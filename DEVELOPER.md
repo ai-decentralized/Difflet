@@ -132,10 +132,11 @@ backend-neutral modules always, the Trainium modules only when the Neuron SDK is
 `difflet.ops` and the text encoder, VAE and scheduler loop on the same device in one process.
 There is no ahead-of-time compile step: `compile()` writes `cuda_manifest.json`, `load()` builds
 the module eagerly from the diffusers safetensors. Validated on an RTX PRO 6000 (Blackwell,
-96 GB) with torch 2.11.0+cu128: 50 steps at 1024×1024 in 26.1 s (0.52 s/step with the prompt
-padding mask; 20.5 s before it), 58 GB peak, the DiT parity gates (all-ones and padded masks) and the
-whole-pipeline gate vs diffusers (PSNR 41.4 dB) passing. Upstream diffusers runs the same 50 steps in
-15.2 s on that card; closing the gap is follow-up F4. Plan, decisions and status log:
+96 GB) with torch 2.11.0+cu128: 50 steps at 1024×1024 in **16.5 s eager (0.33 s/step)**, 13.3 s with
+`--torch-compile`, 10.0 s with `--teacache-cadence 2`; 58 GB peak; the DiT parity gates (all-ones
+and padded masks) and the whole-pipeline gate vs diffusers (PSNR 41.2 dB eager, 39.9 dB compiled)
+passing. Upstream diffusers' pipeline runs the same 50 steps in 15.2 s on that card. The DiT
+forward alone: 323 ms eager, 246 ms compiled, 300 ms for diffusers (`scripts/cuda_bench_dit.py`). Plan, decisions and status log:
 `docs/plans/2026-10-16-cuda-backend-support.md`.
 
 ```bash
@@ -151,6 +152,12 @@ DIFFLET_BACKEND=cuda difflet run --model-id Qwen/Qwen-Image --tp-degree 1 \
     --prompt "a photorealistic cat sitting in a sunlit garden" --output /tmp/qwen.png --steps 50
 scripts/cuda_smoke.sh --prompt "..." --output /tmp/qwen.png     # same, logged to /tmp/logs
 DIFFLET_BACKEND=cuda python scripts/cuda_smoke.py --steps 50     # per-phase timings, peak memory
+DIFFLET_BACKEND=cuda difflet run --model-id Qwen/Qwen-Image --prompt "..." --output /tmp/qwen.png \
+    --torch-compile --teacache-cadence 2             # measured options (F4): compiled DiT blocks,
+                                                     # skip every 2nd step after warm-up; both off by default
+
+# DiT forward, Difflet vs diffusers on identical inputs: timed median + kernel categories (F4)
+DIFFLET_BACKEND=cuda python scripts/cuda_bench_dit.py --model-path <snapshot dir> [--torch-compile]
 
 # oracles against upstream diffusers: DiT-level (all-ones and padded-prompt masks), then
 # whole pipeline (prompt in, image out, same initial noise)
@@ -167,15 +174,26 @@ python scripts/verify_cli_cuda.py --steps 50
 
 **Prompt padding mask.** Difflet pads every prompt to 1024 text tokens; a typical prompt is
 about 16. The shared Qwen modeling code drops the padding mask (it does not trace under XLA),
-so on Trainium and TPU the DiT attends over the padding. On CUDA the mask is applied
-(`_QwenImageTransformerTraceModule(apply_text_mask=True)`, set only by the CUDA transformer
-application), which is what upstream diffusers does; `tests/unit/models/qwen_image/test_qwen_text_mask.py`
-pins it against diffusers on CPU. Trainium/TPU outputs are unchanged by this.
+so on Trainium and TPU the DiT attends over the padding. On CUDA the padding is sliced off before
+the DiT (`_QwenImageTransformerTraceModule(apply_text_mask=True, trim_text_padding=True)`, set only
+by the CUDA transformer application): the same image output as masking it (masked keys contribute
+nothing; the dropped positions' own outputs are discarded), but the joint sequence is ~4112 tokens
+instead of 5120 and SDPA takes the flash kernel again — 516 → 323 ms per DiT forward. Ragged batches
+keep a mask for the shorter rows. `tests/unit/models/qwen_image/test_qwen_text_mask.py` pins both
+against diffusers on CPU. Trainium/TPU outputs are unchanged by this.
+
+**Measured options (F4, both off by default — D4 keeps eager as the premise).** `--torch-compile`
+(or `application_kwargs={"torch_compile": True}`, or `DIFFLET_CUDA_TORCH_COMPILE=1`) compiles each
+DiT block with inductor (`max-autotune-no-cudagraphs`, static shapes): 0.33 → 0.27 s/step after a
+~36 s first-forward compile; parity moves but stays inside the bf16 noise (rel_l1 0.88× the bf16
+control vs fp32). `--teacache-cadence N` runs the existing probe-free TeaCache controller (skip every
+Nth step after warm-up): cadence 2 → 0.20 s/step at PSNR 38.5 dB against the full run. The
+calibrated and online-delta TeaCache modes need the probe path on CUDA (F4b) and are refused.
 
 Not in Release 1 (follow-ups F1–F8 in the plan): Wan and Flux on CUDA, a second GPU
 (data-parallel / CFG-parallel first; tensor-parallel across PCIe only when a workload needs it),
-context parallel, `--requests` / `--dp` batches on CUDA, `difflet serve` on CUDA (F3b),
-`torch.compile`, FP8, custom kernels.
+context parallel, `--requests` / `--dp` batches on CUDA, `difflet serve` on CUDA (F3b), CUDA
+graphs, calibrated/online-delta TeaCache, FP8, `flash-attn`, custom kernels (F4b).
 
 ## Compile cache
 

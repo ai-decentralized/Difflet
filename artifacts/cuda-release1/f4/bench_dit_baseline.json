@@ -1,0 +1,418 @@
+{
+  "model": "qwen_image",
+  "model_path": "/home/user/.cache/huggingface/hub/models--Qwen--Qwen-Image/snapshots/75e0b4be04f60ec59a75f475837eced720f823b6/",
+  "shape": [
+    1024,
+    1024,
+    1024
+  ],
+  "valid_text_tokens": 16,
+  "device": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+  "torch": "2.11.0+cu128",
+  "torch_compile": false,
+  "warmup": 3,
+  "iters": 10,
+  "cases": {
+    "difflet_masked": {
+      "timed": {
+        "median_ms": 515.6913757324219,
+        "min_ms": 515.5556030273438,
+        "max_ms": 515.9886474609375,
+        "iters": 10
+      },
+      "profile": {
+        "total_ms": 1104.428647,
+        "by_category_ms": {
+          "other": 407.07728699999933,
+          "gemm": 236.05579599999967,
+          "copy": 24.810112999999955,
+          "elementwise": 75.04244500000098,
+          "norm": 7.031939999999587,
+          "attention": 354.41106600000023
+        },
+        "top": [
+          {
+            "name": "aten::addmm",
+            "ms": 236.05579599999967,
+            "share": 0.21373566924509493
+          },
+          {
+            "name": "aten::_efficient_attention_forward",
+            "ms": 177.20553300000012,
+            "share": 0.16044996069356768
+          },
+          {
+            "name": "fmha_cutlassF_bf16_aligned_64x128_rf_sm80(PyTorchMemEffAttention::AttentionKernel<cutlass::bfloat16_t, cutlass::arch::Sm80, true, 64, 128, 128, true, true>::Params)",
+            "ms": 177.20553300000012,
+            "share": 0.16044996069356768
+          },
+          {
+            "name": "void cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_256x128_32x3_tn_align8>(cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_256x128_32x3_tn_align8::Params)",
+            "ms": 128.62867099999983,
+            "share": 0.11646625732626423
+          },
+          {
+            "name": "Command Buffer Full",
+            "ms": 91.05317100000026,
+            "share": 0.08244368818875836
+          },
+          {
+            "name": "void cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_128x128_32x4_tn_align8>(cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_128x128_32x4_tn_align8::Params)",
+            "ms": 52.87715899999987,
+            "share": 0.04787738813515209
+          },
+          {
+            "name": "aten::mul",
+            "ms": 27.079595999999825,
+            "share": 0.024519099602819183
+          },
+          {
+            "name": "void cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_256x64_32x4_tn_align8>(cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_256x64_32x4_tn_align8::Params)",
+            "ms": 24.042072000000022,
+            "share": 0.02176878702422867
+          },
+          {
+            "name": "aten::copy_",
+            "ms": 21.44953599999945,
+            "share": 0.019421386848542558
+          },
+          {
+            "name": "void cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_128x256_32x3_tn_align8>(cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_128x256_32x3_tn_align8::Params)",
+            "ms": 20.113774999999833,
+            "share": 0.018211927999726936
+          },
+          {
+            "name": "void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>, 4, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1> >(int, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1>)",
+            "ms": 18.23608999999932,
+            "share": 0.016511786478496986
+          },
+          {
+            "name": "aten::add",
+            "ms": 14.492005000000976,
+            "share": 0.013121721389033272
+          },
+          {
+            "name": "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1})",
+            "ms": 12.374758999999504,
+            "share": 0.01120467042720552
+          },
+          {
+            "name": "std::enable_if<!(false), void>::type internal::gemvx::kernel<int, int, __nv_bfloat16, __nv_bfloat16, __nv_bfloat16, float, false, true, true, false, 6, false, cublasGemvParamsEx<int, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16>, float> >(cublasGemvParamsEx<int, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16>, float>)",
+            "ms": 10.336391000000127,
+            "share": 0.00935903919920698
+          },
+          {
+            "name": "aten::cat",
+            "ms": 9.587018000000713,
+            "share": 0.00868052275359054
+          }
+        ]
+      },
+      "attention_kernels": [
+        "aten::_efficient_attention_forward",
+        "fmha_cutlassF_bf16_aligned_64x128_rf_sm80(PyTorchMemEffAttention::AttentionKernel<cutlass::bfloat16_t, cutlass::arch::Sm80, true, 64, 128, 128, true, true>::Params)"
+      ]
+    },
+    "difflet_allones": {
+      "timed": {
+        "median_ms": 516.0785217285156,
+        "min_ms": 515.8700561523438,
+        "max_ms": 516.6201171875,
+        "iters": 10
+      },
+      "profile": {
+        "total_ms": 1108.1285679999994,
+        "by_category_ms": {
+          "other": 410.63330800000057,
+          "copy": 24.82047300000008,
+          "elementwise": 74.96121700000008,
+          "gemm": 236.09988399999952,
+          "norm": 7.018951999999599,
+          "attention": 354.59473399999973
+        },
+        "top": [
+          {
+            "name": "aten::addmm",
+            "ms": 236.09988399999952,
+            "share": 0.21306181504382948
+          },
+          {
+            "name": "aten::_efficient_attention_forward",
+            "ms": 177.29736699999987,
+            "share": 0.159997108747042
+          },
+          {
+            "name": "fmha_cutlassF_bf16_aligned_64x128_rf_sm80(PyTorchMemEffAttention::AttentionKernel<cutlass::bfloat16_t, cutlass::arch::Sm80, true, 64, 128, 128, true, true>::Params)",
+            "ms": 177.29736699999987,
+            "share": 0.159997108747042
+          },
+          {
+            "name": "void cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_256x128_32x3_tn_align8>(cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_256x128_32x3_tn_align8::Params)",
+            "ms": 128.66018899999955,
+            "share": 0.11610583168360264
+          },
+          {
+            "name": "Command Buffer Full",
+            "ms": 94.63271799999997,
+            "share": 0.08539868092273568
+          },
+          {
+            "name": "void cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_128x128_32x4_tn_align8>(cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_128x128_32x4_tn_align8::Params)",
+            "ms": 52.93306300000003,
+            "share": 0.047767979753049784
+          },
+          {
+            "name": "aten::mul",
+            "ms": 27.030344000000646,
+            "share": 0.024392786884635805
+          },
+          {
+            "name": "void cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_256x64_32x4_tn_align8>(cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_256x64_32x4_tn_align8::Params)",
+            "ms": 24.025837999999837,
+            "share": 0.021681453482751332
+          },
+          {
+            "name": "aten::copy_",
+            "ms": 21.47038100000027,
+            "share": 0.019375351940209413
+          },
+          {
+            "name": "void cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_128x256_32x3_tn_align8>(cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_128x256_32x3_tn_align8::Params)",
+            "ms": 20.118661000000042,
+            "share": 0.018155529584722385
+          },
+          {
+            "name": "void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>, 4, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1> >(int, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1>)",
+            "ms": 18.2762239999999,
+            "share": 0.01649287323490419
+          },
+          {
+            "name": "aten::add",
+            "ms": 14.502369999999988,
+            "share": 0.013087262993476038
+          },
+          {
+            "name": "void at::native::elementwise_kernel<128, 2, at::native::gpu_kernel_impl_nocast<at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<float, float, float, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1})",
+            "ms": 12.346875000000395,
+            "share": 0.011142096103780261
+          },
+          {
+            "name": "std::enable_if<!(false), void>::type internal::gemvx::kernel<int, int, __nv_bfloat16, __nv_bfloat16, __nv_bfloat16, float, false, true, true, false, 6, false, cublasGemvParamsEx<int, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16>, float> >(cublasGemvParamsEx<int, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16>, float>)",
+            "ms": 10.335861000000117,
+            "share": 0.009327312099402641
+          },
+          {
+            "name": "aten::cat",
+            "ms": 9.565716999999815,
+            "share": 0.008632316931657537
+          }
+        ]
+      },
+      "attention_kernels": [
+        "aten::_efficient_attention_forward",
+        "fmha_cutlassF_bf16_aligned_64x128_rf_sm80(PyTorchMemEffAttention::AttentionKernel<cutlass::bfloat16_t, cutlass::arch::Sm80, true, 64, 128, 128, true, true>::Params)"
+      ]
+    },
+    "diffusers_masked": {
+      "timed": {
+        "median_ms": 489.6091613769531,
+        "min_ms": 489.5063171386719,
+        "max_ms": 489.7241516113281,
+        "iters": 10
+      },
+      "profile": {
+        "total_ms": 1274.9982319999963,
+        "by_category_ms": {
+          "other": 605.2499239999979,
+          "elementwise": 51.38238699999905,
+          "copy": 20.686503999999882,
+          "gemm": 236.2290989999999,
+          "norm": 6.9128460000001475,
+          "attention": 354.5374719999997
+        },
+        "top": [
+          {
+            "name": "Command Buffer Full",
+            "ms": 310.20145399999876,
+            "share": 0.2432955954091077
+          },
+          {
+            "name": "aten::addmm",
+            "ms": 236.2290989999999,
+            "share": 0.18527798162468398
+          },
+          {
+            "name": "aten::_efficient_attention_forward",
+            "ms": 177.26873599999985,
+            "share": 0.13903449553959882
+          },
+          {
+            "name": "fmha_cutlassF_bf16_aligned_64x128_rf_sm80(PyTorchMemEffAttention::AttentionKernel<cutlass::bfloat16_t, cutlass::arch::Sm80, true, 64, 128, 128, true, true>::Params)",
+            "ms": 177.26873599999985,
+            "share": 0.13903449553959882
+          },
+          {
+            "name": "void cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_256x128_32x3_tn_align8>(cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_256x128_32x3_tn_align8::Params)",
+            "ms": 128.81376200000034,
+            "share": 0.10103054166431245
+          },
+          {
+            "name": "void cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_128x128_32x4_tn_align8>(cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_128x128_32x4_tn_align8::Params)",
+            "ms": 52.97755999999999,
+            "share": 0.04155108506848513
+          },
+          {
+            "name": "void cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_256x64_32x4_tn_align8>(cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_256x64_32x4_tn_align8::Params)",
+            "ms": 23.997829999999638,
+            "share": 0.018821853550617086
+          },
+          {
+            "name": "aten::copy_",
+            "ms": 20.68394399999988,
+            "share": 0.016222723671980698
+          },
+          {
+            "name": "void cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_128x256_32x3_tn_align8>(cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_128x256_32x3_tn_align8::Params)",
+            "ms": 20.122261000000034,
+            "share": 0.01578218737482931
+          },
+          {
+            "name": "aten::mul",
+            "ms": 18.407097999999706,
+            "share": 0.014436959627093631
+          },
+          {
+            "name": "void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>, 4, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1> >(int, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1>)",
+            "ms": 17.14350799999947,
+            "share": 0.013445907272442022
+          },
+          {
+            "name": "std::enable_if<!(false), void>::type internal::gemvx::kernel<int, int, __nv_bfloat16, __nv_bfloat16, __nv_bfloat16, float, false, true, true, false, 6, false, cublasGemvParamsEx<int, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16>, float> >(cublasGemvParamsEx<int, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16>, float>)",
+            "ms": 10.291381999999908,
+            "share": 0.008071683349596941
+          },
+          {
+            "name": "void at::native::elementwise_kernel<128, 4, at::native::gpu_kernel_impl_nocast<at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1})",
+            "ms": 9.558751999999991,
+            "share": 0.007497070788095037
+          },
+          {
+            "name": "aten::add",
+            "ms": 7.377747999999411,
+            "share": 0.005786477043522231
+          },
+          {
+            "name": "aten::gelu",
+            "ms": 6.35422299999992,
+            "share": 0.004983711224471673
+          }
+        ]
+      },
+      "attention_kernels": [
+        "aten::_efficient_attention_forward",
+        "fmha_cutlassF_bf16_aligned_64x128_rf_sm80(PyTorchMemEffAttention::AttentionKernel<cutlass::bfloat16_t, cutlass::arch::Sm80, true, 64, 128, 128, true, true>::Params)"
+      ]
+    },
+    "diffusers_trimmed": {
+      "timed": {
+        "median_ms": 299.7103271484375,
+        "min_ms": 299.6197204589844,
+        "max_ms": 299.7956848144531,
+        "iters": 10
+      },
+      "profile": {
+        "total_ms": 599.2184209999994,
+        "by_category_ms": {
+          "other": 254.84572900000046,
+          "elementwise": 42.248262999999795,
+          "copy": 17.71625200000017,
+          "gemm": 190.74506300000024,
+          "norm": 5.460703999999131,
+          "attention": 88.20240999999967
+        },
+        "top": [
+          {
+            "name": "aten::addmm",
+            "ms": 190.74506300000024,
+            "share": 0.31832309607851733
+          },
+          {
+            "name": "void cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_256x128_32x3_tn_align8>(cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_256x128_32x3_tn_align8::Params)",
+            "ms": 112.55295799999978,
+            "share": 0.187832940469632
+          },
+          {
+            "name": "void cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_128x128_32x4_tn_align8>(cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_128x128_32x4_tn_align8::Params)",
+            "ms": 53.04213800000009,
+            "share": 0.08851887081755809
+          },
+          {
+            "name": "aten::_flash_attention_forward",
+            "ms": 44.10120499999984,
+            "share": 0.07359787926145862
+          },
+          {
+            "name": "void pytorch_flash::flash_fwd_kernel<Flash_fwd_kernel_traits<128, 128, 64, 4, false, false, cutlass::bfloat16_t, Flash_kernel_traits<128, 128, 64, 4, cutlass::bfloat16_t> >, false, false, false, false, false, true, false, false>(pytorch_flash::Flash_fwd_params)",
+            "ms": 44.10120499999984,
+            "share": 0.07359787926145862
+          },
+          {
+            "name": "aten::copy_",
+            "ms": 17.71362700000017,
+            "share": 0.029561219046702482
+          },
+          {
+            "name": "aten::mul",
+            "ms": 15.404045000000544,
+            "share": 0.025706894948746176
+          },
+          {
+            "name": "void cutlass::Kernel2<cutlass_80_wmma_tensorop_bf16_s161616gemm_bf16_16x16_128x2_tn_align8>(cutlass_80_wmma_tensorop_bf16_s161616gemm_bf16_16x16_128x2_tn_align8::Params)",
+            "ms": 15.354769000000452,
+            "share": 0.025624661161744337
+          },
+          {
+            "name": "void at::native::unrolled_elementwise_kernel<at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>, 4, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1> >(int, at::native::direct_copy_kernel_cuda(at::TensorIteratorBase&)::{lambda()#3}::operator()() const::{lambda()#7}::operator()() const::{lambda(float)#1}, std::array<char*, 2ul>, TrivialOffsetCalculator<1, unsigned int>, TrivialOffsetCalculator<1, unsigned int>, at::native::memory::LoadWithCast<1>, at::native::memory::StoreWithCast<1>)",
+            "ms": 14.739414000000256,
+            "share": 0.02459773178435092
+          },
+          {
+            "name": "Command Buffer Full",
+            "ms": 13.985465000000055,
+            "share": 0.02333951111960236
+          },
+          {
+            "name": "std::enable_if<!(false), void>::type internal::gemvx::kernel<int, int, __nv_bfloat16, __nv_bfloat16, __nv_bfloat16, float, false, true, true, false, 6, false, cublasGemvParamsEx<int, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16>, float> >(cublasGemvParamsEx<int, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16>, float>)",
+            "ms": 9.769021999999914,
+            "share": 0.016302940059314236
+          },
+          {
+            "name": "void at::native::elementwise_kernel<128, 4, at::native::gpu_kernel_impl_nocast<at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1}>(int, at::native::gpu_kernel_impl_nocast<at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::MulFunctor<float> > >(at::TensorIteratorBase&, at::native::BinaryFunctor<c10::BFloat16, c10::BFloat16, c10::BFloat16, at::native::binary_internal::MulFunctor<float> > const&)::{lambda(int)#1})",
+            "ms": 7.946527000000322,
+            "share": 0.013261486498927793
+          },
+          {
+            "name": "aten::add",
+            "ms": 6.067823999999996,
+            "share": 0.010126230748837412
+          },
+          {
+            "name": "aten::gelu",
+            "ms": 5.876657000000026,
+            "share": 0.009807203507183289
+          },
+          {
+            "name": "void at::native::vectorized_elementwise_kernel<4, at::native::GeluCUDAKernelImpl(at::TensorIteratorBase&, at::native::GeluType)::{lambda()#1}::operator()() const::{lambda()#4}::operator()() const::{lambda(c10::BFloat16)#1}, std::array<char*, 2ul> >(int, at::native::GeluCUDAKernelImpl(at::TensorIteratorBase&, at::native::GeluType)::{lambda()#1}::operator()() const::{lambda()#4}::operator()() const::{lambda(c10::BFloat16)#1}, std::array<char*, 2ul>)",
+            "ms": 5.876657000000026,
+            "share": 0.009807203507183289
+          }
+        ]
+      },
+      "attention_kernels": [
+        "aten::_flash_attention_forward",
+        "void pytorch_flash::flash_fwd_kernel<Flash_fwd_kernel_traits<128, 128, 64, 4, false, false, cutlass::bfloat16_t, Flash_kernel_traits<128, 128, 64, 4, cutlass::bfloat16_t> >, false, false, false, false, false, true, false, false>(pytorch_flash::Flash_fwd_params)"
+      ]
+    }
+  },
+  "trim_text_padding": false
+}

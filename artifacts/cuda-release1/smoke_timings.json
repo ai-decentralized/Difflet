@@ -37,6 +37,39 @@
       "peak_reserved_gb": 58.87,
       "image": "e2e_difflet_qwen_50steps.png (bit-identical to the difflet run image)",
       "note": "F3 2026-10-17, pod difflet-cuda-f3c: prompt padding mask applied (valid=16/1024), masked SDPA; difflet run via scripts/cuda_smoke.sh: load 9.3 s, image in 26.5 s, 38 s wall; diffusers QwenImagePipeline on the same card: 15.2 s for 50 steps"
+    },
+    {
+      "steps": 50,
+      "load_s": 8.4,
+      "encode_s": 0.07,
+      "generate_s": 16.5,
+      "per_step_s": 0.33,
+      "peak_alloc_gb": 57.95,
+      "peak_reserved_gb": 58.83,
+      "image": "f4 trimmed prompt (same cat as e2e_difflet_qwen_50steps.png, PSNR 41.2 dB vs diffusers)",
+      "note": "F4 task 2 2026-10-17, pod difflet-cuda-f3c: padded prompt trimmed before the DiT (16 real tokens, no mask, flash SDPA); DiT forward 323 ms vs diffusers 300 ms"
+    },
+    {
+      "steps": 50,
+      "load_s": 27.1,
+      "encode_s": 0.08,
+      "generate_s": 13.3,
+      "per_step_s": 0.27,
+      "peak_alloc_gb": 57.95,
+      "peak_reserved_gb": 58.58,
+      "image": "f4 --torch-compile (same cat, PSNR 40.0 dB vs the eager run, 39.9 dB vs diffusers)",
+      "note": "F4 task 3 2026-10-17: opt-in torch.compile of the DiT blocks; load includes 36 s of compilation at warm-up; DiT forward 246 ms vs diffusers 300 ms; diffusers' pipeline 15.2 s for the same 50 steps"
+    },
+    {
+      "steps": 50,
+      "load_s": 10.2,
+      "encode_s": 0.08,
+      "generate_s": 10.0,
+      "per_step_s": 0.2,
+      "peak_alloc_gb": 57.95,
+      "peak_reserved_gb": 58.83,
+      "image": "f4 --teacache-cadence 2 (same cat, PSNR 38.5 dB vs the full eager run)",
+      "note": "F4 task 4 2026-10-17: probe-free fixed cadence on the host-side controller; cadence 3: 12.3 s, 38.5 dB"
     }
   ]
 }
