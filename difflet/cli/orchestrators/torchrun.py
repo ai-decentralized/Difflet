@@ -2,8 +2,10 @@
 backend (neuron): Wan (``wan.py``) and Qwen-Image (``qwen_image.py``).
 
 Every helper is inert unless DIFFLET_BACKEND names such a backend (``torchrun_backend``), so
-unset, trainium and tpu keep their stage paths unchanged. Torch-free except ``fallback_tracker``,
-which runs in the ranks: the driver checks must not import torch before torchrun fans out.
+unset, trainium and tpu keep their stage paths unchanged. Torch-free except the helpers that run
+in the ranks (``fallback_tracker``, and ``replica_requests``/``replica_request_scope``, a DP
+replica's request queue), which import torch when called: the driver checks must not import
+torch before torchrun fans out.
 """
 from __future__ import annotations
 
@@ -11,6 +13,7 @@ import argparse
 import contextlib
 import os
 import sys
+from pathlib import Path
 
 from difflet import envs
 from difflet.cli import runner
@@ -45,29 +48,17 @@ def torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
 
     The ranks keep their own checks (the application's ``_reject_unsupported`` for TeaCache);
     this list lets the driver refuse the same options before torchrun starts tp*cp processes
-    that import torch only to fail. A model adds its own (Qwen-Image: request batches,
-    --cfg-parallel, several --shapes; Wan: several --shapes, since it runs SP and DP
-    replicas). Torch-free.
+    that import torch only to fail. A model adds its own (Qwen-Image: --cfg-parallel, several
+    --shapes; Wan: several --shapes). Both run SP and DP replicas. Torch-free.
     """
     return [flag for flag, name in TEACACHE_FLAGS if getattr(args, name, None) is not None]
-
-
-def batch_options(args: argparse.Namespace) -> list[str]:
-    """Request batches (--requests, a data-parallel worker), as the command line names them:
-    for a model whose torchrun ranks run no request queue. Torch-free."""
-    found = []
-    if getattr(args, "requests", None) is not None:
-        found.append("--requests")
-    if getattr(args, "requests_dir", None) is not None:
-        found.append("--requests/--dp (data-parallel worker)")
-    return found
 
 
 def reject_unsupported_torchrun_options(found: list[str], *, runs: str) -> None:
     """On a torchrun backend, ``found`` non-empty: print one message naming the options and exit
     2 before anything is launched (or downloaded, for ``run``). ``runs`` is what the model's
-    ranks do support, request batching included ("tensor and context parallelism at one static
-    shape, one request per launch"; Wan's DP workers drain a request queue). No-op on unset,
+    ranks do support, request batching included ("... at one static shape, and DP replicas":
+    Wan's and Qwen-Image's DP workers drain a request queue). No-op on unset,
     trainium and tpu, which support these options or reject them where they always did."""
     if not found:
         return
@@ -98,6 +89,61 @@ def root_compile_cache_at_cache_dir(cache_dir: str | None, *, tag: str) -> None:
     print(f"[{tag}] backend {backend!r} compiles into --cache-dir: "
           f"DIFFLET_COMPILE_CACHE={root} (NEFF and HLO caches under {root}/neuron)",
           flush=True)
+
+
+def replica_requests(args: argparse.Namespace, *, device):
+    """The requests a torchrun replica runs, one at a time, every rank the same request.
+
+    Outside batch mode, or with one rank, this is ``stage_loop.claim_requests``. In a DP worker
+    (``--requests-dir``) under torchrun, rank 0 alone claims from the queue and broadcasts the
+    claimed index (-1 when the queue is empty, as int32) to the replica's ranks, which read the
+    request from the manifest: claiming on every rank would hand the TP group different requests.
+    """
+    from difflet.backends.neuron.core import distributed
+    from difflet.cli.dp import stage_loop
+
+    rank, world = distributed.world_info()
+    if not stage_loop.batch_mode(args) or world == 1:
+        yield from stage_loop.claim_requests(args)
+        return
+    import torch
+
+    from difflet.cli.dp.requests_io import read_manifest
+
+    manifest = {r.index: r for r in read_manifest(Path(args.requests_dir))}
+    claims = stage_loop.claim_requests(args) if rank == 0 else None
+    while True:
+        req = next(claims, None) if rank == 0 else None
+        index = (torch.tensor([req.index if req is not None else -1], dtype=torch.int32)
+                 if rank == 0 else None)
+        index = int(distributed.broadcast_tensor(index, device=device).reshape(-1)[0].item())
+        if index < 0:
+            return
+        yield req if rank == 0 else manifest[index]
+
+
+@contextlib.contextmanager
+def replica_request_scope(args: argparse.Namespace, req):
+    """``stage_loop.request_scope`` for a torchrun replica: a failed request is marked failed
+    once (rank 0) and every rank re-raises. A rank cannot skip a request its TP partners are
+    still running: they would wait in a collective forever. One rank stays as before."""
+    from difflet.backends.neuron.core import distributed
+    from difflet.cli.dp import claims, stage_loop
+
+    rank, world = distributed.world_info()
+    if not stage_loop.batch_mode(args) or world == 1:
+        with stage_loop.request_scope(args, req, final=False):
+            yield
+        return
+    try:
+        yield
+    except Exception:
+        if rank == 0:
+            import traceback
+
+            claims.mark_failed(args.requests_dir, req.index, traceback.format_exc())
+            print(f"[dp-worker] request {req.index} failed; stopping this replica", flush=True)
+        raise
 
 
 def fallback_tracker(pipe):

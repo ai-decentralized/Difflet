@@ -310,9 +310,6 @@ _REJECTED = [
     (dict(teacache_online_delta=0.6), "--teacache-online-delta"),
     (dict(teacache_speedup=1.5, teacache_calibration="c.json"),
      "--teacache-speedup, --teacache-calibration"),
-    (dict(requests="r.jsonl"), "--requests"),
-    (dict(requests_dir="/rd", worker_index=0, dp_schedule="round_robin"),
-     "--requests/--dp (data-parallel worker)"),
     (dict(shapes="1024x1024,768x1360"), "--shapes with more than one shape"),
     (dict(sp_enabled=True, cfg_parallel=True, shapes="1024x1024, 512x512 ,"),
      "--cfg-parallel, --shapes with more than one shape"),
@@ -343,7 +340,7 @@ def test_neuron_driver_rejects_unsupported_options_before_any_launch(monkeypatch
     assert out == ""
     assert err.strip() == (
         f"Error: the neuron backend does not support {named} (it runs tensor, sequence and "
-        "context parallelism at one static shape, one request per launch, no TeaCache); "
+        "context parallelism at one static shape, and DP replicas, no TeaCache); "
         "nothing was launched.")
     assert "DIFFLET_COMPILE_CACHE" not in os.environ
     assert not (tmp_path / "work").exists()
@@ -625,12 +622,65 @@ def test_stage_generate_neuron_writes_files_on_rank0_only(neuron_stage, monkeypa
     assert "packed latents" not in capsys.readouterr().out
 
 
-def test_stage_generate_neuron_rejects_request_batches(neuron_stage, tmp_path):
-    args = _qwen_args(work_dir=str(tmp_path), requests_dir=str(tmp_path / "requests"),
-                      worker_index=0, dp_schedule="round_robin")
-    with pytest.raises(NotImplementedError, match="--requests"):
-        QwenImageOrchestrator(args)._stage_generate(args)
-    assert neuron_stage.CALLS == []
+def _queue(tmp_path, prompts, *, workers=1):
+    """A DP request queue (the router's manifest), round robin over ``workers``."""
+    from difflet.cli.dp.requests_io import RequestSpec, write_manifest
+
+    requests = tmp_path / "requests"
+    write_manifest([RequestSpec(index=i, prompt=prompt, output=str(tmp_path / f"o{i}.png"),
+                                seed=10 + i, assigned_worker=i % workers)
+                    for i, prompt in enumerate(prompts)], requests)
+    return requests
+
+
+def test_stage_generate_neuron_runs_a_request_batch(neuron_stage, tmp_path):
+    # A DP worker's queue: one load, then every request this worker claims, in order, each
+    # with its own prompt and seed and its own latents file.
+    requests = _queue(tmp_path, ["a fox", "a cat"])
+    args = _qwen_args(work_dir=str(tmp_path), requests_dir=str(requests), worker_index=0,
+                      dp_schedule="round_robin")
+    QwenImageOrchestrator(args)._stage_generate(args)
+
+    [call] = neuron_stage.CALLS
+    app = call["pipeline"].app
+    assert [(c["prompt"], c["seed"]) for c in app.calls] == [("a fox", 10), ("a cat", 11)]
+    assert len(app.load_calls) == 1  # loaded once for the whole queue
+    assert (tmp_path / "latents_req0000.pt").exists() and (tmp_path / "latents_req0001.pt").exists()
+    assert sorted(p.name for p in requests.glob("*.claim")) == ["req_0000.claim", "req_0001.claim"]
+    assert list(requests.glob("*.done")) == []  # done once the image is written (the decode)
+
+
+def test_dp_replica_ranks_run_the_same_requests_rank0_claims_and_writes(tmp_path):
+    """A two-rank replica of a DP worker on gloo (the real stage, the fake pipeline): rank 0
+    alone claims, every rank runs every request of the queue in order, rank 0 alone saves."""
+    from tests.unit.backends._neuron_gloo import run_ranks
+
+    requests = _queue(tmp_path, ["p0", "p1", "p2"])
+    results = run_ranks(fake_pipeline.qwen_replica_worker, str(tmp_path), str(requests),
+                        world_size=2)
+    for result in results:
+        assert result["prompts"] == ["p0", "p1", "p2"] and result["seeds"] == [10, 11, 12]
+        assert result["error"] is None and result["loads"] == 1
+    assert results[0]["saved"] == ["latents_req0000.pt", "latents_req0001.pt",
+                                   "latents_req0002.pt"]
+    assert results[1]["saved"] == []  # one writer
+    claims = sorted(requests.glob("*.claim"))
+    assert [p.name for p in claims] == ["req_0000.claim", "req_0001.claim", "req_0002.claim"]
+    assert {p.read_text() for p in claims} == {"0"}  # claimed once, by worker 0's rank 0
+
+
+def test_dp_replica_stops_together_on_a_failed_request(tmp_path):
+    from tests.unit.backends._neuron_gloo import run_ranks
+
+    requests = _queue(tmp_path, ["p0", fake_pipeline.FAIL_PROMPT, "p2"])
+    results = run_ranks(fake_pipeline.qwen_replica_worker, str(tmp_path), str(requests),
+                        world_size=2)
+    for result in results:
+        assert result["prompts"] == ["p0", fake_pipeline.FAIL_PROMPT]
+        assert "fake failure" in result["error"]  # every rank stops, none waits in a collective
+    assert results[0]["saved"] == ["latents_req0000.pt"] and results[1]["saved"] == []
+    assert sorted(p.name for p in requests.glob("*.failed")) == ["req_0001.failed"]
+    assert not (requests / "req_0002.claim").exists()  # left for the router's summary
 
 
 @pytest.mark.parametrize("overrides, parallel, app_extra", [
@@ -664,6 +714,191 @@ def test_stage_generate_neuron_binds_a_local_model_path(neuron_stage, tmp_path):
     assert kw["resolved_source_id"] == "local"
     assert kw["compiled_path_override"] == str(orch._stage_compiled_dir("generate", args))
     assert [tuple(s) for s in kw["shapes"]] == [(1024, 1024, None)]
+
+
+# ----------------------------------------------------------------- DP workers: the decode
+
+
+@pytest.mark.parametrize("device_vae", [False, True])
+def test_dp_worker_decodes_each_claimed_request_and_marks_it_done(monkeypatch, tmp_path,
+                                                                  device_vae):
+    """A DP worker's driver after its generate launch: the host decode runs once per request
+    the replica claimed and did not fail, from its own latents file to its own output, and
+    marks it done. With --device-vae the vae stage does that instead (its
+    request_scope(final=True))."""
+    from difflet.cli.dp import claims
+
+    _backend(monkeypatch, "neuron")
+    stages, decoded = _record_stages(monkeypatch)
+    requests = _queue(tmp_path, ["p0", "p1", "p2", "p3"], workers=2)
+    work = tmp_path / "worker_0"
+
+    def generate_launch(orch, stage, **kw):
+        stages.append((stage, kw["num_cores"]))
+        if stage == "generate":  # what worker 0's replica leaves: 0 and 2 claimed, 2 failed
+            for index in (0, 2):
+                claims._try_claim(requests, index, 0)
+            claims.mark_failed(requests, 2, "boom")
+
+    monkeypatch.setattr(qwen_mod.runner, "run_stage", generate_launch)
+    args = _qwen_args(work_dir=str(work), requests_dir=str(requests), worker_index=0,
+                      dp_schedule="round_robin", device_vae=device_vae, keep_work_dir=True)
+    QwenImageOrchestrator(args).generate()
+
+    if device_vae:
+        assert stages == [("generate", 4), ("vae", 1)] and decoded == []
+        return
+    assert stages == [("generate", 4)]
+    assert decoded == [((str(work / "latents_req0000.pt"), "/fake/model",
+                         str(tmp_path / "o0.png")), {"height": 1024, "width": 1024})]
+    assert sorted(p.name for p in requests.glob("*.done")) == ["req_0000.done"]
+    assert claims.summarize(requests).failed.keys() == {2}
+
+
+def test_dp_worker_marks_a_failed_decode_and_decodes_the_next(monkeypatch, tmp_path):
+    from difflet.cli.dp import claims
+
+    _backend(monkeypatch, "neuron")
+    _record_stages(monkeypatch)
+    requests = _queue(tmp_path, ["p0", "p1"])
+    for index in (0, 1):
+        claims._try_claim(requests, index, 0)
+    seen = []
+
+    def decode(latents_path, model_dir, output_path, *, height, width):
+        seen.append(Path(output_path).name)
+        if output_path.endswith("o0.png"):
+            raise RuntimeError("decode failed")
+
+    monkeypatch.setattr(qwen_mod, "_decode_latents_host", decode)
+    args = _qwen_args(work_dir=str(tmp_path / "w"), requests_dir=str(requests), worker_index=0,
+                      dp_schedule="round_robin")
+    QwenImageOrchestrator(args).generate()
+    assert seen == ["o0.png", "o1.png"]
+    summary = claims.summarize(requests)
+    assert summary.done == [1] and "decode failed" in summary.failed[0]
+
+
+def test_dp_workers_get_the_qwen_flags_from_the_router():
+    from difflet.cli import stage as stage_mod
+    from difflet.cli.dp.router import worker_cli_args
+
+    cli_main = importlib.import_module("difflet.cli.main")
+    args = cli_main._build_parser().parse_args([
+        "generate", "--model-id", _QWEN_ID, "--backend", "neuron", "--exec-mode", "eager",
+        "--dp", "2", "--tp-degree", "2", "--sp", "--device-vae", "--steps", "8",
+        "--prompt", "a fox", "--output", "/tmp/o.png",
+    ])
+    forwarded = worker_cli_args(args)
+    worker = cli_main._build_parser().parse_args(["generate", *forwarded])
+    assert (worker.tp_degree, worker.sp_enabled, worker.device_vae) == (2, True, True)
+    assert (worker.exec_mode, worker.steps) == ("eager", 8)
+    stage_args, _ = stage_mod._build_stage_parser().parse_known_args(
+        ["--orchestrator", _QWEN_ID, "--stage", "generate", *QwenImageOrchestrator(
+            _qwen_args(sp_enabled=True, requests_dir="/rd", worker_index=1,
+                       dp_schedule="round_robin"))._shared_cli_args("generate", "/w")])
+    assert (stage_args.requests_dir, stage_args.worker_index) == ("/rd", 1)
+
+
+# ----------------------------------------------------------------- the DiT's HBM budget
+
+
+def _header_only_dit(root: Path, numel: int) -> Path:
+    """A transformer directory whose safetensors header claims ``numel`` elements (no data: the
+    driver's estimate reads only headers)."""
+    import json
+    import struct
+
+    header = json.dumps({"w": {"dtype": "BF16", "shape": [numel], "data_offsets": [0, 0]}})
+    (root / "transformer").mkdir(parents=True)
+    with open(root / "transformer" / "model.safetensors", "wb") as f:
+        f.write(struct.pack("<Q", len(header)) + header.encode())
+    return root
+
+
+_REAL_DIT_NUMEL = 20_430_401_088  # Qwen-Image's transformer: 38.05 GiB in bf16
+
+
+@pytest.mark.parametrize("mode", ["compile", "generate", "run"])
+@pytest.mark.parametrize("worker", [False, True])
+def test_a_dit_shard_that_cannot_fit_is_refused_before_any_launch(monkeypatch, tmp_path, capsys,
+                                                                  mode, worker):
+    # --dp 4 --tp-degree 1 (each worker), or a plain tp1: 38 GiB per core against 24 GiB.
+    _backend(monkeypatch, "neuron")
+    monkeypatch.setenv("DIFFLET_NEURON_HBM_GIB", "24")
+    model = _header_only_dit(tmp_path / "model", _REAL_DIT_NUMEL)
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path",
+                        lambda *a, **k: str(model))
+    monkeypatch.setattr(qwen_mod.runner, "run_stage",
+                        lambda *a, **k: pytest.fail("no stage may be launched"))
+    monkeypatch.setattr(QwenImageOrchestrator, "download", lambda self: None)
+    extra = (dict(requests_dir=str(tmp_path / "rd"), worker_index=3, dp_schedule="round_robin")
+             if worker else {})
+    args = _qwen_args(tp_degree=1, work_dir=str(tmp_path / "w"), **extra)
+    with pytest.raises(SystemExit) as exc:
+        getattr(QwenImageOrchestrator(args), mode)()
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "the Qwen-Image DiT needs at least 38.1 GiB of bf16 weights per core at tp=1" in err
+    assert "use --tp-degree 2 or more; nothing was launched." in err
+
+
+def test_run_with_dp4_tp1_is_refused_before_the_router_starts(monkeypatch, tmp_path, capsys):
+    """``difflet run --dp 4 --tp-degree 1``: the router compiles first, and that compile's
+    budget check exits before a worker or a torchrun rank starts."""
+    from difflet.cli.dp import router
+
+    cli_main = importlib.import_module("difflet.cli.main")
+    _unset(monkeypatch, *_CACHE_ENV, "NEURON_RT_NUM_CORES")
+    _backend(monkeypatch, None)
+    monkeypatch.setenv("DIFFLET_NEURON_HBM_GIB", "24")
+    model = _header_only_dit(tmp_path / "model", _REAL_DIT_NUMEL)
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path",
+                        lambda *a, **k: str(model))
+    monkeypatch.setattr(QwenImageOrchestrator, "download", lambda self: None)
+    monkeypatch.setattr(qwen_mod.runner, "run_stage",
+                        lambda *a, **k: pytest.fail("no stage may be launched"))
+    monkeypatch.setattr(router, "run_router", lambda *a, **k: pytest.fail("no router"))
+    with pytest.raises(SystemExit) as exc:
+        cli_main.main(["run", "--model-id", _QWEN_ID, "--backend", "neuron", "--dp", "4",
+                       "--tp-degree", "1", "--total-cores", "4", "--prompt", "a fox",
+                       "--output", str(tmp_path / "o.png"), "--work-dir", str(tmp_path / "w")])
+    assert exc.value.code == 2
+    assert "38.1 GiB of bf16 weights per core at tp=1" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("tp", [2, 4])
+def test_dp2tp2_and_tp4_dit_shards_pass_the_budget(monkeypatch, tmp_path, capsys, tp):
+    _backend(monkeypatch, "neuron")
+    monkeypatch.setenv("DIFFLET_NEURON_HBM_GIB", "24")
+    model = _header_only_dit(tmp_path / "model", _REAL_DIT_NUMEL)
+    stages, decoded = _record_stages(monkeypatch)
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path",
+                        lambda *a, **k: str(model))
+    QwenImageOrchestrator(_qwen_args(tp_degree=tp, work_dir=str(tmp_path / "w"))).generate()
+    assert stages == [("generate", tp)] and capsys.readouterr().err == ""
+
+
+def test_weights_not_local_leave_the_budget_to_the_application(monkeypatch, tmp_path):
+    _backend(monkeypatch, "neuron")
+    stages, _ = _record_stages(monkeypatch)
+
+    def not_local(*a, **k):
+        raise FileNotFoundError("not in the cache")
+
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path", not_local)
+    QwenImageOrchestrator(_qwen_args(tp_degree=1)).compile()
+    assert [s for s, _ in stages] == ["generate"]
+
+
+@pytest.mark.parametrize("backend", [None, "trainium", "tpu"])
+def test_aot_backends_skip_the_dit_budget(monkeypatch, tmp_path, backend):
+    _backend(monkeypatch, backend)
+    stages, _ = _record_stages(monkeypatch)
+    monkeypatch.setattr(QwenImageOrchestrator, "_model_dir",
+                        staticmethod(lambda *a: pytest.fail("not consulted off neuron")))
+    QwenImageOrchestrator(_qwen_args(tp_degree=1)).compile()
+    assert [s for s, _ in stages] == ["text", "generate", "vae"]
 
 
 # ----------------------------------------------------------------- host VAE decode
@@ -862,6 +1097,37 @@ def test_compile_neuron_cpu_torchrun_rank0_writes_the_manifest(neuron_torchrun, 
     for record in records:
         assert [c["skip_warmup"] for c in record["pipeline_load_calls"]] == [False]
         assert record["app_calls"] == []
+
+
+def test_dp_worker_cpu_torchrun_drains_the_queue_and_decodes_each_request(neuron_torchrun,
+                                                                          monkeypatch, tmp_path):
+    """A DP worker end to end: the real run_stage -> torchrun (2 gloo ranks) -> the generate
+    stage drains the queue (rank 0 claims, both ranks run each request, rank 0 alone saves),
+    then the driver decodes each request and marks it done."""
+    from difflet.cli.dp import claims
+
+    decoded = []
+    monkeypatch.setattr(qwen_mod, "_decode_latents_host",
+                        lambda latents_path, model_dir, output_path, *, height, width:
+                        decoded.append((Path(latents_path).name, Path(output_path).name)))
+    requests = _queue(tmp_path, ["p0", "p1", "p2"])
+    work = tmp_path / "worker_0"
+    args = _qwen_args(tp_degree=2, work_dir=str(work), keep_work_dir=True,
+                      cache_dir=str(tmp_path / "cache"), requests_dir=str(requests),
+                      worker_index=0, dp_schedule="round_robin")
+    QwenImageOrchestrator(args).generate()
+
+    records = fake_pipeline.read_rank_records(neuron_torchrun)
+    assert [r["rank"] for r in records] == [0, 1]
+    for record in records:
+        assert [(c["prompt"], c["seed"]) for c in record["app_calls"]] == [
+            ("p0", 10), ("p1", 11), ("p2", 12)]
+        assert [c["skip_warmup"] for c in record["pipeline_load_calls"]] == [False]
+    writes = [w for r in records for w in r["writes"]]
+    assert writes == [{"kind": "torch.save", "path": str(work / f"latents_req000{i}.pt"),
+                       "rank": 0} for i in range(3)]
+    assert decoded == [(f"latents_req000{i}.pt", f"o{i}.png") for i in range(3)]
+    assert claims.summarize(requests).done == [0, 1, 2]
 
 
 # ----------------------------------------------------------------- `difflet generate` end to end

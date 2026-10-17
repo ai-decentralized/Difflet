@@ -34,10 +34,13 @@ the unpack and the un-normalisation (``_vae_latents``), so they see the same fp3
 ``compile`` is the generate stage's load + warm-up (it fills the NEFF cache) and its stage
 manifest, plus the vae stage's warm-up decode with --device-vae; the stage cache key names the
 backend and exec mode; --cache-dir becomes DIFFLET_COMPILE_CACHE unless that is exported; the
-options the ranks reject (--cfg-parallel, TeaCache, several --shapes, --requests/--dp) and the
-pairs they cannot run together (--sp with --cp-degree > 1) are refused by the driver before
-torchrun starts. The ranks run TP, SP (--sp) and CP. Unset, trainium and tpu keep their three
-stages unchanged.
+options the ranks reject (--cfg-parallel, TeaCache, several --shapes), the pairs they cannot
+run together (--sp with --cp-degree > 1) and a TP degree whose DiT shard cannot fit one core
+(``_check_dit_fits``) are refused by the driver before torchrun starts. The ranks run TP, SP
+(--sp) and CP. DP replicas (--dp, --requests) are separate torchrun launches, as Wan's: each DP
+worker runs this driver, its generate launch drains the request queue (rank 0 claims:
+``replica_requests``), and its decode, host or vae stage, writes and marks done each request
+the replica finished. Unset, trainium and tpu keep their three stages unchanged.
 """
 
 from __future__ import annotations
@@ -60,9 +63,10 @@ from difflet.cli.orchestrators.base import (
     write_stage_manifest,
 )
 from difflet.cli.orchestrators.torchrun import (
-    batch_options,
     fallback_tracker,
     reject_unsupported_torchrun_options,
+    replica_request_scope,
+    replica_requests,
     root_compile_cache_at_cache_dir,
     torchrun_backend,
     torchrun_unsupported_options,
@@ -102,18 +106,18 @@ _TORCHRUN_APPLICATION_KWARGS = {
 }
 #: What the neuron Qwen-Image ranks support, for the driver's rejection message.
 _TORCHRUN_RUNS = (
-    "tensor, sequence and context parallelism at one static shape, one request per launch"
+    "tensor, sequence and context parallelism at one static shape, and DP replicas"
 )
 
 
 def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
     """The options the torchrun (neuron) generate stage rejects in phase 1, as the command line
-    names them: every torchrun backend's (TeaCache), request batches (the Qwen ranks run no DP
-    replica loop, unlike Wan's), plus --cfg-parallel (Qwen-Image is guidance-distilled: one
-    forward per step) and a --shapes with more than one shape (the application holds one static
-    shape per process). Torch-free: the shapes are counted, not parsed, so a malformed --shapes
-    fails where it always did."""
-    found = torchrun_unsupported_options(args) + batch_options(args)
+    names them: every torchrun backend's (TeaCache), plus --cfg-parallel (Qwen-Image is
+    guidance-distilled: one forward per step) and a --shapes with more than one shape (the
+    application holds one static shape per process). Request batches and DP replicas run, as
+    Wan's: each replica's rank 0 claims the requests (``replica_requests``). Torch-free: the
+    shapes are counted, not parsed, so a malformed --shapes fails where it always did."""
+    found = torchrun_unsupported_options(args)
     if getattr(args, "cfg_parallel", False):
         found.append("--cfg-parallel")
     shapes = getattr(args, "shapes", None)
@@ -289,12 +293,46 @@ class QwenImageOrchestrator(ModelOrchestrator):
             print(f"Error: {conflicts[0]}; nothing was launched.", file=sys.stderr, flush=True)
             raise SystemExit(2)
 
+    def _check_dit_fits(self) -> None:
+        """On a torchrun backend (neuron), refuse a TP degree whose DiT shard clearly cannot fit
+        one core (``difflet/backends/neuron/qwen_image/hbm.py``) before any rank starts: print
+        one message and exit 2.
+
+        The application base refuses it too, but only once torchrun has started every rank and
+        each has built the model on meta; a DP router would start every replica for it. The
+        per-rank share depends on the TP degree alone, so a DP replica (``--dp 4 --tp-degree
+        1``: 38 GiB per core) is caught the same way as a plain launch, while dp2tp2 (about
+        19 GiB per core) passes. Weights that are not local yet (``compile`` before a download)
+        leave the decision to the application's check. Torch-free, like every driver check.
+        """
+        if torchrun_backend() is None:
+            return
+        from difflet.backends.neuron.hbm import GIB, suggested_tp
+        from difflet.backends.neuron.qwen_image.hbm import dit_fits
+        from difflet.pipeline.path_resolver import resolve_model_path
+
+        try:
+            model_dir = self._model_dir(self.args, resolve_model_path)
+        except (OSError, RuntimeError):
+            return
+        tp = self.args.tp_degree or 4
+        fits, estimate, limit = dit_fits(model_dir, tp_degree=tp)
+        if fits:
+            return
+        print(f"Error: the Qwen-Image DiT needs at least {estimate / GIB:.1f} GiB of bf16 weights "
+              f"per core at tp={tp}, over the {limit / GIB:.1f} GiB budget of one NeuronCore "
+              f"(every DP replica is its own TP group); use --tp-degree "
+              f"{suggested_tp(estimate, tp, limit)} or more; nothing was launched.",
+              file=sys.stderr, flush=True)
+        raise SystemExit(2)
+
     def run(self) -> None:
         self._reject_unsupported_torchrun_options()  # before the download, too
         super().run()
 
     def compile(self) -> None:
         self._reject_unsupported_torchrun_options()
+        self._check_dit_fits()
         root_compile_cache_at_cache_dir(getattr(self.args, "cache_dir", None), tag="qwen_image")
         work_dir = Path.home() / ".cache" / "difflet" / "work" / _CLI_NAME
         work_dir.mkdir(parents=True, exist_ok=True)
@@ -337,6 +375,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
 
     def generate(self) -> None:
         self._reject_unsupported_torchrun_options()
+        self._check_dit_fits()
         root_compile_cache_at_cache_dir(getattr(self.args, "cache_dir", None), tag="qwen_image")
         _require_request_shape_in_set(self.args)  # fail fast before any stage runs
         work_dir = Path(
@@ -397,18 +436,32 @@ class QwenImageOrchestrator(ModelOrchestrator):
                     cli_args=shared,
                 )
             else:
-                _decode_latents_host(
-                    str(work_dir / "latents.pt"),
-                    self._model_dir(self.args, resolve_model_path),
-                    self.args.output,
-                    height=self.args.height or 1024,
-                    width=self.args.width or 1024,
-                )
+                self._decode_on_host(work_dir, self._model_dir(self.args, resolve_model_path))
         except Exception:
             print(f"[difflet] work dir preserved at {work_dir} for inspection", file=sys.stderr)
             raise
         if not self.args.keep_work_dir:
             shutil.rmtree(work_dir, ignore_errors=True)
+
+    def _decode_on_host(self, work_dir: Path, model_dir: str) -> None:
+        """The host decode of every request the generate launch finished: the one request of a
+        plain launch (``work_dir/latents.pt`` to --output), or, in a DP worker, each request
+        this worker's replica claimed and did not fail, from its own latents file to its own
+        output, marked done after its image is written (the vae stage's ``final=True``). A
+        request whose decode fails is marked failed and the next one decodes, as the AoT vae
+        stage's ``request_scope`` does."""
+        from difflet.cli.dp import stage_loop
+
+        args = argparse.Namespace(**{**vars(self.args), "work_dir": str(work_dir)})
+        for req in stage_loop.claimed_requests(args):
+            with stage_loop.request_scope(args, req, final=True):
+                _decode_latents_host(
+                    str(stage_loop.work_file(args, req, "latents.pt")),
+                    model_dir,
+                    req.output,
+                    height=self.args.height or 1024,
+                    width=self.args.width or 1024,
+                )
 
     def _run_stage_internal(self, stage: str, args: argparse.Namespace) -> None:
         if stage == "text":
@@ -623,9 +676,13 @@ class QwenImageOrchestrator(ModelOrchestrator):
         TEXT_SEQ_LEN; the DiT attends the padded text unmasked, as on Trainium), draws the noise
         from the seeded generator on rank 0 and broadcasts it, and sets the shifted FlowMatch
         schedule as ``_stage_generate`` does. Every rank runs the same generate and rank 0 alone
-        writes files: ``work_file`` and the compiled dir are the same path on every rank. The
-        process group is destroyed after a successful stage only: a failing rank exits with its
-        exception and torchrun stops its peers, which may be blocked in a collective.
+        writes files: ``work_file`` and the compiled dir are the same path on every rank. In a
+        DP worker (``--requests-dir``) the launch is one replica draining the request queue, as
+        Wan's transformer stage does: rank 0 alone claims and broadcasts each request's index
+        (``replica_requests``), and a request that fails is marked failed once and stops every
+        rank of the replica (``replica_request_scope``). The process group is destroyed after a
+        successful stage only: a failing rank exits with its exception and torchrun stops its
+        peers, which may be blocked in a collective.
         """
         import time
 
@@ -638,12 +695,6 @@ class QwenImageOrchestrator(ModelOrchestrator):
         from difflet.pipeline.difflet_pipeline import DiffletPipeline
         from difflet.pipeline.parallel_config import DiffletParallelConfig
 
-        if stage_loop.batch_mode(args):
-            raise NotImplementedError(
-                f"[qwen_image] the {backend} backend runs one request per launch (phase 1): "
-                "every rank would claim a different request; --requests and data parallelism "
-                "are not supported"
-            )
         compile_shapes = _require_request_shape_in_set(args)
         h, w = args.height or 1024, args.width or 1024
         # The whole parallel request: the backend and the application reject what they do not
@@ -691,8 +742,10 @@ class QwenImageOrchestrator(ModelOrchestrator):
                     "generate", args, self._stage_compiled_dir("generate", args)
                 )
         else:
-            for req in stage_loop.claim_requests(args):
-                with stage_loop.request_scope(args, req, final=False):
+            # A DP worker's replica drains the queue: rank 0 claims, every rank runs the request
+            # (replica_requests), and a failed request stops the whole replica together.
+            for req in replica_requests(args, device=getattr(pipe.app, "device", None)):
+                with replica_request_scope(args, req):
                     with fallback_tracker(pipe) as fallbacks:
                         out = pipe(
                             # The noise the Trainium stage draws after torch.manual_seed(seed).

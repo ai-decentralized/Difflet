@@ -19,7 +19,6 @@ trainium and tpu keep their paths unchanged.
 from __future__ import annotations
 
 import argparse
-import contextlib
 import json
 import re
 import shutil
@@ -41,6 +40,8 @@ from difflet.cli.orchestrators.base import (
 from difflet.cli.orchestrators.torchrun import (
     fallback_tracker as _fallback_tracker,
     reject_unsupported_torchrun_options,
+    replica_request_scope as _replica_request_scope,
+    replica_requests as _replica_requests,
     root_compile_cache_at_cache_dir,
     torchrun_backend as _torchrun_backend,
     torchrun_unsupported_options,
@@ -199,61 +200,6 @@ _TORCHRUN_APPLICATION_KWARGS = {
     "encoder_threads": 12,
     "text_encoder_device": "neuron",
 }
-
-
-def _replica_requests(args: argparse.Namespace, *, device):
-    """The requests a torchrun replica runs, one at a time, every rank the same request.
-
-    Outside batch mode, or with one rank, this is ``stage_loop.claim_requests``. In a DP worker
-    (``--requests-dir``) under torchrun, rank 0 alone claims from the queue and broadcasts the
-    claimed index (-1 when the queue is empty, as int32) to the replica's ranks, which read the
-    request from the manifest: claiming on every rank would hand the TP group different requests.
-    """
-    from difflet.backends.neuron.core import distributed
-    from difflet.cli.dp import stage_loop
-
-    rank, world = distributed.world_info()
-    if not stage_loop.batch_mode(args) or world == 1:
-        yield from stage_loop.claim_requests(args)
-        return
-    import torch
-
-    from difflet.cli.dp.requests_io import read_manifest
-
-    manifest = {r.index: r for r in read_manifest(Path(args.requests_dir))}
-    claims = stage_loop.claim_requests(args) if rank == 0 else None
-    while True:
-        req = next(claims, None) if rank == 0 else None
-        index = (torch.tensor([req.index if req is not None else -1], dtype=torch.int32)
-                 if rank == 0 else None)
-        index = int(distributed.broadcast_tensor(index, device=device).reshape(-1)[0].item())
-        if index < 0:
-            return
-        yield req if rank == 0 else manifest[index]
-
-
-@contextlib.contextmanager
-def _replica_request_scope(args: argparse.Namespace, req):
-    """``stage_loop.request_scope`` for a torchrun replica: a failed request is marked failed
-    once (rank 0) and every rank re-raises. A rank cannot skip a request its TP partners are
-    still running: they would wait in a collective forever. One rank stays as before."""
-    from difflet.backends.neuron.core import distributed
-    from difflet.cli.dp import claims, stage_loop
-
-    rank, world = distributed.world_info()
-    if not stage_loop.batch_mode(args) or world == 1:
-        with stage_loop.request_scope(args, req, final=False):
-            yield
-        return
-    try:
-        yield
-    except Exception:
-        if rank == 0:
-            import traceback
-
-            claims.mark_failed(args.requests_dir, req.index, traceback.format_exc())
-            print(f"[dp-worker] request {req.index} failed; stopping this replica", flush=True)
-        raise
 
 
 def _dual_expert_misuse(args: argparse.Namespace, torchrun_backend: str | None) -> str | None:
