@@ -169,11 +169,20 @@ def test_entry_routes_neuron_and_registry_lists_it(tiny):
     assert type(app) is na.TorchNeuronQwenImageApplication
     assert app.config.image_seq_len == TINY_PACKED[0] * TINY_PACKED[1]
     assert app.config.cp_degree == 1  # filled from the parallel config by the DiT application
-    with pytest.raises(NotImplementedError, match="guidance-distilled"):
-        create_qwen_image_application(
-            model_path=tiny.dir, parallel=DiffletParallelConfig(cfg_parallel_enabled=True),
-            dtype=torch.float32, shape=dict(TINY_SHAPE), backend="neuron", device="cpu",
-        )
+    # CFG parallelism serves the neuron application's opt-in true CFG; the Trainium and TPU
+    # paths run one forward per step and still refuse it.
+    cfg_app = create_qwen_image_application(
+        model_path=tiny.dir, parallel=DiffletParallelConfig(cfg_parallel_enabled=True),
+        dtype=torch.float32, shape=dict(TINY_SHAPE), backend="neuron", device="cpu",
+        text_seq_len=TINY_TEXT_SEQ_LEN, enable_text_encoder=False,
+    )
+    assert cfg_app.config.cfg_parallel_enabled and cfg_app.config.dit_batch == 2
+    for backend in ("trainium", "tpu"):
+        with pytest.raises(NotImplementedError, match="guidance-distilled"):
+            create_qwen_image_application(
+                model_path=tiny.dir, parallel=DiffletParallelConfig(cfg_parallel_enabled=True),
+                dtype=torch.float32, shape=dict(TINY_SHAPE), backend=backend,
+            )
     with pytest.raises(NotImplementedError, match="trainium, tpu and neuron backends, got 'cuda'"):
         create_qwen_image_application(
             model_path=tiny.dir, parallel=DiffletParallelConfig(), dtype=torch.float32,
@@ -208,7 +217,6 @@ def test_kwargs_mirror_the_cli_and_reject_phase1_limits(tiny):
         ({"teacache_fused": True}, "teacache_fused"),
         ({"shapes": ((64, 96, None), (32, 48, None))}, "one static shape"),
         ({"batch_size": 2}, "batch_size"),
-        ({"parallel": DiffletParallelConfig(cfg_parallel_enabled=True)}, "guidance-distilled"),
         ({"parallel": DiffletParallelConfig(dp_degree=2)}, "dp_degree=2"),
     ):
         with pytest.raises(NotImplementedError, match=match):

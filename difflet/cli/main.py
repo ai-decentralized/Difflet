@@ -385,6 +385,24 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
         "the checkpoint's boundary timestep and the low-noise one below it (default: the "
         "high-noise expert for every step, as on trainium and tpu)",
     )
+    p.add_argument(
+        "--true-cfg-scale",
+        dest="true_cfg_scale",
+        type=float,
+        default=None,
+        help="Qwen-Image on the neuron backend: opt-in true classifier-free guidance, two DiT "
+        "forwards per step combined as diffusers' QwenImagePipeline does (above 1 enables it; "
+        "default: off, one forward per step). Needed for --cfg-parallel, which runs the two "
+        "branches on two TP groups",
+    )
+    p.add_argument(
+        "--negative-prompt",
+        dest="negative_prompt",
+        default=None,
+        help="Qwen-Image on the neuron backend: the negative prompt of --true-cfg-scale "
+        "(default with --true-cfg-scale: ' ', diffusers' empty negative prompt). A --requests "
+        "line's negative_prompt wins over it",
+    )
     p.add_argument("--seed", type=int, default=42)
     p.add_argument(
         "--work-dir", default=None, help="Directory for inter-stage tensors (staged models only)"
@@ -849,7 +867,20 @@ def _validate_cfg_parallel(args: argparse.Namespace) -> None:
         raise SystemExit(1)
     # The staged CLI path builds the app directly, bypassing each model's
     # entry.py guard, so this has to reject before dispatch.
-    if not _capabilities(args.model_id).supports_cfg_parallel:
+    capabilities = _capabilities(args.model_id)
+    if not capabilities.supports_cfg_parallel and _opt_in_true_cfg_backend(capabilities):
+        # A distilled-by-default model with opt-in true CFG on this backend (Qwen-Image on
+        # neuron): compile only warms the batch-2 graph up; generate needs the two branches.
+        if args.command == "compile" or (getattr(args, "true_cfg_scale", None) or 0) > 1:
+            return
+        print(
+            f"Error: --cfg-parallel splits the two branches of true classifier-free guidance; "
+            f"{args.model_id} runs them only with --true-cfg-scale > 1 (opt-in; by default it "
+            "runs one forward per step).",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if not capabilities.supports_cfg_parallel:
         print(
             f"Error: {args.model_id} is guidance-distilled (single forward pass "
             "with the guidance scale baked into the timestep embedding); "
@@ -858,6 +889,14 @@ def _validate_cfg_parallel(args: argparse.Namespace) -> None:
             file=sys.stderr,
         )
         raise SystemExit(1)
+
+
+def _opt_in_true_cfg_backend(capabilities) -> bool:
+    """Whether the selected torchrun backend is one where this model runs opt-in true CFG
+    (``ModelCapabilities.true_cfg_backends``)."""
+    if not capabilities.true_cfg_backends or not _torchrun_backend_selected():
+        return False
+    return _lookup_backend(None).name in capabilities.true_cfg_backends
 
 
 def _replica_cores(args: argparse.Namespace) -> int:
@@ -974,6 +1013,7 @@ def _dispatch_dp(args: argparse.Namespace) -> None:
                 prompt=args.prompt,
                 output=args.output,
                 seed=args.seed,
+                negative_prompt=getattr(args, "negative_prompt", None),
                 guidance_scale=args.guidance_scale,
                 steps=args.steps,
             )

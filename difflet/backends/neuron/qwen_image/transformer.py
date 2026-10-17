@@ -59,16 +59,41 @@ def checkpoint_key(name: str) -> str:
 
 
 def _trace_module_class():
-    """``_QwenImageTransformerTraceModule`` with the mask and guidance optional.
+    """``_QwenImageTransformerTraceModule`` with the mask and guidance optional, and CFG
+    parallelism.
 
     The warm-up broadcasts tensors only (``broadcast_tensor`` has no None), so it calls the
     module with the three tensors the DiT actually consumes; the orchestrator's five-argument
     call keeps working. Built lazily: importing the modeling binds ``difflet.ops`` to the
     selected backend, which must not happen when this module is merely imported.
+
+    With ``cfg_parallel_enabled`` the call carries the true-CFG pair ``[negative,
+    conditional]`` as batch 2 (``QwenImageOrchestrator._true_cfg_step``): each rank keeps the
+    half of its CFG coordinate (``scatter_to_process_group_spmd`` over the CFG group, a local
+    narrow: rank 0 of the group the negative branch, rank 1 the conditional one), runs the
+    batch-1 DiT on it in its own TP group, and the halves are all-gathered back along the
+    batch, so every rank returns both predictions in order, as Wan's model does. The blocks
+    still see batch 1, so the block graph is the non-CFG one. This lives in the neuron
+    subclass: the Trainium and TPU paths never run CFG parallelism for Qwen-Image.
     """
     from difflet.models.qwen_image.modeling_qwen_image import _QwenImageTransformerTraceModule
+    from difflet.ops import (
+        SPMDRank,
+        gather_from_tensor_model_parallel_region_with_dim,
+        get_cfg_group,
+        get_cfg_rank_spmd,
+        get_world_group,
+        scatter_to_process_group_spmd,
+    )
 
     class NeuronQwenImageTraceModule(_QwenImageTransformerTraceModule):
+        def __init__(self, config):
+            super().__init__(config)
+            self.cfg_parallel_enabled = bool(getattr(config, "cfg_parallel_enabled", False))
+            if self.cfg_parallel_enabled:
+                self.cfg_group = get_cfg_group()
+                self.cfg_rank_util = SPMDRank(world_size=get_world_group().size())
+
         def forward(
             self,
             hidden_states: torch.Tensor,
@@ -77,9 +102,24 @@ def _trace_module_class():
             encoder_hidden_states_mask: torch.Tensor | None = None,
             guidance: torch.Tensor | None = None,
         ) -> torch.Tensor:
-            return super().forward(
-                hidden_states, timestep, encoder_hidden_states, encoder_hidden_states_mask,
-                guidance,
+            if not self.cfg_parallel_enabled:
+                return super().forward(
+                    hidden_states, timestep, encoder_hidden_states, encoder_hidden_states_mask,
+                    guidance,
+                )
+            rank = get_cfg_rank_spmd(self.cfg_rank_util.get_rank())
+
+            def mine(tensor):
+                return scatter_to_process_group_spmd(
+                    tensor, partition_dim=0, rank=rank, process_group=self.cfg_group
+                )
+
+            output = super().forward(
+                mine(hidden_states), mine(timestep), mine(encoder_hidden_states), None,
+                None if guidance is None else mine(guidance),
+            )
+            return gather_from_tensor_model_parallel_region_with_dim(
+                output, gather_dim=0, process_group=self.cfg_group
             )
 
     return NeuronQwenImageTraceModule
@@ -92,7 +132,8 @@ class NeuronQwenImageTransformerApplication(TorchNeuronApplicationBase):
     ``model_path`` is the transformer directory (``<model>/transformer``). The config sizes the
     module and the parallel config the mesh, so they must agree: ``tp_degree`` equal,
     ``context_parallel_enabled`` iff ``parallel.cp_degree > 1`` with the same ``cp_mode``,
-    ``sp_enabled`` equal, and no CFG parallelism (Qwen-Image is guidance-distilled). With CP on, the trace module calls
+    ``sp_enabled`` and ``cfg_parallel_enabled`` equal (CFG parallelism splits the batch-2
+    true-CFG call over the CFG group; see ``_trace_module_class``). With CP on, the trace module calls
     ``init_parallel_mesh(config)`` again while it is built; the neuron mesh derives cp as
     ``world / (tp * cfg * dp)`` from the config, which these checks make equal to the spec the
     base initialised from ``parallel``, so that call is the idempotent no-op. ``config.cp_degree``
@@ -133,10 +174,11 @@ class NeuronQwenImageTransformerApplication(TorchNeuronApplicationBase):
                 f"has tp_degree={parallel.tp_degree}; the module would be sharded for one and "
                 "the mesh built for the other"
             )
-        if parallel.cfg_parallel_enabled:
-            raise NotImplementedError(
-                "Qwen-Image is guidance-distilled (one forward per step); CFG parallelism does "
-                "not apply"
+        if bool(config.cfg_parallel_enabled) != bool(parallel.cfg_parallel_enabled):
+            raise ValueError(
+                f"NeuronQwenImageConfig has cfg_parallel_enabled={config.cfg_parallel_enabled} "
+                f"but the parallel config has cfg_parallel_enabled="
+                f"{parallel.cfg_parallel_enabled}"
             )
         # The mesh carries no SP flag (MeshSpec drops it), so the module is the only place SP
         # takes effect: a config without it would build the dense model under an SP launch,
@@ -210,12 +252,13 @@ class NeuronQwenImageTransformerApplication(TorchNeuronApplicationBase):
 
         The packed latents ``[B, image_seq_len, in_channels]``, the per-sample timestep and the
         zero-padded text embeddings ``[B, text_seq_len, joint_attention_dim]``: exactly the
-        per-step shapes the orchestrator sends (one forward per step, no CFG batch), so the
-        warm-up compiles the only block graph the run needs. Under CP every rank receives the
-        full sequence and the module scatters it.
+        per-call shapes the orchestrator sends, so the warm-up compiles the only block graph
+        the run needs. B is 1, or 2 under CFG parallelism (the ``[negative, conditional]``
+        pair, which the module splits over the CFG group: each rank's blocks still see batch
+        1). Under CP every rank receives the full sequence and the module scatters it.
         """
         cfg = self.config
-        batch = int(cfg.batch_size)
+        batch = cfg.dit_batch
         return (
             torch.zeros(batch, cfg.image_seq_len, int(cfg.in_channels), dtype=self.dtype),
             torch.zeros(batch, dtype=self.dtype),

@@ -94,6 +94,12 @@ class NeuronQwenImageConfig:
     def image_seq_len(self) -> int:
         return self.packed_height * self.packed_width
 
+    @property
+    def dit_batch(self) -> int:
+        """The batch of one DiT call: the CFG-parallel ``[negative, conditional]`` pair, which
+        the module splits over the CFG group, or ``batch_size``."""
+        return 2 if self.cfg_parallel_enabled else int(self.batch_size)
+
     def validate(self) -> None:
         if sum(int(d) for d in self.axes_dims_rope) != int(self.attention_head_dim):
             raise ValueError(
@@ -146,12 +152,13 @@ class NeuronQwenImageConfig:
                 "parallelism runs as separate replicas)"
             )
         self._validate_sequence_parallel()
-        if self.cfg_parallel_enabled:
-            # create_qwen_image_application rejects it for every backend, for the same reason.
-            raise NotImplementedError(
-                "Qwen-Image is guidance-distilled (one forward per step, the guidance scale "
-                "baked into the timestep embedding); CFG parallelism needs two-pass "
-                "classifier-free guidance and does not apply"
+        if self.cfg_parallel_enabled and self.context_parallel_enabled:
+            # As for Wan (NeuronWanConfig) and the CLI (--cfg-parallel with --cp-degree > 1).
+            # CFG parallelism serves opt-in true CFG only: the application refuses a call that
+            # does not run it.
+            raise ValueError(
+                "Qwen-Image cfg_parallel_enabled and context_parallel_enabled are mutually "
+                "exclusive (both consume the data-parallel lanes)"
             )
         if self.cp_mode not in CP_MODES:
             raise ValueError(f"cp_mode must be one of {CP_MODES}, got {self.cp_mode!r}")

@@ -103,6 +103,9 @@ def worker_cli_args(args) -> list[str]:
         # encoder on the device beside a narrower TP shard than its HBM allows.
         ("--exec-mode", getattr(args, "exec_mode", None)),
         ("--guidance-scale-2", getattr(args, "guidance_scale_2", None)),
+        ("--true-cfg-scale", getattr(args, "true_cfg_scale", None)),
+        # The default for requests without one of their own (a manifest line's wins).
+        ("--negative-prompt", getattr(args, "negative_prompt", None)),
     ):
         if value is not None:
             argv += [flag, str(value)]

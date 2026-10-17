@@ -79,6 +79,8 @@ def _build_stage_parser() -> argparse.ArgumentParser:
     p.add_argument("--output", default=None)
     p.add_argument("--steps", type=int, default=None)
     p.add_argument("--guidance-scale", type=float, default=None)
+    p.add_argument("--true-cfg-scale", dest="true_cfg_scale", type=float, default=None)
+    p.add_argument("--negative-prompt", dest="negative_prompt", default=None)
     p.add_argument("--guidance-scale-2", dest="guidance_scale_2", type=float, default=None)
     p.add_argument("--dual-expert", dest="dual_expert", action="store_true")
     p.add_argument("--host-text-encoder", dest="host_text_encoder", action="store_true")
