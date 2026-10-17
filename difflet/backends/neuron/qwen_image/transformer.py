@@ -14,6 +14,17 @@ compile mode the identical ``QwenImageTransformerBlock``s are compiled in place 
 graph while the top level (patch/text input projections, timestep embedding, final norm and
 projection, and the CP scatter/gather) stays eager.
 
+Sequence parallelism (``sp_enabled``, Megatron SP within the TP group) builds the trace module's
+``QwenImageSPTransformer2DModel`` fork (``difflet/models/qwen_image/modeling_qwen.py``) instead
+of diffusers' class: the same submodule layout and checkpoint keys, the four row-parallel
+outputs built with ``reduce_output=False``, both residual streams sharded along their own
+sequence axis between the blocks, and each TP region entered with an all-gather and left with a
+reduce-scatter instead of the all-reduce. The neuron ops supply those collectives over the TP
+group (``ops_impl/collectives.py``); the fork's ``_sp_unbias`` removes the ``tp - 1`` extra
+biases the un-reduced partials carry (the neuron ``RowParallelLinear`` adds the full bias to
+each partial, as NxD's does). The blocks' collectives are functional collectives, so the block
+graph compiles as one graph per block class, as without SP.
+
 The text mask is dropped, as on Trainium and TPU: prompts are zero-padded to ``text_seq_len``
 and attended unmasked. The modeling's forward deletes ``encoder_hidden_states_mask`` (the
 diffusers mask path builds the active length with ``arange``/``where``, which the fixed-shape
@@ -80,8 +91,8 @@ class NeuronQwenImageTransformerApplication(TorchNeuronApplicationBase):
 
     ``model_path`` is the transformer directory (``<model>/transformer``). The config sizes the
     module and the parallel config the mesh, so they must agree: ``tp_degree`` equal,
-    ``context_parallel_enabled`` iff ``parallel.cp_degree > 1`` with the same ``cp_mode``, and
-    no CFG parallelism (Qwen-Image is guidance-distilled). With CP on, the trace module calls
+    ``context_parallel_enabled`` iff ``parallel.cp_degree > 1`` with the same ``cp_mode``,
+    ``sp_enabled`` equal, and no CFG parallelism (Qwen-Image is guidance-distilled). With CP on, the trace module calls
     ``init_parallel_mesh(config)`` again while it is built; the neuron mesh derives cp as
     ``world / (tp * cfg * dp)`` from the config, which these checks make equal to the spec the
     base initialised from ``parallel``, so that call is the idempotent no-op. ``config.cp_degree``
@@ -127,13 +138,13 @@ class NeuronQwenImageTransformerApplication(TorchNeuronApplicationBase):
                 "Qwen-Image is guidance-distilled (one forward per step); CFG parallelism does "
                 "not apply"
             )
-        # Checked here, not left to check_parallel_supported: the neuron runtime runs SP for
-        # Wan, so it lets sp_enabled through, and the Qwen trace module built from this config
-        # (sp_enabled=False) would silently ignore it.
-        if getattr(parallel, "sp_enabled", False):
-            raise NotImplementedError(
-                "Qwen-Image on the neuron backend runs tensor and context parallelism; "
-                "sequence parallelism is not implemented"
+        # The mesh carries no SP flag (MeshSpec drops it), so the module is the only place SP
+        # takes effect: a config without it would build the dense model under an SP launch,
+        # and one with it would shard where the caller asked for none.
+        if bool(config.sp_enabled) != bool(getattr(parallel, "sp_enabled", False)):
+            raise ValueError(
+                f"NeuronQwenImageConfig has sp_enabled={config.sp_enabled} but the parallel "
+                f"config has sp_enabled={getattr(parallel, 'sp_enabled', False)}"
             )
         cp = int(parallel.cp_degree)
         if bool(config.context_parallel_enabled) != (cp > 1):
