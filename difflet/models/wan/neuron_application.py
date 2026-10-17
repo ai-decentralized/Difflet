@@ -19,7 +19,9 @@ launch builds one and holds:
   ``text_encoder_device="neuron"``, ``_DeviceTextEncoder``: umT5 on the device in fp32, as on
   the host, sharded across the TP group with the AoT path's layout
   (``NeuronWanTextEncoderApplication``, about a quarter of the 22.7 GB fp32 encoder per rank),
-  every rank encoding, the embeddings cast to the DiT's dtype;
+  every rank encoding, the embeddings cast to the DiT's dtype. ``__init__`` refuses it when it
+  clearly cannot fit beside the DiT on one core at this tp (``_check_device_text_encoder_fits``:
+  tp2, so CFG or CP on four cores and dp2tp2 replicas, does not fit);
 * ``pipeline``: the backend-neutral ``WanOrchestrator`` (fp32 latents, UniPC on the host), which
   every rank runs on identical inputs; its DiT calls go through ``_OnDeviceTransformer``.
 
@@ -53,8 +55,10 @@ import torch
 from difflet.backends.neuron.core.application_base import _normalize_dtype
 from difflet.backends.neuron.core.checkpoint import _resolve_device
 from difflet.backends.neuron.core.distributed import broadcast_tensor, rank0_call
+from difflet.backends.neuron.hbm import budget_enforced, check_fits
 from difflet.backends.neuron.runtime import check_parallel_supported
 from difflet.backends.neuron.wan.config import NeuronWanConfig
+from difflet.backends.neuron.wan.hbm import device_text_encoder_bytes
 from difflet.backends.neuron.wan.text_encoder import NeuronWanTextEncoderApplication
 from difflet.backends.neuron.wan.transformer import NeuronWanTransformerApplication
 from difflet.backends.neuron.wan.vae import NeuronWanVaeDecoderApplication
@@ -339,15 +343,8 @@ class TorchNeuronWanApplication(torch.nn.Module):
                 device=self.device,
             )
         self.text_encoder: _HostTextEncoder | _DeviceTextEncoder | None = None
-        if (options["enable_text_encoder"] and options["text_encoder_device"] == "neuron"
-                and (self.config.cfg_parallel_enabled or self.config.context_parallel_enabled)):
-            raise ValueError(
-                "CFG and context parallelism narrow the TP degree, so a core would hold a TP-"
-                f"{parallel.tp_degree} shard of the fp32 text encoder beside a TP-"
-                f"{parallel.tp_degree} shard of the DiT, more than its HBM; encode on the host "
-                "(text_encoder_device='host', --host-text-encoder)"
-            )
         if options["enable_text_encoder"] and options["text_encoder_device"] == "neuron":
+            self._check_device_text_encoder_fits()
             self.text_encoder = _DeviceTextEncoder(
                 NeuronWanTextEncoderApplication(
                     model_path=os.path.join(self.model_path, "text_encoder"),
@@ -390,6 +387,37 @@ class TorchNeuronWanApplication(torch.nn.Module):
         #: Called with no arguments once per denoise iteration; see the module docstring.
         self.step_hook: Callable[[], None] | None = None
         self._text_encoder_load_seconds: float | None = None
+
+    def _check_device_text_encoder_fits(self) -> None:
+        """umT5 on the device shares each core with this rank's DiT shards. Raise before anything
+        loads when the two clearly cannot fit together (``difflet/backends/neuron/wan/hbm.py``).
+
+        The estimate depends on the TP degree and the checkpoint's sizes, not on the mode flags.
+        CFG and CP on four cores, DP replicas of tp2 and a plain tp2 all narrow the TP group the
+        same way. At tp2 that is at least 10.6 GiB of fp32 encoder beside 13.3 GiB of bf16 DiT on
+        a 24 GiB core. The base's own load-time check sees one component at a time, so it would
+        pass the DiT and fail only after it had loaded. Like that check, this one runs on the
+        neuron device, or elsewhere when ``DIFFLET_NEURON_HBM_GIB`` sets a budget.
+        """
+        if not budget_enforced(self.device.type):
+            return
+        experts = tuple(
+            name
+            for name, app in (("transformer", self.transformer),
+                              ("transformer_2", self.transformer_2))
+            if app is not None
+        )
+        tp = int(self.parallel.tp_degree)
+        estimate = device_text_encoder_bytes(
+            self.model_path, tp_degree=tp, experts=experts, dit_dtype_bytes=self.dtype.itemsize
+        )
+        check_fits(
+            estimate,
+            what=f"umT5 (fp32) beside the Wan DiT ({', '.join(experts) or 'none'}) on one core",
+            tp_degree=tp,
+            advice="encode on the host (text_encoder_device='host', --host-text-encoder), or "
+            "give the TP group more cores (tp_degree={tp} or more)",
+        )
 
     def _low_noise_expert_path(self, options: dict[str, Any]) -> str:
         if not options["enable_transformer"]:
