@@ -161,17 +161,21 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
         "--host-vae",
         dest="host_vae",
         action="store_true",
-        help="Decode the VAE on host CPU via diffusers instead of a "
-        "compiled Neuron VAE. Required for Wan clips beyond ~9 "
-        "frames: the single-shot Neuron VAE graph exceeds the "
-        "compiler instruction limit (NCC_EVRF007).",
+        help="Decode the VAE on host CPU via diffusers instead of on a "
+        "NeuronCore. Trainium (AoT): required for Wan clips beyond ~9 "
+        "frames, whose single-shot compiled VAE graph exceeds the "
+        "compiler instruction limit (NCC_EVRF007). --backend neuron: "
+        "optional; the VAE stage otherwise decodes eagerly in fp32 on "
+        "one core.",
     )
     p.add_argument(
         "--host-text-encoder",
         dest="host_text_encoder",
         action="store_true",
         help="Wan on the neuron backend: encode prompts with umT5 on rank 0's host CPU (fp32) "
-        "instead of on the device (fp32, TP-sharded, the default)",
+        "instead of on the device (fp32, TP-sharded, the default). Set automatically when the "
+        "TP group is too narrow for umT5 to fit beside the DiT (tp2, e.g. --cfg-parallel or "
+        "--cp-degree 2 on four cores, or --dp 2 --tp-degree 2)",
     )
     p.add_argument(
         "--taef1",
