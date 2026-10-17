@@ -1468,15 +1468,23 @@ def convert_flux_hf_state_dict(
     *,
     num_single_layers: int,
     inner_dim: int,
+    clone: bool = True,
 ) -> Dict[str, torch.Tensor]:
     """Convert a diffusers ``FluxTransformer2DModel`` state dict to this module's names.
 
     Splits each single block's fused ``proj_out`` (``[attn | mlp]`` along the input
     dim, split at ``inner_dim``) into ``proj_out_attn`` (which takes the bias) and
     ``proj_out_mlp``. The fused keys are left out, so the result loads with
-    ``strict=True``. Every value is a contiguous clone; the caller's dict is not
-    modified. The Trainium application's ``convert_hf_to_neuron_state_dict`` delegates
-    here and adds its Trainium-only state (``global_rank.rank``, the SPMD rank buffer).
+    ``strict=True``. The caller's dict is not modified.
+
+    With ``clone=True`` (the default) every value is a contiguous clone. With
+    ``clone=False`` the untouched tensors (and the renamed bias) are returned as they
+    are, with no copy, and only the two ``proj_out`` weight slices per single block are
+    made contiguous copies -- for a caller that copies the values on anyway (the CUDA
+    loader's ``load_state_dict``, the Trainium converter's in-place clone) and must not
+    hold the checkpoint twice on the host. The Trainium application's
+    ``convert_hf_to_neuron_state_dict`` delegates here and adds its Trainium-only state
+    (``global_rank.rank``, the SPMD rank buffer).
     """
     fused = {
         f"single_transformer_blocks.{i}.proj_out.{name}"
@@ -1487,7 +1495,28 @@ def convert_flux_hf_state_dict(
     for i in range(num_single_layers):
         prefix = f"single_transformer_blocks.{i}"
         weight = state_dict[f"{prefix}.proj_out.weight"]
-        converted[f"{prefix}.proj_out_attn.weight"] = weight[:, :inner_dim]
+        attn_weight = weight[:, :inner_dim]
+        mlp_weight = weight[:, inner_dim:]
+        if not clone:
+            # A real copy even when the slice is already contiguous (one row), so the
+            # split never keeps the fused weight alive.
+            attn_weight = attn_weight.clone().contiguous()
+            mlp_weight = mlp_weight.clone().contiguous()
+        converted[f"{prefix}.proj_out_attn.weight"] = attn_weight
         converted[f"{prefix}.proj_out_attn.bias"] = state_dict[f"{prefix}.proj_out.bias"]
-        converted[f"{prefix}.proj_out_mlp.weight"] = weight[:, inner_dim:]
+        converted[f"{prefix}.proj_out_mlp.weight"] = mlp_weight
+    if not clone:
+        return converted
     return {key: value.clone().detach().contiguous() for key, value in converted.items()}
+
+
+def clone_state_dict_in_place(state_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    """Replace every value with a contiguous clone, one key at a time, and return the dict.
+
+    Keys and order are kept. Each original tensor is released as soon as its clone
+    replaces it (when nothing else holds it), so the transient host peak is one tensor,
+    not the whole dict -- the Trainium converter's original final pass.
+    """
+    for k, v in state_dict.items():
+        state_dict[k] = v.clone().detach().contiguous()
+    return state_dict

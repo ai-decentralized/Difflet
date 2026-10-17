@@ -66,10 +66,16 @@ class CudaFluxTransformerApplication(CudaApplicationBase):
             state: dict[str, torch.Tensor] = {}
             for path in sorted(set(build_weight_map(self.model_path).values())):
                 state.update(load_file(path))
+            # ``clone=False``: the untouched tensors are aliased, not copied
+            # (``load_state_dict`` copies them into the parameters), so the host holds
+            # the checkpoint once plus the split ``proj_out`` slices.
             converted = convert_flux_hf_state_dict(
-                state, num_single_layers=int(cfg.num_single_layers), inner_dim=cfg.inner_dim
+                state,
+                num_single_layers=int(cfg.num_single_layers),
+                inner_dim=cfg.inner_dim,
+                clone=False,
             )
-            del state  # the converter cloned every tensor; don't hold the model twice
+            del state  # frees the fused ``proj_out`` tensors the split copies replaced
             module.load_state_dict(converted, strict=True)
             del converted
             module.to(self.device)

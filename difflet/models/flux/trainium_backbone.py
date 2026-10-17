@@ -38,6 +38,7 @@ from difflet.backends.trainium.core.model_wrapper import BaseModelInstance, Mode
 from difflet.layers.embeddings import FluxPosEmbed
 from difflet.models.flux.modeling_flux import (
     NeuronFluxTransformer2DModel,
+    clone_state_dict_in_place,
     convert_flux_hf_state_dict,
 )
 from difflet.ops import get_platform_target, hardware
@@ -285,20 +286,21 @@ class NeuronFluxBackboneApplication(NeuronApplicationBase):
             state_dict,
             num_single_layers=config.num_single_layers,
             inner_dim=config.num_attention_heads * config.attention_head_dim,
+            clone=False,
         )
         # The Trainium checkpoint has always kept the fused HF
         # ``single_transformer_blocks.{i}.proj_out.*`` keys next to the split ones,
         # updating the caller's dict in place, and carries the SPMD rank buffer
         # (Trainium state the neutral conversion leaves out). Keep that exactly (same
         # keys, same order, every value a contiguous clone) so the sharded checkpoint
-        # and the shared weight store see no change.
-        for key, value in list(state_dict.items()):
-            if key in converted:
-                state_dict[key] = converted.pop(key)
-            else:
-                state_dict[key] = value.clone().detach().contiguous()
+        # and the shared weight store see no change: original keys in place, then
+        # ``global_rank.rank``, then the split keys per single block. ``clone=False``
+        # aliases the untouched tensors, so the clone pass below replaces one tensor at
+        # a time and the host peak stays the original one.
         state_dict["global_rank.rank"] = torch.arange(
             0, config.neuron_config.world_size, dtype=torch.int32
         )
+        converted.pop("global_rank.rank", None)
         state_dict.update(converted)
-        return state_dict
+        del converted  # drop the aliases before cloning, or every original stays alive
+        return clone_state_dict_in_place(state_dict)

@@ -356,3 +356,37 @@ def test_backbone_convert_hf_to_neuron_state_dict_splits_single_blocks():
     assert "global_rank.rank" in out
     assert torch.equal(out["global_rank.rank"], torch.arange(1, dtype=torch.int32))
     assert NeuronFluxBackboneApplication.update_state_dict_for_tied_weights({}) is None
+
+
+@needs_neuron
+def test_backbone_convert_hf_to_neuron_state_dict_order_and_clones():
+    """Pins the original in-place algorithm: original keys in place (fused ``proj_out``
+    kept), then ``global_rank.rank``, then per single block ``proj_out_attn.weight``,
+    ``proj_out_attn.bias``, ``proj_out_mlp.weight``; every value a contiguous clone."""
+    from difflet.models.flux.trainium_backbone import NeuronFluxBackboneApplication
+
+    config = _trainium_backbone_config(num_single_layers=2)
+    inner_dim = config.num_attention_heads * config.attention_head_dim
+    sd = {"x_embedder.weight": torch.randn(3, 3)}
+    for i in range(2):
+        sd[f"single_transformer_blocks.{i}.proj_out.weight"] = torch.randn(DIM, inner_dim + 7)
+        sd[f"single_transformer_blocks.{i}.proj_out.bias"] = torch.randn(DIM)
+    inputs = dict(sd)
+
+    out = NeuronFluxBackboneApplication.convert_hf_to_neuron_state_dict(sd, config)
+
+    assert out is sd
+    split = [
+        f"single_transformer_blocks.{i}.{name}"
+        for i in range(2)
+        for name in ("proj_out_attn.weight", "proj_out_attn.bias", "proj_out_mlp.weight")
+    ]
+    assert list(out) == list(inputs) + ["global_rank.rank"] + split
+    for key, value in inputs.items():
+        assert torch.equal(out[key], value) and out[key].data_ptr() != value.data_ptr()
+    storages = {v.untyped_storage().data_ptr() for v in inputs.values()}
+    for value in out.values():
+        assert value.is_contiguous() and value.untyped_storage().data_ptr() not in storages
+    w0 = inputs["single_transformer_blocks.0.proj_out.weight"]
+    assert torch.equal(out["single_transformer_blocks.0.proj_out_attn.weight"], w0[:, :inner_dim])
+    assert torch.equal(out["single_transformer_blocks.0.proj_out_mlp.weight"], w0[:, inner_dim:])

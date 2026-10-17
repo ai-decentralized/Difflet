@@ -37,6 +37,10 @@ class FluxCudaOrchestrator(CudaOneProcessOrchestrator):
         for name in ("teacache_cadence", "teacache_speedup", "teacache_online_delta"):
             if getattr(args, name, None) is not None:
                 self._refuse(f"--{name.replace('_', '-')} (TeaCache for Flux)")
+        # ``main._validate_teacache`` lets a lone calibration file through and nothing
+        # forwards it for Flux, so it would be dropped silently: refuse it by name.
+        if getattr(args, "teacache_calibration", None):
+            self._refuse("--teacache-calibration (TeaCache for Flux)")
         if getattr(args, "taef1", False) or getattr(args, "taef1_path", None):
             self._refuse("--taef1 / --taef1-path (tiny VAE decoder)")
         if getattr(args, "host_vae", False):

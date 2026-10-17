@@ -14,7 +14,10 @@ from pathlib import Path
 import torch
 
 from difflet.models.flux.dit_config import FluxDiTConfig
-from difflet.models.flux.modeling_flux import convert_flux_hf_state_dict
+from difflet.models.flux.modeling_flux import (
+    clone_state_dict_in_place,
+    convert_flux_hf_state_dict,
+)
 
 REPO = Path(__file__).resolve().parents[4]
 
@@ -95,6 +98,70 @@ def test_convert_flux_hf_state_dict_splits_proj_out_at_inner_dim():
         "single_transformer_blocks.0.proj_out.bias",
         "x_embedder.weight",
     }
+
+
+def _shares_storage(a: torch.Tensor, b: torch.Tensor) -> bool:
+    return a.untyped_storage().data_ptr() == b.untyped_storage().data_ptr()
+
+
+def test_convert_flux_hf_state_dict_clone_false_aliases_untouched_and_copies_splits():
+    inner = 16
+    # One row: the column slices are already contiguous, so ``.contiguous()`` alone would
+    # hand back views of the fused weight; the split must still be a real copy.
+    for rows in (inner, 1):
+        weight = torch.randn(rows, inner + 4 * inner)
+        bias = torch.randn(rows)
+        other = torch.randn(3, 3)
+        sd = {
+            "single_transformer_blocks.0.proj_out.weight": weight,
+            "single_transformer_blocks.0.proj_out.bias": bias,
+            "x_embedder.weight": other,
+        }
+
+        out = convert_flux_hf_state_dict(sd, num_single_layers=1, inner_dim=inner, clone=False)
+
+        # Untouched tensors are returned as they are: no host copy of the checkpoint.
+        assert out["x_embedder.weight"] is other
+        assert out["single_transformer_blocks.0.proj_out_attn.bias"] is bias
+        attn_w = out["single_transformer_blocks.0.proj_out_attn.weight"]
+        mlp_w = out["single_transformer_blocks.0.proj_out_mlp.weight"]
+        assert torch.equal(attn_w, weight[:, :inner]) and torch.equal(mlp_w, weight[:, inner:])
+        # The splits are contiguous copies, not views of the fused weight.
+        for split in (attn_w, mlp_w):
+            assert split.is_contiguous() and not _shares_storage(split, weight)
+        assert "single_transformer_blocks.0.proj_out.weight" not in out
+        assert "single_transformer_blocks.0.proj_out.bias" not in out
+        assert list(out) == [
+            "x_embedder.weight",
+            "single_transformer_blocks.0.proj_out_attn.weight",
+            "single_transformer_blocks.0.proj_out_attn.bias",
+            "single_transformer_blocks.0.proj_out_mlp.weight",
+        ]
+        # The caller's dict is left as it was.
+        assert list(sd) == [
+            "single_transformer_blocks.0.proj_out.weight",
+            "single_transformer_blocks.0.proj_out.bias",
+            "x_embedder.weight",
+        ]
+        assert sd["single_transformer_blocks.0.proj_out.weight"] is weight
+
+
+def test_clone_state_dict_in_place_keeps_keys_and_order_and_breaks_aliases():
+    base = torch.randn(4, 6)
+    sd = {
+        "b": base[:, :2],  # a non-contiguous view
+        "a": base,
+        "c": base,  # the same tensor under two keys
+    }
+    expected = {k: v.clone() for k, v in sd.items()}
+
+    out = clone_state_dict_in_place(sd)
+
+    assert out is sd and list(out) == ["b", "a", "c"]
+    for key, value in out.items():
+        assert value.is_contiguous() and torch.equal(value, expected[key])
+        assert not _shares_storage(value, base)
+    assert not _shares_storage(out["a"], out["c"])
 
 
 def _imported_modules(path: Path) -> list[str]:
