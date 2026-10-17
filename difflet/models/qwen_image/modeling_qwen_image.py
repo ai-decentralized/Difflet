@@ -102,7 +102,7 @@ class _StaticQwenImageRealRope(nn.Module):
         self._global_rank_ref = (global_rank,) if global_rank is not None else ()
         self.cp_group = cp_group
 
-    def forward(self, img_shapes=None, *args, **kwargs):
+    def forward(self, img_shapes=None, *args, max_txt_seq_len: int | None = None, **kwargs):
         del args, kwargs
         if img_shapes is not None:
             _batch, ph, pw = img_shapes[0][0]
@@ -119,7 +119,12 @@ class _StaticQwenImageRealRope(nn.Module):
             img_sin = scatter_to_process_group_spmd(
                 img_sin, partition_dim=0, rank=cp_rank, process_group=self.cp_group
             )
-        return (img_cos, img_sin), (self.txt_cos, self.txt_sin)
+        txt_cos, txt_sin = self.txt_cos, self.txt_sin
+        if max_txt_seq_len is not None:
+            # diffusers passes the current text length; a trimmed prompt is shorter
+            # than the precomputed table. Trainium/TPU pass the full length: no-op there.
+            txt_cos, txt_sin = txt_cos[:max_txt_seq_len], txt_sin[:max_txt_seq_len]
+        return (img_cos, img_sin), (txt_cos, txt_sin)
 
 
 class _ZeroQwenImageAttention(nn.Module):
@@ -440,10 +445,34 @@ class _QwenImageTrainiumAttnProcessor:
         return img_attn_output, txt_attn_output
 
 
+def _trim_text_padding(
+    encoder_hidden_states: torch.Tensor, mask: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor | None]:
+    """Slice the text stream to the last valid token across the batch.
+
+    Exact for the image output: a masked key contributes nothing to any query, text
+    positions past the last valid one are keys to nobody and their own outputs are
+    discarded, so dropping those columns changes the image tokens only through
+    reduction order. Rows shorter than the longest keep their mask; when every row is
+    full after the slice the mask is dropped (no mask → flash SDPA). An all-False mask
+    (no valid token anywhere) is left as it is, as diffusers does.
+    """
+    mask = mask.to(torch.bool)
+    if not bool(mask.any()):
+        return encoder_hidden_states, mask
+    positions = torch.arange(mask.shape[1], device=mask.device)
+    length = int((positions * mask).amax().item()) + 1  # one host sync per forward
+    encoder_hidden_states = encoder_hidden_states[:, :length]
+    mask = mask[:, :length]
+    if bool(mask.all()):
+        return encoder_hidden_states, None
+    return encoder_hidden_states, mask
+
+
 class _QwenImageTransformerTraceModule(nn.Module):
     """Fix non-tensor Qwen-Image pipeline args at trace time."""
 
-    def __init__(self, config, *, apply_text_mask: bool = False):
+    def __init__(self, config, *, apply_text_mask: bool = False, trim_text_padding: bool = False):
         super().__init__()
         from diffusers.models.transformers.transformer_qwenimage import (
             QwenImageTransformer2DModel,
@@ -454,6 +483,13 @@ class _QwenImageTransformerTraceModule(nn.Module):
         # Trainium/TPU behaviour (mask dropped; see forward). The CUDA backend sets True so
         # padded prompts match upstream diffusers.
         self.apply_text_mask = bool(apply_text_mask)
+        # Whether the padding is sliced off before the DiT instead of masked:
+        # the same output as masking (see _trim_text_padding), but the joint sequence shrinks
+        # to the real prompt and, when no row is ragged, the mask disappears so SDPA can take
+        # the flash kernel. Eager backends only; needs the mask to know what is padding.
+        if trim_text_padding and not apply_text_mask:
+            raise ValueError("trim_text_padding needs apply_text_mask")
+        self.trim_text_padding = bool(trim_text_padding)
         self.guidance_embeds = bool(getattr(config, "guidance_embeds", False))
         self.context_parallel_enabled = bool(getattr(config, "context_parallel_enabled", False))
         self.cp_mode = str(getattr(config, "cp_mode", "gather_kv"))
@@ -560,6 +596,10 @@ class _QwenImageTransformerTraceModule(nn.Module):
                     "text mask with context parallel is not supported on the CUDA backend yet"
                 )
             mask_arg = encoder_hidden_states_mask
+            if self.trim_text_padding and mask_arg is not None:
+                encoder_hidden_states, mask_arg = _trim_text_padding(
+                    encoder_hidden_states, mask_arg
+                )
         else:
             mask_arg = None
         del encoder_hidden_states_mask
@@ -649,4 +689,5 @@ __all__ = [
     "_replace_qwen_linears_for_tp",
     "_row_parallel_like",
     "_safe_tensor_parallel_size",
+    "_trim_text_padding",
 ]

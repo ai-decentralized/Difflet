@@ -42,9 +42,12 @@ class CudaQwenImageTransformerApplication(CudaApplicationBase):
 
         self._init_runtime()
         # CUDA runs eagerly, so the prompt padding mask can reach the attention
-        # (Trainium/TPU keep dropping it: the mask path does not trace under XLA).
+        # (Trainium/TPU keep dropping it: the mask path does not trace under XLA), and
+        # the padding is sliced off before the DiT: same output, flash SDPA back.
         with init_empty_weights(include_buffers=False):
-            module = _QwenImageTransformerTraceModule(self.dit_config, apply_text_mask=True)
+            module = _QwenImageTransformerTraceModule(
+                self.dit_config, apply_text_mask=True, trim_text_padding=True
+            )
         return module
 
     def _prepare_module(self) -> torch.nn.Module:

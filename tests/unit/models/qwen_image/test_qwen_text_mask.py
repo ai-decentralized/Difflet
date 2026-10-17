@@ -137,3 +137,79 @@ def test_cuda_transformer_application_applies_the_mask(config, tmp_path):
 
     app = CudaQwenImageTransformerApplication(model_path=str(tmp_path), config=config, device="cpu")
     assert app.build_module().apply_text_mask is True
+
+
+# --- F4 task 2: trim the padded prompt instead of masking it (CUDA only) ---
+
+
+def test_trimmed_padding_matches_the_masked_output(config):
+    masked = _QwenImageTransformerTraceModule(config, apply_text_mask=True).eval()
+    trimmed = _QwenImageTransformerTraceModule(
+        config, apply_text_mask=True, trim_text_padding=True
+    ).eval()
+    trimmed.load_state_dict(masked.state_dict())
+    hidden, t, text, mask = _inputs(config, 1, [3])
+    torch.testing.assert_close(
+        _difflet(trimmed, hidden, t, text, mask),
+        _difflet(masked, hidden, t, text, mask),
+        rtol=1e-4,
+        atol=1e-4,
+    )
+
+
+def test_trimmed_ragged_batch_keeps_the_mask_and_matches_diffusers(config):
+    module = _QwenImageTransformerTraceModule(
+        config, apply_text_mask=True, trim_text_padding=True
+    ).eval()
+    hidden, t, text, mask = _inputs(config, 2, [2, 5])
+    torch.testing.assert_close(
+        _difflet(module, hidden, t, text, mask),
+        _diffusers(_oracle(module), config, hidden, t, text, mask),
+        rtol=1e-4,
+        atol=1e-4,
+    )
+
+
+def test_all_false_mask_is_not_trimmed_and_stays_finite(config):
+    module = _QwenImageTransformerTraceModule(
+        config, apply_text_mask=True, trim_text_padding=True
+    ).eval()
+    hidden, t, text, mask = _inputs(config, 1, [0])
+    assert torch.isfinite(_difflet(module, hidden, t, text, mask)).all()
+
+
+def test_full_length_prompt_drops_the_mask(config, monkeypatch):
+    module = _QwenImageTransformerTraceModule(
+        config, apply_text_mask=True, trim_text_padding=True
+    ).eval()
+    seen = {}
+    real = module.transformer.forward
+
+    def spy(*a, **k):
+        seen["mask"] = k.get("encoder_hidden_states_mask")
+        return real(*a, **k)
+
+    monkeypatch.setattr(module.transformer, "forward", spy)
+    hidden, t, text, mask = _inputs(config, 1, [config.text_seq_len])
+    _difflet(module, hidden, t, text, mask)
+    assert seen["mask"] is None
+
+
+def test_trim_needs_the_mask_and_is_off_by_default(config):
+    assert _QwenImageTransformerTraceModule(config).trim_text_padding is False
+    with pytest.raises(ValueError, match="trim_text_padding needs apply_text_mask"):
+        _QwenImageTransformerTraceModule(config, trim_text_padding=True)
+
+
+def test_static_rope_slices_the_text_table(config):
+    module = _QwenImageTransformerTraceModule(config, apply_text_mask=True)
+    shapes = [[(1, config.packed_height, config.packed_width)]]
+    (_, _), (cos, sin) = module.transformer.pos_embed(shapes, max_txt_seq_len=3)
+    assert cos.shape[0] == 3 and sin.shape[0] == 3
+
+
+def test_cuda_transformer_application_trims(config, tmp_path):
+    from difflet.backends.cuda.qwen_image.transformer import CudaQwenImageTransformerApplication
+
+    app = CudaQwenImageTransformerApplication(model_path=str(tmp_path), config=config)
+    assert app.build_module().trim_text_padding is True
