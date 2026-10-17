@@ -25,7 +25,14 @@ FORBIDDEN_PREFIXES = (
     "difflet.backends.tpu",
 )
 
-SCANNED = [Path("difflet/backends/cuda"), Path("difflet/backends/_torch_megatron")]
+# Directories are scanned recursively; a file entry is scanned on its own (the
+# backend-neutral model files the CUDA backend runs, F5 Task 2).
+SCANNED = [
+    Path("difflet/backends/cuda"),
+    Path("difflet/backends/_torch_megatron"),
+    Path("difflet/models/flux/modeling_flux.py"),
+    Path("difflet/models/flux/dit_config.py"),
+]
 
 OPS_MODULES = ("attention", "collectives", "embeddings", "linear", "mx", "norm", "platform")
 
@@ -36,7 +43,8 @@ def _is_forbidden(module: str) -> bool:
 
 def scan_forbidden_imports(root: Path) -> list[tuple[Path, int, str]]:
     violations: list[tuple[Path, int, str]] = []
-    for path in sorted(root.rglob("*.py")):
+    paths = [root] if root.is_file() else sorted(root.rglob("*.py"))
+    for path in paths:
         tree = ast.parse(path.read_text(), filename=str(path))
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
@@ -56,6 +64,8 @@ def scan_forbidden_imports(root: Path) -> list[tuple[Path, int, str]]:
 
 def test_cuda_backend_has_no_forbidden_imports():
     repo = Path(__file__).resolve().parents[3]
+    missing = [root for root in SCANNED if not (repo / root).exists()]
+    assert missing == [], f"SCANNED entries that do not exist: {missing}"
     violations = [v for root in SCANNED for v in scan_forbidden_imports(repo / root)]
     assert violations == [], violations
 
@@ -65,6 +75,12 @@ def test_scan_detects_a_forbidden_import(tmp_path):
     assert scan_forbidden_imports(tmp_path) == [
         (tmp_path / "bad.py", 1, "difflet.backends.trainium.core")
     ]
+
+
+def test_scan_accepts_a_single_file(tmp_path):
+    bad = tmp_path / "bad.py"
+    bad.write_text("import torch\nimport torch_xla.core.xla_model as xm\n")
+    assert scan_forbidden_imports(bad) == [(bad, 2, "torch_xla.core.xla_model")]
 
 
 # Modules Phase 2 has not landed yet: their import is expected to fail (strict), so

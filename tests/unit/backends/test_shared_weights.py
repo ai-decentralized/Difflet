@@ -55,6 +55,7 @@ def _cache_root(tmp_path, monkeypatch):
 
 # ---------------------------------------------------------------- rank marker
 
+
 @pytest.mark.parametrize(
     "flag",
     ["context_parallel_enabled", "cfg_parallel_enabled", "sp_enabled"],
@@ -68,6 +69,7 @@ def test_rank_marker_absent_by_default():
 
 
 # ---------------------------------------------------------------- key
+
 
 def test_key_changes_with_source_dtype_and_every_parallel_axis(tmp_path):
     base = shared_weights.store_key(make_app(tmp_path))
@@ -111,6 +113,7 @@ def test_label_records_the_parallel_layout(tmp_path):
 
 # ---------------------------------------------------------------- store_dir
 
+
 def test_store_dir_disabled_by_env(tmp_path, monkeypatch):
     monkeypatch.setenv("DIFFLET_SHARE_WEIGHTS", "0")
     assert shared_weights.store_dir(make_app(tmp_path)) is None
@@ -129,7 +132,14 @@ def test_store_dir_lives_under_compile_cache(tmp_path):
 
 
 def test_store_dir_name_is_readable_and_digest_suffixed(tmp_path):
-    hf = tmp_path / "hub" / "models--acme--Widget-XL" / "snapshots" / "abcdef1234567890" / "transformer"
+    hf = (
+        tmp_path
+        / "hub"
+        / "models--acme--Widget-XL"
+        / "snapshots"
+        / "abcdef1234567890"
+        / "transformer"
+    )
     hf.mkdir(parents=True)
     app = make_app(tmp_path)
     app.model_path = str(hf)
@@ -185,6 +195,7 @@ def test_store_dir_honours_explicit_override(tmp_path, monkeypatch):
 
 # ---------------------------------------------------------------- rank mapping
 
+
 def test_canonical_index_is_periodic_without_rank_marker(tmp_path):
     app = make_app(tmp_path, tp_degree=2, local_ranks_size=4)
     assert [shared_weights.canonical_index(r, app) for r in range(4)] == [0, 1, 0, 1]
@@ -196,6 +207,7 @@ def test_canonical_index_is_identity_with_rank_marker(tmp_path):
 
 
 # ---------------------------------------------------------------- publish/link
+
 
 def test_publish_then_link_shares_one_inode(tmp_path):
     app = make_app(tmp_path, tp_degree=2)
@@ -250,6 +262,7 @@ def test_publish_collapses_duplicate_ranks(tmp_path):
 
 
 # ------------------------------------------------- the --force corruption hazard
+
 
 def test_prepare_for_write_unlinks_existing_shards(tmp_path):
     weights = tmp_path / "weights"
@@ -307,6 +320,7 @@ def test_link_failure_leaves_no_partial_directory(tmp_path, monkeypatch):
 
 # ------------------------------------------------- probe apps share the entry
 
+
 def test_probe_and_backbone_apps_share_one_store_entry(tmp_path):
     """Full-layout probes share shards; prefix-only probes use a separate store."""
     from difflet.backends.trainium.flux.teacache_probe_fused import (
@@ -318,7 +332,7 @@ def test_probe_and_backbone_apps_share_one_store_entry(tmp_path):
     from difflet.backends.trainium.qwen_image.teacache_probe_fused import (
         NeuronQwenImageTeacacheProbeFusedApplication,
     )
-    from difflet.models.flux.modeling_flux import NeuronFluxBackboneApplication
+    from difflet.models.flux.trainium_backbone import NeuronFluxBackboneApplication
 
     def as_app(cls, **extra):
         # store_key reads only model_path / config / neuron_config; build the

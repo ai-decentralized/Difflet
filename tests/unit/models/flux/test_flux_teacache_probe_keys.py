@@ -30,9 +30,10 @@ import torch  # noqa: E402
 import difflet.backends.trainium.core.config as _config_mod  # noqa: E402
 import difflet.layers.normalization as _norm_mod  # noqa: E402
 
-# Rebind the flux modeling module onto the cpu backend, then the probe module
-# so its subclass derives from the *reloaded* NeuronFluxTransformer2DModel.
+# Rebind the flux modeling module onto the cpu backend, then the Trainium wrapper
+# and the probe module so they build the *reloaded* NeuronFluxTransformer2DModel.
 mf = importlib.reload(importlib.import_module("difflet.models.flux.modeling_flux"))
+tb = importlib.reload(importlib.import_module("difflet.models.flux.trainium_backbone"))
 probe_mod = importlib.reload(
     importlib.import_module("difflet.backends.trainium.flux.teacache_probe_fused")
 )
@@ -97,7 +98,7 @@ def _config(guidance_embeds=True, num_single_layers=1, **overrides):
         out_channels=4,
     )
     kwargs.update(overrides)
-    return mf.FluxBackboneInferenceConfig(**kwargs)
+    return tb.FluxBackboneInferenceConfig(**kwargs)
 
 
 def _seq_len(config):
@@ -126,6 +127,7 @@ def _build(config):
 
 # ------------------------------------------------------------- construction
 
+
 def test_probe_model_is_the_backbone_transformer():
     # Subclass, not wrapper: that is the whole mechanism. A wrapper would move
     # every parameter one attribute level deeper and change its traced name.
@@ -138,10 +140,11 @@ def test_probe_model_is_the_backbone_transformer():
 def test_probe_declares_exactly_prev_mod_as_state():
     assert STATE == frozenset({"prev_mod"})
     assert NeuronApplicationBase.state_tensor_names == frozenset()
-    assert mf.NeuronFluxBackboneApplication.state_tensor_names == frozenset()
+    assert tb.NeuronFluxBackboneApplication.state_tensor_names == frozenset()
 
 
 # --------------------------------------------------- traced parameter names
+
 
 @pytest.mark.parametrize("guidance_embeds", [True, False])
 def test_probe_parameter_names_equal_backbone_names_plus_declared_state(guidance_embeds):
@@ -167,9 +170,10 @@ def test_probe_prev_mod_shape_matches_mod_input():
 
 # ------------------------------------------------------ checkpoint converter
 
+
 def test_probe_converter_is_the_backbone_converter():
     probe_fn = probe_mod.NeuronFluxTeacacheProbeFusedApplication.convert_hf_to_neuron_state_dict
-    backbone_fn = mf.NeuronFluxBackboneApplication.convert_hf_to_neuron_state_dict
+    backbone_fn = tb.NeuronFluxBackboneApplication.convert_hf_to_neuron_state_dict
     assert probe_fn is backbone_fn
 
 
@@ -184,7 +188,7 @@ def test_probe_converted_keys_equal_backbone_converted_keys():
         )
     )
     backbone_keys = set(
-        mf.NeuronFluxBackboneApplication.convert_hf_to_neuron_state_dict(dict(sd), config)
+        tb.NeuronFluxBackboneApplication.convert_hf_to_neuron_state_dict(dict(sd), config)
     )
     assert probe_keys == backbone_keys
     assert "global_rank.rank" in probe_keys  # rank marker rides along unchanged
@@ -194,13 +198,14 @@ def test_probe_converted_keys_equal_backbone_converted_keys():
 
 # ----------------------------------------------- the loader-facing invariant
 
+
 def test_backbone_checkpoint_serves_every_probe_weight():
     """Every non-state tensor in the probe's state dict is present, under the
     same key, in the checkpoint the backbone shards. This is the host-side
     form of the on-device hard error ("Missing weight tensor with key ...")."""
     config = _config()
     backbone, probe = _build(config)
-    converted = mf.NeuronFluxBackboneApplication.convert_hf_to_neuron_state_dict(
+    converted = tb.NeuronFluxBackboneApplication.convert_hf_to_neuron_state_dict(
         _hf_state_dict(backbone, config), config
     )
 
@@ -238,6 +243,7 @@ def test_aliased_tensors_are_exactly_the_declared_state():
 
 
 # ------------------------------------------------------------ forward parity
+
 
 @pytest.mark.parametrize("guidance_embeds", [True, False])
 def test_probe_forward_matches_backbone_prefix_and_updates_from_prev_mod(
