@@ -40,7 +40,7 @@ from difflet.cli.orchestrators.torchrun import (
     reject_unsupported_torchrun_options,
     root_compile_cache_at_cache_dir,
     torchrun_backend as _torchrun_backend,
-    torchrun_unsupported_options as _torchrun_unsupported_options,
+    torchrun_unsupported_options,
 )
 
 # Model id comes from the CLI (--model-id); both Wan 2.2 A14B (MoE, dual
@@ -158,6 +158,19 @@ def _write_frames(frames, output: str) -> None:
     pt_path = out_path.with_suffix(".pt")
     torch.save(frames.cpu(), pt_path)
     print(f"[wan] video tensor saved to {pt_path}")
+
+
+def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
+    """The options the torchrun (neuron) ranks reject in phase 1, as the command line names
+    them: every torchrun backend's (TeaCache), plus a --shapes with more than one shape. The
+    application holds one static shape per process (``_resolve_shape``), so a bucketed set
+    used to fail only after torchrun had started every rank. Torch-free: the shapes are
+    counted, not parsed, so a malformed --shapes fails where it always did."""
+    found = torchrun_unsupported_options(args)
+    shapes = getattr(args, "shapes", None)
+    if shapes and len([token for token in str(shapes).split(",") if token.strip()]) > 1:
+        found.append("--shapes with more than one shape")
+    return found
 
 
 def _require_request_shape_in_set(args: argparse.Namespace):

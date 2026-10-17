@@ -14,6 +14,7 @@ torch = pytest.importorskip("torch")
 
 import inspect  # noqa: E402
 import os  # noqa: E402
+import re  # noqa: E402
 import time  # noqa: E402
 from pathlib import Path  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
@@ -47,6 +48,7 @@ from tests.unit.backends._neuron_workers import (  # noqa: E402
     w1_fake_hidden,
     w1_host_text_encoder_worker,
     w1_wan_lifecycle_worker,
+    w1_wan_initial_noise_worker,
     w1_wan_one_graph_worker,
     w1_wan_truncated_worker,
     w1_wan22_pipeline_worker,
@@ -125,6 +127,63 @@ def test_config_validates_tp_and_shape(tiny):
     default.validate()
     geometry = (default.latent_frames, default.latent_height, default.latent_width)
     assert geometry == (3, 60, 104) and default.image_seq_len == 4680
+
+
+@pytest.mark.parametrize("overrides, match", [
+    (dict(cp_mode="striped"), "cp_mode must be one of"),
+    (dict(context_parallel_enabled=True, sp_enabled=True), "mutually exclusive"),
+    (dict(context_parallel_enabled=True, cfg_parallel_enabled=True), "mutually exclusive"),
+    (dict(cp_degree=2), "needs context_parallel_enabled=True"),
+    # 12 image tokens: CP and SP split them without padding.
+    (dict(context_parallel_enabled=True, cp_degree=5), r"image_seq_len=12 .* cp_degree=5"),
+    (dict(sp_enabled=True, tp_degree=1, num_frames=1), None),
+    # 4 heads: Ulysses shards heads / tp over cp.
+    (dict(context_parallel_enabled=True, cp_degree=4, tp_degree=2, cp_mode="ulysses"),
+     r"this rank's 2 heads \(heads=4 / tp=2\) over cp_degree=4"),
+    (dict(context_parallel_enabled=True, cp_degree=4, tp_degree=2, cp_mode="ring"), None),
+    (dict(context_parallel_enabled=True, cp_degree=2, tp_degree=2, cp_mode="ulysses"), None),
+    (dict(context_parallel_enabled=True, cp_mode="ulysses"), None),  # cp unknown: the mesh's
+])
+def test_config_validates_the_parallel_modes(tiny, overrides, match):
+    def build():
+        return NeuronWanConfig.from_pretrained(
+            tiny.transformer, text_seq_len=TINY_TEXT_SEQ_LEN, **{**TINY_SHAPE, **overrides})
+
+    if match is None:
+        build()
+        return
+    with pytest.raises(ValueError, match=match):
+        build()
+
+
+def test_sp_needs_the_sequence_to_split_over_tp(tiny):
+    # 32x48x5 has 12 patch tokens (tp=4 splits them, the 4-rank SP test runs it); 32x48x1 has
+    # 6, which do not split over tp=4.
+    with pytest.raises(ValueError, match=r"splits image_seq_len=6 over tp=4"):
+        NeuronWanConfig.from_pretrained(tiny.transformer, sp_enabled=True, tp_degree=4,
+                                        height=32, width=48, num_frames=1)
+
+
+def test_transformer_application_matches_its_config_to_the_mesh(tiny):
+    def make(parallel, **config):
+        return NeuronWanTransformerApplication(
+            model_path=tiny.transformer,
+            config=NeuronWanConfig.from_pretrained(tiny.transformer, **{**TINY_SHAPE, **config}),
+            parallel=parallel, dtype=torch.float32, device="cpu")
+
+    cp2 = DiffletParallelConfig(tp_degree=2, cp_degree=2, cp_mode="ulysses")
+    with pytest.raises(ValueError, match="context_parallel_enabled=False but .* cp_degree=2"):
+        make(cp2, tp_degree=2)
+    with pytest.raises(ValueError, match="cp_mode='ring' but .* cp_mode='ulysses'"):
+        make(cp2, tp_degree=2, context_parallel_enabled=True, cp_mode="ring")
+    with pytest.raises(ValueError, match="cp_degree=4 but the parallel config has cp_degree=2"):
+        make(DiffletParallelConfig(tp_degree=2, cp_degree=2), tp_degree=2,
+             context_parallel_enabled=True, cp_degree=4)
+    app = make(cp2, tp_degree=2, context_parallel_enabled=True, cp_mode="ulysses")
+    assert app.config.cp_degree == 2  # filled from the parallel config, on a copy
+    # The 4 heads at tp1 x cp4 Ulysses: 4 % 4 == 0 fits; tp2 x cp4 would not (8 ranks).
+    make(DiffletParallelConfig(tp_degree=1, cp_degree=4, cp_mode="ulysses"),
+         context_parallel_enabled=True, cp_mode="ulysses")
 
 
 def test_num_layers_override_records_the_checkpoint_depth(tiny):
@@ -338,16 +397,22 @@ def test_adapter_passes_contiguous_inputs():
             received.append(args)
             return torch.ones(1, 4, 2, 4, 6)
 
-    config = SimpleNamespace(cfg_parallel_enabled=False)
-    adapter = na._OnDeviceTransformer(Recorder(), config, torch.bfloat16, "cpu")
-    assert adapter.dtype is torch.bfloat16 and adapter.config is config
+    import dataclasses
+
+    from tests.unit.backends._neuron_wan_toy import tiny_wan_config
+
     seconds = []
-    adapter.forward_hook = seconds.append
     sent = []
     # Strided host views as the orchestrator can hand them over: transposed latents and text,
     # and _batch_timestep's expanded 0-dim timestep (stride 0). The second call is already in
-    # the adapter dtype, so only the adapter's .contiguous() can make it dense.
+    # the adapter dtype, so only the adapter's .contiguous() can make it dense. Batch 2 is the
+    # CFG-parallel [uncond, cond] call.
+    recorder = Recorder()
     for dtype, batch in ((torch.float32, 1), (torch.bfloat16, 2)):
+        config = dataclasses.replace(tiny_wan_config(), cfg_parallel_enabled=batch == 2)
+        adapter = na._OnDeviceTransformer(recorder, config, torch.bfloat16, "cpu")
+        assert adapter.dtype is torch.bfloat16 and adapter.config is config
+        adapter.forward_hook = seconds.append
         latents = torch.randn(batch, 4, 2, 6, 4).to(dtype).transpose(-1, -2)
         timestep = torch.tensor(999.0, dtype=dtype).expand(batch)
         text = torch.randn(batch, 24, 8).to(dtype).transpose(1, 2)
@@ -363,6 +428,40 @@ def test_adapter_passes_contiguous_inputs():
             assert torch.equal(got, original.to(torch.bfloat16))
     assert received[1][1].stride() == (1,)  # the batch-2 timestep was materialised
     assert len(seconds) == 2 and all(s >= 0.0 for s in seconds)
+
+
+@pytest.mark.parametrize("name, shape", [
+    ("hidden_states", (1, 4, 2, 4, 8)),        # another width: a new block graph per block
+    ("hidden_states", (2, 4, 2, 4, 6)),        # both CFG branches without CFG parallelism
+    ("timestep", (2,)),
+    ("encoder_hidden_states", (1, 6, 24)),     # text not padded to text_seq_len
+])
+def test_adapter_refuses_any_other_shape_than_the_static_one(name, shape):
+    """A different shape must raise, not compile new block graphs (or, eager, misuse the static
+    rotary tables) on every rank: the module is never called."""
+    from tests.unit.backends._neuron_wan_toy import tiny_wan_config
+
+    def module(*args):
+        raise AssertionError("the DiT must not run at another shape")
+
+    config = tiny_wan_config()
+    adapter = na._OnDeviceTransformer(module, config, torch.float32, "cpu")
+    inputs = {"hidden_states": torch.zeros(TINY_LATENT_SHAPE), "timestep": torch.zeros(1),
+              "encoder_hidden_states": torch.zeros(TINY_TEXT_SHAPE)}
+    assert {k: tuple(v.shape) for k, v in inputs.items()} == na.dit_input_shapes(config)
+    inputs[name] = torch.zeros(shape)
+    with pytest.raises(ValueError, match=rf"'{name}' has shape {re.escape(str(shape))}, "
+                                         r"expected .*the one static shape, 32x48x5"):
+        adapter(*inputs.values())
+    assert adapter.calls == 0
+    # Under CFG parallelism the one call is the [uncond, cond] batch of 2.
+    import dataclasses
+
+    cfg = dataclasses.replace(config, cfg_parallel_enabled=True)
+    assert na.dit_input_shapes(cfg)["hidden_states"][0] == 2
+    with pytest.raises(ValueError, match="CFG-parallel batch of 2"):
+        na._OnDeviceTransformer(module, cfg, torch.float32, "cpu")(
+            torch.zeros(TINY_LATENT_SHAPE), torch.zeros(1), torch.zeros(TINY_TEXT_SHAPE))
 
 
 def test_host_text_encoder_broadcasts_rank0_result():
@@ -404,13 +503,28 @@ def test_application_call_dispatch(tiny):
     with pytest.raises(RuntimeError, match="not loaded"):
         app(torch.zeros(1), torch.zeros(1), torch.zeros(1))
     app.transformer_adapter = lambda *args, **kwargs: ("adapter", len(args), kwargs)
-    app.pipeline = lambda *args, **kwargs: ("pipeline", len(args), kwargs)
+
+    class Pipeline:
+        """The orchestrator's call, and the draw ``__call__`` makes for it without latents."""
+
+        def prepare_latents(self, **kwargs):
+            return ("noise", kwargs["generator"])
+
+        def __call__(self, *args, **kwargs):
+            return ("pipeline", len(args), kwargs)
+
+    app.pipeline = Pipeline()
     x = torch.zeros(1)
     assert app(x, x, x) == ("adapter", 3, {})
     assert app(prompt="a cat", num_inference_steps=2) == (
-        "pipeline", 0, {"prompt": "a cat", "num_inference_steps": 2}
+        "pipeline", 0, {"prompt": "a cat", "num_inference_steps": 2, "latents": ("noise", None)}
     )
-    assert app("a cat", guidance_scale=5.0) == ("pipeline", 1, {"guidance_scale": 5.0})
+    assert app("a cat", guidance_scale=5.0, latents=x) == (
+        "pipeline", 1, {"guidance_scale": 5.0, "latents": x})
+    with pytest.raises(ValueError, match="seed or generator"):
+        app(prompt="a cat", seed=1, generator=torch.Generator())
+    with pytest.raises(TypeError, match="seed applies to the orchestrator call"):
+        app(x, x, x, seed=1)
     # The DiffletPipeline contract (difflet_pipeline.py inspects these parameter names).
     assert list(inspect.signature(app.load).parameters) == [
         "compiled_model_path", "start_rank_id", "local_ranks_size", "skip_warmup"
@@ -430,6 +544,21 @@ def test_application_call_dispatch(tiny):
             _composed(tiny, **kwargs)
     with pytest.raises(TypeError, match="encoder_thread"):
         _composed(tiny, encoder_thread=4)
+
+
+def test_every_rank_starts_from_rank0s_initial_noise(tiny):
+    """Each rank's global RNG and generator differ; the initial latents are rank 0's draw on
+    every rank, exactly what the orchestrator itself would have drawn there."""
+    results = run_ranks(w1_wan_initial_noise_worker, tiny.dir, world_size=4, env=OFFLINE)
+    shape = TINY_LATENT_SHAPE
+    expected = {
+        "global_rng": torch.randn(shape, generator=torch.Generator().manual_seed(100)),
+        "seed": torch.randn(shape, generator=torch.Generator().manual_seed(7)),
+        "generator": torch.randn(shape, generator=torch.Generator().manual_seed(7)),
+    }
+    for result in results:
+        for name, want in expected.items():
+            assert torch.equal(torch.tensor(result[name]), want), name
 
 
 def test_prompt_goes_through_the_tokenizer_and_the_host_encoder(tiny):
