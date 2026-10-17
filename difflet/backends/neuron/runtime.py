@@ -5,8 +5,11 @@ Execution model: one process per NeuronCore (torchrun MPMD), eager or
 bound to one core through ``NEURON_RT_VISIBLE_CORES`` before the Neuron runtime
 starts, and ranks communicate through the ``neuron`` process group.
 
-Phase 1 supports tensor parallelism only; context, CFG, sequence and data
-parallelism raise until their collectives are validated on this backend.
+Within one launch the backend runs tensor parallelism, with or without sequence
+parallelism, CFG parallelism, and context parallelism in every cp_mode (gather_kv, ulysses,
+ring); each model's application rejects what its own modeling does not run (Qwen-Image: SP and
+CFG). Data parallelism is replicas, separate torchrun launches of the CLI's request router, so
+``dp_degree > 1`` within one launch raises (``check_parallel_supported``).
 
 ``prepare_runtime`` first points torch-neuronx's persistent NEFF cache at the Difflet
 compile cache (``compile.configure_compile_cache``): the runtime reads it once, when it

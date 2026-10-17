@@ -6,9 +6,15 @@ Inter-stage tensor: {work_dir}/latents.pt
 
 With DIFFLET_BACKEND naming a non-AoT torchrun backend (neuron), the transformer stage runs as
 torchrun ranks that build the registry's application through DiffletPipeline
-(_stage_transformer_neuron), the VAE decodes on the host (--host-vae is forced), the stage
-cache key names the backend and exec mode, and --cache-dir becomes DIFFLET_COMPILE_CACHE (the
-NEFF/HLO cache root) unless that is exported. Unset, trainium and tpu keep their paths unchanged.
+(_stage_transformer_neuron). Those ranks run TP, SP, CFG and CP at one static shape, and the
+DiT sits on every rank's core. umT5 also runs on the device (fp32, TP-sharded) unless
+--host-text-encoder is given. When the TP group is too narrow for umT5 to fit beside the DiT
+(_place_text_encoder), the driver sets that flag itself and says so. The VAE decodes in a vae
+stage of its own on one core (_stage_vae_neuron, fp32 eager), or on the host with --host-vae.
+DP replicas (--dp) are separate torchrun launches; each one's rank 0 claims the requests
+(_replica_requests). The stage cache key names the backend and exec mode, and --cache-dir
+becomes DIFFLET_COMPILE_CACHE (the NEFF/HLO cache root) unless that is exported. Unset,
+trainium and tpu keep their paths unchanged.
 """
 from __future__ import annotations
 
@@ -304,7 +310,8 @@ class WanOrchestrator(ModelOrchestrator):
         ``run``). The ranks' own checks stay (defence in depth)."""
         reject_unsupported_torchrun_options(
             _torchrun_unsupported_options(self.args),
-            runs="tensor, sequence, CFG and context parallelism",
+            runs="tensor, sequence, CFG and context parallelism at one static shape, and DP "
+            "replicas",
         )
 
     def _reject_dual_expert_misuse(self) -> None:
@@ -533,8 +540,9 @@ class WanOrchestrator(ModelOrchestrator):
 
         compile_shapes = _require_request_shape_in_set(args)
         h, w, f = args.height or 480, args.width or 832, args.num_frames or 9
-        # The whole parallel request: the backend rejects what it does not run (cp, cfg, sp)
-        # rather than the stage dropping it.
+        # The whole parallel request (tp, cp, cfg, sp; the neuron ranks run all four): the
+        # backend and the application reject what they do not run, rather than the stage
+        # dropping it.
         parallel = DiffletParallelConfig(
             tp_degree=args.tp_degree or 4,
             cp_degree=args.cp_degree or 1,

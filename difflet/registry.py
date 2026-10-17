@@ -281,7 +281,8 @@ def _register_builtin_wan() -> None:
         ),
         # Wan is the second model on the TPU backend, single-expert by default
         # (see difflet/models/wan/tpu_application.py on expert residency), and the first
-        # on the neuron backend (TorchNeuron, torchrun ranks; host umT5 and host VAE).
+        # on the neuron backend (TorchNeuron, torchrun ranks; umT5 and the VAE on the device
+        # or the host).
         backends=("trainium", "tpu", "neuron"),
     )
     class _WanRegistration:

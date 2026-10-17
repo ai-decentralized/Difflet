@@ -81,7 +81,7 @@ _TORCHRUN_APPLICATION_KWARGS = {
     "encoder_threads": 12,
 }
 #: What the neuron Qwen-Image ranks support, for the driver's rejection message.
-_TORCHRUN_RUNS = "tensor and context parallelism at one static shape"
+_TORCHRUN_RUNS = "tensor and context parallelism at one static shape, one request per launch"
 
 
 def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:

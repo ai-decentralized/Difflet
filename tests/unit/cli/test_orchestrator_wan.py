@@ -1054,7 +1054,7 @@ def test_neuron_driver_rejects_unsupported_options_before_any_launch(monkeypatch
     assert out == ""
     assert err.strip() == (
         f"Error: the neuron backend does not support {named} (it runs tensor, sequence, CFG and "
-        "context parallelism, one request per launch, no TeaCache); "
+        "context parallelism at one static shape, and DP replicas, no TeaCache); "
         "nothing was launched.")
     assert args.host_vae is False and "DIFFLET_COMPILE_CACHE" not in os.environ
     assert not (tmp_path / "work").exists()
