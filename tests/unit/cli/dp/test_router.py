@@ -224,3 +224,17 @@ def _alive(pid: int) -> bool:
             return "State:\tZ" not in fh.read()
     except FileNotFoundError:
         return False
+
+
+def test_run_router_rerun_in_the_same_work_dir_starts_a_fresh_queue(tmp_path):
+    # A failed run leaves claim/failed markers behind; a rerun in the same work dir must not
+    # inherit them (it used to: every request looked claimed or failed, nothing ran).
+    args = _args(work_dir=str(tmp_path / "work"))
+    first = run_router(args, _requests(4), replica_cores=4,
+                       worker_argv_prefix=_stub_prefix(tmp_path) + ["--fail-index", "2"])
+    assert first != 0
+    rc = run_router(args, _requests(4), replica_cores=4,
+                    worker_argv_prefix=_stub_prefix(tmp_path))
+    assert rc == 0
+    s = summarize(tmp_path / "work" / "requests")
+    assert s.done == [0, 1, 2, 3] and not s.failed and not s.unfinished

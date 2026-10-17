@@ -99,15 +99,23 @@ def worker_cli_args(args) -> list[str]:
         ("--seed", args.seed),
         ("--cache-dir", args.cache_dir),
         ("--revision", getattr(args, "revision", None)),
+        # The torchrun backends' options: a worker that lost them would, e.g., load the text
+        # encoder on the device beside a narrower TP shard than its HBM allows.
+        ("--exec-mode", getattr(args, "exec_mode", None)),
+        ("--guidance-scale-2", getattr(args, "guidance_scale_2", None)),
     ):
         if value is not None:
             argv += [flag, str(value)]
-    if getattr(args, "cfg_parallel", False):
-        argv.append("--cfg-parallel")
-    if getattr(args, "sp_enabled", False):
-        argv.append("--sp")
-    if getattr(args, "keep_work_dir", False):
-        argv.append("--keep-work-dir")
+    for flag, name in (
+        ("--cfg-parallel", "cfg_parallel"),
+        ("--sp", "sp_enabled"),
+        ("--keep-work-dir", "keep_work_dir"),
+        ("--host-text-encoder", "host_text_encoder"),
+        ("--host-vae", "host_vae"),
+        ("--dual-expert", "dual_expert"),
+    ):
+        if getattr(args, name, False):
+            argv.append(flag)
     return argv
 
 
@@ -139,6 +147,10 @@ def run_router(
         requests = [
             dataclasses.replace(req, assigned_worker=req.index % dp) for req in requests
         ]
+    # A new queue: an earlier run's claim/done/failed markers in a reused work dir would make
+    # every request look claimed or failed, and the workers would exit with nothing done.
+    for stale in requests_dir.glob("req_*"):
+        stale.unlink()
     write_manifest(requests, requests_dir)
     _check_hbm(args)
 
