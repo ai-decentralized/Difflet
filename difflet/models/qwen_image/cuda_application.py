@@ -74,6 +74,22 @@ class CudaQwenImageApplication(torch.nn.Module):
         self.batch_size = int(kwargs.get("batch_size", 1))
         self.load_text_encoder = bool(kwargs.get("load_text_encoder", True))
         self.load_vae = bool(kwargs.get("load_vae", True))
+        # TeaCache on CUDA (F4 task 4): the probe-free fixed cadence runs on the host-side
+        # controller the Qwen orchestrator already has. The calibrated (probe NEFF) and
+        # online-delta modes need the probe path on CUDA: follow-up F4b.
+        for key in (
+            "teacache_speedup",
+            "teacache_calibration",
+            "teacache_calibration_path",
+            "teacache_online_delta_alpha",
+        ):
+            if kwargs.get(key) is not None:
+                raise NotImplementedError(
+                    f"{key} on the CUDA backend is follow-up F4b of the CUDA backend plan; "
+                    "use teacache_cadence (probe-free) or run without TeaCache"
+                )
+        cadence = kwargs.get("teacache_cadence")
+        self.teacache_cadence = int(cadence) if cadence is not None else None
         torch_compile = kwargs.get("torch_compile")
         if torch_compile is None:  # the kwarg wins; the env is the scripts' switch (F4)
             torch_compile = os.environ.get("DIFFLET_CUDA_TORCH_COMPILE", "") == "1"
@@ -165,6 +181,7 @@ class CudaQwenImageApplication(torch.nn.Module):
             width=self.shape["width"],
             text_seq_len=self.text_seq_len,
             scheduler=scheduler,
+            teacache_cadence=self.teacache_cadence,
         )
 
     def encode_prompt(self, prompt: str | list[str]) -> tuple[torch.Tensor, torch.Tensor]:

@@ -41,9 +41,11 @@ def refuse_unsupported(args: argparse.Namespace) -> None:
         _refuse("--cp-degree > 1 (context parallel, second card)", "F2")
     if getattr(args, "cfg_parallel", False):
         _refuse("--cfg-parallel (second card)", "F2")
-    for name in ("teacache_speedup", "teacache_cadence", "teacache_online_delta"):
+    # Probe-free fixed cadence (--teacache-cadence) runs on CUDA since F4; the calibrated
+    # and online-delta modes need the probe path (F4b).
+    for name in ("teacache_speedup", "teacache_online_delta"):
         if getattr(args, name, None) is not None:
-            _refuse(f"--{name.replace('_', '-')} (TeaCache port)", "F4")
+            _refuse(f"--{name.replace('_', '-')} (TeaCache probe path)", "F4b")
     if getattr(args, "guidance_scale", None) is not None:
         # Qwen-Image's transformer has guidance_embeds=False: the application refuses the
         # value as a silent no-op, and the CLI must not hide that by dropping the flag.
@@ -68,9 +70,14 @@ def pipeline_kwargs(args: argparse.Namespace, *, load: bool) -> dict:
         force_compile=bool(getattr(args, "force", False)),
         load=load,
     )
+    application_kwargs: dict = {}
     if getattr(args, "torch_compile", False):
         # Measured option (CUDA plan D4 / F4 task 3): compiled DiT blocks, eager otherwise.
-        kwargs["application_kwargs"] = {"torch_compile": True}
+        application_kwargs["torch_compile"] = True
+    if getattr(args, "teacache_cadence", None) is not None:
+        application_kwargs["teacache_cadence"] = int(args.teacache_cadence)
+    if application_kwargs:
+        kwargs["application_kwargs"] = application_kwargs
     return kwargs
 
 

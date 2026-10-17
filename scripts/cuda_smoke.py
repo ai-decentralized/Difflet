@@ -32,6 +32,7 @@ def main() -> None:
     ap.add_argument("--compile-cache-dir", default=None)
     ap.add_argument("--local-files-only", action="store_true")
     ap.add_argument("--torch-compile", action="store_true", help="F4 task 3: compiled DiT")
+    ap.add_argument("--teacache-cadence", type=int, default=None, help="F4 task 4: skip every Nth")
     args = ap.parse_args()
 
     os.environ.setdefault("DIFFLET_BACKEND", "cuda")
@@ -48,7 +49,13 @@ def main() -> None:
         width=args.width,
         compile_cache_dir=args.compile_cache_dir,
         local_files_only=args.local_files_only,
-        application_kwargs={"torch_compile": True} if args.torch_compile else None,
+        application_kwargs=(
+            {
+                **({"torch_compile": True} if args.torch_compile else {}),
+                **({"teacache_cadence": args.teacache_cadence} if args.teacache_cadence else {}),
+            }
+            or None
+        ),
     )
     torch.cuda.synchronize()
     timings["load_s"] = round(time.perf_counter() - t0, 1)
