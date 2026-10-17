@@ -22,8 +22,10 @@ def create_qwen_image_application(
         )
     # Two different parallel-config types reach this factory: the pipeline's
     # DiffletParallelConfig and serving's ParallelTopology, which carries no
-    # cfg flag. Ask, do not assume.
-    if getattr(parallel, "cfg_parallel_enabled", False):
+    # cfg flag. Ask, do not assume. The neuron application runs opt-in true CFG
+    # (true_cfg_scale > 1 with a negative prompt) and splits its two branches
+    # under CFG parallelism; it refuses a call without true CFG itself.
+    if getattr(parallel, "cfg_parallel_enabled", False) and backend != "neuron":
         raise NotImplementedError(
             "Qwen-Image is guidance-distilled (single forward pass with the "
             "guidance scale baked into the timestep embedding); CFG-parallel "
