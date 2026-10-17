@@ -27,11 +27,18 @@ launch builds one and holds:
 
 * ``vae_decoder`` (``enable_vae_decoder=True``): ``_DeviceVaeDecoder``, the VAE decoder on every
   rank's core in fp32, eager (``NeuronWanVaeDecoderApplication``); ``output_type="pt"`` then
-  returns decoded frames. Without it the VAE decodes on the host outside this application
-  (``--host-vae``).
+  returns decoded frames. Without it the VAE decodes outside this application: the CLI's vae
+  stage runs the same decoder on one core, or diffusers on the host with ``--host-vae``.
 
-Phase 1 limits, each rejected in ``__init__``: one static shape, batch 1, no TeaCache, tensor
-parallelism only.
+Parallelism: tensor parallelism, with or without sequence parallelism (Megatron SP within the
+TP group), CFG parallelism (one batch-2 DiT call per step, each branch on its own TP group) and
+context parallelism in every ``cp_mode`` (gather_kv, ulysses, ring). Data parallelism is a set
+of separate replicas, each a torchrun launch of its own (``--dp``, the CLI's request router),
+so ``dp_degree`` within one application is rejected. Each rank starts from rank 0's initial
+noise (``__call__``).
+
+Phase 1 limits, each rejected in ``__init__`` (or, for the shape, at every DiT call): one
+static shape, batch 1. TeaCache runs (``_teacache_probes``: one probe per loaded expert).
 
 Timing hooks (for the benchmark): ``step_hook`` is called with no arguments once per denoise
 iteration, right after the orchestrator's scheduler step (``load`` wraps
@@ -312,7 +319,8 @@ def _reject_unsupported(options: dict[str, Any]) -> None:
 
 
 class TorchNeuronWanApplication(torch.nn.Module):
-    """Host umT5 on rank 0 + the DiT on each rank's core + ``WanOrchestrator``, on every rank.
+    """umT5 (rank 0's host, or the device) + the DiT on each rank's core (+ the device VAE) +
+    ``WanOrchestrator``, on every rank.
 
     Factory signature (``difflet/registry.py`` ``create_application``): ``model_path`` is the
     diffusers snapshot root, ``shape`` the request's ``height``/``width``/``num_frames``. Keyword
