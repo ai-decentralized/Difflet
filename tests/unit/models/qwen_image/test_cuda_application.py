@@ -262,3 +262,9 @@ def test_generate_uses_the_given_initial_latents(tmp_path, monkeypatch):
     noise = torch.randn(1, 16, 64)
     app.generate("a cat", num_inference_steps=2, seed=0, latents=noise, output_type="latent")
     assert seen["latents"] is noise and seen["call"]["latents"] is noise
+
+
+def test_torch_compile_is_the_kwarg_and_off_by_default(tmp_path):
+    assert _build(tmp_path).torch_compile is False
+    assert _build(tmp_path, torch_compile=True).torch_compile is True
+    assert _build(tmp_path, torch_compile=False).torch_compile is False

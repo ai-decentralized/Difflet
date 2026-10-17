@@ -74,6 +74,7 @@ class CudaQwenImageApplication(torch.nn.Module):
         self.batch_size = int(kwargs.get("batch_size", 1))
         self.load_text_encoder = bool(kwargs.get("load_text_encoder", True))
         self.load_vae = bool(kwargs.get("load_vae", True))
+        self.torch_compile = bool(kwargs.get("torch_compile", False))
         self.transformer_path = transformer_dir(model_path)
         self.transformer = None
         self.text_pipeline = None
@@ -95,7 +96,10 @@ class CudaQwenImageApplication(torch.nn.Module):
             cp_mode=getattr(parallel, "cp_mode", "gather_kv"),
         )
         self.transformer = CudaQwenImageTransformerApplication(
-            model_path=self.transformer_path, config=self.config, device=self.device
+            model_path=self.transformer_path,
+            config=self.config,
+            device=self.device,
+            torch_compile=self.torch_compile,
         )
 
     # --------------------------------------------------- DiffletPipeline API

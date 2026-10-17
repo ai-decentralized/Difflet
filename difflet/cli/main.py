@@ -337,6 +337,11 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--guidance-scale", type=float, default=None)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument(
+        "--torch-compile",
+        action="store_true",
+        help="CUDA backend only: torch.compile the DiT blocks (opt-in; eager is the default)",
+    )
+    p.add_argument(
         "--work-dir", default=None, help="Directory for inter-stage tensors (staged models only)"
     )
     p.add_argument(

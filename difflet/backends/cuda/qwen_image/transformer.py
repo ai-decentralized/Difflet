@@ -25,12 +25,24 @@ CHECKPOINT_PREFIX = "transformer."
 
 
 class CudaQwenImageTransformerApplication(CudaApplicationBase):
-    def __init__(self, *, model_path: str, config: QwenImageDiTConfig, device=None):
+    def __init__(
+        self,
+        *,
+        model_path: str,
+        config: QwenImageDiTConfig,
+        device=None,
+        torch_compile: bool = False,
+    ):
         super().__init__(
             config=MeshSpec(tp=int(config.tp_degree)), device=device, dtype=config.torch_dtype
         )
         self.model_path = model_path
         self.dit_config = config
+        # Eager is the premise; ``torch.compile`` is a measured, opt-in option.
+        # Each transformer block is compiled on its own (one graph reused 60x; the prompt
+        # trim's host sync stays outside the graph), so ``self.module`` is still the trace
+        # module and the parity scripts call it unchanged.
+        self.torch_compile = bool(torch_compile)
 
     def _init_runtime(self) -> None:
         parallel_mesh.init_parallel_mesh(self.config)
@@ -68,6 +80,12 @@ class CudaQwenImageTransformerApplication(CudaApplicationBase):
             module.requires_grad_(False)
             module.eval()
             self._assert_on_device(module)
+            if self.torch_compile:
+                blocks = module.transformer.transformer_blocks
+                for i, block in enumerate(blocks):
+                    blocks[i] = torch.compile(
+                        block, mode="max-autotune-no-cudagraphs", dynamic=False, fullgraph=False
+                    )
             self.module = module
         return self.module
 

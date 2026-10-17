@@ -16,6 +16,7 @@ real prompt is ~16 valid tokens of 1024.
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import math
 import os
@@ -54,6 +55,12 @@ def _save(img: torch.Tensor, path: Path) -> None:
     Image.fromarray(arr).save(path)
 
 
+def _application_kwargs(args: argparse.Namespace) -> dict | None:
+    """The opt-in application options this run asks for (None: the defaults)."""
+    kwargs = {k: True for k in ("torch_compile", "fuse_proj_out") if getattr(args, k, False)}
+    return kwargs or None
+
+
 def run_difflet(args, device) -> tuple[torch.Tensor, torch.Tensor]:
     from difflet import DiffletParallelConfig, DiffletPipeline
 
@@ -61,6 +68,7 @@ def run_difflet(args, device) -> tuple[torch.Tensor, torch.Tensor]:
     pipe = DiffletPipeline.from_pretrained(
         args.model_id,
         backend="cuda",
+        application_kwargs=_application_kwargs(args),
         parallel=DiffletParallelConfig(tp_degree=1),
         dtype="bf16",
         height=args.height,
@@ -83,6 +91,9 @@ def run_difflet(args, device) -> tuple[torch.Tensor, torch.Tensor]:
     print(f"difflet generated in {time.monotonic() - mark:.1f}s", flush=True)
     img = _to_unit(out.images)
     del out, app, pipe
+    # A torch.compile'd DiT stays alive in dynamo's caches until reset.
+    torch._dynamo.reset()
+    gc.collect()
     torch.cuda.empty_cache()
     return img.cpu(), noise.cpu()
 
@@ -114,7 +125,9 @@ def run_diffusers(args, device, noise: torch.Tensor) -> torch.Tensor:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     ap.add_argument("--model-path", required=True, help="local HF snapshot of Qwen/Qwen-Image")
     ap.add_argument("--model-id", default="Qwen/Qwen-Image")
     ap.add_argument("--prompt", default="a photorealistic cat sitting in a sunlit garden")
@@ -125,6 +138,11 @@ def main() -> None:
     ap.add_argument("--out", default="/tmp/logs/cuda_e2e_qwen_image.json")
     ap.add_argument("--images-dir", default="/tmp/logs")
     ap.add_argument("--compile-cache-dir", default=None)
+    ap.add_argument(
+        "--torch-compile",
+        action="store_true",
+        help="compile the DiT blocks, as `difflet run --torch-compile` does (default: eager)",
+    )
     args = ap.parse_args()
     os.environ.setdefault("DIFFLET_BACKEND", "cuda")
     device = torch.device("cuda")
@@ -146,7 +164,10 @@ def main() -> None:
         "device": torch.cuda.get_device_name(0),
         "torch": torch.__version__,
         "metrics": metrics,
-        "images": {"difflet": str(images / "e2e_difflet.png"), "diffusers": str(images / "e2e_diffusers.png")},
+        "images": {
+            "difflet": str(images / "e2e_difflet.png"),
+            "diffusers": str(images / "e2e_diffusers.png"),
+        },
     }
     print(f"difflet vs diffusers (pixels in [0,1]): {metrics}", flush=True)
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
