@@ -463,9 +463,12 @@ class _QwenImageTransformerTraceModule(nn.Module):
         # SP reuses the TP group: the materialized SPMDRank buffer is the
         # per-rank id the fork's entry scatter reads (loaded as
         # ``sp_rank_util.rank = arange(tp)``; see convert_hf_to_neuron_state_dict).
-        self.sp_rank_util = (
-            SPMDRank(world_size=int(config.neuron_config.tp_degree)) if self.sp_enabled else None
-        )
+        # The Trainium config nests tp under ``neuron_config``; the neuron
+        # backend's NeuronQwenImageConfig carries it directly (its SPMDRank is
+        # stateless: one process per rank, the rank is a Python int).
+        neuron_config = getattr(config, "neuron_config", None)
+        sp_tp_degree = int(getattr(neuron_config, "tp_degree", None) or config.tp_degree)
+        self.sp_rank_util = SPMDRank(world_size=sp_tp_degree) if self.sp_enabled else None
         # One packed shape per compiled bucket, keyed by image_seq_len. The
         # forward selects by hidden_states.shape[1], which is a concrete value
         # during each bucket's trace, so every bucket NEFF bakes its own RoPE
