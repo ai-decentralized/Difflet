@@ -356,6 +356,11 @@ def _add_serve_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=8091)
     p.add_argument(
+        "--torch-compile",
+        action="store_true",
+        help="CUDA backend only: torch.compile the DiT blocks (opt-in; eager is the default)",
+    )
+    p.add_argument(
         "--api-key",
         type=_api_key,
         default=None,

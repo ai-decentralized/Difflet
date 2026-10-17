@@ -261,6 +261,8 @@ class ServingProfile:
     # profile (height/width/num_frames above). By convention height/width/
     # num_frames equal the largest (priority) shape of the set.
     shapes: tuple[tuple[int, int, int | None], ...] | None = None
+    # CUDA backend only: torch.compile the DiT blocks in the resident worker (opt-in).
+    torch_compile: bool = False
 
     @property
     def world_size(self) -> int:

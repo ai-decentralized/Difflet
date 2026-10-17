@@ -86,6 +86,7 @@ def resolve_serving_model(options: ServeOptions) -> ResolvedServingModel:
         teacache_online_delta=options.teacache_online_delta,
         teacache_speedup=options.teacache_speedup,
         teacache_calibration=options.teacache_calibration,
+        torch_compile=bool(getattr(options, "torch_compile", False)),
     )
     return ResolvedServingModel(
         model_id=options.model_id,
