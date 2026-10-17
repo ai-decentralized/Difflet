@@ -268,3 +268,29 @@ def test_torch_compile_is_the_kwarg_and_off_by_default(tmp_path):
     assert _build(tmp_path).torch_compile is False
     assert _build(tmp_path, torch_compile=True).torch_compile is True
     assert _build(tmp_path, torch_compile=False).torch_compile is False
+
+
+def test_cuda_pipeline_builds_a_teacache_controller_for_cadence(tmp_path):
+    app = _build(tmp_path, load_text_encoder=False, load_vae=False, teacache_cadence=2)
+    app._load_companions()
+    controller = app.pipeline.teacache_controller
+    assert controller is not None and int(controller.calibration.cadence) == 2
+
+
+def test_cuda_pipeline_has_no_teacache_controller_by_default(tmp_path):
+    app = _build(tmp_path, load_text_encoder=False, load_vae=False)
+    app._load_companions()
+    assert app.pipeline.teacache_controller is None
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"teacache_speedup": 1.5},
+        {"teacache_calibration_path": "/x.json"},
+        {"teacache_online_delta_alpha": 0.1},
+    ],
+)
+def test_cuda_application_refuses_calibrated_and_online_delta_teacache(tmp_path, kwargs):
+    with pytest.raises(NotImplementedError, match="not supported"):
+        _build(tmp_path, **kwargs)

@@ -124,7 +124,7 @@ def test_cache_dir_and_force_reach_from_pretrained(recorder):
         ({"shapes": "1024x1024,768x768"}, "not supported"),
         ({"sp_enabled": True}, "not supported"),
         ({"teacache_speedup": 1.5}, "not supported"),
-        ({"teacache_cadence": 2}, "not supported"),
+        ({"teacache_online_delta": 0.1}, "not supported"),
         ({"cfg_parallel": True}, "not supported"),
         ({"tp_degree": 2}, "not supported"),
         ({"cp_degree": 2}, "not supported"),
@@ -180,3 +180,9 @@ def test_torch_compile_is_opt_in():
     assert mod.pipeline_kwargs(_args(), load=True).get("application_kwargs") is None
     kw = mod.pipeline_kwargs(_args(torch_compile=True), load=True)
     assert kw["application_kwargs"] == {"torch_compile": True}
+
+
+def test_teacache_cadence_is_forwarded_as_an_application_kwarg(recorder, tmp_path):
+    out = tmp_path / "qwen.png"
+    mod.CudaQwenImageOrchestrator(_args(teacache_cadence=2, output=str(out))).generate()
+    assert recorder[0][1]["application_kwargs"] == {"teacache_cadence": 2}
