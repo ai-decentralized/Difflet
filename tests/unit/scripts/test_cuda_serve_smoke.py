@@ -55,3 +55,38 @@ def test_serve_command_runs_the_cli_on_cuda_with_the_port_and_cache_dir():
         "/c",
     ]
     assert env["DIFFLET_BACKEND"] == "cuda"
+
+
+def test_image_bytes_come_from_a_data_url_or_an_http_fetch():
+    # Review finding: with an S3 .env in the repo root the server returns https URLs, and the
+    # script raised after a successful generation.
+    fetched = []
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def read(self):
+            return b"PNG-from-s3"
+
+    def opener(url, timeout):
+        fetched.append(url)
+        return _Resp()
+
+    data_url = "data:image/png;base64," + base64.b64encode(b"inline").decode()
+    assert smoke.fetch_image_bytes(data_url, opener=opener) == b"inline" and fetched == []
+    assert smoke.fetch_image_bytes("https://s3/x.png", opener=opener) == b"PNG-from-s3"
+    assert fetched == ["https://s3/x.png"]
+    with pytest.raises(ValueError):
+        smoke.fetch_image_bytes("ftp://nope", opener=opener)
+
+
+def test_request_headers_carry_the_api_key_when_the_server_requires_one():
+    assert smoke.request_headers(None) == {"Content-Type": "application/json"}
+    assert smoke.request_headers("k1") == {
+        "Content-Type": "application/json",
+        "Authorization": "Bearer k1",
+    }

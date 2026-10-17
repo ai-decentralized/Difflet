@@ -234,13 +234,23 @@ split is argued (verbatim move, CPU suites) but not re-run on a trn2 (D13).
 process; on CUDA that worker holds a single opaque `pipeline` stage —
 `DiffletPipeline.from_pretrained(backend="cuda")` kept loaded, `app.generate()` per request —
 instead of the three Neuron stage applications (`difflet/serving/orchestrators/qwen_image_cuda.py`,
-selected by backend name in `difflet/serving/model_registry.py`). Requests are handled exactly
-as `difflet run` handles them: `num_inference_steps` (default 50), `seed`, the profile's one
-shape; `guidance_scale` is refused unless omitted (the model has `guidance_embeds=False`, so any
-value would be a silent no-op), other shapes are refused with `profile_mismatch`, and
-`--tp-degree > 1` / `--sp` (F6), `--cp-degree > 1` / `--cfg-parallel` (F2), TeaCache (F4) and
-`--shapes` (F3) are refused at startup before the snapshot is resolved. `--tp-degree` defaults to
-1 on CUDA. Trainium and TPU serving are untouched.
+selected by backend name in `difflet/serving/model_registry.py`). The worker loads the model with
+the same `DiffletPipeline.from_pretrained` arguments as `difflet run` (pinned to the commit the
+server resolved at startup) and runs each request through the same `generate()` call:
+`num_inference_steps` (default 50), `seed`, the profile's one shape. Three deliberate
+differences from the CLI: the HTTP layer caps steps at 1..50; `guidance_scale` is accepted only
+at its no-op value 4.0 and refused otherwise (`feature_not_supported` — the model has
+`guidance_embeds=False`, so any value would be a silent no-op; the CLI refuses the flag
+outright); prompts beyond 1024 tokens past the chat template are refused (`prompt_too_long`)
+where the CLI truncates silently. Other shapes are refused with `profile_mismatch`. At startup,
+`--tp-degree > 1` / `--sp` are refused naming F6 and `--shapes` naming F3, before the snapshot is
+resolved; `--cp-degree > 1`, `--cfg-parallel` and a TeaCache flag are refused earlier still by
+the shared profile builder with its own wording (they are F2 / F4 work). `--tp-degree` defaults
+to 1 on CUDA. One request runs at a time and a 50-step request takes ~20 s on an RTX PRO 6000;
+a request that waits longer than `--queue-timeout` (30 s default) gets 429 `queue_timeout`, and
+a request past `--request-timeout` restarts the worker (full reload, ~10 s, plus the 4-step
+smoke) because `generate()` is not interruptible mid-denoise. Trainium and TPU serving are
+untouched.
 
 Not in Release 1 (follow-ups F1–F8 in the plan): Wan and Flux on CUDA, a second GPU
 (data-parallel / CFG-parallel first; tensor-parallel across PCIe only when a workload needs it),

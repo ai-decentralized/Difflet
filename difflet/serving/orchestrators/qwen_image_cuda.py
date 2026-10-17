@@ -280,7 +280,10 @@ class CudaQwenImageServingStageAdapter:
                 height=profile.height,
                 width=profile.width,
                 cache_dir=profile.cache_dir,
-                revision=profile.revision,
+                # The commit the parent pinned (resolve_hf_model_source), not the user's ref:
+                # a worker restart must load the snapshot the bundle and the validator's
+                # tokenizer describe, even if refs/main moved meanwhile.
+                revision=runtime.source.resolved_source_id,
                 force_compile=config.get("compile_policy") is CompilePolicy.FORCE,
                 load=True,
             ),
