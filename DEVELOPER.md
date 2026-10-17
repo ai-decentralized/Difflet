@@ -168,6 +168,10 @@ DIFFLET_RUN_CUDA_NUMERICAL=1 pytest tests/numerical/test_cuda_vs_diffusers.py te
 # the CUDA column of the CLI matrix (download → compile → timed generate, results.json)
 python scripts/verify_cli_cuda.py --steps 50
 
+# OpenAI-compatible serving: one resident process, the model stays loaded between requests
+DIFFLET_BACKEND=cuda difflet serve --model-id Qwen/Qwen-Image --port 8091
+scripts/cuda_serve_smoke.sh --output /tmp/qwen-serve.png --steps 50   # start, /ready, 2 requests, timings
+
 # CPU-host gate (no SDK, no GPU) — also what CI runs
 .claude/skills/difflet-cuda-backend/scripts/cpu-gate.sh
 ```
@@ -225,6 +229,23 @@ distance 0.398×); whole-pipeline e2e vs diffusers' `FluxPipeline` PSNR 40.35 dB
 (floors 35 dB / 0.998); the CLI matrix passes both cells. Flux on CUDA refuses TeaCache, SP, CP, CFG-parallel, TAEF1,
 `--host-vae`, bucketed shapes and `--torch-compile` as F5b. The Trainium byte-identity of the
 split is argued (verbatim move, CPU suites) but not re-run on a trn2 (D13).
+
+**Serving on CUDA (F3b).** `difflet serve` keeps the serving engine's one resident worker
+process; on CUDA that worker holds a single opaque `pipeline` stage —
+`DiffletPipeline.from_pretrained(backend="cuda")` kept loaded, `app.generate()` per request —
+instead of the three Neuron stage applications (`difflet/serving/orchestrators/qwen_image_cuda.py`,
+selected by backend name in `difflet/serving/model_registry.py`). Requests are handled exactly
+as `difflet run` handles them: `num_inference_steps` (default 50), `seed`, the profile's one
+shape; `guidance_scale` is refused unless omitted (the model has `guidance_embeds=False`, so any
+value would be a silent no-op), other shapes are refused with `profile_mismatch`, and
+`--tp-degree > 1` / `--sp` (F6), `--cp-degree > 1` / `--cfg-parallel` (F2), TeaCache (F4) and
+`--shapes` (F3) are refused at startup before the snapshot is resolved. `--tp-degree` defaults to
+1 on CUDA. Trainium and TPU serving are untouched.
+
+Not in Release 1 (follow-ups F1–F8 in the plan): Wan and Flux on CUDA, a second GPU
+(data-parallel / CFG-parallel first; tensor-parallel across PCIe only when a workload needs it),
+context parallel, `--requests` / `--dp` batches on CUDA, multi-shape serving on CUDA,
+`torch.compile`, FP8, custom kernels.
 
 Not in Release 1 (follow-ups F1–F8 in the plan): Wan on CUDA, Flux follow-ups (F5b), a second GPU
 (data-parallel / CFG-parallel first; tensor-parallel across PCIe only when a workload needs it),
