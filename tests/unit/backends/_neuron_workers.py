@@ -1086,6 +1086,30 @@ def ulysses_worker(rank: int, world_size: int) -> dict:
             "round_trip_exact": torch.equal(back, local[0])}
 
 
+def w1_wan_initial_noise_worker(rank: int, world_size: int, model_dir: str) -> dict:
+    """The composed application's initial latents when every rank's RNG differs: the global
+    RNG, ``seed=``, and a per-rank generator. No DiT and no encoder are loaded, so the
+    orchestrator returns the initial latents as its final ones."""
+    from difflet.models.wan.neuron_application import TorchNeuronWanApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_wan_toy import TINY_LATENT_SHAPE, TINY_SHAPE, TINY_TEXT_SEQ_LEN
+
+    torch.manual_seed(100 + rank)
+    app = TorchNeuronWanApplication(
+        model_path=model_dir, parallel=DiffletParallelConfig(tp_degree=world_size),
+        dtype=torch.float32, shape=dict(TINY_SHAPE), text_seq_len=TINY_TEXT_SEQ_LEN,
+        exec_mode="eager", device="cpu", enable_transformer=False, enable_text_encoder=False,
+    )
+    app.load()
+    common = {"channels": TINY_LATENT_SHAPE[1], "output_type": "latent"}
+    return {
+        "global_rng": app(**common).latents.tolist(),
+        "seed": app(seed=7, **common).latents.tolist(),
+        "generator": app(generator=torch.Generator().manual_seed(7 + rank), **common)
+        .latents.tolist(),
+    }
+
+
 def w1_wan_cp_worker(rank: int, world_size: int, model_dir: str, cp_mode: str) -> dict:
     """The composed application at TP2 x CP2: two steps at guidance 5.0 on the fixed inputs."""
     import hashlib
