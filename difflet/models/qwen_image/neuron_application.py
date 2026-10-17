@@ -13,7 +13,14 @@ of the torchrun launch builds one and holds:
 * ``text_encoder``: ``_HostQwenTextEncoder``, Qwen2.5-VL on rank 0's host only (bf16 by
   default, one copy instead of one per rank), its embeddings broadcast to every rank. It
   reproduces the Trainium text stage's embeddings (``difflet/cli/orchestrators/qwen_image.py``
-  ``_stage_text``): see that class for the semantics and the divergences from diffusers;
+  ``_stage_text``): see that class for the semantics and the divergences from diffusers. Or,
+  with ``text_encoder_device="neuron"`` (opt-in; the host stays the default),
+  ``_DeviceQwenTextEncoder``: Qwen2.5-VL's language model on the device in ``text_encoder_dtype``
+  (bf16), sharded across the TP group (``NeuronQwenTextEncoderApplication``, about 3.3 GiB per
+  rank at tp4), every rank tokenizing and encoding the same prompt at the static
+  ``(1, ENC_SEQ)`` shape, with the host encoder's post-processing. ``__init__`` refuses it when
+  it cannot fit beside the DiT on one core at this tp (``_check_device_text_encoder_fits``: tp2,
+  so CP2 or dp2tp2, does not fit);
 * ``vae_decoder`` (``enable_vae_decoder=True``): ``_DeviceQwenVaeDecoder``, the decoder on every
   rank's core in fp32, eager. Qwen-Image's VAE (``AutoencoderKLQwenImage``) is diffusers' Wan 2.1
   VAE under another name, so this reuses ``NeuronWanVaeDecoderApplication``, as the Trainium
@@ -59,7 +66,10 @@ import torch
 from difflet.backends.neuron.core.application_base import _normalize_dtype
 from difflet.backends.neuron.core.checkpoint import _resolve_device
 from difflet.backends.neuron.core.distributed import broadcast_tensor, rank0_call, world_info
+from difflet.backends.neuron.hbm import budget_enforced, check_fits
 from difflet.backends.neuron.qwen_image.config import NeuronQwenImageConfig
+from difflet.backends.neuron.qwen_image.hbm import device_text_encoder_bytes
+from difflet.backends.neuron.qwen_image.text_encoder import NeuronQwenTextEncoderApplication
 from difflet.backends.neuron.qwen_image.transformer import NeuronQwenImageTransformerApplication
 from difflet.backends.neuron.runtime import check_parallel_supported
 from difflet.backends.neuron.wan.vae import NeuronWanVaeDecoderApplication
@@ -76,8 +86,9 @@ logger = logging.getLogger(__name__)
 #: The keyword arguments the application accepts, with their defaults: the ones the Qwen-Image
 #: CLI generate stage passes the Trainium application (difflet/cli/orchestrators/qwen_image.py
 #: ``_stage_generate``) and DiffletPipeline's TeaCache merge (``teacache_calibration``), plus
-#: exec_mode, device, encoder_threads, text_encoder_dtype, enable_text_encoder and
-#: enable_vae_decoder. Anything else is a TypeError rather than silently ignored.
+#: exec_mode, device, encoder_threads, text_encoder_dtype, text_encoder_device,
+#: enable_text_encoder and enable_vae_decoder. Anything else is a TypeError rather than
+#: silently ignored.
 _KWARG_DEFAULTS: dict[str, Any] = {
     "text_seq_len": TEXT_SEQ_LEN,
     "batch_size": 1,
@@ -89,6 +100,7 @@ _KWARG_DEFAULTS: dict[str, Any] = {
     "device": "neuron",
     "encoder_threads": 12,
     "text_encoder_dtype": torch.bfloat16,
+    "text_encoder_device": "host",
     "teacache_fused": False,
     "teacache_speedup": None,
     "teacache_calibration": None,
@@ -140,6 +152,37 @@ def qwen_text_mask(seq: int, seq_len: int, batch: int = 1) -> torch.Tensor:
     mask = torch.zeros(batch, seq_len, dtype=torch.bool)
     mask[:, :seq] = True
     return mask
+
+
+def tokenize_qwen_prompt(tokenizer, prompt: str, enc_seq_len: int) -> tuple[torch.Tensor, int]:
+    """The Trainium text stage's tokenization, shared by the host and the device encoder:
+    ``QWEN_TEMPLATE.format(prompt)`` tokenized to ``max_length=enc_seq_len``, right-padded and
+    truncated to it. Returns ``input_ids [1, enc_seq_len]`` (int64) and the valid length; a
+    prompt the budget truncates logs a warning (the CLI truncates silently)."""
+    text = QWEN_TEMPLATE.format(prompt)
+    tokens = tokenizer(
+        text,
+        max_length=enc_seq_len,
+        padding="max_length",
+        truncation=True,
+        return_tensors="pt",
+        return_attention_mask=True,
+    )
+    input_ids, attention_mask = tokens.input_ids, tokens.attention_mask
+    if input_ids.shape[0] != 1:
+        raise ValueError("the neuron Qwen-Image application encodes one prompt (batch 1)")
+    valid = int(attention_mask.sum())
+    if attention_mask[:, valid:].any():
+        raise ValueError("expected a right-padded prompt (the tokenizer pads on the right)")
+    if valid == enc_seq_len:
+        full = len(tokenizer(text, truncation=False).input_ids)
+        if full > enc_seq_len:
+            logger.warning(
+                "Qwen-Image prompt is %d tokens with the template, more than the %d the "
+                "encoder reads (ENC_SEQ); its tail is truncated, as on Trainium",
+                full, enc_seq_len,
+            )
+    return input_ids.to(torch.int64), valid
 
 
 class _HostQwenTextEncoder:
@@ -233,36 +276,14 @@ class _HostQwenTextEncoder:
     def _encode(self, prompt: str) -> tuple[torch.Tensor, int]:
         if self.model is None or self.tokenizer is None:
             raise RuntimeError("the text encoder is not loaded on rank 0; call load() first")
-        text = QWEN_TEMPLATE.format(prompt)
-        tokens = self.tokenizer(
-            text,
-            max_length=self.enc_seq_len,
-            padding="max_length",
-            truncation=True,
-            return_tensors="pt",
-            return_attention_mask=True,
-        )
-        input_ids, attention_mask = tokens.input_ids, tokens.attention_mask
-        if input_ids.shape[0] != 1:
-            raise ValueError("the neuron Qwen-Image application encodes one prompt (batch 1)")
-        valid = int(attention_mask.sum())
-        if attention_mask[:, valid:].any():
-            raise ValueError("expected a right-padded prompt (the tokenizer pads on the right)")
-        if valid == self.enc_seq_len:
-            full = len(self.tokenizer(text, truncation=False).input_ids)
-            if full > self.enc_seq_len:
-                logger.warning(
-                    "Qwen-Image prompt is %d tokens with the template, more than the %d the "
-                    "encoder reads (ENC_SEQ); its tail is truncated, as on Trainium",
-                    full, self.enc_seq_len,
-                )
+        input_ids, valid = tokenize_qwen_prompt(self.tokenizer, prompt, self.enc_seq_len)
         previous = torch.get_num_threads()
         torch.set_num_threads(self.threads)
         try:
             with torch.no_grad():
                 hidden = self.model.model(
-                    input_ids=input_ids[:, :valid].to(torch.int64),
-                    attention_mask=attention_mask[:, :valid].to(torch.int64),
+                    input_ids=input_ids[:, :valid],
+                    attention_mask=torch.ones_like(input_ids[:, :valid]),
                     use_cache=False,
                 ).last_hidden_state
         finally:
@@ -273,6 +294,54 @@ class _HostQwenTextEncoder:
                 f"joint_attention_dim={self.text_dim}"
             )
         return qwen_prompt_embeds(hidden, valid, seq_len=self.seq_len)
+
+
+class _DeviceQwenTextEncoder:
+    """Qwen2.5-VL's language model on the device (``NeuronQwenTextEncoderApplication``), called
+    like ``_HostQwenTextEncoder``: a prompt in, ``(embeddings, mask)`` out on the host.
+
+    Every rank loads the tokenizer, tokenizes the prompt as the host encoder does
+    (``tokenize_qwen_prompt``) and encodes it: the encoder's TP collectives need every rank, and
+    every rank then holds the full last hidden state, so nothing is broadcast. The prompt is
+    encoded at the static ``(1, enc_seq_len)`` shape, padding included and unmasked (causal
+    attention keeps it out of the valid rows), and post-processed by ``qwen_prompt_embeds``:
+    the template rows dropped, the valid rows kept and zero-padded to ``seq_len`` in bf16.
+    """
+
+    def __init__(self, app, *, model_path, text_dim: int, seq_len: int, device):
+        self.app = app
+        self.model_path = str(model_path)
+        self.text_dim = int(text_dim)
+        self.seq_len = int(seq_len)
+        self.device = torch.device(device)
+        self.tokenizer = None  # every rank, after load()
+
+    def load(self, skip_warmup: bool = False) -> None:
+        from difflet.backends.neuron.core.distributed import collective_phase
+
+        with collective_phase("tokenizer load", device=self.device):
+            from transformers import AutoTokenizer
+
+            self.tokenizer = AutoTokenizer.from_pretrained(
+                os.path.join(self.model_path, "tokenizer")
+            )
+        self.app.load(skip_warmup=skip_warmup)
+
+    def __call__(self, prompt: str) -> tuple[torch.Tensor, torch.Tensor]:
+        if self.tokenizer is None:
+            raise RuntimeError("the device text encoder is not loaded; call load() first")
+        input_ids, valid = tokenize_qwen_prompt(self.tokenizer, prompt, self.app.enc_seq_len)
+        hidden = self.app(input_ids.to(self.device))
+        if self.device.type == "neuron":
+            torch.neuron.synchronize()
+        hidden = hidden.cpu()
+        if hidden.shape[-1] != self.text_dim:
+            raise ValueError(
+                f"the text encoder's hidden size is {hidden.shape[-1]}, but the DiT expects "
+                f"joint_attention_dim={self.text_dim}"
+            )
+        embeds, seq = qwen_prompt_embeds(hidden, valid, seq_len=self.seq_len)
+        return embeds, qwen_text_mask(seq, self.seq_len)
 
 
 class _DeviceQwenVaeDecoder:
@@ -413,6 +482,11 @@ def _reject_unsupported(options: dict[str, Any], parallel) -> None:
     dtype = normalize_dtype(options["text_encoder_dtype"])
     if dtype not in (torch.bfloat16, torch.float32):
         raise ValueError(f"text_encoder_dtype must be bfloat16 or float32, got {dtype}")
+    if options["text_encoder_device"] not in ("host", "neuron"):
+        raise ValueError(
+            "text_encoder_device must be 'host' or 'neuron', got "
+            f"{options['text_encoder_device']!r}"
+        )
 
 
 def _flow_match_mu(scheduler_config, image_seq_len: int) -> float:
@@ -486,8 +560,24 @@ class TorchNeuronQwenImageApplication(torch.nn.Module):
                 device=self.device,
             )
             self.config = self.transformer.config  # cp_degree filled from the parallel config
-        self.text_encoder: _HostQwenTextEncoder | None = None
-        if options["enable_text_encoder"]:
+        self.text_encoder: _HostQwenTextEncoder | _DeviceQwenTextEncoder | None = None
+        if options["enable_text_encoder"] and options["text_encoder_device"] == "neuron":
+            encoder_dtype = normalize_dtype(options["text_encoder_dtype"])
+            self._check_device_text_encoder_fits(encoder_dtype)
+            self.text_encoder = _DeviceQwenTextEncoder(
+                NeuronQwenTextEncoderApplication(
+                    model_path=os.path.join(self.model_path, "text_encoder"),
+                    parallel=parallel,
+                    dtype=encoder_dtype,
+                    exec_mode=options["exec_mode"],
+                    device=self.device,
+                ),
+                model_path=self.model_path,
+                text_dim=int(self.config.joint_attention_dim),
+                seq_len=self.text_seq_len,
+                device=self.device,
+            )
+        elif options["enable_text_encoder"]:
             self.text_encoder = _HostQwenTextEncoder(
                 self.model_path,
                 text_dim=int(self.config.joint_attention_dim),
@@ -515,6 +605,30 @@ class TorchNeuronQwenImageApplication(torch.nn.Module):
         #: Called with no arguments once per denoise iteration; see the module docstring.
         self.step_hook: Callable[[], None] | None = None
         self._text_encoder_load_seconds: float | None = None
+
+    def _check_device_text_encoder_fits(self, encoder_dtype: torch.dtype) -> None:
+        """The device text encoder shares each core with this rank's DiT shard. Raise before
+        anything loads when the two clearly cannot fit together
+        (``difflet/backends/neuron/qwen_image/hbm.py``): at tp2 (CP2 or CFG2 on four cores,
+        dp2tp2 replicas) about 6.6 GiB of bf16 encoder beside 19.0 GiB of DiT, over a 24 GiB
+        core; at tp4 about 3.3 + 9.5 GiB. The base's load-time check sees one component at a
+        time, so it would pass the DiT and refuse the encoder only after the DiT had loaded.
+        Like that check, this one runs on the neuron device, or elsewhere when
+        ``DIFFLET_NEURON_HBM_GIB`` sets a budget."""
+        if not budget_enforced(self.device.type):
+            return
+        tp = int(self.parallel.tp_degree)
+        estimate = device_text_encoder_bytes(
+            self.model_path, tp_degree=tp, encoder_dtype_bytes=encoder_dtype.itemsize,
+            dit_dtype_bytes=self.dtype.itemsize,
+        )
+        check_fits(
+            estimate,
+            what=f"Qwen2.5-VL ({encoder_dtype}) beside the Qwen-Image DiT on one core",
+            tp_degree=tp,
+            advice="encode on the host (text_encoder_device='host', no --device-text-encoder), "
+            "or give the TP group more cores (tp_degree={tp} or more)",
+        )
 
     # --------------------------------------------------- DiffletPipeline API
 
@@ -546,7 +660,9 @@ class TorchNeuronQwenImageApplication(torch.nn.Module):
             self.transformer_adapter = _OnDeviceTransformer(
                 self.transformer, self.config, self.dtype, self.device
             )
-        if self.text_encoder is not None:
+        if isinstance(self.text_encoder, _DeviceQwenTextEncoder):
+            self.text_encoder.load(skip_warmup=skip_warmup)
+        elif self.text_encoder is not None:
             start = time.perf_counter()
             self.text_encoder.load()
             self._text_encoder_load_seconds = time.perf_counter() - start
@@ -583,8 +699,13 @@ class TorchNeuronQwenImageApplication(torch.nn.Module):
     @property
     def phase_seconds(self) -> dict[str, float]:
         """The DiT's load phases, ``"text encoder load"`` (rank 0's read, which the other ranks
-        wait out in that phase's status sync) and the device VAE's as ``"vae <phase>"``."""
+        wait out in that phase's status sync) or the device text encoder's as ``"text_encoder
+        <phase>"``, and the device VAE's as ``"vae <phase>"``."""
         seconds = dict(self.transformer.phase_seconds) if self.transformer is not None else {}
+        if isinstance(self.text_encoder, _DeviceQwenTextEncoder):
+            seconds.update(
+                {f"text_encoder {k}": v for k, v in self.text_encoder.app.phase_seconds.items()}
+            )
         if self.vae_decoder is not None:
             seconds.update({f"vae {k}": v for k, v in self.vae_decoder.app.phase_seconds.items()})
         if self._text_encoder_load_seconds is not None:
@@ -593,11 +714,16 @@ class TorchNeuronQwenImageApplication(torch.nn.Module):
 
     @property
     def compiled_blocks(self) -> list[str]:
-        return list(self.transformer.compiled_blocks) if self.transformer is not None else []
+        blocks = list(self.transformer.compiled_blocks) if self.transformer is not None else []
+        if isinstance(self.text_encoder, _DeviceQwenTextEncoder):
+            blocks += [f"text_encoder.{name}" for name in self.text_encoder.app.compiled_blocks]
+        return blocks
 
     @property
     def unwarmed_shapes(self) -> list:
         shapes = list(self.transformer.unwarmed_shapes) if self.transformer is not None else []
+        if isinstance(self.text_encoder, _DeviceQwenTextEncoder):
+            shapes += list(self.text_encoder.app.unwarmed_shapes)
         if self.vae_decoder is not None:
             shapes += list(self.vae_decoder.app.unwarmed_shapes)
         return shapes
@@ -747,4 +873,9 @@ class TorchNeuronQwenImageApplication(torch.nn.Module):
         return self.generate(**kwargs)
 
 
-__all__ = ["TorchNeuronQwenImageApplication", "qwen_prompt_embeds", "qwen_text_mask"]
+__all__ = [
+    "TorchNeuronQwenImageApplication",
+    "qwen_prompt_embeds",
+    "qwen_text_mask",
+    "tokenize_qwen_prompt",
+]

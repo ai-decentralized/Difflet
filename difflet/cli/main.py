@@ -188,6 +188,15 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
         "--cp-degree 2 on four cores, or --dp 2 --tp-degree 2)",
     )
     p.add_argument(
+        "--device-text-encoder",
+        dest="device_text_encoder",
+        action="store_true",
+        help="Qwen-Image on the neuron backend: encode prompts with Qwen2.5-VL's language model "
+        "on the device (bf16, TP-sharded beside the DiT) instead of on rank 0's host CPU (the "
+        "default for now). Dropped, with a note, when the TP group is too narrow for it to fit "
+        "beside the DiT (tp2, e.g. --cp-degree 2 on four cores or --dp 2 --tp-degree 2)",
+    )
+    p.add_argument(
         "--taef1",
         dest="taef1",
         action="store_true",
