@@ -47,7 +47,8 @@ def torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
     The ranks keep their own checks (the application's ``_reject_unsupported`` for TeaCache);
     this list lets the driver refuse the same options before torchrun starts tp*cp processes
     that import torch only to fail. A model adds its own (Qwen-Image: --sp, request batches,
-    --cfg-parallel, several --shapes; Wan runs SP and DP replicas). Torch-free.
+    --cfg-parallel, several --shapes; Wan: several --shapes, since it runs SP and DP
+    replicas). Torch-free.
     """
     return [flag for flag, name in TEACACHE_FLAGS if getattr(args, name, None) is not None]
 
@@ -68,15 +69,17 @@ def sp_and_batch_options(args: argparse.Namespace) -> list[str]:
 def reject_unsupported_torchrun_options(found: list[str], *, runs: str) -> None:
     """On a torchrun backend, ``found`` non-empty: print one message naming the options and exit
     2 before anything is launched (or downloaded, for ``run``). ``runs`` is what the model's
-    ranks do support ("tensor, CFG and context parallelism"). No-op on unset, trainium and tpu,
-    which support these options or reject them where they always did."""
+    ranks do support, request batching and TeaCache included ("tensor and context parallelism
+    at one static shape, one request per launch, no TeaCache"; Wan's and Flux's ranks run
+    TeaCache and DP replicas, so the phrase is the model's, not a fixed suffix). No-op on unset,
+    trainium and tpu, which support these options or reject them where they always did."""
     if not found:
         return
     backend = torchrun_backend()
     if backend is None:
         return
     print(f"Error: the {backend} backend does not support {', '.join(found)} (it runs "
-          f"{runs}, one request per launch, no TeaCache); nothing was launched.",
+          f"{runs}); nothing was launched.",
           file=sys.stderr, flush=True)
     raise SystemExit(2)
 

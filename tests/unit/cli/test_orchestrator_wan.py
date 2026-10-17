@@ -1061,7 +1061,10 @@ def test_neuron_driver_rejects_several_shapes_before_any_launch(monkeypatch, tmp
     assert exc.value.code == 2
     out, err = capsys.readouterr()
     assert out == ""
-    assert f"does not support {named} (" in err and "nothing was launched." in err
+    assert err.strip() == (
+        f"Error: the neuron backend does not support {named} (it runs tensor, sequence, CFG and "
+        "context parallelism at one static shape, DP replicas and TeaCache); "
+        "nothing was launched.")
     assert "--teacache" not in err
     assert "DIFFLET_COMPILE_CACHE" not in os.environ
     assert not (tmp_path / "work").exists()
