@@ -3,8 +3,10 @@
     DIFFLET_BACKEND=cuda python scripts/cuda_e2e_vs_diffusers.py --model-path <snapshot>
     DIFFLET_RUN_CUDA_NUMERICAL=1 pytest tests/numerical/test_cuda_e2e_vs_diffusers.py -v
 
-The floors are the initial ones from the F3 plan; the first GPU run's numbers tighten them in
-the plan's status log. Both pipelines run bf16, so this is "the same picture", not bit equality.
+The floors were set from the first GPU run (2026-10-17, RTX PRO 6000, torch 2.11.0+cu128:
+PSNR 41.40 dB, pixel cosine 0.99972 at 50 steps, seed 0); the initial F3 floors were 25 dB /
+0.99. Both pipelines run bf16, so this is "the same picture", not bit equality — headroom is
+~6 dB and ~1.7e-3 in cosine, enough for a kernel change, not for a lost mask.
 """
 
 from __future__ import annotations
@@ -17,8 +19,8 @@ import pytest
 
 pytestmark = [pytest.mark.numerical, pytest.mark.slow]
 
-MIN_PSNR_DB = 25.0
-MIN_COSINE = 0.99
+MIN_PSNR_DB = 35.0
+MIN_COSINE = 0.998
 DEFAULT_RESULT = "/tmp/logs/cuda_e2e_qwen_image.json"
 
 

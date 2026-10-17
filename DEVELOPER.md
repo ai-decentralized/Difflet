@@ -132,8 +132,10 @@ backend-neutral modules always, the Trainium modules only when the Neuron SDK is
 `difflet.ops` and the text encoder, VAE and scheduler loop on the same device in one process.
 There is no ahead-of-time compile step: `compile()` writes `cuda_manifest.json`, `load()` builds
 the module eagerly from the diffusers safetensors. Validated on an RTX PRO 6000 (Blackwell,
-96 GB) with torch 2.11.0+cu128: 50 steps at 1024×1024 in 20.5 s, 58 GB peak, and the
-diffusers-relative parity gate passing. Plan, decisions and status log:
+96 GB) with torch 2.11.0+cu128: 50 steps at 1024×1024 in 26.1 s (0.52 s/step with the prompt
+padding mask; 20.5 s before it), 58 GB peak, the DiT parity gates (all-ones and padded masks) and the
+whole-pipeline gate vs diffusers (PSNR 41.4 dB) passing. Upstream diffusers runs the same 50 steps in
+15.2 s on that card; closing the gap is not supported on the CUDA backend yet. Plan, decisions and status log:
 `docs/plans/2026-10-16-cuda-backend-support.md`.
 
 ```bash
