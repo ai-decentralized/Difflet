@@ -29,14 +29,9 @@ ALL_CASES = ("difflet_masked", "difflet_allones", "diffusers_masked", "diffusers
 
 
 def _events(prof) -> list[tuple[str, float]]:
-    out = []
-    for e in prof.key_averages():
-        us = getattr(e, "self_device_time_total", None)
-        if us is None:
-            us = getattr(e, "self_cuda_time_total", 0.0)
-        if us and us > 0:
-            out.append((e.key, float(us)))
-    return out
+    from difflet.backends.cuda.bench import kernel_events
+
+    return kernel_events(prof.key_averages())
 
 
 def _measure(fn, *, warmup: int, iters: int) -> dict:
@@ -79,6 +74,11 @@ def main() -> None:
     ap.add_argument("--iters", type=int, default=10)
     ap.add_argument("--cases", default=",".join(ALL_CASES))
     ap.add_argument("--torch-compile", action="store_true", help="F4 task 3: compiled DiT")
+    ap.add_argument(
+        "--no-trim",
+        action="store_true",
+        help="run the Difflet cases with the padding masked, not trimmed (the pre-F4 baseline)",
+    )
     ap.add_argument("--compile-cache-dir", default="/tmp/logs/cuda_bench_cache")
     args = ap.parse_args()
     os.environ.setdefault("DIFFLET_BACKEND", "cuda")
@@ -138,6 +138,8 @@ def main() -> None:
         app.load(args.compile_cache_dir, skip_warmup=True)
         print(f"difflet loaded in {time.monotonic() - mark:.1f}s", flush=True)
         module = app.transformer.module if hasattr(app, "transformer") else None
+        if args.no_trim and module is not None:
+            module.trim_text_padding = False
         payload["trim_text_padding"] = bool(getattr(module, "trim_text_padding", False))
 
         def difflet_fn(m):

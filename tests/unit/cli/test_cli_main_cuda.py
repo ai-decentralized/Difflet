@@ -46,15 +46,24 @@ def test_requests_and_dp_are_refused_on_cuda(monkeypatch, tmp_path, capsys):
     assert exc.value.code == 1 and "F2" in capsys.readouterr().err
     with pytest.raises(SystemExit) as exc:
         cli.main(
-            ["run", "--model-id", "Qwen/Qwen-Image", "--prompt", "a", "--output", "a.png", "--dp", "2"]
+            [
+                "run",
+                "--model-id",
+                "Qwen/Qwen-Image",
+                "--prompt",
+                "a",
+                "--output",
+                "a.png",
+                "--dp",
+                "2",
+            ]
         )
     assert exc.value.code == 1 and "F2" in capsys.readouterr().err
 
 
 def test_cli_and_serving_import_without_neuron():
     # F3's import clause: no module-level Neuron import on the CLI/serving path.
-    code = textwrap.dedent(
-        """
+    code = textwrap.dedent("""
         import importlib.abc, sys
         BLOCKED = {"neuronx_distributed", "torch_neuronx", "neuronxcc", "nki", "torch_xla", "libneuronxla"}
         class Block(importlib.abc.MetaPathFinder):
@@ -68,8 +77,7 @@ def test_cli_and_serving_import_without_neuron():
                   "difflet.serving.models._common"):
             __import__(m)
         print("OK")
-        """
-    )
+        """)
     proc = subprocess.run(
         [sys.executable, "-c", code],
         capture_output=True,
@@ -77,3 +85,10 @@ def test_cli_and_serving_import_without_neuron():
         env={**os.environ, "DIFFLET_BACKEND": "cpu"},
     )
     assert proc.returncode == 0 and "OK" in proc.stdout, proc.stderr[-2000:]
+
+
+def test_torch_compile_is_refused_off_cuda(monkeypatch):
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
+    with pytest.raises(SystemExit) as exc:
+        _cli()._get_orchestrator(argparse.Namespace(model_id="Qwen/Qwen-Image", torch_compile=True))
+    assert "CUDA" in str(exc.value)

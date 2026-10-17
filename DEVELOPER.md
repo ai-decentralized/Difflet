@@ -132,11 +132,11 @@ backend-neutral modules always, the Trainium modules only when the Neuron SDK is
 `difflet.ops` and the text encoder, VAE and scheduler loop on the same device in one process.
 There is no ahead-of-time compile step: `compile()` writes `cuda_manifest.json`, `load()` builds
 the module eagerly from the diffusers safetensors. Validated on an RTX PRO 6000 (Blackwell,
-96 GB) with torch 2.11.0+cu128: 50 steps at 1024×1024 in **16.5 s eager (0.33 s/step)**, 13.3 s with
+96 GB) with torch 2.11.0+cu128: 50 steps at 1024×1024 in **16.5 s eager (0.33 s/step)**, 12.4 s with
 `--torch-compile`, 10.0 s with `--teacache-cadence 2`; 58 GB peak; the DiT parity gates (all-ones
-and padded masks) and the whole-pipeline gate vs diffusers (PSNR 41.2 dB eager, 39.9 dB compiled)
+and padded masks) and the whole-pipeline gate vs diffusers (PSNR 41.2 dB eager, 40.2 dB compiled)
 passing. Upstream diffusers' pipeline runs the same 50 steps in 15.2 s on that card. The DiT
-forward alone: 323 ms eager, 246 ms compiled, 300 ms for diffusers (`scripts/cuda_bench_dit.py`). Plan, decisions and status log:
+forward alone: 323 ms eager, 243 ms compiled, 300 ms for diffusers (`scripts/cuda_bench_dit.py`). Plan, decisions and status log:
 `docs/plans/2026-10-16-cuda-backend-support.md`.
 
 ```bash
@@ -184,9 +184,12 @@ against diffusers on CPU. Trainium/TPU outputs are unchanged by this.
 
 **Measured options (F4, both off by default — D4 keeps eager as the premise).** `--torch-compile`
 (or `application_kwargs={"torch_compile": True}`, or `DIFFLET_CUDA_TORCH_COMPILE=1`) compiles each
-DiT block with inductor (`max-autotune-no-cudagraphs`, static shapes): 0.33 → 0.27 s/step after a
-~36 s first-forward compile; parity moves but stays inside the bf16 noise (rel_l1 0.88× the bf16
-control vs fp32). `--teacache-cadence N` runs the existing probe-free TeaCache controller (skip every
+DiT block with inductor (`max-autotune-no-cudagraphs`, `dynamic=True` so one graph serves every
+prompt length): 0.33 → 0.25 s/step. Expect two compilations at load (the warm-up runs twice under
+the flag: dynamo's guard on a `None` block argument forces the second; ~16 s together with a warm
+inductor cache, more on a fresh box), then no recompiles — `TORCH_LOGS=recompiles` shows them. Parity moves but
+stays inside the bf16 noise (rel_l1 0.88× the bf16 control vs fp32). CUDA-only: the other backends
+refuse the flag. `--teacache-cadence N` runs the existing probe-free TeaCache controller (skip every
 Nth step after warm-up): cadence 2 → 0.20 s/step at PSNR 38.5 dB against the full run. The
 calibrated and online-delta TeaCache modes need the probe path on CUDA (F4b) and are refused.
 

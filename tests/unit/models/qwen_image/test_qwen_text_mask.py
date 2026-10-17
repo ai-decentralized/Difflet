@@ -271,3 +271,69 @@ def test_compiled_module_matches_eager(config, tmp_path):
     torch.testing.assert_close(
         compiled_out, _difflet(eager.eval(), hidden, t, text, mask), rtol=1e-4, atol=1e-4
     )
+
+
+@pytest.mark.slow
+def test_compiled_blocks_do_not_recompile_per_prompt_length(config, tmp_path):
+    import torch._dynamo
+    from torch._dynamo.utils import counters
+
+    _write_checkpoint(config, tmp_path)
+    torch._dynamo.reset()
+    counters.clear()
+    app = _loaded_cuda_transformer_app(config, tmp_path, torch_compile=True)
+    for valid in (3, 5, 6):
+        hidden, t, text, mask = _inputs(config, 1, [valid])
+        with torch.no_grad():
+            app(hidden, t, text, mask, torch.zeros(1))
+    # One static graph, then one that makes the text length dynamic: never one per prompt.
+    assert counters["stats"]["unique_graphs"] <= 2
+
+
+def test_static_rope_text_slice_is_not_a_view_of_the_table(config):
+    # A view keeps `_base` (the 1024-row table): dynamo's duck sizing then ties the prompt
+    # length to 1024 at warm-up and recompiles on every real prompt (review fix pass).
+    module = _QwenImageTransformerTraceModule(config, apply_text_mask=True)
+    shapes = [[(1, config.packed_height, config.packed_width)]]
+    (_, _), (cos, sin) = module.transformer.pos_embed(shapes, max_txt_seq_len=3)
+    assert cos._base is None and sin._base is None
+
+
+def test_cuda_transformer_example_inputs_carry_a_trimmed_prompt(config, tmp_path):
+    from difflet.backends.cuda.qwen_image.transformer import (
+        WARMUP_VALID_TEXT_TOKENS,
+        CudaQwenImageTransformerApplication,
+    )
+
+    app = CudaQwenImageTransformerApplication(model_path=str(tmp_path), config=config)
+    mask = app.get_example_inputs()[3]
+    assert mask is not None and mask.dtype == torch.bool
+    assert int(mask.sum()) == min(WARMUP_VALID_TEXT_TOKENS, config.text_seq_len)
+
+
+@pytest.mark.parametrize("torch_compile,forwards", [(False, 1), (True, 2)])
+def test_warmup_runs_twice_under_torch_compile(config, tmp_path, torch_compile, forwards):
+    from difflet.backends.cuda.qwen_image.transformer import CudaQwenImageTransformerApplication
+
+    _write_checkpoint(config, tmp_path)
+    app = CudaQwenImageTransformerApplication(
+        model_path=str(tmp_path / "transformer"),
+        config=config,
+        device="cpu",
+        torch_compile=torch_compile,
+    )
+    cache = tmp_path / "cache"
+    app.compile(str(cache))
+    calls = []
+    real_prepare = app._prepare_module
+    hooked = {}
+
+    def prepare():
+        module = real_prepare()
+        if "hook" not in hooked:
+            hooked["hook"] = module.register_forward_hook(lambda *_: calls.append(1))
+        return module
+
+    app._prepare_module = prepare
+    app.load(str(cache))  # warm-up on
+    assert len(calls) == forwards

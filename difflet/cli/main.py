@@ -844,6 +844,11 @@ def _dispatch_dp(args: argparse.Namespace) -> None:
 def _get_orchestrator(args: argparse.Namespace):
     from difflet.backends.registry import current_backend
 
+    if getattr(args, "torch_compile", False) and current_backend() != "cuda":
+        raise SystemExit(
+            "[difflet] --torch-compile is a CUDA-backend option (CUDA plan D4 / F4); "
+            f"the {current_backend()} backend does not take it"
+        )
     if current_backend() == "cuda":
         # CUDA runs the whole model in one process (plan D5): no Neuron stages.
         if args.model_id == "Qwen/Qwen-Image":

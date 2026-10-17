@@ -51,14 +51,14 @@
     },
     {
       "steps": 50,
-      "load_s": 27.1,
-      "encode_s": 0.08,
-      "generate_s": 13.3,
-      "per_step_s": 0.27,
+      "load_s": 15.7,
+      "encode_s": 0.06,
+      "generate_s": 12.4,
+      "per_step_s": 0.25,
       "peak_alloc_gb": 57.95,
-      "peak_reserved_gb": 58.58,
-      "image": "f4 --torch-compile (same cat, PSNR 40.0 dB vs the eager run, 39.9 dB vs diffusers)",
-      "note": "F4 task 3 2026-10-17: opt-in torch.compile of the DiT blocks; load includes 36 s of compilation at warm-up; DiT forward 246 ms vs diffusers 300 ms; diffusers' pipeline 15.2 s for the same 50 steps"
+      "peak_reserved_gb": 58.6,
+      "image": "f4 --torch-compile (same cat, PSNR 40.2 dB vs diffusers)",
+      "note": "F4 task 3 + review fix 2026-10-17: opt-in torch.compile of the DiT blocks, dynamic=True; load includes both compilations (warm-up twice), no recompiles during generation; DiT forward 243 ms vs diffusers 300 ms; diffusers' pipeline 15.2 s for the same 50 steps"
     },
     {
       "steps": 50,

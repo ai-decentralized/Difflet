@@ -120,10 +120,13 @@ class _StaticQwenImageRealRope(nn.Module):
                 img_sin, partition_dim=0, rank=cp_rank, process_group=self.cp_group
             )
         txt_cos, txt_sin = self.txt_cos, self.txt_sin
-        if max_txt_seq_len is not None:
+        if max_txt_seq_len is not None and int(max_txt_seq_len) < int(txt_cos.shape[0]):
             # diffusers passes the current text length; a trimmed prompt (F4) is shorter
             # than the precomputed table. Trainium/TPU pass the full length: no-op there.
-            txt_cos, txt_sin = txt_cos[:max_txt_seq_len], txt_sin[:max_txt_seq_len]
+            # ``.clone()``: a view keeps the 1024-row table as ``_base`` and torch.compile's
+            # duck sizing then ties the prompt length to it and recompiles per prompt.
+            txt_cos = txt_cos[:max_txt_seq_len].clone()
+            txt_sin = txt_sin[:max_txt_seq_len].clone()
         return (img_cos, img_sin), (txt_cos, txt_sin)
 
 

@@ -22,6 +22,11 @@ from difflet.models.qwen_image.dit_config import QwenImageDiTConfig
 from difflet.pipeline.parallel_mesh import MeshSpec
 
 CHECKPOINT_PREFIX = "transformer."
+# The warm-up prompt length: trimmed like a real prompt (so warm-up compiles the shape the
+# run will use, not the 1024-token padded one), and a length nothing else in the graph has
+# (dynamo's duck sizing ties equal sizes together at trace time; 16 would collide with
+# out_channels, 1024 with the text table).
+WARMUP_VALID_TEXT_TOKENS = 37
 
 
 class CudaQwenImageTransformerApplication(CudaApplicationBase):
@@ -83,8 +88,13 @@ class CudaQwenImageTransformerApplication(CudaApplicationBase):
             if self.torch_compile:
                 blocks = module.transformer.transformer_blocks
                 for i, block in enumerate(blocks):
+                    # dynamic=True: one graph for every prompt length. dynamic=False (review
+                    # finding) specialised per trimmed prompt length and hit dynamo's recompile
+                    # limit; dynamic=None's automatic-dynamic graph failed its own guard on the
+                    # next length and compiled a third graph (torch 2.11 / 2.14, see
+                    # test_compiled_blocks_do_not_recompile_per_prompt_length).
                     blocks[i] = torch.compile(
-                        block, mode="max-autotune-no-cudagraphs", dynamic=False, fullgraph=False
+                        block, mode="max-autotune-no-cudagraphs", dynamic=True, fullgraph=False
                     )
             self.module = module
         return self.module
@@ -93,13 +103,23 @@ class CudaQwenImageTransformerApplication(CudaApplicationBase):
         cfg = self.dit_config
         batch = int(cfg.batch_size)
         dtype = cfg.torch_dtype
+        mask = torch.zeros(batch, int(cfg.text_seq_len), dtype=torch.bool)
+        mask[:, : min(WARMUP_VALID_TEXT_TOKENS, int(cfg.text_seq_len))] = True
         return (
             torch.zeros(batch, int(cfg.image_seq_len), int(cfg.in_channels), dtype=dtype),
             torch.zeros(batch, dtype=dtype),
             torch.zeros(batch, int(cfg.text_seq_len), int(cfg.joint_attention_dim), dtype=dtype),
-            None,
+            mask,
             None,
         )
+
+    def warmup(self) -> None:
+        super().warmup()
+        if self.torch_compile:
+            # dynamo's guard on a None block argument errors once ("'NoneType' object has
+            # no attribute 'size'") and forces a second compile; take it here, at load,
+            # instead of inside the user's first generate.
+            super().warmup()
 
     def forward(
         self,
@@ -120,4 +140,9 @@ def transformer_dir(model_path: str) -> str:
     return os.path.join(model_path, "transformer")
 
 
-__all__ = ["CHECKPOINT_PREFIX", "CudaQwenImageTransformerApplication", "transformer_dir"]
+__all__ = [
+    "CHECKPOINT_PREFIX",
+    "WARMUP_VALID_TEXT_TOKENS",
+    "CudaQwenImageTransformerApplication",
+    "transformer_dir",
+]

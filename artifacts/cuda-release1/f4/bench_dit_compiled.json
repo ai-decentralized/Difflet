@@ -15,103 +15,102 @@
   "cases": {
     "difflet_masked": {
       "timed": {
-        "median_ms": 245.83716583251953,
-        "min_ms": 245.76319885253906,
-        "max_ms": 246.24131774902344,
+        "median_ms": 242.77244567871094,
+        "min_ms": 242.70358276367188,
+        "max_ms": 242.91973876953125,
         "iters": 10
       },
       "profile": {
-        "total_ms": 431.9376179999997,
+        "total_ms": 240.13754899999984,
         "by_category_ms": {
-          "other": 267.2187360000006,
-          "elementwise": 0.07568000000000438,
-          "copy": 0.008896000000000185,
-          "gemm": 9.727451999999845,
-          "norm": 110.11679999999926,
-          "attention": 44.79005399999999
+          "elementwise": 12.13854000000002,
+          "copy": 0.00876800000000003,
+          "gemm": 180.51782499999968,
+          "norm": 2.784823000000145,
+          "attention": 44.68759300000002
         },
         "top": [
           {
-            "name": "triton_tem_fused_addmm_gelu_t_view_16",
-            "ms": 109.26626199999997,
-            "share": 0.2529676912743452
+            "name": "void cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_128x128_32x4_tn_align8>(cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_128x128_32x4_tn_align8::Params)",
+            "ms": 53.08891600000004,
+            "share": 0.22107711276756672
           },
           {
             "name": "triton_tem_fused_add_addmm_mul_native_layer_norm_split_t_unsqueeze_view_14",
-            "ms": 95.76691199999978,
-            "share": 0.22171468288274868
-          },
-          {
-            "name": "triton_tem_fused_addmm_t_view_3",
-            "ms": 86.86283600000016,
-            "share": 0.2011004190887588
+            "ms": 47.45075199999983,
+            "share": 0.1975982190107215
           },
           {
             "name": "void pytorch_flash::flash_fwd_kernel<Flash_fwd_kernel_traits<128, 128, 64, 4, false, false, cutlass::bfloat16_t, Flash_kernel_traits<128, 128, 64, 4, cutlass::bfloat16_t> >, false, false, false, false, false, true, false, false>(pytorch_flash::Flash_fwd_params)",
-            "ms": 44.79005399999999,
-            "share": 0.10369565449610832
+            "ms": 44.68759300000002,
+            "share": 0.18609165116447512
+          },
+          {
+            "name": "triton_tem_fused_addmm_t_view_3",
+            "ms": 42.85655799999996,
+            "share": 0.17846670867786688
           },
           {
             "name": "triton_tem_fused_addmm_slice_squeeze_t_transpose_view_9",
-            "ms": 28.871119999999994,
-            "share": 0.0668409483149023
-          },
-          {
-            "name": "triton_poi_fused_gelu_view_15",
-            "ms": 10.95286200000001,
-            "share": 0.025357508916947394
+            "ms": 14.27821000000005,
+            "share": 0.05945846478178246
           },
           {
             "name": "std::enable_if<!(false), void>::type internal::gemvx::kernel<int, int, __nv_bfloat16, __nv_bfloat16, __nv_bfloat16, float, false, true, true, false, 6, false, cublasGemvParamsEx<int, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16>, float> >(cublasGemvParamsEx<int, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16>, float>)",
-            "ms": 9.646203999999868,
-            "share": 0.02233240078663367
+            "ms": 9.652105999999984,
+            "share": 0.04019407227313705
+          },
+          {
+            "name": "triton_poi_fused_gelu_view_15",
+            "ms": 5.469045999999987,
+            "share": 0.022774639046557403
           },
           {
             "name": "triton_tem_fused_addmm_t_view_5",
-            "ms": 9.194216000000058,
-            "share": 0.021285981162215105
+            "ms": 4.465591999999951,
+            "share": 0.018595975592305036
           },
           {
             "name": "triton_tem_fused_add_addmm_gelu_mul_split_t_unsqueeze_view_13",
-            "ms": 8.719597999999907,
-            "share": 0.020187169713011457
+            "ms": 4.329115999999913,
+            "share": 0.0180276513107907
           },
           {
             "name": "triton_tem_fused_add_addmm_gelu_mul_native_layer_norm_split_t_unsqueeze_view_12",
-            "ms": 8.540070000000192,
-            "share": 0.019771535620220507
+            "ms": 4.314206999999952,
+            "share": 0.01796556605980831
           },
           {
-            "name": "triton_per_fused__to_copy_add_mean_mul_neg_pow_rsqrt_stack_unbind_unsqueeze_view_4",
-            "ms": 7.74459000000008,
-            "share": 0.017929880791258342
+            "name": "triton_red_fused__to_copy_add_mean_mul_neg_pow_rsqrt_stack_unbind_unsqueeze_view_4",
+            "ms": 3.9519579999999963,
+            "share": 0.0164570597828497
           },
           {
-            "name": "triton_poi_fused_add_mul_split_unsqueeze_view_17",
-            "ms": 4.087399999999898,
-            "share": 0.009462940548975061
+            "name": "triton_poi_fused_add_mul_split_unsqueeze_view_16",
+            "ms": 1.8498499999999494,
+            "share": 0.007703293415391488
           },
           {
             "name": "triton_red_fused_add_mul_native_layer_norm_split_unsqueeze_view_10",
-            "ms": 3.669082000000024,
-            "share": 0.008494471995722369
+            "ms": 1.744534999999988,
+            "share": 0.007264732263924245
           },
           {
             "name": "triton_red_fused_add_mul_native_layer_norm_split_unsqueeze_1",
-            "ms": 1.554051999999594,
-            "share": 0.0035978621338778488
+            "ms": 0.7021110000000536,
+            "share": 0.0029237868168632557
           },
           {
             "name": "triton_poi_fused_cat_view_8",
-            "ms": 1.033537999999854,
-            "share": 0.002392794600260667
+            "ms": 0.5162240000000706,
+            "share": 0.0021497012947361725
           }
         ]
       },
       "attention_kernels": [
         "void pytorch_flash::flash_fwd_kernel<Flash_fwd_kernel_traits<128, 128, 64, 4, false, false, cutlass::bfloat16_t, Flash_kernel_traits<128, 128, 64, 4, cutlass::bfloat16_t> >, false, false, false, false, false, true, false, false>(pytorch_flash::Flash_fwd_params)"
       ],
-      "first_forward_s": 35.59339090799995
+      "first_forward_s": 31.058181137000247
     }
   },
   "trim_text_padding": true
