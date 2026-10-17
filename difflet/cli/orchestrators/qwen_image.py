@@ -7,18 +7,36 @@ Inter-stage tensors: {work_dir}/text.pt, {work_dir}/latents.pt.
 
 Stage logic migrated from examples/qwen_image_example.py.
 
-With DIFFLET_BACKEND naming a non-AoT torchrun backend (neuron), the plan is one launch and a
-host decode: the generate stage runs as tp*cp torchrun ranks (default tp 4, every core of a
-trn2.3xlarge) that build the registry's application (TorchNeuronQwenImageApplication) through
+With DIFFLET_BACKEND naming a non-AoT torchrun backend (neuron), the plan is the generate launch
+and then a decode: the generate stage runs as tp*cp torchrun ranks (default tp 4, every core of
+a trn2.3xlarge) that build the registry's application (TorchNeuronQwenImageApplication) through
 DiffletPipeline (``_stage_generate_neuron``). The text stage is folded into it: rank 0 encodes
 the prompt with Qwen2.5-VL on its host and broadcasts the embeddings, the ranks denoise, and rank
-0 writes latents.pt in the packed format the vae stage reads. The driver then decodes it on the
-host (diffusers ``AutoencoderKLQwenImage``, fp32: ``_decode_latents_host``), so there is no text
-or vae launch and --host-vae changes nothing. ``compile`` is the generate stage's load + warm-up
-(it fills the NEFF cache) and its stage manifest; the stage cache key names the backend and exec
-mode; --cache-dir becomes DIFFLET_COMPILE_CACHE unless that is exported; the options the ranks
-reject (--sp, --cfg-parallel, TeaCache, several --shapes, --requests/--dp) are refused by the
-driver before torchrun starts. Unset, trainium and tpu keep their three stages unchanged.
+0 writes latents.pt in the packed format the vae stage reads. The decode then runs after that
+launch has exited, in one of two places (``_decodes_on_device``):
+
+* on the host, the default for now: the driver decodes with diffusers ``AutoencoderKLQwenImage``
+  in fp32 (``_decode_latents_host``), about 23 s per 1024x1024 image on the trn2.3xlarge host;
+* with --device-vae, in a vae stage of its own on one NeuronCore (``_stage_vae_neuron``): the
+  Wan decoder (Qwen-Image's VAE is Wan 2.1's) in fp32, eager, as Wan's neuron vae stage runs it.
+  --host-vae keeps the host decode whatever the default is.
+
+The decoder runs in a launch of its own rather than beside the DiT on rank 0's core, as Wan
+does, because of the HBM arithmetic: at tp4 a core already holds about 10.1 GiB of DiT shard
+(measured, docs/verification/qwen-image-neuron-evidence.md) plus its activations and NEFFs,
+and the fp32 decoder adds 0.5 GB of weights and several GiB of full-resolution activations
+(a 96-channel 1024x1024 fp32 feature map alone is 0.4 GiB, and the up blocks keep a few of them
+and their convolution caches live). That leaves too little margin at tp4, and at tp2 (CP2,
+CFG2 or dp2tp2, 19.75 GiB of DiT per core) it cannot fit at all. After the generate launch has
+exited, the vae launch has a whole core to itself whatever the topology was. Both decodes share
+the unpack and the un-normalisation (``_vae_latents``), so they see the same fp32 latent.
+
+``compile`` is the generate stage's load + warm-up (it fills the NEFF cache) and its stage
+manifest, plus the vae stage's warm-up decode with --device-vae; the stage cache key names the
+backend and exec mode; --cache-dir becomes DIFFLET_COMPILE_CACHE unless that is exported; the
+options the ranks reject (--sp, --cfg-parallel, TeaCache, several --shapes, --requests/--dp)
+are refused by the driver before torchrun starts. Unset, trainium and tpu keep their three
+stages unchanged.
 """
 
 from __future__ import annotations
@@ -69,8 +87,9 @@ def _require_request_shape_in_set(args: argparse.Namespace):
 
 # TorchNeuronQwenImageApplication keyword arguments for the torchrun generate stage: the
 # Trainium generate stage's set, Qwen2.5-VL on rank 0's host (in its default bf16, the Trainium
-# text stage's dtype) with 12 threads, no device VAE (the driver decodes on the host) and
-# exec_mode=None (the application reads DIFFLET_EXEC_MODE, which --exec-mode exports).
+# text stage's dtype) with 12 threads, no VAE in the generate launch (the decode runs after it,
+# on the host or in the vae stage: _decodes_on_device) and exec_mode=None (the application
+# reads DIFFLET_EXEC_MODE, which --exec-mode exports).
 _TORCHRUN_APPLICATION_KWARGS = {
     "text_seq_len": _TEXT_SEQ_LEN,
     "batch_size": 1,
@@ -172,17 +191,51 @@ def _write_image(img, output: str, save=_save_image_torchvision) -> None:
         )
 
 
+#: Where the neuron backend decodes when neither --host-vae nor --device-vae is given: the host,
+#: for now. The on-device stage measures the device decode against the host's (about 23 s per
+#: 1024x1024 image) and flips this; --host-vae then remains the opt-out.
+_DEVICE_VAE_DEFAULT = False
+
+
+def _decodes_on_device(args: argparse.Namespace) -> bool:
+    """Whether the neuron backend decodes in a vae stage on one core (``_stage_vae_neuron``)
+    instead of on the host in the driver (``_decode_latents_host``). --host-vae wins, then
+    --device-vae, then ``_DEVICE_VAE_DEFAULT``. Torch-free."""
+    if getattr(args, "host_vae", False):
+        return False
+    if getattr(args, "device_vae", False):
+        return True
+    return _DEVICE_VAE_DEFAULT
+
+
+def _vae_latents(packed, height: int, width: int, latents_mean, latents_std):
+    """The VAE's fp32 input for the generate stage's packed latents: unpacked to a one-frame
+    latent video (``_unpack_latents``) and un-normalised, ``z * latents_std + latents_mean`` (the
+    Trainium vae stage's, diffusers' ``latents / (1 / std) + mean`` up to rounding, and the
+    orchestrator's ``_decode_latents``). Both neuron decodes, host and device, start from this
+    tensor, so they decode bit-identical inputs. Without a mean/std the latent is unchanged."""
+    import torch
+
+    z = _unpack_latents(packed.to(torch.float32), height, width)
+    if latents_mean and latents_std:
+        mean = torch.tensor(latents_mean, dtype=torch.float32).view(1, -1, 1, 1, 1)
+        std = torch.tensor(latents_std, dtype=torch.float32).view(1, -1, 1, 1, 1)
+        z = z * std + mean
+    return z
+
+
 def _decode_latents_host(
     latents_path: str, model_dir: str, output_path: str, *, height: int, width: int
 ) -> None:
     """Decode the generate stage's packed latents with diffusers' ``AutoencoderKLQwenImage`` on
-    the host CPU in fp32: the neuron backend's VAE path. The driver runs it after the torchrun
-    generate stage has exited, so the decoder never shares a core (or a process) with the DiT.
+    the host CPU in fp32: the neuron backend's default VAE path. The driver runs it after the
+    torchrun generate stage has exited, so the decoder never shares a core (or a process) with
+    the DiT.
 
     The decode of the Trainium vae stage and of diffusers' ``QwenImagePipeline``: unpack to a
-    one-frame latent video, un-normalise (``z * latents_std + latents_mean``), decode, keep
-    frame 0. fp32 rather than the Trainium stage's bf16: the host has the memory for it. The
-    image goes through PIL (``_save_image_pil``: the pixels torchvision would write).
+    one-frame latent video, un-normalise (``_vae_latents``), decode, keep frame 0. fp32 rather
+    than the Trainium stage's bf16: the host has the memory for it. The image goes through PIL
+    (``_save_image_pil``: the pixels torchvision would write).
     """
     import torch
     from diffusers import AutoencoderKLQwenImage
@@ -190,13 +243,10 @@ def _decode_latents_host(
     vae = AutoencoderKLQwenImage.from_pretrained(
         str(Path(model_dir) / "vae"), torch_dtype=torch.float32
     ).eval()
-    packed = torch.load(latents_path, map_location="cpu").to(torch.float32)
-    z = _unpack_latents(packed, height, width)
-    config = vae.config
-    mean = torch.tensor(config.latents_mean, dtype=torch.float32).view(1, -1, 1, 1, 1)
-    std = torch.tensor(config.latents_std, dtype=torch.float32).view(1, -1, 1, 1, 1)
+    packed = torch.load(latents_path, map_location="cpu")
+    z = _vae_latents(packed, height, width, vae.config.latents_mean, vae.config.latents_std)
     with torch.no_grad():
-        frames = vae.decode(z * std + mean, return_dict=False)[0]
+        frames = vae.decode(z, return_dict=False)[0]
     _write_image(frames[:, :, 0].float().cpu(), output_path, save=_save_image_pil)
 
 
@@ -215,6 +265,10 @@ class QwenImageOrchestrator(ModelOrchestrator):
         reject_unsupported_torchrun_options(
             _torchrun_unsupported_options(self.args), runs=_TORCHRUN_RUNS
         )
+        if getattr(self.args, "host_vae", False) and getattr(self.args, "device_vae", False):
+            print("Error: --host-vae and --device-vae are mutually exclusive; nothing was "
+                  "launched.", file=sys.stderr, flush=True)
+            raise SystemExit(2)
 
     def run(self) -> None:
         self._reject_unsupported_torchrun_options()  # before the download, too
@@ -228,8 +282,9 @@ class QwenImageOrchestrator(ModelOrchestrator):
         full_cores = (self.args.tp_degree or 4) * (self.args.cp_degree or 1)
         shared = self._shared_cli_args(stage_mode="compile", work_dir=str(work_dir))
         if torchrun_backend() is not None:
-            # One launch: the generate stage's load + warm-up (the text encoder is part of it)
-            # fills the NEFF cache and writes the manifest; the host VAE compiles nothing.
+            # The generate stage's load + warm-up (the text encoder is part of it) fills the
+            # NEFF cache and writes the manifest; the host VAE compiles nothing, the device
+            # VAE's warm-up decode fills the eager kernel cache at the request shape.
             runner.run_stage(
                 _HF_MODEL_ID,
                 "generate",
@@ -237,6 +292,11 @@ class QwenImageOrchestrator(ModelOrchestrator):
                 virtual_core_size=_VIRTUAL_CORE_SIZE,
                 cli_args=shared,
             )
+            if _decodes_on_device(self.args):
+                runner.run_stage(
+                    _HF_MODEL_ID, "vae", num_cores=1, virtual_core_size=_VIRTUAL_CORE_SIZE,
+                    cli_args=shared,
+                )
             return
         runner.run_stage(
             _HF_MODEL_ID,
@@ -299,8 +359,9 @@ class QwenImageOrchestrator(ModelOrchestrator):
 
     def _generate_torchrun(self, work_dir: Path, full_cores: int, shared: list[str]) -> None:
         """``generate`` on a torchrun backend (neuron): the generate stage as ``full_cores``
-        ranks (prompt encode on rank 0's host, denoise, rank 0 writes latents.pt), then the host
-        decode here in the driver, after torchrun has exited (so after every rank has)."""
+        ranks (prompt encode on rank 0's host, denoise, rank 0 writes latents.pt), then the
+        decode after torchrun has exited (so after every rank has): the vae stage on one core
+        with --device-vae, else the host decode here in the driver."""
         from difflet.pipeline.path_resolver import resolve_model_path
 
         try:
@@ -311,13 +372,19 @@ class QwenImageOrchestrator(ModelOrchestrator):
                 virtual_core_size=_VIRTUAL_CORE_SIZE,
                 cli_args=shared,
             )
-            _decode_latents_host(
-                str(work_dir / "latents.pt"),
-                self._model_dir(self.args, resolve_model_path),
-                self.args.output,
-                height=self.args.height or 1024,
-                width=self.args.width or 1024,
-            )
+            if _decodes_on_device(self.args):
+                runner.run_stage(
+                    _HF_MODEL_ID, "vae", num_cores=1, virtual_core_size=_VIRTUAL_CORE_SIZE,
+                    cli_args=shared,
+                )
+            else:
+                _decode_latents_host(
+                    str(work_dir / "latents.pt"),
+                    self._model_dir(self.args, resolve_model_path),
+                    self.args.output,
+                    height=self.args.height or 1024,
+                    width=self.args.width or 1024,
+                )
         except Exception:
             print(f"[difflet] work dir preserved at {work_dir} for inspection", file=sys.stderr)
             raise
@@ -338,13 +405,13 @@ class QwenImageOrchestrator(ModelOrchestrator):
 
     @staticmethod
     def _require_aot_stage(stage: str) -> None:
-        """The text and vae stages exist on the AoT backends only: on a torchrun backend the
-        generate stage encodes the prompt and the driver decodes on the host."""
+        """The text stage exists on the AoT backends only: on a torchrun backend the generate
+        stage encodes the prompt (the vae stage is ``_stage_vae_neuron`` there)."""
         backend = torchrun_backend()
         if backend is not None:
             raise RuntimeError(
                 f"[qwen_image] the {backend} backend has no {stage!r} stage: the generate stage "
-                "encodes the prompt (rank 0's host) and the driver decodes on the host"
+                "encodes the prompt (rank 0's host)"
             )
 
     def _stage_text(self, args: argparse.Namespace) -> None:
@@ -643,7 +710,9 @@ class QwenImageOrchestrator(ModelOrchestrator):
             dist.destroy_process_group()
 
     def _stage_vae(self, args: argparse.Namespace) -> None:
-        self._require_aot_stage("vae")
+        if torchrun_backend() is not None:
+            self._stage_vae_neuron(args)
+            return
         import torch
         from difflet.backends.trainium.core.config import NeuronConfig
         from difflet.backends.trainium.wan.vae import (
@@ -706,6 +775,56 @@ class QwenImageOrchestrator(ModelOrchestrator):
                 img = app(z)
                 img = (img[0] if isinstance(img, (tuple, list)) else img).float().cpu()
                 _write_image(img[:, :, 0], req.output)
+
+    def _stage_vae_neuron(self, args: argparse.Namespace) -> None:
+        """The neuron backend's vae stage (--device-vae): one rank, a launch of its own after
+        the generate stage has exited, so the decoder has a whole core (see the module
+        docstring). Wan's ``_stage_vae_neuron`` with Qwen-Image's one-frame latent: the Wan
+        decoder (``NeuronWanVaeDecoderApplication``, which Qwen-Image's VAE maps onto key for
+        key) in fp32, eager, through the composed application's adapter
+        (``_DeviceQwenVaeDecoder``, which drops the frame axis). ``compile`` mode loads it with
+        the warm-up decode, which compiles and caches the per-op kernels at the request shape,
+        and writes the manifest; ``generate`` skips the warm-up, a second full decode that eager
+        mode does not need. The packed latents are unpacked and un-normalised by
+        ``_vae_latents``, as the host decode does, and the image is written as the host decode
+        writes it (``_write_image`` through PIL)."""
+        import json
+
+        import torch
+
+        from difflet.backends.neuron.core import distributed
+        from difflet.backends.neuron.wan import vae as vae_mod
+        from difflet.cli.dp import stage_loop
+        from difflet.models.qwen_image import neuron_application as na
+        from difflet.pipeline.parallel_config import DiffletParallelConfig
+        from difflet.pipeline.path_resolver import resolve_model_path
+
+        vae_dir = Path(self._model_dir(args, resolve_model_path)) / "vae"
+        with open(vae_dir / "config.json", encoding="utf-8") as f:
+            z_dim = int(json.load(f)["z_dim"])
+        h, w = args.height or 1024, args.width or 1024
+        app = vae_mod.NeuronWanVaeDecoderApplication(
+            model_path=str(vae_dir),
+            latent_shape=(1, z_dim, 1, 2 * (h // 16), 2 * (w // 16)),
+            parallel=DiffletParallelConfig(tp_degree=1),
+            device="neuron",
+        )
+        app.load(skip_warmup=args.stage_mode != "compile")
+        if args.stage_mode == "compile":
+            if distributed.is_rank0():
+                self._finish_stage_compile("vae", args, self._stage_compiled_dir("vae", args))
+            return
+        decoder = na._DeviceQwenVaeDecoder(app, device="neuron")
+        config = app.vae_config
+        for req in stage_loop.claimed_requests(args):
+            with stage_loop.request_scope(args, req, final=True):
+                packed = torch.load(stage_loop.work_file(args, req, "latents.pt"),
+                                    map_location="cpu")
+                z = _vae_latents(packed, h, w, config.latents_mean, config.latents_std)
+                with torch.no_grad():
+                    images = decoder(z)
+                if distributed.is_rank0():
+                    _write_image(images.float().cpu(), req.output, save=_save_image_pil)
 
     # ------------------------------------------------------------ helpers
 
