@@ -85,12 +85,7 @@ def test_neutral_flux_dit_matches_diffusers_on_cpu(monkeypatch):
         reference.state_dict(),
         num_single_layers=config.num_single_layers,
         inner_dim=config.inner_dim,
-        world_size=config.neuron_config.world_size,
     )
-    # global_rank.rank is the Trainium SPMDRank parameter; off Trainium SPMDRank is a
-    # plain rank holder with no state, so that one key has nothing to land on.
-    assert "global_rank.rank" not in model.state_dict()
-    converted.pop("global_rank.rank")
     model.load_state_dict(converted, strict=True)
 
     hidden = torch.randn(1, 16, 4)

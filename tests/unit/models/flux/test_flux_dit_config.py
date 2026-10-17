@@ -71,7 +71,7 @@ def test_convert_flux_hf_state_dict_splits_proj_out_at_inner_dim():
         "x_embedder.weight": other,
     }
 
-    out = convert_flux_hf_state_dict(sd, num_single_layers=1, inner_dim=inner, world_size=1)
+    out = convert_flux_hf_state_dict(sd, num_single_layers=1, inner_dim=inner)
 
     attn_w = out["single_transformer_blocks.0.proj_out_attn.weight"]
     mlp_w = out["single_transformer_blocks.0.proj_out_mlp.weight"]
@@ -82,7 +82,8 @@ def test_convert_flux_hf_state_dict_splits_proj_out_at_inner_dim():
     # The fused HF keys are consumed, so a strict load sees only Difflet names.
     assert "single_transformer_blocks.0.proj_out.weight" not in out
     assert "single_transformer_blocks.0.proj_out.bias" not in out
-    assert torch.equal(out["global_rank.rank"], torch.arange(1, dtype=torch.int32))
+    # The SPMD rank buffer is Trainium state; the Trainium converter adds it, not this one.
+    assert "global_rank.rank" not in out
     assert torch.equal(out["x_embedder.weight"], other)
     # Contiguous clones: the result never aliases the caller's tensors.
     assert all(t.is_contiguous() for t in out.values())

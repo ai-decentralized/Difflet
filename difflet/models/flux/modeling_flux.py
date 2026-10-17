@@ -1468,17 +1468,15 @@ def convert_flux_hf_state_dict(
     *,
     num_single_layers: int,
     inner_dim: int,
-    world_size: int,
 ) -> Dict[str, torch.Tensor]:
     """Convert a diffusers ``FluxTransformer2DModel`` state dict to this module's names.
 
-    Adds the SPMD rank buffer (``global_rank.rank``) and splits each single block's
-    fused ``proj_out`` (``[attn | mlp]`` along the input dim, split at ``inner_dim``)
-    into ``proj_out_attn`` (which takes the bias) and ``proj_out_mlp``. The fused keys
-    are left out, so every key names a module tensor and a strict load works (on
-    backends whose ``SPMDRank`` holds no state, the caller drops ``global_rank.rank``).
-    Every value is a contiguous clone; the caller's dict is not modified. The Trainium
-    application's ``convert_hf_to_neuron_state_dict`` delegates here.
+    Splits each single block's fused ``proj_out`` (``[attn | mlp]`` along the input
+    dim, split at ``inner_dim``) into ``proj_out_attn`` (which takes the bias) and
+    ``proj_out_mlp``. The fused keys are left out, so the result loads with
+    ``strict=True``. Every value is a contiguous clone; the caller's dict is not
+    modified. The Trainium application's ``convert_hf_to_neuron_state_dict`` delegates
+    here and adds its Trainium-only state (``global_rank.rank``, the SPMD rank buffer).
     """
     fused = {
         f"single_transformer_blocks.{i}.proj_out.{name}"
@@ -1486,7 +1484,6 @@ def convert_flux_hf_state_dict(
         for name in ("weight", "bias")
     }
     converted = {key: value for key, value in state_dict.items() if key not in fused}
-    converted["global_rank.rank"] = torch.arange(0, world_size, dtype=torch.int32)
     for i in range(num_single_layers):
         prefix = f"single_transformer_blocks.{i}"
         weight = state_dict[f"{prefix}.proj_out.weight"]
