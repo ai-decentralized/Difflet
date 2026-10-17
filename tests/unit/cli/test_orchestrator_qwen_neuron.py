@@ -37,7 +37,7 @@ def _qwen_args(**overrides) -> argparse.Namespace:
     defaults = dict(
         model_id=_QWEN_ID, tp_degree=4, cp_degree=1, cp_mode="gather_kv", cfg_parallel=False,
         sp_enabled=False, height=1024, width=1024, num_frames=None, shapes=None,
-        cache_dir=None, force=False, revision=None, host_vae=False,
+        cache_dir=None, force=False, revision=None, host_vae=False, device_vae=False,
         prompt="a cat", output="/tmp/qwen.png",
         steps=4, guidance_scale=4.0, seed=42, stage_mode="generate",
         work_dir=None, keep_work_dir=False,
@@ -136,12 +136,170 @@ def test_aot_backends_keep_the_three_stages(monkeypatch, tmp_path, backend, mode
     assert stages == [("text", 4), ("generate", 4), ("vae", 1)] and decoded == []
 
 
-@pytest.mark.parametrize("stage", ["text", "vae"])
-def test_neuron_has_no_text_or_vae_stage(monkeypatch, stage):
+def test_neuron_has_no_text_stage(monkeypatch):
     _backend(monkeypatch, "neuron")
     args = _qwen_args()
-    with pytest.raises(RuntimeError, match=f"no '{stage}' stage"):
-        QwenImageOrchestrator(args)._run_stage_internal(stage, args)
+    with pytest.raises(RuntimeError, match="no 'text' stage"):
+        QwenImageOrchestrator(args)._run_stage_internal("text", args)
+
+
+# ----------------------------------------------------------------- device VAE (--device-vae)
+
+
+@pytest.mark.parametrize("mode", ["compile", "generate"])
+def test_neuron_device_vae_is_a_vae_stage_after_the_generate_launch(monkeypatch, tmp_path, mode):
+    # A launch of its own on one core, as Wan's: the decoder never shares a core with the DiT.
+    _backend(monkeypatch, "neuron")
+    stages, decoded = _record_stages(monkeypatch)
+    args = _qwen_args(device_vae=True, work_dir=str(tmp_path / "w"))
+    getattr(QwenImageOrchestrator(args), mode)()
+    assert stages == [("generate", 4), ("vae", 1)] and decoded == []
+
+
+@pytest.mark.parametrize("device_default", [False, True])
+@pytest.mark.parametrize("host_vae, device_vae", [(False, False), (True, False), (False, True)])
+def test_vae_placement_flags_and_the_default(monkeypatch, tmp_path, device_default, host_vae,
+                                             device_vae):
+    # The host is the default for now (the device stage flips _DEVICE_VAE_DEFAULT after
+    # measuring); --host-vae is the opt-out whatever the default is.
+    assert qwen_mod._DEVICE_VAE_DEFAULT is False
+    monkeypatch.setattr(qwen_mod, "_DEVICE_VAE_DEFAULT", device_default)
+    _backend(monkeypatch, "neuron")
+    stages, decoded = _record_stages(monkeypatch)
+    args = _qwen_args(host_vae=host_vae, device_vae=device_vae, work_dir=str(tmp_path / "w"))
+    QwenImageOrchestrator(args).generate()
+    on_device = not host_vae and (device_vae or device_default)
+    assert [s for s, _ in stages] == (["generate", "vae"] if on_device else ["generate"])
+    assert len(decoded) == (0 if on_device else 1)
+
+
+@pytest.mark.parametrize("mode", ["compile", "generate", "run"])
+def test_host_vae_and_device_vae_are_exclusive(monkeypatch, tmp_path, capsys, mode):
+    _backend(monkeypatch, "neuron")
+    monkeypatch.setattr(qwen_mod.runner, "run_stage",
+                        lambda *a, **k: pytest.fail("no stage may be launched"))
+    monkeypatch.setattr(QwenImageOrchestrator, "download",
+                        lambda self: pytest.fail("rejected before the download"))
+    args = _qwen_args(host_vae=True, device_vae=True, work_dir=str(tmp_path / "w"))
+    with pytest.raises(SystemExit) as exc:
+        getattr(QwenImageOrchestrator(args), mode)()
+    assert exc.value.code == 2
+    assert "--host-vae and --device-vae are mutually exclusive" in capsys.readouterr().err
+
+
+def test_device_vae_flag_is_parsed_and_forwarded_to_dp_workers():
+    from difflet.cli.dp.router import worker_cli_args
+
+    cli_main = importlib.import_module("difflet.cli.main")
+    parser = cli_main._build_parser()
+    for command in ("compile", "generate", "run"):
+        args = parser.parse_args([command, "--model-id", _QWEN_ID, "--device-vae"])
+        assert args.device_vae is True and args.host_vae is False
+    args = parser.parse_args(["generate", "--model-id", _QWEN_ID, "--device-vae"])
+    args.dp = 2
+    assert "--device-vae" in worker_cli_args(args)
+
+
+def _cpu_vae_stage(monkeypatch):
+    """The vae stage's decoder on the CPU: the real ``NeuronWanVaeDecoderApplication`` and
+    ``_DeviceQwenVaeDecoder``, with the device the stage asks for ("neuron") replaced by the
+    CPU. Returns the applications the stage built."""
+    import difflet.backends.neuron.wan.vae as vae_mod
+    import difflet.models.qwen_image.neuron_application as na_mod
+
+    real_app, real_adapter = vae_mod.NeuronWanVaeDecoderApplication, na_mod._DeviceQwenVaeDecoder
+    built = []
+
+    def app(*, device, **kwargs):
+        assert device == "neuron"
+        built.append(real_app(device="cpu", **kwargs))
+        return built[-1]
+
+    def adapter(app, *, device):
+        assert device == "neuron"
+        return real_adapter(app, device="cpu")
+
+    monkeypatch.setattr(vae_mod, "NeuronWanVaeDecoderApplication", app)
+    monkeypatch.setattr(na_mod, "_DeviceQwenVaeDecoder", adapter)
+    return built
+
+
+@pytest.fixture
+def clean_neuron_mesh():
+    from difflet.backends.neuron.ops_impl import parallel_mesh
+
+    parallel_mesh.destroy_parallel_mesh()
+    yield
+    parallel_mesh.destroy_parallel_mesh()
+
+
+def test_neuron_vae_stage_decodes_what_the_host_decode_does(monkeypatch, tmp_path,
+                                                            clean_neuron_mesh):
+    """The vae stage (the Wan decoder through the application's adapter, fp32 eager, here on
+    the CPU) against the host decode (diffusers' AutoencoderKLQwenImage, fp32) on the same
+    packed latents of a non-square tiny image: the same unpack and latents_mean/std, the same
+    [1, 3, H, W] image in [-1, 1], equal to fp32 rounding."""
+    import numpy as np
+    import torch
+    from PIL import Image
+
+    _backend(monkeypatch, "neuron")
+    model = tmp_path / "model"
+    _tiny_vae_snapshot(model)
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path",
+                        lambda *a, **k: str(model))
+    built = _cpu_vae_stage(monkeypatch)
+    height, width = 64, 96
+    work = tmp_path / "work"
+    work.mkdir()
+    packed = torch.randn(1, (height // 16) * (width // 16), 16,
+                         generator=torch.Generator().manual_seed(3)).to(torch.bfloat16)
+    torch.save(packed, work / "latents.pt")
+    args = _qwen_args(height=height, width=width, work_dir=str(work),
+                      output=str(tmp_path / "device.png"), cache_dir=str(tmp_path / "cache"))
+    QwenImageOrchestrator(args)._run_stage_internal("vae", args)
+    qwen_mod._decode_latents_host(str(work / "latents.pt"), str(model),
+                                  str(tmp_path / "host.png"), height=height, width=width)
+
+    [app] = built
+    assert app.latent_shape == (1, 4, 1, height // 8, width // 8) and app.dtype is torch.float32
+    assert app.load_report["missing"] == [] and app.warmup_shapes is None  # generate: no warm-up
+    device_png = np.asarray(Image.open(tmp_path / "device.png"))
+    host_png = np.asarray(Image.open(tmp_path / "host.png"))
+    assert device_png.shape == (height, width, 3)
+    assert np.abs(device_png.astype(int) - host_png.astype(int)).max() <= 1
+    # The tensors themselves: the writer's .pt fallback keeps them.
+    monkeypatch.setattr(qwen_mod, "_save_image_pil",
+                        lambda image, path: (_ for _ in ()).throw(RuntimeError("no image")))
+    QwenImageOrchestrator(args)._run_stage_internal("vae", args)
+    qwen_mod._decode_latents_host(str(work / "latents.pt"), str(model),
+                                  str(tmp_path / "host.png"), height=height, width=width)
+    device = torch.load(tmp_path / "device.pt")
+    host = torch.load(tmp_path / "host.pt")
+    assert device.shape == host.shape == (1, 3, height, width)
+    assert device.dtype == host.dtype == torch.float32
+    torch.testing.assert_close(device, host, atol=1e-5, rtol=1e-5)
+
+
+def test_neuron_vae_stage_compile_warms_up_and_writes_the_manifest(monkeypatch, tmp_path,
+                                                                   clean_neuron_mesh):
+    from difflet.cli.orchestrators.base import has_valid_stage_manifest
+
+    _backend(monkeypatch, "neuron")
+    model = tmp_path / "model"
+    _tiny_vae_snapshot(model)
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path",
+                        lambda *a, **k: str(model))
+    built = _cpu_vae_stage(monkeypatch)
+    args = _qwen_args(height=32, width=48, stage_mode="compile", work_dir=str(tmp_path / "w"),
+                      cache_dir=str(tmp_path / "cache"))
+    orch = QwenImageOrchestrator(args)
+    orch._run_stage_internal("vae", args)
+    [app] = built
+    assert app.warmup_shapes == [(1, 4, 1, 4, 6)]  # the warm-up decode at the request shape
+    assert has_valid_stage_manifest(orch._stage_compiled_dir("vae", args),
+                                    orch._stage_cache_inputs("vae", args))
+    assert not (tmp_path / "w").exists()
 
 
 # ----------------------------------------------------------------- driver-side rejection
