@@ -67,8 +67,9 @@ def build_parallel_layers(collectives) -> SimpleNamespace:
     against ``collectives``.
 
     ``collectives`` must provide ``gather_tp_dim(t, *, dim)``, ``scatter_tp_dim(t, *, dim)``,
-    ``reduce_tp(t)``, ``get_tp_size() -> int`` and ``get_tp_rank() -> int``. Each call
-    returns new classes, so two backends in one process never share them.
+    ``reduce_tp(t)``, ``get_tp_size() -> int``, ``get_tp_rank() -> int`` and
+    ``get_tp_groups() -> list[list[int]]``. Each call returns new classes, so two
+    backends in one process never share them.
     """
 
     gather_tp_dim = collectives.gather_tp_dim
@@ -76,6 +77,7 @@ def build_parallel_layers(collectives) -> SimpleNamespace:
     reduce_tp = collectives.reduce_tp
     get_tp_size = collectives.get_tp_size
     get_tp_rank = collectives.get_tp_rank
+    get_tp_groups = collectives.get_tp_groups
 
     def _split_evenly(total: int, what: str) -> int:
         tp = get_tp_size()
@@ -133,8 +135,20 @@ def build_parallel_layers(collectives) -> SimpleNamespace:
     class RowParallelLinear(nn.Module):
         """``y = xA^T + b`` with ``A`` split along its input dim.
 
-        ``**kwargs`` (notably ``reduce_output=``, which modeling code passes for the
-        Trainium layer) are accepted and ignored: the all-reduce always runs here.
+        ``reduce_output`` and ``skip_bias_add`` follow the NxD layer the modeling code
+        was written against (defaults are NxD's, so callers that pass neither are
+        unchanged):
+
+        * ``reduce_output=False`` returns the un-reduced partial; the caller reduces
+          (Flux's single block merges two row-parallel reduces into one). As in NxD,
+          the full bias is then added to the partial — the modeling's ``_sp_unbias``
+          removes the ``tp-1`` extra copies after its own reduce.
+        * ``skip_bias_add=True`` returns ``(out, bias)`` with the bias NOT added
+          (``bias`` is ``None`` when the layer has none), for the caller to add once.
+
+        ``tensor_parallel_group`` is the TP replica group the caller reduces over
+        (``reduce_from_tensor_model_parallel_region(..., process_group=)``); ``None``
+        at tp=1, where there is nothing to reduce.
         """
 
         def __init__(
@@ -145,6 +159,8 @@ def build_parallel_layers(collectives) -> SimpleNamespace:
             input_is_parallel=False,
             dtype=None,
             device=None,
+            reduce_output=True,
+            skip_bias_add=False,
             **kwargs,
         ):
             super().__init__()
@@ -152,7 +168,10 @@ def build_parallel_layers(collectives) -> SimpleNamespace:
             self.input_size = input_size
             self.output_size = output_size
             self.input_is_parallel = input_is_parallel
+            self.reduce_output = reduce_output
+            self.skip_bias_add = skip_bias_add
             self.input_size_per_partition = _split_evenly(input_size, "input_size")
+            self.tensor_parallel_group = None if get_tp_size() == 1 else get_tp_groups()
 
             factory = {"dtype": dtype, "device": device}
             self.weight = nn.Parameter(
@@ -171,9 +190,14 @@ def build_parallel_layers(collectives) -> SimpleNamespace:
             if not self.input_is_parallel:
                 x = scatter_tp_dim(x, dim=-1)
             # Partial sum over this rank's input slice; the all-reduce completes it.
-            out = reduce_tp(F.linear(x, self.weight))
+            out = F.linear(x, self.weight)
+            if self.reduce_output:
+                out = reduce_tp(out)
+            if self.skip_bias_add:
+                return out, self.bias
             if self.bias is not None:
-                # After the reduce — adding before would sum the bias tp times.
+                # After the reduce — adding before would sum the bias tp times. With
+                # reduce_output=False this is NxD's partial + bias (see the docstring).
                 out = out + self.bias
             return out
 
@@ -181,7 +205,8 @@ def build_parallel_layers(collectives) -> SimpleNamespace:
             return (
                 f"in={self.input_size}, out={self.output_size}, "
                 f"in_per_partition={self.input_size_per_partition}, "
-                f"input_is_parallel={self.input_is_parallel}"
+                f"input_is_parallel={self.input_is_parallel}, "
+                f"reduce_output={self.reduce_output}, skip_bias_add={self.skip_bias_add}"
             )
 
     class ParallelEmbedding(nn.Module):

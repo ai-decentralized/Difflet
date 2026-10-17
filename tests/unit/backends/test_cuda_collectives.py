@@ -118,3 +118,19 @@ def test_scatter_rejects_indivisible_dimension():
 def test_import_does_not_initialise_torch_distributed():
     assert not torch.distributed.is_initialized()
     assert "WORLD_SIZE" not in os.environ or int(os.environ["WORLD_SIZE"]) == 1
+
+
+def test_reduce_from_tensor_model_parallel_region_takes_a_process_group():
+    # modeling_flux's single block reduces over ``proj_out_attn.tensor_parallel_group``.
+    pm.init_parallel_mesh(MeshSpec(tp=1))
+    t = torch.arange(8.0).reshape(2, 4)
+    assert C.reduce_from_tensor_model_parallel_region(t, process_group=None) is t
+    assert C.reduce_from_tensor_model_parallel_region(t, process_group=[[0]]) is t
+    with pytest.raises(NotImplementedError, match="F2"):
+        C.reduce_from_tensor_model_parallel_region(t, process_group=[[0, 1]])
+
+
+def test_reduce_from_tensor_model_parallel_region_defaults_to_the_tp_group():
+    pm.init_parallel_mesh(MeshSpec(tp=2))
+    with pytest.raises(NotImplementedError, match="F2"):
+        C.reduce_from_tensor_model_parallel_region(torch.zeros(2, 4), process_group=None)

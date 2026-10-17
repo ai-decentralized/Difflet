@@ -29,7 +29,8 @@ def reduce_tp(tensor):
     return tensor
 
 
-def reduce_from_tensor_model_parallel_region(tensor):
+def reduce_from_tensor_model_parallel_region(tensor, process_group=None):
+    del process_group
     return tensor
 
 

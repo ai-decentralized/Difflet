@@ -21,6 +21,7 @@ def _identity_collectives(tp_size=1, tp_rank=0):
         reduce_tp=lambda t: t,
         get_tp_size=lambda: tp_size,
         get_tp_rank=lambda: tp_rank,
+        get_tp_groups=lambda: [list(range(tp_size))],
     )
 
 
@@ -60,12 +61,28 @@ def test_row_parallel_shard_metadata_and_bias_after_reduce():
     assert torch.allclose(out, F.linear(x, layer.weight) + layer.bias)
 
 
-def test_row_parallel_accepts_and_ignores_reduce_output():
-    # modeling_qwen_image.py:156-165 passes reduce_output=; the Trainium layer honours
-    # it, the shared one accepts and ignores it (plan Review Focus 1).
+def test_row_parallel_reduce_output_false_skips_the_reduce():
+    # The Trainium layer honours reduce_output= and so does the shared one (F5 task 3:
+    # Flux's single block merges two row-parallel reduces into one explicit reduce).
+    calls = []
+    c = _identity_collectives()
+    c.reduce_tp = lambda t: calls.append("reduce") or t
+    L = build_parallel_layers(c)
+    layer = L.RowParallelLinear(16, 8, input_is_parallel=True, reduce_output=False)
+    x = torch.randn(4, 16)
+    out = layer(x)
+    assert calls == []
+    assert torch.allclose(out, F.linear(x, layer.weight) + layer.bias)
+
+
+def test_row_parallel_skip_bias_add_returns_the_bias_unadded():
     L = build_parallel_layers(_identity_collectives())
-    layer = L.RowParallelLinear(16, 8, reduce_output=False)
-    assert not hasattr(layer, "reduce_output")
+    layer = L.RowParallelLinear(16, 8, input_is_parallel=True, skip_bias_add=True)
+    x = torch.randn(4, 16)
+    out, bias = layer(x)
+    assert bias is layer.bias
+    assert torch.allclose(out, F.linear(x, layer.weight))
+    assert layer.tensor_parallel_group is None
 
 
 def test_indivisible_shapes_are_rejected_at_construction():
