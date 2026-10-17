@@ -25,6 +25,37 @@ HF_MODEL_ID = "Qwen/Qwen-Image"
 DEFAULT_STEPS = 50  # diffusers' QwenImagePipeline default; the Trainium CLI's 4 is a cost choice
 
 
+def cuda_pipeline_kwargs(
+    *,
+    tp_degree: int | None,
+    height: int | None,
+    width: int | None,
+    cache_dir: str | None,
+    revision: str | None,
+    force_compile: bool,
+    load: bool,
+) -> dict:
+    """The ``DiffletPipeline.from_pretrained`` kwargs for Qwen-Image on CUDA.
+
+    Shared with ``difflet serve`` (``difflet/serving/orchestrators/qwen_image_cuda.py``) so the
+    resident server loads the model exactly as ``difflet run`` does.
+    """
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+
+    return dict(
+        backend="cuda",
+        parallel=DiffletParallelConfig(tp_degree=tp_degree or 1),
+        dtype="bf16",
+        height=height or 1024,
+        width=width or 1024,
+        compile_cache_dir=cache_dir,
+        local_files_only=True,
+        revision=revision,
+        force_compile=bool(force_compile),
+        load=load,
+    )
+
+
 class CudaOneProcessOrchestrator(ModelOrchestrator):
     """``difflet download/compile/generate/run`` for a one-process CUDA model.
 
@@ -79,17 +110,12 @@ class CudaOneProcessOrchestrator(ModelOrchestrator):
         return {}
 
     def pipeline_kwargs(self, *, load: bool) -> dict:
-        from difflet.pipeline.parallel_config import DiffletParallelConfig
-
         args = self.args
-        kwargs = dict(
-            backend="cuda",
-            parallel=DiffletParallelConfig(tp_degree=args.tp_degree or 1),
-            dtype="bf16",
-            height=args.height or 1024,
-            width=args.width or 1024,
-            compile_cache_dir=args.cache_dir,
-            local_files_only=True,
+        kwargs = cuda_pipeline_kwargs(
+            tp_degree=args.tp_degree,
+            height=args.height,
+            width=args.width,
+            cache_dir=args.cache_dir,
             revision=getattr(args, "revision", None),
             force_compile=bool(getattr(args, "force", False)),
             load=load,
@@ -197,6 +223,7 @@ __all__ = [
     "HF_MODEL_ID",
     "CudaOneProcessOrchestrator",
     "CudaQwenImageOrchestrator",
+    "cuda_pipeline_kwargs",
     "pipeline_kwargs",
     "refuse_unsupported",
 ]

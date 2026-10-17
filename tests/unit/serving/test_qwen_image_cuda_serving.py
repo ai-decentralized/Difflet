@@ -165,3 +165,136 @@ def test_preload_loads_the_tokenizer_from_the_pinned_snapshot(source, monkeypatc
     )
     mod.CudaQwenImageServingRequestValidator(_prepare(_profile(), source)).preload()
     assert seen["path"] == "/snap/qwen/tokenizer"
+
+
+# ------------------------------------------------------------------- adapter
+
+import argparse
+import asyncio
+import io
+
+from PIL import Image
+
+from difflet.serving.engines.stage_pipeline import StagePipelineEngine
+from difflet.serving.types import (
+    ArtifactSet,
+    CancellationSignal,
+    ResolvedRuntimeBundle,
+    WorkerRequestContext,
+)
+
+_FROM_PRETRAINED = "difflet.pipeline.difflet_pipeline.DiffletPipeline.from_pretrained"
+
+
+class _App:
+    def __init__(self, size):
+        self.calls, self.size = [], size
+
+    def generate(self, prompt, **kw):
+        self.calls.append((prompt, kw))
+        return [Image.new("RGB", self.size, "red")]
+
+
+class _Pipe:
+    def __init__(self, size):
+        self.app = _App(size)
+
+
+@pytest.fixture
+def recorder(monkeypatch):
+    calls = []
+
+    def fake(model_id, **kw):
+        calls.append((model_id, kw))
+        return _Pipe((kw["width"], kw["height"]))
+
+    monkeypatch.setattr(_FROM_PRETRAINED, staticmethod(fake))
+    return calls
+
+
+def _engine(bundle):
+    adapter = mod.CudaQwenImageServingStageAdapter()
+    return adapter, StagePipelineEngine(runtime=bundle, adapter=adapter)
+
+
+def test_startup_loads_the_pipeline_exactly_as_the_cuda_cli_would(source, recorder):
+    from difflet.cli.orchestrators import qwen_image_cuda as cli
+
+    bundle = _prepare(_profile(cache_dir="/c", revision="r1"), source, CompilePolicy.FORCE)
+    adapter, engine = _engine(bundle)
+    asyncio.run(engine.start())
+    model_id, kw = recorder[0]
+    cli_args = argparse.Namespace(
+        tp_degree=1, height=1024, width=1024, cache_dir="/c", revision="r1", force=True
+    )
+    assert model_id == "Qwen/Qwen-Image" and kw == cli.pipeline_kwargs(cli_args, load=True)
+    assert kw["backend"] == "cuda" and kw["load"] is True and kw["force_compile"] is True
+
+
+def test_auto_compile_policy_does_not_force(source, recorder):
+    adapter, engine = _engine(_prepare(_profile(), source))
+    asyncio.run(engine.start())
+    assert recorder[0][1]["force_compile"] is False
+
+
+def test_startup_smoke_runs_four_steps_at_the_profile_shape(source, recorder):
+    adapter, engine = _engine(_prepare(_profile(), source))
+    asyncio.run(engine.start())
+    prompt, kw = adapter.pipe.app.calls[0]
+    assert kw == {"num_inference_steps": mod.SMOKE_STEPS, "seed": 0, "output_type": "pil"}
+    assert mod.SMOKE_STEPS == 4 and "guidance_scale" not in kw
+
+
+def test_generate_passes_prompt_steps_and_seed_and_returns_png(source, recorder):
+    adapter, engine = _engine(_prepare(_profile(), source))
+    asyncio.run(engine.start())
+    req = _request(prompt="a cat", num_inference_steps=7, seed=3)
+    out = asyncio.run(engine.generate(req, WorkerRequestContext.with_timeout("r1", 30.0)))
+    prompt, kw = adapter.pipe.app.calls[-1]
+    assert prompt == "a cat" and kw == {"num_inference_steps": 7, "seed": 3, "output_type": "pil"}
+    assert out.mime_type == "image/png" and out.output_format == "png"
+    assert Image.open(io.BytesIO(out.data)).size == (1024, 1024)
+
+
+def test_smoke_output_of_the_wrong_size_fails_startup(source, monkeypatch):
+    monkeypatch.setattr(_FROM_PRETRAINED, staticmethod(lambda m, **kw: _Pipe((8, 8))))
+    adapter, engine = _engine(_prepare(_profile(), source))
+    with pytest.raises(RuntimeError):
+        asyncio.run(engine.start())
+    assert adapter.pipe is None
+
+
+def test_cancelled_request_never_reaches_generate(source, recorder):
+    adapter, engine = _engine(_prepare(_profile(), source))
+    asyncio.run(engine.start())
+    n = len(adapter.pipe.app.calls)
+    signal = CancellationSignal()
+    signal.cancel()
+    context = WorkerRequestContext.with_timeout("r", 30.0, cancellation=signal)
+    with pytest.raises(asyncio.CancelledError):
+        asyncio.run(engine.generate(_request(), context))
+    assert len(adapter.pipe.app.calls) == n
+
+
+def test_unsupported_profile_is_refused_before_any_load(source, recorder):
+    # The preparer refuses tp=2, so build the bundle by hand to prove the worker side too.
+    profile = _profile(parallel=DiffletParallelConfig(tp_degree=2))
+    bundle = ResolvedRuntimeBundle(
+        profile=profile,
+        source=_SOURCE,
+        pipeline_definition=_prepare(_profile(), source).pipeline_definition,
+        runtime_plan=mod.cuda_runtime_plan(profile, _SOURCE),
+        compile_specs=(),
+        artifacts=ArtifactSet(()),
+        adapter_config={"compile_policy": CompilePolicy.AUTO},
+    )
+    with pytest.raises(DiffletServingError) as exc:
+        asyncio.run(mod.CudaQwenImageServingStageAdapter().create_loaded_runners(bundle))
+    assert "F6" in exc.value.message and recorder == []
+
+
+def test_shutdown_releases_the_resident_pipeline(source, recorder):
+    adapter, engine = _engine(_prepare(_profile(), source))
+    asyncio.run(engine.start())
+    asyncio.run(engine.shutdown())
+    assert adapter.pipe is None and adapter.active_runtime is None

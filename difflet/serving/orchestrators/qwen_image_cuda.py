@@ -21,24 +21,39 @@ CUDA worker never loads the Neuron runtime, so the one GPU is slot 0 and the var
 
 from __future__ import annotations
 
+import io
+import time
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
 from difflet.common.orchestrators.qwen_image import TEXT_SEQ_LEN
+from difflet.serving.engines.stage_pipeline import (
+    ErasedStageRunner,
+    ValidatedStageRunner,
+    require_exact_payload,
+    stage_result,
+)
 from difflet.serving.errors import feature_not_supported, profile_mismatch, prompt_too_long
 from difflet.serving.options import CompilePolicy, DownloadPolicy
 from difflet.serving.orchestrators.base import resolve_hf_model_source
 from difflet.serving.types import (
     ArtifactSet,
     CompileArtifactIdentity,
+    DiffletGenerateOutput,
     DiffletGenerateRequest,
     DistributedProcessEnvironment,
     ParallelTopology,
+    QwenFinalPayload,
+    QwenInitialPayload,
     ResolvedModelSource,
     ResolvedRuntimeBundle,
     RuntimeEnvironment,
     RuntimePlan,
     ServingProfile,
+    StageExecutionResult,
+    StageInvocation,
+    StagePayload,
     StageRuntimeSpec,
     WorkerAllocationSpec,
 )
@@ -59,6 +74,8 @@ _QWEN_TEMPLATE = (
     "<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n"
 )
 _QWEN_DROP_IDX = 34
+#: Startup smoke: cheap, like the Trainium adapter's 4-step smoke; proves load + one generate.
+SMOKE_STEPS = 4
 
 
 def _refuse(what: str, follow_up: str) -> None:
@@ -211,10 +228,141 @@ class CudaQwenImageServingRequestValidator:
         return self._tokenizer
 
 
+class CudaQwenImagePipelineRunner:
+    """The one stage: prompt in, PNG out, through the resident ``DiffletPipeline``."""
+
+    def __init__(self, adapter: "CudaQwenImageServingStageAdapter") -> None:
+        self.adapter = adapter
+
+    async def execute(
+        self,
+        invocation: StageInvocation[QwenInitialPayload],
+    ) -> StageExecutionResult[QwenFinalPayload]:
+        started = time.monotonic()
+        invocation.context.cancellation.throw_if_cancelled()
+        output = self.adapter.generate_png(invocation.request)
+        return stage_result(QwenFinalPayload(output=output), started_monotonic=started)
+
+    async def shutdown(self) -> None:
+        self.adapter.pipe = None
+
+
+class CudaQwenImageServingStageAdapter:
+    """``ServingStageAdapter`` for Qwen-Image on CUDA: the model stays resident in the worker."""
+
+    model_id = _HF_MODEL_ID
+    model_type = _MODEL_TYPE
+
+    def __init__(self, model_id: str = _HF_MODEL_ID) -> None:
+        self.model_id = model_id
+        self.active_runtime: ResolvedRuntimeBundle | None = None
+        self.active_profile: ServingProfile | None = None
+        self.pipe: Any = None
+
+    async def create_loaded_runners(
+        self,
+        runtime: ResolvedRuntimeBundle,
+    ) -> OrderedDict[str, ErasedStageRunner]:
+        profile = runtime.profile
+        refuse_unsupported_profile(profile)
+        # Worker-side imports: the parent process never loads torch for this adapter.
+        from difflet.cli.orchestrators.qwen_image_cuda import cuda_pipeline_kwargs
+        from difflet.pipeline.difflet_pipeline import DiffletPipeline
+
+        config = runtime.adapter_config or {}
+        print("[difflet serve] loading Qwen-Image on CUDA (text encoder, DiT, VAE in-process)")
+        self.active_runtime = runtime
+        self.active_profile = profile
+        self.pipe = DiffletPipeline.from_pretrained(
+            self.model_id,
+            **cuda_pipeline_kwargs(
+                tp_degree=profile.parallel.tp_degree,
+                height=profile.height,
+                width=profile.width,
+                cache_dir=profile.cache_dir,
+                revision=profile.revision,
+                force_compile=config.get("compile_policy") is CompilePolicy.FORCE,
+                load=True,
+            ),
+        )
+        print("[difflet serve] Qwen-Image CUDA pipeline resident")
+        return OrderedDict(
+            (
+                (
+                    _STAGE_ID,
+                    ValidatedStageRunner(
+                        CudaQwenImagePipelineRunner(self), QwenInitialPayload, QwenFinalPayload
+                    ),
+                ),
+            )
+        )
+
+    def generate_png(self, request: DiffletGenerateRequest) -> DiffletGenerateOutput:
+        """``app.generate`` with the CLI's arguments; no ``guidance_scale`` (the app refuses it)."""
+        if self.pipe is None:
+            raise RuntimeError("Qwen-Image CUDA pipeline is not loaded")
+        image = self.pipe.app.generate(
+            request.prompt,
+            num_inference_steps=int(request.num_inference_steps),
+            seed=int(request.seed),
+            output_type="pil",
+        )[0]
+        buf = io.BytesIO()
+        image.save(buf, format="PNG")
+        return DiffletGenerateOutput(
+            data=buf.getvalue(), mime_type="image/png", output_format="png"
+        )
+
+    def initial_payload(self, request: DiffletGenerateRequest) -> QwenInitialPayload:
+        return QwenInitialPayload()
+
+    def finalize(self, payload: StagePayload) -> DiffletGenerateOutput:
+        return require_exact_payload(
+            payload, QwenFinalPayload, boundary="Qwen CUDA final payload"
+        ).output
+
+    def smoke_request(self) -> DiffletGenerateRequest:
+        if self.pipe is None or self.active_profile is None:
+            raise RuntimeError("Qwen-Image CUDA load did not leave a resident pipeline")
+        profile = self.active_profile
+        return DiffletGenerateRequest(
+            request_id="startup-smoke",
+            model=self.model_id,
+            prompt="a small red square",
+            height=profile.height,
+            width=profile.width,
+            num_inference_steps=SMOKE_STEPS,
+            guidance_scale=NOOP_GUIDANCE_SCALE,
+            seed=0,
+        )
+
+    def validate_smoke_output(self, output: DiffletGenerateOutput) -> None:
+        if not output.data:
+            raise RuntimeError("Qwen-Image CUDA smoke produced empty output")
+        from PIL import Image
+
+        profile = self.active_profile
+        size = Image.open(io.BytesIO(output.data)).size
+        if profile is None or size != (profile.width, profile.height):
+            raise RuntimeError(f"Qwen-Image CUDA smoke image is {size}, not the profile shape")
+        print("[difflet serve] Qwen-Image CUDA generation smoke passed")
+
+    def reset_request_state(self, outcome: str) -> None:
+        return None
+
+    async def shutdown(self) -> None:
+        self.pipe = None
+        self.active_profile = None
+        self.active_runtime = None
+
+
 __all__: list[str] = [
     "NOOP_GUIDANCE_SCALE",
+    "SMOKE_STEPS",
+    "CudaQwenImagePipelineRunner",
     "CudaQwenImageServingArtifactPreparer",
     "CudaQwenImageServingRequestValidator",
+    "CudaQwenImageServingStageAdapter",
     "cuda_runtime_plan",
     "refuse_unsupported_profile",
 ]
