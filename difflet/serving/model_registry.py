@@ -16,6 +16,14 @@ Factory = Callable[..., Any]
 _SERVING_METADATA: dict[str, ServingModelMetadata] = {}
 _BUILTINS_LOADED = False
 
+# Models served on the CUDA backend (one process per GPU, no Neuron stages),
+# keyed by registry entry name. Selected by backend name the way
+# ``difflet.cli.main._get_orchestrator`` selects the CLI orchestrator; on every other
+# backend the Trainium metadata above is used unchanged.
+_CUDA_SERVING_OVERLAYS: dict[str, str] = {
+    "qwen_image": "difflet.common.registry.qwen_image:cuda_serving_metadata",
+}
+
 
 @dataclass(frozen=True)
 class ResolvedServingModel:
@@ -44,6 +52,15 @@ def resolve_serving_model(options: ServeOptions) -> ResolvedServingModel:
             f"checkpoint {options.model_id!r} is not enabled for P0 serving; "
             f"allowed for {entry.name}: {allowed}"
         )
+    from difflet.backends.registry import current_backend
+
+    tp_degree = options.tp_degree
+    if current_backend() == "cuda":
+        metadata = _cuda_serving_metadata(entry.name, options.model_id)
+        if tp_degree is None:
+            # Release 1 is one card: the registry default (tp=4) is a Trainium topology, and
+            # the CUDA CLI uses `args.tp_degree or 1`.
+            tp_degree = 1
     profile = build_serving_profile(
         model_id=options.model_id,
         model_type=metadata.model_type,
@@ -54,7 +71,7 @@ def resolve_serving_model(options: ServeOptions) -> ResolvedServingModel:
         default_host_vae=metadata.default_host_vae,
         revision=options.revision,
         cache_dir=options.cache_dir,
-        tp_degree=options.tp_degree,
+        tp_degree=tp_degree,
         cp_degree=options.cp_degree,
         cp_mode=options.cp_mode,
         cfg_parallel=options.cfg_parallel,
@@ -76,6 +93,16 @@ def resolve_serving_model(options: ServeOptions) -> ResolvedServingModel:
         metadata=metadata,
         profile=profile,
     )
+
+
+def _cuda_serving_metadata(entry_name: str, model_id: str) -> ServingModelMetadata:
+    path = _CUDA_SERVING_OVERLAYS.get(entry_name)
+    if path is None:
+        raise ValueError(
+            f"{model_id} is not supported on the CUDA backend yet; "
+            "set DIFFLET_BACKEND=trainium for the staged Neuron path"
+        )
+    return load_factory(path)()
 
 
 def _ensure_builtin_serving_models_registered() -> None:

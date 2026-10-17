@@ -20,7 +20,7 @@ OutputModality = Literal["image", "video"]
 ServingPlacement = Literal["host", "neuron"]
 StageRole = Literal["prompt_encoder", "denoiser", "decoder", "pipeline"]
 StageKind = Literal["extracted", "opaque_pipeline"]
-StagePlacement = Literal["host", "neuron", "hybrid", "tpu"]
+StagePlacement = Literal["host", "neuron", "hybrid", "tpu", "cuda"]
 
 
 @dataclass(frozen=True)
@@ -118,14 +118,15 @@ class StageRuntimeSpec:
                     "allocation, topology, or compiled artifact"
                 )
             return
-        if self.placement == "tpu":
+        if self.placement in {"tpu", "cuda"}:
             # On an accelerator like a neuron stage, but without a compiled
-            # artifact: the TPU backend executes the graph eagerly. Requiring
-            # one here would be requiring a file that is never produced, and
-            # loosening the neuron rule instead would drop a real invariant.
+            # artifact: the TPU and CUDA backends execute the graph eagerly.
+            # Requiring one here would be requiring a file that is never
+            # produced, and loosening the neuron rule instead would drop a
+            # real invariant.
             if self.allocation_id is None or self.topology is None:
                 raise ValueError(
-                    f"tpu stage {self.stage_id!r} requires allocation and topology"
+                    f"{self.placement} stage {self.stage_id!r} requires allocation and topology"
                 )
             return
         if self.placement not in {"neuron", "hybrid"}:
