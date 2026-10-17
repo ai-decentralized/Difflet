@@ -538,6 +538,31 @@ def c8_lifecycle_worker(
     }
 
 
+def c8_hbm_budget_worker(rank: int, world_size: int, model_dir: str) -> dict:
+    """ToyApplication at TP=world: the load's per-rank weight estimate (or the budget error every
+    rank must raise together), plus the bytes the loaded module really holds."""
+    import torch
+
+    from difflet.backends.neuron.hbm import HbmBudgetError
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_toy import ToyApplication
+
+    app = ToyApplication(
+        model_path=model_dir,
+        parallel=DiffletParallelConfig(tp_degree=world_size),
+        dtype=torch.float32,
+        exec_mode="eager",
+        device="cpu",
+    )
+    try:
+        app.load(skip_warmup=True)
+    except HbmBudgetError as exc:
+        return {"outcome": "rejected", "message": str(exc), "weight_bytes": app.weight_bytes}
+    held = sum(t.numel() * t.element_size()
+               for t in (*app.module.parameters(), *app.module.buffers()))
+    return {"outcome": "loaded", "weight_bytes": app.weight_bytes, "held": held}
+
+
 def c8_failure_worker(rank: int, world_size: int, model_dir: str, inject: str) -> dict:
     """Rank 0 fails before a collective; every rank must return instead of hanging."""
     import torch

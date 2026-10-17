@@ -10,7 +10,9 @@ NEFF cache, ``difflet/backends/neuron/compile.py``), so ``compile()`` is a no-op
    must exist before the module is built: TP layers size their shards in ``__init__`` and Wan's
    ``_safe_tp_size`` silently falls back to tp=1 (``difflet/models/wan/modeling_wan.py:71-82``);
 2. build on meta (``build_on_meta``): nothing allocated, computed buffers stay real;
-3. load this rank's shards straight onto the device (``load_sharded_checkpoint``);
+3. check that this rank's weights fit one core's HBM (``rank_weight_bytes`` of the meta module
+   against ``difflet/backends/neuron/hbm.py``'s budget, before anything is materialised), then
+   load this rank's shards straight onto the device (``load_sharded_checkpoint``);
 4. ``eval()`` and ``requires_grad_(False)``;
 5. in compile mode, per-block ``torch.compile`` (``compile_blocks``; on the neuron device the
    ``"neuron"`` backend with ``NEURON_COMPILE_OPTIONS``, so a block that fails to lower raises
@@ -58,13 +60,14 @@ from difflet.backends.neuron.core.distributed import (
     rank0_call,
     world_info,
 )
+from difflet.backends.neuron.hbm import budget_enforced, check_fits
 from difflet.backends.neuron.ops_impl import parallel_mesh
 from difflet.backends.neuron.runtime import check_parallel_supported
 from difflet.pipeline.parallel_config import DiffletParallelConfig
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["TorchNeuronApplicationBase"]
+__all__ = ["TorchNeuronApplicationBase", "rank_weight_bytes"]
 
 _ShapeKey = tuple[tuple[int, ...], ...]
 
@@ -77,6 +80,25 @@ def _normalize_dtype(dtype: Any) -> torch.dtype:
         if isinstance(resolved, torch.dtype):
             return resolved
     raise ValueError(f"unsupported dtype {dtype!r}; pass a torch.dtype such as torch.bfloat16")
+
+
+def rank_weight_bytes(module: torch.nn.Module, dtype: torch.dtype) -> int:
+    """Bytes this rank's ``module`` will hold on the device once ``load_sharded_checkpoint`` has
+    filled it.
+
+    Meta parameters are counted in ``dtype``, the dtype ``materialize_meta_`` gives them. Their
+    shapes are already this rank's shards, because a TP layer sizes its partition in ``__init__``
+    and its ``_difflet_shard`` declaration only tells the loader how to slice the checkpoint to
+    that shape. Parameters with storage keep their own dtype, as do all buffers: meta buffers
+    are materialised in their own dtype, and real ones (the rotary tables) move as they are.
+    """
+    total = 0
+    for param in module.parameters():
+        itemsize = dtype.itemsize if param.is_meta else param.element_size()
+        total += param.numel() * itemsize
+    for buf in module.buffers():
+        total += buf.numel() * buf.element_size()
+    return total
 
 
 def _shape_key(args: tuple[Any, ...], kwargs: dict[str, Any]) -> _ShapeKey:
@@ -126,6 +148,8 @@ class TorchNeuronApplicationBase(torch.nn.Module):
         #: Input shapes ``forward`` met in compile mode that the warm-up did not compile.
         self.unwarmed_shapes: list[_ShapeKey] = []
         self.load_report: dict[str, list[str]] | None = None
+        #: This rank's weight bytes on the device, estimated from the meta module by ``load``.
+        self.weight_bytes: int | None = None
         self.phase_seconds: dict[str, float] = {}
         self._compiled_shapes: set[_ShapeKey] = set()
 
@@ -190,6 +214,7 @@ class TorchNeuronApplicationBase(torch.nn.Module):
                     f"{type(self).__name__}: no checkpoint directory; pass model_path= "
                     "(phase 1 loads weights from safetensors only)"
                 )
+            self._check_hbm_budget(module)
             self.load_report = load_sharded_checkpoint(
                 module, model_dir, device=self.device, dtype=self.dtype, rename=self.checkpoint_key
             )
@@ -272,6 +297,19 @@ class TorchNeuronApplicationBase(torch.nn.Module):
                 "get_backend('neuron').prepare_runtime(parallel) before load()"
             )
         parallel_mesh.init_parallel_mesh(self.parallel.mesh_spec)
+
+    def _check_hbm_budget(self, module: torch.nn.Module) -> None:
+        """Fail before materialising weights that cannot fit this rank's core (see
+        ``difflet/backends/neuron/hbm.py``). On the device, a load that does not fit OOMs only
+        after minutes of allocator retries. Every rank raises the same error, because every
+        rank's estimate is the same. The estimate is recorded in ``weight_bytes``."""
+        self.weight_bytes = rank_weight_bytes(module, self.dtype)
+        if budget_enforced(self.device.type):
+            check_fits(
+                self.weight_bytes,
+                what=f"{type(self).__name__} ({self.dtype})",
+                tp_degree=int(self.parallel.tp_degree),
+            )
 
     def _compile_backend(self) -> str | Callable[..., Any]:
         if self.compile_backend is not None:
