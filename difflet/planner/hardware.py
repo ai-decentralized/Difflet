@@ -164,6 +164,21 @@ def detected_core_count() -> int | None:
     return total or None
 
 
+def detected_hbm_per_core() -> tuple[int, str] | None:
+    """One logical NeuronCore's HBM in bytes and a description, or ``None`` if undetectable.
+
+    As narrow as ``detected_core_count``: the neuron backend's load-time budget check
+    (``difflet/backends/neuron/hbm.py``) needs only this, from the CLI driver as well as the
+    ranks, so it must neither import torch (``_fallback_profile`` may) nor raise.
+    """
+
+    devices = _probe_neuron_ls()
+    if not devices:
+        return None
+    profile = _profile_from_neuron_ls(devices)
+    return profile.hbm_bytes_per_core, f"neuron-ls: {profile.describe()}"
+
+
 def _resolve_allocated_cores(
     *, machine_cores: int, override: int | None
 ) -> tuple[int, str | None]:
