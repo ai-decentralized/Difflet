@@ -32,6 +32,8 @@ SCANNED = [
     Path("difflet/backends/_torch_megatron"),
     Path("difflet/models/flux/modeling_flux.py"),
     Path("difflet/models/flux/dit_config.py"),
+    Path("difflet/models/flux/cuda_application.py"),
+    Path("difflet/models/flux/contract.py"),
 ]
 
 OPS_MODULES = ("attention", "collectives", "embeddings", "linear", "mx", "norm", "platform")

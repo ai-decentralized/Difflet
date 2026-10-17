@@ -1,11 +1,15 @@
 """The CUDA column of the CLI matrix.
 
 ``scripts/verify_cli.py`` sizes every cell to the four NeuronCores of a trn2.3xlarge. On one
-GPU the matrix has one cell today — Qwen-Image at ``tp=1`` — grown by F1 (Wan) and F2 (a
-second card). Per cell: ``difflet download`` → ``difflet compile`` → TIMED ``difflet generate``,
-each a subprocess with ``DIFFLET_BACKEND=cuda``, logs and ``results.json`` under a fresh run dir.
+GPU the matrix has two cells — Qwen-Image and FLUX.1-dev at ``tp=1`` — grown by F1
+(Wan) and F2 (a second card). Per cell: ``difflet download`` → ``difflet compile`` → TIMED
+``difflet generate``, each a subprocess with ``DIFFLET_BACKEND=cuda``, logs and
+``results.json`` under a fresh run dir. GPU-only (the unit tests stub the subprocesses).
 
-    python scripts/verify_cli_cuda.py --steps 50 --seed 0 [--run-root ~/.cache/difflet/verify-cli-cuda]
+Each cell generates at its model's default step count (``CELL_STEPS``: Qwen-Image 50,
+FLUX.1-dev 28); ``--steps N`` overrides every cell.
+
+    python scripts/verify_cli_cuda.py --seed 0 [--steps N] [--run-root ~/.cache/difflet/verify-cli-cuda]
 
 Exit code 0 only when every cell passes.
 """
@@ -24,7 +28,12 @@ import time
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from verify_cli import _DIFFLET_CMD, Status, StepResult, _kill_process_group, allocate_run_dir  # noqa: E402
 
-CELLS: list[tuple[str, str]] = [("Qwen/Qwen-Image", "tp1")]
+CELLS: list[tuple[str, str]] = [
+    ("Qwen/Qwen-Image", "tp1"),
+    ("black-forest-labs/FLUX.1-dev", "tp1"),
+]
+# Per-model generate steps when --steps is not given: diffusers' pipeline defaults.
+CELL_STEPS: dict[str, int] = {"Qwen/Qwen-Image": 50, "black-forest-labs/FLUX.1-dev": 28}
 DEFAULT_RUN_ROOT = pathlib.Path.home() / ".cache" / "difflet" / "verify-cli-cuda"
 DEFAULT_PROMPT = "a photorealistic cat sitting in a sunlit garden"
 
@@ -86,7 +95,12 @@ def _device_name() -> str:
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--run-root", default=str(DEFAULT_RUN_ROOT))
-    ap.add_argument("--steps", type=int, default=50)
+    ap.add_argument(
+        "--steps",
+        type=int,
+        default=None,
+        help="generate steps for every cell (default: CELL_STEPS)",
+    )
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--prompt", default=DEFAULT_PROMPT)
     ap.add_argument("--timeout", type=float, default=1800.0, help="seconds per step")
@@ -98,11 +112,12 @@ def main(argv: list[str] | None = None) -> int:
     cells = []
     for model_id, config in CELLS:
         slug = model_id.split("/")[-1].lower()
+        steps = args.steps if args.steps is not None else CELL_STEPS[model_id]
         cmds = build_cmds(
             model_id,
             prompt=args.prompt,
             output=str(run_dir / f"{slug}_{config}.png"),
-            steps=args.steps,
+            steps=steps,
             seed=args.seed,
             cache_dir=args.cache_dir,
         )
@@ -120,6 +135,7 @@ def main(argv: list[str] | None = None) -> int:
                 "model_id": model_id,
                 "config": config,
                 "outcome": outcome.value,
+                "generate_steps": steps,
                 "steps": {
                     k: {"status": r.status.value, "duration_s": r.duration, "reason": r.reason, "cmd": r.cmd}
                     for k, r in results.items()
@@ -129,7 +145,7 @@ def main(argv: list[str] | None = None) -> int:
     payload = {
         "backend": "cuda",
         "device": _device_name(),
-        "generate_steps": args.steps,
+        "generate_steps": args.steps,  # the --steps override; None = per-cell CELL_STEPS
         "seed": args.seed,
         "run_dir": str(run_dir),
         "cells": cells,

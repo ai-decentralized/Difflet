@@ -136,6 +136,12 @@ class FluxDiTAdapter(torch.nn.Module):
         # (key, txt_ids, img_ids, rope): the denoising loop passes the same ids every step.
         self._rope_cache = None
 
+    @property
+    def device(self) -> torch.device:
+        """``DiffusionPipeline.device`` reads ``.device`` off its first module, which is this
+        adapter when the pipeline holds no text encoder."""
+        return self.app.device
+
     @contextmanager
     def cache_context(self, name: str):
         """FluxPipeline enters this around each forward; nothing is cached across it here."""

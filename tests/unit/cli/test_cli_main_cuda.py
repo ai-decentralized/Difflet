@@ -28,11 +28,20 @@ def test_cpu_and_trainium_keep_the_staged_orchestrator(monkeypatch):
     assert type(orch).__name__ == "QwenImageOrchestrator"
 
 
+@pytest.mark.parametrize(
+    "model_id", ["black-forest-labs/FLUX.1-dev", "black-forest-labs/FLUX.1-schnell"]
+)
+def test_cuda_backend_routes_flux_to_the_flux_orchestrator(monkeypatch, model_id):
+    monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
+    orch = _cli()._get_orchestrator(argparse.Namespace(model_id=model_id))
+    assert type(orch).__name__ == "FluxCudaOrchestrator"
+
+
 def test_other_models_on_cuda_are_refused_by_name(monkeypatch):
     monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
     with pytest.raises(SystemExit) as exc:
-        _cli()._get_orchestrator(argparse.Namespace(model_id="black-forest-labs/FLUX.1-dev"))
-    assert "not supported" in str(exc.value) and "not supported" in str(exc.value)
+        _cli()._get_orchestrator(argparse.Namespace(model_id="Wan-AI/Wan2.1-T2V-14B-Diffusers"))
+    assert "not supported" in str(exc.value) and "DIFFLET_BACKEND=trainium" in str(exc.value)
 
 
 def test_requests_and_dp_are_refused_on_cuda(monkeypatch, tmp_path, capsys):
@@ -72,7 +81,8 @@ def test_cli_and_serving_import_without_neuron():
                     raise ImportError("blocked: " + name)
         sys.meta_path.insert(0, Block())
         for m in ("difflet.cli.main", "difflet.cli.orchestrators.qwen_image",
-                  "difflet.cli.orchestrators.qwen_image_cuda", "difflet.cli.runner",
+                  "difflet.cli.orchestrators.qwen_image_cuda", "difflet.cli.orchestrators.flux_cuda",
+                  "difflet.cli.runner",
                   "difflet.cli.stage", "difflet.serving.orchestrators.qwen_image",
                   "difflet.serving.models._common"):
             __import__(m)
