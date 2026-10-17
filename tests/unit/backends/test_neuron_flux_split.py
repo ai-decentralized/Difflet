@@ -16,7 +16,11 @@ def test_flux_model_imports_without_the_aot_backend():
     code = (
         "import sys\n"
         "import difflet.models.flux.modeling_flux as mf\n"
-        "assert hasattr(mf, 'NeuronFluxTransformer2DModel')\n"
+        "import difflet.models.flux.t5.modeling_t5 as t5\n"
+        "import difflet.models.flux.clip.modeling_clip as clip\n"
+        "import difflet.models.flux.vae.modeling_vae as vae\n"
+        "assert hasattr(mf, 'NeuronFluxTransformer2DModel') and hasattr(t5, 'NeuronT5EncoderModel')\n"
+        "assert hasattr(clip, 'NeuronCLIPTextModel') and hasattr(vae, 'PatchedGroupNorm')\n"
         "loaded = sorted(m for m in sys.modules if m.startswith('difflet.backends.trainium')"
         " or m.startswith('neuronx_distributed') or m.startswith('torch_xla'))\n"
         "print(loaded)\n"
@@ -55,3 +59,21 @@ def test_old_import_path_reaches_the_moved_aot_classes():
     for name in ("FluxBackboneInferenceConfig", "ModelWrapperFluxBackbone",
                  "NeuronFluxBackboneApplication"):
         assert getattr(mf, name) is getattr(backbone, name)
+
+
+@pytest.mark.skipif(importlib.util.find_spec("neuronx_distributed") is None,
+                    reason="the AoT (Trainium) stack is not installed")
+@pytest.mark.parametrize("model_mod, aot_mod, names", [
+    ("difflet.models.flux.t5.modeling_t5", "difflet.backends.trainium.flux.t5",
+     ("T5InferenceConfig", "ModelWrapperT5", "NeuronT5Application")),
+    ("difflet.models.flux.clip.modeling_clip", "difflet.backends.trainium.flux.clip",
+     ("CLIPInferenceConfig", "ModelWrapperClip", "CLIPEncoderOutput", "NeuronClipApplication")),
+    ("difflet.models.flux.vae.modeling_vae", "difflet.backends.trainium.flux.vae",
+     ("VAEDecoderInferenceConfig", "ModelWrapperVAEDecoder", "NeuronVAEDecoderApplication")),
+])
+def test_old_import_paths_reach_the_moved_encoder_and_vae_classes(model_mod, aot_mod, names):
+    import importlib
+
+    model, aot = importlib.import_module(model_mod), importlib.import_module(aot_mod)
+    for name in names:
+        assert getattr(model, name) is getattr(aot, name)
