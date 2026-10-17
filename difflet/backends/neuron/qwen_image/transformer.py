@@ -127,6 +127,14 @@ class NeuronQwenImageTransformerApplication(TorchNeuronApplicationBase):
                 "Qwen-Image is guidance-distilled (one forward per step); CFG parallelism does "
                 "not apply"
             )
+        # Checked here, not left to check_parallel_supported: the neuron runtime runs SP for
+        # Wan, so it lets sp_enabled through, and the Qwen trace module built from this config
+        # (sp_enabled=False) would silently ignore it.
+        if getattr(parallel, "sp_enabled", False):
+            raise NotImplementedError(
+                "Qwen-Image on the neuron backend runs tensor and context parallelism; "
+                "sequence parallelism is not implemented"
+            )
         cp = int(parallel.cp_degree)
         if bool(config.context_parallel_enabled) != (cp > 1):
             raise ValueError(

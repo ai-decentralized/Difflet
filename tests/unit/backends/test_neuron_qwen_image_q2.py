@@ -209,7 +209,8 @@ def test_kwargs_mirror_the_cli_and_reject_phase1_limits(tiny):
         ({"shapes": ((64, 96, None), (32, 48, None))}, "one static shape"),
         ({"batch_size": 2}, "batch_size"),
         ({"parallel": DiffletParallelConfig(cfg_parallel_enabled=True)}, "guidance-distilled"),
-        ({"parallel": DiffletParallelConfig(sp_enabled=True)}, "supports tensor, context"),
+        ({"parallel": DiffletParallelConfig(sp_enabled=True)},
+         "sequence parallelism is not implemented"),
         ({"parallel": DiffletParallelConfig(dp_degree=2)}, "dp_degree=2"),
     ):
         with pytest.raises(NotImplementedError, match=match):
