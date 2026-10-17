@@ -16,7 +16,9 @@ on a host without /mnt/models pass them. --threads sizes torch's thread pool
 (default: os.cpu_count()). For wan, --timesteps 996,500 computes the reference
 and the bf16 control at each timestep on the same inputs (saved under "runs"), and
 --expert transformer_2 runs Wan 2.2 A14B's low-noise expert instead of transformer/
-(recorded as "expert"; pair it with timesteps below the boundary, e.g. 500).
+(recorded as "expert"; pair it with timesteps below the boundary, e.g. 500), and
+--num-layers N builds only the first N blocks (recorded as "num_layers"; the reference of
+check_neuron_wan_preflight.py --num-layers N).
 """
 
 from __future__ import annotations
@@ -43,10 +45,16 @@ SNAPSHOT_ENV = {"wan": "DIFFLET_WAN_SNAPSHOT", "qwen_image": "DIFFLET_QWEN_SNAPS
 
 
 def wan(out: Path, frames: int, snapshot: str = WAN,
-        timesteps: Sequence[float] = (500.0,), expert: str = "transformer") -> None:
+        timesteps: Sequence[float] = (500.0,), expert: str = "transformer",
+        num_layers: int | None = None) -> None:
     """One fp32 forward per timestep, then one bf16 control per timestep, on the same seeded
     latents and text. ``runs`` holds every timestep; the single-timestep keys
-    (``timestep``, ``reference``, ``reference_bf16``) hold the first one."""
+    (``timestep``, ``reference``, ``reference_bf16``) hold the first one.
+
+    ``num_layers`` builds diffusers' model with only the first N blocks of the same checkpoint
+    (``from_pretrained(..., num_layers=N)``; the later blocks' tensors are unexpected there), the
+    reference of a ``check_neuron_wan_preflight.py --num-layers N`` launch. It is recorded as
+    ``num_layers`` (None: every block)."""
     from diffusers import WanTransformer3DModel
 
     torch.manual_seed(0)
@@ -55,13 +63,17 @@ def wan(out: Path, frames: int, snapshot: str = WAN,
     text = torch.randn(1, 512, 4096)
     steps = [torch.tensor([float(t)]) for t in timesteps]
 
+    depth = "every block" if num_layers is None else f"the first {num_layers} blocks"
     print(f"loading diffusers WanTransformer3DModel fp32 from {expert}/ ({frames} frames, "
-          f"latent {latent_frames}x60x104) ...", flush=True)
+          f"latent {latent_frames}x60x104, {depth}) ...", flush=True)
     mark = time.monotonic()
     model = WanTransformer3DModel.from_pretrained(
-        snapshot + "/" + expert, torch_dtype=torch.float32
+        snapshot + "/" + expert, torch_dtype=torch.float32,
+        **({} if num_layers is None else {"num_layers": num_layers}),
     ).eval()
     model.requires_grad_(False)
+    if num_layers is not None and len(model.blocks) != num_layers:
+        raise RuntimeError(f"built {len(model.blocks)} blocks, wanted {num_layers}")
     print(f"  loaded in {time.monotonic() - mark:.1f}s; "
           f"{sum(p.numel() for p in model.parameters()) / 1e9:.3f}B params", flush=True)
 
@@ -96,7 +108,8 @@ def wan(out: Path, frames: int, snapshot: str = WAN,
 
     first = runs[0]
     torch.save({"hidden_states": hidden, "encoder_hidden_states": text, "frames": frames,
-                "expert": expert, "timesteps": [float(t[0]) for t in steps], "runs": runs,
+                "expert": expert, "num_layers": num_layers,
+                "timesteps": [float(t[0]) for t in steps], "runs": runs,
                 # The single-timestep layout tpu_oracle_compare.py reads.
                 "timestep": first["timestep"], "reference": first["reference"],
                 "reference_bf16": first["reference_bf16"]}, out)
@@ -174,11 +187,21 @@ def main() -> None:
     p.add_argument("--timesteps", default=None,
                    help="wan only: comma-separated DiT timesteps, one fp32 reference and one "
                         "bf16 control each on the same inputs (default: 500)")
+    p.add_argument("--num-layers", type=int, default=None,
+                   help="wan only: build only the first N blocks of the checkpoint (the "
+                        "reference of check_neuron_wan_preflight.py --num-layers N; default: "
+                        "every block)")
     a = p.parse_args()
     if a.threads < 1:
         p.error(f"--threads must be at least 1, got {a.threads}")
     if a.expert != "transformer" and a.model != "wan":
         p.error("--expert applies to wan only")
+    if a.num_layers is not None:
+        if a.model != "wan":
+            p.error("--num-layers applies to wan only (Qwen-Image: "
+                    "tests/manual/qwen_image_dit_reference.py --num-layers)")
+        if a.num_layers < 1:
+            p.error(f"--num-layers must be at least 1, got {a.num_layers}")
     timesteps = [500.0]
     if a.timesteps is not None:
         if a.model != "wan":
@@ -201,7 +224,8 @@ def main() -> None:
     print(f"torch threads: {torch.get_num_threads()} (os.cpu_count()={os.cpu_count()}); "
           f"snapshot {snapshot}", flush=True)
     if a.model == "wan":
-        wan(out=out, frames=a.frames, snapshot=snapshot, timesteps=timesteps, expert=a.expert)
+        wan(out=out, frames=a.frames, snapshot=snapshot, timesteps=timesteps, expert=a.expert,
+            num_layers=a.num_layers)
     else:
         qwen_image(out=out, snapshot=snapshot)
 

@@ -26,6 +26,13 @@ from difflet.models.wan.modeling_wan import WanTransformerConfig
 class NeuronWanConfig(WanTransformerConfig):
     """``WanTransformerConfig`` plus the neuron runtime's shape and topology."""
 
+    #: The checkpoint's own block count, set by ``from_pretrained`` before a ``num_layers``
+    #: override. An on-device parity check that builds only the first N blocks of the real
+    #: checkpoint (``from_pretrained(..., num_layers=N)``, as for Qwen-Image) needs it to skip
+    #: the rest: ``NeuronWanTransformerApplication`` reports them under ``load_report["skipped"]``
+    #: rather than as unexpected.
+    checkpoint_num_layers: int | None = None
+
     # --- difflet runtime shape (one static shape per process) ---
     height: int = 480
     width: int = 832
@@ -68,6 +75,15 @@ class NeuronWanConfig(WanTransformerConfig):
         )
 
     def validate(self) -> None:
+        if int(self.num_layers) < 1:
+            raise ValueError(f"Wan num_layers={self.num_layers} must be >= 1")
+        if self.checkpoint_num_layers is not None and int(self.num_layers) > int(
+            self.checkpoint_num_layers
+        ):
+            raise ValueError(
+                f"Wan num_layers={self.num_layers} exceeds the checkpoint's "
+                f"{self.checkpoint_num_layers} blocks"
+            )
         # tp shards the attention heads, so it has to divide them evenly.
         if int(self.num_attention_heads) % int(self.tp_degree):
             raise ValueError(
@@ -107,12 +123,18 @@ class NeuronWanConfig(WanTransformerConfig):
 
     @classmethod
     def from_pretrained(cls, transformer_path, **overrides) -> "NeuronWanConfig":
-        """Build from a diffusers ``transformer/config.json``."""
+        """Build from a diffusers ``transformer/config.json``.
+
+        ``checkpoint_num_layers`` records the file's ``num_layers`` before the overrides, so a
+        ``num_layers=N`` override builds the first N blocks of the same checkpoint.
+        """
         raw = json.loads((Path(transformer_path) / "config.json").read_text())
         fields = {f.name for f in cls.__dataclass_fields__.values()}
         kept = {k: v for k, v in raw.items() if k in fields}
         if isinstance(kept.get("patch_size"), list):
             kept["patch_size"] = tuple(kept["patch_size"])
+        if "num_layers" in kept:
+            kept["checkpoint_num_layers"] = int(kept["num_layers"])
         kept.update(overrides)
         config = cls(**kept)
         config.validate()

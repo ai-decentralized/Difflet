@@ -47,6 +47,9 @@ class NeuronWanTransformerApplication(TorchNeuronApplicationBase):
     Wan passes ``reduce_dtype=dtype`` to its TP linears and the neuron layers ignore it,
     all-reducing in the activation dtype; that matches NxD for the bf16 runs the ruling was
     made for, and this check stops any other dtype from reaching the device unexamined).
+    A ``num_layers`` below the checkpoint's (``NeuronWanConfig.from_pretrained(...,
+    num_layers=N)``) loads the first N blocks and reports the others under
+    ``load_report["skipped"]``.
     """
 
     block_attrs = ("blocks",)
@@ -84,6 +87,12 @@ class NeuronWanTransformerApplication(TorchNeuronApplicationBase):
                 "against NxD for bf16 only)"
             )
         self.config = config
+        # Blocks past num_layers are in the checkpoint on purpose when num_layers was cut.
+        total = config.checkpoint_num_layers
+        if total is not None and int(total) > int(config.num_layers):
+            self.skipped_checkpoint_prefixes = tuple(
+                f"blocks.{i}." for i in range(int(config.num_layers), int(total))
+            )
 
     def build_module(self) -> torch.nn.Module:
         from difflet.models.wan.modeling_wan import WanTransformer3DModel
