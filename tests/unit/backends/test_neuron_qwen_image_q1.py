@@ -150,7 +150,8 @@ def test_config_defaults_are_qwen_image():
         ({"sp_enabled": True, "context_parallel_enabled": True}, ValueError,
          "sp_enabled and context_parallel_enabled are mutually exclusive"),
         ({"sp_enabled": True, "zero_cond_t": True}, NotImplementedError, "zero_cond_t"),
-        ({"cfg_parallel_enabled": True}, NotImplementedError, "guidance-distilled"),
+        ({"cfg_parallel_enabled": True, "context_parallel_enabled": True}, ValueError,
+         "cfg_parallel_enabled and context_parallel_enabled are mutually exclusive"),
         ({"cp_mode": "tree"}, ValueError, "cp_mode must be one of"),
         ({"cp_degree": 2}, ValueError, "needs context_parallel_enabled"),
         # 4 heads / tp 2 = 2 local heads do not split over cp 4.
@@ -179,6 +180,8 @@ def test_config_validate_accepts_supported_topologies():
         {"num_layers": 1, "checkpoint_num_layers": 2},
         {"sp_enabled": True, "tp_degree": 2},
         {"sp_enabled": True, "tp_degree": 4},
+        {"cfg_parallel_enabled": True, "tp_degree": 2},
+        {"cfg_parallel_enabled": True, "sp_enabled": True, "tp_degree": 2},
         # tp1: the fork is the dense model, so nothing has to divide.
         {"sp_enabled": True, "text_seq_len": 7},
     ):
@@ -197,7 +200,9 @@ def test_application_guards_topology_and_dtype(tiny):
 
     with pytest.raises(ValueError, match="tp_degree=2.*tp_degree=1"):
         make(tiny_qwen_config(tp_degree=2), DiffletParallelConfig(tp_degree=1))
-    with pytest.raises(NotImplementedError, match="guidance-distilled"):
+    # CFG parallelism changes the call's batch (the [negative, conditional] pair): the config
+    # and the parallel config must agree on it.
+    with pytest.raises(ValueError, match="cfg_parallel_enabled=False.*cfg_parallel_enabled=True"):
         make(tiny_qwen_config(tp_degree=2),
              DiffletParallelConfig(tp_degree=2, cfg_parallel_enabled=True))
     # The mesh carries no SP flag, so the config and the parallel config must agree on it.
