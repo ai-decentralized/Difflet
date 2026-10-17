@@ -1,10 +1,42 @@
 {
-  "host": "Yottalabs pod difflet-cuda-qwen, NVIDIA RTX PRO 6000 Blackwell Server Edition (97887 MiB), driver 580.126.09, torch 2.11.0+cu128",
+  "host": "Yottalabs pod difflet-cuda-qwen, NVIDIA RTX PRO 6000 Blackwell Server Edition (97887 MiB), driver 580.126.09, torch 2.11.0+cu128; F3 run on pod difflet-cuda-f3c (same GPU model, driver, torch)",
   "prompt": "a photorealistic cat sitting in a sunlit garden",
   "seed": 0,
-  "shape": [1024, 1024],
+  "shape": [
+    1024,
+    1024
+  ],
   "runs": [
-    {"steps": 4,  "load_s": 8.6,  "encode_s": 0.07, "generate_s": 1.9,  "per_step_s": 0.47, "peak_alloc_gb": 57.95, "peak_reserved_gb": 58.87, "image": "qwen_4steps (not committed)"},
-    {"steps": 50, "load_s": 10.3, "encode_s": 0.08, "generate_s": 20.5, "per_step_s": 0.41, "peak_alloc_gb": 57.95, "peak_reserved_gb": 58.87, "image": "qwen_50steps.png"}
+    {
+      "steps": 4,
+      "load_s": 8.6,
+      "encode_s": 0.07,
+      "generate_s": 1.9,
+      "per_step_s": 0.47,
+      "peak_alloc_gb": 57.95,
+      "peak_reserved_gb": 58.87,
+      "image": "qwen_4steps (not committed)"
+    },
+    {
+      "steps": 50,
+      "load_s": 10.3,
+      "encode_s": 0.08,
+      "generate_s": 20.5,
+      "per_step_s": 0.41,
+      "peak_alloc_gb": 57.95,
+      "peak_reserved_gb": 58.87,
+      "image": "qwen_50steps.png"
+    },
+    {
+      "steps": 50,
+      "load_s": 8.8,
+      "encode_s": 0.07,
+      "generate_s": 26.1,
+      "per_step_s": 0.52,
+      "peak_alloc_gb": 57.95,
+      "peak_reserved_gb": 58.87,
+      "image": "e2e_difflet_qwen_50steps.png (bit-identical to the difflet run image)",
+      "note": "F3 2026-10-17, pod difflet-cuda-f3c: prompt padding mask applied (valid=16/1024), masked SDPA; difflet run via scripts/cuda_smoke.sh: load 9.3 s, image in 26.5 s, 38 s wall; diffusers QwenImagePipeline on the same card: 15.2 s for 50 steps"
+    }
   ]
 }

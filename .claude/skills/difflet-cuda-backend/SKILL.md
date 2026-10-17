@@ -116,6 +116,15 @@ venv (task 0.5). Every GPU run logs to `/tmp/logs/<what>-<ts>.log` on the box an
 status-log line with wall time and peak memory. The image from `scripts/cuda_smoke.sh` must be
 prompt-faithful by eye before any numeric gate is trusted.
 
+**Pod lifecycle (owner's rule, 2026-10-16).** A pod bills by the hour whether or not anything runs
+on it. Deploying one needs the owner's explicit yes in the console (RTX PRO 6000, 1 GPU, 300 GB
+container storage, On-Demand). At the end of every GPU session — after the last script of the
+session has run and its JSONs/PNGs are copied off the box — ask the owner whether to stop the
+pod, then stop it from the console, and record the pod name, ID, and the stop in the status-log
+entry. Never leave a pod running "for the next session": the snapshot download is ~90 s and the
+venv build ~3 min, far cheaper than idle hours. The account SSH key (Settings → Access Keys)
+is shared across pods, so `~/.ssh/yottalabs_difflet_cuda_qwen.pem` works on a new pod.
+
 ## Status log entry
 
 Append to the end of the plan, never edit earlier entries:

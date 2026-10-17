@@ -1,0 +1,67 @@
+{
+  "backend": "cuda",
+  "device": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+  "generate_steps": 50,
+  "seed": 0,
+  "run_dir": "/home/user/.cache/difflet/verify-cli-cuda/verify_matrix_20261017_100647",
+  "cells": [
+    {
+      "model_id": "Qwen/Qwen-Image",
+      "config": "tp1",
+      "outcome": "PASS",
+      "steps": {
+        "download": {
+          "status": "PASS",
+          "duration_s": 0.21392596900000171,
+          "reason": "",
+          "cmd": [
+            "/home/user/Difflet/.venv/bin/python",
+            "-m",
+            "difflet.cli.main",
+            "download",
+            "--model-id",
+            "Qwen/Qwen-Image"
+          ]
+        },
+        "compile": {
+          "status": "PASS",
+          "duration_s": 1.517124069999909,
+          "reason": "",
+          "cmd": [
+            "/home/user/Difflet/.venv/bin/python",
+            "-m",
+            "difflet.cli.main",
+            "compile",
+            "--model-id",
+            "Qwen/Qwen-Image",
+            "--tp-degree",
+            "1"
+          ]
+        },
+        "generate": {
+          "status": "PASS",
+          "duration_s": 38.47153306200005,
+          "reason": "",
+          "cmd": [
+            "/home/user/Difflet/.venv/bin/python",
+            "-m",
+            "difflet.cli.main",
+            "generate",
+            "--model-id",
+            "Qwen/Qwen-Image",
+            "--tp-degree",
+            "1",
+            "--prompt",
+            "a photorealistic cat sitting in a sunlit garden",
+            "--output",
+            "/home/user/.cache/difflet/verify-cli-cuda/verify_matrix_20261017_100647/qwen-image_tp1.png",
+            "--steps",
+            "50",
+            "--seed",
+            "0"
+          ]
+        }
+      }
+    }
+  ]
+}
