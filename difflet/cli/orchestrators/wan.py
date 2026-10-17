@@ -19,8 +19,6 @@ trainium and tpu keep their paths unchanged.
 from __future__ import annotations
 
 import argparse
-import contextlib
-import functools
 import json
 import re
 import shutil
@@ -40,10 +38,10 @@ from difflet.cli.orchestrators.base import (
     write_stage_manifest,
 )
 from difflet.cli.orchestrators.torchrun import (
-    replica_request_scope,
-    replica_requests,
     fallback_tracker as _fallback_tracker,
     reject_unsupported_torchrun_options,
+    replica_request_scope as _replica_request_scope,
+    replica_requests as _replica_requests,
     root_compile_cache_at_cache_dir,
     torchrun_backend as _torchrun_backend,
     torchrun_unsupported_options,
@@ -202,12 +200,6 @@ _TORCHRUN_APPLICATION_KWARGS = {
     "encoder_threads": 12,
     "text_encoder_device": "neuron",
 }
-
-
-# The replica claim loop and request scope live in orchestrators/torchrun.py, shared with Flux;
-# Wan's transformer stage is not the final one (its VAE stage marks requests done).
-_replica_requests = replica_requests
-_replica_request_scope = functools.partial(replica_request_scope, final=False)
 
 
 def _dual_expert_misuse(args: argparse.Namespace, torchrun_backend: str | None) -> str | None:
