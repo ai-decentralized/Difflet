@@ -116,6 +116,7 @@ def worker_cli_args(args) -> list[str]:
         ("--sp", "sp_enabled"),
         ("--keep-work-dir", "keep_work_dir"),
         ("--host-text-encoder", "host_text_encoder"),
+        ("--device-text-encoder", "device_text_encoder"),
         ("--host-vae", "host_vae"),
         ("--device-vae", "device_vae"),
         ("--dual-expert", "dual_expert"),

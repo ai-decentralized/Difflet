@@ -11,8 +11,10 @@ With DIFFLET_BACKEND naming a non-AoT torchrun backend (neuron), the plan is the
 and then a decode: the generate stage runs as tp*cp torchrun ranks (default tp 4, every core of
 a trn2.3xlarge) that build the registry's application (TorchNeuronQwenImageApplication) through
 DiffletPipeline (``_stage_generate_neuron``). The text stage is folded into it: rank 0 encodes
-the prompt with Qwen2.5-VL on its host and broadcasts the embeddings, the ranks denoise, and rank
-0 writes latents.pt in the packed format the vae stage reads. The decode then runs after that
+the prompt with Qwen2.5-VL on its host and broadcasts the embeddings (or, with
+--device-text-encoder, every rank encodes it with the language model TP-sharded on the device
+beside the DiT; the driver keeps the host encoder when that cannot fit: ``_place_text_encoder``),
+the ranks denoise, and rank 0 writes latents.pt in the packed format the vae stage reads. The decode then runs after that
 launch has exited, in one of two places (``_decodes_on_device``):
 
 * on the host, the default for now: the driver decodes with diffusers ``AutoencoderKLQwenImage``
@@ -145,8 +147,12 @@ def _torchrun_conflicts(args: argparse.Namespace) -> list[str]:
 
 def _torchrun_application_kwargs(args: argparse.Namespace) -> dict:
     """The application kwargs, plus any TeaCache flag the user gave: the neuron application
-    rejects TeaCache (phase 1) instead of the stage dropping the flag silently."""
+    rejects TeaCache (phase 1) instead of the stage dropping the flag silently.
+    --device-text-encoder puts Qwen2.5-VL's language model on the device (the driver has already
+    dropped the flag when it cannot fit: ``QwenImageOrchestrator._place_text_encoder``)."""
     kwargs = dict(_TORCHRUN_APPLICATION_KWARGS)
+    if getattr(args, "device_text_encoder", False):
+        kwargs["text_encoder_device"] = "neuron"
     for app_key, arg_key in (
         ("teacache_speedup", "teacache_speedup"),
         ("teacache_cadence", "teacache_cadence"),
@@ -327,6 +333,40 @@ class QwenImageOrchestrator(ModelOrchestrator):
               file=sys.stderr, flush=True)
         raise SystemExit(2)
 
+    def _place_text_encoder(self) -> None:
+        """On a torchrun backend (neuron) with --device-text-encoder, keep Qwen2.5-VL on rank
+        0's host when its language model cannot fit on the device beside the DiT at this TP
+        degree, and print one line saying so (Wan's ``_place_text_encoder``, in reverse: Qwen
+        defaults to the host and the device is the opt-in).
+
+        At tp4 the encoder adds about 3.3 GiB of bf16 weights per core beside 9.5 GiB of DiT;
+        a narrower TP group (--cp-degree 2 with --tp-degree 2, DP replicas of tp2, a plain tp2)
+        doubles both, about 6.6 + 19.0 GiB, over a 24 GiB core. The estimate
+        (``difflet/backends/neuron/qwen_image/hbm.py``) depends on the stage's tp and the local
+        checkpoint's sizes. Weights that are not local yet leave the flag alone, and the
+        application's own check still refuses. The setting lands on ``self.args``, so
+        ``_shared_cli_args`` hands it to the stages and a ``run`` that dispatches DP workers
+        after ``compile`` forwards it to them (``worker_cli_args``). Torch-free."""
+        args = self.args
+        if torchrun_backend() is None or not getattr(args, "device_text_encoder", False):
+            return
+        from difflet.backends.neuron.hbm import GIB
+        from difflet.backends.neuron.qwen_image.hbm import device_text_encoder_fits
+        from difflet.pipeline.path_resolver import resolve_model_path
+
+        try:
+            model_dir = self._model_dir(args, resolve_model_path)
+        except (OSError, RuntimeError):
+            return
+        tp = args.tp_degree or 4
+        fits, estimate, limit = device_text_encoder_fits(model_dir, tp_degree=tp)
+        if fits:
+            return
+        args.device_text_encoder = False
+        print(f"[qwen_image] Qwen2.5-VL on the device needs at least {estimate / GIB:.1f} GiB per "
+              f"core beside the DiT at tp={tp}, over the {limit / GIB:.1f} GiB budget: encoding "
+              "on rank 0's host instead (without --device-text-encoder)", flush=True)
+
     def run(self) -> None:
         self._reject_unsupported_torchrun_options()  # before the download, too
         super().run()
@@ -334,6 +374,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
     def compile(self) -> None:
         self._reject_unsupported_torchrun_options()
         self._check_dit_fits()
+        self._place_text_encoder()
         root_compile_cache_at_cache_dir(getattr(self.args, "cache_dir", None), tag="qwen_image")
         work_dir = Path.home() / ".cache" / "difflet" / "work" / _CLI_NAME
         work_dir.mkdir(parents=True, exist_ok=True)
@@ -377,6 +418,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
     def generate(self) -> None:
         self._reject_unsupported_torchrun_options()
         self._check_dit_fits()
+        self._place_text_encoder()
         root_compile_cache_at_cache_dir(getattr(self.args, "cache_dir", None), tag="qwen_image")
         _require_request_shape_in_set(self.args)  # fail fast before any stage runs
         work_dir = Path(
@@ -1023,6 +1065,8 @@ class QwenImageOrchestrator(ModelOrchestrator):
             parts += ["--revision", a.revision]
         if getattr(a, "sp_enabled", None):
             parts += ["--sp"]
+        if getattr(a, "device_text_encoder", False):
+            parts += ["--device-text-encoder"]
         if getattr(a, "teacache_speedup", None) is not None:
             parts += ["--teacache-speedup", str(a.teacache_speedup)]
         if getattr(a, "teacache_calibration", None):
