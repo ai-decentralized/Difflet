@@ -35,7 +35,7 @@ and again on f9 (Server) [F9].
 | `difflet serve` | PASS; LIMIT on concurrency on one GPU (429 `queue_timeout` after the 30 s default) [F3b]; `--dp-degree 2` PASS, two concurrent requests in one request-time [F2b] | N/A · refused by name, F5b | N/A · refused by name, F1b |
 | `--torch-compile` | PASS, opt-in [F4] | N/A · refused, F5b | N/A · refused, F1b |
 | `--teacache-cadence N` | PASS, fixed cadence only [F4] | N/A · refused, F5b | N/A · refused, F1b |
-| `--dp 2 --requests` | PASS, byte-identical [F2] | NOT MEASURED (reachable) | PASS, bit-identical [F2b] |
+| `--dp 2 --requests` | PASS, byte-identical [F2] | `--dp 1` batch PASS, byte-identical [F5c]; `--dp 2` NOT MEASURED (2 GPUs) | PASS, bit-identical [F2b] |
 | `--cfg-parallel` (2 GPUs) | N/A · single pass | N/A · guidance-distilled; true-CFG is the owner's call | PASS, bit-identical [F2] |
 | `--dp` × `--cfg-parallel` | N/A · refuses `--cfg-parallel` | N/A · refuses `--cfg-parallel` | NOT MEASURED (needs 4 cards) |
 | serving on two GPUs (`--dp-degree 2`) | PASS [F2b] | N/A · serve refused | N/A · serve refused |
@@ -242,6 +242,8 @@ as four serial runs and 79 s as a `--dp 1` batch; all six compared images byte-i
 videos bit-identical; replicas generating at once take 51.2 s each vs 44.5 s alone (unmeasured).
 **Serving on two GPUs** (F2b, f2b): `difflet serve --dp-degree 2` → `--concurrent 2` in 16.7 s
 wall, `--concurrent 3` in 33.3 s, identical bytes; `--dp-degree 3` refused naming the GPU count
-(`scripts/cuda_serve_smoke.py --dp N --concurrent K --reference PNG`). Not run: Wan `--dp` ×
-`--cfg-parallel`, Flux under `--dp`. Artifacts: `artifacts/cuda-release1/f2/`, `f2b/serve/`,
-`f2b/wan_dp/`.
+(`scripts/cuda_serve_smoke.py --dp N --concurrent K --reference PNG`). **Flux `--dp 1
+--requests`** (F5c, pod flux, one card): two 28-step requests 28 s wall vs 33 s serial, PNGs
+byte-identical; Flux e2e timings Difflet 9.4 s vs diffusers 8.3 s (Server). Not run: Wan `--dp`
+× `--cfg-parallel`, Flux `--dp 2` (needs 2 GPUs). Artifacts: `artifacts/cuda-release1/f2/`,
+`f2b/serve/`, `f2b/wan_dp/`, `flux/f5c/`.

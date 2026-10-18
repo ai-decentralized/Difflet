@@ -1,0 +1,23 @@
+== host ==
+hostname: 6f82bd6e410d
+os: Ubuntu 22.04.5 LTS
+kernel: 6.8.0-147-generic
+cpu: 30 cores
+ram: 88 GB
+disk free: 386G of 484G
+hf cache: /home/user/hf
+== nvidia ==
+NVIDIA RTX PRO 6000 Blackwell Server Edition, 580.178.04, 97887 MiB, 12.0
+CUDA Version: 13.0
+== python / torch ==
+python: Python 3.11.14 (/home/user/Difflet/.venv/bin/python)
+torch: 2.11.0+cu128 | cuda build: 12.8 | cudnn: 91900
+cuda available: True
+device: NVIDIA RTX PRO 6000 Blackwell Server Edition | capability: (12, 0) | memory GB: 95.0
+bf16 matmul: ok (1024, 1024)
+diffusers: 0.38.0
+transformers: 5.20.1
+accelerate: 1.15.0
+safetensors: 0.8.0
+triton: 3.6.0
+flash_attn: None
