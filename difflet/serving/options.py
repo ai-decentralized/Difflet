@@ -75,6 +75,9 @@ class ServeOptions:
     compile_policy: CompilePolicy = CompilePolicy.AUTO
     max_running_requests: int = 1
     max_queued_requests: int = 8
+    # Resident replicas of the model, one GPU each (`--dp-degree`); 1 is one
+    # resident worker. Not a DiffletParallelConfig axis: each replica is a dp=1 worker.
+    replicas: int = 1
     # None preserves modality-specific defaults: 30 seconds for image serving
     # and 24 hours for the shared video FIFO.
     queue_timeout: float | None = None
@@ -103,6 +106,12 @@ class ServeOptions:
             not math.isfinite(self.queue_timeout) or self.queue_timeout <= 0
         ):
             raise ValueError("queue timeout must be positive")
+        if (
+            isinstance(self.replicas, bool)
+            or not isinstance(self.replicas, int)
+            or self.replicas < 1
+        ):
+            raise ValueError("replicas (--dp-degree) must be a positive integer")
         if self.clip_placement not in {None, "host", "neuron"}:
             raise ValueError("clip placement must be 'host' or 'neuron'")
         if (

@@ -378,6 +378,17 @@ def _add_serve_flags(p: argparse.ArgumentParser) -> None:
         help="Maximum requests waiting behind the active request (default: 8; 0 disables queuing)",
     )
     p.add_argument(
+        "--dp-degree",
+        dest="replicas",
+        type=_positive_int,
+        default=1,
+        metavar="N",
+        help=(
+            "Resident replicas of the model, one GPU each; requests go to the least loaded "
+            "(CUDA backend only; default: 1)"
+        ),
+    )
+    p.add_argument(
         "--queue-timeout",
         type=_positive_finite_float,
         default=None,

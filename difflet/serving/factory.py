@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
-from difflet.serving.engines import ResidentWorkerServingEngine
+from difflet.serving.engines import ReplicatedServingEngine, ResidentWorkerServingEngine
 from difflet.serving.engines.resident_worker import ResidentWorkerConfig
 from difflet.serving.model_registry import (
     ResolvedServingModel,
@@ -25,8 +25,15 @@ from difflet.serving.types import ResolvedRuntimeBundle
 class ServingStack:
     resolved_model: ResolvedServingModel
     runtime: ResolvedRuntimeBundle
-    engine: ResidentWorkerServingEngine
+    engine: ResidentWorkerServingEngine | ReplicatedServingEngine
     request_validator: ServingRequestValidator
+
+
+def _replica_runtime(runtime: ResolvedRuntimeBundle, index: int) -> ResolvedRuntimeBundle:
+    """The same bundle with the plan claiming GPU ``index``."""
+    plan = runtime.runtime_plan
+    environment = replace(plan.environment, available_core_ids=(index,))
+    return replace(runtime, runtime_plan=replace(plan, environment=environment))
 
 
 def build_serving_stack(options: ServeOptions) -> ServingStack:
@@ -57,26 +64,40 @@ def build_serving_stack(options: ServeOptions) -> ServingStack:
         if validator_factory is not None
         else NoopServingRequestValidator(runtime)
     )
-    engine = ResidentWorkerServingEngine(
-        runtime=runtime,
-        orchestrator_factory=resolved.metadata.orchestrator_factory,
-        config=ResidentWorkerConfig(
-            max_running_requests=options.max_running_requests,
-            # Video sync and async work share VideoGenerationService's FIFO.
-            # Keeping the inner engine queue disabled prevents either API path
-            # from bypassing that single admission domain.
-            max_queued_requests=(
-                0 if resolved.metadata.output_modality == "video" else options.max_queued_requests
-            ),
-            queue_timeout=options.effective_queue_timeout(
-                resolved.metadata.output_modality
-            ),
-            request_timeout=options.request_timeout,
-            worker_cancel_timeout=options.worker_cancel_timeout,
-            worker_restart_timeout=options.worker_restart_timeout,
-            worker_heartbeat_interval=options.worker_heartbeat_interval,
+    config = ResidentWorkerConfig(
+        max_running_requests=options.max_running_requests,
+        # Video sync and async work share VideoGenerationService's FIFO.
+        # Keeping the inner engine queue disabled prevents either API path
+        # from bypassing that single admission domain.
+        max_queued_requests=(
+            0 if resolved.metadata.output_modality == "video" else options.max_queued_requests
         ),
+        queue_timeout=options.effective_queue_timeout(resolved.metadata.output_modality),
+        request_timeout=options.request_timeout,
+        worker_cancel_timeout=options.worker_cancel_timeout,
+        worker_restart_timeout=options.worker_restart_timeout,
+        worker_heartbeat_interval=options.worker_heartbeat_interval,
     )
+    factory = resolved.metadata.orchestrator_factory
+    engine: ResidentWorkerServingEngine | ReplicatedServingEngine
+    if int(options.replicas) > 1:
+        # resolve_serving_model refused this off CUDA or above the GPU count.
+        engine = ReplicatedServingEngine(
+            [
+                ResidentWorkerServingEngine(
+                    runtime=_replica_runtime(runtime, index),
+                    orchestrator_factory=factory,
+                    config=config,
+                )
+                for index in range(int(options.replicas))
+            ]
+        )
+        runtime = engine.replicas[0].runtime
+        print(f"[difflet serve] resident replicas: {options.replicas}, one GPU each")
+    else:
+        engine = ResidentWorkerServingEngine(
+            runtime=runtime, orchestrator_factory=factory, config=config
+        )
     return ServingStack(
         resolved_model=resolved,
         runtime=runtime,

@@ -99,6 +99,7 @@ def test_serve_help_exposes_operational_tuning_but_hides_artifact_policy(capsys)
     assert "--validation-workers" in out
     assert "--validation-max-waiting" in out
     assert "--validation-timeout" in out
+    assert "--dp-degree" in out
     assert "--video-retention-seconds" in out
     assert "--video-max-jobs" in out
     assert "--video-sweep-interval" in out
@@ -237,10 +238,13 @@ def test_difflet_serve_maps_operational_controls(monkeypatch):
             "100",
             "--video-sweep-interval",
             "60",
+            "--dp-degree",
+            "2",
         ]
     )
 
     options = options_from_args(calls[0])
+    assert options.replicas == 2
     assert options.max_queued_requests == 0
     assert options.queue_timeout == 12.0
     assert options.request_timeout == 600.0
@@ -270,6 +274,7 @@ def test_difflet_serve_maps_operational_controls(monkeypatch):
         ("--video-retention-seconds", "0"),
         ("--video-max-jobs", "0"),
         ("--video-sweep-interval", "nan"),
+        ("--dp-degree", "0"),
     ],
 )
 def test_difflet_serve_rejects_invalid_operational_controls(flag, value):
@@ -554,3 +559,14 @@ def test_serve_options_maps_shapes_csv_for_multi_shape_serving():
     options = options_from_args(args)
 
     assert options.shapes == "1024x1024,512x512"
+
+
+def test_difflet_serve_maps_torch_compile(monkeypatch):
+    calls = []
+    monkeypatch.setattr("difflet.cli.serve.run", calls.append)
+    cli_main = importlib.import_module("difflet.cli.main")
+
+    cli_main.main(["serve", "--model-id", "Qwen/Qwen-Image"])
+    cli_main.main(["serve", "--model-id", "Qwen/Qwen-Image", "--torch-compile"])
+    off, on = (options_from_args(args) for args in calls)
+    assert off.torch_compile is False and on.torch_compile is True
