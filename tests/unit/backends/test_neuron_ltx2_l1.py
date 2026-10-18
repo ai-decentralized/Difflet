@@ -169,6 +169,9 @@ def test_tp1_eager_matches_diffusers(tiny):
     assert result["load_report"] == CLEAN_REPORT
     assert result["params_on_meta"] == 0 and result["compiled_blocks"] == []
     assert result["rope_types"] == {attr: "_HostRope" for attr in ROPES}
+    # The feed-forward GELU runs in fp32 on this backend (the device's bf16 tanh GELU is less
+    # accurate than the CPU's; _FP32_GELU), with diffusers' parameters and keys.
+    assert result["ff_activations"] == ["Fp32GELU"]
     # Warm-up, three forwards on the same coordinates: each table computed once.
     assert result["rope_computed"] == {attr: 1 for attr in ROPES}
     assert result["other_differs"] and result["again_equal"]
