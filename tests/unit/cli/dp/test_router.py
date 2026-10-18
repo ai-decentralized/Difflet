@@ -99,7 +99,13 @@ _STUB = textwrap.dedent("""
     p.add_argument("--dp-schedule", required=True)
     p.add_argument("--fail-index", type=int, default=None)
     p.add_argument("--crash-worker", type=int, default=None)
+    p.add_argument("--env-dump", default=None)
     args, _ = p.parse_known_args()
+    if args.env_dump:
+        import json, os
+        keys = [k for k in os.environ if k.startswith(("NEURON_RT_", "CUDA_VISIBLE"))]
+        with open(f"{args.env_dump}/worker_{args.worker_index}.json", "w") as fh:
+            json.dump({k: os.environ[k] for k in keys}, fh)
     if args.crash_worker == args.worker_index:
         sys.exit(3)
     while (req := claims.claim_next(args.requests_dir, args.worker_index,
@@ -224,3 +230,96 @@ def _alive(pid: int) -> bool:
             return "State:\tZ" not in fh.read()
     except FileNotFoundError:
         return False
+
+
+# ------------------------------------------------- CUDA replicas
+
+
+def test_cuda_worker_env_pins_the_replica_gpus_and_drops_neuron_variables():
+    base = {
+        "NEURON_RT_NUM_CORES": "16",
+        "NEURON_RT_VISIBLE_CORES": "0-15",
+        "NEURON_RT_ROOT_COMM_ID": "localhost:62182",
+        "PATH": "/bin",
+    }
+    env = worker_env(base, "2-3", 2, backend="cuda")
+    assert env["CUDA_VISIBLE_DEVICES"] == "2,3" and env["PATH"] == "/bin"
+    assert not [k for k in env if k.startswith("NEURON_RT_")]
+    assert worker_env({}, "1", 1, backend="cuda")["CUDA_VISIBLE_DEVICES"] == "1"
+
+
+def test_cuda_worker_env_indexes_into_an_inherited_device_list():
+    # The parent's CUDA_VISIBLE_DEVICES is the GPU budget the replica ranges count from:
+    # replica "1" of a parent restricted to GPUs 4,6 is physical GPU 6, not GPU 1.
+    base = {"CUDA_VISIBLE_DEVICES": "4,6"}
+    assert worker_env(base, "0", 1, backend="cuda")["CUDA_VISIBLE_DEVICES"] == "4"
+    assert worker_env(base, "1", 1, backend="cuda")["CUDA_VISIBLE_DEVICES"] == "6"
+    assert worker_env(base, "0-1", 2, backend="cuda")["CUDA_VISIBLE_DEVICES"] == "4,6"
+    with pytest.raises(ValueError, match="CUDA_VISIBLE_DEVICES"):
+        worker_env(base, "2", 1, backend="cuda")
+
+
+def test_trainium_worker_env_is_the_default_and_sets_no_cuda_devices():
+    env = worker_env({"PATH": "/bin"}, "0-3", 4)
+    assert "CUDA_VISIBLE_DEVICES" not in env and env["NEURON_RT_VISIBLE_CORES"] == "0-3"
+
+
+def test_run_router_on_cuda_gives_each_worker_its_own_gpu(tmp_path, monkeypatch):
+    monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
+    monkeypatch.setenv("NEURON_RT_NUM_CORES", "16")
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    dump = tmp_path / "env"
+    dump.mkdir()
+    args = _args(work_dir=str(tmp_path / "work"), dp=2, tp_degree=None)
+    rc = run_router(
+        args,
+        _requests(4),
+        replica_cores=1,
+        worker_argv_prefix=_stub_prefix(tmp_path) + ["--env-dump", str(dump)],
+    )
+    assert rc == 0
+    import json
+
+    envs = [json.loads((dump / f"worker_{w}.json").read_text()) for w in (0, 1)]
+    assert envs == [{"CUDA_VISIBLE_DEVICES": "0"}, {"CUDA_VISIBLE_DEVICES": "1"}]
+    s = summarize(tmp_path / "work" / "requests")
+    assert s.done == [0, 1, 2, 3] and not s.failed and not s.unfinished
+
+
+def test_run_router_on_cuda_two_gpu_replicas(tmp_path, monkeypatch):
+    # dp=2 x cfg=2: each replica is a torchrun world on its own pair of GPUs.
+    monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    dump = tmp_path / "env"
+    dump.mkdir()
+    args = _args(work_dir=str(tmp_path / "work"), dp=2, tp_degree=None, cfg_parallel=True)
+    rc = run_router(
+        args,
+        _requests(2),
+        replica_cores=2,
+        worker_argv_prefix=_stub_prefix(tmp_path) + ["--env-dump", str(dump)],
+    )
+    assert rc == 0
+    import json
+
+    envs = [json.loads((dump / f"worker_{w}.json").read_text()) for w in (0, 1)]
+    assert envs == [{"CUDA_VISIBLE_DEVICES": "0,1"}, {"CUDA_VISIBLE_DEVICES": "2,3"}]
+
+
+def test_run_router_on_trainium_keeps_the_neuron_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("DIFFLET_BACKEND", "trainium")
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    dump = tmp_path / "env"
+    dump.mkdir()
+    args = _args(work_dir=str(tmp_path / "work"), dp=2)
+    rc = run_router(
+        args,
+        _requests(2),
+        replica_cores=4,
+        worker_argv_prefix=_stub_prefix(tmp_path) + ["--env-dump", str(dump)],
+    )
+    assert rc == 0
+    import json
+
+    env0 = json.loads((dump / "worker_0.json").read_text())
+    assert env0["NEURON_RT_VISIBLE_CORES"] == "0-3" and "CUDA_VISIBLE_DEVICES" not in env0

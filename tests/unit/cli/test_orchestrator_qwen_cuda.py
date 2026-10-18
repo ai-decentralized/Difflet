@@ -211,3 +211,133 @@ def test_qwen_is_one_process_and_refuses_cfg_parallel_as_distilled(recorder):
         mod.CudaQwenImageOrchestrator(_args(cfg_parallel=True)).compile()
     assert "--cfg-parallel" in str(exc.value) and "[qwen_image/cuda]" in str(exc.value)
     assert recorder == []
+
+
+# ------------------------------------------------- batch mode: a dp worker
+
+
+def _manifest(tmp_path, specs):
+    from difflet.cli.dp.requests_io import RequestSpec, write_manifest
+
+    requests_dir = tmp_path / "requests"
+    reqs = [
+        RequestSpec(index=i, output=str(tmp_path / "out" / f"r{i}.png"), **spec)
+        for i, spec in enumerate(specs)
+    ]
+    write_manifest(reqs, requests_dir)
+    return requests_dir
+
+
+def _batch_args(requests_dir, **over):
+    batch = dict(
+        prompt=None,
+        output=None,
+        requests_dir=str(requests_dir),
+        worker_index=0,
+        dp_schedule="least_loaded",
+        work_dir=str(requests_dir.parent / "worker_0"),
+    )
+    return _args(**{**batch, **over})
+
+
+class _FailingApp(_App):
+    def generate(self, prompt, **kw):
+        if prompt == "boom":
+            self.calls.append((prompt, kw))
+            raise RuntimeError("generation exploded")
+        return super().generate(prompt, **kw)
+
+
+def test_batch_mode_loads_once_and_writes_every_request(recorder, tmp_path):
+    from difflet.cli.dp.claims import summarize
+
+    requests_dir = _manifest(
+        tmp_path,
+        [dict(prompt="p0", seed=0), dict(prompt="p1", seed=1, steps=3), dict(prompt="p2", seed=2)],
+    )
+    orch = mod.CudaQwenImageOrchestrator(_batch_args(requests_dir, steps=9))
+    orch.generate(argv=[])
+    assert [kw["load"] for _, kw in recorder] == [True]  # one load for the whole batch
+    calls = orch._last_pipe.app.calls
+    assert [(p, kw["seed"], kw["num_inference_steps"]) for p, kw in calls] == [
+        ("p0", 0, 9),  # --steps is the worker's default
+        ("p1", 1, 3),  # the request's own steps win
+        ("p2", 2, 9),
+    ]
+    assert all((tmp_path / "out" / f"r{i}.png").is_file() for i in range(3))
+    s = summarize(requests_dir)
+    assert s.done == [0, 1, 2] and not s.failed and not s.unfinished
+    # Every request claimed exactly once, by this worker.
+    assert [(requests_dir / f"req_{i:04d}.claim").read_text() for i in range(3)] == ["0"] * 3
+
+
+def test_batch_mode_steps_fall_back_to_the_model_default(recorder, tmp_path):
+    requests_dir = _manifest(tmp_path, [dict(prompt="p0")])
+    orch = mod.CudaQwenImageOrchestrator(_batch_args(requests_dir))
+    orch.generate(argv=[])
+    assert orch._last_pipe.app.calls[0][1]["num_inference_steps"] == mod.DEFAULT_STEPS
+
+
+def test_a_failing_request_is_marked_failed_and_the_loop_continues(recorder, monkeypatch, tmp_path):
+    from difflet.cli.dp.claims import summarize
+
+    monkeypatch.setattr(_Pipe, "__init__", lambda self: setattr(self, "app", _FailingApp()))
+    requests_dir = _manifest(tmp_path, [dict(prompt="p0"), dict(prompt="boom"), dict(prompt="p2")])
+    orch = mod.CudaQwenImageOrchestrator(_batch_args(requests_dir))
+    orch.generate(argv=[])
+    assert [p for p, _ in orch._last_pipe.app.calls] == ["p0", "boom", "p2"]
+    s = summarize(requests_dir)
+    assert s.done == [0, 2] and list(s.failed) == [1] and not s.unfinished
+    assert "generation exploded" in s.failed[1]
+    assert not (tmp_path / "out" / "r1.png").exists()
+
+
+def test_a_request_guidance_scale_fails_that_request_on_qwen(recorder, tmp_path):
+    # Qwen-Image takes no guidance scale: a request carrying one is failed, never dropped.
+    from difflet.cli.dp.claims import summarize
+
+    requests_dir = _manifest(tmp_path, [dict(prompt="p0", guidance_scale=4.0), dict(prompt="p1")])
+    orch = mod.CudaQwenImageOrchestrator(_batch_args(requests_dir))
+    orch.generate(argv=[])
+    s = summarize(requests_dir)
+    assert s.done == [1] and list(s.failed) == [0] and "guidance" in s.failed[0]
+    assert [p for p, _ in orch._last_pipe.app.calls] == ["p1"]
+
+
+def test_a_request_negative_prompt_fails_that_request_on_qwen(recorder, tmp_path):
+    from difflet.cli.dp.claims import summarize
+
+    requests_dir = _manifest(tmp_path, [dict(prompt="p0", negative_prompt="blurry")])
+    mod.CudaQwenImageOrchestrator(_batch_args(requests_dir)).generate(argv=[])
+    s = summarize(requests_dir)
+    assert list(s.failed) == [0] and "negative" in s.failed[0]
+
+
+def test_round_robin_claims_only_this_worker_s_requests(recorder, tmp_path):
+    import dataclasses
+
+    from difflet.cli.dp.claims import summarize
+    from difflet.cli.dp.requests_io import read_manifest, write_manifest
+
+    requests_dir = _manifest(tmp_path, [dict(prompt=f"p{i}") for i in range(4)])
+    write_manifest(
+        [dataclasses.replace(r, assigned_worker=r.index % 2) for r in read_manifest(requests_dir)],
+        requests_dir,
+    )
+    orch = mod.CudaQwenImageOrchestrator(
+        _batch_args(requests_dir, worker_index=1, dp_schedule="round_robin")
+    )
+    orch.generate(argv=[])
+    assert [p for p, _ in orch._last_pipe.app.calls] == ["p1", "p3"]
+    s = summarize(requests_dir)
+    assert s.done == [1, 3] and s.unfinished == [0, 2]
+
+
+def test_generate_kwargs_take_the_request_overrides():
+    from difflet.cli.dp.requests_io import RequestSpec
+
+    orch = mod.CudaQwenImageOrchestrator(_args(steps=9, seed=5))
+    assert orch.generate_kwargs()["num_inference_steps"] == 9
+    req = RequestSpec(index=0, prompt="p", output="o.png", seed=11, steps=4)
+    kw = orch.generate_kwargs(req)
+    assert kw["num_inference_steps"] == 4 and kw["seed"] == 11
