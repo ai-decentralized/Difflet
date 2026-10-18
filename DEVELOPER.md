@@ -287,6 +287,17 @@ the router records it. Still refused: context parallel (F2b), tensor parallel ac
 `--sp` (F6), `--cfg-parallel` for Qwen-Image and Flux (single-pass / distilled); `--dp` with
 `--cfg-parallel` needs four cards and is unverified.
 
+**Verifying the CUDA backend (F8).** A GPU session follows the `difflet-cuda-verify` skill
+(`.claude/skills/difflet-cuda-verify/SKILL.md`). Pods are deployed, paused, resumed, deleted and
+read back through `scripts/yottalabs_pod.py` (`gpus`, `create`, `status`, `wait-running`,
+`pause`, `resume`, `delete`, `ssh-config`; the API key is read from
+`~/.config/yottalabs/api_key`). The skill's `scripts/` hold `pod_setup.sh` (venv, HF cache with or
+without the `difflet-cache` volume), `ship_branch.sh` (the branch as a git bundle) and
+`run_gates.sh <qwen|flux|wan>` (smoke → DiT parity → gate → e2e → gate, one log per step). What
+Release 1 → F2 proved, with every number traced to `artifacts/cuda-release1/` and the status
+log, is in `docs/verification/cuda-release1-evidence.md`: per-gate tables, the support matrix
+(PASS / LIMIT / N/A / NOT MEASURED) and the list of what was never run.
+
 **Serving on CUDA (F3b).** `difflet serve` keeps the serving engine's one resident worker
 process; on CUDA that worker holds a single opaque `pipeline` stage —
 `DiffletPipeline.from_pretrained(backend="cuda")` kept loaded, `app.generate()` per request —

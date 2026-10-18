@@ -22,6 +22,10 @@ docs/superpowers/*
 !docs/superpowers/plans/
 docs/superpowers/plans/*
 !docs/superpowers/plans/*.md
+# Evidence reports are audit records, tracked like plans so none is lost on one machine.
+!docs/verification/
+docs/verification/*
+!docs/verification/*.md
 docs_human/
 .history/
 # Compile cache (Trainium AOT artifacts can be huge)

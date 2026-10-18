@@ -132,13 +132,15 @@ of every GPU session, after the last script's JSONs/PNGs are copied off the box 
    `id` field at deploy time — write the ID into the session notes the moment the pod exists.
 
    ```bash
-   KEY="$(cat ~/.config/yottalabs/api_key)"; POD=<id>
-   curl -fsS -X POST "https://api.yottalabs.ai/v2/pods/$POD/pause" -H "X-Api-Key: $KEY"
-   curl -fsS "https://api.yottalabs.ai/v2/pods/$POD" -H "X-Api-Key: $KEY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["status"])'
+   POD=<id>   # every call goes through scripts/yottalabs_pod.py (reads the key file itself)
+   python3 scripts/yottalabs_pod.py pause "$POD"    # polls until PAUSED
+   python3 scripts/yottalabs_pod.py status "$POD"   # the read-back: PAUSED
    ```
 
-   Poll the second command until the status is no longer `Running`. `POST .../resume` brings it
-   back; `DELETE /v2/pods/{id}` terminates — only when the owner says "terminate".
+   `resume ID` brings it back (exit 2 when it falls back INITIALIZING → PAUSED: no capacity);
+   `delete ID` terminates and polls until the pod is gone. Terminating a pod that has a network
+   volume needs the owner's word "terminate"; a pod without a volume cannot be paused (API
+   12005) and is terminated at the end of the session, pre-authorised.
 2. If `~/.config/yottalabs/api_key` does not exist, ask the owner for it at the **start** of the
    GPU session, while they are awake — never at the end. Without it, fall back to the console:
    Pods → the pod's pause control → confirm "Pause Pod" → reload and read the status. The
@@ -172,6 +174,7 @@ Append to the end of the plan, never edit earlier entries:
 | Situation | Skill |
 |---|---|
 | any new work on this branch | this skill, then `writing-plans` / `executing-plans` |
+| a GPU session: deploy/resume a pod, run the gates, write evidence | `difflet-cuda-verify` |
 | a test fails or a run hangs | `systematic-debugging` first, `diagnosing-bugs` for perf regressions |
 | about to say "done" | `verification-before-completion` |
 | designing `_torch_megatron` or the CUDA application base | `codebase-design` |
