@@ -348,6 +348,32 @@ def test_host_text_encoder_with_the_stub_on_one_rank(caplog):
         encoder("a cat")
 
 
+def test_host_text_encoder_load_spends_one_encode_before_any_request(monkeypatch):
+    """The first encode of a fresh process was not reproducible under host CPU contention (a
+    dp2tp2 replica's first request on the trn2, 2026-10-18; 4 of 51 fresh CPU processes), later
+    ones always were: load() encodes a fixed prompt once and discards it, with the encode
+    threads, so the first request is the process's second encode and its result is unchanged."""
+    import transformers
+
+    tok, vl = StubQwenTokenizer(n_prompt=3), StubQwenVL()
+    vl.eval = lambda: vl
+    vl.requires_grad_ = lambda flag: vl
+    monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", lambda *a, **k: tok)
+    monkeypatch.setattr(transformers.Qwen2_5_VLForConditionalGeneration, "from_pretrained",
+                        lambda *a, **k: vl)
+    encoder = na._HostQwenTextEncoder("/unused", text_dim=TEXT_DIM, seq_len=TINY_TEXT_SEQ_LEN,
+                                      dtype=torch.bfloat16, device="cpu", threads=2)
+    encoder.load()
+    assert encoder.tokenizer is tok and encoder.model is vl
+    assert [text for text, _ in tok.calls] == [qwen_common.QWEN_TEMPLATE.format(na._WARMUP_PROMPT)]
+    assert vl.calls == [((1, 37), 2)]  # one forward, with the encode threads
+    embeds, mask = encoder("a red fox")
+    assert len(vl.calls) == 2 and tok.calls[-1][0] == qwen_common.QWEN_TEMPLATE.format("a red fox")
+    expected = torch.zeros(1, TINY_TEXT_SEQ_LEN, TEXT_DIM, dtype=torch.bfloat16)
+    expected[:, :3] = stub_hidden(torch.arange(100, 137)[None])[:, 34:].to(torch.bfloat16)
+    assert torch.equal(embeds, expected) and mask.tolist() == [[True] * 3 + [False] * 5]
+
+
 def test_host_text_encoder_broadcasts_rank0_result_to_two_ranks():
     results = run_ranks(q2_host_text_encoder_worker, world_size=2, timeout=120.0, env=OFFLINE)
     expected = torch.zeros(1, TINY_TEXT_SEQ_LEN, TEXT_DIM)
