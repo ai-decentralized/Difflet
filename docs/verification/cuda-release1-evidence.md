@@ -694,6 +694,10 @@ above. Spurious infrastructure events are kept and labelled.
     run, so a second `--dp N --requests` over the same file reports `done=N` in seconds without
     generating; cleared by hand on f2b (F2b observation); Wan replicas generating at once take
     51.2 s each vs 44.5 s alone (unmeasured cause) *[10-18 F2b/F4b]*.
+33. `c8794f6` — F2c: `write_manifest` starts a `--requests` run from an empty queue (stale
+    `req_*` manifests and claim/done/failed markers removed first), so the item-32 footgun is
+    closed; proven on the CPU with the router run twice over one work dir *[10-18 F2c]*.
+
 ## Support matrix
 
 Model × feature, from the entries above. Wan 2.1 (`Wan-AI/Wan2.1-T2V-14B-Diffusers`) is routed
