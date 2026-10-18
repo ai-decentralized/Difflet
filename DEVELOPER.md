@@ -246,8 +246,13 @@ with both experts resident; DiT parity vs diffusers per expert rel_l1 1.051× / 
 control (same-dtype 0.870× / 0.819×, cosine 0.9988 / 0.9997); whole-video e2e vs diffusers'
 `WanPipeline` from the same noise PSNR 26.3 dB / cosine 0.9961 with the fp32 timestep (27.5 dB /
 0.9970 under Release 1's bf16 cast), floors 25 dB / 0.99. Diffusers generates the same clip in
-44.6 s; the 10 s gap is unmeasured (the host latents round trip is far too small to explain it)
-and belongs to F4b. The e2e PSNR is well below Qwen's and Flux's; F1b measured the first suspect,
+44.6 s; F4b measured the gap with a DiT-level bench on identical inputs
+(`scripts/cuda_bench_wan_dit.py`): gemm and attention identical to diffusers', the whole 78 ms
+per forward in elementwise and copy kernels — the across-heads q/k RMSNorm's seven fp32 passes
+at tp=1 — and the host loop at 1.35 ms/step. The norm is now one op (`difflet.ops.rms_norm_fp32`,
+`torch.nn.functional.rms_norm` on CUDA, the reference math bit for bit elsewhere): 536 vs 528 ms
+per forward and 44.5 s vs diffusers' 42.8 s per 40-step run on the Server Edition, gates green.
+The e2e PSNR is well below Qwen's and Flux's; F1b measured the first suspect,
 the timestep: the CUDA DiT now receives it in fp32 (`timestep_dtype="float32"`, a per-component
 property the shared orchestrator reads; Trainium and TPU keep their model-dtype cast), which
 brings each DiT call closer to diffusers (rel_l1 1.084× → 1.039× the control at timestep 999,
@@ -324,13 +329,19 @@ the same card (measured 38.6 s served vs 38.5 s CLI on an RTX PRO 6000 Workstati
 that waits longer than `--queue-timeout` (30 s default — shorter than one 50-step request on
 the Workstation card, so raise it when clients queue) gets 429 `queue_timeout`, and a request
 past `--request-timeout` restarts the worker (full reload plus the 4-step smoke) because
-`generate()` is not interruptible mid-denoise. Trainium and TPU serving are
+`generate()` is not interruptible mid-denoise. **Two GPUs:** `--dp-degree N` keeps N
+complete resident workers, one GPU each (each worker pins `CUDA_VISIBLE_DEVICES` from its plan's
+core id), behind `difflet/serving/engines/replicated.py`, which routes each request to the replica
+with the fewest pending requests; two concurrent 50-step requests then finish in one
+request-time (16.7 s wall on two Server Edition cards, images identical to the one-GPU run) and a
+third waits for a free replica. It is refused off CUDA and above the visible GPU count before any
+download; `--dp-degree 1` is the one-worker path above, unchanged. Trainium and TPU serving are
 untouched.
 
 Not in Release 1 (follow-ups F1–F8 in the plan; Wan, Flux, serving and the second card have
 landed as F1, F5, F3b and F2 for the shapes and models above, with their own follow-ups):
 context parallel, tensor parallel across PCIe (need-triggered), multi-shape serving on
-CUDA, Wan and Flux serving on CUDA, serving on two GPUs, Wan follow-ups (F1b:
+CUDA, Wan and Flux serving on CUDA, Wan follow-ups (F1b:
 TeaCache, `--shapes`, 81-frame clips, I2V, `--negative-prompt`, batch > 1), Flux follow-ups,
 CUDA graphs, calibrated/online-delta TeaCache, FP8, `flash-attn`, custom kernels.
 
