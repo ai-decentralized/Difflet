@@ -1,14 +1,19 @@
 """The difflet-cuda-verify skill's scripts on a CPU host: every shell wrapper parses (`bash -n`)
 and answers `--help`, the pod tool answers `--help`, and `run_gates.sh --dry-run` prints each
-model's gate sequence with the runbooks' env and flags. Nothing here touches a GPU, a pod or
-the network."""
+model's gate sequence with the runbooks' env and flags; the skill's files exist, its frontmatter
+parses, every script its text names is in the repo, and its evals mirror the Trainium schema.
+Nothing here touches a GPU, a pod or the network."""
 
+import json
 import os
 import pathlib
+import py_compile
+import re
 import subprocess
 import sys
 
 import pytest
+import yaml
 
 ROOT = pathlib.Path(__file__).resolve().parents[3]
 SKILL = ROOT / ".claude" / "skills" / "difflet-cuda-verify"
@@ -137,3 +142,100 @@ def test_run_gates_rejects_an_unknown_model(tmp_path):
         cwd=ROOT,
     )
     assert proc.returncode == 2 and "qwen|flux|wan" in proc.stderr
+
+
+# --- the skill's text (F8 task 2) ---------------------------------------------------------
+
+SKILL_FILES = [
+    "SKILL.md",
+    "references/feature-catalog.md",
+    "references/pod-runbook.md",
+    "references/failure-triage.md",
+    "references/gotchas.md",
+    "references/evidence-doc-template.md",
+    "evals/evals.json",
+    "scripts/hf_device_login.py",
+]
+SKILL_DOCS = ["SKILL.md", *[f for f in SKILL_FILES if f.startswith("references/")]]
+# Where a bare script name may live (`$S/run_gates.sh`, `cuda_smoke.py`, a gate test's name).
+SCRIPT_DIRS = [SKILL / "scripts", ROOT / "scripts", ROOT / "tests" / "numerical"]
+# A path token: optional directories, then a .sh / .py file name; never a glob (`*_x.py`).
+SCRIPT_TOKEN = re.compile(r"(?<![\w.*-])((?:[\w$~.-]+/)*)([\w-]+\.(?:sh|py))\b")
+
+
+@pytest.mark.parametrize("rel", SKILL_FILES)
+def test_skill_file_exists(rel):
+    path = SKILL / rel
+    assert path.is_file() and path.stat().st_size > 0, path
+
+
+def test_skill_frontmatter_parses():
+    text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+    assert text.startswith("---\n")
+    front = yaml.safe_load(text.split("---\n", 2)[1])
+    assert front["name"] == "difflet-cuda-verify"
+    assert isinstance(front["description"], str) and "CUDA" in front["description"]
+    assert len(text.splitlines()) <= 200
+
+
+def named_scripts(rel):
+    """(token, resolved path or None) for every script path or name a skill doc mentions."""
+    text = (SKILL / rel).read_text(encoding="utf-8")
+    found = []
+    for match in SCRIPT_TOKEN.finditer(text):
+        dirs, name = match.groups()
+        token = dirs + name
+        if dirs.startswith("~") or dirs.startswith("<"):
+            continue  # a path on the pod (`~/hf_device_login.py`), not in the repo
+        if dirs in ("", "$S/"):
+            candidates = [d / name for d in SCRIPT_DIRS]
+        elif "scripts/" in dirs or dirs.startswith("tests/"):
+            candidates = [ROOT / token, SKILL / token]
+        else:
+            continue
+        found.append((token, next((c for c in candidates if c.is_file()), None)))
+    return found
+
+
+@pytest.mark.parametrize("rel", SKILL_DOCS)
+def test_every_script_the_skill_names_exists(rel):
+    found = named_scripts(rel)
+    missing = sorted({token for token, path in found if path is None})
+    assert not missing, f"{rel} names scripts that are not in the repo: {missing}"
+
+
+def test_skill_md_names_the_pod_tool_and_the_wrappers():
+    tokens = {token for token, _ in named_scripts("SKILL.md")}
+    for name in ["scripts/yottalabs_pod.py", "pod_setup.sh", "ship_branch.sh", "run_gates.sh"]:
+        assert any(t.endswith(name) for t in tokens), name
+
+
+@pytest.mark.parametrize("rel", SKILL_DOCS)
+def test_skill_docs_keep_prose_lines_short(rel):
+    long_lines = [
+        n
+        for n, line in enumerate((SKILL / rel).read_text(encoding="utf-8").splitlines(), 1)
+        if len(line) > 100 and not line.lstrip().startswith("|")
+    ]
+    assert not long_lines, f"{rel}: lines over 100 characters: {long_lines}"
+
+
+def test_hf_device_login_compiles(tmp_path):
+    py_compile.compile(
+        str(SKILL / "scripts" / "hf_device_login.py"),
+        cfile=str(tmp_path / "hf_device_login.pyc"),
+        doraise=True,
+    )
+
+
+def test_evals_mirror_the_trainium_schema():
+    ours = json.loads((SKILL / "evals" / "evals.json").read_text(encoding="utf-8"))
+    theirs = json.loads(
+        (ROOT / ".claude/skills/difflet-device-verify/evals/evals.json").read_text(encoding="utf-8")
+    )
+    assert ours["skill_name"] == "difflet-cuda-verify"
+    assert len(ours["evals"]) == 2
+    assert [e["id"] for e in ours["evals"]] == [0, 1]
+    for case in ours["evals"]:
+        assert set(case) == set(theirs["evals"][0]), set(case) ^ set(theirs["evals"][0])
+        assert case["prompt"] and case["expected_output"] and len(case["expectations"]) >= 5
