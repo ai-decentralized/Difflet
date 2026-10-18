@@ -181,8 +181,9 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
         "--host-text-encoder",
         dest="host_text_encoder",
         action="store_true",
-        help="Wan on the neuron backend: encode prompts with umT5 on rank 0's host CPU (fp32) "
-        "instead of on the device (fp32, TP-sharded, the default). Set automatically when the "
+        help="Wan and LTX-2 on the neuron backend: encode prompts on rank 0's host CPU (Wan: "
+        "umT5 in fp32; LTX-2: Gemma-3 in bf16) instead of on the device (TP-sharded, the "
+        "default). Set automatically when the "
         "TP group is too narrow for umT5 to fit beside the DiT (tp2, e.g. --cfg-parallel or "
         "--cp-degree 2 on four cores, or --dp 2 --tp-degree 2)",
     )
@@ -192,7 +193,8 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Qwen-Image on the neuron backend: encode prompts with Qwen2.5-VL's language model "
         "on the device (bf16, TP-sharded beside the DiT) instead of on rank 0's host CPU (the "
-        "default for now). Dropped, with a note, when the TP group is too narrow for it to fit "
+        "default for now; LTX-2's Gemma-3 is on the device by default). Dropped, with a note, "
+        "when the TP group is too narrow for it to fit "
         "beside the DiT (tp2, e.g. --cp-degree 2 on four cores or --dp 2 --tp-degree 2)",
     )
     p.add_argument(
