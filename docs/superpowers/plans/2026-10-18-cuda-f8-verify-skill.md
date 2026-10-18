@@ -39,7 +39,7 @@
 - Pure functions tested: `build_create_body(name, gpus, region, disk_gb, volume_id, mount, image)`, `pick_region(pools, preferred)`, `ssh_endpoint(pod_json) -> (host, port) | None`, `next_poll_decision(status, target)`.
 - `pod_setup.sh [--volume]`: the F1b/F2 recipe (uv, venv, torch cu128, `-e .[test,cuda]`, hf cli, imageio-ffmpeg, env check); with `--volume` sets `HF_HOME=/data/hf` and chowns `/data` once, else `HF_HOME=$HOME/hf`. `ship_branch.sh <alias> <branch>`: bundle, scp, fetch, checkout on the pod. `run_gates.sh <qwen|flux|wan> <snapshot> [--out ~/logs/<name>]`: the per-model sequence (smoke → parity → gate → e2e → gate; Wan adds the rounding block and the e2e A/B flags) with the exact env, mirroring the F3/F5/F1/F1b runbooks.
 
-- [ ] **Step 1: Write the failing tests** (Review Focus 1–3; polling decisions; `bash -n`; `--help`). **Step 2: Run** → ImportError/failures. **Step 3: Implement.** **Step 4:** `pytest tests/unit/scripts -q` + CPU gate green. **Step 5: Commit** `scripts: yottalabs_pod — pod lifecycle through the API, and the CUDA verify skill's setup/ship/gate wrappers (F8 task 1)`.
+- [x] **Step 1: Write the failing tests** (Review Focus 1–3; polling decisions; `bash -n`; `--help`). **Step 2: Run** → ImportError/failures. **Step 3: Implement.** **Step 4:** `pytest tests/unit/scripts -q` + CPU gate green. **Step 5: Commit** `scripts: yottalabs_pod — pod lifecycle through the API, and the CUDA verify skill's setup/ship/gate wrappers (F8 task 1)`.
 
 ### Task 2: The `difflet-cuda-verify` skill
 
@@ -53,7 +53,7 @@
 - `failure-triage.md`: spurious causes seen (device-cgroup loss on us-central-7, container restart on disk overrun, capacity refusals, the `.venv/bin/pip` absence under uv, the HF code expiry) before calling a Difflet bug; the bug protocol as on Trainium.
 - `gotchas.md`, `evidence-doc-template.md` (CUDA tables), `evals/evals.json` (two evals: plan a session without a GPU; write the evidence skeleton from the artifacts).
 
-- [ ] **Step 1:** write the files. **Step 2:** a test in `tests/unit/scripts/test_cuda_verify_skill_scripts.py` asserts the skill's files exist, the frontmatter parses, and every `scripts/*.sh` / `scripts/yottalabs_pod.py` the SKILL.md names exists. **Step 3:** CPU gate green. **Step 4: Commit** `skill: difflet-cuda-verify — pod lifecycle, host setup, per-model gates and triage, from the Release 1 → F2 campaigns (F8 task 2)`.
+- [x] **Step 1:** write the files. **Step 2:** a test in `tests/unit/scripts/test_cuda_verify_skill_scripts.py` asserts the skill's files exist, the frontmatter parses, and every `scripts/*.sh` / `scripts/yottalabs_pod.py` the SKILL.md names exists. **Step 3:** CPU gate green. **Step 4: Commit** `skill: difflet-cuda-verify — pod lifecycle, host setup, per-model gates and triage, from the Release 1 → F2 campaigns (F8 task 2)`.
 
 ### Task 3: The evidence report, pointers, status log
 
@@ -63,7 +63,7 @@
 
 **Report content:** header (branches, PRs #84–#89, pods and card editions, dates); per-feature sections with a table model × gate → numbers → artifact path → status-log entry, for: smoke, DiT parity (D14 gates), e2e (floors), CLI matrix, serve (F3b), performance (F4), two GPUs (F2), the F1b A/B; "How to inspect manually" per section (the exact script invocations); the rulings/bugs ledger (one line each with the commit); the support matrix (PASS / LIMIT / N/A / NOT MEASURED) as model × feature and as one block per feature; what is NOT MEASURED (CLI matrix Wan cell, dp×cfg, Flux under dp, Wan 2.1, noise floor); pod cost table.
 
-- [ ] **Step 1:** write the report and the pointers. **Step 2:** `git check-ignore docs/verification/cuda-release1-evidence.md` must exit 1; CPU gate green. **Step 3: Commit** `docs: CUDA Release 1 → F2 evidence report, verify-skill pointers, F8 status (F8 task 3)`.
+- [x] **Step 1:** write the report and the pointers. **Step 2:** `git check-ignore docs/verification/cuda-release1-evidence.md` must exit 1; CPU gate green. **Step 3: Commit** `docs: CUDA Release 1 → F2 evidence report, verify-skill pointers, F8 status (F8 task 3)`.
 
 ## Rulings
 
@@ -71,6 +71,24 @@
 - R2: `docs/verification/*.md` becomes tracked by a `.gitignore` exception rather than `git add -f`, so the report cannot be lost the way the TPU plan once was.
 - R3: F8 ships without a GPU run; the skill's first real use is its exit criterion and is recorded as such.
 
-## Execution ledger
+## Execution ledger (folded from the SDD workspace, 2026-10-18)
 
-(appended by the executor, one line per task: numbers, rulings, deviations)
+```
+# SDD ledger — plan: docs/superpowers/plans/2026-10-18-cuda-f8-verify-skill.md
+
+Branch feat/cuda-f8-verify-skill on feat/cuda-f2-second-gpu (8c06acb). Pre-flight scan: T1 produces the pod tool and wrappers T2 names and T3 points at — consistent; T2 self: the file-existence test lives in T1's test module (T2 extends it) — ok; T3 self: the gitignore exception must precede the report add — ok. Scan clean.
+
+## Tasks
+Task 1: Ruling: `pause` waits for PAUSED, a `list` subcommand exists, the watcher retries a failed GET but never the create POST — implementer's departures, all kept. Live read-only check by the controller: `gpus`, `status`, `list`, `create --dry-run` work against the API and print no key.
+Task 1: minor (deferred): the watcher retries every ApiError including a revoked key (retry only transient codes); one network error during `wait-running`/`delete`/`pause`/`resume` exits 1 after the request was sent (retry transient GETs in `poll`); the ssh-config block lacks `IdentitiesOnly yes` / `ServerAliveInterval 30`; `run_gates.sh` drops `CUDA_VISIBLE_DEVICES=0`, `/usr/bin/time -v` and `nvidia-smi topo -m` from the runbooks; no test asserts the flags `run_gates.sh` passes exist in the target scripts' argparse.
+Task 1: complete (commits 40b7902..40a24fa, review clean)
+Task 2: review (opus): numbers accurate and labelled, flags real; Needs fixes — five Important text items (unpinned volume create region, pause-then-delete block, matrix/serve commands without HF_HOME, NVML row deploying without the owner's yes, three unsupported runbook facts) + minors. Ruling: pausing a volume pod and terminating a pod that cannot be paused are the pre-authorised end-of-session actions; terminating a volume pod still needs the owner's word — Task 3 reconciles the backend skill's "DELETE only when the owner says terminate" line with this. Fix round 1 dispatched.
+Task 2: fix round 1/5 (11 addressed, 0 open; commits 2cb5b9a..fc222f0). minor (deferred): SKILL.md at exactly 200 lines; two prose lines at 101/103 chars; gotchas.md and evals.json keep a looser "pausing/terminating pre-authorised" paraphrase; the serve-probe block dropped the `--tp-degree 2` refusal probe (the catalog keeps it).
+Task 2: complete (commits 40a24fa..fc222f0, review clean after one fix round)
+Task 3: review (opus): ~60 numbers all match their artifacts/entries; Needs fixes — two cited F2 `.log` artifacts are gitignored (ruling: track them with `!artifacts/cuda-release1/**/*.log`, R2 spirit); a `~` inside double quotes in the Wan parity inspect command; minors (F2 prompts added to the F8 entry from the controller's runbook, "38 dB" in three entries, 5.3 %, bench `--out`, `$SNAP`/`$H` defined, DEVELOPER run_gates usage, backend-skill heading/step 3/resume wording, two ledger citations, one computed label). Fix round 1 dispatched.
+Task 3: fix round 1/5 (11 addressed, 0 open; commits 7e8df43..ad607d5 — the two F2 logs tracked via `!artifacts/cuda-release1/**/*.log`, 39 tracked artifacts, `$HOME` in on-pod commands, F2 prompts in the F8 entry, lifecycle wording in the backend skill).
+Task 3: complete (commits fc222f0..ad607d5, review clean after one fix round)
+Whole-branch review (8c06acb..ad607d5, opus): flags, flows and numbers agree across files; fresh-session dry run reached the right commands; With fixes — Important: SKILL.md two-GPU block sets no HF_HOME/HF_HUB_OFFLINE/DIFFLET_BACKEND; the lifecycle rule still loose in failure-triage NVML row, the tool's --help, evals.json, gotchas; the paused f5b holding the volume is never mentioned (a second pod on the volume: not measured); run_gates.sh early exits write no `GATES DONE` so the polling loop can hang. Minors: deploy-yes order, status vocabulary/NOT MEASURED count (5 vs 6), fixture public IP, eval 0 remedy (remove Flux, not Qwen), attached setup run, DEVELOPER.md line break. One fix dispatch follows.
+Final fix wave: 38f93f8 (HF_HOME/offline/backend exported in the two-GPU block; one lifecycle rule in failure-triage, the tool's --help, evals, gotchas; f5b and the volume named with the not-measured claims; `GATES DONE … overall_rc=2` on every early exit + tests; runbook deploy order; catalog vocabulary + serve LIMIT + serving-on-two-GPUs row; six NOT MEASURED; fixture IP; eval 0 remedy; detached setup with a `SETUP DONE rc=` trap; DEVELOPER.md line break; ssh-config IdentitiesOnly/ServerAliveInterval; an appended "F8 review fixes" entry). Scoped re-review: all twelve addressed, no new breakage; observation: the setup poll ends on any rc and would retry forever if ssh itself fails.
+Branch complete: 8c06acb..38f93f8, final review clean after one fix wave.
+```
