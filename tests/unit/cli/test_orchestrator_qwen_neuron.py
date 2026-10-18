@@ -22,6 +22,17 @@ from difflet.cli.orchestrators.qwen_image import QwenImageOrchestrator
 from tests.unit.cli import _fake_neuron_pipeline as fake_pipeline
 
 _QWEN_ID = "Qwen/Qwen-Image"
+#: The shipped default, read before the fixture below replaces it.
+_SHIPPED_DEVICE_VAE_DEFAULT = qwen_mod._DEVICE_VAE_DEFAULT
+
+
+@pytest.fixture(autouse=True)
+def _host_decode_unless_asked(monkeypatch):
+    """The tests here check the launch plan, flags, DP queues and caches around the host decode,
+    which the CPU fakes can run (a vae stage would need the real VAE weights). The decode
+    placement itself, the shipped default included, is pinned by the --device-vae tests below,
+    which set ``_DEVICE_VAE_DEFAULT`` themselves."""
+    monkeypatch.setattr(qwen_mod, "_DEVICE_VAE_DEFAULT", False)
 _REV = "75e0b4be04f60ec59a75f475837eced720f823b6"
 _CACHE_ENV = ("DIFFLET_COMPILE_CACHE", "TORCH_NEURONX_NEFF_CACHE_DIR",
               "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR", "TORCH_NEURONX_HLO_CACHE_DIR")
@@ -160,9 +171,9 @@ def test_neuron_device_vae_is_a_vae_stage_after_the_generate_launch(monkeypatch,
 @pytest.mark.parametrize("host_vae, device_vae", [(False, False), (True, False), (False, True)])
 def test_vae_placement_flags_and_the_default(monkeypatch, tmp_path, device_default, host_vae,
                                              device_vae):
-    # The host is the default for now (the device stage flips _DEVICE_VAE_DEFAULT after
-    # measuring); --host-vae is the opt-out whatever the default is.
-    assert qwen_mod._DEVICE_VAE_DEFAULT is False
+    # The vae stage on one core is the default (flipped after the device measurements);
+    # --host-vae is the opt-out whatever the default is.
+    assert _SHIPPED_DEVICE_VAE_DEFAULT is True
     monkeypatch.setattr(qwen_mod, "_DEVICE_VAE_DEFAULT", device_default)
     _backend(monkeypatch, "neuron")
     stages, decoded = _record_stages(monkeypatch)
