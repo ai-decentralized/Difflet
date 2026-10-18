@@ -192,6 +192,20 @@ def test_pod_setup_ends_with_its_done_marker_even_on_failure(tmp_path):
     assert proc.stdout.splitlines()[-1] == "SETUP DONE rc=2"
 
 
+def test_pod_setup_finds_its_checkout_from_any_cwd(tmp_path):
+    """F9 friction #1: run from `~` it said "not a Difflet checkout"; the checkout is now
+    resolved from the script's own path, so --help and the checkout check work from anywhere."""
+    script = SKILL / "scripts" / "pod_setup.sh"
+    env = {k: v for k, v in os.environ.items() if k != "REPO"}
+    for args in (["--help"], ["--check-repo"]):
+        proc = subprocess.run(
+            ["bash", str(script), *args], capture_output=True, text=True, cwd=tmp_path, env=env
+        )
+        assert proc.returncode == 0, proc.stderr
+    assert proc.stdout.strip() == f"pod_setup.sh: Difflet checkout at {ROOT}"
+    assert "SETUP DONE" not in proc.stdout  # the check installs nothing and ends no setup
+
+
 # --- the skill's text (F8 task 2) ---------------------------------------------------------
 
 SKILL_FILES = [

@@ -1,0 +1,50 @@
+seeds [0, 1, 2]
+aggregate {"variants": {"float32": {"psnr_db": {"min": 26.303416187998177, "mean": 27.195269632128362, "max": 28.892729833853217}, "cosine": {"min": 0.9954080361759985, "mean": 0.9964161665721022, "max": 0.9977499547450291}}}, "noise_floor": {"psnr_db": {"min": 23.791277963208838, "mean": 26.383384022048123, "max": 28.62247624113023}, "cosine": {"min": 0.9925481088354928, "mean": 0.9953332437595783, "max": 0.9976972537199161}}}
+seed 0 difflet fp32 vs exact {'psnr_db': 26.3034, 'cosine': 0.9961, 'mean_abs': 0.0274} noise floor exact vs bf16ts {'psnr_db': 28.6225, 'cosine': 0.9977, 'mean_abs': 0.0203}
+seed 1 difflet fp32 vs exact {'psnr_db': 26.3897, 'cosine': 0.9954, 'mean_abs': 0.028} noise floor exact vs bf16ts {'psnr_db': 26.7364, 'cosine': 0.9958, 'mean_abs': 0.0259}
+seed 2 difflet fp32 vs exact {'psnr_db': 28.8927, 'cosine': 0.9977, 'mean_abs': 0.0223} noise floor exact vs bf16ts {'psnr_db': 23.7913, 'cosine': 0.9925, 'mean_abs': 0.0365}
+timings {"difflet": {"load_s": 56.0, "generate_s": 50.9, "peak_alloc_gb": 68.44}, "diffusers": {"load_s": 48.3, "generate_s": 43.2, "peak_alloc_gb": 68.56}}
+== noise pytest
+==================================== PASSES ====================================
+timestep_dtype=float32: PSNR 26.30 dB, cosine 0.99609
+seed 0 timestep_dtype=float32: PSNR 26.30 dB, cosine 0.99609
+seed 1 timestep_dtype=float32: PSNR 26.39 dB, cosine 0.99541
+seed 2 timestep_dtype=float32: PSNR 28.89 dB, cosine 0.99775
+seed 0 noise floor (diffusers vs its bf16-rounded timestep): PSNR 28.62 dB, cosine 0.99770
+seed 1 noise floor (diffusers vs its bf16-rounded timestep): PSNR 26.74 dB, cosine 0.99575
+seed 2 noise floor (diffusers vs its bf16-rounded timestep): PSNR 23.79 dB, cosine 0.99255
+aggregate over 3 seeds, timestep_dtype=float32: PSNR min 26.30 / mean 27.20 / max 28.89 dB, cosine min 0.99541 / mean 0.99642 / max 0.99775
+aggregate over 3 seeds, noise floor: PSNR min 23.79 / mean 26.38 / max 28.62 dB, cosine min 0.99255 / mean 0.99533 / max 0.99770
+=========================== short test summary info ============================
+============================== 4 passed in 0.02s ===============================
+== gates
+== wan gates 2026-10-18T19:36:36Z ==
+snapshot: /home/user/hf/hub/models--Wan-AI--Wan2.2-T2V-A14B-Diffusers/snapshots/5be7df9619b54f4e2667b2755bc6a756675b5cd7/
+2387653 wan: e2e noise floor over seeds — diffusers vs its bf16-rounded timestep; pod tool keeps an explicit disk size with a volume (F9 task 1)
+0, NVIDIA RTX PRO 6000 Blackwell Server Edition, 580.178.04, 0 MiB
+overlay         484G  251G  183G  58% /
+overlay         484G  251G  183G  58% /
+smoke exit: 0 in 104s
+parity exit: 0 in 189s
+parity-gate exit: 0 in 0s
+e2e exit: 0 in 302s
+e2e-gate exit: 0 in 0s
+0 MiB
+GATES DONE wan overall_rc=0
+[difflet] loaded in 47.7 s
+difflet (timestep_dtype=float32) loaded in 49.8s
+difflet (timestep_dtype=float32, seed 0) generated in 50.6s
+difflet (timestep_dtype=model) loaded in 48.9s
+difflet (timestep_dtype=model, seed 0) generated in 50.2s
+diffusers loaded in 52.6s
+diffusers (seed 0) generated in 43.1s
+seed 0: difflet (timestep_dtype=float32) vs diffusers (whole video, pixels in [0,1]): {'psnr_db': 26.303416187998177, 'cosine': 0.9960905087952788, 'mean_abs': 
+seed 0: difflet (timestep_dtype=model) vs diffusers (whole video, pixels in [0,1]): {'psnr_db': 27.541036709948607, 'cosine': 0.9970406648545574, 'mean_abs': 0.
+aggregate over 1 seed(s), timestep_dtype=float32: {'psnr_db': {'min': 26.303416187998177, 'mean': 26.303416187998177, 'max': 26.303416187998177}, 'cosine': {'mi
+aggregate over 1 seed(s), timestep_dtype=model: {'psnr_db': {'min': 27.541036709948607, 'mean': 27.541036709948607, 'max': 27.541036709948607}, 'cosine': {'min'
+diffusers transformer torch.float32 loaded in 69.1s
+== verify cells
+NVIDIA RTX PRO 6000 Blackwell Server Edition
+Qwen/Qwen-Image PASS {'download': 0.2, 'compile': 3.8, 'generate': 51.9}
+black-forest-labs/FLUX.1-dev PASS {'download': 0.2, 'compile': 2.1, 'generate': 16.8}
+Wan-AI/Wan2.2-T2V-A14B-Diffusers PASS {'download': 0.2, 'compile': 2.1, 'generate': 111.5}

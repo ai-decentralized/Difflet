@@ -15,7 +15,7 @@ in this order — each one happened on a reference pod (2026-10-16 → 10-18).
 | `pause` → API code 12005 | the pod has no network volume | `delete` instead; that is the only way to stop its billing. |
 | `.venv/bin/pip: No such file or directory` | uv venvs ship no pip | `uv pip install --python .venv/bin/python …`. |
 | `/usr/bin/time: not found`; `nsys: not found` | not in the pod image | Use the scripts' own timers / log timestamps; `torch.profiler` for timelines (F4). |
-| Device login: no `LOGIN_OK` in the log, the token never appears | the HF device code expired (300 s) before the owner entered it | Start `hf_device_login.py` again for a fresh code; send the owner the URL the moment it prints. |
+| Device login: no `LOGIN_OK` in the log, the token never appears | the HF device code expired (300 s) before the owner entered it (F9's first code, 2026-10-18) | Start `hf_device_login.py` again for a fresh code once the owner says they are at the phone; send the URL the moment it prints. |
 | SSH session dies right after a `pkill -f …` | the pattern matched the SSH command's own shell | Kill by PID (`pgrep -af`), never `pkill -f` inside `ssh '…'`. |
 | A gate's pytest SKIPs ("no recorded … result", "set DIFFLET_RUN_CUDA_NUMERICAL=1") | the result-JSON env var points elsewhere, or the opt-in is unset | A SKIP is not a PASS. Point the env var at the JSON (`run_gates.sh` does) and re-run the gate. |
 | `HF_HUB_OFFLINE` errors / a snapshot without `transformer/` or Wan without `transformer_2/` | partial download or the wrong `HF_HOME` | Re-run `hf download` into the right `HF_HOME`; Difflet refuses a Wan 2.2 snapshot without `transformer_2/` by design. |
@@ -40,7 +40,8 @@ Difflet traceback, a shape mismatch or a gate miss on a healthy card is a candid
 - One seed and one prompt are one sample. Before blaming a cause for an e2e gap, measure the
   metric's own noise floor (diffusers vs diffusers with a perturbation, several seeds) — the
   F1b A/B moved Wan's PSNR by 1.2 dB, and its "refuted" had to be corrected to "not supported by
-  a single-seed A/B". The noise floor is still not measured.
+  a single-seed A/B". F9 measured Wan's: diffusers vs its bf16-rounded timestep 23.8–28.6 dB over
+  seeds 0–2, Difflet vs diffusers 26.3–28.9 dB — inside it, so no Difflet defect to chase there.
 
 ## The bug protocol (when it really is a bug)
 

@@ -1,0 +1,186 @@
+{
+  "backend": "cuda",
+  "device": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+  "generate_steps": null,
+  "seed": 0,
+  "run_dir": "/home/user/.cache/difflet/verify-cli-cuda/verify_matrix_20261018_192446",
+  "cells": [
+    {
+      "model_id": "Qwen/Qwen-Image",
+      "config": "tp1",
+      "outcome": "PASS",
+      "generate_steps": 50,
+      "steps": {
+        "download": {
+          "status": "PASS",
+          "duration_s": 0.2137675130002208,
+          "reason": "",
+          "cmd": [
+            "/home/user/Difflet/.venv/bin/python",
+            "-m",
+            "difflet.cli.main",
+            "download",
+            "--model-id",
+            "Qwen/Qwen-Image"
+          ]
+        },
+        "compile": {
+          "status": "PASS",
+          "duration_s": 3.768888333999712,
+          "reason": "",
+          "cmd": [
+            "/home/user/Difflet/.venv/bin/python",
+            "-m",
+            "difflet.cli.main",
+            "compile",
+            "--model-id",
+            "Qwen/Qwen-Image",
+            "--tp-degree",
+            "1"
+          ]
+        },
+        "generate": {
+          "status": "PASS",
+          "duration_s": 51.88311176700017,
+          "reason": "",
+          "cmd": [
+            "/home/user/Difflet/.venv/bin/python",
+            "-m",
+            "difflet.cli.main",
+            "generate",
+            "--model-id",
+            "Qwen/Qwen-Image",
+            "--tp-degree",
+            "1",
+            "--prompt",
+            "a photorealistic cat sitting in a sunlit garden",
+            "--output",
+            "/home/user/.cache/difflet/verify-cli-cuda/verify_matrix_20261018_192446/qwen-image_tp1.png",
+            "--steps",
+            "50",
+            "--seed",
+            "0"
+          ]
+        }
+      }
+    },
+    {
+      "model_id": "black-forest-labs/FLUX.1-dev",
+      "config": "tp1",
+      "outcome": "PASS",
+      "generate_steps": 28,
+      "steps": {
+        "download": {
+          "status": "PASS",
+          "duration_s": 0.21386087200016846,
+          "reason": "",
+          "cmd": [
+            "/home/user/Difflet/.venv/bin/python",
+            "-m",
+            "difflet.cli.main",
+            "download",
+            "--model-id",
+            "black-forest-labs/FLUX.1-dev"
+          ]
+        },
+        "compile": {
+          "status": "PASS",
+          "duration_s": 2.068094462999852,
+          "reason": "",
+          "cmd": [
+            "/home/user/Difflet/.venv/bin/python",
+            "-m",
+            "difflet.cli.main",
+            "compile",
+            "--model-id",
+            "black-forest-labs/FLUX.1-dev",
+            "--tp-degree",
+            "1"
+          ]
+        },
+        "generate": {
+          "status": "PASS",
+          "duration_s": 16.788660975999846,
+          "reason": "",
+          "cmd": [
+            "/home/user/Difflet/.venv/bin/python",
+            "-m",
+            "difflet.cli.main",
+            "generate",
+            "--model-id",
+            "black-forest-labs/FLUX.1-dev",
+            "--tp-degree",
+            "1",
+            "--prompt",
+            "a photorealistic cat sitting in a sunlit garden",
+            "--output",
+            "/home/user/.cache/difflet/verify-cli-cuda/verify_matrix_20261018_192446/flux.1-dev_tp1.png",
+            "--steps",
+            "28",
+            "--seed",
+            "0"
+          ]
+        }
+      }
+    },
+    {
+      "model_id": "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+      "config": "tp1",
+      "outcome": "PASS",
+      "generate_steps": 40,
+      "steps": {
+        "download": {
+          "status": "PASS",
+          "duration_s": 0.21383637400003863,
+          "reason": "",
+          "cmd": [
+            "/home/user/Difflet/.venv/bin/python",
+            "-m",
+            "difflet.cli.main",
+            "download",
+            "--model-id",
+            "Wan-AI/Wan2.2-T2V-A14B-Diffusers"
+          ]
+        },
+        "compile": {
+          "status": "PASS",
+          "duration_s": 2.11802132899993,
+          "reason": "",
+          "cmd": [
+            "/home/user/Difflet/.venv/bin/python",
+            "-m",
+            "difflet.cli.main",
+            "compile",
+            "--model-id",
+            "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+            "--tp-degree",
+            "1"
+          ]
+        },
+        "generate": {
+          "status": "PASS",
+          "duration_s": 111.51901980100001,
+          "reason": "",
+          "cmd": [
+            "/home/user/Difflet/.venv/bin/python",
+            "-m",
+            "difflet.cli.main",
+            "generate",
+            "--model-id",
+            "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+            "--tp-degree",
+            "1",
+            "--prompt",
+            "a photorealistic cat sitting in a sunlit garden",
+            "--output",
+            "/home/user/.cache/difflet/verify-cli-cuda/verify_matrix_20261018_192446/wan2.2-t2v-a14b-diffusers_tp1.mp4",
+            "--steps",
+            "40",
+            "--seed",
+            "0"
+          ]
+        }
+      }
+    }
+  ]
+}

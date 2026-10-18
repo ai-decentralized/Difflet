@@ -1,0 +1,251 @@
+{
+  "model": "wan",
+  "model_id": "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+  "model_path": "/home/user/hf/hub/models--Wan-AI--Wan2.2-T2V-A14B-Diffusers/snapshots/5be7df9619b54f4e2667b2755bc6a756675b5cd7/",
+  "prompt": "a photorealistic cat walking through a sunlit garden",
+  "steps": 40,
+  "guidance_scale": 4.0,
+  "guidance_scale_2": 3.0,
+  "seed": 0,
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "shape": [
+    480,
+    832,
+    9
+  ],
+  "latent_shape": [
+    1,
+    16,
+    3,
+    60,
+    104
+  ],
+  "video_shape": [
+    9,
+    480,
+    832,
+    3
+  ],
+  "device": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+  "torch": "2.11.0+cu128",
+  "timestep_dtypes": [
+    "float32"
+  ],
+  "metrics": {
+    "psnr_db": 26.303416187998177,
+    "cosine": 0.9960905087952788,
+    "mean_abs": 0.027446623820128718,
+    "max_abs": 1.0
+  },
+  "timings": {
+    "difflet": {
+      "load_s": 56.0,
+      "generate_s": 50.9,
+      "peak_alloc_gb": 68.44
+    },
+    "diffusers": {
+      "load_s": 48.3,
+      "generate_s": 43.2,
+      "peak_alloc_gb": 68.56
+    }
+  },
+  "images": {
+    "difflet": "/home/user/logs/f9/wan_e2e_difflet_float32_frame0.png",
+    "diffusers": "/home/user/logs/f9/wan_e2e_diffusers_frame0.png"
+  },
+  "variants": {
+    "float32": {
+      "metrics": {
+        "psnr_db": 26.303416187998177,
+        "cosine": 0.9960905087952788,
+        "mean_abs": 0.027446623820128718,
+        "max_abs": 1.0
+      },
+      "timings": {
+        "load_s": 56.0,
+        "generate_s": 50.9,
+        "peak_alloc_gb": 68.44
+      },
+      "image": "/home/user/logs/f9/wan_e2e_difflet_float32_frame0.png"
+    }
+  },
+  "noise_floor": {
+    "metrics": {
+      "psnr_db": 28.62247624113023,
+      "cosine": 0.9976972537199161,
+      "mean_abs": 0.020343872896286835,
+      "max_abs": 0.951171875
+    },
+    "timings": {
+      "load_s": 48.3,
+      "generate_s": 42.8,
+      "peak_alloc_gb": 68.56
+    }
+  },
+  "per_seed": {
+    "0": {
+      "variants": {
+        "float32": {
+          "metrics": {
+            "psnr_db": 26.303416187998177,
+            "cosine": 0.9960905087952788,
+            "mean_abs": 0.027446623820128718,
+            "max_abs": 1.0
+          },
+          "timings": {
+            "load_s": 56.0,
+            "generate_s": 50.9,
+            "peak_alloc_gb": 68.44
+          }
+        }
+      },
+      "noise_floor": {
+        "metrics": {
+          "psnr_db": 28.62247624113023,
+          "cosine": 0.9976972537199161,
+          "mean_abs": 0.020343872896286835,
+          "max_abs": 0.951171875
+        },
+        "timings": {
+          "load_s": 48.3,
+          "generate_s": 42.8,
+          "peak_alloc_gb": 68.56
+        }
+      },
+      "diffusers": {
+        "timings": {
+          "load_s": 48.3,
+          "generate_s": 43.2,
+          "peak_alloc_gb": 68.56
+        }
+      },
+      "images": {
+        "difflet": {
+          "float32": "/home/user/logs/f9/wan_e2e_difflet_float32_seed0_frame0.png"
+        },
+        "diffusers": "/home/user/logs/f9/wan_e2e_diffusers_seed0_frame0.png",
+        "diffusers_bf16ts": "/home/user/logs/f9/wan_e2e_diffusers_bf16ts_seed0_frame0.png"
+      }
+    },
+    "1": {
+      "variants": {
+        "float32": {
+          "metrics": {
+            "psnr_db": 26.389662874533684,
+            "cosine": 0.9954080361759985,
+            "mean_abs": 0.027996093272483587,
+            "max_abs": 0.98828125
+          },
+          "timings": {
+            "load_s": 56.0,
+            "generate_s": 49.3,
+            "peak_alloc_gb": 68.44
+          }
+        }
+      },
+      "noise_floor": {
+        "metrics": {
+          "psnr_db": 26.7363978618053,
+          "cosine": 0.9957543687233261,
+          "mean_abs": 0.025940741478321334,
+          "max_abs": 1.0
+        },
+        "timings": {
+          "load_s": 48.3,
+          "generate_s": 42.9,
+          "peak_alloc_gb": 68.56
+        }
+      },
+      "diffusers": {
+        "timings": {
+          "load_s": 48.3,
+          "generate_s": 42.9,
+          "peak_alloc_gb": 68.56
+        }
+      },
+      "images": {
+        "difflet": {
+          "float32": "/home/user/logs/f9/wan_e2e_difflet_float32_seed1_frame0.png"
+        },
+        "diffusers": "/home/user/logs/f9/wan_e2e_diffusers_seed1_frame0.png",
+        "diffusers_bf16ts": "/home/user/logs/f9/wan_e2e_diffusers_bf16ts_seed1_frame0.png"
+      }
+    },
+    "2": {
+      "variants": {
+        "float32": {
+          "metrics": {
+            "psnr_db": 28.892729833853217,
+            "cosine": 0.9977499547450291,
+            "mean_abs": 0.022324854337874754,
+            "max_abs": 0.919921875
+          },
+          "timings": {
+            "load_s": 56.0,
+            "generate_s": 49.4,
+            "peak_alloc_gb": 68.44
+          }
+        }
+      },
+      "noise_floor": {
+        "metrics": {
+          "psnr_db": 23.791277963208838,
+          "cosine": 0.9925481088354928,
+          "mean_abs": 0.03647410328458404,
+          "max_abs": 1.0
+        },
+        "timings": {
+          "load_s": 48.3,
+          "generate_s": 42.9,
+          "peak_alloc_gb": 68.56
+        }
+      },
+      "diffusers": {
+        "timings": {
+          "load_s": 48.3,
+          "generate_s": 42.9,
+          "peak_alloc_gb": 68.56
+        }
+      },
+      "images": {
+        "difflet": {
+          "float32": "/home/user/logs/f9/wan_e2e_difflet_float32_seed2_frame0.png"
+        },
+        "diffusers": "/home/user/logs/f9/wan_e2e_diffusers_seed2_frame0.png",
+        "diffusers_bf16ts": "/home/user/logs/f9/wan_e2e_diffusers_bf16ts_seed2_frame0.png"
+      }
+    }
+  },
+  "aggregate": {
+    "variants": {
+      "float32": {
+        "psnr_db": {
+          "min": 26.303416187998177,
+          "mean": 27.195269632128362,
+          "max": 28.892729833853217
+        },
+        "cosine": {
+          "min": 0.9954080361759985,
+          "mean": 0.9964161665721022,
+          "max": 0.9977499547450291
+        }
+      }
+    },
+    "noise_floor": {
+      "psnr_db": {
+        "min": 23.791277963208838,
+        "mean": 26.383384022048123,
+        "max": 28.62247624113023
+      },
+      "cosine": {
+        "min": 0.9925481088354928,
+        "mean": 0.9953332437595783,
+        "max": 0.9976972537199161
+      }
+    }
+  }
+}

@@ -1,6 +1,6 @@
 # Feature catalog — each gate's script, inputs, thresholds and reference numbers
 
-Every number below is from the reference campaign (Release 1 → F2, 2026-10-16 → 10-18) and
+Every number below is from the reference campaign (Release 1 → F9, 2026-10-16 → 10-18) and
 carries its date, pod and card edition. They show what a pass looked like on that card; they are
 not expectations for the next run. Sources: the status log at the end of
 `docs/plans/2026-10-16-cuda-backend-support.md` (entry date in brackets) and the JSONs under
@@ -15,12 +15,14 @@ not expectations for the next run. Sources: the status log at the end of
 | `difflet-cuda-f5b` | us-east-3 | 1× **Workstation Edition**, `difflet-cache` volume | 0.45 | F5, F3b, F1 [10-18] |
 | `difflet-cuda-f1b` | eu-3 | 2× **Server Edition** (GPU 0 used) | 5.30 | F1b [10-18] |
 | `difflet-cuda-f2` | eu-3 | 2× **Server Edition**, PCIe `PHB`, no NVLink | 5.30 | F2 [10-18] |
+| `difflet-cuda-f9` | eu-3 | 1× **Server Edition**, no volume, 250 GB container disk | 2.65 | F9 [10-18] |
 
 Same driver family, torch 2.11.0+cu128 and code path everywhere, yet Qwen-Image's 50-step
 `difflet run` took **0.77 s/step on the Workstation Edition** (f5b) and **0.33 s/step on the
 Server Edition** (f3c, after F4's trim): a **2.3× per-step gap** from the card/pod [F3b, 10-18].
 Never put per-step numbers from two editions in one comparison without naming both. Parity and
-e2e metrics did match across editions: Wan's `model`-timestep e2e gave 27.54 dB on both [F1b].
+e2e metrics did match across editions: Wan's `model`-timestep e2e gave 27.54 dB on both [F1b],
+and again on f9 (Server) [F9].
 
 ## Support snapshot (2026-10-18; the default expectation per gate)
 
@@ -28,8 +30,8 @@ e2e metrics did match across editions: Wan's `model`-timestep e2e gave 27.54 dB 
 |---|---|---|---|
 | smoke (`difflet run`, by eye) | PASS [F3] | PASS [F5] | PASS [F1] |
 | DiT parity (D14, three gates) | PASS incl. padded prompt [F3, F4] | PASS [F5] | PASS both experts + rounding block [F1, F1b] |
-| e2e vs diffusers | PASS, floors 35 dB / 0.998 [F3] | PASS, floors 35 dB / 0.998 [F5] | PASS, floors 25 dB / 0.99 [F1, F1b] |
-| CLI matrix cell (`verify_cli_cuda.py`) | PASS [F3, F5] | PASS [F5] | NOT MEASURED (smoke stands in) [F1] |
+| e2e vs diffusers | PASS, floors 35 dB / 0.998 [F3] | PASS, floors 35 dB / 0.998 [F5] | PASS, floors 25 dB / 0.99 [F1, F1b]; seeds 0–2 26.30–28.89 dB, inside diffusers' own noise floor 23.79–28.62 dB [F9] |
+| CLI matrix cell (`verify_cli_cuda.py`) | PASS [F3, F5, F9] | PASS [F5, F9] | PASS [F9] |
 | `difflet serve` | PASS; LIMIT on concurrency (429 `queue_timeout` after the 30 s default) [F3b] | N/A · refused by name, F5b | N/A · refused by name, F1b |
 | `--torch-compile` | PASS, opt-in [F4] | N/A · refused, F5b | N/A · refused, F1b |
 | `--teacache-cadence N` | PASS, fixed cadence only [F4] | N/A · refused, F5b | N/A · refused, F1b |
@@ -86,14 +88,25 @@ Prompt in, image or video out, from the **same initial noise** through Difflet a
 diffusers (`QwenImagePipeline`, `FluxPipeline`, `WanPipeline`), one side loaded at a time;
 pixel metrics in [0, 1]. Floors: Qwen and Flux **PSNR ≥ 35 dB, cosine ≥ 0.998** (tightened
 from 25 / 0.99 after the first measurement, F3 and F5); Wan **≥ 25 dB, ≥ 0.99** (kept: the
-measurement left 2.5 dB, F1). The Wan gate judges the `float32` timestep variant by name.
+measurement left 2.5 dB, F1). The Wan gate judges the `float32` timestep variant by name, and
+every seed of a multi-seed JSON. Wan's e2e over seeds with the metric's own **noise floor** (F9:
+per seed, diffusers again with both experts' timestep rounded through bf16, exact vs perturbed
+recorded, not gated; `run_gates.sh`'s e2e is one seed without it):
+
+```bash
+HF_HOME=$H HF_HUB_OFFLINE=1 DIFFLET_BACKEND=cuda PYTHONPATH=$PWD .venv/bin/python \
+  scripts/cuda_e2e_wan_vs_diffusers.py --model-path "$SNAP" --seeds 0,1,2 --noise-floor \
+  --timestep-dtypes float32 --steps 40 --num-frames 9 --out ~/logs/<name>/cuda_e2e_wan_noise.json \
+  --images-dir ~/logs/<name>     # F9: 518 s; then the gate with DIFFLET_CUDA_WAN_E2E_RESULT=… -rA
+```
 
 ## Qwen-Image (`Qwen/Qwen-Image`, public)
 
 Snapshot 54 GB (57.7 GB in the volume's cache listing), downloaded in ~90 s on us-central-7
-[10-16, 10-17]. Defaults: 1024×1024, 50 steps, guidance 4.0 fixed (`guidance_embeds=False`, so
-`--guidance-scale` is refused). Smoke `scripts/cuda_smoke.sh --steps 50 --seed 0` (CLI) or
-`scripts/cuda_smoke.py --steps 50 --local-files-only` (phase timings, peak memory).
+[10-16, 10-17] and in 175 s to an eu-3 container disk [F9]. Defaults: 1024×1024, 50 steps,
+guidance 4.0 fixed (`guidance_embeds=False`, so `--guidance-scale` is refused). Smoke
+`scripts/cuda_smoke.sh --steps 50 --seed 0` (CLI) or `scripts/cuda_smoke.py --steps 50
+--local-files-only` (phase timings, peak memory).
 
 | Measurement | Value | Pod, edition [entry] |
 |---|---|---|
@@ -110,6 +123,7 @@ Snapshot 54 GB (57.7 GB in the volume's cache listing), downloaded in ~90 s on u
 | e2e | PSNR 41.40 dB, cosine 0.99972 (trim 41.20; compiled 40.21) | f3c, Server [F3, F4] |
 | `verify_cli_cuda.py` cell | PASS, generate 38.5 s (local disk) | f3c, Server [F3] |
 | `verify_cli_cuda.py` cell | PASS, generate 276.0 s (cold volume read + Workstation card) | f5b, Workstation [F5] |
+| `verify_cli_cuda.py` cell | PASS, compile 3.8 s, generate 51.9 s (container disk) | f9, Server [F9] |
 
 Artifacts: `artifacts/cuda-release1/cuda_parity_qwen_image.json`, `cuda_e2e_qwen_image.json`,
 `smoke_timings.json`, `verify_cli_cuda_results.json`, `f4/*.json`, the PNGs.
@@ -117,9 +131,10 @@ Artifacts: `artifacts/cuda-release1/cuda_parity_qwen_image.json`, `cuda_e2e_qwen
 ## FLUX.1-dev (`black-forest-labs/FLUX.1-dev`, gated)
 
 Snapshot 33 GB without the duplicate single-file weights (33.7 GB in the volume listing),
-downloaded in 31 s to the volume [F5, 10-18]; the owner's HF login is needed once per
-`HF_HOME`. Defaults: 1024×1024, 28 steps, distilled guidance 3.5. Smoke
-`scripts/cuda_smoke_flux.sh --steps 28 --seed 0`. All rows: pod f5b, **Workstation Edition**.
+downloaded in 31 s to the volume [F5, 10-18] and in 109 s to an eu-3 container disk [F9]; the
+owner's HF login is needed once per `HF_HOME`. Defaults: 1024×1024, 28 steps, distilled guidance
+3.5. Smoke `scripts/cuda_smoke_flux.sh --steps 28 --seed 0`. Rows: pod f5b, **Workstation
+Edition**, except the F9 row (f9, **Server Edition**).
 
 | Measurement | Value [entry] |
 |---|---|
@@ -128,6 +143,7 @@ downloaded in 31 s to the volume [F5, 10-18]; the owner's HF login is needed onc
 | parity loads | fp32 reference 90 s; diffusers bf16 949 s (cold volume); Difflet 23 s [F5] |
 | e2e | PSNR 40.35 dB, cosine 0.99980; Difflet 23.6 s, diffusers 21.8 s [F5] |
 | `verify_cli_cuda.py` cell | PASS, generate 56.5 s [F5] |
+| `verify_cli_cuda.py` cell, f9 Server | PASS, compile 2.1 s, generate 16.8 s [F9] |
 | DiT step | ≈ 0.84 s Difflet vs 0.78 s diffusers [F5] |
 
 Artifacts: `artifacts/cuda-release1/flux/`.
@@ -136,8 +152,8 @@ Artifacts: `artifacts/cuda-release1/flux/`.
 
 The repo is **126 GB of fp32 shards, 118 GB on disk** (two 57 GB experts, UMT5-XXL 11 GB, VAE),
 cast to bf16 at load; both experts resident on CUDA. Downloaded in 108–109 s (us-east-3, to the
-container disk and to the volume) and in 400 s (eu-3 local disk) [F1, F1b]. Defaults: 480×832,
-9 frames, 40 steps, guidance 4.0 above the boundary / 3.0 below. Smoke
+container disk and to the volume) and in 400 s / 401 s (eu-3 local disk) [F1, F1b, F9].
+Defaults: 480×832, 9 frames, 40 steps, guidance 4.0 above the boundary / 3.0 below. Smoke
 `scripts/cuda_smoke_wan.sh --steps 40 --num-frames 9 --seed 0` (writes an MP4 and a timings
 JSON; peak memory from an `nvidia-smi` sampler). Parity inputs: B=1, latents (1, 16, 3, 60, 104),
 text (1, 512, 4096), timesteps 900 (`transformer`) / 500 (`transformer_2`).
@@ -154,18 +170,34 @@ text (1, 512, 4096), timesteps 900 (`transformer`) / 500 (`transformer_2`).
 | e2e generate | Difflet 55.3 s / diffusers 44.6 s | f5b, Workstation [F1] |
 | e2e generate | Difflet 50.9 s / 50.2 s, diffusers 42.9 s | f1b, Server [F1b] |
 | serial `difflet run` | load 55.9 s, generate 50.9 s (1.27 s/step) | f2, Server [F2] |
+| e2e `float32`, seeds 0 / 1 / 2 | PSNR 26.30 / 26.39 / 28.89 dB, cosine 0.99609 / 0.99541 / 0.99775 | f9, Server [F9] |
+| noise floor: diffusers vs its bf16-rounded timestep, seeds 0 / 1 / 2 | PSNR 28.62 / 26.74 / 23.79 dB, cosine 0.99770 / 0.99575 / 0.99255 | f9, Server [F9] |
+| e2e aggregate, min / mean / max | Difflet 26.30 / 27.20 / 28.89 dB; noise floor 23.79 / 26.38 / 28.62 dB | f9, Server [F9] |
+| e2e timings (noise-floor run) | Difflet load 56.0 s, generate 50.9 s, peak 68.44 GB; diffusers 48.3 s / 43.2 s / 68.56 GB | f9, Server [F9] |
+| `run_gates.sh wan` | exit 0 in 595 s: smoke 104 s (load 47.7 s, 51.0 s, 1.27 s/step, 73,035 MiB), parity 189 s, e2e 302 s (`float32` 26.30 dB, `model` 27.54 dB) | f9, Server [F9] |
+| `verify_cli_cuda.py` cell | PASS, compile 2.1 s, generate 111.5 s (40 steps, MP4) | f9, Server [F9] |
 
-The Wan e2e PSNR sits far below Qwen's and Flux's; its cause is open (F1b correction: measure
-the e2e metric's own noise floor across seeds first — not measured). The 10 s generate gap to
-diffusers is unmeasured. Artifacts: `artifacts/cuda-release1/wan/`, `wan/f1b/`.
+The Wan e2e PSNR sits far below Qwen's and Flux's. F9 measured the metric's own noise floor:
+diffusers against itself with its timestep rounded through bf16 (at most half a bf16 ulp, e.g.
+999 → 1000) spans 23.8–28.6 dB over three seeds, the same range as Difflet vs diffusers
+(26.3–28.9 dB). Difflet is as close to diffusers as diffusers is to itself, so the gap to
+Qwen/Flux is a property of the 40-step true-CFG Wan trajectory, not a Difflet defect. The floor
+is an upper bound on the timestep-cast effect (it also absorbs any run-to-run GPU
+nondeterminism; not separated). The floors stay 25 dB / 0.99 (F9 R1); recommended follow-up:
+state the Wan gate relative to the measured noise floor — its worst seed (23.8 dB) is below
+25 dB, so seed luck could fail a correct build. The 10 s generate gap to diffusers is
+unmeasured. Artifacts: `artifacts/cuda-release1/wan/`, `wan/f1b/`, `f9/`
+(`cuda_e2e_wan_noise.json`, per-seed first frames, `gates-wan/`).
 
 ## CLI matrix — `scripts/verify_cli_cuda.py`
 
 Cells Qwen-Image 50 steps, FLUX.1-dev 28, Wan 2.2 40 (each download → compile → timed generate
 as `DIFFLET_BACKEND=cuda` subprocesses; `results.json` under `--run-root`). It has **no cell
 filter**, so all three models must be in `HF_HOME` — 209 GB together, more than the 200 GB
-volume holds. The Wan cell has never run (NOT MEASURED); it needs a pod whose disk holds all
-three (an eu node's container disk goes up to 500 GB) or the cell filter listed under F1b.
+volume holds. **All three cells PASS** on f9 (Server, eu-3, the three models on a 250 GB
+container disk, `--seed 0`), 191 s wall; compile / generate: Qwen-Image 3.8 s / 51.9 s,
+FLUX.1-dev 2.1 s / 16.8 s, Wan 2.2 2.1 s / 111.5 s [F9; `artifacts/cuda-release1/f9/`
+`verify_cli_results.json`].
 
 ## Serve — `scripts/cuda_serve_smoke.sh` (Qwen-Image only) [F3b, f5b, Workstation]
 

@@ -1,6 +1,6 @@
 # Pod runbook — Yottalabs facts and the exact steps
 
-What the reference sessions learned about Yottalabs pods (2026-10-16 → 10-18). Prices,
+What the reference sessions learned about Yottalabs pods (2026-10-16 → 10-18, through F9). Prices,
 capacity and limits are what the API showed on those dates; read `gpus` again before quoting
 any of them. The binding rule: deploying (create, resume) needs the owner's yes; at the end of
 a session, pausing a volume pod or terminating a pod that cannot be paused (no volume) is
@@ -23,7 +23,7 @@ by the owner's login with a `difflet-` name are ours (the console lists other lo
 | Region | $/GPU/h | Card | Container disk limit | Notes |
 |---|---|---|---|---|
 | us-east-3 | 0.45 | Workstation Edition | 178 GB | the only pool where `difflet-cache` mounts |
-| eu-3 | 2.65 | Server Edition | 500 GB | sells whole 2-GPU nodes ($5.30/h) |
+| eu-3 | 2.65 | Server Edition | 500 GB | whole 2-GPU nodes ($5.30/h, F1b, F2); a 1-GPU pod with a 250 GB disk on 10-18 18:44 UTC (F9) |
 | eu-2 | 2.65 | not observed (no pod ran there) | 500 GB | 1-GPU requests refused (12014) |
 | eu-1 | 2.55 | not used | — | seen UNAVAILABLE |
 | us-central-7 | 1.35/h per pod (10-16, 10-17) | Server Edition | — | F3/F4 pods; device-cgroup incident |
@@ -32,10 +32,13 @@ by the owner's login with a `difflet-` name are ours (the console lists other lo
   The flag can lag: a create into an AVAILABLE pool can still return code **12014** ("Pod
   insufficient resources"); the capacity watcher keeps waiting on 12014.
 - In eu-3 / eu-2 every 1-GPU request (with and without an SSH expose, 150–200 GB disk) returned
-  12014; a 2-GPU request succeeded. A 1-GPU job there means renting both cards [F1b ledger].
+  12014 during F1b; a 2-GPU request succeeded [F1b ledger]. Later the same day
+  `create --gpus 1 --regions eu-3,eu-2 --disk-gb 250` was accepted in eu-3 (`difflet-cuda-f9`,
+  $2.65/h) [F9]: try one GPU first, rent both cards only on 12014.
 - All PRO 6000 pools were full for about an hour on 2026-10-18; F2's pod was created by an
   ad-hoc capacity watcher [F2]. `create --wait-for-capacity` (one GET per 300 s round, one POST
-  when a pool opens) reproduces it but has not yet run against the live API.
+  when a pool opens) reproduces it; its first live run (F9) waited on the full us-east-3 pool
+  until the owner switched the session to eu, and created nothing.
 - The us-east-3 pool can be full for hours: a paused pod there may not resume on demand.
 
 ## Pause, resume, terminate
@@ -47,14 +50,15 @@ by the owner's login with a `difflet-` name are ours (the console lists other lo
 - **Resume needs free capacity**: on 2026-10-18 three `POST …/resume` calls to the paused
   `difflet-cuda-f5b` returned 200, then the pod went INITIALIZING → PAUSED within ~10 s each
   time; `gpus` showed us-east-3 UNAVAILABLE. `resume` exits 2 on that pattern. It is not a bug.
-- Cost reference: `difflet-cuda-f2` (2× Server Edition, eu-3, $5.30/h) ran 29 min, ~$2.60.
+- Cost reference: `difflet-cuda-f2` (2× Server Edition, eu-3, $5.30/h) ran 29 min, ~$2.60;
+  `difflet-cuda-f9` (1× Server Edition, eu-3, $2.65/h) ran 18:44 → 19:50 UTC (~66 min), ~$2.90.
 
 ## Storage
 
 | Where | Size / speed (reference) | Survives | Use for |
 |---|---|---|---|
 | `difflet-cache` volume at `/data` | 200 GB CephFS, $0.0698/GB/month; cold reads ≈ 0.23 GB/s | pause (f5b, measured); its pod's termination and a mount by another pod: **not measured** (us-east-3 only) | HF cache + HF token (`HF_HOME=/data/hf`) |
-| container disk (`containerVolumeInGb`) | 100 GB on f5b; 150 GB on the eu pods | nothing — lost on pause/terminate, wiped by a restart | venv, eu-pod downloads |
+| container disk (`containerVolumeInGb`) | 100 GB on f5b; 150 GB on f1b / f2; 250 GB on f9 | nothing — lost on pause/terminate, wiped by a restart | venv, eu-pod downloads |
 | `/home` | — | the F1 container restart (pod still alive) | `~/Difflet`, `~/logs` |
 
 - The volume: id **469225541779435520**, us-east-3, mounted by `persistentVolumes`
@@ -79,12 +83,19 @@ by the owner's login with a `difflet-` name are ours (the console lists other lo
 - **The container disk limit is a hard write limit.** Writing Wan's 118 GB to `/tmp` on f5b
   (record `containerVolumeInGb` 100) was followed by a container restart that wiped `/tmp`
   (logs, the download); `/home` and `/data` survived [F1]. Large downloads go on the volume, or
-  on a pod created with a bigger `--disk-gb`. Keep logs under `~/logs`, never `/tmp`.
+  on a pod created with a bigger `--disk-gb` — since F9 `yottalabs_pod.py create` sends an
+  explicit `--disk-gb` beside `--volume-id` too (it used to drop it). Without the flag a volume
+  pod gets the API's default disk and a pod without one 150 GB. Keep logs under `~/logs`, never
+  `/tmp`.
 - `df` does not show that limit: f5b's `/tmp` showed 8.6 TB free under a 100 GB record [F1
   plan], the F1b pod a 968 GB local disk under 150 GB [F1b ledger]. Read the pod record's
   `containerVolumeInGb` (`yottalabs_pod.py status ID`) and budget against it.
 - Whether the eu pods enforce the record the same way is not measured: F2 wrote ~172 GB (Wan +
   Qwen-Image) to `~/hf` on a 150 GB record with no restart. Budget against the record anyway.
+- **All three models on one eu container disk (F9, no volume, measured):** a 250 GB record held
+  Wan, Qwen-Image and FLUX.1-dev under `HF_HOME=~/hf` (downloads 401 s, 175 s, 109 s; `df` then
+  read 251 GB used of the 484 GB overlay, no restart), enough for the three-cell CLI matrix. The
+  F9 plan's alternative (Wan on the container disk symlinked into the volume's hub) never ran.
 - Growing the volume (≥ 350 GB would hold all three models) is the owner's call [F1 plan].
 
 ## SSH and long runs
@@ -120,11 +131,14 @@ ssh <alias> "cd ~ && HF_HOME=$H setsid nohup ~/Difflet/.venv/bin/python \
 ssh <alias> 'cat ~/logs/hf-login.log'     # OPEN: <url>   CODE: <code> expires_in_s: ...
 ```
 
-Give the owner the `OPEN:` URL and the `CODE:`; they open it and enter the code within 300 s.
-`LOGIN_OK user: …` in the log means the token is saved under `HF_HOME`. If the code expired,
-start the script again (a fresh code). **Never `pkill -f hf_device_login.py` from inside an SSH
-command**: the pattern matches the SSH session's own shell command line and kills it. List with
-`pgrep -af hf_device_login`, take the `python … hf_device_login.py` line's PID, `kill <pid>`.
+Start the script only when the owner says they are ready at the phone (or browser): the code
+expires 300 s after it is issued — on 2026-10-18 F9's first code expired before the owner reached
+the phone, the second worked. Give the owner the `OPEN:` URL and the `CODE:`; they open it and
+enter the code within 300 s. `LOGIN_OK user: …` in the log means the token is saved under
+`HF_HOME`. If the code expired, start the script again (a fresh code) once they are ready.
+**Never `pkill -f hf_device_login.py` from inside an SSH command**: the pattern matches the SSH
+session's own shell command line and kills it. List with `pgrep -af hf_device_login`, take the
+`python … hf_device_login.py` line's PID, `kill <pid>`.
 
 ## Pod image facts (`yottalabsai/pytorch:2.9.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04`)
 
@@ -142,7 +156,8 @@ command**: the pattern matches the SSH session's own shell command line and kill
    `wait-running`; `ssh-config` with a new alias `>> ~/.ssh/config`. The volume is held by
    the paused f5b (ID 502399632095187214): `resume` it (owner's yes) or create a new pod on
    the volume — not measured while f5b holds it; if `create` rejects the volume, ask the owner.
-2. `nvidia-smi` twice; `ship_branch.sh`; `pod_setup.sh [--volume]`; downloads (disk checked).
+2. `nvidia-smi` twice; `ship_branch.sh`; `pod_setup.sh [--volume]` (from any cwd: it resolves
+   its checkout from its own path since F9); downloads (disk checked).
 3. Gates detached (`run_gates.sh`, then the matrix / serve / two-GPU runs); poll for `DONE`.
 4. Copy evidence off (`scp -r <alias>:~/logs/<name> …`), curate into
    `artifacts/cuda-release1/<feature>/`, status-log entry, commit.

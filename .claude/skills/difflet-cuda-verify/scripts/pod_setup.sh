@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # pod_setup.sh: host setup ON a Yottalabs pod (the F1b / F2 recipe), after ship_branch.sh.
-# Usage:
-#   cd ~/Difflet && bash .claude/skills/difflet-cuda-verify/scripts/pod_setup.sh [--volume]
-#   --volume   the difflet-cache network volume is mounted at /data (us-east-3 only):
-#              HF_HOME=/data/hf, and /data is chowned to the login user once (when not theirs).
-#   (default)  no volume: HF_HOME=$HOME/hf on the container disk (mind containerVolumeInGb:
-#              a disk overrun restarted the container in an earlier session).
+# Usage (from any cwd: the checkout is the one this script sits in, F9):
+#   bash ~/Difflet/.claude/skills/difflet-cuda-verify/scripts/pod_setup.sh [--volume]
+#   --volume      the difflet-cache network volume is mounted at /data (us-east-3 only):
+#                 HF_HOME=/data/hf, and /data is chowned to the login user once (when not theirs).
+#   (default)     no volume: HF_HOME=$HOME/hf on the container disk (mind containerVolumeInGb:
+#                 a disk overrun restarted the container in an earlier session).
+#   --check-repo  print the resolved checkout and exit (0 = a Difflet checkout, 2 = not one).
+# The checkout is $REPO when set, else four directories up from this script (the repo root of
+# .claude/skills/difflet-cuda-verify/scripts/); it must hold pyproject.toml and difflet/.
 # Steps: uv (installed if missing), `uv venv --python 3.11 .venv` (kept when present), torch
 # 2.11.0 from the cu128 index, `-e ".[test,cuda]"`, `huggingface_hub[cli]`, `imageio[ffmpeg]`,
 # then scripts/cuda_env_check.sh into ~/logs/env-check-<ts>.log. HF_HOME is appended to
@@ -13,18 +16,21 @@
 # Idempotent: re-running reinstalls nothing that is already satisfied. Its last line is
 # "SETUP DONE rc=<n>" (also on a failure), so a detached run can be polled for it.
 set -euo pipefail
+CHECK=0
 case "${1:-}" in
   -h|--help) sed -n '2,/^[^#]/{/^#/s/^# \{0,1\}//p;}' "$0"; exit 0 ;;
   --volume) VOLUME=1 ;;
+  --check-repo) VOLUME=0 CHECK=1 ;;
   "") VOLUME=0 ;;
   *) echo "pod_setup.sh: unknown argument $1 (see --help)" >&2; exit 2 ;;
 esac
-trap 'rc=$?; set +x; echo "SETUP DONE rc=$rc"' EXIT
-REPO=${REPO:-$PWD}
+[ "$CHECK" = 1 ] || trap 'rc=$?; set +x; echo "SETUP DONE rc=$rc"' EXIT
+REPO=${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd -P)}
 [ -f "$REPO/pyproject.toml" ] && [ -d "$REPO/difflet" ] || {
-  echo "pod_setup.sh: $REPO is not a Difflet checkout (run ship_branch.sh first, then cd ~/Difflet)" >&2
+  echo "pod_setup.sh: $REPO is not a Difflet checkout (run ship_branch.sh first)" >&2
   exit 2
 }
+if [ "$CHECK" = 1 ]; then echo "pod_setup.sh: Difflet checkout at $REPO"; exit 0; fi
 set -x
 if [ "$VOLUME" = 1 ]; then
   mountpoint -q /data || { echo "pod_setup.sh: --volume but nothing is mounted at /data" >&2; exit 2; }

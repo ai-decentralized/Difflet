@@ -1,0 +1,13 @@
+== wan gates 2026-10-18T19:36:36Z ==
+snapshot: /home/user/hf/hub/models--Wan-AI--Wan2.2-T2V-A14B-Diffusers/snapshots/5be7df9619b54f4e2667b2755bc6a756675b5cd7/
+2387653 wan: e2e noise floor over seeds — diffusers vs its bf16-rounded timestep; pod tool keeps an explicit disk size with a volume (F9 task 1)
+0, NVIDIA RTX PRO 6000 Blackwell Server Edition, 580.178.04, 0 MiB
+overlay         484G  251G  183G  58% /
+overlay         484G  251G  183G  58% /
+smoke exit: 0 in 104s
+parity exit: 0 in 189s
+parity-gate exit: 0 in 0s
+e2e exit: 0 in 302s
+e2e-gate exit: 0 in 0s
+0 MiB
+GATES DONE wan overall_rc=0

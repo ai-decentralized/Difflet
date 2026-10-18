@@ -17,7 +17,7 @@ description: >-
 
 A session turns "this branch should work on CUDA" into "it ran on an RTX PRO 6000; here are the
 JSONs, the images, the timings and the exact commands" — or into a root-caused bug with its own
-commit. Distilled from Release 1 → F2 (2026-10-16 → 10-18, eight pods; the status log of
+commit. Distilled from Release 1 → F9 (2026-10-16 → 10-18, nine pods; the status log of
 `docs/plans/2026-10-16-cuda-backend-support.md`). Every number here is that campaign's, labelled
 with date, pod and card edition: what a pass looked like, never a fact about the next run.
 References: `feature-catalog.md` (gates, thresholds, numbers), `pod-runbook.md` (before creating
@@ -37,11 +37,11 @@ Pin down only what the request leaves open:
   speed, and only compared on the same card edition.
 - **Branch** (CPU gate green first); evidence in `artifacts/cuda-release1/<feature>/`.
 - **Pod**: 1 GPU in us-east-3 with the `difflet-cache` volume (cheapest; the pool can be full for
-  hours), or a 2-GPU eu node (whole nodes only, no volume, terminate at the end). The volume is
-  held by `difflet-cuda-f5b` (ID 502399632095187214, PAUSED): resume it (owner's yes) or create
-  a new us-east-3 pod on the volume — a second pod on the volume while f5b holds it, and the
-  volume outliving f5b, are not measured; if `create` rejects the volume, ask the owner. Disk
-  decides what fits: Qwen + Flux live on the volume, Wan (118 GB) not beside both (runbook).
+  hours), or an eu pod without a volume (terminate at the end; 1 GPU accepted in eu-3, F9). The
+  volume is held by `difflet-cuda-f5b` (ID 502399632095187214, PAUSED): resume it (owner's yes)
+  or create a new us-east-3 pod on it — a second pod on the volume while f5b holds it, and the
+  volume outliving f5b, are not measured; if `create` rejects the volume, ask the owner. Disk:
+  Qwen + Flux live on the volume, Wan (118 GB) not beside both; F9's 250 GB eu disk held all three.
 
 State the plan back — expected outcome per gate (the catalog's snapshot), commands, pod and its
 price as `gpus` shows it now, disk plan — and ask for the deploy yes. Planning-only stops here.
@@ -68,9 +68,10 @@ python3 scripts/yottalabs_pod.py ssh-config "$POD" --alias difflet-cuda-<topic> 
 Pin `--regions us-east-3` whenever `--volume-id` is given: the volume mounts only there; an eu
 fallback would be a volume-less pod at $2.65/GPU/h where `pod_setup.sh --volume` fails. Note the
 pod id the moment it prints. Use an alias new to `~/.ssh/config` (ssh takes the first matching
-`Host`; delete a stale block). `--wait-for-capacity` polls every 300 s and creates once (not yet
-run against the live API). Two GPUs: `--gpus 2 --regions eu-3,eu-2 --disk-gb 150`, no volume.
-`resume ID` exits 2 when the pod falls back INITIALIZING → PAUSED: no capacity, not a bug.
+`Host`; delete a stale block). `--wait-for-capacity` polls every 300 s and creates once (F9 ran
+it live). `--disk-gb` is sent beside a volume too (F9). No volume: `--gpus 1 --regions eu-3,eu-2
+--disk-gb 250` (F9) or `--gpus 2 … --disk-gb 150` (F1b, F2). `resume ID` exits 2 when the pod
+falls back INITIALIZING → PAUSED: no capacity, not a bug.
 
 Then ship the branch and build the host (the F1b/F2 recipe):
 
@@ -78,8 +79,8 @@ Then ship the branch and build the host (the F1b/F2 recipe):
 S=.claude/skills/difflet-cuda-verify/scripts
 REPO=$PWD bash $S/ship_branch.sh difflet-cuda-<topic> <branch>    # laptop → ~/Difflet on the pod
 ssh difflet-cuda-<topic> nvidia-smi        # now, and again a few minutes later (NVML loss, triage)
-ssh difflet-cuda-<topic> "mkdir -p ~/logs && cd ~/Difflet && setsid nohup bash $S/pod_setup.sh \
-    --volume > ~/logs/setup.log 2>&1 < /dev/null &"           # no volume: drop --volume
+ssh difflet-cuda-<topic> "mkdir -p ~/logs && setsid nohup bash ~/Difflet/$S/pod_setup.sh \
+    --volume > ~/logs/setup.log 2>&1 < /dev/null &"      # any cwd; no volume: drop --volume
 until ssh difflet-cuda-<topic> 'grep -q "SETUP DONE" ~/logs/setup.log'; do sleep 30; done
 ```
 
@@ -89,7 +90,7 @@ imageio-ffmpeg), sets `HF_HOME` (`/data/hf` with `--volume`, else `~/hf`), write
 line: GPU name **with its edition**, driver, torch — and ends `SETUP DONE rc=<n>` (0 = ok).
 Weights: `HF_HOME=/data/hf ~/Difflet/.venv/bin/hf download <repo>` (check `df -h` first). FLUX.1-dev
 needs the owner's device-code login once per `HF_HOME` (`scripts/hf_device_login.py`; recipe in
-the runbook) — ask for it while the owner is awake, at the start.
+the runbook): ask at the start; run the script only once the owner is at the phone (300 s codes).
 
 ## 3. Run the gates, detached and watched
 
@@ -109,6 +110,7 @@ e2e-gate with `DIFFLET_BACKEND=cuda HF_HUB_OFFLINE=1`, one log per step under `-
 last. A failed step does not stop the rest. `--dry-run` prints every command (planning: pass an
 explicit snapshot path; `auto` needs a cached one). Look at the smoke output **by eye** before
 trusting a number: it must be prompt-faithful (every reference smoke was a cat in a garden).
+Its Wan e2e is one seed without the noise floor; the multi-seed run with it is in the catalog.
 
 Then, as scoped (detached the same way), with `HF_HOME` set in every command — `H=/data/hf`, or
 `H=~/hf` without the volume (a non-interactive shell may skip `~/.bashrc`; a fallback cache on
@@ -166,9 +168,8 @@ python3 scripts/yottalabs_pod.py delete "$POD"   # a pod WITHOUT one (pause → 
 python3 scripts/yottalabs_pod.py status "$POD"   # the read-back
 ```
 
-Terminating a volume pod needs the owner's word "terminate". "I sent pause" is not done; a
-read-back of `PAUSED` / gone is — it goes in the status entry and the report's **first line**.
-Never keep a pod running "for the next session": setup takes minutes, idle hours bill.
+"I sent pause" is not done; a read-back of `PAUSED` / gone is — it goes in the status entry and
+the report's **first line**. Never keep a pod running "for the next session": idle hours bill.
 
 ## 5. When a gate fails: triage, then the bug protocol
 
@@ -190,11 +191,10 @@ an expired HF code, a cold volume read, a per-step number from another card edit
 From this session's evidence: **the status-log entry** (step 4); **the evidence doc**
 `docs/verification/<topic>-evidence.md` (the template: per gate model → numbers → artifact path →
 entry, *How to inspect manually*, ledger with commits, pod costs; `git check-ignore -q <doc>`
-must exit 1 before you commit — an ignored doc is a lost doc);
-**the support matrix**: PASS / LIMIT / N/A / NOT MEASURED, model × feature and one block per
-feature; NOT MEASURED is the gap list (2026-10-18, six: the CLI matrix's Wan cell, Wan `--dp` ×
-`--cfg-parallel`, Flux and Wan under `--dp`, Wan 2.1, the Wan e2e noise floor, serving on two
-GPUs). Be exact about what was and wasn't verified, and which card edition produced each number
-(Qwen-Image: 0.77 s/step Workstation vs 0.33 Server, same code, F3b). Every path, number and
-explanation comes from this session's JSONs, logs, or code you read — these references describe
-other pods. Label inferences ("likely the page cache — not measured") as inferences.
+must exit 1 before you commit — an ignored doc is a lost doc); **the support matrix**: PASS /
+LIMIT / N/A / NOT MEASURED, model × feature and one block per feature; NOT MEASURED is the gap
+list (after F9, four: Wan `--dp` × `--cfg-parallel`, Flux and Wan under `--dp`, Wan 2.1, serving
+on two GPUs). Be exact about what was and wasn't verified, and which card edition produced each
+number (Qwen 0.77 s/step Workstation vs 0.33 Server, F3b). Every path, number and explanation
+comes from this session's JSONs, logs, or code you read — these references describe other pods.
+Label inferences ("likely the page cache — not measured") as inferences.
