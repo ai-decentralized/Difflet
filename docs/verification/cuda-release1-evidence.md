@@ -41,7 +41,7 @@ to the CUDA path but never ran: it is NOT MEASURED in every row and has no colum
 |---|---|---|---|
 | smoke (`difflet run`, by eye) | PASS [10-16, 10-17 F3] | PASS [10-18 F5] | PASS [10-18 F1] |
 | DiT parity (three gates) | PASS incl. padded prompt | PASS | PASS both experts + rounding block |
-| e2e vs diffusers | PASS, 35 dB / 0.998 | PASS, 35 dB / 0.998 | PASS, 25 dB / 0.99; seeds 0–2 overlap diffusers' own noise floor |
+| e2e vs diffusers | PASS, 35 dB / 0.998 | PASS, 35 dB / 0.998 | PASS, 25 dB / 0.99; seeds 0–2 overlap diffusers' own noise floor; gate relative to the floor, 2.0 dB headroom on the mean |
 | CLI matrix cell | PASS | PASS | PASS |
 | `difflet serve` | PASS; LIMIT on concurrency (429 after 30 s) | N/A · refused by name, F5b | N/A · refused by name, F1b |
 | `--torch-compile` | PASS, opt-in | N/A · refused, F5b | N/A · refused, F1b |
@@ -69,7 +69,7 @@ Difflet bf16 against diffusers fp32 and bf16 on identical inputs; gates 1.15× /
 Same initial noise through both pipelines; pixel PSNR / cosine.
 | Qwen-Image | FLUX.1-dev | Wan 2.2 |
 |---|---|---|
-| PASS · 41.40 dB / 0.99972 | PASS · 40.35 dB / 0.99980 | PASS · 26.30 dB / 0.99609 (1.3 dB above the floor); seeds 0–2 26.30–28.89 dB vs diffusers' own noise floor 23.79–28.62 dB |
+| PASS · 41.40 dB / 0.99972 | PASS · 40.35 dB / 0.99980 | PASS · 26.30 dB / 0.99609 (1.3 dB above the floor); seeds 0–2 26.30–28.89 dB vs diffusers' own noise floor 23.79–28.62 dB; relative gate mean 27.20 dB vs 25.17 required |
 
 ### CLI matrix   `scripts/verify_cli_cuda.py`
 Download → compile → timed generate per cell, `results.json`.
@@ -137,6 +137,6 @@ Also unmeasured, and recorded where they arose: Workstation vs Server characteri
 50.9 vs 42.9 s Server; F4b); Flux peak GPU memory; F2 `--dp 1` requests 1 and 2 against their
 references; the origin of GPU 0's extra ~555 MiB under `--cfg-parallel`; the Trainium
 byte-identity of the Flux split (needs a trn2); the split of the Wan noise floor into the
-timestep effect and run-to-run GPU nondeterminism. Recommended follow-up (not done
-under ruling R1): state the Wan e2e gate relative to the measured noise floor, whose worst seed
-(23.79 dB) is below the 25 dB gate.
+timestep effect and run-to-run GPU nondeterminism. F9's recommended follow-up — state the
+Wan e2e gate relative to the measured noise floor, whose worst seed (23.79 dB) is below the
+25 dB gate — is done.
