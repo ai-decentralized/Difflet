@@ -228,6 +228,28 @@ distance 0.398×); whole-pipeline e2e vs diffusers' `FluxPipeline` PSNR 40.35 dB
 `--host-vae`, bucketed shapes and `--torch-compile` as F5b. The Trainium byte-identity of the
 split is argued (verbatim move, CPU suites) but not re-run on a trn2.
 
+**Wan 2.2 on CUDA (verified on the RTX PRO 6000).** `Wan-AI/Wan2.2-T2V-A14B-Diffusers`
+runs on one GPU at `tp=1` through Difflet's own backend-neutral Wan DiT (`modeling_wan.py`) with
+**both 14B experts resident** (`enable_transformer_2=True` is the CUDA default; Trainium/TPU keep
+False) and the true-CFG path: `difflet/models/wan/cuda_application.py` holds one
+`CudaWanTransformerApplication` per expert (`difflet/backends/cuda/wan/transformer.py`, diffusers
+safetensors loaded through the shared `_torch_megatron` loader with the `ffn.net_in/net_out` rename
+from the neutral `difflet/models/wan/dit_config.py`, lifted from the TPU port), UMT5 and
+`AutoencoderKLWan` on the GPU behind callables, and drives the backend-neutral `WanOrchestrator`
+(boundary-ratio expert switch at timestep 875, cond + uncond passes per step, loop latents on the
+host in fp32 as on TPU). `difflet run --model-id Wan-AI/Wan2.2-T2V-A14B-Diffusers` writes an MP4
+(`difflet/cli/orchestrators/wan_cuda.py`, 40 steps, `--num-frames` default 9, `--guidance-scale`
+default 4.0 with `guidance_scale_2` 3.0 below the boundary). Measured 2026-10-18 (Workstation
+Edition card): load 703 s cold from the volume (118 GB of fp32 shards cast to bf16), 9 frames at
+480×832 in 55 s for 40 steps (1.38 s/step, two passes per step), 73 GB peak with both experts
+resident; DiT parity vs diffusers per expert rel_l1 1.051× / 1.043× the bf16 control (same-dtype
+0.870× / 0.819×, cosine 0.9988 / 0.9997); whole-video e2e vs diffusers' `WanPipeline` from the same
+noise PSNR 27.5 dB / cosine 0.9970 (floors 25 dB / 0.99; diffusers generates the same clip in
+44.6 s). The lower e2e PSNR than Qwen's or Flux's is expected to come from the shared
+orchestrator's bf16 timestep (999 → 1000, 750 → 752) where diffusers keeps fp32, to be measured
+in F1b. F1b also holds TeaCache, `--shapes`, `--torch-compile`, CP, SP, 81-frame clips, I2V and
+a `--negative-prompt` flag, all refused by name today.
+
 **Serving on CUDA.** `difflet serve` keeps the serving engine's one resident worker
 process; on CUDA that worker holds a single opaque `pipeline` stage —
 `DiffletPipeline.from_pretrained(backend="cuda")` kept loaded, `app.generate()` per request —
@@ -253,12 +275,12 @@ past `--request-timeout` restarts the worker (full reload plus the 4-step smoke)
 `generate()` is not interruptible mid-denoise. Trainium and TPU serving are
 untouched.
 
-Not in Release 1 (follow-ups F1–F8 in the plan): Wan and Flux on CUDA, a second GPU
+Not in Release 1 (follow-ups F1–F8 in the plan; Wan, Flux and serving have since landed as F1, F5 and F3b): a second GPU
 (data-parallel / CFG-parallel first; tensor-parallel across PCIe only when a workload needs it),
 context parallel, `--requests` / `--dp` batches on CUDA, multi-shape serving on CUDA,
 `torch.compile`, FP8, custom kernels.
 
-Not in Release 1 (follow-ups F1–F8 in the plan): Wan on CUDA, Flux follow-ups, a second GPU
+Not in Release 1 (follow-ups F1–F8 in the plan): Wan follow-ups, Flux follow-ups, a second GPU
 (data-parallel / CFG-parallel first; tensor-parallel across PCIe only when a workload needs it),
 context parallel, `--requests` / `--dp` batches on CUDA, CUDA
 graphs, calibrated/online-delta TeaCache, FP8, `flash-attn`, custom kernels.
