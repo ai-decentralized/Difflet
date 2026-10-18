@@ -30,7 +30,7 @@ and again on f9 (Server) [F9].
 |---|---|---|---|
 | smoke (`difflet run`, by eye) | PASS [F3] | PASS [F5] | PASS [F1] |
 | DiT parity (D14, three gates) | PASS incl. padded prompt [F3, F4] | PASS [F5] | PASS both experts + rounding block [F1, F1b] |
-| e2e vs diffusers | PASS, floors 35 dB / 0.998 [F3] | PASS, floors 35 dB / 0.998 [F5] | PASS, floors 25 dB / 0.99 [F1, F1b]; seeds 0–2 26.30–28.89 dB, inside diffusers' own noise floor 23.79–28.62 dB [F9] |
+| e2e vs diffusers | PASS, floors 35 dB / 0.998 [F3] | PASS, floors 35 dB / 0.998 [F5] | PASS, floors 25 dB / 0.99 [F1, F1b]; seeds 0–2 26.30–28.89 dB, overlapping diffusers' own noise floor 23.79–28.62 dB [F9] |
 | CLI matrix cell (`verify_cli_cuda.py`) | PASS [F3, F5, F9] | PASS [F5, F9] | PASS [F9] |
 | `difflet serve` | PASS; LIMIT on concurrency (429 `queue_timeout` after the 30 s default) [F3b] | N/A · refused by name, F5b | N/A · refused by name, F1b |
 | `--torch-compile` | PASS, opt-in [F4] | N/A · refused, F5b | N/A · refused, F1b |
@@ -179,9 +179,9 @@ text (1, 512, 4096), timesteps 900 (`transformer`) / 500 (`transformer_2`).
 
 The Wan e2e PSNR sits far below Qwen's and Flux's. F9 measured the metric's own noise floor:
 diffusers against itself with its timestep rounded through bf16 (at most half a bf16 ulp, e.g. 999
-→ 1000) spans 23.79–28.62 dB over three seeds; Difflet vs diffusers (26.30–28.89 dB) lies inside
-that spread, so the gap to Qwen/Flux need not indicate a Difflet defect (n = 3: the ranges overlap
-but are not the same, and it cannot show there is none). The floor is an upper bound on the
+→ 1000) spans 23.79–28.62 dB over three seeds; Difflet vs diffusers (26.30–28.89 dB) overlaps
+that spread, so the gap to Qwen/Flux need not indicate a Difflet defect (n = 3: the ranges are
+not the same, and it cannot show there is none). The floor is an upper bound on the
 timestep-cast effect (it also absorbs run-to-run nondeterminism of the perturbed run; the exact
 Difflet and diffusers runs are deterministic, seed 0's PSNR is identical across three runs). The
 floors stay 25 dB / 0.99 (F9 R1); recommended follow-up: state the Wan gate relative to the

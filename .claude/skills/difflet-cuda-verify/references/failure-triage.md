@@ -41,7 +41,7 @@ Difflet traceback, a shape mismatch or a gate miss on a healthy card is a candid
   metric's own noise floor (diffusers vs diffusers with a perturbation, several seeds) — the
   F1b A/B moved Wan's PSNR by 1.2 dB, and its "refuted" had to be corrected to "not supported by
   a single-seed A/B". F9 measured Wan's: diffusers vs its bf16-rounded timestep 23.8–28.6 dB over
-  seeds 0–2, Difflet vs diffusers 26.3–28.9 dB — inside it, so the e2e number alone points to
+  seeds 0–2, Difflet vs diffusers 26.3–28.9 dB — overlapping it, so the e2e number alone points to
   no Difflet defect (n = 3: it cannot show there is none).
 
 ## The bug protocol (when it really is a bug)

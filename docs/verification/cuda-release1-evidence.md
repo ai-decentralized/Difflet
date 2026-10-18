@@ -70,9 +70,9 @@ F9 entry.
   trimmed, compiled), Flux, and both Wan experts plus the 999 / 750 rounding block.
 - **e2e vs diffusers**: PASS. Qwen 41.40 dB and Flux 40.35 dB against 35 dB / 0.998 floors. Wan
   26.30 dB (fp32 timestep, gated) and 27.54 dB (bf16 cast) against 25 dB / 0.99. Over seeds 0–2
-  (F9) Wan gives 26.30–28.89 dB, inside diffusers' own perturbation spread (diffusers vs its
-  bf16-rounded timestep: 23.79–28.62 dB), so the gap to Qwen and Flux need not indicate a
-  Difflet defect (three seeds cannot show there is none).
+  (F9) Wan gives 26.30–28.89 dB, which overlaps diffusers' own perturbation spread (diffusers
+  vs its bf16-rounded timestep: 23.79–28.62 dB), so the gap to Qwen and Flux need not indicate
+  a Difflet defect (three seeds cannot show there is none).
 - **CLI matrix**: PASS for all three cells. Qwen-Image three times, FLUX.1-dev twice, and Wan
   2.2 once: F9 ran the three-cell matrix on one pod (generate 51.9 s / 16.8 s / 111.5 s).
 - **Serve (F3b, Qwen-Image)**: PASS. Ready in 56.0 s, two requests of 38.6 s and 39.2 s, both
@@ -264,13 +264,13 @@ Source: `f9/cuda_e2e_wan_noise.json` (`per_seed.<s>.variants.float32.metrics`,
 for `float32` (`e2e_difflet_fp32_seed2_frame0.png` is the script's
 `wan_e2e_difflet_float32_seed2_frame0.png`).
 
-**Verdict.** Difflet vs diffusers (26.30–28.89 dB over seeds 0–2) lies inside diffusers' own
+**Verdict.** Difflet vs diffusers (26.30–28.89 dB over seeds 0–2) overlaps diffusers' own
 perturbation spread (23.79–28.62 dB with its timestep rounded through bf16), so the gap to Qwen
 and Flux (40–41 dB) need not indicate a Difflet defect. The noise floor is an upper bound on the
 timestep-cast effect (it also absorbs any run-to-run nondeterminism of the perturbed run; the
 exact Difflet and diffusers runs are deterministic — seed 0's whole-video PSNR
 26.303416187998177 is identical to the last digit across the F1b, F9 noise and F9 gates-wan runs
-on two pods). The ranges overlap but are not the same (26.30–28.89 vs 23.79–28.62 dB), and
+on two pods). The ranges are not the same (26.30–28.89 vs 23.79–28.62 dB), and
 matched by seed Difflet is further from diffusers than the perturbed run on seeds 0 and 1, so
 with n = 3 this shows the gap need not indicate a defect; it cannot show there is none. By eye, seed 2's exact and
 perturbed first frames (23.8 dB) are the same tabby cat in the same pose with different fur and
@@ -575,7 +575,7 @@ to the CUDA path but never ran: it is NOT MEASURED in every row and has no colum
 |---|---|---|---|
 | smoke (`difflet run`, by eye) | PASS [10-16, 10-17 F3] | PASS [10-18 F5] | PASS [10-18 F1] |
 | DiT parity (D14, three gates) | PASS incl. padded prompt [F3, F4] | PASS [F5] | PASS both experts + rounding block [F1, F1b] |
-| e2e vs diffusers | PASS, 35 dB / 0.998 [F3] | PASS, 35 dB / 0.998 [F5] | PASS, 25 dB / 0.99 [F1, F1b]; seeds 0–2 inside diffusers' own noise floor [F9] |
+| e2e vs diffusers | PASS, 35 dB / 0.998 [F3] | PASS, 35 dB / 0.998 [F5] | PASS, 25 dB / 0.99 [F1, F1b]; seeds 0–2 overlap diffusers' own noise floor [F9] |
 | CLI matrix cell | PASS [F3, F5, F9] | PASS [F5, F9] | PASS [F9] |
 | `difflet serve` | PASS; LIMIT on concurrency (429 after 30 s) [F3b] | N/A · refused by name, F5b | N/A · refused by name, F1b |
 | `--torch-compile` | PASS, opt-in [F4] | N/A · refused, F5b | N/A · refused, F1b |

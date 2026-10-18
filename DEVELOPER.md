@@ -260,9 +260,9 @@ single-seed A/B does not support the timestep as the gap. Both sides combine CFG
 on host tensors the DiT returned in bf16, diffusers on the device). F9 measured the e2e metric's
 own noise floor: diffusers against itself with its timestep rounded through bf16 lands at
 23.8–28.6 dB over seeds 0–2, Difflet against diffusers at 26.3–28.9 dB on the same seeds
-(`artifacts/cuda-release1/f9/cuda_e2e_wan_noise.json`). Difflet vs diffusers lies inside
+(`artifacts/cuda-release1/f9/cuda_e2e_wan_noise.json`). Difflet vs diffusers overlaps
 diffusers' own perturbation spread, so the gap to Qwen and Flux need not indicate a Difflet
-defect (the ranges overlap but are not the same, and n = 3 cannot show there is none); the noise
+defect (the ranges are not the same, and n = 3 cannot show there is none); the noise
 floor is an upper bound on the timestep-cast effect (it also absorbs run-to-run nondeterminism
 of the perturbed run; the exact runs are deterministic). The former suspects (the host scheduler
 step, the bf16 latents/text casts, the empty-prompt negative embeds) are not needed to explain
