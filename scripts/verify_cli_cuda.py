@@ -1,13 +1,16 @@
 """The CUDA column of the CLI matrix (CUDA plan F3).
 
 ``scripts/verify_cli.py`` sizes every cell to the four NeuronCores of a trn2.3xlarge. On one
-GPU the matrix has two cells — Qwen-Image (F3) and FLUX.1-dev (F5) at ``tp=1`` — grown by F1
-(Wan) and F2 (a second card). Per cell: ``difflet download`` → ``difflet compile`` → TIMED
-``difflet generate``, each a subprocess with ``DIFFLET_BACKEND=cuda``, logs and
-``results.json`` under a fresh run dir. GPU-only (the unit tests stub the subprocesses).
+GPU the matrix has three cells — Qwen-Image (F3), FLUX.1-dev (F5) and Wan 2.2 T2V-A14B (F1)
+at ``tp=1`` — grown by F2 (a second card). Per cell: ``difflet download`` →
+``difflet compile`` → TIMED ``difflet generate``, each a subprocess with
+``DIFFLET_BACKEND=cuda``, logs and ``results.json`` under a fresh run dir. GPU-only (the
+unit tests stub the subprocesses).
 
 Each cell generates at its model's default step count (``CELL_STEPS``: Qwen-Image 50,
-FLUX.1-dev 28); ``--steps N`` overrides every cell.
+FLUX.1-dev 28, Wan 2.2 40); ``--steps N`` overrides every cell. A generate that exits 0 but
+leaves no output at the cell's path (``.png``, or ``.mp4`` for Wan — ``CELL_OUTPUT_SUFFIX``)
+fails the cell.
 
     python scripts/verify_cli_cuda.py --seed 0 [--steps N] [--run-root ~/.cache/difflet/verify-cli-cuda]
 
@@ -31,11 +34,32 @@ from verify_cli import _DIFFLET_CMD, Status, StepResult, _kill_process_group, al
 CELLS: list[tuple[str, str]] = [
     ("Qwen/Qwen-Image", "tp1"),
     ("black-forest-labs/FLUX.1-dev", "tp1"),
+    ("Wan-AI/Wan2.2-T2V-A14B-Diffusers", "tp1"),
 ]
-# Per-model generate steps when --steps is not given: diffusers' pipeline defaults.
-CELL_STEPS: dict[str, int] = {"Qwen/Qwen-Image": 50, "black-forest-labs/FLUX.1-dev": 28}
+# Per-model generate steps when --steps is not given: diffusers' pipeline defaults (Wan's 40 is
+# WanPipeline's; the registry's serving default_steps=2 is a Trainium smoke value).
+CELL_STEPS: dict[str, int] = {
+    "Qwen/Qwen-Image": 50,
+    "black-forest-labs/FLUX.1-dev": 28,
+    "Wan-AI/Wan2.2-T2V-A14B-Diffusers": 40,
+}
+# The generate output's suffix per model (default ".png"): a video model writes an MP4.
+CELL_OUTPUT_SUFFIX: dict[str, str] = {"Wan-AI/Wan2.2-T2V-A14B-Diffusers": ".mp4"}
 DEFAULT_RUN_ROOT = pathlib.Path.home() / ".cache" / "difflet" / "verify-cli-cuda"
 DEFAULT_PROMPT = "a photorealistic cat sitting in a sunlit garden"
+
+
+def cell_output(run_dir: pathlib.Path, model_id: str, config: str) -> pathlib.Path:
+    slug = model_id.split("/")[-1].lower()
+    return run_dir / f"{slug}_{config}{CELL_OUTPUT_SUFFIX.get(model_id, '.png')}"
+
+
+def check_output(result: StepResult, output: pathlib.Path) -> StepResult:
+    """A passing generate that left no file at ``output`` is a failure."""
+    if result.status is not Status.PASS or output.is_file():
+        return result
+    reason = f"exit 0 but no output at {output}"
+    return StepResult(Status.FAIL, result.duration, reason, cmd=result.cmd)
 
 
 def cuda_env() -> dict[str, str]:
@@ -113,10 +137,11 @@ def main(argv: list[str] | None = None) -> int:
     for model_id, config in CELLS:
         slug = model_id.split("/")[-1].lower()
         steps = args.steps if args.steps is not None else CELL_STEPS[model_id]
+        output = cell_output(run_dir, model_id, config)
         cmds = build_cmds(
             model_id,
             prompt=args.prompt,
-            output=str(run_dir / f"{slug}_{config}.png"),
+            output=str(output),
             steps=steps,
             seed=args.seed,
             cache_dir=args.cache_dir,
@@ -125,6 +150,8 @@ def main(argv: list[str] | None = None) -> int:
         with (run_dir / f"{slug}_{config}.log").open("w") as log_fh:
             for step in ("download", "compile", "generate"):
                 results[step] = run_step(cmds[step], log_fh, timeout=args.timeout, env=env)
+                if step == "generate":
+                    results[step] = check_output(results[step], output)
                 if results[step].status is not Status.PASS:
                     break
         outcome = cell_outcome(results)

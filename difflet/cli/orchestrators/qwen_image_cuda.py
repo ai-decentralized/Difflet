@@ -9,8 +9,9 @@ Release 1 scope: tp=1, cp=1, dp=1, no CFG-parallel, no TeaCache, one request sha
 wider is refused here, before any weight is loaded, with the plan follow-up that owns it.
 
 ``CudaOneProcessOrchestrator`` is that ``download → compile → generate`` flow for any model
-whose CUDA application exposes ``generate()``; ``CudaQwenImageOrchestrator`` and
-``flux_cuda.FluxCudaOrchestrator`` (F5) set the model-specific parts.
+whose CUDA application exposes ``generate()``; ``CudaQwenImageOrchestrator``,
+``flux_cuda.FluxCudaOrchestrator`` (F5) and ``wan_cuda.WanCudaOrchestrator`` (F1) set the
+model-specific parts.
 """
 
 from __future__ import annotations
@@ -63,7 +64,9 @@ class CudaOneProcessOrchestrator(ModelOrchestrator):
     ``ACCEPTS_GUIDANCE_SCALE`` (forward ``--guidance-scale``, defaulting to
     ``DEFAULT_GUIDANCE_SCALE``); ``MODEL_IDS`` lists the repos this orchestrator serves
     (the requested one is used when listed); ``refuse_model_flags`` and
-    ``application_kwargs`` add the model-specific refusals and application options.
+    ``application_kwargs`` add the model-specific refusals and application options;
+    ``OUTPUT_TYPE`` and ``save_result`` are what ``generate()`` asks for and how it writes it
+    (a PIL image by default; a video model returns a tensor and writes an MP4).
     """
 
     HF_MODEL_ID: str
@@ -71,6 +74,7 @@ class CudaOneProcessOrchestrator(ModelOrchestrator):
     DEFAULT_STEPS: int
     ACCEPTS_GUIDANCE_SCALE: bool = False
     DEFAULT_GUIDANCE_SCALE: float | None = None
+    OUTPUT_TYPE: str = "pil"
     TAG: str
 
     def __init__(self, args: argparse.Namespace) -> None:
@@ -129,12 +133,18 @@ class CudaOneProcessOrchestrator(ModelOrchestrator):
         kwargs = dict(
             num_inference_steps=self.args.steps or self.DEFAULT_STEPS,
             seed=self.args.seed,
-            output_type="pil",
+            output_type=self.OUTPUT_TYPE,
         )
         if self.ACCEPTS_GUIDANCE_SCALE:
             scale = getattr(self.args, "guidance_scale", None)
             kwargs["guidance_scale"] = self.DEFAULT_GUIDANCE_SCALE if scale is None else scale
         return kwargs
+
+    def save_result(self, result, out: Path) -> str:
+        """Write ``generate()``'s result to ``out``; return what to print after "wrote"."""
+        image = result[0]
+        image.save(out)
+        return f"{out} ({image.size[0]}x{image.size[1]})"
 
     # ------------------------------------------------------------ commands
 
@@ -163,14 +173,11 @@ class CudaOneProcessOrchestrator(ModelOrchestrator):
         self._last_pipe = pipe
         print(f"[difflet] loaded in {time.perf_counter() - t0:.1f} s", flush=True)
         t1 = time.perf_counter()
-        image = pipe.app.generate(self.args.prompt, **self.generate_kwargs())[0]
+        result = pipe.app.generate(self.args.prompt, **self.generate_kwargs())
         out = Path(self.args.output)
         out.parent.mkdir(parents=True, exist_ok=True)
-        image.save(out)
-        print(
-            f"[difflet] wrote {out} ({image.size[0]}x{image.size[1]}) "
-            f"in {time.perf_counter() - t1:.1f} s"
-        )
+        written = self.save_result(result, out)
+        print(f"[difflet] wrote {written} in {time.perf_counter() - t1:.1f} s")
 
 
 class CudaQwenImageOrchestrator(CudaOneProcessOrchestrator):

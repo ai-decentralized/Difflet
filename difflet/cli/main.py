@@ -859,9 +859,13 @@ def _get_orchestrator(args: argparse.Namespace):
             from difflet.cli.orchestrators.flux_cuda import FluxCudaOrchestrator
 
             return FluxCudaOrchestrator(args)
+        if args.model_id in ("Wan-AI/Wan2.2-T2V-A14B-Diffusers", "Wan-AI/Wan2.1-T2V-14B-Diffusers"):
+            from difflet.cli.orchestrators.wan_cuda import WanCudaOrchestrator
+
+            return WanCudaOrchestrator(args)
         raise SystemExit(
-            f"[difflet] {args.model_id} is not on the CUDA backend yet (plan follow-up "
-            "F1 Wan); set DIFFLET_BACKEND=trainium for the staged Neuron path"
+            f"[difflet] {args.model_id} is not on the CUDA backend yet; "
+            "set DIFFLET_BACKEND=trainium for the staged Neuron path"
         )
 
     from difflet.cli.orchestrators.flux import FluxOrchestrator
