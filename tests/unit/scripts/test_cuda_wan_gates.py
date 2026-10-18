@@ -44,7 +44,7 @@ def _gate(gate: str, env_var: str, payload: dict, tmp_path) -> tuple[dict[str, s
     for line in proc.stdout.splitlines():
         # The -v progress line names the test for every outcome; the -rA summary names it for
         # PASSED/FAILED only (a SKIPPED summary line carries the file:line and the reason).
-        progress = re.match(r"^\S+::(\S+) (PASSED|FAILED|SKIPPED|ERROR)\b", line)
+        progress = re.match(r"^.*?::(\S+) (PASSED|FAILED|SKIPPED|ERROR)\b", line)
         if progress:
             outcomes[progress[1]] = progress[2]
     assert outcomes, proc.stdout[-3000:] + proc.stderr[-2000:]
@@ -387,7 +387,8 @@ def test_e2e_gate_needs_the_variants(tmp_path):
 # ``aggregate``. Without a noise floor the gate holds EVERY seed's float32 variant to the
 # 25 dB / 0.99 floors. With one (diffusers vs its own bf16-rounded timestep) the gate is
 # stated relative to it: the mean over seeds within 1.15x (1.21 dB) of the floor's mean,
-# every seed within 1.21 dB of the floor's worst seed, and a loose 20 dB / 0.98 absolute floor.
+# every seed within 1.21 dB of the floor's worst seed (cosine deviation within 1.15^2 = 1.3225x,
+# the same 1.15x on the linear error), and a loose 20 dB / 0.98 absolute floor.
 
 
 def _spread(values: list[float]) -> dict:
@@ -440,7 +441,7 @@ def _seeded_payload(
 
 SEEDS_OK = {0: (26.3, 0.995), 1: (27.0, 0.996), 2: (25.5, 0.993)}
 # A floor SEEDS_OK clears relatively: mean 26.27 >= 26.00 - 1.21 dB, every seed >= 25.00 - 1.21;
-# cosine deviation mean 0.00533 <= 1.15 x 0.00533, every seed 0.007 <= 1.15 x 0.007.
+# cosine deviation mean 0.00533 <= 1.3225 x 0.00533, every seed 0.007 <= 1.3225 x 0.007.
 FLOOR = {0: (27.0, 0.996), 1: (26.0, 0.995), 2: (25.0, 0.993)}
 # The F9 measurement (the F9 noise-floor run, inlined at the end of this file), two decimals.
 F9_DIFFLET = {0: (26.30, 0.99609), 1: (26.39, 0.99541), 2: (28.89, 0.99775)}
@@ -504,13 +505,13 @@ def test_e2e_relative_gate_passes_the_f9_measurement_and_prints_its_thresholds(t
     # Gate A: the mean over seeds, 1.21 dB (a 1.15x RMSE ratio) under the floor's mean.
     assert (
         "relative gate A (mean over 3 seeds): PSNR 27.19 dB, required >= 25.17 dB "
-        "(noise floor mean 26.38 dB - 1.21 dB); cosine deviation 0.00358, allowed <= 0.00537 "
-        "(1.15x the floor's 0.00467)" in stdout
+        "(noise floor mean 26.38 dB - 1.21 dB); cosine deviation 0.00358, allowed <= 0.00617 "
+        "(1.3225x the floor's 0.00467; 1.15x on the linear error)" in stdout
     ), stdout
     # Gate B: every seed against the floor's worst seed.
     assert (
         "relative gate B (every seed): PSNR >= 22.58 dB (noise floor min 23.79 dB - 1.21 dB); "
-        "cosine deviation <= 0.00857 (1.15x the floor's worst 0.00745)" in stdout
+        "cosine deviation <= 0.00985 (1.3225x the floor's worst 0.00745)" in stdout
     ), stdout
     # The 25 / 0.99 floors step aside; the loose absolute floors judged every seed.
     assert (
@@ -548,36 +549,69 @@ def test_e2e_relative_gate_fails_when_one_seed_is_below_the_floor_s_worst_seed_m
 def test_e2e_relative_gate_holds_the_loose_absolute_floor_when_the_noise_floor_collapses(
     tmp_path,
 ):
-    # Diffusers 18-20 dB from itself: the relative gate alone would pass a 19.5 dB build;
-    # the loose 20 dB / 0.98 floors in the absolute test do not.
+    # Diffusers 18-20 dB from itself: the oracle moved, so the relative test fails rather than
+    # scaling the gate down to it, and the loose 20 dB / 0.98 floors in the absolute test still
+    # judge every seed (a 19.5 dB build fails them).
     floor = {0: (18.0, 0.95), 1: (19.0, 0.96), 2: (20.0, 0.97)}
     out, stdout = _e2e(_seeded_payload(SEEDS_OK, floor=floor), tmp_path)
-    assert set(out.values()) == {"PASSED"}, out
+    assert out[RELATIVE] == "FAILED"
+    assert (
+        "the oracle moved: noise floor worst seed PSNR 18.00 dB, cosine 0.95000 is under the "
+        "loose floor 20.0 dB / 0.98" in stdout
+    ), stdout
+    assert out["test_video_is_the_same_clip_as_diffusers"] == "PASSED"
     assert "seed 0 noise floor (diffusers vs its bf16-rounded timestep): PSNR 18.00 dB" in stdout
     difflet = {seed: (19.5, 0.985) for seed in floor}
     out, stdout = _e2e(_seeded_payload(difflet, floor=floor), tmp_path)
-    assert out[RELATIVE] == "PASSED"
     assert out["test_video_is_the_same_clip_as_diffusers"] == "FAILED"
     assert "seed 0: PSNR 19.50 dB below 20.0" in stdout, stdout
     difflet = {seed: (21.0, 0.975) for seed in floor}
     out, stdout = _e2e(_seeded_payload(difflet, floor=floor), tmp_path)
     assert out["test_video_is_the_same_clip_as_diffusers"] == "FAILED"
     assert "seed 1: pixel cosine 0.97500 below 0.98" in stdout, stdout
+    # A floor whose worst seed just clears the loose floor is judged, and a 19.5 dB build then
+    # clears gates A and B (20.5 - 1.21 = 19.29 on the mean, 20.0 - 1.21 = 18.79 per seed) and
+    # fails only through gate C.
+    floor = {0: (20.0, 0.98), 1: (20.5, 0.985), 2: (21.0, 0.99)}
+    out, stdout = _e2e(_seeded_payload({s: (19.5, 0.985) for s in floor}, floor=floor), tmp_path)
+    assert out[RELATIVE] == "PASSED"
+    assert out["test_video_is_the_same_clip_as_diffusers"] == "FAILED"
+    assert "seed 0: PSNR 19.50 dB below 20.0" in stdout, stdout
+
+
+def test_e2e_relative_gate_fails_closed_on_a_non_finite_noise_floor(tmp_path):
+    floor = {0: (float("inf"), 1.0), 1: (26.0, 0.995), 2: (25.0, 0.993)}
+    out, stdout = _e2e(_seeded_payload(SEEDS_OK, floor=floor), tmp_path)
+    assert out[RELATIVE] == "FAILED"
+    assert "noise floor not finite" in stdout, stdout
+
+
+def test_e2e_gate_does_not_judge_a_seed_by_the_first_seed_s_metrics(tmp_path):
+    # A seed whose variants hold neither float32 nor timestep_dtypes[0] used to fall back to
+    # the top-level (first seed's) metrics; it fails instead.
+    payload = _seeded_payload(SEEDS_OK, floor=FLOOR)
+    payload["per_seed"]["2"]["variants"] = {
+        "bfloat16": payload["per_seed"]["2"]["variants"]["model"]
+    }
+    out, stdout = _e2e(payload, tmp_path)
+    assert out[RELATIVE] == "FAILED"
+    assert out["test_video_is_the_same_clip_as_diffusers"] == "FAILED"
+    assert "a seed's variants ['bfloat16'] hold no gated dtype" in stdout, stdout
 
 
 def test_e2e_relative_gate_judges_the_cosine_deviation_the_same_way(tmp_path):
     # PSNR is fine everywhere; 1 - cosine is 0.00433 on average against the floor's 0.00200
-    # (allowed 1.15x = 0.00230), and seed 2's 0.00700 against the floor's worst 0.00300
-    # (allowed 0.00345; seeds 0 and 1 at 0.00300 clear it).
+    # (allowed 1.3225x = 0.00265), and seed 2's 0.00700 against the floor's worst 0.00300
+    # (allowed 0.00397; seeds 0 and 1 at 0.00300 clear it).
     floor = {0: (31.0, 0.999), 1: (30.0, 0.998), 2: (29.0, 0.997)}
     difflet = {0: (30.0, 0.997), 1: (30.0, 0.997), 2: (30.0, 0.993)}
     out, stdout = _e2e(_seeded_payload(difflet, floor=floor), tmp_path)
     assert out[RELATIVE] == "FAILED"
     assert (
-        "mean cosine deviation 0.00433 above 0.00230 (1.15x the noise floor's 0.00200)" in stdout
+        "mean cosine deviation 0.00433 above 0.00265 (1.3225x the noise floor's 0.00200)" in stdout
     ), stdout
     assert (
-        "seed 2: cosine deviation 0.00700 above 0.00345 (1.15x the noise floor's worst 0.00300)"
+        "seed 2: cosine deviation 0.00700 above 0.00397 (1.3225x the noise floor's worst 0.00300)"
         in stdout
     ), stdout
     assert "seed 0: cosine" not in stdout and "seed 1: cosine" not in stdout, stdout

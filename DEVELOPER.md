@@ -266,8 +266,9 @@ step, the bf16 latents/text casts, the empty-prompt negative embeds) are not nee
 the gap, nor excluded by it. Because the noise
 floor's worst seed is below 25 dB, the gate is stated relative to the floor when the result
 carries it (the mean PSNR over seeds within 20·log10(1.15) = 1.21 dB of the floor's mean,
-every seed within 1.21 dB of the floor's worst seed, the cosine deviation within 1.15×, and a
-loose 20 dB / 0.98 absolute floor; the measured run clears the mean by 2.0 dB); without a floor the
+every seed within 1.21 dB of the floor's worst seed, the cosine deviation within 1.15² = 1.3225×
+— the same 1.15× on the linear error — and a loose 20 dB / 0.98 absolute floor; the measured run
+clears the mean by 2.0 dB, about one standard error of the difference at n = 3); without a floor the
 25 dB / 0.99 floors judge every seed. Both sides decode the VAE in bf16, so it is not a parity suspect.
 A Wan 2.2 snapshot without `transformer_2/` is refused (a partial download), not run on one
 expert.
