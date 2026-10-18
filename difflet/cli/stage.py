@@ -35,6 +35,7 @@ _ORCHESTRATOR_MAP: dict[str, str] = {
         "difflet.cli.orchestrators.hunyuan_video_15.HunyuanVideo15Orchestrator"
     ),
     "Qwen/Qwen-Image": "difflet.cli.orchestrators.qwen_image.QwenImageOrchestrator",
+    "Lightricks/LTX-2": "difflet.cli.orchestrators.ltx_2.LTX2Orchestrator",
     "MiniMaxAI/MiniMax-H3": "difflet.cli.orchestrators.minimax_h3.MiniMaxH3Orchestrator",
 }
 
