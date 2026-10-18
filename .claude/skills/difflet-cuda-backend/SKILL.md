@@ -116,14 +116,46 @@ venv (task 0.5). Every GPU run logs to `/tmp/logs/<what>-<ts>.log` on the box an
 status-log line with wall time and peak memory. The image from `scripts/cuda_smoke.sh` must be
 prompt-faithful by eye before any numeric gate is trusted.
 
-**Pod lifecycle (owner's rule, 2026-10-16).** A pod bills by the hour whether or not anything runs
-on it. Deploying one needs the owner's explicit yes in the console (RTX PRO 6000, 1 GPU, 300 GB
-container storage, On-Demand). At the end of every GPU session — after the last script of the
-session has run and its JSONs/PNGs are copied off the box — ask the owner whether to stop the
-pod, then stop it from the console, and record the pod name, ID, and the stop in the status-log
-entry. Never leave a pod running "for the next session": the snapshot download is ~90 s and the
-venv build ~3 min, far cheaper than idle hours. The account SSH key (Settings → Access Keys)
-is shared across pods, so `~/.ssh/yottalabs_difflet_cuda_qwen.pem` works on a new pod.
+**Pod lifecycle (owner's standing rule, 2026-10-16, tightened 2026-10-18).** A pod bills by the
+hour whether or not anything runs on it. Deploying one needs the owner's explicit yes in the
+console (RTX PRO 6000, 1 GPU, On-Demand; mount the `difflet-cache` network volume at `/data`).
+
+**Pausing the pod is pre-authorized. Do it yourself; never ask, never wait.** On 2026-10-17 the
+owner went to sleep after saying "pause the pod when you finish"; the session finished and then
+asked for approval, so the pod billed all night. That is the mistake this rule prevents. At the end
+of every GPU session, after the last script's JSONs/PNGs are copied off the box and committed:
+
+1. Pause through the API first, not the console (a console click can be refused by the
+   permission layer; the API call is a plain shell command and is not). The key is a Yottalabs
+   Access Key (Console → Settings → Access Keys) that the owner creates once and stores in
+   `~/.config/yottalabs/api_key` (mode 600; never print it, never commit it). Pod IDs are the
+   `id` field at deploy time — write the ID into the session notes the moment the pod exists.
+
+   ```bash
+   KEY="$(cat ~/.config/yottalabs/api_key)"; POD=<id>
+   curl -fsS -X POST "https://api.yottalabs.ai/v2/pods/$POD/pause" -H "X-Api-Key: $KEY"
+   curl -fsS "https://api.yottalabs.ai/v2/pods/$POD" -H "X-Api-Key: $KEY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["data"]["status"])'
+   ```
+
+   Poll the second command until the status is no longer `Running`. `POST .../resume` brings it
+   back; `DELETE /v2/pods/{id}` terminates — only when the owner says "terminate".
+2. If `~/.config/yottalabs/api_key` does not exist, ask the owner for it at the **start** of the
+   GPU session, while they are awake — never at the end. Without it, fall back to the console:
+   Pods → the pod's pause control → confirm "Pause Pod" → reload and read the status. The
+   "all data in container storage will be lost" warning is expected: nothing lives only on the
+   container (evidence is committed, the HF cache is on the volume).
+3. Verify, then record: the pod name, ID, and the final status (`Paused`) go in the status-log
+   entry and in the first line of the final message. "I pressed pause" is not done; a status
+   read that says `Paused` is.
+4. Nothing above applies to pods created by other logins (e.g. `terminator@yottalabs.ai`): the
+   console lists them beside ours under the same organization. Touch only pods whose
+   `Created By` is the owner's login and whose name starts with `difflet-`.
+
+Never leave a pod running "for the next session": the snapshot read from the volume is ~4 min and
+the venv build ~3 min, far cheaper than idle hours. The account SSH key is shared across pods,
+so `~/.ssh/yottalabs_difflet_cuda_qwen.pem` works on a new pod. Prices differ per region and card
+edition (us-central-7 Server Edition $1.35/h; us-east-3 Workstation Edition $0.45/h), so quote
+the price the deploy form shows, not a remembered one.
 
 ## Status log entry
 
