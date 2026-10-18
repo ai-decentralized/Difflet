@@ -77,6 +77,22 @@ def test_weight_map_from_an_index(tmp_path):
     assert got["down.weight"].endswith("model-00002-of-00002.safetensors")
 
 
+def test_weight_map_skips_an_index_whose_shards_are_missing(tmp_path):
+    """LTX-2's text_encoder/ holds transformers' model.safetensors.index.json (shards present)
+    and a diffusers diffusion_pytorch_model.safetensors.index.json, which sorts first and whose
+    shards a filtered download leaves out: the complete index wins."""
+    _write_sharded(tmp_path)
+    (tmp_path / "diffusion_pytorch_model.safetensors.index.json").write_text(
+        json.dumps({"metadata": {}, "weight_map": {
+            "other.weight": "diffusion_pytorch_model-00001-of-00002.safetensors"}})
+    )
+    got = ckpt.build_weight_map(tmp_path)
+    assert set(got) == set(FULL)
+    # With no complete index the first one is used, as before.
+    (tmp_path / "model-00002-of-00002.safetensors").unlink()
+    assert set(ckpt.build_weight_map(tmp_path)) == {"other.weight"}
+
+
 def test_missing_checkpoint_directory(tmp_path):
     with pytest.raises(FileNotFoundError, match="no .safetensors"):
         ckpt.build_weight_map(tmp_path)
