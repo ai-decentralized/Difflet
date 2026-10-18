@@ -51,3 +51,13 @@ def test_unknown_options_are_rejected(root):
     with pytest.raises(TypeError, match="unexpected keyword arguments: bogus"):
         TorchNeuronFluxApplication(model_path=root, parallel=DiffletParallelConfig(), shape={"height": 16, "width": 16},
                                    bogus=1)
+
+
+def test_without_the_vae_the_application_returns_diffusers_latents(root):
+    a = TorchNeuronFluxApplication(model_path=root, parallel=DiffletParallelConfig(tp_degree=1),
+                                   dtype=torch.float32, shape={"height": PIPE_HW, "width": PIPE_HW},
+                                   device="cpu", exec_mode="eager", text_seq_len=8, decode_vae=False)
+    a.load()
+    assert a.vae is None
+    ours = a(**pipeline_kwargs("pt")).images  # forced to latents without a VAE
+    torch.testing.assert_close(ours, diffusers_pipeline_reference(root, "latent"), atol=1e-4, rtol=1e-4)

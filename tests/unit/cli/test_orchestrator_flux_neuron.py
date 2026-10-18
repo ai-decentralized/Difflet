@@ -35,16 +35,19 @@ def launches(monkeypatch):
 
 
 @pytest.mark.parametrize("mode", ["generate", "compile"])
-def test_driver_launches_one_torchrun_generate_stage(launches, mode):
-    getattr(flux_cli.FluxOrchestrator(_args()), mode)()
-    [call] = launches
-    assert call["args"][:2] == ("black-forest-labs/FLUX.1-dev", "generate")
-    assert call["num_cores"] == 4
-    cli = call["cli_args"]
-    assert cli[cli.index("--stage-mode") + 1] == mode
-    for flag, value in (("--prompt", "a cat"), ("--steps", "50"), ("--guidance-scale", "3.5"),
-                        ("--seed", "7"), ("--tp-degree", "4")):
-        assert cli[cli.index(flag) + 1] == value
+@pytest.mark.parametrize("tp, stages", [(4, [("transformer", 4)]),
+                                        (2, [("transformer", 2), ("vae", 1)])])
+def test_driver_runs_a_vae_stage_only_where_the_decode_does_not_fit(launches, tmp_path, mode, tp, stages):
+    getattr(flux_cli.FluxOrchestrator(_args(work_dir=str(tmp_path / "w"), tp_degree=tp)), mode)()
+    assert [(c["args"][1], c["num_cores"]) for c in launches] == stages
+    for call in launches:
+        cli = call["cli_args"]
+        assert cli[cli.index("--stage-mode") + 1] == mode
+        assert cli[cli.index("--work-dir") + 1] == str(tmp_path / "w")
+        for flag, value in (("--prompt", "a cat"), ("--steps", "50"), ("--guidance-scale", "3.5"),
+                            ("--seed", "7"), ("--tp-degree", str(tp))):
+            assert cli[cli.index(flag) + 1] == value
+    assert not (tmp_path / "w").exists()  # removed without --keep-work-dir
 
 
 @pytest.mark.parametrize("override, named", [
@@ -58,10 +61,41 @@ def test_driver_refuses_what_the_stage_does_not_run(launches, capsys, override, 
     assert named in capsys.readouterr().err
 
 
-def test_stage_runs_the_request_and_saves_the_image(monkeypatch, tmp_path):
+def test_transformer_stage_saves_the_packed_latents(monkeypatch, tmp_path):
+    import torch
+
+    import difflet.backends.registry as registry
     import difflet.pipeline.difflet_pipeline as dp
 
-    saved, calls = [], []
+    monkeypatch.setattr(registry, "get_backend",
+                        lambda name: SimpleNamespace(prepare_runtime=lambda parallel: None))
+    latents, calls, built = torch.randn(1, 16, 64), [], []
+
+    class FakePipe:
+        app = SimpleNamespace(dit=SimpleNamespace(device="cpu"))
+
+        def __call__(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(images=latents)
+
+    monkeypatch.setattr(dp.DiffletPipeline, "from_pretrained",
+                        classmethod(lambda cls, *a, **k: built.append(k) or FakePipe()))
+    args = _args(work_dir=str(tmp_path), tp_degree=2)
+    flux_cli.FluxOrchestrator(args)._run_stage_internal("transformer", args)
+    assert built[0]["application_kwargs"]["decode_vae"] is False
+    assert built[0]["parallel"].tp_degree == 2
+    [call] = calls
+    assert call["output_type"] == "latent" and call["num_inference_steps"] == 50
+    torch.testing.assert_close(torch.load(tmp_path / "latents.pt"), latents)
+
+
+def test_transformer_stage_at_tp4_decodes_in_process(monkeypatch, tmp_path):
+    import difflet.backends.registry as registry
+    import difflet.pipeline.difflet_pipeline as dp
+
+    monkeypatch.setattr(registry, "get_backend",
+                        lambda name: SimpleNamespace(prepare_runtime=lambda parallel: None))
+    saved, calls, built = [], [], []
 
     class FakeImage:
         def save(self, path):
@@ -74,19 +108,51 @@ def test_stage_runs_the_request_and_saves_the_image(monkeypatch, tmp_path):
             calls.append(kwargs)
             return SimpleNamespace(images=[FakeImage()])
 
-    import difflet.backends.registry as registry
-
-    monkeypatch.setattr(registry, "get_backend",
-                        lambda name: SimpleNamespace(prepare_runtime=lambda parallel: None))
-    built = []
     monkeypatch.setattr(dp.DiffletPipeline, "from_pretrained",
                         classmethod(lambda cls, *a, **k: built.append(k) or FakePipe()))
     out = tmp_path / "img.png"
-    flux_cli.FluxOrchestrator(_args(output=str(out)))._run_stage_internal("generate", _args(output=str(out)))
-    assert built[0]["model_type"] == "flux" and built[0]["parallel"].tp_degree == 4
-    [call] = calls
-    assert call["prompt"] == "a cat" and call["num_inference_steps"] == 50 and call["guidance_scale"] == 3.5
-    assert saved == [str(out)]
+    args = _args(work_dir=str(tmp_path), output=str(out), tp_degree=4)
+    flux_cli.FluxOrchestrator(args)._run_stage_internal("transformer", args)
+    assert built[0]["application_kwargs"]["decode_vae"] is True
+    assert calls[0]["output_type"] == "pil" and saved == [str(out)]
+    assert not (tmp_path / "latents.pt").exists()
+
+
+def test_vae_stage_unpacks_decodes_and_saves(monkeypatch, tmp_path):
+    import torch
+
+    import difflet.backends.neuron.flux.vae as vae_mod
+    import difflet.backends.registry as registry
+    import difflet.pipeline.path_resolver as resolver
+
+    monkeypatch.setattr(registry, "get_backend",
+                        lambda name: SimpleNamespace(prepare_runtime=lambda parallel: None))
+    monkeypatch.setattr(resolver, "resolve_model_path", lambda *a, **k: str(tmp_path / "model"))
+    seen = {}
+
+    class FakeVae:
+        def __init__(self, **kwargs):
+            seen["init"] = kwargs
+            self.vae_config = {"scaling_factor": 0.5, "shift_factor": 0.1}
+            self.scale_factor = 8
+            self.phase_seconds = {}
+
+        def load(self, skip_warmup=False):
+            seen["skip_warmup"] = skip_warmup
+
+        def decode(self, z):
+            seen["z"] = z
+            return torch.zeros(1, 3, 32, 32)
+
+    monkeypatch.setattr(vae_mod, "NeuronFluxVaeDecoderApplication", FakeVae)
+    packed = torch.randn(1, 4, 64)  # 32x32 image: (32 / 16)^2 tokens of 16 channels x 2 x 2
+    torch.save(packed, tmp_path / "latents.pt")
+    out = tmp_path / "img.png"
+    args = _args(work_dir=str(tmp_path), output=str(out), height=32, width=32)
+    flux_cli.FluxOrchestrator(args)._run_stage_internal("vae", args)
+    assert seen["skip_warmup"] is True and seen["init"]["height"] == 32
+    assert tuple(seen["z"].shape) == (1, 16, 4, 4)  # unpacked 2x2 patches
+    assert out.exists()
 
 
 def test_registry_routes_flux_to_the_neuron_application():

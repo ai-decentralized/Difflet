@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import argparse
+import os
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
-
-import argparse
 
 from difflet.cli import runner
 from difflet.cli.orchestrators.base import ModelOrchestrator, require_request_shape_in_set
@@ -21,6 +22,15 @@ _HF_MODEL_ID = "black-forest-labs/FLUX.1-dev"
 _MODEL_TYPE = "flux"
 _CLI_NAME = "flux"
 _TORCHRUN_RUNS = "tensor parallelism and data-parallel replicas"
+
+
+def _decode_in_process(tp_degree: int) -> bool:
+    """Whether the transformer stage decodes too (no separate vae stage). At TP4 the 1024x1024
+    fp32 decode fits on rank 0's core beside its DiT (~6 GB) and T5 (~1.2 GB) shards, and a second
+    stage would only add a launch (~15-20 s per worker). At TP2 (~12 GB and ~2.4 GB) it does not:
+    in process it crawled through OOM recovery (~10 s per decode against ~0.7 s), so the vae stage
+    decodes after the transformer stage has exited, as for Wan."""
+    return int(tp_degree) >= 4
 
 
 def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
@@ -103,23 +113,37 @@ class FluxOrchestrator(ModelOrchestrator):
     # ------------------------------------------------ torchrun (neuron) path
 
     def _run_torchrun_stage(self, mode: str) -> None:
-        """One torchrun launch of the ``generate`` stage, tp ranks: ``compile`` loads and warms up
-        every component (filling the compile cache); ``generate`` also runs the request(s), and
-        rank 0 writes each image."""
+        """The ``transformer`` stage (torchrun, tp ranks) encodes and denoises. Where the decode fits
+        beside the shards (``_decode_in_process``: TP4) it also decodes, rank 0 saving each image;
+        otherwise rank 0 writes each request's packed latents to the work directory and the ``vae``
+        stage (one process, one core) decodes them after the transformer stage has exited, as for
+        Wan. ``compile`` loads and warms up whatever the generate path will run."""
         reject_unsupported_torchrun_options(_torchrun_unsupported_options(self.args),
                                             runs=_TORCHRUN_RUNS)
         root_compile_cache_at_cache_dir(getattr(self.args, "cache_dir", None), tag="flux")
-        runner.run_stage(_HF_MODEL_ID, "generate", num_cores=int(self.args.tp_degree or 4),
-                         virtual_core_size=None, cli_args=self._stage_cli_args(mode))
+        work_dir = Path(self.args.work_dir or Path.home() / ".cache" / "difflet" / "work" / "flux")
+        work_dir.mkdir(parents=True, exist_ok=True)
+        cli_args = self._stage_cli_args(mode, work_dir=str(work_dir))
+        try:
+            runner.run_stage(_HF_MODEL_ID, "transformer", num_cores=int(self.args.tp_degree or 4),
+                             virtual_core_size=None, cli_args=cli_args)
+            if not _decode_in_process(int(self.args.tp_degree or 4)):
+                runner.run_stage(_HF_MODEL_ID, "vae", num_cores=1, virtual_core_size=None,
+                                 cli_args=cli_args)
+        except Exception:
+            print(f"[difflet] work dir preserved at {work_dir} for inspection", file=sys.stderr)
+            raise
+        if not getattr(self.args, "keep_work_dir", False):
+            shutil.rmtree(work_dir, ignore_errors=True)
 
-    def _stage_cli_args(self, mode: str) -> list[str]:
+    def _stage_cli_args(self, mode: str, *, work_dir: str) -> list[str]:
         a = self.args
         parts = ["--model-id", _HF_MODEL_ID, "--tp-degree", str(a.tp_degree or 4),
                  "--height", str(a.height or 1024), "--width", str(a.width or 1024),
-                 "--stage-mode", mode]
+                 "--stage-mode", mode, "--work-dir", work_dir]
         for flag, name in (("--revision", "revision"), ("--prompt", "prompt"), ("--output", "output"),
                            ("--steps", "steps"), ("--guidance-scale", "guidance_scale"),
-                           ("--seed", "seed"), ("--cache-dir", "cache_dir"), ("--work-dir", "work_dir"),
+                           ("--seed", "seed"), ("--cache-dir", "cache_dir"),
                            ("--requests-dir", "requests_dir"), ("--worker-index", "worker_index"),
                            ("--dp-schedule", "dp_schedule"), ("--exec-mode", "exec_mode")):
             value = getattr(a, name, None)
@@ -130,14 +154,18 @@ class FluxOrchestrator(ModelOrchestrator):
         return parts
 
     def _run_stage_internal(self, stage: str, args: argparse.Namespace) -> None:
-        if stage != "generate":
+        if stage == "transformer":
+            self._stage_transformer_neuron(args)
+        elif stage == "vae":
+            self._stage_vae_neuron(args)
+        else:
             raise ValueError(f"Unknown Flux stage: {stage!r}")
-        self._stage_generate_neuron(args)
 
-    def _stage_generate_neuron(self, args: argparse.Namespace) -> None:
-        """The generate stage on every rank: DiffletPipeline prepares the runtime and builds the
-        registry's application (TorchNeuronFluxApplication); then each request (one, or a DP
-        worker's queue: rank 0 claims for the replica) runs on every rank and rank 0 saves it."""
+    def _stage_transformer_neuron(self, args: argparse.Namespace) -> None:
+        """The transformer stage on every rank: DiffletPipeline prepares the runtime and builds the
+        registry's application (TorchNeuronFluxApplication) without its VAE; each request (one, or
+        a DP worker's queue: rank 0 claims for the replica) is encoded and denoised on every rank,
+        and rank 0 saves its packed latents for the vae stage."""
         import torch
         import torch.distributed as dist
 
@@ -149,7 +177,10 @@ class FluxOrchestrator(ModelOrchestrator):
         import time
 
         h, w = int(args.height or 1024), int(args.width or 1024)
-        app_kwargs = {"exec_mode": args.exec_mode} if getattr(args, "exec_mode", None) else None
+        in_process = _decode_in_process(int(args.tp_degree or 4))
+        app_kwargs = {"decode_vae": in_process}
+        if getattr(args, "exec_mode", None):
+            app_kwargs["exec_mode"] = args.exec_mode
         parallel = DiffletParallelConfig(tp_degree=int(args.tp_degree or 4))
         # Start-up breakdown: process start to here, prepare_runtime, the heavy imports
         # from_pretrained would do lazily, then from_pretrained itself (it prepares again: cheap).
@@ -194,7 +225,7 @@ class FluxOrchestrator(ModelOrchestrator):
                 print("[flux] neuron: every component loaded and warmed up", flush=True)
             return
         for req in replica_requests(args, device=pipe.app.dit.device):
-            with replica_request_scope(args, req, final=True):
+            with replica_request_scope(args, req, final=in_process):
                 marks: list[float] = []
 
                 def on_step_end(_pipe, _i, _t, callback_kwargs):
@@ -208,6 +239,7 @@ class FluxOrchestrator(ModelOrchestrator):
                     guidance_scale=float(stage_loop.effective(req, args, "guidance_scale", 3.5)),
                     generator=torch.Generator().manual_seed(req.seed),
                     callback_on_step_end=on_step_end,
+                    output_type="pil" if in_process else "latent",
                 )
                 done = time.perf_counter()
                 if rank == 0 and len(marks) > 1:
@@ -215,13 +247,64 @@ class FluxOrchestrator(ModelOrchestrator):
                     print(f"[flux] request: {done - called:.2f} s; to the first step's end "
                           f"{marks[0] - called:.2f} s (prompt encode + step 1); step median "
                           f"{statistics.median(deltas) * 1e3:.1f} ms (n={len(deltas)}, max "
-                          f"{deltas[-1] * 1e3:.1f}); after the last step {done - marks[-1]:.2f} s "
-                          f"(unpack + decode)", flush=True)
-                if rank == 0:
+                          f"{deltas[-1] * 1e3:.1f}); after the last step {done - marks[-1]:.2f} s",
+                          flush=True)
+                if rank == 0 and in_process:
                     out = Path(req.output)
                     out.parent.mkdir(parents=True, exist_ok=True)
                     output.images[0].save(str(out))
                     print(f"[difflet] image saved to {out}", flush=True)
+                elif rank == 0:
+                    path = stage_loop.work_file(args, req, "latents.pt")
+                    torch.save(output.images.cpu(), path)
+                    print(f"[flux] latents saved to {path}", flush=True)
+
+    def _stage_vae_neuron(self, args: argparse.Namespace) -> None:
+        """The vae stage, one process on one core, after the transformer stage has exited: each
+        claimed request's packed latents are unpacked and un-normalised as FluxPipeline does
+        (``latents / scaling_factor + shift_factor``), decoded in fp32 (eager), post-processed and
+        saved. ``compile`` mode loads with the warm-up decode, which compiles and caches the per-op
+        kernels at the request shape; ``generate`` skips it (as for Wan's VAE stage)."""
+        import time
+
+        import torch
+        from diffusers import FluxPipeline
+        from diffusers.image_processor import VaeImageProcessor
+
+        from difflet.backends.neuron.flux.vae import NeuronFluxVaeDecoderApplication
+        from difflet.backends.registry import get_backend
+        from difflet.cli.dp import stage_loop
+        from difflet.pipeline.parallel_config import DiffletParallelConfig
+        from difflet.pipeline.path_resolver import resolve_model_path
+
+        h, w = int(args.height or 1024), int(args.width or 1024)
+        parallel = DiffletParallelConfig(tp_degree=1)
+        get_backend("neuron").prepare_runtime(parallel)
+        root = resolve_model_path(_HF_MODEL_ID, revision=getattr(args, "revision", None),
+                                  local_files_only=True)
+        started = time.perf_counter()
+        app = NeuronFluxVaeDecoderApplication(model_path=os.path.join(root, "vae"), height=h, width=w,
+                                              parallel=parallel, device="neuron")
+        app.load(skip_warmup=args.stage_mode != "compile")
+        print(f"[flux] vae load {time.perf_counter() - started:.1f} s "
+              f"{ {k: round(v, 2) for k, v in app.phase_seconds.items()} }", flush=True)
+        if args.stage_mode == "compile":
+            return
+        cfg = app.vae_config
+        scaling, shift = cfg.get("scaling_factor", 0.3611), cfg.get("shift_factor", 0.1159)
+        processor = VaeImageProcessor(vae_scale_factor=app.scale_factor * 2)
+        for req in stage_loop.claimed_requests(args):
+            with stage_loop.request_scope(args, req, final=True):
+                started = time.perf_counter()
+                packed = torch.load(stage_loop.work_file(args, req, "latents.pt"), weights_only=True)
+                latents = FluxPipeline._unpack_latents(packed, h, w, app.scale_factor)
+                latents = latents / scaling + shift
+                image = processor.postprocess(app.decode(latents).cpu(), output_type="pil")[0]
+                out = Path(req.output)
+                out.parent.mkdir(parents=True, exist_ok=True)
+                image.save(str(out))
+                print(f"[flux] decode {time.perf_counter() - started:.2f} s; [difflet] image saved "
+                      f"to {out}", flush=True)
 
     def _load_pipeline(self):
         from difflet.pipeline.compile_cache import CacheSpec, cache_path, has_valid_manifest

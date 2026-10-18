@@ -35,6 +35,9 @@ _KWARG_DEFAULTS: dict[str, Any] = {
     # bf16 passes the parity gate on the device (0.87x the bf16 control vs fp32) and halves T5's
     # memory per core; fp32 remains an option.
     "t5_dtype": torch.bfloat16,
+    # False: no VAE is loaded and every call returns packed latents (the CLI decodes them in a
+    # separate stage, as for Wan, so the decoder never shares a core with the DiT and T5 shards).
+    "decode_vae": True,
 }
 
 
@@ -86,6 +89,12 @@ class _Vae:
         self.dtype = app.dtype
 
     def decode(self, latents, return_dict=False):
+        # In-process decode (decode_vae=True): the denoising loop leaves the DiT's per-step
+        # activation blocks cached by the device allocator; return them first (at TP2 the
+        # 1024x1024 decode otherwise crawls through OOM recovery).
+        empty_cache = getattr(getattr(torch, "neuron", None), "empty_cache", None)
+        if callable(empty_cache) and str(self.app.device).startswith("neuron"):
+            empty_cache()
         return (self.app.decode(latents).to("cpu"),)
 
 
@@ -141,11 +150,18 @@ class TorchNeuronFluxApplication:
 
         # Every rank loads the VAE (the load phases run in step across the process group, as for
         # Wan's device VAE); it is not sharded, so each holds a full copy and only rank 0 decodes.
-        vae = NeuronFluxVaeDecoderApplication(model_path=self._path("vae"), height=self.height,
-                                              width=self.width, parallel=parallel,
-                                              device=opts["device"])
-        vae.load(skip_warmup=skip_warmup)
-        vae_scale = vae.scale_factor
+        vae = None
+        if opts["decode_vae"]:
+            vae = NeuronFluxVaeDecoderApplication(model_path=self._path("vae"), height=self.height,
+                                                  width=self.width, parallel=parallel,
+                                                  device=opts["device"])
+            vae.load(skip_warmup=skip_warmup)
+            vae_scale = vae.scale_factor
+        else:
+            import json
+
+            with open(self._path("vae/config.json"), encoding="utf-8") as f:
+                vae_scale = 2 ** (len(json.load(f)["block_out_channels"]) - 1)
         lap("vae")
         config = NeuronFluxConfig.from_pretrained(
             self._path("transformer"), height=self.height, width=self.width,
@@ -181,9 +197,10 @@ class TorchNeuronFluxApplication:
 
         self.dit, self.t5, self.vae = dit, t5, vae
         self.pipeline = NeuronFluxPipeline(
-            scheduler=scheduler, vae=_Vae(vae), text_encoder=clip, tokenizer=tokenizer,
-            text_encoder_2=_T5(t5, self.dtype) if t5 is not None else None,
+            scheduler=scheduler, vae=_Vae(vae) if vae is not None else None, text_encoder=clip,
+            tokenizer=tokenizer, text_encoder_2=_T5(t5, self.dtype) if t5 is not None else None,
             tokenizer_2=tokenizer_2, transformer=_Transformer(dit))
+        self.pipeline.vae_scale_factor = vae_scale  # diffusers' default without a VAE is 8
         lap("scheduler+pipeline")
 
     @torch.no_grad()
@@ -194,7 +211,7 @@ class TorchNeuronFluxApplication:
         kwargs.setdefault("height", self.height)
         kwargs.setdefault("width", self.width)
         kwargs.setdefault("max_sequence_length", int(self.options["text_seq_len"]))
-        if _rank() != 0:
+        if _rank() != 0 or self.vae is None:
             kwargs["output_type"] = "latent"
         return self.pipeline(**kwargs)
 
