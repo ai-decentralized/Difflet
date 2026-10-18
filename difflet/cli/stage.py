@@ -36,6 +36,7 @@ _ORCHESTRATOR_MAP: dict[str, str] = {
     ),
     "Qwen/Qwen-Image": "difflet.cli.orchestrators.qwen_image.QwenImageOrchestrator",
     "black-forest-labs/FLUX.1-dev": "difflet.cli.orchestrators.flux.FluxOrchestrator",
+    "Lightricks/LTX-2": "difflet.cli.orchestrators.ltx_2.LTX2Orchestrator",
     "MiniMaxAI/MiniMax-H3": "difflet.cli.orchestrators.minimax_h3.MiniMaxH3Orchestrator",
 }
 
