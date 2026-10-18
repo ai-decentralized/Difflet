@@ -249,16 +249,31 @@ class CudaOneProcessOrchestrator(ModelOrchestrator):
         if not stage_loop.batch_mode(self.args):
             self._generate_one(pipe, self.args.prompt, self.args.output, None)
             return
+        from difflet.cli.dp import claims
+
+        # One process: a failed request is marked and the loop continues. In a torchrun world
+        # a failure on one rank would leave the ranks' collectives out of step (one in a CFG
+        # gather, the other in the next broadcast: an NCCL hang), so the world fails fast and
+        # the router marks the claimed-but-unfinished requests failed.
+        multi_rank = int(os.environ.get("WORLD_SIZE", "1")) > 1
         for request in self._batch_requests():
             if self.is_rank_zero:
                 # Marks .done on success, .failed (and continues) on an exception.
                 with stage_loop.request_scope(self.args, request, final=True):
                     self._generate_one(pipe, request.prompt, request.output, request)
+                if multi_rank and claims.is_failed(self.args.requests_dir, request.index):
+                    print(
+                        f"[dp-worker] request {request.index} failed; stopping the "
+                        "torchrun world",
+                        flush=True,
+                    )
+                    raise SystemExit(1)
                 continue
             try:  # a follower rank: same work, no markers (rank 0 owns the queue)
                 self._generate_one(pipe, request.prompt, request.output, request)
             except Exception as exc:
-                print(f"[dp-worker] request {request.index} failed on this rank: {exc}")
+                print(f"[dp-worker] request {request.index} failed on this rank: {exc}", flush=True)
+                raise
 
     def _generate_one(self, pipe, prompt: str, output: str, request) -> None:
         t1 = time.perf_counter()

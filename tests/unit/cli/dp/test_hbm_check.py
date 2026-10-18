@@ -60,9 +60,7 @@ def _fake_cuda(monkeypatch, *, available, total_memory=0):
     import torch
 
     monkeypatch.setattr(torch.cuda, "is_available", lambda: available)
-    monkeypatch.setattr(
-        torch.cuda, "get_device_properties", lambda index: _Props(total_memory)
-    )
+    monkeypatch.setattr(torch.cuda, "get_device_properties", lambda index: _Props(total_memory))
 
 
 def test_default_limit_on_trainium_is_one_trn2_chip(tmp_path, monkeypatch):

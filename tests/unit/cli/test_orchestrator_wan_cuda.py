@@ -628,26 +628,57 @@ def test_inside_a_cfg_world_rank_one_follows_rank_zero_and_writes_nothing(
     assert s.done == [] and not s.failed and s.unfinished == [0, 1]
 
 
-def test_inside_a_cfg_world_a_failure_on_rank_one_marks_nothing(
-    recorder, saved, launches, broadcasts, monkeypatch, tmp_path
-):
-    from difflet.cli.dp.requests_io import read_manifest
-
+def _exploding_generate(message):
     def generate(self, prompt, **kw):
         self.calls.append((prompt, kw))
         if prompt == "boom":
-            raise RuntimeError("rank 1 exploded")
+            raise RuntimeError(message)
         return self.video
 
-    monkeypatch.setattr(_App, "generate", generate)
+    return generate
+
+
+def test_inside_a_cfg_world_a_failure_on_rank_one_re_raises_and_marks_nothing(
+    recorder, saved, launches, broadcasts, monkeypatch, tmp_path
+):
+    # A one-rank failure must not leave the ranks' collectives out of step (rank 0 in a CFG
+    # gather, this rank in the next broadcast): the follower re-raises, torchrun tears the
+    # world down, and the router marks the claimed request failed.
+    from difflet.cli.dp.requests_io import read_manifest
+
+    monkeypatch.setattr(_App, "generate", _exploding_generate("rank 1 exploded"))
     monkeypatch.setenv("WORLD_SIZE", "2")
     monkeypatch.setenv("RANK", "1")
     requests_dir = _manifest(tmp_path, [dict(prompt="boom"), dict(prompt="p1")])
     broadcasts["feed"] = [*read_manifest(requests_dir), None]
     orch = mod.WanCudaOrchestrator(_batch_args(requests_dir, cfg_parallel=True))
-    orch.generate(argv=[])
-    assert [p for p, _ in orch._last_pipe.app.calls] == ["boom", "p1"]
+    with pytest.raises(RuntimeError, match="rank 1 exploded"):
+        orch.generate(argv=[])
+    assert [p for p, _ in orch._last_pipe.app.calls] == ["boom"]  # no next request
     assert not list(requests_dir.glob("*.failed")) and not list(requests_dir.glob("*.done"))
+    assert saved == []
+
+
+def test_inside_a_cfg_world_a_failure_on_rank_zero_marks_failed_then_exits(
+    recorder, saved, launches, broadcasts, monkeypatch, tmp_path
+):
+    from difflet.cli.dp.claims import summarize
+
+    monkeypatch.setattr(_App, "generate", _exploding_generate("rank 0 exploded"))
+    monkeypatch.setenv("WORLD_SIZE", "2")
+    monkeypatch.setenv("RANK", "0")
+    requests_dir = _manifest(tmp_path, [dict(prompt="boom"), dict(prompt="p1")])
+    orch = mod.WanCudaOrchestrator(_batch_args(requests_dir, cfg_parallel=True))
+    with pytest.raises(SystemExit) as exc:
+        orch.generate(argv=[])
+    assert exc.value.code == 1
+    # .failed is written before the exit; the next request is never broadcast or claimed.
+    s = summarize(requests_dir)
+    assert list(s.failed) == [0] and "rank 0 exploded" in s.failed[0]
+    assert s.done == [] and s.unfinished == [1]
+    assert not (requests_dir / "req_0001.claim").exists()
+    assert [r.prompt for r in broadcasts["sent"]] == ["boom"]
+    assert [p for p, _ in orch._last_pipe.app.calls] == ["boom"] and saved == []
 
 
 _FORBIDDEN = (
