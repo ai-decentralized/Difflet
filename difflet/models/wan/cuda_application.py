@@ -57,6 +57,18 @@ def _refuse_unsupported_kwargs(kwargs: dict[str, Any]) -> None:
             )
 
 
+def _timestep_dtype(value: Any, model_dtype: torch.dtype) -> torch.dtype:
+    """``"float32"`` (the default: diffusers' exact timestep) or ``"model"`` (the bf16 cast
+    Release 1 shipped, kept for the A/B)."""
+    if value == "float32":
+        return torch.float32
+    if value == "model":
+        return model_dtype
+    raise ValueError(
+        f"Unsupported timestep_dtype for Wan on CUDA: {value!r}; expected 'float32' or 'model'"
+    )
+
+
 def _normalize_dtype(dtype: Any) -> torch.dtype:
     if isinstance(dtype, torch.dtype):
         return dtype
@@ -109,13 +121,16 @@ class _CudaDiT:
     """One expert behind the orchestrator's DiT callable.
 
     The orchestrator holds the loop latents on the host in fp32; each call moves
-    the three inputs to the device in the model dtype and the output back to the host.
-    ``dtype`` and ``config`` are what the orchestrator reads off a component.
+    the latents and text to the device in the model dtype, the timestep in ``timestep_dtype``
+    (fp32 by default: the exact integer diffusers passes; the sinusoidal projection computes
+    in fp32 anyway), and the output back to the host. ``dtype``, ``timestep_dtype`` and
+    ``config`` are what the orchestrator reads off a component.
     """
 
-    def __init__(self, app, dtype, device):
+    def __init__(self, app, dtype, device, timestep_dtype=torch.float32):
         self.app = app
         self.dtype = dtype
+        self.timestep_dtype = timestep_dtype
         self.device = torch.device(device)
         self.config = getattr(app, "dit_config", None)
 
@@ -123,7 +138,7 @@ class _CudaDiT:
         with torch.no_grad():
             out = self.app(
                 hidden_states.to(self.device, self.dtype),
-                timestep.to(self.device, self.dtype),
+                timestep.to(self.device, self.timestep_dtype),
                 encoder_hidden_states.to(self.device, self.dtype),
             )
         return out.cpu()
@@ -166,6 +181,7 @@ class CudaWanApplication(torch.nn.Module):
         self.model_path = model_path
         self.parallel = parallel
         self.dtype = _normalize_dtype(dtype)
+        self.timestep_dtype = _timestep_dtype(kwargs.get("timestep_dtype", "float32"), self.dtype)
         self.shape = {
             "height": int(shape.get("height") or 480),
             "width": int(shape.get("width") or 832),
@@ -308,11 +324,13 @@ class CudaWanApplication(torch.nn.Module):
 
         transformer_2 = None
         if self.transformer_2 is not None:
-            transformer_2 = _CudaDiT(self.transformer_2, self.dtype, self.device)
+            transformer_2 = _CudaDiT(
+                self.transformer_2, self.dtype, self.device, self.timestep_dtype
+            )
         self.pipeline = WanOrchestrator(
             model_path=self.model_path,
             text_encoder=self.text_encoder,
-            transformer=_CudaDiT(self.transformer, self.dtype, self.device),
+            transformer=_CudaDiT(self.transformer, self.dtype, self.device, self.timestep_dtype),
             transformer_2=transformer_2,
             vae_decoder=self.vae_decoder,
             dtype=self.dtype,

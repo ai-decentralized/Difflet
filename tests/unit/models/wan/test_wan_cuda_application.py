@@ -127,13 +127,13 @@ def _build(root, *, parallel=None, dtype="bf16", **kwargs):
     )
 
 
-def _loaded_app(tmp_path, *, vae=False, **kwargs):
+def _loaded_app(tmp_path, *, vae=False, dtype="fp32", **kwargs):
     root = tmp_path / "wan"
     reference_vae = _write_model(root, vae=vae)
     text_encoder = FakeTextEncoder()
     app = _build(
         root,
-        dtype="fp32",
+        dtype=dtype,
         device="cpu",
         load_text_encoder=False,
         text_encoder=text_encoder,
@@ -161,6 +161,7 @@ def _spy_experts(monkeypatch, app):
                 SimpleNamespace(
                     expert=_name,
                     timestep=float(timestep[0]),
+                    timestep_dtype=timestep.dtype,
                     text=encoder_hidden_states.detach().clone(),
                     out=out.detach().clone(),
                 )
@@ -341,6 +342,54 @@ def test_generate_routes_steps_to_the_boundary_expert(tmp_path, monkeypatch, ena
     assert [c.expert for c in calls] == expected
 
 
+# bf16 rounds integers in [512, 1024) to multiples of 4: 999 -> 1000, 750 -> 752 (ties to even).
+EXACT_TIMESTEPS = [999.0, 900.0, 750.0, 500.0]
+BF16_TIMESTEPS = [1000.0, 900.0, 752.0, 500.0]
+
+
+def _bf16_timestep_calls(tmp_path, monkeypatch, **kwargs):
+    app, _, _ = _loaded_app(tmp_path, dtype="bf16", **kwargs)
+    calls = _spy_experts(monkeypatch, app)
+    app.generate(
+        "a cat",
+        num_inference_steps=4,
+        guidance_scale=1.0,
+        guidance_scale_2=1.0,
+        seed=0,
+        output_type="latent",
+    )
+    assert _expected_timesteps(tmp_path / "wan") == EXACT_TIMESTEPS
+    assert [c.expert for c in calls] == ["transformer"] * 2 + ["transformer_2"] * 2
+    return app, calls
+
+
+def test_cuda_dit_passes_fp32_timestep_by_default(tmp_path, monkeypatch):
+    # diffusers' WanPipeline hands the DiT UniPC's exact integer; so does the CUDA DiT, in a
+    # bf16 model, through both experts.
+    from difflet.models.wan.cuda_application import _CudaDiT
+
+    assert _CudaDiT(lambda *a: a[0], torch.bfloat16, "cpu").timestep_dtype is torch.float32
+    app, calls = _bf16_timestep_calls(tmp_path, monkeypatch)
+    assert app.pipeline.transformer.timestep_dtype is torch.float32
+    assert app.pipeline.transformer_2.timestep_dtype is torch.float32
+    assert [c.timestep_dtype for c in calls] == [torch.float32] * 4
+    assert [c.timestep for c in calls] == EXACT_TIMESTEPS  # 999 stays 999.0
+
+
+def test_timestep_dtype_model_restores_the_bf16_cast(tmp_path, monkeypatch):
+    app, calls = _bf16_timestep_calls(tmp_path, monkeypatch, timestep_dtype="model")
+    assert app.pipeline.transformer.timestep_dtype is torch.bfloat16
+    assert app.pipeline.transformer_2.timestep_dtype is torch.bfloat16
+    assert [c.timestep_dtype for c in calls] == [torch.bfloat16] * 4
+    assert [c.timestep for c in calls] == BF16_TIMESTEPS  # 999 becomes 1000.0
+
+
+@pytest.mark.parametrize("value", ["bfloat16", "fp32", None])
+def test_timestep_dtype_rejects_anything_but_float32_or_model(tmp_path, value):
+    with pytest.raises(ValueError, match="timestep_dtype"):
+        _build(tmp_path, timestep_dtype=value)
+
+
 def test_generate_runs_cond_and_uncond_passes(tmp_path, monkeypatch):
     app, text_encoder, _ = _loaded_app(tmp_path)
     calls = _spy_experts(monkeypatch, app)
@@ -435,7 +484,8 @@ def test_dit_callable_moves_to_the_model_dtype_and_returns_host_tensors():
         return hidden_states * 2
 
     expert.dit_config = SimpleNamespace(cfg_parallel_enabled=False)
-    dit = _CudaDiT(expert, torch.bfloat16, torch.device("cpu"))
+    # The model-dtype timestep (``timestep_dtype="model"``); the fp32 default has its own test.
+    dit = _CudaDiT(expert, torch.bfloat16, torch.device("cpu"), timestep_dtype=torch.bfloat16)
     assert dit.dtype is torch.bfloat16  # the orchestrator casts per step from this
     assert dit.config.cfg_parallel_enabled is False
     out = dit(torch.ones(LATENT_SHAPE), torch.tensor([999.0]), torch.ones(1, 6, 16))
