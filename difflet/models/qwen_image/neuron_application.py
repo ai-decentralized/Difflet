@@ -123,6 +123,8 @@ _TEACACHE_KWARGS = (
 #: The dtype the text embeddings are zero-padded in: the Trainium text stage's (CLI and
 #: serving) and the TPU encode's, whatever the encoder computed in.
 _EMBED_DTYPE = torch.bfloat16
+#: The host encoder's discarded warm-up encode at load (``_HostQwenTextEncoder._load``).
+_WARMUP_PROMPT = "a photo"
 #: The orchestrator's and the CLI's default step count, used to set the shifted schedule when
 #: the caller passes neither ``timesteps`` nor ``num_inference_steps``.
 _DEFAULT_STEPS = 4
@@ -229,7 +231,8 @@ class _HostQwenTextEncoder:
     a host without AVX512-BF16, where fp32 can be the faster of the two).
 
     ``load()`` reads the tokenizer and the encoder on rank 0 inside their own status-synced
-    phase, ``"text encoder load"``, so a rank 0 that cannot read them fails every rank there.
+    phase, ``"text encoder load"``, so a rank 0 that cannot read them fails every rank there,
+    and runs one discarded encode (see ``_load``), so a request is never a process's first.
     """
 
     def __init__(
@@ -264,8 +267,15 @@ class _HostQwenTextEncoder:
         tokenizer = AutoTokenizer.from_pretrained(os.path.join(self.model_path, "tokenizer"))
         model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
             os.path.join(self.model_path, "text_encoder"), dtype=self.dtype
-        )
-        return tokenizer, model.eval().requires_grad_(False)
+        ).eval().requires_grad_(False)
+        # The first encode of a fresh process is not reproducible when the host CPUs are busy
+        # (another DP replica, compiles, decodes): its bf16 result differed in 4 of 51 fresh
+        # processes on a trn2.3xlarge, while none of the later encodes in those processes did,
+        # whatever the prompt of the first one. So one encode is spent here and discarded, and
+        # every request is encoded by a warmed-up process.
+        self.tokenizer, self.model = tokenizer, model
+        self._encode(_WARMUP_PROMPT)
+        return tokenizer, model
 
     def __call__(self, prompt: str) -> tuple[torch.Tensor, torch.Tensor]:
         """``(encoder_hidden_states [1, seq_len, D] bf16, mask [1, seq_len] bool)`` on the host,
