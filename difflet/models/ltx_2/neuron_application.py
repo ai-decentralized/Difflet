@@ -498,6 +498,8 @@ class TorchNeuronLtx2Application(torch.nn.Module):
             text_seq_len=self.text_seq_len, batch_size=1,
             tp_degree=int(parallel.tp_degree),
             cfg_parallel_enabled=bool(getattr(parallel, "cfg_parallel_enabled", False)),
+            context_parallel_enabled=int(getattr(parallel, "cp_degree", 1) or 1) > 1,
+            cp_mode=str(getattr(parallel, "cp_mode", "gather_kv") or "gather_kv"),
             torch_dtype=self.dtype,
         )
         if options["num_layers"] is not None:
@@ -510,6 +512,7 @@ class TorchNeuronLtx2Application(torch.nn.Module):
                 model_path=transformer_path, config=self.config, parallel=parallel,
                 dtype=self.dtype, exec_mode=options["exec_mode"], device=self.device,
             )
+            self.config = self.transformer.config  # cp_degree filled from the parallel config
         enable_text = options["enable_text_encoder"]
         if options["enable_host_pipeline"] is not None:
             enable_text = bool(options["enable_host_pipeline"])
