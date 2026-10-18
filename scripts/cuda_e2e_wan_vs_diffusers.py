@@ -29,7 +29,10 @@ generates every seed, and diffusers is loaded once. The first variant draws each
 the ``timestep`` (UniPC's int64 ``t.expand(B)``) is rounded through bf16 — Release 1's cast,
 999 → 1000, 750 → 752 — and every other argument passes untouched; the wrapper is removed before
 the next seed's exact run. Exact vs perturbed is diffusers' distance from itself under that cast:
-a scale for the Difflet-vs-diffusers numbers, recorded, never gated. The JSON adds ``seeds``,
+the scale the gate states the Difflet-vs-diffusers numbers against when it is recorded (the
+mean over seeds within 1.15x, 1.21 dB, of the floor's mean; every seed within 1.21 dB of the
+floor's worst seed; a loose 20 dB / 0.98 absolute floor), the 25 dB / 0.99 floors judging
+otherwise. The JSON adds ``seeds``,
 ``per_seed.<seed>.{variants.<name>.{metrics, timings}, noise_floor: {metrics, timings} | null,
 diffusers.timings, images}`` and ``aggregate.{variants.<name>, noise_floor}.{psnr_db, cosine}.
 {min, mean, max}``; ``seed``, ``metrics``, ``variants``, ``timings``, ``images`` and
