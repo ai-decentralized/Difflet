@@ -80,3 +80,33 @@ def t5_reference(path) -> torch.Tensor:
     (ids,) = t5_inputs()
     with torch.no_grad():
         return model(input_ids=ids).last_hidden_state
+
+
+# ---- VAE (2D AutoencoderKL; Flux's has no quant convs) ----
+TINY_VAE = dict(in_channels=3, out_channels=3, latent_channels=4, block_out_channels=(8, 16),
+                down_block_types=("DownEncoderBlock2D", "DownEncoderBlock2D"),
+                up_block_types=("UpDecoderBlock2D", "UpDecoderBlock2D"), layers_per_block=1,
+                norm_num_groups=4, use_quant_conv=False, use_post_quant_conv=False)
+VAE_HW = 16  # image side; latent side = 16 / 2 (two blocks: scale factor 2)
+
+
+def write_tiny_vae(root) -> str:
+    from diffusers import AutoencoderKL
+
+    torch.manual_seed(0)
+    path = f"{root}/vae"
+    AutoencoderKL(**TINY_VAE).save_pretrained(path, safe_serialization=True)
+    return path
+
+
+def vae_latents():
+    g = torch.Generator().manual_seed(3)
+    return torch.randn(1, TINY_VAE["latent_channels"], VAE_HW // 2, VAE_HW // 2, generator=g)
+
+
+def vae_reference(path) -> torch.Tensor:
+    from diffusers import AutoencoderKL
+
+    vae = AutoencoderKL.from_pretrained(path).eval()
+    with torch.no_grad():
+        return vae.decode(vae_latents(), return_dict=False)[0]
