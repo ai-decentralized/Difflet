@@ -178,6 +178,20 @@ def test_device_text_encoder_placement(monkeypatch, tmp_path, capsys):
     assert "--device-text-encoder" not in orch._shared_cli_args("generate")
 
 
+def test_device_text_encoder_is_the_default_and_host_opts_out(monkeypatch, tmp_path):
+    _header_only_checkpoint(tmp_path / "transformer", "w", 18_876_000_000)
+    _header_only_checkpoint(tmp_path / "text_encoder", "language_model.model.w", 11_770_000_000)
+    monkeypatch.setenv("DIFFLET_NEURON_HBM_GIB", "24")
+    monkeypatch.setattr(cli.LTX2Orchestrator, "_model_dir", lambda self: str(tmp_path))
+    orch = cli.LTX2Orchestrator(_args())
+    orch._place_text_encoder()
+    assert orch.args.device_text_encoder is True
+    orch = cli.LTX2Orchestrator(_args(host_text_encoder=True))
+    orch._place_text_encoder()
+    assert orch.args.device_text_encoder is False
+    assert "--device-text-encoder" not in orch._shared_cli_args("generate")
+
+
 def test_stage_dispatch_knows_ltx_2():
     from difflet.cli import stage
 
