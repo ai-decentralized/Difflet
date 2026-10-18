@@ -264,6 +264,27 @@ partial download), not run on one expert.
 `Wan-AI/Wan2.1-T2V-14B-Diffusers` is routed to the same path but unverified on a GPU; diffusers'
 Wan 2.1 defaults (50 steps, guidance 5.0) differ from the 40 / 4.0 used here.
 
+**Two GPUs on CUDA (verified on 2× RTX PRO 6000 over PCIe).** Decision D6's order: data
+parallel and CFG-parallel first. `difflet run --dp 2 --requests requests.jsonl` runs one
+single-GPU replica per card through the existing request router (`difflet/cli/dp/`): each worker
+gets `CUDA_VISIBLE_DEVICES` for its card, loads once, claims requests from the shared manifest and
+writes each output; the one-process orchestrator's batch mode does the loop. Measured: four
+50-step Qwen-Image requests in 58 s wall on two cards against 190 s as four serial `difflet run`
+calls and 79 s as a `--dp 1 --requests` batch on one card (one load, four generates); every
+compared image (all four from `--dp 2`, two from `--dp 1`) is byte-identical to its reference.
+`difflet run --model-id Wan-AI/... --cfg-parallel` re-execs itself under `torchrun --standalone
+--nproc_per_node=2` (`difflet/cli/runner.py`): `CudaBackend.prepare_runtime` joins NCCL at
+`WORLD_SIZE > 1`, the CUDA mesh builds one `torch.distributed` group per non-trivial axis from
+`MeshSpec.axis_groups`, and the unchanged Wan modeling scatters the batch of two to one branch per
+rank and all-gathers the result each step; both ranks run the whole orchestrator loop (SPMD) and
+rank 0 writes. Measured: the 40-step, 9-frame clip in 26.1 s on two cards against 50.9 s serially
+on one (1.95×, one all-gather per step over PCIe), bit-identical to the serial video (max_abs 0);
+68,074 / 67,519 MiB resident on the two cards. The torchrun child dies with its parent
+(`PR_SET_PDEATHSIG`); a batch request that fails inside a two-rank world fails that worker fast so
+the router records it. Still refused: context parallel, tensor parallel across PCIe and
+`--sp`, `--cfg-parallel` for Qwen-Image and Flux (single-pass / distilled); `--dp` with
+`--cfg-parallel` needs four cards and is unverified.
+
 **Serving on CUDA.** `difflet serve` keeps the serving engine's one resident worker
 process; on CUDA that worker holds a single opaque `pipeline` stage —
 `DiffletPipeline.from_pretrained(backend="cuda")` kept loaded, `app.generate()` per request —
@@ -279,7 +300,7 @@ outright); prompts beyond 1024 tokens past the chat template are refused (`promp
 where the CLI truncates silently. Other shapes are refused with `profile_mismatch`. At startup,
 `--tp-degree > 1` / `--sp` are refused naming F6 and `--shapes` naming F3, before the snapshot is
 resolved; `--cp-degree > 1`, `--cfg-parallel` and a TeaCache flag are refused earlier still by
-the shared profile builder with its own wording (they are F2 / F4 work). `--tp-degree` defaults
+the shared profile builder with its own wording (they are F2b / F4 work). `--tp-degree` defaults
 to 1 on CUDA. One request runs at a time; a 50-step request takes what `difflet run` takes on
 the same card (measured 38.6 s served vs 38.5 s CLI on an RTX PRO 6000 Workstation Edition,
 ~17 s on the Server Edition; ready in 56 s including load and the startup smoke). A request
@@ -289,13 +310,12 @@ past `--request-timeout` restarts the worker (full reload plus the 4-step smoke)
 `generate()` is not interruptible mid-denoise. Trainium and TPU serving are
 untouched.
 
-Not in Release 1 (follow-ups F1–F8 in the plan; Wan, Flux and serving on CUDA have landed as
-F1, F5 and F3b for the shapes and models above, with their own follow-ups): a second GPU
-(data-parallel / CFG-parallel first; tensor-parallel across PCIe only when a workload needs
-it), context parallel, `--requests` / `--dp` batches on CUDA, multi-shape serving on CUDA,
-Wan and Flux serving on CUDA, Wan follow-ups (TeaCache, `--shapes`, 81-frame
-clips, I2V, `--negative-prompt`, batch > 1), Flux follow-ups, `torch.compile`, CUDA
-graphs, calibrated/online-delta TeaCache, FP8, `flash-attn`, custom kernels.
+Not in Release 1 (follow-ups F1–F8 in the plan; Wan, Flux, serving and the second card have
+landed as F1, F5, F3b and F2 for the shapes and models above, with their own follow-ups):
+context parallel, tensor parallel across PCIe (need-triggered), multi-shape serving on
+CUDA, Wan and Flux serving on CUDA, serving on two GPUs, Wan follow-ups (F1b:
+TeaCache, `--shapes`, 81-frame clips, I2V, `--negative-prompt`, batch > 1), Flux follow-ups,
+CUDA graphs, calibrated/online-delta TeaCache, FP8, `flash-attn`, custom kernels.
 
 ## Compile cache
 
