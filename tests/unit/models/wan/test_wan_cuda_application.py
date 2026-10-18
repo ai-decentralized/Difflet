@@ -288,6 +288,35 @@ def test_dit_input_contract_matches_the_expert(tmp_path):
     }
 
 
+def test_cfg_parallel_experts_take_the_batch_of_two(tmp_path, monkeypatch):
+    """Under CFG-parallel each expert is compiled and warmed up at batch 2 — the
+    [uncond, cond] stack the orchestrator's cfg branch hands it — on a cfg=2 mesh."""
+    from difflet.pipeline.parallel_mesh import MeshSpec
+
+    monkeypatch.delenv("WORLD_SIZE", raising=False)
+    root = tmp_path / "wan"
+    _write_model(root)
+    app = _build(
+        root, parallel=DiffletParallelConfig(tp_degree=1, cfg_parallel_enabled=True), device="cpu"
+    )
+    for expert in (app.transformer, app.transformer_2):
+        assert expert.dit_config.cfg_parallel_enabled is True
+        assert expert.dit_config.batch_size == 2
+        assert expert.config == MeshSpec(cfg=2, tp=1)
+    contract = app.dit_input_contract()
+    assert contract["hidden_states"]["shape"] == (2,) + LATENT_SHAPE[1:]
+    assert contract["timestep"]["shape"] == (2,)
+    assert contract["encoder_hidden_states"]["shape"] == (2, TEXT_SEQ_LEN, TINY["text_dim"])
+
+
+def test_cfg_parallel_off_keeps_the_requested_batch(tmp_path):
+    root = tmp_path / "wan"
+    _write_model(root)
+    app = _build(root, device="cpu")
+    assert app.transformer.dit_config.cfg_parallel_enabled is False
+    assert app.transformer.dit_config.batch_size == 1
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [

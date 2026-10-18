@@ -58,6 +58,31 @@ def test_mesh_from_config_reads_world_size_from_env(monkeypatch):
     assert pm.mesh_spec_from_config(type("Cfg", (), {"tp_degree": 2})()) == MeshSpec(tp=2)
 
 
+def test_mesh_from_config_without_a_launcher_is_the_product_of_the_factors(monkeypatch):
+    # The CLI parent compiles (writes the manifest) before torchrun starts the
+    # ranks, with WORLD_SIZE unset and no process group: the mesh is what the config
+    # asks for (tp x cfg x dp, cp=1), not a world of one that cfg=2 cannot divide.
+    monkeypatch.delenv("WORLD_SIZE", raising=False)
+    assert not torch.distributed.is_initialized()
+
+    def cfg(**flags):
+        return type("Cfg", (), {"tp_degree": 1, **flags})()
+
+    assert pm.mesh_spec_from_config(cfg(cfg_parallel_enabled=True)) == MeshSpec(cfg=2)
+    assert pm.mesh_spec_from_config(cfg(dp_degree=2)) == MeshSpec(dp=2)
+    assert pm.mesh_spec_from_config(cfg(dp_degree=2, cfg_parallel_enabled=True)) == MeshSpec(
+        dp=2, cfg=2
+    )
+    assert pm.mesh_spec_from_config(cfg(context_parallel_enabled=True)) == MeshSpec()
+    # A launcher that *set* a world size the config cannot fill is still refused.
+    monkeypatch.setenv("WORLD_SIZE", "1")
+    with pytest.raises(ValueError, match="not divisible"):
+        pm.mesh_spec_from_config(cfg(cfg_parallel_enabled=True))
+    monkeypatch.setenv("WORLD_SIZE", "4")
+    with pytest.raises(ValueError, match="world_size 4"):
+        pm.mesh_spec_from_config(cfg(cfg_parallel_enabled=True))
+
+
 def test_axis_rank_reads_rank_from_env(monkeypatch):
     pm.init_parallel_mesh(MeshSpec(tp=2))
     monkeypatch.setenv("RANK", "1")

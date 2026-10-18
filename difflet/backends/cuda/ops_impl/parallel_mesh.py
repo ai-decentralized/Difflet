@@ -2,8 +2,9 @@
 
 Same mesh math as TPU and Trainium (``difflet.pipeline.parallel_mesh``); the only
 backend-specific facts are the world size and this process's rank, which come
-from the ``torchrun`` environment (``WORLD_SIZE`` / ``RANK``, defaulting to a
-single process) instead of an XLA or NxD runtime.
+from the ``torchrun`` environment (``WORLD_SIZE`` / ``RANK``) instead of an XLA
+or NxD runtime. Without a launcher the world is what the config's factors ask for
+(``mesh_spec_from_config``) and this process is rank 0.
 
 At world size 1 no ``torch.distributed`` process group exists and the
 group accessors return replica lists. At world size > 1 (one
@@ -31,8 +32,12 @@ _GROUP_AXES = ("cfg", "cp", "dp")
 _TP_UNSUPPORTED = "tensor parallelism (tp > 1) is not supported on the CUDA backend yet"
 
 
-def _runtime_world_size() -> int:
-    return int(os.environ.get("WORLD_SIZE", "1"))
+def _launched_world_size() -> int | None:
+    """The world size a launcher fixed — ``WORLD_SIZE`` when set, else an initialised
+    process group's — or None in a plain single process."""
+    if "WORLD_SIZE" in os.environ:
+        return int(os.environ["WORLD_SIZE"])
+    return _distributed_world_size()
 
 
 def _runtime_ordinal() -> int:
@@ -40,12 +45,19 @@ def _runtime_ordinal() -> int:
 
 
 def mesh_spec_from_config(config) -> MeshSpec:
-    """Derive the mesh from model-config flags plus the launcher's world size."""
-    world = _runtime_world_size()
+    """Derive the mesh from model-config flags plus the launcher's world size.
+
+    Without a launcher (``WORLD_SIZE`` unset, no process group) the world is the
+    product of the config's factors, ``tp × cfg × dp`` with cp=1: the CLI parent
+    compiles — writes the manifest the ranks will load — before ``torchrun`` starts
+    them. A world size a launcher *did* set must match the config.
+    """
     tp = int(getattr(config, "tp_degree", 1) or 1)
     cfg = 2 if bool(getattr(config, "cfg_parallel_enabled", False)) else 1
     dp = int(getattr(config, "dp_degree", 1) or 1)
     denom = tp * cfg * dp
+    launched = _launched_world_size()
+    world = denom if launched is None else launched
     if world % denom != 0:
         raise ValueError(
             f"world_size {world} is not divisible by tp*cfg*dp = {denom} "

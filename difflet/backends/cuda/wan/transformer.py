@@ -25,16 +25,16 @@ from difflet.pipeline.parallel_mesh import MeshSpec
 
 
 def _refuse_parallel_modes(config: WanDiTConfig) -> None:
-    """One expert on one device; anything else is refused."""
+    """One expert per process at tp=1, optionally one CFG branch per process;
+    anything else is refused."""
     if int(config.tp_degree) != 1:
         raise NotImplementedError(
             f"Wan on CUDA runs tp=1 (got tp_degree={config.tp_degree}); "
             "tensor parallelism (tp > 1) is not supported on the CUDA backend yet"
         )
-    if config.context_parallel_enabled or config.cfg_parallel_enabled:
+    if config.context_parallel_enabled:
         raise NotImplementedError(
-            "Wan on CUDA runs one process: context and CFG parallel are "
-            "not supported on the CUDA backend yet"
+            "context parallelism (cp > 1) is not supported on the CUDA backend yet"
         )
     if config.sp_enabled:
         raise NotImplementedError(
@@ -43,11 +43,18 @@ def _refuse_parallel_modes(config: WanDiTConfig) -> None:
 
 
 class CudaWanTransformerApplication(CudaApplicationBase):
-    """One Wan DiT expert on one device."""
+    """One Wan DiT expert on one device.
+
+    Under CFG-parallel two processes each hold the whole expert on a cfg=2 mesh:
+    the modeling scatters the [uncond, cond] batch of 2 by cfg rank and all-gathers
+    the outputs, so every rank returns the full batch. ``config.batch_size`` is then 2,
+    which the warm-up's example inputs follow.
+    """
 
     def __init__(self, *, model_path: str, config: WanDiTConfig, device=None):
         _refuse_parallel_modes(config)
-        super().__init__(config=MeshSpec(tp=1), device=device, dtype=config.torch_dtype)
+        mesh = MeshSpec(cfg=2 if config.cfg_parallel_enabled else 1, tp=1)
+        super().__init__(config=mesh, device=device, dtype=config.torch_dtype)
         # This expert's diffusers directory (``transformer/`` or ``transformer_2/``).
         self.model_path = model_path
         self.dit_config = config
