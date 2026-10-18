@@ -1,8 +1,9 @@
 """Tensor-parallel linear/embedding layers for the CUDA backend.
 
 The bodies live in ``difflet.backends._torch_megatron.linear`` and are
-built here against the CUDA collectives — identity at world size 1, NCCL later — so the same
-sharding code serves TPU and CUDA.
+built here against the CUDA collectives, so the same sharding code serves TPU and
+CUDA. At world size 1 those collectives are the identity; the tensor-parallel
+collectives across processes are not supported yet.
 """
 
 from difflet.backends._torch_megatron.linear import build_parallel_layers

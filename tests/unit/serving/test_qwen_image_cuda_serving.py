@@ -72,7 +72,8 @@ def test_prepare_runtime_resolves_the_snapshot_and_builds_an_eager_bundle(source
         ({"parallel": DiffletParallelConfig(tp_degree=2)}, "not supported"),
         ({"parallel": DiffletParallelConfig(tp_degree=1, sp_enabled=True)}, "not supported"),
         ({"parallel": DiffletParallelConfig(tp_degree=1, cp_degree=2)}, "not supported"),
-        ({"parallel": DiffletParallelConfig(tp_degree=1, cfg_parallel_enabled=True)}, "not supported"),
+        # Qwen-Image runs single-pass (no CFG): there is no second branch to place.
+        ({"parallel": DiffletParallelConfig(tp_degree=1, cfg_parallel_enabled=True)}, "no CFG"),
         ({"teacache_speedup": 1.5}, "not supported"),
     ],
 )

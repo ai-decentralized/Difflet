@@ -9,6 +9,7 @@ its axis groups from it.
 
 from __future__ import annotations
 
+import atexit
 import os
 
 import torch
@@ -42,6 +43,15 @@ class CudaBackend(BackendRuntime):
             if not torch.distributed.is_initialized():
                 # Env rendezvous: torchrun sets MASTER_ADDR/PORT, RANK and WORLD_SIZE.
                 torch.distributed.init_process_group(distributed_backend_name())
+                # The group this call created is torn down at exit, so a rank does not
+                # leave NCCL to the interpreter's finalisers (warnings, a hung exit).
+                atexit.register(_destroy_process_group_at_exit)
+
+
+def _destroy_process_group_at_exit() -> None:
+    """Destroy the default process group if it is still initialised (no-op otherwise)."""
+    if torch.distributed.is_initialized():
+        torch.distributed.destroy_process_group()
 
 
 def create_backend() -> CudaBackend:

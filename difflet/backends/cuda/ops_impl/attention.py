@@ -15,7 +15,7 @@ Contract (shared with the CPU oracle and the TPU backend, ``difflet/ops/attentio
 
 Kernel selection (flash / cuDNN / efficient / math) is torch's; ``platform.
 sdpa_kernel_report`` says which one a shape gets, recorded in Phase 0. No
-``flash-attn`` dependency. The context-parallel modes raise.
+``flash-attn`` dependency. The context-parallel modes raise (not supported yet).
 """
 
 from __future__ import annotations

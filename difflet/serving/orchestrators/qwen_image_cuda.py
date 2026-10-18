@@ -93,9 +93,14 @@ def refuse_unsupported_profile(profile: ServingProfile) -> None:
     if parallel.sp_enabled:
         _refuse("--sp (sequence parallel needs tp > 1)")
     if int(parallel.cp_degree) > 1:
-        _refuse("--cp-degree > 1 (context parallel, second card)")
+        _refuse("--cp-degree > 1 (context parallel across cards)")
     if parallel.cfg_parallel_enabled:
-        _refuse("--cfg-parallel (second card)")
+        # There is no second branch to place on another GPU.
+        raise feature_not_supported(
+            f"{_TAG} --cfg-parallel does not apply to Qwen-Image on the CUDA backend: "
+            "it is a guidance-distilled/single-pass model here, no CFG "
+            "(guidance_embeds=False, one transformer pass per step)"
+        )
     if profile.teacache_speedup is not None:
         _refuse("--teacache-speedup (TeaCache port)")
 

@@ -55,8 +55,8 @@ def create_wan_application(
             # Data-parallel replicas are separate single-GPU processes; the router
             # never hands one application a dp > 1 config.
             raise NotImplementedError(
-                f"Wan on CUDA is one GPU per application (got dp={dp}); "
-                "the second card is not supported on the CUDA backend yet"
+                f"Wan on CUDA is one GPU per application (got dp={dp}): dp>1 runs as "
+                "single-GPU replicas through the CLI router, not inside the application"
             )
         from difflet.models.wan.cuda_application import CudaWanApplication
 

@@ -596,7 +596,7 @@ class _QwenImageTransformerTraceModule(nn.Module):
         if self.apply_text_mask:
             if self.context_parallel_enabled:
                 raise NotImplementedError(
-                    "text mask with context parallel is not supported on the CUDA backend yet"
+                    "the text mask with context parallelism is not supported on CUDA yet"
                 )
             mask_arg = encoder_hidden_states_mask
             if self.trim_text_padding and mask_arg is not None:

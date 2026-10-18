@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import os
 import re
+import signal
 import subprocess
 import sys
 import uuid
 from collections.abc import Mapping
 
+from difflet.cli.parent_death import die_with_parent
 from difflet.common.neuron_cores import (
     resolve_available_neuron_core_ids,
     select_neuron_core_ids,
@@ -106,6 +108,13 @@ def run_torchrun(world_size: int, argv: list[str], env: Mapping[str, str] | None
     ``MASTER_ADDR/PORT``) that ``CudaBackend.prepare_runtime`` joins. ``argv`` is the module
     invocation, ``["-m", "difflet.cli.main", command, *args]``: torchrun's own ``-m`` makes
     each rank run it as ``python -m``. The return code is the caller's to judge.
+
+    On Linux torchrun gets SIGTERM when this process dies (``timeout``, a SIGTERM, the DP
+    router's own death signal to a cfg worker): its elastic agent then terminates the
+    ranks, which would otherwise be orphaned holding their GPUs. SIGTERM, not SIGKILL —
+    a SIGKILLed agent cannot pass the signal on. An unset ``OMP_NUM_THREADS`` becomes the
+    rank's share of the host cores: torchrun would pin each rank to one thread, and the
+    Wan loop keeps the scheduler and the fp32 latents on the host.
     """
     cmd = [
         sys.executable,
@@ -117,4 +126,7 @@ def run_torchrun(world_size: int, argv: list[str], env: Mapping[str, str] | None
         *argv,
     ]
     child_env = dict(os.environ) if env is None else dict(env)
-    return subprocess.run(cmd, env=child_env, check=False).returncode
+    if "OMP_NUM_THREADS" not in child_env:
+        child_env["OMP_NUM_THREADS"] = str(max(1, (os.cpu_count() or 1) // world_size))
+    preexec = die_with_parent(signal.SIGTERM) if sys.platform.startswith("linux") else None
+    return subprocess.run(cmd, env=child_env, check=False, preexec_fn=preexec).returncode

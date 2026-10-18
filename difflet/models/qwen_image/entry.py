@@ -36,10 +36,15 @@ def create_qwen_image_application(
         tp = int(getattr(parallel, "tp_degree", 1) or 1)
         cp = int(getattr(parallel, "cp_degree", 1) or 1)
         dp = int(getattr(parallel, "dp_degree", 1) or 1)
-        if tp > 1 or dp > 1:
+        if tp > 1:
             raise NotImplementedError(
-                f"Qwen-Image on CUDA runs tp=1 on one GPU in Release 1 (got tp={tp}, dp={dp}); "
-                "multi-GPU is not supported on the CUDA backend yet"
+                f"Qwen-Image on CUDA runs tp=1 on one GPU (got tp={tp}); "
+                "tensor parallelism (tp > 1) is not supported on the CUDA backend yet"
+            )
+        if dp > 1:
+            raise NotImplementedError(
+                f"Qwen-Image on CUDA is one GPU per application (got dp={dp}): dp>1 runs as "
+                "single-GPU replicas through the CLI router, not inside the application"
             )
         if cp > 1:
             raise NotImplementedError(
