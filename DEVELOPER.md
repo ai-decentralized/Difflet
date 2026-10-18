@@ -255,12 +255,16 @@ where bf16 rounds to 1000) but leaves the 40-step trajectory 1.2 dB further away
 dB with the old cast; the old-cast `model` variant ran on both the Workstation and the Server
 Edition cards and matched to the digit, the fp32 variant on the Server Edition only), so a
 single-seed A/B does not support the timestep as the gap. Both sides combine CFG in bf16 (Difflet
-on host tensors the DiT returned in bf16, diffusers on the device), so the remaining suspects are
-the scheduler step on the host CPU vs the device, the bf16 latents/text casts, and the
-empty-prompt negative embeds; measure the e2e metric's own noise floor (diffusers vs diffusers
-with a perturbed timestep, several seeds) before chasing any of them. Both sides decode the VAE in
-bf16, so it is not a parity suspect. A Wan 2.2 snapshot without `transformer_2/` is refused (a
-partial download), not run on one expert.
+on host tensors the DiT returned in bf16, diffusers on the device). F9 measured the e2e metric's
+own noise floor: diffusers against itself with its timestep rounded through bf16 lands at
+23.8–28.6 dB over seeds 0–2, Difflet against diffusers at 26.3–28.9 dB on the same seeds. Difflet is as close to diffusers as
+diffusers is to itself, so the gap to Qwen and Flux is a property of the 40-step true-CFG Wan
+trajectory, not a Difflet defect; the former suspects (the host scheduler step, the bf16
+latents/text casts, the empty-prompt negative embeds) are not needed to explain it. The floors
+stay 25 dB / 0.99; the noise floor's worst seed is below 25 dB, so a gate stated relative to it
+is the recommended follow-up. Both sides decode the VAE in bf16, so it is not a parity suspect.
+A Wan 2.2 snapshot without `transformer_2/` is refused (a partial download), not run on one
+expert.
 `Wan-AI/Wan2.1-T2V-14B-Diffusers` is routed to the same path but unverified on a GPU; diffusers'
 Wan 2.1 defaults (50 steps, guidance 5.0) differ from the 40 / 4.0 used here.
 
