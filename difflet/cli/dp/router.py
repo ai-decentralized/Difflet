@@ -134,7 +134,11 @@ def _check_hbm(args) -> None:
     from difflet.pipeline.path_resolver import resolve_model_path
 
     try:
-        model_path = resolve_model_path(args.model_id, local_files_only=True)
+        # The pinned --revision, as the workers resolve it: without it the check would read
+        # refs/main (another snapshot, or none at all in a cache that holds only the pin).
+        model_path = resolve_model_path(
+            args.model_id, revision=getattr(args, "revision", None), local_files_only=True
+        )
     except OSError:
         print("[dp-router] weights not local; skipping HBM fit check", flush=True)
         return
