@@ -34,6 +34,8 @@ SCANNED = [
     Path("difflet/models/flux/dit_config.py"),
     Path("difflet/models/flux/cuda_application.py"),
     Path("difflet/models/flux/contract.py"),
+    Path("difflet/models/wan/dit_config.py"),
+    Path("difflet/models/wan/cuda_application.py"),
 ]
 
 OPS_MODULES = ("attention", "collectives", "embeddings", "linear", "mx", "norm", "platform")

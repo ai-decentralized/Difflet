@@ -3,16 +3,61 @@
 from __future__ import annotations
 
 import pytest
+import torch
 
 from difflet.pipeline.parallel_config import DiffletParallelConfig
 from difflet.models.wan import entry
 
 
 def test_create_wan_application_rejects_unsupported_backend(tmp_path):
-    with pytest.raises(NotImplementedError, match="trainium and tpu"):
+    with pytest.raises(NotImplementedError, match="trainium, tpu and cuda"):
         entry.create_wan_application(
             model_path=str(tmp_path),
             parallel=DiffletParallelConfig(),
+            dtype="bf16",
+            shape={},
+            backend="rocm",
+        )
+
+
+def test_entry_builds_the_cuda_wan_application(tmp_path, monkeypatch):
+    """CUDA plan F1: the cuda branch builds the one-process application.
+
+    No checkpoint under ``tmp_path``, so no experts — enough to prove the dispatch.
+    """
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
+    app = entry.create_wan_application(
+        model_path=str(tmp_path),
+        parallel=DiffletParallelConfig(tp_degree=1),
+        dtype="bf16",
+        shape={"height": None, "width": None, "num_frames": None},
+        backend="cuda",
+    )
+    assert type(app).__name__ == "CudaWanApplication"
+    assert app.transformer is None and app.transformer_2 is None
+    assert app.shape == {"height": 480, "width": 832, "num_frames": 9}
+    assert app.dtype is torch.bfloat16
+    assert app.device == torch.device("cuda")
+    # Both experts fit a 96 GB card: resident by default on CUDA only.
+    assert app.enable_transformer_2 is True
+
+
+@pytest.mark.parametrize(
+    "parallel,follow_up",
+    [
+        (DiffletParallelConfig(tp_degree=4), "F6"),
+        (DiffletParallelConfig(tp_degree=1, cp_degree=2), "F2"),
+        (DiffletParallelConfig(tp_degree=1, cfg_parallel_enabled=True), "F2"),
+        (DiffletParallelConfig(tp_degree=1, dp_degree=2), "F2"),
+        (DiffletParallelConfig(tp_degree=1, sp_enabled=True), "F6"),
+    ],
+)
+def test_entry_refuses_multi_rank_and_sp_on_cuda_up_front(tmp_path, parallel, follow_up):
+    # Refused before either 14B expert is touched, not at the first collective.
+    with pytest.raises(NotImplementedError, match=follow_up):
+        entry.create_wan_application(
+            model_path=str(tmp_path),
+            parallel=parallel,
             dtype="bf16",
             shape={},
             backend="cuda",

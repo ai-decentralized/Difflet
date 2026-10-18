@@ -283,7 +283,8 @@ def _register_builtin_wan() -> None:
         ),
         # Wan is the second model on the TPU backend, single-expert by default
         # (see difflet/models/wan/tpu_application.py on expert residency).
-        backends=("trainium", "tpu"),
+        # CUDA (plan F1): tp=1, one GPU, both experts resident by default.
+        backends=("trainium", "tpu", "cuda"),
     )
     class _WanRegistration:
         pass
