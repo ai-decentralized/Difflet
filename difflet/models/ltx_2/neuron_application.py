@@ -251,6 +251,57 @@ class _OnDeviceLtx2Transformer:
         return video, audio
 
 
+class _DeviceLtx2VaeDecoder:
+    """The orchestrator's video VAE on the device (``NeuronLtx2VaeDecoderApplication``).
+
+    Exposes what ``LTX2Orchestrator._decode_latents`` reads from a diffusers VAE: ``dtype``,
+    ``config`` (``scaling_factor``, ``timestep_conditioning``), ``latents_mean`` /
+    ``latents_std`` (read from the checkpoint, on the host) and ``decode(z, timestep,
+    return_dict=False)``, which moves the un-normalised host latents to the device, decodes and
+    returns the frames ``[B, 3, F, H, W]`` on the host as a one-tuple.
+    """
+
+    def __init__(self, app, *, device) -> None:
+        from types import SimpleNamespace
+
+        from safetensors import safe_open
+
+        self.app = app
+        self.dtype = app.dtype
+        self.device = torch.device(device)
+        self.config = SimpleNamespace(**app.vae_config)
+        path = os.path.join(str(app.model_path), "diffusion_pytorch_model.safetensors")
+        with safe_open(path, framework="pt", device="cpu") as handle:
+            self.latents_mean = handle.get_tensor("latents_mean")
+            self.latents_std = handle.get_tensor("latents_std")
+
+    def load(self, skip_warmup: bool = False) -> None:
+        self.app.load(skip_warmup=skip_warmup)
+
+    def decode(self, z: torch.Tensor, timestep=None, return_dict: bool = False):
+        if timestep is not None:
+            raise NotImplementedError("the LTX-2 device decoder takes no decode timestep")
+        frames = self.app(z.to(self.dtype).contiguous().to(self.device))
+        if self.device.type == "neuron":
+            torch.neuron.synchronize()
+        frames = frames.cpu()
+        return (frames,) if not return_dict else {"sample": frames}
+
+
+def _host_ltx2_audio_decoder(model_path: str, *, dtype: torch.dtype):
+    """The audio VAE and the vocoder on the host CPU (diffusers' own modules, as the Trainium
+    decode loads them) and the video post-processor, without the video VAE."""
+    from diffusers import AutoencoderKLLTX2Audio
+    from diffusers.pipelines.ltx2.vocoder import LTX2Vocoder
+    from diffusers.video_processor import VideoProcessor
+
+    audio_vae = AutoencoderKLLTX2Audio.from_pretrained(
+        os.path.join(model_path, "audio_vae"), torch_dtype=dtype).eval()
+    vocoder = LTX2Vocoder.from_pretrained(os.path.join(model_path, "vocoder"),
+                                          torch_dtype=dtype).eval()
+    return audio_vae, vocoder, VideoProcessor(vae_scale_factor=32)
+
+
 def _check_dit_shapes(config: NeuronLtx2Config, bundle: LTX2DiTInputBundle) -> None:
     """The one static shape: the warm-up compiled the blocks for it, so another shape would
     compile again (or, for the text, attend the wrong rows)."""
