@@ -12,7 +12,8 @@ noise. Pixel-space metrics go to a JSON the gate reads
 
 Metrics and PNG writing are scripts/cuda_e2e_vs_diffusers.py's (one definition for both e2e
 gates). Its ``_to_unit`` is not used: ``FluxPipeline``'s ``output_type="pt"`` is already
-post-processed to [0, 1] on both sides.
+post-processed to [0, 1] on both sides. Since F4b the JSON carries
+``timings.{difflet,diffusers}.{load_s, generate_s, peak_alloc_gb}`` as the Wan oracle does.
 """
 
 from __future__ import annotations
@@ -56,6 +57,19 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
+def timings_record(*, load_s: float, generate_s: float, peak_bytes: int | None) -> dict:
+    """One side's ``{load_s, generate_s, peak_alloc_gb}`` (GB = 1e9 bytes, as the Wan oracle)."""
+    return {
+        "load_s": round(float(load_s), 1),
+        "generate_s": round(float(generate_s), 1),
+        "peak_alloc_gb": None if peak_bytes is None else round(int(peak_bytes) / 1e9, 2),
+    }
+
+
+def _peak_bytes() -> int | None:
+    return torch.cuda.max_memory_allocated() if torch.cuda.is_available() else None
+
+
 def _unit_image(images: torch.Tensor) -> torch.Tensor:
     """FluxPipeline ``output_type="pt"`` (B, C, H, W) in [0, 1] → (C, H, W) float on CPU."""
     return images[0].float().clamp(0, 1).cpu()
@@ -67,9 +81,10 @@ def _application_kwargs(args: argparse.Namespace) -> dict | None:
     return kwargs or None
 
 
-def run_difflet(args, device) -> tuple[torch.Tensor, torch.Tensor]:
+def run_difflet(args, device) -> tuple[torch.Tensor, torch.Tensor, dict]:
     from difflet import DiffletParallelConfig, DiffletPipeline
 
+    torch.cuda.reset_peak_memory_stats()
     mark = time.monotonic()
     pipe = DiffletPipeline.from_pretrained(
         args.model_id,
@@ -86,7 +101,8 @@ def run_difflet(args, device) -> tuple[torch.Tensor, torch.Tensor]:
         compiled_path_override=str(Path(args.compile_cache_dir or "/tmp/logs/cuda_e2e_flux_cache")),
     )
     app = pipe.app
-    print(f"difflet loaded in {time.monotonic() - mark:.1f}s", flush=True)
+    load_s = time.monotonic() - mark
+    print(f"difflet loaded in {load_s:.1f}s", flush=True)
     generator = torch.Generator(device=device).manual_seed(args.seed)
     noise, _ = app.pipe.prepare_latents(
         1,
@@ -108,7 +124,9 @@ def run_difflet(args, device) -> tuple[torch.Tensor, torch.Tensor]:
         output_type="pt",
     )
     torch.cuda.synchronize()
-    print(f"difflet generated in {time.monotonic() - mark:.1f}s", flush=True)
+    generate_s = time.monotonic() - mark
+    print(f"difflet generated in {generate_s:.1f}s", flush=True)
+    timings = timings_record(load_s=load_s, generate_s=generate_s, peak_bytes=_peak_bytes())
     img = _unit_image(out.images)
     noise = noise.cpu()
     del out, app, pipe
@@ -116,17 +134,19 @@ def run_difflet(args, device) -> tuple[torch.Tensor, torch.Tensor]:
     torch._dynamo.reset()
     gc.collect()
     torch.cuda.empty_cache()
-    return img, noise
+    return img, noise, timings
 
 
-def run_diffusers(args, device, noise: torch.Tensor) -> torch.Tensor:
+def run_diffusers(args, device, noise: torch.Tensor) -> tuple[torch.Tensor, dict]:
     from diffusers import FluxPipeline
 
+    torch.cuda.reset_peak_memory_stats()
     mark = time.monotonic()
     pipe = FluxPipeline.from_pretrained(
         args.model_path, torch_dtype=torch.bfloat16, local_files_only=True
     ).to(device)
-    print(f"diffusers loaded in {time.monotonic() - mark:.1f}s", flush=True)
+    load_s = time.monotonic() - mark
+    print(f"diffusers loaded in {load_s:.1f}s", flush=True)
     mark = time.monotonic()
     with torch.no_grad():
         out = pipe(
@@ -140,12 +160,14 @@ def run_diffusers(args, device, noise: torch.Tensor) -> torch.Tensor:
             output_type="pt",
         )
     torch.cuda.synchronize()
-    print(f"diffusers generated in {time.monotonic() - mark:.1f}s", flush=True)
+    generate_s = time.monotonic() - mark
+    print(f"diffusers generated in {generate_s:.1f}s", flush=True)
+    timings = timings_record(load_s=load_s, generate_s=generate_s, peak_bytes=_peak_bytes())
     img = _unit_image(out.images)
     del out, pipe
     gc.collect()
     torch.cuda.empty_cache()
-    return img
+    return img, timings
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -156,9 +178,9 @@ def main(argv: list[str] | None = None) -> None:
     difflet_png = images / "flux_e2e_difflet.png"
     diffusers_png = images / "flux_e2e_diffusers.png"
 
-    img_d, noise = run_difflet(args, device)
+    img_d, noise, timings_d = run_difflet(args, device)
     _save(img_d, difflet_png)
-    img_r = run_diffusers(args, device, noise)
+    img_r, timings_r = run_diffusers(args, device, noise)
     _save(img_r, diffusers_png)
 
     metrics = image_metrics(img_d, img_r)
@@ -175,6 +197,7 @@ def main(argv: list[str] | None = None) -> None:
         "torch": torch.__version__,
         "metrics": metrics,
         "images": {"difflet": str(difflet_png), "diffusers": str(diffusers_png)},
+        "timings": {"difflet": timings_d, "diffusers": timings_r},
     }
     print(f"difflet vs diffusers (pixels in [0,1]): {metrics}", flush=True)
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
