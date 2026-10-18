@@ -215,15 +215,21 @@ measurement (F3, F5). Wan stays at ≥ **25 dB**, ≥ **0.99** (kept in F1; the 
 did not move in F9, ruling R1). Since F9b, when the result carries the noise floor on every seed
 (`--seeds … --noise-floor`), the Wan gate is stated **relative to it**, the way D14 states the
 parity gates: (A) the mean PSNR over seeds is at least the floor's mean minus 20·log10(1.15) =
-1.21 dB (the 1.15× deviation ratio in dB) and the mean cosine deviation 1 − cosine at most 1.15×
-the floor's; (B) every seed is at least the floor's worst seed minus 1.21 dB, its cosine
-deviation at most 1.15× the floor's worst; (C) a loose absolute floor of 20 dB / 0.98 on every
-seed. The 25 dB / 0.99 floors then step aside (the floor's own worst seed, 23.79 dB, is under
+1.21 dB (the 1.15× deviation ratio in dB) and the mean cosine deviation 1 − cosine at most
+1.15² = 1.3225× the floor's (1 − cosine is quadratic in the error, ≈ ε²/2, so the square is the
+same 1.15× on the linear error); (B) every seed is at least the floor's worst seed minus 1.21 dB,
+its cosine deviation at most 1.3225× the floor's worst; (C) a loose absolute floor of 20 dB /
+0.98 on every seed. A floor whose own worst seed is under the loose floor, or not finite, fails
+the relative test as "the oracle moved" instead of scaling the gate down to it. The 25 dB / 0.99
+floors then step aside (the floor's own worst seed, 23.79 dB, is under
 them, so seed luck could fail a correct build); without a floor they judge every seed as before
 and the relative test is skipped with that reason (`run_gates.sh wan`'s one-seed e2e, the F1b
 JSON). On the F9 measurement: gate A 27.20 dB against 25.17 required (floor mean 26.38 − 1.21),
-cosine deviation 0.00358 against 0.00537 allowed; gate B 22.58 dB required (floor min 23.79 −
-1.21), worst Difflet seed 26.30; 0.00857 allowed, worst 0.00459.
+cosine deviation 0.00358 against 0.00617 allowed; gate B 22.58 dB required (floor min 23.79 −
+1.21), worst Difflet seed 26.30; 0.00986 allowed, worst 0.00459. With n = 3 the floor's mean
+carries a standard error of about 1.4 dB (sample std 2.43 dB), so the 2.0 dB headroom on gate A
+is about one standard error of the difference: the relative gate reduces the seed-luck risk, it
+does not remove it; more seeds narrow it.
 
 | Model / variant | Steps / shape | PSNR | Cosine | mean / max abs | Floors | Difflet / diffusers generate | Pod (edition) | Artifact | Entry |
 |---|---|---|---|---|---|---|---|---|---|
@@ -289,7 +295,8 @@ foliage texture (the perturbed one also loses the dark collar, which Difflet's f
 Ruling R1 (F9): the floors (25 dB / 0.99) are unchanged; the floor's own worst seed (23.79 dB)
 is below the 25 dB gate, so seed luck could fail a correct build. F9b acted on that: with the
 floor in the result the gate is stated relative to it (the e2e floors paragraph above); this JSON
-passes it with 2.0 dB of headroom on the mean and 3.7 dB on the worst seed.
+passes it with 2.0 dB of headroom on the mean (about one standard error of the difference at
+n = 3) and 3.7 dB on the worst seed.
 
 **How to inspect manually.**
 
@@ -311,8 +318,9 @@ open $A/e2e_difflet_qwen_50steps.png $A/e2e_diffusers_qwen_50steps.png   # the s
 ```
 
 The F1 Wan e2e JSON fails today's `test_every_timestep_dtype_variant_is_recorded` with `"no
-variants: the result predates F1b task 2; re-run the e2e script"` (1 failed, 3 passed since F9
-added a fourth test; 1 failed, 2 passed before). This is by design, as in the parity section.
+variants: the result predates F1b task 2; re-run the e2e script"` (1 failed, 3 passed, 1 skipped
+since F9b added the relative test; 1 failed, 3 passed in F9; 1 failed, 2 passed before). This is
+by design, as in the parity section.
 On a pod:
 
 ```bash
@@ -579,9 +587,10 @@ above. Spurious infrastructure events are kept and labelled.
     terminated, read back gone *[10-18 F9]*.
 28. the F9b commit — the Wan e2e gate stated relative to the measured noise floor when the result
     carries it (mean over seeds within 1.21 dB of the floor's mean, every seed within 1.21 dB of
-    the floor's worst seed, cosine deviation within 1.15×, a loose 20 dB / 0.98 absolute floor);
-    the 25 dB / 0.99 floors judge results without a floor as before. No GPU run: the F9 JSONs
-    re-gated on the Mac *[10-18 F9b]*.
+    the floor's worst seed, cosine deviation within 1.15² = 1.3225×, a loose 20 dB / 0.98
+    absolute floor; a floor under the loose floor fails as "the oracle moved"); the 25 dB / 0.99
+    floors judge results without a floor as before. No GPU run: the F9 JSONs re-gated on the
+    Mac *[10-18 F9b]*.
 
 ## Support matrix
 

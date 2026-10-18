@@ -27,18 +27,23 @@ the parity gates, relative to what the reference costs itself, in three parts:
 
 - gate A, the mean over seeds: Difflet's mean PSNR is at least the floor's mean minus
   ``20·log10(1.15)`` = 1.21 dB (D14's 1.15x deviation ratio in dB; a mean of dB values is the
-  geometric mean of RMSE ratios), and the mean cosine deviation ``1 - cosine`` is at most 1.15x
-  the floor's mean deviation;
+  geometric mean of RMSE ratios), and the mean cosine deviation ``1 - cosine`` is at most
+  1.15² = 1.3225x the floor's mean deviation (``1 - cosine`` is quadratic in the error —
+  ``≈ ε²/2`` — so the square is the same 1.15x on the linear error);
 - gate B, every seed: at least the floor's WORST seed minus 1.21 dB, and a cosine deviation of
-  at most 1.15x the floor's worst — against the floor's spread, not matched by seed, because a
-  half-ulp perturbation moves diffusers by 5 dB between seeds;
+  at most 1.3225x the floor's worst — against the floor's spread, not matched by seed, because
+  a half-ulp perturbation moves diffusers by 5 dB between seeds;
 - gate C, a loose absolute floor on every seed, ``LOOSE_PSNR_DB`` / ``LOOSE_COSINE``
-  (20 dB / 0.98), so a collapsed floor cannot pass a bad build.
+  (20 dB / 0.98), so a collapsed floor cannot pass a bad build; a floor whose own worst seed is
+  under it, or not finite, fails the relative test as "the oracle moved" rather than judging.
 
 The 25 dB / 0.99 floors then step aside (``test_video_is_the_same_clip_as_diffusers`` applies
 gate C and says so). Without a floor — a legacy JSON, or ``--seeds`` without ``--noise-floor``,
 as ``run_gates.sh wan``'s e2e — the 25 dB / 0.99 floors judge every seed as before and the
 relative test is skipped with that reason. A floor on some seeds only is a malformed result.
+With n = 3 seeds the floor's mean carries a standard error of about 1.4 dB, so the F9 run's
+2.0 dB headroom on gate A is about one standard error of the difference: the relative gate
+reduces the seed-luck risk F9 named, it does not remove it; more seeds narrow it.
 """
 
 from __future__ import annotations
@@ -54,10 +59,11 @@ pytestmark = [pytest.mark.numerical, pytest.mark.slow]
 
 MIN_PSNR_DB = 25.0
 MIN_COSINE = 0.99
-# The relative gate (F9b): D14's deviation ratio, in dB for PSNR and as a factor on 1 - cosine;
-# the loose absolute floor that holds whatever the noise floor says.
+# The relative gate (F9b): D14's deviation ratio, in dB for PSNR and squared on 1 - cosine
+# (quadratic in the error); the loose absolute floor that holds whatever the noise floor says.
 MAX_DEVIATION_RATIO = 1.15
 MARGIN_DB = 20 * math.log10(MAX_DEVIATION_RATIO)  # 1.21 dB
+COSINE_DEVIATION_RATIO = MAX_DEVIATION_RATIO**2  # 1.3225x on 1 - cosine
 LOOSE_PSNR_DB = 20.0
 LOOSE_COSINE = 0.98
 DEFAULT_RESULT = "/tmp/logs/cuda_e2e_wan.json"
@@ -83,6 +89,7 @@ def _gated_metrics(payload: dict, variants: dict | None = None) -> dict:
     result has variants including it, else the first listed dtype's (legacy results: the
     top-level metrics). ``variants``: one seed's (``per_seed.<seed>.variants``) instead of the
     top-level ones."""
+    per_seed = variants is not None
     if variants is None:
         variants = payload.get("variants") or {}
     if "float32" in variants:
@@ -90,6 +97,7 @@ def _gated_metrics(payload: dict, variants: dict | None = None) -> dict:
     first = (payload.get("timestep_dtypes") or [None])[0]
     if first in variants:
         return variants[first]["metrics"]
+    assert not per_seed, f"a seed's variants {sorted(variants)} hold no gated dtype"
     return payload["metrics"]
 
 
@@ -160,7 +168,7 @@ def test_video_is_as_close_to_diffusers_as_diffusers_is_to_itself():
             "no noise floor recorded (run with --seeds ... --noise-floor): "
             f"the {MIN_PSNR_DB} dB / {MIN_COSINE} floors judged"
         )
-    ratio = f"{MAX_DEVIATION_RATIO:g}x"
+    ratio = f"{COSINE_DEVIATION_RATIO:g}x"
     difflet = {
         seed: _gated_metrics(payload, entry["variants"])
         for seed, entry in payload["per_seed"].items()
@@ -171,14 +179,24 @@ def test_video_is_as_close_to_diffusers_as_diffusers_is_to_itself():
     psnr = [m["psnr_db"] for m in difflet.values()]
     dev = [1 - m["cosine"] for m in difflet.values()]
 
+    # The oracle itself: a floor that is not finite, or whose worst seed is under the loose
+    # floor, cannot scale anything — diffusers moved, not Difflet.
+    assert all(
+        math.isfinite(v) for v in floor_psnr + floor_dev
+    ), f"noise floor not finite: {floors}"
+    assert min(floor_psnr) >= LOOSE_PSNR_DB and max(floor_dev) <= 1 - LOOSE_COSINE, (
+        f"the oracle moved: noise floor worst seed PSNR {min(floor_psnr):.2f} dB, cosine "
+        f"{1 - max(floor_dev):.5f} is under the loose floor {LOOSE_PSNR_DB} dB / {LOOSE_COSINE}"
+    )
+
     # Gate A: the mean over seeds.
     required_a = _mean(floor_psnr) - MARGIN_DB
-    allowed_a = MAX_DEVIATION_RATIO * _mean(floor_dev)
+    allowed_a = COSINE_DEVIATION_RATIO * _mean(floor_dev)
     print(
         f"relative gate A (mean over {n} seeds): PSNR {_mean(psnr):.2f} dB, required >= "
         f"{required_a:.2f} dB (noise floor mean {_mean(floor_psnr):.2f} dB - {MARGIN_DB:.2f} dB); "
         f"cosine deviation {_mean(dev):.5f}, allowed <= {allowed_a:.5f} "
-        f"({ratio} the floor's {_mean(floor_dev):.5f})"
+        f"({ratio} the floor's {_mean(floor_dev):.5f}; {MAX_DEVIATION_RATIO:g}x on the linear error)"
     )
     failures = []
     if not _mean(psnr) >= required_a:
@@ -194,7 +212,7 @@ def test_video_is_as_close_to_diffusers_as_diffusers_is_to_itself():
 
     # Gate B: every seed against the floor's worst seed.
     required_b = min(floor_psnr) - MARGIN_DB
-    allowed_b = MAX_DEVIATION_RATIO * max(floor_dev)
+    allowed_b = COSINE_DEVIATION_RATIO * max(floor_dev)
     print(
         f"relative gate B (every seed): PSNR >= {required_b:.2f} dB (noise floor min "
         f"{min(floor_psnr):.2f} dB - {MARGIN_DB:.2f} dB); cosine deviation <= {allowed_b:.5f} "

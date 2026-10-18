@@ -45,8 +45,9 @@ Difflet traceback, a shape mismatch or a gate miss on a healthy card is a candid
   no Difflet defect (n = 3: it cannot show there is none). Since F9b the Wan gate is stated
   relative to that floor when the result carries it (the mean over seeds within 1.21 dB of the
   floor's mean, every seed within 1.21 dB of the floor's worst seed, cosine deviation within
-  1.15×, a loose 20 dB / 0.98 floor): a relative-gate failure names the gate (A: the mean, B: a
-  seed) and the floor numbers it was judged against — read those before blaming Difflet.
+  1.15² = 1.3225×, a loose 20 dB / 0.98 floor): a relative-gate failure names the gate (A: the
+  mean, B: a seed, or "the oracle moved" when the floor itself is under the loose floor) and the
+  floor numbers it was judged against — read those before blaming Difflet.
 
 ## The bug protocol (when it really is a bug)
 

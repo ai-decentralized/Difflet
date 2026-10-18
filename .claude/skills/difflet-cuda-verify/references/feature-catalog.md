@@ -94,10 +94,12 @@ per seed, diffusers again with both experts' timestep rounded through bf16, exac
 recorded; `run_gates.sh`'s e2e is one seed without it). When the result carries the floor on
 every seed the Wan gate is stated **relative to it** (F9b, as D14 states the parity gates): the
 mean PSNR over seeds ≥ the floor's mean − 1.21 dB (a 1.15× deviation ratio in dB) and the mean
-cosine deviation ≤ 1.15× the floor's; every seed ≥ the floor's worst seed − 1.21 dB; a loose
-20 dB / 0.98 absolute floor. The 25 dB / 0.99 floors then step aside; without a floor they judge
-every seed and the relative test is skipped with that reason. F9's JSON: mean 27.20 dB against
-25.17 required, worst seed 26.30 against 22.58.
+cosine deviation ≤ 1.15² = 1.3225× the floor's (the same 1.15× on the linear error); every seed
+≥ the floor's worst seed − 1.21 dB; a loose 20 dB / 0.98 absolute floor, which a floor must itself
+clear ("the oracle moved" otherwise). The 25 dB / 0.99 floors then step aside; without a floor
+they judge every seed and the relative test is skipped with that reason. F9's JSON: mean
+27.20 dB against 25.17 required (2.0 dB, about one standard error of the difference at n = 3),
+worst seed 26.30 against 22.58.
 
 ```bash
 HF_HOME=$H HF_HUB_OFFLINE=1 DIFFLET_BACKEND=cuda PYTHONPATH=$PWD .venv/bin/python \
