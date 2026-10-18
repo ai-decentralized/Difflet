@@ -17,9 +17,9 @@ refused, not run).
 - **DiT parity**: PASS on all three gates for Qwen (all-ones and padded prompt; eager,
   trimmed, compiled), Flux, and both Wan experts plus the 999 / 750 rounding block.
 - **e2e vs diffusers**: PASS. Qwen 41.40 dB and Flux 40.35 dB against 35 dB / 0.998 floors. Wan
-  26.30 dB (fp32 timestep, gated) and 27.54 dB (bf16 cast) against 25 dB / 0.99. Over seeds 0–2 Wan gives 26.30–28.89 dB, inside diffusers' own noise floor (diffusers vs its
-  bf16-rounded timestep: 23.79–28.62 dB): Difflet is as close to diffusers as diffusers is to
-  itself.
+  26.30 dB (fp32 timestep, gated) and 27.54 dB (bf16 cast) against 25 dB / 0.99. Over seeds 0–2 Wan gives 26.30–28.89 dB, inside diffusers' own perturbation spread (diffusers vs its
+  bf16-rounded timestep: 23.79–28.62 dB), so the gap to Qwen and Flux need not indicate a
+  Difflet defect (three seeds cannot show there is none).
 - **CLI matrix**: PASS for all three cells. Qwen-Image three times, FLUX.1-dev twice, and Wan
   2.2 once: F9 ran the three-cell matrix on one pod (generate 51.9 s / 16.8 s / 111.5 s).
 - **Serve (Qwen-Image)**: PASS. Ready in 56.0 s, two requests of 38.6 s and 39.2 s, both
