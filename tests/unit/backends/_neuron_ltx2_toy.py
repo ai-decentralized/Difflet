@@ -217,10 +217,12 @@ def l1_ltx2_worker(
     exec_mode: str,
     num_layers: int | None = None,
     cfg: bool = False,
+    cp_mode: str = "gather_kv",
 ) -> dict:
-    """Load the tiny DiT at TP=tp (x CFG 2 when ``cfg``) on CPU fp32, run the fixed inputs twice
-    (the second time with other values at the same shapes), report the outputs and the
-    lifecycle."""
+    """Load the tiny DiT at TP=tp (x CFG 2 when ``cfg``, else x CP world/tp) on CPU fp32, run the
+    fixed inputs twice (the second time with other values at the same shapes), report the
+    outputs and the lifecycle. In eager mode the video tokens the first block receives are
+    recorded (this rank's shard under CP)."""
     from torch._dynamo.utils import counters
 
     from difflet.backends.neuron.ltx_2.config import NeuronLtx2Config
@@ -231,9 +233,12 @@ def l1_ltx2_worker(
     from difflet.backends.neuron.ops_impl import parallel_mesh
     from difflet.pipeline.parallel_config import DiffletParallelConfig
 
-    parallel = DiffletParallelConfig(tp_degree=tp, cfg_parallel_enabled=cfg)
+    cp = 1 if cfg else world_size // tp
+    parallel = DiffletParallelConfig(tp_degree=tp, cfg_parallel_enabled=cfg, cp_degree=cp,
+                                     cp_mode=cp_mode if cp > 1 else "gather_kv")
     overrides = dict(TINY_SHAPE, text_seq_len=TINY_TEXT_SEQ_LEN, tp_degree=tp,
-                     cfg_parallel_enabled=cfg, torch_dtype=torch.float32)
+                     cfg_parallel_enabled=cfg, context_parallel_enabled=cp > 1,
+                     cp_mode=parallel.cp_mode, torch_dtype=torch.float32)
     if num_layers is not None:
         overrides["num_layers"] = num_layers
     config = NeuronLtx2Config.from_pretrained(Path(model_dir) / "transformer", **overrides)
@@ -248,6 +253,14 @@ def l1_ltx2_worker(
     counters.clear()
     app.load()
     after_warmup = counters["stats"]["unique_graphs"]
+    block_tokens: list = []
+    if exec_mode == "eager":
+        app.module.transformer.transformer_blocks[0].register_forward_pre_hook(
+            lambda module, args, kwargs: block_tokens.append(
+                [int(kwargs["hidden_states"].shape[1]),
+                 int(kwargs["audio_hidden_states"].shape[1])]),
+            with_kwargs=True,
+        )
     batch = 2 if cfg else 1
     out = app(*tiny_ltx2_inputs(batch=batch))
     other = app(*tiny_ltx2_inputs(batch=batch, scale=0.5))
@@ -271,6 +284,10 @@ def l1_ltx2_worker(
                         for name in ("attn1", "audio_attn1", "attn2", "audio_attn2",
                                      "audio_to_video_attn", "video_to_audio_attn")},
         "processor": type(block0.attn1.processor).__name__,
+        "kv_modes": {name: getattr(getattr(block0, name).processor, "kv_mode", "-")
+                     for name in ("attn1", "audio_attn1", "attn2", "audio_attn2",
+                                  "audio_to_video_attn", "video_to_audio_attn")},
+        "block_tokens": block_tokens,
         "ff_activations": sorted({type(b.ff.net[0]).__name__ for b in
                                   app.module.transformer.transformer_blocks}
                                  | {type(b.audio_ff.net[0]).__name__ for b in
