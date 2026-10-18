@@ -55,6 +55,7 @@ def resolve_serving_model(options: ServeOptions) -> ResolvedServingModel:
     from difflet.backends.registry import current_backend
 
     tp_degree = options.tp_degree
+    _refuse_unsupported_replicas(int(options.replicas), current_backend())
     if current_backend() == "cuda":
         metadata = _cuda_serving_metadata(entry.name, options.model_id)
         if tp_degree is None:
@@ -93,6 +94,33 @@ def resolve_serving_model(options: ServeOptions) -> ResolvedServingModel:
         metadata=metadata,
         profile=profile,
     )
+
+
+def _visible_gpu_count() -> int:
+    import torch
+
+    return int(torch.cuda.device_count())
+
+
+def _refuse_unsupported_replicas(dp_degree: int, backend: str) -> None:
+    """``--dp-degree N > 1`` is CUDA's one-worker-per-GPU replica set (plan F2b), refused
+    before any snapshot resolution elsewhere, and on CUDA when N exceeds the visible GPUs."""
+    if dp_degree <= 1:
+        return
+    from difflet.serving.errors import feature_not_supported
+
+    if backend != "cuda":
+        raise feature_not_supported(
+            f"--dp-degree {dp_degree}: data-parallel serving replicas (one resident worker "
+            f"per GPU) exist on the CUDA backend only (plan follow-up F2b); the {backend} "
+            "backend serves one resident worker"
+        )
+    count = _visible_gpu_count()
+    if dp_degree > count:
+        raise feature_not_supported(
+            f"--dp-degree {dp_degree} exceeds the {count} visible GPU(s) "
+            "(CUDA_VISIBLE_DEVICES); one resident replica needs one GPU"
+        )
 
 
 def _cuda_serving_metadata(entry_name: str, model_id: str) -> ServingModelMetadata:

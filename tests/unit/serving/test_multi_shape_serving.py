@@ -151,9 +151,7 @@ class TestValidatorMembership:
 
 class TestIdentity:
     def test_denoiser_identity_covers_the_set(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(
-            hunyuan_video, "toolchain_versions", lambda: {"python": "3.10"}
-        )
+        monkeypatch.setattr(hunyuan_video, "toolchain_versions", lambda: {"python": "3.10"})
         source = _source(tmp_path)
         multi = hunyuan_video._compile_specs(source, _profile(tmp_path))
         single = hunyuan_video._compile_specs(source, _profile(tmp_path, shapes=None))
@@ -166,6 +164,7 @@ class TestIdentity:
 
         assert denoiser(multi) != denoiser(single)
         assert denoiser(multi) == denoiser(reordered)
+
         # llama identity is shape-independent: same artifact serves both sets
         def llama(specs):
             return next(s for s in specs if s.component_id == "llama").identity

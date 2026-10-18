@@ -181,6 +181,7 @@ def options_from_args(args: argparse.Namespace) -> ServeOptions:
         download_policy=download_policy,
         compile_policy=compile_policy,
         max_queued_requests=getattr(args, "max_queued_requests", 8),
+        replicas=getattr(args, "replicas", 1),
         queue_timeout=getattr(args, "queue_timeout", None),
         request_timeout=getattr(args, "request_timeout", 300.0),
         artifact_store_timeout=getattr(args, "artifact_store_timeout", 60.0),

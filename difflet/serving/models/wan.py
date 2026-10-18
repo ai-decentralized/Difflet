@@ -825,12 +825,14 @@ def _runtime_plan(
         profile_identity=(
             ""
             if tpu
-            else generation.identity.digest
-            if profile.host_vae
-            else combined_profile_identity(
-                generation.identity.digest,
-                by_component["decoder"].identity.digest,
-                "vae:neuron",
+            else (
+                generation.identity.digest
+                if profile.host_vae
+                else combined_profile_identity(
+                    generation.identity.digest,
+                    by_component["decoder"].identity.digest,
+                    "vae:neuron",
+                )
             )
         ),
         environment=environment,

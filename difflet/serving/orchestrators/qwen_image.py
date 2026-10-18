@@ -122,9 +122,7 @@ class QwenVaeStageRunner:
         return stage_result(
             QwenFinalPayload(
                 output=DiffletGenerateOutput(
-                    data=self.adapter._decode(
-                        invocation.input.packed_latents, invocation.request
-                    ),
+                    data=self.adapter._decode(invocation.input.packed_latents, invocation.request),
                     mime_type="image/png",
                     output_format="png",
                 )
@@ -535,9 +533,7 @@ class QwenImageServingStageAdapter:
         self.text_app = Qwen2_5_VLForConditionalGeneration.from_pretrained(
             enc_path, torch_dtype=torch.float32
         ).eval()
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            str(Path(self.model_dir) / "tokenizer")
-        )
+        self.tokenizer = AutoTokenizer.from_pretrained(str(Path(self.model_dir) / "tokenizer"))
 
     def _load_denoiser_stage_tpu(self, profile: ServingProfile) -> None:
         import torch
@@ -567,9 +563,7 @@ class QwenImageServingStageAdapter:
 
         assert self.model_dir is not None
         vae_path = str(Path(self.model_dir) / "vae")
-        vae = AutoencoderKLQwenImage.from_pretrained(
-            vae_path, torch_dtype=torch.bfloat16
-        ).eval()
+        vae = AutoencoderKLQwenImage.from_pretrained(vae_path, torch_dtype=torch.bfloat16).eval()
         # Kept on the HOST between requests and moved to device only for the
         # decode. The stages are sequential so they never need to co-reside —
         # and the headroom does not allow it: after the DiT shard ~6 GiB is
@@ -611,9 +605,7 @@ class QwenImageServingStageAdapter:
                 if self.text_app is None or self.tokenizer is None:
                     raise RuntimeError("Qwen prompt encoder is not loaded")
                 text = _QWEN_TEMPLATE.format(prompt)
-                encoded = self.tokenizer(
-                    text, padding=False, truncation=False, return_tensors="pt"
-                )
+                encoded = self.tokenizer(text, padding=False, truncation=False, return_tensors="pt")
                 if int(encoded.input_ids.shape[1]) > _ENC_SEQ:
                     status = _ENCODE_TOO_LONG
                 else:
@@ -661,9 +653,7 @@ class QwenImageServingStageAdapter:
         import json
 
         assert self.model_dir is not None
-        body = json.loads(
-            (Path(self.model_dir) / "transformer" / "config.json").read_text()
-        )
+        body = json.loads((Path(self.model_dir) / "transformer" / "config.json").read_text())
         return int(body["joint_attention_dim"])
 
     def _denoise_tpu(self, text: dict[str, object], request: DiffletGenerateRequest):
@@ -693,8 +683,11 @@ class QwenImageServingStageAdapter:
 
         generator = torch.Generator("cpu").manual_seed(int(request.seed))
         latents = torch.randn(
-            1, image_seq_len, int(config.in_channels),
-            generator=generator, dtype=torch.float32,
+            1,
+            image_seq_len,
+            int(config.in_channels),
+            generator=generator,
+            dtype=torch.float32,
         ).to(device)
         states = text["encoder_hidden_states"].to(device, torch.bfloat16)
 
@@ -715,12 +708,9 @@ class QwenImageServingStageAdapter:
         # confirmed with tpu-info). As tensors, one graph serves the whole loop.
         sigmas = scheduler.sigmas.to(torch.float32)
         steps = len(scheduler.timesteps)
-        deltas = [
-            (sigmas[i + 1] - sigmas[i]).reshape(1).to(device) for i in range(steps)
-        ]
+        deltas = [(sigmas[i + 1] - sigmas[i]).reshape(1).to(device) for i in range(steps)]
         timesteps = [
-            (step / 1000).to(torch.bfloat16).reshape(1).to(device)
-            for step in scheduler.timesteps
+            (step / 1000).to(torch.bfloat16).reshape(1).to(device) for step in scheduler.timesteps
         ]
         with torch.no_grad():
             for index in range(steps):
@@ -947,9 +937,7 @@ def _runtime_plan(profile: ServingProfile, pipeline, specs) -> RuntimePlan:
                 world_size=world_size,
             ),
             # None when there is no compile plan (the tpu backend runs eagerly).
-            artifact_id=(
-                by_id[stage.stage_id].artifact_id if stage.stage_id in by_id else None
-            ),
+            artifact_id=(by_id[stage.stage_id].artifact_id if stage.stage_id in by_id else None),
             placement="tpu" if not specs else "neuron",
         )
         for stage in pipeline.stages
