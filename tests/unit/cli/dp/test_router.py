@@ -155,6 +155,32 @@ def test_run_router_all_success(tmp_path):
     assert s.done == [0, 1, 2, 3, 4] and not s.failed and not s.unfinished
 
 
+def test_run_router_twice_over_the_same_work_dir_regenerates(tmp_path):
+    # Stale claim/done markers must not make the second run report done without working
+    # (the f2b run: a second `--dp 2 --requests` over the same file reported done=2 in 25 s).
+    from difflet.cli.dp.requests_io import read_manifest
+
+    args = _args(work_dir=str(tmp_path / "work"))
+    assert (
+        run_router(args, _requests(3), replica_cores=4, worker_argv_prefix=_stub_prefix(tmp_path))
+        == 0
+    )
+    requests_dir = tmp_path / "work" / "requests"
+    first_done = (requests_dir / "req_0000.done").stat().st_mtime_ns
+    import time
+
+    time.sleep(0.02)
+    assert (
+        run_router(args, _requests(2), replica_cores=4, worker_argv_prefix=_stub_prefix(tmp_path))
+        == 0
+    )
+    s = summarize(requests_dir)
+    assert s.done == [0, 1] and not s.failed and not s.unfinished
+    assert len(read_manifest(requests_dir)) == 2
+    assert (requests_dir / "req_0000.done").stat().st_mtime_ns > first_done
+    assert not (requests_dir / "req_0002.json").exists()
+
+
 def test_run_router_reports_failed_request(tmp_path):
     args = _args(work_dir=str(tmp_path / "work"), dp_schedule="least_loaded")
     rc = run_router(args, _requests(4), replica_cores=4,
