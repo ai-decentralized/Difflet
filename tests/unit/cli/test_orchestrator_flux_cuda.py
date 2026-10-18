@@ -152,8 +152,8 @@ def test_schnell_is_built_from_its_own_repo(recorder, monkeypatch):
     [
         ({"tp_degree": 2}, "F6"),
         ({"sp_enabled": True}, "F6"),
-        ({"cp_degree": 2}, "F2"),
-        ({"cfg_parallel": True}, "F2"),
+        ({"cp_degree": 2}, "F2b"),
+        ({"cfg_parallel": True}, "distilled model"),
         ({"shapes": "1024x1024,768x768"}, "F5b"),
         ({"teacache_cadence": 2}, "F5b"),
         ({"teacache_speedup": 1.5}, "F5b"),

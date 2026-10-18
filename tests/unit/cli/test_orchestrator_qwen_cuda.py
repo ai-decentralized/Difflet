@@ -125,9 +125,9 @@ def test_cache_dir_and_force_reach_from_pretrained(recorder):
         ({"sp_enabled": True}, "F6"),
         ({"teacache_speedup": 1.5}, "F4b"),
         ({"teacache_online_delta": 0.1}, "F4b"),
-        ({"cfg_parallel": True}, "F2"),
+        ({"cfg_parallel": True}, "distilled model"),
         ({"tp_degree": 2}, "F6"),
-        ({"cp_degree": 2}, "F2"),
+        ({"cp_degree": 2}, "F2b"),
     ],
 )
 def test_unsupported_flags_are_refused_before_any_load(recorder, over, follow_up):
@@ -165,7 +165,7 @@ def test_run_refuses_unsupported_flags_before_any_download(recorder, monkeypatch
     )
     with pytest.raises(SystemExit) as exc:
         mod.CudaQwenImageOrchestrator(_args(cp_degree=2)).run()
-    assert "F2" in str(exc.value) and recorder == []
+    assert "F2b" in str(exc.value) and recorder == []
 
 
 def test_guidance_scale_is_refused_not_dropped(recorder):
@@ -186,3 +186,28 @@ def test_teacache_cadence_is_forwarded_as_an_application_kwarg(recorder, tmp_pat
     out = tmp_path / "qwen.png"
     mod.CudaQwenImageOrchestrator(_args(teacache_cadence=2, output=str(out))).generate()
     assert recorder[0][1]["application_kwargs"] == {"teacache_cadence": 2}
+
+
+def test_cuda_pipeline_kwargs_cfg_parallel_defaults_off():
+    """The serving caller passes no ``cfg_parallel`` and keeps the single-branch config."""
+    common = dict(
+        tp_degree=None,
+        height=None,
+        width=None,
+        cache_dir=None,
+        revision=None,
+        force_compile=False,
+        load=False,
+    )
+    assert mod.cuda_pipeline_kwargs(**common)["parallel"].cfg_parallel_enabled is False
+    on = mod.cuda_pipeline_kwargs(**common, cfg_parallel=True)["parallel"]
+    assert on.cfg_parallel_enabled is True and on.tp_degree == 1
+
+
+def test_qwen_is_one_process_and_refuses_cfg_parallel_as_distilled(recorder):
+    assert mod.CudaQwenImageOrchestrator.ACCEPTS_CFG_PARALLEL is False
+    assert mod.CudaQwenImageOrchestrator(_args()).world_size == 1
+    with pytest.raises(SystemExit) as exc:
+        mod.CudaQwenImageOrchestrator(_args(cfg_parallel=True)).compile()
+    assert "--cfg-parallel" in str(exc.value) and "[qwen_image/cuda]" in str(exc.value)
+    assert recorder == []
