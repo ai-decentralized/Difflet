@@ -244,18 +244,23 @@ Edition card): load 703 s cold from the volume (118 GB of fp32 shards cast to bf
 480×832 in 55 s for 40 steps (1.38 s/step, two passes per step), 71.3 GiB peak (73,035 MiB)
 with both experts resident; DiT parity vs diffusers per expert rel_l1 1.051× / 1.043× the bf16
 control (same-dtype 0.870× / 0.819×, cosine 0.9988 / 0.9997); whole-video e2e vs diffusers'
-`WanPipeline` from the same noise PSNR 27.5 dB / cosine 0.9970 (floors 25 dB / 0.99). Diffusers
-generates the same clip in 44.6 s; the 10 s gap is unmeasured (the host latents round trip is far
-too small to explain it) and belongs to F4b. The e2e PSNR is well below Qwen's and Flux's; F1b
-measured the first suspect, the timestep: the CUDA DiT now receives it in fp32
-(`timestep_dtype="float32"`, a per-component property the shared orchestrator reads; Trainium
-and TPU keep their model-dtype cast), which brings each DiT call closer to diffusers (rel_l1
-1.084× → 1.039× the control at timestep 999, where bf16 rounds to 1000) but leaves the 40-step
-trajectory 1.2 dB further away (26.3 dB vs 27.5 dB with the old cast, identical on the
-Workstation and Server Edition cards), so the gap comes from elsewhere — next suspect the CFG
-combine, which diffusers does in bf16 on the device and Difflet in fp32 on the host. Both sides
-decode the VAE in bf16, so it is not a parity suspect. A Wan 2.2 snapshot without
-`transformer_2/` is refused (a partial download), not run on one expert.
+`WanPipeline` from the same noise PSNR 26.3 dB / cosine 0.9961 with the fp32 timestep (27.5 dB /
+0.9970 under Release 1's bf16 cast), floors 25 dB / 0.99. Diffusers generates the same clip in
+44.6 s; the 10 s gap is unmeasured (the host latents round trip is far too small to explain it)
+and belongs to F4b. The e2e PSNR is well below Qwen's and Flux's; F1b measured the first suspect,
+the timestep: the CUDA DiT now receives it in fp32 (`timestep_dtype="float32"`, a per-component
+property the shared orchestrator reads; Trainium and TPU keep their model-dtype cast), which
+brings each DiT call closer to diffusers (rel_l1 1.084× → 1.039× the control at timestep 999,
+where bf16 rounds to 1000) but leaves the 40-step trajectory 1.2 dB further away (26.3 dB vs 27.5
+dB with the old cast; the old-cast `model` variant ran on both the Workstation and the Server
+Edition cards and matched to the digit, the fp32 variant on the Server Edition only), so a
+single-seed A/B does not support the timestep as the gap. Both sides combine CFG in bf16 (Difflet
+on host tensors the DiT returned in bf16, diffusers on the device), so the remaining suspects are
+the scheduler step on the host CPU vs the device, the bf16 latents/text casts, and the
+empty-prompt negative embeds; measure the e2e metric's own noise floor (diffusers vs diffusers
+with a perturbed timestep, several seeds) before chasing any of them. Both sides decode the VAE in
+bf16, so it is not a parity suspect. A Wan 2.2 snapshot without `transformer_2/` is refused (a
+partial download), not run on one expert.
 `Wan-AI/Wan2.1-T2V-14B-Diffusers` is routed to the same path but unverified on a GPU; diffusers'
 Wan 2.1 defaults (50 steps, guidance 5.0) differ from the 40 / 4.0 used here.
 
