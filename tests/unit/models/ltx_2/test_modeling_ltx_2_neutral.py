@@ -25,6 +25,27 @@ def test_modeling_ltx_2_imports_no_backend():
     assert offenders == []
 
 
+def _module_level_imports(path: Path) -> list[str]:
+    names = []
+    for node in ast.parse(path.read_text()).body:
+        if isinstance(node, ast.Import):
+            names += [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            names.append(node.module)
+    return names
+
+
+def test_orchestrator_contract_and_package_import_no_backend():
+    """The orchestrator (``pipeline.py``), the bundle contract and the package ``__init__`` are
+    what the neuron backend imports; at module level none of them reaches NxD, directly or
+    through ``application.py``."""
+    package = _MODELING.parent
+    forbidden = (*_FORBIDDEN, "difflet.models.ltx_2.application")
+    for name in ("pipeline.py", "contract.py", "__init__.py"):
+        offenders = [m for m in _module_level_imports(package / name) if m.startswith(forbidden)]
+        assert offenders == [], name
+
+
 def test_trainium_transformer_reexports_the_modeling_classes():
     trainium = _MODELING.parents[2] / "backends/trainium/ltx_2/transformer.py"
     tree = ast.parse(trainium.read_text())
