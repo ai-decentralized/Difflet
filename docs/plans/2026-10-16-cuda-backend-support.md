@@ -182,7 +182,7 @@ Exit (Release 1 done): Qwen-Image generates a prompt-faithful image on one Pro 6
 - **F5 — Flux.** Requires a Trainium verification path (D13; `trn2.3xlarge`). Split `modeling_flux.py` into neutral modeling + Trainium wrapper; `scripts/flux_smoke.sh` before and after, same cosine; then port with the Phase 4 recipe. Flux is guidance-distilled: no CFG-parallel.
 - **F6 — Tensor parallel across PCIe (need-triggered, D6).** Implemented when a named shape fails to fit one card and after measuring against CP. The Status log records the triggering workload.
 - **F7 — ROCm registration (D11).** `backends/rocm/` registers the shared torch-accelerator code with its own platform module. No new op code expected.
-- **F8 — `difflet-cuda-verify` skill and docs.** CUDA sibling of `.claude/skills/difflet-device-verify/`, written from what F1–F4 actually ran; `docs/verification/` evidence report.
+- **F8 — `difflet-cuda-verify` skill and docs.** CUDA sibling of `.claude/skills/difflet-device-verify/`, written from what F1–F4 actually ran; `docs/verification/` evidence report. *(done 2026-10-18; the skill and the pod tooling are kept internal, the evidence report is summarised in the repo.)*
 
 ---
 

@@ -285,6 +285,12 @@ the router records it. Still refused: context parallel, tensor parallel across P
 `--sp`, `--cfg-parallel` for Qwen-Image and Flux (single-pass / distilled); `--dp` with
 `--cfg-parallel` needs four cards and is unverified.
 
+**Verifying the CUDA backend.** A GPU session runs, per model, the smoke (`difflet run`), the DiT
+parity script under `tests/numerical/` and its gate, and the e2e script under `scripts/` and its
+gate; then `scripts/verify_cli_cuda.py` and the serving smoke. The results — per-gate status, the
+support matrix (PASS / LIMIT / N/A / NOT MEASURED) and the list of what was never run — are
+summarised in `docs/verification/cuda-release1-evidence.md`.
+
 **Serving on CUDA.** `difflet serve` keeps the serving engine's one resident worker
 process; on CUDA that worker holds a single opaque `pipeline` stage —
 `DiffletPipeline.from_pretrained(backend="cuda")` kept loaded, `app.generate()` per request —
