@@ -115,7 +115,7 @@ def test_row_parallel_skip_bias_add_without_bias_returns_none():
 
 
 def test_row_parallel_reduce_output_false_skips_the_all_reduce():
-    # At tp=2 the CUDA all-reduce raises F2, so not raising proves the reduce was skipped.
+    # At tp=2 the CUDA all-reduce raises F6, so not raising proves the reduce was skipped.
     _reinit(MeshSpec(tp=2))
     partial = L.RowParallelLinear(16, 8, bias=True, input_is_parallel=True, reduce_output=False)
     x = torch.randn(4, 8)
@@ -124,7 +124,7 @@ def test_row_parallel_reduce_output_false_skips_the_all_reduce():
     assert torch.allclose(partial(x), F.linear(x, partial.weight) + partial.bias)
 
     reducing = L.RowParallelLinear(16, 8, bias=True, input_is_parallel=True)
-    with pytest.raises(NotImplementedError, match="F2"):
+    with pytest.raises(NotImplementedError, match="F6"):
         reducing(x)
 
 

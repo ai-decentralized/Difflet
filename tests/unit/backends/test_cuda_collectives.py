@@ -1,8 +1,10 @@
-"""CUDA parallel mesh + collectives at world size 1 (CUDA plan Phase 2a, D5).
+"""CUDA parallel mesh + collectives (CUDA plan Phase 2a, D5; follow-up F2).
 
-Mirrors tests/unit/backends/test_tpu_collectives.py. Release 1 runs one process on one
-device: every collective is the identity, and anything that would need a second process
-raises naming follow-up F2 rather than silently running on one rank.
+Mirrors tests/unit/backends/test_tpu_collectives.py. At world size 1 every collective
+is the identity and no ``torch.distributed`` group exists. At world size > 1 the mesh
+builds ``torch.distributed`` groups for the cfg/cp/dp axes (F2; exercised here with a
+fake ``torch.distributed`` and for real under gloo in test_cuda_multirank.py), and
+tensor parallel still raises naming follow-up F6.
 """
 
 import os
@@ -96,16 +98,18 @@ def test_public_surface_matches_the_ops_contract():
         assert hasattr(C, name), name
 
 
-def test_multi_rank_collectives_raise_f2():
+def test_tensor_parallel_collectives_raise_f6():
     pm.init_parallel_mesh(MeshSpec(tp=2))
     t = torch.zeros(2, 4)
     for fn in (
         lambda x: C.gather_tp_dim(x, dim=-1),
         C.reduce_tp,
         lambda x: C.reduce_scatter_to_sequence_parallel_region(x, dim=0),
+        lambda x: C.gather_from_sequence_parallel_region(x, dim=0),
         lambda x: C.gather_from_tensor_model_parallel_region_with_dim(x, 1),
+        C.reduce_from_tensor_model_parallel_region,
     ):
-        with pytest.raises(NotImplementedError, match="F2"):
+        with pytest.raises(NotImplementedError, match="F6"):
             fn(t)
 
 
@@ -126,11 +130,116 @@ def test_reduce_from_tensor_model_parallel_region_takes_a_process_group():
     t = torch.arange(8.0).reshape(2, 4)
     assert C.reduce_from_tensor_model_parallel_region(t, process_group=None) is t
     assert C.reduce_from_tensor_model_parallel_region(t, process_group=[[0]]) is t
-    with pytest.raises(NotImplementedError, match="F2"):
+    with pytest.raises(NotImplementedError, match="F6"):
         C.reduce_from_tensor_model_parallel_region(t, process_group=[[0, 1]])
 
 
 def test_reduce_from_tensor_model_parallel_region_defaults_to_the_tp_group():
     pm.init_parallel_mesh(MeshSpec(tp=2))
-    with pytest.raises(NotImplementedError, match="F2"):
+    with pytest.raises(NotImplementedError, match="F6"):
         C.reduce_from_tensor_model_parallel_region(torch.zeros(2, 4), process_group=None)
+
+
+# --------------------------------------------------------------------------
+# World size > 1 under a fake torch.distributed (F2). The real collectives run
+# under gloo in test_cuda_multirank.py; these pin the group bookkeeping.
+# --------------------------------------------------------------------------
+
+
+class _FakeGroup:
+    def __init__(self, ranks):
+        self.ranks = list(ranks)
+
+    def __repr__(self):
+        return f"_FakeGroup({self.ranks})"
+
+
+@pytest.fixture
+def fake_dist(monkeypatch):
+    """A 4-rank ``torch.distributed`` that records ``new_group`` calls."""
+    state = {"world": 4, "new_group": []}
+
+    def new_group(ranks=None, **kw):
+        state["new_group"].append(list(ranks))
+        return _FakeGroup(ranks)
+
+    monkeypatch.setattr(torch.distributed, "is_available", lambda: True)
+    monkeypatch.setattr(torch.distributed, "is_initialized", lambda: True)
+    monkeypatch.setattr(
+        torch.distributed,
+        "get_world_size",
+        lambda group=None: (state["world"] if group is None else len(group.ranks)),
+    )
+    monkeypatch.setattr(torch.distributed, "new_group", new_group)
+    monkeypatch.setattr(
+        torch.distributed, "get_process_group_ranks", lambda group: list(group.ranks)
+    )
+    return state
+
+
+def test_world_size_one_creates_no_process_group(monkeypatch):
+    def _no_new_group(*a, **kw):
+        raise AssertionError("world size 1 must not create a torch.distributed group")
+
+    monkeypatch.setattr(torch.distributed, "new_group", _no_new_group)
+    pm.init_parallel_mesh(MeshSpec(tp=1))
+    assert pm.get_cfg_group() == [[0]] and pm.get_cp_group() == [[0]]
+
+
+def test_mesh_builds_one_group_per_replica_list_on_every_rank(fake_dist, monkeypatch):
+    monkeypatch.setenv("RANK", "1")
+    pm.init_parallel_mesh(MeshSpec(cfg=2, cp=2))
+    # Every rank enters new_group for every ranks list, axes in cfg, cp, dp order.
+    assert fake_dist["new_group"] == [[0, 2], [1, 3], [0, 1], [2, 3]]
+    # Each rank keeps the group it belongs to; replica lists are unchanged.
+    assert pm.get_cfg_group().ranks == [1, 3]
+    assert pm.get_cp_group().ranks == [0, 1]
+    assert pm.axis_replica_groups("cfg") == [[0, 2], [1, 3]]
+    assert pm.get_cp_mesh() == [[0, 1], [2, 3]]
+
+
+def test_trivial_axes_get_no_group(fake_dist, monkeypatch):
+    fake_dist["world"] = 2
+    monkeypatch.setenv("RANK", "0")
+    pm.init_parallel_mesh(MeshSpec(dp=2))
+    assert fake_dist["new_group"] == [[0, 1]]  # the dp axis only
+    assert pm.get_cfg_group() == [[0], [1]] and pm.get_cp_group() == [[0], [1]]
+
+
+def test_mesh_refuses_tensor_parallel_across_processes(fake_dist, monkeypatch):
+    fake_dist["world"] = 2
+    monkeypatch.setenv("RANK", "0")
+    with pytest.raises(NotImplementedError, match="F6"):
+        pm.init_parallel_mesh(MeshSpec(tp=2))
+    assert fake_dist["new_group"] == []
+    with pytest.raises(RuntimeError, match="not initialized"):
+        pm.get_mesh_spec()
+
+
+def test_mesh_world_size_must_match_the_process_group(fake_dist, monkeypatch):
+    monkeypatch.setenv("RANK", "0")
+    with pytest.raises(ValueError, match="world size"):
+        pm.init_parallel_mesh(MeshSpec(cfg=2))  # fake world is 4
+
+
+def test_destroy_drops_the_groups(fake_dist, monkeypatch):
+    monkeypatch.setenv("RANK", "0")
+    pm.init_parallel_mesh(MeshSpec(cfg=2, cp=2))
+    pm.destroy_parallel_mesh()
+    assert pm._AXIS_GROUPS == {}
+
+
+def test_collectives_accept_a_process_group(fake_dist, monkeypatch):
+    monkeypatch.setenv("RANK", "0")
+    pm.init_parallel_mesh(MeshSpec(cfg=2, cp=2))
+    t = torch.arange(8.0).reshape(2, 4)
+    one = _FakeGroup([0])
+    assert C._group_size(one) == 1 and C._group_ranks(one) == [0]
+    assert C.gather_from_tensor_model_parallel_region_with_dim(t, 1, process_group=one) is t
+    assert C.reduce_from_tensor_model_parallel_region(t, process_group=one) is t
+    assert C.scatter_to_process_group_spmd(t, 1, 0, process_group=one) is t
+    cfg = pm.get_cfg_group()
+    assert C._group_size(cfg) == 2 and C._group_ranks(cfg) == [0, 2]
+    assert torch.equal(C.scatter_to_process_group_spmd(t, 1, 1, process_group=cfg), t[:, 2:])
+    # A replica list resolves to the list this rank belongs to.
+    assert C._group_size([[0, 2], [1, 3]]) == 2 and C._group_ranks([[0, 2], [1, 3]]) == [0, 2]

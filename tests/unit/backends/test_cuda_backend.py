@@ -36,11 +36,37 @@ def test_prepare_runtime_without_cuda_raises_clear_error(monkeypatch):
         registry.get_backend("cuda").prepare_runtime(parallel=object())
 
 
-def test_prepare_runtime_multi_process_raises_f2(monkeypatch):
+def _fake_distributed(monkeypatch, *, initialised: bool):
+    """Stand in for torch.distributed so the torchrun path runs on a CPU host."""
+    calls = []
     monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "set_device", lambda d: calls.append(("set_device", d)))
+    monkeypatch.setattr(torch.distributed, "is_available", lambda: True)
+    monkeypatch.setattr(torch.distributed, "is_initialized", lambda: initialised)
+    monkeypatch.setattr(
+        torch.distributed,
+        "init_process_group",
+        lambda backend=None, **kw: calls.append(("init_process_group", backend)),
+    )
+    return calls
+
+
+def test_prepare_runtime_multi_process_initialises_nccl_and_binds_local_rank(monkeypatch):
+    calls = _fake_distributed(monkeypatch, initialised=False)
     monkeypatch.setenv("WORLD_SIZE", "2")
-    with pytest.raises(NotImplementedError, match="F2"):
-        registry.get_backend("cuda").prepare_runtime(parallel=object())
+    monkeypatch.setenv("RANK", "1")
+    monkeypatch.setenv("LOCAL_RANK", "1")
+    registry.get_backend("cuda").prepare_runtime(parallel=object())
+    # The device is bound before the NCCL communicator is created.
+    assert calls == [("set_device", 1), ("init_process_group", "nccl")]
+
+
+def test_prepare_runtime_multi_process_reuses_an_existing_process_group(monkeypatch):
+    calls = _fake_distributed(monkeypatch, initialised=True)
+    monkeypatch.setenv("WORLD_SIZE", "2")
+    monkeypatch.setenv("LOCAL_RANK", "0")
+    registry.get_backend("cuda").prepare_runtime(parallel=object())
+    assert calls == [("set_device", 0)]
 
 
 def test_prepare_runtime_single_process_sets_local_rank_device(monkeypatch):
@@ -49,6 +75,11 @@ def test_prepare_runtime_single_process_sets_local_rank_device(monkeypatch):
     monkeypatch.setenv("LOCAL_RANK", "0")
     calls = []
     monkeypatch.setattr(torch.cuda, "set_device", lambda d: calls.append(d))
+
+    def _no_init(*a, **kw):
+        raise AssertionError("world size 1 must not initialise torch.distributed")
+
+    monkeypatch.setattr(torch.distributed, "init_process_group", _no_init)
     registry.get_backend("cuda").prepare_runtime(parallel=object())
     assert calls == [0]
 

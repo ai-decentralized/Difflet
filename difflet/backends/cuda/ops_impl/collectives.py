@@ -1,13 +1,15 @@
-"""Collectives for the CUDA backend — identity at world size 1.
+"""Collectives for the CUDA backend.
 
-Release 1 of the CUDA plan runs one process on one device (D5), so every
-collective here either returns its input (tp=1) or takes this rank's local
-slice (scatters, which were always local narrows on Trainium and TPU too).
-Anything that would need a second rank raises ``NotImplementedError`` naming
-follow-up F2, where NCCL process groups are built from the same replica lists
-``parallel_mesh`` produces. Semantics match ``difflet/backends/cpu/ops_impl/
-collectives.py`` line for line at tp=1 and ``difflet/backends/tpu/ops_impl/
-collectives.py`` for the surface and error behaviour.
+At world size 1 (D5) every collective returns its input or takes this rank's
+local slice (scatters, which were always local narrows on Trainium and TPU too).
+At world size > 1 (follow-up F2) the group-taking collectives run
+``torch.distributed`` all-gather / all-reduce over the group ``parallel_mesh``
+built (``get_cfg_group()`` / ``get_cp_group()``). Tensor parallel across
+processes — the tp-group collectives and the sequence-parallel operators —
+raises ``NotImplementedError`` naming follow-up F6. Semantics match
+``difflet/backends/cpu/ops_impl/collectives.py`` line for line at tp=1 and
+``difflet/backends/tpu/ops_impl/collectives.py`` for the surface and error
+behaviour.
 """
 
 from __future__ import annotations
@@ -28,17 +30,42 @@ from difflet.backends.cuda.ops_impl.parallel_mesh import (  # noqa: F401  (re-ex
     init_parallel_mesh,
 )
 
-_F2 = "CUDA multi-process collectives are follow-up F2 of the CUDA backend plan"
+_F6 = "tensor parallel across PCIe is follow-up F6 of the CUDA backend plan"
 
 
 def _not_single_process(what: str):
-    raise NotImplementedError(f"{what}: {_F2} (Release 1 runs one process, one device)")
+    raise NotImplementedError(
+        f"{what}: {_F6} (the CUDA backend runs tp=1; multi-process collectives take "
+        "the torch.distributed group from get_cfg_group() / get_cp_group())"
+    )
 
 
 def _global_rank() -> int:
     from difflet.backends.cuda.ops_impl.parallel_mesh import _runtime_ordinal
 
     return _runtime_ordinal()
+
+
+def _is_replica_lists(group) -> bool:
+    return isinstance(group, (list, tuple))
+
+
+def _group_size(group) -> int:
+    """Size of a replica-list partition or of a ``torch.distributed`` group."""
+    if _is_replica_lists(group):
+        return len(group[0])
+    return torch.distributed.get_world_size(group)
+
+
+def _group_ranks(group) -> list[int]:
+    """Global ranks of this rank's group: its replica list, or the group's ranks."""
+    if _is_replica_lists(group):
+        rank = _global_rank()
+        for ranks in group:
+            if rank in ranks:
+                return list(ranks)
+        raise ValueError(f"rank {rank} is in none of the replica groups {group}")
+    return list(torch.distributed.get_process_group_ranks(group))
 
 
 # --------------------------------------------------------------------------
@@ -138,16 +165,24 @@ def get_cp_rank_spmd(global_rank):
 
 
 def gather_from_tensor_model_parallel_region_with_dim(tensor, gather_dim: int, process_group=None):
-    groups = get_tp_groups() if process_group is None else process_group
-    if len(groups[0]) == 1:
+    """All-gather over ``process_group`` (default the TP group), concatenated in
+    group-rank order along ``gather_dim``."""
+    group = get_tp_groups() if process_group is None else process_group
+    size = _group_size(group)
+    if size == 1:
         return tensor
-    return _not_single_process("gather_from_tensor_model_parallel_region_with_dim")
+    if _is_replica_lists(group):
+        return _not_single_process("gather_from_tensor_model_parallel_region_with_dim")
+    tensor = tensor.contiguous()
+    parts = [torch.empty_like(tensor) for _ in range(size)]
+    torch.distributed.all_gather(parts, tensor, group=group)
+    return torch.cat(parts, dim=gather_dim)
 
 
 def scatter_to_process_group_spmd(tensor, partition_dim: int, rank, process_group=None):
     """Take this rank's slice along ``partition_dim`` — local narrow, no collective."""
-    groups = get_tp_groups() if process_group is None else process_group
-    group_size = len(groups[0])
+    group = get_tp_groups() if process_group is None else process_group
+    group_size = _group_size(group)
     if group_size == 1:
         return tensor
     if isinstance(rank, torch.Tensor):
@@ -161,15 +196,20 @@ def scatter_to_process_group_spmd(tensor, partition_dim: int, rank, process_grou
 
 
 def reduce_from_tensor_model_parallel_region(tensor, process_group=None):
-    """All-reduce over ``process_group`` (replica lists, default the TP group).
+    """Sum-all-reduce over ``process_group`` (default the TP group), on a copy.
 
-    ``process_group`` is what a ``RowParallelLinear`` exposes as
-    ``tensor_parallel_group`` (Flux's single block merges two reduces into this one).
+    ``process_group`` is replica lists or a ``torch.distributed`` group; it is what
+    a ``RowParallelLinear`` exposes as ``tensor_parallel_group`` (Flux's single
+    block merges two reduces into this one).
     """
-    groups = get_tp_groups() if process_group is None else process_group
-    if len(groups[0]) == 1:
+    group = get_tp_groups() if process_group is None else process_group
+    if _group_size(group) == 1:
         return tensor
-    return _not_single_process("reduce_from_tensor_model_parallel_region")
+    if _is_replica_lists(group):
+        return _not_single_process("reduce_from_tensor_model_parallel_region")
+    out = tensor.clone()
+    torch.distributed.all_reduce(out, op=torch.distributed.ReduceOp.SUM, group=group)
+    return out
 
 
 def scatter_to_tensor_model_parallel_region(tensor, dim: int = -1):
