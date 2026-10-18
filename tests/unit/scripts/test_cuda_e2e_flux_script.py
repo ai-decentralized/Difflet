@@ -21,3 +21,11 @@ def test_metrics_are_the_qwen_oracle_s():
     # One metric definition for both e2e gates.
     assert flux_e2e.image_metrics is qwen_e2e.image_metrics
     assert flux_e2e._save is qwen_e2e._save
+
+
+def test_timings_record_carries_load_generate_and_peak(monkeypatch):
+    # F4b: the Flux oracle records per-side timings as the Wan oracle does.
+    rec = flux_e2e.timings_record(load_s=12.345, generate_s=16.78, peak_bytes=68_440_000_000)
+    assert rec == {"load_s": 12.3, "generate_s": 16.8, "peak_alloc_gb": 68.44}
+    rec = flux_e2e.timings_record(load_s=1.0, generate_s=2.0, peak_bytes=None)
+    assert rec["peak_alloc_gb"] is None
