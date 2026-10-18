@@ -30,7 +30,7 @@ and again on f9 (Server) [F9].
 |---|---|---|---|
 | smoke (`difflet run`, by eye) | PASS [F3] | PASS [F5] | PASS [F1] |
 | DiT parity (D14, three gates) | PASS incl. padded prompt [F3, F4] | PASS [F5] | PASS both experts + rounding block [F1, F1b] |
-| e2e vs diffusers | PASS, floors 35 dB / 0.998 [F3] | PASS, floors 35 dB / 0.998 [F5] | PASS, floors 25 dB / 0.99 [F1, F1b]; seeds 0–2 26.30–28.89 dB, overlapping diffusers' own noise floor 23.79–28.62 dB [F9] |
+| e2e vs diffusers | PASS, floors 35 dB / 0.998 [F3] | PASS, floors 35 dB / 0.998 [F5] | PASS, floors 25 dB / 0.99 [F1, F1b]; seeds 0–2 26.30–28.89 dB, overlapping diffusers' own noise floor 23.79–28.62 dB [F9]; gate relative to the floor when recorded, 2.0 dB headroom on the mean [F9b] |
 | CLI matrix cell (`verify_cli_cuda.py`) | PASS [F3, F5, F9] | PASS [F5, F9] | PASS [F9] |
 | `difflet serve` | PASS; LIMIT on concurrency (429 `queue_timeout` after the 30 s default) [F3b] | N/A · refused by name, F5b | N/A · refused by name, F1b |
 | `--torch-compile` | PASS, opt-in [F4] | N/A · refused, F5b | N/A · refused, F1b |
@@ -91,7 +91,13 @@ from 25 / 0.99 after the first measurement, F3 and F5); Wan **≥ 25 dB, ≥ 0.9
 measurement left 2.5 dB, F1). The Wan gate judges the `float32` timestep variant by name, and
 every seed of a multi-seed JSON. Wan's e2e over seeds with the metric's own **noise floor** (F9:
 per seed, diffusers again with both experts' timestep rounded through bf16, exact vs perturbed
-recorded, not gated; `run_gates.sh`'s e2e is one seed without it):
+recorded; `run_gates.sh`'s e2e is one seed without it). When the result carries the floor on
+every seed the Wan gate is stated **relative to it** (F9b, as D14 states the parity gates): the
+mean PSNR over seeds ≥ the floor's mean − 1.21 dB (a 1.15× deviation ratio in dB) and the mean
+cosine deviation ≤ 1.15× the floor's; every seed ≥ the floor's worst seed − 1.21 dB; a loose
+20 dB / 0.98 absolute floor. The 25 dB / 0.99 floors then step aside; without a floor they judge
+every seed and the relative test is skipped with that reason. F9's JSON: mean 27.20 dB against
+25.17 required, worst seed 26.30 against 22.58.
 
 ```bash
 HF_HOME=$H HF_HUB_OFFLINE=1 DIFFLET_BACKEND=cuda PYTHONPATH=$PWD .venv/bin/python \
@@ -184,9 +190,10 @@ that spread, so the gap to Qwen/Flux need not indicate a Difflet defect (n = 3: 
 not the same, and it cannot show there is none). The floor is an upper bound on the
 timestep-cast effect (it also absorbs run-to-run nondeterminism of the perturbed run; the exact
 Difflet and diffusers runs are deterministic, seed 0's PSNR is identical across three runs). The
-floors stay 25 dB / 0.99 (F9 R1); recommended follow-up: state the Wan gate relative to the
-measured noise floor — its worst seed (23.8 dB) is below 25 dB, so seed luck could fail a correct
-build. The 10 s generate gap to diffusers is unmeasured. Artifacts:
+floors stayed 25 dB / 0.99 in F9 (R1); because the floor's worst seed (23.8 dB) is below 25 dB,
+so seed luck could fail a correct build, F9b states the Wan gate relative to the measured noise
+floor whenever the result carries it (the floors paragraph above). The 10 s generate gap to
+diffusers is unmeasured. Artifacts:
 `artifacts/cuda-release1/wan/`, `wan/f1b/`, `f9/`
 (`cuda_e2e_wan_noise.json`, per-seed first frames, `gates-wan/`).
 

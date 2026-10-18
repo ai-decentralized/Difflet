@@ -42,7 +42,11 @@ Difflet traceback, a shape mismatch or a gate miss on a healthy card is a candid
   F1b A/B moved Wan's PSNR by 1.2 dB, and its "refuted" had to be corrected to "not supported by
   a single-seed A/B". F9 measured Wan's: diffusers vs its bf16-rounded timestep 23.8–28.6 dB over
   seeds 0–2, Difflet vs diffusers 26.3–28.9 dB — overlapping it, so the e2e number alone points to
-  no Difflet defect (n = 3: it cannot show there is none).
+  no Difflet defect (n = 3: it cannot show there is none). Since F9b the Wan gate is stated
+  relative to that floor when the result carries it (the mean over seeds within 1.21 dB of the
+  floor's mean, every seed within 1.21 dB of the floor's worst seed, cosine deviation within
+  1.15×, a loose 20 dB / 0.98 floor): a relative-gate failure names the gate (A: the mean, B: a
+  seed) and the floor numbers it was judged against — read those before blaming Difflet.
 
 ## The bug protocol (when it really is a bug)
 

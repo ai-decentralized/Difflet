@@ -212,7 +212,18 @@ at a time. Pixel metrics are in [0, 1]. Floors (in `tests/numerical/test_cuda_*e
 Qwen and Flux PSNR ≥ **35 dB**, cosine ≥ **0.998**, tightened from 25 / 0.99 after the first
 measurement (F3, F5). Wan stays at ≥ **25 dB**, ≥ **0.99** (kept in F1; the gate judges the
 `float32` variant by name since F1b, and every seed of a multi-seed JSON since F9; the floors
-did not move in F9, ruling R1).
+did not move in F9, ruling R1). Since F9b, when the result carries the noise floor on every seed
+(`--seeds … --noise-floor`), the Wan gate is stated **relative to it**, the way D14 states the
+parity gates: (A) the mean PSNR over seeds is at least the floor's mean minus 20·log10(1.15) =
+1.21 dB (the 1.15× deviation ratio in dB) and the mean cosine deviation 1 − cosine at most 1.15×
+the floor's; (B) every seed is at least the floor's worst seed minus 1.21 dB, its cosine
+deviation at most 1.15× the floor's worst; (C) a loose absolute floor of 20 dB / 0.98 on every
+seed. The 25 dB / 0.99 floors then step aside (the floor's own worst seed, 23.79 dB, is under
+them, so seed luck could fail a correct build); without a floor they judge every seed as before
+and the relative test is skipped with that reason (`run_gates.sh wan`'s one-seed e2e, the F1b
+JSON). On the F9 measurement: gate A 27.20 dB against 25.17 required (floor mean 26.38 − 1.21),
+cosine deviation 0.00358 against 0.00537 allowed; gate B 22.58 dB required (floor min 23.79 −
+1.21), worst Difflet seed 26.30; 0.00857 allowed, worst 0.00459.
 
 | Model / variant | Steps / shape | PSNR | Cosine | mean / max abs | Floors | Difflet / diffusers generate | Pod (edition) | Artifact | Entry |
 |---|---|---|---|---|---|---|---|---|---|
@@ -275,9 +286,10 @@ matched by seed Difflet is further from diffusers than the perturbed run on seed
 with n = 3 this shows the gap need not indicate a defect; it cannot show there is none. By eye, seed 2's exact and
 perturbed first frames (23.8 dB) are the same tabby cat in the same pose with different fur and
 foliage texture (the perturbed one also loses the dark collar, which Difflet's frame keeps).
-Ruling R1: the floors (25 dB / 0.99) are unchanged. Recommended follow-up: state the Wan e2e
-gate relative to the measured noise floor — the floor's own worst seed (23.79 dB) is below the
-25 dB gate, so seed luck could fail a correct build.
+Ruling R1 (F9): the floors (25 dB / 0.99) are unchanged; the floor's own worst seed (23.79 dB)
+is below the 25 dB gate, so seed luck could fail a correct build. F9b acted on that: with the
+floor in the result the gate is stated relative to it (the e2e floors paragraph above); this JSON
+passes it with 2.0 dB of headroom on the mean and 3.7 dB on the worst seed.
 
 **How to inspect manually.**
 
@@ -287,10 +299,10 @@ DIFFLET_CUDA_E2E_RESULT=$A/cuda_e2e_qwen_image.json pytest -q tests/numerical/te
 DIFFLET_CUDA_E2E_RESULT=$A/f4/e2e_trimmed.json pytest -q tests/numerical/test_cuda_e2e_vs_diffusers.py         # 2 passed
 DIFFLET_CUDA_E2E_RESULT=$A/f4/e2e_compiled.json pytest -q tests/numerical/test_cuda_e2e_vs_diffusers.py        # 2 passed
 DIFFLET_CUDA_FLUX_E2E_RESULT=$A/flux/cuda_e2e_flux.json pytest -q tests/numerical/test_cuda_flux_e2e_vs_diffusers.py  # 2 passed
-DIFFLET_CUDA_WAN_E2E_RESULT=$A/wan/f1b/cuda_e2e_wan.json pytest -q tests/numerical/test_cuda_wan_e2e_vs_diffusers.py  # 4 passed
-DIFFLET_CUDA_WAN_E2E_RESULT=$A/f9/gates-wan/cuda_e2e_wan.json pytest -q tests/numerical/test_cuda_wan_e2e_vs_diffusers.py  # 4 passed
-# the noise floor: every seed gated, the floor and the aggregates printed (-rA)
-DIFFLET_CUDA_WAN_E2E_RESULT=$A/f9/cuda_e2e_wan_noise.json pytest -q -rA tests/numerical/test_cuda_wan_e2e_vs_diffusers.py  # 4 passed
+DIFFLET_CUDA_WAN_E2E_RESULT=$A/wan/f1b/cuda_e2e_wan.json pytest -q tests/numerical/test_cuda_wan_e2e_vs_diffusers.py  # 4 passed, 1 skipped (no noise floor: 25 dB / 0.99 judged)
+DIFFLET_CUDA_WAN_E2E_RESULT=$A/f9/gates-wan/cuda_e2e_wan.json pytest -q tests/numerical/test_cuda_wan_e2e_vs_diffusers.py  # 4 passed, 1 skipped
+# the noise floor: the relative gate (F9b) prints its thresholds, the floor and the aggregates (-rA)
+DIFFLET_CUDA_WAN_E2E_RESULT=$A/f9/cuda_e2e_wan_noise.json pytest -q -rA tests/numerical/test_cuda_wan_e2e_vs_diffusers.py  # 5 passed
 python3 -c "import json; d=json.load(open('artifacts/cuda-release1/f9/cuda_e2e_wan_noise.json'))
 for s, v in d['per_seed'].items(): print(s, round(v['variants']['float32']['metrics']['psnr_db'], 2), round(v['noise_floor']['metrics']['psnr_db'], 2))
 print(d['aggregate'])"
@@ -565,6 +577,11 @@ above. Spurious infrastructure events are kept and labelled.
     "Switch to eu" the session ran on a one-GPU eu-3 pod without a volume (rulings R2, Wan
     symlinked into the volume's hub, and R3, pause at the end, did not apply); the pod was
     terminated, read back gone *[10-18 F9]*.
+28. the F9b commit — the Wan e2e gate stated relative to the measured noise floor when the result
+    carries it (mean over seeds within 1.21 dB of the floor's mean, every seed within 1.21 dB of
+    the floor's worst seed, cosine deviation within 1.15×, a loose 20 dB / 0.98 absolute floor);
+    the 25 dB / 0.99 floors judge results without a floor as before. No GPU run: the F9 JSONs
+    re-gated on the Mac *[10-18 F9b]*.
 
 ## Support matrix
 
@@ -575,7 +592,7 @@ to the CUDA path but never ran: it is NOT MEASURED in every row and has no colum
 |---|---|---|---|
 | smoke (`difflet run`, by eye) | PASS [10-16, 10-17 F3] | PASS [10-18 F5] | PASS [10-18 F1] |
 | DiT parity (D14, three gates) | PASS incl. padded prompt [F3, F4] | PASS [F5] | PASS both experts + rounding block [F1, F1b] |
-| e2e vs diffusers | PASS, 35 dB / 0.998 [F3] | PASS, 35 dB / 0.998 [F5] | PASS, 25 dB / 0.99 [F1, F1b]; seeds 0–2 overlap diffusers' own noise floor [F9] |
+| e2e vs diffusers | PASS, 35 dB / 0.998 [F3] | PASS, 35 dB / 0.998 [F5] | PASS, 25 dB / 0.99 [F1, F1b]; seeds 0–2 overlap diffusers' own noise floor [F9]; gate relative to the floor, 2.0 dB headroom on the mean [F9b] |
 | CLI matrix cell | PASS [F3, F5, F9] | PASS [F5, F9] | PASS [F9] |
 | `difflet serve` | PASS; LIMIT on concurrency (429 after 30 s) [F3b] | N/A · refused by name, F5b | N/A · refused by name, F1b |
 | `--torch-compile` | PASS, opt-in [F4] | N/A · refused, F5b | N/A · refused, F1b |
@@ -603,7 +620,7 @@ Difflet bf16 against diffusers fp32 and bf16 on identical inputs; gates 1.15× /
 Same initial noise through both pipelines; pixel PSNR / cosine.
 | Qwen-Image | FLUX.1-dev | Wan 2.2 |
 |---|---|---|
-| PASS · 41.40 dB / 0.99972 | PASS · 40.35 dB / 0.99980 | PASS · 26.30 dB / 0.99609 (1.3 dB above the floor); seeds 0–2 26.30–28.89 dB vs diffusers' own noise floor 23.79–28.62 dB (F9) |
+| PASS · 41.40 dB / 0.99972 | PASS · 40.35 dB / 0.99980 | PASS · 26.30 dB / 0.99609 (1.3 dB above the floor); seeds 0–2 26.30–28.89 dB vs diffusers' own noise floor 23.79–28.62 dB (F9); relative gate mean 27.20 dB vs 25.17 required (F9b) |
 
 ### CLI matrix   `scripts/verify_cli_cuda.py`
 Download → compile → timed generate per cell, `results.json`.
@@ -671,9 +688,9 @@ Also unmeasured, and recorded where they arose: Workstation vs Server characteri
 50.9 vs 42.9 s Server; F4b); Flux peak GPU memory; F2 `--dp 1` requests 1 and 2 against their
 references; the origin of GPU 0's extra ~555 MiB under `--cfg-parallel`; the Trainium
 byte-identity of the Flux split (D13, needs a trn2); the split of the Wan noise floor into the
-timestep effect and run-to-run GPU nondeterminism (F9). Recommended follow-up (F9, not done
-under ruling R1): state the Wan e2e gate relative to the measured noise floor, whose worst seed
-(23.79 dB) is below the 25 dB gate.
+timestep effect and run-to-run GPU nondeterminism (F9). F9's recommended follow-up — state the
+Wan e2e gate relative to the measured noise floor, whose worst seed (23.79 dB) is below the
+25 dB gate — is done (F9b, ledger line 28, the e2e section).
 
 ## Pod cost
 

@@ -266,9 +266,12 @@ defect (the ranges are not the same, and n = 3 cannot show there is none); the n
 floor is an upper bound on the timestep-cast effect (it also absorbs run-to-run nondeterminism
 of the perturbed run; the exact runs are deterministic). The former suspects (the host scheduler
 step, the bf16 latents/text casts, the empty-prompt negative embeds) are not needed to explain
-the gap, nor excluded by it. The floors
-stay 25 dB / 0.99; the noise floor's worst seed is below 25 dB, so a gate stated relative to it
-is the recommended follow-up. Both sides decode the VAE in bf16, so it is not a parity suspect.
+the gap, nor excluded by it. Because the noise
+floor's worst seed is below 25 dB, the gate is stated relative to the floor when the result
+carries it (F9b: the mean PSNR over seeds within 20·log10(1.15) = 1.21 dB of the floor's mean,
+every seed within 1.21 dB of the floor's worst seed, the cosine deviation within 1.15×, and a
+loose 20 dB / 0.98 absolute floor; the F9 run clears the mean by 2.0 dB); without a floor the
+25 dB / 0.99 floors judge every seed. Both sides decode the VAE in bf16, so it is not a parity suspect.
 A Wan 2.2 snapshot without `transformer_2/` is refused (a partial download), not run on one
 expert.
 `Wan-AI/Wan2.1-T2V-14B-Diffusers` is routed to the same path but unverified on a GPU; diffusers'
