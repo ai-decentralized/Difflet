@@ -21,9 +21,9 @@ several --shapes, --cp-mode ring, --sp, --cfg-parallel without --guidance-scale 
 --cp-degree > 1) and a TP degree whose DiT shard cannot fit one core are refused here, before
 torchrun starts. --cp-degree > 1 (gather_kv or ulysses) shards the video tokens over the CP group
 (tp x cp ranks).
---device-text-encoder runs Gemma-3's language model on the device, TP-sharded beside the DiT, with
-the connectors on rank 0's host; the driver keeps the host encoder when it cannot fit
-(``_place_text_encoder``).
+Gemma-3's language model runs on the device by default, TP-sharded beside the DiT, with the
+connectors on rank 0's host (``--host-text-encoder`` keeps it on rank 0's host); the driver moves
+it to the host itself when it cannot fit, at tp2 (``_place_text_encoder``).
 """
 
 from __future__ import annotations
@@ -141,8 +141,16 @@ def _torchrun_conflicts(args: argparse.Namespace, *, generating: bool) -> list[s
 
 
 #: Where the neuron backend decodes when neither --host-vae nor --device-vae is given: on the
-#: host in the driver, the Trainium decode's placement and dtype.
+#: host in the driver, the Trainium decode's placement and dtype. Measured on a trn2.3xlarge
+#: (tp4, 480x704x49, warm): the vae stage's launch and load (about 18 s) cost more than the
+#: device decode saves (2.8 s against the host's 13.9 s): 80.0 s against 78.1 s e2e.
 _DEVICE_VAE_DEFAULT = False
+#: Where the Gemma-3 encode runs when --host-text-encoder is not given (and it fits beside the
+#: DiT): on the device. Measured on a trn2.3xlarge (tp4, 480x704x49, warm): encode 5.5 s against
+#: 13.5 s on the host, e2e 78.1 s against 110.8 s (the host path also loads the 50 GB fp32
+#: checkpoint into host memory and spends a warm-up encode), compile 119 s against 424 s; final
+#: latents cos 0.99969 to the host encoder's.
+_DEVICE_TEXT_ENCODER_DEFAULT = True
 
 
 def _decodes_on_device(args: argparse.Namespace) -> bool:
@@ -412,17 +420,22 @@ class LTX2Orchestrator(ModelOrchestrator):
         raise SystemExit(2)
 
     def _place_text_encoder(self) -> None:
-        """With --device-text-encoder, keep the Gemma-3 encode on rank 0's host when its language
-        model cannot fit on the device beside the DiT at this TP degree, and print one line
-        saying so (as the Qwen-Image driver does). At tp4 the encoder adds about 5.5 GiB of bf16
-        weights per core beside 8.8 GiB of DiT; a tp2 group (--cfg-parallel or DP replicas on
-        four cores) doubles both, over a 24 GiB core (``difflet/backends/neuron/ltx_2/hbm.py``).
-        Weights that are not local yet leave the flag alone (the application's own check still
-        refuses). The setting lands on ``self.args``, so ``_shared_cli_args`` hands it to the
-        stage. Torch-free."""
+        """Put the Gemma-3 encode on the device (``_DEVICE_TEXT_ENCODER_DEFAULT``) unless
+        --host-text-encoder is given, and keep it on rank 0's host when its language model
+        cannot fit on the device beside the DiT at this TP degree, printing one line saying so
+        (as the Wan driver does). At tp4 the encoder adds about 5.5 GiB of bf16 weights per core
+        beside 8.8 GiB of DiT; a tp2 group (--cp-degree 2, --cfg-parallel or DP replicas on four
+        cores) doubles both, over a 24 GiB core (``difflet/backends/neuron/ltx_2/hbm.py``).
+        Weights that are not local yet leave the choice alone (the application's own check still
+        refuses). The setting lands on ``self.args`` (``device_text_encoder``), so
+        ``_shared_cli_args`` hands it to the stage. Torch-free."""
         args = self.args
-        if not getattr(args, "device_text_encoder", False):
+        if getattr(args, "host_text_encoder", False):
+            args.device_text_encoder = False
             return
+        if not (getattr(args, "device_text_encoder", False) or _DEVICE_TEXT_ENCODER_DEFAULT):
+            return
+        args.device_text_encoder = True
         from difflet.backends.neuron.hbm import GIB
         from difflet.backends.neuron.ltx_2.hbm import device_text_encoder_fits
 
@@ -437,7 +450,7 @@ class LTX2Orchestrator(ModelOrchestrator):
         args.device_text_encoder = False
         print(f"[ltx_2] Gemma-3 on the device needs at least {estimate / GIB:.1f} GiB per core "
               f"beside the DiT at tp={tp}, over the {limit / GIB:.1f} GiB budget: encoding on "
-              "rank 0's host instead (without --device-text-encoder)", flush=True)
+              "rank 0's host instead (--host-text-encoder)", flush=True)
 
     def _prepare_torchrun(self, *, generating: bool) -> None:
         self._reject_unsupported_torchrun_options(generating=generating)
