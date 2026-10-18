@@ -1,0 +1,52 @@
+{
+  "model": "wan",
+  "model_id": "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+  "model_path": "/data/hf/hub/models--Wan-AI--Wan2.2-T2V-A14B-Diffusers/snapshots/5be7df9619b54f4e2667b2755bc6a756675b5cd7/",
+  "prompt": "a photorealistic cat walking through a sunlit garden",
+  "steps": 40,
+  "guidance_scale": 4.0,
+  "guidance_scale_2": 3.0,
+  "seed": 0,
+  "shape": [
+    480,
+    832,
+    9
+  ],
+  "latent_shape": [
+    1,
+    16,
+    3,
+    60,
+    104
+  ],
+  "video_shape": [
+    9,
+    480,
+    832,
+    3
+  ],
+  "device": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+  "torch": "2.11.0+cu128",
+  "metrics": {
+    "psnr_db": 27.541036709948607,
+    "cosine": 0.9970406648545576,
+    "mean_abs": 0.0237719470859706,
+    "max_abs": 1.0
+  },
+  "timings": {
+    "difflet": {
+      "load_s": 417.6,
+      "generate_s": 55.3,
+      "peak_alloc_gb": 68.44
+    },
+    "diffusers": {
+      "load_s": 452.3,
+      "generate_s": 44.6,
+      "peak_alloc_gb": 68.56
+    }
+  },
+  "images": {
+    "difflet": "/home/user/logs/f1/wan_e2e_difflet_frame0.png",
+    "diffusers": "/home/user/logs/f1/wan_e2e_diffusers_frame0.png"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "model_id": "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+  "load_s": 703.1,
+  "generate_s": 55.1,
+  "per_step_s": 1.38,
+  "steps": 40,
+  "num_frames": 9,
+  "seed": 0,
+  "output": "/home/user/logs/f1/wan.mp4",
+  "log": "/home/user/logs/f1/cuda-smoke-wan-20261018-111717.log",
+  "peak_gpu_mem_mib": 73035
+}
