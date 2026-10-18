@@ -343,8 +343,9 @@ core id), behind `difflet/serving/engines/replicated.py`, which routes each requ
 with the fewest pending requests; two concurrent 50-step requests then finish in one
 request-time (16.7 s wall on two Server Edition cards, images identical to the one-GPU run) and a
 third waits for a free replica. It is refused off CUDA and above the visible GPU count before any
-download; `--dp-degree 1` is the one-worker path above, unchanged. Trainium and TPU serving are
-untouched.
+download; at `--dp-degree 1` the engine path is the one-worker path above, and the worker now
+pins its GPU (`CUDA_VISIBLE_DEVICES=0`) instead of inheriting the parent's environment. Trainium
+and TPU serving are untouched.
 
 Not in Release 1 (follow-ups F1–F8 in the plan; Wan, Flux, serving and the second card have
 landed as F1, F5, F3b and F2 for the shapes and models above, with their own follow-ups):

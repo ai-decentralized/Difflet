@@ -95,10 +95,9 @@ def test_loop_probe_counts_the_dit_calls_and_separates_host_time_from_dit_time(t
     )
     # 4 steps x (cond + uncond) with true CFG (guidance 4.0 / 3.0): 8 DiT calls.
     assert probe["steps"] == 4 and probe["dit_calls"] == 8
-    assert (
-        probe["experts"] == {"transformer": 2, "transformer_2": 6}
-        or sum(probe["experts"].values()) == 8
-    )
+    # UniPC (flow shift 3) at 4 steps: timesteps 1000 and 900 are at or above the 0.875
+    # boundary (high-noise expert), 750 and 500 below (low-noise): the real switch runs.
+    assert probe["experts"] == {"transformer": 4, "transformer_2": 4}
     assert probe["total_ms"] >= probe["dit_ms"] >= 0.0
     assert probe["host_ms"] == probe["total_ms"] - probe["dit_ms"]
     assert probe["per_step_ms"] == probe["total_ms"] / 4

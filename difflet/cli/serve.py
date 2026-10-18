@@ -12,6 +12,7 @@ import sys
 from typing import Any
 
 from difflet.serving.artifact_store import S3ArtifactStore
+from difflet.serving.errors import DiffletServingError
 from difflet.serving.factory import build_serving_stack
 from difflet.serving.openai.api_server import create_app
 from difflet.serving.options import (
@@ -224,7 +225,13 @@ def run(args: argparse.Namespace) -> None:
     artifact_store = S3ArtifactStore.from_env_if_configured(
         client_timeout=options.artifact_store_timeout
     )
-    stack = build_serving_stack(options)
+    try:
+        stack = build_serving_stack(options)
+    except DiffletServingError as exc:
+        # A startup refusal (an unsupported profile, --dp-degree off CUDA or above the GPU
+        # count) is an answer, not a crash: one line, exit 1, as the argparse validators do.
+        print(f"Error: {exc.message}", file=sys.stderr)
+        raise SystemExit(1)
     app = create_app(
         options=options,
         resolved_model=stack.resolved_model,

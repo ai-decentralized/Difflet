@@ -104,7 +104,7 @@ F9 entry.
 | Wan 2.2 T2V-A14B | 40 / 480×832 × 9 frames | 703.1 s (**cold volume**) | 55.1 s (1.38) | 73,035 MiB (`nvidia-smi`) | f5b (**Workstation**) | `wan/smoke_timings.json`, `wan/wan_40steps_9frames.mp4`, `wan/wan_40steps_frame0.png` | 10-18 F1 |
 | Wan 2.2, serial on one card | 40 / 480×832 × 9 | 55.9 s | 50.9 s (1.27) | — | f2 (Server) | `f2/timings.txt` | 10-18 F2 |
 | Wan 2.2, `run_gates.sh wan` smoke | 40 / 480×832 × 9 | 47.7 s | 51.0 s (1.27) | 73,035 MiB (`nvidia-smi`) | f9 (Server) | `f9/gates-wan/cuda-smoke-wan-20261018-193636.json` | 10-18 F9 |
-| Wan 2.2, `run_gates.sh wan` smoke after the fused q/k norm (83d244a) | 40 / 480×832 × 9 | 16.7 s (page cache) | 48.5 s (1.21) | — | f2b (Server) | `f2b/gates-wan/cuda-smoke-wan-20261018-220419.json` | 10-18 F2b/F4b |
+| Wan 2.2, `run_gates.sh wan` smoke after the fused q/k norm (83d244a) | 40 / 480×832 × 9 | 16.7 s (page cache) | 48.5 s (1.21) | 72,491 MiB (`nvidia-smi`) | f2b (Server) | `f2b/gates-wan/cuda-smoke-wan-20261018-220419.json` | 10-18 F2b/F4b |
 
 Footnotes. All paths are under `artifacts/cuda-release1/`. Release 1's 0.41 s/step became
 0.52 s/step in F3 (+27 %): the padding mask made the flash kernel ineligible. F4's trim
@@ -410,14 +410,15 @@ Pod f2b (2 × **Server**, PCIe `PHB`), checkout 3d8b026+ (branch `feat/cuda-f2b-
 `HF_HOME=~/hf`, offline *[10-18 F2b/F4b]*. `difflet serve --dp-degree N` keeps N complete
 resident workers, one GPU each (the worker exports `CUDA_VISIBLE_DEVICES` from its plan's core
 id), behind one `ReplicatedServingEngine` that routes each request to the replica with the fewest
-pending requests; `--dp-degree 1` is the F3b path unchanged. 50 steps, 1024², seed 0, the same
+pending requests; at `--dp-degree 1` the engine path is F3b's, and the worker now pins its GPU
+(`CUDA_VISIBLE_DEVICES=0`) where F3b's inherited the parent's environment. 50 steps, 1024², seed 0, the same
 prompt; every image compared by bytes with the `--dp 1` run's first image.
 
 | Run (`scripts/cuda_serve_smoke.py`) | ready | requests | wall | identical to the dp 1 image | Artifact |
 |---|---|---|---|---|---|
 | `--dp 1 --requests 2` (reference) | 44.0 s | 16.7 / 16.7 s (serial) | — | reference (md5 `c74b4d32…`) | `f2b/serve/serve_dp1/serve_timings.json`, `qwen_50steps.png` |
 | `--dp 2 --concurrent 2` | 30.0 s (two loads in parallel; likely the page cache after the dp 1 run — not measured) | 16.7 / 16.7 s | **16.7 s** | both | `f2b/serve/serve_dp2/serve_timings.json` |
-| `--dp 2 --concurrent 3 --queue-timeout 120` | 30.0 s | 16.7 / 16.7 / 33.3 s | 33.3 s (the third queued behind a running one) | all three | `f2b/serve/serve_dp2c3/serve_timings.json` |
+| `--dp 2 --concurrent 3 --queue-timeout 120` | 14.0 s (third start of the same snapshot; page cache — not measured) | 16.7 / 16.7 / 33.3 s | 33.3 s (the third queued behind a running one) | all three | `f2b/serve/serve_dp2c3/serve_timings.json` |
 | GPU memory while serving (42 s into the 3-request run) | | one worker per card, 60,893 MiB each (pids 3088 / 3089), GPU 0 at 98 % serving the third | | | `f2b/serve_dp2c3_nvsmi.log` |
 | `difflet serve --model-id Qwen/Qwen-Image --dp-degree 3` | `400 feature_not_supported: --dp-degree 3 exceeds the 2 visible GPU(s) (CUDA_VISIBLE_DEVICES); one resident replica needs one GPU`, exit 1, before any download | | | | `f2b/serve/serve_dp3_refusal.log` |
 | `DIFFLET_BACKEND=cpu difflet serve … --dp-degree 2` | `400 feature_not_supported: --dp-degree 2: data-parallel serving replicas (one resident worker per GPU) exist on the CUDA backend only (plan follow-up F2b) …` | | | | status-log only |
@@ -537,7 +538,7 @@ shows `NCCL version 2.28.9+cuda12.9` and both ranks report `gathered [0.0, 1.0] 
 | Qwen-Image, 4 serial `difflet run` (seeds 0–3) | 17.6–44.0 s each | 16.8–17.3 s each | — | references | — | `f2/timings.txt`; 190 s total status-log only |
 | Qwen-Image `--dp 1 --requests` (one card, batch) | 8.6 s (once) | 16.7–16.8 s per image | 79 s wall (status-log only) | requests 0 and 3 byte-identical (`identical_bytes: true`); 1 and 2 not compared | — | `f2/compare_qwen.json` `[4]`, `[5]` |
 | Qwen-Image `--dp 2 --requests` (router `worker 0: GPUs 0`, `worker 1: GPUs 1`) | 21.4 / 21.5 s in parallel | 16.7–16.8 s per image | **58 s wall** vs 190 s serial (3.3×, computed) and 79 s `--dp 1` (1.36×, computed) | all four byte-identical | — | `f2/compare_qwen.json` `[0]`–`[3]`, `f2/qwen_dp2_request0_50steps.png` |
-| Wan 2.2, 2 serial `difflet run` (seeds 0, 1), pod f2b, checkout 83d244a | 16-ish s (page cache; `serial_seed0.log`) | 44.5 / 44.6 s | — | references | — | `f2b/wan_dp/compare_wan_dp.json` `serial_generate_s`, `serial_seed0.log` *[10-18 F2b/F4b]* |
+| Wan 2.2, 2 serial `difflet run` (seeds 0, 1), pod f2b, checkout 83d244a | 12.9 s (seed 0; seed 1 not recorded) | 44.5 / 44.6 s | — | references | — | `f2b/wan_dp/compare_wan_dp.json` `serial_generate_s`, `serial_seed0.log` *[10-18 F2b/F4b]* |
 | Wan 2.2 `--dp 2 --requests` (two 40-step requests, seeds 0, 1), pod f2b | 20.6 / 20.8 s in parallel | 51.2 / 51.2 s (slower than 44.5 s alone: two replicas at once — contention not measured) | **76 s wall** vs 120 s serial (1.58×, computed) | both videos bit-identical (max_abs 0) | — | `f2b/wan_dp/compare_wan_dp.json` `comparisons[0..1]`, `dp2.log` |
 
 The extra ~555 MiB on GPU 0 is likely the parent's CUDA context; it was not measured separately.
@@ -673,6 +674,13 @@ above. Spurious infrastructure events are kept and labelled.
     "Switch to eu" the session ran on a one-GPU eu-3 pod without a volume (rulings R2, Wan
     symlinked into the volume's hub, and R3, pause at the end, did not apply); the pod was
     terminated, read back gone *[10-18 F9]*.
+28. the F9b commit — the Wan e2e gate stated relative to the measured noise floor when the result
+    carries it (mean over seeds within 1.21 dB of the floor's mean, every seed within 1.21 dB of
+    the floor's worst seed, cosine deviation within 1.15² = 1.3225×, a loose 20 dB / 0.98
+    absolute floor; a floor under the loose floor fails as "the oracle moved"); the 25 dB / 0.99
+    floors judge results without a floor as before. No GPU run: the F9 JSONs re-gated on the
+    Mac *[10-18 F9b]*.
+
 29. `3d8b026` — F2b task 1: `difflet serve --dp-degree N` on CUDA, N resident workers one GPU
     each behind `ReplicatedServingEngine`; the worker pins `CUDA_VISIBLE_DEVICES` from its plan;
     refused off CUDA and above the GPU count before any download *[10-18 F2b/F4b]*.
@@ -686,13 +694,6 @@ above. Spurious infrastructure events are kept and labelled.
     run, so a second `--dp N --requests` over the same file reports `done=N` in seconds without
     generating; cleared by hand on f2b (F2b observation); Wan replicas generating at once take
     51.2 s each vs 44.5 s alone (unmeasured cause) *[10-18 F2b/F4b]*.
-28. the F9b commit — the Wan e2e gate stated relative to the measured noise floor when the result
-    carries it (mean over seeds within 1.21 dB of the floor's mean, every seed within 1.21 dB of
-    the floor's worst seed, cosine deviation within 1.15² = 1.3225×, a loose 20 dB / 0.98
-    absolute floor; a floor under the loose floor fails as "the oracle moved"); the 25 dB / 0.99
-    floors judge results without a floor as before. No GPU run: the F9 JSONs re-gated on the
-    Mac *[10-18 F9b]*.
-
 ## Support matrix
 
 Model × feature, from the entries above. Wan 2.1 (`Wan-AI/Wan2.1-T2V-14B-Diffusers`) is routed
@@ -824,7 +825,7 @@ from recorded times and prices.
 | `difflet-cuda-f1b` | 13:58 → 14:24 UTC (~26 min) | 5.30 | ~$2.30 | terminated, gone |
 | `difflet-cuda-f2` | 15:52 → 16:21 UTC (~29 min) | 5.30 | ~$2.60 (recorded) | terminated, gone |
 | `difflet-cuda-f9` | 18:44 → 19:50 UTC (~66 min) | 2.65 | ~$2.90 (computed) | terminated, gone |
-| `difflet-cuda-f2b` (2 GPUs, eu-2) | 17:27 → 18:11 UTC (~44 min) | 5.30 | ~$3.90 (computed) | terminated, gone |
+| `difflet-cuda-f2b` (2 GPUs, eu-2) | 21:27 → 22:11 UTC (the status-log entry's 17:27 → 18:11 are EDT; ~44 min) | 5.30 | ~$3.90 (computed) | terminated, gone |
 | `difflet-cache` volume | ongoing | $0.0698/GB/month × 200 GB | ~$13.96/month | attached to f5b |
 
 A paused pod releases its card and stops GPU billing; the container disk is lost, while the volume

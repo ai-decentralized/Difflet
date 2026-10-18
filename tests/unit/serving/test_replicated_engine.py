@@ -112,6 +112,37 @@ def test_dispatch_goes_to_the_replica_with_the_fewest_pending_then_round_robin()
     assert b.calls == ["req-0", "req-2"] and c.calls == ["req-1", "req-3"]
 
 
+def test_dispatch_skips_a_replica_that_is_not_ready():
+    # A recovering replica answers 503 at once, so its pending count never grows; it must not
+    # be ranked while a ready one exists.
+    a, b = _StubReplica("a"), _StubReplica("b")
+    b.ready = False
+    engine = ReplicatedServingEngine([a, b])
+
+    async def _run():
+        for i in range(3):
+            await engine.generate(_request(f"req-{i}", "x"))
+
+    asyncio.run(_run())
+    assert a.calls == ["req-0", "req-1", "req-2"] and b.calls == []
+    # No ready replica at all: the request still reaches one (and gets its own 503 there).
+    a.ready = False
+    asyncio.run(engine.generate(_request("req-3", "x")))
+    assert "req-3" in a.calls + b.calls
+
+
+def test_a_replica_that_fails_to_start_shuts_the_others_down():
+    class _Failing(_StubReplica):
+        async def start(self) -> None:
+            raise RuntimeError("no GPU 1")
+
+    a, b = _StubReplica("a"), _Failing("b")
+    engine = ReplicatedServingEngine([a, b])
+    with pytest.raises(RuntimeError, match="no GPU 1"):
+        asyncio.run(engine.start())
+    assert a.started and a.stopped and b.stopped
+
+
 def test_lifecycle_fans_out_and_aggregates_state():
     a, b = _StubReplica("a"), _StubReplica("b")
     engine = ReplicatedServingEngine([a, b])

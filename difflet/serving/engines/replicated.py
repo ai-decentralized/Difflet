@@ -64,9 +64,14 @@ class ReplicatedServingEngine:
         return sum(int(replica.pending_requests) for replica in self.replicas)
 
     def _pick(self) -> Any:
+        """The ready replica with the fewest pending requests, ties round-robin. A replica that
+        is recovering or dead answers 503 at once and so never accumulates pending requests;
+        ranking it would send it every other request while the live card idles. With no ready
+        replica the caller still gets the resident engine's own 503."""
         n = len(self.replicas)
         order = [(self._next + i) % n for i in range(n)]
-        index = min(order, key=lambda i: int(self.replicas[i].pending_requests))
+        candidates = [i for i in order if self.replicas[i].ready] or order
+        index = min(candidates, key=lambda i: int(self.replicas[i].pending_requests))
         self._next = (index + 1) % n
         return self.replicas[index]
 
