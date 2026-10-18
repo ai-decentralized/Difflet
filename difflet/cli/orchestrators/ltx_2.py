@@ -17,9 +17,11 @@ decoder never shares a core or a process with the DiT. ``compile`` is the stage'
 (it fills the NEFF cache) and its stage manifest. --cache-dir becomes DIFFLET_COMPILE_CACHE unless
 that is exported. DP replicas (--dp, --requests) are separate torchrun launches whose rank 0
 claims the requests, as for Wan and Qwen-Image. The options the ranks do not run (TeaCache,
-several --shapes, --cp-degree > 1, --sp, --device-text-encoder, --cfg-parallel without
---guidance-scale > 1) and a TP degree whose DiT shard cannot fit one core are refused here, before
-torchrun starts.
+several --shapes, --cp-degree > 1, --sp, --cfg-parallel without --guidance-scale > 1) and a TP
+degree whose DiT shard cannot fit one core are refused here, before torchrun starts.
+--device-text-encoder runs Gemma-3's language model on the device, TP-sharded beside the DiT, with
+the connectors on rank 0's host; the driver keeps the host encoder when it cannot fit
+(``_place_text_encoder``).
 """
 
 from __future__ import annotations
@@ -109,8 +111,7 @@ def _guidance(args: argparse.Namespace) -> float:
 def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
     """The options the torchrun (neuron) ranks do not run, as the command line names them:
     every torchrun backend's (TeaCache), several --shapes (one static shape per process), and
-    the parallel modes LTX-2 has no implementation of on any backend (--cp-degree > 1, --sp) or
-    on this one (--device-text-encoder). Torch-free."""
+    the parallel modes LTX-2 has no implementation of (--cp-degree > 1, --sp). Torch-free."""
     found = torchrun_unsupported_options(args)
     shapes = getattr(args, "shapes", None)
     if shapes and len([token for token in str(shapes).split(",") if token.strip()]) > 1:
@@ -119,8 +120,6 @@ def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
         found.append("--cp-degree > 1")
     if getattr(args, "sp_enabled", False):
         found.append("--sp")
-    if getattr(args, "device_text_encoder", False):
-        found.append("--device-text-encoder")
     return found
 
 
@@ -407,9 +406,38 @@ class LTX2Orchestrator(ModelOrchestrator):
               file=sys.stderr, flush=True)
         raise SystemExit(2)
 
+    def _place_text_encoder(self) -> None:
+        """With --device-text-encoder, keep the Gemma-3 encode on rank 0's host when its language
+        model cannot fit on the device beside the DiT at this TP degree, and print one line
+        saying so (as the Qwen-Image driver does). At tp4 the encoder adds about 5.5 GiB of bf16
+        weights per core beside 8.8 GiB of DiT; a tp2 group (--cfg-parallel or DP replicas on
+        four cores) doubles both, over a 24 GiB core (``difflet/backends/neuron/ltx_2/hbm.py``).
+        Weights that are not local yet leave the flag alone (the application's own check still
+        refuses). The setting lands on ``self.args``, so ``_shared_cli_args`` hands it to the
+        stage. Torch-free."""
+        args = self.args
+        if not getattr(args, "device_text_encoder", False):
+            return
+        from difflet.backends.neuron.hbm import GIB
+        from difflet.backends.neuron.ltx_2.hbm import device_text_encoder_fits
+
+        try:
+            model_dir = self._model_dir()
+        except (OSError, RuntimeError):
+            return
+        tp = args.tp_degree or 4
+        fits, estimate, limit = device_text_encoder_fits(model_dir, tp_degree=tp)
+        if fits:
+            return
+        args.device_text_encoder = False
+        print(f"[ltx_2] Gemma-3 on the device needs at least {estimate / GIB:.1f} GiB per core "
+              f"beside the DiT at tp={tp}, over the {limit / GIB:.1f} GiB budget: encoding on "
+              "rank 0's host instead (without --device-text-encoder)", flush=True)
+
     def _prepare_torchrun(self, *, generating: bool) -> None:
         self._reject_unsupported_torchrun_options(generating=generating)
         self._check_dit_fits()
+        self._place_text_encoder()
         root_compile_cache_at_cache_dir(getattr(self.args, "cache_dir", None), tag="ltx_2")
 
     def _compile_torchrun(self) -> None:
@@ -564,6 +592,8 @@ class LTX2Orchestrator(ModelOrchestrator):
             sp_enabled=getattr(args, "sp_enabled", False),
         )
         kwargs = dict(_TORCHRUN_APPLICATION_KWARGS)
+        if getattr(args, "device_text_encoder", False):
+            kwargs["text_encoder_device"] = "neuron"
         for app_key, arg_key in (("teacache_speedup", "teacache_speedup"),
                                  ("teacache_cadence", "teacache_cadence"),
                                  ("teacache_online_delta_alpha", "teacache_online_delta"),
@@ -648,6 +678,9 @@ class LTX2Orchestrator(ModelOrchestrator):
             "toolchain": stage_toolchain_versions(),
             "backend": torchrun_backend(),
             "exec_mode": resolve_exec_mode(envs.DIFFLET_EXEC_MODE),
+            # Additive: only a device-encoder stage carries the key.
+            **({"text_encoder_device": "neuron"}
+               if getattr(args, "device_text_encoder", False) else {}),
         }
 
     def _stage_compiled_dir(self, args: argparse.Namespace) -> Path:
@@ -676,6 +709,8 @@ class LTX2Orchestrator(ModelOrchestrator):
             parts.append("--cfg-parallel")
         if getattr(a, "sp_enabled", False):
             parts.append("--sp")
+        if getattr(a, "device_text_encoder", False):
+            parts.append("--device-text-encoder")
         for flag, name in (("--teacache-cadence", "teacache_cadence"),
                            ("--teacache-online-delta", "teacache_online_delta"),
                            ("--teacache-speedup", "teacache_speedup"),
