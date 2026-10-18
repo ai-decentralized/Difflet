@@ -14,6 +14,7 @@ from difflet.backends._torch_megatron.norm import (  # noqa: F401
     LayerNorm,
     RMSNorm,
     CustomRMSNorm,
+    rms_norm_fp32,
 )
 
-__all__ = ["CustomRMSNorm", "LayerNorm", "RMSNorm"]
+__all__ = ["CustomRMSNorm", "LayerNorm", "RMSNorm", "rms_norm_fp32"]

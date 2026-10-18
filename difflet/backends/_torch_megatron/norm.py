@@ -33,4 +33,18 @@ class RMSNorm(nn.Module):
 
 CustomRMSNorm = RMSNorm
 
-__all__ = ["CustomRMSNorm", "LayerNorm", "RMSNorm"]
+
+def rms_norm_fp32(x: torch.Tensor, weight: torch.Tensor | None, eps: float) -> torch.Tensor:
+    """RMSNorm over the last dim with fp32 statistics, fp32 normalisation and fp32 affine,
+    the result cast back to ``x.dtype`` — diffusers' ``torch.nn.RMSNorm`` numerics, and the
+    op ``WanAttention``'s across-heads q/k norm reduces to at tp=1. This is
+    the reference: the same ops in the same order on every backend that has no fused
+    kernel, so the CPU oracle, Trainium and TPU keep today's bits."""
+    sq = x.float().pow(2).sum(dim=-1, keepdim=True)
+    x_normed = x.float() * torch.rsqrt(sq / x.shape[-1] + eps)
+    if weight is not None:
+        x_normed = x_normed * weight.float()
+    return x_normed.to(x.dtype)
+
+
+__all__ = ["CustomRMSNorm", "LayerNorm", "RMSNorm", "rms_norm_fp32"]
