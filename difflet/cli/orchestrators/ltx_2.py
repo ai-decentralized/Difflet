@@ -17,8 +17,10 @@ decoder never shares a core or a process with the DiT. ``compile`` is the stage'
 (it fills the NEFF cache) and its stage manifest. --cache-dir becomes DIFFLET_COMPILE_CACHE unless
 that is exported. DP replicas (--dp, --requests) are separate torchrun launches whose rank 0
 claims the requests, as for Wan and Qwen-Image. The options the ranks do not run (TeaCache,
-several --shapes, --cp-degree > 1, --sp, --cfg-parallel without --guidance-scale > 1) and a TP
-degree whose DiT shard cannot fit one core are refused here, before torchrun starts.
+several --shapes, --cp-mode ring, --sp, --cfg-parallel without --guidance-scale > 1 or with
+--cp-degree > 1) and a TP degree whose DiT shard cannot fit one core are refused here, before
+torchrun starts. --cp-degree > 1 (gather_kv or ulysses) shards the video tokens over the CP group
+(tp x cp ranks).
 --device-text-encoder runs Gemma-3's language model on the device, TP-sharded beside the DiT, with
 the connectors on rank 0's host; the driver keeps the host encoder when it cannot fit
 (``_place_text_encoder``).
@@ -111,13 +113,13 @@ def _guidance(args: argparse.Namespace) -> float:
 def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
     """The options the torchrun (neuron) ranks do not run, as the command line names them:
     every torchrun backend's (TeaCache), several --shapes (one static shape per process), and
-    the parallel modes LTX-2 has no implementation of (--cp-degree > 1, --sp). Torch-free."""
+    the parallel modes LTX-2 has no implementation of (--cp-mode ring, --sp). Torch-free."""
     found = torchrun_unsupported_options(args)
     shapes = getattr(args, "shapes", None)
     if shapes and len([token for token in str(shapes).split(",") if token.strip()]) > 1:
         found.append("--shapes with more than one shape")
-    if (getattr(args, "cp_degree", None) or 1) > 1:
-        found.append("--cp-degree > 1")
+    if (getattr(args, "cp_degree", None) or 1) > 1 and getattr(args, "cp_mode", None) == "ring":
+        found.append("--cp-mode ring")
     if getattr(args, "sp_enabled", False):
         found.append("--sp")
     return found
@@ -130,6 +132,8 @@ def _torchrun_conflicts(args: argparse.Namespace, *, generating: bool) -> list[s
     conflicts = []
     if getattr(args, "host_vae", False) and getattr(args, "device_vae", False):
         conflicts.append("--host-vae and --device-vae are mutually exclusive")
+    if getattr(args, "cfg_parallel", False) and (getattr(args, "cp_degree", None) or 1) > 1:
+        conflicts.append("--cfg-parallel and --cp-degree > 1 are mutually exclusive")
     if generating and getattr(args, "cfg_parallel", False) and _guidance(args) <= 1.0:
         conflicts.append("--cfg-parallel splits the two branches of classifier-free guidance; "
                          "LTX-2 runs them only with --guidance-scale > 1")
@@ -374,8 +378,9 @@ class LTX2Orchestrator(ModelOrchestrator):
             raise SystemExit(2)
 
     def _replica_cores(self) -> int:
-        """Cores of one generate launch: tp, doubled by --cfg-parallel."""
-        return (self.args.tp_degree or 4) * (2 if getattr(self.args, "cfg_parallel", False) else 1)
+        """Cores of one generate launch: tp x cp, doubled by --cfg-parallel."""
+        return ((self.args.tp_degree or 4) * (self.args.cp_degree or 1)
+                * (2 if getattr(self.args, "cfg_parallel", False) else 1))
 
     def _model_dir(self) -> str:
         from difflet.pipeline.path_resolver import resolve_model_path
@@ -588,6 +593,7 @@ class LTX2Orchestrator(ModelOrchestrator):
         parallel = DiffletParallelConfig(
             tp_degree=args.tp_degree or 4,
             cp_degree=args.cp_degree or 1,
+            cp_mode=getattr(args, "cp_mode", "gather_kv") or "gather_kv",
             cfg_parallel_enabled=getattr(args, "cfg_parallel", False),
             sp_enabled=getattr(args, "sp_enabled", False),
         )
@@ -671,6 +677,8 @@ class LTX2Orchestrator(ModelOrchestrator):
             "component": "ltx_2_generate",
             "model_id": _HF_MODEL_ID,
             "tp": args.tp_degree or 4,
+            "cp": args.cp_degree or 1,
+            "cp_mode": str(getattr(args, "cp_mode", "gather_kv") or "gather_kv"),
             "cfg_parallel": bool(getattr(args, "cfg_parallel", False)),
             "dtype": "bfloat16",
             "text_seq_len": 1024,
@@ -695,6 +703,7 @@ class LTX2Orchestrator(ModelOrchestrator):
             "--model-id", _HF_MODEL_ID,
             "--tp-degree", str(a.tp_degree or 4),
             "--cp-degree", str(a.cp_degree or 1),
+            "--cp-mode", str(getattr(a, "cp_mode", "gather_kv") or "gather_kv"),
             "--height", str(height),
             "--width", str(width),
             "--num-frames", str(num_frames),

@@ -67,8 +67,9 @@ def tiny(tmp_path_factory):
                            audio=audio, video_tp=video_tp, audio_tp=audio_tp)
 
 
-def _run(tiny, *, world_size=1, tp=1, exec_mode="eager", num_layers=None, cfg=False):
-    return run_ranks(l1_ltx2_worker, tiny.dir, tp, exec_mode, num_layers, cfg,
+def _run(tiny, *, world_size=1, tp=1, exec_mode="eager", num_layers=None, cfg=False,
+         cp_mode="gather_kv"):
+    return run_ranks(l1_ltx2_worker, tiny.dir, tp, exec_mode, num_layers, cfg, cp_mode,
                      world_size=world_size, env=OFFLINE)
 
 
@@ -127,7 +128,11 @@ def test_config_defaults_are_ltx_2_and_match_the_trainium_geometry():
         ({"gated_attn": True}, NotImplementedError, "gated attention"),
         ({"perturbed_attn": True}, NotImplementedError, "STG"),
         ({"dp_degree": 2}, NotImplementedError, "separate replicas"),
-        ({"context_parallel_enabled": True}, NotImplementedError, "context parallelism"),
+        ({"context_parallel_enabled": True, "cp_mode": "ring"}, NotImplementedError, "ring"),
+        ({"context_parallel_enabled": True, "cp_degree": 4}, ValueError, "does not divide"),
+        ({"context_parallel_enabled": True, "cp_degree": 2, "cfg_parallel_enabled": True},
+         ValueError, "mutually exclusive"),
+        ({"cp_degree": 2}, ValueError, "needs context_parallel_enabled"),
         ({"sp_enabled": True}, NotImplementedError, "sequence parallelism"),
     ],
 )
@@ -142,7 +147,7 @@ def test_application_refuses_a_disagreeing_parallel_config(tiny):
         NeuronLtx2TransformerApplication(model_path=tiny.transformer, config=config,
                                          parallel=DiffletParallelConfig(), dtype=torch.float32,
                                          device="cpu")
-    with pytest.raises(NotImplementedError, match="cp_degree=2"):
+    with pytest.raises(ValueError, match="context_parallel_enabled=False but the parallel"):
         NeuronLtx2TransformerApplication(
             model_path=tiny.transformer, config=tiny_ltx2_config(tp_degree=2),
             parallel=DiffletParallelConfig(tp_degree=2, cp_degree=2), dtype=torch.float32,
@@ -219,7 +224,34 @@ def test_num_layers_override_loads_the_first_blocks(tiny):
     _assert_replicated_and_close([result], video, audio)
 
 
-# ---- (c) CFG parallelism -------------------------------------------------------------------
+# ---- (c) context and CFG parallelism -------------------------------------------------------
+
+
+@pytest.mark.parametrize(("tp", "cp_mode"), [(1, "gather_kv"), (1, "ulysses"),
+                                              (2, "gather_kv"), (2, "ulysses")])
+def test_context_parallel_shards_the_video_tokens(tiny, tp, cp_mode):
+    """CP2 over the 18 video tokens: each rank's blocks get 9 video tokens and the whole audio
+    stream; the gathered output matches diffusers (with the TP path's bf16 RoPE at tp2)."""
+    world = 2 * tp
+    results = _run(tiny, world_size=world, tp=tp, cp_mode=cp_mode)
+    video_ref, audio_ref = (tiny.video, tiny.audio) if tp == 1 else (tiny.video_tp, tiny.audio_tp)
+    _assert_replicated_and_close(results, video_ref, audio_ref)
+    mode = "ulysses" if cp_mode == "ulysses" else "gather"
+    for result in results:
+        assert result["block_tokens"] == [[TINY_VIDEO_SEQ_LEN // 2, TINY_AUDIO_SEQ_LEN]] * 3
+        assert result["kv_modes"] == {"attn1": mode, "video_to_audio_attn": "gather",
+                                      "audio_attn1": None, "attn2": None, "audio_attn2": None,
+                                      "audio_to_video_attn": None}
+
+
+def test_context_parallel_compiles_one_graph(tiny):
+    eager = _run(tiny, world_size=4, tp=2)
+    compiled = _run(tiny, world_size=4, tp=2, exec_mode="compile")
+    for e, c in zip(eager, compiled):
+        assert c["unique_graphs_after_warmup"] == 1 == c["unique_graphs_after_forwards"]
+        assert c["graph_breaks"] == 0
+        torch.testing.assert_close(torch.tensor(c["video"]), torch.tensor(e["video"]),
+                                   atol=ATOL, rtol=RTOL)
 
 
 def test_cfg_parallel_splits_the_pair_and_gathers_both_branches(tiny):
