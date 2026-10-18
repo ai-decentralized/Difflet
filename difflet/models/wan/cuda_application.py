@@ -34,6 +34,7 @@ from typing import Any
 import torch
 
 from difflet.models.wan.dit_config import WanDiTConfig
+from difflet.models.wan.pipeline import _read_boundary_ratio
 
 DEFAULT_STEPS = 40  # diffusers' WanPipeline default
 DEFAULT_GUIDANCE_SCALE = 4.0  # Wan 2.2 high-noise stage
@@ -195,17 +196,25 @@ class CudaWanApplication(torch.nn.Module):
         self.transformer = CudaWanTransformerApplication(
             model_path=self.transformer_path, config=self.config, device=self.device
         )
-        if self.enable_transformer_2 and os.path.exists(
-            os.path.join(self.transformer_2_path, "config.json")
-        ):
-            # Both A14B experts share one config, but read the second one's own config.json
-            # anyway: a variant where they diverge would otherwise load against the wrong
-            # geometry.
-            self.transformer_2 = CudaWanTransformerApplication(
-                model_path=self.transformer_2_path,
-                config=self._expert_config(self.transformer_2_path),
-                device=self.device,
-            )
+        if self.enable_transformer_2:
+            if os.path.exists(os.path.join(self.transformer_2_path, "config.json")):
+                # Both A14B experts share one config, but read the second one's own
+                # config.json anyway: a variant where they diverge would otherwise load
+                # against the wrong geometry.
+                self.transformer_2 = CudaWanTransformerApplication(
+                    model_path=self.transformer_2_path,
+                    config=self._expert_config(self.transformer_2_path),
+                    device=self.device,
+                )
+            elif _read_boundary_ratio(model_path) is not None:
+                # boundary_ratio marks a two-expert (Wan 2.2) snapshot; without transformer_2
+                # the low-noise steps would silently run on the high-noise expert.
+                raise FileNotFoundError(
+                    f"{self.transformer_2_path!r} is missing: {model_path!r} is a two-expert "
+                    "Wan 2.2 snapshot (model_index.json has boundary_ratio), so this is a "
+                    "partial download. Re-download the snapshot, or pass "
+                    "enable_transformer_2=False to run the high-noise expert alone."
+                )
 
     def _expert_config(self, transformer_path: str) -> WanDiTConfig:
         parallel = self.parallel
@@ -363,6 +372,11 @@ class CudaWanApplication(torch.nn.Module):
         """
         if self.pipeline is None:
             raise RuntimeError("application is not loaded; call load() first")
+        if not isinstance(prompt, str) and len(prompt) > 1:
+            raise NotImplementedError(
+                f"Wan on CUDA generates one prompt at a time, got {len(prompt)}; "
+                "batch > 1 is follow-up F1b"
+            )
         loaded_frames = self.shape["num_frames"]
         if num_frames is not None and int(num_frames) != loaded_frames:
             raise ValueError(

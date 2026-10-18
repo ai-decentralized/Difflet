@@ -10,7 +10,7 @@ diffusers bf16 (the control), difflet bf16 through the CUDA ops — and records 
     DIFFLET_RUN_CUDA_NUMERICAL=1 pytest tests/numerical/test_cuda_wan_vs_diffusers.py -v
 
 The gates are the Qwen-Image / Flux ones (tests/numerical/test_cuda_flux_vs_diffusers.py),
-applied to every expert the JSON records: an absolute 0.999 cosine is unreachable for bf16
+applied to both experts, which the JSON must record: an absolute 0.999 cosine is unreachable for bf16
 itself, so difflet is judged against what bf16 alone costs upstream.
 """
 
@@ -96,6 +96,7 @@ def test_result_records_the_host():
     assert payload["model"] == "wan", payload["model"]
     for key in ("device", "torch", "model_path", "shape"):
         assert key in payload, key
-    assert payload["experts"], "no expert recorded"
+    # Both experts are required: a one-expert JSON proves half of the model.
+    assert set(payload["experts"]) == {"transformer", "transformer_2"}, sorted(payload["experts"])
     for expert, record in payload["experts"].items():
         assert "timestep" in record, expert

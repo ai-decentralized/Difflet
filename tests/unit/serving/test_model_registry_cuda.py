@@ -56,7 +56,10 @@ def test_other_models_on_cuda_name_their_follow_up(monkeypatch):
     monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
     with pytest.raises(ValueError) as exc:
         resolve_serving_model(ServeOptions(model_id="black-forest-labs/FLUX.1-dev"))
-    assert "F5" in str(exc.value) and "F1" in str(exc.value)
+    message = str(exc.value)
+    # Wan and Flux *generate* on CUDA (F1, F5); only their serving is outstanding.
+    assert "Qwen-Image only" in message
+    assert "F1b" in message and "F5b" in message
 
 
 def test_cuda_placement_needs_allocation_and_topology_but_no_artifact():

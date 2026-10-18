@@ -65,16 +65,20 @@ def _cpu_backend(monkeypatch):
 # ------------------------------------------------------------------ fixtures
 
 
-def _write_model(root, *, transformer_2=True, vae=False):
-    """A diffusers-shaped Wan 2.2 snapshot: experts, model_index, scheduler, optional VAE."""
+def _write_model(root, *, transformer_2=True, vae=False, boundary_ratio=0.875):
+    """A diffusers-shaped Wan 2.2 snapshot: experts, model_index, scheduler, optional VAE.
+
+    ``boundary_ratio=None`` leaves the key out, as a Wan 2.1 ``model_index.json`` does.
+    """
     for seed, name in ((0, "transformer"), (1, "transformer_2")):
         if name == "transformer_2" and not transformer_2:
             continue
         torch.manual_seed(seed)
         WanTransformer3DModel(**TINY).eval().save_pretrained(str(root / name))
-    (root / "model_index.json").write_text(
-        json.dumps({"_class_name": "WanPipeline", "boundary_ratio": 0.875})
-    )
+    index = {"_class_name": "WanPipeline"}
+    if boundary_ratio is not None:
+        index["boundary_ratio"] = boundary_ratio
+    (root / "model_index.json").write_text(json.dumps(index))
     UniPCMultistepScheduler(
         prediction_type="flow_prediction", use_flow_sigmas=True, flow_shift=3.0
     ).save_pretrained(str(root / "scheduler"))
@@ -212,8 +216,23 @@ def test_both_experts_are_resident_by_default_on_cuda(tmp_path):
     assert _build(root, device="cpu", enable_transformer_2=False).transformer_2 is None
 
     single = tmp_path / "wan21"
-    _write_model(single, transformer_2=False)  # a Wan 2.1 snapshot has one expert
+    # A Wan 2.1 snapshot has one expert and no boundary ratio: no second expert, no error.
+    _write_model(single, transformer_2=False, boundary_ratio=None)
     assert _build(single, device="cpu").transformer_2 is None
+
+
+def test_a_wan_22_snapshot_without_transformer_2_is_refused(tmp_path):
+    # boundary_ratio in model_index.json marks a two-expert model; a missing transformer_2/
+    # is a partial download, and running only the high-noise expert would be a silent
+    # fallback.
+    root = tmp_path / "wan"
+    _write_model(root, transformer_2=False)
+    with pytest.raises(FileNotFoundError, match="transformer_2") as excinfo:
+        _build(root, device="cpu")
+    assert str(root / "transformer_2") in str(excinfo.value)
+    assert "two-expert" in str(excinfo.value)
+    # Explicitly asking for one expert keeps working on the same snapshot.
+    assert _build(root, device="cpu", enable_transformer_2=False).transformer_2 is None
 
 
 def test_compile_and_load_cover_both_experts(tmp_path):
@@ -281,6 +300,12 @@ def test_dit_input_contract_matches_the_expert(tmp_path):
 def test_cuda_wan_application_refuses_f1b_kwargs(tmp_path, kwargs):
     with pytest.raises(NotImplementedError, match="F1b"):
         _build(tmp_path, **kwargs)
+
+
+def test_generate_refuses_a_batch_of_prompts_as_f1b(tmp_path):
+    app, _, _ = _loaded_app(tmp_path)
+    with pytest.raises(NotImplementedError, match="F1b"):
+        app.generate(["a cat", "a dog"], num_inference_steps=1, output_type="latent")
 
 
 def test_off_values_of_f1b_kwargs_are_accepted(tmp_path):
