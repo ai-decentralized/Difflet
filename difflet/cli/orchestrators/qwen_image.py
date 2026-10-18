@@ -17,11 +17,11 @@ beside the DiT; the driver keeps the host encoder when that cannot fit: ``_place
 the ranks denoise, and rank 0 writes latents.pt in the packed format the vae stage reads. The decode then runs after that
 launch has exited, in one of two places (``_decodes_on_device``):
 
-* on the host, the default for now: the driver decodes with diffusers ``AutoencoderKLQwenImage``
-  in fp32 (``_decode_latents_host``), about 23 s per 1024x1024 image on the trn2.3xlarge host;
-* with --device-vae, in a vae stage of its own on one NeuronCore (``_stage_vae_neuron``): the
-  Wan decoder (Qwen-Image's VAE is Wan 2.1's) in fp32, eager, as Wan's neuron vae stage runs it.
-  --host-vae keeps the host decode whatever the default is.
+* by default (or with --device-vae), in a vae stage of its own on one NeuronCore
+  (``_stage_vae_neuron``): the Wan decoder (Qwen-Image's VAE is Wan 2.1's) in fp32, eager, as
+  Wan's neuron vae stage runs it, about 19 s per 1024x1024 image including the launch;
+* with --host-vae, on the host: the driver decodes with diffusers ``AutoencoderKLQwenImage``
+  in fp32 (``_decode_latents_host``), about 23.6 s per 1024x1024 image on the trn2.3xlarge host.
 
 The decoder runs in a launch of its own rather than beside the DiT on rank 0's core, as Wan
 does, because of the HBM arithmetic: at tp4 a core already holds about 10.1 GiB of DiT shard
@@ -263,10 +263,12 @@ def _write_image(img, output: str, save=_save_image_torchvision) -> None:
         )
 
 
-#: Where the neuron backend decodes when neither --host-vae nor --device-vae is given: the host,
-#: for now. The on-device stage measures the device decode against the host's (about 23 s per
-#: 1024x1024 image) and flips this; --host-vae then remains the opt-out.
-_DEVICE_VAE_DEFAULT = False
+#: Where the neuron backend decodes when neither --host-vae nor --device-vae is given: the vae
+#: stage on one core. Measured on a trn2.3xlarge (TP4, 1024x1024, 50 steps, warm, alternating
+#: runs): the vae stage takes 19.2 s against the host decode's 23.6 s, the process wall 79.4 s
+#: against 83.2 s, the image within one level of the host's (fp32 cosine 1 - 3e-13).
+#: --host-vae is the opt-out.
+_DEVICE_VAE_DEFAULT = True
 
 
 def _decodes_on_device(args: argparse.Namespace) -> bool:
