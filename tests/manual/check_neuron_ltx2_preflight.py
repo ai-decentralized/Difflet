@@ -87,6 +87,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--bench-iters", type=int, default=5)
     p.add_argument("--bench-rounds", type=int, default=2)
     p.add_argument("--hbm-limit-gib", type=float, default=24.0)
+    p.add_argument("--cp-degree", type=int, default=1,
+                   help="context parallelism over the video tokens (tp = WORLD_SIZE / cp)")
+    p.add_argument("--cp-mode", choices=("gather_kv", "ulysses"), default="gather_kv")
     args = p.parse_args()
     compares = {}
     for item in args.compare:
@@ -128,8 +131,12 @@ def main() -> int:
     neffs_before = wanpf.neff_files()
     snaps = {"pre_prepare": wanpf.snapshot(t0, device=False, runtime_started=False)}
     world = int(os.environ.get("WORLD_SIZE", "1"))
-    tp = world
-    parallel = DiffletParallelConfig(tp_degree=tp)
+    cp = int(args.cp_degree)
+    if world % cp:
+        raise SystemExit(f"WORLD_SIZE {world} is not divisible by --cp-degree {cp}")
+    tp = world // cp
+    parallel = DiffletParallelConfig(tp_degree=tp, cp_degree=cp,
+                                     cp_mode=args.cp_mode if cp > 1 else "gather_kv")
     get_backend("neuron").prepare_runtime(parallel)
     prepare_s = time.perf_counter() - t0
 
@@ -144,6 +151,7 @@ def main() -> int:
     config = NeuronLtx2Config.from_pretrained(
         transformer_dir, num_layers=args.num_layers, height=int(ref["height"]),
         width=int(ref["width"]), num_frames=int(ref["num_frames"]), tp_degree=tp,
+        context_parallel_enabled=cp > 1, cp_mode=parallel.cp_mode,
         torch_dtype=torch.bfloat16,
     )
     app = NeuronLtx2TransformerApplication(
