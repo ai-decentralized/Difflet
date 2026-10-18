@@ -90,15 +90,17 @@ def test_parity_gate_runs_per_recorded_expert(tmp_path):
     assert out["test_result_records_the_host"] == "PASSED"
 
 
-def test_parity_gate_with_one_expert_recorded_runs_only_that_one(tmp_path):
+def test_parity_gate_with_one_expert_recorded_fails_the_record_check(tmp_path):
     payload = _parity_payload(
         transformer_2=_expert(500.0, rel_l1=0.01, vs_bf16_rel_l1=0.01, cosine=0.99)
     )
     out = _run_gate(
         "test_cuda_wan_vs_diffusers.py", "DIFFLET_CUDA_WAN_PARITY_RESULT", payload, tmp_path
     )
+    # Half a model is not a pass: both experts must be in the JSON.
+    assert out["test_result_records_the_host"] == "FAILED"
     assert not any("[transformer]" in name for name in out)
-    # Cosine 0.99 is under the 0.995 floor: a break, not rounding.
+    # The recorded expert is still judged: cosine 0.99 is under the 0.995 floor.
     assert out["test_sits_inside_the_noise_bf16_already_creates[transformer_2]"] == "FAILED"
     assert out["test_adds_little_on_top_of_what_bf16_costs[transformer_2]"] == "PASSED"
 

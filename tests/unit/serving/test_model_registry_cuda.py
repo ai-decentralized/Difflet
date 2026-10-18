@@ -56,7 +56,10 @@ def test_other_models_on_cuda_are_refused_by_name(monkeypatch):
     monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
     with pytest.raises(ValueError) as exc:
         resolve_serving_model(ServeOptions(model_id="black-forest-labs/FLUX.1-dev"))
-    assert "not supported" in str(exc.value) and "not supported" in str(exc.value)
+    message = str(exc.value)
+    # Wan and Flux *generate* on CUDA; only their serving is outstanding.
+    assert "Qwen-Image only" in message
+    assert "not supported" in message and "not supported" in message
 
 
 def test_cuda_placement_needs_allocation_and_topology_but_no_artifact():

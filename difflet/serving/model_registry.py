@@ -100,8 +100,10 @@ def _cuda_serving_metadata(entry_name: str, model_id: str) -> ServingModelMetada
     path = _CUDA_SERVING_OVERLAYS.get(entry_name)
     if path is None:
         raise ValueError(
-            f"{model_id} is not supported on the CUDA backend yet; "
-            "set DIFFLET_BACKEND=trainium for the staged Neuron path"
+            f"{model_id} cannot be served on the CUDA backend: serving on CUDA exists for "
+            "Qwen-Image only (Wan and Flux generate on CUDA through `difflet run`; serving "
+            "them is not supported on the CUDA backend yet); set DIFFLET_BACKEND=trainium for the staged "
+            "Neuron path"
         )
     return load_factory(path)()
 
