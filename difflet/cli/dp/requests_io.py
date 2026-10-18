@@ -59,8 +59,20 @@ def request_path(requests_dir: Path, index: int) -> Path:
 
 
 def write_manifest(requests: list[RequestSpec], requests_dir: Path) -> None:
+    """Write the run's queue, starting from an empty one.
+
+    The requests dir IS the queue (claims.py): ``req_NNNN.json`` is a request, ``.claim`` /
+    ``.done`` / ``.failed`` beside it its state. Markers and manifests from an earlier run
+    over the same work dir are removed first — left in place, a second ``--dp N --requests``
+    reported ``done=N`` in seconds without generating anything (pod f2b, 2026-10-18), and a
+    longer earlier manifest would have added its extra requests to the new run. Other files
+    in the directory are left alone.
+    """
     requests_dir = Path(requests_dir)
     requests_dir.mkdir(parents=True, exist_ok=True)
+    for stale in requests_dir.glob("req_*"):
+        if stale.suffix in (".json", ".claim", ".done", ".failed") and stale.is_file():
+            stale.unlink()
     for req in requests:
         request_path(requests_dir, req.index).write_text(
             json.dumps(dataclasses.asdict(req)), encoding="utf-8"
