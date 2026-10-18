@@ -9,8 +9,9 @@ GPU-only: the result JSON comes from the script on the pod. The metrics are over
 headroom. Both pipelines run bf16, so this is "the same clip", not bit equality.
 
 The script runs Difflet once per ``--timestep-dtypes`` variant (F1b task 2) against one
-diffusers run; the floors judge the top-level ``metrics``, which are the first variant's
-(``float32``, production, in the pod command). Every variant's PSNR and cosine are printed
+diffusers run; the floors judge the ``float32`` variant (the shipped default) by name when the
+result has it, else the first listed dtype's. The top-level ``metrics`` are the first listed
+dtype's, which need not be ``float32``. Every variant's PSNR and cosine are printed
 (``-rA`` shows them), not gated.
 """
 
@@ -44,10 +45,23 @@ def _opt_in():
         pytest.skip("set DIFFLET_RUN_CUDA_NUMERICAL=1 to run the CUDA numerical gate")
 
 
+def _gated_metrics(payload: dict) -> dict:
+    """The metrics the floors judge: the ``float32`` variant's (the shipped default) when the
+    result has variants including it, else the first listed dtype's (legacy results: the
+    top-level metrics)."""
+    variants = payload.get("variants") or {}
+    if "float32" in variants:
+        return variants["float32"]["metrics"]
+    first = (payload.get("timestep_dtypes") or [None])[0]
+    if first in variants:
+        return variants[first]["metrics"]
+    return payload["metrics"]
+
+
 def test_video_is_the_same_clip_as_diffusers():
     payload = _result()
     assert payload["model"] == "wan", payload["model"]
-    m = payload["metrics"]
+    m = _gated_metrics(payload)
     assert m["psnr_db"] >= MIN_PSNR_DB, f"PSNR {m['psnr_db']:.2f} dB below {MIN_PSNR_DB}"
     assert m["cosine"] >= MIN_COSINE, f"pixel cosine {m['cosine']:.5f} below {MIN_COSINE}"
 
@@ -61,10 +75,13 @@ def test_every_timestep_dtype_variant_is_recorded():
             assert key in variant, (name, key)
         m = variant["metrics"]
         print(f"timestep_dtype={name}: PSNR {m['psnr_db']:.2f} dB, cosine {m['cosine']:.5f}")
-    first = next(iter(variants))
+    first = payload["timestep_dtypes"][0]
+    assert (
+        first in variants
+    ), f"timestep_dtypes[0]={first!r} is not among the variants {list(variants)}"
     assert (
         payload["metrics"] == variants[first]["metrics"]
-    ), f"the gated top-level metrics are not the first variant's ({first})"
+    ), f"the top-level metrics are not the first listed dtype's ({first})"
     assert payload["timings"]["difflet"] == variants[first]["timings"], first
 
 

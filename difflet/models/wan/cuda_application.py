@@ -59,8 +59,8 @@ def _refuse_f1b_kwargs(kwargs: dict[str, Any]) -> None:
 
 def _timestep_dtype(value: Any, model_dtype: torch.dtype) -> torch.dtype:
     """``"float32"`` (the default: diffusers' exact timestep) or ``"model"`` (the bf16 cast
-    Release 1 shipped, kept for the A/B)."""
-    if value == "float32":
+    Release 1 shipped, kept for the A/B). ``None`` means unset, i.e. the default."""
+    if value is None or value == "float32":
         return torch.float32
     if value == "model":
         return model_dtype
@@ -181,7 +181,7 @@ class CudaWanApplication(torch.nn.Module):
         self.model_path = model_path
         self.parallel = parallel
         self.dtype = _normalize_dtype(dtype)
-        self.timestep_dtype = _timestep_dtype(kwargs.get("timestep_dtype", "float32"), self.dtype)
+        self.timestep_dtype = _timestep_dtype(kwargs.get("timestep_dtype"), self.dtype)
         self.shape = {
             "height": int(shape.get("height") or 480),
             "width": int(shape.get("width") or 832),

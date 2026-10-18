@@ -384,10 +384,16 @@ def test_timestep_dtype_model_restores_the_bf16_cast(tmp_path, monkeypatch):
     assert [c.timestep for c in calls] == BF16_TIMESTEPS  # 999 becomes 1000.0
 
 
-@pytest.mark.parametrize("value", ["bfloat16", "fp32", None])
+@pytest.mark.parametrize("value", ["bfloat16", "fp32", torch.float32, torch.bfloat16, ""])
 def test_timestep_dtype_rejects_anything_but_float32_or_model(tmp_path, value):
     with pytest.raises(ValueError, match="timestep_dtype"):
         _build(tmp_path, timestep_dtype=value)
+
+
+def test_timestep_dtype_none_is_the_default_float32(tmp_path):
+    # The module's convention: None = unset (as _refuse_f1b_kwargs reads it).
+    app = _build(tmp_path, timestep_dtype=None)
+    assert app.timestep_dtype is torch.float32
 
 
 def test_generate_runs_cond_and_uncond_passes(tmp_path, monkeypatch):

@@ -252,9 +252,18 @@ def _e2e_timings() -> dict:
     return {"load_s": 1.0, "generate_s": 1.0, "peak_alloc_gb": 1.0}
 
 
-def _e2e_payload(psnr_db: float, cosine: float, *, model_variant=(27.5, 0.997)) -> dict:
-    """The e2e JSON with two timestep-dtype variants; the first's metrics are the top-level."""
-    metrics = _e2e_metrics(psnr_db, cosine)
+def _e2e_payload(
+    psnr_db: float, cosine: float, *, model_variant=(27.5, 0.997), model_first=False
+) -> dict:
+    """The e2e JSON with two timestep-dtype variants; ``psnr_db``/``cosine`` are the
+    ``float32`` variant's. The top-level metrics are those of ``timestep_dtypes[0]``."""
+    fp32 = _e2e_metrics(psnr_db, cosine)
+    model = _e2e_metrics(*model_variant)
+    order = ["model", "float32"] if model_first else ["float32", "model"]
+    variants = {
+        "float32": {"metrics": fp32, "timings": _e2e_timings(), "image": "/a.png"},
+        "model": {"metrics": model, "timings": _e2e_timings(), "image": "/c.png"},
+    }
     return {
         "model": "wan",
         "model_id": "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
@@ -268,18 +277,11 @@ def _e2e_payload(psnr_db: float, cosine: float, *, model_variant=(27.5, 0.997)) 
         "video_shape": [9, 480, 832, 3],
         "device": "fake",
         "torch": "x",
-        "timestep_dtypes": ["float32", "model"],
-        "metrics": metrics,
+        "timestep_dtypes": order,
+        "metrics": variants[order[0]]["metrics"],
         "images": {"difflet": "/a.png", "diffusers": "/b.png"},
         "timings": {"difflet": _e2e_timings(), "diffusers": _e2e_timings()},
-        "variants": {
-            "float32": {"metrics": metrics, "timings": _e2e_timings(), "image": "/a.png"},
-            "model": {
-                "metrics": _e2e_metrics(*model_variant),
-                "timings": _e2e_timings(),
-                "image": "/c.png",
-            },
-        },
+        "variants": {name: variants[name] for name in order},
     }
 
 
@@ -315,6 +317,36 @@ def test_e2e_gate_prints_every_variant(tmp_path):
     assert set(out.values()) == {"PASSED"}, out
     assert "timestep_dtype=float32: PSNR 30.00 dB, cosine 0.99800" in stdout, stdout
     assert "timestep_dtype=model: PSNR 27.50 dB, cosine 0.99700" in stdout, stdout
+
+
+def test_e2e_gate_judges_float32_by_name_not_by_position(tmp_path):
+    # "model" listed first (so it is the top-level metrics) and under the floors, float32 fine:
+    # the floors judge float32 by name, the old cast is recorded only.
+    payload = _e2e_payload(30.0, 0.998, model_variant=(20.0, 0.9), model_first=True)
+    out, _ = _e2e(payload, tmp_path)
+    assert set(out.values()) == {"PASSED"}, out
+
+
+def test_e2e_gate_fails_when_float32_is_under_the_floors_even_if_listed_second(tmp_path):
+    payload = _e2e_payload(24.0, 0.98, model_variant=(30.0, 0.999), model_first=True)
+    out, _ = _e2e(payload, tmp_path)
+    assert out["test_video_is_the_same_clip_as_diffusers"] == "FAILED"
+
+
+def test_e2e_gate_falls_back_to_the_first_dtype_without_a_float32_variant(tmp_path):
+    payload = _e2e_payload(30.0, 0.998, model_variant=(24.0, 0.98), model_first=True)
+    del payload["variants"]["float32"]
+    payload["timestep_dtypes"] = ["model"]
+    out, _ = _e2e(payload, tmp_path)
+    assert out["test_video_is_the_same_clip_as_diffusers"] == "FAILED"
+    assert out["test_every_timestep_dtype_variant_is_recorded"] == "PASSED"
+
+
+def test_e2e_gate_needs_the_first_dtype_among_the_variants(tmp_path):
+    payload = _e2e_payload(30.0, 0.998)
+    payload["timestep_dtypes"] = ["bfloat16", "float32"]
+    out, _ = _e2e(payload, tmp_path)
+    assert out["test_every_timestep_dtype_variant_is_recorded"] == "FAILED"
 
 
 def test_e2e_gate_judges_the_first_variant_only(tmp_path):
