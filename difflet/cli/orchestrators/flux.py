@@ -145,27 +145,78 @@ class FluxOrchestrator(ModelOrchestrator):
         from difflet.pipeline.difflet_pipeline import DiffletPipeline
         from difflet.pipeline.parallel_config import DiffletParallelConfig
 
+        import statistics
+        import time
+
         h, w = int(args.height or 1024), int(args.width or 1024)
         app_kwargs = {"exec_mode": args.exec_mode} if getattr(args, "exec_mode", None) else None
+        parallel = DiffletParallelConfig(tp_degree=int(args.tp_degree or 4))
+        # Start-up breakdown: process start to here, prepare_runtime, the heavy imports
+        # from_pretrained would do lazily, then from_pretrained itself (it prepares again: cheap).
+        startup: dict[str, float] = {}
+        mark = time.perf_counter()
+        import torch_neuronx  # noqa: F401  (registers the device; does not start the runtime)
+
+        startup["import torch_neuronx"] = round(time.perf_counter() - mark, 2)
+        mark = time.perf_counter()
+        from difflet.backends.registry import get_backend
+
+        get_backend("neuron").prepare_runtime(parallel)  # binds the core; rendezvous of all ranks
+        startup["prepare_runtime"] = round(time.perf_counter() - mark, 2)
+        mark = time.perf_counter()
+        import diffusers  # noqa: F401
+        import transformers  # noqa: F401
+
+        import difflet.models.flux.neuron_application  # noqa: F401
+        startup["imports"] = round(time.perf_counter() - mark, 2)
+        started = time.perf_counter()
         pipe = DiffletPipeline.from_pretrained(
             _HF_MODEL_ID, model_type=_MODEL_TYPE,
-            parallel=DiffletParallelConfig(tp_degree=int(args.tp_degree or 4)),
+            parallel=parallel,
             dtype=torch.bfloat16, height=h, width=w, revision=getattr(args, "revision", None),
             compile_cache_dir=getattr(args, "cache_dir", None), local_files_only=True,
             application_kwargs=app_kwargs)
         rank = dist.get_rank() if dist.is_available() and dist.is_initialized() else 0
+        app = pipe.app
+        if rank == 0:
+            loaded = time.perf_counter() - started
+            components = getattr(app, "phase_seconds", {}) or {}
+            startup["from_pretrained outside the components"] = round(loaded - sum(components.values()), 2)
+            print(f"[flux] start-up {startup}", flush=True)
+            print(f"[flux] load {loaded:.1f} s by component {components}", flush=True)
+            for name in ("dit", "t5", "vae"):
+                phases = getattr(getattr(app, name, None), "phase_seconds", None)
+                if phases:
+                    print(f"[flux]   {name} phases { {k: round(v, 2) for k, v in phases.items()} }",
+                          flush=True)
         if args.stage_mode == "compile":
             if rank == 0:
                 print("[flux] neuron: every component loaded and warmed up", flush=True)
             return
         for req in replica_requests(args, device=pipe.app.dit.device):
             with replica_request_scope(args, req, final=True):
+                marks: list[float] = []
+
+                def on_step_end(_pipe, _i, _t, callback_kwargs):
+                    marks.append(time.perf_counter())
+                    return callback_kwargs
+
+                called = time.perf_counter()
                 output = pipe(
                     prompt=req.prompt, height=h, width=w,
                     num_inference_steps=int(stage_loop.effective(req, args, "steps", 28)),
                     guidance_scale=float(stage_loop.effective(req, args, "guidance_scale", 3.5)),
                     generator=torch.Generator().manual_seed(req.seed),
+                    callback_on_step_end=on_step_end,
                 )
+                done = time.perf_counter()
+                if rank == 0 and len(marks) > 1:
+                    deltas = sorted(b - a for a, b in zip(marks, marks[1:]))
+                    print(f"[flux] request: {done - called:.2f} s; to the first step's end "
+                          f"{marks[0] - called:.2f} s (prompt encode + step 1); step median "
+                          f"{statistics.median(deltas) * 1e3:.1f} ms (n={len(deltas)}, max "
+                          f"{deltas[-1] * 1e3:.1f}); after the last step {done - marks[-1]:.2f} s "
+                          f"(unpack + decode)", flush=True)
                 if rank == 0:
                     out = Path(req.output)
                     out.parent.mkdir(parents=True, exist_ok=True)

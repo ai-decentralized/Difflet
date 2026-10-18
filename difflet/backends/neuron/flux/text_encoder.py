@@ -11,8 +11,8 @@ One static shape, ``(batch, text_seq_len)`` token ids (FLUX.1-dev: 512 tokens): 
 padded to ``text_seq_len`` and encoded whole, **without an attention mask**, as diffusers'
 FluxPipeline does (the model was trained attending to the padding; the model class asserts the
 mask is ``None``), so no prompt length compiles a new graph. The
-dtype is the caller's choice (fp32 by default, as for umT5, until a parity check shows bf16 is
-safe for this encoder).
+dtype is the caller's choice: unlike umT5, T5-XXL is not bf16-fragile (on the device bf16 is 0.87x
+the bf16 control against fp32, fp32 near exact), so Flux's composed application uses bf16.
 """
 
 from __future__ import annotations

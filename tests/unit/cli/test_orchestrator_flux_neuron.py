@@ -74,6 +74,10 @@ def test_stage_runs_the_request_and_saves_the_image(monkeypatch, tmp_path):
             calls.append(kwargs)
             return SimpleNamespace(images=[FakeImage()])
 
+    import difflet.backends.registry as registry
+
+    monkeypatch.setattr(registry, "get_backend",
+                        lambda name: SimpleNamespace(prepare_runtime=lambda parallel: None))
     built = []
     monkeypatch.setattr(dp.DiffletPipeline, "from_pretrained",
                         classmethod(lambda cls, *a, **k: built.append(k) or FakePipe()))

@@ -3,7 +3,7 @@
     torchrun --standalone --nproc-per-node 4 tests/manual/run_neuron_flux_smoke.py \
         --model-dir $FLUX --out ~/tn/flux_smoke.png
 
-TP = world size; DiT bf16, T5 --t5-dtype (fp32 by default), VAE fp32 on rank 0, CLIP on the host.
+TP = world size; DiT bf16, T5 --t5-dtype (bf16 by default), VAE fp32 on rank 0, CLIP on the host.
 Prints load and generate wall times (orientation only: matched numbers come from the CLI path).
 """
 
@@ -27,7 +27,7 @@ def main() -> int:
     p.add_argument("--steps", type=int, default=50)
     p.add_argument("--guidance-scale", type=float, default=3.5)
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--t5-dtype", choices=("float32", "bfloat16"), default="float32")
+    p.add_argument("--t5-dtype", choices=("float32", "bfloat16"), default="bfloat16")
     p.add_argument("--exec-mode", choices=("compile", "eager"), default="compile")
     args = p.parse_args()
 

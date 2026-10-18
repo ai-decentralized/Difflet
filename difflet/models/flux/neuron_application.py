@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import time
 from types import SimpleNamespace
 from typing import Any
 
@@ -31,7 +32,9 @@ _KWARG_DEFAULTS: dict[str, Any] = {
     "device": "neuron",
     "exec_mode": None,
     "text_seq_len": 512,
-    "t5_dtype": torch.float32,
+    # bf16 passes the parity gate on the device (0.87x the bf16 control vs fp32) and halves T5's
+    # memory per core; fp32 remains an option.
+    "t5_dtype": torch.bfloat16,
 }
 
 
@@ -107,6 +110,9 @@ class TorchNeuronFluxApplication:
         self.dtype = dtype
         self.height, self.width = int(shape["height"]), int(shape["width"])
         self.pipeline = None
+        #: Wall seconds per component of the last ``load`` (each application's own phases are on
+        #: ``dit``, ``t5`` and ``vae``).
+        self.phase_seconds: dict[str, float] = {}
 
     def _path(self, name: str) -> str:
         return os.path.join(self.model_path, name)
@@ -124,6 +130,14 @@ class TorchNeuronFluxApplication:
 
         opts, parallel = self.options, self.parallel
         common = dict(parallel=parallel, exec_mode=opts["exec_mode"], device=opts["device"])
+        phases = self.phase_seconds = {}
+        mark = time.perf_counter()
+
+        def lap(name):
+            nonlocal mark
+            now = time.perf_counter()
+            phases[name] = round(now - mark, 2)
+            mark = now
 
         # Every rank loads the VAE (the load phases run in step across the process group, as for
         # Wan's device VAE); it is not sharded, so each holds a full copy and only rank 0 decodes.
@@ -132,6 +146,7 @@ class TorchNeuronFluxApplication:
                                               device=opts["device"])
         vae.load(skip_warmup=skip_warmup)
         vae_scale = vae.scale_factor
+        lap("vae")
         config = NeuronFluxConfig.from_pretrained(
             self._path("transformer"), height=self.height, width=self.width,
             text_seq_len=int(opts["text_seq_len"]), vae_scale_factor=vae_scale,
@@ -139,6 +154,7 @@ class TorchNeuronFluxApplication:
         dit = NeuronFluxTransformerApplication(model_path=self._path("transformer"), config=config,
                                                dtype=self.dtype, **common)
         dit.load(skip_warmup=skip_warmup)
+        lap("dit")
 
         t5 = None
         if os.path.isdir(self._path("text_encoder_2")):
@@ -146,6 +162,7 @@ class TorchNeuronFluxApplication:
                                          text_seq_len=int(opts["text_seq_len"]),
                                          dtype=opts["t5_dtype"], **common)
             t5.load(skip_warmup=skip_warmup)
+        lap("t5")
         clip = tokenizer = tokenizer_2 = None
         if os.path.isdir(self._path("text_encoder")):
             from transformers import CLIPTextModel
@@ -159,6 +176,7 @@ class TorchNeuronFluxApplication:
             from transformers import T5TokenizerFast
 
             tokenizer_2 = T5TokenizerFast.from_pretrained(self._path("tokenizer_2"))
+        lap("clip+tokenizers")
         scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(self._path("scheduler"))
 
         self.dit, self.t5, self.vae = dit, t5, vae
@@ -166,6 +184,7 @@ class TorchNeuronFluxApplication:
             scheduler=scheduler, vae=_Vae(vae), text_encoder=clip, tokenizer=tokenizer,
             text_encoder_2=_T5(t5, self.dtype) if t5 is not None else None,
             tokenizer_2=tokenizer_2, transformer=_Transformer(dit))
+        lap("scheduler+pipeline")
 
     @torch.no_grad()
     def __call__(self, **kwargs):
