@@ -203,9 +203,8 @@ def _measure(fn, *, warmup: int, iters: int) -> dict:
     return {"timed": timed, "profile": summary, "attention_kernels": attention[:3]}
 
 
-def _free(*objs) -> None:
-    for obj in objs:
-        del obj
+def _free() -> None:
+    """After the caller dropped its references (the model and any closure over it)."""
     gc.collect()
     torch.cuda.empty_cache()
 
@@ -264,7 +263,11 @@ def main(argv: list[str] | None = None) -> None:
         res = _measure(difflet_fn, warmup=args.warmup, iters=args.iters)
         payload["cases"]["difflet"] = res
         print(f"[difflet] {json.dumps(res['timed'])} attention={res['attention_kernels']}")
-        _free(app)
+        # Drop every reference (the closure too) so the expert leaves the card before the
+        # diffusers side loads; two experts fit a 96 GB card, which hid a no-op here (review).
+        del difflet_fn
+        app = None
+        _free()
 
     if "diffusers" in cases:
         from diffusers import WanTransformer3DModel
@@ -286,7 +289,9 @@ def main(argv: list[str] | None = None) -> None:
         res = _measure(diffusers_fn, warmup=args.warmup, iters=args.iters)
         payload["cases"]["diffusers"] = res
         print(f"[diffusers] {json.dumps(res['timed'])} attention={res['attention_kernels']}")
-        _free(model)
+        del diffusers_fn
+        model = None
+        _free()
 
     if args.loop_probe:
         payload["loop_probe"] = loop_probe(

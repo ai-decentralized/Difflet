@@ -34,6 +34,33 @@ def test_difflet_serve_routes_to_serving_command(monkeypatch):
     assert calls[0].port == 9000
 
 
+def test_serve_startup_refusal_is_one_line_and_exit_1(monkeypatch, capsys):
+    import types
+
+    from difflet.cli import serve as serve_mod
+    from difflet.serving.errors import feature_not_supported
+
+    def refuse(options):
+        raise feature_not_supported("--dp-degree 3 exceeds the 2 visible GPU(s)")
+
+    monkeypatch.setattr(serve_mod, "_load_serving_environment", lambda: None)
+    monkeypatch.setattr(serve_mod, "_resolve_project_name", lambda: "difflet")
+    monkeypatch.setattr(serve_mod, "_build_serving_logging_config", lambda name: {})
+    monkeypatch.setattr(
+        serve_mod,
+        "options_from_args",
+        lambda args: types.SimpleNamespace(artifact_store_timeout=60.0),
+    )
+    monkeypatch.setattr(
+        serve_mod.S3ArtifactStore, "from_env_if_configured", staticmethod(lambda **k: None)
+    )
+    monkeypatch.setattr(serve_mod, "build_serving_stack", refuse)
+    with pytest.raises(SystemExit) as exc:
+        serve_mod.run(argparse.Namespace())
+    assert exc.value.code == 1
+    assert capsys.readouterr().err.strip() == "Error: --dp-degree 3 exceeds the 2 visible GPU(s)"
+
+
 def test_serve_loads_dotenv_from_current_directory(monkeypatch, tmp_path):
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("DIFFLET_TEST_DOTENV", raising=False)
