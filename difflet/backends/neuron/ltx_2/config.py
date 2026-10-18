@@ -100,6 +100,8 @@ class NeuronLtx2Config:
 
     # --- topology ---
     tp_degree: int = 1
+    #: The CP degree when known (the application fills it from the parallel config).
+    cp_degree: int | None = None
     dp_degree: int = 1
     cfg_parallel_enabled: bool = False
     context_parallel_enabled: bool = False
@@ -218,10 +220,35 @@ class NeuronLtx2Config:
                 f"application; unsupported: dp_degree={self.dp_degree} (data parallelism runs "
                 "as separate replicas)"
             )
+        if self.cp_mode not in ("gather_kv", "ulysses", "ring"):
+            raise ValueError(f"unknown cp_mode {self.cp_mode!r}")
+        cp = None if self.cp_degree is None else int(self.cp_degree)
+        if cp is not None and cp > 1 and not self.context_parallel_enabled:
+            raise ValueError(f"cp_degree={cp} needs context_parallel_enabled=True")
         if self.context_parallel_enabled:
-            raise NotImplementedError(
-                "context parallelism is not supported for LTX-2 on the neuron backend"
-            )
+            if self.cp_mode == "ring":
+                raise NotImplementedError(
+                    "cp_mode='ring' is not supported for LTX-2 on the neuron backend (gather_kv "
+                    "and ulysses are)"
+                )
+            if self.cfg_parallel_enabled:
+                raise ValueError(
+                    "LTX-2 cfg_parallel_enabled and context_parallel_enabled are mutually "
+                    "exclusive (both consume the data-parallel lanes)"
+                )
+            if cp is not None and cp > 1:
+                if self.video_seq_len % cp:
+                    raise ValueError(
+                        f"LTX-2 context parallelism splits video_seq_len={self.video_seq_len} "
+                        f"({self.latent_num_frames}x{self.latent_height}x{self.latent_width} "
+                        f"latent) over cp_degree={cp}, which does not divide it"
+                    )
+                if self.cp_mode == "ulysses" and (int(self.num_attention_heads) // tp) % cp:
+                    raise ValueError(
+                        f"cp_mode='ulysses' shards this rank's "
+                        f"{int(self.num_attention_heads) // tp} video heads over cp_degree={cp}; "
+                        "num_attention_heads must be divisible by tp_degree * cp_degree"
+                    )
         if self.sp_enabled:
             raise NotImplementedError(
                 "sequence parallelism is not supported for LTX-2 on the neuron backend"

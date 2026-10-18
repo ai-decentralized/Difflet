@@ -10,7 +10,8 @@ from difflet.cli.orchestrators import ltx_2 as cli
 
 def _args(**overrides):
     base = dict(
-        model_id="Lightricks/LTX-2", tp_degree=4, cp_degree=1, cfg_parallel=False,
+        model_id="Lightricks/LTX-2", tp_degree=4, cp_degree=1, cp_mode="gather_kv",
+        cfg_parallel=False,
         sp_enabled=False, height=480, width=704, num_frames=49, steps=20, guidance_scale=1.0,
         seed=42, prompt="a fox", negative_prompt=None, output="/tmp/o.mp4", cache_dir="/tmp/c",
         work_dir=None, keep_work_dir=False, revision="47da56e2", shapes=None,
@@ -26,7 +27,7 @@ def _args(**overrides):
     [
         ({"teacache_cadence": 2}, "--teacache-cadence"),
         ({"shapes": "480x704x49,512x768x121"}, "--shapes with more than one shape"),
-        ({"cp_degree": 2}, "--cp-degree > 1"),
+        ({"cp_degree": 2, "cp_mode": "ring"}, "--cp-mode ring"),
         ({"sp_enabled": True}, "--sp"),
     ],
 )
@@ -49,11 +50,15 @@ def test_rejection_exits_2_before_anything_launches(monkeypatch, capsys):
     monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
     launched = []
     monkeypatch.setattr(cli.runner, "run_stage", lambda *a, **k: launched.append(a))
-    orch = cli.LTX2Orchestrator(_args(cp_degree=2))
+    orch = cli.LTX2Orchestrator(_args(cp_degree=2, cp_mode="ring"))
     with pytest.raises(SystemExit) as exc:
         orch.generate()
     assert exc.value.code == 2 and launched == []
-    assert "--cp-degree > 1" in capsys.readouterr().err
+    assert "--cp-mode ring" in capsys.readouterr().err
+    orch = cli.LTX2Orchestrator(_args(cp_degree=2, cfg_parallel=True, guidance_scale=3.0))
+    with pytest.raises(SystemExit) as exc:
+        orch.generate()
+    assert exc.value.code == 2 and launched == []
     orch = cli.LTX2Orchestrator(_args(cfg_parallel=True, guidance_scale=1.0))
     with pytest.raises(SystemExit) as exc:
         orch.generate()
@@ -74,6 +79,24 @@ def test_compile_on_neuron_is_one_generate_stage_on_tp_times_cfg_cores(monkeypat
     assert forwarded[forwarded.index("--stage-mode") + 1] == "compile"
     assert "--cfg-parallel" in forwarded
     assert forwarded[forwarded.index("--revision") + 1] == "47da56e2"
+
+
+def test_context_parallel_launch_is_tp_times_cp_ranks(monkeypatch):
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    monkeypatch.delenv("DIFFLET_COMPILE_CACHE", raising=False)
+    launched = []
+    monkeypatch.setattr(cli.runner, "run_stage",
+                        lambda model, stage, **k: launched.append((stage, k)))
+    monkeypatch.setattr(cli.LTX2Orchestrator, "_check_dit_fits", lambda self: None)
+    cli.LTX2Orchestrator(_args(tp_degree=2, cp_degree=2, cp_mode="ulysses")).compile()
+    [(stage, kwargs)] = launched
+    assert stage == "generate" and kwargs["num_cores"] == 4
+    forwarded = kwargs["cli_args"]
+    assert forwarded[forwarded.index("--cp-degree") + 1] == "2"
+    assert forwarded[forwarded.index("--cp-mode") + 1] == "ulysses"
+    inputs = cli.LTX2Orchestrator(_args())._stage_cache_inputs(
+        _args(tp_degree=2, cp_degree=2, cp_mode="ulysses"))
+    assert (inputs["cp"], inputs["cp_mode"]) == (2, "ulysses")
 
 
 def test_decode_placement(monkeypatch, tmp_path):
