@@ -271,6 +271,10 @@ def l1_ltx2_worker(
                         for name in ("attn1", "audio_attn1", "attn2", "audio_attn2",
                                      "audio_to_video_attn", "video_to_audio_attn")},
         "processor": type(block0.attn1.processor).__name__,
+        "ff_activations": sorted({type(b.ff.net[0]).__name__ for b in
+                                  app.module.transformer.transformer_blocks}
+                                 | {type(b.audio_ff.net[0]).__name__ for b in
+                                    app.module.transformer.transformer_blocks}),
         "rope_types": {attr: type(m).__name__ for attr, m in ropes.items()},
         "rope_computed": {attr: int(getattr(m, "computed", -1)) for attr, m in ropes.items()},
         "params_on_meta": sum(p.is_meta for p in app.module.parameters()),
