@@ -237,6 +237,9 @@ def _register_builtin_flux() -> None:
     @register_model(
         name="flux",
         application_factory="difflet.models.flux.entry:create_flux_application",
+        # trainium (AoT), and the neuron backend (TorchNeuron, torchrun ranks; DiT and T5 TP on
+        # the device, CLIP on the host, the VAE on rank 0's core).
+        backends=("trainium", "neuron"),
         hf_paths=(
             "black-forest-labs/FLUX.1-dev",
             "black-forest-labs/FLUX.1-schnell",

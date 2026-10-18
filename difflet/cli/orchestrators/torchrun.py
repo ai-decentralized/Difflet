@@ -1,5 +1,5 @@
 """Driver and rank helpers shared by the staged orchestrators that run on a non-AoT torchrun
-backend (neuron): Wan (``wan.py``) and Qwen-Image (``qwen_image.py``).
+backend (neuron): Wan (``wan.py``), Qwen-Image (``qwen_image.py``) and Flux (``flux.py``).
 
 Every helper is inert unless DIFFLET_BACKEND names such a backend (``torchrun_backend``), so
 unset, trainium and tpu keep their stage paths unchanged. Torch-free except ``fallback_tracker``,
@@ -11,6 +11,7 @@ import argparse
 import contextlib
 import os
 import sys
+from pathlib import Path
 
 from difflet import envs
 from difflet.cli import runner
@@ -108,3 +109,61 @@ def fallback_tracker(pipe):
 
         return track_fallbacks()
     return contextlib.nullcontext([])
+
+
+def replica_requests(args: argparse.Namespace, *, device):
+    """The requests a torchrun replica runs, one at a time, every rank the same request.
+
+    Outside batch mode, or with one rank, this is ``stage_loop.claim_requests``. In a DP worker
+    (``--requests-dir``) under torchrun, rank 0 alone claims from the queue and broadcasts the
+    claimed index (-1 when the queue is empty, as int32) to the replica's ranks, which read the
+    request from the manifest: claiming on every rank would hand the TP group different requests.
+    """
+    from difflet.backends.neuron.core import distributed
+    from difflet.cli.dp import stage_loop
+
+    rank, world = distributed.world_info()
+    if not stage_loop.batch_mode(args) or world == 1:
+        yield from stage_loop.claim_requests(args)
+        return
+    import torch
+
+    from difflet.cli.dp.requests_io import read_manifest
+
+    manifest = {r.index: r for r in read_manifest(Path(args.requests_dir))}
+    claims = stage_loop.claim_requests(args) if rank == 0 else None
+    while True:
+        req = next(claims, None) if rank == 0 else None
+        index = (torch.tensor([req.index if req is not None else -1], dtype=torch.int32)
+                 if rank == 0 else None)
+        index = int(distributed.broadcast_tensor(index, device=device).reshape(-1)[0].item())
+        if index < 0:
+            return
+        yield req if rank == 0 else manifest[index]
+
+
+@contextlib.contextmanager
+def replica_request_scope(args: argparse.Namespace, req, *, final: bool):
+    """``stage_loop.request_scope`` for a torchrun replica: a failed request is marked failed
+    once (rank 0) and every rank re-raises. A rank cannot skip a request its TP partners are
+    still running: they would wait in a collective forever. With ``final`` (the stage that
+    finishes a request), rank 0 marks a successful request done. One rank stays as before."""
+    from difflet.backends.neuron.core import distributed
+    from difflet.cli.dp import claims, stage_loop
+
+    rank, world = distributed.world_info()
+    if not stage_loop.batch_mode(args) or world == 1:
+        with stage_loop.request_scope(args, req, final=final):
+            yield
+        return
+    try:
+        yield
+    except Exception:
+        if rank == 0:
+            import traceback
+
+            claims.mark_failed(args.requests_dir, req.index, traceback.format_exc())
+            print(f"[dp-worker] request {req.index} failed; stopping this replica", flush=True)
+        raise
+    if final and rank == 0:
+        claims.mark_done(args.requests_dir, req.index)

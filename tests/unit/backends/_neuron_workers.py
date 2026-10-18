@@ -1255,3 +1255,19 @@ def flux_t5_worker(rank: int, world_size: int, model_dir: str) -> dict:
                                   dtype=torch.float32, exec_mode="eager", device="cpu")
     app.load()
     return {"out": app.encode(*t5_inputs()).tolist(), "report": app.load_report}
+
+
+def dp_replica_final_worker(rank: int, world_size: int, requests_dir: str) -> dict:
+    """A 2-rank replica draining a queue in a final stage: rank 0 marks each request done."""
+    import argparse
+    from pathlib import Path
+
+    from difflet.cli.orchestrators.torchrun import replica_request_scope, replica_requests
+
+    args = argparse.Namespace(requests_dir=Path(requests_dir), worker_index=0,
+                              dp_schedule="round_robin")
+    seen = []
+    for req in replica_requests(args, device=torch.device("cpu")):
+        with replica_request_scope(args, req, final=True):
+            seen.append(req.index)
+    return {"seen": seen}

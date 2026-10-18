@@ -16,9 +16,16 @@ def create_flux_application(
     backend: str = "trainium",
     **kwargs: Any,
 ) -> Any:
+    if backend == "neuron":
+        # TorchNeuron, one process per NeuronCore (torchrun). Keyword arguments and their
+        # defaults: neuron_application._KWARG_DEFAULTS.
+        from difflet.models.flux.neuron_application import TorchNeuronFluxApplication
+
+        return TorchNeuronFluxApplication(model_path=model_path, parallel=parallel, dtype=dtype,
+                                          shape=shape, **kwargs)
     if backend != "trainium":
         raise NotImplementedError(
-            f"Flux currently supports only the trainium backend, got {backend!r}"
+            f"Flux supports the trainium and neuron backends, got {backend!r}"
         )
 
     from difflet.models.flux.application import (

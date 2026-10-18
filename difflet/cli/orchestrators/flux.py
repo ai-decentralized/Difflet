@@ -4,11 +4,38 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import argparse
+
+from difflet.cli import runner
 from difflet.cli.orchestrators.base import ModelOrchestrator, require_request_shape_in_set
+from difflet.cli.orchestrators.torchrun import (
+    reject_unsupported_torchrun_options,
+    replica_request_scope,
+    replica_requests,
+    root_compile_cache_at_cache_dir,
+    torchrun_backend,
+    torchrun_unsupported_options,
+)
 
 _HF_MODEL_ID = "black-forest-labs/FLUX.1-dev"
 _MODEL_TYPE = "flux"
 _CLI_NAME = "flux"
+_TORCHRUN_RUNS = "tensor parallelism and data-parallel replicas"
+
+
+def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
+    """What the torchrun (neuron) generate stage rejects, as the command line names it:
+    every torchrun backend's (TeaCache), and what Flux's neuron path does not run yet. Torch-free."""
+    found = torchrun_unsupported_options(args)
+    if (getattr(args, "cp_degree", None) or 1) > 1:
+        found.append("--cp-degree")
+    if getattr(args, "cfg_parallel", False):
+        found.append("--cfg-parallel")
+    if getattr(args, "sp_enabled", False):
+        found.append("--sp")
+    if getattr(args, "taef1", False):
+        found.append("--taef1")
+    return found
 
 
 class FluxOrchestrator(ModelOrchestrator):
@@ -23,6 +50,9 @@ class FluxOrchestrator(ModelOrchestrator):
         print(f"[difflet] weights ready for {_HF_MODEL_ID}")
 
     def compile(self) -> None:
+        if torchrun_backend() is not None:
+            self._run_torchrun_stage("compile")
+            return
         from difflet.pipeline.difflet_pipeline import DiffletPipeline
         from difflet.pipeline.path_resolver import resolve_model_path
         resolve_model_path(_HF_MODEL_ID, revision=self.args.revision, local_files_only=True)
@@ -41,6 +71,9 @@ class FluxOrchestrator(ModelOrchestrator):
         )
 
     def generate(self) -> None:
+        if torchrun_backend() is not None:
+            self._run_torchrun_stage("generate")
+            return
         import torch
 
         from difflet.cli.dp import stage_loop
@@ -66,6 +99,78 @@ class FluxOrchestrator(ModelOrchestrator):
                 out.parent.mkdir(parents=True, exist_ok=True)
                 image.save(str(out))
                 print(f"[difflet] image saved to {out}")
+
+    # ------------------------------------------------ torchrun (neuron) path
+
+    def _run_torchrun_stage(self, mode: str) -> None:
+        """One torchrun launch of the ``generate`` stage, tp ranks: ``compile`` loads and warms up
+        every component (filling the compile cache); ``generate`` also runs the request(s), and
+        rank 0 writes each image."""
+        reject_unsupported_torchrun_options(_torchrun_unsupported_options(self.args),
+                                            runs=_TORCHRUN_RUNS)
+        root_compile_cache_at_cache_dir(getattr(self.args, "cache_dir", None), tag="flux")
+        runner.run_stage(_HF_MODEL_ID, "generate", num_cores=int(self.args.tp_degree or 4),
+                         virtual_core_size=None, cli_args=self._stage_cli_args(mode))
+
+    def _stage_cli_args(self, mode: str) -> list[str]:
+        a = self.args
+        parts = ["--model-id", _HF_MODEL_ID, "--tp-degree", str(a.tp_degree or 4),
+                 "--height", str(a.height or 1024), "--width", str(a.width or 1024),
+                 "--stage-mode", mode]
+        for flag, name in (("--revision", "revision"), ("--prompt", "prompt"), ("--output", "output"),
+                           ("--steps", "steps"), ("--guidance-scale", "guidance_scale"),
+                           ("--seed", "seed"), ("--cache-dir", "cache_dir"), ("--work-dir", "work_dir"),
+                           ("--requests-dir", "requests_dir"), ("--worker-index", "worker_index"),
+                           ("--dp-schedule", "dp_schedule"), ("--exec-mode", "exec_mode")):
+            value = getattr(a, name, None)
+            if value is not None:
+                parts += [flag, str(value)]
+        if getattr(a, "keep_work_dir", False):
+            parts.append("--keep-work-dir")
+        return parts
+
+    def _run_stage_internal(self, stage: str, args: argparse.Namespace) -> None:
+        if stage != "generate":
+            raise ValueError(f"Unknown Flux stage: {stage!r}")
+        self._stage_generate_neuron(args)
+
+    def _stage_generate_neuron(self, args: argparse.Namespace) -> None:
+        """The generate stage on every rank: DiffletPipeline prepares the runtime and builds the
+        registry's application (TorchNeuronFluxApplication); then each request (one, or a DP
+        worker's queue: rank 0 claims for the replica) runs on every rank and rank 0 saves it."""
+        import torch
+        import torch.distributed as dist
+
+        from difflet.cli.dp import stage_loop
+        from difflet.pipeline.difflet_pipeline import DiffletPipeline
+        from difflet.pipeline.parallel_config import DiffletParallelConfig
+
+        h, w = int(args.height or 1024), int(args.width or 1024)
+        app_kwargs = {"exec_mode": args.exec_mode} if getattr(args, "exec_mode", None) else None
+        pipe = DiffletPipeline.from_pretrained(
+            _HF_MODEL_ID, model_type=_MODEL_TYPE,
+            parallel=DiffletParallelConfig(tp_degree=int(args.tp_degree or 4)),
+            dtype=torch.bfloat16, height=h, width=w, revision=getattr(args, "revision", None),
+            compile_cache_dir=getattr(args, "cache_dir", None), local_files_only=True,
+            application_kwargs=app_kwargs)
+        rank = dist.get_rank() if dist.is_available() and dist.is_initialized() else 0
+        if args.stage_mode == "compile":
+            if rank == 0:
+                print("[flux] neuron: every component loaded and warmed up", flush=True)
+            return
+        for req in replica_requests(args, device=pipe.app.dit.device):
+            with replica_request_scope(args, req, final=True):
+                output = pipe(
+                    prompt=req.prompt, height=h, width=w,
+                    num_inference_steps=int(stage_loop.effective(req, args, "steps", 28)),
+                    guidance_scale=float(stage_loop.effective(req, args, "guidance_scale", 3.5)),
+                    generator=torch.Generator().manual_seed(req.seed),
+                )
+                if rank == 0:
+                    out = Path(req.output)
+                    out.parent.mkdir(parents=True, exist_ok=True)
+                    output.images[0].save(str(out))
+                    print(f"[difflet] image saved to {out}", flush=True)
 
     def _load_pipeline(self):
         from difflet.pipeline.compile_cache import CacheSpec, cache_path, has_valid_manifest

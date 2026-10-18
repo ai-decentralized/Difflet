@@ -1304,3 +1304,13 @@ def test_dp_replica_stops_together_on_a_failed_request(tmp_path):
     assert [r["error"] for r in results] == ["boom", "boom"]  # every rank stops, none hangs
     assert sorted(p.name for p in requests.glob("*.failed")) == ["req_0001.failed"]
     assert not (requests / "req_0002.claim").exists()  # left for the router's summary
+
+
+def test_dp_replica_final_stage_marks_requests_done_once(tmp_path):
+    from tests.unit.backends._neuron_gloo import run_ranks
+    from tests.unit.backends._neuron_workers import dp_replica_final_worker
+
+    requests = _dp_queue(tmp_path, 2)
+    results = run_ranks(dp_replica_final_worker, str(requests), world_size=2)
+    assert [r["seen"] for r in results] == [[0, 1]] * 2
+    assert sorted(p.name for p in requests.glob("*.done")) == ["req_0000.done", "req_0001.done"]

@@ -111,7 +111,9 @@ class TorchNeuronFluxApplication:
     def _path(self, name: str) -> str:
         return os.path.join(self.model_path, name)
 
-    def load(self) -> None:
+    def load(self, compiled_model_path=None, skip_warmup: bool = False) -> None:
+        """Build and load every component (``compiled_model_path`` is an AoT notion: unused).
+        ``skip_warmup`` skips each application's warm-up forward."""
         from diffusers import FlowMatchEulerDiscreteScheduler
 
         from difflet.backends.neuron.flux.config import NeuronFluxConfig
@@ -128,7 +130,7 @@ class TorchNeuronFluxApplication:
         vae = NeuronFluxVaeDecoderApplication(model_path=self._path("vae"), height=self.height,
                                               width=self.width, parallel=parallel,
                                               device=opts["device"])
-        vae.load()
+        vae.load(skip_warmup=skip_warmup)
         vae_scale = vae.scale_factor
         config = NeuronFluxConfig.from_pretrained(
             self._path("transformer"), height=self.height, width=self.width,
@@ -136,14 +138,14 @@ class TorchNeuronFluxApplication:
             tp_degree=int(parallel.tp_degree))
         dit = NeuronFluxTransformerApplication(model_path=self._path("transformer"), config=config,
                                                dtype=self.dtype, **common)
-        dit.load()
+        dit.load(skip_warmup=skip_warmup)
 
         t5 = None
         if os.path.isdir(self._path("text_encoder_2")):
             t5 = NeuronFluxT5Application(model_path=self._path("text_encoder_2"),
                                          text_seq_len=int(opts["text_seq_len"]),
                                          dtype=opts["t5_dtype"], **common)
-            t5.load()
+            t5.load(skip_warmup=skip_warmup)
         clip = tokenizer = tokenizer_2 = None
         if os.path.isdir(self._path("text_encoder")):
             from transformers import CLIPTextModel
