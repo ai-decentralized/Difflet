@@ -1,0 +1,17 @@
+{
+  "model": "Qwen/Qwen-Image",
+  "steps": 50,
+  "seed": 0,
+  "requests": [
+    {
+      "request_s": 38.6,
+      "image": "/tmp/logs/f3b/qwen-serve.png"
+    },
+    {
+      "request_s": 39.2,
+      "image": "/tmp/logs/f3b/qwen-serve-2.png"
+    }
+  ],
+  "ready_s": 56.0,
+  "request_s": 38.6
+}

@@ -246,10 +246,13 @@ where the CLI truncates silently. Other shapes are refused with `profile_mismatc
 `--tp-degree > 1` / `--sp` are refused naming F6 and `--shapes` naming F3, before the snapshot is
 resolved; `--cp-degree > 1`, `--cfg-parallel` and a TeaCache flag are refused earlier still by
 the shared profile builder with its own wording (they are F2 / F4 work). `--tp-degree` defaults
-to 1 on CUDA. One request runs at a time and a 50-step request takes ~20 s on an RTX PRO 6000;
-a request that waits longer than `--queue-timeout` (30 s default) gets 429 `queue_timeout`, and
-a request past `--request-timeout` restarts the worker (full reload, ~10 s, plus the 4-step
-smoke) because `generate()` is not interruptible mid-denoise. Trainium and TPU serving are
+to 1 on CUDA. One request runs at a time; a 50-step request takes what `difflet run` takes on
+the same card (measured 38.6 s served vs 38.5 s CLI on an RTX PRO 6000 Workstation Edition,
+~17 s on the Server Edition; ready in 56 s including load and the startup smoke). A request
+that waits longer than `--queue-timeout` (30 s default — shorter than one 50-step request on
+the Workstation card, so raise it when clients queue) gets 429 `queue_timeout`, and a request
+past `--request-timeout` restarts the worker (full reload plus the 4-step smoke) because
+`generate()` is not interruptible mid-denoise. Trainium and TPU serving are
 untouched.
 
 Not in Release 1 (follow-ups F1–F8 in the plan): Wan and Flux on CUDA, a second GPU
@@ -259,7 +262,7 @@ context parallel, `--requests` / `--dp` batches on CUDA, multi-shape serving on 
 
 Not in Release 1 (follow-ups F1–F8 in the plan): Wan on CUDA, Flux follow-ups (F5b), a second GPU
 (data-parallel / CFG-parallel first; tensor-parallel across PCIe only when a workload needs it),
-context parallel, `--requests` / `--dp` batches on CUDA, `difflet serve` on CUDA (F3b), CUDA
+context parallel, `--requests` / `--dp` batches on CUDA, CUDA
 graphs, calibrated/online-delta TeaCache, FP8, `flash-attn`, custom kernels (F4b).
 
 ## Compile cache
