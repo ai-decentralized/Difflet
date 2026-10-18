@@ -29,7 +29,7 @@
         "each timing table names the card edition (Server vs Workstation) taken from the JSON device field or the status log, and does not compare per-step times across editions unlabelled",
         "sections without an artifact JSON (e.g. Flux or Wan under --dp) are marked as gaps or NOT MEASURED rather than filled with invented numbers",
         "every section has a How to inspect manually recipe naming the file, the JSON keys and, for numerical gates, the pytest gate command with DIFFLET_RUN_CUDA_NUMERICAL=1",
-        "the NOT MEASURED list includes Wan --dp combined with --cfg-parallel and serving on two GPUs, and does not list the CLI-matrix Wan cell or the Wan e2e noise floor (both measured in artifacts/cuda-release1/f9/)",
+        "the NOT MEASURED list includes Wan --dp combined with --cfg-parallel and Flux under --dp, and does not list the CLI-matrix Wan cell, the Wan e2e noise floor (both measured in artifacts/cuda-release1/f9/), serving on two GPUs or Wan under --dp (both measured in artifacts/cuda-release1/f2b/)",
         "no tracked repository file was modified"
       ]
     }

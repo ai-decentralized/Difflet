@@ -104,6 +104,7 @@ F9 entry.
 | Wan 2.2 T2V-A14B | 40 / 480×832 × 9 frames | 703.1 s (**cold volume**) | 55.1 s (1.38) | 73,035 MiB (`nvidia-smi`) | f5b (**Workstation**) | `wan/smoke_timings.json`, `wan/wan_40steps_9frames.mp4`, `wan/wan_40steps_frame0.png` | 10-18 F1 |
 | Wan 2.2, serial on one card | 40 / 480×832 × 9 | 55.9 s | 50.9 s (1.27) | — | f2 (Server) | `f2/timings.txt` | 10-18 F2 |
 | Wan 2.2, `run_gates.sh wan` smoke | 40 / 480×832 × 9 | 47.7 s | 51.0 s (1.27) | 73,035 MiB (`nvidia-smi`) | f9 (Server) | `f9/gates-wan/cuda-smoke-wan-20261018-193636.json` | 10-18 F9 |
+| Wan 2.2, `run_gates.sh wan` smoke after the fused q/k norm (83d244a) | 40 / 480×832 × 9 | 16.7 s (page cache) | 48.5 s (1.21) | — | f2b (Server) | `f2b/gates-wan/cuda-smoke-wan-20261018-220419.json` | 10-18 F2b/F4b |
 
 Footnotes. All paths are under `artifacts/cuda-release1/`. Release 1's 0.41 s/step became
 0.52 s/step in F3 (+27 %): the padding mask made the flash kernel ineligible. F4's trim
@@ -239,6 +240,7 @@ does not remove it; more seeds narrow it.
 | FLUX.1-dev (guidance 3.5) | 28 / 1024² | 40.35 dB | 0.99980 | 0.0034 / 0.625 | 35 / 0.998 | 23.6 s / 21.8 s (status-log only) | f5b (Workstation) | `flux/cuda_e2e_flux.json`, `flux/e2e_{difflet,diffusers}_flux_28steps.png` | 10-18 F5 |
 | Wan 2.2, bf16 timestep (`model`), F1 | 40 / 480×832 × 9 | 27.54 dB | 0.99704 | 0.0238 / 1.0 | 25 / 0.99 | 55.3 s / 44.6 s (loads 417.6 / 452.3 s; peak 68.44 / 68.56 GB) | f5b (Workstation) | `wan/cuda_e2e_wan.json`, `wan/e2e_{difflet,diffusers}_wan_40steps_frame0.png` | 10-18 F1 |
 | Wan 2.2, fp32 timestep (`float32`, default, gated) | 40 / 480×832 × 9 | 26.30 dB | 0.99609 | 0.0274 / 1.0 | 25 / 0.99 | 50.9 s / 42.9 s | f1b (Server) | `wan/f1b/cuda_e2e_wan.json` | 10-18 F1b |
+| Wan 2.2, `float32` / `model`, seed 0, after the fused q/k norm (83d244a) | 40 / 480×832 × 9 | 27.91 / 27.51 dB | 0.99730 / 0.99702 | — | 25 / 0.99 (no floor in the result) | 44.6 / 44.5 s / 42.8 s | f2b (Server) | `f2b/gates-wan/cuda_e2e_wan.json` | 10-18 F2b/F4b |
 | Wan 2.2, `float32`, seeds 0 / 1 / 2 | 40 / 480×832 × 9 | 26.30 / 26.39 / 28.89 dB | 0.99609 / 0.99541 / 0.99775 | 0.0274 / 0.0280 / 0.0223; max 1.0 / 0.988 / 0.920 | 25 / 0.99, every seed | 50.9 / 49.3 / 49.4 s / 43.2 / 42.9 / 42.9 s (loads 56.0 / 48.3 s; peak 68.44 / 68.56 GB) | f9 (Server) | `f9/cuda_e2e_wan_noise.json` `per_seed`, `timings` | 10-18 F9 |
 | Wan 2.2, `run_gates.sh wan`: `float32` / `model`, seed 0 | 40 / 480×832 × 9 | 26.30 / 27.54 dB | 0.99609 / 0.99704 | 0.0274 / 0.0238; max 1.0 | 25 / 0.99 | 50.6 / 50.2 s / 43.1 s (loads 49.8 / 48.9 / 52.6 s) | f9 (Server) | `f9/gates-wan/cuda_e2e_wan.json` `variants` | 10-18 F9 |
 
@@ -402,6 +404,38 @@ HF_HOME=$H scripts/cuda_serve_smoke.sh --output $HOME/logs/qwen-serve.png --step
 # (port 8091): the exact curl helper is in .claude/skills/difflet-cuda-verify/SKILL.md §3
 ```
 
+### Serving on two GPUs (F2b, `--dp-degree N`)
+
+Pod f2b (2 × **Server**, PCIe `PHB`), checkout 3d8b026+ (branch `feat/cuda-f2b-f4b-two-gpus`),
+`HF_HOME=~/hf`, offline *[10-18 F2b/F4b]*. `difflet serve --dp-degree N` keeps N complete
+resident workers, one GPU each (the worker exports `CUDA_VISIBLE_DEVICES` from its plan's core
+id), behind one `ReplicatedServingEngine` that routes each request to the replica with the fewest
+pending requests; `--dp-degree 1` is the F3b path unchanged. 50 steps, 1024², seed 0, the same
+prompt; every image compared by bytes with the `--dp 1` run's first image.
+
+| Run (`scripts/cuda_serve_smoke.py`) | ready | requests | wall | identical to the dp 1 image | Artifact |
+|---|---|---|---|---|---|
+| `--dp 1 --requests 2` (reference) | 44.0 s | 16.7 / 16.7 s (serial) | — | reference (md5 `c74b4d32…`) | `f2b/serve/serve_dp1/serve_timings.json`, `qwen_50steps.png` |
+| `--dp 2 --concurrent 2` | 30.0 s (two loads in parallel; likely the page cache after the dp 1 run — not measured) | 16.7 / 16.7 s | **16.7 s** | both | `f2b/serve/serve_dp2/serve_timings.json` |
+| `--dp 2 --concurrent 3 --queue-timeout 120` | 30.0 s | 16.7 / 16.7 / 33.3 s | 33.3 s (the third queued behind a running one) | all three | `f2b/serve/serve_dp2c3/serve_timings.json` |
+| GPU memory while serving (42 s into the 3-request run) | | one worker per card, 60,893 MiB each (pids 3088 / 3089), GPU 0 at 98 % serving the third | | | `f2b/serve_dp2c3_nvsmi.log` |
+| `difflet serve --model-id Qwen/Qwen-Image --dp-degree 3` | `400 feature_not_supported: --dp-degree 3 exceeds the 2 visible GPU(s) (CUDA_VISIBLE_DEVICES); one resident replica needs one GPU`, exit 1, before any download | | | | `f2b/serve/serve_dp3_refusal.log` |
+| `DIFFLET_BACKEND=cpu difflet serve … --dp-degree 2` | `400 feature_not_supported: --dp-degree 2: data-parallel serving replicas (one resident worker per GPU) exist on the CUDA backend only (plan follow-up F2b) …` | | | | status-log only |
+
+The F3b LIMIT (the second concurrent request got 429 after the 30 s default) is lifted by one
+replica per GPU: two concurrent requests complete in one request-time; a third still waits for a
+free replica, so `--queue-timeout` must exceed a request when clients queue beyond N.
+
+**How to inspect manually.**
+
+```bash
+for d in serve_dp1 serve_dp2 serve_dp2c3; do python3 -m json.tool artifacts/cuda-release1/f2b/serve/$d/serve_timings.json; done
+cat artifacts/cuda-release1/f2b/serve_dp2c3_nvsmi.log
+# on a 2-GPU pod (after a --dp 1 run that wrote $HOME/logs/x/serve_dp1/qwen.png):
+HF_HOME=$H scripts/cuda_serve_smoke.sh --output $HOME/logs/x/serve_dp2/qwen.png --steps 50 \
+    --dp 2 --concurrent 2 --reference $HOME/logs/x/serve_dp1/qwen.png
+```
+
 ## Performance (F4, `scripts/cuda_bench_dit.py`) — Server Edition only
 
 Qwen-Image DiT forward, bf16, B = 1, 1024×1024, 1024 text tokens of which 16 are valid. Median
@@ -438,6 +472,58 @@ python scripts/cuda_bench_dit.py --model-path "$SNAP" --cases difflet_masked --t
     --out $HOME/logs/x/bench_dit_compiled.json
 ```
 
+### Second Server-Edition data point (F4b, pod f2b)
+
+`cuda_bench_dit.py` on pod f2b (another Server Edition card, eu-2): Difflet trimmed 322.7 ms
+(f3c: 323.5), diffusers padded 489.7 (489.6), diffusers trimmed 299.7 (299.6); Difflet with an
+all-ones mask and the trim on 402.5 ms (no f3c counterpart). The same edition reproduces the
+F4 table to the millisecond; the Workstation edition was not on this pod, so the
+Workstation-vs-Server characterisation stays unmeasured (`f2b/bench/bench_dit_qwen.json`).
+
+### Wan DiT bench and the fused q/k norm (F4b, `scripts/cuda_bench_wan_dit.py`)
+
+One Wan 2.2 expert forward on identical seeded inputs (latents `(1, 16, 3, 60, 104)`, timestep
+999 in fp32, text `(1, 512, 4096)`, bf16), Difflet's `CudaWanTransformerApplication` vs diffusers'
+`WanTransformer3DModel`, median of 10 after 3 warm-ups, then one profiled forward. Pod f2b
+(**Server**) *[10-18 F2b/F4b]*.
+
+| Case | Difflet ms | diffusers ms | ratio | gemm / attention / elementwise / copy / norm (Difflet vs diffusers) | Artifact |
+|---|---|---|---|---|---|
+| `transformer`, before the fix (d8ca0de) | 604.5 | 526.4 | 1.148× | 286.8 vs 286.9 / 61.6 vs 61.2 / **145.4 vs 94.5** / **95.1 vs 61.3** / 11.9 vs 19.6 | `f2b/bench/bench_wan_dit_transformer.json` |
+| `transformer_2`, before | 604.5 | 526.8 | 1.148× | 286.0 vs 286.5 / 61.5 vs 61.2 / 145.4 vs 94.5 / 95.1 vs 61.3 / 11.9 vs 19.6 | `bench_wan_dit_transformer_2.json` |
+| `transformer`, `--cfg-batch 2`, before | 1305.7 | 1094.8 | 1.193× | — | `bench_wan_dit_transformer_cfg2.json` |
+| `transformer`, after the fix (83d244a) | **536.2** | 527.9 | **1.016×** | 287.4 vs 288.8 / 61.0 vs 61.2 / 101.3 vs 94.6 / 63.8 vs 61.3 / 19.3 vs 19.6 | `bench_wan_dit_transformer_fused.json` |
+
+Both sides run the same gemm and the same flash-attention kernel; the whole gap was
+elementwise and copy work, which the code read traced to `WanAttention._global_rms_norm`: the
+across-heads q/k RMSNorm at tp=1 made seven fp32 passes (two fp32 copies, pow, sum, mul, affine,
+cast) per call, three large calls per block, forty blocks. The fix (commit 83d244a) is a new op,
+`difflet.ops.rms_norm_fp32`: the CPU, TPU and Trainium backends export the old math verbatim
+(bit for bit, unit-tested), the CUDA backend `torch.nn.functional.rms_norm` (one fused kernel,
+the same fp32 math up to the reduction order). The loop-overhead probe (`--loop-probe`: the real
+`WanOrchestrator` loop with probe experts) puts the host loop at 1.35 ms/step — 54 ms of a
+40-step run, 80 DiT calls (26 high-noise, 54 low-noise) — so the orchestrator was never the gap
+(a second probe read 184 ms/step while the other card's gate run was loading weights: host
+contention, not the loop). Pipeline level, 40 steps, seed 0, same pod: Difflet generate
+50.3 s (old code) → **44.5 s**, diffusers 42.8 s — the F1b/F9 gap of 8.1 s is 1.8 s. The fix is a
+rounding-level change: old vs new code on seed 0 differ by PSNR 28.45 dB (mean_abs 0.041,
+`f2b/wan_dp/compare_wan_dp.json`), the noise floor's own range; the Wan gates on the new code
+(the e2e table and the parity section's F2b rows) pass with the F1b parity numbers to the
+third digit and e2e 27.91 dB.
+
+**How to inspect manually.**
+
+```bash
+python3 -c "import json
+for f in ['transformer', 'transformer_2', 'transformer_cfg2', 'transformer_fused']:
+    d = json.load(open(f'artifacts/cuda-release1/f2b/bench/bench_wan_dit_{f}.json'))
+    for c, v in d['cases'].items(): print(f, c, round(v['timed']['median_ms'], 1), {k: round(x, 1) for k, x in v['profile']['by_category_ms'].items()})
+    print('  loop probe:', d.get('loop_probe'))"
+# on a pod:
+python scripts/cuda_bench_wan_dit.py --model-path "$WAN" --expert transformer --loop-probe --out $HOME/logs/x/bench_wan_dit_transformer.json
+python scripts/cuda_bench_wan_dit.py --model-path "$WAN" --expert transformer_2 --out $HOME/logs/x/bench_wan_dit_transformer_2.json
+```
+
 ## Two GPUs (F2)
 
 Pod f2: 2 × **Server** over PCIe `PHB`, no NVLink, checkout aef79dd *[10-18 F2 verdict]*. NCCL
@@ -451,6 +537,8 @@ shows `NCCL version 2.28.9+cuda12.9` and both ranks report `gathered [0.0, 1.0] 
 | Qwen-Image, 4 serial `difflet run` (seeds 0–3) | 17.6–44.0 s each | 16.8–17.3 s each | — | references | — | `f2/timings.txt`; 190 s total status-log only |
 | Qwen-Image `--dp 1 --requests` (one card, batch) | 8.6 s (once) | 16.7–16.8 s per image | 79 s wall (status-log only) | requests 0 and 3 byte-identical (`identical_bytes: true`); 1 and 2 not compared | — | `f2/compare_qwen.json` `[4]`, `[5]` |
 | Qwen-Image `--dp 2 --requests` (router `worker 0: GPUs 0`, `worker 1: GPUs 1`) | 21.4 / 21.5 s in parallel | 16.7–16.8 s per image | **58 s wall** vs 190 s serial (3.3×, computed) and 79 s `--dp 1` (1.36×, computed) | all four byte-identical | — | `f2/compare_qwen.json` `[0]`–`[3]`, `f2/qwen_dp2_request0_50steps.png` |
+| Wan 2.2, 2 serial `difflet run` (seeds 0, 1), pod f2b, checkout 83d244a | 16-ish s (page cache; `serial_seed0.log`) | 44.5 / 44.6 s | — | references | — | `f2b/wan_dp/compare_wan_dp.json` `serial_generate_s`, `serial_seed0.log` *[10-18 F2b/F4b]* |
+| Wan 2.2 `--dp 2 --requests` (two 40-step requests, seeds 0, 1), pod f2b | 20.6 / 20.8 s in parallel | 51.2 / 51.2 s (slower than 44.5 s alone: two replicas at once — contention not measured) | **76 s wall** vs 120 s serial (1.58×, computed) | both videos bit-identical (max_abs 0) | — | `f2b/wan_dp/compare_wan_dp.json` `comparisons[0..1]`, `dp2.log` |
 
 The extra ~555 MiB on GPU 0 is likely the parent's CUDA context; it was not measured separately.
 After each run no process was left on either card. The `cosine` field in both comparison JSONs is
@@ -585,6 +673,19 @@ above. Spurious infrastructure events are kept and labelled.
     "Switch to eu" the session ran on a one-GPU eu-3 pod without a volume (rulings R2, Wan
     symlinked into the volume's hub, and R3, pause at the end, did not apply); the pod was
     terminated, read back gone *[10-18 F9]*.
+29. `3d8b026` — F2b task 1: `difflet serve --dp-degree N` on CUDA, N resident workers one GPU
+    each behind `ReplicatedServingEngine`; the worker pins `CUDA_VISIBLE_DEVICES` from its plan;
+    refused off CUDA and above the GPU count before any download *[10-18 F2b/F4b]*.
+30. `9ace97a`, `d8ca0de` — the serve smoke's `--dp` / `--concurrent` / `--reference`;
+    `scripts/cuda_bench_wan_dit.py` with the loop-overhead probe; Flux e2e timings recorded
+    *[10-18 F2b/F4b]*.
+31. `83d244a` — F4b task 5: `difflet.ops.rms_norm_fp32`, the Wan q/k norm at tp=1 as one op,
+    fused on CUDA (the reference math elsewhere, bit for bit): the expert forward 604.5 → 536.2 ms
+    against diffusers' 527.9, the 40-step generate 50.3 → 44.5 s against 42.8 *[10-18 F2b/F4b]*.
+32. status-log only — the DP router's claim markers under `~/.cache/difflet/work/dp` survive a
+    run, so a second `--dp N --requests` over the same file reports `done=N` in seconds without
+    generating; cleared by hand on f2b (F2b observation); Wan replicas generating at once take
+    51.2 s each vs 44.5 s alone (unmeasured cause) *[10-18 F2b/F4b]*.
 28. the F9b commit — the Wan e2e gate stated relative to the measured noise floor when the result
     carries it (mean over seeds within 1.21 dB of the floor's mean, every seed within 1.21 dB of
     the floor's worst seed, cosine deviation within 1.15² = 1.3225×, a loose 20 dB / 0.98
@@ -606,10 +707,10 @@ to the CUDA path but never ran: it is NOT MEASURED in every row and has no colum
 | `difflet serve` | PASS; LIMIT on concurrency (429 after 30 s) [F3b] | N/A · refused by name, F5b | N/A · refused by name, F1b |
 | `--torch-compile` | PASS, opt-in [F4] | N/A · refused, F5b | N/A · refused, F1b |
 | `--teacache-cadence N` | PASS, fixed cadence only [F4] | N/A · refused, F5b | N/A · refused, F1b |
-| `--dp 2 --requests` | PASS, byte-identical [F2] | NOT MEASURED (reachable) | NOT MEASURED (reachable) |
+| `--dp 2 --requests` | PASS, byte-identical [F2] | NOT MEASURED (reachable) | PASS, bit-identical [F2b] |
 | `--cfg-parallel` (2 GPUs) | N/A · single pass | N/A · guidance-distilled; true-CFG is the owner's call | PASS, bit-identical [F2] |
 | `--dp` × `--cfg-parallel` | N/A · refuses `--cfg-parallel` | N/A · refuses `--cfg-parallel` | NOT MEASURED (needs 4 cards) |
-| serving on two GPUs | NOT MEASURED (F2b) | N/A · serve refused | N/A · serve refused |
+| serving on two GPUs (`--dp-degree 2`) | PASS, two requests in one request-time [F2b] | N/A · serve refused | N/A · serve refused |
 | CP / ulysses (`--cp-degree > 1`) | N/A · refused, F2b | N/A · refused, F2b | N/A · refused, F2b |
 | TP across PCIe, `--sp` | N/A · refused, F6 | N/A · refused, F6 | N/A · refused, F6 |
 
@@ -641,7 +742,7 @@ Download → compile → timed generate per cell, `results.json`.
 One resident worker holds the pipeline; OpenAI-compatible chat endpoint.
 | Qwen-Image | FLUX.1-dev | Wan 2.2 |
 |---|---|---|
-| PASS · ready 56.0 s, 38.6 / 39.2 s per request; LIMIT · 429 `queue_timeout` for a concurrent request at the 30 s default | N/A · refused by name, F5b | N/A · refused by name, F1b |
+| PASS · ready 56.0 s, 38.6 / 39.2 s per request; LIMIT · 429 `queue_timeout` for a concurrent request at the 30 s default on one GPU; `--dp-degree 2` PASS · two concurrent requests in one request-time (16.7 s wall), identical bytes [F2b] | N/A · refused by name, F5b | N/A · refused by name, F1b |
 
 ### `--torch-compile`
 Per-block inductor compile of the DiT, opt-in (D4: eager by default).
@@ -659,7 +760,7 @@ Probe-free fixed cadence on the CUDA loop; calibrated and online-delta modes ref
 One single-GPU replica per card through the request router.
 | Qwen-Image | FLUX.1-dev | Wan 2.2 |
 |---|---|---|
-| PASS · 4 requests in 58 s on 2 cards vs 190 s serial, byte-identical | NOT MEASURED · reachable, not run | NOT MEASURED · reachable, not run |
+| PASS · 4 requests in 58 s on 2 cards vs 190 s serial, byte-identical | NOT MEASURED · reachable, not run | PASS · 2 requests in 76 s vs 120 s serial, bit-identical [F2b] |
 
 ### CFG-parallel   `--cfg-parallel` (2 GPUs, torchrun)
 Runs the cond and uncond branches on two cards, one all-gather per step.
@@ -683,18 +784,25 @@ The honest gap list for the next session, none of it refused and none of it run:
 
 1. **Wan `--dp` × `--cfg-parallel`.** It needs four cards; it is allowed by construction and
    unverified (F2 R3, F2b).
-2. **FLUX.1-dev and Wan under `--dp`** on CUDA. Both are reachable and were not run (F2b).
+2. **FLUX.1-dev under `--dp`** on CUDA. Reachable and not run (F2b). Wan under `--dp` was
+   measured on pod f2b (Two GPUs section) *[10-18 F2b/F4b]*.
 3. **Wan 2.1** (`Wan-AI/Wan2.1-T2V-14B-Diffusers`). It is routed to the CUDA orchestrator and has
    never run on a GPU. Diffusers' Wan 2.1 defaults (50 steps, guidance 5.0) differ from 40 / 4.0
    *[10-18 F1 review fixes]*.
-4. **Serving on two GPUs** (F2b).
+4. **Flux e2e timings** next to diffusers': `cuda_e2e_flux_vs_diffusers.py` records them since
+   F4b, but FLUX.1-dev is gated and the owner was not at the phone for the device login on pod
+   f2b, so none were taken *[10-18 F2b/F4b]*.
 
 F9 measured and removed two items: the CLI matrix's Wan cell (PASS, CLI matrix section) and the
-Wan e2e noise floor (e2e section) *[10-18 F9]*.
+Wan e2e noise floor (e2e section) *[10-18 F9]*. F2b/F4b measured and removed two more: serving on
+two GPUs (Serving section) and Wan under `--dp` (Two GPUs section) *[10-18 F2b/F4b]*.
 
 Also unmeasured, and recorded where they arose: Workstation vs Server characterisation with
-`cuda_bench_dit.py` (F4b); Wan's Difflet vs diffusers generate gap (55.3 vs 44.6 s Workstation,
-50.9 vs 42.9 s Server; F4b); Flux peak GPU memory; F2 `--dp 1` requests 1 and 2 against their
+`cuda_bench_dit.py` (F4b: a second Server card reproduced the f3c table to the millisecond, the
+Workstation card was not on the pod); Wan's Difflet vs diffusers generate gap — **measured and
+closed** in F4b (50.9 vs 42.9 s Server → 44.5 vs 42.8 s after the fused q/k norm; the
+Performance section); why two Wan replicas generating at once take 51.2 s each against 44.5 s
+alone (F2b); Flux peak GPU memory; F2 `--dp 1` requests 1 and 2 against their
 references; the origin of GPU 0's extra ~555 MiB under `--cfg-parallel`; the Trainium
 byte-identity of the Flux split (D13, needs a trn2); the split of the Wan noise floor into the
 timestep effect and run-to-run GPU nondeterminism (F9). F9's recommended follow-up — state the
@@ -716,6 +824,7 @@ from recorded times and prices.
 | `difflet-cuda-f1b` | 13:58 → 14:24 UTC (~26 min) | 5.30 | ~$2.30 | terminated, gone |
 | `difflet-cuda-f2` | 15:52 → 16:21 UTC (~29 min) | 5.30 | ~$2.60 (recorded) | terminated, gone |
 | `difflet-cuda-f9` | 18:44 → 19:50 UTC (~66 min) | 2.65 | ~$2.90 (computed) | terminated, gone |
+| `difflet-cuda-f2b` (2 GPUs, eu-2) | 17:27 → 18:11 UTC (~44 min) | 5.30 | ~$3.90 (computed) | terminated, gone |
 | `difflet-cache` volume | ongoing | $0.0698/GB/month × 200 GB | ~$13.96/month | attached to f5b |
 
 A paused pod releases its card and stops GPU billing; the container disk is lost, while the volume

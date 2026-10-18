@@ -1,0 +1,124 @@
+[serve-smoke] starting: /home/user/Difflet/.venv/bin/python -m difflet.cli.main serve --model-id Qwen/Qwen-Image --port 8091 --dp-degree 2 --queue-timeout 120
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+2026-10-18 21:46:17.123 INFO:     Started server process [2938]
+2026-10-18 21:46:17.123 INFO:     Waiting for application startup.
+2026-10-18 21:46:17.123 INFO:     serving startup begin model=Qwen/Qwen-Image
+2026-10-18 21:46:18.413 INFO:     worker_process_start model=Qwen/Qwen-Image profile_identity=2b7d81bde9837706ee01e0b4b072c009a203612675696afb038f38295e402193 startup_timeout=900.0
+2026-10-18 21:46:18.413 INFO:     worker_process_start model=Qwen/Qwen-Image profile_identity=2b7d81bde9837706ee01e0b4b072c009a203612675696afb038f38295e402193 startup_timeout=900.0
+2026-10-18 21:46:18.413 INFO:     worker_process_terminate model=Qwen/Qwen-Image
+2026-10-18 21:46:18.413 INFO:     worker_process_terminate model=Qwen/Qwen-Image
+[difflet serve] resolving Qwen-Image weights for Qwen/Qwen-Image
+[difflet serve] cuda backend: eager resident pipeline, no compile artifacts
+[difflet serve] stage topology:
+  - pipeline: role=pipeline kind=opaque_pipeline placement=cuda artifact=-
+[difflet serve] resident replicas: 2, one GPU each
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+2026-10-18 21:46:18.472 INFO:     worker heartbeat transition state=starting request_id=None stage=None running_requests=0 queued_requests=0 pending_requests=0 capacity=9
+2026-10-18 21:46:18.473 INFO:     worker heartbeat transition state=starting request_id=None stage=None running_requests=0 queued_requests=0 pending_requests=0 capacity=9
+[transformers] Qwen2_5_VLConfig got `key=rope_scaling` in kwargs but hasn't set it as attribute. For RoPE standardization you need to set `self.rope_parameters` in model's config. 
+[transformers] Unrecognized keys in `rope_parameters` for 'rope_type'='default': {'mrope_section'}
+[difflet serve] loading Qwen-Image on CUDA (text encoder, DiT, VAE in-process)
+Loading weights:   0%|          | 0/729 [00:00<?, ?it/s]Loading weights: 100%|██████████| 729/729 [00:00<00:00, 23599.15it/s]
+[transformers] Qwen2_5_VLConfig got `key=rope_scaling` in kwargs but hasn't set it as attribute. For RoPE standardization you need to set `self.rope_parameters` in model's config. 
+[transformers] Unrecognized keys in `rope_parameters` for 'rope_type'='default': {'mrope_section'}
+[difflet serve] loading Qwen-Image on CUDA (text encoder, DiT, VAE in-process)
+Loading weights:   0%|          | 0/729 [00:00<?, ?it/s]Loading weights: 100%|██████████| 729/729 [00:00<00:00, 17395.63it/s]
+2026-10-18 21:46:29.060 INFO:     worker_process_ready model=Qwen/Qwen-Image replicas=1
+2026-10-18 21:46:29.327 INFO:     worker_process_ready model=Qwen/Qwen-Image replicas=1
+2026-10-18 21:46:29.327 INFO:     serving startup complete model=Qwen/Qwen-Image
+2026-10-18 21:46:29.327 INFO:     Application startup complete.
+2026-10-18 21:46:29.328 INFO:     Uvicorn running on http://0.0.0.0:8091 (Press CTRL+C to quit)
+2026-10-18 21:46:30.123 INFO:     127.0.0.1:43676 - "GET /ready HTTP/1.1" 200
+[serve-smoke] ready in 14.0 s
+2026-10-18 21:46:30.129 INFO:     http.request_started path=/v1/chat/completions method=POST model=Qwen/Qwen-Image request_id=5264ea32-a7b9-4cfc-a9ce-b575f6db3bf7 client=127.0.0.1
+2026-10-18 21:46:30.130 INFO:     http.request_started path=/v1/chat/completions method=POST model=Qwen/Qwen-Image request_id=153242cf-0615-443a-a0f4-2738b17ab651 client=127.0.0.1
+2026-10-18 21:46:30.131 INFO:     http.request_started path=/v1/chat/completions method=POST model=Qwen/Qwen-Image request_id=5003213e-1107-4852-b2d6-135a40d002e6 client=127.0.0.1
+2026-10-18 21:46:30.131 INFO:     chat request normalized model=Qwen/Qwen-Image request_id=5264ea32-a7b9-4cfc-a9ce-b575f6db3bf7 prompt_len=47 steps=50 guidance=4.0 seed=0
+2026-10-18 21:46:30.131 INFO:     engine.generate admitted request_id=5264ea32-a7b9-4cfc-a9ce-b575f6db3bf7 model=Qwen/Qwen-Image queued=0/9
+2026-10-18 21:46:30.131 INFO:     engine.queue_acquired request_id=5264ea32-a7b9-4cfc-a9ce-b575f6db3bf7
+2026-10-18 21:46:30.131 INFO:     engine.lock_acquired request_id=5264ea32-a7b9-4cfc-a9ce-b575f6db3bf7
+2026-10-18 21:46:30.131 INFO:     engine.run_start request_id=5264ea32-a7b9-4cfc-a9ce-b575f6db3bf7
+2026-10-18 21:46:30.131 INFO:     chat request normalized model=Qwen/Qwen-Image request_id=153242cf-0615-443a-a0f4-2738b17ab651 prompt_len=47 steps=50 guidance=4.0 seed=0
+2026-10-18 21:46:30.131 INFO:     engine.generate admitted request_id=153242cf-0615-443a-a0f4-2738b17ab651 model=Qwen/Qwen-Image queued=0/9
+2026-10-18 21:46:30.131 INFO:     engine.queue_acquired request_id=153242cf-0615-443a-a0f4-2738b17ab651
+2026-10-18 21:46:30.132 INFO:     engine.lock_acquired request_id=153242cf-0615-443a-a0f4-2738b17ab651
+2026-10-18 21:46:30.132 INFO:     engine.run_start request_id=153242cf-0615-443a-a0f4-2738b17ab651
+2026-10-18 21:46:30.132 INFO:     worker_process_run_start request_id=5264ea32-a7b9-4cfc-a9ce-b575f6db3bf7 model=Qwen/Qwen-Image deadline_remaining=299.999
+2026-10-18 21:46:30.132 INFO:     worker_process_run_start request_id=153242cf-0615-443a-a0f4-2738b17ab651 model=Qwen/Qwen-Image deadline_remaining=300.000
+2026-10-18 21:46:30.132 INFO:     chat request normalized model=Qwen/Qwen-Image request_id=5003213e-1107-4852-b2d6-135a40d002e6 prompt_len=47 steps=50 guidance=4.0 seed=0
+2026-10-18 21:46:30.132 INFO:     engine.generate admitted request_id=5003213e-1107-4852-b2d6-135a40d002e6 model=Qwen/Qwen-Image queued=1/9
+2026-10-18 21:46:30.132 INFO:     engine.queue_acquired request_id=5003213e-1107-4852-b2d6-135a40d002e6
+2026-10-18 21:46:46.772 INFO:     worker_process_generation_ok request_id=5264ea32-a7b9-4cfc-a9ce-b575f6db3bf7
+2026-10-18 21:46:46.773 INFO:     engine.run_complete request_id=5264ea32-a7b9-4cfc-a9ce-b575f6db3bf7
+2026-10-18 21:46:46.773 INFO:     chat request engine_ok request_id=5264ea32-a7b9-4cfc-a9ce-b575f6db3bf7 model=Qwen/Qwen-Image latency_ms=16641.69
+2026-10-18 21:46:46.775 INFO:     chat request image_inline_ready request_id=5264ea32-a7b9-4cfc-a9ce-b575f6db3bf7 bytes=1455341
+2026-10-18 21:46:46.775 INFO:     chat request completed request_id=5264ea32-a7b9-4cfc-a9ce-b575f6db3bf7 model=Qwen/Qwen-Image total_ms=16643.98
+2026-10-18 21:46:46.775 INFO:     engine.lock_acquired request_id=5003213e-1107-4852-b2d6-135a40d002e6
+2026-10-18 21:46:46.775 INFO:     engine.run_start request_id=5003213e-1107-4852-b2d6-135a40d002e6
+2026-10-18 21:46:46.775 INFO:     http.request_completed path=/v1/chat/completions status=200 model=Qwen/Qwen-Image request_id=5264ea32-a7b9-4cfc-a9ce-b575f6db3bf7 duration_ms=16646.24
+2026-10-18 21:46:46.775 INFO:     worker_process_run_start request_id=5003213e-1107-4852-b2d6-135a40d002e6 model=Qwen/Qwen-Image deadline_remaining=283.357
+2026-10-18 21:46:46.785 INFO:     127.0.0.1:43692 - "POST /v1/chat/completions HTTP/1.1" 200
+2026-10-18 21:46:46.786 INFO:     worker_process_generation_ok request_id=153242cf-0615-443a-a0f4-2738b17ab651
+2026-10-18 21:46:46.787 INFO:     engine.run_complete request_id=153242cf-0615-443a-a0f4-2738b17ab651
+2026-10-18 21:46:46.787 INFO:     chat request engine_ok request_id=153242cf-0615-443a-a0f4-2738b17ab651 model=Qwen/Qwen-Image latency_ms=16655.26
+2026-10-18 21:46:46.788 INFO:     chat request image_inline_ready request_id=153242cf-0615-443a-a0f4-2738b17ab651 bytes=1455341
+2026-10-18 21:46:46.788 INFO:     chat request completed request_id=153242cf-0615-443a-a0f4-2738b17ab651 model=Qwen/Qwen-Image total_ms=16656.21
+2026-10-18 21:46:46.788 INFO:     http.request_completed path=/v1/chat/completions status=200 model=Qwen/Qwen-Image request_id=153242cf-0615-443a-a0f4-2738b17ab651 duration_ms=16657.92
+2026-10-18 21:46:46.797 INFO:     127.0.0.1:43706 - "POST /v1/chat/completions HTTP/1.1" 200
+2026-10-18 21:46:48.472 INFO:     worker heartbeat state_dwell_seconds=30.00 from_state=starting to_state=busy
+2026-10-18 21:46:48.472 INFO:     worker heartbeat transition state=busy request_id=5003213e-1107-4852-b2d6-135a40d002e6 stage=pipeline running_requests=1 queued_requests=0 pending_requests=1 capacity=9
+2026-10-18 21:46:48.473 INFO:     worker heartbeat state_dwell_seconds=30.00 from_state=starting to_state=ready
+2026-10-18 21:46:48.473 INFO:     worker heartbeat transition state=ready request_id=None stage=None running_requests=0 queued_requests=0 pending_requests=0 capacity=9
+2026-10-18 21:47:03.461 INFO:     worker_process_generation_ok request_id=5003213e-1107-4852-b2d6-135a40d002e6
+2026-10-18 21:47:03.461 INFO:     engine.run_complete request_id=5003213e-1107-4852-b2d6-135a40d002e6
+2026-10-18 21:47:03.461 INFO:     chat request engine_ok request_id=5003213e-1107-4852-b2d6-135a40d002e6 model=Qwen/Qwen-Image latency_ms=33328.63
+2026-10-18 21:47:03.462 INFO:     chat request image_inline_ready request_id=5003213e-1107-4852-b2d6-135a40d002e6 bytes=1455341
+2026-10-18 21:47:03.462 INFO:     chat request completed request_id=5003213e-1107-4852-b2d6-135a40d002e6 model=Qwen/Qwen-Image total_ms=33329.85
+2026-10-18 21:47:03.462 INFO:     http.request_completed path=/v1/chat/completions status=200 model=Qwen/Qwen-Image request_id=5003213e-1107-4852-b2d6-135a40d002e6 duration_ms=33331.39
+2026-10-18 21:47:03.471 INFO:     127.0.0.1:43716 - "POST /v1/chat/completions HTTP/1.1" 200
+[serve-smoke] request 1: 16.7 s -> /home/user/logs/f2b/serve_dp2c3/qwen.png (identical to reference: True)
+[serve-smoke] request 2: 16.7 s -> /home/user/logs/f2b/serve_dp2c3/qwen-2.png (identical to reference: True)
+[serve-smoke] request 3: 33.3 s -> /home/user/logs/f2b/serve_dp2c3/qwen-3.png (identical to reference: True)
+2026-10-18 21:47:03.571 INFO:     Shutting down
+2026-10-18 21:47:03.672 INFO:     Waiting for application shutdown.
+2026-10-18 21:47:03.672 INFO:     serving shutdown begin model=Qwen/Qwen-Image
+2026-10-18 21:47:03.672 INFO:     worker_process_shutdown requested model=Qwen/Qwen-Image alive=True
+2026-10-18 21:47:03.672 INFO:     worker_process_shutdown requested model=Qwen/Qwen-Image alive=True
+2026-10-18 21:47:03.674 INFO:     worker_process_terminate model=Qwen/Qwen-Image
+2026-10-18 21:47:03.764 INFO:     worker_process_terminate model=Qwen/Qwen-Image
+2026-10-18 21:47:03.765 INFO:     serving shutdown complete model=Qwen/Qwen-Image
+2026-10-18 21:47:03.765 INFO:     Application shutdown complete.
+2026-10-18 21:47:03.765 INFO:     Finished server process [2938]
+/usr/local/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 2 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+[serve-smoke] 3 concurrent requests in 33.3 s wall
+{
+  "model": "Qwen/Qwen-Image",
+  "steps": 50,
+  "seed": 0,
+  "dp": 2,
+  "concurrent": 3,
+  "reference": "/home/user/logs/f2b/serve_dp1/qwen.png",
+  "requests": [
+    {
+      "request_s": 16.7,
+      "image": "/home/user/logs/f2b/serve_dp2c3/qwen.png",
+      "identical_to_reference": true
+    },
+    {
+      "request_s": 16.7,
+      "image": "/home/user/logs/f2b/serve_dp2c3/qwen-2.png",
+      "identical_to_reference": true
+    },
+    {
+      "request_s": 33.3,
+      "image": "/home/user/logs/f2b/serve_dp2c3/qwen-3.png",
+      "identical_to_reference": true
+    }
+  ],
+  "ready_s": 14.0,
+  "wall_s": 33.3,
+  "request_s": 16.7
+}
+SMOKE DONE rc=0

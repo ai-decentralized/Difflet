@@ -1,0 +1,19 @@
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/user/Difflet/difflet/cli/main.py", line 1048, in <module>
+    main()
+  File "/home/user/Difflet/difflet/cli/main.py", line 1041, in main
+    run(args)
+  File "/home/user/Difflet/difflet/cli/serve.py", line 227, in run
+    stack = build_serving_stack(options)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/Difflet/difflet/serving/factory.py", line 40, in build_serving_stack
+    resolved = resolve_serving_model(options)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/user/Difflet/difflet/serving/model_registry.py", line 58, in resolve_serving_model
+    _refuse_unsupported_replicas(int(options.replicas), current_backend())
+  File "/home/user/Difflet/difflet/serving/model_registry.py", line 120, in _refuse_unsupported_replicas
+    raise feature_not_supported(
+difflet.serving.errors.DiffletServingError: 400 feature_not_supported: --dp-degree 3 exceeds the 2 visible GPU(s) (CUDA_VISIBLE_DEVICES); one resident replica needs one GPU

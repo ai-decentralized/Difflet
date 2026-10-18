@@ -193,8 +193,8 @@ From this session's evidence: **the status-log entry** (step 4); **the evidence 
 entry, *How to inspect manually*, ledger with commits, pod costs; `git check-ignore -q <doc>`
 must exit 1 before you commit — an ignored doc is a lost doc); **the support matrix**: PASS /
 LIMIT / N/A / NOT MEASURED, model × feature and one block per feature; NOT MEASURED is the gap
-list (after F9, four: Wan `--dp` × `--cfg-parallel`, Flux and Wan under `--dp`, Wan 2.1, serving
-on two GPUs). Be exact about what was and wasn't verified, and which card edition produced each
+list (after F2b/F4b, four: Wan `--dp` × `--cfg-parallel`, Flux under `--dp`, Wan 2.1, Flux e2e
+timings). Be exact about what was and wasn't verified, and which card edition produced each
 number (Qwen 0.77 s/step Workstation vs 0.33 Server, F3b). Every path, number and explanation
 comes from this session's JSONs, logs, or code you read — these references describe other pods.
 Label inferences ("likely the page cache — not measured") as inferences.

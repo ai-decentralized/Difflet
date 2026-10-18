@@ -32,13 +32,13 @@ and again on f9 (Server) [F9].
 | DiT parity (D14, three gates) | PASS incl. padded prompt [F3, F4] | PASS [F5] | PASS both experts + rounding block [F1, F1b] |
 | e2e vs diffusers | PASS, floors 35 dB / 0.998 [F3] | PASS, floors 35 dB / 0.998 [F5] | PASS, floors 25 dB / 0.99 [F1, F1b]; seeds 0–2 26.30–28.89 dB, overlapping diffusers' own noise floor 23.79–28.62 dB [F9]; gate relative to the floor when recorded, 2.0 dB headroom on the mean [F9b] |
 | CLI matrix cell (`verify_cli_cuda.py`) | PASS [F3, F5, F9] | PASS [F5, F9] | PASS [F9] |
-| `difflet serve` | PASS; LIMIT on concurrency (429 `queue_timeout` after the 30 s default) [F3b] | N/A · refused by name, F5b | N/A · refused by name, F1b |
+| `difflet serve` | PASS; LIMIT on concurrency on one GPU (429 `queue_timeout` after the 30 s default) [F3b]; `--dp-degree 2` PASS, two concurrent requests in one request-time [F2b] | N/A · refused by name, F5b | N/A · refused by name, F1b |
 | `--torch-compile` | PASS, opt-in [F4] | N/A · refused, F5b | N/A · refused, F1b |
 | `--teacache-cadence N` | PASS, fixed cadence only [F4] | N/A · refused, F5b | N/A · refused, F1b |
-| `--dp 2 --requests` | PASS, byte-identical [F2] | NOT MEASURED (reachable) | NOT MEASURED (reachable) |
+| `--dp 2 --requests` | PASS, byte-identical [F2] | NOT MEASURED (reachable) | PASS, bit-identical [F2b] |
 | `--cfg-parallel` (2 GPUs) | N/A · single pass | N/A · guidance-distilled; true-CFG is the owner's call | PASS, bit-identical [F2] |
 | `--dp` × `--cfg-parallel` | N/A · refuses `--cfg-parallel` | N/A · refuses `--cfg-parallel` | NOT MEASURED (needs 4 cards) |
-| serving on two GPUs | NOT MEASURED (F2b) | N/A · serve refused | N/A · serve refused |
+| serving on two GPUs (`--dp-degree 2`) | PASS [F2b] | N/A · serve refused | N/A · serve refused |
 | CP / ulysses (`--cp-degree > 1`) | N/A · refused, F2b | N/A · refused, F2b | N/A · refused, F2b |
 | TP across PCIe, `--sp` | N/A · refused, F6 | N/A · refused, F6 | N/A · refused, F6 |
 
@@ -194,10 +194,13 @@ timestep-cast effect (it also absorbs run-to-run nondeterminism of the perturbed
 Difflet and diffusers runs are deterministic, seed 0's PSNR is identical across three runs). The
 floors stayed 25 dB / 0.99 in F9 (R1); because the floor's worst seed (23.8 dB) is below 25 dB,
 so seed luck could fail a correct build, F9b states the Wan gate relative to the measured noise
-floor whenever the result carries it (the floors paragraph above). The 10 s generate gap to
-diffusers is unmeasured. Artifacts:
+floor whenever the result carries it (the floors paragraph above). The 8 s generate gap to
+diffusers was the DiT, not the loop (F4b: `scripts/cuda_bench_wan_dit.py`, expert forward
+604.5 vs 526.4 ms with identical gemm and attention; the host loop 1.35 ms/step): the q/k
+RMSNorm's seven fp32 passes. Since 83d244a it is one op (`difflet.ops.rms_norm_fp32`, fused on
+CUDA): 536.2 vs 527.9 ms, generate 44.5 vs 42.8 s, gates green, e2e 27.91 dB (seed 0). Artifacts:
 `artifacts/cuda-release1/wan/`, `wan/f1b/`, `f9/`
-(`cuda_e2e_wan_noise.json`, per-seed first frames, `gates-wan/`).
+(`cuda_e2e_wan_noise.json`, per-seed first frames, `gates-wan/`), `f2b/bench/`, `f2b/gates-wan/`.
 
 ## CLI matrix — `scripts/verify_cli_cuda.py`
 
@@ -234,6 +237,11 @@ NCCL smoke 11 s. **Wan `--cfg-parallel`** (`difflet run` re-execs under `torchru
 --nproc_per_node=2`): generate 26.1 s (0.65 s/step) vs 50.9 s serial (1.95×), video
 bit-identical (max_abs 0), peak 68,074 / 67,519 MiB. **Qwen-Image `--dp 2 --requests`** (JSONL,
 one request per line with `prompt`, `output`, `seed`): four 50-step requests 58 s wall vs 190 s
-as four serial runs and 79 s as a `--dp 1` batch; all six compared images byte-identical. Not
-run: Wan `--dp` × `--cfg-parallel`, Flux or Wan under `--dp`, serving on two GPUs (F2b). Artifacts:
-`artifacts/cuda-release1/f2/`.
+as four serial runs and 79 s as a `--dp 1` batch; all six compared images byte-identical.
+**Wan `--dp 2 --requests`** (F2b, f2b): two 40-step requests 76 s wall vs 120 s serial, both
+videos bit-identical; replicas generating at once take 51.2 s each vs 44.5 s alone (unmeasured).
+**Serving on two GPUs** (F2b, f2b): `difflet serve --dp-degree 2` → `--concurrent 2` in 16.7 s
+wall, `--concurrent 3` in 33.3 s, identical bytes; `--dp-degree 3` refused naming the GPU count
+(`scripts/cuda_serve_smoke.py --dp N --concurrent K --reference PNG`). Not run: Wan `--dp` ×
+`--cfg-parallel`, Flux under `--dp`. Artifacts: `artifacts/cuda-release1/f2/`, `f2b/serve/`,
+`f2b/wan_dp/`.

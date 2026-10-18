@@ -1,0 +1,28 @@
+{
+  "model": "Qwen/Qwen-Image",
+  "steps": 50,
+  "seed": 0,
+  "dp": 2,
+  "concurrent": 3,
+  "reference": "/home/user/logs/f2b/serve_dp1/qwen.png",
+  "requests": [
+    {
+      "request_s": 16.7,
+      "image": "/home/user/logs/f2b/serve_dp2c3/qwen.png",
+      "identical_to_reference": true
+    },
+    {
+      "request_s": 16.7,
+      "image": "/home/user/logs/f2b/serve_dp2c3/qwen-2.png",
+      "identical_to_reference": true
+    },
+    {
+      "request_s": 33.3,
+      "image": "/home/user/logs/f2b/serve_dp2c3/qwen-3.png",
+      "identical_to_reference": true
+    }
+  ],
+  "ready_s": 14.0,
+  "wall_s": 33.3,
+  "request_s": 16.7
+}

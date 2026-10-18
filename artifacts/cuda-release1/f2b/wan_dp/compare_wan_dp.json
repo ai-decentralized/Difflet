@@ -1,0 +1,76 @@
+{
+  "model": "wan",
+  "steps": 40,
+  "num_frames": 9,
+  "prompt": "a photorealistic cat walking through a sunlit garden",
+  "code": "83d244a (fused q/k norm)",
+  "serial_generate_s": {
+    "seed0": 44.5,
+    "seed1": 44.6,
+    "seed0_old_code_d8ca0de": 50.3,
+    "seed1_old_code_d8ca0de": 50.5
+  },
+  "serial_wall_s": {
+    "seed0": 60,
+    "seed1": 60
+  },
+  "dp2": {
+    "wall_s": 76,
+    "loads_s": [
+      20.6,
+      20.8
+    ],
+    "generate_s": [
+      51.2,
+      51.2
+    ],
+    "router": "done=2 failed=0 unfinished=0"
+  },
+  "comparisons": [
+    {
+      "a": "serial_seed0.pt",
+      "b": "dp2_seed0.pt",
+      "shape": [
+        1,
+        3,
+        9,
+        480,
+        832
+      ],
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "psnr_db_range2": null,
+      "identical": true
+    },
+    {
+      "a": "serial_seed1.pt",
+      "b": "dp2_seed1.pt",
+      "shape": [
+        1,
+        3,
+        9,
+        480,
+        832
+      ],
+      "max_abs": 0.0,
+      "mean_abs": 0.0,
+      "psnr_db_range2": null,
+      "identical": true
+    },
+    {
+      "a": "serial_oldcode_seed0.pt",
+      "b": "serial_seed0.pt",
+      "shape": [
+        1,
+        3,
+        9,
+        480,
+        832
+      ],
+      "max_abs": 1.81640625,
+      "mean_abs": 0.041300851851701736,
+      "psnr_db_range2": 28.44590551619425,
+      "identical": false
+    }
+  ]
+}

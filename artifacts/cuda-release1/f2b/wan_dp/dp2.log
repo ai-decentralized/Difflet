@@ -1,0 +1,14 @@
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+[difflet] weights ready for Wan-AI/Wan2.2-T2V-A14B-Diffusers
+[difflet] CUDA artifact (eager manifest) at /home/user/.cache/difflet/wan/2637f3a51cf549be
+[dp-router] worker 0: GPUs 0
+[dp-router] worker 1: GPUs 1
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+Loading weights:   0%|          | 0/242 [00:00<?, ?it/s]Loading weights: 100%|██████████| 242/242 [00:00<00:00, 14607.99it/s]
+Loading weights:   0%|          | 0/242 [00:00<?, ?it/s]Loading weights: 100%|██████████| 242/242 [00:00<00:00, 13898.88it/s]
+[difflet] loaded in 20.6 s
+[difflet] loaded in 20.8 s
+[difflet] wrote /home/user/logs/f2b/wan_dp/dp2_seed1.pt (9 frames, 480x832) in 51.2 s
+[difflet] wrote /home/user/logs/f2b/wan_dp/dp2_seed0.pt (9 frames, 480x832) in 51.2 s
+[dp-router] done=2 failed=0 unfinished=0

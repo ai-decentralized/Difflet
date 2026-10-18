@@ -1,0 +1,15 @@
+== wan gates 2026-10-18T22:04:19Z ==
+snapshot: /home/user/hf/hub/models--Wan-AI--Wan2.2-T2V-A14B-Diffusers/snapshots/5be7df9619b54f4e2667b2755bc6a756675b5cd7/
+83d244a wan: the q/k RMSNorm at tp=1 is one op, fused on CUDA (F4b task 5)
+0, NVIDIA RTX PRO 6000 Blackwell Server Edition, 580.178.04, 0 MiB
+1, NVIDIA RTX PRO 6000 Blackwell Server Edition, 580.178.04, 0 MiB
+overlay         968G  220G  648G  26% /
+overlay         968G  220G  648G  26% /
+smoke exit: 0 in 68s
+parity exit: 0 in 46s
+parity-gate exit: 0 in 0s
+e2e exit: 0 in 184s
+e2e-gate exit: 0 in 1s
+0 MiB
+0 MiB
+GATES DONE wan overall_rc=0

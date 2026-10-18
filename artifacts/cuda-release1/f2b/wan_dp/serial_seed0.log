@@ -1,0 +1,6 @@
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+[difflet] weights ready for Wan-AI/Wan2.2-T2V-A14B-Diffusers
+[difflet] CUDA artifact (eager manifest) at /home/user/.cache/difflet/wan/2637f3a51cf549be
+Loading weights:   0%|          | 0/242 [00:00<?, ?it/s]Loading weights: 100%|██████████| 242/242 [00:00<00:00, 16281.50it/s]
+[difflet] loaded in 12.9 s
+[difflet] wrote /home/user/logs/f2b/wan_dp/serial_seed0.pt (9 frames, 480x832) in 44.5 s

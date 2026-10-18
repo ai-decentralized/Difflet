@@ -1,0 +1,23 @@
+{
+  "model": "Qwen/Qwen-Image",
+  "steps": 50,
+  "seed": 0,
+  "dp": 2,
+  "concurrent": 2,
+  "reference": "/home/user/logs/f2b/serve_dp1/qwen.png",
+  "requests": [
+    {
+      "request_s": 16.7,
+      "image": "/home/user/logs/f2b/serve_dp2/qwen.png",
+      "identical_to_reference": true
+    },
+    {
+      "request_s": 16.7,
+      "image": "/home/user/logs/f2b/serve_dp2/qwen-2.png",
+      "identical_to_reference": true
+    }
+  ],
+  "ready_s": 30.0,
+  "wall_s": 16.7,
+  "request_s": 16.7
+}
