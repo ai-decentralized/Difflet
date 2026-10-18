@@ -115,6 +115,7 @@ def test_parser_parses_sp_into_sp_enabled():
          "hunyuanvideo-community/HunyuanVideo"),
         ("difflet.cli.orchestrators.qwen_image", "QwenImageOrchestrator",
          "Qwen/Qwen-Image"),
+        ("difflet.cli.orchestrators.ltx_2", "LTX2Orchestrator", "Lightricks/LTX-2"),
     ],
 )
 def test_stage_parser_consumes_every_forwarded_flag(orch_module, orch_cls, model_id):
