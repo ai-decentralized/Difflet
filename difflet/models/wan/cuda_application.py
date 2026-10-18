@@ -234,17 +234,21 @@ class CudaWanApplication(torch.nn.Module):
 
     def _expert_config(self, transformer_path: str) -> WanDiTConfig:
         parallel = self.parallel
+        cfg_parallel = bool(getattr(parallel, "cfg_parallel_enabled", False))
         return WanDiTConfig.from_pretrained(
             transformer_path,
             height=self.shape["height"],
             width=self.shape["width"],
             num_frames=self.shape["num_frames"],
             text_seq_len=self.text_seq_len,
-            batch_size=self.batch_size,
+            # CFG-parallel (F2): the orchestrator's cfg branch hands the expert the
+            # [uncond, cond] stack and the modeling asserts batch 2, so the warm-up and
+            # the input contract are batch 2 too.
+            batch_size=2 if cfg_parallel else self.batch_size,
             tp_degree=int(getattr(parallel, "tp_degree", 1) or 1),
             torch_dtype=self.dtype,
             context_parallel_enabled=int(getattr(parallel, "cp_degree", 1) or 1) > 1,
-            cfg_parallel_enabled=bool(getattr(parallel, "cfg_parallel_enabled", False)),
+            cfg_parallel_enabled=cfg_parallel,
             sp_enabled=bool(getattr(parallel, "sp_enabled", False)),
         )
 

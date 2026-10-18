@@ -46,9 +46,8 @@ def test_entry_builds_the_cuda_wan_application(tmp_path, monkeypatch):
     "parallel,follow_up",
     [
         (DiffletParallelConfig(tp_degree=4), "F6"),
-        (DiffletParallelConfig(tp_degree=1, cp_degree=2), "F2"),
-        (DiffletParallelConfig(tp_degree=1, cfg_parallel_enabled=True), "F2"),
-        (DiffletParallelConfig(tp_degree=1, dp_degree=2), "F2"),
+        (DiffletParallelConfig(tp_degree=1, cp_degree=2), "follow-up F2b"),
+        (DiffletParallelConfig(tp_degree=1, dp_degree=2), "follow-up F2 "),
         (DiffletParallelConfig(tp_degree=1, sp_enabled=True), "F6"),
     ],
 )
@@ -62,6 +61,20 @@ def test_entry_refuses_multi_rank_and_sp_on_cuda_up_front(tmp_path, parallel, fo
             shape={},
             backend="cuda",
         )
+
+
+def test_entry_accepts_cfg_parallel_on_cuda(tmp_path, monkeypatch):
+    """F2: CFG-parallel runs the cond and uncond branches on two GPUs under torchrun."""
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
+    app = entry.create_wan_application(
+        model_path=str(tmp_path),
+        parallel=DiffletParallelConfig(tp_degree=1, cfg_parallel_enabled=True),
+        dtype="bf16",
+        shape={},
+        backend="cuda",
+    )
+    assert type(app).__name__ == "CudaWanApplication"
+    assert app.parallel.cfg_parallel_enabled is True
 
 
 def test_create_wan_application_builds_tpu_app(tmp_path):
