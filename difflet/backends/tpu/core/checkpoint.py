@@ -36,13 +36,25 @@ def build_weight_map(model_dir) -> dict[str, str]:
 
     Handles both layouts: a sharded checkpoint with an index json, and a
     single ``*.safetensors`` with no index.
+
+    A directory can hold several indexes of which only one has its shards on disk: LTX-2's
+    ``text_encoder/`` ships transformers' ``model.safetensors.index.json`` and a diffusers
+    ``diffusion_pytorch_model.safetensors.index.json`` (another checkpoint, text encoder plus
+    connectors), and a download filtered to the files a pipeline reads keeps only the first's
+    shards. So the first index (in name order) whose files all exist is used; when none is
+    complete, the first one, as before (the load then names the missing file).
     """
     from safetensors import safe_open
 
     directory = Path(model_dir)
     indexes = sorted(directory.glob("*" + INDEX_SUFFIX))
     if indexes:
-        body = json.loads(indexes[0].read_text())
+        bodies = [json.loads(index.read_text()) for index in indexes]
+        complete = [
+            body for body in bodies
+            if all((directory / name).is_file() for name in set(body["weight_map"].values()))
+        ]
+        body = (complete or bodies)[0]
         return {k: str(directory / v) for k, v in body["weight_map"].items()}
 
     files = sorted(directory.glob("*.safetensors"))
