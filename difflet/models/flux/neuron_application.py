@@ -122,14 +122,14 @@ class TorchNeuronFluxApplication:
 
         opts, parallel = self.options, self.parallel
         common = dict(parallel=parallel, exec_mode=opts["exec_mode"], device=opts["device"])
-        rank0 = _rank() == 0
 
-        vae = None
-        if rank0:
-            vae = NeuronFluxVaeDecoderApplication(model_path=self._path("vae"), height=self.height,
-                                                  width=self.width, device=opts["device"])
-            vae.load()
-        vae_scale = vae.scale_factor if vae is not None else 8
+        # Every rank loads the VAE (the load phases run in step across the process group, as for
+        # Wan's device VAE); it is not sharded, so each holds a full copy and only rank 0 decodes.
+        vae = NeuronFluxVaeDecoderApplication(model_path=self._path("vae"), height=self.height,
+                                              width=self.width, parallel=parallel,
+                                              device=opts["device"])
+        vae.load()
+        vae_scale = vae.scale_factor
         config = NeuronFluxConfig.from_pretrained(
             self._path("transformer"), height=self.height, width=self.width,
             text_seq_len=int(opts["text_seq_len"]), vae_scale_factor=vae_scale,
@@ -161,11 +161,9 @@ class TorchNeuronFluxApplication:
 
         self.dit, self.t5, self.vae = dit, t5, vae
         self.pipeline = NeuronFluxPipeline(
-            scheduler=scheduler, vae=_Vae(vae) if vae is not None else None, text_encoder=clip,
-            tokenizer=tokenizer, text_encoder_2=_T5(t5, self.dtype) if t5 is not None else None,
+            scheduler=scheduler, vae=_Vae(vae), text_encoder=clip, tokenizer=tokenizer,
+            text_encoder_2=_T5(t5, self.dtype) if t5 is not None else None,
             tokenizer_2=tokenizer_2, transformer=_Transformer(dit))
-        if vae is None:
-            self.pipeline.vae_scale_factor = vae_scale  # diffusers' default without a VAE is 8
 
     @torch.no_grad()
     def __call__(self, **kwargs):
