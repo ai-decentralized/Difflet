@@ -195,12 +195,18 @@ def test_qwen_timesteps_pass_mu_to_a_dynamic_shift_scheduler():
 
 
 @pytest.mark.parametrize(
-    "kwargs", [{"tp_degree": 2}, {"tp_degree": 1, "cp_degree": 2}, {"tp_degree": 1, "dp_degree": 2}]
+    "kwargs,owner",
+    [
+        ({"tp_degree": 2}, "follow-up F6"),
+        ({"tp_degree": 1, "cp_degree": 2}, "follow-up F2b"),
+        ({"tp_degree": 1, "dp_degree": 2}, "single-GPU replicas through the CLI router"),
+    ],
 )
-def test_entry_rejects_multi_rank_parallel_on_cuda_up_front(tmp_path, kwargs):
+def test_entry_rejects_multi_rank_parallel_on_cuda_up_front(tmp_path, kwargs, owner):
     # Review finding: tp/cp/dp > 1 used to fail only after loading the 41 GB DiT (first
-    # collective raised F2). Release 1 is one process, one device; refuse before any load.
-    with pytest.raises(NotImplementedError, match="F2|F6"):
+    # collective raised). One application is one process, one device; refuse before any
+    # load and name who owns the mode: TP is F6, CP is F2b, DP is the CLI router's.
+    with pytest.raises(NotImplementedError, match=owner):
         create_qwen_image_application(
             model_path=str(tmp_path),
             parallel=DiffletParallelConfig(**kwargs),

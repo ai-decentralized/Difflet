@@ -63,6 +63,40 @@ class CudaWanTransformerApplication(CudaApplicationBase):
     def _init_runtime(self) -> None:
         parallel_mesh.init_parallel_mesh(self.config)
 
+    def _refuse_cfg_without_its_world(self) -> None:
+        """A cfg=2 expert holds one CFG branch per process: loading it needs the world-2
+        process group (the CLI re-execs itself under torchrun for this). Refuse before the
+        weights are read rather than fail in the warm-up gather. Compile needs no group:
+        the CLI parent writes the manifest before torchrun starts the ranks."""
+        need = int(self.config.world_size)
+        if need == 1:
+            return
+        dist = torch.distributed
+        have = dist.get_world_size() if dist.is_available() and dist.is_initialized() else None
+        if have != need:
+            raise RuntimeError(
+                f"Wan CFG-parallel on CUDA runs one CFG branch per process on {need} GPUs, "
+                f"but this process has {'no' if have is None else f'a world-{have}'} "
+                "torch.distributed process group: run under "
+                f"`torchrun --nproc_per_node={need}` (the difflet CLI does this for "
+                "--cfg-parallel)"
+            )
+
+    def load(
+        self,
+        compiled_model_path,
+        start_rank_id=None,
+        local_ranks_size=None,
+        skip_warmup: bool = False,
+    ) -> None:
+        self._refuse_cfg_without_its_world()
+        super().load(
+            compiled_model_path,
+            start_rank_id=start_rank_id,
+            local_ranks_size=local_ranks_size,
+            skip_warmup=skip_warmup,
+        )
+
     def build_module(self) -> torch.nn.Module:
         from accelerate import init_empty_weights
 

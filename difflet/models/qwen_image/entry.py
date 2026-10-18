@@ -36,15 +36,20 @@ def create_qwen_image_application(
         tp = int(getattr(parallel, "tp_degree", 1) or 1)
         cp = int(getattr(parallel, "cp_degree", 1) or 1)
         dp = int(getattr(parallel, "dp_degree", 1) or 1)
-        if tp > 1 or dp > 1:
+        if tp > 1:
             raise NotImplementedError(
-                f"Qwen-Image on CUDA runs tp=1 on one GPU in Release 1 (got tp={tp}, dp={dp}); "
-                "multi-GPU is follow-up F2 of the CUDA backend plan"
+                f"Qwen-Image on CUDA runs tp=1 on one GPU in Release 1 (got tp={tp}); "
+                "tensor parallel across PCIe is follow-up F6 of the CUDA backend plan"
+            )
+        if dp > 1:
+            raise NotImplementedError(
+                f"Qwen-Image on CUDA is one GPU per application (got dp={dp}): dp>1 runs as "
+                "single-GPU replicas through the CLI router, not inside the application"
             )
         if cp > 1:
             raise NotImplementedError(
                 f"Qwen-Image on CUDA has no context parallelism in Release 1 (got cp={cp}); "
-                "follow-up F2/F6 of the CUDA backend plan"
+                "context parallel across cards is follow-up F2b of the CUDA backend plan"
             )
         from difflet.models.qwen_image.cuda_application import CudaQwenImageApplication
 

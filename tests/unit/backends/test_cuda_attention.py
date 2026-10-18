@@ -107,7 +107,8 @@ def test_cross_attention_forces_tp_flags_off_and_no_causal():
     ["ring_attention", "joint_ring_attention", "ulysses_attention", "joint_ulysses_attention"],
 )
 def test_context_parallel_modes_fail_loudly(name):
-    with pytest.raises(NotImplementedError, match="F2|F6"):
+    # Context parallel across cards is follow-up F2b (TP, F6, is not an attention mode).
+    with pytest.raises(NotImplementedError, match="follow-up F2b"):
         getattr(A, name)()
 
 

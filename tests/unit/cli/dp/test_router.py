@@ -60,6 +60,13 @@ def test_worker_cli_args_forward_sp_and_keep_work_dir():
     assert "--sp" in argv and "--keep-work-dir" in argv
 
 
+def test_worker_cli_args_forward_torch_compile():
+    # A CUDA replica compiles its DiT blocks exactly as a one-process run would.
+    assert "--torch-compile" in worker_cli_args(_args(torch_compile=True))
+    assert "--torch-compile" not in worker_cli_args(_args(torch_compile=False))
+    assert "--torch-compile" not in worker_cli_args(_args())  # an older namespace
+
+
 def test_check_hbm_skips_when_weights_missing(monkeypatch, capsys):
     from difflet.cli.dp import router as router_mod
 
@@ -217,6 +224,27 @@ def test_workers_are_killed_when_the_router_dies(tmp_path):
     while _alive(worker_pid) and time.monotonic() < deadline:
         time.sleep(0.05)
     assert not _alive(worker_pid), "worker outlived the killed router"
+
+
+def test_router_workers_keep_their_sigkill_death_signal(monkeypatch):
+    """The DP workers' preexec stays SIGKILL (torchrun's child gets SIGTERM instead)."""
+    import ctypes
+    import signal
+
+    from difflet.cli.dp.router import _die_with_parent
+
+    prctl_calls = []
+
+    class _Libc:
+        def prctl(self, *args):
+            prctl_calls.append(args)
+            return 0
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(ctypes, "CDLL", lambda name, use_errno=False: _Libc())
+    monkeypatch.setattr(os, "getppid", lambda: 4242)
+    _die_with_parent()
+    assert prctl_calls == [(1, int(signal.SIGKILL), 0, 0, 0)]
 
 
 def _alive(pid: int) -> bool:

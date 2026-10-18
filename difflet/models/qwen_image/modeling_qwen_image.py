@@ -605,7 +605,7 @@ class _QwenImageTransformerTraceModule(nn.Module):
         if self.apply_text_mask:
             if self.context_parallel_enabled:
                 raise NotImplementedError(
-                    "text mask with context parallel is follow-up F2/F6 of the CUDA plan"
+                    "text mask with context parallel is follow-up F2b of the CUDA plan"
                 )
             mask_arg = encoder_hidden_states_mask
             if self.trim_text_padding and mask_arg is not None:

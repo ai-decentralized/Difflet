@@ -9,7 +9,6 @@ CUDA_VISIBLE_DEVICES, and no Neuron variable reaches the worker (F2 task 4).
 
 from __future__ import annotations
 
-import ctypes
 import dataclasses
 import os
 import signal
@@ -21,6 +20,7 @@ from typing import Mapping
 
 from difflet.cli.dp.claims import mark_failed, summarize
 from difflet.cli.dp.requests_io import RequestSpec, write_manifest
+from difflet.cli.parent_death import die_with_parent
 
 
 def replica_core_ranges(dp: int, replica_cores: int) -> list[str]:
@@ -103,19 +103,11 @@ def _cuda_worker_env(base_env: Mapping[str, str], gpu_range: str) -> dict[str, s
     return env
 
 
-def _die_with_parent() -> None:
-    """``preexec_fn`` for worker processes: SIGKILL the worker when the router
-    dies. The verification driver SIGKILLs a timed-out ``difflet generate``;
-    without this the workers outlived it and kept all four NeuronCores
-    (observed on device, 2026-09-07: two LTX-2 workers held cores 0-3 for hours
-    after the router was gone)."""
-    if not sys.platform.startswith("linux"):
-        return
-    PR_SET_PDEATHSIG = 1
-    libc = ctypes.CDLL("libc.so.6", use_errno=True)
-    libc.prctl(PR_SET_PDEATHSIG, int(signal.SIGKILL), 0, 0, 0)
-    if os.getppid() == 1:  # the parent already died between fork and here
-        os.kill(os.getpid(), signal.SIGKILL)
+#: ``preexec_fn`` for worker processes: SIGKILL the worker when the router dies. The
+#: verification driver SIGKILLs a timed-out ``difflet generate``; without this the workers
+#: outlived it and kept all four NeuronCores (observed on device, 2026-09-07: two LTX-2
+#: workers held cores 0-3 for hours after the router was gone).
+_die_with_parent = die_with_parent(signal.SIGKILL)
 
 
 def worker_cli_args(args) -> list[str]:
@@ -142,6 +134,8 @@ def worker_cli_args(args) -> list[str]:
         argv.append("--sp")
     if getattr(args, "keep_work_dir", False):
         argv.append("--keep-work-dir")
+    if getattr(args, "torch_compile", False):
+        argv.append("--torch-compile")
     return argv
 
 

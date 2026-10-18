@@ -47,7 +47,8 @@ def test_entry_builds_the_cuda_wan_application(tmp_path, monkeypatch):
     [
         (DiffletParallelConfig(tp_degree=4), "F6"),
         (DiffletParallelConfig(tp_degree=1, cp_degree=2), "follow-up F2b"),
-        (DiffletParallelConfig(tp_degree=1, dp_degree=2), "follow-up F2 "),
+        # dp > 1 is the CLI router's: single-GPU replicas, never one application.
+        (DiffletParallelConfig(tp_degree=1, dp_degree=2), "single-GPU replicas through the CLI"),
         (DiffletParallelConfig(tp_degree=1, sp_enabled=True), "F6"),
     ],
 )

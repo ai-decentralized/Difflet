@@ -15,7 +15,7 @@ Contract (shared with the CPU oracle and the TPU backend, ``difflet/ops/attentio
 
 Kernel selection (flash / cuDNN / efficient / math) is torch's; ``platform.
 sdpa_kernel_report`` says which one a shape gets, recorded in Phase 0 (D7). No
-``flash-attn`` dependency. The context-parallel modes raise until follow-up F2/F6.
+``flash-attn`` dependency. The context-parallel modes raise until follow-up F2b.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ import torch
 import torch.nn.functional as F
 
 _CP_DEFERRED = (
-    "context-parallel attention on the CUDA backend is follow-up F2/F6 of the CUDA "
+    "context-parallel attention on the CUDA backend is follow-up F2b of the CUDA "
     "backend plan; run with cp_degree=1"
 )
 

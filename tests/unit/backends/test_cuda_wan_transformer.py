@@ -148,6 +148,30 @@ def test_cfg_parallel_builds_on_a_cfg_two_mesh(tmp_path, monkeypatch):
     assert manifest["world_size"] == 2
 
 
+def test_cfg_parallel_load_without_a_world_two_group_is_refused_before_the_weights(
+    tmp_path, monkeypatch
+):
+    """A direct API caller loading a cfg=2 expert in a plain process must be told to run
+    under torchrun before ~70 GB of weights are read, not fail at the warm-up gather."""
+    monkeypatch.delenv("WORLD_SIZE", raising=False)
+    import difflet.backends.cuda.wan.transformer as wan_transformer
+
+    def _no_load(*a, **kw):
+        raise AssertionError("weights were read before the cfg world was checked")
+
+    monkeypatch.setattr(wan_transformer, "load_checkpoint_into", _no_load)
+    transformer = tmp_path / "transformer"
+    _reference(transformer)
+    cfg = _config(transformer, cfg_parallel_enabled=True, batch_size=2)
+    app = CudaWanTransformerApplication(model_path=str(transformer), config=cfg, device="cpu")
+    cache = tmp_path / "cache"
+    app.compile(str(cache))  # the CLI parent's compile needs no process group
+    assert not torch.distributed.is_initialized()
+    with pytest.raises(RuntimeError, match=r"torchrun --nproc_per_node=2"):
+        app.load(str(cache))
+    assert app.module is None and not app.is_loaded
+
+
 # ------------------------------------------------ CFG-parallel on two gloo ranks
 
 CFG_WORLD = 2
