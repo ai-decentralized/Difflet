@@ -70,9 +70,9 @@ F9 entry.
   trimmed, compiled), Flux, and both Wan experts plus the 999 / 750 rounding block.
 - **e2e vs diffusers**: PASS. Qwen 41.40 dB and Flux 40.35 dB against 35 dB / 0.998 floors. Wan
   26.30 dB (fp32 timestep, gated) and 27.54 dB (bf16 cast) against 25 dB / 0.99. Over seeds 0–2
-  (F9) Wan gives 26.30–28.89 dB, inside diffusers' own noise floor (diffusers vs its
-  bf16-rounded timestep: 23.79–28.62 dB): Difflet is as close to diffusers as diffusers is to
-  itself.
+  (F9) Wan gives 26.30–28.89 dB, inside diffusers' own perturbation spread (diffusers vs its
+  bf16-rounded timestep: 23.79–28.62 dB), so the gap to Qwen and Flux need not indicate a
+  Difflet defect (three seeds cannot show there is none).
 - **CLI matrix**: PASS for all three cells. Qwen-Image three times, FLUX.1-dev twice, and Wan
   2.2 once: F9 ran the three-cell matrix on one pod (generate 51.9 s / 16.8 s / 111.5 s).
 - **Serve (F3b, Qwen-Image)**: PASS. Ready in 56.0 s, two requests of 38.6 s and 39.2 s, both
@@ -264,13 +264,15 @@ Source: `f9/cuda_e2e_wan_noise.json` (`per_seed.<s>.variants.float32.metrics`,
 for `float32` (`e2e_difflet_fp32_seed2_frame0.png` is the script's
 `wan_e2e_difflet_float32_seed2_frame0.png`).
 
-**Verdict.** The Wan e2e metric's own sensitivity to a bf16 rounding of the timestep spans
-**23.8–28.6 dB** over three seeds, the same range as Difflet vs diffusers (**26.3–28.9 dB**).
-Difflet is as close to diffusers as diffusers is to itself, so the gap to Qwen and Flux (40–41
-dB) is a property of the 40-step true-CFG Wan trajectory, not a Difflet defect. The noise floor
-is an upper bound on the timestep-cast effect: it also absorbs any run-to-run GPU
-nondeterminism, which F9 did not separate (the byte-identical seed-0 frames across the F1b and
-F9 pods suggest that part is small — an inference from one frame). By eye, seed 2's exact and
+**Verdict.** Difflet vs diffusers (26.30–28.89 dB over seeds 0–2) lies inside diffusers' own
+perturbation spread (23.79–28.62 dB with its timestep rounded through bf16), so the gap to Qwen
+and Flux (40–41 dB) need not indicate a Difflet defect. The noise floor is an upper bound on the
+timestep-cast effect (it also absorbs any run-to-run nondeterminism of the perturbed run; the
+exact Difflet and diffusers runs are deterministic — seed 0's whole-video PSNR
+26.303416187998177 is identical to the last digit across the F1b, F9 noise and F9 gates-wan runs
+on two pods). The ranges overlap but are not the same (26.30–28.89 vs 23.79–28.62 dB), and
+matched by seed Difflet is further from diffusers than the perturbed run on seeds 0 and 1, so
+with n = 3 this shows the gap need not indicate a defect; it cannot show there is none. By eye, seed 2's exact and
 perturbed first frames (23.8 dB) are the same tabby cat in the same pose with different fur and
 foliage texture (the perturbed one also loses the dark collar, which Difflet's frame keeps).
 Ruling R1: the floors (25 dB / 0.99) are unchanged. Recommended follow-up: state the Wan e2e
@@ -331,9 +333,9 @@ The 276 s Qwen generate combines a cold read of 54 GB from the network volume (�
 ≈ 0.23 GB/s) with the slower Workstation card *[10-18 F5, F3b]*. In the F5 run
 `generate_steps` is `null`, so each cell used its default (`CELL_STEPS`: Qwen 50, Flux 28).
 **F9 ran all three cells in one invocation** on pod f9 (Server, eu-3, no volume): the three
-models (Wan 401 s, Qwen 175 s, Flux 109 s to download) fit its 250 GB container disk under
-`HF_HOME=~/hf`, and the matrix passed in 191 s wall (status-log only; the JSON holds per-step
-durations). `generate_steps` is `null` there too; each cell's `generate_steps` field reads 50 /
+models (Wan 401 s, Qwen 175 s, Flux 109 s to download; status-log only, in no artifact) fit its
+250 GB container disk under `HF_HOME=~/hf`, and the matrix passed in 191 s wall (status-log only;
+the JSON holds per-step durations). `generate_steps` is `null` there too; each cell's `generate_steps` field reads 50 /
 28 / 40. Each generate is a fresh `difflet generate` subprocess, load included; the Qwen
 51.88 s against f3c's 38.47 s on the same edition was not investigated. The Wan cell's MP4 was
 not copied off the pod.
@@ -472,7 +474,7 @@ Both variants share one diffusers run, one noise tensor and one Difflet run each
 Verdict as corrected by review. Exact timesteps bring every DiT call closer to diffusers, yet the
 40-step trajectory ends 1.2 dB further away. The single-seed A/B does not support the timestep
 as the cause of the e2e gap, and does not exclude it either (F9's noise floor, in the e2e
-section, puts the whole 1.2 dB move inside the metric's seed-to-seed spread). The fp32 default
+section, puts the whole 1.2 dB move inside the range the noise floor spans over seeds 0–2). The fp32 default
 stays (ruling). The
 artifact PNG names differ from the script's: `e2e_difflet_fp32_timestep_frame0.png` is the
 script's `wan_e2e_difflet_float32_frame0.png`, and `e2e_difflet_bf16_timestep_frame0.png` is

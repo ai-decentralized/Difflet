@@ -178,15 +178,16 @@ text (1, 512, 4096), timesteps 900 (`transformer`) / 500 (`transformer_2`).
 | `verify_cli_cuda.py` cell | PASS, compile 2.1 s, generate 111.5 s (40 steps, MP4) | f9, Server [F9] |
 
 The Wan e2e PSNR sits far below Qwen's and Flux's. F9 measured the metric's own noise floor:
-diffusers against itself with its timestep rounded through bf16 (at most half a bf16 ulp, e.g.
-999 → 1000) spans 23.8–28.6 dB over three seeds, the same range as Difflet vs diffusers
-(26.3–28.9 dB). Difflet is as close to diffusers as diffusers is to itself, so the gap to
-Qwen/Flux is a property of the 40-step true-CFG Wan trajectory, not a Difflet defect. The floor
-is an upper bound on the timestep-cast effect (it also absorbs any run-to-run GPU
-nondeterminism; not separated). The floors stay 25 dB / 0.99 (F9 R1); recommended follow-up:
-state the Wan gate relative to the measured noise floor — its worst seed (23.8 dB) is below
-25 dB, so seed luck could fail a correct build. The 10 s generate gap to diffusers is
-unmeasured. Artifacts: `artifacts/cuda-release1/wan/`, `wan/f1b/`, `f9/`
+diffusers against itself with its timestep rounded through bf16 (at most half a bf16 ulp, e.g. 999
+→ 1000) spans 23.79–28.62 dB over three seeds; Difflet vs diffusers (26.30–28.89 dB) lies inside
+that spread, so the gap to Qwen/Flux need not indicate a Difflet defect (n = 3: the ranges overlap
+but are not the same, and it cannot show there is none). The floor is an upper bound on the
+timestep-cast effect (it also absorbs run-to-run nondeterminism of the perturbed run; the exact
+Difflet and diffusers runs are deterministic, seed 0's PSNR is identical across three runs). The
+floors stay 25 dB / 0.99 (F9 R1); recommended follow-up: state the Wan gate relative to the
+measured noise floor — its worst seed (23.8 dB) is below 25 dB, so seed luck could fail a correct
+build. The 10 s generate gap to diffusers is unmeasured. Artifacts:
+`artifacts/cuda-release1/wan/`, `wan/f1b/`, `f9/`
 (`cuda_e2e_wan_noise.json`, per-seed first frames, `gates-wan/`).
 
 ## CLI matrix — `scripts/verify_cli_cuda.py`

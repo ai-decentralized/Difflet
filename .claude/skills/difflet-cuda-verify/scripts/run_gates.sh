@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # run_gates.sh: one model's GPU gate sequence ON the pod, mirroring the F3 / F5 / F1 / F1b runbooks:
 # smoke -> DiT parity -> parity gate (pytest) -> e2e vs diffusers -> e2e gate (pytest).
+# Resolves the checkout from $PWD (run it from ~/Difflet, or set REPO=), unlike pod_setup.sh.
 # Usage:
 #   cd ~/Difflet && bash .claude/skills/difflet-cuda-verify/scripts/run_gates.sh \
 #       <qwen|flux|wan> <snapshot|auto> [--out ~/logs/<name>] [--dry-run]
