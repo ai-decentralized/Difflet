@@ -36,10 +36,15 @@ def test_outcome_requires_every_step_to_pass():
     assert v.cell_outcome({"download": ok, "compile": ok, "generate": bad}) is Status.FAIL
 
 
+def _passing_step(cmd, log_fh, *, timeout, env):
+    """A PASS that writes the generate output, as a real ``difflet generate`` does."""
+    if "generate" in cmd:
+        pathlib.Path(cmd[cmd.index("--output") + 1]).write_bytes(b"x")
+    return StepResult(Status.PASS, 0.5, cmd=cmd)
+
+
 def test_main_writes_results_json_and_exit_code(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        v, "run_step", lambda cmd, log_fh, *, timeout, env: StepResult(Status.PASS, 0.5, cmd=cmd)
-    )
+    monkeypatch.setattr(v, "run_step", _passing_step)
     rc = v.main(["--run-root", str(tmp_path), "--steps", "2"])
     assert rc == 0
     data = json.loads(next(tmp_path.rglob("results.json")).read_text())
@@ -61,13 +66,57 @@ def test_flux_cell_is_in_the_matrix():
     assert ("black-forest-labs/FLUX.1-dev", "tp1") in v.CELLS
 
 
+WAN = "Wan-AI/Wan2.2-T2V-A14B-Diffusers"
+
+
+def test_wan_cell_is_in_the_matrix_at_40_steps_writing_an_mp4(tmp_path):
+    assert (WAN, "tp1") in v.CELLS
+    # diffusers' Wan 2.2 default; the registry's serving default_steps=2 is a Trainium smoke.
+    assert v.CELL_STEPS[WAN] == 40
+    assert v.cell_output(tmp_path, WAN, "tp1") == tmp_path / "wan2.2-t2v-a14b-diffusers_tp1.mp4"
+    assert v.cell_output(tmp_path, "Qwen/Qwen-Image", "tp1") == tmp_path / "qwen-image_tp1.png"
+
+
+def test_generate_is_given_the_per_model_output_path(tmp_path, monkeypatch):
+    outputs = {}
+
+    def fake(cmd, log_fh, *, timeout, env):
+        if "generate" in cmd:
+            outputs[cmd[cmd.index("--model-id") + 1]] = cmd[cmd.index("--output") + 1]
+        return _passing_step(cmd, log_fh, timeout=timeout, env=env)
+
+    monkeypatch.setattr(v, "run_step", fake)
+    assert v.main(["--run-root", str(tmp_path)]) == 0
+    assert outputs[WAN].endswith("_tp1.mp4")
+    assert outputs["black-forest-labs/FLUX.1-dev"].endswith("_tp1.png")
+
+
+def test_a_generate_that_writes_no_output_fails_the_cell(tmp_path, monkeypatch):
+    def fake(cmd, log_fh, *, timeout, env):
+        # Exit 0 everywhere, but the Wan generate writes only the .pt fallback.
+        if "generate" in cmd:
+            out = pathlib.Path(cmd[cmd.index("--output") + 1])
+            model_id = cmd[cmd.index("--model-id") + 1]
+            (out.with_suffix(".pt") if model_id == WAN else out).write_bytes(b"x")
+        return StepResult(Status.PASS, 0.5, cmd=cmd)
+
+    monkeypatch.setattr(v, "run_step", fake)
+    assert v.main(["--run-root", str(tmp_path)]) == 1
+    data = json.loads(next(tmp_path.rglob("results.json")).read_text())
+    by_model = {c["model_id"]: c for c in data["cells"]}
+    assert by_model["Qwen/Qwen-Image"]["outcome"] == "PASS"
+    wan = by_model[WAN]
+    assert wan["outcome"] == "FAIL" and wan["steps"]["generate"]["status"] == "FAIL"
+    assert ".mp4" in wan["steps"]["generate"]["reason"]
+
+
 def _generate_steps(tmp_path, monkeypatch, argv):
     seen = {}
 
     def fake(cmd, log_fh, *, timeout, env):
         if "generate" in cmd:
             seen[cmd[cmd.index("--model-id") + 1]] = cmd[cmd.index("--steps") + 1]
-        return StepResult(Status.PASS, 0.5, cmd=cmd)
+        return _passing_step(cmd, log_fh, timeout=timeout, env=env)
 
     monkeypatch.setattr(v, "run_step", fake)
     assert v.main(["--run-root", str(tmp_path), *argv]) == 0
@@ -75,12 +124,13 @@ def _generate_steps(tmp_path, monkeypatch, argv):
 
 
 def test_each_cell_generates_at_its_own_default_steps(tmp_path, monkeypatch):
-    # Qwen keeps its 50 (diffusers' default); Flux runs FluxPipeline's 28.
+    # Qwen keeps its 50 (diffusers' default); Flux runs FluxPipeline's 28, Wan WanPipeline's 40.
     seen, data = _generate_steps(tmp_path, monkeypatch, [])
-    assert seen == {"Qwen/Qwen-Image": "50", "black-forest-labs/FLUX.1-dev": "28"}
+    assert seen == {"Qwen/Qwen-Image": "50", "black-forest-labs/FLUX.1-dev": "28", WAN: "40"}
     by_model = {c["model_id"]: c for c in data["cells"]}
     assert by_model["Qwen/Qwen-Image"]["generate_steps"] == 50
     assert by_model["black-forest-labs/FLUX.1-dev"]["generate_steps"] == 28
+    assert by_model[WAN]["generate_steps"] == 40
 
 
 def test_explicit_steps_override_every_cell(tmp_path, monkeypatch):

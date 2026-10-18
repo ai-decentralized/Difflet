@@ -37,11 +37,25 @@ def test_cuda_backend_routes_flux_to_the_flux_orchestrator(monkeypatch, model_id
     assert type(orch).__name__ == "FluxCudaOrchestrator"
 
 
-def test_other_models_on_cuda_are_refused_by_name(monkeypatch):
+@pytest.mark.parametrize(
+    "model_id", ["Wan-AI/Wan2.2-T2V-A14B-Diffusers", "Wan-AI/Wan2.1-T2V-14B-Diffusers"]
+)
+def test_cuda_backend_routes_wan_to_the_wan_orchestrator(monkeypatch, model_id):
+    monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
+    orch = _cli()._get_orchestrator(argparse.Namespace(model_id=model_id))
+    assert type(orch).__name__ == "WanCudaOrchestrator" and orch.model_id == model_id
+
+
+def test_other_models_on_cuda_point_at_the_trainium_path(monkeypatch):
     monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
     with pytest.raises(SystemExit) as exc:
-        _cli()._get_orchestrator(argparse.Namespace(model_id="Wan-AI/Wan2.1-T2V-14B-Diffusers"))
-    assert "not supported" in str(exc.value) and "DIFFLET_BACKEND=trainium" in str(exc.value)
+        _cli()._get_orchestrator(argparse.Namespace(model_id="hunyuanvideo-community/HunyuanVideo"))
+    message = str(exc.value)
+    assert (
+        "DIFFLET_BACKEND=trainium" in message and "hunyuanvideo-community/HunyuanVideo" in message
+    )
+    # F1 (Wan) has landed: the fallback no longer names it.
+    assert "Wan" not in message
 
 
 def test_requests_and_dp_are_refused_on_cuda(monkeypatch, tmp_path, capsys):
@@ -82,6 +96,7 @@ def test_cli_and_serving_import_without_neuron():
         sys.meta_path.insert(0, Block())
         for m in ("difflet.cli.main", "difflet.cli.orchestrators.qwen_image",
                   "difflet.cli.orchestrators.qwen_image_cuda", "difflet.cli.orchestrators.flux_cuda",
+                  "difflet.cli.orchestrators.wan_cuda", "difflet.cli.orchestrators.wan",
                   "difflet.cli.runner",
                   "difflet.cli.stage", "difflet.serving.orchestrators.qwen_image",
                   "difflet.serving.models._common"):
