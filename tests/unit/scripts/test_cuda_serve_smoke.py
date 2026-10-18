@@ -90,3 +90,56 @@ def test_request_headers_carry_the_api_key_when_the_server_requires_one():
         "Content-Type": "application/json",
         "Authorization": "Bearer k1",
     }
+
+
+# --- replicas and concurrency (F2b task 2) ----------------------------------------------------
+
+
+def test_serve_command_carries_the_replica_count_and_queue_timeout():
+    cmd, _ = smoke.serve_command(port=8099, cache_dir=None, python="py", dp=2, queue_timeout=120)
+    assert cmd[3:] == [
+        "serve",
+        "--model-id",
+        "Qwen/Qwen-Image",
+        "--port",
+        "8099",
+        "--dp-degree",
+        "2",
+        "--queue-timeout",
+        "120",
+    ]
+    cmd, _ = smoke.serve_command(port=8099, cache_dir=None, python="py")
+    assert "--dp-degree" not in cmd and "--queue-timeout" not in cmd
+
+
+def test_fire_concurrently_runs_the_posts_side_by_side_and_keeps_their_order():
+    import time
+
+    def poster(index: int):
+        time.sleep(0.2)
+        return {"index": index}, 0.2
+
+    started = time.monotonic()
+    results, wall = smoke.fire_concurrently(poster, 3)
+    assert [payload["index"] for payload, _ in results] == [0, 1, 2]
+    assert wall < 0.45 and time.monotonic() - started < 0.6
+    results, wall = smoke.fire_concurrently(poster, 1)
+    assert len(results) == 1
+
+
+def test_fire_concurrently_raises_the_first_failure():
+    def poster(index: int):
+        if index == 1:
+            raise RuntimeError("boom")
+        return {"index": index}, 0.0
+
+    with pytest.raises(RuntimeError, match="boom"):
+        smoke.fire_concurrently(poster, 2)
+
+
+def test_identical_to_reference_compares_bytes(tmp_path):
+    ref = tmp_path / "ref.png"
+    ref.write_bytes(b"\x89PNGabc")
+    assert smoke.identical_to_reference(b"\x89PNGabc", ref) is True
+    assert smoke.identical_to_reference(b"\x89PNGabd", ref) is False
+    assert smoke.identical_to_reference(b"\x89PNGabc", None) is None
