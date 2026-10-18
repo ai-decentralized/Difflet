@@ -31,6 +31,21 @@ Two neuron-specific changes, both outside the blocks:
 The call is ``(hidden_states, audio_hidden_states, encoder_hidden_states,
 audio_encoder_hidden_states, timestep, video_coords, audio_coords)``; ``sigma`` (LTX-2.3 prompt
 modulation only) is the timestep, as the orchestrator passes it.
+
+Context parallelism (``context_parallel_enabled``) shards the VIDEO tokens over the CP group and
+keeps the short audio stream (51 frames at 480x704x49) and the text replicated, the layout Qwen-
+Image's joint attention uses for its text: the module scatters the packed video latents and
+their RoPE coordinates, every rank runs its video shard and the whole audio stream through the
+blocks, and the video output is all-gathered back. Per block, only the two attentions whose
+keys are video tokens need the other ranks' tokens: the video self-attention (``attn1``: all
+three of q/k/v sharded; ``cp_mode`` gather_kv all-gathers k/v over the CP group, ulysses trades
+the sequence shard for a head shard and back with two all-to-alls) and the video-to-audio
+cross-attention (``video_to_audio_attn``: the replicated audio queries attend the gathered video
+k/v). The text cross-attentions and the audio-to-video attention (video queries, audio keys) are
+local. ``_Ltx2CPAttnProcessor`` is the TP processor with that k/v exchange added after the RoPE.
+Ring attention is not wired: its partial-softmax merge would need the flash kernel's logsumexp
+path for every block's self-attention, and gather_kv already moves only k/v (2310 video tokens x
+4096 at 480x704x49).
 """
 
 from __future__ import annotations
@@ -129,6 +144,8 @@ def _trace_module_class():
         gather_from_tensor_model_parallel_region_with_dim,
         get_cfg_group,
         get_cfg_rank_spmd,
+        get_cp_group,
+        get_cp_rank_spmd,
         get_world_group,
         scatter_to_process_group_spmd,
     )
@@ -158,6 +175,29 @@ def _trace_module_class():
             if self.cfg_split:
                 self.cfg_group = get_cfg_group()
                 self.cfg_rank_util = SPMDRank(world_size=get_world_group().size())
+            self.cp_split = bool(config.context_parallel_enabled)
+            if self.cp_split:
+                self._install_cp_processors(config)
+
+        def _install_cp_processors(self, config: NeuronLtx2Config) -> None:
+            """One processor per role, shared by every block (one compiled graph): the video
+            self-attention exchanges k/v by ``cp_mode``, the video-to-audio attention gathers its
+            video k/v, the four others attend locally."""
+            cls = _cp_processor_class()
+            tp = int(config.tp_degree)
+            rank_util = getattr(self, "tp_rank_util", None) or SPMDRank(tp)
+            self.cp_group = get_cp_group()
+            self.cp_rank_util = SPMDRank(world_size=get_world_group().size())
+            mode = "ulysses" if config.cp_mode == "ulysses" else "gather"
+            roles = {"attn1": mode, "video_to_audio_attn": "gather"}
+            processors = {
+                kv: cls(tp_degree=tp, rank_util=rank_util, kv_mode=kv)
+                for kv in {None, "gather", mode}
+            }
+            for block in self.transformer.transformer_blocks:
+                for name in ("attn1", "audio_attn1", "attn2", "audio_attn2",
+                             "audio_to_video_attn", "video_to_audio_attn"):
+                    getattr(block, name).processor = processors[roles.get(name)]
 
         def forward(
             self,
@@ -180,9 +220,20 @@ def _trace_module_class():
                     for t in inputs
                 )
             hidden, audio, text, audio_text, t, vcoords, acoords = inputs
+            if self.cp_split:
+                # This rank's video tokens and their RoPE coordinates (a local narrow).
+                cp_rank = get_cp_rank_spmd(self.cp_rank_util.get_rank())
+                hidden = scatter_to_process_group_spmd(
+                    hidden, partition_dim=1, rank=cp_rank, process_group=self.cp_group)
+                vcoords = scatter_to_process_group_spmd(
+                    vcoords, partition_dim=2, rank=cp_rank, process_group=self.cp_group)
             video_out, audio_out = super().forward(
                 hidden, audio, text, audio_text, t, t, None, None, vcoords, acoords
             )
+            if self.cp_split:
+                video_out = gather_from_tensor_model_parallel_region_with_dim(
+                    video_out, gather_dim=1, process_group=self.cp_group
+                )
             if self.cfg_split:
                 video_out = gather_from_tensor_model_parallel_region_with_dim(
                     video_out, gather_dim=0, process_group=self.cfg_group
@@ -193,6 +244,77 @@ def _trace_module_class():
             return video_out, audio_out
 
     return NeuronLtx2TraceModule
+
+
+def _cp_processor_class():
+    """``_LTX2TPAttnProcessor`` with the video tokens sharded over the CP group: after q/k
+    normalisation and RoPE, ``kv_mode`` "gather" all-gathers k and v over the CP group (the
+    queries stay local), "ulysses" runs the attention through ``difflet.ops.ulysses_attention``
+    (all three sharded), None attends locally. Masks are ignored, as by the TP processor (the
+    attention there is unmasked in both branches). Built lazily, like the trace module."""
+    import math
+
+    import diffusers.models.transformers.transformer_ltx2 as ltx2_transformer
+
+    from difflet.models.ltx_2.modeling_ltx_2 import _LTX2TPAttnProcessor
+    from difflet.ops import (
+        attention,
+        gather_from_tensor_model_parallel_region_with_dim,
+        get_cp_group,
+        ulysses_attention,
+    )
+
+    class Ltx2CPAttnProcessor(_LTX2TPAttnProcessor):
+        def __init__(self, *, tp_degree: int, rank_util, kv_mode: str | None) -> None:
+            super().__init__(tp_degree=tp_degree, rank_util=rank_util)
+            if kv_mode not in (None, "gather", "ulysses"):
+                raise ValueError(f"unknown kv_mode {kv_mode!r}")
+            self.kv_mode = kv_mode
+            self.cp_group = get_cp_group()
+
+        def __call__(self, attn, hidden_states, encoder_hidden_states=None,
+                     attention_mask=None, query_rotary_emb=None, key_rotary_emb=None):
+            del attention_mask
+            if encoder_hidden_states is None:
+                encoder_hidden_states = hidden_states
+            query = attn.to_q(hidden_states)
+            key = attn.to_k(encoder_hidden_states)
+            value = attn.to_v(encoder_hidden_states)
+            query = self._global_rms_norm(attn.norm_q, query)
+            key = self._global_rms_norm(attn.norm_k, key)
+            if query_rotary_emb is not None:
+                k_rope = key_rotary_emb if key_rotary_emb is not None else query_rotary_emb
+                if attn.rope_type == "interleaved":
+                    query = ltx2_transformer.apply_interleaved_rotary_emb(query, query_rotary_emb)
+                    key = ltx2_transformer.apply_interleaved_rotary_emb(key, k_rope)
+                elif attn.rope_type == "split":
+                    query = ltx2_transformer.apply_split_rotary_emb(query, query_rotary_emb)
+                    key = ltx2_transformer.apply_split_rotary_emb(key, k_rope)
+            out_dtype = query.dtype
+            heads = attn.heads
+            bsz, q_len, inner = query.shape
+            head_dim = inner // heads
+
+            def split(t):
+                return t.reshape(bsz, t.shape[1], heads, head_dim).permute(0, 2, 1, 3)
+
+            q4, k4, v4 = split(query), split(key), split(value)
+            scale = 1.0 / math.sqrt(head_dim)
+            if self.kv_mode == "ulysses":
+                out = ulysses_attention(q4, k4, v4, scale=scale)
+            else:
+                if self.kv_mode == "gather":
+                    k4 = gather_from_tensor_model_parallel_region_with_dim(
+                        k4, gather_dim=2, process_group=self.cp_group)
+                    v4 = gather_from_tensor_model_parallel_region_with_dim(
+                        v4, gather_dim=2, process_group=self.cp_group)
+                out = attention(q4, k4, v4, scale=scale, causal=False, tp_q=True, tp_k=True,
+                                tp_out=False)
+            hidden_states = out.permute(0, 2, 1, 3).reshape(bsz, q_len, inner).to(out_dtype)
+            hidden_states = attn.to_out[0](hidden_states)
+            return attn.to_out[1](hidden_states)
+
+    return Ltx2CPAttnProcessor
 
 
 def example_coords(config: NeuronLtx2Config, batch: int) -> tuple[torch.Tensor, torch.Tensor]:
@@ -262,13 +384,30 @@ class NeuronLtx2TransformerApplication(TorchNeuronApplicationBase):
                 f"NeuronLtx2Config has cfg_parallel_enabled={config.cfg_parallel_enabled} but "
                 f"the parallel config has cfg_parallel_enabled={parallel.cfg_parallel_enabled}"
             )
-        for what, value in (("cp_degree", int(parallel.cp_degree)),
-                            ("dp_degree", int(getattr(parallel, "dp_degree", 1) or 1))):
-            if value > 1:
-                raise NotImplementedError(
-                    f"the LTX-2 DiT on the neuron backend runs tensor and CFG parallelism only; "
-                    f"got {what}={value}"
-                )
+        dp = int(getattr(parallel, "dp_degree", 1) or 1)
+        if dp > 1:
+            raise NotImplementedError(
+                "the LTX-2 DiT on the neuron backend runs tensor, CFG and context parallelism; "
+                f"got dp_degree={dp} (data parallelism runs as separate replicas)"
+            )
+        cp = int(parallel.cp_degree)
+        if bool(config.context_parallel_enabled) != (cp > 1):
+            raise ValueError(
+                f"NeuronLtx2Config has context_parallel_enabled={config.context_parallel_enabled} "
+                f"but the parallel config has cp_degree={cp}"
+            )
+        if cp > 1 and str(config.cp_mode) != str(parallel.cp_mode):
+            raise ValueError(
+                f"NeuronLtx2Config has cp_mode={config.cp_mode!r} but the parallel config has "
+                f"cp_mode={parallel.cp_mode!r}"
+            )
+        if config.cp_degree is None:
+            config = dataclasses.replace(config, cp_degree=cp)
+        elif int(config.cp_degree) != cp:
+            raise ValueError(
+                f"NeuronLtx2Config has cp_degree={config.cp_degree} but the parallel config has "
+                f"cp_degree={cp}"
+            )
         if bool(getattr(parallel, "sp_enabled", False)):
             raise NotImplementedError(
                 "the LTX-2 DiT on the neuron backend has no sequence parallelism (sp_enabled)"
