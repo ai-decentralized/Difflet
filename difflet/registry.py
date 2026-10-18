@@ -478,7 +478,10 @@ def _register_builtin_ltx_2() -> None:
             supports_sp=False,
             cp_modes=frozenset(),
         ),
-        backends=("trainium",),
+        # The neuron backend (TorchNeuron, torchrun ranks) runs the DiT on the device with TP
+        # and CFG parallelism; the Gemma-3 text path stays on rank 0's host and the decode on
+        # the host after the generate launch.
+        backends=("trainium", "neuron"),
         download_patterns=(
             "*.json",
             "*.txt",
