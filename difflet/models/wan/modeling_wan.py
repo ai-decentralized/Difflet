@@ -45,6 +45,7 @@ from diffusers.models.embeddings import (
 from diffusers.models.normalization import FP32LayerNorm
 
 from difflet.ops import (
+    rms_norm_fp32,
     ColumnParallelLinear,
     RMSNorm,
     RowParallelLinear,
@@ -132,8 +133,7 @@ class WanTransformerConfig:
     def __post_init__(self) -> None:
         if self.qk_norm != "rms_norm_across_heads":
             raise NotImplementedError(
-                "Wan T2V spike currently supports only "
-                "qk_norm='rms_norm_across_heads'."
+                "Wan T2V spike currently supports only " "qk_norm='rms_norm_across_heads'."
             )
         unsupported = {
             "image_dim": self.image_dim,
@@ -226,8 +226,16 @@ class WanRotaryPosEmbed(nn.Module):
         # max_abs~2.0), which corrupts the RoPE table -> mosaic video. narrow/slice fold
         # correctly and keep the (input-independent) builder in-graph. See AWS_BUG_REPORT.
         _t, _th = self.t_dim, self.t_dim + self.h_dim
-        cos_t, cos_h, cos_w = self.freqs_cos[:, :_t], self.freqs_cos[:, _t:_th], self.freqs_cos[:, _th:]
-        sin_t, sin_h, sin_w = self.freqs_sin[:, :_t], self.freqs_sin[:, _t:_th], self.freqs_sin[:, _th:]
+        cos_t, cos_h, cos_w = (
+            self.freqs_cos[:, :_t],
+            self.freqs_cos[:, _t:_th],
+            self.freqs_cos[:, _th:],
+        )
+        sin_t, sin_h, sin_w = (
+            self.freqs_sin[:, :_t],
+            self.freqs_sin[:, _t:_th],
+            self.freqs_sin[:, _th:],
+        )
 
         cos_f = cos_t[:ppf].view(ppf, 1, 1, -1).expand(ppf, pph, ppw, -1)
         cos_y = cos_h[:pph].view(1, pph, 1, -1).expand(ppf, pph, ppw, -1)
@@ -266,14 +274,10 @@ class WanTimeTextEmbedding(nn.Module):
         self.timesteps_proj = Timesteps(
             num_channels=time_freq_dim, flip_sin_to_cos=True, downscale_freq_shift=0
         )
-        self.time_embedder = TimestepEmbedding(
-            in_channels=time_freq_dim, time_embed_dim=dim
-        )
+        self.time_embedder = TimestepEmbedding(in_channels=time_freq_dim, time_embed_dim=dim)
         self.act_fn = nn.SiLU()
         self.time_proj = nn.Linear(dim, time_proj_dim)
-        self.text_embedder = PixArtAlphaTextProjection(
-            text_embed_dim, dim, act_fn="gelu_tanh"
-        )
+        self.text_embedder = PixArtAlphaTextProjection(text_embed_dim, dim, act_fn="gelu_tanh")
 
     def forward(
         self,
@@ -437,9 +441,7 @@ class WanAttention(nn.Module):
         # this rank's heads; it stays None for a standalone/tp=1 build (full weight).
         self.tp_degree = _safe_tp_size()
         if heads % self.tp_degree != 0:
-            raise ValueError(
-                f"WanAttention heads={heads} must be divisible by tp={self.tp_degree}"
-            )
+            raise ValueError(f"WanAttention heads={heads} must be divisible by tp={self.tp_degree}")
         self.local_heads = heads // self.tp_degree
         self._rank_util = None
 
@@ -488,12 +490,16 @@ class WanAttention(nn.Module):
         no-ops, so this is bit-identical to a plain ``RMSNorm`` — the path the CPU
         reference and unit tests exercise.
         """
+        eps = getattr(norm, "eps", None) or getattr(norm, "variance_epsilon", None) or 1e-6
+        if self.tp_degree == 1 and self._rank_util is None:
+            # No shard to reduce over: the whole norm is one op, fused where the backend has
+            # a kernel (CUDA, F4b), the same fp32 reference math elsewhere.
+            return rms_norm_fp32(x, getattr(norm, "weight", None), eps)
         local_dim = x.shape[-1]
         local_sq = x.float().pow(2).sum(dim=-1, keepdim=True)
         global_sq = reduce_from_tensor_model_parallel_region(local_sq)
         full_dim = local_dim * self.tp_degree
         # difflet's RMSNorm is a CustomRMSNorm (eps stored as variance_epsilon).
-        eps = getattr(norm, "eps", None) or getattr(norm, "variance_epsilon", None) or 1e-6
         x_normed = x.float() * torch.rsqrt(global_sq / full_dim + eps)
         weight = getattr(norm, "weight", None)
         if weight is not None:
@@ -516,9 +522,7 @@ class WanAttention(nn.Module):
         if self.sp_enabled:
             hidden_states = gather_from_sequence_parallel_region(hidden_states, dim=1)
 
-        kv_source = (
-            encoder_hidden_states if encoder_hidden_states is not None else hidden_states
-        )
+        kv_source = encoder_hidden_states if encoder_hidden_states is not None else hidden_states
 
         q = self.to_q(hidden_states)
         k = self.to_k(kv_source)
@@ -600,20 +604,30 @@ class WanTransformerBlock(nn.Module):
 
         self.norm1 = FP32LayerNorm(dim, eps, elementwise_affine=False)
         self.attn1 = WanAttention(
-            dim, num_heads, head_dim, eps=eps, is_cross_attention=False, dtype=dtype,
-            context_parallel_enabled=context_parallel_enabled, cp_mode=cp_mode,
+            dim,
+            num_heads,
+            head_dim,
+            eps=eps,
+            is_cross_attention=False,
+            dtype=dtype,
+            context_parallel_enabled=context_parallel_enabled,
+            cp_mode=cp_mode,
             sp_enabled=sp_enabled,
         )
 
         self.attn2 = WanAttention(
-            dim, num_heads, head_dim, eps=eps, is_cross_attention=True, dtype=dtype,
-            context_parallel_enabled=context_parallel_enabled, cp_mode=cp_mode,
+            dim,
+            num_heads,
+            head_dim,
+            eps=eps,
+            is_cross_attention=True,
+            dtype=dtype,
+            context_parallel_enabled=context_parallel_enabled,
+            cp_mode=cp_mode,
             sp_enabled=sp_enabled,
         )
         self.norm2 = (
-            FP32LayerNorm(dim, eps, elementwise_affine=True)
-            if cross_attn_norm
-            else nn.Identity()
+            FP32LayerNorm(dim, eps, elementwise_affine=True) if cross_attn_norm else nn.Identity()
         )
 
         self.ffn = WanFeedForward(dim, ffn_dim, dtype=dtype, sp_enabled=sp_enabled)
@@ -657,9 +671,7 @@ class WanTransformerBlock(nn.Module):
             hidden_states
         )
         ff_out = self.ffn(norm_h)
-        hidden_states = (hidden_states.float() + ff_out.float() * c_gate_msa).type_as(
-            hidden_states
-        )
+        hidden_states = (hidden_states.float() + ff_out.float() * c_gate_msa).type_as(hidden_states)
         return hidden_states
 
 
@@ -687,12 +699,12 @@ class WanTransformer3DModel(nn.Module):
         self.config = config
         self.dtype = dtype
 
-        self.context_parallel_enabled = getattr(config, 'context_parallel_enabled', False)
-        self.cp_mode = getattr(config, 'cp_mode', 'gather_kv')
-        self.cfg_parallel_enabled = getattr(config, 'cfg_parallel_enabled', False)
+        self.context_parallel_enabled = getattr(config, "context_parallel_enabled", False)
+        self.cp_mode = getattr(config, "cp_mode", "gather_kv")
+        self.cfg_parallel_enabled = getattr(config, "cfg_parallel_enabled", False)
         # Megatron-style sequence parallelism reuses the TP group; it is mutually
         # exclusive with CP (both shard the sequence dimension).
-        self.sp_enabled = getattr(config, 'sp_enabled', False)
+        self.sp_enabled = getattr(config, "sp_enabled", False)
         if self.sp_enabled and self.context_parallel_enabled:
             raise ValueError(
                 "sp_enabled and context_parallel_enabled are mutually exclusive "
@@ -770,9 +782,7 @@ class WanTransformer3DModel(nn.Module):
                 object.__setattr__(block.attn2, "_rank_util", self.tp_rank_util)
 
         self.norm_out = FP32LayerNorm(inner_dim, config.eps, elementwise_affine=False)
-        self.proj_out = nn.Linear(
-            inner_dim, config.out_channels * math.prod(config.patch_size)
-        )
+        self.proj_out = nn.Linear(inner_dim, config.out_channels * math.prod(config.patch_size))
         self.scale_shift_table = nn.Parameter(torch.randn(1, 2, inner_dim) / inner_dim**0.5)
 
     def _sp_seq_scatter(self, tensor: torch.Tensor, *, dim: int) -> torch.Tensor:
@@ -801,26 +811,32 @@ class WanTransformer3DModel(nn.Module):
         # CFG parallel: the caller stacks [uncond, cond] into batch=2; scatter the
         # batch dim so each data-parallel rank denoises one branch at batch=1.
         if self.cfg_parallel_enabled:
-            assert hidden_states.shape[0] == 2, (
-                f"CFG parallel expects batch_size=2, got {hidden_states.shape[0]}"
-            )
-            assert timestep.shape[0] == 2, (
-                f"CFG parallel expects batch_size=2, got {timestep.shape[0]}"
-            )
-            assert encoder_hidden_states.shape[0] == 2, (
-                f"CFG parallel expects batch_size=2, got {encoder_hidden_states.shape[0]}"
-            )
+            assert (
+                hidden_states.shape[0] == 2
+            ), f"CFG parallel expects batch_size=2, got {hidden_states.shape[0]}"
+            assert (
+                timestep.shape[0] == 2
+            ), f"CFG parallel expects batch_size=2, got {timestep.shape[0]}"
+            assert (
+                encoder_hidden_states.shape[0] == 2
+            ), f"CFG parallel expects batch_size=2, got {encoder_hidden_states.shape[0]}"
             cfg_rank = get_cfg_rank_spmd(self.global_rank.get_rank())
             hidden_states = scatter_to_process_group_spmd(
-                hidden_states, partition_dim=0, rank=cfg_rank,
+                hidden_states,
+                partition_dim=0,
+                rank=cfg_rank,
                 process_group=self.cfg_group,
             )
             timestep = scatter_to_process_group_spmd(
-                timestep, partition_dim=0, rank=cfg_rank,
+                timestep,
+                partition_dim=0,
+                rank=cfg_rank,
                 process_group=self.cfg_group,
             )
             encoder_hidden_states = scatter_to_process_group_spmd(
-                encoder_hidden_states, partition_dim=0, rank=cfg_rank,
+                encoder_hidden_states,
+                partition_dim=0,
+                rank=cfg_rank,
                 process_group=self.cfg_group,
             )
 
@@ -847,15 +863,23 @@ class WanTransformer3DModel(nn.Module):
         if self.context_parallel_enabled:
             cp_rank = get_cp_rank_spmd(self.global_rank.get_rank())
             hidden_states = scatter_to_process_group_spmd(
-                hidden_states, partition_dim=1, rank=cp_rank,
+                hidden_states,
+                partition_dim=1,
+                rank=cp_rank,
                 process_group=self.cp_group,
             )
             cos, sin = rotary_emb
             cos = scatter_to_process_group_spmd(
-                cos, partition_dim=1, rank=cp_rank, process_group=self.cp_group,
+                cos,
+                partition_dim=1,
+                rank=cp_rank,
+                process_group=self.cp_group,
             )
             sin = scatter_to_process_group_spmd(
-                sin, partition_dim=1, rank=cp_rank, process_group=self.cp_group,
+                sin,
+                partition_dim=1,
+                rank=cp_rank,
+                process_group=self.cp_group,
             )
             rotary_emb = (cos, sin)
 
@@ -882,9 +906,7 @@ class WanTransformer3DModel(nn.Module):
             temb = self._sp_seq_scatter(temb, dim=1)
 
         for block in self.blocks:
-            hidden_states = block(
-                hidden_states, encoder_hidden_states, timestep_proj, rotary_emb
-            )
+            hidden_states = block(hidden_states, encoder_hidden_states, timestep_proj, rotary_emb)
 
         if temb.ndim == 3:
             shift, scale = (
@@ -893,13 +915,13 @@ class WanTransformer3DModel(nn.Module):
             shift = shift.squeeze(2)
             scale = scale.squeeze(2)
         else:
-            shift, scale = (
-                self.scale_shift_table.to(temb.device) + temb.unsqueeze(1)
-            ).chunk(2, dim=1)
+            shift, scale = (self.scale_shift_table.to(temb.device) + temb.unsqueeze(1)).chunk(
+                2, dim=1
+            )
 
-        hidden_states = (
-            self.norm_out(hidden_states.float()) * (1 + scale) + shift
-        ).type_as(hidden_states)
+        hidden_states = (self.norm_out(hidden_states.float()) * (1 + scale) + shift).type_as(
+            hidden_states
+        )
         hidden_states = self.proj_out(hidden_states)
 
         if self.sp_enabled:
@@ -909,7 +931,9 @@ class WanTransformer3DModel(nn.Module):
 
         if self.context_parallel_enabled:
             hidden_states = gather_from_tensor_model_parallel_region_with_dim(
-                hidden_states, gather_dim=1, process_group=self.cp_group,
+                hidden_states,
+                gather_dim=1,
+                process_group=self.cp_group,
             )
 
         hidden_states = hidden_states.reshape(bs, ppf, pph, ppw, p_t, p_h, p_w, -1)
@@ -920,7 +944,9 @@ class WanTransformer3DModel(nn.Module):
         # pipeline can apply the guidance formula on [uncond, cond].
         if self.cfg_parallel_enabled:
             output = gather_from_tensor_model_parallel_region_with_dim(
-                output, gather_dim=0, process_group=self.cfg_group,
+                output,
+                gather_dim=0,
+                process_group=self.cfg_group,
             )
         return output
 
@@ -966,9 +992,9 @@ class WanTransformer3DModel(nn.Module):
             shift_msa = shift_msa.squeeze(2)
             scale_msa = scale_msa.squeeze(2)
         else:
-            shift_msa, scale_msa = (
-                block0.scale_shift_table + timestep_proj.float()
-            ).chunk(6, dim=1)[:2]
+            shift_msa, scale_msa = (block0.scale_shift_table + timestep_proj.float()).chunk(
+                6, dim=1
+            )[:2]
 
         return (block0.norm1(hs.float()) * (1 + scale_msa) + shift_msa).type_as(hs)
 

@@ -5,7 +5,6 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
-
 LayerNorm = nn.LayerNorm
 
 
@@ -24,4 +23,8 @@ class RMSNorm(nn.Module):
 
 CustomRMSNorm = RMSNorm
 
-__all__ = ["CustomRMSNorm", "LayerNorm", "RMSNorm"]
+# The reference (fp32 statistics, affine and cast), shared with every backend without a
+# fused kernel; the CUDA backend's fused path is checked against it.
+from difflet.backends._torch_megatron.norm import rms_norm_fp32  # noqa: E402,F401
+
+__all__ = ["CustomRMSNorm", "LayerNorm", "RMSNorm", "rms_norm_fp32"]
