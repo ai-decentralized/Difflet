@@ -19,8 +19,8 @@ import pytest
 
 pytestmark = [pytest.mark.numerical, pytest.mark.slow]
 
-MIN_PSNR_DB = 25.0
-MIN_COSINE = 0.99
+MIN_PSNR_DB = 35.0
+MIN_COSINE = 0.998
 DEFAULT_RESULT = "/tmp/logs/cuda_e2e_flux.json"
 
 

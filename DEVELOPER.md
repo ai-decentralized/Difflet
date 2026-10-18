@@ -193,7 +193,7 @@ refuse the flag. `--teacache-cadence N` runs the existing probe-free TeaCache co
 Nth step after warm-up): cadence 2 → 0.20 s/step at PSNR 38.5 dB against the full run. The
 calibrated and online-delta TeaCache modes need the probe path on CUDA (F4b) and are refused.
 
-**Flux on CUDA (F5, code landed; GPU gates pending).** `modeling_flux.py` is backend-neutral since
+**Flux on CUDA (F5, verified on the RTX PRO 6000).** `modeling_flux.py` is backend-neutral since
 F5: the Trainium wrapper classes live in `difflet/models/flux/trainium_backbone.py` (bodies
 unchanged), the layer-boundary markers resolve per backend in `difflet/layers/markers.py`
 (identity off Trainium), and `FluxDiTConfig` (`difflet/models/flux/dit_config.py`) replaces the
@@ -206,7 +206,9 @@ diffusers' `FluxTransformer2DModel` on CPU (`tests/unit/models/flux/test_flux_vs
 and a two-step `FluxPipeline` run around the adapter in `test_flux_cuda_application.py`).
 
 ```bash
-hf auth login                                    # both FLUX repos are gated: accept the license on the model page first
+# Pod recipe: mount the `difflet-cache` network volume at /data (HF cache + token live there:
+# export HF_HOME=/data/hf); `sudo chown user:user /data` once; otherwise `hf auth login` —
+# both FLUX repos are gated: accept the license on the model page first.
 hf download black-forest-labs/FLUX.1-dev --exclude "flux1-dev.safetensors" --exclude "ae.safetensors"
 DIFFLET_BACKEND=cuda difflet run --model-id black-forest-labs/FLUX.1-dev --tp-degree 1 \
     --prompt "..." --output /tmp/flux.png --steps 28 --guidance-scale 3.5
@@ -217,12 +219,14 @@ DIFFLET_RUN_CUDA_NUMERICAL=1 pytest tests/numerical/test_cuda_flux_vs_diffusers.
 python scripts/verify_cli_cuda.py                # Qwen-Image at 50 steps and FLUX.1-dev at 28
 ```
 
-The GPU side of F5 (smoke, parity, e2e, CLI matrix on the RTX PRO 6000) has not run yet; the
-status log records it as pending. Flux on CUDA refuses TeaCache, SP, CP, CFG-parallel, TAEF1,
+Measured on the RTX PRO 6000 (2026-10-18): `difflet run` writes a 1024×1024 image in 23.2 s for
+28 steps after a 36.5 s load; DiT parity vs diffusers rel_l1 0.987× the bf16 control (same-dtype
+distance 0.398×); whole-pipeline e2e vs diffusers' `FluxPipeline` PSNR 40.35 dB / cosine 0.99980
+(floors 35 dB / 0.998); the CLI matrix passes both cells. Flux on CUDA refuses TeaCache, SP, CP, CFG-parallel, TAEF1,
 `--host-vae`, bucketed shapes and `--torch-compile` as F5b. The Trainium byte-identity of the
 split is argued (verbatim move, CPU suites) but not re-run on a trn2 (D13).
 
-Not in Release 1 (follow-ups F1–F8 in the plan): Wan on CUDA, Flux GPU verification (F5 Task 5), a second GPU
+Not in Release 1 (follow-ups F1–F8 in the plan): Wan on CUDA, Flux follow-ups (F5b), a second GPU
 (data-parallel / CFG-parallel first; tensor-parallel across PCIe only when a workload needs it),
 context parallel, `--requests` / `--dp` batches on CUDA, `difflet serve` on CUDA (F3b), CUDA
 graphs, calibrated/online-delta TeaCache, FP8, `flash-attn`, custom kernels (F4b).
