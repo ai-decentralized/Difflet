@@ -248,12 +248,18 @@ with both experts resident; DiT parity vs diffusers per expert rel_l1 1.051× / 
 control (same-dtype 0.870× / 0.819×, cosine 0.9988 / 0.9997); whole-video e2e vs diffusers'
 `WanPipeline` from the same noise PSNR 27.5 dB / cosine 0.9970 (floors 25 dB / 0.99). Diffusers
 generates the same clip in 44.6 s; the 10 s gap is unmeasured (the host latents round trip is far
-too small to explain it) and belongs to F4b. The lower e2e PSNR than Qwen's or Flux's is expected
-to come from the shared orchestrator's bf16 timestep (999 → 1000, 750 → 752) where diffusers
-keeps fp32, to be measured in F1b; both sides decode the VAE in bf16, so it is not a parity
-suspect. A Wan 2.2 snapshot without `transformer_2/` is refused (a partial download), not run
-on one expert. `Wan-AI/Wan2.1-T2V-14B-Diffusers` is routed to the same path but unverified on a
-GPU; diffusers' Wan 2.1 defaults (50 steps, guidance 5.0) differ from the 40 / 4.0 used here.
+too small to explain it) and belongs to F4b. The e2e PSNR is well below Qwen's and Flux's; F1b
+measured the first suspect, the timestep: the CUDA DiT now receives it in fp32
+(`timestep_dtype="float32"`, a per-component property the shared orchestrator reads; Trainium
+and TPU keep their model-dtype cast), which brings each DiT call closer to diffusers (rel_l1
+1.084× → 1.039× the control at timestep 999, where bf16 rounds to 1000) but leaves the 40-step
+trajectory 1.2 dB further away (26.3 dB vs 27.5 dB with the old cast, identical on the
+Workstation and Server Edition cards), so the gap comes from elsewhere — next suspect the CFG
+combine, which diffusers does in bf16 on the device and Difflet in fp32 on the host. Both sides
+decode the VAE in bf16, so it is not a parity suspect. A Wan 2.2 snapshot without
+`transformer_2/` is refused (a partial download), not run on one expert.
+`Wan-AI/Wan2.1-T2V-14B-Diffusers` is routed to the same path but unverified on a GPU; diffusers'
+Wan 2.1 defaults (50 steps, guidance 5.0) differ from the 40 / 4.0 used here.
 
 **Serving on CUDA (F3b).** `difflet serve` keeps the serving engine's one resident worker
 process; on CUDA that worker holds a single opaque `pipeline` stage —
