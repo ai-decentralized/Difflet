@@ -1,0 +1,56 @@
+[
+ {
+  "a": "/home/user/logs/f2/ref/qwen_0.png",
+  "b": "/home/user/logs/f2/dp2/qwen_0.png",
+  "psnr_db": Infinity,
+  "cosine": 0.999787,
+  "max_abs": 0.0,
+  "mean_abs": 0.0,
+  "identical_bytes": true
+ },
+ {
+  "a": "/home/user/logs/f2/ref/qwen_1.png",
+  "b": "/home/user/logs/f2/dp2/qwen_1.png",
+  "psnr_db": Infinity,
+  "cosine": 0.999557,
+  "max_abs": 0.0,
+  "mean_abs": 0.0,
+  "identical_bytes": true
+ },
+ {
+  "a": "/home/user/logs/f2/ref/qwen_2.png",
+  "b": "/home/user/logs/f2/dp2/qwen_2.png",
+  "psnr_db": Infinity,
+  "cosine": 1.000037,
+  "max_abs": 0.0,
+  "mean_abs": 0.0,
+  "identical_bytes": true
+ },
+ {
+  "a": "/home/user/logs/f2/ref/qwen_3.png",
+  "b": "/home/user/logs/f2/dp2/qwen_3.png",
+  "psnr_db": Infinity,
+  "cosine": 0.999496,
+  "max_abs": 0.0,
+  "mean_abs": 0.0,
+  "identical_bytes": true
+ },
+ {
+  "a": "/home/user/logs/f2/ref/qwen_0.png",
+  "b": "/home/user/logs/f2/dp1/qwen_0.png",
+  "psnr_db": Infinity,
+  "cosine": 0.999787,
+  "max_abs": 0.0,
+  "mean_abs": 0.0,
+  "identical_bytes": true
+ },
+ {
+  "a": "/home/user/logs/f2/ref/qwen_3.png",
+  "b": "/home/user/logs/f2/dp1/qwen_3.png",
+  "psnr_db": Infinity,
+  "cosine": 0.999496,
+  "max_abs": 0.0,
+  "mean_abs": 0.0,
+  "identical_bytes": true
+ }
+]

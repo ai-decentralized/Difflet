@@ -1,0 +1,41 @@
+== wan serial
+[difflet] weights ready for Wan-AI/Wan2.2-T2V-A14B-Diffusers
+[difflet] CUDA artifact (eager manifest) at /home/user/.cache/difflet/wan/2637f3a51cf549be
+[difflet] loaded in 55.9 s
+[difflet] wrote /home/user/logs/f2/ref/wan_serial.pt (9 frames, 480x832) in 50.9 s
+== wan cfg
+1:<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable beha
+2:<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable beha
+5:[difflet] loaded in 22.8 s[difflet] loaded in 22.8 s
+7:[difflet] wrote /home/user/logs/f2/wan_cfg.pt (9 frames, 480x832) in 26.1 s
+== nvsmi peak per GPU during cfg (MiB)
+{'0': 68074, '1': 67519}
+== apps after
+== qwen refs
+[difflet] loaded in 27.1 s
+[difflet] wrote /home/user/logs/f2/ref/qwen_0.png (1024x1024) in 16.9 s
+[difflet] loaded in 25.3 s
+[difflet] wrote /home/user/logs/f2/ref/qwen_1.png (1024x1024) in 16.8 s
+[difflet] loaded in 44.0 s
+[difflet] wrote /home/user/logs/f2/ref/qwen_2.png (1024x1024) in 16.8 s
+[difflet] loaded in 17.6 s
+[difflet] wrote /home/user/logs/f2/ref/qwen_3.png (1024x1024) in 17.3 s
+== qwen dp2
+[dp-router] worker 0: GPUs 0
+[dp-router] worker 1: GPUs 1
+[difflet] loaded in 21.4 s
+[difflet] loaded in 21.5 s
+[difflet] wrote /home/user/logs/f2/dp2/qwen_0.png (1024x1024) in 16.8 s
+[difflet] wrote /home/user/logs/f2/dp2/qwen_1.png (1024x1024) in 16.8 s
+[difflet] wrote /home/user/logs/f2/dp2/qwen_3.png (1024x1024) in 16.7 s
+[difflet] wrote /home/user/logs/f2/dp2/qwen_2.png (1024x1024) in 16.7 s
+[dp-router] done=4 failed=0 unfinished=0
+== qwen dp1
+[dp-router] worker 0: GPUs 0
+[difflet] loaded in 8.6 s
+[difflet] wrote /home/user/logs/f2/dp1/qwen_0.png (1024x1024) in 16.8 s
+[difflet] wrote /home/user/logs/f2/dp1/qwen_1.png (1024x1024) in 16.7 s
+[difflet] wrote /home/user/logs/f2/dp1/qwen_2.png (1024x1024) in 16.7 s
+[difflet] wrote /home/user/logs/f2/dp1/qwen_3.png (1024x1024) in 16.7 s
+[dp-router] done=4 failed=0 unfinished=0
+(apps now)

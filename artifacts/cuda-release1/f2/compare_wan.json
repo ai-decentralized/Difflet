@@ -1,0 +1,11 @@
+[
+ {
+  "a": "/home/user/logs/f2/ref/wan_serial.pt",
+  "b": "/home/user/logs/f2/wan_cfg.pt",
+  "psnr_db": Infinity,
+  "cosine": 1.000116,
+  "max_abs": 0.0,
+  "mean_abs": 0.0,
+  "identical_bytes": false
+ }
+]
