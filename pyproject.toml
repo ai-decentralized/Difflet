@@ -149,6 +149,7 @@ markers = [
     "slow: marks tests as slow (run with -m slow)",
     "neuron: requires NeuronCore hardware",
     "numerical: numerical correctness vs HF diffusers reference",
+    "multirank: spawns several torch.distributed (gloo) processes on the CPU host",
 ]
 
 # Coverage is measured over the CPU-executable, first-party surface of difflet/.
