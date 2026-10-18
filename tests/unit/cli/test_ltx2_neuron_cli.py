@@ -28,7 +28,6 @@ def _args(**overrides):
         ({"shapes": "480x704x49,512x768x121"}, "--shapes with more than one shape"),
         ({"cp_degree": 2}, "--cp-degree > 1"),
         ({"sp_enabled": True}, "--sp"),
-        ({"device_text_encoder": True}, "--device-text-encoder"),
     ],
 )
 def test_driver_lists_what_the_ranks_do_not_run(overrides, flag):
@@ -126,6 +125,34 @@ def test_dit_fit_check_refuses_tp1(monkeypatch, tmp_path, capsys):
     assert exc.value.code == 2
     assert "--tp-degree 2 or more" in capsys.readouterr().err
     cli.LTX2Orchestrator(_args(tp_degree=4))._check_dit_fits()  # 8.8 GiB per core: fits
+
+
+def _header_only_checkpoint(directory, name, numel):
+    import json
+    import struct
+
+    directory.mkdir(parents=True, exist_ok=True)
+    header = json.dumps({name: {"dtype": "BF16", "shape": [numel], "data_offsets": [0, 0]}})
+    (directory / "model.safetensors").write_bytes(
+        struct.pack("<Q", len(header)) + header.encode())
+
+
+def test_device_text_encoder_placement(monkeypatch, tmp_path, capsys):
+    """--device-text-encoder is forwarded at tp4, where Gemma-3 (11.8 B) and the DiT (18.9 B)
+    fit beside each other, and dropped with a note at tp2, where they do not."""
+    _header_only_checkpoint(tmp_path / "transformer", "w", 18_876_000_000)
+    _header_only_checkpoint(tmp_path / "text_encoder", "language_model.model.w", 11_770_000_000)
+    monkeypatch.setenv("DIFFLET_NEURON_HBM_GIB", "24")
+    monkeypatch.setattr(cli.LTX2Orchestrator, "_model_dir", lambda self: str(tmp_path))
+    orch = cli.LTX2Orchestrator(_args(device_text_encoder=True))
+    orch._place_text_encoder()
+    assert orch.args.device_text_encoder is True
+    assert "--device-text-encoder" in orch._shared_cli_args("generate")
+    orch = cli.LTX2Orchestrator(_args(device_text_encoder=True, tp_degree=2))
+    orch._place_text_encoder()
+    assert orch.args.device_text_encoder is False
+    assert "encoding on rank 0's host instead" in capsys.readouterr().out
+    assert "--device-text-encoder" not in orch._shared_cli_args("generate")
 
 
 def test_stage_dispatch_knows_ltx_2():
