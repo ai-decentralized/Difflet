@@ -46,7 +46,7 @@ to the CUDA path but never ran: it is NOT MEASURED in every row and has no colum
 | `difflet serve` | PASS; LIMIT on concurrency (429 after 30 s) | N/A · refused by name, F5b | N/A · refused by name, F1b |
 | `--torch-compile` | PASS, opt-in | N/A · refused, F5b | N/A · refused, F1b |
 | `--teacache-cadence N` | PASS, fixed cadence only | N/A · refused, F5b | N/A · refused, F1b |
-| `--dp 2 --requests` | PASS, byte-identical | NOT MEASURED (reachable) | PASS, bit-identical |
+| `--dp 2 --requests` | PASS, byte-identical | `--dp 1` batch PASS, byte-identical; `--dp 2` NOT MEASURED (needs 2 GPUs) | PASS, bit-identical |
 | `--cfg-parallel` (2 GPUs) | N/A · single pass | N/A · guidance-distilled; true-CFG is the owner's call | PASS, bit-identical |
 | `--dp` × `--cfg-parallel` | N/A · refuses `--cfg-parallel` | N/A · refuses `--cfg-parallel` | NOT MEASURED (needs 4 cards) |
 | serving on two GPUs (`--dp-degree 2`) | PASS, two requests in one request-time | N/A · serve refused | N/A · serve refused |
@@ -99,7 +99,7 @@ Probe-free fixed cadence on the CUDA loop; calibrated and online-delta modes ref
 One single-GPU replica per card through the request router.
 | Qwen-Image | FLUX.1-dev | Wan 2.2 |
 |---|---|---|
-| PASS · 4 requests in 58 s on 2 cards vs 190 s serial, byte-identical | NOT MEASURED · reachable, not run | PASS · 2 requests in 76 s vs 120 s serial, bit-identical |
+| PASS · 4 requests in 58 s on 2 cards vs 190 s serial, byte-identical | PASS · `--dp 1` batch, 2 requests in 28 s vs 33 s serial, byte-identical; `--dp 2` NOT MEASURED (needs 2 GPUs) | PASS · 2 requests in 76 s vs 120 s serial, bit-identical |
 
 ### CFG-parallel   `--cfg-parallel` (2 GPUs, torchrun)
 Runs the cond and uncond branches on two cards, one all-gather per step.
@@ -123,14 +123,15 @@ The honest gap list for the next session, none of it refused and none of it run:
 
 1. **Wan `--dp` × `--cfg-parallel`.** It needs four cards; it is allowed by construction and
    unverified.
-2. **FLUX.1-dev under `--dp`** on CUDA. Reachable and not run. Wan under `--dp` was
-   measured on the f2b session *[10-18 F2b/F4b]*.
+2. **FLUX.1-dev with two replicas (`--dp 2`)** on CUDA: reachable, needs a 2-GPU pod. The
+   one-card `--dp 1 --requests` batch was measured on the flux session (byte-identical to serial, Two
+   GPUs section) *[10-18 F5c]*. Wan under `--dp` was measured on the f2b session *[10-18 F2b/F4b]*.
 3. **Wan 2.1** (`Wan-AI/Wan2.1-T2V-14B-Diffusers`). It is routed to the CUDA orchestrator and has
    never run on a GPU. Diffusers' Wan 2.1 defaults (50 steps, guidance 5.0) differ from 40 / 4.0
    *[10-18 F1 review fixes]*.
-4. **Flux e2e timings** next to diffusers': `cuda_e2e_flux_vs_diffusers.py` records them since
-   F4b, but FLUX.1-dev is gated and the owner was not at the phone for the device login on pod
-   f2b, so none were taken *[10-18 F2b/F4b]*.
+4. ~~Flux e2e timings~~ — measured on the flux session *[10-18 F5c]*: Difflet 9.4 s vs
+   diffusers 8.3 s for 28 steps on the Server Edition; the 1.1 s gap is a new F4b-class item
+   (no Flux DiT bench exists yet).
 
 F9 measured and removed two items: the CLI matrix's Wan cell (PASS) and the
 Wan e2e noise floor *[10-18 F9]*. F2b/F4b measured and removed two more: serving on
@@ -140,7 +141,8 @@ Also unmeasured, and recorded where they arose: Workstation vs Server characteri
 `cuda_bench_dit.py` (a second Server card reproduced the f3c table to the millisecond, the
 Workstation card was not on the pod); Wan's Difflet vs diffusers generate gap — **measured and
 closed** in F4b (50.9 vs 42.9 s Server → 44.5 vs 42.8 s after the fused q/k norm); why two Wan replicas generating at once take 51.2 s each against 44.5 s
-alone; Flux peak GPU memory; F2 `--dp 1` requests 1 and 2 against their
+alone; Flux's 1.1 s generate gap vs diffusers (9.4 vs 8.3 s, F5c; no DiT bench for Flux
+yet); F2 `--dp 1` requests 1 and 2 against their
 references; the origin of GPU 0's extra ~555 MiB under `--cfg-parallel`; the Trainium
 byte-identity of the Flux split (needs a trn2); the split of the Wan noise floor into the
 timestep effect and run-to-run GPU nondeterminism. F9's recommended follow-up — state the
