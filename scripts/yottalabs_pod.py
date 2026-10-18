@@ -13,9 +13,10 @@ never printed, logged, put in an exception or shown by --dry-run.
   scripts/yottalabs_pod.py ssh-config ID --alias difflet-gpu   >> ~/.ssh/config
   scripts/yottalabs_pod.py status ID | list | pause ID | resume ID | delete ID
 
-Deploying (create, resume) needs the owner's yes; pause / delete at the end of a session are
-pre-authorised (.claude/skills/difflet-cuda-backend/SKILL.md). Only a pod with a network
-volume can be paused (API code 12005 otherwise): delete it instead.
+Deploying (create, resume) needs the owner's yes. At the end of a session, pausing a pod that has
+the network volume, or deleting one that cannot be paused (API code 12005, no volume), is
+pre-authorised; deleting (terminating) a volume pod needs the owner's word "terminate"
+(.claude/skills/difflet-cuda-backend/SKILL.md).
 
 Exit codes: 0 ok, 1 API error (or a FAILED pod), 2 no capacity or timeout.
 """
@@ -540,6 +541,8 @@ def cmd_ssh_config(args, ctx: Ctx) -> int:
     ctx.out(f"  User {SSH_USER}")
     ctx.out(f"  IdentityFile {SSH_KEY}")
     ctx.out("  StrictHostKeyChecking accept-new")
+    ctx.out("  IdentitiesOnly yes")
+    ctx.out("  ServerAliveInterval 30")
     return 0
 
 
@@ -617,7 +620,13 @@ def build_parser() -> argparse.ArgumentParser:
         900,
         5,
     )
-    lifecycle("delete", cmd_delete, "terminate and wait until the pod is gone", 300, 5)
+    lifecycle(
+        "delete",
+        cmd_delete,
+        "terminate and wait until the pod is gone (a volume pod: only on the owner's 'terminate')",
+        300,
+        5,
+    )
 
     p = sub.add_parser("ssh-config", help="the ~/.ssh/config Host block for a RUNNING pod")
     p.add_argument("id")

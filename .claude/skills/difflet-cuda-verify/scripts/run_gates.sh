@@ -17,7 +17,9 @@
 # Env per step: DIFFLET_BACKEND=cuda PATH=$REPO/.venv/bin:$PATH HF_HOME=... HF_HUB_OFFLINE=1
 # PYTHONPATH=$REPO (CUDA_VISIBLE_DEVICES passes through; F1b pinned it to 0). Each step logs to
 # <out>/<step>.log and appends "<step> exit: <rc> in <s>s" to <out>/gates.txt; a failed step does
-# not stop the rest, and the exit code is 1 when any step failed.
+# not stop the rest, and the exit code is 1 when any step failed. An early exit (no snapshot, no
+# transformer/, no .venv) still appends "GATES DONE <model> overall_rc=2 (<reason>)" to gates.txt,
+# so a poll on "GATES DONE" ends.
 # qwen (F3): cuda_smoke.sh 50 steps; cuda_parity_gpu.py; cuda_e2e_vs_diffusers.py.
 # flux (F5): cuda_smoke_flux.sh 28 steps; cuda_parity_flux_gpu.py; cuda_e2e_flux_vs_diffusers.py.
 # wan (F1, F1b): cuda_smoke_wan.sh 40 steps x 9 frames; cuda_parity_wan_gpu.py --expert both (the
@@ -45,13 +47,22 @@ while [ $# -gt 0 ]; do
   esac
 done
 REPO=${REPO:-$PWD}
+L=${OUT:-$HOME/logs/$MODEL-$(date +%Y%m%d-%H%M%S)}
+# bail REASON: an early exit that still ends the poll loop (a real run writes the DONE marker)
+bail() {
+  echo "run_gates.sh: $1" >&2
+  if [ "$DRY" = 0 ]; then
+    mkdir -p "$L" && echo "GATES DONE $MODEL overall_rc=2 ($1)" >> "$L/gates.txt"
+  fi
+  exit 2
+}
 
 if [ "$SNAP" = auto ]; then
   if [ -z "${HF_HOME:-}" ]; then
     if [ -d /data/hf ]; then HF_HOME=/data/hf; else HF_HOME=$HOME/hf; fi
   fi
   SNAP=$(ls -d "$HF_HOME/hub/$REPO_DIR/snapshots/"*/ 2>/dev/null | head -1)
-  [ -n "$SNAP" ] || { echo "run_gates.sh: no $REPO_DIR snapshot under $HF_HOME/hub" >&2; exit 2; }
+  [ -n "$SNAP" ] || bail "no $REPO_DIR snapshot under $HF_HOME/hub"
 else
   case "${SNAP%/}" in
     */hub/models--*/snapshots/*)  # HF_HOME is four levels up from the snapshot
@@ -61,7 +72,6 @@ else
   case "$SNAP" in */"$REPO_DIR"/*) ;; *) echo "run_gates.sh: warning: $SNAP is not a $REPO_DIR snapshot" >&2 ;; esac
 fi
 SNAP=${SNAP%/}/
-L=${OUT:-$HOME/logs/$MODEL-$(date +%Y%m%d-%H%M%S)}
 
 export DIFFLET_BACKEND=cuda PATH="$REPO/.venv/bin:$PATH" HF_HOME HF_HUB_OFFLINE=1 PYTHONPATH="$REPO"
 echo "model: $MODEL  snapshot: $SNAP  out: $L"
@@ -92,10 +102,10 @@ step() {
 }
 
 if [ "$DRY" = 0 ]; then
-  [ -d "$SNAP/transformer" ] || { echo "run_gates.sh: $SNAP has no transformer/" >&2; exit 2; }
-  [ -x "$REPO/.venv/bin/python" ] || { echo "run_gates.sh: no $REPO/.venv (run pod_setup.sh)" >&2; exit 2; }
+  [ -d "$SNAP/transformer" ] || bail "$SNAP has no transformer/"
+  [ -x "$REPO/.venv/bin/python" ] || bail "no $REPO/.venv (run pod_setup.sh)"
   mkdir -p "$L" /tmp/logs
-  cd "$REPO" || exit 2
+  cd "$REPO" || bail "cannot cd to $REPO"
   {
     echo "== $MODEL gates $(date -u +%FT%TZ) =="
     echo "snapshot: $SNAP"

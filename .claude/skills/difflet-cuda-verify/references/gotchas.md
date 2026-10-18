@@ -2,8 +2,10 @@
 
 ## Pods and billing
 - A pod bills by the hour whether or not anything runs. On 2026-10-17 a session finished, then
-  waited for approval to pause, and the pod billed all night. Pausing at the end is
-  pre-authorised: do it, read the status back, report it on the first line.
+  waited for approval to pause, and the pod billed all night. At the end, pausing a volume pod,
+  or terminating a pod that cannot be paused (12005, no volume), is pre-authorised: do it, read
+  the status back, report it on the first line. Terminating a volume pod needs the owner's
+  word "terminate"; deploying (`create`, `resume`) needs the owner's yes.
 - A pod without a network volume cannot be paused (code 12005); only `delete` stops it.
 - The eu PRO 6000 pools sell whole 2-GPU nodes ($5.30/h on 2026-10-18): a 1-GPU job there costs
   two cards. The us-east-3 pool ($0.45/GPU/h) can be full for hours, and a paused pod there
@@ -48,7 +50,8 @@
   laptop — with no accelerator the registry falls back to Trainium.
 - `HF_HUB_OFFLINE=1` after the download keeps a run from re-resolving `main` mid-session.
 - Gated repos: the token lives in `HF_HOME`. On a container disk it dies with the pod (f3c,
-  terminated 2026-10-17 mid-download); on the volume it persists.
+  terminated 2026-10-17 mid-download); on the volume it stays (only f5b has read it; another
+  pod reading it is not measured).
 
 ## Evidence
 - Each numerical gate SKIPs, not fails, when its JSON is missing or the opt-in

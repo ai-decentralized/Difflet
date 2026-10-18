@@ -294,10 +294,9 @@ read back through `scripts/yottalabs_pod.py` (`gpus`, `create`, `status`, `wait-
 `~/.config/yottalabs/api_key`). The skill's `scripts/` hold `pod_setup.sh` (venv, HF cache with or
 without the `difflet-cache` volume), `ship_branch.sh` (the branch as a git bundle) and
 `run_gates.sh <qwen|flux|wan> <snapshot|auto>` (smoke → DiT parity → gate → e2e → gate, one log
-per step). What
-Release 1 → F2 proved, with every number traced to `artifacts/cuda-release1/` and the status
-log, is in `docs/verification/cuda-release1-evidence.md`: per-gate tables, the support matrix
-(PASS / LIMIT / N/A / NOT MEASURED) and the list of what was never run.
+per step). What Release 1 → F2 proved, with every number traced to `artifacts/cuda-release1/`
+and the status log, is in `docs/verification/cuda-release1-evidence.md`: per-gate tables, the
+support matrix (PASS / LIMIT / N/A / NOT MEASURED) and the list of what was never run.
 
 **Serving on CUDA (F3b).** `difflet serve` keeps the serving engine's one resident worker
 process; on CUDA that worker holds a single opaque `pipeline` stage —

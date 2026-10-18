@@ -144,6 +144,54 @@ def test_run_gates_rejects_an_unknown_model(tmp_path):
     assert proc.returncode == 2 and "qwen|flux|wan" in proc.stderr
 
 
+def run_gates_for_real(args, env_extra=None):
+    """run_gates.sh without --dry-run, for the early exits that stop before any GPU step."""
+    env = {k: v for k, v in os.environ.items() if k != "HF_HOME"}
+    return subprocess.run(
+        ["bash", str(SKILL / "scripts" / "run_gates.sh"), *args],
+        capture_output=True,
+        text=True,
+        cwd=ROOT,
+        env={**env, **(env_extra or {})},
+    )
+
+
+def test_run_gates_snapshot_without_transformer_still_writes_the_done_marker(tmp_path):
+    snap = tmp_path / "hf" / "hub" / "models--Qwen--Qwen-Image" / "snapshots" / "abc"
+    snap.mkdir(parents=True)  # a partial download: no transformer/
+    out = tmp_path / "logs" / "qwen"
+    proc = run_gates_for_real(["qwen", str(snap), "--out", str(out)])
+    assert proc.returncode == 2 and "has no transformer/" in proc.stderr
+    lines = (out / "gates.txt").read_text().splitlines()
+    assert lines[-1].startswith("GATES DONE qwen overall_rc=2 (") and "transformer/" in lines[-1]
+
+
+def test_run_gates_auto_without_a_snapshot_still_writes_the_done_marker(tmp_path):
+    out = tmp_path / "logs" / "wan"
+    proc = run_gates_for_real(
+        ["wan", "auto", "--out", str(out)], {"HF_HOME": str(tmp_path / "empty-hf")}
+    )
+    assert proc.returncode == 2 and "no models--Wan-AI" in proc.stderr
+    assert (
+        (out / "gates.txt")
+        .read_text()
+        .splitlines()[-1]
+        .startswith("GATES DONE wan overall_rc=2 (no models--Wan-AI")
+    )
+
+
+def test_pod_setup_ends_with_its_done_marker_even_on_failure(tmp_path):
+    proc = subprocess.run(  # not a Difflet checkout: exits 2 before touching anything
+        ["bash", str(SKILL / "scripts" / "pod_setup.sh")],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        env={**os.environ, "REPO": str(tmp_path)},
+    )
+    assert proc.returncode == 2 and "not a Difflet checkout" in proc.stderr
+    assert proc.stdout.splitlines()[-1] == "SETUP DONE rc=2"
+
+
 # --- the skill's text (F8 task 2) ---------------------------------------------------------
 
 SKILL_FILES = [

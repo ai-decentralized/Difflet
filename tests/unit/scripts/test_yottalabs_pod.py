@@ -52,7 +52,7 @@ def pod(status, host="", port=None, region="us-east-3"):
         "containerVolumeInGb": 150,
         "volumes": [],
         "singleCardPrice": "0.45",
-        "sshCmd": "ssh user@95.133.253.132 -p 30000 -i <private key file>",
+        "sshCmd": "ssh user@203.0.113.10 -p 30000 -i <private key file>",
         "expose": [
             {"port": 8888, "proxyPort": 30001, "protocol": "HTTP", "host": "other.example"},
             {
@@ -619,6 +619,8 @@ def test_ssh_config_prints_the_host_block():
         "  User user\n"
         "  IdentityFile ~/.ssh/yottalabs_difflet_cuda_qwen.pem\n"
         "  StrictHostKeyChecking accept-new\n"
+        "  IdentitiesOnly yes\n"
+        "  ServerAliveInterval 30\n"
     )
 
 

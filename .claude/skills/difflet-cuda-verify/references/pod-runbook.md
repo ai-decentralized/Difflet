@@ -53,7 +53,7 @@ by the owner's login with a `difflet-` name are ours (the console lists other lo
 
 | Where | Size / speed (reference) | Survives | Use for |
 |---|---|---|---|
-| `difflet-cache` volume at `/data` | 200 GB CephFS, $0.0698/GB/month; cold reads ≈ 0.23 GB/s | pause, terminate, new pods (us-east-3 only) | HF cache + HF token (`HF_HOME=/data/hf`) |
+| `difflet-cache` volume at `/data` | 200 GB CephFS, $0.0698/GB/month; cold reads ≈ 0.23 GB/s | pause (f5b, measured); its pod's termination and a mount by another pod: **not measured** (us-east-3 only) | HF cache + HF token (`HF_HOME=/data/hf`) |
 | container disk (`containerVolumeInGb`) | 100 GB on f5b; 150 GB on the eu pods | nothing — lost on pause/terminate, wiped by a restart | venv, eu-pod downloads |
 | `/home` | — | the F1 container restart (pod still alive) | `~/Difflet`, `~/logs` |
 
@@ -61,10 +61,18 @@ by the owner's login with a `difflet-` name are ours (the console lists other lo
   (`create --regions us-east-3 --volume-id 469225541779435520 --mount /data`; always pin the
   region). It mounts **root-owned** the first time: `sudo chown user:user /data` once
   (`pod_setup.sh --volume` does it).
+- Only one pod has ever mounted it: `difflet-cuda-f5b` (ID **502399632095187214**, us-east-3,
+  $0.45/h), **PAUSED** since 2026-10-18 and still holding it. Next session: resume f5b (the
+  owner's yes) or create a new us-east-3 pod on the volume. A second pod on the volume while
+  f5b holds it, and the volume outliving f5b's termination, are **not measured**; if `create`
+  rejects the volume (in use), stop and ask the owner — never terminate f5b to free it
+  without the owner's word "terminate".
 - What it holds (2026-10-18, after F1): Qwen-Image (57.7 GB) and FLUX.1-dev (33.7 GB), 116 GB
   free, plus the HF token. Wan 2.2 (118 GB on disk) does **not** fit beside both. To run Wan
   there: `HF_HOME=/data/hf .venv/bin/hf cache rm model/Qwen/Qwen-Image -y`, download Wan
   (~1 GB/s: 118 GB in 108–109 s), and swap back after (the F1 session did exactly that).
+  A Qwen + Wan session removes FLUX.1-dev instead (`model/black-forest-labs/FLUX.1-dev`:
+  116 + 33.7 GB free ≥ 118 GB) and keeps both of its models.
 - Cold reads from the volume dominate first loads: Qwen 54 GB ≈ 240 s, the Flux DiT 24 GB ≈
   200 s, Wan's smoke load 703 s; F1's parity loads: fp32 reference 147 s and 1083 s (the
   second expert cold), bf16 120–196 s [F5, F1]. Warm loads match local disk.
@@ -100,7 +108,8 @@ by the owner's login with a `difflet-` name are ours (the console lists other lo
 ## Gated repos: the Hugging Face device-code login
 
 FLUX.1-dev is gated (the licence is accepted on the owner's HF account). The token lives in
-`HF_HOME`; on the volume it persists across pods, on a container disk it dies with the pod. When
+`HF_HOME`; on the volume it stays with the volume (only f5b has read it; another pod: not
+measured), on a container disk it dies with the pod. When
 `hf download black-forest-labs/FLUX.1-dev` says 401/gated:
 
 ```bash
@@ -128,9 +137,11 @@ command**: the pattern matches the SSH session's own shell command line and kill
 
 ## A session, start to finish
 
-1. Owner's yes → `gpus`, `create … --dry-run`, `create` (watcher if the pool is full; with the
-   volume always `--regions us-east-3`, where it mounts); id into the notes; `wait-running`;
-   `ssh-config` with a new alias `>> ~/.ssh/config`.
+1. `gpus` → `create … --dry-run` → the owner's yes → `create` (watcher if the pool is full;
+   with the volume always `--regions us-east-3`, where it mounts); id into the notes;
+   `wait-running`; `ssh-config` with a new alias `>> ~/.ssh/config`. The volume is held by
+   the paused f5b (ID 502399632095187214): `resume` it (owner's yes) or create a new pod on
+   the volume — not measured while f5b holds it; if `create` rejects the volume, ask the owner.
 2. `nvidia-smi` twice; `ship_branch.sh`; `pod_setup.sh [--volume]`; downloads (disk checked).
 3. Gates detached (`run_gates.sh`, then the matrix / serve / two-GPU runs); poll for `DONE`.
 4. Copy evidence off (`scp -r <alias>:~/logs/<name> …`), curate into

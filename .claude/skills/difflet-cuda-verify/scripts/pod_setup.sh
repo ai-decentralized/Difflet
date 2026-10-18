@@ -10,7 +10,8 @@
 # 2.11.0 from the cu128 index, `-e ".[test,cuda]"`, `huggingface_hub[cli]`, `imageio[ffmpeg]`,
 # then scripts/cuda_env_check.sh into ~/logs/env-check-<ts>.log. HF_HOME is appended to
 # ~/.bashrc once. The venv has no pip: install with `uv pip install --python .venv/bin/python`.
-# Idempotent: re-running reinstalls nothing that is already satisfied.
+# Idempotent: re-running reinstalls nothing that is already satisfied. Its last line is
+# "SETUP DONE rc=<n>" (also on a failure), so a detached run can be polled for it.
 set -euo pipefail
 case "${1:-}" in
   -h|--help) sed -n '2,/^[^#]/{/^#/s/^# \{0,1\}//p;}' "$0"; exit 0 ;;
@@ -18,6 +19,7 @@ case "${1:-}" in
   "") VOLUME=0 ;;
   *) echo "pod_setup.sh: unknown argument $1 (see --help)" >&2; exit 2 ;;
 esac
+trap 'rc=$?; set +x; echo "SETUP DONE rc=$rc"' EXIT
 REPO=${REPO:-$PWD}
 [ -f "$REPO/pyproject.toml" ] && [ -d "$REPO/difflet" ] || {
   echo "pod_setup.sh: $REPO is not a Difflet checkout (run ship_branch.sh first, then cd ~/Difflet)" >&2

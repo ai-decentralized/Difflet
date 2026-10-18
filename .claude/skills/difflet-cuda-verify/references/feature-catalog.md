@@ -30,14 +30,19 @@ e2e metrics did match across editions: Wan's `model`-timestep e2e gave 27.54 dB 
 | DiT parity (D14, three gates) | PASS incl. padded prompt [F3, F4] | PASS [F5] | PASS both experts + rounding block [F1, F1b] |
 | e2e vs diffusers | PASS, floors 35 dB / 0.998 [F3] | PASS, floors 35 dB / 0.998 [F5] | PASS, floors 25 dB / 0.99 [F1, F1b] |
 | CLI matrix cell (`verify_cli_cuda.py`) | PASS [F3, F5] | PASS [F5] | NOT MEASURED (smoke stands in) [F1] |
-| `difflet serve` | PASS [F3b] | refused by name (F5b) | refused by name (F1b) |
-| `--torch-compile` | PASS, opt-in [F4] | refused (F5b) | refused (F1b) |
-| `--teacache-cadence N` | PASS [F4] | refused (F5b) | refused (F1b) |
+| `difflet serve` | PASS; LIMIT on concurrency (429 `queue_timeout` after the 30 s default) [F3b] | N/A · refused by name, F5b | N/A · refused by name, F1b |
+| `--torch-compile` | PASS, opt-in [F4] | N/A · refused, F5b | N/A · refused, F1b |
+| `--teacache-cadence N` | PASS, fixed cadence only [F4] | N/A · refused, F5b | N/A · refused, F1b |
 | `--dp 2 --requests` | PASS, byte-identical [F2] | NOT MEASURED (reachable) | NOT MEASURED (reachable) |
-| `--cfg-parallel` (2 GPUs) | N/A (refused: single pass) | N/A (refused: guidance-distilled; true-CFG is the owner's call) | PASS, bit-identical [F2] |
-| `--dp` × `--cfg-parallel` | N/A (refuses `--cfg-parallel`) | N/A (refuses `--cfg-parallel`) | NOT MEASURED (needs 4 cards) |
-| CP / ulysses (`--cp-degree > 1`) | refused (F2b) | refused (F2b) | refused (F2b) |
-| TP across PCIe, `--sp` | refused (F6) | refused (F6) | refused (F6) |
+| `--cfg-parallel` (2 GPUs) | N/A · single pass | N/A · guidance-distilled; true-CFG is the owner's call | PASS, bit-identical [F2] |
+| `--dp` × `--cfg-parallel` | N/A · refuses `--cfg-parallel` | N/A · refuses `--cfg-parallel` | NOT MEASURED (needs 4 cards) |
+| serving on two GPUs | NOT MEASURED (F2b) | N/A · serve refused | N/A · serve refused |
+| CP / ulysses (`--cp-degree > 1`) | N/A · refused, F2b | N/A · refused, F2b | N/A · refused, F2b |
+| TP across PCIe, `--sp` | N/A · refused, F6 | N/A · refused, F6 | N/A · refused, F6 |
+
+Statuses as in the evidence report: PASS (ran end to end in the cited entry), LIMIT (works with a
+documented constraint), N/A (excluded by design, or refused by name pending the named
+follow-up), NOT MEASURED (not refused, not run).
 
 Anything landing differently in a new session is a finding — a regression, an upgrade, or a
 NOT MEASURED cell finally measured. Say which.

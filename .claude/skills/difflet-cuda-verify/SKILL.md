@@ -3,15 +3,14 @@ name: difflet-cuda-verify
 description: >-
   Run a GPU verification session for Difflet's CUDA backend on a Yottalabs RTX PRO 6000 pod and
   leave auditable evidence. Use this whenever the user wants to verify, re-verify, benchmark or
-  "prove on the GPU" Qwen-Image, FLUX.1-dev or Wan 2.2 on CUDA — smoke (`difflet run`), DiT
-  parity vs diffusers, e2e vs diffusers, the CUDA CLI matrix, the `difflet serve` smoke, two-GPU
-  `--dp` / Wan `--cfg-parallel` — including requests phrased as "run the GPU gates", "deploy a
-  pod and check this branch", "does Wan still pass on CUDA", "resume the pod", "get a 2-GPU
-  node", "re-run parity after this change". Also use it to plan a session without a GPU, to
-  triage a failed gate (pod infrastructure vs a Difflet bug), and to write the evidence report
-  from artifacts/cuda-release1/. It carries the pod lifecycle through scripts/yottalabs_pod.py
-  (deploying needs the owner's yes; at the end, pausing a volume pod or terminating one that
-  cannot be paused is pre-authorised).
+  "prove on the GPU" Qwen-Image, FLUX.1-dev or Wan 2.2 on CUDA — smoke (`difflet run`), DiT parity
+  vs diffusers, e2e vs diffusers, the CUDA CLI matrix, the `difflet serve` smoke, two-GPU `--dp` /
+  Wan `--cfg-parallel` — including requests phrased as "run the GPU gates", "deploy a pod and check
+  this branch", "does Wan still pass on CUDA", "resume the pod", "get a 2-GPU node", "re-run parity
+  after this change". Also use it to plan a session without a GPU, to triage a failed gate (pod
+  infrastructure vs a Difflet bug), and to write the evidence report from artifacts/cuda-release1/.
+  It carries the pod lifecycle through scripts/yottalabs_pod.py (deploying needs the owner's yes; at
+  the end, pausing a volume pod or terminating one that cannot be paused is pre-authorised).
 ---
 
 # Difflet CUDA verification sessions
@@ -38,9 +37,11 @@ Pin down only what the request leaves open:
   speed, and only compared on the same card edition.
 - **Branch** (CPU gate green first); evidence in `artifacts/cuda-release1/<feature>/`.
 - **Pod**: 1 GPU in us-east-3 with the `difflet-cache` volume (cheapest; the pool can be full for
-  hours), or a 2-GPU eu node (whole nodes only, no volume, terminate at the end). Disk decides
-  what fits — Qwen + Flux live on the volume, Wan (118 GB) does not fit beside them; see the
-  runbook's storage table before promising three models on one pod.
+  hours), or a 2-GPU eu node (whole nodes only, no volume, terminate at the end). The volume is
+  held by `difflet-cuda-f5b` (ID 502399632095187214, PAUSED): resume it (owner's yes) or create
+  a new us-east-3 pod on the volume — a second pod on the volume while f5b holds it, and the
+  volume outliving f5b, are not measured; if `create` rejects the volume, ask the owner. Disk
+  decides what fits: Qwen + Flux live on the volume, Wan (118 GB) not beside both (runbook).
 
 State the plan back — expected outcome per gate (the catalog's snapshot), commands, pod and its
 price as `gpus` shows it now, disk plan — and ask for the deploy yes. Planning-only stops here.
@@ -77,14 +78,16 @@ Then ship the branch and build the host (the F1b/F2 recipe):
 S=.claude/skills/difflet-cuda-verify/scripts
 REPO=$PWD bash $S/ship_branch.sh difflet-cuda-<topic> <branch>    # laptop → ~/Difflet on the pod
 ssh difflet-cuda-<topic> nvidia-smi        # now, and again a few minutes later (NVML loss, triage)
-ssh difflet-cuda-<topic> "cd ~/Difflet && bash $S/pod_setup.sh --volume"   # no volume: drop flag
+ssh difflet-cuda-<topic> "mkdir -p ~/logs && cd ~/Difflet && setsid nohup bash $S/pod_setup.sh \
+    --volume > ~/logs/setup.log 2>&1 < /dev/null &"           # no volume: drop --volume
+until ssh difflet-cuda-<topic> 'grep -q "SETUP DONE" ~/logs/setup.log'; do sleep 30; done
 ```
 
 `pod_setup.sh` builds the uv venv (torch 2.11.0 cu128, `-e .[test,cuda]`, the `hf` CLI,
-imageio-ffmpeg), sets `HF_HOME` (`/data/hf` with `--volume`, else `~/hf`) and writes the
-`scripts/cuda_env_check.sh` report to `~/logs/env-check-<ts>.log` — the status entry's host line:
-GPU name **with its edition**, driver, torch. Weights:
-`HF_HOME=/data/hf ~/Difflet/.venv/bin/hf download <repo>` (check `df -h` first). FLUX.1-dev
+imageio-ffmpeg), sets `HF_HOME` (`/data/hf` with `--volume`, else `~/hf`), writes the
+`scripts/cuda_env_check.sh` report to `~/logs/env-check-<ts>.log` — the status entry's host
+line: GPU name **with its edition**, driver, torch — and ends `SETUP DONE rc=<n>` (0 = ok).
+Weights: `HF_HOME=/data/hf ~/Difflet/.venv/bin/hf download <repo>` (check `df -h` first). FLUX.1-dev
 needs the owner's device-code login once per `HF_HOME` (`scripts/hf_device_login.py`; recipe in
 the runbook) — ask for it while the owner is awake, at the start.
 
@@ -129,14 +132,13 @@ Two GPUs (F2): a serial reference on one card, then both; compare `.pt` tensors 
 references (bit-identical in F2), `nvidia-smi` sampled on both cards meanwhile:
 
 ```bash
+export HF_HOME=$H HF_HUB_OFFLINE=1 DIFFLET_BACKEND=cuda      # H=~/hf on the eu pod (no volume)
 P="a cat walking through a sunlit garden, photorealistic"
 W="--model-id Wan-AI/Wan2.2-T2V-A14B-Diffusers --steps 40 --num-frames 9 --seed 0"
 CUDA_VISIBLE_DEVICES=0 .venv/bin/difflet run $W --prompt "$P" --output ~/logs/<name>/wan_serial.pt
 .venv/bin/difflet run $W --prompt "$P" --cfg-parallel --output ~/logs/<name>/wan_cfg.pt  # 2 ranks
-cat > ~/logs/<name>/requests.jsonl <<'EOF'
-{"prompt": "a cat in a sunlit garden", "output": "/home/user/logs/<name>/q0.png", "seed": 0}
-{"prompt": "a cat in a sunlit garden", "output": "/home/user/logs/<name>/q1.png", "seed": 1}
-EOF
+for s in 0 1; do printf '{"prompt": "a cat in a sunlit garden", "output": "%s", "seed": %d}\n' \
+  "$HOME/logs/<name>/q$s.png" $s; done > ~/logs/<name>/requests.jsonl
 .venv/bin/difflet run --model-id Qwen/Qwen-Image --dp 2 --requests ~/logs/<name>/requests.jsonl
 ```
 
@@ -190,11 +192,9 @@ From this session's evidence: **the status-log entry** (step 4); **the evidence 
 entry, *How to inspect manually*, ledger with commits, pod costs; `git check-ignore -q <doc>`
 must exit 1 before you commit — an ignored doc is a lost doc);
 **the support matrix**: PASS / LIMIT / N/A / NOT MEASURED, model × feature and one block per
-feature; NOT MEASURED is the gap list (2026-10-18: the CLI matrix's Wan cell, Wan `--dp` ×
-`--cfg-parallel`, Flux and Wan under `--dp`, Wan 2.1, the Wan e2e noise floor).
-
-Be exact about what was and wasn't verified, and which card produced each number: Qwen-Image
-ran 0.77 s/step on the Workstation Edition (us-east-3) and 0.33 s/step on the Server Edition
-with the same code (F3b entry, 2.3×). Every path, number and explanation must come from this
-session's JSONs, logs, or code you read; the numbers in these references describe other pods.
-Label inferences ("likely the page cache — not measured") as inferences.
+feature; NOT MEASURED is the gap list (2026-10-18, six: the CLI matrix's Wan cell, Wan `--dp` ×
+`--cfg-parallel`, Flux and Wan under `--dp`, Wan 2.1, the Wan e2e noise floor, serving on two
+GPUs). Be exact about what was and wasn't verified, and which card edition produced each number
+(Qwen-Image: 0.77 s/step Workstation vs 0.33 Server, same code, F3b). Every path, number and
+explanation comes from this session's JSONs, logs, or code you read — these references describe
+other pods. Label inferences ("likely the page cache — not measured") as inferences.
