@@ -153,7 +153,7 @@ def test_schnell_is_built_from_its_own_repo(recorder, monkeypatch):
         ({"tp_degree": 2}, "not supported"),
         ({"sp_enabled": True}, "not supported"),
         ({"cp_degree": 2}, "not supported"),
-        ({"cfg_parallel": True}, "not supported"),
+        ({"cfg_parallel": True}, "distilled model"),
         ({"shapes": "1024x1024,768x768"}, "not supported"),
         ({"teacache_cadence": 2}, "not supported"),
         ({"teacache_speedup": 1.5}, "not supported"),

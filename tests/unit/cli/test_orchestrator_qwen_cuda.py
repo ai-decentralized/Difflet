@@ -125,7 +125,7 @@ def test_cache_dir_and_force_reach_from_pretrained(recorder):
         ({"sp_enabled": True}, "not supported"),
         ({"teacache_speedup": 1.5}, "not supported"),
         ({"teacache_online_delta": 0.1}, "not supported"),
-        ({"cfg_parallel": True}, "not supported"),
+        ({"cfg_parallel": True}, "distilled model"),
         ({"tp_degree": 2}, "not supported"),
         ({"cp_degree": 2}, "not supported"),
     ],
@@ -186,3 +186,28 @@ def test_teacache_cadence_is_forwarded_as_an_application_kwarg(recorder, tmp_pat
     out = tmp_path / "qwen.png"
     mod.CudaQwenImageOrchestrator(_args(teacache_cadence=2, output=str(out))).generate()
     assert recorder[0][1]["application_kwargs"] == {"teacache_cadence": 2}
+
+
+def test_cuda_pipeline_kwargs_cfg_parallel_defaults_off():
+    """The serving caller passes no ``cfg_parallel`` and keeps the single-branch config."""
+    common = dict(
+        tp_degree=None,
+        height=None,
+        width=None,
+        cache_dir=None,
+        revision=None,
+        force_compile=False,
+        load=False,
+    )
+    assert mod.cuda_pipeline_kwargs(**common)["parallel"].cfg_parallel_enabled is False
+    on = mod.cuda_pipeline_kwargs(**common, cfg_parallel=True)["parallel"]
+    assert on.cfg_parallel_enabled is True and on.tp_degree == 1
+
+
+def test_qwen_is_one_process_and_refuses_cfg_parallel_as_distilled(recorder):
+    assert mod.CudaQwenImageOrchestrator.ACCEPTS_CFG_PARALLEL is False
+    assert mod.CudaQwenImageOrchestrator(_args()).world_size == 1
+    with pytest.raises(SystemExit) as exc:
+        mod.CudaQwenImageOrchestrator(_args(cfg_parallel=True)).compile()
+    assert "--cfg-parallel" in str(exc.value) and "[qwen_image/cuda]" in str(exc.value)
+    assert recorder == []

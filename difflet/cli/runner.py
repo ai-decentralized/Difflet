@@ -5,6 +5,7 @@ import re
 import subprocess
 import sys
 import uuid
+from collections.abc import Mapping
 
 from difflet.common.neuron_cores import (
     resolve_available_neuron_core_ids,
@@ -95,3 +96,25 @@ def run_stage(
             import shutil
 
             shutil.rmtree(scratch, ignore_errors=True)
+
+
+def run_torchrun(world_size: int, argv: list[str], env: Mapping[str, str] | None = None) -> int:
+    """Launch ``world_size`` local ranks of ``python <argv>`` under ``torchrun``; return its code.
+
+    The CUDA backend's multi-process launch: ``torch.distributed.run --standalone``
+    gives every rank the env rendezvous (``WORLD_SIZE``, ``RANK``, ``LOCAL_RANK``,
+    ``MASTER_ADDR/PORT``) that ``CudaBackend.prepare_runtime`` joins. ``argv`` is the module
+    invocation, ``["-m", "difflet.cli.main", command, *args]``: torchrun's own ``-m`` makes
+    each rank run it as ``python -m``. The return code is the caller's to judge.
+    """
+    cmd = [
+        sys.executable,
+        "-m",
+        "torch.distributed.run",
+        "--standalone",
+        "--nproc_per_node",
+        str(world_size),
+        *argv,
+    ]
+    child_env = dict(os.environ) if env is None else dict(env)
+    return subprocess.run(cmd, env=child_env, check=False).returncode

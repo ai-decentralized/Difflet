@@ -11,12 +11,16 @@ wider is refused here, before any weight is loaded.
 ``CudaOneProcessOrchestrator`` is that ``download → compile → generate`` flow for any model
 whose CUDA application exposes ``generate()``; ``CudaQwenImageOrchestrator``,
 ``flux_cuda.FluxCudaOrchestrator`` and ``wan_cuda.WanCudaOrchestrator`` set the
-model-specific parts.
+model-specific parts. When the parallel config needs more than one process (Wan's
+``--cfg-parallel``), ``generate()`` re-execs itself under ``torchrun``
+(``runner.run_torchrun``) and each rank runs ``generate`` in-process; only rank 0 writes.
 """
 
 from __future__ import annotations
 
 import argparse
+import os
+import sys
 import time
 from pathlib import Path
 
@@ -35,6 +39,7 @@ def cuda_pipeline_kwargs(
     revision: str | None,
     force_compile: bool,
     load: bool,
+    cfg_parallel: bool = False,
     torch_compile: bool = False,
 ) -> dict:
     """The ``DiffletPipeline.from_pretrained`` kwargs for Qwen-Image on CUDA.
@@ -46,7 +51,9 @@ def cuda_pipeline_kwargs(
 
     kwargs = dict(
         backend="cuda",
-        parallel=DiffletParallelConfig(tp_degree=tp_degree or 1),
+        parallel=DiffletParallelConfig(
+            tp_degree=tp_degree or 1, cfg_parallel_enabled=bool(cfg_parallel)
+        ),
         dtype="bf16",
         height=height or 1024,
         width=width or 1024,
@@ -71,6 +78,8 @@ class CudaOneProcessOrchestrator(ModelOrchestrator):
     ``application_kwargs`` add the model-specific refusals and application options;
     ``OUTPUT_TYPE`` and ``save_result`` are what ``generate()`` asks for and how it writes it
     (a PIL image by default; a video model returns a tensor and writes an MP4).
+    ``ACCEPTS_CFG_PARALLEL`` lets ``--cfg-parallel`` through (a two-pass CFG model; the
+    distilled ones refuse it): its two branches run on two ranks under ``torchrun``.
     """
 
     HF_MODEL_ID: str
@@ -79,6 +88,7 @@ class CudaOneProcessOrchestrator(ModelOrchestrator):
     ACCEPTS_GUIDANCE_SCALE: bool = False
     DEFAULT_GUIDANCE_SCALE: float | None = None
     OUTPUT_TYPE: str = "pil"
+    ACCEPTS_CFG_PARALLEL: bool = False
     TAG: str
 
     def __init__(self, args: argparse.Namespace) -> None:
@@ -92,6 +102,20 @@ class CudaOneProcessOrchestrator(ModelOrchestrator):
         requested = getattr(self.args, "model_id", None)
         return requested if requested in self.MODEL_IDS else self.HF_MODEL_ID
 
+    @property
+    def world_size(self) -> int:
+        """Processes the parallel config needs: ``cfg × cp × tp`` (dp is the router's)."""
+        args = self.args
+        cfg = 2 if getattr(args, "cfg_parallel", False) else 1
+        return (
+            cfg * (getattr(args, "cp_degree", None) or 1) * (getattr(args, "tp_degree", None) or 1)
+        )
+
+    @property
+    def is_rank_zero(self) -> bool:
+        """True outside ``torchrun`` and on its rank 0: the one process that writes output."""
+        return int(os.environ.get("RANK", "0")) == 0
+
     def _refuse(self, flag: str) -> None:
         raise SystemExit(f"{self.TAG} {flag} is not supported on the CUDA backend yet")
 
@@ -103,9 +127,14 @@ class CudaOneProcessOrchestrator(ModelOrchestrator):
         if getattr(args, "sp_enabled", False):
             self._refuse("--sp (sequence parallel needs tp > 1)")
         if (getattr(args, "cp_degree", None) or 1) > 1:
-            self._refuse("--cp-degree > 1 (context parallel, second card)")
-        if getattr(args, "cfg_parallel", False):
-            self._refuse("--cfg-parallel (second card)")
+            self._refuse("--cp-degree > 1 (context parallel across cards)")
+        if getattr(args, "cfg_parallel", False) and not self.ACCEPTS_CFG_PARALLEL:
+            # main._validate_cfg_parallel rejects it first for the distilled models; this
+            # is the backstop for a direct orchestrator caller.
+            raise SystemExit(
+                f"{self.TAG} --cfg-parallel does not apply: {self.model_id} is a distilled "
+                "model (one guidance pass, no conditional/unconditional pair to split)"
+            )
         self.refuse_model_flags()
 
     def refuse_model_flags(self) -> None:
@@ -124,6 +153,7 @@ class CudaOneProcessOrchestrator(ModelOrchestrator):
             revision=getattr(args, "revision", None),
             force_compile=bool(getattr(args, "force", False)),
             load=load,
+            cfg_parallel=bool(getattr(args, "cfg_parallel", False)),
         )
         application_kwargs = self.application_kwargs()
         if application_kwargs:
@@ -165,8 +195,27 @@ class CudaOneProcessOrchestrator(ModelOrchestrator):
         self._last_pipe = pipe
         print(f"[difflet] CUDA artifact (eager manifest) at {pipe.compiled_path}")
 
-    def generate(self) -> None:
+    def generate(self, argv: list[str] | None = None) -> None:
+        """Generate in-process, or re-exec under ``torchrun`` when ``world_size > 1``.
+
+        Outside ``torchrun`` (``WORLD_SIZE`` unset) a multi-process config launches
+        ``world_size`` ranks of ``difflet generate`` with the user's own arguments after the
+        command word (``argv``, default ``sys.argv``), so a ``run`` becomes ``generate`` in
+        the ranks: download and compile already ran here. A non-zero rank exit exits this
+        process with that code. Inside a rank every rank runs the full generate (SPMD); only
+        rank 0 writes the output.
+        """
         self.refuse_unsupported()
+        if self.world_size > 1 and "WORLD_SIZE" not in os.environ:
+            from difflet.cli import runner
+
+            user_argv = sys.argv if argv is None else argv
+            code = runner.run_torchrun(
+                self.world_size, ["-m", "difflet.cli.main", "generate", *user_argv[2:]]
+            )
+            if code:
+                raise SystemExit(code)
+            return
         from difflet.pipeline.difflet_pipeline import DiffletPipeline
 
         t0 = time.perf_counter()
@@ -175,6 +224,8 @@ class CudaOneProcessOrchestrator(ModelOrchestrator):
         print(f"[difflet] loaded in {time.perf_counter() - t0:.1f} s", flush=True)
         t1 = time.perf_counter()
         result = pipe.app.generate(self.args.prompt, **self.generate_kwargs())
+        if not self.is_rank_zero:
+            return
         out = Path(self.args.output)
         out.parent.mkdir(parents=True, exist_ok=True)
         written = self.save_result(result, out)

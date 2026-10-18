@@ -227,7 +227,6 @@ def test_wan21_is_built_from_its_own_repo(recorder, monkeypatch):
         ({"tp_degree": 2}, "not supported"),
         ({"sp_enabled": True}, "not supported"),
         ({"cp_degree": 2}, "not supported"),
-        ({"cfg_parallel": True}, "not supported"),
         ({"shapes": "480x832x9,480x832x17"}, "not supported"),
         ({"teacache_cadence": 2}, "not supported"),
         ({"teacache_speedup": 1.5}, "not supported"),
@@ -299,6 +298,171 @@ def test_lone_teacache_calibration_is_refused_by_name(recorder):
         mod.WanCudaOrchestrator(_args(teacache_calibration="/x.json")).generate()
     assert "--teacache-calibration" in str(exc.value) and "not supported" in str(exc.value)
     assert recorder == []
+
+
+# ------------------------------------------------- CFG-parallel under torchrun
+
+_USER_ARGV = [
+    "/venv/bin/difflet",
+    "run",
+    "--model-id",
+    WAN22,
+    "--cfg-parallel",
+    "--prompt",
+    "a cat",
+    "--output",
+    "out/wan.mp4",
+]
+
+
+@pytest.fixture
+def launches(monkeypatch):
+    """Record ``run_torchrun`` calls instead of launching; the return code is settable."""
+    calls = []
+    state = {"code": 0}
+
+    def fake(world_size, argv, env=None):
+        calls.append((world_size, argv, env))
+        return state["code"]
+
+    monkeypatch.setattr("difflet.cli.runner.run_torchrun", fake)
+    monkeypatch.delenv("WORLD_SIZE", raising=False)
+    monkeypatch.delenv("RANK", raising=False)
+    return calls, state
+
+
+def test_wan_accepts_cfg_parallel():
+    assert mod.WanCudaOrchestrator.ACCEPTS_CFG_PARALLEL is True
+    assert CudaOneProcessOrchestrator.ACCEPTS_CFG_PARALLEL is False
+
+
+@pytest.mark.parametrize(
+    "over,world_size",
+    [({}, 1), ({"cfg_parallel": True}, 2), ({"cfg_parallel": True, "tp_degree": 1}, 2)],
+)
+def test_world_size_is_cfg_times_cp_times_tp(over, world_size):
+    assert mod.WanCudaOrchestrator(_args(**over)).world_size == world_size
+
+
+def test_world_size_counts_cp_and_tp_degrees():
+    # cp > 1 and tp > 1 are refused today; the product is still the launch size.
+    assert mod.WanCudaOrchestrator(_args(cp_degree=2)).world_size == 2
+    assert mod.WanCudaOrchestrator(_args(tp_degree=2, cfg_parallel=True)).world_size == 4
+
+
+def test_compile_with_cfg_parallel_builds_the_cfg_parallel_config(recorder, launches):
+    mod.WanCudaOrchestrator(_args(cfg_parallel=True)).compile()
+    _, kw = recorder[0]
+    assert kw["parallel"].cfg_parallel_enabled is True and kw["parallel"].tp_degree == 1
+    assert kw["load"] is False
+    assert launches[0] == []  # compile never re-execs
+
+
+def test_cfg_parallel_off_keeps_the_single_branch_config(recorder):
+    mod.WanCudaOrchestrator(_args()).compile()
+    assert recorder[0][1]["parallel"].cfg_parallel_enabled is False
+
+
+def test_generate_with_cfg_parallel_re_execs_under_torchrun(recorder, saved, launches, tmp_path):
+    calls, _ = launches
+    orch = mod.WanCudaOrchestrator(_args(cfg_parallel=True, output=str(tmp_path / "w.mp4")))
+    user = [*_USER_ARGV[:1], "generate", *_USER_ARGV[2:]]
+    orch.generate(argv=user)
+    ((world_size, argv, _env),) = calls
+    assert world_size == 2
+    # The user's own arguments after the command word, verbatim.
+    assert argv == ["-m", "difflet.cli.main", "generate", *_USER_ARGV[2:]]
+    # The parent loads nothing and writes nothing: the ranks do the work.
+    assert recorder == [] and saved == []
+
+
+def test_a_run_becomes_generate_in_the_ranks(recorder, saved, launches):
+    calls, _ = launches
+    mod.WanCudaOrchestrator(_args(cfg_parallel=True)).generate(argv=list(_USER_ARGV))
+    ((_, argv, _),) = calls
+    assert argv[:3] == ["-m", "difflet.cli.main", "generate"] and "run" not in argv
+    assert argv[3:] == _USER_ARGV[2:]
+
+
+def test_generate_reads_sys_argv_by_default(recorder, saved, launches, monkeypatch):
+    calls, _ = launches
+    monkeypatch.setattr(sys, "argv", list(_USER_ARGV))
+    mod.WanCudaOrchestrator(_args(cfg_parallel=True)).generate()
+    assert calls[0][1] == ["-m", "difflet.cli.main", "generate", *_USER_ARGV[2:]]
+
+
+def test_a_failed_launch_exits_with_the_child_return_code(recorder, saved, launches):
+    _, state = launches
+    state["code"] = 7
+    with pytest.raises(SystemExit) as exc:
+        mod.WanCudaOrchestrator(_args(cfg_parallel=True)).generate(argv=list(_USER_ARGV))
+    assert exc.value.code == 7
+
+
+def test_run_downloads_and_compiles_in_the_parent_then_launches_generate(
+    recorder, saved, launches, monkeypatch
+):
+    calls, _ = launches
+    pulled = []
+    monkeypatch.setattr(
+        "difflet.pipeline.path_resolver.resolve_model_path",
+        lambda mid, **kw: pulled.append(mid) or "/snap",
+    )
+    monkeypatch.setattr(sys, "argv", list(_USER_ARGV))
+    mod.WanCudaOrchestrator(_args(cfg_parallel=True)).run()
+    assert pulled == [WAN22]
+    # One parent-side build (compile, load=False), then the launch; no parent-side load.
+    assert [kw["load"] for _, kw in recorder] == [False]
+    assert recorder[0][1]["parallel"].cfg_parallel_enabled is True
+    assert [(ws, argv[2]) for ws, argv, _ in calls] == [(2, "generate")]
+
+
+def test_one_process_generate_never_launches(recorder, saved, launches, tmp_path):
+    calls, _ = launches
+    mod.WanCudaOrchestrator(_args(output=str(tmp_path / "w.mp4"))).generate(argv=list(_USER_ARGV))
+    assert calls == [] and [kw["load"] for _, kw in recorder] == [True] and len(saved) == 1
+
+
+def test_a_refused_flag_is_refused_before_any_launch(recorder, launches):
+    calls, _ = launches
+    with pytest.raises(SystemExit) as exc:
+        mod.WanCudaOrchestrator(_args(cfg_parallel=True, host_vae=True)).generate(argv=[])
+    assert "not supported" in str(exc.value) and calls == [] and recorder == []
+
+
+@pytest.mark.parametrize("rank", ["0", "1"])
+def test_inside_a_rank_generate_runs_in_process(
+    recorder, saved, launches, monkeypatch, tmp_path, capsys, rank
+):
+    calls, _ = launches
+    monkeypatch.setenv("WORLD_SIZE", "2")
+    monkeypatch.setenv("RANK", rank)
+    out = tmp_path / "deep" / "w.mp4"
+    orch = mod.WanCudaOrchestrator(_args(cfg_parallel=True, output=str(out)))
+    orch.generate(argv=list(_USER_ARGV))
+    # SPMD: every rank loads the cfg-parallel pipeline and runs the full generate.
+    assert calls == []
+    ((_, kw),) = recorder
+    assert kw["load"] is True and kw["parallel"].cfg_parallel_enabled is True
+    assert len(orch._last_pipe.app.calls) == 1
+    printed = capsys.readouterr().out
+    if rank == "0":
+        assert [path for _, path in saved] == [str(out)] and out.is_file()
+        assert "[difflet] wrote" in printed
+    else:
+        # Only rank 0 writes: rank 1 touches neither the output nor its directory.
+        assert saved == [] and not out.exists() and not out.parent.exists()
+        assert "wrote" not in printed
+
+
+def test_is_rank_zero_reads_rank(monkeypatch):
+    orch = mod.WanCudaOrchestrator(_args())
+    monkeypatch.delenv("RANK", raising=False)
+    assert orch.is_rank_zero is True
+    monkeypatch.setenv("RANK", "0")
+    assert orch.is_rank_zero is True
+    monkeypatch.setenv("RANK", "1")
+    assert orch.is_rank_zero is False
 
 
 _FORBIDDEN = (
