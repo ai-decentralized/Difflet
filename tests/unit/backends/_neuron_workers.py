@@ -1242,3 +1242,16 @@ def flux_dit_worker(rank: int, world_size: int, model_dir: str) -> dict:
     app.load()
     out = first(app(**tiny_inputs(config)))
     return {"out": out.tolist(), "report": app.load_report}
+
+
+def flux_t5_worker(rank: int, world_size: int, model_dir: str) -> dict:
+    """Flux's T5 encoder application at TP=world_size on CPU (eager), on the tiny checkpoint."""
+    from difflet.backends.neuron.flux.text_encoder import NeuronFluxT5Application
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_flux_toy import T5_SEQ, t5_inputs
+
+    app = NeuronFluxT5Application(model_path=model_dir, text_seq_len=T5_SEQ,
+                                  parallel=DiffletParallelConfig(tp_degree=world_size),
+                                  dtype=torch.float32, exec_mode="eager", device="cpu")
+    app.load()
+    return {"out": app.encode(*t5_inputs()).tolist(), "report": app.load_report}

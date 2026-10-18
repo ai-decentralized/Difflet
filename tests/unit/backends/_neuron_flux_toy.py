@@ -46,3 +46,37 @@ def diffusers_reference(path, config) -> torch.Tensor:
 
 def first(out):
     return out[0] if isinstance(out, (tuple, list)) else out
+
+
+# ---- T5 (v1.1: gated-gelu, as T5-XXL) ----
+TINY_T5 = dict(vocab_size=64, d_model=16, d_kv=4, d_ff=32, num_layers=2, num_heads=4,
+               feed_forward_proj="gated-gelu", relative_attention_num_buckets=8,
+               relative_attention_max_distance=16, dropout_rate=0.0, tie_word_embeddings=False)
+T5_SEQ = 8
+
+
+def write_tiny_t5(root) -> str:
+    from transformers import T5Config, T5EncoderModel
+
+    torch.manual_seed(0)
+    model = T5EncoderModel(T5Config(**TINY_T5)).eval()
+    path = f"{root}/text_encoder_2"
+    model.save_pretrained(path, safe_serialization=True)
+    return path
+
+
+def t5_inputs():
+    """A padded prompt (pad id 0 after five tokens), no mask: as FluxPipeline encodes."""
+    g = torch.Generator().manual_seed(2)
+    ids = torch.randint(1, TINY_T5["vocab_size"], (1, T5_SEQ), generator=g)
+    ids[:, 5:] = 0
+    return (ids,)
+
+
+def t5_reference(path) -> torch.Tensor:
+    from transformers import T5EncoderModel
+
+    model = T5EncoderModel.from_pretrained(path).eval()
+    (ids,) = t5_inputs()
+    with torch.no_grad():
+        return model(input_ids=ids).last_hidden_state
