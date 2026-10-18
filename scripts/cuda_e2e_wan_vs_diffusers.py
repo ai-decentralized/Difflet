@@ -10,7 +10,7 @@ JSON the gate reads (tests/numerical/test_cuda_wan_e2e_vs_diffusers.py):
 
     DIFFLET_BACKEND=cuda python scripts/cuda_e2e_wan_vs_diffusers.py \\
         --model-path /path/to/Wan2.2-T2V-A14B-Diffusers-snapshot [--steps 40] [--num-frames 9] \\
-        [--timestep-dtypes float32,model]
+        [--timestep-dtypes float32,model] [--seeds 0,1,2 --noise-floor]
 
 **Timestep-dtype A/B (F1b task 2).** ``--timestep-dtypes`` lists ``CudaWanApplication``'s
 ``timestep_dtype`` values to run (``float32``: production, UniPC's exact integer timestep;
@@ -20,6 +20,21 @@ load draws the noise, which every later variant and the single diffusers run reu
 holds ``variants.<name>.{metrics, timings, image}`` (one first-frame PNG per variant); the
 top-level ``metrics``, ``timings.difflet`` and ``images.difflet`` are the first variant's, so
 the gate's floors judge it.
+
+**Seeds and the noise floor (F9 task 1).** ``--seeds 0,1,2`` (overrides ``--seed``; ``--seed N``
+alone is ``--seeds N``) keeps one load per side: each Difflet variant is loaded once and
+generates every seed, and diffusers is loaded once. The first variant draws each seed's noise
+(``torch.Generator().manual_seed(seed)``, as before); every later variant and diffusers reuse it.
+``--noise-floor`` adds, per seed, a second diffusers run with both experts' ``forward`` wrapped so
+the ``timestep`` (UniPC's int64 ``t.expand(B)``) is rounded through bf16 — Release 1's cast,
+999 → 1000, 750 → 752 — and every other argument passes untouched; the wrapper is removed before
+the next seed's exact run. Exact vs perturbed is diffusers' distance from itself under that cast:
+a scale for the Difflet-vs-diffusers numbers, recorded, never gated. The JSON adds ``seeds``,
+``per_seed.<seed>.{variants.<name>.{metrics, timings}, noise_floor: {metrics, timings} | null,
+diffusers.timings, images}`` and ``aggregate.{variants.<name>, noise_floor}.{psnr_db, cosine}.
+{min, mean, max}``; ``seed``, ``metrics``, ``variants``, ``timings``, ``images`` and
+``noise_floor`` stay the first seed's (pre-F9 readers and the gate's fallbacks), and the first
+seed's PNGs are also written under the pre-F9 names.
 
 The noise is ``WanOrchestrator.prepare_latents`` on the host from a seeded generator, shape
 ``(1, 16, latent_frames, H/8, W/8)``, fp32. ``WanPipeline.prepare_latents`` returns a given
@@ -34,6 +49,7 @@ Layouts: Difflet's ``output_type="pt"`` is the VAE's ``(B, 3, F, H, W)`` in [-1,
 from __future__ import annotations
 
 import argparse
+import contextlib
 import gc
 import json
 import os
@@ -65,6 +81,27 @@ def parse_timestep_dtypes(text: str) -> list[str]:
     return names
 
 
+def parse_seeds(text: str) -> list[int]:
+    """``"0,1,2"`` → ``[0, 1, 2]``: non-negative integers, no repeats, at least one."""
+    seeds = []
+    for part in text.split(","):
+        part = part.strip()
+        if not part.isdigit():
+            raise argparse.ArgumentTypeError(
+                f"bad seed {part!r} in {text!r}; expected a comma-separated list of "
+                f"non-negative integers"
+            )
+        seeds.append(int(part))
+    if len(set(seeds)) != len(seeds):
+        raise argparse.ArgumentTypeError(f"repeated seed in {text!r}")
+    return seeds
+
+
+def run_seeds(args) -> list[int]:
+    """The seeds to run: ``--seeds`` when given, else ``[--seed]``."""
+    return list(args.seeds) if args.seeds else [args.seed]
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -75,7 +112,21 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--steps", type=int, default=40)
     ap.add_argument("--guidance-scale", type=float, default=4.0)
     ap.add_argument("--guidance-scale-2", type=float, default=3.0)
-    ap.add_argument("--seed", type=int, default=0)
+    ap.add_argument("--seed", type=int, default=0, help="one seed (default 0); see --seeds")
+    ap.add_argument(
+        "--seeds",
+        type=parse_seeds,
+        default=None,
+        help="comma-separated seeds, overriding --seed: one load per side, every seed generated "
+        "on it, per-seed and aggregate metrics in one JSON (e.g. 0,1,2)",
+    )
+    ap.add_argument(
+        "--noise-floor",
+        action="store_true",
+        help="per seed, a second diffusers run with both experts' timestep rounded through bf16 "
+        "(Release 1's cast), compared against the exact run: diffusers' distance from itself, "
+        "recorded next to the Difflet numbers, not gated",
+    )
     ap.add_argument("--height", type=int, default=480)
     ap.add_argument("--width", type=int, default=832)
     ap.add_argument("--num-frames", type=int, default=9)
@@ -93,9 +144,71 @@ def build_parser() -> argparse.ArgumentParser:
     return ap
 
 
-def variant_png(images_dir: Path, name: str) -> Path:
-    """The first-frame PNG of one Difflet variant."""
-    return Path(images_dir) / f"wan_e2e_difflet_{name}_frame0.png"
+def variant_png(images_dir: Path, name: str, seed: int | None = None) -> Path:
+    """The first-frame PNG of one Difflet variant (``seed`` None: the pre-F9 name)."""
+    tag = "" if seed is None else f"_seed{seed}"
+    return Path(images_dir) / f"wan_e2e_difflet_{name}{tag}_frame0.png"
+
+
+def diffusers_png(images_dir: Path, seed: int | None = None, *, bf16ts: bool = False) -> Path:
+    """The first-frame PNG of diffusers' exact run, or (``bf16ts``) its bf16-rounded-timestep
+    run; ``seed`` None: the pre-F9 name of the exact run."""
+    if seed is None:
+        assert not bf16ts, "the bf16-rounded run has per-seed names only"
+        return Path(images_dir) / "wan_e2e_diffusers_frame0.png"
+    tag = "_bf16ts" if bf16ts else ""
+    return Path(images_dir) / f"wan_e2e_diffusers{tag}_seed{seed}_frame0.png"
+
+
+def bf16_rounded_timestep(t: torch.Tensor) -> torch.Tensor:
+    """``t`` rounded through bf16, as a float32 tensor (999 → 1000, 750 → 752): what Release 1's
+    ``model`` cast fed the experts. Through float32 first, so an int64 schedule rounds once;
+    the result stays float, which ``WanTransformer3DModel``'s sinusoidal embedding takes as is
+    (``timesteps[:, None].float()``)."""
+    return t.to(torch.float32).to(torch.bfloat16).to(torch.float32)
+
+
+@contextlib.contextmanager
+def perturb_timestep(pipe):
+    """Within the block, ``pipe.transformer`` and ``pipe.transformer_2`` (when present) see their
+    ``timestep`` rounded through bf16; every other argument reaches ``forward`` untouched. On exit
+    (errors included) each module's instance attributes are as before — an instance-level
+    ``forward`` (a diffusers hook) restored, else removed so the class's runs again."""
+    _missing = object()
+    wrapped = []
+    try:
+        for module in (getattr(pipe, "transformer", None), getattr(pipe, "transformer_2", None)):
+            if module is None or any(module is m for m, _ in wrapped):
+                continue
+            previous = vars(module).get("forward", _missing)
+            original = module.forward
+
+            def forward(*args, __original=original, **kwargs):
+                if "timestep" in kwargs:
+                    kwargs["timestep"] = bf16_rounded_timestep(kwargs["timestep"])
+                elif len(args) >= 2:  # forward(hidden_states, timestep, ...)
+                    args = (args[0], bf16_rounded_timestep(args[1]), *args[2:])
+                return __original(*args, **kwargs)
+
+            module.forward = forward
+            wrapped.append((module, previous))
+        yield
+    finally:
+        for module, previous in reversed(wrapped):
+            if previous is _missing:
+                del module.forward
+            else:
+                module.forward = previous
+
+
+def spread(values: list[float]) -> dict:
+    """``{min, mean, max}`` of a list of numbers."""
+    return {"min": min(values), "mean": sum(values) / len(values), "max": max(values)}
+
+
+def aggregate_metrics(entries: list[dict]) -> dict:
+    """PSNR and cosine ``{min, mean, max}`` over per-seed ``{"metrics": ...}`` entries."""
+    return {key: spread([e["metrics"][key] for e in entries]) for key in ("psnr_db", "cosine")}
 
 
 def difflet_unit_video(frames: torch.Tensor) -> torch.Tensor:
@@ -121,10 +234,16 @@ def _device_name() -> str:
     return torch.cuda.get_device_name(0)
 
 
+def _device() -> torch.device:
+    return torch.device("cuda")
+
+
 def run_difflet(
-    args, *, timestep_dtype: str, noise: torch.Tensor | None = None
-) -> tuple[torch.Tensor, torch.Tensor, dict]:
-    """One Difflet load + generate with ``timestep_dtype``; draws the noise unless given."""
+    args, *, timestep_dtype: str, seeds: list[int], noises: dict[int, torch.Tensor] | None = None
+) -> tuple[dict[int, torch.Tensor], dict[int, torch.Tensor], dict[int, dict]]:
+    """One Difflet load with ``timestep_dtype``, then one generate per seed; draws each seed's
+    noise unless ``noises`` is given. Returns per seed: the unit video, the noise, the timings
+    (``load_s`` is the one shared load's)."""
     from difflet import DiffletParallelConfig, DiffletPipeline
 
     torch.cuda.reset_peak_memory_stats()
@@ -145,53 +264,57 @@ def run_difflet(
         application_kwargs={"timestep_dtype": timestep_dtype},
     )
     app = pipe.app
-    timings = {"load_s": round(time.monotonic() - mark, 1)}
-    print(f"difflet (timestep_dtype={timestep_dtype}) loaded in {timings['load_s']}s", flush=True)
-    if noise is None:
-        # Host fp32 noise from a seeded generator: the orchestrator's own draw, made explicit
-        # so every later variant and the diffusers side start from the same tensor.
-        noise = app.pipeline.prepare_latents(
-            batch_size=1,
-            channels=int(app.config.in_channels),
-            dtype=torch.float32,
-            generator=torch.Generator().manual_seed(args.seed),
+    load_s = round(time.monotonic() - mark, 1)
+    print(f"difflet (timestep_dtype={timestep_dtype}) loaded in {load_s}s", flush=True)
+    videos: dict[int, torch.Tensor] = {}
+    out_noises: dict[int, torch.Tensor] = {}
+    timings: dict[int, dict] = {}
+    for seed in seeds:
+        if noises is None:
+            # Host fp32 noise from a seeded generator: the orchestrator's own draw, made
+            # explicit so every later variant and the diffusers side start from the same tensor.
+            noise = app.pipeline.prepare_latents(
+                batch_size=1,
+                channels=int(app.config.in_channels),
+                dtype=torch.float32,
+                generator=torch.Generator().manual_seed(seed),
+            )
+        else:
+            noise = noises[seed]
+        mark = time.monotonic()
+        frames = app.generate(
+            args.prompt,
+            num_inference_steps=args.steps,
+            guidance_scale=args.guidance_scale,
+            guidance_scale_2=args.guidance_scale_2,
+            latents=noise.clone(),  # the diffusers side gets the untouched original
+            output_type="pt",
         )
-    mark = time.monotonic()
-    frames = app.generate(
-        args.prompt,
-        num_inference_steps=args.steps,
-        guidance_scale=args.guidance_scale,
-        guidance_scale_2=args.guidance_scale_2,
-        latents=noise.clone(),  # the diffusers side gets the untouched original
-        output_type="pt",
-    )
-    torch.cuda.synchronize()
-    timings["generate_s"] = round(time.monotonic() - mark, 1)
-    timings["peak_alloc_gb"] = _gb(torch.cuda.max_memory_allocated())
-    print(
-        f"difflet (timestep_dtype={timestep_dtype}) generated in {timings['generate_s']}s",
-        flush=True,
-    )
-    video = difflet_unit_video(frames)
-    del frames, app, pipe
+        torch.cuda.synchronize()
+        timings[seed] = {
+            "load_s": load_s,
+            "generate_s": round(time.monotonic() - mark, 1),
+            "peak_alloc_gb": _gb(torch.cuda.max_memory_allocated()),
+        }
+        print(
+            f"difflet (timestep_dtype={timestep_dtype}, seed {seed}) generated in "
+            f"{timings[seed]['generate_s']}s",
+            flush=True,
+        )
+        videos[seed] = difflet_unit_video(frames)
+        out_noises[seed] = noise.cpu()
+        del frames
+    del app, pipe
     # Free everything before the next variant or diffusers loads (two experts + UMT5 + VAE,
     # ~70 GB each).
     torch._dynamo.reset()
     gc.collect()
     torch.cuda.empty_cache()
-    return video, noise.cpu(), timings
+    return videos, out_noises, timings
 
 
-def run_diffusers(args, device, noise: torch.Tensor) -> tuple[torch.Tensor, dict]:
-    from diffusers import WanPipeline
-
-    torch.cuda.reset_peak_memory_stats()
-    mark = time.monotonic()
-    pipe = WanPipeline.from_pretrained(
-        args.model_path, torch_dtype=torch.bfloat16, local_files_only=True
-    ).to(device)
-    timings = {"load_s": round(time.monotonic() - mark, 1)}
-    print(f"diffusers loaded in {timings['load_s']}s", flush=True)
+def _diffusers_generate(pipe, args, device, noise: torch.Tensor) -> tuple[torch.Tensor, dict]:
+    """One ``WanPipeline`` call from ``noise``: the unit video and its timings."""
     mark = time.monotonic()
     with torch.no_grad():
         video = pipe(
@@ -209,50 +332,142 @@ def run_diffusers(args, device, noise: torch.Tensor) -> tuple[torch.Tensor, dict
             return_dict=False,
         )[0]
     torch.cuda.synchronize()
-    timings["generate_s"] = round(time.monotonic() - mark, 1)
-    timings["peak_alloc_gb"] = _gb(torch.cuda.max_memory_allocated())
-    print(f"diffusers generated in {timings['generate_s']}s", flush=True)
+    timings = {
+        "generate_s": round(time.monotonic() - mark, 1),
+        "peak_alloc_gb": _gb(torch.cuda.max_memory_allocated()),
+    }
     out = diffusers_unit_video(video)
-    del video, pipe
+    del video
+    return out, timings
+
+
+def run_diffusers(
+    args, device, noises: dict[int, torch.Tensor], *, noise_floor: bool = False
+) -> tuple[dict[int, torch.Tensor], dict[int, dict], dict[int, torch.Tensor], dict[int, dict]]:
+    """One ``WanPipeline`` load; per seed the exact run and, with ``noise_floor``, the run with
+    both experts' timestep rounded through bf16. Returns (exact videos, exact timings, perturbed
+    videos, perturbed timings), per seed; the perturbed dicts are empty without ``noise_floor``."""
+    from diffusers import WanPipeline
+
+    torch.cuda.reset_peak_memory_stats()
+    mark = time.monotonic()
+    pipe = WanPipeline.from_pretrained(
+        args.model_path, torch_dtype=torch.bfloat16, local_files_only=True
+    ).to(device)
+    load_s = round(time.monotonic() - mark, 1)
+    print(f"diffusers loaded in {load_s}s", flush=True)
+    exact, exact_t, perturbed, perturbed_t = {}, {}, {}, {}
+    for seed, noise in noises.items():
+        exact[seed], timings = _diffusers_generate(pipe, args, device, noise)
+        exact_t[seed] = {"load_s": load_s, **timings}
+        print(f"diffusers (seed {seed}) generated in {timings['generate_s']}s", flush=True)
+        if noise_floor:
+            with perturb_timestep(pipe):
+                perturbed[seed], timings = _diffusers_generate(pipe, args, device, noise)
+            perturbed_t[seed] = {"load_s": load_s, **timings}
+            print(
+                f"diffusers (seed {seed}, bf16-rounded timestep) generated in "
+                f"{timings['generate_s']}s",
+                flush=True,
+            )
+    del pipe
     gc.collect()
     torch.cuda.empty_cache()
-    return out, timings
+    return exact, exact_t, perturbed, perturbed_t
 
 
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
     os.environ.setdefault("DIFFLET_BACKEND", "cuda")
-    device = torch.device("cuda")
+    device = _device()
     images = Path(args.images_dir)
-    diffusers_png = images / "wan_e2e_diffusers_frame0.png"
+    seeds = run_seeds(args)
+    first_seed = seeds[0]
 
-    videos: dict[str, torch.Tensor] = {}
-    timings_d: dict[str, dict] = {}
-    noise = None
+    # videos[name][seed], timings_d[name][seed]
+    videos: dict[str, dict[int, torch.Tensor]] = {}
+    timings_d: dict[str, dict[int, dict]] = {}
+    noises = None
     for name in args.timestep_dtypes:
-        videos[name], noise, timings_d[name] = run_difflet(args, timestep_dtype=name, noise=noise)
-        _save(first_frame(videos[name]), variant_png(images, name))
-    video_r, timings_r = run_diffusers(args, device, noise)
-    _save(first_frame(video_r), diffusers_png)
-    for name, video_d in videos.items():
-        if video_d.shape != video_r.shape:
-            raise SystemExit(
-                f"video shapes differ: difflet ({name}) {tuple(video_d.shape)} vs diffusers "
-                f"{tuple(video_r.shape)}"
-            )
-
-    variants = {}
-    for name, video_d in videos.items():
-        variants[name] = {
-            "metrics": image_metrics(video_d, video_r),
-            "timings": timings_d[name],
-            "image": str(variant_png(images, name)),
-        }
-        print(
-            f"difflet (timestep_dtype={name}) vs diffusers (whole video, pixels in [0,1]): "
-            f"{variants[name]['metrics']}",
-            flush=True,
+        videos[name], noises, timings_d[name] = run_difflet(
+            args, timestep_dtype=name, seeds=seeds, noises=noises
         )
+        for seed, video in videos[name].items():
+            _save(first_frame(video), variant_png(images, name, seed=seed))
+        _save(first_frame(videos[name][first_seed]), variant_png(images, name))
+    exact, exact_t, perturbed, perturbed_t = run_diffusers(
+        args, device, noises, noise_floor=args.noise_floor
+    )
+    for seed in seeds:
+        _save(first_frame(exact[seed]), diffusers_png(images, seed=seed))
+        if seed in perturbed:
+            _save(first_frame(perturbed[seed]), diffusers_png(images, seed=seed, bf16ts=True))
+    _save(first_frame(exact[first_seed]), diffusers_png(images))
+    for seed in seeds:
+        others = [(f"difflet ({name})", videos[name][seed]) for name in videos]
+        if seed in perturbed:
+            others.append(("diffusers (bf16-rounded timestep)", perturbed[seed]))
+        for label, video in others:
+            if video.shape != exact[seed].shape:
+                raise SystemExit(
+                    f"video shapes differ (seed {seed}): {label} {tuple(video.shape)} vs "
+                    f"diffusers {tuple(exact[seed].shape)}"
+                )
+
+    per_seed = {}
+    for seed in seeds:
+        entry_variants = {}
+        for name in args.timestep_dtypes:
+            entry_variants[name] = {
+                "metrics": image_metrics(videos[name][seed], exact[seed]),
+                "timings": timings_d[name][seed],
+            }
+            print(
+                f"seed {seed}: difflet (timestep_dtype={name}) vs diffusers (whole video, "
+                f"pixels in [0,1]): {entry_variants[name]['metrics']}",
+                flush=True,
+            )
+        floor = None
+        if seed in perturbed:
+            floor = {
+                "metrics": image_metrics(perturbed[seed], exact[seed]),
+                "timings": perturbed_t[seed],
+            }
+            print(
+                f"seed {seed}: noise floor, diffusers (bf16-rounded timestep) vs diffusers: "
+                f"{floor['metrics']}",
+                flush=True,
+            )
+        per_seed[str(seed)] = {
+            "variants": entry_variants,
+            "noise_floor": floor,
+            "diffusers": {"timings": exact_t[seed]},
+            "images": {
+                "difflet": {
+                    name: str(variant_png(images, name, seed=seed)) for name in args.timestep_dtypes
+                },
+                "diffusers": str(diffusers_png(images, seed=seed)),
+                "diffusers_bf16ts": (
+                    str(diffusers_png(images, seed=seed, bf16ts=True)) if floor else None
+                ),
+            },
+        }
+    entries = [per_seed[str(seed)] for seed in seeds]
+    aggregate = {
+        "variants": {
+            name: aggregate_metrics([e["variants"][name] for e in entries])
+            for name in args.timestep_dtypes
+        },
+        "noise_floor": (
+            aggregate_metrics([e["noise_floor"] for e in entries]) if args.noise_floor else None
+        ),
+    }
+
+    first_entry = per_seed[str(first_seed)]
+    variants = {
+        name: {**first_entry["variants"][name], "image": str(variant_png(images, name))}
+        for name in args.timestep_dtypes
+    }
     first = variants[args.timestep_dtypes[0]]
     payload = {
         "model": "wan",
@@ -262,19 +477,30 @@ def main(argv: list[str] | None = None) -> None:
         "steps": args.steps,
         "guidance_scale": args.guidance_scale,
         "guidance_scale_2": args.guidance_scale_2,
-        "seed": args.seed,
+        "seed": first_seed,
+        "seeds": seeds,
         "shape": [args.height, args.width, args.num_frames],
-        "latent_shape": list(noise.shape),
-        "video_shape": list(video_r.shape),
+        "latent_shape": list(noises[first_seed].shape),
+        "video_shape": list(exact[first_seed].shape),
         "device": _device_name(),
         "torch": torch.__version__,
         "timestep_dtypes": list(args.timestep_dtypes),
-        # The gate's keys: the first variant's.
+        # The pre-F9 keys: the first seed's, the first variant's on top.
         "metrics": first["metrics"],
-        "timings": {"difflet": first["timings"], "diffusers": timings_r},
-        "images": {"difflet": first["image"], "diffusers": str(diffusers_png)},
+        "timings": {"difflet": first["timings"], "diffusers": exact_t[first_seed]},
+        "images": {"difflet": first["image"], "diffusers": str(diffusers_png(images))},
         "variants": variants,
+        "noise_floor": first_entry["noise_floor"],
+        "per_seed": per_seed,
+        "aggregate": aggregate,
     }
+    for name, agg in aggregate["variants"].items():
+        print(f"aggregate over {len(seeds)} seed(s), timestep_dtype={name}: {agg}", flush=True)
+    if aggregate["noise_floor"] is not None:
+        print(
+            f"aggregate over {len(seeds)} seed(s), noise floor: {aggregate['noise_floor']}",
+            flush=True,
+        )
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text(json.dumps(payload, indent=2))
     print(f"wrote {args.out}", flush=True)

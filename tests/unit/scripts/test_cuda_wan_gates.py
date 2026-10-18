@@ -365,3 +365,168 @@ def test_e2e_gate_needs_the_variants(tmp_path):
     payload["metrics"] = _e2e_metrics(31.0, 0.999)
     out, _ = _e2e(payload, tmp_path)
     assert out["test_every_timestep_dtype_variant_is_recorded"] == "FAILED"
+
+
+# --- seeds and the noise floor (F9 task 1) ---------------------------------------------------
+#
+# A multi-seed result carries ``per_seed`` ({"<seed>": {variants, noise_floor}}) and
+# ``aggregate``; the gate holds EVERY seed's float32 variant to the floors and prints the noise
+# floor (diffusers vs its own bf16-rounded timestep) and the aggregate — recorded, not gated.
+
+REPO = pathlib.Path(__file__).resolve().parents[3]
+
+
+def _spread(values: list[float]) -> dict:
+    return {"min": min(values), "mean": sum(values) / len(values), "max": max(values)}
+
+
+def _seeded_payload(
+    float32: dict[int, tuple[float, float]],
+    *,
+    floor: dict[int, tuple[float, float]] | None = None,
+    model_variant=(27.5, 0.997),
+) -> dict:
+    """A multi-seed e2e JSON: ``float32[seed]`` is that seed's (PSNR, cosine), ``floor[seed]``
+    its noise floor (None: run without ``--noise-floor``). Legacy keys are the first seed's."""
+    seeds = list(float32)
+    payload = _e2e_payload(*float32[seeds[0]], model_variant=model_variant)
+    per_seed = {}
+    for seed in seeds:
+        nf = None
+        if floor is not None:
+            nf = {"metrics": _e2e_metrics(*floor[seed]), "timings": _e2e_timings()}
+        per_seed[str(seed)] = {
+            "variants": {
+                "float32": {"metrics": _e2e_metrics(*float32[seed]), "timings": _e2e_timings()},
+                "model": {"metrics": _e2e_metrics(*model_variant), "timings": _e2e_timings()},
+            },
+            "noise_floor": nf,
+        }
+
+    def agg(pick):
+        return {
+            key: _spread([pick(per_seed[str(s)])["metrics"][key] for s in seeds])
+            for key in ("psnr_db", "cosine")
+        }
+
+    payload.update(
+        seeds=seeds,
+        seed=seeds[0],
+        per_seed=per_seed,
+        noise_floor=per_seed[str(seeds[0])]["noise_floor"],
+        aggregate={
+            "variants": {
+                name: agg(lambda e, name=name: e["variants"][name]) for name in ("float32", "model")
+            },
+            "noise_floor": None if floor is None else agg(lambda e: e["noise_floor"]),
+        },
+    )
+    return payload
+
+
+SEEDS_OK = {0: (26.3, 0.995), 1: (27.0, 0.996), 2: (25.5, 0.993)}
+FLOOR = {0: (31.0, 0.999), 1: (30.0, 0.998), 2: (29.0, 0.997)}
+
+
+def test_e2e_gate_passes_when_every_seed_clears_the_floors_and_prints_the_noise_floor(tmp_path):
+    out, stdout = _e2e(_seeded_payload(SEEDS_OK, floor=FLOOR), tmp_path)
+    assert set(out.values()) == {"PASSED"}, out
+    assert "test_noise_floor_and_aggregate_are_recorded" in out
+    for seed, (psnr, cos) in SEEDS_OK.items():
+        assert f"seed {seed} timestep_dtype=float32: PSNR {psnr:.2f} dB, cosine {cos:.5f}" in (
+            stdout
+        ), stdout
+    assert (
+        "seed 1 noise floor (diffusers vs its bf16-rounded timestep): PSNR 30.00 dB, "
+        "cosine 0.99800" in stdout
+    ), stdout
+    assert (
+        "aggregate over 3 seeds, timestep_dtype=float32: PSNR min 25.50 / mean 26.27 / "
+        "max 27.00 dB, cosine min 0.99300 / mean 0.99467 / max 0.99600" in stdout
+    ), stdout
+    assert (
+        "aggregate over 3 seeds, noise floor: PSNR min 29.00 / mean 30.00 / max 31.00 dB, "
+        "cosine min 0.99700 / mean 0.99800 / max 0.99900" in stdout
+    ), stdout
+
+
+def test_e2e_gate_fails_when_one_seed_is_under_the_floors_and_names_it(tmp_path):
+    # Seed 0 (the legacy top-level metrics) is fine; seed 2 is not.
+    seeds = {**SEEDS_OK, 2: (24.0, 0.995)}
+    out, stdout = _e2e(_seeded_payload(seeds, floor=FLOOR), tmp_path)
+    assert out["test_video_is_the_same_clip_as_diffusers"] == "FAILED"
+    assert "seed 2: PSNR 24.00 dB below 25.0" in stdout, stdout
+    assert "seed 0: PSNR" not in stdout and "seed 1: PSNR" not in stdout
+    assert out["test_every_timestep_dtype_variant_is_recorded"] == "PASSED"
+    assert out["test_noise_floor_and_aggregate_are_recorded"] == "PASSED"
+    # A cosine miss on one seed fails too.
+    seeds = {**SEEDS_OK, 1: (30.0, 0.98)}
+    out, stdout = _e2e(_seeded_payload(seeds, floor=FLOOR), tmp_path)
+    assert out["test_video_is_the_same_clip_as_diffusers"] == "FAILED"
+    assert "seed 1: pixel cosine 0.98000 below 0.99" in stdout, stdout
+
+
+def test_e2e_noise_floor_is_recorded_not_gated(tmp_path):
+    # Diffusers far from itself under the rounding: printed, never a failure (R1).
+    floor = {0: (18.0, 0.95), 1: (19.0, 0.96), 2: (20.0, 0.97)}
+    out, stdout = _e2e(_seeded_payload(SEEDS_OK, floor=floor), tmp_path)
+    assert set(out.values()) == {"PASSED"}, out
+    assert "seed 0 noise floor (diffusers vs its bf16-rounded timestep): PSNR 18.00 dB" in stdout
+
+
+def test_e2e_seeds_without_the_noise_floor_pass_and_say_so(tmp_path):
+    out, stdout = _e2e(_seeded_payload(SEEDS_OK), tmp_path)
+    assert set(out.values()) == {"PASSED"}, out
+    assert "seed 0 noise floor: not run (--noise-floor not given)" in stdout, stdout
+    assert "aggregate over 3 seeds, noise floor: not run" in stdout, stdout
+
+
+def test_e2e_gate_needs_every_seed_s_variants_and_the_first_seed_on_top(tmp_path):
+    payload = _seeded_payload(SEEDS_OK, floor=FLOOR)
+    del payload["per_seed"]["1"]["variants"]["model"]
+    out, _ = _e2e(payload, tmp_path)
+    assert out["test_every_timestep_dtype_variant_is_recorded"] == "FAILED"
+
+    payload = _seeded_payload(SEEDS_OK, floor=FLOOR)
+    payload["seeds"] = [0, 1]
+    out, _ = _e2e(payload, tmp_path)
+    assert out["test_every_timestep_dtype_variant_is_recorded"] == "FAILED"
+
+    # The legacy top-level metrics must be the first seed's.
+    payload = _seeded_payload(SEEDS_OK, floor=FLOOR)
+    payload["metrics"] = payload["variants"]["float32"]["metrics"] = _e2e_metrics(30.0, 0.999)
+    out, _ = _e2e(payload, tmp_path)
+    assert out["test_every_timestep_dtype_variant_is_recorded"] == "FAILED"
+
+
+def test_e2e_aggregate_must_match_the_per_seed_numbers(tmp_path):
+    payload = _seeded_payload(SEEDS_OK, floor=FLOOR)
+    payload["aggregate"]["variants"]["float32"]["psnr_db"]["min"] = 26.0
+    out, _ = _e2e(payload, tmp_path)
+    assert out["test_noise_floor_and_aggregate_are_recorded"] == "FAILED"
+    assert out["test_video_is_the_same_clip_as_diffusers"] == "PASSED"
+
+    payload = _seeded_payload(SEEDS_OK, floor=FLOOR)
+    del payload["aggregate"]
+    out, _ = _e2e(payload, tmp_path)
+    assert out["test_noise_floor_and_aggregate_are_recorded"] == "FAILED"
+
+
+def test_e2e_legacy_single_seed_json_is_gated_as_before(tmp_path):
+    out, stdout = _e2e(_e2e_payload(25.0, 0.99), tmp_path)
+    assert set(out.values()) == {"PASSED"}, out
+    assert "single-seed result (no per_seed): no noise floor recorded" in stdout, stdout
+    out, _ = _e2e(_e2e_payload(24.9, 0.995), tmp_path)
+    assert out["test_video_is_the_same_clip_as_diffusers"] == "FAILED"
+
+
+def test_committed_e2e_artifacts_keep_their_verdicts(tmp_path):
+    # F1b (variants, one seed) passes every test; F1 (no variants) fails only the variants
+    # test, by design (it predates F1b task 2).
+    f1b = json.loads((REPO / "artifacts/cuda-release1/wan/f1b/cuda_e2e_wan.json").read_text())
+    out, _ = _e2e(f1b, tmp_path)
+    assert set(out.values()) == {"PASSED"}, out
+    f1 = json.loads((REPO / "artifacts/cuda-release1/wan/cuda_e2e_wan.json").read_text())
+    out, _ = _e2e(f1, tmp_path)
+    failed = {name for name, status in out.items() if status != "PASSED"}
+    assert failed == {"test_every_timestep_dtype_variant_is_recorded"}, out

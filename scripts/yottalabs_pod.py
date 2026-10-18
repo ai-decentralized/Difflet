@@ -7,7 +7,7 @@ never printed, logged, put in an exception or shown by --dry-run.
 
   scripts/yottalabs_pod.py gpus [--type NVIDIA_RTX_PRO_6000_96G]
   scripts/yottalabs_pod.py create --name difflet-f9 --gpus 1 [--regions us-east-3,eu-3,eu-2]
-        [--disk-gb 150] [--volume-id 469225541779435520 --mount /data]
+        [--disk-gb 170] [--volume-id 469225541779435520 --mount /data]
         [--wait-for-capacity --interval 300 --max-wait 21600] [--dry-run]     -> prints the pod id
   scripts/yottalabs_pod.py wait-running ID [--timeout 900]                     -> prints "host port"
   scripts/yottalabs_pod.py ssh-config ID --alias difflet-gpu   >> ~/.ssh/config
@@ -38,6 +38,7 @@ DEFAULT_KEY_FILE = "~/.config/yottalabs/api_key"
 DEFAULT_IMAGE = "yottalabsai/pytorch:2.9.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04"
 DEFAULT_GPU_TYPE = "NVIDIA_RTX_PRO_6000_96G"
 DEFAULT_REGIONS = "us-east-3,eu-3,eu-2"
+DEFAULT_DISK_GB = 150  # the container disk when --disk-gb is not given and there is no volume
 # The difflet-cache network volume lives in us-east-3; no other region can mount it.
 VOLUME_REGION = "us-east-3"
 DIFFLET_CACHE_VOLUME_ID = 469225541779435520
@@ -172,14 +173,16 @@ def build_create_body(
     name: str,
     gpus: int,
     region: str,
-    disk_gb: int,
+    disk_gb: int | None,
     volume_id: int | None,
     mount: str,
     image: str,
     gpu_type: str = DEFAULT_GPU_TYPE,
 ) -> dict:
     """The ``POST /v2/pods`` body for one region: the network volume only in the region it
-    lives in (and then no container disk size); everywhere else a container disk."""
+    lives in; a container disk size wherever there is no volume (``disk_gb``, or
+    ``DEFAULT_DISK_GB`` when it is None) and, beside the volume, only when ``disk_gb`` was given
+    explicitly (the API takes both: ``difflet-cuda-f5b`` ran a 100 GB disk with the volume)."""
     body: dict[str, Any] = {
         "name": name,
         "regions": [region],
@@ -192,8 +195,10 @@ def build_create_body(
         body["persistentVolumes"] = [
             {"volumeId": volume_id, "mountPath": mount, "needBackup": False}
         ]
+        if disk_gb is not None:
+            body["containerVolumeInGb"] = disk_gb
     else:
-        body["containerVolumeInGb"] = disk_gb
+        body["containerVolumeInGb"] = DEFAULT_DISK_GB if disk_gb is None else disk_gb
     return body
 
 
@@ -373,7 +378,8 @@ def cmd_create(args, ctx: Ctx) -> int:
         ctx.out(
             f"# dry run: nothing sent. The first preferred region whose {args.gpu_type} pool is "
             f"AVAILABLE (GET {API_BASE}/v2/gpus) gets its request; X-Api-Key is read from "
-            f"{ctx.key_file} at send time and not shown."
+            f"{ctx.key_file} at send time and not shown. containerVolumeInGb: --disk-gb when "
+            f"given (with the volume too), else {DEFAULT_DISK_GB} where there is no volume."
         )
         for region in preferred:
             ctx.out(f"POST {API_BASE}/v2/pods  # region {region}")
@@ -404,15 +410,16 @@ def cmd_create(args, ctx: Ctx) -> int:
             if args.volume_id is not None and region != VOLUME_REGION:
                 ctx.log(
                     f"the volume lives in {VOLUME_REGION}; {region} gets a "
-                    f"{args.disk_gb} GB container disk instead"
+                    f"{body_for(region)['containerVolumeInGb']} GB container disk instead"
                 )
             limit = next(
                 (p.get("containerDiskLimitInGb") for p in pools if p.get("region") == region),
                 None,
             )
             body = body_for(region)
-            if "containerVolumeInGb" in body and isinstance(limit, int) and args.disk_gb > limit:
-                ctx.log(f"warning: --disk-gb {args.disk_gb} exceeds {region}'s limit {limit} GB")
+            disk = body.get("containerVolumeInGb")
+            if disk is not None and isinstance(limit, int) and disk > limit:
+                ctx.log(f"warning: a {disk} GB container disk exceeds {region}'s limit {limit} GB")
             try:
                 record = api(ctx.transport, "POST", "/v2/pods", body)
             except NoCapacity as exc:
@@ -570,7 +577,14 @@ def build_parser() -> argparse.ArgumentParser:
         default=DEFAULT_REGIONS,
         help="preference order (default %(default)s); the eu PRO 6000 pools sell 2-GPU nodes only",
     )
-    p.add_argument("--disk-gb", type=int, default=150, help="container disk when no volume")
+    p.add_argument(
+        "--disk-gb",
+        type=int,
+        default=None,
+        help=f"container disk in GB; when given it is sent even with a volume (e.g. room for a "
+        f"download beside the cache volume); not given: {DEFAULT_DISK_GB} without a volume, "
+        f"none with one",
+    )
     p.add_argument(
         "--volume-id",
         type=int,
