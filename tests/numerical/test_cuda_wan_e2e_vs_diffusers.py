@@ -17,8 +17,28 @@ dtype's, which need not be ``float32``. Every variant's PSNR and cosine are prin
 **Seeds and the noise floor (F9 task 1).** A result run with ``--seeds`` carries ``per_seed``:
 the floors judge EVERY seed's gated variant (a failure names the seed), the top-level keys must
 be the first seed's, and the noise floor (diffusers vs its own bf16-rounded timestep,
-``--noise-floor``) and the min/mean/max ``aggregate`` are printed under ``-rA`` — recorded, never
-gated (plan F9 R1). A pre-F9 result (no ``per_seed``) is gated exactly as before.
+``--noise-floor``) and the min/mean/max ``aggregate`` are printed under ``-rA``. A pre-F9 result
+(no ``per_seed``) is gated exactly as before.
+
+**The gate relative to the noise floor (F9b).** F9 measured the floor at 28.62 / 26.74 / 23.79 dB
+over seeds 0-2 — its own worst seed is under the 25 dB floor, so seed luck could fail a correct
+build. When the result carries the floor on every seed, the gate is stated the way D14 states
+the parity gates, relative to what the reference costs itself, in three parts:
+
+- gate A, the mean over seeds: Difflet's mean PSNR is at least the floor's mean minus
+  ``20·log10(1.15)`` = 1.21 dB (D14's 1.15x deviation ratio in dB; a mean of dB values is the
+  geometric mean of RMSE ratios), and the mean cosine deviation ``1 - cosine`` is at most 1.15x
+  the floor's mean deviation;
+- gate B, every seed: at least the floor's WORST seed minus 1.21 dB, and a cosine deviation of
+  at most 1.15x the floor's worst — against the floor's spread, not matched by seed, because a
+  half-ulp perturbation moves diffusers by 5 dB between seeds;
+- gate C, a loose absolute floor on every seed, ``LOOSE_PSNR_DB`` / ``LOOSE_COSINE``
+  (20 dB / 0.98), so a collapsed floor cannot pass a bad build.
+
+The 25 dB / 0.99 floors then step aside (``test_video_is_the_same_clip_as_diffusers`` applies
+gate C and says so). Without a floor — a legacy JSON, or ``--seeds`` without ``--noise-floor``,
+as ``run_gates.sh wan``'s e2e — the 25 dB / 0.99 floors judge every seed as before and the
+relative test is skipped with that reason. A floor on some seeds only is a malformed result.
 """
 
 from __future__ import annotations
@@ -34,6 +54,12 @@ pytestmark = [pytest.mark.numerical, pytest.mark.slow]
 
 MIN_PSNR_DB = 25.0
 MIN_COSINE = 0.99
+# The relative gate (F9b): D14's deviation ratio, in dB for PSNR and as a factor on 1 - cosine;
+# the loose absolute floor that holds whatever the noise floor says.
+MAX_DEVIATION_RATIO = 1.15
+MARGIN_DB = 20 * math.log10(MAX_DEVIATION_RATIO)  # 1.21 dB
+LOOSE_PSNR_DB = 20.0
+LOOSE_COSINE = 0.98
 DEFAULT_RESULT = "/tmp/logs/cuda_e2e_wan.json"
 
 
@@ -67,28 +93,124 @@ def _gated_metrics(payload: dict, variants: dict | None = None) -> dict:
     return payload["metrics"]
 
 
-def _floor_misses(m: dict) -> list[str]:
+def _floor_misses(m: dict, min_psnr_db: float, min_cosine: float) -> list[str]:
     misses = []
-    if not m["psnr_db"] >= MIN_PSNR_DB:
-        misses.append(f"PSNR {m['psnr_db']:.2f} dB below {MIN_PSNR_DB}")
-    if not m["cosine"] >= MIN_COSINE:
-        misses.append(f"pixel cosine {m['cosine']:.5f} below {MIN_COSINE}")
+    if not m["psnr_db"] >= min_psnr_db:
+        misses.append(f"PSNR {m['psnr_db']:.2f} dB below {min_psnr_db}")
+    if not m["cosine"] >= min_cosine:
+        misses.append(f"pixel cosine {m['cosine']:.5f} below {min_cosine}")
     return misses
+
+
+def _noise_floors(payload: dict) -> dict[str, dict] | None:
+    """Per seed, the noise floor's metrics (diffusers vs its bf16-rounded timestep), or None
+    when the result carries none (a legacy JSON, or ``--seeds`` without ``--noise-floor``). A
+    floor on some seeds only is a malformed result."""
+    per_seed = payload.get("per_seed")
+    if not per_seed:
+        return None
+    floors = {seed: entry.get("noise_floor") for seed, entry in per_seed.items()}
+    if all(floor is None for floor in floors.values()):
+        return None
+    missing = sorted(seed for seed, floor in floors.items() if floor is None)
+    assert not missing, f"noise floor recorded on some seeds but not on {missing}"
+    return {seed: floor["metrics"] for seed, floor in floors.items()}
+
+
+def _absolute_floors(payload: dict) -> tuple[float, float]:
+    """(PSNR, cosine) floors every seed must clear: the loose ones when the noise floor is
+    recorded (the relative gate judges), the 25 dB / 0.99 ones otherwise. Says which."""
+    if _noise_floors(payload) is None:
+        print(f"no noise floor recorded: the {MIN_PSNR_DB} dB / {MIN_COSINE} floors judged")
+        return MIN_PSNR_DB, MIN_COSINE
+    print(
+        f"noise floor recorded: the {MIN_PSNR_DB} dB / {MIN_COSINE} floors are superseded by the "
+        f"relative gate; the loose floors {LOOSE_PSNR_DB} dB / {LOOSE_COSINE} judged every seed"
+    )
+    return LOOSE_PSNR_DB, LOOSE_COSINE
 
 
 def test_video_is_the_same_clip_as_diffusers():
     payload = _result()
     assert payload["model"] == "wan", payload["model"]
+    min_psnr_db, min_cosine = _absolute_floors(payload)
     per_seed = payload.get("per_seed")
     if not per_seed:
-        m = _gated_metrics(payload)
-        assert m["psnr_db"] >= MIN_PSNR_DB, f"PSNR {m['psnr_db']:.2f} dB below {MIN_PSNR_DB}"
-        assert m["cosine"] >= MIN_COSINE, f"pixel cosine {m['cosine']:.5f} below {MIN_COSINE}"
+        misses = _floor_misses(_gated_metrics(payload), min_psnr_db, min_cosine)
+        assert not misses, "; ".join(misses)
         return
     failures = []
     for seed, entry in per_seed.items():
         m = _gated_metrics(payload, entry["variants"])
-        failures += [f"seed {seed}: {miss}" for miss in _floor_misses(m)]
+        failures += [f"seed {seed}: {miss}" for miss in _floor_misses(m, min_psnr_db, min_cosine)]
+    assert not failures, "; ".join(failures)
+
+
+def _mean(values: list[float]) -> float:
+    return sum(values) / len(values)
+
+
+def test_video_is_as_close_to_diffusers_as_diffusers_is_to_itself():
+    """The relative gate (F9b): gate A on the mean over seeds, gate B on every seed against the
+    floor's worst seed; see the module docstring. Skipped when no noise floor is recorded."""
+    payload = _result()
+    floors = _noise_floors(payload)
+    if floors is None:
+        pytest.skip(
+            "no noise floor recorded (run with --seeds ... --noise-floor): "
+            f"the {MIN_PSNR_DB} dB / {MIN_COSINE} floors judged"
+        )
+    ratio = f"{MAX_DEVIATION_RATIO:g}x"
+    difflet = {
+        seed: _gated_metrics(payload, entry["variants"])
+        for seed, entry in payload["per_seed"].items()
+    }
+    n = len(floors)
+    floor_psnr = [m["psnr_db"] for m in floors.values()]
+    floor_dev = [1 - m["cosine"] for m in floors.values()]
+    psnr = [m["psnr_db"] for m in difflet.values()]
+    dev = [1 - m["cosine"] for m in difflet.values()]
+
+    # Gate A: the mean over seeds.
+    required_a = _mean(floor_psnr) - MARGIN_DB
+    allowed_a = MAX_DEVIATION_RATIO * _mean(floor_dev)
+    print(
+        f"relative gate A (mean over {n} seeds): PSNR {_mean(psnr):.2f} dB, required >= "
+        f"{required_a:.2f} dB (noise floor mean {_mean(floor_psnr):.2f} dB - {MARGIN_DB:.2f} dB); "
+        f"cosine deviation {_mean(dev):.5f}, allowed <= {allowed_a:.5f} "
+        f"({ratio} the floor's {_mean(floor_dev):.5f})"
+    )
+    failures = []
+    if not _mean(psnr) >= required_a:
+        failures.append(
+            f"mean PSNR {_mean(psnr):.2f} dB below {required_a:.2f} "
+            f"(noise floor mean {_mean(floor_psnr):.2f} dB - {MARGIN_DB:.2f} dB)"
+        )
+    if not _mean(dev) <= allowed_a:
+        failures.append(
+            f"mean cosine deviation {_mean(dev):.5f} above {allowed_a:.5f} "
+            f"({ratio} the noise floor's {_mean(floor_dev):.5f})"
+        )
+
+    # Gate B: every seed against the floor's worst seed.
+    required_b = min(floor_psnr) - MARGIN_DB
+    allowed_b = MAX_DEVIATION_RATIO * max(floor_dev)
+    print(
+        f"relative gate B (every seed): PSNR >= {required_b:.2f} dB (noise floor min "
+        f"{min(floor_psnr):.2f} dB - {MARGIN_DB:.2f} dB); cosine deviation <= {allowed_b:.5f} "
+        f"({ratio} the floor's worst {max(floor_dev):.5f})"
+    )
+    for seed, m in difflet.items():
+        if not m["psnr_db"] >= required_b:
+            failures.append(
+                f"seed {seed}: PSNR {m['psnr_db']:.2f} dB below {required_b:.2f} "
+                f"(noise floor min {min(floor_psnr):.2f} dB - {MARGIN_DB:.2f} dB)"
+            )
+        if not 1 - m["cosine"] <= allowed_b:
+            failures.append(
+                f"seed {seed}: cosine deviation {1 - m['cosine']:.5f} above {allowed_b:.5f} "
+                f"({ratio} the noise floor's worst {max(floor_dev):.5f})"
+            )
     assert not failures, "; ".join(failures)
 
 
