@@ -1,4 +1,4 @@
-"""main() picks the CUDA orchestrator by backend name and refuses DP/batch on CUDA (F2)."""
+"""main() picks the CUDA orchestrator by backend name and routes DP/batch on CUDA (F2)."""
 
 from __future__ import annotations
 
@@ -58,15 +58,44 @@ def test_other_models_on_cuda_point_at_the_trainium_path(monkeypatch):
     assert "F1" not in message and "Wan" not in message
 
 
-def test_requests_and_dp_are_refused_on_cuda(monkeypatch, tmp_path, capsys):
+def test_requests_and_dp_dispatch_to_the_router_on_cuda(monkeypatch, tmp_path):
+    # F2 task 4: the Release 1 refusal is gone; batch and dp>1 go through the dp router
+    # (download + compile once in the parent, then one single-GPU worker per replica).
+    import torch
+
     monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
     cli = _cli()
-    monkeypatch.setattr(cli, "_get_orchestrator", lambda args: pytest.fail("must not reach"))
+    parent = []
+
+    class _Orch:
+        def download(self):
+            parent.append("download")
+
+        def compile(self):
+            parent.append("compile")
+
+        def generate(self):
+            pytest.fail("the parent never generates in batch/dp mode")
+
+    monkeypatch.setattr(cli, "_get_orchestrator", lambda args: _Orch())
+    routed = []
+
+    def fake_router(args, requests, *, replica_cores, worker_argv_prefix=None):
+        routed.append((args.dp, replica_cores, [(r.prompt, r.output) for r in requests]))
+        return 0
+
+    monkeypatch.setattr("difflet.cli.dp.router.run_router", fake_router)
     req = tmp_path / "r.jsonl"
-    req.write_text('{"prompt": "a", "output": "a.png"}\n')
+    req.write_text('{"prompt": "a", "output": "a.png"}\n{"prompt": "b", "output": "b.png"}\n')
     with pytest.raises(SystemExit) as exc:
         cli.main(["run", "--model-id", "Qwen/Qwen-Image", "--requests", str(req)])
-    assert exc.value.code == 1 and "F2" in capsys.readouterr().err
+    assert exc.value.code == 0
+    assert parent == ["download", "compile"]
+    assert routed == [(None, 1, [("a", "a.png"), ("b", "b.png")])]
+    parent.clear()
+    routed.clear()
     with pytest.raises(SystemExit) as exc:
         cli.main(
             [
@@ -81,7 +110,25 @@ def test_requests_and_dp_are_refused_on_cuda(monkeypatch, tmp_path, capsys):
                 "2",
             ]
         )
-    assert exc.value.code == 1 and "F2" in capsys.readouterr().err
+    assert exc.value.code == 0
+    assert parent == ["download", "compile"] and routed == [(2, 1, [("a", "a.png")])]
+
+
+def test_dp_beyond_the_gpu_count_is_refused_before_any_work(monkeypatch, capsys):
+    import torch
+
+    monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: 2)
+    cli = _cli()
+    monkeypatch.setattr(cli, "_get_orchestrator", lambda args: pytest.fail("must not reach"))
+    monkeypatch.setattr(
+        "difflet.cli.dp.router.run_router", lambda *a, **k: pytest.fail("must not route")
+    )
+    argv = ["run", "--model-id", "Qwen/Qwen-Image", "--prompt", "a", "--output", "a.png"]
+    with pytest.raises(SystemExit) as exc:
+        cli.main([*argv, "--dp", "3"])
+    assert exc.value.code == 1 and "needs 3 GPUs" in capsys.readouterr().err
 
 
 def test_cli_and_serving_import_without_neuron():

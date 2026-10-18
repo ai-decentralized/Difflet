@@ -46,3 +46,53 @@ def test_assert_replica_fits_raises_with_breakdown(tmp_path):
 def test_no_safetensors_raises(tmp_path):
     with pytest.raises(RuntimeError, match="no safetensors"):
         component_weight_bytes(tmp_path)
+
+
+# ------------------------------------------------- per-backend limit (F2 task 4)
+
+
+class _Props:
+    def __init__(self, total_memory):
+        self.total_memory = total_memory
+
+
+def _fake_cuda(monkeypatch, *, available, total_memory=0):
+    import torch
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: available)
+    monkeypatch.setattr(
+        torch.cuda, "get_device_properties", lambda index: _Props(total_memory)
+    )
+
+
+def test_default_limit_on_trainium_is_one_trn2_chip(tmp_path, monkeypatch):
+    from difflet.cli.dp import hbm_check
+
+    monkeypatch.setenv("DIFFLET_BACKEND", "trainium")
+    assert hbm_check.replica_limit_bytes() == hbm_check.HBM_LIMIT_BYTES
+
+
+def test_default_limit_on_cuda_is_the_device_memory(tmp_path, monkeypatch):
+    monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
+    _fake_cuda(monkeypatch, available=True, total_memory=1_000_000)
+    _write_safetensors(tmp_path / "transformer" / "m.safetensors", {"w": (1000, 1000)})
+    with pytest.raises(RuntimeError, match="exceed"):
+        assert_replica_fits(tmp_path)  # 2 MB of weights > the 1 MB "GPU"
+    _fake_cuda(monkeypatch, available=True, total_memory=10_000_000)
+    assert_replica_fits(tmp_path)  # fits a 10 MB "GPU"
+
+
+def test_cuda_without_a_device_skips_with_a_note(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
+    _fake_cuda(monkeypatch, available=False)
+    _write_safetensors(tmp_path / "transformer" / "m.safetensors", {"w": (1000, 1000)})
+    assert_replica_fits(tmp_path)  # no raise: the limit is unknown
+    assert "skipping" in capsys.readouterr().out
+
+
+def test_explicit_limit_wins_on_cuda(tmp_path, monkeypatch):
+    monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
+    _fake_cuda(monkeypatch, available=True, total_memory=10**12)
+    _write_safetensors(tmp_path / "transformer" / "m.safetensors", {"w": (1000, 1000)})
+    with pytest.raises(RuntimeError):
+        assert_replica_fits(tmp_path, limit_bytes=1_000_000)

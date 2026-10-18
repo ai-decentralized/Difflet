@@ -14,6 +14,8 @@ whose CUDA application exposes ``generate()``; ``CudaQwenImageOrchestrator``,
 model-specific parts. When the parallel config needs more than one process (F2: Wan's
 ``--cfg-parallel``), ``generate()`` re-execs itself under ``torchrun``
 (``runner.run_torchrun``) and each rank runs ``generate`` in-process; only rank 0 writes.
+As a data-parallel worker (``--requests-dir``, spawned by ``difflet/cli/dp/router.py``)
+``generate()`` loads once and generates every request it claims (F2 task 4).
 """
 
 from __future__ import annotations
@@ -76,6 +78,8 @@ class CudaOneProcessOrchestrator(ModelOrchestrator):
     (a PIL image by default; a video model returns a tensor and writes an MP4).
     ``ACCEPTS_CFG_PARALLEL`` lets ``--cfg-parallel`` through (a two-pass CFG model; the
     distilled ones refuse it): its two branches run on two ranks under ``torchrun``.
+    ``ACCEPTS_NEGATIVE_PROMPT`` forwards a batch request's ``negative_prompt``; elsewhere a
+    request carrying one fails rather than silently dropping it.
     """
 
     HF_MODEL_ID: str
@@ -85,6 +89,7 @@ class CudaOneProcessOrchestrator(ModelOrchestrator):
     DEFAULT_GUIDANCE_SCALE: float | None = None
     OUTPUT_TYPE: str = "pil"
     ACCEPTS_CFG_PARALLEL: bool = False
+    ACCEPTS_NEGATIVE_PROMPT: bool = False
     TAG: str
 
     def __init__(self, args: argparse.Namespace) -> None:
@@ -159,15 +164,33 @@ class CudaOneProcessOrchestrator(ModelOrchestrator):
             kwargs["application_kwargs"] = application_kwargs
         return kwargs
 
-    def generate_kwargs(self) -> dict:
+    def generate_kwargs(self, request=None) -> dict:
+        """``app.generate`` kwargs; a batch ``request`` (``RequestSpec``) overrides the flags.
+
+        A request's steps/guidance win over ``--steps``/``--guidance-scale``, which win over
+        the model defaults (``stage_loop.effective``); its seed replaces ``--seed``. A request
+        field this model cannot honour raises, so that request is failed, not altered.
+        """
+        from difflet.cli.dp import stage_loop
+
+        args = self.args
+        steps = stage_loop.effective(request, args, "steps", None) or self.DEFAULT_STEPS
         kwargs = dict(
-            num_inference_steps=self.args.steps or self.DEFAULT_STEPS,
-            seed=self.args.seed,
+            num_inference_steps=int(steps),
+            seed=args.seed if request is None else request.seed,
             output_type=self.OUTPUT_TYPE,
         )
         if self.ACCEPTS_GUIDANCE_SCALE:
-            scale = getattr(self.args, "guidance_scale", None)
-            kwargs["guidance_scale"] = self.DEFAULT_GUIDANCE_SCALE if scale is None else scale
+            kwargs["guidance_scale"] = stage_loop.effective(
+                request, args, "guidance_scale", self.DEFAULT_GUIDANCE_SCALE
+            )
+        elif request is not None and request.guidance_scale is not None:
+            raise ValueError(f"{self.TAG} {self.model_id} takes no guidance_scale (request)")
+        negative = None if request is None else request.negative_prompt
+        if negative is not None:
+            if not self.ACCEPTS_NEGATIVE_PROMPT:
+                raise ValueError(f"{self.TAG} {self.model_id} takes no negative_prompt (request)")
+            kwargs["negative_prompt"] = negative
         return kwargs
 
     def save_result(self, result, out: Path) -> str:
@@ -221,14 +244,57 @@ class CudaOneProcessOrchestrator(ModelOrchestrator):
         pipe = DiffletPipeline.from_pretrained(self.model_id, **self.pipeline_kwargs(load=True))
         self._last_pipe = pipe
         print(f"[difflet] loaded in {time.perf_counter() - t0:.1f} s", flush=True)
+        from difflet.cli.dp import stage_loop
+
+        if not stage_loop.batch_mode(self.args):
+            self._generate_one(pipe, self.args.prompt, self.args.output, None)
+            return
+        for request in self._batch_requests():
+            if self.is_rank_zero:
+                # Marks .done on success, .failed (and continues) on an exception.
+                with stage_loop.request_scope(self.args, request, final=True):
+                    self._generate_one(pipe, request.prompt, request.output, request)
+                continue
+            try:  # a follower rank: same work, no markers (rank 0 owns the queue)
+                self._generate_one(pipe, request.prompt, request.output, request)
+            except Exception as exc:
+                print(f"[dp-worker] request {request.index} failed on this rank: {exc}")
+
+    def _generate_one(self, pipe, prompt: str, output: str, request) -> None:
         t1 = time.perf_counter()
-        result = pipe.app.generate(self.args.prompt, **self.generate_kwargs())
+        result = pipe.app.generate(prompt, **self.generate_kwargs(request))
         if not self.is_rank_zero:
             return
-        out = Path(self.args.output)
+        out = Path(output)
         out.parent.mkdir(parents=True, exist_ok=True)
         written = self.save_result(result, out)
-        print(f"[difflet] wrote {written} in {time.perf_counter() - t1:.1f} s")
+        print(f"[difflet] wrote {written} in {time.perf_counter() - t1:.1f} s", flush=True)
+
+    def _batch_requests(self):
+        """This worker's requests, each claimed exactly once.
+
+        One process: ``stage_loop.claim_requests``. Inside a ``torchrun`` world (a cfg
+        replica) only rank 0 claims; it broadcasts each claimed ``RequestSpec`` (then
+        ``None`` to stop) so every rank runs the same request in the same order (SPMD).
+        """
+        from difflet.cli.dp import claims, stage_loop
+
+        if int(os.environ.get("WORLD_SIZE", "1")) <= 1:
+            yield from stage_loop.claim_requests(self.args)
+            return
+        import torch.distributed
+
+        args = self.args
+        while True:
+            box = [None]
+            if self.is_rank_zero:
+                box[0] = claims.claim_next(
+                    args.requests_dir, int(args.worker_index), args.dp_schedule
+                )
+            torch.distributed.broadcast_object_list(box, src=0)
+            if box[0] is None:
+                return
+            yield box[0]
 
 
 class CudaQwenImageOrchestrator(CudaOneProcessOrchestrator):

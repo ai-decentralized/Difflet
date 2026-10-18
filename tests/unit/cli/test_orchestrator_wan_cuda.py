@@ -465,6 +465,191 @@ def test_is_rank_zero_reads_rank(monkeypatch):
     assert orch.is_rank_zero is False
 
 
+# ------------------------------------------------- batch mode: a dp worker (F2 task 4)
+
+
+def _manifest(tmp_path, specs):
+    from difflet.cli.dp.requests_io import RequestSpec, write_manifest
+
+    requests_dir = tmp_path / "requests"
+    reqs = [
+        RequestSpec(index=i, output=str(tmp_path / "out" / f"r{i}.mp4"), **spec)
+        for i, spec in enumerate(specs)
+    ]
+    write_manifest(reqs, requests_dir)
+    return requests_dir
+
+
+def _batch_args(requests_dir, **over):
+    batch = dict(
+        prompt=None,
+        output=None,
+        requests_dir=str(requests_dir),
+        worker_index=0,
+        dp_schedule="least_loaded",
+        work_dir=str(requests_dir.parent / "worker_0"),
+    )
+    return _args(**{**batch, **over})
+
+
+def test_batch_mode_forwards_each_request_s_overrides(recorder, saved, tmp_path):
+    from difflet.cli.dp.claims import summarize
+
+    requests_dir = _manifest(
+        tmp_path,
+        [
+            dict(prompt="p0", seed=0),
+            dict(prompt="p1", seed=1, steps=3, guidance_scale=2.5, negative_prompt="blurry"),
+        ],
+    )
+    orch = mod.WanCudaOrchestrator(_batch_args(requests_dir, num_frames=5))
+    orch.generate(argv=[])
+    assert [kw["load"] for _, kw in recorder] == [True]
+    (p0, kw0), (p1, kw1) = orch._last_pipe.app.calls
+    assert (p0, kw0["seed"], kw0["num_inference_steps"], kw0["guidance_scale"]) == (
+        "p0",
+        0,
+        mod.DEFAULT_STEPS,
+        mod.DEFAULT_GUIDANCE_SCALE,
+    )
+    assert "negative_prompt" not in kw0 and kw0["num_frames"] == 5
+    assert (p1, kw1["seed"], kw1["num_inference_steps"], kw1["guidance_scale"]) == (
+        "p1",
+        1,
+        3,
+        2.5,
+    )
+    assert kw1["negative_prompt"] == "blurry" and kw1["num_frames"] == 5
+    assert [path for _, path in saved] == [str(tmp_path / "out" / f"r{i}.mp4") for i in (0, 1)]
+    assert summarize(requests_dir).done == [0, 1]
+
+
+def test_batch_mode_a_failing_request_is_marked_failed_and_the_loop_continues(
+    recorder, saved, monkeypatch, tmp_path
+):
+    from difflet.cli.dp.claims import summarize
+
+    def generate(self, prompt, **kw):
+        self.calls.append((prompt, kw))
+        if prompt == "boom":
+            raise RuntimeError("generation exploded")
+        return self.video
+
+    monkeypatch.setattr(_App, "generate", generate)
+    requests_dir = _manifest(tmp_path, [dict(prompt="boom"), dict(prompt="p1"), dict(prompt="p2")])
+    orch = mod.WanCudaOrchestrator(_batch_args(requests_dir))
+    orch.generate(argv=[])
+    assert [p for p, _ in orch._last_pipe.app.calls] == ["boom", "p1", "p2"]
+    s = summarize(requests_dir)
+    assert s.done == [1, 2] and list(s.failed) == [0] and "generation exploded" in s.failed[0]
+    assert len(saved) == 2
+
+
+def test_a_cfg_parallel_worker_re_execs_torchrun_with_its_worker_flags(
+    recorder, saved, launches, tmp_path
+):
+    # A dp replica with --cfg-parallel is itself a two-rank torchrun world: the worker's
+    # --requests-dir/--worker-index/--dp-schedule reach the ranks verbatim.
+    calls, _ = launches
+    requests_dir = _manifest(tmp_path, [dict(prompt="p0")])
+    worker_argv = [
+        "/venv/lib/difflet/cli/main.py",
+        "generate",
+        "--model-id",
+        WAN22,
+        "--cfg-parallel",
+        "--requests-dir",
+        str(requests_dir),
+        "--worker-index",
+        "0",
+        "--dp-schedule",
+        "least_loaded",
+    ]
+    mod.WanCudaOrchestrator(_batch_args(requests_dir, cfg_parallel=True)).generate(argv=worker_argv)
+    ((world_size, argv, _),) = calls
+    assert world_size == 2 and argv[3:] == worker_argv[2:]
+    # The parent worker claims nothing: the ranks do.
+    assert recorder == [] and not (requests_dir / "req_0000.claim").exists()
+
+
+@pytest.fixture
+def broadcasts(monkeypatch):
+    """Fake ``torch.distributed.broadcast_object_list`` for a rank of a 2-rank world.
+
+    On rank 0 it records what was sent; on other ranks it delivers ``state["feed"]``
+    one item per call (what rank 0 would have sent).
+    """
+    import torch.distributed
+
+    state = {"sent": [], "feed": []}
+
+    def fake(object_list, src=0, group=None, device=None):
+        assert src == 0
+        if os.environ.get("RANK") == "0":
+            state["sent"].append(object_list[0])
+        else:
+            object_list[0] = state["feed"].pop(0)
+
+    monkeypatch.setattr(torch.distributed, "broadcast_object_list", fake)
+    return state
+
+
+def test_inside_a_cfg_world_rank_zero_claims_and_broadcasts(
+    recorder, saved, launches, broadcasts, monkeypatch, tmp_path
+):
+    from difflet.cli.dp.claims import summarize
+
+    monkeypatch.setenv("WORLD_SIZE", "2")
+    monkeypatch.setenv("RANK", "0")
+    requests_dir = _manifest(tmp_path, [dict(prompt="p0"), dict(prompt="p1")])
+    orch = mod.WanCudaOrchestrator(_batch_args(requests_dir, cfg_parallel=True))
+    orch.generate(argv=[])
+    assert [r.prompt if r else None for r in broadcasts["sent"]] == ["p0", "p1", None]
+    assert [p for p, _ in orch._last_pipe.app.calls] == ["p0", "p1"]
+    assert len(saved) == 2 and summarize(requests_dir).done == [0, 1]
+
+
+def test_inside_a_cfg_world_rank_one_follows_rank_zero_and_writes_nothing(
+    recorder, saved, launches, broadcasts, monkeypatch, tmp_path
+):
+    from difflet.cli.dp.claims import summarize
+    from difflet.cli.dp.requests_io import read_manifest
+
+    monkeypatch.setenv("WORLD_SIZE", "2")
+    monkeypatch.setenv("RANK", "1")
+    requests_dir = _manifest(tmp_path, [dict(prompt="p0"), dict(prompt="p1")])
+    broadcasts["feed"] = [*read_manifest(requests_dir), None]
+    orch = mod.WanCudaOrchestrator(_batch_args(requests_dir, cfg_parallel=True))
+    orch.generate(argv=[])
+    # Same requests, same order as rank 0 (SPMD), but no claims, markers or outputs.
+    assert [p for p, _ in orch._last_pipe.app.calls] == ["p0", "p1"]
+    assert saved == [] and not list(requests_dir.glob("*.claim"))
+    s = summarize(requests_dir)
+    assert s.done == [] and not s.failed and s.unfinished == [0, 1]
+
+
+def test_inside_a_cfg_world_a_failure_on_rank_one_marks_nothing(
+    recorder, saved, launches, broadcasts, monkeypatch, tmp_path
+):
+    from difflet.cli.dp.requests_io import read_manifest
+
+    def generate(self, prompt, **kw):
+        self.calls.append((prompt, kw))
+        if prompt == "boom":
+            raise RuntimeError("rank 1 exploded")
+        return self.video
+
+    monkeypatch.setattr(_App, "generate", generate)
+    monkeypatch.setenv("WORLD_SIZE", "2")
+    monkeypatch.setenv("RANK", "1")
+    requests_dir = _manifest(tmp_path, [dict(prompt="boom"), dict(prompt="p1")])
+    broadcasts["feed"] = [*read_manifest(requests_dir), None]
+    orch = mod.WanCudaOrchestrator(_batch_args(requests_dir, cfg_parallel=True))
+    orch.generate(argv=[])
+    assert [p for p, _ in orch._last_pipe.app.calls] == ["boom", "p1"]
+    assert not list(requests_dir.glob("*.failed")) and not list(requests_dir.glob("*.done"))
+
+
 _FORBIDDEN = (
     "neuronx_distributed",
     "torch_neuronx",

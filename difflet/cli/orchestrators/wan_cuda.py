@@ -45,6 +45,7 @@ class WanCudaOrchestrator(CudaOneProcessOrchestrator):
     DEFAULT_GUIDANCE_SCALE = DEFAULT_GUIDANCE_SCALE
     OUTPUT_TYPE = "pt"
     ACCEPTS_CFG_PARALLEL = True  # two-pass CFG: one branch per rank (F2)
+    ACCEPTS_NEGATIVE_PROMPT = True  # a batch request's negative_prompt (F2 task 4)
     TAG = "[wan/cuda]"
 
     def refuse_model_flags(self) -> None:
@@ -76,8 +77,8 @@ class WanCudaOrchestrator(CudaOneProcessOrchestrator):
         kwargs["num_frames"] = self._num_frames()
         return kwargs
 
-    def generate_kwargs(self) -> dict:
-        return {**super().generate_kwargs(), "num_frames": self._num_frames()}
+    def generate_kwargs(self, request=None) -> dict:
+        return {**super().generate_kwargs(request), "num_frames": self._num_frames()}
 
     def save_result(self, result, out: Path) -> str:
         """MP4 through the Trainium orchestrator's writer, else the tensor as ``.pt``."""

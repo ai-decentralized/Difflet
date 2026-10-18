@@ -3,7 +3,8 @@
 Spec: docs/superpowers/specs/2026-07-06-dp-replication-routing-design.md §Router.
 Workers are full difflet CLI invocations with dp=1 semantics; NEURON_RT_* are
 plain-assigned (run_stage's setdefault must see the worker's range, not the
-parent's).
+parent's). On the CUDA backend a replica's range is GPUs, pinned through
+CUDA_VISIBLE_DEVICES, and no Neuron variable reaches the worker (F2 task 4).
 """
 
 from __future__ import annotations
@@ -53,7 +54,10 @@ def worker_env(
     replica_cores: int,
     *,
     root_comm_id: str | None = None,
+    backend: str = "trainium",
 ) -> dict[str, str]:
+    if backend == "cuda":
+        return _cuda_worker_env(base_env, core_range)
     env = dict(base_env)
     env["NEURON_RT_VISIBLE_CORES"] = core_range
     env["NEURON_RT_NUM_CORES"] = str(replica_cores)
@@ -66,6 +70,36 @@ def worker_env(
     # both replicas waited forever (ltx_2/dp2tp2 on device, 2026-09-07). A
     # value inherited from the parent is just as shared, so it is replaced too.
     env["NEURON_RT_ROOT_COMM_ID"] = root_comm_id or f"localhost:{_free_localhost_port()}"
+    return env
+
+
+def _expand_range(core_range: str) -> list[int]:
+    lo, _, hi = core_range.partition("-")
+    return list(range(int(lo), int(hi or lo) + 1))
+
+
+def _cuda_worker_env(base_env: Mapping[str, str], gpu_range: str) -> dict[str, str]:
+    """A CUDA replica's env: its GPUs in ``CUDA_VISIBLE_DEVICES``, no ``NEURON_RT_*``.
+
+    ``gpu_range`` counts from the parent's visible devices (``"0-1"`` is the first two GPUs
+    the router sees), so a parent already restricted by ``CUDA_VISIBLE_DEVICES`` hands out
+    its own devices, not physical GPUs 0 and 1. A replica with more than one GPU (cfg/cp)
+    re-execs under ``torchrun`` inside that range.
+    """
+    env = {k: v for k, v in base_env.items() if not k.startswith("NEURON_RT_")}
+    indices = _expand_range(gpu_range)
+    inherited = base_env.get("CUDA_VISIBLE_DEVICES", "").strip()
+    if inherited:
+        visible = [d.strip() for d in inherited.split(",") if d.strip()]
+        if max(indices) >= len(visible):
+            raise ValueError(
+                f"replica GPU range {gpu_range!r} is outside the parent's "
+                f"CUDA_VISIBLE_DEVICES={inherited!r}"
+            )
+        devices = [visible[i] for i in indices]
+    else:
+        devices = [str(i) for i in indices]
+    env["CUDA_VISIBLE_DEVICES"] = ",".join(devices)
     return env
 
 
@@ -143,6 +177,10 @@ def run_router(
     _check_hbm(args)
 
     prefix = worker_argv_prefix or [sys.executable, "-m", "difflet.cli.main"]
+    from difflet.backends.registry import current_backend
+
+    backend = current_backend()
+    unit = "GPUs" if backend == "cuda" else "cores"
 
     procs = []
     for w, core_range in enumerate(replica_core_ranges(dp, replica_cores)):
@@ -152,8 +190,8 @@ def run_router(
             "--dp-schedule", schedule,
             "--work-dir", str(work_dir / f"worker_{w}"),
         ]
-        env = worker_env(os.environ, core_range, replica_cores)
-        print(f"[dp-router] worker {w}: cores {core_range}", flush=True)
+        env = worker_env(os.environ, core_range, replica_cores, backend=backend)
+        print(f"[dp-router] worker {w}: {unit} {core_range}", flush=True)
         procs.append(subprocess.Popen(argv, env=env, preexec_fn=_die_with_parent))
 
     exit_codes = [p.wait() for p in procs]

@@ -1,4 +1,7 @@
-"""Replica HBM fit check: weights-only, header-only safetensors scan (spec §CLI)."""
+"""Replica HBM fit check: weights-only, header-only safetensors scan (spec §CLI).
+
+The limit is per backend: one Trainium2 chip, or the GPU's memory on CUDA (F2 task 4).
+"""
 
 from __future__ import annotations
 
@@ -33,9 +36,33 @@ def component_weight_bytes(model_path: str | Path, dtype_bytes: int = 2) -> dict
     return sizes
 
 
+def replica_limit_bytes() -> int | None:
+    """The per-replica device memory for the current backend, or ``None`` when unknown.
+
+    Trainium: one Trainium2 chip (``HBM_LIMIT_BYTES``). CUDA: device 0's total memory (a
+    replica's weights live on each of its GPUs; the router's GPUs are one model), unknown
+    when no CUDA device is visible.
+    """
+    from difflet.backends.registry import current_backend
+
+    if current_backend() != "cuda":
+        return HBM_LIMIT_BYTES
+    import torch
+
+    if not torch.cuda.is_available():
+        return None
+    return int(torch.cuda.get_device_properties(0).total_memory)
+
+
 def assert_replica_fits(
-    model_path: str | Path, *, dtype_bytes: int = 2, limit_bytes: int = HBM_LIMIT_BYTES
+    model_path: str | Path, *, dtype_bytes: int = 2, limit_bytes: int | None = None
 ) -> None:
+    """Raise when the replica's weights exceed ``limit_bytes`` (default: per backend)."""
+    if limit_bytes is None:
+        limit_bytes = replica_limit_bytes()
+        if limit_bytes is None:
+            print("[dp-router] no CUDA device visible; skipping HBM fit check", flush=True)
+            return
     sizes = component_weight_bytes(model_path, dtype_bytes=dtype_bytes)
     total = sum(sizes.values())
     if total > limit_bytes:
