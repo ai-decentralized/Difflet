@@ -117,13 +117,15 @@ status-log line with wall time and peak memory. The image from `scripts/cuda_smo
 prompt-faithful by eye before any numeric gate is trusted.
 
 **Pod lifecycle (owner's standing rule, 2026-10-16, tightened 2026-10-18).** A pod bills by the
-hour whether or not anything runs on it. Deploying one needs the owner's explicit yes in the
-console (RTX PRO 6000, 1 GPU, On-Demand; mount the `difflet-cache` network volume at `/data`).
+hour whether or not anything runs on it. Deploying one needs the owner's explicit yes, through
+`scripts/yottalabs_pod.py create` or the console (RTX PRO 6000, 1 GPU, On-Demand; mount the
+`difflet-cache` network volume at `/data`).
 
-**Pausing the pod is pre-authorized. Do it yourself; never ask, never wait.** On 2026-10-17 the
-owner went to sleep after saying "pause the pod when you finish"; the session finished and then
-asked for approval, so the pod billed all night. That is the mistake this rule prevents. At the end
-of every GPU session, after the last script's JSONs/PNGs are copied off the box and committed:
+**Pausing (or, without a volume, terminating) the pod at the end is pre-authorized. Do it
+yourself; never ask, never wait.** On 2026-10-17 the owner went to sleep after saying "pause
+the pod when you finish"; the session finished and then asked for approval, so the pod billed all
+night. That is the mistake this rule prevents. At the end of every GPU session, after the last
+script's JSONs/PNGs are copied off the box and committed:
 
 1. Pause through the API first, not the console (a console click can be refused by the
    permission layer; the API call is a plain shell command and is not). The key is a Yottalabs
@@ -137,7 +139,8 @@ of every GPU session, after the last script's JSONs/PNGs are copied off the box 
    python3 scripts/yottalabs_pod.py status "$POD"   # the read-back: PAUSED
    ```
 
-   `resume ID` brings it back (exit 2 when it falls back INITIALIZING → PAUSED: no capacity);
+   `resume ID` brings it back and bills again, so it needs the owner's yes like a deploy (exit 2
+   when it falls back INITIALIZING → PAUSED: no capacity);
    `delete ID` terminates and polls until the pod is gone. Terminating a pod that has a network
    volume needs the owner's word "terminate"; a pod without a volume cannot be paused (API
    12005) and is terminated at the end of the session, pre-authorised.
@@ -146,9 +149,9 @@ of every GPU session, after the last script's JSONs/PNGs are copied off the box 
    Pods → the pod's pause control → confirm "Pause Pod" → reload and read the status. The
    "all data in container storage will be lost" warning is expected: nothing lives only on the
    container (evidence is committed, the HF cache is on the volume).
-3. Verify, then record: the pod name, ID, and the final status (`Paused`) go in the status-log
-   entry and in the first line of the final message. "I pressed pause" is not done; a status
-   read that says `Paused` is.
+3. Verify, then record: the pod name, ID, and the final status (`Paused`, or gone after a
+   terminate) go in the status-log entry and in the first line of the final message. "I pressed
+   pause" is not done; a status read that says `Paused` (or a pod that is gone) is.
 4. Nothing above applies to pods created by other logins (e.g. `terminator@yottalabs.ai`): the
    console lists them beside ours under the same organization. Touch only pods whose
    `Created By` is the owner's login and whose name starts with `difflet-`.

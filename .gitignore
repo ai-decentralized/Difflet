@@ -46,6 +46,8 @@ global_metric_store.json
 # Local
 .env
 *.log
+# CUDA evidence logs are cited by docs/verification/cuda-release1-evidence.md (after *.log).
+!artifacts/cuda-release1/**/*.log
 
 # Internal / not for public repo
 cclogs/
