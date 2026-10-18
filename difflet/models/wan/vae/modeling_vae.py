@@ -267,6 +267,26 @@ class WanResidualBlock(nn.Module):
         return x + h
 
 
+def _explicit_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+    """``softmax(q k^T / sqrt(d)) v``: what ``F.scaled_dot_product_attention`` computes without
+    a mask, dropout or causality, written out as two matmuls and a softmax."""
+    scores = torch.matmul(q, k.transpose(-1, -2)) * (q.shape[-1] ** -0.5)
+    return torch.matmul(torch.softmax(scores, dim=-1), v)
+
+
+def _spatial_attention_impl(device_type: str):
+    """The attention of ``WanAttentionBlock`` on ``device_type``.
+
+    The neuron backend (TorchNeuron, eager) lowers ``F.scaled_dot_product_attention`` to nkilib's
+    flash kernel ``attention_cte``, which fails this block's one head of d=384 at 8192 key tokens
+    or more (``AssertionError: Out-of-bound access ... index 7 exceed dimension size of 6`` while
+    it traces; 6240 tokens, Wan's 480x832 latent, pass, and splitting the queries does not help).
+    Qwen-Image's 1024x1024 latent has 128x128 = 16384 tokens. The written-out attention needs
+    ``tokens^2`` fp32 of scores (1 GiB at 16384), which one core holds. Every other device (the
+    CPU, Trainium/TPU's XLA traces) keeps the fused call, so their graphs do not change."""
+    return _explicit_attention if device_type == "neuron" else F.scaled_dot_product_attention
+
+
 class WanAttentionBlock(nn.Module):
     """Single-head spatial attention per frame."""
 
@@ -285,7 +305,7 @@ class WanAttentionBlock(nn.Module):
         qkv = qkv.reshape(batch_size * time, 1, channels * 3, -1)
         qkv = qkv.permute(0, 1, 3, 2).contiguous()
         q, k, v = qkv.chunk(3, dim=-1)
-        x = F.scaled_dot_product_attention(q, k, v)
+        x = _spatial_attention_impl(q.device.type)(q, k, v)
         x = x.squeeze(1).permute(0, 2, 1).reshape(batch_size * time, channels, height, width)
         x = self.proj(x)
         x = x.view(batch_size, time, channels, height, width).permute(0, 2, 1, 3, 4)
