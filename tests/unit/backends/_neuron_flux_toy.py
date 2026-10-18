@@ -110,3 +110,44 @@ def vae_reference(path) -> torch.Tensor:
     vae = AutoencoderKL.from_pretrained(path).eval()
     with torch.no_grad():
         return vae.decode(vae_latents(), return_dict=False)[0]
+
+
+# ---- a tiny pipeline: DiT (in_channels 8 = 4 x 2 latent channels, packed 2x2), VAE with 2 latent
+# channels and scale factor 2, the flow-matching scheduler; prompt embeddings passed directly.
+PIPE_HW = 16  # image side: 16 / (2 * 2) = 4 x 4 packed tokens, as TINY_SHAPE
+PIPE_VAE = dict(TINY_VAE, latent_channels=2, scaling_factor=0.5, shift_factor=0.1)
+
+
+def write_tiny_pipeline(root) -> str:
+    from diffusers import AutoencoderKL, FlowMatchEulerDiscreteScheduler
+
+    write_tiny_flux(root)
+    torch.manual_seed(0)
+    AutoencoderKL(**PIPE_VAE).save_pretrained(f"{root}/vae", safe_serialization=True)
+    FlowMatchEulerDiscreteScheduler(shift=3.0, use_dynamic_shifting=True, base_shift=0.5,
+                                    max_shift=1.15, base_image_seq_len=4,
+                                    max_image_seq_len=64).save_pretrained(f"{root}/scheduler")
+    return str(root)
+
+
+def pipeline_kwargs(output_type):
+    g = torch.Generator().manual_seed(4)
+    return dict(
+        prompt_embeds=torch.randn(1, TINY_SHAPE["text_seq_len"], TINY["joint_attention_dim"], generator=g),
+        pooled_prompt_embeds=torch.randn(1, TINY["pooled_projection_dim"], generator=g),
+        height=PIPE_HW, width=PIPE_HW, num_inference_steps=2, guidance_scale=3.5,
+        max_sequence_length=TINY_SHAPE["text_seq_len"], output_type=output_type,
+        generator=torch.Generator().manual_seed(0),
+    )
+
+
+def diffusers_pipeline_reference(root, output_type):
+    from diffusers import AutoencoderKL, FlowMatchEulerDiscreteScheduler, FluxPipeline, FluxTransformer2DModel
+
+    pipe = FluxPipeline(
+        scheduler=FlowMatchEulerDiscreteScheduler.from_pretrained(f"{root}/scheduler"),
+        vae=AutoencoderKL.from_pretrained(f"{root}/vae").eval(), text_encoder=None, tokenizer=None,
+        text_encoder_2=None, tokenizer_2=None,
+        transformer=FluxTransformer2DModel.from_pretrained(f"{root}/transformer").eval())
+    with torch.no_grad():
+        return pipe(**pipeline_kwargs(output_type)).images
