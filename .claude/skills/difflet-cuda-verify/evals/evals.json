@@ -20,7 +20,7 @@
     {
       "id": 1,
       "prompt": "Using only the files under artifacts/cuda-release1/ and the status log at the end of docs/plans/2026-10-16-cuda-backend-support.md, write an evidence-doc skeleton cuda-evidence-skeleton.md for the CUDA backend: a pods-and-cards table, then one section per gate (smoke, DiT parity, e2e, CLI matrix, serve, performance, two GPUs, the F1b A/B) with a table whose rows are filled from the artifact JSONs where a JSON exists (cite its path next to the table) and left as explicit gaps where none does, a 'How to inspect manually' recipe per section, a NOT MEASURED list and a pod cost table. Do not modify tracked files.",
-      "expected_output": "Skeleton whose numbers match the JSONs: Qwen e2e PSNR 41.40 dB / cosine 0.99972 (cuda_e2e_qwen_image.json, device Server Edition), Flux parity rel_l1 2.710e-2 vs control 2.747e-2 (0.987x) and e2e 40.35 dB / 0.99980 (flux/, Workstation Edition), Wan F1b variants float32 26.30 dB and model 27.54 dB (wan/f1b/cuda_e2e_wan.json), F4 bench medians 516 / 323 / 243 ms (f4/bench_dit_*.json), serve ready 56.0 s and request 38.6 s (f3b/serve_timings.json), F2 compare max_abs 0 (f2/compare_*.json); each table names the card edition from the JSON's device field; inspection recipes name the JSON keys and the gate pytest command; NOT MEASURED lists the CLI-matrix Wan cell, --dp x --cfg-parallel, Flux and Wan under --dp, Wan 2.1, the Wan e2e noise floor; pod cost table from the status log (e.g. difflet-cuda-f2 ~29 min, ~$2.60).",
+      "expected_output": "Skeleton whose numbers match the JSONs: Qwen e2e PSNR 41.40 dB / cosine 0.99972 (cuda_e2e_qwen_image.json, device Server Edition), Flux parity rel_l1 2.710e-2 vs control 2.747e-2 (0.987x) and e2e 40.35 dB / 0.99980 (flux/, Workstation Edition), Wan F1b variants float32 26.30 dB and model 27.54 dB (wan/f1b/cuda_e2e_wan.json), F4 bench medians 516 / 323 / 243 ms (f4/bench_dit_*.json), serve ready 56.0 s and request 38.6 s (f3b/serve_timings.json), F2 compare max_abs 0 (f2/compare_*.json); each table names the card edition from the JSON's device field; inspection recipes name the JSON keys and the gate pytest command; NOT MEASURED lists the CLI-matrix Wan cell, Wan --dp x --cfg-parallel, Flux and Wan under --dp, Wan 2.1, the Wan e2e noise floor; pod cost table from the status log (e.g. difflet-cuda-f2 ~29 min, ~$2.60).",
       "files": [],
       "expectations": [
         "the e2e section gives Qwen-Image PSNR 41.40 dB and cosine 0.99972 citing artifacts/cuda-release1/cuda_e2e_qwen_image.json, and FLUX.1-dev 40.35 dB / 0.99980 citing artifacts/cuda-release1/flux/cuda_e2e_flux.json",
@@ -29,7 +29,7 @@
         "each timing table names the card edition (Server vs Workstation) taken from the JSON device field or the status log, and does not compare per-step times across editions unlabelled",
         "sections without an artifact JSON (e.g. the CLI matrix Wan cell) are marked as gaps or NOT MEASURED rather than filled with invented numbers",
         "every section has a How to inspect manually recipe naming the file, the JSON keys and, for numerical gates, the pytest gate command with DIFFLET_RUN_CUDA_NUMERICAL=1",
-        "the NOT MEASURED list includes the CLI-matrix Wan cell and --dp combined with --cfg-parallel",
+        "the NOT MEASURED list includes the CLI-matrix Wan cell and Wan --dp combined with --cfg-parallel",
         "no tracked repository file was modified"
       ]
     }

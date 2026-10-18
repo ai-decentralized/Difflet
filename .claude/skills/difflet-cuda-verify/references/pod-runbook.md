@@ -2,9 +2,10 @@
 
 What the reference sessions learned about Yottalabs pods (2026-10-16 → 10-18). Prices,
 capacity and limits are what the API showed on those dates; read `gpus` again before quoting
-any of them. The binding rule: deploying (create, resume) needs the owner's yes; pause or
-terminate at the end of a session is pre-authorised; only pods created by the owner's login
-with a `difflet-` name are ours (the console lists other logins' pods beside them).
+any of them. The binding rule: deploying (create, resume) needs the owner's yes; at the end of
+a session, pausing a volume pod or terminating a pod that cannot be paused (no volume) is
+pre-authorised; terminating a volume pod needs the owner's word "terminate"; only pods created
+by the owner's login with a `difflet-` name are ours (the console lists other logins' pods).
 
 ## The API and the key
 
@@ -23,7 +24,7 @@ with a `difflet-` name are ours (the console lists other logins' pods beside the
 |---|---|---|---|---|
 | us-east-3 | 0.45 | Workstation Edition | 178 GB | the only pool where `difflet-cache` mounts |
 | eu-3 | 2.65 | Server Edition | 500 GB | sells whole 2-GPU nodes ($5.30/h) |
-| eu-2 | 2.65 | Server Edition | 500 GB | sells whole 2-GPU nodes |
+| eu-2 | 2.65 | not observed (no pod ran there) | 500 GB | 1-GPU requests refused (12014) |
 | eu-1 | 2.55 | not used | — | seen UNAVAILABLE |
 | us-central-7 | 1.35/h per pod (10-16, 10-17) | Server Edition | — | F3/F4 pods; device-cgroup incident |
 
@@ -32,8 +33,9 @@ with a `difflet-` name are ours (the console lists other logins' pods beside the
   insufficient resources"); the capacity watcher keeps waiting on 12014.
 - In eu-3 / eu-2 every 1-GPU request (with and without an SSH expose, 150–200 GB disk) returned
   12014; a 2-GPU request succeeded. A 1-GPU job there means renting both cards [F1b ledger].
-- All PRO 6000 pools were full for about an hour on 2026-10-18; F2's pod was created by
-  `create --wait-for-capacity` (one GET per 300 s round, one POST when a pool opens) [F2].
+- All PRO 6000 pools were full for about an hour on 2026-10-18; F2's pod was created by an
+  ad-hoc capacity watcher [F2]. `create --wait-for-capacity` (one GET per 300 s round, one POST
+  when a pool opens) reproduces it but has not yet run against the live API.
 - The us-east-3 pool can be full for hours: a paused pod there may not resume on demand.
 
 ## Pause, resume, terminate
@@ -56,14 +58,16 @@ with a `difflet-` name are ours (the console lists other logins' pods beside the
 | `/home` | — | the F1 container restart (pod still alive) | `~/Difflet`, `~/logs` |
 
 - The volume: id **469225541779435520**, us-east-3, mounted by `persistentVolumes`
-  (`create --volume-id 469225541779435520 --mount /data`). It mounts **root-owned** the first
-  time: `sudo chown user:user /data` once (`pod_setup.sh --volume` does it).
+  (`create --regions us-east-3 --volume-id 469225541779435520 --mount /data`; always pin the
+  region). It mounts **root-owned** the first time: `sudo chown user:user /data` once
+  (`pod_setup.sh --volume` does it).
 - What it holds (2026-10-18, after F1): Qwen-Image (57.7 GB) and FLUX.1-dev (33.7 GB), 116 GB
   free, plus the HF token. Wan 2.2 (118 GB on disk) does **not** fit beside both. To run Wan
   there: `HF_HOME=/data/hf .venv/bin/hf cache rm model/Qwen/Qwen-Image -y`, download Wan
   (~1 GB/s: 118 GB in 108–109 s), and swap back after (the F1 session did exactly that).
 - Cold reads from the volume dominate first loads: Qwen 54 GB ≈ 240 s, the Flux DiT 24 GB ≈
-  200 s, Wan's load 703 s, a 57 GB expert ≈ 4 min [F5, F1]. Warm loads match local disk.
+  200 s, Wan's smoke load 703 s; F1's parity loads: fp32 reference 147 s and 1083 s (the
+  second expert cold), bf16 120–196 s [F5, F1]. Warm loads match local disk.
 - **The container disk limit is a hard write limit.** Writing Wan's 118 GB to `/tmp` on f5b
   (record `containerVolumeInGb` 100) was followed by a container restart that wiped `/tmp`
   (logs, the download); `/home` and `/data` survived [F1]. Large downloads go on the volume, or
@@ -71,6 +75,8 @@ with a `difflet-` name are ours (the console lists other logins' pods beside the
 - `df` does not show that limit: f5b's `/tmp` showed 8.6 TB free under a 100 GB record [F1
   plan], the F1b pod a 968 GB local disk under 150 GB [F1b ledger]. Read the pod record's
   `containerVolumeInGb` (`yottalabs_pod.py status ID`) and budget against it.
+- Whether the eu pods enforce the record the same way is not measured: F2 wrote ~172 GB (Wan +
+  Qwen-Image) to `~/hf` on a 150 GB record with no restart. Budget against the record anyway.
 - Growing the volume (≥ 350 GB would hold all three models) is the owner's call [F1 plan].
 
 ## SSH and long runs
@@ -78,6 +84,8 @@ with a `difflet-` name are ours (the console lists other logins' pods beside the
 - The account key `~/.ssh/yottalabs_difflet_cuda_qwen.pem` works on every pod.
   `yottalabs_pod.py ssh-config ID --alias difflet-cuda-<name> >> ~/.ssh/config` writes the Host
   block from the pod's SSH expose (proxy host and port); before the endpoint exists it exits 2.
+  `>>` appends and ssh uses the first matching `Host`: give every pod a new alias, or delete the
+  old block first.
 - Ship code with `ship_branch.sh <alias> <branch>` (a full-history git bundle; the pod needs
   no GitHub access).
 - Right after the first SSH: `nvidia-smi`, and again a few minutes later, before building
@@ -97,8 +105,9 @@ FLUX.1-dev is gated (the licence is accepted on the owner's HF account). The tok
 
 ```bash
 scp .claude/skills/difflet-cuda-verify/scripts/hf_device_login.py <alias>:~/hf_device_login.py
-ssh <alias> 'cd ~ && HF_HOME=/data/hf setsid nohup ~/Difflet/.venv/bin/python \
-    hf_device_login.py > ~/logs/hf-login.log 2>&1 < /dev/null &'
+H=/data/hf   # the volume pod; H='~/hf' on a pod without the volume (pod_setup.sh's HF_HOME)
+ssh <alias> "cd ~ && HF_HOME=$H setsid nohup ~/Difflet/.venv/bin/python \
+    hf_device_login.py > ~/logs/hf-login.log 2>&1 < /dev/null &"
 ssh <alias> 'cat ~/logs/hf-login.log'     # OPEN: <url>   CODE: <code> expires_in_s: ...
 ```
 
@@ -119,11 +128,13 @@ command**: the pattern matches the SSH session's own shell command line and kill
 
 ## A session, start to finish
 
-1. Owner's yes → `gpus`, `create … --dry-run`, `create` (watcher if the pool is full); id into
-   the notes; `wait-running`; `ssh-config >> ~/.ssh/config`.
+1. Owner's yes → `gpus`, `create … --dry-run`, `create` (watcher if the pool is full; with the
+   volume always `--regions us-east-3`, where it mounts); id into the notes; `wait-running`;
+   `ssh-config` with a new alias `>> ~/.ssh/config`.
 2. `nvidia-smi` twice; `ship_branch.sh`; `pod_setup.sh [--volume]`; downloads (disk checked).
 3. Gates detached (`run_gates.sh`, then the matrix / serve / two-GPU runs); poll for `DONE`.
 4. Copy evidence off (`scp -r <alias>:~/logs/<name> …`), curate into
    `artifacts/cuda-release1/<feature>/`, status-log entry, commit.
-5. `pause` (volume) or `delete` (no volume); `status` read back; the final status in the
-   entry and in the first line of the report.
+5. Either `pause` (a pod with the volume; read back PAUSED) or `delete` (a pod without one,
+   pause → 12005; read back gone) — never both; the final status in the entry and in the
+   first line of the report. Terminating a volume pod needs the owner's "terminate".

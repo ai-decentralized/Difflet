@@ -35,7 +35,7 @@ e2e metrics did match across editions: Wan's `model`-timestep e2e gave 27.54 dB 
 | `--teacache-cadence N` | PASS [F4] | refused (F5b) | refused (F1b) |
 | `--dp 2 --requests` | PASS, byte-identical [F2] | NOT MEASURED (reachable) | NOT MEASURED (reachable) |
 | `--cfg-parallel` (2 GPUs) | N/A (refused: single pass) | N/A (refused: guidance-distilled; true-CFG is the owner's call) | PASS, bit-identical [F2] |
-| `--dp` × `--cfg-parallel` | NOT MEASURED (needs 4 cards) | NOT MEASURED | NOT MEASURED |
+| `--dp` × `--cfg-parallel` | N/A (refuses `--cfg-parallel`) | N/A (refuses `--cfg-parallel`) | NOT MEASURED (needs 4 cards) |
 | CP / ulysses (`--cp-degree > 1`) | refused (F2b) | refused (F2b) | refused (F2b) |
 | TP across PCIe, `--sp` | refused (F6) | refused (F6) | refused (F6) |
 
@@ -188,5 +188,5 @@ NCCL smoke 11 s. **Wan `--cfg-parallel`** (`difflet run` re-execs under `torchru
 bit-identical (max_abs 0), peak 68,074 / 67,519 MiB. **Qwen-Image `--dp 2 --requests`** (JSONL,
 one request per line with `prompt`, `output`, `seed`): four 50-step requests 58 s wall vs 190 s
 as four serial runs and 79 s as a `--dp 1` batch; all six compared images byte-identical. Not
-run: `--dp` × `--cfg-parallel`, Flux or Wan under `--dp`, serving on two GPUs (F2b). Artifacts:
+run: Wan `--dp` × `--cfg-parallel`, Flux or Wan under `--dp`, serving on two GPUs (F2b). Artifacts:
 `artifacts/cuda-release1/f2/`.
