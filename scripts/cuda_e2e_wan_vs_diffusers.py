@@ -9,7 +9,17 @@ then diffusers loads and runs with the saved noise. Pixel metrics over the whole
 JSON the gate reads (tests/numerical/test_cuda_wan_e2e_vs_diffusers.py):
 
     DIFFLET_BACKEND=cuda python scripts/cuda_e2e_wan_vs_diffusers.py \\
-        --model-path /path/to/Wan2.2-T2V-A14B-Diffusers-snapshot [--steps 40] [--num-frames 9]
+        --model-path /path/to/Wan2.2-T2V-A14B-Diffusers-snapshot [--steps 40] [--num-frames 9] \\
+        [--timestep-dtypes float32,model]
+
+**Timestep-dtype A/B (F1b task 2).** ``--timestep-dtypes`` lists ``CudaWanApplication``'s
+``timestep_dtype`` values to run (``float32``: production, UniPC's exact integer timestep;
+``model``: Release 1's bf16 cast, 999 → 1000), passed through ``DiffletPipeline``'s
+``application_kwargs``. Difflet is loaded, run and freed once per variant, in order; the first
+load draws the noise, which every later variant and the single diffusers run reuse. The JSON
+holds ``variants.<name>.{metrics, timings, image}`` (one first-frame PNG per variant); the
+top-level ``metrics``, ``timings.difflet`` and ``images.difflet`` are the first variant's, so
+the gate's floors judge it.
 
 The noise is ``WanOrchestrator.prepare_latents`` on the host from a seeded generator, shape
 ``(1, 16, latent_frames, H/8, W/8)``, fp32. ``WanPipeline.prepare_latents`` returns a given
@@ -37,6 +47,22 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from cuda_e2e_vs_diffusers import _save, image_metrics  # noqa: E402
 
 MAX_SEQUENCE_LENGTH = 512
+# CudaWanApplication's timestep_dtype values (difflet/models/wan/cuda_application.py).
+TIMESTEP_DTYPES = ("float32", "model")
+
+
+def parse_timestep_dtypes(text: str) -> list[str]:
+    """``"float32,model"`` → ``["float32", "model"]``: known values, no repeats, at least one."""
+    names = [part.strip() for part in text.split(",")]
+    for name in names:
+        if name not in TIMESTEP_DTYPES:
+            raise argparse.ArgumentTypeError(
+                f"unknown timestep dtype {name!r}; expected a comma-separated list of "
+                f"{', '.join(TIMESTEP_DTYPES)}"
+            )
+    if len(set(names)) != len(names):
+        raise argparse.ArgumentTypeError(f"repeated timestep dtype in {text!r}")
+    return names
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -56,7 +82,20 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--out", default="/tmp/logs/cuda_e2e_wan.json")
     ap.add_argument("--images-dir", default="/tmp/logs")
     ap.add_argument("--compile-cache-dir", default=None)
+    ap.add_argument(
+        "--timestep-dtypes",
+        type=parse_timestep_dtypes,
+        default=["float32"],
+        help="comma-separated CudaWanApplication timestep_dtype values, one Difflet run each "
+        "against one diffusers run (float32 = production, model = Release 1's bf16 cast); the "
+        "first is the gated one (default: float32)",
+    )
     return ap
+
+
+def variant_png(images_dir: Path, name: str) -> Path:
+    """The first-frame PNG of one Difflet variant."""
+    return Path(images_dir) / f"wan_e2e_difflet_{name}_frame0.png"
 
 
 def difflet_unit_video(frames: torch.Tensor) -> torch.Tensor:
@@ -78,7 +117,14 @@ def _gb(n: int) -> float:
     return round(n / 2**30, 2)
 
 
-def run_difflet(args) -> tuple[torch.Tensor, torch.Tensor, dict]:
+def _device_name() -> str:
+    return torch.cuda.get_device_name(0)
+
+
+def run_difflet(
+    args, *, timestep_dtype: str, noise: torch.Tensor | None = None
+) -> tuple[torch.Tensor, torch.Tensor, dict]:
+    """One Difflet load + generate with ``timestep_dtype``; draws the noise unless given."""
     from difflet import DiffletParallelConfig, DiffletPipeline
 
     torch.cuda.reset_peak_memory_stats()
@@ -96,18 +142,20 @@ def run_difflet(args) -> tuple[torch.Tensor, torch.Tensor, dict]:
         model_path_override=args.model_path,
         resolved_source_id=f"local:{args.model_path}",
         compiled_path_override=str(Path(args.compile_cache_dir or "/tmp/logs/cuda_e2e_wan_cache")),
+        application_kwargs={"timestep_dtype": timestep_dtype},
     )
     app = pipe.app
     timings = {"load_s": round(time.monotonic() - mark, 1)}
-    print(f"difflet loaded in {timings['load_s']}s", flush=True)
-    # Host fp32 noise from a seeded generator: the orchestrator's own draw, made explicit so
-    # the diffusers side starts from the same tensor.
-    noise = app.pipeline.prepare_latents(
-        batch_size=1,
-        channels=int(app.config.in_channels),
-        dtype=torch.float32,
-        generator=torch.Generator().manual_seed(args.seed),
-    )
+    print(f"difflet (timestep_dtype={timestep_dtype}) loaded in {timings['load_s']}s", flush=True)
+    if noise is None:
+        # Host fp32 noise from a seeded generator: the orchestrator's own draw, made explicit
+        # so every later variant and the diffusers side start from the same tensor.
+        noise = app.pipeline.prepare_latents(
+            batch_size=1,
+            channels=int(app.config.in_channels),
+            dtype=torch.float32,
+            generator=torch.Generator().manual_seed(args.seed),
+        )
     mark = time.monotonic()
     frames = app.generate(
         args.prompt,
@@ -120,10 +168,14 @@ def run_difflet(args) -> tuple[torch.Tensor, torch.Tensor, dict]:
     torch.cuda.synchronize()
     timings["generate_s"] = round(time.monotonic() - mark, 1)
     timings["peak_alloc_gb"] = _gb(torch.cuda.max_memory_allocated())
-    print(f"difflet generated in {timings['generate_s']}s", flush=True)
+    print(
+        f"difflet (timestep_dtype={timestep_dtype}) generated in {timings['generate_s']}s",
+        flush=True,
+    )
     video = difflet_unit_video(frames)
     del frames, app, pipe
-    # Free everything before diffusers loads its own two experts + UMT5 + VAE (~70 GB).
+    # Free everything before the next variant or diffusers loads (two experts + UMT5 + VAE,
+    # ~70 GB each).
     torch._dynamo.reset()
     gc.collect()
     torch.cuda.empty_cache()
@@ -172,20 +224,36 @@ def main(argv: list[str] | None = None) -> None:
     os.environ.setdefault("DIFFLET_BACKEND", "cuda")
     device = torch.device("cuda")
     images = Path(args.images_dir)
-    difflet_png = images / "wan_e2e_difflet_frame0.png"
     diffusers_png = images / "wan_e2e_diffusers_frame0.png"
 
-    video_d, noise, timings_d = run_difflet(args)
-    _save(first_frame(video_d), difflet_png)
+    videos: dict[str, torch.Tensor] = {}
+    timings_d: dict[str, dict] = {}
+    noise = None
+    for name in args.timestep_dtypes:
+        videos[name], noise, timings_d[name] = run_difflet(args, timestep_dtype=name, noise=noise)
+        _save(first_frame(videos[name]), variant_png(images, name))
     video_r, timings_r = run_diffusers(args, device, noise)
     _save(first_frame(video_r), diffusers_png)
-    if video_d.shape != video_r.shape:
-        raise SystemExit(
-            f"video shapes differ: difflet {tuple(video_d.shape)} vs diffusers "
-            f"{tuple(video_r.shape)}"
-        )
+    for name, video_d in videos.items():
+        if video_d.shape != video_r.shape:
+            raise SystemExit(
+                f"video shapes differ: difflet ({name}) {tuple(video_d.shape)} vs diffusers "
+                f"{tuple(video_r.shape)}"
+            )
 
-    metrics = image_metrics(video_d, video_r)
+    variants = {}
+    for name, video_d in videos.items():
+        variants[name] = {
+            "metrics": image_metrics(video_d, video_r),
+            "timings": timings_d[name],
+            "image": str(variant_png(images, name)),
+        }
+        print(
+            f"difflet (timestep_dtype={name}) vs diffusers (whole video, pixels in [0,1]): "
+            f"{variants[name]['metrics']}",
+            flush=True,
+        )
+    first = variants[args.timestep_dtypes[0]]
     payload = {
         "model": "wan",
         "model_id": args.model_id,
@@ -197,14 +265,16 @@ def main(argv: list[str] | None = None) -> None:
         "seed": args.seed,
         "shape": [args.height, args.width, args.num_frames],
         "latent_shape": list(noise.shape),
-        "video_shape": list(video_d.shape),
-        "device": torch.cuda.get_device_name(0),
+        "video_shape": list(video_r.shape),
+        "device": _device_name(),
         "torch": torch.__version__,
-        "metrics": metrics,
-        "timings": {"difflet": timings_d, "diffusers": timings_r},
-        "images": {"difflet": str(difflet_png), "diffusers": str(diffusers_png)},
+        "timestep_dtypes": list(args.timestep_dtypes),
+        # The gate's keys: the first variant's.
+        "metrics": first["metrics"],
+        "timings": {"difflet": first["timings"], "diffusers": timings_r},
+        "images": {"difflet": first["image"], "diffusers": str(diffusers_png)},
+        "variants": variants,
     }
-    print(f"difflet vs diffusers (whole video, pixels in [0,1]): {metrics}", flush=True)
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text(json.dumps(payload, indent=2))
     print(f"wrote {args.out}", flush=True)

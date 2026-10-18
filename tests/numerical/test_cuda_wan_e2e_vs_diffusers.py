@@ -7,6 +7,11 @@ GPU-only: the result JSON comes from the script on the pod. The metrics are over
 ``(F, H, W, 3)`` video in [0, 1] on both sides. The floors are the initial F1 floors
 (25 dB / 0.99, as F3 and F5 started); Task 5 tightens them from the first measurement, leaving
 headroom. Both pipelines run bf16, so this is "the same clip", not bit equality.
+
+The script runs Difflet once per ``--timestep-dtypes`` variant (F1b task 2) against one
+diffusers run; the floors judge the top-level ``metrics``, which are the first variant's
+(``float32``, production, in the pod command). Every variant's PSNR and cosine are printed
+(``-rA`` shows them), not gated.
 """
 
 from __future__ import annotations
@@ -45,6 +50,22 @@ def test_video_is_the_same_clip_as_diffusers():
     m = payload["metrics"]
     assert m["psnr_db"] >= MIN_PSNR_DB, f"PSNR {m['psnr_db']:.2f} dB below {MIN_PSNR_DB}"
     assert m["cosine"] >= MIN_COSINE, f"pixel cosine {m['cosine']:.5f} below {MIN_COSINE}"
+
+
+def test_every_timestep_dtype_variant_is_recorded():
+    payload = _result()
+    variants = payload.get("variants")
+    assert variants, "no variants: the result predates F1b task 2; re-run the e2e script"
+    for name, variant in variants.items():
+        for key in ("metrics", "timings", "image"):
+            assert key in variant, (name, key)
+        m = variant["metrics"]
+        print(f"timestep_dtype={name}: PSNR {m['psnr_db']:.2f} dB, cosine {m['cosine']:.5f}")
+    first = next(iter(variants))
+    assert (
+        payload["metrics"] == variants[first]["metrics"]
+    ), f"the gated top-level metrics are not the first variant's ({first})"
+    assert payload["timings"]["difflet"] == variants[first]["timings"], first
 
 
 def test_result_records_the_run():

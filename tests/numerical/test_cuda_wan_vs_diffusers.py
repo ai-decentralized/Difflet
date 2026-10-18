@@ -1,17 +1,21 @@
 """CUDA Wan DiT numerical alignment against Hugging Face diffusers, per expert (CUDA plan F1
-task 4, D14).
+task 4, D14; the rounding block is F1b task 2).
 
 The oracle is the *upstream* ``WanTransformer3DModel``, never another difflet backend. The
-numbers come from one GPU script that runs, for each expert (``transformer`` at timestep 900,
-``transformer_2`` at 500), three forwards on identical seeded inputs — diffusers fp32,
-diffusers bf16 (the control), difflet bf16 through the CUDA ops — and records them:
+numbers come from one GPU script that runs, for each expert, diffusers fp32, diffusers bf16 (the
+control) and difflet bf16 through the CUDA ops on identical seeded inputs, in two blocks:
+``results.sdpa`` at 900 / 500 (exact in bf16) and ``rounding`` at 999 / 750 (bf16 holds them as
+1000 / 752), where upstream gets WanPipeline's int64 timestep and difflet runs with its
+production fp32 timestep (``fp32_timestep``) and with Release 1's bf16 cast (``bf16_timestep``):
 
     DIFFLET_BACKEND=cuda python tests/numerical/cuda_parity_wan_gpu.py --model-path <hf snapshot>
-    DIFFLET_RUN_CUDA_NUMERICAL=1 pytest tests/numerical/test_cuda_wan_vs_diffusers.py -v
+    DIFFLET_RUN_CUDA_NUMERICAL=1 pytest tests/numerical/test_cuda_wan_vs_diffusers.py -v -rA
 
 The gates are the Qwen-Image / Flux ones (tests/numerical/test_cuda_flux_vs_diffusers.py),
-applied to both experts, which the JSON must record: an absolute 0.999 cosine is unreachable for bf16
-itself, so difflet is judged against what bf16 alone costs upstream.
+applied to both experts, which the JSON must record, and to both blocks: an absolute 0.999
+cosine is unreachable for bf16 itself, so difflet is judged against what bf16 alone costs
+upstream at the same timestep. ``bf16_timestep`` is recorded, not gated: its ratios are printed
+(``-rA`` shows them) beside ``fp32_timestep``'s, and a JSON without the rounding block fails.
 """
 
 from __future__ import annotations
@@ -89,6 +93,62 @@ def test_adds_little_on_top_of_what_bf16_costs(expert):
         f"{control['rel_l1']:.3e} that bf16 alone costs upstream, above the "
         f"{MAX_ERROR_RATIO_VS_CONTROL}x allowance"
     )
+
+
+def _rounding(expert: str) -> dict:
+    record = _result()["experts"][expert]
+    assert "rounding" in record, (
+        f"[{expert}] no rounding block in {_path()}: the oracle predates F1b task 2; re-run "
+        "cuda_parity_wan_gpu.py"
+    )
+    return record["rounding"]
+
+
+@pytest.mark.parametrize("expert", EXPERTS)
+def test_rounding_block_sits_inside_the_noise_bf16_already_creates(expert):
+    rounding = _rounding(expert)
+    same_dtype = rounding["fp32_timestep"]["vs_bf16"]
+    control = rounding["control"]
+    t = rounding["timestep"]
+    assert same_dtype["cosine"] >= MIN_ABSOLUTE_COSINE, (
+        f"[{expert}] at {t}, cosine {same_dtype['cosine']:.8f} against the same-dtype upstream "
+        f"reference is below the {MIN_ABSOLUTE_COSINE} floor -- a break, not rounding"
+    )
+    ratio = same_dtype["rel_l1"] / control["rel_l1"]
+    assert ratio <= MAX_SAME_DTYPE_DISTANCE_RATIO, (
+        f"[{expert}] at {t}, difflet (fp32 timestep) is {same_dtype['rel_l1']:.3e} from the "
+        f"same-dtype reference, {ratio:.2f}x the {control['rel_l1']:.3e} that reference is from "
+        "fp32"
+    )
+
+
+@pytest.mark.parametrize("expert", EXPERTS)
+def test_rounding_block_adds_little_on_top_of_what_bf16_costs(expert):
+    rounding = _rounding(expert)
+    control = rounding["control"]
+    entry = rounding["fp32_timestep"]
+    ratio = entry["rel_l1"] / control["rel_l1"]
+    assert ratio <= MAX_ERROR_RATIO_VS_CONTROL, (
+        f"[{expert}] at {rounding['timestep']}, relative error {entry['rel_l1']:.3e} (fp32 "
+        f"timestep) is {ratio:.3f}x the {control['rel_l1']:.3e} that bf16 alone costs upstream, "
+        f"above the {MAX_ERROR_RATIO_VS_CONTROL}x allowance"
+    )
+
+
+@pytest.mark.parametrize("expert", EXPERTS)
+def test_the_bf16_timestep_is_recorded(expert):
+    """Release 1's bf16 cast is the A/B's other arm: it must have run, its ratios are printed
+    beside the production fp32 timestep's, and nothing is gated on them."""
+    rounding = _rounding(expert)
+    control = rounding["control"]
+    for name in ("fp32_timestep", "bf16_timestep"):
+        entry = rounding[name]
+        print(
+            f"[{expert}] rounding @ {rounding['timestep']}: {name} rel_l1 "
+            f"{entry['rel_l1'] / control['rel_l1']:.3f}x control, same-dtype distance "
+            f"{entry['vs_bf16']['rel_l1'] / control['rel_l1']:.3f}x, cosine vs bf16 "
+            f"{entry['vs_bf16']['cosine']:.6f}"
+        )
 
 
 def test_result_records_the_host():
