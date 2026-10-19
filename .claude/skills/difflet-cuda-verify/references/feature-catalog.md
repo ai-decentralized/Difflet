@@ -232,10 +232,11 @@ same padded input 490 ms; diffusers on its real 16-token input 300 ms; Difflet t
 only on one card edition (F3b's open follow-up: characterise Workstation vs Server). **Flux DiT
 bench** (F4c, `scripts/cuda_bench_flux_dit.py`, f4d): Difflet 311.9 vs diffusers 290.5 ms — the
 gap was unfused q/k norms (+11 ms elementwise, +7.5 casts, −8.5 norm) and gemm kernel shapes
-(+10 ms), attention identical. F4e fused the CUDA backend's `RMSNorm` (one `F.rms_norm`): 303.0 vs
-292.0 ms, generate 8.8 vs 8.3 s, e2e 41.58 dB; the gemm half remains (the single block's two
-projection gemms vs diffusers' one). The attention-layout op (F4d) measured as no effect and was
-reverted: the fold copies cost tens of µs, not ms. Artifacts: `artifacts/cuda-release1/f4d/`, `f4e/`.
+(+10 ms), attention identical. F4e fused the CUDA backend's `RMSNorm` (one `F.rms_norm`):
+303.0 vs 292.0 ms, generate 8.8 vs 8.3 s, e2e 41.58 dB; the gemm half remains (the single
+block's two projection gemms vs diffusers' one). The attention-layout op (F4d) measured as no
+effect and was reverted: the fold copies cost tens of µs, not ms. Artifacts:
+`artifacts/cuda-release1/f4d/`, `f4e/`.
 
 ## Two GPUs [F2, f2, 2× Server Edition over PCIe]
 
