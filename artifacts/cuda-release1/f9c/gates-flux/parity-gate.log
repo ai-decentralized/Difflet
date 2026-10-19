@@ -1,0 +1,18 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.14, pytest-9.1.1, pluggy-1.7.0 -- /home/user/Difflet/.venv/bin/python
+neuron gate: active — 25 Trainium-only test modules not collected; Neuron-only failures reported as skips (see tests/_neuron_gate.py)
+rootdir: /home/user/Difflet
+configfile: pyproject.toml
+plugins: xdist-3.8.0, anyio-4.15.1
+collecting ... collected 3 items
+
+tests/numerical/test_cuda_flux_vs_diffusers.py::test_sits_inside_the_noise_bf16_already_creates PASSED [ 33%]
+tests/numerical/test_cuda_flux_vs_diffusers.py::test_adds_little_on_top_of_what_bf16_costs PASSED [ 66%]
+tests/numerical/test_cuda_flux_vs_diffusers.py::test_result_records_the_host PASSED [100%]
+
+==================================== PASSES ====================================
+=========================== short test summary info ============================
+PASSED tests/numerical/test_cuda_flux_vs_diffusers.py::test_sits_inside_the_noise_bf16_already_creates
+PASSED tests/numerical/test_cuda_flux_vs_diffusers.py::test_adds_little_on_top_of_what_bf16_costs
+PASSED tests/numerical/test_cuda_flux_vs_diffusers.py::test_result_records_the_host
+============================== 3 passed in 0.01s ===============================

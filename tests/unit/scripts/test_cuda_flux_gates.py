@@ -336,3 +336,22 @@ def test_the_committed_f4f_floor_runs_merged_over_seeds_pass(tmp_path):
     assert set(out.values()) == {"PASSED"}, out
     assert "relative gate A (mean over 3 seeds): PSNR 38.30 dB, required >= 33.84 dB" in stdout
     assert "relative gate B (every seed): PSNR >= 29.71 dB" in stdout, stdout
+
+
+def test_committed_f9c_runs_over_seeds_pass(tmp_path):
+    # Pod f9c3 (Workstation Edition): seeds 0-7 with the floor, eager and compiled, and
+    # `run_gates.sh flux`'s three-seed e2e; each passes gates A and B with the headroom the
+    # status log states.
+    f9c = REPO / "artifacts/cuda-release1/f9c"
+    expected = {
+        "eager/cuda_e2e_flux_noise.json": "PSNR 36.79 dB, required >= 32.40 dB",
+        "compiled/cuda_e2e_flux_noise.json": "PSNR 38.31 dB, required >= 32.40 dB",
+        "gates-flux/cuda_e2e_flux.json": "PSNR 38.30 dB, required >= 33.84 dB",
+    }
+    for name, line in expected.items():
+        out, stdout = _gate(json.loads((f9c / name).read_text()), tmp_path)
+        assert set(out.values()) == {"PASSED"}, (name, out)
+        assert line in stdout, (name, stdout)
+    out, stdout = _gate(json.loads((f9c / "eager/cuda_e2e_flux_noise.json").read_text()), tmp_path)
+    assert "relative gate B (every seed): PSNR >= 23.02 dB (noise floor min 24.24 dB" in stdout
+    assert "seed 7 difflet vs diffusers: PSNR 24.89 dB" in stdout, stdout

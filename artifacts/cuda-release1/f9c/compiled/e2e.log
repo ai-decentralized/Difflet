@@ -1,0 +1,645 @@
+/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/select_algorithm.py:3686: UserWarning: TypedStorage is deprecated. It will be removed in the future and UntypedStorage will be the only storage class. This should only matter to you if you are using storages directly.  To access UntypedStorage directly, use tensor.untyped_storage() instead of tensor.storage()
+  current_out_size = out_base.storage().size()
+E1019 16:41:09.667000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:09.667000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:09.667000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+E1019 16:41:09.801000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:09.801000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 147456 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:09.801000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+E1019 16:41:10.019000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:10.019000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:10.019000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+E1019 16:41:10.021000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:10.021000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 196608 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:10.021000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+Autotune Choices Stats:
+{"num_choices": 22, "num_triton_choices": 20, "best_kernel": "bias_addmm", "best_time": 0.8212159872055054, "best_triton_pos": 1, "best_triton_time": 0.857088029384613, "best_triton_kernel": "triton_mm_252", "best_triton_kernel_desc": "ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4"}
+AUTOTUNE addmm(4096x12288, 4096x3072, 3072x12288)
+strides: [0, 1], [3072, 1], [1, 3072]
+dtypes: torch.bfloat16, torch.bfloat16, torch.bfloat16
+  bias_addmm 0.8212 ms 100.0% 
+  triton_mm_252 0.8571 ms 95.8% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_253 0.8709 ms 94.3% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  addmm 0.8981 ms 91.4% 
+  triton_mm_251 0.9165 ms 89.6% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=2, num_warps=8
+  triton_mm_247 0.9728 ms 84.4% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_249 1.0066 ms 81.6% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_245 1.0097 ms 81.3% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_250 1.0404 ms 78.9% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8
+  triton_mm_246 1.0424 ms 78.8% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8
+SingleProcess AUTOTUNE benchmarking takes 0.8853 seconds and 0.4302 seconds precompiling for 22 choices
+E1019 16:41:11.223000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:11.223000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:11.223000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+E1019 16:41:11.355000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:11.355000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 147456 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:11.355000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+E1019 16:41:11.574000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:11.574000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:11.574000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+E1019 16:41:11.576000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:11.576000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 196608 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:11.576000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+Autotune Choices Stats:
+{"num_choices": 21, "num_triton_choices": 20, "best_kernel": "triton_mm_272", "best_kernel_desc": "ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4", "best_time": 0.9635840058326721, "best_triton_pos": 0}
+AUTOTUNE mm(4096x12288, 12288x3072)
+strides: [12288, 1], [1, 12288]
+dtypes: torch.bfloat16, torch.bfloat16
+  triton_mm_272 0.9636 ms 100.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_273 0.9708 ms 99.3% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_267 1.0076 ms 95.6% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  mm 1.0394 ms 92.7% 
+  triton_mm_269 1.0700 ms 90.1% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_265 1.0813 ms 89.1% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_271 1.0834 ms 88.9% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=2, num_warps=8
+  triton_mm_266 1.0885 ms 88.5% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8
+  triton_mm_270 1.1049 ms 87.2% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8
+  triton_mm_263 1.2311 ms 78.3% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=8
+SingleProcess AUTOTUNE benchmarking takes 0.7881 seconds and 0.0002 seconds precompiling for 21 choices
+E1019 16:41:12.690000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:12.690000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:12.690000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+E1019 16:41:12.797000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:12.797000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 147456 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:12.797000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+E1019 16:41:12.980000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:12.980000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:12.980000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+E1019 16:41:12.982000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:12.982000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 196608 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:12.982000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+Autotune Choices Stats:
+{"num_choices": 22, "num_triton_choices": 20, "best_kernel": "triton_mm_207", "best_kernel_desc": "ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4", "best_time": 0.15347200632095337, "best_triton_pos": 0}
+AUTOTUNE addmm(512x12288, 512x3072, 3072x12288)
+strides: [0, 1], [3072, 1], [1, 3072]
+dtypes: torch.bfloat16, torch.bfloat16, torch.bfloat16
+  triton_mm_207 0.1535 ms 100.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_213 0.1608 ms 95.5% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_209 0.1612 ms 95.2% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_210 0.1633 ms 94.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8
+  bias_addmm 0.1638 ms 93.7% 
+  triton_mm_206 0.1670 ms 91.9% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8
+  triton_mm_205 0.1670 ms 91.9% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_212 0.1673 ms 91.7% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_203 0.1700 ms 90.3% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=8
+  addmm 0.1761 ms 87.2% 
+SingleProcess AUTOTUNE benchmarking takes 0.9291 seconds and 0.0001 seconds precompiling for 22 choices
+E1019 16:41:13.972000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:13.972000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:13.972000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+E1019 16:41:14.089000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:14.089000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 147456 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:14.089000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+E1019 16:41:14.287000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:14.287000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:14.287000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+E1019 16:41:14.289000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:14.289000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 196608 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:14.289000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+Autotune Choices Stats:
+{"num_choices": 21, "num_triton_choices": 20, "best_kernel": "mm", "best_time": 0.13087999820709229, "best_triton_pos": 1, "best_triton_time": 0.1801919937133789, "best_triton_kernel": "triton_mm_233", "best_triton_kernel_desc": "ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4"}
+AUTOTUNE mm(512x12288, 12288x3072)
+strides: [12288, 1], [1, 12288]
+dtypes: torch.bfloat16, torch.bfloat16
+  mm 0.1309 ms 100.0% 
+  triton_mm_233 0.1802 ms 72.6% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_223 0.1898 ms 69.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=8
+  triton_mm_227 0.1903 ms 68.8% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_225 0.1945 ms 67.3% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_229 0.2048 ms 63.9% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_226 0.2079 ms 63.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8
+  triton_mm_230 0.2089 ms 62.7% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8
+  triton_mm_232 0.2120 ms 61.7% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_220 0.2401 ms 54.5% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=128, BLOCK_M=64, BLOCK_N=32, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=5, num_warps=4
+SingleProcess AUTOTUNE benchmarking takes 0.6951 seconds and 0.0001 seconds precompiling for 21 choices
+E1019 16:41:15.023000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] Exception No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 110592 Hardware limit:101376 Reducing block sizes or `num_stages` may help. for benchmark choice TritonTemplateCaller(/tmp/torchinductor_user/s6/cs6k35mbor457lpn6pxzhtequdcnwbomwdnzn7f2dwgob3y2zlgz.py, ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=128, BLOCK_M=16, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=4)
+E1019 16:41:15.023000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] Traceback (most recent call last):
+E1019 16:41:15.023000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/usr/local/lib/python3.11/concurrent/futures/thread.py", line 58, in run
+E1019 16:41:15.023000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     result = self.fn(*self.args, **self.kwargs)
+E1019 16:41:15.023000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E1019 16:41:15.023000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/select_algorithm.py", line 3464, in precompile_with_captured_stdout
+E1019 16:41:15.023000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     choice.precompile()
+E1019 16:41:15.023000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/select_algorithm.py", line 2388, in precompile
+E1019 16:41:15.023000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     self.bmreq.precompile()
+E1019 16:41:15.023000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/autotune_process.py", line 714, in precompile
+E1019 16:41:15.023000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     getattr(mod, self.kernel_name).precompile()
+E1019 16:41:15.023000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/runtime/triton_heuristics.py", line 503, in precompile
+E1019 16:41:15.023000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     self._make_launchers()
+E1019 16:41:15.023000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/runtime/triton_heuristics.py", line 664, in _make_launchers
+E1019 16:41:15.023000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
+E1019 16:41:15.023000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] RuntimeError: No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 110592 Hardware limit:101376 Reducing block sizes or `num_stages` may help.
+E1019 16:41:15.025000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] Exception No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 110592 Hardware limit:101376 Reducing block sizes or `num_stages` may help. for benchmark choice TritonTemplateCaller(/tmp/torchinductor_user/am/camgcd73qzbn5bz5357hxqwjcmznud574cfi7a43j257xzqrsxpq.py, ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=128, BLOCK_M=16, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8)
+E1019 16:41:15.025000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] Traceback (most recent call last):
+E1019 16:41:15.025000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/usr/local/lib/python3.11/concurrent/futures/thread.py", line 58, in run
+E1019 16:41:15.025000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     result = self.fn(*self.args, **self.kwargs)
+E1019 16:41:15.025000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E1019 16:41:15.025000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/select_algorithm.py", line 3464, in precompile_with_captured_stdout
+E1019 16:41:15.025000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     choice.precompile()
+E1019 16:41:15.025000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/select_algorithm.py", line 2388, in precompile
+E1019 16:41:15.025000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     self.bmreq.precompile()
+E1019 16:41:15.025000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/autotune_process.py", line 714, in precompile
+E1019 16:41:15.025000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     getattr(mod, self.kernel_name).precompile()
+E1019 16:41:15.025000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/runtime/triton_heuristics.py", line 503, in precompile
+E1019 16:41:15.025000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     self._make_launchers()
+E1019 16:41:15.025000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/runtime/triton_heuristics.py", line 664, in _make_launchers
+E1019 16:41:15.025000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
+E1019 16:41:15.025000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] RuntimeError: No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 110592 Hardware limit:101376 Reducing block sizes or `num_stages` may help.
+Autotune Choices Stats:
+{"num_choices": 18, "num_triton_choices": 16, "best_kernel": "triton_mm_16", "best_kernel_desc": "ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=16, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=5, num_warps=8", "best_time": 0.07782399654388428, "best_triton_pos": 0}
+AUTOTUNE addmm(1x18432, 1x3072, 3072x18432)
+strides: [0, 1], [3072, 1], [1, 3072]
+dtypes: torch.bfloat16, torch.bfloat16, torch.bfloat16
+  triton_mm_16 0.0778 ms 100.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=16, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=5, num_warps=8
+  triton_mm_8 0.0799 ms 97.4% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=128, BLOCK_M=16, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=5, num_warps=4
+  triton_mm_11 0.0799 ms 97.4% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=16, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_7 0.0829 ms 93.8% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=16, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  bias_addmm 0.0836 ms 93.1% 
+  addmm 0.0860 ms 90.5% 
+  triton_mm_4 0.0900 ms 86.4% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=128, BLOCK_M=16, BLOCK_N=32, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=5, num_warps=2
+  triton_mm_2 0.0942 ms 82.6% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=16, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=5, num_warps=4
+  triton_mm_13 0.1003 ms 77.6% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=16, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_14 0.1034 ms 75.3% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=16, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=4
+SingleProcess AUTOTUNE benchmarking takes 0.5187 seconds and 0.0045 seconds precompiling for 18 choices
+E1019 16:41:15.950000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:15.950000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 110592 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:15.950000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+E1019 16:41:16.067000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:16.067000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 110592 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:16.067000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+Autotune Choices Stats:
+{"num_choices": 20, "num_triton_choices": 18, "best_kernel": "triton_mm_34", "best_kernel_desc": "ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=16, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=5, num_warps=8", "best_time": 0.07782399654388428, "best_triton_pos": 0}
+AUTOTUNE addmm(1x18432, 1x3072, 3072x18432)
+strides: [0, 1], [3072, 1], [1, 3072]
+dtypes: torch.bfloat16, torch.bfloat16, torch.bfloat16
+  triton_mm_34 0.0778 ms 100.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=16, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=5, num_warps=8
+  triton_mm_26 0.0794 ms 98.1% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=128, BLOCK_M=16, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=5, num_warps=4
+  triton_mm_29 0.0805 ms 96.7% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=16, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  bias_addmm 0.0838 ms 92.9% 
+  triton_mm_25 0.0839 ms 92.7% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=16, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  addmm 0.0854 ms 91.2% 
+  triton_mm_22 0.0895 ms 86.9% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=128, BLOCK_M=16, BLOCK_N=32, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=5, num_warps=2
+  triton_mm_20 0.0942 ms 82.6% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=16, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=5, num_warps=4
+  triton_mm_31 0.1004 ms 77.6% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=16, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_32 0.1019 ms 76.4% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=16, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=4
+SingleProcess AUTOTUNE benchmarking takes 0.5210 seconds and 0.0000 seconds precompiling for 20 choices
+E1019 16:41:16.068000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] Exception No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 196608 Hardware limit:101376 Reducing block sizes or `num_stages` may help. for benchmark choice TritonTemplateCaller(/tmp/torchinductor_user/5m/c5m6y7ojrkrd7hgpuv7mkbn56nnee4rfcdibrey7ttumcrfx7hxj.py, ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=128, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8)
+E1019 16:41:16.068000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] Traceback (most recent call last):
+E1019 16:41:16.068000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/usr/local/lib/python3.11/concurrent/futures/thread.py", line 58, in run
+E1019 16:41:16.068000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     result = self.fn(*self.args, **self.kwargs)
+E1019 16:41:16.068000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E1019 16:41:16.068000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/select_algorithm.py", line 3464, in precompile_with_captured_stdout
+E1019 16:41:16.068000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     choice.precompile()
+E1019 16:41:16.068000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/select_algorithm.py", line 2388, in precompile
+E1019 16:41:16.068000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     self.bmreq.precompile()
+E1019 16:41:16.068000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/autotune_process.py", line 714, in precompile
+E1019 16:41:16.068000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     getattr(mod, self.kernel_name).precompile()
+E1019 16:41:16.068000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/runtime/triton_heuristics.py", line 503, in precompile
+E1019 16:41:16.068000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     self._make_launchers()
+E1019 16:41:16.068000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/runtime/triton_heuristics.py", line 664, in _make_launchers
+E1019 16:41:16.068000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
+E1019 16:41:16.068000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] RuntimeError: No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 196608 Hardware limit:101376 Reducing block sizes or `num_stages` may help.
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] Exception No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help. for benchmark choice TritonTemplateCaller(/tmp/torchinductor_user/zc/czcszqubmztqhybj6qzmhwnaghmz3z3slvihxcmuwkzjrvnefdei.py, ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=5, num_warps=8)
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] Traceback (most recent call last):
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/usr/local/lib/python3.11/concurrent/futures/thread.py", line 58, in run
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     result = self.fn(*self.args, **self.kwargs)
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/select_algorithm.py", line 3464, in precompile_with_captured_stdout
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     choice.precompile()
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/select_algorithm.py", line 2388, in precompile
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     self.bmreq.precompile()
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/autotune_process.py", line 714, in precompile
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     getattr(mod, self.kernel_name).precompile()
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/runtime/triton_heuristics.py", line 503, in precompile
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     self._make_launchers()
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/runtime/triton_heuristics.py", line 664, in _make_launchers
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] RuntimeError: No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help.
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] Exception No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help. for benchmark choice TritonTemplateCaller(/tmp/torchinductor_user/z5/cz5fx64acpnligd2kogpmkwcie4baqbcztr3cpcvnoiku3q7e3wg.py, ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=128, BLOCK_M=64, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=5, num_warps=4)
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] Traceback (most recent call last):
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/usr/local/lib/python3.11/concurrent/futures/thread.py", line 58, in run
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     result = self.fn(*self.args, **self.kwargs)
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/select_algorithm.py", line 3464, in precompile_with_captured_stdout
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     choice.precompile()
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/select_algorithm.py", line 2388, in precompile
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     self.bmreq.precompile()
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/autotune_process.py", line 714, in precompile
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     getattr(mod, self.kernel_name).precompile()
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/runtime/triton_heuristics.py", line 503, in precompile
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     self._make_launchers()
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/runtime/triton_heuristics.py", line 664, in _make_launchers
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] RuntimeError: No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help.
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] Exception No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 147456 Hardware limit:101376 Reducing block sizes or `num_stages` may help. for benchmark choice TritonTemplateCaller(/tmp/torchinductor_user/6t/c6tewvook76ayj3qeivllr7klubjngcbr7dpqwq3m35cc5rmewcj.py, ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=128, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=4)
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] Traceback (most recent call last):
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/usr/local/lib/python3.11/concurrent/futures/thread.py", line 58, in run
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     result = self.fn(*self.args, **self.kwargs)
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/select_algorithm.py", line 3464, in precompile_with_captured_stdout
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     choice.precompile()
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/select_algorithm.py", line 2388, in precompile
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     self.bmreq.precompile()
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/autotune_process.py", line 714, in precompile
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     getattr(mod, self.kernel_name).precompile()
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/runtime/triton_heuristics.py", line 503, in precompile
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     self._make_launchers()
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/runtime/triton_heuristics.py", line 664, in _make_launchers
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
+E1019 16:41:16.069000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] RuntimeError: No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 147456 Hardware limit:101376 Reducing block sizes or `num_stages` may help.
+Autotune Choices Stats:
+{"num_choices": 18, "num_triton_choices": 16, "best_kernel": "triton_mm_43", "best_kernel_desc": "ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=8", "best_time": 0.04710400104522705, "best_triton_pos": 0}
+AUTOTUNE addmm(512x3072, 512x3072, 3072x3072)
+strides: [0, 1], [3072, 1], [1, 3072]
+dtypes: torch.bfloat16, torch.bfloat16, torch.bfloat16
+  triton_mm_43 0.0471 ms 100.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=8
+  triton_mm_47 0.0486 ms 97.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  bias_addmm 0.0491 ms 95.9% 
+  triton_mm_53 0.0547 ms 86.2% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_50 0.0588 ms 80.1% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8
+  triton_mm_46 0.0594 ms 79.3% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8
+  triton_mm_45 0.0633 ms 74.4% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_49 0.0635 ms 74.2% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_52 0.0676 ms 69.7% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_40 0.0696 ms 67.6% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=128, BLOCK_M=64, BLOCK_N=32, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=5, num_warps=4
+SingleProcess AUTOTUNE benchmarking takes 0.4310 seconds and 0.0042 seconds precompiling for 18 choices
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] Exception No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 147456 Hardware limit:101376 Reducing block sizes or `num_stages` may help. for benchmark choice TritonTemplateCaller(/tmp/torchinductor_user/6n/c6ncjbadxn3fd35cu6xt5vaqw6atfjl2d5skiecwky35ij2l6nvn.py, ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=128, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=4)
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] Traceback (most recent call last):
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/usr/local/lib/python3.11/concurrent/futures/thread.py", line 58, in run
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     result = self.fn(*self.args, **self.kwargs)
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/select_algorithm.py", line 3464, in precompile_with_captured_stdout
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     choice.precompile()
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/select_algorithm.py", line 2388, in precompile
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     self.bmreq.precompile()
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/autotune_process.py", line 714, in precompile
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     getattr(mod, self.kernel_name).precompile()
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/runtime/triton_heuristics.py", line 503, in precompile
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     self._make_launchers()
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/runtime/triton_heuristics.py", line 664, in _make_launchers
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] RuntimeError: No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 147456 Hardware limit:101376 Reducing block sizes or `num_stages` may help.
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] Exception No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 196608 Hardware limit:101376 Reducing block sizes or `num_stages` may help. for benchmark choice TritonTemplateCaller(/tmp/torchinductor_user/4d/c4dafgj2dz557a77r23cprcp6u2xss6zvsass6ewjhw7mouunb67.py, ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=128, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8)
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] Traceback (most recent call last):
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/usr/local/lib/python3.11/concurrent/futures/thread.py", line 58, in run
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     result = self.fn(*self.args, **self.kwargs)
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/select_algorithm.py", line 3464, in precompile_with_captured_stdout
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     choice.precompile()
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/select_algorithm.py", line 2388, in precompile
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     self.bmreq.precompile()
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/autotune_process.py", line 714, in precompile
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     getattr(mod, self.kernel_name).precompile()
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/runtime/triton_heuristics.py", line 503, in precompile
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     self._make_launchers()
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/runtime/triton_heuristics.py", line 664, in _make_launchers
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
+E1019 16:41:16.504000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] RuntimeError: No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 196608 Hardware limit:101376 Reducing block sizes or `num_stages` may help.
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] Exception No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help. for benchmark choice TritonTemplateCaller(/tmp/torchinductor_user/mp/cmpb6k3yhpofrurmkaspeddvqhyjqnxky74qebeno7p73wmwi5uo.py, ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=128, BLOCK_M=64, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=5, num_warps=4)
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] Traceback (most recent call last):
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/usr/local/lib/python3.11/concurrent/futures/thread.py", line 58, in run
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     result = self.fn(*self.args, **self.kwargs)
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/select_algorithm.py", line 3464, in precompile_with_captured_stdout
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     choice.precompile()
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/select_algorithm.py", line 2388, in precompile
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     self.bmreq.precompile()
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/autotune_process.py", line 714, in precompile
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     getattr(mod, self.kernel_name).precompile()
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/runtime/triton_heuristics.py", line 503, in precompile
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     self._make_launchers()
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/runtime/triton_heuristics.py", line 664, in _make_launchers
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] RuntimeError: No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help.
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] Exception No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help. for benchmark choice TritonTemplateCaller(/tmp/torchinductor_user/rn/crnbuzzgfx233qkn7f47xkcgiknfzn5wcr7xoqsr4oqpq7nukyp5.py, ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=5, num_warps=8)
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] Traceback (most recent call last):
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/usr/local/lib/python3.11/concurrent/futures/thread.py", line 58, in run
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     result = self.fn(*self.args, **self.kwargs)
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/select_algorithm.py", line 3464, in precompile_with_captured_stdout
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     choice.precompile()
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/select_algorithm.py", line 2388, in precompile
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     self.bmreq.precompile()
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/autotune_process.py", line 714, in precompile
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     getattr(mod, self.kernel_name).precompile()
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/runtime/triton_heuristics.py", line 503, in precompile
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     self._make_launchers()
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]   File "/home/user/Difflet/.venv/lib/python3.11/site-packages/torch/_inductor/runtime/triton_heuristics.py", line 664, in _make_launchers
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0]     raise RuntimeError(f"No valid triton configs. {type(exc).__name__}: {exc}")
+E1019 16:41:16.505000 1032 torch/_inductor/select_algorithm.py:3541] [0/0] RuntimeError: No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help.
+Autotune Choices Stats:
+{"num_choices": 18, "num_triton_choices": 16, "best_kernel": "triton_mm_72", "best_kernel_desc": "ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4", "best_time": 0.24777600169181824, "best_triton_pos": 0}
+AUTOTUNE addmm(4096x3072, 4096x3072, 3072x3072)
+strides: [0, 1], [3072, 1], [1, 3072]
+dtypes: torch.bfloat16, torch.bfloat16, torch.bfloat16
+  triton_mm_72 0.2478 ms 100.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_73 0.2555 ms 97.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_67 0.2621 ms 94.5% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  bias_addmm 0.2636 ms 94.0% 
+  triton_mm_69 0.2704 ms 91.6% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_71 0.2739 ms 90.5% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=2, num_warps=8
+  triton_mm_65 0.2744 ms 90.3% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  addmm 0.2765 ms 89.6% 
+  triton_mm_66 0.2770 ms 89.5% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8
+  triton_mm_70 0.2785 ms 89.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8
+SingleProcess AUTOTUNE benchmarking takes 0.7397 seconds and 0.0045 seconds precompiling for 18 choices
+E1019 16:41:17.501000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:17.501000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:17.501000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+E1019 16:41:17.566000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:17.566000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 147456 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:17.566000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+E1019 16:41:17.680000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:17.680000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:17.680000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+E1019 16:41:17.680000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:17.680000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 196608 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:17.680000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+Autotune Choices Stats:
+{"num_choices": 22, "num_triton_choices": 20, "best_kernel": "triton_mm_87", "best_kernel_desc": "ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4", "best_time": 0.048608001321554184, "best_triton_pos": 0}
+AUTOTUNE addmm(512x3072, 512x3072, 3072x3072)
+strides: [0, 1], [3072, 1], [1, 3072]
+dtypes: torch.bfloat16, torch.bfloat16, torch.bfloat16
+  triton_mm_87 0.0486 ms 100.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  bias_addmm 0.0490 ms 99.2% 
+  triton_mm_83 0.0491 ms 99.1% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=8
+  triton_mm_93 0.0551 ms 88.2% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_90 0.0593 ms 81.9% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8
+  triton_mm_86 0.0608 ms 79.9% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8
+  triton_mm_85 0.0626 ms 77.6% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_89 0.0628 ms 77.3% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_92 0.0676 ms 71.9% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_80 0.0701 ms 69.3% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=128, BLOCK_M=64, BLOCK_N=32, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=5, num_warps=4
+SingleProcess AUTOTUNE benchmarking takes 0.4326 seconds and 0.0000 seconds precompiling for 22 choices
+E1019 16:41:18.088000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:18.088000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:18.088000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+E1019 16:41:18.213000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:18.213000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 147456 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:18.213000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+E1019 16:41:18.421000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:18.421000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:18.421000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+E1019 16:41:18.421000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:18.421000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 196608 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:18.421000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+Autotune Choices Stats:
+{"num_choices": 22, "num_triton_choices": 20, "best_kernel": "triton_mm_112", "best_kernel_desc": "ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4", "best_time": 0.2489600032567978, "best_triton_pos": 0}
+AUTOTUNE addmm(4096x3072, 4096x3072, 3072x3072)
+strides: [0, 1], [3072, 1], [1, 3072]
+dtypes: torch.bfloat16, torch.bfloat16, torch.bfloat16
+  triton_mm_112 0.2490 ms 100.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_113 0.2560 ms 97.3% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_107 0.2621 ms 95.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  bias_addmm 0.2622 ms 95.0% 
+  triton_mm_109 0.2714 ms 91.7% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_105 0.2734 ms 91.1% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_111 0.2743 ms 90.8% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=2, num_warps=8
+  triton_mm_106 0.2790 ms 89.2% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8
+  addmm 0.2801 ms 88.9% 
+  triton_mm_110 0.2801 ms 88.9% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8
+SingleProcess AUTOTUNE benchmarking takes 0.7409 seconds and 0.0000 seconds precompiling for 22 choices
+E1019 16:41:18.814000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:18.814000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:18.814000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+E1019 16:41:18.948000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:18.948000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 147456 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:18.948000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+E1019 16:41:19.171000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:19.171000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:19.171000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+E1019 16:41:19.173000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:19.173000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 196608 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:19.173000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+Autotune Choices Stats:
+{"num_choices": 21, "num_triton_choices": 20, "best_kernel": "triton_mm_172", "best_kernel_desc": "ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4", "best_time": 0.24729600548744202, "best_triton_pos": 0}
+AUTOTUNE mm(4096x3072, 3072x3072)
+strides: [3072, 1], [1, 3072]
+dtypes: torch.bfloat16, torch.bfloat16
+  triton_mm_172 0.2473 ms 100.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_173 0.2534 ms 97.6% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  mm 0.2621 ms 94.3% 
+  triton_mm_167 0.2621 ms 94.3% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_169 0.2703 ms 91.5% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_165 0.2718 ms 91.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_171 0.2724 ms 90.8% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=2, num_warps=8
+  triton_mm_166 0.2775 ms 89.1% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8
+  triton_mm_170 0.2775 ms 89.1% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8
+  triton_mm_163 0.3139 ms 78.8% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=8
+SingleProcess AUTOTUNE benchmarking takes 0.7505 seconds and 0.0001 seconds precompiling for 21 choices
+E1019 16:41:19.427000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:19.427000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:19.427000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+E1019 16:41:19.500000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:19.500000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 147456 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:19.500000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+E1019 16:41:19.627000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:19.627000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:19.627000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+E1019 16:41:19.630000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Runtime error during autotuning: 
+E1019 16:41:19.630000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 196608 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:19.630000 1032 torch/_inductor/select_algorithm.py:3924] [0/0] Ignoring this choice.
+Autotune Choices Stats:
+{"num_choices": 21, "num_triton_choices": 20, "best_kernel": "triton_mm_183", "best_kernel_desc": "ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=8", "best_time": 0.04848000034689903, "best_triton_pos": 0}
+AUTOTUNE mm(512x3072, 3072x3072)
+strides: [3072, 1], [1, 3072]
+dtypes: torch.bfloat16, torch.bfloat16
+  triton_mm_183 0.0485 ms 100.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=8
+  triton_mm_187 0.0487 ms 99.6% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_193 0.0546 ms 88.8% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_190 0.0588 ms 82.4% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8
+  triton_mm_186 0.0592 ms 81.8% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8
+  triton_mm_185 0.0635 ms 76.4% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_189 0.0635 ms 76.4% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_180 0.0671 ms 72.3% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=128, BLOCK_M=64, BLOCK_N=32, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=5, num_warps=4
+  triton_mm_192 0.0676 ms 71.7% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_179 0.0753 ms 64.4% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=32, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=5, num_warps=8
+SingleProcess AUTOTUNE benchmarking takes 0.4566 seconds and 0.0002 seconds precompiling for 21 choices
+E1019 16:41:36.963000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Runtime error during autotuning: 
+E1019 16:41:36.963000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:36.963000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Ignoring this choice.
+E1019 16:41:37.101000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Runtime error during autotuning: 
+E1019 16:41:37.101000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 147456 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:37.101000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Ignoring this choice.
+E1019 16:41:37.329000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Runtime error during autotuning: 
+E1019 16:41:37.329000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:37.329000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Ignoring this choice.
+E1019 16:41:37.331000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Runtime error during autotuning: 
+E1019 16:41:37.331000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 196608 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:37.331000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Ignoring this choice.
+Autotune Choices Stats:
+{"num_choices": 22, "num_triton_choices": 20, "best_kernel": "bias_addmm", "best_time": 1.2318079471588135, "best_triton_pos": 1, "best_triton_time": 1.2625919580459595, "best_triton_kernel": "triton_mm_390", "best_triton_kernel_desc": "ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4"}
+AUTOTUNE addmm(4608x3072, 4608x15360, 15360x3072)
+strides: [0, 1], [15360, 1], [1, 15360]
+dtypes: torch.bfloat16, torch.bfloat16, torch.bfloat16
+  bias_addmm 1.2318 ms 100.0% 
+  triton_mm_390 1.2626 ms 97.6% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_391 1.2687 ms 97.1% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  addmm 1.3363 ms 92.2% 
+  triton_mm_385 1.4213 ms 86.7% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_389 1.4588 ms 84.4% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=2, num_warps=8
+  triton_mm_383 1.5069 ms 81.7% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_387 1.5100 ms 81.6% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_384 1.5371 ms 80.1% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8
+  triton_mm_388 1.5733 ms 78.3% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8
+SingleProcess AUTOTUNE benchmarking takes 0.9041 seconds and 0.2278 seconds precompiling for 22 choices
+E1019 16:41:38.167000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Runtime error during autotuning: 
+E1019 16:41:38.167000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 110592 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:38.167000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Ignoring this choice.
+E1019 16:41:38.272000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Runtime error during autotuning: 
+E1019 16:41:38.272000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 110592 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:38.272000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Ignoring this choice.
+Autotune Choices Stats:
+{"num_choices": 20, "num_triton_choices": 18, "best_kernel": "triton_mm_292", "best_kernel_desc": "ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=16, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=5, num_warps=8", "best_time": 0.04195199906826019, "best_triton_pos": 0}
+AUTOTUNE addmm(1x9216, 1x3072, 3072x9216)
+strides: [0, 1], [3072, 1], [1, 3072]
+dtypes: torch.bfloat16, torch.bfloat16, torch.bfloat16
+  triton_mm_292 0.0420 ms 100.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=16, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=5, num_warps=8
+  triton_mm_284 0.0430 ms 97.5% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=128, BLOCK_M=16, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=5, num_warps=4
+  bias_addmm 0.0470 ms 89.3% 
+  triton_mm_287 0.0470 ms 89.2% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=16, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_278 0.0487 ms 86.2% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=16, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=5, num_warps=4
+  triton_mm_280 0.0491 ms 85.4% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=128, BLOCK_M=16, BLOCK_N=32, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=5, num_warps=2
+  addmm 0.0492 ms 85.4% 
+  triton_mm_283 0.0492 ms 85.2% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=16, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_286 0.0532 ms 78.8% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=16, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8
+  triton_mm_290 0.0532 ms 78.8% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=16, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=4
+SingleProcess AUTOTUNE benchmarking takes 0.4816 seconds and 0.0001 seconds precompiling for 20 choices
+E1019 16:41:38.704000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Runtime error during autotuning: 
+E1019 16:41:38.704000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:38.704000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Ignoring this choice.
+E1019 16:41:38.838000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Runtime error during autotuning: 
+E1019 16:41:38.838000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 147456 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:38.838000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Ignoring this choice.
+E1019 16:41:39.061000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Runtime error during autotuning: 
+E1019 16:41:39.061000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:39.061000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Ignoring this choice.
+E1019 16:41:39.063000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Runtime error during autotuning: 
+E1019 16:41:39.063000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 196608 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:39.063000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Ignoring this choice.
+Autotune Choices Stats:
+{"num_choices": 22, "num_triton_choices": 20, "best_kernel": "triton_mm_310", "best_kernel_desc": "ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4", "best_time": 0.2539840042591095, "best_triton_pos": 0}
+AUTOTUNE addmm(4608x3072, 4608x3072, 3072x3072)
+strides: [0, 1], [3072, 1], [1, 3072]
+dtypes: torch.bfloat16, torch.bfloat16, torch.bfloat16
+  triton_mm_310 0.2540 ms 100.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_311 0.2580 ms 98.4% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  bias_addmm 0.2693 ms 94.3% 
+  addmm 0.2838 ms 89.5% 
+  triton_mm_309 0.2882 ms 88.1% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=2, num_warps=8
+  triton_mm_305 0.2898 ms 87.6% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_307 0.3011 ms 84.4% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_303 0.3025 ms 84.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_308 0.3057 ms 83.1% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8
+  triton_mm_304 0.3062 ms 83.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8
+SingleProcess AUTOTUNE benchmarking takes 0.7904 seconds and 0.0001 seconds precompiling for 22 choices
+E1019 16:41:39.552000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Runtime error during autotuning: 
+E1019 16:41:39.552000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:39.552000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Ignoring this choice.
+E1019 16:41:39.687000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Runtime error during autotuning: 
+E1019 16:41:39.687000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 147456 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:39.687000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Ignoring this choice.
+E1019 16:41:39.908000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Runtime error during autotuning: 
+E1019 16:41:39.908000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 131072 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:39.908000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Ignoring this choice.
+E1019 16:41:39.911000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Runtime error during autotuning: 
+E1019 16:41:39.911000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] No valid triton configs. OutOfMemoryError: out of resource: triton_mm Required: 196608 Hardware limit:101376 Reducing block sizes or `num_stages` may help.. 
+E1019 16:41:39.911000 1032 torch/_inductor/select_algorithm.py:3924] [1/0] Ignoring this choice.
+Autotune Choices Stats:
+{"num_choices": 22, "num_triton_choices": 20, "best_kernel": "bias_addmm", "best_time": 0.9107199907302856, "best_triton_pos": 1, "best_triton_time": 0.9574400186538696, "best_triton_kernel": "triton_mm_370", "best_triton_kernel_desc": "ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4"}
+AUTOTUNE addmm(4608x12288, 4608x3072, 3072x12288)
+strides: [0, 1], [3072, 1], [1, 3072]
+dtypes: torch.bfloat16, torch.bfloat16, torch.bfloat16
+  bias_addmm 0.9107 ms 100.0% 
+  triton_mm_370 0.9574 ms 95.1% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_371 0.9692 ms 94.0% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  addmm 1.0036 ms 90.7% 
+  triton_mm_369 1.0260 ms 88.8% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=2, num_warps=8
+  triton_mm_365 1.0869 ms 83.8% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=64, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_363 1.1227 ms 81.1% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_367 1.1233 ms 81.1% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=3, num_warps=4
+  triton_mm_368 1.1614 ms 78.4% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=128, BLOCK_N=64, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8
+  triton_mm_364 1.1663 ms 78.1% ACC_TYPE='tl.float32', ALLOW_TF32=False, BLOCK_K=32, BLOCK_M=64, BLOCK_N=128, EVEN_K=True, GROUP_M=8, USE_FAST_ACCUM=False, num_stages=4, num_warps=8
+SingleProcess AUTOTUNE benchmarking takes 0.8466 seconds and 0.0001 seconds precompiling for 22 choices
+[transformers] `CLIPImageProcessor` requires torchvision (not installed); falling back to `CLIPImageProcessorPil` for backward compatibility. Install torchvision to use the default backend, or import `CLIPImageProcessorPil` directly to silence this warning.
+[transformers] `SiglipImageProcessor` requires torchvision (not installed); falling back to `SiglipImageProcessorPil` for backward compatibility. Install torchvision to use the default backend, or import `SiglipImageProcessorPil` directly to silence this warning.
+Loading pipeline components...:   0%|          | 0/6 [00:00<?, ?it/s]
+Loading weights:   0%|          | 0/196 [00:00<?, ?it/s][ALoading weights: 100%|██████████| 196/196 [00:00<00:00, 9160.52it/s]
+Loading pipeline components...:  50%|█████     | 3/6 [00:00<00:00, 22.91it/s]
+Loading weights:   0%|          | 0/219 [00:00<?, ?it/s][ALoading weights: 100%|██████████| 219/219 [00:00<00:00, 6270.54it/s]
+Loading pipeline components...: 100%|██████████| 6/6 [00:00<00:00,  6.23it/s]Loading pipeline components...: 100%|██████████| 6/6 [00:00<00:00,  6.99it/s]
+difflet loaded in 77.8s
+  0%|          | 0/28 [00:00<?, ?it/s]  7%|▋         | 2/28 [00:00<00:04,  5.66it/s] 11%|█         | 3/28 [00:00<00:05,  4.85it/s] 14%|█▍        | 4/28 [00:00<00:05,  4.44it/s] 18%|█▊        | 5/28 [00:01<00:05,  4.23it/s] 21%|██▏       | 6/28 [00:01<00:05,  4.10it/s] 25%|██▌       | 7/28 [00:01<00:05,  4.03it/s] 29%|██▊       | 8/28 [00:01<00:05,  3.97it/s] 32%|███▏      | 9/28 [00:02<00:04,  3.94it/s] 36%|███▌      | 10/28 [00:02<00:04,  3.92it/s] 39%|███▉      | 11/28 [00:02<00:04,  3.90it/s] 43%|████▎     | 12/28 [00:02<00:04,  3.89it/s] 46%|████▋     | 13/28 [00:03<00:03,  3.88it/s] 50%|█████     | 14/28 [00:03<00:03,  3.87it/s] 54%|█████▎    | 15/28 [00:03<00:03,  3.87it/s] 57%|█████▋    | 16/28 [00:03<00:03,  3.86it/s] 61%|██████    | 17/28 [00:04<00:02,  3.86it/s] 64%|██████▍   | 18/28 [00:04<00:02,  3.86it/s] 68%|██████▊   | 19/28 [00:04<00:02,  3.85it/s] 71%|███████▏  | 20/28 [00:05<00:02,  3.85it/s] 75%|███████▌  | 21/28 [00:05<00:01,  3.85it/s] 79%|███████▊  | 22/28 [00:05<00:01,  3.85it/s] 82%|████████▏ | 23/28 [00:05<00:01,  3.85it/s] 86%|████████▌ | 24/28 [00:06<00:01,  3.84it/s] 89%|████████▉ | 25/28 [00:06<00:00,  3.84it/s] 93%|█████████▎| 26/28 [00:06<00:00,  3.84it/s] 96%|█████████▋| 27/28 [00:06<00:00,  3.84it/s]100%|██████████| 28/28 [00:07<00:00,  3.83it/s]100%|██████████| 28/28 [00:07<00:00,  3.95it/s]
+difflet (seed 0) generated in 7.8s
+  0%|          | 0/28 [00:00<?, ?it/s]  7%|▋         | 2/28 [00:00<00:03,  7.28it/s] 11%|█         | 3/28 [00:00<00:04,  5.31it/s] 14%|█▍        | 4/28 [00:00<00:05,  4.64it/s] 18%|█▊        | 5/28 [00:01<00:05,  4.32it/s] 21%|██▏       | 6/28 [00:01<00:05,  4.14it/s] 25%|██▌       | 7/28 [00:01<00:05,  4.03it/s] 29%|██▊       | 8/28 [00:01<00:05,  3.96it/s] 32%|███▏      | 9/28 [00:02<00:04,  3.92it/s] 36%|███▌      | 10/28 [00:02<00:04,  3.89it/s] 39%|███▉      | 11/28 [00:02<00:04,  3.86it/s] 43%|████▎     | 12/28 [00:02<00:04,  3.85it/s] 46%|████▋     | 13/28 [00:03<00:03,  3.84it/s] 50%|█████     | 14/28 [00:03<00:03,  3.83it/s] 54%|█████▎    | 15/28 [00:03<00:03,  3.83it/s] 57%|█████▋    | 16/28 [00:03<00:03,  3.82it/s] 61%|██████    | 17/28 [00:04<00:02,  3.82it/s] 64%|██████▍   | 18/28 [00:04<00:02,  3.82it/s] 68%|██████▊   | 19/28 [00:04<00:02,  3.82it/s] 71%|███████▏  | 20/28 [00:04<00:02,  3.82it/s] 75%|███████▌  | 21/28 [00:05<00:01,  3.81it/s] 79%|███████▊  | 22/28 [00:05<00:01,  3.81it/s] 82%|████████▏ | 23/28 [00:05<00:01,  3.81it/s] 86%|████████▌ | 24/28 [00:06<00:01,  3.81it/s] 89%|████████▉ | 25/28 [00:06<00:00,  3.81it/s] 93%|█████████▎| 26/28 [00:06<00:00,  3.81it/s] 96%|█████████▋| 27/28 [00:06<00:00,  3.81it/s]100%|██████████| 28/28 [00:07<00:00,  3.81it/s]100%|██████████| 28/28 [00:07<00:00,  3.95it/s]
+difflet (seed 1) generated in 7.5s
+  0%|          | 0/28 [00:00<?, ?it/s]  7%|▋         | 2/28 [00:00<00:03,  7.24it/s] 11%|█         | 3/28 [00:00<00:04,  5.27it/s] 14%|█▍        | 4/28 [00:00<00:05,  4.60it/s] 18%|█▊        | 5/28 [00:01<00:05,  4.29it/s] 21%|██▏       | 6/28 [00:01<00:05,  4.11it/s] 25%|██▌       | 7/28 [00:01<00:05,  4.01it/s] 29%|██▊       | 8/28 [00:01<00:05,  3.94it/s] 32%|███▏      | 9/28 [00:02<00:04,  3.89it/s] 36%|███▌      | 10/28 [00:02<00:04,  3.86it/s] 39%|███▉      | 11/28 [00:02<00:04,  3.84it/s] 43%|████▎     | 12/28 [00:02<00:04,  3.83it/s] 46%|████▋     | 13/28 [00:03<00:03,  3.82it/s] 50%|█████     | 14/28 [00:03<00:03,  3.81it/s] 54%|█████▎    | 15/28 [00:03<00:03,  3.81it/s] 57%|█████▋    | 16/28 [00:03<00:03,  3.81it/s] 61%|██████    | 17/28 [00:04<00:02,  3.80it/s] 64%|██████▍   | 18/28 [00:04<00:02,  3.80it/s] 68%|██████▊   | 19/28 [00:04<00:02,  3.80it/s] 71%|███████▏  | 20/28 [00:05<00:02,  3.80it/s] 75%|███████▌  | 21/28 [00:05<00:01,  3.80it/s] 79%|███████▊  | 22/28 [00:05<00:01,  3.80it/s] 82%|████████▏ | 23/28 [00:05<00:01,  3.79it/s] 86%|████████▌ | 24/28 [00:06<00:01,  3.79it/s] 89%|████████▉ | 25/28 [00:06<00:00,  3.79it/s] 93%|█████████▎| 26/28 [00:06<00:00,  3.79it/s] 96%|█████████▋| 27/28 [00:06<00:00,  3.79it/s]100%|██████████| 28/28 [00:07<00:00,  3.79it/s]100%|██████████| 28/28 [00:07<00:00,  3.93it/s]
+difflet (seed 2) generated in 7.5s
+  0%|          | 0/28 [00:00<?, ?it/s]  7%|▋         | 2/28 [00:00<00:03,  7.22it/s] 11%|█         | 3/28 [00:00<00:04,  5.25it/s] 14%|█▍        | 4/28 [00:00<00:05,  4.59it/s] 18%|█▊        | 5/28 [00:01<00:05,  4.27it/s] 21%|██▏       | 6/28 [00:01<00:05,  4.10it/s] 25%|██▌       | 7/28 [00:01<00:05,  3.99it/s] 29%|██▊       | 8/28 [00:01<00:05,  3.93it/s] 32%|███▏      | 9/28 [00:02<00:04,  3.88it/s] 36%|███▌      | 10/28 [00:02<00:04,  3.85it/s] 39%|███▉      | 11/28 [00:02<00:04,  3.83it/s] 43%|████▎     | 12/28 [00:02<00:04,  3.82it/s] 46%|████▋     | 13/28 [00:03<00:03,  3.81it/s] 50%|█████     | 14/28 [00:03<00:03,  3.80it/s] 54%|█████▎    | 15/28 [00:03<00:03,  3.80it/s] 57%|█████▋    | 16/28 [00:03<00:03,  3.80it/s] 61%|██████    | 17/28 [00:04<00:02,  3.79it/s] 64%|██████▍   | 18/28 [00:04<00:02,  3.79it/s] 68%|██████▊   | 19/28 [00:04<00:02,  3.79it/s] 71%|███████▏  | 20/28 [00:05<00:02,  3.79it/s] 75%|███████▌  | 21/28 [00:05<00:01,  3.79it/s] 79%|███████▊  | 22/28 [00:05<00:01,  3.79it/s] 82%|████████▏ | 23/28 [00:05<00:01,  3.79it/s] 86%|████████▌ | 24/28 [00:06<00:01,  3.79it/s] 89%|████████▉ | 25/28 [00:06<00:00,  3.79it/s] 93%|█████████▎| 26/28 [00:06<00:00,  3.79it/s] 96%|█████████▋| 27/28 [00:06<00:00,  3.79it/s]100%|██████████| 28/28 [00:07<00:00,  3.79it/s]100%|██████████| 28/28 [00:07<00:00,  3.92it/s]
+difflet (seed 3) generated in 7.5s
+  0%|          | 0/28 [00:00<?, ?it/s]  7%|▋         | 2/28 [00:00<00:03,  7.20it/s] 11%|█         | 3/28 [00:00<00:04,  5.24it/s] 14%|█▍        | 4/28 [00:00<00:05,  4.58it/s] 18%|█▊        | 5/28 [00:01<00:05,  4.27it/s] 21%|██▏       | 6/28 [00:01<00:05,  4.09it/s] 25%|██▌       | 7/28 [00:01<00:05,  3.99it/s] 29%|██▊       | 8/28 [00:01<00:05,  3.92it/s] 32%|███▏      | 9/28 [00:02<00:04,  3.87it/s] 36%|███▌      | 10/28 [00:02<00:04,  3.84it/s] 39%|███▉      | 11/28 [00:02<00:04,  3.82it/s] 43%|████▎     | 12/28 [00:02<00:04,  3.81it/s] 46%|████▋     | 13/28 [00:03<00:03,  3.80it/s] 50%|█████     | 14/28 [00:03<00:03,  3.79it/s] 54%|█████▎    | 15/28 [00:03<00:03,  3.79it/s] 57%|█████▋    | 16/28 [00:03<00:03,  3.79it/s] 61%|██████    | 17/28 [00:04<00:02,  3.78it/s] 64%|██████▍   | 18/28 [00:04<00:02,  3.78it/s] 68%|██████▊   | 19/28 [00:04<00:02,  3.78it/s] 71%|███████▏  | 20/28 [00:05<00:02,  3.78it/s] 75%|███████▌  | 21/28 [00:05<00:01,  3.78it/s] 79%|███████▊  | 22/28 [00:05<00:01,  3.78it/s] 82%|████████▏ | 23/28 [00:05<00:01,  3.78it/s] 86%|████████▌ | 24/28 [00:06<00:01,  3.78it/s] 89%|████████▉ | 25/28 [00:06<00:00,  3.78it/s] 93%|█████████▎| 26/28 [00:06<00:00,  3.78it/s] 96%|█████████▋| 27/28 [00:06<00:00,  3.78it/s]100%|██████████| 28/28 [00:07<00:00,  3.78it/s]100%|██████████| 28/28 [00:07<00:00,  3.91it/s]
+difflet (seed 4) generated in 7.5s
+  0%|          | 0/28 [00:00<?, ?it/s]  7%|▋         | 2/28 [00:00<00:03,  7.19it/s] 11%|█         | 3/28 [00:00<00:04,  5.23it/s] 14%|█▍        | 4/28 [00:00<00:05,  4.57it/s] 18%|█▊        | 5/28 [00:01<00:05,  4.26it/s] 21%|██▏       | 6/28 [00:01<00:05,  4.08it/s] 25%|██▌       | 7/28 [00:01<00:05,  3.98it/s] 29%|██▊       | 8/28 [00:01<00:05,  3.91it/s] 32%|███▏      | 9/28 [00:02<00:04,  3.87it/s] 36%|███▌      | 10/28 [00:02<00:04,  3.84it/s] 39%|███▉      | 11/28 [00:02<00:04,  3.82it/s] 43%|████▎     | 12/28 [00:02<00:04,  3.80it/s] 46%|████▋     | 13/28 [00:03<00:03,  3.79it/s] 50%|█████     | 14/28 [00:03<00:03,  3.79it/s] 54%|█████▎    | 15/28 [00:03<00:03,  3.78it/s] 57%|█████▋    | 16/28 [00:03<00:03,  3.78it/s] 61%|██████    | 17/28 [00:04<00:02,  3.78it/s] 64%|██████▍   | 18/28 [00:04<00:02,  3.78it/s] 68%|██████▊   | 19/28 [00:04<00:02,  3.77it/s] 71%|███████▏  | 20/28 [00:05<00:02,  3.77it/s] 75%|███████▌  | 21/28 [00:05<00:01,  3.77it/s] 79%|███████▊  | 22/28 [00:05<00:01,  3.77it/s] 82%|████████▏ | 23/28 [00:05<00:01,  3.77it/s] 86%|████████▌ | 24/28 [00:06<00:01,  3.77it/s] 89%|████████▉ | 25/28 [00:06<00:00,  3.77it/s] 93%|█████████▎| 26/28 [00:06<00:00,  3.77it/s] 96%|█████████▋| 27/28 [00:06<00:00,  3.77it/s]100%|██████████| 28/28 [00:07<00:00,  3.77it/s]100%|██████████| 28/28 [00:07<00:00,  3.91it/s]
+difflet (seed 5) generated in 7.5s
+  0%|          | 0/28 [00:00<?, ?it/s]  7%|▋         | 2/28 [00:00<00:03,  7.18it/s] 11%|█         | 3/28 [00:00<00:04,  5.22it/s] 14%|█▍        | 4/28 [00:00<00:05,  4.56it/s] 18%|█▊        | 5/28 [00:01<00:05,  4.25it/s] 21%|██▏       | 6/28 [00:01<00:05,  4.08it/s] 25%|██▌       | 7/28 [00:01<00:05,  3.97it/s] 29%|██▊       | 8/28 [00:01<00:05,  3.90it/s] 32%|███▏      | 9/28 [00:02<00:04,  3.86it/s] 36%|███▌      | 10/28 [00:02<00:04,  3.83it/s] 39%|███▉      | 11/28 [00:02<00:04,  3.81it/s] 43%|████▎     | 12/28 [00:02<00:04,  3.80it/s] 46%|████▋     | 13/28 [00:03<00:03,  3.79it/s] 50%|█████     | 14/28 [00:03<00:03,  3.78it/s] 54%|█████▎    | 15/28 [00:03<00:03,  3.78it/s] 57%|█████▋    | 16/28 [00:03<00:03,  3.78it/s] 61%|██████    | 17/28 [00:04<00:02,  3.77it/s] 64%|██████▍   | 18/28 [00:04<00:02,  3.77it/s] 68%|██████▊   | 19/28 [00:04<00:02,  3.77it/s] 71%|███████▏  | 20/28 [00:05<00:02,  3.77it/s] 75%|███████▌  | 21/28 [00:05<00:01,  3.77it/s] 79%|███████▊  | 22/28 [00:05<00:01,  3.77it/s] 82%|████████▏ | 23/28 [00:05<00:01,  3.77it/s] 86%|████████▌ | 24/28 [00:06<00:01,  3.77it/s] 89%|████████▉ | 25/28 [00:06<00:00,  3.77it/s] 93%|█████████▎| 26/28 [00:06<00:00,  3.77it/s] 96%|█████████▋| 27/28 [00:06<00:00,  3.77it/s]100%|██████████| 28/28 [00:07<00:00,  3.77it/s]100%|██████████| 28/28 [00:07<00:00,  3.90it/s]
+difflet (seed 6) generated in 7.6s
+  0%|          | 0/28 [00:00<?, ?it/s]  7%|▋         | 2/28 [00:00<00:03,  7.18it/s] 11%|█         | 3/28 [00:00<00:04,  5.22it/s] 14%|█▍        | 4/28 [00:00<00:05,  4.56it/s] 18%|█▊        | 5/28 [00:01<00:05,  4.25it/s] 21%|██▏       | 6/28 [00:01<00:05,  4.07it/s] 25%|██▌       | 7/28 [00:01<00:05,  3.97it/s] 29%|██▊       | 8/28 [00:01<00:05,  3.90it/s] 32%|███▏      | 9/28 [00:02<00:04,  3.86it/s] 36%|███▌      | 10/28 [00:02<00:04,  3.83it/s] 39%|███▉      | 11/28 [00:02<00:04,  3.81it/s] 43%|████▎     | 12/28 [00:02<00:04,  3.79it/s] 46%|████▋     | 13/28 [00:03<00:03,  3.78it/s] 50%|█████     | 14/28 [00:03<00:03,  3.78it/s] 54%|█████▎    | 15/28 [00:03<00:03,  3.77it/s] 57%|█████▋    | 16/28 [00:03<00:03,  3.77it/s] 61%|██████    | 17/28 [00:04<00:02,  3.77it/s] 64%|██████▍   | 18/28 [00:04<00:02,  3.77it/s] 68%|██████▊   | 19/28 [00:04<00:02,  3.76it/s] 71%|███████▏  | 20/28 [00:05<00:02,  3.76it/s] 75%|███████▌  | 21/28 [00:05<00:01,  3.76it/s] 79%|███████▊  | 22/28 [00:05<00:01,  3.76it/s] 82%|████████▏ | 23/28 [00:05<00:01,  3.76it/s] 86%|████████▌ | 24/28 [00:06<00:01,  3.76it/s] 89%|████████▉ | 25/28 [00:06<00:00,  3.76it/s] 93%|█████████▎| 26/28 [00:06<00:00,  3.76it/s] 96%|█████████▋| 27/28 [00:06<00:00,  3.76it/s]100%|██████████| 28/28 [00:07<00:00,  3.76it/s]100%|██████████| 28/28 [00:07<00:00,  3.89it/s]
+difflet (seed 7) generated in 7.6s
+Loading pipeline components...:   0%|          | 0/7 [00:00<?, ?it/s]
+Loading weights:   0%|          | 0/196 [00:00<?, ?it/s][ALoading weights: 100%|██████████| 196/196 [00:00<00:00, 8239.29it/s]
+Loading pipeline components...:  57%|█████▋    | 4/7 [00:00<00:00, 22.27it/s]
+Loading weights:   0%|          | 0/219 [00:00<?, ?it/s][ALoading weights: 100%|██████████| 219/219 [00:00<00:00, 8342.51it/s]
+
+Loading checkpoint shards:   0%|          | 0/3 [00:00<?, ?it/s][ALoading checkpoint shards: 100%|██████████| 3/3 [00:00<00:00, 61.64it/s]
+Loading pipeline components...: 100%|██████████| 7/7 [00:00<00:00, 18.81it/s]Loading pipeline components...: 100%|██████████| 7/7 [00:00<00:00, 19.32it/s]
+diffusers loaded in 23.0s
+  0%|          | 0/28 [00:00<?, ?it/s]  4%|▎         | 1/28 [00:00<00:05,  5.13it/s]  7%|▋         | 2/28 [00:00<00:06,  3.95it/s] 11%|█         | 3/28 [00:00<00:06,  3.66it/s] 14%|█▍        | 4/28 [00:01<00:06,  3.54it/s] 18%|█▊        | 5/28 [00:01<00:06,  3.47it/s] 21%|██▏       | 6/28 [00:01<00:06,  3.43it/s] 25%|██▌       | 7/28 [00:01<00:06,  3.41it/s] 29%|██▊       | 8/28 [00:02<00:05,  3.39it/s] 32%|███▏      | 9/28 [00:02<00:05,  3.38it/s] 36%|███▌      | 10/28 [00:02<00:05,  3.37it/s] 39%|███▉      | 11/28 [00:03<00:05,  3.36it/s] 43%|████▎     | 12/28 [00:03<00:04,  3.35it/s] 46%|████▋     | 13/28 [00:03<00:04,  3.35it/s] 50%|█████     | 14/28 [00:04<00:04,  3.35it/s] 54%|█████▎    | 15/28 [00:04<00:03,  3.34it/s] 57%|█████▋    | 16/28 [00:04<00:03,  3.34it/s] 61%|██████    | 17/28 [00:04<00:03,  3.34it/s] 64%|██████▍   | 18/28 [00:05<00:02,  3.34it/s] 68%|██████▊   | 19/28 [00:05<00:02,  3.34it/s] 71%|███████▏  | 20/28 [00:05<00:02,  3.33it/s] 75%|███████▌  | 21/28 [00:06<00:02,  3.33it/s] 79%|███████▊  | 22/28 [00:06<00:01,  3.33it/s] 82%|████████▏ | 23/28 [00:06<00:01,  3.33it/s] 86%|████████▌ | 24/28 [00:07<00:01,  3.33it/s] 89%|████████▉ | 25/28 [00:07<00:00,  3.33it/s] 93%|█████████▎| 26/28 [00:07<00:00,  3.33it/s] 96%|█████████▋| 27/28 [00:07<00:00,  3.33it/s]100%|██████████| 28/28 [00:08<00:00,  3.32it/s]100%|██████████| 28/28 [00:08<00:00,  3.38it/s]
+diffusers (seed 0) generated in 8.6s
+  0%|          | 0/28 [00:00<?, ?it/s]  4%|▎         | 1/28 [00:00<00:04,  6.47it/s]  7%|▋         | 2/28 [00:00<00:06,  4.18it/s] 11%|█         | 3/28 [00:00<00:06,  3.73it/s] 14%|█▍        | 4/28 [00:01<00:06,  3.56it/s] 18%|█▊        | 5/28 [00:01<00:06,  3.46it/s] 21%|██▏       | 6/28 [00:01<00:06,  3.41it/s] 25%|██▌       | 7/28 [00:01<00:06,  3.37it/s] 29%|██▊       | 8/28 [00:02<00:05,  3.35it/s] 32%|███▏      | 9/28 [00:02<00:05,  3.34it/s] 36%|███▌      | 10/28 [00:02<00:05,  3.33it/s] 39%|███▉      | 11/28 [00:03<00:05,  3.32it/s] 43%|████▎     | 12/28 [00:03<00:04,  3.32it/s] 46%|████▋     | 13/28 [00:03<00:04,  3.31it/s] 50%|█████     | 14/28 [00:04<00:04,  3.31it/s] 54%|█████▎    | 15/28 [00:04<00:03,  3.31it/s] 57%|█████▋    | 16/28 [00:04<00:03,  3.31it/s] 61%|██████    | 17/28 [00:04<00:03,  3.31it/s] 64%|██████▍   | 18/28 [00:05<00:03,  3.31it/s] 68%|██████▊   | 19/28 [00:05<00:02,  3.31it/s] 71%|███████▏  | 20/28 [00:05<00:02,  3.31it/s] 75%|███████▌  | 21/28 [00:06<00:02,  3.31it/s] 79%|███████▊  | 22/28 [00:06<00:01,  3.31it/s] 82%|████████▏ | 23/28 [00:06<00:01,  3.30it/s] 86%|████████▌ | 24/28 [00:07<00:01,  3.30it/s] 89%|████████▉ | 25/28 [00:07<00:00,  3.30it/s] 93%|█████████▎| 26/28 [00:07<00:00,  3.30it/s] 96%|█████████▋| 27/28 [00:08<00:00,  3.30it/s]100%|██████████| 28/28 [00:08<00:00,  3.30it/s]100%|██████████| 28/28 [00:08<00:00,  3.37it/s]
+diffusers (seed 0, bf16 reductions flipped) generated in 8.6s
+seed 0: diffusers vs its perturbed self (pixels in [0,1]): {'psnr_db': 30.92373250148661, 'cosine': 0.9982712401987284, 'mean_abs': 0.0072033970306317014, 'max_abs': 0.892578125}
+  0%|          | 0/28 [00:00<?, ?it/s]  4%|▎         | 1/28 [00:00<00:04,  6.49it/s]  7%|▋         | 2/28 [00:00<00:06,  4.17it/s] 11%|█         | 3/28 [00:00<00:06,  3.72it/s] 14%|█▍        | 4/28 [00:01<00:06,  3.54it/s] 18%|█▊        | 5/28 [00:01<00:06,  3.45it/s] 21%|██▏       | 6/28 [00:01<00:06,  3.39it/s] 25%|██▌       | 7/28 [00:01<00:06,  3.36it/s] 29%|██▊       | 8/28 [00:02<00:05,  3.34it/s] 32%|███▏      | 9/28 [00:02<00:05,  3.32it/s] 36%|███▌      | 10/28 [00:02<00:05,  3.31it/s] 39%|███▉      | 11/28 [00:03<00:05,  3.31it/s] 43%|████▎     | 12/28 [00:03<00:04,  3.30it/s] 46%|████▋     | 13/28 [00:03<00:04,  3.30it/s] 50%|█████     | 14/28 [00:04<00:04,  3.30it/s] 54%|█████▎    | 15/28 [00:04<00:03,  3.30it/s] 57%|█████▋    | 16/28 [00:04<00:03,  3.29it/s] 61%|██████    | 17/28 [00:05<00:03,  3.29it/s] 64%|██████▍   | 18/28 [00:05<00:03,  3.29it/s] 68%|██████▊   | 19/28 [00:05<00:02,  3.29it/s] 71%|███████▏  | 20/28 [00:05<00:02,  3.29it/s] 75%|███████▌  | 21/28 [00:06<00:02,  3.29it/s] 79%|███████▊  | 22/28 [00:06<00:01,  3.29it/s] 82%|████████▏ | 23/28 [00:06<00:01,  3.29it/s] 86%|████████▌ | 24/28 [00:07<00:01,  3.29it/s] 89%|████████▉ | 25/28 [00:07<00:00,  3.29it/s] 93%|█████████▎| 26/28 [00:07<00:00,  3.29it/s] 96%|█████████▋| 27/28 [00:08<00:00,  3.29it/s]100%|██████████| 28/28 [00:08<00:00,  3.29it/s]100%|██████████| 28/28 [00:08<00:00,  3.35it/s]
+diffusers (seed 1) generated in 8.7s
+  0%|          | 0/28 [00:00<?, ?it/s]  4%|▎         | 1/28 [00:00<00:04,  6.47it/s]  7%|▋         | 2/28 [00:00<00:06,  4.15it/s] 11%|█         | 3/28 [00:00<00:06,  3.71it/s] 14%|█▍        | 4/28 [00:01<00:06,  3.53it/s] 18%|█▊        | 5/28 [00:01<00:06,  3.43it/s] 21%|██▏       | 6/28 [00:01<00:06,  3.38it/s] 25%|██▌       | 7/28 [00:01<00:06,  3.34it/s] 29%|██▊       | 8/28 [00:02<00:06,  3.32it/s] 32%|███▏      | 9/28 [00:02<00:05,  3.31it/s] 36%|███▌      | 10/28 [00:02<00:05,  3.30it/s] 39%|███▉      | 11/28 [00:03<00:05,  3.29it/s] 43%|████▎     | 12/28 [00:03<00:04,  3.29it/s] 46%|████▋     | 13/28 [00:03<00:04,  3.29it/s] 50%|█████     | 14/28 [00:04<00:04,  3.28it/s] 54%|█████▎    | 15/28 [00:04<00:03,  3.28it/s] 57%|█████▋    | 16/28 [00:04<00:03,  3.28it/s] 61%|██████    | 17/28 [00:05<00:03,  3.28it/s] 64%|██████▍   | 18/28 [00:05<00:03,  3.28it/s] 68%|██████▊   | 19/28 [00:05<00:02,  3.28it/s] 71%|███████▏  | 20/28 [00:05<00:02,  3.28it/s] 75%|███████▌  | 21/28 [00:06<00:02,  3.28it/s] 79%|███████▊  | 22/28 [00:06<00:01,  3.28it/s] 82%|████████▏ | 23/28 [00:06<00:01,  3.28it/s] 86%|████████▌ | 24/28 [00:07<00:01,  3.28it/s] 89%|████████▉ | 25/28 [00:07<00:00,  3.28it/s] 93%|█████████▎| 26/28 [00:07<00:00,  3.28it/s] 96%|█████████▋| 27/28 [00:08<00:00,  3.28it/s]100%|██████████| 28/28 [00:08<00:00,  3.28it/s]100%|██████████| 28/28 [00:08<00:00,  3.34it/s]
+diffusers (seed 1, bf16 reductions flipped) generated in 8.7s
+seed 1: diffusers vs its perturbed self (pixels in [0,1]): {'psnr_db': 36.62104024843132, 'cosine': 0.9995219231179733, 'mean_abs': 0.005462898562351863, 'max_abs': 0.533203125}
+  0%|          | 0/28 [00:00<?, ?it/s]  4%|▎         | 1/28 [00:00<00:04,  6.48it/s]  7%|▋         | 2/28 [00:00<00:06,  4.15it/s] 11%|█         | 3/28 [00:00<00:06,  3.70it/s] 14%|█▍        | 4/28 [00:01<00:06,  3.52it/s] 18%|█▊        | 5/28 [00:01<00:06,  3.43it/s] 21%|██▏       | 6/28 [00:01<00:06,  3.38it/s] 25%|██▌       | 7/28 [00:01<00:06,  3.35it/s] 29%|██▊       | 8/28 [00:02<00:06,  3.32it/s] 32%|███▏      | 9/28 [00:02<00:05,  3.31it/s] 36%|███▌      | 10/28 [00:02<00:05,  3.30it/s] 39%|███▉      | 11/28 [00:03<00:05,  3.29it/s] 43%|████▎     | 12/28 [00:03<00:04,  3.29it/s] 46%|████▋     | 13/28 [00:03<00:04,  3.28it/s] 50%|█████     | 14/28 [00:04<00:04,  3.28it/s] 54%|█████▎    | 15/28 [00:04<00:03,  3.28it/s] 57%|█████▋    | 16/28 [00:04<00:03,  3.28it/s] 61%|██████    | 17/28 [00:05<00:03,  3.28it/s] 64%|██████▍   | 18/28 [00:05<00:03,  3.28it/s] 68%|██████▊   | 19/28 [00:05<00:02,  3.28it/s] 71%|███████▏  | 20/28 [00:05<00:02,  3.28it/s] 75%|███████▌  | 21/28 [00:06<00:02,  3.28it/s] 79%|███████▊  | 22/28 [00:06<00:01,  3.28it/s] 82%|████████▏ | 23/28 [00:06<00:01,  3.28it/s] 86%|████████▌ | 24/28 [00:07<00:01,  3.28it/s] 89%|████████▉ | 25/28 [00:07<00:00,  3.28it/s] 93%|█████████▎| 26/28 [00:07<00:00,  3.28it/s] 96%|█████████▋| 27/28 [00:08<00:00,  3.28it/s]100%|██████████| 28/28 [00:08<00:00,  3.28it/s]100%|██████████| 28/28 [00:08<00:00,  3.34it/s]
+diffusers (seed 2) generated in 8.7s
+  0%|          | 0/28 [00:00<?, ?it/s]  4%|▎         | 1/28 [00:00<00:04,  6.44it/s]  7%|▋         | 2/28 [00:00<00:06,  4.13it/s] 11%|█         | 3/28 [00:00<00:06,  3.69it/s] 14%|█▍        | 4/28 [00:01<00:06,  3.51it/s] 18%|█▊        | 5/28 [00:01<00:06,  3.42it/s] 21%|██▏       | 6/28 [00:01<00:06,  3.37it/s] 25%|██▌       | 7/28 [00:01<00:06,  3.33it/s] 29%|██▊       | 8/28 [00:02<00:06,  3.31it/s] 32%|███▏      | 9/28 [00:02<00:05,  3.30it/s] 36%|███▌      | 10/28 [00:02<00:05,  3.29it/s] 39%|███▉      | 11/28 [00:03<00:05,  3.28it/s] 43%|████▎     | 12/28 [00:03<00:04,  3.28it/s] 46%|████▋     | 13/28 [00:03<00:04,  3.28it/s] 50%|█████     | 14/28 [00:04<00:04,  3.27it/s] 54%|█████▎    | 15/28 [00:04<00:03,  3.27it/s] 57%|█████▋    | 16/28 [00:04<00:03,  3.27it/s] 61%|██████    | 17/28 [00:05<00:03,  3.27it/s] 64%|██████▍   | 18/28 [00:05<00:03,  3.27it/s] 68%|██████▊   | 19/28 [00:05<00:02,  3.27it/s] 71%|███████▏  | 20/28 [00:05<00:02,  3.27it/s] 75%|███████▌  | 21/28 [00:06<00:02,  3.27it/s] 79%|███████▊  | 22/28 [00:06<00:01,  3.27it/s] 82%|████████▏ | 23/28 [00:06<00:01,  3.27it/s] 86%|████████▌ | 24/28 [00:07<00:01,  3.27it/s] 89%|████████▉ | 25/28 [00:07<00:00,  3.27it/s] 93%|█████████▎| 26/28 [00:07<00:00,  3.27it/s] 96%|█████████▋| 27/28 [00:08<00:00,  3.27it/s]100%|██████████| 28/28 [00:08<00:00,  3.27it/s]100%|██████████| 28/28 [00:08<00:00,  3.33it/s]
+diffusers (seed 2, bf16 reductions flipped) generated in 8.7s
+seed 2: diffusers vs its perturbed self (pixels in [0,1]): {'psnr_db': 37.605905468138545, 'cosine': 0.9996355033656947, 'mean_abs': 0.004588952288031578, 'max_abs': 0.583984375}
+  0%|          | 0/28 [00:00<?, ?it/s]  4%|▎         | 1/28 [00:00<00:04,  6.47it/s]  7%|▋         | 2/28 [00:00<00:06,  4.14it/s] 11%|█         | 3/28 [00:00<00:06,  3.69it/s] 14%|█▍        | 4/28 [00:01<00:06,  3.51it/s] 18%|█▊        | 5/28 [00:01<00:06,  3.42it/s] 21%|██▏       | 6/28 [00:01<00:06,  3.37it/s] 25%|██▌       | 7/28 [00:01<00:06,  3.33it/s] 29%|██▊       | 8/28 [00:02<00:06,  3.31it/s] 32%|███▏      | 9/28 [00:02<00:05,  3.30it/s] 36%|███▌      | 10/28 [00:02<00:05,  3.29it/s] 39%|███▉      | 11/28 [00:03<00:05,  3.28it/s] 43%|████▎     | 12/28 [00:03<00:04,  3.28it/s] 46%|████▋     | 13/28 [00:03<00:04,  3.27it/s] 50%|█████     | 14/28 [00:04<00:04,  3.27it/s] 54%|█████▎    | 15/28 [00:04<00:03,  3.27it/s] 57%|█████▋    | 16/28 [00:04<00:03,  3.27it/s] 61%|██████    | 17/28 [00:05<00:03,  3.27it/s] 64%|██████▍   | 18/28 [00:05<00:03,  3.27it/s] 68%|██████▊   | 19/28 [00:05<00:02,  3.27it/s] 71%|███████▏  | 20/28 [00:05<00:02,  3.27it/s] 75%|███████▌  | 21/28 [00:06<00:02,  3.27it/s] 79%|███████▊  | 22/28 [00:06<00:01,  3.27it/s] 82%|████████▏ | 23/28 [00:06<00:01,  3.27it/s] 86%|████████▌ | 24/28 [00:07<00:01,  3.27it/s] 89%|████████▉ | 25/28 [00:07<00:00,  3.27it/s] 93%|█████████▎| 26/28 [00:07<00:00,  3.27it/s] 96%|█████████▋| 27/28 [00:08<00:00,  3.27it/s]100%|██████████| 28/28 [00:08<00:00,  3.27it/s]100%|██████████| 28/28 [00:08<00:00,  3.33it/s]
+diffusers (seed 3) generated in 8.7s
+  0%|          | 0/28 [00:00<?, ?it/s]  4%|▎         | 1/28 [00:00<00:04,  6.43it/s]  7%|▋         | 2/28 [00:00<00:06,  4.12it/s] 11%|█         | 3/28 [00:00<00:06,  3.68it/s] 14%|█▍        | 4/28 [00:01<00:06,  3.50it/s] 18%|█▊        | 5/28 [00:01<00:06,  3.41it/s] 21%|██▏       | 6/28 [00:01<00:06,  3.36it/s] 25%|██▌       | 7/28 [00:01<00:06,  3.33it/s] 29%|██▊       | 8/28 [00:02<00:06,  3.31it/s] 32%|███▏      | 9/28 [00:02<00:05,  3.29it/s] 36%|███▌      | 10/28 [00:02<00:05,  3.28it/s] 39%|███▉      | 11/28 [00:03<00:05,  3.28it/s] 43%|████▎     | 12/28 [00:03<00:04,  3.27it/s] 46%|████▋     | 13/28 [00:03<00:04,  3.27it/s] 50%|█████     | 14/28 [00:04<00:04,  3.27it/s] 54%|█████▎    | 15/28 [00:04<00:03,  3.26it/s] 57%|█████▋    | 16/28 [00:04<00:03,  3.26it/s] 61%|██████    | 17/28 [00:05<00:03,  3.26it/s] 64%|██████▍   | 18/28 [00:05<00:03,  3.26it/s] 68%|██████▊   | 19/28 [00:05<00:02,  3.26it/s] 71%|███████▏  | 20/28 [00:05<00:02,  3.26it/s] 75%|███████▌  | 21/28 [00:06<00:02,  3.26it/s] 79%|███████▊  | 22/28 [00:06<00:01,  3.26it/s] 82%|████████▏ | 23/28 [00:06<00:01,  3.26it/s] 86%|████████▌ | 24/28 [00:07<00:01,  3.26it/s] 89%|████████▉ | 25/28 [00:07<00:00,  3.26it/s] 93%|█████████▎| 26/28 [00:07<00:00,  3.26it/s] 96%|█████████▋| 27/28 [00:08<00:00,  3.26it/s]100%|██████████| 28/28 [00:08<00:00,  3.26it/s]100%|██████████| 28/28 [00:08<00:00,  3.32it/s]
+diffusers (seed 3, bf16 reductions flipped) generated in 8.7s
+seed 3: diffusers vs its perturbed self (pixels in [0,1]): {'psnr_db': 31.899727701907665, 'cosine': 0.9986830330018996, 'mean_abs': 0.00854241413374742, 'max_abs': 0.65625}
+  0%|          | 0/28 [00:00<?, ?it/s]  4%|▎         | 1/28 [00:00<00:04,  6.46it/s]  7%|▋         | 2/28 [00:00<00:06,  4.13it/s] 11%|█         | 3/28 [00:00<00:06,  3.69it/s] 14%|█▍        | 4/28 [00:01<00:06,  3.51it/s] 18%|█▊        | 5/28 [00:01<00:06,  3.41it/s] 21%|██▏       | 6/28 [00:01<00:06,  3.36it/s] 25%|██▌       | 7/28 [00:01<00:06,  3.33it/s] 29%|██▊       | 8/28 [00:02<00:06,  3.31it/s] 32%|███▏      | 9/28 [00:02<00:05,  3.29it/s] 36%|███▌      | 10/28 [00:02<00:05,  3.28it/s] 39%|███▉      | 11/28 [00:03<00:05,  3.28it/s] 43%|████▎     | 12/28 [00:03<00:04,  3.27it/s] 46%|████▋     | 13/28 [00:03<00:04,  3.27it/s] 50%|█████     | 14/28 [00:04<00:04,  3.27it/s] 54%|█████▎    | 15/28 [00:04<00:03,  3.27it/s] 57%|█████▋    | 16/28 [00:04<00:03,  3.27it/s] 61%|██████    | 17/28 [00:05<00:03,  3.26it/s] 64%|██████▍   | 18/28 [00:05<00:03,  3.26it/s] 68%|██████▊   | 19/28 [00:05<00:02,  3.26it/s] 71%|███████▏  | 20/28 [00:05<00:02,  3.26it/s] 75%|███████▌  | 21/28 [00:06<00:02,  3.26it/s] 79%|███████▊  | 22/28 [00:06<00:01,  3.26it/s] 82%|████████▏ | 23/28 [00:06<00:01,  3.26it/s] 86%|████████▌ | 24/28 [00:07<00:01,  3.26it/s] 89%|████████▉ | 25/28 [00:07<00:00,  3.26it/s] 93%|█████████▎| 26/28 [00:07<00:00,  3.26it/s] 96%|█████████▋| 27/28 [00:08<00:00,  3.26it/s]100%|██████████| 28/28 [00:08<00:00,  3.26it/s]100%|██████████| 28/28 [00:08<00:00,  3.32it/s]
+diffusers (seed 4) generated in 8.7s
+  0%|          | 0/28 [00:00<?, ?it/s]  4%|▎         | 1/28 [00:00<00:04,  6.43it/s]  7%|▋         | 2/28 [00:00<00:06,  4.12it/s] 11%|█         | 3/28 [00:00<00:06,  3.68it/s] 14%|█▍        | 4/28 [00:01<00:06,  3.50it/s] 18%|█▊        | 5/28 [00:01<00:06,  3.41it/s] 21%|██▏       | 6/28 [00:01<00:06,  3.36it/s] 25%|██▌       | 7/28 [00:01<00:06,  3.32it/s] 29%|██▊       | 8/28 [00:02<00:06,  3.30it/s] 32%|███▏      | 9/28 [00:02<00:05,  3.29it/s] 36%|███▌      | 10/28 [00:02<00:05,  3.28it/s] 39%|███▉      | 11/28 [00:03<00:05,  3.27it/s] 43%|████▎     | 12/28 [00:03<00:04,  3.27it/s] 46%|████▋     | 13/28 [00:03<00:04,  3.27it/s] 50%|█████     | 14/28 [00:04<00:04,  3.26it/s] 54%|█████▎    | 15/28 [00:04<00:03,  3.26it/s] 57%|█████▋    | 16/28 [00:04<00:03,  3.26it/s] 61%|██████    | 17/28 [00:05<00:03,  3.26it/s] 64%|██████▍   | 18/28 [00:05<00:03,  3.26it/s] 68%|██████▊   | 19/28 [00:05<00:02,  3.26it/s] 71%|███████▏  | 20/28 [00:05<00:02,  3.26it/s] 75%|███████▌  | 21/28 [00:06<00:02,  3.26it/s] 79%|███████▊  | 22/28 [00:06<00:01,  3.26it/s] 82%|████████▏ | 23/28 [00:06<00:01,  3.26it/s] 86%|████████▌ | 24/28 [00:07<00:01,  3.26it/s] 89%|████████▉ | 25/28 [00:07<00:00,  3.26it/s] 93%|█████████▎| 26/28 [00:07<00:00,  3.26it/s] 96%|█████████▋| 27/28 [00:08<00:00,  3.26it/s]100%|██████████| 28/28 [00:08<00:00,  3.26it/s]100%|██████████| 28/28 [00:08<00:00,  3.32it/s]
+diffusers (seed 4, bf16 reductions flipped) generated in 8.7s
+seed 4: diffusers vs its perturbed self (pixels in [0,1]): {'psnr_db': 33.04803157471056, 'cosine': 0.9987632044874011, 'mean_abs': 0.008519370729724566, 'max_abs': 0.76953125}
+  0%|          | 0/28 [00:00<?, ?it/s]  4%|▎         | 1/28 [00:00<00:04,  6.45it/s]  7%|▋         | 2/28 [00:00<00:06,  4.13it/s] 11%|█         | 3/28 [00:00<00:06,  3.68it/s] 14%|█▍        | 4/28 [00:01<00:06,  3.50it/s] 18%|█▊        | 5/28 [00:01<00:06,  3.41it/s] 21%|██▏       | 6/28 [00:01<00:06,  3.36it/s] 25%|██▌       | 7/28 [00:01<00:06,  3.33it/s] 29%|██▊       | 8/28 [00:02<00:06,  3.31it/s] 32%|███▏      | 9/28 [00:02<00:05,  3.29it/s] 36%|███▌      | 10/28 [00:02<00:05,  3.28it/s] 39%|███▉      | 11/28 [00:03<00:05,  3.27it/s] 43%|████▎     | 12/28 [00:03<00:04,  3.27it/s] 46%|████▋     | 13/28 [00:03<00:04,  3.27it/s] 50%|█████     | 14/28 [00:04<00:04,  3.27it/s] 54%|█████▎    | 15/28 [00:04<00:03,  3.26it/s] 57%|█████▋    | 16/28 [00:04<00:03,  3.26it/s] 61%|██████    | 17/28 [00:05<00:03,  3.26it/s] 64%|██████▍   | 18/28 [00:05<00:03,  3.26it/s] 68%|██████▊   | 19/28 [00:05<00:02,  3.26it/s] 71%|███████▏  | 20/28 [00:05<00:02,  3.26it/s] 75%|███████▌  | 21/28 [00:06<00:02,  3.26it/s] 79%|███████▊  | 22/28 [00:06<00:01,  3.26it/s] 82%|████████▏ | 23/28 [00:06<00:01,  3.26it/s] 86%|████████▌ | 24/28 [00:07<00:01,  3.26it/s] 89%|████████▉ | 25/28 [00:07<00:00,  3.26it/s] 93%|█████████▎| 26/28 [00:07<00:00,  3.26it/s] 96%|█████████▋| 27/28 [00:08<00:00,  3.26it/s]100%|██████████| 28/28 [00:08<00:00,  3.26it/s]100%|██████████| 28/28 [00:08<00:00,  3.32it/s]
+diffusers (seed 5) generated in 8.7s
+  0%|          | 0/28 [00:00<?, ?it/s]  4%|▎         | 1/28 [00:00<00:04,  6.43it/s]  7%|▋         | 2/28 [00:00<00:06,  4.12it/s] 11%|█         | 3/28 [00:00<00:06,  3.68it/s] 14%|█▍        | 4/28 [00:01<00:06,  3.50it/s] 18%|█▊        | 5/28 [00:01<00:06,  3.41it/s] 21%|██▏       | 6/28 [00:01<00:06,  3.35it/s] 25%|██▌       | 7/28 [00:01<00:06,  3.32it/s] 29%|██▊       | 8/28 [00:02<00:06,  3.30it/s] 32%|███▏      | 9/28 [00:02<00:05,  3.29it/s] 36%|███▌      | 10/28 [00:02<00:05,  3.28it/s] 39%|███▉      | 11/28 [00:03<00:05,  3.27it/s] 43%|████▎     | 12/28 [00:03<00:04,  3.27it/s] 46%|████▋     | 13/28 [00:03<00:04,  3.26it/s] 50%|█████     | 14/28 [00:04<00:04,  3.26it/s] 54%|█████▎    | 15/28 [00:04<00:03,  3.26it/s] 57%|█████▋    | 16/28 [00:04<00:03,  3.26it/s] 61%|██████    | 17/28 [00:05<00:03,  3.26it/s] 64%|██████▍   | 18/28 [00:05<00:03,  3.26it/s] 68%|██████▊   | 19/28 [00:05<00:02,  3.26it/s] 71%|███████▏  | 20/28 [00:05<00:02,  3.26it/s] 75%|███████▌  | 21/28 [00:06<00:02,  3.26it/s] 79%|███████▊  | 22/28 [00:06<00:01,  3.26it/s] 82%|████████▏ | 23/28 [00:06<00:01,  3.26it/s] 86%|████████▌ | 24/28 [00:07<00:01,  3.26it/s] 89%|████████▉ | 25/28 [00:07<00:00,  3.26it/s] 93%|█████████▎| 26/28 [00:07<00:00,  3.26it/s] 96%|█████████▋| 27/28 [00:08<00:00,  3.26it/s]100%|██████████| 28/28 [00:08<00:00,  3.26it/s]100%|██████████| 28/28 [00:08<00:00,  3.32it/s]
+diffusers (seed 5, bf16 reductions flipped) generated in 8.7s
+seed 5: diffusers vs its perturbed self (pixels in [0,1]): {'psnr_db': 39.436461590790095, 'cosine': 0.999787891031054, 'mean_abs': 0.004057213043173154, 'max_abs': 0.47265625}
+  0%|          | 0/28 [00:00<?, ?it/s]  4%|▎         | 1/28 [00:00<00:04,  6.45it/s]  7%|▋         | 2/28 [00:00<00:06,  4.13it/s] 11%|█         | 3/28 [00:00<00:06,  3.68it/s] 14%|█▍        | 4/28 [00:01<00:06,  3.50it/s] 18%|█▊        | 5/28 [00:01<00:06,  3.41it/s] 21%|██▏       | 6/28 [00:01<00:06,  3.36it/s] 25%|██▌       | 7/28 [00:01<00:06,  3.33it/s] 29%|██▊       | 8/28 [00:02<00:06,  3.30it/s] 32%|███▏      | 9/28 [00:02<00:05,  3.29it/s] 36%|███▌      | 10/28 [00:02<00:05,  3.28it/s] 39%|███▉      | 11/28 [00:03<00:05,  3.28it/s] 43%|████▎     | 12/28 [00:03<00:04,  3.27it/s] 46%|████▋     | 13/28 [00:03<00:04,  3.27it/s] 50%|█████     | 14/28 [00:04<00:04,  3.27it/s] 54%|█████▎    | 15/28 [00:04<00:03,  3.27it/s] 57%|█████▋    | 16/28 [00:04<00:03,  3.26it/s] 61%|██████    | 17/28 [00:05<00:03,  3.26it/s] 64%|██████▍   | 18/28 [00:05<00:03,  3.26it/s] 68%|██████▊   | 19/28 [00:05<00:02,  3.26it/s] 71%|███████▏  | 20/28 [00:05<00:02,  3.26it/s] 75%|███████▌  | 21/28 [00:06<00:02,  3.26it/s] 79%|███████▊  | 22/28 [00:06<00:01,  3.26it/s] 82%|████████▏ | 23/28 [00:06<00:01,  3.26it/s] 86%|████████▌ | 24/28 [00:07<00:01,  3.26it/s] 89%|████████▉ | 25/28 [00:07<00:00,  3.26it/s] 93%|█████████▎| 26/28 [00:07<00:00,  3.26it/s] 96%|█████████▋| 27/28 [00:08<00:00,  3.26it/s]100%|██████████| 28/28 [00:08<00:00,  3.26it/s]100%|██████████| 28/28 [00:08<00:00,  3.32it/s]
+diffusers (seed 6) generated in 8.7s
+  0%|          | 0/28 [00:00<?, ?it/s]  4%|▎         | 1/28 [00:00<00:04,  6.43it/s]  7%|▋         | 2/28 [00:00<00:06,  4.12it/s] 11%|█         | 3/28 [00:00<00:06,  3.67it/s] 14%|█▍        | 4/28 [00:01<00:06,  3.50it/s] 18%|█▊        | 5/28 [00:01<00:06,  3.41it/s] 21%|██▏       | 6/28 [00:01<00:06,  3.35it/s] 25%|██▌       | 7/28 [00:01<00:06,  3.32it/s] 29%|██▊       | 8/28 [00:02<00:06,  3.30it/s] 32%|███▏      | 9/28 [00:02<00:05,  3.29it/s] 36%|███▌      | 10/28 [00:02<00:05,  3.28it/s] 39%|███▉      | 11/28 [00:03<00:05,  3.27it/s] 43%|████▎     | 12/28 [00:03<00:04,  3.27it/s] 46%|████▋     | 13/28 [00:03<00:04,  3.26it/s] 50%|█████     | 14/28 [00:04<00:04,  3.26it/s] 54%|█████▎    | 15/28 [00:04<00:03,  3.26it/s] 57%|█████▋    | 16/28 [00:04<00:03,  3.26it/s] 61%|██████    | 17/28 [00:05<00:03,  3.26it/s] 64%|██████▍   | 18/28 [00:05<00:03,  3.26it/s] 68%|██████▊   | 19/28 [00:05<00:02,  3.26it/s] 71%|███████▏  | 20/28 [00:05<00:02,  3.26it/s] 75%|███████▌  | 21/28 [00:06<00:02,  3.26it/s] 79%|███████▊  | 22/28 [00:06<00:01,  3.26it/s] 82%|████████▏ | 23/28 [00:06<00:01,  3.26it/s] 86%|████████▌ | 24/28 [00:07<00:01,  3.26it/s] 89%|████████▉ | 25/28 [00:07<00:00,  3.26it/s] 93%|█████████▎| 26/28 [00:07<00:00,  3.26it/s] 96%|█████████▋| 27/28 [00:08<00:00,  3.26it/s]100%|██████████| 28/28 [00:08<00:00,  3.26it/s]100%|██████████| 28/28 [00:08<00:00,  3.32it/s]
+diffusers (seed 6, bf16 reductions flipped) generated in 8.7s
+seed 6: diffusers vs its perturbed self (pixels in [0,1]): {'psnr_db': 35.14129406333446, 'cosine': 0.9993118192728915, 'mean_abs': 0.005065087229013443, 'max_abs': 0.91015625}
+  0%|          | 0/28 [00:00<?, ?it/s]  4%|▎         | 1/28 [00:00<00:04,  6.45it/s]  7%|▋         | 2/28 [00:00<00:06,  4.13it/s] 11%|█         | 3/28 [00:00<00:06,  3.68it/s] 14%|█▍        | 4/28 [00:01<00:06,  3.50it/s] 18%|█▊        | 5/28 [00:01<00:06,  3.41it/s] 21%|██▏       | 6/28 [00:01<00:06,  3.36it/s] 25%|██▌       | 7/28 [00:01<00:06,  3.32it/s] 29%|██▊       | 8/28 [00:02<00:06,  3.30it/s] 32%|███▏      | 9/28 [00:02<00:05,  3.29it/s] 36%|███▌      | 10/28 [00:02<00:05,  3.28it/s] 39%|███▉      | 11/28 [00:03<00:05,  3.27it/s] 43%|████▎     | 12/28 [00:03<00:04,  3.27it/s] 46%|████▋     | 13/28 [00:03<00:04,  3.27it/s] 50%|█████     | 14/28 [00:04<00:04,  3.27it/s] 54%|█████▎    | 15/28 [00:04<00:03,  3.26it/s] 57%|█████▋    | 16/28 [00:04<00:03,  3.26it/s] 61%|██████    | 17/28 [00:05<00:03,  3.26it/s] 64%|██████▍   | 18/28 [00:05<00:03,  3.26it/s] 68%|██████▊   | 19/28 [00:05<00:02,  3.26it/s] 71%|███████▏  | 20/28 [00:05<00:02,  3.26it/s] 75%|███████▌  | 21/28 [00:06<00:02,  3.26it/s] 79%|███████▊  | 22/28 [00:06<00:01,  3.26it/s] 82%|████████▏ | 23/28 [00:06<00:01,  3.26it/s] 86%|████████▌ | 24/28 [00:07<00:01,  3.26it/s] 89%|████████▉ | 25/28 [00:07<00:00,  3.26it/s] 93%|█████████▎| 26/28 [00:07<00:00,  3.26it/s] 96%|█████████▋| 27/28 [00:08<00:00,  3.26it/s]100%|██████████| 28/28 [00:08<00:00,  3.26it/s]100%|██████████| 28/28 [00:08<00:00,  3.32it/s]
+diffusers (seed 7) generated in 8.7s
+  0%|          | 0/28 [00:00<?, ?it/s]  4%|▎         | 1/28 [00:00<00:04,  6.43it/s]  7%|▋         | 2/28 [00:00<00:06,  4.12it/s] 11%|█         | 3/28 [00:00<00:06,  3.67it/s] 14%|█▍        | 4/28 [00:01<00:06,  3.49it/s] 18%|█▊        | 5/28 [00:01<00:06,  3.40it/s] 21%|██▏       | 6/28 [00:01<00:06,  3.35it/s] 25%|██▌       | 7/28 [00:01<00:06,  3.32it/s] 29%|██▊       | 8/28 [00:02<00:06,  3.30it/s] 32%|███▏      | 9/28 [00:02<00:05,  3.28it/s] 36%|███▌      | 10/28 [00:02<00:05,  3.27it/s] 39%|███▉      | 11/28 [00:03<00:05,  3.27it/s] 43%|████▎     | 12/28 [00:03<00:04,  3.26it/s] 46%|████▋     | 13/28 [00:03<00:04,  3.26it/s] 50%|█████     | 14/28 [00:04<00:04,  3.26it/s] 54%|█████▎    | 15/28 [00:04<00:03,  3.26it/s] 57%|█████▋    | 16/28 [00:04<00:03,  3.26it/s] 61%|██████    | 17/28 [00:05<00:03,  3.26it/s] 64%|██████▍   | 18/28 [00:05<00:03,  3.26it/s] 68%|██████▊   | 19/28 [00:05<00:02,  3.26it/s] 71%|███████▏  | 20/28 [00:05<00:02,  3.26it/s] 75%|███████▌  | 21/28 [00:06<00:02,  3.26it/s] 79%|███████▊  | 22/28 [00:06<00:01,  3.26it/s] 82%|████████▏ | 23/28 [00:06<00:01,  3.26it/s] 86%|████████▌ | 24/28 [00:07<00:01,  3.26it/s] 89%|████████▉ | 25/28 [00:07<00:00,  3.26it/s] 93%|█████████▎| 26/28 [00:07<00:00,  3.26it/s] 96%|█████████▋| 27/28 [00:08<00:00,  3.26it/s]100%|██████████| 28/28 [00:08<00:00,  3.26it/s]100%|██████████| 28/28 [00:08<00:00,  3.32it/s]
+diffusers (seed 7, bf16 reductions flipped) generated in 8.7s
+seed 7: diffusers vs its perturbed self (pixels in [0,1]): {'psnr_db': 24.23772558683694, 'cosine': 0.9915854725793107, 'mean_abs': 0.026914271836479504, 'max_abs': 0.892578125}
+seed 0: difflet vs diffusers (pixels in [0,1]): {'psnr_db': 42.27261684836233, 'cosine': 0.9998749736584387, 'mean_abs': 0.0031346275160710015, 'max_abs': 0.6328125}
+seed 1: difflet vs diffusers (pixels in [0,1]): {'psnr_db': 41.31239820407713, 'cosine': 0.9998384193666154, 'mean_abs': 0.0034144005427757898, 'max_abs': 0.4921875}
+seed 2: difflet vs diffusers (pixels in [0,1]): {'psnr_db': 40.52270489155631, 'cosine': 0.999814000537145, 'mean_abs': 0.003443929056326548, 'max_abs': 0.72265625}
+seed 3: difflet vs diffusers (pixels in [0,1]): {'psnr_db': 43.01444868958021, 'cosine': 0.9998991624433271, 'mean_abs': 0.002651744211713473, 'max_abs': 0.58203125}
+seed 4: difflet vs diffusers (pixels in [0,1]): {'psnr_db': 36.879382207109884, 'cosine': 0.9994979624603094, 'mean_abs': 0.005108991637825966, 'max_abs': 0.732421875}
+seed 5: difflet vs diffusers (pixels in [0,1]): {'psnr_db': 39.76220318313252, 'cosine': 0.9998030505440206, 'mean_abs': 0.003768338511387507, 'max_abs': 0.537109375}
+seed 6: difflet vs diffusers (pixels in [0,1]): {'psnr_db': 34.23529655785738, 'cosine': 0.9991522001808376, 'mean_abs': 0.005760929236809413, 'max_abs': 0.91015625}
+seed 7: difflet vs diffusers (pixels in [0,1]): {'psnr_db': 28.496203492372814, 'cosine': 0.9968378439737349, 'mean_abs': 0.013614095747470856, 'max_abs': 0.7109375}
+aggregate over 8 seed(s), difflet: {'psnr_db': {'min': 28.496203492372814, 'mean': 38.311906759256075, 'max': 43.01444868958021}, 'cosine': {'min': 0.9968378439737349, 'mean': 0.9993397016455536, 'max': 0.9998991624433271}}
+aggregate over 8 seed(s), noise floor: {'psnr_db': {'min': 24.23772558683694, 'mean': 33.61423984195452, 'max': 39.436461590790095}, 'cosine': {'min': 0.9915854725793107, 'mean': 0.9981950108818691, 'max': 0.999787891031054}}
+wrote /home/user/logs/f9c/compiled/cuda_e2e_flux_noise.json

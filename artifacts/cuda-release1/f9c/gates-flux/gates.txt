@@ -1,0 +1,13 @@
+== flux gates 2026-10-19T16:45:54Z ==
+snapshot: /data/hf/hub/models--black-forest-labs--FLUX.1-dev/snapshots/3de623fc3c33e44ffbe2bad470d0f45bccf2eb21/
+f643e46 pod tool: attach a volume through PodV2CreateRequest.volumes ({id: string, mountPath}), not persistentVolumes
+0, NVIDIA RTX PRO 6000 Blackwell Workstation Edition, 580.126.09, 0 MiB
+static@12ed3e64-c516-11f0-b886-a8a159f5c511.static=/volumes/csi/volume-356085614379667456-1792283746945/90e87216-fb28-43d0-bf44-d7bb6cee27c2  200G   86G  115G  43% /data
+overlay                                                                                                                                        15T  5.5T  8.6T  40% /
+smoke exit: 0 in 44s
+parity exit: 0 in 107s
+parity-gate exit: 0 in 1s
+e2e exit: 0 in 149s
+e2e-gate exit: 0 in 0s
+0 MiB
+GATES DONE flux overall_rc=0

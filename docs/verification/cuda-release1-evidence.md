@@ -53,6 +53,9 @@ here without both being named.
 | `difflet-cuda-f1b` | 502601836865405322 | eu-3 | **Server** × 2 (GPU 0 used) | 580.178.04 / 2.11.0+cu128 | 5.30 | 2026-10-18 13:58 → 14:24 UTC (**terminated**, read back gone) |
 | `difflet-cuda-f2` | 502630011196547564 | eu-3 | **Server** × 2, PCIe `PHB`, no NVLink | 580.178.04 / 2.11.0+cu128 | 5.30 | 2026-10-18 15:52 → 16:21 UTC (**terminated**, read back gone) |
 | `difflet-cuda-f9` | 502673395609120916 | eu-3 | **Server** × 1, no volume, 250 GB container disk | 580.178.04 / 2.11.0+cu128 | 2.65 | 2026-10-18 18:44 → 19:50 UTC (**terminated**, read back gone) |
+| `difflet-cuda-f9c` | 502996083439452993 | eu-3 | **Server** × 1, no volume, 150 GB disk | 580.178.04 / 2.11.0+cu128 | 2.68 | 2026-10-19 16:06 → 16:20 UTC (**terminated**: the HF code expired; nothing ran) |
+| `difflet-cuda-f9c2` | 502999627274010989 | us-east-3 | **Workstation** × 1, the volume requested but not attached (v2 API) | 580.126.09 / — | 0.45 | 2026-10-19 16:20 → 16:23 UTC (**terminated**; nothing ran) |
+| `difflet-cuda-f9c3` | 503002432390967883 | us-east-3 | **Workstation** × 1, `difflet-cache` at `/data` (v1 API) | 580.126.09 / 2.11.0+cu128 | 0.45 | 2026-10-19 16:32 → **PAUSED** 16:53 UTC (read back) |
 
 Network volume `difflet-cache`: id 469225541779435520, us-east-3, 200 GB CephFS,
 $0.0698/GB/month, mounted at `/data` (HF cache + token, `HF_HOME=/data/hf`); cold reads ≈ 0.23
@@ -644,6 +647,65 @@ DIFFLET_CUDA_FLUX_E2E_RESULT=artifacts/cuda-release1/f4f/floor/e2e_floor_seed0.j
 # since F9c: cuda_e2e_flux_vs_diffusers.py --seeds 0,1,2,... --noise-floor (one load per side; the gate over seeds)
 ```
 
+### The Flux e2e over eight seeds and the gate over seeds (F9c)
+
+Pod `difflet-cuda-f9c3` (us-east-3, **Workstation** × 1, the `difflet-cache` volume: no
+download, no login), checkout `f643e46`: `cuda_e2e_flux_vs_diffusers.py --seeds 0,…,7
+--noise-floor`, eager, then with `DIFFLET_CUDA_TORCH_COMPILE=1`, then `run_gates.sh flux` and its
+new three-seed e2e step *[10-19 F9c verdict]*. PSNR / cosine against diffusers' image from the
+same noise, and the floor (diffusers against itself with bf16 gemm reductions flipped):
+
+| seed | Difflet eager | Difflet `--torch-compile` | noise floor |
+|---|---|---|---|
+| 0 | 31.56 dB / 0.99851 | 42.27 dB / 0.99987 | 30.92 dB / 0.99827 |
+| 1 | 39.56 dB / 0.99976 | 41.31 dB / 0.99984 | 36.62 dB / 0.99952 |
+| 2 | 43.79 dB / 0.99991 | 40.52 dB / 0.99981 | 37.61 dB / 0.99964 |
+| 3 | 41.27 dB / 0.99985 | 43.01 dB / 0.99990 | 31.90 dB / 0.99868 |
+| 4 | 35.61 dB / 0.99931 | 36.88 dB / 0.99950 | 33.05 dB / 0.99876 |
+| 5 | 44.14 dB / 0.99993 | 39.76 dB / 0.99980 | 39.44 dB / 0.99979 |
+| 6 | 33.46 dB / 0.99899 | 34.24 dB / 0.99915 | 35.14 dB / 0.99931 |
+| 7 | 24.89 dB / 0.99276 | 28.50 dB / 0.99684 | 24.24 dB / 0.99159 |
+| min / mean / max | 24.89 / 36.79 / 44.14 dB | 28.50 / 38.31 / 43.01 dB | 24.24 / 33.61 / 39.44 dB |
+
+**Gates.** Gate A (the mean): eager 36.79 dB against 32.40 required (the floor's mean 33.61 −
+1.21 dB; 4.4 dB headroom, about 2.6 standard errors of the floor's mean at n = 8, whose seeds
+spread with a standard deviation of 4.8 dB), compiled 38.31 dB (5.9 dB); the mean cosine
+deviation 0.00137 / 0.00066 against 0.00239 allowed. Gate B (every seed): at least 23.02 dB
+(the floor's worst seed 24.24 − 1.21) and a deviation of at most 0.01113; the worst Difflet
+seed is 24.89 dB eager, 28.50 compiled. Both pass (`f9c/eager/gate.log`, `f9c/compiled/gate.log`).
+`run_gates.sh flux` (eager): `GATES DONE flux overall_rc=0` — smoke 44 s (a cat in a sunlit
+garden), parity 107 s at 0.987× the control and 0.387× same-dtype (F4f's numbers), e2e 149 s
+over seeds 0–2 with gate A 38.30 dB against 33.84 (`f9c/gates-flux/`).
+
+**Reproduction.** Eager seeds 0–2, and their floors, equal F4f's three single-seed runs to the
+printed digits — on a Workstation card where F4f's ran on a Server card, and with all seeds in
+one process: nothing carries over between seeds. `--torch-compile` is not reproducible run to
+run (max-autotune picks kernels by timing): its seed 0 reads 42.27 dB here and 31.41 dB on F4f.
+
+**Observations.** (1) Seed 7 is a chaotic seed for diffusers itself (24.24 dB from its own
+rounding noise); with eight seeds the floor's worst seed fell from 30.92 to 24.24 dB, and gate
+B's threshold from 29.71 to 23.02 dB — with more seeds gate B becomes the backstop and gate A
+the judge. (2) Matched seed by seed, Difflet is above its own floor on 7 of 8 seeds in both
+modes; eager seed 6 is 1.68 dB under it (33.46 vs 35.14; compiled 0.90). The gate compares with
+the floor's spread, not seed by seed (F9b's ruling: the perturbation moves diffusers by several
+dB between seeds), so this is inside the gate's design; a per-seed test at 1.21 dB would fail
+eager seed 6. **Timings (Workstation):** generate eager 8.7–9.1 s against diffusers 8.6–8.7 s,
+compiled 7.5–7.8 s; Difflet's first load 154.9 s (a cold read from the volume, ≈ 0.22 GB/s), the
+compiled load 77.8 s (warm page cache plus compiles); peak 36.33 / 36.32 GB.
+
+**Getting the pod.** The v2 create API attaches R2 volumes only (12016) and drops an unknown
+volume key without an error (`difflet-cuda-f9c2` came up without `/data`); v1's create with
+`persistentVolumes: [{id, volumeType: "Ceph", mountMode: "Data", mountPath}]` attached
+`difflet-cache` (`f643e46`, `2497d32`; `yottalabs_pod.py create --volume-id` now sends it).
+
+```bash
+export DIFFLET_BACKEND=cpu DIFFLET_RUN_CUDA_NUMERICAL=1 A=artifacts/cuda-release1/f9c
+DIFFLET_CUDA_FLUX_E2E_RESULT=$A/eager/cuda_e2e_flux_noise.json pytest -q -rA tests/numerical/test_cuda_flux_e2e_vs_diffusers.py     # 4 passed; gate A/B lines, per-seed table
+DIFFLET_CUDA_FLUX_E2E_RESULT=$A/compiled/cuda_e2e_flux_noise.json pytest -q -rA tests/numerical/test_cuda_flux_e2e_vs_diffusers.py  # 4 passed
+DIFFLET_CUDA_FLUX_E2E_RESULT=$A/gates-flux/cuda_e2e_flux.json pytest -q -rA tests/numerical/test_cuda_flux_e2e_vs_diffusers.py      # 4 passed
+cat $A/gates-flux/gates.txt; open $A/eager/flux_e2e_{difflet,diffusers}_seed7.png   # the chaotic seed, by eye
+```
+
 ## Two GPUs (F2)
 
 Pod f2: 2 × **Server** over PCIe `PHB`, no NVLink, checkout aef79dd *[10-18 F2 verdict]*. NCCL
@@ -850,6 +912,13 @@ above. Spurious infrastructure events are kept and labelled.
     with one load per side and per-seed / aggregate metrics, the gate over seeds (gates A and
     B as F9b's), `run_gates.sh flux` on seeds 0–2 with the noise floor; the F4f floor runs
     merged into one result pass it *[10-19 F9c]*.
+42. `f643e46`, `2497d32` — the pod tool's volume path: v2's create dropped `persistentVolumes`
+    silently (a pod without `/data`) and answers 12016 for a network volume with its own
+    `volumes` field; a volume pod now goes to v1's create (`persistentVolumes`, Ceph, by id),
+    which attached `difflet-cache` *[10-19 F9c verdict]*.
+43. F9c measured on `difflet-cuda-f9c3` (Workstation): seeds 0–7 with the floor, eager and
+    compiled, pass gates A and B (36.79 / 38.31 dB against 32.40); `run_gates.sh flux` green
+    end to end; eager seeds 0–2 reproduce F4f's to the digit *[10-19 F9c verdict]*.
 
 ## Support matrix
 
@@ -888,7 +957,7 @@ Difflet bf16 against diffusers fp32 and bf16 on identical inputs; gates 1.15× /
 Same initial noise through both pipelines; pixel PSNR / cosine.
 | Qwen-Image | FLUX.1-dev | Wan 2.2 |
 |---|---|---|
-| PASS · 41.40 dB / 0.99972 | PASS · 40.35 dB / 0.99980 | PASS · 26.30 dB / 0.99609 (1.3 dB above the floor); seeds 0–2 26.30–28.89 dB vs diffusers' own noise floor 23.79–28.62 dB (F9); relative gate mean 27.20 dB vs 25.17 required (F9b) |
+| PASS · 41.40 dB / 0.99972 | PASS · 40.35 dB / 0.99980; seeds 0–7 against the noise floor, gate A 36.79 dB eager / 38.31 compiled vs 32.40 required (F9c, Workstation) | PASS · 26.30 dB / 0.99609 (1.3 dB above the floor); seeds 0–2 26.30–28.89 dB vs diffusers' own noise floor 23.79–28.62 dB (F9); relative gate mean 27.20 dB vs 25.17 required (F9b) |
 
 ### CLI matrix   `scripts/verify_cli_cuda.py`
 Download → compile → timed generate per cell, `results.json`.
@@ -987,11 +1056,14 @@ from recorded times and prices.
 | `difflet-cuda-f9` | 18:44 → 19:50 UTC (~66 min) | 2.65 | ~$2.90 (computed) | terminated, gone |
 | `difflet-cuda-f2b` (2 GPUs, eu-2) | 21:27 → 22:11 UTC (the status-log entry's 17:27 → 18:11 are EDT; ~44 min) | 5.30 | ~$3.90 (computed) | terminated, gone |
 | `difflet-cuda-flux` (1 GPU, eu-3) | 23:03 → 23:25 UTC (~22 min) | 2.65 | ~$1.00 (computed) | terminated, gone |
-| `difflet-cuda-f5b` resume attempt | 23:59 UTC 2026-10-18 → still INITIALIZING at 10:24 UTC 2026-10-19; `pause` refused (12005) | 0.45 if it ever runs | unknown | INITIALIZING (watched) |
+| `difflet-cuda-f5b` resume attempt | 23:59 UTC 2026-10-18 → INITIALIZING until terminated 16:01 UTC 2026-10-19 on the owner's word; `pause` refused (12005) | 0.45 if billed | unknown (the API shows no billing; ≤ ~$7) | terminated, gone |
 | `difflet-cuda-f4d` (1 GPU, eu-3) | 09:46 → 10:24 UTC 2026-10-19 (~38 min) | 2.65 | ~$1.70 (computed) | terminated, gone |
 | `difflet-cuda-f4e` (1 GPU, eu-2) | 11:52 → 12:20 UTC 2026-10-19 (~28 min) | 2.65 | ~$1.25 (computed) | terminated, gone |
 | `difflet-cuda-f4f` (1 GPU, eu-2) | 12:56 → 13:52 UTC 2026-10-19 (~56 min) | 2.65 | ~$2.50 (computed) | terminated, gone |
-| `difflet-cache` volume | ongoing | $0.0698/GB/month × 200 GB | ~$13.96/month | attached to f5b |
+| `difflet-cuda-f9c` (1 GPU, eu-3) | 16:06 → 16:20 UTC 2026-10-19 (~14 min, nothing ran) | 2.68 | ~$0.62 (computed) | terminated, gone |
+| `difflet-cuda-f9c2` (1 GPU, us-east-3) | 16:20 → 16:23 UTC (~3 min, nothing ran) | 0.45 | ~$0.02 (computed) | terminated, gone |
+| `difflet-cuda-f9c3` (1 GPU, us-east-3, the volume) | 16:32 → 16:53 UTC (~21 min) | 0.45 | ~$0.16 (computed) | PAUSED |
+| `difflet-cache` volume | ongoing | $0.0698/GB/month × 200 GB | ~$13.96/month | attached to f9c3 (paused) |
 
 A paused pod releases its card and stops GPU billing; the container disk is lost, while the volume
 and the pod record stay (`.claude/skills/difflet-cuda-verify/references/pod-runbook.md`).

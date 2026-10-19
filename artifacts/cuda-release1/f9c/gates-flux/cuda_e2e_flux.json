@@ -1,0 +1,198 @@
+{
+  "model": "flux",
+  "model_id": "black-forest-labs/FLUX.1-dev",
+  "model_path": "/data/hf/hub/models--black-forest-labs--FLUX.1-dev/snapshots/3de623fc3c33e44ffbe2bad470d0f45bccf2eb21/",
+  "prompt": "a photorealistic cat sitting in a sunlit garden",
+  "steps": 28,
+  "guidance_scale": 3.5,
+  "seed": 0,
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "shape": [
+    1024,
+    1024
+  ],
+  "device": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+  "torch": "2.11.0+cu128",
+  "metrics": {
+    "psnr_db": 31.564294225201547,
+    "cosine": 0.9985057519682408,
+    "mean_abs": 0.006465555479129155,
+    "max_abs": 0.796875
+  },
+  "images": {
+    "difflet": "/home/user/logs/f9c/gates-flux/flux_e2e_difflet.png",
+    "diffusers": "/home/user/logs/f9c/gates-flux/flux_e2e_diffusers.png"
+  },
+  "timings": {
+    "difflet": {
+      "load_s": 33.8,
+      "generate_s": 9.1,
+      "peak_alloc_gb": 36.33
+    },
+    "diffusers": {
+      "load_s": 23.0,
+      "generate_s": 8.6,
+      "peak_alloc_gb": 36.32
+    }
+  },
+  "noise_floor": {
+    "perturbation": "allow_bf16_reduced_precision_reduction=False (exact: True)",
+    "metrics": {
+      "psnr_db": 30.92373250148661,
+      "cosine": 0.9982712401987284,
+      "mean_abs": 0.0072033970306317014,
+      "max_abs": 0.892578125
+    },
+    "timings": {
+      "load_s": 23.0,
+      "generate_s": 8.6,
+      "peak_alloc_gb": null
+    }
+  },
+  "per_seed": {
+    "0": {
+      "metrics": {
+        "psnr_db": 31.564294225201547,
+        "cosine": 0.9985057519682408,
+        "mean_abs": 0.006465555479129155,
+        "max_abs": 0.796875
+      },
+      "timings": {
+        "difflet": {
+          "load_s": 33.8,
+          "generate_s": 9.1,
+          "peak_alloc_gb": 36.33
+        },
+        "diffusers": {
+          "load_s": 23.0,
+          "generate_s": 8.6,
+          "peak_alloc_gb": 36.32
+        }
+      },
+      "noise_floor": {
+        "perturbation": "allow_bf16_reduced_precision_reduction=False (exact: True)",
+        "metrics": {
+          "psnr_db": 30.92373250148661,
+          "cosine": 0.9982712401987284,
+          "mean_abs": 0.0072033970306317014,
+          "max_abs": 0.892578125
+        },
+        "timings": {
+          "load_s": 23.0,
+          "generate_s": 8.6,
+          "peak_alloc_gb": null
+        }
+      },
+      "images": {
+        "difflet": "/home/user/logs/f9c/gates-flux/flux_e2e_difflet_seed0.png",
+        "diffusers": "/home/user/logs/f9c/gates-flux/flux_e2e_diffusers_seed0.png"
+      }
+    },
+    "1": {
+      "metrics": {
+        "psnr_db": 39.55547969517981,
+        "cosine": 0.9997568624459017,
+        "mean_abs": 0.003727724775671959,
+        "max_abs": 0.580078125
+      },
+      "timings": {
+        "difflet": {
+          "load_s": 33.8,
+          "generate_s": 8.7,
+          "peak_alloc_gb": 36.33
+        },
+        "diffusers": {
+          "load_s": 23.0,
+          "generate_s": 8.6,
+          "peak_alloc_gb": 36.32
+        }
+      },
+      "noise_floor": {
+        "perturbation": "allow_bf16_reduced_precision_reduction=False (exact: True)",
+        "metrics": {
+          "psnr_db": 36.62104024843132,
+          "cosine": 0.9995219231179733,
+          "mean_abs": 0.005462898562351863,
+          "max_abs": 0.533203125
+        },
+        "timings": {
+          "load_s": 23.0,
+          "generate_s": 8.6,
+          "peak_alloc_gb": null
+        }
+      },
+      "images": {
+        "difflet": "/home/user/logs/f9c/gates-flux/flux_e2e_difflet_seed1.png",
+        "diffusers": "/home/user/logs/f9c/gates-flux/flux_e2e_diffusers_seed1.png"
+      }
+    },
+    "2": {
+      "metrics": {
+        "psnr_db": 43.78866577298002,
+        "cosine": 0.999912451915674,
+        "mean_abs": 0.002370798339446386,
+        "max_abs": 0.5859375
+      },
+      "timings": {
+        "difflet": {
+          "load_s": 33.8,
+          "generate_s": 8.8,
+          "peak_alloc_gb": 36.33
+        },
+        "diffusers": {
+          "load_s": 23.0,
+          "generate_s": 8.6,
+          "peak_alloc_gb": 36.32
+        }
+      },
+      "noise_floor": {
+        "perturbation": "allow_bf16_reduced_precision_reduction=False (exact: True)",
+        "metrics": {
+          "psnr_db": 37.605905468138545,
+          "cosine": 0.9996355033656947,
+          "mean_abs": 0.004588952288031578,
+          "max_abs": 0.583984375
+        },
+        "timings": {
+          "load_s": 23.0,
+          "generate_s": 8.7,
+          "peak_alloc_gb": null
+        }
+      },
+      "images": {
+        "difflet": "/home/user/logs/f9c/gates-flux/flux_e2e_difflet_seed2.png",
+        "diffusers": "/home/user/logs/f9c/gates-flux/flux_e2e_diffusers_seed2.png"
+      }
+    }
+  },
+  "aggregate": {
+    "difflet": {
+      "psnr_db": {
+        "min": 31.564294225201547,
+        "mean": 38.30281323112046,
+        "max": 43.78866577298002
+      },
+      "cosine": {
+        "min": 0.9985057519682408,
+        "mean": 0.9993916887766056,
+        "max": 0.999912451915674
+      }
+    },
+    "noise_floor": {
+      "psnr_db": {
+        "min": 30.92373250148661,
+        "mean": 35.0502260726855,
+        "max": 37.605905468138545
+      },
+      "cosine": {
+        "min": 0.9982712401987284,
+        "mean": 0.9991428888941322,
+        "max": 0.9996355033656947
+      }
+    }
+  }
+}

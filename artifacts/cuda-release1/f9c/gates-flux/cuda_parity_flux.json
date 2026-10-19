@@ -1,0 +1,36 @@
+{
+  "model": "flux",
+  "model_path": "/data/hf/hub/models--black-forest-labs--FLUX.1-dev/snapshots/3de623fc3c33e44ffbe2bad470d0f45bccf2eb21/",
+  "shape": [
+    1024,
+    1024,
+    512
+  ],
+  "device": "NVIDIA RTX PRO 6000 Blackwell Workstation Edition",
+  "torch": "2.11.0+cu128",
+  "cuda": "12.8",
+  "guidance_embeds": true,
+  "control": {
+    "cosine": 0.9995572082198417,
+    "rel_l1": 0.027469445019960403,
+    "rel_l2": 0.029905973002314568,
+    "max_abs": 0.04596838355064392,
+    "ref_absmean": 0.29358023405075073
+  },
+  "results": {
+    "sdpa": {
+      "cosine": 0.999574317638905,
+      "rel_l1": 0.02710285224020481,
+      "rel_l2": 0.029238000512123108,
+      "max_abs": 0.04549098014831543,
+      "ref_absmean": 0.29358023405075073,
+      "vs_bf16": {
+        "cosine": 0.9999303981675162,
+        "rel_l1": 0.010640882886946201,
+        "rel_l2": 0.011855893768370152,
+        "max_abs": 0.01953125,
+        "ref_absmean": 0.29277491569519043
+      }
+    }
+  }
+}

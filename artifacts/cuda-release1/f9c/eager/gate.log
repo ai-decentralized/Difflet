@@ -1,0 +1,47 @@
+============================= test session starts ==============================
+platform linux -- Python 3.11.14, pytest-9.1.1, pluggy-1.7.0 -- /home/user/Difflet/.venv/bin/python
+neuron gate: active — 25 Trainium-only test modules not collected; Neuron-only failures reported as skips (see tests/_neuron_gate.py)
+rootdir: /home/user/Difflet
+configfile: pyproject.toml
+plugins: xdist-3.8.0, anyio-4.15.1
+collecting ... collected 4 items
+
+tests/numerical/test_cuda_flux_e2e_vs_diffusers.py::test_image_is_the_same_picture_as_diffusers PASSED [ 25%]
+tests/numerical/test_cuda_flux_e2e_vs_diffusers.py::test_image_is_as_close_to_diffusers_as_diffusers_is_to_itself PASSED [ 50%]
+tests/numerical/test_cuda_flux_e2e_vs_diffusers.py::test_seeds_and_aggregate_are_recorded PASSED [ 75%]
+tests/numerical/test_cuda_flux_e2e_vs_diffusers.py::test_result_records_the_run PASSED [100%]
+
+==================================== PASSES ====================================
+_________________ test_image_is_the_same_picture_as_diffusers __________________
+----------------------------- Captured stdout call -----------------------------
+noise floor recorded: the 35.0 dB / 0.998 floors are superseded by the relative gate; the loose floors 20.0 dB / 0.98 judged every seed
+________ test_image_is_as_close_to_diffusers_as_diffusers_is_to_itself _________
+----------------------------- Captured stdout call -----------------------------
+relative gate A (mean over 8 seeds): PSNR 36.79 dB, required >= 32.40 dB (noise floor mean 33.61 dB - 1.21 dB); cosine deviation 0.00137, allowed <= 0.00239 (1.3225x the floor's 0.00180; 1.15x on the linear error)
+relative gate B (every seed): PSNR >= 23.02 dB (noise floor min 24.24 dB - 1.21 dB); cosine deviation <= 0.01113 (1.3225x the floor's worst 0.00841)
+____________________ test_seeds_and_aggregate_are_recorded _____________________
+----------------------------- Captured stdout call -----------------------------
+seed 0 difflet vs diffusers: PSNR 31.56 dB, cosine 0.99851
+seed 0 noise floor (diffusers vs its perturbed self): PSNR 30.92 dB, cosine 0.99827
+seed 1 difflet vs diffusers: PSNR 39.56 dB, cosine 0.99976
+seed 1 noise floor (diffusers vs its perturbed self): PSNR 36.62 dB, cosine 0.99952
+seed 2 difflet vs diffusers: PSNR 43.79 dB, cosine 0.99991
+seed 2 noise floor (diffusers vs its perturbed self): PSNR 37.61 dB, cosine 0.99964
+seed 3 difflet vs diffusers: PSNR 41.27 dB, cosine 0.99985
+seed 3 noise floor (diffusers vs its perturbed self): PSNR 31.90 dB, cosine 0.99868
+seed 4 difflet vs diffusers: PSNR 35.61 dB, cosine 0.99931
+seed 4 noise floor (diffusers vs its perturbed self): PSNR 33.05 dB, cosine 0.99876
+seed 5 difflet vs diffusers: PSNR 44.14 dB, cosine 0.99993
+seed 5 noise floor (diffusers vs its perturbed self): PSNR 39.44 dB, cosine 0.99979
+seed 6 difflet vs diffusers: PSNR 33.46 dB, cosine 0.99899
+seed 6 noise floor (diffusers vs its perturbed self): PSNR 35.14 dB, cosine 0.99931
+seed 7 difflet vs diffusers: PSNR 24.89 dB, cosine 0.99276
+seed 7 noise floor (diffusers vs its perturbed self): PSNR 24.24 dB, cosine 0.99159
+aggregate over 8 seeds, difflet: PSNR min 24.89 / mean 36.79 / max 44.14 dB, cosine min 0.99276 / mean 0.99863 / max 0.99993
+aggregate over 8 seeds, noise floor: PSNR min 24.24 / mean 33.61 / max 39.44 dB, cosine min 0.99159 / mean 0.99820 / max 0.99979
+=========================== short test summary info ============================
+PASSED tests/numerical/test_cuda_flux_e2e_vs_diffusers.py::test_image_is_the_same_picture_as_diffusers
+PASSED tests/numerical/test_cuda_flux_e2e_vs_diffusers.py::test_image_is_as_close_to_diffusers_as_diffusers_is_to_itself
+PASSED tests/numerical/test_cuda_flux_e2e_vs_diffusers.py::test_seeds_and_aggregate_are_recorded
+PASSED tests/numerical/test_cuda_flux_e2e_vs_diffusers.py::test_result_records_the_run
+============================== 4 passed in 0.02s ===============================
