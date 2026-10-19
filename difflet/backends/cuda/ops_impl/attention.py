@@ -12,6 +12,9 @@ Contract (shared with the CPU oracle and the TPU backend, ``difflet/ops/attentio
   ``finfo.min`` rather than ``-inf`` so a fully masked row stays finite.
 * ``tp_q``/``tp_k``/``tp_out`` are Trainium kernel hints: accepted and ignored.
 * Inputs may be ``(B, H, S, D)`` or ``(B*H, S, D)``; SDPA accepts either batch shape.
+* ``attention_heads`` takes the models' ``(B, H, S, D)`` transposed views as they are:
+  no fold, no copy — SDPA's flash kernel reads the ``(B, S, H, D)`` storage directly. The
+  The Wan DiT bench put the three fold copies per attention at ~8 ms of a 536 ms forward.
 
 Kernel selection (flash / cuDNN / efficient / math) is torch's; ``platform.
 sdpa_kernel_report`` says which one a shape gets, recorded in Phase 0. No
@@ -89,6 +92,14 @@ def _sdpa(q, k, v, *, scale: float, causal: bool, attention_mask):
     return F.scaled_dot_product_attention(q, k, v, attn_mask=additive, scale=scale)
 
 
+def attention_heads(q, k, v, *, scale=None, causal=False, attention_mask=None, **kwargs):
+    """``attention`` over ``(B, H, S, D)`` views of any strides, straight to SDPA (no copies)."""
+    kwargs.pop("tp_q", None)
+    kwargs.pop("tp_k", None)
+    kwargs.pop("tp_out", None)
+    return attention(q, k, v, scale=scale, causal=causal, attention_mask=attention_mask, **kwargs)
+
+
 def cross_attention(q, k, v, *, scale: float | None = None, attention_mask=None, **kwargs):
     kwargs.pop("tp_q", None)
     kwargs.pop("tp_k", None)
@@ -114,6 +125,7 @@ def joint_ulysses_attention(*args, **kwargs):
 
 __all__ = [
     "attention",
+    "attention_heads",
     "cross_attention",
     "joint_ring_attention",
     "joint_ulysses_attention",
