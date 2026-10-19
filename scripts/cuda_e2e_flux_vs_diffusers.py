@@ -50,6 +50,13 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--images-dir", default="/tmp/logs")
     ap.add_argument("--compile-cache-dir", default=None)
     ap.add_argument(
+        "--noise-floor",
+        action="store_true",
+        help="also run diffusers against itself with bf16 gemm reductions in reduced precision "
+        "flipped (a rounding-level perturbation): the metric's own sensitivity on this seed (F9's "
+        "Wan recipe, F4f for Flux)",
+    )
+    ap.add_argument(
         "--torch-compile",
         action="store_true",
         help="compile the DiT blocks, as `difflet run --torch-compile` does (default: eager)",
@@ -143,16 +150,7 @@ def run_difflet(args, device) -> tuple[torch.Tensor, torch.Tensor, dict]:
     return img, noise, timings
 
 
-def run_diffusers(args, device, noise: torch.Tensor) -> tuple[torch.Tensor, dict]:
-    from diffusers import FluxPipeline
-
-    torch.cuda.reset_peak_memory_stats()
-    mark = time.monotonic()
-    pipe = FluxPipeline.from_pretrained(
-        args.model_path, torch_dtype=torch.bfloat16, local_files_only=True
-    ).to(device)
-    load_s = time.monotonic() - mark
-    print(f"diffusers loaded in {load_s:.1f}s", flush=True)
+def _diffusers_generate(pipe, args, device, noise: torch.Tensor) -> tuple[torch.Tensor, float]:
     mark = time.monotonic()
     with torch.no_grad():
         out = pipe(
@@ -168,12 +166,45 @@ def run_diffusers(args, device, noise: torch.Tensor) -> tuple[torch.Tensor, dict
     torch.cuda.synchronize()
     generate_s = time.monotonic() - mark
     print(f"diffusers generated in {generate_s:.1f}s", flush=True)
+    return _unit_image(out.images), generate_s
+
+
+def run_diffusers(
+    args, device, noise: torch.Tensor, *, noise_floor: bool = False
+) -> tuple[torch.Tensor, dict, dict | None]:
+    """One ``FluxPipeline`` load; the exact run and, with ``noise_floor``, a second run with
+    ``torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction`` flipped — every
+    bf16 gemm accumulates differently, a rounding-level perturbation of diffusers itself.
+    Returns the exact image, its timings, and the perturbed run's ``{metrics, timings}`` or None."""
+    from diffusers import FluxPipeline
+
+    torch.cuda.reset_peak_memory_stats()
+    mark = time.monotonic()
+    pipe = FluxPipeline.from_pretrained(
+        args.model_path, torch_dtype=torch.bfloat16, local_files_only=True
+    ).to(device)
+    load_s = time.monotonic() - mark
+    print(f"diffusers loaded in {load_s:.1f}s", flush=True)
+    img, generate_s = _diffusers_generate(pipe, args, device, noise)
     timings = timings_record(load_s=load_s, generate_s=generate_s, peak_bytes=_peak_bytes())
-    img = _unit_image(out.images)
-    del out, pipe
+    floor = None
+    if noise_floor:
+        flag = torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
+        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = not flag
+        try:
+            perturbed, perturbed_s = _diffusers_generate(pipe, args, device, noise)
+        finally:
+            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = flag
+        floor = {
+            "perturbation": f"allow_bf16_reduced_precision_reduction={not flag} (exact: {flag})",
+            "metrics": image_metrics(img, perturbed),
+            "timings": timings_record(load_s=load_s, generate_s=perturbed_s, peak_bytes=None),
+        }
+        print(f"diffusers vs its perturbed self (pixels in [0,1]): {floor['metrics']}", flush=True)
+    del pipe
     gc.collect()
     torch.cuda.empty_cache()
-    return img, timings
+    return img, timings, floor
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -186,7 +217,7 @@ def main(argv: list[str] | None = None) -> None:
 
     img_d, noise, timings_d = run_difflet(args, device)
     _save(img_d, difflet_png)
-    img_r, timings_r = run_diffusers(args, device, noise)
+    img_r, timings_r, floor = run_diffusers(args, device, noise, noise_floor=args.noise_floor)
     _save(img_r, diffusers_png)
 
     metrics = image_metrics(img_d, img_r)
@@ -204,6 +235,7 @@ def main(argv: list[str] | None = None) -> None:
         "metrics": metrics,
         "images": {"difflet": str(difflet_png), "diffusers": str(diffusers_png)},
         "timings": {"difflet": timings_d, "diffusers": timings_r},
+        "noise_floor": floor,
     }
     print(f"difflet vs diffusers (pixels in [0,1]): {metrics}", flush=True)
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
