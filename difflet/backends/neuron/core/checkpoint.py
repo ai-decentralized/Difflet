@@ -116,6 +116,7 @@ def load_sharded_checkpoint(
     prefix: str = "",
     strict: bool = True,
     slices: Mapping[str, CheckpointSlice] | None = None,
+    on_tensor: Callable[[str, torch.Tensor], None] | None = None,
 ) -> dict[str, list[str]]:
     """Load this rank's shards of the safetensors checkpoint in ``model_dir`` onto ``device``.
 
@@ -131,6 +132,8 @@ def load_sharded_checkpoint(
     they are read after the renamable ones, and their source keys do not count as unexpected.
     Returns ``{"missing": [...], "unexpected": [...]}``; with ``strict`` a parameter or
     persistent buffer missing from the checkpoint raises ``ValueError``.
+    ``on_tensor(name, host_tensor)`` sees every tensor after its copy (the weight store,
+    ``core/weight_store.py``, writes them).
     """
     tp_size = get_tp_size() if tp_size is None else int(tp_size)
     if tp_rank is None:
@@ -158,15 +161,17 @@ def load_sharded_checkpoint(
         dtype=None,
         strict=strict and not slices,  # sliced parameters show up as missing until read below
         rename=rename,
+        on_tensor=on_tensor,
     )
     if slices:
         report = _load_slices(module, model_dir, slices, report, tp_size=tp_size, tp_rank=tp_rank,
-                              strict=strict)
+                              strict=strict, on_tensor=on_tensor)
     module.to(target)
     return report
 
 
-def _load_slices(module, model_dir, slices, report, *, tp_size, tp_rank, strict):
+def _load_slices(module, model_dir, slices, report, *, tp_size, tp_rank, strict,
+                 on_tensor=None):
     from difflet.backends.tpu.core.checkpoint import build_weight_map
     from difflet.backends.tpu.core.weights import shard_dim
 
@@ -184,7 +189,10 @@ def _load_slices(module, model_dir, slices, report, *, tp_size, tp_rank, strict)
             if tuple(tensor.shape) != tuple(target.shape):
                 raise ValueError(f"{name}: checkpoint slice {tuple(tensor.shape)} != parameter "
                                  f"{tuple(target.shape)} ({spec}, tp={tp_size})")
-            target.copy_(tensor.to(target.dtype))
+            tensor = tensor.to(target.dtype)
+            target.copy_(tensor)
+            if on_tensor is not None:  # the weight store records sliced parameters too
+                on_tensor(name, tensor)
     missing = [n for n in report["missing"] if n not in slices]
     sources = {spec.key for spec in slices.values()}
     unexpected = [k for k in report["unexpected"] if k not in sources]
