@@ -154,3 +154,36 @@ def test_load_converts_without_cloning_the_checkpoint(tmp_path, monkeypatch):
     monkeypatch.setattr(modeling_flux, "convert_flux_hf_state_dict", spy)
     _adapter(tmp_path)
     assert seen == [False]
+
+
+# --- F4f task 1: --torch-compile for the Flux DiT ----------------------------------------------
+
+
+def test_torch_compile_is_off_by_default_for_flux(tmp_path):
+    from torch._dynamo.eval_frame import OptimizedModule
+
+    _, adapter = _adapter(tmp_path)
+    app = adapter.app
+    assert app.torch_compile is False
+    blocks = list(app.module.transformer_blocks) + list(app.module.single_transformer_blocks)
+    assert blocks and not any(isinstance(b, OptimizedModule) for b in blocks)
+
+
+def test_torch_compile_wraps_every_flux_block(tmp_path):
+    from torch._dynamo.eval_frame import OptimizedModule
+
+    reference = _reference(True)
+    transformer = tmp_path / "transformer"
+    transformer.mkdir(parents=True)
+    state = {k: v.detach().clone().contiguous() for k, v in reference.state_dict().items()}
+    save_file(state, str(transformer / "diffusion_pytorch_model.safetensors"))
+    app = CudaFluxTransformerApplication(
+        model_path=str(transformer), config=_config(True), device="cpu", torch_compile=True
+    )
+    cache = tmp_path / "cache"
+    app.compile(str(cache))
+    app.load(str(cache), skip_warmup=True)
+    assert app.torch_compile is True
+    blocks = list(app.module.transformer_blocks) + list(app.module.single_transformer_blocks)
+    assert len(blocks) == TINY["num_layers"] + TINY["num_single_layers"]
+    assert all(isinstance(b, OptimizedModule) for b in blocks)

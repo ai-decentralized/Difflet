@@ -159,12 +159,26 @@ def test_registry_lists_cuda_for_flux():
         {"taef1_path": "madebyollin/taef1"},
         {"shapes": [[1024, 1024], [768, 768]]},
         {"sp_enabled": True},
-        {"torch_compile": True},
     ],
 )
 def test_cuda_flux_application_refuses_f5b_kwargs(tmp_path, kwargs):
     with pytest.raises(NotImplementedError, match="F5b"):
         _build(tmp_path, **kwargs)
+
+
+def test_torch_compile_reaches_the_transformer(tmp_path, monkeypatch):
+    # F4f: the measured, opt-in compile option (D4) is a kwarg (or DIFFLET_CUDA_TORCH_COMPILE=1)
+    # and the transformer application carries it; off by default.
+    monkeypatch.delenv("DIFFLET_CUDA_TORCH_COMPILE", raising=False)
+    _write_tiny_checkpoint(tmp_path)
+    kw = dict(dtype="fp32", device="cpu", load_text_encoders=False, load_vae=False)
+    app = _build(tmp_path, **kw)
+    assert app.torch_compile is False and app.transformer.torch_compile is False
+    app = _build(tmp_path, torch_compile=True, **kw)
+    assert app.torch_compile is True and app.transformer.torch_compile is True
+    monkeypatch.setenv("DIFFLET_CUDA_TORCH_COMPILE", "1")
+    assert _build(tmp_path, **kw).transformer.torch_compile is True
+    assert _build(tmp_path, torch_compile=False, **kw).torch_compile is False  # the kwarg wins
 
 
 def test_off_values_of_f5b_kwargs_are_accepted(tmp_path):

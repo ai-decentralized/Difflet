@@ -31,7 +31,7 @@ MAX_SEQUENCE_LENGTH = 512  # T5 prompt length; also the DiT warm-up's text lengt
 # Application kwargs that request a feature outside Release 1 (plan R3 → F5b). A key is
 # refused only when it carries a request (not None / False): the CLI and DiffletPipeline
 # pass several of them with their "off" value.
-_F5B_KWARGS = ("taef1", "taef1_path", "shapes", "sp_enabled", "torch_compile")
+_F5B_KWARGS = ("taef1", "taef1_path", "shapes", "sp_enabled")
 
 
 def _refuse_f5b_kwargs(kwargs: dict[str, Any]) -> None:
@@ -41,8 +41,7 @@ def _refuse_f5b_kwargs(kwargs: dict[str, Any]) -> None:
         if key in _F5B_KWARGS or key.startswith("teacache_"):
             raise NotImplementedError(
                 f"{key} for Flux on the CUDA backend is follow-up F5b of the CUDA backend "
-                "plan; Release 1 runs one shape at tp=1 without TeaCache, TAEF1, SP or "
-                "torch.compile"
+                "plan; Release 1 runs one shape at tp=1 without TeaCache, TAEF1 or SP"
             )
 
 
@@ -76,6 +75,10 @@ class CudaFluxApplication(torch.nn.Module):
         self.load_text_encoders = bool(kwargs.get("load_text_encoders", True))
         self.load_vae = bool(kwargs.get("load_vae", True))
         self.local_files_only = bool(kwargs.get("local_files_only", True))
+        torch_compile = kwargs.get("torch_compile")
+        if torch_compile is None:  # the kwarg wins; the env is the scripts' switch (F4)
+            torch_compile = os.environ.get("DIFFLET_CUDA_TORCH_COMPILE", "") == "1"
+        self.torch_compile = bool(torch_compile)
         self.transformer_path = os.path.join(model_path, "transformer")
         self.transformer = None
         self.adapter = None
@@ -92,7 +95,10 @@ class CudaFluxApplication(torch.nn.Module):
             torch_dtype=self.dtype,
         )
         self.transformer = CudaFluxTransformerApplication(
-            model_path=self.transformer_path, config=self.config, device=self.device
+            model_path=self.transformer_path,
+            config=self.config,
+            device=self.device,
+            torch_compile=self.torch_compile,
         )
         self.adapter = FluxDiTAdapter(self.transformer)
 

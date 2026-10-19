@@ -235,7 +235,6 @@ def test_wan21_is_built_from_its_own_repo(recorder, monkeypatch):
         ({"taef1": True}, "F1b"),
         ({"taef1_path": "madebyollin/taef1"}, "F1b"),
         ({"host_vae": True}, "F1b"),
-        ({"torch_compile": True}, "F1b"),
     ],
 )
 def test_unsupported_flags_are_refused_before_any_load(recorder, over, follow_up):
@@ -252,7 +251,6 @@ def test_unsupported_flags_are_refused_before_any_load(recorder, over, follow_up
         ({"teacache_calibration": "/x.json"}, "--teacache-calibration"),
         ({"taef1_path": "madebyollin/taef1"}, "--taef1"),
         ({"host_vae": True}, "--host-vae"),
-        ({"torch_compile": True}, "--torch-compile"),
     ],
 )
 def test_refusals_name_the_flag(recorder, over, flag):
@@ -725,3 +723,11 @@ def test_importing_the_cuda_and_trainium_wan_orchestrators_pulls_no_neuron_modul
         env={**os.environ, "DIFFLET_BACKEND": "cpu"},
     )
     assert proc.returncode == 0 and "OK" in proc.stdout, proc.stderr[-2000:]
+
+
+def test_torch_compile_is_forwarded_to_the_wan_application():
+    # F4f: the measured, opt-in compile option (D4) reaches CudaWanApplication as a kwarg.
+    kw = mod.WanCudaOrchestrator(_args(torch_compile=True)).pipeline_kwargs(load=True)
+    assert kw["application_kwargs"] == {"torch_compile": True}
+    kw = mod.WanCudaOrchestrator(_args()).pipeline_kwargs(load=True)
+    assert "application_kwargs" not in kw

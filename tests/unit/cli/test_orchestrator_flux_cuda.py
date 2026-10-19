@@ -162,7 +162,6 @@ def test_schnell_is_built_from_its_own_repo(recorder, monkeypatch):
         ({"taef1": True}, "F5b"),
         ({"taef1_path": "madebyollin/taef1"}, "F5b"),
         ({"host_vae": True}, "F5b"),
-        ({"torch_compile": True}, "F5b"),
     ],
 )
 def test_unsupported_flags_are_refused_before_any_load(recorder, over, follow_up):
@@ -208,3 +207,11 @@ def test_lone_teacache_calibration_is_refused_by_name(recorder):
         mod.FluxCudaOrchestrator(_args(teacache_calibration="/x.json")).generate()
     assert "--teacache-calibration" in str(exc.value) and "F5b" in str(exc.value)
     assert recorder == []
+
+
+def test_torch_compile_is_forwarded_to_the_flux_application():
+    # F4f: the measured, opt-in compile option (D4) reaches CudaFluxApplication as a kwarg.
+    kw = mod.FluxCudaOrchestrator(_args(torch_compile=True)).pipeline_kwargs(load=True)
+    assert kw["application_kwargs"] == {"torch_compile": True}
+    kw = mod.FluxCudaOrchestrator(_args()).pipeline_kwargs(load=True)
+    assert "application_kwargs" not in kw

@@ -324,7 +324,6 @@ def test_cfg_parallel_off_keeps_the_requested_batch(tmp_path):
         {"teacache_speedup": 1.5},
         {"teacache_calibration_path": "/x.json"},
         {"shapes": [[480, 832, 9], [480, 832, 17]]},
-        {"torch_compile": True},
     ],
 )
 def test_cuda_wan_application_refuses_f1b_kwargs(tmp_path, kwargs):
@@ -336,6 +335,23 @@ def test_generate_refuses_a_batch_of_prompts_as_f1b(tmp_path):
     app, _, _ = _loaded_app(tmp_path)
     with pytest.raises(NotImplementedError, match="F1b"):
         app.generate(["a cat", "a dog"], num_inference_steps=1, output_type="latent")
+
+
+def test_torch_compile_reaches_both_experts(tmp_path, monkeypatch):
+    # F4f: the measured, opt-in compile option (D4) is a kwarg (or DIFFLET_CUDA_TORCH_COMPILE=1)
+    # and both expert applications carry it; off by default.
+    monkeypatch.delenv("DIFFLET_CUDA_TORCH_COMPILE", raising=False)
+    root = tmp_path / "wan"
+    _write_model(root)
+    app = _build(root)
+    assert app.torch_compile is False and app.transformer.torch_compile is False
+    app = _build(root, torch_compile=True)
+    assert app.torch_compile is True and app.transformer.torch_compile is True
+    if app.transformer_2 is not None:
+        assert app.transformer_2.torch_compile is True
+    monkeypatch.setenv("DIFFLET_CUDA_TORCH_COMPILE", "1")
+    assert _build(root).transformer.torch_compile is True
+    assert _build(root, torch_compile=False).torch_compile is False  # the kwarg wins
 
 
 def test_off_values_of_f1b_kwargs_are_accepted(tmp_path):
