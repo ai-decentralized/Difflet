@@ -26,6 +26,13 @@ from pathlib import Path
 
 import torch
 
+from difflet.backends.neuron.core.config_checks import (
+    check_even_split,
+    check_heads_divide_tp,
+    check_layer_count,
+    exclusive_modes,
+)
+
 #: The diffusers LTX-2 pipeline's ``max_sequence_length`` and Difflet's text budget on every
 #: backend (``LTX_2_DEFAULT_TEXT_SEQ_LEN``, ``difflet/models/ltx_2/application.py``); the
 #: connectors return exactly this many rows (padding replaced by learned registers).
@@ -198,22 +205,11 @@ class NeuronLtx2Config:
             )
         if int(self.audio_num_frames) < 1:
             raise ValueError(f"LTX-2 audio_num_frames={self.audio_num_frames} must be >= 1")
-        if int(self.num_layers) < 1:
-            raise ValueError(f"LTX-2 num_layers={self.num_layers} must be >= 1")
-        if self.checkpoint_num_layers is not None and int(self.num_layers) > int(
-            self.checkpoint_num_layers
-        ):
-            raise ValueError(
-                f"LTX-2 num_layers={self.num_layers} exceeds the checkpoint's "
-                f"{self.checkpoint_num_layers} blocks"
-            )
+        check_layer_count("LTX-2", self.num_layers, self.checkpoint_num_layers)
         tp = int(self.tp_degree)
         for what, heads in (("video", self.num_attention_heads),
                             ("audio", self.audio_num_attention_heads)):
-            if int(heads) % tp:
-                raise ValueError(
-                    f"LTX-2 has {heads} {what} attention heads, which does not divide tp={tp}"
-                )
+            check_heads_divide_tp("LTX-2", heads, tp, what=what)
         if int(self.dp_degree) > 1:
             raise NotImplementedError(
                 "the neuron backend runs tensor and CFG parallelism within one LTX-2 "
@@ -232,17 +228,15 @@ class NeuronLtx2Config:
                     "and ulysses are)"
                 )
             if self.cfg_parallel_enabled:
-                raise ValueError(
-                    "LTX-2 cfg_parallel_enabled and context_parallel_enabled are mutually "
-                    "exclusive (both consume the data-parallel lanes)"
-                )
+                raise exclusive_modes("LTX-2", "cfg_parallel_enabled", "context_parallel_enabled",
+                                      "both consume the data-parallel lanes")
             if cp is not None and cp > 1:
-                if self.video_seq_len % cp:
-                    raise ValueError(
-                        f"LTX-2 context parallelism splits video_seq_len={self.video_seq_len} "
-                        f"({self.latent_num_frames}x{self.latent_height}x{self.latent_width} "
-                        f"latent) over cp_degree={cp}, which does not divide it"
-                    )
+                check_even_split(
+                    f"LTX-2 context parallelism splits video_seq_len={self.video_seq_len} "
+                    f"({self.latent_num_frames}x{self.latent_height}x{self.latent_width} latent)",
+                    self.video_seq_len, "cp_degree", cp)
+                # Only the video tokens are sharded over CP, so only the video heads Ulysses
+                # trades for them must split (the message names them).
                 if self.cp_mode == "ulysses" and (int(self.num_attention_heads) // tp) % cp:
                     raise ValueError(
                         f"cp_mode='ulysses' shards this rank's "
