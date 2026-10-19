@@ -100,10 +100,16 @@ def _prepare_mpmd_env(env: dict[str, str], num_cores: int, *, strict_environment
     Each rank binds its own core from NEURON_RT_VISIBLE_CORES
     (difflet/backends/neuron/runtime.py, bind_core), so NEURON_RT_NUM_CORES and
     NEURON_RT_VIRTUAL_CORE_SIZE, which size one process's multi-core allocation,
-    are never set here.
+    are never set here. The ranks' process-group timeout is
+    ``runtime.TORCHRUN_PG_TIMEOUT_S`` (3 h, against torch's 30 min) unless
+    DIFFLET_NEURON_PG_TIMEOUT_S is exported with a value.
     """
     for name in _TORCHRUN_RANK_ENV:
         env.pop(name, None)
+    from difflet.backends.neuron.runtime import PG_TIMEOUT_ENV, TORCHRUN_PG_TIMEOUT_S
+
+    if not (env.get(PG_TIMEOUT_ENV) or "").strip():
+        env[PG_TIMEOUT_ENV] = str(TORCHRUN_PG_TIMEOUT_S)
     # Before the ranks start: the HLO cache location is read when torch_neuronx is imported,
     # so prepare_runtime (which sets the NEFF cache) is too late for it.
     from difflet.backends.neuron.compile import configure_compile_cache
