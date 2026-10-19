@@ -119,7 +119,11 @@ def main(argv: list[str] | None = None) -> None:
         )
 
         mark = time.monotonic()
-        app = CudaFluxTransformerApplication(model_path=str(tdir), config=cfg, device=device)
+        torch_compile = os.environ.get("DIFFLET_CUDA_TORCH_COMPILE", "") == "1"
+        payload["torch_compile"] = torch_compile
+        app = CudaFluxTransformerApplication(
+            model_path=str(tdir), config=cfg, device=device, torch_compile=torch_compile
+        )
         app.compile(args.compile_cache_dir)
         app.load(args.compile_cache_dir, skip_warmup=True)
         print(f"difflet loaded in {time.monotonic() - mark:.1f}s", flush=True)

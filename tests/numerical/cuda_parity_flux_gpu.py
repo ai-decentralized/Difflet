@@ -120,7 +120,14 @@ def main() -> None:
     )
 
     mark = time.monotonic()
-    app = CudaFluxTransformerApplication(model_path=str(tdir), config=cfg, device=device)
+    # DIFFLET_CUDA_TORCH_COMPILE=1 (the scripts' switch, F4): the compiled blocks are what the
+    # gate then judges, as `difflet run --torch-compile` runs them.
+    app = CudaFluxTransformerApplication(
+        model_path=str(tdir),
+        config=cfg,
+        device=device,
+        torch_compile=os.environ.get("DIFFLET_CUDA_TORCH_COMPILE", "") == "1",
+    )
     cache = Path("/tmp/logs/cuda_parity_flux_cache")
     app.compile(str(cache))
     app.load(str(cache), skip_warmup=True)

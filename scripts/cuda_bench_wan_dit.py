@@ -250,7 +250,11 @@ def main(argv: list[str] | None = None) -> None:
         from difflet.backends.cuda.wan.transformer import CudaWanTransformerApplication
 
         mark = time.monotonic()
-        app = CudaWanTransformerApplication(model_path=str(expert_dir), config=cfg, device=device)
+        torch_compile = os.environ.get("DIFFLET_CUDA_TORCH_COMPILE", "") == "1"
+        payload["torch_compile"] = torch_compile
+        app = CudaWanTransformerApplication(
+            model_path=str(expert_dir), config=cfg, device=device, torch_compile=torch_compile
+        )
         cache = str(Path(args.compile_cache_dir) / args.expert)
         app.compile(cache)
         app.load(cache, skip_warmup=True)

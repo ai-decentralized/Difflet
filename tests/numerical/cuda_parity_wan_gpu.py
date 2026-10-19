@@ -251,7 +251,14 @@ def _difflet(edir: Path, cfg, cache: Path, device, hidden, text, timesteps: dict
     from difflet.backends.cuda.wan.transformer import CudaWanTransformerApplication
 
     mark = time.monotonic()
-    app = CudaWanTransformerApplication(model_path=str(edir), config=cfg, device=device)
+    # DIFFLET_CUDA_TORCH_COMPILE=1 (the scripts' switch, F4): the compiled blocks are what the
+    # gate then judges, as `difflet run --torch-compile` runs them.
+    app = CudaWanTransformerApplication(
+        model_path=str(edir),
+        config=cfg,
+        device=device,
+        torch_compile=os.environ.get("DIFFLET_CUDA_TORCH_COMPILE", "") == "1",
+    )
     app.compile(str(cache))
     app.load(str(cache), skip_warmup=True)
     print(f"difflet {edir.name} bf16 loaded in {time.monotonic() - mark:.1f}s", flush=True)
