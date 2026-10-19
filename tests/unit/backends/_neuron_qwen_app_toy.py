@@ -24,6 +24,7 @@ from types import SimpleNamespace
 
 import torch
 
+from tests.unit.backends._neuron_gloo import record_block_rows
 from tests.unit.backends._neuron_qwen_toy import (
     QWEN_SNAPSHOT,
     TINY_QWEN_TRANSFORMER,
@@ -462,6 +463,8 @@ def q5_true_cfg_worker(rank: int, world_size: int, model_dir: str, tp: int, cfg_
     forwards: list[float] = []
     steps: list[int] = []
     app.transformer_adapter.forward_hook = forwards.append
+    block_rows = (record_block_rows(app.transformer.module.transformer.transformer_blocks[0],
+                                    "hidden_states") if exec_mode == "eager" else [])
     app.step_hook = lambda: steps.append(len(forwards))
     embeds, mask = tiny_text_inputs()
     negative, negative_mask = tiny_negative_inputs()
@@ -485,5 +488,6 @@ def q5_true_cfg_worker(rank: int, world_size: int, model_dir: str, tp: int, cfg_
         "unwarmed_shapes": [list(k) for k in app.unwarmed_shapes],
         "compiled_blocks": app.compiled_blocks,
         "cfg_group_size": module.cfg_group.size() if module.cfg_parallel_enabled else 1,
+        "block_rows": block_rows,
     }
 
