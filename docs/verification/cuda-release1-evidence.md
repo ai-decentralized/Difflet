@@ -141,8 +141,8 @@ Also unmeasured, and recorded where they arose: Workstation vs Server characteri
 `cuda_bench_dit.py` (a second Server card reproduced the f3c table to the millisecond, the
 Workstation card was not on the pod); Wan's Difflet vs diffusers generate gap — **measured and
 closed** in F4b (50.9 vs 42.9 s Server → 44.5 vs 42.8 s after the fused q/k norm); why two Wan replicas generating at once take 51.2 s each against 44.5 s
-alone; Flux's generate gap vs diffusers — **located** by the DiT bench (unfused norms
-and gemm kernel shapes), the fix pending; F2 `--dp 1` requests 1 and 2 against their
+alone; Flux's generate gap vs diffusers — located by the DiT bench and halved by F4e
+(8.8 vs 8.3 s; what remains is the single block's projection gemm layout); F2 `--dp 1` requests 1 and 2 against their
 references; the origin of GPU 0's extra ~555 MiB under `--cfg-parallel`; the Trainium
 byte-identity of the Flux split (needs a trn2); the split of the Wan noise floor into the
 timestep effect and run-to-run GPU nondeterminism. F9's recommended follow-up — state the
