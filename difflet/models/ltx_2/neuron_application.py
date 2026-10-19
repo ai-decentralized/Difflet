@@ -38,32 +38,38 @@ within one application.
 Timing hooks (for the benchmark): ``step_hook`` is called with no arguments once per denoise
 iteration, after the audio scheduler step that ends it; ``transformer_adapter.forward_hook`` is
 called after every DiT forward with that call's wall seconds.
+
+The lifecycle, the evidence properties, the hooks, the rank-0 encoder plumbing and the
+initial-latents broadcast are the composed neuron application's (``TorchNeuronModelApplication``,
+``difflet/backends/neuron/core/model_application.py``); what is LTX-2's is here.
 """
 
 from __future__ import annotations
 
-import logging
 import os
-import time
-from collections.abc import Callable
 from typing import Any
 
 import torch
 
 from difflet.backends.neuron.core.application_base import _normalize_dtype
-from difflet.backends.neuron.core.checkpoint import _resolve_device
-from difflet.backends.neuron.core.distributed import broadcast_tensor, rank0_call, world_info
+from difflet.backends.neuron.core.distributed import rank0_call, world_info
+from difflet.backends.neuron.core.model_application import (
+    DeviceComponent,
+    DeviceTextEncoder,
+    HostTextEncoder,
+    OnDeviceDiT,
+    TorchNeuronModelApplication,
+    broadcast_from_rank0,
+    intra_op_threads,
+)
 from difflet.backends.neuron.ltx_2.config import LTX_2_TEXT_SEQ_LEN, NeuronLtx2Config
 from difflet.backends.neuron.ltx_2.transformer import NeuronLtx2TransformerApplication
-from difflet.backends.neuron.runtime import check_parallel_supported
 from difflet.models.ltx_2.contract import (
     LTX_2_DEFAULT_HEIGHT,
     LTX_2_DEFAULT_NUM_FRAMES,
     LTX_2_DEFAULT_WIDTH,
     LTX2DiTInputBundle,
 )
-
-logger = logging.getLogger(__name__)
 
 #: The keyword arguments the application accepts, with their defaults. The Trainium CLI's
 #: generate kwargs (``enable_host_pipeline``, ``enable_decode_components``) are accepted under
@@ -99,10 +105,12 @@ _TEACACHE_KWARGS = (
 )
 #: The orchestrator's default step count when the call names none.
 _DEFAULT_STEPS = 4
-#: The host encoder's discarded warm-up encode at load (``_HostLtx2TextEncoder._load``).
+#: The host encoder's discarded warm-up encode at load (``HostTextEncoder.warmup_args``).
 _WARMUP_PROMPT = "a photo"
 _LATENT_CHANNELS = 128
 _AUDIO_LATENT_CHANNELS = 8
+#: The four conditioning tensors' indices that are bool masks (they travel as int32).
+_MASKS = (2, 3)
 
 
 def _host_ltx2_pipeline(model_path: str, *, dtype: torch.dtype, text: bool, decode: bool):
@@ -125,7 +133,7 @@ def _host_ltx2_pipeline(model_path: str, *, dtype: torch.dtype, text: bool, deco
     return pipe
 
 
-class _HostLtx2TextEncoder:
+class _HostLtx2TextEncoder(HostTextEncoder):
     """The LTX-2 text path on rank 0's host; every rank receives its output by broadcast.
 
     ``__call__(prompt, negative_prompt, guidance_scale)`` returns what
@@ -133,30 +141,26 @@ class _HostLtx2TextEncoder:
     audio_text [B, L, 3840], video_mask [B, L] bool, audio_mask [B, L] bool)``, with B = 2
     (``[negative, positive]``) when ``guidance_scale`` > 1, else 1, and L = ``seq_len``. Rank 0
     computes it with the same call on the same diffusers modules (``_host_ltx2_pipeline``), so
-    the bits are the Trainium host's for the same torch build. The encode runs with
-    ``threads`` intra-op threads and restores the previous count.
+    the bits are the Trainium host's for the same torch build (``HostTextEncoder``: with
+    ``threads`` intra-op threads, inside ``rank0_call``).
 
-    ``load()`` reads the encoder on rank 0 inside its own status-synced phase
-    (``"text encoder load"``) and spends one encode there (see ``_load``).
+    ``load()`` reads the encoder on rank 0 and, as for the Qwen-Image host encoder (6d38344),
+    spends one discarded bf16 encode (``warmup_args``), so every request is encoded by a
+    warmed-up process.
     """
+
+    warmup_args = (_WARMUP_PROMPT, None, 1.0)
 
     def __init__(self, model_path, *, seq_len: int, dtype: torch.dtype, device, threads: int,
                  frame_rate: float, shape: dict[str, int]):
-        self.model_path = str(model_path)
+        super().__init__(model_path, device=device, threads=threads)
         self.seq_len = int(seq_len)
         self.dtype = dtype
-        self.device = torch.device(device)
-        self.threads = int(threads)
         self.frame_rate = float(frame_rate)
         self.shape = dict(shape)
         self.orchestrator = None  # rank 0 only, after load()
 
-    def load(self) -> None:
-        loaded = rank0_call(self._load, device=self.device, what="text encoder load")
-        if loaded is not None:
-            self.orchestrator = loaded
-
-    def _load(self):
+    def _load(self) -> None:
         from difflet.models.ltx_2.pipeline import LTX2Orchestrator
 
         pipe = _host_ltx2_pipeline(self.model_path, dtype=self.dtype, text=True, decode=False)
@@ -166,79 +170,55 @@ class _HostLtx2TextEncoder:
             num_frames=self.shape["num_frames"], text_seq_len=self.seq_len,
             frame_rate=self.frame_rate,
         )
-        # As for the Qwen-Image host encoder (6d38344): a fresh process's first bf16 encode is
-        # spent and discarded, so every request is encoded by a warmed-up process.
-        self._encode(_WARMUP_PROMPT, None, 1.0)
-        return self.orchestrator
 
     def __call__(self, prompt: str, negative_prompt: str | None,
                  guidance_scale: float) -> tuple[torch.Tensor, ...]:
-        encoded = rank0_call(self._encode, prompt, negative_prompt, guidance_scale,
-                             device=self.device, what="prompt encode")
-        out = []
-        for i in range(4):
-            tensor = None if encoded is None else encoded[i]
-            if tensor is not None and tensor.dtype == torch.bool:
-                tensor = tensor.to(torch.int32)
-            out.append(broadcast_tensor(tensor, device=self.device).cpu())
-        video, audio, video_mask, audio_mask = out
-        return video, audio, video_mask.to(torch.bool), audio_mask.to(torch.bool)
+        encoded = self._rank0_encode(prompt, negative_prompt, guidance_scale)
+        return tuple(broadcast_from_rank0(encoded, 4, device=self.device, bools=_MASKS))
 
     def _encode(self, prompt, negative_prompt, guidance_scale):
         if self.orchestrator is None:
             raise RuntimeError("the text encoder is not loaded on rank 0; call load() first")
-        previous = torch.get_num_threads()
-        torch.set_num_threads(self.threads)
-        try:
-            with torch.no_grad():
-                return tuple(t.contiguous() for t in self.orchestrator.prepare_conditioning(
-                    prompt=prompt, negative_prompt=negative_prompt,
-                    guidance_scale=float(guidance_scale), max_sequence_length=self.seq_len,
-                ))
-        finally:
-            torch.set_num_threads(previous)
+        with self._pinned():
+            return tuple(t.contiguous() for t in self.orchestrator.prepare_conditioning(
+                prompt=prompt, negative_prompt=negative_prompt,
+                guidance_scale=float(guidance_scale), max_sequence_length=self.seq_len,
+            ))
 
 
-class _DeviceLtx2TextEncoder:
+class _DeviceLtx2TextEncoder(DeviceTextEncoder):
     """The LTX-2 text path with Gemma-3's language model on the device
     (``NeuronLtx2TextEncoderApplication``, TP-sharded beside the DiT), called like
     ``_HostLtx2TextEncoder``: ``(prompt, negative_prompt, guidance_scale)`` in, the four
     conditioning tensors out, identical on every rank.
 
-    Every rank loads the tokenizer and tokenizes as diffusers does
-    (``LTX2Pipeline._get_gemma_prompt_embeds``: the stripped prompt, left-padded to ``seq_len``
-    with the tokenizer's pad token, truncated, special tokens added), then moves the valid tokens
-    to the front (the device encoder takes right-padded tokens, see its modeling module) and
-    runs the encoder: its TP collectives need every rank. Rank 0 alone restores the left-padded
-    layout of the 49 stacked states (the valid rows at the end, zeros before them: the
-    connectors mask the padding out), runs diffusers' ``LTX2TextConnectors`` on its host (bf16,
-    1.4 B parameters) on the ``[negative, positive]`` batch when ``guidance_scale`` > 1, and
+    Every rank loads the tokenizer (``DeviceTextEncoder``, configured as diffusers'
+    ``LTX2Pipeline._get_gemma_prompt_embeds`` uses it: left padding, the EOS token as the pad
+    token when there is none) and tokenizes the stripped prompt, left-padded to ``seq_len``,
+    truncated, special tokens added; then it moves the valid tokens to the front (the device
+    encoder takes right-padded tokens, see its modeling module) and runs the encoder: its TP
+    collectives need every rank. Rank 0 alone restores the left-padded layout of the 49 stacked
+    states (the valid rows at the end, zeros before them: the connectors mask the padding out),
+    runs diffusers' ``LTX2TextConnectors`` on its host (bf16, 1.4 B parameters, with ``threads``
+    intra-op threads) on the ``[negative, positive]`` batch when ``guidance_scale`` > 1, and
     broadcasts the result as the host encoder does.
     """
 
     def __init__(self, app, *, model_path, seq_len: int, device, connectors_dtype: torch.dtype,
                  threads: int) -> None:
-        self.app = app
-        self.model_path = str(model_path)
+        super().__init__(app, model_path=model_path, device=device)
         self.seq_len = int(seq_len)
-        self.device = torch.device(device)
         self.connectors_dtype = connectors_dtype
         self.threads = int(threads)
-        self.tokenizer = None  # every rank, after load()
         self.connectors = None  # rank 0 only, after load()
 
+    def _configure_tokenizer(self, tokenizer) -> None:
+        tokenizer.padding_side = "left"
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+
     def load(self, skip_warmup: bool = False) -> None:
-        from difflet.backends.neuron.core.distributed import collective_phase
-
-        with collective_phase("tokenizer load", device=self.device):
-            from transformers import AutoTokenizer
-
-            tokenizer = AutoTokenizer.from_pretrained(os.path.join(self.model_path, "tokenizer"))
-            tokenizer.padding_side = "left"
-            if tokenizer.pad_token is None:
-                tokenizer.pad_token = tokenizer.eos_token
-            self.tokenizer = tokenizer
-        self.app.load(skip_warmup=skip_warmup)
+        super().load(skip_warmup=skip_warmup)
         self.connectors = rank0_call(self._load_connectors, device=self.device,
                                      what="connectors load")
 
@@ -274,58 +254,37 @@ class _DeviceLtx2TextEncoder:
 
     def __call__(self, prompt: str, negative_prompt: str | None,
                  guidance_scale: float) -> tuple[torch.Tensor, ...]:
-        if self.tokenizer is None:
-            raise RuntimeError("the device text encoder is not loaded; call load() first")
+        self._require_tokenizer()
         prompts = ([negative_prompt or "", prompt] if float(guidance_scale) > 1.0 else [prompt])
         encoded = [self._encode_one(p) for p in prompts]
         result = rank0_call(self._connect, encoded, device=self.device, what="connectors")
-        out = []
-        for i in range(4):
-            tensor = None if result is None else result[i]
-            if tensor is not None and tensor.dtype == torch.bool:
-                tensor = tensor.to(torch.int32)
-            out.append(broadcast_tensor(tensor, device=self.device).cpu())
-        video, audio, video_mask, audio_mask = out
-        return video, audio, video_mask.to(torch.bool), audio_mask.to(torch.bool)
+        return tuple(broadcast_from_rank0(result, 4, device=self.device, bools=_MASKS))
 
     def _connect(self, encoded):
         embeds = torch.cat([e for e, _ in encoded], dim=0).to(self.connectors_dtype)
         mask = torch.cat([m for _, m in encoded], dim=0)
-        previous = torch.get_num_threads()
-        torch.set_num_threads(self.threads)
-        try:
-            with torch.no_grad():
-                video, audio, connector_mask = self.connectors(embeds, mask, padding_side="left")
-        finally:
-            torch.set_num_threads(previous)
+        with intra_op_threads(self.threads), torch.no_grad():
+            video, audio, connector_mask = self.connectors(embeds, mask, padding_side="left")
         connector_mask = connector_mask.to(torch.bool)
         return video.contiguous(), audio.contiguous(), connector_mask, connector_mask.clone()
 
 
-class _OnDeviceLtx2Transformer:
-    """The orchestrator's DiT callable: an ``LTX2DiTInputBundle`` in, the host ``(video,
-    audio)`` velocity pair out.
+class _OnDeviceLtx2Transformer(OnDeviceDiT):
+    """The orchestrator's DiT callable (``OnDeviceDiT``): an ``LTX2DiTInputBundle`` in, the host
+    ``(video, audio)`` velocity pair out.
 
-    The five model tensors are cast to ``dtype`` and made contiguous on the host before they move
-    to ``device`` (a strided host view would be restrided through a CPU round trip on the device,
-    decision D16); the RoPE coordinates stay on the host as fp32 (the module computes the rotary
-    tables there, see ``difflet/backends/neuron/ltx_2/transformer.py``); the masks and sigma
-    are not sent (the DiT attends the text unmasked; sigma is the timestep). ``.dtype``,
-    ``.config`` and ``cfg_parallel_enabled`` are what the orchestrator reads.
+    The five model tensors go to the device; the RoPE coordinates stay on the host as fp32 (the
+    module computes the rotary tables there, see ``difflet/backends/neuron/ltx_2/transformer.py``);
+    the masks and sigma are not sent (the DiT attends the text unmasked; sigma is the timestep).
+    ``.dtype``, ``.config`` and ``cfg_parallel_enabled`` are what the orchestrator reads.
     """
 
     supports_ltx_2_extra_kwargs = False
     teacache_probe_fused = False
 
-    def __init__(self, module: Callable[..., Any], config: NeuronLtx2Config, dtype, device):
-        self.module = module
-        self.config = config
-        self.dtype = dtype
-        self.device = torch.device(device)
+    def __init__(self, module, config: NeuronLtx2Config, dtype, device):
+        super().__init__(module, config, dtype, device)
         self.cfg_parallel_enabled = bool(config.cfg_parallel_enabled)
-        #: Called after every forward with its wall seconds; see the module docstring.
-        self.forward_hook: Callable[[float], None] | None = None
-        self.calls = 0
 
     def __call__(self, bundle: LTX2DiTInputBundle, **kwargs: Any):
         if kwargs:
@@ -336,26 +295,16 @@ class _OnDeviceLtx2Transformer:
         if not isinstance(bundle, LTX2DiTInputBundle):
             raise TypeError(f"expected an LTX2DiTInputBundle, got {type(bundle).__name__}")
         _check_dit_shapes(self.config, bundle)
-        start = time.perf_counter()
-        args = tuple(
-            tensor.to(self.dtype).contiguous().to(self.device)
-            for tensor in (bundle.hidden_states, bundle.audio_hidden_states,
-                           bundle.encoder_hidden_states, bundle.audio_encoder_hidden_states,
-                           bundle.timestep)
-        )
         coords = tuple(t.to(torch.float32).contiguous()
                        for t in (bundle.video_coords, bundle.audio_coords))
-        video, audio = self.module(*args, *coords)
-        if self.device.type == "neuron":
-            torch.neuron.synchronize()
-        video, audio = video.cpu(), audio.cpu()
-        self.calls += 1
-        if self.forward_hook is not None:
-            self.forward_hook(time.perf_counter() - start)
-        return video, audio
+        return self._forward(
+            (bundle.hidden_states, bundle.audio_hidden_states, bundle.encoder_hidden_states,
+             bundle.audio_encoder_hidden_states, bundle.timestep),
+            extra=coords,
+        )
 
 
-class _DeviceLtx2VaeDecoder:
+class _DeviceLtx2VaeDecoder(DeviceComponent):
     """The orchestrator's video VAE on the device (``NeuronLtx2VaeDecoderApplication``).
 
     Exposes what ``LTX2Orchestrator._decode_latents`` reads from a diffusers VAE: ``dtype``,
@@ -370,17 +319,13 @@ class _DeviceLtx2VaeDecoder:
 
         from safetensors import safe_open
 
-        self.app = app
+        super().__init__(app, device=device)
         self.dtype = app.dtype
-        self.device = torch.device(device)
         self.config = SimpleNamespace(**app.vae_config)
         path = os.path.join(str(app.model_path), "diffusion_pytorch_model.safetensors")
         with safe_open(path, framework="pt", device="cpu") as handle:
             self.latents_mean = handle.get_tensor("latents_mean")
             self.latents_std = handle.get_tensor("latents_std")
-
-    def load(self, skip_warmup: bool = False) -> None:
-        self.app.load(skip_warmup=skip_warmup)
 
     def decode(self, z: torch.Tensor, timestep=None, return_dict: bool = False):
         if timestep is not None:
@@ -428,41 +373,7 @@ def _check_dit_shapes(config: NeuronLtx2Config, bundle: LTX2DiTInputBundle) -> N
             )
 
 
-def _resolve_shape(shape: dict[str, int | None], shapes) -> dict[str, int]:
-    resolved = {
-        "height": int(shape.get("height") or LTX_2_DEFAULT_HEIGHT),
-        "width": int(shape.get("width") or LTX_2_DEFAULT_WIDTH),
-        "num_frames": int(shape.get("num_frames") or LTX_2_DEFAULT_NUM_FRAMES),
-    }
-    if shapes:
-        shapes = [tuple(entry) for entry in shapes]
-        if len(shapes) > 1:
-            raise NotImplementedError(
-                "the neuron backend compiles one static shape per process (phase 1); "
-                f"got shapes={shapes}"
-            )
-        bucket = tuple(int(v) for v in shapes[0])
-        if bucket != (resolved["height"], resolved["width"], resolved["num_frames"]):
-            raise ValueError(f"the request shape {resolved} is not the one compiled shape {bucket}")
-    return resolved
-
-
-def _reject_unsupported(options: dict[str, Any]) -> None:
-    teacache = [name for name in _TEACACHE_KWARGS if options[name] is not None]
-    if options["teacache_fused"]:
-        teacache.append("teacache_fused")
-    if teacache:
-        raise NotImplementedError(
-            f"TeaCache is not supported on the neuron backend in phase 1 ({', '.join(teacache)})"
-        )
-    if int(options["batch_size"]) != 1:
-        raise NotImplementedError(
-            "the neuron LTX-2 application runs batch_size=1 only (phase 1), got "
-            f"batch_size={options['batch_size']}"
-        )
-
-
-class TorchNeuronLtx2Application(torch.nn.Module):
+class TorchNeuronLtx2Application(TorchNeuronModelApplication):
     """Host text path on rank 0 + the DiT on each rank's core + ``LTX2Orchestrator``, on every
     rank.
 
@@ -472,23 +383,17 @@ class TorchNeuronLtx2Application(torch.nn.Module):
     CPU tests (``"cpu"`` on gloo).
     """
 
+    MODEL_LABEL = "LTX-2"
+    KWARG_DEFAULTS = _KWARG_DEFAULTS
+    TEACACHE_KWARGS = _TEACACHE_KWARGS
+    DIT_BUNDLE = LTX2DiTInputBundle
+    DIT_CALL = "a DiT bundle"
+
     def __init__(self, *, model_path, parallel, dtype: Any, shape: dict[str, int | None],
                  **kwargs: Any) -> None:
-        super().__init__()
-        unknown = sorted(set(kwargs) - set(_KWARG_DEFAULTS))
-        if unknown:
-            raise TypeError(
-                f"{type(self).__name__} got unexpected keyword arguments: {', '.join(unknown)}"
-            )
-        options = {**_KWARG_DEFAULTS, **kwargs}
-        _reject_unsupported(options)
-        check_parallel_supported(parallel)
-        self.model_path = str(model_path)
-        self.parallel = parallel
-        self.dtype = _normalize_dtype(dtype)
-        self.device = _resolve_device(options["device"])
-        self.shape = _resolve_shape(shape, options["shapes"])
-        self.text_seq_len = int(options["text_seq_len"])
+        super().__init__(model_path=model_path, parallel=parallel, dtype=dtype, shape=shape,
+                         **kwargs)
+        options = self.options
         self.frame_rate = float(options["frame_rate"])
         self.batch_size = 1
         transformer_path = os.path.join(self.model_path, "transformer")
@@ -506,7 +411,6 @@ class TorchNeuronLtx2Application(torch.nn.Module):
             overrides["num_layers"] = int(options["num_layers"])
         self.config = NeuronLtx2Config.from_pretrained(transformer_path, **overrides)
         self.cfg_parallel_enabled = bool(self.config.cfg_parallel_enabled)
-        self.transformer: NeuronLtx2TransformerApplication | None = None
         if options["enable_transformer"]:
             self.transformer = NeuronLtx2TransformerApplication(
                 model_path=transformer_path, config=self.config, parallel=parallel,
@@ -516,10 +420,6 @@ class TorchNeuronLtx2Application(torch.nn.Module):
         enable_text = options["enable_text_encoder"]
         if options["enable_host_pipeline"] is not None:
             enable_text = bool(options["enable_host_pipeline"])
-        if options["text_encoder_device"] not in ("host", "neuron"):
-            raise ValueError("text_encoder_device must be 'host' or 'neuron', got "
-                             f"{options['text_encoder_device']!r}")
-        self.text_encoder: _HostLtx2TextEncoder | _DeviceLtx2TextEncoder | None = None
         if enable_text and options["text_encoder_device"] == "neuron":
             from difflet.backends.neuron.ltx_2.text_encoder import (
                 NeuronLtx2TextEncoderApplication,
@@ -545,75 +445,64 @@ class TorchNeuronLtx2Application(torch.nn.Module):
             )
         self.enable_decode_components = bool(options["enable_decode_components"])
         self.decoder = None  # rank 0's host LTX2Pipeline decode components, after load()
-        self.transformer_adapter: _OnDeviceLtx2Transformer | None = None
-        self.pipeline = None
-        #: Called with no arguments once per denoise iteration; see the module docstring.
-        self.step_hook: Callable[[], None] | None = None
-        self._text_encoder_load_seconds: float | None = None
+
+    def _resolve_shape(self, shape: dict[str, int | None], shapes) -> dict[str, int]:
+        resolved = {
+            "height": int(shape.get("height") or LTX_2_DEFAULT_HEIGHT),
+            "width": int(shape.get("width") or LTX_2_DEFAULT_WIDTH),
+            "num_frames": int(shape.get("num_frames") or LTX_2_DEFAULT_NUM_FRAMES),
+        }
+        if shapes:
+            shapes = [tuple(entry) for entry in shapes]
+            if len(shapes) > 1:
+                raise NotImplementedError(
+                    "the neuron backend compiles one static shape per process (phase 1); "
+                    f"got shapes={shapes}"
+                )
+            bucket = tuple(int(v) for v in shapes[0])
+            if bucket != (resolved["height"], resolved["width"], resolved["num_frames"]):
+                raise ValueError(
+                    f"the request shape {resolved} is not the one compiled shape {bucket}")
+        return resolved
 
     def _check_device_text_encoder_fits(self, encoder_dtype: torch.dtype) -> None:
-        """The device text encoder shares each core with this rank's DiT shard. Raise before
+        """The device text encoder shares each core with this rank's DiT shard: refuse before
         anything loads when the two clearly cannot fit together
-        (``difflet/backends/neuron/ltx_2/hbm.py``): at tp4 about 5.5 GiB of bf16 Gemma-3 beside
-        8.8 GiB of DiT; at tp2 (CFG2 on four cores, dp2tp2) twice both, over a 24 GiB core. The
-        base's load-time check sees one component at a time, so it would pass the DiT and refuse
-        the encoder only after the DiT had loaded. Like that check, it runs on the neuron device,
-        or elsewhere when ``DIFFLET_NEURON_HBM_GIB`` sets a budget."""
-        from difflet.backends.neuron.hbm import budget_enforced, check_fits
-        from difflet.backends.neuron.ltx_2.hbm import device_text_encoder_bytes
+        (``difflet/backends/neuron/ltx_2/hbm.py``, ``_check_components_fit``): at tp4 about
+        5.5 GiB of bf16 Gemma-3 beside 8.8 GiB of DiT; at tp2 (CFG2 on four cores, dp2tp2) twice
+        both, over a 24 GiB core."""
+        from difflet.backends.neuron.ltx_2.hbm import device_text_encoder_components
 
-        if not budget_enforced(self.device.type):
-            return
-        tp = int(self.parallel.tp_degree)
-        estimate = device_text_encoder_bytes(
-            self.model_path, tp_degree=tp, encoder_dtype_bytes=encoder_dtype.itemsize,
-            dit_dtype_bytes=self.dtype.itemsize,
-        )
-        check_fits(
-            estimate, what=f"Gemma-3 ({encoder_dtype}) beside the LTX-2 DiT on one core",
-            tp_degree=tp,
+        self._check_components_fit(
+            device_text_encoder_components(encoder_dtype.itemsize, self.dtype.itemsize),
+            what=f"Gemma-3 ({encoder_dtype}) beside the LTX-2 DiT on one core",
             advice="encode on the host (text_encoder_device='host', no --device-text-encoder), "
             "or give the TP group more cores (tp_degree={tp} or more)",
         )
 
-    # --------------------------------------------------- DiffletPipeline API
+    # --------------------------------------------------------------------- load
 
-    def compile(self, compiled_model_path, debug: bool = False) -> None:
-        """No-op: the neuron backend compiles nothing ahead of time (see ``load``)."""
-        del compiled_model_path, debug
-
-    def has_compiled_artifacts(self, compiled_model_path) -> bool:
-        del compiled_model_path
-        return True
-
-    def load(self, compiled_model_path=None, start_rank_id=None, local_ranks_size=None,
-             skip_warmup: bool = False) -> None:
-        """DiT (runtime init, shards, per-block compile, warm-up), then the text path on rank 0,
-        then (if enabled) the decode components on rank 0, then the orchestrator. Every rank must
-        call it; the steps are status-synced phases."""
-        del compiled_model_path, start_rank_id, local_ranks_size
-        if self.pipeline is not None:
-            return
+    def _orchestrator_class(self) -> type:
         from difflet.models.ltx_2.pipeline import LTX2Orchestrator
 
-        if self.transformer is not None:
-            self.transformer.load(skip_warmup=skip_warmup)
-            self.transformer_adapter = _OnDeviceLtx2Transformer(
-                self.transformer, self.config, self.dtype, self.device
-            )
-        if isinstance(self.text_encoder, _DeviceLtx2TextEncoder):
-            self.text_encoder.load(skip_warmup=skip_warmup)
-        elif self.text_encoder is not None:
-            start = time.perf_counter()
-            self.text_encoder.load()
-            self._text_encoder_load_seconds = time.perf_counter() - start
+        return LTX2Orchestrator
+
+    def _dit_adapter(self, app) -> _OnDeviceLtx2Transformer:
+        return _OnDeviceLtx2Transformer(app, self.config, self.dtype, self.device)
+
+    def _load_decoders(self, skip_warmup: bool) -> None:
+        """With ``enable_decode_components``, the decode path of diffusers' pipeline on rank
+        0's host (the Trainium CLI's placement), in the application dtype."""
+        del skip_warmup
         if self.enable_decode_components:
             self.decoder = rank0_call(
                 _host_ltx2_pipeline, self.model_path, dtype=self.dtype, text=False, decode=True,
                 device=self.device, what="decoder load",
             )
+
+    def _build_pipeline(self, orchestrator_class: type):
         decoder = self.decoder
-        pipeline = LTX2Orchestrator(
+        pipeline = orchestrator_class(
             model_path=self.model_path,
             transformer=self.transformer_adapter,
             vae=getattr(decoder, "vae", None),
@@ -629,8 +518,7 @@ class TorchNeuronLtx2Application(torch.nn.Module):
             frame_rate=self.frame_rate,
         )
         self._check_orchestrator_geometry(pipeline)
-        self._stamp_denoise_iterations(pipeline)
-        self.pipeline = pipeline
+        return pipeline
 
     def _check_orchestrator_geometry(self, pipeline) -> None:
         """The orchestrator derives its latent shapes from the VAE ratios (diffusers defaults
@@ -646,44 +534,12 @@ class TorchNeuronLtx2Application(torch.nn.Module):
         if mismatch:
             raise ValueError(f"LTX-2 orchestrator and DiT disagree on the geometry: {mismatch}")
 
-    def _stamp_denoise_iterations(self, pipeline) -> None:
-        """Call ``step_hook`` after each audio scheduler step: once per denoise iteration."""
-        scheduler_step = pipeline._scheduler_step
+    def _ends_iteration(self, pipeline, args: tuple) -> bool:
+        """The orchestrator steps the video scheduler, then the audio one, per iteration
+        (``LTX2Orchestrator._scheduler_step(scheduler, ...)``): the audio step ends it."""
+        return args[0] is not pipeline.scheduler
 
-        def stamped_scheduler_step(scheduler, *args: Any, **kwargs: Any) -> torch.Tensor:
-            latents = scheduler_step(scheduler, *args, **kwargs)
-            if self.step_hook is not None and scheduler is not pipeline.scheduler:
-                self.step_hook()
-            return latents
-
-        pipeline._scheduler_step = stamped_scheduler_step
-
-    # ------------------------------------------------------------- evidence
-
-    @property
-    def phase_seconds(self) -> dict[str, float]:
-        seconds = dict(self.transformer.phase_seconds) if self.transformer is not None else {}
-        if isinstance(self.text_encoder, _DeviceLtx2TextEncoder):
-            seconds.update(
-                {f"text_encoder {k}": v for k, v in self.text_encoder.app.phase_seconds.items()}
-            )
-        if self._text_encoder_load_seconds is not None:
-            seconds["text encoder load"] = self._text_encoder_load_seconds
-        return seconds
-
-    @property
-    def compiled_blocks(self) -> list[str]:
-        blocks = list(self.transformer.compiled_blocks) if self.transformer is not None else []
-        if isinstance(self.text_encoder, _DeviceLtx2TextEncoder):
-            blocks += [f"text_encoder.{name}" for name in self.text_encoder.app.compiled_blocks]
-        return blocks
-
-    @property
-    def unwarmed_shapes(self) -> list:
-        shapes = list(self.transformer.unwarmed_shapes) if self.transformer is not None else []
-        if isinstance(self.text_encoder, _DeviceLtx2TextEncoder):
-            shapes += list(self.text_encoder.app.unwarmed_shapes)
-        return shapes
+    # ----------------------------------------------------------------- evidence
 
     def dit_input_contract(self) -> dict[str, dict[str, Any]]:
         """The Trainium contract's ten tensors at the DiT batch; the DiT reads seven (the masks
@@ -708,19 +564,7 @@ class TorchNeuronLtx2Application(torch.nn.Module):
             "audio_coords": {"shape": (b, 1, cfg.audio_seq_len, 2), "dtype": torch.float32},
         }
 
-    # ------------------------------------------------------------- inference
-
-    def _require_dit(self) -> _OnDeviceLtx2Transformer:
-        if self.transformer_adapter is None:
-            raise RuntimeError(
-                f"{type(self).__name__}: the DiT is not loaded (call load() first; "
-                "enable_transformer=False never loads one)"
-            )
-        return self.transformer_adapter
-
-    def forward_dit(self, bundle: LTX2DiTInputBundle):
-        """One DiT forward on a host bundle: ``(video [B, S_v, 128], audio [B, S_a, 128])``."""
-        return self._require_dit()(bundle)
+    # ---------------------------------------------------------------- inference
 
     def encode_prompt(self, prompt, negative_prompt=None, guidance_scale: float = 1.0):
         """The four conditioning tensors (see ``_HostLtx2TextEncoder``), identical on every rank.
@@ -730,14 +574,7 @@ class TorchNeuronLtx2Application(torch.nn.Module):
                 f"{type(self).__name__}: no text encoder (enable_text_encoder=False); pass "
                 "encoder_hidden_states (and the audio stream and masks) instead of a prompt"
             )
-        if isinstance(prompt, (list, tuple)):
-            if len(prompt) != 1:
-                raise NotImplementedError(
-                    f"the neuron LTX-2 application runs batch 1, got {len(prompt)} prompts"
-                )
-            prompt = prompt[0]
-        if not isinstance(prompt, str):
-            raise TypeError(f"prompt must be a string, got {type(prompt).__name__}")
+        prompt = self._single_prompt(prompt)
         if isinstance(negative_prompt, (list, tuple)):
             negative_prompt = negative_prompt[0] if negative_prompt else None
         return self.text_encoder(prompt, negative_prompt, guidance_scale)
@@ -757,8 +594,7 @@ class TorchNeuronLtx2Application(torch.nn.Module):
         Under CFG parallelism a call without CFG is refused: the DiT then takes only the
         batch-2 pair.
         """
-        if self.pipeline is None:
-            raise RuntimeError(f"{type(self).__name__} is not loaded; call load() first")
+        self._require_loaded()
         guidance_scale = float(kwargs.get("guidance_scale", 1.0))
         audio_guidance = kwargs.get("audio_guidance_scale")
         audio_guidance = guidance_scale if audio_guidance is None else float(audio_guidance)
@@ -778,10 +614,7 @@ class TorchNeuronLtx2Application(torch.nn.Module):
                           audio_encoder_attention_mask=audio_mask)
         elif negative_prompt is not None:
             raise ValueError("negative_prompt needs prompt")
-        if seed is not None:
-            if kwargs.get("generator") is not None:
-                raise ValueError("pass seed or generator, not both")
-            kwargs["generator"] = torch.Generator().manual_seed(int(seed))
+        self._apply_seed(kwargs, seed)
         if kwargs.get("bundle") is None and kwargs.get("latents") is None:
             kwargs["latents"], kwargs["audio_latents"] = self._initial_latents(kwargs)
         kwargs.setdefault("num_inference_steps", _DEFAULT_STEPS)
@@ -801,29 +634,7 @@ class TorchNeuronLtx2Application(torch.nn.Module):
                 dtype=pipeline.dtype, generator=generator)
             return video.contiguous(), audio.contiguous()
 
-        if world_info()[1] == 1:
-            return draw()
-        drawn = rank0_call(draw, device=self.device, what="initial latents")
-        video = broadcast_tensor(None if drawn is None else drawn[0], device=self.device).cpu()
-        audio = broadcast_tensor(None if drawn is None else drawn[1], device=self.device).cpu()
-        return video, audio
-
-    def __call__(self, *args: Any, **kwargs: Any):
-        """``app(bundle)`` runs the DiT; ``app("prompt", ...)`` and every keyword-only call run
-        ``generate`` (the orchestrator)."""
-        if len(args) == 1 and isinstance(args[0], LTX2DiTInputBundle) and not kwargs:
-            return self.forward_dit(args[0])
-        if len(args) == 1 and isinstance(args[0], (str, list)):
-            if "prompt" in kwargs:
-                raise TypeError("prompt given both positionally and as a keyword")
-            kwargs["prompt"] = args[0]
-            args = ()
-        if args:
-            raise TypeError(
-                f"{type(self).__name__}: positional arguments are a DiT bundle or a prompt; got "
-                f"{len(args)}"
-            )
-        return self.generate(**kwargs)
+        return self._draw_on_rank0(draw, count=2)
 
 
 __all__ = ["TorchNeuronLtx2Application"]
