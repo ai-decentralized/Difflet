@@ -37,11 +37,11 @@ Pin down only what the request leaves open:
   speed, and only compared on the same card edition.
 - **Branch** (CPU gate green first); evidence in `artifacts/cuda-release1/<feature>/`.
 - **Pod**: 1 GPU in us-east-3 with the `difflet-cache` volume (cheapest; the pool can be full for
-  hours), or an eu pod without a volume (terminate at the end; 1 GPU accepted in eu-3, F9). The
-  volume is held by `difflet-cuda-f5b` (ID 502399632095187214, PAUSED): resume it (owner's yes)
-  or create a new us-east-3 pod on it — a second pod on the volume while f5b holds it, and the
-  volume outliving f5b, are not measured; if `create` rejects the volume, ask the owner. Disk:
-  Qwen + Flux live on the volume, Wan (118 GB) not beside both; F9's 250 GB eu disk held all three.
+  hours; the HF cache and token at `/data/hf`: no login, no download), or an eu pod without a
+  volume (terminate at the end; F9, F4f). `create --volume-id` goes to the v1 API, the only one
+  that attaches this volume (v2 answers 12016; F9c's `difflet-cuda-f9c3` mounted it). f5b is
+  gone (terminated 10-19). Disk: Qwen + Flux live on the volume (86 of 200 GB), Wan (118 GB) not
+  beside both; F9's 250 GB eu disk held all three.
 
 State the plan back — expected outcome per gate (the catalog's snapshot), commands, pod and its
 price as `gpus` shows it now, disk plan — and ask for the deploy yes. Planning-only stops here.

@@ -41,6 +41,9 @@ DEFAULT_REGIONS = "us-east-3,eu-3,eu-2"
 DEFAULT_DISK_GB = 150  # the container disk when --disk-gb is not given and there is no volume
 # The difflet-cache network volume lives in us-east-3; no other region can mount it.
 VOLUME_REGION = "us-east-3"
+# The create that attaches a network volume: v1's persistentVolumes (Ceph, by id). v2's create
+# takes R2 volumes only (12016 for difflet-cache) and drops unknown keys silently (2026-10-19).
+V1_CREATE_PATH = "/openapi/v1/pods/create"
 DIFFLET_CACHE_VOLUME_ID = 469225541779435520
 SSH_USER = "user"
 SSH_KEY = "~/.ssh/yottalabs_difflet_cuda_qwen.pem"
@@ -179,30 +182,47 @@ def build_create_body(
     image: str,
     gpu_type: str = DEFAULT_GPU_TYPE,
 ) -> dict:
-    """The ``POST /v2/pods`` body for one region: the network volume only in the region it
-    lives in; a container disk size wherever there is no volume (``disk_gb``, or
+    """The create body for one region (sent to :func:`create_path`): the network volume only in
+    the region it lives in; a container disk size wherever there is no volume (``disk_gb``, or
     ``DEFAULT_DISK_GB`` when it is None) and, beside the volume, only when ``disk_gb`` was given
-    explicitly (the API takes both: ``difflet-cuda-f5b`` ran a 100 GB disk with the volume)."""
-    body: dict[str, Any] = {
+    explicitly (the API takes both: ``difflet-cuda-f5b`` ran a 100 GB disk with the volume).
+
+    With the volume the body is v1's ``OpenapiPodCreateRequest`` (``podName``, ``regionList``,
+    ``persistentVolumes: [{id, volumeType: Ceph, mountMode: Data, mountPath}]``, the id an exact
+    int64): ``difflet-cuda-f9c3`` came up with difflet-cache at /data that way. Without it, v2's
+    ``PodV2CreateRequest``."""
+    expose = [{"port": 22, "protocol": "SSH"}]
+    if volume_id is not None and region == VOLUME_REGION:
+        body: dict[str, Any] = {
+            "podName": name,
+            "regionList": [region],
+            "image": image,
+            "imagePublicType": "PUBLIC",
+            "resourceType": "GPU",
+            "gpuType": gpu_type,
+            "gpuCount": gpus,
+            "expose": expose,
+            "persistentVolumes": [
+                {"id": volume_id, "volumeType": "Ceph", "mountMode": "Data", "mountPath": mount}
+            ],
+        }
+        if disk_gb is not None:
+            body["containerVolumeInGb"] = disk_gb
+        return body
+    return {
         "name": name,
         "regions": [region],
         "image": image,
         "gpuType": gpu_type,
         "gpuCount": gpus,
-        "expose": [{"port": 22, "protocol": "SSH"}],
+        "expose": expose,
+        "containerVolumeInGb": DEFAULT_DISK_GB if disk_gb is None else disk_gb,
     }
-    if volume_id is not None and region == VOLUME_REGION:
-        # PodV2CreateRequest.volumes: ``{id, mountPath}``, the id a string (the API reference:
-        # "string to avoid JavaScript int64 precision loss"). An unknown key is dropped without
-        # an error: ``persistentVolumes`` created difflet-cuda-f9c2 with no volume (2026-10-19).
-        # The v2 create attaches R2 volumes only: a NETWORK_STORAGE volume (difflet-cache)
-        # returns 12016, so a pod on it comes from the console.
-        body["volumes"] = [{"id": str(volume_id), "mountPath": mount}]
-        if disk_gb is not None:
-            body["containerVolumeInGb"] = disk_gb
-    else:
-        body["containerVolumeInGb"] = DEFAULT_DISK_GB if disk_gb is None else disk_gb
-    return body
+
+
+def create_path(region: str, volume_id: int | None) -> str:
+    """Where :func:`build_create_body`'s body goes: v1's create with the volume, else v2's."""
+    return V1_CREATE_PATH if volume_id is not None and region == VOLUME_REGION else "/v2/pods"
 
 
 def _pool_sells(pool: dict, gpu_count: int | None) -> bool:
@@ -385,7 +405,7 @@ def cmd_create(args, ctx: Ctx) -> int:
             f"given (with the volume too), else {DEFAULT_DISK_GB} where there is no volume."
         )
         for region in preferred:
-            ctx.out(f"POST {API_BASE}/v2/pods  # region {region}")
+            ctx.out(f"POST {API_BASE}{create_path(region, args.volume_id)}  # region {region}")
             ctx.out(json.dumps(body_for(region), indent=2))
         return 0
 
@@ -423,17 +443,20 @@ def cmd_create(args, ctx: Ctx) -> int:
             disk = body.get("containerVolumeInGb")
             if disk is not None and isinstance(limit, int) and disk > limit:
                 ctx.log(f"warning: a {disk} GB container disk exceeds {region}'s limit {limit} GB")
+            path = create_path(region, args.volume_id)
             try:
-                record = api(ctx.transport, "POST", "/v2/pods", body)
+                record = api(ctx.transport, "POST", path, body)
             except NoCapacity as exc:
                 ctx.log(f"{region}: {exc.message} (code {exc.code}; the pool flag can lag)")
             else:
-                pod_id = (record or {}).get("id")
-                if pod_id is None:
-                    raise ApiError("bad-response", "POST /v2/pods returned no pod id")
+                # v2 answers the pod record, v1 the bare id.
+                is_record = isinstance(record, dict)
+                pod_id = record.get("id") if is_record else record
+                if pod_id in (None, ""):
+                    raise ApiError("bad-response", f"POST {path} returned no pod id")
+                status = pod_status(record) if is_record else "submitted"
                 ctx.log(
-                    f"created {pod_id} in {region}: {args.gpu_type} x{args.gpus}, "
-                    f"status {pod_status(record)}"
+                    f"created {pod_id} in {region}: {args.gpu_type} x{args.gpus}, status {status}"
                 )
                 ctx.out(str(pod_id))
                 return 0

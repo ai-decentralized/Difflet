@@ -9,8 +9,10 @@
 - A pod without a network volume cannot be paused (code 12005); only `delete` stops it.
 - The v2 API cannot put a pod on `difflet-cache`: `POST /v2/pods` attaches R2 volumes only
   (12016 for a NETWORK_STORAGE volume), and an unknown key such as `persistentVolumes` is
-  dropped silently (difflet-cuda-f9c2 came up with no volume, 10-19). A pod on the volume is
-  deployed from the console (Network Storage → difflet-cache at /data).
+  dropped silently (difflet-cuda-f9c2 came up with no volume, 10-19). v1's
+  `POST /openapi/v1/pods/create` with `persistentVolumes: [{id, volumeType: "Ceph", mountMode:
+  "Data", mountPath}]` attaches it (difflet-cuda-f9c3); `yottalabs_pod.py create --volume-id`
+  sends that. v1 refuses port 22 as TCP: expose it as `SSH`.
 - The eu PRO 6000 pools sell whole 2-GPU nodes ($5.30/h on 2026-10-18): a 1-GPU job there costs
   two cards. The us-east-3 pool ($0.45/GPU/h) can be full for hours, and a paused pod there
   then cannot resume (INITIALIZING → PAUSED).
