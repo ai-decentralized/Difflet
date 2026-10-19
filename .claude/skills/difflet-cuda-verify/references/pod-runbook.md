@@ -24,7 +24,7 @@ by the owner's login with a `difflet-` name are ours (the console lists other lo
 |---|---|---|---|---|
 | us-east-3 | 0.45 | Workstation Edition | 178 GB | the only pool where `difflet-cache` mounts |
 | eu-3 | 2.65 | Server Edition | 500 GB | whole 2-GPU nodes ($5.30/h, F1b, F2); a 1-GPU pod with a 250 GB disk on 10-18 18:44 UTC (F9) |
-| eu-2 | 2.65 | not observed (no pod ran there) | 500 GB | 1-GPU requests refused (12014) |
+| eu-2 | 2.65 → 2.68 (10-19) | Server Edition | 500 GB | 1-GPU requests refused (12014) on 10-18; 1-GPU pods F4f, f3c on 10-19 |
 | eu-1 | 2.55 | not used | — | seen UNAVAILABLE |
 | us-central-7 | 1.35/h per pod (10-16, 10-17) | Server Edition | — | F3/F4 pods; device-cgroup incident |
 
@@ -40,6 +40,15 @@ by the owner's login with a `difflet-` name are ours (the console lists other lo
   when a pool opens) reproduces it; its first live run (F9) waited on the full us-east-3 pool
   until the owner switched the session to eu, and created nothing.
 - The us-east-3 pool can be full for hours: a paused pod there may not resume on demand.
+- **The pod order (owner, 2026-10-19)**: us-east-3 on `difflet-cache` first ($0.45/h; no download,
+  no login), eu-2 / eu-3 ($2.68/h, Server Edition) when it is full — one call:
+  `create --regions us-east-3,eu-2,eu-3 --volume-id 469225541779435520 --disk-gb 250
+  --prefer-first-for 1800 --interval 60` holds out for us-east-3, then falls back with a 250 GB
+  container disk. On an eu pod: `pod_setup.sh --no-xet` (on f3c the Xet download stalled at
+  0 B/s; plain HTTPS finished it), and FLUX.1-dev needs the owner's device code again.
+- **Pod volumes exist in us-east-3 and us-east-4 only** (the console's Create Network Storage,
+  Pod workload, 10-19); eu network storage is offered for the Virtual Machine workload only, and
+  `POST /v2/volumes` creates object storage (CLOUD_STORAGE) whatever `storageType` says.
 
 ## Pause, resume, terminate
 

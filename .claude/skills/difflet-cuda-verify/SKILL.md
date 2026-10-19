@@ -65,13 +65,13 @@ python3 scripts/yottalabs_pod.py wait-running "$POD"               # prints "hos
 python3 scripts/yottalabs_pod.py ssh-config "$POD" --alias difflet-cuda-<topic> >> ~/.ssh/config
 ```
 
-Pin `--regions us-east-3` whenever `--volume-id` is given: the volume mounts only there; an eu
-fallback would be a volume-less pod at $2.65/GPU/h where `pod_setup.sh --volume` fails. Note the
-pod id the moment it prints. Use an alias new to `~/.ssh/config` (ssh takes the first matching
-`Host`; delete a stale block). `--wait-for-capacity` polls every 300 s and creates once (F9 ran
-it live). `--disk-gb` is sent beside a volume too (F9). No volume: `--gpus 1 --regions eu-3,eu-2
---disk-gb 250` (F9) or `--gpus 2 … --disk-gb 150` (F1b, F2). `resume ID` exits 2 when the pod
-falls back INITIALIZING → PAUSED: no capacity, not a bug.
+The owner's order (10-19): us-east-3 on the volume, else eu-2/eu-3. `--regions us-east-3,eu-2,eu-3
+--prefer-first-for 1800 --interval 60 --disk-gb 250` waits 30 min for us-east-3 (the volume, v1),
+then takes eu with a 250 GB disk, no volume: run `pod_setup.sh --no-xet` there, not `--volume`
+(Xet stalled on f3c). Note the pod id the moment it prints; use an alias new to `~/.ssh/config`
+(ssh takes the first matching `Host`). `--wait-for-capacity` polls every `--interval` s and
+creates once. 2 GPUs: `--gpus 2 … --disk-gb 150` (F1b, F2). `resume ID` exits 2 when the pod falls
+back INITIALIZING → PAUSED: no capacity, not a bug. Pod volumes exist in us-east-3/-4 only.
 
 Then ship the branch and build the host (the F1b/F2 recipe):
 
