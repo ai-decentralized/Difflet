@@ -244,6 +244,8 @@ def clean_neuron_mesh(monkeypatch, tmp_path):
     from difflet.backends.neuron.ops_impl import parallel_mesh
 
     monkeypatch.setattr(runtime, "_runtime_prepared", False)
+    # No device here; the AoT venv's torch_neuronx has no native-runtime query at all.
+    monkeypatch.setattr(runtime, "_neuron_runtime_initialized", lambda: False)
     for name in (*_CACHE_ENV, "NKI_ENABLE_TRACE_CACHE"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path / "compile_cache"))
