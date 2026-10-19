@@ -46,7 +46,7 @@ to the CUDA path but never ran: it is NOT MEASURED in every row and has no colum
 | DiT parity (three gates) | PASS incl. padded prompt | PASS | PASS both experts + rounding block |
 | e2e vs diffusers | PASS, 35 dB / 0.998 | PASS, 35 dB / 0.998; relative to the noise floor when recorded, over seeds | PASS, 25 dB / 0.99; seeds 0–2 overlap diffusers' own noise floor; gate relative to the floor, 2.0 dB headroom on the mean |
 | CLI matrix cell | PASS | PASS | PASS |
-| `difflet serve` | PASS; LIMIT on concurrency (429 after 30 s) | PASS · byte-identical to `difflet run` | PASS · tensor bit-identical to `difflet run`, MP4 within codec noise (the writer is not byte-deterministic) |
+| `difflet serve` | PASS; LIMIT on concurrency (429 after 30 s) | PASS · byte-identical to `difflet run` | PASS · the adapter's tensor (in-process) bit-identical to `difflet run`, MP4 within codec noise (the writer is not byte-deterministic) |
 | `--torch-compile` | PASS, opt-in | PASS, 0.83× diffusers per forward | PASS, 0.76× diffusers per run |
 | `--teacache-cadence N` | PASS, fixed cadence only | N/A · refused, F5b | N/A · refused, F1b |
 | `--dp 2 --requests` | PASS, byte-identical | `--dp 1` batch PASS, byte-identical; `--dp 2` NOT MEASURED (needs 2 GPUs) | PASS, bit-identical |
@@ -84,7 +84,7 @@ Download → compile → timed generate per cell, `results.json`.
 One resident worker holds the pipeline; OpenAI-compatible chat (images) and `/v1/videos` (Wan).
 | Qwen-Image | FLUX.1-dev | Wan 2.2 |
 |---|---|---|
-| PASS · ready 56.0 s, 38.6 / 39.2 s per request; LIMIT · 429 `queue_timeout` for a concurrent request at the 30 s default on one GPU; `--dp-degree 2` PASS · two concurrent requests in one request-time (16.7 s wall), identical bytes | PASS · ready 12.0 s, 8.8 s per request, PNG byte-identical to `difflet run`; 400s for an out-of-range guidance, a wrong shape and a long prompt; startup refusals clean (Server) | PASS · ready 60.0 s, 43.8 s per request (480×832×9, 40 steps); tensor bit-identical to `difflet run` through the adapter's calls, MP4 decoded 33.88 dB vs the tensor (the codec's own 33.87); sync and async paths, nine 400s, startup refusals clean; one replica (Server) |
+| PASS · ready 56.0 s, 38.6 / 39.2 s per request; LIMIT · 429 `queue_timeout` for a concurrent request at the 30 s default on one GPU; `--dp-degree 2` PASS · two concurrent requests in one request-time (16.7 s wall), identical bytes | PASS · ready 12.0 s, 8.8 s per request, PNG byte-identical to `difflet run`; 400s for an out-of-range guidance, a wrong shape and a long prompt; startup refusals clean (Server) | PASS · ready 60.0 s, 43.8 s per request (480×832×9, 40 steps); tensor bit-identical to `difflet run` through the adapter's calls (in-process), MP4 decoded 33.88 dB vs the tensor (the codec's own 33.87); sync and async paths, nine 400s, startup refusals clean; one replica (Server) |
 
 ### `--torch-compile`
 Per-block inductor compile of the DiT, opt-in (eager by default).
