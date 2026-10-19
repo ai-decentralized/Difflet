@@ -309,7 +309,7 @@ def run_generate_stage(args: argparse.Namespace, backend: str, *, tag: str, mode
                        pipeline_kwargs: dict[str, Any], application_kwargs: dict[str, Any],
                        request_kwargs: Callable[[Any], dict[str, Any]],
                        save: Callable[[Any, Any], None],
-                       finish_compile: Callable[[], None]) -> None:
+                       finish_compile: Callable[[], None], timing: bool = False) -> None:
     """The DiT stage on a non-AoT torchrun backend (neuron); runs on every rank.
 
     ``DiffletPipeline.from_pretrained(model_id, **pipeline_kwargs, ...)`` prepares the runtime
@@ -327,6 +327,11 @@ def run_generate_stage(args: argparse.Namespace, backend: str, *, tag: str, mode
     mode, the compiled blocks, the unwarmed shapes, the CPU fallbacks, the load and stage
     seconds. The process group is destroyed after a successful stage only: a failing rank exits
     with its exception and torchrun stops its peers, which may be blocked in a collective.
+
+    With ``timing`` (Wan), rank 0 also prints the start-up split (``from_pretrained`` against
+    ``load``, with the application's ``phase_seconds`` by component) and, per request, the
+    wall time, the time to the first step's end and the median step, read from the scheduler's
+    ``step`` calls (one per denoising step, after that step's DiT forwards).
     """
     import time
 
@@ -350,20 +355,50 @@ def run_generate_stage(args: argparse.Namespace, backend: str, *, tag: str, mode
         load=False,
         **pipeline_kwargs,
     )
+    built_s = time.perf_counter() - start  # prepare_runtime (the process group) and the build
     with fallback_tracker(pipe) as load_fallbacks:
         pipe.load(skip_warmup=False)
     load_s = time.perf_counter() - start
+    if timing and distributed.is_rank0():
+        components = getattr(pipe.app, "phase_seconds", {}) or {}
+        print(f"[{tag}] start-up: from_pretrained (prepare_runtime + build) {built_s:.2f} s; "
+              f"load {load_s - built_s:.1f} s by component {components}", flush=True)
 
     generate_fallbacks: list = []
     if args.stage_mode == "compile":
         if distributed.is_rank0():
             finish_compile()
     else:
+        # Step timing without touching the shared orchestrator: the scheduler steps once per
+        # denoising step, after that step's DiT forward(s).
+        marks: list[float] = []
+        scheduler = getattr(getattr(pipe.app, "pipeline", None), "scheduler", None)
+        if timing and scheduler is not None:
+            original_step = scheduler.step
+
+            def timed_step(*a, **k):
+                result = original_step(*a, **k)
+                marks.append(time.perf_counter())
+                return result
+
+            scheduler.step = timed_step
         for req in replica_requests(args, device=getattr(pipe.app, "device", None)):
             with replica_request_scope(args, req):
+                marks.clear()
+                called = time.perf_counter()
                 with fallback_tracker(pipe) as fallbacks:
                     out = pipe(**request_kwargs(req))
                 generate_fallbacks.extend(fallbacks)
+                done = time.perf_counter()
+                if distributed.is_rank0() and len(marks) > 1:
+                    import statistics
+
+                    deltas = sorted(b - a for a, b in zip(marks, marks[1:]))
+                    print(f"[{tag}] request: {done - called:.2f} s; to the first step's end "
+                          f"{marks[0] - called:.2f} s (prompt encode + step 1); step median "
+                          f"{statistics.median(deltas) * 1e3:.1f} ms (n={len(deltas)}, max "
+                          f"{deltas[-1] * 1e3:.1f}); after the last step {done - marks[-1]:.2f} s",
+                          flush=True)
                 if distributed.is_rank0():
                     save(req, out)
 
