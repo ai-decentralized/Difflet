@@ -85,6 +85,10 @@ class CudaFluxTransformerApplication(CudaApplicationBase):
             module.requires_grad_(False)
             module.eval()
             self._assert_on_device(module)
+            # F4f: one gemm per single block for proj_out at tp=1 (diffusers' layout), before
+            # any compile so the graph sees the fused layer.
+            for block in module.single_transformer_blocks:
+                block.fuse_proj_out()
             if self.torch_compile:
                 # D4: eager is the premise; ``torch.compile`` is the measured, opt-in option
                 # (F4 for Qwen, F4f here). Per block, one static shape per process, so

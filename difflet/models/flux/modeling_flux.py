@@ -666,6 +666,10 @@ class NeuronFluxSingleTransformerBlock(nn.Module):
             reduce_output=False,
         )
 
+        # F4f: at tp=1 a backend may fuse the two projections back into diffusers' one
+        # ``Linear(dim + mlp, dim)`` over ``cat([attn, mlp])`` (``fuse_proj_out``); None
+        # until then, and the split path above is the forward.
+        self.proj_out = None
         self.attn = NeuronFluxAttention(
             query_dim=dim,
             cross_attention_dim=None,
@@ -709,6 +713,14 @@ class NeuronFluxSingleTransformerBlock(nn.Module):
         )
 
         gate = gate.unsqueeze(1)
+        if self.proj_out is not None:
+            # The fused projection (tp=1, ``fuse_proj_out``): diffusers' one gemm over the
+            # concatenation, accumulated in fp32 and rounded once.
+            proj_out = self.proj_out(torch.cat([attn_output, mlp_hidden_states], dim=2))
+            hidden_states = residual + gate * proj_out
+            if hidden_states.dtype == torch.float16:
+                hidden_states = hidden_states.clip(-65504, 65504)
+            return hidden_states
         out_attn, bias = self.proj_out_attn(attn_output)
         out_mlp = self.proj_out_mlp(mlp_hidden_states)
         # proj_out_attn / proj_out_mlp keep reduce_output=False to merge their two
@@ -722,6 +734,43 @@ class NeuronFluxSingleTransformerBlock(nn.Module):
             hidden_states = hidden_states.clip(-65504, 65504)
 
         return hidden_states
+
+
+    def fuse_proj_out(self) -> bool:
+        """Rebuild diffusers' fused ``proj_out`` from the split weights, at tp=1 only.
+
+        The Megatron split (``proj_out_attn`` + ``proj_out_mlp``, two gemms and an add)
+        exists to merge two all-reduces; at tp=1 there is nothing to reduce and the split
+        costs a second gemm launch and a second rounding — the F4e Flux bench's +10 ms of
+        gemm per forward against diffusers. The fused ``nn.Linear(dim + mlp, dim)`` takes
+        ``cat([attn_weight, mlp_weight], dim=1)`` and the attn bias (exactly diffusers'
+        ``proj_out``), the split modules are dropped, and ``forward`` takes the fused path.
+        Returns True when it fused, False when there was nothing to do (already fused) or
+        it must not (tp > 1: the split carries the sharding). Load-time, never a checkpoint
+        format: the converter keeps splitting and Trainium/TPU keep the split.
+        """
+        if self.proj_out is not None or self.proj_out_attn is None:
+            return False
+        if _safe_tp_size() != 1 or self.proj_out_attn.tensor_parallel_group is not None:
+            return False
+        attn, mlp = self.proj_out_attn, self.proj_out_mlp
+        weight = torch.cat([attn.weight.detach(), mlp.weight.detach()], dim=1)
+        fused = nn.Linear(
+            weight.shape[1],
+            weight.shape[0],
+            bias=attn.bias is not None,
+            device=weight.device,
+            dtype=weight.dtype,
+        )
+        with torch.no_grad():
+            fused.weight.copy_(weight)
+            if attn.bias is not None:
+                fused.bias.copy_(attn.bias.detach())
+        fused.requires_grad_(False)
+        self.proj_out = fused
+        self.proj_out_attn = None
+        self.proj_out_mlp = None
+        return True
 
 
 class NeuronFluxTransformerBlock(nn.Module):
