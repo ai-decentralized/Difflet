@@ -46,31 +46,32 @@ iteration, right after the orchestrator's scheduler step (``load`` wraps
 iteration is two DiT forwards plus the host UniPC step. ``transformer_adapter.forward_hook`` is
 called after every DiT forward with that call's wall seconds (host -> device copies, forward,
 device sync, copy back), whichever expert ran it; ``expert_calls`` counts the forwards per expert.
+
+The lifecycle, the evidence properties, the hooks and the initial-latents broadcast are the
+composed neuron application's (``TorchNeuronModelApplication``,
+``difflet/backends/neuron/core/model_application.py``); what is Wan's is here.
 """
 
 from __future__ import annotations
 
 import dataclasses
-import logging
 import os
-import time
-from collections.abc import Callable
 from typing import Any
 
 import torch
 
-from difflet.backends.neuron.core.application_base import _normalize_dtype
-from difflet.backends.neuron.core.checkpoint import _resolve_device
-from difflet.backends.neuron.core.distributed import broadcast_tensor, rank0_call, world_info
-from difflet.backends.neuron.hbm import budget_enforced, check_fits
-from difflet.backends.neuron.runtime import check_parallel_supported
+from difflet.backends.neuron.core.model_application import (
+    DeviceComponent,
+    HostTextEncoder,
+    OnDeviceDiT,
+    TorchNeuronModelApplication,
+    broadcast_from_rank0,
+)
 from difflet.backends.neuron.wan.config import NeuronWanConfig
-from difflet.backends.neuron.wan.hbm import device_text_encoder_bytes
+from difflet.backends.neuron.wan.hbm import device_text_encoder_components
 from difflet.backends.neuron.wan.text_encoder import NeuronWanTextEncoderApplication
 from difflet.backends.neuron.wan.transformer import NeuronWanTransformerApplication
 from difflet.backends.neuron.wan.vae import NeuronWanVaeDecoderApplication
-
-logger = logging.getLogger(__name__)
 
 #: The keyword arguments the application accepts, with their defaults: the ones the Wan CLI
 #: stage passes the Trainium application (difflet/cli/orchestrators/wan.py) plus exec_mode,
@@ -91,37 +92,34 @@ _KWARG_DEFAULTS: dict[str, Any] = {
     "teacache_online_delta_alpha": None,
     "teacache_calibration_path": None,
 }
-_TEACACHE_KWARGS = ("teacache_cadence", "teacache_online_delta_alpha", "teacache_calibration_path")
 
 
-class _HostTextEncoder:
+class _HostTextEncoder(HostTextEncoder):
     """umT5 in fp32 on rank 0's host; every rank receives the embeddings by broadcast.
 
     ``WanOrchestrator.encode_prompt`` tokenizes on every rank (cheap and deterministic) and
     calls this with ``(input_ids, attention_mask)`` padded on the right to ``seq_len``. Rank 0
-    encodes inside ``rank0_call``, so a failing encode makes every rank raise together instead
-    of leaving them in the broadcast; the result is broadcast in ``dtype`` and returned on the
-    host. Only the valid prefix is encoded and the result re-padded with zeros: T5 attention is
-    masked, so the padding never reaches the real tokens, and the orchestrator zeroes the padded
-    rows anyway (``_zero_padding_embeds``). The encode runs with ``threads`` intra-op threads
-    (the other ranks are waiting in the status all-reduce meanwhile) and restores the previous
-    count after.
+    encodes (``HostTextEncoder``: inside ``rank0_call``, with ``threads`` intra-op threads, 12
+    from the CLI: D70, the fp32 output bits depend on the count) and the result is broadcast in
+    ``dtype`` and returned on the host. Only the valid prefix is encoded and the result re-padded
+    with zeros: T5 attention is masked, so the padding never reaches the real tokens, and the
+    orchestrator zeroes the padded rows anyway (``_zero_padding_embeds``).
 
-    ``load()`` reads the encoder on rank 0 inside its own status-synced phase, ``"text encoder
-    load"``, so a rank 0 that cannot read it fails every rank there.
+    No warm-up encode is spent at load (``warmup_args`` stays None), unlike Qwen-Image's and
+    LTX-2's bf16 host encoders: the first-encode variance was measured on those, and adding one
+    here would change what every Wan process runs before its first request (review W4: it needs
+    its own device check first).
     """
 
     def __init__(self, model_path, *, text_dim: int, seq_len: int, dtype, device, threads: int):
-        self.model_path = str(model_path)
+        super().__init__(model_path, device=device, threads=threads)
         self.text_dim = int(text_dim)
         self.seq_len = int(seq_len)
         self.dtype = dtype
-        self.device = torch.device(device)
-        self.threads = int(threads)
         self.model = None  # rank 0 only, after load()
 
-    def load(self) -> None:
-        self.model = rank0_call(self._load_model, device=self.device, what="text encoder load")
+    def _load(self) -> None:
+        self.model = self._load_model()
 
     def _load_model(self):
         from transformers import UMT5EncoderModel
@@ -132,10 +130,9 @@ class _HostTextEncoder:
         return model.eval().requires_grad_(False)
 
     def __call__(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
-        embeds = rank0_call(
-            self._encode, input_ids, attention_mask, device=self.device, what="prompt encode"
-        )
-        return broadcast_tensor(embeds, device=self.device).cpu()
+        embeds = self._rank0_encode(input_ids, attention_mask)
+        return broadcast_from_rank0(None if embeds is None else (embeds,), 1,
+                                    device=self.device)[0]
 
     def _encode(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
         if self.model is None:
@@ -143,22 +140,17 @@ class _HostTextEncoder:
         valid = max(int(attention_mask.sum(dim=-1).max()), 1)
         if attention_mask[:, valid:].any():
             raise ValueError("expected right-padded prompts (the tokenizer pads on the right)")
-        previous = torch.get_num_threads()
-        torch.set_num_threads(self.threads)
-        try:
-            with torch.no_grad():
-                hidden = self.model(
-                    input_ids[:, :valid].to(torch.int64),
-                    attention_mask[:, :valid].to(torch.int32),
-                ).last_hidden_state
-        finally:
-            torch.set_num_threads(previous)
+        with self._pinned():
+            hidden = self.model(
+                input_ids[:, :valid].to(torch.int64),
+                attention_mask[:, :valid].to(torch.int32),
+            ).last_hidden_state
         embeds = torch.zeros(input_ids.shape[0], self.seq_len, self.text_dim, dtype=self.dtype)
         embeds[:, :valid] = hidden.to(self.dtype)
         return embeds
 
 
-class _DeviceTextEncoder:
+class _DeviceTextEncoder(DeviceComponent):
     """umT5 on the device (``NeuronWanTextEncoderApplication``), called like ``_HostTextEncoder``.
 
     Every rank encodes (the encoder's TP collectives need all of them) and every rank gets the
@@ -168,12 +160,8 @@ class _DeviceTextEncoder:
     """
 
     def __init__(self, app: NeuronWanTextEncoderApplication, *, dtype, device):
-        self.app = app
+        super().__init__(app, device=device)
         self.dtype = dtype
-        self.device = torch.device(device)
-
-    def load(self, skip_warmup: bool = False) -> None:
-        self.app.load(skip_warmup=skip_warmup)
 
     def __call__(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
         rows = []
@@ -190,7 +178,7 @@ class _DeviceTextEncoder:
         return torch.cat(rows)
 
 
-class _DeviceVaeDecoder:
+class _DeviceVaeDecoder(DeviceComponent):
     """The orchestrator's VAE decoder: host latents in (already un-normalised), host frames out.
 
     Exposes what ``WanOrchestrator._decode_latents`` reads: ``dtype`` (fp32, the decode
@@ -198,58 +186,35 @@ class _DeviceVaeDecoder:
     """
 
     def __init__(self, app: NeuronWanVaeDecoderApplication, *, device):
-        self.app = app
+        super().__init__(app, device=device)
         self.dtype = app.dtype
         self.config = app.vae_config
-        self.device = torch.device(device)
-
-    def load(self, skip_warmup: bool = False) -> None:
-        self.app.load(skip_warmup=skip_warmup)
 
     def __call__(self, latents: torch.Tensor) -> torch.Tensor:
         return self.app(latents.to(self.device, self.dtype)).cpu()
 
 
-class _OnDeviceTransformer:
-    """The orchestrator's DiT callable: host tensors in, host tensor out.
+class _OnDeviceTransformer(OnDeviceDiT):
+    """The orchestrator's DiT callable (``OnDeviceDiT``): the three host tensors in, a host
+    tensor out. The latents stay fp32 on the host between steps, as on TPU, because UniPC's
+    corrector collapses in bf16. A call at any other shape than the static one raises
+    (``_check_dit_shapes``) instead of compiling new block graphs. ``.config`` carries
+    ``cfg_parallel_enabled`` for the orchestrator.
 
-    Each input is cast to ``dtype`` and made contiguous on the host before it moves to
-    ``device``: a strided host view (the timestep ``_batch_timestep`` expands from a 0-dim
-    tensor, a transposed slice) would otherwise be restrided on the device through a CPU round
-    trip (decision D16). ``.dtype`` and ``.config`` are what the orchestrator reads
-    (``_component_dtype``; ``cfg_parallel_enabled``). The latents stay fp32 on the host between
-    steps, as on TPU, because UniPC's corrector collapses in bf16. A call at any other shape
-    than the static one raises (``_check_dit_shapes``) instead of compiling new block graphs.
+    ``hook_from``: another adapter whose ``forward_hook`` this one reports to (the low-noise
+    expert's adapter reports to the high-noise one's, so one hook times every DiT forward).
     """
 
-    def __init__(self, module: Callable[..., torch.Tensor], config, dtype, device, hook_from=None):
-        self.module = module
-        self.config = config
-        self.dtype = dtype
-        self.device = torch.device(device)
-        #: Called after every forward with its wall seconds; see the module docstring.
-        self.forward_hook: Callable[[float], None] | None = None
-        #: Another adapter whose ``forward_hook`` this one reports to (the low-noise expert's
-        #: adapter reports to the high-noise one's, so one hook times every DiT forward).
+    def __init__(self, module, config, dtype, device, hook_from=None):
+        super().__init__(module, config, dtype, device)
         self.hook_from = hook_from
-        self.calls = 0
 
     def __call__(self, hidden_states, timestep, encoder_hidden_states) -> torch.Tensor:
         _check_dit_shapes(self.config, hidden_states, timestep, encoder_hidden_states)
-        start = time.perf_counter()
-        args = tuple(
-            tensor.to(self.dtype).contiguous().to(self.device)
-            for tensor in (hidden_states, timestep, encoder_hidden_states)
-        )
-        out = self.module(*args)
-        if self.device.type == "neuron":
-            torch.neuron.synchronize()
-        out = out.cpu()
-        self.calls += 1
-        hook = self.forward_hook if self.hook_from is None else self.hook_from.forward_hook
-        if hook is not None:
-            hook(time.perf_counter() - start)
-        return out
+        return self._forward((hidden_states, timestep, encoder_hidden_states))
+
+    def _forward_hook(self):
+        return self.forward_hook if self.hook_from is None else self.hook_from.forward_hook
 
 
 def dit_input_shapes(config) -> dict[str, tuple[int, ...]]:
@@ -289,36 +254,7 @@ def _check_dit_shapes(config, hidden_states, timestep, encoder_hidden_states) ->
             )
 
 
-def _resolve_shape(shape: dict[str, int | None], shapes) -> dict[str, int]:
-    if shapes:
-        shapes = list(shapes)
-        if len(shapes) > 1:
-            raise NotImplementedError(
-                "the neuron backend compiles one static shape per process (phase 1); "
-                f"got shapes={shapes}"
-            )
-        height, width, num_frames = (int(v) for v in shapes[0])
-        return {"height": height, "width": width, "num_frames": num_frames}
-    return {
-        "height": int(shape.get("height") or 480),
-        "width": int(shape.get("width") or 832),
-        "num_frames": int(shape.get("num_frames") or 9),
-    }
-
-
-def _reject_unsupported(options: dict[str, Any]) -> None:
-    if int(options["batch_size"]) != 1:
-        raise NotImplementedError(
-            f"the neuron Wan application runs batch_size=1 only (phase 1), got "
-            f"batch_size={options['batch_size']}"
-        )
-    if options["text_encoder_device"] not in ("host", "neuron"):
-        raise ValueError(
-            f"text_encoder_device must be 'host' or 'neuron', got {options['text_encoder_device']!r}"
-        )
-
-
-class TorchNeuronWanApplication(torch.nn.Module):
+class TorchNeuronWanApplication(TorchNeuronModelApplication):
     """umT5 (rank 0's host, or the device) + the DiT on each rank's core (+ the device VAE) +
     ``WanOrchestrator``, on every rank.
 
@@ -327,6 +263,12 @@ class TorchNeuronWanApplication(torch.nn.Module):
     arguments and their defaults are ``_KWARG_DEFAULTS``; ``device`` is ``"neuron"`` except in
     CPU tests (``"cpu"`` on gloo).
     """
+
+    MODEL_LABEL = "Wan"
+    KWARG_DEFAULTS = _KWARG_DEFAULTS
+    #: Nothing refused: TeaCache runs on Wan's neuron path (``_teacache_probes``; the options
+    #: reach WanOrchestrator in ``_build_pipeline``).
+    TEACACHE_KWARGS = ()
 
     def __init__(
         self,
@@ -337,22 +279,9 @@ class TorchNeuronWanApplication(torch.nn.Module):
         shape: dict[str, int | None],
         **kwargs: Any,
     ) -> None:
-        super().__init__()
-        unknown = sorted(set(kwargs) - set(_KWARG_DEFAULTS))
-        if unknown:
-            raise TypeError(
-                f"{type(self).__name__} got unexpected keyword arguments: {', '.join(unknown)}"
-            )
-        options = {**_KWARG_DEFAULTS, **kwargs}
-        _reject_unsupported(options)
-        self.options = options  # read again at load (TeaCache)
-        check_parallel_supported(parallel)
-        self.model_path = str(model_path)
-        self.parallel = parallel
-        self.dtype = _normalize_dtype(dtype)
-        self.device = _resolve_device(options["device"])
-        self.shape = _resolve_shape(shape, options["shapes"])
-        self.text_seq_len = int(options["text_seq_len"])
+        super().__init__(model_path=model_path, parallel=parallel, dtype=dtype, shape=shape,
+                         **kwargs)
+        options = self.options
         transformer_path = os.path.join(self.model_path, "transformer")
         config_overrides = dict(
             **self.shape,
@@ -367,7 +296,6 @@ class TorchNeuronWanApplication(torch.nn.Module):
             torch_dtype=self.dtype,
         )
         self.config = NeuronWanConfig.from_pretrained(transformer_path, **config_overrides)
-        self.transformer: NeuronWanTransformerApplication | None = None
         if options["enable_transformer"]:
             self.transformer = NeuronWanTransformerApplication(
                 model_path=transformer_path,
@@ -390,7 +318,6 @@ class TorchNeuronWanApplication(torch.nn.Module):
                 exec_mode=options["exec_mode"],
                 device=self.device,
             )
-        self.text_encoder: _HostTextEncoder | _DeviceTextEncoder | None = None
         if options["enable_text_encoder"] and options["text_encoder_device"] == "neuron":
             self._check_device_text_encoder_fits()
             self.text_encoder = _DeviceTextEncoder(
@@ -415,7 +342,6 @@ class TorchNeuronWanApplication(torch.nn.Module):
                 device=self.device,
                 threads=int(options["encoder_threads"]),
             )
-        self.vae_decoder: _DeviceVaeDecoder | None = None
         if options["enable_vae_decoder"]:
             cfg = self.config
             self.vae_decoder = _DeviceVaeDecoder(
@@ -429,40 +355,43 @@ class TorchNeuronWanApplication(torch.nn.Module):
                 ),
                 device=self.device,
             )
-        self.transformer_adapter: _OnDeviceTransformer | None = None
         self.transformer_2_adapter: _OnDeviceTransformer | None = None
-        self.pipeline = None
-        #: Called with no arguments once per denoise iteration; see the module docstring.
-        self.step_hook: Callable[[], None] | None = None
-        self._text_encoder_load_seconds: float | None = None
+
+    def _resolve_shape(self, shape: dict[str, int | None], shapes) -> dict[str, int]:
+        if shapes:
+            shapes = list(shapes)
+            if len(shapes) > 1:
+                raise NotImplementedError(
+                    "the neuron backend compiles one static shape per process (phase 1); "
+                    f"got shapes={shapes}"
+                )
+            height, width, num_frames = (int(v) for v in shapes[0])
+            return {"height": height, "width": width, "num_frames": num_frames}
+        return {
+            "height": int(shape.get("height") or 480),
+            "width": int(shape.get("width") or 832),
+            "num_frames": int(shape.get("num_frames") or 9),
+        }
 
     def _check_device_text_encoder_fits(self) -> None:
-        """umT5 on the device shares each core with this rank's DiT shards. Raise before anything
-        loads when the two clearly cannot fit together (``difflet/backends/neuron/wan/hbm.py``).
+        """umT5 on the device shares each core with this rank's DiT shards: refuse before
+        anything loads when the two clearly cannot fit together
+        (``difflet/backends/neuron/wan/hbm.py``, ``_check_components_fit``).
 
         The estimate depends on the TP degree and the checkpoint's sizes, not on the mode flags.
         CFG and CP on four cores, DP replicas of tp2 and a plain tp2 all narrow the TP group the
         same way. At tp2 that is at least 10.6 GiB of fp32 encoder beside 13.3 GiB of bf16 DiT on
-        a 24 GiB core. The base's own load-time check sees one component at a time, so it would
-        pass the DiT and fail only after it had loaded. Like that check, this one runs on the
-        neuron device, or elsewhere when ``DIFFLET_NEURON_HBM_GIB`` sets a budget.
+        a 24 GiB core. Both experts count when Wan 2.2's low-noise expert is resident.
         """
-        if not budget_enforced(self.device.type):
-            return
         experts = tuple(
             name
             for name, app in (("transformer", self.transformer),
                               ("transformer_2", self.transformer_2))
             if app is not None
         )
-        tp = int(self.parallel.tp_degree)
-        estimate = device_text_encoder_bytes(
-            self.model_path, tp_degree=tp, experts=experts, dit_dtype_bytes=self.dtype.itemsize
-        )
-        check_fits(
-            estimate,
+        self._check_components_fit(
+            device_text_encoder_components(experts, self.dtype.itemsize),
             what=f"umT5 (fp32) beside the Wan DiT ({', '.join(experts) or 'none'}) on one core",
-            tp_degree=tp,
             advice="encode on the host (text_encoder_device='host', --host-text-encoder), or "
             "give the TP group more cores (tp_degree={tp} or more)",
         )
@@ -481,51 +410,29 @@ class TorchNeuronWanApplication(torch.nn.Module):
             )
         return path
 
-    # --------------------------------------------------- DiffletPipeline API
+    # --------------------------------------------------------------------- load
 
-    def compile(self, compiled_model_path, debug: bool = False) -> None:
-        """No-op: the neuron backend compiles nothing ahead of time (see ``load``)."""
-        del compiled_model_path, debug
-
-    def has_compiled_artifacts(self, compiled_model_path) -> bool:
-        del compiled_model_path
-        return True
-
-    def load(
-        self,
-        compiled_model_path=None,
-        start_rank_id=None,
-        local_ranks_size=None,
-        skip_warmup: bool = False,
-    ) -> None:
-        """DiT (runtime init, shards, per-block compile, warm-up), then the low-noise expert if
-        enabled, then umT5 on rank 0, then the orchestrator. Every rank must call it; the steps
-        are status-synced phases."""
-        del compiled_model_path, start_rank_id, local_ranks_size
-        if self.pipeline is not None:
-            return
+    def _orchestrator_class(self) -> type:
         from difflet.models.wan.pipeline import WanOrchestrator
 
-        if self.transformer is not None:
-            self.transformer.load(skip_warmup=skip_warmup)
-            self.transformer_adapter = _OnDeviceTransformer(
-                self.transformer, self.config, self.dtype, self.device
-            )
+        return WanOrchestrator
+
+    def _dit_adapter(self, app) -> _OnDeviceTransformer:
+        return _OnDeviceTransformer(app, self.config, self.dtype, self.device)
+
+    def _load_transformers(self, skip_warmup: bool) -> None:
+        """The high-noise expert, then the low-noise one, whose adapter reports its forwards to
+        the first adapter's ``forward_hook``."""
+        super()._load_transformers(skip_warmup)
         if self.transformer_2 is not None:
             self.transformer_2.load(skip_warmup=skip_warmup)
             self.transformer_2_adapter = _OnDeviceTransformer(
                 self.transformer_2, self.transformer_2.config, self.dtype, self.device,
                 hook_from=self.transformer_adapter,
             )
-        if isinstance(self.text_encoder, _DeviceTextEncoder):
-            self.text_encoder.load(skip_warmup=skip_warmup)
-        elif self.text_encoder is not None:
-            start = time.perf_counter()
-            self.text_encoder.load()
-            self._text_encoder_load_seconds = time.perf_counter() - start
-        if self.vae_decoder is not None:
-            self.vae_decoder.load(skip_warmup=skip_warmup)
-        pipeline = WanOrchestrator(
+
+    def _build_pipeline(self, orchestrator_class: type):
+        return orchestrator_class(
             model_path=self.model_path,
             text_encoder=self.text_encoder,
             transformer=self.transformer_adapter,
@@ -539,10 +446,6 @@ class TorchNeuronWanApplication(torch.nn.Module):
             teacache_online_delta_alpha=self.options["teacache_online_delta_alpha"],
             **self.shape,
         )
-        self._stamp_denoise_iterations(pipeline)
-        self.pipeline = pipeline
-        logger.info("%s loaded: %s", type(self).__name__,
-                    {k: round(v, 2) for k, v in self.phase_seconds.items()})
 
     def _teacache_probes(self) -> dict[int, Any]:
         """One TeaCache probe per loaded expert, keyed as WanOrchestrator looks them up (the id of
@@ -559,60 +462,16 @@ class TorchNeuronWanApplication(torch.nn.Module):
                 probes[id(adapter)] = NeuronTeaCacheProbe(app.teacache_mod_input)
         return probes
 
-    def _stamp_denoise_iterations(self, pipeline) -> None:
-        """Call ``step_hook`` after each scheduler step: exactly once per denoise iteration, in
-        every branch of ``WanOrchestrator._denoise`` (CFG, cfg-parallel, a TeaCache skip)."""
-        scheduler_step = pipeline._scheduler_step
+    # ----------------------------------------------------------------- evidence
 
-        def stamped_scheduler_step(*args: Any, **kwargs: Any) -> torch.Tensor:
-            latents = scheduler_step(*args, **kwargs)
-            if self.step_hook is not None:
-                self.step_hook()
-            return latents
-
-        pipeline._scheduler_step = stamped_scheduler_step
-
-    # ------------------------------------------------------------- evidence
-
-    @property
-    def phase_seconds(self) -> dict[str, float]:
-        """The DiT's load phases, the low-noise expert's as ``"transformer_2 <phase>"``, the
-        device umT5's as ``"text_encoder <phase>"``, or for the host umT5 ``"text encoder load"``
-        (rank 0's read, which the other ranks wait out in that phase's status sync)."""
-        seconds = dict(self.transformer.phase_seconds) if self.transformer is not None else {}
+    def _device_apps(self) -> list:
+        """The low-noise expert's phases and blocks follow the DiT's, as ``"transformer_2
+        <phase>"`` and ``"transformer_2.<block>"``."""
+        apps = super()._device_apps()
         if self.transformer_2 is not None:
-            seconds.update(
-                {f"transformer_2 {k}": v for k, v in self.transformer_2.phase_seconds.items()}
-            )
-        if isinstance(self.text_encoder, _DeviceTextEncoder):
-            seconds.update(
-                {f"text_encoder {k}": v for k, v in self.text_encoder.app.phase_seconds.items()}
-            )
-        if self.vae_decoder is not None:
-            seconds.update({f"vae {k}": v for k, v in self.vae_decoder.app.phase_seconds.items()})
-        if self._text_encoder_load_seconds is not None:
-            seconds["text encoder load"] = self._text_encoder_load_seconds
-        return seconds
-
-    @property
-    def compiled_blocks(self) -> list[str]:
-        blocks = list(self.transformer.compiled_blocks) if self.transformer is not None else []
-        if self.transformer_2 is not None:
-            blocks += [f"transformer_2.{name}" for name in self.transformer_2.compiled_blocks]
-        if isinstance(self.text_encoder, _DeviceTextEncoder):
-            blocks += [f"text_encoder.{name}" for name in self.text_encoder.app.compiled_blocks]
-        return blocks
-
-    @property
-    def unwarmed_shapes(self) -> list:
-        shapes = list(self.transformer.unwarmed_shapes) if self.transformer is not None else []
-        if self.transformer_2 is not None:
-            shapes += list(self.transformer_2.unwarmed_shapes)
-        if isinstance(self.text_encoder, _DeviceTextEncoder):
-            shapes += list(self.text_encoder.app.unwarmed_shapes)
-        if self.vae_decoder is not None:
-            shapes += list(self.vae_decoder.app.unwarmed_shapes)
-        return shapes
+            apps.insert(1 if self.transformer is not None else 0,
+                        ("transformer_2", self.transformer_2))
+        return apps
 
     @property
     def expert_calls(self) -> dict[str, int]:
@@ -645,6 +504,8 @@ class TorchNeuronWanApplication(torch.nn.Module):
             },
         }
 
+    # ---------------------------------------------------------------- inference
+
     def __call__(self, *args: Any, seed: int | None = None, **kwargs: Any):
         """``app(latents, timestep, text)`` runs the DiT (the high-noise expert when there are
         two); anything else runs the orchestrator (``WanOrchestrator.__call__``'s arguments),
@@ -652,33 +513,22 @@ class TorchNeuronWanApplication(torch.nn.Module):
 
         * ``seed``: a ``torch.Generator`` seeded with it (pass one or ``generator``);
         * without ``latents``, the initial noise is drawn on rank 0 (from ``generator``, or the
-          global RNG) and broadcast, so every rank of the TP/CP/CFG group denoises the same
-          latents even when the caller's generators or global RNGs differ per rank. Rank 0's
-          draw is the one the orchestrator itself would have made, so a single rank, or ranks
-          that were given identical generators, get the same latents as before.
+          global RNG) and broadcast (``_draw_on_rank0``), so every rank of the TP/CP/CFG group
+          denoises the same latents even when the caller's generators or global RNGs differ.
         """
         if len(args) >= 3:
             if seed is not None:
                 raise TypeError("seed applies to the orchestrator call, not a DiT call")
-            if self.transformer_adapter is None:
-                raise RuntimeError(
-                    f"{type(self).__name__}: the DiT is not loaded (call load() first; "
-                    "enable_transformer=False never loads one)"
-                )
-            return self.transformer_adapter(*args, **kwargs)
-        if self.pipeline is None:
-            raise RuntimeError(f"{type(self).__name__} is not loaded; call load() first")
-        if seed is not None:
-            if kwargs.get("generator") is not None:
-                raise ValueError("pass seed or generator, not both")
-            kwargs["generator"] = torch.Generator().manual_seed(int(seed))
+            return self._require_dit()(*args, **kwargs)
+        self._require_loaded()
+        self._apply_seed(kwargs, seed)
         if kwargs.get("latents") is None:
             kwargs["latents"] = self._initial_latents(kwargs)
         return self.pipeline(*args, **kwargs)
 
     def _initial_latents(self, kwargs: dict[str, Any]) -> torch.Tensor:
-        """Rank 0's fp32 initial noise, broadcast (see ``__call__``): the orchestrator's own
-        ``prepare_latents`` draw, at the call's batch, channels and shape."""
+        """Rank 0's fp32 initial noise, broadcast: the orchestrator's own ``prepare_latents``
+        draw, at the call's batch, channels and shape."""
         pipeline = self.pipeline
 
         def draw() -> torch.Tensor:
@@ -692,10 +542,7 @@ class TorchNeuronWanApplication(torch.nn.Module):
                 generator=kwargs.get("generator"),
             )
 
-        if world_info()[1] == 1:
-            return draw()
-        latents = rank0_call(draw, device=self.device, what="initial latents")
-        return broadcast_tensor(latents, device=self.device).cpu()
+        return self._draw_on_rank0(draw)
 
 
 def _require_same_architecture(config, config_2) -> None:
