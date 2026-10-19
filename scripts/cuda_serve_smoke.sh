@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
-# `difflet serve` for Qwen-Image on one GPU, end to end (plan F3b): start the server, wait for
-# /ready, fetch two images over /v1/chat/completions (the second proves the model stays resident).
+# `difflet serve` on one GPU, end to end (plan F3b; Flux and Wan F3c): start the server, wait for
+# /ready, fetch two outputs (the second proves the model stays resident) — images over
+# /v1/chat/completions, a Wan clip over /v1/videos/sync.
 # Logs to /tmp/logs/cuda-serve-smoke-<ts>.log; timings in serve_timings.json next to --output.
 #   scripts/cuda_serve_smoke.sh --output /tmp/qwen-serve.png [--steps 50 --seed 0 --port 8091]
+#   scripts/cuda_serve_smoke.sh --model-id Wan-AI/Wan2.2-T2V-A14B-Diffusers --output /tmp/wan.mp4
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

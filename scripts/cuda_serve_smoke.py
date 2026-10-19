@@ -1,6 +1,6 @@
-"""`difflet serve` on CUDA, end to end: start the server, wait for /ready, fetch one image.
+"""`difflet serve` on CUDA, end to end: start the server, wait for /ready, fetch an output.
 
-Starts ``difflet serve --model-id Qwen/Qwen-Image`` with ``DIFFLET_BACKEND=cuda`` as a
+Starts ``difflet serve --model-id <model>`` with ``DIFFLET_BACKEND=cuda`` as a
 subprocess, polls ``GET /ready`` (the worker loads the model and runs its 4-step startup smoke
 first), POSTs one ``/v1/chat/completions`` request, saves the PNG, and writes
 ``serve_timings.json`` next to it (``ready_s``, ``request_s``). With ``--requests 2`` the second
@@ -15,6 +15,13 @@ startup smoke, and the 900 s startup timeout is not sized for a 54 GB download. 
 ``DIFFLET_API_KEY`` and an S3 artifact store configured through the repo-root ``.env``.
 
     DIFFLET_BACKEND=cuda python scripts/cuda_serve_smoke.py --output /tmp/qwen-serve.png --steps 50
+
+**FLUX.1-dev and Wan 2.2.** ``--model-id black-forest-labs/FLUX.1-dev`` goes through the
+same chat path (PNG; ``--guidance-scale`` is sent when given). ``--model-id
+Wan-AI/Wan2.2-T2V-A14B-Diffusers`` POSTs the multipart form of ``/v1/videos/sync`` (``size``,
+``num_frames``, steps, seed, and ``guidance_scale`` / ``guidance_scale_2`` when given) and saves
+the MP4. Flags left out take the model's CUDA CLI defaults (``MODEL_DEFAULTS``); Wan's startup
+timeout is 1800 s, since its 126 GB snapshot reads cold from the volume at about 0.23 GB/s.
 """
 
 from __future__ import annotations
@@ -33,20 +40,109 @@ import urllib.request
 
 MODEL_ID = "Qwen/Qwen-Image"
 DEFAULT_PROMPT = "a photorealistic cat sitting in a sunlit garden"
+#: Per model: the CUDA CLI's defaults (steps, shape), what it returns, how long a cold load may
+#: take, and the default output file.
+MODEL_DEFAULTS: dict[str, dict] = {
+    MODEL_ID: dict(
+        kind="image",
+        steps=50,
+        height=1024,
+        width=1024,
+        num_frames=None,
+        startup_timeout=900.0,
+        output="/tmp/qwen-serve.png",
+    ),
+    "black-forest-labs/FLUX.1-dev": dict(
+        kind="image",
+        steps=28,
+        height=1024,
+        width=1024,
+        num_frames=None,
+        startup_timeout=900.0,
+        output="/tmp/flux-serve.png",
+    ),
+    "Wan-AI/Wan2.2-T2V-A14B-Diffusers": dict(
+        kind="video",
+        steps=40,
+        height=480,
+        width=832,
+        num_frames=9,
+        startup_timeout=1800.0,
+        output="/tmp/wan-serve.mp4",
+    ),
+}
 
 
-def build_chat_body(prompt: str, *, steps: int, seed: int, height: int, width: int) -> dict:
-    """One chat request; no guidance_scale (the CUDA server refuses any but the no-op value)."""
-    return {
-        "model": MODEL_ID,
-        "messages": [{"role": "user", "content": prompt}],
-        "extra_body": {
-            "num_inference_steps": int(steps),
-            "seed": int(seed),
-            "height": int(height),
-            "width": int(width),
-        },
+def build_chat_body(
+    prompt: str,
+    *,
+    steps: int,
+    seed: int,
+    height: int,
+    width: int,
+    model_id: str = MODEL_ID,
+    guidance_scale: float | None = None,
+) -> dict:
+    """One chat request. ``guidance_scale`` only when given: the Qwen-Image server refuses any but
+    its no-op value, the Flux server defaults it to 3.5."""
+    extra = {
+        "num_inference_steps": int(steps),
+        "seed": int(seed),
+        "height": int(height),
+        "width": int(width),
     }
+    if guidance_scale is not None:
+        extra["guidance_scale"] = float(guidance_scale)
+    return {
+        "model": model_id,
+        "messages": [{"role": "user", "content": prompt}],
+        "extra_body": extra,
+    }
+
+
+def build_video_form(
+    prompt: str,
+    *,
+    steps: int,
+    seed: int,
+    height: int,
+    width: int,
+    num_frames: int,
+    model_id: str,
+    guidance_scale: float | None = None,
+    guidance_scale_2: float | None = None,
+) -> list[tuple[str, str]]:
+    """The ``/v1/videos/sync`` multipart fields (fps is the server profile's, so not sent)."""
+    fields = [
+        ("model", model_id),
+        ("prompt", prompt),
+        ("size", f"{int(width)}x{int(height)}"),
+        ("num_frames", str(int(num_frames))),
+        ("num_inference_steps", str(int(steps))),
+        ("seed", str(int(seed))),
+    ]
+    if guidance_scale is not None:
+        fields.append(("guidance_scale", f"{float(guidance_scale):g}"))
+    if guidance_scale_2 is not None:
+        fields.append(("guidance_scale_2", f"{float(guidance_scale_2):g}"))
+    return fields
+
+
+def encode_multipart(fields: list[tuple[str, str]]) -> tuple[bytes, str]:
+    """``multipart/form-data`` for plain text fields: the body and its Content-Type."""
+    import uuid
+
+    boundary = f"difflet-{uuid.uuid4().hex}"
+    lines: list[bytes] = []
+    for name, value in fields:
+        lines += [
+            f"--{boundary}".encode(),
+            f'Content-Disposition: form-data; name="{name}"'.encode(),
+            b"",
+            str(value).encode("utf-8"),
+        ]
+    lines += [f"--{boundary}--".encode(), b""]
+    return b"\r\n".join(lines), f"multipart/form-data; boundary={boundary}"
 
 
 def decode_image_data_url(url: str) -> bytes:
@@ -92,8 +188,9 @@ def serve_command(
     python: str = sys.executable,
     dp: int = 1,
     queue_timeout: float | None = None,
+    model_id: str = MODEL_ID,
 ) -> tuple[list[str], dict[str, str]]:
-    cmd = [python, "-m", "difflet.cli.main", "serve", "--model-id", MODEL_ID, "--port", str(port)]
+    cmd = [python, "-m", "difflet.cli.main", "serve", "--model-id", model_id, "--port", str(port)]
     if cache_dir:
         cmd += ["--cache-dir", cache_dir]
     if int(dp) > 1:
@@ -154,18 +251,41 @@ def post_chat(
     return payload, time.monotonic() - start
 
 
-def main(argv: list[str] | None = None) -> int:
+def post_video_sync(
+    base_url: str, fields: list[tuple[str, str]], *, timeout: float, api_key: str | None = None
+) -> tuple[bytes, float]:
+    """One ``/v1/videos/sync`` request: the MP4 bytes and the request time."""
+    data, content_type = encode_multipart(fields)
+    headers = request_headers(api_key)
+    headers["Content-Type"] = content_type
+    req = urllib.request.Request(
+        f"{base_url}/v1/videos/sync", data=data, headers=headers, method="POST"
+    )
+    start = time.monotonic()
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        mp4 = resp.read()
+    return mp4, time.monotonic() - start
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """The flags; any left out take ``--model-id``'s defaults (``MODEL_DEFAULTS``)."""
     ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--model-id", default=MODEL_ID, choices=sorted(MODEL_DEFAULTS))
     ap.add_argument("--prompt", default=DEFAULT_PROMPT)
-    ap.add_argument("--steps", type=int, default=50)
+    ap.add_argument("--steps", type=int, default=None)
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--height", type=int, default=1024)
-    ap.add_argument("--width", type=int, default=1024)
+    ap.add_argument("--height", type=int, default=None)
+    ap.add_argument("--width", type=int, default=None)
+    ap.add_argument("--num-frames", type=int, default=None, help="video models only")
+    ap.add_argument("--guidance-scale", type=float, default=None, help="sent only when given")
+    ap.add_argument(
+        "--guidance-scale-2", type=float, default=None, help="Wan 2.2's low-noise expert"
+    )
     ap.add_argument("--port", type=int, default=8091)
     ap.add_argument("--cache-dir", default=None)
-    ap.add_argument("--output", default="/tmp/qwen-serve.png")
+    ap.add_argument("--output", default=None)
     ap.add_argument("--requests", type=int, default=2, help="requests to send (2 proves residency)")
-    ap.add_argument("--startup-timeout", type=float, default=900.0)
+    ap.add_argument("--startup-timeout", type=float, default=None)
     ap.add_argument("--request-timeout", type=float, default=300.0)
     ap.add_argument("--dp", type=int, default=1, help="--dp-degree for the server")
     ap.add_argument(
@@ -175,18 +295,33 @@ def main(argv: list[str] | None = None) -> int:
         help="fire this many requests at once instead of --requests serially",
     )
     ap.add_argument("--queue-timeout", type=float, default=None, help="passed to the server")
-    ap.add_argument("--reference", default=None, help="PNG to compare every image's bytes with")
+    ap.add_argument(
+        "--reference", default=None, help="an output to compare every output's bytes with"
+    )
     args = ap.parse_args(argv)
+    defaults = MODEL_DEFAULTS[args.model_id]
+    for name in ("steps", "height", "width", "num_frames", "startup_timeout", "output"):
+        if getattr(args, name) is None:
+            setattr(args, name, defaults[name])
+    args.kind = defaults["kind"]
+    return args
 
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
     cmd, env = serve_command(
-        port=args.port, cache_dir=args.cache_dir, dp=args.dp, queue_timeout=args.queue_timeout
+        port=args.port,
+        cache_dir=args.cache_dir,
+        dp=args.dp,
+        queue_timeout=args.queue_timeout,
+        model_id=args.model_id,
     )
     api_key = os.environ.get("DIFFLET_API_KEY") or None  # the server reads the same variable
     base_url = f"http://127.0.0.1:{args.port}"
     print(f"[serve-smoke] starting: {' '.join(cmd)}", flush=True)
     process = subprocess.Popen(cmd, env=env, start_new_session=True)
     timings: dict = {
-        "model": MODEL_ID,
+        "model": args.model_id,
         "steps": args.steps,
         "seed": args.seed,
         "dp": int(args.dp),
@@ -199,21 +334,46 @@ def main(argv: list[str] | None = None) -> int:
             wait_for_ready(base_url, timeout=args.startup_timeout, process=process), 1
         )
         print(f"[serve-smoke] ready in {timings['ready_s']} s", flush=True)
-        body = build_chat_body(
-            args.prompt, steps=args.steps, seed=args.seed, height=args.height, width=args.width
-        )
+        shape = dict(steps=args.steps, seed=args.seed, height=args.height, width=args.width)
+        if args.kind == "video":
+            fields = build_video_form(
+                args.prompt,
+                num_frames=args.num_frames,
+                model_id=args.model_id,
+                guidance_scale=args.guidance_scale,
+                guidance_scale_2=args.guidance_scale_2,
+                **shape,
+            )
+
+            def send() -> tuple[bytes, float]:
+                return post_video_sync(
+                    base_url, fields, timeout=args.request_timeout, api_key=api_key
+                )
+
+        else:
+            body = build_chat_body(
+                args.prompt, model_id=args.model_id, guidance_scale=args.guidance_scale, **shape
+            )
+
+            def send() -> tuple[bytes, float]:
+                payload, request_s = post_chat(
+                    base_url, body, timeout=args.request_timeout, api_key=api_key
+                )
+                return fetch_image_bytes(image_url_from_response(payload)), request_s
+
         out = pathlib.Path(args.output)
         out.parent.mkdir(parents=True, exist_ok=True)
 
-        def record(index: int, payload: dict, request_s: float) -> None:
-            png = fetch_image_bytes(image_url_from_response(payload))
+        def record(index: int, data: bytes, request_s: float) -> None:
             path = out if index == 0 else out.with_name(f"{out.stem}-{index + 1}{out.suffix}")
-            path.write_bytes(png)
-            same = identical_to_reference(png, args.reference)
+            path.write_bytes(data)
+            same = identical_to_reference(data, args.reference)
             timings["requests"].append(
                 {
                     "request_s": round(request_s, 1),
-                    "image": str(path),
+                    # "image" as F3b / F2b recorded it; "video" for a clip.
+                    args.kind: str(path),
+                    "bytes": len(data),
                     "identical_to_reference": same,
                 }
             )
@@ -224,21 +384,15 @@ def main(argv: list[str] | None = None) -> int:
             )
 
         if args.concurrent > 0:
-
-            def poster(index: int):
-                return post_chat(base_url, body, timeout=args.request_timeout, api_key=api_key)
-
-            results, wall = fire_concurrently(poster, args.concurrent)
-            for index, (payload, request_s) in enumerate(results):
-                record(index, payload, request_s)
+            results, wall = fire_concurrently(lambda index: send(), args.concurrent)
+            for index, (data, request_s) in enumerate(results):
+                record(index, data, request_s)
             timings["wall_s"] = round(wall, 1)
             print(f"[serve-smoke] {args.concurrent} concurrent requests in {wall:.1f} s wall")
         else:
             for index in range(max(1, int(args.requests))):
-                payload, request_s = post_chat(
-                    base_url, body, timeout=args.request_timeout, api_key=api_key
-                )
-                record(index, payload, request_s)
+                data, request_s = send()
+                record(index, data, request_s)
         timings["request_s"] = timings["requests"][0]["request_s"]
         out.with_name("serve_timings.json").write_text(json.dumps(timings, indent=2) + "\n")
         print(json.dumps(timings, indent=2))
