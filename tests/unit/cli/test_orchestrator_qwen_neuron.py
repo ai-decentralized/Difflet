@@ -471,9 +471,7 @@ def test_cache_inputs_unchanged_for_aot_backends_and_distinct_for_neuron(monkeyp
     eager, eager_dirs = keyed("neuron", "eager")
     assert eager["generate"] == {**neuron["generate"], "exec_mode": "eager"}
     assert eager_dirs["generate"] != neuron_dirs["generate"]
-    # CP degree and mode stay in the key.
-    ring = _qwen_args(cache_dir="/c", tp_degree=2, cp_degree=2, cp_mode="ring")
-    assert orch._stage_compiled_dir("generate", ring) != neuron_dirs["generate"]
+    # CP degree and mode, SP and CFG parallelism, each alone: test_neuron_stage_cache_keys.py.
 
 
 # ----------------------------------------------------------------- the torchrun command line
