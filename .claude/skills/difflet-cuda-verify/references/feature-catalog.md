@@ -91,7 +91,7 @@ from 25 / 0.99 after the first measurement, F3 and F5); Wan **≥ 25 dB, ≥ 0.9
 measurement left 2.5 dB, F1). The Wan gate judges the `float32` timestep variant by name, and
 every seed of a multi-seed JSON. Wan's e2e over seeds with the metric's own **noise floor** (F9:
 per seed, diffusers again with both experts' timestep rounded through bf16, exact vs perturbed
-recorded; `run_gates.sh`'s e2e is one seed without it). When the result carries the floor on
+recorded; `run_gates.sh wan`'s e2e is one seed without it). When the result carries the floor on
 every seed the Wan gate is stated **relative to it** (F9b, as D14 states the parity gates): the
 mean PSNR over seeds ≥ the floor's mean − 1.21 dB (a 1.15× deviation ratio in dB) and the mean
 cosine deviation ≤ 1.15² = 1.3225× the floor's (the same 1.15× on the linear error); every seed
@@ -99,13 +99,22 @@ cosine deviation ≤ 1.15² = 1.3225× the floor's (the same 1.15× on the linea
 clear ("the oracle moved" otherwise). The 25 dB / 0.99 floors then step aside; without a floor
 they judge every seed and the relative test is skipped with that reason. F9's JSON: mean
 27.20 dB against 25.17 required (2.0 dB, about one standard error of the difference at n = 3),
-worst seed 26.30 against 22.58.
+worst seed 26.30 against 22.58. **Flux over seeds (F9c)** has the same shape: `--seeds` keeps one
+load per side, `--noise-floor` reruns diffusers per seed with bf16 gemm reductions flipped
+(F4f's perturbation), and the Flux gate judges every seed — gates A and B over two or more
+seeds, F4f's single-seed statement for one. `run_gates.sh flux` runs seeds 0–2 with the floor.
+The three F4f floor runs, merged into one result, pass it: mean 38.30 dB against 33.84
+required, worst seed 31.56 against 29.71.
 
 ```bash
 HF_HOME=$H HF_HUB_OFFLINE=1 DIFFLET_BACKEND=cuda PYTHONPATH=$PWD .venv/bin/python \
   scripts/cuda_e2e_wan_vs_diffusers.py --model-path "$SNAP" --seeds 0,1,2 --noise-floor \
   --timestep-dtypes float32 --steps 40 --num-frames 9 --out ~/logs/<name>/cuda_e2e_wan_noise.json \
   --images-dir ~/logs/<name>     # F9: 518 s; then the gate with DIFFLET_CUDA_WAN_E2E_RESULT=… -rA
+HF_HOME=$H HF_HUB_OFFLINE=1 DIFFLET_BACKEND=cuda PYTHONPATH=$PWD .venv/bin/python \
+  scripts/cuda_e2e_flux_vs_diffusers.py --model-path "$SNAP" --seeds 0,1,2,3,4,5,6,7 \
+  --noise-floor --out ~/logs/<name>/cuda_e2e_flux_noise.json --images-dir ~/logs/<name>
+  # F9c: ~3 × 8 s per seed after the loads; the gate with DIFFLET_CUDA_FLUX_E2E_RESULT=… -rA
 ```
 
 ## Qwen-Image (`Qwen/Qwen-Image`, public)
@@ -242,8 +251,8 @@ Flux — compiled Wan 32.8 s vs diffusers 43.2 per 40-step run, compiled Flux 7.
 (eager Flux DiT 299.6 vs 291.4 ms). Flux's e2e noise floor (`cuda_e2e_flux_vs_diffusers.py
 --noise-floor`: diffusers vs itself with bf16 gemm reductions flipped) reads 30.92 / 36.62 /
 37.61 dB over seeds 0–2 — the single-seed 35 dB floor fails diffusers' own noise on seed 0, so
-the Flux gate is relative to a recorded floor, as Wan's (F9b). Artifacts:
-`artifacts/cuda-release1/f4f/`.
+the Flux gate is relative to a recorded floor, as Wan's (F9b); since F9c over seeds in one run
+(the e2e section). Artifacts: `artifacts/cuda-release1/f4f/`.
 
 ## Two GPUs [F2, f2, 2× Server Edition over PCIe]
 

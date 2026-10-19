@@ -235,7 +235,9 @@ distance 0.398×); whole-pipeline e2e vs diffusers' `FluxPipeline` PSNR 40.35 dB
 the single block's `proj_out` runs as diffusers' one gemm at tp=1 (`fuse_proj_out`, load-time on
 CUDA; `DIFFLET_CUDA_FLUX_FUSE_PROJ_OUT=0` keeps the split for an A/B; the checkpoint and the Trainium/TPU graphs keep the Megatron split). Flux's e2e PSNR is
 seed-sensitive — diffusers against its own perturbed self spans 30.9–37.6 dB over three seeds —
-so the e2e gate is relative to a recorded noise floor, as Wan's (F4f). The Trainium byte-identity of the
+so the e2e gate is relative to a recorded noise floor, as Wan's (F4f) — since F9c over seeds in one run
+(`cuda_e2e_flux_vs_diffusers.py --seeds 0,1,2 --noise-floor`, gates A and B as Wan's), which
+`run_gates.sh flux` uses. The Trainium byte-identity of the
 split is argued (verbatim move, CPU suites) but not re-run on a trn2 (D13).
 
 **Wan 2.2 on CUDA (F1, verified on the RTX PRO 6000).** `Wan-AI/Wan2.2-T2V-A14B-Diffusers`

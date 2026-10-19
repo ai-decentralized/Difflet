@@ -623,7 +623,12 @@ floor's, a loose 20 dB / 0.98 absolute floor), the 35 dB / 0.998 floors judging 
 without one; the three floor runs pass it (`f4f/floor/e2e_floor_seed{0,1,2}.json`), the
 seed-0 runs without a floor fail the absolute floor as recorded (`f4f/gates-flux{,-compiled}/`).
 Three seeds is a small sample: the floor's spread (6.7 dB) says Flux's single-seed e2e PSNR
-carries several dB of noise, not that any build is within it.
+carries several dB of noise, not that any build is within it. Since F9c (on the CPU; the pod
+run is pending) the script runs many seeds in one load per side (`--seeds … --noise-floor`) and
+the gate judges them as F9b judges Wan — the mean over seeds within 1.21 dB of the floor's mean
+(gate A), every seed within 1.21 dB of the floor's worst seed (gate B); the three floor runs
+above, merged into one result, pass it (mean 38.30 dB against 33.84 required, worst seed
+31.56 against 29.71; `tests/unit/scripts/test_cuda_flux_gates.py`).
 
 **How to inspect manually.**
 
@@ -635,6 +640,7 @@ for s in (0, 1, 2):
 export DIFFLET_BACKEND=cpu DIFFLET_RUN_CUDA_NUMERICAL=1
 DIFFLET_CUDA_FLUX_E2E_RESULT=artifacts/cuda-release1/f4f/floor/e2e_floor_seed0.json pytest -q -rA tests/numerical/test_cuda_flux_e2e_vs_diffusers.py   # 3 passed: the relative gate prints its thresholds
 # on a pod: DIFFLET_CUDA_TORCH_COMPILE=1 run_gates.sh wan|flux; cuda_e2e_flux_vs_diffusers.py --seed N --noise-floor
+# since F9c: cuda_e2e_flux_vs_diffusers.py --seeds 0,1,2,... --noise-floor (one load per side; the gate over seeds)
 ```
 
 ## Two GPUs (F2)
@@ -839,6 +845,10 @@ above. Spurious infrastructure events are kept and labelled.
     recorded floor (F9b's form): the floor reads 30.92 / 36.62 / 37.61 dB over seeds 0–2, so the
     single-seed 35 dB floor fails diffusers' own noise on seed 0, where the fused and compiled
     runs read 31.5 dB (39.6–43.8 dB on seeds 1–2) *[10-19 F4f]*.
+41. `be118a4`, `a59f39b`, `7e29f17` — the Flux e2e over seeds (F9c, on the CPU): `--seeds`
+    with one load per side and per-seed / aggregate metrics, the gate over seeds (gates A and
+    B as F9b's), `run_gates.sh flux` on seeds 0–2 with the noise floor; the F4f floor runs
+    merged into one result pass it *[10-19 F9c]*.
 
 ## Support matrix
 

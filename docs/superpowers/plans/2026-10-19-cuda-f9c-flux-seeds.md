@@ -28,11 +28,11 @@
 - Modify: `scripts/cuda_e2e_vs_diffusers.py` (the seed helpers), `scripts/cuda_e2e_wan_vs_diffusers.py` (import them), `scripts/cuda_e2e_flux_vs_diffusers.py` (`--seeds`, per-seed runs, the payload)
 - Test: `tests/unit/scripts/test_cuda_e2e_flux_script.py`
 
-- [ ] **Step 1:** failing tests — the helpers are one definition (`flux_e2e.parse_seeds is wan_e2e.parse_seeds`); `--seeds` parses and overrides `--seed`; `run_difflet` loads once and generates each seed from its seeded draw; `run_diffusers` loads once, runs exact (+ perturbed) per seed, restores the flag; `main` over seeds 0,1,2 with `--noise-floor` writes `per_seed`, `aggregate`, first-seed top-level keys, per-seed PNGs and the legacy names; one seed without the floor is the F4f run plus `per_seed` / `aggregate`.
+- [x] **Step 1:** failing tests — the helpers are one definition (`flux_e2e.parse_seeds is wan_e2e.parse_seeds`); `--seeds` parses and overrides `--seed`; `run_difflet` loads once and generates each seed from its seeded draw; `run_diffusers` loads once, runs exact (+ perturbed) per seed, restores the flag; `main` over seeds 0,1,2 with `--noise-floor` writes `per_seed`, `aggregate`, first-seed top-level keys, per-seed PNGs and the legacy names; one seed without the floor is the F4f run plus `per_seed` / `aggregate`.
   Expected: FAIL (`AttributeError: parse_seeds`, `TypeError` on the new signatures).
-- [ ] **Step 2:** implement. Expected: the file's tests pass; Wan's script tests unchanged and green.
-- [ ] **Step 3:** CPU gate. Expected: `regressions=0`.
-- [ ] **Step 4: Commit** `flux e2e: --seeds — one load per side, per-seed and aggregate metrics, the noise floor per seed (F9c task 1)`.
+- [x] **Step 2:** implement. Expected: the file's tests pass; Wan's script tests unchanged and green.
+- [x] **Step 3:** CPU gate. Expected: `regressions=0`.
+- [x] **Step 4: Commit** `flux e2e: --seeds — one load per side, per-seed and aggregate metrics, the noise floor per seed (F9c task 1)`.
 
 ### Task 2: The Flux e2e gate over seeds
 
@@ -40,11 +40,11 @@
 - Modify: `tests/numerical/test_cuda_flux_e2e_vs_diffusers.py`
 - Test: `tests/unit/scripts/test_cuda_flux_gates.py`
 
-- [ ] **Step 1:** failing harness tests — a three-seed payload with a floor: gate A / gate B thresholds printed and judged (the F4f floor seeds 0–2 and Difflet's fused numbers pass: mean 38.30 dB ≥ 35.05 − 1.21, every seed ≥ 30.92 − 1.21); a mean short of gate A fails as "mean PSNR"; one seed under gate B fails naming it; the cosine halves; a floor on some seeds only fails; without a floor the 35 dB floors judge every seed and name the failing one; the first-seed top-level keys and the aggregate are checked; the F4f single-seed tests and the committed-artifact verdicts unchanged; the three committed F4f floor JSONs merged into one three-seed result pass.
+- [x] **Step 1:** failing harness tests — a three-seed payload with a floor: gate A / gate B thresholds printed and judged (the F4f floor seeds 0–2 and Difflet's fused numbers pass: mean 38.30 dB ≥ 35.05 − 1.21, every seed ≥ 30.92 − 1.21); a mean short of gate A fails as "mean PSNR"; one seed under gate B fails naming it; the cosine halves; a floor on some seeds only fails; without a floor the 35 dB floors judge every seed and name the failing one; the first-seed top-level keys and the aggregate are checked; the F4f single-seed tests and the committed-artifact verdicts unchanged; the three committed F4f floor JSONs merged into one three-seed result pass.
   Expected: FAIL (the gate reads the top-level seed only; no record test).
-- [ ] **Step 2:** implement. Expected: the harness passes.
-- [ ] **Step 3:** CPU gate. Expected: `regressions=0`.
-- [ ] **Step 4: Commit** `flux: the e2e gate over seeds — gate A on the mean, gate B on the floor's worst seed, as F9b (F9c task 2)`.
+- [x] **Step 2:** implement. Expected: the harness passes.
+- [x] **Step 3:** CPU gate. Expected: `regressions=0`.
+- [x] **Step 4: Commit** `flux: the e2e gate over seeds — gate A on the mean, gate B on the floor's worst seed, as F9b (F9c task 2)`.
 
 ### Task 3: `run_gates.sh flux` runs the e2e over three seeds with the floor
 
@@ -52,12 +52,12 @@
 - Modify: `.claude/skills/difflet-cuda-verify/scripts/run_gates.sh`
 - Test: `tests/unit/scripts/test_cuda_verify_skill_scripts.py`
 
-- [ ] **Step 1:** failing dry-run assertion (`--seeds 0,1,2 --noise-floor` in the flux e2e step). Expected: FAIL.
-- [ ] **Step 2:** implement. **Step 3:** CPU gate. **Step 4: Commit** `verify skill: run_gates.sh flux judges the e2e over three seeds against the noise floor (F9c task 3)`.
+- [x] **Step 1:** failing dry-run assertion (`--seeds 0,1,2 --noise-floor` in the flux e2e step). Expected: FAIL.
+- [x] **Step 2:** implement. **Step 3:** CPU gate. **Step 4: Commit** `verify skill: run_gates.sh flux judges the e2e over three seeds against the noise floor (F9c task 3)`.
 
 ### Task 4: Docs, status log, PR; the pod run (pending the owner's yes)
 
-- [ ] The catalog (the Flux multi-seed command, the gate's form), SKILL §5's runner line, `DEVELOPER.md`, the evidence report's reproduction lines; status-log entry "landed on the CPU"; push; PR stacked on #100; one fresh whole-branch reviewer. Pod (owner's yes): `cuda_e2e_flux_vs_diffusers.py --seeds 0,…,7 --noise-floor`, eager and `DIFFLET_CUDA_TORCH_COMPILE=1`, then `run_gates.sh flux`.
+- [ ] The catalog (the Flux multi-seed command, the gate's form), SKILL's runner line, `DEVELOPER.md`, the evidence report's reproduction lines; status-log entry "landed on the CPU"; push; PR stacked on #100; one fresh whole-branch reviewer. Pod (owner's yes): `cuda_e2e_flux_vs_diffusers.py --seeds 0,…,7 --noise-floor`, eager and `DIFFLET_CUDA_TORCH_COMPILE=1`, then `run_gates.sh flux`.
 
 ## Rulings
 
@@ -65,3 +65,12 @@
 - R2: one seed keeps F4f's single-seed relative statement (gates A and B coincide at n = 1); two or more seeds get F9b's A/B form. A single-seed result printed the F4f way keeps the committed F4f harness strings and artifact verdicts.
 - R3: no perturbed-run PNG for Flux (F4f wrote none); the floor's metrics are what the gate reads.
 - R4: inline execution, one fresh whole-branch reviewer.
+
+## Execution ledger
+
+```
+Task 1: complete (be118a4; CPU gate 2870 passed).
+Task 2: complete (a59f39b; CPU gate 2880 passed). The record test prints "seed N difflet vs diffusers: ..." (a "seed N: PSNR" line collided with the absolute test's failure messages in the harness).
+Task 3: complete (7e29f17; CPU gate 2880 passed). SKILL §2's runner line rewritten in place (200 lines kept).
+Task 4: docs + status log (this commit); push, PR, review; the pod run pending the owner's yes.
+```
