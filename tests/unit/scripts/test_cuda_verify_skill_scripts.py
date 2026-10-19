@@ -118,6 +118,9 @@ def test_run_gates_dry_run_flux(tmp_path):
     assert "tests/numerical/cuda_parity_flux_gpu.py" in steps[1]
     assert f"DIFFLET_CUDA_FLUX_PARITY_RESULT={out}/cuda_parity_flux.json" in steps[2]
     assert "scripts/cuda_e2e_flux_vs_diffusers.py" in steps[3]
+    # F9c: seeds 0-2 with the noise floor, so the relative gate judges (seed 0 alone is under
+    # the 35 dB floor for diffusers itself).
+    assert "--seeds 0,1,2 --noise-floor" in steps[3]
     assert f"DIFFLET_CUDA_FLUX_E2E_RESULT={out}/cuda_e2e_flux.json" in steps[4]
 
 

@@ -110,7 +110,7 @@ e2e-gate with `DIFFLET_BACKEND=cuda HF_HUB_OFFLINE=1`, one log per step under `-
 last. A failed step does not stop the rest. `--dry-run` prints every command (planning: pass an
 explicit snapshot path; `auto` needs a cached one). Look at the smoke output **by eye** before
 trusting a number: it must be prompt-faithful (every reference smoke was a cat in a garden).
-Its Wan e2e is one seed without the noise floor; the multi-seed run with it is in the catalog.
+Wan's e2e is one seed without the noise floor (multi-seed: the catalog); Flux's, seeds 0–2 with it.
 
 Then, as scoped (detached the same way), with `HF_HOME` set in every command — `H=/data/hf`, or
 `H=~/hf` without the volume (a non-interactive shell may skip `~/.bashrc`; a fallback cache on

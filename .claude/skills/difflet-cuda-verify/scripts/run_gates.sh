@@ -22,7 +22,8 @@
 # transformer/, no .venv) still appends "GATES DONE <model> overall_rc=2 (<reason>)" to gates.txt,
 # so a poll on "GATES DONE" ends.
 # qwen (F3): cuda_smoke.sh 50 steps; cuda_parity_gpu.py; cuda_e2e_vs_diffusers.py.
-# flux (F5): cuda_smoke_flux.sh 28 steps; cuda_parity_flux_gpu.py; cuda_e2e_flux_vs_diffusers.py.
+# flux (F5): cuda_smoke_flux.sh 28 steps; cuda_parity_flux_gpu.py; cuda_e2e_flux_vs_diffusers.py
+#   --seeds 0,1,2 --noise-floor (F9c: the gate relative to diffusers' own floor; ~1 min more).
 # wan (F1, F1b): cuda_smoke_wan.sh 40 steps x 9 frames; cuda_parity_wan_gpu.py --expert both (the
 #   sdpa block and the 999/750 rounding block, references + compile cache under <out>);
 #   cuda_e2e_wan_vs_diffusers.py --timestep-dtypes float32,model (float32 gated, the bf16 cast
@@ -139,7 +140,7 @@ case "$MODEL" in
     step parity-gate "${GATE[@]}" DIFFLET_CUDA_FLUX_PARITY_RESULT="$L/cuda_parity_flux.json" \
       "${PYTEST[@]}" tests/numerical/test_cuda_flux_vs_diffusers.py
     step e2e python scripts/cuda_e2e_flux_vs_diffusers.py --model-path "$SNAP" \
-      --out "$L/cuda_e2e_flux.json" --images-dir "$L"
+      --seeds 0,1,2 --noise-floor --out "$L/cuda_e2e_flux.json" --images-dir "$L"
     step e2e-gate "${GATE[@]}" DIFFLET_CUDA_FLUX_E2E_RESULT="$L/cuda_e2e_flux.json" \
       "${PYTEST[@]}" tests/numerical/test_cuda_flux_e2e_vs_diffusers.py
     ;;
