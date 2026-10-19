@@ -81,8 +81,11 @@ def test_serial_cfg_runs_two_forwards_per_step_and_matches(tiny):
 def test_cfg_parallel_equals_serial_cfg(tiny):
     [serial] = _run(tiny, guidance=3.0)
     parallel = _run(tiny, world_size=2, cfg=True, guidance=3.0)
+    assert serial["block_rows"] == [[1, TINY_VIDEO_SEQ_LEN]] * (2 * STEPS)
     for result in parallel:
         assert result["dit_calls"] == STEPS  # one batch-2 call per step
+        # Review T3: each rank's blocks see one branch of the pair (batch 1) per step.
+        assert result["block_rows"] == [[1, TINY_VIDEO_SEQ_LEN]] * STEPS
         assert result["contract_hidden"] == [2, TINY_VIDEO_SEQ_LEN, 128]
         torch.testing.assert_close(torch.tensor(result["video"]), torch.tensor(serial["video"]),
                                    atol=1e-6, rtol=1e-6)

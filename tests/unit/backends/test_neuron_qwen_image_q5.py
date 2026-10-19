@@ -253,6 +253,7 @@ def test_cfg_parallel_equals_serial_true_cfg_and_diffusers(tiny, world_size, tp,
     (serial,) = run_ranks(q5_true_cfg_worker, tiny.dir, 1, False, "eager", world_size=1,
                           env=OFFLINE)
     assert serial["forwards"] == 4 and serial["steps"] == [2, 4]  # two forwards per step
+    assert serial["block_rows"] == [[1, 24]] * 4  # each forward one branch, all 24 tokens
     results = run_ranks(q5_true_cfg_worker, tiny.dir, tp, True, exec_mode, 4.0, sp,
                         world_size=world_size, env=OFFLINE)
     for result in results:
@@ -263,6 +264,10 @@ def test_cfg_parallel_equals_serial_true_cfg_and_diffusers(tiny, world_size, tp,
         assert result["warmup_shapes"] == [(2, 24, 16), (2,), (2, TINY_TEXT_SEQ_LEN, 24)]
         assert result["unwarmed_shapes"] == []
         assert len(result["compiled_blocks"]) == (2 if exec_mode == "compile" else 0)
+        if exec_mode == "eager":
+            # Review T3: each rank's blocks see its own branch of the pair (batch 1), and under
+            # SP its 1/tp of the image tokens; outputs alone would not show a rank running both.
+            assert result["block_rows"] == [[1, 24 // (tp if sp else 1)]] * 2
     if tp == 1:
         assert results[0]["sha256"] == serial["sha256"]
     torch.testing.assert_close(torch.tensor(results[0]["latents"]),
