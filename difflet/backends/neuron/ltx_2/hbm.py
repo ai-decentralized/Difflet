@@ -19,67 +19,57 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from difflet.backends.neuron.hbm import FIT_FRACTION, per_core_hbm_bytes, safetensors_numel
+from difflet.backends.neuron.hbm import Component, components_bytes, components_fit
 
 #: The DiT runs in bf16 on the device (decision D42, ``NeuronLtx2TransformerApplication``).
 DIT_DTYPE_BYTES = 2
+#: The device text encoder's default dtype (bf16, the host path's).
+TEXT_ENCODER_DTYPE_BYTES = 2
+DIT = Component("transformer", DIT_DTYPE_BYTES)
+#: Gemma-3's language model in ``<model>/text_encoder`` (transformers' checkpoint): no vision
+#: tower, no projector, no ``lm_head``, and only the shards ``model.safetensors.index.json``
+#: lists (``model-*.safetensors``): the directory may also list a diffusers index of another
+#: checkpoint.
+TEXT_ENCODER = Component(
+    "text_encoder", TEXT_ENCODER_DTYPE_BYTES,
+    skipped_prefixes=("vision_tower.", "multi_modal_projector.", "language_model.lm_head."),
+    index="model.safetensors.index.json",
+)
+
+
+def text_encoder_lm_numel(model_dir: str | Path) -> int:
+    """Element count of the language model in ``<model_dir>/text_encoder``: what ``NeuronLtx2TextEncoderApplication``
+    loads (``TEXT_ENCODER``)."""
+    return TEXT_ENCODER.numel(model_dir)
 
 
 def dit_bytes(model_dir: str | Path, *, tp_degree: int,
               dit_dtype_bytes: int = DIT_DTYPE_BYTES) -> int:
     """Lower bound of one rank's DiT weight bytes: ``<model_dir>/transformer`` over tp."""
-    total = safetensors_numel(Path(model_dir) / "transformer") * int(dit_dtype_bytes)
-    return total // max(int(tp_degree), 1)
+    return components_bytes(model_dir, (DIT.in_dtype(dit_dtype_bytes),), tp_degree=tp_degree)
 
 
 def dit_fits(model_dir: str | Path, *, tp_degree: int,
              dit_dtype_bytes: int = DIT_DTYPE_BYTES) -> tuple[bool, int, int]:
     """``(fits, estimate, limit)``: ``dit_bytes`` against ``FIT_FRACTION`` of one core's HBM."""
-    estimate = dit_bytes(model_dir, tp_degree=tp_degree, dit_dtype_bytes=dit_dtype_bytes)
-    limit = int(per_core_hbm_bytes()[0] * FIT_FRACTION)
-    return estimate <= limit, estimate, limit
+    return components_fit(model_dir, (DIT.in_dtype(dit_dtype_bytes),), tp_degree=tp_degree)
 
 
-#: The device text encoder's default dtype (bf16, the host path's).
-TEXT_ENCODER_DTYPE_BYTES = 2
-#: Tensors of ``<model>/text_encoder`` (transformers' Gemma-3 checkpoint) the device encoder
-#: never loads.
-_TEXT_ENCODER_SKIPPED = ("vision_tower.", "multi_modal_projector.", "language_model.lm_head.")
-_TEXT_ENCODER_INDEX = "model.safetensors.index.json"
-
-
-def text_encoder_lm_numel(model_dir: str | Path) -> int:
-    """Element count of Gemma-3's language model in ``<model_dir>/text_encoder`` (no vision
-    tower, no projector): what ``NeuronLtx2TextEncoderApplication`` loads. Only the
-    transformers checkpoint's shards (``model-*.safetensors``) are read: the directory may also
-    list a diffusers index of another checkpoint."""
-    import json
-    import math
-    import struct
-
-    directory = Path(model_dir) / "text_encoder"
-    index = directory / _TEXT_ENCODER_INDEX
-    files = (sorted(set(json.loads(index.read_text())["weight_map"].values()))
-             if index.is_file() else [p.name for p in sorted(directory.glob("*.safetensors"))])
-    total = 0
-    for name in files:
-        with (directory / name).open("rb") as handle:
-            (header_len,) = struct.unpack("<Q", handle.read(8))
-            header = json.loads(handle.read(header_len))
-        for key, info in header.items():
-            if key != "__metadata__" and not key.startswith(_TEXT_ENCODER_SKIPPED):
-                total += math.prod(info["shape"]) if info["shape"] else 1
-    return total
+def device_text_encoder_components(encoder_dtype_bytes: int = TEXT_ENCODER_DTYPE_BYTES,
+                                   dit_dtype_bytes: int = DIT_DTYPE_BYTES
+                                   ) -> tuple[Component, Component]:
+    """The language model beside the DiT on the same cores."""
+    return TEXT_ENCODER.in_dtype(encoder_dtype_bytes), DIT.in_dtype(dit_dtype_bytes)
 
 
 def device_text_encoder_bytes(model_dir: str | Path, *, tp_degree: int,
                               encoder_dtype_bytes: int = TEXT_ENCODER_DTYPE_BYTES,
                               dit_dtype_bytes: int = DIT_DTYPE_BYTES) -> int:
-    """Lower bound of one rank's weight bytes with Gemma-3's language model on the device beside
-    the DiT, both sharded over ``tp_degree``."""
-    total = text_encoder_lm_numel(model_dir) * int(encoder_dtype_bytes)
-    total += safetensors_numel(Path(model_dir) / "transformer") * int(dit_dtype_bytes)
-    return total // max(int(tp_degree), 1)
+    """Lower bound of one rank's weight bytes with the language model on the device beside the
+    DiT, both sharded over ``tp_degree``."""
+    return components_bytes(
+        model_dir, device_text_encoder_components(encoder_dtype_bytes, dit_dtype_bytes),
+        tp_degree=tp_degree)
 
 
 def device_text_encoder_fits(model_dir: str | Path, *, tp_degree: int,
@@ -87,17 +77,18 @@ def device_text_encoder_fits(model_dir: str | Path, *, tp_degree: int,
                              dit_dtype_bytes: int = DIT_DTYPE_BYTES) -> tuple[bool, int, int]:
     """``(fits, estimate, limit)``: ``device_text_encoder_bytes`` against ``FIT_FRACTION`` of
     one core's HBM."""
-    estimate = device_text_encoder_bytes(model_dir, tp_degree=tp_degree,
-                                         encoder_dtype_bytes=encoder_dtype_bytes,
-                                         dit_dtype_bytes=dit_dtype_bytes)
-    limit = int(per_core_hbm_bytes()[0] * FIT_FRACTION)
-    return estimate <= limit, estimate, limit
+    return components_fit(
+        model_dir, device_text_encoder_components(encoder_dtype_bytes, dit_dtype_bytes),
+        tp_degree=tp_degree)
 
 
 __all__ = [
+    "DIT",
     "DIT_DTYPE_BYTES",
+    "TEXT_ENCODER",
     "TEXT_ENCODER_DTYPE_BYTES",
     "device_text_encoder_bytes",
+    "device_text_encoder_components",
     "device_text_encoder_fits",
     "dit_bytes",
     "dit_fits",
