@@ -18,6 +18,7 @@ Phase 2a of docs/plans/2026-08-16-tpu-backend-support.md.
 
 from __future__ import annotations
 
+from difflet.ops.collectives import ParallelMeshNotInitializedError
 from difflet.pipeline.parallel_mesh import AXES, MeshSpec
 
 _MESH_SPEC: MeshSpec | None = None
@@ -78,7 +79,9 @@ def init_parallel_mesh(config) -> None:
 
 def _require_spec() -> MeshSpec:
     if _MESH_SPEC is None:
-        raise RuntimeError(
+        # A RuntimeError the shared safe_tensor_parallel_size reads as tp=1: the TPU modeling
+        # builds its host CPU copies without a mesh.
+        raise ParallelMeshNotInitializedError(
             "TPU parallel mesh is not initialized; call init_parallel_mesh() first"
         )
     return _MESH_SPEC

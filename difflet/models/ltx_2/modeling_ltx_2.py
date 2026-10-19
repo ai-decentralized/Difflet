@@ -24,6 +24,7 @@ import os
 import torch
 from torch import nn
 
+from difflet.ops.collectives import safe_tensor_parallel_size
 from difflet.ops import (
     ColumnParallelLinear,
     RowParallelLinear,
@@ -115,15 +116,12 @@ def _safe_tensor_parallel_size() -> int:
     """tp_degree if a TP group is initialized (inside ModelBuilder), else 1.
 
     The host CPU copy in ``_load_cpu_transformer`` is built outside any parallel
-    context and must stay unsharded.
+    context and must stay unsharded (NxD asserts there). Narrow on purpose
+    (``difflet.ops.collectives.safe_tensor_parallel_size``, shared with Qwen-Image):
+    real config/import errors, and the neuron backend's uninitialised multi-rank
+    mesh, surface instead of silently falling back to tp=1 and OOMing later.
     """
-    try:
-        return int(get_tensor_model_parallel_size())
-    except AssertionError:
-        # NxD raises AssertionError when the TP group is not initialized (the host
-        # CPU copy path). Narrow on purpose so real config/import errors surface
-        # instead of silently falling back to tp=1 and OOMing at compile.
-        return 1
+    return safe_tensor_parallel_size(get_tensor_model_parallel_size)
 
 
 def _column_parallel_like(linear: nn.Linear, *, gather_output: bool) -> ColumnParallelLinear:

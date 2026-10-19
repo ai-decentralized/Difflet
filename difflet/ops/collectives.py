@@ -45,6 +45,29 @@ def reduce_scatter_to_sequence_parallel_region(tensor, *, dim: int):
     return _load("reduce_scatter_to_sequence_parallel_region")(tensor, dim=dim)
 
 
+class ParallelMeshNotInitializedError(RuntimeError):
+    """A backend's parallel mesh is not initialised, on a backend where building a module
+    without it is meant to build it unsharded (the TPU mesh off the device: the host CPU copy).
+
+    ``safe_tensor_parallel_size`` treats it, and NxD's AssertionError, as tp=1. The neuron
+    backend raises a plain RuntimeError instead: with more than one rank and no mesh, a module
+    built at tp=1 would load whole weights on every core and run unsharded, so it fails there.
+    """
+
+
+def safe_tensor_parallel_size(get_size) -> int:
+    """``get_size()`` (a modeling module's ``get_tensor_model_parallel_size``), or 1 when the
+    backend says the TP group is not initialised and a tp=1 build is what it means: NxD's
+    AssertionError (Trainium's host CPU copy, built outside ModelBuilder) and the TPU mesh's
+    ``ParallelMeshNotInitializedError``. Any other error propagates: the neuron backend's
+    RuntimeError for a multi-rank world without a mesh, and real config or import errors, which
+    a silent tp=1 would turn into an unsharded model and an OOM much later."""
+    try:
+        return int(get_size())
+    except (AssertionError, ParallelMeshNotInitializedError):
+        return 1
+
+
 def _load(name: str):
     from difflet.ops._dispatch import load_backend_attr
 
