@@ -390,12 +390,22 @@ def run_vae_stage(args: argparse.Namespace, *, build: Callable[[Any], Any],
     decodes each request this replica finished with ``prepare_decode(decoder)(req)``, marking
     it done after its output is written (a failing one is marked failed, and the next one
     decodes).
+
+    The neuron runtime is prepared first (``prepare_runtime``: the NEFF, lock and HLO cache
+    locations under DIFFLET_COMPILE_CACHE, the core binding, the process group), as
+    ``DiffletPipeline.from_pretrained`` prepares it for the DiT stage. The decoder applications
+    are built directly, so without it a vae stage started outside ``runner.run_stage`` (which
+    exports the cache locations to its ranks) would compile into torch-neuronx's default
+    ``/tmp/neff_cache``.
     """
+    from difflet.backends import get_backend
     from difflet.backends.neuron.core import distributed
     from difflet.cli.dp import stage_loop
     from difflet.pipeline.parallel_config import DiffletParallelConfig
 
-    decoder = build(DiffletParallelConfig(tp_degree=1))
+    parallel = DiffletParallelConfig(tp_degree=1)
+    get_backend("neuron").prepare_runtime(parallel)
+    decoder = build(parallel)
     decoder.load(skip_warmup=args.stage_mode != "compile")
     if args.stage_mode == "compile":
         if distributed.is_rank0():
