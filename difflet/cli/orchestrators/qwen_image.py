@@ -122,11 +122,7 @@ def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
     as Wan's: each replica's rank 0 claims the requests (``replica_requests``); --cfg-parallel
     runs with true CFG (``_torchrun_conflicts``). Torch-free: the shapes are counted, not
     parsed, so a malformed --shapes fails where it always did."""
-    found = torchrun_unsupported_options(args)
-    shapes = getattr(args, "shapes", None)
-    if shapes and len([token for token in str(shapes).split(",") if token.strip()]) > 1:
-        found.append("--shapes with more than one shape")
-    return found
+    return torchrun_unsupported_options(args)
 
 
 def _true_cfg_scale(args: argparse.Namespace) -> float | None:

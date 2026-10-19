@@ -115,9 +115,6 @@ def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
     every torchrun backend's (TeaCache), several --shapes (one static shape per process), and
     the parallel modes LTX-2 has no implementation of (--cp-mode ring, --sp). Torch-free."""
     found = torchrun_unsupported_options(args)
-    shapes = getattr(args, "shapes", None)
-    if shapes and len([token for token in str(shapes).split(",") if token.strip()]) > 1:
-        found.append("--shapes with more than one shape")
     if (getattr(args, "cp_degree", None) or 1) > 1 and getattr(args, "cp_mode", None) == "ring":
         found.append("--cp-mode ring")
     if getattr(args, "sp_enabled", False):
