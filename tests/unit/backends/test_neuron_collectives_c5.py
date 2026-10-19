@@ -306,3 +306,18 @@ def test_shard_has_the_strides_of_a_fresh_tensor():
     already = C._shard(torch.randn(4, 6), 0, 1, 2)  # a leading-axis narrow needs no copy
     assert already.stride() == (6, 1)
     assert C._contiguous_strides((1, 0, 3)) == torch.empty(1, 0, 3).stride()
+
+
+def test_the_missing_group_message_names_the_modes_the_runtime_names(monkeypatch):
+    """Review S7: the collectives' refusal named "tensor, CFG and context parallelism only",
+    the runtime's check "tensor, sequence, context and CFG"; both now say the latter."""
+    from difflet.backends.neuron import runtime
+
+    monkeypatch.setattr(C, "_spec_or_trivial", lambda: MeshSpec(cfg=2, tp=1))
+    with pytest.raises(NotImplementedError) as collectives_error:
+        C._trivial_axis_group("cfg")
+    with pytest.raises(NotImplementedError) as runtime_error:
+        runtime.check_parallel_supported(DiffletParallelConfig(tp_degree=1, dp_degree=2))
+    modes = "the neuron backend supports tensor, sequence, context and CFG parallelism"
+    assert str(collectives_error.value) == f"{modes}; no cfg group exists (cfg=2)"
+    assert str(runtime_error.value).startswith(modes)
