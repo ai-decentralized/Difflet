@@ -15,12 +15,17 @@ second instance of this class.
 
 from __future__ import annotations
 
-import dataclasses
 import re
 
 import torch
 
 from difflet.backends.neuron.core.application_base import TorchNeuronApplicationBase
+from difflet.backends.neuron.core.config_checks import (
+    check_tp_matches,
+    require_bf16_on_device,
+    resolve_cp_degree,
+    truncated_block_prefixes,
+)
 from difflet.backends.neuron.wan.config import NeuronWanConfig
 
 # The module -> checkpoint direction of the FFN renames (copied from
@@ -74,49 +79,17 @@ class NeuronWanTransformerApplication(TorchNeuronApplicationBase):
             device=device,
             **kwargs,
         )
-        parallel = self.parallel
-        if int(config.tp_degree) != int(parallel.tp_degree):
-            raise ValueError(
-                f"NeuronWanConfig has tp_degree={config.tp_degree} but the parallel config has "
-                f"tp_degree={parallel.tp_degree}; the module would be sharded for one and "
-                "the mesh built for the other"
-            )
+        check_tp_matches("NeuronWanConfig", config, self.parallel)
         # As for Qwen-Image: the config sizes the module and the parallel config the mesh, and
-        # WanTransformer3DModel calls init_parallel_mesh(config) again under CP/CFG, which is a
-        # no-op only when both describe the same mesh. cp_degree left None is filled from
-        # parallel (on a copy) so validate() runs the cp divisibility checks.
-        cp = int(getattr(parallel, "cp_degree", 1) or 1)
-        if bool(config.context_parallel_enabled) != (cp > 1):
-            raise ValueError(
-                f"NeuronWanConfig has context_parallel_enabled={config.context_parallel_enabled} "
-                f"but the parallel config has cp_degree={cp}"
-            )
-        if cp > 1 and str(config.cp_mode) != str(parallel.cp_mode):
-            raise ValueError(
-                f"NeuronWanConfig has cp_mode={config.cp_mode!r} but the parallel config has "
-                f"cp_mode={parallel.cp_mode!r}"
-            )
-        if config.cp_degree is None:
-            config = dataclasses.replace(config, cp_degree=cp)
-        elif int(config.cp_degree) != cp:
-            raise ValueError(
-                f"NeuronWanConfig has cp_degree={config.cp_degree} but the parallel config has "
-                f"cp_degree={cp}"
-            )
+        # WanTransformer3DModel calls init_parallel_mesh(config) again under CP/CFG.
+        config = resolve_cp_degree("NeuronWanConfig", config, self.parallel)
         config.validate()
-        if self.device.type == "neuron" and self.dtype is not torch.bfloat16:
-            raise ValueError(
-                f"the Wan DiT runs in torch.bfloat16 on the neuron device, got {self.dtype} "
-                "(decision D42: the TP layers all-reduce in the activation dtype, checked "
-                "against NxD for bf16 only)"
-            )
+        require_bf16_on_device("Wan", self.device.type, self.dtype)
         self.config = config
         # Blocks past num_layers are in the checkpoint on purpose when num_layers was cut.
-        total = config.checkpoint_num_layers
-        if total is not None and int(total) > int(config.num_layers):
-            self.skipped_checkpoint_prefixes = tuple(
-                f"blocks.{i}." for i in range(int(config.num_layers), int(total))
-            )
+        skipped = truncated_block_prefixes(config, "blocks.")
+        if skipped:
+            self.skipped_checkpoint_prefixes = skipped
 
     def build_module(self) -> torch.nn.Module:
         from difflet.models.wan.modeling_wan import WanTransformer3DModel
