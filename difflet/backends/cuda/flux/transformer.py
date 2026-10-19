@@ -34,7 +34,13 @@ ROPE_THETA = 10000
 
 class CudaFluxTransformerApplication(CudaApplicationBase):
     def __init__(
-        self, *, model_path: str, config: FluxDiTConfig, device=None, torch_compile: bool = False
+        self,
+        *,
+        model_path: str,
+        config: FluxDiTConfig,
+        device=None,
+        torch_compile: bool = False,
+        fuse_proj_out: bool = False,
     ):
         super().__init__(
             config=MeshSpec(tp=int(config.tp_degree)), device=device, dtype=config.torch_dtype
@@ -43,6 +49,8 @@ class CudaFluxTransformerApplication(CudaApplicationBase):
         self.model_path = model_path
         self.dit_config = config
         self.torch_compile = bool(torch_compile)
+        # The single block's proj_out as one gemm (``proj_out.py``): off by default.
+        self.fuse_proj_out = bool(fuse_proj_out)
 
     def _init_runtime(self) -> None:
         parallel_mesh.init_parallel_mesh(self.config)
@@ -85,6 +93,13 @@ class CudaFluxTransformerApplication(CudaApplicationBase):
             module.requires_grad_(False)
             module.eval()
             self._assert_on_device(module)
+            if self.fuse_proj_out:
+                # Opt-in (see ``proj_out.py``), before any compile so the graph sees the
+                # fused layer.
+                from difflet.backends.cuda.flux.proj_out import fuse_proj_out
+
+                for block in module.single_transformer_blocks:
+                    fuse_proj_out(block)
             if self.torch_compile:
                 # Eager is the premise; ``torch.compile`` is the measured, opt-in option. Per block,
                 # one static shape per process, so

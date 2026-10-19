@@ -54,6 +54,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="compile the DiT blocks, as `difflet run --torch-compile` does (default: eager)",
     )
+    ap.add_argument(
+        "--fuse-proj-out",
+        action="store_true",
+        help="the single block's proj_out as one gemm (off by default; see "
+        "difflet/backends/cuda/flux/proj_out.py)",
+    )
     return ap
 
 

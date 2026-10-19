@@ -95,6 +95,7 @@ class CudaFluxApplication(torch.nn.Module):
             config=self.config,
             device=self.device,
             torch_compile=self.torch_compile,
+            fuse_proj_out=bool(kwargs.get("fuse_proj_out", False)),
         )
         self.adapter = FluxDiTAdapter(self.transformer)
 

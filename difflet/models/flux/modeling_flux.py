@@ -724,6 +724,7 @@ class NeuronFluxSingleTransformerBlock(nn.Module):
         return hidden_states
 
 
+
 class NeuronFluxTransformerBlock(nn.Module):
     r"""
     A Transformer block following the MMDiT architecture, introduced in Stable Diffusion 3.

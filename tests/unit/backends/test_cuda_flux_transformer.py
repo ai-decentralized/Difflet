@@ -187,3 +187,20 @@ def test_torch_compile_wraps_every_flux_block(tmp_path):
     blocks = list(app.module.transformer_blocks) + list(app.module.single_transformer_blocks)
     assert len(blocks) == TINY["num_layers"] + TINY["num_single_layers"]
     assert all(isinstance(b, OptimizedModule) for b in blocks)
+
+
+# --- F4f task 2: the single block's proj_out as one gemm at tp=1 ------------------------------
+
+
+def test_load_fuses_every_single_block_s_proj_out_at_tp1(tmp_path):
+    reference, adapter = _adapter(tmp_path)
+    app = adapter.app
+    for block in app.module.single_transformer_blocks:
+        assert isinstance(block.proj_out, torch.nn.Linear)
+        assert block.proj_out_attn is None and block.proj_out_mlp is None
+    inputs = _inputs()
+    guidance = torch.tensor([3.5])
+    with torch.no_grad():
+        expected = reference(**inputs, guidance=guidance, return_dict=False)[0]
+        (actual,) = adapter(**inputs, guidance=guidance, return_dict=False)
+    torch.testing.assert_close(actual, expected, rtol=1e-4, atol=1e-4)
