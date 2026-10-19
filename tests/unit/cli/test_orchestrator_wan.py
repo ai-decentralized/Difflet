@@ -861,6 +861,13 @@ def test_neuron_vae_stage_decodes_on_the_device(monkeypatch, tmp_path, mode):
     monkeypatch.setattr(distributed, "is_rank0", lambda: True)
     monkeypatch.setattr(_FakeNeuronVae, "instances", [])
     monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    # The stage prepares the neuron runtime itself (review C3); keep that out of this process.
+    from difflet.backends.neuron import runtime
+
+    monkeypatch.setattr(runtime, "_runtime_prepared", False)
+    for name in (*_CACHE_ENV, "NKI_ENABLE_TRACE_CACHE"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path / "compile_cache"))
     work = tmp_path / "work"
     work.mkdir()
     z = torch.randn(1, 4, 3, 60, 104)
@@ -872,6 +879,9 @@ def test_neuron_vae_stage_decodes_on_the_device(monkeypatch, tmp_path, mode):
 
     [app] = _FakeNeuronVae.instances
     assert app.loaded and app.latent_shape == (1, 4, 3, 60, 104) and app.device == "neuron"
+    # Its NEFF cache is DIFFLET_COMPILE_CACHE's, not torch-neuronx's /tmp/neff_cache.
+    assert os.environ["TORCH_NEURONX_NEFF_CACHE_DIR"] == str(
+        tmp_path / "compile_cache" / "neuron" / "neff")
     # The warm-up decode fills the kernel cache in compile mode; generate's own decode suffices.
     assert app.skip_warmup is (mode == "generate")
     if mode == "compile":
