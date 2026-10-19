@@ -21,7 +21,9 @@ refused, not run).
   vs its bf16-rounded timestep: 23.79–28.62 dB), so the gap to Qwen and Flux need not indicate
   a Difflet defect (three seeds cannot show there is none).
 - **CLI matrix**: PASS for all three cells. Qwen-Image three times, FLUX.1-dev twice, and Wan
-  2.2 once: F9 ran the three-cell matrix on one pod (generate 51.9 s / 16.8 s / 111.5 s).
+  2.2 once: F9 ran the three-cell matrix on one pod (generate 51.9 s / 16.8 s / 111.5 s). The
+  matrix ran again from the 400 GB volume on a Workstation card (wanvol, 10-19): the Qwen and
+  Flux images are byte-identical to earlier runs on both card editions.
 - **Serve (Qwen-Image)**: PASS. Ready in 56.0 s, two requests of 38.6 s and 39.2 s, both
   400 probes and the F6 refusal as designed. Concurrency is a LIMIT: 429 after the 30 s default.
 - **Serve (FLUX.1-dev and Wan 2.2)**: PASS. Flux's PNGs are byte-identical to `difflet run`;
@@ -45,7 +47,7 @@ to the CUDA path but never ran: it is NOT MEASURED in every row and has no colum
 | smoke (`difflet run`, by eye) | PASS [10-16, 10-17 F3] | PASS [10-18 F5] | PASS [10-18 F1] |
 | DiT parity (three gates) | PASS incl. padded prompt | PASS | PASS both experts + rounding block |
 | e2e vs diffusers | PASS, 35 dB / 0.998 | PASS, 35 dB / 0.998; relative to the noise floor when recorded, over seeds | PASS, 25 dB / 0.99; seeds 0–2 overlap diffusers' own noise floor; gate relative to the floor, 2.0 dB headroom on the mean |
-| CLI matrix cell | PASS | PASS | PASS |
+| CLI matrix cell | PASS [F3, F5, F9, wanvol] | PASS [F5, F9, wanvol] | PASS [F9, wanvol] |
 | `difflet serve` | PASS; LIMIT on concurrency (429 after 30 s) | PASS · byte-identical to `difflet run` | PASS · the adapter's tensor (in-process) bit-identical to `difflet run`, MP4 within codec noise (the writer is not byte-deterministic) |
 | `--torch-compile` | PASS, opt-in | PASS, 0.83× diffusers per forward | PASS, 0.76× diffusers per run |
 | `--teacache-cadence N` | PASS, fixed cadence only | N/A · refused, F5b | N/A · refused, F1b |
