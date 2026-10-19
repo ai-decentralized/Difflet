@@ -28,7 +28,8 @@ from __future__ import annotations
 import json
 import math
 import struct
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from difflet import envs
@@ -82,13 +83,27 @@ def budget_enforced(device_type: str) -> bool:
     return device_type == "neuron" or bool((envs.DIFFLET_NEURON_HBM_GIB or "").strip())
 
 
-def safetensors_numel(directory: str | Path, keep: Callable[[str], bool] | None = None) -> int:
+def safetensors_numel(
+    directory: str | Path,
+    keep: Callable[[str], bool] | None = None,
+    *,
+    index: str | None = None,
+) -> int:
     """Total element count of the ``*.safetensors`` files directly in ``directory``, or of the
     tensors whose name ``keep`` accepts (a component that loads only part of its checkpoint, as
-    Qwen-Image's text encoder skips the vision tower). Only the headers are read. Returns 0 when
-    the directory has none (a component the checkpoint lacks)."""
+    Qwen-Image's text encoder skips the vision tower). With ``index``, the name of a safetensors
+    index in ``directory`` that exists, only the shards its weight map lists are read (LTX-2's
+    text encoder directory also lists a diffusers index of another checkpoint). Only the headers
+    are read. Returns 0 when the directory has none (a component the checkpoint lacks)."""
+    directory = Path(directory)
+    index_path = directory / index if index else None
+    if index_path is not None and index_path.is_file():
+        names = sorted(set(json.loads(index_path.read_text())["weight_map"].values()))
+        paths = [directory / name for name in names]
+    else:
+        paths = sorted(directory.glob("*.safetensors"))
     total = 0
-    for path in sorted(Path(directory).glob("*.safetensors")):
+    for path in paths:
         with path.open("rb") as handle:
             (header_len,) = struct.unpack("<Q", handle.read(8))
             header = json.loads(handle.read(header_len))
@@ -96,6 +111,49 @@ def safetensors_numel(directory: str | Path, keep: Callable[[str], bool] | None 
             if name != "__metadata__" and (keep is None or keep(name)):
                 total += math.prod(info["shape"]) if info["shape"] else 1
     return total
+
+
+@dataclass(frozen=True)
+class Component:
+    """One checkpoint subdirectory a device component loads, for the estimates below.
+
+    ``subdir`` is relative to the snapshot root; ``dtype_bytes`` is the element size the
+    component holds on the device (not the checkpoint's); tensors whose names start with one of
+    ``skipped_prefixes`` are never loaded (a vision tower, an ``lm_head``); ``index`` names the
+    safetensors index whose shards are the component's (``safetensors_numel``)."""
+
+    subdir: str
+    dtype_bytes: int
+    skipped_prefixes: tuple[str, ...] = ()
+    index: str | None = None
+
+    def numel(self, model_dir: str | Path) -> int:
+        """The element count this component loads from ``<model_dir>/<subdir>``."""
+        skipped = self.skipped_prefixes
+        keep = (lambda name: not name.startswith(skipped)) if skipped else None
+        return safetensors_numel(Path(model_dir) / self.subdir, keep, index=self.index)
+
+    def in_dtype(self, dtype_bytes: int) -> Component:
+        """The same tensors held in another element size."""
+        return replace(self, dtype_bytes=int(dtype_bytes))
+
+
+def components_bytes(model_dir: str | Path, components: Iterable[Component], *,
+                     tp_degree: int) -> int:
+    """Lower bound of one rank's weight bytes when ``components`` share every core of a TP group
+    of ``tp_degree``: their elements times their element sizes, all counted as sharded over tp
+    (replicated tensors do not shrink, so a rejection means the weights clearly cannot fit)."""
+    total = sum(c.numel(model_dir) * int(c.dtype_bytes) for c in components)
+    return total // max(int(tp_degree), 1)
+
+
+def components_fit(model_dir: str | Path, components: Iterable[Component], *,
+                   tp_degree: int) -> tuple[bool, int, int]:
+    """``(fits, estimate, limit)``: ``components_bytes`` against ``FIT_FRACTION`` of one core's
+    HBM. Torch-free, for the CLI drivers' checks before torchrun starts any rank."""
+    estimate = components_bytes(model_dir, components, tp_degree=tp_degree)
+    limit = int(per_core_hbm_bytes()[0] * FIT_FRACTION)
+    return estimate <= limit, estimate, limit
 
 
 def suggested_tp(estimate_bytes: int, tp_degree: int, limit_bytes: int) -> int:
@@ -131,12 +189,15 @@ def check_fits(estimate_bytes: int, *, what: str, tp_degree: int, advice: str = 
 
 
 __all__ = [
+    "Component",
     "FIT_FRACTION",
     "GIB",
     "HBM_ENV",
     "HbmBudgetError",
     "budget_enforced",
     "check_fits",
+    "components_bytes",
+    "components_fit",
     "per_core_hbm_bytes",
     "safetensors_numel",
     "suggested_tp",
