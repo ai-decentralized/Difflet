@@ -850,6 +850,8 @@ class _ResidentWorkerProcess:
         last_state_signature = None
         last_state_start = time.monotonic()
         last_summary = time.monotonic()
+        last_stage_load: dict[str, Any] | None = None
+        last_request_stages: tuple[str | None, str | None] | None = None
         heartbeat_summary_interval = self.heartbeat_interval
         while not stop.is_set():
             try:
@@ -875,6 +877,8 @@ class _ResidentWorkerProcess:
             if event.get("type") != "worker_heartbeat":
                 continue
             event = {**event, **self._admission_snapshot()}
+            last_stage_load = self._log_new_stage_load(event, last_stage_load)
+            last_request_stages = self._log_new_request_stages(event, last_request_stages)
             last_heartbeat = time.monotonic()
             last_event = event
             stale_reported = False
@@ -921,6 +925,80 @@ class _ResidentWorkerProcess:
                     extra={"worker_heartbeat": event},
                 )
                 last_summary = now
+
+    @staticmethod
+    def _log_new_stage_load(
+        event: dict[str, Any],
+        previous: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Log the worker's startup residency the first time the heartbeat carries it."""
+
+        report = event.get("stage_load")
+        if not isinstance(report, dict) or report == previous:
+            return previous
+        stages = report.get("stages") or []
+        detail = (
+            " ".join(
+                f"{stage.get('stage_id')}={_gib(stage.get('device_bytes'))}"
+                f"@{float(stage.get('load_seconds') or 0.0):.2f}s"
+                for stage in stages
+            )
+            or "none"
+        )
+        logger.info(
+            "worker stage residency model=%s backend=%s probe=%s attribution=%s scope=%s "
+            "total=%s attributed=%s unattributed=%s stages=%s reason=%s",
+            event.get("model_id"),
+            report.get("backend"),
+            report.get("probe"),
+            report.get("attribution"),
+            report.get("scope") or "unknown",
+            _gib(report.get("total_device_bytes")),
+            _gib(report.get("attributed_device_bytes")),
+            _gib(report.get("unattributed_device_bytes")),
+            detail,
+            report.get("reason") or "none",
+            extra={"worker_stage_load": report},
+        )
+        return report
+
+    @staticmethod
+    def _log_new_request_stages(
+        event: dict[str, Any],
+        previous: tuple[str | None, str | None] | None,
+    ) -> tuple[str | None, str | None] | None:
+        """Log one line per request whose stage breakdown the heartbeat has not shown yet."""
+
+        breakdown = event.get("last_request_stages")
+        if not isinstance(breakdown, dict):
+            return previous
+        signature = (breakdown.get("request_id"), breakdown.get("outcome"))
+        if signature == previous:
+            return previous
+        stages = breakdown.get("stages") or []
+        detail = (
+            " ".join(
+                f"{stage.get('stage_id')}={float(stage.get('seconds') or 0.0):.3f}s"
+                for stage in stages
+            )
+            or "none"
+        )
+        logger.info(
+            "worker stage breakdown request_id=%s model=%s outcome=%s total=%.3fs stages=%s",
+            breakdown.get("request_id"),
+            breakdown.get("model"),
+            breakdown.get("outcome"),
+            float(breakdown.get("total_seconds") or 0.0),
+            detail,
+            extra={"worker_stage_breakdown": breakdown},
+        )
+        return signature
+
+
+def _gib(value: Any) -> str:
+    if not isinstance(value, (int, float)):
+        return "unknown"
+    return f"{float(value) / (1024 ** 3):.2f}GiB"
 
 
 class _NullConnection:
@@ -1069,6 +1147,12 @@ def _worker_main(
         heartbeat_state.set(state="loading")
         asyncio.run(stage_engine.start())
         logger.info("worker_main stage_engine_ready model=%s", runtime.profile.model_id)
+        if stage_engine.stage_load_report is not None:
+            heartbeat_state.record_stage_load(stage_engine.stage_load_report.as_event())
+        if stage_engine.last_stage_breakdown is not None:
+            # The startup smoke is a request like any other, so the worker is ready with a
+            # stage breakdown already published rather than with an empty field.
+            heartbeat_state.record_request_stages(stage_engine.last_stage_breakdown.as_event())
         heartbeat_state.set(state="ready")
         reply_q.put({"type": "ready"})
         while True:
@@ -1119,6 +1203,10 @@ def _worker_main(
                 logger.exception("worker_main generate_error request_id=%s", request.request_id)
                 reply_q.put(_reply_from_error(exc, request_id=request.request_id))
             finally:
+                if stage_engine is not None and stage_engine.last_stage_breakdown is not None:
+                    heartbeat_state.record_request_stages(
+                        stage_engine.last_stage_breakdown.as_event()
+                    )
                 heartbeat_state.set(state="ready")
     except BaseException as exc:
         logger.exception("worker_main failed model=%s", runtime.profile.model_id)
@@ -1234,6 +1322,10 @@ class _WorkerHeartbeatState:
         self._state = "starting"
         self._request_id: str | None = None
         self._stage: str | None = None
+        # Per-stage observability, published on the existing heartbeat rather than on a new
+        # surface: residency is fixed at load, the breakdown is the last request's.
+        self._stage_load: dict[str, Any] | None = None
+        self._last_request_stages: dict[str, Any] | None = None
 
     def set(
         self,
@@ -1247,6 +1339,14 @@ class _WorkerHeartbeatState:
             self._request_id = request_id
             self._stage = stage
 
+    def record_stage_load(self, report: dict[str, Any] | None) -> None:
+        with self._lock:
+            self._stage_load = report
+
+    def record_request_stages(self, breakdown: dict[str, Any] | None) -> None:
+        with self._lock:
+            self._last_request_stages = breakdown
+
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
             return {
@@ -1258,6 +1358,8 @@ class _WorkerHeartbeatState:
                 "state": self._state,
                 "request_id": self._request_id,
                 "stage": self._stage,
+                "stage_load": self._stage_load,
+                "last_request_stages": self._last_request_stages,
             }
 
 

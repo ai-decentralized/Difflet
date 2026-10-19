@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from difflet.common.orchestrators import flux as flux_common
+from difflet.serving.engines.stage_observability import record_stage_load
 from difflet.serving.engines.stage_pipeline import (
     ErasedStageRunner,
     ValidatedStageRunner,
@@ -204,18 +205,19 @@ class CudaFluxServingStageAdapter:
         self.active_profile = profile
         # The CLI's kwargs (FluxCudaOrchestrator.pipeline_kwargs); the revision is the commit
         # the parent pinned, so a worker restart loads the snapshot the bundle describes.
-        self.pipe = DiffletPipeline.from_pretrained(
-            self.model_id,
-            **cuda_pipeline_kwargs(
-                tp_degree=profile.parallel.tp_degree,
-                height=profile.height,
-                width=profile.width,
-                cache_dir=profile.cache_dir,
-                revision=runtime.source.resolved_source_id,
-                force_compile=config.get("compile_policy") is CompilePolicy.FORCE,
-                load=True,
-            ),
-        )
+        with record_stage_load(_STAGE_ID):
+            self.pipe = DiffletPipeline.from_pretrained(
+                self.model_id,
+                **cuda_pipeline_kwargs(
+                    tp_degree=profile.parallel.tp_degree,
+                    height=profile.height,
+                    width=profile.width,
+                    cache_dir=profile.cache_dir,
+                    revision=runtime.source.resolved_source_id,
+                    force_compile=config.get("compile_policy") is CompilePolicy.FORCE,
+                    load=True,
+                ),
+            )
         print("[difflet serve] FLUX.1-dev CUDA pipeline resident")
         return OrderedDict(
             (

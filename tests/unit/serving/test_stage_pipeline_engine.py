@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -9,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from difflet.pipeline.parallel_config import DiffletParallelConfig
+from difflet.serving.engines.stage_observability import DeviceMemorySample, record_stage_load
 from difflet.serving.engines.stage_pipeline import (
     InProcessStageExecutor,
     StagePayloadTypeError,
@@ -33,6 +35,7 @@ from difflet.serving.types import (
     RuntimePlan,
     ServingProfile,
     StageDefinition,
+    StageExecutionMetadata,
     StageExecutionResult,
     StageInvocation,
     StagePayload,
@@ -298,3 +301,203 @@ def test_stage_pipeline_engine_rejects_non_payload_initial_value():
         asyncio.run(engine.start())
 
     assert "error" in adapter.calls
+
+
+class _SlowRunner(_Runner):
+    """A runner whose metadata reports a fixed duration, so timing assertions are exact."""
+
+    def __init__(self, output, seconds: float, *, calls=None):
+        super().__init__(output, calls=calls)
+        self.seconds = float(seconds)
+
+    async def execute(self, invocation):
+        self.calls.append(invocation.stage.stage_id)
+        started = time.monotonic()
+        return StageExecutionResult(
+            output=self.output,
+            metadata=StageExecutionMetadata(
+                started_monotonic=started,
+                finished_monotonic=started + self.seconds,
+            ),
+        )
+
+
+class _TimedAdapter(_Adapter):
+    """``_Adapter`` whose two stages report 1 s and 9 s, and which marks its load boundaries."""
+
+    def __init__(self, *, mark_loads: bool = True, fail_in_last: bool = False):
+        super().__init__()
+        self.mark_loads = mark_loads
+        self.fail_in_last = fail_in_last
+
+    async def create_loaded_runners(self, runtime):
+        first = ValidatedStageRunner(
+            _SlowRunner(_Middle("middle"), 1.0, calls=self.calls), _Initial, _Middle
+        )
+        last = ValidatedStageRunner(
+            (
+                _ExplodingRunner(calls=self.calls)
+                if self.fail_in_last
+                else _SlowRunner(
+                    _Final(DiffletGenerateOutput(b"ok", "image/png")), 9.0, calls=self.calls
+                )
+            ),
+            _Middle,
+            _Final,
+        )
+        if self.mark_loads:
+            with record_stage_load("first"):
+                pass
+            with record_stage_load("last"):
+                pass
+        return OrderedDict((("first", first), ("last", last)))
+
+
+class _ExplodingRunner(_Runner):
+    def __init__(self, *, calls=None):
+        super().__init__(None, calls=calls)
+
+    async def execute(self, invocation):
+        self.calls.append(invocation.stage.stage_id)
+        raise RuntimeError("stage blew up")
+
+
+class _StubProbe:
+    def __init__(self, readings):
+        self.name = "stub"
+        self._readings = list(readings)
+
+    def sample(self):
+        if not self._readings:
+            return None
+        return DeviceMemorySample(int(self._readings.pop(0)), "process")
+
+    @property
+    def unavailable_reason(self):
+        return "stub exhausted"
+
+
+def _engine(adapter, probe=None):
+    return StagePipelineEngine(
+        runtime=_runtime(),
+        adapter=adapter,
+        device_memory_probe=probe or _StubProbe([0] * 32),
+    )
+
+
+def test_engine_records_each_stage_wall_time_for_every_request():
+    adapter = _TimedAdapter()
+    engine = _engine(adapter)
+
+    async def _run():
+        await engine.start()
+        await engine.generate(_request("r1"), _context("r1"))
+
+    asyncio.run(_run())
+
+    breakdown = engine.last_stage_breakdown
+    assert breakdown is not None
+    assert breakdown.request_id == "r1"
+    assert breakdown.outcome == "completed"
+    assert breakdown.stage_seconds == {"first": 1.0, "last": 9.0}
+    assert breakdown.total_seconds >= 0.0
+
+
+def test_engine_logs_the_stage_breakdown_once_per_request(caplog):
+    adapter = _TimedAdapter()
+    engine = _engine(adapter)
+
+    with caplog.at_level(logging.INFO, logger="difflet.serving.engines.stage_pipeline"):
+
+        async def _run():
+            await engine.start()
+            await engine.generate(_request("r1"), _context("r1"))
+
+        asyncio.run(_run())
+
+    breakdowns = [
+        record for record in caplog.records if record.getMessage().startswith("stage.breakdown")
+    ]
+    # One for the startup smoke, one for the request.
+    assert [record.stage_breakdown["request_id"] for record in breakdowns] == ["smoke", "r1"]
+    message = breakdowns[-1].getMessage()
+    assert "first=1.000s(" in message and "last=9.000s(" in message
+    assert breakdowns[-1].stage_breakdown["stages"] == [
+        {"stage_id": "first", "seconds": 1.0},
+        {"stage_id": "last", "seconds": 9.0},
+    ]
+
+
+def test_engine_keeps_the_partial_breakdown_when_a_stage_fails():
+    adapter = _TimedAdapter(fail_in_last=True)
+    engine = _engine(adapter)
+
+    with pytest.raises(RuntimeError, match="stage blew up"):
+        asyncio.run(engine.start())
+
+    breakdown = engine.last_stage_breakdown
+    assert breakdown is not None
+    assert breakdown.outcome == "error"
+    # The stage that ran is recorded; the one that raised is not timed.
+    assert list(breakdown.stage_seconds) == ["first"]
+
+
+def test_engine_reports_per_stage_residency_from_the_adapter_boundaries():
+    # baseline 0; first stage 0 -> 4; last stage 4 -> 10; final 10.
+    probe = _StubProbe([0, 0, 4, 4, 10, 10])
+    adapter = _TimedAdapter()
+    engine = _engine(adapter, probe)
+
+    asyncio.run(engine.start())
+
+    report = engine.stage_load_report
+    assert report is not None
+    assert report.attribution == "per_stage"
+    assert {stage.stage_id: stage.device_bytes for stage in report.stages} == {
+        "first": 4,
+        "last": 6,
+    }
+    assert report.total_device_bytes == 10
+    assert report.unattributed_device_bytes == 0
+
+
+def test_engine_logs_the_total_when_no_adapter_boundary_exists(caplog):
+    adapter = _TimedAdapter(mark_loads=False)
+    engine = _engine(adapter, _StubProbe([0, 42]))
+
+    with caplog.at_level(logging.INFO, logger="difflet.serving.engines.stage_pipeline"):
+        asyncio.run(engine.start())
+
+    report = engine.stage_load_report
+    assert report is not None
+    assert report.attribution == "total_only"
+    assert report.total_device_bytes == 42
+    summary = next(
+        record for record in caplog.records if record.getMessage().startswith("stage.load_summary")
+    )
+    assert "attribution=total_only" in summary.getMessage()
+    assert "no stage marked its load boundary" in summary.getMessage()
+    assert summary.stage_load_summary["total_device_bytes"] == 42
+
+
+def test_engine_says_unavailable_when_the_backend_cannot_report_memory(caplog):
+    adapter = _TimedAdapter()
+    engine = _engine(adapter, _StubProbe([]))
+
+    with caplog.at_level(logging.INFO, logger="difflet.serving.engines.stage_pipeline"):
+        asyncio.run(engine.start())
+
+    report = engine.stage_load_report
+    assert report is not None
+    assert report.attribution == "unavailable"
+    assert report.total_device_bytes is None
+    summary = next(
+        record for record in caplog.records if record.getMessage().startswith("stage.load_summary")
+    )
+    assert "attribution=unavailable" in summary.getMessage()
+    assert "stub exhausted" in summary.getMessage()
+    assert "device_memory=unknown" in next(
+        record.getMessage()
+        for record in caplog.records
+        if record.getMessage().startswith("stage.load ")
+    )

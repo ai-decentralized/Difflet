@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from difflet.common.orchestrators.qwen_image import TEXT_SEQ_LEN
+from difflet.serving.engines.stage_observability import record_stage_load
 from difflet.serving.engines.stage_pipeline import (
     ErasedStageRunner,
     ValidatedStageRunner,
@@ -223,21 +224,24 @@ class CudaQwenImageServingStageAdapter:
         print("[difflet serve] loading Qwen-Image on CUDA (text encoder, DiT, VAE in-process)")
         self.active_runtime = runtime
         self.active_profile = profile
-        self.pipe = DiffletPipeline.from_pretrained(
-            self.model_id,
-            **cuda_pipeline_kwargs(
-                tp_degree=profile.parallel.tp_degree,
-                height=profile.height,
-                width=profile.width,
-                cache_dir=profile.cache_dir,
-                # The commit the parent pinned (resolve_hf_model_source), not the user's ref:
-                # a worker restart must load the snapshot the bundle and the validator's
-                # tokenizer describe, even if refs/main moved meanwhile.
-                revision=runtime.source.resolved_source_id,
-                force_compile=config.get("compile_policy") is CompilePolicy.FORCE,
-                load=True,
-            ),
-        )
+        # One opaque stage holds text encoder, DiT and VAE together, so the recorded
+        # residency is the whole model's: that is the honest attribution on CUDA today.
+        with record_stage_load(_STAGE_ID):
+            self.pipe = DiffletPipeline.from_pretrained(
+                self.model_id,
+                **cuda_pipeline_kwargs(
+                    tp_degree=profile.parallel.tp_degree,
+                    height=profile.height,
+                    width=profile.width,
+                    cache_dir=profile.cache_dir,
+                    # The commit the parent pinned (resolve_hf_model_source), not the user's
+                    # ref: a worker restart must load the snapshot the bundle and the
+                    # validator's tokenizer describe, even if refs/main moved meanwhile.
+                    revision=runtime.source.resolved_source_id,
+                    force_compile=config.get("compile_policy") is CompilePolicy.FORCE,
+                    load=True,
+                ),
+            )
         print("[difflet serve] Qwen-Image CUDA pipeline resident")
         return OrderedDict(
             (
