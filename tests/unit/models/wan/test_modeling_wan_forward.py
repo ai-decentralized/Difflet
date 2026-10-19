@@ -262,29 +262,3 @@ def test_teacache_mod_input_2d_timestep():
     timestep = torch.randint(0, 1000, (1, seq)).float()
     sig = model.teacache_mod_input(hidden, timestep, enc)
     assert sig.shape == (1, seq, 64)
-
-
-def test_attn_kernel_equals_the_folded_attention_bit_for_bit():
-    # The kernel hands the (B, H, S, D) views to ``attention_heads``; on the CPU backend
-    # that is the old fold-call-unfold, so the bits do not move.
-    import math
-
-    from difflet.ops import attention
-
-    torch.manual_seed(0)
-    q = torch.randn(2, 5, 3, 4).transpose(1, 2)
-    k = torch.randn(2, 7, 3, 4).transpose(1, 2)
-    v = torch.randn(2, 7, 3, 4).transpose(1, 2)
-    out = wan._attn_kernel(q, k, v, head_dim=4)
-    folded = attention(
-        q.reshape(6, 5, 4),
-        k.reshape(6, 7, 4),
-        v.reshape(6, 7, 4),
-        scale=1.0 / math.sqrt(4),
-        causal=False,
-        attention_mask=None,
-        tp_q=True,
-        tp_k=True,
-        tp_out=False,
-    ).reshape(2, 3, 5, 4)
-    assert tuple(out.shape) == (2, 3, 5, 4) and torch.equal(out, folded)

@@ -133,30 +133,8 @@ def joint_ulysses_attention(
     return out[:, :, :s_img], out[:, :, s_img:]
 
 
-
-def attention_heads(q, k, v, *, scale=None, causal=False, attention_mask=None, **kwargs):
-    """``attention`` over ``(B, H, S, D)`` inputs of any strides, returning ``(B, H, S_q, D)``.
-
-    Model code produces ``(B, S, H, D)`` projections and used to ``reshape`` their transposed
-    views into ``(B*H, S, D)`` before the call — a copy of q, k and v on an eager backend. This
-    backend folds the heads here instead, with the very same ops, so its graph and bits are
-    unchanged (the CUDA backend hands the views to SDPA without any copy).
-    """
-    b, h, s_q, d = q.shape
-    out = attention(
-        q.reshape(b * h, s_q, d),
-        k.reshape(b * h, k.shape[2], d),
-        v.reshape(b * h, v.shape[2], d),
-        scale=scale,
-        causal=causal,
-        attention_mask=attention_mask,
-        **kwargs,
-    )
-    return out.reshape(b, h, s_q, d)
-
 __all__ = [
     "attention",
-    "attention_heads",
     "cross_attention",
     "ring_attention",
     "joint_ring_attention",
