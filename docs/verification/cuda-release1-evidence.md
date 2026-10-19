@@ -931,13 +931,13 @@ to the CUDA path but never ran: it is NOT MEASURED in every row and has no colum
 | DiT parity (D14, three gates) | PASS incl. padded prompt [F3, F4] | PASS [F5] | PASS both experts + rounding block [F1, F1b] |
 | e2e vs diffusers | PASS, 35 dB / 0.998 [F3] | PASS, 35 dB / 0.998 [F5]; relative to the noise floor when recorded [F4f], over seeds [F9c] | PASS, 25 dB / 0.99 [F1, F1b]; seeds 0–2 overlap diffusers' own noise floor [F9]; gate relative to the floor, 2.0 dB headroom on the mean [F9b] |
 | CLI matrix cell | PASS [F3, F5, F9] | PASS [F5, F9] | PASS [F9] |
-| `difflet serve` | PASS; LIMIT on concurrency (429 after 30 s) [F3b] | N/A · refused by name, F5b | N/A · refused by name, F1b |
+| `difflet serve` | PASS; LIMIT on concurrency (429 after 30 s) [F3b] | NOT MEASURED · landed on the CPU [F3c] | NOT MEASURED · landed on the CPU, MP4 over `/v1/videos` [F3c] |
 | `--torch-compile` | PASS, opt-in [F4] | PASS, 0.83× diffusers per forward [F4f] | PASS, 0.76× diffusers per run [F4f] |
 | `--teacache-cadence N` | PASS, fixed cadence only [F4] | N/A · refused, F5b | N/A · refused, F1b |
 | `--dp 2 --requests` | PASS, byte-identical [F2] | `--dp 1` batch PASS, byte-identical [F5c]; `--dp 2` NOT MEASURED (needs 2 GPUs) | PASS, bit-identical [F2b] |
 | `--cfg-parallel` (2 GPUs) | N/A · single pass | N/A · guidance-distilled; true-CFG is the owner's call | PASS, bit-identical [F2] |
 | `--dp` × `--cfg-parallel` | N/A · refuses `--cfg-parallel` | N/A · refuses `--cfg-parallel` | NOT MEASURED (needs 4 cards) |
-| serving on two GPUs (`--dp-degree 2`) | PASS, two requests in one request-time [F2b] | N/A · serve refused | N/A · serve refused |
+| serving on two GPUs (`--dp-degree 2`) | PASS, two requests in one request-time [F2b] | NOT MEASURED · allowed [F3c] | N/A · refused: the video service runs one job at a time [F3c] |
 | CP / ulysses (`--cp-degree > 1`) | N/A · refused, F2b | N/A · refused, F2b | N/A · refused, F2b |
 | TP across PCIe, `--sp` | N/A · refused, F6 | N/A · refused, F6 | N/A · refused, F6 |
 
@@ -969,7 +969,7 @@ Download → compile → timed generate per cell, `results.json`.
 One resident worker holds the pipeline; OpenAI-compatible chat endpoint.
 | Qwen-Image | FLUX.1-dev | Wan 2.2 |
 |---|---|---|
-| PASS · ready 56.0 s, 38.6 / 39.2 s per request; LIMIT · 429 `queue_timeout` for a concurrent request at the 30 s default on one GPU; `--dp-degree 2` PASS · two concurrent requests in one request-time (16.7 s wall), identical bytes [F2b] | N/A · refused by name, F5b | N/A · refused by name, F1b |
+| PASS · ready 56.0 s, 38.6 / 39.2 s per request; LIMIT · 429 `queue_timeout` for a concurrent request at the 30 s default on one GPU; `--dp-degree 2` PASS · two concurrent requests in one request-time (16.7 s wall), identical bytes [F2b] | NOT MEASURED · landed on the CPU (F3c): PNG over chat | NOT MEASURED · landed on the CPU (F3c): MP4 over `/v1/videos`, one replica |
 
 ### `--torch-compile`
 Per-block inductor compile of the DiT, opt-in (D4: eager by default).
@@ -1009,6 +1009,9 @@ Runs the cond and uncond branches on two cards, one all-gather per step.
 
 The honest gap list for the next session, none of it refused and none of it run:
 
+0. **`difflet serve` for FLUX.1-dev and Wan 2.2 (F3c).** Landed on the CPU (adapters, registry,
+   an in-process `/v1/videos/sync` test with a real MP4); not yet run on a GPU. One pod session:
+   `cuda_serve_smoke.sh --model-id …` for each, plus the 400 probes.
 1. **Wan `--dp` × `--cfg-parallel`.** It needs four cards; it is allowed by construction and
    unverified (F2 R3, F2b).
 2. **FLUX.1-dev with two replicas (`--dp 2`)** on CUDA: reachable, needs a 2-GPU pod. The

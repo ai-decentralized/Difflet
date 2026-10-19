@@ -32,7 +32,7 @@ Pin down only what the request leaves open:
   owner's HF login), `wan` = `Wan-AI/Wan2.2-T2V-A14B-Diffusers`. Wan 2.1 never ran on a GPU.
 - **Gates**, per model in this order: smoke → DiT parity → parity gate → e2e → e2e gate
   (`run_gates.sh` runs all five); then the CLI matrix (`scripts/verify_cli_cuda.py`, every cell
-  at once — it has no cell filter), the serve smoke (Qwen-Image only), two GPUs (`--dp 2`, Wan
+  at once — it has no cell filter), the serve smoke (all three since F3c), two GPUs (`--dp 2`, Wan
   `--cfg-parallel`; a 2-GPU pod). `scripts/cuda_bench_dit.py` only when the change is about
   speed, and only compared on the same card edition.
 - **Branch** (CPU gate green first); evidence in `artifacts/cuda-release1/<feature>/`.
