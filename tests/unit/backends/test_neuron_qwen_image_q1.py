@@ -123,12 +123,17 @@ def test_config_defaults_are_qwen_image():
         60, 24, 128
     )
     assert default.image_seq_len == 4096 and default.text_seq_len == 1024
-    if QWEN_SNAPSHOT.is_dir():
-        real = NeuronQwenImageConfig.from_pretrained(QWEN_SNAPSHOT / "transformer")
-        for name in ("patch_size", "in_channels", "out_channels", "num_layers",
-                     "attention_head_dim", "num_attention_heads", "joint_attention_dim",
-                     "guidance_embeds", "axes_dims_rope"):
-            assert getattr(real, name) == getattr(default, name), name
+
+
+def test_config_defaults_are_the_real_checkpoints():
+    if not QWEN_SNAPSHOT.is_dir():
+        pytest.skip("the real Qwen-Image snapshot is not on this machine")
+    default = NeuronQwenImageConfig(tp_degree=4)
+    real = NeuronQwenImageConfig.from_pretrained(QWEN_SNAPSHOT / "transformer")
+    for name in ("patch_size", "in_channels", "out_channels", "num_layers",
+                 "attention_head_dim", "num_attention_heads", "joint_attention_dim",
+                 "guidance_embeds", "axes_dims_rope"):
+        assert getattr(real, name) == getattr(default, name), name
 
 
 @pytest.mark.parametrize(
