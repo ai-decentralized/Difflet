@@ -93,6 +93,24 @@ class NeuronWanTransformerApplication(TorchNeuronApplicationBase):
     def checkpoint_key(self, name: str) -> str:
         return checkpoint_key(name)
 
+    @torch.no_grad()
+    def teacache_mod_input(self, hidden_states: torch.Tensor, timestep: torch.Tensor) -> torch.Tensor:
+        """The TeaCache signal, as the model defines it (``WanTransformer3DModel.teacache_mod_input``,
+        the method the Trainium CPU shadow runs): block 0's modulated self-attention input. Its
+        modulation is timestep-only; the prompt embeddings are an input only because
+        ``condition_embedder`` projects them (unused here), so a fixed zero tensor of the right
+        shape stands in. Host inputs; moved to this rank's device in the model's dtype."""
+        model = self.module
+        if getattr(self, "_teacache_text", None) is None:
+            text_dim = getattr(getattr(model, "config", None), "text_dim", None)
+            if text_dim is None:
+                text_dim = next(m for m in model.condition_embedder.modules()
+                                if isinstance(m, torch.nn.Linear)).in_features
+            self._teacache_text = torch.zeros(int(self.config.batch_size), int(self.config.text_seq_len),
+                                              int(text_dim), dtype=self.dtype, device=self.device)
+        return model.teacache_mod_input(hidden_states.to(self.device, self.dtype),
+                                        timestep.to(self.device), self._teacache_text)
+
     def get_example_inputs(self) -> tuple[torch.Tensor, ...]:
         """``(latents, timestep, text embeddings)`` at the static shape, in ``dtype``.
 

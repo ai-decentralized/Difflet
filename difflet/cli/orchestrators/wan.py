@@ -207,8 +207,8 @@ def _dual_expert_misuse(args: argparse.Namespace, torchrun_backend: str | None) 
 
 
 def _torchrun_application_kwargs(args: argparse.Namespace) -> dict:
-    """The application kwargs, plus any TeaCache flag the user gave: the neuron application
-    rejects TeaCache (phase 1) instead of the stage dropping the flag silently. --dual-expert
+    """The application kwargs, plus any TeaCache flag the user gave (the application builds the
+    controller and, for a calibrated signal, one probe per expert). --dual-expert
     loads Wan 2.2 A14B's low-noise expert (``transformer_2``)."""
     kwargs = dict(_TORCHRUN_APPLICATION_KWARGS)
     if getattr(args, "dual_expert", False):
@@ -242,8 +242,9 @@ class WanOrchestrator(ModelOrchestrator):
         one message naming it and exit 2 before anything is launched (or downloaded, for
         ``run``). The ranks' own checks stay (defence in depth)."""
         reject_unsupported_torchrun_options(
-            _torchrun_unsupported_options(self.args),
-            runs="tensor, sequence, CFG and context parallelism",
+            # TeaCache runs on Wan's neuron path (the stage forwards its flags): not refused.
+            [f for f in _torchrun_unsupported_options(self.args) if not f.startswith("--teacache")],
+            runs="tensor, sequence, CFG and context parallelism and TeaCache",
         )
 
     def _reject_dual_expert_misuse(self) -> None:

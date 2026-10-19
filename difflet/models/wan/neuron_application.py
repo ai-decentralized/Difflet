@@ -257,11 +257,6 @@ def _resolve_shape(shape: dict[str, int | None], shapes) -> dict[str, int]:
 
 
 def _reject_unsupported(options: dict[str, Any]) -> None:
-    teacache = [name for name in _TEACACHE_KWARGS if options[name] is not None]
-    if teacache:
-        raise NotImplementedError(
-            f"TeaCache is not supported on the neuron backend in phase 1 ({', '.join(teacache)})"
-        )
     if int(options["batch_size"]) != 1:
         raise NotImplementedError(
             f"the neuron Wan application runs batch_size=1 only (phase 1), got "
@@ -299,6 +294,7 @@ class TorchNeuronWanApplication(torch.nn.Module):
             )
         options = {**_KWARG_DEFAULTS, **kwargs}
         _reject_unsupported(options)
+        self.options = options  # read again at load (TeaCache)
         check_parallel_supported(parallel)
         self.model_path = str(model_path)
         self.parallel = parallel
@@ -461,12 +457,31 @@ class TorchNeuronWanApplication(torch.nn.Module):
             vae_decoder=self.vae_decoder,
             dtype=self.dtype,
             max_text_length=self.text_seq_len,
+            teacache_calibration_path=self.options["teacache_calibration_path"],
+            teacache_probes=self._teacache_probes(),
+            teacache_cadence=self.options["teacache_cadence"],
+            teacache_online_delta_alpha=self.options["teacache_online_delta_alpha"],
             **self.shape,
         )
         self._stamp_denoise_iterations(pipeline)
         self.pipeline = pipeline
         logger.info("%s loaded: %s", type(self).__name__,
                     {k: round(v, 2) for k, v in self.phase_seconds.items()})
+
+    def _teacache_probes(self) -> dict[int, Any]:
+        """One TeaCache probe per loaded expert, keyed as WanOrchestrator looks them up (the id of
+        the transformer callable it was given), when the calibration needs a per-step signal; so
+        the Trainium CPU shadow is never built. Empty for the probe-free modes and without TeaCache."""
+        if not self.options["teacache_calibration_path"]:
+            return {}
+        from difflet.backends.neuron.core.teacache import NeuronTeaCacheProbe
+
+        probes = {}
+        for adapter, app in ((getattr(self, "transformer_adapter", None), getattr(self, "transformer", None)),
+                             (getattr(self, "transformer_2_adapter", None), getattr(self, "transformer_2", None))):
+            if adapter is not None and app is not None:
+                probes[id(adapter)] = NeuronTeaCacheProbe(app.teacache_mod_input)
+        return probes
 
     def _stamp_denoise_iterations(self, pipeline) -> None:
         """Call ``step_hook`` after each scheduler step: exactly once per denoise iteration, in

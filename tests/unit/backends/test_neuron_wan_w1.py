@@ -366,9 +366,6 @@ def test_application_call_dispatch(tiny):
                        shapes=((32, 48, 5),))
     assert single.config.image_seq_len == 12
     for kwargs, match in (
-        ({"teacache_cadence": 2}, "TeaCache"),
-        ({"teacache_online_delta_alpha": 0.5}, "TeaCache"),
-        ({"teacache_calibration_path": "/x.json"}, "TeaCache"),
         ({"shapes": ((32, 48, 5), (32, 48, 9))}, "one static shape"),
         ({"batch_size": 2}, "batch_size"),
         ({"parallel": DiffletParallelConfig(dp_degree=2)}, "supports tensor, sequence"),
