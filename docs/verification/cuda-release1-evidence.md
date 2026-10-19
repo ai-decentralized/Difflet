@@ -238,6 +238,9 @@ does not remove it; more seeds narrow it.
 | Qwen-Image, trimmed | 50 / 1024² | 41.20 dB | 0.99971 | 0.0031 / 0.258 | 35 / 0.998 | — | f3c (Server) | `f4/e2e_trimmed.json` | 10-17 F4 |
 | Qwen-Image, `--torch-compile` | 50 / 1024² | 40.21 dB | 0.99963 | 0.0039 / 0.266 | 35 / 0.998 | — | f3c (Server) | `f4/e2e_compiled.json` | 10-17 F4 |
 | FLUX.1-dev (guidance 3.5), Server Edition, timings recorded | 28 / 1024² | 40.35 dB | 0.99980 | 0.0034 / 0.625 | 35 / 0.998 | 9.4 s / 8.3 s (loads 8.3 / 3.0 s; peak 36.33 / 36.32 GB) | flux (Server) | `flux/f5c/cuda_e2e_flux.json`, `flux/f5c/flux_e2e_{difflet,diffusers}.png` | 10-18 F5c |
+| FLUX.1-dev, `run_gates.sh flux` on the F4d code | 28 / 1024² | 40.35 dB | 0.99980 | — | 35 / 0.998 | 9.1 s / 8.3 s | f4d (Server) | `f4d/gates-flux/cuda_e2e_flux.json` | 10-19 F4c/F4d |
+| Qwen-Image, `run_gates.sh qwen` on the F4d code | 50 / 1024² | 41.20 dB | 0.99971 | — | 35 / 0.998 | 16.9 s / 15.2 s | f4d (Server) | `f4d/gates-qwen/cuda_e2e_qwen_image.json` | 10-19 F4c/F4d |
+| Wan 2.2, `run_gates.sh wan` on the F4d code: `float32` / `model` | 40 / 480×832 × 9 | 27.91 / 27.51 dB | 0.99730 / 0.99702 | — | 25 / 0.99 | 48.9 (the FLUX.1-dev download ran on the host meanwhile — contended) / 44.6 s / 43.1 s | f4d (Server) | `f4d/gates-wan/cuda_e2e_wan.json` | 10-19 F4c/F4d |
 | FLUX.1-dev (guidance 3.5) | 28 / 1024² | 40.35 dB | 0.99980 | 0.0034 / 0.625 | 35 / 0.998 | 23.6 s / 21.8 s (status-log only) | f5b (Workstation) | `flux/cuda_e2e_flux.json`, `flux/e2e_{difflet,diffusers}_flux_28steps.png` | 10-18 F5 |
 | Wan 2.2, bf16 timestep (`model`), F1 | 40 / 480×832 × 9 | 27.54 dB | 0.99704 | 0.0238 / 1.0 | 25 / 0.99 | 55.3 s / 44.6 s (loads 417.6 / 452.3 s; peak 68.44 / 68.56 GB) | f5b (Workstation) | `wan/cuda_e2e_wan.json`, `wan/e2e_{difflet,diffusers}_wan_40steps_frame0.png` | 10-18 F1 |
 | Wan 2.2, fp32 timestep (`float32`, default, gated) | 40 / 480×832 × 9 | 26.30 dB | 0.99609 | 0.0274 / 1.0 | 25 / 0.99 | 50.9 s / 42.9 s | f1b (Server) | `wan/f1b/cuda_e2e_wan.json` | 10-18 F1b |
@@ -526,6 +529,50 @@ python scripts/cuda_bench_wan_dit.py --model-path "$WAN" --expert transformer --
 python scripts/cuda_bench_wan_dit.py --model-path "$WAN" --expert transformer_2 --out $HOME/logs/x/bench_wan_dit_transformer_2.json
 ```
 
+### Flux DiT bench (F4c, `scripts/cuda_bench_flux_dit.py`) and the attention layout copies (F4d)
+
+Pod f4d (1 × **Server**, eu-3, 38 min) *[10-19 F4c/F4d]*. One FLUX.1-dev DiT forward on
+identical seeded inputs (packed latents `(1, 4096, 64)`, text `(1, 512, 4096)`, pooled `(1,
+768)`, `t / 1000` = 0.5, guidance 3.5, the rope from the pipeline's ids), median of 10 after 3
+warm-ups, one profiled forward.
+
+| Case | Difflet ms | diffusers ms | ratio | gemm / attention / elementwise / copy / norm (Difflet vs diffusers) | Artifact |
+|---|---|---|---|---|---|
+| FLUX.1-dev DiT forward | **311.9** | 290.5 | 1.073× | 183.0 vs 173.1 / 47.1 vs 47.2 / **53.7 vs 42.7** / **21.6 vs 14.1** / **1.5 vs 10.0** | `f4d/bench/bench_flux_dit.json` |
+
+Attention is identical (the same flash kernel). The 21 ms gap has two parts, both read from
+the kernel buckets: (1) **unfused norms** — diffusers spends 10.0 ms in
+`vectorized_layer_norm_kernel`, Difflet 1.5 ms in norm kernels and pays it back as +11 ms of
+elementwise and +7.5 ms of casts (`direct_copy_kernel` 16.8 vs 10.1 ms): the Flux modeling's
+`NeuronAdaLayerNormZero` / `LayerNorm` run as elementwise passes rather than a fused kernel,
+the Wan q/k-norm pattern again (F4b); (2) **+10 ms of gemm from different kernel shapes** —
+Difflet's largest gemm kernel runs 167.9 ms where diffusers splits the same work across two
+(99.4 + 62.1 ms), the parallel-layer projections presenting different `(M, N, K)` to cuBLAS.
+Per 28-step run the forward gap is 0.6 s of the measured 0.8–1.1 s. Neither part is a
+30-minute fix; the fused-norm half is the next contained change (F4e), the gemm half needs a
+look at the projection layout. The Flux gates on this pod pass (parity `sdpa` rel_l1 0.987×
+the control, same-dtype 0.398×, cosine 0.99993; e2e 40.35 dB / 0.99980, generate 9.1 s vs
+diffusers 8.3 s; `f4d/gates-flux/`).
+
+**F4d, measured: no effect.** The `attention_heads` op (the models' `(B, H, S, D)` views
+straight to SDPA, no fold copies) changed nothing: Qwen `difflet_masked` 322.7 ms (322.7
+before), Wan `transformer` 535.1 ms (536.2), the copy buckets identical (22.1 / 63.8 ms). The
+fold copies are three 48 MB tensors per attention — tens of microseconds each, not the 8 ms
+the F4b entry estimated (an arithmetic error, now corrected in the status log). The op is
+reverted on the branch; the session's gates (all three models, F4d code) pass and are kept as
+evidence (`f4d/gates-{qwen,wan,flux}/`).
+
+**How to inspect manually.**
+
+```bash
+python3 -c "import json
+for f in ['bench_flux_dit', 'bench_dit_qwen_f4d', 'bench_wan_dit_transformer_f4d']:
+    d = json.load(open(f'artifacts/cuda-release1/f4d/bench/{f}.json'))
+    for c, v in d['cases'].items(): print(f, c, round(v['timed']['median_ms'], 1), {k: round(x, 1) for k, x in v['profile']['by_category_ms'].items()})"
+# on a pod:
+python scripts/cuda_bench_flux_dit.py --model-path "$FLUX" --out $HOME/logs/x/bench_flux_dit.json
+```
+
 ## Two GPUs (F2)
 
 Pod f2: 2 × **Server** over PCIe `PHB`, no NVLink, checkout aef79dd *[10-18 F2 verdict]*. NCCL
@@ -703,6 +750,13 @@ above. Spurious infrastructure events are kept and labelled.
 34. status-log only — F5c (pod flux, 1 × Server, 22 min): Flux e2e timings recorded (Difflet
     9.4 s vs diffusers 8.3 s, 28 steps; PSNR 40.35 dB again) and Flux `--dp 1 --requests`
     byte-identical to serial; `--dp 2` for Flux still needs a 2-GPU pod *[10-18 F5c]*.
+35. `a29d971` — F4c: `scripts/cuda_bench_flux_dit.py`; measured on pod f4d: Difflet 311.9 vs
+    diffusers 290.5 ms, the gap in unfused norms (+11 elementwise, +7.5 casts, −8.5 norm) and
+    gemm kernel shapes (+10 ms); the Flux gates pass *[10-19 F4c/F4d]*.
+36. `7f44984` then reverted — F4d: the `attention_heads` op measured as no effect (Qwen 322.7,
+    Wan 535.1 ms, copy buckets unchanged); the F4b estimate of 8 ms for the fold copies was an
+    arithmetic error (tens of µs). Reverted on the branch; the three models' gates on the
+    F4d code are kept as evidence *[10-19 F4c/F4d]*.
 
 ## Support matrix
 
@@ -814,8 +868,8 @@ Also unmeasured, and recorded where they arose: Workstation vs Server characteri
 Workstation card was not on the pod); Wan's Difflet vs diffusers generate gap — **measured and
 closed** in F4b (50.9 vs 42.9 s Server → 44.5 vs 42.8 s after the fused q/k norm; the
 Performance section); why two Wan replicas generating at once take 51.2 s each against 44.5 s
-alone (F2b); Flux's 1.1 s generate gap vs diffusers (9.4 vs 8.3 s, F5c; no DiT bench for Flux
-yet); F2 `--dp 1` requests 1 and 2 against their
+alone (F2b); Flux's generate gap vs diffusers — **located** by the F4c bench (unfused norms
+and gemm kernel shapes, Performance section), the fix pending (F4e); F2 `--dp 1` requests 1 and 2 against their
 references; the origin of GPU 0's extra ~555 MiB under `--cfg-parallel`; the Trainium
 byte-identity of the Flux split (D13, needs a trn2); the split of the Wan noise floor into the
 timestep effect and run-to-run GPU nondeterminism (F9). F9's recommended follow-up — state the
@@ -839,6 +893,8 @@ from recorded times and prices.
 | `difflet-cuda-f9` | 18:44 → 19:50 UTC (~66 min) | 2.65 | ~$2.90 (computed) | terminated, gone |
 | `difflet-cuda-f2b` (2 GPUs, eu-2) | 21:27 → 22:11 UTC (the status-log entry's 17:27 → 18:11 are EDT; ~44 min) | 5.30 | ~$3.90 (computed) | terminated, gone |
 | `difflet-cuda-flux` (1 GPU, eu-3) | 23:03 → 23:25 UTC (~22 min) | 2.65 | ~$1.00 (computed) | terminated, gone |
+| `difflet-cuda-f5b` resume attempt | 23:59 UTC 2026-10-18 → still INITIALIZING at 10:24 UTC 2026-10-19; `pause` refused (12005) | 0.45 if it ever runs | unknown | INITIALIZING (watched) |
+| `difflet-cuda-f4d` (1 GPU, eu-3) | 09:46 → 10:24 UTC 2026-10-19 (~38 min) | 2.65 | ~$1.70 (computed) | terminated, gone |
 | `difflet-cache` volume | ongoing | $0.0698/GB/month × 200 GB | ~$13.96/month | attached to f5b |
 
 A paused pod releases its card and stops GPU billing; the container disk is lost, while the volume

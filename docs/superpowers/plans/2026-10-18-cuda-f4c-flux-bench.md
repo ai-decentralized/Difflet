@@ -31,13 +31,21 @@
 
 ### Task 2: The pod session
 
-- [ ] create (1 GPU, eu-3/eu-2, 250 GB), ship, setup, the owner's device login, FLUX.1-dev download; `cuda_bench_flux_dit.py` (both cases); read the buckets; artifacts to `artifacts/cuda-release1/flux/f4c/`.
+- [x] create (1 GPU, eu-3/eu-2, 250 GB), ship, setup, the owner's device login, FLUX.1-dev download; `cuda_bench_flux_dit.py` (both cases); read the buckets; artifacts to `artifacts/cuda-release1/flux/f4c/`.
 
 ### Task 3: The fix the buckets name (ruling at the time), docs
 
-- [ ] If contained: implement on the Mac with a bit-identity / rounding test, CPU gate, ship, re-bench, `run_gates.sh flux` (parity + e2e); else record. Terminate the pod. Status-log entry, evidence report (Performance section, ledger, pod cost, NOT MEASURED), catalog; fold the ledger; commit.
+- [x] If contained: implement on the Mac with a bit-identity / rounding test, CPU gate, ship, re-bench, `run_gates.sh flux` (parity + e2e); else record. Terminate the pod. Status-log entry, evidence report (Performance section, ledger, pod cost, NOT MEASURED), catalog; fold the ledger; commit.
 
 ## Rulings
 
 - R1: inline execution, one fresh whole-branch reviewer.
 - R2: the bench is one forward of the whole DiT (19 double + 38 single blocks); per-block attribution comes from the kernel buckets, not from timing blocks separately.
+
+## Execution ledger (folded, 2026-10-19)
+
+```
+Task 1: complete (a29d971; CPU gate 2839 passed).
+Task 2: pod difflet-cuda-f4d (eu-3, 1x Server, 09:46-10:24 UTC, ~$1.70); f5b resume stuck INITIALIZING -> owner said "move on", then "New eu pod". Pipeline unattended: Qwen bench+gates, Wan bench+gates, Flux bench+gates, all rc=0.
+Task 3: ruling — no fix on the pod: the Flux gap is unfused norms (+11 elementwise, +7.5 casts, -8.5 norm) and gemm kernel shapes (+10 ms); F4e on the Mac first. F4d (attention_heads, run on this pod) measured no effect and was reverted on its branch. Docs: this commit.
+```

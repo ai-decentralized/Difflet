@@ -229,7 +229,11 @@ Qwen-Image DiT forward, median of 10 (warm-up untimed, a timed run with profiler
 `torch.profiler` run; the pod image has no `nsys`): baseline Difflet 516 ms ≈ diffusers on the
 same padded input 490 ms; diffusers on its real 16-token input 300 ms; Difflet trimmed 323 ms;
 `--torch-compile` 243 ms. Artifacts: `artifacts/cuda-release1/f4/bench_dit_*.json`. Compare
-only on one card edition (F3b's open follow-up: characterise Workstation vs Server).
+only on one card edition (F3b's open follow-up: characterise Workstation vs Server). **Flux DiT
+bench** (F4c, `scripts/cuda_bench_flux_dit.py`, f4d): Difflet 311.9 vs diffusers 290.5 ms — the
+gap is unfused norms (+11 ms elementwise, +7.5 casts, −8.5 norm) and gemm kernel shapes (+10 ms),
+attention identical; fix pending (F4e). The attention-layout op (F4d) measured as no effect and
+was reverted: the fold copies cost tens of µs, not ms. Artifacts: `artifacts/cuda-release1/f4d/`.
 
 ## Two GPUs [F2, f2, 2× Server Edition over PCIe]
 

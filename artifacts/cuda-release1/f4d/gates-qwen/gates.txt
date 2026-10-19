@@ -1,0 +1,13 @@
+== qwen gates 2026-10-19T10:05:20Z ==
+snapshot: /home/user/hf/hub/models--Qwen--Qwen-Image/snapshots/75e0b4be04f60ec59a75f475837eced720f823b6/
+9b9f188 docs: F4c/F4d status — the Flux bench and the attention layout copies, GPU runs pending
+0, NVIDIA RTX PRO 6000 Blackwell Server Edition, 580.178.04, 0 MiB
+overlay         484G  220G  215G  51% /
+overlay         484G  220G  215G  51% /
+smoke exit: 0 in 64s
+parity exit: 0 in 98s
+parity-gate exit: 0 in 0s
+e2e exit: 0 in 77s
+e2e-gate exit: 0 in 0s
+0 MiB
+GATES DONE qwen overall_rc=0

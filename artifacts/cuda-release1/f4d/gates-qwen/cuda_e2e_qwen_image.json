@@ -1,0 +1,23 @@
+{
+  "model": "qwen_image",
+  "model_path": "/home/user/hf/hub/models--Qwen--Qwen-Image/snapshots/75e0b4be04f60ec59a75f475837eced720f823b6/",
+  "prompt": "a photorealistic cat sitting in a sunlit garden",
+  "steps": 50,
+  "seed": 0,
+  "shape": [
+    1024,
+    1024
+  ],
+  "device": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+  "torch": "2.11.0+cu128",
+  "metrics": {
+    "psnr_db": 41.20039305023448,
+    "cosine": 0.9997086914995307,
+    "mean_abs": 0.0030838979011302095,
+    "max_abs": 0.2578125
+  },
+  "images": {
+    "difflet": "/home/user/logs/f4d/gates-qwen/e2e_difflet.png",
+    "diffusers": "/home/user/logs/f4d/gates-qwen/e2e_diffusers.png"
+  }
+}

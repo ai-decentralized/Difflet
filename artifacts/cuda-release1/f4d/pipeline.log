@@ -1,0 +1,9 @@
+10:03:08 qwen bench
+qwen bench rc=0
+10:05:20 qwen gates
+qwen gates rc=0
+10:09:19 wan bench
+wan bench rc=0
+10:10:24 wan gates
+wan gates rc=0
+10:20:14 PIPELINE DONE
