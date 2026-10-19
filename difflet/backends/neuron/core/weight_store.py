@@ -8,7 +8,8 @@ per-rank lazy loader (``core/checkpoint.py``).
 
 What it stores: for one component (a checkpoint directory loaded by one
 ``TorchNeuronApplicationBase``), exactly the host tensors the loader copies onto the device,
-in their load dtype (bf16 for a bf16 DiT from an fp32 checkpoint; an fp32 umT5 stays fp32):
+in their load dtype (bf16 for a bf16 DiT from an fp32 checkpoint; an fp32 umT5 would stay
+fp32, but is not written by default, see the flow below):
 
 * ``replicated.safetensors``: the tensors every rank holds whole (no shard declaration, or
   tp=1), written once and read by every rank, so replicated tensors cost their bytes once;
@@ -39,8 +40,11 @@ Flow (``load_with_store``, called by ``TorchNeuronApplicationBase.load``):
 1. hit: every file this rank needs has a manifest that matches the module and the file
    (size, header, samples): the tensors are read in file order, in large sequential reads
    with one read ahead, and copied onto the device. No checkpoint read, no cast.
-2. miss: the checkpoint loads as before, and each host tensor the loader copies to the device
-   is also written to the store at its precomputed offset. The files are written to a temp
+2. miss: the checkpoint loads as before. When the entry is at least ``MIN_SAVING`` smaller than
+   what the checkpoint load reads (an fp32 checkpoint loaded in bf16; or any component with
+   ``DIFFLET_NEURON_WEIGHT_STORE_ALL=1``, for a store on a faster disk than the checkpoint),
+   each host tensor the loader copies to the device is also written to the store at its
+   precomputed offset. The files are written to a temp
    name, fsynced and renamed, then the manifest is written the same way. A rank writes a file
    only while it holds the file's ``flock`` (a concurrent launch or a CP/DP replica of the same
    TP rank skips it), only when the disk keeps ``RESERVE_BYTES`` free after the whole entry,
@@ -91,8 +95,12 @@ __all__ = [
 STORE_FORMAT = 1
 STORE_ENV = "DIFFLET_NEURON_WEIGHT_STORE"
 _OFF_VALUES = ("0", "off", "false", "none", "no")
+ALL_ENV = "DIFFLET_NEURON_WEIGHT_STORE_ALL"
 #: Free disk a write must leave behind, after the whole entry.
 RESERVE_BYTES = 10 * 1024**3
+#: An entry is written only when it is at least this much smaller than what the checkpoint
+#: load reads for the same tensors (unless DIFFLET_NEURON_WEIGHT_STORE_ALL is set).
+MIN_SAVING = 0.1
 _SAMPLES = 8
 _SAMPLE_BYTES = 64 * 1024
 _REPLICATED = "replicated"
@@ -109,6 +117,8 @@ _DTYPES: dict[torch.dtype, str] = {
     torch.uint8: "U8",
     torch.bool: "BOOL",
 }
+_ITEMSIZE = {"F64": 8, "F32": 4, "F16": 2, "BF16": 2, "I64": 8, "I32": 4, "I16": 2, "I8": 1,
+             "U8": 1, "BOOL": 1, "F8_E4M3": 1, "F8_E5M2": 1}
 
 
 def store_root() -> Path | None:
@@ -160,6 +170,34 @@ def _module_specs(module: nn.Module, *, dtype: torch.dtype, tp_size: int, prefix
         dim = shard_dim(module, name) if tp_size > 1 else None
         specs.append(_Spec(name, key, tuple(int(n) for n in tensor.shape), target_dtype, dim))
     return specs
+
+
+def _checkpoint_bytes(model_dir: Path, specs: list[_Spec]) -> int | None:
+    """The bytes the checkpoint load reads for ``specs`` (this rank's slices, in the
+    checkpoint's own dtypes), from the safetensors headers; None when a key or dtype is not
+    found there."""
+    from difflet.backends.tpu.core.checkpoint import build_weight_map
+
+    weight_map = build_weight_map(model_dir)
+    headers: dict[str, dict[str, Any]] = {}
+    total = 0
+    for spec in specs:
+        path = weight_map.get(spec.key)
+        if path is None:
+            return None
+        if path not in headers:
+            with open(path, "rb") as f:
+                (length,) = struct.unpack("<Q", f.read(8))
+                headers[path] = json.loads(f.read(length))
+        itemsize = _ITEMSIZE.get((headers[path].get(spec.key) or {}).get("dtype"))
+        if itemsize is None:
+            return None
+        total += spec.nbytes // spec.dtype.itemsize * itemsize
+    return total
+
+
+def _write_everything() -> bool:
+    return (envs.DIFFLET_NEURON_WEIGHT_STORE_ALL or "").strip().lower() not in ("", *_OFF_VALUES)
 
 
 def _fingerprint(model_dir: Path) -> list[list[Any]]:
@@ -556,6 +594,20 @@ def load_with_store(
                 StoreResult("hit", "", where, entry.rank_bytes, time.perf_counter() - start))
 
     reasons = sorted({why for body, why in checks if body is None})
+    if not _write_everything():
+        try:
+            read = _checkpoint_bytes(model_dir, specs)
+        except (OSError, ValueError) as exc:
+            return direct(), StoreResult("not written", f"checkpoint headers unreadable ({exc})",
+                                         where)
+        stored = sum(s.nbytes for s in specs)
+        if read is not None and stored > read * (1 - MIN_SAVING):
+            # The checkpoint already holds these tensors in the load dtype: the store would read
+            # the same bytes (measured on trn2: Qwen-Image's bf16 DiT loads in 311 s cold and
+            # 3.6 s warm either way) and cost their bytes again on disk and a write.
+            return direct(), StoreResult(
+                "not written", f"no gain: the checkpoint holds these tensors in the load dtype "
+                f"({stored / 1e9:.2f} GB either way; {ALL_ENV}=1 writes it anyway)", where)
     with contextlib.ExitStack() as stack:
         writers: list[_FileWriter] = []
         note = ""
