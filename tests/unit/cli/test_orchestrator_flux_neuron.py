@@ -50,9 +50,8 @@ def test_driver_runs_a_vae_stage_only_where_the_decode_does_not_fit(launches, tm
     assert not (tmp_path / "w").exists()  # removed without --keep-work-dir
 
 
-@pytest.mark.parametrize("override, named", [
-    (dict(cfg_parallel=True), "--cfg-parallel"), (dict(teacache_cadence=2), "--teacache-cadence"),
-])
+@pytest.mark.parametrize("override, named", [(dict(cfg_parallel=True), "--cfg-parallel"),
+                                             (dict(taef1=True), "--taef1")])
 def test_driver_refuses_what_the_stage_does_not_run(launches, capsys, override, named):
     with pytest.raises(SystemExit) as exc:
         flux_cli.FluxOrchestrator(_args(**override)).generate()
@@ -66,6 +65,27 @@ def test_driver_runs_context_parallel_on_tp_x_cp_cores(launches, tmp_path):
     assert [(c["args"][1], c["num_cores"]) for c in launches] == [("transformer", 4), ("vae", 1)]
     cli = launches[0]["cli_args"]
     assert cli[cli.index("--cp-degree") + 1] == "2" and cli[cli.index("--cp-mode") + 1] == "ulysses"
+
+
+def test_teacache_flags_reach_the_stage_application(launches, monkeypatch, tmp_path):
+    args = _args(work_dir=str(tmp_path / "w"), teacache_speedup=1.6, teacache_calibration="/c.json")
+    flux_cli.FluxOrchestrator(args).generate()
+    cli = launches[0]["cli_args"]
+    assert cli[cli.index("--teacache-speedup") + 1] == "1.6"
+    assert cli[cli.index("--teacache-calibration") + 1] == "/c.json"
+
+    import difflet.backends.registry as registry
+    import difflet.pipeline.difflet_pipeline as dp
+
+    monkeypatch.setattr(registry, "get_backend",
+                        lambda name: SimpleNamespace(prepare_runtime=lambda parallel: None))
+    built = []
+    monkeypatch.setattr(dp.DiffletPipeline, "from_pretrained",
+                        classmethod(lambda cls, *a, **k: built.append(k) or (_ for _ in ()).throw(SystemExit(0))))
+    with pytest.raises(SystemExit):
+        flux_cli.FluxOrchestrator(args)._run_stage_internal("transformer", args)
+    opts = built[0]["application_kwargs"]
+    assert opts["teacache_speedup"] == 1.6 and opts["teacache_calibration_path"] == "/c.json"
 
 
 def test_transformer_stage_saves_the_packed_latents(monkeypatch, tmp_path):

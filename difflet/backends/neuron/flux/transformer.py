@@ -117,6 +117,21 @@ class NeuronFluxTransformerApplication(TorchNeuronApplicationBase):
             rotary,
         )
 
+    @torch.no_grad()
+    def teacache_mod_input(self, hidden_states, timestep, pooled_projections, guidance):
+        """Block 0's modulated image input, as the Trainium TeaCache probe computes it: the model's
+        forward up to ``transformer_blocks[0].norm1`` (timestep and guidance rescaled by 1000 as
+        the forward does). Inputs already on this rank's device, in the model's dtype."""
+        model = self.module
+        hs = model.x_embedder(hidden_states)
+        timestep = timestep * 1000
+        if self.config.guidance_embeds:
+            temb = model.time_text_embed(timestep, guidance * 1000, pooled_projections)
+        else:
+            temb = model.time_text_embed(timestep, pooled_projections)
+        modulated, *_ = model.transformer_blocks[0].norm1(hs, emb=temb, hlomarker=True)
+        return modulated
+
     def forward(self, hidden_states, encoder_hidden_states=None, pooled_projections=None,
                 timestep=None, img_ids=None, txt_ids=None, guidance=None,
                 joint_attention_kwargs=None, return_dict=False):

@@ -38,6 +38,15 @@ _KWARG_DEFAULTS: dict[str, Any] = {
     # False: no VAE is loaded and every call returns packed latents (the CLI decodes them in a
     # separate stage, as for Wan, so the decoder never shares a core with the DiT and T5 shards).
     "decode_vae": True,
+    # TeaCache, as the Trainium application takes it: the adaptive modes (teacache_fused,
+    # teacache_speedup with a calibration) use the probe; the probe-free ones (teacache_cadence,
+    # teacache_online_delta_alpha) decide on the host alone.
+    "teacache_fused": False,
+    "teacache_speedup": None,
+    "teacache_calibration": None,
+    "teacache_calibration_path": None,
+    "teacache_cadence": None,
+    "teacache_online_delta_alpha": None,
 }
 
 
@@ -205,7 +214,53 @@ class TorchNeuronFluxApplication:
             tokenizer=tokenizer, text_encoder_2=_T5(t5, self.dtype) if t5 is not None else None,
             tokenizer_2=tokenizer_2, transformer=_Transformer(dit))
         self.pipeline.vae_scale_factor = vae_scale  # diffusers' default without a VAE is 8
+        self._configure_teacache()
         lap("scheduler+pipeline")
+
+    def _configure_teacache(self) -> None:
+        """Mount the probe and the controller on the pipeline as the Trainium application does
+        (same calibration checks, same probe-free controller); a no-op with TeaCache off."""
+        opts, pipe = self.options, self.pipeline
+        pipe.teacache_probe = pipe.teacache_controller = pipe.teacache_speedup = None
+        adaptive = bool(opts["teacache_fused"]) or opts["teacache_speedup"] is not None
+        probe_free = opts["teacache_cadence"] is not None or opts["teacache_online_delta_alpha"] is not None
+        if adaptive and probe_free:
+            raise ValueError("teacache_cadence/teacache_online_delta_alpha are mutually exclusive "
+                             "with the adaptive probe modes (teacache_fused/teacache_speedup).")
+        from difflet.pipeline.teacache import (
+            TeaCacheCalibration,
+            TeaCacheController,
+            load_teacache_calibration_or_raise,
+        )
+
+        shape_label = f"{self.height}x{self.width}"
+        if adaptive:
+            from difflet.backends.neuron.flux.teacache import NeuronFluxTeaCacheProbe
+
+            pipe.teacache_probe = NeuronFluxTeaCacheProbe(self.dit)
+            speedup = opts["teacache_speedup"]
+            if speedup is not None:
+                calibration, path = opts["teacache_calibration"], opts["teacache_calibration_path"]
+                if calibration is not None and path is not None:
+                    raise ValueError("teacache_calibration and teacache_calibration_path are "
+                                     "mutually exclusive")
+                if calibration is None:
+                    calibration = load_teacache_calibration_or_raise(path, model="flux",
+                                                                     shape_label=shape_label)
+                elif calibration.model != "flux" or calibration.shape_label != shape_label:
+                    raise ValueError("TeaCache calibration does not match Flux model/profile")
+                if (calibration.target_speedup is not None
+                        and float(speedup) > float(calibration.target_speedup) + 1e-6):
+                    raise ValueError(
+                        "Flux TeaCache calibration target speedup is lower than requested: "
+                        f"requested {speedup}, calibration has {calibration.target_speedup}.")
+                pipe.teacache_controller = TeaCacheController(calibration)
+                pipe.teacache_speedup = float(speedup)
+        elif probe_free:
+            pipe.teacache_controller = TeaCacheController(TeaCacheCalibration(
+                model="flux", shape_label=shape_label, num_steps=0, poly_coef=(0.0,), threshold=0.0,
+                cadence=int(opts["teacache_cadence"] or 0),
+                online_delta_alpha=float(opts["teacache_online_delta_alpha"] or 0.0)))
 
     @torch.no_grad()
     def __call__(self, **kwargs):

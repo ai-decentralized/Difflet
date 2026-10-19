@@ -21,7 +21,7 @@ from difflet.cli.orchestrators.torchrun import (
 _HF_MODEL_ID = "black-forest-labs/FLUX.1-dev"
 _MODEL_TYPE = "flux"
 _CLI_NAME = "flux"
-_TORCHRUN_RUNS = "tensor, sequence and context parallelism and data-parallel replicas"
+_TORCHRUN_RUNS = "tensor, sequence and context parallelism, data-parallel replicas and TeaCache"
 
 
 def _decode_in_process(tp_degree: int) -> bool:
@@ -36,7 +36,9 @@ def _decode_in_process(tp_degree: int) -> bool:
 def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
     """What the torchrun (neuron) generate stage rejects, as the command line names it:
     every torchrun backend's (TeaCache), and what Flux's neuron path does not run yet. Torch-free."""
-    found = torchrun_unsupported_options(args)
+    # TeaCache runs on Flux's neuron path (probe on the DiT, controller in the pipeline): drop
+    # it from the shared torchrun refusal.
+    found = [f for f in torchrun_unsupported_options(args) if not f.startswith("--teacache")]
     if getattr(args, "cfg_parallel", False):
         found.append("--cfg-parallel")  # FLUX.1-dev is guidance-distilled: no two-pass CFG
     if getattr(args, "taef1", False):
@@ -152,6 +154,13 @@ class FluxOrchestrator(ModelOrchestrator):
             parts += ["--cp-degree", str(a.cp_degree), "--cp-mode", str(a.cp_mode or "gather_kv")]
         if getattr(a, "sp_enabled", False):
             parts.append("--sp")
+        for flag, name in (("--teacache-cadence", "teacache_cadence"),
+                           ("--teacache-online-delta", "teacache_online_delta"),
+                           ("--teacache-speedup", "teacache_speedup"),
+                           ("--teacache-calibration", "teacache_calibration")):
+            value = getattr(a, name, None)
+            if value is not None:
+                parts += [flag, str(value)]
         if getattr(a, "keep_work_dir", False):
             parts.append("--keep-work-dir")
         return parts
@@ -182,6 +191,13 @@ class FluxOrchestrator(ModelOrchestrator):
         h, w = int(args.height or 1024), int(args.width or 1024)
         in_process = _decode_in_process(int(args.tp_degree or 4))
         app_kwargs = {"decode_vae": in_process}
+        for option, name in (("teacache_cadence", "teacache_cadence"),
+                             ("teacache_online_delta_alpha", "teacache_online_delta"),
+                             ("teacache_speedup", "teacache_speedup"),
+                             ("teacache_calibration_path", "teacache_calibration")):
+            value = getattr(args, name, None)
+            if value is not None:
+                app_kwargs[option] = value
         if getattr(args, "exec_mode", None):
             app_kwargs["exec_mode"] = args.exec_mode
         cp = int(getattr(args, "cp_degree", None) or 1)
