@@ -170,11 +170,7 @@ def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
     application holds one static shape per process (``_resolve_shape``), so a bucketed set
     used to fail only after torchrun had started every rank. Torch-free: the shapes are
     counted, not parsed, so a malformed --shapes fails where it always did."""
-    found = torchrun_unsupported_options(args)
-    shapes = getattr(args, "shapes", None)
-    if shapes and len([token for token in str(shapes).split(",") if token.strip()]) > 1:
-        found.append("--shapes with more than one shape")
-    return found
+    return torchrun_unsupported_options(args)
 
 
 def _require_request_shape_in_set(args: argparse.Namespace):
