@@ -236,9 +236,17 @@ def _cpu_vae_stage(monkeypatch):
 
 
 @pytest.fixture
-def clean_neuron_mesh():
+def clean_neuron_mesh(monkeypatch, tmp_path):
+    """No mesh, and a neuron runtime this process has not prepared, with its cache locations
+    unset and DIFFLET_COMPILE_CACHE at ``tmp_path / "compile_cache"``: the vae stage prepares
+    the runtime itself (``run_vae_stage``), which sets them; monkeypatch restores them."""
+    from difflet.backends.neuron import runtime
     from difflet.backends.neuron.ops_impl import parallel_mesh
 
+    monkeypatch.setattr(runtime, "_runtime_prepared", False)
+    for name in (*_CACHE_ENV, "NKI_ENABLE_TRACE_CACHE"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path / "compile_cache"))
     parallel_mesh.destroy_parallel_mesh()
     yield
     parallel_mesh.destroy_parallel_mesh()
@@ -308,6 +316,10 @@ def test_neuron_vae_stage_compile_warms_up_and_writes_the_manifest(monkeypatch, 
     orch._run_stage_internal("vae", args)
     [app] = built
     assert app.warmup_shapes == [(1, 4, 1, 4, 6)]  # the warm-up decode at the request shape
+    # The stage prepared the neuron runtime itself: its NEFF cache is DIFFLET_COMPILE_CACHE's,
+    # not torch-neuronx's /tmp/neff_cache (review C3).
+    assert os.environ["TORCH_NEURONX_NEFF_CACHE_DIR"] == str(
+        tmp_path / "compile_cache" / "neuron" / "neff")
     assert has_valid_stage_manifest(orch._stage_compiled_dir("vae", args),
                                     orch._stage_cache_inputs("vae", args))
     assert not (tmp_path / "w").exists()
