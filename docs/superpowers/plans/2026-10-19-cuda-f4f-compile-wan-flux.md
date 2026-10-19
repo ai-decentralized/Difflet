@@ -28,7 +28,7 @@
 - Modify: `difflet/backends/cuda/wan/transformer.py`, `difflet/backends/cuda/flux/transformer.py` (the `torch_compile` kwarg, per-block compile in `_prepare_module`), `difflet/models/wan/cuda_application.py`, `difflet/models/flux/cuda_application.py` (read the kwarg / env, pass it on; drop it from the refused kwargs), `difflet/cli/orchestrators/wan_cuda.py`, `difflet/cli/orchestrators/flux_cuda.py` (forward instead of refuse)
 - Test: `tests/unit/backends/test_cuda_wan_transformer.py`, `tests/unit/backends/test_cuda_flux_transformer.py`, `tests/unit/models/wan/test_wan_cuda_application.py`, `tests/unit/models/flux/test_cuda_flux_application.py` (or the existing file), `tests/unit/cli/test_orchestrator_wan_cuda.py`, `tests/unit/cli/test_orchestrator_flux_cuda.py`
 
-- [ ] **Step 1:** failing tests → **Step 2:** run → **Step 3:** implement → **Step 4:** CPU gate → **Step 5: Commit** `cuda: --torch-compile for Wan's experts and Flux's DiT, per-block inductor as Qwen's (F4f task 1)`.
+- [x] **Step 1:** failing tests → **Step 2:** run → **Step 3:** implement → **Step 4:** CPU gate → **Step 5: Commit** `cuda: --torch-compile for Wan's experts and Flux's DiT, per-block inductor as Qwen's (F4f task 1)`.
 
 ### Task 2: The Flux single block's fused `proj_out` at tp=1
 
@@ -36,7 +36,7 @@
 - Modify: `difflet/models/flux/modeling_flux.py` (`NeuronFluxSingleTransformerBlock.fuse_proj_out`, the fused forward path), `difflet/backends/cuda/flux/transformer.py` (call it after loading at tp=1)
 - Test: `tests/unit/models/flux/test_flux_vs_diffusers_cpu.py` or a new `test_flux_fused_proj_out.py`, `tests/unit/backends/test_cuda_flux_transformer.py`
 
-- [ ] **Step 1:** failing tests → **Step 2:** run → **Step 3:** implement → **Step 4:** CPU gate → **Step 5: Commit** `flux: the single block's proj_out as one gemm at tp=1 on CUDA (F4f task 2)`.
+- [x] **Step 1:** failing tests → **Step 2:** run → **Step 3:** implement → **Step 4:** CPU gate → **Step 5: Commit** `flux: the single block's proj_out as one gemm at tp=1 on CUDA (F4f task 2)`.
 
 ### Task 3: Status log, docs, PR; the pod run (pending the owner's yes)
 
