@@ -54,7 +54,6 @@ import shutil
 import sys
 from pathlib import Path
 
-from difflet import envs
 from difflet.common.orchestrators import qwen_image as qwen_common
 from difflet.cli.orchestrators.base import (
     ModelOrchestrator,
@@ -67,13 +66,21 @@ from difflet.cli.orchestrators.base import (
     write_stage_manifest,
 )
 from difflet.cli.orchestrators.torchrun import (
-    fallback_tracker,
+    cfg_cp_conflict,
+    decodes_on_device,
+    device_encoder_overflow,
+    refuse,
+    refuse_dit_overflow,
+    refuse_torchrun_conflicts,
     reject_unsupported_torchrun_options,
-    replica_request_scope,
-    replica_requests,
+    replica_cores,
     root_compile_cache_at_cache_dir,
+    run_generate_stage,
+    run_vae_stage,
     torchrun_backend,
+    torchrun_stage_keys,
     torchrun_unsupported_options,
+    vae_placement_conflict,
 )
 from difflet.cli import runner
 
@@ -137,23 +144,16 @@ def _torchrun_conflicts(args: argparse.Namespace, *, generating: bool) -> list[s
     ``NeuronQwenImageConfig`` refuses either pair in every rank, as Wan's config does); and,
     for a ``generating`` command, --cfg-parallel without --true-cfg-scale > 1 (the CFG groups
     split true CFG's two branches; ``compile`` only warms the batch-2 graph up). Torch-free."""
-    conflicts = []
-    if getattr(args, "host_vae", False) and getattr(args, "device_vae", False):
-        conflicts.append("--host-vae and --device-vae are mutually exclusive")
+    sp_cp = None
     if getattr(args, "sp_enabled", False) and (getattr(args, "cp_degree", None) or 1) > 1:
-        conflicts.append(
-            "--sp and --cp-degree > 1 are mutually exclusive for Qwen-Image (both shard the "
-            "image sequence)"
-        )
-    cfg = bool(getattr(args, "cfg_parallel", False))
-    if cfg and (getattr(args, "cp_degree", None) or 1) > 1:
-        conflicts.append("--cfg-parallel and --cp-degree > 1 are mutually exclusive")
-    if cfg and generating and _true_cfg_scale(args) is None:
-        conflicts.append(
-            "--cfg-parallel splits the two branches of true classifier-free guidance; "
-            "Qwen-Image runs them only with --true-cfg-scale > 1"
-        )
-    return conflicts
+        sp_cp = ("--sp and --cp-degree > 1 are mutually exclusive for Qwen-Image (both shard "
+                 "the image sequence)")
+    cfg_without_true_cfg = None
+    if getattr(args, "cfg_parallel", False) and generating and _true_cfg_scale(args) is None:
+        cfg_without_true_cfg = ("--cfg-parallel splits the two branches of true classifier-free "
+                                "guidance; Qwen-Image runs them only with --true-cfg-scale > 1")
+    found = (vae_placement_conflict(args), sp_cp, cfg_cp_conflict(args), cfg_without_true_cfg)
+    return [conflict for conflict in found if conflict is not None]
 
 
 def _true_cfg_misuse(args: argparse.Namespace) -> str | None:
@@ -270,11 +270,7 @@ def _decodes_on_device(args: argparse.Namespace) -> bool:
     """Whether the neuron backend decodes in a vae stage on one core (``_stage_vae_neuron``)
     instead of on the host in the driver (``_decode_latents_host``). --host-vae wins, then
     --device-vae, then ``_DEVICE_VAE_DEFAULT``. Torch-free."""
-    if getattr(args, "host_vae", False):
-        return False
-    if getattr(args, "device_vae", False):
-        return True
-    return _DEVICE_VAE_DEFAULT
+    return decodes_on_device(args, _DEVICE_VAE_DEFAULT)
 
 
 def _vae_latents(packed, height: int, width: int, latents_mean, latents_std):
@@ -335,20 +331,13 @@ class QwenImageOrchestrator(ModelOrchestrator):
         reject_unsupported_torchrun_options(
             _torchrun_unsupported_options(self.args), runs=_TORCHRUN_RUNS
         )
-        conflicts = _torchrun_conflicts(self.args, generating=generating)
-        if conflicts and torchrun_backend() is not None:
-            print(f"Error: {conflicts[0]}; nothing was launched.", file=sys.stderr, flush=True)
-            raise SystemExit(2)
-        misuse = _true_cfg_misuse(self.args)
-        if misuse is not None:
-            print(f"Error: {misuse}; nothing was launched.", file=sys.stderr, flush=True)
-            raise SystemExit(2)
+        refuse_torchrun_conflicts(_torchrun_conflicts(self.args, generating=generating))
+        refuse(_true_cfg_misuse(self.args))
 
     def _replica_cores(self) -> int:
         """Cores of one generate launch: tp x cp, doubled by --cfg-parallel (each CFG branch
         on its own TP group)."""
-        return ((self.args.tp_degree or 4) * (self.args.cp_degree or 1)
-                * (2 if getattr(self.args, "cfg_parallel", False) else 1))
+        return replica_cores(self.args)
 
     def _check_dit_fits(self) -> None:
         """On a torchrun backend (neuron), refuse a TP degree whose DiT shard clearly cannot fit
@@ -364,24 +353,11 @@ class QwenImageOrchestrator(ModelOrchestrator):
         """
         if torchrun_backend() is None:
             return
-        from difflet.backends.neuron.hbm import GIB, suggested_tp
         from difflet.backends.neuron.qwen_image.hbm import dit_fits
         from difflet.pipeline.path_resolver import resolve_model_path
 
-        try:
-            model_dir = self._model_dir(self.args, resolve_model_path)
-        except (OSError, RuntimeError):
-            return
-        tp = self.args.tp_degree or 4
-        fits, estimate, limit = dit_fits(model_dir, tp_degree=tp)
-        if fits:
-            return
-        print(f"Error: the Qwen-Image DiT needs at least {estimate / GIB:.1f} GiB of bf16 weights "
-              f"per core at tp={tp}, over the {limit / GIB:.1f} GiB budget of one NeuronCore "
-              f"(every DP replica is its own TP group); use --tp-degree "
-              f"{suggested_tp(estimate, tp, limit)} or more; nothing was launched.",
-              file=sys.stderr, flush=True)
-        raise SystemExit(2)
+        refuse_dit_overflow("Qwen-Image", lambda: self._model_dir(self.args, resolve_model_path),
+                            dit_fits, self.args.tp_degree or 4)
 
     def _place_text_encoder(self) -> None:
         """On a torchrun backend (neuron) with --device-text-encoder, keep Qwen2.5-VL on rank
@@ -400,22 +376,16 @@ class QwenImageOrchestrator(ModelOrchestrator):
         args = self.args
         if torchrun_backend() is None or not getattr(args, "device_text_encoder", False):
             return
-        from difflet.backends.neuron.hbm import GIB
         from difflet.backends.neuron.qwen_image.hbm import device_text_encoder_fits
         from difflet.pipeline.path_resolver import resolve_model_path
 
-        try:
-            model_dir = self._model_dir(args, resolve_model_path)
-        except (OSError, RuntimeError):
-            return
-        tp = args.tp_degree or 4
-        fits, estimate, limit = device_text_encoder_fits(model_dir, tp_degree=tp)
-        if fits:
+        overflow = device_encoder_overflow(lambda: self._model_dir(args, resolve_model_path),
+                                           device_text_encoder_fits, args.tp_degree or 4)
+        if overflow is None:
             return
         args.device_text_encoder = False
-        print(f"[qwen_image] Qwen2.5-VL on the device needs at least {estimate / GIB:.1f} GiB per "
-              f"core beside the DiT at tp={tp}, over the {limit / GIB:.1f} GiB budget: encoding "
-              "on rank 0's host instead (without --device-text-encoder)", flush=True)
+        print(f"[qwen_image] Qwen2.5-VL on the device {overflow}: encoding on rank 0's host "
+              "instead (without --device-text-encoder)", flush=True)
 
     def run(self) -> None:
         self._reject_unsupported_torchrun_options()  # before the download, too
@@ -759,46 +729,25 @@ class QwenImageOrchestrator(ModelOrchestrator):
     def _stage_generate_neuron(self, args: argparse.Namespace, backend: str) -> None:
         """The generate stage on a non-AoT torchrun backend (neuron); runs on every rank.
 
-        ``DiffletPipeline.from_pretrained`` prepares the runtime (NEFF cache, core binding, the
-        process group) before it builds the registry's application
-        (TorchNeuronQwenImageApplication), and ``load(skip_warmup=False)`` compiles or loads the
-        DiT blocks at the static shape and reads Qwen2.5-VL on rank 0, so the step loop compiles
-        nothing. Nothing is built ahead of time: ``compile`` mode is that load plus the stage
-        manifest; ``generate`` requires no artifact. Per request, the application encodes the
-        prompt on rank 0's host (the Trainium text stage's template, drop and zero-pad to
-        TEXT_SEQ_LEN; the DiT attends the padded text unmasked, as on Trainium), draws the noise
-        from the seeded generator on rank 0 and broadcasts it, and sets the shifted FlowMatch
-        schedule as ``_stage_generate`` does. Every rank runs the same generate and rank 0 alone
-        writes files: ``work_file`` and the compiled dir are the same path on every rank. In a
-        DP worker (``--requests-dir``) the launch is one replica draining the request queue, as
-        Wan's transformer stage does: rank 0 alone claims and broadcasts each request's index
-        (``replica_requests``), and a request that fails is marked failed once and stops every
-        rank of the replica (``replica_request_scope``). The process group is destroyed after a
-        successful stage only: a failing rank exits with its exception and torchrun stops its
-        peers, which may be blocked in a collective.
+        ``run_generate_stage`` builds the registry's application (TorchNeuronQwenImageApplication)
+        through ``DiffletPipeline``, loads the DiT blocks with the warm-up and Qwen2.5-VL on rank
+        0 (``compile`` mode is that load plus the stage manifest) and runs the replica's
+        requests. Qwen-Image's part: --model-path (a local snapshot) binds the pipeline to it;
+        per request, the application encodes the prompt on rank 0's host (the Trainium text
+        stage's template, drop and zero-pad to TEXT_SEQ_LEN; the DiT attends the padded text
+        unmasked, as on Trainium), draws the noise from the seeded generator on rank 0 (the noise
+        the Trainium stage draws after ``torch.manual_seed(seed)``), sets the shifted FlowMatch
+        schedule as ``_stage_generate`` does, and runs true CFG only with --true-cfg-scale > 1
+        (``_true_cfg_kwargs``); the guidance scale is passed as the Trainium stage passes it (the
+        DiT drops it: guidance_embeds is off); rank 0 writes the packed latents the vae stage
+        reads.
         """
-        import time
-
         import torch
-        import torch.distributed as dist
 
-        from difflet.backends.neuron.compile import resolve_exec_mode
-        from difflet.backends.neuron.core import distributed
         from difflet.cli.dp import stage_loop
-        from difflet.pipeline.difflet_pipeline import DiffletPipeline
-        from difflet.pipeline.parallel_config import DiffletParallelConfig
 
         compile_shapes = _require_request_shape_in_set(args)
         h, w = args.height or 1024, args.width or 1024
-        # The whole parallel request: the backend and the application reject what they do not
-        # run (CFG parallelism without true CFG, SP with CP) rather than the stage dropping it.
-        parallel = DiffletParallelConfig(
-            tp_degree=args.tp_degree or 4,
-            cp_degree=args.cp_degree or 1,
-            cp_mode=getattr(args, "cp_mode", "gather_kv"),
-            cfg_parallel_enabled=getattr(args, "cfg_parallel", False),
-            sp_enabled=bool(getattr(args, "sp_enabled", None)),
-        )
         # --model-path (a local snapshot) binds the pipeline to it; the compiled path is the
         # stage dir, which the neuron application never reads.
         bound = {}
@@ -808,72 +757,33 @@ class QwenImageOrchestrator(ModelOrchestrator):
                 "resolved_source_id": args.revision or "local",
                 "compiled_path_override": str(self._stage_compiled_dir("generate", args)),
             }
-        start = time.perf_counter()
-        pipe = DiffletPipeline.from_pretrained(
-            _HF_MODEL_ID,
-            revision=args.revision,
-            local_files_only=True,
-            parallel=parallel,
-            dtype=torch.bfloat16,
-            height=h,
-            width=w,
-            shapes=compile_shapes,
-            compile_cache_dir=args.cache_dir,
-            backend=backend,
+
+        def request_kwargs(req) -> dict:
+            return dict(
+                **_true_cfg_kwargs(args, req),
+                generator=torch.Generator().manual_seed(req.seed),
+                prompt=req.prompt,
+                num_inference_steps=int(stage_loop.effective(req, args, "steps", 4)),
+                guidance_scale=float(stage_loop.effective(req, args, "guidance_scale", 4.0)),
+                output_type="latent",
+            )
+
+        def save(req, out) -> None:
+            packed = out.latents.cpu()
+            dest = stage_loop.work_file(args, req, "latents.pt")
+            torch.save(packed, dest)
+            print(f"[generate] packed latents {tuple(packed.shape)} -> {dest}", flush=True)
+
+        run_generate_stage(
+            args, backend, tag="qwen_image", model_id=_HF_MODEL_ID,
+            pipeline_kwargs=dict(revision=args.revision, height=h, width=w, shapes=compile_shapes,
+                                 **bound),
             application_kwargs=_torchrun_application_kwargs(args),
-            load=False,
-            **bound,
+            request_kwargs=request_kwargs,
+            save=save,
+            finish_compile=lambda: self._finish_stage_compile(
+                "generate", args, self._stage_compiled_dir("generate", args)),
         )
-        with fallback_tracker(pipe) as load_fallbacks:
-            pipe.load(skip_warmup=False)
-        load_s = time.perf_counter() - start
-
-        generate_fallbacks: list = []
-        if args.stage_mode == "compile":
-            if distributed.is_rank0():
-                self._finish_stage_compile(
-                    "generate", args, self._stage_compiled_dir("generate", args)
-                )
-        else:
-            # A DP worker's replica drains the queue: rank 0 claims, every rank runs the request
-            # (replica_requests), and a failed request stops the whole replica together.
-            for req in replica_requests(args, device=getattr(pipe.app, "device", None)):
-                with replica_request_scope(args, req):
-                    with fallback_tracker(pipe) as fallbacks:
-                        out = pipe(
-                            **_true_cfg_kwargs(args, req),
-                            # The noise the Trainium stage draws after torch.manual_seed(seed).
-                            generator=torch.Generator().manual_seed(req.seed),
-                            prompt=req.prompt,
-                            num_inference_steps=int(stage_loop.effective(req, args, "steps", 4)),
-                            # A bf16 [1] tensor of it, as the Trainium stage passes (the DiT
-                            # drops it: guidance_embeds is off).
-                            guidance_scale=float(
-                                stage_loop.effective(req, args, "guidance_scale", 4.0)
-                            ),
-                            output_type="latent",
-                        )
-                    generate_fallbacks.extend(fallbacks)
-                    if distributed.is_rank0():
-                        packed = out.latents.cpu()
-                        dest = stage_loop.work_file(args, req, "latents.pt")
-                        torch.save(packed, dest)
-                        print(f"[generate] packed latents {tuple(packed.shape)} -> {dest}",
-                              flush=True)
-
-        app = pipe.app
-        rank, world = distributed.world_info()
-        print(
-            f"[qwen_image] {backend} rank {rank}/{world}: "
-            f"exec_mode={resolve_exec_mode(envs.DIFFLET_EXEC_MODE)} "
-            f"compiled_blocks={len(getattr(app, 'compiled_blocks', []))} "
-            f"unwarmed_shapes={list(getattr(app, 'unwarmed_shapes', []))} "
-            f"fallbacks: load={list(load_fallbacks)} generate={generate_fallbacks} "
-            f"load+warmup {load_s:.1f}s, stage {time.perf_counter() - start:.1f}s",
-            flush=True,
-        )
-        if dist.is_initialized():
-            dist.destroy_process_group()
 
     def _stage_vae(self, args: argparse.Namespace) -> None:
         if torchrun_backend() is not None:
@@ -943,17 +853,14 @@ class QwenImageOrchestrator(ModelOrchestrator):
                 _write_image(img[:, :, 0], req.output)
 
     def _stage_vae_neuron(self, args: argparse.Namespace) -> None:
-        """The neuron backend's vae stage (--device-vae): one rank, a launch of its own after
-        the generate stage has exited, so the decoder has a whole core (see the module
-        docstring). Wan's ``_stage_vae_neuron`` with Qwen-Image's one-frame latent: the Wan
-        decoder (``NeuronWanVaeDecoderApplication``, which Qwen-Image's VAE maps onto key for
-        key) in fp32, eager, through the composed application's adapter
-        (``_DeviceQwenVaeDecoder``, which drops the frame axis). ``compile`` mode loads it with
-        the warm-up decode, which compiles and caches the per-op kernels at the request shape,
-        and writes the manifest; ``generate`` skips the warm-up, a second full decode that eager
-        mode does not need. The packed latents are unpacked and un-normalised by
-        ``_vae_latents``, as the host decode does, and the image is written as the host decode
-        writes it (``_write_image`` through PIL)."""
+        """The neuron backend's vae stage (``run_vae_stage``; --device-vae, the default): one
+        rank, a launch of its own after the generate stage has exited, so the decoder has a
+        whole core (see the module docstring). Wan's vae stage with Qwen-Image's one-frame
+        latent: the Wan decoder (``NeuronWanVaeDecoderApplication``, which Qwen-Image's VAE maps
+        onto key for key) in fp32, eager, through the composed application's adapter
+        (``_DeviceQwenVaeDecoder``, which drops the frame axis). The packed latents are unpacked
+        and un-normalised by ``_vae_latents``, as the host decode does, and the image is written
+        as the host decode writes it (``_write_image`` through PIL)."""
         import json
 
         import torch
@@ -962,28 +869,26 @@ class QwenImageOrchestrator(ModelOrchestrator):
         from difflet.backends.neuron.wan import vae as vae_mod
         from difflet.cli.dp import stage_loop
         from difflet.models.qwen_image import neuron_application as na
-        from difflet.pipeline.parallel_config import DiffletParallelConfig
         from difflet.pipeline.path_resolver import resolve_model_path
 
         vae_dir = Path(self._model_dir(args, resolve_model_path)) / "vae"
         with open(vae_dir / "config.json", encoding="utf-8") as f:
             z_dim = int(json.load(f)["z_dim"])
         h, w = args.height or 1024, args.width or 1024
-        app = vae_mod.NeuronWanVaeDecoderApplication(
-            model_path=str(vae_dir),
-            latent_shape=(1, z_dim, 1, 2 * (h // 16), 2 * (w // 16)),
-            parallel=DiffletParallelConfig(tp_degree=1),
-            device="neuron",
-        )
-        app.load(skip_warmup=args.stage_mode != "compile")
-        if args.stage_mode == "compile":
-            if distributed.is_rank0():
-                self._finish_stage_compile("vae", args, self._stage_compiled_dir("vae", args))
-            return
-        decoder = na._DeviceQwenVaeDecoder(app, device="neuron")
-        config = app.vae_config
-        for req in stage_loop.claimed_requests(args):
-            with stage_loop.request_scope(args, req, final=True):
+
+        def build(parallel):
+            return vae_mod.NeuronWanVaeDecoderApplication(
+                model_path=str(vae_dir),
+                latent_shape=(1, z_dim, 1, 2 * (h // 16), 2 * (w // 16)),
+                parallel=parallel,
+                device="neuron",
+            )
+
+        def prepare_decode(app):
+            decoder = na._DeviceQwenVaeDecoder(app, device="neuron")
+            config = app.vae_config
+
+            def decode(req) -> None:
                 packed = torch.load(stage_loop.work_file(args, req, "latents.pt"),
                                     map_location="cpu")
                 z = _vae_latents(packed, h, w, config.latents_mean, config.latents_std)
@@ -991,6 +896,14 @@ class QwenImageOrchestrator(ModelOrchestrator):
                     images = decoder(z)
                 if distributed.is_rank0():
                     _write_image(images.float().cpu(), req.output, save=_save_image_pil)
+
+            return decode
+
+        run_vae_stage(
+            args, build=build, prepare_decode=prepare_decode,
+            finish_compile=lambda: self._finish_stage_compile(
+                "vae", args, self._stage_compiled_dir("vae", args)),
+        )
 
     # ------------------------------------------------------------ helpers
 
@@ -1006,19 +919,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
         )
 
     def _stage_cache_inputs(self, stage: str, args: argparse.Namespace) -> dict:
-        inputs = self._backend_neutral_stage_cache_inputs(stage, args)
-        backend = torchrun_backend()
-        if backend is None:
-            return inputs
-        from difflet.backends.neuron.compile import resolve_exec_mode
-
-        # Additive, torchrun backends only: their stage dirs never match a Trainium/TPU
-        # artifact, and eager vs compile differ (an omitted --exec-mode keys as the default).
-        return {
-            **inputs,
-            "backend": backend,
-            "exec_mode": resolve_exec_mode(envs.DIFFLET_EXEC_MODE),
-        }
+        return torchrun_stage_keys(self._backend_neutral_stage_cache_inputs(stage, args))
 
     def _backend_neutral_stage_cache_inputs(self, stage: str, args: argparse.Namespace) -> dict:
         if stage == "text":
