@@ -6,9 +6,11 @@
 #                 HF_HOME=/data/hf, and /data is chowned to the login user once (when not theirs).
 #   (default)     no volume: HF_HOME=$HOME/hf on the container disk (mind containerVolumeInGb:
 #                 a disk overrun restarted the container in an earlier session).
-#   --no-xet      Hugging Face downloads over plain HTTPS: HF_HUB_DISABLE_XET=1 for this run and
-#                 in ~/.bashrc. For eu pods: on f3c (eu-2, 10-19) the Xet download of FLUX.1-dev
-#                 stalled at 0 B/s and HTTPS finished it; Xet stays the default (us-east-3: ~1 GB/s).
+#   --no-xet      Hugging Face downloads over plain HTTPS: HF_HUB_DISABLE_XET=1 in ~/.bashrc (an
+#                 interactive shell). A non-interactive `ssh pod "..."` skips ~/.bashrc, so pass
+#                 HF_HUB_DISABLE_XET=1 on each download command too, as HF_HOME is. For eu pods:
+#                 on f3c (eu-2, 10-19) the Xet download of FLUX.1-dev stalled at 0 B/s and HTTPS
+#                 finished it; Xet stays the default (us-east-3 pulled ~1 GB/s with it).
 #   --check-repo  print the resolved checkout and exit (0 = a Difflet checkout, 2 = not one).
 # The checkout is $REPO when set, else four directories up from this script (the repo root of
 # .claude/skills/difflet-cuda-verify/scripts/); it must hold pyproject.toml and difflet/.

@@ -28,7 +28,7 @@ def err(code, message):
     return {"message": message, "code": code, "data": None}
 
 
-def pool(region, status="AVAILABLE", gpu_type=PRO6000, counts=(1, 2)):
+def pool(region, status="AVAILABLE", gpu_type=PRO6000, counts=(1, 2), disk_limit=178):
     return {
         "gpuType": gpu_type,
         "displayName": "RTX PRO 6000",
@@ -36,7 +36,7 @@ def pool(region, status="AVAILABLE", gpu_type=PRO6000, counts=(1, 2)):
         "maxGpuCount": 2,
         "gpuCountOptions": list(counts),
         "pricePerGpuPerHour": "0.45",
-        "containerDiskLimitInGb": 178,
+        "containerDiskLimitInGb": disk_limit,
         "region": region,
         "status": status,
         "storageType": "SSD",
@@ -257,12 +257,12 @@ def test_create_help_says_an_explicit_disk_goes_with_the_volume():
 
 
 def test_pick_region_follows_preference_not_pool_order():
-    pools = [pool("eu-2"), pool("eu-3"), pool("us-east-3", "UNAVAILABLE")]
+    pools = [_eu(), pool("eu-3"), pool("us-east-3", "UNAVAILABLE")]
     assert yp.pick_region(pools, ["us-east-3", "eu-3", "eu-2"]) == "eu-3"
     pools.append(pool("us-east-3"))  # a second listing row for the same region, AVAILABLE
     assert yp.pick_region(pools, ["us-east-3", "eu-3", "eu-2"]) == "us-east-3"
     assert yp.pick_region([pool("eu-3", "UNAVAILABLE")], ["us-east-3", "eu-3"]) is None
-    assert yp.pick_region([pool("eu-2")], ["us-east-3", "eu-3"]) is None
+    assert yp.pick_region([_eu()], ["us-east-3", "eu-3"]) is None
     assert yp.pick_region([], ["us-east-3"]) is None
 
 
@@ -759,7 +759,18 @@ def test_list_prints_one_line_per_pod():
 
 # --- --prefer-first-for: wait for the first region, then fall back (F8b) ------------------
 
-_FALLBACK = ["--regions", "us-east-3,eu-2", "--volume-id", str(VOLUME_ID), "--disk-gb", "250"]
+_FALLBACK = [
+    "--regions",
+    "us-east-3,eu-2",
+    "--volume-id",
+    str(VOLUME_ID),
+    "--fallback-disk-gb",
+    "250",
+]
+
+
+def _eu(status="AVAILABLE", counts=(1, 2)):
+    return pool("eu-2", status, counts=counts, disk_limit=500)
 
 
 def _prefer(window, interval="60"):
@@ -781,9 +792,9 @@ def test_prefer_first_for_creates_in_the_first_region_when_it_comes_back_in_time
     t = FakeTransport(
         {
             ("GET", "/v2/gpus"): [
-                ok([pool("us-east-3", "UNAVAILABLE"), pool("eu-2")]),
-                ok([pool("us-east-3", "UNAVAILABLE"), pool("eu-2")]),
-                ok([pool("us-east-3"), pool("eu-2")]),
+                ok([pool("us-east-3", "UNAVAILABLE"), _eu()]),
+                ok([pool("us-east-3", "UNAVAILABLE"), _eu()]),
+                ok([pool("us-east-3"), _eu()]),
             ],
             ("POST", yp.V1_CREATE_PATH): ok(POD_ID),
         }
@@ -794,6 +805,8 @@ def test_prefer_first_for_creates_in_the_first_region_when_it_comes_back_in_time
     # The volume pod in us-east-3 (v1), never the eu fallback.
     (body,) = t.bodies("POST", yp.V1_CREATE_PATH)
     assert body["regionList"] == ["us-east-3"] and body["persistentVolumes"][0]["id"] == VOLUME_ID
+    # --fallback-disk-gb is not asked of the volume region (its limit is 178 GB).
+    assert "containerVolumeInGb" not in body and "exceeds" not in errs
     assert t.count("POST", "/v2/pods") == 0 and clock.sleeps == [60, 60]
     assert "waiting for us-east-3" in errs
 
@@ -801,7 +814,7 @@ def test_prefer_first_for_creates_in_the_first_region_when_it_comes_back_in_time
 def test_prefer_first_for_falls_back_after_the_window_with_a_container_disk():
     t = FakeTransport(
         {
-            ("GET", "/v2/gpus"): ok([pool("us-east-3", "UNAVAILABLE"), pool("eu-2")]),
+            ("GET", "/v2/gpus"): ok([pool("us-east-3", "UNAVAILABLE"), _eu()]),
             ("POST", "/v2/pods"): ok(pod("INITIALIZING", region="eu-2")),
         }
     )
@@ -818,7 +831,7 @@ def test_prefer_first_for_falls_back_after_the_window_with_a_container_disk():
 def test_prefer_first_for_zero_is_today_s_immediate_fallback():
     t = FakeTransport(
         {
-            ("GET", "/v2/gpus"): ok([pool("us-east-3", "UNAVAILABLE"), pool("eu-2")]),
+            ("GET", "/v2/gpus"): ok([pool("us-east-3", "UNAVAILABLE"), _eu()]),
             ("POST", "/v2/pods"): ok(pod("INITIALIZING", region="eu-2")),
         }
     )
@@ -830,11 +843,106 @@ def test_prefer_first_for_zero_is_today_s_immediate_fallback():
     )
 
 
-def test_prefer_first_for_with_nothing_free_anywhere_waits_only_with_the_watcher():
-    listing = ok([pool("us-east-3", "UNAVAILABLE"), pool("eu-2", "UNAVAILABLE")])
+def test_prefer_first_for_with_nothing_free_waits_out_the_window_then_gives_up():
+    listing = ok([pool("us-east-3", "UNAVAILABLE"), _eu("UNAVAILABLE")])
     t = FakeTransport({("GET", "/v2/gpus"): listing})
     clock = FakeClock()
     rc, out, _ = run(_prefer("120"), t, clock)
     # Nothing free in any region: the window still waits for the first region, then gives up
     # (no --wait-for-capacity), as a plain create does.
     assert rc == 2 and out == "" and clock.now == 120
+
+
+def test_a_12014_from_the_first_region_after_the_window_tries_the_next_in_the_same_round():
+    # The AVAILABLE flag can lag: us-east-3 listed free but refusing must not starve the order.
+    t = FakeTransport(
+        {
+            ("GET", "/v2/gpus"): ok([pool("us-east-3"), _eu()]),
+            ("POST", yp.V1_CREATE_PATH): err(12014, "Pod insufficient resources"),
+            ("POST", "/v2/pods"): ok(pod("INITIALIZING", region="eu-2")),
+        }
+    )
+    clock = FakeClock()
+    rc, out, errs = run(["create", "--name", "n", "--gpus", "1", *_FALLBACK], t, clock)
+    assert rc == 0 and out.strip() == POD_ID, errs
+    assert t.count("POST", yp.V1_CREATE_PATH) == 1 and t.count("POST", "/v2/pods") == 1
+    (body,) = t.bodies("POST", "/v2/pods")
+    assert body["regions"] == ["eu-2"] and body["containerVolumeInGb"] == 250
+    assert clock.sleeps == []
+
+
+def test_a_12014_from_the_first_region_inside_the_window_keeps_waiting_for_it():
+    t = FakeTransport(
+        {
+            ("GET", "/v2/gpus"): ok([pool("us-east-3"), _eu()]),
+            ("POST", yp.V1_CREATE_PATH): [
+                err(12014, "Pod insufficient resources"),
+                ok(POD_ID),
+            ],
+        }
+    )
+    clock = FakeClock()
+    rc, out, errs = run(_prefer("600"), t, clock)
+    assert rc == 0 and out.strip() == POD_ID, errs
+    assert t.count("POST", yp.V1_CREATE_PATH) == 2 and t.count("POST", "/v2/pods") == 0
+    assert clock.sleeps == [60]
+
+
+def test_a_failed_listing_inside_the_window_waits_and_after_it_raises():
+    t = FakeTransport(
+        {
+            ("GET", "/v2/gpus"): [
+                yp.ApiError("network", "GET /v2/gpus: timed out"),
+                ok([pool("us-east-3"), _eu()]),
+            ],
+            ("POST", yp.V1_CREATE_PATH): ok(POD_ID),
+        }
+    )
+    rc, out, errs = run(_prefer("600"), t, FakeClock())
+    assert rc == 0 and out.strip() == POD_ID and "timed out" in errs
+    # Out of the window (and without the watcher) the same failure is an API error.
+    t = FakeTransport({("GET", "/v2/gpus"): yp.ApiError("network", "timed out")})
+    rc, _, _ = run(["create", "--name", "n", "--gpus", "1", *_FALLBACK], t, FakeClock())
+    assert rc == 1
+
+
+def test_no_hold_for_a_first_region_that_does_not_sell_the_gpu_count():
+    t = FakeTransport(
+        {
+            ("GET", "/v2/gpus"): ok([pool("us-east-3", counts=(1,)), _eu()]),
+            ("POST", "/v2/pods"): ok(pod("INITIALIZING", region="eu-2")),
+        }
+    )
+    clock = FakeClock()
+    args = ["create", "--name", "n", "--gpus", "2", *_FALLBACK, "--prefer-first-for", "1800"]
+    rc, out, _ = run(args, t, clock)
+    assert rc == 0 and out.strip() == POD_ID and clock.sleeps == []
+
+
+@pytest.mark.parametrize(
+    "flag,value", [("--interval", "0"), ("--interval", "-5"), ("--prefer-first-for", "-1")]
+)
+def test_intervals_must_be_positive_and_the_window_not_negative(flag, value):
+    with pytest.raises(SystemExit):
+        yp.build_parser().parse_args(["create", "--name", "n", "--gpus", "1", flag, value])
+
+
+class _TickingClock(FakeClock):
+    """Every read moves time 1 ms: a round can start inside the window and end after it."""
+
+    def clock(self):
+        self.now += 0.001
+        return self.now
+
+
+def test_a_round_that_ends_as_the_window_closes_is_followed_by_one_out_of_it():
+    t = FakeTransport(
+        {
+            ("GET", "/v2/gpus"): ok([pool("us-east-3", "UNAVAILABLE"), _eu()]),
+            ("POST", "/v2/pods"): ok(pod("INITIALIZING", region="eu-2")),
+        }
+    )
+    rc, out, errs = run(_prefer("120"), t, _TickingClock())
+    assert rc == 0 and out.strip() == POD_ID, errs
+    (body,) = t.bodies("POST", "/v2/pods")
+    assert body["regions"] == ["eu-2"]

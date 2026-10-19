@@ -233,19 +233,25 @@ def _pool_sells(pool: dict, gpu_count: int | None) -> bool:
     return not options or gpu_count in options
 
 
-def pick_region(
+def pick_regions(
     pools: Iterable[dict], preferred: Iterable[str], gpu_count: int | None = None
-) -> str | None:
-    """The first preferred region with an AVAILABLE pool (that sells ``gpu_count`` cards)."""
+) -> list[str]:
+    """The preferred regions with an AVAILABLE pool (that sells ``gpu_count`` cards), in
+    preference order: the candidates of one create round."""
     available = {
         p.get("region")
         for p in pools
         if p.get("status") == "AVAILABLE" and _pool_sells(p, gpu_count)
     }
-    for region in preferred:
-        if region in available:
-            return region
-    return None
+    return [region for region in preferred if region in available]
+
+
+def pick_region(
+    pools: Iterable[dict], preferred: Iterable[str], gpu_count: int | None = None
+) -> str | None:
+    """The first preferred region with an AVAILABLE pool (that sells ``gpu_count`` cards)."""
+    regions = pick_regions(pools, preferred, gpu_count)
+    return regions[0] if regions else None
 
 
 def ssh_endpoint(pod_json: dict | None) -> tuple[str, int] | None:
@@ -385,13 +391,23 @@ def cmd_create(args, ctx: Ctx) -> int:
     preferred = [r.strip() for r in args.regions.split(",") if r.strip()]
     if not preferred:
         raise PodToolError("--regions is empty")
+    window = float(args.prefer_first_for)
+
+    def gets_volume(region: str) -> bool:
+        return args.volume_id is not None and region == VOLUME_REGION
 
     def body_for(region: str) -> dict:
+        # --fallback-disk-gb sizes the container disk only where the volume does not mount, so
+        # an eu fallback can get room for its download without the volume region (us-east-3,
+        # a 178 GB limit) being asked for the same disk.
+        disk = args.disk_gb
+        if args.fallback_disk_gb is not None and not gets_volume(region):
+            disk = args.fallback_disk_gb
         return build_create_body(
             args.name,
             args.gpus,
             region,
-            args.disk_gb,
+            disk,
             args.volume_id,
             args.mount,
             args.image,
@@ -401,9 +417,12 @@ def cmd_create(args, ctx: Ctx) -> int:
     if args.dry_run:
         ctx.out(
             f"# dry run: nothing sent. The first preferred region whose {args.gpu_type} pool is "
-            f"AVAILABLE (GET {API_BASE}/v2/gpus) gets its request; X-Api-Key is read from "
-            f"{ctx.key_file} at send time and not shown. containerVolumeInGb: --disk-gb when "
-            f"given (with the volume too), else {DEFAULT_DISK_GB} where there is no volume."
+            f"AVAILABLE (GET {API_BASE}/v2/gpus) gets its request (a 12014 moves on to the next "
+            f"one); with --prefer-first-for {window:g} a later region waits until "
+            f"{preferred[0]} has had that long. X-Api-Key is read from {ctx.key_file} at send "
+            f"time and not shown. containerVolumeInGb: --disk-gb when given (with the volume "
+            f"too), --fallback-disk-gb where the volume does not mount, else {DEFAULT_DISK_GB} "
+            f"where there is no volume."
         )
         for region in preferred:
             ctx.out(f"POST {API_BASE}{create_path(region, args.volume_id)}  # region {region}")
@@ -412,45 +431,55 @@ def cmd_create(args, ctx: Ctx) -> int:
 
     start = ctx.clock()
     while True:
+        # The window is read once per round, so a round cannot hold for the first region and
+        # then find the window closed with nothing tried.
+        in_window = ctx.clock() - start < window
         try:
             listing = api(ctx.transport, "GET", "/v2/gpus") or []
         except ApiError as exc:
-            # The listing is read-only, so the watcher rides out a failed read; the POST below
-            # is never retried after an error that is not 12014 (it may have created a pod).
-            if not args.wait_for_capacity:
+            # The listing is read-only, so the watcher (and the window) ride out a failed read;
+            # a POST is never retried after an error that is not 12014 (it may have landed).
+            if not args.wait_for_capacity and not in_window:
                 raise
             ctx.log(f"pool listing failed, retrying: {exc}")
             listing = None
         pools = [
             p for p in listing or [] if isinstance(p, dict) and p.get("gpuType") == args.gpu_type
         ]
-        region = pick_region(pools, preferred, gpu_count=args.gpus)
-        elapsed = ctx.clock() - start
-        # --prefer-first-for: a later region is free but the first is not; hold out for the
-        # first (us-east-3: the volume, the cheapest card) until the window closes.
-        holding = region not in (None, preferred[0]) and elapsed < args.prefer_first_for
-        if holding:
-            ctx.log(
-                f"{preferred[0]} has no {args.gpu_type} x{args.gpus} free; waiting for "
-                f"{preferred[0]} ({elapsed:.0f} of {args.prefer_first_for:.0f} s) before {region}"
-            )
-        elif listing is not None and region is None:
+        candidates = pick_regions(pools, preferred, gpu_count=args.gpus)
+        # Hold out for the first region only while it could still serve: a pool that is
+        # AVAILABLE but does not sell this GPU count is not coming back for this request.
+        first_cannot_sell = any(
+            p.get("region") == preferred[0]
+            and p.get("status") == "AVAILABLE"
+            and not _pool_sells(p, args.gpus)
+            for p in pools
+        )
+        holding = in_window and not first_cannot_sell
+        if listing is not None and not candidates:
             ctx.log(
                 f"no AVAILABLE {args.gpu_type} x{args.gpus} pool in {','.join(preferred)} "
                 f"(no capacity)"
             )
-        elif region is not None:
-            if args.volume_id is not None and region != VOLUME_REGION:
+        for region in candidates:
+            if region != preferred[0] and holding:
+                elapsed = ctx.clock() - start
                 ctx.log(
-                    f"the volume lives in {VOLUME_REGION}; {region} gets a "
-                    f"{body_for(region)['containerVolumeInGb']} GB container disk instead"
+                    f"{preferred[0]} has no {args.gpu_type} x{args.gpus} free; waiting for "
+                    f"{preferred[0]} ({elapsed:.0f} of {window:.0f} s) before {region}"
+                )
+                break
+            body = body_for(region)
+            disk = body.get("containerVolumeInGb")
+            if args.volume_id is not None and not gets_volume(region):
+                ctx.log(
+                    f"the volume lives in {VOLUME_REGION}; {region} gets a {disk} GB container "
+                    f"disk instead"
                 )
             limit = next(
                 (p.get("containerDiskLimitInGb") for p in pools if p.get("region") == region),
                 None,
             )
-            body = body_for(region)
-            disk = body.get("containerVolumeInGb")
             if disk is not None and isinstance(limit, int) and disk > limit:
                 ctx.log(f"warning: a {disk} GB container disk exceeds {region}'s limit {limit} GB")
             path = create_path(region, args.volume_id)
@@ -458,23 +487,24 @@ def cmd_create(args, ctx: Ctx) -> int:
                 record = api(ctx.transport, "POST", path, body)
             except NoCapacity as exc:
                 ctx.log(f"{region}: {exc.message} (code {exc.code}; the pool flag can lag)")
-            else:
-                # v2 answers the pod record, v1 the bare id.
-                is_record = isinstance(record, dict)
-                pod_id = record.get("id") if is_record else record
-                if pod_id in (None, ""):
-                    raise ApiError("bad-response", f"POST {path} returned no pod id")
-                status = pod_status(record) if is_record else "submitted"
-                ctx.log(
-                    f"created {pod_id} in {region}: {args.gpu_type} x{args.gpus}, status {status}"
-                )
-                ctx.out(str(pod_id))
-                return 0
-        elapsed = ctx.clock() - start
-        if elapsed < args.prefer_first_for:
-            # Inside the window every round waits, with or without --wait-for-capacity, and no
-            # sleep runs past the window's end.
-            ctx.sleep(min(args.interval, args.prefer_first_for - elapsed))
+                if region == preferred[0] and holding:
+                    break  # inside the window the first region keeps its priority
+                continue  # a refused POST created nothing: try the next AVAILABLE region
+            # v2 answers the pod record, v1 the bare id.
+            is_record = isinstance(record, dict)
+            pod_id = record.get("id") if is_record else record
+            if pod_id in (None, ""):
+                raise ApiError("bad-response", f"POST {path} returned no pod id")
+            status = pod_status(record) if is_record else "submitted"
+            ctx.log(f"created {pod_id} in {region}: {args.gpu_type} x{args.gpus}, status {status}")
+            ctx.out(str(pod_id))
+            return 0
+        if in_window:
+            # Inside the window every round waits, with or without --wait-for-capacity, no sleep
+            # runs past its end, and the round after it runs out of the window.
+            remaining = window - (ctx.clock() - start)
+            if remaining > 0:
+                ctx.sleep(min(args.interval, remaining))
             continue
         if not args.wait_for_capacity:
             return 2
@@ -598,6 +628,20 @@ def cmd_ssh_config(args, ctx: Ctx) -> int:
 # --- CLI ------------------------------------------------------------------------------------
 
 
+def _positive_seconds(text: str) -> float:
+    value = float(text)
+    if not value > 0 or value != value or value == float("inf"):
+        raise argparse.ArgumentTypeError(f"expected a positive number of seconds, got {text!r}")
+    return value
+
+
+def _non_negative_seconds(text: str) -> float:
+    value = float(text)
+    if not value >= 0 or value == float("inf"):
+        raise argparse.ArgumentTypeError(f"expected seconds >= 0, got {text!r}")
+    return value
+
+
 def build_parser() -> argparse.ArgumentParser:
     ap = argparse.ArgumentParser(
         prog="yottalabs_pod.py",
@@ -617,7 +661,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--regions",
         default=DEFAULT_REGIONS,
-        help="preference order (default %(default)s); the eu PRO 6000 pools sell 2-GPU nodes only",
+        help="preference order (default %(default)s); the first AVAILABLE region gets the request "
+        "and a 12014 moves on to the next",
     )
     p.add_argument(
         "--disk-gb",
@@ -634,6 +679,13 @@ def build_parser() -> argparse.ArgumentParser:
         help=f"network volume, mounted only in {VOLUME_REGION} where it lives "
         f"(difflet-cache: {DIFFLET_CACHE_VOLUME_ID})",
     )
+    p.add_argument(
+        "--fallback-disk-gb",
+        type=int,
+        default=None,
+        help="container disk in GB for a region where the volume does not mount (an eu "
+        "fallback that downloads its weights); not given: --disk-gb, else the default",
+    )
     p.add_argument("--mount", default="/data")
     p.add_argument("--image", default=DEFAULT_IMAGE)
     p.add_argument(
@@ -643,13 +695,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--prefer-first-for",
-        type=float,
+        type=_non_negative_seconds,
         default=0,
         metavar="SECONDS",
         help="while the first --regions entry has no card, keep polling it (every --interval s) "
-        "for up to SECONDS before taking a later region; 0 (default) falls back at once",
+        "for up to SECONDS before taking a later region, even past --max-wait; 0 (default) "
+        "falls back at once",
     )
-    p.add_argument("--interval", type=float, default=300)
+    p.add_argument("--interval", type=_positive_seconds, default=300)
     p.add_argument("--max-wait", type=float, default=21600)
     p.add_argument("--dry-run", action="store_true", help="print the request(s), send nothing")
     p.set_defaults(func=cmd_create)

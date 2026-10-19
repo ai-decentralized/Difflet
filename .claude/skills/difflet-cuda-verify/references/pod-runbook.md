@@ -23,7 +23,7 @@ by the owner's login with a `difflet-` name are ours (the console lists other lo
 | Region | $/GPU/h | Card | Container disk limit | Notes |
 |---|---|---|---|---|
 | us-east-3 | 0.45 | Workstation Edition | 178 GB | the only pool where `difflet-cache` mounts |
-| eu-3 | 2.65 | Server Edition | 500 GB | whole 2-GPU nodes ($5.30/h, F1b, F2); a 1-GPU pod with a 250 GB disk on 10-18 18:44 UTC (F9) |
+| eu-3 | 2.65 → 2.68 (10-19) | Server Edition | 500 GB | whole 2-GPU nodes ($5.30/h, F1b, F2); a 1-GPU pod with a 250 GB disk on 10-18 18:44 UTC (F9) |
 | eu-2 | 2.65 → 2.68 (10-19) | Server Edition | 500 GB | 1-GPU requests refused (12014) on 10-18; 1-GPU pods F4f, f3c on 10-19 |
 | eu-1 | 2.55 | not used | — | seen UNAVAILABLE |
 | us-central-7 | 1.35/h per pod (10-16, 10-17) | Server Edition | — | F3/F4 pods; device-cgroup incident |
@@ -42,10 +42,13 @@ by the owner's login with a `difflet-` name are ours (the console lists other lo
 - The us-east-3 pool can be full for hours: a paused pod there may not resume on demand.
 - **The pod order (owner, 2026-10-19)**: us-east-3 on `difflet-cache` first ($0.45/h; no download,
   no login), eu-2 / eu-3 ($2.68/h, Server Edition) when it is full — one call:
-  `create --regions us-east-3,eu-2,eu-3 --volume-id 469225541779435520 --disk-gb 250
-  --prefer-first-for 1800 --interval 60` holds out for us-east-3, then falls back with a 250 GB
-  container disk. On an eu pod: `pod_setup.sh --no-xet` (on f3c the Xet download stalled at
-  0 B/s; plain HTTPS finished it), and FLUX.1-dev needs the owner's device code again.
+  `create --regions us-east-3,eu-2,eu-3 --volume-id 469225541779435520 --fallback-disk-gb 250
+  --prefer-first-for 1800 --interval 60` holds out for us-east-3 (the volume, no container disk
+  asked: its limit is 178 GB), then falls back with a 250 GB container disk; a us-east-3 that is
+  listed free but answers 12014 moves on to eu in the same round once the window has closed. On
+  an eu pod: `pod_setup.sh --no-xet`, and `HF_HUB_DISABLE_XET=1` on every download command (a
+  non-interactive ssh shell skips `~/.bashrc`): on f3c the Xet download stalled at 0 B/s and
+  plain HTTPS finished it. FLUX.1-dev needs the owner's device code again there.
 - **Pod volumes exist in us-east-3 and us-east-4 only** (the console's Create Network Storage,
   Pod workload, 10-19); eu network storage is offered for the Virtual Machine workload only, and
   `POST /v2/volumes` creates object storage (CLOUD_STORAGE) whatever `storageType` says.
@@ -71,8 +74,8 @@ by the owner's login with a `difflet-` name are ours (the console lists other lo
 | `/home` | — | the F1 container restart (pod still alive) | `~/Difflet`, `~/logs` |
 
 - The volume: id **469225541779435520**, us-east-3, mounted by `persistentVolumes`
-  (`create --regions us-east-3 --volume-id 469225541779435520 --mount /data`; always pin the
-  region). It mounts **root-owned** the first time: `sudo chown user:user /data` once
+  (`create --volume-id 469225541779435520 --mount /data`: it rides only on us-east-3's body,
+  the pod order above). It mounts **root-owned** the first time: `sudo chown user:user /data` once
   (`pod_setup.sh --volume` does it).
 - Only one pod has ever mounted it: `difflet-cuda-f5b` (ID **502399632095187214**, us-east-3,
   $0.45/h), **PAUSED** since 2026-10-18 and still holding it. Next session: resume f5b (the
@@ -161,12 +164,13 @@ session's own shell command line and kills it. List with `pgrep -af hf_device_lo
 ## A session, start to finish
 
 1. `gpus` → `create … --dry-run` → the owner's yes → `create` (watcher if the pool is full;
-   with the volume always `--regions us-east-3`, where it mounts); id into the notes;
-   `wait-running`; `ssh-config` with a new alias `>> ~/.ssh/config`. The volume is held by
-   the paused f5b (ID 502399632095187214): `resume` it (owner's yes) or create a new pod on
-   the volume — not measured while f5b holds it; if `create` rejects the volume, ask the owner.
-2. `nvidia-smi` twice; `ship_branch.sh`; `pod_setup.sh [--volume]` (from any cwd: it resolves
-   its checkout from its own path since F9); downloads (disk checked).
+   the pod order above: us-east-3 on the volume, eu after `--prefer-first-for`); id into the
+   notes; `wait-running`; `ssh-config` with a new alias `>> ~/.ssh/config`. The paused
+   `difflet-cuda-f9c3` (ID 503002432390967883) holds the volume: `resume` it (owner's yes) or
+   create a new pod on the volume (`create --volume-id`, the v1 API, F9c).
+2. `nvidia-smi` twice; `ship_branch.sh`; `pod_setup.sh --volume` (us-east-3) or
+   `pod_setup.sh --no-xet` (eu) (from any cwd since F9); downloads (disk checked; on eu
+   `HF_HUB_DISABLE_XET=1` on the command).
 3. Gates detached (`run_gates.sh`, then the matrix / serve / two-GPU runs); poll for `DONE`.
 4. Copy evidence off (`scp -r <alias>:~/logs/<name> …`), curate into
    `artifacts/cuda-release1/<feature>/`, status-log entry, commit.
