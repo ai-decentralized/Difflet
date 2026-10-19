@@ -32,13 +32,13 @@ and again on f9 (Server) [F9].
 | DiT parity (D14, three gates) | PASS incl. padded prompt [F3, F4] | PASS [F5] | PASS both experts + rounding block [F1, F1b] |
 | e2e vs diffusers | PASS, floors 35 dB / 0.998 [F3] | PASS, floors 35 dB / 0.998 [F5]; relative to the noise floor when recorded [F4f]; seeds 0–7 gate A 36.79 dB vs 32.40 [F9c] | PASS, floors 25 dB / 0.99 [F1, F1b]; seeds 0–2 26.30–28.89 dB, overlapping diffusers' own noise floor 23.79–28.62 dB [F9]; gate relative to the floor when recorded, 2.0 dB headroom on the mean [F9b] |
 | CLI matrix cell (`verify_cli_cuda.py`) | PASS [F3, F5, F9] | PASS [F5, F9] | PASS [F9] |
-| `difflet serve` | PASS; LIMIT on concurrency on one GPU (429 `queue_timeout` after the 30 s default) [F3b]; `--dp-degree 2` PASS, two concurrent requests in one request-time [F2b] | N/A · refused by name, F5b | N/A · refused by name, F1b |
+| `difflet serve` | PASS; LIMIT on concurrency on one GPU (429 `queue_timeout` after the 30 s default) [F3b]; `--dp-degree 2` PASS, two concurrent requests in one request-time [F2b] | landed on the CPU, NOT MEASURED on a GPU [F3c] | landed on the CPU (`/v1/videos`, MP4), NOT MEASURED on a GPU [F3c] |
 | `--torch-compile` | PASS, opt-in [F4] | PASS · 7.1 s / 28 steps vs diffusers 8.3 [F4f] | PASS · 32.8 s / 40 steps vs diffusers 43.2 [F4f] |
 | `--teacache-cadence N` | PASS, fixed cadence only [F4] | N/A · refused, F5b | N/A · refused, F1b |
 | `--dp 2 --requests` | PASS, byte-identical [F2] | `--dp 1` batch PASS, byte-identical [F5c]; `--dp 2` NOT MEASURED (2 GPUs) | PASS, bit-identical [F2b] |
 | `--cfg-parallel` (2 GPUs) | N/A · single pass | N/A · guidance-distilled; true-CFG is the owner's call | PASS, bit-identical [F2] |
 | `--dp` × `--cfg-parallel` | N/A · refuses `--cfg-parallel` | N/A · refuses `--cfg-parallel` | NOT MEASURED (needs 4 cards) |
-| serving on two GPUs (`--dp-degree 2`) | PASS [F2b] | N/A · serve refused | N/A · serve refused |
+| serving on two GPUs (`--dp-degree 2`) | PASS [F2b] | allowed, NOT MEASURED [F3c] | N/A · refused: the video service runs one job at a time [F3c] |
 | CP / ulysses (`--cp-degree > 1`) | N/A · refused, F2b | N/A · refused, F2b | N/A · refused, F2b |
 | TP across PCIe, `--sp` | N/A · refused, F6 | N/A · refused, F6 | N/A · refused, F6 |
 
@@ -224,7 +224,7 @@ container disk, `--seed 0`), 191 s wall; compile / generate: Qwen-Image 3.8 s / 
 FLUX.1-dev 2.1 s / 16.8 s, Wan 2.2 2.1 s / 111.5 s [F9; `artifacts/cuda-release1/f9/`
 `verify_cli_results.json`].
 
-## Serve — `scripts/cuda_serve_smoke.sh` (Qwen-Image only) [F3b, f5b, Workstation]
+## Serve — `scripts/cuda_serve_smoke.sh` [F3b, f5b, Workstation; Flux and Wan F3c]
 
 `--output ~/logs/qwen-serve.png --steps 50 --requests 2`: ready in 56.0 s (load + the 4-step
 startup smoke), request 1 38.6 s, request 2 39.2 s (no load: the worker is resident), 60,893 MiB
@@ -234,6 +234,22 @@ requests → the second gets 429 `queue_timeout` after 30.0 s (the default `--qu
 shorter than one request on this card); `difflet serve --model-id Qwen/Qwen-Image
 --tp-degree 2` → refused naming F6 before any download, exit 1. Artifacts:
 `artifacts/cuda-release1/f3b/`.
+
+**FLUX.1-dev and Wan 2.2 (F3c, on the CPU; no GPU run yet).** Both serve on CUDA in F3b's
+shape: one resident worker holding `DiffletPipeline`, one opaque stage, the CLI's load kwargs
+and `generate` arguments. Flux answers the chat endpoint with a PNG (guidance in [0, 20], T5
+within 512 tokens). Wan 2.2 answers `/v1/videos` and `/v1/videos/sync` with an MP4 at the
+resident 480×832×9, 16 fps: `guidance_scale` and `guidance_scale_2` (the two experts) and a
+`negative_prompt` are taken; `boundary_ratio`, `flow_shift`, `true_cfg_scale` are refused;
+Wan 2.1 and `--dp-degree > 1` for Wan are refused by name. Expected on the pod: ready = load
+plus a 4-step smoke (Wan's runs both experts), request 2 without a load.
+
+```bash
+HF_HOME=$H scripts/cuda_serve_smoke.sh --model-id black-forest-labs/FLUX.1-dev \
+  --output ~/logs/<name>/flux-serve.png --requests 2
+HF_HOME=$H scripts/cuda_serve_smoke.sh --model-id Wan-AI/Wan2.2-T2V-A14B-Diffusers \
+  --output ~/logs/<name>/wan-serve.mp4 --requests 2     # startup timeout 1800 s (cold 126 GB)
+```
 
 ## Performance — `scripts/cuda_bench_dit.py` [F4, f3c, Server]
 

@@ -143,3 +143,89 @@ def test_identical_to_reference_compares_bytes(tmp_path):
     assert smoke.identical_to_reference(b"\x89PNGabc", ref) is True
     assert smoke.identical_to_reference(b"\x89PNGabd", ref) is False
     assert smoke.identical_to_reference(b"\x89PNGabc", None) is None
+
+
+# --- F3c: Flux and Wan ---------------------------------------------------------------------
+
+_FLUX = "black-forest-labs/FLUX.1-dev"
+_WAN = "Wan-AI/Wan2.2-T2V-A14B-Diffusers"
+
+
+def test_each_model_has_the_cuda_cli_s_defaults():
+    qwen, flux, wan = (smoke.MODEL_DEFAULTS[m] for m in (smoke.MODEL_ID, _FLUX, _WAN))
+    assert (qwen["steps"], qwen["height"], qwen["width"], qwen["kind"]) == (50, 1024, 1024, "image")
+    assert (flux["steps"], flux["height"], flux["width"], flux["kind"]) == (28, 1024, 1024, "image")
+    assert (wan["steps"], wan["height"], wan["width"], wan["num_frames"]) == (40, 480, 832, 9)
+    assert wan["kind"] == "video" and wan["startup_timeout"] > qwen["startup_timeout"]
+
+
+def test_flags_left_out_take_the_model_s_defaults():
+    args = smoke.parse_args(["--model-id", _WAN])
+    assert (args.steps, args.height, args.width, args.num_frames) == (40, 480, 832, 9)
+    assert args.output.endswith(".mp4") and args.startup_timeout == 1800.0
+    args = smoke.parse_args(["--model-id", _FLUX, "--steps", "4"])
+    assert (args.steps, args.height) == (4, 1024) and args.output.endswith(".png")
+    assert smoke.parse_args([]).model_id == smoke.MODEL_ID == "Qwen/Qwen-Image"
+    with pytest.raises(SystemExit):
+        smoke.parse_args(["--model-id", "Wan-AI/Wan2.1-T2V-14B-Diffusers"])
+
+
+def test_flux_chat_body_names_the_model_and_carries_guidance_only_when_given():
+    body = smoke.build_chat_body(
+        "a cat", steps=28, seed=1, height=1024, width=1024, model_id=_FLUX, guidance_scale=3.5
+    )
+    assert body["model"] == _FLUX and body["extra_body"]["guidance_scale"] == 3.5
+    body = smoke.build_chat_body("a cat", steps=28, seed=1, height=1024, width=1024, model_id=_FLUX)
+    assert "guidance_scale" not in body["extra_body"]
+
+
+def test_wan_video_form_carries_the_profile_shape_and_the_request_knobs():
+    fields = dict(
+        smoke.build_video_form(
+            "a cat walking",
+            steps=40,
+            seed=2,
+            height=480,
+            width=832,
+            num_frames=9,
+            model_id=_WAN,
+            guidance_scale=4.0,
+            guidance_scale_2=3.0,
+        )
+    )
+    assert fields == {
+        "model": _WAN,
+        "prompt": "a cat walking",
+        "size": "832x480",
+        "num_frames": "9",
+        "num_inference_steps": "40",
+        "seed": "2",
+        "guidance_scale": "4",
+        "guidance_scale_2": "3",
+    }
+    fields = dict(
+        smoke.build_video_form(
+            "x", steps=4, seed=0, height=480, width=832, num_frames=9, model_id=_WAN
+        )
+    )
+    assert "guidance_scale" not in fields and "guidance_scale_2" not in fields
+
+
+def test_multipart_encoding_is_what_the_videos_endpoint_parses():
+    from email.parser import BytesParser
+    from email.policy import default
+
+    body, content_type = smoke.encode_multipart([("prompt", "a cat"), ("num_frames", "9")])
+    message = BytesParser(policy=default).parsebytes(
+        f"Content-Type: {content_type}\r\n\r\n".encode() + body
+    )
+    parts = {
+        p.get_param("name", header="content-disposition"): p.get_content()
+        for p in message.iter_parts()
+    }
+    assert parts == {"prompt": "a cat", "num_frames": "9"}
+
+
+def test_serve_command_names_the_model():
+    cmd, _ = smoke.serve_command(port=8099, cache_dir=None, python="py", model_id=_WAN)
+    assert cmd[3:7] == ["serve", "--model-id", _WAN, "--port"]
