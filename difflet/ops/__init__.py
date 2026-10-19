@@ -10,6 +10,7 @@ _EXPORTS = {
     "rms_norm_fp32": ("norm", "rms_norm_fp32"),
     "SPMDRank": ("collectives", "SPMDRank"),
     "attention": ("attention", "attention"),
+    "attention_heads": ("attention", "attention_heads"),
     "cross_attention": ("attention", "cross_attention"),
     "ring_attention": ("attention", "ring_attention"),
     "joint_ring_attention": ("attention", "joint_ring_attention"),

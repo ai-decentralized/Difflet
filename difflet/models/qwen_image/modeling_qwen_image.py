@@ -26,6 +26,7 @@ import torch
 from torch import nn
 
 from difflet.ops import (
+    attention_heads,
     ColumnParallelLinear,
     RowParallelLinear,
     SPMDRank,
@@ -409,15 +410,13 @@ class _QwenImageTrainiumAttnProcessor:
                 # heads folded into the batch axis. Attention is per-rank: q/k/v
                 # already carry this rank's head shard from the ColumnParallel
                 # projections (_parallel_config is None — no context parallelism).
-                q = joint_query.transpose(1, 2)
-                k = joint_key.transpose(1, 2)
-                v = joint_value.transpose(1, 2)
-                b, h, s_q, d = q.shape
-                s_k = k.shape[2]
-                attn_out = attention(
-                    q.reshape(b * h, s_q, d),
-                    k.reshape(b * h, s_k, d),
-                    v.reshape(b * h, s_k, d),
+                # (B, H, S, d) views straight to the op: each backend folds the heads itself
+                # if its kernel wants (B*H, S, d) (the reshapes this code used to do), and
+                # CUDA runs SDPA on the views with no copy (F4d).
+                attn_out = attention_heads(
+                    joint_query.transpose(1, 2),
+                    joint_key.transpose(1, 2),
+                    joint_value.transpose(1, 2),
                     scale=1.0 / math.sqrt(head_dim),
                     causal=False,
                     attention_mask=None,
@@ -425,7 +424,7 @@ class _QwenImageTrainiumAttnProcessor:
                     tp_k=True,
                     tp_out=False,
                 )
-                joint_hidden_states = attn_out.reshape(b, h, s_q, d).transpose(1, 2)
+                joint_hidden_states = attn_out.transpose(1, 2)
             else:
                 # Masked joint attention (a padded prompt on an eager backend): the
                 # same op in (B, H, S, d) layout, so the (B, 1, 1, S_k) key mask

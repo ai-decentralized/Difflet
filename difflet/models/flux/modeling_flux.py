@@ -44,6 +44,7 @@ from difflet.layers.normalization import (
     NeuronAdaLayerNormZeroSingle,
 )
 from difflet.ops import (
+    attention_heads,
     ColumnParallelLinear,
     CustomRMSNorm,
     LayerNorm,
@@ -118,31 +119,22 @@ def attention_wrapper_sharded_without_swap(query, key, value):
     Uses tp_q=True, tp_k=True to let the kernel handle transposes internally
     for better performance (optimized DMA transpose).
     """
-    bs, n_head, q_len, d_head = query.shape
-    k_len = key.shape[2]
-    v_len = value.shape[2]
-
-    # Only reshape, no permutes - let kernel handle transposes via tp_* flags
-    q = query.reshape((bs * n_head, q_len, d_head))   # [B*H, S, d]
-    k = key.reshape((bs * n_head, k_len, d_head))     # [B*H, S, d]
-    v = value.reshape((bs * n_head, v_len, d_head))   # [B*H, S, d]
-
+    d_head = query.shape[-1]
     scale = 1 / math.sqrt(d_head)
 
-    attn_output = attention(
-        q,
-        k,
-        v,
+    # (B, H, S, D) views straight to the op: each backend folds the heads itself if its
+    # kernel wants (B*H, S, d) (the reshapes this function used to do), and CUDA runs SDPA on
+    # the views with no copy (F4d).
+    return attention_heads(
+        query,
+        key,
+        value,
         scale=scale,
         causal=False,  # Flux uses bi-directional attention
         tp_q=True,  # Q is (batch, seqlen, d)
         tp_k=True,  # K is (batch, seqlen, d) - kernel transposes internally
         tp_out=False,  # Output is (batch, seqlen, d)
     )
-
-    attn_output = attn_output.reshape((bs, n_head, q_len, d_head))
-
-    return attn_output
 
 
 # Context Parallel Attention Helper Function, CC-Ops + Attention Kernel

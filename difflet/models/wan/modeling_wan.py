@@ -45,6 +45,7 @@ from diffusers.models.embeddings import (
 from diffusers.models.normalization import FP32LayerNorm
 
 from difflet.ops import (
+    attention_heads,
     rms_norm_fp32,
     ColumnParallelLinear,
     RMSNorm,
@@ -377,15 +378,13 @@ def _attn_kernel(
     standard (S, D) layout, no mask. The CPU reference (``difflet.ops`` cpu impl)
     computes the same standard attention, so trajectory parity is preserved.
     """
-    batch, heads, seq_q, dim = q.shape
-    seq_k = k.shape[2]
-    q_flat = q.reshape(batch * heads, seq_q, dim)
-    k_flat = k.reshape(batch * heads, seq_k, dim)
-    v_flat = v.reshape(batch * heads, seq_k, dim)
-    out = attention(
-        q_flat,
-        k_flat,
-        v_flat,
+    # (B, H, S, D) views straight to the op: each backend folds the heads itself if its kernel
+    # wants (B*H, S, D) (the same ops this function used to run), and CUDA runs SDPA on the
+    # views with no copy (F4d).
+    return attention_heads(
+        q,
+        k,
+        v,
         scale=1.0 / math.sqrt(head_dim),
         causal=False,
         attention_mask=None,
@@ -393,7 +392,6 @@ def _attn_kernel(
         tp_k=True,
         tp_out=False,
     )
-    return out.reshape(batch, heads, seq_q, dim)
 
 
 class WanAttention(nn.Module):
