@@ -21,6 +21,8 @@ from pathlib import Path
 
 import torch
 
+from tests.unit.backends._neuron_gloo import record_block_rows
+
 TINY_LTX2_TRANSFORMER: dict = {
     "_class_name": "LTX2VideoTransformer3DModel",
     "_diffusers_version": "0.37.0.dev0",
@@ -254,6 +256,8 @@ def l1_ltx2_worker(
     app.load()
     after_warmup = counters["stats"]["unique_graphs"]
     block_tokens: list = []
+    block_rows = (record_block_rows(app.module.transformer.transformer_blocks[0],
+                                    "hidden_states") if exec_mode == "eager" else [])
     if exec_mode == "eager":
         app.module.transformer.transformer_blocks[0].register_forward_pre_hook(
             lambda module, args, kwargs: block_tokens.append(
@@ -288,6 +292,7 @@ def l1_ltx2_worker(
                      for name in ("attn1", "audio_attn1", "attn2", "audio_attn2",
                                   "audio_to_video_attn", "video_to_audio_attn")},
         "block_tokens": block_tokens,
+        "block_rows": block_rows,
         "ff_activations": sorted({type(b.ff.net[0]).__name__ for b in
                                   app.module.transformer.transformer_blocks}
                                  | {type(b.audio_ff.net[0]).__name__ for b in
@@ -450,6 +455,8 @@ def l2_app_worker(rank: int, world_size: int, model_dir: str, tp: int, cfg: bool
         enable_text_encoder=False, exec_mode=exec_mode, device="cpu",
     )
     app.load()
+    block_rows = (record_block_rows(app.transformer.module.transformer.transformer_blocks[0],
+                                    "hidden_states") if exec_mode == "eager" else [])
     steps_seen: list = []
     app.step_hook = lambda: steps_seen.append(1)
     calls: list = []
@@ -465,6 +472,7 @@ def l2_app_worker(rank: int, world_size: int, model_dir: str, tp: int, cfg: bool
         "dit_calls": len(calls),
         "contract_hidden": list(contract["hidden_states"]["shape"]),
         "phase_seconds": sorted(app.phase_seconds),
+        "block_rows": block_rows,
     }
 
 

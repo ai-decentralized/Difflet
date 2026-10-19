@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import torch
 
+from tests.unit.backends._neuron_gloo import record_block_rows
+
 # --------------------------------------------------------------------------
 # C5: TP collectives and mesh
 # --------------------------------------------------------------------------
@@ -1056,6 +1058,7 @@ def w1_wan_cfg_parallel_worker(rank: int, world_size: int, model_dir: str) -> di
     app.load()
     calls: list[float] = []
     app.transformer_adapter.forward_hook = calls.append
+    block_rows = record_block_rows(app.transformer.module.blocks[0])
     prompt_embeds, latents = tiny_wan_pipeline_inputs()
     out = app(prompt_embeds=prompt_embeds, latents=latents, channels=TINY_LATENT_SHAPE[1],
               num_inference_steps=2, guidance_scale=5.0, output_type="latent")
@@ -1065,6 +1068,7 @@ def w1_wan_cfg_parallel_worker(rank: int, world_size: int, model_dir: str) -> di
         "sha256": hashlib.sha256(final.contiguous().numpy().tobytes()).hexdigest(),
         "dit_calls": len(calls),
         "unwarmed_shapes": [list(s) for s in app.unwarmed_shapes],
+        "block_rows": block_rows,
     }
 
 
@@ -1141,11 +1145,12 @@ def w1_wan_cp_worker(rank: int, world_size: int, model_dir: str, cp_mode: str) -
         encoder_threads=2,
     )
     app.load()
+    block_rows = record_block_rows(app.transformer.module.blocks[0])
     prompt_embeds, latents = tiny_wan_pipeline_inputs()
     out = app(prompt_embeds=prompt_embeds, latents=latents, channels=TINY_LATENT_SHAPE[1],
               num_inference_steps=2, guidance_scale=5.0, output_type="latent")
     final = out.latents
-    return {"latents": final.tolist(),
+    return {"latents": final.tolist(), "block_rows": block_rows,
             "sha256": hashlib.sha256(final.contiguous().numpy().tobytes()).hexdigest()}
 
 
@@ -1199,11 +1204,12 @@ def w1_wan_sp_worker(rank: int, world_size: int, model_dir: str, cfg: bool) -> d
         encoder_threads=2,
     )
     app.load()
+    block_rows = record_block_rows(app.transformer.module.blocks[0])
     prompt_embeds, latents = tiny_wan_pipeline_inputs()
     out = app(prompt_embeds=prompt_embeds, latents=latents, channels=TINY_LATENT_SHAPE[1],
               num_inference_steps=2, guidance_scale=5.0, output_type="latent")
     final = out.latents
-    return {"latents": final.tolist(),
+    return {"latents": final.tolist(), "block_rows": block_rows,
             "sha256": hashlib.sha256(final.contiguous().numpy().tobytes()).hexdigest()}
 
 

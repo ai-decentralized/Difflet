@@ -772,8 +772,17 @@ def test_cfg_parallel_on_four_ranks_matches_tp1(tiny):
         assert result["sha256"] == results[0]["sha256"]
         assert result["dit_calls"] == 2  # one batched call per step, not two
         assert result["unwarmed_shapes"] == []
+        # Review T3: each rank's blocks see its own branch of the pair, batch 1, and every
+        # token; a module running both branches on every rank would match the reference too.
+        assert result["block_rows"] == [[1, _tokens(tiny)]] * 2
     torch.testing.assert_close(torch.tensor(results[0]["latents"]), reference,
                                atol=1e-4, rtol=1e-4)
+
+
+def _tokens(tiny) -> int:
+    """The tiny model's patch tokens at TINY_SHAPE: the sequence CP and SP shard."""
+    return NeuronWanConfig.from_pretrained(tiny.transformer, text_seq_len=TINY_TEXT_SEQ_LEN,
+                                           **TINY_SHAPE).image_seq_len
 
 
 def _umt5_budget_between(monkeypatch, root, fits, fails):
@@ -844,6 +853,9 @@ def test_context_parallel_on_four_ranks_matches_tp1(tiny, cp_mode):
     results = run_ranks(w1_wan_cp_worker, tiny.dir, cp_mode, world_size=4, env=OFFLINE)
     for result in results:
         assert result["sha256"] == results[0]["sha256"]
+        # Review T4: serial CFG (two batch-1 calls per step), each block on this rank's half of
+        # the tokens; the ranks agreeing proves nothing about the split.
+        assert result["block_rows"] == [[1, _tokens(tiny) // 2]] * 4
     torch.testing.assert_close(torch.tensor(results[0]["latents"]), reference,
                                atol=1e-4, rtol=1e-4)
 
@@ -857,7 +869,11 @@ def test_sequence_parallel_on_four_ranks_matches_tp1(tiny, cfg):
     equal to the TP1 reference, alone and combined with CFG parallelism."""
     reference = tiny_wan_pipeline_reference(tiny.dir, num_inference_steps=2, guidance_scale=5.0)
     results = run_ranks(w1_wan_sp_worker, tiny.dir, cfg, world_size=4, env=OFFLINE)
+    tp = 2 if cfg else 4
     for result in results:
         assert result["sha256"] == results[0]["sha256"]
+        # The blocks see this rank's 1/tp of the tokens, and under CFG parallelism one branch
+        # per call (one call per step), else two batch-1 calls per step.
+        assert result["block_rows"] == [[1, _tokens(tiny) // tp]] * (2 if cfg else 4)
     torch.testing.assert_close(torch.tensor(results[0]["latents"]), reference,
                                atol=1e-4, rtol=1e-4)

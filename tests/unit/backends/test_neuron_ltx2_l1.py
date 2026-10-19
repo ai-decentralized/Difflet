@@ -244,6 +244,7 @@ def test_context_parallel_shards_the_video_tokens(tiny, tp, cp_mode):
     mode = "ulysses" if cp_mode == "ulysses" else "gather"
     for result in results:
         assert result["block_tokens"] == [[TINY_VIDEO_SEQ_LEN // 2, TINY_AUDIO_SEQ_LEN]] * 3
+        assert result["block_rows"] == [[1, TINY_VIDEO_SEQ_LEN // 2]] * 3
         assert result["kv_modes"] == {"attn1": mode, "video_to_audio_attn": "gather",
                                       "audio_attn1": None, "attn2": None, "audio_attn2": None,
                                       "audio_to_video_attn": None}
@@ -264,6 +265,10 @@ def test_cfg_parallel_splits_the_pair_and_gathers_both_branches(tiny):
     video, audio = diffusers_reference(tiny.transformer, batch=2)
     _assert_replicated_and_close(results, video, audio)
     assert results[0]["warmup_shapes"][0] == (2, TINY_VIDEO_SEQ_LEN, 128)
+    # Review T3: the module splits the pair, so each rank's blocks see one branch (batch 1) of
+    # all the video tokens; a module running both branches on every rank would also match.
+    for result in results:
+        assert result["block_rows"] == [[1, TINY_VIDEO_SEQ_LEN]] * 3
 
 
 # ---- (d) the real checkpoint's keys --------------------------------------------------------
