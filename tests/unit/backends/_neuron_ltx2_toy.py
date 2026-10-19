@@ -434,16 +434,18 @@ def reference_generate(model_dir, *, guidance_scale: float, steps: int, seed: in
 
 
 def l2_app_worker(rank: int, world_size: int, model_dir: str, tp: int, cfg: bool,
-                  guidance_scale: float, steps: int, exec_mode: str = "eager") -> dict:
+                  guidance_scale: float, steps: int, exec_mode: str = "eager", cp: int = 1,
+                  cp_mode: str = "gather_kv") -> dict:
     """The composed ``TorchNeuronLtx2Application`` (text encoder off, the conditioning passed
-    in) on CPU fp32 at TP=tp (x CFG 2 when ``cfg``): one ``generate``; the latents and the
-    lifecycle."""
+    in) on CPU fp32 at TP=tp (x CFG 2 when ``cfg``, x CP=cp in ``cp_mode``): one ``generate``;
+    the latents and the lifecycle."""
     from difflet.models.ltx_2.neuron_application import TorchNeuronLtx2Application
     from difflet.pipeline.parallel_config import DiffletParallelConfig
 
     app = TorchNeuronLtx2Application(
         model_path=model_dir,
-        parallel=DiffletParallelConfig(tp_degree=tp, cfg_parallel_enabled=cfg),
+        parallel=DiffletParallelConfig(tp_degree=tp, cfg_parallel_enabled=cfg, cp_degree=cp,
+                                       cp_mode=cp_mode),
         dtype=torch.float32, shape=dict(TINY_SHAPE), text_seq_len=TINY_TEXT_SEQ_LEN,
         enable_text_encoder=False, exec_mode=exec_mode, device="cpu",
     )
