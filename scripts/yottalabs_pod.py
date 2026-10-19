@@ -192,9 +192,12 @@ def build_create_body(
         "expose": [{"port": 22, "protocol": "SSH"}],
     }
     if volume_id is not None and region == VOLUME_REGION:
-        body["persistentVolumes"] = [
-            {"volumeId": volume_id, "mountPath": mount, "needBackup": False}
-        ]
+        # PodV2CreateRequest.volumes: ``{id, mountPath}``, the id a string (the API reference:
+        # "string to avoid JavaScript int64 precision loss"). An unknown key is dropped without
+        # an error: ``persistentVolumes`` created difflet-cuda-f9c2 with no volume (2026-10-19).
+        # The v2 create attaches R2 volumes only: a NETWORK_STORAGE volume (difflet-cache)
+        # returns 12016, so a pod on it comes from the console.
+        body["volumes"] = [{"id": str(volume_id), "mountPath": mount}]
         if disk_gb is not None:
             body["containerVolumeInGb"] = disk_gb
     else:

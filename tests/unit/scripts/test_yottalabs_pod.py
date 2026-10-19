@@ -122,9 +122,7 @@ def test_create_body_per_region():
         "difflet-f8", 1, "us-east-3", None, VOLUME_ID, "/data", yp.DEFAULT_IMAGE
     )
     assert east["regions"] == ["us-east-3"]
-    assert east["persistentVolumes"] == [
-        {"volumeId": VOLUME_ID, "mountPath": "/data", "needBackup": False}
-    ]
+    assert east["volumes"] == [{"id": str(VOLUME_ID), "mountPath": "/data"}]
     assert "containerVolumeInGb" not in east
     assert east["name"] == "difflet-f8" and east["gpuType"] == PRO6000 and east["gpuCount"] == 1
     assert east["image"] == "yottalabsai/pytorch:2.9.0-py3.11-cuda12.8.1-cudnn-devel-ubuntu22.04"
@@ -133,12 +131,12 @@ def test_create_body_per_region():
     eu = yp.build_create_body("difflet-f8", 2, "eu-3", None, VOLUME_ID, "/data", yp.DEFAULT_IMAGE)
     assert eu["regions"] == ["eu-3"]
     assert eu["containerVolumeInGb"] == yp.DEFAULT_DISK_GB == 150
-    assert "persistentVolumes" not in eu
+    assert "volumes" not in eu
     assert eu["gpuCount"] == 2
 
     east_no_volume = yp.build_create_body("n", 1, "us-east-3", 120, None, "/data", yp.DEFAULT_IMAGE)
     assert east_no_volume["containerVolumeInGb"] == 120
-    assert "persistentVolumes" not in east_no_volume
+    assert "volumes" not in east_no_volume
     default_no_volume = yp.build_create_body(
         "n", 1, "us-east-3", None, None, "/data", yp.DEFAULT_IMAGE
     )
@@ -157,9 +155,7 @@ def test_create_body_per_region_through_the_cli():
     rc, out, _ = run(["create", "--name", "n", "--gpus", "1", "--volume-id", str(VOLUME_ID)], t)
     assert rc == 0 and out.strip() == POD_ID
     (body,) = t.bodies("POST", "/v2/pods")
-    assert (
-        body["regions"] == ["us-east-3"] and body["persistentVolumes"][0]["volumeId"] == VOLUME_ID
-    )
+    assert body["regions"] == ["us-east-3"] and body["volumes"][0]["id"] == str(VOLUME_ID)
 
     t = FakeTransport(
         {
@@ -171,7 +167,7 @@ def test_create_body_per_region_through_the_cli():
     assert rc == 0
     (body,) = t.bodies("POST", "/v2/pods")
     assert body["regions"] == ["eu-3"] and body["containerVolumeInGb"] == 150
-    assert "persistentVolumes" not in body
+    assert "volumes" not in body
 
 
 def test_create_body_keeps_an_explicit_disk_with_a_volume():
@@ -179,15 +175,13 @@ def test_create_body_keeps_an_explicit_disk_with_a_volume():
     # the F9 pod needs a 170 GB container disk for the Wan download beside the cache volume.
     east = yp.build_create_body("n", 1, "us-east-3", 170, VOLUME_ID, "/data", yp.DEFAULT_IMAGE)
     assert east["containerVolumeInGb"] == 170
-    assert east["persistentVolumes"] == [
-        {"volumeId": VOLUME_ID, "mountPath": "/data", "needBackup": False}
-    ]
+    assert east["volumes"] == [{"id": str(VOLUME_ID), "mountPath": "/data"}]
     # An explicit 150 is still explicit: sent with the volume.
     east = yp.build_create_body("n", 1, "us-east-3", 150, VOLUME_ID, "/data", yp.DEFAULT_IMAGE)
-    assert east["containerVolumeInGb"] == 150 and "persistentVolumes" in east
+    assert east["containerVolumeInGb"] == 150 and "volumes" in east
     # Outside the volume's region the explicit size is the container disk, as before.
     eu = yp.build_create_body("n", 2, "eu-3", 170, VOLUME_ID, "/data", yp.DEFAULT_IMAGE)
-    assert eu["containerVolumeInGb"] == 170 and "persistentVolumes" not in eu
+    assert eu["containerVolumeInGb"] == 170 and "volumes" not in eu
 
 
 def test_disk_gb_not_given_is_none_and_given_is_kept_through_the_cli():
@@ -214,9 +208,9 @@ def test_disk_gb_not_given_is_none_and_given_is_kept_through_the_cli():
 
     body = volume_pod(["--disk-gb", "170"])
     assert body["containerVolumeInGb"] == 170
-    assert body["persistentVolumes"][0]["volumeId"] == VOLUME_ID
+    assert body["volumes"][0]["id"] == str(VOLUME_ID)
     body = volume_pod([])
-    assert "containerVolumeInGb" not in body and "persistentVolumes" in body
+    assert "containerVolumeInGb" not in body and "volumes" in body
 
 
 def test_dry_run_shows_the_explicit_disk_beside_the_volume():
@@ -242,7 +236,7 @@ def test_dry_run_shows_the_explicit_disk_beside_the_volume():
     )
     assert rc == 0
     body = json.loads(out.split("# region us-east-3\n", 1)[1])
-    assert body["containerVolumeInGb"] == 170 and body["persistentVolumes"]
+    assert body["containerVolumeInGb"] == 170 and body["volumes"]
 
 
 def test_create_help_says_an_explicit_disk_goes_with_the_volume():
@@ -486,7 +480,7 @@ def test_dry_run_and_errors_never_print_the_key(tmp_path, monkeypatch):
         no_network,
     )
     assert rc == 0
-    assert "POST" in out and "/v2/pods" in out and "persistentVolumes" in out
+    assert "POST" in out and "/v2/pods" in out and "volumes" in out
     assert SECRET not in out + errs
 
     # the real transport: the key goes in the header and nowhere else
