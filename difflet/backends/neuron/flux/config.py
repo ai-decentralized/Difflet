@@ -106,9 +106,11 @@ class NeuronFluxConfig:
             raise ValueError(f"cp_mode must be one of {CP_MODES}, got {self.cp_mode!r}")
         cp = None if self.cp_degree is None else int(self.cp_degree)
         if self.context_parallel_enabled and cp is not None and cp > 1:
-            if self.image_seq_len % cp:
-                raise ValueError(f"Flux image_seq_len={self.image_seq_len} is not divisible by "
-                                 f"cp_degree={cp}")
+            # Flux shards both streams along the CP group (each rank holds [text || image]).
+            for name, length in (("image_seq_len", self.image_seq_len),
+                                 ("text_seq_len", int(self.text_seq_len))):
+                if length % cp:
+                    raise ValueError(f"Flux {name}={length} is not divisible by cp_degree={cp}")
             if self.cp_mode == "ulysses" and (heads // tp) % cp:
                 raise ValueError(f"cp_mode='ulysses' needs num_attention_heads={heads} divisible "
                                  f"by tp_degree * cp_degree = {tp * cp}")

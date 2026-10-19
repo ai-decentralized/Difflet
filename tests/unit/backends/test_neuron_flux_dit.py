@@ -90,3 +90,26 @@ def test_tp4_on_four_ranks_matches_diffusers(tiny):
     for r in results:
         assert r["report"] == {"missing": [], "unexpected": []}
         torch.testing.assert_close(torch.tensor(r["out"]), reference, atol=1e-4, rtol=1e-4)
+
+
+@pytest.mark.parametrize("tp, cp, cp_mode, sp", [
+    (2, 2, "gather_kv", False), (2, 2, "ring", False), (2, 2, "ulysses", False),
+    (4, 1, "gather_kv", True), (2, 1, "gather_kv", True),
+], ids=["tp2-cp2-gather_kv", "tp2-cp2-ring", "tp2-cp2-ulysses", "tp4-sp", "tp2-sp"])
+def test_parallel_layouts_match_diffusers(tiny, tp, cp, cp_mode, sp):
+    """CP shards both streams ([text || image] per rank) and attends with gather_kv, ring or
+    ulysses; SP shards the image stream across the TP group through the dual-stream blocks."""
+    from tests.unit.backends._neuron_gloo import run_ranks
+    from tests.unit.backends._neuron_workers import flux_dit_parallel_worker
+
+    config = NeuronFluxConfig.from_pretrained(tiny, **TINY_SHAPE)
+    reference = diffusers_reference(tiny, config)
+    results = run_ranks(flux_dit_parallel_worker, tiny, tp, cp, cp_mode, sp, world_size=tp * cp)
+    for r in results:
+        assert r["report"] == {"missing": [], "unexpected": []}
+        torch.testing.assert_close(torch.tensor(r["out"]), reference, atol=1e-4, rtol=1e-4)
+
+
+def test_cp_needs_both_streams_divisible():
+    with pytest.raises(ValueError, match="text_seq_len=510 is not divisible by cp_degree=4"):
+        NeuronFluxConfig(text_seq_len=510, cp_degree=4, context_parallel_enabled=True).validate()

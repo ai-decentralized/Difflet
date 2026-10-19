@@ -15,7 +15,7 @@ def _args(**overrides):
                 height=1024, width=1024, prompt="a cat", output="/tmp/o.png", steps=50,
                 guidance_scale=3.5, seed=7, cache_dir=None, work_dir=None, requests_dir=None,
                 worker_index=None, dp_schedule=None, exec_mode=None, revision=None,
-                keep_work_dir=False, teacache_cadence=None, teacache_online_delta=None,
+                keep_work_dir=False, cp_mode=None, teacache_cadence=None, teacache_online_delta=None,
                 teacache_speedup=None, teacache_calibration=None, stage_mode="generate", shapes=None)
     base.update(overrides)
     return argparse.Namespace(**base)
@@ -51,7 +51,6 @@ def test_driver_runs_a_vae_stage_only_where_the_decode_does_not_fit(launches, tm
 
 
 @pytest.mark.parametrize("override, named", [
-    (dict(cp_degree=2), "--cp-degree"), (dict(sp_enabled=True), "--sp"),
     (dict(cfg_parallel=True), "--cfg-parallel"), (dict(teacache_cadence=2), "--teacache-cadence"),
 ])
 def test_driver_refuses_what_the_stage_does_not_run(launches, capsys, override, named):
@@ -59,6 +58,14 @@ def test_driver_refuses_what_the_stage_does_not_run(launches, capsys, override, 
         flux_cli.FluxOrchestrator(_args(**override)).generate()
     assert exc.value.code == 2 and launches == []
     assert named in capsys.readouterr().err
+
+
+def test_driver_runs_context_parallel_on_tp_x_cp_cores(launches, tmp_path):
+    args = _args(work_dir=str(tmp_path / "w"), tp_degree=2, cp_degree=2, cp_mode="ulysses")
+    flux_cli.FluxOrchestrator(args).generate()
+    assert [(c["args"][1], c["num_cores"]) for c in launches] == [("transformer", 4), ("vae", 1)]
+    cli = launches[0]["cli_args"]
+    assert cli[cli.index("--cp-degree") + 1] == "2" and cli[cli.index("--cp-mode") + 1] == "ulysses"
 
 
 def test_transformer_stage_saves_the_packed_latents(monkeypatch, tmp_path):

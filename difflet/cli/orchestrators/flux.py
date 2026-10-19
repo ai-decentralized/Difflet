@@ -21,7 +21,7 @@ from difflet.cli.orchestrators.torchrun import (
 _HF_MODEL_ID = "black-forest-labs/FLUX.1-dev"
 _MODEL_TYPE = "flux"
 _CLI_NAME = "flux"
-_TORCHRUN_RUNS = "tensor parallelism and data-parallel replicas"
+_TORCHRUN_RUNS = "tensor, sequence and context parallelism and data-parallel replicas"
 
 
 def _decode_in_process(tp_degree: int) -> bool:
@@ -37,12 +37,8 @@ def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
     """What the torchrun (neuron) generate stage rejects, as the command line names it:
     every torchrun backend's (TeaCache), and what Flux's neuron path does not run yet. Torch-free."""
     found = torchrun_unsupported_options(args)
-    if (getattr(args, "cp_degree", None) or 1) > 1:
-        found.append("--cp-degree")
     if getattr(args, "cfg_parallel", False):
-        found.append("--cfg-parallel")
-    if getattr(args, "sp_enabled", False):
-        found.append("--sp")
+        found.append("--cfg-parallel")  # FLUX.1-dev is guidance-distilled: no two-pass CFG
     if getattr(args, "taef1", False):
         found.append("--taef1")
     return found
@@ -125,7 +121,7 @@ class FluxOrchestrator(ModelOrchestrator):
         work_dir.mkdir(parents=True, exist_ok=True)
         cli_args = self._stage_cli_args(mode, work_dir=str(work_dir))
         try:
-            runner.run_stage(_HF_MODEL_ID, "transformer", num_cores=int(self.args.tp_degree or 4),
+            runner.run_stage(_HF_MODEL_ID, "transformer", num_cores=self._replica_cores(),
                              virtual_core_size=None, cli_args=cli_args)
             if not _decode_in_process(int(self.args.tp_degree or 4)):
                 runner.run_stage(_HF_MODEL_ID, "vae", num_cores=1, virtual_core_size=None,
@@ -135,6 +131,9 @@ class FluxOrchestrator(ModelOrchestrator):
             raise
         if not getattr(self.args, "keep_work_dir", False):
             shutil.rmtree(work_dir, ignore_errors=True)
+
+    def _replica_cores(self) -> int:
+        return int(self.args.tp_degree or 4) * int(getattr(self.args, "cp_degree", None) or 1)
 
     def _stage_cli_args(self, mode: str, *, work_dir: str) -> list[str]:
         a = self.args
@@ -149,6 +148,10 @@ class FluxOrchestrator(ModelOrchestrator):
             value = getattr(a, name, None)
             if value is not None:
                 parts += [flag, str(value)]
+        if (getattr(a, "cp_degree", None) or 1) > 1:
+            parts += ["--cp-degree", str(a.cp_degree), "--cp-mode", str(a.cp_mode or "gather_kv")]
+        if getattr(a, "sp_enabled", False):
+            parts.append("--sp")
         if getattr(a, "keep_work_dir", False):
             parts.append("--keep-work-dir")
         return parts
@@ -181,7 +184,11 @@ class FluxOrchestrator(ModelOrchestrator):
         app_kwargs = {"decode_vae": in_process}
         if getattr(args, "exec_mode", None):
             app_kwargs["exec_mode"] = args.exec_mode
-        parallel = DiffletParallelConfig(tp_degree=int(args.tp_degree or 4))
+        cp = int(getattr(args, "cp_degree", None) or 1)
+        parallel = DiffletParallelConfig(
+            tp_degree=int(args.tp_degree or 4), cp_degree=cp,
+            cp_mode=(getattr(args, "cp_mode", None) or "gather_kv") if cp > 1 else "gather_kv",
+            sp_enabled=bool(getattr(args, "sp_enabled", False)))
         # Start-up breakdown: process start to here, prepare_runtime, the heavy imports
         # from_pretrained would do lazily, then from_pretrained itself (it prepares again: cheap).
         startup: dict[str, float] = {}

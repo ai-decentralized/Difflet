@@ -166,7 +166,11 @@ class TorchNeuronFluxApplication:
         config = NeuronFluxConfig.from_pretrained(
             self._path("transformer"), height=self.height, width=self.width,
             text_seq_len=int(opts["text_seq_len"]), vae_scale_factor=vae_scale,
-            tp_degree=int(parallel.tp_degree))
+            tp_degree=int(parallel.tp_degree),
+            cp_degree=int(getattr(parallel, "cp_degree", 1) or 1),
+            context_parallel_enabled=int(getattr(parallel, "cp_degree", 1) or 1) > 1,
+            cp_mode=getattr(parallel, "cp_mode", "gather_kv") or "gather_kv",
+            sp_enabled=bool(getattr(parallel, "sp_enabled", False)))
         dit = NeuronFluxTransformerApplication(model_path=self._path("transformer"), config=config,
                                                dtype=self.dtype, **common)
         dit.load(skip_warmup=skip_warmup)
