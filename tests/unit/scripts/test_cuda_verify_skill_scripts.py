@@ -304,3 +304,36 @@ def test_evals_mirror_the_trainium_schema():
     for case in ours["evals"]:
         assert set(case) == set(theirs["evals"][0]), set(case) ^ set(theirs["evals"][0])
         assert case["prompt"] and case["expected_output"] and len(case["expectations"]) >= 5
+
+
+def test_pod_setup_takes_no_xet_with_the_other_flags_in_any_order(tmp_path):
+    """F8b: --no-xet (plain-HTTPS Hugging Face downloads, for eu pods where Xet stalled) combines
+    with --volume / --check-repo in either order; an unknown flag still exits 2."""
+    script = SKILL / "scripts" / "pod_setup.sh"
+    env = {k: v for k, v in os.environ.items() if k != "REPO"}
+    for args in (["--no-xet", "--check-repo"], ["--check-repo", "--no-xet"]):
+        proc = subprocess.run(
+            ["bash", str(script), *args], capture_output=True, text=True, cwd=tmp_path, env=env
+        )
+        assert proc.returncode == 0, proc.stderr
+        assert proc.stdout.splitlines() == [
+            f"pod_setup.sh: Difflet checkout at {ROOT}",
+            "pod_setup.sh: Hugging Face downloads over plain HTTPS (HF_HUB_DISABLE_XET=1)",
+        ]
+    # Both setup flags parse; the (fake) checkout check then stops it before any install.
+    proc = subprocess.run(
+        ["bash", str(script), "--volume", "--no-xet"],
+        capture_output=True,
+        text=True,
+        cwd=tmp_path,
+        env={**os.environ, "REPO": str(tmp_path)},
+    )
+    assert proc.returncode == 2 and "not a Difflet checkout" in proc.stderr
+    proc = subprocess.run(
+        ["bash", str(script), "--no-xet", "--bogus"], capture_output=True, text=True, env=env
+    )
+    assert proc.returncode == 2 and "unknown argument --bogus" in proc.stderr
+    help_text = subprocess.run(
+        ["bash", str(script), "--help"], capture_output=True, text=True
+    ).stdout
+    assert "--no-xet" in help_text and "HF_HUB_DISABLE_XET=1" in help_text

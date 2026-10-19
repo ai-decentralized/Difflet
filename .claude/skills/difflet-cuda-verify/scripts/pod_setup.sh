@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # pod_setup.sh: host setup ON a Yottalabs pod (the F1b / F2 recipe), after ship_branch.sh.
 # Usage (from any cwd: the checkout is the one this script sits in, F9):
-#   bash ~/Difflet/.claude/skills/difflet-cuda-verify/scripts/pod_setup.sh [--volume]
+#   bash ~/Difflet/.claude/skills/difflet-cuda-verify/scripts/pod_setup.sh [--volume] [--no-xet]
 #   --volume      the difflet-cache network volume is mounted at /data (us-east-3 only):
 #                 HF_HOME=/data/hf, and /data is chowned to the login user once (when not theirs).
 #   (default)     no volume: HF_HOME=$HOME/hf on the container disk (mind containerVolumeInGb:
 #                 a disk overrun restarted the container in an earlier session).
+#   --no-xet      Hugging Face downloads over plain HTTPS: HF_HUB_DISABLE_XET=1 for this run and
+#                 in ~/.bashrc. For eu pods: on f3c (eu-2, 10-19) the Xet download of FLUX.1-dev
+#                 stalled at 0 B/s and HTTPS finished it; Xet stays the default (us-east-3: ~1 GB/s).
 #   --check-repo  print the resolved checkout and exit (0 = a Difflet checkout, 2 = not one).
 # The checkout is $REPO when set, else four directories up from this script (the repo root of
 # .claude/skills/difflet-cuda-verify/scripts/); it must hold pyproject.toml and difflet/.
@@ -16,21 +19,27 @@
 # Idempotent: re-running reinstalls nothing that is already satisfied. Its last line is
 # "SETUP DONE rc=<n>" (also on a failure), so a detached run can be polled for it.
 set -euo pipefail
-CHECK=0
-case "${1:-}" in
-  -h|--help) sed -n '2,/^[^#]/{/^#/s/^# \{0,1\}//p;}' "$0"; exit 0 ;;
-  --volume) VOLUME=1 ;;
-  --check-repo) VOLUME=0 CHECK=1 ;;
-  "") VOLUME=0 ;;
-  *) echo "pod_setup.sh: unknown argument $1 (see --help)" >&2; exit 2 ;;
-esac
+CHECK=0 VOLUME=0 NO_XET=0
+for arg in "$@"; do
+  case "$arg" in
+    -h|--help) sed -n '2,/^[^#]/{/^#/s/^# \{0,1\}//p;}' "$0"; exit 0 ;;
+    --volume) VOLUME=1 ;;
+    --no-xet) NO_XET=1 ;;
+    --check-repo) CHECK=1 ;;
+    *) echo "pod_setup.sh: unknown argument $arg (see --help)" >&2; exit 2 ;;
+  esac
+done
 [ "$CHECK" = 1 ] || trap 'rc=$?; set +x; echo "SETUP DONE rc=$rc"' EXIT
 REPO=${REPO:-$(cd "$(dirname "${BASH_SOURCE[0]}")/../../../.." && pwd -P)}
 [ -f "$REPO/pyproject.toml" ] && [ -d "$REPO/difflet" ] || {
   echo "pod_setup.sh: $REPO is not a Difflet checkout (run ship_branch.sh first)" >&2
   exit 2
 }
-if [ "$CHECK" = 1 ]; then echo "pod_setup.sh: Difflet checkout at $REPO"; exit 0; fi
+if [ "$CHECK" = 1 ]; then
+  echo "pod_setup.sh: Difflet checkout at $REPO"
+  [ "$NO_XET" = 0 ] || echo "pod_setup.sh: Hugging Face downloads over plain HTTPS (HF_HUB_DISABLE_XET=1)"
+  exit 0
+fi
 set -x
 if [ "$VOLUME" = 1 ]; then
   mountpoint -q /data || { echo "pod_setup.sh: --volume but nothing is mounted at /data" >&2; exit 2; }
@@ -43,6 +52,10 @@ export HF_HOME
 mkdir -p "$HF_HOME" "$HOME/logs" /tmp/logs
 grep -q "HF_HOME=$HF_HOME" ~/.bashrc 2>/dev/null \
   || echo "export HF_HOME=$HF_HOME HF_XET_HIGH_PERFORMANCE=1" >> ~/.bashrc
+if [ "$NO_XET" = 1 ]; then
+  export HF_HUB_DISABLE_XET=1
+  grep -q "HF_HUB_DISABLE_XET=1" ~/.bashrc 2>/dev/null || echo "export HF_HUB_DISABLE_XET=1" >> ~/.bashrc
+fi
 export PATH="$HOME/.local/bin:$PATH"
 command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
