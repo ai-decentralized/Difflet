@@ -12,7 +12,14 @@ The budget is ``FIT_FRACTION`` of one core's HBM, for weights only. There is no 
 estimate: the check rejects a load that clearly cannot fit and lets a marginal one go to the
 device. ``TorchNeuronApplicationBase.load`` compares the exact bytes of this rank's meta-built
 module with it. The TP layers size their shards in ``__init__``, so the meta shapes are already
-this rank's slices. Every neuron model goes through it (Wan, Qwen-Image, their VAEs and umT5).
+this rank's slices. Every neuron model goes through it (Wan, Qwen-Image, LTX-2, their VAEs and
+text encoders).
+
+Before anything is built, the estimates from the checkpoint headers answer the same question
+for components that share a core: ``Component`` names a checkpoint subdirectory, the dtype it
+holds on the device and the tensors it skips, and ``components_fit`` adds the components up over
+the TP group (a device text encoder beside the DiT, which the per-component check at load would
+only catch once the DiT had loaded). Each model's ``hbm.py`` declares its components.
 
 One core's HBM comes from ``DIFFLET_NEURON_HBM_GIB`` if set, else from ``neuron-ls``
 (``memory_size`` over the logical cores of a device), else from trn2's numbers: 96 GiB per
