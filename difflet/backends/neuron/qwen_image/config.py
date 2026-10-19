@@ -26,7 +26,16 @@ from pathlib import Path
 
 import torch
 
-from difflet.pipeline.parallel_config import CP_MODES
+from difflet.backends.neuron.core.config_checks import (
+    check_cp_enabled,
+    check_cp_mode,
+    check_cp_split,
+    check_even_split,
+    check_heads_divide_tp,
+    check_layer_count,
+    check_ulysses_heads,
+    exclusive_modes,
+)
 
 
 @dataclass
@@ -128,22 +137,9 @@ class NeuronQwenImageConfig:
                     f"Qwen-Image compile {name}={value} must be a positive multiple of "
                     f"{multiple} (vae {self.vae_scale_factor}x, patch {self.patch_size})"
                 )
-        if int(self.num_layers) < 1:
-            raise ValueError(f"Qwen-Image num_layers={self.num_layers} must be >= 1")
-        if self.checkpoint_num_layers is not None and int(self.num_layers) > int(
-            self.checkpoint_num_layers
-        ):
-            raise ValueError(
-                f"Qwen-Image num_layers={self.num_layers} exceeds the checkpoint's "
-                f"{self.checkpoint_num_layers} blocks"
-            )
-        # tp shards the attention heads (and with them every column-parallel projection), so
-        # it has to divide them evenly; a ragged split would only surface deep in the load.
+        check_layer_count("Qwen-Image", self.num_layers, self.checkpoint_num_layers)
         heads, tp = int(self.num_attention_heads), int(self.tp_degree)
-        if heads % tp:
-            raise ValueError(
-                f"Qwen-Image has {heads} attention heads, which does not divide tp={tp}"
-            )
+        check_heads_divide_tp("Qwen-Image", heads, tp)
         if int(self.dp_degree) > 1:
             # DP is a set of separate replicas (torchrun launches), never an axis of one module.
             raise NotImplementedError(
@@ -156,33 +152,18 @@ class NeuronQwenImageConfig:
             # As for Wan (NeuronWanConfig) and the CLI (--cfg-parallel with --cp-degree > 1).
             # CFG parallelism serves opt-in true CFG only: the application refuses a call that
             # does not run it.
-            raise ValueError(
-                "Qwen-Image cfg_parallel_enabled and context_parallel_enabled are mutually "
-                "exclusive (both consume the data-parallel lanes)"
-            )
-        if self.cp_mode not in CP_MODES:
-            raise ValueError(f"cp_mode must be one of {CP_MODES}, got {self.cp_mode!r}")
+            raise exclusive_modes("Qwen-Image", "cfg_parallel_enabled",
+                                  "context_parallel_enabled", "both consume the data-parallel lanes")
+        check_cp_mode(self.cp_mode)
         cp = None if self.cp_degree is None else int(self.cp_degree)
-        if cp is not None and cp > 1 and not self.context_parallel_enabled:
-            raise ValueError(
-                f"cp_degree={cp} needs context_parallel_enabled=True (the module would run "
-                "the full sequence on every rank of the CP group)"
-            )
+        check_cp_enabled(cp, self.context_parallel_enabled)
         if self.context_parallel_enabled and cp is not None and cp > 1:
             # The trace module scatters the packed image tokens (and their RoPE rows) evenly
             # over the CP group; text stays replicated, so only the image length matters.
-            if self.image_seq_len % cp:
-                raise ValueError(
-                    f"Qwen-Image image_seq_len={self.image_seq_len} "
-                    f"({self.packed_height}x{self.packed_width} packed) is not divisible by "
-                    f"cp_degree={cp}"
-                )
-            if self.cp_mode == "ulysses" and (heads // tp) % cp:
-                raise ValueError(
-                    f"cp_mode='ulysses' shards this rank's {heads // tp} heads (heads={heads} / "
-                    f"tp={tp}) over cp_degree={cp}; num_attention_heads must be divisible by "
-                    "tp_degree * cp_degree"
-                )
+            check_cp_split("Qwen-Image", "image_seq_len", self.image_seq_len,
+                           f"{self.packed_height}x{self.packed_width} packed", cp)
+            if self.cp_mode == "ulysses":
+                check_ulysses_heads(heads, tp, cp)
 
     def _validate_sequence_parallel(self) -> None:
         """Megatron SP's rules (``QwenImageSPTransformer2DModel``, the fork the trace module
@@ -202,10 +183,8 @@ class NeuronQwenImageConfig:
         if not self.sp_enabled:
             return
         if self.context_parallel_enabled:
-            raise ValueError(
-                "Qwen-Image sp_enabled and context_parallel_enabled are mutually exclusive "
-                "(both shard the image sequence; as for Wan)"
-            )
+            raise exclusive_modes("Qwen-Image", "sp_enabled", "context_parallel_enabled",
+                                  "both shard the image sequence; as for Wan")
         if self.zero_cond_t:
             raise NotImplementedError(
                 "Qwen-Image sequence parallelism does not support zero_cond_t (a per-token "
@@ -214,17 +193,12 @@ class NeuronQwenImageConfig:
         tp = int(self.tp_degree)
         if tp <= 1:
             return
-        if self.image_seq_len % tp:
-            raise ValueError(
-                f"Qwen-Image sequence parallelism splits image_seq_len={self.image_seq_len} "
-                f"({self.packed_height}x{self.packed_width} packed) over tp={tp}, which does not "
-                "divide it"
-            )
-        if int(self.text_seq_len) % tp:
-            raise ValueError(
-                f"Qwen-Image sequence parallelism splits the zero-padded text_seq_len="
-                f"{self.text_seq_len} over tp={tp}, which does not divide it"
-            )
+        check_even_split(
+            f"Qwen-Image sequence parallelism splits image_seq_len={self.image_seq_len} "
+            f"({self.packed_height}x{self.packed_width} packed)", self.image_seq_len, "tp", tp)
+        check_even_split(
+            "Qwen-Image sequence parallelism splits the zero-padded text_seq_len="
+            f"{self.text_seq_len}", int(self.text_seq_len), "tp", tp)
 
     @classmethod
     def from_pretrained(cls, transformer_path, **overrides) -> "NeuronQwenImageConfig":
