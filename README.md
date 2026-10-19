@@ -429,6 +429,11 @@ paths, and stage core counts are in [docs/cli-staged-commands.md](docs/cli-stage
 - **"Cores are already held by another process".** A previous run or server is still
   resident. Find it with `neuron-ls` or `neuron-top`, stop it, then retry. `difflet plan`
   reports busy cores.
+- **A `--backend neuron` launch times out in a collective while loading.** A cold launch can
+  keep ranks waiting on a peer for a long time (rank 0 reading a host text encoder, a cold
+  warm-up compile). The CLI gives its torchrun ranks a 3-hour process-group timeout; torch's
+  own default is 30 minutes. Export `DIFFLET_NEURON_PG_TIMEOUT_S=<seconds>` to choose another
+  one; an exported value always wins.
 - **Compile finished but generate recompiles.** Any change to shape, parallel flags,
   or toolchain version changes the cache key. `difflet cache ls` shows what is cached.
 - **Disk filling up.** Compiler scratch accumulates in the working directory; run
