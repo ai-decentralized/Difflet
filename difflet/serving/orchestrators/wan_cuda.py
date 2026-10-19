@@ -27,6 +27,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from difflet.serving.engines.stage_observability import record_stage_load
 from difflet.serving.engines.stage_pipeline import (
     ErasedStageRunner,
     ValidatedStageRunner,
@@ -278,7 +279,8 @@ class CudaWanServingStageAdapter:
             torch_compile=profile.torch_compile,
         )
         kwargs["num_frames"] = int(profile.num_frames)
-        self.pipe = DiffletPipeline.from_pretrained(self.model_id, **kwargs)
+        with record_stage_load(_STAGE_ID):
+            self.pipe = DiffletPipeline.from_pretrained(self.model_id, **kwargs)
         print("[difflet serve] Wan 2.2 CUDA pipeline resident")
         return OrderedDict(
             (

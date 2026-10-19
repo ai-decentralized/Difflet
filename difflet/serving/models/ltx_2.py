@@ -20,6 +20,7 @@ from difflet.common.neuron_cores import (
 from difflet.pipeline.compile_cache import CacheSpec
 from difflet.registry import resolve_model
 from difflet.serving.artifact_manager import ImmutableArtifactManager
+from difflet.serving.engines.stage_observability import record_stage_load
 from difflet.serving.engines.stage_pipeline import (
     ErasedStageRunner,
     ValidatedStageRunner,
@@ -507,14 +508,15 @@ class LTX2ServingStageAdapter:
                 runtime.source, profile, spec, path
             ),
         )
-        pipe = build_pipeline(
-            runtime.source,
-            profile,
-            load=True,
-            skip_compile=True,
-            compiled_path_override=binding.path,
-            host_components=True,
-        )
+        with record_stage_load("pipeline"):
+            pipe = build_pipeline(
+                runtime.source,
+                profile,
+                load=True,
+                skip_compile=True,
+                compiled_path_override=binding.path,
+                host_components=True,
+            )
         self._untransferred_pipe = pipe
         runner = ValidatedStageRunner(
             LTX2PipelineRunner(pipe, profile),
