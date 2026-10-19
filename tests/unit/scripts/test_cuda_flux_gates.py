@@ -338,6 +338,25 @@ def test_the_measured_f4f_floor_runs_merged_over_seeds_pass(tmp_path):
     assert "relative gate B (every seed): PSNR >= 29.71 dB" in stdout, stdout
 
 
+def test_measured_f9c_runs_over_seeds_pass(tmp_path):
+    # The f9c3 run (Workstation Edition): seeds 0-7 with the floor, eager and compiled, and
+    # the flux gate run's three-seed e2e; each passes gates A and B with the headroom the
+    # status log states.
+    f9c = _MEASURED / "f9c"
+    expected = {
+        "eager/cuda_e2e_flux_noise.json": "PSNR 36.79 dB, required >= 32.40 dB",
+        "compiled/cuda_e2e_flux_noise.json": "PSNR 38.31 dB, required >= 32.40 dB",
+        "gates-flux/cuda_e2e_flux.json": "PSNR 38.30 dB, required >= 33.84 dB",
+    }
+    for name, line in expected.items():
+        out, stdout = _gate(json.loads((f9c / name).read_text()), tmp_path)
+        assert set(out.values()) == {"PASSED"}, (name, out)
+        assert line in stdout, (name, stdout)
+    out, stdout = _gate(json.loads((f9c / "eager/cuda_e2e_flux_noise.json").read_text()), tmp_path)
+    assert "relative gate B (every seed): PSNR >= 23.02 dB (noise floor min 24.24 dB" in stdout
+    assert "seed 7 difflet vs diffusers: PSNR 24.89 dB" in stdout, stdout
+
+
 # --- measured results the tests above are pinned against ---------------------------------------
 # PSNR and cosine of the GPU runs, at full precision, transcribed from the result JSONs the e2e
 # script wrote on the GPU host; the payload around them comes from the builders above. The JSON
@@ -374,6 +393,65 @@ def _measured_results() -> dict[str, dict]:
         ),
         # seed 0
         "f4f/gates-flux/cuda_e2e_flux.json": _payload(31.564294225201547, 0.9985057519682408),
+        # 8 seeds, with the noise floor
+        "f9c/compiled/cuda_e2e_flux_noise.json": _seeded(
+            {
+                0: (42.27261684836233, 0.9998749736584387),
+                1: (41.31239820407713, 0.9998384193666154),
+                2: (40.52270489155631, 0.999814000537145),
+                3: (43.01444868958021, 0.9998991624433271),
+                4: (36.879382207109884, 0.9994979624603094),
+                5: (39.76220318313252, 0.9998030505440206),
+                6: (34.23529655785738, 0.9991522001808376),
+                7: (28.496203492372814, 0.9968378439737349),
+            },
+            floor={
+                0: (30.92373250148661, 0.9982712401987284),
+                1: (36.62104024843132, 0.9995219231179733),
+                2: (37.605905468138545, 0.9996355033656947),
+                3: (31.899727701907665, 0.9986830330018996),
+                4: (33.04803157471056, 0.9987632044874011),
+                5: (39.436461590790095, 0.999787891031054),
+                6: (35.14129406333446, 0.9993118192728915),
+                7: (24.23772558683694, 0.9915854725793107),
+            },
+        ),
+        # 8 seeds, with the noise floor
+        "f9c/eager/cuda_e2e_flux_noise.json": _seeded(
+            {
+                0: (31.564294225201547, 0.9985057519682408),
+                1: (39.55547969517981, 0.9997568624459017),
+                2: (43.78866577298002, 0.999912451915674),
+                3: (41.27145138169099, 0.9998486348324223),
+                4: (35.60975010632689, 0.9993133925446605),
+                5: (44.13913925750629, 0.9999280588457766),
+                6: (33.463866758067574, 0.9989883058547875),
+                7: (24.89339956491908, 0.992760177207342),
+            },
+            floor={
+                0: (30.92373250148661, 0.9982712401987284),
+                1: (36.62104024843132, 0.9995219231179733),
+                2: (37.605905468138545, 0.9996355033656947),
+                3: (31.899727701907665, 0.9986830330018996),
+                4: (33.04803157471056, 0.9987632044874011),
+                5: (39.436461590790095, 0.999787891031054),
+                6: (35.14129406333446, 0.9993118192728915),
+                7: (24.23772558683694, 0.9915854725793107),
+            },
+        ),
+        # 3 seeds, with the noise floor
+        "f9c/gates-flux/cuda_e2e_flux.json": _seeded(
+            {
+                0: (31.564294225201547, 0.9985057519682408),
+                1: (39.55547969517981, 0.9997568624459017),
+                2: (43.78866577298002, 0.999912451915674),
+            },
+            floor={
+                0: (30.92373250148661, 0.9982712401987284),
+                1: (36.62104024843132, 0.9995219231179733),
+                2: (37.605905468138545, 0.9996355033656947),
+            },
+        ),
         # seed 0
         "flux/f5c/cuda_e2e_flux.json": _payload(40.35257866675994, 0.9998033805951199),
     }

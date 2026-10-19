@@ -69,7 +69,7 @@ Difflet bf16 against diffusers fp32 and bf16 on identical inputs; gates 1.15× /
 Same initial noise through both pipelines; pixel PSNR / cosine.
 | Qwen-Image | FLUX.1-dev | Wan 2.2 |
 |---|---|---|
-| PASS · 41.40 dB / 0.99972 | PASS · 40.35 dB / 0.99980 | PASS · 26.30 dB / 0.99609 (1.3 dB above the floor); seeds 0–2 26.30–28.89 dB vs diffusers' own noise floor 23.79–28.62 dB; relative gate mean 27.20 dB vs 25.17 required |
+| PASS · 41.40 dB / 0.99972 | PASS · 40.35 dB / 0.99980; seeds 0–7 against the noise floor, gate A 36.79 dB eager / 38.31 compiled vs 32.40 required (Workstation; run with the fused projection, which is now opt-in) | PASS · 26.30 dB / 0.99609 (1.3 dB above the floor); seeds 0–2 26.30–28.89 dB vs diffusers' own noise floor 23.79–28.62 dB; relative gate mean 27.20 dB vs 25.17 required |
 
 ### CLI matrix   `scripts/verify_cli_cuda.py`
 Download → compile → timed generate per cell, `results.json`.
