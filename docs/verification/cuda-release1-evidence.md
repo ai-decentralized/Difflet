@@ -212,7 +212,8 @@ The prompt goes in and an image or video comes out, from the same initial noise,
 and through stock diffusers (`QwenImagePipeline`, `FluxPipeline`, `WanPipeline`), one side loaded
 at a time. Pixel metrics are in [0, 1]. Floors (in `tests/numerical/test_cuda_*e2e_vs_diffusers.py`):
 Qwen and Flux PSNR ≥ **35 dB**, cosine ≥ **0.998**, tightened from 25 / 0.99 after the first
-measurement (F3, F5). Wan stays at ≥ **25 dB**, ≥ **0.99** (kept in F1; the gate judges the
+measurement (F3, F5); Flux's gate is relative to a recorded noise floor since F4f, over seeds
+since F9c (the F4f subsection), the 35 dB / 0.998 floors judging results without one. Wan stays at ≥ **25 dB**, ≥ **0.99** (kept in F1; the gate judges the
 `float32` variant by name since F1b, and every seed of a multi-seed JSON since F9; the floors
 did not move in F9, ruling R1). Since F9b, when the result carries the noise floor on every seed
 (`--seeds … --noise-floor`), the Wan gate is stated **relative to it**, the way D14 states the
@@ -316,7 +317,7 @@ A=artifacts/cuda-release1; export DIFFLET_BACKEND=cpu DIFFLET_RUN_CUDA_NUMERICAL
 DIFFLET_CUDA_E2E_RESULT=$A/cuda_e2e_qwen_image.json pytest -q tests/numerical/test_cuda_e2e_vs_diffusers.py     # 2 passed
 DIFFLET_CUDA_E2E_RESULT=$A/f4/e2e_trimmed.json pytest -q tests/numerical/test_cuda_e2e_vs_diffusers.py         # 2 passed
 DIFFLET_CUDA_E2E_RESULT=$A/f4/e2e_compiled.json pytest -q tests/numerical/test_cuda_e2e_vs_diffusers.py        # 2 passed
-DIFFLET_CUDA_FLUX_E2E_RESULT=$A/flux/cuda_e2e_flux.json pytest -q tests/numerical/test_cuda_flux_e2e_vs_diffusers.py  # 2 passed
+DIFFLET_CUDA_FLUX_E2E_RESULT=$A/flux/cuda_e2e_flux.json pytest -q tests/numerical/test_cuda_flux_e2e_vs_diffusers.py  # 3 passed, 1 skipped (no noise floor: 35 dB / 0.998 judged)
 DIFFLET_CUDA_WAN_E2E_RESULT=$A/wan/f1b/cuda_e2e_wan.json pytest -q tests/numerical/test_cuda_wan_e2e_vs_diffusers.py  # 4 passed, 1 skipped (no noise floor: 25 dB / 0.99 judged)
 DIFFLET_CUDA_WAN_E2E_RESULT=$A/f9/gates-wan/cuda_e2e_wan.json pytest -q tests/numerical/test_cuda_wan_e2e_vs_diffusers.py  # 4 passed, 1 skipped
 # the noise floor: the relative gate (F9b) prints its thresholds, the floor and the aggregates (-rA)
@@ -638,7 +639,7 @@ for s in (0, 1, 2):
     d = json.load(open(f'artifacts/cuda-release1/f4f/floor/e2e_floor_seed{s}.json'))
     print(s, round(d['metrics']['psnr_db'], 2), 'floor', round(d['noise_floor']['metrics']['psnr_db'], 2), d['noise_floor']['perturbation'])"
 export DIFFLET_BACKEND=cpu DIFFLET_RUN_CUDA_NUMERICAL=1
-DIFFLET_CUDA_FLUX_E2E_RESULT=artifacts/cuda-release1/f4f/floor/e2e_floor_seed0.json pytest -q -rA tests/numerical/test_cuda_flux_e2e_vs_diffusers.py   # 3 passed: the relative gate prints its thresholds
+DIFFLET_CUDA_FLUX_E2E_RESULT=artifacts/cuda-release1/f4f/floor/e2e_floor_seed0.json pytest -q -rA tests/numerical/test_cuda_flux_e2e_vs_diffusers.py   # 4 passed: the relative gate prints its thresholds
 # on a pod: DIFFLET_CUDA_TORCH_COMPILE=1 run_gates.sh wan|flux; cuda_e2e_flux_vs_diffusers.py --seed N --noise-floor
 # since F9c: cuda_e2e_flux_vs_diffusers.py --seeds 0,1,2,... --noise-floor (one load per side; the gate over seeds)
 ```
@@ -859,7 +860,7 @@ to the CUDA path but never ran: it is NOT MEASURED in every row and has no colum
 |---|---|---|---|
 | smoke (`difflet run`, by eye) | PASS [10-16, 10-17 F3] | PASS [10-18 F5] | PASS [10-18 F1] |
 | DiT parity (D14, three gates) | PASS incl. padded prompt [F3, F4] | PASS [F5] | PASS both experts + rounding block [F1, F1b] |
-| e2e vs diffusers | PASS, 35 dB / 0.998 [F3] | PASS, 35 dB / 0.998 [F5] | PASS, 25 dB / 0.99 [F1, F1b]; seeds 0–2 overlap diffusers' own noise floor [F9]; gate relative to the floor, 2.0 dB headroom on the mean [F9b] |
+| e2e vs diffusers | PASS, 35 dB / 0.998 [F3] | PASS, 35 dB / 0.998 [F5]; relative to the noise floor when recorded [F4f], over seeds [F9c] | PASS, 25 dB / 0.99 [F1, F1b]; seeds 0–2 overlap diffusers' own noise floor [F9]; gate relative to the floor, 2.0 dB headroom on the mean [F9b] |
 | CLI matrix cell | PASS [F3, F5, F9] | PASS [F5, F9] | PASS [F9] |
 | `difflet serve` | PASS; LIMIT on concurrency (429 after 30 s) [F3b] | N/A · refused by name, F5b | N/A · refused by name, F1b |
 | `--torch-compile` | PASS, opt-in [F4] | PASS, 0.83× diffusers per forward [F4f] | PASS, 0.76× diffusers per run [F4f] |

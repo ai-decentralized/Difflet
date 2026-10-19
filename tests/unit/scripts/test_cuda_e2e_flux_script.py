@@ -101,8 +101,10 @@ class _FakeFluxApp:
 
     def generate(self, prompt, *, latents, output_type, **kwargs):
         assert output_type == "pt" and kwargs["num_inference_steps"] == 28
-        self.generated.append(latents)
-        return types.SimpleNamespace(images=_base(latents) + OFFSET * _pattern(2))
+        self.generated.append(latents.clone())
+        images = _base(latents) + OFFSET * _pattern(2)
+        latents.add_(1.0)  # a pipeline may step its latents in place: the noise must survive
+        return types.SimpleNamespace(images=images)
 
 
 class _FakeDiffletPipeline:

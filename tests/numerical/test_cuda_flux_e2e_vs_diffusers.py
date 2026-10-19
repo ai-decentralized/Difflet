@@ -257,6 +257,7 @@ def test_seeds_and_aggregate_are_recorded():
     if per_seed is None:
         print("single-seed result (no per_seed): the top-level seed judged")
         return
+    assert payload.get("seeds") is not None, "per_seed without seeds: re-run the e2e script"
     seeds = [str(seed) for seed in payload["seeds"]]
     assert seeds == list(per_seed), f"seeds {payload['seeds']} vs per_seed {list(per_seed)}"
     assert str(payload["seed"]) == seeds[0], (payload["seed"], seeds)

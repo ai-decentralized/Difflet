@@ -30,7 +30,7 @@ and again on f9 (Server) [F9].
 |---|---|---|---|
 | smoke (`difflet run`, by eye) | PASS [F3] | PASS [F5] | PASS [F1] |
 | DiT parity (D14, three gates) | PASS incl. padded prompt [F3, F4] | PASS [F5] | PASS both experts + rounding block [F1, F1b] |
-| e2e vs diffusers | PASS, floors 35 dB / 0.998 [F3] | PASS, floors 35 dB / 0.998 [F5] | PASS, floors 25 dB / 0.99 [F1, F1b]; seeds 0–2 26.30–28.89 dB, overlapping diffusers' own noise floor 23.79–28.62 dB [F9]; gate relative to the floor when recorded, 2.0 dB headroom on the mean [F9b] |
+| e2e vs diffusers | PASS, floors 35 dB / 0.998 [F3] | PASS, floors 35 dB / 0.998 [F5]; relative to the noise floor when recorded [F4f], gates A / B over seeds [F9c] | PASS, floors 25 dB / 0.99 [F1, F1b]; seeds 0–2 26.30–28.89 dB, overlapping diffusers' own noise floor 23.79–28.62 dB [F9]; gate relative to the floor when recorded, 2.0 dB headroom on the mean [F9b] |
 | CLI matrix cell (`verify_cli_cuda.py`) | PASS [F3, F5, F9] | PASS [F5, F9] | PASS [F9] |
 | `difflet serve` | PASS; LIMIT on concurrency on one GPU (429 `queue_timeout` after the 30 s default) [F3b]; `--dp-degree 2` PASS, two concurrent requests in one request-time [F2b] | N/A · refused by name, F5b | N/A · refused by name, F1b |
 | `--torch-compile` | PASS, opt-in [F4] | PASS · 7.1 s / 28 steps vs diffusers 8.3 [F4f] | PASS · 32.8 s / 40 steps vs diffusers 43.2 [F4f] |

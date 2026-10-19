@@ -39,7 +39,7 @@ tests/numerical/test_cuda_*_vs_diffusers.py` (no GPU needed — it reads the JSO
 
 ## e2e vs diffusers
 | Model | Steps / shape | PSNR | Cosine | Floors | Difflet / diffusers generate | Artifact |
-| FLUX.1-dev | 28 / 1024² | … dB | … | 35 dB / 0.998 | … s / … s | `…/cuda_e2e_flux.json` + PNGs |
+| FLUX.1-dev | 28 / 1024² | … dB per seed | … | relative to the noise floor (gates A / B over seeds; 35 dB / 0.998 without a floor) | … s / … s | `…/cuda_e2e_flux.json` + PNGs |
 **How to inspect manually:** the two PNGs side by side (the same picture); `metrics` in the
 JSON; the e2e gate re-run from the JSON as above.
 
