@@ -21,7 +21,9 @@ _BUILTINS_LOADED = False
 # ``difflet.cli.main._get_orchestrator`` selects the CLI orchestrator; on every other
 # backend the Trainium metadata above is used unchanged.
 _CUDA_SERVING_OVERLAYS: dict[str, str] = {
-    "qwen_image": "difflet.common.registry.qwen_image:cuda_serving_metadata",
+    "qwen_image": "difflet.common.registry.qwen_image:cuda_serving_metadata",  # F3b
+    "flux": "difflet.common.registry.flux:cuda_serving_metadata",  # F3c
+    "wan": "difflet.common.registry.wan:cuda_serving_metadata",  # F3c, Wan 2.2 only
 }
 
 
@@ -58,6 +60,13 @@ def resolve_serving_model(options: ServeOptions) -> ResolvedServingModel:
     _refuse_unsupported_replicas(int(options.replicas), current_backend())
     if current_backend() == "cuda":
         metadata = _cuda_serving_metadata(entry.name, options.model_id)
+        if normalized not in metadata.checkpoint_ids:
+            allowed = ", ".join(metadata.checkpoint_ids)
+            raise ValueError(
+                f"checkpoint {options.model_id!r} is not served on the CUDA backend: it has "
+                f"never run on a GPU (NOT MEASURED); served for {entry.name}: {allowed}"
+            )
+        _refuse_video_replicas(int(options.replicas), metadata)
         if tp_degree is None:
             # Release 1 is one card: the registry default (tp=4) is a Trainium topology, and
             # the CUDA CLI uses `args.tp_degree or 1`.
@@ -123,14 +132,27 @@ def _refuse_unsupported_replicas(dp_degree: int, backend: str) -> None:
         )
 
 
+def _refuse_video_replicas(dp_degree: int, metadata: ServingModelMetadata) -> None:
+    """``--dp-degree N > 1`` for a video model on CUDA (plan F3c, ruling R2): the video service
+    dispatches one video job at a time, so every replica past the first would only hold a GPU."""
+    if dp_degree <= 1 or metadata.output_modality != "video":
+        return
+    from difflet.serving.errors import feature_not_supported
+
+    raise feature_not_supported(
+        f"--dp-degree {dp_degree}: {metadata.model_type} serves video, and the video service "
+        "runs one video job at a time, so a second resident replica would sit idle; serve "
+        "with one replica (a concurrent video dispatcher is a follow-up)"
+    )
+
+
 def _cuda_serving_metadata(entry_name: str, model_id: str) -> ServingModelMetadata:
     path = _CUDA_SERVING_OVERLAYS.get(entry_name)
     if path is None:
         raise ValueError(
             f"{model_id} cannot be served on the CUDA backend: serving on CUDA exists for "
-            "Qwen-Image only (Wan and Flux generate on CUDA through `difflet run`; serving "
-            "them is follow-ups F1b and F5b); set DIFFLET_BACKEND=trainium for the staged "
-            "Neuron path"
+            "Qwen-Image, FLUX.1-dev and Wan 2.2 (plan F3b, F3c); set DIFFLET_BACKEND=trainium "
+            "for the staged Neuron path"
         )
     return load_factory(path)()
 

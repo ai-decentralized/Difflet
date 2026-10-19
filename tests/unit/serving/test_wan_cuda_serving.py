@@ -399,3 +399,109 @@ def test_cuda_serving_metadata_is_one_opaque_stage_with_the_cli_defaults():
     (stage,) = meta.pipeline_definition.stages
     assert stage.kind == "opaque_pipeline" and stage.stage_id == "pipeline"
     assert meta.orchestrator_factory.endswith("wan_cuda:CudaWanServingStageAdapter")
+
+
+# ------------------------------------------------------------- over HTTP
+
+
+class _InProcessEngine:
+    """The resident engine's surface over an in-process StagePipelineEngine (no worker)."""
+
+    def __init__(self, stage_engine):
+        self.stage_engine = stage_engine
+
+    async def start(self) -> None:
+        await self.stage_engine.start()
+
+    async def shutdown(self) -> None:
+        await self.stage_engine.shutdown()
+
+    async def generate(self, request):
+        context = WorkerRequestContext.with_timeout(request.request_id, 60.0)
+        return await self.stage_engine.generate(request, context)
+
+    async def wait_for_recovery(self, *, timeout=None) -> None:
+        return None
+
+    def health(self):
+        return {"status": "ok"}
+
+
+def test_videos_sync_serves_a_wan_clip_through_the_cuda_adapter(
+    source, recorder, monkeypatch, tmp_path
+):
+    """POST /v1/videos/sync → the CUDA validator → the resident adapter → a real MP4."""
+    from fastapi.testclient import TestClient
+
+    from difflet.serving.model_registry import resolve_serving_model
+    from difflet.serving.openai.api_server import create_app
+    from difflet.serving.options import ServeOptions
+    from difflet.serving.video_jobs import InMemoryVideoJobRepository
+    from difflet.serving.video_media import validate_mp4
+    from difflet.serving.video_service import VideoGenerationService
+    from difflet.serving.video_storage import LocalVideoArtifactStore
+
+    monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
+    options = ServeOptions(model_id=_MODEL, cache_dir=str(tmp_path), height=H, width=W)
+    options = dataclasses.replace(options, num_frames=F)
+    resolved = resolve_serving_model(options)
+    assert resolved.metadata.orchestrator_factory.endswith("CudaWanServingStageAdapter")
+    bundle = _prepare(resolved.profile)
+    adapter = mod.CudaWanServingStageAdapter()
+    engine = _InProcessEngine(StagePipelineEngine(runtime=bundle, adapter=adapter))
+    validator = _validator(bundle)
+    service = VideoGenerationService(
+        engine=engine,
+        jobs=InMemoryVideoJobRepository(),
+        artifacts=LocalVideoArtifactStore(tmp_path / "media"),
+        max_queued_requests=0,
+        queue_timeout_s=60.0,
+        request_timeout_s=60.0,
+        recovery_timeout_s=1.0,
+    )
+    app = create_app(
+        options=options,
+        resolved_model=resolved,
+        engine=engine,
+        request_validator=validator,
+        video_service=service,
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/videos/sync",
+            files=[
+                (name, (None, value))
+                for name, value in (
+                    ("model", _MODEL),
+                    ("prompt", "a cat in a garden"),
+                    ("size", f"{W}x{H}"),
+                    ("num_frames", str(F)),
+                    ("guidance_scale_2", "3.0"),
+                    ("seed", "5"),
+                )
+            ],
+        )
+        assert response.status_code == 200, response.text
+        assert response.headers["content-type"] == "video/mp4"
+        clip = tmp_path / "clip.mp4"
+        clip.write_bytes(response.content)
+        meta = validate_mp4(
+            clip, expected_width=W, expected_height=H, expected_num_frames=F, expected_fps=FPS
+        )
+        assert meta.size_bytes == len(response.content)
+        prompt, kw = adapter.pipe.app.calls[-1]
+        assert prompt == "a cat in a garden" and kw["seed"] == 5
+        assert kw["guidance_scale"] == 4.0 and kw["guidance_scale_2"] == 3.0
+        assert kw["num_inference_steps"] == 40 and kw["num_frames"] == F
+        # A field the CUDA app does not take is refused before the worker.
+        n = len(adapter.pipe.app.calls)
+        refused = client.post(
+            "/v1/videos/sync",
+            files=[
+                (name, (None, value)) for name, value in (("prompt", "x"), ("flow_shift", "5.0"))
+            ],
+        )
+        assert refused.status_code == 400, refused.text
+        # The CUDA validator's message, not the form parser's: the validator runs in the server.
+        assert "flow_shift is not taken by Wan 2.2 on the CUDA backend" in refused.text
+        assert len(adapter.pipe.app.calls) == n
