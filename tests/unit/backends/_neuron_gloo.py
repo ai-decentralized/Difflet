@@ -124,3 +124,19 @@ def run_ranks(
         report = "\n".join(f"--- rank {r} ---\n{failures[r]}" for r in sorted(failures))
         raise AssertionError(f"{target.__name__} failed on ranks {sorted(failures)}:\n{report}")
     return [values[rank] for rank in range(world_size)]
+
+
+def record_block_rows(block, name: str | None = None) -> list:
+    """``[batch, tokens]`` of the hidden states each call of ``block`` receives on this rank
+    (its first positional argument, or the keyword ``name``), appended to the returned list:
+    what the block actually sees under CFG parallelism (batch 1 of the pair) and CP or SP (this
+    rank's token shard). Register it after ``load()``, in eager mode: a hook added to a compiled
+    block would change what Dynamo guards on."""
+    rows: list = []
+
+    def hook(module, args, kwargs):
+        hidden = kwargs[name] if name is not None else args[0]
+        rows.append([int(hidden.shape[0]), int(hidden.shape[1])])
+
+    block.register_forward_pre_hook(hook, with_kwargs=True)
+    return rows
