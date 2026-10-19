@@ -94,6 +94,8 @@ def _entry_files(root):
 
 @pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float32])
 def test_round_trip_is_bit_identical_to_the_checkpoint_load(toy, store, monkeypatch, dtype):
+    if dtype == torch.float32:  # the fp32 checkpoint in fp32: written only when asked for
+        monkeypatch.setenv("DIFFLET_NEURON_WEIGHT_STORE_ALL", "1")
     written = _load(toy, dtype)
     assert written.weight_store.status == "written"
     entry, files = _entry_files(store)
@@ -114,6 +116,21 @@ def test_round_trip_is_bit_identical_to_the_checkpoint_load(toy, store, monkeypa
     x = toy.x.to(dtype)
     with torch.no_grad():
         assert torch.equal(hit(x), direct(x))
+
+
+def test_a_checkpoint_already_in_the_load_dtype_is_not_written(toy, store, monkeypatch):
+    # The same bytes on the same disk load no faster (Qwen-Image's bf16 DiT on trn2: 311 s cold
+    # and 3.6 s warm with or without the store), so the store would only cost disk and a write.
+    app = _load(toy, torch.float32)
+    assert app.weight_store.status == "not written"
+    assert app.weight_store.detail.startswith("no gain: the checkpoint holds these tensors")
+    assert "DIFFLET_NEURON_WEIGHT_STORE_ALL=1" in app.weight_store.detail
+    assert not store.exists() or not any(store.iterdir())
+    monkeypatch.setenv("DIFFLET_NEURON_WEIGHT_STORE_ALL", "1")
+    assert _load(toy, torch.float32).weight_store.status == "written"
+    assert _load(toy, torch.float32).weight_store.status == "hit"
+    monkeypatch.setenv("DIFFLET_NEURON_WEIGHT_STORE_ALL", "0")
+    assert _load(toy, torch.float32).weight_store.status == "hit"  # an entry is always read
 
 
 def test_the_store_file_is_plain_safetensors_in_the_load_dtype(toy, store):
@@ -148,6 +165,7 @@ def _entry_names(root):
 
 
 def test_the_key_separates_dtype_layers_and_format(toy, store, monkeypatch):
+    monkeypatch.setenv("DIFFLET_NEURON_WEIGHT_STORE_ALL", "1")  # fp32 is written too
     _load(toy, torch.bfloat16)
     _load(toy, torch.float32)
     _load(toy, torch.bfloat16, n_blocks=2)
