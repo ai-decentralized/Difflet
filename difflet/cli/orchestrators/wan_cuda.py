@@ -13,8 +13,9 @@ The application returns the ``(B, 3, F, H, W)`` video tensor in ``[-1, 1]``
 is not ``.mp4``. Default shape 480x832, 9 frames (``--height/--width/--num-frames``).
 
 The CUDA backend runs tp=1, cp=1, dp=1, one request shape, no TeaCache, no TAEF1, no host
-VAE, no ``torch.compile`` — refused here, before any download or load, with the follow-up that
-owns each. ``--cfg-parallel`` is accepted: the conditional and unconditional branches run
+VAE — refused here, before any download or load;
+``--torch-compile`` is forwarded as the measured opt-in option. ``--cfg-parallel`` is accepted: the
+conditional and unconditional branches run
 on two GPUs, the shared orchestrator re-execing ``generate`` under ``torchrun``.
 ``--guidance-scale`` is the high-noise expert's CFG scale (default 4.0); the low-noise one
 stays at the application's 3.0 (no CLI flag), and there is no ``--negative-prompt``

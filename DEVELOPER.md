@@ -191,9 +191,11 @@ against diffusers on CPU. Trainium/TPU outputs are unchanged by this.
 DiT block with inductor (`max-autotune-no-cudagraphs`, `dynamic=True` so one graph serves every
 prompt length; `dynamic=False` for Wan and Flux, one static shape per process — measured: compiled
 Wan 32.8 s vs diffusers' 43.2 s per 40-step run, compiled Flux 7.1 s vs 8.3 s per 28 steps, each
-expert / the double and single blocks compiled per block): 0.33 → 0.25 s/step for Qwen. Expect two compilations at load (the warm-up runs twice under
-the flag: dynamo's guard on a `None` block argument forces the second; ~16 s together with a warm
-inductor cache, more on a fresh box), then no recompiles — `TORCH_LOGS=recompiles` shows them. Parity moves but
+expert / the double and single blocks compiled per block): 0.33 → 0.25 s/step for Qwen. Expect
+two compilations at load for Qwen (its warm-up runs twice under the flag: dynamo's guard on a
+`None` block argument forces the second; ~16 s together with a warm inductor cache, more on a
+fresh box) and one for Wan and Flux (their warm-up runs once; Wan compiles both experts, 82.6 s
+load), then no recompiles — `TORCH_LOGS=recompiles` shows them. Parity moves but
 stays inside the bf16 noise (rel_l1 0.88× the bf16 control vs fp32). CUDA-only: the other backends
 refuse the flag. `--teacache-cadence N` runs the existing probe-free TeaCache controller (skip every
 Nth step after warm-up): cadence 2 → 0.20 s/step at PSNR 38.5 dB against the full run. The
@@ -228,8 +230,9 @@ Measured on the RTX PRO 6000 (2026-10-18): `difflet run` writes a 1024×1024 ima
 distance 0.398×); whole-pipeline e2e vs diffusers' `FluxPipeline` PSNR 40.35 dB / cosine 0.99980
 (floors 35 dB / 0.998); the CLI matrix passes both cells. Flux on CUDA refuses TeaCache, SP, CP, CFG-parallel, TAEF1,
 `--host-vae` and bucketed shapes as unsupported; `--torch-compile` is the measured option above, and
-the single block's `proj_out` runs as diffusers' one gemm at tp=1 (`fuse_proj_out`, load-time on
-CUDA; the checkpoint and the Trainium/TPU graphs keep the Megatron split). Flux's e2e PSNR is
+the single block's `proj_out` can run as diffusers' one gemm at tp=1 (`fuse_proj_out`, a CUDA
+load-time module swap in `difflet/backends/cuda/flux/proj_out.py`, off by default until the 10 dB
+it moved one seed's e2e PSNR is explained; the model file, the checkpoint and the Trainium/TPU graphs keep the Megatron split). Flux's e2e PSNR is
 seed-sensitive — diffusers against its own perturbed self spans 30.9–37.6 dB over three seeds —
 so the e2e gate is relative to a recorded noise floor, as Wan's. The Trainium byte-identity of the
 split is argued (verbatim move, CPU suites) but not re-run on a trn2.

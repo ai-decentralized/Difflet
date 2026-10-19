@@ -22,8 +22,9 @@ reflectively — but keeps every stage on the device:
 fp32 — UniPC's corrector collapses in bf16 — and the DiT/VAE callables move tensors to the
 device per call and return host tensors.
 
-The CUDA backend runs tp=1, one shape, no TeaCache, no ``--shapes``, no
-``torch.compile`` — each is refused by name before any weight loads.
+The CUDA backend runs tp=1, one shape, no TeaCache, no ``--shapes`` — each is refused
+by name before any weight loads. ``torch.compile`` is an opt-in
+option: the ``torch_compile`` kwarg (``--torch-compile`` on the CLI).
 """
 
 from __future__ import annotations

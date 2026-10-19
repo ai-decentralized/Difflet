@@ -47,7 +47,7 @@ def _config(guidance_embeds: bool) -> FluxDiTConfig:
     )
 
 
-def _adapter(tmp_path, guidance_embeds=True, *, warmup=False):
+def _adapter(tmp_path, guidance_embeds=True, *, warmup=False, **app_kwargs):
     """Write the diffusers weights as one unindexed shard, then compile + load the app."""
     reference = _reference(guidance_embeds)
     transformer = tmp_path / "transformer"
@@ -55,7 +55,7 @@ def _adapter(tmp_path, guidance_embeds=True, *, warmup=False):
     state = {k: v.detach().clone().contiguous() for k, v in reference.state_dict().items()}
     save_file(state, str(transformer / "diffusion_pytorch_model.safetensors"))
     app = CudaFluxTransformerApplication(
-        model_path=str(transformer), config=_config(guidance_embeds), device="cpu"
+        model_path=str(transformer), config=_config(guidance_embeds), device="cpu", **app_kwargs
     )
     cache = tmp_path / "cache"
     app.compile(str(cache))
@@ -189,12 +189,26 @@ def test_torch_compile_wraps_every_flux_block(tmp_path):
     assert all(isinstance(b, OptimizedModule) for b in blocks)
 
 
-# --- F4f task 2: the single block's proj_out as one gemm at tp=1 ------------------------------
+# --- the single block's proj_out as one gemm at tp=1 (opt-in) --------------------------------
 
 
-def test_load_fuses_every_single_block_s_proj_out_at_tp1(tmp_path):
+def test_the_split_projection_is_the_default(tmp_path):
     reference, adapter = _adapter(tmp_path)
+    for block in adapter.app.module.single_transformer_blocks:
+        assert getattr(block, "proj_out", None) is None
+        assert block.proj_out_attn is not None and block.proj_out_mlp is not None
+    inputs = _inputs()
+    guidance = torch.tensor([3.5])
+    with torch.no_grad():
+        expected = reference(**inputs, guidance=guidance, return_dict=False)[0]
+        (actual,) = adapter(**inputs, guidance=guidance, return_dict=False)
+    torch.testing.assert_close(actual, expected, rtol=1e-4, atol=1e-4)
+
+
+def test_fuse_proj_out_option_fuses_every_single_block_and_matches_diffusers(tmp_path):
+    reference, adapter = _adapter(tmp_path, fuse_proj_out=True)
     app = adapter.app
+    assert app.fuse_proj_out is True
     for block in app.module.single_transformer_blocks:
         assert isinstance(block.proj_out, torch.nn.Linear)
         assert block.proj_out_attn is None and block.proj_out_mlp is None
