@@ -44,7 +44,7 @@ to the CUDA path but never ran: it is NOT MEASURED in every row and has no colum
 | e2e vs diffusers | PASS, 35 dB / 0.998 | PASS, 35 dB / 0.998 | PASS, 25 dB / 0.99; seeds 0–2 overlap diffusers' own noise floor; gate relative to the floor, 2.0 dB headroom on the mean |
 | CLI matrix cell | PASS | PASS | PASS |
 | `difflet serve` | PASS; LIMIT on concurrency (429 after 30 s) | N/A · refused by name, F5b | N/A · refused by name, F1b |
-| `--torch-compile` | PASS, opt-in | N/A · refused, F5b | N/A · refused, F1b |
+| `--torch-compile` | PASS, opt-in | PASS, 0.83× diffusers per forward | PASS, 0.76× diffusers per run |
 | `--teacache-cadence N` | PASS, fixed cadence only | N/A · refused, F5b | N/A · refused, F1b |
 | `--dp 2 --requests` | PASS, byte-identical | `--dp 1` batch PASS, byte-identical; `--dp 2` NOT MEASURED (needs 2 GPUs) | PASS, bit-identical |
 | `--cfg-parallel` (2 GPUs) | N/A · single pass | N/A · guidance-distilled; true-CFG is the owner's call | PASS, bit-identical |
@@ -87,7 +87,7 @@ One resident worker holds the pipeline; OpenAI-compatible chat endpoint.
 Per-block inductor compile of the DiT, opt-in (eager by default).
 | Qwen-Image | FLUX.1-dev | Wan 2.2 |
 |---|---|---|
-| PASS · 242.8 ms forward, 12.4 s / 50 steps, parity and e2e (40.21 dB) pass | N/A · refused, F5b | N/A · refused, F1b |
+| PASS · 242.8 ms forward, 12.4 s / 50 steps, parity and e2e (40.21 dB) pass | PASS · 241.3 ms forward, 7.1 s / 28 steps vs diffusers 8.3; parity 0.958×; e2e at the noise floor on seed 0, 39.8–42.5 dB on seeds 1–2 | PASS · 32.8 s / 40 steps vs diffusers 43.2; parity 0.947× / 0.928×; e2e 27.49 dB |
 
 ### TeaCache   `--teacache-cadence N`
 Probe-free fixed cadence on the CUDA loop; calibrated and online-delta modes refused.
@@ -141,8 +141,9 @@ Also unmeasured, and recorded where they arose: Workstation vs Server characteri
 `cuda_bench_dit.py` (a second Server card reproduced the f3c table to the millisecond, the
 Workstation card was not on the pod); Wan's Difflet vs diffusers generate gap — **measured and
 closed** in F4b (50.9 vs 42.9 s Server → 44.5 vs 42.8 s after the fused q/k norm); why two Wan replicas generating at once take 51.2 s each against 44.5 s
-alone; Flux's generate gap vs diffusers — located by the DiT bench and halved by F4e
-(8.8 vs 8.3 s; what remains is the single block's projection gemm layout); F2 `--dp 1` requests 1 and 2 against their
+alone; Flux's generate gap vs diffusers — located by the DiT bench, halved by F4e and
+closed to 1.028× per forward by F4f's fused projection (8.8 vs 8.3 s eager; 7.1 s compiled);
+F2 `--dp 1` requests 1 and 2 against their
 references; the origin of GPU 0's extra ~555 MiB under `--cfg-parallel`; the Trainium
 byte-identity of the Flux split (needs a trn2); the split of the Wan noise floor into the
 timestep effect and run-to-run GPU nondeterminism. F9's recommended follow-up — state the
