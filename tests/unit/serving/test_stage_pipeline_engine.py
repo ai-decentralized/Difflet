@@ -423,8 +423,8 @@ def test_engine_logs_the_stage_breakdown_once_per_request(caplog):
     message = breakdowns[-1].getMessage()
     assert "first=1.000s(" in message and "last=9.000s(" in message
     assert breakdowns[-1].stage_breakdown["stages"] == [
-        {"stage_id": "first", "seconds": 1.0},
-        {"stage_id": "last", "seconds": 9.0},
+        {"stage_id": "first", "role": "prompt_encoder", "seconds": 1.0},
+        {"stage_id": "last", "role": "decoder", "seconds": 9.0},
     ]
 
 
@@ -501,3 +501,46 @@ def test_engine_says_unavailable_when_the_backend_cannot_report_memory(caplog):
         for record in caplog.records
         if record.getMessage().startswith("stage.load ")
     )
+
+
+def test_engine_takes_each_stage_role_from_the_pipeline_definition():
+    adapter = _TimedAdapter()
+    engine = _engine(adapter)
+
+    async def _run():
+        await engine.start()
+        await engine.generate(_request("r1"), _context("r1"))
+
+    asyncio.run(_run())
+
+    breakdown = engine.last_stage_breakdown
+    assert breakdown is not None
+    assert breakdown.role_seconds == {"prompt_encoder": 1.0, "decoder": 9.0}
+    report = engine.stage_load_report
+    assert report is not None
+    assert [stage.role for stage in report.stages] == ["prompt_encoder", "decoder"]
+
+
+def test_engine_warns_when_an_adapter_marks_a_stage_the_pipeline_does_not_declare(caplog):
+    class _TypoAdapter(_TimedAdapter):
+        async def create_loaded_runners(self, runtime):
+            runners = await super().create_loaded_runners(runtime)
+            with record_stage_load("generation"):
+                pass
+            return runners
+
+    engine = _engine(_TypoAdapter())
+
+    with caplog.at_level(logging.WARNING, logger="difflet.serving.engines.stage_pipeline"):
+        asyncio.run(engine.start())
+
+    report = engine.stage_load_report
+    assert report is not None
+    assert report.unknown_stage_ids == ("generation",)
+    warning = next(
+        record
+        for record in caplog.records
+        if record.getMessage().startswith("stage.load_unknown_stage")
+    )
+    assert "stage_ids=generation" in warning.getMessage()
+    assert "pipeline=first,last" in warning.getMessage()

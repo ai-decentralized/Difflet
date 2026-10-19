@@ -1073,6 +1073,18 @@ boundary and around the whole load, and emits `stage.load` per boundary plus one
 - `unavailable` — the backend exposes no resident device memory here; the summary carries
   the reason and no number is invented.
 
+Every stage event carries both `stage_id` and `role`. `role` is the normalized vocabulary
+(`prompt_encoder`, `denoiser`, `decoder`, `pipeline`) that is stable across models where
+`stage_id` is not, so grouping and cross-model comparison key on `role`; `stage.breakdown`
+also carries `role_seconds`, which sums stages that share a role (HunyuanVideo's `clip` and
+`llama` are both prompt encoders). A load marked against a stage ID the pipeline definition
+does not declare is reported as `unknown_stage_ids` with a `stage.load_unknown_stage`
+warning and role `unknown`, never filed against a stage nobody runs.
+
+A single-stage pipeline — every model on CUDA, plus Flux and LTX-2 on Trainium — is the
+degenerate case, not a failure: one `pipeline` stage whose duration is the whole request
+and whose residency is the whole total, with nothing unattributed.
+
 `scope` says whose bytes they are: `process` normally, `host` when the probe could only
 read a host-wide total. A load that happens outside every marked boundary shows up as
 `unattributed`, never folded into a stage.

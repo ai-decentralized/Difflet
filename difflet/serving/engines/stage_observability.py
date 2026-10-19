@@ -27,13 +27,17 @@ import os
 import select
 import subprocess
 import time
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Protocol
 
 logger = logging.getLogger(__name__)
+
+#: The role of a stage the pipeline definition does not declare, or that no pipeline was
+#: supplied for. Never silently mapped onto a real role.
+UNKNOWN_ROLE = "unknown"
 
 MemoryScope = Literal["process", "host"]
 LoadAttribution = Literal["per_stage", "total_only", "unavailable"]
@@ -245,15 +249,24 @@ class StageLoadRecord:
     stage_ids: tuple[str, ...]
     load_seconds: float
     device_bytes: int | None
+    # ``role`` is the normalized vocabulary (prompt_encoder, denoiser, decoder, pipeline)
+    # that is comparable across models; ``stage_id`` is not. Group on roles.
+    roles: tuple[str, ...] = ()
 
     @property
     def stage_id(self) -> str:
         return "+".join(self.stage_ids)
 
+    @property
+    def role(self) -> str:
+        return "+".join(self.roles) if self.roles else UNKNOWN_ROLE
+
     def as_event(self) -> dict[str, Any]:
         return {
             "stage_id": self.stage_id,
             "stage_ids": list(self.stage_ids),
+            "role": self.role,
+            "roles": list(self.roles),
             "load_seconds": round(self.load_seconds, 3),
             "device_bytes": self.device_bytes,
         }
@@ -270,6 +283,9 @@ class StageLoadReport:
     stages: tuple[StageLoadRecord, ...]
     total_device_bytes: int | None
     reason: str | None = None
+    # Stage IDs an adapter marked that the pipeline definition does not declare: a typo in
+    # an adapter, surfaced rather than silently logged against a stage nobody runs.
+    unknown_stage_ids: tuple[str, ...] = ()
 
     @property
     def attributed_device_bytes(self) -> int | None:
@@ -294,16 +310,26 @@ class StageLoadReport:
             "attributed_device_bytes": self.attributed_device_bytes,
             "unattributed_device_bytes": self.unattributed_device_bytes,
             "reason": self.reason,
+            "unknown_stage_ids": list(self.unknown_stage_ids),
         }
 
 
 class StageLoadRecorder:
     """Collect per-stage load time and device memory deltas for one worker startup."""
 
-    def __init__(self, probe: DeviceMemoryProbe, *, backend: str = "unknown") -> None:
+    def __init__(
+        self,
+        probe: DeviceMemoryProbe,
+        *,
+        backend: str = "unknown",
+        stage_roles: Mapping[str, str] | None = None,
+    ) -> None:
         self.probe = probe
         self.backend = backend
+        # stage_id -> role, from the pipeline definition the engine is about to run.
+        self.stage_roles = dict(stage_roles or {})
         self._records: list[StageLoadRecord] = []
+        self._unknown_stage_ids: list[str] = []
         self._baseline: DeviceMemorySample | None = None
         self._final: DeviceMemorySample | None = None
         self._scope: MemoryScope | None = None
@@ -338,7 +364,19 @@ class StageLoadRecorder:
                 if before is not None and after is not None
                 else None
             )
-            self._records.append(StageLoadRecord(tuple(stage_ids), elapsed, delta))
+            roles = tuple(self._role(stage_id) for stage_id in stage_ids)
+            self._records.append(StageLoadRecord(tuple(stage_ids), elapsed, delta, roles))
+
+    def _role(self, stage_id: str) -> str:
+        if not self.stage_roles:
+            # No pipeline to check against (a bare recorder in a test): claim nothing.
+            return UNKNOWN_ROLE
+        try:
+            return self.stage_roles[stage_id]
+        except KeyError:
+            if stage_id not in self._unknown_stage_ids:
+                self._unknown_stage_ids.append(stage_id)
+            return UNKNOWN_ROLE
 
     def report(self) -> StageLoadReport:
         total = (
@@ -368,6 +406,7 @@ class StageLoadRecorder:
             stages=tuple(self._records),
             total_device_bytes=total,
             reason=reason,
+            unknown_stage_ids=tuple(self._unknown_stage_ids),
         )
 
 
@@ -412,6 +451,7 @@ def record_stage_load(*stage_ids: str) -> Iterator[None]:
 class StageTiming:
     stage_id: str
     seconds: float
+    role: str = UNKNOWN_ROLE
 
 
 @dataclass(frozen=True, slots=True)
@@ -428,15 +468,33 @@ class RequestStageBreakdown:
     def stage_seconds(self) -> dict[str, float]:
         return {stage.stage_id: stage.seconds for stage in self.stages}
 
+    @property
+    def role_seconds(self) -> dict[str, float]:
+        """Seconds per role, summed — the comparable view across models, since two stages
+        can share a role (HunyuanVideo's ``clip`` and ``llama`` are both prompt_encoder)."""
+
+        totals: dict[str, float] = {}
+        for stage in self.stages:
+            totals[stage.role] = totals.get(stage.role, 0.0) + stage.seconds
+        return totals
+
     def as_event(self) -> dict[str, Any]:
         return {
             "request_id": self.request_id,
             "model": self.model,
             "outcome": self.outcome,
             "stages": [
-                {"stage_id": stage.stage_id, "seconds": round(stage.seconds, 3)}
+                {
+                    "stage_id": stage.stage_id,
+                    "role": stage.role,
+                    "seconds": round(stage.seconds, 3),
+                }
                 for stage in self.stages
             ],
+            # The comparable view: two models with different stage IDs still line up here.
+            "role_seconds": {
+                role: round(seconds, 3) for role, seconds in self.role_seconds.items()
+            },
             "total_seconds": round(self.total_seconds, 3),
         }
 
@@ -460,6 +518,7 @@ def format_bytes(value: int | None) -> str:
 
 
 __all__ = [
+    "UNKNOWN_ROLE",
     "CudaDeviceMemoryProbe",
     "DeviceMemoryProbe",
     "DeviceMemorySample",
