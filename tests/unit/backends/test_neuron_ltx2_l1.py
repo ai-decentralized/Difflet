@@ -109,13 +109,18 @@ def test_config_defaults_are_ltx_2_and_match_the_trainium_geometry():
     assert default.video_seq_len == 16 * 16 * 24 and default.audio_num_frames == 126
     bench = NeuronLtx2Config(height=480, width=704, num_frames=49)
     assert bench.video_seq_len == 7 * 15 * 22 and bench.audio_seq_len == 51
-    if LTX2_SNAPSHOT.is_dir():
-        real = NeuronLtx2Config.from_pretrained(LTX2_SNAPSHOT / "transformer")
-        for name in ("in_channels", "num_layers", "attention_head_dim", "num_attention_heads",
-                     "cross_attention_dim", "audio_num_attention_heads", "audio_attention_head_dim",
-                     "audio_cross_attention_dim", "caption_channels", "rope_type",
-                     "rope_double_precision", "vae_scale_factors"):
-            assert getattr(real, name) == getattr(default, name), name
+
+
+def test_config_defaults_are_the_real_checkpoints():
+    if not LTX2_SNAPSHOT.is_dir():
+        pytest.skip("the real LTX-2 snapshot is not on this machine")
+    default = NeuronLtx2Config(tp_degree=4)
+    real = NeuronLtx2Config.from_pretrained(LTX2_SNAPSHOT / "transformer")
+    for name in ("in_channels", "num_layers", "attention_head_dim", "num_attention_heads",
+                 "cross_attention_dim", "audio_num_attention_heads", "audio_attention_head_dim",
+                 "audio_cross_attention_dim", "caption_channels", "rope_type",
+                 "rope_double_precision", "vae_scale_factors"):
+        assert getattr(real, name) == getattr(default, name), name
 
 
 @pytest.mark.parametrize(
