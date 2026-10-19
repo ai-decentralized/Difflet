@@ -1,0 +1,97 @@
+log: /tmp/logs/cuda-serve-smoke-20261019-191844.log
+[serve-smoke] starting: /home/user/Difflet/.venv/bin/python -m difflet.cli.main serve --model-id black-forest-labs/FLUX.1-dev --port 8091 --worker-restart-timeout 900
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+2026-10-19 19:18:45.739 INFO:     Started server process [2308]
+2026-10-19 19:18:45.739 INFO:     Waiting for application startup.
+2026-10-19 19:18:45.740 INFO:     serving startup begin model=black-forest-labs/FLUX.1-dev
+2026-10-19 19:18:46.964 INFO:     worker_process_start model=black-forest-labs/FLUX.1-dev profile_identity=15ad46cebadebb20eb04cc526fc2444603b64b7f9c81e065719f7700a010fda4 startup_timeout=900.0
+2026-10-19 19:18:46.964 INFO:     worker_process_terminate model=black-forest-labs/FLUX.1-dev
+[difflet serve] resolving FLUX.1-dev weights for black-forest-labs/FLUX.1-dev
+[difflet serve] cuda backend: eager resident pipeline, no compile artifacts
+[difflet serve] stage topology:
+  - pipeline: role=pipeline kind=opaque_pipeline placement=cuda artifact=-
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+2026-10-19 19:18:47.022 INFO:     worker heartbeat transition state=starting request_id=None stage=None running_requests=0 queued_requests=0 pending_requests=0 capacity=9
+[transformers] `CLIPImageProcessor` requires torchvision (not installed); falling back to `CLIPImageProcessorPil` for backward compatibility. Install torchvision to use the default backend, or import `CLIPImageProcessorPil` directly to silence this warning.
+[transformers] `SiglipImageProcessor` requires torchvision (not installed); falling back to `SiglipImageProcessorPil` for backward compatibility. Install torchvision to use the default backend, or import `SiglipImageProcessorPil` directly to silence this warning.
+[difflet serve] loading FLUX.1-dev on CUDA (CLIP, T5, DiT, VAE in-process)
+Loading pipeline components...:   0%|          | 0/6 [00:00<?, ?it/s]
+Loading weights:   0%|          | 0/219 [00:00<?, ?it/s][ALoading weights: 100%|██████████| 219/219 [00:00<00:00, 15672.02it/s]
+Loading pipeline components...:  17%|█▋        | 1/6 [00:00<00:01,  4.90it/s]
+Loading weights:   0%|          | 0/196 [00:00<?, ?it/s][ALoading weights: 100%|██████████| 196/196 [00:00<00:00, 17658.71it/s]
+Loading pipeline components...:  83%|████████▎ | 5/6 [00:00<00:00, 17.72it/s]Loading pipeline components...: 100%|██████████| 6/6 [00:00<00:00, 17.14it/s]
+[difflet serve] FLUX.1-dev CUDA pipeline resident
+  0%|          | 0/4 [00:00<?, ?it/s] 25%|██▌       | 1/4 [00:00<00:00,  5.51it/s] 50%|█████     | 2/4 [00:00<00:00,  3.93it/s] 75%|███████▌  | 3/4 [00:00<00:00,  3.63it/s]100%|██████████| 4/4 [00:01<00:00,  3.51it/s]100%|██████████| 4/4 [00:01<00:00,  3.68it/s]
+2026-10-19 19:18:54.701 INFO:     worker_process_ready model=black-forest-labs/FLUX.1-dev replicas=1
+2026-10-19 19:18:54.702 INFO:     serving startup complete model=black-forest-labs/FLUX.1-dev
+2026-10-19 19:18:54.702 INFO:     Application startup complete.
+2026-10-19 19:18:54.703 INFO:     Uvicorn running on http://0.0.0.0:8091 (Press CTRL+C to quit)
+2026-10-19 19:18:56.495 INFO:     127.0.0.1:37140 - "GET /ready HTTP/1.1" 200
+[serve-smoke] ready in 12.0 s
+2026-10-19 19:18:56.497 INFO:     http.request_started path=/v1/chat/completions method=POST model=black-forest-labs/FLUX.1-dev request_id=d7108cb2-ddd9-41ab-aa31-54f7909369fb client=127.0.0.1
+2026-10-19 19:18:56.498 INFO:     chat request normalized model=black-forest-labs/FLUX.1-dev request_id=d7108cb2-ddd9-41ab-aa31-54f7909369fb prompt_len=47 steps=28 guidance=3.5 seed=0
+2026-10-19 19:18:56.498 INFO:     engine.generate admitted request_id=d7108cb2-ddd9-41ab-aa31-54f7909369fb model=black-forest-labs/FLUX.1-dev queued=0/9
+2026-10-19 19:18:56.498 INFO:     engine.queue_acquired request_id=d7108cb2-ddd9-41ab-aa31-54f7909369fb
+2026-10-19 19:18:56.498 INFO:     engine.lock_acquired request_id=d7108cb2-ddd9-41ab-aa31-54f7909369fb
+2026-10-19 19:18:56.498 INFO:     engine.run_start request_id=d7108cb2-ddd9-41ab-aa31-54f7909369fb
+2026-10-19 19:18:56.499 INFO:     worker_process_run_start request_id=d7108cb2-ddd9-41ab-aa31-54f7909369fb model=black-forest-labs/FLUX.1-dev deadline_remaining=300.000
+[difflet serve] FLUX.1-dev CUDA generation smoke passed
+  0%|          | 0/28 [00:00<?, ?it/s]  4%|▎         | 1/28 [00:00<00:04,  5.78it/s]  7%|▋         | 2/28 [00:00<00:06,  4.03it/s] 11%|█         | 3/28 [00:00<00:06,  3.68it/s] 14%|█▍        | 4/28 [00:01<00:06,  3.53it/s] 18%|█▊        | 5/28 [00:01<00:06,  3.46it/s] 21%|██▏       | 6/28 [00:01<00:06,  3.41it/s] 25%|██▌       | 7/28 [00:01<00:06,  3.39it/s] 29%|██▊       | 8/28 [00:02<00:05,  3.37it/s] 32%|███▏      | 9/28 [00:02<00:05,  3.36it/s] 36%|███▌      | 10/28 [00:02<00:05,  3.35it/s] 39%|███▉      | 11/28 [00:03<00:05,  3.34it/s] 43%|████▎     | 12/28 [00:03<00:04,  3.34it/s] 46%|████▋     | 13/28 [00:03<00:04,  3.34it/s] 50%|█████     | 14/28 [00:04<00:04,  3.33it/s] 54%|█████▎    | 15/28 [00:04<00:03,  3.33it/s] 57%|█████▋    | 16/28 [00:04<00:03,  3.33it/s] 61%|██████    | 17/28 [00:04<00:03,  3.33it/s] 64%|██████▍   | 18/28 [00:05<00:03,  3.33it/s] 68%|██████▊   | 19/28 [00:05<00:02,  3.33it/s] 71%|███████▏  | 20/28 [00:05<00:02,  3.33it/s] 75%|███████▌  | 21/28 [00:06<00:02,  3.33it/s] 79%|███████▊  | 22/28 [00:06<00:01,  3.33it/s] 82%|████████▏ | 23/28 [00:06<00:01,  3.33it/s] 86%|████████▌ | 24/28 [00:07<00:01,  3.33it/s] 89%|████████▉ | 25/28 [00:07<00:00,  3.33it/s] 93%|█████████▎| 26/28 [00:07<00:00,  3.33it/s] 96%|█████████▋| 27/28 [00:07<00:00,  3.33it/s]100%|██████████| 28/28 [00:08<00:00,  3.33it/s]100%|██████████| 28/28 [00:08<00:00,  3.38it/s]
+2026-10-19 19:19:05.328 INFO:     worker_process_generation_ok request_id=d7108cb2-ddd9-41ab-aa31-54f7909369fb
+2026-10-19 19:19:05.328 INFO:     engine.run_complete request_id=d7108cb2-ddd9-41ab-aa31-54f7909369fb
+2026-10-19 19:19:05.328 INFO:     chat request engine_ok request_id=d7108cb2-ddd9-41ab-aa31-54f7909369fb model=black-forest-labs/FLUX.1-dev latency_ms=8829.87
+2026-10-19 19:19:05.330 INFO:     chat request image_inline_ready request_id=d7108cb2-ddd9-41ab-aa31-54f7909369fb bytes=1247233
+2026-10-19 19:19:05.330 INFO:     chat request completed request_id=d7108cb2-ddd9-41ab-aa31-54f7909369fb model=black-forest-labs/FLUX.1-dev total_ms=8831.72
+2026-10-19 19:19:05.330 INFO:     http.request_completed path=/v1/chat/completions status=200 model=black-forest-labs/FLUX.1-dev request_id=d7108cb2-ddd9-41ab-aa31-54f7909369fb duration_ms=8833.35
+2026-10-19 19:19:05.338 INFO:     127.0.0.1:37150 - "POST /v1/chat/completions HTTP/1.1" 200
+[serve-smoke] request 1: 8.8 s -> /home/user/logs/f3c/flux-serve.png (identical to reference: True)
+2026-10-19 19:19:05.343 INFO:     http.request_started path=/v1/chat/completions method=POST model=black-forest-labs/FLUX.1-dev request_id=c3c050e2-bd97-40dc-8d9f-bfbc14beec66 client=127.0.0.1
+2026-10-19 19:19:05.344 INFO:     chat request normalized model=black-forest-labs/FLUX.1-dev request_id=c3c050e2-bd97-40dc-8d9f-bfbc14beec66 prompt_len=47 steps=28 guidance=3.5 seed=0
+2026-10-19 19:19:05.344 INFO:     engine.generate admitted request_id=c3c050e2-bd97-40dc-8d9f-bfbc14beec66 model=black-forest-labs/FLUX.1-dev queued=0/9
+2026-10-19 19:19:05.344 INFO:     engine.queue_acquired request_id=c3c050e2-bd97-40dc-8d9f-bfbc14beec66
+2026-10-19 19:19:05.344 INFO:     engine.lock_acquired request_id=c3c050e2-bd97-40dc-8d9f-bfbc14beec66
+2026-10-19 19:19:05.344 INFO:     engine.run_start request_id=c3c050e2-bd97-40dc-8d9f-bfbc14beec66
+2026-10-19 19:19:05.344 INFO:     worker_process_run_start request_id=c3c050e2-bd97-40dc-8d9f-bfbc14beec66 model=black-forest-labs/FLUX.1-dev deadline_remaining=300.000
+  0%|          | 0/28 [00:00<?, ?it/s]  4%|▎         | 1/28 [00:00<00:04,  5.82it/s]  7%|▋         | 2/28 [00:00<00:06,  4.04it/s] 11%|█         | 3/28 [00:00<00:06,  3.68it/s] 14%|█▍        | 4/28 [00:01<00:06,  3.53it/s] 18%|█▊        | 5/28 [00:01<00:06,  3.46it/s] 21%|██▏       | 6/28 [00:01<00:06,  3.41it/s] 25%|██▌       | 7/28 [00:01<00:06,  3.38it/s] 29%|██▊       | 8/28 [00:02<00:05,  3.37it/s] 32%|███▏      | 9/28 [00:02<00:05,  3.35it/s] 36%|███▌      | 10/28 [00:02<00:05,  3.35it/s] 39%|███▉      | 11/28 [00:03<00:05,  3.34it/s] 43%|████▎     | 12/28 [00:03<00:04,  3.34it/s] 46%|████▋     | 13/28 [00:03<00:04,  3.33it/s] 50%|█████     | 14/28 [00:04<00:04,  3.33it/s] 54%|█████▎    | 15/28 [00:04<00:03,  3.33it/s] 57%|█████▋    | 16/28 [00:04<00:03,  3.33it/s] 61%|██████    | 17/28 [00:04<00:03,  3.33it/s] 64%|██████▍   | 18/28 [00:05<00:03,  3.33it/s] 68%|██████▊   | 19/28 [00:05<00:02,  3.33it/s] 71%|███████▏  | 20/28 [00:05<00:02,  3.33it/s] 75%|███████▌  | 21/28 [00:06<00:02,  3.33it/s] 79%|███████▊  | 22/28 [00:06<00:01,  3.33it/s] 82%|████████▏ | 23/28 [00:06<00:01,  3.33it/s] 86%|████████▌ | 24/28 [00:07<00:01,  3.33it/s] 89%|████████▉ | 25/28 [00:07<00:00,  3.33it/s] 93%|█████████▎| 26/28 [00:07<00:00,  3.33it/s] 96%|█████████▋| 27/28 [00:07<00:00,  3.33it/s]100%|██████████| 28/28 [00:08<00:00,  3.33it/s]100%|██████████| 28/28 [00:08<00:00,  3.38it/s]
+2026-10-19 19:19:14.173 INFO:     worker_process_generation_ok request_id=c3c050e2-bd97-40dc-8d9f-bfbc14beec66
+2026-10-19 19:19:14.173 INFO:     engine.run_complete request_id=c3c050e2-bd97-40dc-8d9f-bfbc14beec66
+2026-10-19 19:19:14.173 INFO:     chat request engine_ok request_id=c3c050e2-bd97-40dc-8d9f-bfbc14beec66 model=black-forest-labs/FLUX.1-dev latency_ms=8829.35
+2026-10-19 19:19:14.174 INFO:     chat request image_inline_ready request_id=c3c050e2-bd97-40dc-8d9f-bfbc14beec66 bytes=1247233
+2026-10-19 19:19:14.174 INFO:     chat request completed request_id=c3c050e2-bd97-40dc-8d9f-bfbc14beec66 model=black-forest-labs/FLUX.1-dev total_ms=8830.25
+2026-10-19 19:19:14.174 INFO:     http.request_completed path=/v1/chat/completions status=200 model=black-forest-labs/FLUX.1-dev request_id=c3c050e2-bd97-40dc-8d9f-bfbc14beec66 duration_ms=8830.99
+2026-10-19 19:19:14.182 INFO:     127.0.0.1:50402 - "POST /v1/chat/completions HTTP/1.1" 200
+[serve-smoke] request 2: 8.8 s -> /home/user/logs/f3c/flux-serve-2.png (identical to reference: True)
+2026-10-19 19:19:14.227 INFO:     Shutting down
+2026-10-19 19:19:14.327 INFO:     Waiting for application shutdown.
+2026-10-19 19:19:14.327 INFO:     serving shutdown begin model=black-forest-labs/FLUX.1-dev
+2026-10-19 19:19:14.327 INFO:     worker_process_shutdown requested model=black-forest-labs/FLUX.1-dev alive=False
+2026-10-19 19:19:14.327 INFO:     worker_process_terminate model=black-forest-labs/FLUX.1-dev
+2026-10-19 19:19:14.328 INFO:     serving shutdown complete model=black-forest-labs/FLUX.1-dev
+2026-10-19 19:19:14.328 INFO:     Application shutdown complete.
+2026-10-19 19:19:14.328 INFO:     Finished server process [2308]
+/usr/local/lib/python3.11/multiprocessing/resource_tracker.py:254: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '
+{
+  "model": "black-forest-labs/FLUX.1-dev",
+  "steps": 28,
+  "seed": 0,
+  "dp": 1,
+  "concurrent": 0,
+  "reference": "/home/user/logs/f3c/flux-run.png",
+  "requests": [
+    {
+      "request_s": 8.8,
+      "image": "/home/user/logs/f3c/flux-serve.png",
+      "bytes": 1247233,
+      "identical_to_reference": true
+    },
+    {
+      "request_s": 8.8,
+      "image": "/home/user/logs/f3c/flux-serve-2.png",
+      "bytes": 1247233,
+      "identical_to_reference": true
+    }
+  ],
+  "ready_s": 12.0,
+  "request_s": 8.8
+}

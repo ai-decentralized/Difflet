@@ -1,0 +1,24 @@
+{
+  "model": "black-forest-labs/FLUX.1-dev",
+  "steps": 28,
+  "seed": 0,
+  "dp": 1,
+  "concurrent": 0,
+  "reference": "/home/user/logs/f3c/flux-run.png",
+  "requests": [
+    {
+      "request_s": 8.8,
+      "image": "/home/user/logs/f3c/flux-serve.png",
+      "bytes": 1247233,
+      "identical_to_reference": true
+    },
+    {
+      "request_s": 8.8,
+      "image": "/home/user/logs/f3c/flux-serve-2.png",
+      "bytes": 1247233,
+      "identical_to_reference": true
+    }
+  ],
+  "ready_s": 12.0,
+  "request_s": 8.8
+}

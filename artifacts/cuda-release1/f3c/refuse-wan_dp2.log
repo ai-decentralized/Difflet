@@ -1,0 +1,1 @@
+Error: --dp-degree 2: wan serves video, and the video service runs one video job at a time, so a second resident replica would sit idle; serve with one replica (a concurrent video dispatcher is a follow-up)

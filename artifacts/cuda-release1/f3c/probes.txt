@@ -1,0 +1,6 @@
+guidance21 400 0.001604s
+height768 400 0.000579s
+longprompt 400 0.002050s
+guidance25 200 8.852526s
+concurrent2 200 8.878222s
+concurrent1 200 17.748163s

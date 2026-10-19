@@ -59,7 +59,7 @@
 
 ### Task 6: Docs, status log, PR; the pod run (pending the owner's yes)
 
-- [ ] The evidence report's NOT MEASURED / support matrix serve rows stay as measured until the pod; `DEVELOPER.md`, the catalog; status-log entry "landed on the CPU"; push; PR stacked on #101; one fresh whole-branch reviewer. Pod (owner's yes, us-east-3 on `difflet-cache` — Flux on the volume; Wan needs its 126 GB download unless the volume is grown): `cuda_serve_smoke.py --model-id black-forest-labs/FLUX.1-dev --requests 2`, then Wan the same, plus the 400 probes.
+- [x] The evidence report's NOT MEASURED / support matrix serve rows stay as measured until the pod; `DEVELOPER.md`, the catalog; status-log entry "landed on the CPU"; push; PR stacked on #101; one fresh whole-branch reviewer. Pod (owner's yes, us-east-3 on `difflet-cache` — Flux on the volume; Wan needs its 126 GB download unless the volume is grown): `cuda_serve_smoke.py --model-id black-forest-labs/FLUX.1-dev --requests 2`, then Wan the same, plus the 400 probes.
 
 ## Rulings
 
@@ -77,4 +77,6 @@ Task 3: complete (532abf8; CPU gate 2939 passed). Real MP4 encode/decode in the 
 Task 4: complete (c019245; CPU gate 2946 passed). Added an in-process /v1/videos/sync test through the CUDA validator and adapter (not in the plan): video is new on the CUDA path; Flux uses Qwen's GPU-verified chat path.
 Task 5: complete (4568b34; CPU gate 2952 passed). serve_timings.json keeps "image" for images, adds "video" and "bytes".
 Task 6: docs + status log (this commit); push, PR, review; the pod run pending the owner's yes (Wan needs disk: the volume has 115 GiB free, Wan is 117.5 GiB).
+Review fix wave: f7c167e (smoke --worker-restart-timeout, clean CUDA refusals, lone --teacache-calibration refused, video-replica reason first).
+Pod: f9c3 resume refused (no capacity) -> eu-2 pod f3c (Server, $2.68/h); HF login + Flux download to its disk (Xet stalled; HTTPS); Flux serving PASS: served PNGs byte-identical to difflet run, probes and refusals as designed; terminated 19:30 UTC. Wan serving still NOT MEASURED (needs disk).
 ```

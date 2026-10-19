@@ -1,0 +1,1 @@
+Error: checkpoint 'Wan-AI/Wan2.1-T2V-14B-Diffusers' is not served on the CUDA backend: it has never run on a GPU (NOT MEASURED); served for wan: Wan-AI/Wan2.2-T2V-A14B-Diffusers

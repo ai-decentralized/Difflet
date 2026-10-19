@@ -1,0 +1,1 @@
+Error: --teacache-calibration without --teacache-speedup is ignored by resident serving; on the CUDA backend TeaCache is a `difflet run` option (Qwen-Image's fixed cadence, F4) and not served (F1b, F5b) — drop the flag

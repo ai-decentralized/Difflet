@@ -1,0 +1,1 @@
+Error: [flux/cuda serve] --tp-degree > 1 (tensor parallel across PCIe) is not supported on the CUDA backend in Release 1 (plan follow-up F6)

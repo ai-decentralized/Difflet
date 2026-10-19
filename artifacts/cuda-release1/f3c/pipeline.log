@@ -1,0 +1,12 @@
+== f3c 2026-10-19T19:18:27Z ==
+f7c167e review: F3c fix wave — the server gets the smoke's startup timeout, CUDA refusals exit cleanly, a lone --teacache-calibration is refused
+NVIDIA RTX PRO 6000 Blackwell Server Edition, 580.178.04, 0 MiB
+19:18:28 difflet run reference (28 steps, seed 0)
+19:18:44 run rc=0 in 16s
+19:18:44 serve smoke (2 requests, --reference the run's PNG)
+19:19:14 smoke rc=0 in 30s
+19:19:14 probe server
+19:19:24 probe server ready (poll 3)
+19:28:57 probe server stopped
+19:28:57 startup refusals
+19:28:57 F3C DONE

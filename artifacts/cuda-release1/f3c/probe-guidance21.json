@@ -1,0 +1,1 @@
+{"error":{"message":"guidance_scale must satisfy 0 <= value <= 20","type":"invalid_request_error","code":"invalid_extra_body"}}

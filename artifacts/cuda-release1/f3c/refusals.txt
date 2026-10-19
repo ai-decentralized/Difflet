@@ -1,0 +1,4 @@
+tp2 exit 1
+wan21 exit 1
+calibration exit 1
+wan_dp2 exit 1

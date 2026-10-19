@@ -56,6 +56,7 @@ here without both being named.
 | `difflet-cuda-f9c` | 502996083439452993 | eu-3 | **Server** × 1, no volume, 150 GB disk | 580.178.04 / 2.11.0+cu128 | 2.68 | 2026-10-19 16:06 → 16:20 UTC (**terminated**: the HF code expired; nothing ran) |
 | `difflet-cuda-f9c2` | 502999627274010989 | us-east-3 | **Workstation** × 1, the volume requested but not attached (v2 API) | 580.126.09 / — | 0.45 | 2026-10-19 16:20 → 16:23 UTC (**terminated**; nothing ran) |
 | `difflet-cuda-f9c3` | 503002432390967883 | us-east-3 | **Workstation** × 1, `difflet-cache` at `/data` (v1 API) | 580.126.09 / 2.11.0+cu128 | 0.45 | 2026-10-19 16:32 → **PAUSED** 16:53 UTC (read back) |
+| `difflet-cuda-f3c` | 503032996619760425 | eu-2 | **Server** × 1, no volume, 150 GB disk | 580.178.04 / 2.11.0+cu128 | 2.68 | 2026-10-19 18:33 → 19:30 UTC (**terminated**, read back gone) |
 
 Network volume `difflet-cache`: id 469225541779435520, us-east-3, 200 GB CephFS,
 $0.0698/GB/month, mounted at `/data` (HF cache + token, `HF_HOME=/data/hf`); cold reads ≈ 0.23
@@ -416,6 +417,27 @@ HF_HOME=$H scripts/cuda_serve_smoke.sh --output $HOME/logs/qwen-serve.png --step
 # probes against a running `HF_HOME=$H DIFFLET_BACKEND=cuda .venv/bin/difflet serve --model-id Qwen/Qwen-Image`
 # (port 8091): the exact curl helper is in .claude/skills/difflet-cuda-verify/SKILL.md §3
 ```
+
+### FLUX.1-dev served on CUDA (F3c, pod f3c, Server)
+
+`difflet serve --model-id black-forest-labs/FLUX.1-dev` on one card (checkout `f7c167e`), driven
+by `scripts/cuda_serve_smoke.sh --model-id black-forest-labs/FLUX.1-dev --steps 28 --seed 0
+--requests 2 --reference flux-run.png`, after a `difflet run` with the same prompt, seed and steps
+*[10-19 F3c Flux verdict]*:
+
+| Check | Result | Artifact |
+|---|---|---|
+| ready (load + the 4-step startup smoke) | 12.0 s (likely the page cache: the `difflet run` had just read the weights — not measured) | `f3c/serve_timings.json` |
+| two requests, 28 steps, 1024² | 8.8 s each (the `difflet run` generate: 9.1 s) | `f3c/serve_timings.json` |
+| served PNG vs `difflet run` PNG | **byte-identical**, both requests (md5 `e4b9c74b…`) — and identical to F9c's `run_gates.sh flux` smoke on a Workstation card | `f3c/flux-serve.png`, `f3c/flux-run.png`, `f3c/md5-flux.txt` |
+| `guidance_scale: 21` / 768×768 / a 700-word prompt | 400 `invalid_extra_body` / `profile_mismatch` / `prompt_too_long` | `f3c/probes.txt`, `f3c/probe-*.json` |
+| `guidance_scale: 2.5`, seed 1 | 200 in 8.9 s | `f3c/probes.txt` |
+| two concurrent requests | both 200: 8.9 s and 17.7 s (the second queues behind the first, inside the 30 s default) | `f3c/probes.txt` |
+| GPU memory while serving | 37,839 MiB | `f3c/serving-memory.txt` |
+| startup refusals: `--tp-degree 2`, Wan 2.1, a lone `--teacache-calibration`, Wan 2.2 `--dp-degree 2` | each exits 1 with one `Error:` line, before any load | `f3c/refusals.txt`, `f3c/refuse-*.log` |
+
+Wan 2.2's serving (MP4 over `/v1/videos`) is NOT MEASURED: its snapshot needs a pod with the disk
+for it (the `difflet-cache` volume's free space is smaller than the snapshot).
 
 ### Serving on two GPUs (F2b, `--dp-degree N`)
 
@@ -919,6 +941,9 @@ above. Spurious infrastructure events are kept and labelled.
 43. F9c measured on `difflet-cuda-f9c3` (Workstation): seeds 0–7 with the floor, eager and
     compiled, pass gates A and B (36.79 / 38.31 dB against 32.40); `run_gates.sh flux` green
     end to end; eager seeds 0–2 reproduce F4f's to the digit *[10-19 F9c verdict]*.
+44. `4b3f500` … `f7c167e` — `difflet serve` for FLUX.1-dev and Wan 2.2 on CUDA (F3c); Flux
+    measured on pod f3c: served PNGs byte-identical to `difflet run`, probes and startup
+    refusals as designed; Wan's serving not yet on a GPU *[10-19 F3c Flux verdict]*.
 
 ## Support matrix
 
@@ -931,7 +956,7 @@ to the CUDA path but never ran: it is NOT MEASURED in every row and has no colum
 | DiT parity (D14, three gates) | PASS incl. padded prompt [F3, F4] | PASS [F5] | PASS both experts + rounding block [F1, F1b] |
 | e2e vs diffusers | PASS, 35 dB / 0.998 [F3] | PASS, 35 dB / 0.998 [F5]; relative to the noise floor when recorded [F4f], over seeds [F9c] | PASS, 25 dB / 0.99 [F1, F1b]; seeds 0–2 overlap diffusers' own noise floor [F9]; gate relative to the floor, 2.0 dB headroom on the mean [F9b] |
 | CLI matrix cell | PASS [F3, F5, F9] | PASS [F5, F9] | PASS [F9] |
-| `difflet serve` | PASS; LIMIT on concurrency (429 after 30 s) [F3b] | NOT MEASURED · landed on the CPU [F3c] | NOT MEASURED · landed on the CPU, MP4 over `/v1/videos` [F3c] |
+| `difflet serve` | PASS; LIMIT on concurrency (429 after 30 s) [F3b] | PASS · byte-identical to `difflet run` [F3c] | NOT MEASURED · landed on the CPU, MP4 over `/v1/videos` [F3c] |
 | `--torch-compile` | PASS, opt-in [F4] | PASS, 0.83× diffusers per forward [F4f] | PASS, 0.76× diffusers per run [F4f] |
 | `--teacache-cadence N` | PASS, fixed cadence only [F4] | N/A · refused, F5b | N/A · refused, F1b |
 | `--dp 2 --requests` | PASS, byte-identical [F2] | `--dp 1` batch PASS, byte-identical [F5c]; `--dp 2` NOT MEASURED (needs 2 GPUs) | PASS, bit-identical [F2b] |
@@ -969,7 +994,7 @@ Download → compile → timed generate per cell, `results.json`.
 One resident worker holds the pipeline; OpenAI-compatible chat endpoint.
 | Qwen-Image | FLUX.1-dev | Wan 2.2 |
 |---|---|---|
-| PASS · ready 56.0 s, 38.6 / 39.2 s per request; LIMIT · 429 `queue_timeout` for a concurrent request at the 30 s default on one GPU; `--dp-degree 2` PASS · two concurrent requests in one request-time (16.7 s wall), identical bytes [F2b] | NOT MEASURED · landed on the CPU (F3c): PNG over chat | NOT MEASURED · landed on the CPU (F3c): MP4 over `/v1/videos`, one replica |
+| PASS · ready 56.0 s, 38.6 / 39.2 s per request; LIMIT · 429 `queue_timeout` for a concurrent request at the 30 s default on one GPU; `--dp-degree 2` PASS · two concurrent requests in one request-time (16.7 s wall), identical bytes [F2b] | PASS · ready 12.0 s, 8.8 s per request, PNG byte-identical to `difflet run`; 400s for an out-of-range guidance, a wrong shape and a long prompt; startup refusals clean (F3c, Server) | NOT MEASURED · landed on the CPU (F3c): MP4 over `/v1/videos`, one replica |
 
 ### `--torch-compile`
 Per-block inductor compile of the DiT, opt-in (D4: eager by default).
@@ -1009,9 +1034,10 @@ Runs the cond and uncond branches on two cards, one all-gather per step.
 
 The honest gap list for the next session, none of it refused and none of it run:
 
-0. **`difflet serve` for FLUX.1-dev and Wan 2.2 (F3c).** Landed on the CPU (adapters, registry,
-   an in-process `/v1/videos/sync` test with a real MP4); not yet run on a GPU. One pod session:
-   `cuda_serve_smoke.sh --model-id …` for each, plus the 400 probes.
+0. **`difflet serve` for Wan 2.2 (F3c).** Landed on the CPU (adapter, registry, an in-process
+   `/v1/videos/sync` test with a real MP4); not yet run on a GPU. Flux's serving is measured (the
+   Serving section). One pod session with disk for Wan's snapshot:
+   `cuda_serve_smoke.sh --model-id Wan-AI/Wan2.2-T2V-A14B-Diffusers --requests 2`.
 1. **Wan `--dp` × `--cfg-parallel`.** It needs four cards; it is allowed by construction and
    unverified (F2 R3, F2b).
 2. **FLUX.1-dev with two replicas (`--dp 2`)** on CUDA: reachable, needs a 2-GPU pod. The
@@ -1065,7 +1091,8 @@ from recorded times and prices.
 | `difflet-cuda-f4f` (1 GPU, eu-2) | 12:56 → 13:52 UTC 2026-10-19 (~56 min) | 2.65 | ~$2.50 (computed) | terminated, gone |
 | `difflet-cuda-f9c` (1 GPU, eu-3) | 16:06 → 16:20 UTC 2026-10-19 (~14 min, nothing ran) | 2.68 | ~$0.62 (computed) | terminated, gone |
 | `difflet-cuda-f9c2` (1 GPU, us-east-3) | 16:20 → 16:23 UTC (~3 min, nothing ran) | 0.45 | ~$0.02 (computed) | terminated, gone |
-| `difflet-cuda-f9c3` (1 GPU, us-east-3, the volume) | 16:32 → 16:53 UTC (~21 min) | 0.45 | ~$0.16 (computed) | PAUSED |
+| `difflet-cuda-f9c3` (1 GPU, us-east-3, the volume) | 16:32 → 16:53 UTC (~21 min); resume at 18:18 refused (no capacity in us-east-3) | 0.45 | ~$0.16 (computed) | PAUSED |
+| `difflet-cuda-f3c` (1 GPU, eu-2) | 18:33 → 19:30 UTC (~57 min; ~35 of them a stalled, then slow, Flux download) | 2.68 | ~$2.54 (computed) | terminated, gone |
 | `difflet-cache` volume | ongoing | $0.0698/GB/month × 200 GB | ~$13.96/month | attached to f9c3 (paused) |
 
 A paused pod releases its card and stops GPU billing; the container disk is lost, while the volume

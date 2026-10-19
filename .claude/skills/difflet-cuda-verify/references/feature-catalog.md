@@ -32,7 +32,7 @@ and again on f9 (Server) [F9].
 | DiT parity (D14, three gates) | PASS incl. padded prompt [F3, F4] | PASS [F5] | PASS both experts + rounding block [F1, F1b] |
 | e2e vs diffusers | PASS, floors 35 dB / 0.998 [F3] | PASS, floors 35 dB / 0.998 [F5]; relative to the noise floor when recorded [F4f]; seeds 0–7 gate A 36.79 dB vs 32.40 [F9c] | PASS, floors 25 dB / 0.99 [F1, F1b]; seeds 0–2 26.30–28.89 dB, overlapping diffusers' own noise floor 23.79–28.62 dB [F9]; gate relative to the floor when recorded, 2.0 dB headroom on the mean [F9b] |
 | CLI matrix cell (`verify_cli_cuda.py`) | PASS [F3, F5, F9] | PASS [F5, F9] | PASS [F9] |
-| `difflet serve` | PASS; LIMIT on concurrency on one GPU (429 `queue_timeout` after the 30 s default) [F3b]; `--dp-degree 2` PASS, two concurrent requests in one request-time [F2b] | landed on the CPU, NOT MEASURED on a GPU [F3c] | landed on the CPU (`/v1/videos`, MP4), NOT MEASURED on a GPU [F3c] |
+| `difflet serve` | PASS; LIMIT on concurrency on one GPU (429 `queue_timeout` after the 30 s default) [F3b]; `--dp-degree 2` PASS, two concurrent requests in one request-time [F2b] | PASS, PNG byte-identical to `difflet run` [F3c] | landed on the CPU (`/v1/videos`, MP4), NOT MEASURED on a GPU [F3c] |
 | `--torch-compile` | PASS, opt-in [F4] | PASS · 7.1 s / 28 steps vs diffusers 8.3 [F4f] | PASS · 32.8 s / 40 steps vs diffusers 43.2 [F4f] |
 | `--teacache-cadence N` | PASS, fixed cadence only [F4] | N/A · refused, F5b | N/A · refused, F1b |
 | `--dp 2 --requests` | PASS, byte-identical [F2] | `--dp 1` batch PASS, byte-identical [F5c]; `--dp 2` NOT MEASURED (2 GPUs) | PASS, bit-identical [F2b] |
@@ -235,7 +235,10 @@ shorter than one request on this card); `difflet serve --model-id Qwen/Qwen-Imag
 --tp-degree 2` → refused naming F6 before any download, exit 1. Artifacts:
 `artifacts/cuda-release1/f3b/`.
 
-**FLUX.1-dev and Wan 2.2 (F3c, on the CPU; no GPU run yet).** Both serve on CUDA in F3b's
+**FLUX.1-dev and Wan 2.2 (F3c; Flux measured on f3c, Server; Wan on the CPU only).** Flux: ready
+12.0 s, 8.8 s per 28-step request, both served PNGs byte-identical to `difflet run` (and to
+F9c's Workstation smoke), the 400 probes and the startup refusals as designed
+(`artifacts/cuda-release1/f3c/`). Both serve on CUDA in F3b's
 shape: one resident worker holding `DiffletPipeline`, one opaque stage, the CLI's load kwargs
 and `generate` arguments. Flux answers the chat endpoint with a PNG (guidance in [0, 20], T5
 within 512 tokens). Wan 2.2 answers `/v1/videos` and `/v1/videos/sync` with an MP4 at the
