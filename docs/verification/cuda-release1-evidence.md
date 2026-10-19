@@ -24,6 +24,9 @@ refused, not run).
   2.2 once: F9 ran the three-cell matrix on one pod (generate 51.9 s / 16.8 s / 111.5 s).
 - **Serve (Qwen-Image)**: PASS. Ready in 56.0 s, two requests of 38.6 s and 39.2 s, both
   400 probes and the F6 refusal as designed. Concurrency is a LIMIT: 429 after the 30 s default.
+- **Serve (FLUX.1-dev and Wan 2.2)**: PASS. Flux's PNGs are byte-identical to `difflet run`;
+  Wan's tensor is bit-identical to `difflet run`'s through the adapter's calls, and its MP4
+  decodes within the codec's own loss (the MP4 writer is not byte-deterministic).
 - **Performance**: the Qwen DiT forward went from 515.7 ms to 323.5 ms (trim) and to 242.8 ms
   (`--torch-compile`); diffusers takes 299.6 ms. Gates still pass with both.
 - **Two GPUs**: PASS. Wan `--cfg-parallel` ran 1.95× faster and bit-identical. Qwen
@@ -43,7 +46,7 @@ to the CUDA path but never ran: it is NOT MEASURED in every row and has no colum
 | DiT parity (three gates) | PASS incl. padded prompt | PASS | PASS both experts + rounding block |
 | e2e vs diffusers | PASS, 35 dB / 0.998 | PASS, 35 dB / 0.998; relative to the noise floor when recorded, over seeds | PASS, 25 dB / 0.99; seeds 0–2 overlap diffusers' own noise floor; gate relative to the floor, 2.0 dB headroom on the mean |
 | CLI matrix cell | PASS | PASS | PASS |
-| `difflet serve` | PASS; LIMIT on concurrency (429 after 30 s) | PASS · byte-identical to `difflet run` | NOT MEASURED · landed on the CPU, MP4 over `/v1/videos` |
+| `difflet serve` | PASS; LIMIT on concurrency (429 after 30 s) | PASS · byte-identical to `difflet run` | PASS · tensor bit-identical to `difflet run`, MP4 within codec noise (the writer is not byte-deterministic) |
 | `--torch-compile` | PASS, opt-in | PASS, 0.83× diffusers per forward | PASS, 0.76× diffusers per run |
 | `--teacache-cadence N` | PASS, fixed cadence only | N/A · refused, F5b | N/A · refused, F1b |
 | `--dp 2 --requests` | PASS, byte-identical | `--dp 1` batch PASS, byte-identical; `--dp 2` NOT MEASURED (needs 2 GPUs) | PASS, bit-identical |
@@ -78,10 +81,10 @@ Download → compile → timed generate per cell, `results.json`.
 | PASS · 38.47 s (Server), 276.01 s (Workstation, cold volume), 51.88 s (Server) | PASS · 56.47 s (Workstation), 16.79 s (Server) | PASS · 111.52 s (Server, F9; all three models on a 250 GB container disk) |
 
 ### Serving   `difflet serve`
-One resident worker holds the pipeline; OpenAI-compatible chat endpoint.
+One resident worker holds the pipeline; OpenAI-compatible chat (images) and `/v1/videos` (Wan).
 | Qwen-Image | FLUX.1-dev | Wan 2.2 |
 |---|---|---|
-| PASS · ready 56.0 s, 38.6 / 39.2 s per request; LIMIT · 429 `queue_timeout` for a concurrent request at the 30 s default on one GPU; `--dp-degree 2` PASS · two concurrent requests in one request-time (16.7 s wall), identical bytes | PASS · ready 12.0 s, 8.8 s per request, PNG byte-identical to `difflet run`; 400s for an out-of-range guidance, a wrong shape and a long prompt; startup refusals clean (Server) | NOT MEASURED · landed on the CPU: MP4 over `/v1/videos`, one replica |
+| PASS · ready 56.0 s, 38.6 / 39.2 s per request; LIMIT · 429 `queue_timeout` for a concurrent request at the 30 s default on one GPU; `--dp-degree 2` PASS · two concurrent requests in one request-time (16.7 s wall), identical bytes | PASS · ready 12.0 s, 8.8 s per request, PNG byte-identical to `difflet run`; 400s for an out-of-range guidance, a wrong shape and a long prompt; startup refusals clean (Server) | PASS · ready 60.0 s, 43.8 s per request (480×832×9, 40 steps); tensor bit-identical to `difflet run` through the adapter's calls, MP4 decoded 33.88 dB vs the tensor (the codec's own 33.87); sync and async paths, nine 400s, startup refusals clean; one replica (Server) |
 
 ### `--torch-compile`
 Per-block inductor compile of the DiT, opt-in (eager by default).
@@ -121,9 +124,9 @@ Runs the cond and uncond branches on two cards, one all-gather per step.
 
 The honest gap list for the next session, none of it refused and none of it run:
 
-0. **`difflet serve` for Wan 2.2.** Landed on the CPU (adapter, registry, an in-process
-   `/v1/videos/sync` test with a real MP4); not yet run on a GPU. Flux's serving is measured. One pod session with disk for Wan's snapshot:
-   `cuda_serve_smoke.sh --model-id Wan-AI/Wan2.2-T2V-A14B-Diffusers --requests 2`.
+0. ~~`difflet serve` for Wan 2.2~~ — measured on the f3cw session *[10-19 F3c Wan verdict]*. Left from it: the HTTP worker's own tensor (the in-process adapter calls
+   were compared, bit-identical), and the MP4 writer's byte drift — `encode_tensor_to_mp4` gave
+   two files for one tensor in three writes; the cause is not located (not threading alone).
 1. **Wan `--dp` × `--cfg-parallel`.** It needs four cards; it is allowed by construction and
    unverified.
 2. **FLUX.1-dev with two replicas (`--dp 2`)** on CUDA: reachable, needs a 2-GPU pod. The
