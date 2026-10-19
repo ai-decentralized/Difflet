@@ -11,17 +11,35 @@ the reference's; only the fp32 reduction order differs.
 """
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 
-from difflet.backends._torch_megatron.norm import (  # noqa: F401
-    CustomRMSNorm,
-    LayerNorm,
-    RMSNorm,
-)
+from difflet.backends._torch_megatron.norm import LayerNorm  # noqa: F401
 
 
 def rms_norm_fp32(x: torch.Tensor, weight: torch.Tensor | None, eps: float) -> torch.Tensor:
     return F.rms_norm(x, (x.shape[-1],), weight=weight, eps=float(eps))
 
+
+class RMSNorm(nn.Module):
+    """The module behind ``difflet.ops.RMSNorm`` / ``CustomRMSNorm`` on CUDA: one fused
+    ``F.rms_norm`` — fp32 statistics, normalisation and affine, one cast to ``x.dtype`` —
+    diffusers' ``nn.RMSNorm`` numerics. The shared pure-torch module normalises in the input
+    dtype over several passes; Flux's and Qwen-Image's q/k norms are this module, and the Flux
+    DiT bench put the gap to diffusers in exactly those passes. Same ``weight`` parameter and
+    ``eps`` as the shared module, so checkpoints load unchanged.
+    """
+
+    def __init__(self, hidden_size: int, eps: float = 1e-6, **kwargs):
+        super().__init__()
+        del kwargs
+        self.weight = nn.Parameter(torch.ones(hidden_size))
+        self.eps = eps
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        return rms_norm_fp32(hidden_states, self.weight, self.eps)
+
+
+CustomRMSNorm = RMSNorm
 
 __all__ = ["CustomRMSNorm", "LayerNorm", "RMSNorm", "rms_norm_fp32"]
