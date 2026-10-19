@@ -5,7 +5,8 @@ FluxTransformer2DModel in fp32 (the reference) and in bf16 (the control), saved 
 
     python tests/manual/check_neuron_flux_dit.py --model-dir $FLUX --make-oracle ~/w22/flux_oracle.pt
 
-Phase 2, on the device under torchrun: the neuron application at TP=world (compile mode), one
+Phase 2, on the device under torchrun: the neuron application at TP=world/cp, with --cp-degree,
+--cp-mode and --sp for the parallel layouts (compile mode), one
 forward on the oracle's inputs compared on rank 0, then --iters timed forwards (FLUX.1-dev is
 guidance-distilled: one forward per denoising step).
 
@@ -77,11 +78,20 @@ def check(args) -> int:
 
     oracle = torch.load(os.path.expanduser(args.oracle))
     world = int(os.environ.get("WORLD_SIZE", "1"))
-    parallel = DiffletParallelConfig(tp_degree=world)
+    cp = int(args.cp_degree)
+    if world % cp:
+        raise SystemExit(f"world size {world} is not divisible by --cp-degree {cp}")
+    tp = world // cp
+    parallel = DiffletParallelConfig(tp_degree=tp, cp_degree=cp,
+                                     cp_mode=args.cp_mode if cp > 1 else "gather_kv",
+                                     sp_enabled=args.sp)
     get_backend("neuron").prepare_runtime(parallel)  # process group + this rank's core
     path = os.path.join(args.model_dir, "transformer")
     config = NeuronFluxConfig.from_pretrained(path, height=oracle["height"], width=oracle["width"],
-                                              tp_degree=world)
+                                              tp_degree=tp, cp_degree=cp,
+                                              context_parallel_enabled=cp > 1,
+                                              cp_mode=args.cp_mode if cp > 1 else "gather_kv",
+                                              sp_enabled=args.sp)
     app = NeuronFluxTransformerApplication(model_path=path, config=config, parallel=parallel,
                                            dtype=torch.bfloat16, exec_mode="compile")
     t = time.perf_counter()
@@ -104,7 +114,8 @@ def check(args) -> int:
         ours, control = rel(out), rel(ctl)
         cos = torch.nn.functional.cosine_similarity(out.flatten(), ref.flatten(), 0).item()
         ok = torch.isfinite(out).all().item() and ours <= GATE * control
-        print(f"{'PASS' if ok else 'FAIL'} parity cos={cos:.6f} rel_l1={ours:.3e} "
+        layout = f"tp{tp}" + (f"xcp{cp}-{args.cp_mode}" if cp > 1 else "") + ("+sp" if args.sp else "")
+        print(f"{'PASS' if ok else 'FAIL'} {layout} parity cos={cos:.6f} rel_l1={ours:.3e} "
               f"({ours / control:.3f}x control {control:.3e}, gate {GATE}x)", flush=True)
     times = []
     for _ in range(args.iters):
@@ -126,6 +137,9 @@ def main() -> int:
     p.add_argument("--height", type=int, default=1024)
     p.add_argument("--width", type=int, default=1024)
     p.add_argument("--iters", type=int, default=10)
+    p.add_argument("--cp-degree", type=int, default=1)
+    p.add_argument("--cp-mode", choices=("gather_kv", "ring", "ulysses"), default="gather_kv")
+    p.add_argument("--sp", action="store_true", help="sequence parallelism within the TP group")
     args = p.parse_args()
     if args.make_oracle:
         return make_oracle(args)
