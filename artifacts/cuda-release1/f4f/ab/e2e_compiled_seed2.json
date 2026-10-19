@@ -1,0 +1,38 @@
+{
+  "model": "flux",
+  "model_id": "black-forest-labs/FLUX.1-dev",
+  "model_path": "/home/user/hf/hub/models--black-forest-labs--FLUX.1-dev/snapshots/3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+  "prompt": "a photorealistic cat sitting in a sunlit garden",
+  "steps": 28,
+  "guidance_scale": 3.5,
+  "seed": 2,
+  "shape": [
+    1024,
+    1024
+  ],
+  "device": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+  "torch": "2.11.0+cu128",
+  "metrics": {
+    "psnr_db": 42.53124841129,
+    "cosine": 0.9998839523266001,
+    "mean_abs": 0.003177188957730929,
+    "max_abs": 0.58984375
+  },
+  "images": {
+    "difflet": "/home/user/logs/f4f/ab/compiled_seed2/flux_e2e_difflet.png",
+    "diffusers": "/home/user/logs/f4f/ab/compiled_seed2/flux_e2e_diffusers.png"
+  },
+  "timings": {
+    "difflet": {
+      "load_s": 8.4,
+      "generate_s": 7.2,
+      "peak_alloc_gb": 36.33
+    },
+    "diffusers": {
+      "load_s": 3.6,
+      "generate_s": 8.3,
+      "peak_alloc_gb": 36.32
+    }
+  },
+  "noise_floor": null
+}

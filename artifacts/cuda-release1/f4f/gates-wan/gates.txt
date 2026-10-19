@@ -1,0 +1,13 @@
+== wan gates 2026-10-19T13:15:28Z ==
+snapshot: /home/user/hf/hub/models--Wan-AI--Wan2.2-T2V-A14B-Diffusers/snapshots/5be7df9619b54f4e2667b2755bc6a756675b5cd7/
+abf2dd2 docs: F4f status — --torch-compile for Wan and Flux, the fused Flux projection; GPU run pending
+0, NVIDIA RTX PRO 6000 Blackwell Server Edition, 580.178.04, 0 MiB
+overlay         484G  220G  214G  51% /
+overlay         484G  220G  214G  51% /
+smoke exit: 0 in 106s
+parity exit: 0 in 225s
+parity-gate exit: 0 in 0s
+e2e exit: 0 in 297s
+e2e-gate exit: 0 in 1s
+0 MiB
+GATES DONE wan overall_rc=0

@@ -40,10 +40,18 @@
 
 ### Task 3: Status log, docs, PR; the pod run (pending the owner's yes)
 
-- [ ] Status-log entry; push; PR stacked on #99. Pod: Wan and Flux `--torch-compile` smoke + parity + e2e; the Flux bench (eager with the fused projection, and compiled); the Qwen gates (nothing changed for Qwen, a regression net).
+- [x] Status-log entry; push; PR stacked on #99. Pod: Wan and Flux `--torch-compile` smoke + parity + e2e; the Flux bench (eager with the fused projection, and compiled); the Qwen gates (nothing changed for Qwen, a regression net).
 
 ## Rulings
 
 - R1: `dynamic=False` for Wan and Flux (one static shape per process); Qwen keeps `dynamic=True` for its trimmed prompt lengths.
 - R2: the fused projection is a load-time transformation on CUDA at tp=1, never a checkpoint format change: the converter keeps splitting, Trainium/TPU keep the split weights.
 - R3: inline execution, one fresh whole-branch reviewer.
+
+## Execution ledger (folded, 2026-10-19)
+
+```
+Task 1: complete (d0cb725; CPU gate 2847 passed).
+Task 2: complete (4d7c8f3; CPU gate 2851 passed).
+Task 3: pod difflet-cuda-f4f (eu-2, 1x Server, 12:56-13:52 UTC, ~$2.50). Pipeline unattended: Qwen gates, Wan eager + compiled gates, Flux eager + compiled bench and gates. Ruling R-oracle: the parity oracles/benches ignored the compile env -> fixed and shipped (34a343b) before the compiled Wan run. Flux e2e failed the 35 dB floor on seed 0 in both modes -> A/B (fuse switch, 086adf1f) showed no systematic loss over seeds 0-2; the Flux noise floor (49a397c, --noise-floor) reads 30.92 / 36.62 / 37.61 dB -> the gate restated relative to a recorded floor (9f1dc24), F9b's form. Fused projection stays on by default. Docs: this commit.
+```

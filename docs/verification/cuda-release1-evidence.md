@@ -105,6 +105,7 @@ F9 entry.
 | Wan 2.2, serial on one card | 40 / 480×832 × 9 | 55.9 s | 50.9 s (1.27) | — | f2 (Server) | `f2/timings.txt` | 10-18 F2 |
 | Wan 2.2, `run_gates.sh wan` smoke | 40 / 480×832 × 9 | 47.7 s | 51.0 s (1.27) | 73,035 MiB (`nvidia-smi`) | f9 (Server) | `f9/gates-wan/cuda-smoke-wan-20261018-193636.json` | 10-18 F9 |
 | Wan 2.2, `run_gates.sh wan` smoke after the fused q/k norm (83d244a) | 40 / 480×832 × 9 | 16.7 s (page cache) | 48.5 s (1.21) | 72,491 MiB (`nvidia-smi`) | f2b (Server) | `f2b/gates-wan/cuda-smoke-wan-20261018-220419.json` | 10-18 F2b/F4b |
+| Wan 2.2, `--torch-compile` smoke (F4f) | 40 / 480×832 × 9 | 82.6 s (incl. both experts' compiles) | **33.3 s (0.83)** | 73,259 MiB | f4f (Server) | `f4f/gates-wan-compiled/cuda-smoke-wan-20261019-132557.json` | 10-19 F4f |
 
 Footnotes. All paths are under `artifacts/cuda-release1/`. Release 1's 0.41 s/step became
 0.52 s/step in F3 (+27 %): the padding mask made the flash kernel ineligible. F4's trim
@@ -240,6 +241,9 @@ does not remove it; more seeds narrow it.
 | FLUX.1-dev (guidance 3.5), Server Edition, timings recorded | 28 / 1024² | 40.35 dB | 0.99980 | 0.0034 / 0.625 | 35 / 0.998 | 9.4 s / 8.3 s (loads 8.3 / 3.0 s; peak 36.33 / 36.32 GB) | flux (Server) | `flux/f5c/cuda_e2e_flux.json`, `flux/f5c/flux_e2e_{difflet,diffusers}.png` | 10-18 F5c |
 | FLUX.1-dev, `run_gates.sh flux` on the F4d code | 28 / 1024² | 40.35 dB | 0.99980 | — | 35 / 0.998 | 9.1 s / 8.3 s | f4d (Server) | `f4d/gates-flux/cuda_e2e_flux.json` | 10-19 F4c/F4d |
 | FLUX.1-dev, `run_gates.sh flux` after the fused q/k norm (F4e) | 28 / 1024² | **41.58 dB** | 0.99985 | — | 35 / 0.998 | **8.8 s** / 8.3 s | f4e (Server) | `f4e/gates-flux/cuda_e2e_flux.json` | 10-19 F4e |
+| FLUX.1-dev, fused projection, seeds 0 / 1 / 2 with the noise floor (F4f) | 28 / 1024² | 31.56 / 39.56 / 43.79 dB (floor 30.92 / 36.62 / 37.61) | 0.99851 / 0.99976 / 0.99991 | — | relative to the floor | 8.8 s / 8.3 s | f4f (Server) | `f4f/floor/e2e_floor_seed{0,1,2}.json` | 10-19 F4f |
+| FLUX.1-dev, `--torch-compile`, seeds 0 / 1 / 2 | 28 / 1024² | 31.41 / 39.79 / 42.53 dB | — | — | 35 / 0.998 (seed 0 FAIL, no floor recorded) | **7.1 s** / 8.3 s | f4f (Server) | `f4f/gates-flux-compiled/cuda_e2e_flux.json`, `f4f/ab/e2e_compiled_seed{1,2}.json` | 10-19 F4f |
+| Wan 2.2, `--torch-compile`: `float32` / `model`, seed 0 | 40 / 480×832 × 9 | 27.49 / 27.79 dB | 0.99706 / 0.99739 | — | 25 / 0.99 | **32.8 / 32.5 s** / 43.2 s | f4f (Server) | `f4f/gates-wan-compiled/cuda_e2e_wan.json` | 10-19 F4f |
 | Qwen-Image, `run_gates.sh qwen` on the F4d code | 50 / 1024² | 41.20 dB | 0.99971 | — | 35 / 0.998 | 16.9 s / 15.2 s | f4d (Server) | `f4d/gates-qwen/cuda_e2e_qwen_image.json` | 10-19 F4c/F4d |
 | Wan 2.2, `run_gates.sh wan` on the F4d code: `float32` / `model` | 40 / 480×832 × 9 | 27.91 / 27.51 dB | 0.99730 / 0.99702 | — | 25 / 0.99 | 48.9 (the FLUX.1-dev download ran on the host meanwhile — contended) / 44.6 s / 43.1 s | f4d (Server) | `f4d/gates-wan/cuda_e2e_wan.json` | 10-19 F4c/F4d |
 | FLUX.1-dev (guidance 3.5) | 28 / 1024² | 40.35 dB | 0.99980 | 0.0034 / 0.625 | 35 / 0.998 | 23.6 s / 21.8 s (status-log only) | f5b (Workstation) | `flux/cuda_e2e_flux.json`, `flux/e2e_{difflet,diffusers}_flux_28steps.png` | 10-18 F5 |
@@ -586,6 +590,52 @@ for f in ['bench_flux_dit', 'bench_dit_qwen_f4d', 'bench_wan_dit_transformer_f4d
 python scripts/cuda_bench_flux_dit.py --model-path "$FLUX" --out $HOME/logs/x/bench_flux_dit.json
 ```
 
+### `--torch-compile` for Wan and Flux, the fused Flux projection, the Flux noise floor (F4f)
+
+Pod f4f (1 × **Server**, eu-2, 56 min), branch `feat/cuda-f4f-compile-wan-flux` *[10-19 F4f]*.
+`--torch-compile` (D4's measured, opt-in option; per-block inductor, `dynamic=False` for these
+static shapes) now reaches Wan's experts and Flux's DiT; the Flux single block's `proj_out`
+runs as diffusers' one gemm over `cat([attn, mlp])` at tp=1 (`fuse_proj_out`, load-time).
+
+| Run | eager | compiled | diffusers | gates |
+|---|---|---|---|---|
+| Wan 2.2, 40 steps, generate (`run_gates.sh wan` e2e, seed 0) | 45.0 s (27.91 dB) | **32.8 s** (27.49 dB) | 43.2 s | both PASS; compiled parity rounding block 0.947× / 0.928× the control (`f4f/gates-wan-compiled/`) |
+| Wan 2.2 smoke, 40 steps | 46.1 s (1.15 s/step) | 33.3 s (0.83 s/step; load 82.6 s incl. the compiles; peak 73,259 MiB) | — | `f4f/gates-wan-compiled/cuda-smoke-wan-*.json` |
+| Flux DiT forward (fused projection) | **299.6 ms** (gemm 177.3 / attention 47.1 / elementwise 43.0 / copy 20.5 / norm 8.3) | **241.3 ms** (172.8 / 50.7 / 10.9 / 0.0 / 3.8) | 291.4 ms (173.6 / 47.3 / 42.8 / 14.2 / 10.0) | `f4f/bench/bench_flux_dit_f4f{,_compiled}.json` |
+| Flux, 28 steps, generate | 8.8 s | **7.1 s** | 8.3 s | parity 0.987× / 0.958× the control, PASS; e2e below |
+| Qwen-Image (regression net) | 41.20 dB, parity 0.997× | — | — | PASS, unchanged (`f4f/gates-qwen/`) |
+
+Eager Flux with the fused projection is 1.028× diffusers per forward (F4e: 1.038×; the gemm
+bucket 177.3 vs 173.6); compiled Flux is 0.83× and compiled Wan 0.76× of diffusers per run.
+
+**The Flux e2e gate and the noise floor.** On seed 0 both the fused eager run (31.56 dB) and the
+compiled run (31.41 dB) failed the single-seed 35 dB floor that F5/F5c passed at 40.35–41.58 dB.
+An A/B with the projection kept split (`DIFFLET_CUDA_FLUX_FUSE_PROJ_OUT=0`) read 41.58 dB on
+seed 0 but 39.71 / 40.99 dB on seeds 1 / 2 against 39.56 / 43.79 dB fused: not a systematic
+loss. The metric's own floor, measured as F9 did for Wan (`--noise-floor`: diffusers against
+itself with `allow_bf16_reduced_precision_reduction` flipped, a rounding-level perturbation of
+every bf16 gemm), reads **30.92 / 36.62 / 37.61 dB** over seeds 0–2: seed 0 is a chaotic seed
+for diffusers too, and Difflet fused (31.56 / 39.56 / 43.79) and compiled (31.41 / 39.79 /
+42.53) sit at or above the floor on every seed. The Flux gate is therefore stated relative to a
+recorded floor (as F9b's Wan gate: PSNR ≥ floor − 1.21 dB, cosine deviation ≤ 1.3225× the
+floor's, a loose 20 dB / 0.98 absolute floor), the 35 dB / 0.998 floors judging results
+without one; the three floor runs pass it (`f4f/floor/e2e_floor_seed{0,1,2}.json`), the
+seed-0 runs without a floor fail the absolute floor as recorded (`f4f/gates-flux{,-compiled}/`).
+Three seeds is a small sample: the floor's spread (6.7 dB) says Flux's single-seed e2e PSNR
+carries several dB of noise, not that any build is within it.
+
+**How to inspect manually.**
+
+```bash
+python3 -c "import json
+for s in (0, 1, 2):
+    d = json.load(open(f'artifacts/cuda-release1/f4f/floor/e2e_floor_seed{s}.json'))
+    print(s, round(d['metrics']['psnr_db'], 2), 'floor', round(d['noise_floor']['metrics']['psnr_db'], 2), d['noise_floor']['perturbation'])"
+export DIFFLET_BACKEND=cpu DIFFLET_RUN_CUDA_NUMERICAL=1
+DIFFLET_CUDA_FLUX_E2E_RESULT=artifacts/cuda-release1/f4f/floor/e2e_floor_seed0.json pytest -q -rA tests/numerical/test_cuda_flux_e2e_vs_diffusers.py   # 3 passed: the relative gate prints its thresholds
+# on a pod: DIFFLET_CUDA_TORCH_COMPILE=1 run_gates.sh wan|flux; cuda_e2e_flux_vs_diffusers.py --seed N --noise-floor
+```
+
 ## Two GPUs (F2)
 
 Pod f2: 2 × **Server** over PCIe `PHB`, no NVLink, checkout aef79dd *[10-18 F2 verdict]*. NCCL
@@ -774,6 +824,20 @@ above. Spurious infrastructure events are kept and labelled.
     (Flux's q/k norms; found with a CPU aten op-count diff): Flux DiT 311.9 → 303.0 ms vs
     diffusers 292.0, generate 8.8 vs 8.3 s, e2e 40.35 → 41.58 dB; Qwen and Wan unchanged; all
     three models' gates pass on pod f4e *[10-19 F4e]*.
+38. `d0cb725`, `4d7c8f3` — F4f: `--torch-compile` for Wan's experts and Flux's DiT (per-block
+    inductor, `dynamic=False`); the Flux single block's `proj_out` as diffusers' one gemm at
+    tp=1 (`fuse_proj_out`, load-time; `DIFFLET_CUDA_FLUX_FUSE_PROJ_OUT=0` keeps the split).
+    Measured on pod f4f: compiled Wan 32.8 s / 40 steps vs diffusers 43.2, compiled Flux
+    7.1 s / 28 steps vs 8.3 (DiT 241.3 vs 291.4 ms), eager fused Flux 299.6 vs 291.4 ms; all
+    parity gates pass *[10-19 F4f]*.
+39. `34a343b` — the Wan and Flux parity oracles and DiT benches honour
+    `DIFFLET_CUDA_TORCH_COMPILE` (they built the applications directly, so a "compiled" parity
+    run would have judged eager blocks) *[10-19 F4f]*.
+40. `49a397c`, `9f1dc24` — Flux e2e `--noise-floor` (diffusers vs itself with
+    `allow_bf16_reduced_precision_reduction` flipped) and the Flux e2e gate stated relative to a
+    recorded floor (F9b's form): the floor reads 30.92 / 36.62 / 37.61 dB over seeds 0–2, so the
+    single-seed 35 dB floor fails diffusers' own noise on seed 0, where the fused and compiled
+    runs read 31.5 dB (39.6–43.8 dB on seeds 1–2) *[10-19 F4f]*.
 
 ## Support matrix
 
@@ -787,7 +851,7 @@ to the CUDA path but never ran: it is NOT MEASURED in every row and has no colum
 | e2e vs diffusers | PASS, 35 dB / 0.998 [F3] | PASS, 35 dB / 0.998 [F5] | PASS, 25 dB / 0.99 [F1, F1b]; seeds 0–2 overlap diffusers' own noise floor [F9]; gate relative to the floor, 2.0 dB headroom on the mean [F9b] |
 | CLI matrix cell | PASS [F3, F5, F9] | PASS [F5, F9] | PASS [F9] |
 | `difflet serve` | PASS; LIMIT on concurrency (429 after 30 s) [F3b] | N/A · refused by name, F5b | N/A · refused by name, F1b |
-| `--torch-compile` | PASS, opt-in [F4] | N/A · refused, F5b | N/A · refused, F1b |
+| `--torch-compile` | PASS, opt-in [F4] | PASS, 0.83× diffusers per forward [F4f] | PASS, 0.76× diffusers per run [F4f] |
 | `--teacache-cadence N` | PASS, fixed cadence only [F4] | N/A · refused, F5b | N/A · refused, F1b |
 | `--dp 2 --requests` | PASS, byte-identical [F2] | `--dp 1` batch PASS, byte-identical [F5c]; `--dp 2` NOT MEASURED (needs 2 GPUs) | PASS, bit-identical [F2b] |
 | `--cfg-parallel` (2 GPUs) | N/A · single pass | N/A · guidance-distilled; true-CFG is the owner's call | PASS, bit-identical [F2] |
@@ -830,7 +894,7 @@ One resident worker holds the pipeline; OpenAI-compatible chat endpoint.
 Per-block inductor compile of the DiT, opt-in (D4: eager by default).
 | Qwen-Image | FLUX.1-dev | Wan 2.2 |
 |---|---|---|
-| PASS · 242.8 ms forward, 12.4 s / 50 steps, parity and e2e (40.21 dB) pass | N/A · refused, F5b | N/A · refused, F1b |
+| PASS · 242.8 ms forward, 12.4 s / 50 steps, parity and e2e (40.21 dB) pass | PASS · 241.3 ms forward, 7.1 s / 28 steps vs diffusers 8.3; parity 0.958×; e2e at the noise floor on seed 0, 39.8–42.5 dB on seeds 1–2 [F4f] | PASS · 32.8 s / 40 steps vs diffusers 43.2; parity 0.947× / 0.928×; e2e 27.49 dB [F4f] |
 
 ### TeaCache   `--teacache-cadence N`
 Probe-free fixed cadence on the CUDA loop; calibrated and online-delta modes refused (F4b).
@@ -885,9 +949,9 @@ Also unmeasured, and recorded where they arose: Workstation vs Server characteri
 Workstation card was not on the pod); Wan's Difflet vs diffusers generate gap — **measured and
 closed** in F4b (50.9 vs 42.9 s Server → 44.5 vs 42.8 s after the fused q/k norm; the
 Performance section); why two Wan replicas generating at once take 51.2 s each against 44.5 s
-alone (F2b); Flux's generate gap vs diffusers — located by the F4c bench and halved by F4e
-(8.8 vs 8.3 s; what remains is the single block's projection gemm layout, Performance
-section); F2 `--dp 1` requests 1 and 2 against their
+alone (F2b); Flux's generate gap vs diffusers — located by the F4c bench, halved by F4e and
+closed to 1.028× per forward by F4f's fused projection (8.8 vs 8.3 s eager; 7.1 s compiled);
+F2 `--dp 1` requests 1 and 2 against their
 references; the origin of GPU 0's extra ~555 MiB under `--cfg-parallel`; the Trainium
 byte-identity of the Flux split (D13, needs a trn2); the split of the Wan noise floor into the
 timestep effect and run-to-run GPU nondeterminism (F9). F9's recommended follow-up — state the
@@ -914,6 +978,7 @@ from recorded times and prices.
 | `difflet-cuda-f5b` resume attempt | 23:59 UTC 2026-10-18 → still INITIALIZING at 10:24 UTC 2026-10-19; `pause` refused (12005) | 0.45 if it ever runs | unknown | INITIALIZING (watched) |
 | `difflet-cuda-f4d` (1 GPU, eu-3) | 09:46 → 10:24 UTC 2026-10-19 (~38 min) | 2.65 | ~$1.70 (computed) | terminated, gone |
 | `difflet-cuda-f4e` (1 GPU, eu-2) | 11:52 → 12:20 UTC 2026-10-19 (~28 min) | 2.65 | ~$1.25 (computed) | terminated, gone |
+| `difflet-cuda-f4f` (1 GPU, eu-2) | 12:56 → 13:52 UTC 2026-10-19 (~56 min) | 2.65 | ~$2.50 (computed) | terminated, gone |
 | `difflet-cache` volume | ongoing | $0.0698/GB/month × 200 GB | ~$13.96/month | attached to f5b |
 
 A paused pod releases its card and stops GPU billing; the container disk is lost, while the volume

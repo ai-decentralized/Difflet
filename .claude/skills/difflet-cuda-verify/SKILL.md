@@ -183,7 +183,7 @@ an expired HF code, a cold volume read, a per-step number from another card edit
 3. **One commit per bug** (*Problem*: symptom, pod, date, log; *Solution*). 4. `ship_branch.sh`
    the fix and re-run the exact gate that failed on the same pod.
 5. Never loosen a gate to pass; floors move only from a measurement, in their own commit (F3/F5:
-   25 → 35 dB with 5–6 dB headroom; F1 kept Wan at 25 / 0.99; F9b: Wan relative to its noise floor).
+   25 → 35 dB with 5–6 dB headroom; F9b / F4f: Wan and Flux relative to a recorded noise floor).
 6. One unsupportive A/B reads "not supported by a single-seed A/B", not "refuted" (F1b).
 
 ## 6. Report

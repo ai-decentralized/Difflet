@@ -189,7 +189,9 @@ against diffusers on CPU. Trainium/TPU outputs are unchanged by this.
 **Measured options (F4, both off by default — D4 keeps eager as the premise).** `--torch-compile`
 (or `application_kwargs={"torch_compile": True}`, or `DIFFLET_CUDA_TORCH_COMPILE=1`) compiles each
 DiT block with inductor (`max-autotune-no-cudagraphs`, `dynamic=True` so one graph serves every
-prompt length): 0.33 → 0.25 s/step. Expect two compilations at load (the warm-up runs twice under
+prompt length; `dynamic=False` for Wan and Flux, one static shape per process — F4f: compiled
+Wan 32.8 s vs diffusers' 43.2 s per 40-step run, compiled Flux 7.1 s vs 8.3 s per 28 steps, each
+expert / the double and single blocks compiled per block): 0.33 → 0.25 s/step for Qwen. Expect two compilations at load (the warm-up runs twice under
 the flag: dynamo's guard on a `None` block argument forces the second; ~16 s together with a warm
 inductor cache, more on a fresh box), then no recompiles — `TORCH_LOGS=recompiles` shows them. Parity moves but
 stays inside the bf16 noise (rel_l1 0.88× the bf16 control vs fp32). CUDA-only: the other backends
@@ -227,7 +229,11 @@ Measured on the RTX PRO 6000 (2026-10-18): `difflet run` writes a 1024×1024 ima
 28 steps after a 36.5 s load; DiT parity vs diffusers rel_l1 0.987× the bf16 control (same-dtype
 distance 0.398×); whole-pipeline e2e vs diffusers' `FluxPipeline` PSNR 40.35 dB / cosine 0.99980
 (floors 35 dB / 0.998); the CLI matrix passes both cells. Flux on CUDA refuses TeaCache, SP, CP, CFG-parallel, TAEF1,
-`--host-vae`, bucketed shapes and `--torch-compile` as F5b. The Trainium byte-identity of the
+`--host-vae` and bucketed shapes as F5b; `--torch-compile` is the measured option above (F4f), and
+the single block's `proj_out` runs as diffusers' one gemm at tp=1 (`fuse_proj_out`, load-time on
+CUDA; the checkpoint and the Trainium/TPU graphs keep the Megatron split). Flux's e2e PSNR is
+seed-sensitive — diffusers against its own perturbed self spans 30.9–37.6 dB over three seeds —
+so the e2e gate is relative to a recorded noise floor, as Wan's (F4f). The Trainium byte-identity of the
 split is argued (verbatim move, CPU suites) but not re-run on a trn2 (D13).
 
 **Wan 2.2 on CUDA (F1, verified on the RTX PRO 6000).** `Wan-AI/Wan2.2-T2V-A14B-Diffusers`

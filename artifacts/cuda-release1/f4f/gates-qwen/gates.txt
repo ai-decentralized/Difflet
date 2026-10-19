@@ -1,0 +1,13 @@
+== qwen gates 2026-10-19T13:11:08Z ==
+snapshot: /home/user/hf/hub/models--Qwen--Qwen-Image/snapshots/75e0b4be04f60ec59a75f475837eced720f823b6/
+abf2dd2 docs: F4f status — --torch-compile for Wan and Flux, the fused Flux projection; GPU run pending
+0, NVIDIA RTX PRO 6000 Blackwell Server Edition, 580.178.04, 0 MiB
+overlay         484G  159G  276G  37% /
+overlay         484G  159G  276G  37% /
+smoke exit: 0 in 90s
+parity exit: 0 in 91s
+parity-gate exit: 0 in 1s
+e2e exit: 0 in 78s
+e2e-gate exit: 0 in 0s
+0 MiB
+GATES DONE qwen overall_rc=0

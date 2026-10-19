@@ -1,0 +1,122 @@
+{
+  "model": "flux",
+  "model_path": "/home/user/hf/hub/models--black-forest-labs--FLUX.1-dev/snapshots/3de623fc3c33e44ffbe2bad470d0f45bccf2eb21",
+  "shape": [
+    1024,
+    1024
+  ],
+  "image_seq_len": 4096,
+  "timestep": 0.5,
+  "guidance": 3.5,
+  "device": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+  "torch": "2.11.0+cu128",
+  "warmup": 3,
+  "iters": 10,
+  "cases": {
+    "difflet": {
+      "timed": {
+        "median_ms": 241.31207275390625,
+        "min_ms": 241.02560424804688,
+        "max_ms": 241.5548553466797,
+        "iters": 10
+      },
+      "profile": {
+        "total_ms": 238.30046399999975,
+        "by_category_ms": {
+          "gemm": 172.77759099999986,
+          "elementwise": 10.947047000000131,
+          "copy": 0.01497699999999395,
+          "norm": 3.8110009999998287,
+          "attention": 50.74984799999992
+        },
+        "top": [
+          {
+            "name": "void pytorch_flash::flash_fwd_kernel<Flash_fwd_kernel_traits<128, 128, 64, 4, false, false, cutlass::bfloat16_t, Flash_kernel_traits<128, 128, 64, 4, cutlass::bfloat16_t> >, false, false, false, false, true, true, false, false>(pytorch_flash::Flash_fwd_params)",
+            "ms": 46.258296999999956,
+            "share": 0.1941175280296559
+          },
+          {
+            "name": "triton_tem_fused__unsafe_view_addmm_cat_clone_gelu_squeeze_t_transpose_view_8",
+            "ms": 45.89787699999998,
+            "share": 0.19260506769302818
+          },
+          {
+            "name": "triton_tem_fused_addmm_t_view_6",
+            "ms": 34.17599199999999,
+            "share": 0.14341554953917346
+          },
+          {
+            "name": "triton_tem_fused_addmm_t_view_3",
+            "ms": 30.28108299999991,
+            "share": 0.12707101988689348
+          },
+          {
+            "name": "triton_tem_fused_gelu_mm_t_view_21",
+            "ms": 17.687614999999994,
+            "share": 0.07422400570734941
+          },
+          {
+            "name": "triton_tem_fused__unsafe_view_add_addmm_mul_native_layer_norm_split_t_unsqueeze_view_19",
+            "ms": 15.300030999999985,
+            "share": 0.06420478895920237
+          },
+          {
+            "name": "triton_tem_fused_addmm_t_view_5",
+            "ms": 13.779866999999976,
+            "share": 0.05782559869459587
+          },
+          {
+            "name": "triton_poi_fused__unsafe_view_cat_clone_gelu_squeeze_transpose_view_7",
+            "ms": 6.299842000000048,
+            "share": 0.02643654944792745
+          },
+          {
+            "name": "triton_tem_fused__unsafe_view_clone_mm_slice_squeeze_t_transpose_view_12",
+            "ms": 4.494588999999987,
+            "share": 0.01886101656940119
+          },
+          {
+            "name": "std::enable_if<!(false), void>::type internal::gemvx::kernel<int, int, __nv_bfloat16, __nv_bfloat16, __nv_bfloat16, float, false, true, true, false, 6, false, cublasGemvParamsEx<int, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16>, float> >(cublasGemvParamsEx<int, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16 const>, cublasGemvTensorStridedBatched<__nv_bfloat16>, float>)",
+            "ms": 3.1453740000000345,
+            "share": 0.013199193770768477
+          },
+          {
+            "name": "triton_poi_fused__fused_rms_norm__scaled_dot_product_flash_attention__to_copy_add_mul_transpose_unbind_unsqueeze_view_5",
+            "ms": 3.05865399999998,
+            "share": 0.012835283442838717
+          },
+          {
+            "name": "triton_tem_fused__unsafe_view_add_addmm_mul_native_layer_norm_split_t_unsqueeze_view_16",
+            "ms": 2.8191010000000025,
+            "share": 0.011830027322145732
+          },
+          {
+            "name": "void cutlass::Kernel2<cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_128x256_32x3_tn_align8>(cutlass_80_tensorop_bf16_s16816gemm_relu_bf16_128x256_32x3_tn_align8::Params)",
+            "ms": 2.4295669999999956,
+            "share": 0.010195393492813334
+          },
+          {
+            "name": "triton_poi_fused_gelu_view_20",
+            "ms": 1.7528969999999944,
+            "share": 0.007355827053698042
+          },
+          {
+            "name": "triton_tem_fused_addmm_silu_t_1",
+            "ms": 1.6045460000000311,
+            "share": 0.006733289449239314
+          }
+        ]
+      },
+      "attention_kernels": [
+        "void pytorch_flash::flash_fwd_kernel<Flash_fwd_kernel_traits<128, 128, 64, 4, false, false, cutlass::bfloat16_t, Flash_kernel_traits<128, 128, 64, 4, cutlass::bfloat16_t> >, false, false, false, false, true, true, false, false>(pytorch_flash::Flash_fwd_params)",
+        "triton_poi_fused__fused_rms_norm__scaled_dot_product_flash_attention__to_copy_add_mul_transpose_unbind_unsqueeze_view_5"
+      ]
+    }
+  },
+  "torch_compile": true,
+  "rope_shape": [
+    4608,
+    128,
+    2
+  ]
+}

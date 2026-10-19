@@ -1,0 +1,13 @@
+== flux gates 2026-10-19T13:39:12Z ==
+snapshot: /home/user/hf/hub/models--black-forest-labs--FLUX.1-dev/snapshots/3de623fc3c33e44ffbe2bad470d0f45bccf2eb21/
+34a343b perf: the Wan and Flux parity oracles and DiT benches honour DIFFLET_CUDA_TORCH_COMPILE (F4f)
+0, NVIDIA RTX PRO 6000 Blackwell Server Edition, 580.178.04, 0 MiB
+overlay         484G  274G  160G  64% /
+overlay         484G  274G  160G  64% /
+smoke exit: 0 in 20s
+parity exit: 0 in 23s
+parity-gate exit: 0 in 1s
+e2e exit: 0 in 30s
+e2e-gate exit: 1 in 0s
+0 MiB
+GATES DONE flux overall_rc=1
