@@ -8,12 +8,12 @@ noise. Pixel-space metrics go to a JSON the gate reads
 (tests/numerical/test_cuda_flux_e2e_vs_diffusers.py):
 
     DIFFLET_BACKEND=cuda python scripts/cuda_e2e_flux_vs_diffusers.py \\
-        --model-path /path/to/FLUX.1-dev-snapshot [--steps 28] [--guidance-scale 3.5] [--seed 0] \\
-        [--seeds 0,1,2 --noise-floor]
+        --model-path /path/to/FLUX.1-dev-snapshot [--steps 28] [--guidance-scale 3.5] \\
+        [--seed 0 | --seeds 0,1,2] [--noise-floor]
 
 Metrics, PNG writing and the seed helpers are scripts/cuda_e2e_vs_diffusers.py's (one
-definition for every e2e oracle). Its ``_to_unit`` is not used: ``FluxPipeline``'s ``output_type="pt"`` is already
-post-processed to [0, 1] on both sides. Since F4b the JSON carries
+definition for every e2e oracle). Its ``_to_unit`` is not used: ``FluxPipeline``'s
+``output_type="pt"`` is already post-processed to [0, 1] on both sides. Since F4b the JSON carries
 ``timings.{difflet,diffusers}.{load_s, generate_s, peak_alloc_gb}`` as the Wan oracle does.
 
 **Seeds and the noise floor.** ``--noise-floor`` adds, per seed, a second diffusers
@@ -203,7 +203,9 @@ def run_difflet(
     return images, noises, timings
 
 
-def _diffusers_generate(pipe, args, device, noise: torch.Tensor) -> tuple[torch.Tensor, float]:
+def _diffusers_generate(
+    pipe, args, device, noise: torch.Tensor, label: str
+) -> tuple[torch.Tensor, float]:
     mark = time.monotonic()
     with torch.no_grad():
         out = pipe(
@@ -218,7 +220,7 @@ def _diffusers_generate(pipe, args, device, noise: torch.Tensor) -> tuple[torch.
         )
     torch.cuda.synchronize()
     generate_s = time.monotonic() - mark
-    print(f"diffusers generated in {generate_s:.1f}s", flush=True)
+    print(f"diffusers ({label}) generated in {generate_s:.1f}s", flush=True)
     return _unit_image(out.images), generate_s
 
 
@@ -228,8 +230,10 @@ def run_diffusers(
     """One ``FluxPipeline`` load; per seed the exact run and, with ``noise_floor``, a second run
     with ``torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction`` flipped — every
     bf16 gemm accumulates differently, a rounding-level perturbation of diffusers itself — the
-    flag restored after it (errors included). Returns per seed: the exact image, its timings,
-    and the perturbed run's ``{perturbation, metrics, timings}`` (empty without ``noise_floor``)."""
+    flag restored after it (errors included). Returns per seed: the exact image, its timings
+    (``load_s`` the one shared load's; ``peak_alloc_gb`` the peak so far, taken before that seed's
+    perturbed run), and the perturbed run's ``{perturbation, metrics, timings}`` (empty without
+    ``noise_floor``)."""
     from diffusers import FluxPipeline
 
     torch.cuda.reset_peak_memory_stats()
@@ -243,7 +247,7 @@ def run_diffusers(
     timings: dict[int, dict] = {}
     floors: dict[int, dict] = {}
     for seed, noise in noises.items():
-        images[seed], generate_s = _diffusers_generate(pipe, args, device, noise)
+        images[seed], generate_s = _diffusers_generate(pipe, args, device, noise, f"seed {seed}")
         timings[seed] = timings_record(
             load_s=load_s, generate_s=generate_s, peak_bytes=_peak_bytes()
         )
@@ -252,7 +256,9 @@ def run_diffusers(
         flag = torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
         torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = not flag
         try:
-            perturbed, perturbed_s = _diffusers_generate(pipe, args, device, noise)
+            perturbed, perturbed_s = _diffusers_generate(
+                pipe, args, device, noise, f"seed {seed}, bf16 reductions flipped"
+            )
         finally:
             torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = flag
         floors[seed] = {

@@ -41,7 +41,7 @@ to the CUDA path but never ran: it is NOT MEASURED in every row and has no colum
 |---|---|---|---|
 | smoke (`difflet run`, by eye) | PASS [10-16, 10-17 F3] | PASS [10-18 F5] | PASS [10-18 F1] |
 | DiT parity (three gates) | PASS incl. padded prompt | PASS | PASS both experts + rounding block |
-| e2e vs diffusers | PASS, 35 dB / 0.998 | PASS, 35 dB / 0.998 | PASS, 25 dB / 0.99; seeds 0–2 overlap diffusers' own noise floor; gate relative to the floor, 2.0 dB headroom on the mean |
+| e2e vs diffusers | PASS, 35 dB / 0.998 | PASS, 35 dB / 0.998; relative to the noise floor when recorded, over seeds | PASS, 25 dB / 0.99; seeds 0–2 overlap diffusers' own noise floor; gate relative to the floor, 2.0 dB headroom on the mean |
 | CLI matrix cell | PASS | PASS | PASS |
 | `difflet serve` | PASS; LIMIT on concurrency (429 after 30 s) | N/A · refused by name, F5b | N/A · refused by name, F1b |
 | `--torch-compile` | PASS, opt-in | PASS, 0.83× diffusers per forward | PASS, 0.76× diffusers per run |

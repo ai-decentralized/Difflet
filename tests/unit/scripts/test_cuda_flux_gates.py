@@ -292,6 +292,10 @@ def test_over_seeds_the_first_seed_is_on_top_and_the_aggregate_matches(tmp_path)
     payload["seeds"] = [0, 1]
     out, _ = _gate(payload, tmp_path)
     assert out[RECORD] == "FAILED", out
+    del payload["seeds"]
+    out, stdout = _gate(payload, tmp_path)
+    assert out[RECORD] == "FAILED" and "per_seed without seeds" in stdout, stdout
+    assert out[RELATIVE] == "PASSED" and out[ABSOLUTE] == "PASSED", out
 
     payload = _seeded(F4F_DIFFLET, floor=F4F_FLOOR)
     payload["aggregate"]["difflet"]["psnr_db"]["mean"] = 40.0
