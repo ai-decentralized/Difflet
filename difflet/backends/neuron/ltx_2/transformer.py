@@ -122,7 +122,9 @@ class _HostRope(torch.nn.Module):
 #: put the video output at t=500 at 1.54x the diffusers bf16 control's rel_l1 (gate: 1.15x);
 #: with the activation in fp32 it is 1.05x, and every stream rounds like upstream bf16
 #: (err_cos 0.66-0.74). The cast costs one fp32 elementwise pass over the FFN's local
-#: intermediate per block. The Trainium path is unchanged.
+#: intermediate per block. Both feed-forwards of every block get ``Fp32GELU``
+#: (``difflet/backends/neuron/core/activations.py``), which keeps diffusers' ``proj`` and so its
+#: state dict keys. The Trainium path is unchanged.
 _FP32_GELU = True
 
 
@@ -143,8 +145,7 @@ def _trace_module_class():
     the module is built with CFG off and splits the call here, as the Qwen-Image neuron module
     does.
     """
-    from diffusers.models.activations import GELU
-
+    from difflet.backends.neuron.core.activations import use_fp32_gelu
     from difflet.models.ltx_2.modeling_ltx_2 import _LTX2TransformerTraceModule
     from difflet.ops import (
         SPMDRank,
@@ -157,25 +158,15 @@ def _trace_module_class():
         scatter_to_process_group_spmd,
     )
 
-    class Fp32GELU(GELU):
-        """diffusers' ``GELU`` (the feed-forward's projection + tanh GELU) with the activation
-        evaluated in fp32 and cast back: the neuron device's bf16 tanh GELU is less accurate
-        than the CPU's (see ``_FP32_GELU``)."""
-
-        def gelu(self, gate: torch.Tensor) -> torch.Tensor:
-            return torch.nn.functional.gelu(gate.float(), approximate=self.approximate).to(
-                gate.dtype)
-
     class NeuronLtx2TraceModule(_LTX2TransformerTraceModule):
         def __init__(self, config: NeuronLtx2Config):
             super().__init__(dataclasses.replace(config, cfg_parallel_enabled=False))
             for attr in ROPE_ATTRS:
                 setattr(self.transformer, attr, _HostRope(getattr(self.transformer, attr)))
-            for block in self.transformer.transformer_blocks:
-                for ff in (block.ff, block.audio_ff):
-                    act = ff.net[0]
-                    if _FP32_GELU and type(act) is GELU:
-                        act.__class__ = Fp32GELU  # same attributes and state dict keys
+            if _FP32_GELU:
+                for block in self.transformer.transformer_blocks:
+                    use_fp32_gelu(block.ff)
+                    use_fp32_gelu(block.audio_ff)
             # The base forward's own CFG path stays off (its cfg_parallel_enabled is False);
             # the split happens here.
             self.cfg_split = bool(config.cfg_parallel_enabled)
