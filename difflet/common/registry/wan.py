@@ -64,3 +64,39 @@ def serving_metadata() -> ServingModelMetadata:
         default_fps=16,
         default_host_vae=False,
     )
+
+
+def cuda_serving_metadata() -> ServingModelMetadata:
+    """Wan 2.2 T2V-A14B served on the CUDA backend (plan F3c): one resident process, one stage.
+
+    Wan 2.2 only: Wan 2.1 is routed to the CUDA CLI but has never run on a GPU (NOT MEASURED).
+    The request defaults are the CUDA CLI's (40 steps, guidance 4.0 on the high-noise expert,
+    16 fps MP4); the factories live in ``difflet.serving.orchestrators.wan_cuda``.
+    """
+    module = "difflet.serving.orchestrators.wan_cuda"
+    return ServingModelMetadata(
+        model_type="wan",
+        checkpoint_ids=("Wan-AI/Wan2.2-T2V-A14B-Diffusers",),
+        output_modality="video",
+        output_mime_type="video/mp4",
+        chat_content_type="video_url",
+        default_steps=40,
+        default_guidance_scale=4.0,
+        pipeline_definition=PipelineDefinition(
+            model_type="wan",
+            stages=(
+                StageDefinition(
+                    stage_id="pipeline",
+                    kind="opaque_pipeline",
+                    role="pipeline",
+                    output_keys=("output",),
+                    final_output=True,
+                ),
+            ),
+        ),
+        artifact_preparer_factory=f"{module}:CudaWanServingArtifactPreparer",
+        orchestrator_factory=f"{module}:CudaWanServingStageAdapter",
+        request_validator_factory=f"{module}:CudaWanServingRequestValidator",
+        default_fps=16,
+        default_host_vae=False,
+    )
