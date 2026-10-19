@@ -349,7 +349,7 @@ download; at `--dp-degree 1` the engine path is the one-worker path above, and t
 pins its GPU (`CUDA_VISIBLE_DEVICES=0`) instead of inheriting the parent's environment. Trainium
 and TPU serving are untouched.
 
-**Serving Flux and Wan on CUDA (F3c; on the CPU, not yet on a GPU).** FLUX.1-dev and Wan 2.2 serve
+**Serving Flux and Wan on CUDA (F3c; Flux verified on a GPU — served PNGs byte-identical to `difflet run` — Wan on the CPU so far).** FLUX.1-dev and Wan 2.2 serve
 in the same shape (`difflet/serving/orchestrators/flux_cuda.py`, `wan_cuda.py`, on the shared
 `cuda_resident.py`): the CLI's load kwargs and `generate` arguments, a 4-step startup smoke.
 Flux answers `/v1/chat/completions` with a PNG (guidance in [0, 20], T5 within 512 tokens). Wan
