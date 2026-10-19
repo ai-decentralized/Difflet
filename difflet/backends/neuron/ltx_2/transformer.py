@@ -55,6 +55,13 @@ import dataclasses
 import torch
 
 from difflet.backends.neuron.core.application_base import TorchNeuronApplicationBase
+from difflet.backends.neuron.core.config_checks import (
+    check_flag_matches,
+    check_tp_matches,
+    require_bf16_on_device,
+    resolve_cp_degree,
+    truncated_block_prefixes,
+)
 from difflet.backends.neuron.ltx_2.config import NeuronLtx2Config
 
 #: The trace module nests the diffusers model under this attribute; checkpoint keys are the
@@ -372,59 +379,26 @@ class NeuronLtx2TransformerApplication(TorchNeuronApplicationBase):
             device=device,
             **kwargs,
         )
-        parallel = self.parallel
-        if int(config.tp_degree) != int(parallel.tp_degree):
-            raise ValueError(
-                f"NeuronLtx2Config has tp_degree={config.tp_degree} but the parallel config has "
-                f"tp_degree={parallel.tp_degree}; the module would be sharded for one and the "
-                "mesh built for the other"
-            )
-        if bool(config.cfg_parallel_enabled) != bool(parallel.cfg_parallel_enabled):
-            raise ValueError(
-                f"NeuronLtx2Config has cfg_parallel_enabled={config.cfg_parallel_enabled} but "
-                f"the parallel config has cfg_parallel_enabled={parallel.cfg_parallel_enabled}"
-            )
-        dp = int(getattr(parallel, "dp_degree", 1) or 1)
+        name = "NeuronLtx2Config"
+        check_tp_matches(name, config, self.parallel)
+        check_flag_matches(name, config, self.parallel, "cfg_parallel_enabled")
+        dp = int(getattr(self.parallel, "dp_degree", 1) or 1)
         if dp > 1:
             raise NotImplementedError(
                 "the LTX-2 DiT on the neuron backend runs tensor, CFG and context parallelism; "
                 f"got dp_degree={dp} (data parallelism runs as separate replicas)"
             )
-        cp = int(parallel.cp_degree)
-        if bool(config.context_parallel_enabled) != (cp > 1):
-            raise ValueError(
-                f"NeuronLtx2Config has context_parallel_enabled={config.context_parallel_enabled} "
-                f"but the parallel config has cp_degree={cp}"
-            )
-        if cp > 1 and str(config.cp_mode) != str(parallel.cp_mode):
-            raise ValueError(
-                f"NeuronLtx2Config has cp_mode={config.cp_mode!r} but the parallel config has "
-                f"cp_mode={parallel.cp_mode!r}"
-            )
-        if config.cp_degree is None:
-            config = dataclasses.replace(config, cp_degree=cp)
-        elif int(config.cp_degree) != cp:
-            raise ValueError(
-                f"NeuronLtx2Config has cp_degree={config.cp_degree} but the parallel config has "
-                f"cp_degree={cp}"
-            )
-        if bool(getattr(parallel, "sp_enabled", False)):
+        config = resolve_cp_degree(name, config, self.parallel)
+        if bool(getattr(self.parallel, "sp_enabled", False)):
             raise NotImplementedError(
                 "the LTX-2 DiT on the neuron backend has no sequence parallelism (sp_enabled)"
             )
         config.validate()
-        if self.device.type == "neuron" and self.dtype is not torch.bfloat16:
-            raise ValueError(
-                f"the LTX-2 DiT runs in torch.bfloat16 on the neuron device, got {self.dtype} "
-                "(decision D42: the TP layers all-reduce in the activation dtype, checked "
-                "against NxD for bf16 only)"
-            )
+        require_bf16_on_device("LTX-2", self.device.type, self.dtype)
         self.config = config
-        total = config.checkpoint_num_layers
-        if total is not None and int(total) > int(config.num_layers):
-            self.skipped_checkpoint_prefixes = tuple(
-                f"transformer_blocks.{i}." for i in range(int(config.num_layers), int(total))
-            )
+        skipped = truncated_block_prefixes(config, "transformer_blocks.")
+        if skipped:
+            self.skipped_checkpoint_prefixes = skipped
 
     def build_module(self) -> torch.nn.Module:
         return _trace_module_class()(self.config)
