@@ -8,7 +8,8 @@ never printed, logged, put in an exception or shown by --dry-run.
   scripts/yottalabs_pod.py gpus [--type NVIDIA_RTX_PRO_6000_96G]
   scripts/yottalabs_pod.py create --name difflet-f9 --gpus 1 [--regions us-east-3,eu-3,eu-2]
         [--disk-gb 170] [--volume-id 469225541779435520 --mount /data]
-        [--wait-for-capacity --interval 300 --max-wait 21600] [--dry-run]     -> prints the pod id
+        [--wait-for-capacity --interval 300 --max-wait 21600] [--prefer-first-for 1800]
+        [--dry-run]                                                          -> prints the pod id
   scripts/yottalabs_pod.py wait-running ID [--timeout 900]                     -> prints "host port"
   scripts/yottalabs_pod.py ssh-config ID --alias difflet-gpu   >> ~/.ssh/config
   scripts/yottalabs_pod.py status ID | list | pause ID | resume ID | delete ID
@@ -424,7 +425,16 @@ def cmd_create(args, ctx: Ctx) -> int:
             p for p in listing or [] if isinstance(p, dict) and p.get("gpuType") == args.gpu_type
         ]
         region = pick_region(pools, preferred, gpu_count=args.gpus)
-        if listing is not None and region is None:
+        elapsed = ctx.clock() - start
+        # --prefer-first-for: a later region is free but the first is not; hold out for the
+        # first (us-east-3: the volume, the cheapest card) until the window closes.
+        holding = region not in (None, preferred[0]) and elapsed < args.prefer_first_for
+        if holding:
+            ctx.log(
+                f"{preferred[0]} has no {args.gpu_type} x{args.gpus} free; waiting for "
+                f"{preferred[0]} ({elapsed:.0f} of {args.prefer_first_for:.0f} s) before {region}"
+            )
+        elif listing is not None and region is None:
             ctx.log(
                 f"no AVAILABLE {args.gpu_type} x{args.gpus} pool in {','.join(preferred)} "
                 f"(no capacity)"
@@ -460,6 +470,12 @@ def cmd_create(args, ctx: Ctx) -> int:
                 )
                 ctx.out(str(pod_id))
                 return 0
+        elapsed = ctx.clock() - start
+        if elapsed < args.prefer_first_for:
+            # Inside the window every round waits, with or without --wait-for-capacity, and no
+            # sleep runs past the window's end.
+            ctx.sleep(min(args.interval, args.prefer_first_for - elapsed))
+            continue
         if not args.wait_for_capacity:
             return 2
         elapsed = ctx.clock() - start
@@ -624,6 +640,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--wait-for-capacity",
         action="store_true",
         help="poll the pools every --interval s until one is AVAILABLE, then create once",
+    )
+    p.add_argument(
+        "--prefer-first-for",
+        type=float,
+        default=0,
+        metavar="SECONDS",
+        help="while the first --regions entry has no card, keep polling it (every --interval s) "
+        "for up to SECONDS before taking a later region; 0 (default) falls back at once",
     )
     p.add_argument("--interval", type=float, default=300)
     p.add_argument("--max-wait", type=float, default=21600)

@@ -755,3 +755,86 @@ def test_list_prints_one_line_per_pod():
     assert rc == 0
     (line,) = out.strip().splitlines()[1:]
     assert POD_ID in line and "difflet-f2" in line and "PAUSED" in line and "us-east-3" in line
+
+
+# --- --prefer-first-for: wait for the first region, then fall back (F8b) ------------------
+
+_FALLBACK = ["--regions", "us-east-3,eu-2", "--volume-id", str(VOLUME_ID), "--disk-gb", "250"]
+
+
+def _prefer(window, interval="60"):
+    return [
+        "create",
+        "--name",
+        "n",
+        "--gpus",
+        "1",
+        *_FALLBACK,
+        "--prefer-first-for",
+        window,
+        "--interval",
+        interval,
+    ]
+
+
+def test_prefer_first_for_creates_in_the_first_region_when_it_comes_back_in_time():
+    t = FakeTransport(
+        {
+            ("GET", "/v2/gpus"): [
+                ok([pool("us-east-3", "UNAVAILABLE"), pool("eu-2")]),
+                ok([pool("us-east-3", "UNAVAILABLE"), pool("eu-2")]),
+                ok([pool("us-east-3"), pool("eu-2")]),
+            ],
+            ("POST", yp.V1_CREATE_PATH): ok(POD_ID),
+        }
+    )
+    clock = FakeClock()
+    rc, out, errs = run(_prefer("1800"), t, clock)
+    assert rc == 0 and out.strip() == POD_ID, errs
+    # The volume pod in us-east-3 (v1), never the eu fallback.
+    (body,) = t.bodies("POST", yp.V1_CREATE_PATH)
+    assert body["regionList"] == ["us-east-3"] and body["persistentVolumes"][0]["id"] == VOLUME_ID
+    assert t.count("POST", "/v2/pods") == 0 and clock.sleeps == [60, 60]
+    assert "waiting for us-east-3" in errs
+
+
+def test_prefer_first_for_falls_back_after_the_window_with_a_container_disk():
+    t = FakeTransport(
+        {
+            ("GET", "/v2/gpus"): ok([pool("us-east-3", "UNAVAILABLE"), pool("eu-2")]),
+            ("POST", "/v2/pods"): ok(pod("INITIALIZING", region="eu-2")),
+        }
+    )
+    clock = FakeClock()
+    rc, out, errs = run(_prefer("150"), t, clock)
+    assert rc == 0 and out.strip() == POD_ID, errs
+    (body,) = t.bodies("POST", "/v2/pods")
+    assert body["regions"] == ["eu-2"] and body["containerVolumeInGb"] == 250
+    assert "volumes" not in body and t.count("POST", yp.V1_CREATE_PATH) == 0
+    # The sleeps stop at the window: 60 + 60 + the 30 s left, not a third full interval.
+    assert clock.sleeps == [60, 60, 30] and clock.now == 150
+
+
+def test_prefer_first_for_zero_is_today_s_immediate_fallback():
+    t = FakeTransport(
+        {
+            ("GET", "/v2/gpus"): ok([pool("us-east-3", "UNAVAILABLE"), pool("eu-2")]),
+            ("POST", "/v2/pods"): ok(pod("INITIALIZING", region="eu-2")),
+        }
+    )
+    clock = FakeClock()
+    rc, out, _ = run(["create", "--name", "n", "--gpus", "1", *_FALLBACK], t, clock)
+    assert rc == 0 and out.strip() == POD_ID and clock.sleeps == []
+    assert (
+        yp.build_parser().parse_args(["create", "--name", "n", "--gpus", "1"]).prefer_first_for == 0
+    )
+
+
+def test_prefer_first_for_with_nothing_free_anywhere_waits_only_with_the_watcher():
+    listing = ok([pool("us-east-3", "UNAVAILABLE"), pool("eu-2", "UNAVAILABLE")])
+    t = FakeTransport({("GET", "/v2/gpus"): listing})
+    clock = FakeClock()
+    rc, out, _ = run(_prefer("120"), t, clock)
+    # Nothing free in any region: the window still waits for the first region, then gives up
+    # (no --wait-for-capacity), as a plain create does.
+    assert rc == 2 and out == "" and clock.now == 120
