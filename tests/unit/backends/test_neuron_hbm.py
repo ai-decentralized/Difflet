@@ -74,6 +74,36 @@ def test_safetensors_numel_reads_the_headers_only(tmp_path):
     assert hbm.safetensors_numel(tmp_path / "missing") == 0
 
 
+def test_components_sum_their_subdirs_in_their_own_dtype_over_tp(tmp_path, monkeypatch):
+    """The generic budget every model's ``hbm.py`` declares its components with: each one's
+    elements (minus its skipped prefixes, from its index's shards only) times its element size,
+    summed and divided by tp, against ``FIT_FRACTION`` of one core."""
+    (tmp_path / "transformer").mkdir()
+    _header_only(tmp_path / "transformer" / "dit.safetensors", {"w": (1024, 1024)})
+    encoder = tmp_path / "text_encoder"
+    encoder.mkdir()
+    _header_only(encoder / "model-00001.safetensors",
+                 {"lm.w": (512, 512), "vision.w": (100, 100)})
+    _header_only(encoder / "other.safetensors", {"x": (999,)})  # not in the index
+    (encoder / "model.safetensors.index.json").write_text(
+        json.dumps({"weight_map": {"lm.w": "model-00001.safetensors",
+                                   "vision.w": "model-00001.safetensors"}}))
+    dit = hbm.Component("transformer", 2)
+    text = hbm.Component("text_encoder", 4, skipped_prefixes=("vision.",),
+                         index="model.safetensors.index.json")
+    assert dit.numel(tmp_path) == 1024 * 1024
+    assert text.numel(tmp_path) == 512 * 512
+    assert hbm.Component("text_encoder", 4).numel(tmp_path) == 512 * 512 + 100 * 100 + 999
+    assert hbm.Component("missing", 2).numel(tmp_path) == 0
+    expected = (1024 * 1024 * 2 + 512 * 512 * 4) // 4
+    assert hbm.components_bytes(tmp_path, (dit, text), tp_degree=4) == expected
+    assert hbm.components_bytes(tmp_path, (dit.in_dtype(4),), tp_degree=1) == 1024 * 1024 * 4
+    monkeypatch.setenv(hbm.HBM_ENV, str(expected * 1.01 / hbm.FIT_FRACTION / GIB))
+    fits, estimate, limit = hbm.components_fit(tmp_path, (dit, text), tp_degree=4)
+    assert (fits, estimate) == (True, expected) and limit >= expected
+    assert not hbm.components_fit(tmp_path, (dit, text), tp_degree=2)[0]
+
+
 # Per-rank weights measured on trn2 (the Wan and Qwen-Image evidence docs) against 24 GiB.
 @pytest.mark.parametrize("gib, tp, fits", [
     (8.1, 4, True),     # Wan 14B DiT tp4
