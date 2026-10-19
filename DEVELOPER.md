@@ -349,6 +349,16 @@ download; at `--dp-degree 1` the engine path is the one-worker path above, and t
 pins its GPU (`CUDA_VISIBLE_DEVICES=0`) instead of inheriting the parent's environment. Trainium
 and TPU serving are untouched.
 
+**Serving Flux and Wan on CUDA (F3c; on the CPU, not yet on a GPU).** FLUX.1-dev and Wan 2.2 serve
+in the same shape (`difflet/serving/orchestrators/flux_cuda.py`, `wan_cuda.py`, on the shared
+`cuda_resident.py`): the CLI's load kwargs and `generate` arguments, a 4-step startup smoke.
+Flux answers `/v1/chat/completions` with a PNG (guidance in [0, 20], T5 within 512 tokens). Wan
+2.2 answers `/v1/videos` and `/v1/videos/sync` with an MP4 at the resident shape and fps;
+`guidance_scale_2` and `negative_prompt` are taken, `boundary_ratio` / `flow_shift` /
+`true_cfg_scale` refused. Wan 2.1 (never run on a GPU) and `--dp-degree > 1` for Wan (the video
+service runs one job at a time) are refused by name. `scripts/cuda_serve_smoke.sh --model-id <id>`
+drives each on a pod.
+
 Not in Release 1 (follow-ups F1–F8 in the plan; Wan, Flux, serving and the second card have
 landed as F1, F5, F3b and F2 for the shapes and models above, with their own follow-ups):
 context parallel, tensor parallel across PCIe (need-triggered), multi-shape serving on
