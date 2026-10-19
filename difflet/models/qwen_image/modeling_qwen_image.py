@@ -26,6 +26,7 @@ import torch
 from torch import nn
 from diffusers.models.attention_dispatch import dispatch_attention_fn
 
+from difflet.ops.collectives import safe_tensor_parallel_size
 from difflet.ops import (
     ColumnParallelLinear,
     RowParallelLinear,
@@ -166,13 +167,11 @@ def _row_parallel_like(
 
 
 def _safe_tensor_parallel_size() -> int:
-    # "TP not initialized" surfaces differently per backend: NxD asserts, the
-    # TPU mesh raises RuntimeError. Catching only AssertionError made this
-    # backend-neutral module quietly Trainium-specific.
-    try:
-        return int(get_tensor_model_parallel_size())
-    except (AssertionError, RuntimeError):
-        return 1
+    """tp_degree if a TP group is initialized, else 1 where the backend means a tp=1 build
+    (``difflet.ops.collectives.safe_tensor_parallel_size``: NxD asserts, the TPU mesh raises
+    ``ParallelMeshNotInitializedError``); the neuron backend's uninitialised multi-rank mesh
+    raises instead of silently building unsharded."""
+    return safe_tensor_parallel_size(get_tensor_model_parallel_size)
 
 
 def _replace_qwen_linears_for_tp(transformer: nn.Module, sp_enabled: bool = False) -> None:
