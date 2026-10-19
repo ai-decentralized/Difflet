@@ -93,3 +93,34 @@ def test_stage_keys_and_parallel_request(monkeypatch):
     p = tr.torchrun_parallel(_args(tp_degree=2, cp_degree=2, cp_mode=None, sp_enabled=None))
     assert (p.tp_degree, p.cp_degree, p.cp_mode, p.cfg_parallel_enabled, p.sp_enabled) == (
         2, 2, "gather_kv", False, False)
+
+
+@pytest.mark.parametrize("mode", ["compile", "generate"])
+def test_vae_stage_prepares_the_neuron_runtime_before_the_decoder(monkeypatch, mode):
+    """Review C3: the vae stage builds its decoder application directly, so it prepares the
+    neuron runtime itself (compile cache, core binding), with the stage's tp1 parallel config,
+    before anything is built or loaded."""
+    pytest.importorskip("torch")
+    from difflet.backends.neuron import runtime
+    from difflet.cli.dp import stage_loop
+
+    events = []
+    monkeypatch.setattr(runtime.NeuronBackend, "prepare_runtime",
+                        lambda self, parallel: events.append(("prepare", parallel.world_size)))
+    monkeypatch.setattr(stage_loop, "claimed_requests", lambda args: iter(["r0"]))
+    monkeypatch.setattr(stage_loop, "request_scope",
+                        lambda args, req, final: __import__("contextlib").nullcontext())
+
+    class Decoder:
+        def load(self, skip_warmup):
+            events.append(("load", skip_warmup))
+
+    def build(parallel):
+        events.append(("build", parallel.tp_degree))
+        return Decoder()
+
+    tr.run_vae_stage(argparse.Namespace(stage_mode=mode), build=build,
+                     finish_compile=lambda: events.append(("manifest",)),
+                     prepare_decode=lambda decoder: lambda req: events.append(("decode", req)))
+    tail = [("manifest",)] if mode == "compile" else [("decode", "r0")]
+    assert events == [("prepare", 1), ("build", 1), ("load", mode != "compile"), *tail]
