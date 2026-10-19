@@ -13,10 +13,8 @@ Release 1 scope: tp=1, cp=1, dp=1, no CFG-parallel, no TeaCache, one request sha
 wider is refused in ``prepare_runtime`` — before the 54 GB snapshot is resolved — naming the
 plan follow-up that owns it.
 
-Why the runtime plan claims core ``0``: the resident worker validates its allocation generically
-(one allocation, positive core count, enough ``available_core_ids``) and exports
-``NEURON_RT_VISIBLE_CORES`` from it. Those "cores" are abstract device slots to the engine; the
-CUDA worker never loads the Neuron runtime, so the one GPU is slot 0 and the variable is inert.
+The resident plan (slot ``0``, one ``cuda`` stage) and the refusals every CUDA profile shares
+live in ``cuda_resident``, shared with the Flux and Wan adapters (F3c).
 """
 
 from __future__ import annotations
@@ -36,26 +34,21 @@ from difflet.serving.engines.stage_pipeline import (
 )
 from difflet.serving.errors import feature_not_supported, profile_mismatch, prompt_too_long
 from difflet.serving.options import CompilePolicy, DownloadPolicy
+from difflet.serving.orchestrators import cuda_resident
 from difflet.serving.orchestrators.base import resolve_hf_model_source
 from difflet.serving.types import (
     ArtifactSet,
-    CompileArtifactIdentity,
     DiffletGenerateOutput,
     DiffletGenerateRequest,
-    DistributedProcessEnvironment,
-    ParallelTopology,
     QwenFinalPayload,
     QwenInitialPayload,
     ResolvedModelSource,
     ResolvedRuntimeBundle,
-    RuntimeEnvironment,
     RuntimePlan,
     ServingProfile,
     StageExecutionResult,
     StageInvocation,
     StagePayload,
-    StageRuntimeSpec,
-    WorkerAllocationSpec,
 )
 
 _HF_MODEL_ID = "Qwen/Qwen-Image"
@@ -79,24 +72,13 @@ SMOKE_STEPS = 4
 
 
 def _refuse(what: str, follow_up: str) -> None:
-    raise feature_not_supported(
-        f"{_TAG} {what} is not supported on the CUDA backend in Release 1 "
-        f"(plan follow-up {follow_up})"
-    )
+    cuda_resident.refuse(_TAG, what, follow_up)
 
 
 def refuse_unsupported_profile(profile: ServingProfile) -> None:
     """Raise ``feature_not_supported`` naming the follow-up for every profile outside Release 1."""
-    if profile.shapes:
-        _refuse("--shapes (bucketed request shapes)", "F3")
-    parallel = profile.parallel
-    if int(parallel.tp_degree) > 1:
-        _refuse("--tp-degree > 1 (tensor parallel across PCIe)", "F6")
-    if parallel.sp_enabled:
-        _refuse("--sp (sequence parallel needs tp > 1)", "F6")
-    if int(parallel.cp_degree) > 1:
-        _refuse("--cp-degree > 1 (context parallel across cards)", "F2b")
-    if parallel.cfg_parallel_enabled:
+    cuda_resident.refuse_shared_profile(profile, tag=_TAG, shapes_follow_up="F3")
+    if profile.parallel.cfg_parallel_enabled:
         # Not a follow-up: there is no second branch to place on another GPU.
         raise feature_not_supported(
             f"{_TAG} --cfg-parallel does not apply to Qwen-Image on the CUDA backend: "
@@ -109,45 +91,8 @@ def refuse_unsupported_profile(profile: ServingProfile) -> None:
 
 def cuda_runtime_plan(profile: ServingProfile, source: ResolvedModelSource) -> RuntimePlan:
     """The resident plan for one GPU: one allocation (slot 0), one eager ``cuda`` stage."""
-    identity = CompileArtifactIdentity.from_cache_inputs(
-        {
-            "backend": "cuda",
-            "model_type": profile.model_type,
-            "source_id": source.resolved_source_id,
-            "height": int(profile.height),
-            "width": int(profile.width),
-            "tp_degree": int(profile.parallel.tp_degree),
-            "dtype": profile.dtype,
-        }
-    )
-    distributed = DistributedProcessEnvironment(1, 1, 0, 0)
-    environment = RuntimeEnvironment(
-        available_core_ids=(0,),
-        num_cores_override=None,
-        virtual_core_size_override=None,
-        logical_nc_config_override=None,
-        inherited_distributed=distributed,
-        child_distributed=distributed,
-    )
-    allocation = WorkerAllocationSpec(
-        allocation_id=_ALLOCATION_ID,
-        requested_num_cores=1,
-        effective_num_cores=1,
-        world_size=1,
-    )
-    stage = StageRuntimeSpec(
-        stage_id=_STAGE_ID,
-        allocation_id=_ALLOCATION_ID,
-        topology=ParallelTopology(tp_degree=1, cp_degree=1, world_size=1),
-        artifact_id=None,
-        placement="cuda",
-    )
-    return RuntimePlan(
-        mode="resident",
-        profile_identity=identity.digest,
-        environment=environment,
-        allocations=(allocation,),
-        stages=(stage,),
+    return cuda_resident.resident_runtime_plan(
+        profile, source, allocation_id=_ALLOCATION_ID, stage_id=_STAGE_ID
     )
 
 
