@@ -205,3 +205,49 @@ def test_ltx2_tp2_cp2(snapshots, cp_mode):
     results = run_ranks(l2_app_worker, snapshots.ltx, 2, False, 3.0, 3, "eager", 2, cp_mode,
                         world_size=4, env=OFFLINE)
     _check(f"ltx2_tp2_cp2_{cp_mode}", [_sha(r["video"], r["audio"]) for r in results])
+
+
+# ------------------------------------------------------------------------- the weight store
+# The same pins with the pre-sharded weight store on (``core/weight_store.py``; the unit-test
+# conftest turns it off everywhere else): a first run writes every device component's entry, a
+# second run reads them, and both must give the pinned bits.
+
+
+def _out_sha(result) -> str:
+    return result["sha256"]
+
+
+def _qwen_images_sha(result) -> str:
+    return _sha(result["latents"], result["images"])
+
+
+def _ltx2_sha(result) -> str:
+    return _sha(result["video"], result["audio"])
+
+
+_STORE_CASES = {
+    "wan_tp4": (w1_wan_pipeline_worker, "wan", (), 4, _out_sha),
+    "wan_tp2_device_vae": (w1_wan_device_vae_worker, "wan", (), 2, _out_sha),
+    "qwen_tp2_cp2_gather_kv": (q2_pipeline_worker, "qwen", (2, "gather_kv", "eager", False), 4,
+                               _out_sha),
+    "qwen_tp2_device_vae": (q2_pipeline_worker, "qwen", (2, "gather_kv", "eager", False, "pt"),
+                            2, _qwen_images_sha),
+    "ltx2_tp2_cfg2": (l2_app_worker, "ltx", (2, True, 3.0, 3), 4, _ltx2_sha),
+}
+
+
+def _manifests(root):
+    return {str(p): p.stat().st_mtime_ns for p in root.rglob("*.manifest.json")}
+
+
+@pytest.mark.parametrize("case", sorted(_STORE_CASES))
+def test_e2e_pins_with_the_store(snapshots, tmp_path, case):
+    worker, model, args, world, digest = _STORE_CASES[case]
+    env = {**OFFLINE, "DIFFLET_NEURON_WEIGHT_STORE": str(tmp_path / "store")}
+    first = run_ranks(worker, getattr(snapshots, model), *args, world_size=world, env=env)
+    written = _manifests(tmp_path / "store")
+    assert written, "the first run wrote no store entry"
+    second = run_ranks(worker, getattr(snapshots, model), *args, world_size=world, env=env)
+    assert _manifests(tmp_path / "store") == written  # read, not rewritten
+    _check(case, [digest(r) for r in first])
+    _check(case, [digest(r) for r in second])
