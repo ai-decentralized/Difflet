@@ -30,6 +30,7 @@ if TYPE_CHECKING:
     DIFFLET_NEURON_PG_TIMEOUT_S: str | None = None
     DIFFLET_NEURON_HBM_GIB: str | None = None
     DIFFLET_NEURON_WEIGHT_STORE: str | None = None
+    DIFFLET_NEURON_WEIGHT_STORE_ALL: str | None = None
 
     # ----- Distributed framework (set by torchrun / launcher / tests) -----
     RANK: int = 0
@@ -102,6 +103,13 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # directory; "0", "off", "false", "none" or "no": off (every load reads the checkpoint).
     "DIFFLET_NEURON_WEIGHT_STORE":
     lambda: os.environ.get("DIFFLET_NEURON_WEIGHT_STORE"),
+
+    # Write every component to the neuron weight store, also one whose checkpoint already holds
+    # its load dtype (by default only a store at least 10% smaller than the checkpoint read is
+    # written: on one disk the same bytes load no faster). Set it ("1") when the store lives on
+    # a faster disk than the checkpoint (DIFFLET_NEURON_WEIGHT_STORE on local NVMe).
+    "DIFFLET_NEURON_WEIGHT_STORE_ALL":
+    lambda: os.environ.get("DIFFLET_NEURON_WEIGHT_STORE_ALL"),
 
     # Hardlink pre-sharded weights into a shape-independent store under
     # ``<DIFFLET_COMPILE_CACHE>/_shared_weights/`` so that every compiled shape

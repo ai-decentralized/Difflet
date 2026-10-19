@@ -243,7 +243,9 @@ def _manifests(root):
 @pytest.mark.parametrize("case", sorted(_STORE_CASES))
 def test_e2e_pins_with_the_store(snapshots, tmp_path, case):
     worker, model, args, world, digest = _STORE_CASES[case]
-    env = {**OFFLINE, "DIFFLET_NEURON_WEIGHT_STORE": str(tmp_path / "store")}
+    # The tiny snapshots are fp32 and load in fp32: written only with ..._STORE_ALL.
+    env = {**OFFLINE, "DIFFLET_NEURON_WEIGHT_STORE": str(tmp_path / "store"),
+           "DIFFLET_NEURON_WEIGHT_STORE_ALL": "1"}
     first = run_ranks(worker, getattr(snapshots, model), *args, world_size=world, env=env)
     written = _manifests(tmp_path / "store")
     assert written, "the first run wrote no store entry"
