@@ -28,72 +28,71 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from difflet.backends.neuron.hbm import FIT_FRACTION, per_core_hbm_bytes, safetensors_numel
+from difflet.backends.neuron.hbm import Component, components_bytes, components_fit
 
 #: The DiT runs in bf16 on the device (decision D42, ``NeuronQwenImageTransformerApplication``).
 DIT_DTYPE_BYTES = 2
 #: The device text encoder's default dtype (bf16, as diffusers and the host path run it).
 TEXT_ENCODER_DTYPE_BYTES = 2
-#: Tensors of ``<model>/text_encoder`` that the device text encoder never loads.
-_TEXT_ENCODER_SKIPPED = ("visual.", "model.visual.", "lm_head.")
+DIT = Component("transformer", DIT_DTYPE_BYTES)
+#: ``<model>/text_encoder`` without the vision tower and the ``lm_head``, which the device text
+#: encoder never loads.
+TEXT_ENCODER = Component("text_encoder", TEXT_ENCODER_DTYPE_BYTES,
+                         skipped_prefixes=("visual.", "model.visual.", "lm_head."))
+
+
+def text_encoder_lm_numel(model_dir: str | Path) -> int:
+    """Element count of the language model in ``<model_dir>/text_encoder``: what ``NeuronQwenTextEncoderApplication``
+    loads (``TEXT_ENCODER``)."""
+    return TEXT_ENCODER.numel(model_dir)
 
 
 def dit_bytes(model_dir: str | Path, *, tp_degree: int,
               dit_dtype_bytes: int = DIT_DTYPE_BYTES) -> int:
     """Lower bound of one rank's DiT weight bytes: ``<model_dir>/transformer`` over tp."""
-    total = safetensors_numel(Path(model_dir) / "transformer") * int(dit_dtype_bytes)
-    return total // max(int(tp_degree), 1)
+    return components_bytes(model_dir, (DIT.in_dtype(dit_dtype_bytes),), tp_degree=tp_degree)
 
 
 def dit_fits(model_dir: str | Path, *, tp_degree: int,
              dit_dtype_bytes: int = DIT_DTYPE_BYTES) -> tuple[bool, int, int]:
     """``(fits, estimate, limit)``: ``dit_bytes`` against ``FIT_FRACTION`` of one core's HBM."""
-    estimate = dit_bytes(model_dir, tp_degree=tp_degree, dit_dtype_bytes=dit_dtype_bytes)
-    limit = int(per_core_hbm_bytes()[0] * FIT_FRACTION)
-    return estimate <= limit, estimate, limit
+    return components_fit(model_dir, (DIT.in_dtype(dit_dtype_bytes),), tp_degree=tp_degree)
 
 
-def text_encoder_lm_numel(model_dir: str | Path) -> int:
-    """Element count of the language model in ``<model_dir>/text_encoder`` (no vision tower, no
-    ``lm_head``): what ``NeuronQwenTextEncoderApplication`` loads."""
-    return safetensors_numel(Path(model_dir) / "text_encoder",
-                             keep=lambda name: not name.startswith(_TEXT_ENCODER_SKIPPED))
+def device_text_encoder_components(encoder_dtype_bytes: int = TEXT_ENCODER_DTYPE_BYTES,
+                                   dit_dtype_bytes: int = DIT_DTYPE_BYTES
+                                   ) -> tuple[Component, Component]:
+    """The language model beside the DiT on the same cores."""
+    return TEXT_ENCODER.in_dtype(encoder_dtype_bytes), DIT.in_dtype(dit_dtype_bytes)
 
 
-def device_text_encoder_bytes(
-    model_dir: str | Path,
-    *,
-    tp_degree: int,
-    encoder_dtype_bytes: int = TEXT_ENCODER_DTYPE_BYTES,
-    dit_dtype_bytes: int = DIT_DTYPE_BYTES,
-) -> int:
+def device_text_encoder_bytes(model_dir: str | Path, *, tp_degree: int,
+                              encoder_dtype_bytes: int = TEXT_ENCODER_DTYPE_BYTES,
+                              dit_dtype_bytes: int = DIT_DTYPE_BYTES) -> int:
     """Lower bound of one rank's weight bytes with the language model on the device beside the
     DiT, both sharded over ``tp_degree``."""
-    total = text_encoder_lm_numel(model_dir) * int(encoder_dtype_bytes)
-    total += safetensors_numel(Path(model_dir) / "transformer") * int(dit_dtype_bytes)
-    return total // max(int(tp_degree), 1)
+    return components_bytes(
+        model_dir, device_text_encoder_components(encoder_dtype_bytes, dit_dtype_bytes),
+        tp_degree=tp_degree)
 
 
-def device_text_encoder_fits(
-    model_dir: str | Path,
-    *,
-    tp_degree: int,
-    encoder_dtype_bytes: int = TEXT_ENCODER_DTYPE_BYTES,
-    dit_dtype_bytes: int = DIT_DTYPE_BYTES,
-) -> tuple[bool, int, int]:
+def device_text_encoder_fits(model_dir: str | Path, *, tp_degree: int,
+                             encoder_dtype_bytes: int = TEXT_ENCODER_DTYPE_BYTES,
+                             dit_dtype_bytes: int = DIT_DTYPE_BYTES) -> tuple[bool, int, int]:
     """``(fits, estimate, limit)``: ``device_text_encoder_bytes`` against ``FIT_FRACTION`` of
     one core's HBM."""
-    estimate = device_text_encoder_bytes(model_dir, tp_degree=tp_degree,
-                                         encoder_dtype_bytes=encoder_dtype_bytes,
-                                         dit_dtype_bytes=dit_dtype_bytes)
-    limit = int(per_core_hbm_bytes()[0] * FIT_FRACTION)
-    return estimate <= limit, estimate, limit
+    return components_fit(
+        model_dir, device_text_encoder_components(encoder_dtype_bytes, dit_dtype_bytes),
+        tp_degree=tp_degree)
 
 
 __all__ = [
+    "DIT",
     "DIT_DTYPE_BYTES",
+    "TEXT_ENCODER",
     "TEXT_ENCODER_DTYPE_BYTES",
     "device_text_encoder_bytes",
+    "device_text_encoder_components",
     "device_text_encoder_fits",
     "dit_bytes",
     "dit_fits",
