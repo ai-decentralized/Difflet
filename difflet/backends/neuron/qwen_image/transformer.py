@@ -35,11 +35,16 @@ Qwen-Image backend shares. Masked attention is a follow-up, not a phase-1 featur
 
 from __future__ import annotations
 
-import dataclasses
-
 import torch
 
 from difflet.backends.neuron.core.application_base import TorchNeuronApplicationBase
+from difflet.backends.neuron.core.config_checks import (
+    check_flag_matches,
+    check_tp_matches,
+    require_bf16_on_device,
+    resolve_cp_degree,
+    truncated_block_prefixes,
+)
 from difflet.backends.neuron.qwen_image.config import NeuronQwenImageConfig
 
 #: The trace module nests the diffusers model under this attribute; checkpoint keys are the
@@ -167,59 +172,21 @@ class NeuronQwenImageTransformerApplication(TorchNeuronApplicationBase):
             device=device,
             **kwargs,
         )
-        parallel = self.parallel
-        if int(config.tp_degree) != int(parallel.tp_degree):
-            raise ValueError(
-                f"NeuronQwenImageConfig has tp_degree={config.tp_degree} but the parallel config "
-                f"has tp_degree={parallel.tp_degree}; the module would be sharded for one and "
-                "the mesh built for the other"
-            )
-        if bool(config.cfg_parallel_enabled) != bool(parallel.cfg_parallel_enabled):
-            raise ValueError(
-                f"NeuronQwenImageConfig has cfg_parallel_enabled={config.cfg_parallel_enabled} "
-                f"but the parallel config has cfg_parallel_enabled="
-                f"{parallel.cfg_parallel_enabled}"
-            )
+        name = "NeuronQwenImageConfig"
+        check_tp_matches(name, config, self.parallel)
+        check_flag_matches(name, config, self.parallel, "cfg_parallel_enabled")
         # The mesh carries no SP flag (MeshSpec drops it), so the module is the only place SP
         # takes effect: a config without it would build the dense model under an SP launch,
         # and one with it would shard where the caller asked for none.
-        if bool(config.sp_enabled) != bool(getattr(parallel, "sp_enabled", False)):
-            raise ValueError(
-                f"NeuronQwenImageConfig has sp_enabled={config.sp_enabled} but the parallel "
-                f"config has sp_enabled={getattr(parallel, 'sp_enabled', False)}"
-            )
-        cp = int(parallel.cp_degree)
-        if bool(config.context_parallel_enabled) != (cp > 1):
-            raise ValueError(
-                f"NeuronQwenImageConfig has context_parallel_enabled="
-                f"{config.context_parallel_enabled} but the parallel config has cp_degree={cp}"
-            )
-        if cp > 1 and str(config.cp_mode) != str(parallel.cp_mode):
-            raise ValueError(
-                f"NeuronQwenImageConfig has cp_mode={config.cp_mode!r} but the parallel config "
-                f"has cp_mode={parallel.cp_mode!r}"
-            )
-        if config.cp_degree is None:
-            config = dataclasses.replace(config, cp_degree=cp)
-        elif int(config.cp_degree) != cp:
-            raise ValueError(
-                f"NeuronQwenImageConfig has cp_degree={config.cp_degree} but the parallel config "
-                f"has cp_degree={cp}"
-            )
+        check_flag_matches(name, config, self.parallel, "sp_enabled")
+        config = resolve_cp_degree(name, config, self.parallel)
         config.validate()
-        if self.device.type == "neuron" and self.dtype is not torch.bfloat16:
-            raise ValueError(
-                f"the Qwen-Image DiT runs in torch.bfloat16 on the neuron device, got "
-                f"{self.dtype} (decision D42: the TP layers all-reduce in the activation dtype, "
-                "checked against NxD for bf16 only)"
-            )
+        require_bf16_on_device("Qwen-Image", self.device.type, self.dtype)
         self.config = config
         # Blocks past num_layers are in the checkpoint on purpose when num_layers was cut.
-        total = config.checkpoint_num_layers
-        if total is not None and int(total) > int(config.num_layers):
-            self.skipped_checkpoint_prefixes = tuple(
-                f"transformer_blocks.{i}." for i in range(int(config.num_layers), int(total))
-            )
+        skipped = truncated_block_prefixes(config, "transformer_blocks.")
+        if skipped:
+            self.skipped_checkpoint_prefixes = skipped
 
     def build_module(self) -> torch.nn.Module:
         return _trace_module_class()(self.config)
