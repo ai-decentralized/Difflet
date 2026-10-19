@@ -46,6 +46,11 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--cases", default=",".join(ALL_CASES))
     ap.add_argument("--compile-cache-dir", default="/tmp/logs/cuda_bench_flux_cache")
     ap.add_argument("--out", default="/tmp/logs/bench_flux_dit.json")
+    ap.add_argument(
+        "--torch-compile",
+        action="store_true",
+        help="compile the DiT blocks, as `difflet run --torch-compile` does (default: eager)",
+    )
     return ap
 
 
@@ -119,7 +124,11 @@ def main(argv: list[str] | None = None) -> None:
         )
 
         mark = time.monotonic()
-        app = CudaFluxTransformerApplication(model_path=str(tdir), config=cfg, device=device)
+        torch_compile = bool(args.torch_compile)
+        payload["torch_compile"] = torch_compile
+        app = CudaFluxTransformerApplication(
+            model_path=str(tdir), config=cfg, device=device, torch_compile=torch_compile
+        )
         app.compile(args.compile_cache_dir)
         app.load(args.compile_cache_dir, skip_warmup=True)
         print(f"difflet loaded in {time.monotonic() - mark:.1f}s", flush=True)

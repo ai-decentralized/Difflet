@@ -60,6 +60,11 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--probe-steps", type=int, default=40)
     ap.add_argument("--compile-cache-dir", default="/tmp/logs/cuda_bench_wan_cache")
     ap.add_argument("--out", default="/tmp/logs/bench_wan_dit.json")
+    ap.add_argument(
+        "--torch-compile",
+        action="store_true",
+        help="compile the DiT blocks, as `difflet run --torch-compile` does (default: eager)",
+    )
     return ap
 
 
@@ -250,7 +255,11 @@ def main(argv: list[str] | None = None) -> None:
         from difflet.backends.cuda.wan.transformer import CudaWanTransformerApplication
 
         mark = time.monotonic()
-        app = CudaWanTransformerApplication(model_path=str(expert_dir), config=cfg, device=device)
+        torch_compile = bool(args.torch_compile)
+        payload["torch_compile"] = torch_compile
+        app = CudaWanTransformerApplication(
+            model_path=str(expert_dir), config=cfg, device=device, torch_compile=torch_compile
+        )
         cache = str(Path(args.compile_cache_dir) / args.expert)
         app.compile(cache)
         app.load(cache, skip_warmup=True)
