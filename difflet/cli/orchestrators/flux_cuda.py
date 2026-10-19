@@ -7,8 +7,9 @@ CLIP, T5, the DiT and the VAE live in one process inside diffusers' ``FluxPipeli
 ``main._get_orchestrator`` for FLUX.1-dev and FLUX.1-schnell when the backend is CUDA.
 
 Release 1 scope (plan R3): tp=1, cp=1, dp=1, no CFG-parallel, one request shape, no
-TeaCache, no TAEF1, no host VAE, no ``torch.compile`` — refused here, before any download or
-load, with the follow-up that owns each. ``--guidance-scale`` is FLUX.1-dev's distilled
+TeaCache, no TAEF1, no host VAE — refused here, before any download or load, with the
+follow-up that owns each; ``--torch-compile`` is forwarded as the measured opt-in option
+(D4 / F4f). ``--guidance-scale`` is FLUX.1-dev's distilled
 guidance (one pass) and is forwarded, default 3.5.
 """
 

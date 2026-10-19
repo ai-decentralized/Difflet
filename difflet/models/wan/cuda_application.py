@@ -22,8 +22,9 @@ reflectively — but keeps every stage on the device:
 fp32 — UniPC's corrector collapses in bf16 — and the DiT/VAE callables move tensors to the
 device per call and return host tensors (plan R1).
 
-Release 1 scope (plan R3): tp=1, one shape, no TeaCache, no ``--shapes``, no
-``torch.compile`` — each is refused by name with follow-up F1b, before any weight loads.
+Release 1 scope (plan R3): tp=1, one shape, no TeaCache, no ``--shapes`` — each is refused
+by name with follow-up F1b, before any weight loads. ``torch.compile`` is the measured opt-in
+option (D4 / F4f): the ``torch_compile`` kwarg or ``DIFFLET_CUDA_TORCH_COMPILE=1``.
 """
 
 from __future__ import annotations

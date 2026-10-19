@@ -13,8 +13,9 @@ The application returns the ``(B, 3, F, H, W)`` video tensor in ``[-1, 1]``
 is not ``.mp4``. Default shape 480x832, 9 frames (``--height/--width/--num-frames``).
 
 Release 1 scope (plan R3): tp=1, cp=1, dp=1, one request shape, no TeaCache, no TAEF1, no host
-VAE, no ``torch.compile`` — refused here, before any download or load, with the follow-up that
-owns each. ``--cfg-parallel`` (F2) is accepted: the conditional and unconditional branches run
+VAE — refused here, before any download or load, with the follow-up that owns each;
+``--torch-compile`` is forwarded as the measured opt-in option (D4 / F4f). ``--cfg-parallel``
+(F2) is accepted: the conditional and unconditional branches run
 on two GPUs, the shared orchestrator re-execing ``generate`` under ``torchrun``.
 ``--guidance-scale`` is the high-noise expert's CFG scale (default 4.0); the low-noise one
 stays at the application's 3.0 (no CLI flag), and there is no ``--negative-prompt``

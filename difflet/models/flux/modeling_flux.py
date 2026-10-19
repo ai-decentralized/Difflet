@@ -735,7 +735,6 @@ class NeuronFluxSingleTransformerBlock(nn.Module):
 
         return hidden_states
 
-
     def fuse_proj_out(self) -> bool:
         """Rebuild diffusers' fused ``proj_out`` from the split weights, at tp=1 only.
 
@@ -755,18 +754,14 @@ class NeuronFluxSingleTransformerBlock(nn.Module):
             return False
         attn, mlp = self.proj_out_attn, self.proj_out_mlp
         weight = torch.cat([attn.weight.detach(), mlp.weight.detach()], dim=1)
+        # Built on the meta device so no throw-away [dim, dim + mlp] buffer is allocated and
+        # kaiming-initialised on the GPU; the parameters are the cat and the bias themselves.
         fused = nn.Linear(
-            weight.shape[1],
-            weight.shape[0],
-            bias=attn.bias is not None,
-            device=weight.device,
-            dtype=weight.dtype,
+            weight.shape[1], weight.shape[0], bias=attn.bias is not None, device="meta"
         )
-        with torch.no_grad():
-            fused.weight.copy_(weight)
-            if attn.bias is not None:
-                fused.bias.copy_(attn.bias.detach())
-        fused.requires_grad_(False)
+        fused.weight = nn.Parameter(weight, requires_grad=False)
+        if attn.bias is not None:
+            fused.bias = nn.Parameter(attn.bias.detach().clone(), requires_grad=False)
         self.proj_out = fused
         self.proj_out_attn = None
         self.proj_out_mlp = None

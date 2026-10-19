@@ -192,12 +192,29 @@ def test_torch_compile_wraps_every_flux_block(tmp_path):
 # --- F4f task 2: the single block's proj_out as one gemm at tp=1 ------------------------------
 
 
-def test_load_fuses_every_single_block_s_proj_out_at_tp1(tmp_path):
+def test_load_fuses_every_single_block_s_proj_out_at_tp1(tmp_path, monkeypatch):
+    monkeypatch.delenv("DIFFLET_CUDA_FLUX_FUSE_PROJ_OUT", raising=False)
     reference, adapter = _adapter(tmp_path)
     app = adapter.app
     for block in app.module.single_transformer_blocks:
         assert isinstance(block.proj_out, torch.nn.Linear)
         assert block.proj_out_attn is None and block.proj_out_mlp is None
+    inputs = _inputs()
+    guidance = torch.tensor([3.5])
+    with torch.no_grad():
+        expected = reference(**inputs, guidance=guidance, return_dict=False)[0]
+        (actual,) = adapter(**inputs, guidance=guidance, return_dict=False)
+    torch.testing.assert_close(actual, expected, rtol=1e-4, atol=1e-4)
+
+
+def test_fuse_proj_out_env_0_keeps_the_split_projection(tmp_path, monkeypatch):
+    # The A/B switch the F4f evidence rests on: every single block keeps the Megatron split and
+    # the adapter still matches diffusers.
+    monkeypatch.setenv("DIFFLET_CUDA_FLUX_FUSE_PROJ_OUT", "0")
+    reference, adapter = _adapter(tmp_path)
+    for block in adapter.app.module.single_transformer_blocks:
+        assert block.proj_out is None
+        assert block.proj_out_attn is not None and block.proj_out_mlp is not None
     inputs = _inputs()
     guidance = torch.tensor([3.5])
     with torch.no_grad():

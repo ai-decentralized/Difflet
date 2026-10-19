@@ -7,8 +7,9 @@ calls reflectively. The DiT is ``CudaFluxTransformerApplication`` (the neutral
 diffusers' own ``FluxPipeline`` drives CLIP, T5, the scheduler, the DiT and the VAE on one
 device. Only the DiT is Difflet code, which is the part under test.
 
-Release 1 scope (plan R3): tp=1, one request shape, no TeaCache, no TAEF1, no SP, no
-``torch.compile`` — each is refused by name with follow-up F5b, before any weight loads.
+Release 1 scope (plan R3): tp=1, one request shape, no TeaCache, no TAEF1, no SP — each is
+refused by name with follow-up F5b, before any weight loads. ``torch.compile`` is the measured
+opt-in option (D4 / F4f): the ``torch_compile`` kwarg or ``DIFFLET_CUDA_TORCH_COMPILE=1``.
 
 ``__call__`` accepts a ``FluxDiTInputBundle`` or the six DiT tensors as keywords (parity
 scripts), and ``prompt=`` for the whole text-to-image path.

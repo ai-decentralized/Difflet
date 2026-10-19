@@ -14,9 +14,8 @@ doing on the host what ``trainium_backbone.ModelWrapperFluxBackbone.forward`` do
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-
 import os
+from contextlib import contextmanager
 
 import torch
 from diffusers.models.modeling_outputs import Transformer2DModelOutput

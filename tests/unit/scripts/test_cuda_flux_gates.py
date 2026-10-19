@@ -85,8 +85,9 @@ def test_without_a_noise_floor_the_35_db_floors_judge_and_the_relative_test_skip
 
 
 def test_with_the_f4f_seed0_floor_the_relative_gate_judges(tmp_path):
-    # Pod f4f, seed 0: diffusers vs its perturbed self 30.92 dB / 0.99808; Difflet (fused
-    # projection) 31.56 dB / 0.99851 — under the 35 dB floor, at the floor's own level.
+    # Pod f4f's seed 0 numbers: Difflet (fused projection) 31.56 dB / 0.99851 against a floor
+    # at 30.92 dB (the measured one; its cosine 0.99827 is rounded to 0.99808 here for a round
+    # allowance of 0.00254) — under the 35 dB floor, at the floor's own level.
     out, stdout = _gate(_payload(31.56, 0.99851, floor=(30.92, 0.99808)), tmp_path)
     assert out[ABSOLUTE] == "PASSED" and out[RELATIVE] == "PASSED", out
     assert (

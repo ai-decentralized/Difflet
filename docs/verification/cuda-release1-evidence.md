@@ -243,7 +243,7 @@ does not remove it; more seeds narrow it.
 | FLUX.1-dev, `run_gates.sh flux` after the fused q/k norm (F4e) | 28 / 1024² | **41.58 dB** | 0.99985 | — | 35 / 0.998 | **8.8 s** / 8.3 s | f4e (Server) | `f4e/gates-flux/cuda_e2e_flux.json` | 10-19 F4e |
 | FLUX.1-dev, fused projection, seeds 0 / 1 / 2 with the noise floor (F4f) | 28 / 1024² | 31.56 / 39.56 / 43.79 dB (floor 30.92 / 36.62 / 37.61) | 0.99851 / 0.99976 / 0.99991 | — | relative to the floor | 8.8 s / 8.3 s | f4f (Server) | `f4f/floor/e2e_floor_seed{0,1,2}.json` | 10-19 F4f |
 | FLUX.1-dev, `--torch-compile`, seeds 0 / 1 / 2 | 28 / 1024² | 31.41 / 39.79 / 42.53 dB | — | — | 35 / 0.998 (seed 0 FAIL, no floor recorded) | **7.1 s** / 8.3 s | f4f (Server) | `f4f/gates-flux-compiled/cuda_e2e_flux.json`, `f4f/ab/e2e_compiled_seed{1,2}.json` | 10-19 F4f |
-| Wan 2.2, `--torch-compile`: `float32` / `model`, seed 0 | 40 / 480×832 × 9 | 27.49 / 27.79 dB | 0.99706 / 0.99739 | — | 25 / 0.99 | **32.8 / 32.5 s** / 43.2 s | f4f (Server) | `f4f/gates-wan-compiled/cuda_e2e_wan.json` | 10-19 F4f |
+| Wan 2.2, `--torch-compile`: `float32` / `model`, seed 0 | 40 / 480×832 × 9 | 27.49 / 27.79 dB | 0.99702 / 0.99721 | — | 25 / 0.99 | **32.8 / 32.5 s** / 43.2 s | f4f (Server) | `f4f/gates-wan-compiled/cuda_e2e_wan.json` | 10-19 F4f |
 | Qwen-Image, `run_gates.sh qwen` on the F4d code | 50 / 1024² | 41.20 dB | 0.99971 | — | 35 / 0.998 | 16.9 s / 15.2 s | f4d (Server) | `f4d/gates-qwen/cuda_e2e_qwen_image.json` | 10-19 F4c/F4d |
 | Wan 2.2, `run_gates.sh wan` on the F4d code: `float32` / `model` | 40 / 480×832 × 9 | 27.91 / 27.51 dB | 0.99730 / 0.99702 | — | 25 / 0.99 | 48.9 (the FLUX.1-dev download ran on the host meanwhile — contended) / 44.6 s / 43.1 s | f4d (Server) | `f4d/gates-wan/cuda_e2e_wan.json` | 10-19 F4c/F4d |
 | FLUX.1-dev (guidance 3.5) | 28 / 1024² | 40.35 dB | 0.99980 | 0.0034 / 0.625 | 35 / 0.998 | 23.6 s / 21.8 s (status-log only) | f5b (Workstation) | `flux/cuda_e2e_flux.json`, `flux/e2e_{difflet,diffusers}_flux_28steps.png` | 10-18 F5 |
@@ -606,7 +606,8 @@ runs as diffusers' one gemm over `cat([attn, mlp])` at tp=1 (`fuse_proj_out`, lo
 | Qwen-Image (regression net) | 41.20 dB, parity 0.997× | — | — | PASS, unchanged (`f4f/gates-qwen/`) |
 
 Eager Flux with the fused projection is 1.028× diffusers per forward (F4e: 1.038×; the gemm
-bucket 177.3 vs 173.6); compiled Flux is 0.83× and compiled Wan 0.76× of diffusers per run.
+bucket 177.3 vs 173.6); compiled Flux is 0.83× diffusers per forward (0.86× per run) and
+compiled Wan 0.76× per run.
 
 **The Flux e2e gate and the noise floor.** On seed 0 both the fused eager run (31.56 dB) and the
 compiled run (31.41 dB) failed the single-seed 35 dB floor that F5/F5c passed at 40.35–41.58 dB.
