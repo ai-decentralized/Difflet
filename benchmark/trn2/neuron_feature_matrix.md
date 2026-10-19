@@ -127,14 +127,46 @@ At tp2 (CFG, CP, DP) the driver moves umT5 to the host on its own. It prints, fo
 - Cost: about 90 s more cold compile.
 - `--host-vae` opts out.
 
+## Pre-sharded weight store (2026-10-19)
+
+`difflet/backends/neuron/core/weight_store.py` (commits `4a56b85`, `7a151de`). Every device component's load writes this rank's slices, in the load dtype, under `<DIFFLET_COMPILE_CACHE>/neuron/weights/`. Later loads read those files instead of the checkpoint. An entry is written only when it is at least 10% smaller than what the checkpoint load reads (an fp32 checkpoint loaded in bf16). `DIFFLET_NEURON_WEIGHT_STORE=0` turns the store off, and `DIFFLET_NEURON_WEIGHT_STORE_ALL=1` writes every component.
+
+**Method:** the same host and workloads as the matrix above. Each model ran at tp4 with the default placement, on a fresh compile-cache root.
+- `difflet compile` ran with the page cache dropped first, and wrote the store.
+- Then one store-cold generate and three store-warm generates, then one direct (store off) cold generate and three direct warm generates. The first warm generate of each series is discarded.
+- *Cold* means the page cache was dropped; the NEFF cache is warm.
+- The "load" columns give the component's "load checkpoint" phase (max over ranks).
+- The disk is the EBS root volume: `dd` read it at 132–135 MB/s, with one reader or four.
+
+| model, component | load: direct cold / store cold | load: direct warm / store warm | e2e cold: direct / store | e2e warm: direct / store | store size | write cost (compile load phase) |
+|---|---:|---:|---:|---:|---:|---:|
+| Wan2.1 14B, DiT (fp32 → bf16) | 435.0 / 217.0 s | 5.0–5.1 / 3.5–4.7 s | 739.4 / 524.5 s | 122.9, 126.0 / 125.0, 123.4 s | 28.58 GB | 652.9 s vs 435.0 s direct cold |
+| LTX-2, device Gemma-3 (fp32 → bf16) | 358.0 / 178.5 s | 3.4–3.5 / 2.6–2.8 s | 745.1 / 574.3 s | 77.8, 78.3 / 76.6, 77.7 s | 23.53 GB | 537.5 s vs 358.0 s direct cold |
+| Qwen-Image, DiT (bf16 checkpoint, written before `7a151de`) | 311.0 / 311.0 s | 3.6–3.7 / 3.6 s | 497.9 / 497.2 s | 77.7, 76.5 / 76.6, 78.9 s | 40.86 GB | 622.4 s vs 311.0 s direct cold |
+
+- **Bit-identity.** Every store-loaded generate equals the direct-loaded one bit for bit:
+  - Wan: latents `9f198762…`, the matrix golden above;
+  - Qwen-Image: latents `1fea84b1…`, PNG `a300a78e…`;
+  - LTX-2: latents `95ef7d53…`.
+- **Qwen-Image.** The store saves nothing when the checkpoint is already in the load dtype, so `7a151de` stops writing such entries. The same applies to the fp32 umT5 and the VAEs. After that change, a Qwen run on an empty store writes nothing ("no gain").
+- **The key separates TP layouts.** Wan tp2cfg2 on the same root wrote a second entry (`…__tp2__685ea74c…`, 28.58 GB) beside the tp4 one.
+  - Rank 0 wrote the replicated and tp0 files and rank 3 wrote tp1. The two CFG replicas skipped them, because another process held the lock.
+  - Warm DiT load: 9.4 s from the store vs 8.8–8.9 s direct. Warm e2e: 133.2 vs 133.5 / 134.9 s.
+  - Store and direct are bit-identical (latents `3717d503…`).
+- **Lazy population.** A first Wan generate on an empty store root, with no compile, wrote the entry. Its DiT load phase took 220.4 s, of which 215.2 s were store writes. The next generate read the entry.
+
 ## Open issues
 
 1. **Wan 81 frames, default placement:** device OOM. The umT5 placement check counts weights only and not the activations at 32,760 tokens.
 2. **Wan 81 frames, warm-up and step time:** the warm-up takes 427 s per launch even with warm NEFFs. The step time ramps (*inference:* throttling).
-3. **Native cold start (Wan):** 62% slower than AoT. A bf16 pre-sharded weight store was not tried.
+3. **Native cold start (Wan):** 62% slower than AoT. The bf16 pre-sharded weight store (below) takes the Wan cold e2e from 739.4 to 524.5 s.
 4. **Per-launch jitter:** 23–34 s of spawn and `prepare_runtime` jitter. The device VAE adds a second torchrun launch.
 5. **Wan host VAE decode:** 59–61 s in the native venv vs 49 s in the AoT venv (not investigated).
 6. **Not measured:** Wan 1.3B and Wan 2.2 (no weights on the host). The Qwen AoT numbers were reused, not re-measured.
+7. **Cold loads the weight store does not cover:**
+   - The fp32 umT5 on the device: 172.3 s per cold Wan launch, the same bytes either way.
+   - The host encoders: Qwen2.5-VL took 99.8 s per cold Qwen launch. The host umT5 and the host Gemma-3 at tp2 were not measured.
+   - A store on the instance's local NVMe (`DIFFLET_NEURON_WEIGHT_STORE` plus `..._ALL=1`) would also speed up bf16 checkpoints. It was not measured.
 
 ## Toolchain
 
