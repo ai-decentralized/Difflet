@@ -22,10 +22,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from difflet.backends.neuron.hbm import FIT_FRACTION, per_core_hbm_bytes, safetensors_numel
+from difflet.backends.neuron.hbm import Component, components_bytes, components_fit
 
 #: umT5 runs in fp32 on the device whatever the DiT's dtype (``NeuronWanTextEncoderApplication``).
 TEXT_ENCODER_DTYPE_BYTES = 4
+TEXT_ENCODER = Component("text_encoder", TEXT_ENCODER_DTYPE_BYTES)
+
+
+def device_text_encoder_components(experts: tuple[str, ...] = ("transformer",),
+                                   dit_dtype_bytes: int = 2) -> tuple[Component, ...]:
+    """umT5 and the DiT ``experts`` (the checkpoint subdirectories that stay resident with it:
+    ``("transformer",)``, plus ``"transformer_2"`` for Wan 2.2's low-noise expert, or none)."""
+    return (TEXT_ENCODER, *(Component(name, int(dit_dtype_bytes)) for name in experts))
 
 
 def device_text_encoder_bytes(
@@ -35,13 +43,10 @@ def device_text_encoder_bytes(
     experts: tuple[str, ...] = ("transformer",),
     dit_dtype_bytes: int = 2,
 ) -> int:
-    """Lower bound of one rank's weight bytes with umT5 on the device beside the DiT ``experts``
-    (the checkpoint subdirectories that stay resident with it: ``("transformer",)``, plus
-    ``"transformer_2"`` for Wan 2.2's low-noise expert, or none), all sharded over ``tp_degree``."""
-    root = Path(model_dir)
-    total = safetensors_numel(root / "text_encoder") * TEXT_ENCODER_DTYPE_BYTES
-    total += sum(safetensors_numel(root / name) for name in experts) * int(dit_dtype_bytes)
-    return total // max(int(tp_degree), 1)
+    """Lower bound of one rank's weight bytes with umT5 on the device beside the DiT ``experts``,
+    all sharded over ``tp_degree``."""
+    return components_bytes(model_dir, device_text_encoder_components(experts, dit_dtype_bytes),
+                            tp_degree=tp_degree)
 
 
 def device_text_encoder_fits(
@@ -53,11 +58,14 @@ def device_text_encoder_fits(
 ) -> tuple[bool, int, int]:
     """``(fits, estimate, limit)``: the ``device_text_encoder_bytes`` estimate against
     ``FIT_FRACTION`` of one core's HBM."""
-    estimate = device_text_encoder_bytes(
-        model_dir, tp_degree=tp_degree, experts=experts, dit_dtype_bytes=dit_dtype_bytes
-    )
-    limit = int(per_core_hbm_bytes()[0] * FIT_FRACTION)
-    return estimate <= limit, estimate, limit
+    return components_fit(model_dir, device_text_encoder_components(experts, dit_dtype_bytes),
+                          tp_degree=tp_degree)
 
 
-__all__ = ["TEXT_ENCODER_DTYPE_BYTES", "device_text_encoder_bytes", "device_text_encoder_fits"]
+__all__ = [
+    "TEXT_ENCODER",
+    "TEXT_ENCODER_DTYPE_BYTES",
+    "device_text_encoder_bytes",
+    "device_text_encoder_components",
+    "device_text_encoder_fits",
+]
