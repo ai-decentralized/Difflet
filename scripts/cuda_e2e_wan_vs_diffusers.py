@@ -63,7 +63,13 @@ from pathlib import Path
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from cuda_e2e_vs_diffusers import _save, image_metrics  # noqa: E402
+from cuda_e2e_vs_diffusers import (  # noqa: E402
+    _save,
+    aggregate_metrics,
+    image_metrics,
+    parse_seeds,
+    run_seeds,
+)
 
 MAX_SEQUENCE_LENGTH = 512
 # CudaWanApplication's timestep_dtype values (difflet/models/wan/cuda_application.py).
@@ -82,27 +88,6 @@ def parse_timestep_dtypes(text: str) -> list[str]:
     if len(set(names)) != len(names):
         raise argparse.ArgumentTypeError(f"repeated timestep dtype in {text!r}")
     return names
-
-
-def parse_seeds(text: str) -> list[int]:
-    """``"0,1,2"`` → ``[0, 1, 2]``: non-negative integers, no repeats, at least one."""
-    seeds = []
-    for part in text.split(","):
-        part = part.strip()
-        if not part.isdigit():
-            raise argparse.ArgumentTypeError(
-                f"bad seed {part!r} in {text!r}; expected a comma-separated list of "
-                f"non-negative integers"
-            )
-        seeds.append(int(part))
-    if len(set(seeds)) != len(seeds):
-        raise argparse.ArgumentTypeError(f"repeated seed in {text!r}")
-    return seeds
-
-
-def run_seeds(args) -> list[int]:
-    """The seeds to run: ``--seeds`` when given, else ``[--seed]``."""
-    return list(args.seeds) if args.seeds else [args.seed]
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -202,16 +187,6 @@ def perturb_timestep(pipe):
                 del module.forward
             else:
                 module.forward = previous
-
-
-def spread(values: list[float]) -> dict:
-    """``{min, mean, max}`` of a list of numbers."""
-    return {"min": min(values), "mean": sum(values) / len(values), "max": max(values)}
-
-
-def aggregate_metrics(entries: list[dict]) -> dict:
-    """PSNR and cosine ``{min, mean, max}`` over per-seed ``{"metrics": ...}`` entries."""
-    return {key: spread([e["metrics"][key] for e in entries]) for key in ("psnr_db", "cosine")}
 
 
 def difflet_unit_video(frames: torch.Tensor) -> torch.Tensor:
