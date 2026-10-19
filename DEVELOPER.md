@@ -234,7 +234,9 @@ the single block's `proj_out` can run as diffusers' one gemm at tp=1 (`fuse_proj
 load-time module swap in `difflet/backends/cuda/flux/proj_out.py`, off by default until the 10 dB
 it moved one seed's e2e PSNR is explained; the model file, the checkpoint and the Trainium/TPU graphs keep the Megatron split). Flux's e2e PSNR is
 seed-sensitive — diffusers against its own perturbed self spans 30.9–37.6 dB over three seeds —
-so the e2e gate is relative to a recorded noise floor, as Wan's. The Trainium byte-identity of the
+so the e2e gate is relative to a recorded noise floor, as Wan's — now over seeds in one run
+(`cuda_e2e_flux_vs_diffusers.py --seeds 0,1,2 --noise-floor`, gates A and B as Wan's), which
+the flux gate run uses. The Trainium byte-identity of the
 split is argued (verbatim move, CPU suites) but not re-run on a trn2.
 
 **Wan 2.2 on CUDA (verified on the RTX PRO 6000).** `Wan-AI/Wan2.2-T2V-A14B-Diffusers`
