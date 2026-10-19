@@ -48,3 +48,11 @@ def _no_hardware_probe(monkeypatch):
     monkeypatch.setattr(hardware, "_run_neuron_ls", lambda: [])
     yield
     hardware._probe_neuron_ls_cached.cache_clear()
+
+
+@pytest.fixture(autouse=True)
+def _neuron_weight_store_off(monkeypatch):
+    """The neuron backend's weight store is on by default and lives under the compile cache
+    (``~/.cache/difflet``); unit tests must not write there. Tests of the store point
+    DIFFLET_NEURON_WEIGHT_STORE at a temp dir themselves (gloo workers inherit it)."""
+    monkeypatch.setenv("DIFFLET_NEURON_WEIGHT_STORE", "0")
