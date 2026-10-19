@@ -5,8 +5,9 @@ the two backends can diverge without editing the TPU tree: ``WanTransformerConfi
 hardware-neutral hyperparameters, ``difflet/models/wan/modeling_wan.py``) plus the one static
 runtime shape, the tp degree and the dtype, and the latent geometry the warm-up inputs are
 built from. ``validate()`` differs in the parallel modes: it checks their divisibility (CP's
-sequence split and Ulysses' head split, SP's sequence split over TP) the way
-``NeuronQwenImageConfig`` does, and the ``num_layers`` cut against ``checkpoint_num_layers``.
+sequence split and Ulysses' head split, SP's sequence split over TP) and the ``num_layers`` cut
+against ``checkpoint_num_layers`` with the rules every neuron DiT config shares
+(``difflet/backends/neuron/core/config_checks.py``).
 
 The parallel-mode flags are the ones ``WanTransformer3DModel`` reads with ``getattr``; they
 are declared so that an unsupported or ragged mode fails here, with a message, instead of
@@ -21,8 +22,17 @@ from pathlib import Path
 
 import torch
 
+from difflet.backends.neuron.core.config_checks import (
+    check_cp_enabled,
+    check_cp_mode,
+    check_cp_split,
+    check_even_split,
+    check_heads_divide_tp,
+    check_layer_count,
+    check_ulysses_heads,
+    exclusive_modes,
+)
 from difflet.models.wan.modeling_wan import WanTransformerConfig
-from difflet.pipeline.parallel_config import CP_MODES
 
 
 @dataclass
@@ -82,21 +92,8 @@ class NeuronWanConfig(WanTransformerConfig):
         )
 
     def validate(self) -> None:
-        if int(self.num_layers) < 1:
-            raise ValueError(f"Wan num_layers={self.num_layers} must be >= 1")
-        if self.checkpoint_num_layers is not None and int(self.num_layers) > int(
-            self.checkpoint_num_layers
-        ):
-            raise ValueError(
-                f"Wan num_layers={self.num_layers} exceeds the checkpoint's "
-                f"{self.checkpoint_num_layers} blocks"
-            )
-        # tp shards the attention heads, so it has to divide them evenly.
-        if int(self.num_attention_heads) % int(self.tp_degree):
-            raise ValueError(
-                f"Wan has {self.num_attention_heads} attention heads, which "
-                f"does not divide tp={self.tp_degree}"
-            )
+        check_layer_count("Wan", self.num_layers, self.checkpoint_num_layers)
+        check_heads_divide_tp("Wan", self.num_attention_heads, self.tp_degree)
         # Both are sharded column-wise by the TP linears; a ragged split would
         # only surface as a shape mismatch deep inside the weight load.
         if int(self.ffn_dim) % int(self.tp_degree):
@@ -139,45 +136,26 @@ class NeuronWanConfig(WanTransformerConfig):
         The exclusivity rules are the model's own (``WanTransformer3DModel.__init__``), checked
         here so that a wrong config fails before the mesh and the meta build.
         """
-        if self.cp_mode not in CP_MODES:
-            raise ValueError(f"cp_mode must be one of {CP_MODES}, got {self.cp_mode!r}")
+        check_cp_mode(self.cp_mode)
         if self.context_parallel_enabled and self.sp_enabled:
-            raise ValueError(
-                "Wan sp_enabled and context_parallel_enabled are mutually exclusive (both shard "
-                "the sequence dimension)"
-            )
+            raise exclusive_modes("Wan", "sp_enabled", "context_parallel_enabled",
+                                  "both shard the sequence dimension")
         if self.context_parallel_enabled and self.cfg_parallel_enabled:
-            raise ValueError(
-                "Wan cfg_parallel_enabled and context_parallel_enabled are mutually exclusive "
-                "(both consume the data-parallel lanes)"
-            )
+            raise exclusive_modes("Wan", "cfg_parallel_enabled", "context_parallel_enabled",
+                                  "both consume the data-parallel lanes")
         heads, tp = int(self.num_attention_heads), int(self.tp_degree)
         seq = int(self.image_seq_len)
-        if self.sp_enabled and seq % tp:
-            raise ValueError(
-                f"Wan sequence parallelism splits image_seq_len={seq} over tp={tp}, which does "
-                "not divide it"
-            )
+        if self.sp_enabled:
+            check_even_split(f"Wan sequence parallelism splits image_seq_len={seq}", seq, "tp", tp)
         cp = None if self.cp_degree is None else int(self.cp_degree)
-        if cp is not None and cp > 1 and not self.context_parallel_enabled:
-            raise ValueError(
-                f"cp_degree={cp} needs context_parallel_enabled=True (the module would run "
-                "the full sequence on every rank of the CP group)"
-            )
+        check_cp_enabled(cp, self.context_parallel_enabled)
         if not self.context_parallel_enabled or cp is None or cp <= 1:
             return
-        if seq % cp:
-            raise ValueError(
-                f"Wan image_seq_len={seq} ({self.latent_frames}x{self.latent_height}x"
-                f"{self.latent_width} latent, patch {tuple(self.patch_size)}) is not divisible "
-                f"by cp_degree={cp}"
-            )
-        if self.cp_mode == "ulysses" and (heads // tp) % cp:
-            raise ValueError(
-                f"cp_mode='ulysses' shards this rank's {heads // tp} heads (heads={heads} / "
-                f"tp={tp}) over cp_degree={cp}; num_attention_heads must be divisible by "
-                "tp_degree * cp_degree"
-            )
+        check_cp_split("Wan", "image_seq_len", seq,
+                       f"{self.latent_frames}x{self.latent_height}x{self.latent_width} latent, "
+                       f"patch {tuple(self.patch_size)}", cp)
+        if self.cp_mode == "ulysses":
+            check_ulysses_heads(heads, tp, cp)
 
     @classmethod
     def from_pretrained(cls, transformer_path, **overrides) -> "NeuronWanConfig":
