@@ -55,6 +55,37 @@ def _save(img: torch.Tensor, path: Path) -> None:
     Image.fromarray(arr).save(path)
 
 
+def parse_seeds(text: str) -> list[int]:
+    """``"0,1,2"`` → ``[0, 1, 2]``: non-negative integers, no repeats, at least one."""
+    seeds = []
+    for part in text.split(","):
+        part = part.strip()
+        if not part.isdigit():
+            raise argparse.ArgumentTypeError(
+                f"bad seed {part!r} in {text!r}; expected a comma-separated list of "
+                f"non-negative integers"
+            )
+        seeds.append(int(part))
+    if len(set(seeds)) != len(seeds):
+        raise argparse.ArgumentTypeError(f"repeated seed in {text!r}")
+    return seeds
+
+
+def run_seeds(args) -> list[int]:
+    """The seeds to run: ``--seeds`` when given, else ``[--seed]``."""
+    return list(args.seeds) if args.seeds else [args.seed]
+
+
+def spread(values: list[float]) -> dict:
+    """``{min, mean, max}`` of a list of numbers."""
+    return {"min": min(values), "mean": sum(values) / len(values), "max": max(values)}
+
+
+def aggregate_metrics(entries: list[dict]) -> dict:
+    """PSNR and cosine ``{min, mean, max}`` over per-seed ``{"metrics": ...}`` entries."""
+    return {key: spread([e["metrics"][key] for e in entries]) for key in ("psnr_db", "cosine")}
+
+
 def _application_kwargs(args: argparse.Namespace) -> dict | None:
     """The opt-in application options this run asks for (None: the defaults)."""
     kwargs = {k: True for k in ("torch_compile", "fuse_proj_out") if getattr(args, k, False)}
