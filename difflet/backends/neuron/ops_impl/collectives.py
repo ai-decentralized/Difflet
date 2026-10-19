@@ -43,7 +43,9 @@ from difflet.backends.neuron.ops_impl.parallel_mesh import (
 )
 from difflet.pipeline.parallel_mesh import MeshSpec
 
-_TP_ONLY = "the neuron backend supports tensor, CFG and context parallelism only"
+#: The parallel modes one neuron launch runs, worded as ``runtime.check_parallel_supported``
+#: words them (SP runs within the TP group, so it has no group of its own).
+_SUPPORTED_MODES = "the neuron backend supports tensor, sequence, context and CFG parallelism"
 
 
 class _TrivialGroup:
@@ -237,7 +239,8 @@ def get_world_group():
 def _trivial_axis_group(axis: str) -> _TrivialGroup:
     size = _spec_or_trivial().axis_size(axis)
     if size > 1:
-        raise NotImplementedError(f"{_TP_ONLY}; no {axis} group exists ({axis}={size})")
+        raise NotImplementedError(
+            f"{_SUPPORTED_MODES}; no {axis} group exists ({axis}={size})")
     return _TrivialGroup()
 
 
