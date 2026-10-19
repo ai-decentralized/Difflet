@@ -802,3 +802,25 @@ def test_launcher_exports_the_cache_settings_to_every_rank(monkeypatch, tmp_path
     assert env["TORCH_NEURONX_NEFF_CACHE_DIR"] == "/shared/neff"
     assert env["TORCH_NEURONX_HLO_CACHE_DIR"] == str(tmp_path / "neuron" / "hlo")
     assert env["NKI_ENABLE_TRACE_CACHE"] == "0"
+
+
+@pytest.mark.parametrize(("exported", "expected"), [
+    (None, "10800"), ("", "10800"), ("  ", "10800"), ("7200", "7200"), ("600", "600"),
+])
+def test_launcher_gives_the_ranks_a_3h_process_group_timeout(monkeypatch, tmp_path, exported,
+                                                              expected):
+    """Review S3: torch's default 30 min is shorter than a cold launch's legitimate waits (rank
+    0 reading a host encoder, a cold warm-up), so the launcher gives every torchrun rank 3 h
+    unless DIFFLET_NEURON_PG_TIMEOUT_S is exported with a value; the ranks parse it into the
+    neuron process group's timeout."""
+    import datetime
+
+    from difflet.backends.neuron import runtime
+    from difflet.cli import runner
+
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path))
+    env = {} if exported is None else {runtime.PG_TIMEOUT_ENV: exported}
+    runner._prepare_mpmd_env(env, 4, strict_environment=False)
+    assert env[runtime.PG_TIMEOUT_ENV] == expected
+    monkeypatch.setenv(runtime.PG_TIMEOUT_ENV, env[runtime.PG_TIMEOUT_ENV])
+    assert runtime.process_group_timeout() == datetime.timedelta(seconds=int(expected))
