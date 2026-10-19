@@ -229,3 +229,30 @@ def test_multipart_encoding_is_what_the_videos_endpoint_parses():
 def test_serve_command_names_the_model():
     cmd, _ = smoke.serve_command(port=8099, cache_dir=None, python="py", model_id=_WAN)
     assert cmd[3:7] == ["serve", "--model-id", _WAN, "--port"]
+
+
+def test_the_server_gets_the_startup_timeout_and_any_shape_given():
+    # The server bounds worker startup (load + smoke) by --worker-restart-timeout (900 s by
+    # default): without it Wan's 1800 s client timeout would never be reached.
+    cmd, _ = smoke.serve_command(
+        port=8099,
+        cache_dir=None,
+        python="py",
+        model_id=_WAN,
+        worker_restart_timeout=1800.0,
+        height=480,
+        width=832,
+        num_frames=17,
+    )
+    assert cmd[cmd.index("--worker-restart-timeout") + 1] == "1800"
+    assert cmd[cmd.index("--height") + 1] == "480" and cmd[cmd.index("--width") + 1] == "832"
+    assert cmd[cmd.index("--num-frames") + 1] == "17"
+    cmd, _ = smoke.serve_command(port=8099, cache_dir=None, python="py")
+    assert "--worker-restart-timeout" not in cmd and "--height" not in cmd
+
+
+def test_only_the_shape_flags_given_are_forwarded_to_the_server():
+    args = smoke.parse_args(["--model-id", _WAN, "--num-frames", "17"])
+    assert args.server_shape == {"height": None, "width": None, "num_frames": 17}
+    assert args.num_frames == 17 and args.height == 480  # the request still carries the shape
+    assert smoke.parse_args([]).server_shape == {"height": None, "width": None, "num_frames": None}

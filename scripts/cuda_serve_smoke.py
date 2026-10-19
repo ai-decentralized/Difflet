@@ -21,7 +21,10 @@ same chat path (PNG; ``--guidance-scale`` is sent when given). ``--model-id
 Wan-AI/Wan2.2-T2V-A14B-Diffusers`` POSTs the multipart form of ``/v1/videos/sync`` (``size``,
 ``num_frames``, steps, seed, and ``guidance_scale`` / ``guidance_scale_2`` when given) and saves
 the MP4. Flags left out take the model's CUDA CLI defaults (``MODEL_DEFAULTS``); Wan's startup
-timeout is 1800 s, since its 126 GB snapshot reads cold from the volume at about 0.23 GB/s.
+timeout is 1800 s, since its 126 GB snapshot reads cold from the volume at about 0.23 GB/s. The
+startup timeout also goes to the server as ``--worker-restart-timeout`` (which bounds the
+worker's load and smoke, 900 s by default), and ``--height`` / ``--width`` / ``--num-frames``
+given set the server's resident shape as well as the requests'.
 """
 
 from __future__ import annotations
@@ -189,10 +192,21 @@ def serve_command(
     dp: int = 1,
     queue_timeout: float | None = None,
     model_id: str = MODEL_ID,
+    worker_restart_timeout: float | None = None,
+    height: int | None = None,
+    width: int | None = None,
+    num_frames: int | None = None,
 ) -> tuple[list[str], dict[str, str]]:
+    """The ``difflet serve`` command. ``worker_restart_timeout`` bounds the worker's startup
+    (load + smoke) on the server side; a shape given here sets the resident profile's."""
     cmd = [python, "-m", "difflet.cli.main", "serve", "--model-id", model_id, "--port", str(port)]
     if cache_dir:
         cmd += ["--cache-dir", cache_dir]
+    if worker_restart_timeout is not None:
+        cmd += ["--worker-restart-timeout", f"{float(worker_restart_timeout):g}"]
+    for flag, value in (("--height", height), ("--width", width), ("--num-frames", num_frames)):
+        if value is not None:
+            cmd += [flag, str(int(value))]
     if int(dp) > 1:
         cmd += ["--dp-degree", str(int(dp))]
     if queue_timeout is not None:
@@ -299,6 +313,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--reference", default=None, help="an output to compare every output's bytes with"
     )
     args = ap.parse_args(argv)
+    # The shape flags given are the server's resident profile too; left out, both sides use
+    # the model's default.
+    args.server_shape = {n: getattr(args, n) for n in ("height", "width", "num_frames")}
     defaults = MODEL_DEFAULTS[args.model_id]
     for name in ("steps", "height", "width", "num_frames", "startup_timeout", "output"):
         if getattr(args, name) is None:
@@ -315,6 +332,8 @@ def main(argv: list[str] | None = None) -> int:
         dp=args.dp,
         queue_timeout=args.queue_timeout,
         model_id=args.model_id,
+        worker_restart_timeout=args.startup_timeout,
+        **args.server_shape,
     )
     api_key = os.environ.get("DIFFLET_API_KEY") or None  # the server reads the same variable
     base_url = f"http://127.0.0.1:{args.port}"

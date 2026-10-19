@@ -91,9 +91,11 @@ def test_cuda_routes_wan22_to_its_cuda_adapter_with_the_cli_defaults(monkeypatch
 
 
 def test_wan21_is_not_served_on_cuda_because_it_never_ran_on_a_gpu(monkeypatch):
-    with pytest.raises(ValueError) as exc:
+    # A DiffletServingError, so `difflet serve` exits with the message, not a traceback.
+    with pytest.raises(DiffletServingError) as exc:
         _resolve_model(monkeypatch, _WAN21)
-    message = str(exc.value)
+    assert exc.value.code == "feature_not_supported"
+    message = exc.value.message
     assert _WAN21 in message and "CUDA" in message and _WAN22 in message
     assert "never run on a GPU" in message
     # On Trainium the Wan serving metadata keeps both checkpoints.
@@ -104,19 +106,24 @@ def test_wan21_is_not_served_on_cuda_because_it_never_ran_on_a_gpu(monkeypatch):
 
 
 def test_video_serving_on_cuda_refuses_replicas_and_image_serving_keeps_them(monkeypatch):
+    # The video reason wins over the GPU count: on a one-GPU box the user learns why Wan
+    # cannot use replicas at all, not that the box is short of GPUs.
+    for gpus in (1, 2):
+        monkeypatch.setattr(model_registry, "_visible_gpu_count", lambda gpus=gpus: gpus)
+        with pytest.raises(DiffletServingError) as exc:
+            _resolve_model(monkeypatch, _WAN22, replicas=2)
+        assert exc.value.code == "feature_not_supported"
+        assert "one video job at a time" in exc.value.message
     monkeypatch.setattr(model_registry, "_visible_gpu_count", lambda: 2)
-    with pytest.raises(DiffletServingError) as exc:
-        _resolve_model(monkeypatch, _WAN22, replicas=2)
-    assert exc.value.code == "feature_not_supported"
-    assert "one video job at a time" in exc.value.message
     assert _resolve_model(monkeypatch, _FLUX, replicas=2).metadata.model_type == "flux"
 
 
 def test_models_without_a_cuda_adapter_name_the_three_that_have_one(monkeypatch):
     monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
-    with pytest.raises(ValueError) as exc:
+    with pytest.raises(DiffletServingError) as exc:
         resolve_serving_model(ServeOptions(model_id="hunyuanvideo-community/HunyuanVideo"))
-    message = str(exc.value)
+    assert exc.value.code == "feature_not_supported"
+    message = exc.value.message
     assert "Qwen-Image, FLUX.1-dev and Wan 2.2" in message and "trainium" in message
 
 
@@ -142,3 +149,13 @@ def test_legacy_serving_tests_run_on_the_cpu_backend_whatever_the_host_has():
     from difflet.backends.registry import current_backend
 
     assert current_backend() == "cpu"
+
+
+@pytest.mark.parametrize("model_id", ["Qwen/Qwen-Image", _FLUX, _WAN22])
+def test_a_lone_teacache_calibration_is_refused_on_cuda_not_dropped(monkeypatch, model_id):
+    # Without --teacache-speedup the profile builder keeps no calibration, so the file would
+    # be ignored silently while the snapshot downloads; the CUDA CLI refuses it by name.
+    with pytest.raises(DiffletServingError) as exc:
+        _resolve_model(monkeypatch, model_id, teacache_calibration="/cal.json")
+    assert exc.value.code == "feature_not_supported"
+    assert "--teacache-calibration" in exc.value.message
