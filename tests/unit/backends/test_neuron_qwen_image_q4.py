@@ -103,12 +103,16 @@ def test_config_reads_the_text_config_and_validates_the_tp_split(tiny):
         QwenTextEncoderConfig.from_dict({"text_config": {"rope_scaling": {"rope_type": "yarn"}}})
     with pytest.raises(NotImplementedError, match="use_sliding_window"):
         QwenTextEncoderConfig.from_dict({"use_sliding_window": True})
-    if (QWEN_SNAPSHOT / "text_encoder" / "config.json").is_file():
-        real = QwenTextEncoderConfig.from_pretrained(QWEN_SNAPSHOT / "text_encoder")
-        assert real == QwenTextEncoderConfig()  # the defaults are Qwen-Image's Qwen2.5-VL-7B
-        real.validate(4)  # 28 / 4 query heads, 4 / 4 kv heads
-        with pytest.raises(ValueError, match="num_attention_heads=28 does not divide tp=8"):
-            real.validate(8)
+
+
+def test_config_defaults_are_the_real_text_encoders():
+    if not (QWEN_SNAPSHOT / "text_encoder" / "config.json").is_file():
+        pytest.skip("the real Qwen-Image snapshot is not on this machine")
+    real = QwenTextEncoderConfig.from_pretrained(QWEN_SNAPSHOT / "text_encoder")
+    assert real == QwenTextEncoderConfig()  # the defaults are Qwen-Image's Qwen2.5-VL-7B
+    real.validate(4)  # 28 / 4 query heads, 4 / 4 kv heads
+    with pytest.raises(ValueError, match="num_attention_heads=28 does not divide tp=8"):
+        real.validate(8)
 
 
 def test_mrope_with_text_positions_is_the_1d_rope():
@@ -261,8 +265,11 @@ def test_hbm_estimates_count_the_language_model_only(tiny, monkeypatch):
     lm = sum(p.numel() for n, p in model.named_parameters()
              if not n.startswith(("model.visual.", "lm_head.")))
     assert qwen_hbm.text_encoder_lm_numel(tiny.dir) == lm
+
+
+def test_hbm_estimates_of_the_real_text_encoder(monkeypatch):
     if not (QWEN_SNAPSHOT / "text_encoder").is_dir():
-        return
+        pytest.skip("the real Qwen-Image snapshot is not on this machine")
     # The real checkpoint (headers only): 7.07 B language-model parameters, 13.2 GiB in bf16.
     assert qwen_hbm.text_encoder_lm_numel(QWEN_SNAPSHOT) == 7_070_619_136
     monkeypatch.setenv("DIFFLET_NEURON_HBM_GIB", "24")
