@@ -13,6 +13,7 @@ from difflet.serving.engines.stage_observability import (
     RequestStageBreakdown,
     StageLoadRecorder,
     StageLoadReport,
+    UNKNOWN_ROLE,
     StageTiming,
     format_bytes,
     recording_stage_loads,
@@ -211,6 +212,9 @@ class StagePipelineEngine:
             recorder = StageLoadRecorder(
                 self._device_memory_probe or select_device_memory_probe(),
                 backend=resolve_backend_label(),
+                stage_roles={
+                    stage.stage_id: stage.role for stage in self.runtime.pipeline_definition.stages
+                },
             )
             with recording_stage_loads(recorder):
                 runners = await self.adapter.create_loaded_runners(self.runtime)
@@ -270,7 +274,7 @@ class StagePipelineEngine:
                     )
                 )
                 duration = result.metadata.finished_monotonic - result.metadata.started_monotonic
-                timings.append(StageTiming(stage.stage_id, duration))
+                timings.append(StageTiming(stage.stage_id, duration, stage.role))
                 context.cancellation.throw_if_cancelled()
                 logger.info(
                     "stage.complete request_id=%s model=%s stage=%s duration=%.3f",
@@ -326,13 +330,26 @@ class StagePipelineEngine:
     def _log_stage_load_report(self, report: StageLoadReport) -> None:
         for stage in report.stages:
             logger.info(
-                "stage.load model=%s stage=%s load_seconds=%.3f device_memory=%s scope=%s",
+                "stage.load model=%s stage=%s role=%s load_seconds=%.3f device_memory=%s scope=%s",
                 self.adapter.model_id,
                 stage.stage_id,
+                stage.role,
                 stage.load_seconds,
                 format_bytes(stage.device_bytes),
                 report.scope or "unknown",
                 extra={"stage_load": stage.as_event()},
+            )
+        if report.unknown_stage_ids:
+            # An adapter marked a load against a stage ID the pipeline does not declare.
+            # The bytes are still real, but they are filed under no role, so say so loudly
+            # instead of letting the summary read as if the split were complete.
+            logger.warning(
+                "stage.load_unknown_stage model=%s stage_ids=%s pipeline=%s role=%s",
+                self.adapter.model_id,
+                ",".join(report.unknown_stage_ids),
+                ",".join(stage.stage_id for stage in self.runtime.pipeline_definition.stages),
+                UNKNOWN_ROLE,
+                extra={"stage_load_unknown": list(report.unknown_stage_ids)},
             )
         logger.info(
             "stage.load_summary model=%s backend=%s probe=%s attribution=%s scope=%s "

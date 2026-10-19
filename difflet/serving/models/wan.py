@@ -450,7 +450,7 @@ class WanServingStageAdapter:
         # One load brings up the text encoder and the backbone together, so both stage IDs
         # name this boundary: the recorder reports their bytes jointly rather than
         # inventing a split.
-        with record_stage_load("prompt_encoder", "generation"):
+        with record_stage_load("prompt_encoder", "denoiser"):
             application = _build_application(runtime.source, runtime.profile)
             if tpu:
                 application.load_eager()
