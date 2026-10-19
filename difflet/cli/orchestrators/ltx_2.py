@@ -34,7 +34,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from difflet import envs
 from difflet.cli import runner
 from difflet.cli.orchestrators.base import (
     ModelOrchestrator,
@@ -45,13 +44,20 @@ from difflet.cli.orchestrators.base import (
     write_stage_manifest,
 )
 from difflet.cli.orchestrators.torchrun import (
-    fallback_tracker,
+    cfg_cp_conflict,
+    decodes_on_device,
+    device_encoder_overflow,
+    refuse_dit_overflow,
+    refuse_torchrun_conflicts,
     reject_unsupported_torchrun_options,
-    replica_request_scope,
-    replica_requests,
+    replica_cores,
     root_compile_cache_at_cache_dir,
+    run_generate_stage,
+    run_vae_stage,
     torchrun_backend,
+    torchrun_stage_keys,
     torchrun_unsupported_options,
+    vae_placement_conflict,
 )
 
 _HF_MODEL_ID = "Lightricks/LTX-2"
@@ -110,6 +116,23 @@ def _guidance(args: argparse.Namespace) -> float:
     return float(_DEFAULT_GUIDANCE if value is None else value)
 
 
+def _torchrun_application_kwargs(args: argparse.Namespace) -> dict:
+    """The application kwargs, plus any TeaCache flag the user gave (the application refuses it
+    in phase 1 instead of the stage dropping it): Gemma-3 on the device when the driver left
+    ``device_text_encoder`` on (``LTX2Orchestrator._place_text_encoder``)."""
+    kwargs = dict(_TORCHRUN_APPLICATION_KWARGS)
+    if getattr(args, "device_text_encoder", False):
+        kwargs["text_encoder_device"] = "neuron"
+    for app_key, arg_key in (("teacache_speedup", "teacache_speedup"),
+                             ("teacache_cadence", "teacache_cadence"),
+                             ("teacache_online_delta_alpha", "teacache_online_delta"),
+                             ("teacache_calibration_path", "teacache_calibration")):
+        value = getattr(args, arg_key, None)
+        if value is not None:
+            kwargs[app_key] = value
+    return kwargs
+
+
 def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
     """The options the torchrun (neuron) ranks do not run, as the command line names them:
     every torchrun backend's (TeaCache), several --shapes (one static shape per process), and
@@ -126,15 +149,12 @@ def _torchrun_conflicts(args: argparse.Namespace, *, generating: bool) -> list[s
     """--host-vae with --device-vae, and --cfg-parallel without CFG: the CFG groups split the two
     branches of a guidance_scale > 1 step (``compile`` only warms the batch-2 graph up).
     Torch-free."""
-    conflicts = []
-    if getattr(args, "host_vae", False) and getattr(args, "device_vae", False):
-        conflicts.append("--host-vae and --device-vae are mutually exclusive")
-    if getattr(args, "cfg_parallel", False) and (getattr(args, "cp_degree", None) or 1) > 1:
-        conflicts.append("--cfg-parallel and --cp-degree > 1 are mutually exclusive")
+    cfg_without_cfg = None
     if generating and getattr(args, "cfg_parallel", False) and _guidance(args) <= 1.0:
-        conflicts.append("--cfg-parallel splits the two branches of classifier-free guidance; "
-                         "LTX-2 runs them only with --guidance-scale > 1")
-    return conflicts
+        cfg_without_cfg = ("--cfg-parallel splits the two branches of classifier-free guidance; "
+                           "LTX-2 runs them only with --guidance-scale > 1")
+    found = (vae_placement_conflict(args), cfg_cp_conflict(args), cfg_without_cfg)
+    return [conflict for conflict in found if conflict is not None]
 
 
 #: Where the neuron backend decodes when neither --host-vae nor --device-vae is given: on the
@@ -154,11 +174,7 @@ def _decodes_on_device(args: argparse.Namespace) -> bool:
     """Whether the neuron backend decodes the video in a vae stage on one core
     (``_stage_vae_neuron``) instead of on the host in the driver (``_decode_latents_host``).
     --host-vae wins, then --device-vae, then ``_DEVICE_VAE_DEFAULT``. Torch-free."""
-    if getattr(args, "host_vae", False):
-        return False
-    if getattr(args, "device_vae", False):
-        return True
-    return _DEVICE_VAE_DEFAULT
+    return decodes_on_device(args, _DEVICE_VAE_DEFAULT)
 
 
 def _decode_latents_host(latents_path: str, model_dir: str, output_path: str, *, height: int,
@@ -377,15 +393,11 @@ class LTX2Orchestrator(ModelOrchestrator):
         No-op on the AoT backends."""
         reject_unsupported_torchrun_options(_torchrun_unsupported_options(self.args),
                                             runs=_TORCHRUN_RUNS)
-        conflicts = _torchrun_conflicts(self.args, generating=generating)
-        if conflicts and torchrun_backend() is not None:
-            print(f"Error: {conflicts[0]}; nothing was launched.", file=sys.stderr, flush=True)
-            raise SystemExit(2)
+        refuse_torchrun_conflicts(_torchrun_conflicts(self.args, generating=generating))
 
     def _replica_cores(self) -> int:
         """Cores of one generate launch: tp x cp, doubled by --cfg-parallel."""
-        return ((self.args.tp_degree or 4) * (self.args.cp_degree or 1)
-                * (2 if getattr(self.args, "cfg_parallel", False) else 1))
+        return replica_cores(self.args)
 
     def _model_dir(self) -> str:
         from difflet.pipeline.path_resolver import resolve_model_path
@@ -398,23 +410,9 @@ class LTX2Orchestrator(ModelOrchestrator):
         (``difflet/backends/neuron/ltx_2/hbm.py``) before any rank starts: print one message and
         exit 2. Weights that are not local yet leave the decision to the application's own
         check. Torch-free."""
-        from difflet.backends.neuron.hbm import GIB, suggested_tp
         from difflet.backends.neuron.ltx_2.hbm import dit_fits
 
-        try:
-            model_dir = self._model_dir()
-        except (OSError, RuntimeError):
-            return
-        tp = self.args.tp_degree or 4
-        fits, estimate, limit = dit_fits(model_dir, tp_degree=tp)
-        if fits:
-            return
-        print(f"Error: the LTX-2 DiT needs at least {estimate / GIB:.1f} GiB of bf16 weights per "
-              f"core at tp={tp}, over the {limit / GIB:.1f} GiB budget of one NeuronCore (every "
-              f"DP replica is its own TP group); use --tp-degree "
-              f"{suggested_tp(estimate, tp, limit)} or more; nothing was launched.",
-              file=sys.stderr, flush=True)
-        raise SystemExit(2)
+        refuse_dit_overflow("LTX-2", self._model_dir, dit_fits, self.args.tp_degree or 4)
 
     def _place_text_encoder(self) -> None:
         """Put the Gemma-3 encode on the device (``_DEVICE_TEXT_ENCODER_DEFAULT``) unless
@@ -433,21 +431,15 @@ class LTX2Orchestrator(ModelOrchestrator):
         if not (getattr(args, "device_text_encoder", False) or _DEVICE_TEXT_ENCODER_DEFAULT):
             return
         args.device_text_encoder = True
-        from difflet.backends.neuron.hbm import GIB
         from difflet.backends.neuron.ltx_2.hbm import device_text_encoder_fits
 
-        try:
-            model_dir = self._model_dir()
-        except (OSError, RuntimeError):
-            return
-        tp = args.tp_degree or 4
-        fits, estimate, limit = device_text_encoder_fits(model_dir, tp_degree=tp)
-        if fits:
+        overflow = device_encoder_overflow(self._model_dir, device_text_encoder_fits,
+                                           args.tp_degree or 4)
+        if overflow is None:
             return
         args.device_text_encoder = False
-        print(f"[ltx_2] Gemma-3 on the device needs at least {estimate / GIB:.1f} GiB per core "
-              f"beside the DiT at tp={tp}, over the {limit / GIB:.1f} GiB budget: encoding on "
-              "rank 0's host instead (--host-text-encoder)", flush=True)
+        print(f"[ltx_2] Gemma-3 on the device {overflow}: encoding on rank 0's host instead "
+              "(--host-text-encoder)", flush=True)
 
     def _prepare_torchrun(self, *, generating: bool) -> None:
         self._reject_unsupported_torchrun_options(generating=generating)
@@ -522,16 +514,14 @@ class LTX2Orchestrator(ModelOrchestrator):
             self._stage_vae_neuron(args)
 
     def _stage_vae_neuron(self, args: argparse.Namespace) -> None:
-        """The neuron backend's vae stage (--device-vae): one rank, a launch of its own after the
-        generate stage has exited, so the decoder never shares a core with the DiT. The video
-        decodes on the device (``NeuronLtx2VaeDecoderApplication``, bf16, eager); the audio VAE
-        and the vocoder run on the host, and the orchestrator's own ``_decode_latents`` does the
-        unpacking, un-normalisation and post-processing, as in the host decode. ``compile`` mode
-        loads with the warm-up decode (it fills the eager kernel cache) and writes the
-        manifest; ``generate`` skips that warm-up."""
+        """The neuron backend's vae stage (``run_vae_stage``; --device-vae): one rank, a launch
+        of its own after the generate stage has exited, so the decoder never shares a core with
+        the DiT. The video decodes on the device (``NeuronLtx2VaeDecoderApplication``, bf16,
+        eager); the audio VAE and the vocoder run on the host, and the orchestrator's own
+        ``_decode_latents`` does the unpacking, un-normalisation and post-processing, as in the
+        host decode. Rank 0 writes the video as the host decode does."""
         import torch
 
-        from difflet.backends.neuron.core import distributed
         from difflet.backends.neuron.ltx_2.vae import NeuronLtx2VaeDecoderApplication
         from difflet.cli.dp import stage_loop
         from difflet.models.ltx_2.neuron_application import (
@@ -539,32 +529,33 @@ class LTX2Orchestrator(ModelOrchestrator):
             _host_ltx2_audio_decoder,
         )
         from difflet.models.ltx_2.pipeline import LTX2Orchestrator
-        from difflet.pipeline.parallel_config import DiffletParallelConfig
 
         model_dir = self._model_dir()
         height, width, num_frames = self._shape(args)
         latent_shape = (1, 128, (num_frames - 1) // 8 + 1, height // 32, width // 32)
-        app = NeuronLtx2VaeDecoderApplication(
-            model_path=str(Path(model_dir) / "vae"), latent_shape=latent_shape,
-            parallel=DiffletParallelConfig(tp_degree=1), dtype=torch.bfloat16, device="neuron",
-        )
-        decoder = _DeviceLtx2VaeDecoder(app, device="neuron")
-        decoder.load(skip_warmup=args.stage_mode != "compile")
-        if args.stage_mode == "compile":
-            if distributed.is_rank0():
-                vae_args = argparse.Namespace(**{**vars(args), "stage": "vae"})
-                write_stage_manifest(self._stage_compiled_dir(vae_args),
-                                     self._stage_cache_inputs(vae_args))
-            return
-        audio_vae, vocoder, video_processor = _host_ltx2_audio_decoder(
-            model_dir, dtype=torch.bfloat16)
-        orchestrator = LTX2Orchestrator(
-            model_path=model_dir, vae=decoder, audio_vae=audio_vae, vocoder=vocoder,
-            video_processor=video_processor, dtype=torch.bfloat16, height=height, width=width,
-            num_frames=num_frames,
-        )
-        for req in stage_loop.claimed_requests(args):
-            with stage_loop.request_scope(args, req, final=True):
+
+        def build(parallel):
+            app = NeuronLtx2VaeDecoderApplication(
+                model_path=str(Path(model_dir) / "vae"), latent_shape=latent_shape,
+                parallel=parallel, dtype=torch.bfloat16, device="neuron",
+            )
+            return _DeviceLtx2VaeDecoder(app, device="neuron")
+
+        def finish_compile() -> None:
+            vae_args = argparse.Namespace(**{**vars(args), "stage": "vae"})
+            write_stage_manifest(self._stage_compiled_dir(vae_args),
+                                 self._stage_cache_inputs(vae_args))
+
+        def prepare_decode(decoder):
+            audio_vae, vocoder, video_processor = _host_ltx2_audio_decoder(
+                model_dir, dtype=torch.bfloat16)
+            orchestrator = LTX2Orchestrator(
+                model_path=model_dir, vae=decoder, audio_vae=audio_vae, vocoder=vocoder,
+                video_processor=video_processor, dtype=torch.bfloat16, height=height,
+                width=width, num_frames=num_frames,
+            )
+
+            def decode(req) -> None:
                 latents = torch.load(stage_loop.work_file(args, req, "latents.pt"),
                                      map_location="cpu")
                 with torch.no_grad():
@@ -577,103 +568,59 @@ class LTX2Orchestrator(ModelOrchestrator):
                     print(f"[difflet] video tensor saved to {out.with_suffix('.pt')}",
                           flush=True)
 
+            return decode
+
+        run_vae_stage(args, build=build, finish_compile=finish_compile,
+                      prepare_decode=prepare_decode)
+
     def _stage_generate_neuron(self, args: argparse.Namespace, backend: str) -> None:
         """The generate stage on a non-AoT torchrun backend (neuron); runs on every rank.
 
-        ``DiffletPipeline.from_pretrained`` prepares the runtime (NEFF cache, core binding, the
-        process group) before it builds the registry's application (TorchNeuronLtx2Application),
-        and ``load(skip_warmup=False)`` compiles or loads the blocks at the static shape, so the
-        step loop compiles nothing. ``compile`` mode is that warm-up plus the stage manifest.
-        Every rank runs the same generate and rank 0 alone writes files. The process group is
-        destroyed after a successful stage only: a failing rank exits with its exception and
-        torchrun stops its peers.
+        ``run_generate_stage`` builds the registry's application (TorchNeuronLtx2Application)
+        through ``DiffletPipeline``, loads it with the warm-up (``compile`` mode is that plus the
+        stage manifest) and runs the replica's requests. LTX-2's part: the request's negative
+        prompt (its manifest line's, else --negative-prompt), the Trainium CLI's step and
+        guidance defaults, and the packed video and audio latents written by rank 0 to one
+        ``latents.pt``.
         """
-        import time
-
         import torch
-        import torch.distributed as dist
 
-        from difflet.backends.neuron.compile import resolve_exec_mode
-        from difflet.backends.neuron.core import distributed
         from difflet.cli.dp import stage_loop
-        from difflet.pipeline.difflet_pipeline import DiffletPipeline
-        from difflet.pipeline.parallel_config import DiffletParallelConfig
 
         height, width, num_frames = self._shape(args)
-        parallel = DiffletParallelConfig(
-            tp_degree=args.tp_degree or 4,
-            cp_degree=args.cp_degree or 1,
-            cp_mode=getattr(args, "cp_mode", "gather_kv") or "gather_kv",
-            cfg_parallel_enabled=getattr(args, "cfg_parallel", False),
-            sp_enabled=getattr(args, "sp_enabled", False),
-        )
-        kwargs = dict(_TORCHRUN_APPLICATION_KWARGS)
-        if getattr(args, "device_text_encoder", False):
-            kwargs["text_encoder_device"] = "neuron"
-        for app_key, arg_key in (("teacache_speedup", "teacache_speedup"),
-                                 ("teacache_cadence", "teacache_cadence"),
-                                 ("teacache_online_delta_alpha", "teacache_online_delta"),
-                                 ("teacache_calibration_path", "teacache_calibration")):
-            value = getattr(args, arg_key, None)
-            if value is not None:
-                kwargs[app_key] = value  # the application refuses it (phase 1)
-        start = time.perf_counter()
-        pipe = DiffletPipeline.from_pretrained(
-            _HF_MODEL_ID, model_type=_MODEL_TYPE, revision=args.revision, local_files_only=True,
-            parallel=parallel, dtype=torch.bfloat16, height=height, width=width,
-            num_frames=num_frames, compile_cache_dir=args.cache_dir, backend=backend,
-            application_kwargs=kwargs, load=False,
-        )
-        with fallback_tracker(pipe) as load_fallbacks:
-            pipe.load(skip_warmup=False)
-        load_s = time.perf_counter() - start
 
-        generate_fallbacks: list = []
-        if args.stage_mode == "compile":
-            if distributed.is_rank0():
-                write_stage_manifest(self._stage_compiled_dir(args),
-                                     self._stage_cache_inputs(args))
-        else:
-            for req in replica_requests(args, device=getattr(pipe.app, "device", None)):
-                with replica_request_scope(args, req):
-                    with fallback_tracker(pipe) as fallbacks:
-                        out = pipe(
-                            prompt=req.prompt,
-                            negative_prompt=getattr(req, "negative_prompt", None)
-                            or getattr(args, "negative_prompt", None),
-                            num_inference_steps=int(
-                                stage_loop.effective(req, args, "steps", _DEFAULT_STEPS)),
-                            guidance_scale=float(stage_loop.effective(
-                                req, args, "guidance_scale", _DEFAULT_GUIDANCE)),
-                            generator=torch.Generator().manual_seed(req.seed),
-                            output_type="latent",
-                        )
-                    generate_fallbacks.extend(fallbacks)
-                    if distributed.is_rank0():
-                        dest = stage_loop.work_file(args, req, "latents.pt")
-                        torch.save({"video": out.latents.cpu(), "audio": out.audio_latents.cpu()},
-                                   dest)
-                        print(f"[ltx_2] latents saved to {dest}", flush=True)
+        def request_kwargs(req) -> dict:
+            return dict(
+                prompt=req.prompt,
+                negative_prompt=getattr(req, "negative_prompt", None)
+                or getattr(args, "negative_prompt", None),
+                num_inference_steps=int(stage_loop.effective(req, args, "steps", _DEFAULT_STEPS)),
+                guidance_scale=float(stage_loop.effective(
+                    req, args, "guidance_scale", _DEFAULT_GUIDANCE)),
+                generator=torch.Generator().manual_seed(req.seed),
+                output_type="latent",
+            )
 
-        app = pipe.app
-        rank, world = distributed.world_info()
-        print(
-            f"[ltx_2] {backend} rank {rank}/{world}: "
-            f"exec_mode={resolve_exec_mode(envs.DIFFLET_EXEC_MODE)} "
-            f"compiled_blocks={len(getattr(app, 'compiled_blocks', []))} "
-            f"unwarmed_shapes={list(getattr(app, 'unwarmed_shapes', []))} "
-            f"fallbacks: load={list(load_fallbacks)} generate={generate_fallbacks} "
-            f"load+warmup {load_s:.1f}s, stage {time.perf_counter() - start:.1f}s",
-            flush=True,
+        def save(req, out) -> None:
+            dest = stage_loop.work_file(args, req, "latents.pt")
+            torch.save({"video": out.latents.cpu(), "audio": out.audio_latents.cpu()}, dest)
+            print(f"[ltx_2] latents saved to {dest}", flush=True)
+
+        run_generate_stage(
+            args, backend, tag="ltx_2", model_id=_HF_MODEL_ID,
+            pipeline_kwargs=dict(model_type=_MODEL_TYPE, revision=args.revision, height=height,
+                                 width=width, num_frames=num_frames),
+            application_kwargs=_torchrun_application_kwargs(args),
+            request_kwargs=request_kwargs,
+            save=save,
+            finish_compile=lambda: write_stage_manifest(self._stage_compiled_dir(args),
+                                                        self._stage_cache_inputs(args)),
         )
-        if dist.is_initialized():
-            dist.destroy_process_group()
 
     def _stage_cache_inputs(self, args: argparse.Namespace) -> dict:
-        from difflet.backends.neuron.compile import resolve_exec_mode
-
         height, width, num_frames = self._shape(args)
         if getattr(args, "stage", None) == "vae":
+            # The device decoder runs eager whatever --exec-mode says, and its key says so.
             return {
                 "component": "ltx_2_vae",
                 "model_id": _HF_MODEL_ID,
@@ -683,7 +630,7 @@ class LTX2Orchestrator(ModelOrchestrator):
                 "backend": torchrun_backend(),
                 "exec_mode": "eager",
             }
-        return {
+        return torchrun_stage_keys({
             "component": "ltx_2_generate",
             "model_id": _HF_MODEL_ID,
             "tp": args.tp_degree or 4,
@@ -694,12 +641,10 @@ class LTX2Orchestrator(ModelOrchestrator):
             "text_seq_len": 1024,
             "shapes": canonical_shapes_list(args, (height, width, num_frames)),
             "toolchain": stage_toolchain_versions(),
-            "backend": torchrun_backend(),
-            "exec_mode": resolve_exec_mode(envs.DIFFLET_EXEC_MODE),
             # Additive: only a device-encoder stage carries the key.
             **({"text_encoder_device": "neuron"}
                if getattr(args, "device_text_encoder", False) else {}),
-        }
+        })
 
     def _stage_compiled_dir(self, args: argparse.Namespace) -> Path:
         base = Path(args.cache_dir or Path.home() / ".cache" / "difflet").expanduser()
