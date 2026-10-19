@@ -70,8 +70,9 @@ _TAG = "[wan/cuda serve]"
 DEFAULT_GUIDANCE_SCALE = 4.0
 MAX_GUIDANCE_SCALE = 20.0  # the Trainium Wan validator's bound, for both experts
 TEXT_SEQ_LEN = 512  # UMT5 tokens (WanPipeline's max_sequence_length)
-#: Startup smoke: four steps run both experts (the first timestep, 999, sits above Wan 2.2's
-#: boundary and the rest below it), so a broken second expert fails startup, not a request.
+#: Startup smoke: four steps run both experts (with the checkpoint's flow shift they are about
+#: 999 / 900 / 750 / 500, two on each side of Wan 2.2's 0.875 boundary), so a broken second
+#: expert fails startup, not a request.
 SMOKE_STEPS = 4
 #: Video fields the CUDA application does not take, with why.
 _REFUSED_VIDEO_FIELDS = {
@@ -92,7 +93,11 @@ class CudaWanFinalPayload(StagePayload):
 
 
 def refuse_unsupported_profile(profile: ServingProfile) -> None:
-    """Raise ``feature_not_supported`` for every profile the CUDA backend does not serve."""
+    """Raise ``feature_not_supported`` for every profile the CUDA backend does not serve.
+
+    ``build_serving_profile`` already refuses ``--cfg-parallel`` and the TeaCache cadence /
+    online-delta modes for every serving model; the checks here are the worker's backstop for a
+    bundle that did not come through it."""
     cuda_resident.refuse_shared_profile(profile, tag=_TAG)
     if profile.parallel.cfg_parallel_enabled:
         cuda_resident.refuse(

@@ -89,10 +89,13 @@ def test_prepare_runtime_resolves_the_snapshot_and_builds_an_eager_bundle(source
     "over,named",
     [
         ({"shapes": ((H, W, F), (H, W, 17))}, "not supported"),
-        ({"parallel": DiffletParallelConfig(tp_degree=2)}, "not supported"),
-        ({"parallel": DiffletParallelConfig(tp_degree=1, sp_enabled=True)}, "not supported"),
+        ({"parallel": DiffletParallelConfig(tp_degree=2)}, "--tp-degree > 1"),
+        ({"parallel": DiffletParallelConfig(tp_degree=1, sp_enabled=True)}, "--sp (sequence"),
         ({"parallel": DiffletParallelConfig(tp_degree=1, cp_degree=2)}, "not supported"),
-        ({"parallel": DiffletParallelConfig(tp_degree=1, cfg_parallel_enabled=True)}, "not supported"),
+        (
+            {"parallel": DiffletParallelConfig(tp_degree=1, cfg_parallel_enabled=True)},
+            "not supported",
+        ),
         ({"teacache_speedup": 1.5}, "not supported"),
         ({"host_vae": True}, "not supported"),
     ],

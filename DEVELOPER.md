@@ -356,13 +356,16 @@ Flux answers `/v1/chat/completions` with a PNG (guidance in [0, 20], T5 within 5
 2.2 answers `/v1/videos` and `/v1/videos/sync` with an MP4 at the resident shape and fps;
 `guidance_scale_2` and `negative_prompt` are taken, `boundary_ratio` / `flow_shift` /
 `true_cfg_scale` refused. Wan 2.1 (never run on a GPU) and `--dp-degree > 1` for Wan (the video
-service runs one job at a time) are refused by name. `scripts/cuda_serve_smoke.sh --model-id <id>`
-drives each on a pod.
+service runs one job at a time) are refused by name, and so is a lone `--teacache-calibration`
+(it would be ignored). `--cfg-parallel` and the TeaCache cadence modes are refused first by the
+profile builder for every serving model; the adapters' own checks are the worker's backstop.
+`scripts/cuda_serve_smoke.sh --model-id <id>` drives each on a pod; it passes its startup
+timeout (1800 s for Wan's cold 126 GB read) to the server as `--worker-restart-timeout`.
 
 Not in Release 1 (follow-ups F1–F8 in the plan; Wan, Flux, serving and the second card have
 landed as F1, F5, F3b and F2 for the shapes and models above, with their own follow-ups):
 context parallel, tensor parallel across PCIe (need-triggered), multi-shape serving on
-CUDA, Wan and Flux serving on CUDA, Wan follow-ups (F1b:
+CUDA, Wan serving with more than one replica, Wan follow-ups (F1b:
 TeaCache, `--shapes`, 81-frame clips, I2V, `--negative-prompt`, batch > 1), Flux follow-ups,
 CUDA graphs, calibrated/online-delta TeaCache, FP8, `flash-attn`, custom kernels.
 

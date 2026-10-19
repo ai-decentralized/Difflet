@@ -82,8 +82,8 @@ def test_prepare_runtime_resolves_the_snapshot_and_builds_an_eager_bundle(source
     "over,named",
     [
         ({"shapes": ((1024, 1024, None), (768, 768, None))}, "not supported"),
-        ({"parallel": DiffletParallelConfig(tp_degree=2)}, "not supported"),
-        ({"parallel": DiffletParallelConfig(tp_degree=1, sp_enabled=True)}, "not supported"),
+        ({"parallel": DiffletParallelConfig(tp_degree=2)}, "--tp-degree > 1"),
+        ({"parallel": DiffletParallelConfig(tp_degree=1, sp_enabled=True)}, "--sp (sequence"),
         ({"parallel": DiffletParallelConfig(tp_degree=1, cp_degree=2)}, "not supported"),
         # FLUX.1-dev is guidance-distilled: one pass per step, no second branch to place.
         (
