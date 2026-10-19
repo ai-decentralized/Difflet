@@ -16,6 +16,8 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 
+import os
+
 import torch
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 
@@ -86,9 +88,11 @@ class CudaFluxTransformerApplication(CudaApplicationBase):
             module.eval()
             self._assert_on_device(module)
             # F4f: one gemm per single block for proj_out at tp=1 (diffusers' layout), before
-            # any compile so the graph sees the fused layer.
-            for block in module.single_transformer_blocks:
-                block.fuse_proj_out()
+            # any compile so the graph sees the fused layer. DIFFLET_CUDA_FLUX_FUSE_PROJ_OUT=0
+            # keeps the split (the A/B switch for the gates).
+            if os.environ.get("DIFFLET_CUDA_FLUX_FUSE_PROJ_OUT", "1") != "0":
+                for block in module.single_transformer_blocks:
+                    block.fuse_proj_out()
             if self.torch_compile:
                 # D4: eager is the premise; ``torch.compile`` is the measured, opt-in option
                 # (F4 for Qwen, F4f here). Per block, one static shape per process, so
