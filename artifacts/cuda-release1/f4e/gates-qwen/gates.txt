@@ -1,0 +1,13 @@
+== qwen gates 2026-10-19T11:59:01Z ==
+snapshot: /home/user/hf/hub/models--Qwen--Qwen-Image/snapshots/75e0b4be04f60ec59a75f475837eced720f823b6/
+248f550 docs: F4e status — the fused CUDA RMSNorm for Flux's q/k norms, GPU run pending
+0, NVIDIA RTX PRO 6000 Blackwell Server Edition, 580.178.04, 0 MiB
+overlay         484G  184G  250G  43% /
+overlay         484G  184G  250G  43% /
+smoke exit: 0 in 133s
+parity exit: 0 in 86s
+parity-gate exit: 0 in 0s
+e2e exit: 0 in 75s
+e2e-gate exit: 0 in 0s
+0 MiB
+GATES DONE qwen overall_rc=0

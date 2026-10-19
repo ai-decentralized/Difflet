@@ -239,6 +239,7 @@ does not remove it; more seeds narrow it.
 | Qwen-Image, `--torch-compile` | 50 / 1024² | 40.21 dB | 0.99963 | 0.0039 / 0.266 | 35 / 0.998 | — | f3c (Server) | `f4/e2e_compiled.json` | 10-17 F4 |
 | FLUX.1-dev (guidance 3.5), Server Edition, timings recorded | 28 / 1024² | 40.35 dB | 0.99980 | 0.0034 / 0.625 | 35 / 0.998 | 9.4 s / 8.3 s (loads 8.3 / 3.0 s; peak 36.33 / 36.32 GB) | flux (Server) | `flux/f5c/cuda_e2e_flux.json`, `flux/f5c/flux_e2e_{difflet,diffusers}.png` | 10-18 F5c |
 | FLUX.1-dev, `run_gates.sh flux` on the F4d code | 28 / 1024² | 40.35 dB | 0.99980 | — | 35 / 0.998 | 9.1 s / 8.3 s | f4d (Server) | `f4d/gates-flux/cuda_e2e_flux.json` | 10-19 F4c/F4d |
+| FLUX.1-dev, `run_gates.sh flux` after the fused q/k norm (F4e) | 28 / 1024² | **41.58 dB** | 0.99985 | — | 35 / 0.998 | **8.8 s** / 8.3 s | f4e (Server) | `f4e/gates-flux/cuda_e2e_flux.json` | 10-19 F4e |
 | Qwen-Image, `run_gates.sh qwen` on the F4d code | 50 / 1024² | 41.20 dB | 0.99971 | — | 35 / 0.998 | 16.9 s / 15.2 s | f4d (Server) | `f4d/gates-qwen/cuda_e2e_qwen_image.json` | 10-19 F4c/F4d |
 | Wan 2.2, `run_gates.sh wan` on the F4d code: `float32` / `model` | 40 / 480×832 × 9 | 27.91 / 27.51 dB | 0.99730 / 0.99702 | — | 25 / 0.99 | 48.9 (the FLUX.1-dev download ran on the host meanwhile — contended) / 44.6 s / 43.1 s | f4d (Server) | `f4d/gates-wan/cuda_e2e_wan.json` | 10-19 F4c/F4d |
 | FLUX.1-dev (guidance 3.5) | 28 / 1024² | 40.35 dB | 0.99980 | 0.0034 / 0.625 | 35 / 0.998 | 23.6 s / 21.8 s (status-log only) | f5b (Workstation) | `flux/cuda_e2e_flux.json`, `flux/e2e_{difflet,diffusers}_flux_28steps.png` | 10-18 F5 |
@@ -539,6 +540,7 @@ warm-ups, one profiled forward.
 | Case | Difflet ms | diffusers ms | ratio | gemm / attention / elementwise / copy / norm (Difflet vs diffusers) | Artifact |
 |---|---|---|---|---|---|
 | FLUX.1-dev DiT forward | **311.9** | 290.5 | 1.073× | 183.0 vs 173.1 / 47.1 vs 47.2 / **53.7 vs 42.7** / **21.6 vs 14.1** / **1.5 vs 10.0** | `f4d/bench/bench_flux_dit.json` |
+| FLUX.1-dev DiT forward, after the fused q/k norm (F4e, pod f4e) | **303.0** | 292.0 | **1.038×** | 184.2 vs 174.4 / 47.0 vs 47.3 / 39.3 vs 42.8 / 20.5 vs 14.1 / 8.3 vs 10.0 | `f4e/bench/bench_flux_dit_f4e.json` |
 
 Attention is identical (the same flash kernel). The 21 ms gap has two parts, both read from
 the kernel buckets: (1) **unfused norms** — diffusers spends 10.0 ms in
@@ -553,6 +555,17 @@ Per 28-step run the forward gap is 0.6 s of the measured 0.8–1.1 s. Neither pa
 look at the projection layout. The Flux gates on this pod pass (parity `sdpa` rel_l1 0.987×
 the control, same-dtype 0.398×, cosine 0.99993; e2e 40.35 dB / 0.99980, generate 9.1 s vs
 diffusers 8.3 s; `f4d/gates-flux/`).
+
+**F4e, measured (pod f4e, 28 min):** the CUDA backend's `RMSNorm` as one fused `F.rms_norm`
+(commit `5a92098`, Flux's q/k norms) takes the forward from 311.9 to **303.0 ms** against
+292.0: the norm bucket is fused (1.5 → 8.3 ms), the elementwise excess is gone (53.7 → 39.3,
+now under diffusers' 42.8), casts 21.6 → 20.5. What remains (+11 ms) is the gemm half (184.2
+vs 174.4) and +6 ms of casts. Pipeline level: generate **8.8 s vs 8.3 s** (from 9.4 / 9.1), and
+the Flux e2e match improved to **41.58 dB / 0.99985** (from 40.35, the fused norm being
+diffusers' own numerics); parity `sdpa` 0.990× the control (0.987×), same-dtype 0.396×. The
+Qwen and Wan gates on the same build are unchanged (Qwen 41.20 dB, parity 0.997× / 0.992×;
+Wan 27.91 dB, 1.051× / 1.043×) — Qwen's q/k norm is diffusers' own class and Wan's was fused
+in F4b (`f4e/gates-{qwen,wan,flux}/`).
 
 **F4d, measured: no effect.** The `attention_heads` op (the models' `(B, H, S, D)` views
 straight to SDPA, no fold copies) changed nothing: Qwen `difflet_masked` 322.7 ms (322.7
@@ -757,6 +770,10 @@ above. Spurious infrastructure events are kept and labelled.
     Wan 535.1 ms, copy buckets unchanged); the F4b estimate of 8 ms for the fold copies was an
     arithmetic error (tens of µs). Reverted on the branch; the three models' gates on the
     F4d code are kept as evidence *[10-19 F4c/F4d]*.
+37. `5a92098` — F4e: the CUDA backend's `RMSNorm` / `CustomRMSNorm` is one fused `F.rms_norm`
+    (Flux's q/k norms; found with a CPU aten op-count diff): Flux DiT 311.9 → 303.0 ms vs
+    diffusers 292.0, generate 8.8 vs 8.3 s, e2e 40.35 → 41.58 dB; Qwen and Wan unchanged; all
+    three models' gates pass on pod f4e *[10-19 F4e]*.
 
 ## Support matrix
 
@@ -868,8 +885,9 @@ Also unmeasured, and recorded where they arose: Workstation vs Server characteri
 Workstation card was not on the pod); Wan's Difflet vs diffusers generate gap — **measured and
 closed** in F4b (50.9 vs 42.9 s Server → 44.5 vs 42.8 s after the fused q/k norm; the
 Performance section); why two Wan replicas generating at once take 51.2 s each against 44.5 s
-alone (F2b); Flux's generate gap vs diffusers — **located** by the F4c bench (unfused norms
-and gemm kernel shapes, Performance section), the fix pending (F4e); F2 `--dp 1` requests 1 and 2 against their
+alone (F2b); Flux's generate gap vs diffusers — located by the F4c bench and halved by F4e
+(8.8 vs 8.3 s; what remains is the single block's projection gemm layout, Performance
+section); F2 `--dp 1` requests 1 and 2 against their
 references; the origin of GPU 0's extra ~555 MiB under `--cfg-parallel`; the Trainium
 byte-identity of the Flux split (D13, needs a trn2); the split of the Wan noise floor into the
 timestep effect and run-to-run GPU nondeterminism (F9). F9's recommended follow-up — state the
@@ -895,6 +913,7 @@ from recorded times and prices.
 | `difflet-cuda-flux` (1 GPU, eu-3) | 23:03 → 23:25 UTC (~22 min) | 2.65 | ~$1.00 (computed) | terminated, gone |
 | `difflet-cuda-f5b` resume attempt | 23:59 UTC 2026-10-18 → still INITIALIZING at 10:24 UTC 2026-10-19; `pause` refused (12005) | 0.45 if it ever runs | unknown | INITIALIZING (watched) |
 | `difflet-cuda-f4d` (1 GPU, eu-3) | 09:46 → 10:24 UTC 2026-10-19 (~38 min) | 2.65 | ~$1.70 (computed) | terminated, gone |
+| `difflet-cuda-f4e` (1 GPU, eu-2) | 11:52 → 12:20 UTC 2026-10-19 (~28 min) | 2.65 | ~$1.25 (computed) | terminated, gone |
 | `difflet-cache` volume | ongoing | $0.0698/GB/month × 200 GB | ~$13.96/month | attached to f5b |
 
 A paused pod releases its card and stops GPU billing; the container disk is lost, while the volume

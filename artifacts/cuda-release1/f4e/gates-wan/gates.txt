@@ -1,0 +1,13 @@
+== wan gates 2026-10-19T12:03:55Z ==
+snapshot: /home/user/hf/hub/models--Wan-AI--Wan2.2-T2V-A14B-Diffusers/snapshots/5be7df9619b54f4e2667b2755bc6a756675b5cd7/
+248f550 docs: F4e status — the fused CUDA RMSNorm for Flux's q/k norms, GPU run pending
+0, NVIDIA RTX PRO 6000 Blackwell Server Edition, 580.178.04, 0 MiB
+overlay         484G  274G  160G  64% /
+overlay         484G  274G  160G  64% /
+smoke exit: 0 in 159s
+parity exit: 0 in 216s
+parity-gate exit: 0 in 1s
+e2e exit: 0 in 395s
+e2e-gate exit: 0 in 1s
+0 MiB
+GATES DONE wan overall_rc=0

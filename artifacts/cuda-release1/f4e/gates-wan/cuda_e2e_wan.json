@@ -1,0 +1,167 @@
+{
+  "model": "wan",
+  "model_id": "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+  "model_path": "/home/user/hf/hub/models--Wan-AI--Wan2.2-T2V-A14B-Diffusers/snapshots/5be7df9619b54f4e2667b2755bc6a756675b5cd7/",
+  "prompt": "a photorealistic cat walking through a sunlit garden",
+  "steps": 40,
+  "guidance_scale": 4.0,
+  "guidance_scale_2": 3.0,
+  "seed": 0,
+  "seeds": [
+    0
+  ],
+  "shape": [
+    480,
+    832,
+    9
+  ],
+  "latent_shape": [
+    1,
+    16,
+    3,
+    60,
+    104
+  ],
+  "video_shape": [
+    9,
+    480,
+    832,
+    3
+  ],
+  "device": "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+  "torch": "2.11.0+cu128",
+  "timestep_dtypes": [
+    "float32",
+    "model"
+  ],
+  "metrics": {
+    "psnr_db": 27.909470124450092,
+    "cosine": 0.9973017748458071,
+    "mean_abs": 0.022823666921991004,
+    "max_abs": 1.0
+  },
+  "timings": {
+    "difflet": {
+      "load_s": 94.6,
+      "generate_s": 45.1,
+      "peak_alloc_gb": 68.44
+    },
+    "diffusers": {
+      "load_s": 69.6,
+      "generate_s": 43.4,
+      "peak_alloc_gb": 68.56
+    }
+  },
+  "images": {
+    "difflet": "/home/user/logs/f4e/gates-wan/wan_e2e_difflet_float32_frame0.png",
+    "diffusers": "/home/user/logs/f4e/gates-wan/wan_e2e_diffusers_frame0.png"
+  },
+  "variants": {
+    "float32": {
+      "metrics": {
+        "psnr_db": 27.909470124450092,
+        "cosine": 0.9973017748458071,
+        "mean_abs": 0.022823666921991004,
+        "max_abs": 1.0
+      },
+      "timings": {
+        "load_s": 94.6,
+        "generate_s": 45.1,
+        "peak_alloc_gb": 68.44
+      },
+      "image": "/home/user/logs/f4e/gates-wan/wan_e2e_difflet_float32_frame0.png"
+    },
+    "model": {
+      "metrics": {
+        "psnr_db": 27.5108519384623,
+        "cosine": 0.9970229043988285,
+        "mean_abs": 0.02345433332669882,
+        "max_abs": 0.98046875
+      },
+      "timings": {
+        "load_s": 91.5,
+        "generate_s": 44.8,
+        "peak_alloc_gb": 68.44
+      },
+      "image": "/home/user/logs/f4e/gates-wan/wan_e2e_difflet_model_frame0.png"
+    }
+  },
+  "noise_floor": null,
+  "per_seed": {
+    "0": {
+      "variants": {
+        "float32": {
+          "metrics": {
+            "psnr_db": 27.909470124450092,
+            "cosine": 0.9973017748458071,
+            "mean_abs": 0.022823666921991004,
+            "max_abs": 1.0
+          },
+          "timings": {
+            "load_s": 94.6,
+            "generate_s": 45.1,
+            "peak_alloc_gb": 68.44
+          }
+        },
+        "model": {
+          "metrics": {
+            "psnr_db": 27.5108519384623,
+            "cosine": 0.9970229043988285,
+            "mean_abs": 0.02345433332669882,
+            "max_abs": 0.98046875
+          },
+          "timings": {
+            "load_s": 91.5,
+            "generate_s": 44.8,
+            "peak_alloc_gb": 68.44
+          }
+        }
+      },
+      "noise_floor": null,
+      "diffusers": {
+        "timings": {
+          "load_s": 69.6,
+          "generate_s": 43.4,
+          "peak_alloc_gb": 68.56
+        }
+      },
+      "images": {
+        "difflet": {
+          "float32": "/home/user/logs/f4e/gates-wan/wan_e2e_difflet_float32_seed0_frame0.png",
+          "model": "/home/user/logs/f4e/gates-wan/wan_e2e_difflet_model_seed0_frame0.png"
+        },
+        "diffusers": "/home/user/logs/f4e/gates-wan/wan_e2e_diffusers_seed0_frame0.png",
+        "diffusers_bf16ts": null
+      }
+    }
+  },
+  "aggregate": {
+    "variants": {
+      "float32": {
+        "psnr_db": {
+          "min": 27.909470124450092,
+          "mean": 27.909470124450092,
+          "max": 27.909470124450092
+        },
+        "cosine": {
+          "min": 0.9973017748458071,
+          "mean": 0.9973017748458071,
+          "max": 0.9973017748458071
+        }
+      },
+      "model": {
+        "psnr_db": {
+          "min": 27.5108519384623,
+          "mean": 27.5108519384623,
+          "max": 27.5108519384623
+        },
+        "cosine": {
+          "min": 0.9970229043988285,
+          "mean": 0.9970229043988285,
+          "max": 0.9970229043988285
+        }
+      }
+    },
+    "noise_floor": null
+  }
+}
