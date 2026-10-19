@@ -74,6 +74,7 @@ def load_sharded_checkpoint(
     rename: Callable[[str], str] | None = None,
     prefix: str = "",
     strict: bool = True,
+    on_tensor: Callable[[str, torch.Tensor], None] | None = None,
 ) -> dict[str, list[str]]:
     """Load this rank's shards of the safetensors checkpoint in ``model_dir`` onto ``device``.
 
@@ -87,6 +88,8 @@ def load_sharded_checkpoint(
     module name (after stripping ``prefix``) to its checkpoint key. Returns
     ``{"missing": [...], "unexpected": [...]}``; with ``strict`` a parameter or
     persistent buffer missing from the checkpoint raises ``ValueError``.
+    ``on_tensor(name, host_tensor)`` sees every tensor after its copy (the weight store,
+    ``core/weight_store.py``, writes them).
     """
     tp_size = get_tp_size() if tp_size is None else int(tp_size)
     if tp_rank is None:
@@ -113,6 +116,7 @@ def load_sharded_checkpoint(
         dtype=None,
         strict=strict,
         rename=rename,
+        on_tensor=on_tensor,
     )
     module.to(target)
     return report

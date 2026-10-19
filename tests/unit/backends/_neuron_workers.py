@@ -1329,3 +1329,71 @@ def joint_cp_worker(rank: int, world_size: int, tp: int, mode: str) -> dict:
         "masked_txt_err": err(txt_masked, masked[:, :, JOINT_S_IMG:]),
         "head_error": head_error,
     }
+
+
+# --------------------------------------------------------------------------
+# Weight store (core/weight_store.py)
+# --------------------------------------------------------------------------
+
+
+def ws_toy_worker(rank: int, world_size: int, model_dir: str, dtype_name: str,
+                  tp_degree: int) -> dict:
+    """ToyApplication at tp=``tp_degree`` (with CFG parallelism when the world is twice that,
+    so two processes load each TP rank) and the store DIFFLET_NEURON_WEIGHT_STORE names: what
+    the store did, the sha256 of every loaded tensor, and the output on rank 0's input."""
+    import hashlib
+
+    from difflet.backends.neuron.core.distributed import broadcast_tensor
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_toy import ToyApplication, toy_blocks_input
+
+    dtype = getattr(torch, dtype_name)
+    parallel = DiffletParallelConfig(tp_degree=tp_degree,
+                                     cfg_parallel_enabled=world_size > tp_degree)
+    app = ToyApplication(model_path=model_dir, parallel=parallel, dtype=dtype,
+                         exec_mode="eager", device="cpu")
+    app.load()
+    x = toy_blocks_input(app.batch, app.seq, app.dim, dtype=dtype) if rank == 0 else None
+    x = broadcast_tensor(x, device=app.device)
+    with torch.no_grad():
+        out = app(x)
+
+    def sha(t):
+        t = t.detach().contiguous().reshape(-1)
+        return hashlib.sha256(t.view(torch.uint8).numpy().tobytes()).hexdigest()
+
+    return {
+        "status": app.weight_store.status,
+        "detail": app.weight_store.detail,
+        "directory": app.weight_store.directory,
+        "tensors": {name: [sha(t), str(t.dtype)] for name, t in app.module.state_dict().items()},
+        "out": sha(out.float()),
+        "report": app.load_report,
+    }
+
+
+def ws_concurrent_launch(model_dir, root, barrier, results):
+    """One single-rank launch of ToyApplication (bf16) racing others to write the same store
+    entry (a multiprocessing target, not a gloo worker): puts (store status, sha256 of the
+    loaded tensors) on ``results``."""
+    import os
+
+    os.environ["DIFFLET_NEURON_WEIGHT_STORE"] = root
+    os.environ["DIFFLET_BACKEND"] = "neuron"
+    for name in ("RANK", "WORLD_SIZE", "LOCAL_RANK"):
+        os.environ.pop(name, None)
+    import hashlib
+
+    from difflet.backends.neuron.ops_impl import parallel_mesh as mesh
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_toy import ToyApplication
+
+    mesh.destroy_parallel_mesh()
+    app = ToyApplication(model_path=model_dir, parallel=DiffletParallelConfig(),
+                         dtype=torch.bfloat16, exec_mode="eager", device="cpu")
+    barrier.wait()
+    app.load(skip_warmup=True)
+    digest = hashlib.sha256()
+    for t in app.module.state_dict().values():
+        digest.update(t.contiguous().reshape(-1).view(torch.uint8).numpy().tobytes())
+    results.put((app.weight_store.status, digest.hexdigest()))

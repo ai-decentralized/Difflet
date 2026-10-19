@@ -12,7 +12,10 @@ NEFF cache, ``difflet/backends/neuron/compile.py``), so ``compile()`` is a no-op
 2. build on meta (``build_on_meta``): nothing allocated, computed buffers stay real;
 3. check that this rank's weights fit one core's HBM (``rank_weight_bytes`` of the meta module
    against ``difflet/backends/neuron/hbm.py``'s budget, before anything is materialised), then
-   load this rank's shards straight onto the device (``load_sharded_checkpoint``);
+   load this rank's shards straight onto the device: from the pre-sharded weight store when it
+   holds them, else from the checkpoint (``load_sharded_checkpoint``) while writing the store
+   (``core/weight_store.py``; ``weight_store`` records which, one ``[weight store]`` line per
+   rank says so on stderr);
 4. ``eval()`` and ``requires_grad_(False)``;
 5. in compile mode, per-block ``torch.compile`` (``compile_blocks``; on the neuron device the
    ``"neuron"`` backend with ``NEURON_COMPILE_OPTIONS``, so a block that fails to lower raises
@@ -59,6 +62,11 @@ from difflet.backends.neuron.core.distributed import (
     collective_phase,
     rank0_call,
     world_info,
+)
+from difflet.backends.neuron.core.weight_store import (
+    StoreResult,
+    load_with_store,
+    print_result,
 )
 from difflet.backends.neuron.hbm import budget_enforced, check_fits
 from difflet.backends.neuron.ops_impl import parallel_mesh
@@ -151,6 +159,8 @@ class TorchNeuronApplicationBase(torch.nn.Module):
         #: This rank's weight bytes on the device, estimated from the meta module by ``load``.
         self.weight_bytes: int | None = None
         self.phase_seconds: dict[str, float] = {}
+        #: What the pre-sharded weight store did in ``load`` (``core/weight_store.py``).
+        self.weight_store: StoreResult | None = None
         self._compiled_shapes: set[_ShapeKey] = set()
 
     @property
@@ -215,9 +225,12 @@ class TorchNeuronApplicationBase(torch.nn.Module):
                     "(phase 1 loads weights from safetensors only)"
                 )
             self._check_hbm_budget(module)
-            self.load_report = load_sharded_checkpoint(
-                module, model_dir, device=self.device, dtype=self.dtype, rename=self.checkpoint_key
+            self.load_report, self.weight_store = load_with_store(
+                module, model_dir, device=self.device, dtype=self.dtype,
+                rename=self.checkpoint_key, load_checkpoint=load_sharded_checkpoint,
             )
+            if self.weight_store.status != "off":
+                print_result(self.weight_store, type(self).__name__, self.rank, self.world_size)
             if self.skipped_checkpoint_prefixes:
                 # Tensors the subclass skips on purpose (e.g. a VAE checkpoint's encoder half).
                 unexpected = self.load_report["unexpected"]
