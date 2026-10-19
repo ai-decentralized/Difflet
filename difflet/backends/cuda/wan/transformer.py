@@ -51,13 +51,16 @@ class CudaWanTransformerApplication(CudaApplicationBase):
     which the warm-up's example inputs follow.
     """
 
-    def __init__(self, *, model_path: str, config: WanDiTConfig, device=None):
+    def __init__(
+        self, *, model_path: str, config: WanDiTConfig, device=None, torch_compile: bool = False
+    ):
         _refuse_parallel_modes(config)
         mesh = MeshSpec(cfg=2 if config.cfg_parallel_enabled else 1, tp=1)
         super().__init__(config=mesh, device=device, dtype=config.torch_dtype)
         # This expert's diffusers directory (``transformer/`` or ``transformer_2/``).
         self.model_path = model_path
         self.dit_config = config
+        self.torch_compile = bool(torch_compile)
 
     def _init_runtime(self) -> None:
         parallel_mesh.init_parallel_mesh(self.config)
@@ -130,6 +133,14 @@ class CudaWanTransformerApplication(CudaApplicationBase):
             module.requires_grad_(False)
             module.eval()
             self._assert_on_device(module)
+            if self.torch_compile:
+                # Eager is the premise; ``torch.compile`` is the measured, opt-in option. Per block,
+                # one static shape per process, so
+                # dynamic=False; ``self.module`` stays the eager module around the blocks.
+                for i, block in enumerate(module.blocks):
+                    module.blocks[i] = torch.compile(
+                        block, mode="max-autotune-no-cudagraphs", dynamic=False, fullgraph=False
+                    )
             self.module = module
         return self.module
 

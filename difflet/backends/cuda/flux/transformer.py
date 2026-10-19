@@ -33,13 +33,16 @@ ROPE_THETA = 10000
 
 
 class CudaFluxTransformerApplication(CudaApplicationBase):
-    def __init__(self, *, model_path: str, config: FluxDiTConfig, device=None):
+    def __init__(
+        self, *, model_path: str, config: FluxDiTConfig, device=None, torch_compile: bool = False
+    ):
         super().__init__(
             config=MeshSpec(tp=int(config.tp_degree)), device=device, dtype=config.torch_dtype
         )
         # The diffusers ``transformer/`` directory (sharded index or a single shard).
         self.model_path = model_path
         self.dit_config = config
+        self.torch_compile = bool(torch_compile)
 
     def _init_runtime(self) -> None:
         parallel_mesh.init_parallel_mesh(self.config)
@@ -82,6 +85,15 @@ class CudaFluxTransformerApplication(CudaApplicationBase):
             module.requires_grad_(False)
             module.eval()
             self._assert_on_device(module)
+            if self.torch_compile:
+                # Eager is the premise; ``torch.compile`` is the measured, opt-in option. Per block,
+                # one static shape per process, so
+                # dynamic=False; ``self.module`` stays the eager module around the blocks.
+                for blocks in (module.transformer_blocks, module.single_transformer_blocks):
+                    for i, block in enumerate(blocks):
+                        blocks[i] = torch.compile(
+                            block, mode="max-autotune-no-cudagraphs", dynamic=False, fullgraph=False
+                        )
             self.module = module
         return self.module
 

@@ -285,3 +285,35 @@ def test_cfg_parallel_forward_matches_the_serial_batch(tmp_path, monkeypatch):
         assert result["block_batches"] == [1], result["block_batches"]
         assert result["out"].shape == (2, 4, 2, 2, 2)
         torch.testing.assert_close(result["out"], expected, rtol=1e-5, atol=1e-5)
+
+
+# --- F4f task 1: --torch-compile for the Wan experts -------------------------------------------
+
+
+def _loaded_expert(tmp_path, **kwargs) -> CudaWanTransformerApplication:
+    transformer = tmp_path / "transformer"
+    _reference(transformer)
+    app = CudaWanTransformerApplication(
+        model_path=str(transformer), config=_config(transformer), device="cpu", **kwargs
+    )
+    cache = tmp_path / "cache"
+    app.compile(str(cache))
+    app.load(str(cache), skip_warmup=True)
+    return app
+
+
+def test_torch_compile_is_off_by_default_for_the_wan_expert(tmp_path):
+    from torch._dynamo.eval_frame import OptimizedModule
+
+    app = _loaded_expert(tmp_path)
+    assert app.torch_compile is False
+    assert not any(isinstance(b, OptimizedModule) for b in app.module.blocks)
+
+
+def test_torch_compile_wraps_each_wan_block(tmp_path):
+    from torch._dynamo.eval_frame import OptimizedModule
+
+    app = _loaded_expert(tmp_path, torch_compile=True)
+    assert app.torch_compile is True
+    assert len(app.module.blocks) == TINY["num_layers"]
+    assert all(isinstance(b, OptimizedModule) for b in app.module.blocks)

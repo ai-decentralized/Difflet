@@ -43,7 +43,7 @@ DEFAULT_GUIDANCE_SCALE_2 = 3.0  # Wan 2.2 low-noise stage (below the boundary)
 # Application kwargs that request a feature outside Release 1. A key is
 # refused only when it carries a request (not None / False): the CLI and DiffletPipeline
 # pass several of them with their "off" value.
-_UNSUPPORTED_KWARGS = ("shapes", "torch_compile")
+_UNSUPPORTED_KWARGS = ("shapes",)
 
 
 def _refuse_unsupported_kwargs(kwargs: dict[str, Any]) -> None:
@@ -52,8 +52,8 @@ def _refuse_unsupported_kwargs(kwargs: dict[str, Any]) -> None:
             continue
         if key in _UNSUPPORTED_KWARGS or key.startswith("teacache_"):
             raise NotImplementedError(
-                f"{key} for Wan on the CUDA backend is not supported on the CUDA backend yet of the CUDA backend "
-                "plan; Release 1 runs one shape at tp=1 without TeaCache or torch.compile"
+                f"{key} is not supported for Wan on the CUDA backend yet "
+                "(one request shape at tp=1; no TeaCache)"
             )
 
 
@@ -194,6 +194,7 @@ class CudaWanApplication(torch.nn.Module):
         # See the module docstring: both experts fit a 96 GB card, so on CUDA (only) the
         # low-noise expert is resident by default.
         self.enable_transformer_2 = bool(kwargs.get("enable_transformer_2", True))
+        self.torch_compile = bool(kwargs.get("torch_compile", False))
         self.load_text_encoder = bool(kwargs.get("load_text_encoder", True))
         self.load_vae = bool(kwargs.get("load_vae", True))
 
@@ -210,7 +211,10 @@ class CudaWanApplication(torch.nn.Module):
 
         self.config = self._expert_config(self.transformer_path)
         self.transformer = CudaWanTransformerApplication(
-            model_path=self.transformer_path, config=self.config, device=self.device
+            model_path=self.transformer_path,
+            config=self.config,
+            device=self.device,
+            torch_compile=self.torch_compile,
         )
         if self.enable_transformer_2:
             if os.path.exists(os.path.join(self.transformer_2_path, "config.json")):
@@ -221,6 +225,7 @@ class CudaWanApplication(torch.nn.Module):
                     model_path=self.transformer_2_path,
                     config=self._expert_config(self.transformer_2_path),
                     device=self.device,
+                    torch_compile=self.torch_compile,
                 )
             elif _read_boundary_ratio(model_path) is not None:
                 # boundary_ratio marks a two-expert (Wan 2.2) snapshot; without transformer_2

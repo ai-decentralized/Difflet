@@ -30,7 +30,7 @@ MAX_SEQUENCE_LENGTH = 512  # T5 prompt length; also the DiT warm-up's text lengt
 # Application kwargs that request a feature outside Release 1. A key is
 # refused only when it carries a request (not None / False): the CLI and DiffletPipeline
 # pass several of them with their "off" value.
-_UNSUPPORTED_KWARGS = ("taef1", "taef1_path", "shapes", "sp_enabled", "torch_compile")
+_UNSUPPORTED_KWARGS = ("taef1", "taef1_path", "shapes", "sp_enabled")
 
 
 def _refuse_unsupported_kwargs(kwargs: dict[str, Any]) -> None:
@@ -39,9 +39,8 @@ def _refuse_unsupported_kwargs(kwargs: dict[str, Any]) -> None:
             continue
         if key in _UNSUPPORTED_KWARGS or key.startswith("teacache_"):
             raise NotImplementedError(
-                f"{key} for Flux on the CUDA backend is not supported on the CUDA backend yet of the CUDA backend "
-                "plan; Release 1 runs one shape at tp=1 without TeaCache, TAEF1, SP or "
-                "torch.compile"
+                f"{key} is not supported for Flux on the CUDA backend yet "
+                "(one request shape at tp=1; no TeaCache, TAEF1 or SP)"
             )
 
 
@@ -75,6 +74,7 @@ class CudaFluxApplication(torch.nn.Module):
         self.load_text_encoders = bool(kwargs.get("load_text_encoders", True))
         self.load_vae = bool(kwargs.get("load_vae", True))
         self.local_files_only = bool(kwargs.get("local_files_only", True))
+        self.torch_compile = bool(kwargs.get("torch_compile", False))
         self.transformer_path = os.path.join(model_path, "transformer")
         self.transformer = None
         self.adapter = None
@@ -91,7 +91,10 @@ class CudaFluxApplication(torch.nn.Module):
             torch_dtype=self.dtype,
         )
         self.transformer = CudaFluxTransformerApplication(
-            model_path=self.transformer_path, config=self.config, device=self.device
+            model_path=self.transformer_path,
+            config=self.config,
+            device=self.device,
+            torch_compile=self.torch_compile,
         )
         self.adapter = FluxDiTAdapter(self.transformer)
 

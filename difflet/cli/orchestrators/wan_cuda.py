@@ -63,8 +63,13 @@ class WanCudaOrchestrator(CudaOneProcessOrchestrator):
             self._refuse("--taef1 / --taef1-path (tiny VAE decoder)")
         if getattr(args, "host_vae", False):
             self._refuse("--host-vae (the VAE already runs in-process on the GPU)")
-        if getattr(args, "torch_compile", False):
-            self._refuse("--torch-compile (compiled Wan DiT blocks)")
+
+    def application_kwargs(self) -> dict:
+        application_kwargs: dict = {}
+        if getattr(self.args, "torch_compile", False):
+            # Measured option: compiled DiT blocks on both experts.
+            application_kwargs["torch_compile"] = True
+        return application_kwargs
 
     def _num_frames(self) -> int:
         return getattr(self.args, "num_frames", None) or DEFAULT_NUM_FRAMES
