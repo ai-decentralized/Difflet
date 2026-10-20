@@ -133,6 +133,23 @@ def test_a_checkpoint_already_in_the_load_dtype_is_not_written(toy, store, monke
     assert _load(toy, torch.float32).weight_store.status == "hit"  # an entry is always read
 
 
+def test_a_parameter_sliced_from_a_fused_tensor_counts_as_its_stored_bytes(tmp_path):
+    # Flux's proj_out_attn is a range of the fused proj_out (CheckpointSlice): its renamed key is
+    # in no checkpoint header. It must not turn the comparison off (None used to mean "write"),
+    # which wrote a bf16 checkpoint's whole store for no gain.
+    from safetensors.torch import save_file
+
+    save_file({"a": torch.zeros(4, 8, dtype=torch.float32),
+               "b": torch.zeros(8, dtype=torch.bfloat16)}, str(tmp_path / "m.safetensors"))
+    spec = weight_store._Spec
+    fp32_in_ckpt = spec("a", "a", (4, 8), torch.bfloat16, None)       # fp32 on disk: 128 bytes
+    bf16_in_ckpt = spec("b", "b", (8,), torch.bfloat16, None)          # 16 bytes either way
+    sliced = spec("s", "s_not_in_ckpt", (2, 8), torch.bfloat16, None)  # 32 bytes, stored size
+    read = weight_store._checkpoint_bytes(tmp_path, [fp32_in_ckpt, bf16_in_ckpt, sliced])
+    assert read == 4 * 8 * 4 + 8 * 2 + 2 * 8 * 2
+    assert weight_store._checkpoint_bytes(tmp_path, [bf16_in_ckpt, sliced]) == 16 + 32
+
+
 def test_the_store_file_is_plain_safetensors_in_the_load_dtype(toy, store):
     from safetensors.torch import load_file
 
