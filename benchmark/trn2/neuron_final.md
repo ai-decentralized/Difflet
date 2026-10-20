@@ -222,29 +222,32 @@ The same 9-to-21 s bimodality appears in the pre-refactor runs: in `dp2tp2-postf
 
 ### Final: native vs AoT
 
-AoT numbers are reused. They were not re-measured on this commit: Wan and LTX-2 from the same-host campaigns, Qwen-Image from the A/B at `03f3a84`. Native is the default placement with the weight store. "Compile" is the cold compile with the checkpoint in the page cache.
+Updated 2026-10-20. The AoT column is now AoT with `NEURON_RT_VIRTUAL_CORE_SIZE=2` traced in: profiling found that Wan2.1's and LTX-2's AoT CLIs traced `attention_cte` on one of the two physical cores (`difflet/backends/trainium/ops_impl/attention.py` picks the two-core kernel only with that variable set); Qwen-Image's AoT CLI already set it. The fix (commits `5f62732` Wan, `62e3475` LTX-2) lives on the AoT experiment branch `feat/aot-bf16-allreduce`, not in this PR. Its outputs are **bit-identical** to stock AoT (Wan mp4 `d2ecce24…`, latents `f3dd7d2e…`; LTX-2 latents `e597cc5d…`, mp4 `396b8947…`). LTX-2 now runs **50 steps** (the CLI default is 40; the earlier 20 steps copied the AoT benchmark), native included.
 
-| model | metric | native now | AoT (reused) | native vs AoT | native before this work (reused) |
+Measured 2026-10-20 on this host with the same probe and method: AoT Wan two-core and both LTX-2 AoT cells at commits `62e3475` (two-core) and `026376a` (stock), native LTX-2 at `026376a`. Compile times for the two-core cells are from fresh roots on 2026-10-19 (same code); native compile and the native Wan and Qwen-Image rows are this report's runs; Qwen-Image AoT is reused from the A/B at `03f3a84`. Native is the default placement with the weight store. "Compile" is the cold compile with the checkpoint in the page cache.
+
+| model | metric | native | AoT, two-core attention | native vs AoT | AoT stock |
 |---|---|---:|---:|---:|---:|
-| Wan2.1 14B, tp4 | DiT step | 1063.1 ms | 1151.5 ms | −7.7% | 1061.7 ms |
-| | compile cold | 518.9 s | 482.0 s | +7.7% | 314.2 s |
-| | e2e warm | 125.5 s | 134.5 s | −6.7% | 125.8 s |
-| | e2e cold | 520.2 s | 461.8 s | +12.6% | 746.2 s |
-| Qwen-Image, tp4 | DiT step | 352.6 ms (329.9 with `--sp`) | 418.4 ms | −15.7% (−21.1%) | 351.4 ms (328.9) |
-| | compile cold | 161.7 s | 1480 s | −89% | 155.2 s |
-| | e2e warm | 79.6 s | 76.9 s | +3.5% | 79.4 s |
-| | e2e cold | 496.1 s | 505.9 s | −1.9% | 492.0 s |
-| LTX-2, tp4 | DiT step | 349.7 ms | 459.7 ms | −23.9% | 350.1 ms (349.3 host Gemma-3) |
-| | compile cold | 306.6 s | 1838.9 s (939.1 s pre-refactor run) | −83% (−67%) | 119.3 s |
-| | e2e warm | 80.8 s | 56.6 s | +43% | 78.1 s |
-| | e2e cold | 576.9 s | 768.6 s | −24.9% | 758.0 s |
+| Wan2.1 14B, tp4, 480x832x9, 50 steps | DiT step | 1063.1 ms | 957.1 ms | +11.1% | 1151.5 ms |
+| | compile cold | 518.9 s | 303.2 s | +71% | 482.0 s |
+| | e2e warm | 125.5 s | 123.1 s | +2.0% | 134.5 s |
+| | e2e cold | 520.2 s | 450.0 s | +15.6% | 461.8 s |
+| Qwen-Image, tp4, 1024x1024, 50 steps | DiT step | 352.6 ms (329.9 with `--sp`) | 418.4 ms (reused; already two-core) | −15.7% (−21.1%) | same |
+| | compile cold | 161.7 s | 1480 s | −89% | same |
+| | e2e warm | 79.6 s | 76.9 s | +3.5% | same |
+| | e2e cold | 496.1 s | 505.9 s | −1.9% | same |
+| LTX-2, tp4, 480x704x49, 50 steps, g=1 | DiT step | 350.7 ms | 419.2 ms | −16.3% | 461.4 ms |
+| | compile cold | 306.6 s | 576.9 s | −47% | 1838.9 s (939.1 s in another run) |
+| | e2e warm | 90.8 s | 68.0 s | +33.5% | 71.8 s |
+| | e2e cold | 588.3 s | 781.3 s | −24.7% | 785.5 s |
 
 What the table says:
 
-- **The native DiT stays 8–24% faster than AoT.** The refactor did not move it.
-- **The weight store fixed Wan's cold start** (746 → 520 s) and cut LTX-2's (758 → 577 s). Native Wan is still 12.6% behind AoT cold. Of the remaining cold load, 172.5 s is the fp32 umT5 off disk, which the store does not cover because an fp32 store entry saves no bytes.
-- **The store's one-time write moved compile.** Wan's native compile is now 7.7% slower than AoT's instead of 35% faster (open issue 1). Qwen-Image is unaffected (nothing written).
-- **Warm e2e is unchanged by both changes.** Qwen-Image and LTX-2 still trail AoT on warm e2e, for the host-side and launch reasons the earlier reports attributed.
+- **Two-core attention takes 16.9% off AoT Wan's step (1151.5 → 957.1 ms) and 9.1% off LTX-2's (461.4 → 419.2 ms), bit for bit.** AoT Wan is now 11.1% faster than native per step; native stays 16% faster for LTX-2 and Qwen-Image. Profiling attributes the remaining LTX-2 / Qwen-Image gap to AoT's older compiler (2.26), its fp32 all-reduce and per-block work not yet explained (`ltx_2_neuron.md`, the Qwen-Image profile); Wan's AoT modeling already all-reduces in bf16.
+- **The weight store fixed Wan's cold start** (746 → 520 s) and cut LTX-2's (758 → 588 s at 50 steps). Native Wan is still 15.6% behind two-core AoT cold; 172.5 s of its cold load is the fp32 umT5 off disk, which the store does not cover because an fp32 store entry saves no bytes.
+- **The store's one-time write moved compile.** Wan's native compile is now slower than AoT's (open issue 1). Qwen-Image is unaffected (nothing written).
+- **Warm e2e:** native trails AoT on LTX-2 (+22.8 s at 50 steps) and Qwen-Image (+2.7 s) for the host-side and launch reasons the earlier reports attributed, and is within 2% on Wan.
+- **LTX-2 image quality at guidance 1 is weak on both backends** (no CFG; the setting copies the AoT benchmark). Guidance 3–4 is the practical setting; per-step time doubles with CFG on both.
 
 ## Bugs fixed
 
