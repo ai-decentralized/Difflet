@@ -174,8 +174,11 @@ def _module_specs(module: nn.Module, *, dtype: torch.dtype, tp_size: int, prefix
 
 def _checkpoint_bytes(model_dir: Path, specs: list[_Spec]) -> int | None:
     """The bytes the checkpoint load reads for ``specs`` (this rank's slices, in the
-    checkpoint's own dtypes), from the safetensors headers; None when a key or dtype is not
-    found there."""
+    checkpoint's own dtypes), from the safetensors headers; None when a dtype is not found
+    there. A spec whose key is not in the checkpoint is a parameter sliced from a fused tensor
+    (``CheckpointSlice``, e.g. Flux's ``proj_out_attn``): it counts as its stored bytes, so it
+    neither argues for nor against a write, and a same-dtype checkpoint with sliced parameters
+    is still "no gain"."""
     from difflet.backends.tpu.core.checkpoint import build_weight_map
 
     weight_map = build_weight_map(model_dir)
@@ -184,7 +187,8 @@ def _checkpoint_bytes(model_dir: Path, specs: list[_Spec]) -> int | None:
     for spec in specs:
         path = weight_map.get(spec.key)
         if path is None:
-            return None
+            total += spec.nbytes
+            continue
         if path not in headers:
             with open(path, "rb") as f:
                 (length,) = struct.unpack("<Q", f.read(8))
