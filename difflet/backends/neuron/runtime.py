@@ -68,6 +68,9 @@ class NeuronBackend(BackendRuntime):
                 "get_backend('neuron').prepare_runtime(...) before anything touches the neuron "
                 "device (a tensor .to('neuron'), a torch.neuron call, a prewarm)"
             )
+        from difflet.backends.neuron.core.workarounds import install_bool_bitwise_guard
+
+        install_bool_bitwise_guard()  # torch-neuronx bool bitwise ops on strided operands
         configure_compile_cache()
         bind_core()
         init_process_group()
