@@ -32,7 +32,9 @@ refused, not run).
 - **Performance**: the Qwen DiT forward went from 515.7 ms to 323.5 ms (trim) and to 242.8 ms
   (`--torch-compile`); diffusers takes 299.6 ms. Gates still pass with both.
 - **Two GPUs**: PASS. Wan `--cfg-parallel` ran 1.95× faster and bit-identical. Qwen
-  `--dp 2 --requests` took 58 s wall against 190 s serial, byte-identical.
+  `--dp 2 --requests` took 58 s wall against 190 s serial, byte-identical. Flux `--dp 2` and
+  `serve --dp-degree 2`: PASS, byte-identical, on 2 × A100 80 GB (fluxa100, 10-20) — no two
+  PRO 6000 cards were free.
 - **F1b A/B**: the fp32 timestep improves DiT parity at the rounding steps. The e2e PSNR moves
   −1.2 dB, which a single-seed A/B does not support either way.
 - **Ledger**: 27 lines below. **Gaps**: 4 NOT MEASURED items.
@@ -51,10 +53,10 @@ to the CUDA path but never ran: it is NOT MEASURED in every row and has no colum
 | `difflet serve` | PASS; LIMIT on concurrency (429 after 30 s) | PASS · byte-identical to `difflet run` | PASS · the adapter's tensor (in-process) bit-identical to `difflet run`, MP4 within codec noise (the writer is not byte-deterministic) |
 | `--torch-compile` | PASS, opt-in | PASS, 0.83× diffusers per forward | PASS, 0.76× diffusers per run |
 | `--teacache-cadence N` | PASS, fixed cadence only | N/A · refused, F5b | N/A · refused, F1b |
-| `--dp 2 --requests` | PASS, byte-identical | `--dp 1` batch PASS, byte-identical; `--dp 2` NOT MEASURED (needs 2 GPUs) | PASS, bit-identical |
+| `--dp 2 --requests` | PASS, byte-identical | `--dp 1` batch PASS, byte-identical; `--dp 2` PASS, byte-identical, on 2 × A100 [fluxa100] — on PRO 6000 NOT MEASURED | PASS, bit-identical |
 | `--cfg-parallel` (2 GPUs) | N/A · single pass | N/A · guidance-distilled; true-CFG is the owner's call | PASS, bit-identical |
 | `--dp` × `--cfg-parallel` | N/A · refuses `--cfg-parallel` | N/A · refuses `--cfg-parallel` | NOT MEASURED (needs 4 cards) |
-| serving on two GPUs (`--dp-degree 2`) | PASS, two requests in one request-time | NOT MEASURED · allowed | N/A · refused: the video service runs one job at a time |
+| serving on two GPUs (`--dp-degree 2`) | PASS, two requests in one request-time | PASS on 2 × A100: two requests in one request-time, byte-identical [fluxa100]; on PRO 6000 NOT MEASURED | N/A · refused: the video service runs one job at a time |
 | CP / ulysses (`--cp-degree > 1`) | N/A · refused, F2b | N/A · refused, F2b | N/A · refused, F2b |
 | TP across PCIe, `--sp` | N/A · refused, F6 | N/A · refused, F6 | N/A · refused, F6 |
 
@@ -104,7 +106,7 @@ Probe-free fixed cadence on the CUDA loop; calibrated and online-delta modes ref
 One single-GPU replica per card through the request router.
 | Qwen-Image | FLUX.1-dev | Wan 2.2 |
 |---|---|---|
-| PASS · 4 requests in 58 s on 2 cards vs 190 s serial, byte-identical | PASS · `--dp 1` batch, 2 requests in 28 s vs 33 s serial, byte-identical; `--dp 2` NOT MEASURED (needs 2 GPUs) | PASS · 2 requests in 76 s vs 120 s serial, bit-identical |
+| PASS · 4 requests in 58 s on 2 cards vs 190 s serial, byte-identical | PASS · `--dp 1` batch, 2 requests in 28 s vs 33 s serial, byte-identical; `--dp 2` 4 requests in 42 s vs 69 s, byte-identical, on 2 × A100 [fluxa100] | PASS · 2 requests in 76 s vs 120 s serial, bit-identical |
 
 ### CFG-parallel   `--cfg-parallel` (2 GPUs, torchrun)
 Runs the cond and uncond branches on two cards, one all-gather per step.
@@ -131,9 +133,10 @@ The honest gap list for the next session, none of it refused and none of it run:
    two files for one tensor in three writes; the cause is not located (not threading alone).
 1. **Wan `--dp` × `--cfg-parallel`.** It needs four cards; it is allowed by construction and
    unverified.
-2. **FLUX.1-dev with two replicas (`--dp 2`)** on CUDA: reachable, needs a 2-GPU pod. The
-   one-card `--dp 1 --requests` batch was measured on the flux session (byte-identical to serial, Two
-   GPUs section) *[10-18 F5c]*. Wan under `--dp` was measured on the f2b session *[10-18 F2b/F4b]*.
+2. **FLUX.1-dev with two replicas (`--dp 2`) on two RTX PRO 6000s.** Measured instead on
+   2 × A100 80 GB (the fluxa100 session: `--dp 2 --requests` and `serve --dp-degree 2` byte-identical) *[10-20 fluxa100]*, since no pool had two PRO 6000s free for over 6 h. The
+   one-card `--dp 1 --requests` batch was measured on the flux session *[10-18 F5c]*; Wan under `--dp`
+   on the f2b session *[10-18 F2b/F4b]*.
 3. **Wan 2.1** (`Wan-AI/Wan2.1-T2V-14B-Diffusers`). It is routed to the CUDA orchestrator and has
    never run on a GPU. Diffusers' Wan 2.1 defaults (50 steps, guidance 5.0) differ from 40 / 4.0
    *[10-18 F1 review fixes]*.

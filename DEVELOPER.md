@@ -298,6 +298,9 @@ writes each output; the one-process orchestrator's batch mode does the loop. Mea
 50-step Qwen-Image requests in 58 s wall on two cards against 190 s as four serial `difflet run`
 calls and 79 s as a `--dp 1 --requests` batch on one card (one load, four generates); every
 compared image (all four from `--dp 2`, two from `--dp 1`) is byte-identical to its reference.
+FLUX.1-dev ran the same way on 2 × A100 80 GB (10-20, no two PRO 6000s free; the backend's
+first non-Blackwell card, unchanged): `--dp 2 --requests` and `serve --dp-degree 2`
+byte-identical to one card.
 `difflet run --model-id Wan-AI/... --cfg-parallel` re-execs itself under `torchrun --standalone
 --nproc_per_node=2` (`difflet/cli/runner.py`): `CudaBackend.prepare_runtime` joins NCCL at
 `WORLD_SIZE > 1`, the CUDA mesh builds one `torch.distributed` group per non-trivial axis from
