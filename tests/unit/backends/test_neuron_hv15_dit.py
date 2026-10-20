@@ -12,9 +12,10 @@ from difflet.backends.neuron.hunyuan_video15.transformer import (  # noqa: E402
 )
 from difflet.backends.neuron.ops_impl import collectives as C  # noqa: E402
 
-TINY = dict(in_channels=9, out_channels=4, num_attention_heads=2, attention_head_dim=16, num_layers=2,
+# 4 heads of 8 so Ulysses can split them over 4 ranks; rope axes sum to the head dim
+TINY = dict(in_channels=9, out_channels=4, num_attention_heads=4, attention_head_dim=8, num_layers=2,
             num_refiner_layers=1, mlp_ratio=4.0, patch_size=1, patch_size_t=1, qk_norm="rms_norm",
-            text_embed_dim=32, text_embed_2_dim=24, image_embed_dim=16, rope_axes_dim=(4, 6, 6),
+            text_embed_dim=32, text_embed_2_dim=24, image_embed_dim=16, rope_axes_dim=(2, 2, 4),
             rope_theta=256.0, target_size=640, task_type="t2v", use_meanflow=False)
 SHAPE = dict(height=32, width=48, num_frames=5, text_seq_len=16, text_2_seq_len=8, image_tokens=9)
 
@@ -48,28 +49,52 @@ def _inputs():
     )
 
 
-def test_matches_diffusers(tiny):
+def _reference(tiny):
     from diffusers import HunyuanVideo15Transformer3DModel
 
+    ref_model = HunyuanVideo15Transformer3DModel.from_pretrained(tiny).eval()
+    with torch.no_grad():
+        return ref_model(**_inputs(),
+                         encoder_hidden_states_2=torch.zeros(1, SHAPE["text_2_seq_len"], 24),
+                         encoder_attention_mask_2=torch.zeros(1, SHAPE["text_2_seq_len"], dtype=torch.int64),
+                         image_embeds=torch.zeros(1, SHAPE["image_tokens"], 16), return_dict=False)[0]
+
+
+def test_matches_diffusers(tiny):
     app = NeuronHunyuanVideo15TransformerApplication(model_path=tiny, dtype=torch.float32,
                                                      exec_mode="eager", device="cpu", **SHAPE)
     app.load()
     assert app.load_report == {"missing": [], "unexpected": []}
-    assert app.latent_shape == (1, 9, 2, 2, 3)
-    ours = app(**_inputs())[0]
-    ref_model = HunyuanVideo15Transformer3DModel.from_pretrained(tiny).eval()
-    with torch.no_grad():
-        ref = ref_model(**_inputs(),
-                        encoder_hidden_states_2=torch.zeros(1, SHAPE["text_2_seq_len"], 24),
-                        encoder_attention_mask_2=torch.zeros(1, SHAPE["text_2_seq_len"], dtype=torch.int64),
-                        image_embeds=torch.zeros(1, SHAPE["image_tokens"], 16), return_dict=False)[0]
-    torch.testing.assert_close(ours, ref, atol=1e-4, rtol=1e-4)
+    assert app.latent_shape == (1, 9, 2, 2, 3) and app.num_image_tokens == 12
+    torch.testing.assert_close(app(**_inputs())[0], _reference(tiny), atol=1e-4, rtol=1e-4)
+
+
+@pytest.mark.parametrize("cp", [2, 4])
+def test_ulysses_context_parallel_matches_diffusers(tiny, cp):
+    """12 image tokens split over cp ranks, text replicated, joint Ulysses with key_valid_len:
+    every rank's gathered output equals diffusers' single-rank forward."""
+    from tests.unit.backends._neuron_gloo import run_ranks
+    from tests.unit.backends._neuron_workers import hv15_cp_worker
+
+    reference = _reference(tiny)
+    for out in run_ranks(hv15_cp_worker, tiny, SHAPE, _inputs(), world_size=cp):
+        torch.testing.assert_close(torch.tensor(out), reference, atol=1e-4, rtol=1e-4)
+
+
+def test_cp_needs_image_tokens_divisible(tiny):
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+
+    # 4 heads divide by cp=4, but 2 x 3 x 3 = 18 image tokens do not
+    with pytest.raises(ValueError, match="18 image tokens .* do not divide by cp=4"):
+        NeuronHunyuanVideo15TransformerApplication(
+            model_path=tiny, parallel=DiffletParallelConfig(cp_degree=4, cp_mode="ulysses"),
+            device="cpu", **dict(SHAPE, height=48, width=48))
 
 
 def test_rejects_what_it_does_not_run(tiny):
     from difflet.pipeline.parallel_config import DiffletParallelConfig
 
-    with pytest.raises(NotImplementedError, match="TP1"):
+    with pytest.raises(NotImplementedError, match="runs at TP1"):
         NeuronHunyuanVideo15TransformerApplication(model_path=tiny, parallel=DiffletParallelConfig(tp_degree=2),
                                                    device="cpu", **SHAPE)
     with pytest.raises(ValueError, match="4k\\+1"):

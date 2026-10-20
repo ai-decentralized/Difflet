@@ -1290,3 +1290,15 @@ def flux_dit_parallel_worker(rank: int, world_size: int, model_dir: str, tp: int
     app.load()
     out = first(app(**tiny_inputs(config)))
     return {"out": out.tolist(), "report": app.load_report}
+
+
+def hv15_cp_worker(rank: int, world_size: int, model_dir: str, shape: dict, inputs: dict) -> list:
+    """HunyuanVideo 1.5's DiT application at TP1 x CP=world_size (Ulysses) on CPU, eager."""
+    from difflet.backends.neuron.hunyuan_video15.transformer import NeuronHunyuanVideo15TransformerApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+
+    app = NeuronHunyuanVideo15TransformerApplication(
+        model_path=model_dir, parallel=DiffletParallelConfig(cp_degree=world_size, cp_mode="ulysses"),
+        dtype=torch.float32, exec_mode="eager", device="cpu", **shape)
+    app.load()
+    return app(**inputs)[0].tolist()

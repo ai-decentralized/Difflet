@@ -9,7 +9,13 @@ Qwen2.5-VL streams first, padding zeroed after) is data-dependent but fixed-leng
 = 1,985 tokens), and it runs in the un-compiled top-level forward, so the compiled blocks see one
 shape. (The Trainium path forks it because it compiles the whole model as one graph.)
 
-Parallelism: TP1 (the 8.3B DiT is 15.5 GiB in bf16, one core); context parallelism comes next.
+Parallelism: TP1 (the 8.3B DiT is 15.5 GiB in bf16, one core), optionally with context
+parallelism over the image tokens (Ulysses): every rank holds the whole DiT; the image stream is
+split evenly across the CP group before the blocks and gathered after them, the text stream (729 +
+256 + 1000 tokens) stays replicated, and the blocks' attention processor is replaced by one that
+calls ``joint_ulysses_attention`` with the text's padding expressed as ``key_valid_len`` (diffusers
+reorders valid text tokens first). That is exact for every valid query: diffusers' symmetric mask
+and a key mask differ only on padded text queries, whose outputs are never used.
 Numerics depend on two backend workarounds installed by ``prepare_runtime``: the bool bitwise guard
 (the token refiner's mask) and fp32 LayerNorm for bf16 inputs.
 """
@@ -38,9 +44,12 @@ class NeuronHunyuanVideo15TransformerApplication(TorchNeuronApplicationBase):
                  exec_mode: str | None = None, device="neuron", **kwargs) -> None:
         super().__init__(model_path=model_path, parallel=parallel, dtype=dtype,
                          exec_mode=exec_mode, device=device, **kwargs)
-        if int(self.parallel.tp_degree) != 1 or int(getattr(self.parallel, "cp_degree", 1) or 1) != 1:
-            raise NotImplementedError("HunyuanVideo 1.5 on the neuron backend runs at TP1 (context "
-                                      "parallelism is not implemented yet)")
+        if int(self.parallel.tp_degree) != 1:
+            raise NotImplementedError("HunyuanVideo 1.5 on the neuron backend runs at TP1 (the whole "
+                                      "DiT on every core), with context parallelism for long videos")
+        self.cp = int(getattr(self.parallel, "cp_degree", 1) or 1)
+        if self.cp > 1 and getattr(self.parallel, "cp_mode", "ulysses") != "ulysses":
+            raise NotImplementedError("HunyuanVideo 1.5 runs context parallelism in Ulysses mode only")
         with open(os.path.join(str(self.model_path), "config.json"), encoding="utf-8") as f:
             self.model_config = {k: v for k, v in json.load(f).items() if not k.startswith("_")}
         if int(num_frames) % VAE_TEMPORAL != 1:
@@ -53,9 +62,23 @@ class NeuronHunyuanVideo15TransformerApplication(TorchNeuronApplicationBase):
                              int(height) // VAE_SPATIAL, int(width) // VAE_SPATIAL)
         self.text_seq_len, self.text_2_seq_len = int(text_seq_len), int(text_2_seq_len)
         self.image_tokens, self.batch_size = int(image_tokens), int(batch_size)
+        _, _, f, h, w = self.latent_shape
+        self.num_image_tokens = f * h * w  # patch size 1 x 1 x 1
+        if self.cp > 1:
+            heads = int(self.model_config["num_attention_heads"])
+            if heads % self.cp:
+                raise ValueError(f"Ulysses needs num_attention_heads={heads} divisible by cp={self.cp}")
+            if self.num_image_tokens % self.cp:
+                raise ValueError(
+                    f"{self.num_image_tokens} image tokens ({f} x {h} x {w}) do not divide by cp={self.cp}; "
+                    f"pick a frame count or CP degree that divides them (e.g. 121 frames at 480x848 is "
+                    f"31 x 30 x 53: cp=2)")
 
     def build_module(self) -> torch.nn.Module:
-        return _tensor_signature_model()(**self.model_config)
+        model = _tensor_signature_model()(**self.model_config)
+        if self.cp > 1:
+            _install_context_parallel(model, self.num_image_tokens, self.cp)
+        return model
 
     def checkpoint_key(self, name: str) -> str:
         return name  # diffusers' layout, key for key
@@ -97,6 +120,90 @@ class NeuronHunyuanVideo15TransformerApplication(TorchNeuronApplicationBase):
                                                    image_embeds)
         return (super().forward(*self._positional(hidden_states, timestep, encoder_hidden_states,
                                                   encoder_attention_mask, e2, m2, img)),)
+
+
+class _JointUlyssesProcessor:
+    """``HunyuanVideo15AttnProcessor2_0`` with the attention done by ``joint_ulysses_attention``:
+    the image stream arrives sharded (this rank's ``N/cp`` tokens, rotary rows to match), the text
+    stream replicated; projections, QK norms and rotary are diffusers' own. Keys are masked by
+    count (valid image keys, then the valid text keys diffusers reordered to the front)."""
+
+    def __init__(self, num_image_tokens: int) -> None:
+        self.num_image_tokens = int(num_image_tokens)
+
+    def __call__(self, attn, hidden_states, encoder_hidden_states=None, attention_mask=None,
+                 image_rotary_emb=None):
+        from diffusers.models.embeddings import apply_rotary_emb
+
+        from difflet.backends.neuron.ops_impl.attention import joint_ulysses_attention
+
+        def heads(t):
+            return t.unflatten(2, (attn.heads, -1))
+
+        q, k, v = heads(attn.to_q(hidden_states)), heads(attn.to_k(hidden_states)), heads(attn.to_v(hidden_states))
+        q, k = attn.norm_q(q), attn.norm_k(k)
+        if image_rotary_emb is not None:
+            q = apply_rotary_emb(q, image_rotary_emb, sequence_dim=1)
+            k = apply_rotary_emb(k, image_rotary_emb, sequence_dim=1)
+        eq = heads(attn.add_q_proj(encoder_hidden_states))
+        ek = heads(attn.add_k_proj(encoder_hidden_states))
+        ev = heads(attn.add_v_proj(encoder_hidden_states))
+        if attn.norm_added_q is not None:
+            eq = attn.norm_added_q(eq)
+        if attn.norm_added_k is not None:
+            ek = attn.norm_added_k(ek)
+        valid_text = attention_mask.to(torch.int32).sum(dim=1)
+        key_valid_len = (valid_text + self.num_image_tokens).to(torch.int32)
+        bhsd = lambda t: t.transpose(1, 2).contiguous()  # noqa: E731  [B, S, H, d] -> [B, H, S, d]
+        img_out, txt_out = joint_ulysses_attention(
+            bhsd(q), bhsd(eq), bhsd(k), bhsd(v), bhsd(ek), bhsd(ev),
+            scale=q.shape[-1] ** -0.5, key_valid_len=key_valid_len)
+        img_out = img_out.transpose(1, 2).flatten(2, 3).to(q.dtype)
+        txt_out = txt_out.transpose(1, 2).flatten(2, 3).to(q.dtype)
+        img_out = attn.to_out[1](attn.to_out[0](img_out))
+        txt_out = attn.to_add_out(txt_out)
+        return img_out, txt_out
+
+
+def _install_context_parallel(model, num_image_tokens: int, cp: int) -> None:
+    """Image tokens split over the CP group around the blocks: before each block, this rank's
+    ``N/cp`` image rows (block 0 receives all ``N``) and the matching rotary rows; after the last
+    block, an all-gather over the CP group. Plus the joint-Ulysses processor in every block."""
+    from difflet.backends.neuron.ops_impl import collectives
+    from difflet.backends.neuron.ops_impl.parallel_mesh import get_axis_rank
+
+    n, local = int(num_image_tokens), int(num_image_tokens) // cp
+    start = get_axis_rank("cp") * local
+
+    def shard(t):
+        if not isinstance(t, torch.Tensor):
+            return t
+        for dim, size in enumerate(t.shape):
+            if size == n:
+                return t.narrow(dim, start, local)
+        return t
+
+    def before(block, args):
+        hidden_states, encoder_hidden_states, temb, mask, freqs = args
+        if hidden_states.shape[1] == n:
+            hidden_states = hidden_states.narrow(1, start, local).contiguous()
+        if isinstance(freqs, (tuple, list)):
+            freqs = type(freqs)(shard(f) for f in freqs)
+        else:
+            freqs = shard(freqs)
+        return hidden_states, encoder_hidden_states, temb, mask, freqs
+
+    def after(block, args, output):
+        hidden_states, encoder_hidden_states = output
+        gathered = collectives.gather_from_tensor_model_parallel_region_with_dim(
+            hidden_states.contiguous(), 1, collectives.get_cp_group())
+        return gathered, encoder_hidden_states
+
+    processor = _JointUlyssesProcessor(n)
+    for block in model.transformer_blocks:
+        block.attn.set_processor(processor)
+        block.register_forward_pre_hook(before)
+    model.transformer_blocks[-1].register_forward_hook(after)
 
 
 def _tensor_signature_model():

@@ -7,9 +7,12 @@ diffusers in fp32 (reference) and bf16 (control).
 
     python tests/manual/check_neuron_hv15_dit.py --model-dir $HV15 --make-oracle ~/w22/hv15_oracle.pt
 
-Phase 2, device (one rank): the application, compile mode, one forward compared, then --iters timed.
+Phase 2, device: the application, compile mode, one forward compared, then --iters timed. One
+rank is TP1; N ranks is TP1 x CP=N (Ulysses: the image tokens split, the text replicated).
 
     torchrun --standalone --nproc-per-node 1 tests/manual/check_neuron_hv15_dit.py \
+        --model-dir $HV15 --oracle ~/w22/hv15_oracle.pt --iters 5
+    torchrun --standalone --nproc-per-node 4 tests/manual/check_neuron_hv15_dit.py \
         --model-dir $HV15 --oracle ~/w22/hv15_oracle.pt --iters 5
 """
 
@@ -69,14 +72,19 @@ def check(args) -> int:
     from difflet.pipeline.parallel_config import DiffletParallelConfig
 
     oracle = torch.load(os.path.expanduser(args.oracle))
-    parallel = DiffletParallelConfig(tp_degree=1)
+    cp = int(os.environ.get("WORLD_SIZE", "1"))
+    parallel = DiffletParallelConfig(tp_degree=1, cp_degree=cp, cp_mode="ulysses" if cp > 1 else "gather_kv")
     get_backend("neuron").prepare_runtime(parallel)  # core binding + the numerics workarounds
+    import torch.distributed as dist
+
+    rank0 = not dist.is_initialized() or dist.get_rank() == 0
+    say = (lambda *a, **k: print(*a, **k)) if rank0 else (lambda *a, **k: None)  # noqa: E731
     app = NeuronHunyuanVideo15TransformerApplication(
         model_path=os.path.join(args.model_dir, "transformer"), height=H, width=W, num_frames=FRAMES,
         parallel=parallel, dtype=torch.bfloat16, exec_mode=args.exec_mode)
     t = time.perf_counter()
     app.load()
-    print(f"load+warmup {time.perf_counter() - t:.1f} s phases="
+    say(f"load+warmup {time.perf_counter() - t:.1f} s phases="
           f"{ {k: round(v, 1) for k, v in app.phase_seconds.items()} } report={app.load_report}", flush=True)
 
     def forward():
@@ -90,7 +98,7 @@ def check(args) -> int:
     finite = bool(torch.isfinite(y).all())
     ours, control = (rel(y) if finite else float("nan")), rel(ctl)
     ok = finite and ours <= GATE * control
-    print(f"{'PASS' if ok else 'FAIL'} {args.exec_mode} TP1: finite={finite} rel_l1={ours:.3e} "
+    say(f"{'PASS' if ok else 'FAIL'} {args.exec_mode} TP1{f' x CP{cp}' if cp > 1 else ''}: finite={finite} rel_l1={ours:.3e} "
           f"({ours / control:.3f}x control {control:.3e}, gate {GATE}x)", flush=True)
     times = []
     for _ in range(args.iters):
@@ -98,7 +106,7 @@ def check(args) -> int:
         forward()
         times.append(time.perf_counter() - t)
     if times:
-        print(f"forward median {statistics.median(times) * 1e3:.1f} ms (n={len(times)})", flush=True)
+        say(f"forward median {statistics.median(times) * 1e3:.1f} ms (n={len(times)})", flush=True)
     return 0
 
 
