@@ -8,7 +8,22 @@
 
 Every number below comes from runs made for this report. Inferences are labelled.
 
-## Headline: native vs AoT
+## Headline at 50 steps (updated 2026-10-20)
+
+Re-measured on this host on 2026-10-20 at 480x704x49, **50 steps**, guidance 1, seed 42, tp4, with the same probe and method as below. The earlier 20 steps copied the AoT benchmark; the CLI default is 40. The AoT rows now include **two-core attention** (`NEURON_RT_VIRTUAL_CORE_SIZE=2` at trace time): the stock LTX-2 AoT CLI traced `attention_cte` on one of the two physical cores, which profiling measured at 39 ms of the 111 ms per-forward gap. The fix (commit `62e3475`) is on the AoT experiment branch `feat/aot-bf16-allreduce`. Its output is bit-identical to stock AoT: latents `e597cc5d…` and mp4 `396b8947…` in every run of both.
+
+| metric | native | AoT, two-core attention | native vs AoT | AoT stock |
+|---|---:|---:|---:|---:|
+| DiT step (median of 3 warm runs) | **350.7 ms** | 419.2 ms | **−16.3%** | 461.4 ms |
+| e2e warm (mean of 3) | 90.8 s | 68.0 s | +33.5% | 71.8 s |
+| e2e cold (page cache dropped) | **588.3 s** | 781.3 s | **−24.7%** | 785.5 s |
+| compile cold | 306.6 s (2026-10-19, with weight store) | 576.9 s (2026-10-19, fresh root) | −47% | 1838.9 s (939.1 s in another run) |
+
+- Native's step at 50 steps (350.7 ms) matches its 20-step value (349.3 ms): the step time does not depend on the step count.
+- The warm e2e gap is host-side, as attributed below (launch, host decode, connectors); at 50 steps the faster native denoise recovers part of it (+22.8 s vs +21.5 s at 20 steps).
+- Native and AoT images differ at the same seed because torch 2.14 and 2.9 draw different bf16 noise; from the same noise they agree (parity section). At guidance 1 both are low quality (no CFG); guidance 3–4 is the practical setting.
+
+## Headline at 20 steps: native vs AoT
 
 Workload for every cell unless the cell says otherwise:
 
