@@ -1,0 +1,52 @@
+name: public-hygiene
+
+# This repository is public: anything merged here, and every commit message on the way, is
+# published for good. This check flags the kinds of internal detail that have no place here:
+# cloud pod/instance/volume IDs, prices and costs, cloud regions, credentials and key-file paths,
+# IP addresses, personal email addresses, binary or media artifacts and large files, and new files
+# under .claude/ (agent skills and settings). It scans the PR's commits, title and description.
+#
+# It only knows generic patterns, because the check itself is public. A pushed branch is already
+# public, so run the same script locally before pushing:
+#   python scripts/check_public_hygiene.py --range origin/main..HEAD
+# Reviewed false positives go in .public-hygiene-allow, or `public-hygiene: ok` on the line.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Title and body arrive through the environment, never inside the script text.
+      - name: Scan the PR's commits, title and description
+        # Advisory for now: findings show in the log and the run summary without failing the PR.
+        # Delete this line to make the check blocking.
+        continue-on-error: true
+        shell: bash
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          printf '%s\n\n%s\n' "$PR_TITLE" "$PR_BODY" > "$RUNNER_TEMP/pr.md"
+          rc=0
+          python scripts/check_public_hygiene.py --no-private \
+            --range "$BASE_SHA..$HEAD_SHA" --text "$RUNNER_TEMP/pr.md" > "$RUNNER_TEMP/report.txt" || rc=$?
+          cat "$RUNNER_TEMP/report.txt"
+          { echo '### Public hygiene'; echo '```'; cat "$RUNNER_TEMP/report.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          exit "$rc"
