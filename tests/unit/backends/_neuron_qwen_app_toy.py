@@ -24,6 +24,7 @@ from types import SimpleNamespace
 
 import torch
 
+from tests.unit.backends._neuron_gloo import record_block_rows
 from tests.unit.backends._neuron_qwen_toy import (
     QWEN_SNAPSHOT,
     TINY_QWEN_TRANSFORMER,
@@ -85,17 +86,28 @@ def tokenizer_available() -> bool:
     return (QWEN_SNAPSHOT / "tokenizer" / "vocab.json").is_file()
 
 
-def tiny_text_encoder_config():
+#: A tiny Qwen2.5-VL language model that TP2 can shard (the default one has a single kv head):
+#: 4 query heads x 6 over 2 kv heads (grouped-query attention, two heads per group) and a
+#: three-axis mrope section, so the test exercises the GQA grouping and the mrope reduction.
+TP_TEXT_ENCODER = dict(
+    num_attention_heads=4, num_key_value_heads=2,
+    rope_scaling={"type": "default", "rope_type": "default", "mrope_section": [1, 1, 1]},
+)
+
+
+def tiny_text_encoder_config(**text_overrides):
     from transformers import Qwen2_5_VLConfig
 
+    text = dict(
+        hidden_size=TEXT_DIM, intermediate_size=32, num_hidden_layers=2,
+        num_attention_heads=2, num_key_value_heads=1, vocab_size=151936,
+        max_position_embeddings=512, rope_theta=1000000.0, rms_norm_eps=1e-6,
+        rope_scaling={"type": "default", "rope_type": "default", "mrope_section": [2, 2, 2]},
+        bos_token_id=151643, eos_token_id=151645,
+    )
+    text.update(text_overrides)
     return Qwen2_5_VLConfig(
-        text_config=dict(
-            hidden_size=TEXT_DIM, intermediate_size=32, num_hidden_layers=2,
-            num_attention_heads=2, num_key_value_heads=1, vocab_size=151936,
-            max_position_embeddings=512, rope_theta=1000000.0, rms_norm_eps=1e-6,
-            rope_scaling={"type": "default", "rope_type": "default", "mrope_section": [2, 2, 2]},
-            bos_token_id=151643, eos_token_id=151645,
-        ),
+        text_config=text,
         vision_config=dict(
             depth=1, hidden_size=16, intermediate_size=16, num_heads=2, out_hidden_size=TEXT_DIM,
             fullatt_block_indexes=[0], window_size=28, patch_size=14, spatial_merge_size=2,
@@ -105,9 +117,23 @@ def tiny_text_encoder_config():
     )
 
 
-def write_tiny_qwen_snapshot(root, *, text_encoder: bool = True) -> torch.Tensor:
-    """Q1's tiny transformer plus scheduler, VAE and (if available) tokenizer + text encoder;
-    returns Q1's diffusers DiT reference."""
+def write_tiny_text_encoder(directory, **text_overrides) -> Path:
+    """A seeded tiny ``Qwen2_5_VLForConditionalGeneration`` (vision tower and lm_head included,
+    as in the real checkpoint) saved to ``directory``."""
+    from transformers import Qwen2_5_VLForConditionalGeneration
+
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(4)
+        encoder = Qwen2_5_VLForConditionalGeneration(tiny_text_encoder_config(**text_overrides))
+    _perturbed(encoder, 5).save_pretrained(str(directory), safe_serialization=True)
+    return Path(directory)
+
+
+def write_tiny_qwen_snapshot(root, *, text_encoder: bool = True,
+                             text_encoder_overrides: dict | None = None) -> torch.Tensor:
+    """Q1's tiny transformer plus scheduler, VAE and (if available) tokenizer + text encoder
+    (``text_encoder_overrides`` changes its text config, e.g. ``TP_TEXT_ENCODER``); returns
+    Q1's diffusers DiT reference."""
     root = Path(root)
     ref = write_tiny_qwen_model(root)
     (root / "scheduler").mkdir(parents=True, exist_ok=True)
@@ -121,14 +147,8 @@ def write_tiny_qwen_snapshot(root, *, text_encoder: bool = True) -> torch.Tensor
         vae = AutoencoderKLQwenImage(**TINY_VAE_CONFIG)
     _perturbed(vae, 3).save_pretrained(str(root / "vae"), safe_serialization=True)
     if text_encoder and tokenizer_available():
-        from transformers import Qwen2_5_VLForConditionalGeneration
-
         shutil.copytree(QWEN_SNAPSHOT / "tokenizer", root / "tokenizer", dirs_exist_ok=True)
-        with torch.random.fork_rng(devices=[]):
-            torch.manual_seed(4)
-            encoder = Qwen2_5_VLForConditionalGeneration(tiny_text_encoder_config())
-        _perturbed(encoder, 5).save_pretrained(str(root / "text_encoder"),
-                                               safe_serialization=True)
+        write_tiny_text_encoder(root / "text_encoder", **(text_encoder_overrides or {}))
     return ref
 
 
@@ -260,9 +280,12 @@ def q2_pipeline_worker(
     exec_mode: str,
     use_prompt: bool,
     output_type: str = "latent",
+    sp: bool = False,
+    text_encoder_dtype: str = "bfloat16",
 ) -> dict:
-    """The composed application at TP=tp x CP=world/tp on CPU fp32: two steps from seed 7, on a
-    prompt (the tiny Qwen2.5-VL, encoded on rank 0) or on the fixed embeddings."""
+    """The composed application at TP=tp x CP=world/tp on CPU fp32 (Megatron SP over the TP
+    group when ``sp``): two steps from seed 7, on a prompt (the tiny Qwen2.5-VL, encoded on
+    rank 0 in ``text_encoder_dtype``) or on the fixed embeddings."""
     import hashlib
 
     from difflet.models.qwen_image.neuron_application import TorchNeuronQwenImageApplication
@@ -272,7 +295,8 @@ def q2_pipeline_worker(
     app = TorchNeuronQwenImageApplication(
         model_path=model_dir,
         parallel=DiffletParallelConfig(tp_degree=tp, cp_degree=cp,
-                                       cp_mode=cp_mode if cp > 1 else "gather_kv"),
+                                       cp_mode=cp_mode if cp > 1 else "gather_kv",
+                                       sp_enabled=sp),
         dtype=torch.float32,
         shape=dict(TINY_SHAPE),
         text_seq_len=TINY_TEXT_SEQ_LEN,
@@ -281,6 +305,7 @@ def q2_pipeline_worker(
         encoder_threads=2,
         enable_text_encoder=use_prompt,
         enable_vae_decoder=output_type == "pt",
+        text_encoder_dtype=text_encoder_dtype,
     )
     app.load()
     steps: list[int] = []
@@ -342,3 +367,127 @@ def q2_difflet_pipeline_worker(rank: int, world_size: int, model_dir: str, cache
         "compiled_dir_exists": Path(cache_dir).exists(),
         "latents": out.latents.tolist(),
     }
+
+
+def q4_text_encoder_worker(rank: int, world_size: int, text_encoder_dir: str, exec_mode: str,
+                           enc_seq_len: int) -> dict:
+    """``NeuronQwenTextEncoderApplication`` at TP=world on CPU fp32: the last hidden state of
+    fixed random ids (every id in the vocabulary range) and of the same ids again, with the
+    lifecycle."""
+    from torch._dynamo.utils import counters
+
+    from difflet.backends.neuron.qwen_image.text_encoder import NeuronQwenTextEncoderApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+
+    app = NeuronQwenTextEncoderApplication(
+        model_path=text_encoder_dir, enc_seq_len=enc_seq_len,
+        parallel=DiffletParallelConfig(tp_degree=world_size), dtype=torch.float32,
+        exec_mode=exec_mode, device="cpu",
+    )
+    torch._dynamo.reset()
+    counters.clear()
+    app.load()
+    ids = torch.randint(0, 151936, (1, enc_seq_len), generator=torch.Generator().manual_seed(9))
+    hidden = app(ids)
+    again = app(ids)
+    attn = app.module.layers[0].self_attn
+    return {
+        "hidden": hidden.tolist(),
+        "repeat_equal": bool(torch.equal(hidden, again)),
+        "load_report": app.load_report,
+        "compiled_blocks": list(app.compiled_blocks),
+        "unique_graphs": counters["stats"]["unique_graphs"],
+        "graph_breaks": sum(counters["graph_break"].values()),
+        "unwarmed_shapes": [list(k) for k in app.unwarmed_shapes],
+        "heads": [attn.heads, attn.kv_heads],
+        "warmup_shapes": app.warmup_shapes,
+    }
+
+
+def q4_device_prompt_worker(rank: int, world_size: int, model_dir: str, use_dit: bool) -> dict:
+    """The composed application with ``text_encoder_device="neuron"`` at TP=world on CPU fp32:
+    the prompt embeddings, and with the DiT two steps from seed 7 on the prompt."""
+    import hashlib
+
+    from difflet.models.qwen_image.neuron_application import TorchNeuronQwenImageApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+
+    app = TorchNeuronQwenImageApplication(
+        model_path=model_dir, parallel=DiffletParallelConfig(tp_degree=world_size),
+        dtype=torch.float32, shape=dict(TINY_SHAPE), text_seq_len=TINY_TEXT_SEQ_LEN,
+        exec_mode="eager", device="cpu", text_encoder_device="neuron",
+        text_encoder_dtype=torch.float32, enable_transformer=use_dit,
+    )
+    app.load()
+    embeds, mask = app.encode_prompt(TINY_PROMPT)
+    result = {"embeds": embeds.float().tolist(), "dtype": str(embeds.dtype),
+              "mask": mask.tolist(), "phase_seconds": sorted(app.phase_seconds),
+              "encoder": type(app.text_encoder).__name__}
+    if use_dit:
+        out = app(prompt=TINY_PROMPT, num_inference_steps=2, seed=7, channels=TINY_Z_DIM)
+        result["latents"] = out.latents.tolist()
+        result["sha256"] = hashlib.sha256(out.latents.contiguous().numpy().tobytes()).hexdigest()
+    return result
+
+
+def tiny_negative_inputs():
+    """Fixed negative-prompt embeddings ``[1, 8, 24]`` (3 valid rows) and their mask."""
+    gen = torch.Generator().manual_seed(12)
+    embeds = torch.zeros(1, TINY_TEXT_SEQ_LEN, TEXT_DIM)
+    embeds[:, :3] = torch.randn(1, 3, TEXT_DIM, generator=gen)
+    mask = torch.zeros(1, TINY_TEXT_SEQ_LEN, dtype=torch.bool)
+    mask[:, :3] = True
+    return embeds.to(torch.bfloat16), mask
+
+
+def q5_true_cfg_worker(rank: int, world_size: int, model_dir: str, tp: int, cfg_parallel: bool,
+                       exec_mode: str, true_cfg_scale: float | None = 4.0,
+                       sp: bool = False) -> dict:
+    """The composed application at TP=tp (with Megatron SP when ``sp``), with CFG parallelism
+    over world/tp = 2 groups or serial, on CPU fp32: two steps from seed 7 on the fixed
+    embeddings with true CFG (the fixed negative embeddings) at ``true_cfg_scale``, or without
+    it when that is None."""
+    import hashlib
+
+    from difflet.models.qwen_image.neuron_application import TorchNeuronQwenImageApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+
+    app = TorchNeuronQwenImageApplication(
+        model_path=model_dir,
+        parallel=DiffletParallelConfig(tp_degree=tp, cfg_parallel_enabled=cfg_parallel,
+                                       sp_enabled=sp),
+        dtype=torch.float32, shape=dict(TINY_SHAPE), text_seq_len=TINY_TEXT_SEQ_LEN,
+        exec_mode=exec_mode, device="cpu", enable_text_encoder=False,
+    )
+    app.load()
+    forwards: list[float] = []
+    steps: list[int] = []
+    app.transformer_adapter.forward_hook = forwards.append
+    block_rows = (record_block_rows(app.transformer.module.transformer.transformer_blocks[0],
+                                    "hidden_states") if exec_mode == "eager" else [])
+    app.step_hook = lambda: steps.append(len(forwards))
+    embeds, mask = tiny_text_inputs()
+    negative, negative_mask = tiny_negative_inputs()
+    kwargs = dict(encoder_hidden_states=embeds, encoder_hidden_states_mask=mask,
+                  num_inference_steps=2, seed=7, channels=TINY_Z_DIM)
+    if true_cfg_scale is not None:
+        kwargs.update(true_cfg_scale=true_cfg_scale, negative_encoder_hidden_states=negative,
+                      negative_encoder_hidden_states_mask=negative_mask)
+    try:
+        out = app(**kwargs)
+    except ValueError as exc:
+        return {"error": str(exc)}
+    final = out.latents
+    module = app.transformer.module
+    return {
+        "latents": final.tolist(),
+        "sha256": hashlib.sha256(final.contiguous().numpy().tobytes()).hexdigest(),
+        "steps": steps,
+        "forwards": len(forwards),
+        "warmup_shapes": app.transformer.warmup_shapes,
+        "unwarmed_shapes": [list(k) for k in app.unwarmed_shapes],
+        "compiled_blocks": app.compiled_blocks,
+        "cfg_group_size": module.cfg_group.size() if module.cfg_parallel_enabled else 1,
+        "block_rows": block_rows,
+    }
+

@@ -14,6 +14,7 @@ torch = pytest.importorskip("torch")
 
 import inspect  # noqa: E402
 import os  # noqa: E402
+import re  # noqa: E402
 import time  # noqa: E402
 from pathlib import Path  # noqa: E402
 from types import SimpleNamespace  # noqa: E402
@@ -47,7 +48,9 @@ from tests.unit.backends._neuron_workers import (  # noqa: E402
     w1_fake_hidden,
     w1_host_text_encoder_worker,
     w1_wan_lifecycle_worker,
+    w1_wan_initial_noise_worker,
     w1_wan_one_graph_worker,
+    w1_wan_truncated_worker,
     w1_wan22_pipeline_worker,
     w1_wan_cfg_parallel_worker,
     w1_wan_cp_worker,
@@ -124,6 +127,118 @@ def test_config_validates_tp_and_shape(tiny):
     default.validate()
     geometry = (default.latent_frames, default.latent_height, default.latent_width)
     assert geometry == (3, 60, 104) and default.image_seq_len == 4680
+
+
+@pytest.mark.parametrize("overrides, match", [
+    (dict(cp_mode="striped"), "cp_mode must be one of"),
+    (dict(context_parallel_enabled=True, sp_enabled=True), "mutually exclusive"),
+    (dict(context_parallel_enabled=True, cfg_parallel_enabled=True), "mutually exclusive"),
+    (dict(cp_degree=2), "needs context_parallel_enabled=True"),
+    # 12 image tokens: CP and SP split them without padding.
+    (dict(context_parallel_enabled=True, cp_degree=5), r"image_seq_len=12 .* cp_degree=5"),
+    (dict(sp_enabled=True, tp_degree=1, num_frames=1), None),
+    # 4 heads: Ulysses shards heads / tp over cp.
+    (dict(context_parallel_enabled=True, cp_degree=4, tp_degree=2, cp_mode="ulysses"),
+     r"this rank's 2 heads \(heads=4 / tp=2\) over cp_degree=4"),
+    (dict(context_parallel_enabled=True, cp_degree=4, tp_degree=2, cp_mode="ring"), None),
+    (dict(context_parallel_enabled=True, cp_degree=2, tp_degree=2, cp_mode="ulysses"), None),
+    (dict(context_parallel_enabled=True, cp_mode="ulysses"), None),  # cp unknown: the mesh's
+])
+def test_config_validates_the_parallel_modes(tiny, overrides, match):
+    def build():
+        return NeuronWanConfig.from_pretrained(
+            tiny.transformer, text_seq_len=TINY_TEXT_SEQ_LEN, **{**TINY_SHAPE, **overrides})
+
+    if match is None:
+        build()
+        return
+    with pytest.raises(ValueError, match=match):
+        build()
+
+
+def test_sp_needs_the_sequence_to_split_over_tp(tiny):
+    # 32x48x5 has 12 patch tokens (tp=4 splits them, the 4-rank SP test runs it); 32x48x1 has
+    # 6, which do not split over tp=4.
+    with pytest.raises(ValueError, match=r"splits image_seq_len=6 over tp=4"):
+        NeuronWanConfig.from_pretrained(tiny.transformer, sp_enabled=True, tp_degree=4,
+                                        height=32, width=48, num_frames=1)
+
+
+def test_transformer_application_matches_its_config_to_the_mesh(tiny):
+    def make(parallel, **config):
+        return NeuronWanTransformerApplication(
+            model_path=tiny.transformer,
+            config=NeuronWanConfig.from_pretrained(tiny.transformer, **{**TINY_SHAPE, **config}),
+            parallel=parallel, dtype=torch.float32, device="cpu")
+
+    cp2 = DiffletParallelConfig(tp_degree=2, cp_degree=2, cp_mode="ulysses")
+    with pytest.raises(ValueError, match="context_parallel_enabled=False but .* cp_degree=2"):
+        make(cp2, tp_degree=2)
+    with pytest.raises(ValueError, match="cp_mode='ring' but .* cp_mode='ulysses'"):
+        make(cp2, tp_degree=2, context_parallel_enabled=True, cp_mode="ring")
+    with pytest.raises(ValueError, match="cp_degree=4 but the parallel config has cp_degree=2"):
+        make(DiffletParallelConfig(tp_degree=2, cp_degree=2), tp_degree=2,
+             context_parallel_enabled=True, cp_degree=4)
+    app = make(cp2, tp_degree=2, context_parallel_enabled=True, cp_mode="ulysses")
+    assert app.config.cp_degree == 2  # filled from the parallel config, on a copy
+    # The 4 heads at tp1 x cp4 Ulysses: 4 % 4 == 0 fits; tp2 x cp4 would not (8 ranks).
+    make(DiffletParallelConfig(tp_degree=1, cp_degree=4, cp_mode="ulysses"),
+         context_parallel_enabled=True, cp_mode="ulysses")
+
+
+def test_num_layers_override_records_the_checkpoint_depth(tiny):
+    config = NeuronWanConfig.from_pretrained(tiny.transformer, num_layers=1, **TINY_SHAPE)
+    assert (config.num_layers, config.checkpoint_num_layers) == (1, 2)
+    full = NeuronWanConfig.from_pretrained(tiny.transformer, **TINY_SHAPE)
+    assert (full.num_layers, full.checkpoint_num_layers) == (2, 2)
+    with pytest.raises(ValueError, match="exceeds the checkpoint's 2 blocks"):
+        NeuronWanConfig.from_pretrained(tiny.transformer, num_layers=3)
+    with pytest.raises(ValueError, match="num_layers=0 must be >= 1"):
+        NeuronWanConfig.from_pretrained(tiny.transformer, num_layers=0)
+    app = NeuronWanTransformerApplication(
+        model_path=tiny.transformer, config=config, dtype=torch.float32, device="cpu"
+    )
+    assert app.skipped_checkpoint_prefixes == ("blocks.1.",)
+    whole = NeuronWanTransformerApplication(
+        model_path=tiny.transformer, config=full, dtype=torch.float32, device="cpu"
+    )
+    assert whole.skipped_checkpoint_prefixes == ()
+
+
+def _truncated_reference(num_layers: int):
+    """The seeded TP1 DiT (the tiny checkpoint's weights) with only its first blocks."""
+    from tests.unit.backends._neuron_wan_toy import tiny_wan_inputs
+
+    with tp1_mesh():
+        model = tiny_wan_tp1_model()
+        model.blocks = model.blocks[:num_layers]
+        with torch.no_grad():
+            return model(*tiny_wan_inputs())
+
+
+@pytest.mark.parametrize("cp, exec_mode", [(2, "eager"), (1, "compile")],
+                         ids=["tp2-cp2-eager", "tp4-compile"])
+def test_num_layers_loads_the_first_blocks_and_skips_the_rest(tiny, cp, exec_mode):
+    """The on-device parity runs' cut: the first block of the real checkpoint, the second
+    reported as skipped (not unexpected), equal to diffusers-layout TP1 with one block. The
+    preflight's cp_scatter hook on norm_out sees this rank's sequence shard, and it leaves the
+    compiled blocks' graph unbroken."""
+    from safetensors import safe_open
+
+    reference = _truncated_reference(1)
+    assert not torch.allclose(reference, tiny.ref, atol=1e-3)  # the second block mattered
+    results = run_ranks(w1_wan_truncated_worker, tiny.dir, 1, cp, exec_mode, world_size=4,
+                        env=OFFLINE)
+    with safe_open(str(tiny.transformer / "diffusion_pytorch_model.safetensors"), "pt") as f:
+        block1 = sorted(k for k in f.keys() if k.startswith("blocks.1."))
+    assert block1
+    for result in results:
+        assert result["num_blocks"] == 1
+        assert result["load_report"] == {"missing": [], "unexpected": [], "skipped": block1}
+        assert result["sha256"] == results[0]["sha256"]  # ranks_identical
+        assert result["tokens"] == [result["image_seq_len"] // cp]  # cp_scatter
+        assert result["graph_breaks"] == 0 and result["unwarmed_shapes"] == []
+    torch.testing.assert_close(torch.tensor(results[0]["out"]), reference, atol=1e-4, rtol=1e-4)
 
 
 def test_checkpoint_key_round_trip(tiny):
@@ -282,16 +397,22 @@ def test_adapter_passes_contiguous_inputs():
             received.append(args)
             return torch.ones(1, 4, 2, 4, 6)
 
-    config = SimpleNamespace(cfg_parallel_enabled=False)
-    adapter = na._OnDeviceTransformer(Recorder(), config, torch.bfloat16, "cpu")
-    assert adapter.dtype is torch.bfloat16 and adapter.config is config
+    import dataclasses
+
+    from tests.unit.backends._neuron_wan_toy import tiny_wan_config
+
     seconds = []
-    adapter.forward_hook = seconds.append
     sent = []
     # Strided host views as the orchestrator can hand them over: transposed latents and text,
     # and _batch_timestep's expanded 0-dim timestep (stride 0). The second call is already in
-    # the adapter dtype, so only the adapter's .contiguous() can make it dense.
+    # the adapter dtype, so only the adapter's .contiguous() can make it dense. Batch 2 is the
+    # CFG-parallel [uncond, cond] call.
+    recorder = Recorder()
     for dtype, batch in ((torch.float32, 1), (torch.bfloat16, 2)):
+        config = dataclasses.replace(tiny_wan_config(), cfg_parallel_enabled=batch == 2)
+        adapter = na._OnDeviceTransformer(recorder, config, torch.bfloat16, "cpu")
+        assert adapter.dtype is torch.bfloat16 and adapter.config is config
+        adapter.forward_hook = seconds.append
         latents = torch.randn(batch, 4, 2, 6, 4).to(dtype).transpose(-1, -2)
         timestep = torch.tensor(999.0, dtype=dtype).expand(batch)
         text = torch.randn(batch, 24, 8).to(dtype).transpose(1, 2)
@@ -307,6 +428,40 @@ def test_adapter_passes_contiguous_inputs():
             assert torch.equal(got, original.to(torch.bfloat16))
     assert received[1][1].stride() == (1,)  # the batch-2 timestep was materialised
     assert len(seconds) == 2 and all(s >= 0.0 for s in seconds)
+
+
+@pytest.mark.parametrize("name, shape", [
+    ("hidden_states", (1, 4, 2, 4, 8)),        # another width: a new block graph per block
+    ("hidden_states", (2, 4, 2, 4, 6)),        # both CFG branches without CFG parallelism
+    ("timestep", (2,)),
+    ("encoder_hidden_states", (1, 6, 24)),     # text not padded to text_seq_len
+])
+def test_adapter_refuses_any_other_shape_than_the_static_one(name, shape):
+    """A different shape must raise, not compile new block graphs (or, eager, misuse the static
+    rotary tables) on every rank: the module is never called."""
+    from tests.unit.backends._neuron_wan_toy import tiny_wan_config
+
+    def module(*args):
+        raise AssertionError("the DiT must not run at another shape")
+
+    config = tiny_wan_config()
+    adapter = na._OnDeviceTransformer(module, config, torch.float32, "cpu")
+    inputs = {"hidden_states": torch.zeros(TINY_LATENT_SHAPE), "timestep": torch.zeros(1),
+              "encoder_hidden_states": torch.zeros(TINY_TEXT_SHAPE)}
+    assert {k: tuple(v.shape) for k, v in inputs.items()} == na.dit_input_shapes(config)
+    inputs[name] = torch.zeros(shape)
+    with pytest.raises(ValueError, match=rf"'{name}' has shape {re.escape(str(shape))}, "
+                                         r"expected .*the one static shape, 32x48x5"):
+        adapter(*inputs.values())
+    assert adapter.calls == 0
+    # Under CFG parallelism the one call is the [uncond, cond] batch of 2.
+    import dataclasses
+
+    cfg = dataclasses.replace(config, cfg_parallel_enabled=True)
+    assert na.dit_input_shapes(cfg)["hidden_states"][0] == 2
+    with pytest.raises(ValueError, match="CFG-parallel batch of 2"):
+        na._OnDeviceTransformer(module, cfg, torch.float32, "cpu")(
+            torch.zeros(TINY_LATENT_SHAPE), torch.zeros(1), torch.zeros(TINY_TEXT_SHAPE))
 
 
 def test_host_text_encoder_broadcasts_rank0_result():
@@ -348,13 +503,28 @@ def test_application_call_dispatch(tiny):
     with pytest.raises(RuntimeError, match="not loaded"):
         app(torch.zeros(1), torch.zeros(1), torch.zeros(1))
     app.transformer_adapter = lambda *args, **kwargs: ("adapter", len(args), kwargs)
-    app.pipeline = lambda *args, **kwargs: ("pipeline", len(args), kwargs)
+
+    class Pipeline:
+        """The orchestrator's call, and the draw ``__call__`` makes for it without latents."""
+
+        def prepare_latents(self, **kwargs):
+            return ("noise", kwargs["generator"])
+
+        def __call__(self, *args, **kwargs):
+            return ("pipeline", len(args), kwargs)
+
+    app.pipeline = Pipeline()
     x = torch.zeros(1)
     assert app(x, x, x) == ("adapter", 3, {})
     assert app(prompt="a cat", num_inference_steps=2) == (
-        "pipeline", 0, {"prompt": "a cat", "num_inference_steps": 2}
+        "pipeline", 0, {"prompt": "a cat", "num_inference_steps": 2, "latents": ("noise", None)}
     )
-    assert app("a cat", guidance_scale=5.0) == ("pipeline", 1, {"guidance_scale": 5.0})
+    assert app("a cat", guidance_scale=5.0, latents=x) == (
+        "pipeline", 1, {"guidance_scale": 5.0, "latents": x})
+    with pytest.raises(ValueError, match="seed or generator"):
+        app(prompt="a cat", seed=1, generator=torch.Generator())
+    with pytest.raises(TypeError, match="seed applies to the orchestrator call"):
+        app(x, x, x, seed=1)
     # The DiffletPipeline contract (difflet_pipeline.py inspects these parameter names).
     assert list(inspect.signature(app.load).parameters) == [
         "compiled_model_path", "start_rank_id", "local_ranks_size", "skip_warmup"
@@ -374,6 +544,21 @@ def test_application_call_dispatch(tiny):
             _composed(tiny, **kwargs)
     with pytest.raises(TypeError, match="encoder_thread"):
         _composed(tiny, encoder_thread=4)
+
+
+def test_every_rank_starts_from_rank0s_initial_noise(tiny):
+    """Each rank's global RNG and generator differ; the initial latents are rank 0's draw on
+    every rank, exactly what the orchestrator itself would have drawn there."""
+    results = run_ranks(w1_wan_initial_noise_worker, tiny.dir, world_size=4, env=OFFLINE)
+    shape = TINY_LATENT_SHAPE
+    expected = {
+        "global_rng": torch.randn(shape, generator=torch.Generator().manual_seed(100)),
+        "seed": torch.randn(shape, generator=torch.Generator().manual_seed(7)),
+        "generator": torch.randn(shape, generator=torch.Generator().manual_seed(7)),
+    }
+    for result in results:
+        for name, want in expected.items():
+            assert torch.equal(torch.tensor(result[name]), want), name
 
 
 def test_prompt_goes_through_the_tokenizer_and_the_host_encoder(tiny):
@@ -568,14 +753,74 @@ def test_cfg_parallel_on_four_ranks_matches_tp1(tiny):
         assert result["sha256"] == results[0]["sha256"]
         assert result["dit_calls"] == 2  # one batched call per step, not two
         assert result["unwarmed_shapes"] == []
+        # Review T3: each rank's blocks see its own branch of the pair, batch 1, and every
+        # token; a module running both branches on every rank would match the reference too.
+        assert result["block_rows"] == [[1, _tokens(tiny)]] * 2
     torch.testing.assert_close(torch.tensor(results[0]["latents"]), reference,
                                atol=1e-4, rtol=1e-4)
 
 
-def test_cfg_parallel_refuses_the_device_text_encoder(tiny):
-    with pytest.raises(ValueError, match="encode on the host"):
-        _composed(tiny, parallel=DiffletParallelConfig(tp_degree=2, cfg_parallel_enabled=True),
-                  text_encoder_device="neuron")
+def _tokens(tiny) -> int:
+    """The tiny model's patch tokens at TINY_SHAPE: the sequence CP and SP shard."""
+    return NeuronWanConfig.from_pretrained(tiny.transformer, text_seq_len=TINY_TEXT_SEQ_LEN,
+                                           **TINY_SHAPE).image_seq_len
+
+
+def _umt5_budget_between(monkeypatch, root, fits, fails):
+    """A per-core budget (DIFFLET_NEURON_HBM_GIB, which also turns the check on off the device)
+    that the umT5 + DiT estimate at ``fits`` = (tp, experts) meets and at ``fails`` exceeds.
+    The DiT is counted in fp32, the dtype the CPU tests load."""
+    from difflet.backends.neuron.hbm import FIT_FRACTION, GIB
+    from difflet.backends.neuron.wan.hbm import device_text_encoder_bytes
+
+    low, high = (device_text_encoder_bytes(root, tp_degree=tp, experts=experts, dit_dtype_bytes=4)
+                 for tp, experts in (fits, fails))
+    assert low < high
+    monkeypatch.setenv("DIFFLET_NEURON_HBM_GIB", repr((low + high) / 2 / FIT_FRACTION / GIB))
+
+
+@pytest.mark.parametrize("parallel", [
+    DiffletParallelConfig(tp_degree=2, cfg_parallel_enabled=True),
+    DiffletParallelConfig(tp_degree=2, cp_degree=2, cp_mode="ulysses"),
+    DiffletParallelConfig(tp_degree=2),  # one dp2tp2 replica, or a plain tp2
+], ids=["tp2-cfg2", "tp2-cp2", "tp2"])
+def test_a_narrow_tp_refuses_the_device_text_encoder(tiny, monkeypatch, parallel):
+    """The check follows tp and the checkpoint's sizes, not the mode flags: wherever the TP
+    group is too narrow for umT5 to fit beside the DiT, construction fails, before any load."""
+    from difflet.backends.neuron.hbm import HbmBudgetError
+
+    one = ("transformer",)
+    _umt5_budget_between(monkeypatch, tiny.dir, fits=(4, one), fails=(2, one))
+    with pytest.raises(HbmBudgetError, match=r"at tp=2 .*encode on the host \(text_encoder_dev"):
+        _composed(tiny, parallel=parallel, text_encoder_device="neuron")
+    app = _composed(tiny, parallel=DiffletParallelConfig(tp_degree=4),
+                    text_encoder_device="neuron")  # tp4 fits
+    assert isinstance(app.text_encoder, na._DeviceTextEncoder)
+    host = _composed(tiny, parallel=parallel, text_encoder_device="host")  # the host is fine
+    assert isinstance(host.text_encoder, na._HostTextEncoder)
+    # Without the DiT on the core the encoder alone fits.
+    alone = _composed(tiny, parallel=parallel, text_encoder_device="neuron",
+                      enable_transformer=False)
+    assert isinstance(alone.text_encoder, na._DeviceTextEncoder)
+
+
+def test_without_a_budget_the_cpu_does_not_check_the_device_text_encoder(tiny):
+    # On the CPU (no DIFFLET_NEURON_HBM_GIB) there is no HBM to check: the gloo tests run it.
+    app = _composed(tiny, parallel=DiffletParallelConfig(tp_degree=2, cfg_parallel_enabled=True),
+                    text_encoder_device="neuron")
+    assert isinstance(app.text_encoder, na._DeviceTextEncoder)
+
+
+def test_the_low_noise_expert_counts_against_the_device_text_encoder(tiny22, monkeypatch):
+    from difflet.backends.neuron.hbm import HbmBudgetError
+
+    _umt5_budget_between(monkeypatch, tiny22.dir, fits=(4, ("transformer",)),
+                         fails=(4, ("transformer", "transformer_2")))
+    four = DiffletParallelConfig(tp_degree=4)
+    _composed(tiny22, parallel=four, text_encoder_device="neuron")
+    with pytest.raises(HbmBudgetError, match=r"transformer, transformer_2\) on one core"):
+        _composed(tiny22, parallel=four, text_encoder_device="neuron",
+                  enable_transformer_2=True)
 
 
 # ---- context parallelism (TP2 x CP2) -----------------------------------------------------
@@ -589,6 +834,9 @@ def test_context_parallel_on_four_ranks_matches_tp1(tiny, cp_mode):
     results = run_ranks(w1_wan_cp_worker, tiny.dir, cp_mode, world_size=4, env=OFFLINE)
     for result in results:
         assert result["sha256"] == results[0]["sha256"]
+        # Review T4: serial CFG (two batch-1 calls per step), each block on this rank's half of
+        # the tokens; the ranks agreeing proves nothing about the split.
+        assert result["block_rows"] == [[1, _tokens(tiny) // 2]] * 4
     torch.testing.assert_close(torch.tensor(results[0]["latents"]), reference,
                                atol=1e-4, rtol=1e-4)
 
@@ -602,7 +850,11 @@ def test_sequence_parallel_on_four_ranks_matches_tp1(tiny, cfg):
     equal to the TP1 reference, alone and combined with CFG parallelism."""
     reference = tiny_wan_pipeline_reference(tiny.dir, num_inference_steps=2, guidance_scale=5.0)
     results = run_ranks(w1_wan_sp_worker, tiny.dir, cfg, world_size=4, env=OFFLINE)
+    tp = 2 if cfg else 4
     for result in results:
         assert result["sha256"] == results[0]["sha256"]
+        # The blocks see this rank's 1/tp of the tokens, and under CFG parallelism one branch
+        # per call (one call per step), else two batch-1 calls per step.
+        assert result["block_rows"] == [[1, _tokens(tiny) // tp]] * (2 if cfg else 4)
     torch.testing.assert_close(torch.tensor(results[0]["latents"]), reference,
                                atol=1e-4, rtol=1e-4)

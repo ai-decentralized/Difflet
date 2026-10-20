@@ -8,7 +8,9 @@ import inspect
 
 import pytest
 
-ltx2 = pytest.importorskip("difflet.backends.trainium.ltx_2.transformer")
+# The trace module (and its CFG split) moved to the backend-neutral modeling module; the
+# Trainium transformer module re-exports it.
+ltx2 = pytest.importorskip("difflet.models.ltx_2.modeling_ltx_2")
 
 
 def test_ltx2_uses_axis_ops_not_dp():

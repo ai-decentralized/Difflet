@@ -26,6 +26,7 @@ import torch
 from torch import nn
 from diffusers.models.attention_dispatch import dispatch_attention_fn
 
+from difflet.ops.collectives import safe_tensor_parallel_size
 from difflet.ops import (
     ColumnParallelLinear,
     RowParallelLinear,
@@ -166,13 +167,11 @@ def _row_parallel_like(
 
 
 def _safe_tensor_parallel_size() -> int:
-    # "TP not initialized" surfaces differently per backend: NxD asserts, the
-    # TPU mesh raises RuntimeError. Catching only AssertionError made this
-    # backend-neutral module quietly Trainium-specific.
-    try:
-        return int(get_tensor_model_parallel_size())
-    except (AssertionError, RuntimeError):
-        return 1
+    """tp_degree if a TP group is initialized, else 1 where the backend means a tp=1 build
+    (``difflet.ops.collectives.safe_tensor_parallel_size``: NxD asserts, the TPU mesh raises
+    ``ParallelMeshNotInitializedError``); the neuron backend's uninitialised multi-rank mesh
+    raises instead of silently building unsharded."""
+    return safe_tensor_parallel_size(get_tensor_model_parallel_size)
 
 
 def _replace_qwen_linears_for_tp(transformer: nn.Module, sp_enabled: bool = False) -> None:
@@ -463,9 +462,12 @@ class _QwenImageTransformerTraceModule(nn.Module):
         # SP reuses the TP group: the materialized SPMDRank buffer is the
         # per-rank id the fork's entry scatter reads (loaded as
         # ``sp_rank_util.rank = arange(tp)``; see convert_hf_to_neuron_state_dict).
-        self.sp_rank_util = (
-            SPMDRank(world_size=int(config.neuron_config.tp_degree)) if self.sp_enabled else None
-        )
+        # The Trainium config nests tp under ``neuron_config``; the neuron
+        # backend's NeuronQwenImageConfig carries it directly (its SPMDRank is
+        # stateless: one process per rank, the rank is a Python int).
+        neuron_config = getattr(config, "neuron_config", None)
+        sp_tp_degree = int(getattr(neuron_config, "tp_degree", None) or config.tp_degree)
+        self.sp_rank_util = SPMDRank(world_size=sp_tp_degree) if self.sp_enabled else None
         # One packed shape per compiled bucket, keyed by image_seq_len. The
         # forward selects by hidden_states.shape[1], which is a concrete value
         # during each bucket's trace, so every bucket NEFF bakes its own RoPE

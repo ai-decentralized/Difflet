@@ -6,22 +6,25 @@ Inter-stage tensor: {work_dir}/latents.pt
 
 With DIFFLET_BACKEND naming a non-AoT torchrun backend (neuron), the transformer stage runs as
 torchrun ranks that build the registry's application through DiffletPipeline
-(_stage_transformer_neuron), the VAE decodes on the host (--host-vae is forced), the stage
-cache key names the backend and exec mode, and --cache-dir becomes DIFFLET_COMPILE_CACHE (the
-NEFF/HLO cache root) unless that is exported. Unset, trainium and tpu keep their paths unchanged.
+(_stage_transformer_neuron). Those ranks run TP, SP, CFG and CP at one static shape, and the
+DiT sits on every rank's core. umT5 also runs on the device (fp32, TP-sharded) unless
+--host-text-encoder is given. When the TP group is too narrow for umT5 to fit beside the DiT
+(_place_text_encoder), the driver sets that flag itself and says so. The VAE decodes in a vae
+stage of its own on one core (_stage_vae_neuron, fp32 eager), or on the host with --host-vae.
+DP replicas (--dp) are separate torchrun launches; each one's rank 0 claims the requests
+(_replica_requests). The stage cache key names the backend and exec mode, and --cache-dir
+becomes DIFFLET_COMPILE_CACHE (the NEFF/HLO cache root) unless that is exported. Unset,
+trainium and tpu keep their paths unchanged.
 """
 from __future__ import annotations
 
 import argparse
-import contextlib
-import functools
 import json
 import re
 import shutil
 import sys
 from pathlib import Path
 
-from difflet import envs
 from difflet.cli import runner
 from difflet.cli.orchestrators.base import (
     ModelOrchestrator,
@@ -34,13 +37,16 @@ from difflet.cli.orchestrators.base import (
     write_stage_manifest,
 )
 from difflet.cli.orchestrators.torchrun import (
-    replica_request_scope,
-    replica_requests,
-    fallback_tracker as _fallback_tracker,
+    device_encoder_overflow,
+    refuse,
     reject_unsupported_torchrun_options,
+    replica_cores,
     root_compile_cache_at_cache_dir,
+    run_generate_stage,
+    run_vae_stage,
     torchrun_backend as _torchrun_backend,
-    torchrun_unsupported_options as _torchrun_unsupported_options,
+    torchrun_stage_keys,
+    torchrun_unsupported_options,
 )
 
 # Model id comes from the CLI (--model-id); both Wan 2.2 A14B (MoE, dual
@@ -160,6 +166,15 @@ def _write_frames(frames, output: str) -> None:
     print(f"[wan] video tensor saved to {pt_path}")
 
 
+def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
+    """The options the torchrun (neuron) ranks reject in phase 1, as the command line names
+    them: every torchrun backend's (TeaCache), plus a --shapes with more than one shape. The
+    application holds one static shape per process (``_resolve_shape``), so a bucketed set
+    used to fail only after torchrun had started every rank. Torch-free: the shapes are
+    counted, not parsed, so a malformed --shapes fails where it always did."""
+    return torchrun_unsupported_options(args)
+
+
 def _require_request_shape_in_set(args: argparse.Namespace):
     return require_request_shape_in_set(
         args, default_shape=(480, 832, 9), model_tag="wan"
@@ -169,7 +184,9 @@ def _require_request_shape_in_set(args: argparse.Namespace):
 # TorchNeuronWanApplication keyword arguments for the torchrun transformer stage: the Trainium
 # stage's set, exec_mode=None (the application reads DIFFLET_EXEC_MODE, which --exec-mode
 # exports), umT5 on the device (fp32, TP-sharded; --host-text-encoder keeps it on rank 0's
-# host) and, for the host encoder, 12 threads (D70: its fp32 output bits depend on the count).
+# host, and the driver sets that flag itself when the TP group is too narrow for the encoder to
+# fit beside the DiT: WanOrchestrator._place_text_encoder) and, for the host encoder, 12 threads
+# (D70: its fp32 output bits depend on the count).
 _TORCHRUN_APPLICATION_KWARGS = {
     "text_seq_len": 512,
     "batch_size": 1,
@@ -181,12 +198,6 @@ _TORCHRUN_APPLICATION_KWARGS = {
     "encoder_threads": 12,
     "text_encoder_device": "neuron",
 }
-
-
-# The replica claim loop and request scope live in orchestrators/torchrun.py, shared with Flux;
-# Wan's transformer stage is not the final one (its VAE stage marks requests done).
-_replica_requests = replica_requests
-_replica_request_scope = functools.partial(replica_request_scope, final=False)
 
 
 def _dual_expert_misuse(args: argparse.Namespace, torchrun_backend: str | None) -> str | None:
@@ -244,17 +255,51 @@ class WanOrchestrator(ModelOrchestrator):
         reject_unsupported_torchrun_options(
             # TeaCache runs on Wan's neuron path (the stage forwards its flags): not refused.
             [f for f in _torchrun_unsupported_options(self.args) if not f.startswith("--teacache")],
-            runs="tensor, sequence, CFG and context parallelism and TeaCache",
+            runs="tensor, sequence, CFG and context parallelism at one static shape, DP "
+            "replicas and TeaCache",
         )
 
     def _reject_dual_expert_misuse(self) -> None:
         """--dual-expert off the neuron backend, or --guidance-scale-2 without it: print one
         message and exit 2 before anything is launched (or downloaded, for ``run``)."""
-        problem = _dual_expert_misuse(self.args, _torchrun_backend())
-        if problem is None:
+        refuse(_dual_expert_misuse(self.args, _torchrun_backend()))
+
+    def _place_text_encoder(self) -> None:
+        """On a torchrun backend (neuron), move umT5 to rank 0's host when it cannot fit on the
+        device beside the DiT at this TP degree, and print one line saying so.
+
+        The CLI default is the device encoder (``_TORCHRUN_APPLICATION_KWARGS``). A topology that
+        narrows the TP group (``--cfg-parallel`` or ``--cp-degree>1`` with ``--tp-degree 2``,
+        ``--mode latency``'s CFG, DP replicas of tp2, a plain tp2) leaves each core at least
+        10.6 GiB of fp32 encoder beside 13.3 GiB of DiT, more than its HBM. Before this check the
+        application refused it only after torchrun had started every rank. The estimate
+        (``difflet/backends/neuron/wan/hbm.py``) depends on the tp the transformer stage runs and
+        the local checkpoint's sizes. Weights that are not local yet (``compile`` before any
+        download) leave the flag alone, and the application's own check still refuses. The
+        setting lands on ``self.args``, so ``_shared_cli_args`` hands it to the stages, and a
+        ``run`` that dispatches DP workers after ``compile`` forwards it to them
+        (``worker_cli_args``). Torch-free, like every driver check.
+        """
+        args = self.args
+        if _torchrun_backend() is None or getattr(args, "host_text_encoder", False):
             return
-        print(f"Error: {problem}; nothing was launched.", file=sys.stderr, flush=True)
-        raise SystemExit(2)
+        from difflet.backends.neuron.wan.hbm import device_text_encoder_fits
+        from difflet.pipeline.path_resolver import resolve_model_path
+
+        experts = (("transformer", "transformer_2") if getattr(args, "dual_expert", False)
+                   else ("transformer",))
+        overflow = device_encoder_overflow(
+            lambda: resolve_model_path(args.model_id, revision=args.revision,
+                                       local_files_only=True),
+            lambda model_dir, tp_degree: device_text_encoder_fits(
+                model_dir, tp_degree=tp_degree, experts=experts),
+            args.tp_degree or 4,
+        )
+        if overflow is None:
+            return
+        args.host_text_encoder = True
+        print(f"[wan] umT5 on the device {overflow}: encoding on rank 0's host instead "
+              "(--host-text-encoder)", flush=True)
 
     def run(self) -> None:
         self._reject_unsupported_torchrun_options()  # before the download, too
@@ -269,10 +314,9 @@ class WanOrchestrator(ModelOrchestrator):
     def compile(self) -> None:
         self._reject_unsupported_torchrun_options()
         self._reject_dual_expert_misuse()
+        self._place_text_encoder()
         self._root_compile_cache_at_cache_dir()
-        full_cores = (self.args.tp_degree or 4) * (self.args.cp_degree or 1) * (
-            2 if getattr(self.args, "cfg_parallel", False) else 1
-        )
+        full_cores = replica_cores(self.args)
         shared = self._shared_cli_args(stage_mode="compile")
         runner.run_stage(self.args.model_id, "transformer",
                          num_cores=full_cores,
@@ -287,14 +331,13 @@ class WanOrchestrator(ModelOrchestrator):
     def generate(self) -> None:
         self._reject_unsupported_torchrun_options()
         self._reject_dual_expert_misuse()
+        self._place_text_encoder()
         self._root_compile_cache_at_cache_dir()
         _require_request_shape_in_set(self.args)  # fail fast before any stage runs
         work_dir = Path(self.args.work_dir or
                         Path.home() / ".cache" / "difflet" / "work" / _CLI_NAME)
         work_dir.mkdir(parents=True, exist_ok=True)
-        full_cores = (self.args.tp_degree or 4) * (self.args.cp_degree or 1) * (
-            2 if getattr(self.args, "cfg_parallel", False) else 1
-        )
+        full_cores = replica_cores(self.args)
         shared = self._shared_cli_args(stage_mode="generate", work_dir=str(work_dir))
         try:
             runner.run_stage(self.args.model_id, "transformer",
@@ -409,104 +452,52 @@ class WanOrchestrator(ModelOrchestrator):
     def _stage_transformer_neuron(self, args: argparse.Namespace, backend: str) -> None:
         """The transformer stage on a non-AoT torchrun backend (neuron); runs on every rank.
 
-        ``DiffletPipeline.from_pretrained`` prepares the runtime (NEFF cache, core binding, the
-        process group) before it builds the registry's application (TorchNeuronWanApplication),
-        and ``load(skip_warmup=False)`` compiles or loads the blocks at the static shape, so the
-        step loop compiles nothing. Nothing is built ahead of time: ``compile`` mode is that
-        warm-up (it fills the NEFF cache) plus the stage manifest; ``generate`` requires no
-        artifact. Every rank runs the same generate and rank 0 alone writes files: ``work_file``
-        and the compiled dir are the same path on every rank. The process group is destroyed
-        after a successful stage only: a failing rank exits with its exception and torchrun
-        stops its peers, which may be blocked in a collective.
+        ``run_generate_stage`` builds the registry's application (TorchNeuronWanApplication)
+        through ``DiffletPipeline``, loads it with the warm-up (``compile`` mode is that plus the
+        stage manifest) and runs the replica's requests. Wan's part: the request's shape on the
+        call (the orchestrator draws the noise for it), two steps and guidance 1.0 unless the
+        request or the command line say otherwise, the low-noise expert's guidance only when
+        --guidance-scale-2 is given (the orchestrator otherwise uses --guidance-scale
+        throughout), and the latents written by rank 0 to the request's ``latents.pt``.
         """
-        import time
-
         import torch
-        import torch.distributed as dist
 
-        from difflet.backends.neuron.compile import resolve_exec_mode
-        from difflet.backends.neuron.core import distributed
         from difflet.cli.dp import stage_loop
-        from difflet.pipeline.difflet_pipeline import DiffletPipeline
-        from difflet.pipeline.parallel_config import DiffletParallelConfig
 
         compile_shapes = _require_request_shape_in_set(args)
         h, w, f = args.height or 480, args.width or 832, args.num_frames or 9
-        # The whole parallel request: the backend rejects what it does not run (cp, cfg, sp)
-        # rather than the stage dropping it.
-        parallel = DiffletParallelConfig(
-            tp_degree=args.tp_degree or 4,
-            cp_degree=args.cp_degree or 1,
-            cp_mode=getattr(args, "cp_mode", "gather_kv"),
-            cfg_parallel_enabled=getattr(args, "cfg_parallel", False),
-            sp_enabled=getattr(args, "sp_enabled", False),
-        )
-        start = time.perf_counter()
-        pipe = DiffletPipeline.from_pretrained(
-            self.args.model_id,
-            revision=self.args.revision,
-            local_files_only=True,
-            parallel=parallel,
-            dtype=torch.bfloat16,
-            height=h,
-            width=w,
-            num_frames=f,
-            shapes=compile_shapes,
-            compile_cache_dir=args.cache_dir,
-            backend=backend,
+        low_noise = ({"guidance_scale_2": float(args.guidance_scale_2)}
+                     if getattr(args, "guidance_scale_2", None) is not None else {})
+
+        def request_kwargs(req) -> dict:
+            return dict(
+                generator=torch.Generator().manual_seed(req.seed),
+                prompt=req.prompt,
+                height=h,
+                width=w,
+                num_frames=f,
+                num_inference_steps=int(stage_loop.effective(req, args, "steps", 2)),
+                guidance_scale=float(stage_loop.effective(req, args, "guidance_scale", 1.0)),
+                output_type="latent",
+                **low_noise,
+            )
+
+        def save(req, out) -> None:
+            latents_out = out.latents if hasattr(out, "latents") else out[0]
+            dest = stage_loop.work_file(args, req, "latents.pt")
+            torch.save(latents_out.cpu(), dest)
+            print(f"[wan] latents saved to {dest}", flush=True)
+
+        run_generate_stage(
+            args, backend, tag="wan", model_id=self.args.model_id,
+            pipeline_kwargs=dict(revision=self.args.revision, height=h, width=w, num_frames=f,
+                                 shapes=compile_shapes),
             application_kwargs=_torchrun_application_kwargs(args),
-            load=False,
+            request_kwargs=request_kwargs,
+            save=save,
+            finish_compile=lambda: self._finish_stage_compile(
+                "transformer", args, self._stage_compiled_dir("transformer", args)),
         )
-        with _fallback_tracker(pipe) as load_fallbacks:
-            pipe.load(skip_warmup=False)
-        load_s = time.perf_counter() - start
-
-        generate_fallbacks: list = []
-        if args.stage_mode == "compile":
-            if distributed.is_rank0():
-                self._finish_stage_compile(
-                    "transformer", args, self._stage_compiled_dir("transformer", args)
-                )
-        else:
-            # Only when given: the orchestrator otherwise uses --guidance-scale throughout.
-            low_noise = ({"guidance_scale_2": float(args.guidance_scale_2)}
-                         if getattr(args, "guidance_scale_2", None) is not None else {})
-            for req in _replica_requests(args, device=getattr(pipe.app, "device", None)):
-                with _replica_request_scope(args, req):
-                    with _fallback_tracker(pipe) as fallbacks:
-                        out = pipe(
-                            generator=torch.Generator().manual_seed(req.seed),
-                            prompt=req.prompt,
-                            height=h,
-                            width=w,
-                            num_frames=f,
-                            num_inference_steps=int(stage_loop.effective(req, args, "steps", 2)),
-                            guidance_scale=float(
-                                stage_loop.effective(req, args, "guidance_scale", 1.0)
-                            ),
-                            output_type="latent",
-                            **low_noise,
-                        )
-                    generate_fallbacks.extend(fallbacks)
-                    latents_out = out.latents if hasattr(out, "latents") else out[0]
-                    if distributed.is_rank0():
-                        dest = stage_loop.work_file(args, req, "latents.pt")
-                        torch.save(latents_out.cpu(), dest)
-                        print(f"[wan] latents saved to {dest}", flush=True)
-
-        app = pipe.app
-        rank, world = distributed.world_info()
-        print(
-            f"[wan] {backend} rank {rank}/{world}: "
-            f"exec_mode={resolve_exec_mode(envs.DIFFLET_EXEC_MODE)} "
-            f"compiled_blocks={len(getattr(app, 'compiled_blocks', []))} "
-            f"unwarmed_shapes={list(getattr(app, 'unwarmed_shapes', []))} "
-            f"fallbacks: load={list(load_fallbacks)} generate={generate_fallbacks} "
-            f"load+warmup {load_s:.1f}s, stage {time.perf_counter() - start:.1f}s",
-            flush=True,
-        )
-        if dist.is_initialized():
-            dist.destroy_process_group()
 
     def _stage_vae(self, args: argparse.Namespace) -> None:
         if _torchrun_backend() is not None:
@@ -567,21 +558,18 @@ class WanOrchestrator(ModelOrchestrator):
                 _write_frames(frames, req.output)
 
     def _stage_vae_neuron(self, args: argparse.Namespace) -> None:
-        """The neuron backend's vae stage, structured as Trainium's: a launch of its own after
-        the transformer stage has exited, so the decoder's activations (about 12 GiB per core at
-        480x832 in fp32) never share a core with the DiT and the text encoder. One rank decodes
-        in fp32, eager (``NeuronWanVaeDecoderApplication``). ``compile`` mode loads it with the
-        warm-up decode, which compiles and caches the per-op kernels at the request shape, and
-        writes the manifest; ``generate`` skips the warm-up, a second full decode that eager
-        mode does not need (the request's decode compiles whatever the cache lacks). The
-        latents are un-normalised as the host decode and the orchestrator do."""
+        """The neuron backend's vae stage (``run_vae_stage``), structured as Trainium's: a launch
+        of its own after the transformer stage has exited, so the decoder's activations (about
+        12 GiB per core at 480x832 in fp32) never share a core with the DiT and the text
+        encoder. One rank decodes in fp32, eager (``NeuronWanVaeDecoderApplication``) at the
+        request's latent video shape. The latents are un-normalised as the host decode and the
+        orchestrator do, and rank 0 writes the frames."""
         import torch
 
         from difflet.backends.neuron.core import distributed
         from difflet.backends.neuron.wan.vae import NeuronWanVaeDecoderApplication
         from difflet.cli.dp import stage_loop
         from difflet.models.wan.neuron_application import _DeviceVaeDecoder
-        from difflet.pipeline.parallel_config import DiffletParallelConfig
         from difflet.pipeline.path_resolver import resolve_model_path
 
         model_dir = resolve_model_path(self.args.model_id, revision=self.args.revision,
@@ -590,21 +578,20 @@ class WanOrchestrator(ModelOrchestrator):
         with open(vae_dir / "config.json", encoding="utf-8") as f:
             z_dim = int(json.load(f)["z_dim"])
         h, w, frames_count = args.height or 480, args.width or 832, args.num_frames or 9
-        app = NeuronWanVaeDecoderApplication(
-            model_path=str(vae_dir),
-            latent_shape=(1, z_dim, (frames_count - 1) // 4 + 1, h // 8, w // 8),
-            parallel=DiffletParallelConfig(tp_degree=1),
-            device="neuron",
-        )
-        app.load(skip_warmup=args.stage_mode != "compile")
-        if args.stage_mode == "compile":
-            if distributed.is_rank0():
-                self._finish_stage_compile("vae", args, self._stage_compiled_dir("vae", args))
-            return
-        decoder = _DeviceVaeDecoder(app, device="neuron")
-        config = app.vae_config
-        for req in stage_loop.claimed_requests(args):
-            with stage_loop.request_scope(args, req, final=True):
+
+        def build(parallel):
+            return NeuronWanVaeDecoderApplication(
+                model_path=str(vae_dir),
+                latent_shape=(1, z_dim, (frames_count - 1) // 4 + 1, h // 8, w // 8),
+                parallel=parallel,
+                device="neuron",
+            )
+
+        def prepare_decode(app):
+            decoder = _DeviceVaeDecoder(app, device="neuron")
+            config = app.vae_config
+
+            def decode(req) -> None:
                 z = torch.load(stage_loop.work_file(args, req, "latents.pt"),
                                map_location="cpu").to(torch.float32)
                 if config.latents_mean and config.latents_std:
@@ -614,22 +601,18 @@ class WanOrchestrator(ModelOrchestrator):
                 if distributed.is_rank0():
                     _write_frames(frames, req.output)
 
+            return decode
+
+        run_vae_stage(
+            args, build=build, prepare_decode=prepare_decode,
+            finish_compile=lambda: self._finish_stage_compile(
+                "vae", args, self._stage_compiled_dir("vae", args)),
+        )
+
     # ------------------------------------------------------------ helpers
 
     def _stage_cache_inputs(self, stage: str, args: argparse.Namespace) -> dict:
-        inputs = self._backend_neutral_stage_cache_inputs(stage, args)
-        backend = _torchrun_backend()
-        if backend is None:
-            return inputs
-        from difflet.backends.neuron.compile import resolve_exec_mode
-
-        # Additive, torchrun backends only: their stage dirs never match a Trainium/TPU
-        # artifact, and eager vs compile differ (an omitted --exec-mode keys as the default).
-        return {
-            **inputs,
-            "backend": backend,
-            "exec_mode": resolve_exec_mode(envs.DIFFLET_EXEC_MODE),
-        }
+        return torchrun_stage_keys(self._backend_neutral_stage_cache_inputs(stage, args))
 
     def _backend_neutral_stage_cache_inputs(self, stage: str, args: argparse.Namespace) -> dict:
         prefix = _cache_prefix(self.args.model_id)

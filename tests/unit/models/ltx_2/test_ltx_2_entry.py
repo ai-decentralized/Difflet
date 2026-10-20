@@ -35,7 +35,7 @@ def test_package_reexports_public_symbols():
 
 
 def test_entry_rejects_non_trainium_backend(tmp_path):
-    with pytest.raises(NotImplementedError, match="trainium backend"):
+    with pytest.raises(NotImplementedError, match="trainium and neuron backends"):
         create_ltx_2_application(
             model_path=str(tmp_path),
             parallel=DiffletParallelConfig(tp_degree=1),

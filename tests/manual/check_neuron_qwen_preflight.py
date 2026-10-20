@@ -29,7 +29,9 @@ Launch (one device job at a time; ``W`` a records directory), e.g. TP4 eager:
 
 and compile mode against the eager outputs: ``--exec-mode compile --compare eager=W/l4-eager/out.pt
 --expect cold`` (``--expect warm --equal-to W/l4-cold/out.pt`` on the second launch). Add
-``DIFFLET_NEURON_PG_TIMEOUT_S=7200`` for a launch that cold-compiles.
+``DIFFLET_NEURON_PG_TIMEOUT_S=7200`` for a launch that cold-compiles. ``--sp`` builds the
+Megatron-SP fork (``QwenImageSPTransformer2DModel``) over the TP group; gate it against the
+non-SP launch of the same tp with ``--compare tp=W/l4-eager/out.pt``.
 
 Checks (every rank; rank 0 prints one PASS/FAIL line each, every rank a summary line):
 
@@ -115,6 +117,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--tp-degree", type=int, default=None, help="default: WORLD_SIZE / cp")
     p.add_argument("--cp-degree", type=int, default=1)
     p.add_argument("--cp-mode", choices=("gather_kv", "ulysses", "ring"), default="gather_kv")
+    p.add_argument("--sp", action="store_true",
+                   help="sequence parallelism within the TP group (not with --cp-degree > 1)")
     p.add_argument("--save", type=Path, required=True, help="rank 0's outputs (fp32, .pt)")
     p.add_argument("--out-json", type=Path, required=True)
     p.add_argument("--compare", action="append", default=[], metavar="NAME=PATH",
@@ -225,7 +229,8 @@ def main() -> int:
     snaps = {"pre_prepare": wanpf.snapshot(t0, device=False, runtime_started=False)}
     world = int(os.environ.get("WORLD_SIZE", "1"))
     tp, cp = args.tp_degree, args.cp_degree
-    parallel = DiffletParallelConfig(tp_degree=tp, cp_degree=cp, cp_mode=args.cp_mode)
+    parallel = DiffletParallelConfig(tp_degree=tp, cp_degree=cp, cp_mode=args.cp_mode,
+                                     sp_enabled=args.sp)
     get_backend("neuron").prepare_runtime(parallel)
     prepare_s = time.perf_counter() - t0
 
@@ -240,7 +245,7 @@ def main() -> int:
     config = NeuronQwenImageConfig.from_pretrained(
         transformer_dir, num_layers=args.num_layers, height=args.height, width=args.width,
         text_seq_len=args.text_seq_len, tp_degree=tp, context_parallel_enabled=cp > 1,
-        cp_mode=args.cp_mode, torch_dtype=torch.bfloat16,
+        cp_mode=args.cp_mode, sp_enabled=args.sp, torch_dtype=torch.bfloat16,
     )
     app = NeuronQwenImageTransformerApplication(
         model_path=transformer_dir, config=config, parallel=parallel, dtype=torch.bfloat16,

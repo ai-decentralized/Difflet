@@ -48,6 +48,11 @@ class ModelCapabilities:
     # Empty whenever supports_cp is False. A subset when a model wires context
     # parallelism but not every attention strategy.
     cp_modes: frozenset[str] = _ALL_CP_MODES
+    # Backends on which a model that is distilled by default runs opt-in true
+    # classifier-free guidance (two branches per step, --true-cfg-scale > 1 with
+    # a negative prompt), so --cfg-parallel can split those branches there. The
+    # planner and --mode keep treating the model as distilled.
+    true_cfg_backends: frozenset[str] = frozenset()
 
     def __post_init__(self) -> None:
         if self.num_attention_heads < 1:
@@ -284,7 +289,8 @@ def _register_builtin_wan() -> None:
         ),
         # Wan is the second model on the TPU backend, single-expert by default
         # (see difflet/models/wan/tpu_application.py on expert residency), and the first
-        # on the neuron backend (TorchNeuron, torchrun ranks; host umT5 and host VAE).
+        # on the neuron backend (TorchNeuron, torchrun ranks; umT5 and the VAE on the device
+        # or the host).
         backends=("trainium", "tpu", "neuron"),
     )
     class _WanRegistration:
@@ -389,6 +395,10 @@ def _register_builtin_qwen_image() -> None:
             # scatter_to_process_group_spmd with a materialized SPMDRank buffer,
             # the same primitive wan's validated SP path uses).
             supports_sp=True,
+            # One forward per step by default; the neuron application runs diffusers'
+            # opt-in true CFG (true_cfg_scale > 1 with a negative prompt) and can split
+            # its two branches over a CFG group.
+            true_cfg_backends=frozenset({"neuron"}),
         ),
         # Qwen-Image is the first model on the TPU backend (plan Phase 4), and the second on
         # the neuron backend (TorchNeuron, torchrun ranks; host Qwen2.5-VL, host or device VAE).
@@ -471,7 +481,10 @@ def _register_builtin_ltx_2() -> None:
             supports_sp=False,
             cp_modes=frozenset(),
         ),
-        backends=("trainium",),
+        # The neuron backend (TorchNeuron, torchrun ranks) runs the DiT on the device with TP
+        # and CFG parallelism; the Gemma-3 text path stays on rank 0's host and the decode on
+        # the host after the generate launch.
+        backends=("trainium", "neuron"),
         download_patterns=(
             "*.json",
             "*.txt",

@@ -5,8 +5,11 @@ Execution model: one process per NeuronCore (torchrun MPMD), eager or
 bound to one core through ``NEURON_RT_VISIBLE_CORES`` before the Neuron runtime
 starts, and ranks communicate through the ``neuron`` process group.
 
-Phase 1 supports tensor parallelism only; context, CFG, sequence and data
-parallelism raise until their collectives are validated on this backend.
+Within one launch the backend runs tensor parallelism, with or without sequence
+parallelism, CFG parallelism, and context parallelism in every cp_mode (gather_kv, ulysses,
+ring); each model's application rejects what its own modeling does not run (Qwen-Image: SP and
+CFG). Data parallelism is replicas, separate torchrun launches of the CLI's request router, so
+``dp_degree > 1`` within one launch raises (``check_parallel_supported``).
 
 ``prepare_runtime`` first points torch-neuronx's persistent NEFF cache at the Difflet
 compile cache (``compile.configure_compile_cache``): the runtime reads it once, when it
@@ -35,6 +38,13 @@ from difflet.backends.neuron.compile import configure_compile_cache
 PROCESS_GROUP_BACKEND = "neuron"
 VISIBLE_CORES_ENV = "NEURON_RT_VISIBLE_CORES"
 PG_TIMEOUT_ENV = "DIFFLET_NEURON_PG_TIMEOUT_S"
+#: The process-group timeout the CLI launcher gives torchrun ranks when ``PG_TIMEOUT_ENV`` is
+#: unset or blank (``runner._prepare_mpmd_env``): 3 h. torch's own default, 30 min, is shorter
+#: than what a rank can legitimately wait on a peer in a cold launch: rank 0 reading the host
+#: Gemma-3 (50 GB fp32, 374-407 s) or umT5 while the others wait in the status all-reduce, a
+#: cold Wan 81-frame warm-up (1084 s), a cold page cache under both. Two device campaigns had to
+#: export DIFFLET_NEURON_PG_TIMEOUT_S=7200 by hand (review S3). An exported value wins.
+TORCHRUN_PG_TIMEOUT_S = 3 * 3600
 
 # Set once prepare_runtime has configured this process; a later call (a second pipeline)
 # finds the runtime it started and goes ahead.
@@ -150,7 +160,8 @@ def process_group_timeout() -> datetime.timedelta | None:
     The value is a positive number of seconds; unset or blank returns None, which leaves
     torch's default (30 min for non-NCCL groups). The neuron backend's watchdog fails a
     collective that waits longer than this, so a launch whose ranks can wait on a peer for
-    more than 30 min (a cold compile of a large block graph) raises it.
+    more than 30 min (a cold compile of a large block graph) raises it. The CLI's torchrun
+    launches set it to ``TORCHRUN_PG_TIMEOUT_S`` (3 h) unless it is exported.
     """
     raw = envs.DIFFLET_NEURON_PG_TIMEOUT_S
     if raw is None or not raw.strip():

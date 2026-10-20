@@ -169,11 +169,20 @@ def test_entry_routes_neuron_and_registry_lists_it(tiny):
     assert type(app) is na.TorchNeuronQwenImageApplication
     assert app.config.image_seq_len == TINY_PACKED[0] * TINY_PACKED[1]
     assert app.config.cp_degree == 1  # filled from the parallel config by the DiT application
-    with pytest.raises(NotImplementedError, match="guidance-distilled"):
-        create_qwen_image_application(
-            model_path=tiny.dir, parallel=DiffletParallelConfig(cfg_parallel_enabled=True),
-            dtype=torch.float32, shape=dict(TINY_SHAPE), backend="neuron", device="cpu",
-        )
+    # CFG parallelism serves the neuron application's opt-in true CFG; the Trainium and TPU
+    # paths run one forward per step and still refuse it.
+    cfg_app = create_qwen_image_application(
+        model_path=tiny.dir, parallel=DiffletParallelConfig(cfg_parallel_enabled=True),
+        dtype=torch.float32, shape=dict(TINY_SHAPE), backend="neuron", device="cpu",
+        text_seq_len=TINY_TEXT_SEQ_LEN, enable_text_encoder=False,
+    )
+    assert cfg_app.config.cfg_parallel_enabled and cfg_app.config.dit_batch == 2
+    for backend in ("trainium", "tpu"):
+        with pytest.raises(NotImplementedError, match="guidance-distilled"):
+            create_qwen_image_application(
+                model_path=tiny.dir, parallel=DiffletParallelConfig(cfg_parallel_enabled=True),
+                dtype=torch.float32, shape=dict(TINY_SHAPE), backend=backend,
+            )
     with pytest.raises(NotImplementedError, match="trainium, tpu and neuron backends, got 'cuda'"):
         create_qwen_image_application(
             model_path=tiny.dir, parallel=DiffletParallelConfig(), dtype=torch.float32,
@@ -208,13 +217,13 @@ def test_kwargs_mirror_the_cli_and_reject_phase1_limits(tiny):
         ({"teacache_fused": True}, "teacache_fused"),
         ({"shapes": ((64, 96, None), (32, 48, None))}, "one static shape"),
         ({"batch_size": 2}, "batch_size"),
-        ({"parallel": DiffletParallelConfig(cfg_parallel_enabled=True)}, "guidance-distilled"),
-        ({"parallel": DiffletParallelConfig(sp_enabled=True)},
-         "sequence parallelism is not implemented"),
         ({"parallel": DiffletParallelConfig(dp_degree=2)}, "dp_degree=2"),
     ):
         with pytest.raises(NotImplementedError, match=match):
             _composed(tiny, **kwargs)
+    # Sequence parallelism reaches the DiT's config (SP with CP is refused by the parallel
+    # config itself and again by NeuronQwenImageConfig, as for Wan).
+    assert _composed(tiny, parallel=DiffletParallelConfig(sp_enabled=True)).config.sp_enabled
     with pytest.raises(TypeError, match="encoder_thread"):
         _composed(tiny, encoder_thread=4)
     with pytest.raises(ValueError, match="text_encoder_dtype"):
@@ -337,6 +346,32 @@ def test_host_text_encoder_with_the_stub_on_one_rank(caplog):
     encoder.tokenizer = StubQwenTokenizer(n_prompt=3)
     with pytest.raises(ValueError, match="joint_attention_dim=24"):
         encoder("a cat")
+
+
+def test_host_text_encoder_load_spends_one_encode_before_any_request(monkeypatch):
+    """The first encode of a fresh process was not reproducible under host CPU contention (a
+    dp2tp2 replica's first request on the trn2, 2026-10-18; 4 of 51 fresh CPU processes), later
+    ones always were: load() encodes a fixed prompt once and discards it, with the encode
+    threads, so the first request is the process's second encode and its result is unchanged."""
+    import transformers
+
+    tok, vl = StubQwenTokenizer(n_prompt=3), StubQwenVL()
+    vl.eval = lambda: vl
+    vl.requires_grad_ = lambda flag: vl
+    monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", lambda *a, **k: tok)
+    monkeypatch.setattr(transformers.Qwen2_5_VLForConditionalGeneration, "from_pretrained",
+                        lambda *a, **k: vl)
+    encoder = na._HostQwenTextEncoder("/unused", text_dim=TEXT_DIM, seq_len=TINY_TEXT_SEQ_LEN,
+                                      dtype=torch.bfloat16, device="cpu", threads=2)
+    encoder.load()
+    assert encoder.tokenizer is tok and encoder.model is vl
+    assert [text for text, _ in tok.calls] == [qwen_common.QWEN_TEMPLATE.format(na._WARMUP_PROMPT)]
+    assert vl.calls == [((1, 37), 2)]  # one forward, with the encode threads
+    embeds, mask = encoder("a red fox")
+    assert len(vl.calls) == 2 and tok.calls[-1][0] == qwen_common.QWEN_TEMPLATE.format("a red fox")
+    expected = torch.zeros(1, TINY_TEXT_SEQ_LEN, TEXT_DIM, dtype=torch.bfloat16)
+    expected[:, :3] = stub_hidden(torch.arange(100, 137)[None])[:, 34:].to(torch.bfloat16)
+    assert torch.equal(embeds, expected) and mask.tolist() == [[True] * 3 + [False] * 5]
 
 
 def test_host_text_encoder_broadcasts_rank0_result_to_two_ranks():
@@ -483,6 +518,25 @@ def test_end_to_end_two_steps_on_fixed_embeddings_matches_diffusers(tiny, world_
         assert result["unwarmed_shapes"] == []
     latents = torch.tensor(results[0]["latents"])
     assert tuple(latents.shape) == TINY_PACKED_LATENT_SHAPE
+    torch.testing.assert_close(latents, reference, **FP32_TOL)
+
+
+@pytest.mark.parametrize("exec_mode", ["eager", "compile"])
+def test_end_to_end_sequence_parallel_tp2_matches_diffusers(tiny, exec_mode):
+    """Two steps with Megatron SP over TP2 (the DiT's QwenImageSPTransformer2DModel fork):
+    identical on both ranks, equal to TP2 without SP and to diffusers' loop."""
+    embeds, _ = tiny_text_inputs()
+    reference, _ = _host_reference(tiny.dir, embeds)
+    dense = run_ranks(q2_pipeline_worker, tiny.dir, 2, "gather_kv", exec_mode, False,
+                      world_size=2, env=OFFLINE)
+    results = run_ranks(q2_pipeline_worker, tiny.dir, 2, "gather_kv", exec_mode, False, "latent",
+                        True, world_size=2, env=OFFLINE)
+    for result in results:
+        assert result["sha256"] == results[0]["sha256"]
+        assert result["steps"] == [1, 2] and result["unwarmed_shapes"] == []
+        assert len(result["compiled_blocks"]) == (2 if exec_mode == "compile" else 0)
+    latents = torch.tensor(results[0]["latents"])
+    torch.testing.assert_close(latents, torch.tensor(dense[0]["latents"]), **FP32_TOL)
     torch.testing.assert_close(latents, reference, **FP32_TOL)
 
 

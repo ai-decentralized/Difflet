@@ -861,6 +861,15 @@ def test_neuron_vae_stage_decodes_on_the_device(monkeypatch, tmp_path, mode):
     monkeypatch.setattr(distributed, "is_rank0", lambda: True)
     monkeypatch.setattr(_FakeNeuronVae, "instances", [])
     monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    # The stage prepares the neuron runtime itself (review C3); keep that out of this process.
+    from difflet.backends.neuron import runtime
+
+    monkeypatch.setattr(runtime, "_runtime_prepared", False)
+    # No device here; the AoT venv's torch_neuronx has no native-runtime query at all.
+    monkeypatch.setattr(runtime, "_neuron_runtime_initialized", lambda: False)
+    for name in (*_CACHE_ENV, "NKI_ENABLE_TRACE_CACHE"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path / "compile_cache"))
     work = tmp_path / "work"
     work.mkdir()
     z = torch.randn(1, 4, 3, 60, 104)
@@ -872,6 +881,9 @@ def test_neuron_vae_stage_decodes_on_the_device(monkeypatch, tmp_path, mode):
 
     [app] = _FakeNeuronVae.instances
     assert app.loaded and app.latent_shape == (1, 4, 3, 60, 104) and app.device == "neuron"
+    # Its NEFF cache is DIFFLET_COMPILE_CACHE's, not torch-neuronx's /tmp/neff_cache.
+    assert os.environ["TORCH_NEURONX_NEFF_CACHE_DIR"] == str(
+        tmp_path / "compile_cache" / "neuron" / "neff")
     # The warm-up decode fills the kernel cache in compile mode; generate's own decode suffices.
     assert app.skip_warmup is (mode == "generate")
     if mode == "compile":
@@ -1029,9 +1041,49 @@ def test_neuron_driver_accepts_teacache(monkeypatch, tmp_path, capsys, overrides
     assert "does not support" not in capsys.readouterr().err
 
 
+# One static shape per process: a bucketed set failed only once every rank had started.
+_SHAPES_REJECTED = [
+    (dict(shapes="480x832x9,480x832x5"), "--shapes with more than one shape"),
+    (dict(shapes="480x832x9, 480x832x5", teacache_cadence=2), "--shapes with more than one shape"),
+]
+
+
+@pytest.mark.parametrize("overrides, named", _SHAPES_REJECTED)
+@pytest.mark.parametrize("mode", ["compile", "generate", "run"])
+def test_neuron_driver_rejects_several_shapes_before_any_launch(monkeypatch, tmp_path, capsys,
+                                                                mode, overrides, named):
+    """The ranks hold one static shape and rejected a bucketed set only after torchrun had
+    started them; the driver exits 2 with one message before any launch, any note, the cache
+    export or (for `run`) the download. TeaCache flags are not refused (Wan runs them)."""
+    _unset(monkeypatch, *_CACHE_ENV)
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    monkeypatch.setattr(wan_mod.runner, "run_stage",
+                        lambda *a, **k: pytest.fail("no stage may be launched"))
+    monkeypatch.setattr(wan_mod, "_decode_latents_host",
+                        lambda *a, **k: pytest.fail("nothing to decode"))
+    monkeypatch.setattr(WanOrchestrator, "download",
+                        lambda self: pytest.fail("rejected before the download"))
+    args = _wan_args(model_id=_WAN21_ID, cache_dir=str(tmp_path / "cache"),
+                     work_dir=str(tmp_path / "work"), **overrides)
+
+    with pytest.raises(SystemExit) as exc:
+        getattr(WanOrchestrator(args), mode)()
+
+    assert exc.value.code == 2
+    out, err = capsys.readouterr()
+    assert out == ""
+    assert err.strip() == (
+        f"Error: the neuron backend does not support {named} (it runs tensor, sequence, CFG and "
+        "context parallelism at one static shape, DP replicas and TeaCache); "
+        "nothing was launched.")
+    assert "--teacache" not in err
+    assert "DIFFLET_COMPILE_CACHE" not in os.environ
+    assert not (tmp_path / "work").exists()
+
+
 @pytest.mark.parametrize("overrides", [
     {}, dict(tp_degree=2, steps=50, guidance_scale=5.0, seed=7), dict(cp_mode="ring"),
-    dict(host_vae=True),
+    dict(host_vae=True), dict(shapes="480x832x9"),
 ])
 def test_neuron_driver_lets_supported_options_through(monkeypatch, tmp_path, capsys, overrides):
     monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
@@ -1342,3 +1394,126 @@ def test_host_text_encoder_is_forwarded_and_parsed():
     stage, _ = _build_stage_parser().parse_known_args([
         "--orchestrator", _WAN21_ID, "--stage", "transformer", "--host-text-encoder"])
     assert stage.host_text_encoder is True
+
+
+# ------------------------- umT5 placement: the driver moves it to the host when TP is too narrow
+
+
+def _header_only_checkpoint(root: Path, *, dual: bool = False) -> Path:
+    """A Wan snapshot whose safetensors hold headers only, at the real parameter counts: umT5
+    5.681 B (fp32 on the device), each DiT expert 14.288 B (bf16)."""
+    import json
+    import struct
+
+    components = {"text_encoder": 5_681, "transformer": 14_288}
+    if dual:
+        components["transformer_2"] = 14_288
+    for name, millions in components.items():
+        (root / name).mkdir(parents=True)
+        header = json.dumps({"w": {"dtype": "F32", "shape": [millions, 1_000_000],
+                                   "data_offsets": [0, 0]}}).encode()
+        (root / name / "model.safetensors").write_bytes(struct.pack("<Q", len(header)) + header)
+    return root
+
+
+@pytest.fixture
+def wan_snapshot(monkeypatch, tmp_path):
+    """The neuron backend at 24 GiB per core, with the local snapshot at ``.root``."""
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    monkeypatch.setenv("DIFFLET_NEURON_HBM_GIB", "24")
+    state = types.SimpleNamespace(root=None, stages=[])
+
+    def resolve(model_id, *, revision=None, local_files_only=False, **_):
+        assert local_files_only, "the driver check must never download"
+        if state.root is None:
+            raise FileNotFoundError(f"{model_id} is not local")
+        return str(state.root)
+
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path", resolve)
+    monkeypatch.setattr(wan_mod.runner, "run_stage",
+                        lambda orch, stage, **kw: state.stages.append((stage, kw["cli_args"])))
+    monkeypatch.setattr(wan_mod, "_decode_latents_host", lambda *a, **k: None)
+    monkeypatch.setattr(WanOrchestrator, "download", lambda self: None)
+    return state
+
+
+_NOTE = "[wan] umT5 on the device needs at least"
+
+
+@pytest.mark.parametrize("overrides", [
+    dict(tp_degree=2, cfg_parallel=True),            # --cfg-parallel, or --mode latency
+    dict(tp_degree=2, cp_degree=2, cp_mode="ring"),  # --cp-degree 2
+    dict(tp_degree=2),                               # each replica of --dp 2 --tp-degree 2
+    dict(tp_degree=1, cp_degree=4),
+], ids=["tp2-cfg2", "tp2-cp2", "tp2", "tp1-cp4"])
+@pytest.mark.parametrize("mode", ["compile", "generate", "run"])
+def test_a_narrow_tp_moves_umt5_to_the_host_before_any_launch(wan_snapshot, tmp_path, capsys,
+                                                               mode, overrides):
+    wan_snapshot.root = _header_only_checkpoint(tmp_path / "snapshot")
+    args = _wan_args(model_id=_WAN21_ID, work_dir=str(tmp_path / "work"), **overrides)
+
+    getattr(WanOrchestrator(args), mode)()
+
+    tp = overrides["tp_degree"]
+    out, err = capsys.readouterr()
+    [note] = [line for line in out.splitlines() if line.startswith(_NOTE)]  # once, even for run
+    assert f"GiB per core beside the DiT at tp={tp}, over the 22.8 GiB budget" in note
+    assert note.endswith("encoding on rank 0's host instead (--host-text-encoder)")
+    assert err == "" and args.host_text_encoder is True
+    assert wan_snapshot.stages
+    assert all("--host-text-encoder" in cli for _, cli in wan_snapshot.stages)
+
+
+@pytest.mark.parametrize("overrides", [
+    {}, dict(cfg_parallel=True), dict(cp_degree=2), dict(dual_expert=True),
+    dict(tp_degree=2, host_text_encoder=True),
+], ids=["tp4", "tp4-cfg2", "tp4-cp2", "tp4-dual-expert", "tp2-already-host"])
+def test_umt5_stays_where_it_fits(wan_snapshot, tmp_path, capsys, overrides):
+    # tp4: 5.3 GiB of encoder beside 6.7 (13.3 with both experts) GiB of DiT per core.
+    wan_snapshot.root = _header_only_checkpoint(tmp_path / "snapshot",
+                                                dual=overrides.get("dual_expert", False))
+    args = _wan_args(model_id=_WAN21_ID, work_dir=str(tmp_path / "work"), **overrides)
+
+    WanOrchestrator(args).generate()
+
+    assert _NOTE not in capsys.readouterr().out
+    host = overrides.get("host_text_encoder", False)
+    assert [("--host-text-encoder" in cli) for _, cli in wan_snapshot.stages] == [host, host]
+
+
+def test_two_experts_at_tp2_move_umt5_to_the_host(wan_snapshot, tmp_path, capsys):
+    wan_snapshot.root = _header_only_checkpoint(tmp_path / "snapshot", dual=True)
+    args = _wan_args(work_dir=str(tmp_path / "work"), tp_degree=2, dual_expert=True)
+    WanOrchestrator(args).compile()
+    assert args.host_text_encoder is True and _NOTE in capsys.readouterr().out
+
+
+def test_weights_not_local_leave_umt5_to_the_application(wan_snapshot, tmp_path, capsys):
+    args = _wan_args(model_id=_WAN21_ID, work_dir=str(tmp_path / "work"), tp_degree=2,
+                     cfg_parallel=True)
+    WanOrchestrator(args).compile()
+    assert not getattr(args, "host_text_encoder", False)
+    assert _NOTE not in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("backend", [None, "trainium", "tpu"])
+def test_aot_backends_never_move_umt5(wan_snapshot, monkeypatch, tmp_path, capsys, backend):
+    _unset(monkeypatch, "DIFFLET_BACKEND")
+    if backend is not None:
+        monkeypatch.setenv("DIFFLET_BACKEND", backend)
+    wan_snapshot.root = _header_only_checkpoint(tmp_path / "snapshot")
+    args = _wan_args(model_id=_WAN21_ID, work_dir=str(tmp_path / "work"), tp_degree=2,
+                     cfg_parallel=True)
+    WanOrchestrator(args).generate()
+    assert not getattr(args, "host_text_encoder", False)
+    assert _NOTE not in capsys.readouterr().out
+
+
+def test_dp_workers_inherit_the_host_encoder_from_run(wan_snapshot, tmp_path):
+    # `run` with --dp compiles in the driver, then the router forwards the args to its workers.
+    from difflet.cli.dp.router import worker_cli_args
+
+    wan_snapshot.root = _header_only_checkpoint(tmp_path / "snapshot")
+    args = _wan_args(model_id=_WAN21_ID, work_dir=str(tmp_path / "work"), tp_degree=2)
+    WanOrchestrator(args).compile()
+    assert "--host-text-encoder" in worker_cli_args(args)
