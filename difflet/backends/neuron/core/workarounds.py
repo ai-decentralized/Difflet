@@ -1,4 +1,11 @@
-"""Workarounds for torch-neuronx eager-kernel bugs, installed by the backend's prepare_runtime.
+"""Workarounds for torch-neuronx kernel issues, installed by the backend's prepare_runtime.
+
+LayerNorm in bf16. The device's bf16 LayerNorm is less accurate than the CPU's, whose kernel
+accumulates the statistics in fp32: over HunyuanVideo 1.5's 54 blocks the drift compounded to
+1.21x the bf16 CPU control against fp32 (blocks 0-3 at 1.00x, block 26 at 1.04x, block 53 at
+1.16x). Computing it in fp32 for bf16 inputs (upcast input, weight and bias; normalize; cast back)
+brings the model to 0.92x. ``F.layer_norm`` is wrapped (``nn.LayerNorm`` calls it); other dtypes
+and devices run unchanged.
 
 Boolean bitwise ops on non-contiguous operands. Eager ``bitwise_and`` on ``bool`` neuron tensors
 returns wrong values when an operand is a non-contiguous view, at sizes such as 256 x 256 (a
@@ -35,6 +42,31 @@ def _contiguous_bool_operands(a, b):
     return a, b
 
 
+def install_layer_norm_fp32() -> None:
+    """Wrap ``torch.nn.functional.layer_norm`` (idempotent)."""
+    import torch.nn.functional as F
+
+    if ("F", "layer_norm") in _originals:
+        return
+    original = F.layer_norm
+
+    def layer_norm(input, normalized_shape, weight=None, bias=None, eps=1e-5):
+        if _on_neuron(input) and input.dtype == torch.bfloat16:
+            return original(input.float(), normalized_shape,
+                            None if weight is None else weight.float(),
+                            None if bias is None else bias.float(), eps).to(input.dtype)
+        return original(input, normalized_shape, weight, bias, eps)
+
+    _originals[("F", "layer_norm")] = original
+    F.layer_norm = layer_norm
+
+
+def install_neuron_workarounds() -> None:
+    """Every workaround (idempotent): what prepare_runtime installs."""
+    install_bool_bitwise_guard()
+    install_layer_norm_fp32()
+
+
 def install_bool_bitwise_guard() -> None:
     """Wrap the boolean bitwise operators (idempotent)."""
     for name in _OPERATORS:
@@ -63,9 +95,15 @@ def install_bool_bitwise_guard() -> None:
 
 def uninstall_bool_bitwise_guard() -> None:
     """Restore the original operators (tests)."""
+    import torch.nn.functional as F
+
+    owners = {"Tensor": torch.Tensor, "torch": torch, "F": F}
     for (owner, name), original in list(_originals.items()):
-        setattr(torch.Tensor if owner == "Tensor" else torch, name, original)
+        setattr(owners[owner], name, original)
         del _originals[(owner, name)]
 
 
-__all__ = ["install_bool_bitwise_guard", "uninstall_bool_bitwise_guard"]
+uninstall_neuron_workarounds = uninstall_bool_bitwise_guard
+
+__all__ = ["install_bool_bitwise_guard", "install_layer_norm_fp32", "install_neuron_workarounds",
+           "uninstall_bool_bitwise_guard", "uninstall_neuron_workarounds"]

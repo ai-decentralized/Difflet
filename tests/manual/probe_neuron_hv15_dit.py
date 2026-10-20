@@ -31,7 +31,8 @@ def main() -> int:
     p.add_argument("--no-device", action="store_true", help="skip moving the model to the core")
     p.add_argument("--make-ref", help="write fixed inputs + fp32 reference + bf16 control here (CPU)")
     p.add_argument("--check", help="run one bf16 forward on the core against this reference")
-    p.add_argument("--no-guard", action="store_true", help="with --check: without the bool bitwise guard")
+    p.add_argument("--no-workarounds", action="store_true",
+                   help="device modes without the backend workarounds (bool bitwise guard, fp32 LayerNorm)")
     p.add_argument("--bisect", help="per-module outputs: device bf16 and CPU bf16 against CPU fp32")
     p.add_argument("--deep", help="with --bisect: hook every module under this prefix")
     p.add_argument("--sdpa-trace", help="device forward with every SDPA call logged and recomputed on the CPU")
@@ -40,6 +41,10 @@ def main() -> int:
     p.add_argument("--attn-steps", help="refiner block 0's attention processor step by step, device vs CPU")
     p.add_argument("--mask-diff", help="the refiner's attention mask as built in a CPU forward vs a device forward")
     args = p.parse_args()
+    if not args.no_workarounds and not args.make_ref:  # every device mode, as prepare_runtime does
+        from difflet.backends.neuron.core.workarounds import install_neuron_workarounds
+
+        install_neuron_workarounds()
     if args.make_ref:
         return make_ref(args)
     if args.check:
@@ -137,10 +142,6 @@ def check(args) -> int:
     from diffusers import HunyuanVideo15Transformer3DModel
 
     ref = torch.load(os.path.expanduser(args.check))
-    if not args.no_guard:  # prepare_runtime installs it on every torchrun path; here, by hand
-        from difflet.backends.neuron.core.workarounds import install_bool_bitwise_guard
-
-        install_bool_bitwise_guard()
     path = os.path.join(args.model_dir, "transformer")
     model = HunyuanVideo15Transformer3DModel.from_pretrained(path, torch_dtype=torch.bfloat16).eval().to("neuron")
     inputs = _cast(ref["inputs"], torch.bfloat16, "neuron")
@@ -157,7 +158,7 @@ def check(args) -> int:
     finite = bool(torch.isfinite(y).all())
     ours, control = (rel(y) if finite else float("nan")), rel(c)
     ok = finite and ours <= 1.15 * control
-    print(f"{'PASS' if ok else 'FAIL'} eager TP1 ({'no guard' if args.no_guard else 'guard'}): finite={finite} rel_l1={ours:.3e} "
+    print(f"{'PASS' if ok else 'FAIL'} eager TP1 ({'no workarounds' if args.no_workarounds else 'workarounds'}): finite={finite} rel_l1={ours:.3e} "
           f"({ours / control:.3f}x control {control:.3e}); forward {times[0]:.1f} s first, "
           f"{times[1]:.1f} s second", flush=True)
     return 0
