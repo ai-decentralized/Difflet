@@ -79,6 +79,12 @@ def attention(
             raise ValueError("bound_min and bound_max must both be provided")
         if attention_mask is not None:
             raise ValueError("attention_mask and bounds are mutually exclusive")
+        if not causal and _can_use_flash_kernel(q, k, v, None) and _FLASH_BOUNDED_OP is not None:
+            # attention_cte's sequence packing: per-query key range [bound_min, bound_max), read per
+            # query tile inside the kernel (O(L) memory) instead of an L x L mask and masked SDPA.
+            out = _flash_attention_bounded(q, k, v, bound_min, bound_max,
+                                           scale=1.0 if scale is None else float(scale))
+            return out.transpose(-1, -2) if tp_out else out
         key_idx = torch.arange(k.shape[-2], device=k.device).view(1, 1, -1)
         attention_mask = (key_idx >= bound_min.to(key_idx.device)) & (
             key_idx < bound_max.to(key_idx.device)
@@ -128,6 +134,65 @@ def _flash_attention(q, k, v, *, scale: float, causal: bool):
     return out.squeeze(0) if squeeze else out
 
 
+def _load_flash_bounded_op():
+    """attention_cte with per-query key bounds (its "sequence packing"): ``(q, k, v, bound_min,
+    bound_max, scale) -> out`` on ``[B*H, L, d]``, bounds int32 ``[B*H, L_q, 1]``, query ``i``
+    attending to keys ``bound_min[i] <= j < bound_max[i]``. torch-neuronx's own SDPA wrapper does
+    not forward bounds, so the kernel is called as its decomposition calls it (``tp_q``/``tp_k``
+    layout, an LNC-wide grid), registered with ``nki_op`` like the logsumexp op."""
+    try:
+        return torch.ops.difflet_neuron.flash_attention_bounded  # already registered (module reload)
+    except (AttributeError, RuntimeError):
+        pass
+    try:
+        from torch_neuronx.neuron_dynamo_backend.decompositions import (
+            get_logical_neuron_cores,
+            wrapped_flash_fwd,
+        )
+        from torch_neuronx.nki_hop import nki_op
+    except ImportError:
+        return None
+
+    @nki_op("difflet_neuron::flash_attention_bounded", mutates_args={})
+    def flash_attention_bounded(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
+                                bound_min: torch.Tensor, bound_max: torch.Tensor,
+                                scale: float) -> torch.Tensor:
+        grid = (int(get_logical_neuron_cores()),)
+        return wrapped_flash_fwd[grid](q, k, v, tp_q=True, tp_k=True, scale=scale, causal_mask=False,
+                                       cache_softmax=False, bound_min=bound_min, bound_max=bound_max)
+
+    return flash_attention_bounded
+
+
+def _flash_attention_bounded(q, k, v, bound_min, bound_max, *, scale: float):
+    """``[B, H, S, d]`` or ``[B*H, S, d]`` through the bounded kernel; bounds of ``[B*H, S_q, 1]``
+    (or anything that reshapes to it)."""
+    shape = q.shape
+    bh, s_q, d = math.prod(shape[:-2]), shape[-2], shape[-1]
+    q3, k3, v3 = (t.reshape(bh, t.shape[-2], d) for t in (q, k, v))
+    lo = bound_min.to(q.device, torch.int32).reshape(bh, s_q, 1)
+    hi = bound_max.to(q.device, torch.int32).reshape(bh, s_q, 1)
+    # The kernel's range_select (sequence packing) path requires scale == 1.0 (NCC_INKI016); as its
+    # docstring prescribes, q is scaled first: softmax(s q k^T) = softmax((s q) k^T), with s q
+    # computed in fp32 and rounded once to q's dtype.
+    q3 = (q3.float() * scale).to(q3.dtype)
+    # It also needs query and key lengths in multiples of 128 (other lengths fail to compile, a
+    # DMACopy error; the unbounded kernel takes any length). Zero keys appended at index >= every
+    # bound_max are excluded by the bounds; appended query rows get the one-key range [0, 1) (no
+    # fully masked row) and are dropped.
+    s_k = k3.shape[1]
+    pad_q, pad_k = -s_q % 128, -s_k % 128
+    if pad_k:
+        k3, v3 = F.pad(k3, (0, 0, 0, pad_k)), F.pad(v3, (0, 0, 0, pad_k))
+    if pad_q:
+        q3 = F.pad(q3, (0, 0, 0, pad_q))
+        lo = F.pad(lo, (0, 0, 0, pad_q))
+        hi = F.pad(hi, (0, 0, 0, pad_q), value=1)
+    out = _FLASH_BOUNDED_OP(q3.contiguous(), k3.contiguous(), v3.contiguous(),
+                            lo.contiguous(), hi.contiguous(), 1.0)
+    return out[:, :s_q].reshape(*shape[:-1], v.shape[-1])
+
+
 def _load_flash_kernel():
     try:
         from torch_neuronx.python_ops.nki_kernels.scaled_dot_product_attention import (
@@ -140,6 +205,7 @@ def _load_flash_kernel():
 
 # Resolved once at import: no import or cache lookup inside traced (compiled) code.
 _FLASH_KERNEL = _load_flash_kernel()
+_FLASH_BOUNDED_OP = _load_flash_bounded_op()
 
 
 def _load_flash_lse_op():
