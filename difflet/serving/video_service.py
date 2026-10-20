@@ -802,17 +802,13 @@ class VideoGenerationService:
                         self.jobs.mark_in_progress(item.key)
                         item.phase = "preparing"
                         if item.deadline_monotonic is None:
-                            item.deadline_monotonic = (
-                                time.monotonic() + self.request_timeout_s
-                            )
+                            item.deadline_monotonic = time.monotonic() + self.request_timeout_s
                             self._start_deadline_watch(item)
                         claimed = True
                     else:
                         item.phase = "preparing"
                         if item.deadline_monotonic is None:
-                            item.deadline_monotonic = (
-                                time.monotonic() + self.request_timeout_s
-                            )
+                            item.deadline_monotonic = time.monotonic() + self.request_timeout_s
                             self._start_deadline_watch(item)
                         claimed = True
             if not claimed:

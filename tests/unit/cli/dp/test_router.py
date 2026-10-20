@@ -34,13 +34,32 @@ def test_worker_env_overrides_parent_values():
 
 def _args(**kw):
     defaults = dict(
-        model_id="Wan-AI/Wan2.2-T2V-A14B-Diffusers", tp_degree=4, cp_degree=None,
-        cp_mode="gather_kv", cfg_parallel=False, sp_enabled=False, height=None,
-        width=None, num_frames=None, steps=None, guidance_scale=None, seed=42,
-        cache_dir=None, work_dir=None, keep_work_dir=False, dp=2,
-        dp_schedule="round_robin", requests=None, revision=None, force=False,
-        teacache_cadence=None, teacache_online_delta=None, teacache_speedup=None,
-        teacache_calibration=None, prompt=None, output=None,
+        model_id="Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+        tp_degree=4,
+        cp_degree=None,
+        cp_mode="gather_kv",
+        cfg_parallel=False,
+        sp_enabled=False,
+        height=None,
+        width=None,
+        num_frames=None,
+        steps=None,
+        guidance_scale=None,
+        seed=42,
+        cache_dir=None,
+        work_dir=None,
+        keep_work_dir=False,
+        dp=2,
+        dp_schedule="round_robin",
+        requests=None,
+        revision=None,
+        force=False,
+        teacache_cadence=None,
+        teacache_online_delta=None,
+        teacache_speedup=None,
+        teacache_calibration=None,
+        prompt=None,
+        output=None,
     )
     defaults.update(kw)
     return argparse.Namespace(**defaults)
@@ -118,9 +137,7 @@ def _worktree_on_pythonpath(monkeypatch):
     `python -m difflet.cli.main` from the caller's cwd and don't need this."""
     repo_root = str(Path(difflet.__file__).parents[1])
     existing = os.environ.get("PYTHONPATH")
-    monkeypatch.setenv(
-        "PYTHONPATH", repo_root + (os.pathsep + existing if existing else "")
-    )
+    monkeypatch.setenv("PYTHONPATH", repo_root + (os.pathsep + existing if existing else ""))
 
 
 def _stub_prefix(tmp_path):
@@ -135,8 +152,7 @@ def _requests(n):
 
 def test_run_router_all_success(tmp_path):
     args = _args(work_dir=str(tmp_path / "work"))
-    rc = run_router(args, _requests(5), replica_cores=4,
-                    worker_argv_prefix=_stub_prefix(tmp_path))
+    rc = run_router(args, _requests(5), replica_cores=4, worker_argv_prefix=_stub_prefix(tmp_path))
     assert rc == 0
     s = summarize(tmp_path / "work" / "requests")
     assert s.done == [0, 1, 2, 3, 4] and not s.failed and not s.unfinished
@@ -144,8 +160,12 @@ def test_run_router_all_success(tmp_path):
 
 def test_run_router_reports_failed_request(tmp_path):
     args = _args(work_dir=str(tmp_path / "work"), dp_schedule="least_loaded")
-    rc = run_router(args, _requests(4), replica_cores=4,
-                    worker_argv_prefix=_stub_prefix(tmp_path) + ["--fail-index", "2"])
+    rc = run_router(
+        args,
+        _requests(4),
+        replica_cores=4,
+        worker_argv_prefix=_stub_prefix(tmp_path) + ["--fail-index", "2"],
+    )
     assert rc != 0
     s = summarize(tmp_path / "work" / "requests")
     assert 2 in s.failed and sorted(s.done) == [0, 1, 3]
@@ -153,15 +173,20 @@ def test_run_router_reports_failed_request(tmp_path):
 
 def test_run_router_crashed_worker_round_robin(tmp_path):
     args = _args(work_dir=str(tmp_path / "work"), dp=2)
-    rc = run_router(args, _requests(4), replica_cores=4,
-                    worker_argv_prefix=_stub_prefix(tmp_path) + ["--crash-worker", "1"])
+    rc = run_router(
+        args,
+        _requests(4),
+        replica_cores=4,
+        worker_argv_prefix=_stub_prefix(tmp_path) + ["--crash-worker", "1"],
+    )
     assert rc != 0
     s = summarize(tmp_path / "work" / "requests")
-    assert sorted(s.done) == [0, 2]            # worker 0's assignments
-    assert set(s.failed) == {1, 3}             # dead worker's assignments marked failed
+    assert sorted(s.done) == [0, 2]  # worker 0's assignments
+    assert set(s.failed) == {1, 3}  # dead worker's assignments marked failed
 
 
 # ------------------------------------------------- per-worker bootstrap root
+
 
 def test_worker_env_gives_each_replica_its_own_root_comm_id():
     # ltx_2/dp2tp2 on device (2026-09-07): both workers bootstrapped their
@@ -182,6 +207,7 @@ def test_worker_env_honours_an_explicit_root_comm_id():
 
 
 # ------------------------------------------------- workers die with the router
+
 
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="prctl is Linux-only")
 def test_workers_are_killed_when_the_router_dies(tmp_path):

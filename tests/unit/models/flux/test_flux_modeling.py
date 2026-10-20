@@ -30,6 +30,7 @@ def _reload(name):
 # modules (registry, wan, qwen) depend on and break them mid-session.
 import difflet.backends.trainium.core.config as _config_mod  # noqa: E402
 import difflet.layers.normalization as _norm_mod  # noqa: E402
+
 mf = _reload("difflet.models.flux.modeling_flux")
 
 NeuronConfig = _config_mod.NeuronConfig
@@ -108,9 +109,7 @@ def test_attention_wrapper_sharded_without_swap():
     out = mf.attention_wrapper_sharded_without_swap(q, k, v)
     assert out.shape == (1, HEADS, 5, HEAD_DIM)
     # numeric oracle: plain scaled dot product attention
-    ref = torch.nn.functional.scaled_dot_product_attention(
-        q, k, v, scale=1.0 / math.sqrt(HEAD_DIM)
-    )
+    ref = torch.nn.functional.scaled_dot_product_attention(q, k, v, scale=1.0 / math.sqrt(HEAD_DIM))
     assert torch.allclose(out, ref, atol=1e-5)
 
 
@@ -125,7 +124,11 @@ def test_split_along_dim_identity_on_cpu():
 # --------------------------------------------------------------------------
 def test_attention_qk_norm_none():
     attn = mf.NeuronFluxAttention(
-        query_dim=DIM, dim_head=HEAD_DIM, heads=HEADS, out_dim=DIM, qk_norm=None,
+        query_dim=DIM,
+        dim_head=HEAD_DIM,
+        heads=HEADS,
+        out_dim=DIM,
+        qk_norm=None,
         reduce_dtype=torch.float32,
     )
     assert attn.norm_q is None and attn.norm_k is None
@@ -134,22 +137,36 @@ def test_attention_qk_norm_none():
 def test_attention_invalid_qk_norm_raises():
     with pytest.raises(ValueError):
         mf.NeuronFluxAttention(
-            query_dim=DIM, dim_head=HEAD_DIM, heads=HEADS, out_dim=DIM, qk_norm="layer_norm",
+            query_dim=DIM,
+            dim_head=HEAD_DIM,
+            heads=HEADS,
+            out_dim=DIM,
+            qk_norm="layer_norm",
         )
 
 
 def test_attention_invalid_cross_attention_norm_raises():
     with pytest.raises(ValueError):
         mf.NeuronFluxAttention(
-            query_dim=DIM, dim_head=HEAD_DIM, heads=HEADS, out_dim=DIM,
+            query_dim=DIM,
+            dim_head=HEAD_DIM,
+            heads=HEADS,
+            out_dim=DIM,
             cross_attention_norm="group_norm",
         )
 
 
 def test_attention_single_stream_pre_only_forward():
     attn = mf.NeuronFluxAttention(
-        query_dim=DIM, cross_attention_dim=None, dim_head=HEAD_DIM, heads=HEADS,
-        out_dim=DIM, bias=True, qk_norm="rms_norm", eps=1e-6, pre_only=True,
+        query_dim=DIM,
+        cross_attention_dim=None,
+        dim_head=HEAD_DIM,
+        heads=HEADS,
+        out_dim=DIM,
+        bias=True,
+        qk_norm="rms_norm",
+        eps=1e-6,
+        pre_only=True,
         reduce_dtype=torch.float32,
     ).eval()
     s = 5
@@ -161,9 +178,17 @@ def test_attention_single_stream_pre_only_forward():
 
 def test_attention_double_stream_forward():
     attn = mf.NeuronFluxAttention(
-        query_dim=DIM, cross_attention_dim=None, added_kv_proj_dim=DIM, dim_head=HEAD_DIM,
-        heads=HEADS, out_dim=DIM, context_pre_only=False, bias=True, qk_norm="rms_norm",
-        eps=1e-6, reduce_dtype=torch.float32,
+        query_dim=DIM,
+        cross_attention_dim=None,
+        added_kv_proj_dim=DIM,
+        dim_head=HEAD_DIM,
+        heads=HEADS,
+        out_dim=DIM,
+        context_pre_only=False,
+        bias=True,
+        qk_norm="rms_norm",
+        eps=1e-6,
+        reduce_dtype=torch.float32,
     ).eval()
     s_txt, s_img = 3, 5
     h = torch.randn(1, s_img, DIM)
@@ -198,8 +223,11 @@ def test_feed_forward_warns_on_scale(caplog):
 # --------------------------------------------------------------------------
 def test_single_transformer_block_construction():
     block = mf.NeuronFluxSingleTransformerBlock(
-        dim=DIM, num_attention_heads=HEADS, attention_head_dim=HEAD_DIM,
-        reduce_dtype=torch.float32, cp_mode="ring",
+        dim=DIM,
+        num_attention_heads=HEADS,
+        attention_head_dim=HEAD_DIM,
+        reduce_dtype=torch.float32,
+        cp_mode="ring",
     )
     assert block.attn.cp_mode == "ring"
     assert block.mlp_hidden_dim == int(DIM * 4.0)
@@ -207,7 +235,9 @@ def test_single_transformer_block_construction():
 
 def test_double_transformer_block_forward(patched_markers):
     block = mf.NeuronFluxTransformerBlock(
-        dim=DIM, num_attention_heads=HEADS, attention_head_dim=HEAD_DIM,
+        dim=DIM,
+        num_attention_heads=HEADS,
+        attention_head_dim=HEAD_DIM,
         reduce_dtype=torch.float32,
     ).eval()
     s_txt, s_img = 3, 5

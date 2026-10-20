@@ -126,6 +126,7 @@ def _build(config):
 
 # ------------------------------------------------------------- construction
 
+
 def test_probe_model_is_the_backbone_transformer():
     # Subclass, not wrapper: that is the whole mechanism. A wrapper would move
     # every parameter one attribute level deeper and change its traced name.
@@ -142,6 +143,7 @@ def test_probe_declares_exactly_prev_mod_as_state():
 
 
 # --------------------------------------------------- traced parameter names
+
 
 @pytest.mark.parametrize("guidance_embeds", [True, False])
 def test_probe_parameter_names_equal_backbone_names_plus_declared_state(guidance_embeds):
@@ -166,6 +168,7 @@ def test_probe_prev_mod_shape_matches_mod_input():
 
 
 # ------------------------------------------------------ checkpoint converter
+
 
 def test_probe_converter_is_the_backbone_converter():
     probe_fn = probe_mod.NeuronFluxTeacacheProbeFusedApplication.convert_hf_to_neuron_state_dict
@@ -193,6 +196,7 @@ def test_probe_converted_keys_equal_backbone_converted_keys():
 
 
 # ----------------------------------------------- the loader-facing invariant
+
 
 def test_backbone_checkpoint_serves_every_probe_weight():
     """Every non-state tensor in the probe's state dict is present, under the
@@ -238,6 +242,7 @@ def test_aliased_tensors_are_exactly_the_declared_state():
 
 
 # ------------------------------------------------------------ forward parity
+
 
 @pytest.mark.parametrize("guidance_embeds", [True, False])
 def test_probe_forward_matches_backbone_prefix_and_updates_from_prev_mod(

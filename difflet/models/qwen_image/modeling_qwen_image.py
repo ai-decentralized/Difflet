@@ -221,7 +221,9 @@ def _replace_qwen_linears_for_tp(transformer: nn.Module, sp_enabled: bool = Fals
         attn = block.attn
         if not replicate_attention:
             if int(attn.heads) % int(tp_degree) != 0:
-                raise ValueError(f"Qwen-Image attention heads {attn.heads} must divide tp={tp_degree}.")
+                raise ValueError(
+                    f"Qwen-Image attention heads {attn.heads} must divide tp={tp_degree}."
+                )
             attn.heads = int(attn.heads) // int(tp_degree)
             attn.to_q = _column_parallel_like(attn.to_q, gather_output=False)
             attn.to_k = _column_parallel_like(attn.to_k, gather_output=False)
@@ -352,9 +354,12 @@ class _QwenImageTrainiumAttnProcessor:
             q_joint = torch.cat([txt_query, img_query], dim=1).transpose(1, 2)  # [B, H, Sq, d]
             o_joint = joint_ring_attention(
                 q_joint,
-                img_key.transpose(1, 2), img_value.transpose(1, 2),  # sharded image K,V
-                txt_key.transpose(1, 2), txt_value.transpose(1, 2),  # replicated text K,V
-                scale=scale, causal=False,
+                img_key.transpose(1, 2),
+                img_value.transpose(1, 2),  # sharded image K,V
+                txt_key.transpose(1, 2),
+                txt_value.transpose(1, 2),  # replicated text K,V
+                scale=scale,
+                causal=False,
             )  # [B, H, Sq, d]
             joint_hidden_states = o_joint.transpose(1, 2)  # [B, Sq, H, d]
         elif self.context_parallel_enabled and self.cp_mode == "ulysses":
@@ -367,10 +372,14 @@ class _QwenImageTrainiumAttnProcessor:
             # the downstream split at seq_txt unchanged.
             scale = 1.0 / math.sqrt(head_dim)
             img_out, txt_out = joint_ulysses_attention(
-                img_query.transpose(1, 2), txt_query.transpose(1, 2),
-                img_key.transpose(1, 2), img_value.transpose(1, 2),      # sharded image K,V
-                txt_key.transpose(1, 2), txt_value.transpose(1, 2),      # replicated text K,V
-                scale=scale, causal=False,
+                img_query.transpose(1, 2),
+                txt_query.transpose(1, 2),
+                img_key.transpose(1, 2),
+                img_value.transpose(1, 2),  # sharded image K,V
+                txt_key.transpose(1, 2),
+                txt_value.transpose(1, 2),  # replicated text K,V
+                scale=scale,
+                causal=False,
             )  # [B, H, S_img/cp, d], [B, H, S_txt, d]
             joint_hidden_states = torch.cat([txt_out, img_out], dim=2).transpose(1, 2)
         else:

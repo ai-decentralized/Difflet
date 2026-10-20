@@ -124,9 +124,7 @@ class StageRuntimeSpec:
             # one here would be requiring a file that is never produced, and
             # loosening the neuron rule instead would drop a real invariant.
             if self.allocation_id is None or self.topology is None:
-                raise ValueError(
-                    f"tpu stage {self.stage_id!r} requires allocation and topology"
-                )
+                raise ValueError(f"tpu stage {self.stage_id!r} requires allocation and topology")
             return
         if self.placement not in {"neuron", "hybrid"}:
             raise ValueError(f"unsupported stage placement {self.placement!r}")
@@ -284,9 +282,7 @@ class ServingProfile:
         return frozenset(self.canonical_shapes())
 
     def shape_dicts(self) -> list[dict[str, int | None]]:
-        return [
-            {"height": h, "width": w, "num_frames": f} for h, w, f in self.canonical_shapes()
-        ]
+        return [{"height": h, "width": w, "num_frames": f} for h, w, f in self.canonical_shapes()]
 
 
 @dataclass(frozen=True)
