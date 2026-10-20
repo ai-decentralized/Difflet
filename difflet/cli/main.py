@@ -173,8 +173,7 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
         "--taef1-path",
         default=None,
         metavar="REPO_ID",
-        help="HuggingFace repo id of the tiny VAE (e.g. madebyollin/taef1). "
-        "Implies --taef1.",
+        help="HuggingFace repo id of the tiny VAE (e.g. madebyollin/taef1). " "Implies --taef1.",
     )
 
 

@@ -50,4 +50,3 @@ def create_qwen_image_application(
         shape=shape,
         **kwargs,
     )
-

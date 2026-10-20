@@ -952,9 +952,7 @@ def test_multi_shape_validator_accepts_members_and_rejects_out_of_set(monkeypatc
     request = _request(runtime.profile)
 
     for _height, _width, num_frames in (_SHAPE_A, _SHAPE_B):
-        validator.validate(
-            replace(request, video=replace(request.video, num_frames=num_frames))
-        )
+        validator.validate(replace(request, video=replace(request.video, num_frames=num_frames)))
 
     with pytest.raises(DiffletServingError) as exc:
         validator.validate(replace(request, video=replace(request.video, num_frames=13)))
@@ -977,9 +975,7 @@ def test_multi_shape_generation_identity_covers_the_set(monkeypatch, tmp_path):
     assert reordered.identity == multi.identity
 
     # K=1 as an explicit one-member set matches the legacy single-shape form.
-    explicit_single = wan._compile_spec(
-        source, _profile(tmp_path, shapes=((64, 96, 5),))
-    )
+    explicit_single = wan._compile_spec(source, _profile(tmp_path, shapes=((64, 96, 5),)))
     assert explicit_single.identity == single.identity
 
 

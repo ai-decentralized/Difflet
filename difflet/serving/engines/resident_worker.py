@@ -974,7 +974,10 @@ def _initialize_replica_runtime(replica_rank: int, replica_count: int) -> None:
     torch.set_num_threads(share)
     logger.info(
         "worker_replica_threads rank=%d/%d threads=%d of %d cores",
-        replica_rank, replica_count, share, cores,
+        replica_rank,
+        replica_count,
+        share,
+        cores,
     )
 
 
@@ -1009,7 +1012,9 @@ def _worker_main(
     try:
         logger.info(
             "worker_main start model=%s rank=%d/%d",
-            runtime.profile.model_id, replica_rank, replica_count,
+            runtime.profile.model_id,
+            replica_rank,
+            replica_count,
         )
         if replica_count > 1:
             _initialize_replica_runtime(replica_rank, replica_count)

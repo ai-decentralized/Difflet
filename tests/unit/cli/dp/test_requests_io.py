@@ -18,11 +18,20 @@ def _write_jsonl(tmp_path, lines):
 
 
 def test_load_minimal_jsonl(tmp_path):
-    p = _write_jsonl(tmp_path, [
-        {"prompt": "a cat", "output": "a.png"},
-        {"prompt": "a dog", "output": "b.png", "seed": 7, "steps": 12,
-         "guidance_scale": 5.0, "negative_prompt": "blurry"},
-    ])
+    p = _write_jsonl(
+        tmp_path,
+        [
+            {"prompt": "a cat", "output": "a.png"},
+            {
+                "prompt": "a dog",
+                "output": "b.png",
+                "seed": 7,
+                "steps": 12,
+                "guidance_scale": 5.0,
+                "negative_prompt": "blurry",
+            },
+        ],
+    )
     reqs = load_requests_jsonl(p)
     assert [r.index for r in reqs] == [0, 1]
     assert reqs[0].seed == 42 and reqs[0].steps is None
@@ -32,16 +41,21 @@ def test_load_minimal_jsonl(tmp_path):
 
 def test_load_skips_blank_lines(tmp_path):
     p = tmp_path / "blank.jsonl"
-    p.write_text('{"prompt": "a", "output": "a.png"}\n\n\n{"prompt": "b", "output": "b.png"}\n',
-                 encoding="utf-8")
+    p.write_text(
+        '{"prompt": "a", "output": "a.png"}\n\n\n{"prompt": "b", "output": "b.png"}\n',
+        encoding="utf-8",
+    )
     assert [r.index for r in load_requests_jsonl(p)] == [0, 1]
 
 
 def test_load_rejects_duplicate_outputs(tmp_path):
-    p = _write_jsonl(tmp_path, [
-        {"prompt": "x", "output": "same.png"},
-        {"prompt": "y", "output": "same.png"},
-    ])
+    p = _write_jsonl(
+        tmp_path,
+        [
+            {"prompt": "x", "output": "same.png"},
+            {"prompt": "y", "output": "same.png"},
+        ],
+    )
     with pytest.raises(ValueError, match="duplicate output"):
         load_requests_jsonl(p)
 

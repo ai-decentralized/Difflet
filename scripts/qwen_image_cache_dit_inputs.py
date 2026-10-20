@@ -27,7 +27,9 @@ def ensure_runtime_python() -> None:
         if Path(sys.executable) != NEURON_PYTHON and NEURON_PYTHON.exists():
             env = os.environ.copy()
             env["PATH"] = f"{NEURON_VENV / 'bin'}:{env.get('PATH', '')}"
-            env["PYTHONPATH"] = f"{Path(__file__).resolve().parents[1]}{os.pathsep}{env.get('PYTHONPATH', '')}"
+            env["PYTHONPATH"] = (
+                f"{Path(__file__).resolve().parents[1]}{os.pathsep}{env.get('PYTHONPATH', '')}"
+            )
             os.execve(str(NEURON_PYTHON), [str(NEURON_PYTHON), *sys.argv], env)
         raise
 
@@ -243,7 +245,9 @@ def cache_dit_inputs(args: argparse.Namespace) -> None:
         "latents_init": latents.to(dtype=output_dtype, device="cpu").contiguous(),
         "timesteps": timesteps.to(dtype=output_dtype, device="cpu").contiguous(),
         "encoder_hidden_states": prompt_embeds.to(dtype=output_dtype, device="cpu").contiguous(),
-        "encoder_hidden_states_mask": prompt_embeds_mask.to(dtype=torch.bool, device="cpu").contiguous(),
+        "encoder_hidden_states_mask": prompt_embeds_mask.to(
+            dtype=torch.bool, device="cpu"
+        ).contiguous(),
         "guidance": guidance.to(device="cpu").contiguous(),
     }
 
