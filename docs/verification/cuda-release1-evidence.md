@@ -37,7 +37,8 @@ refused, not run).
   PRO 6000 cards were free.
 - **F1b A/B**: the fp32 timestep improves DiT parity at the rounding steps. The e2e PSNR moves
   −1.2 dB, which a single-seed A/B does not support either way.
-- **Ledger**: 27 lines below. **Gaps**: 4 NOT MEASURED items.
+- **Gaps**: 3 open NOT MEASURED items (Wan `--dp` × `--cfg-parallel`,
+  Flux `--dp 2` on two PRO 6000s, Wan 2.1).
 
 ## Support matrix
 
@@ -88,7 +89,7 @@ Download → compile → timed generate per cell, `results.json`.
 One resident worker holds the pipeline; OpenAI-compatible chat (images) and `/v1/videos` (Wan).
 | Qwen-Image | FLUX.1-dev | Wan 2.2 |
 |---|---|---|
-| PASS · ready 56.0 s, 38.6 / 39.2 s per request; LIMIT · 429 `queue_timeout` for a concurrent request at the 30 s default on one GPU; `--dp-degree 2` PASS · two concurrent requests in one request-time (16.7 s wall), identical bytes | PASS · ready 12.0 s, 8.8 s per request, PNG byte-identical to `difflet run`; 400s for an out-of-range guidance, a wrong shape and a long prompt; startup refusals clean (Server) | PASS · ready 60.0 s, 43.8 s per request (480×832×9, 40 steps); tensor bit-identical to `difflet run` through the adapter's calls (in-process), MP4 decoded 33.88 dB vs the tensor (the codec's own 33.87); sync and async paths, nine 400s, startup refusals clean; one replica (Server) |
+| PASS · ready 56.0 s, 38.6 / 39.2 s per request; LIMIT · 429 `queue_timeout` for a concurrent request at the 30 s default on one GPU; `--dp-degree 2` PASS · two concurrent requests in one request-time (16.7 s wall), identical bytes | PASS · ready 12.0 s, 8.8 s per request, PNG byte-identical to `difflet run`; 400s for an out-of-range guidance, a wrong shape and a long prompt; startup refusals clean (Server); `--dp-degree 2` on 2 × A100 PASS · two concurrent requests in one request-time (13.1 s), identical bytes [fluxa100] | PASS · ready 60.0 s, 43.8 s per request (480×832×9, 40 steps); tensor bit-identical to `difflet run` through the adapter's calls (in-process), MP4 decoded 33.88 dB vs the tensor (the codec's own 33.87); sync and async paths, nine 400s, startup refusals clean; one replica (Server) |
 
 ### `--torch-compile`
 Per-block inductor compile of the DiT, opt-in (eager by default).
@@ -106,7 +107,7 @@ Probe-free fixed cadence on the CUDA loop; calibrated and online-delta modes ref
 One single-GPU replica per card through the request router.
 | Qwen-Image | FLUX.1-dev | Wan 2.2 |
 |---|---|---|
-| PASS · 4 requests in 58 s on 2 cards vs 190 s serial, byte-identical | PASS · `--dp 1` batch, 2 requests in 28 s vs 33 s serial, byte-identical; `--dp 2` 4 requests in 42 s vs 69 s, byte-identical, on 2 × A100 [fluxa100] | PASS · 2 requests in 76 s vs 120 s serial, bit-identical |
+| PASS · 4 requests in 58 s on 2 cards vs 190 s serial, byte-identical | PASS · `--dp 1` batch, 2 requests in 28 s vs 33 s serial, byte-identical; `--dp 2` 4 requests in 42 s vs 69 s as a one-card batch, byte-identical, on 2 × A100 [fluxa100]; on PRO 6000 NOT MEASURED | PASS · 2 requests in 76 s vs 120 s serial, bit-identical |
 
 ### CFG-parallel   `--cfg-parallel` (2 GPUs, torchrun)
 Runs the cond and uncond branches on two cards, one all-gather per step.
