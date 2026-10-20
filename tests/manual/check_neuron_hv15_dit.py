@@ -9,6 +9,7 @@ diffusers in fp32 (reference) and bf16 (control).
 
 Phase 2, device: the application, compile mode, one forward compared, then --iters timed. One
 rank is TP1; N ranks is TP1 x CP=N (Ulysses: the image tokens split, the text replicated).
+``--oracle none --frames F``: timing only at another length (finite output, time per forward).
 
     torchrun --standalone --nproc-per-node 1 tests/manual/check_neuron_hv15_dit.py \
         --model-dir $HV15 --oracle ~/w22/hv15_oracle.pt --iters 5
@@ -30,11 +31,11 @@ GATE = 1.15
 H, W, FRAMES = 480, 848, 5
 
 
-def _inputs():
+def _inputs(frames: int = FRAMES):
     g = torch.Generator().manual_seed(0)
     mask = torch.zeros(1, 1000, dtype=torch.int64)
     mask[:, :120] = 1
-    lat = (FRAMES - 1) // 4 + 1, H // 16, W // 16
+    lat = (frames - 1) // 4 + 1, H // 16, W // 16
     return dict(
         hidden_states=torch.cat([torch.randn(1, 32, *lat, generator=g), torch.zeros(1, 33, *lat)], dim=1),
         timestep=torch.tensor([900.0]),
@@ -71,7 +72,8 @@ def check(args) -> int:
     from difflet.backends.registry import get_backend
     from difflet.pipeline.parallel_config import DiffletParallelConfig
 
-    oracle = torch.load(os.path.expanduser(args.oracle))
+    oracle = None if args.oracle == "none" else torch.load(os.path.expanduser(args.oracle))
+    frames = FRAMES if oracle is not None else int(args.frames)
     cp = int(os.environ.get("WORLD_SIZE", "1"))
     parallel = DiffletParallelConfig(tp_degree=1, cp_degree=cp, cp_mode="ulysses" if cp > 1 else "gather_kv")
     get_backend("neuron").prepare_runtime(parallel)  # core binding + the numerics workarounds
@@ -80,19 +82,32 @@ def check(args) -> int:
     rank0 = not dist.is_initialized() or dist.get_rank() == 0
     say = (lambda *a, **k: print(*a, **k)) if rank0 else (lambda *a, **k: None)  # noqa: E731
     app = NeuronHunyuanVideo15TransformerApplication(
-        model_path=os.path.join(args.model_dir, "transformer"), height=H, width=W, num_frames=FRAMES,
+        model_path=os.path.join(args.model_dir, "transformer"), height=H, width=W, num_frames=frames,
         parallel=parallel, dtype=torch.bfloat16, exec_mode=args.exec_mode)
     t = time.perf_counter()
     app.load()
     say(f"load+warmup {time.perf_counter() - t:.1f} s phases="
           f"{ {k: round(v, 1) for k, v in app.phase_seconds.items()} } report={app.load_report}", flush=True)
 
+    inputs = oracle["inputs"] if oracle is not None else _inputs(frames)
+
     def forward():
-        out = app(**oracle["inputs"])[0]
+        out = app(**inputs)[0]
         torch.neuron.synchronize()
         return out
 
     y = forward().float().cpu()
+    if oracle is None:  # timing only: no reference at this length
+        say(f"{frames} frames ({app.num_image_tokens} image tokens), TP1{f' x CP{cp}' if cp > 1 else ''}: "
+            f"finite={bool(torch.isfinite(y).all())}, output {tuple(y.shape)}", flush=True)
+        times = []
+        for _ in range(args.iters):
+            t = time.perf_counter()
+            forward()
+            times.append(time.perf_counter() - t)
+        if times:
+            say(f"forward median {statistics.median(times) * 1e3:.1f} ms (n={len(times)})", flush=True)
+        return 0
     ref, ctl = oracle["ref_fp32"], oracle["control_bf16"]
     rel = lambda a: ((a - ref).abs().mean() / ref.abs().mean()).item()  # noqa: E731
     finite = bool(torch.isfinite(y).all())
@@ -117,6 +132,8 @@ def main() -> int:
     p.add_argument("--oracle")
     p.add_argument("--iters", type=int, default=5)
     p.add_argument("--exec-mode", choices=("compile", "eager"), default="compile")
+    p.add_argument("--frames", type=int, default=FRAMES,
+                   help="with --oracle none: the clip length for a timing-only run")
     args = p.parse_args()
     if args.make_oracle:
         return make_oracle(args)
