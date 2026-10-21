@@ -274,7 +274,7 @@ class ServingProfile:
 
     def canonical_shapes(self) -> tuple[tuple[int, int, int | None], ...]:
         """Deduped largest-first shape set (1-entry for single-shape profiles)."""
-        from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+        from difflet.pipeline.bucketing import canonicalize_shapes
 
         if self.shapes:
             return canonicalize_shapes(self.shapes)

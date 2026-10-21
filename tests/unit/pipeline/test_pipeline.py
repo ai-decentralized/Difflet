@@ -384,8 +384,16 @@ def test_force_compile_overrides_cache_hit(tmp_path):
     )
 
 
+def _select_backend(monkeypatch, name):
+    from difflet.backends import registry
+
+    monkeypatch.setenv("DIFFLET_BACKEND", name)
+    registry._get_backend_by_name.cache_clear()
+
+
 def test_torchrun_load_defaults_to_one_rank_per_process(monkeypatch):
     """In torchrun MPMD each Python process owns one NeuronCore."""
+    _select_backend(monkeypatch, "trainium")
     monkeypatch.setenv("WORLD_SIZE", "4")
     monkeypatch.setenv("RANK", "2")
 
@@ -394,10 +402,20 @@ def test_torchrun_load_defaults_to_one_rank_per_process(monkeypatch):
 
 def test_explicit_load_rank_range_is_preserved(monkeypatch):
     """Manual load ranges still allow single-process multi-core loading."""
+    _select_backend(monkeypatch, "trainium")
     monkeypatch.setenv("WORLD_SIZE", "4")
     monkeypatch.setenv("RANK", "2")
 
     assert _resolve_load_rank_range(start_rank_id=0, local_ranks_size=4) == (0, 4)
+
+
+def test_cpu_backend_load_rank_range_is_passthrough(monkeypatch):
+    """The load-rank policy belongs to the selected backend, not to Trainium."""
+    _select_backend(monkeypatch, "cpu")
+    monkeypatch.setenv("WORLD_SIZE", "4")
+    monkeypatch.setenv("RANK", "2")
+
+    assert _resolve_load_rank_range(start_rank_id=None, local_ranks_size=None) == (None, None)
 
 
 def test_backend_override_must_be_supported_by_model(tmp_path):

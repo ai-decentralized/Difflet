@@ -33,7 +33,7 @@ def create_flux_application(
     taef1_path = kwargs.pop("taef1_path", None)
     compile_shapes = kwargs.pop("shapes", None)
     if compile_shapes:
-        from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+        from difflet.pipeline.bucketing import canonicalize_shapes
 
         compile_shapes = canonicalize_shapes(compile_shapes)
     world_size = get_flux_parallelism_config(
