@@ -7,6 +7,7 @@ _EXPORTS = {
     "LayerNorm": ("norm", "LayerNorm"),
     "RMSNorm": ("norm", "RMSNorm"),
     "CustomRMSNorm": ("norm", "CustomRMSNorm"),
+    "rms_norm_fp32": ("norm", "rms_norm_fp32"),
     "SPMDRank": ("collectives", "SPMDRank"),
     "attention": ("attention", "attention"),
     "cross_attention": ("attention", "cross_attention"),
