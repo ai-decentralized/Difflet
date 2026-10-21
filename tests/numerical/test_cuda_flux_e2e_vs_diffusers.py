@@ -3,30 +3,29 @@
     DIFFLET_BACKEND=cuda python scripts/cuda_e2e_flux_vs_diffusers.py --model-path <snapshot>
     DIFFLET_RUN_CUDA_NUMERICAL=1 pytest tests/numerical/test_cuda_flux_e2e_vs_diffusers.py -v
 
-GPU-only: the result JSON comes from the script on the pod. The floors are the initial F5
-floors (25 dB / 0.99, as F3 started Qwen-Image); F5 task 5 tightens them from the first
-measurement, leaving headroom. Both pipelines run bf16, so this is "the same picture", not
-bit equality.
+GPU-only: the result JSON comes from the script on a GPU host. Floors: 35 dB / 0.998,
+tightened from the first measurement, leaving headroom. Both pipelines run bf16, so this is
+"the same picture", not bit equality.
 
-**The gate relative to the noise floor.** The F4f pod measured the metric's own
-sensitivity on Flux: diffusers against itself with its bf16 gemm reductions flipped lands at
-30.92 / 36.62 / 37.61 dB over seeds 0-2 (``--noise-floor``), so on seed 0 the 35 dB floor fails
-diffusers' own rounding noise and any rounding-level change of Difflet's (F4f's fused
-projection and ``--torch-compile`` both read 31.5 dB there and 39.6-43.8 dB on seeds 1-2).
-When the result carries ``noise_floor`` the gate is stated the way F9b states Wan's (D14's
-shape): PSNR at least the floor's minus ``20·log10(1.15)`` = 1.21 dB, the cosine deviation
+**The gate relative to the noise floor.** The metric's own sensitivity on Flux: diffusers
+against itself with its bf16 gemm reductions flipped lands at 30.92 / 36.62 / 37.61 dB over
+seeds 0-2 (``--noise-floor``), so on seed 0 the 35 dB floor fails diffusers' own rounding
+noise and any rounding-level change of Difflet's (the fused projection and ``--torch-compile``
+both read 31.5 dB there and 39.6-43.8 dB on seeds 1-2).
+When the result carries ``noise_floor`` the gate is stated as Wan's is (the DiT parity
+deviation ratio): PSNR at least the floor's minus ``20·log10(1.15)`` = 1.21 dB, the cosine deviation
 ``1 - cosine`` at most 1.15² = 1.3225x the floor's (quadratic in the error: 1.15x on the linear
 error), and a loose absolute floor of ``LOOSE_PSNR_DB`` / ``LOOSE_COSINE`` (20 dB / 0.98) that the
 floor itself must clear ("the oracle moved" otherwise). The 35 dB / 0.998 floors then step
 aside; without a floor they judge as before and the relative test is skipped with that reason.
 
-**Over seeds.** A result run with ``--seeds`` carries ``per_seed`` (a pre-F9c JSON is read
+**Over seeds.** A result run with ``--seeds`` carries ``per_seed`` (a single-seed JSON is read
 as its one top-level seed). The absolute test judges EVERY seed (a failure names it). With the
-floor on every seed and two or more seeds, the relative test is F9b's for Wan: gate A, the mean
+floor on every seed and two or more seeds, the relative test is Wan's: gate A, the mean
 PSNR over seeds at least the floor's mean minus 1.21 dB and the mean cosine deviation at most
 1.3225x the floor's mean; gate B, every seed at least the floor's WORST seed minus 1.21 dB and
 at most 1.3225x the floor's worst deviation — against the floor's spread, not matched by seed
-(F4f's floor spans 6.7 dB over seeds 0-2); "the oracle moved" when the floor's worst seed is
+(Flux's floor spans 6.7 dB over seeds 0-2); "the oracle moved" when the floor's worst seed is
 under the loose floor. One seed keeps the statement above (gates A and B coincide). A floor on
 some seeds only is a malformed result. ``test_seeds_and_aggregate_are_recorded`` checks the
 first-seed top-level keys and the min/mean/max ``aggregate`` against the per-seed numbers and
@@ -46,7 +45,7 @@ pytestmark = [pytest.mark.numerical, pytest.mark.slow]
 
 MIN_PSNR_DB = 35.0
 MIN_COSINE = 0.998
-# The relative gate: D14's deviation ratio in dB for PSNR, squared on
+# The relative gate: the DiT parity deviation ratio in dB for PSNR, squared on
 # 1 - cosine; the loose absolute floor that holds whatever the noise floor says.
 MAX_DEVIATION_RATIO = 1.15
 MARGIN_DB = 20 * math.log10(MAX_DEVIATION_RATIO)  # 1.21 dB
@@ -73,7 +72,7 @@ def _opt_in():
 
 def _per_seed(payload: dict) -> dict[str, dict]:
     """Per seed, ``{metrics, noise_floor,...}``: a ``--seeds`` result's ``per_seed``, else
-    the one top-level seed's (a pre-F9c JSON)."""
+    the one top-level seed's (a single-seed JSON)."""
     per_seed = payload.get("per_seed")
     if per_seed:
         return per_seed
@@ -87,7 +86,7 @@ def _per_seed(payload: dict) -> dict[str, dict]:
 
 def _noise_floors(payload: dict) -> dict[str, dict] | None:
     """Per seed, the noise floor's metrics (diffusers vs its perturbed self, ``--noise-floor``),
-    or None when the result carries none (a pre-F4f JSON, or the flag not given). A floor on
+    or None when the result carries none (an older JSON, or the flag not given). A floor on
     some seeds only is a malformed result."""
     floors = {seed: entry.get("noise_floor") for seed, entry in _per_seed(payload).items()}
     if all(floor is None for floor in floors.values()):
@@ -129,7 +128,7 @@ def _mean(values: list[float]) -> float:
 
 
 def test_image_is_as_close_to_diffusers_as_diffusers_is_to_itself():
-    """The relative gate (F4f; over seeds F9c): against the recorded noise floor — one seed
+    """The relative gate: against the recorded noise floor — one seed
     against its own floor, two or more by gates A and B; see the module docstring. Skipped when
     no noise floor is recorded."""
     payload = _result()
@@ -157,7 +156,7 @@ def test_image_is_as_close_to_diffusers_as_diffusers_is_to_itself():
     )
 
     if n == 1:
-        # F4f's statement: the one seed against its own floor (gates A and B coincide).
+        # One seed against its own floor (gates A and B coincide).
         (m,) = difflet.values()
         (floor_p,), (floor_d,) = floor_psnr, floor_dev
         required = floor_p - MARGIN_DB

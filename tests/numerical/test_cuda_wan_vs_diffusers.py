@@ -1,12 +1,12 @@
-"""CUDA Wan DiT numerical alignment against Hugging Face diffusers, per expert (CUDA plan F1
-task 4, D14; the rounding block is F1b task 2).
+"""CUDA Wan DiT numerical alignment against Hugging Face diffusers, per expert.
 
 The oracle is the *upstream* ``WanTransformer3DModel``, never another difflet backend. The
 numbers come from one GPU script that runs, for each expert, diffusers fp32, diffusers bf16 (the
 control) and difflet bf16 through the CUDA ops on identical seeded inputs, in two blocks:
 ``results.sdpa`` at 900 / 500 (exact in bf16) and ``rounding`` at 999 / 750 (bf16 holds them as
 1000 / 752), where upstream gets WanPipeline's int64 timestep and difflet runs with its
-production fp32 timestep (``fp32_timestep``) and with Release 1's bf16 cast (``bf16_timestep``):
+production fp32 timestep (``fp32_timestep``) and with the model-dtype bf16 cast
+(``bf16_timestep``):
 
     DIFFLET_BACKEND=cuda python tests/numerical/cuda_parity_wan_gpu.py --model-path <hf snapshot>
     DIFFLET_RUN_CUDA_NUMERICAL=1 pytest tests/numerical/test_cuda_wan_vs_diffusers.py -v -rA
@@ -98,7 +98,7 @@ def test_adds_little_on_top_of_what_bf16_costs(expert):
 def _rounding(expert: str) -> dict:
     record = _result()["experts"][expert]
     assert "rounding" in record, (
-        f"[{expert}] no rounding block in {_path()}: the oracle predates F1b task 2; re-run "
+        f"[{expert}] no rounding block in {_path()}: the oracle predates it; re-run "
         "cuda_parity_wan_gpu.py"
     )
     return record["rounding"]
@@ -137,7 +137,7 @@ def test_rounding_block_adds_little_on_top_of_what_bf16_costs(expert):
 
 @pytest.mark.parametrize("expert", EXPERTS)
 def test_the_bf16_timestep_is_recorded(expert):
-    """Release 1's bf16 cast is the A/B's other arm: it must have run, its ratios are printed
+    """The model-dtype bf16 cast is the A/B's other arm: it must have run, its ratios are printed
     beside the production fp32 timestep's, and nothing is gated on them."""
     rounding = _rounding(expert)
     control = rounding["control"]

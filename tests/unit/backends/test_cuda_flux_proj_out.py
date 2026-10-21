@@ -5,17 +5,27 @@ keeps the Megatron split (``proj_out_attn`` + ``proj_out_mlp``). ``fuse_proj_out
 diffusers' layout from the split weights on a loaded block and binds the fused forward to it;
 the model file, the converter and the Trainium/TPU graphs keep the split."""
 
+import os
+
 import torch
 from diffusers import FluxPipeline, FluxTransformer2DModel
 
-from difflet.backends.cuda.flux.proj_out import fuse_proj_out
-from difflet.layers.embeddings import FluxPosEmbed
-from difflet.models.flux import modeling_flux as mf
-from difflet.models.flux.dit_config import FluxDiTConfig
-from difflet.models.flux.modeling_flux import (
+# With no backend set, bind difflet.ops to the CPU ops for the modules imported below (a
+# Trainium host would bind the Neuron ops).
+_PINNED = "DIFFLET_BACKEND" not in os.environ
+os.environ.setdefault("DIFFLET_BACKEND", "cpu")
+
+from difflet.backends.cuda.flux.proj_out import fuse_proj_out  # noqa: E402
+from difflet.layers.embeddings import FluxPosEmbed  # noqa: E402
+from difflet.models.flux import modeling_flux as mf  # noqa: E402
+from difflet.models.flux.dit_config import FluxDiTConfig  # noqa: E402
+from difflet.models.flux.modeling_flux import (  # noqa: E402
     NeuronFluxTransformer2DModel,
     convert_flux_hf_state_dict,
 )
+
+if _PINNED:
+    del os.environ["DIFFLET_BACKEND"]
 
 AXES = (2, 2, 4)
 TINY = dict(

@@ -1,6 +1,6 @@
 """difflet.models.qwen_image.dit_config: the backend-neutral Qwen-Image DiT geometry.
 
-Moved out of the TPU backend (CUDA plan PR 3 Task 6) because the arithmetic is
+Lives outside the TPU backend because the arithmetic is
 patch/VAE geometry, not hardware. TPU keeps ``TpuQwenImageConfig`` as an alias.
 """
 

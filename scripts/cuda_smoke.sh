@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Qwen-Image on one GPU through `difflet run` on the CUDA backend (plan File Map / F3).
+# Qwen-Image on one GPU through `difflet run` on the CUDA backend.
 # Logs to /tmp/logs/cuda-smoke-<ts>.log.
 #   scripts/cuda_smoke.sh --prompt "a cat" --output /tmp/qwen.png [--steps 50 --seed 0]
 # Per-phase timings (load / encode / generate, peak memory) come from scripts/cuda_smoke.py.

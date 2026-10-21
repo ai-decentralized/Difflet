@@ -730,20 +730,18 @@ def _validate_cfg_parallel(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
-def _on_cuda() -> bool:
-    from difflet.backends.registry import current_backend
+def _platform():
+    from difflet.platforms import current_platform
 
-    return current_backend() == "cuda"
+    return current_platform()
 
 
 def _replica_tp(args: argparse.Namespace) -> int:
-    """The tp degree one replica runs at: the registry default on Trainium, 1 on CUDA.
-
-    The CUDA backend has no registry-default tensor parallelism (tp > 1 is not supported):
-    a CUDA replica is ``cfg x cp x tp`` GPUs with every unset degree at 1.
-    """
-    if _on_cuda():
-        return args.tp_degree or 1
+    """The tp degree one replica runs at: the platform's default when it has one (1 on a GPU
+    platform, where a replica is ``cfg x cp x tp`` GPUs), else the registry default."""
+    platform_default = _platform().default_tp_degree()
+    if platform_default is not None:
+        return args.tp_degree or platform_default
     from difflet.registry import resolve_model
 
     entry = resolve_model(args.model_id, model_type=_MODEL_TYPE[args.model_id])
@@ -771,12 +769,12 @@ def _resolve_total_cores(args: argparse.Namespace) -> tuple[int | None, str]:
     if total is not None:
         return total, "--total-cores"
 
-    if _on_cuda():
-        # GPUs, not NeuronCores: CUDA_VISIBLE_DEVICES already narrows the count.
-        import torch
-
-        if torch.cuda.is_available():
-            return torch.cuda.device_count(), "torch.cuda.device_count()"
+    platform = _platform()
+    if platform.capabilities.flow == "gpu":
+        # GPUs, not NeuronCores: the visible-devices variable already narrows the count.
+        count = platform.device_count()
+        if count is not None:
+            return count, "torch.cuda.device_count()"
         return None, "undetected"
 
     env_value = os.environ.get("NEURON_RT_NUM_CORES", "").strip()
@@ -813,8 +811,9 @@ def _validate_capacity(args: argparse.Namespace) -> None:
         return
 
     tp = _replica_tp(args)
-    if _on_cuda():
-        unit, tp_note = "GPUs", ""
+    platform = _platform()
+    if platform.capabilities.flow == "gpu":
+        unit, tp_note = platform.capabilities.device_unit, ""
     else:
         from difflet.registry import resolve_model
 
@@ -888,31 +887,24 @@ def _dispatch_dp(args: argparse.Namespace) -> None:
 
 
 def _get_orchestrator(args: argparse.Namespace):
-    from difflet.backends.registry import current_backend
-
-    if getattr(args, "torch_compile", False) and current_backend() != "cuda":
+    platform = _platform()
+    if getattr(args, "torch_compile", False) and not platform.capabilities.supports_torch_compile:
         raise SystemExit(
-            "[difflet] --torch-compile is a CUDA-backend option; "
-            f"the {current_backend()} backend does not take it"
+            "[difflet] --torch-compile is a GPU-backend option; "
+            f"the {platform.name} backend does not take it"
         )
-    if current_backend() == "cuda":
-        # CUDA runs the whole model in one process: no Neuron stages.
-        if args.model_id == "Qwen/Qwen-Image":
-            from difflet.cli.orchestrators.qwen_image_cuda import CudaQwenImageOrchestrator
+    if platform.capabilities.flow == "gpu":
+        # The whole model runs in one process: no Neuron stages.
+        from difflet.backends.gpu.cli import GpuOrchestrator
+        from difflet.models.spec import gpu_spec_for_cli_model_id
 
-            return CudaQwenImageOrchestrator(args)
-        if args.model_id in ("black-forest-labs/FLUX.1-dev", "black-forest-labs/FLUX.1-schnell"):
-            from difflet.cli.orchestrators.flux_cuda import FluxCudaOrchestrator
-
-            return FluxCudaOrchestrator(args)
-        if args.model_id in ("Wan-AI/Wan2.2-T2V-A14B-Diffusers", "Wan-AI/Wan2.1-T2V-14B-Diffusers"):
-            from difflet.cli.orchestrators.wan_cuda import WanCudaOrchestrator
-
-            return WanCudaOrchestrator(args)
-        raise SystemExit(
-            f"[difflet] {args.model_id} is not supported on the CUDA backend yet; "
-            "set DIFFLET_BACKEND=trainium for the staged Neuron path"
-        )
+        spec = gpu_spec_for_cli_model_id(args.model_id)
+        if spec is None:
+            raise SystemExit(
+                f"[difflet] {args.model_id} is not supported on the {platform.display_name} "
+                "backend yet; set DIFFLET_BACKEND=trainium for the staged Neuron path"
+            )
+        return GpuOrchestrator(args, spec)
 
     from difflet.cli.orchestrators.flux import FluxOrchestrator
     from difflet.cli.orchestrators.hunyuan_video import HunyuanVideoOrchestrator

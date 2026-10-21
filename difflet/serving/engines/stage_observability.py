@@ -213,26 +213,29 @@ class NeuronDeviceMemoryProbe:
 
 
 def resolve_backend_label() -> str:
-    """The active backend's name, or ``"unknown"`` if it cannot be resolved here."""
+    """The active platform's name, or ``"unknown"`` if it cannot be resolved here."""
 
     try:
-        from difflet.backends.registry import current_backend
+        from difflet.platforms import current_platform
 
-        return current_backend()
+        return current_platform().name
     except BaseException:  # pragma: no cover - defensive
         return "unknown"
 
 
 def select_device_memory_probe(backend: str | None = None) -> DeviceMemoryProbe:
-    """The probe for the backend this worker runs on."""
+    """The probe for the platform this worker runs on."""
 
     if backend is None:
         backend = resolve_backend_label()
     if backend == "unknown":
         return NullDeviceMemoryProbe("the active Difflet backend could not be resolved")
-    if backend == "cuda":
+    from difflet.platforms import get_platform
+
+    flow = get_platform(backend).capabilities.flow
+    if flow == "gpu":
         return CudaDeviceMemoryProbe()
-    if backend == "trainium":
+    if flow == "neuron":
         return NeuronDeviceMemoryProbe()
     return NullDeviceMemoryProbe(
         f"no resident device memory probe for backend {backend!r}; "

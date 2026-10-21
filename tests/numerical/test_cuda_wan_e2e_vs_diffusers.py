@@ -3,10 +3,10 @@
     DIFFLET_BACKEND=cuda python scripts/cuda_e2e_wan_vs_diffusers.py --model-path <snapshot>
     DIFFLET_RUN_CUDA_NUMERICAL=1 pytest tests/numerical/test_cuda_wan_e2e_vs_diffusers.py -v
 
-GPU-only: the result JSON comes from the script on the pod. The metrics are over the whole
-``(F, H, W, 3)`` video in [0, 1] on both sides. The floors are the initial F1 floors
-(25 dB / 0.99, as F3 and F5 started); Task 5 tightens them from the first measurement, leaving
-headroom. Both pipelines run bf16, so this is "the same clip", not bit equality.
+GPU-only: the result JSON comes from the script on a GPU host. The metrics are over the whole
+``(F, H, W, 3)`` video in [0, 1] on both sides. Floors: 25 dB / 0.99, set from the first
+measurement, leaving headroom. Both pipelines run bf16, so this is "the same clip", not bit
+equality.
 
 The script runs Difflet once per ``--timestep-dtypes`` variant against one
 diffusers run; the floors judge the ``float32`` variant (the shipped default) by name when the
@@ -17,18 +17,18 @@ dtype's, which need not be ``float32``. Every variant's PSNR and cosine are prin
 **Seeds and the noise floor.** A result run with ``--seeds`` carries ``per_seed``:
 the floors judge EVERY seed's gated variant (a failure names the seed), the top-level keys must
 be the first seed's, and the noise floor (diffusers vs its own bf16-rounded timestep,
-``--noise-floor``) and the min/mean/max ``aggregate`` are printed under ``-rA``. A pre-F9 result
-(no ``per_seed``) is gated exactly as before.
+``--noise-floor``) and the min/mean/max ``aggregate`` are printed under ``-rA``. A single-seed
+result (no ``per_seed``) is gated exactly as before.
 
-**The gate relative to the noise floor.** F9 measured the floor at 28.62 / 26.74 / 23.79 dB
+**The gate relative to the noise floor.** The measured floor is 28.62 / 26.74 / 23.79 dB
 over seeds 0-2 — its own worst seed is under the 25 dB floor, so seed luck could fail a correct
-build. When the result carries the floor on every seed, the gate is stated the way D14 states
-the parity gates, relative to what the reference costs itself, in three parts:
+build. When the result carries the floor on every seed, the gate is stated the way the DiT
+parity gates are, relative to what the reference costs itself, in three parts:
 
 - gate A, the mean over seeds: Difflet's mean PSNR is at least the floor's mean minus
-  ``20·log10(1.15)`` = 1.21 dB (D14's 1.15x deviation ratio in dB; a mean of dB values is the
-  geometric mean of RMSE ratios), and the mean cosine deviation ``1 - cosine`` is at most
-  1.15² = 1.3225x the floor's mean deviation (``1 - cosine`` is quadratic in the error —
+  ``20·log10(1.15)`` = 1.21 dB (the parity gates' 1.15x deviation ratio in dB; a mean of dB
+  values is the geometric mean of RMSE ratios), and the mean cosine deviation ``1 - cosine`` is
+  at most 1.15² = 1.3225x the floor's mean deviation (``1 - cosine`` is quadratic in the error —
   ``≈ ε²/2`` — so the square is the same 1.15x on the linear error);
 - gate B, every seed: at least the floor's WORST seed minus 1.21 dB, and a cosine deviation of
   at most 1.3225x the floor's worst — against the floor's spread, not matched by seed, because
@@ -38,12 +38,12 @@ the parity gates, relative to what the reference costs itself, in three parts:
   under it, or not finite, fails the relative test as "the oracle moved" rather than judging.
 
 The 25 dB / 0.99 floors then step aside (``test_video_is_the_same_clip_as_diffusers`` applies
-gate C and says so). Without a floor — a legacy JSON, or ``--seeds`` without ``--noise-floor``,
-as the wan gate run's e2e — the 25 dB / 0.99 floors judge every seed as before and the
+gate C and says so). Without a floor — a legacy JSON, or ``--seeds`` without ``--noise-floor``
+— the 25 dB / 0.99 floors judge every seed as before and the
 relative test is skipped with that reason. A floor on some seeds only is a malformed result.
 With n = 3 seeds the floor's mean carries a standard error of about 1.4 dB, so the measured run's
 2.0 dB headroom on gate A is about one standard error of the difference: the relative gate
-reduces the seed-luck risk F9 named, it does not remove it; more seeds narrow it.
+reduces the seed-luck risk, it does not remove it; more seeds narrow it.
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ pytestmark = [pytest.mark.numerical, pytest.mark.slow]
 
 MIN_PSNR_DB = 25.0
 MIN_COSINE = 0.99
-# The relative gate: D14's deviation ratio, in dB for PSNR and squared on 1 - cosine
+# The relative gate: the parity gates' deviation ratio, in dB for PSNR and squared on 1 - cosine
 # (quadratic in the error); the loose absolute floor that holds whatever the noise floor says.
 MAX_DEVIATION_RATIO = 1.15
 MARGIN_DB = 20 * math.log10(MAX_DEVIATION_RATIO)  # 1.21 dB
@@ -235,7 +235,7 @@ def test_video_is_as_close_to_diffusers_as_diffusers_is_to_itself():
 def test_every_timestep_dtype_variant_is_recorded():
     payload = _result()
     variants = payload.get("variants")
-    assert variants, "no variants: the result predates F1b task 2; re-run the e2e script"
+    assert variants, "no variants: the result predates timestep-dtype variants; re-run the script"
     for name, variant in variants.items():
         for key in ("metrics", "timings", "image"):
             assert key in variant, (name, key)

@@ -1,4 +1,4 @@
-"""`difflet serve` picks the CUDA serving adapters by backend name."""
+"""`difflet serve` picks the generic GPU serving adapter on a GPU platform."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from difflet.serving.model_registry import resolve_serving_model
 from difflet.serving.options import ServeOptions
 from difflet.serving.types import ParallelTopology, StageRuntimeSpec
 
-_CUDA_MODULE = "difflet.serving.orchestrators.qwen_image_cuda"
+_GPU_MODULE = "difflet.backends.gpu.serving"
 
 
 def _resolve(monkeypatch, backend, **options):
@@ -19,11 +19,15 @@ def _resolve(monkeypatch, backend, **options):
     return resolve_serving_model(ServeOptions(model_id="Qwen/Qwen-Image", **options))
 
 
-def test_cuda_routes_qwen_to_the_cuda_factories(monkeypatch):
+def _assert_gpu_factories(md):
+    assert md.artifact_preparer_factory == f"{_GPU_MODULE}:GpuServingArtifactPreparer"
+    assert md.orchestrator_factory == f"{_GPU_MODULE}:GpuServingStageAdapter"
+    assert md.request_validator_factory == f"{_GPU_MODULE}:GpuServingRequestValidator"
+
+
+def test_cuda_routes_qwen_to_the_gpu_factories(monkeypatch):
     md = _resolve(monkeypatch, "cuda").metadata
-    assert md.artifact_preparer_factory == f"{_CUDA_MODULE}:CudaQwenImageServingArtifactPreparer"
-    assert md.orchestrator_factory == f"{_CUDA_MODULE}:CudaQwenImageServingStageAdapter"
-    assert md.request_validator_factory == f"{_CUDA_MODULE}:CudaQwenImageServingRequestValidator"
+    _assert_gpu_factories(md)
     assert [
         (s.stage_id, s.kind, s.role, s.final_output) for s in md.pipeline_definition.stages
     ] == [("pipeline", "opaque_pipeline", "pipeline", True)]
@@ -64,24 +68,19 @@ def _resolve_model(monkeypatch, model_id, backend="cuda", **options):
     return resolve_serving_model(ServeOptions(model_id=model_id, **options))
 
 
-def test_cuda_routes_flux_to_its_cuda_adapter_with_the_cli_defaults(monkeypatch):
+def test_cuda_routes_flux_to_the_gpu_adapter_with_the_cli_defaults(monkeypatch):
     resolved = _resolve_model(monkeypatch, _FLUX)
     md = resolved.metadata
-    module = "difflet.serving.orchestrators.flux_cuda"
-    assert md.artifact_preparer_factory == f"{module}:CudaFluxServingArtifactPreparer"
-    assert md.orchestrator_factory == f"{module}:CudaFluxServingStageAdapter"
-    assert md.request_validator_factory == f"{module}:CudaFluxServingRequestValidator"
+    _assert_gpu_factories(md)
     assert (md.default_steps, md.default_guidance_scale) == (28, 3.5)
     profile = resolved.profile
     assert profile.parallel.tp_degree == 1 and (profile.height, profile.width) == (1024, 1024)
 
 
-def test_cuda_routes_wan22_to_its_cuda_adapter_with_the_cli_defaults(monkeypatch):
+def test_cuda_routes_wan22_to_the_gpu_adapter_with_the_cli_defaults(monkeypatch):
     resolved = _resolve_model(monkeypatch, _WAN22)
     md = resolved.metadata
-    module = "difflet.serving.orchestrators.wan_cuda"
-    assert md.orchestrator_factory == f"{module}:CudaWanServingStageAdapter"
-    assert md.request_validator_factory == f"{module}:CudaWanServingRequestValidator"
+    _assert_gpu_factories(md)
     assert (md.default_steps, md.default_guidance_scale) == (40, 4.0)
     assert md.output_modality == "video" and md.output_mime_type == "video/mp4"
     profile = resolved.profile
@@ -97,7 +96,7 @@ def test_wan21_is_not_served_on_cuda_because_it_never_ran_on_a_gpu(monkeypatch):
     assert exc.value.code == "feature_not_supported"
     message = exc.value.message
     assert _WAN21 in message and "CUDA" in message and _WAN22 in message
-    assert "not supported on the CUDA backend yet" in message
+    assert "not served on the CUDA backend yet" in message
     # On Trainium the Wan serving metadata keeps both checkpoints.
     assert _resolve_model(monkeypatch, _WAN21, backend="trainium").metadata.checkpoint_ids == (
         _WAN21,
@@ -106,25 +105,28 @@ def test_wan21_is_not_served_on_cuda_because_it_never_ran_on_a_gpu(monkeypatch):
 
 
 def test_video_serving_on_cuda_refuses_replicas_and_image_serving_keeps_them(monkeypatch):
-    # The video reason wins over the GPU count: on a one-GPU box the user learns why Wan
-    # cannot use replicas at all, not that the box is short of GPUs.
+    # The video reason wins over the GPU count: on a one-GPU host the user learns why Wan
+    # cannot use replicas at all, not that the host is short of GPUs.
     for gpus in (1, 2):
-        monkeypatch.setattr(model_registry, "_visible_gpu_count", lambda gpus=gpus: gpus)
+        monkeypatch.setattr(
+            model_registry, "_visible_gpu_count", lambda platform, gpus=gpus: gpus
+        )
         with pytest.raises(DiffletServingError) as exc:
             _resolve_model(monkeypatch, _WAN22, replicas=2)
         assert exc.value.code == "feature_not_supported"
         assert "one video job at a time" in exc.value.message
-    monkeypatch.setattr(model_registry, "_visible_gpu_count", lambda: 2)
+    monkeypatch.setattr(model_registry, "_visible_gpu_count", lambda platform: 2)
     assert _resolve_model(monkeypatch, _FLUX, replicas=2).metadata.model_type == "flux"
 
 
-def test_models_without_a_cuda_adapter_name_the_three_that_have_one(monkeypatch):
+def test_models_without_a_gpu_spec_name_the_three_that_have_one(monkeypatch):
     monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
     with pytest.raises(DiffletServingError) as exc:
         resolve_serving_model(ServeOptions(model_id="hunyuanvideo-community/HunyuanVideo"))
     assert exc.value.code == "feature_not_supported"
     message = exc.value.message
-    assert "Qwen-Image, FLUX.1-dev and Wan 2.2" in message and "trainium" in message
+    assert "black-forest-labs/FLUX.1-dev, Wan-AI/Wan2.2-T2V-A14B-Diffusers" in message
+    assert "trainium" in message
 
 
 @pytest.mark.parametrize("model_id", [_FLUX, _WAN22])
@@ -143,9 +145,9 @@ def test_cuda_placement_needs_allocation_and_topology_but_no_artifact():
 
 
 def test_legacy_serving_tests_run_on_the_cpu_backend_whatever_the_host_has():
-    # Review finding: resolve_serving_model now branches on current_backend(), so the existing
-    # serving tests (which pin no backend) failed 97 times under DIFFLET_BACKEND=cuda. The
-    # serving conftest pins cpu; CUDA tests set their own backend after it.
+    # resolve_serving_model branches on the current platform, so serving tests that pin no
+    # backend would take the GPU path on a GPU host. The serving conftest pins cpu; GPU tests
+    # set their own backend after it.
     from difflet.backends.registry import current_backend
 
     assert current_backend() == "cpu"
@@ -154,7 +156,7 @@ def test_legacy_serving_tests_run_on_the_cpu_backend_whatever_the_host_has():
 @pytest.mark.parametrize("model_id", ["Qwen/Qwen-Image", _FLUX, _WAN22])
 def test_a_lone_teacache_calibration_is_refused_on_cuda_not_dropped(monkeypatch, model_id):
     # Without --teacache-speedup the profile builder keeps no calibration, so the file would
-    # be ignored silently while the snapshot downloads; the CUDA CLI refuses it by name.
+    # be ignored silently while the snapshot downloads; the GPU CLI refuses it by name.
     with pytest.raises(DiffletServingError) as exc:
         _resolve_model(monkeypatch, model_id, teacache_calibration="/cal.json")
     assert exc.value.code == "feature_not_supported"

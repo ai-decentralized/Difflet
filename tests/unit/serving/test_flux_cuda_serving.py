@@ -18,7 +18,8 @@ from difflet.serving.engines.resident_worker import _apply_worker_runtime_enviro
 from difflet.serving.engines.stage_pipeline import StagePipelineEngine
 from difflet.serving.errors import DiffletServingError
 from difflet.serving.options import CompilePolicy, DownloadPolicy
-from difflet.serving.orchestrators import flux_cuda as mod
+from difflet.backends.gpu import serving as mod
+from difflet.models.flux.spec import SPEC
 from difflet.serving.types import (
     ArtifactSet,
     CancellationSignal,
@@ -58,7 +59,7 @@ def source(monkeypatch):
 
 
 def _prepare(profile, policy=CompilePolicy.AUTO):
-    return mod.CudaFluxServingArtifactPreparer().prepare_runtime(
+    return mod.GpuServingArtifactPreparer(_MODEL).prepare_runtime(
         profile, download_policy=DownloadPolicy.AUTO, compile_policy=policy
     )
 
@@ -88,7 +89,7 @@ def test_prepare_runtime_resolves_the_snapshot_and_builds_an_eager_bundle(source
         # FLUX.1-dev is guidance-distilled: one pass per step, no second branch to place.
         (
             {"parallel": DiffletParallelConfig(tp_degree=1, cfg_parallel_enabled=True)},
-            "guidance-distilled",
+            "does not apply",
         ),
         ({"teacache_speedup": 1.5}, "not supported"),
     ],
@@ -133,8 +134,8 @@ class _Tok:
 
 
 def _validator(bundle, n_tokens=40):
-    v = mod.CudaFluxServingRequestValidator(bundle)
-    v._tokenizer_for_runtime = lambda: _Tok(n_tokens)
+    v = mod.GpuServingRequestValidator(bundle)
+    v._tokenizer = lambda subdir: _Tok(n_tokens)
     return v
 
 
@@ -189,7 +190,7 @@ def test_preload_loads_the_t5_tokenizer_from_the_pinned_snapshot(source, monkeyp
         "from_pretrained",
         staticmethod(lambda p, **k: seen.update(path=str(p)) or _Tok(5)),
     )
-    mod.CudaFluxServingRequestValidator(_prepare(_profile())).preload()
+    mod.GpuServingRequestValidator(_prepare(_profile())).preload()
     assert seen["path"] == "/snap/flux/tokenizer_2"
 
 
@@ -223,12 +224,12 @@ def recorder(monkeypatch):
 
 
 def _engine(bundle):
-    adapter = mod.CudaFluxServingStageAdapter()
+    adapter = mod.GpuServingStageAdapter(_MODEL)
     return adapter, StagePipelineEngine(runtime=bundle, adapter=adapter)
 
 
 def _cli(**over):
-    from difflet.cli.orchestrators.flux_cuda import FluxCudaOrchestrator
+    from difflet.backends.gpu.cli import GpuOrchestrator
 
     d = dict(
         model_id=_MODEL,
@@ -245,7 +246,7 @@ def _cli(**over):
         seed=0,
     )
     d.update(over)
-    return FluxCudaOrchestrator(argparse.Namespace(**d))
+    return GpuOrchestrator(argparse.Namespace(**d), SPEC)
 
 
 def test_startup_loads_the_pipeline_exactly_as_the_cuda_cli_would(source, recorder):
@@ -274,12 +275,12 @@ def test_startup_smoke_runs_four_steps_at_the_profile_shape(source, recorder):
     asyncio.run(engine.start())
     prompt, kw = adapter.pipe.app.calls[0]
     assert kw == {
-        "num_inference_steps": mod.SMOKE_STEPS,
+        "num_inference_steps": SPEC.smoke_steps,
         "guidance_scale": 3.5,
         "seed": 0,
         "output_type": "pil",
     }
-    assert mod.SMOKE_STEPS == 4
+    assert SPEC.smoke_steps == 4
 
 
 def test_generate_passes_the_cli_s_arguments_and_returns_png(source, recorder):
@@ -321,13 +322,13 @@ def test_unsupported_profile_is_refused_before_any_load(source, recorder):
         profile=profile,
         source=_SOURCE,
         pipeline_definition=_prepare(_profile()).pipeline_definition,
-        runtime_plan=mod.cuda_runtime_plan(profile, _SOURCE),
+        runtime_plan=mod.resident_runtime_plan(profile, _SOURCE, SPEC),
         compile_specs=(),
         artifacts=ArtifactSet(()),
         adapter_config={"compile_policy": CompilePolicy.AUTO},
     )
     with pytest.raises(DiffletServingError) as exc:
-        asyncio.run(mod.CudaFluxServingStageAdapter().create_loaded_runners(bundle))
+        asyncio.run(mod.GpuServingStageAdapter(_MODEL).create_loaded_runners(bundle))
     assert "not supported" in exc.value.message and recorder == []
 
 
@@ -338,13 +339,11 @@ def test_shutdown_releases_the_resident_pipeline(source, recorder):
     assert adapter.pipe is None and adapter.active_runtime is None
 
 
-def test_cuda_serving_metadata_is_one_opaque_stage_with_the_cli_defaults():
-    from difflet.common.registry.flux import cuda_serving_metadata
-
-    meta = cuda_serving_metadata()
+def test_gpu_serving_metadata_is_one_opaque_stage_with_the_cli_defaults():
+    meta = mod.gpu_serving_metadata(SPEC)
     assert meta.model_type == "flux" and meta.checkpoint_ids == (_MODEL,)
     assert (meta.default_steps, meta.default_guidance_scale) == (28, 3.5)
     assert meta.output_modality == "image" and meta.chat_content_type == "image_url"
     (stage,) = meta.pipeline_definition.stages
     assert stage.kind == "opaque_pipeline" and stage.stage_id == "pipeline"
-    assert meta.orchestrator_factory.endswith("flux_cuda:CudaFluxServingStageAdapter")
+    assert meta.orchestrator_factory == "difflet.backends.gpu.serving:GpuServingStageAdapter"

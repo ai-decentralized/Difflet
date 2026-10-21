@@ -1,6 +1,6 @@
 """Replica HBM fit check: weights-only, header-only safetensors scan (spec §CLI).
 
-The limit is per backend: one Trainium2 chip, or the GPU's memory on CUDA.
+The limit is per platform: one Trainium2 chip, or the GPU's memory on a GPU platform.
 """
 
 from __future__ import annotations
@@ -37,21 +37,17 @@ def component_weight_bytes(model_path: str | Path, dtype_bytes: int = 2) -> dict
 
 
 def replica_limit_bytes() -> int | None:
-    """The per-replica device memory for the current backend, or ``None`` when unknown.
+    """The per-replica device memory for the current platform, or ``None`` when unknown.
 
-    Trainium: one Trainium2 chip (``HBM_LIMIT_BYTES``). CUDA: device 0's total memory (a
-    replica's weights live on each of its GPUs; the router's GPUs are one model), unknown
-    when no CUDA device is visible.
+    Trainium: one Trainium2 chip (``HBM_LIMIT_BYTES``). A GPU platform: device 0's total memory
+    (a replica's weights live on each of its GPUs), unknown when no GPU is visible.
     """
-    from difflet.backends.registry import current_backend
+    from difflet.platforms import current_platform
 
-    if current_backend() != "cuda":
+    platform = current_platform()
+    if platform.capabilities.flow != "gpu":
         return HBM_LIMIT_BYTES
-    import torch
-
-    if not torch.cuda.is_available():
-        return None
-    return int(torch.cuda.get_device_properties(0).total_memory)
+    return platform.device_memory_bytes()
 
 
 def assert_replica_fits(

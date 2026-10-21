@@ -8,13 +8,27 @@ guidance, ``return_dict``) are device-independent. The diffusers
 ``tests/numerical/cuda_parity_flux_gpu.py``.
 """
 
+import os
+
 import pytest
 import torch
 from diffusers import FluxPipeline, FluxTransformer2DModel
 from safetensors.torch import save_file
 
-from difflet.backends.cuda.flux.transformer import CudaFluxTransformerApplication, FluxDiTAdapter
-from difflet.models.flux.dit_config import FluxDiTConfig
+# With no backend set, bind difflet.ops to the CPU ops for the modules imported below (a
+# Trainium host would bind the Neuron ops).
+_PINNED = "DIFFLET_BACKEND" not in os.environ
+os.environ.setdefault("DIFFLET_BACKEND", "cpu")
+
+from difflet.backends.cuda.flux.transformer import (  # noqa: E402
+    CudaFluxTransformerApplication,
+    FluxDiTAdapter,
+)
+from difflet.models.flux.dit_config import FluxDiTConfig  # noqa: E402
+import difflet.models.flux.modeling_flux  # noqa: E402,F401  (bound to the CPU ops)
+
+if _PINNED:
+    del os.environ["DIFFLET_BACKEND"]
 
 # Rope axes must be even (cos/sin pairs) and sum to attention_head_dim (8).
 AXES_DIMS_ROPE = (2, 2, 4)
@@ -156,7 +170,7 @@ def test_load_converts_without_cloning_the_checkpoint(tmp_path, monkeypatch):
     assert seen == [False]
 
 
-# --- F4f task 1: --torch-compile for the Flux DiT ----------------------------------------------
+# --- --torch-compile for the Flux DiT ----------------------------------------------------------
 
 
 def test_torch_compile_is_off_by_default_for_flux(tmp_path):

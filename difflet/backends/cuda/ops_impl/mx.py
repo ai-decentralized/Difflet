@@ -1,7 +1,7 @@
 """MX (microscaling) ops on the CUDA backend: deliberately unimplemented.
 
-MX is a Trainium hardware format (``nkilib``-backed there). Release 1 of the CUDA
-backend runs bf16 only; silently dequantizing or falling back would make a model
+MX is a Trainium hardware format (``nkilib``-backed there). The CUDA backend runs
+bf16 only; silently dequantizing or falling back would make a model
 that *asks* for MX run at a different precision than requested. FP8/FP4 on
 Blackwell is not decided yet. These raise instead.
 """

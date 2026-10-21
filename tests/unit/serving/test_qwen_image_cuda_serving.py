@@ -11,7 +11,8 @@ from difflet.pipeline.parallel_config import DiffletParallelConfig
 from difflet.serving.engines.resident_worker import _apply_worker_runtime_environment
 from difflet.serving.errors import DiffletServingError
 from difflet.serving.options import CompilePolicy, DownloadPolicy
-from difflet.serving.orchestrators import qwen_image_cuda as mod
+from difflet.backends.gpu import serving as mod
+from difflet.models.qwen_image.spec import SPEC
 from difflet.serving.types import ResolvedModelSource, ServingProfile
 
 import os as _os
@@ -44,7 +45,7 @@ def source(monkeypatch):
 
 
 def _prepare(profile, source_calls, policy=CompilePolicy.AUTO):
-    return mod.CudaQwenImageServingArtifactPreparer().prepare_runtime(
+    return mod.GpuServingArtifactPreparer("Qwen/Qwen-Image").prepare_runtime(
         profile, download_policy=DownloadPolicy.AUTO, compile_policy=policy
     )
 
@@ -73,7 +74,10 @@ def test_prepare_runtime_resolves_the_snapshot_and_builds_an_eager_bundle(source
         ({"parallel": DiffletParallelConfig(tp_degree=1, sp_enabled=True)}, "not supported"),
         ({"parallel": DiffletParallelConfig(tp_degree=1, cp_degree=2)}, "not supported"),
         # Qwen-Image runs single-pass (no CFG): there is no second branch to place.
-        ({"parallel": DiffletParallelConfig(tp_degree=1, cfg_parallel_enabled=True)}, "no CFG"),
+        (
+            {"parallel": DiffletParallelConfig(tp_degree=1, cfg_parallel_enabled=True)},
+            "does not apply",
+        ),
         ({"teacache_speedup": 1.5}, "not supported"),
     ],
 )
@@ -117,8 +121,8 @@ def test_runtime_plan_is_accepted_by_the_resident_worker_environment(
 
 
 def test_worker_environment_does_not_leak_out_of_the_previous_test():
-    # Review finding: the first version used delenv(raising=False), which records nothing to
-    # undo, so NEURON_RT_VISIBLE_CORES=0 stayed set for every later test in the session.
+    # delenv(raising=False) on an unset variable records nothing to undo, so a worker's
+    # NEURON_RT_VISIBLE_CORES=0 would stay set for every later test in the session.
     import os
 
     assert os.environ.get("NEURON_RT_VISIBLE_CORES") == _AMBIENT_VISIBLE_CORES
@@ -144,8 +148,8 @@ class _Tok:
 
 
 def _validator(bundle, n_tokens=40):
-    v = mod.CudaQwenImageServingRequestValidator(bundle)
-    v._tokenizer_for_runtime = lambda: _Tok(n_tokens)
+    v = mod.GpuServingRequestValidator(bundle)
+    v._tokenizer = lambda subdir: _Tok(n_tokens)
     return v
 
 
@@ -159,7 +163,7 @@ def _request(**over):
         height=1024,
         width=1024,
         num_inference_steps=50,
-        guidance_scale=mod.NOOP_GUIDANCE_SCALE,
+        guidance_scale=SPEC.serving_noop_guidance_scale,
         seed=7,
     )
     d.update(over)
@@ -200,7 +204,7 @@ def test_preload_loads_the_tokenizer_from_the_pinned_snapshot(source, monkeypatc
         "from_pretrained",
         staticmethod(lambda p, **k: seen.update(path=str(p)) or _Tok(5)),
     )
-    mod.CudaQwenImageServingRequestValidator(_prepare(_profile(), source)).preload()
+    mod.GpuServingRequestValidator(_prepare(_profile(), source)).preload()
     assert seen["path"] == "/snap/qwen/tokenizer"
 
 
@@ -250,12 +254,12 @@ def recorder(monkeypatch):
 
 
 def _engine(bundle):
-    adapter = mod.CudaQwenImageServingStageAdapter()
+    adapter = mod.GpuServingStageAdapter("Qwen/Qwen-Image")
     return adapter, StagePipelineEngine(runtime=bundle, adapter=adapter)
 
 
 def test_startup_loads_the_pipeline_exactly_as_the_cuda_cli_would(source, recorder):
-    from difflet.cli.orchestrators import qwen_image_cuda as cli
+    from difflet.backends.gpu.cli import GpuOrchestrator
 
     bundle = _prepare(_profile(cache_dir="/c", revision="r1"), source, CompilePolicy.FORCE)
     adapter, engine = _engine(bundle)
@@ -264,7 +268,7 @@ def test_startup_loads_the_pipeline_exactly_as_the_cuda_cli_would(source, record
     cli_args = argparse.Namespace(
         tp_degree=1, height=1024, width=1024, cache_dir="/c", revision="r1", force=True
     )
-    cli_kw = cli.pipeline_kwargs(cli_args, load=True)
+    cli_kw = GpuOrchestrator(cli_args, SPEC).pipeline_kwargs(load=True)
     # Same kwargs as the CLI except the revision: the server loads the commit the parent pinned
     # (test below), where the CLI resolves the user's ref itself.
     assert model_id == "Qwen/Qwen-Image"
@@ -275,7 +279,7 @@ def test_startup_loads_the_pipeline_exactly_as_the_cuda_cli_would(source, record
 
 
 def test_worker_loads_the_commit_the_parent_pinned(source, recorder):
-    # Review finding: revision=profile.revision re-resolves refs/main in the worker, so a worker
+    # revision=profile.revision would re-resolve refs/main in the worker, so a worker
     # restart after a newer snapshot landed would quietly load a commit the bundle, the
     # profile_identity and the validator's tokenizer do not describe.
     adapter, engine = _engine(_prepare(_profile(revision=None), source))
@@ -293,8 +297,8 @@ def test_startup_smoke_runs_four_steps_at_the_profile_shape(source, recorder):
     adapter, engine = _engine(_prepare(_profile(), source))
     asyncio.run(engine.start())
     prompt, kw = adapter.pipe.app.calls[0]
-    assert kw == {"num_inference_steps": mod.SMOKE_STEPS, "seed": 0, "output_type": "pil"}
-    assert mod.SMOKE_STEPS == 4 and "guidance_scale" not in kw
+    assert kw == {"num_inference_steps": SPEC.smoke_steps, "seed": 0, "output_type": "pil"}
+    assert SPEC.smoke_steps == 4 and "guidance_scale" not in kw
 
 
 def test_generate_passes_prompt_steps_and_seed_and_returns_png(source, recorder):
@@ -335,13 +339,13 @@ def test_unsupported_profile_is_refused_before_any_load(source, recorder):
         profile=profile,
         source=_SOURCE,
         pipeline_definition=_prepare(_profile(), source).pipeline_definition,
-        runtime_plan=mod.cuda_runtime_plan(profile, _SOURCE),
+        runtime_plan=mod.resident_runtime_plan(profile, _SOURCE, SPEC),
         compile_specs=(),
         artifacts=ArtifactSet(()),
         adapter_config={"compile_policy": CompilePolicy.AUTO},
     )
     with pytest.raises(DiffletServingError) as exc:
-        asyncio.run(mod.CudaQwenImageServingStageAdapter().create_loaded_runners(bundle))
+        asyncio.run(mod.GpuServingStageAdapter("Qwen/Qwen-Image").create_loaded_runners(bundle))
     assert "not supported" in exc.value.message and recorder == []
 
 

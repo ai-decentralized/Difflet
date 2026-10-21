@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Phase 0 of docs/plans/2026-10-16-cuda-backend-support.md: record the GPU box's
-# facts before any code depends on them. Prints everything the status log needs.
+# Record a GPU host's facts (driver, capability, torch build, bf16 matmul) before
+# running the CUDA backend on it.
 # Usage: scripts/cuda_env_check.sh [python]   (default: <repo>/.venv/bin/python, else python3)
 set -uo pipefail
 

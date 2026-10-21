@@ -7,12 +7,23 @@ same weights and the same partial mask.
 """
 
 import json
+import os
 
 import pytest
 import torch
 
-from difflet.models.qwen_image.dit_config import QwenImageDiTConfig
-from difflet.models.qwen_image.modeling_qwen_image import _QwenImageTransformerTraceModule
+# With no backend set, bind difflet.ops to the CPU ops for the modules imported below (a
+# Trainium host would bind the Neuron ops).
+_PINNED = "DIFFLET_BACKEND" not in os.environ
+os.environ.setdefault("DIFFLET_BACKEND", "cpu")
+
+from difflet.models.qwen_image.dit_config import QwenImageDiTConfig  # noqa: E402
+from difflet.models.qwen_image.modeling_qwen_image import (  # noqa: E402
+    _QwenImageTransformerTraceModule,
+)
+
+if _PINNED:
+    del os.environ["DIFFLET_BACKEND"]
 
 _CFG = dict(
     patch_size=2,
@@ -139,7 +150,7 @@ def test_cuda_transformer_application_applies_the_mask(config, tmp_path):
     assert app.build_module().apply_text_mask is True
 
 
-# --- F4 task 2: trim the padded prompt instead of masking it (CUDA only) ---
+# --- trim the padded prompt instead of masking it (GPU flow only) ---
 
 
 def test_trimmed_padding_matches_the_masked_output(config):
@@ -215,7 +226,7 @@ def test_cuda_transformer_application_trims(config, tmp_path):
     assert app.build_module().trim_text_padding is True
 
 
-# --- F4 task 3: torch.compile as a measured, opt-in option ---
+# --- torch.compile as an opt-in option ---
 
 
 def _write_checkpoint(config, tmp_path):

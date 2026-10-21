@@ -21,7 +21,7 @@ from collections.abc import Sequence
 import torch
 
 # The backend-neutral half (CompileShape, canonicalize_shapes) lives in
-# difflet.pipeline.bucketing since the CUDA backend plan (Phase 1, task 1.5);
+# difflet.pipeline.bucketing, so hosts without the Neuron SDK can import it;
 # re-exported here so on-device scripts and serving code keep their import path.
 from difflet.pipeline.bucketing import (  # noqa: F401  (re-export)
     CompileShape,

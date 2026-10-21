@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# `difflet serve` on one GPU, end to end (plan F3b; Flux and Wan F3c): start the server, wait for
+# `difflet serve` on one GPU, end to end (Qwen-Image, Flux, Wan): start the server, wait for
 # /ready, fetch two outputs (the second proves the model stays resident) — images over
 # /v1/chat/completions, a Wan clip over /v1/videos/sync.
 # Logs to /tmp/logs/cuda-serve-smoke-<ts>.log; timings in serve_timings.json next to --output.

@@ -157,7 +157,7 @@ def test_run_router_all_success(tmp_path):
 
 def test_run_router_twice_over_the_same_work_dir_regenerates(tmp_path):
     # Stale claim/done markers must not make the second run report done without working
-    # (the f2b run: a second `--dp 2 --requests` over the same file reported done=2 in 25 s).
+    # (a second `--dp 2 --requests` over the same file reported done=2 without generating).
     from difflet.cli.dp.requests_io import read_manifest
 
     args = _args(work_dir=str(tmp_path / "work"))

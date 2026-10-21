@@ -84,8 +84,8 @@ def test_without_a_noise_floor_the_35_db_floors_judge_and_the_relative_test_skip
     assert out[ABSOLUTE] == "FAILED" and "PSNR 34.90 dB below 35.0" in stdout
 
 
-def test_with_the_f4f_seed0_floor_the_relative_gate_judges(tmp_path):
-    # The f4f run's seed 0 numbers: Difflet (fused projection) 31.56 dB / 0.99851 against a floor
+def test_with_a_seed0_noise_floor_the_relative_gate_judges(tmp_path):
+    # Measured seed 0 numbers: Difflet (fused projection) 31.56 dB / 0.99851 against a floor
     # at 30.92 dB (the measured one; its cosine 0.99827 is rounded to 0.99808 here for a round
     # allowance of 0.00254) — under the 35 dB floor, at the floor's own level.
     out, stdout = _gate(_payload(31.56, 0.99851, floor=(30.92, 0.99808)), tmp_path)
@@ -112,18 +112,18 @@ def test_a_collapsed_floor_fails_as_the_oracle_moved_and_the_loose_floors_still_
 
 
 def test_measured_flux_results_keep_their_verdicts(tmp_path):
-    f4f = _MEASURED / "f4f"
+    fused = _MEASURED / "fused"
     for seed in (0, 1, 2):
-        payload = json.loads((f4f / f"floor/e2e_floor_seed{seed}.json").read_text())
+        payload = json.loads((fused / f"floor/e2e_floor_seed{seed}.json").read_text())
         out, _ = _gate(payload, tmp_path)
         assert set(out.values()) == {"PASSED"}, (seed, out)
     # The seed-0 runs without a floor (the gate runner's e2e, eager and compiled) fail the
-    # single-seed 35 dB floor as recorded; F5c's seed-0 JSON (41.58 dB, no floor) passes.
+    # single-seed 35 dB floor as recorded; the split-projection seed-0 result (no floor) passes.
     for name in ("gates-flux", "gates-flux-compiled"):
-        out, _ = _gate(json.loads((f4f / name / "cuda_e2e_flux.json").read_text()), tmp_path)
+        out, _ = _gate(json.loads((fused / name / "cuda_e2e_flux.json").read_text()), tmp_path)
         assert out[ABSOLUTE] == "FAILED" and out[RELATIVE] == "SKIPPED", (name, out)
     out, _ = _gate(
-        json.loads((_MEASURED / "flux/f5c/cuda_e2e_flux.json").read_text()),
+        json.loads((_MEASURED / "flux/split/cuda_e2e_flux.json").read_text()),
         tmp_path,
     )
     assert out[ABSOLUTE] == "PASSED" and out[RELATIVE] == "SKIPPED", out
@@ -132,12 +132,12 @@ def test_measured_flux_results_keep_their_verdicts(tmp_path):
 # --- the gate over seeds ------------------------------------------------------------------
 # A `--seeds` result: gate A on the mean over seeds within 1.21 dB of the floor's mean, gate B on
 # every seed within 1.21 dB of the floor's worst seed (cosine deviation within 1.3225x the same
-# way), the loose 20 dB / 0.98 floor on every seed, as F9b gates Wan.
+# way), the loose 20 dB / 0.98 floor on every seed, as Wan's gate does.
 
 RECORD = "test_seeds_and_aggregate_are_recorded"
-# The f4f run, two decimals: Difflet (fused projection, eager) and the noise floor, seeds 0-2.
-F4F_DIFFLET = {0: (31.56, 0.99851), 1: (39.56, 0.99976), 2: (43.79, 0.99991)}
-F4F_FLOOR = {0: (30.92, 0.99827), 1: (36.62, 0.99952), 2: (37.61, 0.99964)}
+# A measured run, two decimals: Difflet (fused projection, eager) and the noise floor, seeds 0-2.
+FUSED_DIFFLET = {0: (31.56, 0.99851), 1: (39.56, 0.99976), 2: (43.79, 0.99991)}
+NOISE_FLOOR = {0: (30.92, 0.99827), 1: (36.62, 0.99952), 2: (37.61, 0.99964)}
 KEYS = ("psnr_db", "cosine")
 
 
@@ -146,7 +146,7 @@ def _spread(values: list[float]) -> dict:
 
 
 def _with_seeds(payload: dict, per_seed: dict[str, dict], seeds: list[int]) -> dict:
-    """``payload`` with ``per_seed`` and its aggregate; the pre-F9c keys the first seed's."""
+    """``payload`` with ``per_seed`` and its aggregate; the single-seed keys the first seed's."""
     entries = list(per_seed.values())
 
     def agg(pick):
@@ -188,7 +188,7 @@ def _seeded(
 
 
 def test_over_seeds_the_relative_gate_judges_the_mean_and_every_seed(tmp_path):
-    out, stdout = _gate(_seeded(F4F_DIFFLET, floor=F4F_FLOOR), tmp_path)
+    out, stdout = _gate(_seeded(FUSED_DIFFLET, floor=NOISE_FLOOR), tmp_path)
     assert set(out.values()) == {"PASSED"}, out
     assert RECORD in out
     # Gate A: the mean over seeds, 1.21 dB (a 1.15x RMSE ratio) under the floor's mean.
@@ -220,10 +220,10 @@ def test_over_seeds_the_relative_gate_judges_the_mean_and_every_seed(tmp_path):
 
 
 def test_over_seeds_a_mean_short_of_the_floor_s_mean_fails_gate_a(tmp_path):
-    # 33.5 dB on every seed clears seed 0's floor (gate B, and F4f's single-seed gate) but not
+    # 33.5 dB on every seed clears seed 0's floor (gate B, and the single-seed gate) but not
     # the mean: seeds 1 and 2 put diffusers 36.6-37.6 dB from itself.
-    difflet = {seed: (33.5, 0.9995) for seed in F4F_FLOOR}
-    out, stdout = _gate(_seeded(difflet, floor=F4F_FLOOR), tmp_path)
+    difflet = {seed: (33.5, 0.9995) for seed in NOISE_FLOOR}
+    out, stdout = _gate(_seeded(difflet, floor=NOISE_FLOOR), tmp_path)
     assert out[RELATIVE] == "FAILED" and out[ABSOLUTE] == "PASSED", out
     assert "mean PSNR 33.50 dB below 33.84 (noise floor mean 35.05 dB - 1.21 dB)" in stdout
     assert "dB below 29.71" not in stdout, stdout  # every seed clears gate B
@@ -231,7 +231,7 @@ def test_over_seeds_a_mean_short_of_the_floor_s_mean_fails_gate_a(tmp_path):
 
 def test_over_seeds_one_seed_under_the_floor_s_worst_fails_gate_b_and_names_it(tmp_path):
     difflet = {0: (29.5, 0.9985), 1: (42.0, 0.9998), 2: (44.0, 0.9999)}
-    out, stdout = _gate(_seeded(difflet, floor=F4F_FLOOR), tmp_path)
+    out, stdout = _gate(_seeded(difflet, floor=NOISE_FLOOR), tmp_path)
     assert out[RELATIVE] == "FAILED" and out[ABSOLUTE] == "PASSED", out
     assert "seed 0: PSNR 29.50 dB below 29.71 (noise floor min 30.92 dB - 1.21 dB)" in stdout
     assert "seed 1: PSNR" not in stdout and "mean PSNR" not in stdout, stdout
@@ -239,7 +239,7 @@ def test_over_seeds_one_seed_under_the_floor_s_worst_fails_gate_b_and_names_it(t
 
 def test_over_seeds_the_cosine_deviation_is_judged_the_same_way(tmp_path):
     difflet = {0: (35.0, 0.9975), 1: (40.0, 0.9990), 2: (42.0, 0.9995)}
-    out, stdout = _gate(_seeded(difflet, floor=F4F_FLOOR), tmp_path)
+    out, stdout = _gate(_seeded(difflet, floor=NOISE_FLOOR), tmp_path)
     assert out[RELATIVE] == "FAILED", out
     assert (
         "mean cosine deviation 0.00133 above 0.00113 (1.3225x the noise floor's 0.00086)" in stdout
@@ -252,8 +252,8 @@ def test_over_seeds_the_cosine_deviation_is_judged_the_same_way(tmp_path):
 
 
 def test_over_seeds_a_collapsed_worst_seed_fails_as_the_oracle_moved(tmp_path):
-    floor = {**F4F_FLOOR, 0: (18.0, 0.95)}
-    out, stdout = _gate(_seeded(F4F_DIFFLET, floor=floor), tmp_path)
+    floor = {**NOISE_FLOOR, 0: (18.0, 0.95)}
+    out, stdout = _gate(_seeded(FUSED_DIFFLET, floor=floor), tmp_path)
     assert out[RELATIVE] == "FAILED" and out[ABSOLUTE] == "PASSED", out
     assert (
         "the oracle moved: noise floor worst seed PSNR 18.00 dB, cosine 0.95000 is under the "
@@ -275,7 +275,7 @@ def test_over_seeds_without_a_floor_the_35_db_floors_judge_every_seed(tmp_path):
 
 
 def test_over_seeds_a_floor_on_some_seeds_only_is_malformed(tmp_path):
-    payload = _seeded(F4F_DIFFLET, floor=F4F_FLOOR)
+    payload = _seeded(FUSED_DIFFLET, floor=NOISE_FLOOR)
     payload["per_seed"]["1"]["noise_floor"] = None
     out, stdout = _gate(payload, tmp_path)
     assert out[RELATIVE] == "FAILED" and out[RECORD] == "FAILED", out
@@ -283,12 +283,12 @@ def test_over_seeds_a_floor_on_some_seeds_only_is_malformed(tmp_path):
 
 
 def test_over_seeds_the_first_seed_is_on_top_and_the_aggregate_matches(tmp_path):
-    payload = _seeded(F4F_DIFFLET, floor=F4F_FLOOR)
+    payload = _seeded(FUSED_DIFFLET, floor=NOISE_FLOOR)
     payload["metrics"] = payload["per_seed"]["1"]["metrics"]
     out, stdout = _gate(payload, tmp_path)
     assert out[RECORD] == "FAILED" and "the top-level metrics are not the first seed's" in stdout
 
-    payload = _seeded(F4F_DIFFLET, floor=F4F_FLOOR)
+    payload = _seeded(FUSED_DIFFLET, floor=NOISE_FLOOR)
     payload["seeds"] = [0, 1]
     out, _ = _gate(payload, tmp_path)
     assert out[RECORD] == "FAILED", out
@@ -297,23 +297,23 @@ def test_over_seeds_the_first_seed_is_on_top_and_the_aggregate_matches(tmp_path)
     assert out[RECORD] == "FAILED" and "per_seed without seeds" in stdout, stdout
     assert out[RELATIVE] == "PASSED" and out[ABSOLUTE] == "PASSED", out
 
-    payload = _seeded(F4F_DIFFLET, floor=F4F_FLOOR)
+    payload = _seeded(FUSED_DIFFLET, floor=NOISE_FLOOR)
     payload["aggregate"]["difflet"]["psnr_db"]["mean"] = 40.0
     out, stdout = _gate(payload, tmp_path)
     assert out[RECORD] == "FAILED" and "aggregate difflet psnr_db mean 40.0" in stdout, stdout
     assert out[RELATIVE] == "PASSED" and out[ABSOLUTE] == "PASSED", out
 
-    payload = _seeded(F4F_DIFFLET, floor=F4F_FLOOR)
+    payload = _seeded(FUSED_DIFFLET, floor=NOISE_FLOOR)
     del payload["aggregate"]
     out, _ = _gate(payload, tmp_path)
     assert out[RECORD] == "FAILED", out
 
 
-def test_a_single_seed_result_keeps_f4f_s_statement(tmp_path):
+def test_a_single_seed_result_keeps_the_single_seed_statement(tmp_path):
     out, stdout = _gate(_payload(31.56, 0.99851, floor=(30.92, 0.99808)), tmp_path)
     assert out[RECORD] == "PASSED" and "single-seed result (no per_seed)" in stdout, stdout
     assert "relative gate A" not in stdout, stdout
-    # A one-seed `--seeds` result reads the same as the pre-F9c JSON.
+    # A one-seed `--seeds` result reads the same as a single-seed JSON.
     one = _seeded({3: (31.56, 0.99851)}, floor={3: (30.92, 0.99808)})
     out, stdout = _gate(one, tmp_path)
     assert set(out.values()) == {"PASSED"}, out
@@ -323,11 +323,11 @@ def test_a_single_seed_result_keeps_f4f_s_statement(tmp_path):
     ), stdout
 
 
-def test_the_measured_f4f_floor_runs_merged_over_seeds_pass(tmp_path):
-    # The three single-seed floor runs of the f4f run as one three-seed result: what the F9c
-    # script writes from one load per side.
-    f4f = _MEASURED / "f4f/floor"
-    runs = [json.loads((f4f / f"e2e_floor_seed{seed}.json").read_text()) for seed in (0, 1, 2)]
+def test_the_measured_floor_runs_merged_over_seeds_pass(tmp_path):
+    # Three measured single-seed floor runs as one three-seed result: what the script writes
+    # with --seeds from one load per side.
+    fused = _MEASURED / "fused/floor"
+    runs = [json.loads((fused / f"e2e_floor_seed{seed}.json").read_text()) for seed in (0, 1, 2)]
     per_seed = {
         str(run["seed"]): {key: run[key] for key in ("metrics", "timings", "noise_floor", "images")}
         for run in runs
@@ -338,21 +338,20 @@ def test_the_measured_f4f_floor_runs_merged_over_seeds_pass(tmp_path):
     assert "relative gate B (every seed): PSNR >= 29.71 dB" in stdout, stdout
 
 
-def test_measured_f9c_runs_over_seeds_pass(tmp_path):
-    # The f9c3 run (Workstation Edition): seeds 0-7 with the floor, eager and compiled, and
-    # the flux gate run's three-seed e2e; each passes gates A and B with the headroom the
-    # status log states.
-    f9c = _MEASURED / "f9c"
+def test_measured_runs_over_seeds_pass(tmp_path):
+    # Measured runs (Workstation Edition): seeds 0-7 with the floor, eager and compiled, and a
+    # three-seed e2e; each passes gates A and B with the recorded headroom.
+    runs = _MEASURED / "seeds"
     expected = {
         "eager/cuda_e2e_flux_noise.json": "PSNR 36.79 dB, required >= 32.40 dB",
         "compiled/cuda_e2e_flux_noise.json": "PSNR 38.31 dB, required >= 32.40 dB",
         "gates-flux/cuda_e2e_flux.json": "PSNR 38.30 dB, required >= 33.84 dB",
     }
     for name, line in expected.items():
-        out, stdout = _gate(json.loads((f9c / name).read_text()), tmp_path)
+        out, stdout = _gate(json.loads((runs / name).read_text()), tmp_path)
         assert set(out.values()) == {"PASSED"}, (name, out)
         assert line in stdout, (name, stdout)
-    out, stdout = _gate(json.loads((f9c / "eager/cuda_e2e_flux_noise.json").read_text()), tmp_path)
+    out, stdout = _gate(json.loads((runs / "eager/cuda_e2e_flux_noise.json").read_text()), tmp_path)
     assert "relative gate B (every seed): PSNR >= 23.02 dB (noise floor min 24.24 dB" in stdout
     assert "seed 7 difflet vs diffusers: PSNR 24.89 dB" in stdout, stdout
 
@@ -370,31 +369,31 @@ def _without(payload: dict, *keys: str) -> dict:
 def _measured_results() -> dict[str, dict]:
     return {
         # seed 0, with the noise floor
-        "f4f/floor/e2e_floor_seed0.json": _payload(
+        "fused/floor/e2e_floor_seed0.json": _payload(
             31.564294225201547, 0.9985057519682408, floor=(30.92373250148661, 0.9982712401987284)
         ),
         # seed 1, with the noise floor
-        "f4f/floor/e2e_floor_seed1.json": {
+        "fused/floor/e2e_floor_seed1.json": {
             **_payload(
                 39.55547969517981, 0.9997568624459019, floor=(36.62104024843132, 0.9995219231179735)
             ),
             "seed": 1,
         },
         # seed 2, with the noise floor
-        "f4f/floor/e2e_floor_seed2.json": {
+        "fused/floor/e2e_floor_seed2.json": {
             **_payload(
                 43.78866577298002, 0.999912451915674, floor=(37.605905468138545, 0.9996355033656944)
             ),
             "seed": 2,
         },
         # seed 0
-        "f4f/gates-flux-compiled/cuda_e2e_flux.json": _payload(
+        "fused/gates-flux-compiled/cuda_e2e_flux.json": _payload(
             31.405094605784907, 0.9984494606556629
         ),
         # seed 0
-        "f4f/gates-flux/cuda_e2e_flux.json": _payload(31.564294225201547, 0.9985057519682408),
+        "fused/gates-flux/cuda_e2e_flux.json": _payload(31.564294225201547, 0.9985057519682408),
         # 8 seeds, with the noise floor
-        "f9c/compiled/cuda_e2e_flux_noise.json": _seeded(
+        "seeds/compiled/cuda_e2e_flux_noise.json": _seeded(
             {
                 0: (42.27261684836233, 0.9998749736584387),
                 1: (41.31239820407713, 0.9998384193666154),
@@ -417,7 +416,7 @@ def _measured_results() -> dict[str, dict]:
             },
         ),
         # 8 seeds, with the noise floor
-        "f9c/eager/cuda_e2e_flux_noise.json": _seeded(
+        "seeds/eager/cuda_e2e_flux_noise.json": _seeded(
             {
                 0: (31.564294225201547, 0.9985057519682408),
                 1: (39.55547969517981, 0.9997568624459017),
@@ -440,7 +439,7 @@ def _measured_results() -> dict[str, dict]:
             },
         ),
         # 3 seeds, with the noise floor
-        "f9c/gates-flux/cuda_e2e_flux.json": _seeded(
+        "seeds/gates-flux/cuda_e2e_flux.json": _seeded(
             {
                 0: (31.564294225201547, 0.9985057519682408),
                 1: (39.55547969517981, 0.9997568624459017),
@@ -453,7 +452,7 @@ def _measured_results() -> dict[str, dict]:
             },
         ),
         # seed 0
-        "flux/f5c/cuda_e2e_flux.json": _payload(40.35257866675994, 0.9998033805951199),
+        "flux/split/cuda_e2e_flux.json": _payload(40.35257866675994, 0.9998033805951199),
     }
 
 

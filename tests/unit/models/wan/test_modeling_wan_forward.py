@@ -166,7 +166,7 @@ def test_global_rms_norm_matches_plain_rmsnorm():
 
 
 def _reference_global_rms_norm(x: torch.Tensor, weight: torch.Tensor, eps: float) -> torch.Tensor:
-    # The pre-F4b tp=1 math, verbatim (fp32 statistics, normalisation and affine, cast back).
+    # The unfused tp=1 math, verbatim (fp32 statistics, normalisation and affine, cast back).
     sq = x.float().pow(2).sum(dim=-1, keepdim=True)
     return (x.float() * torch.rsqrt(sq / x.shape[-1] + eps) * weight.float()).to(x.dtype)
 

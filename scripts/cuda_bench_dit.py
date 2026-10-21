@@ -7,7 +7,7 @@ by ``difflet.backends.cuda.bench``). Cases:
 * ``difflet_masked`` — Difflet's real input: ``text_seq_len`` padded text tokens, the first
   ``--valid-text-tokens`` valid (the module may trim the padding itself; the JSON records
   ``trim_text_padding``).
-* ``difflet_allones`` — the same tokens with an all-ones mask (Release 1's input).
+* ``difflet_allones`` — the same tokens with an all-ones mask (no masking at all).
 * ``diffusers_masked`` — upstream ``QwenImageTransformer2DModel`` on the padded tokens + mask.
 * ``diffusers_trimmed`` — upstream on the valid tokens only, no mask (what its pipeline feeds).
 
@@ -73,11 +73,11 @@ def main() -> None:
     ap.add_argument("--warmup", type=int, default=3)
     ap.add_argument("--iters", type=int, default=10)
     ap.add_argument("--cases", default=",".join(ALL_CASES))
-    ap.add_argument("--torch-compile", action="store_true", help="F4 task 3: compiled DiT")
+    ap.add_argument("--torch-compile", action="store_true", help="compile the DiT blocks")
     ap.add_argument(
         "--no-trim",
         action="store_true",
-        help="run the Difflet cases with the padding masked, not trimmed (the pre-F4 baseline)",
+        help="run the Difflet cases with the padding masked, not trimmed (the untrimmed baseline)",
     )
     ap.add_argument("--compile-cache-dir", default="/tmp/logs/cuda_bench_cache")
     args = ap.parse_args()
@@ -117,7 +117,7 @@ def main() -> None:
     difflet_cases = [c for c in cases if c.startswith("difflet")]
     if difflet_cases:
         from difflet.models.qwen_image.contract import QwenImageDiTInputBundle
-        from difflet.models.qwen_image.cuda_application import CudaQwenImageApplication
+        from difflet.backends.cuda.qwen_image.application import CudaQwenImageApplication
         from difflet.pipeline.parallel_config import DiffletParallelConfig
 
         kwargs = {}

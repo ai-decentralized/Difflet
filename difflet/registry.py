@@ -117,6 +117,20 @@ class ModelEntry:
         backend: str,
         application_kwargs: dict[str, Any] | None = None,
     ) -> Any:
+        from difflet.platforms import get_platform
+
+        if get_platform(backend).capabilities.flow == "gpu":
+            # Every GPU platform runs the generic flow, driven by the model's spec.
+            from difflet.backends.gpu.application import create_gpu_application
+
+            return create_gpu_application(
+                self.name,
+                model_path=model_path,
+                parallel=parallel,
+                dtype=dtype,
+                shape=shape,
+                **(application_kwargs or {}),
+            )
         factory = _resolve_factory(self.application_factory)
         return factory(
             model_path=model_path,

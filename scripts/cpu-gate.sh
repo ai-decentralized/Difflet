@@ -12,11 +12,10 @@
 # one a missing Neuron module or a trainium-only model registration). Any red
 # test NOT in that file fails the gate — that is a regression you caused. Known
 # red tests that now pass are reported as progress; remove them from the file
-# in the same commit that fixed them, so the file shrinks to empty by the end
-# of Phase 1.
+# in the same commit that fixed them, so the file shrinks to empty.
 #
-# CPU_GATE_IMPORTS_REQUIRED (default 1 since plan task 1.7 / PR 2 Task 6): a
-# failing scripts/test_imports.sh fails the gate. Set it to 0 only to triage.
+# CPU_GATE_IMPORTS_REQUIRED (default 1): a failing scripts/test_imports.sh fails
+# the gate. Set it to 0 only to triage.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -50,7 +49,7 @@ unit_log="$LOGDIR/cpu-gate-unit-$ts.log"
 export NEURON_GATE_REPORT="$LOGDIR/cpu-gate-neuron-skips-$ts.txt"
 : > "$NEURON_GATE_REPORT"
 # -rfEs: failures and errors must appear in the short summary, or the regression
-# diff below cannot see them (found on the GPU box: two failures, "regressions=0").
+# diff below cannot see them (otherwise two failures can still report "regressions=0").
 "$PY" -m pytest tests/unit -q --tb=short -rfEs -p no:cacheprovider -p no:warnings \
   --continue-on-collection-errors "$@" > "$unit_log" 2>&1
 summary="$(grep -E '^[0-9]+ (passed|failed)' "$unit_log" | tail -n 1 || true)"

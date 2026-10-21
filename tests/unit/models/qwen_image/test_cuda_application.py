@@ -1,8 +1,8 @@
-"""CPU-only coverage for the Qwen-Image CUDA application and entry branch (PR 3 Task 7).
+"""CPU-only coverage for the Qwen-Image GPU application and its registry routing.
 
 No weights, no GPU: an empty model dir builds an application with no transformer,
-which is enough to prove the entry wiring, the reflective contract and the prompt
-padding helper. The GPU round trip is scripts/cuda_smoke.py on the box.
+which is enough to prove the routing, the reflective contract and the prompt
+padding helper. The GPU round trip is scripts/cuda_smoke.py.
 """
 
 import inspect
@@ -11,6 +11,7 @@ import os
 import pytest
 import torch
 
+from difflet.backends.gpu.application import create_gpu_application
 from difflet.models.qwen_image.entry import create_qwen_image_application
 from difflet.models.qwen_image.prompt import pad_or_truncate_prompt_embeds
 from difflet.pipeline.parallel_config import DiffletParallelConfig
@@ -22,26 +23,34 @@ def _cpu_backend(monkeypatch):
 
 
 def _build(tmp_path, **kwargs):
-    return create_qwen_image_application(
+    return create_gpu_application(
+        "qwen_image",
+        model_path=str(tmp_path),
+        parallel=DiffletParallelConfig(tp_degree=1),
+        dtype="bf16",
+        shape={"height": 64, "width": 64},
+        **kwargs,
+    )
+
+
+def test_registry_routes_cuda_to_the_gpu_application(tmp_path):
+    from difflet.registry import resolve_model
+
+    app = resolve_model("Qwen/Qwen-Image").create_application(
         model_path=str(tmp_path),
         parallel=DiffletParallelConfig(tp_degree=1),
         dtype="bf16",
         shape={"height": 64, "width": 64},
         backend="cuda",
-        **kwargs,
     )
-
-
-def test_entry_builds_the_cuda_application(tmp_path):
-    app = _build(tmp_path)
     assert type(app).__name__ == "CudaQwenImageApplication"
     assert app.transformer is None  # empty model dir -> no transformer/config.json
     assert app.has_compiled_artifacts(str(tmp_path)) is False
     assert app.dtype is torch.bfloat16
 
 
-def test_entry_error_lists_all_three_backends(tmp_path):
-    with pytest.raises(NotImplementedError, match="trainium, tpu and cuda"):
+def test_entry_error_lists_its_backends(tmp_path):
+    with pytest.raises(NotImplementedError, match="trainium and tpu"):
         create_qwen_image_application(
             model_path=str(tmp_path),
             parallel=DiffletParallelConfig(tp_degree=1),
@@ -51,14 +60,14 @@ def test_entry_error_lists_all_three_backends(tmp_path):
         )
 
 
-def test_entry_rejects_cfg_parallel_on_cuda(tmp_path):
-    with pytest.raises(NotImplementedError, match="guidance-distilled"):
-        create_qwen_image_application(
+def test_gpu_application_rejects_cfg_parallel(tmp_path):
+    with pytest.raises(NotImplementedError, match="--cfg-parallel does not apply to Qwen-Image"):
+        create_gpu_application(
+            "qwen_image",
             model_path=str(tmp_path),
             parallel=DiffletParallelConfig(tp_degree=1, cfg_parallel_enabled=True),
             dtype="bf16",
             shape={"height": 64, "width": 64},
-            backend="cuda",
         )
 
 
@@ -123,7 +132,7 @@ def test_tiny_qwen_dit_runs_through_the_cuda_ops_on_cpu(tmp_path):
         # HF layout: the diffusers transformer's own keys; the loader strips "transformer."
         state = {{k[len("transformer."):]: v.contiguous() for k, v in full.state_dict().items()}}
         save_file(state, os.path.join(tdir, "model.safetensors"))
-        from difflet.models.qwen_image.cuda_application import CudaQwenImageApplication
+        from difflet.backends.cuda.qwen_image.application import CudaQwenImageApplication
         from difflet.pipeline.parallel_config import DiffletParallelConfig
         app = CudaQwenImageApplication(model_path=root, parallel=DiffletParallelConfig(tp_degree=1),
                                        dtype="fp32", shape={{"height": 64, "width": 64}},
@@ -157,10 +166,10 @@ def test_tiny_qwen_dit_runs_through_the_cuda_ops_on_cpu(tmp_path):
 
 def test_dynamic_shift_mu_matches_the_cli_formula():
     # difflet/cli/orchestrators/qwen_image.py computes mu from the scheduler config; the
-    # CUDA path must use the same value or its timesteps differ from the Trainium path.
+    # GPU path must use the same value or its timesteps differ from the Trainium path.
     from types import SimpleNamespace
 
-    from difflet.models.qwen_image.cuda_application import dynamic_shift_mu
+    from difflet.backends.cuda.qwen_image.application import dynamic_shift_mu
 
     sc = SimpleNamespace(
         base_shift=0.5, max_shift=0.9, base_image_seq_len=256, max_image_seq_len=8192
@@ -171,7 +180,7 @@ def test_dynamic_shift_mu_matches_the_cli_formula():
 
 
 def test_qwen_timesteps_pass_mu_to_a_dynamic_shift_scheduler():
-    from difflet.models.qwen_image.cuda_application import qwen_image_timesteps
+    from difflet.backends.cuda.qwen_image.application import qwen_image_timesteps
 
     class _Sched:
         config = type(
@@ -199,20 +208,18 @@ def test_qwen_timesteps_pass_mu_to_a_dynamic_shift_scheduler():
     [
         ({"tp_degree": 2}, "not supported"),
         ({"tp_degree": 1, "cp_degree": 2}, "not supported"),
-        ({"tp_degree": 1, "dp_degree": 2}, "single-GPU replicas through the CLI router"),
     ],
 )
-def test_entry_rejects_multi_rank_parallel_on_cuda_up_front(tmp_path, kwargs, owner):
-    # Review finding: tp/cp/dp > 1 used to fail only after loading the 41 GB DiT (first
-    # collective raised). One application is one process, one device; refuse before any
-    # load and name who owns the mode: TP is F6, CP is F2b, DP is the CLI router's.
+def test_gpu_application_rejects_multi_rank_parallel_up_front(tmp_path, kwargs, owner):
+    # tp/cp/dp > 1 would otherwise fail only after loading the 41 GB DiT (at the first
+    # collective). One application is one process, one device; refuse before any load.
     with pytest.raises(NotImplementedError, match=owner):
-        create_qwen_image_application(
+        create_gpu_application(
+            "qwen_image",
             model_path=str(tmp_path),
             parallel=DiffletParallelConfig(**kwargs),
             dtype="bf16",
             shape={"height": 64, "width": 64},
-            backend="cuda",
         )
 
 
@@ -278,14 +285,14 @@ def test_torch_compile_is_the_kwarg_and_off_by_default(tmp_path):
 
 def test_cuda_pipeline_builds_a_teacache_controller_for_cadence(tmp_path):
     app = _build(tmp_path, load_text_encoder=False, load_vae=False, teacache_cadence=2)
-    app._load_companions()
+    app.load_companions()
     controller = app.pipeline.teacache_controller
     assert controller is not None and int(controller.calibration.cadence) == 2
 
 
 def test_cuda_pipeline_has_no_teacache_controller_by_default(tmp_path):
     app = _build(tmp_path, load_text_encoder=False, load_vae=False)
-    app._load_companions()
+    app.load_companions()
     assert app.pipeline.teacache_controller is None
 
 

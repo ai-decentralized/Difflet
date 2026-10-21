@@ -10,7 +10,7 @@ Writes a JSON the gate reads (tests/numerical/test_cuda_flux_vs_diffusers.py):
 
 Same structure and metrics as the Qwen-Image script (cuda_parity_gpu.py). The Difflet side
 runs through ``FluxDiTAdapter`` — the interface FluxPipeline calls — so the rope built from
-``img_ids``/``txt_ids`` (cast to bf16, Review Focus 4) is inside what is measured. The fp32
+``img_ids``/``txt_ids`` (cast to bf16) is inside what is measured. The fp32
 reference runs first and is freed before the bf16 passes.
 """
 

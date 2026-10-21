@@ -7,8 +7,8 @@ bucketing — turning the canonical shapes into example inputs for an AOT
 compiler — stays with each backend (``difflet/backends/trainium/core/bucketing.py``
 re-exports these names for its callers).
 
-Moved out of the Trainium package by the CUDA backend plan (Phase 1, task 1.5)
-so a host without the Neuron SDK can import the pipeline.
+Kept outside the Trainium package so a host without the Neuron SDK can import the
+pipeline.
 """
 
 from __future__ import annotations

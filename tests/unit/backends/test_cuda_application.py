@@ -1,7 +1,7 @@
-"""CUDA component lifecycle (CUDA plan Phase 3): manifest-only compile, eager load.
+"""GPU component lifecycle: manifest-only compile, eager load.
 
-No GPU needed: the base takes ``device=`` and these tests run it on "cpu". The same
-module is run with ``device="cuda"`` on the box in Task 8 (plan Review Focus 4).
+No GPU needed: the base takes ``device=`` and these tests run it on "cpu" when no CUDA
+device is present.
 """
 
 import inspect
@@ -11,7 +11,7 @@ import pytest
 import torch
 import torch.nn as nn
 
-from difflet.backends.cuda.core import application_base as ab
+from difflet.backends.gpu import application as ab
 from difflet.backends.cuda.ops_impl import linear as L
 from difflet.backends.cuda.ops_impl import parallel_mesh as pm
 from difflet.pipeline.parallel_mesh import MeshSpec
@@ -37,7 +37,7 @@ class _Block(nn.Module):
         return self.down(torch.relu(self.up(x))) + self.rope
 
 
-class _App(ab.CudaApplicationBase):
+class _App(ab.GpuComponent):
     def __init__(self, device=DEVICE):
         super().__init__(config=MeshSpec(tp=1), device=device, dtype=torch.float32)
 
@@ -53,11 +53,11 @@ class _App(ab.CudaApplicationBase):
 
 
 def test_signatures_match_what_the_pipeline_reflects_on():
-    assert "debug" in inspect.signature(ab.CudaApplicationBase.compile).parameters
-    load_params = inspect.signature(ab.CudaApplicationBase.load).parameters
+    assert "debug" in inspect.signature(ab.GpuComponent.compile).parameters
+    load_params = inspect.signature(ab.GpuComponent.load).parameters
     for name in ("start_rank_id", "local_ranks_size", "skip_warmup"):
         assert name in load_params
-    assert callable(ab.CudaApplicationBase.has_compiled_artifacts)
+    assert callable(ab.GpuComponent.has_compiled_artifacts)
 
 
 def test_forward_before_load_is_an_explicit_error():

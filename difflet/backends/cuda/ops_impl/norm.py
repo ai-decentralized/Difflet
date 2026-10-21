@@ -1,13 +1,17 @@
-"""Normalization layers for the CUDA backend: the shared pure-torch ones.
+"""Normalization layers for the CUDA backend.
 
-Megatron does not shard normalization, so these are plain modules with no
-collectives, byte-identical in math to the CPU reference (the oracle).
+Megatron does not shard normalization, so these are plain modules with no collectives.
+``LayerNorm`` is the shared pure-torch one.
 
-``rms_norm_fp32`` is the one fused path: ``torch.nn.functional.rms_norm`` computes the
-statistics, the normalisation and the affine in fp32 inside one kernel and writes ``x.dtype``
-once, where the reference's seven elementwise passes over fp32 copies cost Wan's DiT ~50 ms
-of its 605 ms forward (the DiT bench: elementwise +51 ms, copy +34 ms vs diffusers). The math is
-the reference's; only the fp32 reduction order differs.
+``rms_norm_fp32`` and ``RMSNorm`` are one fused ``torch.nn.functional.rms_norm`` call: fp32
+statistics, normalisation and affine inside one kernel, one cast back to ``x.dtype``, instead
+of the reference's seven elementwise passes over fp32 copies (a measurable share of Wan's and
+Flux's DiT time).
+
+Numerics against the CPU reference: ``rms_norm_fp32`` is the reference's math with a
+different fp32 reduction order. ``RMSNorm`` is not the CPU ``RMSNorm``'s math: the CPU module
+normalises and applies the weight in the input dtype, this one computes in fp32 like
+diffusers' ``nn.RMSNorm``; the two agree within bf16 rounding, not bit for bit.
 """
 
 import torch

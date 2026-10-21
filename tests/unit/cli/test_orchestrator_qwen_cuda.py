@@ -1,4 +1,4 @@
-"""Qwen-Image on CUDA through the CLI: one process, DiffletPipeline + generate().
+"""Qwen-Image on the GPU flow through the CLI: one process, DiffletPipeline + generate().
 
 CPU-only: DiffletPipeline.from_pretrained is replaced by a recorder; no weights, no GPU.
 """
@@ -10,7 +10,12 @@ import argparse
 import pytest
 from PIL import Image
 
-from difflet.cli.orchestrators import qwen_image_cuda as mod
+from difflet.backends.gpu.cli import GpuOrchestrator, gpu_pipeline_kwargs
+from difflet.models.qwen_image.spec import SPEC
+
+
+def _orch(args):
+    return GpuOrchestrator(args, SPEC)
 
 
 def _args(**over):
@@ -77,7 +82,7 @@ def recorder(monkeypatch):
 
 
 def test_compile_builds_the_cuda_pipeline_without_loading(recorder):
-    mod.CudaQwenImageOrchestrator(_args()).compile()
+    _orch(_args()).compile()
     model_id, kw = recorder[0]
     assert model_id == "Qwen/Qwen-Image" and kw["backend"] == "cuda" and kw["load"] is False
     assert kw["parallel"].tp_degree == 1 and kw["dtype"] == "bf16"
@@ -86,34 +91,34 @@ def test_compile_builds_the_cuda_pipeline_without_loading(recorder):
 
 def test_generate_without_a_compiled_artifact_compiles_first(recorder, tmp_path):
     # from_pretrained compiles when the manifest is missing; the orchestrator never
-    # demands a separate `difflet compile` (Review Focus 3).
+    # demands a separate `difflet compile`.
     out = tmp_path / "qwen.png"
-    mod.CudaQwenImageOrchestrator(_args(output=str(out))).generate()
+    _orch(_args(output=str(out))).generate()
     _, kw = recorder[0]
     assert kw["load"] is True and kw["force_compile"] is False and out.is_file()
 
 
 def test_generate_creates_the_output_directory(recorder, tmp_path):
     out = tmp_path / "deep" / "er" / "qwen.png"
-    mod.CudaQwenImageOrchestrator(_args(output=str(out))).generate()
+    _orch(_args(output=str(out))).generate()
     assert out.is_file()
 
 
 def test_generate_passes_prompt_steps_and_seed(recorder, tmp_path):
-    orch = mod.CudaQwenImageOrchestrator(_args(output=str(tmp_path / "q.png"), steps=7, seed=3))
+    orch = _orch(_args(output=str(tmp_path / "q.png"), steps=7, seed=3))
     orch.generate()
     prompt, kw = orch._last_pipe.app.calls[0]
     assert prompt == "a cat" and kw["num_inference_steps"] == 7 and kw["seed"] == 3
 
 
-def test_steps_default_to_fifty_on_cuda(recorder, tmp_path):
-    orch = mod.CudaQwenImageOrchestrator(_args(output=str(tmp_path / "q.png")))
+def test_steps_default_to_fifty(recorder, tmp_path):
+    orch = _orch(_args(output=str(tmp_path / "q.png")))
     orch.generate()
-    assert orch._last_pipe.app.calls[0][1]["num_inference_steps"] == mod.DEFAULT_STEPS == 50
+    assert orch._last_pipe.app.calls[0][1]["num_inference_steps"] == SPEC.default_steps == 50
 
 
 def test_cache_dir_and_force_reach_from_pretrained(recorder):
-    mod.CudaQwenImageOrchestrator(_args(cache_dir="/c", force=True)).compile()
+    _orch(_args(cache_dir="/c", force=True)).compile()
     _, kw = recorder[0]
     assert kw["compile_cache_dir"] == "/c" and kw["force_compile"] is True
 
@@ -125,14 +130,14 @@ def test_cache_dir_and_force_reach_from_pretrained(recorder):
         ({"sp_enabled": True}, "not supported"),
         ({"teacache_speedup": 1.5}, "not supported"),
         ({"teacache_online_delta": 0.1}, "not supported"),
-        ({"cfg_parallel": True}, "distilled model"),
+        ({"cfg_parallel": True}, "does not apply"),
         ({"tp_degree": 2}, "not supported"),
         ({"cp_degree": 2}, "not supported"),
     ],
 )
 def test_unsupported_flags_are_refused_before_any_load(recorder, over, expected):
     with pytest.raises(SystemExit) as exc:
-        mod.CudaQwenImageOrchestrator(_args(**over)).generate()
+        _orch(_args(**over)).generate()
     assert expected in str(exc.value) and recorder == []
 
 
@@ -142,13 +147,13 @@ def test_download_resolves_the_hub_snapshot(monkeypatch):
         "difflet.pipeline.path_resolver.resolve_model_path",
         lambda mid, **kw: seen.update(mid=mid, **kw) or "/snap",
     )
-    mod.CudaQwenImageOrchestrator(_args()).download()
+    _orch(_args()).download()
     assert seen["mid"] == "Qwen/Qwen-Image" and seen["local_files_only"] is False
 
 
 def test_run_is_download_compile_generate(recorder, monkeypatch, tmp_path):
     order = []
-    orch = mod.CudaQwenImageOrchestrator(_args(output=str(tmp_path / "q.png")))
+    orch = _orch(_args(output=str(tmp_path / "q.png")))
     monkeypatch.setattr(orch, "download", lambda: order.append("download"))
     monkeypatch.setattr(orch, "compile", lambda: order.append("compile"))
     monkeypatch.setattr(orch, "generate", lambda: order.append("generate"))
@@ -157,14 +162,14 @@ def test_run_is_download_compile_generate(recorder, monkeypatch, tmp_path):
 
 
 def test_run_refuses_unsupported_flags_before_any_download(recorder, monkeypatch):
-    # Review finding: run() is download → compile → generate, and the refusal lived in
-    # compile/generate, so `difflet run --cp-degree 2` pulled the 58 GB snapshot first.
+    # run() is download → compile → generate: a refusal that lived only in compile/generate
+    # would let `difflet run --cp-degree 2` pull the 58 GB snapshot first.
     monkeypatch.setattr(
         "difflet.pipeline.path_resolver.resolve_model_path",
         lambda *a, **kw: pytest.fail("must refuse before resolving the snapshot"),
     )
     with pytest.raises(SystemExit) as exc:
-        mod.CudaQwenImageOrchestrator(_args(cp_degree=2)).run()
+        _orch(_args(cp_degree=2)).run()
     assert "not supported" in str(exc.value) and recorder == []
 
 
@@ -172,23 +177,23 @@ def test_guidance_scale_is_refused_not_dropped(recorder):
     # The application refuses guidance_scale (guidance_embeds=False → silent no-op); the CLI
     # must not hide that by never forwarding the flag.
     with pytest.raises(SystemExit) as exc:
-        mod.CudaQwenImageOrchestrator(_args(guidance_scale=3.0)).generate()
+        _orch(_args(guidance_scale=3.0)).generate()
     assert "guidance" in str(exc.value) and recorder == []
 
 
 def test_torch_compile_is_opt_in():
-    assert mod.pipeline_kwargs(_args(), load=True).get("application_kwargs") is None
-    kw = mod.pipeline_kwargs(_args(torch_compile=True), load=True)
+    assert _orch(_args()).pipeline_kwargs(load=True).get("application_kwargs") is None
+    kw = _orch(_args(torch_compile=True)).pipeline_kwargs(load=True)
     assert kw["application_kwargs"] == {"torch_compile": True}
 
 
 def test_teacache_cadence_is_forwarded_as_an_application_kwarg(recorder, tmp_path):
     out = tmp_path / "qwen.png"
-    mod.CudaQwenImageOrchestrator(_args(teacache_cadence=2, output=str(out))).generate()
+    _orch(_args(teacache_cadence=2, output=str(out))).generate()
     assert recorder[0][1]["application_kwargs"] == {"teacache_cadence": 2}
 
 
-def test_cuda_pipeline_kwargs_cfg_parallel_defaults_off():
+def test_gpu_pipeline_kwargs_cfg_parallel_defaults_off():
     """The serving caller passes no ``cfg_parallel`` and keeps the single-branch config."""
     common = dict(
         tp_degree=None,
@@ -199,16 +204,16 @@ def test_cuda_pipeline_kwargs_cfg_parallel_defaults_off():
         force_compile=False,
         load=False,
     )
-    assert mod.cuda_pipeline_kwargs(**common)["parallel"].cfg_parallel_enabled is False
-    on = mod.cuda_pipeline_kwargs(**common, cfg_parallel=True)["parallel"]
+    assert gpu_pipeline_kwargs(SPEC, **common)["parallel"].cfg_parallel_enabled is False
+    on = gpu_pipeline_kwargs(SPEC, **common, cfg_parallel=True)["parallel"]
     assert on.cfg_parallel_enabled is True and on.tp_degree == 1
 
 
 def test_qwen_is_one_process_and_refuses_cfg_parallel_as_distilled(recorder):
-    assert mod.CudaQwenImageOrchestrator.ACCEPTS_CFG_PARALLEL is False
-    assert mod.CudaQwenImageOrchestrator(_args()).world_size == 1
+    assert SPEC.accepts_cfg_parallel is False
+    assert _orch(_args()).world_size == 1
     with pytest.raises(SystemExit) as exc:
-        mod.CudaQwenImageOrchestrator(_args(cfg_parallel=True)).compile()
+        _orch(_args(cfg_parallel=True)).compile()
     assert "--cfg-parallel" in str(exc.value) and "[qwen_image/cuda]" in str(exc.value)
     assert recorder == []
 
@@ -255,7 +260,7 @@ def test_batch_mode_loads_once_and_writes_every_request(recorder, tmp_path):
         tmp_path,
         [dict(prompt="p0", seed=0), dict(prompt="p1", seed=1, steps=3), dict(prompt="p2", seed=2)],
     )
-    orch = mod.CudaQwenImageOrchestrator(_batch_args(requests_dir, steps=9))
+    orch = _orch(_batch_args(requests_dir, steps=9))
     orch.generate(argv=[])
     assert [kw["load"] for _, kw in recorder] == [True]  # one load for the whole batch
     calls = orch._last_pipe.app.calls
@@ -273,9 +278,9 @@ def test_batch_mode_loads_once_and_writes_every_request(recorder, tmp_path):
 
 def test_batch_mode_steps_fall_back_to_the_model_default(recorder, tmp_path):
     requests_dir = _manifest(tmp_path, [dict(prompt="p0")])
-    orch = mod.CudaQwenImageOrchestrator(_batch_args(requests_dir))
+    orch = _orch(_batch_args(requests_dir))
     orch.generate(argv=[])
-    assert orch._last_pipe.app.calls[0][1]["num_inference_steps"] == mod.DEFAULT_STEPS
+    assert orch._last_pipe.app.calls[0][1]["num_inference_steps"] == SPEC.default_steps
 
 
 def test_a_failing_request_is_marked_failed_and_the_loop_continues(recorder, monkeypatch, tmp_path):
@@ -283,7 +288,7 @@ def test_a_failing_request_is_marked_failed_and_the_loop_continues(recorder, mon
 
     monkeypatch.setattr(_Pipe, "__init__", lambda self: setattr(self, "app", _FailingApp()))
     requests_dir = _manifest(tmp_path, [dict(prompt="p0"), dict(prompt="boom"), dict(prompt="p2")])
-    orch = mod.CudaQwenImageOrchestrator(_batch_args(requests_dir))
+    orch = _orch(_batch_args(requests_dir))
     orch.generate(argv=[])
     assert [p for p, _ in orch._last_pipe.app.calls] == ["p0", "boom", "p2"]
     s = summarize(requests_dir)
@@ -297,7 +302,7 @@ def test_a_request_guidance_scale_fails_that_request_on_qwen(recorder, tmp_path)
     from difflet.cli.dp.claims import summarize
 
     requests_dir = _manifest(tmp_path, [dict(prompt="p0", guidance_scale=4.0), dict(prompt="p1")])
-    orch = mod.CudaQwenImageOrchestrator(_batch_args(requests_dir))
+    orch = _orch(_batch_args(requests_dir))
     orch.generate(argv=[])
     s = summarize(requests_dir)
     assert s.done == [1] and list(s.failed) == [0] and "guidance" in s.failed[0]
@@ -308,7 +313,7 @@ def test_a_request_negative_prompt_fails_that_request_on_qwen(recorder, tmp_path
     from difflet.cli.dp.claims import summarize
 
     requests_dir = _manifest(tmp_path, [dict(prompt="p0", negative_prompt="blurry")])
-    mod.CudaQwenImageOrchestrator(_batch_args(requests_dir)).generate(argv=[])
+    _orch(_batch_args(requests_dir)).generate(argv=[])
     s = summarize(requests_dir)
     assert list(s.failed) == [0] and "negative" in s.failed[0]
 
@@ -324,7 +329,7 @@ def test_round_robin_claims_only_this_worker_s_requests(recorder, tmp_path):
         [dataclasses.replace(r, assigned_worker=r.index % 2) for r in read_manifest(requests_dir)],
         requests_dir,
     )
-    orch = mod.CudaQwenImageOrchestrator(
+    orch = _orch(
         _batch_args(requests_dir, worker_index=1, dp_schedule="round_robin")
     )
     orch.generate(argv=[])
@@ -336,7 +341,7 @@ def test_round_robin_claims_only_this_worker_s_requests(recorder, tmp_path):
 def test_generate_kwargs_take_the_request_overrides():
     from difflet.cli.dp.requests_io import RequestSpec
 
-    orch = mod.CudaQwenImageOrchestrator(_args(steps=9, seed=5))
+    orch = _orch(_args(steps=9, seed=5))
     assert orch.generate_kwargs()["num_inference_steps"] == 9
     req = RequestSpec(index=0, prompt="p", output="o.png", seed=11, steps=4)
     kw = orch.generate_kwargs(req)

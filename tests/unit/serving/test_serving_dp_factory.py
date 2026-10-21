@@ -1,5 +1,5 @@
-"""`--dp-degree N`: refused before any download off CUDA or above the GPU count; on CUDA the
-factory builds one resident engine per GPU behind a ReplicatedServingEngine."""
+"""`--dp-degree N`: refused before any download off a GPU platform or above the GPU count; on
+CUDA the factory builds one resident engine per GPU behind a ReplicatedServingEngine."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from difflet.serving.engines.replicated import ReplicatedServingEngine
 from difflet.serving.engines.resident_worker import ResidentWorkerServingEngine
 from difflet.serving.errors import DiffletServingError
 from difflet.serving.options import ServeOptions
-from difflet.serving.orchestrators import qwen_image_cuda as cuda_mod
+from difflet.backends.gpu import serving as gpu_serving
 from difflet.serving.orchestrators.base import NoopServingRequestValidator
 from difflet.serving.types import ResolvedModelSource
 
@@ -21,7 +21,7 @@ _SOURCE = ResolvedModelSource("hf_snapshot", "Qwen/Qwen-Image", None, "/snap/qwe
 def no_download(monkeypatch):
     calls = []
     monkeypatch.setattr(
-        cuda_mod, "resolve_hf_model_source", lambda *a, **k: calls.append((a, k)) or _SOURCE
+        gpu_serving, "resolve_hf_model_source", lambda *a, **k: calls.append((a, k)) or _SOURCE
     )
     monkeypatch.setattr(
         factory_mod,
@@ -46,13 +46,13 @@ def test_dp_degree_is_refused_off_cuda_before_the_download(no_download):
     # conftest pins DIFFLET_BACKEND=cpu
     with pytest.raises(DiffletServingError) as exc:
         factory_mod.build_serving_stack(_options(replicas=2))
-    assert exc.value.code == "feature_not_supported" and "CUDA backend only" in exc.value.message
+    assert exc.value.code == "feature_not_supported" and "GPU backends only" in exc.value.message
     assert no_download == []
 
 
 def test_dp_degree_above_the_gpu_count_is_refused_before_the_download(monkeypatch, no_download):
     monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
-    monkeypatch.setattr("difflet.serving.model_registry._visible_gpu_count", lambda: 1)
+    monkeypatch.setattr("difflet.serving.model_registry._visible_gpu_count", lambda platform: 1)
     with pytest.raises(DiffletServingError) as exc:
         factory_mod.build_serving_stack(_options(replicas=2))
     assert exc.value.code == "feature_not_supported"
@@ -62,7 +62,7 @@ def test_dp_degree_above_the_gpu_count_is_refused_before_the_download(monkeypatc
 
 def test_dp_degree_two_builds_two_replicas_one_gpu_each(monkeypatch, no_download):
     monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
-    monkeypatch.setattr("difflet.serving.model_registry._visible_gpu_count", lambda: 2)
+    monkeypatch.setattr("difflet.serving.model_registry._visible_gpu_count", lambda platform: 2)
     stack = factory_mod.build_serving_stack(_options(replicas=2))
     engine = stack.engine
     assert isinstance(engine, ReplicatedServingEngine)

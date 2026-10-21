@@ -28,7 +28,7 @@ def _reload(name):
 # Reload only the flux modeling module so its `from difflet.ops import ...`
 # rebinds onto the cpu backend. Shared difflet.layers modules are imported
 # normally — reloading them would replace classes that other test modules
-# (registry, wan, qwen) depend on and break them mid-session.
+# (registry, wan, qwen) depend on and break them for later tests.
 import difflet.layers.normalization as _norm_mod  # noqa: E402
 from difflet.models.flux.dit_config import FluxDiTConfig  # noqa: E402
 mf = _reload("difflet.models.flux.modeling_flux")

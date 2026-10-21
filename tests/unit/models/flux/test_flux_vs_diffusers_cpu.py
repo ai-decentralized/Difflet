@@ -1,25 +1,35 @@
 """The neutral Flux DiT against diffusers' ``FluxTransformer2DModel`` on CPU.
 
-D13 proxy: with no trn2 available, the Trainium "same cosine before/after the split"
-proof is replaced by pinning the neutral modeling, driven by ``FluxDiTConfig`` and fed
+Without a trn2 host, the Trainium "same cosine before/after the split" proof is
+replaced by pinning the neutral modeling, driven by ``FluxDiTConfig`` and fed
 weights through ``convert_flux_hf_state_dict``, to the diffusers reference in fp32. A
 strict load proves the conversion produces exactly the module's parameter names.
 
 The single-stream block runs on the real CPU ops: ``RowParallelLinear(skip_bias_add=True)``
 returns ``(out, bias)`` and ``reduce_from_tensor_model_parallel_region`` takes
-``process_group=`` (closed for CPU, CUDA and the shared ``_torch_megatron`` layers in
-F5 Task 3), so no test-local bridge stands in for them.
+``process_group=`` (on CPU, CUDA and the shared ``_torch_megatron`` layers), so no
+test-local bridge stands in for them.
 """
+
+import os
 
 import torch
 from diffusers import FluxPipeline, FluxTransformer2DModel
 
-from difflet.layers.embeddings import FluxPosEmbed
-from difflet.models.flux.dit_config import FluxDiTConfig
-from difflet.models.flux.modeling_flux import (
+# With no backend set, bind difflet.ops to the CPU ops for the modules imported below (a
+# Trainium host would bind the Neuron ops).
+_PINNED = "DIFFLET_BACKEND" not in os.environ
+os.environ.setdefault("DIFFLET_BACKEND", "cpu")
+
+from difflet.layers.embeddings import FluxPosEmbed  # noqa: E402
+from difflet.models.flux.dit_config import FluxDiTConfig  # noqa: E402
+from difflet.models.flux.modeling_flux import (  # noqa: E402
     NeuronFluxTransformer2DModel,
     convert_flux_hf_state_dict,
 )
+
+if _PINNED:
+    del os.environ["DIFFLET_BACKEND"]
 
 # Rope axes must be even (cos/sin pairs) and sum to attention_head_dim (8).
 AXES_DIMS_ROPE = (2, 2, 4)

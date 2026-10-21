@@ -1,4 +1,4 @@
-"""Flux on CUDA through the CLI: one process, DiffletPipeline + generate().
+"""Flux on the GPU flow through the CLI: one process, DiffletPipeline + generate().
 
 CPU-only: DiffletPipeline.from_pretrained is replaced by a recorder; no weights, no GPU.
 Mirrors tests/unit/cli/test_orchestrator_qwen_cuda.py.
@@ -11,8 +11,12 @@ import argparse
 import pytest
 from PIL import Image
 
-from difflet.cli.orchestrators import flux_cuda as mod
-from difflet.cli.orchestrators.qwen_image_cuda import CudaOneProcessOrchestrator
+from difflet.backends.gpu.cli import GpuOrchestrator
+from difflet.models.flux.spec import SPEC
+
+
+def _orch(args):
+    return GpuOrchestrator(args, SPEC)
 
 
 def _args(**over):
@@ -79,15 +83,16 @@ def recorder(monkeypatch):
     return calls
 
 
-def test_flux_orchestrator_is_the_shared_one_process_orchestrator():
-    assert issubclass(mod.FluxCudaOrchestrator, CudaOneProcessOrchestrator)
-    assert mod.FluxCudaOrchestrator.HF_MODEL_ID == "black-forest-labs/FLUX.1-dev"
-    assert mod.FluxCudaOrchestrator.DEFAULT_STEPS == 28
-    assert mod.FluxCudaOrchestrator.ACCEPTS_GUIDANCE_SCALE is True
+def test_flux_spec_drives_the_shared_gpu_orchestrator():
+    orch = _orch(_args())
+    assert orch.spec is SPEC and orch.model_id == "black-forest-labs/FLUX.1-dev"
+    assert SPEC.cli_model_ids[0] == "black-forest-labs/FLUX.1-dev"
+    assert SPEC.default_steps == 28
+    assert SPEC.guidance == "distilled"
 
 
 def test_compile_builds_the_cuda_pipeline_without_loading(recorder):
-    mod.FluxCudaOrchestrator(_args()).compile()
+    _orch(_args()).compile()
     model_id, kw = recorder[0]
     assert model_id == "black-forest-labs/FLUX.1-dev"
     assert kw["backend"] == "cuda" and kw["load"] is False
@@ -98,28 +103,28 @@ def test_compile_builds_the_cuda_pipeline_without_loading(recorder):
 
 def test_generate_without_a_compiled_artifact_compiles_first(recorder, tmp_path):
     out = tmp_path / "flux.png"
-    mod.FluxCudaOrchestrator(_args(output=str(out))).generate()
+    _orch(_args(output=str(out))).generate()
     _, kw = recorder[0]
     assert kw["load"] is True and kw["force_compile"] is False and out.is_file()
 
 
 def test_generate_creates_the_output_directory(recorder, tmp_path):
     out = tmp_path / "deep" / "er" / "flux.png"
-    mod.FluxCudaOrchestrator(_args(output=str(out))).generate()
+    _orch(_args(output=str(out))).generate()
     assert out.is_file()
 
 
 def test_steps_default_to_28_and_guidance_to_3_5(recorder, tmp_path):
-    orch = mod.FluxCudaOrchestrator(_args(output=str(tmp_path / "f.png")))
+    orch = _orch(_args(output=str(tmp_path / "f.png")))
     orch.generate()
     prompt, kw = orch._last_pipe.app.calls[0]
     assert prompt == "a cat" and kw["seed"] == 42 and kw["output_type"] == "pil"
-    assert kw["num_inference_steps"] == mod.DEFAULT_STEPS == 28
-    assert kw["guidance_scale"] == mod.DEFAULT_GUIDANCE_SCALE == 3.5
+    assert kw["num_inference_steps"] == SPEC.default_steps == 28
+    assert kw["guidance_scale"] == SPEC.default_guidance_scale == 3.5
 
 
 def test_steps_seed_and_guidance_are_forwarded(recorder, tmp_path):
-    orch = mod.FluxCudaOrchestrator(
+    orch = _orch(
         _args(output=str(tmp_path / "f.png"), steps=7, seed=3, guidance_scale=5.0)
     )
     orch.generate()
@@ -128,7 +133,7 @@ def test_steps_seed_and_guidance_are_forwarded(recorder, tmp_path):
 
 
 def test_height_width_cache_dir_and_force_reach_from_pretrained(recorder):
-    mod.FluxCudaOrchestrator(_args(cache_dir="/c", force=True, height=768, width=512)).compile()
+    _orch(_args(cache_dir="/c", force=True, height=768, width=512)).compile()
     _, kw = recorder[0]
     assert kw["compile_cache_dir"] == "/c" and kw["force_compile"] is True
     assert (kw["height"], kw["width"]) == (768, 512)
@@ -136,14 +141,14 @@ def test_height_width_cache_dir_and_force_reach_from_pretrained(recorder):
 
 def test_schnell_is_built_from_its_own_repo(recorder, monkeypatch):
     args = _args(model_id="black-forest-labs/FLUX.1-schnell")
-    mod.FluxCudaOrchestrator(args).compile()
+    _orch(args).compile()
     assert recorder[0][0] == "black-forest-labs/FLUX.1-schnell"
     seen = {}
     monkeypatch.setattr(
         "difflet.pipeline.path_resolver.resolve_model_path",
         lambda mid, **kw: seen.update(mid=mid) or "/snap",
     )
-    mod.FluxCudaOrchestrator(args).download()
+    _orch(args).download()
     assert seen["mid"] == "black-forest-labs/FLUX.1-schnell"
 
 
@@ -153,7 +158,7 @@ def test_schnell_is_built_from_its_own_repo(recorder, monkeypatch):
         ({"tp_degree": 2}, "not supported"),
         ({"sp_enabled": True}, "not supported"),
         ({"cp_degree": 2}, "not supported"),
-        ({"cfg_parallel": True}, "distilled model"),
+        ({"cfg_parallel": True}, "does not apply"),
         ({"shapes": "1024x1024,768x768"}, "not supported"),
         ({"teacache_cadence": 2}, "not supported"),
         ({"teacache_speedup": 1.5}, "not supported"),
@@ -166,7 +171,7 @@ def test_schnell_is_built_from_its_own_repo(recorder, monkeypatch):
 )
 def test_unsupported_flags_are_refused_before_any_load(recorder, over, expected):
     with pytest.raises(SystemExit) as exc:
-        mod.FluxCudaOrchestrator(_args(**over)).generate()
+        _orch(_args(**over)).generate()
     assert expected in str(exc.value) and "[flux/cuda]" in str(exc.value) and recorder == []
 
 
@@ -176,13 +181,13 @@ def test_download_resolves_the_hub_snapshot(monkeypatch):
         "difflet.pipeline.path_resolver.resolve_model_path",
         lambda mid, **kw: seen.update(mid=mid, **kw) or "/snap",
     )
-    mod.FluxCudaOrchestrator(_args()).download()
+    _orch(_args()).download()
     assert seen["mid"] == "black-forest-labs/FLUX.1-dev" and seen["local_files_only"] is False
 
 
 def test_run_is_download_compile_generate(recorder, monkeypatch, tmp_path):
     order = []
-    orch = mod.FluxCudaOrchestrator(_args(output=str(tmp_path / "f.png")))
+    orch = _orch(_args(output=str(tmp_path / "f.png")))
     monkeypatch.setattr(orch, "download", lambda: order.append("download"))
     monkeypatch.setattr(orch, "compile", lambda: order.append("compile"))
     monkeypatch.setattr(orch, "generate", lambda: order.append("generate"))
@@ -196,22 +201,23 @@ def test_run_refuses_unsupported_flags_before_any_download(recorder, monkeypatch
         lambda *a, **kw: pytest.fail("must refuse before resolving the snapshot"),
     )
     with pytest.raises(SystemExit) as exc:
-        mod.FluxCudaOrchestrator(_args(taef1=True)).run()
+        _orch(_args(taef1=True)).run()
     assert "not supported" in str(exc.value) and recorder == []
 
 
 def test_lone_teacache_calibration_is_refused_by_name(recorder):
     """``main._validate_teacache`` lets a lone ``--teacache-calibration`` through and Flux on
-    CUDA forwards nothing, so without this refusal the calibration file is silently dropped."""
+    the GPU flow forwards nothing, so without this refusal the calibration file is silently
+    dropped."""
     with pytest.raises(SystemExit) as exc:
-        mod.FluxCudaOrchestrator(_args(teacache_calibration="/x.json")).generate()
+        _orch(_args(teacache_calibration="/x.json")).generate()
     assert "--teacache-calibration" in str(exc.value) and "not supported" in str(exc.value)
     assert recorder == []
 
 
 def test_torch_compile_is_forwarded_to_the_flux_application():
     # The measured, opt-in compile option reaches CudaFluxApplication as a kwarg.
-    kw = mod.FluxCudaOrchestrator(_args(torch_compile=True)).pipeline_kwargs(load=True)
+    kw = _orch(_args(torch_compile=True)).pipeline_kwargs(load=True)
     assert kw["application_kwargs"] == {"torch_compile": True}
-    kw = mod.FluxCudaOrchestrator(_args()).pipeline_kwargs(load=True)
+    kw = _orch(_args()).pipeline_kwargs(load=True)
     assert "application_kwargs" not in kw

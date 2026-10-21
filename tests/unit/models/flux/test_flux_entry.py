@@ -31,10 +31,25 @@ else:
     os.environ["DIFFLET_BACKEND"] = _PREV_BACKEND
 
 
-def test_create_flux_application_accepts_the_cuda_backend(tmp_path):
-    # CUDA plan F5: the cuda branch builds the one-process application (no checkpoint
-    # under tmp_path, so no transformer — enough to prove the wiring).
-    app = entry.create_flux_application(
+def test_create_flux_application_rejects_non_trainium_backend():
+    with pytest.raises(NotImplementedError, match="only the trainium backend"):
+        entry.create_flux_application(
+            model_path="/fake/model",
+            parallel=DiffletParallelConfig(),
+            dtype=torch.float32,
+            shape={"height": 512, "width": 512},
+            backend="tpu",
+        )
+
+
+def test_registry_routes_cuda_to_the_gpu_application(tmp_path, monkeypatch):
+    # The entry factory is the Trainium path; the registry sends a GPU platform to the
+    # generic GPU flow (no checkpoint under tmp_path, so no transformer: enough to prove
+    # the routing).
+    from difflet.registry import resolve_model
+
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
+    app = resolve_model("black-forest-labs/FLUX.1-dev").create_application(
         model_path=str(tmp_path),
         parallel=DiffletParallelConfig(tp_degree=1),
         dtype=torch.float32,
@@ -43,17 +58,6 @@ def test_create_flux_application_accepts_the_cuda_backend(tmp_path):
     )
     assert type(app).__name__ == "CudaFluxApplication"
     assert app.transformer is None and app.shape["height"] == 512
-
-
-def test_create_flux_application_rejects_other_backends():
-    with pytest.raises(NotImplementedError, match="trainium and cuda"):
-        entry.create_flux_application(
-            model_path="/fake/model",
-            parallel=DiffletParallelConfig(),
-            dtype=torch.float32,
-            shape={"height": 512, "width": 512},
-            backend="tpu",
-        )
 
 
 def test_create_flux_application_wires_config_flow(monkeypatch):

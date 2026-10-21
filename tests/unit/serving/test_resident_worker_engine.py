@@ -823,7 +823,7 @@ def test_worker_heartbeat_logs_independently_of_reply_queue(caplog):
     assert "running_requests=1 queued_requests=1 pending_requests=2 capacity=9" in caplog.text
 
 
-# --- CUDA: the worker pins its GPU (plan F2b, `difflet serve --dp-degree N`) -----------------
+# --- GPU: the worker pins its GPU (`difflet serve --dp-degree N`) ---------------------------
 
 
 def _cuda_runtime(core_ids: tuple[int, ...]) -> ResolvedRuntimeBundle:

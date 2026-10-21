@@ -2,7 +2,7 @@
 
 ``canonicalize_shapes`` is pure Python + torch and is used by the pipeline, the
 CLI, serving and every model entry, so it must import without the Trainium
-backend (CUDA plan Phase 1, task 1.5). The Trainium bucketing module keeps the
+backend. The Trainium bucketing module keeps the
 NxD-specific half and re-exports these names, so on-device scripts that still
 import the old path keep working.
 """

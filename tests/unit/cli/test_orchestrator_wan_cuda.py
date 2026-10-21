@@ -1,8 +1,8 @@
-"""Wan 2.2 on CUDA through the CLI: one process, DiffletPipeline + generate().
+"""Wan 2.2 on the GPU flow through the CLI: one process, DiffletPipeline + generate().
 
 CPU-only: DiffletPipeline.from_pretrained is replaced by a recorder; no weights, no GPU.
 Mirrors tests/unit/cli/test_orchestrator_flux_cuda.py; the differences are the video output
-(``OUTPUT_TYPE = "pt"``, MP4 through the Trainium orchestrator's ``_save_video``, ``.pt``
+(``output_type="pt"``, MP4 through the Trainium orchestrator's ``_save_video``, ``.pt``
 fallback), ``--num-frames`` and the 480x832x9 default shape.
 """
 
@@ -19,12 +19,18 @@ from pathlib import Path
 import pytest
 import torch
 
+from difflet.backends.gpu import cli as gpu_cli
+from difflet.backends.gpu.cli import GpuOrchestrator
 from difflet.cli.orchestrators import wan as trainium_wan
-from difflet.cli.orchestrators import wan_cuda as mod
-from difflet.cli.orchestrators.qwen_image_cuda import CudaOneProcessOrchestrator
+from difflet.models.flux.spec import SPEC as FLUX_SPEC
+from difflet.models.wan.spec import SPEC
 
 WAN22 = "Wan-AI/Wan2.2-T2V-A14B-Diffusers"
 WAN21 = "Wan-AI/Wan2.1-T2V-14B-Diffusers"
+
+
+def _orch(args):
+    return GpuOrchestrator(args, SPEC)
 
 
 def _args(**over):
@@ -109,29 +115,31 @@ def saved(monkeypatch):
         Path(output_path).write_bytes(b"mp4")
         return True
 
-    monkeypatch.setattr(mod, "_save_video", fake)
+    monkeypatch.setattr(trainium_wan, "_save_video", fake)
     return calls
 
 
-def test_wan_orchestrator_is_the_shared_one_process_orchestrator():
-    assert issubclass(mod.WanCudaOrchestrator, CudaOneProcessOrchestrator)
-    assert mod.WanCudaOrchestrator.HF_MODEL_ID == WAN22
-    assert set(mod.WanCudaOrchestrator.MODEL_IDS) == {WAN22, WAN21}
-    assert mod.WanCudaOrchestrator.DEFAULT_STEPS == 40
-    assert mod.WanCudaOrchestrator.ACCEPTS_GUIDANCE_SCALE is True
-    assert mod.WanCudaOrchestrator.DEFAULT_GUIDANCE_SCALE == 4.0
-    assert mod.WanCudaOrchestrator.OUTPUT_TYPE == "pt"
+def test_wan_spec_drives_the_shared_gpu_orchestrator():
+    orch = _orch(_args())
+    assert orch.spec is SPEC and orch.model_id == WAN22
+    assert set(SPEC.cli_model_ids) == {WAN22, WAN21}
+    assert SPEC.default_steps == 40
+    assert SPEC.guidance == "cfg" and SPEC.default_guidance_scale == 4.0
+    assert orch.generate_kwargs()["output_type"] == "pt"
     # The image models keep PIL output.
-    assert CudaOneProcessOrchestrator.OUTPUT_TYPE == "pil"
+    assert GpuOrchestrator(_args(), FLUX_SPEC).generate_kwargs()["output_type"] == "pil"
 
 
-def test_the_mp4_writer_is_the_trainium_orchestrator_s_helper():
-    # Reused by import, not copied.
-    assert mod._save_video is trainium_wan._save_video
+def test_the_mp4_writer_is_the_trainium_orchestrator_s_helper(monkeypatch, tmp_path):
+    # Reused by import, not copied: save_result looks it up on the Trainium orchestrator.
+    calls = []
+    monkeypatch.setattr(trainium_wan, "_save_video", lambda t, p: calls.append(p) or True)
+    _orch(_args()).save_result(_video(), tmp_path / "w.mp4")
+    assert calls == [str(tmp_path / "w.mp4")]
 
 
 def test_compile_builds_the_cuda_pipeline_at_480x832x9_without_loading(recorder):
-    mod.WanCudaOrchestrator(_args()).compile()
+    _orch(_args()).compile()
     model_id, kw = recorder[0]
     assert model_id == WAN22
     assert kw["backend"] == "cuda" and kw["load"] is False
@@ -143,7 +151,7 @@ def test_compile_builds_the_cuda_pipeline_at_480x832x9_without_loading(recorder)
 
 def test_height_width_num_frames_cache_dir_and_force_reach_from_pretrained(recorder):
     args = _args(cache_dir="/c", force=True, height=320, width=512, num_frames=17)
-    mod.WanCudaOrchestrator(args).compile()
+    _orch(args).compile()
     _, kw = recorder[0]
     assert kw["compile_cache_dir"] == "/c" and kw["force_compile"] is True
     assert (kw["height"], kw["width"], kw["num_frames"]) == (320, 512, 17)
@@ -151,7 +159,7 @@ def test_height_width_num_frames_cache_dir_and_force_reach_from_pretrained(recor
 
 def test_generate_writes_the_mp4_through_save_video(recorder, saved, tmp_path):
     out = tmp_path / "deep" / "wan.mp4"
-    orch = mod.WanCudaOrchestrator(_args(output=str(out)))
+    orch = _orch(_args(output=str(out)))
     orch.generate()
     _, kw = recorder[0]
     assert kw["load"] is True and kw["force_compile"] is False
@@ -162,9 +170,9 @@ def test_generate_writes_the_mp4_through_save_video(recorder, saved, tmp_path):
 
 
 def test_a_failed_mp4_export_falls_back_to_a_pt_tensor(recorder, monkeypatch, tmp_path):
-    monkeypatch.setattr(mod, "_save_video", lambda tensor, path: False)
+    monkeypatch.setattr(trainium_wan, "_save_video", lambda tensor, path: False)
     out = tmp_path / "wan.mp4"
-    orch = mod.WanCudaOrchestrator(_args(output=str(out)))
+    orch = _orch(_args(output=str(out)))
     orch.generate()
     pt = out.with_suffix(".pt")
     assert pt.is_file() and not out.exists()
@@ -173,7 +181,7 @@ def test_a_failed_mp4_export_falls_back_to_a_pt_tensor(recorder, monkeypatch, tm
 
 def test_a_non_mp4_output_is_saved_as_the_tensor(recorder, saved, tmp_path):
     out = tmp_path / "wan.pt"
-    orch = mod.WanCudaOrchestrator(_args(output=str(out)))
+    orch = _orch(_args(output=str(out)))
     orch.generate()
     assert saved == [] and torch.equal(torch.load(out), orch._last_pipe.app.video)
 
@@ -181,24 +189,24 @@ def test_a_non_mp4_output_is_saved_as_the_tensor(recorder, saved, tmp_path):
 def test_generate_writes_a_real_mp4(recorder, tmp_path):
     pytest.importorskip("imageio_ffmpeg")
     out = tmp_path / "wan.mp4"
-    mod.WanCudaOrchestrator(_args(output=str(out))).generate()
+    _orch(_args(output=str(out))).generate()
     assert out.is_file() and out.stat().st_size > 0 and not out.with_suffix(".pt").exists()
 
 
 def test_steps_default_to_40_guidance_to_4_and_frames_to_9(recorder, saved, tmp_path):
-    orch = mod.WanCudaOrchestrator(_args(output=str(tmp_path / "w.mp4")))
+    orch = _orch(_args(output=str(tmp_path / "w.mp4")))
     orch.generate()
     prompt, kw = orch._last_pipe.app.calls[0]
     assert prompt == "a cat" and kw["seed"] == 42 and kw["output_type"] == "pt"
-    assert kw["num_inference_steps"] == mod.DEFAULT_STEPS == 40
-    assert kw["guidance_scale"] == mod.DEFAULT_GUIDANCE_SCALE == 4.0
+    assert kw["num_inference_steps"] == SPEC.default_steps == 40
+    assert kw["guidance_scale"] == SPEC.default_guidance_scale == 4.0
     assert kw["num_frames"] == 9
     # No --negative-prompt flag: the application's default (None → "") applies.
     assert "negative_prompt" not in kw
 
 
 def test_steps_seed_guidance_and_frames_are_forwarded(recorder, saved, tmp_path):
-    orch = mod.WanCudaOrchestrator(
+    orch = _orch(
         _args(output=str(tmp_path / "w.mp4"), steps=7, seed=3, guidance_scale=5.0, num_frames=17)
     )
     orch.generate()
@@ -210,14 +218,14 @@ def test_steps_seed_guidance_and_frames_are_forwarded(recorder, saved, tmp_path)
 
 def test_wan21_is_built_from_its_own_repo(recorder, monkeypatch):
     args = _args(model_id=WAN21)
-    mod.WanCudaOrchestrator(args).compile()
+    _orch(args).compile()
     assert recorder[0][0] == WAN21
     seen = {}
     monkeypatch.setattr(
         "difflet.pipeline.path_resolver.resolve_model_path",
         lambda mid, **kw: seen.update(mid=mid) or "/snap",
     )
-    mod.WanCudaOrchestrator(args).download()
+    _orch(args).download()
     assert seen["mid"] == WAN21
 
 
@@ -239,7 +247,7 @@ def test_wan21_is_built_from_its_own_repo(recorder, monkeypatch):
 )
 def test_unsupported_flags_are_refused_before_any_load(recorder, over, expected):
     with pytest.raises(SystemExit) as exc:
-        mod.WanCudaOrchestrator(_args(**over)).generate()
+        _orch(_args(**over)).generate()
     assert expected in str(exc.value) and "[wan/cuda]" in str(exc.value) and recorder == []
 
 
@@ -255,7 +263,7 @@ def test_unsupported_flags_are_refused_before_any_load(recorder, over, expected)
 )
 def test_refusals_name_the_flag(recorder, over, flag):
     with pytest.raises(SystemExit) as exc:
-        mod.WanCudaOrchestrator(_args(**over)).compile()
+        _orch(_args(**over)).compile()
     assert flag in str(exc.value) and recorder == []
 
 
@@ -265,13 +273,13 @@ def test_download_resolves_the_hub_snapshot(monkeypatch):
         "difflet.pipeline.path_resolver.resolve_model_path",
         lambda mid, **kw: seen.update(mid=mid, **kw) or "/snap",
     )
-    mod.WanCudaOrchestrator(_args()).download()
+    _orch(_args()).download()
     assert seen["mid"] == WAN22 and seen["local_files_only"] is False
 
 
 def test_run_is_download_compile_generate(recorder, monkeypatch, tmp_path):
     order = []
-    orch = mod.WanCudaOrchestrator(_args(output=str(tmp_path / "w.mp4")))
+    orch = _orch(_args(output=str(tmp_path / "w.mp4")))
     monkeypatch.setattr(orch, "download", lambda: order.append("download"))
     monkeypatch.setattr(orch, "compile", lambda: order.append("compile"))
     monkeypatch.setattr(orch, "generate", lambda: order.append("generate"))
@@ -285,15 +293,16 @@ def test_run_refuses_unsupported_flags_before_any_download(recorder, monkeypatch
         lambda *a, **kw: pytest.fail("must refuse before resolving the snapshot"),
     )
     with pytest.raises(SystemExit) as exc:
-        mod.WanCudaOrchestrator(_args(host_vae=True)).run()
+        _orch(_args(host_vae=True)).run()
     assert "not supported" in str(exc.value) and recorder == []
 
 
 def test_lone_teacache_calibration_is_refused_by_name(recorder):
     """``main._validate_teacache`` lets a lone ``--teacache-calibration`` through and Wan on
-    CUDA forwards nothing, so without this refusal the calibration file is silently dropped."""
+    the GPU flow forwards nothing, so without this refusal the calibration file is silently
+    dropped."""
     with pytest.raises(SystemExit) as exc:
-        mod.WanCudaOrchestrator(_args(teacache_calibration="/x.json")).generate()
+        _orch(_args(teacache_calibration="/x.json")).generate()
     assert "--teacache-calibration" in str(exc.value) and "not supported" in str(exc.value)
     assert recorder == []
 
@@ -330,8 +339,8 @@ def launches(monkeypatch):
 
 
 def test_wan_accepts_cfg_parallel():
-    assert mod.WanCudaOrchestrator.ACCEPTS_CFG_PARALLEL is True
-    assert CudaOneProcessOrchestrator.ACCEPTS_CFG_PARALLEL is False
+    assert SPEC.accepts_cfg_parallel is True
+    assert FLUX_SPEC.accepts_cfg_parallel is False
 
 
 @pytest.mark.parametrize(
@@ -339,17 +348,17 @@ def test_wan_accepts_cfg_parallel():
     [({}, 1), ({"cfg_parallel": True}, 2), ({"cfg_parallel": True, "tp_degree": 1}, 2)],
 )
 def test_world_size_is_cfg_times_cp_times_tp(over, world_size):
-    assert mod.WanCudaOrchestrator(_args(**over)).world_size == world_size
+    assert _orch(_args(**over)).world_size == world_size
 
 
 def test_world_size_counts_cp_and_tp_degrees():
     # cp > 1 and tp > 1 are refused today; the product is still the launch size.
-    assert mod.WanCudaOrchestrator(_args(cp_degree=2)).world_size == 2
-    assert mod.WanCudaOrchestrator(_args(tp_degree=2, cfg_parallel=True)).world_size == 4
+    assert _orch(_args(cp_degree=2)).world_size == 2
+    assert _orch(_args(tp_degree=2, cfg_parallel=True)).world_size == 4
 
 
 def test_compile_with_cfg_parallel_builds_the_cfg_parallel_config(recorder, launches):
-    mod.WanCudaOrchestrator(_args(cfg_parallel=True)).compile()
+    _orch(_args(cfg_parallel=True)).compile()
     _, kw = recorder[0]
     assert kw["parallel"].cfg_parallel_enabled is True and kw["parallel"].tp_degree == 1
     assert kw["load"] is False
@@ -357,13 +366,13 @@ def test_compile_with_cfg_parallel_builds_the_cfg_parallel_config(recorder, laun
 
 
 def test_cfg_parallel_off_keeps_the_single_branch_config(recorder):
-    mod.WanCudaOrchestrator(_args()).compile()
+    _orch(_args()).compile()
     assert recorder[0][1]["parallel"].cfg_parallel_enabled is False
 
 
 def test_generate_with_cfg_parallel_re_execs_under_torchrun(recorder, saved, launches, tmp_path):
     calls, _ = launches
-    orch = mod.WanCudaOrchestrator(_args(cfg_parallel=True, output=str(tmp_path / "w.mp4")))
+    orch = _orch(_args(cfg_parallel=True, output=str(tmp_path / "w.mp4")))
     user = [*_USER_ARGV[:1], "generate", *_USER_ARGV[2:]]
     orch.generate(argv=user)
     ((world_size, argv, _env),) = calls
@@ -376,7 +385,7 @@ def test_generate_with_cfg_parallel_re_execs_under_torchrun(recorder, saved, lau
 
 def test_a_run_becomes_generate_in_the_ranks(recorder, saved, launches):
     calls, _ = launches
-    mod.WanCudaOrchestrator(_args(cfg_parallel=True)).generate(argv=list(_USER_ARGV))
+    _orch(_args(cfg_parallel=True)).generate(argv=list(_USER_ARGV))
     ((_, argv, _),) = calls
     assert argv[:3] == ["-m", "difflet.cli.main", "generate"] and "run" not in argv
     assert argv[3:] == _USER_ARGV[2:]
@@ -385,7 +394,7 @@ def test_a_run_becomes_generate_in_the_ranks(recorder, saved, launches):
 def test_generate_reads_sys_argv_by_default(recorder, saved, launches, monkeypatch):
     calls, _ = launches
     monkeypatch.setattr(sys, "argv", list(_USER_ARGV))
-    mod.WanCudaOrchestrator(_args(cfg_parallel=True)).generate()
+    _orch(_args(cfg_parallel=True)).generate()
     assert calls[0][1] == ["-m", "difflet.cli.main", "generate", *_USER_ARGV[2:]]
 
 
@@ -393,7 +402,7 @@ def test_a_failed_launch_exits_with_the_child_return_code(recorder, saved, launc
     _, state = launches
     state["code"] = 7
     with pytest.raises(SystemExit) as exc:
-        mod.WanCudaOrchestrator(_args(cfg_parallel=True)).generate(argv=list(_USER_ARGV))
+        _orch(_args(cfg_parallel=True)).generate(argv=list(_USER_ARGV))
     assert exc.value.code == 7
 
 
@@ -407,7 +416,7 @@ def test_run_downloads_and_compiles_in_the_parent_then_launches_generate(
         lambda mid, **kw: pulled.append(mid) or "/snap",
     )
     monkeypatch.setattr(sys, "argv", list(_USER_ARGV))
-    mod.WanCudaOrchestrator(_args(cfg_parallel=True)).run()
+    _orch(_args(cfg_parallel=True)).run()
     assert pulled == [WAN22]
     # One parent-side build (compile, load=False), then the launch; no parent-side load.
     assert [kw["load"] for _, kw in recorder] == [False]
@@ -417,14 +426,14 @@ def test_run_downloads_and_compiles_in_the_parent_then_launches_generate(
 
 def test_one_process_generate_never_launches(recorder, saved, launches, tmp_path):
     calls, _ = launches
-    mod.WanCudaOrchestrator(_args(output=str(tmp_path / "w.mp4"))).generate(argv=list(_USER_ARGV))
+    _orch(_args(output=str(tmp_path / "w.mp4"))).generate(argv=list(_USER_ARGV))
     assert calls == [] and [kw["load"] for _, kw in recorder] == [True] and len(saved) == 1
 
 
 def test_a_refused_flag_is_refused_before_any_launch(recorder, launches):
     calls, _ = launches
     with pytest.raises(SystemExit) as exc:
-        mod.WanCudaOrchestrator(_args(cfg_parallel=True, host_vae=True)).generate(argv=[])
+        _orch(_args(cfg_parallel=True, host_vae=True)).generate(argv=[])
     assert "not supported" in str(exc.value) and calls == [] and recorder == []
 
 
@@ -436,7 +445,7 @@ def test_inside_a_rank_generate_runs_in_process(
     monkeypatch.setenv("WORLD_SIZE", "2")
     monkeypatch.setenv("RANK", rank)
     out = tmp_path / "deep" / "w.mp4"
-    orch = mod.WanCudaOrchestrator(_args(cfg_parallel=True, output=str(out)))
+    orch = _orch(_args(cfg_parallel=True, output=str(out)))
     orch.generate(argv=list(_USER_ARGV))
     # SPMD: every rank loads the cfg-parallel pipeline and runs the full generate.
     assert calls == []
@@ -454,7 +463,7 @@ def test_inside_a_rank_generate_runs_in_process(
 
 
 def test_is_rank_zero_reads_rank(monkeypatch):
-    orch = mod.WanCudaOrchestrator(_args())
+    orch = _orch(_args())
     monkeypatch.delenv("RANK", raising=False)
     assert orch.is_rank_zero is True
     monkeypatch.setenv("RANK", "0")
@@ -500,15 +509,15 @@ def test_batch_mode_forwards_each_request_s_overrides(recorder, saved, tmp_path)
             dict(prompt="p1", seed=1, steps=3, guidance_scale=2.5, negative_prompt="blurry"),
         ],
     )
-    orch = mod.WanCudaOrchestrator(_batch_args(requests_dir, num_frames=5))
+    orch = _orch(_batch_args(requests_dir, num_frames=5))
     orch.generate(argv=[])
     assert [kw["load"] for _, kw in recorder] == [True]
     (p0, kw0), (p1, kw1) = orch._last_pipe.app.calls
     assert (p0, kw0["seed"], kw0["num_inference_steps"], kw0["guidance_scale"]) == (
         "p0",
         0,
-        mod.DEFAULT_STEPS,
-        mod.DEFAULT_GUIDANCE_SCALE,
+        SPEC.default_steps,
+        SPEC.default_guidance_scale,
     )
     assert "negative_prompt" not in kw0 and kw0["num_frames"] == 5
     assert (p1, kw1["seed"], kw1["num_inference_steps"], kw1["guidance_scale"]) == (
@@ -535,7 +544,7 @@ def test_batch_mode_a_failing_request_is_marked_failed_and_the_loop_continues(
 
     monkeypatch.setattr(_App, "generate", generate)
     requests_dir = _manifest(tmp_path, [dict(prompt="boom"), dict(prompt="p1"), dict(prompt="p2")])
-    orch = mod.WanCudaOrchestrator(_batch_args(requests_dir))
+    orch = _orch(_batch_args(requests_dir))
     orch.generate(argv=[])
     assert [p for p, _ in orch._last_pipe.app.calls] == ["boom", "p1", "p2"]
     s = summarize(requests_dir)
@@ -563,7 +572,7 @@ def test_a_cfg_parallel_worker_re_execs_torchrun_with_its_worker_flags(
         "--dp-schedule",
         "least_loaded",
     ]
-    mod.WanCudaOrchestrator(_batch_args(requests_dir, cfg_parallel=True)).generate(argv=worker_argv)
+    _orch(_batch_args(requests_dir, cfg_parallel=True)).generate(argv=worker_argv)
     ((world_size, argv, _),) = calls
     assert world_size == 2 and argv[3:] == worker_argv[2:]
     # The parent worker claims nothing: the ranks do.
@@ -600,7 +609,7 @@ def test_inside_a_cfg_world_rank_zero_claims_and_broadcasts(
     monkeypatch.setenv("WORLD_SIZE", "2")
     monkeypatch.setenv("RANK", "0")
     requests_dir = _manifest(tmp_path, [dict(prompt="p0"), dict(prompt="p1")])
-    orch = mod.WanCudaOrchestrator(_batch_args(requests_dir, cfg_parallel=True))
+    orch = _orch(_batch_args(requests_dir, cfg_parallel=True))
     orch.generate(argv=[])
     assert [r.prompt if r else None for r in broadcasts["sent"]] == ["p0", "p1", None]
     assert [p for p, _ in orch._last_pipe.app.calls] == ["p0", "p1"]
@@ -617,7 +626,7 @@ def test_inside_a_cfg_world_rank_one_follows_rank_zero_and_writes_nothing(
     monkeypatch.setenv("RANK", "1")
     requests_dir = _manifest(tmp_path, [dict(prompt="p0"), dict(prompt="p1")])
     broadcasts["feed"] = [*read_manifest(requests_dir), None]
-    orch = mod.WanCudaOrchestrator(_batch_args(requests_dir, cfg_parallel=True))
+    orch = _orch(_batch_args(requests_dir, cfg_parallel=True))
     orch.generate(argv=[])
     # Same requests, same order as rank 0 (SPMD), but no claims, markers or outputs.
     assert [p for p, _ in orch._last_pipe.app.calls] == ["p0", "p1"]
@@ -649,7 +658,7 @@ def test_inside_a_cfg_world_a_failure_on_rank_one_re_raises_and_marks_nothing(
     monkeypatch.setenv("RANK", "1")
     requests_dir = _manifest(tmp_path, [dict(prompt="boom"), dict(prompt="p1")])
     broadcasts["feed"] = [*read_manifest(requests_dir), None]
-    orch = mod.WanCudaOrchestrator(_batch_args(requests_dir, cfg_parallel=True))
+    orch = _orch(_batch_args(requests_dir, cfg_parallel=True))
     with pytest.raises(RuntimeError, match="rank 1 exploded"):
         orch.generate(argv=[])
     assert [p for p, _ in orch._last_pipe.app.calls] == ["boom"]  # no next request
@@ -666,7 +675,7 @@ def test_inside_a_cfg_world_a_failure_on_rank_zero_marks_failed_then_exits(
     monkeypatch.setenv("WORLD_SIZE", "2")
     monkeypatch.setenv("RANK", "0")
     requests_dir = _manifest(tmp_path, [dict(prompt="boom"), dict(prompt="p1")])
-    orch = mod.WanCudaOrchestrator(_batch_args(requests_dir, cfg_parallel=True))
+    orch = _orch(_batch_args(requests_dir, cfg_parallel=True))
     with pytest.raises(SystemExit) as exc:
         orch.generate(argv=[])
     assert exc.value.code == 1
@@ -688,8 +697,8 @@ _FORBIDDEN = (
 )
 
 
-def test_wan_cuda_imports_nothing_from_neuron_or_the_sibling_backends():
-    tree = ast.parse(Path(mod.__file__).read_text())
+def test_gpu_cli_imports_nothing_from_neuron_or_the_sibling_backends():
+    tree = ast.parse(Path(gpu_cli.__file__).read_text())
     imported = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -700,7 +709,7 @@ def test_wan_cuda_imports_nothing_from_neuron_or_the_sibling_backends():
     assert bad == []
 
 
-def test_importing_the_cuda_and_trainium_wan_orchestrators_pulls_no_neuron_module():
+def test_importing_the_gpu_and_trainium_wan_orchestrators_pulls_no_neuron_module():
     # _save_video lives in the Trainium orchestrator: importing it must stay Neuron-free.
     code = textwrap.dedent("""
         import importlib.abc, sys
@@ -712,7 +721,7 @@ def test_importing_the_cuda_and_trainium_wan_orchestrators_pulls_no_neuron_modul
                 if name.split(".")[0] in BLOCKED or name.startswith(BLOCKED_PREFIXES):
                     raise ImportError("blocked: " + name)
         sys.meta_path.insert(0, Block())
-        import difflet.cli.orchestrators.wan_cuda
+        import difflet.backends.gpu.cli
         import difflet.cli.orchestrators.wan
         print("OK")
         """)
@@ -727,7 +736,7 @@ def test_importing_the_cuda_and_trainium_wan_orchestrators_pulls_no_neuron_modul
 
 def test_torch_compile_is_forwarded_to_the_wan_application():
     # The measured, opt-in compile option reaches CudaWanApplication as a kwarg.
-    kw = mod.WanCudaOrchestrator(_args(torch_compile=True)).pipeline_kwargs(load=True)
+    kw = _orch(_args(torch_compile=True)).pipeline_kwargs(load=True)
     assert kw["application_kwargs"] == {"torch_compile": True}
-    kw = mod.WanCudaOrchestrator(_args()).pipeline_kwargs(load=True)
+    kw = _orch(_args()).pipeline_kwargs(load=True)
     assert "application_kwargs" not in kw

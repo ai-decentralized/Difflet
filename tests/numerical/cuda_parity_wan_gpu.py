@@ -1,10 +1,8 @@
 """Wan 2.2 DiT parity on one GPU, per expert: diffusers fp32 → diffusers bf16 (control) →
-difflet bf16 through the CUDA ops, on identical seeded inputs (CUDA plan F1 task 4, D14; the
-rounding block is F1b task 2).
+difflet bf16 through the CUDA ops, on identical seeded inputs, plus a block at timesteps bf16
+cannot hold.
 
-GPU-ONLY: needs a CUDA device and a local Wan 2.2 T2V-A14B snapshot; the unit suite imports it,
-parses its arguments and runs ``measure_expert`` against fake models
-(tests/unit/scripts/test_cuda_parity_wan_script.py).
+GPU-ONLY: needs a CUDA device and a local Wan 2.2 T2V-A14B snapshot.
 
 Writes a JSON the gate reads (tests/numerical/test_cuda_wan_vs_diffusers.py), keyed by expert:
 
@@ -17,14 +15,14 @@ Same structure and metrics as the Flux script (cuda_parity_flux_gpu.py), once pe
 ``(1, 16, 3, 60, 104)`` (480x832, 9 frames), text ``(1, 512, 4096)``, one seed for both experts.
 Wan timesteps are in [0, 1000]; each expert runs two blocks on the same latents and text:
 
-* ``results.sdpa`` (F1's block) at 900 for ``transformer`` (above the 0.875 boundary, where the
+* ``results.sdpa`` (the main block) at 900 for ``transformer`` (above the 0.875 boundary, where the
   pipeline uses it) and 500 for ``transformer_2`` — both exact in bf16. Upstream gets the float
   in each model's dtype; difflet gets it in fp32, the production cast now.
 * ``rounding`` at 999 / 750, which bf16 holds as 1000 / 752 (999 is UniPC's first step).
   Upstream gets the **int64** timestep exactly as diffusers' ``WanPipeline`` passes it
   (``t.expand(B)``, ``t`` from UniPC's int64 schedule; its sinusoidal projection computes in fp32
   from any input dtype). Difflet runs twice: ``fp32_timestep`` (production, gated) and
-  ``bf16_timestep`` (Release 1's cast, recorded, not gated).
+  ``bf16_timestep`` (the model-dtype cast, recorded, not gated).
 
 Per expert the JSON holds ``{"timestep", "control", "results": {"sdpa": {..., "vs_bf16"}},
 "rounding": {"timestep", "control", "fp32_timestep": {..., "vs_bf16"},
@@ -35,8 +33,8 @@ is freed, then the bf16 control, then difflet bf16, each freed before the next l
 runs all of its forwards (both blocks), so the rounding block adds no load.
 ``--skip-fp32`` reuses an expert's saved reference (``--reference``, one file per expert; the
 rounding block's reference is its ``"rounding"`` key) when it holds both blocks at the current
-timesteps and shape — an F1-era file is recomputed. Re-running one expert merges into an
-existing JSON from the same snapshot and shape.
+timesteps and shape — an older file without the rounding block is recomputed. Re-running one
+expert merges into an existing JSON from the same snapshot and shape.
 """
 
 from __future__ import annotations
@@ -57,7 +55,8 @@ EXPERT_TIMESTEP = {"transformer": 900.0, "transformer_2": 500.0}
 # Timesteps bf16 cannot hold (999 -> 1000, 750 -> 752), one on each side of the boundary; ints,
 # as UniPC's schedule hands them to WanPipeline.
 ROUNDING_TIMESTEP = {"transformer": 999, "transformer_2": 750}
-# Difflet's two casts of the rounding timestep: production (gated) and Release 1's (recorded).
+# Difflet's two casts of the rounding timestep: production fp32 (gated) and the model-dtype cast
+# (recorded).
 DIFFLET_ROUNDING_DTYPES = {"fp32_timestep": torch.float32, "bf16_timestep": torch.bfloat16}
 LATENT_CHANNELS = 16
 VAE_SCALE_SPATIAL = 8
@@ -125,7 +124,8 @@ def pipeline_timestep(t: int, batch: int = 1) -> torch.Tensor:
 
 
 def upstream_timesteps(expert: str, dtype: torch.dtype) -> dict[str, torch.Tensor]:
-    """Upstream's inputs per block: the F1 float in the model dtype; the rounding int64."""
+    """Upstream's inputs per block: the main block's float in the model dtype; the rounding
+    block's int64."""
     return {
         "sdpa": torch.tensor([EXPERT_TIMESTEP[expert]], dtype=dtype),
         "rounding": pipeline_timestep(ROUNDING_TIMESTEP[expert]),
@@ -133,7 +133,7 @@ def upstream_timesteps(expert: str, dtype: torch.dtype) -> dict[str, torch.Tenso
 
 
 def difflet_timesteps(expert: str) -> dict[str, torch.Tensor]:
-    """Difflet's inputs: the F1 block in fp32 (production), the rounding block in both casts."""
+    """Difflet's inputs: the main block in fp32 (production), the rounding block in both casts."""
     rounding = torch.tensor([ROUNDING_TIMESTEP[expert]], dtype=torch.int64)
     return {
         "sdpa": torch.tensor([EXPERT_TIMESTEP[expert]], dtype=torch.float32),
@@ -142,7 +142,7 @@ def difflet_timesteps(expert: str) -> dict[str, torch.Tensor]:
 
 
 def reference_blob(expert: str, ref: dict, ref_bf16: dict) -> dict:
-    """The saved per-expert reference: F1's keys for the sdpa block, ``"rounding"`` for the
+    """The saved per-expert reference: the top-level keys for the sdpa block, ``"rounding"`` for the
     rounding block, each with its control (diffusers bf16 vs fp32)."""
     return {
         "timestep": EXPERT_TIMESTEP[expert],
@@ -247,7 +247,7 @@ def _upstream(edir: Path, dtype, device, hidden, text, timesteps: dict) -> dict:
 
 def _difflet(edir: Path, cfg, cache: Path, device, hidden, text, timesteps: dict) -> dict:
     """One load of difflet's bf16 expert, one forward per named timestep, each in its own
-    dtype (``difflet_timesteps``: fp32, or bf16 for Release 1's cast)."""
+    dtype (``difflet_timesteps``: fp32, or bf16 for the model-dtype cast)."""
     from difflet.backends.cuda.wan.transformer import CudaWanTransformerApplication
 
     mark = time.monotonic()

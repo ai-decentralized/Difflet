@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Unit suite. Prefers the Neuron venv at /opt when present; otherwise `python`
-# on PATH. Hosts without the Neuron SDK (laptops, the CUDA box, CI): set
+# on PATH. Hosts without the Neuron SDK (laptops, GPU hosts, CI): set
 # PYTHON_BIN=<repo>/.venv/bin/python and DIFFLET_BACKEND=cpu — auto-detect falls
 # back to trainium on a host with no accelerator. Tests that need the SDK skip
 # there with a reason (see tests/conftest.py).

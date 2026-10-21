@@ -1,8 +1,8 @@
-"""CUDA attention / platform / mx ops (CUDA plan Phase 2c–2d).
+"""CUDA attention / platform / mx ops.
 
 Runs on CPU tensors: SDPA has a CPU path, so the contract — scale=None means 1.0,
-masks, bounds, causal — is pinned here and the kernel choice is a Phase 0 fact on
-the box. Mirrors the attention block of test_tpu_layers.py.
+masks, bounds, causal — is pinned here; the kernel choice is only observable on a GPU.
+Mirrors the attention block of test_tpu_layers.py.
 """
 
 import pytest
@@ -168,7 +168,7 @@ def test_public_surface_matches_the_ops_contract():
 
 
 def test_heads_folded_inputs_reach_sdpa_as_four_dimensional(monkeypatch):
-    # Phase 0 on the box: SDPA picks the flash kernel for (B, H, S, D) but falls back to the
+    # On a GPU, SDPA picks the flash kernel for (B, H, S, D) but falls back to the
     # math path (materialised S×S scores) for the (B*H, S, D) layout difflet's model code
     # passes. The backend must present 4-D tensors to SDPA whatever the caller's layout.
     import torch.nn.functional as F

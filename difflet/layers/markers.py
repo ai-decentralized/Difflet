@@ -1,7 +1,7 @@
-"""Backend-resolved layer-boundary markers.
+"""Platform-resolved layer-boundary markers.
 
 On Trainium the markers are the Neuron custom-call wrappers that delimit layer
-boundaries for the compiler. On every other backend they are identity modules, so
+boundaries for the compiler. On every other platform they are identity modules, so
 model code can wrap layers unconditionally without importing the Neuron SDK.
 """
 
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from torch import nn
 
-from difflet.backends.registry import current_backend
+from difflet.platforms import current_platform, get_platform
 
 
 class _IdentityMarker(nn.Module):
@@ -20,15 +20,8 @@ class _IdentityMarker(nn.Module):
 
 
 def resolve_markers(backend: str) -> tuple[type, type]:
-    """Return the (start, end) marker classes for ``backend``."""
-    if backend == "trainium":
-        from difflet.backends.trainium.core.layer_boundary_marker import (
-            ModuleMarkerEndWrapper,
-            ModuleMarkerStartWrapper,
-        )
-
-        return ModuleMarkerStartWrapper, ModuleMarkerEndWrapper
-    return _IdentityMarker, _IdentityMarker
+    """Return the (start, end) marker classes for the ``backend`` platform."""
+    return get_platform(backend).layer_markers() or (_IdentityMarker, _IdentityMarker)
 
 
-ModuleMarkerStartWrapper, ModuleMarkerEndWrapper = resolve_markers(current_backend())
+ModuleMarkerStartWrapper, ModuleMarkerEndWrapper = resolve_markers(current_platform().name)

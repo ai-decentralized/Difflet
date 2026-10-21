@@ -1,7 +1,6 @@
-"""Release 1 smoke: one Qwen-Image picture on one GPU through DiffletPipeline + the CUDA backend.
+"""Smoke: one Qwen-Image picture on one GPU through DiffletPipeline + the CUDA backend.
 
-Task 9 of the PR 3 execution plan. Prints per-phase wall
-times and peak memory so the numbers go straight into the plan's status log.
+Prints per-phase wall times and peak memory.
 
     DIFFLET_BACKEND=cuda python scripts/cuda_smoke.py --prompt "..." --steps 4 --output /tmp/qwen.png
 """
@@ -31,8 +30,10 @@ def main() -> None:
     ap.add_argument("--output", default="/tmp/qwen.png")
     ap.add_argument("--compile-cache-dir", default=None)
     ap.add_argument("--local-files-only", action="store_true")
-    ap.add_argument("--torch-compile", action="store_true", help="F4 task 3: compiled DiT")
-    ap.add_argument("--teacache-cadence", type=int, default=None, help="F4 task 4: skip every Nth")
+    ap.add_argument("--torch-compile", action="store_true", help="compile the DiT blocks")
+    ap.add_argument(
+        "--teacache-cadence", type=int, default=None, help="TeaCache: skip every Nth step"
+    )
     args = ap.parse_args()
 
     os.environ.setdefault("DIFFLET_BACKEND", "cuda")

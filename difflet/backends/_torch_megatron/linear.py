@@ -15,9 +15,9 @@ Sharding follows Megatron:
 The layers are pure torch; the only backend-specific thing they touch is the
 collectives module they call. ``build_parallel_layers(collectives)`` returns
 fresh classes closed over that module, so the TPU backend (XLA custom-op
-collectives) and the CUDA backend (identity at world size 1, NCCL later) share
-one implementation without sharing state. Lifted from the TPU backend by the
-CUDA backend plan; bodies unchanged.
+collectives) and the GPU backends (identity at world size 1, NCCL later) share
+one implementation without sharing state. The bodies are the TPU backend's,
+unchanged.
 
 **Weight loading:** parameters are allocated already-sharded, so a checkpoint
 loader must split host weights before ``load_state_dict``. Each layer declares

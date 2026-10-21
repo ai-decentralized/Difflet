@@ -1,11 +1,10 @@
-"""Qwen-Image DiT as a CUDA component (CUDA plan Phase 4).
+"""Qwen-Image DiT as a GPU component.
 
 The module is the backend-neutral ``_QwenImageTransformerTraceModule``, whose
-``difflet.ops`` calls bind to the CUDA backend at import time. It is built on the
+``difflet.ops`` calls bind to the selected backend at import time. It is built on the
 meta device, materialized in the requested dtype, and filled from the diffusers
-``transformer/`` safetensors through the shared checkpoint loader (tp=1 in
-Release 1: every rank's slice is the whole tensor). Mirrors
-``difflet/backends/tpu/qwen_image/transformer.py`` minus XLA.
+``transformer/`` safetensors through the shared checkpoint loader (at tp=1 every rank's
+slice is the whole tensor).
 """
 
 from __future__ import annotations
@@ -15,9 +14,8 @@ import os
 import torch
 
 from difflet.backends._torch_megatron.checkpoint import load_checkpoint_into
-from difflet.backends._torch_megatron.weights import materialize_meta_
-from difflet.backends.cuda.core.application_base import CudaApplicationBase
 from difflet.backends.cuda.ops_impl import parallel_mesh
+from difflet.backends.gpu.application import GpuComponent
 from difflet.models.qwen_image.dit_config import QwenImageDiTConfig
 from difflet.pipeline.parallel_mesh import MeshSpec
 
@@ -29,7 +27,16 @@ CHECKPOINT_PREFIX = "transformer."
 WARMUP_VALID_TEXT_TOKENS = 37
 
 
-class CudaQwenImageTransformerApplication(CudaApplicationBase):
+class CudaQwenImageTransformerApplication(GpuComponent):
+    # dynamic=True: one graph for every prompt length. dynamic=False specialised per trimmed
+    # prompt length and hit dynamo's recompile limit; dynamic=None's automatic-dynamic graph
+    # failed its own guard on the next length and compiled a third graph (torch 2.11 / 2.14,
+    # see test_compiled_blocks_do_not_recompile_per_prompt_length).
+    compile_dynamic = True
+    # dynamo's guard on a None block argument errors once ("'NoneType' object has no attribute
+    # 'size'") and forces a second compile; the second warm-up takes it at load.
+    warmup_passes_when_compiled = 2
+
     def __init__(
         self,
         *,
@@ -39,18 +46,13 @@ class CudaQwenImageTransformerApplication(CudaApplicationBase):
         torch_compile: bool = False,
     ):
         super().__init__(
-            config=MeshSpec(tp=int(config.tp_degree)), device=device, dtype=config.torch_dtype
+            config=MeshSpec(tp=int(config.tp_degree)),
+            device=device,
+            dtype=config.torch_dtype,
+            torch_compile=torch_compile,
         )
         self.model_path = model_path
         self.dit_config = config
-        # Eager is the premise; ``torch.compile`` is a measured, opt-in option.
-        # Each transformer block is compiled on its own (one graph reused 60x; the prompt
-        # trim's host sync stays outside the graph), so ``self.module`` is still the trace
-        # module and the parity scripts call it unchanged.
-        self.torch_compile = bool(torch_compile)
-
-    def _init_runtime(self) -> None:
-        parallel_mesh.init_parallel_mesh(self.config)
 
     def build_module(self) -> torch.nn.Module:
         from accelerate import init_empty_weights
@@ -58,7 +60,7 @@ class CudaQwenImageTransformerApplication(CudaApplicationBase):
         from difflet.models.qwen_image.modeling_qwen_image import _QwenImageTransformerTraceModule
 
         self._init_runtime()
-        # CUDA runs eagerly, so the prompt padding mask can reach the attention
+        # Eager GPU execution lets the prompt padding mask reach the attention
         # (Trainium/TPU keep dropping it: the mask path does not trace under XLA), and
         # the padding is sliced off before the DiT: same output, flash SDPA back.
         with init_empty_weights(include_buffers=False):
@@ -67,37 +69,21 @@ class CudaQwenImageTransformerApplication(CudaApplicationBase):
             )
         return module
 
-    def _prepare_module(self) -> torch.nn.Module:
-        if self.module is None:
-            module = self.build_module()
-            materialize_meta_(module, device=self.device, dtype=self.dit_config.torch_dtype)
-            spec = self._mesh()
-            load_checkpoint_into(
-                module,
-                self.model_path,
-                tp_size=spec.tp,
-                tp_rank=parallel_mesh.get_tp_rank(),
-                prefix=CHECKPOINT_PREFIX,
-                dtype=self.dit_config.torch_dtype,
-                strict=True,
-            )
-            module.to(self.device)
-            module.requires_grad_(False)
-            module.eval()
-            self._assert_on_device(module)
-            if self.torch_compile:
-                blocks = module.transformer.transformer_blocks
-                for i, block in enumerate(blocks):
-                    # dynamic=True: one graph for every prompt length. dynamic=False (review
-                    # finding) specialised per trimmed prompt length and hit dynamo's recompile
-                    # limit; dynamic=None's automatic-dynamic graph failed its own guard on the
-                    # next length and compiled a third graph (torch 2.11 / 2.14, see
-                    # test_compiled_blocks_do_not_recompile_per_prompt_length).
-                    blocks[i] = torch.compile(
-                        block, mode="max-autotune-no-cudagraphs", dynamic=True, fullgraph=False
-                    )
-            self.module = module
-        return self.module
+    def load_weights(self, module: torch.nn.Module) -> None:
+        load_checkpoint_into(
+            module,
+            self.model_path,
+            tp_size=self._mesh().tp,
+            tp_rank=parallel_mesh.get_tp_rank(),
+            prefix=CHECKPOINT_PREFIX,
+            dtype=self.dit_config.torch_dtype,
+            strict=True,
+        )
+
+    def repeated_blocks(self, module: torch.nn.Module) -> list[torch.nn.ModuleList]:
+        # Each block is compiled on its own: one graph reused 60x, and the prompt trim's host
+        # sync stays outside the graph, so ``self.module`` is still the trace module.
+        return [module.transformer.transformer_blocks]
 
     def get_example_inputs(self) -> tuple:
         cfg = self.dit_config
@@ -112,14 +98,6 @@ class CudaQwenImageTransformerApplication(CudaApplicationBase):
             mask,
             None,
         )
-
-    def warmup(self) -> None:
-        super().warmup()
-        if self.torch_compile:
-            # dynamo's guard on a None block argument errors once ("'NoneType' object has
-            # no attribute 'size'") and forces a second compile; take it here, at load,
-            # instead of inside the user's first generate.
-            super().warmup()
 
     def forward(
         self,

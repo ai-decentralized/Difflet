@@ -1,4 +1,4 @@
-"""main() picks the CUDA orchestrator by backend name and routes DP/batch on CUDA."""
+"""main() picks the GPU orchestrator on a GPU platform and routes DP/batch there."""
 
 from __future__ import annotations
 
@@ -16,10 +16,10 @@ def _cli():
     return importlib.import_module("difflet.cli.main")
 
 
-def test_cuda_backend_routes_qwen_to_the_cuda_orchestrator(monkeypatch):
+def test_cuda_backend_routes_qwen_to_the_gpu_orchestrator(monkeypatch):
     monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
     orch = _cli()._get_orchestrator(argparse.Namespace(model_id="Qwen/Qwen-Image"))
-    assert type(orch).__name__ == "CudaQwenImageOrchestrator"
+    assert type(orch).__name__ == "GpuOrchestrator" and orch.spec.model_type == "qwen_image"
 
 
 def test_cpu_and_trainium_keep_the_staged_orchestrator(monkeypatch):
@@ -31,19 +31,21 @@ def test_cpu_and_trainium_keep_the_staged_orchestrator(monkeypatch):
 @pytest.mark.parametrize(
     "model_id", ["black-forest-labs/FLUX.1-dev", "black-forest-labs/FLUX.1-schnell"]
 )
-def test_cuda_backend_routes_flux_to_the_flux_orchestrator(monkeypatch, model_id):
+def test_cuda_backend_routes_flux_to_the_gpu_orchestrator(monkeypatch, model_id):
     monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
     orch = _cli()._get_orchestrator(argparse.Namespace(model_id=model_id))
-    assert type(orch).__name__ == "FluxCudaOrchestrator"
+    assert type(orch).__name__ == "GpuOrchestrator" and orch.spec.model_type == "flux"
+    assert orch.model_id == model_id
 
 
 @pytest.mark.parametrize(
     "model_id", ["Wan-AI/Wan2.2-T2V-A14B-Diffusers", "Wan-AI/Wan2.1-T2V-14B-Diffusers"]
 )
-def test_cuda_backend_routes_wan_to_the_wan_orchestrator(monkeypatch, model_id):
+def test_cuda_backend_routes_wan_to_the_gpu_orchestrator(monkeypatch, model_id):
     monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
     orch = _cli()._get_orchestrator(argparse.Namespace(model_id=model_id))
-    assert type(orch).__name__ == "WanCudaOrchestrator" and orch.model_id == model_id
+    assert type(orch).__name__ == "GpuOrchestrator" and orch.spec.model_type == "wan"
+    assert orch.model_id == model_id
 
 
 def test_other_models_on_cuda_point_at_the_trainium_path(monkeypatch):
@@ -54,13 +56,13 @@ def test_other_models_on_cuda_point_at_the_trainium_path(monkeypatch):
     assert (
         "DIFFLET_BACKEND=trainium" in message and "hunyuanvideo-community/HunyuanVideo" in message
     )
-    # F1 (Wan) has landed: the fallback no longer names it.
+    # Wan runs on the GPU flow: the fallback does not name it.
     assert "Wan" not in message
 
 
 def test_requests_and_dp_dispatch_to_the_router_on_cuda(monkeypatch, tmp_path):
-    # The Release 1 refusal is gone; batch and dp>1 go through the dp router
-    # (download + compile once in the parent, then one single-GPU worker per replica).
+    # Batch and dp>1 go through the dp router (download + compile once in the parent, then
+    # one single-GPU worker per replica).
     import torch
 
     monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
@@ -132,7 +134,7 @@ def test_dp_beyond_the_gpu_count_is_refused_before_any_work(monkeypatch, capsys)
 
 
 def test_cli_and_serving_import_without_neuron():
-    # F3's import clause: no module-level Neuron import on the CLI/serving path.
+    # No module-level Neuron import on the CLI/serving path.
     code = textwrap.dedent("""
         import importlib.abc, sys
         BLOCKED = {"neuronx_distributed", "torch_neuronx", "neuronxcc", "nki", "torch_xla", "libneuronxla"}
@@ -142,8 +144,8 @@ def test_cli_and_serving_import_without_neuron():
                     raise ImportError("blocked: " + name)
         sys.meta_path.insert(0, Block())
         for m in ("difflet.cli.main", "difflet.cli.orchestrators.qwen_image",
-                  "difflet.cli.orchestrators.qwen_image_cuda", "difflet.cli.orchestrators.flux_cuda",
-                  "difflet.cli.orchestrators.wan_cuda", "difflet.cli.orchestrators.wan",
+                  "difflet.backends.gpu.cli", "difflet.backends.gpu.serving",
+                  "difflet.cli.orchestrators.wan",
                   "difflet.cli.runner",
                   "difflet.cli.stage", "difflet.serving.orchestrators.qwen_image",
                   "difflet.serving.models._common"):
@@ -159,8 +161,8 @@ def test_cli_and_serving_import_without_neuron():
     assert proc.returncode == 0 and "OK" in proc.stdout, proc.stderr[-2000:]
 
 
-def test_torch_compile_is_refused_off_cuda(monkeypatch):
+def test_torch_compile_is_refused_off_gpu(monkeypatch):
     monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
     with pytest.raises(SystemExit) as exc:
         _cli()._get_orchestrator(argparse.Namespace(model_id="Qwen/Qwen-Image", torch_compile=True))
-    assert "CUDA" in str(exc.value)
+    assert "GPU-backend option" in str(exc.value) and "cpu" in str(exc.value)

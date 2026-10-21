@@ -2,7 +2,7 @@
 
 ``scripts/verify_cli.py`` sizes every cell to the four NeuronCores of a trn2.3xlarge. On one
 GPU the matrix has three cells — Qwen-Image, FLUX.1-dev and Wan 2.2 T2V-A14B
-at ``tp=1`` — grown by F2 (a second card). Per cell: ``difflet download`` →
+at ``tp=1``. Per cell: ``difflet download`` →
 ``difflet compile`` → TIMED ``difflet generate``, each a subprocess with
 ``DIFFLET_BACKEND=cuda``, logs and ``results.json`` under a fresh run dir. GPU-only (the
 unit tests stub the subprocesses).

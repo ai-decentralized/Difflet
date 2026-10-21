@@ -14,7 +14,7 @@ JSON the gate reads (tests/numerical/test_cuda_wan_e2e_vs_diffusers.py):
 
 **Timestep-dtype A/B.** ``--timestep-dtypes`` lists ``CudaWanApplication``'s
 ``timestep_dtype`` values to run (``float32``: production, UniPC's exact integer timestep;
-``model``: Release 1's bf16 cast, 999 → 1000), passed through ``DiffletPipeline``'s
+``model``: the model-dtype bf16 cast, 999 → 1000), passed through ``DiffletPipeline``'s
 ``application_kwargs``. Difflet is loaded, run and freed once per variant, in order; the first
 load draws the noise, which every later variant and the single diffusers run reuse. The JSON
 holds ``variants.<name>.{metrics, timings, image}`` (one first-frame PNG per variant); the
@@ -26,7 +26,7 @@ alone is ``--seeds N``) keeps one load per side: each Difflet variant is loaded 
 generates every seed, and diffusers is loaded once. The first variant draws each seed's noise
 (``torch.Generator().manual_seed(seed)``, as before); every later variant and diffusers reuse it.
 ``--noise-floor`` adds, per seed, a second diffusers run with both experts' ``forward`` wrapped so
-the ``timestep`` (UniPC's int64 ``t.expand(B)``) is rounded through bf16 — Release 1's cast,
+the ``timestep`` (UniPC's int64 ``t.expand(B)``) is rounded through bf16 — the model-dtype cast,
 999 → 1000, 750 → 752 — and every other argument passes untouched; the wrapper is removed before
 the next seed's exact run. Exact vs perturbed is diffusers' distance from itself under that cast:
 the scale the gate states the Difflet-vs-diffusers numbers against when it is recorded (the
@@ -36,8 +36,8 @@ otherwise. The JSON adds ``seeds``,
 ``per_seed.<seed>.{variants.<name>.{metrics, timings}, noise_floor: {metrics, timings} | null,
 diffusers.timings, images}`` and ``aggregate.{variants.<name>, noise_floor}.{psnr_db, cosine}.
 {min, mean, max}``; ``seed``, ``metrics``, ``variants``, ``timings``, ``images`` and
-``noise_floor`` stay the first seed's (pre-F9 readers and the gate's fallbacks), and the first
-seed's PNGs are also written under the pre-F9 names.
+``noise_floor`` stay the first seed's (single-seed readers and the gate's fallbacks), and the
+first seed's PNGs are also written under the single-seed names.
 
 The noise is ``WanOrchestrator.prepare_latents`` on the host from a seeded generator, shape
 ``(1, 16, latent_frames, H/8, W/8)``, fp32. ``WanPipeline.prepare_latents`` returns a given
@@ -72,7 +72,7 @@ from cuda_e2e_vs_diffusers import (  # noqa: E402
 )
 
 MAX_SEQUENCE_LENGTH = 512
-# CudaWanApplication's timestep_dtype values (difflet/models/wan/cuda_application.py).
+# CudaWanApplication's timestep_dtype values (difflet/backends/cuda/wan/application.py).
 TIMESTEP_DTYPES = ("float32", "model")
 
 
@@ -112,7 +112,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--noise-floor",
         action="store_true",
         help="per seed, a second diffusers run with both experts' timestep rounded through bf16 "
-        "(Release 1's cast), compared against the exact run: diffusers' distance from itself, "
+        "(the model-dtype cast), compared against the exact run: diffusers' distance from itself, "
         "recorded next to the Difflet numbers, not gated",
     )
     ap.add_argument("--height", type=int, default=480)
@@ -126,7 +126,7 @@ def build_parser() -> argparse.ArgumentParser:
         type=parse_timestep_dtypes,
         default=["float32"],
         help="comma-separated CudaWanApplication timestep_dtype values, one Difflet run each "
-        "against one diffusers run (float32 = production, model = Release 1's bf16 cast); the "
+        "against one diffusers run (float32 = production, model = the bf16 model-dtype cast); the "
         "first is the gated one (default: float32)",
     )
     ap.add_argument(
@@ -138,14 +138,14 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def variant_png(images_dir: Path, name: str, seed: int | None = None) -> Path:
-    """The first-frame PNG of one Difflet variant (``seed`` None: the pre-F9 name)."""
+    """The first-frame PNG of one Difflet variant (``seed`` None: the single-seed name)."""
     tag = "" if seed is None else f"_seed{seed}"
     return Path(images_dir) / f"wan_e2e_difflet_{name}{tag}_frame0.png"
 
 
 def diffusers_png(images_dir: Path, seed: int | None = None, *, bf16ts: bool = False) -> Path:
     """The first-frame PNG of diffusers' exact run, or (``bf16ts``) its bf16-rounded-timestep
-    run; ``seed`` None: the pre-F9 name of the exact run."""
+    run; ``seed`` None: the single-seed name of the exact run."""
     if seed is None:
         assert not bf16ts, "the bf16-rounded run has per-seed names only"
         return Path(images_dir) / "wan_e2e_diffusers_frame0.png"
@@ -154,8 +154,8 @@ def diffusers_png(images_dir: Path, seed: int | None = None, *, bf16ts: bool = F
 
 
 def bf16_rounded_timestep(t: torch.Tensor) -> torch.Tensor:
-    """``t`` rounded through bf16, as a float32 tensor (999 → 1000, 750 → 752): what Release 1's
-    ``model`` cast fed the experts. Through float32 first, so an int64 schedule rounds once;
+    """``t`` rounded through bf16, as a float32 tensor (999 → 1000, 750 → 752): what the
+    ``model`` cast feeds the experts. Through float32 first, so an int64 schedule rounds once;
     the result stays float, which ``WanTransformer3DModel``'s sinusoidal embedding takes as is
     (``timesteps[:, None].float()``)."""
     return t.to(torch.float32).to(torch.bfloat16).to(torch.float32)
@@ -474,7 +474,7 @@ def main(argv: list[str] | None = None) -> None:
         "device": _device_name(),
         "torch": torch.__version__,
         "timestep_dtypes": list(args.timestep_dtypes),
-        # The pre-F9 keys: the first seed's, the first variant's on top.
+        # The single-seed keys: the first seed's, the first variant's on top.
         "metrics": first["metrics"],
         "timings": {"difflet": first["timings"], "diffusers": exact_t[first_seed]},
         "images": {"difflet": first["image"], "diffusers": str(diffusers_png(images))},

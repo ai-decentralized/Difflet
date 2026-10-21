@@ -1,6 +1,6 @@
 """The Neuron gate (tests/_neuron_gate.py, wired in tests/conftest.py).
 
-Plan Review Focus 2 and 3: the gate must never fire when the SDK is present, and it
+The gate must never fire when the SDK is present, and it
 must only convert the three exact Neuron-less signatures, never a look-alike.
 """
 

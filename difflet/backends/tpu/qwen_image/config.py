@@ -13,8 +13,8 @@ refactor of the NxD config on hardware we cannot run here.
 Phase 4 of docs/plans/2026-08-16-tpu-backend-support.md.
 """
 
-# The dataclass moved to difflet.models.qwen_image.dit_config (CUDA plan PR 3,
-# Task 6) so the CUDA backend can share it; this name stays for the TPU path.
+# The dataclass lives in difflet.models.qwen_image.dit_config so the GPU backends can share
+# it; this name stays for the TPU path.
 from difflet.models.qwen_image.dit_config import QwenImageDiTConfig  # noqa: F401
 
 TpuQwenImageConfig = QwenImageDiTConfig

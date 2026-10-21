@@ -1,19 +1,6 @@
-"""CPU backend runtime used by numerical-alignment scripts."""
+"""The cpu runtime: the platform in ``difflet.platforms.cpu`` under its historical names."""
 
-from difflet.backends.base import BackendCapabilities, BackendRuntime
+from difflet.platforms.cpu import CpuPlatform as CpuBackend
+from difflet.platforms.cpu import create_platform as create_backend
 
-
-class CpuBackend(BackendRuntime):
-    name = "cpu"
-    capabilities = BackendCapabilities(
-        requires_aot=False,
-        single_process_multi_core=False,
-        supports_torchrun_mpmd=False,
-    )
-
-    def prepare_runtime(self, parallel) -> None:
-        return None
-
-
-def create_backend() -> CpuBackend:
-    return CpuBackend()
+__all__ = ["CpuBackend", "create_backend"]

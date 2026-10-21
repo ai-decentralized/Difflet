@@ -5,14 +5,14 @@ reference test environment, so tests use the real library. Tests that need to
 avoid the heavy Neuron runtime (``torch_xla`` / ``neuronx_distributed``) should
 mock only those modules locally rather than replacing ``torch`` globally.
 
-On a host **without** the Neuron SDK (a laptop, the CUDA box, CI) the Neuron gate
+On a host **without** the Neuron SDK (a laptop, a GPU host, CI) the Neuron gate
 in ``tests/_neuron_gate.py`` applies: test modules that cannot even import without
 the SDK are not collected (an explicit, reviewed list), and a test that fails with
 one of the three exact Neuron-less signatures is reported as skipped with the reason
 ``needs Neuron SDK: ...``. When the SDK is present the gate does nothing, so a
 Trainium host sees every failure. Nothing is hidden on either kind of host: the
 skip count and reasons are in the summary (``-rs``), and the gate prints its state
-in the header. Introduced by the CUDA backend plan (Phase 1, task 1.10).
+in the header.
 """
 
 from __future__ import annotations

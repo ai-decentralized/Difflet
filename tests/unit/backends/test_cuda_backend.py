@@ -1,7 +1,7 @@
-"""Unit tests for the CUDA backend scaffolding (CUDA plan Phase 1, task 1.3).
+"""Unit tests for the CUDA backend runtime.
 
 Runs on a host without CUDA: the device calls are monkeypatched. The real
-``prepare_runtime`` on a GPU is exercised by ``scripts/cuda_smoke.sh`` in Phase 4.
+``prepare_runtime`` on a GPU is exercised by ``scripts/cuda_smoke.sh``.
 """
 
 import pytest
@@ -125,7 +125,7 @@ def test_auto_detect_cuda_when_device_available(monkeypatch):
 
 
 def test_auto_detect_falls_back_to_trainium_without_accelerator(monkeypatch):
-    # Pinned on purpose (plan Review Focus 1): a CPU-only host must set
+    # Pinned on purpose: a CPU-only host must set
     # DIFFLET_BACKEND=cpu explicitly; silently defaulting to cpu would be a decision.
     monkeypatch.setattr(registry.importlib.util, "find_spec", lambda n: None)
     monkeypatch.setattr(torch.cuda, "is_available", lambda: False)

@@ -1,8 +1,8 @@
-"""CUDA parallel mesh + collectives (CUDA plan Phase 2a, D5; follow-up F2).
+"""CUDA parallel mesh + collectives.
 
 Mirrors tests/unit/backends/test_tpu_collectives.py. At world size 1 every collective
 is the identity and no ``torch.distributed`` group exists. At world size > 1 the mesh
-builds ``torch.distributed`` groups for the cfg/cp/dp axes (F2; exercised here with a
+builds ``torch.distributed`` groups for the cfg/cp/dp axes (exercised here with a
 fake ``torch.distributed`` and for real under gloo in test_cuda_multirank.py), and
 tensor parallel still raises.
 """

@@ -10,8 +10,6 @@ sub-range off disk, so each rank pays roughly ``38 GiB / tp`` instead of the
 whole file. The split axis still comes from the layer's own ``_difflet_shard``
 declaration on the owning module, exactly as in ``weights.py`` — one source of
 truth for how a parameter is partitioned.
-
-Phase 4 of docs/plans/2026-08-16-tpu-backend-support.md.
 """
 
 from __future__ import annotations

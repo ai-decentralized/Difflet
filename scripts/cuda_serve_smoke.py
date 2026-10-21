@@ -390,7 +390,7 @@ def main(argv: list[str] | None = None) -> int:
             timings["requests"].append(
                 {
                     "request_s": round(request_s, 1),
-                    # "image" as F3b / F2b recorded it; "video" for a clip.
+                    # "image" for a picture, "video" for a clip.
                     args.kind: str(path),
                     "bytes": len(data),
                     "identical_to_reference": same,

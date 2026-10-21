@@ -3,7 +3,7 @@
 Contract (shared with the CPU oracle and the TPU backend, ``difflet/ops/attention.py``):
 
 * ``scale=None`` means **1.0**, not SDPA's default ``1/sqrt(head_dim)`` — passing
-  None through would silently rescale every score (plan Review Focus 2).
+  None through would silently rescale every score.
 * ``attention_mask`` is bool (True = attend) or additive; ``bound_min``/``bound_max``
   (both or neither, exclusive with a mask) select a per-query key window, the
   ``attention_cte`` contract from Trainium.
@@ -14,8 +14,7 @@ Contract (shared with the CPU oracle and the TPU backend, ``difflet/ops/attentio
 * Inputs may be ``(B, H, S, D)`` or ``(B*H, S, D)``; SDPA accepts either batch shape.
 
 Kernel selection (flash / cuDNN / efficient / math) is torch's; ``platform.
-sdpa_kernel_report`` says which one a shape gets, recorded in Phase 0. No
-``flash-attn`` dependency. The context-parallel modes raise (not supported yet).
+sdpa_kernel_report`` says which one a shape gets. No ``flash-attn`` dependency. The context-parallel modes raise (not supported yet).
 """
 
 from __future__ import annotations
@@ -61,8 +60,8 @@ def attention(
 
     # SDPA's fused kernels (flash / cuDNN / efficient) require 4-D (B, H, S, D); a 3-D
     # (B*H, S, D) call silently takes the math path, which materialises the S×S score
-    # matrix per head (measured in Phase 0 on the Pro 6000: "flash" vs "math" for the
-    # same tokens). Model code folds heads into the batch axis, so lift it here.
+    # matrix per head (``sdpa_kernel_report`` shows "flash" vs "math" for the same tokens).
+    # Model code folds heads into the batch axis, so lift it here.
     folded = q.dim() == 3
     if folded:
         q, k, v = q.unsqueeze(0), k.unsqueeze(0), v.unsqueeze(0)

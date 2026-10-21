@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# FLUX.1-dev on one GPU through `difflet run` on the CUDA backend (plan F5). GPU-only.
+# FLUX.1-dev on one GPU through `difflet run` on the CUDA backend. GPU-only.
 # Logs to /tmp/logs/cuda-smoke-flux-<ts>.log. Load / generate timings come from the CLI's
 # own "[difflet] loaded in" / "wrote ... in" lines.
 #   scripts/cuda_smoke_flux.sh --prompt "a cat" --output /tmp/flux.png [--steps 28 --seed 0 --guidance-scale 3.5]

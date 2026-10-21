@@ -1,6 +1,6 @@
 """The Wan CUDA gates (tests/numerical/test_cuda_wan_*vs_diffusers.py) on fabricated results.
 
-The gates read a JSON the GPU scripts write on the pod; here they run in a pytest subprocess
+The gates read a JSON the GPU scripts write on a GPU host; here they run in a pytest subprocess
 against hand-made JSONs, so their thresholds, per-expert parametrisation and recorded-key
 checks are exercised on the CPU host.
 """
@@ -225,7 +225,7 @@ def test_parity_gate_holds_the_rounding_block_to_the_cosine_floor(tmp_path):
 
 def test_the_bf16_timestep_is_recorded_not_gated(tmp_path):
     payload = _parity_payload(
-        # Release 1's bf16 cast at 3x the control: printed, never a failure.
+        # The model-dtype bf16 cast at 3x the control: printed, never a failure.
         transformer=_expert(
             900.0,
             rel_l1=0.011,
@@ -242,7 +242,7 @@ def test_the_bf16_timestep_is_recorded_not_gated(tmp_path):
 
 
 def test_parity_gate_without_a_rounding_block_fails(tmp_path):
-    # An F1-era JSON: the oracle did not run the rounding block, so it proves nothing about it.
+    # An older JSON: the oracle did not run the rounding block, so it proves nothing about it.
     payload = _parity_payload(
         transformer=_expert(900.0, rel_l1=0.011, vs_bf16_rel_l1=0.011, rounding=None),
         transformer_2=_expert(500.0, rel_l1=0.011, vs_bf16_rel_l1=0.011, rounding=None),
@@ -364,7 +364,7 @@ def test_e2e_gate_needs_the_first_dtype_among_the_variants(tmp_path):
 
 
 def test_e2e_gate_judges_the_first_variant_only(tmp_path):
-    # The "model" variant (Release 1's bf16 cast) under the floors is recorded, not gated.
+    # The "model" variant (the model-dtype bf16 cast) under the floors is recorded, not gated.
     out, _ = _e2e(_e2e_payload(30.0, 0.998, model_variant=(20.0, 0.9)), tmp_path)
     _passes_without_a_noise_floor(out)
 
@@ -443,9 +443,9 @@ SEEDS_OK = {0: (26.3, 0.995), 1: (27.0, 0.996), 2: (25.5, 0.993)}
 # A floor SEEDS_OK clears relatively: mean 26.27 >= 26.00 - 1.21 dB, every seed >= 25.00 - 1.21;
 # cosine deviation mean 0.00533 <= 1.3225 x 0.00533, every seed 0.007 <= 1.3225 x 0.007.
 FLOOR = {0: (27.0, 0.996), 1: (26.0, 0.995), 2: (25.0, 0.993)}
-# The F9 measurement (the F9 noise-floor run, inlined at the end of this file), two decimals.
-F9_DIFFLET = {0: (26.30, 0.99609), 1: (26.39, 0.99541), 2: (28.89, 0.99775)}
-F9_FLOOR = {0: (28.62, 0.99770), 1: (26.74, 0.99575), 2: (23.79, 0.99255)}
+# The measured noise-floor run (inlined at the end of this file), two decimals.
+MEASURED_DIFFLET = {0: (26.30, 0.99609), 1: (26.39, 0.99541), 2: (28.89, 0.99775)}
+MEASURED_FLOOR = {0: (28.62, 0.99770), 1: (26.74, 0.99575), 2: (23.79, 0.99255)}
 
 
 def test_e2e_gate_passes_when_every_seed_clears_the_floors_and_prints_the_noise_floor(tmp_path):
@@ -499,8 +499,8 @@ def test_e2e_seeds_without_the_noise_floor_pass_and_say_so(tmp_path):
 # --- the relative gate -------------------------------------------------------------------
 
 
-def test_e2e_relative_gate_passes_the_f9_measurement_and_prints_its_thresholds(tmp_path):
-    out, stdout = _e2e(_seeded_payload(F9_DIFFLET, floor=F9_FLOOR), tmp_path)
+def test_e2e_relative_gate_passes_the_measured_run_and_prints_its_thresholds(tmp_path):
+    out, stdout = _e2e(_seeded_payload(MEASURED_DIFFLET, floor=MEASURED_FLOOR), tmp_path)
     assert set(out.values()) == {"PASSED"}, out
     # Gate A: the mean over seeds, 1.21 dB (a 1.15x RMSE ratio) under the floor's mean.
     assert (
@@ -525,8 +525,8 @@ def test_e2e_relative_gate_fails_when_the_mean_is_more_than_1_15x_from_diffusers
 ):
     # Every seed at 25.0 dB clears the old absolute floor, but the mean is 0.17 dB short of
     # the floor's mean minus the margin (26.38 - 1.21 = 25.17).
-    difflet = {seed: (25.0, 0.996) for seed in F9_FLOOR}
-    out, stdout = _e2e(_seeded_payload(difflet, floor=F9_FLOOR), tmp_path)
+    difflet = {seed: (25.0, 0.996) for seed in MEASURED_FLOOR}
+    out, stdout = _e2e(_seeded_payload(difflet, floor=MEASURED_FLOOR), tmp_path)
     assert out[RELATIVE] == "FAILED"
     assert "mean PSNR 25.00 dB below 25.17 (noise floor mean 26.38 dB - 1.21 dB)" in stdout
     assert "dB below 22.58" not in stdout, stdout  # every seed clears gate B
@@ -538,7 +538,7 @@ def test_e2e_relative_gate_fails_when_one_seed_is_below_the_floor_s_worst_seed_m
 ):
     # Mean 26.83 dB clears gate A; seed 2 at 22.50 dB is under 23.79 - 1.21 = 22.58.
     difflet = {0: (29.0, 0.996), 1: (29.0, 0.996), 2: (22.5, 0.996)}
-    out, stdout = _e2e(_seeded_payload(difflet, floor=F9_FLOOR), tmp_path)
+    out, stdout = _e2e(_seeded_payload(difflet, floor=MEASURED_FLOOR), tmp_path)
     assert out[RELATIVE] == "FAILED"
     assert "seed 2: PSNR 22.50 dB below 22.58 (noise floor min 23.79 dB - 1.21 dB)" in stdout
     assert "seed 0: PSNR" not in stdout and "seed 1: PSNR" not in stdout, stdout
@@ -666,23 +666,23 @@ def test_e2e_legacy_single_seed_json_is_gated_as_before(tmp_path):
 
 
 def test_measured_e2e_results_keep_their_verdicts(tmp_path):
-    # F1b (variants, one seed) passes every test; F1 (no variants) fails only the variants
-    # test, by design (it predates F1b task 2).
-    f1b = json.loads((_MEASURED / "wan/f1b/cuda_e2e_wan.json").read_text())
-    out, _ = _e2e(f1b, tmp_path)
+    # A one-seed result with timestep-dtype variants passes every test; an older one without
+    # variants fails only the variants test, by design.
+    variants = json.loads((_MEASURED / "wan/variants/cuda_e2e_wan.json").read_text())
+    out, _ = _e2e(variants, tmp_path)
     _passes_without_a_noise_floor(out)
-    # The wan gate run's one-seed e2e (no floor) and the three-seed noise-floor run, which
-    # the relative gate judges with the headroom the status log states.
-    gates = json.loads((_MEASURED / "f9/gates-wan/cuda_e2e_wan.json").read_text())
+    # A one-seed e2e (no floor) and the three-seed noise-floor run, which the relative gate
+    # judges with the recorded headroom.
+    gates = json.loads((_MEASURED / "seeds/gates-wan/cuda_e2e_wan.json").read_text())
     out, _ = _e2e(gates, tmp_path)
     _passes_without_a_noise_floor(out)
-    noise = json.loads((_MEASURED / "f9/cuda_e2e_wan_noise.json").read_text())
+    noise = json.loads((_MEASURED / "seeds/cuda_e2e_wan_noise.json").read_text())
     out, stdout = _e2e(noise, tmp_path)
     assert set(out.values()) == {"PASSED"}, out
     assert "relative gate A (mean over 3 seeds): PSNR 27.20 dB, required >= 25.17 dB" in stdout
     assert "relative gate B (every seed): PSNR >= 22.58 dB" in stdout, stdout
-    f1 = json.loads((_MEASURED / "wan/cuda_e2e_wan.json").read_text())
-    out, _ = _e2e(f1, tmp_path)
+    older = json.loads((_MEASURED / "wan/cuda_e2e_wan.json").read_text())
+    out, _ = _e2e(older, tmp_path)
     failed = {name for name, status in out.items() if status == "FAILED"}
     assert failed == {"test_every_timestep_dtype_variant_is_recorded"}, out
     assert out[RELATIVE] == "SKIPPED", out
@@ -699,7 +699,7 @@ def _without(payload: dict, *keys: str) -> dict:
 
 
 def _float32_only(payload: dict) -> dict:
-    """A run recorded with ``--timestep-dtypes float32`` only (the F9 noise-floor run)."""
+    """A run recorded with ``--timestep-dtypes float32`` only (the noise-floor run)."""
     payload = {**payload, "timestep_dtypes": ["float32"]}
     payload["variants"] = {"float32": payload["variants"]["float32"]}
     payload["per_seed"] = {
@@ -712,7 +712,7 @@ def _float32_only(payload: dict) -> dict:
 def _measured_results() -> dict[str, dict]:
     return {
         # 3 seed(s), with the noise floor
-        "f9/cuda_e2e_wan_noise.json": _float32_only(
+        "seeds/cuda_e2e_wan_noise.json": _float32_only(
             _seeded_payload(
                 {
                     0: (26.303416187998177, 0.9960905087952788),
@@ -727,7 +727,7 @@ def _measured_results() -> dict[str, dict]:
             )
         ),
         # 1 seed(s)
-        "f9/gates-wan/cuda_e2e_wan.json": _seeded_payload(
+        "seeds/gates-wan/cuda_e2e_wan.json": _seeded_payload(
             {0: (26.303416187998177, 0.9960905087952788)},
             model_variant=(27.541036709948607, 0.9970406648545574),
         ),
@@ -736,7 +736,7 @@ def _measured_results() -> dict[str, dict]:
             _e2e_payload(27.541036709948607, 0.9970406648545576), "variants", "timestep_dtypes"
         ),
         # one seed, both timestep dtypes
-        "wan/f1b/cuda_e2e_wan.json": _e2e_payload(
+        "wan/variants/cuda_e2e_wan.json": _e2e_payload(
             26.303416187998177,
             0.9960905087952789,
             model_variant=(27.541036709948607, 0.9970406648545576),

@@ -1,6 +1,6 @@
 """One FLUX.1-dev DiT forward, Difflet vs diffusers, on identical inputs, one GPU.
 
-The F4b recipe (``scripts/cuda_bench_wan_dit.py``) for Flux: warm-up untimed, a clean timed run
+The recipe of ``scripts/cuda_bench_wan_dit.py``, for Flux: warm-up untimed, a clean timed run
 (median of N forwards with CUDA events, profiler off) and one profiled forward
 (``torch.profiler``, kernels bucketed by ``difflet.backends.cuda.bench``). Cases:
 

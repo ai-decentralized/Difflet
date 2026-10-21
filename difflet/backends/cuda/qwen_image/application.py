@@ -1,26 +1,21 @@
-"""Qwen-Image on the CUDA backend: DiT through ``difflet.ops``, encoder and VAE on the
-same device, one process.
+"""Qwen-Image on the GPU flow: the DiT through ``difflet.ops``, the Qwen2.5-VL text encoder and
+the ``AutoencoderKLQwenImage`` VAE on the same device, denoising and decoding through the
+backend-neutral ``QwenImageOrchestrator``.
 
-Mirrors ``TpuQwenImageApplication``'s outward contract — the shape ``DiffletPipeline``
-calls reflectively — and adds the two things TPU kept host-side: the Qwen2.5-VL text
-encoder and the ``AutoencoderKLQwenImage`` VAE, both diffusers/transformers modules
-placed on the GPU at ``load()``. Denoising and decoding go through the existing
-``QwenImageOrchestrator``; only the DiT is Difflet code, which is the part under test.
-
-``__call__`` accepts, like the TPU application, a ``QwenImageDiTInputBundle`` or the
-five DiT tensors as keywords (parity scripts), and additionally ``prompt=`` for the
-whole text-to-image path.
+``__call__`` accepts a ``QwenImageDiTInputBundle`` or the five DiT tensors as keywords (parity
+scripts), and ``prompt=`` for the whole text-to-image path.
 """
 
 from __future__ import annotations
 
-import os
 from typing import Any
 
 import torch
 
-from difflet.models.qwen_image.contract import QwenImageDiTInputBundle, normalize_dtype
+from difflet.backends.gpu.application import GpuApplication
+from difflet.models.qwen_image.contract import QwenImageDiTInputBundle
 from difflet.models.qwen_image.dit_config import QwenImageDiTConfig
+from difflet.models.qwen_image.spec import SPEC
 
 
 def dynamic_shift_mu(scheduler_config, image_seq_len: int) -> float:
@@ -44,62 +39,29 @@ def qwen_image_timesteps(scheduler, *, num_inference_steps: int, image_seq_len: 
     return scheduler.timesteps
 
 
-class CudaQwenImageApplication(torch.nn.Module):
-    def __init__(
-        self,
-        *,
-        model_path: str,
-        parallel,
-        dtype: Any,
-        shape: dict[str, int | None],
-        **kwargs: Any,
-    ) -> None:
-        super().__init__()
-        from difflet.backends.cuda.qwen_image.transformer import (
-            CudaQwenImageTransformerApplication,
-            transformer_dir,
-        )
+class CudaQwenImageApplication(GpuApplication):
+    spec = SPEC
+    input_bundle_type = QwenImageDiTInputBundle
 
-        self.model_path = model_path
-        self.parallel = parallel
-        self.dtype = normalize_dtype(dtype)
-        self.shape = {
-            "height": int(shape.get("height") or 1024),
-            "width": int(shape.get("width") or 1024),
-            "num_frames": None,
-        }
-        self.kwargs = kwargs
-        self.device = torch.device(kwargs.get("device", "cuda"))
+    def _configure(self, kwargs: dict[str, Any]) -> None:
         self.text_seq_len = int(kwargs.get("text_seq_len", 1024))
         self.batch_size = int(kwargs.get("batch_size", 1))
         self.load_text_encoder = bool(kwargs.get("load_text_encoder", True))
         self.load_vae = bool(kwargs.get("load_vae", True))
-        # TeaCache on CUDA: the probe-free fixed cadence runs on the host-side
-        # controller the Qwen orchestrator already has. The calibrated (probe NEFF) and
-        # online-delta modes need the probe path on CUDA, which does not exist yet.
-        for key in (
-            "teacache_speedup",
-            "teacache_calibration",
-            "teacache_calibration_path",
-            "teacache_online_delta_alpha",
-        ):
-            if kwargs.get(key) is not None:
-                raise NotImplementedError(
-                    f"{key} is not supported on the CUDA backend yet; "
-                    "use teacache_cadence (probe-free) or run without TeaCache"
-                )
+        # TeaCache: the probe-free fixed cadence runs on the host-side controller the Qwen
+        # orchestrator already has; the calibrated and online-delta modes are refused (spec).
         cadence = kwargs.get("teacache_cadence")
         self.teacache_cadence = int(cadence) if cadence is not None else None
-        self.torch_compile = bool(kwargs.get("torch_compile", False))
-        self.transformer_path = transformer_dir(model_path)
-        self.transformer = None
         self.text_pipeline = None
         self.vae = None
         self.pipeline = None
 
-        if not os.path.exists(os.path.join(self.transformer_path, "config.json")):
-            return
+    def _build_transformers(self) -> None:
+        from difflet.backends.cuda.qwen_image.transformer import (
+            CudaQwenImageTransformerApplication,
+        )
 
+        parallel = self.parallel
         self.config = QwenImageDiTConfig.from_pretrained(
             self.transformer_path,
             height=self.shape["height"],
@@ -118,41 +80,9 @@ class CudaQwenImageApplication(torch.nn.Module):
             torch_compile=self.torch_compile,
         )
 
-    # --------------------------------------------------- DiffletPipeline API
-
-    def _require_transformer(self, action: str):
-        if self.transformer is None:
-            raise NotImplementedError(
-                f"Qwen-Image {action} requires transformer/config.json under {self.model_path!r}"
-            )
-        return self.transformer
-
-    def compile(self, compiled_model_path: str, debug: bool = False) -> None:
-        self._require_transformer("compile").compile(compiled_model_path, debug=debug)
-
-    def load(
-        self,
-        compiled_model_path: str,
-        start_rank_id=None,
-        local_ranks_size=None,
-        skip_warmup: bool = False,
-    ) -> None:
-        self._require_transformer("load").load(
-            compiled_model_path,
-            start_rank_id=start_rank_id,
-            local_ranks_size=local_ranks_size,
-            skip_warmup=skip_warmup,
-        )
-        self._load_companions()
-
-    def has_compiled_artifacts(self, compiled_model_path: str) -> bool:
-        if self.transformer is None:
-            return False
-        return self.transformer.has_compiled_artifacts(compiled_model_path)
-
     # ------------------------------------------------ encoder / VAE / loop
 
-    def _load_companions(self) -> None:
+    def load_companions(self) -> None:
         """Text encoder, VAE and the denoise/decode orchestrator, all on the device."""
         from difflet.models.qwen_image.pipeline import QwenImageOrchestrator
         from difflet.models.qwen_image.prompt import load_text_pipeline
@@ -212,21 +142,13 @@ class CudaQwenImageApplication(torch.nn.Module):
             "guidance": {"shape": (batch,), "dtype": self.dtype},
         }
 
-    def forward_dit(self, bundle: QwenImageDiTInputBundle):
-        transformer = self._require_transformer("forward")
-        inputs = tuple(
-            t.to(self.device) if isinstance(t, torch.Tensor) else t
-            for t in bundle.as_model_inputs()
-        )
-        return transformer(*inputs)
-
     # ---------------------------------------------------------- generation
 
     def generate(
         self,
         prompt: str | list[str],
         *,
-        num_inference_steps: int = 50,
+        num_inference_steps: int = SPEC.default_steps,
         seed: int | None = None,
         guidance_scale: float | None = None,
         output_type: str = "pil",
@@ -237,15 +159,12 @@ class CudaQwenImageApplication(torch.nn.Module):
         ``latents`` is packed ``(B, S, 64)`` initial noise used verbatim (the end-to-end
         oracle feeds the same tensor to diffusers); otherwise ``seed`` draws it.
 
-        Single pass, no classifier-free guidance — the same path the Trainium CLI runs.
-        Qwen-Image's transformer has ``guidance_embeds=False``, so the modeling code drops
-        the guidance tensor; a ``guidance_scale`` would be a silent no-op and is refused.
+        One pass per step without classifier-free guidance, the path the Trainium CLI runs.
+        The transformer has ``guidance_embeds=False``, so the modeling code drops the guidance
+        tensor; a ``guidance_scale`` would be a silent no-op and is refused.
         """
         if guidance_scale is not None and not bool(getattr(self.config, "guidance_embeds", False)):
-            raise ValueError(
-                "guidance_scale has no effect: this model's transformer has guidance_embeds=False "
-                "and Release 1 generation is single-pass without classifier-free guidance"
-            )
+            raise ValueError(f"guidance_scale has no effect: {SPEC.no_guidance_reason}")
         if self.pipeline is None:
             raise RuntimeError("application is not loaded; call load() first")
         encoder_hidden_states, encoder_hidden_states_mask = self.encode_prompt(prompt)
@@ -267,9 +186,11 @@ class CudaQwenImageApplication(torch.nn.Module):
                 num_inference_steps=int(num_inference_steps),
                 image_seq_len=int(latents.shape[1]),
             ).to(self.device)
-        # The Trainium CLI fills the (ignored, guidance_embeds=False) guidance tensor with 4.0;
-        # mirrored so the DiT inputs are identical, not because it changes the image.
-        guidance_scale = 4.0 if guidance_scale is None else float(guidance_scale)
+        # The Trainium CLI fills the ignored guidance tensor with this value; mirrored so the
+        # DiT inputs are identical, not because it changes the image.
+        guidance_scale = (
+            SPEC.serving_noop_guidance_scale if guidance_scale is None else float(guidance_scale)
+        )
         out = self.pipeline(
             latents=latents,
             timesteps=timesteps,
@@ -294,15 +215,6 @@ class CudaQwenImageApplication(torch.nn.Module):
 
         processor = VaeImageProcessor(vae_scale_factor=self.pipeline.vae_scale_factor * 2)
         return processor.postprocess(images.float(), output_type=output_type)
-
-    def __call__(self, *args: Any, **kwargs: Any):
-        if len(args) == 1 and isinstance(args[0], QwenImageDiTInputBundle):
-            return self.forward_dit(args[0])
-        if "prompt" in kwargs and not args:
-            return self.generate(**kwargs)
-        if kwargs and not args:
-            return self.forward_dit(QwenImageDiTInputBundle(**kwargs))
-        return self._require_transformer("forward")(*args, **kwargs)
 
 
 __all__ = ["CudaQwenImageApplication", "dynamic_shift_mu", "qwen_image_timesteps"]

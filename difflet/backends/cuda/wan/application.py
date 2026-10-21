@@ -1,14 +1,11 @@
-"""Wan 2.2 on the CUDA backend: both experts, UMT5 and the VAE on one GPU, driven by the
+"""Wan 2.2 on the GPU flow: both experts, UMT5 and the VAE on one GPU, driven by the
 backend-neutral ``WanOrchestrator``.
 
-Mirrors ``TpuWanApplication``'s outward contract — the shape ``DiffletPipeline`` calls
-reflectively — but keeps every stage on the device:
-
-* the two DiT experts are ``CudaWanTransformerApplication`` (the neutral
+* The two DiT experts are ``CudaWanTransformerApplication`` (the neutral
   ``WanTransformer3DModel`` on ``difflet.ops``), each loaded from its own diffusers directory
-  and compiled into its own artifact subdirectory;
+  and compiled into its own artifact subdirectory.
 * UMT5 (``transformers.UMT5EncoderModel``) sits behind the ``(input_ids, attention_mask) →
-  embeds`` callable ``WanOrchestrator.encode_prompt`` expects;
+  embeds`` callable ``WanOrchestrator.encode_prompt`` expects.
 * diffusers' ``AutoencoderKLWan`` sits behind a decoder callable whose ``.config`` carries
   ``latents_mean``/``latents_std``, so the orchestrator denormalises as ``WanPipeline`` does.
 
@@ -18,13 +15,9 @@ reflectively — but keeps every stage on the device:
 (``model_index.json``) run ``transformer``, below it ``transformer_2``.
 
 **CFG.** ``guidance_scale > 1`` is the orchestrator's sequential cond + uncond passes per step;
-``guidance_scale_2`` applies below the boundary. Loop latents stay on the host in
-fp32 — UniPC's corrector collapses in bf16 — and the DiT/VAE callables move tensors to the
-device per call and return host tensors.
-
-The CUDA backend runs tp=1, one shape, no TeaCache, no ``--shapes`` — each is refused
-by name before any weight loads. ``torch.compile`` is an opt-in
-option: the ``torch_compile`` kwarg (``--torch-compile`` on the CLI).
+``guidance_scale_2`` applies below the boundary. Loop latents stay on the host in fp32 —
+UniPC's corrector collapses in bf16 — and the DiT/VAE callables move tensors to the device per
+call and return host tensors.
 """
 
 from __future__ import annotations
@@ -34,50 +27,26 @@ from typing import Any
 
 import torch
 
+from difflet.backends.gpu.application import GpuApplication
 from difflet.models.wan.dit_config import WanDiTConfig
 from difflet.models.wan.pipeline import _read_boundary_ratio
+from difflet.models.wan.spec import SPEC
 
-DEFAULT_STEPS = 40  # diffusers' WanPipeline default
-DEFAULT_GUIDANCE_SCALE = 4.0  # Wan 2.2 high-noise stage
-DEFAULT_GUIDANCE_SCALE_2 = 3.0  # Wan 2.2 low-noise stage (below the boundary)
-
-# Application kwargs that request a feature outside Release 1. A key is
-# refused only when it carries a request (not None / False): the CLI and DiffletPipeline
-# pass several of them with their "off" value.
-_UNSUPPORTED_KWARGS = ("shapes",)
-
-
-def _refuse_unsupported_kwargs(kwargs: dict[str, Any]) -> None:
-    for key, value in kwargs.items():
-        if value is None or value is False:
-            continue
-        if key in _UNSUPPORTED_KWARGS or key.startswith("teacache_"):
-            raise NotImplementedError(
-                f"{key} is not supported for Wan on the CUDA backend yet "
-                "(one request shape at tp=1; no TeaCache)"
-            )
+DEFAULT_STEPS = SPEC.default_steps
+DEFAULT_GUIDANCE_SCALE = SPEC.default_guidance_scale  # the high-noise stage
+DEFAULT_GUIDANCE_SCALE_2 = 3.0  # Wan 2.2's low-noise stage (below the boundary)
 
 
 def _timestep_dtype(value: Any, model_dtype: torch.dtype) -> torch.dtype:
-    """``"float32"`` (the default: diffusers' exact timestep) or ``"model"`` (the bf16 cast
-    Release 1 shipped, kept for the A/B). ``None`` means unset, i.e. the default."""
+    """``"float32"`` (the default: diffusers' exact timestep) or ``"model"`` (the model-dtype
+    cast, kept for A/B comparisons). ``None`` means unset, i.e. the default."""
     if value is None or value == "float32":
         return torch.float32
     if value == "model":
         return model_dtype
     raise ValueError(
-        f"Unsupported timestep_dtype for Wan on CUDA: {value!r}; expected 'float32' or 'model'"
+        f"Unsupported timestep_dtype for Wan: {value!r}; expected 'float32' or 'model'"
     )
-
-
-def _normalize_dtype(dtype: Any) -> torch.dtype:
-    if isinstance(dtype, torch.dtype):
-        return dtype
-    if dtype in {"bf16", "bfloat16", "torch.bfloat16"}:
-        return torch.bfloat16
-    if dtype in {"fp32", "float32", "torch.float32"}:
-        return torch.float32
-    raise ValueError(f"Unsupported Wan dtype on CUDA: {dtype!r}")
 
 
 class _CudaTextEncoder:
@@ -165,50 +134,27 @@ class _CudaVaeDecoder:
         return frames.float().cpu()
 
 
-class CudaWanApplication(torch.nn.Module):
-    def __init__(
-        self,
-        *,
-        model_path: str,
-        parallel,
-        dtype: Any,
-        shape: dict[str, int | None],
-        **kwargs: Any,
-    ) -> None:
-        super().__init__()
-        _refuse_unsupported_kwargs(kwargs)
-        from difflet.backends.cuda.wan.transformer import CudaWanTransformerApplication
+class CudaWanApplication(GpuApplication):
+    spec = SPEC
+    expert_subdirectories = True
 
-        self.model_path = model_path
-        self.parallel = parallel
-        self.dtype = _normalize_dtype(dtype)
+    def _configure(self, kwargs: dict[str, Any]) -> None:
         self.timestep_dtype = _timestep_dtype(kwargs.get("timestep_dtype"), self.dtype)
-        self.shape = {
-            "height": int(shape.get("height") or 480),
-            "width": int(shape.get("width") or 832),
-            "num_frames": int(shape.get("num_frames") or 9),
-        }
-        self.kwargs = kwargs
-        self.device = torch.device(kwargs.get("device", "cuda"))
         self.text_seq_len = int(kwargs.get("text_seq_len", 512))
         self.batch_size = int(kwargs.get("batch_size", 1))
-        # See the module docstring: both experts fit a 96 GB card, so on CUDA (only) the
+        # See the module docstring: both experts fit a 96 GB card, so on the GPU flow the
         # low-noise expert is resident by default.
         self.enable_transformer_2 = bool(kwargs.get("enable_transformer_2", True))
-        self.torch_compile = bool(kwargs.get("torch_compile", False))
         self.load_text_encoder = bool(kwargs.get("load_text_encoder", True))
         self.load_vae = bool(kwargs.get("load_vae", True))
-
-        self.transformer_path = os.path.join(model_path, "transformer")
-        self.transformer_2_path = os.path.join(model_path, "transformer_2")
-        self.transformer = None
+        self.transformer_2_path = os.path.join(self.model_path, "transformer_2")
         self.transformer_2 = None
         self.text_encoder = None
         self.vae_decoder = None
         self.pipeline = None
 
-        if not os.path.exists(os.path.join(self.transformer_path, "config.json")):
-            return
+    def _build_transformers(self) -> None:
+        from difflet.backends.cuda.wan.transformer import CudaWanTransformerApplication
 
         self.config = self._expert_config(self.transformer_path)
         self.transformer = CudaWanTransformerApplication(
@@ -217,26 +163,27 @@ class CudaWanApplication(torch.nn.Module):
             device=self.device,
             torch_compile=self.torch_compile,
         )
-        if self.enable_transformer_2:
-            if os.path.exists(os.path.join(self.transformer_2_path, "config.json")):
-                # Both A14B experts share one config, but read the second one's own
-                # config.json anyway: a variant where they diverge would otherwise load
-                # against the wrong geometry.
-                self.transformer_2 = CudaWanTransformerApplication(
-                    model_path=self.transformer_2_path,
-                    config=self._expert_config(self.transformer_2_path),
-                    device=self.device,
-                    torch_compile=self.torch_compile,
-                )
-            elif _read_boundary_ratio(model_path) is not None:
-                # boundary_ratio marks a two-expert (Wan 2.2) snapshot; without transformer_2
-                # the low-noise steps would silently run on the high-noise expert.
-                raise FileNotFoundError(
-                    f"{self.transformer_2_path!r} is missing: {model_path!r} is a two-expert "
-                    "Wan 2.2 snapshot (model_index.json has boundary_ratio), so this is a "
-                    "partial download. Re-download the snapshot, or pass "
-                    "enable_transformer_2=False to run the high-noise expert alone."
-                )
+        if not self.enable_transformer_2:
+            return
+        if os.path.exists(os.path.join(self.transformer_2_path, "config.json")):
+            # Both A14B experts share one config, but read the second one's own config.json
+            # anyway: a variant where they diverge would otherwise load against the wrong
+            # geometry.
+            self.transformer_2 = CudaWanTransformerApplication(
+                model_path=self.transformer_2_path,
+                config=self._expert_config(self.transformer_2_path),
+                device=self.device,
+                torch_compile=self.torch_compile,
+            )
+        elif _read_boundary_ratio(self.model_path) is not None:
+            # boundary_ratio marks a two-expert (Wan 2.2) snapshot; without transformer_2
+            # the low-noise steps would silently run on the high-noise expert.
+            raise FileNotFoundError(
+                f"{self.transformer_2_path!r} is missing: {self.model_path!r} is a two-expert "
+                "Wan 2.2 snapshot (model_index.json has boundary_ratio), so this is a "
+                "partial download. Re-download the snapshot, or pass "
+                "enable_transformer_2=False to run the high-noise expert alone."
+            )
 
     def _expert_config(self, transformer_path: str) -> WanDiTConfig:
         parallel = self.parallel
@@ -258,55 +205,15 @@ class CudaWanApplication(torch.nn.Module):
             sp_enabled=bool(getattr(parallel, "sp_enabled", False)),
         )
 
-    # --------------------------------------------------- DiffletPipeline API
-
-    def _named_experts(self) -> list[tuple[str, Any]]:
-        # Each expert owns its own artifact subdirectory, as on TPU.
+    def named_transformers(self):
         named = [("transformer", self.transformer)]
         if self.transformer_2 is not None:
             named.append(("transformer_2", self.transformer_2))
         return named
 
-    def _require_transformer(self, action: str):
-        if self.transformer is None:
-            raise NotImplementedError(
-                f"Wan {action} requires transformer/config.json under {self.model_path!r}"
-            )
-        return self.transformer
-
-    def compile(self, compiled_model_path: str, debug: bool = False) -> None:
-        self._require_transformer("compile")
-        for name, expert in self._named_experts():
-            expert.compile(os.path.join(compiled_model_path, name), debug=debug)
-
-    def load(
-        self,
-        compiled_model_path: str,
-        start_rank_id=None,
-        local_ranks_size=None,
-        skip_warmup: bool = False,
-    ) -> None:
-        self._require_transformer("load")
-        for name, expert in self._named_experts():
-            expert.load(
-                os.path.join(compiled_model_path, name),
-                start_rank_id=start_rank_id,
-                local_ranks_size=local_ranks_size,
-                skip_warmup=skip_warmup,
-            )
-        self._load_companions()
-
-    def has_compiled_artifacts(self, compiled_model_path: str) -> bool:
-        if self.transformer is None:
-            return False
-        return all(
-            expert.has_compiled_artifacts(os.path.join(compiled_model_path, name))
-            for name, expert in self._named_experts()
-        )
-
     # ------------------------------------------------ encoders / VAE / loop
 
-    def _load_companions(self) -> None:
+    def load_companions(self) -> None:
         """UMT5 and the VAE on the device (or the injected callables), then the orchestrator."""
         from difflet.models.wan.pipeline import WanOrchestrator
 
@@ -402,14 +309,14 @@ class CudaWanApplication(torch.nn.Module):
             raise RuntimeError("application is not loaded; call load() first")
         if not isinstance(prompt, str) and len(prompt) > 1:
             raise NotImplementedError(
-                f"Wan on CUDA generates one prompt at a time, got {len(prompt)}; "
+                f"Wan generates one prompt at a time on the GPU flow, got {len(prompt)}; "
                 "batch > 1 is not supported yet"
             )
         loaded_frames = self.shape["num_frames"]
         if num_frames is not None and int(num_frames) != loaded_frames:
             raise ValueError(
-                f"Wan on CUDA was loaded for num_frames={loaded_frames}, got "
-                f"num_frames={num_frames}; one shape per process (more is not supported yet)"
+                f"Wan was loaded for num_frames={loaded_frames}, got num_frames={num_frames}; "
+                "one shape per process (more is not supported yet)"
             )
         generator = None
         if seed is not None:
@@ -427,11 +334,6 @@ class CudaWanApplication(torch.nn.Module):
             output_type=output_type,
             return_dict=False,
         )[0]
-
-    def __call__(self, *args: Any, **kwargs: Any):
-        if "prompt" in kwargs and not args:
-            return self.generate(**kwargs)
-        return self._require_transformer("forward")(*args, **kwargs)
 
 
 __all__ = [

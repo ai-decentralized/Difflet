@@ -1,6 +1,6 @@
 """One Wan 2.2 DiT expert forward, Difflet vs diffusers, on identical inputs, one GPU.
 
-The F4 recipe (``scripts/cuda_bench_dit.py``) for Wan: warm-up untimed, a clean timed run
+The recipe of ``scripts/cuda_bench_dit.py``, for Wan: warm-up untimed, a clean timed run
 (median of N forwards with CUDA events, profiler off) and one profiled forward
 (``torch.profiler``, kernels bucketed by ``difflet.backends.cuda.bench``). Cases:
 

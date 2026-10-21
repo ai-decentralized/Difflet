@@ -1,7 +1,7 @@
 """Qwen-Image DiT parity on one GPU: diffusers fp32 → diffusers bf16 (control) →
 difflet bf16 through the CUDA ops, on identical seeded inputs.
 
-Two cases per run: the all-ones text mask (Release 1) and the padded-prompt mask
+Two cases per run: the all-ones text mask (every token valid) and the padded-prompt mask
 (only the first --valid-text-tokens of text_seq_len are valid, as a real prompt is).
 
 Writes a JSON the gate reads (tests/numerical/test_cuda_vs_diffusers.py):
@@ -138,7 +138,7 @@ def main() -> None:
 
     # difflet bf16 through the CUDA ops (DiT only: no text encoder, no VAE).
     from difflet.models.qwen_image.contract import QwenImageDiTInputBundle
-    from difflet.models.qwen_image.cuda_application import CudaQwenImageApplication
+    from difflet.backends.cuda.qwen_image.application import CudaQwenImageApplication
     from difflet.pipeline.parallel_config import DiffletParallelConfig
 
     mark = time.monotonic()

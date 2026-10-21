@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Wan 2.2 T2V-A14B on one GPU through `difflet run` on the CUDA backend (plan F1). GPU-only.
+# Wan 2.2 T2V-A14B on one GPU through `difflet run` on the CUDA backend. GPU-only.
 # Logs to /tmp/logs/cuda-smoke-wan-<ts>.log (CUDA_SMOKE_LOGDIR overrides the directory) and,
 # after a generate, the timings to cuda-smoke-wan-<ts>.json next to it. Load / generate times
 # come from the CLI's own "[difflet] loaded in" / "wrote ... in" lines; the peak device memory

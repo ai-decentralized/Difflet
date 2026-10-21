@@ -1,11 +1,10 @@
-"""Flux DiT as a CUDA component.
+"""Flux DiT as a GPU component.
 
 The module is the backend-neutral ``NeuronFluxTransformer2DModel``, whose
-``difflet.ops`` calls bind to the CUDA backend at import time. It is built on the
+``difflet.ops`` calls bind to the selected backend at import time. It is built on the
 meta device, materialized in the requested dtype, and filled from the diffusers
-``transformer/`` safetensors through ``convert_flux_hf_state_dict`` (tp=1 in
-Release 1: the full tensors load as they are). Mirrors
-``difflet/backends/cuda/qwen_image/transformer.py``.
+``transformer/`` safetensors through ``convert_flux_hf_state_dict`` (at tp=1 the full
+tensors load as they are).
 
 ``FluxDiTAdapter`` gives the application the call signature ``FluxPipeline`` uses for
 its transformer (ids instead of a rope tensor, optional guidance, ``return_dict``),
@@ -20,9 +19,7 @@ import torch
 from diffusers.models.modeling_outputs import Transformer2DModelOutput
 
 from difflet.backends._torch_megatron.checkpoint import build_weight_map
-from difflet.backends._torch_megatron.weights import materialize_meta_
-from difflet.backends.cuda.core.application_base import CudaApplicationBase
-from difflet.backends.cuda.ops_impl import parallel_mesh
+from difflet.backends.gpu.application import GpuComponent
 from difflet.layers.embeddings import FluxPosEmbed
 from difflet.models.flux.dit_config import FluxDiTConfig
 from difflet.pipeline.parallel_mesh import MeshSpec
@@ -32,7 +29,7 @@ TEXT_SEQ_LEN = 512
 ROPE_THETA = 10000
 
 
-class CudaFluxTransformerApplication(CudaApplicationBase):
+class CudaFluxTransformerApplication(GpuComponent):
     def __init__(
         self,
         *,
@@ -43,17 +40,16 @@ class CudaFluxTransformerApplication(CudaApplicationBase):
         fuse_proj_out: bool = False,
     ):
         super().__init__(
-            config=MeshSpec(tp=int(config.tp_degree)), device=device, dtype=config.torch_dtype
+            config=MeshSpec(tp=int(config.tp_degree)),
+            device=device,
+            dtype=config.torch_dtype,
+            torch_compile=torch_compile,
         )
         # The diffusers ``transformer/`` directory (sharded index or a single shard).
         self.model_path = model_path
         self.dit_config = config
-        self.torch_compile = bool(torch_compile)
         # The single block's proj_out as one gemm (``proj_out.py``): off by default.
         self.fuse_proj_out = bool(fuse_proj_out)
-
-    def _init_runtime(self) -> None:
-        parallel_mesh.init_parallel_mesh(self.config)
 
     def build_module(self) -> torch.nn.Module:
         from accelerate import init_empty_weights
@@ -65,52 +61,40 @@ class CudaFluxTransformerApplication(CudaApplicationBase):
             module = NeuronFluxTransformer2DModel(self.dit_config)
         return module
 
-    def _prepare_module(self) -> torch.nn.Module:
-        if self.module is None:
-            from safetensors.torch import load_file
+    def load_weights(self, module: torch.nn.Module) -> None:
+        from safetensors.torch import load_file
 
-            from difflet.models.flux.modeling_flux import convert_flux_hf_state_dict
+        from difflet.models.flux.modeling_flux import convert_flux_hf_state_dict
 
-            cfg = self.dit_config
-            module = self.build_module()
-            materialize_meta_(module, device=self.device, dtype=cfg.torch_dtype)
-            state: dict[str, torch.Tensor] = {}
-            for path in sorted(set(build_weight_map(self.model_path).values())):
-                state.update(load_file(path))
-            # ``clone=False``: the untouched tensors are aliased, not copied
-            # (``load_state_dict`` copies them into the parameters), so the host holds
-            # the checkpoint once plus the split ``proj_out`` slices.
-            converted = convert_flux_hf_state_dict(
-                state,
-                num_single_layers=int(cfg.num_single_layers),
-                inner_dim=cfg.inner_dim,
-                clone=False,
-            )
-            del state  # frees the fused ``proj_out`` tensors the split copies replaced
-            module.load_state_dict(converted, strict=True)
-            del converted
-            module.to(self.device)
-            module.requires_grad_(False)
-            module.eval()
-            self._assert_on_device(module)
-            if self.fuse_proj_out:
-                # Opt-in (see ``proj_out.py``), before any compile so the graph sees the
-                # fused layer.
-                from difflet.backends.cuda.flux.proj_out import fuse_proj_out
+        cfg = self.dit_config
+        state: dict[str, torch.Tensor] = {}
+        for path in sorted(set(build_weight_map(self.model_path).values())):
+            state.update(load_file(path))
+        # ``clone=False``: the untouched tensors are aliased, not copied
+        # (``load_state_dict`` copies them into the parameters), so the host holds
+        # the checkpoint once plus the split ``proj_out`` slices.
+        converted = convert_flux_hf_state_dict(
+            state,
+            num_single_layers=int(cfg.num_single_layers),
+            inner_dim=cfg.inner_dim,
+            clone=False,
+        )
+        del state  # frees the fused ``proj_out`` tensors the split copies replaced
+        module.load_state_dict(converted, strict=True)
 
-                for block in module.single_transformer_blocks:
-                    fuse_proj_out(block)
-            if self.torch_compile:
-                # Eager is the premise; ``torch.compile`` is the measured, opt-in option. Per block,
-                # one static shape per process, so
-                # dynamic=False; ``self.module`` stays the eager module around the blocks.
-                for blocks in (module.transformer_blocks, module.single_transformer_blocks):
-                    for i, block in enumerate(blocks):
-                        blocks[i] = torch.compile(
-                            block, mode="max-autotune-no-cudagraphs", dynamic=False, fullgraph=False
-                        )
-            self.module = module
-        return self.module
+    def apply_load_time_swaps(self, module: torch.nn.Module) -> None:
+        if not self.fuse_proj_out:
+            return
+        # Opt-in (see ``proj_out.py``); the base class runs swaps before any compile, so the
+        # graph sees the fused layer.
+        from difflet.backends.cuda.flux.proj_out import fuse_proj_out
+
+        for block in module.single_transformer_blocks:
+            fuse_proj_out(block)
+
+    def repeated_blocks(self, module: torch.nn.Module) -> list[torch.nn.ModuleList]:
+        # One static shape per process, so the compile is static (dynamic=False).
+        return [module.transformer_blocks, module.single_transformer_blocks]
 
     def get_example_inputs(self) -> tuple:
         cfg = self.dit_config

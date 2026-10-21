@@ -4,7 +4,7 @@
 # Fork date: 2026-05-08
 # Modifications: neuronx_distributed is imported lazily so this module (and
 #   difflet.utils.testing, which uses it) imports on hosts without the Neuron
-#   SDK — CUDA backend plan, Phase 1 task 1.6.
+#   SDK.
 # <<< NxDI fork banner <<<
 import importlib.util
 import random

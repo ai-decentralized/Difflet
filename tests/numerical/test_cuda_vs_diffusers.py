@@ -1,4 +1,4 @@
-"""CUDA DiT numerical alignment against Hugging Face diffusers (CUDA plan Phase 4).
+"""CUDA DiT numerical alignment against Hugging Face diffusers.
 
 The oracle is the *upstream* implementation, never another difflet backend. The
 numbers come from one GPU script that runs three forwards on identical seeded

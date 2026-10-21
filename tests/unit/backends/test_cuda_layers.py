@@ -1,4 +1,4 @@
-"""CUDA linear / norm / embeddings ops (CUDA plan Phase 2b), mirroring test_tpu_layers.py.
+"""CUDA linear / norm / embeddings ops, mirroring test_tpu_layers.py.
 
 Runs without a GPU: at tp=1 no collective is reached. The layers are the shared
 ``_torch_megatron`` ones bound to the CUDA collectives.
@@ -95,7 +95,7 @@ def test_public_surface_matches_the_ops_contract():
         assert expected <= set(mod.__all__), module
 
 
-# --- F5 task 3: the RowParallelLinear features NeuronFluxSingleTransformerBlock uses ---
+# --- the RowParallelLinear features NeuronFluxSingleTransformerBlock uses ---
 
 
 def test_row_parallel_skip_bias_add_returns_the_unbiased_output_and_the_bias():
@@ -115,7 +115,8 @@ def test_row_parallel_skip_bias_add_without_bias_returns_none():
 
 
 def test_row_parallel_reduce_output_false_skips_the_all_reduce():
-    # At tp=2 the CUDA all-reduce raises F6, so not raising proves the reduce was skipped.
+    # At tp=2 the CUDA all-reduce raises (tp > 1 is not supported), so not raising proves
+    # the reduce was skipped.
     _reinit(MeshSpec(tp=2))
     partial = L.RowParallelLinear(16, 8, bias=True, input_is_parallel=True, reduce_output=False)
     x = torch.randn(4, 8)

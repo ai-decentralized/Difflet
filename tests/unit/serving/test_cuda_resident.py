@@ -1,13 +1,15 @@
-"""The CUDA serving adapters' shared half: the one-GPU resident plan and the refusals every
-CUDA profile shares. CPU-only."""
+"""The GPU serving flow's shared half: the one-GPU resident plan and the refusals every GPU
+profile shares. CPU-only."""
 
 from __future__ import annotations
 
 import pytest
 
+from difflet.backends.gpu import serving as mod
+from difflet.models.qwen_image.spec import SPEC as QWEN_SPEC
+from difflet.models.wan.spec import SPEC as WAN_SPEC
 from difflet.pipeline.parallel_config import DiffletParallelConfig
 from difflet.serving.errors import DiffletServingError
-from difflet.serving.orchestrators import cuda_resident as mod
 from difflet.serving.types import ResolvedModelSource, ServingProfile
 
 _SOURCE = ResolvedModelSource("hf_snapshot", "m/x", None, "/snap/x", "b" * 40)
@@ -28,7 +30,7 @@ def _profile(**over) -> ServingProfile:
 
 
 def test_resident_plan_claims_slot_zero_for_one_cuda_stage():
-    plan = mod.resident_runtime_plan(_profile(), _SOURCE, allocation_id="wan-cuda")
+    plan = mod.resident_runtime_plan(_profile(), _SOURCE, WAN_SPEC)
     assert plan.mode == "resident" and plan.environment.available_core_ids == (0,)
     (allocation,) = plan.allocations
     assert allocation.allocation_id == "wan-cuda" and allocation.effective_num_cores == 1
@@ -38,12 +40,10 @@ def test_resident_plan_claims_slot_zero_for_one_cuda_stage():
 
 
 def test_identity_tracks_the_video_shape_and_leaves_image_identities_as_they_were():
-    a = mod.resident_runtime_plan(_profile(), _SOURCE, allocation_id="a").profile_identity
-    b = mod.resident_runtime_plan(
-        _profile(num_frames=17), _SOURCE, allocation_id="a"
-    ).profile_identity
+    a = mod.resident_runtime_plan(_profile(), _SOURCE, WAN_SPEC).profile_identity
+    b = mod.resident_runtime_plan(_profile(num_frames=17), _SOURCE, WAN_SPEC).profile_identity
     assert a != b
-    # An image profile (no frames) hashes exactly the F3b inputs, so Qwen's identity is unchanged.
+    # An image profile (no frames) hashes no frame count, so Qwen's identity is unchanged.
     from difflet.serving.types import CompileArtifactIdentity
 
     image = _profile(model_type="qwen_image", height=1024, width=1024, num_frames=None)
@@ -58,9 +58,7 @@ def test_identity_tracks_the_video_shape_and_leaves_image_identities_as_they_wer
             "dtype": image.dtype,
         }
     ).digest
-    assert mod.resident_runtime_plan(image, _SOURCE, allocation_id="q").profile_identity == (
-        expected
-    )
+    assert mod.resident_runtime_plan(image, _SOURCE, QWEN_SPEC).profile_identity == expected
 
 
 @pytest.mark.parametrize(
@@ -74,10 +72,10 @@ def test_identity_tracks_the_video_shape_and_leaves_image_identities_as_they_wer
 )
 def test_shared_refusals_name_the_flag_and_the_model(over, expected):
     with pytest.raises(DiffletServingError) as exc:
-        mod.refuse_shared_profile(_profile(**over), tag="[wan/cuda serve]")
+        mod.refuse_unsupported_profile(_profile(**over), WAN_SPEC)
     assert exc.value.code == "feature_not_supported"
     assert expected in exc.value.message and "[wan/cuda serve]" in exc.value.message
 
 
-def test_a_release1_profile_passes_the_shared_refusals():
-    mod.refuse_shared_profile(_profile(), tag="[x]")
+def test_a_one_card_profile_passes_the_shared_refusals():
+    mod.refuse_unsupported_profile(_profile(), WAN_SPEC)

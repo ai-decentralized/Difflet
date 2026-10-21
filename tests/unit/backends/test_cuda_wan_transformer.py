@@ -1,4 +1,4 @@
-"""One Wan DiT expert as a CUDA component.
+"""One Wan DiT expert as a GPU component.
 
 Runs on the CPU (``device="cpu"``): the application's load path — meta build,
 materialize, diffusers safetensors → ``load_checkpoint_into`` with the FFN rename,
@@ -10,6 +10,7 @@ cannot describe different models.
 import datetime
 import json
 import os
+
 import socket
 from pathlib import Path
 
@@ -19,10 +20,18 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 from diffusers import WanTransformer3DModel
 
-from difflet.backends.cuda.ops_impl import parallel_mesh as pm
-from difflet.backends.cuda.wan.transformer import CudaWanTransformerApplication
-from difflet.models.wan.dit_config import WanDiTConfig
-from difflet.pipeline.parallel_mesh import MeshSpec
+# With no backend set, bind difflet.ops to the CPU ops for the modules imported below (a
+# Trainium host would bind the Neuron ops).
+_PINNED = "DIFFLET_BACKEND" not in os.environ
+os.environ.setdefault("DIFFLET_BACKEND", "cpu")
+
+from difflet.backends.cuda.ops_impl import parallel_mesh as pm  # noqa: E402
+from difflet.backends.cuda.wan.transformer import CudaWanTransformerApplication  # noqa: E402
+from difflet.models.wan.dit_config import WanDiTConfig  # noqa: E402
+from difflet.pipeline.parallel_mesh import MeshSpec  # noqa: E402
+
+if _PINNED:
+    del os.environ["DIFFLET_BACKEND"]
 
 TINY = dict(
     patch_size=(1, 2, 2),
@@ -112,19 +121,29 @@ def test_forward_before_load_is_an_explicit_error(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "overrides,expected",
+    "parallel,expected",
     [
-        ({"tp_degree": 2}, "not supported"),
-        ({"context_parallel_enabled": True}, "not supported"),
-        ({"sp_enabled": True}, "not supported"),
+        ({"tp_degree": 2}, "tensor parallelism.*not supported"),
+        ({"tp_degree": 1, "cp_degree": 2}, "context parallelism.*not supported"),
+        ({"tp_degree": 1, "sp_enabled": True}, "sequence parallelism.*not supported"),
     ],
 )
-def test_parallel_modes_are_refused_up_front(tmp_path, overrides, expected):
-    transformer = tmp_path / "transformer"
-    _reference(transformer)
-    cfg = _config(transformer, **overrides)
+def test_parallel_modes_are_refused_up_front(tmp_path, parallel, expected):
+    # The GPU application refuses what the platform does not implement before any expert is
+    # built, so no weights are read for a config that cannot run.
+    from difflet.backends.gpu.application import create_gpu_application
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+
+    _reference(tmp_path / "transformer")
     with pytest.raises(NotImplementedError, match=expected):
-        CudaWanTransformerApplication(model_path=str(transformer), config=cfg, device="cpu")
+        create_gpu_application(
+            "wan",
+            model_path=str(tmp_path),
+            parallel=DiffletParallelConfig(**parallel),
+            dtype="fp32",
+            shape={},
+            device="cpu",
+        )
 
 
 def test_cfg_parallel_builds_on_a_cfg_two_mesh(tmp_path, monkeypatch):
@@ -287,7 +306,7 @@ def test_cfg_parallel_forward_matches_the_serial_batch(tmp_path, monkeypatch):
         torch.testing.assert_close(result["out"], expected, rtol=1e-5, atol=1e-5)
 
 
-# --- F4f task 1: --torch-compile for the Wan experts -------------------------------------------
+# --- --torch-compile for the Wan experts ------------------------------------------------------
 
 
 def _loaded_expert(tmp_path, **kwargs) -> CudaWanTransformerApplication:

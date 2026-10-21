@@ -1,11 +1,10 @@
 """The Neuron gate: how the suite behaves on a host without the Neuron SDK.
 
 Difflet's reference test environment is a Trainium host where ``neuronx_distributed``,
-``torch_neuronx``, ``torch_xla`` and ``nkilib`` import. On a laptop, a CUDA box or CI they
-do not, and 167 tests were red for exactly that reason when the CUDA backend work started
-(plan: docs/plans/2026-10-16-cuda-backend-support.md, Phase 1 task 1.10). Those tests
-are not wrong, they are Trainium-only; this module lets them *skip with a reason* there,
-by exact signature, and does nothing at all when the SDK is present.
+``torch_neuronx``, ``torch_xla`` and ``nkilib`` import. On a laptop, a GPU host or CI they
+do not, and many tests would be red for exactly that reason. Those tests are not wrong,
+they are Trainium-only; this module lets them *skip with a reason* there, by exact
+signature, and does nothing at all when the SDK is present.
 
 Two mechanisms, both reviewable:
 

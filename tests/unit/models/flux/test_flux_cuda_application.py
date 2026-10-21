@@ -1,6 +1,6 @@
-"""CPU coverage for the Flux CUDA application, its entry branch and FluxPipeline wiring.
+"""CPU coverage for the Flux GPU application, its registry routing and FluxPipeline wiring.
 
-No GPU: ``device="cpu"`` runs the same load path the pod runs. A tiny diffusers
+No GPU: ``device="cpu"`` runs the same load path a GPU host runs. A tiny diffusers
 ``FluxTransformer2DModel`` checkpoint (the recipe of
 ``tests/unit/backends/test_cuda_flux_transformer.py``) is the oracle; the text encoders and
 VAE are never loaded here — the real ``FluxPipeline.from_pretrained`` is replaced by a
@@ -12,14 +12,24 @@ from __future__ import annotations
 
 import inspect
 import json
+import os
 
 import pytest
 import torch
 from diffusers import FlowMatchEulerDiscreteScheduler, FluxPipeline, FluxTransformer2DModel
 from safetensors.torch import save_file
 
-from difflet.models.flux.entry import create_flux_application
-from difflet.pipeline.parallel_config import DiffletParallelConfig
+# With no backend set, bind difflet.ops to the CPU ops for the modules imported below (a
+# Trainium host would bind the Neuron ops).
+_PINNED = "DIFFLET_BACKEND" not in os.environ
+os.environ.setdefault("DIFFLET_BACKEND", "cpu")
+
+from difflet.backends.gpu.application import create_gpu_application  # noqa: E402
+import difflet.models.flux.modeling_flux  # noqa: E402,F401  (bound to the CPU ops)
+from difflet.pipeline.parallel_config import DiffletParallelConfig  # noqa: E402
+
+if _PINNED:
+    del os.environ["DIFFLET_BACKEND"]
 
 AXES_DIMS_ROPE = (2, 2, 4)  # even axes summing to attention_head_dim
 TINY = dict(
@@ -40,12 +50,12 @@ def _cpu_backend(monkeypatch):
 
 
 def _build(tmp_path, *, parallel=None, dtype="bf16", **kwargs):
-    return create_flux_application(
+    return create_gpu_application(
+        "flux",
         model_path=str(tmp_path),
         parallel=parallel or DiffletParallelConfig(tp_degree=1),
         dtype=dtype,
         shape={"height": 64, "width": 64},
-        backend="cuda",
         **kwargs,
     )
 
@@ -109,11 +119,19 @@ def _dit_inputs():
     )
 
 
-# ------------------------------------------------------------------ entry / registry
+# ------------------------------------------------------------------ registry
 
 
-def test_entry_builds_the_cuda_flux_application(tmp_path):
-    app = _build(tmp_path)
+def test_registry_routes_cuda_to_the_flux_gpu_application(tmp_path):
+    from difflet.registry import resolve_model
+
+    app = resolve_model("black-forest-labs/FLUX.1-dev").create_application(
+        model_path=str(tmp_path),
+        parallel=DiffletParallelConfig(tp_degree=1),
+        dtype="bf16",
+        shape={"height": 64, "width": 64},
+        backend="cuda",
+    )
     assert type(app).__name__ == "CudaFluxApplication"
     assert app.transformer is None  # empty model dir -> no transformer/config.json
     assert app.has_compiled_artifacts(str(tmp_path)) is False
@@ -124,14 +142,16 @@ def test_entry_builds_the_cuda_flux_application(tmp_path):
 @pytest.mark.parametrize(
     "parallel,expected",
     [
-        (DiffletParallelConfig(tp_degree=2), "not supported"),
-        (DiffletParallelConfig(tp_degree=1, cp_degree=2), "not supported"),
-        (DiffletParallelConfig(tp_degree=1, cfg_parallel_enabled=True), "not supported"),
-        (DiffletParallelConfig(tp_degree=1, dp_degree=2), "not supported"),
-        (DiffletParallelConfig(tp_degree=1, sp_enabled=True), "not supported"),
+        (DiffletParallelConfig(tp_degree=2), "tensor parallelism.*not supported"),
+        (DiffletParallelConfig(tp_degree=1, cp_degree=2), "context parallelism.*not supported"),
+        (DiffletParallelConfig(tp_degree=1, cfg_parallel_enabled=True), "does not apply to Flux"),
+        (
+            DiffletParallelConfig(tp_degree=1, sp_enabled=True),
+            "sequence parallelism.*not supported",
+        ),
     ],
 )
-def test_entry_refuses_multi_rank_and_sp_on_cuda_up_front(tmp_path, parallel, expected):
+def test_gpu_application_refuses_multi_rank_and_sp_up_front(tmp_path, parallel, expected):
     # Refused before the 24 GB DiT is touched, not at the first collective.
     with pytest.raises(NotImplementedError, match=expected):
         _build(tmp_path, parallel=parallel)
@@ -161,7 +181,7 @@ def test_registry_lists_cuda_for_flux():
         {"sp_enabled": True},
     ],
 )
-def test_cuda_flux_application_refuses_f5b_kwargs(tmp_path, kwargs):
+def test_flux_gpu_application_refuses_unsupported_kwargs(tmp_path, kwargs):
     with pytest.raises(NotImplementedError, match="not supported"):
         _build(tmp_path, **kwargs)
 
@@ -178,7 +198,7 @@ def test_torch_compile_reaches_the_transformer(tmp_path):
     assert _build(tmp_path, torch_compile=False, **kw).torch_compile is False
 
 
-def test_off_values_of_f5b_kwargs_are_accepted(tmp_path):
+def test_off_values_of_refused_kwargs_are_accepted(tmp_path):
     # The CLI/pipeline pass these with their "off" value; only a request is refused.
     app = _build(tmp_path, taef1=False, taef1_path=None, teacache_cadence=None, shapes=None)
     assert type(app).__name__ == "CudaFluxApplication"
@@ -216,7 +236,7 @@ def test_load_builds_flux_pipeline_around_the_adapter(tmp_path, from_pretrained_
 
 
 def test_flux_pipeline_from_pretrained_refuses_the_adapter_as_transformer(tmp_path):
-    # Why _load_companions does not pass transformer=self.adapter to from_pretrained:
+    # Why load_companions does not pass transformer=self.adapter to from_pretrained:
     # diffusers checks a passed component against the class in model_index.json.
     from diffusers.pipelines.pipeline_loading_utils import (
         ALL_IMPORTABLE_CLASSES,
@@ -246,11 +266,13 @@ def test_flux_pipeline_from_pretrained_refuses_the_adapter_as_transformer(tmp_pa
 
 
 def test_flux_pipeline_drives_the_adapter_like_the_diffusers_transformer(
-    tmp_path, from_pretrained_recorder
+    tmp_path, from_pretrained_recorder, monkeypatch
 ):
-    """FluxPipeline built with the adapter as its transformer (the Task 3 carry-over):
-    registered, survives ``pipe.to``, reports a device, and denoises to the same latents as
-    the same pipeline around diffusers' own transformer."""
+    """FluxPipeline built with the adapter as its transformer: registered, survives
+    ``pipe.to``, reports a device, and denoises to the same latents as the same pipeline
+    around diffusers' own transformer."""
+    # CPU tensors: keep FluxPipeline off torch_xla's mark_step on a Neuron host.
+    monkeypatch.setattr("diffusers.pipelines.flux.pipeline_flux.XLA_AVAILABLE", False)
     reference, app = _loaded_tiny_app(tmp_path)
     adapter = app.adapter
     pipe = FluxPipeline(

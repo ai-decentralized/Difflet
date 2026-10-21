@@ -16,40 +16,9 @@ def create_flux_application(
     backend: str = "trainium",
     **kwargs: Any,
 ) -> Any:
-    if backend not in {"trainium", "cuda"}:
-        raise NotImplementedError(f"Flux supports the trainium and cuda backends, got {backend!r}")
-
-    if backend == "cuda":
-        # Release 1 of the CUDA backend is one process on one device.
-        # Refuse here, before the 24 GB DiT is loaded, rather than at the first collective.
-        # Two parallel-config types reach this factory (DiffletParallelConfig and serving's
-        # ParallelTopology): ask, do not assume.
-        tp = int(getattr(parallel, "tp_degree", 1) or 1)
-        cp = int(getattr(parallel, "cp_degree", 1) or 1)
-        dp = int(getattr(parallel, "dp_degree", 1) or 1)
-        if tp > 1:
-            raise NotImplementedError(
-                f"Flux on CUDA runs tp=1 on one GPU (got tp={tp}); "
-                "tensor parallelism (tp > 1) is not supported on the CUDA backend yet"
-            )
-        if getattr(parallel, "sp_enabled", False):
-            raise NotImplementedError(
-                "sequence parallelism is not supported on the CUDA backend yet (it needs tp > 1)"
-            )
-        if cp > 1 or dp > 1 or getattr(parallel, "cfg_parallel_enabled", False):
-            raise NotImplementedError(
-                f"Flux on CUDA runs on one GPU (got cp={cp}, dp={dp}, "
-                f"cfg_parallel={bool(getattr(parallel, 'cfg_parallel_enabled', False))}); "
-                "context, data and CFG parallelism are not supported for Flux on CUDA yet"
-            )
-        from difflet.models.flux.cuda_application import CudaFluxApplication
-
-        return CudaFluxApplication(
-            model_path=model_path,
-            parallel=parallel,
-            dtype=dtype,
-            shape=shape,
-            **kwargs,
+    if backend != "trainium":
+        raise NotImplementedError(
+            f"Flux currently supports only the trainium backend, got {backend!r}"
         )
 
     from difflet.models.flux.application import (

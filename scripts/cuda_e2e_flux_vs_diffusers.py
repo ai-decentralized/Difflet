@@ -13,7 +13,7 @@ noise. Pixel-space metrics go to a JSON the gate reads
 
 Metrics, PNG writing and the seed helpers are scripts/cuda_e2e_vs_diffusers.py's (one
 definition for every e2e oracle). Its ``_to_unit`` is not used: ``FluxPipeline``'s
-``output_type="pt"`` is already post-processed to [0, 1] on both sides. Since F4b the JSON carries
+``output_type="pt"`` is already post-processed to [0, 1] on both sides. The JSON carries
 ``timings.{difflet,diffusers}.{load_s, generate_s, peak_alloc_gb}`` as the Wan oracle does.
 
 **Seeds and the noise floor.** ``--noise-floor`` adds, per seed, a second diffusers
@@ -21,13 +21,13 @@ run with ``torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction`` f
 bf16 gemm accumulates differently; restored after the run, errors included): exact vs perturbed
 is diffusers' distance from itself, the scale the gate states Difflet's numbers against.
 ``--seeds 0,1,2`` (overrides ``--seed``; ``--seed N`` alone is ``--seeds N``) keeps one load per
-side, as F9 does for Wan: Difflet is loaded once and generates every seed, each from the packed
+side, as the Wan oracle does: Difflet is loaded once and generates every seed, each from the packed
 noise its seeded ``torch.Generator(device)`` draws, and diffusers is loaded once and runs every
 seed (exact, then perturbed) from that same noise. The JSON adds ``seeds``,
 ``per_seed.<seed>.{metrics, timings.{difflet, diffusers}, noise_floor | null, images}`` and
 ``aggregate.{difflet, noise_floor}.{psnr_db, cosine}.{min, mean, max}``; ``seed``, ``metrics``,
-``timings``, ``images`` and ``noise_floor`` stay the first seed's (pre-F9c readers), and the
-first seed's PNGs are also written under the pre-F9c names.
+``timings``, ``images`` and ``noise_floor`` stay the first seed's (single-seed readers), and the
+first seed's PNGs are also written under the single-seed names.
 """
 
 from __future__ import annotations
@@ -81,7 +81,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="per seed, also run diffusers against itself with bf16 gemm reductions in reduced "
         "precision flipped (a rounding-level perturbation): the metric's own sensitivity on that "
-        "seed (F9's Wan recipe, F4f for Flux)",
+        "seed (the Wan oracle's recipe, applied to Flux)",
     )
     ap.add_argument(
         "--torch-compile",
@@ -119,7 +119,8 @@ def _device_name() -> str:
 
 
 def side_png(images_dir: Path, side: str, seed: int | None = None) -> Path:
-    """One side's PNG (``side``: ``difflet`` or ``diffusers``); ``seed`` None: the pre-F9c name."""
+    """One side's PNG (``side``: ``difflet`` or ``diffusers``); ``seed`` None: the single-seed
+    name."""
     tag = "" if seed is None else f"_seed{seed}"
     return Path(images_dir) / f"flux_e2e_{side}{tag}.png"
 
@@ -327,7 +328,7 @@ def main(argv: list[str] | None = None) -> None:
         "shape": [args.height, args.width],
         "device": _device_name(),
         "torch": torch.__version__,
-        # The pre-F9c keys: the first seed's.
+        # The single-seed keys: the first seed's.
         "metrics": first["metrics"],
         "images": {side: str(side_png(images_dir, side)) for side in ("difflet", "diffusers")},
         "timings": first["timings"],

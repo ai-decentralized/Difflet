@@ -62,8 +62,8 @@ def test_row_parallel_shard_metadata_and_bias_after_reduce():
 
 
 def test_row_parallel_reduce_output_false_skips_the_reduce():
-    # The Trainium layer honours reduce_output= and so does the shared one (F5 task 3:
-    # Flux's single block merges two row-parallel reduces into one explicit reduce).
+    # The Trainium layer honours reduce_output= and so does the shared one (Flux's single
+    # block merges two row-parallel reduces into one explicit reduce).
     calls = []
     c = _identity_collectives()
     c.reduce_tp = lambda t: calls.append("reduce") or t

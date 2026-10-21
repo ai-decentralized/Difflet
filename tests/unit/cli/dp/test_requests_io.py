@@ -76,7 +76,7 @@ def test_manifest_roundtrip(tmp_path):
 def test_write_manifest_starts_from_an_empty_queue(tmp_path):
     # The requests dir IS the queue: markers from an earlier run (claim/done/failed) and a
     # longer earlier manifest made a second `--dp N --requests` over the same work dir report
-    # done=N in seconds without generating (the f2b run, 2026-10-18, F2b observation).
+    # done=N in seconds without generating.
     from difflet.cli.dp.claims import summarize
 
     stale = [RequestSpec(index=i, prompt=f"old{i}", output=f"old{i}.png") for i in range(3)]

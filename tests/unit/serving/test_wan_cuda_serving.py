@@ -20,7 +20,8 @@ from difflet.pipeline.parallel_config import DiffletParallelConfig
 from difflet.serving.engines.stage_pipeline import StagePipelineEngine
 from difflet.serving.errors import DiffletServingError
 from difflet.serving.options import CompilePolicy, DownloadPolicy
-from difflet.serving.orchestrators import wan_cuda as mod
+from difflet.backends.gpu import serving as mod
+from difflet.models.wan.spec import SPEC
 from difflet.serving.types import (
     ArtifactSet,
     CancellationSignal,
@@ -64,7 +65,7 @@ def source(monkeypatch):
 
 
 def _prepare(profile, policy=CompilePolicy.AUTO):
-    return mod.CudaWanServingArtifactPreparer().prepare_runtime(
+    return mod.GpuServingArtifactPreparer(_MODEL).prepare_runtime(
         profile, download_policy=DownloadPolicy.AUTO, compile_policy=policy
     )
 
@@ -119,8 +120,8 @@ class _Tok:
 
 
 def _validator(bundle, n_tokens=40):
-    v = mod.CudaWanServingRequestValidator(bundle)
-    v._tokenizer_for_runtime = lambda: _Tok(n_tokens)
+    v = mod.GpuServingRequestValidator(bundle)
+    v._tokenizer = lambda subdir: _Tok(n_tokens)
     return v
 
 
@@ -169,7 +170,7 @@ def test_both_experts_guidance_and_a_negative_prompt_are_accepted(source):
 @pytest.mark.parametrize(
     "field,value", [("boundary_ratio", 0.9), ("flow_shift", 5.0), ("true_cfg_scale", 4.0)]
 )
-def test_fields_the_cuda_app_does_not_take_are_refused(source, field, value):
+def test_fields_the_application_does_not_take_are_refused(source, field, value):
     with pytest.raises(DiffletServingError) as exc:
         _validator(_prepare(_profile())).validate(_request({field: value}))
     assert exc.value.code == "feature_not_supported" and field in exc.value.message
@@ -216,7 +217,7 @@ def test_preload_loads_the_umt5_tokenizer_from_the_pinned_snapshot(source, monke
         "from_pretrained",
         staticmethod(lambda p, **k: seen.update(path=str(p)) or _Tok(5)),
     )
-    mod.CudaWanServingRequestValidator(_prepare(_profile())).preload()
+    mod.GpuServingRequestValidator(_prepare(_profile())).preload()
     assert seen["path"] == "/snap/wan/tokenizer"
 
 
@@ -224,7 +225,7 @@ def test_preload_loads_the_umt5_tokenizer_from_the_pinned_snapshot(source, monke
 
 
 class _App:
-    """CudaWanApplication's generate: (B, 3, F, H, W) frames in [-1, 1]."""
+    """CudaWanApplication.generate's result: (B, 3, F, H, W) frames in [-1, 1]."""
 
     def __init__(self, frames, height, width):
         self.calls, self.shape = [], (1, 3, frames, height, width)
@@ -253,12 +254,12 @@ def recorder(monkeypatch):
 
 
 def _engine(bundle):
-    adapter = mod.CudaWanServingStageAdapter()
+    adapter = mod.GpuServingStageAdapter(_MODEL)
     return adapter, StagePipelineEngine(runtime=bundle, adapter=adapter)
 
 
 def _cli(**over):
-    from difflet.cli.orchestrators.wan_cuda import WanCudaOrchestrator
+    from difflet.backends.gpu.cli import GpuOrchestrator
 
     d = dict(
         model_id=_MODEL,
@@ -276,7 +277,7 @@ def _cli(**over):
         seed=0,
     )
     d.update(over)
-    return WanCudaOrchestrator(argparse.Namespace(**d))
+    return GpuOrchestrator(argparse.Namespace(**d), SPEC)
 
 
 def test_startup_loads_the_pipeline_exactly_as_the_cuda_cli_would(source, recorder):
@@ -298,13 +299,13 @@ def test_startup_smoke_writes_a_valid_mp4_at_the_profile_shape(source, recorder)
     asyncio.run(engine.start())  # validate_smoke_output decodes the MP4 with PyAV
     prompt, kw = adapter.pipe.app.calls[0]
     assert kw == {
-        "num_inference_steps": mod.SMOKE_STEPS,
+        "num_inference_steps": SPEC.smoke_steps,
         "guidance_scale": 4.0,
         "seed": 0,
         "num_frames": F,
         "output_type": "pt",
     }
-    assert mod.SMOKE_STEPS == 4 and adapter._smoke is None  # the smoke's temp dir is gone
+    assert SPEC.smoke_steps == 4 and adapter._smoke is None  # the smoke's temp dir is gone
 
 
 def test_generate_passes_the_cli_s_arguments_and_writes_the_mp4(source, recorder):
@@ -374,13 +375,13 @@ def test_unsupported_profile_is_refused_before_any_load(source, recorder):
         profile=profile,
         source=_SOURCE,
         pipeline_definition=_prepare(_profile()).pipeline_definition,
-        runtime_plan=mod.cuda_runtime_plan(profile, _SOURCE),
+        runtime_plan=mod.resident_runtime_plan(profile, _SOURCE, SPEC),
         compile_specs=(),
         artifacts=ArtifactSet(()),
         adapter_config={"compile_policy": CompilePolicy.AUTO},
     )
     with pytest.raises(DiffletServingError) as exc:
-        asyncio.run(mod.CudaWanServingStageAdapter().create_loaded_runners(bundle))
+        asyncio.run(mod.GpuServingStageAdapter(_MODEL).create_loaded_runners(bundle))
     assert "not supported" in exc.value.message and recorder == []
 
 
@@ -391,17 +392,15 @@ def test_shutdown_releases_the_resident_pipeline(source, recorder):
     assert adapter.pipe is None and adapter.active_runtime is None
 
 
-def test_cuda_serving_metadata_is_one_opaque_stage_with_the_cli_defaults():
-    from difflet.common.registry.wan import cuda_serving_metadata
-
-    meta = cuda_serving_metadata()
+def test_gpu_serving_metadata_is_one_opaque_stage_with_the_cli_defaults():
+    meta = mod.gpu_serving_metadata(SPEC)
     assert meta.model_type == "wan" and meta.checkpoint_ids == (_MODEL,)
     assert (meta.default_steps, meta.default_guidance_scale, meta.default_fps) == (40, 4.0, 16)
     assert meta.output_modality == "video" and meta.chat_content_type == "video_url"
     assert meta.output_mime_type == "video/mp4" and meta.default_host_vae is False
     (stage,) = meta.pipeline_definition.stages
     assert stage.kind == "opaque_pipeline" and stage.stage_id == "pipeline"
-    assert meta.orchestrator_factory.endswith("wan_cuda:CudaWanServingStageAdapter")
+    assert meta.orchestrator_factory == "difflet.backends.gpu.serving:GpuServingStageAdapter"
 
 
 # ------------------------------------------------------------- over HTTP
@@ -430,10 +429,10 @@ class _InProcessEngine:
         return {"status": "ok"}
 
 
-def test_videos_sync_serves_a_wan_clip_through_the_cuda_adapter(
+def test_videos_sync_serves_a_wan_clip_through_the_gpu_adapter(
     source, recorder, monkeypatch, tmp_path
 ):
-    """POST /v1/videos/sync → the CUDA validator → the resident adapter → a real MP4."""
+    """POST /v1/videos/sync → the GPU validator → the resident adapter → a real MP4."""
     from fastapi.testclient import TestClient
 
     from difflet.serving.model_registry import resolve_serving_model
@@ -448,9 +447,9 @@ def test_videos_sync_serves_a_wan_clip_through_the_cuda_adapter(
     options = ServeOptions(model_id=_MODEL, cache_dir=str(tmp_path), height=H, width=W)
     options = dataclasses.replace(options, num_frames=F)
     resolved = resolve_serving_model(options)
-    assert resolved.metadata.orchestrator_factory.endswith("CudaWanServingStageAdapter")
+    assert resolved.metadata.orchestrator_factory.endswith(":GpuServingStageAdapter")
     bundle = _prepare(resolved.profile)
-    adapter = mod.CudaWanServingStageAdapter()
+    adapter = mod.GpuServingStageAdapter(_MODEL)
     engine = _InProcessEngine(StagePipelineEngine(runtime=bundle, adapter=adapter))
     validator = _validator(bundle)
     service = VideoGenerationService(
@@ -496,7 +495,7 @@ def test_videos_sync_serves_a_wan_clip_through_the_cuda_adapter(
         assert prompt == "a cat in a garden" and kw["seed"] == 5
         assert kw["guidance_scale"] == 4.0 and kw["guidance_scale_2"] == 3.0
         assert kw["num_inference_steps"] == 40 and kw["num_frames"] == F
-        # A field the CUDA app does not take is refused before the worker.
+        # A field the application does not take is refused before the worker.
         n = len(adapter.pipe.app.calls)
         refused = client.post(
             "/v1/videos/sync",
@@ -505,6 +504,6 @@ def test_videos_sync_serves_a_wan_clip_through_the_cuda_adapter(
             ],
         )
         assert refused.status_code == 400, refused.text
-        # The CUDA validator's message, not the form parser's: the validator runs in the server.
-        assert "flow_shift is not taken by Wan 2.2 on the CUDA backend" in refused.text
+        # The GPU validator's message, not the form parser's: the validator runs in the server.
+        assert "[wan/cuda serve] flow_shift is not taken by Wan" in refused.text
         assert len(adapter.pipe.app.calls) == n

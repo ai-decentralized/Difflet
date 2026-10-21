@@ -17,7 +17,7 @@ def test_cuda_rms_norm_is_its_own_fused_module_and_the_cpu_keeps_the_shared_math
     assert cuda_norm.RMSNorm is not SharedRMSNorm
     assert cuda_norm.CustomRMSNorm is cuda_norm.RMSNorm
     # The CPU reference backend's module is its own class with the shared module's math
-    # (input-dtype normalisation), untouched by F4e.
+    # (input-dtype normalisation), untouched by the fused CUDA module.
     torch.manual_seed(0)
     x = torch.randn(2, 5, 16).to(torch.bfloat16)
     assert torch.equal(cpu_norm.RMSNorm(16)(x), SharedRMSNorm(16)(x))

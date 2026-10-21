@@ -1,6 +1,6 @@
 """CPU coverage for the Wan CUDA application.
 
-No GPU: ``device="cpu"`` runs the load path the pod runs. The two experts are tiny diffusers
+No GPU: ``device="cpu"`` runs the load path a GPU host runs. The two experts are tiny diffusers
 ``WanTransformer3DModel`` twins (the recipe of ``tests/unit/backends/test_cuda_wan_transformer.py``)
 saved as ``transformer/`` and ``transformer_2/``; ``model_index.json`` carries
 ``boundary_ratio: 0.875`` and ``scheduler/`` a UniPC flow config whose four steps are
@@ -23,10 +23,10 @@ import pytest
 import torch
 from diffusers import AutoencoderKLWan, UniPCMultistepScheduler, WanTransformer3DModel
 
-from difflet.models.wan.entry import create_wan_application
+from difflet.backends.gpu.application import create_gpu_application
 from difflet.pipeline.parallel_config import DiffletParallelConfig
 
-# Task 2's tiny expert (tests/unit/backends/test_cuda_wan_transformer.py).
+# The tiny expert of tests/unit/backends/test_cuda_wan_transformer.py.
 TINY = dict(
     patch_size=(1, 2, 2),
     num_attention_heads=2,
@@ -116,12 +116,12 @@ class StubTokenizer:
 
 
 def _build(root, *, parallel=None, dtype="bf16", **kwargs):
-    return create_wan_application(
+    return create_gpu_application(
+        "wan",
         model_path=str(root),
         parallel=parallel or DiffletParallelConfig(tp_degree=1),
         dtype=dtype,
         shape=dict(SHAPE),
-        backend="cuda",
         text_seq_len=TEXT_SEQ_LEN,
         **kwargs,
     )
@@ -209,7 +209,7 @@ def test_both_experts_are_resident_by_default_on_cuda(tmp_path):
     assert app.enable_transformer_2 is True
     assert isinstance(app.transformer, CudaWanTransformerApplication)
     assert isinstance(app.transformer_2, CudaWanTransformerApplication)
-    # Each expert owns its own diffusers directory (Task 2 ruling).
+    # Each expert owns its own diffusers directory.
     assert app.transformer.model_path == str(root / "transformer")
     assert app.transformer_2.model_path == str(root / "transformer_2")
     assert app.transformer_2.dit_config.text_seq_len == TEXT_SEQ_LEN
@@ -326,12 +326,12 @@ def test_cfg_parallel_off_keeps_the_requested_batch(tmp_path):
         {"shapes": [[480, 832, 9], [480, 832, 17]]},
     ],
 )
-def test_cuda_wan_application_refuses_f1b_kwargs(tmp_path, kwargs):
+def test_cuda_wan_application_refuses_unsupported_kwargs(tmp_path, kwargs):
     with pytest.raises(NotImplementedError, match="not supported"):
         _build(tmp_path, **kwargs)
 
 
-def test_generate_refuses_a_batch_of_prompts_as_f1b(tmp_path):
+def test_generate_refuses_a_batch_of_prompts(tmp_path):
     app, _, _ = _loaded_app(tmp_path)
     with pytest.raises(NotImplementedError, match="not supported"):
         app.generate(["a cat", "a dog"], num_inference_steps=1, output_type="latent")
@@ -351,7 +351,7 @@ def test_torch_compile_reaches_both_experts(tmp_path):
     assert _build(root, torch_compile=False).torch_compile is False
 
 
-def test_off_values_of_f1b_kwargs_are_accepted(tmp_path):
+def test_off_values_of_refused_kwargs_are_accepted(tmp_path):
     # The CLI/pipeline pass several of these with their "off" value; only a request is refused.
     app = _build(tmp_path, teacache_cadence=None, teacache_probe_enabled=False, shapes=None)
     assert type(app).__name__ == "CudaWanApplication"
@@ -408,7 +408,7 @@ def _bf16_timestep_calls(tmp_path, monkeypatch, **kwargs):
 def test_cuda_dit_passes_fp32_timestep_by_default(tmp_path, monkeypatch):
     # diffusers' WanPipeline hands the DiT UniPC's exact integer; so does the CUDA DiT, in a
     # bf16 model, through both experts.
-    from difflet.models.wan.cuda_application import _CudaDiT
+    from difflet.backends.cuda.wan.application import _CudaDiT
 
     assert _CudaDiT(lambda *a: a[0], torch.bfloat16, "cpu").timestep_dtype is torch.float32
     app, calls = _bf16_timestep_calls(tmp_path, monkeypatch)
@@ -433,7 +433,7 @@ def test_timestep_dtype_rejects_anything_but_float32_or_model(tmp_path, value):
 
 
 def test_timestep_dtype_none_is_the_default_float32(tmp_path):
-    # The module's convention: None = unset (as _refuse_unsupported_kwargs reads it).
+    # None = unset, the convention the kwarg refusal reads too.
     app = _build(tmp_path, timestep_dtype=None)
     assert app.timestep_dtype is torch.float32
 
@@ -523,7 +523,7 @@ def test_call_with_a_prompt_dispatches_to_generate(tmp_path):
 
 
 def test_dit_callable_moves_to_the_model_dtype_and_returns_host_tensors():
-    from difflet.models.wan.cuda_application import _CudaDiT
+    from difflet.backends.cuda.wan.application import _CudaDiT
 
     seen = []
 
@@ -545,7 +545,7 @@ def test_dit_callable_moves_to_the_model_dtype_and_returns_host_tensors():
 def test_text_encoder_callable_pads_to_text_seq_len(tmp_path, monkeypatch):
     import transformers
 
-    from difflet.models.wan.cuda_application import _CudaTextEncoder
+    from difflet.backends.cuda.wan.application import _CudaTextEncoder
 
     class FakeUMT5(torch.nn.Module):
         def __init__(self):
@@ -586,7 +586,7 @@ def test_text_encoder_callable_pads_to_text_seq_len(tmp_path, monkeypatch):
 
 
 def test_vae_decoder_callable_exposes_config_and_decodes(tmp_path):
-    from difflet.models.wan.cuda_application import _CudaVaeDecoder
+    from difflet.backends.cuda.wan.application import _CudaVaeDecoder
 
     torch.manual_seed(2)
     vae = AutoencoderKLWan(**TINY_VAE).eval()

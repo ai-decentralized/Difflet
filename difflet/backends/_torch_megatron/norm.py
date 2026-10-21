@@ -1,11 +1,9 @@
-"""Normalization layers for TPU.
+"""Normalization layers for the torch backends (TPU, GPU).
 
 Megatron does not shard normalization: every rank keeps a full copy and
 normalizes over the (replicated) hidden dim, so these are plain torch modules
 with no collectives. Kept byte-compatible with the CPU backend's math so the
-CPU reference stays a valid oracle for numerical validation (Phase 5).
-
-Phase 2b of docs/plans/2026-08-16-tpu-backend-support.md.
+CPU reference stays a valid oracle for numerical validation.
 """
 
 from __future__ import annotations

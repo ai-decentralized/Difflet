@@ -4,8 +4,8 @@ The Trainium side derives this from ``InferenceConfig``/``NeuronConfig`` (NxD
 types). The geometry itself — patch/VAE arithmetic plus the runtime shape — is
 not hardware-specific, so TPU and CUDA share this plain dataclass; attribute
 names match what ``_QwenImageTransformerTraceModule`` reads, so the same
-modeling code runs on every backend. Lifted from the TPU backend by the CUDA
-backend plan (PR 3, Task 6); ``TpuQwenImageConfig`` remains as an alias.
+modeling code runs on every backend. Lifted from the TPU backend;
+``TpuQwenImageConfig`` remains as an alias.
 """
 
 from __future__ import annotations

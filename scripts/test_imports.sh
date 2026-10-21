@@ -3,7 +3,7 @@
 #
 #   NEUTRAL  — modules that must import on any host: the pipeline, registry,
 #              every model entry, backend-neutral modeling, the CPU/CUDA/TPU
-#              runtimes. Always checked. (CUDA backend plan, Phase 1 task 1.7.)
+#              runtimes. Always checked.
 #   TRAINIUM — modules and probe scripts that need the Neuron SDK. Checked only
 #              when `neuronx_distributed` is importable; skipped with a message
 #              otherwise, never silently.
