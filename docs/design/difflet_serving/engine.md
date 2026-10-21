@@ -29,6 +29,8 @@ MVP engines support:
 - Request-keyed cooperative abort with HBM-resident model reuse.
 - Generic `PipelineDefinition.stages` traversal inside the resident worker.
 - Sequential, process-local stage execution through `InProcessStageExecutor`.
+- Per-stage observability: every request logs each stage's wall time and its share of the
+  request, and startup logs what each stage's load left resident on the device.
 
 MVP engines do not implement:
 
@@ -120,6 +122,8 @@ The engine owns:
 - ordered traversal of `PipelineDefinition.stages`
 - cancellation/deadline checkpoints before and after each stage
 - generic stage lifecycle logs
+- per-request per-stage wall time (`stage.breakdown`) and per-stage resident device memory
+  at load (`stage.load`, `stage.load_summary`), both published on the worker heartbeat
 - selection of the P0 `InProcessStageExecutor`
 
 The engine does not own:
@@ -1039,6 +1043,56 @@ state but does not terminate the worker solely for heartbeat loss.
 `stage_progress` is emitted from a model callback only where the underlying loop
 offers a safe and deterministic hook. Otherwise periodic heartbeat with stage and
 elapsed time is the progress signal.
+
+### Per-stage time and resident device memory
+
+Two numbers that the stage boundary makes available, and that nothing else in the system
+can answer: where a request's wall time goes stage by stage, and how much device memory
+each stage's load left resident while the others sit cold.
+
+Timing is wholly the engine's. `StagePipelineEngine.generate` brackets every
+`executor.execute` call and emits one `stage.breakdown` event per request with each stage's
+seconds, its share of the request, the outcome (`completed`, `cancelled`, `error`), and the
+request total. A request that fails mid-pipeline still reports the stages that ran, so the
+stage it stopped in is visible. The engine learns no stage names: the IDs come from
+`PipelineDefinition.stages`.
+
+Memory attribution needs a boundary only the adapter can draw, because only the adapter
+knows where one stage's weights stop and the next stage's begin inside its own
+`create_loaded_runners`. The adapter marks them with
+`difflet.serving.engines.stage_observability.record_stage_load(*stage_ids)` — several IDs
+when one load brings up several stages, so the bytes are reported jointly rather than split
+by a guess. The engine supplies the backend's probe (`torch.cuda.memory_allocated` on CUDA,
+`neuron-monitor` on Trainium, none on a host backend), samples it around each marked
+boundary and around the whole load, and emits `stage.load` per boundary plus one
+`stage.load_summary` with `attribution`:
+
+- `per_stage` — every number below is a measured delta.
+- `total_only` — the probe works but no adapter boundary was marked; the total covers every
+  stage together.
+- `unavailable` — the backend exposes no resident device memory here; the summary carries
+  the reason and no number is invented.
+
+Every stage event carries both `stage_id` and `role`. `role` is the normalized vocabulary
+(`prompt_encoder`, `denoiser`, `decoder`, `pipeline`) that is stable across models where
+`stage_id` is not, so grouping and cross-model comparison key on `role`; `stage.breakdown`
+also carries `role_seconds`, which sums stages that share a role (HunyuanVideo's `clip` and
+`llama` are both prompt encoders). A load marked against a stage ID the pipeline definition
+does not declare is reported as `unknown_stage_ids` with a `stage.load_unknown_stage`
+warning and role `unknown`, never filed against a stage nobody runs.
+
+A single-stage pipeline — every model on CUDA, plus Flux and LTX-2 on Trainium — is the
+degenerate case, not a failure: one `pipeline` stage whose duration is the whole request
+and whose residency is the whole total, with nothing unattributed.
+
+`scope` says whose bytes they are: `process` normally, `host` when the probe could only
+read a host-wide total. A load that happens outside every marked boundary shows up as
+`unattributed`, never folded into a stage.
+
+Both the startup report and the latest request's breakdown ride the existing
+`worker_heartbeat` as `stage_load` and `last_request_stages`; the parent logs
+`worker stage residency` once per distinct report and `worker stage breakdown` once per
+request. This adds no public API surface and does not touch the chat completions contract.
 
 ### Error sanitization
 

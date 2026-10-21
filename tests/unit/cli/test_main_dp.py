@@ -99,3 +99,71 @@ def test_stage_parser_accepts_new_flags():
     ])
     assert args.requests_dir == "/tmp/reqs" and args.worker_index == 1
     assert args.dp_schedule == "least_loaded" and args.keep_work_dir
+
+
+# ------------------------------------------------- CUDA: GPUs, not NeuronCores
+
+
+def _fake_cuda(monkeypatch, *, available, count=0):
+    import torch
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: available)
+    monkeypatch.setattr(torch.cuda, "device_count", lambda: count)
+
+
+@pytest.mark.parametrize(
+    "extra,gpus",
+    [
+        ([], 1),
+        (["--cfg-parallel"], 2),
+        (["--cfg-parallel", "--cp-degree", "2"], 4),
+        (["--tp-degree", "2"], 2),
+    ],
+)
+def test_cuda_replica_is_cfg_times_cp_times_tp_gpus(monkeypatch, extra, gpus):
+    monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
+    args = cli_main._build_parser().parse_args(_argv(extra))
+    # No registry default tp on CUDA: one GPU per replica unless asked otherwise.
+    assert cli_main._replica_cores(args) == gpus
+
+
+def test_cuda_total_comes_from_device_count(monkeypatch):
+    monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
+    monkeypatch.setenv("NEURON_RT_NUM_CORES", "16")  # a Neuron variable means nothing here
+    _fake_cuda(monkeypatch, available=True, count=2)
+    args = cli_main._build_parser().parse_args(_argv([]))
+    assert cli_main._resolve_total_cores(args) == (2, "torch.cuda.device_count()")
+    args = cli_main._build_parser().parse_args(_argv(["--total-cores", "8"]))
+    assert cli_main._resolve_total_cores(args) == (8, "--total-cores")
+
+
+def test_cuda_total_is_undetected_without_a_device(monkeypatch):
+    monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
+    _fake_cuda(monkeypatch, available=False, count=0)
+    args = cli_main._build_parser().parse_args(_argv([]))
+    assert cli_main._resolve_total_cores(args)[0] is None
+    args.dp = 8
+    cli_main._validate_capacity(args)  # unknown budget: not checked
+
+
+def test_cuda_capacity_rejects_more_gpus_than_the_host_has(monkeypatch, capsys):
+    monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
+    _fake_cuda(monkeypatch, available=True, count=2)
+    args = cli_main._build_parser().parse_args(
+        _argv(["--dp", "2", "--cfg-parallel", "--prompt", "x", "--output", "x.mp4"])
+    )
+    args.command = "generate"
+    with pytest.raises(SystemExit):
+        cli_main._validate_dp(args)  # 2 x 2 = 4 GPUs > 2
+    err = capsys.readouterr().err
+    assert "needs 4 GPUs" in err and "2 are available" in err and "tp=1" in err
+
+
+def test_cuda_capacity_accepts_dp2_on_two_gpus(monkeypatch):
+    monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
+    _fake_cuda(monkeypatch, available=True, count=2)
+    args = cli_main._build_parser().parse_args(
+        _argv(["--dp", "2", "--prompt", "x", "--output", "x.mp4"], model="Qwen/Qwen-Image")
+    )
+    args.command = "generate"
+    cli_main._validate_dp(args)  # 2 x 1 = 2 GPUs: fits

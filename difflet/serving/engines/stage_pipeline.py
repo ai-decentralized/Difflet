@@ -2,11 +2,24 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from collections.abc import Mapping
 from typing import Generic, Protocol
 
+from difflet.serving.engines.stage_observability import (
+    DeviceMemoryProbe,
+    RequestStageBreakdown,
+    StageLoadRecorder,
+    StageLoadReport,
+    UNKNOWN_ROLE,
+    StageTiming,
+    format_bytes,
+    recording_stage_loads,
+    resolve_backend_label,
+    select_device_memory_probe,
+)
 from difflet.serving.types import (
     DiffletGenerateRequest,
     GenerateOutput,
@@ -182,15 +195,31 @@ class StagePipelineEngine:
         *,
         runtime: ResolvedRuntimeBundle,
         adapter: ServingStageAdapter,
+        device_memory_probe: DeviceMemoryProbe | None = None,
     ) -> None:
         self.runtime = runtime
         self.adapter = adapter
         self.executor: InProcessStageExecutor | None = None
+        # Startup residency and the latest request's split, for the worker heartbeat and for
+        # anything else that wants the numbers without re-reading the log.
+        self.stage_load_report: StageLoadReport | None = None
+        self.last_stage_breakdown: RequestStageBreakdown | None = None
+        self._device_memory_probe = device_memory_probe
         self._closed = False
 
     async def start(self) -> None:
         try:
-            runners = await self.adapter.create_loaded_runners(self.runtime)
+            recorder = StageLoadRecorder(
+                self._device_memory_probe or select_device_memory_probe(),
+                backend=resolve_backend_label(),
+                stage_roles={
+                    stage.stage_id: stage.role for stage in self.runtime.pipeline_definition.stages
+                },
+            )
+            with recording_stage_loads(recorder):
+                runners = await self.adapter.create_loaded_runners(self.runtime)
+            self.stage_load_report = recorder.report()
+            self._log_stage_load_report(self.stage_load_report)
             expected = tuple(stage.stage_id for stage in self.runtime.pipeline_definition.stages)
             actual = tuple(runners)
             if actual != expected:
@@ -216,6 +245,12 @@ class StagePipelineEngine:
         if self.executor is None or self._closed:
             raise RuntimeError("stage pipeline engine is not ready")
         self.adapter.reset_request_state("before_request")
+        # Timed here rather than inside the runners: every adapter gets the breakdown
+        # without knowing it is measured, and a stage that never returns still shows up as
+        # the one the request stopped in.
+        timings: list[StageTiming] = []
+        request_started = time.monotonic()
+        outcome = "error"
         try:
             payload = self.adapter.initial_payload(request)
             if not isinstance(payload, StagePayload):
@@ -238,25 +273,99 @@ class StagePipelineEngine:
                         context=context,
                     )
                 )
+                duration = result.metadata.finished_monotonic - result.metadata.started_monotonic
+                timings.append(StageTiming(stage.stage_id, duration, stage.role))
                 context.cancellation.throw_if_cancelled()
                 logger.info(
                     "stage.complete request_id=%s model=%s stage=%s duration=%.3f",
                     request.request_id,
                     request.model,
                     stage.stage_id,
-                    result.metadata.finished_monotonic - result.metadata.started_monotonic,
+                    duration,
                 )
                 if stage.final_output:
                     if index != len(stages) - 1:
                         raise StagePayloadTypeError("final stage must be last")
                     output = self.adapter.finalize(result.output)
                     self.adapter.reset_request_state("completed")
+                    outcome = "completed"
                     return output
                 payload = result.output
             raise StagePayloadTypeError("pipeline has no final output stage")
+        except asyncio.CancelledError:
+            outcome = "cancelled"
+            self.adapter.reset_request_state("error")
+            raise
         except BaseException:
             self.adapter.reset_request_state("error")
             raise
+        finally:
+            self._record_stage_breakdown(request, outcome, timings, request_started)
+
+    def _record_stage_breakdown(
+        self,
+        request: DiffletGenerateRequest,
+        outcome: str,
+        timings: list[StageTiming],
+        request_started: float,
+    ) -> None:
+        breakdown = RequestStageBreakdown(
+            request_id=request.request_id,
+            model=request.model,
+            outcome=outcome,
+            stages=tuple(timings),
+            total_seconds=time.monotonic() - request_started,
+        )
+        self.last_stage_breakdown = breakdown
+        logger.info(
+            "stage.breakdown request_id=%s model=%s outcome=%s total=%.3f stages=%s",
+            breakdown.request_id,
+            breakdown.model,
+            breakdown.outcome,
+            breakdown.total_seconds,
+            breakdown.summary(),
+            extra={"stage_breakdown": breakdown.as_event()},
+        )
+
+    def _log_stage_load_report(self, report: StageLoadReport) -> None:
+        for stage in report.stages:
+            logger.info(
+                "stage.load model=%s stage=%s role=%s load_seconds=%.3f device_memory=%s scope=%s",
+                self.adapter.model_id,
+                stage.stage_id,
+                stage.role,
+                stage.load_seconds,
+                format_bytes(stage.device_bytes),
+                report.scope or "unknown",
+                extra={"stage_load": stage.as_event()},
+            )
+        if report.unknown_stage_ids:
+            # An adapter marked a load against a stage ID the pipeline does not declare.
+            # The bytes are still real, but they are filed under no role, so say so loudly
+            # instead of letting the summary read as if the split were complete.
+            logger.warning(
+                "stage.load_unknown_stage model=%s stage_ids=%s pipeline=%s role=%s",
+                self.adapter.model_id,
+                ",".join(report.unknown_stage_ids),
+                ",".join(stage.stage_id for stage in self.runtime.pipeline_definition.stages),
+                UNKNOWN_ROLE,
+                extra={"stage_load_unknown": list(report.unknown_stage_ids)},
+            )
+        logger.info(
+            "stage.load_summary model=%s backend=%s probe=%s attribution=%s scope=%s "
+            "stages=%d attributed=%s unattributed=%s total=%s reason=%s",
+            self.adapter.model_id,
+            report.backend,
+            report.probe,
+            report.attribution,
+            report.scope or "unknown",
+            len(report.stages),
+            format_bytes(report.attributed_device_bytes),
+            format_bytes(report.unattributed_device_bytes),
+            format_bytes(report.total_device_bytes),
+            report.reason or "none",
+            extra={"stage_load_summary": report.as_event()},
+        )
 
     async def shutdown(self) -> None:
         if self._closed:

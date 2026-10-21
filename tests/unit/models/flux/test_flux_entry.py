@@ -31,14 +31,28 @@ else:
     os.environ["DIFFLET_BACKEND"] = _PREV_BACKEND
 
 
-def test_create_flux_application_rejects_non_trainium_backend():
-    with pytest.raises(NotImplementedError):
+def test_create_flux_application_accepts_the_cuda_backend(tmp_path):
+    # CUDA plan F5: the cuda branch builds the one-process application (no checkpoint
+    # under tmp_path, so no transformer — enough to prove the wiring).
+    app = entry.create_flux_application(
+        model_path=str(tmp_path),
+        parallel=DiffletParallelConfig(tp_degree=1),
+        dtype=torch.float32,
+        shape={"height": 512, "width": 512},
+        backend="cuda",
+    )
+    assert type(app).__name__ == "CudaFluxApplication"
+    assert app.transformer is None and app.shape["height"] == 512
+
+
+def test_create_flux_application_rejects_other_backends():
+    with pytest.raises(NotImplementedError, match="trainium and cuda"):
         entry.create_flux_application(
             model_path="/fake/model",
             parallel=DiffletParallelConfig(),
             dtype=torch.float32,
             shape={"height": 512, "width": 512},
-            backend="cuda",
+            backend="tpu",
         )
 
 

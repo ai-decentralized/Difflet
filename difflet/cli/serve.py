@@ -12,6 +12,7 @@ import sys
 from typing import Any
 
 from difflet.serving.artifact_store import S3ArtifactStore
+from difflet.serving.errors import DiffletServingError
 from difflet.serving.factory import build_serving_stack
 from difflet.serving.openai.api_server import create_app
 from difflet.serving.options import (
@@ -178,9 +179,11 @@ def options_from_args(args: argparse.Namespace) -> ServeOptions:
         teacache_online_delta=getattr(args, "teacache_online_delta", None),
         teacache_speedup=getattr(args, "teacache_speedup", None),
         teacache_calibration=getattr(args, "teacache_calibration", None),
+        torch_compile=getattr(args, "torch_compile", False),
         download_policy=download_policy,
         compile_policy=compile_policy,
         max_queued_requests=getattr(args, "max_queued_requests", 8),
+        replicas=getattr(args, "replicas", 1),
         queue_timeout=getattr(args, "queue_timeout", None),
         request_timeout=getattr(args, "request_timeout", 300.0),
         artifact_store_timeout=getattr(args, "artifact_store_timeout", 60.0),
@@ -223,7 +226,13 @@ def run(args: argparse.Namespace) -> None:
     artifact_store = S3ArtifactStore.from_env_if_configured(
         client_timeout=options.artifact_store_timeout
     )
-    stack = build_serving_stack(options)
+    try:
+        stack = build_serving_stack(options)
+    except DiffletServingError as exc:
+        # A startup refusal (an unsupported profile, --dp-degree off CUDA or above the GPU
+        # count) is an answer, not a crash: one line, exit 1, as the argparse validators do.
+        print(f"Error: {exc.message}", file=sys.stderr)
+        raise SystemExit(1)
     app = create_app(
         options=options,
         resolved_model=stack.resolved_model,

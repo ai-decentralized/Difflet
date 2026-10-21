@@ -16,6 +16,16 @@ Factory = Callable[..., Any]
 _SERVING_METADATA: dict[str, ServingModelMetadata] = {}
 _BUILTINS_LOADED = False
 
+# Models served on the CUDA backend (one process per GPU, no Neuron stages),
+# keyed by registry entry name. Selected by backend name the way
+# ``difflet.cli.main._get_orchestrator`` selects the CLI orchestrator; on every other
+# backend the Trainium metadata above is used unchanged.
+_CUDA_SERVING_OVERLAYS: dict[str, str] = {
+    "qwen_image": "difflet.common.registry.qwen_image:cuda_serving_metadata",
+    "flux": "difflet.common.registry.flux:cuda_serving_metadata",
+    "wan": "difflet.common.registry.wan:cuda_serving_metadata",  # Wan 2.2 only
+}
+
 
 @dataclass(frozen=True)
 class ResolvedServingModel:
@@ -44,6 +54,37 @@ def resolve_serving_model(options: ServeOptions) -> ResolvedServingModel:
             f"checkpoint {options.model_id!r} is not enabled for P0 serving; "
             f"allowed for {entry.name}: {allowed}"
         )
+    from difflet.backends.registry import current_backend
+
+    tp_degree = options.tp_degree
+    backend = current_backend()
+    if backend == "cuda":
+        # CUDA's refusals are DiffletServingErrors, so `difflet serve` exits with the message.
+        from difflet.serving.errors import feature_not_supported
+
+        metadata = _cuda_serving_metadata(entry.name, options.model_id)
+        if normalized not in metadata.checkpoint_ids:
+            allowed = ", ".join(metadata.checkpoint_ids)
+            raise feature_not_supported(
+                f"checkpoint {options.model_id!r} is not served on the CUDA backend: it is "
+                f"not supported on the CUDA backend yet; served for {entry.name}: {allowed}"
+            )
+        # Before the GPU count: a video model cannot use replicas on any box.
+        _refuse_video_replicas(int(options.replicas), metadata)
+        if options.teacache_calibration and options.teacache_speedup is None:
+            # The profile keeps no calibration without a speedup, so the file would be ignored
+            # silently; the CUDA CLI refuses it by name the same way.
+            raise feature_not_supported(
+                "--teacache-calibration without --teacache-speedup is ignored by resident "
+                "serving; on the CUDA backend TeaCache is a `difflet run` option (Qwen-Image's "
+                "fixed cadence) and not served — drop the flag"
+            )
+    _refuse_unsupported_replicas(int(options.replicas), backend)
+    if backend == "cuda":
+        if tp_degree is None:
+            # Release 1 is one card: the registry default (tp=4) is a Trainium topology, and
+            # the CUDA CLI uses `args.tp_degree or 1`.
+            tp_degree = 1
     profile = build_serving_profile(
         model_id=options.model_id,
         model_type=metadata.model_type,
@@ -54,7 +95,7 @@ def resolve_serving_model(options: ServeOptions) -> ResolvedServingModel:
         default_host_vae=metadata.default_host_vae,
         revision=options.revision,
         cache_dir=options.cache_dir,
-        tp_degree=options.tp_degree,
+        tp_degree=tp_degree,
         cp_degree=options.cp_degree,
         cp_mode=options.cp_mode,
         cfg_parallel=options.cfg_parallel,
@@ -69,6 +110,7 @@ def resolve_serving_model(options: ServeOptions) -> ResolvedServingModel:
         teacache_online_delta=options.teacache_online_delta,
         teacache_speedup=options.teacache_speedup,
         teacache_calibration=options.teacache_calibration,
+        torch_compile=bool(getattr(options, "torch_compile", False)),
     )
     return ResolvedServingModel(
         model_id=options.model_id,
@@ -76,6 +118,60 @@ def resolve_serving_model(options: ServeOptions) -> ResolvedServingModel:
         metadata=metadata,
         profile=profile,
     )
+
+
+def _visible_gpu_count() -> int:
+    import torch
+
+    return int(torch.cuda.device_count())
+
+
+def _refuse_unsupported_replicas(dp_degree: int, backend: str) -> None:
+    """``--dp-degree N > 1`` is CUDA's one-worker-per-GPU replica set, refused
+    before any snapshot resolution elsewhere, and on CUDA when N exceeds the visible GPUs."""
+    if dp_degree <= 1:
+        return
+    from difflet.serving.errors import feature_not_supported
+
+    if backend != "cuda":
+        raise feature_not_supported(
+            f"--dp-degree {dp_degree}: data-parallel serving replicas (one resident worker "
+            f"per GPU) exist on the CUDA backend only; the {backend} "
+            "backend serves one resident worker"
+        )
+    count = _visible_gpu_count()
+    if dp_degree > count:
+        raise feature_not_supported(
+            f"--dp-degree {dp_degree} exceeds the {count} visible GPU(s) "
+            "(CUDA_VISIBLE_DEVICES); one resident replica needs one GPU"
+        )
+
+
+def _refuse_video_replicas(dp_degree: int, metadata: ServingModelMetadata) -> None:
+    """``--dp-degree N > 1`` for a video model on CUDA: the video service
+    dispatches one video job at a time, so every replica past the first would only hold a GPU."""
+    if dp_degree <= 1 or metadata.output_modality != "video":
+        return
+    from difflet.serving.errors import feature_not_supported
+
+    raise feature_not_supported(
+        f"--dp-degree {dp_degree}: {metadata.model_type} serves video, and the video service "
+        "runs one video job at a time, so a second resident replica would sit idle; serve "
+        "with one replica (a concurrent video dispatcher is a follow-up)"
+    )
+
+
+def _cuda_serving_metadata(entry_name: str, model_id: str) -> ServingModelMetadata:
+    path = _CUDA_SERVING_OVERLAYS.get(entry_name)
+    if path is None:
+        from difflet.serving.errors import feature_not_supported
+
+        raise feature_not_supported(
+            f"{model_id} cannot be served on the CUDA backend: serving on CUDA exists for "
+            "Qwen-Image, FLUX.1-dev and Wan 2.2; set DIFFLET_BACKEND=trainium "
+            "for the staged Neuron path"
+        )
+    return load_factory(path)()
 
 
 def _ensure_builtin_serving_models_registered() -> None:

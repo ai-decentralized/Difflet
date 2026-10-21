@@ -24,7 +24,6 @@ import os
 
 import torch
 from torch import nn
-from diffusers.models.attention_dispatch import dispatch_attention_fn
 
 from difflet.ops import (
     ColumnParallelLinear,
@@ -103,7 +102,7 @@ class _StaticQwenImageRealRope(nn.Module):
         self._global_rank_ref = (global_rank,) if global_rank is not None else ()
         self.cp_group = cp_group
 
-    def forward(self, img_shapes=None, *args, **kwargs):
+    def forward(self, img_shapes=None, *args, max_txt_seq_len: int | None = None, **kwargs):
         del args, kwargs
         if img_shapes is not None:
             _batch, ph, pw = img_shapes[0][0]
@@ -120,7 +119,15 @@ class _StaticQwenImageRealRope(nn.Module):
             img_sin = scatter_to_process_group_spmd(
                 img_sin, partition_dim=0, rank=cp_rank, process_group=self.cp_group
             )
-        return (img_cos, img_sin), (self.txt_cos, self.txt_sin)
+        txt_cos, txt_sin = self.txt_cos, self.txt_sin
+        if max_txt_seq_len is not None and int(max_txt_seq_len) < int(txt_cos.shape[0]):
+            # diffusers passes the current text length; a trimmed prompt is shorter
+            # than the precomputed table. Trainium/TPU pass the full length: no-op there.
+            # ``.clone()``: a view keeps the 1024-row table as ``_base`` and torch.compile's
+            # duck sizing then ties the prompt length to it and recompiles per prompt.
+            txt_cos = txt_cos[:max_txt_seq_len].clone()
+            txt_sin = txt_sin[:max_txt_seq_len].clone()
+        return (img_cos, img_sin), (txt_cos, txt_sin)
 
 
 class _ZeroQwenImageAttention(nn.Module):
@@ -411,16 +418,21 @@ class _QwenImageTrainiumAttnProcessor:
                 )
                 joint_hidden_states = attn_out.reshape(b, h, s_q, d).transpose(1, 2)
             else:
-                joint_hidden_states = dispatch_attention_fn(
-                    joint_query,
-                    joint_key,
-                    joint_value,
-                    attn_mask=attention_mask,
-                    dropout_p=0.0,
-                    is_causal=False,
-                    backend=self._attention_backend,
-                    parallel_config=self._parallel_config,
+                # Masked joint attention (a padded prompt on an eager backend): the
+                # same op in (B, H, S, d) layout, so the (B, 1, 1, S_k) key mask
+                # broadcasts per batch row instead of against folded heads.
+                q = joint_query.transpose(1, 2)
+                k = joint_key.transpose(1, 2)
+                v = joint_value.transpose(1, 2)
+                attn_out = attention(
+                    q,
+                    k,
+                    v,
+                    scale=1.0 / math.sqrt(head_dim),
+                    causal=False,
+                    attention_mask=attention_mask,
                 )
+                joint_hidden_states = attn_out.transpose(1, 2)
 
         joint_hidden_states = joint_hidden_states.flatten(2, 3)
         joint_hidden_states = joint_hidden_states.to(txt_query.dtype)
@@ -436,16 +448,51 @@ class _QwenImageTrainiumAttnProcessor:
         return img_attn_output, txt_attn_output
 
 
+def _trim_text_padding(
+    encoder_hidden_states: torch.Tensor, mask: torch.Tensor
+) -> tuple[torch.Tensor, torch.Tensor | None]:
+    """Slice the text stream to the last valid token across the batch.
+
+    Exact for the image output: a masked key contributes nothing to any query, text
+    positions past the last valid one are keys to nobody and their own outputs are
+    discarded, so dropping those columns changes the image tokens only through
+    reduction order. Rows shorter than the longest keep their mask; when every row is
+    full after the slice the mask is dropped (no mask → flash SDPA). An all-False mask
+    (no valid token anywhere) is left as it is, as diffusers does.
+    """
+    mask = mask.to(torch.bool)
+    if not bool(mask.any()):
+        return encoder_hidden_states, mask
+    positions = torch.arange(mask.shape[1], device=mask.device)
+    length = int((positions * mask).amax().item()) + 1  # one host sync per forward
+    encoder_hidden_states = encoder_hidden_states[:, :length]
+    mask = mask[:, :length]
+    if bool(mask.all()):
+        return encoder_hidden_states, None
+    return encoder_hidden_states, mask
+
+
 class _QwenImageTransformerTraceModule(nn.Module):
     """Fix non-tensor Qwen-Image pipeline args at trace time."""
 
-    def __init__(self, config):
+    def __init__(self, config, *, apply_text_mask: bool = False, trim_text_padding: bool = False):
         super().__init__()
         from diffusers.models.transformers.transformer_qwenimage import (
             QwenImageTransformer2DModel,
         )
 
         self.config = config
+        # Whether the prompt padding mask reaches the joint attention. False keeps the
+        # Trainium/TPU behaviour (mask dropped; see forward). The CUDA backend sets True so
+        # padded prompts match upstream diffusers.
+        self.apply_text_mask = bool(apply_text_mask)
+        # Whether the padding is sliced off before the DiT instead of masked:
+        # the same output as masking (see _trim_text_padding), but the joint sequence shrinks
+        # to the real prompt and, when no row is ragged, the mask disappears so SDPA can take
+        # the flash kernel. Eager backends only; needs the mask to know what is padding.
+        if trim_text_padding and not apply_text_mask:
+            raise ValueError("trim_text_padding needs apply_text_mask")
+        self.trim_text_padding = bool(trim_text_padding)
         self.guidance_embeds = bool(getattr(config, "guidance_embeds", False))
         self.context_parallel_enabled = bool(getattr(config, "context_parallel_enabled", False))
         self.cp_mode = str(getattr(config, "cp_mode", "gather_kv"))
@@ -541,8 +588,23 @@ class _QwenImageTransformerTraceModule(nn.Module):
     ) -> torch.Tensor:
         # The diffusers mask path computes active text length with arange/where.
         # That currently fails during XLA tracing for the fixed-shape M4a
-        # boundary, so the first Trainium closure uses full-length cached text
-        # embeddings and keeps mask support as a separate follow-up.
+        # boundary, so the Trainium/TPU closures (apply_text_mask=False) use
+        # full-length cached text embeddings and drop the mask. Eager backends
+        # (CUDA) pass it through: diffusers then builds the joint key mask
+        # [text_mask | ones(image)] and the processor applies it, so a prompt
+        # padded to text_seq_len gives the same output as diffusers' unpadded run.
+        if self.apply_text_mask:
+            if self.context_parallel_enabled:
+                raise NotImplementedError(
+                    "the text mask with context parallelism is not supported on CUDA yet"
+                )
+            mask_arg = encoder_hidden_states_mask
+            if self.trim_text_padding and mask_arg is not None:
+                encoder_hidden_states, mask_arg = _trim_text_padding(
+                    encoder_hidden_states, mask_arg
+                )
+        else:
+            mask_arg = None
         del encoder_hidden_states_mask
         guidance_arg = guidance if self.guidance_embeds else None
 
@@ -572,7 +634,7 @@ class _QwenImageTransformerTraceModule(nn.Module):
             hidden_states=hidden_states,
             timestep=timestep,
             encoder_hidden_states=encoder_hidden_states,
-            encoder_hidden_states_mask=None,
+            encoder_hidden_states_mask=mask_arg,
             guidance=guidance_arg,
             img_shapes=img_shapes * int(hidden_states.shape[0]),
             return_dict=False,
@@ -630,4 +692,5 @@ __all__ = [
     "_replace_qwen_linears_for_tp",
     "_row_parallel_like",
     "_safe_tensor_parallel_size",
+    "_trim_text_padding",
 ]

@@ -185,7 +185,7 @@ class NeuronWanApplication(MultiComponentApplication):
         backbone_compile_shapes = None
         raw_shapes = kwargs.get("shapes")
         if raw_shapes:
-            from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+            from difflet.pipeline.bucketing import canonicalize_shapes
 
             self.compile_shapes = canonicalize_shapes(raw_shapes)
             height, width, num_frames = (
