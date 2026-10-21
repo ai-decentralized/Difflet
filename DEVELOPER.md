@@ -114,12 +114,221 @@ parity testing.
 Rules:
 
 - The surface is **additive only**. Dispatch is frozen at first import per process.
-- Each op has a Trainium implementation under `difflet/backends/trainium/ops_impl/` and,
-  ideally, a CPU reference under `difflet/backends/cpu/ops_impl/`.
-- `cuda/` and `rocm/` are stubs.
+- Each op has a Trainium implementation under `difflet/backends/trainium/ops_impl/`, a CPU
+  reference under `difflet/backends/cpu/ops_impl/` (the numerical oracle), a TPU
+  implementation under `difflet/backends/tpu/ops_impl/`, and a CUDA implementation under
+  `difflet/backends/cuda/ops_impl/`. `rocm/` is a stub.
+- The Megatron-style parallel layers, the shard-at-load helpers and the safetensors loader are
+  shared by the torch backends in `difflet/backends/_torch_megatron/`; TPU and CUDA each bind
+  them to their own collectives (`build_parallel_layers(collectives)`).
 
 The repo-wide import guard (`scripts/test_imports.sh`) enforces that modeling files import only
-from `difflet.ops`, `torch`, stdlib, `diffusers`, and `transformers`.
+from `difflet.ops`, `torch`, stdlib, `diffusers`, and `transformers`. It runs in two tiers: the
+backend-neutral modules always, the Trainium modules only when the Neuron SDK is importable.
+
+### CUDA backend (Release 1)
+
+`DIFFLET_BACKEND=cuda` runs Qwen-Image at `tp=1` on one NVIDIA GPU, with the DiT going through
+`difflet.ops` and the text encoder, VAE and scheduler loop on the same device in one process.
+There is no ahead-of-time compile step: `compile()` writes `cuda_manifest.json`, `load()` builds
+the module eagerly from the diffusers safetensors. Validated on an RTX PRO 6000 (Blackwell,
+96 GB) with torch 2.11.0+cu128: 50 steps at 1024×1024 in **16.5 s eager (0.33 s/step)**, 12.4 s with
+`--torch-compile`, 10.0 s with `--teacache-cadence 2`; 58 GB peak; the DiT parity gates (all-ones
+and padded masks) and the whole-pipeline gate vs diffusers (PSNR 41.2 dB eager, 40.2 dB compiled)
+passing. Upstream diffusers' pipeline runs the same 50 steps in 15.2 s on that card. The DiT
+forward alone: 323 ms eager, 243 ms compiled, 300 ms for diffusers (`scripts/cuda_bench_dit.py`). Plan, decisions and status log:
+`docs/plans/2026-10-16-cuda-backend-support.md`.
+
+```bash
+# environment (CUDA 12.8+ wheel; Blackwell needs it) — see requirements-cuda.lock
+uv venv --python 3.11 .venv
+uv pip install --python .venv/bin/python --index-url https://download.pytorch.org/whl/cu128 torch==2.11.0
+uv pip install --python .venv/bin/python -e ".[test,cuda]"
+scripts/cuda_env_check.sh                       # driver, capability, torch build, bf16 matmul
+
+# first image through the CLI (one process; download + eager "compile" + generate)
+hf download Qwen/Qwen-Image
+DIFFLET_BACKEND=cuda difflet run --model-id Qwen/Qwen-Image --tp-degree 1 \
+    --prompt "a photorealistic cat sitting in a sunlit garden" --output /tmp/qwen.png --steps 50
+scripts/cuda_smoke.sh --prompt "..." --output /tmp/qwen.png     # same, logged to /tmp/logs
+DIFFLET_BACKEND=cuda python scripts/cuda_smoke.py --steps 50     # per-phase timings, peak memory
+DIFFLET_BACKEND=cuda difflet run --model-id Qwen/Qwen-Image --prompt "..." --output /tmp/qwen.png \
+    --torch-compile --teacache-cadence 2             # measured options: compiled DiT blocks,
+                                                     # skip every 2nd step after warm-up; both off by default
+
+# DiT forward, Difflet vs diffusers on identical inputs: timed median + kernel categories
+DIFFLET_BACKEND=cuda python scripts/cuda_bench_dit.py --model-path <snapshot dir> [--torch-compile]
+
+# oracles against upstream diffusers: DiT-level (all-ones and padded-prompt masks), then
+# whole pipeline (prompt in, image out, same initial noise)
+DIFFLET_BACKEND=cuda python tests/numerical/cuda_parity_gpu.py --model-path <snapshot dir>
+DIFFLET_BACKEND=cuda python scripts/cuda_e2e_vs_diffusers.py --model-path <snapshot dir>
+DIFFLET_RUN_CUDA_NUMERICAL=1 pytest tests/numerical/test_cuda_vs_diffusers.py tests/numerical/test_cuda_e2e_vs_diffusers.py -v
+
+# the CUDA column of the CLI matrix (download → compile → timed generate, results.json)
+python scripts/verify_cli_cuda.py --steps 50
+
+# OpenAI-compatible serving: one resident process, the model stays loaded between requests
+DIFFLET_BACKEND=cuda difflet serve --model-id Qwen/Qwen-Image --port 8091
+scripts/cuda_serve_smoke.sh --output /tmp/qwen-serve.png --steps 50   # start, /ready, 2 requests, timings
+
+# CPU-host gate (no SDK, no GPU) — also what CI runs
+scripts/cpu-gate.sh
+```
+
+**Prompt padding mask.** Difflet pads every prompt to 1024 text tokens; a typical prompt is
+about 16. The shared Qwen modeling code drops the padding mask (it does not trace under XLA),
+so on Trainium and TPU the DiT attends over the padding. On CUDA the padding is sliced off before
+the DiT (`_QwenImageTransformerTraceModule(apply_text_mask=True, trim_text_padding=True)`, set only
+by the CUDA transformer application): the same image output as masking it (masked keys contribute
+nothing; the dropped positions' own outputs are discarded), but the joint sequence is ~4112 tokens
+instead of 5120 and SDPA takes the flash kernel again — 516 → 323 ms per DiT forward. Ragged batches
+keep a mask for the shorter rows. `tests/unit/models/qwen_image/test_qwen_text_mask.py` pins both
+against diffusers on CPU. Trainium/TPU outputs are unchanged by this.
+
+**Measured options (both off by default; eager is the premise).** `--torch-compile`
+(`difflet serve --torch-compile`, or `application_kwargs={"torch_compile": True}`) compiles each
+DiT block with inductor (`max-autotune-no-cudagraphs`, `dynamic=True` so one graph serves every
+prompt length): 0.33 → 0.25 s/step. Expect two compilations at load (the warm-up runs twice under
+the flag: dynamo's guard on a `None` block argument forces the second; ~16 s together with a warm
+inductor cache, more on a fresh box), then no recompiles — `TORCH_LOGS=recompiles` shows them. Parity moves but
+stays inside the bf16 noise (rel_l1 0.88× the bf16 control vs fp32). CUDA-only: the other backends
+refuse the flag. `--teacache-cadence N` runs the existing probe-free TeaCache controller (skip every
+Nth step after warm-up): cadence 2 → 0.20 s/step at PSNR 38.5 dB against the full run. The
+calibrated and online-delta TeaCache modes need the probe path on CUDA and are refused.
+
+**Flux on CUDA (verified on the RTX PRO 6000).** `modeling_flux.py` is backend-neutral since
+the Trainium wrapper classes live in `difflet/models/flux/trainium_backbone.py` (bodies
+unchanged), the layer-boundary markers resolve per backend in `difflet/layers/markers.py`
+(identity off Trainium), and `FluxDiTConfig` (`difflet/models/flux/dit_config.py`) replaces the
+Trainium `InferenceConfig` elsewhere. On CUDA, Difflet's own `NeuronFluxTransformer2DModel` runs
+on the CUDA ops from the diffusers safetensors (`difflet/backends/cuda/flux/transformer.py`; the
+single-stream block's `skip_bias_add` / `reduce_output=False` / `process_group=` contract is now
+part of the shared and CUDA ops) and a thin `FluxDiTAdapter` lets diffusers' `FluxPipeline` drive
+it with CLIP, T5, the scheduler and the VAE on the same GPU. The modeling is pinned against
+diffusers' `FluxTransformer2DModel` on CPU (`tests/unit/models/flux/test_flux_vs_diffusers_cpu.py`,
+and a two-step `FluxPipeline` run around the adapter in `test_flux_cuda_application.py`).
+
+```bash
+# Both FLUX repos are gated: accept the license on the model page, then `hf auth login`.
+hf download black-forest-labs/FLUX.1-dev --exclude "flux1-dev.safetensors" --exclude "ae.safetensors"
+DIFFLET_BACKEND=cuda difflet run --model-id black-forest-labs/FLUX.1-dev --tp-degree 1 \
+    --prompt "..." --output /tmp/flux.png --steps 28 --guidance-scale 3.5
+scripts/cuda_smoke_flux.sh --prompt "..." --output /tmp/flux.png --steps 28
+DIFFLET_BACKEND=cuda python tests/numerical/cuda_parity_flux_gpu.py --model-path <snapshot dir>
+DIFFLET_BACKEND=cuda python scripts/cuda_e2e_flux_vs_diffusers.py --model-path <snapshot dir>
+DIFFLET_RUN_CUDA_NUMERICAL=1 pytest tests/numerical/test_cuda_flux_vs_diffusers.py tests/numerical/test_cuda_flux_e2e_vs_diffusers.py -v
+python scripts/verify_cli_cuda.py                # Qwen-Image at 50 steps and FLUX.1-dev at 28
+```
+
+Measured on the RTX PRO 6000 (2026-10-18): `difflet run` writes a 1024×1024 image in 23.2 s for
+28 steps after a 36.5 s load; DiT parity vs diffusers rel_l1 0.987× the bf16 control (same-dtype
+distance 0.398×); whole-pipeline e2e vs diffusers' `FluxPipeline` PSNR 40.35 dB / cosine 0.99980
+(floors 35 dB / 0.998); the CLI matrix passes both cells. Flux on CUDA refuses TeaCache, SP, CP, CFG-parallel, TAEF1,
+`--host-vae`, bucketed shapes and `--torch-compile` as F5b. The Trainium byte-identity of the
+split is argued (verbatim move, CPU suites) but not re-run on a trn2.
+
+**Wan 2.2 on CUDA (verified on the RTX PRO 6000).** `Wan-AI/Wan2.2-T2V-A14B-Diffusers`
+runs on one GPU at `tp=1` through Difflet's own backend-neutral Wan DiT (`modeling_wan.py`) with
+**both 14B experts resident** (`enable_transformer_2=True` is the CUDA default; Trainium/TPU keep
+False) and the true-CFG path: `difflet/models/wan/cuda_application.py` holds one
+`CudaWanTransformerApplication` per expert (`difflet/backends/cuda/wan/transformer.py`, diffusers
+safetensors loaded through the shared `_torch_megatron` loader with the `ffn.net_in/net_out` rename
+from the neutral `difflet/models/wan/dit_config.py`, lifted from the TPU port), UMT5 and
+`AutoencoderKLWan` on the GPU behind callables, and drives the backend-neutral `WanOrchestrator`
+(boundary-ratio expert switch at timestep 875, cond + uncond passes per step, loop latents on the
+host in fp32 as on TPU). `difflet run --model-id Wan-AI/Wan2.2-T2V-A14B-Diffusers` writes an MP4
+(`difflet/cli/orchestrators/wan_cuda.py`, 40 steps, `--num-frames` default 9, `--guidance-scale`
+default 4.0 with `guidance_scale_2` 3.0 below the boundary). Measured 2026-10-18 (Workstation
+Edition card): load 703 s cold from the volume (118 GB of fp32 shards cast to bf16), 9 frames at
+480×832 in 55 s for 40 steps (1.38 s/step, two passes per step), 71.3 GiB peak (73,035 MiB)
+with both experts resident; DiT parity vs diffusers per expert rel_l1 1.051× / 1.043× the bf16
+control (same-dtype 0.870× / 0.819×, cosine 0.9988 / 0.9997); whole-video e2e vs diffusers'
+`WanPipeline` from the same noise PSNR 26.3 dB / cosine 0.9961 with the fp32 timestep (27.5 dB /
+0.9970 under Release 1's bf16 cast), floors 25 dB / 0.99. Diffusers generates the same clip in
+44.6 s; the 10 s gap is unmeasured (the host latents round trip is far too small to explain it)
+and belongs to F4b. The e2e PSNR is well below Qwen's and Flux's; F1b measured the first suspect,
+the timestep: the CUDA DiT now receives it in fp32 (`timestep_dtype="float32"`, a per-component
+property the shared orchestrator reads; Trainium and TPU keep their model-dtype cast), which
+brings each DiT call closer to diffusers (rel_l1 1.084× → 1.039× the control at timestep 999,
+where bf16 rounds to 1000) but leaves the 40-step trajectory 1.2 dB further away (26.3 dB vs 27.5
+dB with the old cast; the old-cast `model` variant ran on both the Workstation and the Server
+Edition cards and matched to the digit, the fp32 variant on the Server Edition only), so a
+single-seed A/B does not support the timestep as the gap. Both sides combine CFG in bf16 (Difflet
+on host tensors the DiT returned in bf16, diffusers on the device). F9 measured the e2e metric's
+own noise floor: diffusers against itself with its timestep rounded through bf16 lands at
+23.8–28.6 dB over seeds 0–2, Difflet against diffusers at 26.3–28.9 dB on the same seeds. Difflet vs diffusers overlaps
+diffusers' own perturbation spread, so the gap to Qwen and Flux need not indicate a Difflet
+defect (the ranges are not the same, and n = 3 cannot show there is none); the noise
+floor is an upper bound on the timestep-cast effect (it also absorbs run-to-run nondeterminism
+of the perturbed run; the exact runs are deterministic). The former suspects (the host scheduler
+step, the bf16 latents/text casts, the empty-prompt negative embeds) are not needed to explain
+the gap, nor excluded by it. The floors
+stay 25 dB / 0.99; the noise floor's worst seed is below 25 dB, so a gate stated relative to it
+is the recommended follow-up. Both sides decode the VAE in bf16, so it is not a parity suspect.
+A Wan 2.2 snapshot without `transformer_2/` is refused (a partial download), not run on one
+expert.
+`Wan-AI/Wan2.1-T2V-14B-Diffusers` is routed to the same path but unverified on a GPU; diffusers'
+Wan 2.1 defaults (50 steps, guidance 5.0) differ from the 40 / 4.0 used here.
+
+**Two GPUs on CUDA (verified on 2× RTX PRO 6000 over PCIe).** Decision D6's order: data
+parallel and CFG-parallel first. `difflet run --dp 2 --requests requests.jsonl` runs one
+single-GPU replica per card through the existing request router (`difflet/cli/dp/`): each worker
+gets `CUDA_VISIBLE_DEVICES` for its card, loads once, claims requests from the shared manifest and
+writes each output; the one-process orchestrator's batch mode does the loop. Measured: four
+50-step Qwen-Image requests in 58 s wall on two cards against 190 s as four serial `difflet run`
+calls and 79 s as a `--dp 1 --requests` batch on one card (one load, four generates); every
+compared image (all four from `--dp 2`, two from `--dp 1`) is byte-identical to its reference.
+`difflet run --model-id Wan-AI/... --cfg-parallel` re-execs itself under `torchrun --standalone
+--nproc_per_node=2` (`difflet/cli/runner.py`): `CudaBackend.prepare_runtime` joins NCCL at
+`WORLD_SIZE > 1`, the CUDA mesh builds one `torch.distributed` group per non-trivial axis from
+`MeshSpec.axis_groups`, and the unchanged Wan modeling scatters the batch of two to one branch per
+rank and all-gathers the result each step; both ranks run the whole orchestrator loop (SPMD) and
+rank 0 writes. Measured: the 40-step, 9-frame clip in 26.1 s on two cards against 50.9 s serially
+on one (1.95×, one all-gather per step over PCIe), bit-identical to the serial video (max_abs 0);
+68,074 / 67,519 MiB resident on the two cards. The torchrun child dies with its parent
+(`PR_SET_PDEATHSIG`); a batch request that fails inside a two-rank world fails that worker fast so
+the router records it. Still refused: context parallel, tensor parallel across PCIe and
+`--sp`, `--cfg-parallel` for Qwen-Image and Flux (single-pass / distilled); `--dp` with
+`--cfg-parallel` needs four cards and is unverified.
+
+**Verifying the CUDA backend.** A GPU session runs, per model, the smoke (`difflet run`), the DiT
+parity script under `tests/numerical/` and its gate, and the e2e script under `scripts/` and its
+gate; then `scripts/verify_cli_cuda.py` and the serving smoke. The results — per-gate status, the
+support matrix (PASS / LIMIT / N/A / NOT MEASURED) and the list of what was never run — are
+summarised in `docs/verification/cuda-release1-evidence.md`.
+
+**Serving on CUDA.** `difflet serve` keeps the serving engine's one resident worker
+process; on CUDA that worker holds a single opaque `pipeline` stage —
+`DiffletPipeline.from_pretrained(backend="cuda")` kept loaded, `app.generate()` per request —
+instead of the three Neuron stage applications (`difflet/serving/orchestrators/qwen_image_cuda.py`,
+selected by backend name in `difflet/serving/model_registry.py`). The worker loads the model with
+the same `DiffletPipeline.from_pretrained` arguments as `difflet run` (pinned to the commit the
+server resolved at startup) and runs each request through the same `generate()` call:
+`num_inference_steps` (default 50), `seed`, the profile's one shape. Three deliberate
+differences from the CLI: the HTTP layer caps steps at 1..50; `guidance_scale` is accepted only
+at its no-op value 4.0 and refused otherwise (`feature_not_supported` — the model has
+`guidance_embeds=False`, so any value would be a silent no-op; the CLI refuses the flag
+outright); prompts beyond 1024 tokens past the chat template are refused (`prompt_too_long`)
+where the CLI truncates silently. Other shapes are refused with `profile_mismatch`. At startup,
+`--tp-degree > 1` / `--sp` are refused naming F6 and `--shapes` naming F3, before the snapshot is
+resolved; `--cp-degree > 1`, `--cfg-parallel` and a TeaCache flag are refused earlier still by
+the shared profile builder with its own wording (they are F2b / F4 work). `--tp-degree` defaults
+to 1 on CUDA. One request runs at a time; a 50-step request takes what `difflet run` takes on
+the same card (measured 38.6 s served vs 38.5 s CLI on an RTX PRO 6000 Workstation Edition,
+~17 s on the Server Edition; ready in 56 s including load and the startup smoke). A request
+that waits longer than `--queue-timeout` (30 s default — shorter than one 50-step request on
+the Workstation card, so raise it when clients queue) gets 429 `queue_timeout`, and a request
+past `--request-timeout` restarts the worker (full reload plus the 4-step smoke) because
+`generate()` is not interruptible mid-denoise. Trainium and TPU serving are
+untouched.
+
+Not in Release 1 (follow-ups F1–F8 in the plan; Wan, Flux, serving and the second card have
+landed as F1, F5, F3b and F2 for the shapes and models above, with their own follow-ups):
+context parallel, tensor parallel across PCIe (need-triggered), multi-shape serving on
+CUDA, Wan and Flux serving on CUDA, serving on two GPUs, Wan follow-ups (F1b:
+TeaCache, `--shapes`, 81-frame clips, I2V, `--negative-prompt`, batch > 1), Flux follow-ups,
+CUDA graphs, calibrated/online-delta TeaCache, FP8, `flash-attn`, custom kernels.
 
 ## Compile cache
 
