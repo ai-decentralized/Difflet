@@ -8,7 +8,7 @@
 
 **Tech Stack:** unchanged from `docs/plans/2026-10-16-cuda-backend-support.md`: Python ≥ 3.10, torch (CUDA 12.8+ wheel), `diffusers==0.38.0`, `safetensors`, `pytest`; `torch.distributed` + NCCL + `torchrun` for CFG-parallel and data-parallel replicas. No new dependency.
 
-**Spec:** the reviewer's architecture comment on the Qwen-Image CUDA PR (ai-decentralized/Difflet#84, 2026-10-21, "Architecture: one stack per model × backend"), reproduced in the next section. The merge condition it set (the Flux fusion out of `modeling_flux.py`) is met on the current stack; this document is the agreed follow-up: design before code, and no further CUDA model until the generic layer exists.
+**Spec:** the reviewer's architecture comment on the Qwen-Image CUDA PR (ai-decentralized/Difflet#84, 2026-10-21, "Architecture: one stack per model × backend"), reproduced in the next section. The merge condition it set (the Flux fusion out of `modeling_flux.py`) is met on the current stack; this document is the agreed follow-up: design before code, and no further CUDA model until the generic layer exists. The comment points to vLLM-Omni's RFC on kernel reuse and hardware integration (vllm-project/vllm-omni#7382) as the model for levels 1 to 3; the next-but-one section says what this design takes from it.
 
 ---
 
@@ -23,6 +23,25 @@
 | 5. Load / serve | — | one stack per model | One generic CUDA application and orchestrator; each model supplies a small spec (pipeline class, output kind, smoke request, validation) plus its real differences. |
 
 The real differences the brief names: rope from ids and the split `proj_out` for Flux; the prompt trim for Qwen-Image; two experts, CFG-parallel, the fp32 timestep and video output for Wan.
+
+---
+
+## What this design takes from vLLM-Omni RFC #7382
+
+The RFC (open, first phase under way) is about where kernels and hardware-specific code live and how each reuse is proven. It covers this design's levels 1 to 3. It says nothing about levels 4 and 5: vLLM-Omni already has one model runner, so a generic per-backend application, serving adapter and CLI orchestrator are Difflet's own problem.
+
+Already consistent with it: shared operations on one public surface, model-specific computation with its model, existing dispatch reused and no new runtime registry (here `difflet.ops`); load-time module replacement as a valid integration pattern (Level 3); moving code by re-exporting first, then moving, keeping the old import as a forwarding shim (G6). Its rejected alternative "copy a vendor directory tree into every model" is the reviewer's critique of the current per-model CUDA stacks.
+
+Adopted from it, each folded into the section named:
+
+| From the RFC | In this design |
+|---|---|
+| Layout and arithmetic variants of a "same" fusion are explicit, and a consumer keeps its own reference chain unless the shared op is proven to reproduce it | Level 2 (the op's signature and its preconditions) |
+| The model decides whether to use a fusion; the operation decides which implementation runs for valid inputs | G12; Levels 2 and 3 |
+| A caller that always takes the reference path proves nothing about the fast path: tests assert the selected path, not only the output | G11; Levels 1 to 3; shared tests |
+| A hardware-specific block is accepted on checkpoint keys, non-trivial weights, the selected class, block parity and then a real model run | Level 3, "Acceptance for a swap" |
+| Contracts are per operation, not one universal tolerance, and each change carries a pinned evidence record with unrun cells left "pending" | G7; Level 1, "The ops index" |
+| Moves preserve behaviour; a change to defaults, errors or compile behaviour is reviewed on its own, and a move is checked for performance non-regression | G10; Phase 2; Risks |
 
 ---
 
@@ -95,10 +114,12 @@ This table is the content of the per-model specs and drivers. Everything not in 
 | G4 | **The transformer subclasses stay; the base class owns the lifecycle.** `CudaApplicationBase._prepare_module` becomes the one implementation (materialise → `load_weights` → device → `requires_grad_(False)` → eval → assert → swaps → compile), with `load_weights(module)`, `repeated_blocks(module)` and `apply_load_time_swaps(module)` as the hooks a model implements. | A single `CudaTransformerApplication(spec)` with loader and block-list callables in the spec | A fifty-line subclass is easier to read than a spec with six callables; it is also what the TPU backend does, so the Trainium → TPU → CUDA reading order stays the same. |
 | G5 | **Acceptance for every Level 5 phase is byte-identical output per model at a fixed seed against the pre-refactor build**, on `run` and `serve`, eager. Compiled mode joins the gate only once Phase 2's first task has shown the compiled md5 is stable run to run; otherwise compiled mode is gated on parity against eager within a recorded tolerance. | Parity against diffusers only | The stack already proved eager determinism across cards and across `run`/`serve` (`docs/verification/cuda-release1-evidence.md`); a refactor that is byte-identical to itself has nothing to re-prove upstream. The compiled path's run-to-run identity was never measured: `max-autotune` picks kernels by benchmarking, so it is measured first, not assumed. |
 | G6 | **Per-model unit tests are kept during migration through re-export shims and deleted with the shims in the last phase.** New shared tests are parametrised over the three specs. | Rewrite the tests as each file moves | 252 CUDA tests name today's classes and module paths (census below); moving them in the same commit as the code doubles every review. Shims keep each phase's diff to its subject. |
-| G7 | **Level 1's tolerance table is one test file with one table; bf16 entries are measured on the GPU in Phase 1, not invented here.** fp32 entries are the ones today's tests already use (`atol=1e-5` attention, `1e-6` linear/norm). | Guess bf16 tolerances in the doc | A tolerance nobody measured is either so loose it catches nothing or so tight it fails on the first card with a different reduction order. |
+| G7 | **Level 1's tolerance table is one test file with one table; each row names its reference and says whether it must match exactly or within a tolerance; bf16 entries are measured on the GPU in Phase 1, not invented here.** fp32 entries are the ones today's tests already use (`atol=1e-5` attention, `1e-6` linear/norm). `difflet/ops/README.md` lists every op, and gives every fusion and every op with more than one implementation on a backend a written contract. | Guess bf16 tolerances in the doc; one tolerance for every op | A tolerance nobody measured is either so loose it catches nothing or so tight it fails on the first card with a different reduction order. An op that must reproduce a model's rounding chain exactly and an op that may add bf16 noise are different contracts; one number for both hides one of them. |
 | G8 | **The GPU scripts (`scripts/cuda_e2e_*`, `scripts/cuda_bench_*`, `tests/numerical/cuda_parity*_gpu.py`) are out of scope here** beyond a note on what they would become. | Fold them into the same series | They are evidence tooling, not production code; the brief lists them but asks for the production layering. They collapse once the generic application exists (one script taking `--model`), and that is a later, smaller PR. |
 | G9 | **Defaults have one owner.** Shape comes from `ModelEntry.default_shape` in `difflet/registry.py` (already the registry's); steps, guidance and fps live in the spec only, and the CLI, serving metadata and application read them from there. | A spec copy of everything | Today the shape is in the registry and in each CLI/serving/application file, and steps/guidance in three places per model; a spec that restates the shape would be a fourth copy. |
-| G10 | **Refusals are two lists, not one.** `refused_cli_flags` and `refused_application_kwargs`, each `(name, reason)`, because the two namespaces differ (`--teacache-online-delta` vs `teacache_online_delta_alpha`; `--host-vae` is never an application kwarg). One behaviour change is accepted: Qwen-Image's application will refuse `shapes=` like the other two. | One list applied to both | A flag that is spelled differently from its kwarg would be silently un-refused on one side. |
+| G10 | **Refusals are two lists, not one, and this series reproduces today's lists exactly.** `refused_cli_flags` and `refused_application_kwargs`, each `(name, reason)`, because the two namespaces differ (`--teacache-online-delta` vs `teacache_online_delta_alpha`; `--host-vae` is never an application kwarg). Qwen-Image's application does not refuse `shapes=` today and its spec keeps it that way; making it refuse `shapes=` like Flux and Wan is a behaviour change with its own small PR after Phase 5. | One list applied to both; fixing the Qwen-Image gap inside the refactor | A flag spelled differently from its kwarg would be silently un-refused on one side. A behaviour change inside a move cannot be reviewed as one, and the move's acceptance (G5) is that nothing changes. |
+| G11 | **A test that claims a fast path asserts that the fast path ran.** Attention asserts the SDPA kernel chosen for the shapes the models use (flash, cuDNN or efficient, never `math`); a Level 3 swap reports what it applied and its test asserts the swapped forward executed; a Level 2 consumer test asserts the fused path for the inputs it means to fuse and the model's own chain for the rest. | Compare outputs only | A caller that always falls back passes every output test and proves nothing about the fused code. The 3-D-to-4-D lift in `ops_impl/attention.py` exists because SDPA was silently choosing the math kernel. |
+| G12 | **For a fusion, the model decides whether; the op or swap decides which.** The model owns enablement and policy (a constructor option, a size threshold); the op or swap owns implementation choice for valid inputs and its own reference. | The op decides everything from its inputs | The same fused kernel can win on large inputs and lose on small ones. In vLLM-Omni's measurements one fused QK/RoPE made the smallest request about 4.7% slower on an A100, so that model enables it only above a token threshold: model policy, not op dispatch. |
 
 ---
 
@@ -130,6 +151,18 @@ The test is parametrised over the backends importable on the host (`cpu` always;
 
 **Where the bf16 numbers come from.** Phase 1 runs the table on the GPU once with tolerances at `inf`, records the max abs and rel error per row in the status log, and sets each tolerance to the smallest power of ten above the measured error. The ring and Ulysses attention modes are not in the table: CUDA raises for them, and the table should say what a backend must pass, not what it may skip.
 
+**Exact or tolerance, and which path ran (G7, G11).** Each row names its reference and its kind: `exact` rows (a pure move, or an op that must reproduce a fixed rounding chain) compare with `torch.equal` and also assert dtype, shape and strides, since `torch.equal` checks neither dtype nor NaN placement; `tolerance` rows use the row's `atol`/`rtol`. Rows for ops with more than one implementation on a backend also assert which one ran: the CUDA attention rows record the SDPA kernel through `platform.sdpa_kernel_report` and fail if a model shape lands on `math`.
+
+**The ops index.** `difflet/ops/README.md` lists every op on the surface in one table (op, backends that implement it, reference, exact or tolerance, consumers). Every fusion, and every op with more than one implementation on a backend, also gets a five-part contract:
+
+1. tensor shapes, layouts and dtypes, and the numerics, including intermediate casts and where rounding happens;
+2. the implementations per backend and when each is selected;
+3. the reference and the error behaviour for unsupported and invalid inputs;
+4. the public signature;
+5. the consumers, each with its own policy for using it (G12).
+
+Each qualification run adds a record line under its op: commit, device and software versions, shapes and dtype, the selected path, the baseline, the criterion and the result. A cell nobody has run says "pending"; a run on one device does not qualify another. A unit test asserts that every name `difflet.ops` exports appears in the index.
+
 **What each model still supplies.** Nothing. Models do not appear at this level.
 
 **What a new backend writes.** Its `ops_impl/` package. The table then tells it exactly which op it got wrong and by how much.
@@ -138,28 +171,40 @@ The test is parametrised over the backends importable on the host (`cpu` always;
 
 ## Level 2 — Cross-model fusions in `difflet.ops`
 
-**Today.** None. The brief's example, q/k norm followed by rope, is done in three different ways:
+**Today.** None. The brief's example, q/k norm followed by rope, is done four ways across Difflet's models, and they differ in exactly the dimensions a shared op has to state:
 
-- Flux (`difflet/models/flux/modeling_flux.py:1240-1255`): per-head `CustomRMSNorm` on q and k, then `difflet.layers.embeddings.apply_rotary_emb(x, freqs_cis)` with a stacked `(S, head_dim, 2)` table. This is `difflet.layers`, not `difflet.ops`.
-- Qwen-Image (`difflet/models/qwen_image/modeling_qwen_image.py:327-343`): per-head `CustomRMSNorm`, then the modeling's own `_apply_qwen_rope_real(x, (cos, sin))` with repeat-interleaved tables.
-- Wan (`difflet/models/wan/modeling_wan.py:532-542`): `RMSNorm` across heads over the full `inner_dim` (`qk_norm="rms_norm_across_heads"`), head split, then `difflet.ops.apply_rotary_emb(x, cos, sin)`.
+| Model | q/k norm | Rope layout | Rope arithmetic |
+|---|---|---|---|
+| Flux (`difflet/models/flux/modeling_flux.py:1240-1255`) | per head, `CustomRMSNorm` | interleaved pairs; `(S, D, 2)` table; `difflet.layers.embeddings.apply_rotary_emb` | fp32, cast back once |
+| Qwen-Image (`difflet/models/qwen_image/modeling_qwen_image.py:57-66, 327-343`) | per head, `CustomRMSNorm` | interleaved pairs; repeat-interleaved `(cos, sin)`; `_apply_qwen_rope_real` | fp32, cast back once |
+| Wan (`difflet/models/wan/modeling_wan.py:532-542`) | across all heads, over the full `inner_dim` | interleaved pairs; `difflet.ops.apply_rotary_emb(x, cos, sin)` | the tables' dtype |
+| MiniMax-H3, Trainium only (`difflet/models/minimax_h3/modeling_minimax_h3.py:55-71`) | per head, `nn.RMSNorm` | first and second half, over the leading `rotary_dim` channels only | the input dtype |
 
-The rotation is the same interleaved-pair math in all three; the norm is per-head in two and across-heads in one; the table layouts differ. "Two models use it" is true for Flux and Qwen only.
+"Two models use it" holds for Flux and Qwen-Image only, and even those two reach their rotation through different code. vLLM-Omni's RFC found the same in its own models: its fused QK/RoPE first served a half-split model, its second consumer needed an interleaved variant, and that consumer keeps its own reference chain because the op's generic fallback rounds differently from it.
 
-**Proposal.** One op, additive to the frozen surface:
+**Proposal.** One op, additive to the frozen surface, with the variants in its signature:
 
 ```python
 # difflet/ops/attention.py
-def qk_norm_rope(q, k, *, norm_q_weight, norm_k_weight, eps: float, freqs_cos, freqs_sin):
-    """Per-head RMSNorm of q and k in fp32, then the interleaved-pair rotation, one kernel
-    where the backend has one. q, k are (B, H, S, D); tables are (S, D)."""
+def qk_norm_rope(q, k, *, norm_q_weight, norm_k_weight, eps: float, cos, sin,
+                 interleaved: bool, rotary_dim: int | None = None):
+    """Per-head RMSNorm of q and k with fp32 statistics, then rotation of the leading
+    rotary_dim channels (all when None) as interleaved pairs or as first/second half.
+    q, k are (B, H, S, D); cos, sin are (S, rotary_dim). The contract in difflet/ops/README.md
+    states where each implementation rounds."""
 ```
 
-Every backend's first implementation is the composition of the ops it already has (`rms_norm_fp32` then `apply_rotary_emb`), which makes the op bit-identical to today's two calls on CPU, Trainium and TPU by construction. CUDA may then replace it with a fused Triton kernel behind the same name once a DiT bench shows a win; the tolerance table gets a row for it.
+The op owns its reference implementation and its dispatch for valid inputs. It does not own any model's numerics: each consumer keeps its current chain as its reference and switches to the op only after a test on each backend shows the op reproduces that chain bit for bit at the model's shapes and dtype. Where it does not, the model keeps its own code; Wan's across-heads norm and a rope computed in a different dtype are two such cases. Whether a model uses the op at all is the model's decision (G12). A CUDA fused kernel then sits behind the op for the inputs it supports, with its own tolerance row and path assertions (G11).
 
-**Precondition that is not met yet.** Flux's and Qwen's modeling would have to call the op, which means (a) converting Flux's `(S, D, 2)` table and Qwen's complex/repeat-interleaved tables to the `(cos, sin)` layout at construction time and (b) a Trainium verification run proving the traced graph is unchanged, since both files are traced by Neuron. The 2026-10-16 plan deferred exactly this kind of Flux modeling change until a Trainium path exists (its D13). So Level 2 is scheduled after Level 5 and gated on three things in this order: a Trainium verification host, a measured CUDA win from the fused kernel on a Flux or Qwen DiT bench, and the tolerance row. If the win is not there, the op is not added; the layering survives without it.
+**Preconditions, none met yet.**
 
-**What each model still supplies.** Its tables in the `(cos, sin)` layout. Wan keeps its across-heads norm and does not use the op.
+1. Flux's and Qwen-Image's modeling would call the op, and both files are traced by Neuron. A Trainium verification run must show the traced graph unchanged; the 2026-10-16 plan deferred this kind of Flux modeling change until such a path exists (its D13).
+2. A transformer bench on Flux or Qwen-Image shows the fused kernel winning at the shapes those models run, including the smallest request shape.
+3. Each consumer has its bit-exactness test against its own chain and its path assertions.
+
+So Level 2 is scheduled after Level 5, in that order of preconditions. If the win is not there, the op is not added; the layering stands without it.
+
+**What each model still supplies.** Its decision to use the op, its tables in the op's layout, and its own reference chain. Wan and MiniMax-H3 do not use the op in this series.
 
 ---
 
@@ -180,6 +225,15 @@ def apply_load_time_swaps(self, module) -> list[tuple[str, int]]:
 ```
 
 Flux's subclass applies `fuse_proj_out` over `single_transformer_blocks` when `fuse_proj_out=True` and returns `[("fuse_proj_out", n)]`; the base logs the pairs so a parity run's record says which swaps were live. The ordering guarantee (swaps before compile) is then the base class's, tested once.
+
+**Who decides (G12).** The swap's option is the model's enablement, off by default; the swap function decides only whether it can apply to a given block (tp > 1, already fused) and reports what it did.
+
+**Acceptance for a swap.** The same four obligations vLLM-Omni's RFC sets for a hardware-specific block:
+
+1. *Construction and weights.* The swap runs after `load_weights`, so checkpoint keys and strict loading are untouched; a test loads the same non-trivial weights into a swapped and an unswapped block. Today's `test_split_state_dict_still_loads_strict_and_the_fused_block_has_no_split_keys` and the bit-equal fused-weight check already cover this for `proj_out`.
+2. *Block parity.* The swapped block is compared with the unswapped block and with diffusers' own block on the same inputs, with weights that make every branch observable, in the dtype and at the shapes the model runs. For `proj_out` this is the missing piece: today's comparison is a tiny fp32 model on the CPU within `1e-4`, while the end-to-end shift was seen in bf16 on the GPU. The reviewer asked for exactly this block-level check against diffusers before any noise-floor explanation of the shift is accepted.
+3. *Selection.* `apply_load_time_swaps` returns what it applied, and the test asserts that the swapped forward ran, not only that the module was replaced (G11).
+4. *Model.* The parity harness against diffusers and the byte-identity check of G5, recorded separately with the swap off (the default) and on.
 
 **What each model still supplies.** Its swap functions and the option that enables each. A model with no swap implements nothing.
 
@@ -362,8 +416,10 @@ Generic code, estimated: `common/cuda_spec.py` ~110, `core/compile.py` ~40, `cor
 
 After the migration:
 
-- `tests/unit/ops/test_backend_tolerance.py` (Level 1): the table, parametrised over backends present.
+- `tests/unit/ops/test_backend_tolerance.py` (Level 1): the table, parametrised over backends present; `exact` rows also assert dtype, shape and strides; rows with more than one implementation on a backend assert which one ran (G11).
+- `tests/unit/ops/test_ops_index.py` (Level 1): every name `difflet.ops` exports appears in `difflet/ops/README.md`.
 - `tests/unit/backends/test_cuda_compile.py` (Level 4): `compile_blocks` replaces every block in every list in place and returns the count; the three subclasses declare the lists and flags the table above says; swaps run before compile (Level 3).
+- `tests/unit/backends/test_cuda_flux_proj_out.py` (Level 3): the four obligations of "Acceptance for a swap" that run on the CPU, including that `apply_load_time_swaps` reports the swap and the swapped forward ran. The bf16 block-parity check against diffusers runs on the GPU and is recorded in the ops index.
 - `tests/unit/backends/test_cuda_application.py` (Level 5): the existing base tests, plus tests parametrised over `ALL_SPECS = (QWEN_IMAGE_SPEC, FLUX_SPEC, WAN_SPEC)`: the contract signatures match `DiffletPipeline`'s reflective expectations (the existing `test_cuda_application_signatures_match_the_pipeline_contract` generalised); `compile`/`load`/`has_compiled_artifacts` visit every expert's subdirectory; off-valued refused kwargs are accepted and on-valued ones raise naming the key; `__call__` dispatches a prompt and raw tensors for every spec and a bundle for the two specs with a bundle type; `generate` before `load` is an explicit error.
 - `tests/unit/serving/test_cuda_serving.py`: parametrised over `ALL_SPECS`: `prepare_runtime` yields an eager bundle with no compile specs; unsupported profiles are refused before the download; the runtime plan is accepted by the resident worker environment; the smoke request is at the profile shape with `smoke_steps`; the validator enforces shape, guidance range or pinned value, prompt budget, and the `accepts_*` flags; `generate_output` passes exactly the CLI's kwargs and returns the spec's MIME type; cancellation never reaches `generate`; shutdown releases the pipeline; the parent-process import of the module never loads torch (subprocess).
 - `tests/unit/cli/test_cuda_orchestrator.py`: parametrised over `ALL_SPECS`: `run` is download → compile → generate; refusals name the flag and happen before any download; defaults and overrides reach `from_pretrained` and `generate`; `world_size` is `cfg × cp × tp`; the torchrun re-exec and the data-parallel loop (today's Wan CLI tests, which are the only ones exercising them) run for whichever spec accepts CFG-parallel.
@@ -382,7 +438,7 @@ Assume a diffusers image model with backend-neutral modeling already on `difflet
 1. `CudaModelSpec` instance in `difflet/common/registry/<model>.py` (~25 lines) and `cuda_serving_metadata()` as one helper call (~3 lines).
 2. `difflet/backends/cuda/<model>/transformer.py` (~50 lines): `build_module`, `load_weights`, `get_example_inputs`, `repeated_blocks`, `forward`.
 3. `difflet/backends/cuda/<model>/driver.py` (~100–200 lines): `experts`, `load_companions`, `generate`, `dit_input_contract`, `input_bundle_type`.
-4. The `backend == "cuda"` branch in `difflet/models/<model>/entry.py` (~15 lines, mostly its parallel refusals), the three two-line serving subclasses, the entry in `model_registry`'s CUDA table and in `main._get_orchestrator`'s spec lookup.
+4. The `backend == "cuda"` branch in `difflet/models/<model>/entry.py` (~15 lines, mostly its parallel refusals), the three two-line serving subclasses, the entry in `model_registry`'s CUDA table and in `main._get_orchestrator`'s spec lookup. If it uses a shared fusion or adds a swap: its consumer line in `difflet/ops/README.md`, its bit-exactness test against its own chain, and the swap's acceptance record.
 5. Tests: one line appending the spec to `ALL_SPECS`, and a `test_<model>_driver.py` for its own differences.
 6. GPU evidence: a parity run against diffusers and the smoke on `run` and `serve`, recorded in a status log.
 
@@ -407,8 +463,9 @@ The order is chosen so that each phase's diff is one subject and so that the saf
 
 ### Phase 1 — Level 1 tolerance table and the scan tests (no production change)
 
-- [ ] Add `tests/unit/ops/test_backend_tolerance.py` with the fp32 rows at today's tolerances and `xfail(strict=True)` rows for bf16; CPU-only run green.
-- [ ] On a GPU: run the table with the CUDA column, record max abs/rel error per row in the status log, set the bf16 tolerances, remove the `xfail` markers.
+- [ ] Add `tests/unit/ops/test_backend_tolerance.py` with the fp32 rows at today's tolerances, each marked `exact` or `tolerance` with its reference, and `xfail(strict=True)` rows for bf16; CPU-only run green.
+- [ ] Add `difflet/ops/README.md` (the index of every op, plus the five-part contract for each op with more than one implementation on a backend; no fusion exists yet) and `tests/unit/ops/test_ops_index.py`.
+- [ ] On a GPU: run the table with the CUDA column, record max abs/rel error per row in the status log, set the bf16 tolerances, remove the `xfail` markers; the attention rows assert the SDPA kernel for the shapes Qwen-Image, Flux and Wan run (G11), and the selected kernels go into the index as the first qualification records.
 - [ ] Add the `"cuda"`-literal scan test for the generic path (ROCm item 2) with today's fourteen sites as the allowed list, so the list can only shrink.
 - [ ] Add the subprocess test that imports the three CUDA serving modules and `model_registry` with torch blocked, pinning the parent-process rule before Phase 4 moves that code.
 
@@ -417,13 +474,15 @@ The order is chosen so that each phase's diff is one subject and so that the saf
 - [ ] GPU, before any change: run `--torch-compile` twice per model on this build (cold and warm inductor cache), record whether the md5 is stable; set G5's compiled-mode rule accordingly in the status log.
 - [ ] Add `difflet/backends/cuda/core/compile.py::compile_blocks` with its test.
 - [ ] Move the shared `_prepare_module` body into `CudaApplicationBase` with the hooks `load_weights(module)` (default: the `get_state_dict` path), `repeated_blocks(module)`, `apply_load_time_swaps(module)`, `compile_dynamic`, `warmup_passes_when_compiled`, and `requires_grad_(False)` in the base; the three transformer subclasses shrink to their hooks. Flux's swap call moves into `apply_load_time_swaps`.
-- [ ] Existing transformer, base and application tests pass unchanged; add the parametrised compile-declaration test.
+- [ ] Existing transformer, base and application tests pass unchanged; add the parametrised compile-declaration test, and the CPU part of the `proj_out` swap's acceptance (it reports the swap; the swapped forward ran).
 - [ ] GPU: byte-identity per model (`run`, seed 0) against the Phase 1 build; eager, and compiled under the rule set above.
+- [ ] GPU: no slowdown. The per-model transformer benches (`scripts/cuda_bench_dit.py`, `scripts/cuda_bench_flux_dit.py`, `scripts/cuda_bench_wan_dit.py`), eager and compiled, old and new builds alternated A-B-B-A after warm-up, at least five samples each; the acceptable band is written in the status log before the run, and the result with its spread after it. Compile time is recorded apart from steady-state time.
+- [ ] GPU: the `proj_out` swap's block-parity check against diffusers' block in bf16 at Flux's shapes, recorded in the ops index whatever it shows. It changes nothing by default (the swap stays off) and answers the reviewer's question about the 10 dB shift.
 
 ### Phase 3 — The spec and the CLI move
 
 - [ ] Add `difflet/common/cuda_spec.py` (`CudaModelSpec`, `PromptBudget`, `CudaModelDriver`) and the three spec instances in `difflet/common/registry/<model>.py`; `difflet/backends/cuda/core/pipeline_kwargs.py` takes `cuda_pipeline_kwargs` from the CLI module with the backend name as a parameter; `qwen_image_cuda.py` re-exports it.
-- [ ] Move `CudaOneProcessOrchestrator` to `difflet/cli/orchestrators/cuda.py`, spec-driven; the three `<model>_cuda.py` CLI files become the spec-bound subclasses plus re-exports of their constants; `main._get_orchestrator` still returns those three classes.
+- [ ] Move `CudaOneProcessOrchestrator` to `difflet/cli/orchestrators/cuda.py`, spec-driven; the three `<model>_cuda.py` CLI files become the spec-bound subclasses plus re-exports of their constants; `main._get_orchestrator` still returns those three classes. Each spec's refusal lists reproduce today's per-model refusals exactly, including that Qwen-Image's application does not refuse `shapes=` (G10).
 - [ ] Existing CLI tests pass through the re-exports; add `tests/unit/cli/test_cuda_orchestrator.py` parametrised over `ALL_SPECS`; add `difflet/cli/orchestrators/cuda.py` and `difflet/common/cuda_spec.py` to `SCANNED`.
 - [ ] GPU: byte-identity per model on `run`, including Wan `--cfg-parallel` and the data-parallel router path.
 
@@ -437,7 +496,7 @@ The order is chosen so that each phase's diff is one subject and so that the saf
 
 - [ ] Add `core/application.py::CudaApplication`; move the three drivers to `difflet/backends/cuda/<model>/driver.py`; `difflet/models/<model>/cuda_application.py` becomes a re-export; `entry.py` constructs `CudaApplication(SPEC, …)`.
 - [ ] Existing application tests pass through the re-exports; add the parametrised application test and the three driver test files (moved tests, not new behaviour).
-- [ ] GPU: byte-identity per model on `run` and `serve`; the three parity harnesses against diffusers, unchanged numbers in the status log.
+- [ ] GPU: byte-identity per model on `run` and `serve`; the three parity harnesses against diffusers, unchanged numbers in the status log; the A-B-B-A timing check of Phase 2 repeated on whole `run` requests.
 
 ### Phase 6 — Delete the shims
 
@@ -447,11 +506,14 @@ The order is chosen so that each phase's diff is one subject and so that the saf
 
 ### Phase 7 — Level 2, conditional
 
-- [ ] Precondition check, recorded in the status log: a Trainium verification host exists, and a DiT bench on Flux or Qwen with a prototype fused q/k-norm+rope kernel shows a win worth the modeling change.
-- [ ] Add `difflet.ops.qk_norm_rope` with the composed reference in every backend and a tolerance row; convert Flux's and Qwen's tables to `(cos, sin)`; call the op from both modelings; Trainium graph proven unchanged; CUDA fused kernel behind the same name.
+- [ ] Precondition check, recorded in the status log: a Trainium verification host exists, and a transformer bench on Flux or Qwen-Image with a prototype fused q/k-norm+rope kernel shows a win at those models' shapes, including the smallest request shape.
+- [ ] Add `difflet.ops.qk_norm_rope` with explicit `interleaved` and `rotary_dim`, its own reference in every backend, its contract in the ops index and its tolerance rows.
+- [ ] Per consumer, Flux then Qwen-Image: a bit-exactness test of the op against the model's own chain on each backend at the model's shapes and dtype; switch the model to the op only where it passes, keeping its own chain otherwise; the model's enable decision (G12); path assertions (G11); Trainium graph proven unchanged.
+- [ ] The CUDA fused kernel behind the same name, with its tolerance row, its path assertions and its qualification records.
 
 ### Afterwards, separate and small
 
+- Qwen-Image's application refuses `shapes=` like Flux and Wan (G10): a behaviour change in its own PR, with its test, after Phase 5.
 - The six GPU scripts become `scripts/cuda_e2e_vs_diffusers.py --model` and `scripts/cuda_bench_dit.py --model`, reading the spec (G8).
 - The ROCm package (item 1 above) when a ROCm host is scheduled.
 
@@ -466,7 +528,10 @@ The order is chosen so that each phase's diff is one subject and so that the saf
 | **The serving parent starts importing torch** through a spec placed under the backend package. | Phase 3 | G3 puts the spec in the torch-free registry layer; the subprocess test from Phase 1 fails the build if any serving-side import pulls torch. |
 | **The spec grows into a hook bag.** Each new model adds "just one more optional callable". | Phase 3 onward | G3's rule (two generic readers or it is the driver's), enforced in review; the spec stays a frozen dataclass of data plus one driver import string. |
 | **Wan is the only video, CFG-parallel, two-expert model**, so "generic" is shaped by one example. | Phases 3–5 | The generic code branches on `spec.output` and `accepts_cfg_parallel` only; the expert loop is the *same* loop for one expert. If a second video model arrives and the branch is wrong, the branch is the whole surface to change. |
-| **Level 2 touches Trainium-traced modeling.** | Phase 7 | Scheduled last, conditional on a Trainium verification host and a measured win; the op's first implementation is the composition of existing ops, so the graph is the same ops in the same order. |
+| **Level 2 touches Trainium-traced modeling, and a "same" fusion is not the same arithmetic.** Flux and Qwen-Image rotate in fp32, Wan in the tables' dtype, MiniMax-H3 half-split in the input dtype. | Phase 7 | Scheduled last, conditional on a Trainium verification host and a measured win; each consumer keeps its own chain unless a per-backend bit-exactness test shows the op reproduces it; the variants are explicit in the op's signature. |
+| **A fast path silently never runs.** A caller that always falls back passes every output test. | every level | G11: tests assert the selected path, not only the output. |
+| **A behaviour change rides inside a move**, where it cannot be reviewed as one and breaks the byte-identity argument. | Phases 2–6 | G10: the series reproduces today's behaviour; the one known change (Qwen-Image refusing `shapes=`) is its own PR afterwards. |
+| **A move slows the model without changing a byte**, for example a compile graph break introduced by moving the compile loop. | Phases 2 and 5 | The A-B-B-A timing check with a band set before the run; compile time recorded apart from steady state. |
 | **Test churn hides regressions.** 252 tests name today's paths; a rewrite in the same commit as a move is unreviewable. | Phases 3–6 | G6: shims first, parametrised tests added beside the old ones, deletion in its own phase with a before/after count. |
 | **The open 20-PR stack moves under this series.** | Phase 1 start | This series bases on the stack's top (or on `main` once it merges) and touches no file the stack's remaining review changes; Phase 1 has no production diff and can land first either way. |
 | **Compile quirks are per model and easy to flatten by accident** (Qwen's `dynamic=True` and double warm-up; Flux's two lists). | Phase 2 | The three flags are declared per subclass and asserted by the parametrised compile test; the Qwen recompile test stays. |
@@ -483,8 +548,9 @@ Each is worded so that "yes" takes the recommended answer.
 2. **Base on `main` after the stack merges**, with Phase 1 (no production diff) openable against the stack's top in the meantime?
 3. **Level 2 stays out of this series** (Phase 7 is written down with its preconditions and is cut if the measured win is absent)?
 4. **One PR per phase** (six likely, seven at most), each landable alone, because Phases 2–5 each need their own GPU byte-identity run?
-5. **Accept the one behaviour change** that Qwen-Image's application refuses `shapes=` like Flux and Wan (G10)?
+5. **Make Qwen-Image's application refuse `shapes=` like Flux and Wan in its own PR after Phase 5**, not inside the migration (G10)?
 6. **Keep `fuse_proj_out`, `timestep_dtype` and `enable_transformer_2` programmatic-only** (no new CLI flags or serving profile fields in this series)?
+7. **Keep Difflet's layout of model under backend** (`difflet/backends/cuda/<model>/`, as `trainium/` and `tpu/` already do) rather than vLLM's newer vendor-under-model layout (`models/<model>/{nvidia,amd,common}/`, cited from vllm-project/vllm#42770 through the RFC)? Switching would move the Trainium and TPU per-model code too, which is outside this series.
 
 ---
 
@@ -493,3 +559,4 @@ Each is worded so that "yes" takes the recommended answer.
 | Date | Phase | Verdict | Evidence |
 |---|---|---|---|
 | 2026-10-21 | Design | Draft on a branch cut from the top of the CUDA stack; duplication measured at `c45d2059`; CPU baseline 2819 passed / 176 skipped; CUDA test census 252. Stress-tested against the code before commit: sixteen findings folded in (two Hub-id sets, the torch-free serving parent, the test census, Phase 3 vs the CLI routing test, the base lifecycle's `get_state_dict` path, compiled-mode stability unmeasured). | This document. |
+| 2026-10-21 | Design | Revised against vLLM-Omni RFC #7382, which the reviewer cited: rope variants explicit and per-consumer exactness at Level 2 (the earlier "bit-identical by construction" claim did not hold); the model decides whether to use a fusion (G12); fast-path assertions (G11); acceptance for a swap at Level 3; per-op contracts and the ops index (G7); behaviour changes and timing checks kept apart from moves (G10, Phases 2 and 5); open question 7 on directory layout. | This document; vllm-project/vllm-omni#7382. |
