@@ -74,8 +74,12 @@ def check(args) -> int:
 
     oracle = None if args.oracle == "none" else torch.load(os.path.expanduser(args.oracle))
     frames = FRAMES if oracle is not None else int(args.frames)
-    cp = int(os.environ.get("WORLD_SIZE", "1"))
-    parallel = DiffletParallelConfig(tp_degree=1, cp_degree=cp, cp_mode="ulysses" if cp > 1 else "gather_kv")
+    world, tp = int(os.environ.get("WORLD_SIZE", "1")), int(args.tp_degree)
+    if world % tp:
+        raise SystemExit(f"world size {world} is not divisible by --tp-degree {tp}")
+    cp = world // tp
+    parallel = DiffletParallelConfig(tp_degree=tp, cp_degree=cp, cp_mode="ulysses" if cp > 1 else "gather_kv")
+    layout = f"TP{tp}" + (f" x CP{cp}" if cp > 1 else "")
     get_backend("neuron").prepare_runtime(parallel)  # core binding + the numerics workarounds
     import torch.distributed as dist
 
@@ -98,7 +102,7 @@ def check(args) -> int:
 
     y = forward().float().cpu()
     if oracle is None:  # timing only: no reference at this length
-        say(f"{frames} frames ({app.num_image_tokens} image tokens), TP1{f' x CP{cp}' if cp > 1 else ''}: "
+        say(f"{frames} frames ({app.num_image_tokens} image tokens), {layout}: "
             f"finite={bool(torch.isfinite(y).all())}, output {tuple(y.shape)}", flush=True)
         times = []
         for _ in range(args.iters):
@@ -113,7 +117,7 @@ def check(args) -> int:
     finite = bool(torch.isfinite(y).all())
     ours, control = (rel(y) if finite else float("nan")), rel(ctl)
     ok = finite and ours <= GATE * control
-    say(f"{'PASS' if ok else 'FAIL'} {args.exec_mode} TP1{f' x CP{cp}' if cp > 1 else ''}: finite={finite} rel_l1={ours:.3e} "
+    say(f"{'PASS' if ok else 'FAIL'} {args.exec_mode} {layout}: finite={finite} rel_l1={ours:.3e} "
           f"({ours / control:.3f}x control {control:.3e}, gate {GATE}x)", flush=True)
     times = []
     for _ in range(args.iters):
@@ -132,6 +136,7 @@ def main() -> int:
     p.add_argument("--oracle")
     p.add_argument("--iters", type=int, default=5)
     p.add_argument("--exec-mode", choices=("compile", "eager"), default="compile")
+    p.add_argument("--tp-degree", type=int, default=1, help="TP degree; CP takes the rest of the world")
     p.add_argument("--frames", type=int, default=FRAMES,
                    help="with --oracle none: the clip length for a timing-only run")
     args = p.parse_args()
