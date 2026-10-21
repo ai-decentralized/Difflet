@@ -207,8 +207,12 @@ def test_cpu_linear_mx_outer_n_reference_matches_logical_linear(monkeypatch, k_d
 
     assert out.shape == (128, 2048)
     assert torch.equal(out, dispatched)
+    # float64: the 0.999 gate sits ~4e-5 above the inherent MX-quantization cosine
+    # (0.99904 for these inputs), and an fp32 reduction over 262,144 elements
+    # eats that margin (0.99898 on torch 2.14 CPU). The reference is exact
+    # (cosine 0.9998 vs an fp64 matmul of the dequantized operands).
     assert torch.nn.functional.cosine_similarity(
-        expected.float().reshape(1, -1), out.float().reshape(1, -1)
+        expected.double().reshape(1, -1), out.double().reshape(1, -1)
     ).item() >= 0.999
     assert diff.mean().item() <= 0.01
     assert diff.max().item() <= 0.05

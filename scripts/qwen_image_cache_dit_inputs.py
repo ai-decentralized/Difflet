@@ -54,51 +54,7 @@ def _prompt_arg(prompts: list[str]) -> str | list[str]:
     return prompts[0] if len(prompts) == 1 else prompts
 
 
-def pad_or_truncate_prompt_embeds(
-    prompt_embeds: torch.Tensor,
-    prompt_embeds_mask: torch.Tensor | None,
-    *,
-    max_sequence_length: int,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Return fixed-length prompt embeddings for the Trainium transformer graph."""
-
-    batch_size, seq_len, hidden_size = prompt_embeds.shape
-    if prompt_embeds_mask is None:
-        prompt_embeds_mask = torch.ones(
-            batch_size,
-            seq_len,
-            dtype=torch.bool,
-            device=prompt_embeds.device,
-        )
-    else:
-        prompt_embeds_mask = prompt_embeds_mask.to(device=prompt_embeds.device, dtype=torch.bool)
-
-    if seq_len > max_sequence_length:
-        return (
-            prompt_embeds[:, :max_sequence_length, :].contiguous(),
-            prompt_embeds_mask[:, :max_sequence_length].contiguous(),
-        )
-    if seq_len == max_sequence_length:
-        return prompt_embeds.contiguous(), prompt_embeds_mask.contiguous()
-
-    pad_len = max_sequence_length - seq_len
-    embed_pad = torch.zeros(
-        batch_size,
-        pad_len,
-        hidden_size,
-        dtype=prompt_embeds.dtype,
-        device=prompt_embeds.device,
-    )
-    mask_pad = torch.zeros(
-        batch_size,
-        pad_len,
-        dtype=torch.bool,
-        device=prompt_embeds.device,
-    )
-    return (
-        torch.cat([prompt_embeds, embed_pad], dim=1).contiguous(),
-        torch.cat([prompt_embeds_mask, mask_pad], dim=1).contiguous(),
-    )
+from difflet.models.qwen_image.prompt import pad_or_truncate_prompt_embeds  # noqa: E402
 
 
 def normalize_prompt_embeds(

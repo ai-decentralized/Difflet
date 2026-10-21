@@ -743,7 +743,7 @@ def _compile_specs(
         "virtual_core_size": _VIRTUAL_CORE_SIZE,
         "toolchain": toolchain_versions(),
     }
-    from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+    from difflet.pipeline.bucketing import canonicalize_shapes
 
     profile_shapes = getattr(profile, "shapes", None) or (
         (profile.height, profile.width, profile.num_frames),
