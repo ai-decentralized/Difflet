@@ -17,6 +17,8 @@ from difflet.serving.engines.resident_worker import (
     _apply_worker_runtime_environment,
     _error_from_reply,
     _reply_from_error,
+    _ResidentWorkerProcess,
+    _WorkerHeartbeatState,
 )
 from difflet.serving.types import (
     ArtifactBinding,
@@ -803,6 +805,15 @@ def test_worker_heartbeat_logs_independently_of_reply_queue(caplog):
     assert heartbeats
     assert any(event["state"] == "busy" for event in heartbeats)
     assert any(event["stage"] == "pipeline" for event in heartbeats)
+    # The per-stage observability rides the heartbeat the worker already sends.
+    residency = next(event["stage_load"] for event in heartbeats if event.get("stage_load"))
+    assert [stage["stage_id"] for stage in residency["stages"]] == ["pipeline"]
+    breakdown = next(
+        event["last_request_stages"] for event in heartbeats if event.get("last_request_stages")
+    )
+    assert [stage["stage_id"] for stage in breakdown["stages"]] == ["pipeline"]
+    assert "worker stage residency" in caplog.text
+    assert "worker stage breakdown" in caplog.text
     busy_with_queue = next(
         event for event in heartbeats if event["state"] == "busy" and event["queued_requests"] == 1
     )
@@ -810,3 +821,119 @@ def test_worker_heartbeat_logs_independently_of_reply_queue(caplog):
     assert busy_with_queue["pending_requests"] == 2
     assert busy_with_queue["request_capacity"] == 9
     assert "running_requests=1 queued_requests=1 pending_requests=2 capacity=9" in caplog.text
+
+
+# --- CUDA: the worker pins its GPU (plan F2b, `difflet serve --dp-degree N`) -----------------
+
+
+def _cuda_runtime(core_ids: tuple[int, ...]) -> ResolvedRuntimeBundle:
+    runtime = _runtime()
+    plan = runtime.runtime_plan
+    stage = replace(plan.stages[0], placement="cuda", artifact_id=None)
+    return replace(
+        runtime,
+        runtime_plan=replace(
+            plan,
+            environment=replace(plan.environment, available_core_ids=core_ids),
+            stages=(stage,),
+        ),
+    )
+
+
+def test_cuda_worker_pins_its_gpu(monkeypatch, preserve_worker_environment):
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    _apply_worker_runtime_environment(_cuda_runtime((1,)))
+    assert os.environ["CUDA_VISIBLE_DEVICES"] == "1"
+
+
+def test_cuda_worker_pins_within_the_parent_s_visible_devices(
+    monkeypatch, preserve_worker_environment
+):
+    # The plan's core ids count from the parent's visible devices, as the DP router's do.
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "4,5")
+    _apply_worker_runtime_environment(_cuda_runtime((1,)))
+    assert os.environ["CUDA_VISIBLE_DEVICES"] == "5"
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "4")
+    with pytest.raises(ValueError, match="outside the parent"):
+        _apply_worker_runtime_environment(_cuda_runtime((1,)))
+
+
+def test_neuron_worker_environment_is_unchanged(monkeypatch, preserve_worker_environment):
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    _apply_worker_runtime_environment(_runtime())
+    assert "CUDA_VISIBLE_DEVICES" not in os.environ
+    assert os.environ["NEURON_RT_VISIBLE_CORES"] == "0"
+
+
+def test_heartbeat_state_carries_stage_observability_without_losing_it_on_state_changes():
+    state = _WorkerHeartbeatState(model_id="fake/model", profile_identity="p1")
+    state.record_stage_load({"attribution": "per_stage", "stages": [{"stage_id": "text"}]})
+    state.record_request_stages({"request_id": "r1", "stages": [{"stage_id": "text"}]})
+
+    state.set(state="busy", request_id="r2", stage="text")
+    snapshot = state.snapshot()
+
+    assert snapshot["state"] == "busy"
+    # A state transition must not wipe the last request's numbers.
+    assert snapshot["stage_load"]["attribution"] == "per_stage"
+    assert snapshot["last_request_stages"]["request_id"] == "r1"
+
+
+def test_parent_logs_residency_once_and_again_only_when_it_changes(caplog):
+    report = {
+        "backend": "cuda",
+        "probe": "torch.cuda.memory_allocated",
+        "attribution": "per_stage",
+        "scope": "process",
+        "stages": [{"stage_id": "pipeline", "load_seconds": 41.5, "device_bytes": 2 * 1024**3}],
+        "total_device_bytes": 2 * 1024**3,
+        "attributed_device_bytes": 2 * 1024**3,
+        "unattributed_device_bytes": 0,
+        "reason": None,
+    }
+    event = {"model_id": "fake/model", "stage_load": report}
+    log = _ResidentWorkerProcess._log_new_stage_load
+
+    with caplog.at_level(logging.INFO, logger="difflet.serving.engines.resident_worker"):
+        seen = log(event, None)
+        seen = log(event, seen)
+
+    assert seen == report
+    lines = [line for line in caplog.text.splitlines() if "worker stage residency" in line]
+    assert len(lines) == 1
+    assert "attribution=per_stage" in lines[0]
+    assert "pipeline=2.00GiB@41.50s" in lines[0]
+    assert "total=2.00GiB" in lines[0]
+
+
+def test_parent_logs_a_line_per_request_breakdown(caplog):
+    log = _ResidentWorkerProcess._log_new_request_stages
+    first = {
+        "request_id": "r1",
+        "model": "fake/model",
+        "outcome": "completed",
+        "stages": [{"stage_id": "text", "seconds": 1.25}, {"stage_id": "vae", "seconds": 0.5}],
+        "total_seconds": 1.75,
+    }
+    second = {**first, "request_id": "r2"}
+
+    with caplog.at_level(logging.INFO, logger="difflet.serving.engines.resident_worker"):
+        seen = log({"last_request_stages": first}, None)
+        seen = log({"last_request_stages": first}, seen)
+        seen = log({"last_request_stages": second}, seen)
+
+    assert seen == ("r2", "completed")
+    lines = [line for line in caplog.text.splitlines() if "worker stage breakdown" in line]
+    assert len(lines) == 2
+    assert "request_id=r1" in lines[0]
+    assert "text=1.250s vae=0.500s" in lines[0]
+    assert "total=1.750s" in lines[0]
+    assert "request_id=r2" in lines[1]
+
+
+def test_parent_ignores_a_heartbeat_without_stage_observability(caplog):
+    with caplog.at_level(logging.INFO, logger="difflet.serving.engines.resident_worker"):
+        assert _ResidentWorkerProcess._log_new_stage_load({}, None) is None
+        assert _ResidentWorkerProcess._log_new_request_stages({}, None) is None
+
+    assert "worker stage" not in caplog.text

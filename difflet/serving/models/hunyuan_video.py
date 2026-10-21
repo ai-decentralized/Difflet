@@ -11,6 +11,7 @@ from typing import Any
 from difflet.pipeline.compile_cache import toolchain_versions
 from difflet.registry import resolve_model
 from difflet.serving.artifact_manager import ImmutableArtifactManager
+from difflet.serving.engines.stage_observability import record_stage_load
 from difflet.serving.engines.stage_pipeline import (
     ErasedStageRunner,
     ValidatedStageRunner,
@@ -472,58 +473,66 @@ class HunyuanVideoServingStageAdapter:
                 ),
             )
         clip_placement = _clip_placement(runtime.profile)
-        if clip_placement == "host":
-            self.clip_tokenizer, self.clip_model = _load_host_clip(runtime.source.pinned_model_path)
-        else:
-            self.clip_tokenizer = _load_clip_tokenizer(runtime.source.pinned_model_path)
-        llama_binding = runtime.artifacts.require("llama")
-        llama_app = _build_llama_app(
-            runtime.source,
-            runtime.profile,
-            compiled_path=llama_binding.path,
-            for_compile=False,
-        )
-        llama_app.load(str(llama_binding.path))
-        self.llama_app = llama_app
-        self.llama_tokenizer = _load_llama_tokenizer(runtime.source.pinned_model_path)
-        denoiser_binding = runtime.artifacts.require("denoiser")
-        denoiser = _build_denoiser(runtime.source, runtime.profile)
-        # Warm every compiled bucket at startup (one forward per shape via the
-        # application's warmup loop) so the first request at ANY profile shape
-        # sees steady-state latency. Single-shape profiles keep the old
-        # behavior of skipping warmup (the startup smoke covers their one NEFF).
-        denoiser.load(
-            str(denoiser_binding.path),
-            start_rank_id=0,
-            local_ranks_size=runtime.profile.world_size,
-            skip_warmup=not runtime.profile.shapes,
-        )
-        self.denoiser = denoiser
+        with record_stage_load("clip"):
+            if clip_placement == "host":
+                self.clip_tokenizer, self.clip_model = _load_host_clip(
+                    runtime.source.pinned_model_path
+                )
+            else:
+                self.clip_tokenizer = _load_clip_tokenizer(runtime.source.pinned_model_path)
+        with record_stage_load("llama"):
+            llama_binding = runtime.artifacts.require("llama")
+            llama_app = _build_llama_app(
+                runtime.source,
+                runtime.profile,
+                compiled_path=llama_binding.path,
+                for_compile=False,
+            )
+            llama_app.load(str(llama_binding.path))
+            self.llama_app = llama_app
+            self.llama_tokenizer = _load_llama_tokenizer(runtime.source.pinned_model_path)
+        with record_stage_load("denoiser"):
+            denoiser_binding = runtime.artifacts.require("denoiser")
+            denoiser = _build_denoiser(runtime.source, runtime.profile)
+            # Warm every compiled bucket at startup (one forward per shape via the
+            # application's warmup loop) so the first request at ANY profile shape
+            # sees steady-state latency. Single-shape profiles keep the old
+            # behavior of skipping warmup (the startup smoke covers their one NEFF).
+            denoiser.load(
+                str(denoiser_binding.path),
+                start_rank_id=0,
+                local_ranks_size=runtime.profile.world_size,
+                skip_warmup=not runtime.profile.shapes,
+            )
+            self.denoiser = denoiser
         if clip_placement == "neuron":
             # A full-world TP4 component must establish the process communicator
             # before replicated TP1/W4 components, matching the validated Flux
-            # resident load order.
-            clip_binding = runtime.artifacts.require("clip")
-            clip_app = _build_clip_app(runtime.source, runtime.profile)
-            clip_app.load(
-                str(clip_binding.path),
-                start_rank_id=0,
-                local_ranks_size=runtime.profile.world_size,
-                skip_warmup=True,
-            )
-            self.clip_app = clip_app
-        if runtime.profile.host_vae:
-            self.vae = _load_host_vae(runtime.source.pinned_model_path)
-        else:
-            decoder_binding = runtime.artifacts.require("decoder")
-            vae_app = _build_vae_decoder(runtime.source, runtime.profile)
-            vae_app.load(
-                str(decoder_binding.path),
-                start_rank_id=0,
-                local_ranks_size=runtime.profile.world_size,
-                skip_warmup=True,
-            )
-            self.vae_app = vae_app
+            # resident load order. The recorder keeps this second boundary under
+            # the same stage ID as the tokenizer above.
+            with record_stage_load("clip"):
+                clip_binding = runtime.artifacts.require("clip")
+                clip_app = _build_clip_app(runtime.source, runtime.profile)
+                clip_app.load(
+                    str(clip_binding.path),
+                    start_rank_id=0,
+                    local_ranks_size=runtime.profile.world_size,
+                    skip_warmup=True,
+                )
+                self.clip_app = clip_app
+        with record_stage_load("decoder"):
+            if runtime.profile.host_vae:
+                self.vae = _load_host_vae(runtime.source.pinned_model_path)
+            else:
+                decoder_binding = runtime.artifacts.require("decoder")
+                vae_app = _build_vae_decoder(runtime.source, runtime.profile)
+                vae_app.load(
+                    str(decoder_binding.path),
+                    start_rank_id=0,
+                    local_ranks_size=runtime.profile.world_size,
+                    skip_warmup=True,
+                )
+                self.vae_app = vae_app
         self.runtime = runtime
         self.profile = runtime.profile
         clip_runner = (
@@ -743,7 +752,7 @@ def _compile_specs(
         "virtual_core_size": _VIRTUAL_CORE_SIZE,
         "toolchain": toolchain_versions(),
     }
-    from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+    from difflet.pipeline.bucketing import canonicalize_shapes
 
     profile_shapes = getattr(profile, "shapes", None) or (
         (profile.height, profile.width, profile.num_frames),

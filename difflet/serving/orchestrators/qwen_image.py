@@ -11,6 +11,7 @@ from typing import Any
 
 from difflet.common.orchestrators import qwen_image as qwen_common
 from difflet.serving.artifact_manager import ArtifactPublishTarget, ImmutableArtifactManager
+from difflet.serving.engines.stage_observability import record_stage_load
 from difflet.serving.engines.stage_pipeline import (
     ErasedStageRunner,
     ValidatedStageRunner,
@@ -312,11 +313,14 @@ class QwenImageServingStageAdapter:
                 validate_payload=_validate_runtime_payload,
             )
         print("[difflet serve] loading Qwen prompt_encoder stage")
-        self._load_text_stage(profile)
+        with record_stage_load("text"):
+            self._load_text_stage(profile)
         print("[difflet serve] loading Qwen denoiser stage")
-        self._load_denoiser_stage(profile)
+        with record_stage_load("generate"):
+            self._load_denoiser_stage(profile)
         print("[difflet serve] loading Qwen decoder stage")
-        self._load_vae_stage(profile)
+        with record_stage_load("vae"):
+            self._load_vae_stage(profile)
         print("[difflet serve] Qwen shared-worker co-load completed")
         runners: OrderedDict[str, ErasedStageRunner] = OrderedDict(
             (
