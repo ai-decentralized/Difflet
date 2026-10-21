@@ -136,3 +136,18 @@ def test_manifest_precision_schedule_recorded(tmp_path):
 
 def test_manifest_precision_schedule_none():
     assert _spec().manifest_precision_schedule() is None
+
+
+def test_cuda_backend_enters_key_and_adds_toolchain():
+    cuda = _spec(backend="cuda")
+    assert cache_key(cuda) != cache_key(_spec(backend="trainium"))
+    inputs = cuda.cache_inputs()
+    assert inputs["backend"] == "cuda"
+    assert {"triton", "cuda", "cudnn"} <= set(inputs["toolchain"])
+
+
+def test_trainium_key_unchanged_by_cuda_support():
+    inputs = _spec(backend="trainium").cache_inputs()
+    assert "backend" not in inputs
+    assert not {"triton", "cuda", "cudnn"} & set(inputs["toolchain"])
+    assert cache_key(_spec(backend="trainium")) == cache_key(_spec(backend=None))
