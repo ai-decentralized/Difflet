@@ -219,7 +219,7 @@ def build_serving_profile(
                 "multi-shape serving does not support TeaCache: calibrations are frozen "
                 "per shape; drop --shapes or --teacache-speedup."
             )
-        from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+        from difflet.pipeline.bucketing import canonicalize_shapes
         from difflet.cli.orchestrators.base import parse_shapes_arg
 
         try:

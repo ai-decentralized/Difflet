@@ -119,7 +119,7 @@ def allowed_hunyuan_video_latent_shapes(config: Any) -> list[tuple[int, ...]]:
                 int(config.latent_width),
             )
         ]
-    from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+    from difflet.pipeline.bucketing import canonicalize_shapes
 
     shapes = []
     for height, width, num_frames in canonicalize_shapes(compile_shapes):
@@ -438,7 +438,7 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
         self.compile_shapes = None
         raw_shapes = kwargs.get("shapes")
         if raw_shapes:
-            from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+            from difflet.pipeline.bucketing import canonicalize_shapes
 
             self.compile_shapes = canonicalize_shapes(raw_shapes)
             if self.model_version == "1.5" and len(self.compile_shapes) > 1:

@@ -124,7 +124,7 @@ class FluxOrchestrator(ModelOrchestrator):
 
     def _compile_shapes(self):
         """Canonical (h, w) bucket set from --shapes, or None for single-shape."""
-        from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+        from difflet.pipeline.bucketing import canonicalize_shapes
         from difflet.cli.orchestrators.base import parse_shapes_arg
 
         shapes = parse_shapes_arg(getattr(self.args, "shapes", None))

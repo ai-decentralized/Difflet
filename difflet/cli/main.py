@@ -337,6 +337,11 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--guidance-scale", type=float, default=None)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument(
+        "--torch-compile",
+        action="store_true",
+        help="CUDA backend only: torch.compile the DiT blocks (opt-in; eager is the default)",
+    )
+    p.add_argument(
         "--work-dir", default=None, help="Directory for inter-stage tensors (staged models only)"
     )
     p.add_argument(
@@ -838,6 +843,28 @@ def _dispatch_dp(args: argparse.Namespace) -> None:
 
 
 def _get_orchestrator(args: argparse.Namespace):
+    from difflet.backends.registry import current_backend
+
+    if getattr(args, "torch_compile", False) and current_backend() != "cuda":
+        raise SystemExit(
+            "[difflet] --torch-compile is a CUDA-backend option; "
+            f"the {current_backend()} backend does not take it"
+        )
+    if current_backend() == "cuda":
+        # CUDA runs the whole model in one process: no Neuron stages.
+        if args.model_id == "Qwen/Qwen-Image":
+            from difflet.cli.orchestrators.qwen_image_cuda import CudaQwenImageOrchestrator
+
+            return CudaQwenImageOrchestrator(args)
+        if args.model_id in ("black-forest-labs/FLUX.1-dev", "black-forest-labs/FLUX.1-schnell"):
+            from difflet.cli.orchestrators.flux_cuda import FluxCudaOrchestrator
+
+            return FluxCudaOrchestrator(args)
+        raise SystemExit(
+            f"[difflet] {args.model_id} is not supported on the CUDA backend yet; "
+            "set DIFFLET_BACKEND=trainium for the staged Neuron path"
+        )
+
     from difflet.cli.orchestrators.flux import FluxOrchestrator
     from difflet.cli.orchestrators.hunyuan_video import HunyuanVideoOrchestrator
     from difflet.cli.orchestrators.hunyuan_video_15 import HunyuanVideo15Orchestrator
@@ -948,6 +975,15 @@ def main(argv: list[str] | None = None) -> None:
         _validate_teacache(args)
         _validate_dp(args)
         if args.requests_dir is None and (args.requests is not None or (args.dp or 1) > 1):
+            from difflet.backends.registry import current_backend
+
+            if current_backend() == "cuda":
+                print(
+                    "Error: --requests / --dp > 1 are not supported on the CUDA backend in "
+                    "Release 1.",
+                    file=sys.stderr,
+                )
+                raise SystemExit(1)
             _dispatch_dp(args)  # raises SystemExit
 
     # Only for the weight-loading commands, where jemalloc pays off. This list
