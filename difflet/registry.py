@@ -253,6 +253,8 @@ def _register_builtin_flux() -> None:
             supports_cp=True,
             supports_sp=True,
         ),
+        # CUDA: tp=1, one GPU, FluxPipeline around the Difflet DiT.
+        backends=("trainium", "cuda"),
     )
     class _FluxRegistration:
         pass
@@ -281,7 +283,8 @@ def _register_builtin_wan() -> None:
         ),
         # Wan is the second model on the TPU backend, single-expert by default
         # (see difflet/models/wan/tpu_application.py on expert residency).
-        backends=("trainium", "tpu"),
+        # CUDA: tp=1, one GPU, both experts resident by default.
+        backends=("trainium", "tpu", "cuda"),
     )
     class _WanRegistration:
         pass
@@ -387,7 +390,7 @@ def _register_builtin_qwen_image() -> None:
             supports_sp=True,
         ),
         # Qwen-Image is the first model on the TPU backend (plan Phase 4).
-        backends=("trainium", "tpu"),
+        backends=("trainium", "tpu", "cuda"),
     )
     class _QwenImageRegistration:
         pass

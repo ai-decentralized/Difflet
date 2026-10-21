@@ -130,6 +130,11 @@ class ResidentWorkerServingEngine:
             return True
         return self._worker.is_healthy()
 
+    @property
+    def pending_requests(self) -> int:
+        """Admitted requests (running + queued); what a replica dispatcher balances on."""
+        return self._pending
+
     async def generate(self, request: DiffletGenerateRequest) -> GenerateOutput:
         if self._draining:
             raise DiffletServingError(503, "engine_draining", "engine is draining", "server_error")
@@ -1152,6 +1157,12 @@ def _apply_worker_runtime_environment(runtime: ResolvedRuntimeBundle) -> None:
             f"requires {num_cores}, has {len(available_core_ids)}"
         )
     visible_core_ids = available_core_ids[:num_cores]
+    if any(stage.placement == "cuda" for stage in plan.stages):
+        # One worker per GPU: the plan's core ids count from the parent's
+        # visible devices, as the DP router's do, so the worker's ``cuda:0`` is its own card.
+        os.environ["CUDA_VISIBLE_DEVICES"] = _cuda_visible_devices(
+            os.environ.get("CUDA_VISIBLE_DEVICES"), visible_core_ids
+        )
     virtual_core_size = _validated_optional_positive_int(
         "NEURON_RT_VIRTUAL_CORE_SIZE",
         allocation.effective_virtual_core_size,
@@ -1179,6 +1190,19 @@ def _apply_worker_runtime_environment(runtime: ResolvedRuntimeBundle) -> None:
     os.environ["LOCAL_WORLD_SIZE"] = str(child.local_world_size)
     os.environ["RANK"] = str(child.rank)
     os.environ["LOCAL_RANK"] = str(child.local_rank)
+
+
+def _cuda_visible_devices(inherited: str | None, core_ids: tuple[int, ...]) -> str:
+    """``CUDA_VISIBLE_DEVICES`` for a worker that owns ``core_ids`` of the parent's devices."""
+    parent = [d.strip() for d in (inherited or "").split(",") if d.strip()]
+    if not parent:
+        return ",".join(str(core_id) for core_id in core_ids)
+    if max(core_ids) >= len(parent):
+        raise ValueError(
+            f"resident worker GPU ids {core_ids} are outside the parent's "
+            f"CUDA_VISIBLE_DEVICES={inherited!r}"
+        )
+    return ",".join(parent[core_id] for core_id in core_ids)
 
 
 def _validated_optional_positive_int(name: str, value: int | None) -> int | None:

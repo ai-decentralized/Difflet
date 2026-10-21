@@ -80,7 +80,7 @@ class DiffletPipeline:
         )
         canonical_shapes = None
         if shapes:
-            from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+            from difflet.pipeline.bucketing import canonicalize_shapes
 
             canonical_shapes = canonicalize_shapes(shapes)
             if height is None and width is None and num_frames is None:
@@ -325,7 +325,9 @@ def _resolve_load_rank_range(
     start_rank_id: int | None,
     local_ranks_size: int | None,
 ) -> tuple[int | None, int | None]:
-    return get_backend("trainium").resolve_load_rank_range(
+    # The load-rank policy belongs to whichever backend is selected:
+    # Trainium maps one torchrun rank to one NeuronCore; CPU and CUDA pass through.
+    return get_backend().resolve_load_rank_range(
         start_rank_id=start_rank_id,
         local_ranks_size=local_ranks_size,
     )
