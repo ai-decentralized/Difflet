@@ -7,7 +7,9 @@ decode to 4.3e-3; fp32 to 3.3e-7). The encoder is dropped after loading.
 Tiling is always on: diffusers tiles space only, so a tile's activations grow with the clip length
 (at 61 frames, 256 x 256-pixel fp32 tiles needed 2 GB tensors). The tile size is in sample pixels
 (25% overlap, diffusers' default); smaller tiles fit longer clips but blend more seams (against the
-untiled decode, 5 frames: 1.2e-2 at 256 pixels, 3.2e-2 at 128). Both of diffusers' tile attributes
+untiled decode, 5 frames: 1.2e-2 at 256 pixels, 3.2e-2 at 128). The default is 128: at 61 frames 256
+pixels runs out of memory even in bf16, 128 fits (44.7 s, 6.3 GiB peak); temporal chunking would
+lift this. Both of diffusers' tile attributes
 are set: its tiling loop reads the latent-unit sizes, which ``enable_tiling`` does not derive from
 the sample-pixel ones.
 """
@@ -24,7 +26,7 @@ class NeuronHunyuanVideo15VaeDecoderApplication:
     """``load(skip_warmup=False)``, then ``decode(latents) -> video`` ([B, 3, F, H, W], in [-1, 1])."""
 
     def __init__(self, *, model_path, height: int = 480, width: int = 848, num_frames: int = 61,
-                 tile_size: int = 256, dtype=torch.bfloat16, device="neuron") -> None:
+                 tile_size: int = 128, dtype=torch.bfloat16, device="neuron") -> None:
         self.model_path = str(model_path)
         self.height, self.width, self.num_frames = int(height), int(width), int(num_frames)
         self.tile_size, self.dtype, self.device = int(tile_size), dtype, torch.device(device)
