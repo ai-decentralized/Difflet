@@ -16,6 +16,11 @@ with the output gathered; heads split 16/tp; the token refiner likewise), so the
 shards diffusers' checkpoint unchanged. Context parallelism (Ulysses) splits the image tokens across
 the CP group around the blocks, the text stream (729 + 256 + 1000 tokens) replicated.
 
+CFG parallelism (the checkpoint's guider runs classifier-free guidance, scale 6.0, on every step):
+with ``cfg_parallel_enabled`` the cores form two groups along the mesh's cfg axis; ``forward`` takes
+the two branches stacked as a batch of 2, runs this group's branch (a batch of 1: the compiled
+shapes are unchanged), and all-gathers both predictions over the cfg group, as Wan's CFG mode does.
+
 Attention. The blocks' processor is replaced at every layout: diffusers' builds a dense symmetric
 (N+T)^2 mask (about 2.6 GB per block at 121 frames) for masked SDPA. Ours expresses the text padding
 as a key count, N image keys + the valid text keys (diffusers reorders valid text tokens first),
@@ -52,6 +57,9 @@ class NeuronHunyuanVideo15TransformerApplication(TorchNeuronApplicationBase):
                          exec_mode=exec_mode, device=device, **kwargs)
         self.tp = int(self.parallel.tp_degree)
         self.cp = int(getattr(self.parallel, "cp_degree", 1) or 1)
+        self.cfg = 2 if bool(getattr(self.parallel, "cfg_parallel_enabled", False)) else 1
+        if self.cfg > 1 and int(batch_size) != 1:
+            raise ValueError("CFG parallelism runs one branch per group: batch_size must be 1")
         if self.cp > 1 and getattr(self.parallel, "cp_mode", "ulysses") != "ulysses":
             raise NotImplementedError("HunyuanVideo 1.5 runs context parallelism in Ulysses mode only")
         with open(os.path.join(str(self.model_path), "config.json"), encoding="utf-8") as f:
@@ -129,10 +137,38 @@ class NeuronHunyuanVideo15TransformerApplication(TorchNeuronApplicationBase):
         """The pipeline's call; returns ``(noise_pred,)`` on the device."""
         if timestep_r is not None:
             raise NotImplementedError("timestep_r (meanflow) is not supported")
+        if self.cfg > 1:
+            return (self._cfg_forward(hidden_states, timestep, encoder_hidden_states, encoder_attention_mask,
+                                      encoder_hidden_states_2, encoder_attention_mask_2, image_embeds),)
         e2, m2, img = self._text_to_video_defaults(encoder_hidden_states_2, encoder_attention_mask_2,
                                                    image_embeds)
         return (super().forward(*self._positional(hidden_states, timestep, encoder_hidden_states,
                                                   encoder_attention_mask, e2, m2, img)),)
+
+    def _cfg_forward(self, hidden_states, timestep, encoder_hidden_states, encoder_attention_mask,
+                     encoder_hidden_states_2, encoder_attention_mask_2, image_embeds):
+        """Inputs stacked [uncond, cond] (batch 2; a batch-1 tensor is shared by both branches): this
+        group's branch through the DiT, then both predictions all-gathered over the cfg group."""
+        from difflet.backends.neuron.ops_impl import collectives
+        from difflet.backends.neuron.ops_impl.parallel_mesh import get_axis_rank
+
+        branch = get_axis_rank("cfg")
+
+        def pick(t):
+            if t is None:
+                return None
+            if t.shape[0] == 2:
+                return t[branch:branch + 1]
+            if t.shape[0] == 1:
+                return t
+            raise ValueError(f"CFG parallelism expects inputs of batch 2 (uncond, cond), got {tuple(t.shape)}")
+
+        e2, m2, img = self._text_to_video_defaults(pick(encoder_hidden_states_2), pick(encoder_attention_mask_2),
+                                                   pick(image_embeds))
+        out = super().forward(*self._positional(pick(hidden_states), pick(timestep), pick(encoder_hidden_states),
+                                                pick(encoder_attention_mask), e2, m2, img))
+        return collectives.gather_from_tensor_model_parallel_region_with_dim(
+            out.contiguous(), 0, collectives.get_cfg_group())
 
 
 def _joint_qkv(attn, hidden_states, encoder_hidden_states, image_rotary_emb):

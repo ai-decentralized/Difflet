@@ -112,3 +112,37 @@ def test_tensor_parallel_matches_diffusers(tiny, tp, cp):
     for out in run_ranks(hv15_parallel_worker, tiny, SHAPE, _inputs(), tp, cp, world_size=tp * cp):
         torch.testing.assert_close(torch.tensor(out), reference, atol=1e-4, rtol=1e-4)
 
+
+
+def _uncond_inputs():
+    g = torch.Generator().manual_seed(2)
+    mask = torch.zeros(1, SHAPE["text_seq_len"], dtype=torch.int64)
+    mask[:, :3] = 1
+    x = _inputs()
+    return dict(x, encoder_hidden_states=torch.randn(1, SHAPE["text_seq_len"], 32, generator=g),
+                encoder_attention_mask=mask)
+
+
+def _reference_for(tiny, inputs):
+    from diffusers import HunyuanVideo15Transformer3DModel
+
+    ref_model = HunyuanVideo15Transformer3DModel.from_pretrained(tiny).eval()
+    with torch.no_grad():
+        return ref_model(**inputs,
+                         encoder_hidden_states_2=torch.zeros(1, SHAPE["text_2_seq_len"], 24),
+                         encoder_attention_mask_2=torch.zeros(1, SHAPE["text_2_seq_len"], dtype=torch.int64),
+                         image_embeds=torch.zeros(1, SHAPE["image_tokens"], 16), return_dict=False)[0]
+
+
+@pytest.mark.parametrize("tp", [1, 2], ids=["cfg2-tp1", "cfg2-tp2"])
+def test_cfg_parallel_runs_each_branch_on_its_group(tiny, tp):
+    """[uncond, cond] stacked as batch 2: each cfg group runs its branch, both predictions are
+    gathered; each half equals diffusers' forward on that branch alone."""
+    from tests.unit.backends._neuron_gloo import run_ranks
+    from tests.unit.backends._neuron_workers import hv15_cfg_worker
+
+    u, c = _uncond_inputs(), _inputs()
+    stacked = {k: torch.cat([u[k], c[k]]) for k in c}
+    want = torch.cat([_reference_for(tiny, u), _reference_for(tiny, c)])
+    for out in run_ranks(hv15_cfg_worker, tiny, SHAPE, stacked, tp, world_size=2 * tp):
+        torch.testing.assert_close(torch.tensor(out), want, atol=1e-4, rtol=1e-4)
