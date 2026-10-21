@@ -61,7 +61,7 @@ def canonical_shapes_list(args: argparse.Namespace, default_shape: tuple[int, ..
     """Canonical shapes list for stage identity: --shapes set, or 1-entry list
     from --height/--width[/--num-frames] with per-model defaults."""
     shapes = parse_shapes_arg(getattr(args, "shapes", None))
-    from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+    from difflet.pipeline.bucketing import canonicalize_shapes
 
     if shapes is None:
         h = args.height or default_shape[0]
@@ -115,7 +115,7 @@ def require_request_shape_in_set(
     compile_shapes = parse_shapes_arg(getattr(args, "shapes", None))
     if compile_shapes is None:
         return None
-    from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+    from difflet.pipeline.bucketing import canonicalize_shapes
 
     canonical = canonicalize_shapes(compile_shapes)
     h = args.height or default_shape[0]

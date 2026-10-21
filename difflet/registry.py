@@ -253,6 +253,8 @@ def _register_builtin_flux() -> None:
             supports_cp=True,
             supports_sp=True,
         ),
+        # CUDA: tp=1, one GPU, FluxPipeline around the Difflet DiT.
+        backends=("trainium", "cuda"),
     )
     class _FluxRegistration:
         pass
@@ -387,7 +389,7 @@ def _register_builtin_qwen_image() -> None:
             supports_sp=True,
         ),
         # Qwen-Image is the first model on the TPU backend (plan Phase 4).
-        backends=("trainium", "tpu"),
+        backends=("trainium", "tpu", "cuda"),
     )
     class _QwenImageRegistration:
         pass

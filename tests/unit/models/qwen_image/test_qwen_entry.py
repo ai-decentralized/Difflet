@@ -22,9 +22,9 @@ def _force_cpu_backend():
 
 
 def test_entry_rejects_an_unsupported_backend(tmp_path):
-    # Qwen-Image gained the tpu backend in plan Phase 4; everything else must
-    # still be refused rather than silently falling through to Trainium.
-    with pytest.raises(NotImplementedError, match="trainium and tpu"):
+    # Qwen-Image gained the tpu backend (TPU plan Phase 4) and cuda (CUDA plan PR 3);
+    # everything else must still be refused rather than falling through to Trainium.
+    with pytest.raises(NotImplementedError, match="trainium, tpu and cuda"):
         create_qwen_image_application(
             model_path=str(tmp_path),
             parallel=DiffletParallelConfig(tp_degree=1),
