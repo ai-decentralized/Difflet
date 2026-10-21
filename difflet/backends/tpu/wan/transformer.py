@@ -26,7 +26,6 @@ Wan.
 from __future__ import annotations
 
 import logging
-import re
 from pathlib import Path
 
 import torch
@@ -35,24 +34,10 @@ from difflet.backends.tpu.core.application_base import TpuApplicationBase
 from difflet.backends.tpu.core.checkpoint import load_checkpoint_into
 from difflet.backends.tpu.core.weights import materialize_meta_
 from difflet.backends.tpu.ops_impl import parallel_mesh
+from difflet.models.wan.dit_config import checkpoint_key
 from difflet.pipeline.parallel_mesh import MeshSpec
 
 logger = logging.getLogger(__name__)
-
-# The module→checkpoint direction of ``wan.checkpoint.backbone``'s renames.
-# difflet's WanFeedForward uses explicit net_in/net_out attributes where
-# diffusers wraps the projections in a ModuleList with non-trivial indices.
-_MODULE_TO_CHECKPOINT: list[tuple[str, str]] = [
-    (r"\.ffn\.net_in\.", ".ffn.net.0.proj."),
-    (r"\.ffn\.net_out\.", ".ffn.net.2."),
-]
-
-
-def checkpoint_key(name: str) -> str:
-    """Checkpoint key holding the parameter named ``name`` on the module."""
-    for pattern, replacement in _MODULE_TO_CHECKPOINT:
-        name = re.sub(pattern, replacement, name)
-    return name
 
 
 class TpuWanTransformerApplication(TpuApplicationBase):

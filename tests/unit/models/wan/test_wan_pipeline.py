@@ -61,6 +61,22 @@ def test_component_dtype_fallback():
     assert pl._component_config(object()) is None
 
 
+def test_component_timestep_dtype_defaults_to_fallback():
+    # The fallback is the model dtype: a component without the attribute (TPU, Trainium)
+    # keeps receiving the timestep it always did, even when it carries a ``dtype``.
+    assert pl._component_timestep_dtype(object(), torch.bfloat16) is torch.bfloat16
+    assert (
+        pl._component_timestep_dtype(SimpleNamespace(dtype=torch.float16), torch.bfloat16)
+        is torch.bfloat16
+    )
+    assert (
+        pl._component_timestep_dtype(SimpleNamespace(timestep_dtype=None), torch.bfloat16)
+        is torch.bfloat16
+    )
+    comp = SimpleNamespace(dtype=torch.bfloat16, timestep_dtype=torch.float32)
+    assert pl._component_timestep_dtype(comp, torch.bfloat16) is torch.float32
+
+
 def test_batch_timestep_scalar_and_tensor():
     out = pl._batch_timestep(5, 3, torch.device("cpu"), torch.float32)
     assert out.shape == (3,)

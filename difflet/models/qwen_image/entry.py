@@ -16,9 +16,9 @@ def create_qwen_image_application(
     backend: str = "trainium",
     **kwargs: Any,
 ) -> Any:
-    if backend not in {"trainium", "tpu"}:
+    if backend not in {"trainium", "tpu", "cuda"}:
         raise NotImplementedError(
-            f"Qwen-Image supports the trainium and tpu backends, got {backend!r}"
+            f"Qwen-Image supports the trainium, tpu and cuda backends, got {backend!r}"
         )
     # Two different parallel-config types reach this factory: the pipeline's
     # DiffletParallelConfig and serving's ParallelTopology, which carries no
@@ -28,6 +28,37 @@ def create_qwen_image_application(
             "Qwen-Image is guidance-distilled (single forward pass with the "
             "guidance scale baked into the timestep embedding); CFG-parallel "
             "requires true two-pass classifier-free guidance and does not apply."
+        )
+
+    if backend == "cuda":
+        # Release 1 of the CUDA backend is one process on one device.
+        # Refuse here, before 41 GB of DiT are loaded, rather than at the first collective.
+        tp = int(getattr(parallel, "tp_degree", 1) or 1)
+        cp = int(getattr(parallel, "cp_degree", 1) or 1)
+        dp = int(getattr(parallel, "dp_degree", 1) or 1)
+        if tp > 1:
+            raise NotImplementedError(
+                f"Qwen-Image on CUDA runs tp=1 on one GPU (got tp={tp}); "
+                "tensor parallelism (tp > 1) is not supported on the CUDA backend yet"
+            )
+        if dp > 1:
+            raise NotImplementedError(
+                f"Qwen-Image on CUDA is one GPU per application (got dp={dp}): dp>1 runs as "
+                "single-GPU replicas through the CLI router, not inside the application"
+            )
+        if cp > 1:
+            raise NotImplementedError(
+                f"context parallelism (cp > 1) is not supported on the CUDA backend yet "
+                f"(got cp={cp})"
+            )
+        from difflet.models.qwen_image.cuda_application import CudaQwenImageApplication
+
+        return CudaQwenImageApplication(
+            model_path=model_path,
+            parallel=parallel,
+            dtype=dtype,
+            shape=shape,
+            **kwargs,
         )
 
     if backend == "tpu":

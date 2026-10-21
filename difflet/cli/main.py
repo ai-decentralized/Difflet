@@ -337,6 +337,11 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--guidance-scale", type=float, default=None)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument(
+        "--torch-compile",
+        action="store_true",
+        help="CUDA backend only: torch.compile the DiT blocks (opt-in; eager is the default)",
+    )
+    p.add_argument(
         "--work-dir", default=None, help="Directory for inter-stage tensors (staged models only)"
     )
     p.add_argument(
@@ -350,6 +355,11 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
 def _add_serve_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=8091)
+    p.add_argument(
+        "--torch-compile",
+        action="store_true",
+        help="CUDA backend only: torch.compile the DiT blocks (opt-in; eager is the default)",
+    )
     p.add_argument(
         "--api-key",
         type=_api_key,
@@ -709,13 +719,30 @@ def _validate_cfg_parallel(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
-def _replica_cores(args: argparse.Namespace) -> int:
+def _on_cuda() -> bool:
+    from difflet.backends.registry import current_backend
+
+    return current_backend() == "cuda"
+
+
+def _replica_tp(args: argparse.Namespace) -> int:
+    """The tp degree one replica runs at: the registry default on Trainium, 1 on CUDA.
+
+    The CUDA backend has no registry-default tensor parallelism (tp > 1 is not supported):
+    a CUDA replica is ``cfg x cp x tp`` GPUs with every unset degree at 1.
+    """
+    if _on_cuda():
+        return args.tp_degree or 1
     from difflet.registry import resolve_model
 
     entry = resolve_model(args.model_id, model_type=_MODEL_TYPE[args.model_id])
-    tp = args.tp_degree or entry.default_parallel.tp_degree
+    return args.tp_degree or entry.default_parallel.tp_degree
+
+
+def _replica_cores(args: argparse.Namespace) -> int:
+    """Devices per replica: NeuronCores on Trainium, GPUs on CUDA (``cfg x cp x tp``)."""
     cfg = 2 if getattr(args, "cfg_parallel", False) else 1
-    return tp * (args.cp_degree or 1) * cfg
+    return _replica_tp(args) * (args.cp_degree or 1) * cfg
 
 
 def _resolve_total_cores(args: argparse.Namespace) -> tuple[int | None, str]:
@@ -733,6 +760,14 @@ def _resolve_total_cores(args: argparse.Namespace) -> tuple[int | None, str]:
     if total is not None:
         return total, "--total-cores"
 
+    if _on_cuda():
+        # GPUs, not NeuronCores: CUDA_VISIBLE_DEVICES already narrows the count.
+        import torch
+
+        if torch.cuda.is_available():
+            return torch.cuda.device_count(), "torch.cuda.device_count()"
+        return None, "undetected"
+
     env_value = os.environ.get("NEURON_RT_NUM_CORES", "").strip()
     if env_value:
         try:
@@ -749,7 +784,7 @@ def _resolve_total_cores(args: argparse.Namespace) -> tuple[int | None, str]:
 
 
 def _validate_capacity(args: argparse.Namespace) -> None:
-    """Reject a parallel config that cannot fit the available NeuronCores.
+    """Reject a parallel config that cannot fit the available NeuronCores (GPUs on CUDA).
 
     ``world_size = dp * cfg * cp * tp`` is a hard requirement: every rank needs
     its own core. Before hardware detection this could only be checked when the
@@ -766,13 +801,17 @@ def _validate_capacity(args: argparse.Namespace) -> None:
     if needed <= total:
         return
 
-    from difflet.registry import resolve_model
+    tp = _replica_tp(args)
+    if _on_cuda():
+        unit, tp_note = "GPUs", ""
+    else:
+        from difflet.registry import resolve_model
 
-    entry = resolve_model(args.model_id, model_type=_MODEL_TYPE[args.model_id])
-    tp = args.tp_degree or entry.default_parallel.tp_degree
-    tp_note = "" if args.tp_degree else f" (registry default for {entry.name})"
+        entry = resolve_model(args.model_id, model_type=_MODEL_TYPE[args.model_id])
+        unit = "NeuronCores"
+        tp_note = "" if args.tp_degree else f" (registry default for {entry.name})"
     print(
-        f"Error: this parallel config needs {needed} NeuronCores but only "
+        f"Error: this parallel config needs {needed} {unit} but only "
         f"{total} are available ({origin}).\n"
         f"  dp={getattr(args, 'dp', None) or 1} x cfg={2 if getattr(args, 'cfg_parallel', False) else 1} "
         f"x cp={args.cp_degree or 1} x tp={tp}{tp_note} = {needed}\n"
@@ -838,6 +877,32 @@ def _dispatch_dp(args: argparse.Namespace) -> None:
 
 
 def _get_orchestrator(args: argparse.Namespace):
+    from difflet.backends.registry import current_backend
+
+    if getattr(args, "torch_compile", False) and current_backend() != "cuda":
+        raise SystemExit(
+            "[difflet] --torch-compile is a CUDA-backend option; "
+            f"the {current_backend()} backend does not take it"
+        )
+    if current_backend() == "cuda":
+        # CUDA runs the whole model in one process: no Neuron stages.
+        if args.model_id == "Qwen/Qwen-Image":
+            from difflet.cli.orchestrators.qwen_image_cuda import CudaQwenImageOrchestrator
+
+            return CudaQwenImageOrchestrator(args)
+        if args.model_id in ("black-forest-labs/FLUX.1-dev", "black-forest-labs/FLUX.1-schnell"):
+            from difflet.cli.orchestrators.flux_cuda import FluxCudaOrchestrator
+
+            return FluxCudaOrchestrator(args)
+        if args.model_id in ("Wan-AI/Wan2.2-T2V-A14B-Diffusers", "Wan-AI/Wan2.1-T2V-14B-Diffusers"):
+            from difflet.cli.orchestrators.wan_cuda import WanCudaOrchestrator
+
+            return WanCudaOrchestrator(args)
+        raise SystemExit(
+            f"[difflet] {args.model_id} is not supported on the CUDA backend yet; "
+            "set DIFFLET_BACKEND=trainium for the staged Neuron path"
+        )
+
     from difflet.cli.orchestrators.flux import FluxOrchestrator
     from difflet.cli.orchestrators.hunyuan_video import HunyuanVideoOrchestrator
     from difflet.cli.orchestrators.hunyuan_video_15 import HunyuanVideo15Orchestrator
@@ -948,6 +1013,8 @@ def main(argv: list[str] | None = None) -> None:
         _validate_teacache(args)
         _validate_dp(args)
         if args.requests_dir is None and (args.requests is not None or (args.dp or 1) > 1):
+            # Both backends: on CUDA each replica is a single-GPU (or cfg-pair torchrun)
+            # worker pinned through CUDA_VISIBLE_DEVICES.
             _dispatch_dp(args)  # raises SystemExit
 
     # Only for the weight-loading commands, where jemalloc pays off. This list
