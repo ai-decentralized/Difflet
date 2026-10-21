@@ -44,7 +44,7 @@ from difflet.models.flux.clip.modeling_clip import (
 from difflet.backends.trainium.flux.teacache_probe_fused import (
     NeuronFluxTeacacheProbeFusedApplication,
 )
-from difflet.models.flux.modeling_flux import (
+from difflet.models.flux.trainium_backbone import (
     FluxBackboneInferenceConfig,
     NeuronFluxBackboneApplication,
 )

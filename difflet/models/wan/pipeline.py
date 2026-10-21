@@ -363,6 +363,7 @@ class WanOrchestrator:
             current_model = self._select_transformer(timestep, boundary_timestep)
             scale = self._select_guidance_scale(timestep, boundary_timestep, guidance_scale, guidance_scale_2)
             model_dtype = _component_dtype(current_model, self.dtype)
+            timestep_dtype = _component_timestep_dtype(current_model, model_dtype)
 
             if cfg_parallel:
                 # Stack [uncond, cond] into batch=2; the transformer scatters one
@@ -373,7 +374,7 @@ class WanOrchestrator:
                 batched_embeds = torch.cat(
                     [negative_prompt_embeds, prompt_embeds], dim=0
                 ).to(dtype=model_dtype)
-                batched_timestep = _batch_timestep(timestep, 2, latents.device, model_dtype)
+                batched_timestep = _batch_timestep(timestep, 2, latents.device, timestep_dtype)
                 out = _first_tensor(
                     current_model(batched_latents, batched_timestep, batched_embeds)
                 )
@@ -382,7 +383,9 @@ class WanOrchestrator:
                 latents = self._scheduler_step(noise_pred, timestep, latents, num_inference_steps)
                 continue
 
-            timestep_batch = _batch_timestep(timestep, latents.shape[0], latents.device, model_dtype)
+            timestep_batch = _batch_timestep(
+                timestep, latents.shape[0], latents.device, timestep_dtype
+            )
 
             # TeaCache: block-0's modulated input depends on latents and timestep,
             # shared by cond/uncond, so one probe per step drives the skip decision; the
@@ -560,6 +563,17 @@ def _component_dtype(component: Any, fallback: torch.dtype) -> torch.dtype:
     config = _component_config(component)
     neuron_config = getattr(config, "neuron_config", None)
     dtype = getattr(neuron_config, "torch_dtype", None)
+    return dtype if isinstance(dtype, torch.dtype) else fallback
+
+
+def _component_timestep_dtype(component: Any, fallback: torch.dtype) -> torch.dtype:
+    """The dtype a component takes its timestep in: its ``timestep_dtype``, else ``fallback``.
+
+    The fallback is the model dtype, which is what every component without the attribute
+    (TPU, Trainium) has always received. The CUDA Wan DiT declares fp32, as diffusers'
+    ``WanPipeline`` passes UniPC's exact integer timestep (bf16 rounds 999 to 1000).
+    """
+    dtype = getattr(component, "timestep_dtype", None)
     return dtype if isinstance(dtype, torch.dtype) else fallback
 
 

@@ -69,6 +69,8 @@ class ServeOptions:
     teacache_online_delta: float | None = None
     teacache_speedup: float | None = None
     teacache_calibration: str | None = None
+    # CUDA backend only: torch.compile the DiT blocks in the resident worker (opt-in).
+    torch_compile: bool = False
     download_policy: DownloadPolicy = DownloadPolicy.AUTO
     compile_policy: CompilePolicy = CompilePolicy.AUTO
     max_running_requests: int = 1
@@ -174,6 +176,7 @@ def build_serving_profile(
     teacache_online_delta: float | None,
     teacache_speedup: float | None,
     teacache_calibration: str | None,
+    torch_compile: bool = False,
 ) -> ServingProfile:
     """Resolve registry defaults plus `difflet serve` overrides."""
 
@@ -219,7 +222,7 @@ def build_serving_profile(
                 "multi-shape serving does not support TeaCache: calibrations are frozen "
                 "per shape; drop --shapes or --teacache-speedup."
             )
-        from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+        from difflet.pipeline.bucketing import canonicalize_shapes
         from difflet.cli.orchestrators.base import parse_shapes_arg
 
         try:
@@ -312,6 +315,7 @@ def build_serving_profile(
         host_vae=(default_host_vae or host_vae) if output_modality == "video" else False,
         clip_placement=resolved_clip_placement,
         shapes=canonical_shapes,
+        torch_compile=bool(torch_compile),
     )
 
 

@@ -60,7 +60,7 @@ class QwenImageTransformerInferenceConfig(InferenceConfig):
         # the single height/width convention to the priority shape.
         shapes = getattr(self, "compile_shapes", None)
         if shapes:
-            from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+            from difflet.pipeline.bucketing import canonicalize_shapes
 
             self.compile_shapes = canonicalize_shapes(shapes)
             self.height = self.compile_shapes[0][0]
