@@ -27,9 +27,43 @@ def create_wan_application(
             **kwargs,
         )
 
+    if backend == "cuda":
+        # Release 1 of the CUDA backend is one process on one device.
+        # Refuse here, before two 14B experts are loaded, rather than at the first
+        # collective. Two parallel-config types reach this factory (DiffletParallelConfig
+        # and serving's ParallelTopology): ask, do not assume.
+        tp = int(getattr(parallel, "tp_degree", 1) or 1)
+        cp = int(getattr(parallel, "cp_degree", 1) or 1)
+        dp = int(getattr(parallel, "dp_degree", 1) or 1)
+        cfg_parallel = bool(getattr(parallel, "cfg_parallel_enabled", False))
+        if tp > 1:
+            raise NotImplementedError(
+                f"Wan on CUDA runs tp=1 on one GPU (got tp={tp}); "
+                "tensor parallelism (tp > 1) is not supported on the CUDA backend yet"
+            )
+        if getattr(parallel, "sp_enabled", False):
+            raise NotImplementedError(
+                "sequence parallelism is not supported on the CUDA backend yet (it needs tp > 1)"
+            )
+        if cp > 1 or dp > 1 or cfg_parallel:
+            raise NotImplementedError(
+                f"Wan on CUDA is one GPU in Release 1 (got cp={cp}, dp={dp}, "
+                f"cfg_parallel={cfg_parallel}); CFG runs as sequential cond/uncond passes, "
+                "and the second card is not supported on the CUDA backend yet"
+            )
+        from difflet.models.wan.cuda_application import CudaWanApplication
+
+        return CudaWanApplication(
+            model_path=model_path,
+            parallel=parallel,
+            dtype=dtype,
+            shape=shape,
+            **kwargs,
+        )
+
     if backend != "trainium":
         raise NotImplementedError(
-            f"Wan supports the trainium and tpu backends, got {backend!r}"
+            f"Wan supports the trainium, tpu and cuda backends, got {backend!r}"
         )
 
     from difflet.models.wan.application import NeuronWanApplication
