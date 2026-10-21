@@ -43,6 +43,32 @@ def test_row_parallel_linear_forward():
     assert out.shape == (2, 6)
 
 
+def test_row_parallel_linear_skip_bias_add_returns_output_and_bias():
+    torch.manual_seed(0)
+    layer = cpu_lin.RowParallelLinear(
+        4, 6, input_is_parallel=True, reduce_output=False, skip_bias_add=True
+    )
+    x = torch.randn(2, 4)
+    out, bias = layer(x)
+    assert bias is layer.bias
+    assert torch.allclose(out, torch.nn.functional.linear(x, layer.weight))
+    assert layer.tensor_parallel_group is None
+
+
+def test_row_parallel_linear_skip_bias_add_without_bias():
+    layer = cpu_lin.RowParallelLinear(4, 6, bias=False, skip_bias_add=True)
+    x = torch.randn(2, 4)
+    out, bias = layer(x)
+    assert bias is None
+    assert torch.allclose(out, torch.nn.functional.linear(x, layer.weight))
+
+
+def test_row_parallel_linear_default_adds_the_bias():
+    layer = cpu_lin.RowParallelLinear(4, 6, reduce_output=False)
+    x = torch.randn(2, 4)
+    assert torch.allclose(layer(x), torch.nn.functional.linear(x, layer.weight, layer.bias))
+
+
 def test_parallel_embedding_forward():
     torch.manual_seed(0)
     layer = cpu_lin.ParallelEmbedding(10, 4, shard_across_embedding=True, pad=True)
@@ -191,6 +217,7 @@ def test_collectives_identity_ops():
     assert cpu_col.gather_from_tensor_model_parallel_region_with_dim(t, 0) is t
     assert cpu_col.reduce_tp(t) is t
     assert cpu_col.reduce_from_tensor_model_parallel_region(t) is t
+    assert cpu_col.reduce_from_tensor_model_parallel_region(t, process_group=None) is t
     assert cpu_col.scatter_tp_dim(t, dim=0) is t
     assert cpu_col.scatter_to_tensor_model_parallel_region(t) is t
     assert cpu_col.scatter_to_process_group_spmd(t, 1, foo=2) is t

@@ -11,7 +11,12 @@ dist/
 .venv/
 venv/
 env/
-docs/
+# docs/ stays local working material, except plans: a plan that lives only on one
+# machine gets lost (the TPU backend plan did). Track docs/plans/*.md by default.
+docs/*
+!docs/plans/
+docs/plans/*
+!docs/plans/*.md
 docs_human/
 .history/
 # Compile cache (Trainium AOT artifacts can be huge)
