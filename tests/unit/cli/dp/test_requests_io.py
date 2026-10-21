@@ -71,3 +71,29 @@ def test_manifest_roundtrip(tmp_path):
     assert request_path(tmp_path, 1).name == "req_0001.json"
     back = read_manifest(tmp_path)
     assert back == reqs
+
+
+def test_write_manifest_starts_from_an_empty_queue(tmp_path):
+    # The requests dir IS the queue: markers from an earlier run (claim/done/failed) and a
+    # longer earlier manifest made a second `--dp N --requests` over the same work dir report
+    # done=N in seconds without generating (the f2b run, 2026-10-18, F2b observation).
+    from difflet.cli.dp.claims import summarize
+
+    stale = [RequestSpec(index=i, prompt=f"old{i}", output=f"old{i}.png") for i in range(3)]
+    write_manifest(stale, tmp_path)
+    (tmp_path / "req_0000.claim").write_text("0")
+    (tmp_path / "req_0000.done").touch()
+    (tmp_path / "req_0001.failed").write_text("boom")
+    (tmp_path / "unrelated.txt").write_text("keep me")
+
+    fresh = [RequestSpec(index=i, prompt=f"new{i}", output=f"new{i}.png") for i in range(2)]
+    write_manifest(fresh, tmp_path)
+
+    assert [r.prompt for r in read_manifest(tmp_path)] == ["new0", "new1"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == [
+        "req_0000.json",
+        "req_0001.json",
+        "unrelated.txt",
+    ]
+    s = summarize(tmp_path)
+    assert s.unfinished == [0, 1] and not s.done and not s.failed
