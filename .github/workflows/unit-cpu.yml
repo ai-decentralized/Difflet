@@ -1,10 +1,7 @@
 name: unit-cpu
 
 # CPU-only unit suite with the CPU reference backend selected. No accelerator,
-# no Neuron SDK. Added by PR 1 of docs/plans/2026-10-16-cuda-backend-support.md
-# (decision D12); it is red until PR 2 (Phase 1 import hygiene) lands and is
-# meant to stay green from then on. GPU and Trainium tests remain manual and
-# are recorded in the plan's status log.
+# no Neuron SDK. GPU and Trainium tests remain manual.
 
 on:
   pull_request:

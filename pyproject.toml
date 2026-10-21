@@ -53,9 +53,9 @@ test = [
     "imageio",
     "imageio-ffmpeg",
 ]
-# CUDA backend (docs/plans/2026-10-16-cuda-backend-support.md, D17). Pinned from the
-# RTX PRO 6000 box on 2026-10-16 (requirements-cuda.lock has the full freeze). torch
-# must come from the CUDA 12.8 index, which an extra cannot express:
+# CUDA backend (docs/design/gpu_backend.md). Pinned from an RTX PRO 6000 host
+# (requirements-cuda.lock has the full freeze). torch must come from the CUDA 12.8
+# index, which an extra cannot express:
 #   uv pip install --index-url https://download.pytorch.org/whl/cu128 torch==2.11.0
 #   pip install -e ".[test,cuda]"
 cuda = [
