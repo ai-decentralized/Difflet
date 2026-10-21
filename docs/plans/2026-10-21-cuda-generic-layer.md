@@ -1,6 +1,6 @@
 # CUDA Generic Layer Design and Migration Plan
 
-> **For agentic workers:** this is a design doc first and a plan second. Nothing here is code yet. The migration phases at the end use checkbox (`- [ ]`) syntax and the one-task-one-commit convention, but no phase starts until the owner has settled the decisions table and the open questions, and the reviewer has signed off on the layering. Every phase ends with the CPU unit suite green and a status-log entry.
+> **For agentic workers:** this is a design doc first and a plan second. Nothing here is code yet. The migration phases at the end use checkbox (`- [ ]`) syntax and the one-task-one-commit convention, but no phase starts until the reviewer has answered the nine open questions, settled the decisions table, and signed off on the layering. Every phase ends with the CPU unit suite green and a status-log entry.
 
 **Goal:** Replace "one CUDA stack per model" with one generic CUDA transformer lifecycle, one generic CUDA model application, one generic serving adapter and one generic CLI orchestrator, each driven by a small per-model spec, so that every model Difflet registers (Qwen-Image, Flux and Wan today; HunyuanVideo, HunyuanVideo 1.5, MiniMax-H3 and LTX-2 next) costs a spec plus its real differences, and a ROCm backend costs a platform file, not more stacks. The layer is designed against all seven models, not the three that run on CUDA now; the section "The other four models" is where the design earns that claim.
 
@@ -137,7 +137,7 @@ What stays unresolved by this design, and is a precondition for that model rathe
 
 ---
 
-## Decisions (proposed; to be settled with the owner and the reviewer before Phase 1)
+## Decisions (proposed; to be settled with the reviewer before Phase 1)
 
 | # | Decision | Alternative rejected | Why |
 |---|---|---|---|
@@ -622,9 +622,9 @@ The order is chosen so that each phase's diff is one subject and so that the saf
 
 ---
 
-## Open questions for the owner and the reviewer
+## Open questions, pending the reviewer
 
-Each is worded so that "yes" takes the recommended answer.
+None of these is decided. Each is worded so that "yes" takes the recommended answer, and the design above is written on the recommended answers so that it reads as one piece; a different answer changes the section it names. Question 7 is the one most likely to need the reviewer's own view, since it concerns the layout the reviewer's comment cited.
 
 1. **Spec placement in the torch-free registry layer** (`difflet/common/cuda_spec.py` + instances in `difflet/common/registry/<model>.py`), as G3 says, rather than under `difflet/backends/cuda/<model>/`?
 2. **Base on `main` after the stack merges**, with Phase 1 (no production diff) openable against the stack's top in the meantime?
@@ -645,3 +645,4 @@ Each is worded so that "yes" takes the recommended answer.
 | 2026-10-21 | Design | Draft on a branch cut from the top of the CUDA stack; duplication measured at `c45d2059`; CPU baseline 2819 passed / 176 skipped; CUDA test census 252. Stress-tested against the code before commit: sixteen findings folded in (two Hub-id sets, the torch-free serving parent, the test census, Phase 3 vs the CLI routing test, the base lifecycle's `get_state_dict` path, compiled-mode stability unmeasured). | This document. |
 | 2026-10-21 | Design | Revised against vLLM-Omni RFC #7382, which the reviewer cited: rope variants explicit and per-consumer exactness at Level 2 (the earlier "bit-identical by construction" claim did not hold); the model decides whether to use a fusion (G12); fast-path assertions (G11); acceptance for a swap at Level 3; per-op contracts and the ops index (G7); behaviour changes and timing checks kept apart from moves (G10, Phases 2 and 5); open question 7 on directory layout. | This document; vllm-project/vllm-omni#7382. |
 | 2026-10-21 | Design | Extended from the three CUDA models to all seven registered models: survey table of HunyuanVideo, HunyuanVideo 1.5, MiniMax-H3 and LTX-2; G13 (any eager `nn.Module`, `difflet.ops` only for levels 1–2), G14 (two base drivers), G15 (residency in the spec); spec fields for multiple prompt budgets, guidance kind, audio, shape rules, batch and residency; `_repeated_blocks` as the compile hook's default; the Level 2 variant table over seven models; the order and preconditions for bringing the four; open questions 8 and 9. | This document; `difflet/registry.py`; the model packages and Trainium backends named in the table. |
+| 2026-10-21 | Design | Complete as a design; the nine questions are open and go to the reviewer with their recommended answers. Nothing is pushed. | This document. |
