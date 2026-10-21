@@ -687,7 +687,7 @@ def _compile_specs(
         return (generation,)
     # v2: the decoder identity carries the canonical shape SET (K=1 uses the
     # same list form) instead of a single height/width/num_frames.
-    from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+    from difflet.pipeline.bucketing import canonicalize_shapes
 
     profile_shapes = profile.shapes or ((profile.height, profile.width, profile.num_frames),)
     shapes_list = [list(shape) for shape in canonicalize_shapes(profile_shapes)]

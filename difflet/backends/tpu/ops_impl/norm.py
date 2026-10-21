@@ -8,29 +8,13 @@ CPU reference stays a valid oracle for numerical validation (Phase 5).
 Phase 2b of docs/plans/2026-08-16-tpu-backend-support.md.
 """
 
-from __future__ import annotations
+# Lifted into difflet.backends._torch_megatron; re-exported here so
+# the TPU backend and its tests keep their import paths.
+from difflet.backends._torch_megatron.norm import (  # noqa: F401
+    LayerNorm,
+    RMSNorm,
+    CustomRMSNorm,
+    rms_norm_fp32,
+)
 
-import torch
-import torch.nn as nn
-
-LayerNorm = nn.LayerNorm
-
-
-class RMSNorm(nn.Module):
-    def __init__(self, hidden_size: int, eps: float = 1e-6, **kwargs):
-        super().__init__()
-        del kwargs
-        self.weight = nn.Parameter(torch.ones(hidden_size))
-        self.eps = eps
-
-    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        # fp32 variance regardless of input dtype: bf16 accumulation here is a
-        # known accuracy trap and the CPU oracle does the same.
-        variance = hidden_states.to(torch.float32).pow(2).mean(dim=-1, keepdim=True)
-        hidden_states = hidden_states * torch.rsqrt(variance.to(hidden_states.dtype) + self.eps)
-        return hidden_states * self.weight
-
-
-CustomRMSNorm = RMSNorm
-
-__all__ = ["CustomRMSNorm", "LayerNorm", "RMSNorm"]
+__all__ = ["CustomRMSNorm", "LayerNorm", "RMSNorm", "rms_norm_fp32"]
