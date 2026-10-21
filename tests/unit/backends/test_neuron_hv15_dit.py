@@ -94,8 +94,21 @@ def test_cp_needs_image_tokens_divisible(tiny):
 def test_rejects_what_it_does_not_run(tiny):
     from difflet.pipeline.parallel_config import DiffletParallelConfig
 
-    with pytest.raises(NotImplementedError, match="runs at TP1"):
-        NeuronHunyuanVideo15TransformerApplication(model_path=tiny, parallel=DiffletParallelConfig(tp_degree=2),
+    with pytest.raises(ValueError, match="must divide by tp=8"):  # 4 heads
+        NeuronHunyuanVideo15TransformerApplication(model_path=tiny, parallel=DiffletParallelConfig(tp_degree=8),
                                                    device="cpu", **SHAPE)
     with pytest.raises(ValueError, match="4k\\+1"):
         NeuronHunyuanVideo15TransformerApplication(model_path=tiny, device="cpu", **dict(SHAPE, num_frames=6))
+
+
+@pytest.mark.parametrize("tp, cp", [(2, 1), (4, 1), (2, 2)], ids=["tp2", "tp4", "tp2-cp2"])
+def test_tensor_parallel_matches_diffusers(tiny, tp, cp):
+    """diffusers' linears swapped for column/row-parallel layers (same names, sharded load), heads
+    split over the TP group; with CP, Ulysses over each TP rank's heads."""
+    from tests.unit.backends._neuron_gloo import run_ranks
+    from tests.unit.backends._neuron_workers import hv15_parallel_worker
+
+    reference = _reference(tiny)
+    for out in run_ranks(hv15_parallel_worker, tiny, SHAPE, _inputs(), tp, cp, world_size=tp * cp):
+        torch.testing.assert_close(torch.tensor(out), reference, atol=1e-4, rtol=1e-4)
+

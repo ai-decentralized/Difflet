@@ -9,13 +9,19 @@ Qwen2.5-VL streams first, padding zeroed after) is data-dependent but fixed-leng
 = 1,985 tokens), and it runs in the un-compiled top-level forward, so the compiled blocks see one
 shape. (The Trainium path forks it because it compiles the whole model as one graph.)
 
-Parallelism: TP1 (the 8.3B DiT is 15.5 GiB in bf16, one core), optionally with context
-parallelism over the image tokens (Ulysses): every rank holds the whole DiT; the image stream is
-split evenly across the CP group before the blocks and gathered after them, the text stream (729 +
-256 + 1000 tokens) stays replicated, and the blocks' attention processor is replaced by one that
-calls ``joint_ulysses_attention`` with the text's padding expressed as ``key_valid_len`` (diffusers
-reorders valid text tokens first). That is exact for every valid query: diffusers' symmetric mask
-and a key mask differ only on padded text queries, whose outputs are never used.
+Parallelism. Tensor parallelism replaces diffusers' linears with the backend's column/row-parallel
+layers under the same names (Megatron layout: q/k/v and the added text q/k/v column-parallel, the
+attention outputs row-parallel, each MLP column then row, the modulation linears column-parallel
+with the output gathered; heads split 16/tp; the token refiner likewise), so the per-rank loader
+shards diffusers' checkpoint unchanged. Context parallelism (Ulysses) splits the image tokens across
+the CP group around the blocks, the text stream (729 + 256 + 1000 tokens) replicated.
+
+Attention. The blocks' processor is replaced at every layout: diffusers' builds a dense symmetric
+(N+T)^2 mask (about 2.6 GB per block at 121 frames) for masked SDPA. Ours expresses the text padding
+as a key count, N image keys + the valid text keys (diffusers reorders valid text tokens first),
+which on the device runs attention_cte's key-bounded flash kernel in O(L) memory, through
+``joint_ulysses_attention`` under CP. It is exact for every valid query: the symmetric and key masks
+differ only on padded text queries, whose outputs are never used.
 Numerics depend on two backend workarounds installed by ``prepare_runtime``: the bool bitwise guard
 (the token refiner's mask) and fp32 LayerNorm for bf16 inputs.
 """
@@ -44,9 +50,7 @@ class NeuronHunyuanVideo15TransformerApplication(TorchNeuronApplicationBase):
                  exec_mode: str | None = None, device="neuron", **kwargs) -> None:
         super().__init__(model_path=model_path, parallel=parallel, dtype=dtype,
                          exec_mode=exec_mode, device=device, **kwargs)
-        if int(self.parallel.tp_degree) != 1:
-            raise NotImplementedError("HunyuanVideo 1.5 on the neuron backend runs at TP1 (the whole "
-                                      "DiT on every core), with context parallelism for long videos")
+        self.tp = int(self.parallel.tp_degree)
         self.cp = int(getattr(self.parallel, "cp_degree", 1) or 1)
         if self.cp > 1 and getattr(self.parallel, "cp_mode", "ulysses") != "ulysses":
             raise NotImplementedError("HunyuanVideo 1.5 runs context parallelism in Ulysses mode only")
@@ -64,10 +68,13 @@ class NeuronHunyuanVideo15TransformerApplication(TorchNeuronApplicationBase):
         self.image_tokens, self.batch_size = int(image_tokens), int(batch_size)
         _, _, f, h, w = self.latent_shape
         self.num_image_tokens = f * h * w  # patch size 1 x 1 x 1
+        heads = int(self.model_config["num_attention_heads"])
+        if heads % self.tp:
+            raise ValueError(f"num_attention_heads={heads} must divide by tp={self.tp}")
         if self.cp > 1:
-            heads = int(self.model_config["num_attention_heads"])
-            if heads % self.cp:
-                raise ValueError(f"Ulysses needs num_attention_heads={heads} divisible by cp={self.cp}")
+            if (heads // self.tp) % self.cp:
+                raise ValueError(f"Ulysses needs the {heads // self.tp} heads per TP rank divisible "
+                                 f"by cp={self.cp}")
             if self.num_image_tokens % self.cp:
                 raise ValueError(
                     f"{self.num_image_tokens} image tokens ({f} x {h} x {w}) do not divide by cp={self.cp}; "
@@ -76,8 +83,14 @@ class NeuronHunyuanVideo15TransformerApplication(TorchNeuronApplicationBase):
 
     def build_module(self) -> torch.nn.Module:
         model = _tensor_signature_model()(**self.model_config)
+        if self.tp > 1:
+            _install_tensor_parallel(model, self.tp)
         if self.cp > 1:
             _install_context_parallel(model, self.num_image_tokens, self.cp)
+        else:
+            processor = _JointBoundedProcessor()
+            for block in model.transformer_blocks:
+                block.attn.set_processor(processor)
         return model
 
     def checkpoint_key(self, name: str) -> str:
@@ -122,6 +135,58 @@ class NeuronHunyuanVideo15TransformerApplication(TorchNeuronApplicationBase):
                                                   encoder_attention_mask, e2, m2, img)),)
 
 
+def _joint_qkv(attn, hidden_states, encoder_hidden_states, image_rotary_emb):
+    """diffusers' HunyuanVideo15AttnProcessor2_0 up to the attention: projections, QK norms, rotary
+    on the image stream; ``[B, H, S, d]`` (this rank's heads) for image and text."""
+    from diffusers.models.embeddings import apply_rotary_emb
+
+    def heads(t):
+        return t.unflatten(2, (attn.heads, -1))
+
+    q, k, v = heads(attn.to_q(hidden_states)), heads(attn.to_k(hidden_states)), heads(attn.to_v(hidden_states))
+    q, k = attn.norm_q(q), attn.norm_k(k)
+    if image_rotary_emb is not None:
+        q = apply_rotary_emb(q, image_rotary_emb, sequence_dim=1)
+        k = apply_rotary_emb(k, image_rotary_emb, sequence_dim=1)
+    eq = heads(attn.add_q_proj(encoder_hidden_states))
+    ek = heads(attn.add_k_proj(encoder_hidden_states))
+    ev = heads(attn.add_v_proj(encoder_hidden_states))
+    if attn.norm_added_q is not None:
+        eq = attn.norm_added_q(eq)
+    if attn.norm_added_k is not None:
+        ek = attn.norm_added_k(ek)
+    bhsd = lambda t: t.transpose(1, 2).contiguous()  # noqa: E731  [B, S, H, d] -> [B, H, S, d]
+    return tuple(bhsd(t) for t in (q, k, v, eq, ek, ev))
+
+
+def _joint_out(attn, img_out, txt_out, dtype):
+    """``[B, H, S, d]`` attention outputs through diffusers' output projections."""
+    img_out = img_out.transpose(1, 2).flatten(2, 3).to(dtype)
+    txt_out = txt_out.transpose(1, 2).flatten(2, 3).to(dtype)
+    return attn.to_out[1](attn.to_out[0](img_out)), attn.to_add_out(txt_out)
+
+
+class _JointBoundedProcessor:
+    """``HunyuanVideo15AttnProcessor2_0`` with the text padding as a key count instead of a dense
+    symmetric mask: queries attend to keys ``[0, N + valid text)`` of the joint ``[image || text]``
+    sequence (attention_cte's key-bounded flash kernel on the device)."""
+
+    def __call__(self, attn, hidden_states, encoder_hidden_states=None, attention_mask=None,
+                 image_rotary_emb=None):
+        from difflet.backends.neuron.ops_impl.attention import attention
+
+        q, k, v, eq, ek, ev = _joint_qkv(attn, hidden_states, encoder_hidden_states, image_rotary_emb)
+        n = q.shape[2]
+        b, h, s = q.shape[0], q.shape[1], n + eq.shape[2]
+        q, k, v = (torch.cat(pair, dim=2).reshape(b * h, s, -1) for pair in ((q, eq), (k, ek), (v, ev)))
+        valid = attention_mask.to(torch.int32).sum(dim=1) + n  # [B]
+        hi = valid.view(b, 1, 1).expand(b, h, s).reshape(b * h, s, 1).to(torch.int32)
+        out = attention(q, k, v, scale=q.shape[-1] ** -0.5, causal=False,
+                        bound_min=torch.zeros_like(hi), bound_max=hi, tp_q=True, tp_k=True, tp_out=False)
+        out = out.reshape(b, h, s, -1)
+        return _joint_out(attn, out[:, :, :n], out[:, :, n:], hidden_states.dtype)
+
+
 class _JointUlyssesProcessor:
     """``HunyuanVideo15AttnProcessor2_0`` with the attention done by ``joint_ulysses_attention``:
     the image stream arrives sharded (this rank's ``N/cp`` tokens, rotary rows to match), the text
@@ -133,36 +198,53 @@ class _JointUlyssesProcessor:
 
     def __call__(self, attn, hidden_states, encoder_hidden_states=None, attention_mask=None,
                  image_rotary_emb=None):
-        from diffusers.models.embeddings import apply_rotary_emb
-
         from difflet.backends.neuron.ops_impl.attention import joint_ulysses_attention
 
-        def heads(t):
-            return t.unflatten(2, (attn.heads, -1))
-
-        q, k, v = heads(attn.to_q(hidden_states)), heads(attn.to_k(hidden_states)), heads(attn.to_v(hidden_states))
-        q, k = attn.norm_q(q), attn.norm_k(k)
-        if image_rotary_emb is not None:
-            q = apply_rotary_emb(q, image_rotary_emb, sequence_dim=1)
-            k = apply_rotary_emb(k, image_rotary_emb, sequence_dim=1)
-        eq = heads(attn.add_q_proj(encoder_hidden_states))
-        ek = heads(attn.add_k_proj(encoder_hidden_states))
-        ev = heads(attn.add_v_proj(encoder_hidden_states))
-        if attn.norm_added_q is not None:
-            eq = attn.norm_added_q(eq)
-        if attn.norm_added_k is not None:
-            ek = attn.norm_added_k(ek)
+        q, k, v, eq, ek, ev = _joint_qkv(attn, hidden_states, encoder_hidden_states, image_rotary_emb)
         valid_text = attention_mask.to(torch.int32).sum(dim=1)
         key_valid_len = (valid_text + self.num_image_tokens).to(torch.int32)
-        bhsd = lambda t: t.transpose(1, 2).contiguous()  # noqa: E731  [B, S, H, d] -> [B, H, S, d]
-        img_out, txt_out = joint_ulysses_attention(
-            bhsd(q), bhsd(eq), bhsd(k), bhsd(v), bhsd(ek), bhsd(ev),
-            scale=q.shape[-1] ** -0.5, key_valid_len=key_valid_len)
-        img_out = img_out.transpose(1, 2).flatten(2, 3).to(q.dtype)
-        txt_out = txt_out.transpose(1, 2).flatten(2, 3).to(q.dtype)
-        img_out = attn.to_out[1](attn.to_out[0](img_out))
-        txt_out = attn.to_add_out(txt_out)
-        return img_out, txt_out
+        img_out, txt_out = joint_ulysses_attention(q, eq, k, v, ek, ev, scale=q.shape[-1] ** -0.5,
+                                                   key_valid_len=key_valid_len)
+        return _joint_out(attn, img_out, txt_out, hidden_states.dtype)
+
+
+def _install_tensor_parallel(model, tp: int) -> None:
+    """diffusers' linears -> the backend's column/row-parallel layers, same attribute names (so the
+    loader's ``_difflet_shard`` declarations shard the checkpoint): Megatron layout per block and per
+    token-refiner block; modulation linears column-parallel with the output gathered; heads / tp."""
+    from difflet.backends.neuron.ops_impl.linear import ColumnParallelLinear, RowParallelLinear
+
+    def col(lin, gather=False):
+        return ColumnParallelLinear(lin.in_features, lin.out_features, bias=lin.bias is not None,
+                                    gather_output=gather, dtype=lin.weight.dtype, device=lin.weight.device)
+
+    def row(lin):
+        return RowParallelLinear(lin.in_features, lin.out_features, bias=lin.bias is not None,
+                                 input_is_parallel=True, dtype=lin.weight.dtype, device=lin.weight.device)
+
+    def attention(attn, joint):
+        names = ("to_q", "to_k", "to_v") + (("add_q_proj", "add_k_proj", "add_v_proj") if joint else ())
+        for name in names:
+            setattr(attn, name, col(getattr(attn, name)))
+        attn.to_out[0] = row(attn.to_out[0])
+        if joint:
+            attn.to_add_out = row(attn.to_add_out)
+        attn.heads //= tp
+
+    def mlp(ff):
+        ff.net[0].proj = col(ff.net[0].proj)
+        ff.net[2] = row(ff.net[2])
+
+    for block in model.transformer_blocks:
+        attention(block.attn, joint=True)
+        mlp(block.ff)
+        mlp(block.ff_context)
+        block.norm1.linear = col(block.norm1.linear, gather=True)
+        block.norm1_context.linear = col(block.norm1_context.linear, gather=True)
+    for block in model.context_embedder.token_refiner.refiner_blocks:
+        attention(block.attn, joint=False)
+        mlp(block.ff)
+        block.norm_out.linear = col(block.norm_out.linear, gather=True)
 
 
 def _install_context_parallel(model, num_image_tokens: int, cp: int) -> None:
