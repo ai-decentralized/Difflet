@@ -1330,3 +1330,16 @@ def hv15_cfg_worker(rank: int, world_size: int, model_dir: str, shape: dict, inp
                                                      **shape)
     app.load()
     return app(**inputs)[0].tolist()
+
+
+def hv15_pipeline_cfg_worker(rank: int, world_size: int, snapshot: str, shape: dict, t1: int, t2: int,
+                             embeds: dict, steps: int) -> list:
+    """HunyuanVideo 1.5's denoising loop at CFG2 (world 2), on CPU."""
+    from difflet.backends.neuron.hunyuan_video15.pipeline import TorchNeuronHunyuanVideo15Pipeline
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+
+    pipe = TorchNeuronHunyuanVideo15Pipeline(model_path=snapshot, parallel=DiffletParallelConfig(cfg_parallel_enabled=True),
+                                             dtype=torch.float32, exec_mode="eager", device="cpu",
+                                             text_seq_len=t1, text_2_seq_len=t2, **shape)
+    pipe.load()
+    return pipe(**embeds, num_inference_steps=steps, generator=torch.Generator().manual_seed(0)).tolist()
