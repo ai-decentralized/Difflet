@@ -571,6 +571,15 @@ class _ResidentWorkerProcess:
         )
         self.terminate()
         replicas = self._replica_count
+        if replicas > 1:
+            # Parent-side, before spawn, and only on the multi-replica path —
+            # which is the TPU backend's by construction (see _replica_count).
+            # torch_tpu needs TORCH_TPU_TOPOLOGY et al. set here or every
+            # worker's init_process_group fails; torch_xla needs nothing and
+            # this is a no-op there.
+            from difflet.backends.tpu.ops_impl import device_runtime
+
+            device_runtime.prepare_launch(replicas)
         self._cmd_qs = [self._ctx.Queue() for _ in range(replicas)]
         self._cancel_qs = [self._ctx.Queue() for _ in range(replicas)]
         self._reply_q = self._ctx.Queue()

@@ -318,6 +318,11 @@ class TpuAdapter(BackendAdapter):
     def _start(self, spec) -> None:
         world = self.world_size()
         payload = self._payload(spec)
+        # Parent-side launch environment, before any worker exists; a no-op
+        # under torch_xla. See device_runtime.prepare_launch.
+        from difflet.backends.tpu.ops_impl import device_runtime
+
+        device_runtime.prepare_launch(world)
         ctx = mp.get_context("spawn")
         self._cmd_qs = [ctx.Queue() for _ in range(world)]
         self._reply_q = ctx.Queue()

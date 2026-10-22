@@ -698,3 +698,122 @@ new device folder needs no change.
 `tests/` (19 files) and the superseded `benchmark/*_tpu_run.py` runners and
 one-off probes still import torch_xla directly. Consequence to remember: when
 Phase 2 flips `DIFFLET_TPU_RUNTIME=torch_tpu`, those still exercise torch_xla.
+
+### 2026-10-22 — **Phase 2**: torch_tpu runs a real model, and two defaults had to change
+
+`DIFFLET_TPU_RUNTIME=torch_tpu` now runs Qwen-Image end to end at tp=4 —
+`status=ok`, no tracebacks, four workers, 20 steps, VAE decode, PNG out.
+
+**Shim verification first.** The same 0b payload, but driven through
+`device_runtime` rather than the runtime APIs, so what is tested is the
+translation layer: all four collectives bit-identical to torch_xla on tp=4 and
+tp=2×cp=2. The pieces with real logic in them are the group-list →
+`ProcessGroup` cache (`dist.new_group` is collective, so every rank must create
+every group in the same order), the dim handling in all_gather /
+reduce_scatter (`dist` only ever works along dim 0), broadcast over a list, and
+`all_reduce` needing a clone because `dist`'s is in place while `xm`'s returns
+a new tensor.
+
+**Launch is not what torchrun does.** difflet spawns workers with `mp.Process`,
+so nothing sets the `env://` rendezvous variables. `prepare_launch()` now picks
+a free port and sets `MASTER_ADDR`/`MASTER_PORT`/`WORLD_SIZE` in the parent
+before spawn; `initialize_replica()` sets `RANK`/`LOCAL_RANK` from its
+arguments, which is what `pjrt.initialize_multiprocess` took directly. All
+`setdefault`, so a genuine torchrun launch keeps its own values.
+
+**Two capabilities are off by default and both had to be turned on in the
+shim.** Leaving either to an environment variable the operator must know is the
+same as not having it.
+
+| | default | cost of leaving it | documented? |
+|---|---|---|---|
+| `TORCH_TPU_DEFER_AND_FUSE` | off (Strict eager) | per-step **2.9x** | mentioned in the launch posts |
+| `TORCH_TPU_TIER3_COMPILATION_CACHE_ROOT` | off | every process recompiles | **nowhere** — found with `strings` |
+
+**Qwen-Image, 1024², tp=4, against torch_xla on the same box:**
+
+| metric | torch_xla | tt Strict | tt +fuse | **tt +fuse +cache (warm)** |
+|---|---:|---:|---:|---:|
+| e2e cold | 92.24 s | 69.17 s | 64.23 s | **41.49 s** (−55%) |
+| HBM / chip | 11.07 GB | 9.52 GB | 9.61 GB | **9.61 GB** (−13%) |
+| per-step | 0.270 s | 1.004 s | 0.342 s | 0.355 s (+31%) |
+| load | 7.83 s | 26.71 s | 20.78 s | 21.02 s (+168%) |
+
+`num_compilations` across a fresh four-worker set: `8, 12, 21, 15, 0, 0, 2, 0`
+cold, then **all zeros** warm, with 101 MB in 58 files on disk. Phase 0d
+measured this on a 4-block proxy and the plan recorded that scaling to a real
+DiT was assumed; it is now measured.
+
+**per-step's remaining +31% is the attention kernel, and the arithmetic says so.**
+The gap against Strict eager was 734 ms/step. SDPA costs 1.33 ms per call at
+4096 tokens, so across a 60-block DiT attention can account for ~80 ms — about
+10%. Enabling DeferAndFuse removed 647 ms, leaving 87 ms. The two numbers meet.
+
+**Attention is not a drop-in swap, and the kernel is not obviously the answer.**
+
+- `torch.tpu.ops.splash_sdpa` defaults to **`is_causal=True`** while its own
+  docstring calls it a "Replacement for F.scaled_dot_product_attention", whose
+  default is False. It does not error — it silently returns cosine 0.40. A
+  diffusion DiT is bidirectional, so this would be wrong everywhere.
+  With `is_causal=False` it is correct (cosine 0.99998).
+- It is also **slower than SDPA** at the shapes that matter: 0.68x at 4096
+  tokens / 24 heads with the best working block configuration, against 2.7x
+  *faster* at 1024 tokens. Sweeping `block_q`/`block_kv` did not help — the
+  512/512 default was the best that ran, and `block_kv >= 1024` raised
+  ValueError and poisoned the device state for every later config in the
+  process.
+- It has no `q_segment_ids`/`kv_segment_ids`, which the current wrapper uses
+  for two things: masking the block padding of unaligned lengths (without it,
+  Wan's 4680 silently returns 5.4e-2 relative error), and HunyuanVideo's
+  per-row key window. Neither has a splash equivalent.
+- Installing plain `jax` does **not** restore the current kernel: that wrapper
+  imports `torch_xla.experimental.custom_kernel`, and this venv has no
+  torch_xla. It does make `splash_sdpa` importable, which otherwise fails on
+  `import jax` — and plain `jax` 0.12 left libtpu 0.0.51 and torch 2.14.1
+  alone, so the note in `attention.py` about `jax[tpu]` downgrading libtpu does
+  not apply here.
+
+**load's +168% is host-to-device bandwidth, and TorchTPU's is 20-27x slower.**
+
+Ruled out first: compilation (tier-3 took `num_compilations` to zero and load
+did not move — 21.04 cold against 21.02 warm), page cache, and DeferAndFuse.
+Timing the three load stages showed the transformer stage taking 20.7-31.9 s
+per rank while the VAE took 0.085 s, which points at moving weights, not at
+building anything.
+
+Measured single-process on an empty chip, same code both runtimes, **every copy
+forced to materialise with a reduction read back to the host**:
+
+| size | torch_tpu | torch_xla |
+|---|---:|---:|
+| 0.25 GB | 0.20 GB/s | 5.41 GB/s |
+| 1 GB | 0.30 GB/s | 5.60 GB/s |
+| 2 GB | 0.22 GB/s | 5.67 GB/s |
+
+That forcing matters: without it torch_xla reported 20-46 GB/s, because `.to()`
+on a lazy runtime records the copy and `wait_device_ops()` need not materialise
+a tensor nothing consumes. The repo already knows this shape of error —
+`benchmark/v5e/RESULTS.md` notes that an unsynced delta is the enqueue rate,
+not device time. The 5.6 GB/s figure is flat across three sizes and the
+checksums agree, so it is the real one.
+
+Arithmetic: Qwen-Image at tp=4 puts ~9.6 GB of weights on each rank. At
+5.6 GB/s that is ~1.7 s; at 0.25 GB/s it is ~38 s. Measured stage: 20-32 s,
+with the weights loaded shard by shard rather than in one block.
+
+This is a defect, not a setting. DeferAndFuse and tier-3 were both on, the chip
+was empty, the process was alone. 0.25 GB/s is far below what the link should
+do, and it is worth reporting upstream.
+
+Consequences, which differ sharply by workload:
+
+- **Resident serving** pays it once at startup. 21 s against 7.8 s is absorbed,
+  and e2e cold is still 55% better because of the compilation cache.
+- **Cold-start-heavy use** — switching models, restarting workers — pays 13 s
+  every time.
+- **Bigger models scale it linearly.** HunyuanVideo and LTX-2 carry more
+  weight per rank, so the gap grows with them. Phase 4 must measure this per
+  model rather than assume Qwen-Image's 13 s generalises.
+
+**Dependencies.** `pip install -e .` plus torchvision plus jax into the
+torch_tpu venv left torch at 2.14.1+cpu throughout, `pip check` clean.
