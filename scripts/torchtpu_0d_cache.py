@@ -39,8 +39,12 @@ N_BLOCKS = 4
 def main():
     label = sys.argv[1] if len(sys.argv) > 1 else "run"
     rank = 0
-    if "RANK" in os.environ:  # launched under tt_launch.py: one worker per chip
-        torch.accelerator.set_device_index(int(os.environ.get("LOCAL_RANK", "0")))
+    if "RANK" in os.environ:
+        # No set_device_index here. The launcher already gives each worker its
+        # own chip, so every process sees exactly one addressable device and
+        # set_device_index(local_rank) raises "Device index N is out of bounds
+        # of the number of addressable devices 1" for every rank but 0 — which
+        # deadlocks rank 0 in the rendezvous waiting for peers that just died.
         dist.init_process_group(backend="tpu_dist")
         rank = dist.get_rank()
     t_import = time.perf_counter() - T0

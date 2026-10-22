@@ -38,10 +38,10 @@ def attempt(res: dict, key: str, fn):
 
 def main():
     local_rank = int(os.environ.get("LOCAL_RANK", "0"))
-    try:
-        torch.accelerator.set_device_index(local_rank)
-    except Exception as exc:  # noqa: BLE001
-        print(f"set_device_index({local_rank}) failed: {exc}", flush=True)
+    # Deliberately no set_device_index: the launcher hands each worker its own
+    # chip, so this process sees one addressable device and any index but 0 is
+    # out of bounds. An earlier version called it inside a try/except and the
+    # failure went unnoticed.
 
     dist.init_process_group(backend="tpu_dist")
     rank = dist.get_rank()

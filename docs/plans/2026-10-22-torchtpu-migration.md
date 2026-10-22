@@ -515,3 +515,96 @@ larger effect than most of the rest of this migration.
 (`medium` vs `highest` on the same runtime), so the cross-runtime comparison was
 not on the critical path, and `platform.py`'s "~1e-2 per matmul" is a
 per-matmul figure that is not directly comparable to a through-4-blocks one.
+
+### 2026-10-22 — **Phase 0d PASS**: the executable survives a fresh process, and only one rank compiles
+
+The spike the migration rests on. Measured on the same FLUX 4-block stack,
+timing `t_first_forward` — weights already on the chip, inputs ready, to
+synchronized completion — so XLA compile is isolated from the host-side build.
+The knobs are `TORCH_TPU_TIER3_COMPILATION_CACHE_ROOT` and
+`TORCH_TPU_TIER2_COMPILATION_CACHE`, **found by running `strings` over the
+shipped binary**: they appear in neither the docs nor `public_apis.md`.
+
+**Single process, four fresh starts:**
+
+| condition | t_first_forward | num_compilations |
+|---|---:|---:|
+| tier-3 disabled (today's situation) | 3.47 s | 37 |
+| tier-3 enabled, cache empty (cold) | 3.47 s | 37 |
+| tier-3 enabled, cache warm, **fresh process** | **0.20 s** | **0** |
+| again | **0.20 s** | **0** |
+
+`num_compilations` goes 37 → 0 across a process boundary: the executables are
+deserialized from disk, which is exactly what torch_xla answers
+`UNIMPLEMENTED: Deserializing serialized executable not supported` to. 0.20 s
+against a pure-execute 0.084 s means the remainder is cache read and dispatch.
+
+**tp=4, four concurrent workers — and the better finding:**
+
+| phase | rank 0 | rank 1 | rank 2 | rank 3 |
+|---|---:|---:|---:|---:|
+| cold, t_first | 3.51 s | 3.05 s | 2.14 s | 3.55 s |
+| cold, num_compilations | **37** | **0** | **0** | **0** |
+| warm, t_first | 0.20 s | 0.21 s | 0.20 s | 0.20 s |
+| warm, num_compilations | 0 | 0 | 0 | 0 |
+
+**On a cold cache only one rank compiles; the other three take the result from
+the tier-2 machine-local cache.** Setting the tier-3 root switches tier-2 on
+(it is off for a single-device program), and the on-disk cache is 6.0 MB in 37
+files — the same as the single-process run, so ranks do not each write a copy.
+
+That removes the reason `DIFFLET_TPU_COMPILE_SLOTS` exists. Today
+`application_base.py::warmup_eager` rations compile slots with an flock because
+XLA's compile of a 60-block DiT peaked at **~43 GB per rank**, and four ranks
+compiling at once plus the host text encoder does not fit a 188 GB v5e host.
+With tier-2 dedup there is one compiler, not four, so the gate has nothing left
+to prevent. Phase 3 should delete it rather than port it.
+
+**Caveat, stated plainly.** This is a 4-block random-weight stack, not a real
+DiT: it compiles in 3.5 s where a real one takes 44–170 s, and the mechanism
+scaling to that size is assumed, not shown. The plan's exit criterion — a fresh
+four-worker Qwen-Image set warm-starting under 40 s against today's 92.4 s — is
+Phase 4/5's to prove on the real model. What is settled here is the binary
+question, and it is settled: **a compiled executable survives a fresh process,
+and survives four of them.**
+
+**Three operational findings, each of which cost a run.**
+
+1. *Do not call `torch.accelerator.set_device_index(local_rank)` under this
+   launcher.* Each worker already owns one chip, so it sees exactly one
+   addressable device and any index but 0 raises `Device index N is out of
+   bounds of the number of addressable devices 1`. Ranks 1–3 died on it while
+   rank 0 sat in `do_poll` waiting for peers that were already gone — a 13
+   minute hang whose only visible symptom was host memory stuck at 4 GB of 188.
+   The 0b spike made the same call inside a `try/except`, so it had been failing
+   there too, unnoticed, which is itself the proof that the launcher assigns
+   chips on its own.
+2. *TPU chips are exclusive, and an orphaned worker keeps holding one.*
+   `timeout` kills torchrun but not its children, and the survivors keep
+   `/dev/vfio/N` open, so the next run dies with `Failed to acquire a TPU device
+   node '/dev/vfio/1' because it is already opened by another process on this
+   host` — an error whose text points nowhere near its cause. Free the chips by
+   their actual holders (`sudo fuser /dev/vfio/*`) before and after each run.
+   **This matters for Phase 2:** `serving/engines/resident_worker.py` owns its
+   per-chip worker lifecycle, and every crash and timeout path must release the
+   chip or the next `difflet serve` will not start.
+3. *Never hang a long-running job directly on `gcloud compute tpus tpu-vm ssh`.*
+   On a connection wobble gcloud silently reconnects and **replays the whole
+   command**, which for a job that spawns processes means another full set of
+   them. One deadlocked run left four separate generations of chip-holding
+   workers this way. Start the job detached on the box and let ssh poll a log.
+
+---
+
+## Phase 0 verdict: **GO**
+
+| spike | question | result |
+|---|---|---|
+| 0a | can the dependency set coexist? | **PASS** — torch 2.14.1, diffusers' 0.38.0 pin intact, `pip check` clean |
+| 0b | do the collectives match? | **PASS** — all four bit-identical on tp=4 and tp=2×cp=2 |
+| 0c | what does precision cost? | **PASS** — `medium` holds the bar at 2.42x the speed of today's `highest` |
+| 0d | does the cache survive a fresh process? | **PASS** — 37 compilations → 0, 3.47 s → 0.20 s, and one compiler instead of four |
+
+Nothing found in Phase 0 argues against the migration, and 0c and 0d each found
+more than the plan asked for: a 2.42x matmul win that is independent of the
+cache, and a compile-dedup that deletes a whole subsystem. Proceed to Phase 1.

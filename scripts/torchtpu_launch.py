@@ -22,6 +22,9 @@ def main() -> None:
         sys.exit(__doc__)
     nproc, script = int(sys.argv[1]), sys.argv[2]
 
+    # Without this, process_group_tpu warns "Node-local store disabled" and every
+    # rank publishes to the world store individually.
+    os.environ.setdefault("TORCH_TPU_DEVICES_PER_HOST", str(nproc))
     torch.tpu.distributed.set_tpu_launch_env(nproc_per_node=nproc)
 
     argv = [
