@@ -15,7 +15,7 @@ Statuses: **PASS** (ran end to end) / **LIMIT** (works with a documented constra
 | `difflet run` | PASS | PASS | PASS |
 | DiT parity vs diffusers | PASS (all-ones and padded prompt) | PASS | PASS (both experts, rounding block) |
 | e2e vs diffusers | PASS | PASS, gate relative to a recorded noise floor over seeds | PASS, gate relative to a recorded noise floor over seeds |
-| CLI matrix (`scripts/verify_cli_cuda.py`) | PASS | PASS | PASS |
+| CLI matrix (download, compile, generate) | PASS | PASS | PASS |
 | `difflet serve` | PASS; LIMIT: one request at a time (429 after the 30 s queue timeout) | PASS, PNG byte-identical to `difflet run` | PASS, frames bit-identical to `difflet run` in-process; the MP4 writer is not byte-deterministic |
 | `--torch-compile` | PASS | PASS | PASS |
 | `--teacache-cadence N` | PASS | N/A | N/A |

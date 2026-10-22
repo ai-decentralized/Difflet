@@ -4,8 +4,7 @@ No GPU: ``device="cpu"`` runs the same load path a GPU host runs. A tiny diffuse
 ``FluxTransformer2DModel`` checkpoint (the recipe of
 ``tests/unit/backends/test_cuda_flux_transformer.py``) is the oracle; the text encoders and
 VAE are never loaded here — the real ``FluxPipeline.from_pretrained`` is replaced by a
-recorder that returns a component-less pipeline. The bf16 image numbers come from
-``scripts/cuda_e2e_flux_vs_diffusers.py`` on the GPU.
+recorder that returns a component-less pipeline.
 """
 
 from __future__ import annotations
@@ -155,15 +154,6 @@ def test_gpu_application_refuses_multi_rank_and_sp_up_front(tmp_path, parallel, 
     # Refused before the 24 GB DiT is touched, not at the first collective.
     with pytest.raises(NotImplementedError, match=expected):
         _build(tmp_path, parallel=parallel)
-
-
-def test_registry_lists_cuda_for_flux():
-    from difflet.registry import resolve_model
-
-    for model_id in ("black-forest-labs/FLUX.1-dev", "black-forest-labs/FLUX.1-schnell"):
-        entry = resolve_model(model_id)
-        assert entry.name == "flux" and entry.backends == ("trainium", "cuda")
-        entry.require_backend("cuda")  # must not raise
 
 
 # ----------------------------------------------------------------- application

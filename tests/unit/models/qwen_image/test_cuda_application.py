@@ -2,7 +2,7 @@
 
 No weights, no GPU: an empty model dir builds an application with no transformer,
 which is enough to prove the routing, the reflective contract and the prompt
-padding helper. The GPU round trip is scripts/cuda_smoke.py.
+padding helper.
 """
 
 import inspect
@@ -69,14 +69,6 @@ def test_gpu_application_rejects_cfg_parallel(tmp_path):
             dtype="bf16",
             shape={"height": 64, "width": 64},
         )
-
-
-def test_registry_lists_cuda_for_qwen_image():
-    from difflet.registry import resolve_model
-
-    entry = resolve_model("Qwen/Qwen-Image")
-    assert "cuda" in entry.backends
-    entry.require_backend("cuda")  # must not raise
 
 
 def test_cuda_application_signatures_match_the_pipeline_contract(tmp_path):
@@ -250,8 +242,8 @@ def test_generate_rejects_guidance_scale_when_the_model_has_no_guidance_embeds(t
 
 
 def test_generate_uses_the_given_initial_latents(tmp_path, monkeypatch):
-    # The end-to-end oracle (scripts/cuda_e2e_vs_diffusers.py) feeds the same packed noise to
-    # difflet and diffusers; generate() must use it verbatim.
+    # A comparison against diffusers feeds the same packed noise to both; generate() must use
+    # it verbatim.
     app = _build(tmp_path, device="cpu")
     seen = {}
 

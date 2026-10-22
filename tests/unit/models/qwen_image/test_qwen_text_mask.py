@@ -303,7 +303,7 @@ def test_compiled_blocks_do_not_recompile_per_prompt_length(config, tmp_path):
 
 def test_static_rope_text_slice_is_not_a_view_of_the_table(config):
     # A view keeps `_base` (the 1024-row table): dynamo's duck sizing then ties the prompt
-    # length to 1024 at warm-up and recompiles on every real prompt (review fix pass).
+    # length to 1024 at warm-up and recompiles on every real prompt.
     module = _QwenImageTransformerTraceModule(config, apply_text_mask=True)
     shapes = [[(1, config.packed_height, config.packed_width)]]
     (_, _), (cos, sin) = module.transformer.pos_embed(shapes, max_txt_seq_len=3)

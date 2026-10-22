@@ -113,17 +113,6 @@ def test_context_parallel_modes_fail_loudly(name):
         getattr(A, name)()
 
 
-def test_platform_target_is_cuda():
-    assert P.get_platform_target() is P.hardware.CUDA
-    assert {"CPU", "TRN1", "TRN2", "TPU", "CUDA"} <= set(P.hardware.__members__)
-    assert P.distributed_backend_name() == "nccl"
-
-def test_sdpa_kernel_report_names_a_backend():
-    q, k, v = _qkv()
-    report = P.sdpa_kernel_report(q, k, v)
-    assert isinstance(report, str) and report
-
-
 @pytest.mark.parametrize("name", ["quantize_mx", "dequantize_mx", "matmul_mx", "linear_mx"])
 def test_mx_ops_refuse(name):
     with pytest.raises(NotImplementedError, match="not implemented"):

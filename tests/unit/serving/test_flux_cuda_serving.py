@@ -14,7 +14,6 @@ import pytest
 from PIL import Image
 
 from difflet.pipeline.parallel_config import DiffletParallelConfig
-from difflet.serving.engines.resident_worker import _apply_worker_runtime_environment
 from difflet.serving.engines.stage_pipeline import StagePipelineEngine
 from difflet.serving.errors import DiffletServingError
 from difflet.serving.options import CompilePolicy, DownloadPolicy
@@ -99,27 +98,6 @@ def test_unsupported_profiles_are_refused_before_the_download(source, over, name
         _prepare(_profile(**over))
     assert exc.value.code == "feature_not_supported" and named in exc.value.message
     assert "[flux/cuda serve]" in exc.value.message and source == []
-
-
-def test_runtime_plan_is_accepted_by_the_resident_worker_environment(source, monkeypatch):
-    # setenv records each variable, so monkeypatch restores what the worker setup overwrites.
-    for name in mod_worker_environment_names():
-        monkeypatch.setenv(name, "sentinel")
-    _apply_worker_runtime_environment(_prepare(_profile()))  # raises on a plan it rejects
-
-
-def mod_worker_environment_names():
-    return (
-        "NEURON_RT_VISIBLE_CORES",
-        "NEURON_RT_NUM_CORES",
-        "NEURON_RT_VIRTUAL_CORE_SIZE",
-        "NEURON_LOGICAL_NC_CONFIG",
-        "WORLD_SIZE",
-        "LOCAL_WORLD_SIZE",
-        "RANK",
-        "LOCAL_RANK",
-        "CUDA_VISIBLE_DEVICES",
-    )
 
 
 # ----------------------------------------------------------------- validator

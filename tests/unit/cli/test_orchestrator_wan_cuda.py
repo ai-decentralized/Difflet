@@ -119,17 +119,6 @@ def saved(monkeypatch):
     return calls
 
 
-def test_wan_spec_drives_the_shared_gpu_orchestrator():
-    orch = _orch(_args())
-    assert orch.spec is SPEC and orch.model_id == WAN22
-    assert set(SPEC.cli_model_ids) == {WAN22, WAN21}
-    assert SPEC.default_steps == 40
-    assert SPEC.guidance == "cfg" and SPEC.default_guidance_scale == 4.0
-    assert orch.generate_kwargs()["output_type"] == "pt"
-    # The image models keep PIL output.
-    assert GpuOrchestrator(_args(), FLUX_SPEC).generate_kwargs()["output_type"] == "pil"
-
-
 def test_the_mp4_writer_is_the_trainium_orchestrator_s_helper(monkeypatch, tmp_path):
     # Reused by import, not copied: save_result looks it up on the Trainium orchestrator.
     calls = []

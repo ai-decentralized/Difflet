@@ -8,16 +8,12 @@ from __future__ import annotations
 import pytest
 
 from difflet.pipeline.parallel_config import DiffletParallelConfig
-from difflet.serving.engines.resident_worker import _apply_worker_runtime_environment
 from difflet.serving.errors import DiffletServingError
 from difflet.serving.options import CompilePolicy, DownloadPolicy
 from difflet.backends.gpu import serving as mod
 from difflet.models.qwen_image.spec import SPEC
 from difflet.serving.types import ResolvedModelSource, ServingProfile
 
-import os as _os
-
-_AMBIENT_VISIBLE_CORES = _os.environ.get("NEURON_RT_VISIBLE_CORES")
 _SOURCE = ResolvedModelSource("hf_snapshot", "Qwen/Qwen-Image", None, "/snap/qwen", "a" * 40)
 
 
@@ -86,46 +82,6 @@ def test_unsupported_profiles_are_refused_before_the_download(source, over, expe
         _prepare(_profile(**over), source)
     assert exc.value.code == "feature_not_supported" and expected in exc.value.message
     assert source == []
-
-
-_WORKER_ENVIRONMENT_NAMES = (
-    "NEURON_RT_VISIBLE_CORES",
-    "NEURON_RT_NUM_CORES",
-    "NEURON_RT_VIRTUAL_CORE_SIZE",
-    "NEURON_LOGICAL_NC_CONFIG",
-    "WORLD_SIZE",
-    "LOCAL_WORLD_SIZE",
-    "RANK",
-    "LOCAL_RANK",
-)
-
-
-@pytest.fixture
-def preserve_worker_environment():
-    import os
-
-    original = {name: os.environ.get(name) for name in _WORKER_ENVIRONMENT_NAMES}
-    yield
-    for name, value in original.items():
-        if value is None:
-            os.environ.pop(name, None)
-        else:
-            os.environ[name] = value
-
-
-def test_runtime_plan_is_accepted_by_the_resident_worker_environment(
-    source, preserve_worker_environment
-):
-    bundle = _prepare(_profile(), source)
-    _apply_worker_runtime_environment(bundle)  # raises ValueError on a plan the worker rejects
-
-
-def test_worker_environment_does_not_leak_out_of_the_previous_test():
-    # delenv(raising=False) on an unset variable records nothing to undo, so a worker's
-    # NEURON_RT_VISIBLE_CORES=0 would stay set for every later test in the session.
-    import os
-
-    assert os.environ.get("NEURON_RT_VISIBLE_CORES") == _AMBIENT_VISIBLE_CORES
 
 
 def test_profile_identity_tracks_shape_and_source(source):

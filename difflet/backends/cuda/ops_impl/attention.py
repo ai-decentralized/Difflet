@@ -13,8 +13,7 @@ Contract (shared with the CPU oracle and the TPU backend, ``difflet/ops/attentio
 * ``tp_q``/``tp_k``/``tp_out`` are Trainium kernel hints: accepted and ignored.
 * Inputs may be ``(B, H, S, D)`` or ``(B*H, S, D)``; SDPA accepts either batch shape.
 
-Kernel selection (flash / cuDNN / efficient / math) is torch's; ``platform.
-sdpa_kernel_report`` says which one a shape gets. No ``flash-attn`` dependency. The context-parallel modes raise (not supported yet).
+Kernel selection (flash / cuDNN / efficient / math) is torch's. No ``flash-attn`` dependency. The context-parallel modes raise (not supported yet).
 """
 
 from __future__ import annotations
@@ -60,8 +59,7 @@ def attention(
 
     # SDPA's fused kernels (flash / cuDNN / efficient) require 4-D (B, H, S, D); a 3-D
     # (B*H, S, D) call silently takes the math path, which materialises the S×S score
-    # matrix per head (``sdpa_kernel_report`` shows "flash" vs "math" for the same tokens).
-    # Model code folds heads into the batch axis, so lift it here.
+    # matrix per head. Model code folds heads into the batch axis, so lift it here.
     folded = q.dim() == 3
     if folded:
         q, k, v = q.unsqueeze(0), k.unsqueeze(0), v.unsqueeze(0)

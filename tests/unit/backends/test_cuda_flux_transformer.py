@@ -4,8 +4,7 @@ Runs on the CPU (``device="cpu"``): the application's load path — meta build,
 materialize, diffusers safetensors → ``convert_flux_hf_state_dict`` → strict load — and
 the ``FluxDiTAdapter`` (diffusers' call signature: ids instead of rope, optional
 guidance, ``return_dict``) are device-independent. The diffusers
-``FluxTransformer2DModel`` is the oracle; the bf16 GPU numbers come from
-``tests/numerical/cuda_parity_flux_gpu.py``.
+``FluxTransformer2DModel`` is the oracle.
 """
 
 import os

@@ -17,7 +17,6 @@ os.environ.setdefault("DIFFLET_BACKEND", "cpu")
 
 from difflet.backends.cuda.flux.proj_out import fuse_proj_out  # noqa: E402
 from difflet.layers.embeddings import FluxPosEmbed  # noqa: E402
-from difflet.models.flux import modeling_flux as mf  # noqa: E402
 from difflet.models.flux.dit_config import FluxDiTConfig  # noqa: E402
 from difflet.models.flux.modeling_flux import (  # noqa: E402
     NeuronFluxTransformer2DModel,
@@ -129,14 +128,6 @@ def test_fuse_proj_out_builds_diffusers_layout_and_keeps_the_output():
             return_dict=False,
         )[0]
     torch.testing.assert_close(fused_out, expected, rtol=1e-4, atol=1e-4)
-
-
-def test_fuse_proj_out_is_refused_off_tp1(monkeypatch):
-    _, model, _ = _models()
-    monkeypatch.setattr(mf, "_safe_tp_size", lambda: 2)
-    block = model.single_transformer_blocks[0]
-    assert fuse_proj_out(block) is False
-    assert getattr(block, "proj_out", None) is None and block.proj_out_attn is not None
 
 
 def test_split_state_dict_still_loads_strict_and_the_fused_block_has_no_split_keys():

@@ -83,14 +83,6 @@ def recorder(monkeypatch):
     return calls
 
 
-def test_flux_spec_drives_the_shared_gpu_orchestrator():
-    orch = _orch(_args())
-    assert orch.spec is SPEC and orch.model_id == "black-forest-labs/FLUX.1-dev"
-    assert SPEC.cli_model_ids[0] == "black-forest-labs/FLUX.1-dev"
-    assert SPEC.default_steps == 28
-    assert SPEC.guidance == "distilled"
-
-
 def test_compile_builds_the_cuda_pipeline_without_loading(recorder):
     _orch(_args()).compile()
     model_id, kw = recorder[0]

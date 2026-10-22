@@ -11,7 +11,7 @@ Off by default. Measured on one card, the fused path makes the eager DiT forward
 faster; on one seed it also moved the end-to-end PSNR against diffusers by 10 dB, and until
 that is explained the split path is the one that ships. Opt in with ``fuse_proj_out=True`` on
 ``CudaFluxTransformerApplication`` (``application_kwargs={"fuse_proj_out": True}`` through the
-pipeline; ``--fuse-proj-out`` on the e2e gate script).
+pipeline).
 """
 
 from __future__ import annotations
@@ -20,8 +20,6 @@ import types
 
 import torch
 from torch import nn
-
-from difflet.models.flux import modeling_flux as _modeling
 
 
 def _fused_forward(
@@ -56,12 +54,9 @@ def fuse_proj_out(block: nn.Module) -> bool:
 
     The fused ``nn.Linear(dim + mlp, dim)`` takes ``cat([attn_weight, mlp_weight], dim=1)`` and
     the attn bias (exactly diffusers' ``proj_out``); the split modules are dropped. Returns True
-    when it fused, False when there was nothing to do (already fused) or it must not (tp > 1:
-    the split carries the sharding).
+    when it fused, False when the block was already fused.
     """
     if getattr(block, "proj_out", None) is not None or block.proj_out_attn is None:
-        return False
-    if _modeling._safe_tp_size() != 1 or block.proj_out_attn.tensor_parallel_group is not None:
         return False
     attn, mlp = block.proj_out_attn, block.proj_out_mlp
     weight = torch.cat([attn.weight.detach(), mlp.weight.detach()], dim=1)

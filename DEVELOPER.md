@@ -164,7 +164,6 @@ orchestrator and serving adapter the same way.
 uv venv --python 3.11 .venv
 uv pip install --python .venv/bin/python --index-url https://download.pytorch.org/whl/cu128 torch==2.11.0
 uv pip install --python .venv/bin/python -e ".[test,cuda]"
-scripts/cuda_env_check.sh                       # driver, capability, torch build, bf16 matmul
 
 DIFFLET_BACKEND=cuda difflet run --model-id Qwen/Qwen-Image --prompt "..." --output /tmp/q.png
 DIFFLET_BACKEND=cuda difflet run --model-id black-forest-labs/FLUX.1-dev --prompt "..." \
@@ -173,10 +172,6 @@ DIFFLET_BACKEND=cuda difflet run --model-id Wan-AI/Wan2.2-T2V-A14B-Diffusers --p
     --output /tmp/w.mp4 [--cfg-parallel]        # --cfg-parallel: two GPUs under torchrun
 DIFFLET_BACKEND=cuda difflet serve --model-id <id> [--dp-degree 2] [--torch-compile]
 
-# DiT parity and whole-pipeline e2e against upstream diffusers, then the CLI matrix
-DIFFLET_BACKEND=cuda python tests/numerical/cuda_parity_gpu.py --model-path <snapshot dir>
-DIFFLET_BACKEND=cuda python scripts/cuda_e2e_vs_diffusers.py --model-path <snapshot dir>
-python scripts/verify_cli_cuda.py
 scripts/cpu-gate.sh                              # CPU-host gate (no SDK, no GPU); what CI runs
 ```
 

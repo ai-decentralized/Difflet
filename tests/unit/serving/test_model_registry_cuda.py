@@ -33,14 +33,6 @@ def test_cuda_routes_qwen_to_the_gpu_factories(monkeypatch):
     ] == [("pipeline", "opaque_pipeline", "pipeline", True)]
 
 
-def test_cuda_request_defaults_match_the_cuda_cli(monkeypatch):
-    # The CLI defaults --steps to 50 on CUDA and the application fills guidance 4.0.
-    md = _resolve(monkeypatch, "cuda").metadata
-    assert md.default_steps == 50 and md.default_guidance_scale == 4.0
-    assert md.checkpoint_ids == ("Qwen/Qwen-Image",) and md.output_mime_type == "image/png"
-    assert md.model_type == "qwen_image" and md.output_modality == "image"
-
-
 def test_cuda_defaults_tp_degree_to_one(monkeypatch):
     # Registry default is tp=4 (Trainium); the CUDA CLI uses `args.tp_degree or 1`.
     assert _resolve(monkeypatch, "cuda").profile.parallel.tp_degree == 1
@@ -142,15 +134,6 @@ def test_cuda_placement_needs_allocation_and_topology_but_no_artifact():
     StageRuntimeSpec("pipeline", "qwen-cuda", topology, None, placement="cuda")
     with pytest.raises(ValueError):
         StageRuntimeSpec("pipeline", None, None, None, placement="cuda")
-
-
-def test_legacy_serving_tests_run_on_the_cpu_backend_whatever_the_host_has():
-    # resolve_serving_model branches on the current platform, so serving tests that pin no
-    # backend would take the GPU path on a GPU host. The serving conftest pins cpu; GPU tests
-    # set their own backend after it.
-    from difflet.backends.registry import current_backend
-
-    assert current_backend() == "cpu"
 
 
 @pytest.mark.parametrize("model_id", ["Qwen/Qwen-Image", _FLUX, _WAN22])

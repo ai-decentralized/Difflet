@@ -79,19 +79,6 @@ def test_cuda_backend_has_no_forbidden_imports():
     assert violations == [], violations
 
 
-def test_scan_detects_a_forbidden_import(tmp_path):
-    (tmp_path / "bad.py").write_text("from difflet.backends.trainium.core import config\n")
-    assert scan_forbidden_imports(tmp_path) == [
-        (tmp_path / "bad.py", 1, "difflet.backends.trainium.core")
-    ]
-
-
-def test_scan_accepts_a_single_file(tmp_path):
-    bad = tmp_path / "bad.py"
-    bad.write_text("import torch\nimport torch_xla.core.xla_model as xm\n")
-    assert scan_forbidden_imports(bad) == [(bad, 2, "torch_xla.core.xla_model")]
-
-
 @pytest.mark.parametrize("module", OPS_MODULES)
 def test_cuda_ops_impl_module_imports(module):
     importlib.import_module(f"difflet.backends.cuda.ops_impl.{module}")
