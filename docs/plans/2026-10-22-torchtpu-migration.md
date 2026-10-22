@@ -454,3 +454,64 @@ ragged_all_to_all, ragged_dot, ragged_dot_weight_grad, recv, reduce_scatter_dim,
 send, sparse_dense_matmul*, sparse_gather*, sparse_iota, sparse_map_row,
 splash_sdpa, strip_jagged_padding`. Note `splash_sdpa` is present — the Phase 4
 attention risk has a candidate to test rather than only the SDPA fallback.
+
+### 2026-10-22 — **Phase 0c**: `medium` holds the bar on a 4-block proxy at 2.42x the speed
+
+Measured on FLUX's own block geometry (dim 3072, 24 heads, head_dim 128, 4096
+image + 512 text tokens), four blocks deep, random weights at a fixed seed,
+against a CPU fp32 oracle. Rotary embeddings omitted on purpose — they are
+elementwise, so matmul precision cannot reach them.
+
+| mode | 1−cos @4 blocks | max abs err | ms/block | vs `highest` |
+|---|---:|---:|---:|---:|
+| `medium` (TorchTPU default) | 1.61e-07 | 4.80e-03 | **21.0** | **2.42x faster** |
+| `high` | 8.50e-12 | 3.19e-05 | 29.8 | 1.70x faster |
+| `highest` (what the repo pins today) | 4.86e-13 | 1.91e-06 | 50.8 | — |
+| `medium` + attention-only `HIGHEST` | 1.38e-07 | 4.75e-03 | 35.5 | 1.43x faster |
+
+All four clear cos ≥ 0.9995 by orders of magnitude, so **the bar does not
+discriminate at this depth** and the decision rests on the error columns.
+
+**Selective scoping is not the win it looked like.** Raising precision inside
+attention only costs 69% more than `medium` and leaves the error essentially
+where `medium` had it (1.38e-07 against 1.61e-07). The error therefore lives in
+the linear/MLP matmuls, not attention, and `torch.tpu.precision` as a targeted
+escape hatch would have to wrap those instead — at which point it approaches the
+global setting's cost. Drop the "scope highest to the sensitive layers" idea
+unless a real model's parity run says otherwise.
+
+**Error compounds with depth at `medium`, and is flat at `highest`.** Per-depth
+1−cos runs 3.93e-08 → 7.98e-08 → 1.20e-07 → 1.61e-07 on `medium` (roughly linear
+in depth) against 4.54e-13 → 4.86e-13 on `highest`. Linear extrapolation to
+FLUX's 57 blocks lands near 2e-06, i.e. cos ≈ 0.999998 — still three orders
+inside the bar, and HunyuanVideo's 60 blocks are no worse. **This is
+extrapolation from a 4-block random-weight proxy, not proof**: real checkpoints
+and a real residual stream may compound differently, and Phase 4's per-model
+parity run against the diffusers oracle is what actually decides.
+
+**Recommendation:** default the TorchTPU path to `medium`, carry `highest` as a
+per-model override, and let Phase 4 move any model that misses parity. Dropping
+`platform.py`'s global `"highest"` is worth 2.42x on every matmul, which is a
+larger effect than most of the rest of this migration.
+
+**Two methodology notes, both learned the hard way.**
+
+- *Cosine has no resolution here.* The first run of this spike printed
+  `1.000000` for all four modes and would have been recorded as "no difference".
+  At a relative error of 1e-3 over 12M elements, cosine is 1 − 5e-7, which
+  rounds to 1 at six decimals. Report `1−cos` in scientific notation, or an
+  absolute error, whenever the quantity being compared is this close.
+- *`max relative error` is not decision-grade as computed.* It reads 1.56e+03 on
+  `medium`, which is an artifact of dividing by reference elements near zero
+  (clamped at 1e-6), not a real 1000x error. Max absolute error against
+  order-1 activations is the honest column.
+- *A context manager around the whole forward is the global setting by another
+  name.* The first attempt at the scoped row wrapped `forward_capture` entirely
+  and reproduced global `highest` to three significant figures. Scoping has to
+  be selective — here, per-submodule — to measure anything.
+
+**Not measured:** the same proxy under torch_xla at its default and at
+`"highest"`. The decision this spike had to make is TorchTPU-internal
+(`medium` vs `highest` on the same runtime), so the cross-runtime comparison was
+not on the critical path, and `platform.py`'s "~1e-2 per matmul" is a
+per-matmul figure that is not directly comparable to a through-4-blocks one.
