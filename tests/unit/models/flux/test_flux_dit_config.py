@@ -3,7 +3,7 @@
 ``difflet.models.flux.dit_config.FluxDiTConfig`` is the duck-typed config the neutral
 ``NeuronFluxTransformer2DModel`` runs from off Trainium, ``convert_flux_hf_state_dict``
 is the HF -> Difflet key conversion every backend shares, and the Trainium wrapper
-classes live in ``difflet.models.flux.trainium_backbone`` so the modeling module
+classes live in ``difflet.backends.trainium.flux.backbone`` so the modeling module
 imports nothing from the Trainium backend.
 """
 
@@ -175,7 +175,7 @@ def _imported_modules(path: Path) -> list[str]:
     return names
 
 
-def test_trainium_backbone_module_is_the_only_trainium_importer():
+def test_neutral_flux_modules_import_nothing_from_trainium():
     flux = REPO / "difflet/models/flux"
     for neutral in ("modeling_flux.py", "dit_config.py"):
         offenders = [
@@ -184,5 +184,3 @@ def test_trainium_backbone_module_is_the_only_trainium_importer():
             if m == "difflet.backends.trainium" or m.startswith("difflet.backends.trainium.")
         ]
         assert offenders == [], f"{neutral} imports {offenders}"
-    backbone = _imported_modules(flux / "trainium_backbone.py")
-    assert any(m.startswith("difflet.backends.trainium.") for m in backbone)

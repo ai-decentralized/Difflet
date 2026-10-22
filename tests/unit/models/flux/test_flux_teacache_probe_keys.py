@@ -33,7 +33,7 @@ import difflet.layers.normalization as _norm_mod  # noqa: E402
 # Rebind the flux modeling module onto the cpu backend, then the Trainium wrapper
 # and the probe module so they build the *reloaded* NeuronFluxTransformer2DModel.
 mf = importlib.reload(importlib.import_module("difflet.models.flux.modeling_flux"))
-tb = importlib.reload(importlib.import_module("difflet.models.flux.trainium_backbone"))
+tb = importlib.reload(importlib.import_module("difflet.backends.trainium.flux.backbone"))
 probe_mod = importlib.reload(
     importlib.import_module("difflet.backends.trainium.flux.teacache_probe_fused")
 )

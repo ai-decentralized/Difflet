@@ -60,7 +60,7 @@ from neuronx_distributed.trace.model_builder import BaseModelInstance
 from difflet.backends.trainium.core.application_base import NeuronApplicationBase
 from difflet.backends.trainium.core.model_wrapper import ModelWrapper
 from difflet.models.flux.modeling_flux import NeuronFluxTransformer2DModel
-from difflet.models.flux.trainium_backbone import (
+from difflet.backends.trainium.flux.backbone import (
     FluxBackboneInferenceConfig,
     NeuronFluxBackboneApplication,
 )
@@ -182,7 +182,7 @@ class ModelWrapperFluxTeacacheProbeFused(ModelWrapper):
         if self.model is None:
             raise RuntimeError("Forward called before load.")
         # Cast floating inputs to the compiled dtype (the backbone wrapper,
-        # trainium_backbone.ModelWrapperFluxBackbone.forward, does the same). The
+        # backbone.ModelWrapperFluxBackbone.forward, does the same). The
         # pipeline builds guidance as float32; the NEFF expects bf16.
         dtype = self.config.neuron_config.torch_dtype
         hidden_states = hidden_states.to(dtype)

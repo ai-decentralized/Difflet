@@ -1,7 +1,7 @@
 """Geometry config for the Flux DiT, backend-neutral.
 
 The Trainium side builds ``FluxBackboneInferenceConfig`` (an NxD ``InferenceConfig``,
-in ``difflet.models.flux.trainium_backbone``). Off Trainium the same
+in ``difflet.backends.trainium.flux.backbone``). Off Trainium the same
 ``NeuronFluxTransformer2DModel`` runs from this plain dataclass: its attribute names
 are exactly what the modeling reads, including ``neuron_config.torch_dtype`` and
 ``neuron_config.world_size`` (the modeling keeps reading

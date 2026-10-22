@@ -34,11 +34,11 @@ from difflet.models.flux.dit_config import FluxDiTConfig  # noqa: E402
 mf = _reload("difflet.models.flux.modeling_flux")
 
 # The Trainium wrapper classes (FluxBackboneInferenceConfig,
-# NeuronFluxBackboneApplication) live in difflet.models.flux.trainium_backbone,
+# NeuronFluxBackboneApplication) live in difflet.backends.trainium.flux.backbone,
 # which imports the NxD application stack; their tests run only where it imports.
 needs_neuron = pytest.mark.skipif(
     importlib.util.find_spec("neuronx_distributed") is None,
-    reason="trainium_backbone imports the NxD application stack (neuronx_distributed)",
+    reason="the Trainium Flux backbone imports the NxD application stack (neuronx_distributed)",
 )
 
 
@@ -106,7 +106,7 @@ def _backbone_config(num_layers=1, num_single_layers=0, guidance_embeds=False, *
 
 def _trainium_backbone_config(num_layers=1, num_single_layers=0, guidance_embeds=False):
     from difflet.backends.trainium.core.config import NeuronConfig
-    from difflet.models.flux.trainium_backbone import FluxBackboneInferenceConfig
+    from difflet.backends.trainium.flux.backbone import FluxBackboneInferenceConfig
 
     nc = NeuronConfig(tp_degree=1, world_size=1, torch_dtype=torch.float32)
     return FluxBackboneInferenceConfig(
@@ -318,7 +318,7 @@ def test_backbone_config_required_attributes():
 @needs_neuron
 def test_backbone_config_mutual_exclusivity_raises():
     from difflet.backends.trainium.core.config import NeuronConfig
-    from difflet.models.flux.trainium_backbone import FluxBackboneInferenceConfig
+    from difflet.backends.trainium.flux.backbone import FluxBackboneInferenceConfig
 
     nc = NeuronConfig(tp_degree=1, world_size=1, torch_dtype=torch.float32)
     with pytest.raises(ValueError):
@@ -342,7 +342,7 @@ def test_backbone_config_mutual_exclusivity_raises():
 
 @needs_neuron
 def test_backbone_convert_hf_to_neuron_state_dict_splits_single_blocks():
-    from difflet.models.flux.trainium_backbone import NeuronFluxBackboneApplication
+    from difflet.backends.trainium.flux.backbone import NeuronFluxBackboneApplication
 
     config = _trainium_backbone_config(num_single_layers=1)
     inner_dim = config.num_attention_heads * config.attention_head_dim
@@ -363,7 +363,7 @@ def test_backbone_convert_hf_to_neuron_state_dict_order_and_clones():
     """Pins the original in-place algorithm: original keys in place (fused ``proj_out``
     kept), then ``global_rank.rank``, then per single block ``proj_out_attn.weight``,
     ``proj_out_attn.bias``, ``proj_out_mlp.weight``; every value a contiguous clone."""
-    from difflet.models.flux.trainium_backbone import NeuronFluxBackboneApplication
+    from difflet.backends.trainium.flux.backbone import NeuronFluxBackboneApplication
 
     config = _trainium_backbone_config(num_single_layers=2)
     inner_dim = config.num_attention_heads * config.attention_head_dim

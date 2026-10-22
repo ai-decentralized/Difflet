@@ -8,7 +8,7 @@ tensors load as they are).
 
 ``FluxDiTAdapter`` gives the application the call signature ``FluxPipeline`` uses for
 its transformer (ids instead of a rope tensor, optional guidance, ``return_dict``),
-doing on the host what ``trainium_backbone.ModelWrapperFluxBackbone.forward`` does.
+doing on the host what Trainium's ``ModelWrapperFluxBackbone.forward`` does.
 """
 
 from __future__ import annotations

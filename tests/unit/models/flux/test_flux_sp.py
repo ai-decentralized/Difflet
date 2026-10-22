@@ -38,7 +38,7 @@ import difflet.ops as _ops  # noqa: E402
 
 _reload("difflet.ops")
 mf = _reload("difflet.models.flux.modeling_flux")
-tb = _reload("difflet.models.flux.trainium_backbone")
+tb = _reload("difflet.backends.trainium.flux.backbone")
 
 NeuronConfig = _config_mod.NeuronConfig
 

@@ -43,7 +43,7 @@ def main() -> None:
     p.add_argument("--work-dir", default=os.environ.get("DIFFLET_FLUX_PARITY_WORKDIR", "/tmp/flux_ring_parity"))
     args = p.parse_args()
 
-    from difflet.models.flux.trainium_backbone import FluxBackboneInferenceConfig, NeuronFluxBackboneApplication
+    from difflet.backends.trainium.flux.backbone import FluxBackboneInferenceConfig, NeuronFluxBackboneApplication
     from difflet.backends.trainium.core.config import NeuronConfig
     from difflet.pipeline.path_resolver import resolve_model_path
     from difflet.utils.diffusers_adapter import load_diffusers_config
@@ -85,7 +85,7 @@ def main() -> None:
     vae_scale_factor = 2 ** (len(_vae_cfg["block_out_channels"]) - 1)
     config.vae_scale_factor = vae_scale_factor
 
-    # num_patches formula matches ModelWrapperFluxBackbone.example_inputs_for_shape() (trainium_backbone.py):
+    # num_patches formula matches ModelWrapperFluxBackbone.example_inputs_for_shape() (backends/trainium/flux/backbone.py):
     #   height * width // ((2 * vae_scale_factor) ** 2)
     # The factor of 2 comes from Flux's pack_latents: 2x2 spatial blocks → channels,
     # giving patches at 1/(2 * vae_scale_factor) of original resolution per side.

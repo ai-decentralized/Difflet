@@ -238,7 +238,7 @@ def run_wan(mode: str, ckpt_dir: str, out_path: str, work_dir: str) -> None:
 
 def run_flux(mode: str, ckpt_dir: str, out_path: str, work_dir: str) -> None:
     assert mode == "cp"
-    from difflet.models.flux.trainium_backbone import (
+    from difflet.backends.trainium.flux.backbone import (
         FluxBackboneInferenceConfig,
         NeuronFluxBackboneApplication,
     )
