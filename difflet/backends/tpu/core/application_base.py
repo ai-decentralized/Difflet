@@ -143,9 +143,9 @@ class TpuApplicationBase(torch.nn.Module):
         """This process's global rank; 0 without a multi-device runtime."""
         if spec.world_size == 1:
             return 0
-        import torch_xla.runtime as xr
+        from difflet.backends.tpu.ops_impl import device_runtime
 
-        return int(xr.global_ordinal())
+        return device_runtime.rank()
 
     def _prepare_module(self) -> torch.nn.Module:
         if self.module is None:
@@ -259,7 +259,8 @@ class TpuApplicationBase(torch.nn.Module):
         import time
 
         import torch
-        import torch_xla.core.xla_model as xm
+
+        from difflet.backends.tpu.ops_impl import device_runtime
 
         try:
             inputs = self.get_example_inputs()
@@ -273,8 +274,8 @@ class TpuApplicationBase(torch.nn.Module):
         with compile_slot(slots):
             with torch.no_grad():
                 out = self.forward(*[t.to(device) if hasattr(t, "to") else t for t in inputs])
-            xm.mark_step()
-        xm.wait_device_ops()
+            device_runtime.step()
+        device_runtime.wait()
         del out
         return time.monotonic() - started
 

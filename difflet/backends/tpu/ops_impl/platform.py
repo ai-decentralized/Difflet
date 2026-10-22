@@ -40,11 +40,9 @@ def configure_matmul_precision(precision: str = DEFAULT_MATMUL_PRECISION) -> str
     global state, and silently mutating it on import would be worse than the
     bug it prevents.
     """
-    import torch_xla.backends as backends
+    from difflet.backends.tpu.ops_impl import device_runtime
 
-    previous = backends.get_mat_mul_precision()
-    backends.set_mat_mul_precision(precision)
-    return previous
+    return device_runtime.set_matmul_precision(precision)
 
 
 def tpu_device_kind() -> str:
@@ -53,12 +51,9 @@ def tpu_device_kind() -> str:
     Used for capacity decisions — v5e has 16 GB HBM per chip while v5p has
     ~95 GB, which is the difference between a model fitting at tp=1 and not.
     """
-    try:
-        import torch_xla.core.xla_model as xm
+    from difflet.backends.tpu.ops_impl import device_runtime
 
-        return str(xm.xla_device_hw(xm.xla_device()) or "unknown")
-    except Exception:  # noqa: BLE001 — a probe must never break import
-        return "unknown"
+    return device_runtime.device_kind()
 
 
 __all__ = [

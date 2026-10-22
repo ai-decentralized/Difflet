@@ -957,6 +957,14 @@ def _initialize_replica_runtime(replica_rank: int, replica_count: int) -> None:
     it owns the process lifecycle and blocks, while a resident worker has to
     stay alive on a command queue across many requests.
 
+    **Unreachable on Trainium**, and structurally so rather than by accident:
+    the only caller guards on ``replica_count > 1``, and ``_replica_count()``
+    returns 1 for any backend whose ``supports_torchrun_mpmd`` is False, which
+    is Trainium's by definition — its runtime protocol forbids
+    one-process-per-device. Keep it that way: this function is the TPU launch
+    path, and Phase 2 of docs/plans/2026-10-22-torchtpu-migration.md adds
+    TorchTPU's parent-side ``set_tpu_launch_env`` here.
+
     Also divides the CPU threads. PyTorch defaults to one thread per core *per
     process*, so N replicas oversubscribe the host N-fold — measured as a
     host-side text encode taking 22 s in the worker against 0.43 s standalone,
@@ -965,9 +973,10 @@ def _initialize_replica_runtime(replica_rank: int, replica_count: int) -> None:
     import os
 
     import torch
-    from torch_xla._internal import pjrt
 
-    pjrt.initialize_multiprocess(replica_rank, replica_count)
+    from difflet.backends.tpu.ops_impl import device_runtime
+
+    device_runtime.initialize_replica(replica_rank, replica_count)
 
     cores = os.cpu_count() or replica_count
     share = max(1, cores // max(1, replica_count))

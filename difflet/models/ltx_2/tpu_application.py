@@ -49,9 +49,9 @@ def _normalize_dtype(dtype: Any) -> torch.dtype:
 
 
 def _is_encoder_rank() -> bool:
-    import torch_xla.runtime as xr
+    from difflet.backends.tpu.ops_impl import device_runtime
 
-    return int(xr.global_ordinal()) == 0
+    return device_runtime.rank() == 0
 
 
 def load_tpu_host_pipeline(model_path: str, *, dtype: torch.dtype, encoder_dtype=torch.float32):
@@ -103,13 +103,12 @@ def _install_broadcast_prompt_encoder(
     # _get_gemma_prompt_embeds(..., device=..., dtype=...) from encode_prompt.
     def _encode(prompt, num_videos_per_prompt=1, max_sequence_length=1024, scale_factor=8,
                 device=None, dtype=None):
-        import torch_xla
-        import torch_xla.core.xla_model as xm
+        from difflet.backends.tpu.ops_impl import device_runtime
 
         wire_dtype = pipe_dtype  # what crosses the interconnect; cast to `dtype` after
         prompts = [prompt] if isinstance(prompt, str) else list(prompt)
         batch = len(prompts) * int(num_videos_per_prompt)
-        xla = torch_xla.device()
+        xla = device_runtime.device()
         status = _ENCODE_OK
         if is_encoder:
             try:
@@ -129,8 +128,8 @@ def _install_broadcast_prompt_encoder(
             embeds = torch.zeros(batch, max_sequence_length, packed_dim, dtype=wire_dtype)
             mask = torch.zeros(batch, max_sequence_length, dtype=torch.int32)
         payload = [embeds.to(xla), mask.to(xla), torch.tensor([status], dtype=torch.int32).to(xla)]
-        xm.collective_broadcast(payload, root_ordinal=0)
-        xm.mark_step()
+        device_runtime.broadcast(payload)
+        device_runtime.step()
         if int(payload[2].cpu()[0]) != _ENCODE_OK:
             raise RuntimeError("LTX-2 prompt encoding failed on the encoder rank")
         # Returned in the host pipeline's dtype, not the caller's: the fp32
@@ -165,7 +164,7 @@ class TpuDeviceVideoVae:
     """
 
     def __init__(self, vae, dtype: torch.dtype):
-        import torch_xla
+        from difflet.backends.tpu.ops_impl import device_runtime
 
         self.config = vae.config
         self.dtype = dtype
@@ -182,13 +181,13 @@ class TpuDeviceVideoVae:
             self.latents_mean = self.latents_mean.detach().clone().cpu()
         if self.latents_std is not None:
             self.latents_std = self.latents_std.detach().clone().cpu()
-        self._device = torch_xla.device()
+        self._device = device_runtime.device()
         # The host pipeline is fp32 (see load_tpu_host_pipeline); on the chip
         # the VAE runs in the DiT's dtype.
         self._vae = vae.to(dtype).to(self._device).eval()
 
     def decode(self, latents, timestep=None, return_dict=False):
-        import torch_xla.core.xla_model as xm
+        from difflet.backends.tpu.ops_impl import device_runtime
 
         with torch.no_grad():
             out = self._vae.decode(
@@ -196,7 +195,7 @@ class TpuDeviceVideoVae:
                 None if timestep is None else timestep.to(self.dtype).to(self._device),
                 return_dict=False,
             )[0]
-        xm.mark_step()
+        device_runtime.step()
         frames = out.float().cpu()
         return (frames,) if not return_dict else frames
 
@@ -276,17 +275,16 @@ class TpuLTX2Application(torch.nn.Module):
     def load_eager(self) -> None:
         """DiT to the chips (with the gated warmup compile), then the host pipeline
         and the backend-neutral orchestrator — the path ``difflet serve`` uses."""
-        import torch_xla
-        import torch_xla.core.xla_model as xm
+        from difflet.backends.tpu.ops_impl import device_runtime
 
         from difflet.models.ltx_2.pipeline import LTX2Orchestrator
 
         transformer = self._require_transformer("load")
-        device = torch_xla.device()
+        device = device_runtime.device()
         module = transformer._prepare_module().to(device)
         transformer.module = module
-        xm.mark_step()
-        xm.wait_device_ops()
+        device_runtime.step()
+        device_runtime.wait()
         seconds = transformer.warmup_eager(module, device)
         print(f"[ltx_2] tpu warmup (first compile) in {seconds:.1f}s", flush=True)
         self._device_module = module
@@ -351,15 +349,14 @@ class TpuLTX2Application(torch.nn.Module):
     # ----------------------------------------------------------------- forward
 
     def forward_dit(self, bundle: LTX2DiTInputBundle):
-        import torch_xla
-        import torch_xla.core.xla_model as xm
+        from difflet.backends.tpu.ops_impl import device_runtime
 
         transformer = self._require_transformer("forward")
         validate_ltx_2_dit_inputs(bundle, config=transformer.config, dtype=self.dtype)
-        device = torch_xla.device()
+        device = device_runtime.device()
         with torch.no_grad():
             video, audio = transformer.forward(*[t.to(device) for t in bundle.as_model_inputs()])
-        xm.mark_step()
+        device_runtime.step()
         return video.cpu(), audio.cpu()
 
     def __call__(self, *args: Any, **kwargs: Any):

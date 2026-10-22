@@ -87,13 +87,11 @@ def _worker(rank, world, payload, cmd_q, reply_q):
 
 def _worker_body(rank, world, payload, cmd_q, reply_q):
     """One rank: bring up its chip, load the model, then serve requests."""
-    from torch_xla._internal import pjrt
+    from difflet.backends.tpu.ops_impl import device_runtime
 
-    pjrt.initialize_multiprocess(rank, world)
+    device_runtime.initialize_replica(rank, world)
 
     import torch
-    import torch_xla
-    import torch_xla.core.xla_model as xm
 
     # The serving adapters decode on the primary replica only; the drivers
     # read the same variable difflet/serving/models/* read.
@@ -106,7 +104,7 @@ def _worker_body(rank, world, payload, cmd_q, reply_q):
     from benchmark.adapters.tpu_models import frames_uint8, make_driver, output_info, save_media
     from benchmark.harness import RealLoopStepTimer
 
-    device = torch_xla.device()
+    device = device_runtime.device()
 
     # Mutable so one worker serves both bases without a reload: the
     # comparable synced pass and the natural pass a serving loop runs. Under
@@ -127,7 +125,7 @@ def _worker_body(rank, world, payload, cmd_q, reply_q):
 
     def _sync():
         if sync_now["on"]:
-            xm.wait_device_ops()
+            device_runtime.wait()
 
     timer = RealLoopStepTimer(sync=_sync)
     driver = make_driver(payload, rank, world, timer)
@@ -138,7 +136,7 @@ def _worker_body(rank, world, payload, cmd_q, reply_q):
 
     def mem_gb():
         try:
-            info = xm.get_memory_info(device)
+            info = device_runtime.memory_info(device)
             used = info.get("peak_bytes_used") or info.get("bytes_used") or 0
             return used / 2**30
         except Exception:  # noqa: BLE001

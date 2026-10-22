@@ -64,12 +64,12 @@ class TpuBroadcastLlamaEncoder:
     """
 
     def __init__(self, model_path: str, *, seq_len: int, capture_layer: int, dtype):
-        import torch_xla.runtime as xr
+        from difflet.backends.tpu.ops_impl import device_runtime
 
         self.seq_len = int(seq_len)
         self.capture_layer = int(capture_layer)
         self.dtype = dtype
-        self.is_encoder = int(xr.global_ordinal()) == 0
+        self.is_encoder = device_runtime.rank() == 0
         self.model = None
         encoder_path = os.path.join(model_path, "text_encoder")
         from transformers import AutoConfig
@@ -84,11 +84,10 @@ class TpuBroadcastLlamaEncoder:
             self.model.requires_grad_(False)
 
     def __call__(self, *, input_ids, attention_mask, position_ids=None, sampling_params=None):
-        import torch_xla
-        import torch_xla.core.xla_model as xm
+        from difflet.backends.tpu.ops_impl import device_runtime
 
         del position_ids, sampling_params  # Neuron-app arguments; HF derives both
-        device = torch_xla.device()
+        device = device_runtime.device()
         hidden = torch.zeros(1, self.seq_len, self.hidden_size, dtype=self.dtype)
         status = _ENCODE_OK
         if self.is_encoder:
@@ -107,8 +106,8 @@ class TpuBroadcastLlamaEncoder:
                 status = _ENCODE_FAILED
 
         payload = [hidden.to(device), torch.tensor([status], dtype=torch.int32).to(device)]
-        xm.collective_broadcast(payload, root_ordinal=0)
-        xm.mark_step()
+        device_runtime.broadcast(payload)
+        device_runtime.step()
         if int(payload[1].cpu()[0]) != _ENCODE_OK:
             raise RuntimeError("HunyuanVideo Llama encoding failed on the encoder rank")
         return SimpleNamespace(captured_tensors=[payload[0].cpu()])
@@ -128,10 +127,9 @@ class _OnDeviceTransformer:
         self.dtype = dtype
 
     def __call__(self, bundle: HunyuanVideoDiTInputBundle):
-        import torch_xla
-        import torch_xla.core.xla_model as xm
+        from difflet.backends.tpu.ops_impl import device_runtime
 
-        device = torch_xla.device()
+        device = device_runtime.device()
         out = self.module(
             bundle.hidden_states.to(self.dtype).to(device),
             bundle.timestep.to(self.dtype).to(device),
@@ -141,7 +139,7 @@ class _OnDeviceTransformer:
             bundle.guidance.to(self.dtype).to(device),
             return_dict=False,
         )[0]
-        xm.mark_step()
+        device_runtime.step()
         return out.cpu()
 
 
@@ -229,16 +227,15 @@ class TpuHunyuanVideoApplication(torch.nn.Module):
     def load_eager(self) -> None:
         """Bring the DiT up for serving with no compiled artifact, then build
         the orchestrator — the path ``difflet serve`` uses (see Wan)."""
-        import torch_xla
-        import torch_xla.core.xla_model as xm
+        from difflet.backends.tpu.ops_impl import device_runtime
 
         from difflet.models.hunyuan_video.pipeline import HunyuanVideoOrchestrator
 
         transformer = self._require_transformer("load")
-        device = torch_xla.device()
+        device = device_runtime.device()
         module = transformer._prepare_module().to(device)
-        xm.mark_step()
-        xm.wait_device_ops()
+        device_runtime.step()
+        device_runtime.wait()
         # Compile the request-shaped graph now, a few ranks at a time (see
         # warmup_eager on why): the first execution costs ~100 s and ~43 GB
         # of host RAM per rank on a v5e, and the serving smoke would

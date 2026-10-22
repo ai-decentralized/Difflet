@@ -608,3 +608,93 @@ and survives four of them.**
 Nothing found in Phase 0 argues against the migration, and 0c and 0d each found
 more than the plan asked for: a 2.42x matmul win that is independent of the
 cache, and a compile-dedup that deletes a whole subsystem. Proceed to Phase 1.
+
+### 2026-10-22 — **Phase 1**: the shim is in, and it costs nothing
+
+`difflet/backends/tpu/ops_impl/device_runtime.py` is now the only module on the
+TPU path that imports a TPU runtime library, selected by `DIFFLET_TPU_RUNTIME`
+(default `torch_xla`). Only the torch_xla implementations exist; the torch_tpu
+ones raise and name Phase 2. Ported: the four `ops_impl` modules, the component
+lifecycle, four `models/*/tpu_application.py`, the Qwen serving orchestrator,
+the resident worker's replica init, and `benchmark/adapters/tpu.py`.
+
+**Shared files were handled under a standing rule — leave the other devices
+alone — and each decision is evidence, not judgement.**
+
+| shared file | done | why |
+|---|---|---|
+| `backends/registry.py` | inline `find_spec`, **no new import** | it is on every backend's path; "is this a TPU host" is a different question from "which runtime do TPU ops call" |
+| `serving/engines/resident_worker.py` | ported | unreachable on Trainium *structurally*: the caller guards `replica_count > 1` and `_replica_count()` returns 1 whenever `supports_torchrun_mpmd` is False |
+| `serving/orchestrators/qwen_image.py` | ported | all 14 changed lines are inside `_load_*_tpu` / `_encode_prompt_tpu` / `_denoise_tpu` / `_decode_tpu` |
+| `benchmark/bench.py`, `harness.py` | **untouched** | an AST pass found **zero** live references; every mention is in a docstring, and the sync is injected as a callable |
+| `models/flux/pipeline.py` | **untouched, deliberately** | it defines `NeuronFluxPipeline`, and `requirements-neuron.lock` pins `torch-xla==2.9.0`, so its `XLA_AVAILABLE` / `xm.mark_step()` pair is **Trainium's**, not the TPU backend's |
+
+That last row is the trap: those two call sites look exactly like the ones the
+refactor missed. They are noted in `device_runtime.py`'s docstring so a future
+tidy-up does not "finish the job" and drag the production backend through a TPU
+module.
+
+The invariant that keeps `resident_worker` off the Trainium path had no test.
+It does now (`test_a_backend_without_torchrun_mpmd_gets_exactly_one_replica`).
+
+**Gate: Qwen-Image, and the baseline had to be rebuilt first.**
+
+The phase's exit criterion was written as "reproduces the recorded numbers",
+and that was the wrong criterion: `benchmark/v5e/RESULTS.md` was measured on
+2026-09-12 on a VM that has since been deleted. Against it, the refactor looked
+1.9% *faster* — which a shim that only adds a Python call cannot cause.
+
+Three runs on identical code gave a run-to-run spread of 0.9%, so 1.9% was
+**outside** it: systematic, not noise. The experiment that settles it is old
+code against new code on **one machine, one protocol**:
+
+| metric | new code (this box, n=3) | old code (this box, n=2) | **new vs old** | old vs Sept |
+|---|---|---|---:|---:|
+| per-step synced | 0.273 / 0.270 / 0.272 | 0.273 / 0.270 | **−0.0%** | −1.8% |
+| per-step p90 | 0.274 / 0.271 / 0.273 | 0.275 / 0.272 | **−0.2%** | −1.9% |
+| denoise | 5.710 / 5.662 / 5.695 | 5.751 / 5.662 | **−0.3%** | −1.2% |
+| HBM / chip | 11.069 ×3 | 11.069 ×2 | **±0.0%** | ±0.0% |
+
+**The shim costs nothing** — new against old is inside the 0.9% spread on every
+row and bit-identical on HBM. The whole −1.9% is this VM instance against the
+September one, and the old code shows the same offset.
+
+**Gate: Wan 2.1**, which adds what Qwen-Image does not exercise — `reduce_scatter`,
+the video VAE decode (20 s, the largest single piece of the request) and a video
+latent's broadcast. Two runs each way, same machine, same protocol, all four
+`status=ok`:
+
+| metric | new code (n=2) | old code (n=2) | **new vs old** | Sept |
+|---|---|---|---:|---:|
+| per-step synced | 0.610 / 0.611 | 0.608 / 0.608 | **+0.3%** | 0.613 |
+| per-step p90 | 0.613 / 0.613 | 0.611 / 0.612 | **+0.3%** | 0.617 |
+| denoise | 12.208 / 12.231 | 12.203 / 12.164 | **+0.3%** | 12.245 |
+| vae_decode | 20.425 / 19.998 | 20.084 / 20.570 | **−0.6%** | 20.040 |
+| HBM / chip | 7.513 ×2 | 7.513 ×2 | **±0.0%** | 7.513 |
+
+Across both models the shim moves nothing: ±0.3%, sign random, HBM bit-identical.
+
+Note that Wan does **not** show Qwen-Image's 1.9% offset against September —
+0.610 against 0.613 is 0.5%. So the machine-to-machine difference is not a flat
+whole-box effect; it varies by model, which makes a recorded number an even
+worse "before" than a single figure would suggest.
+
+**Carry into Phase 5: never use a recorded number as the "before".** The
+torch_xla → torch_tpu comparison must measure both sides on one machine in one
+session. A ~2% machine-to-machine offset exists on per-step, which is small
+against what TorchTPU should deliver but large enough to corrupt a per-step
+conclusion.
+
+**A cross-device hazard found and fixed on the way.** `--backend` and the output
+folder are independent: the folder comes from `DIFFLET_BENCH_DEVICE`
+(`benchmark/models.py`), which defaults to `trn2`. A failed TPU run therefore
+overwrote `benchmark/trn2/qwen_image.{json,md}` — Trainium's recorded data,
+restored from git. `benchmark/bench.py` now refuses to write one backend's
+results into a folder whose existing results name another backend, reading the
+expected backend out of the folder's own JSONs so the rule cannot drift and a
+new device folder needs no change.
+
+**Deliberately not done** (per the owner's call to focus on product code):
+`tests/` (19 files) and the superseded `benchmark/*_tpu_run.py` runners and
+one-off probes still import torch_xla directly. Consequence to remember: when
+Phase 2 flips `DIFFLET_TPU_RUNTIME=torch_tpu`, those still exercise torch_xla.

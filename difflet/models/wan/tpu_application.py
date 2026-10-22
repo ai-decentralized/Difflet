@@ -74,12 +74,12 @@ class _BroadcastTextEncoder:
     """
 
     def __init__(self, model_path: str, text_dim: int, seq_len: int, dtype):
-        import torch_xla.runtime as xr
+        from difflet.backends.tpu.ops_impl import device_runtime
 
         self.text_dim = int(text_dim)
         self.seq_len = int(seq_len)
         self.dtype = dtype
-        self.is_encoder = int(xr.global_ordinal()) == 0
+        self.is_encoder = device_runtime.rank() == 0
         self.model = None
         if self.is_encoder:
             from transformers import UMT5EncoderModel
@@ -90,10 +90,9 @@ class _BroadcastTextEncoder:
             self.model.requires_grad_(False)
 
     def __call__(self, input_ids, attention_mask):
-        import torch_xla
-        import torch_xla.core.xla_model as xm
+        from difflet.backends.tpu.ops_impl import device_runtime
 
-        device = torch_xla.device()
+        device = device_runtime.device()
         embeds = torch.zeros(1, self.seq_len, self.text_dim, dtype=self.dtype)
         status = _ENCODE_OK
         if self.is_encoder:
@@ -113,8 +112,8 @@ class _BroadcastTextEncoder:
                 status = _ENCODE_FAILED
 
         payload = [embeds.to(device), torch.tensor([status], dtype=torch.int32).to(device)]
-        xm.collective_broadcast(payload, root_ordinal=0)
-        xm.mark_step()
+        device_runtime.broadcast(payload)
+        device_runtime.step()
         if int(payload[1].cpu()[0]) != _ENCODE_OK:
             raise RuntimeError("Wan prompt encoding failed on the encoder rank")
         return payload[0].cpu()
@@ -134,16 +133,15 @@ class _OnDeviceTransformer:
         self.dtype = dtype
 
     def __call__(self, hidden_states, timestep, encoder_hidden_states):
-        import torch_xla
-        import torch_xla.core.xla_model as xm
+        from difflet.backends.tpu.ops_impl import device_runtime
 
-        device = torch_xla.device()
+        device = device_runtime.device()
         out = self.module(
             hidden_states.to(self.dtype).to(device),
             timestep.to(self.dtype).to(device),
             encoder_hidden_states.to(self.dtype).to(device),
         )
-        xm.mark_step()
+        device_runtime.step()
         return out.cpu()
 
 
@@ -318,20 +316,19 @@ class TpuWanApplication(torch.nn.Module):
         backend-neutral ``WanOrchestrator`` the Trainium adapter hands to the
         stage runners -- which is why those runners need no TPU branch.
         """
-        import torch_xla
-        import torch_xla.core.xla_model as xm
+        from difflet.backends.tpu.ops_impl import device_runtime
 
         expert = self._require_transformer("load")
-        module = expert._prepare_module().to(torch_xla.device())
-        xm.mark_step()
-        xm.wait_device_ops()
+        module = expert._prepare_module().to(device_runtime.device())
+        device_runtime.step()
+        device_runtime.wait()
 
         transformer = _OnDeviceTransformer(module, self.config, self.dtype)
         transformer_2 = None
         if self.transformer_2 is not None:
-            module_2 = self.transformer_2._prepare_module().to(torch_xla.device())
-            xm.mark_step()
-            xm.wait_device_ops()
+            module_2 = self.transformer_2._prepare_module().to(device_runtime.device())
+            device_runtime.step()
+            device_runtime.wait()
             transformer_2 = _OnDeviceTransformer(
                 module_2, self.transformer_2.config, self.dtype
             )

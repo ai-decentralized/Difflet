@@ -519,7 +519,7 @@ class QwenImageServingStageAdapter:
 
     def _load_text_stage_tpu(self, profile: ServingProfile) -> None:
         import torch
-        import torch_xla.runtime as xr
+        from difflet.backends.tpu.ops_impl import device_runtime
         from transformers import AutoTokenizer, Qwen2_5_VLForConditionalGeneration
 
         assert self.model_dir is not None
@@ -536,7 +536,7 @@ class QwenImageServingStageAdapter:
         # 3 -> 1), and encoding on the wrong one silently broadcasts a zero
         # placeholder to every rank -- it does not fail, it generates a
         # different image.
-        self._tpu_is_encoder = int(xr.global_ordinal()) == 0
+        self._tpu_is_encoder = device_runtime.rank() == 0
         if not self._tpu_is_encoder:
             self.text_app = None
             self.tokenizer = None
@@ -550,8 +550,7 @@ class QwenImageServingStageAdapter:
 
     def _load_denoiser_stage_tpu(self, profile: ServingProfile) -> None:
         import torch
-        import torch_xla
-        import torch_xla.core.xla_model as xm
+        from difflet.backends.tpu.ops_impl import device_runtime
 
         from difflet.models.qwen_image.entry import create_qwen_image_application
 
@@ -564,15 +563,15 @@ class QwenImageServingStageAdapter:
             backend="tpu",
             text_seq_len=_TEXT_SEQ_LEN,
         )
-        module = app.transformer._prepare_module().to(torch_xla.device())
-        xm.mark_step()
+        module = app.transformer._prepare_module().to(device_runtime.device())
+        device_runtime.step()
         self.denoise_app = app
         self._tpu_module = module
         self._tpu_teacache = _build_tpu_teacache(profile)
 
     def _load_vae_stage_tpu(self, profile: ServingProfile) -> None:
         import torch
-        import torch_xla
+        from difflet.backends.tpu.ops_impl import device_runtime
         from diffusers import AutoencoderKLQwenImage
 
         assert self.model_dir is not None
@@ -602,10 +601,9 @@ class QwenImageServingStageAdapter:
         engine drives all replicas through the same request in lockstep.
         """
         import torch
-        import torch_xla
-        import torch_xla.core.xla_model as xm
+        from difflet.backends.tpu.ops_impl import device_runtime
 
-        device = torch_xla.device()
+        device = device_runtime.device()
         width = self._tpu_joint_dim()
         states = torch.zeros(1, _TEXT_SEQ_LEN, width, dtype=torch.bfloat16)
         seq, status = 0, _ENCODE_OK
@@ -648,8 +646,8 @@ class QwenImageServingStageAdapter:
 
         meta = torch.tensor([seq, status], dtype=torch.int32)
         payload = [states.to(device), meta.to(device)]
-        xm.collective_broadcast(payload, root_ordinal=0)
-        xm.mark_step()
+        device_runtime.broadcast(payload)
+        device_runtime.step()
         states = payload[0].cpu()
         seq, status = (int(v) for v in payload[1].cpu().tolist())
 
@@ -679,14 +677,13 @@ class QwenImageServingStageAdapter:
     def _denoise_tpu(self, text: dict[str, object], request: DiffletGenerateRequest):
         import numpy as np
         import torch
-        import torch_xla
-        import torch_xla.core.xla_model as xm
+        from difflet.backends.tpu.ops_impl import device_runtime
         from diffusers import FlowMatchEulerDiscreteScheduler
 
         if self.denoise_app is None or self.active_profile is None:
             raise RuntimeError("Qwen denoiser is not loaded")
         profile = self.active_profile
-        device = torch_xla.device()
+        device = device_runtime.device()
         config = self.denoise_app.config
 
         scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(
@@ -740,7 +737,7 @@ class QwenImageServingStageAdapter:
                 deltas,
                 states,
                 controller=self._tpu_teacache,
-                mark_step=xm.mark_step,
+                mark_step=device_runtime.step,
             )
         if self._tpu_teacache is not None:
             self._tpu_teacache_last_stats = self._tpu_teacache.stats()
@@ -753,12 +750,11 @@ class QwenImageServingStageAdapter:
 
     def _decode_tpu(self, packed, request) -> bytes:
         import torch
-        import torch_xla
-        import torch_xla.core.xla_model as xm
+        from difflet.backends.tpu.ops_impl import device_runtime
 
         if self.vae_app is None or self.active_profile is None:
             raise RuntimeError("Qwen VAE decoder is not loaded")
-        device = torch_xla.device()
+        device = device_runtime.device()
         b, seq, _ = packed.shape
         hh, ww = _packed_latent_grid(request.height, request.width, seq)
         z = packed.float().view(b, hh, ww, 16, 2, 2)
@@ -772,7 +768,7 @@ class QwenImageServingStageAdapter:
         try:
             with torch.no_grad():
                 img = self.vae_app.decode(z, return_dict=False)[0]
-            xm.mark_step()
+            device_runtime.step()
             img = img.float().cpu()[:, :, 0]
         finally:
             # Hand the HBM back before the next request's denoise loop.
