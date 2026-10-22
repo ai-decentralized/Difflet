@@ -75,11 +75,13 @@ def check(args) -> int:
     oracle = None if args.oracle == "none" else torch.load(os.path.expanduser(args.oracle))
     frames = FRAMES if oracle is not None else int(args.frames)
     world, tp = int(os.environ.get("WORLD_SIZE", "1")), int(args.tp_degree)
-    if world % tp:
-        raise SystemExit(f"world size {world} is not divisible by --tp-degree {tp}")
-    cp = world // tp
-    parallel = DiffletParallelConfig(tp_degree=tp, cp_degree=cp, cp_mode="ulysses" if cp > 1 else "gather_kv")
-    layout = f"TP{tp}" + (f" x CP{cp}" if cp > 1 else "")
+    cfg = 2 if args.cfg_parallel else 1
+    if world % (tp * cfg):
+        raise SystemExit(f"world size {world} is not divisible by tp x cfg = {tp * cfg}")
+    cp = world // (tp * cfg)
+    parallel = DiffletParallelConfig(tp_degree=tp, cp_degree=cp, cfg_parallel_enabled=cfg > 1,
+                                     cp_mode="ulysses" if cp > 1 else "gather_kv")
+    layout = f"TP{tp}" + (f" x CP{cp}" if cp > 1 else "") + (" x CFG2" if cfg > 1 else "")
     get_backend("neuron").prepare_runtime(parallel)  # core binding + the numerics workarounds
     import torch.distributed as dist
 
@@ -94,6 +96,8 @@ def check(args) -> int:
           f"{ {k: round(v, 1) for k, v in app.phase_seconds.items()} } report={app.load_report}", flush=True)
 
     inputs = oracle["inputs"] if oracle is not None else _inputs(frames)
+    if cfg > 1:  # both branches get the same inputs: each half must reproduce the reference
+        inputs = {k: torch.cat([v, v]) for k, v in inputs.items()}
 
     def forward():
         out = app(**inputs)[0]
@@ -101,6 +105,8 @@ def check(args) -> int:
         return out
 
     y = forward().float().cpu()
+    halves = [y[i:i + 1] for i in range(y.shape[0])] if cfg > 1 else [y]
+    y = halves[0]
     if oracle is None:  # timing only: no reference at this length
         say(f"{frames} frames ({app.num_image_tokens} image tokens), {layout}: "
             f"finite={bool(torch.isfinite(y).all())}, output {tuple(y.shape)}", flush=True)
@@ -114,8 +120,9 @@ def check(args) -> int:
         return 0
     ref, ctl = oracle["ref_fp32"], oracle["control_bf16"]
     rel = lambda a: ((a - ref).abs().mean() / ref.abs().mean()).item()  # noqa: E731
-    finite = bool(torch.isfinite(y).all())
-    ours, control = (rel(y) if finite else float("nan")), rel(ctl)
+    finite = all(bool(torch.isfinite(h).all()) for h in halves)
+    ours = max(rel(h) for h in halves) if finite else float("nan")
+    control = rel(ctl)
     ok = finite and ours <= GATE * control
     say(f"{'PASS' if ok else 'FAIL'} {args.exec_mode} {layout}: finite={finite} rel_l1={ours:.3e} "
           f"({ours / control:.3f}x control {control:.3e}, gate {GATE}x)", flush=True)
@@ -137,6 +144,8 @@ def main() -> int:
     p.add_argument("--iters", type=int, default=5)
     p.add_argument("--exec-mode", choices=("compile", "eager"), default="compile")
     p.add_argument("--tp-degree", type=int, default=1, help="TP degree; CP takes the rest of the world")
+    p.add_argument("--cfg-parallel", action="store_true",
+                   help="two cfg groups, one guidance branch each (the parity check covers both halves)")
     p.add_argument("--frames", type=int, default=FRAMES,
                    help="with --oracle none: the clip length for a timing-only run")
     args = p.parse_args()
