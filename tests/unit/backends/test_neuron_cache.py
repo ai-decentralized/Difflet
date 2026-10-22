@@ -133,3 +133,20 @@ def test_compile_module_imports_without_torch():
         [sys.executable, "-I", "-c", code], capture_output=True, text=True, timeout=120
     )
     assert proc.returncode == 0, proc.stderr
+
+
+def test_nki_trace_cache_opt_in_versions_the_hlo_cache(tmp_path):
+    env = {"DIFFLET_COMPILE_CACHE": str(tmp_path), "DIFFLET_NKI_TRACE_CACHE": "1"}
+    neuron_compile.configure_compile_cache(env=env)
+    tag = neuron_compile.stack_version_tag()
+    assert env["NKI_ENABLE_TRACE_CACHE"] == "1"
+    assert env["TORCH_NEURONX_HLO_CACHE_DIR"] == os.path.join(str(tmp_path), "neuron", "hlo", tag)
+    neuron_compile.configure_compile_cache(env=env)  # the launcher, then prepare_runtime: same value
+    assert env["TORCH_NEURONX_HLO_CACHE_DIR"] == os.path.join(str(tmp_path), "neuron", "hlo", tag)
+
+
+def test_nki_trace_cache_stays_off_without_the_opt_in(tmp_path):
+    env = {"DIFFLET_COMPILE_CACHE": str(tmp_path)}
+    neuron_compile.configure_compile_cache(env=env)
+    assert env["NKI_ENABLE_TRACE_CACHE"] == "0"
+    assert env["TORCH_NEURONX_HLO_CACHE_DIR"] == os.path.join(str(tmp_path), "neuron", "hlo")

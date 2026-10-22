@@ -40,8 +40,12 @@ def _flag(cli, name):
     return cli[cli.index(name) + 1] if name in cli else None
 
 
-def test_default_layout_is_tp2_x_cfg2(launches, tmp_path):
+def test_default_layout_is_tp2_x_cfg2(launches, tmp_path, monkeypatch):
+    import os
+
+    monkeypatch.delenv("DIFFLET_NKI_TRACE_CACHE", raising=False)
     hv15.HunyuanVideo15Orchestrator(_args(work_dir=str(tmp_path / "w"))).generate()
+    assert os.environ["DIFFLET_NKI_TRACE_CACHE"] == "1"  # the stages keep the attention kernel's trace
     assert [(s, n) for s, n, _ in launches] == [("encode", 1), ("transformer", 4), ("vae", 1)]
     cli = launches[1][2]
     assert _flag(cli, "--tp-degree") == "2" and "--cfg-parallel" in cli

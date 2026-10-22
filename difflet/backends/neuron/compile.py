@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import sys
 from collections.abc import Callable, Mapping, MutableMapping, Sequence
 from pathlib import Path
@@ -55,6 +56,14 @@ NEFF_CACHE_ENV = "TORCH_NEURONX_NEFF_CACHE_DIR"
 NEFF_LOCAL_CACHE_ENV = "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR"
 HLO_CACHE_ENV = "TORCH_NEURONX_HLO_CACHE_DIR"
 NKI_TRACE_CACHE_ENV = "NKI_ENABLE_TRACE_CACHE"
+#: Opt-in to torch-neuronx's NKI trace cache (off by default: torch-neuronx warns that its key may
+#: miss environment dependencies and serve stale kernels). Kernels whose every input is a call
+#: argument are safe to cache; some are expensive to trace (the key-bounded attention_cte at
+#: ~51k tokens: ~10 min per process uncached, ~2 min cached). The cache lives in the HLO cache
+#: directory, so an opted-in process gets a subdirectory per stack version (no stale hits across
+#: upgrades).
+NKI_TRACE_OPT_IN_ENV = "DIFFLET_NKI_TRACE_CACHE"
+_STACK_PACKAGES = ("torch-neuronx", "nki", "neuronx-cc")
 
 CACHE_SUBDIR = "neuron"
 # torch-neuronx cache variables and their subdirectories under <cache root>/CACHE_SUBDIR.
@@ -148,6 +157,8 @@ def configure_compile_cache(
     it logs one warning per process saying so.
     """
     target = os.environ if env is None else env
+    nki_trace_cache = nki_trace_cache or str(target.get(NKI_TRACE_OPT_IN_ENV, "")).strip().lower() in (
+        "1", "true", "yes")
     defaults = neuron_cache_env(env=target)
     explicit = {
         NEFF_CACHE_ENV: cache_dir,
@@ -157,11 +168,33 @@ def configure_compile_cache(
     settings = {
         var: defaults[var] if path is None else _absolute(path) for var, path in explicit.items()
     }
+    if nki_trace_cache:
+        settings[HLO_CACHE_ENV] = _versioned(settings[HLO_CACHE_ENV])
     settings[NKI_TRACE_CACHE_ENV] = "1" if nki_trace_cache else "0"
     target.update(settings)
     if target is os.environ:
         _warn_if_hlo_cache_dir_fixed(settings[HLO_CACHE_ENV])
     return settings
+
+
+def stack_version_tag() -> str:
+    """``torch-neuronx-<v>_nki-<v>_neuronx-cc-<v>`` of the installed stack (``none`` if absent)."""
+    from importlib import metadata
+
+    parts = []
+    for package in _STACK_PACKAGES:
+        try:
+            version = metadata.version(package)
+        except metadata.PackageNotFoundError:
+            version = "none"
+        parts.append(f"{package}-{version}")
+    return re.sub(r"[^A-Za-z0-9._+-]+", "_", "_".join(parts))
+
+
+def _versioned(hlo_dir: str) -> str:
+    """``hlo_dir/<stack tag>``, idempotent (a launcher's value already carries the tag)."""
+    tag = stack_version_tag()
+    return hlo_dir if os.path.basename(os.path.normpath(hlo_dir)) == tag else os.path.join(hlo_dir, tag)
 
 
 def _absolute(path: str | os.PathLike[str]) -> str:

@@ -81,6 +81,10 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
                 "the Trainium (AoT) application covers the DiT on cached inputs, without a pipeline.")
         reject_unsupported_torchrun_options(_unsupported(self.args), runs=_RUNS)
         root_compile_cache_at_cache_dir(getattr(self.args, "cache_dir", None), tag="hunyuan_video_15")
+        # The key-bounded attention kernel at 121 frames (~51k joint tokens) takes ~10 min to trace
+        # in every process unless torch-neuronx's NKI trace cache keeps it; its inputs are all call
+        # arguments, so the stages opt in (a per-stack-version cache, see neuron.compile).
+        os.environ.setdefault("DIFFLET_NKI_TRACE_CACHE", "1")
         tp, cfg, cp = _layout(self.args)
         work_dir = Path(getattr(self.args, "work_dir", None) or Path.home() / ".cache" / "difflet" / "work" / "hv15")
         work_dir.mkdir(parents=True, exist_ok=True)
