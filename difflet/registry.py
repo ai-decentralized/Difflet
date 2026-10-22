@@ -345,7 +345,7 @@ def _register_builtin_hunyuan_video_15() -> None:
             supports_sp=False,
             cp_modes=frozenset(),
         ),
-        backends=("trainium",),
+        backends=("trainium", "neuron"),
     )
     class _HunyuanVideo15Registration:
         pass
