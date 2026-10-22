@@ -13,7 +13,6 @@ from typing import Any
 from difflet.pipeline.compile_cache import CacheSpec, toolchain_versions
 from difflet.registry import resolve_model
 from difflet.serving.artifact_manager import ImmutableArtifactManager
-from difflet.serving.engines.stage_observability import record_stage_load
 from difflet.serving.engines.stage_pipeline import (
     ErasedStageRunner,
     ValidatedStageRunner,
@@ -447,45 +446,40 @@ class WanServingStageAdapter:
                     runtime.source, runtime.profile, spec, path
                 ),
             )
-        # One load brings up the text encoder and the backbone together, so both stage IDs
-        # name this boundary: the recorder reports their bytes jointly rather than
-        # inventing a split.
-        with record_stage_load("prompt_encoder", "denoiser"):
-            application = _build_application(runtime.source, runtime.profile)
-            if tpu:
-                application.load_eager()
-            else:
-                binding = runtime.artifacts.require("generation")
-                # Warm every compiled bucket at startup (one forward per shape via the
-                # application's warmup loop) so the first request at ANY profile shape
-                # sees steady-state latency. Single-shape profiles keep the old
-                # behavior of skipping warmup (the startup smoke covers their one NEFF).
-                application.load(
-                    str(binding.path),
-                    start_rank_id=0,
-                    local_ranks_size=runtime.profile.world_size,
-                    skip_warmup=not runtime.profile.shapes,
-                )
+        application = _build_application(runtime.source, runtime.profile)
+        if tpu:
+            application.load_eager()
+        else:
+            binding = runtime.artifacts.require("generation")
+            # Warm every compiled bucket at startup (one forward per shape via the
+            # application's warmup loop) so the first request at ANY profile shape
+            # sees steady-state latency. Single-shape profiles keep the old
+            # behavior of skipping warmup (the startup smoke covers their one NEFF).
+            application.load(
+                str(binding.path),
+                start_rank_id=0,
+                local_ranks_size=runtime.profile.world_size,
+                skip_warmup=not runtime.profile.shapes,
+            )
         self.application = application
         # The TPU VAE decode is host-only: AutoencoderKLWan raises an
         # unsupported-negative-index error under torch_xla. Not a memory
         # limit -- the DiT leaves ~7.6 GB free per chip.
-        with record_stage_load("decoder"):
-            if runtime.profile.host_vae or tpu:
-                self.vae = _load_host_vae(runtime.source.pinned_model_path)
-            else:
-                decoder_binding = runtime.artifacts.require("decoder")
-                vae_app = _build_neuron_vae(runtime.source, runtime.profile)
-                # The Wan VAE decoder genuinely has one bucket per shape (unlike
-                # HunyuanVideo's tile-fixed decoder), so multi-shape profiles warm
-                # it the same way as the backbone.
-                vae_app.load(
-                    str(decoder_binding.path),
-                    start_rank_id=0,
-                    local_ranks_size=runtime.profile.world_size,
-                    skip_warmup=not runtime.profile.shapes,
-                )
-                self.vae_app = vae_app
+        if runtime.profile.host_vae or tpu:
+            self.vae = _load_host_vae(runtime.source.pinned_model_path)
+        else:
+            decoder_binding = runtime.artifacts.require("decoder")
+            vae_app = _build_neuron_vae(runtime.source, runtime.profile)
+            # The Wan VAE decoder genuinely has one bucket per shape (unlike
+            # HunyuanVideo's tile-fixed decoder), so multi-shape profiles warm
+            # it the same way as the backbone.
+            vae_app.load(
+                str(decoder_binding.path),
+                start_rank_id=0,
+                local_ranks_size=runtime.profile.world_size,
+                skip_warmup=not runtime.profile.shapes,
+            )
+            self.vae_app = vae_app
         self.runtime = runtime
         self.profile = runtime.profile
         decoder_runner = (

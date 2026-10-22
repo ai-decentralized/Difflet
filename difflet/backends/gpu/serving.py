@@ -37,7 +37,6 @@ from difflet.backends.gpu.policy import (
 from difflet.common.registry.base import ServingModelMetadata
 from difflet.models.spec import ModelSpec, gpu_model_spec
 from difflet.platforms.base import PARALLEL_MODE_FLAGS
-from difflet.serving.engines.stage_observability import record_stage_load
 from difflet.serving.engines.stage_pipeline import (
     ErasedStageRunner,
     ValidatedStageRunner,
@@ -421,27 +420,24 @@ class GpuServingStageAdapter:
         print(f"[difflet serve] loading {spec.display_name} on {gpu_platform().display_name}")
         self.active_runtime = runtime
         self.active_profile = profile
-        # One opaque stage holds encoders, DiT and decoder together, so the recorded
-        # residency is the whole model's.
-        with record_stage_load(STAGE_ID):
-            self.pipe = DiffletPipeline.from_pretrained(
-                self.model_id,
-                **gpu_pipeline_kwargs(
-                    spec,
-                    tp_degree=profile.parallel.tp_degree,
-                    height=profile.height,
-                    width=profile.width,
-                    num_frames=profile.num_frames,
-                    cache_dir=profile.cache_dir,
-                    # The commit the parent pinned (resolve_hf_model_source), not the user's
-                    # ref: a worker restart must load the snapshot the bundle and the
-                    # validator's tokenizer describe, even if refs/main moved meanwhile.
-                    revision=runtime.source.resolved_source_id,
-                    force_compile=config.get("compile_policy") is CompilePolicy.FORCE,
-                    load=True,
-                    torch_compile=profile.torch_compile,
-                ),
-            )
+        self.pipe = DiffletPipeline.from_pretrained(
+            self.model_id,
+            **gpu_pipeline_kwargs(
+                spec,
+                tp_degree=profile.parallel.tp_degree,
+                height=profile.height,
+                width=profile.width,
+                num_frames=profile.num_frames,
+                cache_dir=profile.cache_dir,
+                # The commit the parent pinned (resolve_hf_model_source), not the user's
+                # ref: a worker restart must load the snapshot the bundle and the
+                # validator's tokenizer describe, even if refs/main moved meanwhile.
+                revision=runtime.source.resolved_source_id,
+                force_compile=config.get("compile_policy") is CompilePolicy.FORCE,
+                load=True,
+                torch_compile=profile.torch_compile,
+            ),
+        )
         print(f"[difflet serve] {spec.display_name} pipeline resident")
         return OrderedDict(
             (

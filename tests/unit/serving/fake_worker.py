@@ -5,7 +5,6 @@ import os
 import time
 from collections import OrderedDict
 
-from difflet.serving.engines.stage_observability import record_stage_load
 from difflet.serving.engines.stage_pipeline import ValidatedStageRunner, stage_result
 from difflet.serving.types import (
     DiffletGenerateOutput,
@@ -72,8 +71,6 @@ class FakeServingStageAdapter:
 
     async def create_loaded_runners(self, runtime):
         self.active_runtime = runtime
-        with record_stage_load("pipeline"):
-            pass
         return OrderedDict(
             (
                 (

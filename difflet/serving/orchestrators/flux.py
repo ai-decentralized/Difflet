@@ -19,7 +19,6 @@ from difflet.serving.orchestrators.base import (
     resolve_hf_model_source,
     validate_guidance_scale,
 )
-from difflet.serving.engines.stage_observability import record_stage_load
 from difflet.serving.engines.stage_pipeline import (
     ErasedStageRunner,
     ValidatedStageRunner,
@@ -226,16 +225,15 @@ class FluxServingStageAdapter:
                 runtime.source, profile, spec, path
             ),
         )
-        with record_stage_load("pipeline"):
-            pipe = flux_common.build_pipeline(
-                self.model_id,
-                profile,
-                load=True,
-                skip_compile=True,
-                model_path_override=runtime.source.pinned_model_path,
-                resolved_source_id=runtime.source.resolved_source_id,
-                compiled_path_override=str(binding.path),
-            )
+        pipe = flux_common.build_pipeline(
+            self.model_id,
+            profile,
+            load=True,
+            skip_compile=True,
+            model_path_override=runtime.source.pinned_model_path,
+            resolved_source_id=runtime.source.resolved_source_id,
+            compiled_path_override=str(binding.path),
+        )
         print("[difflet serve] Flux worker loaded")
         self._untransferred_pipe = pipe
         runner = ValidatedStageRunner(
