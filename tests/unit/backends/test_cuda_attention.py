@@ -1,4 +1,4 @@
-"""CUDA attention / platform / mx ops.
+"""CUDA attention ops.
 
 Runs on CPU tensors: SDPA has a CPU path, so the contract — scale=None means 1.0,
 masks, bounds, causal — is pinned here; the kernel choice is only observable on a GPU.
@@ -10,8 +10,6 @@ import torch
 
 from difflet.backends.cpu.ops_impl import attention as CPU_A
 from difflet.backends.cuda.ops_impl import attention as A
-from difflet.backends.cuda.ops_impl import mx as MX
-from difflet.backends.cuda.ops_impl import platform as P
 
 
 def _qkv(b=1, h=2, s=4, d=8, seed=0):
@@ -111,49 +109,6 @@ def test_context_parallel_modes_fail_loudly(name):
     # mode).
     with pytest.raises(NotImplementedError, match="not supported"):
         getattr(A, name)()
-
-
-@pytest.mark.parametrize("name", ["quantize_mx", "dequantize_mx", "matmul_mx", "linear_mx"])
-def test_mx_ops_refuse(name):
-    with pytest.raises(NotImplementedError, match="not implemented"):
-        getattr(MX, name)()
-
-
-QWEN_IMAGE_OPS = [
-    "ColumnParallelLinear",
-    "RowParallelLinear",
-    "SPMDRank",
-    "attention",
-    "gather_from_tensor_model_parallel_region_with_dim",
-    "get_cp_group",
-    "get_cp_rank_spmd",
-    "get_tensor_model_parallel_size",
-    "get_world_group",
-    "init_parallel_mesh",
-    "joint_ring_attention",
-    "joint_ulysses_attention",
-    "scatter_to_process_group_spmd",
-]
-
-
-@pytest.mark.parametrize("name", QWEN_IMAGE_OPS)
-def test_every_name_qwen_image_imports_resolves_on_cuda(name, monkeypatch):
-    # modeling_qwen_image.py:29-43 imports these from difflet.ops at import time.
-    from difflet.ops import _EXPORTS
-
-    module_name, attr = _EXPORTS[name]
-    import importlib
-
-    mod = importlib.import_module(f"difflet.backends.cuda.ops_impl.{module_name}")
-    assert hasattr(mod, attr), name
-
-
-def test_public_surface_matches_the_ops_contract():
-    from difflet.ops import _EXPORTS
-
-    for module, mod in (("attention", A), ("platform", P), ("mx", MX)):
-        expected = {name for name, (m, _) in _EXPORTS.items() if m == module}
-        assert expected <= set(mod.__all__), module
 
 
 def test_heads_folded_inputs_reach_sdpa_as_four_dimensional(monkeypatch):

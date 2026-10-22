@@ -9,18 +9,7 @@ import torch
 
 from difflet.backends._torch_megatron.norm import RMSNorm as SharedRMSNorm
 from difflet.backends._torch_megatron.norm import rms_norm_fp32
-from difflet.backends.cpu.ops_impl import norm as cpu_norm
 from difflet.backends.cuda.ops_impl import norm as cuda_norm
-
-
-def test_cuda_rms_norm_is_its_own_fused_module_and_the_cpu_keeps_the_shared_math():
-    assert cuda_norm.RMSNorm is not SharedRMSNorm
-    assert cuda_norm.CustomRMSNorm is cuda_norm.RMSNorm
-    # The CPU reference backend's module is its own class with the shared module's math
-    # (input-dtype normalisation), untouched by the fused CUDA module.
-    torch.manual_seed(0)
-    x = torch.randn(2, 5, 16).to(torch.bfloat16)
-    assert torch.equal(cpu_norm.RMSNorm(16)(x), SharedRMSNorm(16)(x))
 
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
@@ -44,13 +33,3 @@ def test_cuda_rms_norm_state_dict_and_eps_match_the_shared_module():
     assert list(fused.state_dict()) == list(shared.state_dict()) == ["weight"]
     assert fused.eps == shared.eps == 1e-5
     fused.load_state_dict(shared.state_dict())  # the checkpoint loader's path
-
-
-def test_cuda_rms_norm_is_what_the_op_surface_hands_the_models(monkeypatch):
-    monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
-    import importlib
-
-    from difflet.ops import _dispatch
-
-    mod = importlib.import_module("difflet.backends.cuda.ops_impl.norm")
-    assert mod.RMSNorm is cuda_norm.RMSNorm

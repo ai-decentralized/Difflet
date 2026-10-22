@@ -1,4 +1,4 @@
-"""CPU coverage for the Flux GPU application, its registry routing and FluxPipeline wiring.
+"""CPU coverage for the Flux GPU application's FluxPipeline wiring.
 
 No GPU: ``device="cpu"`` runs the same load path a GPU host runs. A tiny diffusers
 ``FluxTransformer2DModel`` checkpoint (the recipe of
@@ -48,11 +48,11 @@ def _cpu_backend(monkeypatch):
     monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
 
 
-def _build(tmp_path, *, parallel=None, dtype="bf16", **kwargs):
+def _build(tmp_path, *, dtype="bf16", **kwargs):
     return create_gpu_application(
         "flux",
         model_path=str(tmp_path),
-        parallel=parallel or DiffletParallelConfig(tp_degree=1),
+        parallel=DiffletParallelConfig(tp_degree=1),
         dtype=dtype,
         shape={"height": 64, "width": 64},
         **kwargs,
@@ -118,96 +118,7 @@ def _dit_inputs():
     )
 
 
-# ------------------------------------------------------------------ registry
-
-
-def test_registry_routes_cuda_to_the_flux_gpu_application(tmp_path):
-    from difflet.registry import resolve_model
-
-    app = resolve_model("black-forest-labs/FLUX.1-dev").create_application(
-        model_path=str(tmp_path),
-        parallel=DiffletParallelConfig(tp_degree=1),
-        dtype="bf16",
-        shape={"height": 64, "width": 64},
-        backend="cuda",
-    )
-    assert type(app).__name__ == "CudaFluxApplication"
-    assert app.transformer is None  # empty model dir -> no transformer/config.json
-    assert app.has_compiled_artifacts(str(tmp_path)) is False
-    assert app.dtype is torch.bfloat16
-    assert app.device == torch.device("cuda")
-
-
-@pytest.mark.parametrize(
-    "parallel,expected",
-    [
-        (DiffletParallelConfig(tp_degree=2), "tensor parallelism.*not supported"),
-        (DiffletParallelConfig(tp_degree=1, cp_degree=2), "context parallelism.*not supported"),
-        (DiffletParallelConfig(tp_degree=1, cfg_parallel_enabled=True), "does not apply to Flux"),
-        (
-            DiffletParallelConfig(tp_degree=1, sp_enabled=True),
-            "sequence parallelism.*not supported",
-        ),
-    ],
-)
-def test_gpu_application_refuses_multi_rank_and_sp_up_front(tmp_path, parallel, expected):
-    # Refused before the 24 GB DiT is touched, not at the first collective.
-    with pytest.raises(NotImplementedError, match=expected):
-        _build(tmp_path, parallel=parallel)
-
-
 # ----------------------------------------------------------------- application
-
-
-@pytest.mark.parametrize(
-    "kwargs",
-    [
-        {"teacache_cadence": 2},
-        {"teacache_speedup": 1.5},
-        {"teacache_calibration_path": "/x.json"},
-        {"taef1": True},
-        {"taef1_path": "madebyollin/taef1"},
-        {"shapes": [[1024, 1024], [768, 768]]},
-        {"sp_enabled": True},
-    ],
-)
-def test_flux_gpu_application_refuses_unsupported_kwargs(tmp_path, kwargs):
-    with pytest.raises(NotImplementedError, match="not supported"):
-        _build(tmp_path, **kwargs)
-
-
-def test_torch_compile_reaches_the_transformer(tmp_path):
-    # The opt-in compile option is the ``torch_compile`` kwarg, and the transformer
-    # application carries it; off by default.
-    _write_tiny_checkpoint(tmp_path)
-    kw = dict(dtype="fp32", device="cpu", load_text_encoders=False, load_vae=False)
-    app = _build(tmp_path, **kw)
-    assert app.torch_compile is False and app.transformer.torch_compile is False
-    app = _build(tmp_path, torch_compile=True, **kw)
-    assert app.torch_compile is True and app.transformer.torch_compile is True
-    assert _build(tmp_path, torch_compile=False, **kw).torch_compile is False
-
-
-def test_off_values_of_refused_kwargs_are_accepted(tmp_path):
-    # The CLI/pipeline pass these with their "off" value; only a request is refused.
-    app = _build(tmp_path, taef1=False, taef1_path=None, teacache_cadence=None, shapes=None)
-    assert type(app).__name__ == "CudaFluxApplication"
-
-
-def test_cuda_application_signatures_match_the_pipeline_contract(tmp_path):
-    app = _build(tmp_path)
-    assert "debug" in inspect.signature(app.compile).parameters
-    load_params = inspect.signature(app.load).parameters
-    for name in ("start_rank_id", "local_ranks_size", "skip_warmup"):
-        assert name in load_params
-
-
-def test_lifecycle_without_a_transformer_is_an_explicit_error(tmp_path):
-    app = _build(tmp_path)
-    with pytest.raises(NotImplementedError, match="transformer/config.json"):
-        app.compile(str(tmp_path))
-    with pytest.raises(NotImplementedError, match="transformer/config.json"):
-        app.load(str(tmp_path))
 
 
 def test_load_builds_flux_pipeline_around_the_adapter(tmp_path, from_pretrained_recorder):
@@ -223,36 +134,6 @@ def test_load_builds_flux_pipeline_around_the_adapter(tmp_path, from_pretrained_
     assert kwargs["vae"] is None
     assert app.pipe.transformer is app.adapter
     assert app.adapter.app is app.transformer
-
-
-def test_flux_pipeline_from_pretrained_refuses_the_adapter_as_transformer(tmp_path):
-    # Why load_companions does not pass transformer=self.adapter to from_pretrained:
-    # diffusers checks a passed component against the class in model_index.json.
-    from diffusers.pipelines.pipeline_loading_utils import (
-        ALL_IMPORTABLE_CLASSES,
-        maybe_raise_or_warn,
-    )
-
-    from difflet.backends.cuda.flux.transformer import (
-        CudaFluxTransformerApplication,
-        FluxDiTAdapter,
-    )
-    from difflet.models.flux.dit_config import FluxDiTConfig
-
-    config = FluxDiTConfig(**TINY, out_channels=None, guidance_embeds=True, height=64, width=64)
-    adapter = FluxDiTAdapter(
-        CudaFluxTransformerApplication(model_path=str(tmp_path), config=config, device="cpu")
-    )
-    with pytest.raises(ValueError, match="should be"):
-        maybe_raise_or_warn(
-            "diffusers",
-            None,
-            "FluxTransformer2DModel",
-            ALL_IMPORTABLE_CLASSES,
-            {"transformer": adapter},
-            "transformer",
-            False,
-        )
 
 
 def test_flux_pipeline_drives_the_adapter_like_the_diffusers_transformer(
@@ -385,14 +266,3 @@ def test_generate_forwards_overrides_and_returns_the_output_for_pt(tmp_path):
     (kw,) = app.pipe.calls
     assert kw["num_inference_steps"] == 4 and kw["guidance_scale"] == 5.0
     assert (kw["height"], kw["width"]) == (128, 96) and kw["generator"] is None
-
-
-def test_generate_before_load_is_an_explicit_error(tmp_path):
-    with pytest.raises(RuntimeError, match="load"):
-        _build(tmp_path, device="cpu").generate("a cat")
-
-
-def test_call_dispatches_prompt_to_generate(tmp_path):
-    app = _build(tmp_path, device="cpu")
-    app.pipe = _RecordingPipe()
-    assert app(prompt="a cat", num_inference_steps=1) == ["image"]

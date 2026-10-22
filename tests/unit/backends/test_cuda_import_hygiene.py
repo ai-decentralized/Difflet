@@ -5,7 +5,7 @@ No vendor SDK or sibling-backend import is allowed under ``difflet/backends/cuda
 platforms, or the backend-neutral model files the GPU flow runs. A convention would
 drift; a scan does not.
 
-The last test imports every ``difflet.ops`` module the CUDA backend must provide.
+The last test checks the CUDA ops modules provide every name ``difflet.ops`` exports.
 """
 
 import ast
@@ -80,5 +80,11 @@ def test_cuda_backend_has_no_forbidden_imports():
 
 
 @pytest.mark.parametrize("module", OPS_MODULES)
-def test_cuda_ops_impl_module_imports(module):
-    importlib.import_module(f"difflet.backends.cuda.ops_impl.{module}")
+def test_cuda_ops_impl_provides_the_ops_contract(module):
+    from difflet.ops import _EXPORTS
+
+    mod = importlib.import_module(f"difflet.backends.cuda.ops_impl.{module}")
+    expected = {name for name, (m, _) in _EXPORTS.items() if m == module}
+    assert expected and expected <= set(mod.__all__), module
+    for name in expected:
+        assert hasattr(mod, name), name

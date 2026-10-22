@@ -16,36 +16,27 @@ def _cli():
     return importlib.import_module("difflet.cli.main")
 
 
-def test_cuda_backend_routes_qwen_to_the_gpu_orchestrator(monkeypatch):
+@pytest.mark.parametrize(
+    "model_id,model_type",
+    [
+        ("Qwen/Qwen-Image", "qwen_image"),
+        ("black-forest-labs/FLUX.1-dev", "flux"),
+        ("black-forest-labs/FLUX.1-schnell", "flux"),
+        ("Wan-AI/Wan2.2-T2V-A14B-Diffusers", "wan"),
+        ("Wan-AI/Wan2.1-T2V-14B-Diffusers", "wan"),
+    ],
+)
+def test_cuda_backend_routes_to_the_gpu_orchestrator(monkeypatch, model_id, model_type):
     monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
-    orch = _cli()._get_orchestrator(argparse.Namespace(model_id="Qwen/Qwen-Image"))
-    assert type(orch).__name__ == "GpuOrchestrator" and orch.spec.model_type == "qwen_image"
+    orch = _cli()._get_orchestrator(argparse.Namespace(model_id=model_id))
+    assert type(orch).__name__ == "GpuOrchestrator" and orch.spec.model_type == model_type
+    assert orch.model_id == model_id
 
 
 def test_cpu_and_trainium_keep_the_staged_orchestrator(monkeypatch):
     monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
     orch = _cli()._get_orchestrator(argparse.Namespace(model_id="Qwen/Qwen-Image"))
     assert type(orch).__name__ == "QwenImageOrchestrator"
-
-
-@pytest.mark.parametrize(
-    "model_id", ["black-forest-labs/FLUX.1-dev", "black-forest-labs/FLUX.1-schnell"]
-)
-def test_cuda_backend_routes_flux_to_the_gpu_orchestrator(monkeypatch, model_id):
-    monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
-    orch = _cli()._get_orchestrator(argparse.Namespace(model_id=model_id))
-    assert type(orch).__name__ == "GpuOrchestrator" and orch.spec.model_type == "flux"
-    assert orch.model_id == model_id
-
-
-@pytest.mark.parametrize(
-    "model_id", ["Wan-AI/Wan2.2-T2V-A14B-Diffusers", "Wan-AI/Wan2.1-T2V-14B-Diffusers"]
-)
-def test_cuda_backend_routes_wan_to_the_gpu_orchestrator(monkeypatch, model_id):
-    monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
-    orch = _cli()._get_orchestrator(argparse.Namespace(model_id=model_id))
-    assert type(orch).__name__ == "GpuOrchestrator" and orch.spec.model_type == "wan"
-    assert orch.model_id == model_id
 
 
 def test_other_models_on_cuda_point_at_the_trainium_path(monkeypatch):
@@ -134,13 +125,14 @@ def test_dp_beyond_the_gpu_count_is_refused_before_any_work(monkeypatch, capsys)
 
 
 def test_cli_and_serving_import_without_neuron():
-    # No module-level Neuron import on the CLI/serving path.
+    # No module-level Neuron, Trainium-backend or TPU-backend import on the CLI/serving path.
     code = textwrap.dedent("""
         import importlib.abc, sys
         BLOCKED = {"neuronx_distributed", "torch_neuronx", "neuronxcc", "nki", "torch_xla", "libneuronxla"}
+        BLOCKED_PREFIXES = ("difflet.backends.trainium", "difflet.backends.tpu")
         class Block(importlib.abc.MetaPathFinder):
             def find_spec(self, name, path, target=None):
-                if name.split(".")[0] in BLOCKED:
+                if name.split(".")[0] in BLOCKED or name.startswith(BLOCKED_PREFIXES):
                     raise ImportError("blocked: " + name)
         sys.meta_path.insert(0, Block())
         for m in ("difflet.cli.main", "difflet.cli.orchestrators.qwen_image",

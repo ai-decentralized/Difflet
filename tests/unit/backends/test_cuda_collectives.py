@@ -7,8 +7,6 @@ fake ``torch.distributed`` and for real under gloo in test_cuda_multirank.py), a
 tensor parallel still raises.
 """
 
-import os
-
 import pytest
 import torch
 
@@ -106,20 +104,6 @@ def test_tp_degree_one_collectives_are_identity():
     assert C.get_cp_rank_spmd(0) == 0 and C.get_cfg_rank_spmd(0) == 0
     assert C.get_cfg_group() == [[0]] and C.get_cp_group() == [[0]]
     C.init_parallel_mesh(MeshSpec(tp=1))  # exported, idempotent
-
-
-def test_public_surface_matches_the_ops_contract():
-    from difflet.ops import _EXPORTS
-
-    expected = {name for name, (module, _) in _EXPORTS.items() if module == "collectives"}
-    assert expected <= set(C.__all__)
-    for name in expected:
-        assert hasattr(C, name), name
-
-
-def test_import_does_not_initialise_torch_distributed():
-    assert not torch.distributed.is_initialized()
-    assert "WORLD_SIZE" not in os.environ or int(os.environ["WORLD_SIZE"]) == 1
 
 
 def test_reduce_from_tensor_model_parallel_region_takes_a_process_group():

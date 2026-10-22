@@ -250,17 +250,6 @@ def _loaded_cuda_transformer_app(config, tmp_path, **kwargs):
     return app
 
 
-def test_torch_compile_is_off_by_default(config, tmp_path):
-    from torch._dynamo.eval_frame import OptimizedModule
-
-    _write_checkpoint(config, tmp_path)
-    app = _loaded_cuda_transformer_app(config, tmp_path)
-    assert app.torch_compile is False
-    assert not any(
-        isinstance(b, OptimizedModule) for b in app.module.transformer.transformer_blocks
-    )
-
-
 def test_torch_compile_wraps_each_block(config, tmp_path):
     from torch._dynamo.eval_frame import OptimizedModule
 

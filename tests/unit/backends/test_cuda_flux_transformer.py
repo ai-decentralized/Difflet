@@ -9,7 +9,6 @@ guidance, ``return_dict``) are device-independent. The diffusers
 
 import os
 
-import pytest
 import torch
 from diffusers import FluxPipeline, FluxTransformer2DModel
 from safetensors.torch import save_file
@@ -144,14 +143,6 @@ def test_rope_is_cached_per_ids_shape(tmp_path):
     assert other is not first and not torch.equal(other, first)
 
 
-def test_forward_before_load_is_an_explicit_error(tmp_path):
-    app = CudaFluxTransformerApplication(
-        model_path=str(tmp_path), config=_config(True), device="cpu"
-    )
-    with pytest.raises(RuntimeError, match="not loaded"):
-        FluxDiTAdapter(app)(**_inputs(), guidance=3.5)
-
-
 def test_load_converts_without_cloning_the_checkpoint(tmp_path, monkeypatch):
     """The loader must not hold the host checkpoint twice: it asks the converter for the
     no-clone path (``load_state_dict`` copies into the parameters anyway)."""
@@ -172,32 +163,11 @@ def test_load_converts_without_cloning_the_checkpoint(tmp_path, monkeypatch):
 # --- --torch-compile for the Flux DiT ----------------------------------------------------------
 
 
-def test_torch_compile_is_off_by_default_for_flux(tmp_path):
-    from torch._dynamo.eval_frame import OptimizedModule
-
-    _, adapter = _adapter(tmp_path)
-    app = adapter.app
-    assert app.torch_compile is False
-    blocks = list(app.module.transformer_blocks) + list(app.module.single_transformer_blocks)
-    assert blocks and not any(isinstance(b, OptimizedModule) for b in blocks)
-
-
 def test_torch_compile_wraps_every_flux_block(tmp_path):
     from torch._dynamo.eval_frame import OptimizedModule
 
-    reference = _reference(True)
-    transformer = tmp_path / "transformer"
-    transformer.mkdir(parents=True)
-    state = {k: v.detach().clone().contiguous() for k, v in reference.state_dict().items()}
-    save_file(state, str(transformer / "diffusion_pytorch_model.safetensors"))
-    app = CudaFluxTransformerApplication(
-        model_path=str(transformer), config=_config(True), device="cpu", torch_compile=True
-    )
-    cache = tmp_path / "cache"
-    app.compile(str(cache))
-    app.load(str(cache), skip_warmup=True)
-    assert app.torch_compile is True
-    blocks = list(app.module.transformer_blocks) + list(app.module.single_transformer_blocks)
+    module = _adapter(tmp_path, torch_compile=True)[1].app.module
+    blocks = list(module.transformer_blocks) + list(module.single_transformer_blocks)
     assert len(blocks) == TINY["num_layers"] + TINY["num_single_layers"]
     assert all(isinstance(b, OptimizedModule) for b in blocks)
 

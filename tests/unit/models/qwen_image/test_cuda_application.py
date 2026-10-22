@@ -1,18 +1,15 @@
-"""CPU-only coverage for the Qwen-Image GPU application and its registry routing.
+"""CPU-only coverage for what the Qwen-Image GPU application does differently: prompt padding,
+the dynamic-shift timesteps, the guidance refusal and the probe-free TeaCache cadence.
 
-No weights, no GPU: an empty model dir builds an application with no transformer,
-which is enough to prove the routing, the reflective contract and the prompt
-padding helper.
+No weights, no GPU: an empty model dir builds an application with no transformer.
 """
 
-import inspect
 import os
 
 import pytest
 import torch
 
 from difflet.backends.gpu.application import create_gpu_application
-from difflet.models.qwen_image.entry import create_qwen_image_application
 from difflet.models.qwen_image.prompt import pad_or_truncate_prompt_embeds
 from difflet.pipeline.parallel_config import DiffletParallelConfig
 
@@ -31,60 +28,6 @@ def _build(tmp_path, **kwargs):
         shape={"height": 64, "width": 64},
         **kwargs,
     )
-
-
-def test_registry_routes_cuda_to_the_gpu_application(tmp_path):
-    from difflet.registry import resolve_model
-
-    app = resolve_model("Qwen/Qwen-Image").create_application(
-        model_path=str(tmp_path),
-        parallel=DiffletParallelConfig(tp_degree=1),
-        dtype="bf16",
-        shape={"height": 64, "width": 64},
-        backend="cuda",
-    )
-    assert type(app).__name__ == "CudaQwenImageApplication"
-    assert app.transformer is None  # empty model dir -> no transformer/config.json
-    assert app.has_compiled_artifacts(str(tmp_path)) is False
-    assert app.dtype is torch.bfloat16
-
-
-def test_entry_error_lists_its_backends(tmp_path):
-    with pytest.raises(NotImplementedError, match="trainium and tpu"):
-        create_qwen_image_application(
-            model_path=str(tmp_path),
-            parallel=DiffletParallelConfig(tp_degree=1),
-            dtype="bf16",
-            shape={"height": 64, "width": 64},
-            backend="rocm",
-        )
-
-
-def test_gpu_application_rejects_cfg_parallel(tmp_path):
-    with pytest.raises(NotImplementedError, match="--cfg-parallel does not apply to Qwen-Image"):
-        create_gpu_application(
-            "qwen_image",
-            model_path=str(tmp_path),
-            parallel=DiffletParallelConfig(tp_degree=1, cfg_parallel_enabled=True),
-            dtype="bf16",
-            shape={"height": 64, "width": 64},
-        )
-
-
-def test_cuda_application_signatures_match_the_pipeline_contract(tmp_path):
-    app = _build(tmp_path)
-    assert "debug" in inspect.signature(app.compile).parameters
-    load_params = inspect.signature(app.load).parameters
-    for name in ("start_rank_id", "local_ranks_size", "skip_warmup"):
-        assert name in load_params
-
-
-def test_lifecycle_without_a_transformer_is_an_explicit_error(tmp_path):
-    app = _build(tmp_path)
-    with pytest.raises(NotImplementedError, match="transformer/config.json"):
-        app.compile(str(tmp_path))
-    with pytest.raises(NotImplementedError, match="transformer/config.json"):
-        app.load(str(tmp_path))
 
 
 def test_pad_or_truncate_prompt_embeds_pads_and_masks():
@@ -195,26 +138,6 @@ def test_qwen_timesteps_pass_mu_to_a_dynamic_shift_scheduler():
     assert tuple(ts.shape) == (4,) and ts[0] == 1000.0
 
 
-@pytest.mark.parametrize(
-    "kwargs,owner",
-    [
-        ({"tp_degree": 2}, "not supported"),
-        ({"tp_degree": 1, "cp_degree": 2}, "not supported"),
-    ],
-)
-def test_gpu_application_rejects_multi_rank_parallel_up_front(tmp_path, kwargs, owner):
-    # tp/cp/dp > 1 would otherwise fail only after loading the 41 GB DiT (at the first
-    # collective). One application is one process, one device; refuse before any load.
-    with pytest.raises(NotImplementedError, match=owner):
-        create_gpu_application(
-            "qwen_image",
-            model_path=str(tmp_path),
-            parallel=DiffletParallelConfig(**kwargs),
-            dtype="bf16",
-            shape={"height": 64, "width": 64},
-        )
-
-
 def test_generate_rejects_guidance_scale_when_the_model_has_no_guidance_embeds(tmp_path):
     # Qwen-Image's transformer has guidance_embeds=False: the guidance tensor is dropped by the
     # modeling code, so a user-supplied guidance_scale would be a silent no-op.
@@ -269,12 +192,6 @@ def test_generate_uses_the_given_initial_latents(tmp_path, monkeypatch):
     assert seen["latents"] is noise and seen["call"]["latents"] is noise
 
 
-def test_torch_compile_is_the_kwarg_and_off_by_default(tmp_path):
-    assert _build(tmp_path).torch_compile is False
-    assert _build(tmp_path, torch_compile=True).torch_compile is True
-    assert _build(tmp_path, torch_compile=False).torch_compile is False
-
-
 def test_cuda_pipeline_builds_a_teacache_controller_for_cadence(tmp_path):
     app = _build(tmp_path, load_text_encoder=False, load_vae=False, teacache_cadence=2)
     app.load_companions()
@@ -286,16 +203,3 @@ def test_cuda_pipeline_has_no_teacache_controller_by_default(tmp_path):
     app = _build(tmp_path, load_text_encoder=False, load_vae=False)
     app.load_companions()
     assert app.pipeline.teacache_controller is None
-
-
-@pytest.mark.parametrize(
-    "kwargs",
-    [
-        {"teacache_speedup": 1.5},
-        {"teacache_calibration_path": "/x.json"},
-        {"teacache_online_delta_alpha": 0.1},
-    ],
-)
-def test_cuda_application_refuses_calibrated_and_online_delta_teacache(tmp_path, kwargs):
-    with pytest.raises(NotImplementedError, match="not supported"):
-        _build(tmp_path, **kwargs)

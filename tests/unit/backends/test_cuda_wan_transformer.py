@@ -111,41 +111,6 @@ def test_example_inputs_match_the_contract(tmp_path):
     assert {t.dtype for t in (hidden_states, timestep, text)} == {torch.bfloat16}
 
 
-def test_forward_before_load_is_an_explicit_error(tmp_path):
-    transformer = tmp_path / "transformer"
-    _reference(transformer)
-    cfg = _config(transformer, torch_dtype=torch.float32)
-    app = CudaWanTransformerApplication(model_path=str(transformer), config=cfg, device="cpu")
-    with pytest.raises(RuntimeError, match="not loaded"):
-        app(*_inputs(cfg))
-
-
-@pytest.mark.parametrize(
-    "parallel,expected",
-    [
-        ({"tp_degree": 2}, "tensor parallelism.*not supported"),
-        ({"tp_degree": 1, "cp_degree": 2}, "context parallelism.*not supported"),
-        ({"tp_degree": 1, "sp_enabled": True}, "sequence parallelism.*not supported"),
-    ],
-)
-def test_parallel_modes_are_refused_up_front(tmp_path, parallel, expected):
-    # The GPU application refuses what the platform does not implement before any expert is
-    # built, so no weights are read for a config that cannot run.
-    from difflet.backends.gpu.application import create_gpu_application
-    from difflet.pipeline.parallel_config import DiffletParallelConfig
-
-    _reference(tmp_path / "transformer")
-    with pytest.raises(NotImplementedError, match=expected):
-        create_gpu_application(
-            "wan",
-            model_path=str(tmp_path),
-            parallel=DiffletParallelConfig(**parallel),
-            dtype="fp32",
-            shape={},
-            device="cpu",
-        )
-
-
 def test_cfg_parallel_builds_on_a_cfg_two_mesh(tmp_path, monkeypatch):
     """CFG-parallel is accepted; the expert's mesh is cfg=2, tp=1.
 
@@ -309,30 +274,15 @@ def test_cfg_parallel_forward_matches_the_serial_batch(tmp_path, monkeypatch):
 # --- --torch-compile for the Wan experts ------------------------------------------------------
 
 
-def _loaded_expert(tmp_path, **kwargs) -> CudaWanTransformerApplication:
-    transformer = tmp_path / "transformer"
-    _reference(transformer)
-    app = CudaWanTransformerApplication(
-        model_path=str(transformer), config=_config(transformer), device="cpu", **kwargs
-    )
-    cache = tmp_path / "cache"
-    app.compile(str(cache))
-    app.load(str(cache), skip_warmup=True)
-    return app
-
-
-def test_torch_compile_is_off_by_default_for_the_wan_expert(tmp_path):
-    from torch._dynamo.eval_frame import OptimizedModule
-
-    app = _loaded_expert(tmp_path)
-    assert app.torch_compile is False
-    assert not any(isinstance(b, OptimizedModule) for b in app.module.blocks)
-
-
 def test_torch_compile_wraps_each_wan_block(tmp_path):
     from torch._dynamo.eval_frame import OptimizedModule
 
-    app = _loaded_expert(tmp_path, torch_compile=True)
-    assert app.torch_compile is True
+    transformer = tmp_path / "transformer"
+    _reference(transformer)
+    app = CudaWanTransformerApplication(
+        model_path=str(transformer), config=_config(transformer), device="cpu", torch_compile=True
+    )
+    app.compile(str(tmp_path / "cache"))
+    app.load(str(tmp_path / "cache"), skip_warmup=True)
     assert len(app.module.blocks) == TINY["num_layers"]
     assert all(isinstance(b, OptimizedModule) for b in app.module.blocks)

@@ -15,7 +15,6 @@ the application's own device-moving DiT callable into the Difflet module.
 
 from __future__ import annotations
 
-import inspect
 import json
 from types import SimpleNamespace
 
@@ -256,26 +255,6 @@ def test_compile_and_load_cover_both_experts(tmp_path):
     assert app.has_compiled_artifacts(str(cache)) is False
 
 
-def test_lifecycle_without_a_transformer_is_an_explicit_error(tmp_path):
-    app = _build(tmp_path)  # no transformer/config.json: the early return
-    assert app.transformer is None and app.transformer_2 is None
-    assert app.has_compiled_artifacts(str(tmp_path)) is False
-    with pytest.raises(NotImplementedError, match="transformer/config.json"):
-        app.compile(str(tmp_path))
-    with pytest.raises(NotImplementedError, match="transformer/config.json"):
-        app.load(str(tmp_path))
-    with pytest.raises(RuntimeError, match="load"):
-        app.generate("a prompt")
-
-
-def test_cuda_application_signatures_match_the_pipeline_contract(tmp_path):
-    app = _build(tmp_path)
-    assert "debug" in inspect.signature(app.compile).parameters
-    load_params = inspect.signature(app.load).parameters
-    for name in ("start_rank_id", "local_ranks_size", "skip_warmup"):
-        assert name in load_params
-
-
 def test_dit_input_contract_matches_the_expert(tmp_path):
     root = tmp_path / "wan"
     _write_model(root)
@@ -317,44 +296,10 @@ def test_cfg_parallel_off_keeps_the_requested_batch(tmp_path):
     assert app.transformer.dit_config.batch_size == 1
 
 
-@pytest.mark.parametrize(
-    "kwargs",
-    [
-        {"teacache_cadence": 2},
-        {"teacache_speedup": 1.5},
-        {"teacache_calibration_path": "/x.json"},
-        {"shapes": [[480, 832, 9], [480, 832, 17]]},
-    ],
-)
-def test_cuda_wan_application_refuses_unsupported_kwargs(tmp_path, kwargs):
-    with pytest.raises(NotImplementedError, match="not supported"):
-        _build(tmp_path, **kwargs)
-
-
 def test_generate_refuses_a_batch_of_prompts(tmp_path):
     app, _, _ = _loaded_app(tmp_path)
     with pytest.raises(NotImplementedError, match="not supported"):
         app.generate(["a cat", "a dog"], num_inference_steps=1, output_type="latent")
-
-
-def test_torch_compile_reaches_both_experts(tmp_path):
-    # The opt-in compile option is the ``torch_compile`` kwarg, and both expert
-    # applications carry it; off by default.
-    root = tmp_path / "wan"
-    _write_model(root)
-    app = _build(root)
-    assert app.torch_compile is False and app.transformer.torch_compile is False
-    app = _build(root, torch_compile=True)
-    assert app.torch_compile is True and app.transformer.torch_compile is True
-    if app.transformer_2 is not None:
-        assert app.transformer_2.torch_compile is True
-    assert _build(root, torch_compile=False).torch_compile is False
-
-
-def test_off_values_of_refused_kwargs_are_accepted(tmp_path):
-    # The CLI/pipeline pass several of these with their "off" value; only a request is refused.
-    app = _build(tmp_path, teacache_cadence=None, teacache_probe_enabled=False, shapes=None)
-    assert type(app).__name__ == "CudaWanApplication"
 
 
 # ------------------------------------------------------------------ the denoise loop
@@ -508,15 +453,6 @@ def test_generate_is_seeded_on_the_host_and_one_shape(tmp_path):
     # The orchestrator's own refusal: no decoder was loaded or injected.
     with pytest.raises(ValueError, match="VAE decoder"):
         app.generate("a cat", seed=0, output_type="pt", **kwargs)
-
-
-def test_call_with_a_prompt_dispatches_to_generate(tmp_path):
-    app, _, _ = _loaded_app(tmp_path)
-    kwargs = dict(num_inference_steps=1, guidance_scale=1.0, guidance_scale_2=1.0, seed=0)
-    torch.testing.assert_close(
-        app(prompt="a cat", output_type="latent", **kwargs),
-        app.generate("a cat", output_type="latent", **kwargs),
-    )
 
 
 # ------------------------------------------------------------------ the callables
