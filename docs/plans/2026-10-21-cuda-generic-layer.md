@@ -4,7 +4,7 @@
 
 **Goal:** Replace "one CUDA stack per model" with one generic CUDA transformer lifecycle, one generic CUDA model application, one generic serving adapter and one generic CLI orchestrator, each driven by a small per-model spec, so that every model Difflet registers (Qwen-Image, Flux and Wan today; HunyuanVideo, HunyuanVideo 1.5, MiniMax-H3 and LTX-2 next) costs a spec plus its real differences, and a ROCm backend costs a platform file, not more stacks. The layer is designed against all seven models, not the three that run on CUDA now; the section "The other four models" is where the design earns that claim.
 
-**Architecture:** Five levels, from the op surface up. Levels 1 and 2 live in `difflet.ops` and are backend-neutral. Level 3 (model-and-hardware fusions) stays under `difflet/backends/cuda/<model>/` as load-time module swaps, the pattern `difflet/backends/cuda/flux/proj_out.py` already sets. Level 4 (one `torch.compile` helper) and Level 5 (generic application, serving and CLI) move the shared flow into `difflet/backends/cuda/core/`, `difflet/serving/orchestrators/cuda.py` and `difflet/cli/orchestrators/cuda.py`. Each model keeps a torch-free spec next to its registry metadata, a transformer subclass of about fifty lines, and a driver that owns the parts no generic code should guess at.
+**Architecture:** Five levels, from the op surface up. Levels 1 and 2 live in `difflet.ops` and are backend-neutral. Level 3 (model-and-hardware fusions) stays under `difflet/backends/cuda/<model>/` as load-time module swaps, the pattern `difflet/backends/cuda/flux/proj_out.py` already sets. Level 4 (one `torch.compile` helper) and Level 5 (generic application, serving and CLI) move the shared flow into one package, `difflet/backends/gpu/`, written once for CUDA and ROCm, with a `difflet/platforms/` package holding the per-backend facts. Each model keeps a torch-free spec in its own package (`difflet/models/<model>/spec.py`), a transformer subclass of about fifty lines, and an application-wiring file under `difflet/backends/cuda/<model>/` that owns the parts no generic code should guess at. This layout is the reviewer's, given on 2026-10-22; the section after the brief shows it.
 
 **Tech Stack:** unchanged from `docs/plans/2026-10-16-cuda-backend-support.md`: Python ≥ 3.10, torch (CUDA 12.8+ wheel), `diffusers==0.38.0`, `safetensors`, `pytest`; `torch.distributed` + NCCL + `torchrun` for CFG-parallel and data-parallel replicas. No new dependency.
 
@@ -25,6 +25,56 @@
 The real differences the brief names: rope from ids and the split `proj_out` for Flux; the prompt trim for Qwen-Image; two experts, CFG-parallel, the fp32 timestep and video output for Wan.
 
 ---
+
+## The reviewer's layout (2026-10-22)
+
+On the stack's top PR the reviewer gave the directory layout the generic layer should land in, as a tree with no prose. This design adopts it as given. The tree, with this document's names mapped onto it:
+
+```text
+difflet/
+├── platforms/                   # NEW: one Platform per backend
+│   ├── base.py                  #   PlatformCapabilities (flow, parallel_modes,
+│   │                            #   supports_torch_compile, device_unit); Platform:
+│   │                            #   detect(), prepare_runtime(), unsupported_parallel_modes()
+│   ├── gpu.py                   #   GpuPlatform, shared by CUDA and ROCm: device count/memory,
+│   │                            #   visible-device pinning, NCCL init, worker env
+│   ├── cuda.py  rocm.py         #   CUDA (detect, toolchain versions); ROCm is a stub
+│   ├── trainium.py  tpu.py  cpu.py   # existing runtimes, moved unchanged
+│   └── __init__.py              #   get_platform(), current_platform(), auto-detect
+├── ops/                         # KEEP: op names + dispatch to backends/<platform>/ops_impl
+├── models/
+│   ├── spec.py                  # NEW: ModelSpec, PromptBudget, spec lookup
+│   └── <model>/
+│       ├── modeling_<model>.py  # difflet.ops only; Flux's Trainium wrapper moved out
+│       ├── spec.py              # NEW: torch-free declaration (this document's "spec")
+│       └── dit_config.py        # backend-neutral DiT config (Flux, Qwen-Image and Wan have one)
+└── backends/
+    ├── <backend>/ops_impl/      # KEEP
+    ├── _torch_megatron/         # KEEP: pure-torch parallel layers + weight loading
+    ├── gpu/                     # NEW: generic GPU eager flow, written once
+    │   ├── application.py       #   GpuComponent (Level 4's lifecycle; today CudaApplicationBase),
+    │   │                        #   GpuApplication (Level 5's DiffletPipeline contract), the two
+    │   │                        #   base drivers (G14)
+    │   ├── cli.py               #   GpuOrchestrator: difflet run (today CudaOneProcessOrchestrator)
+    │   ├── serving.py           #   difflet serve adapter (validator, preparer, stage)
+    │   └── policy.py            #   platform choice, parallel-mode refusals, pipeline kwargs (torch-free)
+    ├── cuda/<model>/            # only this model's real differences on CUDA
+    │   ├── transformer.py       #   the DiT as a GpuComponent (weights, repeated_blocks)
+    │   ├── application.py       #   encoders + VAE + denoise loop wiring (this document's "driver")
+    │   └── proj_out.py          #   (Flux only) load-time swap, off by default
+    └── trainium/ …              # behaviour unchanged; flux/backbone.py moved in from models/flux
+```
+
+What it settles, relative to the first draft of this document:
+
+- **The generic layer is `backends/gpu/`, shared by CUDA and ROCm from the start**, not a `cuda` package that ROCm re-exports later. Question 7 is answered: model under backend stays (`backends/cuda/<model>/`), and the backend-generic flow gets its own name. G2 is replaced by G16.
+- **A `platforms/` package replaces today's `backends/registry.py`, each `backends/<b>/runtime.py` and each `ops_impl/platform.py`.** Its `PlatformCapabilities` carries what the generic layer branches on: `flow` (`aot` or `eager`, today's `requires_aot`), `parallel_modes` (what the CLI and serving refuse per backend, today three copies of the same refusal lists), `supports_torch_compile` (today `current_backend() != "cuda"` in `cli/main.py`), and `device_unit` (today the inert "core 0" slot in `cuda_resident.py`). The fourteen `"cuda"` literals route through `current_platform()`; the ROCm section shrinks to a platform file.
+- **Specs live in the model packages**: `difflet/models/spec.py` for the types and lookup, `difflet/models/<model>/spec.py` per model, torch-free. Question 1 is answered; G3 keeps its substance (torch-free, two-reader rule) at this location. The spec names the application class by import string, so `backends/cuda/<model>/application.py` is reached only in the worker.
+- **The per-model application wiring is `backends/cuda/<model>/application.py`**, which is what this document called the driver. `difflet/models/<model>/cuda_application.py` goes away at the end of the migration, as planned.
+- **`dit_config.py` is a convention**: a backend-neutral DiT config per model, which Flux, Qwen-Image and Wan already have and a new model adds.
+- **Flux's Trainium wrapper leaves the model package**: `difflet/models/flux/trainium_backbone.py` moves to `difflet/backends/trainium/flux/`, with a re-export at the old path for its twelve importers (four in `difflet/`, five tests, three scripts). It is Trainium hygiene, not CUDA work, and gets its own small PR.
+
+Two preconditions the layout adds, recorded in the phases: `difflet/models/ltx_2/__init__.py` and `difflet/models/minimax_h3/__init__.py` import torch-bound modules at package level (the other four model packages import nothing), so those two packages make their imports lazy before their `spec.py` can be torch-free; and `platforms/` moves the existing runtimes unchanged, so the Trainium and TPU unit tests are the gate for that move.
 
 ## What this design takes from vLLM-Omni RFC #7382
 
@@ -51,7 +101,7 @@ The twelve production files, raw lines:
 
 | File | Qwen-Image | Flux | Wan | Shared today |
 |---|---|---|---|---|
-| `difflet/backends/cuda/<model>/transformer.py` | 148 | 240 | 171 | `backends/cuda/core/application_base.py` (210) |
+| `difflet/backends/cuda/<model>/transformer.py` | 148 | 240 | 171 | `backends/cuda/core/application_base.py` (210; becomes `backends/gpu/application.py`) |
 | `difflet/models/<model>/cuda_application.py` | 308 | 256 | 442 | — |
 | `difflet/serving/orchestrators/<model>_cuda.py` | 325 | 304 | 387 | `serving/orchestrators/cuda_resident.py` (107) |
 | `difflet/cli/orchestrators/<model>_cuda.py` | 369 | 57 | 109 | `CudaOneProcessOrchestrator`, which lives *inside* `qwen_image_cuda.py` |
@@ -142,9 +192,10 @@ What stays unresolved by this design, and is a precondition for that model rathe
 | # | Decision | Alternative rejected | Why |
 |---|---|---|---|
 | G1 | **Five levels as in the brief, implemented bottom-up except Level 2, which comes last and on its own evidence.** | Build Level 5 first because it removes the most lines | Levels 1, 3 and 4 are the safety net Level 5's refactor runs under. Level 2 changes modeling files the Trainium graphs trace, so it needs the Trainium verification path and a measured win, and must not block the rest. |
-| G2 | **The generic layer stays under the `cuda` name.** `difflet/backends/cuda/core/` gains `compile.py` and `application.py`; the orchestrators become `difflet/serving/orchestrators/cuda.py` and `difflet/cli/orchestrators/cuda.py`. ROCm registers its own package that re-exports them (D11 of the 2026-10-16 plan). | A new `difflet/backends/torch_accel/` package now | A rename is churn with no user; the ROCm section lists the fourteen code literals that would have to go through `platform.py` first. Do that when ROCm is scheduled. |
-| G3 | **The spec is torch-free data; behaviour lives in a driver.** `CudaModelSpec` and `PromptBudget` are frozen dataclasses in `difflet/common/cuda_spec.py`; the three instances sit in `difflet/common/registry/<model>.py` next to `cuda_serving_metadata()`, which is generated from them. The driver is named by import string and resolved only in the worker. | Spec under `difflet/backends/cuda/<model>/` | `difflet/backends/cuda/__init__.py` imports `runtime`, which imports torch. The serving parent resolves the preparer and validator factories and calls `cuda_serving_metadata()` itself, and every adapter today defers even `cuda_pipeline_kwargs` to the worker ("the parent process never loads torch for this adapter"). A spec under the backend package would repeal that rule silently. A field goes in the spec when at least two generic call sites read it; otherwise it is the driver's. |
-| G4 | **The transformer subclasses stay; the base class owns the lifecycle.** `CudaApplicationBase._prepare_module` becomes the one implementation (materialise → `load_weights` → device → `requires_grad_(False)` → eval → assert → swaps → compile), with `load_weights(module)`, `repeated_blocks(module)` and `apply_load_time_swaps(module)` as the hooks a model implements. | A single `CudaTransformerApplication(spec)` with loader and block-list callables in the spec | A fifty-line subclass is easier to read than a spec with six callables; it is also what the TPU backend does, so the Trainium → TPU → CUDA reading order stays the same. |
+| G2 | *Superseded by G16 on 2026-10-22.* The first draft kept the generic layer under the `cuda` name with ROCm re-exporting it later. | | The reviewer's layout names the shared layer `backends/gpu/` from the start and puts the per-backend facts in `platforms/`, which removes the fourteen `"cuda"` literals as a side effect rather than as a later hunt. |
+| G3 | **The spec is torch-free data; behaviour lives in the model's application wiring.** `ModelSpec` and `PromptBudget` are frozen dataclasses in `difflet/models/spec.py`; each model's instance is `difflet/models/<model>/spec.py`, and `cuda_serving_metadata()` in `difflet/common/registry/<model>.py` is generated from it. The wiring class is named by import string and resolved only in the worker. | Spec under `difflet/backends/cuda/<model>/` | `difflet/backends/cuda/__init__.py` imports `runtime`, which imports torch. The serving parent resolves the preparer and validator factories and calls `cuda_serving_metadata()` itself, and every adapter today defers even `cuda_pipeline_kwargs` to the worker ("the parent process never loads torch for this adapter"). A spec under the backend package would repeal that rule silently; a spec in the model package keeps it, provided the package `__init__` stays import-free (true for four packages today, a precondition for LTX-2 and MiniMax-H3). A field goes in the spec when at least two generic call sites read it; otherwise it is the wiring's. |
+| G16 | **One generic GPU layer, `difflet/backends/gpu/`, shared by CUDA and ROCm, over a `difflet/platforms/` package.** `application.py` (GpuComponent, GpuApplication, the two base drivers), `cli.py` (GpuOrchestrator), `serving.py`, `policy.py`; per-backend facts in `platforms/<backend>.py` behind `current_platform()` and a `PlatformCapabilities` record (`flow`, `parallel_modes`, `supports_torch_compile`, `device_unit`). The per-model CUDA files stay under `backends/cuda/<model>/`. | The first draft's `cuda`-named layer; vLLM's vendor-under-model layout | This is the reviewer's layout. It answers questions 1 and 7, keeps model-under-backend as Trainium and TPU already do, and turns the backend branches the CLI and serving take today (`requires_aot`, the refusal lists, the `torch_compile` check, the "core 0" slot) into one capabilities record read in one place. |
+| G4 | **The transformer subclasses stay; the base class owns the lifecycle.** `GpuComponent._prepare_module` becomes the one implementation (materialise → `load_weights` → device → `requires_grad_(False)` → eval → assert → swaps → compile), with `load_weights(module)`, `repeated_blocks(module)` and `apply_load_time_swaps(module)` as the hooks a model implements. | A single `CudaTransformerApplication(spec)` with loader and block-list callables in the spec | A fifty-line subclass is easier to read than a spec with six callables; it is also what the TPU backend does, so the Trainium → TPU → CUDA reading order stays the same. |
 | G5 | **Acceptance for every Level 5 phase is byte-identical output per model at a fixed seed against the pre-refactor build**, on `run` and `serve`, eager. Compiled mode joins the gate only once Phase 2's first task has shown the compiled md5 is stable run to run; otherwise compiled mode is gated on parity against eager within a recorded tolerance. | Parity against diffusers only | The stack already proved eager determinism across cards and across `run`/`serve` (`docs/verification/cuda-release1-evidence.md`); a refactor that is byte-identical to itself has nothing to re-prove upstream. The compiled path's run-to-run identity was never measured: `max-autotune` picks kernels by benchmarking, so it is measured first, not assumed. |
 | G6 | **Per-model unit tests are kept during migration through re-export shims and deleted with the shims in the last phase.** New shared tests are parametrised over the three specs. | Rewrite the tests as each file moves | 252 CUDA tests name today's classes and module paths (census below); moving them in the same commit as the code doubles every review. Shims keep each phase's diff to its subject. |
 | G7 | **Level 1's tolerance table is one test file with one table; each row names its reference and says whether it must match exactly or within a tolerance; bf16 entries are measured on the GPU in Phase 1, not invented here.** fp32 entries are the ones today's tests already use (`atol=1e-5` attention, `1e-6` linear/norm). `difflet/ops/README.md` lists every op, and gives every fusion and every op with more than one implementation on a backend a written contract. | Guess bf16 tolerances in the doc; one tolerance for every op | A tolerance nobody measured is either so loose it catches nothing or so tight it fails on the first card with a different reduction order. An op that must reproduce a model's rounding chain exactly and an op that may add bf16 noise are different contracts; one number for both hides one of them. |
@@ -259,7 +310,7 @@ So Level 2 is scheduled after Level 5, in that order of preconditions. If the wi
 **What moves.** The *call site*. Today the Flux transformer application loops over its blocks and calls the swap inline. In the generic lifecycle (Level 4/5) the base class calls one hook after the weights are on the device and before compile:
 
 ```python
-# difflet/backends/cuda/core/application_base.py
+# difflet/backends/gpu/application.py (GpuComponent)
 def apply_load_time_swaps(self, module) -> list[tuple[str, int]]:
     """Apply this model's enabled swaps in place; return (swap name, blocks swapped)
     pairs. The default applies nothing and returns []."""
@@ -285,7 +336,7 @@ Flux's subclass applies `fuse_proj_out` over `single_transformer_blocks` when `f
 
 **Today.** The same six-line loop in three files, with two differences that matter: Qwen compiles with `dynamic=True` because the prompt trim changes the text length per request (`dynamic=False` hit the recompile limit, `dynamic=None` compiled a third graph; both recorded in the Qwen file's comment and pinned by `tests/unit/models/qwen_image/test_qwen_text_mask.py::test_compiled_blocks_do_not_recompile_per_prompt_length`), while Flux and Wan compile with `dynamic=False` (one static shape per process). Qwen also warms up twice under compile because dynamo's guard on a `None` block argument errors once. Flux has two block lists; Wan compiles each expert separately, which falls out of "one application per expert".
 
-**Proposal.** `difflet/backends/cuda/core/compile.py`:
+**Proposal.** `difflet/backends/gpu/application.py (the compile helper lives there)`:
 
 ```python
 COMPILE_MODE = "max-autotune-no-cudagraphs"
@@ -338,7 +389,7 @@ def _prepare_module(self):
 
 ### The spec
 
-`difflet/common/cuda_spec.py`, importable without torch (the serving parent imports it):
+`difflet/models/spec.py`, importable without torch (the serving parent imports it):
 
 ```python
 @dataclass(frozen=True)
@@ -350,7 +401,7 @@ class PromptBudget:
     applies_to_negative_prompt: bool = False   # Wan
 
 @dataclass(frozen=True)
-class CudaModelSpec:
+class ModelSpec:
     model_type: str                              # "qwen_image" | "flux" | "wan"; tags derive from it:
                                                  # "[flux/cuda]" (CLI), "[flux/cuda serve]" (serving)
     cli_model_ids: tuple[str, ...]               # routed by `difflet run`; the first is the default
@@ -395,18 +446,18 @@ Every field above has at least two generic readers (G3): the validator and the C
 
 Shape is not a field: the generic code reads `resolve_model(model_type).default_shape` (G9). `cli_model_ids` and `served_checkpoint_ids` are two fields because they differ today on purpose: the CLI routes FLUX.1-schnell and Wan2.1, serving accepts FLUX.1-dev and Wan2.2 only, and `tests/unit/serving/test_model_registry_cuda.py::test_wan21_is_not_served_on_cuda_because_it_never_ran_on_a_gpu` guards that. `accepts_cfg_parallel` has one behavioural reader (the CLI); serving refuses `--cfg-parallel` for every model in `difflet/serving/options.py` before an adapter runs, and the preparer's refusal is a backstop whose only per-model content is the message, hence the separate `cfg_parallel_refusal` text.
 
-Three instances live in `difflet/common/registry/{qwen_image,flux,wan}.py`, each a screen of data, and `cuda_serving_metadata()` in each file becomes one call to a helper in `difflet/common/registry/base.py` that builds `ServingModelMetadata` from the spec (`checkpoint_ids=served_checkpoint_ids`, `default_guidance_scale=default_guidance_scale if not None else serving_noop_guidance_scale`, the one-stage `PipelineDefinition`, the factory strings). The `fuse_proj_out`, `timestep_dtype` and `enable_transformer_2` options stay programmatic kwargs read by the drivers: no CLI flag or serving profile field exposes them today, and this design adds none.
+The three instances are `difflet/models/{qwen_image,flux,wan}/spec.py`, each a screen of data, and `cuda_serving_metadata()` in `difflet/common/registry/<model>.py` becomes one call to a helper in `difflet/common/registry/base.py` that builds `ServingModelMetadata` from the spec (`checkpoint_ids=served_checkpoint_ids`, `default_guidance_scale=default_guidance_scale if not None else serving_noop_guidance_scale`, the one-stage `PipelineDefinition`, the factory strings). The `fuse_proj_out`, `timestep_dtype` and `enable_transformer_2` options stay programmatic kwargs read by the drivers: no CLI flag or serving profile field exposes them today, and this design adds none.
 
 ### The driver
 
 What the brief calls "pipeline class" is not one class: Flux is driven by diffusers' `FluxPipeline`, Qwen-Image and Wan by Difflet's own orchestrators with different companion wiring (Qwen: text pipeline + VAE; Wan: three callables and host fp32 latents). The generic application therefore owns the `DiffletPipeline` contract and delegates the model-shaped steps to a driver, imported only in the worker:
 
 ```python
-# difflet/common/cuda_spec.py (typing only; no torch)
-class CudaModelDriver(Protocol):
+# difflet/models/spec.py (typing only; no torch)
+class ModelDriver(Protocol):
     input_bundle_type: type | None       # QwenImageDiTInputBundle | FluxDiTInputBundle | None (Wan)
-    def experts(self, app) -> list[tuple[str, CudaApplicationBase]]:
-        """Named transformer applications, built once from CudaApplication.__init__ and cached:
+    def experts(self, app) -> list[tuple[str, GpuComponent]]:
+        """Named transformer applications, built once from GpuApplication.__init__ and cached:
         [("transformer", t)] or two for Wan. Each owns an artifact subdirectory of that name.
         Returns [] when transformer/config.json is missing, so the generic
         _require_transformer raises NotImplementedError naming "transformer/config.json"
@@ -420,20 +471,20 @@ class CudaModelDriver(Protocol):
     def dit_input_contract(self, app) -> dict[str, dict[str, Any]]: ...
 ```
 
-Two base drivers ship with the generic layer (G14), under `difflet/backends/cuda/core/drivers.py`:
+Two base drivers ship with the generic layer (G14), under `difflet/backends/gpu/application.py`:
 
 - `DiffusersPipelineDriver(pipeline_cls, transformer_name="transformer")`: `load_companions` calls `pipeline_cls.from_pretrained(model_path, **{transformer_name: None})`, moves the components to the device and rebuilds the pipeline around a `TransformerAdapter` that exposes what the pipeline reads (`config`, `dtype`, `device`, `cache_context`) and forwards to the expert; `generate` calls the pipeline. Flux is this today (`FluxDiTAdapter` becomes the adapter's Flux specialisation, for rope from ids). LTX-2 and HunyuanVideo 1.5 take it with diffusers' `LTX2Pipeline` and `HunyuanVideo15Pipeline`, which is the only denoise loop HunyuanVideo 1.5 has anywhere.
 - `OrchestratorDriver`: wires device callables (text encoder, one transformer per expert, decoder) that take host tensors and return host tensors, the fp32-host-latent convention Wan's and MiniMax-H3's loops rely on, into a Difflet orchestrator. Qwen-Image, Wan, HunyuanVideo and MiniMax-H3 are this.
 
-The three drivers are today's `cuda_application.py` files minus the lifecycle trio, the kwargs refusal, `_require_transformer` and the `__call__` dispatcher, re-based on one of the two, and they move under `difflet/backends/cuda/<model>/driver.py`. Each driver reads its own programmatic kwargs (`load_text_encoder`/`load_text_encoders`, `load_vae`, `local_files_only`, `text_seq_len`, `batch_size`, injected components); Flux's plural `load_text_encoders` is not renamed. Flux's driver keeps `FluxDiTAdapter` (rope from ids, cached per ids) and the `FluxPipeline` rebuild; Qwen's keeps `encode_prompt`, `qwen_image_timesteps` and the TeaCache cadence; Wan's keeps `_CudaTextEncoder`, `_CudaDiT` (fp32 timestep), `_CudaVaeDecoder`, the two-expert residency rule and the `boundary_ratio` partial-download check.
+The three drivers are today's `cuda_application.py` files minus the lifecycle trio, the kwargs refusal, `_require_transformer` and the `__call__` dispatcher, re-based on one of the two, and they move under `difflet/backends/cuda/<model>/application.py`. Each driver reads its own programmatic kwargs (`load_text_encoder`/`load_text_encoders`, `load_vae`, `local_files_only`, `text_seq_len`, `batch_size`, injected components); Flux's plural `load_text_encoders` is not renamed. Flux's driver keeps `FluxDiTAdapter` (rope from ids, cached per ids) and the `FluxPipeline` rebuild; Qwen's keeps `encode_prompt`, `qwen_image_timesteps` and the TeaCache cadence; Wan's keeps `_CudaTextEncoder`, `_CudaDiT` (fp32 timestep), `_CudaVaeDecoder`, the two-expert residency rule and the `boundary_ratio` partial-download check.
 
 ### The generic application
 
-`difflet/backends/cuda/core/application.py`:
+`difflet/backends/gpu/application.py`:
 
 ```python
-class CudaApplication(torch.nn.Module):
-    def __init__(self, spec: CudaModelSpec, *, model_path, parallel, dtype, shape, **kwargs): ...
+class GpuApplication(torch.nn.Module):
+    def __init__(self, spec: ModelSpec, *, model_path, parallel, dtype, shape, **kwargs): ...
     # DiffletPipeline's reflective contract, parameter names unchanged:
     def compile(self, compiled_model_path, debug: bool = False) -> None
     def load(self, compiled_model_path, start_rank_id=None, local_ranks_size=None, skip_warmup=False) -> None
@@ -445,24 +496,24 @@ class CudaApplication(torch.nn.Module):
                                                 # else the first expert's forward
 ```
 
-`compile`/`load`/`has_compiled_artifacts` iterate `driver.experts(self)` and join each name onto the artifact path, which is what Wan does today and what Flux and Qwen do with a single `("transformer", …)` entry. The kwargs refusal is one function reading `spec.refused_application_kwargs` with the existing "only when the value is not None/False" rule (G10). The `entry.py` factories keep their parallel-config refusals (they run before anything is built and the messages are model-specific) and construct `CudaApplication(SPEC, ...)`; `difflet/models/<model>/cuda_application.py` becomes a two-line re-export during migration and is deleted at the end.
+`compile`/`load`/`has_compiled_artifacts` iterate `driver.experts(self)` and join each name onto the artifact path, which is what Wan does today and what Flux and Qwen do with a single `("transformer", …)` entry. The kwargs refusal is one function reading `spec.refused_application_kwargs` with the existing "only when the value is not None/False" rule (G10). The `entry.py` factories keep their parallel-config refusals (they run before anything is built and the messages are model-specific) and construct `GpuApplication(SPEC, ...)`; `difflet/models/<model>/cuda_application.py` becomes a two-line re-export during migration and is deleted at the end.
 
 ### The serving adapter
 
-`difflet/serving/orchestrators/cuda.py` absorbs `cuda_resident.py` and the four classes, importing nothing from `difflet.backends.cuda` at module level:
+`difflet/backends/gpu/serving.py` absorbs `cuda_resident.py` and the four classes, importing nothing from `difflet.backends.cuda` at module level:
 
-- `CudaServingArtifactPreparer`: `prepare_runtime` as today, with `refuse_unsupported_profile(profile, spec)` reading the shared refusals plus `spec.cfg_parallel_refusal` and the TeaCache/host-VAE refusals.
-- `CudaServingRequestValidator`: shape equals profile (including `num_frames` and `fps` for video), guidance within `[0, max_guidance_scale]` or pinned to `serving_noop_guidance_scale`, `guidance_scale_2` and `negative_prompt` only when the spec accepts them, every prompt-token budget in `prompt_budgets` (each encoder's tokenizer, template and limit), the frame and spatial rules, `max_batch`, `refused_video_fields`.
-- `CudaPipelineRunner`: one class; `execute` calls `adapter.generate_output(request)`.
-- `CudaServingStageAdapter`: `create_loaded_runners` builds the pipeline through the one `cuda_pipeline_kwargs` (moved out of the CLI module, imported inside the method as today), adds `num_frames` for video; `generate_output` builds the kwargs from the request and the `accepts_*` flags and encodes the result as PNG for images or through `encode_video_tensor` for video; `smoke_request` and `validate_smoke_output` branch once on `spec.output`.
+- `GpuServingArtifactPreparer`: `prepare_runtime` as today, with `refuse_unsupported_profile(profile, spec)` reading the shared refusals plus `spec.cfg_parallel_refusal` and the TeaCache/host-VAE refusals.
+- `GpuServingRequestValidator`: shape equals profile (including `num_frames` and `fps` for video), guidance within `[0, max_guidance_scale]` or pinned to `serving_noop_guidance_scale`, `guidance_scale_2` and `negative_prompt` only when the spec accepts them, every prompt-token budget in `prompt_budgets` (each encoder's tokenizer, template and limit), the frame and spatial rules, `max_batch`, `refused_video_fields`.
+- `GpuPipelineRunner`: one class; `execute` calls `adapter.generate_output(request)`.
+- `GpuServingStageAdapter`: `create_loaded_runners` builds the pipeline through the one `cuda_pipeline_kwargs` (moved out of the CLI module, imported inside the method as today), adds `num_frames` for video; `generate_output` builds the kwargs from the request and the `accepts_*` flags and encodes the result as PNG for images or through `encode_video_tensor` for video; `smoke_request` and `validate_smoke_output` branch once on `spec.output`.
 
-The registry factory strings point at three two-line subclasses per model that bind the spec (`class CudaFluxServingStageAdapter(CudaServingStageAdapter): spec = FLUX_SPEC`), because the registry constructs factories by import path with no arguments. A subprocess test imports the three serving modules and `model_registry` with `torch` blocked in `sys.meta_path`, pinning the parent-process rule that today is only a comment.
+The registry factory strings point at three two-line subclasses per model that bind the spec (`class CudaFluxServingStageAdapter(GpuServingStageAdapter): spec = FLUX_SPEC`), because the registry constructs factories by import path with no arguments. A subprocess test imports the three serving modules and `model_registry` with `torch` blocked in `sys.meta_path`, pinning the parent-process rule that today is only a comment.
 
 ### The CLI orchestrator
 
-`difflet/cli/orchestrators/cuda.py` is `CudaOneProcessOrchestrator` moved out of `qwen_image_cuda.py` and made spec-driven: `HF_MODEL_ID`, `MODEL_IDS`, `DEFAULT_STEPS`, `ACCEPTS_*`, `OUTPUT_TYPE`, `TAG` read off `self.spec`; `refuse_model_flags` reads `spec.refused_cli_flags`, with the `default_guidance_scale is None` branch producing Qwen's "has no effect" refusal of `--guidance-scale`; `application_kwargs` forwards `spec.forwarded_cli_flags` that are set on `args`; `save_result` branches on `spec.output` (Wan's MP4 writer and `.pt` fallback become the video branch). `cuda_pipeline_kwargs` moves to `difflet/backends/cuda/core/pipeline_kwargs.py`, taking the backend name as a parameter (the backend the spec was selected for, `"cuda"` today), not from `current_backend()`, so the five CPU-suite tests asserting `kw["backend"] == "cuda"` stay valid. The torchrun re-exec, the data-parallel worker loop and the rank-0 broadcast of claimed requests do not change.
+`difflet/backends/gpu/cli.py` is `CudaOneProcessOrchestrator` moved out of `qwen_image_cuda.py` and made spec-driven: `HF_MODEL_ID`, `MODEL_IDS`, `DEFAULT_STEPS`, `ACCEPTS_*`, `OUTPUT_TYPE`, `TAG` read off `self.spec`; `refuse_model_flags` reads `spec.refused_cli_flags`, with the `default_guidance_scale is None` branch producing Qwen's "has no effect" refusal of `--guidance-scale`; `application_kwargs` forwards `spec.forwarded_cli_flags` that are set on `args`; `save_result` branches on `spec.output` (Wan's MP4 writer and `.pt` fallback become the video branch). `cuda_pipeline_kwargs` moves to `difflet/backends/gpu/policy.py`, taking the backend name as a parameter (the backend the spec was selected for, `"cuda"` today), not from `current_backend()`, so the five CPU-suite tests asserting `kw["backend"] == "cuda"` stay valid. The torchrun re-exec, the data-parallel worker loop and the rank-0 broadcast of claimed requests do not change.
 
-Through Phase 5, `main._get_orchestrator` keeps returning the three spec-bound subclasses (`CudaQwenImageOrchestrator`, `FluxCudaOrchestrator`, `WanCudaOrchestrator`), because `tests/unit/cli/test_cli_main_cuda.py` asserts those class names; Phase 6 collapses the selection to `CudaOneProcessOrchestrator(args, spec=spec_for(args.model_id))` and updates that test in the same commit.
+Through Phase 5, `main._get_orchestrator` keeps returning the three spec-bound subclasses (`CudaQwenImageOrchestrator`, `FluxCudaOrchestrator`, `WanCudaOrchestrator`), because `tests/unit/cli/test_cli_main_cuda.py` asserts those class names; Phase 6 collapses the selection to `GpuOrchestrator(args, spec=spec_for(args.model_id))` and updates that test in the same commit.
 
 ### What each model still supplies at Level 5
 
@@ -472,7 +523,7 @@ Through Phase 5, `main._get_orchestrator` keeps returning the three spec-bound s
 | Flux | two CLI ids, one served; T5 budget on `tokenizer_2`; the distilled-guidance CFG message | `NeuronFluxTransformer2DModel`, `build_weight_map` + `convert_flux_hf_state_dict`, two block lists, the `proj_out` swap | `FluxDiTAdapter` (rope from ids), `FluxPipeline` rebuild with the adapter, `fuse_proj_out`, the bundle type | ~280 |
 | Wan 2.2 | two CLI ids, one served; fps; `guidance_scale_2`; `negative_prompt`; CFG-parallel; three refused video fields | `WanTransformer3DModel`, `load_checkpoint_into(rename=…)`, the cfg=2 mesh and the world-size check | two experts and the boundary check, UMT5, VAE decoder, `WanOrchestrator`, `timestep_dtype`, `enable_transformer_2`, no bundle type | ~420 |
 
-Generic code, estimated: `common/cuda_spec.py` ~110, `core/compile.py` ~40, `core/application.py` ~220, `core/pipeline_kwargs.py` ~40, `serving/orchestrators/cuda.py` ~380, `cli/orchestrators/cuda.py` ~320, plus the existing `core/application_base.py` ~240 after it absorbs the lifecycle. About 1,350 generic lines and about 1,000 per-model lines replace today's 3,223 (3,116 + `cuda_resident.py`), and the per-model share falls from ~1,000 lines to 280–420.
+Generic code, estimated: `models/spec.py` ~110, `backends/gpu/application.py` ~40, `backends/gpu/application.py` ~220, `backends/gpu/policy.py` ~40, `backends/gpu/serving.py` ~380, `backends/gpu/cli.py` ~320, plus today's `core/application_base.py` ~240 (the `GpuComponent` half of `backends/gpu/application.py`) after it absorbs the lifecycle. About 1,350 generic lines and about 1,000 per-model lines replace today's 3,223 (3,116 + `cuda_resident.py`), and the per-model share falls from ~1,000 lines to 280–420.
 
 ---
 
@@ -491,7 +542,7 @@ After the migration:
 - `tests/unit/cli/test_cuda_orchestrator.py`: parametrised over `ALL_SPECS`: `run` is download → compile → generate; refusals name the flag and happen before any download; defaults and overrides reach `from_pretrained` and `generate`; `world_size` is `cfg × cp × tp`; the torchrun re-exec and the data-parallel loop (today's Wan CLI tests, which are the only ones exercising them) run for whichever spec accepts CFG-parallel.
 - `tests/unit/backends/cuda/test_<model>_driver.py`: the model-specific behaviours from the "genuinely different" table, moved from today's application tests: Flux's rope cache per ids and `guidance=None`; Qwen's prompt trim shape and the no-op guidance refusal; Wan's expert routing by boundary, the fp32 timestep default, the batch-of-two under CFG-parallel, the partial-download refusal, the three callables.
 - `tests/unit/serving/test_model_registry_cuda.py`: the generated metadata equals the spec, field by field, including the served-checkpoint subset.
-- `tests/unit/backends/test_cuda_import_hygiene.py`: `SCANNED` already recurses `difflet/backends/cuda/` and `_torch_megatron/`; it gains `difflet/serving/orchestrators/cuda.py`, `difflet/cli/orchestrators/cuda.py` and `difflet/common/cuda_spec.py` (and loses the two `cuda_application.py` entries in the commit that deletes those files, since the test fails on a missing entry). The forbidden-prefix list is unchanged.
+- `tests/unit/backends/test_cuda_import_hygiene.py`: `SCANNED` already recurses `difflet/backends/cuda/` and `_torch_megatron/`; it gains `difflet/backends/gpu/serving.py`, `difflet/backends/gpu/cli.py` and `difflet/models/spec.py` (and loses the two `cuda_application.py` entries in the commit that deletes those files, since the test fails on a missing entry). The forbidden-prefix list is unchanged.
 
 The GPU-only gate stays what it is: the three parity harnesses against diffusers plus, for this migration, the byte-identity check of G5 (one `run` and one `serve` request per model at seed 0 before and after each Level 5 phase, md5 of the PNG or of the MP4's frame tensor, since the MP4 container is not byte-deterministic).
 
@@ -499,7 +550,7 @@ The GPU-only gate stays what it is: the three parity harnesses against diffusers
 
 ## Bringing the other four models
 
-The test of this layer is that each of the four Trainium-only models arrives through the recipe below and nothing in `core/`, `serving/orchestrators/cuda.py` or `cli/orchestrators/cuda.py` changes for it. Each model's preconditions are its own work, done before its CUDA PR, and the order is by how little stands in the way:
+The test of this layer is that each of the four Trainium-only models arrives through the recipe below and nothing in `core/`, `backends/gpu/serving.py` or `backends/gpu/cli.py` changes for it. Each model's preconditions are its own work, done before its CUDA PR, and the order is by how little stands in the way:
 
 | Order | Model | Preconditions (not CUDA work) | Driver base | Its real differences for CUDA | Fits one 96 GB card |
 |---|---|---|---|---|---|
@@ -514,9 +565,9 @@ HunyuanVideo first is also the first consumer test of Level 2's interleaved vari
 
 Assume a diffusers model whose transformer runs eagerly in torch (G13). The new model adds:
 
-1. `CudaModelSpec` instance in `difflet/common/registry/<model>.py` (~25 lines) and `cuda_serving_metadata()` as one helper call (~3 lines).
+1. `difflet/models/<model>/spec.py` (~25 lines) and `cuda_serving_metadata()` as one helper call (~3 lines); a `dit_config.py` if the model has none yet.
 2. `difflet/backends/cuda/<model>/transformer.py` (~50 lines): `build_module`, `load_weights`, `get_example_inputs`, `repeated_blocks`, `forward`.
-3. `difflet/backends/cuda/<model>/driver.py` (~60–200 lines): a subclass of one base driver (G14) with `experts`, the companion wiring the base does not guess (encoders with hidden-layer capture, a custom scheduler, an audio decoder), `generate`'s model-specific kwargs, `dit_input_contract`, `input_bundle_type`. A diffusers-pipeline model with no quirks writes about 60 lines.
+3. `difflet/backends/cuda/<model>/application.py` (~60–200 lines): a subclass of one base driver (G14) with `experts`, the companion wiring the base does not guess (encoders with hidden-layer capture, a custom scheduler, an audio decoder), `generate`'s model-specific kwargs, `dit_input_contract`, `input_bundle_type`. A diffusers-pipeline model with no quirks writes about 60 lines.
 4. The `backend == "cuda"` branch in `difflet/models/<model>/entry.py` (~15 lines, mostly its parallel refusals), the three two-line serving subclasses, the entry in `model_registry`'s CUDA table and in `main._get_orchestrator`'s spec lookup. If it uses a shared fusion or adds a swap: its consumer line in `difflet/ops/README.md`, its bit-exactness test against its own chain, and the swap's acceptance record.
 5. Tests: one line appending the spec to `ALL_SPECS`, and a `test_<model>_driver.py` for its own differences.
 6. GPU evidence: a parity run against diffusers and the smoke on `run` and `serve`, recorded in a status log.
@@ -525,12 +576,14 @@ About 250–400 lines of code where today's precedent is 850–1,150, and no new
 
 ## What a ROCm backend writes
 
-`difflet/backends/rocm/runtime.py` already exists with `requires_aot=False`, and `difflet/backends/registry.py` already registers and auto-detects `"rocm"`. Torch on ROCm exposes the CUDA API under the `cuda` device type, so the op implementations and the generic layer run unchanged once two things are done:
+Under the reviewer's layout, ROCm is a platform file and an ops package, nothing more:
 
-1. `difflet/backends/rocm/` gets `ops_impl/` re-exporting `difflet.backends.cuda.ops_impl.*` except `platform.py`, which it provides (device name, `distributed_backend_name()` still `"nccl"` through RCCL, an `sdpa_kernel_report` of its own, and `device_type()`), and `runtime.py` stops raising `NotImplementedError`.
-2. The fourteen code `"cuda"` literals on the generic path go through one accessor. Today they are the `torch.device("cuda")` defaults in `core/application_base.py` and the three applications, `backend="cuda"` in `cuda_pipeline_kwargs`, `placement="cuda"` and `"backend": "cuda"` in `cuda_resident.resident_runtime_plan`, the `current_backend() == "cuda"` branches in `cli/main.py` (`_on_cuda`, `_get_orchestrator`) and `serving/model_registry.py`, and the manifest's `"cuda": torch.version.cuda`. `platform.device_type()` is new (today's `platform.py` exports `hardware`, `get_platform_target`, `distributed_backend_name`, `sdpa_kernel_report`); the backend *name* is a parameter of `cuda_pipeline_kwargs` and the resident plan, set by whoever selected the spec, never read from `current_backend()` inside the generic layer (the CPU suite runs these paths with `DIFFLET_BACKEND=cpu`).
+1. `difflet/platforms/rocm.py` (a stub in this series) fills in `detect()` and the toolchain versions over the shared `GpuPlatform`, which already holds device count and memory, visible-device pinning, process-group initialisation (`"nccl"` is RCCL on ROCm) and the worker environment.
+2. `difflet/backends/rocm/ops_impl/` re-exports `difflet.backends.cuda.ops_impl.*`; torch on ROCm exposes the CUDA API under the `cuda` device type, so the implementations are the same code.
 
-Then ROCm registers the same three specs, the same drivers and the same orchestrators under its own backend name, and the tolerance table runs against it on the first ROCm host with its own measured bf16 column. None of this is scheduled; item 2 is listed so that no new `"cuda"` literal is added to the generic layer during this migration (a unit test greps for it, the way the import-hygiene test scans for vendor imports).
+The generic layer never names a backend: `backends/gpu/` reads `current_platform()` for the device, the process-group backend, the toolchain versions in the manifest and the capabilities record. Today's fourteen `"cuda"` literals on that path (the `torch.device("cuda")` defaults in `core/application_base.py` and the three applications, `backend="cuda"` in `cuda_pipeline_kwargs`, `placement="cuda"` and `"backend": "cuda"` in `cuda_resident.resident_runtime_plan`, the `current_backend() == "cuda"` branches in `cli/main.py` and `serving/model_registry.py`, the manifest's `"cuda": torch.version.cuda`) disappear in Phase 3 when `platforms/` lands; the scan test from Phase 1 keeps them from returning. The backend *name* a spec was selected for is still a parameter of the pipeline kwargs and the resident plan, never read from the process's own auto-detection, so the CPU unit suite keeps exercising these paths with `DIFFLET_BACKEND=cpu`.
+
+Then ROCm runs the same specs, the same application wiring and the same orchestrator, and the tolerance table runs against it on the first ROCm host with its own measured bf16 column. The platform stub lands in Phase 3 because the layout has a slot for it; filling it in is not scheduled.
 
 ---
 
@@ -551,29 +604,30 @@ The order is chosen so that each phase's diff is one subject and so that the saf
 ### Phase 2 — Levels 3 and 4: lifecycle into the base class
 
 - [ ] GPU, before any change: run `--torch-compile` twice per model on this build (cold and warm inductor cache), record whether the md5 is stable; set G5's compiled-mode rule accordingly in the status log.
-- [ ] Add `difflet/backends/cuda/core/compile.py::compile_blocks` with its test.
-- [ ] Move the shared `_prepare_module` body into `CudaApplicationBase` with the hooks `load_weights(module)` (default: the `get_state_dict` path), `repeated_blocks(module)`, `apply_load_time_swaps(module)`, `compile_dynamic`, `warmup_passes_when_compiled`, and `requires_grad_(False)` in the base; the three transformer subclasses shrink to their hooks. Flux's swap call moves into `apply_load_time_swaps`.
+- [ ] Create `difflet/backends/gpu/application.py` with `compile_blocks` and its test.
+- [ ] Move `CudaApplicationBase` there as `GpuComponent` (the old name re-exported from `difflet/backends/cuda/core/application_base.py`), and move the shared `_prepare_module` body into it with the hooks `load_weights(module)` (default: the `get_state_dict` path), `repeated_blocks(module)`, `apply_load_time_swaps(module)`, `compile_dynamic`, `warmup_passes_when_compiled`, and `requires_grad_(False)` in the base; the three transformer subclasses shrink to their hooks. Flux's swap call moves into `apply_load_time_swaps`.
 - [ ] Existing transformer, base and application tests pass unchanged; add the parametrised compile-declaration test, and the CPU part of the `proj_out` swap's acceptance (it reports the swap; the swapped forward ran).
 - [ ] GPU: byte-identity per model (`run`, seed 0) against the Phase 1 build; eager, and compiled under the rule set above.
 - [ ] GPU: no slowdown. The per-model transformer benches (`scripts/cuda_bench_dit.py`, `scripts/cuda_bench_flux_dit.py`, `scripts/cuda_bench_wan_dit.py`), eager and compiled, old and new builds alternated A-B-B-A after warm-up, at least five samples each; the acceptable band is written in the status log before the run, and the result with its spread after it. Compile time is recorded apart from steady-state time.
 - [ ] GPU: the `proj_out` swap's block-parity check against diffusers' block in bf16 at Flux's shapes, recorded in the ops index whatever it shows. It changes nothing by default (the swap stays off) and answers the reviewer's question about the 10 dB shift.
 
-### Phase 3 — The spec and the CLI move
+### Phase 3 — Platforms, the spec and the CLI move
 
-- [ ] Add `difflet/common/cuda_spec.py` (`CudaModelSpec`, `PromptBudget`, `CudaModelDriver`) and the three spec instances in `difflet/common/registry/<model>.py`; `difflet/backends/cuda/core/pipeline_kwargs.py` takes `cuda_pipeline_kwargs` from the CLI module with the backend name as a parameter; `qwen_image_cuda.py` re-exports it.
-- [ ] Move `CudaOneProcessOrchestrator` to `difflet/cli/orchestrators/cuda.py`, spec-driven; the three `<model>_cuda.py` CLI files become the spec-bound subclasses plus re-exports of their constants; `main._get_orchestrator` still returns those three classes. Each spec's refusal lists reproduce today's per-model refusals exactly, including that Qwen-Image's application does not refuse `shapes=` (G10).
-- [ ] Existing CLI tests pass through the re-exports; add `tests/unit/cli/test_cuda_orchestrator.py` parametrised over `ALL_SPECS`; add `difflet/cli/orchestrators/cuda.py` and `difflet/common/cuda_spec.py` to `SCANNED`.
+- [ ] Add `difflet/platforms/` with `Platform`, `PlatformCapabilities`, `current_platform()` and auto-detection; move the existing `backends/<b>/runtime.py` runtimes and `ops_impl/platform.py` facts into `platforms/{cpu,trainium,tpu,cuda}.py` unchanged, with `GpuPlatform` in `platforms/gpu.py` and a `rocm.py` stub; `backends/registry.py` and the old modules re-export. The Trainium and TPU unit tests are the gate for the move; the CLI's `torch_compile` check, the serving refusal lists and the resident plan's device slot read the capabilities record.
+- [ ] Add `difflet/models/spec.py` (`ModelSpec`, `PromptBudget`, `ModelDriver`, spec lookup) and `difflet/models/{qwen_image,flux,wan}/spec.py`; a subprocess test imports each `difflet.models.<model>.spec` with torch blocked. `difflet/backends/gpu/policy.py` takes `cuda_pipeline_kwargs` from the CLI module (the backend name a parameter) and the parallel-mode refusals; `qwen_image_cuda.py` re-exports it.
+- [ ] Move `CudaOneProcessOrchestrator` to `difflet/backends/gpu/cli.py` as `GpuOrchestrator`, spec-driven; the three `<model>_cuda.py` CLI files become the spec-bound subclasses plus re-exports of their constants; `main._get_orchestrator` still returns those three classes. Each spec's refusal lists reproduce today's per-model refusals exactly, including that Qwen-Image's application does not refuse `shapes=` (G10).
+- [ ] Existing CLI tests pass through the re-exports; add `tests/unit/cli/test_cuda_orchestrator.py` parametrised over `ALL_SPECS`; add `difflet/backends/gpu/cli.py` and `difflet/models/spec.py` to `SCANNED`.
 - [ ] GPU: byte-identity per model on `run`, including Wan `--cfg-parallel` and the data-parallel router path.
 
 ### Phase 4 — The generic serving adapter
 
-- [ ] Add `difflet/serving/orchestrators/cuda.py` (absorbing `cuda_resident.py`, which re-exports); the three `<model>_cuda.py` serving files become the spec-bound subclasses the registry needs; `cuda_serving_metadata()` becomes the helper call in `difflet/common/registry/base.py`.
+- [ ] Add `difflet/backends/gpu/serving.py` (absorbing `cuda_resident.py`, which re-exports); the three `<model>_cuda.py` serving files become the spec-bound subclasses the registry needs; `cuda_serving_metadata()` becomes the helper call in `difflet/common/registry/base.py`.
 - [ ] Existing serving tests pass; add `tests/unit/serving/test_cuda_serving.py` over `ALL_SPECS`; `test_model_registry_cuda.py` asserts the metadata equals the spec; add the module to `SCANNED`; the torch-blocked subprocess test still passes.
 - [ ] GPU: byte-identity per model on `serve` (one request each, and `--dp-degree 2` for one model) against Phase 3.
 
-### Phase 5 — The generic application and the drivers
+### Phase 5 — The generic application and the per-model wiring
 
-- [ ] Add `core/application.py::CudaApplication`; move the three drivers to `difflet/backends/cuda/<model>/driver.py`; `difflet/models/<model>/cuda_application.py` becomes a re-export; `entry.py` constructs `CudaApplication(SPEC, …)`.
+- [ ] Add `GpuApplication` and the two base drivers to `difflet/backends/gpu/application.py`; move the three drivers to `difflet/backends/cuda/<model>/application.py`; `difflet/models/<model>/cuda_application.py` becomes a re-export; `entry.py` constructs `GpuApplication(SPEC, …)`.
 - [ ] Existing application tests pass through the re-exports; add the parametrised application test and the three driver test files (moved tests, not new behaviour).
 - [ ] GPU: byte-identity per model on `run` and `serve`; the three parity harnesses against diffusers, unchanged numbers in the status log; the A-B-B-A timing check of Phase 2 repeated on whole `run` requests.
 
@@ -582,6 +636,11 @@ The order is chosen so that each phase's diff is one subject and so that the saf
 - [ ] One task per deleted file, each with its `SCANNED` edit and the per-model tests it retires in the same commit: `difflet/models/<model>/cuda_application.py`, `difflet/cli/orchestrators/<model>_cuda.py`, `difflet/serving/orchestrators/<model>_cuda.py` (the spec-bound serving subclasses move next to the generic adapter), `cuda_resident.py`.
 - [ ] `main._get_orchestrator` collapses to the generic class with `test_cli_main_cuda.py` updated in the same commit; DEVELOPER.md's backend section updated.
 - [ ] CPU suite green; the CUDA test count is recorded before and after against the 252 baseline so nothing was dropped silently.
+
+### Phase 6b — Trainium hygiene from the layout (own PR, any time after Phase 1)
+
+- [ ] Move `difflet/models/flux/trainium_backbone.py` to `difflet/backends/trainium/flux/backbone.py` with a re-export at the old path; its twelve importers (four in `difflet/`, five tests, three scripts) are switched in the same PR and the re-export is deleted once they are. CPU unit suite green is the gate; the Trainium graph is untouched because the module's code does not change.
+- [ ] Make `difflet/models/ltx_2/__init__.py` and `difflet/models/minimax_h3/__init__.py` import lazily, so a future `spec.py` in those packages is torch-free; the subprocess test from Phase 3 then covers them.
 
 ### Phase 7 — Level 2, conditional
 
@@ -604,7 +663,7 @@ The order is chosen so that each phase's diff is one subject and so that the saf
 |---|---|---|
 | **A refactor changes numerics without failing a test.** The parity gate against diffusers allows bf16 noise, so a one-ulp regression hides inside it. | Phases 2–5 | G5: byte-identical output per model at seed 0 before and after each phase, on `run` and `serve`. The recorded md5s from the current stack are the first reference. |
 | **Compiled mode may not be byte-stable at all**, so a compiled gate would fail or flake with zero regression. | Phase 2 | Measured first (Phase 2's first task); the gate rule is written down before the code moves. |
-| **The serving parent starts importing torch** through a spec placed under the backend package. | Phase 3 | G3 puts the spec in the torch-free registry layer; the subprocess test from Phase 1 fails the build if any serving-side import pulls torch. |
+| **The serving parent starts importing torch** through a model package whose `__init__` imports torch-bound modules. | Phase 3 | The four packages that get a spec in this series import nothing at package level; LTX-2 and MiniMax-H3 make theirs lazy in Phase 6b before they get one; the subprocess tests from Phases 1 and 3 fail the build if any serving-side or spec import pulls torch. |
 | **The spec grows into a hook bag.** Each new model adds "just one more optional callable". | Phase 3 onward | G3's rule (two generic readers or it is the driver's), enforced in review; the spec stays a frozen dataclass of data plus one driver import string. |
 | **The generic layer is shaped by three models and breaks on the fourth.** | Phases 3–5 | The spec and the two base drivers were designed against all seven registered models ("The other four models"); HunyuanVideo is scheduled right after Phase 6 as the first test, and the acceptance for that PR is that nothing generic changes. |
 | **Residency assumptions.** Everything-resident-on-one-GPU is true for the three models and false for MiniMax-H3. | first H3 PR | G15 puts `gpus_per_replica` and `encoder_residency` in the spec from Phase 3, read by the resident plan, the router and `load`, so the H3 PR adds data, not a code path. |
@@ -624,15 +683,15 @@ The order is chosen so that each phase's diff is one subject and so that the saf
 
 ## Open questions, pending the reviewer
 
-None of these is decided. Each is worded so that "yes" takes the recommended answer, and the design above is written on the recommended answers so that it reads as one piece; a different answer changes the section it names. Question 7 is the one most likely to need the reviewer's own view, since it concerns the layout the reviewer's comment cited.
+Questions 1 and 7 were answered by the reviewer's layout on 2026-10-22 and the design is updated to it. The other seven are not decided. Each is worded so that "yes" takes the recommended answer, and the design above is written on the recommended answers so that it reads as one piece; a different answer changes the section it names.
 
-1. **Spec placement in the torch-free registry layer** (`difflet/common/cuda_spec.py` + instances in `difflet/common/registry/<model>.py`), as G3 says, rather than under `difflet/backends/cuda/<model>/`?
+1. *Answered by the reviewer's layout, 2026-10-22:* specs live in the model packages, `difflet/models/spec.py` and `difflet/models/<model>/spec.py`, torch-free (G3, G16).
 2. **Base on `main` after the stack merges**, with Phase 1 (no production diff) openable against the stack's top in the meantime?
 3. **Level 2 stays out of this series** (Phase 7 is written down with its preconditions and is cut if the measured win is absent)?
 4. **One PR per phase** (six likely, seven at most), each landable alone, because Phases 2–5 each need their own GPU byte-identity run?
 5. **Make Qwen-Image's application refuse `shapes=` like Flux and Wan in its own PR after Phase 5**, not inside the migration (G10)?
 6. **Keep `fuse_proj_out`, `timestep_dtype` and `enable_transformer_2` programmatic-only** (no new CLI flags or serving profile fields in this series)?
-7. **Keep Difflet's layout of model under backend** (`difflet/backends/cuda/<model>/`, as `trainium/` and `tpu/` already do) rather than vLLM's newer vendor-under-model layout (`models/<model>/{nvidia,amd,common}/`, cited from vllm-project/vllm#42770 through the RFC)? Switching would move the Trainium and TPU per-model code too, which is outside this series.
+7. *Answered by the reviewer's layout, 2026-10-22:* model under backend stays (`difflet/backends/cuda/<model>/`); the backend-generic flow is `difflet/backends/gpu/` and the per-backend facts are `difflet/platforms/` (G16).
 8. **Bring the other four models in the order HunyuanVideo, LTX-2, MiniMax-H3, HunyuanVideo 1.5**, each after Phase 6 and after its own preconditions, with HunyuanVideo's PR as the acceptance test that nothing generic changes?
 9. **MiniMax-H3 on CUDA starts with `release_after_encode` on one GPU** rather than two GPUs per replica (G15 supports both; one card is what the Trainium path proves and what the data-parallel router assumes today)?
 
@@ -645,4 +704,5 @@ None of these is decided. Each is worded so that "yes" takes the recommended ans
 | 2026-10-21 | Design | Draft on a branch cut from the top of the CUDA stack; duplication measured at `c45d2059`; CPU baseline 2819 passed / 176 skipped; CUDA test census 252. Stress-tested against the code before commit: sixteen findings folded in (two Hub-id sets, the torch-free serving parent, the test census, Phase 3 vs the CLI routing test, the base lifecycle's `get_state_dict` path, compiled-mode stability unmeasured). | This document. |
 | 2026-10-21 | Design | Revised against vLLM-Omni RFC #7382, which the reviewer cited: rope variants explicit and per-consumer exactness at Level 2 (the earlier "bit-identical by construction" claim did not hold); the model decides whether to use a fusion (G12); fast-path assertions (G11); acceptance for a swap at Level 3; per-op contracts and the ops index (G7); behaviour changes and timing checks kept apart from moves (G10, Phases 2 and 5); open question 7 on directory layout. | This document; vllm-project/vllm-omni#7382. |
 | 2026-10-21 | Design | Extended from the three CUDA models to all seven registered models: survey table of HunyuanVideo, HunyuanVideo 1.5, MiniMax-H3 and LTX-2; G13 (any eager `nn.Module`, `difflet.ops` only for levels 1–2), G14 (two base drivers), G15 (residency in the spec); spec fields for multiple prompt budgets, guidance kind, audio, shape rules, batch and residency; `_repeated_blocks` as the compile hook's default; the Level 2 variant table over seven models; the order and preconditions for bringing the four; open questions 8 and 9. | This document; `difflet/registry.py`; the model packages and Trainium backends named in the table. |
-| 2026-10-21 | Design | Complete as a design; the nine questions are open and go to the reviewer with their recommended answers. Nothing is pushed. | This document. |
+| 2026-10-21 | Design | Complete as a design; the nine questions are open and go to the reviewer with their recommended answers. Pushed as ai-decentralized/Difflet#109. | This document. |
+| 2026-10-22 | Design | The reviewer gave the directory layout on the stack's top PR: `difflet/platforms/` for per-backend facts, `difflet/backends/gpu/` as the generic flow shared by CUDA and ROCm, specs in the model packages, per-model wiring under `backends/cuda/<model>/`, Flux's Trainium wrapper moved under `backends/trainium/`. Adopted as given: G2 superseded by G16, G3 relocated, questions 1 and 7 answered, Phase 3 gains the platforms move, Phase 6b added. Seven questions remain open. | ai-decentralized/Difflet#106, the reviewer's comment of 2026-10-22. |
