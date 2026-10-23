@@ -1102,3 +1102,37 @@ from arithmetic, withdrawn on a second model, and restored by ablation. The
 first two were each one inference from one or two data points. Only the
 ablation, which changes one variable and holds the rest, could separate the
 kernel from the runtime.
+
+### 2026-10-22 — splash_sdpa in the model: 70% slower than SDPA
+
+The ablation left one corner open: torch_tpu with a fused kernel. TorchTPU's
+own fused kernel is `torch.tpu.ops.splash_sdpa`, so `attention.py` gained an
+opt-in path (`DIFFLET_TPU_SPLASH=1`) and Qwen-Image ran through it.
+
+It applied to every joint-attention call — logged
+`splash USED q=(6, 5120, 128) k=(6, 5120, 128)` — and 5120 being a block
+multiple meant no key padding, so no mask was needed and none was missing.
+
+| | per-step |
+|---|---:|
+| A torch_xla, Pallas flash | 0.276 s |
+| C torch_tpu, SDPA | 0.333 s |
+| **F torch_tpu, splash** | **0.567 s** |
+
+Splash is 70% slower than torch_tpu's SDPA in the model, as it was in
+isolation. **torch_tpu's SDPA is the fastest attention it has, and it trails
+torch_xla's Pallas kernel by 21%.** Nothing TorchTPU 0.2.0 ships closes that.
+
+The path stays, off by default, for two reasons: the next TorchTPU release can
+be re-measured with one variable instead of new code, and it encodes the two
+correctness constraints that make splash usable at all — `is_causal=False`
+passed explicitly (its default is causal), and refusal of any key length that
+would need padding (it has no segment ids to mask it).
+
+**The way to parity is torch_xla's own kernel, not TorchTPU's.** The Pallas
+flash kernel torch_xla calls is a JAX kernel, and TorchTPU's public API has
+`torch.tpu.pallas.jax_op` for running JAX/Pallas kernels on torch tensors. That
+is the next experiment: wrap the same kernel, keep the existing
+segment-id padding mask, and measure whether torch_tpu then matches or beats
+0.276 s. Its non-attention path already does as well as torch_xla's, so the
+whole gap should be in reach.

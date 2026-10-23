@@ -193,6 +193,84 @@ def _should_flash(q, k, causal: bool) -> bool:
     return _flash_kernel() is not None
 
 
+#: Opt-in, while it is being measured: TorchTPU's splash kernel in place of SDPA.
+SPLASH_ENV = "DIFFLET_TPU_SPLASH"
+
+#: Shapes already reported, so the eligibility line prints once per shape.
+_SPLASH_REPORTED: set = set()
+
+
+def _should_splash(q, k, causal: bool) -> bool:
+    """Whether to route this call through ``torch.tpu.ops.splash_sdpa``.
+
+    **Measured, and leave it off.** Inside Qwen-Image at tp=4 — splash applied
+    to every joint-attention call, q = k = (6, 5120, 128) — per-step was 0.567 s
+    against 0.333 s on SDPA, 70% slower, and against 0.276 s for torch_xla's
+    Pallas kernel. That matches the isolated measurement (0.68x SDPA at 4096
+    tokens). torch_tpu's own SDPA is the fastest attention it has today; this
+    path exists so the next TorchTPU release can be re-measured with one
+    environment variable rather than new code.
+
+    The constraints are correctness, not speed:
+
+    - **Never causal**, and the call below passes ``is_causal=False`` itself.
+      splash_sdpa *defaults* to causal while describing itself as a drop-in for
+      ``F.scaled_dot_product_attention``, whose default is not; left alone it
+      returns cosine 0.40 against SDPA without a word.
+    - **The key length must already be a block multiple.** splash has no
+      segment ids, so padded keys could not be masked out of the softmax — the
+      exact error ``_flash_attention`` documents at Wan's 4680 (5.4e-2 relative
+      error). Padded *queries* are harmless and are padded below.
+    """
+    from difflet.backends.tpu.ops_impl import device_runtime
+
+    if device_runtime.runtime_name() != device_runtime.TORCH_TPU:
+        return False
+    if os.environ.get(SPLASH_ENV, "0").strip().lower() not in ("1", "true", "yes"):
+        return False
+
+    head_dim = int(q.shape[-1])
+    keys = int(k.shape[-2])
+    reason = None
+    if causal:
+        reason = "causal"
+    elif head_dim != int(k.shape[-1]) or head_dim % 128:
+        reason = "head_dim %d" % head_dim
+    elif keys % FLASH_BLOCK:
+        reason = "key length %d is not a multiple of %d and splash cannot mask padding" % (
+            keys, FLASH_BLOCK)
+    elif _leading_size(q) * int(q.shape[-2]) * keys < FLASH_MIN_SCORE_ELEMENTS:
+        reason = "below the fused-kernel threshold"
+
+    shape = (tuple(q.shape), tuple(k.shape))
+    if shape not in _SPLASH_REPORTED:
+        _SPLASH_REPORTED.add(shape)
+        # print, not logger: the serving worker is a spawned process with no
+        # logging handler.
+        print("[difflet tpu] splash %s q=%s k=%s"
+              % ("USED" if reason is None else "skipped (%s)" % reason, shape[0], shape[1]),
+              flush=True)
+    return reason is None
+
+
+def _splash_attention(q, k, v, *, scale: float):
+    """Fused attention through TorchTPU's splash kernel."""
+    import torch_tpu  # noqa: F401 — registers torch.tpu.ops
+
+    leading = _leading_size(q)
+    seq_q = int(q.shape[-2])
+    pad_q = _align(seq_q)
+    q4 = q.reshape(1, leading, seq_q, q.shape[-1])
+    k4 = k.reshape(1, leading, int(k.shape[-2]), k.shape[-1])
+    v4 = v.reshape(1, leading, int(v.shape[-2]), v.shape[-1])
+    if pad_q != seq_q:
+        # Extra query rows cost compute and are discarded; they never enter
+        # another row's softmax, so no mask is needed for them.
+        q4 = F.pad(q4, (0, 0, 0, pad_q - seq_q))
+    out = torch.tpu.ops.splash_sdpa(q4, k4, v4, scale=float(scale), is_causal=False)
+    return out[:, :, :seq_q, :].reshape(q.shape[:-1] + (v.shape[-1],))
+
+
 def _flash_attention(q, k, v, *, scale: float):
     """Fused attention, padding the sequence to the kernel's block size.
 
@@ -324,6 +402,8 @@ def attention(
         # masked call; see _should_flash.
         if _should_flash(q, k, causal):
             return _flash_attention(q, k, v, scale=scale)
+        if _should_splash(q, k, causal):
+            return _splash_attention(q, k, v, scale=scale)
         if _should_chunk(q, k):
             return _chunked_attention(q, k, v, scale=scale, causal=causal)
         return F.scaled_dot_product_attention(q, k, v, is_causal=causal, scale=scale)
