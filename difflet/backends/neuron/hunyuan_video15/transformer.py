@@ -16,7 +16,10 @@ with the output gathered; heads split 16/tp; the token refiner likewise), so the
 shards diffusers' checkpoint unchanged. Context parallelism splits the image tokens across the CP group
 around the blocks, the text stream (729 + 256 + 1000 tokens) replicated; attention by Ulysses (an
 all-to-all of heads), ring (image K/V blocks rotate; the text partial masks its padding by count) or
-gather_kv (image K/V all-gathered, one key-bounded attention).
+gather_kv (image K/V all-gathered, one key-bounded attention). Sequence parallelism (Megatron style,
+with TP, not with CP) keeps the image stream sequence-sharded across the TP group between the
+sub-layers: the attention and image-MLP inputs are all-gathered, their row-parallel outputs
+reduce-scattered (bias added once after it); the text stream stays replicated.
 
 CFG parallelism (the checkpoint's guider runs classifier-free guidance, scale 6.0, on every step):
 with ``cfg_parallel_enabled`` the cores form two groups along the mesh's cfg axis; ``forward`` takes
@@ -37,6 +40,7 @@ from __future__ import annotations
 
 import json
 import os
+import types
 
 import torch
 
@@ -61,6 +65,7 @@ class NeuronHunyuanVideo15TransformerApplication(TorchNeuronApplicationBase):
         self.cp = int(getattr(self.parallel, "cp_degree", 1) or 1)
         self.cfg = 2 if bool(getattr(self.parallel, "cfg_parallel_enabled", False)) else 1
         self.cp_mode = getattr(self.parallel, "cp_mode", "ulysses") if self.cp > 1 else None
+        self.sp = bool(getattr(self.parallel, "sp_enabled", False))
         if self.cfg > 1 and int(batch_size) != 1:
             raise ValueError("CFG parallelism runs one branch per group: batch_size must be 1")
         if self.cp_mode not in (None, "ulysses", "ring", "gather_kv"):
@@ -82,6 +87,12 @@ class NeuronHunyuanVideo15TransformerApplication(TorchNeuronApplicationBase):
         heads = int(self.model_config["num_attention_heads"])
         if heads % self.tp:
             raise ValueError(f"num_attention_heads={heads} must divide by tp={self.tp}")
+        if self.sp:
+            if self.tp == 1 or self.cp > 1:
+                raise ValueError("sequence parallelism needs tp > 1 and no context parallelism")
+            if self.num_image_tokens % self.tp:
+                raise ValueError(f"{self.num_image_tokens} image tokens do not divide by tp={self.tp} for "
+                                 "sequence parallelism")
         if self.cp_mode == "ulysses":
             if (heads // self.tp) % self.cp:
                 raise ValueError(f"Ulysses needs the {heads // self.tp} heads per TP rank divisible "
@@ -95,13 +106,15 @@ class NeuronHunyuanVideo15TransformerApplication(TorchNeuronApplicationBase):
     def build_module(self) -> torch.nn.Module:
         model = _tensor_signature_model()(**self.model_config)
         if self.tp > 1:
-            _install_tensor_parallel(model, self.tp)
+            _install_tensor_parallel(model, self.tp, sp=self.sp)
         if self.cp > 1:
             _install_context_parallel(model, self.num_image_tokens, self.cp, self.cp_mode)
         else:
-            processor = _JointBoundedProcessor()
+            processor = _JointBoundedProcessor(sp=self.sp)
             for block in model.transformer_blocks:
                 block.attn.set_processor(processor)
+            if self.sp:
+                _install_sequence_parallel(model, self.num_image_tokens, self.tp)
         return model
 
     def checkpoint_key(self, name: str) -> str:
@@ -213,21 +226,37 @@ def _joint_qkv(attn, hidden_states, encoder_hidden_states, image_rotary_emb):
 
 
 def _joint_out(attn, img_out, txt_out, dtype):
-    """``[B, H, S, d]`` attention outputs through diffusers' output projections."""
+    """``[B, H, S, d]`` attention outputs through diffusers' output projections. Under SP the image
+    projection returns ``(partial, bias)`` (no reduce): reduce-scatter to this rank's sequence shard,
+    then the bias once."""
+    from difflet.backends.neuron.ops_impl import collectives
+
     img_out = img_out.transpose(1, 2).flatten(2, 3).to(dtype)
     txt_out = txt_out.transpose(1, 2).flatten(2, 3).to(dtype)
-    return attn.to_out[1](attn.to_out[0](img_out)), attn.to_add_out(txt_out)
+    projected = attn.to_out[0](img_out)
+    if isinstance(projected, tuple):
+        partial, bias = projected
+        projected = collectives.reduce_scatter_to_sequence_parallel_region(partial, dim=1)
+        projected = projected if bias is None else projected + bias
+    return attn.to_out[1](projected), attn.to_add_out(txt_out)
 
 
 class _JointBoundedProcessor:
     """``HunyuanVideo15AttnProcessor2_0`` with the text padding as a key count instead of a dense
     symmetric mask: queries attend to keys ``[0, N + valid text)`` of the joint ``[image || text]``
-    sequence (attention_cte's key-bounded flash kernel on the device)."""
+    sequence (attention_cte's key-bounded flash kernel on the device). Under SP the image stream
+    arrives sequence-sharded and is all-gathered first (rotary over the full image sequence)."""
+
+    def __init__(self, sp: bool = False) -> None:
+        self.sp = sp
 
     def __call__(self, attn, hidden_states, encoder_hidden_states=None, attention_mask=None,
                  image_rotary_emb=None):
+        from difflet.backends.neuron.ops_impl import collectives
         from difflet.backends.neuron.ops_impl.attention import attention
 
+        if self.sp:
+            hidden_states = collectives.gather_from_sequence_parallel_region(hidden_states.contiguous(), dim=1)
         q, k, v, eq, ek, ev = _joint_qkv(attn, hidden_states, encoder_hidden_states, image_rotary_emb)
         n = q.shape[2]
         b, h, s = q.shape[0], q.shape[1], n + eq.shape[2]
@@ -306,7 +335,47 @@ class _JointUlyssesProcessor:
         return _joint_out(attn, img_out, txt_out, hidden_states.dtype)
 
 
-def _install_tensor_parallel(model, tp: int) -> None:
+def _sp_mlp_forward(ff, hidden_states):
+    """diffusers' FeedForward under SP: all-gather the sequence, run its layers, reduce-scatter the
+    row-parallel output (``(partial, bias)``) back to a sequence shard, then the bias once."""
+    from difflet.backends.neuron.ops_impl import collectives
+
+    x = collectives.gather_from_sequence_parallel_region(hidden_states.contiguous(), dim=1)
+    for layer in ff.net:
+        x = layer(x)
+        if isinstance(x, tuple):
+            partial, bias = x
+            x = collectives.reduce_scatter_to_sequence_parallel_region(partial, dim=1)
+            x = x if bias is None else x + bias
+    return x
+
+
+def _install_sequence_parallel(model, num_image_tokens: int, tp: int) -> None:
+    """The image stream sequence-sharded across the TP group between the blocks: this rank's ``N/tp``
+    tokens before block 0, all-gathered after the last block. The rotary table stays whole (the
+    attention all-gathers the image sequence before applying it)."""
+    from difflet.backends.neuron.ops_impl import collectives
+    from difflet.backends.neuron.ops_impl.parallel_mesh import get_axis_rank
+
+    n, local = int(num_image_tokens), int(num_image_tokens) // tp
+    start = get_axis_rank("tp") * local
+
+    def before(block, args):
+        hidden_states, *rest = args
+        if hidden_states.shape[1] == n:
+            hidden_states = hidden_states.narrow(1, start, local).contiguous()
+        return (hidden_states, *rest)
+
+    def after(block, args, output):
+        hidden_states, encoder_hidden_states = output
+        return collectives.gather_from_sequence_parallel_region(hidden_states.contiguous(), dim=1), \
+            encoder_hidden_states
+
+    model.transformer_blocks[0].register_forward_pre_hook(before)
+    model.transformer_blocks[-1].register_forward_hook(after)
+
+
+def _install_tensor_parallel(model, tp: int, sp: bool = False) -> None:
     """diffusers' linears -> the backend's column/row-parallel layers, same attribute names (so the
     loader's ``_difflet_shard`` declarations shard the checkpoint): Megatron layout per block and per
     token-refiner block; modulation linears column-parallel with the output gathered; heads / tp."""
@@ -316,26 +385,31 @@ def _install_tensor_parallel(model, tp: int) -> None:
         return ColumnParallelLinear(lin.in_features, lin.out_features, bias=lin.bias is not None,
                                     gather_output=gather, dtype=lin.weight.dtype, device=lin.weight.device)
 
-    def row(lin):
+    def row(lin, sequence_parallel=False):
+        # Under SP the caller reduce-scatters: no all-reduce here, and the bias handed back to add once.
         return RowParallelLinear(lin.in_features, lin.out_features, bias=lin.bias is not None,
-                                 input_is_parallel=True, dtype=lin.weight.dtype, device=lin.weight.device)
+                                 input_is_parallel=True, reduce_output=not sequence_parallel,
+                                 skip_bias_add=sequence_parallel, dtype=lin.weight.dtype,
+                                 device=lin.weight.device)
 
-    def attention(attn, joint):
+    def attention(attn, joint, sequence_parallel=False):
         names = ("to_q", "to_k", "to_v") + (("add_q_proj", "add_k_proj", "add_v_proj") if joint else ())
         for name in names:
             setattr(attn, name, col(getattr(attn, name)))
-        attn.to_out[0] = row(attn.to_out[0])
+        attn.to_out[0] = row(attn.to_out[0], sequence_parallel)
         if joint:
             attn.to_add_out = row(attn.to_add_out)
         attn.heads //= tp
 
-    def mlp(ff):
+    def mlp(ff, sequence_parallel=False):
         ff.net[0].proj = col(ff.net[0].proj)
-        ff.net[2] = row(ff.net[2])
+        ff.net[2] = row(ff.net[2], sequence_parallel)
+        if sequence_parallel:
+            ff.forward = types.MethodType(_sp_mlp_forward, ff)
 
     for block in model.transformer_blocks:
-        attention(block.attn, joint=True)
-        mlp(block.ff)
+        attention(block.attn, joint=True, sequence_parallel=sp)
+        mlp(block.ff, sequence_parallel=sp)  # the image MLP; the text stream stays replicated
         mlp(block.ff_context)
         block.norm1.linear = col(block.norm1.linear, gather=True)
         block.norm1_context.linear = col(block.norm1_context.linear, gather=True)

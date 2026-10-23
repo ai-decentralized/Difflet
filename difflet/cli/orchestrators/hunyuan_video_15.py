@@ -43,17 +43,14 @@ from difflet.cli.orchestrators.torchrun import (
 _HF_MODEL_ID = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
 _MODEL_TYPE = "hunyuan_video_15"
 _CLI_NAME = "hunyuan-video-1.5"
-_RUNS = "tensor, context and CFG parallelism, and TeaCache"
+_RUNS = "tensor, sequence, context and CFG parallelism, and TeaCache"
 _FPS = 24
 _DEFAULT_STEPS = 50
 _NKI_TRACE_OPT_IN = "DIFFLET_NKI_TRACE_CACHE"
 
 
 def _unsupported(args: argparse.Namespace) -> list[str]:
-    found = [f for f in torchrun_unsupported_options(args) if not f.startswith("--teacache")]  # all run
-    if getattr(args, "sp_enabled", False):
-        found.append("--sp")
-    return found
+    return [f for f in torchrun_unsupported_options(args) if not f.startswith("--teacache")]  # all run
 
 
 def _layout(args: argparse.Namespace) -> tuple[int, bool, int]:
@@ -122,8 +119,10 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
                  "--seed", str(42 if getattr(a, "seed", None) is None else a.seed)]
         if cfg:
             parts.append("--cfg-parallel")
+        if getattr(a, "sp_enabled", False):
+            parts.append("--sp")
         if cp > 1:
-            parts += ["--cp-mode", "ulysses"]
+            parts += ["--cp-mode", str(getattr(a, "cp_mode", None) or "ulysses")]
         for flag, name in (("--prompt", "prompt"), ("--output", "output"), ("--guidance-scale", "guidance_scale"),
                            ("--teacache-cadence", "teacache_cadence"),
                            ("--teacache-online-delta", "teacache_online_delta"),
@@ -189,7 +188,8 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
         cp = int(getattr(args, "cp_degree", None) or 1)
         parallel = DiffletParallelConfig(tp_degree=int(args.tp_degree or 1), cp_degree=cp,
                                          cfg_parallel_enabled=bool(getattr(args, "cfg_parallel", False)),
-                                         cp_mode="ulysses" if cp > 1 else "gather_kv")
+                                         sp_enabled=bool(getattr(args, "sp_enabled", False)),
+                                         cp_mode=(getattr(args, "cp_mode", None) or "ulysses") if cp > 1 else "gather_kv")
         get_backend("neuron").prepare_runtime(parallel)
         rank0 = not dist.is_initialized() or dist.get_rank() == 0
         started = time.perf_counter()

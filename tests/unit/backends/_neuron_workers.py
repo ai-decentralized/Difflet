@@ -1371,3 +1371,16 @@ def hv15_cp_mode_worker(rank: int, world_size: int, model_dir: str, shape: dict,
         dtype=torch.float32, exec_mode="eager", device="cpu", **shape)
     app.load()
     return app(**inputs)[0].tolist()
+
+
+def hv15_sp_worker(rank: int, world_size: int, model_dir: str, shape: dict, inputs: dict) -> list:
+    """HunyuanVideo 1.5's DiT at TP=world with sequence parallelism, on CPU."""
+    from difflet.backends.neuron.hunyuan_video15.transformer import NeuronHunyuanVideo15TransformerApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+
+    app = NeuronHunyuanVideo15TransformerApplication(
+        model_path=model_dir, parallel=DiffletParallelConfig(tp_degree=world_size, sp_enabled=True),
+        dtype=torch.float32, exec_mode="eager", device="cpu", **shape)
+    app.load()
+    assert app.load_report == {"missing": [], "unexpected": []}
+    return app(**inputs)[0].tolist()

@@ -14,7 +14,7 @@ import difflet.cli.orchestrators.hunyuan_video_15 as hv15
 
 
 def _args(**over):
-    base = dict(model_id=hv15._HF_MODEL_ID, tp_degree=None, cp_degree=None, cfg_parallel=False, height=None,
+    base = dict(model_id=hv15._HF_MODEL_ID, tp_degree=None, cp_degree=None, cp_mode=None, cfg_parallel=False, height=None,
                 width=None, num_frames=None, steps=None, seed=42, prompt="a cat", output="/tmp/o.mp4",
                 guidance_scale=None, cache_dir=None, revision=None, exec_mode=None, work_dir=None,
                 keep_work_dir=False, sp_enabled=False, requests_dir=None, requests=None, dp=None,
@@ -71,11 +71,13 @@ def test_compile_skips_the_encoder(launches, tmp_path):
     assert [s for s, _, _ in launches] == ["transformer", "vae"]
 
 
-@pytest.mark.parametrize("over", [dict(sp_enabled=True)])
-def test_refuses_what_it_does_not_run(launches, tmp_path, over):
-    with pytest.raises(SystemExit):
-        hv15.HunyuanVideo15Orchestrator(_args(work_dir=str(tmp_path / "w"), **over)).generate()
-    assert launches == []
+def test_sp_and_cp_mode_reach_the_transformer_stage(launches, tmp_path):
+    hv15.HunyuanVideo15Orchestrator(_args(work_dir=str(tmp_path / "w"), tp_degree=2, sp_enabled=True)).generate()
+    assert "--sp" in launches[1][2]
+    launches.clear()
+    hv15.HunyuanVideo15Orchestrator(_args(work_dir=str(tmp_path / "w"), tp_degree=1, cp_degree=4,
+                                          cp_mode="ring")).generate()
+    assert _flag(launches[1][2], "--cp-mode") == "ring"
 
 
 def test_aot_backend_is_not_implemented(monkeypatch):

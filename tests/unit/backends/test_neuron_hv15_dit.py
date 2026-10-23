@@ -182,3 +182,32 @@ def test_ring_and_gather_kv_context_parallel_match_diffusers(tiny, tp, cp, mode)
     reference = _reference(tiny)
     for out in run_ranks(hv15_cp_mode_worker, tiny, SHAPE, _inputs(), tp, cp, mode, world_size=tp * cp):
         torch.testing.assert_close(torch.tensor(out), reference, atol=1e-4, rtol=1e-4)
+
+
+@pytest.mark.parametrize("tp", [2, 4], ids=["tp2-sp", "tp4-sp"])
+def test_sequence_parallel_matches_diffusers(tiny, tp):
+    """The image stream sequence-sharded across the TP group; attention and image-MLP inputs
+    all-gathered, row-parallel outputs reduce-scattered with the bias added once."""
+    from tests.unit.backends._neuron_gloo import run_ranks
+    from tests.unit.backends._neuron_workers import hv15_sp_worker
+
+    reference = _reference(tiny)
+    for out in run_ranks(hv15_sp_worker, tiny, SHAPE, _inputs(), world_size=tp):
+        torch.testing.assert_close(torch.tensor(out), reference, atol=1e-4, rtol=1e-4)
+
+
+@pytest.mark.parametrize("over, match", [
+    (dict(tp_degree=1, sp_enabled=True), "needs tp > 1"),
+    (dict(tp_degree=2, cp_degree=2, cp_mode="ulysses", sp_enabled=True), "mutually exclusive"),  # the config refuses it
+])
+def test_sequence_parallel_refusals(tiny, over, match):
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+
+    with pytest.raises(ValueError, match=match):
+        NeuronHunyuanVideo15TransformerApplication(model_path=tiny, parallel=DiffletParallelConfig(**over),
+                                                   device="cpu", **SHAPE)
+    # 2 x 3 x 3 = 18 image tokens do not divide by tp=4
+    with pytest.raises(ValueError, match="do not divide by tp=4"):
+        NeuronHunyuanVideo15TransformerApplication(
+            model_path=tiny, parallel=DiffletParallelConfig(tp_degree=4, sp_enabled=True), device="cpu",
+            **dict(SHAPE, height=48, width=48))
