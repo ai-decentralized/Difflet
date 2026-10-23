@@ -13,8 +13,10 @@ Parallelism. Tensor parallelism replaces diffusers' linears with the backend's c
 layers under the same names (Megatron layout: q/k/v and the added text q/k/v column-parallel, the
 attention outputs row-parallel, each MLP column then row, the modulation linears column-parallel
 with the output gathered; heads split 16/tp; the token refiner likewise), so the per-rank loader
-shards diffusers' checkpoint unchanged. Context parallelism (Ulysses) splits the image tokens across
-the CP group around the blocks, the text stream (729 + 256 + 1000 tokens) replicated.
+shards diffusers' checkpoint unchanged. Context parallelism splits the image tokens across the CP group
+around the blocks, the text stream (729 + 256 + 1000 tokens) replicated; attention by Ulysses (an
+all-to-all of heads), ring (image K/V blocks rotate; the text partial masks its padding by count) or
+gather_kv (image K/V all-gathered, one key-bounded attention).
 
 CFG parallelism (the checkpoint's guider runs classifier-free guidance, scale 6.0, on every step):
 with ``cfg_parallel_enabled`` the cores form two groups along the mesh's cfg axis; ``forward`` takes
@@ -58,10 +60,11 @@ class NeuronHunyuanVideo15TransformerApplication(TorchNeuronApplicationBase):
         self.tp = int(self.parallel.tp_degree)
         self.cp = int(getattr(self.parallel, "cp_degree", 1) or 1)
         self.cfg = 2 if bool(getattr(self.parallel, "cfg_parallel_enabled", False)) else 1
+        self.cp_mode = getattr(self.parallel, "cp_mode", "ulysses") if self.cp > 1 else None
         if self.cfg > 1 and int(batch_size) != 1:
             raise ValueError("CFG parallelism runs one branch per group: batch_size must be 1")
-        if self.cp > 1 and getattr(self.parallel, "cp_mode", "ulysses") != "ulysses":
-            raise NotImplementedError("HunyuanVideo 1.5 runs context parallelism in Ulysses mode only")
+        if self.cp_mode not in (None, "ulysses", "ring", "gather_kv"):
+            raise NotImplementedError(f"HunyuanVideo 1.5: unknown cp_mode {self.cp_mode!r}")
         with open(os.path.join(str(self.model_path), "config.json"), encoding="utf-8") as f:
             self.model_config = {k: v for k, v in json.load(f).items() if not k.startswith("_")}
         if int(num_frames) % VAE_TEMPORAL != 1:
@@ -79,7 +82,7 @@ class NeuronHunyuanVideo15TransformerApplication(TorchNeuronApplicationBase):
         heads = int(self.model_config["num_attention_heads"])
         if heads % self.tp:
             raise ValueError(f"num_attention_heads={heads} must divide by tp={self.tp}")
-        if self.cp > 1:
+        if self.cp_mode == "ulysses":
             if (heads // self.tp) % self.cp:
                 raise ValueError(f"Ulysses needs the {heads // self.tp} heads per TP rank divisible "
                                  f"by cp={self.cp}")
@@ -94,7 +97,7 @@ class NeuronHunyuanVideo15TransformerApplication(TorchNeuronApplicationBase):
         if self.tp > 1:
             _install_tensor_parallel(model, self.tp)
         if self.cp > 1:
-            _install_context_parallel(model, self.num_image_tokens, self.cp)
+            _install_context_parallel(model, self.num_image_tokens, self.cp, self.cp_mode)
         else:
             processor = _JointBoundedProcessor()
             for block in model.transformer_blocks:
@@ -237,6 +240,51 @@ class _JointBoundedProcessor:
         return _joint_out(attn, out[:, :, :n], out[:, :, n:], hidden_states.dtype)
 
 
+class _JointGatherKvProcessor:
+    """Context parallelism by gathering K/V: this rank's image queries (and the replicated text
+    queries) attend to every rank's image keys, all-gathered over the CP group, and the text keys,
+    in one key-bounded attention (keys ``[0, N + valid text)`` of ``[image || text]``)."""
+
+    def __init__(self, num_image_tokens: int) -> None:
+        self.num_image_tokens = int(num_image_tokens)
+
+    def __call__(self, attn, hidden_states, encoder_hidden_states=None, attention_mask=None,
+                 image_rotary_emb=None):
+        from difflet.backends.neuron.ops_impl import collectives
+        from difflet.backends.neuron.ops_impl.attention import attention
+
+        q, k, v, eq, ek, ev = _joint_qkv(attn, hidden_states, encoder_hidden_states, image_rotary_emb)
+        group = collectives.get_cp_group()
+        k_all, v_all = (collectives.gather_from_tensor_model_parallel_region_with_dim(t, 2, group) for t in (k, v))
+        n_local, n = q.shape[2], self.num_image_tokens
+        b, h = q.shape[0], q.shape[1]
+        s_q, s_k = n_local + eq.shape[2], n + ek.shape[2]
+        qq = torch.cat([q, eq], dim=2).reshape(b * h, s_q, -1)
+        kk = torch.cat([k_all, ek], dim=2).reshape(b * h, s_k, -1)
+        vv = torch.cat([v_all, ev], dim=2).reshape(b * h, s_k, -1)
+        valid = attention_mask.to(torch.int32).sum(dim=1) + n
+        hi = valid.view(b, 1, 1).expand(b, h, s_q).reshape(b * h, s_q, 1).to(torch.int32)
+        out = attention(qq, kk, vv, scale=q.shape[-1] ** -0.5, causal=False,
+                        bound_min=torch.zeros_like(hi), bound_max=hi, tp_q=True, tp_k=True, tp_out=False)
+        out = out.reshape(b, h, s_q, -1)
+        return _joint_out(attn, out[:, :, :n_local], out[:, :, n_local:], hidden_states.dtype)
+
+
+class _JointRingProcessor:
+    """Ring context parallelism (``joint_ring_attention``): image K/V blocks rotate around the CP
+    group, the replicated text gives one local partial with its padding masked by count."""
+
+    def __call__(self, attn, hidden_states, encoder_hidden_states=None, attention_mask=None,
+                 image_rotary_emb=None):
+        from difflet.backends.neuron.ops_impl.attention import joint_ring_attention
+
+        q, k, v, eq, ek, ev = _joint_qkv(attn, hidden_states, encoder_hidden_states, image_rotary_emb)
+        n_local = q.shape[2]
+        out = joint_ring_attention(torch.cat([q, eq], dim=2), k, v, ek, ev, scale=q.shape[-1] ** -0.5,
+                                   text_valid_len=attention_mask.to(torch.int32).sum(dim=1))
+        return _joint_out(attn, out[:, :, :n_local], out[:, :, n_local:], hidden_states.dtype)
+
+
 class _JointUlyssesProcessor:
     """``HunyuanVideo15AttnProcessor2_0`` with the attention done by ``joint_ulysses_attention``:
     the image stream arrives sharded (this rank's ``N/cp`` tokens, rotary rows to match), the text
@@ -297,7 +345,7 @@ def _install_tensor_parallel(model, tp: int) -> None:
         block.norm_out.linear = col(block.norm_out.linear, gather=True)
 
 
-def _install_context_parallel(model, num_image_tokens: int, cp: int) -> None:
+def _install_context_parallel(model, num_image_tokens: int, cp: int, mode: str = "ulysses") -> None:
     """Image tokens split over the CP group around the blocks: before each block, this rank's
     ``N/cp`` image rows (block 0 receives all ``N``) and the matching rotary rows; after the last
     block, an all-gather over the CP group. Plus the joint-Ulysses processor in every block."""
@@ -331,7 +379,8 @@ def _install_context_parallel(model, num_image_tokens: int, cp: int) -> None:
             hidden_states.contiguous(), 1, collectives.get_cp_group())
         return gathered, encoder_hidden_states
 
-    processor = _JointUlyssesProcessor(n)
+    processor = {"ulysses": _JointUlyssesProcessor(n), "gather_kv": _JointGatherKvProcessor(n),
+                 "ring": _JointRingProcessor()}[mode]
     for block in model.transformer_blocks:
         block.attn.set_processor(processor)
         block.register_forward_pre_hook(before)

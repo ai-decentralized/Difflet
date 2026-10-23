@@ -169,3 +169,16 @@ def test_teacache_probe_signal_matches_diffusers_modules(tiny):
         expected = float((m - p).abs().mean() / (p.abs().mean() + 1e-8))
         assert float(probe.teacache_delta(x, t)) == pytest.approx(expected, rel=1e-5)
         prev = m
+
+
+@pytest.mark.parametrize("mode", ["ring", "gather_kv"])
+@pytest.mark.parametrize("tp, cp", [(1, 2), (1, 4), (2, 2)], ids=["cp2", "cp4", "tp2-cp2"])
+def test_ring_and_gather_kv_context_parallel_match_diffusers(tiny, tp, cp, mode):
+    """The padded text stream masked by count: in ring's text partial, and in gather_kv's
+    key-bounded attention over all image keys plus the text."""
+    from tests.unit.backends._neuron_gloo import run_ranks
+    from tests.unit.backends._neuron_workers import hv15_cp_mode_worker
+
+    reference = _reference(tiny)
+    for out in run_ranks(hv15_cp_mode_worker, tiny, SHAPE, _inputs(), tp, cp, mode, world_size=tp * cp):
+        torch.testing.assert_close(torch.tensor(out), reference, atol=1e-4, rtol=1e-4)

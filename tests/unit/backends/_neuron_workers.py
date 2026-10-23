@@ -1358,3 +1358,16 @@ def hv15_pipeline_teacache_worker(rank: int, world_size: int, snapshot: str, sha
     out = pipe(**embeds, num_inference_steps=steps, generator=torch.Generator().manual_seed(0))
     assert pipe.teacache.skipped_steps > 0
     return out.tolist()
+
+
+def hv15_cp_mode_worker(rank: int, world_size: int, model_dir: str, shape: dict, inputs: dict,
+                        tp: int, cp: int, mode: str) -> list:
+    """HunyuanVideo 1.5's DiT at TP=tp x CP=cp in a given CP mode, on CPU."""
+    from difflet.backends.neuron.hunyuan_video15.transformer import NeuronHunyuanVideo15TransformerApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+
+    app = NeuronHunyuanVideo15TransformerApplication(
+        model_path=model_dir, parallel=DiffletParallelConfig(tp_degree=tp, cp_degree=cp, cp_mode=mode),
+        dtype=torch.float32, exec_mode="eager", device="cpu", **shape)
+    app.load()
+    return app(**inputs)[0].tolist()

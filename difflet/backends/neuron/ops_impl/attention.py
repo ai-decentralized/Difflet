@@ -342,7 +342,7 @@ def _ring_partials(q, k, v, *, scale: float, cp: int, group, rank: int, out=None
 
 
 def joint_ring_attention(q, image_k, image_v, text_k, text_v, *, scale: float,
-                         causal: bool = False):
+                         causal: bool = False, text_valid_len=None):
     """Ring context-parallel joint (text + image) attention: image sharded, text replicated.
 
     ``q``: this rank's joint queries ``[B, H, S_txt + S_img/cp, d]`` (the caller's order; Qwen
@@ -358,6 +358,11 @@ def joint_ring_attention(q, image_k, image_v, text_k, text_v, *, scale: float,
     ``_attention_with_lse`` takes on both the flash kernel and the fp32 path. Non-causal only:
     a causal mask across ring-rotated image blocks would need per-hop position offsets, and no
     joint caller is causal. At ``cp == 1`` this is plain attention over ``[text ‖ image]``.
+
+    ``text_valid_len`` (``[B]``, optional): text keys at or beyond it are padding (the caller
+    puts valid text tokens first, as HunyuanVideo 1.5 does). They are masked in the text partial
+    only, computed densely (the text block is short) with a key-index mask against the count, so
+    no shape depends on it; image keys are all valid.
     """
     if causal:
         raise NotImplementedError("joint_ring_attention supports non-causal attention only")
@@ -365,14 +370,36 @@ def joint_ring_attention(q, image_k, image_v, text_k, text_v, *, scale: float,
     from difflet.backends.neuron.ops_impl.parallel_mesh import get_axis_rank, get_axis_size
 
     cp = get_axis_size("cp")
-    if cp == 1:
+    if cp == 1 and text_valid_len is None:
         return _dense_bhsd(q, torch.cat([text_k, image_k], dim=2),
                            torch.cat([text_v, image_v], dim=2), scale=scale)
-    o_txt, l_txt = _attention_with_lse(q, text_k, text_v, scale=scale)
+    if text_valid_len is None:
+        o_txt, l_txt = _attention_with_lse(q, text_k, text_v, scale=scale)
+    else:
+        o_txt, l_txt = _masked_attention_with_lse(q, text_k, text_v, scale=scale, key_valid_len=text_valid_len)
+    if cp == 1:
+        o_img, l_img = _attention_with_lse(q, image_k, image_v, scale=scale)
+        out, _ = _merge_partials(o_txt.float(), l_txt, o_img.float(), l_img)
+        return out.to(q.dtype)
     out, _ = _ring_partials(q, image_k, image_v, scale=scale, cp=cp,
                             group=collectives.get_cp_group(), rank=get_axis_rank("cp"),
                             out=o_txt.float(), lse=l_txt)
     return out.to(q.dtype)
+
+
+def _masked_attention_with_lse(q, k, v, *, scale: float, key_valid_len):
+    """Dense attention on ``[B, H, L, d]`` with keys at or beyond ``key_valid_len[b]`` masked, and its
+    logsumexp ``[B, H, L]`` (fp32), max-subtracted (not ``torch.logsumexp``: the compiled
+    ``logaddexp`` bug). For short key blocks (a padded text stream). At least one valid key."""
+    scores = torch.matmul(q.float(), k.float().transpose(-1, -2)) * scale
+    keys = torch.arange(k.shape[-2], device=k.device).view(1, 1, 1, -1)
+    valid = keys < key_valid_len.to(k.device).view(-1, 1, 1, 1)
+    scores = scores.masked_fill(~valid, float("-inf"))
+    m = scores.amax(dim=-1, keepdim=True)
+    p = torch.exp(scores - m)
+    total = p.sum(dim=-1, keepdim=True)
+    out = torch.matmul(p / total, v.float()).to(q.dtype)
+    return out, (m + torch.log(total)).squeeze(-1)
 
 
 def _merge_partials(out, lse, o_r, l_r):
