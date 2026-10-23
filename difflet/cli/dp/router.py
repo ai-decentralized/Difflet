@@ -103,6 +103,11 @@ def worker_cli_args(args) -> list[str]:
         # encoder on the device beside a narrower TP shard than its HBM allows.
         ("--exec-mode", getattr(args, "exec_mode", None)),
         ("--guidance-scale-2", getattr(args, "guidance_scale_2", None)),
+        # TeaCache: a worker that lost these would silently run without it.
+        ("--teacache-cadence", getattr(args, "teacache_cadence", None)),
+        ("--teacache-online-delta", getattr(args, "teacache_online_delta", None)),
+        ("--teacache-speedup", getattr(args, "teacache_speedup", None)),
+        ("--teacache-calibration", getattr(args, "teacache_calibration", None)),
     ):
         if value is not None:
             argv += [flag, str(value)]
