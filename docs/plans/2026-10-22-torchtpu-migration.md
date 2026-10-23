@@ -745,6 +745,8 @@ measured this on a 4-block proxy and the plan recorded that scaling to a real
 DiT was assumed; it is now measured.
 
 **per-step's remaining +31% is the attention kernel, and the arithmetic says so.**
+
+> **Superseded — refuted by Wan 2.1, see "Corrections after a second model" below.** Wan's attention share is higher and its per-step came out at parity (−1.9%), so attention cannot be the cause of Qwen-Image's +31%. The 87 ms ≈ 80 ms agreement was a coincidence, and the 80 ms rested on a 60-block count that was never checked.
 The gap against Strict eager was 734 ms/step. SDPA costs 1.33 ms per call at
 4096 tokens, so across a 60-block DiT attention can account for ~80 ms — about
 10%. Enabling DeferAndFuse removed 647 ms, leaving 87 ms. The two numbers meet.
@@ -774,6 +776,8 @@ The gap against Strict eager was 734 ms/step. SDPA costs 1.33 ms per call at
   not apply here.
 
 **load's +168% is host-to-device bandwidth, and TorchTPU's is 20-27x slower.**
+
+> **Superseded in part — see "Corrections after a second model" below.** The h2d measurement itself stands (forced on both runtimes). The inference that it *explains load* does not: `load_seconds` is not comparable across the two runtimes, because torch_xla's load timer stops before its lazy transfers complete.
 
 Ruled out first: compilation (tier-3 took `num_compilations` to zero and load
 did not move — 21.04 cold against 21.02 warm), page cache, and DeferAndFuse.
@@ -817,3 +821,163 @@ Consequences, which differ sharply by workload:
 
 **Dependencies.** `pip install -e .` plus torchvision plus jax into the
 torch_tpu venv left torch at 2.14.1+cpu throughout, `pip check` clean.
+
+
+### 2026-10-22 — Corrections after a second model
+
+Two Phase 2 attributions above were each built on one model and a story that fit
+it. Running Wan 2.1 through both runtimes on the same box, same protocol, same
+session (launch scripts diffed line by line; they differ only in venv, runtime
+and output folder) refuted both.
+
+| metric | torch_xla | torch_tpu | tt vs xla |
+|---|---|---|---:|
+| per-step | 0.61 / 0.61 | 0.60 / 0.60 | −1.9% |
+| denoise | 12.24 / 12.17 | 12.08 / 11.90 | −2.2% |
+| HBM / chip | 7.51 / 7.51 | 7.00 / 7.00 | −6.8% |
+| vae_decode | 19.93 / 20.08 | 21.12 / 21.22 | +5.7% |
+| e2e cold | 99.79 / 92.78 | 103.72 / 79.97 | −13.8% |
+| load | 6.34 / 6.78 | 46.22 / 25.81 | +280.7% |
+
+**Attention is not why Qwen-Image is +31% per step.** Wan carries a longer
+sequence and a larger attention share, so if SDPA-versus-Pallas were the cause
+Wan would be worse. It is at parity. Qwen-Image's +31% is open, and specific to
+it.
+
+**Host-to-device bandwidth does not explain load across models.** The model
+predicted Wan's load gap would be *smaller* than Qwen-Image's, since Wan holds
+less weight per rank (7.0 GB against 9.6 GB). It is larger: +19.3 s against
++13.2 s.
+
+**The reason: `load_seconds` measures different things on the two runtimes.**
+`_load_denoiser_stage_tpu` ends with `step()` and no `wait()`; torch_xla's
+`mark_step()` dispatches without waiting, and the h2d probe already showed that
+even `wait_device_ops()` does not materialise a tensor nothing consumes. So
+torch_xla's load timer stops while weights are still in flight, and the
+transfer lands in the first request. torch_tpu's `.to()` completes before
+returning. Subtracting load from e2e cold makes the shift visible:
+
+| e2e cold − load | torch_xla | torch_tpu |
+|---|---:|---:|
+| Qwen-Image | 84.4 s | 20.5 s |
+| Wan 2.1 | 86.0 s | 54.2 s |
+
+torch_xla's post-load phase is far longer, carrying both the deferred transfer
+and the recompile it pays on every process. That stretch cannot yet be split
+between the two, which is why `benchmark/adapters/tpu.py` now records
+`weights_load_materialized_s` alongside the unchanged `load_seconds`: the same
+load followed by a read that forces every device tensor to have arrived.
+
+**What survives two models:** cross-process compilation cache (`num_compilations`
+to zero on both), lower HBM on both, better e2e cold on both. **Everything else is
+model-dependent with no cause yet identified** — per-step, vae_decode, and how
+much of load is real.
+
+**Method notes, for the next phase:**
+
+- Any stage-boundary timing is suspect across a lazy and an eager runtime.
+  Only end-to-end wall clock and explicitly materialised measurements compare.
+- One model plus a plausible story was enough, three times today, to write a
+  conclusion here. A second model refuted it each time. Phase 4 must not record
+  a cross-runtime cause without at least two models agreeing.
+- Constants in an argument get checked before the argument is believed. The
+  "60 blocks" behind the attention estimate never was.
+
+### 2026-10-22 — FLUX.1-dev: a third model, a deadlock, an op gap, and a walk-back
+
+**A deadlock Phase 2 introduced.** FLUX hung for 17 minutes with no output.
+`/proc/locks` showed two ranks holding the two `compile_slot` flock files and
+the other two in `nanosleep` polling for one. `compile_slot` wraps
+`warmup_eager`'s forward, and its own docstring states the condition it relies
+on: the slot is released after `mark_step()` dispatches and *before* waiting,
+so a rank stuck in its first collective does not hold a slot. That holds only
+on a lazy runtime. Under torch_tpu the tp collectives in the forward block on
+the host inside the slot, and the two holders wait forever for the two
+waiters. Qwen-Image and Wan never hit it because they do not call
+`warmup_eager`; FLUX, HunyuanVideo and LTX-2 do. `compile_slot` is now a no-op
+under torch_tpu — and not only to avoid the hang: tier-2 already gives one rank
+the compile and the rest the result (Phase 0d: 37 / 0 / 0 / 0), so the 43 GB/rank
+peak it guards against does not stack.
+
+The general lesson for the rest of this migration: **any code whose safety
+argument mentions `mark_step` assumes lazy execution and must be re-read.**
+
+**An op gap in TorchTPU.** With the deadlock gone, FLUX failed in the VAE
+decode — after all 28 denoise steps had succeeded:
+
+    RuntimeError: view(): cannot create a view of shape [1, 32, 262144] from the
+    input tensor of shape [1, 512, 128, 128] and strides [512, 1, 65536, 512]
+
+A minimal repro (`scripts/torchtpu_groupnorm_repro.py`) separated it:
+
+| question | answer |
+|---|---|
+| does conv2d on tpu return channels-last? | **no** — output contiguous |
+| does conv → group_norm fail? | no |
+| does group_norm on an explicitly channels-last tensor fail? | **yes**, same error |
+| does `.contiguous()` first fix it? | yes, 1−cos 2.6e-6 vs CPU |
+
+So TorchTPU's `group_norm` rejects non-contiguous input where CPU and CUDA
+PyTorch accept any strides. The first hypothesis — that conv produced the
+channels-last tensor — was wrong; the repro is why it did not get recorded as
+the cause. What in `AutoencoderKL`'s decoder produces it was not traced, and the
+fix does not depend on it. `device_runtime._install_compat()` wraps
+`F.group_norm` to make tpu-resident non-contiguous input contiguous, only under
+torch_tpu; host tensors are untouched. Qwen-Image and Wan were never affected:
+their VAEs normalise with RMS-style layers. Worth an upstream report.
+
+**Results, same box, same protocol, n=2 each:**
+
+| metric | torch_xla | torch_tpu | |
+|---|---:|---:|---:|
+| e2e cold | 214.5 s | 60.2 s | −72% |
+| vae_decode | 0.312 s | 0.136 s | −57% |
+| HBM / chip | 10.455 GB | 10.403 GB | −0.5% |
+| per-step | 0.188 s | 0.217 s | +16% |
+| load, as reported | 52.3 s | 40.5 s | −23% |
+| load, materialised | 55.6 s | 40.6 s | −27% |
+| — of which the materialise step | 3.3 s | 0.09 s | |
+
+**Walk-back of the previous entry.** "Corrections after a second model" argued
+that load's cross-runtime gap was mostly torch_xla's timer stopping before its
+lazy transfers finished. The materialised metric this entry introduced puts
+that deferral at **3.3 s** on FLUX. That is real, and it is why `load_seconds`
+alone cannot compare the runtimes — but it is far too small to explain Wan's
++19 s. The earlier correction over-corrected: Qwen-Image's and Wan's load gaps
+are probably mostly genuine, consistent with the 20-27x slower host-to-device
+copy that was measured with forced materialisation. Confirming that needs
+Qwen-Image and Wan re-run with the materialised metric; until then it stays a
+probability, not a finding.
+
+**And load is not one quantity across models either.** FLUX's TPU application
+calls `warmup_eager` inside load, so its torch_xla load of ~52 s contains the
+DiT compile (~44 s); torch_tpu takes that from the cache. Qwen-Image and Wan do
+not warm up during load. Comparing load across models compares different work.
+
+**Three models together:**
+
+| | Qwen-Image | Wan 2.1 | FLUX.1-dev | agree? |
+|---|---:|---:|---:|---|
+| e2e cold | −55% | −14% | −72% | **yes, all better** |
+| HBM / chip | −13% | −7% | −0.5% | **yes, all ≤** |
+| compile cache, fresh process | 0 compiles | 0 | 0 | **yes** |
+| per-step | +31% | −2% | +16% | no |
+| vae_decode | +49% | +6% | −57% | no |
+
+Per-step has a *possible* shape — both image models at 1024² are slower, the
+video model is at parity — but three points in two classes is a hypothesis.
+Under the rule written into the previous entry, it is not recorded as a cause.
+
+**TorchTPU's sharp edges, collected.** Two days after release, every model has
+found one:
+
+| issue | default | cost |
+|---|---|---|
+| DeferAndFuse | off | 2.9x per step |
+| tier-3 compilation cache | off, undocumented | every process recompiles |
+| `splash_sdpa` `is_causal` | True | silently wrong (cosine 0.40) |
+| `group_norm` | rejects non-contiguous | unmodified diffusers VAEs crash |
+| host-to-device copy | — | 20-27x slower than torch_xla |
+
+"Change two lines to migrate" does not hold for diffusion models on 0.2.0.
+Each further model should be expected to turn up its own.

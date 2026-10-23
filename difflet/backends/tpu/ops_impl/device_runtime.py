@@ -72,6 +72,7 @@ def device():
 
     import torch
 
+    _install_compat()  # idempotent; covers single-process use with no initialize_replica()
     return torch.device("tpu")
 
 
@@ -168,6 +169,51 @@ def _enable_compilation_cache() -> None:
     except OSError:
         return  # read-only or unwritable: run without the tier rather than fail
     os.environ[TIER3_CACHE_ENV] = str(root.resolve())
+
+
+_COMPAT_INSTALLED = False
+
+
+def _install_compat() -> None:
+    """Work around TorchTPU op gaps that break unmodified diffusers models.
+
+    **group_norm rejects non-contiguous input.** Measured on a minimal repro:
+    a channels-last ``[1, 512, 128, 128]`` tensor raises ``view(): cannot
+    create a view of shape [1, 32, 262144]`` — the op reshapes with ``view``
+    where CPU and CUDA PyTorch accept any strides. ``.contiguous()`` first fixes
+    it and matches CPU to 1-cos 2.6e-6. diffusers' ``AutoencoderKL`` feeds
+    group_norm such a tensor partway through its decoder, so FLUX.1-dev's VAE
+    decode failed on torch_tpu after the whole denoise had succeeded. Qwen-Image
+    and Wan were never affected: their VAEs normalise with RMS-style layers.
+
+    The wrapper copies only when the input is on the tpu device *and* not
+    contiguous, so the host-side text encoders are untouched and the common
+    path costs one ``is_contiguous()`` check. The copy itself is ~16 MB at FLUX's
+    1024^2 decode, negligible beside the VAE.
+
+    Patched at ``torch.nn.functional.group_norm`` because ``nn.GroupNorm``
+    resolves ``F.group_norm`` at call time, so one attribute covers every model.
+    Idempotent. A candidate for an upstream TorchTPU bug report; the repro is
+    ``scripts/torchtpu_groupnorm_repro.py``.
+    """
+    global _COMPAT_INSTALLED
+    if _COMPAT_INSTALLED or runtime_name() != TORCH_TPU:
+        return
+
+    import functools
+
+    import torch.nn.functional as F
+
+    original = F.group_norm
+
+    @functools.wraps(original)
+    def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
+        if input.device.type == "tpu" and not input.is_contiguous():
+            input = input.contiguous()
+        return original(input, num_groups, weight, bias, eps)
+
+    F.group_norm = group_norm
+    _COMPAT_INSTALLED = True
 
 
 def _enable_fusion() -> None:
@@ -270,6 +316,7 @@ def initialize_replica(replica_rank: int, replica_count: int) -> None:
     # cost. setdefault, so an inherited value wins.
     _enable_fusion()
     _enable_compilation_cache()
+    _install_compat()
 
     # TorchTPU hands each worker its own chip, so there is no set_device_index
     # here: the process sees exactly one addressable device and any index but 0
