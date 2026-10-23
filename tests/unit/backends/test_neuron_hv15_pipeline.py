@@ -116,3 +116,23 @@ def test_unsupported_guider_settings_are_refused(snapshot, tmp_path):
     (root / "guider" / "guider_config.json").write_text(json.dumps(dict(cfg, guidance_rescale=0.7)))
     with pytest.raises(NotImplementedError, match="guidance_rescale"):
         load_guidance(str(root))
+
+
+def test_teacache_cadence_skips_steps_identically_with_cfg_parallel(snapshot):
+    """The controller acts on the guided prediction: steps are skipped, and the CFG-parallel loop
+    (every rank deciding on the same gathered predictions) gives the single-process latents."""
+    from tests.unit.backends._neuron_gloo import run_ranks
+    from tests.unit.backends._neuron_workers import hv15_pipeline_teacache_worker
+
+    steps = 16  # the controller protects 5 warm-up and 5 cool-down steps
+    pipe = TorchNeuronHunyuanVideo15Pipeline(model_path=snapshot, dtype=torch.float32, exec_mode="eager",
+                                             device="cpu", text_seq_len=T1, text_2_seq_len=T2,
+                                             teacache_cadence=2, **SHAPE)
+    pipe.load()
+    single = pipe(**embeds(), num_inference_steps=steps, generator=torch.Generator().manual_seed(0))
+    stats = pipe.teacache.stats()
+    assert stats["skipped_steps"] > 0 and stats["skipped_steps"] + stats["full_steps"] == steps
+    assert torch.isfinite(single).all()
+    for out in run_ranks(hv15_pipeline_teacache_worker, snapshot, SHAPE, T1, T2, embeds(), steps, 2,
+                         world_size=2):
+        torch.testing.assert_close(torch.tensor(out), single, atol=1e-4, rtol=1e-4)

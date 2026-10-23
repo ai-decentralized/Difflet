@@ -63,7 +63,8 @@ def test_compile_skips_the_encoder(launches, tmp_path):
     assert [s for s, _, _ in launches] == ["transformer", "vae"]
 
 
-@pytest.mark.parametrize("over", [dict(sp_enabled=True), dict(teacache_cadence=2), dict(dp=2)])
+@pytest.mark.parametrize("over", [dict(sp_enabled=True), dict(teacache_speedup=1.5, teacache_calibration="c.json"),
+                                  dict(dp=2)])
 def test_refuses_what_it_does_not_run(launches, tmp_path, over):
     with pytest.raises(SystemExit):
         hv15.HunyuanVideo15Orchestrator(_args(work_dir=str(tmp_path / "w"), **over)).generate()
@@ -127,3 +128,8 @@ def test_transformer_stage_saves_latents(monkeypatch, tmp_path):
     assert seen["skip_warmup"] is True and seen["steps"] == 50
     assert seen["init"]["parallel"].cfg_parallel_enabled and seen["init"]["parallel"].tp_degree == 2
     assert torch.equal(torch.load(tmp_path / "latents.pt"), torch.full((1, 4, 2, 2, 3), 7.0))
+
+
+def test_probe_free_teacache_reaches_the_transformer_stage(launches, tmp_path):
+    hv15.HunyuanVideo15Orchestrator(_args(work_dir=str(tmp_path / "w"), teacache_cadence=2)).generate()
+    assert _flag(launches[1][2], "--teacache-cadence") == "2"

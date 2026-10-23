@@ -13,6 +13,11 @@ then ``scheduler.step``. Only how the two passes run differs: one call on a batc
 parallelism (each cfg group computes one branch), two calls otherwise. Guider settings this loop
 does not implement (guidance rescale, the original formulation, a partial start/stop) are refused.
 
+TeaCache, probe-free modes (fixed cadence, online delta): the shared controller acts on the guided
+prediction, so a skipped step skips both guidance passes and extrapolates the last full prediction by
+its last change. Every rank runs the loop on the same (all-gathered) predictions, so every rank makes
+the same decisions. The adaptive mode needs a calibration and is not wired.
+
 Text embeddings are precomputed (the host encoder stage); the result is latents for the VAE stage.
 """
 
@@ -54,7 +59,8 @@ class TorchNeuronHunyuanVideo15Pipeline:
     def __init__(self, *, model_path, parallel=None, height: int = 480, width: int = 848, num_frames: int = 121,
                  dtype=torch.bfloat16, exec_mode: str | None = None, device="neuron",
                  guidance_scale: float | None = None, text_seq_len: int = 1000, text_2_seq_len: int = 256,
-                 image_tokens: int = 729) -> None:
+                 image_tokens: int = 729, teacache_cadence: int | None = None,
+                 teacache_online_delta_alpha: float | None = None) -> None:
         self.model_path = str(model_path)
         self.height, self.width, self.num_frames = int(height), int(width), int(num_frames)
         self.dtype = dtype
@@ -66,6 +72,13 @@ class TorchNeuronHunyuanVideo15Pipeline:
         if self.dit.cfg > 1 and self.guidance_scale is None:
             raise ValueError("CFG parallelism needs classifier-free guidance (the guider is disabled)")
         self.scheduler = None
+        self.teacache = None
+        if teacache_cadence or teacache_online_delta_alpha:
+            from difflet.pipeline.teacache import build_probe_free_controller
+
+            self.teacache = build_probe_free_controller(
+                model="hunyuan_video_15", shape_label=f"{height}x{width}x{num_frames}",
+                cadence=teacache_cadence, online_delta_alpha=teacache_online_delta_alpha)
 
     def load(self, skip_warmup: bool = False) -> None:
         import diffusers
@@ -110,10 +123,19 @@ class TorchNeuronHunyuanVideo15Pipeline:
         pos = [t.to(dt) for t in (prompt_embeds, prompt_embeds_mask, prompt_embeds_2, prompt_embeds_mask_2)]
         neg = [t.to(dt) for t in (negative_prompt_embeds, negative_prompt_embeds_mask, negative_prompt_embeds_2,
                                   negative_prompt_embeds_mask_2)] if cfg else None
+        ctrl = self.teacache
+        if ctrl is not None:
+            from difflet.pipeline.teacache import sync_probe_free_num_steps
+
+            ctrl.reset()
+            sync_probe_free_num_steps(ctrl, len(timesteps))
         for i, t in enumerate(timesteps):
             latent_input = torch.cat([latents, cond, mask], dim=1)
             timestep = t.expand(latent_input.shape[0]).to(latent_input.dtype)
-            if not cfg:
+            skipped = ctrl is not None and ctrl.should_skip(i, None)
+            if skipped:
+                noise_pred = ctrl.skip_noise_pred()
+            elif not cfg:
                 noise_pred = self._dit(latent_input, timestep, *pos, image_embeds)
             elif self.dit.cfg > 1:  # both branches in one call, one per cfg group: [uncond, cond]
                 stacked = [torch.cat([n, p]) for n, p in zip(neg, pos)]
@@ -125,9 +147,13 @@ class TorchNeuronHunyuanVideo15Pipeline:
                 pred_cond = self._dit(latent_input, timestep, *pos, image_embeds)
                 pred_uncond = self._dit(latent_input, timestep, *neg, image_embeds)
                 noise_pred = pred_uncond + self.guidance_scale * (pred_cond - pred_uncond)
+            if ctrl is not None and not skipped:
+                ctrl.record_full_step(noise_pred)
             latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
             if callback is not None:
                 callback(i, t, latents)
+        if ctrl is not None:
+            print(f"[teacache] stats: {ctrl.stats()}", flush=True)
         return latents
 
 
