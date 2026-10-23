@@ -333,6 +333,18 @@ def sync() -> None:
 _PROCESS_GROUPS: dict[tuple[tuple[int, ...], ...], object] = {}
 
 
+def _dist_fn(dist, preferred: str, legacy: str):
+    """The current spelling of a collective, falling back to the old one.
+
+    torch 2.14 deprecates ``all_gather_into_tensor`` for ``all_gather_single``
+    and ``reduce_scatter_tensor`` for ``reduce_scatter_single``, warning on
+    every call. Picking the new name when it exists keeps this code off the
+    path that is already being removed — which is the whole reason this
+    migration exists — without requiring the newer torch.
+    """
+    return getattr(dist, preferred, None) or getattr(dist, legacy)
+
+
 def _process_group(groups: list[list[int]]):
     """The subgroup this rank belongs to within ``groups``.
 
@@ -407,12 +419,14 @@ def all_gather(tensor, *, dim: int, groups: list[list[int]]):
     pg = _process_group(groups)
     size = len(groups[0])
     source = tensor.contiguous()
-    # all_gather_into_tensor always stacks along dim 0, in rank order.
+    # all_gather_single always stacks along dim 0, in rank order.
     gathered = torch.empty(
         (size * source.shape[0], *source.shape[1:]),
         dtype=source.dtype, device=source.device,
     )
-    dist.all_gather_into_tensor(gathered, source, group=pg)
+    _dist_fn(dist, "all_gather_single", "all_gather_into_tensor")(
+        gathered, source, group=pg
+    )
     if dim == 0 or dim == -source.dim():
         return gathered
     return torch.cat(gathered.chunk(size, dim=0), dim=dim)
@@ -453,7 +467,7 @@ def reduce_scatter_sum(tensor, *, dim: int, shard_count: int, groups: list[list[
     import torch.distributed as dist
 
     pg = _process_group(groups)
-    # reduce_scatter_tensor always scatters along dim 0; bring the target axis
+    # reduce_scatter_single always scatters along dim 0; bring the target axis
     # to the front and put it back afterwards.
     axis = dim % tensor.dim()
     source = tensor if axis == 0 else tensor.movedim(axis, 0)
@@ -467,7 +481,9 @@ def reduce_scatter_sum(tensor, *, dim: int, shard_count: int, groups: list[list[
         (source.shape[0] // shard_count, *source.shape[1:]),
         dtype=source.dtype, device=source.device,
     )
-    dist.reduce_scatter_tensor(out, source, op=dist.ReduceOp.SUM, group=pg)
+    _dist_fn(dist, "reduce_scatter_single", "reduce_scatter_tensor")(
+        out, source, op=dist.ReduceOp.SUM, group=pg
+    )
     return out if axis == 0 else out.movedim(0, axis)
 
 
