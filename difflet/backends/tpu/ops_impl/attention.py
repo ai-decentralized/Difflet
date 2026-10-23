@@ -148,6 +148,101 @@ def _chunked_attention(q, k, v, *, scale: float, causal: bool):
     return torch.cat(outputs, dim=-2)
 
 
+#: Opt-in, while it is being measured: torch_xla's own Pallas flash kernel,
+#: run on torch_tpu through ``torch.tpu.pallas.jax_op``.
+PALLAS_ENV = "DIFFLET_TPU_PALLAS"
+
+
+class _TorchTpuPallasFlash:
+    """torch_xla's flash kernel on torch_tpu, behind torch_xla's own call shape.
+
+    The kernel torch_xla calls is a JAX one —
+    ``jax.experimental.pallas.ops.tpu.flash_attention`` — so torch_tpu can run
+    it through ``jax_op``. It exposes the same ``flash_attention(q, k, v, *,
+    causal, sm_scale, q_segment_ids, kv_segment_ids)`` method as
+    ``torch_xla.experimental.custom_kernel``, so ``_flash_attention`` and
+    ``_flash_attention_key_bounds`` use it unchanged, padding masks included.
+
+    **Block sizes are torch_xla's, not JAX's.** ``BlockSizes.get_default()`` is
+    128 everywhere (its source carries a TODO to choose better); torch_xla
+    passes 512 / 512 / 512 with ``block_b`` 2. Measured at Qwen-Image's joint
+    shape (6, 5120, 128): 4.53 ms at 128, 0.639 ms at 512 against SDPA's 0.631.
+
+    The scale is folded into q — softmax(s·qKᵀ) = softmax((s·q)Kᵀ) — so the kernel
+    runs at ``sm_scale=1.0`` and no Python float crosses ``jax_op``, which would
+    otherwise retrace per distinct value.
+
+    **Correct, and slower in the model under DeferAndFuse — leave it off.**
+    Qwen-Image at tp=4 (per-step):
+
+                        SDPA      this kernel
+        Strict eager    1.004 s   0.971 s
+        DeferAndFuse    0.333 s   0.566 s
+
+    In isolation and under Strict it matches or beats SDPA. Under DeferAndFuse
+    it costs 70%, because a ``jax_op`` is opaque to TorchTPU's fusion: every
+    call forces a materialisation on either side and the surrounding ops stop
+    fusing. splash_sdpa pays the same toll (0.567 s) for the same reason. It is
+    kept because it is numerically right — padding masks and key windows
+    included — and because the cost should vanish under ``torch.compile``,
+    where the kernel becomes one call inside a single compiled graph.
+    """
+
+    def __init__(self):
+        import jax
+        import torch_tpu  # noqa: F401 — registers torch.tpu.pallas
+        from jax.experimental.pallas.ops.tpu import flash_attention as fa
+
+        def blocks(batch, q_len, k_len):
+            return fa.BlockSizes(block_q=min(512, q_len), block_k_major=min(512, k_len),
+                                 block_k=min(512, k_len), block_b=min(2, batch))
+
+        def plain(q, k, v):
+            return fa.flash_attention(q, k, v, causal=False, sm_scale=1.0,
+                                      block_sizes=blocks(q.shape[0], q.shape[2], k.shape[2]))
+
+        def segmented(q, k, v, q_seg, kv_seg):
+            return fa.flash_attention(q, k, v, segment_ids=fa.SegmentIds(q=q_seg, kv=kv_seg),
+                                      causal=False, sm_scale=1.0,
+                                      block_sizes=blocks(q.shape[0], q.shape[2], k.shape[2]))
+
+        # jax_op insists on annotations and resolves them by name in the
+        # function's module. This module has `from __future__ import
+        # annotations`, which turns `jax.Array` into a string, and jax is a
+        # local here (it must stay out of module scope: CPU hosts import this
+        # file without jax installed). Setting the real types directly skips
+        # the lookup. The first in-model run fell back to SDPA on exactly this
+        # NameError — caught only because the path logs whether it was used.
+        plain.__annotations__ = {"q": jax.Array, "k": jax.Array, "v": jax.Array,
+                                 "return": jax.Array}
+        segmented.__annotations__ = {"q": jax.Array, "k": jax.Array, "v": jax.Array,
+                                     "q_seg": jax.Array, "kv_seg": jax.Array,
+                                     "return": jax.Array}
+        self._plain = torch.tpu.pallas.jax_op("difflet::tpu_pallas_flash", plain)
+        self._segmented = torch.tpu.pallas.jax_op("difflet::tpu_pallas_flash_segmented",
+                                                  segmented)
+        self._reported = set()
+
+    def flash_attention(self, q, k, v, *, causal=False, sm_scale=1.0,
+                        q_segment_ids=None, kv_segment_ids=None):
+        if causal:
+            raise ValueError("the torch_tpu Pallas path is non-causal only")
+        shape = tuple(q.shape)
+        if shape not in self._reported:
+            self._reported.add(shape)
+            print("[difflet tpu] pallas flash via jax_op USED q=%s segmented=%s"
+                  % (shape, q_segment_ids is not None or kv_segment_ids is not None), flush=True)
+        q = q * sm_scale
+        if q_segment_ids is None and kv_segment_ids is None:
+            return self._plain(q, k, v)
+        batch = int(q.shape[0])
+        if q_segment_ids is None:
+            q_segment_ids = torch.zeros(batch, int(q.shape[2]), dtype=torch.int32, device=q.device)
+        if kv_segment_ids is None:
+            kv_segment_ids = torch.zeros(batch, int(k.shape[2]), dtype=torch.int32, device=q.device)
+        return self._segmented(q, k, v, q_segment_ids.to(torch.int32), kv_segment_ids.to(torch.int32))
+
+
 def _flash_kernel():
     """``torch_xla.experimental.custom_kernel``, or None when unusable.
 
@@ -159,6 +254,19 @@ def _flash_kernel():
     """
     global _FLASH_KERNEL
     if _FLASH_KERNEL is None:
+        from difflet.backends.tpu.ops_impl import device_runtime
+
+        if device_runtime.runtime_name() == device_runtime.TORCH_TPU:
+            # torch_xla's custom_kernel does not exist here; the same JAX kernel
+            # can be reached through jax_op instead, opt-in until measured.
+            _FLASH_KERNEL = False
+            if os.environ.get(PALLAS_ENV, "0").strip().lower() in ("1", "true", "yes"):
+                try:
+                    _FLASH_KERNEL = _TorchTpuPallasFlash()
+                except Exception as exc:  # noqa: BLE001
+                    print("[difflet tpu] pallas flash unavailable (%s); using SDPA" % exc,
+                          flush=True)
+            return _FLASH_KERNEL or None
         if os.environ.get("DIFFLET_TPU_FLASH", "1").lower() in ("0", "false", "no"):
             _FLASH_KERNEL = False
         else:

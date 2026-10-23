@@ -1136,3 +1136,65 @@ is the next experiment: wrap the same kernel, keep the existing
 segment-id padding mask, and measure whether torch_tpu then matches or beats
 0.276 s. Its non-attention path already does as well as torch_xla's, so the
 whole gap should be in reach.
+
+### 2026-10-22 — torch_xla's own kernel on torch_tpu: correct, and a fusion barrier
+
+The ablation entry concluded "the attention kernel is the gap". This tested it
+directly: run torch_xla's Pallas flash kernel — a JAX kernel,
+`jax.experimental.pallas.ops.tpu.flash_attention` — on torch_tpu through
+`torch.tpu.pallas.jax_op`, behind the same call shape as
+`torch_xla.experimental.custom_kernel`, so `_flash_attention` and
+`_flash_attention_key_bounds` use it unchanged (opt-in, `DIFFLET_TPU_PALLAS=1`).
+
+**Block size was a 7x trap.** JAX's `BlockSizes.get_default()` is 128 for every
+dimension (its source carries a TODO to choose better); torch_xla passes 512 /
+512 / 512 with `block_b` 2. At Qwen-Image's joint shape (6, 5120, 128):
+
+| | per call |
+|---|---:|
+| `jax_op` doing nothing (bridge cost) | 0.130 ms |
+| SDPA | 0.631 ms |
+| Pallas, JAX default blocks | 4.529 ms |
+| **Pallas, torch_xla's blocks** | **0.639 ms** |
+
+Correct through the production `attention()` entry point: cosine 0.99998674 at
+5120, and 0.99998696 at an unaligned 4680, where `_flash_attention` pads and
+masks with segment ids — an unmasked pad would show as ~5e-2.
+
+**One trap on the way.** `attention.py` has `from __future__ import
+annotations`, so `q: jax.Array` became a string that `jax_op` resolves in the
+module's globals, where `jax` is absent by design (CPU hosts import the module
+without it). The first in-model run fell back to SDPA on that NameError — and
+read 0.327 s, which would have been recorded as "the kernel changes nothing" had
+the path not logged whether it was used. Real types are now set on
+`__annotations__` directly.
+
+**In the model it is slower, and the reason is fusion, not the kernel:**
+
+| Qwen-Image per-step | SDPA | Pallas via jax_op |
+|---|---:|---:|
+| Strict eager (no fusion) | 1.004 s | **0.971 s** |
+| DeferAndFuse | **0.333 s** | 0.566 s |
+
+Without fusion it is 3% faster than SDPA, as in isolation. With fusion SDPA's
+path gains 3.0x and this one 1.7x. A `jax_op` is opaque to DeferAndFuse, so each
+call forces a materialisation on both sides and the surrounding ops stop
+fusing. splash_sdpa, also a JAX kernel underneath, costs the same 0.567 s for
+the same reason, which is why two kernels several times apart in isolation
+land on one number in the model.
+
+**This revises the ablation entry's conclusion.** The kernel is not what
+torch_tpu lacks: in isolation and under Strict, torch_xla's kernel and
+torch_tpu's SDPA are level. The most consistent reading of the remaining gap
+(0.333 against 0.276) is how much of the step becomes one compiled program.
+torch_xla compiles the whole denoise step into a single graph, in which the
+Pallas kernel is one custom call that interrupts nothing; DeferAndFuse is
+heuristic fusion, and custom kernels cut it further.
+
+That is inference, not finding. It predicts that `torch.compile(backend="tpu")`
+— TorchTPU's whole-graph mode — should close most of the gap, with SDPA or with
+this kernel inside the compiled graph. That is the next experiment.
+
+The adapter stays, default off: it is numerically right, it is the route to
+masked attention without materialising scores (HunyuanVideo's key windows), and
+under `torch.compile` it should stop being a barrier.
