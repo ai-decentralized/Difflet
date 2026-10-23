@@ -586,24 +586,42 @@ def reduce_scatter_sum(tensor, *, dim: int, shard_count: int, groups: list[list[
 COMPILE_ENV = "DIFFLET_TPU_COMPILE"
 
 
-def maybe_compile(module):
-    """``torch.compile(module, backend="tpu")`` under torch_tpu when opted in.
+def maybe_compile(module, *, default: bool = False):
+    """``torch.compile(module, backend="tpu")`` under torch_tpu, per model.
 
-    The working hypothesis for torch_tpu's remaining per-step gap is fusion
-    completeness. torch_xla compiles a whole denoise step into one XLA graph;
-    DeferAndFuse is heuristic, and a custom kernel cuts it further (a jax_op
-    attention turned 0.333 s into 0.566 s per step on Qwen-Image). TorchTPU's
-    compiled mode lowers one FX graph to one StableHLO program, the nearest
-    thing it has to torch_xla's model. This exists to test that.
+    ``default`` is the call site's choice for its model; ``DIFFLET_TPU_COMPILE``
+    overrides it either way (``1`` forces on, ``0`` forces off). On by default
+    only where it has been measured — Qwen-Image, Wan and FLUX.1-dev — and off
+    for anything that has not run under it.
 
-    Unchanged on torch_xla, where the step is already one lazy graph, and
-    unchanged unless ``DIFFLET_TPU_COMPILE`` is set. TorchTPU sets
-    ``dynamic=False`` itself; callers must keep shapes static and pass varying
-    scalars as device tensors, which the TPU loops here already do.
+    Why compile: torch_xla compiles a whole denoise step into one lazy graph;
+    DeferAndFuse fuses heuristically and leaves torch_tpu 21% behind per step on
+    Qwen-Image. Compiled, each of the three is one graph (zero graph breaks) and
+    beats torch_xla per step — Qwen-Image −15%, Wan −41%, FLUX −3% — with output
+    closer to eager (49.3 dB PSNR) than the torch_xla → torch_tpu switch itself
+    leaves it (44.1 dB).
+
+    The cost: the compiled programs are cached across processes, but each new
+    process still pays +24-50 s on its first call (most likely Dynamo
+    re-tracing; XLA compiles zero times). Break-even is 6-26 requests, so it
+    belongs in a resident server — the only TPU entry point today, whose
+    startup smoke request absorbs it before ``/ready`` — and a one-shot run
+    should set ``DIFFLET_TPU_COMPILE=0``.
+
+    Unchanged on torch_xla, where the step is already one lazy graph. TorchTPU
+    sets ``dynamic=False`` itself; shapes must stay static and varying scalars
+    must be device tensors, which the TPU loops here already ensure.
     """
     if runtime_name() != TORCH_TPU:
         return module
-    if os.environ.get(COMPILE_ENV, "0").strip().lower() not in ("1", "true", "yes"):
+    raw = os.environ.get(COMPILE_ENV, "").strip().lower()
+    if raw in ("1", "true", "yes"):
+        enabled = True
+    elif raw in ("0", "false", "no"):
+        enabled = False
+    else:
+        enabled = default
+    if not enabled:
         return module
 
     import torch

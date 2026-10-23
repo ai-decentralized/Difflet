@@ -1290,3 +1290,15 @@ smoke request would absorb the cost before `/ready` — and costs 24-50 s in a
 one-shot run. HunyuanVideo and LTX-2 have not run under compile, or under
 torch_tpu at all, so a global default would turn it on for two models with no
 evidence.
+
+### 2026-10-22 — Compile on by default for the three measured models
+
+Decided: `maybe_compile(module, default=...)` takes its default from the call
+site, which knows its model. Qwen-Image, Wan (both experts) and FLUX.1-dev pass
+`default=True`; anything not yet measured under compile stays eager.
+`DIFFLET_TPU_COMPILE` now overrides both ways — `1` forces on, `0` forces off,
+unset defers to the model. A one-shot run on one of the three should set `0`:
+it pays +24-50 s of first-call tracing that only a resident server amortises.
+
+Verified with the launch script not setting the variable: Qwen-Image compiled on
+every worker and ran at 0.2333 s per step.

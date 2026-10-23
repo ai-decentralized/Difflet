@@ -322,7 +322,7 @@ class TpuWanApplication(torch.nn.Module):
         module = expert._prepare_module().to(device_runtime.device())
         device_runtime.step()
         device_runtime.wait()
-        module = device_runtime.maybe_compile(module)
+        module = device_runtime.maybe_compile(module, default=True)  # measured
 
         transformer = _OnDeviceTransformer(module, self.config, self.dtype)
         transformer_2 = None
@@ -330,7 +330,7 @@ class TpuWanApplication(torch.nn.Module):
             module_2 = self.transformer_2._prepare_module().to(device_runtime.device())
             device_runtime.step()
             device_runtime.wait()
-            module_2 = device_runtime.maybe_compile(module_2)
+            module_2 = device_runtime.maybe_compile(module_2, default=True)  # measured
             transformer_2 = _OnDeviceTransformer(
                 module_2, self.transformer_2.config, self.dtype
             )

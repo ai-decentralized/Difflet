@@ -353,7 +353,7 @@ class TpuFluxApplication(torch.nn.Module):
         self.last_timings["dit_load_s"] = time.monotonic() - mark
         # Before warmup, so the whole-graph compile lands in startup rather than
         # in the first real request.
-        module = device_runtime.maybe_compile(module)
+        module = device_runtime.maybe_compile(module, default=True)  # measured
         seconds = transformer.warmup_eager(module, device)
         self.last_timings["warmup_s"] = seconds
         print(f"[flux] tpu warmup (first compile) in {seconds:.1f}s", flush=True)
