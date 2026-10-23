@@ -80,8 +80,8 @@ def check(args) -> int:
         raise SystemExit(f"world size {world} is not divisible by tp x cfg = {tp * cfg}")
     cp = world // (tp * cfg)
     parallel = DiffletParallelConfig(tp_degree=tp, cp_degree=cp, cfg_parallel_enabled=cfg > 1,
-                                     cp_mode="ulysses" if cp > 1 else "gather_kv")
-    layout = f"TP{tp}" + (f" x CP{cp}" if cp > 1 else "") + (" x CFG2" if cfg > 1 else "")
+                                     cp_mode=args.cp_mode if cp > 1 else "gather_kv")
+    layout = f"TP{tp}" + (f" x CP{cp} ({args.cp_mode})" if cp > 1 else "") + (" x CFG2" if cfg > 1 else "")
     get_backend("neuron").prepare_runtime(parallel)  # core binding + the numerics workarounds
     import torch.distributed as dist
 
@@ -144,6 +144,7 @@ def main() -> int:
     p.add_argument("--iters", type=int, default=5)
     p.add_argument("--exec-mode", choices=("compile", "eager"), default="compile")
     p.add_argument("--tp-degree", type=int, default=1, help="TP degree; CP takes the rest of the world")
+    p.add_argument("--cp-mode", choices=("ulysses", "ring", "gather_kv"), default="ulysses")
     p.add_argument("--cfg-parallel", action="store_true",
                    help="two cfg groups, one guidance branch each (the parity check covers both halves)")
     p.add_argument("--frames", type=int, default=FRAMES,
