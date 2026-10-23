@@ -981,3 +981,68 @@ found one:
 
 "Change two lines to migrate" does not hold for diffusion models on 0.2.0.
 Each further model should be expected to turn up its own.
+
+### 2026-10-22 — Why torch_tpu loaded weights slowly, and the fix
+
+The load regression has one cause, found by testing hypotheses as a matrix
+rather than by reasoning (`scripts/torchtpu_h2d_why.py`): every 1 GiB copy,
+forced to arrive, timed for wall and process CPU.
+
+| default config | GB/s | cpu/wall |
+|---|---:|---:|
+| fp32 pageable | 0.21 | 1.07 |
+| fp32 pinned | 0.28 | 1.09 |
+| `non_blocking=True` | 0.21 | 1.08 |
+| 3-D weight-shaped / bf16 / 2-D | 0.28 | 1.08-1.21 |
+| **`TPU_PREMAPPED_BUFFER_SIZE=4GiB`** | **5.5-13.0** | 3.0-6.7 |
+
+Pinning, async, dtype and shape change nothing; cpu/wall ≈ 1.1 means one host
+core doing the copy. The premapped buffer changes everything.
+
+**The rule** (`scripts/torchtpu_h2d_buffer_fit.py`, 256 MiB buffer, pinned): a
+transfer goes at 10.9-12.7 GB/s if the whole tensor fits, and at 0.20 GB/s if
+it does not — at 256 MiB exactly as well as at 512. It does **not** chunk
+through the buffer. A 60x cliff, gated on the largest single tensor, not on
+total weight.
+
+**Which is why Wan was worst.** From the safetensors headers
+(`scripts/torchtpu_max_tensor.py`), the largest tensor each model puts on the
+chip: Qwen-Image 108 MiB, HunyuanVideo 108, FLUX.1-dev 126, LTX-2 216 (its VAE
+runs on chip), **Wan 2.1 600 — its checkpoint is F32**. Larger tensors, more of
+them over the cliff. The "host-to-device × weight volume" model in the earlier
+entries used the wrong variable.
+
+**Fix:** `device_runtime._size_premapped_buffer()` sets the variable to 2 GiB
+by default, in `prepare_launch()` (parent, before spawn, so workers inherit it
+before the runtime allocates the buffer). 2 GiB clears every supported model and
+LTX-2's 1.35 GiB text connector. Cost: 2 GiB of premapped host memory per
+worker. `setdefault`, so it can be traded down.
+
+**Verified on Wan 2.1, launch script not setting the variable:**
+
+| run 2 (warm) | torch_xla | tt before | tt + buffer |
+|---|---:|---:|---:|
+| load | 6.78 s | 25.81 s | **7.08 s** |
+| e2e cold | 92.78 s | 79.97 s | **57.26 s** (−38% vs xla) |
+| per-step | 0.61 s | 0.60 s | 0.59 s |
+| HBM | 7.51 GB | 7.00 GB | 7.03 GB |
+
+Load is now at parity with torch_xla; per-step and HBM did not move, so the fix
+touched only what it should. With the buffer large enough the fast path is
+*faster* than torch_xla's 5.6 GB/s.
+
+**Not settled:**
+
+- Run 1 is slower than run 2 both before and after the fix (46.2 / 25.8 s,
+  then 28.1 / 7.1 s), so it is not this change. The materialise step took 21 s
+  on run 1 and 0.2 s on run 2 — that is the new reduction graph compiling
+  once, the instrument's own cost. Why run 1's *load* is also 21 s slower is
+  unexplained; an on-chip F32→bf16 conversion compiling per shape would fit,
+  and was not checked.
+- The fallback call in `initialize_replica()` was not exercised on its own. If
+  the runtime has already initialised by then, it may not take effect.
+- That the slow path pins and maps pages on the fly is inferred from its
+  single-threaded, low-bandwidth signature. TorchTPU's source was not read.
+
+Upstream, the right fix is chunked staging through the buffer, so any size
+reaches full bandwidth. Worth reporting with the `group_norm` gap.

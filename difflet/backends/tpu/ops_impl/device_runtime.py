@@ -216,6 +216,49 @@ def _install_compat() -> None:
     _COMPAT_INSTALLED = True
 
 
+#: Host-to-device copies only take TorchTPU's fast path if the whole tensor
+#: fits in this premapped buffer. 2 GiB clears the largest on-chip tensor of
+#: every supported model (see _size_premapped_buffer) with room to spare.
+PREMAPPED_BUFFER_ENV = "TPU_PREMAPPED_BUFFER_SIZE"
+DEFAULT_PREMAPPED_BUFFER = 2 * 2 ** 30
+
+
+def _size_premapped_buffer() -> None:
+    """Make host-to-device weight copies take TorchTPU's fast path.
+
+    **This is why torch_tpu loaded weights 20-27x slower than torch_xla.** A copy
+    goes at ~12 GB/s only if the *whole tensor* fits in the premapped buffer;
+    one that does not falls back to a single-threaded host copy at ~0.2 GB/s.
+    It does not chunk through the buffer. Measured with a 256 MiB buffer and
+    pinned memory:
+
+        transfer 32-240 MiB (fits)       10.9-12.7 GB/s
+        transfer 256 / 300 / 512 MiB      0.20 GB/s
+
+    and with the buffer large enough, faster than torch_xla's 5.6 GB/s:
+    13.0 GB/s pinned, 7.0 pageable. Under the default, cpu/wall sat at ~1.1 —
+    one core doing the copy by hand — and pinned memory, non_blocking, dtype
+    and shape made no difference, because none of them is the bottleneck.
+
+    So what matters is the **largest single tensor**, not the total weight.
+    From the checkpoint headers, the largest that goes to the chip:
+
+        Qwen-Image 108 MiB · HunyuanVideo 108 · FLUX.1-dev 126
+        LTX-2 216 (its VAE runs on chip) · Wan 2.1 600 (F32 checkpoint)
+
+    That last line is why Wan's load gap was larger than Qwen-Image's despite
+    less weight per rank: its tensors are individually bigger, so more of them
+    went over the cliff. 2 GiB also covers LTX-2's 1.35 GiB text connector,
+    should that ever move to the chip.
+
+    Cost: 2 GiB of premapped host memory per worker, 8 GiB for a tp=4 host of
+    188 GB. setdefault, so an operator can trade it down for a model with
+    small tensors. The variable is in TorchTPU's public API list as stable;
+    nothing there says the default makes weight loading 60x slower.
+    """
+    os.environ.setdefault(PREMAPPED_BUFFER_ENV, str(DEFAULT_PREMAPPED_BUFFER))
+
+
 def _enable_fusion() -> None:
     """Turn on TorchTPU's DeferAndFuse eager mode. Measured: it is not optional.
 
@@ -278,6 +321,7 @@ def prepare_launch(nproc: int) -> None:
 
     _enable_fusion()
     _enable_compilation_cache()
+    _size_premapped_buffer()
 
     os.environ.setdefault("TORCH_TPU_DEVICES_PER_HOST", str(nproc))
     torch.tpu.distributed.set_tpu_launch_env(nproc_per_node=nproc)
@@ -316,6 +360,7 @@ def initialize_replica(replica_rank: int, replica_count: int) -> None:
     # cost. setdefault, so an inherited value wins.
     _enable_fusion()
     _enable_compilation_cache()
+    _size_premapped_buffer()
     _install_compat()
 
     # TorchTPU hands each worker its own chip, so there is no set_device_index
@@ -617,6 +662,7 @@ def set_matmul_precision(precision: str = DEFAULT_MATMUL_PRECISION) -> str:
 
 __all__ = [
     "DEFAULT_MATMUL_PRECISION",
+    "DEFAULT_PREMAPPED_BUFFER",
     "DEFAULT_TIER3_CACHE",
     "TORCH_TPU",
     "TORCH_XLA",
