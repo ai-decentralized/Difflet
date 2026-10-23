@@ -33,12 +33,17 @@ def get_platform_target():
 DEFAULT_MATMUL_PRECISION = "highest"
 
 
-def configure_matmul_precision(precision: str = DEFAULT_MATMUL_PRECISION) -> str:
-    """Set XLA's matmul precision, returning the previous value.
+def configure_matmul_precision(precision: str | None = None) -> str:
+    """Set the TPU runtime's matmul precision, returning the previous value.
 
     Deliberately explicit rather than done at import time: it is process-wide
     global state, and silently mutating it on import would be worse than the
     bug it prevents.
+
+    ``None`` defers to ``device_runtime.set_matmul_precision``, which reads
+    ``DIFFLET_TPU_MATMUL_PRECISION`` and otherwise uses
+    ``DEFAULT_MATMUL_PRECISION``. Passing this module's default explicitly, as
+    it used to, made that override unreachable from every caller.
     """
     from difflet.backends.tpu.ops_impl import device_runtime
 

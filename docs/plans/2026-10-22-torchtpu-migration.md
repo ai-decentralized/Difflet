@@ -489,6 +489,8 @@ extrapolation from a 4-block random-weight proxy, not proof**: real checkpoints
 and a real residual stream may compound differently, and Phase 4's per-model
 parity run against the diffusers oracle is what actually decides.
 
+> **Superseded — see "Per-step ablation" below.** This spike ran FLUX blocks with fp32 random weights, and the precision setting governs **fp32** matmuls only (torch_xla's own docstring: "for 32bit inputs"). Production DiTs run in bf16, which it does not touch: on Qwen-Image under torch_tpu, `medium` against `highest` moved per-step by 1%. The 2.42x is real for fp32 and irrelevant to the models.
+
 **Recommendation:** default the TorchTPU path to `medium`, carry `highest` as a
 per-model override, and let Phase 4 move any model that misses parity. Dropping
 `platform.py`'s global `"highest"` is worth 2.42x on every matmul, which is a
@@ -839,6 +841,8 @@ and output folder) refuted both.
 | e2e cold | 99.79 / 92.78 | 103.72 / 79.97 | −13.8% |
 | load | 6.34 / 6.78 | 46.22 / 25.81 | +280.7% |
 
+> **Superseded — refuted by direct ablation, see "Per-step ablation" below.** Removing the Pallas kernel from torch_xla alone costs Qwen-Image +117%. The inference from Wan assumed torch_tpu's SDPA trails torch_xla's flash kernel by a fixed ratio; it does not — torch_tpu's SDPA is 44% faster than torch_xla's, and the gap to the fused kernel varies with shape.
+
 **Attention is not why Qwen-Image is +31% per step.** Wan carries a longer
 sequence and a larger attention share, so if SDPA-versus-Pallas were the cause
 Wan would be worse. It is at parity. Qwen-Image's +31% is open, and specific to
@@ -1046,3 +1050,55 @@ touched only what it should. With the buffer large enough the fast path is
 
 Upstream, the right fix is chunked staging through the buffer, so any size
 reaches full bandwidth. Worth reporting with the `group_norm` gap.
+
+
+### 2026-10-22 — Per-step ablation: it is the attention kernel, and it is not precision
+
+Qwen-Image's per-step gap had two refuted explanations and no measured one.
+This flips one variable at a time through the same harness and the same
+full-step metric, rather than comparing two runtimes' profilers (which would
+be the cross-runtime-semantics mistake again).
+
+| | runtime | attention | matmul | per-step | vs A |
+|---|---|---|---|---:|---:|
+| A | torch_xla | Pallas flash | highest | 0.276 s | — |
+| B | torch_xla | **SDPA** | highest | **0.598 s** | **+117%** |
+| C | torch_tpu | SDPA | highest | 0.333 s | +21% |
+| D | torch_tpu | SDPA | **medium** | 0.330 s | +20% |
+| E | torch_xla | Pallas flash | medium | failed | — |
+
+D's override was confirmed to apply: C logs 8 TorchTPU HIGHEST-precision
+warnings, D logs none. E failed because torch_xla does not accept the name
+`medium`; see below.
+
+**Precision is ruled out.** D against C is 1%. The setting governs fp32
+matmuls and the DiT runs in bf16; what is left is a few fp32 ops such as the
+timestep embedding. That also retires Phase 0c's recommendation, which was
+measured on fp32 random weights.
+
+**The attention kernel is the gap.** B against A: without its fused kernel,
+torch_xla is 2.17x slower. torch_tpu has no fused kernel in use and runs SDPA,
+yet C lands only 21% behind A — because torch_tpu's SDPA is itself **44%
+faster than torch_xla's** (C against B). So torch_tpu's non-attention path is
+at least as good, and what is missing is a fused attention kernel as fast as
+torch_xla's Pallas one. The earlier refutation reasoned from Wan's parity on
+the assumption of a fixed ratio between torch_tpu's SDPA and torch_xla's flash
+kernel; B and C show the ratio moves, and with shape it can net to zero.
+
+This is strongly indicated, not closed. Closing it takes the fourth corner —
+torch_tpu with a fast fused kernel — and `splash_sdpa` measured slower than
+SDPA in isolation. That needs re-measuring inside the model.
+
+**A shim bug this surfaced.** The two runtimes name the same three settings
+differently: torch_xla takes `default`/`high`/`highest`, torch and TorchTPU
+`medium`/`high`/`highest`, where `default` and `medium` are one bf16 pass.
+`set_matmul_precision` now translates per runtime and rejects unknown names.
+Separately, `platform.configure_matmul_precision()` passed its own default
+explicitly, which made `DIFFLET_TPU_MATMUL_PRECISION` unreachable from every
+caller; it now defers.
+
+**Third revision of this question today.** The attention attribution was made
+from arithmetic, withdrawn on a second model, and restored by ablation. The
+first two were each one inference from one or two data points. Only the
+ablation, which changes one variable and holds the rest, could separate the
+kernel from the runtime.

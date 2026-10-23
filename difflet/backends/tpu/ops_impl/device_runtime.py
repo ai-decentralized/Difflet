@@ -638,14 +638,51 @@ def memory_info(dev=None) -> dict:
 #: confirms it in Phase 4, this stays where torch_xla needs it.
 DEFAULT_MATMUL_PRECISION = "highest"
 
+#: Operator override for the above. The default does not change: moving to
+#: "medium" is a per-model decision for Phase 4, gated on parity against the
+#: diffusers oracle. This exists so that decision can be measured.
+MATMUL_PRECISION_ENV = "DIFFLET_TPU_MATMUL_PRECISION"
 
-def set_matmul_precision(precision: str = DEFAULT_MATMUL_PRECISION) -> str:
+#: The two runtimes name the same three settings differently. torch_xla's
+#: ``set_mat_mul_precision`` takes 'default' / 'high' / 'highest'; torch's
+#: ``set_float32_matmul_precision``, which TorchTPU honours, takes 'medium' /
+#: 'high' / 'highest'. 'default' and 'medium' are the same thing: one bf16 MXU
+#: pass. Passing 'medium' to torch_xla raised, which is how this was found.
+#:
+#: Note what the setting governs: **fp32** matmuls only. A DiT that runs in
+#: bf16 is untouched by it — measured on Qwen-Image under torch_tpu, 'medium'
+#: against 'highest' moved per-step by 1% (0.330 s vs 0.333 s).
+_PRECISION_NAMES = {
+    TORCH_XLA: ("default", "high", "highest"),
+    TORCH_TPU: ("medium", "high", "highest"),
+}
+_PRECISION_ALIASES = {
+    TORCH_XLA: {"medium": "default"},
+    TORCH_TPU: {"default": "medium"},
+}
+
+
+def _precision_for(runtime: str, precision: str) -> str:
+    name = _PRECISION_ALIASES[runtime].get(precision, precision)
+    if name not in _PRECISION_NAMES[runtime]:
+        accepted = sorted(set(_PRECISION_NAMES[runtime]) | set(_PRECISION_ALIASES[runtime]))
+        raise ValueError(f"matmul precision {precision!r} is not one of {accepted}")
+    return name
+
+
+def set_matmul_precision(precision: str | None = None) -> str:
     """Set matmul precision process-wide, returning the previous value.
 
     Deliberately explicit rather than done at import time: it is process-global
     state, and silently mutating it on import would be worse than the bug it
     prevents.
+
+    Resolution order: an explicit argument, then ``DIFFLET_TPU_MATMUL_PRECISION``,
+    then ``DEFAULT_MATMUL_PRECISION``.
     """
+    if precision is None:
+        precision = os.environ.get(MATMUL_PRECISION_ENV) or DEFAULT_MATMUL_PRECISION
+    precision = _precision_for(runtime_name(), precision)
     if runtime_name() == TORCH_XLA:
         import torch_xla.backends as backends
 
