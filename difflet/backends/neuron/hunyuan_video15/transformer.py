@@ -131,6 +131,20 @@ class NeuronHunyuanVideo15TransformerApplication(TorchNeuronApplicationBase):
         dev, dt = self.device, self.dtype
         return tuple(t.to(dev, dt) if t.is_floating_point() else t.to(dev) for t in tensors)
 
+    @torch.no_grad()
+    def teacache_mod_input(self, hidden_states, timestep) -> torch.Tensor:
+        """The TeaCache signal as the Trainium 1.5 probe defines it: block 0's modulated image input,
+        ``transformer_blocks[0].norm1(x_embedder(x), time_embed(t))[0]``. The modulation is
+        timestep-only (text and image conditioning enter as attention tokens), so the signal does
+        not depend on the guidance branch; under TP the modulation linear gathers its output, so
+        every rank holds it whole. Host inputs; moved to this rank's device."""
+        model = self.module
+        x = hidden_states.to(self.device, self.dtype)
+        t = timestep.to(self.device, self.dtype)
+        temb = model.time_embed(t, timestep_r=None)
+        modulated, *_ = model.transformer_blocks[0].norm1(model.x_embedder(x), emb=temb)
+        return modulated
+
     def forward(self, hidden_states, timestep, encoder_hidden_states, encoder_attention_mask,
                 timestep_r=None, encoder_hidden_states_2=None, encoder_attention_mask_2=None,
                 image_embeds=None, attention_kwargs=None, return_dict=False):

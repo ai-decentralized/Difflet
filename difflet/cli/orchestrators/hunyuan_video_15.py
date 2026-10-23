@@ -36,15 +36,13 @@ from difflet.cli.orchestrators.torchrun import (
 _HF_MODEL_ID = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
 _MODEL_TYPE = "hunyuan_video_15"
 _CLI_NAME = "hunyuan-video-1.5"
-_RUNS = "tensor, context and CFG parallelism, and probe-free TeaCache"
+_RUNS = "tensor, context and CFG parallelism, and TeaCache"
 _FPS = 24
 _DEFAULT_STEPS = 50
 
 
 def _unsupported(args: argparse.Namespace) -> list[str]:
-    # TeaCache's probe-free modes run (cadence, online delta); the adaptive ones need a calibration.
-    found = [f for f in torchrun_unsupported_options(args)
-             if f not in ("--teacache-cadence", "--teacache-online-delta")]
+    found = [f for f in torchrun_unsupported_options(args) if not f.startswith("--teacache")]  # all run
     if getattr(args, "sp_enabled", False):
         found.append("--sp")
     if getattr(args, "requests_dir", None) or getattr(args, "requests", None) or (getattr(args, "dp", None) or 1) > 1:
@@ -118,6 +116,8 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
         for flag, name in (("--prompt", "prompt"), ("--output", "output"), ("--guidance-scale", "guidance_scale"),
                            ("--teacache-cadence", "teacache_cadence"),
                            ("--teacache-online-delta", "teacache_online_delta"),
+                           ("--teacache-speedup", "teacache_speedup"),
+                           ("--teacache-calibration", "teacache_calibration"),
                            ("--cache-dir", "cache_dir"), ("--revision", "revision"), ("--exec-mode", "exec_mode")):
             value = getattr(a, name, None)
             if value is not None:
@@ -179,7 +179,9 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
             num_frames=int(args.num_frames), exec_mode=getattr(args, "exec_mode", None),
             guidance_scale=getattr(args, "guidance_scale", None),
             teacache_cadence=getattr(args, "teacache_cadence", None),
-            teacache_online_delta_alpha=getattr(args, "teacache_online_delta", None))
+            teacache_online_delta_alpha=getattr(args, "teacache_online_delta", None),
+            teacache_speedup=getattr(args, "teacache_speedup", None),
+            teacache_calibration_path=getattr(args, "teacache_calibration", None))
         pipe.load(skip_warmup=args.stage_mode != "compile")
         if rank0:
             print(f"[hv15] transformer load {time.perf_counter() - started:.1f} s "

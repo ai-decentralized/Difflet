@@ -136,3 +136,35 @@ def test_teacache_cadence_skips_steps_identically_with_cfg_parallel(snapshot):
     for out in run_ranks(hv15_pipeline_teacache_worker, snapshot, SHAPE, T1, T2, embeds(), steps, 2,
                          world_size=2):
         torch.testing.assert_close(torch.tensor(out), single, atol=1e-4, rtol=1e-4)
+
+
+def test_adaptive_teacache_probes_every_step_and_skips(snapshot, tmp_path):
+    from difflet.pipeline.teacache import TeaCacheCalibration
+
+    steps = 16
+    cal = TeaCacheCalibration(model="hunyuan_video_15", shape_label="32x48x5", num_steps=steps, poly_coef=(1.0, 0.0),
+                              threshold=1e9, warmup_steps=2, cooldown_steps=2, target_speedup=2.0)
+    path = tmp_path / "hv15_cal.json"
+    path.write_text(json.dumps(cal.to_dict()))
+    pipe = TorchNeuronHunyuanVideo15Pipeline(model_path=snapshot, dtype=torch.float32, exec_mode="eager",
+                                             device="cpu", text_seq_len=T1, text_2_seq_len=T2,
+                                             teacache_speedup=1.5, teacache_calibration_path=str(path), **SHAPE)
+    pipe.load()
+    out = pipe(**embeds(), num_inference_steps=steps, generator=torch.Generator().manual_seed(0))
+    stats = pipe.teacache.stats()
+    assert torch.isfinite(out).all()
+    assert stats["probe_calls"] > 0 and stats["skipped_steps"] > 0
+    assert stats["skipped_steps"] + stats["full_steps"] == steps
+
+
+def test_adaptive_teacache_refuses_a_speedup_above_the_calibration(snapshot, tmp_path):
+    from difflet.pipeline.teacache import TeaCacheCalibration
+
+    cal = TeaCacheCalibration(model="hunyuan_video_15", shape_label="32x48x5", num_steps=16, poly_coef=(1.0, 0.0),
+                              threshold=0.1, target_speedup=1.5)
+    path = tmp_path / "hv15_cal.json"
+    path.write_text(json.dumps(cal.to_dict()))
+    with pytest.raises(ValueError, match="target speedup"):
+        TorchNeuronHunyuanVideo15Pipeline(model_path=snapshot, dtype=torch.float32, exec_mode="eager", device="cpu",
+                                          text_seq_len=T1, text_2_seq_len=T2, teacache_speedup=2.0,
+                                          teacache_calibration_path=str(path), **SHAPE)

@@ -13,10 +13,12 @@ then ``scheduler.step``. Only how the two passes run differs: one call on a batc
 parallelism (each cfg group computes one branch), two calls otherwise. Guider settings this loop
 does not implement (guidance rescale, the original formulation, a partial start/stop) are refused.
 
-TeaCache, probe-free modes (fixed cadence, online delta): the shared controller acts on the guided
-prediction, so a skipped step skips both guidance passes and extrapolates the last full prediction by
-its last change. Every rank runs the loop on the same (all-gathered) predictions, so every rank makes
-the same decisions. The adaptive mode needs a calibration and is not wired.
+TeaCache: the shared controller acts on the guided prediction, so a skipped step skips both guidance
+passes and extrapolates the last full prediction by its last change. Probe-free modes (fixed cadence,
+online delta) decide on the host; the adaptive mode, given a calibration, decides from the probe's
+signal (block 0's timestep-only modulated input, as the Trainium probe computes it), measured every
+step before the decision. Every rank runs the loop on the same inputs and (all-gathered) predictions,
+so every rank makes the same decisions.
 
 Text embeddings are precomputed (the host encoder stage); the result is latents for the VAE stage.
 """
@@ -60,7 +62,8 @@ class TorchNeuronHunyuanVideo15Pipeline:
                  dtype=torch.bfloat16, exec_mode: str | None = None, device="neuron",
                  guidance_scale: float | None = None, text_seq_len: int = 1000, text_2_seq_len: int = 256,
                  image_tokens: int = 729, teacache_cadence: int | None = None,
-                 teacache_online_delta_alpha: float | None = None) -> None:
+                 teacache_online_delta_alpha: float | None = None, teacache_speedup: float | None = None,
+                 teacache_calibration_path: str | None = None) -> None:
         self.model_path = str(model_path)
         self.height, self.width, self.num_frames = int(height), int(width), int(num_frames)
         self.dtype = dtype
@@ -72,8 +75,23 @@ class TorchNeuronHunyuanVideo15Pipeline:
         if self.dit.cfg > 1 and self.guidance_scale is None:
             raise ValueError("CFG parallelism needs classifier-free guidance (the guider is disabled)")
         self.scheduler = None
-        self.teacache = None
-        if teacache_cadence or teacache_online_delta_alpha:
+        self.teacache = self.teacache_probe = None
+        adaptive = teacache_speedup is not None or teacache_calibration_path is not None
+        if adaptive and (teacache_cadence or teacache_online_delta_alpha):
+            raise ValueError("adaptive TeaCache (speedup/calibration) and the probe-free modes are exclusive")
+        if adaptive:
+            from difflet.backends.neuron.core.teacache import NeuronTeaCacheProbe
+            from difflet.pipeline.teacache import TeaCacheController, load_teacache_calibration_or_raise
+
+            calibration = load_teacache_calibration_or_raise(
+                teacache_calibration_path, model="hunyuan_video_15", shape_label=f"{height}x{width}x{num_frames}")
+            if (teacache_speedup is not None and calibration.target_speedup is not None
+                    and float(teacache_speedup) > float(calibration.target_speedup) + 1e-6):
+                raise ValueError(f"the calibration's target speedup is {calibration.target_speedup}, "
+                                 f"lower than the requested {teacache_speedup}")
+            self.teacache = TeaCacheController(calibration)
+            self.teacache_probe = NeuronTeaCacheProbe(self.dit.teacache_mod_input)
+        elif teacache_cadence or teacache_online_delta_alpha:
             from difflet.pipeline.teacache import build_probe_free_controller
 
             self.teacache = build_probe_free_controller(
@@ -123,16 +141,22 @@ class TorchNeuronHunyuanVideo15Pipeline:
         pos = [t.to(dt) for t in (prompt_embeds, prompt_embeds_mask, prompt_embeds_2, prompt_embeds_mask_2)]
         neg = [t.to(dt) for t in (negative_prompt_embeds, negative_prompt_embeds_mask, negative_prompt_embeds_2,
                                   negative_prompt_embeds_mask_2)] if cfg else None
-        ctrl = self.teacache
+        ctrl, probe = self.teacache, self.teacache_probe
         if ctrl is not None:
             from difflet.pipeline.teacache import sync_probe_free_num_steps
 
             ctrl.reset()
             sync_probe_free_num_steps(ctrl, len(timesteps))
+            if probe is not None:
+                probe.reset()
         for i, t in enumerate(timesteps):
             latent_input = torch.cat([latents, cond, mask], dim=1)
             timestep = t.expand(latent_input.shape[0]).to(latent_input.dtype)
-            skipped = ctrl is not None and ctrl.should_skip(i, None)
+            diff = None
+            if probe is not None and ctrl.needs_signal():  # every step: the probe keeps m_{t-1}
+                diff = float(probe.teacache_delta(latent_input, timestep))
+                ctrl.note_probe()
+            skipped = ctrl is not None and ctrl.should_skip(i, None, diff_norm=diff)
             if skipped:
                 noise_pred = ctrl.skip_noise_pred()
             elif not cfg:

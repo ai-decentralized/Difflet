@@ -63,8 +63,7 @@ def test_compile_skips_the_encoder(launches, tmp_path):
     assert [s for s, _, _ in launches] == ["transformer", "vae"]
 
 
-@pytest.mark.parametrize("over", [dict(sp_enabled=True), dict(teacache_speedup=1.5, teacache_calibration="c.json"),
-                                  dict(dp=2)])
+@pytest.mark.parametrize("over", [dict(sp_enabled=True), dict(requests="r.jsonl"), dict(dp=2)])
 def test_refuses_what_it_does_not_run(launches, tmp_path, over):
     with pytest.raises(SystemExit):
         hv15.HunyuanVideo15Orchestrator(_args(work_dir=str(tmp_path / "w"), **over)).generate()
@@ -133,3 +132,10 @@ def test_transformer_stage_saves_latents(monkeypatch, tmp_path):
 def test_probe_free_teacache_reaches_the_transformer_stage(launches, tmp_path):
     hv15.HunyuanVideo15Orchestrator(_args(work_dir=str(tmp_path / "w"), teacache_cadence=2)).generate()
     assert _flag(launches[1][2], "--teacache-cadence") == "2"
+
+
+def test_adaptive_teacache_flags_reach_the_transformer_stage(launches, tmp_path):
+    hv15.HunyuanVideo15Orchestrator(_args(work_dir=str(tmp_path / "w"), teacache_speedup=1.5,
+                                          teacache_calibration="/c.json")).generate()
+    cli = launches[1][2]
+    assert _flag(cli, "--teacache-speedup") == "1.5" and _flag(cli, "--teacache-calibration") == "/c.json"

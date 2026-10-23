@@ -146,3 +146,26 @@ def test_cfg_parallel_runs_each_branch_on_its_group(tiny, tp):
     want = torch.cat([_reference_for(tiny, u), _reference_for(tiny, c)])
     for out in run_ranks(hv15_cfg_worker, tiny, SHAPE, stacked, tp, world_size=2 * tp):
         torch.testing.assert_close(torch.tensor(out), want, atol=1e-4, rtol=1e-4)
+
+
+def test_teacache_probe_signal_matches_diffusers_modules(tiny):
+    """delta_t of block 0's timestep-only modulated image input, as the Trainium 1.5 probe computes it."""
+    from diffusers import HunyuanVideo15Transformer3DModel
+
+    from difflet.backends.neuron.core.teacache import NeuronTeaCacheProbe
+
+    app = NeuronHunyuanVideo15TransformerApplication(model_path=tiny, dtype=torch.float32,
+                                                     exec_mode="eager", device="cpu", **SHAPE)
+    app.load()
+    probe = NeuronTeaCacheProbe(app.teacache_mod_input)
+    ref = HunyuanVideo15Transformer3DModel.from_pretrained(tiny).eval()
+    g, prev = torch.Generator().manual_seed(9), None
+    for step in range(3):
+        x = torch.randn(1, 9, 2, 2, 3, generator=g)
+        t = torch.tensor([900.0 - 300 * step])
+        with torch.no_grad():
+            m = ref.transformer_blocks[0].norm1(ref.x_embedder(x), emb=ref.time_embed(t, timestep_r=None))[0]
+        p = prev if prev is not None else torch.zeros_like(m)
+        expected = float((m - p).abs().mean() / (p.abs().mean() + 1e-8))
+        assert float(probe.teacache_delta(x, t)) == pytest.approx(expected, rel=1e-5)
+        prev = m
