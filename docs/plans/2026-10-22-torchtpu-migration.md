@@ -1198,3 +1198,42 @@ this kernel inside the compiled graph. That is the next experiment.
 The adapter stays, default off: it is numerically right, it is the route to
 masked attention without materialising scores (HunyuanVideo's key windows), and
 under `torch.compile` it should stop being a barrier.
+
+### 2026-10-22 — torch.compile closes the per-step gap, and reverses it
+
+The previous entry inferred that the remaining gap was fusion completeness and
+predicted `torch.compile(backend="tpu")` would close it. `device_runtime.maybe_compile`
+(opt-in, `DIFFLET_TPU_COMPILE=1`) wraps Qwen-Image's DiT at load:
+
+| Qwen-Image, tp=4 | per-step | vs torch_xla |
+|---|---:|---:|
+| A torch_xla, whole step one lazy graph + Pallas | 0.276 s | — |
+| C torch_tpu DeferAndFuse + SDPA | 0.333 s | +21% |
+| G torch_tpu DeferAndFuse + Pallas (jax_op) | 0.566 s | +105% |
+| **I torch_tpu `torch.compile` + SDPA** | **0.234 s** | **−15%** |
+| J torch_tpu `torch.compile` + Pallas (jax_op) | 0.278 s | +1% |
+
+**The prediction held.** With the DiT compiled as one graph, torch_tpu is 15%
+*faster* per step than torch_xla. Under whole-graph compilation XLA's own
+lowering of SDPA beats the Pallas custom call.
+
+**I is one graph; J is not.** Run with `TORCH_LOGS=graph_breaks`. J logged 24
+graph breaks — Dynamo raises a `TypeError` tracing into the `jax_op` adapter and
+splits the graph at every attention call — which proves the channel reaches the
+log from the spawned workers. I logged none. So I's zero is a measurement, not
+silence, and I tests exactly the premise. J landing on torch_xla's number is not
+the clean "same kernel, same whole graph" control it first looked like; it is
+compiled segments with the kernel between them.
+
+**Not yet a default.** Three things stand between this and turning it on:
+
+1. **Cold start.** I's first-ever run had e2e cold 153.5 s against DeferAndFuse's
+   35.6 s: compiling the whole DiT once is expensive. Whether tier-3 caches the
+   compiled program so the next process skips it is unmeasured — the run had
+   `--iters 1`. If it does not, compile mode trades a 15% per-step win for a 4x
+   cold start.
+2. **Numerical parity.** The benchmark checks shape, finiteness and range, not
+   agreement. Compiled against eager output must be compared before shipping.
+3. **Other models.** Qwen-Image only. Wan and FLUX may break the graph where
+   Qwen-Image did not, and HunyuanVideo and LTX-2 have not run under torch_tpu at
+   all.

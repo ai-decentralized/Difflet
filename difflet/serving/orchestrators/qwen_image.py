@@ -565,6 +565,7 @@ class QwenImageServingStageAdapter:
         )
         module = app.transformer._prepare_module().to(device_runtime.device())
         device_runtime.step()
+        module = device_runtime.maybe_compile(module)
         self.denoise_app = app
         self._tpu_module = module
         self._tpu_teacache = _build_tpu_teacache(profile)

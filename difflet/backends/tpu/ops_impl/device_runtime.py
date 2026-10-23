@@ -579,6 +579,40 @@ def reduce_scatter_sum(tensor, *, dim: int, shard_count: int, groups: list[list[
     return out if axis == 0 else out.movedim(0, axis)
 
 
+# ------------------------------------------------------------- compilation
+
+#: Opt-in, while it is being measured: run a module through TorchTPU's
+#: whole-graph mode instead of DeferAndFuse eager.
+COMPILE_ENV = "DIFFLET_TPU_COMPILE"
+
+
+def maybe_compile(module):
+    """``torch.compile(module, backend="tpu")`` under torch_tpu when opted in.
+
+    The working hypothesis for torch_tpu's remaining per-step gap is fusion
+    completeness. torch_xla compiles a whole denoise step into one XLA graph;
+    DeferAndFuse is heuristic, and a custom kernel cuts it further (a jax_op
+    attention turned 0.333 s into 0.566 s per step on Qwen-Image). TorchTPU's
+    compiled mode lowers one FX graph to one StableHLO program, the nearest
+    thing it has to torch_xla's model. This exists to test that.
+
+    Unchanged on torch_xla, where the step is already one lazy graph, and
+    unchanged unless ``DIFFLET_TPU_COMPILE`` is set. TorchTPU sets
+    ``dynamic=False`` itself; callers must keep shapes static and pass varying
+    scalars as device tensors, which the TPU loops here already do.
+    """
+    if runtime_name() != TORCH_TPU:
+        return module
+    if os.environ.get(COMPILE_ENV, "0").strip().lower() not in ("1", "true", "yes"):
+        return module
+
+    import torch
+
+    print("[difflet tpu] torch.compile(backend='tpu') applied to %s"
+          % type(module).__name__, flush=True)
+    return torch.compile(module, backend="tpu")
+
+
 # ------------------------------------------------------------------ memory
 
 
@@ -709,6 +743,7 @@ __all__ = [
     "device",
     "device_kind",
     "initialize_replica",
+    "maybe_compile",
     "memory_info",
     "prepare_launch",
     "rank",
