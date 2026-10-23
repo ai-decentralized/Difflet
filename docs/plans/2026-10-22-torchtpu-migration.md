@@ -1237,3 +1237,56 @@ compiled segments with the kernel between them.
 3. **Other models.** Qwen-Image only. Wan and FLUX may break the graph where
    Qwen-Image did not, and HunyuanVideo and LTX-2 have not run under torch_tpu at
    all.
+
+### 2026-10-22 — torch.compile across three models: startup, parity, and the trade
+
+The previous entry left three conditions before compile mode could be a default.
+All three are now measured. `maybe_compile` is wired into Wan's and FLUX's load
+too (FLUX's before `warmup_eager`, so the whole-graph compile lands in startup).
+
+**1. Startup.** Run 2 of each logged zero compilations on every worker, so the
+compiled programs are cached across processes. But compile mode still costs time
+on every process start, all of it in the first request (or in FLUX's warmup)
+and none of it in XLA compilation, which is zero. Most likely that is Dynamo
+re-tracing the model in each new process — inferred from the zero compile count,
+not profiled. Warm cache, current code, same protocol:
+
+| model | eager per-step | compiled | saved | startup cost | break-even |
+|---|---:|---:|---:|---:|---:|
+| Qwen-Image | 0.335 s | 0.233 s | 30% | +50.3 s | 25 requests @20 steps |
+| Wan 2.1 | 0.591 s | 0.360 s | 39% | +28.0 s | 6 requests @20 steps |
+| FLUX.1-dev | 0.216 s | 0.183 s | 16% | +24.3 s | 26 requests @28 steps |
+
+**2. Parity.** Same seed, same prompt, decoded images compared pixel for pixel.
+The scale is the runtime switch itself:
+
+| comparison | PSNR | mean \|Δ\| | pixels \|Δ\|>8 |
+|---|---:|---:|---:|
+| torch_xla vs torch_tpu eager (the migration) | 44.05 dB | 0.90 | 0.62% |
+| torch_xla vs torch_tpu compiled | 43.70 dB | 0.87 | 0.82% |
+| torch_tpu eager vs compiled | **49.27 dB** | 0.42 | 0.11% |
+
+Compiling moves the output less than migrating runtime already does, and leaves
+it no farther from torch_xla than eager is. Each mode reproduced its own image
+exactly across all five requests of its run, so both are deterministic.
+
+**3. Other models.** Wan and FLUX compile as one graph — zero graph breaks on
+every run — as Qwen-Image did.
+
+**Against torch_xla, compiled torch_tpu wins on both axes for all three models:**
+
+| model | per-step | e2e cold |
+|---|---:|---:|
+| Qwen-Image | 0.276 → 0.233 s (−15%) | 92.2 → 81.0 s |
+| Wan 2.1 | 0.610 → 0.360 s (−41%) | 92.8 → 85.2 s |
+| FLUX.1-dev | 0.188 → 0.183 s (−3%) | 214.5 → 56.8 s |
+
+The per-step regression that remained after Phase 2 is reversed on every
+migrated model.
+
+**The default is a decision, not a measurement.** Compile pays for itself in a
+resident server — which is the only TPU entry point today, and whose startup
+smoke request would absorb the cost before `/ready` — and costs 24-50 s in a
+one-shot run. HunyuanVideo and LTX-2 have not run under compile, or under
+torch_tpu at all, so a global default would turn it on for two models with no
+evidence.
