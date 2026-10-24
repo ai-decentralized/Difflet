@@ -465,12 +465,20 @@ class HunyuanVideoAttention(nn.Module):
         # folded in as a local partial. Under gather_kv (default): each rank
         # all-gathers the full latent K,V before running dual_stream_attention.
         if self.context_parallel_enabled and self.cp_mode == "ring":
-            if attention_mask is not None:
-                raise NotImplementedError("ring cp_mode does not support attention_mask")
             # Joint ring: image (latent) K,V sharded → rotated; text (context) K,V
             # replicated → local partial. q is the joint [image_shard ‖ text].
             # dual_stream_attention concatenates latent first then context (q[:, :q_latent_seq]
             # → latent out, q[:, q_latent_seq:] → context out), so we match that ordering.
+            #
+            # The joint key-padding mask is built over [latent_full ‖ text] with every
+            # latent key valid, so its last S_txt columns are the text's; the op takes
+            # their valid count and masks the right-padded text keys in the text
+            # partial. Summed as float then cast, as the ulysses branch does.
+            text_valid_len = None
+            if attention_mask is not None:
+                m = attention_mask.reshape(attention_mask.shape[0], -1)[:, -context_k.shape[1]:]
+                valid = m if m.dtype == torch.bool else (m != 0)
+                text_valid_len = valid.sum(dim=-1, dtype=torch.float32).to(torch.int32)  # [B]
             scale = 1.0 / math.sqrt(self.head_dim)
             q_img = latent_q.transpose(1, 2)      # [B, H, S_img/cp, d]
             q_txt = context_q.transpose(1, 2)     # [B, H, S_txt, d]
@@ -479,7 +487,7 @@ class HunyuanVideoAttention(nn.Module):
                 q_joint,
                 latent_k.transpose(1, 2), latent_v.transpose(1, 2),
                 context_k.transpose(1, 2), context_v.transpose(1, 2),
-                scale=scale, causal=False,
+                scale=scale, causal=False, text_valid_len=text_valid_len,
             )  # [B, H, S_img/cp + S_txt, d]
             o_joint = o_joint.transpose(1, 2)     # [B, S_img/cp + S_txt, H, d]
             img_len = latent_q.shape[1]
