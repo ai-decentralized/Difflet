@@ -16,6 +16,7 @@ import numpy as np
 import torch
 
 from difflet.models.qwen_image.contract import QwenImageDiTInputBundle
+from difflet.utils.latent_dump import dump_latents
 
 
 @dataclass
@@ -276,6 +277,7 @@ class QwenImageOrchestrator:
         controller: Any | None,
     ) -> torch.Tensor:
         latents = bundle.hidden_states
+        dump_latents("initial", latents)
         # fused-A (cclog 81): prev_mod is a persistent on-device Parameter; the
         # probe returns only the scalar delta — no host prev_mod copy. Mirrors
         # the HunyuanVideo fused branch (cclog 80).
@@ -320,6 +322,7 @@ class QwenImageOrchestrator:
             latents = self._scheduler_step(noise_pred, timestep, latents, len(timesteps))
             if trajectory is not None:
                 trajectory.append(latents.detach().cpu())
+        dump_latents("final", latents)
         return latents
 
     def _scheduler_step(
