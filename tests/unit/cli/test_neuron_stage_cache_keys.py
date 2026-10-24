@@ -1,5 +1,5 @@
-"""The neuron DiT stage cache keys, one field at a time (review T1), for Wan, Qwen-Image and
-LTX-2.
+"""The neuron DiT stage cache keys, one field at a time (review T1), for Wan, Qwen-Image, LTX-2
+and HunyuanVideo.
 
 Each case starts from one pinned command line (tp2, cp1 or cp2 gather_kv, exec mode compile,
 every flag off), changes exactly one thing, and asserts that the stage cache inputs differ in
@@ -16,6 +16,7 @@ import pytest
 WAN = "Wan-AI/Wan2.1-T2V-14B-Diffusers"
 QWEN = "Qwen/Qwen-Image"
 LTX = "Lightricks/LTX-2"
+HV = "hunyuanvideo-community/HunyuanVideo"
 
 
 def _key(monkeypatch, model, flags, exec_mode="compile"):
@@ -44,21 +45,27 @@ CASES = [
     (WAN, [], CP2, ["cp"]),
     (QWEN, [], CP2, ["cp"]),
     (LTX, [], CP2, ["cp"]),
+    (HV, [], CP2, ["cp"]),
     # cp mode at cp2: every model keys it (LTX-2 runs gather_kv and ulysses).
     (WAN, CP2, [*CP2, "--cp-mode", "ring"], ["cp_mode"]),
     (WAN, CP2, [*CP2, "--cp-mode", "ulysses"], ["cp_mode"]),
     (QWEN, CP2, [*CP2, "--cp-mode", "ring"], ["cp_mode"]),
     (QWEN, CP2, [*CP2, "--cp-mode", "ulysses"], ["cp_mode"]),
     (LTX, CP2, [*CP2, "--cp-mode", "ulysses"], ["cp_mode"]),
-    # SP: Wan and Qwen-Image key it (SP builds another graph); LTX-2 refuses SP in the driver,
+    (HV, CP2, [*CP2, "--cp-mode", "ring"], ["cp_mode"]),
+    (HV, CP2, [*CP2, "--cp-mode", "ulysses"], ["cp_mode"]),
+    # SP: Wan, Qwen-Image and HunyuanVideo key it (SP builds another graph); LTX-2 refuses SP in the driver,
     # so its key has no SP field.
     (WAN, [], ["--sp"], ["sp"]),
     (QWEN, [], ["--sp"], ["sp"]),
     (LTX, [], ["--sp"], []),
+    (HV, [], ["--sp"], ["sp"]),
     # CFG parallelism: every model keys it (Qwen-Image additively: only when it is on).
     (WAN, [], ["--cfg-parallel"], ["cfg_parallel"]),
     (QWEN, [], ["--cfg-parallel"], ["cfg_parallel"]),
     (LTX, [], ["--cfg-parallel"], ["cfg_parallel"]),
+    # HunyuanVideo is guidance-distilled: the driver refuses --cfg-parallel, so no key field.
+    (HV, [], ["--cfg-parallel"], []),
     # Text encoder placement: LTX-2 keys a device encoder (additively); Wan's and Qwen-Image's
     # keys never named it (the neuron generate stage requires no artifact, and their NEFF
     # caches are keyed by the graphs themselves), so the flags leave their keys unchanged.
@@ -69,6 +76,8 @@ CASES = [
     (WAN, [], ["--host-vae"], []),
     (QWEN, [], ["--device-vae"], []),
     (LTX, [], ["--device-vae"], []),
+    (HV, [], ["--device-vae"], []),
+    (HV, [], ["--host-vae"], []),
 ]
 
 
@@ -83,7 +92,7 @@ def test_one_field_at_a_time(monkeypatch, model, base, changed, keys):
     assert after_dir.parent == before_dir.parent  # the same component directory
 
 
-@pytest.mark.parametrize("model", [WAN, QWEN, LTX])
+@pytest.mark.parametrize("model", [WAN, QWEN, LTX, HV])
 def test_exec_mode_alone_changes_the_key(monkeypatch, model):
     compiled, compiled_dir = _key(monkeypatch, model, [], exec_mode="compile")
     eager, eager_dir = _key(monkeypatch, model, [], exec_mode="eager")

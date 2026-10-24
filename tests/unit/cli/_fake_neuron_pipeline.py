@@ -1,11 +1,12 @@
-"""Test double for ``DiffletPipeline`` in the Wan CLI transformer stage (and the Qwen-Image CLI
-generate stage) on the neuron backend.
+"""Test double for ``DiffletPipeline`` in the Wan CLI transformer stage (and the Qwen-Image and
+HunyuanVideo CLI generate stages) on the neuron backend.
 
 The stage (``WanOrchestrator._stage_transformer_neuron``, ``QwenImageOrchestrator.
-_stage_generate_neuron``) builds its application through
-``DiffletPipeline.from_pretrained``; this module replaces that classmethod with
-``fake_from_pretrained``, which returns a ``FakePipeline`` around a ``FakeWanApp`` on the CPU: no
-weights, no device, no Neuron runtime. Not collected by pytest.
+_stage_generate_neuron``, ``HunyuanVideoOrchestrator._stage_generate_neuron``) builds its
+application through ``DiffletPipeline.from_pretrained``; this module replaces that classmethod
+with ``fake_from_pretrained``, which returns a ``FakePipeline`` around a ``FakeWanApp`` on the CPU
+(``FakeHunyuanVideoApp`` for ``model_type="hunyuan_video"``): no weights, no device, no Neuron
+runtime. Not collected by pytest.
 
 * In process, a test patches it in directly (``monkeypatch.setattr(DiffletPipeline,
   "from_pretrained", classmethod(fake_from_pretrained))``) and reads ``CALLS``.
@@ -100,6 +101,42 @@ class FakeWanApp:
         return SimpleNamespace(latents=latents)
 
 
+class FakeHunyuanVideoApp(FakeWanApp):
+    """``FakeWanApp`` held to ``TorchNeuronHunyuanVideoApplication``'s contract, read from the real
+    classes rather than copied: the application keyword arguments it accepts (``KWARG_DEFAULTS``;
+    the real one raises TypeError for any other) and the call keywords its ``generate`` takes or
+    hands on to ``HunyuanVideoOrchestrator``."""
+
+    def __init__(self, application_kwargs: dict[str, Any] | None = None) -> None:
+        from difflet.models.hunyuan_video.neuron_application import (
+            TorchNeuronHunyuanVideoApplication,
+        )
+
+        unknown = sorted(set(application_kwargs or {})
+                         - set(TorchNeuronHunyuanVideoApplication.KWARG_DEFAULTS))
+        if unknown:
+            raise TypeError(f"TorchNeuronHunyuanVideoApplication got unexpected keyword "
+                            f"arguments {unknown}")
+        super().__init__()
+
+    def __call__(self, **kwargs: Any) -> SimpleNamespace:
+        import inspect
+
+        from difflet.models.hunyuan_video.neuron_application import (
+            TorchNeuronHunyuanVideoApplication,
+        )
+        from difflet.models.hunyuan_video.pipeline import HunyuanVideoOrchestrator
+
+        accepted = ({"generator"}
+                    | set(inspect.signature(TorchNeuronHunyuanVideoApplication.generate).parameters)
+                    | set(inspect.signature(HunyuanVideoOrchestrator.__call__).parameters))
+        unknown = sorted(set(kwargs) - (accepted - {"self", "kwargs"}))
+        if unknown:
+            raise TypeError(f"TorchNeuronHunyuanVideoApplication.generate got unexpected keyword "
+                            f"arguments {unknown}")
+        return super().__call__(**kwargs)
+
+
 class FakePipeline:
     def __init__(self, *, app: FakeWanApp, compiled_path: Path) -> None:
         self.app = app
@@ -124,7 +161,9 @@ def fake_from_pretrained(cls, model_id: str, **kwargs: Any) -> FakePipeline:
     if int(os.environ.get("WORLD_SIZE", "1")) > 1 and not dist.is_initialized():
         dist.init_process_group("gloo")
     cache = kwargs.get("compile_cache_dir") or "/nonexistent-fake-cache"
-    pipe = FakePipeline(app=FakeWanApp(), compiled_path=Path(cache) / "wan" / "fake")
+    app = (FakeHunyuanVideoApp(kwargs.get("application_kwargs"))
+           if kwargs.get("model_type") == "hunyuan_video" else FakeWanApp())
+    pipe = FakePipeline(app=app, compiled_path=Path(cache) / "wan" / "fake")
     if kwargs.get("load", True):
         pipe.load(skip_warmup=kwargs.get("skip_warmup", False))
     CALLS.append({"model_id": model_id, "kwargs": kwargs, "pipeline": pipe})
