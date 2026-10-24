@@ -65,6 +65,14 @@ def test_cli_flag_rejects_other_values():
         )
 
 
+def test_cli_help_describes_fp32_and_one_time_recompile(capsys):
+    with pytest.raises(SystemExit):
+        cli_main._build_parser().parse_args(["generate", "--help"])
+    text = " ".join(capsys.readouterr().out.split())
+    assert "'fp32' makes every tensor-parallel all-reduce fp32" in text
+    assert "Flux and Wan artifacts recompile once" in text
+
+
 def test_stage_parser_carries_flag():
     from difflet.cli.stage import _build_stage_parser
 

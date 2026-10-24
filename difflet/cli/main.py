@@ -86,9 +86,10 @@ def _add_parallel_flags(p: argparse.ArgumentParser) -> None:
         choices=["bf16", "fp32"],
         default=None,
         help="Precision of the tensor-parallel all-reduce (default: bf16). "
-        "'fp32' reproduces the pre-bf16 artifacts of Qwen-Image, LTX-2, "
-        "HunyuanVideo and the Flux/Wan text encoders. Not supported for "
-        "MiniMax-H3.",
+        "'fp32' makes every tensor-parallel all-reduce fp32 (DiT and text "
+        "encoders) and reuses the pre-bf16 artifacts of Qwen-Image, LTX-2 and "
+        "HunyuanVideo; Flux and Wan artifacts recompile once with either "
+        "value. Not supported for MiniMax-H3.",
     )
     p.add_argument(
         "--cfg-parallel",
