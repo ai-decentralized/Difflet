@@ -132,6 +132,8 @@ _CP_SP_LAYOUTS = [
     pytest.param({"tp_degree": 2, "cp_degree": 2, "cp_mode": "gather_kv"}, 4,
                  id="tp2-cp2-gather_kv"),
     pytest.param({"tp_degree": 2, "cp_degree": 2, "cp_mode": "ulysses"}, 4, id="tp2-cp2-ulysses"),
+    pytest.param({"tp_degree": 1, "cp_degree": 2, "cp_mode": "ring"}, 2, id="cp2-ring"),
+    pytest.param({"tp_degree": 2, "cp_degree": 2, "cp_mode": "ring"}, 4, id="tp2-cp2-ring"),
     pytest.param({"tp_degree": 2, "sp_enabled": True}, 2, id="tp2-sp"),
 ]
 
@@ -142,7 +144,8 @@ def test_dit_parallel_matches_diffusers(tiny, parallel, world, valid_text):
     """The port's CP (the image tokens scattered over the CP group, the text replicated) and
     SP (the dual-stream image stream sharded over the TP group) on the neuron collectives:
     every rank returns the whole noise prediction, equal to diffusers'. Three valid text
-    tokens leave the joint key bound well short of the key length; sixteen is no padding."""
+    tokens leave the joint key bound well short of the key length; sixteen is no padding.
+    Under ring the padding reaches the op as the valid-text count (``text_valid_len``)."""
     reference = diffusers_reference(tiny, tiny_inputs(valid_text))
     results = run_ranks(hv1_dit_worker, tiny, parallel, "eager", valid_text, world_size=world)
     assert len(results) == world
