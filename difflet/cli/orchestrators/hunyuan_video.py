@@ -287,6 +287,7 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
             enable_teacache_probe=adaptive,
             teacache_speedup=getattr(args, "teacache_speedup", None),
             teacache_calibration_path=getattr(args, "teacache_calibration", None),
+            tp_reduce_dtype=getattr(args, "tp_reduce_dtype", None),
         )
 
         if args.stage_mode == "compile":
@@ -371,6 +372,10 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
                 "toolchain": stage_toolchain_versions(),
             }
         if stage == "generate":
+            import torch
+
+            from difflet.common.tp_reduce import parse_tp_reduce_dtype, tp_reduce_cache_fields
+
             return {
                 "component": "hunyuan_video_dit",
                 "model_id": _HF_MODEL_ID,
@@ -382,6 +387,11 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
                 "text_seq_len": _TEXT_SEQ_LEN,
                 "shapes": canonical_shapes_list(args, (320, 512, 61)),
                 "toolchain": stage_toolchain_versions(),
+                # Additive: pre-bf16 DiT artifacts reduced in fp32 and keep their key.
+                **tp_reduce_cache_fields(
+                    parse_tp_reduce_dtype(getattr(args, "tp_reduce_dtype", None)),
+                    legacy=torch.float32,
+                ),
             }
         raise ValueError(f"unknown stage {stage!r}")
 
@@ -420,6 +430,8 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
             parts += ["--shapes", str(a.shapes)]
         if getattr(a, "sp_enabled", False):
             parts.append("--sp")
+        if getattr(a, "tp_reduce_dtype", None):
+            parts += ["--tp-reduce-dtype", a.tp_reduce_dtype]
         if getattr(a, "teacache_cadence", None) is not None:
             parts += ["--teacache-cadence", str(a.teacache_cadence)]
         if getattr(a, "teacache_online_delta", None) is not None:
