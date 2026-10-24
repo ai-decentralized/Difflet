@@ -609,3 +609,10 @@ def test_startup_smoke_uses_temporary_target_and_cleans_it(monkeypatch, tmp_path
     ]
     assert not parent.exists()
     assert adapter._smoke_target is None
+
+
+def test_pipeline_identity_names_bf16_reduce(monkeypatch, tmp_path):
+    monkeypatch.setattr(ltx_2, "_torch_bfloat16", lambda: "bfloat16")
+    spec = ltx_2.build_compile_plan(_source(tmp_path), _profile(tmp_path))[0]
+    cache_inputs = json.loads(spec.identity.canonical_cache_inputs_json)["cache_inputs"]
+    assert cache_inputs["application_kwargs"] == {"tp_reduce_dtype": "bfloat16"}

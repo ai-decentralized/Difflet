@@ -1511,3 +1511,13 @@ def test_startup_smoke_is_target_bound_reentrant_and_cleans_on_error(
 
     assert not success_target.parent.exists()
     assert adapter._smoke is None
+
+
+def test_denoiser_identity_names_bf16_reduce(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        hunyuan_video, "toolchain_versions", lambda: {"python": "3.10", "neuronx-cc": "test"}
+    )
+    specs = hunyuan_video._compile_specs(_source(tmp_path), _profile(tmp_path))
+    by_id = {s.component_id: json.loads(s.identity.canonical_cache_inputs_json) for s in specs}
+    assert by_id["denoiser"]["tp_reduce_dtype"] == "bfloat16"
+    assert "tp_reduce_dtype" not in by_id["llama"]  # NxDI Llama encoder: unchanged

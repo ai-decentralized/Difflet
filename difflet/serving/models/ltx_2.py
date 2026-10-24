@@ -18,6 +18,7 @@ from difflet.common.neuron_cores import (
     select_neuron_core_ids,
 )
 from difflet.pipeline.compile_cache import CacheSpec
+from difflet.pipeline.difflet_pipeline import _cache_application_kwargs
 from difflet.registry import resolve_model
 from difflet.serving.artifact_manager import ImmutableArtifactManager
 from difflet.serving.engines.stage_pipeline import (
@@ -104,7 +105,8 @@ def build_compile_plan(
         width=profile.width,
         num_frames=profile.num_frames,
         revision=source.resolved_source_id,
-        application_kwargs=None,
+        # The identity DiffletPipeline keys the artifact with (incl. tp_reduce_dtype).
+        application_kwargs=_cache_application_kwargs(None, model_name=_MODEL_TYPE),
     )
     identity = CompileArtifactIdentity.from_cache_inputs(
         {
