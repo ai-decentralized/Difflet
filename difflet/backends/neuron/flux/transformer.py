@@ -10,7 +10,8 @@ Checkpoint mapping: diffusers fuses each single-stream block's attention and MLP
 projections into one ``proj_out`` (input columns ``[0, inner)`` attention, ``[inner, 5 inner)``
 MLP); the model splits them so each is row-parallel on its own. ``proj_out_attn.weight`` and
 ``proj_out_mlp.weight`` are therefore column ranges of ``proj_out.weight`` (read per TP shard),
-and ``proj_out_attn.bias`` is ``proj_out.bias`` (``proj_out_mlp`` has none).
+and ``proj_out_attn.bias`` is ``proj_out.bias`` (``proj_out_mlp`` has none). Both mappings are
+``core/checkpoint.py``'s ``single_block_proj_out_*``, shared with HunyuanVideo.
 
 ``forward`` takes the pipeline's call (``img_ids``/``txt_ids``, guidance as a number or tensor) like
 the Trainium wrapper: the rotary table is ``FluxPosEmbed`` over ``[txt_ids; img_ids]``, computed on
@@ -19,24 +20,20 @@ the host and cached per shape.
 
 from __future__ import annotations
 
-import re
-
 import torch
 
 from difflet.backends.neuron.core.application_base import TorchNeuronApplicationBase
-from difflet.backends.neuron.core.checkpoint import CheckpointSlice
+from difflet.backends.neuron.core.checkpoint import (
+    CheckpointSlice,
+    single_block_proj_out_key,
+    single_block_proj_out_slices,
+)
 from difflet.backends.neuron.flux.config import NeuronFluxConfig
-
-_MODULE_TO_CHECKPOINT: list[tuple[str, str]] = [
-    (r"\.proj_out_attn\.bias$", ".proj_out.bias"),
-]
 
 
 def checkpoint_key(name: str) -> str:
     """Diffusers checkpoint key holding the module parameter ``name``."""
-    for pattern, replacement in _MODULE_TO_CHECKPOINT:
-        name = re.sub(pattern, replacement, name)
-    return name
+    return single_block_proj_out_key(name)
 
 
 def flux_position_ids(config: NeuronFluxConfig) -> tuple[torch.Tensor, torch.Tensor]:
@@ -76,13 +73,8 @@ class NeuronFluxTransformerApplication(TorchNeuronApplicationBase):
         return checkpoint_key(name)
 
     def checkpoint_slices(self) -> dict[str, CheckpointSlice]:
-        inner, mlp = self.config.inner_dim, self.config.mlp_hidden_dim
-        slices = {}
-        for i in range(int(self.config.num_single_layers)):
-            source = f"single_transformer_blocks.{i}.proj_out.weight"
-            slices[f"single_transformer_blocks.{i}.proj_out_attn.weight"] = CheckpointSlice(source, 1, 0, inner)
-            slices[f"single_transformer_blocks.{i}.proj_out_mlp.weight"] = CheckpointSlice(source, 1, inner, mlp)
-        return slices
+        return single_block_proj_out_slices(self.config.num_single_layers, self.config.inner_dim,
+                                            self.config.mlp_hidden_dim)
 
     def rotary_emb(self, txt_ids: torch.Tensor, img_ids: torch.Tensor) -> torch.Tensor:
         """``[S_txt + S_img, head_dim, 2]`` (cos, sin) for these ids, cached per id shape."""
