@@ -470,16 +470,20 @@ def test_cli_timeline_and_torchrun_note(tmp_path):
 
 
 def test_bench_all_skips_entries_for_other_backends(monkeypatch):
-    from benchmark import bench
+    from benchmark import bench, result_cache
 
     ran = []
     monkeypatch.setattr(bench, "run_one", lambda slug, backend, **kw: ran.append(slug))
-    monkeypatch.setattr(bench, "write_outputs", lambda slug, res: None)
-    monkeypatch.setattr(sys, "argv", ["bench", "--all", "--backend", "trainium"])
+    monkeypatch.setattr(bench, "write_outputs", lambda slug, res, **kw: None)
+    # no host probes; --force: the committed results' cache state must not skip a slug
+    monkeypatch.setattr(result_cache, "instance_type", lambda: "test")
+    monkeypatch.setattr(result_cache, "system_sdk", lambda: {})
+    monkeypatch.setattr(result_cache, "platform_identity", lambda adapter, **kw: {})
+    monkeypatch.setattr(sys, "argv", ["bench", "--all", "--backend", "trainium", "--force"])
     assert bench.main() == 0
     assert "wan_2_1_neuron" not in ran and "wan_2_1" in ran
     ran.clear()
-    monkeypatch.setattr(sys, "argv", ["bench", "--all", "--backend", "neuron"])
+    monkeypatch.setattr(sys, "argv", ["bench", "--all", "--backend", "neuron", "--force"])
     bench.main()
     assert "wan_2_1_neuron" in ran and "wan_2_1" in ran  # backends=None: any backend
     assert MATRIX["wan_2_1_neuron"].backends == ("neuron",)

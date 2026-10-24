@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+from benchmark import result_cache
+
 
 def _fmt_s(x: Optional[float]) -> str:
     if x is None:
@@ -54,6 +56,10 @@ def render(r: dict) -> str:
     a(f"**Backend:** {r['backend']}  ")
     a(f"**Device:** {r.get('device', '—')}  ")
     a(f"**Timestamp:** {r.get('timestamp', '—')}")
+    banner = result_cache.banner(r)
+    if banner:
+        a("")
+        L.extend(banner)
     a("")
     a(f"> Best-performing configuration: {r.get('config_label') or '—'}")
     a("")

@@ -72,6 +72,35 @@ python -m benchmark.bench --all                          # the whole matrix
 python -m benchmark.bench --model flux_1_dev --backend diffusers   # CPU/CUDA reference
 ```
 
+### Reusing committed results instead of re-measuring
+
+The committed `benchmark/<device>/<slug>.json` is also a result cache, so a new instance
+does not spend hours re-measuring what an earlier one already measured
+(`result_cache.py`). Each run stamps a `cache` block into the JSON: a fingerprint of the
+config (MATRIX entry, backend, `--iters`/`--natural-iters`) and the platform (EC2
+instance type, `device_info()`, the adapter's toolchain packages plus the OS-level
+`aws-neuronx-*` packages or the NVIDIA driver), and `measured_at`. The next run
+**reuses** it, touching no device, when the status is `ok` (or `flagged`), the config,
+instance type and SDK all match, and it is younger than 30 days. A different instance
+type or SDK, or an expired result, is **re-measured**. A reused report says so
+(`**REUSED:** these numbers were NOT re-measured …`). Reusing does not restart the 30
+days; only a re-measurement does. Commit `benchmark/` after a run so the next instance
+sees it.
+
+```bash
+python -m benchmark.result_cache                        # fresh / expired / no fingerprint, per file
+python -m benchmark.bench --all --plan                  # what would be reused vs re-run here
+python -m benchmark.bench --all                         # runs only what is missing or stale
+python -m benchmark.bench --model ltx_2 --force         # re-measure anyway
+python -m benchmark.bench --all --max-age-days 14       # a stricter expiry
+python -m benchmark.bench --all --rerun-on-code-change  # also re-run when difflet/ changed
+python -m benchmark.neuron_cold_warm --record-dir <dir> # the ~2 h neuron job: same rules
+```
+
+Results written before the cache have no fingerprint and are re-measured once. This
+caches **results**, not compiled artifacts: a re-measurement still compiles, since
+`~/.cache/difflet` (hundreds of GB) does not fit in git.
+
 The **best-performing configuration** per model (shape, tp/cp, dtype, steps,
 guidance, **pinned HF revision**, seed) lives in `models.py::MATRIX` — edit there to
 retune. Shapes default to what fits a single **trn2.3xlarge** (1 Neuron device, 4

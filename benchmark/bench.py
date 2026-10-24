@@ -8,6 +8,11 @@
 For each model it runs download -> compile -> generate via the selected backend
 adapter, collects the universal metrics, writes ``benchmark/<device>/<slug>.json``
 and ``benchmark/<slug>.md`` (the detailed report).
+
+A committed result is reused instead of re-measured when it is ``ok``, was measured with
+the same config on the same instance type and SDK, and is younger than ``--max-age-days``
+(30); its report then says it was reused (``benchmark/result_cache.py``). ``--force``
+re-measures anyway; ``--plan`` prints the reuse/re-run decision per model and exits.
 """
 from __future__ import annotations
 
@@ -17,7 +22,7 @@ import json
 import sys
 from pathlib import Path
 
-from benchmark import report
+from benchmark import report, result_cache
 from benchmark.harness import BenchResult, Stats
 from benchmark.models import MATRIX
 
@@ -43,9 +48,9 @@ def _make_adapter(name: str):
 
 
 def run_one(slug: str, backend: str, *, skip_download: bool, skip_compile: bool,
-            iters: int, natural_iters: int = 2) -> BenchResult:
+            iters: int, natural_iters: int = 2, adapter=None) -> BenchResult:
     cfg = MATRIX[slug]
-    adapter = _make_adapter(backend)
+    adapter = adapter or _make_adapter(backend)
     res = BenchResult(
         model_id=cfg.model_id, model_type=cfg.model_type, backend=backend,
         device=adapter.device_info(), dtype=cfg.dtype,
@@ -146,7 +151,12 @@ def run_one(slug: str, backend: str, *, skip_download: bool, skip_compile: bool,
     return res
 
 
-def write_outputs(slug: str, res: BenchResult) -> None:
+def run_options(*, iters: int, natural_iters: int) -> dict:
+    """The CLI options that change what a run measures (part of the cache fingerprint)."""
+    return {"iters": iters, "natural_iters": natural_iters}
+
+
+def write_outputs(slug: str, res: BenchResult, cache: dict | None = None) -> None:
     from benchmark.models import DEVICE, results_dir, json_path, report_path
     Path(results_dir()).mkdir(parents=True, exist_ok=True)
     d = res.to_dict()
@@ -160,6 +170,8 @@ def write_outputs(slug: str, res: BenchResult) -> None:
     d["prompt"] = cfg.prompt
     d["guidance_scale"] = cfg.guidance_scale
     d["output_kind"] = cfg.output_kind
+    if cache is not None:
+        d["cache"] = cache
     Path(json_path(slug)).write_text(json.dumps(d, indent=2))
     Path(report_path(slug)).write_text(report.render(d))
     print(f"[bench] {slug}: status={res.status}  "
@@ -181,6 +193,14 @@ def main() -> int:
                         "used by adapters advertising supports_natural_mode.")
     p.add_argument("--iters", type=int, default=0,
                    help="extra warm end-to-end iterations (cold run always done)")
+    p.add_argument("--force", action="store_true",
+                   help="re-measure even when the committed result is still reusable")
+    p.add_argument("--max-age-days", type=int, default=result_cache.MAX_AGE_DAYS,
+                   help="a committed result older than this is re-measured (default 30)")
+    p.add_argument("--rerun-on-code-change", action="store_true",
+                   help="also re-measure when difflet/ changed since the committed result")
+    p.add_argument("--plan", action="store_true",
+                   help="print reuse / re-run per model and exit (nothing runs)")
     args = p.parse_args()
 
     if args.all:
@@ -192,12 +212,50 @@ def main() -> int:
     else:
         raise SystemExit("specify --model <slug> or --all")
 
+    from benchmark.models import json_path, report_path
+
+    opts = run_options(iters=args.iters, natural_iters=args.natural_iters)
+    code = result_cache.code_identity()
+    instance = result_cache.instance_type()
+    system = result_cache.system_sdk()
+    reused = []
     for slug in slugs:
+        adapter = _make_adapter(args.backend)
+        fp = result_cache.fingerprint(
+            result_cache.config_identity(MATRIX[slug], backend=args.backend, run_options=opts),
+            result_cache.platform_identity(adapter, instance=instance, system=system))
+        now = result_cache.utc_now()
+        if args.force:
+            decision = result_cache.Decision(False, "--force")
+        elif args.plan:
+            decision = result_cache.decide(
+                result_cache.load(Path(json_path(slug))), fp, now=now,
+                max_age_days=args.max_age_days, code=code,
+                rerun_on_code_change=args.rerun_on_code_change)
+        else:
+            decision = result_cache.try_reuse(
+                Path(json_path(slug)), fp, now=now, max_age_days=args.max_age_days, code=code,
+                rerun_on_code_change=args.rerun_on_code_change, render=report.render,
+                md_path=Path(report_path(slug)))
+        verb = "REUSE" if decision.reuse else "RUN"
+        print(f"[cache] {slug}: {verb} -- {decision.reason}", flush=True)
+        if args.plan:
+            continue
+        if decision.reuse:
+            reused.append(slug)
+            continue
         print(f"\n========== benchmarking {slug} ({MATRIX[slug].model_id}) ==========", flush=True)
         res = run_one(slug, args.backend, skip_download=args.skip_download,
                       skip_compile=args.skip_compile, iters=args.iters,
-                      natural_iters=args.natural_iters)
-        write_outputs(slug, res)
+                      natural_iters=args.natural_iters, adapter=adapter)
+        write_outputs(slug, res, cache=result_cache.cache_block(
+            fp, code=code, measured_at=result_cache.utc_now(),
+            max_age_days=args.max_age_days))
+    if reused:
+        print(f"[cache] reused without re-measuring: {', '.join(reused)} "
+              "(pass --force to re-measure)", flush=True)
+    if not args.plan:
+        print("[cache] commit benchmark/ so the next instance can reuse these results", flush=True)
     return 0
 
 
