@@ -161,6 +161,16 @@ Per model × dtype, one device job at a time:
 - [ ] **Step 4:** publish the same as a private artifact page in the Wan2.1 report's style; send the link.
 - [ ] **Step 5:** push; open a draft PR of Tasks 1–8 to `main` with the headline numbers; campaign evidence stays on the `verify/` branch.
 
+### Task 13: PyTorch-native backend runs — Qwen-Image and Wan (added by the user after plan approval)
+
+User: "跑完之后再跑下Torch Native的方式Qwen和Wan就行" — after Tasks 1–12, run Qwen and Wan on the PyTorch-native backend (`--backend neuron`, torch-neuronx; code on `origin/feat/torch-native-backend`, not on `main`).
+
+- [ ] **Step 1:** separate worktree on `origin/feat/torch-native-backend`; environment `/opt/aws_neuronx_venv_torch_neuronx_2_14_0` (torch-neuronx 2.14, the report's native stack). Record its reduce dtype for Qwen/Wan TP linears (read `difflet/backends/neuron/ops_impl/linear.py`).
+- [ ] **Step 2:** Qwen-Image at the Task 10 config (1024², 20 steps, g4.0, seed 42), TP4, LNC=2: the Metrics table (step/forward/loop, compile = first-use warm-up delta, warm e2e n=3, page-cold n=1, phase breakdown, profile) with `DIFFLET_DUMP_LATENTS_DIR` if the branch's loop supports it (else add the same hook there, uncommitted to `main`).
+- [ ] **Step 3:** Wan2.1-T2V-14B at the Wan report config (480×832×9, 50 steps, g5.0, UniPC, seed 42), same metrics — directly comparable to the report's PyTorch-native column.
+- [ ] **Step 4:** quality — Qwen native vs the Task 12 CPU fp32 reference and vs NxD bf16/fp32; Wan native vs NxD (this branch, bf16 DiT + bf16 umT5) frame PSNR/SSIM.
+- [ ] **Step 5:** add a "PyTorch native" column to the evidence doc and the artifact page.
+
 ## Decisions made on the user's behalf (overturn any before execution)
 
 1. fp32 stays selectable per run via `--tp-reduce-dtype fp32` (needed for the A/B; escape hatch).
