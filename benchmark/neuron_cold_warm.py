@@ -41,10 +41,11 @@ the driver stops the running launch's ranks before it exits.
 ``--dry-run`` prints the plan and the commands; ``--assemble-only`` re-renders the results
 from the recorded launches; ``--skip-existing`` resumes after a stop.
 
-The result file is also the cache (``benchmark/result_cache.py``): when the committed
-``wan_2_1_neuron.json`` was measured with the same options on the same instance type and SDK
-less than ``--max-age-days`` (30) ago, the job reuses it, marks it reused and launches
-nothing. ``--force`` re-measures.
+A completed job is also stored in ``benchmark/cached_results/wan_2_1_neuron.json``
+(``benchmark/result_cache.py``). When a stored result was measured with the same options on the
+same instance type and SDK less than ``--max-age-days`` (30) ago, the job reuses it: it rewrites
+the result files from it, marked reused, and launches nothing. ``--force`` re-measures; a
+``--skip-existing`` resume always finishes the recorded launches instead.
 """
 
 from __future__ import annotations
@@ -949,12 +950,33 @@ def render(doc: Mapping[str, Any]) -> str:
 
 
 def measured_at(records: Mapping[str, Any]) -> datetime.datetime:
-    """The end of the last recorded launch: a re-assembly keeps the measurement's time."""
-    ends = [rec["run"]["end_epoch"] for rec in records.values()
-            if (rec.get("run") or {}).get("end_epoch")]
-    if not ends:
+    """The start of the oldest recorded launch: the result is as old as its oldest number (a
+    ``--skip-existing`` resume does not make old launches young), and a re-assembly of the
+    same records gives the same time."""
+    starts = [run.get("start_epoch") or run.get("end_epoch")
+              for run in ((rec.get("run") or {}) for rec in records.values())
+              if run.get("start_epoch") or run.get("end_epoch")]
+    if not starts:
         return result_cache.utc_now()
-    return datetime.datetime.fromtimestamp(max(ends), datetime.timezone.utc)
+    return datetime.datetime.fromtimestamp(min(starts), datetime.timezone.utc)
+
+
+def reusable_record(rec: Mapping[str, Any], host: Mapping[str, Any], *,
+                    now: datetime.datetime, max_age_days: int) -> str | None:
+    """Why a recorded launch must NOT be kept by ``--skip-existing`` (None: keep it): it failed,
+    ran on another device or toolchain, or is older than the cache's expiry."""
+    if not rec.get("ok"):
+        return "not ok"
+    was = rec.get("host") or {}
+    for field in ("device", "toolchain"):
+        if field in was and was[field] != host.get(field):
+            return f"recorded on another {field}"
+    run = rec.get("run") or {}
+    start = run.get("start_epoch") or run.get("end_epoch")
+    if start and now - datetime.datetime.fromtimestamp(start, datetime.timezone.utc) > \
+            datetime.timedelta(days=max_age_days):
+        return f"older than {max_age_days} days"
+    return None
 
 
 def run_options(args: argparse.Namespace, *, true_cold: bool) -> dict[str, Any]:
@@ -968,7 +990,11 @@ def assemble(records: Mapping[str, Any], *, adapter: na.NeuronAdapter, out_json:
              out_md: Path, plan_note: str | None = None,
              extra_notes: Sequence[str] = (),
              fingerprint: Mapping[str, Any] | None = None,
+             cache: Mapping[str, Any] | None = None,
              max_age_days: int = result_cache.MAX_AGE_DAYS) -> dict[str, Any]:
+    """``fingerprint`` (a completed job) stores the result in ``benchmark/cached_results/``;
+    ``cache`` (--assemble-only) carries over the banner summary of the file being re-rendered
+    when it describes these records."""
     host = recorded_host(records)
     if host is None:  # records from before M-2: read the host now and say so
         host = host_info(adapter)
@@ -1000,9 +1026,10 @@ def assemble(records: Mapping[str, Any], *, adapter: na.NeuronAdapter, out_json:
     doc["headline_guidance"] = HEADLINE_GUIDANCE
     doc["plan_note"] = plan_note
     if fingerprint is not None:
-        doc["cache"] = result_cache.cache_block(
-            fingerprint, code=result_cache.code_identity(), measured_at=measured_at(records),
-            max_age_days=max_age_days)
+        result_cache.record(SLUG, fingerprint, doc, code=result_cache.code_identity(),
+                            measured_at=measured_at(records), max_age_days=max_age_days)
+    elif cache is not None and cache.get("measured_at") == result_cache.iso(measured_at(records)):
+        doc["cache"] = dict(cache)
     out_json.parent.mkdir(parents=True, exist_ok=True)
     out_json.write_text(json.dumps(doc, indent=2))
     out_md.write_text(render(doc))
@@ -1043,11 +1070,11 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--skip-existing", action="store_true",
                    help="reuse launches whose record.json passes when judged again")
     p.add_argument("--force", action="store_true",
-                   help="re-measure even when the committed result is still reusable")
+                   help="re-measure even when the stored result is still reusable")
     p.add_argument("--max-age-days", type=int, default=result_cache.MAX_AGE_DAYS,
-                   help="a committed result older than this is re-measured (default 30)")
+                   help="a stored result older than this is re-measured (default 30)")
     p.add_argument("--rerun-on-code-change", action="store_true",
-                   help="also re-measure when difflet/ changed since the committed result")
+                   help="also re-measure when difflet/ changed since the stored result")
     args = p.parse_args(argv)
     record_dir = args.record_dir.absolute()
     global STEPS_OVERRIDE
@@ -1056,9 +1083,11 @@ def main(argv: list[str] | None = None) -> int:
                                log_dir=str(record_dir / "runs"), iters=args.iters)
     if args.assemble_only:
         out_json, out_md = output_paths(args, record_dir, final=False)
+        # Re-rendering a report keeps its banner summary when it came from these records.
         doc = assemble(load_records(record_dir, rejudge=True), adapter=adapter,
                        out_json=out_json, out_md=out_md,
-                       extra_notes=superseded_note(record_dir))
+                       extra_notes=superseded_note(record_dir),
+                       cache=(result_cache.load(out_json) or {}).get("cache"))
         print(f"[neuron_cold_warm] wrote {out_json} and {out_md} "
               f"({list(doc['results_by_guidance'])})", flush=True)
         return 0
@@ -1111,19 +1140,23 @@ def main(argv: list[str] | None = None) -> int:
         result_cache.config_identity(MATRIX[SLUG], backend="neuron",
                                      run_options=run_options(args, true_cold=true_cold)),
         result_cache.platform_identity(adapter))
+    resuming = args.skip_existing and any((record_dir / "runs").glob("g*/*/record.json"))
     if args.force:
         print("[cache] RUN -- --force", flush=True)
+    elif resuming:
+        # A resume finishes the recorded measurement; the stored result is not consulted.
+        print(f"[cache] RUN -- resuming the launches recorded in {record_dir} (--skip-existing)",
+              flush=True)
     else:
         final_json, final_md = output_paths(args, record_dir, final=True)
         decision = result_cache.try_reuse(
-            final_json, fp, now=result_cache.utc_now(), max_age_days=args.max_age_days,
+            SLUG, fp, now=result_cache.utc_now(), max_age_days=args.max_age_days,
             code=result_cache.code_identity(), rerun_on_code_change=args.rerun_on_code_change,
-            render=render, md_path=final_md)
+            render=render, json_path=final_json, md_path=final_md)
         print(f"[cache] {'REUSE' if decision.reuse else 'RUN'} -- {decision.reason}", flush=True)
         if decision.reuse:
-            print(f"[neuron_cold_warm] reused {final_json} without launching (marked reused; "
-                  "pass --force to re-measure); commit it so the next instance can reuse it",
-                  flush=True)
+            print(f"[neuron_cold_warm] rewrote {final_json} from benchmark/cached_results/ "
+                  "without launching (marked reused; pass --force to re-measure)", flush=True)
             return 0
 
     signal.signal(signal.SIGTERM, _interrupt)  # stop like Ctrl-C: the launch's ranks first
@@ -1146,9 +1179,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         for launch in plan:
             key = f"{gkey(launch.guidance)}/{launch.name}"
-            if args.skip_existing and records.get(key, {}).get("ok"):
-                print(f"[skip] {key}: recorded and ok", flush=True)
-                continue
+            if args.skip_existing and key in records:
+                why = reusable_record(records[key], host, now=result_cache.utc_now(),
+                                      max_age_days=args.max_age_days)
+                if why is None:
+                    print(f"[skip] {key}: recorded and ok", flush=True)
+                    continue
+                print(f"[rerun] {key}: recorded but {why}", flush=True)
             print(f"[launch] {key} starting at {datetime.datetime.now():%H:%M:%S}", flush=True)
             rec = run_launch(launch, record_dir=record_dir, adapter=adapter, iters=args.iters,
                              records=records, host=host)
@@ -1168,7 +1205,9 @@ def main(argv: list[str] | None = None) -> int:
     out_json, out_md = output_paths(args, record_dir, final=stopped is None)
     try:
         doc = assemble(records, adapter=adapter, out_json=out_json, out_md=out_md,
-                       extra_notes=superseded_note(record_dir), fingerprint=fp,
+                       extra_notes=superseded_note(record_dir),
+                       # only a completed job is stored; a stopped one re-runs
+                       fingerprint=fp if stopped is None else None,
                        max_age_days=args.max_age_days)
         print(f"[neuron_cold_warm] wrote {out_json} and {out_md} "
               f"({list(doc['results_by_guidance'])})", flush=True)

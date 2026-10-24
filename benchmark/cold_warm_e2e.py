@@ -22,7 +22,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from benchmark import report
+from benchmark import report, result_cache
 from benchmark.adapters.trainium import TrainiumAdapter
 from benchmark.harness import Stats
 from benchmark.models import MATRIX
@@ -49,6 +49,7 @@ def _patch(slug: str, note: str | None = None, **kv) -> dict:
             notes = [n for n in notes if not n.startswith(pref)]
         notes.append(note)
     d["notes"] = notes
+    result_cache.invalidate(d)  # patched in place: no longer the stored measurement
     jp.write_text(json.dumps(d, indent=2))
     from benchmark.models import report_path
     Path(report_path(slug)).write_text(report.render(d))

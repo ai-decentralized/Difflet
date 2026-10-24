@@ -33,7 +33,7 @@ import json
 import sys
 from pathlib import Path
 
-from benchmark import report
+from benchmark import report, result_cache
 from benchmark.harness import Stats
 from benchmark.models import MATRIX, json_path, report_path, logs_dir
 
@@ -85,6 +85,7 @@ def run(slug: str, backend: str, warmups: int, iters: int) -> int:
     notes = d.setdefault("notes", [])
     d["notes"] = [n for n in notes if not n.startswith("e2e_warm =")]
     d["notes"].append(_note(backend, st, warmups))
+    result_cache.invalidate(d)  # patched in place: no longer the stored measurement
     jp.write_text(json.dumps(d, indent=2))
     Path(report_path(slug)).write_text(report.render(d))
     print(f"[warm] {slug}: mean {st.mean:.1f}s median {st.median:.1f}s n={st.n} -> patched", flush=True)

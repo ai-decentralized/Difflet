@@ -21,7 +21,7 @@ import sys
 import time
 from pathlib import Path
 
-from benchmark import report
+from benchmark import report, result_cache
 from benchmark.harness import Stats
 from benchmark.models import MATRIX
 
@@ -122,6 +122,7 @@ def main() -> int:
             f"per-step = {st.mean*1000:.1f} ms/DiT-forward (warm, in-process, "
             f"n={st.n}) via benchmark.step_latency — the stable Neuron-compute metric "
             f"(e2e generate is load-dominated/noisy across processes).")
+        result_cache.invalidate(d)  # patched in place: no longer the stored measurement
         jp.write_text(json.dumps(d, indent=2))
         Path(report_path(args.model)).write_text(report.render(d))
         print(f"[step] patched {report_path(args.model)}", flush=True)

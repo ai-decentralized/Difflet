@@ -302,6 +302,11 @@ def test_main_stops_on_an_interrupt_and_assembles_into_results(tmp_path, monkeyp
     monkeypatch.setattr(cw, "run_launch", interrupted)
     monkeypatch.setattr(cw, "sudo_available", lambda: False)
     monkeypatch.setattr(cw, "host_info", lambda adapter: dict(fake.HOST))
+    # no host probes for the cache fingerprint; the fixture launches' epochs are ~1970
+    from benchmark import result_cache
+    monkeypatch.setattr(result_cache, "platform_identity", lambda adapter, **kw: {})
+    monkeypatch.setattr(result_cache, "utc_now", lambda: cw.datetime.datetime.fromtimestamp(
+        2000.0, cw.datetime.timezone.utc))
     repo = [na.REPO_ROOT / "benchmark" / "trn2" / f"wan_2_1_neuron.{ext}" for ext in ("json", "md")]
     before = [(p.stat().st_mtime_ns, p.read_bytes()) for p in repo]
     handler = cw.signal.getsignal(cw.signal.SIGTERM)

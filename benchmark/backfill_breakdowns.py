@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import os
 
-from benchmark import parse_compile, parse_generate, report
+from benchmark import parse_compile, parse_generate, report, result_cache
 
 # slug -> {compile log stem, generate log stem, stage-name template, host note}
 # stage_names overrides parser labels when the log has no [role] markers
@@ -70,6 +70,7 @@ def main() -> int:
                 d["e2e_breakdown"] = eb
                 d["load_seconds"] = eb["weights_load_total_s"]
 
+        result_cache.invalidate(d)  # patched in place: no longer the stored measurement
         json.dump(d, open(jp, "w"), indent=2)
         open(report_path(slug), "w").write(report.render(d))
         eb = d.get("e2e_breakdown", {})

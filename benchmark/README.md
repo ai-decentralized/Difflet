@@ -72,23 +72,30 @@ python -m benchmark.bench --all                          # the whole matrix
 python -m benchmark.bench --model flux_1_dev --backend diffusers   # CPU/CUDA reference
 ```
 
-### Reusing committed results instead of re-measuring
+### Reusing stored results instead of re-measuring
 
-The committed `benchmark/<device>/<slug>.json` is also a result cache, so a new instance
-does not spend hours re-measuring what an earlier one already measured
-(`result_cache.py`). Each run stamps a `cache` block into the JSON: a fingerprint of the
-config (MATRIX entry, backend, `--iters`/`--natural-iters`) and the platform (EC2
-instance type, `device_info()`, the adapter's toolchain packages plus the OS-level
-`aws-neuronx-*` packages or the NVIDIA driver), and `measured_at`. The next run
-**reuses** it, touching no device, when the status is `ok` (or `flagged`), the config,
-instance type and SDK all match, and it is younger than 30 days. A different instance
-type or SDK, or an expired result, is **re-measured**. A reused report says so
-(`**REUSED:** these numbers were NOT re-measured …`). Reusing does not restart the 30
-days; only a re-measurement does. Commit `benchmark/` after a run so the next instance
-sees it.
+Every completed run is stored in **`benchmark/cached_results/<slug>.json`**, one JSON per
+model, committed to git, so a new instance does not spend hours re-measuring what an earlier
+one already measured (`result_cache.py`). A model's file holds one entry per config ×
+platform (a trn2 and a trn3 measurement live side by side), each with its fingerprint, the
+full result and `measured_at`:
+
+- **config:** the MATRIX entry, the backend, and the run options (`--iters`,
+  `--natural-iters`, `--skip-compile`);
+- **platform:** the EC2 instance type (`DIFFLET_INSTANCE_TYPE` off EC2), `device_info()`, and
+  the SDK: the adapter's toolchain packages plus the OS-level `aws-neuronx-*` packages or the
+  NVIDIA driver.
+
+The next run **reuses** an entry, touching no device, when its status is `ok` (or
+`flagged`), the config, instance type and SDK all match, and it is younger than 30 days. It
+then rewrites `benchmark/<device>/<slug>.{json,md}` from the entry, and the report says so
+(`**REUSED:** these numbers were NOT re-measured …`). A different instance type or SDK, or an
+expired entry, is **re-measured**. Reusing does not restart the 30 days; only a
+re-measurement does. Failed, partial and stopped runs are never stored. After a run, commit
+`benchmark/cached_results/` (and the reports) so the next instance sees it.
 
 ```bash
-python -m benchmark.result_cache                        # fresh / expired / no fingerprint, per file
+python -m benchmark.result_cache                        # every stored entry: fresh / expired
 python -m benchmark.bench --all --plan                  # what would be reused vs re-run here
 python -m benchmark.bench --all                         # runs only what is missing or stale
 python -m benchmark.bench --model ltx_2 --force         # re-measure anyway
@@ -97,9 +104,10 @@ python -m benchmark.bench --all --rerun-on-code-change  # also re-run when diffl
 python -m benchmark.neuron_cold_warm --record-dir <dir> # the ~2 h neuron job: same rules
 ```
 
-Results written before the cache have no fingerprint and are re-measured once. This
-caches **results**, not compiled artifacts: a re-measurement still compiles, since
-`~/.cache/difflet` (hundreds of GB) does not fit in git.
+The reports written before the cache existed are not in the store, so each model is measured
+once more. The scripts that patch a report in place (`step_latency.py`, `warm_e2e.py`, …) drop
+its banner and leave the store alone. This caches **results**, not compiled artifacts: a
+re-measurement still compiles, since `~/.cache/difflet` (hundreds of GB) does not fit in git.
 
 The **best-performing configuration** per model (shape, tp/cp, dtype, steps,
 guidance, **pinned HF revision**, seed) lives in `models.py::MATRIX` — edit there to
@@ -117,6 +125,7 @@ benchmark/
     RESULTS.md               # cross-model summary for this device
     <slug>.json  <slug>.md   # machine-readable + detailed report
     logs/                    # raw compile/generate logs (gitignored)
+  cached_results/            # the result cache: <slug>.json, one per model (see above)
   trn3/                      # Trainium trn3pd98.3xlarge (Trainium3); same layout (per-rank presharding A/B)
   h100/   b300/              # NVIDIA (diffusers CUDA reference); same layout
 ```

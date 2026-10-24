@@ -1,35 +1,49 @@
 """Reuse committed benchmark results instead of re-measuring them on every new instance.
 
-The cache is the result file itself: ``benchmark/<device>/<slug>.json`` (committed to git, so
-it outlives the instance) carries a ``cache`` block written when the numbers were measured:
+Measured results are kept in their own folder, one JSON per model, committed to git so they
+outlive the instance:
 
-    "cache": {
+    benchmark/cached_results/<slug>.json
+    {
       "schema": 1,
-      "key": "<sha256 of config + platform, 16 hex>",
-      "measured_at": "2026-10-24T12:00:00Z",
-      "expires_at":  "2026-11-23T12:00:00Z",
-      "fingerprint": {"config": {...}, "platform": {...}},
-      "code": {"git_head": ..., "difflet_tree": ..., "dirty": ...},
-      "last_reused": {"at": ..., "instance_type": ..., "git_head": ...}   # only once reused
+      "slug": "flux_1_dev",
+      "entries": {                                    # one per config x platform
+        "<key: sha256 of config + platform, 16 hex>": {
+          "measured_at": "2026-10-24T12:00:00Z",
+          "fingerprint": {"config": {...}, "platform": {...}},
+          "code": {"git_head": ..., "difflet_tree": ..., "dirty": ...},
+          "result": {...the full result JSON as measured...},
+          "last_reused": {"at": ..., "instance_type": ..., "git_head": ...}   # once reused
+        }
+      }
     }
 
-A later run reuses the file, without touching the device, when all of these hold:
+A trn2 entry and a trn3 entry of the same model live side by side; re-measuring replaces the
+entry with the same key, and drops the model's entries that have expired.
 
-* the file's status is ``ok`` or ``flagged`` (a failed or partial run is never served);
+A run reuses an entry, without touching the device, when all of these hold:
+
+* the entry's result status is ``ok`` or ``flagged`` (a failed, partial or stopped run is never
+  stored), and it holds every guidance value the run asks for (neuron_cold_warm);
 * the config fingerprint matches (model, revision, shape, steps, parallel layout, prompt, seed,
-  flags, backend and the run options such as ``--iters``);
-* the platform matches: the instance type, the accelerator ``device_info()`` reports, and the
-  SDK (the adapter's ``toolchain()`` packages plus the OS-level Neuron runtime/driver packages
-  or the NVIDIA driver);
+  flags, backend and the run options such as ``--iters`` / ``--skip-compile``);
+* the platform matches: the instance type (EC2 metadata, or ``DIFFLET_INSTANCE_TYPE`` off EC2;
+  an unknown host never reuses), the accelerator ``device_info()`` reports, and the SDK (the
+  adapter's ``toolchain()`` packages plus the OS-level ``aws-neuronx-*`` packages or the NVIDIA
+  driver);
 * ``measured_at`` is younger than ``max_age_days`` (30 by default). Reusing does not refresh
   the clock: only a re-measurement does.
 
-The code identity (git HEAD, ``difflet/`` tree) is recorded and shown, but a change only
-forces a re-run under ``--rerun-on-code-change``. Results written before this module have no
-``cache`` block and are always re-measured.
+The code identity (git HEAD, ``difflet/`` tree) is recorded and shown, but a change only forces
+a re-run under ``--rerun-on-code-change``.
 
-    python -m benchmark.result_cache                 # status of every committed result
-    python -m benchmark.result_cache --device trn2 --max-age-days 14
+On reuse the report files ``benchmark/<device>/<slug>.{json,md}`` are rewritten from the entry
+and say so (``**REUSED:**``). Those reports carry a short ``cache`` summary for that banner; the
+scripts that patch a report in place (step_latency.py, warm_e2e.py, ...) drop it
+(``invalidate``), since the report then no longer is the stored measurement.
+
+    python -m benchmark.result_cache                 # every stored entry: fresh / expired
+    python -m benchmark.result_cache --max-age-days 14
 """
 from __future__ import annotations
 
@@ -38,6 +52,7 @@ import dataclasses
 import datetime
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import urllib.request
@@ -51,6 +66,8 @@ MAX_AGE_DAYS = 30
 #: enforced": a finished run whose report already says so. partial / failed never are.
 REUSABLE_STATUSES = ("ok", "flagged")
 REPO_ROOT = Path(__file__).resolve().parent.parent
+#: The store: one JSON per model (``<slug>.json``).
+STORE_DIR = REPO_ROOT / "benchmark" / "cached_results"
 
 #: BenchConfig fields that only describe or label a result; they do not change what runs.
 PRESENTATION_FIELDS = ("config_label", "notes", "stage_names", "e2e_host_note", "backends")
@@ -74,6 +91,10 @@ def parse_iso(s: str) -> datetime.datetime:
         tzinfo=datetime.timezone.utc)
 
 
+def _days(td: datetime.timedelta) -> str:
+    return f"{td.total_seconds() / 86400:.1f} days"
+
+
 # ------------------------------------------------------------------------------ identity
 
 
@@ -93,7 +114,11 @@ def _run(cmd: list[str], timeout: float = 10.0) -> str:
 
 
 def instance_type() -> str:
-    """The EC2 instance type (IMDSv2, then IMDSv1); ``unknown`` off EC2."""
+    """The EC2 instance type (IMDSv2, then IMDSv1); ``unknown`` off EC2, where
+    ``DIFFLET_INSTANCE_TYPE`` names the host instead (an unknown host never reuses)."""
+    override = os.environ.get("DIFFLET_INSTANCE_TYPE", "").strip()
+    if override:
+        return override
     try:
         req = urllib.request.Request(f"{_IMDS}/api/token", method="PUT",
                                      headers={"X-aws-ec2-metadata-token-ttl-seconds": "60"})
@@ -154,11 +179,72 @@ def key_of(fp: Mapping[str, Any]) -> str:
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
-def cache_block(fp: Mapping[str, Any], *, code: Mapping[str, Any],
-                measured_at: datetime.datetime, max_age_days: int = MAX_AGE_DAYS) -> dict:
-    return {"schema": SCHEMA, "key": key_of(fp), "measured_at": iso(measured_at),
-            "expires_at": iso(measured_at + datetime.timedelta(days=max_age_days)),
-            "fingerprint": dict(fp), "code": dict(code)}
+# ------------------------------------------------------------------------------ the store
+
+
+def store_path(slug: str, store: Optional[Path] = None) -> Path:
+    return Path(store or STORE_DIR) / f"{slug}.json"
+
+
+def load(path: Path) -> Optional[dict]:
+    try:
+        return json.loads(Path(path).read_text())
+    except (OSError, ValueError):
+        return None
+
+
+def entries(slug: str, store: Optional[Path] = None) -> dict[str, dict]:
+    doc = load(store_path(slug, store))
+    if not isinstance(doc, Mapping) or doc.get("schema") != SCHEMA:
+        return {}
+    return dict(doc.get("entries") or {})
+
+
+def _write(slug: str, ents: Mapping[str, Any], store: Optional[Path] = None) -> None:
+    path = store_path(slug, store)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"schema": SCHEMA, "slug": slug, "entries": dict(ents)},
+                               indent=2, sort_keys=True) + "\n")
+
+
+def _age(entry: Mapping[str, Any], now: datetime.datetime) -> datetime.timedelta:
+    return now - parse_iso(entry["measured_at"])
+
+
+def statuses(result: Mapping[str, Any]) -> list[Any]:
+    """The result's status and, for a neuron_cold_warm job, each guidance value's."""
+    return [result.get("status")] + [(r or {}).get("status") for r in
+                                     (result.get("results_by_guidance") or {}).values()]
+
+
+def completed(result: Mapping[str, Any]) -> bool:
+    return all(st in REUSABLE_STATUSES for st in statuses(result))
+
+
+def save(slug: str, fp: Mapping[str, Any], result: Mapping[str, Any], *,
+         code: Mapping[str, Any], measured_at: datetime.datetime, now: datetime.datetime,
+         max_age_days: int = MAX_AGE_DAYS, store: Optional[Path] = None) -> dict:
+    """Store a completed measurement under its key (replacing the old one) and drop this
+    model's expired entries. Returns the entry."""
+    if not completed(result):
+        raise ValueError(f"only a completed result is stored, not {statuses(result)!r}")
+    limit = datetime.timedelta(days=max_age_days)
+    ents = {k: e for k, e in entries(slug, store).items() if _age(e, now) <= limit}
+    entry = {"measured_at": iso(measured_at), "fingerprint": dict(fp), "code": dict(code),
+             "result": dict(result)}
+    ents[key_of(fp)] = entry
+    _write(slug, ents, store)
+    return entry
+
+
+def mark_reused(slug: str, key: str, *, now: datetime.datetime, platform: Mapping[str, Any],
+                code: Mapping[str, Any], store: Optional[Path] = None) -> dict:
+    """Record that an entry was reused (not re-measured); ``measured_at`` stays as it was."""
+    ents = entries(slug, store)
+    ents[key]["last_reused"] = {"at": iso(now), "instance_type": platform.get("instance_type"),
+                                "git_head": code.get("git_head")}
+    _write(slug, ents, store)
+    return ents[key]
 
 
 # ------------------------------------------------------------------------------ decision
@@ -168,6 +254,7 @@ def cache_block(fp: Mapping[str, Any], *, code: Mapping[str, Any],
 class Decision:
     reuse: bool
     reason: str
+    key: Optional[str] = None
 
 
 def _diff(path: str, old: Any, new: Any, out: list[str]) -> None:
@@ -185,65 +272,91 @@ def differences(old: Mapping[str, Any], new: Mapping[str, Any]) -> list[str]:
     return out
 
 
-def _age(cache: Mapping[str, Any], now: datetime.datetime) -> datetime.timedelta:
-    return now - parse_iso(cache["measured_at"])
-
-
-def _days(td: datetime.timedelta) -> str:
-    return f"{td.total_seconds() / 86400:.1f} days"
-
-
-def decide(doc: Optional[Mapping[str, Any]], fp: Mapping[str, Any], *,
-           now: datetime.datetime, max_age_days: int = MAX_AGE_DAYS,
-           code: Optional[Mapping[str, Any]] = None,
-           rerun_on_code_change: bool = False) -> Decision:
-    """Reuse ``doc`` (a committed result) for a run whose fingerprint is ``fp``?"""
-    if doc is None:
-        return Decision(False, "no committed result")
-    cache = doc.get("cache")
-    if not isinstance(cache, Mapping) or cache.get("schema") != SCHEMA:
-        return Decision(False, "committed result has no cache fingerprint "
-                               "(written before the result cache)")
-    statuses = [doc.get("status")] + [(r or {}).get("status") for r in
-                                      (doc.get("results_by_guidance") or {}).values()]
-    bad = [st for st in statuses if st not in REUSABLE_STATUSES]
+def decide_entry(entry: Optional[Mapping[str, Any]], fp: Mapping[str, Any], *,
+                 now: datetime.datetime, max_age_days: int = MAX_AGE_DAYS,
+                 code: Optional[Mapping[str, Any]] = None,
+                 rerun_on_code_change: bool = False) -> Decision:
+    """Reuse this stored ``entry`` for a run whose fingerprint is ``fp``?"""
+    if not isinstance(entry, Mapping):
+        return Decision(False, "no stored result")
+    plat = fp.get("platform") or {}
+    if plat.get("instance_type") in (None, "", "unknown"):
+        return Decision(False, "instance type could not be read on this host (no EC2 "
+                               "metadata); set DIFFLET_INSTANCE_TYPE to name it")
+    if not plat.get("sdk"):
+        return Decision(False, "SDK versions could not be read on this host")
+    result = entry.get("result") or {}
+    bad = [st for st in statuses(result) if st not in REUSABLE_STATUSES]
     if bad:
-        return Decision(False, f"committed result's status is {bad[0]!r}, not "
+        return Decision(False, f"stored result's status is {bad[0]!r}, not "
                                + " or ".join(map(repr, REUSABLE_STATUSES)))
-    old = cache.get("fingerprint") or {}
-    platform = differences(old.get("platform") or {}, fp.get("platform") or {})
+    wanted = ((fp.get("config") or {}).get("run_options") or {}).get("guidance")
+    if wanted and "results_by_guidance" in result:
+        missing = sorted({f"{float(g):.1f}" for g in wanted}
+                         - set(result["results_by_guidance"]))
+        if missing:
+            return Decision(False, f"stored result is missing guidance {', '.join(missing)}")
+    old = entry.get("fingerprint") or {}
+    platform = differences(old.get("platform") or {}, plat)
     if platform:
         what = ("instance type" if any(d.startswith(("instance_type", "device")) for d in platform)
                 else "SDK")
         return Decision(False, f"{what} changed: " + "; ".join(platform))
-    if not (fp.get("platform") or {}).get("sdk"):
-        return Decision(False, "SDK versions could not be read on this host")
     config = differences(old.get("config") or {}, fp.get("config") or {})
     if config:
         return Decision(False, "config changed: " + "; ".join(config))
     try:
-        age = _age(cache, now)
+        age = _age(entry, now)
     except (KeyError, ValueError):
-        return Decision(False, "committed result has no valid measured_at")
+        return Decision(False, "stored result has no valid measured_at")
     if age > datetime.timedelta(days=max_age_days):
         return Decision(False, f"expired: measured {_days(age)} ago "
                                f"(limit {max_age_days} days)")
     if rerun_on_code_change and code is not None:
-        was = cache.get("code") or {}
+        was = entry.get("code") or {}
         if code.get("dirty") or was.get("difflet_tree") != code.get("difflet_tree"):
             return Decision(False, "difflet/ code changed since the measurement")
     left = datetime.timedelta(days=max_age_days) - age
-    return Decision(True, f"measured {cache['measured_at']} on "
-                          f"{(old.get('platform') or {}).get('instance_type')} "
-                          f"({_days(age)} ago, expires in {_days(left)})")
+    return Decision(True, f"measured {entry['measured_at']} on {old['platform'].get('instance_type')}"
+                          f" ({_days(age)} ago, expires in {_days(left)})", key_of(old))
 
 
-def mark_reused(doc: dict, *, now: datetime.datetime, platform: Mapping[str, Any],
-                code: Mapping[str, Any]) -> dict:
-    """Record that ``doc`` was reused (not re-measured); ``measured_at`` stays as it was."""
-    doc["cache"]["last_reused"] = {"at": iso(now),
-                                   "instance_type": platform.get("instance_type"),
-                                   "git_head": code.get("git_head")}
+def decide(slug: str, fp: Mapping[str, Any], *, now: datetime.datetime,
+           max_age_days: int = MAX_AGE_DAYS, code: Optional[Mapping[str, Any]] = None,
+           rerun_on_code_change: bool = False, store: Optional[Path] = None) -> Decision:
+    """Is there a stored entry of ``slug`` this run can reuse? On a miss the reason compares
+    against the closest entry: the same key, else the newest one."""
+    ents = entries(slug, store)
+    if not ents:
+        return Decision(False, f"no stored result in {store_path(slug, store).name}")
+    entry = ents.get(key_of(fp)) or max(ents.values(), key=lambda e: e.get("measured_at", ""))
+    return decide_entry(entry, fp, now=now, max_age_days=max_age_days, code=code,
+                        rerun_on_code_change=rerun_on_code_change)
+
+
+# ------------------------------------------------------------------------------ the reports
+
+
+def report_cache(entry: Mapping[str, Any]) -> dict:
+    """The short ``cache`` summary a report JSON carries for its banner."""
+    fp = entry.get("fingerprint") or {}
+    out = {"key": key_of(fp), "measured_at": entry.get("measured_at"),
+           "instance_type": (fp.get("platform") or {}).get("instance_type"),
+           "git_head": (entry.get("code") or {}).get("git_head")}
+    if entry.get("last_reused"):
+        out["last_reused"] = dict(entry["last_reused"])
+    return out
+
+
+def report_doc(entry: Mapping[str, Any]) -> dict:
+    """The report JSON of a stored entry: its result plus the banner summary."""
+    return {**entry["result"], "cache": report_cache(entry)}
+
+
+def invalidate(doc: dict) -> dict:
+    """Drop a report's ``cache`` summary: a script re-measured some of its fields in place, so
+    the report no longer is the stored measurement (the store itself is untouched)."""
+    doc.pop("cache", None)
     return doc
 
 
@@ -252,11 +365,14 @@ def banner(doc: Mapping[str, Any]) -> list[str]:
     cache = doc.get("cache")
     if not isinstance(cache, Mapping):
         return []
-    plat = (cache.get("fingerprint") or {}).get("platform") or {}
-    head = (cache.get("code") or {}).get("git_head") or "?"
-    lines = [f"**Measured:** {cache.get('measured_at')} on {plat.get('instance_type', '?')} "
-             f"at `{head[:12]}` (cache key `{cache.get('key')}`, reusable until "
-             f"{cache.get('expires_at')})  "]
+    head = cache.get("git_head") or "?"
+    try:
+        until = iso(parse_iso(cache["measured_at"]) + datetime.timedelta(days=MAX_AGE_DAYS))
+    except (KeyError, TypeError, ValueError):
+        until = "?"
+    lines = [f"**Measured:** {cache.get('measured_at')} on {cache.get('instance_type', '?')} "
+             f"at `{head[:12]}` (cached in `benchmark/cached_results/`, key `{cache.get('key')}`;"
+             f" reusable until {until} at the default {MAX_AGE_DAYS}-day limit)  "]
     reused = cache.get("last_reused")
     if reused:
         rhead = reused.get("git_head") or "?"
@@ -266,69 +382,69 @@ def banner(doc: Mapping[str, Any]) -> list[str]:
     return lines
 
 
-# ------------------------------------------------------------------------------ files
-
-
-def load(path: Path) -> Optional[dict]:
-    try:
-        return json.loads(Path(path).read_text())
-    except (OSError, ValueError):
-        return None
-
-
-def try_reuse(path: Path, fp: Mapping[str, Any], *, now: datetime.datetime,
-              max_age_days: int, code: Mapping[str, Any], rerun_on_code_change: bool,
-              render: Callable[[dict], str], md_path: Path) -> Decision:
-    """Reuse the result at ``path`` if it is still valid: mark it reused and re-render its
-    report. Returns the decision either way; the caller measures when ``not reuse``."""
-    doc = load(path)
-    d = decide(doc, fp, now=now, max_age_days=max_age_days, code=code,
-               rerun_on_code_change=rerun_on_code_change)
+def try_reuse(slug: str, fp: Mapping[str, Any], *, now: datetime.datetime, max_age_days: int,
+              code: Mapping[str, Any], rerun_on_code_change: bool,
+              render: Callable[[dict], str], json_path: Path, md_path: Path,
+              store: Optional[Path] = None) -> Decision:
+    """Reuse a stored entry if one is still valid: mark it reused and rewrite the report files
+    from it. Returns the decision either way; the caller measures when ``not reuse``."""
+    d = decide(slug, fp, now=now, max_age_days=max_age_days, code=code,
+               rerun_on_code_change=rerun_on_code_change, store=store)
     if d.reuse:
-        mark_reused(doc, now=now, platform=fp["platform"], code=code)
-        Path(path).write_text(json.dumps(doc, indent=2))
+        entry = mark_reused(slug, d.key, now=now, platform=fp["platform"], code=code,
+                            store=store)
+        doc = report_doc(entry)
+        Path(json_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(json_path).write_text(json.dumps(doc, indent=2))
         Path(md_path).write_text(render(doc))
     return d
+
+
+def record(slug: str, fp: Mapping[str, Any], result: dict, *, code: Mapping[str, Any],
+           measured_at: datetime.datetime, max_age_days: int = MAX_AGE_DAYS,
+           store: Optional[Path] = None) -> Optional[dict]:
+    """After a measurement: store it when it completed and give the report its banner summary
+    (``result`` gains ``cache``). A failed run is not stored. Returns the entry or None."""
+    if not completed(result):
+        return None
+    entry = save(slug, fp, {k: v for k, v in result.items() if k != "cache"}, code=code,
+                 measured_at=measured_at, now=utc_now(), max_age_days=max_age_days,
+                 store=store)
+    result["cache"] = report_cache(entry)
+    return entry
 
 
 # ------------------------------------------------------------------------------ status CLI
 
 
-def status_rows(device_dir: Path, *, now: datetime.datetime,
+def status_rows(store: Optional[Path] = None, *, now: datetime.datetime,
                 max_age_days: int = MAX_AGE_DAYS) -> list[tuple[str, str]]:
     rows = []
-    for path in sorted(Path(device_dir).glob("*.json")):
-        doc = load(path)
-        cache = (doc or {}).get("cache")
-        if not isinstance(cache, Mapping):
-            rows.append((path.stem, "no fingerprint: re-measured on the next run"))
-            continue
-        age = _age(cache, now)
-        plat = (cache.get("fingerprint") or {}).get("platform") or {}
-        where = f"{plat.get('instance_type', '?')}, status {doc.get('status')}"
-        if age > datetime.timedelta(days=max_age_days):
-            rows.append((path.stem, f"EXPIRED ({_days(age)} old; {where})"))
-        else:
-            left = datetime.timedelta(days=max_age_days) - age
-            reused = " reused" if cache.get("last_reused") else ""
-            rows.append((path.stem, f"fresh{reused} ({_days(age)} old, expires in {_days(left)};"
-                                    f" {where})"))
+    for path in sorted(Path(store or STORE_DIR).glob("*.json")):
+        for key, entry in sorted(entries(path.stem, path.parent).items()):
+            plat = (entry.get("fingerprint") or {}).get("platform") or {}
+            backend = ((entry.get("fingerprint") or {}).get("config") or {}).get("backend")
+            age = _age(entry, now)
+            where = f"{plat.get('instance_type', '?')}, {backend}, key {key}"
+            if age > datetime.timedelta(days=max_age_days):
+                rows.append((path.stem, f"EXPIRED ({_days(age)} old; {where})"))
+            else:
+                left = datetime.timedelta(days=max_age_days) - age
+                reused = " reused" if entry.get("last_reused") else ""
+                rows.append((path.stem, f"fresh{reused} ({_days(age)} old, expires in "
+                                        f"{_days(left)}; {where})"))
     return rows
 
 
 def main(argv: Optional[list[str]] = None) -> int:
-    p = argparse.ArgumentParser(description="Status of the committed benchmark results")
-    p.add_argument("--device", default=None, help="device folder (default: every folder)")
+    p = argparse.ArgumentParser(description="Status of the stored benchmark results")
     p.add_argument("--max-age-days", type=int, default=MAX_AGE_DAYS)
     args = p.parse_args(argv)
-    root = REPO_ROOT / "benchmark"
-    dirs = [root / args.device] if args.device else sorted(
-        d for d in root.iterdir() if d.is_dir() and any(d.glob("*.json")))
-    now = utc_now()
-    for d in dirs:
-        print(f"{d.name}/")
-        for slug, state in status_rows(d, now=now, max_age_days=args.max_age_days):
-            print(f"  {slug:28s} {state}")
+    rows = status_rows(now=utc_now(), max_age_days=args.max_age_days)
+    if not rows:
+        print(f"no stored results in {STORE_DIR}")
+    for slug, state in rows:
+        print(f"{slug:28s} {state}")
     return 0
 
 
