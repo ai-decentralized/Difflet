@@ -161,17 +161,41 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
         "--host-vae",
         dest="host_vae",
         action="store_true",
-        help="Decode the VAE on host CPU via diffusers instead of a "
-        "compiled Neuron VAE. Required for Wan clips beyond ~9 "
-        "frames: the single-shot Neuron VAE graph exceeds the "
-        "compiler instruction limit (NCC_EVRF007).",
+        help="Decode the VAE on host CPU via diffusers instead of on a "
+        "NeuronCore. Trainium (AoT): required for Wan clips beyond ~9 "
+        "frames, whose single-shot compiled VAE graph exceeds the "
+        "compiler instruction limit (NCC_EVRF007). --backend neuron: "
+        "optional; Wan's VAE stage otherwise decodes eagerly in fp32 on "
+        "one core, as Qwen-Image's does by default; --host-vae keeps the "
+        "decode on the host instead.",
+    )
+    p.add_argument(
+        "--device-vae",
+        dest="device_vae",
+        action="store_true",
+        help="Qwen-Image on --backend neuron: decode in a VAE stage of its own on one "
+        "NeuronCore (fp32, eager), after the generate launch has exited, instead of on the "
+        "host CPU. The default; mutually exclusive with --host-vae.",
     )
     p.add_argument(
         "--host-text-encoder",
         dest="host_text_encoder",
         action="store_true",
-        help="Wan on the neuron backend: encode prompts with umT5 on rank 0's host CPU (fp32) "
-        "instead of on the device (fp32, TP-sharded, the default)",
+        help="Wan and LTX-2 on the neuron backend: encode prompts on rank 0's host CPU (Wan: "
+        "umT5 in fp32; LTX-2: Gemma-3 in bf16) instead of on the device (TP-sharded, the "
+        "default). Set automatically when the "
+        "TP group is too narrow for umT5 to fit beside the DiT (tp2, e.g. --cfg-parallel or "
+        "--cp-degree 2 on four cores, or --dp 2 --tp-degree 2)",
+    )
+    p.add_argument(
+        "--device-text-encoder",
+        dest="device_text_encoder",
+        action="store_true",
+        help="Qwen-Image on the neuron backend: encode prompts with Qwen2.5-VL's language model "
+        "on the device (bf16, TP-sharded beside the DiT) instead of on rank 0's host CPU (the "
+        "default for now; LTX-2's Gemma-3 is on the device by default). Dropped, with a note, "
+        "when the TP group is too narrow for it to fit "
+        "beside the DiT (tp2, e.g. --cp-degree 2 on four cores or --dp 2 --tp-degree 2)",
     )
     p.add_argument(
         "--taef1",
@@ -361,6 +385,24 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
         help="Wan 2.2 A14B on the neuron backend: hold both experts, the high-noise one above "
         "the checkpoint's boundary timestep and the low-noise one below it (default: the "
         "high-noise expert for every step, as on trainium and tpu)",
+    )
+    p.add_argument(
+        "--true-cfg-scale",
+        dest="true_cfg_scale",
+        type=float,
+        default=None,
+        help="Qwen-Image on the neuron backend: opt-in true classifier-free guidance, two DiT "
+        "forwards per step combined as diffusers' QwenImagePipeline does (above 1 enables it; "
+        "default: off, one forward per step). Needed for --cfg-parallel, which runs the two "
+        "branches on two TP groups",
+    )
+    p.add_argument(
+        "--negative-prompt",
+        dest="negative_prompt",
+        default=None,
+        help="Qwen-Image on the neuron backend: the negative prompt of --true-cfg-scale "
+        "(default with --true-cfg-scale: ' ', diffusers' empty negative prompt). A --requests "
+        "line's negative_prompt wins over it",
     )
     p.add_argument("--seed", type=int, default=42)
     p.add_argument(
@@ -826,7 +868,20 @@ def _validate_cfg_parallel(args: argparse.Namespace) -> None:
         raise SystemExit(1)
     # The staged CLI path builds the app directly, bypassing each model's
     # entry.py guard, so this has to reject before dispatch.
-    if not _capabilities(args.model_id).supports_cfg_parallel:
+    capabilities = _capabilities(args.model_id)
+    if not capabilities.supports_cfg_parallel and _opt_in_true_cfg_backend(capabilities):
+        # A distilled-by-default model with opt-in true CFG on this backend (Qwen-Image on
+        # neuron): compile only warms the batch-2 graph up; generate needs the two branches.
+        if args.command == "compile" or (getattr(args, "true_cfg_scale", None) or 0) > 1:
+            return
+        print(
+            f"Error: --cfg-parallel splits the two branches of true classifier-free guidance; "
+            f"{args.model_id} runs them only with --true-cfg-scale > 1 (opt-in; by default it "
+            "runs one forward per step).",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if not capabilities.supports_cfg_parallel:
         print(
             f"Error: {args.model_id} is guidance-distilled (single forward pass "
             "with the guidance scale baked into the timestep embedding); "
@@ -835,6 +890,14 @@ def _validate_cfg_parallel(args: argparse.Namespace) -> None:
             file=sys.stderr,
         )
         raise SystemExit(1)
+
+
+def _opt_in_true_cfg_backend(capabilities) -> bool:
+    """Whether the selected torchrun backend is one where this model runs opt-in true CFG
+    (``ModelCapabilities.true_cfg_backends``)."""
+    if not capabilities.true_cfg_backends or not _torchrun_backend_selected():
+        return False
+    return _lookup_backend(None).name in capabilities.true_cfg_backends
 
 
 def _replica_cores(args: argparse.Namespace) -> int:
@@ -951,6 +1014,7 @@ def _dispatch_dp(args: argparse.Namespace) -> None:
                 prompt=args.prompt,
                 output=args.output,
                 seed=args.seed,
+                negative_prompt=getattr(args, "negative_prompt", None),
                 guidance_scale=args.guidance_scale,
                 steps=args.steps,
             )

@@ -28,6 +28,9 @@ if TYPE_CHECKING:
     DIFFLET_COMPILE_CACHE: str = "~/.cache/difflet"
     DIFFLET_EXEC_MODE: str | None = None
     DIFFLET_NEURON_PG_TIMEOUT_S: str | None = None
+    DIFFLET_NEURON_HBM_GIB: str | None = None
+    DIFFLET_NEURON_WEIGHT_STORE: str | None = None
+    DIFFLET_NEURON_WEIGHT_STORE_ALL: str | None = None
 
     # ----- Distributed framework (set by torchrun / launcher / tests) -----
     RANK: int = 0
@@ -85,6 +88,28 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # a peer compiles a large block graph on a cold NEFF cache.
     "DIFFLET_NEURON_PG_TIMEOUT_S":
     lambda: os.environ.get("DIFFLET_NEURON_PG_TIMEOUT_S"),
+
+    # One NeuronCore's HBM in GiB (a positive number) for the ``neuron`` backend's load-time
+    # weight budget check (``difflet/backends/neuron/hbm.py``). Unset or blank: ``neuron-ls``,
+    # else trn2's 96 GiB per device over 8 physical cores times the LNC (24 GiB at LNC=2).
+    # Setting it also enables the check off the neuron device (CPU tests).
+    "DIFFLET_NEURON_HBM_GIB":
+    lambda: os.environ.get("DIFFLET_NEURON_HBM_GIB"),
+
+    # The ``neuron`` backend's pre-sharded weight store
+    # (``difflet/backends/neuron/core/weight_store.py``): each rank's slices of a component in
+    # their load dtype, written by the first load and read by later ones instead of the
+    # checkpoint. Unset or blank: ``<DIFFLET_COMPILE_CACHE>/neuron/weights``; a path: that
+    # directory; "0", "off", "false", "none" or "no": off (every load reads the checkpoint).
+    "DIFFLET_NEURON_WEIGHT_STORE":
+    lambda: os.environ.get("DIFFLET_NEURON_WEIGHT_STORE"),
+
+    # Write every component to the neuron weight store, also one whose checkpoint already holds
+    # its load dtype (by default only a store at least 10% smaller than the checkpoint read is
+    # written: on one disk the same bytes load no faster). Set it ("1") when the store lives on
+    # a faster disk than the checkpoint (DIFFLET_NEURON_WEIGHT_STORE on local NVMe).
+    "DIFFLET_NEURON_WEIGHT_STORE_ALL":
+    lambda: os.environ.get("DIFFLET_NEURON_WEIGHT_STORE_ALL"),
 
     # Hardlink pre-sharded weights into a shape-independent store under
     # ``<DIFFLET_COMPILE_CACHE>/_shared_weights/`` so that every compiled shape

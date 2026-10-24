@@ -28,9 +28,11 @@ def create_wan_application(
         )
 
     if backend == "neuron":
-        # TorchNeuron, one process per NeuronCore (torchrun): the DiT on the device, umT5 on
-        # rank 0's host, the VAE on the host (--host-vae). Keyword arguments and their
-        # defaults: neuron_application._KWARG_DEFAULTS.
+        # TorchNeuron, one process per NeuronCore (torchrun): the DiT on the device (TP, SP,
+        # CFG, CP), umT5 on rank 0's host by default or on the device
+        # (text_encoder_device="neuron", the CLI's default), the VAE on the device
+        # (enable_vae_decoder=True) or the host. Keyword arguments and their defaults:
+        # neuron_application._KWARG_DEFAULTS.
         from difflet.models.wan.neuron_application import TorchNeuronWanApplication
 
         return TorchNeuronWanApplication(

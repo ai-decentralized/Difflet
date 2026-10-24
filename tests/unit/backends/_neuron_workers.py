@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import torch
 
+from tests.unit.backends._neuron_gloo import record_block_rows
+
 # --------------------------------------------------------------------------
 # C5: TP collectives and mesh
 # --------------------------------------------------------------------------
@@ -538,6 +540,31 @@ def c8_lifecycle_worker(
     }
 
 
+def c8_hbm_budget_worker(rank: int, world_size: int, model_dir: str) -> dict:
+    """ToyApplication at TP=world: the load's per-rank weight estimate (or the budget error every
+    rank must raise together), plus the bytes the loaded module really holds."""
+    import torch
+
+    from difflet.backends.neuron.hbm import HbmBudgetError
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_toy import ToyApplication
+
+    app = ToyApplication(
+        model_path=model_dir,
+        parallel=DiffletParallelConfig(tp_degree=world_size),
+        dtype=torch.float32,
+        exec_mode="eager",
+        device="cpu",
+    )
+    try:
+        app.load(skip_warmup=True)
+    except HbmBudgetError as exc:
+        return {"outcome": "rejected", "message": str(exc), "weight_bytes": app.weight_bytes}
+    held = sum(t.numel() * t.element_size()
+               for t in (*app.module.parameters(), *app.module.buffers()))
+    return {"outcome": "loaded", "weight_bytes": app.weight_bytes, "held": held}
+
+
 def c8_failure_worker(rank: int, world_size: int, model_dir: str, inject: str) -> dict:
     """Rank 0 fails before a collective; every rank must return instead of hanging."""
     import torch
@@ -641,6 +668,51 @@ def w1_wan_lifecycle_worker(rank: int, world_size: int, model_dir: str, exec_mod
         "local_heads": app.module.blocks[0].attn1.local_heads,
         "param_numel": sum(p.numel() for p in app.module.parameters()),
         "out": out.float().tolist(),
+    }
+
+
+def w1_wan_truncated_worker(rank: int, world_size: int, model_dir: str, num_layers: int,
+                            cp: int, exec_mode: str) -> dict:
+    """The tiny Wan DiT cut to its first ``num_layers`` blocks at TP=world/cp x CP=cp, with the
+    preflight's evidence hook: the sequence length the block stack hands ``norm_out``."""
+    import hashlib
+    import os
+
+    from torch._dynamo.utils import counters
+
+    from difflet.backends.neuron.wan.config import NeuronWanConfig
+    from difflet.backends.neuron.wan.transformer import NeuronWanTransformerApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_wan_toy import TINY_SHAPE, TINY_TEXT_SEQ_LEN, tiny_wan_inputs
+
+    transformer_dir = os.path.join(model_dir, "transformer")
+    tp = world_size // cp
+    config = NeuronWanConfig.from_pretrained(
+        transformer_dir, num_layers=num_layers, tp_degree=tp, text_seq_len=TINY_TEXT_SEQ_LEN,
+        context_parallel_enabled=cp > 1, cp_mode="ulysses" if cp > 1 else "gather_kv",
+        torch_dtype=torch.float32, **TINY_SHAPE,
+    )
+    app = NeuronWanTransformerApplication(
+        model_path=transformer_dir, config=config,
+        parallel=DiffletParallelConfig(tp_degree=tp, cp_degree=cp,
+                                       cp_mode="ulysses" if cp > 1 else "gather_kv"),
+        dtype=torch.float32, exec_mode=exec_mode, device="cpu",
+    )
+    app.load()
+    tokens: list[int] = []
+    hook = app.module.norm_out.register_forward_pre_hook(
+        lambda _mod, args: tokens.append(int(args[0].shape[1])))
+    out = app(*tiny_wan_inputs())
+    hook.remove()
+    return {
+        "num_blocks": len(app.module.blocks),
+        "load_report": app.load_report,
+        "tokens": tokens,
+        "image_seq_len": config.image_seq_len,
+        "graph_breaks": sum(counters["graph_break"].values()),
+        "unwarmed_shapes": list(app.unwarmed_shapes),
+        "out": out.float().tolist(),
+        "sha256": hashlib.sha256(out.contiguous().numpy().tobytes()).hexdigest(),
     }
 
 
@@ -980,6 +1052,7 @@ def w1_wan_cfg_parallel_worker(rank: int, world_size: int, model_dir: str) -> di
     app.load()
     calls: list[float] = []
     app.transformer_adapter.forward_hook = calls.append
+    block_rows = record_block_rows(app.transformer.module.blocks[0])
     prompt_embeds, latents = tiny_wan_pipeline_inputs()
     out = app(prompt_embeds=prompt_embeds, latents=latents, channels=TINY_LATENT_SHAPE[1],
               num_inference_steps=2, guidance_scale=5.0, output_type="latent")
@@ -989,6 +1062,7 @@ def w1_wan_cfg_parallel_worker(rank: int, world_size: int, model_dir: str) -> di
         "sha256": hashlib.sha256(final.contiguous().numpy().tobytes()).hexdigest(),
         "dit_calls": len(calls),
         "unwarmed_shapes": [list(s) for s in app.unwarmed_shapes],
+        "block_rows": block_rows,
     }
 
 
@@ -1016,6 +1090,30 @@ def ulysses_worker(rank: int, world_size: int) -> dict:
             "round_trip_exact": torch.equal(back, local[0])}
 
 
+def w1_wan_initial_noise_worker(rank: int, world_size: int, model_dir: str) -> dict:
+    """The composed application's initial latents when every rank's RNG differs: the global
+    RNG, ``seed=``, and a per-rank generator. No DiT and no encoder are loaded, so the
+    orchestrator returns the initial latents as its final ones."""
+    from difflet.models.wan.neuron_application import TorchNeuronWanApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_wan_toy import TINY_LATENT_SHAPE, TINY_SHAPE, TINY_TEXT_SEQ_LEN
+
+    torch.manual_seed(100 + rank)
+    app = TorchNeuronWanApplication(
+        model_path=model_dir, parallel=DiffletParallelConfig(tp_degree=world_size),
+        dtype=torch.float32, shape=dict(TINY_SHAPE), text_seq_len=TINY_TEXT_SEQ_LEN,
+        exec_mode="eager", device="cpu", enable_transformer=False, enable_text_encoder=False,
+    )
+    app.load()
+    common = {"channels": TINY_LATENT_SHAPE[1], "output_type": "latent"}
+    return {
+        "global_rng": app(**common).latents.tolist(),
+        "seed": app(seed=7, **common).latents.tolist(),
+        "generator": app(generator=torch.Generator().manual_seed(7 + rank), **common)
+        .latents.tolist(),
+    }
+
+
 def w1_wan_cp_worker(rank: int, world_size: int, model_dir: str, cp_mode: str) -> dict:
     """The composed application at TP2 x CP2: two steps at guidance 5.0 on the fixed inputs."""
     import hashlib
@@ -1040,11 +1138,12 @@ def w1_wan_cp_worker(rank: int, world_size: int, model_dir: str, cp_mode: str) -
         encoder_threads=2,
     )
     app.load()
+    block_rows = record_block_rows(app.transformer.module.blocks[0])
     prompt_embeds, latents = tiny_wan_pipeline_inputs()
     out = app(prompt_embeds=prompt_embeds, latents=latents, channels=TINY_LATENT_SHAPE[1],
               num_inference_steps=2, guidance_scale=5.0, output_type="latent")
     final = out.latents
-    return {"latents": final.tolist(),
+    return {"latents": final.tolist(), "block_rows": block_rows,
             "sha256": hashlib.sha256(final.contiguous().numpy().tobytes()).hexdigest()}
 
 
@@ -1097,11 +1196,12 @@ def w1_wan_sp_worker(rank: int, world_size: int, model_dir: str, cfg: bool) -> d
         encoder_threads=2,
     )
     app.load()
+    block_rows = record_block_rows(app.transformer.module.blocks[0])
     prompt_embeds, latents = tiny_wan_pipeline_inputs()
     out = app(prompt_embeds=prompt_embeds, latents=latents, channels=TINY_LATENT_SHAPE[1],
               num_inference_steps=2, guidance_scale=5.0, output_type="latent")
     final = out.latents
-    return {"latents": final.tolist(),
+    return {"latents": final.tolist(), "block_rows": block_rows,
             "sha256": hashlib.sha256(final.contiguous().numpy().tobytes()).hexdigest()}
 
 
@@ -1111,7 +1211,10 @@ def dp_replica_claims_worker(rank: int, world_size: int, requests_dir: str, fail
     import argparse
     from pathlib import Path
 
-    from difflet.cli.orchestrators.wan import _replica_request_scope, _replica_requests
+    from difflet.cli.orchestrators.torchrun import (
+        replica_request_scope as _replica_request_scope,
+    )
+    from difflet.cli.orchestrators.torchrun import replica_requests as _replica_requests
 
     args = argparse.Namespace(requests_dir=Path(requests_dir), worker_index=0,
                               dp_schedule="round_robin")
@@ -1384,3 +1487,71 @@ def hv15_sp_worker(rank: int, world_size: int, model_dir: str, shape: dict, inpu
     app.load()
     assert app.load_report == {"missing": [], "unexpected": []}
     return app(**inputs)[0].tolist()
+
+
+# --------------------------------------------------------------------------
+# Weight store (core/weight_store.py)
+# --------------------------------------------------------------------------
+
+
+def ws_toy_worker(rank: int, world_size: int, model_dir: str, dtype_name: str,
+                  tp_degree: int) -> dict:
+    """ToyApplication at tp=``tp_degree`` (with CFG parallelism when the world is twice that,
+    so two processes load each TP rank) and the store DIFFLET_NEURON_WEIGHT_STORE names: what
+    the store did, the sha256 of every loaded tensor, and the output on rank 0's input."""
+    import hashlib
+
+    from difflet.backends.neuron.core.distributed import broadcast_tensor
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_toy import ToyApplication, toy_blocks_input
+
+    dtype = getattr(torch, dtype_name)
+    parallel = DiffletParallelConfig(tp_degree=tp_degree,
+                                     cfg_parallel_enabled=world_size > tp_degree)
+    app = ToyApplication(model_path=model_dir, parallel=parallel, dtype=dtype,
+                         exec_mode="eager", device="cpu")
+    app.load()
+    x = toy_blocks_input(app.batch, app.seq, app.dim, dtype=dtype) if rank == 0 else None
+    x = broadcast_tensor(x, device=app.device)
+    with torch.no_grad():
+        out = app(x)
+
+    def sha(t):
+        t = t.detach().contiguous().reshape(-1)
+        return hashlib.sha256(t.view(torch.uint8).numpy().tobytes()).hexdigest()
+
+    return {
+        "status": app.weight_store.status,
+        "detail": app.weight_store.detail,
+        "directory": app.weight_store.directory,
+        "tensors": {name: [sha(t), str(t.dtype)] for name, t in app.module.state_dict().items()},
+        "out": sha(out.float()),
+        "report": app.load_report,
+    }
+
+
+def ws_concurrent_launch(model_dir, root, barrier, results):
+    """One single-rank launch of ToyApplication (bf16) racing others to write the same store
+    entry (a multiprocessing target, not a gloo worker): puts (store status, sha256 of the
+    loaded tensors) on ``results``."""
+    import os
+
+    os.environ["DIFFLET_NEURON_WEIGHT_STORE"] = root
+    os.environ["DIFFLET_BACKEND"] = "neuron"
+    for name in ("RANK", "WORLD_SIZE", "LOCAL_RANK"):
+        os.environ.pop(name, None)
+    import hashlib
+
+    from difflet.backends.neuron.ops_impl import parallel_mesh as mesh
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_toy import ToyApplication
+
+    mesh.destroy_parallel_mesh()
+    app = ToyApplication(model_path=model_dir, parallel=DiffletParallelConfig(),
+                         dtype=torch.bfloat16, exec_mode="eager", device="cpu")
+    barrier.wait()
+    app.load(skip_warmup=True)
+    digest = hashlib.sha256()
+    for t in app.module.state_dict().values():
+        digest.update(t.contiguous().reshape(-1).view(torch.uint8).numpy().tobytes())
+    results.put((app.weight_store.status, digest.hexdigest()))

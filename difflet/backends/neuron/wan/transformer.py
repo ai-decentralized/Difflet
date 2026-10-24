@@ -20,6 +20,12 @@ import re
 import torch
 
 from difflet.backends.neuron.core.application_base import TorchNeuronApplicationBase
+from difflet.backends.neuron.core.config_checks import (
+    check_tp_matches,
+    require_bf16_on_device,
+    resolve_cp_degree,
+    truncated_block_prefixes,
+)
 from difflet.backends.neuron.wan.config import NeuronWanConfig
 
 # The module -> checkpoint direction of the FFN renames (copied from
@@ -47,6 +53,9 @@ class NeuronWanTransformerApplication(TorchNeuronApplicationBase):
     Wan passes ``reduce_dtype=dtype`` to its TP linears and the neuron layers ignore it,
     all-reducing in the activation dtype; that matches NxD for the bf16 runs the ruling was
     made for, and this check stops any other dtype from reaching the device unexamined).
+    A ``num_layers`` below the checkpoint's (``NeuronWanConfig.from_pretrained(...,
+    num_layers=N)``) loads the first N blocks and reports the others under
+    ``load_report["skipped"]``.
     """
 
     block_attrs = ("blocks",)
@@ -70,20 +79,17 @@ class NeuronWanTransformerApplication(TorchNeuronApplicationBase):
             device=device,
             **kwargs,
         )
+        check_tp_matches("NeuronWanConfig", config, self.parallel)
+        # As for Qwen-Image: the config sizes the module and the parallel config the mesh, and
+        # WanTransformer3DModel calls init_parallel_mesh(config) again under CP/CFG.
+        config = resolve_cp_degree("NeuronWanConfig", config, self.parallel)
         config.validate()
-        if int(config.tp_degree) != int(self.parallel.tp_degree):
-            raise ValueError(
-                f"NeuronWanConfig has tp_degree={config.tp_degree} but the parallel config has "
-                f"tp_degree={self.parallel.tp_degree}; the module would be sharded for one and "
-                "the mesh built for the other"
-            )
-        if self.device.type == "neuron" and self.dtype is not torch.bfloat16:
-            raise ValueError(
-                f"the Wan DiT runs in torch.bfloat16 on the neuron device, got {self.dtype} "
-                "(decision D42: the TP layers all-reduce in the activation dtype, checked "
-                "against NxD for bf16 only)"
-            )
+        require_bf16_on_device("Wan", self.device.type, self.dtype)
         self.config = config
+        # Blocks past num_layers are in the checkpoint on purpose when num_layers was cut.
+        skipped = truncated_block_prefixes(config, "blocks.")
+        if skipped:
+            self.skipped_checkpoint_prefixes = skipped
 
     def build_module(self) -> torch.nn.Module:
         from difflet.models.wan.modeling_wan import WanTransformer3DModel

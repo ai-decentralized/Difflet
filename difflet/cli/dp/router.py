@@ -108,6 +108,9 @@ def worker_cli_args(args) -> list[str]:
         ("--teacache-online-delta", getattr(args, "teacache_online_delta", None)),
         ("--teacache-speedup", getattr(args, "teacache_speedup", None)),
         ("--teacache-calibration", getattr(args, "teacache_calibration", None)),
+        ("--true-cfg-scale", getattr(args, "true_cfg_scale", None)),
+        # The default for requests without one of their own (a manifest line's wins).
+        ("--negative-prompt", getattr(args, "negative_prompt", None)),
     ):
         if value is not None:
             argv += [flag, str(value)]
@@ -116,7 +119,9 @@ def worker_cli_args(args) -> list[str]:
         ("--sp", "sp_enabled"),
         ("--keep-work-dir", "keep_work_dir"),
         ("--host-text-encoder", "host_text_encoder"),
+        ("--device-text-encoder", "device_text_encoder"),
         ("--host-vae", "host_vae"),
+        ("--device-vae", "device_vae"),
         ("--dual-expert", "dual_expert"),
     ):
         if getattr(args, name, False):
@@ -129,7 +134,11 @@ def _check_hbm(args) -> None:
     from difflet.pipeline.path_resolver import resolve_model_path
 
     try:
-        model_path = resolve_model_path(args.model_id, local_files_only=True)
+        # The pinned --revision, as the workers resolve it: without it the check would read
+        # refs/main (another snapshot, or none at all in a cache that holds only the pin).
+        model_path = resolve_model_path(
+            args.model_id, revision=getattr(args, "revision", None), local_files_only=True
+        )
     except OSError:
         print("[dp-router] weights not local; skipping HBM fit check", flush=True)
         return

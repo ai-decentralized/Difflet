@@ -14,6 +14,17 @@ compile mode the identical ``QwenImageTransformerBlock``s are compiled in place 
 graph while the top level (patch/text input projections, timestep embedding, final norm and
 projection, and the CP scatter/gather) stays eager.
 
+Sequence parallelism (``sp_enabled``, Megatron SP within the TP group) builds the trace module's
+``QwenImageSPTransformer2DModel`` fork (``difflet/models/qwen_image/modeling_qwen.py``) instead
+of diffusers' class: the same submodule layout and checkpoint keys, the four row-parallel
+outputs built with ``reduce_output=False``, both residual streams sharded along their own
+sequence axis between the blocks, and each TP region entered with an all-gather and left with a
+reduce-scatter instead of the all-reduce. The neuron ops supply those collectives over the TP
+group (``ops_impl/collectives.py``); the fork's ``_sp_unbias`` removes the ``tp - 1`` extra
+biases the un-reduced partials carry (the neuron ``RowParallelLinear`` adds the full bias to
+each partial, as NxD's does). The blocks' collectives are functional collectives, so the block
+graph compiles as one graph per block class, as without SP.
+
 The text mask is dropped, as on Trainium and TPU: prompts are zero-padded to ``text_seq_len``
 and attended unmasked. The modeling's forward deletes ``encoder_hidden_states_mask`` (the
 diffusers mask path builds the active length with ``arange``/``where``, which the fixed-shape
@@ -24,11 +35,16 @@ Qwen-Image backend shares. Masked attention is a follow-up, not a phase-1 featur
 
 from __future__ import annotations
 
-import dataclasses
-
 import torch
 
 from difflet.backends.neuron.core.application_base import TorchNeuronApplicationBase
+from difflet.backends.neuron.core.config_checks import (
+    check_flag_matches,
+    check_tp_matches,
+    require_bf16_on_device,
+    resolve_cp_degree,
+    truncated_block_prefixes,
+)
 from difflet.backends.neuron.qwen_image.config import NeuronQwenImageConfig
 
 #: The trace module nests the diffusers model under this attribute; checkpoint keys are the
@@ -48,16 +64,41 @@ def checkpoint_key(name: str) -> str:
 
 
 def _trace_module_class():
-    """``_QwenImageTransformerTraceModule`` with the mask and guidance optional.
+    """``_QwenImageTransformerTraceModule`` with the mask and guidance optional, and CFG
+    parallelism.
 
     The warm-up broadcasts tensors only (``broadcast_tensor`` has no None), so it calls the
     module with the three tensors the DiT actually consumes; the orchestrator's five-argument
     call keeps working. Built lazily: importing the modeling binds ``difflet.ops`` to the
     selected backend, which must not happen when this module is merely imported.
+
+    With ``cfg_parallel_enabled`` the call carries the true-CFG pair ``[negative,
+    conditional]`` as batch 2 (``QwenImageOrchestrator._true_cfg_step``): each rank keeps the
+    half of its CFG coordinate (``scatter_to_process_group_spmd`` over the CFG group, a local
+    narrow: rank 0 of the group the negative branch, rank 1 the conditional one), runs the
+    batch-1 DiT on it in its own TP group, and the halves are all-gathered back along the
+    batch, so every rank returns both predictions in order, as Wan's model does. The blocks
+    still see batch 1, so the block graph is the non-CFG one. This lives in the neuron
+    subclass: the Trainium and TPU paths never run CFG parallelism for Qwen-Image.
     """
     from difflet.models.qwen_image.modeling_qwen_image import _QwenImageTransformerTraceModule
+    from difflet.ops import (
+        SPMDRank,
+        gather_from_tensor_model_parallel_region_with_dim,
+        get_cfg_group,
+        get_cfg_rank_spmd,
+        get_world_group,
+        scatter_to_process_group_spmd,
+    )
 
     class NeuronQwenImageTraceModule(_QwenImageTransformerTraceModule):
+        def __init__(self, config):
+            super().__init__(config)
+            self.cfg_parallel_enabled = bool(getattr(config, "cfg_parallel_enabled", False))
+            if self.cfg_parallel_enabled:
+                self.cfg_group = get_cfg_group()
+                self.cfg_rank_util = SPMDRank(world_size=get_world_group().size())
+
         def forward(
             self,
             hidden_states: torch.Tensor,
@@ -66,9 +107,24 @@ def _trace_module_class():
             encoder_hidden_states_mask: torch.Tensor | None = None,
             guidance: torch.Tensor | None = None,
         ) -> torch.Tensor:
-            return super().forward(
-                hidden_states, timestep, encoder_hidden_states, encoder_hidden_states_mask,
-                guidance,
+            if not self.cfg_parallel_enabled:
+                return super().forward(
+                    hidden_states, timestep, encoder_hidden_states, encoder_hidden_states_mask,
+                    guidance,
+                )
+            rank = get_cfg_rank_spmd(self.cfg_rank_util.get_rank())
+
+            def mine(tensor):
+                return scatter_to_process_group_spmd(
+                    tensor, partition_dim=0, rank=rank, process_group=self.cfg_group
+                )
+
+            output = super().forward(
+                mine(hidden_states), mine(timestep), mine(encoder_hidden_states), None,
+                None if guidance is None else mine(guidance),
+            )
+            return gather_from_tensor_model_parallel_region_with_dim(
+                output, gather_dim=0, process_group=self.cfg_group
             )
 
     return NeuronQwenImageTraceModule
@@ -80,8 +136,9 @@ class NeuronQwenImageTransformerApplication(TorchNeuronApplicationBase):
 
     ``model_path`` is the transformer directory (``<model>/transformer``). The config sizes the
     module and the parallel config the mesh, so they must agree: ``tp_degree`` equal,
-    ``context_parallel_enabled`` iff ``parallel.cp_degree > 1`` with the same ``cp_mode``, and
-    no CFG parallelism (Qwen-Image is guidance-distilled). With CP on, the trace module calls
+    ``context_parallel_enabled`` iff ``parallel.cp_degree > 1`` with the same ``cp_mode``,
+    ``sp_enabled`` and ``cfg_parallel_enabled`` equal (CFG parallelism splits the batch-2
+    true-CFG call over the CFG group; see ``_trace_module_class``). With CP on, the trace module calls
     ``init_parallel_mesh(config)`` again while it is built; the neuron mesh derives cp as
     ``world / (tp * cfg * dp)`` from the config, which these checks make equal to the spec the
     base initialised from ``parallel``, so that call is the idempotent no-op. ``config.cp_degree``
@@ -115,58 +172,21 @@ class NeuronQwenImageTransformerApplication(TorchNeuronApplicationBase):
             device=device,
             **kwargs,
         )
-        parallel = self.parallel
-        if int(config.tp_degree) != int(parallel.tp_degree):
-            raise ValueError(
-                f"NeuronQwenImageConfig has tp_degree={config.tp_degree} but the parallel config "
-                f"has tp_degree={parallel.tp_degree}; the module would be sharded for one and "
-                "the mesh built for the other"
-            )
-        if parallel.cfg_parallel_enabled:
-            raise NotImplementedError(
-                "Qwen-Image is guidance-distilled (one forward per step); CFG parallelism does "
-                "not apply"
-            )
-        # Checked here, not left to check_parallel_supported: the neuron runtime runs SP for
-        # Wan, so it lets sp_enabled through, and the Qwen trace module built from this config
-        # (sp_enabled=False) would silently ignore it.
-        if getattr(parallel, "sp_enabled", False):
-            raise NotImplementedError(
-                "Qwen-Image on the neuron backend runs tensor and context parallelism; "
-                "sequence parallelism is not implemented"
-            )
-        cp = int(parallel.cp_degree)
-        if bool(config.context_parallel_enabled) != (cp > 1):
-            raise ValueError(
-                f"NeuronQwenImageConfig has context_parallel_enabled="
-                f"{config.context_parallel_enabled} but the parallel config has cp_degree={cp}"
-            )
-        if cp > 1 and str(config.cp_mode) != str(parallel.cp_mode):
-            raise ValueError(
-                f"NeuronQwenImageConfig has cp_mode={config.cp_mode!r} but the parallel config "
-                f"has cp_mode={parallel.cp_mode!r}"
-            )
-        if config.cp_degree is None:
-            config = dataclasses.replace(config, cp_degree=cp)
-        elif int(config.cp_degree) != cp:
-            raise ValueError(
-                f"NeuronQwenImageConfig has cp_degree={config.cp_degree} but the parallel config "
-                f"has cp_degree={cp}"
-            )
+        name = "NeuronQwenImageConfig"
+        check_tp_matches(name, config, self.parallel)
+        check_flag_matches(name, config, self.parallel, "cfg_parallel_enabled")
+        # The mesh carries no SP flag (MeshSpec drops it), so the module is the only place SP
+        # takes effect: a config without it would build the dense model under an SP launch,
+        # and one with it would shard where the caller asked for none.
+        check_flag_matches(name, config, self.parallel, "sp_enabled")
+        config = resolve_cp_degree(name, config, self.parallel)
         config.validate()
-        if self.device.type == "neuron" and self.dtype is not torch.bfloat16:
-            raise ValueError(
-                f"the Qwen-Image DiT runs in torch.bfloat16 on the neuron device, got "
-                f"{self.dtype} (decision D42: the TP layers all-reduce in the activation dtype, "
-                "checked against NxD for bf16 only)"
-            )
+        require_bf16_on_device("Qwen-Image", self.device.type, self.dtype)
         self.config = config
         # Blocks past num_layers are in the checkpoint on purpose when num_layers was cut.
-        total = config.checkpoint_num_layers
-        if total is not None and int(total) > int(config.num_layers):
-            self.skipped_checkpoint_prefixes = tuple(
-                f"transformer_blocks.{i}." for i in range(int(config.num_layers), int(total))
-            )
+        skipped = truncated_block_prefixes(config, "transformer_blocks.")
+        if skipped:
+            self.skipped_checkpoint_prefixes = skipped
 
     def build_module(self) -> torch.nn.Module:
         return _trace_module_class()(self.config)
@@ -199,12 +219,13 @@ class NeuronQwenImageTransformerApplication(TorchNeuronApplicationBase):
 
         The packed latents ``[B, image_seq_len, in_channels]``, the per-sample timestep and the
         zero-padded text embeddings ``[B, text_seq_len, joint_attention_dim]``: exactly the
-        per-step shapes the orchestrator sends (one forward per step, no CFG batch), so the
-        warm-up compiles the only block graph the run needs. Under CP every rank receives the
-        full sequence and the module scatters it.
+        per-call shapes the orchestrator sends, so the warm-up compiles the only block graph
+        the run needs. B is 1, or 2 under CFG parallelism (the ``[negative, conditional]``
+        pair, which the module splits over the CFG group: each rank's blocks still see batch
+        1). Under CP every rank receives the full sequence and the module scatters it.
         """
         cfg = self.config
-        batch = int(cfg.batch_size)
+        batch = cfg.dit_batch
         return (
             torch.zeros(batch, cfg.image_seq_len, int(cfg.in_channels), dtype=self.dtype),
             torch.zeros(batch, dtype=self.dtype),

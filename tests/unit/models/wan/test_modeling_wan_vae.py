@@ -183,3 +183,44 @@ def test_wan_vae_decoder_inference_config_shapes():
     inputs = mw.input_generator()
     assert tuple(inputs[0][0].shape) == (1, 16, 3, 60, 104)
     assert inputs[0][0].dtype == torch.bfloat16
+
+
+def test_attention_block_uses_explicit_attention_on_neuron_only():
+    """The neuron backend's fused SDPA (nkilib attention_cte) fails this block's one head of
+    d=384 at >= 8192 key tokens (device 2026-10-18, Qwen-Image 1024x1024: 16384 tokens), so the
+    neuron device gets the written-out attention; every other device keeps the fused call."""
+    import torch.nn.functional as F
+
+    from difflet.models.wan.vae import modeling_vae as m
+
+    assert m._spatial_attention_impl("neuron") is m._explicit_attention
+    for device_type in ("cpu", "xla", "cuda"):
+        assert m._spatial_attention_impl(device_type) is F.scaled_dot_product_attention
+
+
+def test_explicit_attention_matches_sdpa():
+    import torch.nn.functional as F
+
+    from difflet.models.wan.vae import modeling_vae as m
+
+    torch.manual_seed(0)
+    q, k, v = (torch.randn(2, 1, 77, 24, dtype=torch.float64) for _ in range(3))
+    torch.testing.assert_close(
+        m._explicit_attention(q, k, v), F.scaled_dot_product_attention(q, k, v),
+        rtol=1e-12, atol=1e-12,
+    )
+
+
+def test_attention_block_output_is_the_same_with_either_attention(monkeypatch):
+    """The whole block (norm, qkv conv, attention, proj, residual) on a non-square frame: the
+    explicit attention the neuron device runs gives the fused call's output."""
+    from difflet.models.wan.vae import modeling_vae as m
+
+    torch.manual_seed(0)
+    block = m.WanAttentionBlock(16).double().eval()
+    x = torch.randn(1, 16, 2, 6, 10, dtype=torch.float64)
+    with torch.no_grad():
+        fused = block(x)
+        monkeypatch.setattr(m, "_spatial_attention_impl", lambda device_type: m._explicit_attention)
+        explicit = block(x)
+    torch.testing.assert_close(explicit, fused, rtol=1e-10, atol=1e-10)
