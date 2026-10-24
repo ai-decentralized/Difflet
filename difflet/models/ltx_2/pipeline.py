@@ -21,6 +21,7 @@ import torch
 from difflet.models.ltx_2.application import LTX2DiTInputBundle
 from difflet.models.ltx_2.application import LTX_2_DEFAULT_NUM_FRAMES
 from difflet.models.ltx_2.application import LTX_2_DEFAULT_TEXT_SEQ_LEN
+from difflet.utils.latent_dump import dump_latents
 
 
 @dataclass
@@ -536,6 +537,8 @@ class LTX2Orchestrator:
     ) -> tuple[torch.Tensor, torch.Tensor]:
         latents = bundle.hidden_states
         audio_latents = bundle.audio_hidden_states
+        dump_latents("initial_video", latents)
+        dump_latents("initial_audio", audio_latents)
         audio_scheduler = copy.deepcopy(self.scheduler) if self.scheduler is not None else None
         # TeaCache: the controller tracks only the video stream; the audio residual is
         # maintained manually here. cclog 87 fix: cache the raw VELOCITY model output (what
@@ -725,6 +728,8 @@ class LTX2Orchestrator:
                 trajectory.append((latents.detach().cpu(), audio_latents.detach().cpu()))
         if ctrl is not None:
             print(f"[teacache] stats: {ctrl.stats()}", flush=True)
+        dump_latents("final_video", latents)
+        dump_latents("final_audio", audio_latents)
         return latents, audio_latents
 
     def _full_dit_step(
