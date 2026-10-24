@@ -101,6 +101,8 @@ def test_reexports_are_the_tpu_objects_not_copies():
         "narrow_to_rank",
         "shard_dim",
         "shard_state_dict",
+        "single_block_proj_out_key",
+        "single_block_proj_out_slices",
     ]
 
 
