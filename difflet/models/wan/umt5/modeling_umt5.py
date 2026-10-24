@@ -73,6 +73,8 @@ class WanUmT5Config:
     dense_act_fn: str = "gelu_new"
     feed_forward_proj: str = "gated-gelu"
     layer_norm_epsilon: float = 1e-6
+    # Precision of the FFN row-parallel all-reduce (--tp-reduce-dtype).
+    tp_reduce_dtype: torch.dtype = torch.bfloat16
 
     def __post_init__(self) -> None:
         if not self.is_gated_act:
@@ -112,7 +114,11 @@ class WanUmT5DenseGatedActDense(nn.Module):
             config.d_model, config.d_ff, bias=False, gather_output=False
         )
         self.wo = RowParallelLinear(
-            config.d_ff, config.d_model, bias=False, input_is_parallel=True
+            config.d_ff,
+            config.d_model,
+            bias=False,
+            input_is_parallel=True,
+            reduce_dtype=config.tp_reduce_dtype,
         )
         self.act = ACT2FN[config.dense_act_fn]
 

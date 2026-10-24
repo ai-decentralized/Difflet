@@ -10,7 +10,13 @@ import torch
 from difflet.backends.trainium.core.application_base import NeuronApplicationBase
 from difflet.backends.trainium.core.config import InferenceConfig
 from difflet.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
+from difflet.common.tp_reduce import config_reduce_dtype
 from difflet.models.wan.umt5.modeling_umt5 import WanUmT5EncoderModel
+
+
+def _umt5_reduce_dtype(config) -> torch.dtype:
+    """umT5 all-reduce dtype from the inference config (default bf16)."""
+    return config_reduce_dtype(config)
 
 
 class WanTextEncoderInferenceConfig(InferenceConfig):
@@ -107,6 +113,7 @@ class ModelWrapperWanTextEncoder(ModelWrapper):
                 is_gated_act=getattr(self.config, "is_gated_act", True),
                 dense_act_fn=getattr(self.config, "dense_act_fn", "gelu_new"),
                 layer_norm_epsilon=self.config.layer_norm_epsilon,
+                tp_reduce_dtype=_umt5_reduce_dtype(self.config),
             )
             model = self.model_cls(cfg)
             model = model.to(dtype=self.config.neuron_config.torch_dtype)

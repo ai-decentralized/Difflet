@@ -15,11 +15,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 _ALLOWED_PREFIXES = ("difflet/backends/trainium/minimax_h3/",)
 
-# Sites still on the NxD fp32 default, by file. Each per-model bf16 commit
-# removes its entry; the target state is empty.
-EXPECTED_DEFAULT_SITES: dict[str, int] = {
-    "difflet/models/wan/umt5/modeling_umt5.py": 1,
-}
+# Sites still on the NxD fp32 default, by file (MiniMax-H3 aside): none.
+EXPECTED_DEFAULT_SITES: dict[str, int] = {}
 
 
 def _default_sites() -> Counter:

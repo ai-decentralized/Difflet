@@ -83,6 +83,13 @@ def _safe_tp_size() -> int:
         return 1
 
 
+def _wan_reduce_dtype(config, dtype: Optional[torch.dtype]) -> Optional[torch.dtype]:
+    """Row-parallel all-reduce dtype: --tp-reduce-dtype (via the Trainium
+    config's neuron_config) when set, else ``dtype`` as before the flag."""
+    neuron_config = getattr(config, "neuron_config", None)
+    return getattr(neuron_config, "rpl_reduce_dtype", None) or dtype
+
+
 def _sp_unbias(x: torch.Tensor, row_linear: nn.Module) -> torch.Tensor:
     """Correct the bias double-count of a ``reduce_output=False`` row-parallel
     linear under Megatron-SP.
@@ -315,6 +322,7 @@ class WanFeedForward(nn.Module):
         inner_dim: int,
         dtype: Optional[torch.dtype] = None,
         sp_enabled: bool = False,
+        reduce_dtype: Optional[torch.dtype] = None,
     ):
         super().__init__()
         self.sp_enabled = sp_enabled
@@ -332,7 +340,9 @@ class WanFeedForward(nn.Module):
             bias=True,
             input_is_parallel=True,
             dtype=dtype,
-            reduce_dtype=dtype,
+            # None (no --tp-reduce-dtype in the config) keeps NxD's fallback to
+            # dtype, i.e. the activation dtype when dtype is None.
+            reduce_dtype=reduce_dtype or dtype,
             # Under Megatron-SP the cross-rank sum is folded into the ḡ
             # reduce-scatter below, so the row-parallel must not also all-reduce.
             reduce_output=not sp_enabled,
@@ -415,8 +425,10 @@ class WanAttention(nn.Module):
         context_parallel_enabled: bool = False,
         cp_mode: str = "gather_kv",
         sp_enabled: bool = False,
+        reduce_dtype: Optional[torch.dtype] = None,
     ):
         super().__init__()
+        reduce_dtype = reduce_dtype or dtype
         self.dim = dim
         self.heads = heads
         self.head_dim = head_dim
@@ -463,7 +475,7 @@ class WanAttention(nn.Module):
                     bias=True,
                     input_is_parallel=True,
                     dtype=dtype,
-                    reduce_dtype=dtype,
+                    reduce_dtype=reduce_dtype,
                     # Under Megatron-SP the cross-rank sum is folded into the ḡ
                     # reduce-scatter in forward(); don't also all-reduce here.
                     reduce_output=not sp_enabled,
@@ -599,6 +611,7 @@ class WanTransformerBlock(nn.Module):
         context_parallel_enabled: bool = False,
         cp_mode: str = "gather_kv",
         sp_enabled: bool = False,
+        reduce_dtype: Optional[torch.dtype] = None,
     ):
         super().__init__()
         head_dim = dim // num_heads
@@ -607,13 +620,13 @@ class WanTransformerBlock(nn.Module):
         self.attn1 = WanAttention(
             dim, num_heads, head_dim, eps=eps, is_cross_attention=False, dtype=dtype,
             context_parallel_enabled=context_parallel_enabled, cp_mode=cp_mode,
-            sp_enabled=sp_enabled,
+            sp_enabled=sp_enabled, reduce_dtype=reduce_dtype,
         )
 
         self.attn2 = WanAttention(
             dim, num_heads, head_dim, eps=eps, is_cross_attention=True, dtype=dtype,
             context_parallel_enabled=context_parallel_enabled, cp_mode=cp_mode,
-            sp_enabled=sp_enabled,
+            sp_enabled=sp_enabled, reduce_dtype=reduce_dtype,
         )
         self.norm2 = (
             FP32LayerNorm(dim, eps, elementwise_affine=True)
@@ -621,7 +634,9 @@ class WanTransformerBlock(nn.Module):
             else nn.Identity()
         )
 
-        self.ffn = WanFeedForward(dim, ffn_dim, dtype=dtype, sp_enabled=sp_enabled)
+        self.ffn = WanFeedForward(
+            dim, ffn_dim, dtype=dtype, sp_enabled=sp_enabled, reduce_dtype=reduce_dtype
+        )
         self.norm3 = FP32LayerNorm(dim, eps, elementwise_affine=False)
 
         self.scale_shift_table = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
@@ -755,6 +770,7 @@ class WanTransformer3DModel(nn.Module):
                     context_parallel_enabled=self.context_parallel_enabled,
                     cp_mode=self.cp_mode,
                     sp_enabled=self.sp_enabled,
+                    reduce_dtype=_wan_reduce_dtype(config, dtype),
                 )
                 for _ in range(config.num_layers)
             ]
