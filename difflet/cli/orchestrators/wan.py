@@ -239,6 +239,7 @@ class WanOrchestrator(ModelOrchestrator):
             teacache_cadence=getattr(args, "teacache_cadence", None),
             teacache_online_delta_alpha=getattr(args, "teacache_online_delta", None),
             teacache_calibration_path=teacache_calibration,
+            tp_reduce_dtype=getattr(args, "tp_reduce_dtype", None),
         )
         if args.stage_mode == "compile":
             app.compile(str(compiled_dir))
@@ -339,6 +340,8 @@ class WanOrchestrator(ModelOrchestrator):
             # Additive: the probe key appears only for a calibrated-adaptive
             # request, so every existing artifact keeps its identity.
             probe = {"teacache_probe": True} if _teacache_probe_required(args) else {}
+            from difflet.common.tp_reduce import parse_tp_reduce_dtype, tp_reduce_cache_fields
+
             return {
                 **probe,
                 "component": f"{prefix}_transformer",
@@ -352,6 +355,11 @@ class WanOrchestrator(ModelOrchestrator):
                 "text_seq_len": 512,
                 "shapes": canonical_shapes_list(args, (480, 832, 9)),
                 "toolchain": stage_toolchain_versions(),
+                # The artifact holds the DiT (bf16 reduce) and umT5 (fp32 reduce
+                # before this flag): mixed legacy, so it always names its dtype.
+                **tp_reduce_cache_fields(
+                    parse_tp_reduce_dtype(getattr(args, "tp_reduce_dtype", None)), legacy=None
+                ),
             }
         if stage == "vae":
             return {
@@ -398,6 +406,8 @@ class WanOrchestrator(ModelOrchestrator):
             parts += ["--shapes", str(a.shapes)]
         if getattr(a, "cfg_parallel", False):
             parts.append("--cfg-parallel")
+        if getattr(a, "tp_reduce_dtype", None):
+            parts += ["--tp-reduce-dtype", a.tp_reduce_dtype]
         if getattr(a, "sp_enabled", False):
             parts.append("--sp")
         if getattr(a, "teacache_cadence", None) is not None:

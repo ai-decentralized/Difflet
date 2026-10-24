@@ -256,6 +256,7 @@ _TP_REDUCE_LEGACY: dict[str, str | None] = {
     "ltx_2": "fp32",
     "hunyuan_video": "fp32",
     "flux": None,  # bf16 DiT, fp32 T5/CLIP
+    "wan": None,  # bf16 DiT, fp32 umT5
 }
 
 
