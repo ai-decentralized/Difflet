@@ -1,7 +1,10 @@
 """DP isolation invariants (spec §Testing 2): the dp axis must never reach a
 worker's compiled graph, and dp>1 must not perturb the compile-cache key."""
+import argparse
 import re
 from pathlib import Path
+
+import pytest
 
 import difflet
 from difflet.pipeline.parallel_config import DiffletParallelConfig
@@ -22,6 +25,30 @@ def test_worker_cli_args_never_forward_dp_or_mode():
     )
     argv = worker_cli_args(args)
     assert "--dp" not in argv and "--mode" not in argv
+
+
+@pytest.mark.parametrize("value", ["fp32", "bf16"])
+def test_worker_cli_args_forward_tp_reduce_dtype(value):
+    from difflet.cli.dp.router import worker_cli_args
+
+    args = argparse.Namespace(
+        model_id="Qwen/Qwen-Image", tp_degree=4, cp_degree=None, cp_mode=None,
+        height=None, width=None, num_frames=None, steps=None, guidance_scale=None,
+        seed=None, cache_dir=None, tp_reduce_dtype=value,
+    )
+    argv = worker_cli_args(args)
+    assert argv[argv.index("--tp-reduce-dtype") + 1] == value
+
+
+def test_worker_cli_args_omit_absent_tp_reduce_dtype():
+    from difflet.cli.dp.router import worker_cli_args
+
+    args = argparse.Namespace(
+        model_id="Qwen/Qwen-Image", tp_degree=4, cp_degree=None, cp_mode=None,
+        height=None, width=None, num_frames=None, steps=None, guidance_scale=None,
+        seed=None, cache_dir=None, tp_reduce_dtype=None,
+    )
+    assert "--tp-reduce-dtype" not in worker_cli_args(args)
 
 
 def test_dp1_cache_key_identical_to_no_dp():

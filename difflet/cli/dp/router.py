@@ -112,6 +112,8 @@ def worker_cli_args(args) -> list[str]:
         argv.append("--cfg-parallel")
     if getattr(args, "sp_enabled", False):
         argv.append("--sp")
+    if getattr(args, "tp_reduce_dtype", None):
+        argv += ["--tp-reduce-dtype", args.tp_reduce_dtype]
     if getattr(args, "keep_work_dir", False):
         argv.append("--keep-work-dir")
     if getattr(args, "torch_compile", False):
