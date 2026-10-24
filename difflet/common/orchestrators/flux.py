@@ -8,6 +8,7 @@ from pathlib import Path
 
 from difflet.common.neuron_cores import select_neuron_core_ids
 from difflet.pipeline.compile_cache import CacheSpec
+from difflet.pipeline.difflet_pipeline import _cache_application_kwargs
 from difflet.serving.types import (
     ArtifactPublishTarget,
     CompileArtifactIdentity,
@@ -86,7 +87,8 @@ def build_compile_plan(
         num_frames=profile.num_frames,
         shapes=profile.shapes,
         revision=source.resolved_source_id,
-        application_kwargs=application_kwargs or None,
+        # The identity DiffletPipeline keys the artifact with (incl. tp_reduce_dtype).
+        application_kwargs=_cache_application_kwargs(application_kwargs, model_name=MODEL_TYPE),
     )
     identity = CompileArtifactIdentity.from_cache_inputs(
         {"component_id": "pipeline", "cache_inputs": cache_spec.cache_inputs()}

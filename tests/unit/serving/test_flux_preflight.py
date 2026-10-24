@@ -418,3 +418,21 @@ def test_flux_request_validator_enforces_shape_set_membership():
     assert exc.value.code == "profile_mismatch"
     assert "768x768" in exc.value.message
     assert "1024x1024" in exc.value.message and "512x512" in exc.value.message
+
+
+def test_flux_identity_names_bf16_reduce(monkeypatch, tmp_path):
+    import json
+
+    source_path = tmp_path / "snapshots" / ("a" * 40)
+    source_path.mkdir(parents=True)
+    source = ResolvedModelSource(
+        source_kind="hf_snapshot",
+        model_id="black-forest-labs/FLUX.1-dev",
+        requested_revision="main",
+        pinned_model_path=str(source_path),
+        resolved_source_id="a" * 40,
+    )
+    monkeypatch.setattr(flux_common, "_torch_bfloat16", lambda: "bfloat16")
+    spec = flux_common.build_compile_plan(source, _flux_profile())[0]
+    cache_inputs = json.loads(spec.identity.canonical_cache_inputs_json)["cache_inputs"]
+    assert cache_inputs["application_kwargs"]["tp_reduce_dtype"] == "bfloat16"
