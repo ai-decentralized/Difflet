@@ -119,7 +119,7 @@ class FluxOrchestrator(ModelOrchestrator):
         reject_unsupported_torchrun_options(_torchrun_unsupported_options(self.args),
                                             runs=_TORCHRUN_RUNS)
         root_compile_cache_at_cache_dir(getattr(self.args, "cache_dir", None), tag="flux")
-        work_dir = Path(self.args.work_dir or Path.home() / ".cache" / "difflet" / "work" / "flux")
+        work_dir = Path(getattr(self.args, "work_dir", None) or Path.home() / ".cache" / "difflet" / "work" / "flux")
         work_dir.mkdir(parents=True, exist_ok=True)
         cli_args = self._stage_cli_args(mode, work_dir=str(work_dir))
         try:
