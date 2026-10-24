@@ -43,7 +43,7 @@ def main() -> None:
     p.add_argument("--work-dir", default=os.environ.get("DIFFLET_FLUX_SP_PARITY_WORKDIR", "/tmp/flux_sp_parity"))
     args = p.parse_args()
 
-    from difflet.models.flux.modeling_flux import FluxBackboneInferenceConfig, NeuronFluxBackboneApplication
+    from difflet.backends.trainium.flux.backbone import FluxBackboneInferenceConfig, NeuronFluxBackboneApplication
     from difflet.backends.trainium.core.config import NeuronConfig
     from difflet.pipeline.path_resolver import resolve_model_path
     from difflet.utils.diffusers_adapter import load_diffusers_config

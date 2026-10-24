@@ -318,7 +318,7 @@ def test_probe_and_backbone_apps_share_one_store_entry(tmp_path):
     from difflet.backends.trainium.qwen_image.teacache_probe_fused import (
         NeuronQwenImageTeacacheProbeFusedApplication,
     )
-    from difflet.models.flux.modeling_flux import NeuronFluxBackboneApplication
+    from difflet.backends.trainium.flux.backbone import NeuronFluxBackboneApplication
 
     def as_app(cls, **extra):
         # store_key reads only model_path / config / neuron_config; build the

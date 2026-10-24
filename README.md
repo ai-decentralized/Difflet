@@ -308,6 +308,14 @@ listing, deletion, and error codes are in the [Videos API reference](docs/servin
 Logs go to the console and `./logs/`, capped at 5 MiB per file and rotated on size or date.
 Stop the server with `Ctrl+C` or `SIGTERM`.
 
+### Observability
+
+The server logs each stage's start and completion with its duration (`stage.start`,
+`stage.complete`), not the device memory each stage keeps resident. A per-request stage
+breakdown and per-stage memory (from those logs plus `neuron-monitor` on Trainium or
+`nvidia-smi` on GPUs) are planned as a skill under `.claude/skills/`, so the serving code
+itself carries no instrumentation.
+
 ### Hardening
 
 **API key.** Authentication is off until a key is set with `--api-key` or `DIFFLET_API_KEY`;

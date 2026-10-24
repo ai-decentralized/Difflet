@@ -1,36 +1,9 @@
-"""Common backend runtime contracts."""
+"""Backend runtime contracts: kept as aliases of the platform contract in
+``difflet.platforms.base``."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
+from difflet.platforms.base import Platform as BackendRuntime
+from difflet.platforms.base import PlatformCapabilities as BackendCapabilities
 
-
-@dataclass(frozen=True)
-class BackendCapabilities:
-    requires_aot: bool
-    single_process_multi_core: bool
-    supports_torchrun_mpmd: bool
-
-
-class BackendRuntime:
-    """Small runtime surface used by DiffletPipeline.
-
-    This is intentionally narrower than the eventual backend API. The first
-    milestone only moves runtime selection and load-rank policy behind a
-    backend boundary; model code can migrate to ``difflet.ops`` later.
-    """
-
-    name: str
-    capabilities: BackendCapabilities
-
-    def prepare_runtime(self, parallel: Any) -> None:
-        """Initialize backend runtime state before application construction."""
-
-    def resolve_load_rank_range(
-        self,
-        *,
-        start_rank_id: int | None,
-        local_ranks_size: int | None,
-    ) -> tuple[int | None, int | None]:
-        return start_rank_id, local_ranks_size
+__all__ = ["BackendCapabilities", "BackendRuntime"]

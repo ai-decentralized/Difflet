@@ -16,58 +16,19 @@ largest shape, and manifests/hashes see one deterministic order.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping, Sequence
-from typing import Optional
+from collections.abc import Sequence
 
 import torch
 
-# (height, width, num_frames); num_frames is None for image models.
-CompileShape = tuple[int, int, Optional[int]]
-
-
-def _normalize_shape(shape) -> CompileShape:
-    if isinstance(shape, Mapping):
-        height = shape.get("height")
-        width = shape.get("width")
-        frames = shape.get("num_frames")
-    elif isinstance(shape, Sequence) and not isinstance(shape, (str, bytes)):
-        if len(shape) == 2:
-            height, width = shape
-            frames = None
-        elif len(shape) == 3:
-            height, width, frames = shape
-        else:
-            raise ValueError(
-                f"compile shape must have 2 (h, w) or 3 (h, w, frames) entries, got {shape!r}"
-            )
-    else:
-        raise TypeError(f"compile shape must be a mapping or sequence, got {type(shape)!r}")
-
-    if height is None or width is None:
-        raise ValueError(f"compile shape is missing height/width: {shape!r}")
-    return (int(height), int(width), None if frames is None else int(frames))
-
-
-def _shape_sort_key(shape: CompileShape) -> tuple[int, int, int, int]:
-    height, width, frames = shape
-    volume = height * width * (frames if frames is not None else 1)
-    return (volume, height, width, frames if frames is not None else 0)
-
-
-def canonicalize_shapes(shapes: Iterable) -> tuple[CompileShape, ...]:
-    """Normalize, dedupe, and sort a shape collection largest-first."""
-
-    normalized = [_normalize_shape(shape) for shape in shapes]
-    if not normalized:
-        raise ValueError("compile shape list must not be empty")
-    frame_kinds = {shape[2] is None for shape in normalized}
-    if len(frame_kinds) > 1:
-        raise ValueError(
-            "compile shapes must be uniformly (h, w) or uniformly (h, w, frames); "
-            f"got a mix: {normalized!r}"
-        )
-    deduped = tuple(dict.fromkeys(normalized))
-    return tuple(sorted(deduped, key=_shape_sort_key, reverse=True))
+# The backend-neutral half (CompileShape, canonicalize_shapes) lives in
+# difflet.pipeline.bucketing, so hosts without the Neuron SDK can import it;
+# re-exported here so on-device scripts and serving code keep their import path.
+from difflet.pipeline.bucketing import (  # noqa: F401  (re-export)
+    CompileShape,
+    _normalize_shape,
+    _shape_sort_key,
+    canonicalize_shapes,
+)
 
 
 def resolve_compile_shapes(config) -> tuple[CompileShape, ...]:

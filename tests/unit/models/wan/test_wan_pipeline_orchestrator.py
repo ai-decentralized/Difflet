@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 import pytest
 import torch
+from diffusers import UniPCMultistepScheduler
 
 from difflet.models.wan.pipeline import WanOrchestrator, WanPipelineOutput
 
@@ -170,6 +171,62 @@ def test_orchestrator_routes_late_steps_to_transformer_2(tmp_path):
     assert len(low_noise.calls) == 1
     assert high_noise.calls[0]["timestep"].item() == pytest.approx(999.0)
     assert low_noise.calls[0]["timestep"].item() == pytest.approx(0.0)
+
+
+@pytest.mark.parametrize("cfg_parallel", [False, True])
+@pytest.mark.parametrize("fp32_expert", ["transformer", "transformer_2"])
+def test_denoise_passes_the_component_timestep_dtype(tmp_path, cfg_parallel, fp32_expert):
+    # A tiny real UniPC flow schedule hands the loop int64 timesteps [999, 750], as in
+    # production; 999 is above the 0.875 boundary, 750 below it. The expert carrying
+    # ``timestep_dtype=float32`` (the CUDA DiT) gets the exact value; the other one (TPU,
+    # Trainium: no attribute) gets the model-dtype cast, where bf16 rounds integers in
+    # [512, 1024) to multiples of 4: 999 -> 1000, 750 -> 752.
+    UniPCMultistepScheduler(
+        prediction_type="flow_prediction", use_flow_sigmas=True, flow_shift=3.0
+    ).save_pretrained(str(tmp_path / "scheduler"))
+    experts = {}
+    for name in ("transformer", "transformer_2"):
+        expert = FakeCfgParallelTransformer() if cfg_parallel else FakeTransformer()
+        expert.dtype = torch.bfloat16
+        if name == fp32_expert:
+            expert.timestep_dtype = torch.float32
+        experts[name] = expert
+    pipeline = WanOrchestrator(
+        model_path=str(tmp_path),
+        transformer=experts["transformer"],
+        transformer_2=experts["transformer_2"],
+        dtype=torch.bfloat16,
+        boundary_ratio=0.875,
+    )
+
+    pipeline(
+        prompt_embeds=torch.ones((1, 5, 8), dtype=torch.bfloat16),
+        latents=torch.zeros((1, 16, 3, 4, 4), dtype=torch.float32),
+        height=32,
+        width=32,
+        num_frames=9,
+        num_inference_steps=2,
+        guidance_scale=5.0 if cfg_parallel else 1.0,
+        output_type="latent",
+    )
+
+    assert [t.item() for t in pipeline.scheduler.timesteps] == [999, 750]
+    batch = 2 if cfg_parallel else 1
+    exact = {"transformer": 999.0, "transformer_2": 750.0}
+    rounded = {"transformer": 1000.0, "transformer_2": 752.0}
+    for name, expert in experts.items():
+        assert len(expert.calls) == 1
+        timestep = expert.calls[0]["timestep"]
+        assert timestep.shape == (batch,)
+        if name == fp32_expert:
+            assert timestep.dtype == torch.float32
+            assert timestep.tolist() == [exact[name]] * batch
+        else:
+            assert timestep.dtype == torch.bfloat16
+            assert timestep.float().tolist() == [rounded[name]] * batch
+        # Latents and text still go in the model dtype.
+        assert expert.calls[0]["hidden_states"].dtype == torch.bfloat16
+        assert expert.calls[0]["encoder_hidden_states"].dtype == torch.bfloat16
 
 
 def test_orchestrator_supports_text_encoder_inputs(tmp_path):

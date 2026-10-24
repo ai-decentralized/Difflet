@@ -3,9 +3,22 @@
 from __future__ import annotations
 
 import pytest
+import torch
 
 from difflet.pipeline.parallel_config import DiffletParallelConfig
 from difflet.models.wan import entry
+from difflet.registry import resolve_model
+
+
+def _create_on_cuda(tmp_path, parallel, shape=None):
+    """The registry's route for a GPU backend: the generic GPU flow, not ``entry.py``."""
+    return resolve_model("Wan-AI/Wan2.2-T2V-A14B-Diffusers").create_application(
+        model_path=str(tmp_path),
+        parallel=parallel,
+        dtype="bf16",
+        shape=shape if shape is not None else {},
+        backend="cuda",
+    )
 
 
 def test_create_wan_application_rejects_unsupported_backend(tmp_path):
@@ -15,8 +28,50 @@ def test_create_wan_application_rejects_unsupported_backend(tmp_path):
             parallel=DiffletParallelConfig(),
             dtype="bf16",
             shape={},
-            backend="cuda",
+            backend="rocm",
         )
+
+
+def test_registry_builds_the_cuda_wan_application(tmp_path, monkeypatch):
+    """The cuda backend routes to the one-process GPU application.
+
+    No checkpoint under ``tmp_path``, so no experts — enough to prove the dispatch.
+    """
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
+    app = _create_on_cuda(
+        tmp_path,
+        DiffletParallelConfig(tp_degree=1),
+        shape={"height": None, "width": None, "num_frames": None},
+    )
+    assert type(app).__name__ == "CudaWanApplication"
+    assert app.transformer is None and app.transformer_2 is None
+    assert app.shape == {"height": 480, "width": 832, "num_frames": 9}
+    assert app.dtype is torch.bfloat16
+    assert app.device == torch.device("cuda")
+    # Both experts fit a 96 GB card: resident by default on the GPU flow only.
+    assert app.enable_transformer_2 is True
+
+
+@pytest.mark.parametrize(
+    "parallel,expected",
+    [
+        (DiffletParallelConfig(tp_degree=4), "not supported"),
+        (DiffletParallelConfig(tp_degree=1, cp_degree=2), "not supported"),
+        (DiffletParallelConfig(tp_degree=1, sp_enabled=True), "not supported"),
+    ],
+)
+def test_cuda_refuses_multi_rank_and_sp_up_front(tmp_path, parallel, expected):
+    # Refused before either 14B expert is touched, not at the first collective.
+    with pytest.raises(NotImplementedError, match=expected):
+        _create_on_cuda(tmp_path, parallel)
+
+
+def test_cuda_accepts_cfg_parallel(tmp_path, monkeypatch):
+    """CFG-parallel runs the cond and uncond branches on two GPUs under torchrun."""
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
+    app = _create_on_cuda(tmp_path, DiffletParallelConfig(tp_degree=1, cfg_parallel_enabled=True))
+    assert type(app).__name__ == "CudaWanApplication"
+    assert app.parallel.cfg_parallel_enabled is True
 
 
 def test_create_wan_application_builds_tpu_app(tmp_path):

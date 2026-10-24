@@ -117,6 +117,20 @@ class ModelEntry:
         backend: str,
         application_kwargs: dict[str, Any] | None = None,
     ) -> Any:
+        from difflet.platforms import get_platform
+
+        if get_platform(backend).capabilities.flow == "gpu":
+            # Every GPU platform runs the generic flow, driven by the model's spec.
+            from difflet.backends.gpu.application import create_gpu_application
+
+            return create_gpu_application(
+                self.name,
+                model_path=model_path,
+                parallel=parallel,
+                dtype=dtype,
+                shape=shape,
+                **(application_kwargs or {}),
+            )
         factory = _resolve_factory(self.application_factory)
         return factory(
             model_path=model_path,
@@ -253,6 +267,8 @@ def _register_builtin_flux() -> None:
             supports_cp=True,
             supports_sp=True,
         ),
+        # CUDA: tp=1, one GPU, FluxPipeline around the Difflet DiT.
+        backends=("trainium", "cuda"),
     )
     class _FluxRegistration:
         pass
@@ -281,7 +297,8 @@ def _register_builtin_wan() -> None:
         ),
         # Wan is the second model on the TPU backend, single-expert by default
         # (see difflet/models/wan/tpu_application.py on expert residency).
-        backends=("trainium", "tpu"),
+        # CUDA: tp=1, one GPU, both experts resident by default.
+        backends=("trainium", "tpu", "cuda"),
     )
     class _WanRegistration:
         pass
@@ -387,7 +404,7 @@ def _register_builtin_qwen_image() -> None:
             supports_sp=True,
         ),
         # Qwen-Image is the first model on the TPU backend (plan Phase 4).
-        backends=("trainium", "tpu"),
+        backends=("trainium", "tpu", "cuda"),
     )
     class _QwenImageRegistration:
         pass

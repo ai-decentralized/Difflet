@@ -105,7 +105,7 @@ class CacheSpec:
         same list form (schema v5).
         """
         if self.shapes:
-            from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+            from difflet.pipeline.bucketing import canonicalize_shapes
 
             return [list(shape) for shape in canonicalize_shapes(self.shapes)]
         return [[self.height, self.width, self.num_frames]]
@@ -254,6 +254,9 @@ def _backend_extra_toolchain_versions(backend: str) -> dict[str, str | None]:
             versions[package] = metadata.version(package)
         except metadata.PackageNotFoundError:
             versions[package] = None
+    from difflet.platforms import get_platform
+
+    versions.update(get_platform(backend).toolchain_versions())
     return versions
 
 

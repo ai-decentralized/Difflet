@@ -31,7 +31,7 @@ from torch import nn as nn
 from difflet.layers.embeddings import (
     NeuronCombinedTimestepLabelEmbeddings,
 )
-from difflet.backends.trainium.core.layer_boundary_marker import ModuleMarkerEndWrapper, ModuleMarkerStartWrapper
+from difflet.layers.markers import ModuleMarkerEndWrapper, ModuleMarkerStartWrapper
 from difflet.ops import ColumnParallelLinear, LayerNorm
 
 

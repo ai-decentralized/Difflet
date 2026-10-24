@@ -81,6 +81,7 @@ difflet/
 │                    parallel config, HF path resolver)
 ├── cli/             difflet CLI: main.py, stage.py, orchestrators/<model>.py
 ├── registry.py      @register_model + ModelEntry
+├── platforms/       One Platform per backend: detection, capabilities, device policy
 ├── ops/             Backend-neutral op surface (frozen v1)
 ├── backends/
 │   ├── trainium/    Real backend (NXD + nkilib + torch_neuronx)
@@ -90,12 +91,15 @@ difflet/
 │   │   ├── nki_kernels/    NKI custom kernels (MX microscaling, etc.)
 │   │   └── flux/ wan/ hunyuan_video/ qwen_image/ ltx_2/    per-model wrappers
 │   ├── cpu/         Pure-torch numerical reference
-│   └── cuda/ rocm/  Stubs
+│   ├── gpu/         The generic GPU flow (application, CLI, serving), shared by CUDA and ROCm
+│   ├── cuda/        CUDA ops_impl and per-model differences (transformer, application)
+│   ├── tpu/         TPU ops_impl (no compile/load lifecycle yet)
+│   └── rocm/        Reserved
 ├── utils/           Hardware-neutral utilities (HF / diffusers adapters)
 ├── layers/          Diffusion-specific layers; import only via difflet.ops
 └── models/          flux/ wan/ hunyuan_video/ qwen_image/ ltx_2/ — each:
                      modeling, pipeline, application, entry, checkpoint
-                     (where needed). HunyuanVideo 1.5 is served from
+                     (where needed), and spec.py for models on the GPU flow. HunyuanVideo 1.5 is served from
                      hunyuan_video/ (model_version="1.5").
 ```
 
@@ -114,12 +118,89 @@ parity testing.
 Rules:
 
 - The surface is **additive only**. Dispatch is frozen at first import per process.
-- Each op has a Trainium implementation under `difflet/backends/trainium/ops_impl/` and,
-  ideally, a CPU reference under `difflet/backends/cpu/ops_impl/`.
-- `cuda/` and `rocm/` are stubs.
+- Each op has a Trainium implementation under `difflet/backends/trainium/ops_impl/`, a CPU
+  reference under `difflet/backends/cpu/ops_impl/` (the numerical oracle), a TPU
+  implementation under `difflet/backends/tpu/ops_impl/`, and a CUDA implementation under
+  `difflet/backends/cuda/ops_impl/`. `rocm/` is reserved.
+- The Megatron-style parallel layers, the shard-at-load helpers and the safetensors loader are
+  shared by the torch backends in `difflet/backends/_torch_megatron/`; TPU and CUDA each bind
+  them to their own collectives (`build_parallel_layers(collectives)`).
 
 The repo-wide import guard (`scripts/test_imports.sh`) enforces that modeling files import only
-from `difflet.ops`, `torch`, stdlib, `diffusers`, and `transformers`.
+from `difflet.ops`, `torch`, stdlib, `diffusers`, and `transformers`. It runs in two tiers: the
+backend-neutral modules always, the Trainium modules only when the Neuron SDK is importable.
+
+### GPU backends (CUDA)
+
+`DIFFLET_BACKEND=cuda` runs Qwen-Image, FLUX.1-dev and Wan 2.2 T2V-A14B on NVIDIA GPUs: the DiT
+through `difflet.ops`, the text encoders, VAE and scheduler loop in the same process on the
+same device. There is no ahead-of-time compile step: `compile()` writes `cuda_manifest.json`,
+`load()` builds the module eagerly from the diffusers safetensors. Design:
+`docs/design/gpu_backend.md`; measured results and the support matrix:
+`docs/verification/gpu-backend-results.md`.
+
+How the code is laid out:
+
+- `difflet/platforms/` — one `Platform` per backend (`trainium`, `tpu`, `cuda`, `rocm`, `cpu`)
+  with its `capabilities` (flow, parallel modes, `torch.compile`, device unit) and methods
+  (device count and memory, worker environment, toolchain versions, layer markers). Code
+  outside `platforms/` and `backends/` asks the platform instead of comparing backend names.
+- `difflet/models/<model>/spec.py` — the model's `ModelSpec`: checkpoints, defaults, guidance
+  kind, refused options, prompt budgets, output kind. Torch-free.
+- `difflet/backends/gpu/` — the generic GPU flow, written once: `application.py`
+  (`GpuComponent`: build → load weights → device → load-time swaps → per-block
+  `torch.compile`; `GpuApplication`: the `DiffletPipeline` contract), `cli.py` (the one-process
+  CLI orchestrator), `serving.py` (the resident serving adapter), `policy.py` (refusals).
+- `difflet/backends/cuda/<model>/` — only what differs per model: the transformer component
+  (`transformer.py`), the application subclass that wires encoders, decoder and the denoise
+  driver (`application.py`), and load-time swaps (`flux/proj_out.py`).
+
+`ModelEntry.create_application` sends every model on a GPU platform to
+`backends/gpu/application.py`; `difflet run` and `difflet serve` pick the generic CLI
+orchestrator and serving adapter the same way.
+
+```bash
+# environment (CUDA 12.8+ wheel for Blackwell) — see requirements-cuda.lock
+uv venv --python 3.11 .venv
+uv pip install --python .venv/bin/python --index-url https://download.pytorch.org/whl/cu128 torch==2.11.0
+uv pip install --python .venv/bin/python -e ".[test,cuda]"
+
+DIFFLET_BACKEND=cuda difflet run --model-id Qwen/Qwen-Image --prompt "..." --output /tmp/q.png
+DIFFLET_BACKEND=cuda difflet run --model-id black-forest-labs/FLUX.1-dev --prompt "..." \
+    --output /tmp/f.png --guidance-scale 3.5
+DIFFLET_BACKEND=cuda difflet run --model-id Wan-AI/Wan2.2-T2V-A14B-Diffusers --prompt "..." \
+    --output /tmp/w.mp4 [--cfg-parallel]        # --cfg-parallel: two GPUs under torchrun
+DIFFLET_BACKEND=cuda difflet serve --model-id <id> [--dp-degree 2] [--torch-compile]
+
+scripts/cpu-gate.sh                              # CPU-host gate (no SDK, no GPU); what CI runs
+```
+
+What the GPU flow supports: one request shape per process; data-parallel replicas (`--dp`,
+`serve --dp-degree`, one GPU each); CFG-parallel for Wan (`difflet run` only). Refused with a
+message naming the option: tensor and sequence parallelism, context parallelism, bucketed
+`--shapes`, TeaCache except Qwen-Image's probe-free `--teacache-cadence`, TAEF1, `--host-vae`.
+Adding TP or CP means implementing the collectives or ring/Ulysses attention in
+`backends/cuda/ops_impl/` and adding the mode to the platform's `parallel_modes`; the model
+files already express them through `difflet.ops`.
+
+Design points worth knowing:
+
+- **Qwen-Image prompt padding.** Difflet pads every prompt to 1024 text tokens. Trainium and
+  TPU drop the padding mask (it does not trace under XLA); on the GPU flow the padding is
+  sliced off before the DiT (`apply_text_mask=True, trim_text_padding=True`), which gives the
+  same image as masking and lets SDPA take the flash kernel.
+  `tests/unit/models/qwen_image/test_qwen_text_mask.py` pins both against diffusers on CPU.
+- **`--torch-compile`** compiles each repeated DiT block with inductor
+  (`max-autotune-no-cudagraphs`); Qwen-Image compiles with dynamic shapes (one graph for every
+  prompt length) and warms up twice, Flux and Wan compile statically. Off by default.
+- **Wan** keeps both experts resident on a 96 GB card, runs true CFG with fp32 host latents,
+  and passes the timestep to the DiT in fp32 (`timestep_dtype`).
+- **Flux** runs Difflet's backend-neutral DiT inside diffusers' `FluxPipeline` through
+  `FluxDiTAdapter`. The single block's `proj_out` can run as one gemm at tp=1 (`fuse_proj_out`,
+  a load-time swap), off by default until a bf16 block-level comparison with diffusers explains
+  a 10 dB end-to-end PSNR shift seen on one seed.
+- **Numerics.** The CUDA `RMSNorm` computes in fp32 like diffusers' `nn.RMSNorm`; it agrees with
+  the CPU reference within bf16 rounding, not bit for bit.
 
 ## Compile cache
 
