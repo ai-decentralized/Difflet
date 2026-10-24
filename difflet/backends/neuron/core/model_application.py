@@ -104,10 +104,11 @@ class OnDeviceDiT:
     ``_forward`` casts each model input to ``dtype`` and makes it contiguous on the host before
     it moves to ``device`` (``_device_input``): a strided host view (the timestep
     ``_batch_timestep`` expands from a 0-dim tensor, a transposed slice) would otherwise be
-    restrided on the device through a CPU round trip (decision D16). It synchronises the device, copies the output back, counts the
-    call and reports its wall seconds (host -> device copies, forward, sync, copy back) to
-    ``forward_hook``. ``.dtype`` and ``.config`` are what the orchestrators read. The models'
-    subclasses take their own call signature and check their one static shape first.
+    restrided on the device through a CPU round trip (decision D16). It synchronises the device,
+    copies the output back, counts the call and reports its wall seconds (host -> device copies,
+    forward, sync, copy back) to ``forward_hook``. ``.dtype`` and ``.config`` are what the
+    orchestrators read. The models' subclasses take their own call signature and check their one
+    static shape first.
     """
 
     def __init__(self, module: Callable[..., Any], config, dtype, device) -> None:

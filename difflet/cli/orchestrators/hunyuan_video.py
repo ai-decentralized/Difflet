@@ -223,7 +223,7 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
 
     def download(self) -> None:
         from difflet.pipeline.path_resolver import resolve_model_path
-        resolve_model_path(_HF_MODEL_ID, local_files_only=False)
+        resolve_model_path(_HF_MODEL_ID, revision=self.args.revision, local_files_only=False)
         print(f"[difflet] weights ready for {_HF_MODEL_ID}")
 
     def run(self) -> None:
