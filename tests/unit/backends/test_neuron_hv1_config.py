@@ -71,6 +71,23 @@ def test_from_pretrained_reads_the_snapshot_config(tmp_path):
         NeuronHunyuanVideoConfig.from_pretrained(tmp_path, tp_degree=5)
 
 
+def test_truncated_depth_records_the_checkpoint_counts(tmp_path):
+    """``num_layers=N`` / ``num_single_layers=M`` build the first blocks of the same checkpoint
+    (fast N-block parity), never more than it holds."""
+    (tmp_path / "config.json").write_text(json.dumps(SNAPSHOT_CONFIG))
+    c = NeuronHunyuanVideoConfig.from_pretrained(tmp_path, num_layers=2, num_single_layers=3)
+    assert (c.num_layers, c.num_single_layers) == (2, 3)
+    assert (c.checkpoint_num_layers, c.checkpoint_num_single_layers) == (20, 40)
+    assert (NeuronHunyuanVideoConfig().checkpoint_num_layers,
+            NeuronHunyuanVideoConfig().checkpoint_num_single_layers) == (20, 40)
+    with pytest.raises(ValueError, match="num_layers=21 exceeds the checkpoint's 20 blocks"):
+        NeuronHunyuanVideoConfig.from_pretrained(tmp_path, num_layers=21)
+    with pytest.raises(ValueError, match="single-stream num_layers=41 exceeds the checkpoint's 40"):
+        NeuronHunyuanVideoConfig.from_pretrained(tmp_path, num_single_layers=41)
+    with pytest.raises(ValueError, match="num_layers=0 must be >= 1"):
+        NeuronHunyuanVideoConfig(num_layers=0).validate()
+
+
 def test_validate_refuses_what_hunyuan_video_does_not_support():
     with pytest.raises(NotImplementedError, match="guidance-distilled"):
         NeuronHunyuanVideoConfig(cfg_parallel_enabled=True).validate()

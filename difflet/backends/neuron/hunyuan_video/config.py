@@ -31,6 +31,7 @@ from difflet.backends.neuron.core.config_checks import (
     check_cp_split,
     check_even_split,
     check_heads_divide_tp,
+    check_layer_count,
     check_ulysses_heads,
     exclusive_modes,
 )
@@ -59,6 +60,12 @@ class NeuronHunyuanVideoConfig:
     rope_axes_dim: tuple[int, ...] = (16, 56, 56)
     #: Set by the image-to-video checkpoints only; the text-to-video snapshot has none.
     image_condition_type: str | None = None
+    #: The checkpoint's own block counts (``from_pretrained`` records the file's). A
+    #: ``num_layers`` or ``num_single_layers`` below them builds the first blocks of each stack
+    #: and ``NeuronHunyuanVideoTransformerApplication`` reports the rest under
+    #: ``load_report["skipped"]`` rather than as unexpected.
+    checkpoint_num_layers: int | None = 20
+    checkpoint_num_single_layers: int | None = 40
 
     # --- difflet runtime shape (one static shape per process) ---
     height: int = 320
@@ -115,6 +122,9 @@ class NeuronHunyuanVideoConfig:
                 f"{self.latent_width // p} patched latent")
 
     def validate(self) -> None:
+        check_layer_count("HunyuanVideo", self.num_layers, self.checkpoint_num_layers)
+        check_layer_count("HunyuanVideo single-stream", self.num_single_layers,
+                          self.checkpoint_num_single_layers)
         if self.image_condition_type is not None:
             raise NotImplementedError(
                 f"image_condition_type={self.image_condition_type!r} (an image-to-video "
@@ -182,10 +192,15 @@ class NeuronHunyuanVideoConfig:
     @classmethod
     def from_pretrained(cls, transformer_path, **overrides) -> "NeuronHunyuanVideoConfig":
         """Build from a diffusers ``transformer/config.json``; keys this class does not declare
-        (``_class_name``, ...) are ignored."""
+        (``_class_name``, ...) are ignored. ``checkpoint_num_layers`` and
+        ``checkpoint_num_single_layers`` record the file's block counts before the overrides, so
+        ``num_layers=N`` builds the first N blocks of the same checkpoint."""
         raw = json.loads((Path(transformer_path) / "config.json").read_text())
         names = {f.name for f in fields(cls)}
         kept = {k: v for k, v in raw.items() if k in names}
+        for stack in ("num_layers", "num_single_layers"):
+            if stack in kept:
+                kept[f"checkpoint_{stack}"] = int(kept[stack])
         kept.update(overrides)
         config = cls(**kept)
         config.validate()
