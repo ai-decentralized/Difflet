@@ -17,6 +17,7 @@ import torch
 
 from difflet.models.qwen_image.contract import QwenImageDiTInputBundle
 from difflet.utils.latent_dump import dump_latents
+from difflet.utils.step_timing import StepTimer, maybe_forward
 
 
 @dataclass
@@ -278,6 +279,7 @@ class QwenImageOrchestrator:
     ) -> torch.Tensor:
         latents = bundle.hidden_states
         dump_latents("initial", latents)
+        step_timer = StepTimer.from_env()
         # fused-A (cclog 81): prev_mod is a persistent on-device Parameter; the
         # probe returns only the scalar delta — no host prev_mod copy. Mirrors
         # the HunyuanVideo fused branch (cclog 80).
@@ -316,12 +318,15 @@ class QwenImageOrchestrator:
             ):
                 noise_pred = controller.skip_noise_pred(None)
             else:
-                noise_pred = _first_tensor(self.transformer(model_bundle))
+                with maybe_forward(step_timer):
+                    noise_pred = _first_tensor(self.transformer(model_bundle))
                 if controller is not None:
                     controller.record_full_step(noise_pred, None)
             latents = self._scheduler_step(noise_pred, timestep, latents, len(timesteps))
             if trajectory is not None:
                 trajectory.append(latents.detach().cpu())
+            if step_timer is not None:
+                step_timer.step_done(step_index)
         dump_latents("final", latents)
         return latents
 
