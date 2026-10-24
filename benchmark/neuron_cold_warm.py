@@ -405,13 +405,14 @@ def set_aside(out: Path) -> Path | None:
 
 def run_launch(launch: Launch, *, record_dir: Path, adapter: na.NeuronAdapter,
                iters: int, records: Mapping[str, Any],
-               host: Mapping[str, Any] | None = None) -> dict[str, Any]:
+               host: Mapping[str, Any] | None = None,
+               cache_key: str | None = None) -> dict[str, Any]:
     out = run_dir(record_dir, launch)
     root = cache_root(record_dir, launch)
     previous = set_aside(out)
     out.mkdir(parents=True)
     cfg = config_for(launch.guidance)
-    record: dict[str, Any] = {"launch": dataclasses.asdict(launch),
+    record: dict[str, Any] = {"launch": dataclasses.asdict(launch), "cache_key": cache_key,
                               "cache_root": os.path.relpath(root, record_dir),
                               "host": dict(host or {}),
                               "previous_attempt": previous and previous.name}
@@ -962,11 +963,15 @@ def measured_at(records: Mapping[str, Any]) -> datetime.datetime:
 
 
 def reusable_record(rec: Mapping[str, Any], host: Mapping[str, Any], *,
-                    now: datetime.datetime, max_age_days: int) -> str | None:
+                    now: datetime.datetime, max_age_days: int,
+                    cache_key: str | None = None) -> str | None:
     """Why a recorded launch must NOT be kept by ``--skip-existing`` (None: keep it): it failed,
-    ran on another device or toolchain, or is older than the cache's expiry."""
+    ran with other options or on another platform (its cache key), on another device or
+    toolchain, or is older than the cache's expiry."""
     if not rec.get("ok"):
         return "not ok"
+    if cache_key and rec.get("cache_key") and rec["cache_key"] != cache_key:
+        return "recorded with other options or on another platform"
     was = rec.get("host") or {}
     for field in ("device", "toolchain"):
         if field in was and was[field] != host.get(field):
@@ -990,8 +995,7 @@ def assemble(records: Mapping[str, Any], *, adapter: na.NeuronAdapter, out_json:
              out_md: Path, plan_note: str | None = None,
              extra_notes: Sequence[str] = (),
              fingerprint: Mapping[str, Any] | None = None,
-             cache: Mapping[str, Any] | None = None,
-             max_age_days: int = result_cache.MAX_AGE_DAYS) -> dict[str, Any]:
+             cache: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """``fingerprint`` (a completed job) stores the result in ``benchmark/cached_results/``;
     ``cache`` (--assemble-only) carries over the banner summary of the file being re-rendered
     when it describes these records."""
@@ -1027,7 +1031,7 @@ def assemble(records: Mapping[str, Any], *, adapter: na.NeuronAdapter, out_json:
     doc["plan_note"] = plan_note
     if fingerprint is not None:
         result_cache.record(SLUG, fingerprint, doc, code=result_cache.code_identity(),
-                            measured_at=measured_at(records), max_age_days=max_age_days)
+                            measured_at=measured_at(records))
     elif cache is not None and cache.get("measured_at") == result_cache.iso(measured_at(records)):
         doc["cache"] = dict(cache)
     out_json.parent.mkdir(parents=True, exist_ok=True)
@@ -1140,6 +1144,7 @@ def main(argv: list[str] | None = None) -> int:
         result_cache.config_identity(MATRIX[SLUG], backend="neuron",
                                      run_options=run_options(args, true_cold=true_cold)),
         result_cache.platform_identity(adapter))
+    cache_key = result_cache.key_of(fp)
     resuming = args.skip_existing and any((record_dir / "runs").glob("g*/*/record.json"))
     if args.force:
         print("[cache] RUN -- --force", flush=True)
@@ -1181,14 +1186,14 @@ def main(argv: list[str] | None = None) -> int:
             key = f"{gkey(launch.guidance)}/{launch.name}"
             if args.skip_existing and key in records:
                 why = reusable_record(records[key], host, now=result_cache.utc_now(),
-                                      max_age_days=args.max_age_days)
+                                      max_age_days=args.max_age_days, cache_key=cache_key)
                 if why is None:
                     print(f"[skip] {key}: recorded and ok", flush=True)
                     continue
                 print(f"[rerun] {key}: recorded but {why}", flush=True)
             print(f"[launch] {key} starting at {datetime.datetime.now():%H:%M:%S}", flush=True)
             rec = run_launch(launch, record_dir=record_dir, adapter=adapter, iters=args.iters,
-                             records=records, host=host)
+                             records=records, host=host, cache_key=cache_key)
             records[key] = rec
             bad = [c for c in rec["checks"] if not c["ok"]]
             wall = rec["run"].get("wall_s")
@@ -1203,12 +1208,17 @@ def main(argv: list[str] | None = None) -> int:
         # run_logged stopped the running launch (its ranks included) before this arrives
         stopped = f"an interrupt ({exc or 'SIGINT'})"
     out_json, out_md = output_paths(args, record_dir, final=stopped is None)
+    # Stored only when the job completed and every launch ran under this fingerprint (a resume
+    # over records from other options, another platform or before the cache is not stored).
+    foreign = sorted(k for k, r in records.items() if r.get("cache_key") != cache_key)
+    if stopped is None and foreign:
+        print(f"[cache] not stored: {len(foreign)} launch(es) recorded under another "
+              f"fingerprint or before the result cache ({', '.join(foreign[:3])}"
+              f"{', ...' if len(foreign) > 3 else ''})", flush=True)
     try:
         doc = assemble(records, adapter=adapter, out_json=out_json, out_md=out_md,
                        extra_notes=superseded_note(record_dir),
-                       # only a completed job is stored; a stopped one re-runs
-                       fingerprint=fp if stopped is None else None,
-                       max_age_days=args.max_age_days)
+                       fingerprint=fp if stopped is None and not foreign else None)
         print(f"[neuron_cold_warm] wrote {out_json} and {out_md} "
               f"({list(doc['results_by_guidance'])})", flush=True)
     except Exception as exc:  # noqa: BLE001 - the launch records stay for --assemble-only

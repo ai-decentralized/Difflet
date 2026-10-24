@@ -71,6 +71,8 @@ STORE_DIR = REPO_ROOT / "benchmark" / "cached_results"
 
 #: BenchConfig fields that only describe or label a result; they do not change what runs.
 PRESENTATION_FIELDS = ("config_label", "notes", "stage_names", "e2e_host_note", "backends")
+#: Inherited environment that changes what is compiled or how it runs (part of the config).
+FINGERPRINT_ENV = ("NEURON_CC_FLAGS", "NEURON_RT_VIRTUAL_CORE_SIZE", "XLA_FLAGS")
 
 _IMDS = "http://169.254.169.254/latest"
 
@@ -98,12 +100,16 @@ def _days(td: datetime.timedelta) -> str:
 # ------------------------------------------------------------------------------ identity
 
 
-def config_identity(cfg: Any, *, backend: str, run_options: Mapping[str, Any]) -> dict:
-    """What was measured: the MATRIX entry minus its labels, the backend, the run options."""
+def config_identity(cfg: Any, *, backend: str, run_options: Mapping[str, Any],
+                    env: Optional[Mapping[str, str]] = None) -> dict:
+    """What was measured: the MATRIX entry minus its labels, the backend, the run options and
+    the compiler / runtime flags inherited from the shell (``FINGERPRINT_ENV``)."""
     fields = dataclasses.asdict(cfg) if dataclasses.is_dataclass(cfg) else dict(cfg)
     for name in PRESENTATION_FIELDS:
         fields.pop(name, None)
-    return {"backend": backend, **fields, "run_options": dict(run_options)}
+    env = os.environ if env is None else env
+    return {"backend": backend, **fields, "run_options": dict(run_options),
+            "env": {k: env[k] for k in FINGERPRINT_ENV if env.get(k)}}
 
 
 def _run(cmd: list[str], timeout: float = 10.0) -> str:
@@ -223,12 +229,13 @@ def completed(result: Mapping[str, Any]) -> bool:
 
 def save(slug: str, fp: Mapping[str, Any], result: Mapping[str, Any], *,
          code: Mapping[str, Any], measured_at: datetime.datetime, now: datetime.datetime,
-         max_age_days: int = MAX_AGE_DAYS, store: Optional[Path] = None) -> dict:
+         store: Optional[Path] = None) -> dict:
     """Store a completed measurement under its key (replacing the old one) and drop this
-    model's expired entries. Returns the entry."""
+    model's entries past the default ``MAX_AGE_DAYS``: a run's own stricter ``--max-age-days``
+    never deletes another platform's still-valid entry. Returns the entry."""
     if not completed(result):
         raise ValueError(f"only a completed result is stored, not {statuses(result)!r}")
-    limit = datetime.timedelta(days=max_age_days)
+    limit = datetime.timedelta(days=MAX_AGE_DAYS)
     ents = {k: e for k, e in entries(slug, store).items() if _age(e, now) <= limit}
     entry = {"measured_at": iso(measured_at), "fingerprint": dict(fp), "code": dict(code),
              "result": dict(result)}
@@ -325,11 +332,17 @@ def decide(slug: str, fp: Mapping[str, Any], *, now: datetime.datetime,
            max_age_days: int = MAX_AGE_DAYS, code: Optional[Mapping[str, Any]] = None,
            rerun_on_code_change: bool = False, store: Optional[Path] = None) -> Decision:
     """Is there a stored entry of ``slug`` this run can reuse? On a miss the reason compares
-    against the closest entry: the same key, else the newest one."""
+    against the closest entry: the same key, else the newest on the same platform, else the
+    newest with the same config, else the newest."""
     ents = entries(slug, store)
     if not ents:
         return Decision(False, f"no stored result in {store_path(slug, store).name}")
-    entry = ents.get(key_of(fp)) or max(ents.values(), key=lambda e: e.get("measured_at", ""))
+
+    def same(part: str) -> list[dict]:
+        return [e for e in ents.values() if (e.get("fingerprint") or {}).get(part) == fp.get(part)]
+
+    pool = same("platform") or same("config") or list(ents.values())
+    entry = ents.get(key_of(fp)) or max(pool, key=lambda e: e.get("measured_at", ""))
     return decide_entry(entry, fp, now=now, max_age_days=max_age_days, code=code,
                         rerun_on_code_change=rerun_on_code_change)
 
@@ -401,15 +414,18 @@ def try_reuse(slug: str, fp: Mapping[str, Any], *, now: datetime.datetime, max_a
 
 
 def record(slug: str, fp: Mapping[str, Any], result: dict, *, code: Mapping[str, Any],
-           measured_at: datetime.datetime, max_age_days: int = MAX_AGE_DAYS,
-           store: Optional[Path] = None) -> Optional[dict]:
+           measured_at: datetime.datetime, store: Optional[Path] = None) -> Optional[dict]:
     """After a measurement: store it when it completed and give the report its banner summary
-    (``result`` gains ``cache``). A failed run is not stored. Returns the entry or None."""
+    (``result`` gains ``cache``). A failed run is not stored, and it drops the entry of the
+    same key: the next run re-measures instead of restoring older numbers over the failure.
+    Returns the entry or None."""
     if not completed(result):
+        ents = entries(slug, store)
+        if ents.pop(key_of(fp), None) is not None:
+            _write(slug, ents, store)
         return None
     entry = save(slug, fp, {k: v for k, v in result.items() if k != "cache"}, code=code,
-                 measured_at=measured_at, now=utc_now(), max_age_days=max_age_days,
-                 store=store)
+                 measured_at=measured_at, now=utc_now(), store=store)
     result["cache"] = report_cache(entry)
     return entry
 

@@ -587,3 +587,52 @@ def test_assemble_only_keeps_the_summary_of_the_same_records(tmp_path, job_env):
     stale = {**doc["cache"], "measured_at": "2020-01-01T00:00:00Z"}  # other records' summary
     assert "cache" not in cw.assemble(records, adapter=None, out_json=out_json, out_md=out_md,
                                       cache=stale)
+
+
+# ------------------------------------------------------------------------------ second review
+
+
+def test_a_stricter_max_age_never_deletes_another_platforms_entry(store, monkeypatch):
+    trn3 = {**PLATFORM, "instance_type": "trn3pd98.3xlarge", "device": "trn3"}
+    _save(_fp(trn3))                                     # 20 days old at the trn2 run below
+    monkeypatch.setattr(rc, "utc_now", lambda: _days(20))
+    rc.record(SLUG, _fp(), _result(), code=CODE, measured_at=_days(20))
+    assert rc.key_of(_fp(trn3)) in rc.entries(SLUG)
+    assert rc.decide(SLUG, _fp(trn3), now=_days(21)).reuse
+
+
+def test_a_miss_is_explained_against_the_same_platform():
+    _save()                                               # trn2, iters 0
+    trn3 = {**PLATFORM, "instance_type": "trn3pd98.3xlarge", "device": "trn3"}
+    _save(_fp(trn3), measured_at=_days(1))                # newer, another platform
+    d = rc.decide(SLUG, _fp(iters=3), now=_days(2))
+    assert not d.reuse and d.reason.startswith("config changed: run_options.iters: 0 -> 3")
+
+
+def test_compiler_flags_from_the_shell_are_part_of_the_config():
+    plain = rc.config_identity(MATRIX[SLUG], backend="trainium", run_options={}, env={})
+    flagged = rc.config_identity(MATRIX[SLUG], backend="trainium", run_options={},
+                                 env={"NEURON_CC_FLAGS": "--optlevel 1", "HOME": "/x"})
+    assert plain["env"] == {} and flagged["env"] == {"NEURON_CC_FLAGS": "--optlevel 1"}
+    d = rc.decide_entry(_entry(rc.fingerprint(plain, PLATFORM)),
+                        rc.fingerprint(flagged, PLATFORM), now=_days(1))
+    assert not d.reuse and "env.NEURON_CC_FLAGS" in d.reason
+
+
+def test_a_failed_re_measurement_drops_the_older_entry(store, monkeypatch):
+    monkeypatch.setattr(rc, "utc_now", lambda: _days(1))
+    _save()
+    other = {**PLATFORM, "instance_type": "trn2.48xlarge"}
+    _save(_fp(other))
+    assert rc.record(SLUG, _fp(), _result("failed"), code=CODE, measured_at=_days(1)) is None
+    assert list(rc.entries(SLUG)) == [rc.key_of(_fp(other))]  # only that key
+    assert not rc.decide(SLUG, _fp(), now=_days(2)).reuse
+
+
+def test_skip_existing_does_not_keep_a_launch_from_another_fingerprint():
+    now = datetime.datetime.fromtimestamp(10_000.0, datetime.timezone.utc)
+    host = {"device": "d", "toolchain": {}}
+    rec = {"ok": True, "host": dict(host), "run": {"start_epoch": 9_000.0}, "cache_key": "aaa"}
+    assert cw.reusable_record(rec, host, now=now, max_age_days=30, cache_key="aaa") is None
+    assert cw.reusable_record(rec, host, now=now, max_age_days=30, cache_key="bbb") == (
+        "recorded with other options or on another platform")

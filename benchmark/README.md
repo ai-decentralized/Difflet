@@ -81,7 +81,7 @@ platform (a trn2 and a trn3 measurement live side by side), each with its finger
 full result and `measured_at`:
 
 - **config:** the MATRIX entry, the backend, and the run options (`--iters`,
-  `--natural-iters`, `--skip-compile`);
+  `--natural-iters`, `--skip-compile`), and `NEURON_CC_FLAGS` / `XLA_FLAGS` from the shell;
 - **platform:** the EC2 instance type (`DIFFLET_INSTANCE_TYPE` off EC2), `device_info()`, and
   the SDK: the adapter's toolchain packages plus the OS-level `aws-neuronx-*` packages or the
   NVIDIA driver.
@@ -91,7 +91,8 @@ The next run **reuses** an entry, touching no device, when its status is `ok` (o
 then rewrites `benchmark/<device>/<slug>.{json,md}` from the entry, and the report says so
 (`**REUSED:** these numbers were NOT re-measured …`). A different instance type or SDK, or an
 expired entry, is **re-measured**. Reusing does not restart the 30 days; only a
-re-measurement does. Failed, partial and stopped runs are never stored. After a run, commit
+re-measurement does. Failed, partial and stopped runs are never stored, and a failed
+re-measurement drops the older entry of that config and platform. After a run, commit
 `benchmark/cached_results/` (and the reports) so the next instance sees it.
 
 ```bash

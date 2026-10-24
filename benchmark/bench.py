@@ -264,8 +264,7 @@ def main() -> int:
                       natural_iters=args.natural_iters, adapter=adapter)
         # only a completed run is stored: a failed one is re-measured next time
         write_outputs(slug, res, stamp=lambda d: result_cache.record(
-            slug, fp, d, code=code, measured_at=result_cache.utc_now(),
-            max_age_days=args.max_age_days))
+            slug, fp, d, code=code, measured_at=result_cache.utc_now()))
     if reused:
         print(f"[cache] reused without re-measuring: {', '.join(reused)} "
               "(pass --force to re-measure)", flush=True)
