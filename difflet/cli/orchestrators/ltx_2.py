@@ -59,6 +59,11 @@ class LTX2Orchestrator(ModelOrchestrator):
         )
         return {} if calibration is None else {"teacache_calibration_path": calibration}
 
+    def _tp_reduce_kwargs(self) -> dict[str, str]:
+        """All-reduce precision for the application; _cache_application_kwargs
+        turns it into the artifact's key field (none for the legacy fp32)."""
+        return {"tp_reduce_dtype": getattr(self.args, "tp_reduce_dtype", None) or "bf16"}
+
     def _resolved_shape(self) -> dict:
         from difflet.registry import resolve_model
         entry = resolve_model(_HF_MODEL_ID, model_type=_MODEL_TYPE)
@@ -71,7 +76,10 @@ class LTX2Orchestrator(ModelOrchestrator):
         resolve_model_path(_HF_MODEL_ID, revision=self.args.revision, local_files_only=True)
         # A calibrated-adaptive request compiles the probe artifact (its own
         # cache identity); every other request keeps the plain tp4 key.
-        adaptive = self._adaptive_teacache_kwargs(self._resolved_shape())
+        adaptive = {
+            **self._adaptive_teacache_kwargs(self._resolved_shape()),
+            **self._tp_reduce_kwargs(),
+        }
         DiffletPipeline.precompile(
             _HF_MODEL_ID,
             model_type=_MODEL_TYPE,
@@ -139,7 +147,7 @@ class LTX2Orchestrator(ModelOrchestrator):
         prewarm_neuron_runtime(parallel.world_size)
         shape = entry.resolve_shape(height=self.args.height, width=self.args.width,
                                     num_frames=self.args.num_frames)
-        adaptive = self._adaptive_teacache_kwargs(shape)
+        adaptive = {**self._adaptive_teacache_kwargs(shape), **self._tp_reduce_kwargs()}
         from difflet.pipeline.difflet_pipeline import _cache_application_kwargs
         spec = CacheSpec(
             model_id=_HF_MODEL_ID, model_path=model_path,

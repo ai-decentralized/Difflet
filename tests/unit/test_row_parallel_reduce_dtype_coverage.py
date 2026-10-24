@@ -18,7 +18,6 @@ _ALLOWED_PREFIXES = ("difflet/backends/trainium/minimax_h3/",)
 # Sites still on the NxD fp32 default, by file. Each per-model bf16 commit
 # removes its entry; the target state is empty.
 EXPECTED_DEFAULT_SITES: dict[str, int] = {
-    "difflet/backends/trainium/ltx_2/transformer.py": 1,
     "difflet/models/flux/clip/modeling_clip.py": 2,
     "difflet/models/flux/t5/modeling_t5.py": 2,
     "difflet/models/hunyuan_video/modeling_hunyuan_video.py": 6,

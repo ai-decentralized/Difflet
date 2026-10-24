@@ -250,12 +250,32 @@ def _merge_teacache_kwargs(
     return merged or None
 
 
+# All-reduce dtype each DiffletPipeline-keyed model's artifact used before
+# --tp-reduce-dtype existed (None: the artifact mixed dtypes).
+_TP_REDUCE_LEGACY: dict[str, str | None] = {"ltx_2": "fp32"}
+
+
+def _tp_reduce_cache_kwargs(application_kwargs: dict[str, Any], model_name: str | None) -> dict:
+    """Pop the raw tp_reduce_dtype kwarg; return the model's cache-key fields for it."""
+    requested = application_kwargs.pop("tp_reduce_dtype", None)
+    if model_name not in _TP_REDUCE_LEGACY:
+        return {}
+    from difflet.common.tp_reduce import parse_tp_reduce_dtype, tp_reduce_cache_fields
+
+    legacy = _TP_REDUCE_LEGACY[model_name]
+    return tp_reduce_cache_fields(
+        parse_tp_reduce_dtype(requested),
+        legacy=None if legacy is None else parse_tp_reduce_dtype(legacy),
+    )
+
+
 def _cache_application_kwargs(
     application_kwargs: dict[str, Any] | None, *, model_name: str | None = None
 ) -> dict[str, Any] | None:
-    if not application_kwargs and model_name != "hunyuan_video":
-        return None
     cache_kwargs = dict(application_kwargs or {})
+    cache_kwargs.update(_tp_reduce_cache_kwargs(cache_kwargs, model_name))
+    if not cache_kwargs and model_name != "hunyuan_video":
+        return None
     if model_name == "hunyuan_video":
         # Recompile backbones whose long-mask integer reduction could truncate
         # the attention range on Trainium LNC2, including non-TeaCache requests.

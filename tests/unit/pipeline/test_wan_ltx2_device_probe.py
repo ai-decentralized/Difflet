@@ -201,7 +201,11 @@ def test_calibration_selects_compile_components_and_cache_key(tmp_path, kind, fa
     app = factory(tmp_path / "model", **kwargs)
     assert (app.teacache_probe is not None) == (mode == "adaptive")
     cached = _cache_application_kwargs(kwargs, model_name=kind)
-    assert cached == ({"teacache_probe_enabled": True} if mode == "adaptive" else None)
+    # LTX-2's default bf16 all-reduce is part of its artifact identity.
+    expected = {"tp_reduce_dtype": "bfloat16"} if kind == "ltx_2" else {}
+    if mode == "adaptive":
+        expected["teacache_probe_enabled"] = True
+    assert cached == (expected or None)
 
 
 class _ScalarProbe:
