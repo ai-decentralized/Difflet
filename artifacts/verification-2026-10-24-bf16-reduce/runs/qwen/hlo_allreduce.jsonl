@@ -1,0 +1,5 @@
+{"module": "MODULE_2705a21040bba6dacbfb+96a32ed9", "all_reduce": {"(bf16 [1,1024,3072], bf16 [])": 120, "(bf16 [1,4096,3072], bf16 [])": 120}}
+{"module": "MODULE_6e3404442cae805e36f5+cc355be3", "all_reduce": {}}
+{"module": "MODULE_e75a2dee8db307ad6163+15b553c6", "all_reduce": {"(f32 [1,1024,3072], f32 [])": 120, "(f32 [1,4096,3072], f32 [])": 120}}
+{"module": "MODULE_fa108af30f6ed34827ef+0cb869f0", "all_reduce": {"(bf16 [1,256,3584], bf16 [])": 56}}
+{"module": "MODULE_dbd6772519bfcfa3a9f8+294c73f5", "all_reduce": {"(bf16 [1,1,3584], bf16 [])": 56}}

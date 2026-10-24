@@ -1,0 +1,86 @@
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+[difflet] stage 'text' already compiled at /home/ubuntu/.cache/difflet/qwen_image_enc/0ec6b2ce606f1eb5 (manifest matches); skipping
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+INFO:Neuron:Saving the neuron_config to /home/ubuntu/.cache/difflet/qwen_image_dit/0b9dbdccc2d99f21/transformer/
+INFO:Neuron:Generating HLOs for the following models: ['QwenImageTransformer2DModel']
+[2026-10-24 05:59:39.800: I neuronx_distributed/parallel_layers/parallel_state.py:638] > initializing tensor model parallel with size 4
+[2026-10-24 05:59:39.800: I neuronx_distributed/parallel_layers/parallel_state.py:639] > initializing pipeline model parallel with size 1
+[2026-10-24 05:59:39.800: I neuronx_distributed/parallel_layers/parallel_state.py:640] > initializing context model parallel with size 1
+[2026-10-24 05:59:39.800: I neuronx_distributed/parallel_layers/parallel_state.py:641] > initializing data parallel with size 1
+[2026-10-24 05:59:39.800: I neuronx_distributed/parallel_layers/parallel_state.py:642] > initializing world size to 4
+[2026-10-24 05:59:39.800: I neuronx_distributed/parallel_layers/parallel_state.py:387] [rank_0_pp-1_tp-1_dp-1_cp-1] Chosen Logic for replica groups ret_logic=<PG_Group_Logic.LOGIC1: (<function ascending_ring_PG_group at 0x7cec3aa57ba0>, 'Ascending Ring PG Group')>
+[2026-10-24 05:59:39.801: I neuronx_distributed/parallel_layers/parallel_state.py:666] [rank_0_pp-1_tp-1_dp-1_cp-1] tp_groups: replica_groups.tp_groups=[[0, 1, 2, 3]]
+[2026-10-24 05:59:39.801: I neuronx_distributed/parallel_layers/parallel_state.py:667] [rank_0_pp-1_tp-1_dp-1_cp-1] dp_groups: replica_groups.dp_groups=[[0], [1], [2], [3]]
+[2026-10-24 05:59:39.801: I neuronx_distributed/parallel_layers/parallel_state.py:668] [rank_0_pp-1_tp-1_dp-1_cp-1] pp_groups: replica_groups.pp_groups=[[0], [1], [2], [3]]
+[2026-10-24 05:59:39.801: I neuronx_distributed/parallel_layers/parallel_state.py:669] [rank_0_pp-1_tp-1_dp-1_cp-1] cp_groups: replica_groups.cp_groups=[[0], [1], [2], [3]]
+[2026-10-24 05:59:39.801: I neuronx_distributed/parallel_layers/parallel_state.py:670] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_model_groups: replica_groups.ep_model_groups=[[0], [1], [2], [3]]
+[2026-10-24 05:59:39.801: I neuronx_distributed/parallel_layers/parallel_state.py:671] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_data_groups: replica_groups.ep_data_groups=[[0], [1], [2], [3]]
+INFO:Neuron:Generating 1 hlos for key: QwenImageTransformer2DModel
+INFO:Neuron:Minimal metadata will be added to HLO
+INFO:Neuron:Started loading module QwenImageTransformer2DModel
+INFO:Neuron:Finished loading module QwenImageTransformer2DModel in 97.33681392669678 seconds
+INFO:Neuron:generating HLO: QwenImageTransformer2DModel, input example shape = torch.Size([1, 4096, 64])
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/parallel_layers/layers.py:531: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=3, shape=torch.Size([1, 1024]), dtype=torch.bool). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=4, shape=torch.Size([1]), dtype=torch.bfloat16). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+INFO:Neuron:Finished generating HLO for QwenImageTransformer2DModel in 18.371021032333374 seconds, input example shape = torch.Size([1, 4096, 64])
+INFO:Neuron:Generated all HLOs in 116.63030529022217 seconds
+INFO:Neuron:Starting compilation for the priority HLO
+INFO:Neuron:'QwenImageTransformer2DModel' is the priority model with bucket rank 0
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/libneuronxla/neuron_cc_wrapper.py:287: SyntaxWarning: str format compiler_flags is discouraged as its handling involves repeated joining and splitting, which can easily make mistakes if something is quoted or escaped. Use list[str] instead. Refer to documentation of the Python subprocess module for details.
+  warnings.warn(SyntaxWarning(
+...
+Compiler status PASS
+2026-10-24 06:02:35.000747:  71049  [INFO]: Compilation Successfully Completed for model.MODULE_2705a21040bba6dacbfb+96a32ed9.hlo_module.pb
+INFO:Neuron:Done compilation for the priority HLO in 60.896399974823 seconds
+INFO:Neuron:Done optimizing weight layout for all HLOs in 0.11231303215026855 seconds
+INFO:Neuron:Starting compilation for all HLOs
+INFO:Neuron:Finished Compilation for all HLOs in 0.0065844058990478516 seconds
+.........
+Compiler status PASS
+INFO:Neuron:Done preparing weight layout transformation
+INFO:Neuron:Finished building model in 357.5002558231354 seconds
+INFO:Neuron:Pre-sharding checkpoints.
+INFO:Neuron:Sharding weights for ranks: 0...3
+[2026-10-24 06:05:38.572: I neuronx_distributed/parallel_layers/parallel_state.py:638] > initializing tensor model parallel with size 4
+[2026-10-24 06:05:38.572: I neuronx_distributed/parallel_layers/parallel_state.py:639] > initializing pipeline model parallel with size 1
+[2026-10-24 06:05:38.572: I neuronx_distributed/parallel_layers/parallel_state.py:640] > initializing context model parallel with size 1
+[2026-10-24 06:05:38.572: I neuronx_distributed/parallel_layers/parallel_state.py:641] > initializing data parallel with size 1
+[2026-10-24 06:05:38.572: I neuronx_distributed/parallel_layers/parallel_state.py:642] > initializing world size to 4
+[2026-10-24 06:05:38.572: I neuronx_distributed/parallel_layers/parallel_state.py:387] [rank_0_pp-1_tp-1_dp-1_cp-1] Chosen Logic for replica groups ret_logic=<PG_Group_Logic.LOGIC1: (<function ascending_ring_PG_group at 0x7cec3aa57ba0>, 'Ascending Ring PG Group')>
+[2026-10-24 06:05:38.572: I neuronx_distributed/parallel_layers/parallel_state.py:666] [rank_0_pp-1_tp-1_dp-1_cp-1] tp_groups: replica_groups.tp_groups=[[0, 1, 2, 3]]
+[2026-10-24 06:05:38.572: I neuronx_distributed/parallel_layers/parallel_state.py:667] [rank_0_pp-1_tp-1_dp-1_cp-1] dp_groups: replica_groups.dp_groups=[[0], [1], [2], [3]]
+[2026-10-24 06:05:38.572: I neuronx_distributed/parallel_layers/parallel_state.py:668] [rank_0_pp-1_tp-1_dp-1_cp-1] pp_groups: replica_groups.pp_groups=[[0], [1], [2], [3]]
+[2026-10-24 06:05:38.572: I neuronx_distributed/parallel_layers/parallel_state.py:669] [rank_0_pp-1_tp-1_dp-1_cp-1] cp_groups: replica_groups.cp_groups=[[0], [1], [2], [3]]
+[2026-10-24 06:05:38.572: I neuronx_distributed/parallel_layers/parallel_state.py:670] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_model_groups: replica_groups.ep_model_groups=[[0], [1], [2], [3]]
+[2026-10-24 06:05:38.572: I neuronx_distributed/parallel_layers/parallel_state.py:671] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_data_groups: replica_groups.ep_data_groups=[[0], [1], [2], [3]]
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/trace/trace.py:642: UserWarning: Removing redundant keys from checkpoint: []
+  warnings.warn(f"Removing redundant keys from checkpoint: {keys_to_delete}")
+INFO:Neuron:Done Sharding weights in 711.1088169350005
+INFO:Neuron:Pre-sharding complete in 711.5s: 4 shard file(s), 38987.1 MB total under /home/ubuntu/.cache/difflet/qwen_image_dit/0b9dbdccc2d99f21/transformer/weights/
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+[difflet] stage 'vae' already compiled at /home/ubuntu/.cache/difflet/qwen_image_vae/e413a1c6a42ba565 (manifest matches); skipping

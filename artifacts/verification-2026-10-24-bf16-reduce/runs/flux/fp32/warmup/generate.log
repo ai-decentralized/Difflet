@@ -1,0 +1,37 @@
+[    0.079] <frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+[    5.282] /home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+[    5.282]   component, error = import_nki(config)
+[    5.295] /home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+[    5.295]   warnings.warn(f"Warning: {error}")
+[    5.295] /home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+[    5.295]   warnings.warn(f"Warning: {error}")
+[    5.295] /home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+[    5.295]   warnings.warn(f"Warning: {error}")
+[    6.841] Loading pipeline components...:   0%|          | 0/4 [00:00<?, ?it/s]You set `add_prefix_space`. The tokenizer needs to be converted from the slow tokenizers
+[    7.189] Loading pipeline components...:  50%|█████     | 2/4 [00:00<00:00,  7.23it/s]Loading pipeline components...: 100%|██████████| 4/4 [00:00<00:00,  9.91it/s]Loading pipeline components...: 100%|██████████| 4/4 [00:00<00:00,  9.39it/s]
+[    7.235] Neuron: Loading presharded checkpoints for ranks: 0...3
+[    8.368] Neuron: Presharded file read: 1.13s for 4 shard(s) (9084.6 MB total)
+[    8.368] Neuron: Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+[   84.184] Neuron: Finished traced model weight initialization in 75.82s (device init 75.82s, total load_weights 76.95s)
+[   84.240] Neuron: Warming up the model.
+[   84.398] Neuron: Warmup completed in 0.1581740379333496 seconds.
+[   84.549] Neuron: Loading presharded checkpoints for ranks: 0...3
+[   88.793] Neuron: Presharded file read: 4.24s for 4 shard(s) (22708.9 MB total)
+[   88.793] Neuron: Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+[  275.344] Neuron: Finished traced model weight initialization in 186.55s (device init 186.55s, total load_weights 190.80s)
+[  275.466] Neuron: Warming up the model.
+[  276.087] Neuron: Warmup completed in 0.620694637298584 seconds.
+[  276.100] Neuron: Loading presharded checkpoints for ranks: 0...3
+[  276.211] Neuron: Presharded file read: 0.11s for 4 shard(s) (939.0 MB total)
+[  276.211] Neuron: Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+[  277.171] Neuron: Finished traced model weight initialization in 0.96s (device init 0.96s, total load_weights 1.07s)
+[  277.181] Neuron: Warming up the model.
+[  277.200] Neuron: Warmup completed in 0.01786661148071289 seconds.
+[  277.589] Neuron: Loading presharded checkpoints for ranks: 0...3
+[  277.672] Neuron: Presharded file read: 0.08s for 4 shard(s) (378.1 MB total)
+[  277.672] Neuron: Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+[  283.244] Neuron: Finished traced model weight initialization in 5.57s (device init 5.57s, total load_weights 5.66s)
+[  283.249] Neuron: Warming up the model.
+[  283.545] Neuron: Warmup completed in 0.29628682136535645 seconds.
+[  291.494]   0%|          | 0/28 [00:00<?, ?it/s]  4%|▎         | 1/28 [00:00<00:07,  3.45it/s]  7%|▋         | 2/28 [00:00<00:08,  3.13it/s] 11%|█         | 3/28 [00:00<00:07,  3.34it/s] 14%|█▍        | 4/28 [00:01<00:06,  3.44it/s] 18%|█▊        | 5/28 [00:01<00:06,  3.50it/s] 21%|██▏       | 6/28 [00:01<00:06,  3.54it/s] 25%|██▌       | 7/28 [00:02<00:05,  3.57it/s] 29%|██▊       | 8/28 [00:02<00:05,  3.58it/s] 32%|███▏      | 9/28 [00:02<00:05,  3.60it/s] 36%|███▌      | 10/28 [00:02<00:05,  3.37it/s] 39%|███▉      | 11/28 [00:03<00:04,  3.43it/s] 43%|████▎     | 12/28 [00:03<00:04,  3.48it/s] 46%|████▋     | 13/28 [00:03<00:04,  3.52it/s] 50%|█████     | 14/28 [00:04<00:03,  3.51it/s] 54%|█████▎    | 15/28 [00:04<00:03,  3.53it/s] 57%|█████▋    | 16/28 [00:04<00:03,  3.55it/s] 61%|██████    | 17/28 [00:04<00:03,  3.57it/s] 64%|██████▍   | 18/28 [00:05<00:02,  3.59it/s] 68%|██████▊   | 19/28 [00:05<00:02,  3.60it/s] 71%|███████▏  | 20/28 [00:05<00:02,  3.60it/s] 75%|███████▌  | 21/28 [00:05<00:01,  3.60it/s] 79%|███████▊  | 22/28 [00:06<00:01,  3.60it/s] 82%|████████▏ | 23/28 [00:06<00:01,  3.60it/s] 86%|████████▌ | 24/28 [00:06<00:01,  3.61it/s] 89%|████████▉ | 25/28 [00:07<00:00,  3.61it/s] 93%|█████████▎| 26/28 [00:07<00:00,  3.61it/s] 96%|█████████▋| 27/28 [00:07<00:00,  3.62it/s]100%|██████████| 28/28 [00:07<00:00,  3.62it/s]100%|██████████| 28/28 [00:07<00:00,  3.55it/s]
+[  292.233] [difflet] image saved to /home/ubuntu/campaign/bf16-reduce/runs/flux/fp32/warmup/out.png

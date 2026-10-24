@@ -1,0 +1,18 @@
+{
+  "ref_dir": "/home/ubuntu/campaign/bf16-reduce/runs/cpu_ref/qwen_image",
+  "cand_dir": "/home/ubuntu/campaign/bf16-reduce/runs/qwen/fp32/warm1",
+  "latents": {
+    "final": {
+      "rel_l2": 0.19231017635029793,
+      "cosine": 0.9813745550305881
+    }
+  },
+  "frames": {
+    "psnr_mean": 24.644751498827926,
+    "psnr_worst": 24.644751498827926,
+    "ssim_mean": 0.9572195428837256,
+    "psnr_per_frame": [
+      24.644751498827926
+    ]
+  }
+}

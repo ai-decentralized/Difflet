@@ -1,0 +1,53 @@
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+INFO:Neuron:Saving the neuron_config to /home/ubuntu/.cache/difflet/ltx_2/d4aef1346d6f1369/transformer/
+INFO:Neuron:Generating HLOs for the following models: ['LTX2VideoTransformer3DModel']
+[2026-10-24 06:34:43.012: I neuronx_distributed/parallel_layers/parallel_state.py:638] > initializing tensor model parallel with size 4
+[2026-10-24 06:34:43.012: I neuronx_distributed/parallel_layers/parallel_state.py:639] > initializing pipeline model parallel with size 1
+[2026-10-24 06:34:43.012: I neuronx_distributed/parallel_layers/parallel_state.py:640] > initializing context model parallel with size 1
+[2026-10-24 06:34:43.012: I neuronx_distributed/parallel_layers/parallel_state.py:641] > initializing data parallel with size 1
+[2026-10-24 06:34:43.012: I neuronx_distributed/parallel_layers/parallel_state.py:642] > initializing world size to 4
+[2026-10-24 06:34:43.012: I neuronx_distributed/parallel_layers/parallel_state.py:387] [rank_0_pp-1_tp-1_dp-1_cp-1] Chosen Logic for replica groups ret_logic=<PG_Group_Logic.LOGIC1: (<function ascending_ring_PG_group at 0x711564ef8a40>, 'Ascending Ring PG Group')>
+[2026-10-24 06:34:43.012: I neuronx_distributed/parallel_layers/parallel_state.py:666] [rank_0_pp-1_tp-1_dp-1_cp-1] tp_groups: replica_groups.tp_groups=[[0, 1, 2, 3]]
+[2026-10-24 06:34:43.012: I neuronx_distributed/parallel_layers/parallel_state.py:667] [rank_0_pp-1_tp-1_dp-1_cp-1] dp_groups: replica_groups.dp_groups=[[0], [1], [2], [3]]
+[2026-10-24 06:34:43.012: I neuronx_distributed/parallel_layers/parallel_state.py:668] [rank_0_pp-1_tp-1_dp-1_cp-1] pp_groups: replica_groups.pp_groups=[[0], [1], [2], [3]]
+[2026-10-24 06:34:43.012: I neuronx_distributed/parallel_layers/parallel_state.py:669] [rank_0_pp-1_tp-1_dp-1_cp-1] cp_groups: replica_groups.cp_groups=[[0], [1], [2], [3]]
+[2026-10-24 06:34:43.012: I neuronx_distributed/parallel_layers/parallel_state.py:670] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_model_groups: replica_groups.ep_model_groups=[[0], [1], [2], [3]]
+[2026-10-24 06:34:43.012: I neuronx_distributed/parallel_layers/parallel_state.py:671] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_data_groups: replica_groups.ep_data_groups=[[0], [1], [2], [3]]
+INFO:Neuron:Generating 1 hlos for key: LTX2VideoTransformer3DModel
+INFO:Neuron:Minimal metadata will be added to HLO
+INFO:Neuron:Started loading module LTX2VideoTransformer3DModel
+INFO:Neuron:Finished loading module LTX2VideoTransformer3DModel in 82.85387325286865 seconds
+INFO:Neuron:generating HLO: LTX2VideoTransformer3DModel, input example shape = torch.Size([1, 2310, 128])
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/parallel_layers/layers.py:531: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=5, shape=torch.Size([1]), dtype=torch.bfloat16). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=6, shape=torch.Size([1, 1024]), dtype=torch.bool). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=7, shape=torch.Size([1, 1024]), dtype=torch.bool). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+INFO:Neuron:Finished generating HLO for LTX2VideoTransformer3DModel in 20.725391626358032 seconds, input example shape = torch.Size([1, 2310, 128])
+INFO:Neuron:Generated all HLOs in 105.7614324092865 seconds
+INFO:Neuron:Starting compilation for the priority HLO
+INFO:Neuron:'LTX2VideoTransformer3DModel' is the priority model with bucket rank 0
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/libneuronxla/neuron_cc_wrapper.py:287: SyntaxWarning: str format compiler_flags is discouraged as its handling involves repeated joining and splitting, which can easily make mistakes if something is quoted or escaped. Use list[str] instead. Refer to documentation of the Python subprocess module for details.
+  warnings.warn(SyntaxWarning(
+.....
+Compiler status PASS
+2026-10-24 06:37:57.000666:  86263  [INFO]: Compilation Successfully Completed for model.MODULE_20da57192ef0a91533f2+9de06980.hlo_module.pb
+INFO:Neuron:Done compilation for the priority HLO in 88.95102429389954 seconds
+INFO:Neuron:Done optimizing weight layout for all HLOs in 0.2886631488800049 seconds
+INFO:Neuron:Starting compilation for all HLOs
+INFO:Neuron:Finished Compilation for all HLOs in 0.012542486190795898 seconds
+..................
+Compiler status PASS
+INFO:Neuron:Done preparing weight layout transformation
+INFO:Neuron:Finished building model in 546.7897746562958 seconds
+INFO:Neuron:Reusing pre-sharded checkpoints from /home/ubuntu/.cache/difflet/_shared_weights/Lightricks--LTX-2__transformer__47da56e2__bfloat16__tp4__0efecbbaf05aab52.

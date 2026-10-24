@@ -1,0 +1,42 @@
+{
+  "ltx2_bf16": {
+    "total_exec_time": 0.40689622692,
+    "tensor_engine_active_time": 0.255649568076,
+    "vector_engine_active_time": 0.189503841797,
+    "scalar_engine_active_time": 0.199651680146,
+    "gpsimd_engine_active_time": 0.086235335747,
+    "dma_active_time": 0.312692342376,
+    "cc_op_time": 0.05197055056,
+    "cc_op_count": 1345
+  },
+  "ltx2_fp32": {
+    "total_exec_time": 0.432537638576,
+    "tensor_engine_active_time": 0.26870663118,
+    "vector_engine_active_time": 0.184414054609,
+    "scalar_engine_active_time": 0.2015494828,
+    "gpsimd_engine_active_time": 0.097100696499,
+    "dma_active_time": 0.329419302732,
+    "cc_op_time": 0.092529344842,
+    "cc_op_count": 1729
+  },
+  "qwen_bf16": {
+    "total_exec_time": 0.344544623768,
+    "tensor_engine_active_time": 0.254805345178,
+    "vector_engine_active_time": 0.176791073936,
+    "scalar_engine_active_time": 0.171750423801,
+    "gpsimd_engine_active_time": 0.062602915561,
+    "dma_active_time": 0.280244905178,
+    "cc_op_time": 0.042717633246,
+    "cc_op_count": 488
+  },
+  "qwen_fp32": {
+    "total_exec_time": 0.403723970282,
+    "tensor_engine_active_time": 0.263086554324,
+    "vector_engine_active_time": 0.189377963637,
+    "scalar_engine_active_time": 0.188092911023,
+    "gpsimd_engine_active_time": 0.069617645597,
+    "dma_active_time": 0.331597907237,
+    "cc_op_time": 0.084061746305,
+    "cc_op_count": 846
+  }
+}

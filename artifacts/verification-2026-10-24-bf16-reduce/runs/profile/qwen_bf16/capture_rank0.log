@@ -1,0 +1,9 @@
+2026-Oct-24 08:31:33.590236 100935:100955 ERROR  TDRV:vtpb_get_virtual_core                   Invalid lnc index 3. Number of LNCs 1
+2026-Oct-24 08:31:33.590309 100935:100955 ERROR   NRT:nrt_load_collectives                    Failed to find core 3
+2026-Oct-24 08:31:33.590227 100935:100994 ERROR  TDRV:vtpb_get_virtual_core                   Invalid lnc index 2. Number of LNCs 1
+2026-Oct-24 08:31:33.590213 100935:100935 ERROR  TDRV:vtpb_get_virtual_core                   Invalid lnc index 1. Number of LNCs 1
+2026-Oct-24 08:31:33.590925 100935:100994 ERROR   NRT:nrt_load_collectives                    Failed to find core 2
+2026-Oct-24 08:31:33.591455 100935:100935 ERROR   NRT:nrt_load_collectives                    Failed to find core 1
+error: invalid statusneuron-explorer exited with an error.neuron-explorer 2.33.0.1039-60059b2 built on 2026-10-14T14:07:43Z (commit 60059b26)
+
+invalid status

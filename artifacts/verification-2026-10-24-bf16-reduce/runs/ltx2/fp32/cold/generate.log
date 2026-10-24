@@ -1,0 +1,30 @@
+[    0.350] <frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+[   20.169] /home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+[   20.169]   component, error = import_nki(config)
+[   20.175] /home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+[   20.175]   warnings.warn(f"Warning: {error}")
+[   20.175] /home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+[   20.175]   warnings.warn(f"Warning: {error}")
+[   20.175] /home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+[   20.175]   warnings.warn(f"Warning: {error}")
+[   23.886] Loading pipeline components...:   0%|          | 0/7 [00:00<?, ?it/s]Loading pipeline components...:  14%|█▍        | 1/7 [00:00<00:00,  6.11it/s]Loading pipeline components...:  29%|██▊       | 2/7 [00:01<00:03,  1.66it/s]Loading pipeline components...:  43%|████▎     | 3/7 [00:01<00:01,  2.62it/s]Loading pipeline components...:  57%|█████▋    | 4/7 [00:01<00:00,  3.30it/s]
+[   35.788] Loading checkpoint shards:   0%|          | 0/11 [00:00<?, ?it/s][A
+[   73.821] Loading checkpoint shards:   9%|▉         | 1/11 [00:11<01:59, 11.90s/it][A
+[  110.767] Loading checkpoint shards:  18%|█▊        | 2/11 [00:49<04:05, 27.27s/it][A
+[  148.549] Loading checkpoint shards:  27%|██▋       | 3/11 [01:26<04:13, 31.69s/it][A
+[  185.982] Loading checkpoint shards:  36%|███▋      | 4/11 [02:04<03:58, 34.10s/it][A
+[  223.763] Loading checkpoint shards:  45%|████▌     | 5/11 [02:42<03:31, 35.30s/it][A
+[  261.188] Loading checkpoint shards:  55%|█████▍    | 6/11 [03:19<03:00, 36.14s/it][A
+[  298.970] Loading checkpoint shards:  64%|██████▎   | 7/11 [03:57<02:26, 36.56s/it][A
+[  336.391] Loading checkpoint shards:  73%|███████▎  | 8/11 [04:35<01:50, 36.95s/it][A
+[  374.173] Loading checkpoint shards:  82%|████████▏ | 9/11 [05:12<01:14, 37.10s/it][A
+[  394.673] Loading checkpoint shards:  91%|█████████ | 10/11 [05:50<00:37, 37.31s/it][A
+[  394.673] Loading checkpoint shards: 100%|██████████| 11/11 [06:10<00:00, 32.16s/it][ALoading checkpoint shards: 100%|██████████| 11/11 [06:10<00:00, 33.71s/it]
+[  394.737] Loading pipeline components...:  86%|████████▌ | 6/7 [06:12<01:38, 98.45s/it]Loading pipeline components...: 100%|██████████| 7/7 [06:12<00:00, 53.19s/it]
+[  395.395] Neuron: Loading presharded checkpoints for ranks: 0...3
+[  406.258] Neuron: Presharded file read: 10.86s for 4 shard(s) (38011.3 MB total)
+[  406.258] Neuron: Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+[  704.399] Neuron: Finished traced model weight initialization in 298.14s (device init 298.14s, total load_weights 309.00s)
+[  704.597] Neuron: Warming up the model.
+[  705.414] Neuron: Warmup completed in 0.816845178604126 seconds.
+[  761.283] [ltx_2] video saved to /home/ubuntu/campaign/bf16-reduce/runs/ltx2/fp32/cold/out.mp4

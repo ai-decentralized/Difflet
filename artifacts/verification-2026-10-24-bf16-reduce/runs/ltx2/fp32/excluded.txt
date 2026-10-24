@@ -1,0 +1,1 @@
+warm1 426.2 s: still re-reading LTX-2 files the preceding Qwen runs had evicted from the page cache (one discarded warm-up was not enough after a model switch); replaced by warm4.

@@ -1,0 +1,153 @@
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+Loading pipeline components...:   0%|          | 0/4 [00:00<?, ?it/s]You set `add_prefix_space`. The tokenizer needs to be converted from the slow tokenizers
+Loading pipeline components...:  25%|██▌       | 1/4 [00:00<00:00,  5.65it/s]Loading pipeline components...: 100%|██████████| 4/4 [00:00<00:00, 15.07it/s]
+INFO:Neuron:Saving the neuron_config to /home/ubuntu/.cache/difflet/flux/45c95ee944b29171/text_encoder/
+INFO:Neuron:Generating HLOs for the following models: ['NeuronCLIPTextModel']
+[2026-10-24 09:11:01.733: I neuronx_distributed/parallel_layers/parallel_state.py:638] > initializing tensor model parallel with size 1
+[2026-10-24 09:11:01.733: I neuronx_distributed/parallel_layers/parallel_state.py:639] > initializing pipeline model parallel with size 1
+[2026-10-24 09:11:01.734: I neuronx_distributed/parallel_layers/parallel_state.py:640] > initializing context model parallel with size 1
+[2026-10-24 09:11:01.734: I neuronx_distributed/parallel_layers/parallel_state.py:641] > initializing data parallel with size 4
+[2026-10-24 09:11:01.734: I neuronx_distributed/parallel_layers/parallel_state.py:642] > initializing world size to 4
+[2026-10-24 09:11:01.734: I neuronx_distributed/parallel_layers/parallel_state.py:387] [rank_0_pp-1_tp-1_dp-1_cp-1] Chosen Logic for replica groups ret_logic=<PG_Group_Logic.LOGIC1: (<function ascending_ring_PG_group at 0x73388e908220>, 'Ascending Ring PG Group')>
+[2026-10-24 09:11:01.734: I neuronx_distributed/parallel_layers/parallel_state.py:666] [rank_0_pp-1_tp-1_dp-1_cp-1] tp_groups: replica_groups.tp_groups=[[0], [1], [2], [3]]
+[2026-10-24 09:11:01.734: I neuronx_distributed/parallel_layers/parallel_state.py:667] [rank_0_pp-1_tp-1_dp-1_cp-1] dp_groups: replica_groups.dp_groups=[[0, 1, 2, 3]]
+[2026-10-24 09:11:01.734: I neuronx_distributed/parallel_layers/parallel_state.py:668] [rank_0_pp-1_tp-1_dp-1_cp-1] pp_groups: replica_groups.pp_groups=[[0], [1], [2], [3]]
+[2026-10-24 09:11:01.734: I neuronx_distributed/parallel_layers/parallel_state.py:669] [rank_0_pp-1_tp-1_dp-1_cp-1] cp_groups: replica_groups.cp_groups=[[0], [1], [2], [3]]
+[2026-10-24 09:11:01.734: I neuronx_distributed/parallel_layers/parallel_state.py:670] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_model_groups: replica_groups.ep_model_groups=[[0], [1], [2], [3]]
+[2026-10-24 09:11:01.734: I neuronx_distributed/parallel_layers/parallel_state.py:671] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_data_groups: replica_groups.ep_data_groups=[[0, 1, 2, 3]]
+INFO:Neuron:Generating 1 hlos for key: NeuronCLIPTextModel
+INFO:Neuron:Minimal metadata will be added to HLO
+INFO:Neuron:Started loading module NeuronCLIPTextModel
+INFO:Neuron:Finished loading module NeuronCLIPTextModel in 0.28765416145324707 seconds
+INFO:Neuron:generating HLO: NeuronCLIPTextModel, input example shape = torch.Size([1, 77])
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/parallel_layers/layers.py:531: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+INFO:Neuron:Finished generating HLO for NeuronCLIPTextModel in 0.3726217746734619 seconds, input example shape = torch.Size([1, 77])
+INFO:Neuron:Generated all HLOs in 0.681537389755249 seconds
+INFO:Neuron:Can't find a priority model, skip marking weights
+INFO:Neuron:Can't find a priority model, skip optimizing weight layout for other HLOs
+INFO:Neuron:Starting compilation for all HLOs
+INFO:Neuron:Neuron compiler flags: --model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap --cc-pipeline-tiling-factor=4' --auto-cast=none --internal-hlo2tensorizer-options='--verify-hlo=true' --internal-hlo2tensorizer-options='--verify-hlo=true'  --verbose=35 --logfile=/tmp/nxd_model/text_encoder/NeuronCLIPTextModel/_tp0_bk0/log-neuron-cc.txt
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/libneuronxla/neuron_cc_wrapper.py:249: SyntaxWarning: str format compiler_flags is discouraged as its handling involves repeated joining and splitting, which can easily make mistakes if something is quoted or escaped. Use list[str] instead. Refer to documentation of the Python subprocess module for details.
+  warnings.warn(SyntaxWarning(
+.
+Compiler status PASS
+2026-10-24 09:11:19.000965:  104966  [INFO]: Compilation Successfully Completed for model.MODULE_3147aaf043bfa3c70966+21a6bb0f.hlo_module.pb
+INFO:Neuron:Finished Compilation for all HLOs in 17.55399441719055 seconds
+INFO:Neuron:Can't find a priority model, falling back to the existing weight layout
+INFO:Neuron:Finished building model in 18.306769371032715 seconds
+INFO:Neuron:Reusing pre-sharded checkpoints from /home/ubuntu/.cache/difflet/_shared_weights/black-forest-labs--FLUX.1-dev__text_encoder__3de623fc__bfloat16__tp1w4__3a7d6a1d8623aa36.
+INFO:Neuron:Saving the neuron_config to /home/ubuntu/.cache/difflet/flux/45c95ee944b29171/text_encoder_2/
+INFO:Neuron:Generating HLOs for the following models: ['NeuronT5EncoderModel']
+[2026-10-24 09:11:20.043: I neuronx_distributed/parallel_layers/parallel_state.py:638] > initializing tensor model parallel with size 4
+[2026-10-24 09:11:20.044: I neuronx_distributed/parallel_layers/parallel_state.py:639] > initializing pipeline model parallel with size 1
+[2026-10-24 09:11:20.044: I neuronx_distributed/parallel_layers/parallel_state.py:640] > initializing context model parallel with size 1
+[2026-10-24 09:11:20.044: I neuronx_distributed/parallel_layers/parallel_state.py:641] > initializing data parallel with size 1
+[2026-10-24 09:11:20.044: I neuronx_distributed/parallel_layers/parallel_state.py:642] > initializing world size to 4
+[2026-10-24 09:11:20.044: I neuronx_distributed/parallel_layers/parallel_state.py:387] [rank_0_pp-1_tp-1_dp-1_cp-1] Chosen Logic for replica groups ret_logic=<PG_Group_Logic.LOGIC1: (<function ascending_ring_PG_group at 0x73388e908220>, 'Ascending Ring PG Group')>
+[2026-10-24 09:11:20.044: I neuronx_distributed/parallel_layers/parallel_state.py:666] [rank_0_pp-1_tp-1_dp-1_cp-1] tp_groups: replica_groups.tp_groups=[[0, 1, 2, 3]]
+[2026-10-24 09:11:20.044: I neuronx_distributed/parallel_layers/parallel_state.py:667] [rank_0_pp-1_tp-1_dp-1_cp-1] dp_groups: replica_groups.dp_groups=[[0], [1], [2], [3]]
+[2026-10-24 09:11:20.044: I neuronx_distributed/parallel_layers/parallel_state.py:668] [rank_0_pp-1_tp-1_dp-1_cp-1] pp_groups: replica_groups.pp_groups=[[0], [1], [2], [3]]
+[2026-10-24 09:11:20.044: I neuronx_distributed/parallel_layers/parallel_state.py:669] [rank_0_pp-1_tp-1_dp-1_cp-1] cp_groups: replica_groups.cp_groups=[[0], [1], [2], [3]]
+[2026-10-24 09:11:20.044: I neuronx_distributed/parallel_layers/parallel_state.py:670] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_model_groups: replica_groups.ep_model_groups=[[0], [1], [2], [3]]
+[2026-10-24 09:11:20.044: I neuronx_distributed/parallel_layers/parallel_state.py:671] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_data_groups: replica_groups.ep_data_groups=[[0], [1], [2], [3]]
+INFO:Neuron:Generating 1 hlos for key: NeuronT5EncoderModel
+INFO:Neuron:Minimal metadata will be added to HLO
+INFO:Neuron:Started loading module NeuronT5EncoderModel
+INFO:Neuron:Finished loading module NeuronT5EncoderModel in 0.39600348472595215 seconds
+INFO:Neuron:generating HLO: NeuronT5EncoderModel, input example shape = torch.Size([1, 512])
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/parallel_layers/layers.py:531: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+INFO:Neuron:Finished generating HLO for NeuronT5EncoderModel in 0.7108645439147949 seconds, input example shape = torch.Size([1, 512])
+INFO:Neuron:Generated all HLOs in 1.1382060050964355 seconds
+INFO:Neuron:Can't find a priority model, skip marking weights
+INFO:Neuron:Can't find a priority model, skip optimizing weight layout for other HLOs
+INFO:Neuron:Starting compilation for all HLOs
+INFO:Neuron:Neuron compiler flags: --model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap --cc-pipeline-tiling-factor=4' --auto-cast=none --internal-hlo2tensorizer-options='--verify-hlo=true' --internal-hlo2tensorizer-options='--verify-hlo=true'  --verbose=35 --logfile=/tmp/nxd_model/text_encoder_2/NeuronT5EncoderModel/_tp0_bk0/log-neuron-cc.txt
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/libneuronxla/neuron_cc_wrapper.py:249: SyntaxWarning: str format compiler_flags is discouraged as its handling involves repeated joining and splitting, which can easily make mistakes if something is quoted or escaped. Use list[str] instead. Refer to documentation of the Python subprocess module for details.
+  warnings.warn(SyntaxWarning(
+.
+Compiler status PASS
+2026-10-24 09:11:26.000792:  104966  [INFO]: Compilation Successfully Completed for model.MODULE_787da31d303ac64d4beb+359a15e9.hlo_module.pb
+INFO:Neuron:Finished Compilation for all HLOs in 5.613332033157349 seconds
+INFO:Neuron:Can't find a priority model, falling back to the existing weight layout
+INFO:Neuron:Finished building model in 6.7945876121521 seconds
+INFO:Neuron:Reusing pre-sharded checkpoints from /home/ubuntu/.cache/difflet/_shared_weights/black-forest-labs--FLUX.1-dev__text_encoder_2__3de623fc__bfloat16__tp4__96ec5177ffc945e4.
+INFO:Neuron:Saving the neuron_config to /home/ubuntu/.cache/difflet/flux/45c95ee944b29171/transformer/
+INFO:Neuron:Generating HLOs for the following models: ['NeuronFluxTransformer2DModel']
+[2026-10-24 09:11:26.916: I neuronx_distributed/parallel_layers/parallel_state.py:638] > initializing tensor model parallel with size 4
+[2026-10-24 09:11:26.916: I neuronx_distributed/parallel_layers/parallel_state.py:639] > initializing pipeline model parallel with size 1
+[2026-10-24 09:11:26.916: I neuronx_distributed/parallel_layers/parallel_state.py:640] > initializing context model parallel with size 1
+[2026-10-24 09:11:26.916: I neuronx_distributed/parallel_layers/parallel_state.py:641] > initializing data parallel with size 1
+[2026-10-24 09:11:26.916: I neuronx_distributed/parallel_layers/parallel_state.py:642] > initializing world size to 4
+[2026-10-24 09:11:26.916: I neuronx_distributed/parallel_layers/parallel_state.py:387] [rank_0_pp-1_tp-1_dp-1_cp-1] Chosen Logic for replica groups ret_logic=<PG_Group_Logic.LOGIC1: (<function ascending_ring_PG_group at 0x73388e908220>, 'Ascending Ring PG Group')>
+[2026-10-24 09:11:26.916: I neuronx_distributed/parallel_layers/parallel_state.py:666] [rank_0_pp-1_tp-1_dp-1_cp-1] tp_groups: replica_groups.tp_groups=[[0, 1, 2, 3]]
+[2026-10-24 09:11:26.916: I neuronx_distributed/parallel_layers/parallel_state.py:667] [rank_0_pp-1_tp-1_dp-1_cp-1] dp_groups: replica_groups.dp_groups=[[0], [1], [2], [3]]
+[2026-10-24 09:11:26.916: I neuronx_distributed/parallel_layers/parallel_state.py:668] [rank_0_pp-1_tp-1_dp-1_cp-1] pp_groups: replica_groups.pp_groups=[[0], [1], [2], [3]]
+[2026-10-24 09:11:26.916: I neuronx_distributed/parallel_layers/parallel_state.py:669] [rank_0_pp-1_tp-1_dp-1_cp-1] cp_groups: replica_groups.cp_groups=[[0], [1], [2], [3]]
+[2026-10-24 09:11:26.916: I neuronx_distributed/parallel_layers/parallel_state.py:670] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_model_groups: replica_groups.ep_model_groups=[[0], [1], [2], [3]]
+[2026-10-24 09:11:26.916: I neuronx_distributed/parallel_layers/parallel_state.py:671] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_data_groups: replica_groups.ep_data_groups=[[0], [1], [2], [3]]
+INFO:Neuron:Generating 1 hlos for key: NeuronFluxTransformer2DModel
+INFO:Neuron:Minimal metadata will be added to HLO
+INFO:Neuron:Started loading module NeuronFluxTransformer2DModel
+INFO:Neuron:Finished loading module NeuronFluxTransformer2DModel in 1.7413372993469238 seconds
+INFO:Neuron:generating HLO: NeuronFluxTransformer2DModel, input example shape = torch.Size([1, 4096, 64])
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/parallel_layers/layers.py:531: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+INFO:Neuron:Finished generating HLO for NeuronFluxTransformer2DModel in 11.801223993301392 seconds, input example shape = torch.Size([1, 4096, 64])
+INFO:Neuron:Generated all HLOs in 13.707599878311157 seconds
+INFO:Neuron:Starting compilation for the priority HLO
+INFO:Neuron:'NeuronFluxTransformer2DModel' is the priority model with bucket rank 0
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/libneuronxla/neuron_cc_wrapper.py:287: SyntaxWarning: str format compiler_flags is discouraged as its handling involves repeated joining and splitting, which can easily make mistakes if something is quoted or escaped. Use list[str] instead. Refer to documentation of the Python subprocess module for details.
+  warnings.warn(SyntaxWarning(
+.....
+Compiler status PASS
+2026-10-24 09:13:04.000000:  104966  [INFO]: Compilation Successfully Completed for model.MODULE_4897063b7a3ddf628c30+28b9ccee.hlo_module.pb
+INFO:Neuron:Done compilation for the priority HLO in 83.42766880989075 seconds
+INFO:Neuron:Done optimizing weight layout for all HLOs in 0.03869175910949707 seconds
+INFO:Neuron:Starting compilation for all HLOs
+INFO:Neuron:Finished Compilation for all HLOs in 0.002337217330932617 seconds
+.....
+Compiler status PASS
+INFO:Neuron:Done preparing weight layout transformation
+INFO:Neuron:Finished building model in 179.72352385520935 seconds
+INFO:Neuron:Reusing pre-sharded checkpoints from /home/ubuntu/.cache/difflet/_shared_weights/black-forest-labs--FLUX.1-dev__transformer__3de623fc__bfloat16__tp4__725b456c1a7101e9.
+INFO:Neuron:Saving the neuron_config to /home/ubuntu/.cache/difflet/flux/45c95ee944b29171/decoder/
+INFO:Neuron:Generating HLOs for the following models: ['Decoder']
+[2026-10-24 09:14:26.710: I neuronx_distributed/parallel_layers/parallel_state.py:638] > initializing tensor model parallel with size 1
+[2026-10-24 09:14:26.710: I neuronx_distributed/parallel_layers/parallel_state.py:639] > initializing pipeline model parallel with size 1
+[2026-10-24 09:14:26.710: I neuronx_distributed/parallel_layers/parallel_state.py:640] > initializing context model parallel with size 1
+[2026-10-24 09:14:26.710: I neuronx_distributed/parallel_layers/parallel_state.py:641] > initializing data parallel with size 4
+[2026-10-24 09:14:26.710: I neuronx_distributed/parallel_layers/parallel_state.py:642] > initializing world size to 4
+[2026-10-24 09:14:26.710: I neuronx_distributed/parallel_layers/parallel_state.py:387] [rank_0_pp-1_tp-1_dp-1_cp-1] Chosen Logic for replica groups ret_logic=<PG_Group_Logic.LOGIC1: (<function ascending_ring_PG_group at 0x73388e908220>, 'Ascending Ring PG Group')>
+[2026-10-24 09:14:26.711: I neuronx_distributed/parallel_layers/parallel_state.py:666] [rank_0_pp-1_tp-1_dp-1_cp-1] tp_groups: replica_groups.tp_groups=[[0], [1], [2], [3]]
+[2026-10-24 09:14:26.711: I neuronx_distributed/parallel_layers/parallel_state.py:667] [rank_0_pp-1_tp-1_dp-1_cp-1] dp_groups: replica_groups.dp_groups=[[0, 1, 2, 3]]
+[2026-10-24 09:14:26.711: I neuronx_distributed/parallel_layers/parallel_state.py:668] [rank_0_pp-1_tp-1_dp-1_cp-1] pp_groups: replica_groups.pp_groups=[[0], [1], [2], [3]]
+[2026-10-24 09:14:26.711: I neuronx_distributed/parallel_layers/parallel_state.py:669] [rank_0_pp-1_tp-1_dp-1_cp-1] cp_groups: replica_groups.cp_groups=[[0], [1], [2], [3]]
+[2026-10-24 09:14:26.711: I neuronx_distributed/parallel_layers/parallel_state.py:670] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_model_groups: replica_groups.ep_model_groups=[[0], [1], [2], [3]]
+[2026-10-24 09:14:26.711: I neuronx_distributed/parallel_layers/parallel_state.py:671] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_data_groups: replica_groups.ep_data_groups=[[0, 1, 2, 3]]
+INFO:Neuron:Generating 1 hlos for key: Decoder
+INFO:Neuron:Minimal metadata will be added to HLO
+INFO:Neuron:Started loading module Decoder
+INFO:Neuron:Finished loading module Decoder in 0.21615386009216309 seconds
+INFO:Neuron:generating HLO: Decoder, input example shape = torch.Size([1, 16, 128, 128])
+INFO:Neuron:Finished generating HLO for Decoder in 0.2585735321044922 seconds, input example shape = torch.Size([1, 16, 128, 128])
+INFO:Neuron:Generated all HLOs in 0.7460591793060303 seconds
+INFO:Neuron:Can't find a priority model, skip marking weights
+INFO:Neuron:Can't find a priority model, skip optimizing weight layout for other HLOs
+INFO:Neuron:Starting compilation for all HLOs
+INFO:Neuron:Neuron compiler flags: --model-type=unet-inference -O1 --auto-cast=none --internal-hlo2tensorizer-options='--verify-hlo=true'  --verbose=35 --logfile=/tmp/nxd_model/decoder/Decoder/_tp0_bk0/log-neuron-cc.txt
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/libneuronxla/neuron_cc_wrapper.py:249: SyntaxWarning: str format compiler_flags is discouraged as its handling involves repeated joining and splitting, which can easily make mistakes if something is quoted or escaped. Use list[str] instead. Refer to documentation of the Python subprocess module for details.
+  warnings.warn(SyntaxWarning(
+2026-10-24 09:14:28.000196:  104966  [INFO]: Using a cached neff at /var/tmp/neuron-compile-cache/neuronxcc-2.26.6360.0+6f180f47/MODULE_5b88c76c8985cdd33d18+8bdfb225/model.neff
+INFO:Neuron:Finished Compilation for all HLOs in 0.7842309474945068 seconds
+INFO:Neuron:Can't find a priority model, falling back to the existing weight layout
+INFO:Neuron:Finished building model in 1.8040580749511719 seconds
+INFO:Neuron:Reusing pre-sharded checkpoints from /home/ubuntu/.cache/difflet/_shared_weights/black-forest-labs--FLUX.1-dev__vae__3de623fc__bfloat16__tp1w4__5847a250b71ac1fd.

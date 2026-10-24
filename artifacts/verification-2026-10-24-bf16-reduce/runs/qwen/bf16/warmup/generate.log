@@ -1,0 +1,43 @@
+[    0.074] <frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+[    4.630] /home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+[    4.630]   component, error = import_nki(config)
+[    4.635] /home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+[    4.635]   warnings.warn(f"Warning: {error}")
+[    4.635] /home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+[    4.635]   warnings.warn(f"Warning: {error}")
+[    4.635] /home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+[    4.635]   warnings.warn(f"Warning: {error}")
+[    4.837] Neuron: Loading presharded checkpoints for ranks: 0...3
+[   14.794] Neuron: Finished weights loading in 9.95827983700292 seconds
+[   14.867] Neuron: Warming up the model.
+[   15.064] Neuron: Warmup completed in 0.1961979866027832 seconds.
+[   15.385] [text] encoder_hidden_states (1, 1024, 3584) -> /home/ubuntu/.cache/difflet/work/qwen-image/text.pt
+[   21.011] /home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+[   21.011]   component, error = import_nki(config)
+[   21.016] /home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+[   21.016]   warnings.warn(f"Warning: {error}")
+[   21.016] /home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+[   21.016]   warnings.warn(f"Warning: {error}")
+[   21.016] /home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+[   21.016]   warnings.warn(f"Warning: {error}")
+[   21.750] Neuron: Loading presharded checkpoints for ranks: 0...3
+[   27.623] Neuron: Presharded file read: 5.87s for 4 shard(s) (38987.1 MB total)
+[   27.623] Neuron: Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+[  338.692] Neuron: Finished traced model weight initialization in 311.07s (device init 311.07s, total load_weights 317.05s)
+[  338.881] Neuron: Skipping model warmup
+[  346.296] [generate] packed latents (1, 4096, 64) -> /home/ubuntu/.cache/difflet/work/qwen-image/latents.pt
+[  351.939] /home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+[  351.939]   component, error = import_nki(config)
+[  351.944] /home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+[  351.944]   warnings.warn(f"Warning: {error}")
+[  351.944] /home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+[  351.944]   warnings.warn(f"Warning: {error}")
+[  351.944] /home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+[  351.944]   warnings.warn(f"Warning: {error}")
+[  352.284] Neuron: Loading presharded checkpoints for ranks: 0...0
+[  352.286] Neuron: Presharded file read: 0.00s for 1 shard(s) (139.8 MB total)
+[  352.286] Neuron: Initializing traced model weights for ranks: 0...0 (runtime_start_rank_id=0)
+[  360.554] Neuron: Finished traced model weight initialization in 8.27s (device init 8.27s, total load_weights 8.27s)
+[  360.555] Neuron: Warming up the model.
+[  360.835] Neuron: Warmup completed in 0.27959465980529785 seconds.
+[  361.452] [vae] image saved to /home/ubuntu/campaign/bf16-reduce/runs/qwen/bf16/warmup/out.png

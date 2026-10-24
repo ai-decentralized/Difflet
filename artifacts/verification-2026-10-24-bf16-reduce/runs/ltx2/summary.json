@@ -1,0 +1,78 @@
+{
+  "fp32": {
+    "model": "ltx2",
+    "dtype": "fp32",
+    "n_steps_pooled": 57,
+    "step_ms": {
+      "median": 459.6584839964635,
+      "p90": 460.18562879617093,
+      "mean": 459.682750034916,
+      "min": 457.9890550012351,
+      "max": 464.0573750002659
+    },
+    "forward_ms_median": 459.3169020008645,
+    "host_ms_per_step": 0.34158199559897184,
+    "loop_s": [
+      9.201475631998619,
+      9.19779175700387,
+      9.192503162994399
+    ],
+    "warm_runs": [
+      "warm2",
+      "warm3",
+      "warm4"
+    ],
+    "excluded_runs": {
+      "warm1": "426.2 s: still re-reading LTX-2 files the preceding Qwen runs had evicted from the page cache (one discarded warm-up was not enough after a model switch); replaced by warm4."
+    },
+    "e2e_warm_s": [
+      58.080475285,
+      54.418441199,
+      55.493701073
+    ],
+    "e2e_cold_s": 767.674176168,
+    "compile_s": 1018.30538391,
+    "phases_first_warm": {
+      "output_written": 54.713,
+      "last_line": 54.713
+    },
+    "e2e_warm_mean_s": 55.99753918566666
+  },
+  "bf16": {
+    "model": "ltx2",
+    "dtype": "bf16",
+    "n_steps_pooled": 57,
+    "step_ms": {
+      "median": 433.47237399575533,
+      "p90": 434.4133120001061,
+      "mean": 433.61133052620283,
+      "min": 432.12038700585254,
+      "max": 436.8800599986571
+    },
+    "forward_ms_median": 433.15833099768497,
+    "host_ms_per_step": 0.31404299807036296,
+    "loop_s": [
+      8.674970754000242,
+      8.678943203995004,
+      8.6731527669981
+    ],
+    "warm_runs": [
+      "warm1",
+      "warm2",
+      "warm3"
+    ],
+    "excluded_runs": {},
+    "e2e_warm_s": [
+      55.781274867,
+      54.348705378,
+      54.208792892
+    ],
+    "e2e_cold_s": 767.462689732,
+    "compile_s": 555.908859801,
+    "phases_first_warm": {
+      "output_written": 52.479,
+      "last_line": 52.479
+    },
+    "e2e_warm_mean_s": 54.77959104566667
+  }
+}

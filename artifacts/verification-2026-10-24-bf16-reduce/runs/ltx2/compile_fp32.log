@@ -1,0 +1,458 @@
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+INFO:Neuron:Saving the neuron_config to /home/ubuntu/.cache/difflet/ltx_2/635898e6c6748658/transformer/
+INFO:Neuron:Generating HLOs for the following models: ['LTX2VideoTransformer3DModel']
+[2026-10-24 06:17:45.548: I neuronx_distributed/parallel_layers/parallel_state.py:638] > initializing tensor model parallel with size 4
+[2026-10-24 06:17:45.548: I neuronx_distributed/parallel_layers/parallel_state.py:639] > initializing pipeline model parallel with size 1
+[2026-10-24 06:17:45.548: I neuronx_distributed/parallel_layers/parallel_state.py:640] > initializing context model parallel with size 1
+[2026-10-24 06:17:45.548: I neuronx_distributed/parallel_layers/parallel_state.py:641] > initializing data parallel with size 1
+[2026-10-24 06:17:45.549: I neuronx_distributed/parallel_layers/parallel_state.py:642] > initializing world size to 4
+[2026-10-24 06:17:45.549: I neuronx_distributed/parallel_layers/parallel_state.py:387] [rank_0_pp-1_tp-1_dp-1_cp-1] Chosen Logic for replica groups ret_logic=<PG_Group_Logic.LOGIC1: (<function ascending_ring_PG_group at 0x78d8986e56c0>, 'Ascending Ring PG Group')>
+[2026-10-24 06:17:45.549: I neuronx_distributed/parallel_layers/parallel_state.py:666] [rank_0_pp-1_tp-1_dp-1_cp-1] tp_groups: replica_groups.tp_groups=[[0, 1, 2, 3]]
+[2026-10-24 06:17:45.549: I neuronx_distributed/parallel_layers/parallel_state.py:667] [rank_0_pp-1_tp-1_dp-1_cp-1] dp_groups: replica_groups.dp_groups=[[0], [1], [2], [3]]
+[2026-10-24 06:17:45.549: I neuronx_distributed/parallel_layers/parallel_state.py:668] [rank_0_pp-1_tp-1_dp-1_cp-1] pp_groups: replica_groups.pp_groups=[[0], [1], [2], [3]]
+[2026-10-24 06:17:45.549: I neuronx_distributed/parallel_layers/parallel_state.py:669] [rank_0_pp-1_tp-1_dp-1_cp-1] cp_groups: replica_groups.cp_groups=[[0], [1], [2], [3]]
+[2026-10-24 06:17:45.549: I neuronx_distributed/parallel_layers/parallel_state.py:670] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_model_groups: replica_groups.ep_model_groups=[[0], [1], [2], [3]]
+[2026-10-24 06:17:45.549: I neuronx_distributed/parallel_layers/parallel_state.py:671] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_data_groups: replica_groups.ep_data_groups=[[0], [1], [2], [3]]
+INFO:Neuron:Generating 1 hlos for key: LTX2VideoTransformer3DModel
+INFO:Neuron:Minimal metadata will be added to HLO
+INFO:Neuron:Started loading module LTX2VideoTransformer3DModel
+INFO:Neuron:Finished loading module LTX2VideoTransformer3DModel in 82.95211410522461 seconds
+INFO:Neuron:generating HLO: LTX2VideoTransformer3DModel, input example shape = torch.Size([1, 2310, 128])
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/parallel_layers/layers.py:531: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=5, shape=torch.Size([1]), dtype=torch.bfloat16). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=6, shape=torch.Size([1, 1024]), dtype=torch.bool). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=7, shape=torch.Size([1, 1024]), dtype=torch.bool). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+INFO:Neuron:Finished generating HLO for LTX2VideoTransformer3DModel in 23.397253274917603 seconds, input example shape = torch.Size([1, 2310, 128])
+INFO:Neuron:Generated all HLOs in 108.53503894805908 seconds
+INFO:Neuron:Starting compilation for the priority HLO
+INFO:Neuron:'LTX2VideoTransformer3DModel' is the priority model with bucket rank 0
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/libneuronxla/neuron_cc_wrapper.py:287: SyntaxWarning: str format compiler_flags is discouraged as its handling involves repeated joining and splitting, which can easily make mistakes if something is quoted or escaped. Use list[str] instead. Refer to documentation of the Python subprocess module for details.
+  warnings.warn(SyntaxWarning(
+.....
+Compiler status PASS
+2026-10-24 06:20:59.000982:  84569  [INFO]: Compilation Successfully Completed for model.MODULE_8521223016edca772e7f+9de06980.hlo_module.pb
+INFO:Neuron:Done compilation for the priority HLO in 85.94136214256287 seconds
+INFO:Neuron:Done optimizing weight layout for all HLOs in 0.2893226146697998 seconds
+INFO:Neuron:Starting compilation for all HLOs
+INFO:Neuron:Finished Compilation for all HLOs in 0.012457847595214844 seconds
+..................
+Compiler status PASS
+INFO:Neuron:Done preparing weight layout transformation
+INFO:Neuron:Finished building model in 540.8366916179657 seconds
+INFO:Neuron:Pre-sharding checkpoints.
+INFO:Neuron:Sharding weights for ranks: 0...3
+[2026-10-24 06:26:46.534: I neuronx_distributed/parallel_layers/parallel_state.py:638] > initializing tensor model parallel with size 4
+[2026-10-24 06:26:46.535: I neuronx_distributed/parallel_layers/parallel_state.py:639] > initializing pipeline model parallel with size 1
+[2026-10-24 06:26:46.535: I neuronx_distributed/parallel_layers/parallel_state.py:640] > initializing context model parallel with size 1
+[2026-10-24 06:26:46.535: I neuronx_distributed/parallel_layers/parallel_state.py:641] > initializing data parallel with size 1
+[2026-10-24 06:26:46.535: I neuronx_distributed/parallel_layers/parallel_state.py:642] > initializing world size to 4
+[2026-10-24 06:26:46.535: I neuronx_distributed/parallel_layers/parallel_state.py:387] [rank_0_pp-1_tp-1_dp-1_cp-1] Chosen Logic for replica groups ret_logic=<PG_Group_Logic.LOGIC1: (<function ascending_ring_PG_group at 0x78d8986e56c0>, 'Ascending Ring PG Group')>
+[2026-10-24 06:26:46.535: I neuronx_distributed/parallel_layers/parallel_state.py:666] [rank_0_pp-1_tp-1_dp-1_cp-1] tp_groups: replica_groups.tp_groups=[[0, 1, 2, 3]]
+[2026-10-24 06:26:46.535: I neuronx_distributed/parallel_layers/parallel_state.py:667] [rank_0_pp-1_tp-1_dp-1_cp-1] dp_groups: replica_groups.dp_groups=[[0], [1], [2], [3]]
+[2026-10-24 06:26:46.535: I neuronx_distributed/parallel_layers/parallel_state.py:668] [rank_0_pp-1_tp-1_dp-1_cp-1] pp_groups: replica_groups.pp_groups=[[0], [1], [2], [3]]
+[2026-10-24 06:26:46.535: I neuronx_distributed/parallel_layers/parallel_state.py:669] [rank_0_pp-1_tp-1_dp-1_cp-1] cp_groups: replica_groups.cp_groups=[[0], [1], [2], [3]]
+[2026-10-24 06:26:46.535: I neuronx_distributed/parallel_layers/parallel_state.py:670] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_model_groups: replica_groups.ep_model_groups=[[0], [1], [2], [3]]
+[2026-10-24 06:26:46.535: I neuronx_distributed/parallel_layers/parallel_state.py:671] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_data_groups: replica_groups.ep_data_groups=[[0], [1], [2], [3]]
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.0.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.0.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.0.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.0.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.1.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.1.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.1.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.1.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.2.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.2.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.2.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.2.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.3.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.3.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.3.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.3.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.4.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.4.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.4.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.4.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.5.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.5.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.5.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.5.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.19.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.19.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.19.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.19.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.20.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.20.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.20.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.20.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.21.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.21.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.21.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.21.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.22.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.22.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.22.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.22.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.23.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.23.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.23.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.23.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.24.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.24.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.24.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.24.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.32.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.32.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.32.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.32.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.33.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.33.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.33.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.33.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.34.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.34.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.34.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.34.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.35.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.35.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.35.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.35.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.36.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.36.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.36.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.36.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.37.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.37.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.37.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.37.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.10.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.10.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.10.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.10.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.11.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.11.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.11.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.11.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.12.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.12.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.12.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.12.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.6.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.6.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.6.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.6.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.7.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.7.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.7.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.7.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.8.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.8.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.8.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.8.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.9.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.9.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.9.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.9.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.45.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.45.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.45.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.45.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.46.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.46.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.46.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.46.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.47.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.47.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.47.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.47.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.13.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.13.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.13.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.13.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.14.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.14.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.14.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.14.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.15.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.15.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.15.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.15.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.16.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.16.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.16.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.16.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.17.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.17.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.17.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.17.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.18.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.18.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.18.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.18.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.25.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.25.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.25.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.25.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.26.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.26.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.26.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.26.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.27.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.27.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.27.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.27.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.28.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.28.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.28.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.28.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.29.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.29.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.29.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.29.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.30.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.30.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.30.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.30.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.31.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.31.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.31.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.31.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.38.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.38.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.38.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.38.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.39.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.39.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.39.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.39.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.40.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.40.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.40.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.40.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.41.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.41.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.41.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.41.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.42.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.42.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.42.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.42.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.43.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.43.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.43.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.43.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.44.audio_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.44.audio_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.44.scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/Difflet/.claude/worktrees/bf16-tp-reduce-qwen-ltx2/difflet/backends/trainium/core/application_base.py:879: UserWarning: Found torch.float32 weights in checkpoint: transformer.transformer_blocks.44.video_a2v_cross_attn_scale_shift_table. Will convert to torch.bfloat16
+  warnings.warn(
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/trace/trace.py:642: UserWarning: Removing redundant keys from checkpoint: []
+  warnings.warn(f"Removing redundant keys from checkpoint: {keys_to_delete}")
+INFO:Neuron:Done Sharding weights in 469.3786224819996
+INFO:Neuron:Pre-sharding complete in 469.7s: 4 shard file(s), 38011.3 MB total under /home/ubuntu/.cache/difflet/ltx_2/635898e6c6748658/transformer/weights/
