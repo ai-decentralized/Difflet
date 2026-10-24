@@ -126,6 +126,46 @@ def test_dit_matches_diffusers_tp2_gloo(tiny, exec_mode):
         _assert_matches(r["out"], reference)
 
 
+_CP_SP_LAYOUTS = [
+    pytest.param({"tp_degree": 1, "cp_degree": 2, "cp_mode": "gather_kv"}, 2, id="cp2-gather_kv"),
+    pytest.param({"tp_degree": 1, "cp_degree": 2, "cp_mode": "ulysses"}, 2, id="cp2-ulysses"),
+    pytest.param({"tp_degree": 2, "cp_degree": 2, "cp_mode": "gather_kv"}, 4,
+                 id="tp2-cp2-gather_kv"),
+    pytest.param({"tp_degree": 2, "cp_degree": 2, "cp_mode": "ulysses"}, 4, id="tp2-cp2-ulysses"),
+    pytest.param({"tp_degree": 2, "sp_enabled": True}, 2, id="tp2-sp"),
+]
+
+
+@pytest.mark.parametrize("valid_text", [3, 16])
+@pytest.mark.parametrize(("parallel", "world"), _CP_SP_LAYOUTS)
+def test_dit_parallel_matches_diffusers(tiny, parallel, world, valid_text):
+    """The port's CP (the image tokens scattered over the CP group, the text replicated) and
+    SP (the dual-stream image stream sharded over the TP group) on the neuron collectives:
+    every rank returns the whole noise prediction, equal to diffusers'. Three valid text
+    tokens leave the joint key bound well short of the key length; sixteen is no padding."""
+    reference = diffusers_reference(tiny, tiny_inputs(valid_text))
+    results = run_ranks(hv1_dit_worker, tiny, parallel, "eager", valid_text, world_size=world)
+    assert len(results) == world
+    for r in results:
+        assert r["report"] == CLEAN
+        _assert_matches(r["out"], reference)
+
+
+def test_dit_tp2_cp2_ulysses_compiled_matches_diffusers(tiny):
+    """Ulysses' two all-to-alls and the TP all-reduces sit inside the compiled block graphs:
+    the functional collectives must trace and give diffusers' output."""
+    reference = diffusers_reference(tiny, tiny_inputs(3))
+    results = run_ranks(hv1_dit_worker, tiny,
+                        {"tp_degree": 2, "cp_degree": 2, "cp_mode": "ulysses"}, "compile", 3,
+                        world_size=4)
+    for r in results:
+        assert r["report"] == CLEAN
+        assert r["compiled_blocks"] == [
+            "transformer_blocks.0", "single_transformer_blocks.0", "single_transformer_blocks.1"]
+        assert r["unwarmed_shapes"] == []
+        _assert_matches(r["out"], reference)
+
+
 def test_truncated_depth_skips_the_cut_blocks(tiny):
     """``num_single_layers=1`` loads the first single-stream block of the two and reports the
     second's tensors (its fused ``proj_out`` included) as skipped, not unexpected."""
