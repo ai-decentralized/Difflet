@@ -1497,6 +1497,41 @@ def hv15_sp_worker(rank: int, world_size: int, model_dir: str, shape: dict, inpu
     return app(**inputs)[0].tolist()
 
 
+def hv1_dit_worker(rank: int, world_size: int, model_dir: str, parallel: dict, exec_mode: str,
+                   valid_text: int = 16, overrides: dict | None = None) -> dict:
+    """HunyuanVideo's DiT application (tests/unit/backends/_neuron_hv1_toy.py) on CPU, fp32, at
+    the layout ``parallel`` names (``DiffletParallelConfig`` keywords; world = tp x cp), on the
+    toy's inputs with ``valid_text`` valid text tokens: the output and the TeaCache signal.
+    ``overrides`` go to the config (``num_single_layers=1`` cuts the depth)."""
+    from difflet.backends.neuron.hunyuan_video.config import NeuronHunyuanVideoConfig
+    from difflet.backends.neuron.hunyuan_video.transformer import (
+        NeuronHunyuanVideoTransformerApplication,
+    )
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_hv1_toy import TINY_SHAPE, tiny_inputs
+
+    cp = int(parallel.get("cp_degree", 1))
+    config = NeuronHunyuanVideoConfig.from_pretrained(
+        model_dir, tp_degree=int(parallel.get("tp_degree", 1)),
+        context_parallel_enabled=cp > 1, cp_mode=parallel.get("cp_mode", "gather_kv"),
+        sp_enabled=bool(parallel.get("sp_enabled", False)), **TINY_SHAPE, **(overrides or {}))
+    app = NeuronHunyuanVideoTransformerApplication(
+        model_path=model_dir, config=config, parallel=DiffletParallelConfig(**parallel),
+        dtype=torch.float32, exec_mode=exec_mode, device="cpu")
+    app.load()
+    inputs = tiny_inputs(valid_text)
+    out = app(*inputs.values())
+    teacache = app.teacache_mod_input(inputs["hidden_states"], inputs["timestep"],
+                                      inputs["pooled_projections"], inputs["guidance"])
+    return {
+        "out": out.tolist(),
+        "teacache": teacache.tolist(),
+        "report": app.load_report,
+        "compiled_blocks": list(app.compiled_blocks),
+        "unwarmed_shapes": list(app.unwarmed_shapes),
+    }
+
+
 # --------------------------------------------------------------------------
 # Weight store (core/weight_store.py)
 # --------------------------------------------------------------------------
