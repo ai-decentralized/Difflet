@@ -19,6 +19,8 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+import re
+
 import torch
 import torch.nn as nn
 
@@ -43,6 +45,8 @@ __all__ = [
     "narrow_to_rank",
     "shard_dim",
     "shard_state_dict",
+    "single_block_proj_out_key",
+    "single_block_proj_out_slices",
 ]
 
 
@@ -76,6 +80,33 @@ class CheckpointSlice:
     dim: int
     start: int
     length: int
+
+
+def single_block_proj_out_slices(num_single_layers: int, inner_dim: int,
+                                 mlp_dim: int) -> dict[str, CheckpointSlice]:
+    """The two halves of each single-stream block's fused output projection.
+
+    diffusers fuses a single-stream block's attention and MLP output projections into one
+    ``proj_out`` (input columns ``[0, inner_dim)`` attention, ``[inner_dim, inner_dim +
+    mlp_dim)`` MLP); Flux's and HunyuanVideo's ports split them so each is row-parallel on its
+    own input sharding. ``proj_out_attn.weight`` and ``proj_out_mlp.weight`` are therefore
+    column ranges of ``single_transformer_blocks.{i}.proj_out.weight``; the bias is
+    ``single_block_proj_out_key``'s rename."""
+    slices = {}
+    for i in range(int(num_single_layers)):
+        block = f"single_transformer_blocks.{i}"
+        source = f"{block}.proj_out.weight"
+        slices[f"{block}.proj_out_attn.weight"] = CheckpointSlice(source, 1, 0, int(inner_dim))
+        slices[f"{block}.proj_out_mlp.weight"] = CheckpointSlice(source, 1, int(inner_dim),
+                                                                 int(mlp_dim))
+    return slices
+
+
+def single_block_proj_out_key(name: str) -> str:
+    """Checkpoint key of module parameter ``name`` under the split single-stream ``proj_out``:
+    ``proj_out_attn.bias`` is the fused ``proj_out.bias`` (``proj_out_mlp`` has none); every
+    other name is unchanged."""
+    return re.sub(r"\.proj_out_attn\.bias$", ".proj_out.bias", name)
 
 
 def _read_checkpoint_slice(path: str, spec: CheckpointSlice, *, shard: int | None, tp_size: int,
