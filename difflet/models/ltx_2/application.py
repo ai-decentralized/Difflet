@@ -15,6 +15,7 @@ from typing import Any
 import torch
 
 from difflet.backends.trainium.core.config import NeuronConfig
+from difflet.common.tp_reduce import parse_tp_reduce_dtype
 from difflet.backends.trainium.core.multi_component_application import (
     ComponentSpec,
     MultiComponentApplication,
@@ -127,6 +128,7 @@ def create_ltx_2_transformer_config(
     frame_rate: float = 24.0,
     batch_size: int = 1,
     cfg_parallel_enabled: bool = False,
+    tp_reduce_dtype: torch.dtype = torch.bfloat16,
 ):
     from difflet.backends.trainium.ltx_2.transformer import LTX2TransformerInferenceConfig
 
@@ -136,6 +138,7 @@ def create_ltx_2_transformer_config(
         tp_degree=tp_degree,
         world_size=world_size,
         torch_dtype=dtype,
+        rpl_reduce_dtype=tp_reduce_dtype,
     )
     return LTX2TransformerInferenceConfig(
         neuron_config=neuron_config,
@@ -220,6 +223,7 @@ class NeuronLTX2Application(MultiComponentApplication):
                 frame_rate=self.frame_rate,
                 batch_size=transformer_batch_size,
                 cfg_parallel_enabled=cfg_parallel_enabled,
+                tp_reduce_dtype=parse_tp_reduce_dtype(kwargs.get("tp_reduce_dtype")),
             )
             if transformer_mode == "single":
                 from difflet.backends.trainium.ltx_2.transformer import (

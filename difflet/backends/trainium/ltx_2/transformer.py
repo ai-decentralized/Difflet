@@ -124,12 +124,16 @@ def _column_parallel_like(linear: nn.Linear, *, gather_output: bool) -> ColumnPa
     )
 
 
-def _row_parallel_like(linear: nn.Linear, *, input_is_parallel: bool) -> RowParallelLinear:
+def _row_parallel_like(
+    linear: nn.Linear, *, input_is_parallel: bool, reduce_dtype: torch.dtype
+) -> RowParallelLinear:
+    # reduce_dtype has no default on purpose: NxD's own default is fp32.
     return RowParallelLinear(
         linear.in_features,
         linear.out_features,
         bias=linear.bias is not None,
         input_is_parallel=input_is_parallel,
+        reduce_dtype=reduce_dtype,
     )
 
 
@@ -154,6 +158,7 @@ class _LTX2TrainiumTPAttnProcessor:
     def _global_rms_norm(self, norm, x: torch.Tensor) -> torch.Tensor:
         in_dim = x.shape[-1]
         local_sq = x.float().pow(2).sum(dim=-1, keepdim=True)
+        # Stays fp32 under --tp-reduce-dtype bf16: a [B, S, 1] RMS statistic.
         global_sq = reduce_from_tensor_model_parallel_region(local_sq)
         full_dim = in_dim * self.tp_degree
         eps = getattr(norm, "eps", None)
@@ -317,8 +322,17 @@ def _patch_ltx2_rope_for_tp(transformer: nn.Module, rank_util: "SPMDRank") -> No
         rope.forward = _make(rope.forward)
 
 
-def _shard_ltx2_transformer(transformer: nn.Module, tp_degree: int, rank_util: "SPMDRank") -> None:
-    """Tensor-parallel shard LTX-2's attention + FFN linears across ``tp_degree`` ranks."""
+def _shard_ltx2_transformer(
+    transformer: nn.Module,
+    tp_degree: int,
+    rank_util: "SPMDRank",
+    *,
+    reduce_dtype: torch.dtype = torch.bfloat16,
+) -> None:
+    """Tensor-parallel shard LTX-2's attention + FFN linears across ``tp_degree`` ranks.
+
+    ``reduce_dtype`` is the precision of the row-parallel all-reduce.
+    """
     if tp_degree <= 1:
         return
 
@@ -344,16 +358,22 @@ def _shard_ltx2_transformer(transformer: nn.Module, tp_degree: int, rank_util: "
                 attn.to_q = _column_parallel_like(attn.to_q, gather_output=False)
                 attn.to_k = _column_parallel_like(attn.to_k, gather_output=False)
                 attn.to_v = _column_parallel_like(attn.to_v, gather_output=False)
-                attn.to_out[0] = _row_parallel_like(attn.to_out[0], input_is_parallel=True)
+                attn.to_out[0] = _row_parallel_like(
+                    attn.to_out[0], input_is_parallel=True, reduce_dtype=reduce_dtype
+                )
                 attn.processor = processor
 
         if not replicate_mlp:
             block.ff.net[0].proj = _column_parallel_like(block.ff.net[0].proj, gather_output=False)
-            block.ff.net[2] = _row_parallel_like(block.ff.net[2], input_is_parallel=True)
+            block.ff.net[2] = _row_parallel_like(
+                block.ff.net[2], input_is_parallel=True, reduce_dtype=reduce_dtype
+            )
             block.audio_ff.net[0].proj = _column_parallel_like(
                 block.audio_ff.net[0].proj, gather_output=False
             )
-            block.audio_ff.net[2] = _row_parallel_like(block.audio_ff.net[2], input_is_parallel=True)
+            block.audio_ff.net[2] = _row_parallel_like(
+                block.audio_ff.net[2], input_is_parallel=True, reduce_dtype=reduce_dtype
+            )
 
     # Slice RoPE once at the rope modules (heads were sharded above), so the
     # per-rank rope fans out to all blocks without re-scattering per attention.
@@ -568,7 +588,12 @@ class _LTX2TransformerTraceModule(nn.Module):
                     "LTX-2 tensor-parallel sharding does not support perturbed_attn (STG)."
                 )
             self.tp_rank_util = SPMDRank(tp_degree)
-            _shard_ltx2_transformer(self.transformer, tp_degree, self.tp_rank_util)
+            _shard_ltx2_transformer(
+                self.transformer,
+                tp_degree,
+                self.tp_rank_util,
+                reduce_dtype=config.neuron_config.rpl_reduce_dtype or torch.bfloat16,
+            )
 
     def forward(
         self,
