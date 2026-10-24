@@ -69,7 +69,7 @@ class FluxOrchestrator(ModelOrchestrator):
 
     def _load_pipeline(self):
         from difflet.pipeline.compile_cache import CacheSpec, cache_path, has_valid_manifest
-        from difflet.pipeline.difflet_pipeline import DiffletPipeline
+        from difflet.pipeline.difflet_pipeline import DiffletPipeline, _cache_application_kwargs
         from difflet.pipeline.path_resolver import resolve_model_path
         from difflet.registry import resolve_model
 
@@ -96,7 +96,10 @@ class FluxOrchestrator(ModelOrchestrator):
             dtype=self._dtype(),
             height=shape.get("height"), width=shape.get("width"),
             num_frames=shape.get("num_frames"), revision=self.args.revision,
-            application_kwargs=self._application_kwargs() or None,
+            # The identity compile wrote through DiffletPipeline (tp_reduce_dtype keyed).
+            application_kwargs=_cache_application_kwargs(
+                self._application_kwargs(), model_name=entry.name
+            ),
             shapes=self._compile_shapes(),
         )
         compiled = cache_path(self.args.cache_dir, spec)

@@ -115,3 +115,30 @@ def test_parallel_falls_back_to_registry_default():
     # tp_degree None -> registry default is used (non-None positive int).
     parallel = FluxOrchestrator(_flux_args(tp_degree=None))._parallel()
     assert parallel.tp_degree >= 1
+
+
+@pytest.mark.parametrize("dtype", [None, "fp32", "bf16"])
+def test_generate_precheck_hashes_what_compile_writes(monkeypatch, dtype):
+    # The generate pre-check must resolve the artifact compile wrote: compile
+    # keys through DiffletPipeline's _cache_application_kwargs, so a raw
+    # tp_reduce_dtype ("fp32") vs the keyed form ("float32") would miss it
+    # (seen on trn2: flux fp32 compile ok, generate "no compiled artifacts").
+    from difflet.pipeline import compile_cache
+    from difflet.pipeline.difflet_pipeline import _cache_application_kwargs
+
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path",
+                        lambda *a, **kw: "/fake/path")
+    monkeypatch.setattr("difflet.cli.prewarm.prewarm_neuron_runtime", lambda *a, **kw: None)
+    seen = {}
+
+    def fake_has_valid_manifest(path, spec):
+        seen["spec"] = spec
+        return False
+
+    monkeypatch.setattr(compile_cache, "has_valid_manifest", fake_has_valid_manifest)
+    orch = FluxOrchestrator(_flux_args(tp_reduce_dtype=dtype))
+    with pytest.raises(SystemExit):
+        orch._load_pipeline()
+    assert seen["spec"].application_kwargs == _cache_application_kwargs(
+        orch._application_kwargs(), model_name="flux"
+    )
