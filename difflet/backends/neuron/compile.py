@@ -151,6 +151,10 @@ def configure_compile_cache(
     and that cache can serve stale kernels, so it stays off unless asked for. torch-neuronx
     creates the directories. Returns the values written to ``env`` (``os.environ`` by default).
 
+    With the NKI trace cache on, a derived HLO location (the default, or one inherited from
+    ``env``) gets a subdirectory per stack version, so a stack upgrade cannot serve stale
+    kernels; an explicit ``hlo_cache_dir`` is used as given.
+
     In a process that already imported torch, the HLO location moves the HLO cache entries but
     not the lock directory torch-neuronx fixed at import (module docstring). When this writes
     ``os.environ`` of a process whose torch-neuronx was imported with another HLO directory,
@@ -168,7 +172,7 @@ def configure_compile_cache(
     settings = {
         var: defaults[var] if path is None else _absolute(path) for var, path in explicit.items()
     }
-    if nki_trace_cache:
+    if nki_trace_cache and hlo_cache_dir is None:  # an explicit HLO location is the caller's, as given
         settings[HLO_CACHE_ENV] = _versioned(settings[HLO_CACHE_ENV])
     settings[NKI_TRACE_CACHE_ENV] = "1" if nki_trace_cache else "0"
     target.update(settings)

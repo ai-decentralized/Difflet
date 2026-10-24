@@ -226,7 +226,8 @@ def test_configure_compile_cache_explicit_neff_dirs_leave_the_hlo_dir_at_its_def
     assert env == {
         "TORCH_NEURONX_NEFF_CACHE_DIR": str(tmp_path / "neff"),
         "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR": str(tmp_path / "locks"),
-        "TORCH_NEURONX_HLO_CACHE_DIR": str(tmp_path / "root" / "neuron" / "hlo"),
+        # the trace cache on: the default HLO location gets its stack-version subdirectory
+        "TORCH_NEURONX_HLO_CACHE_DIR": str(tmp_path / "root" / "neuron" / "hlo" / neuron_compile.stack_version_tag()),
         "NKI_ENABLE_TRACE_CACHE": "1",
     }
 
