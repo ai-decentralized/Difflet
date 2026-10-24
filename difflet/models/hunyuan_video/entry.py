@@ -16,15 +16,31 @@ def create_hunyuan_video_application(
     backend: str = "trainium",
     **kwargs: Any,
 ) -> Any:
-    if backend != "trainium":
+    if backend not in {"trainium", "neuron"}:
         raise NotImplementedError(
-            f"HunyuanVideo currently supports only the trainium backend, got {backend!r}"
+            f"HunyuanVideo supports the trainium and neuron backends, got {backend!r}"
         )
     if parallel.cfg_parallel_enabled:
         raise NotImplementedError(
             "HunyuanVideo is guidance-distilled (single forward pass with the "
             "guidance scale baked into the timestep embedding); CFG-parallel "
             "requires true two-pass classifier-free guidance and does not apply."
+        )
+
+    if backend == "neuron":
+        # TorchNeuron, one process per NeuronCore (torchrun): the DiT on the device, the
+        # Llama/CLIP encode on rank 0's host. Keyword arguments and their defaults:
+        # neuron_application._KWARG_DEFAULTS.
+        from difflet.models.hunyuan_video.neuron_application import (
+            TorchNeuronHunyuanVideoApplication,
+        )
+
+        return TorchNeuronHunyuanVideoApplication(
+            model_path=model_path,
+            parallel=parallel,
+            dtype=dtype,
+            shape=shape,
+            **kwargs,
         )
 
     from difflet.models.hunyuan_video.application import NeuronHunyuanVideoApplication

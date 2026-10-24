@@ -1532,6 +1532,73 @@ def hv1_dit_worker(rank: int, world_size: int, model_dir: str, parallel: dict, e
     }
 
 
+def hv1_app_worker(rank: int, world_size: int, root: str, parallel: dict,
+                   options: dict | None = None, generate: dict | None = None,
+                   runs: int = 1) -> dict:
+    """The composed HunyuanVideo application (``TorchNeuronHunyuanVideoApplication``) on the
+    tiny pipeline snapshot (tests/unit/backends/_neuron_hv1_toy.py), CPU, fp32, eager, at the
+    layout ``parallel`` names; ``options`` are its keyword arguments. ``runs`` times
+    ``generate(prompt=TINY_PROMPT, seed=42, 3 steps, guidance 6.0, **generate)``; per run the
+    latents, what every DiT forward handed the module (the guidance, every input's dtype), the
+    TeaCache deltas the orchestrator asked the adapter for and the controller's stats. Then the
+    probe on two fixed bundles: its deltas and the module's two modulated inputs."""
+    from difflet.models.hunyuan_video.application import HunyuanVideoDiTInputBundle
+    from difflet.models.hunyuan_video.neuron_application import (
+        TorchNeuronHunyuanVideoApplication,
+    )
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_hv1_toy import TINY_PROMPT, TINY_SHAPE, tiny_inputs
+
+    app = TorchNeuronHunyuanVideoApplication(
+        model_path=root, parallel=DiffletParallelConfig(**parallel), dtype=torch.float32,
+        shape={k: TINY_SHAPE[k] for k in ("height", "width", "num_frames")},
+        text_seq_len=TINY_SHAPE["text_seq_len"], exec_mode="eager", device="cpu",
+        **(options or {}))
+    app.load()
+    adapter = app.transformer_adapter
+    calls: list = []
+    deltas: list = []
+    module, teacache_delta = adapter.module, adapter.teacache_delta
+
+    def recording_module(*args):
+        calls.append({"guidance": args[5].tolist(), "dtypes": [str(a.dtype) for a in args]})
+        return module(*args)
+
+    def recording_delta(bundle):
+        delta = teacache_delta(bundle)
+        deltas.append(float(delta))
+        return delta
+
+    adapter.module, adapter.teacache_delta = recording_module, recording_delta
+    results = []
+    for _ in range(runs):
+        calls.clear()
+        deltas.clear()
+        out = app.generate(prompt=TINY_PROMPT, seed=42,
+                           **{"num_inference_steps": 3, "guidance_scale": 6.0, **(generate or {})})
+        controller = app.pipeline.teacache_controller
+        results.append({
+            "latents": out.latents.tolist(),
+            "calls": list(calls),
+            "deltas": list(deltas),
+            "stats": None if controller is None else controller.stats(),
+        })
+    probe = None
+    if adapter.teacache_probe_fused:
+        bundles = []
+        for t in (900.0, 700.0):
+            inputs = tiny_inputs(8)
+            inputs["timestep"] = torch.tensor([t])
+            bundles.append(HunyuanVideoDiTInputBundle(**inputs))
+        adapter.probe.reset()
+        mods = [app.transformer.teacache_mod_input(b.hidden_states, b.timestep,
+                                                   b.pooled_projections, b.guidance)
+                for b in bundles]
+        probe = {"deltas": [float(teacache_delta(b)) for b in bundles],
+                 "mods": [m.tolist() for m in mods]}
+    return {"runs": results, "probe": probe}
+
+
 # --------------------------------------------------------------------------
 # Weight store (core/weight_store.py)
 # --------------------------------------------------------------------------

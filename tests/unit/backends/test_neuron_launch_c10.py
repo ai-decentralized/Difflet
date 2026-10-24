@@ -28,7 +28,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 # fp32 TP-N vs the TP1 reference differs by reduction order only.
 FP32_TOL = {"atol": 1e-4, "rtol": 1e-4}
 WAN_ID = "Wan-AI/Wan2.1-T2V-14B-Diffusers"  # registry backends: trainium, tpu, neuron (W5)
-HUNYUAN_ID = "hunyuanvideo-community/HunyuanVideo"  # registry backends: trainium
+HUNYUAN_ID = "hunyuanvideo-community/HunyuanVideo"  # registry backends: trainium, neuron
+MINIMAX_ID = "MiniMaxAI/MiniMax-H3"  # registry backends: trainium
 
 
 def _isolate_env(monkeypatch, *names):
@@ -671,7 +672,7 @@ def test_main_rejects_backend_the_model_does_not_support(monkeypatch, capsys, tm
     _isolate_env(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE")
     built = []
     monkeypatch.setattr(cli_main, "_get_orchestrator", lambda args: built.append(args))
-    argv = [command, "--model-id", HUNYUAN_ID, "--backend", "neuron"]
+    argv = [command, "--model-id", MINIMAX_ID, "--backend", "neuron"]
     if command != "compile":
         argv += ["--prompt", "p", "--output", str(tmp_path / "c10.mp4")]
 
@@ -680,7 +681,7 @@ def test_main_rejects_backend_the_model_does_not_support(monkeypatch, capsys, tm
 
     assert exc.value.code == 2
     err = capsys.readouterr().err
-    assert "model 'hunyuan_video' does not support backend 'neuron'" in err
+    assert "model 'minimax_h3' does not support backend 'neuron'" in err
     assert "supported backends: trainium (--backend neuron)" in err
     assert built == []
     assert "DIFFLET_BACKEND" not in os.environ
@@ -726,11 +727,11 @@ def test_main_rejects_ambient_non_aot_backend_the_model_does_not_support(
     built = _recording_orchestrator(monkeypatch, cli_main)
 
     with pytest.raises(SystemExit) as exc:
-        cli_main.main(_main_argv(command, HUNYUAN_ID, tmp_path))
+        cli_main.main(_main_argv(command, MINIMAX_ID, tmp_path))
 
     assert exc.value.code == 2
     assert capsys.readouterr().err.strip() == (
-        "Error: model 'hunyuan_video' does not support backend 'neuron'; supported backends: "
+        "Error: model 'minimax_h3' does not support backend 'neuron'; supported backends: "
         "trainium (DIFFLET_BACKEND=neuron)."
     )
     assert built == []
@@ -783,7 +784,7 @@ def test_main_ambient_aot_backend_keeps_its_old_path(monkeypatch, tmp_path, back
                                                      command):
     """Trainium/TPU (requires_aot) selected through DIFFLET_BACKEND: no CLI model check, as
     before, even for a model whose registry entry does not list the backend (HunyuanVideo
-    lists trainium only); the orchestrator is built and the variable left as it was."""
+    lists trainium and neuron); the orchestrator is built and the variable left as it was."""
     cli_main = _cli_main()
     _isolate_env(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE")
     monkeypatch.delenv("NEURON_RT_NUM_CORES", raising=False)

@@ -102,9 +102,9 @@ class OnDeviceDiT:
     out.
 
     ``_forward`` casts each model input to ``dtype`` and makes it contiguous on the host before
-    it moves to ``device``: a strided host view (the timestep ``_batch_timestep`` expands from a
-    0-dim tensor, a transposed slice) would otherwise be restrided on the device through a CPU
-    round trip (decision D16). It synchronises the device, copies the output back, counts the
+    it moves to ``device`` (``_device_input``): a strided host view (the timestep
+    ``_batch_timestep`` expands from a 0-dim tensor, a transposed slice) would otherwise be
+    restrided on the device through a CPU round trip (decision D16). It synchronises the device, copies the output back, counts the
     call and reports its wall seconds (host -> device copies, forward, sync, copy back) to
     ``forward_hook``. ``.dtype`` and ``.config`` are what the orchestrators read. The models'
     subclasses take their own call signature and check their one static shape first.
@@ -123,7 +123,7 @@ class OnDeviceDiT:
         """``module(*tensors on the device, *extra)`` with its output on the host: a tensor, or
         a tuple of them."""
         start = time.perf_counter()
-        args = tuple(tensor.to(self.dtype).contiguous().to(self.device) for tensor in tensors)
+        args = tuple(self._device_input(tensor) for tensor in tensors)
         out = self.module(*args, *extra)
         if self.device.type == "neuron":
             torch.neuron.synchronize()
@@ -133,6 +133,12 @@ class OnDeviceDiT:
         if hook is not None:
             hook(time.perf_counter() - start)
         return out
+
+    def _device_input(self, tensor: torch.Tensor) -> torch.Tensor:
+        """One model input on the device: cast to ``dtype`` and made contiguous on the host
+        first. A model whose module takes an integer tensor (a mask) keeps it by overriding
+        this."""
+        return tensor.to(self.dtype).contiguous().to(self.device)
 
     def _forward_hook(self) -> Callable[[float], None] | None:
         return self.forward_hook
