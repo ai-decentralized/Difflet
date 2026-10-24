@@ -81,6 +81,16 @@ def _add_parallel_flags(p: argparse.ArgumentParser) -> None:
         "by tp_degree * cp_degree.",
     )
     p.add_argument(
+        "--tp-reduce-dtype",
+        dest="tp_reduce_dtype",
+        choices=["bf16", "fp32"],
+        default=None,
+        help="Precision of the tensor-parallel all-reduce (default: bf16). "
+        "'fp32' reproduces the pre-bf16 artifacts of Qwen-Image, LTX-2, "
+        "HunyuanVideo and the Flux/Wan text encoders. Not supported for "
+        "MiniMax-H3.",
+    )
+    p.add_argument(
         "--cfg-parallel",
         dest="cfg_parallel",
         action="store_true",
