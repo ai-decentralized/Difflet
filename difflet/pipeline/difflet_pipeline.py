@@ -252,7 +252,11 @@ def _merge_teacache_kwargs(
 
 # All-reduce dtype each DiffletPipeline-keyed model's artifact used before
 # --tp-reduce-dtype existed (None: the artifact mixed dtypes).
-_TP_REDUCE_LEGACY: dict[str, str | None] = {"ltx_2": "fp32", "hunyuan_video": "fp32"}
+_TP_REDUCE_LEGACY: dict[str, str | None] = {
+    "ltx_2": "fp32",
+    "hunyuan_video": "fp32",
+    "flux": None,  # bf16 DiT, fp32 T5/CLIP
+}
 
 
 def _tp_reduce_cache_kwargs(application_kwargs: dict[str, Any], model_name: str | None) -> dict:

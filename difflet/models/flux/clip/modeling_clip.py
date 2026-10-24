@@ -26,6 +26,7 @@ from difflet.ops import (
 from difflet.backends.trainium.core.application_base import NeuronApplicationBase
 from difflet.backends.trainium.core.config import InferenceConfig
 from difflet.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
+from difflet.common.tp_reduce import config_reduce_dtype
 
 _HARDWARE = hardware(get_platform_target())
 
@@ -88,7 +89,10 @@ class NeuronCLIPAttention(nn.Module):
             config.hidden_size, config.hidden_size, gather_output=False
         )
         self.out_proj = RowParallelLinear(
-            config.hidden_size, config.hidden_size, input_is_parallel=True
+            config.hidden_size,
+            config.hidden_size,
+            input_is_parallel=True,
+            reduce_dtype=config_reduce_dtype(config),
         )
 
         tp_size = get_tensor_model_parallel_size()
@@ -189,7 +193,10 @@ class NeuronCLIPMLP(nn.Module):
             config.hidden_size, config.intermediate_size, gather_output=False
         )
         self.fc2 = RowParallelLinear(
-            config.intermediate_size, config.hidden_size, input_is_parallel=True
+            config.intermediate_size,
+            config.hidden_size,
+            input_is_parallel=True,
+            reduce_dtype=config_reduce_dtype(config),
         )
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:

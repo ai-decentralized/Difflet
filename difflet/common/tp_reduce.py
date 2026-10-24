@@ -26,6 +26,12 @@ def parse_tp_reduce_dtype(value: str | None) -> torch.dtype:
         ) from None
 
 
+def config_reduce_dtype(config, default: torch.dtype = torch.bfloat16) -> torch.dtype:
+    """All-reduce dtype a model config carries (``neuron_config.rpl_reduce_dtype``)."""
+    neuron_config = getattr(config, "neuron_config", None)
+    return getattr(neuron_config, "rpl_reduce_dtype", None) or default
+
+
 def tp_reduce_cache_fields(
     requested: torch.dtype, *, legacy: torch.dtype | None
 ) -> dict[str, str]:

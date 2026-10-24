@@ -88,6 +88,12 @@ def _safe_tp_size() -> int:
         return 1
 
 
+def _flux_reduce_dtype(neuron_config) -> torch.dtype:
+    """All-reduce dtype of the DiT: --tp-reduce-dtype when set, else the model
+    dtype (bf16), which is what the DiT reduced in before the flag existed."""
+    return getattr(neuron_config, "rpl_reduce_dtype", None) or neuron_config.torch_dtype
+
+
 def _sp_unbias(x: torch.Tensor, row_linear: nn.Module) -> torch.Tensor:
     """Correct the bias double-count of a ``reduce_output=False`` row-parallel
     linear under Megatron-SP.
@@ -263,6 +269,7 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
             self.out_channels = self.config.in_channels
 
         self.inner_dim = self.config.num_attention_heads * self.config.attention_head_dim
+        reduce_dtype = _flux_reduce_dtype(self.config.neuron_config)
 
         text_time_guidance_cls = (
             NeuronCombinedTimestepGuidanceTextProjEmbeddings
@@ -272,7 +279,7 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
         self.time_text_embed = text_time_guidance_cls(
             embedding_dim=self.inner_dim,
             pooled_projection_dim=self.config.pooled_projection_dim,
-            reduce_dtype=self.config.neuron_config.torch_dtype,
+            reduce_dtype=reduce_dtype,
         )
 
         # We can't use gather_output=False, there is a LayerNorm at the beginning of the next FluxTransformerBlock
@@ -280,10 +287,10 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
             self.config.joint_attention_dim,
             self.inner_dim,
             gather_output=True,
-            reduce_dtype=self.config.neuron_config.torch_dtype,
+            reduce_dtype=reduce_dtype,
         )
         self.x_embedder = ColumnParallelLinear(
-            self.config.in_channels, self.inner_dim, gather_output=True, reduce_dtype=self.config.neuron_config.torch_dtype,
+            self.config.in_channels, self.inner_dim, gather_output=True, reduce_dtype=reduce_dtype,
         )
 
         self.transformer_blocks = nn.ModuleList(
@@ -292,7 +299,7 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
                     dim=self.inner_dim,
                     num_attention_heads=self.config.num_attention_heads,
                     attention_head_dim=self.config.attention_head_dim,
-                    reduce_dtype=self.config.neuron_config.torch_dtype,
+                    reduce_dtype=reduce_dtype,
                     context_parallel_enabled=self.context_parallel_enabled,
                     cp_mode=self.cp_mode,
                     sp_enabled=self.sp_enabled,
@@ -307,7 +314,7 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
                     dim=self.inner_dim,
                     num_attention_heads=self.config.num_attention_heads,
                     attention_head_dim=self.config.attention_head_dim,
-                    reduce_dtype=self.config.neuron_config.torch_dtype,
+                    reduce_dtype=reduce_dtype,
                     context_parallel_enabled=self.context_parallel_enabled,
                     cp_mode=self.cp_mode,
                     sp_enabled=self.sp_enabled,
@@ -331,7 +338,7 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
             self.config.patch_size * self.config.patch_size * self.out_channels,
             bias=True,
             gather_output=True,
-            reduce_dtype=self.config.neuron_config.torch_dtype,
+            reduce_dtype=reduce_dtype,
         )
 
     def _sp_seq_scatter(self, tensor: torch.Tensor, *, dim: int) -> torch.Tensor:
