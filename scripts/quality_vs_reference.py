@@ -100,16 +100,26 @@ def _read_frames(run_dir: Path) -> np.ndarray | None:
 
 
 def compare_runs(ref_dir: Path, cand_dir: Path) -> dict:
+    """Compare every reference ``final*.pt`` and the decoded output.
+
+    Missing files raise: a run without DIFFLET_DUMP_LATENTS_DIR or without an
+    output must not produce a result that looks complete.
+    """
+    ref_latents = sorted(ref_dir.glob("final*.pt"))
+    if not ref_latents:
+        raise FileNotFoundError(f"no final*.pt latents in {ref_dir}")
     result: dict = {"ref_dir": str(ref_dir), "cand_dir": str(cand_dir), "latents": {}}
-    for ref_path in sorted(ref_dir.glob("final*.pt")):
+    for ref_path in ref_latents:
         cand_path = cand_dir / ref_path.name
-        if cand_path.exists():
-            result["latents"][ref_path.stem] = latent_metrics(
-                torch.load(ref_path), torch.load(cand_path)
-            )
-    ref_frames, cand_frames = _read_frames(ref_dir), _read_frames(cand_dir)
-    if ref_frames is not None and cand_frames is not None:
-        result["frames"] = frame_metrics(ref_frames, cand_frames)
+        if not cand_path.exists():
+            raise FileNotFoundError(f"{cand_path} missing (reference has {ref_path.name})")
+        result["latents"][ref_path.stem] = latent_metrics(torch.load(ref_path), torch.load(cand_path))
+    frames = {}
+    for run_dir in (ref_dir, cand_dir):
+        frames[run_dir] = _read_frames(run_dir)
+        if frames[run_dir] is None:
+            raise FileNotFoundError(f"no out.png / out.mp4 in {run_dir}")
+    result["frames"] = frame_metrics(frames[ref_dir], frames[cand_dir])
     return result
 
 

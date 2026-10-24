@@ -80,6 +80,38 @@ def test_ssim_drops_for_noise(qvr):
     assert qvr.frame_metrics(ref, cand)["ssim_mean"] < 0.9
 
 
+def _run_dir(path, latents=("final",), image=True):
+    import imageio.v3 as iio
+
+    path.mkdir()
+    for name in latents:
+        torch.save(torch.ones(1, 4), path / f"{name}.pt")
+    if image:
+        iio.imwrite(path / "out.png", np.full((16, 16, 3), 7, dtype=np.uint8))
+    return path
+
+
+def test_compare_runs_complete(qvr, tmp_path):
+    result = qvr.compare_runs(_run_dir(tmp_path / "ref"), _run_dir(tmp_path / "cand"))
+    assert result["latents"]["final"]["rel_l2"] == 0.0
+    assert math.isinf(result["frames"]["psnr_mean"])
+
+
+def test_compare_runs_rejects_missing_candidate_latent(qvr, tmp_path):
+    with pytest.raises(FileNotFoundError, match="final.pt"):
+        qvr.compare_runs(_run_dir(tmp_path / "ref"), _run_dir(tmp_path / "cand", latents=()))
+
+
+def test_compare_runs_rejects_missing_output(qvr, tmp_path):
+    with pytest.raises(FileNotFoundError, match="out"):
+        qvr.compare_runs(_run_dir(tmp_path / "ref"), _run_dir(tmp_path / "cand", image=False))
+
+
+def test_compare_runs_rejects_reference_without_latents(qvr, tmp_path):
+    with pytest.raises(FileNotFoundError, match="final"):
+        qvr.compare_runs(_run_dir(tmp_path / "ref", latents=()), _run_dir(tmp_path / "cand"))
+
+
 def test_frame_shape_mismatch_raises(qvr):
     with pytest.raises(ValueError, match="shape"):
         qvr.frame_metrics(
