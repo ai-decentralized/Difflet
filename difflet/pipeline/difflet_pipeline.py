@@ -253,15 +253,23 @@ def _merge_teacache_kwargs(
 # All-reduce dtype each DiffletPipeline-keyed model's artifact used before
 # --tp-reduce-dtype existed (None: the artifact mixed dtypes).
 _TP_REDUCE_LEGACY: dict[str, str | None] = {
+    "qwen_image": "fp32",
     "ltx_2": "fp32",
     "hunyuan_video": "fp32",
     "flux": None,  # bf16 DiT, fp32 T5/CLIP
     "wan": None,  # bf16 DiT, fp32 umT5
 }
+# Trainium models whose artifacts --tp-reduce-dtype does not change.
+_TP_REDUCE_UNAFFECTED: frozenset[str] = frozenset({"minimax_h3", "hunyuan_video_15"})
 
 
 def _tp_reduce_cache_kwargs(application_kwargs: dict[str, Any], model_name: str | None) -> dict:
-    """Pop the raw tp_reduce_dtype kwarg; return the model's cache-key fields for it."""
+    """Pop the raw tp_reduce_dtype kwarg; return the model's cache-key fields for it.
+
+    ``model_name`` is None off-Trainium. Every built-in Trainium model is listed
+    in _TP_REDUCE_LEGACY or _TP_REDUCE_UNAFFECTED (pinned by
+    tests/unit/pipeline/test_tp_reduce_cache_table.py).
+    """
     requested = application_kwargs.pop("tp_reduce_dtype", None)
     if model_name not in _TP_REDUCE_LEGACY:
         return {}
