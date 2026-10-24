@@ -161,14 +161,20 @@ def _column_parallel_like(linear: nn.Linear, *, gather_output: bool) -> ColumnPa
 
 
 def _row_parallel_like(
-    linear: nn.Linear, *, input_is_parallel: bool, reduce_output: bool = True
+    linear: nn.Linear,
+    *,
+    input_is_parallel: bool,
+    reduce_dtype: torch.dtype,
+    reduce_output: bool = True,
 ) -> RowParallelLinear:
+    # reduce_dtype has no default on purpose: NxD's own default is fp32.
     return RowParallelLinear(
         linear.in_features,
         linear.out_features,
         bias=linear.bias is not None,
         input_is_parallel=input_is_parallel,
         reduce_output=reduce_output,
+        reduce_dtype=reduce_dtype,
     )
 
 
@@ -182,13 +188,19 @@ def _safe_tensor_parallel_size() -> int:
         return 1
 
 
-def _replace_qwen_linears_for_tp(transformer: nn.Module, sp_enabled: bool = False) -> None:
+def _replace_qwen_linears_for_tp(
+    transformer: nn.Module,
+    sp_enabled: bool = False,
+    *,
+    reduce_dtype: torch.dtype = torch.bfloat16,
+) -> None:
     """Shard Qwen's largest transformer linears across tensor-parallel ranks.
 
     Under Megatron-SP (``sp_enabled``) the four row-parallel outputs keep
     their partial sums (``reduce_output=False``); the forked block forward's
     ``ḡ`` reduce-scatter performs the cross-rank sum while re-sharding the
     sequence, and the fork's ``_sp_unbias`` corrects the bias double-count.
+    ``reduce_dtype`` is the precision of the row-parallel all-reduce.
     """
 
     tp_degree = _safe_tensor_parallel_size()
@@ -237,10 +249,16 @@ def _replace_qwen_linears_for_tp(transformer: nn.Module, sp_enabled: bool = Fals
             attn.add_k_proj = _column_parallel_like(attn.add_k_proj, gather_output=False)
             attn.add_v_proj = _column_parallel_like(attn.add_v_proj, gather_output=False)
             attn.to_out[0] = _row_parallel_like(
-                attn.to_out[0], input_is_parallel=True, reduce_output=not sp_enabled
+                attn.to_out[0],
+                input_is_parallel=True,
+                reduce_dtype=reduce_dtype,
+                reduce_output=not sp_enabled,
             )
             attn.to_add_out = _row_parallel_like(
-                attn.to_add_out, input_is_parallel=True, reduce_output=not sp_enabled
+                attn.to_add_out,
+                input_is_parallel=True,
+                reduce_dtype=reduce_dtype,
+                reduce_output=not sp_enabled,
             )
 
         if not replicate_mlp:
@@ -251,6 +269,7 @@ def _replace_qwen_linears_for_tp(transformer: nn.Module, sp_enabled: bool = Fals
             block.img_mlp.net[2] = _row_parallel_like(
                 block.img_mlp.net[2],
                 input_is_parallel=True,
+                reduce_dtype=reduce_dtype,
                 reduce_output=not sp_enabled,
             )
             block.txt_mlp.net[0].proj = _column_parallel_like(
@@ -260,6 +279,7 @@ def _replace_qwen_linears_for_tp(transformer: nn.Module, sp_enabled: bool = Fals
             block.txt_mlp.net[2] = _row_parallel_like(
                 block.txt_mlp.net[2],
                 input_is_parallel=True,
+                reduce_dtype=reduce_dtype,
                 reduce_output=not sp_enabled,
             )
 
@@ -551,7 +571,13 @@ class _QwenImageTransformerTraceModule(nn.Module):
             use_layer3d_rope=bool(getattr(config, "use_layer3d_rope", False)),
             **sp_ctor_kwargs,
         )
-        _replace_qwen_linears_for_tp(self.transformer, sp_enabled=self.sp_enabled)
+        _replace_qwen_linears_for_tp(
+            self.transformer,
+            sp_enabled=self.sp_enabled,
+            # Non-NxD backends (CUDA, TPU) build this from a config without neuron_config.
+            reduce_dtype=getattr(getattr(config, "neuron_config", None), "rpl_reduce_dtype", None)
+            or torch.bfloat16,
+        )
         _apply_qwen_block_diagnostics(self.transformer)
         img_ropes: dict[tuple[int, int], tuple[torch.Tensor, torch.Tensor]] = {}
         txt_rope = None

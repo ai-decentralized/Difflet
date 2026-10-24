@@ -22,7 +22,6 @@ EXPECTED_DEFAULT_SITES: dict[str, int] = {
     "difflet/models/flux/clip/modeling_clip.py": 2,
     "difflet/models/flux/t5/modeling_t5.py": 2,
     "difflet/models/hunyuan_video/modeling_hunyuan_video.py": 6,
-    "difflet/models/qwen_image/modeling_qwen_image.py": 1,
     "difflet/models/wan/umt5/modeling_umt5.py": 1,
 }
 
