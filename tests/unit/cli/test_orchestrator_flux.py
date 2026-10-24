@@ -85,7 +85,10 @@ def test_teacache_kwargs_speedup_and_app_kwargs():
 
 
 def test_teacache_kwargs_empty_when_unset():
-    assert FluxOrchestrator(_flux_args())._model_kwargs() == {}
+    # Only the all-reduce precision (always part of a Flux artifact's identity).
+    assert FluxOrchestrator(_flux_args())._model_kwargs() == {
+        "application_kwargs": {"tp_reduce_dtype": "bf16"}
+    }
 
 
 def test_taef1_kwargs_reach_compile_and_application_cache_identity():
@@ -94,6 +97,7 @@ def test_taef1_kwargs_reach_compile_and_application_cache_identity():
     )._model_kwargs()
     assert kwargs == {
         "application_kwargs": {
+            "tp_reduce_dtype": "bf16",
             "taef1": True,
             "taef1_path": "madebyollin/taef1",
         }

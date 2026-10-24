@@ -109,6 +109,7 @@ def create_flux_config(
     taef1: bool = False,
     taef1_path: str | None = None,
     compile_shapes=None,
+    tp_reduce_dtype: torch.dtype = torch.bfloat16,
 ):
     shape_extra = {"compile_shapes": compile_shapes} if compile_shapes else {}
     text_encoder_path = os.path.join(model_path, "text_encoder")
@@ -120,6 +121,7 @@ def create_flux_config(
         tp_degree=1,
         world_size=world_size,
         torch_dtype=dtype,
+        rpl_reduce_dtype=tp_reduce_dtype,
     )
     clip_config = CLIPInferenceConfig(
         neuron_config=clip_neuron_config,
@@ -130,6 +132,7 @@ def create_flux_config(
         tp_degree=world_size,  # T5: TP degree = world_size
         world_size=world_size,
         torch_dtype=dtype,
+        rpl_reduce_dtype=tp_reduce_dtype,
     )
     t5_config = T5InferenceConfig(
         neuron_config=t5_neuron_config,
@@ -140,6 +143,7 @@ def create_flux_config(
         tp_degree=backbone_tp_degree,
         world_size=world_size,
         torch_dtype=dtype,
+        rpl_reduce_dtype=tp_reduce_dtype,
     )
     backbone_config = FluxBackboneInferenceConfig(
         cfg_parallel_enabled=cfg_parallel_enabled,

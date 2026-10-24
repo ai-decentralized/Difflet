@@ -153,7 +153,9 @@ class FluxOrchestrator(ModelOrchestrator):
 
     def _application_kwargs(self) -> dict[str, Any]:
         """Model-opt kwargs shared by compile and load (hashed into the cache key)."""
-        app_kwargs: dict[str, Any] = {}
+        app_kwargs: dict[str, Any] = {
+            "tp_reduce_dtype": getattr(self.args, "tp_reduce_dtype", None) or "bf16",
+        }
         if getattr(self.args, "teacache_cadence", None) is not None:
             app_kwargs["teacache_cadence"] = self.args.teacache_cadence
         if getattr(self.args, "teacache_online_delta", None) is not None:
