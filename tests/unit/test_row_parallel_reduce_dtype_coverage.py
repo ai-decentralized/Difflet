@@ -20,7 +20,6 @@ _ALLOWED_PREFIXES = ("difflet/backends/trainium/minimax_h3/",)
 EXPECTED_DEFAULT_SITES: dict[str, int] = {
     "difflet/models/flux/clip/modeling_clip.py": 2,
     "difflet/models/flux/t5/modeling_t5.py": 2,
-    "difflet/models/hunyuan_video/modeling_hunyuan_video.py": 6,
     "difflet/models/wan/umt5/modeling_umt5.py": 1,
 }
 
