@@ -80,7 +80,7 @@ class NeuronBackend(BackendRuntime):
             )
         from difflet.backends.neuron.core.workarounds import install_neuron_workarounds
 
-        install_neuron_workarounds()  # bool bitwise ops on strided operands; fp32 bf16 LayerNorm
+        install_neuron_workarounds()  # strided bool bitwise ops; bf16 Layer/GroupNorm in fp32
         configure_compile_cache()
         bind_core()
         init_process_group()

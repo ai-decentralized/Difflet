@@ -14,6 +14,14 @@ the spatial size: ``F.group_norm`` in bf16 on the device against fp32, 32 groups
 fp32 (68x the bf16 CPU control). ``F.group_norm`` is wrapped (``nn.GroupNorm`` calls it) exactly as
 ``F.layer_norm`` is.
 
+HunyuanVideo's VAE decoder hit the same failure: on one tile, each GroupNorm run alone on the fp32
+input cast to bf16 was off by 6e-3 to 2e-2 rel-L1 at 81,920 elements per group, 3e-2 to 4e-2 at
+327,680, 0.2 to 0.38 at 1.2M to 2.4M, and 1.3 to 2.1 at 4.5M to 8.9M (the CPU's bf16: 2e-3 to
+4e-3 at every size); the decoder's other ops (Conv3d, SiLU, the attention's Linear layers, the
+upsampling) matched the CPU's bf16 error. The whole bf16 decode came out at 20.8 dB PSNR against
+the fp32 decode (55.9 dB in bf16 on the host) before the wrap. No DiT on this backend uses
+GroupNorm.
+
 Boolean bitwise ops on non-contiguous operands. Eager ``bitwise_and`` on ``bool`` neuron tensors
 returns wrong values when an operand is a non-contiguous view, at sizes such as 256 x 256 (a
 64 x 64 case was correct; ``uint8`` and ``int64`` are correct; ``.contiguous()`` on the strided
@@ -133,5 +141,5 @@ def uninstall_bool_bitwise_guard() -> None:
 uninstall_neuron_workarounds = uninstall_bool_bitwise_guard
 
 __all__ = ["install_bool_bitwise_guard", "install_group_norm_fp32", "install_layer_norm_fp32",
-           "install_neuron_workarounds",
-           "uninstall_bool_bitwise_guard", "uninstall_neuron_workarounds"]
+           "install_neuron_workarounds", "uninstall_bool_bitwise_guard",
+           "uninstall_neuron_workarounds"]
