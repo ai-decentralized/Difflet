@@ -305,9 +305,10 @@ def test_bounded_kernel_splits_heads_above_its_tested_size(fake_bounded_op, monk
                                                            calls):
     """TP4 720x1280x129 (6 heads x 119,168 x 119,168 padded joint tokens, 8.5e10) failed on trn2
     with "BIR emission failed: colz: body blob exceeds uint32 offset range" in the kernel's NKI
-    compile; attention_cte is tested up to 32 x 36864^2 (4.3e10). The heads are split into equal
-    chunks that each stay within that size (the largest divisor of the head count that fits, so
-    every call has one shape and one trace), and the outputs are concatenated: same result."""
+    compile, and again at 3 heads; attention_cte is tested up to 32 x 36864^2 (4.3e10). The
+    heads are split into equal chunks that each stay within the bound (the largest divisor of the
+    head count that fits, so every call has one shape and one trace), and the outputs are
+    concatenated: same result."""
     monkeypatch.setattr(neuron_attention, "_BOUNDED_KERNEL_MAX_BH_SQ_SK", limit)
     q, k, v, lo, hi, ref = _bounded_case()
     with torch.no_grad():
@@ -318,7 +319,9 @@ def test_bounded_kernel_splits_heads_above_its_tested_size(fake_bounded_op, monk
 
 
 def test_bounded_kernel_limit_is_attention_cte_s_tested_size():
-    assert neuron_attention._BOUNDED_KERNEL_MAX_BH_SQ_SK == 32 * 36864 * 36864
-    # TP4 at 720x1280x129: 6 heads of 119,168 padded joint tokens split into 2 calls of 3 heads.
-    assert neuron_attention._head_chunk(6, 119168, 119168) == 3
+    # 3 heads x 119,168^2 (4.26e10, just under nkilib's tested 32 x 36864^2) still failed BIR
+    # emission on trn2, so the bound is half the tested size.
+    assert neuron_attention._BOUNDED_KERNEL_MAX_BH_SQ_SK == 16 * 36864 * 36864
+    # TP4 at 720x1280x129: 6 heads of 119,168 padded joint tokens, one head per call.
+    assert neuron_attention._head_chunk(6, 119168, 119168) == 1
     assert neuron_attention._head_chunk(6, 10496, 10496) == 6  # 320x512x61 unchanged
