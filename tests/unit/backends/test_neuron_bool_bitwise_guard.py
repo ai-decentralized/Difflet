@@ -81,3 +81,56 @@ def test_layer_norm_runs_in_fp32_for_bf16_neuron_inputs(monkeypatch):
         assert seen[-1] == torch.float32 and len(seen) == 2
     finally:
         W.uninstall_neuron_workarounds()
+
+
+@pytest.fixture
+def group_norm_spy(monkeypatch):
+    import torch.nn.functional as F
+
+    W.uninstall_neuron_workarounds()
+    seen = []
+    real = F.group_norm
+
+    def spy(x, num_groups, weight=None, bias=None, eps=1e-5):
+        seen.append((x.dtype, None if weight is None else weight.dtype))
+        return real(x, num_groups, weight, bias, eps)
+
+    monkeypatch.setattr(F, "group_norm", spy)
+    yield seen
+    W.uninstall_neuron_workarounds()
+
+
+def test_group_norm_runs_in_fp32_for_bf16_neuron_inputs(group_norm_spy, monkeypatch):
+    import torch.nn.functional as F
+
+    monkeypatch.setattr(W, "_on_neuron", lambda t: isinstance(t, torch.Tensor))  # CPU stands in
+    W.install_group_norm_fp32()
+    gn = torch.nn.GroupNorm(4, 16).to(torch.bfloat16)  # nn.GroupNorm calls F.group_norm
+    x = torch.randn(2, 16, 3, 5, 5, dtype=torch.bfloat16)
+    out = gn(x)
+    assert group_norm_spy == [(torch.float32, torch.float32)] and out.dtype == torch.bfloat16
+    expected = F.group_norm(x.float(), 4, gn.weight.float(), gn.bias.float(), gn.eps).bfloat16()
+    torch.testing.assert_close(out, expected, rtol=0, atol=0)
+    F.group_norm(torch.randn(2, 16, 4), 4)  # fp32 input: unchanged path
+    assert group_norm_spy[-1] == (torch.float32, None) and len(group_norm_spy) == 3
+
+
+def test_group_norm_off_the_device_is_untouched(group_norm_spy):
+    import torch.nn.functional as F
+
+    W.install_group_norm_fp32()  # the real device check: a CPU tensor is not on a neuron device
+    F.group_norm(torch.randn(2, 16, 4, dtype=torch.bfloat16), 4)
+    assert group_norm_spy == [(torch.bfloat16, None)]
+
+
+def test_install_neuron_workarounds_installs_group_norm_fp32_once(group_norm_spy, monkeypatch):
+    import torch.nn.functional as F
+
+    monkeypatch.setattr(W, "_on_neuron", lambda t: isinstance(t, torch.Tensor))
+    W.install_neuron_workarounds()
+    W.install_neuron_workarounds()
+    F.group_norm(torch.randn(2, 16, 4, dtype=torch.bfloat16), 4)
+    assert group_norm_spy == [(torch.float32, None)]
+    W.uninstall_neuron_workarounds()
+    F.group_norm(torch.randn(2, 16, 4, dtype=torch.bfloat16), 4)
+    assert group_norm_spy[-1] == (torch.bfloat16, None)
