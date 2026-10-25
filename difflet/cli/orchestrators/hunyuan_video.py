@@ -201,24 +201,64 @@ def _decodes_on_device(args: argparse.Namespace) -> bool:
     return decodes_on_device(args, _DEVICE_VAE_DEFAULT)
 
 
+#: diffusers' ``export_to_video`` encoder settings (imageio-ffmpeg: libx264 at quality 5, frame
+#: sizes rounded up to 16), so ``_encode_mp4`` writes the MP4 export_to_video writes.
+_MP4_QUALITY = 5.0
+_MP4_MACRO_BLOCK_SIZE = 16
+
+
+def _video_frames_uint8(video):
+    """The decoded clip ([B, 3, F, H, W] in [-1, 1]; batch 0) as uint8 frames [F, H, W, 3]: the
+    frames HunyuanVideoPipeline's path encodes, bit for bit (VideoProcessor's ``np``
+    post-processing, ``(x * 0.5 + 0.5).clamp(0, 1)`` in fp32, then export_to_video's ``(frame *
+    255).astype(uint8)``, which truncates), computed in one pass of torch ops on the host instead
+    of a float32 numpy clip and a per-frame float copy."""
+    import torch
+
+    x = video.detach()[0].cpu().float()  # C, F, H, W; bf16 -> fp32 is exact
+    frames = ((x * 0.5 + 0.5).clamp(0, 1) * 255).to(torch.uint8)
+    return frames.permute(1, 2, 3, 0).contiguous().numpy()
+
+
+def _encode_mp4(frames, path: str, fps: int) -> None:
+    """uint8 frames [F, H, W, 3] to an MP4 with export_to_video's imageio writer settings."""
+    import imageio
+
+    with imageio.get_writer(path, fps=fps, quality=_MP4_QUALITY, bitrate=None,
+                            macro_block_size=_MP4_MACRO_BLOCK_SIZE) as writer:
+        for frame in frames:
+            writer.append_data(frame)
+
+
 def _write_video(video, output: str) -> None:
-    """The decoded clip ([1, 3, F, H, W] in [-1, 1]) to ``output``: diffusers' VideoProcessor
-    post-processing, as HunyuanVideoPipeline does, then an MP4 when ``output`` ends in .mp4 and
-    encoding works; else the decoded tensor as a .pt."""
+    """The decoded clip ([1, 3, F, H, W] in [-1, 1]) to ``output``: an MP4 when ``output`` ends in
+    .mp4 and encoding works, with the frames diffusers' post-processing and export_to_video
+    would encode (``_video_frames_uint8``, ``_encode_mp4``: the same file byte for byte); else
+    the decoded tensor as a .pt. Prints the split: the frames to uint8 on the host (this
+    includes the device-to-host copy, and so the end of an asynchronous device decode, when
+    ``video`` is still on the device) and the encode.
+
+    Measured on trn2.3xlarge (2026-10-26, 320x512x61; benchmark/trn2/hunyuan_video_neuron.md,
+    "F1b"): after the compiled bf16 decoder (whose decode returns a host tensor) diffusers' path
+    took 0.39-0.45 s and this one 0.32-0.34 s, the same MP4 byte for byte. The 21.9 s the
+    eager fp32 vae launch spent writing was the decode finishing on the device: its first
+    decode returned after 78.9 s and synchronised 23.1 s later; the write after that took
+    0.85 s."""
+    import time
+
     import torch
 
     out = Path(output)
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.suffix == ".mp4":
-        from diffusers.utils import export_to_video
-        from diffusers.video_processor import VideoProcessor
-
-        # Float frames in [0, 1]: export_to_video multiplies ndarray frames by 255 itself.
-        frames = VideoProcessor(vae_scale_factor=8).postprocess_video(
-            video.detach().float().cpu(), output_type="np")[0]
+        start = time.perf_counter()
+        frames = _video_frames_uint8(video)
+        converted = time.perf_counter()
         try:
-            export_to_video(list(frames), str(out), fps=_FPS)
-            print(f"[hunyuan_video] video saved to {out}", flush=True)
+            _encode_mp4(frames, str(out), _FPS)
+            print(f"[hunyuan_video] video saved to {out} ({len(frames)} frames; to uint8 "
+                  f"{converted - start:.2f} s, encode {time.perf_counter() - converted:.2f} s)",
+                  flush=True)
             return
         except Exception as exc:
             print(f"[hunyuan_video] mp4 export failed ({exc}); saving as .pt instead", flush=True)

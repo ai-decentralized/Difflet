@@ -533,13 +533,15 @@ def tiny_vae_snapshot(tmp_path_factory):
 def test_host_decode_writes_what_the_diffusers_pipeline_would(tiny_vae_snapshot, monkeypatch,
                                                               tmp_path):
     """The host decode is HunyuanVideoPipeline's: ``vae.decode(latents / scaling_factor)``
-    (tiled in space and time) then VideoProcessor's post-processing, an MP4 at 24 fps."""
+    (tiled in space and time) then VideoProcessor's post-processing and export_to_video's uint8
+    frames, an MP4 at 24 fps."""
+    import numpy as np
     import torch
     from diffusers import AutoencoderKLHunyuanVideo
     from diffusers.video_processor import VideoProcessor
 
     exported = {}
-    monkeypatch.setattr("diffusers.utils.export_to_video",
+    monkeypatch.setattr(hv_mod, "_encode_mp4",
                         lambda frames, path, fps: exported.update(frames=frames, path=path,
                                                                   fps=fps))
     latents = torch.randn(1, 4, 5, 8, 8, generator=torch.Generator().manual_seed(1))
@@ -556,11 +558,57 @@ def test_host_decode_writes_what_the_diffusers_pipeline_would(tiny_vae_snapshot,
         video = vae.decode(latents / vae.config.scaling_factor, return_dict=False)[0]
     want = VideoProcessor(vae_scale_factor=8).postprocess_video(video, output_type="np")[0]
     assert (exported["path"], exported["fps"]) == (str(out), 24)
-    assert len(exported["frames"]) == 17
-    torch.testing.assert_close(torch.from_numpy(exported["frames"][0]),
-                               torch.from_numpy(want[0]), atol=1e-5, rtol=1e-5)
-    torch.testing.assert_close(torch.from_numpy(exported["frames"][-1]),
-                               torch.from_numpy(want[-1]), atol=1e-5, rtol=1e-5)
+    frames = exported["frames"]
+    assert frames.shape == (17, 64, 64, 3) and frames.dtype == np.uint8
+    # The decode itself is compared to 1e-5 (two decodes of one model); one grey level then.
+    diff = np.abs(frames.astype(np.int16) - (want * 255).astype(np.uint8).astype(np.int16))
+    assert diff.max() <= 1
+
+
+@pytest.mark.parametrize("dtype", ["float32", "bfloat16"])
+def test_video_frames_are_diffusers_uint8_frames_exactly(dtype):
+    """``_video_frames_uint8`` gives exactly the frames the diffusers path encodes:
+    VideoProcessor.postprocess_video(output_type="np") (the clip cast to fp32, denormalised,
+    clamped) and export_to_video's ``(frame * 255).astype(uint8)``, for values inside and
+    outside [-1, 1], in fp32 and bf16."""
+    import numpy as np
+    import torch
+    from diffusers.video_processor import VideoProcessor
+
+    video = (torch.randn(1, 3, 9, 24, 40, generator=torch.Generator().manual_seed(3)) * 0.8
+             ).to(getattr(torch, dtype))
+    video[0, 0, 0, 0, :4] = torch.tensor([-1.0, 1.0, -3.0, 3.0])
+    frames = hv_mod._video_frames_uint8(video)
+    post = VideoProcessor(vae_scale_factor=8).postprocess_video(video.float(), output_type="np")[0]
+    want = np.stack([(f * 255).astype(np.uint8) for f in list(post)])
+    assert frames.dtype == np.uint8 and frames.flags["C_CONTIGUOUS"]
+    assert np.array_equal(frames, want)
+
+
+def test_write_video_mp4_is_byte_identical_to_export_to_video(tmp_path, capsys):
+    """The MP4 is the one diffusers' export_to_video writes from the post-processed float
+    frames (same uint8 frames, same encoder settings), byte for byte; the write prints its
+    split (frames to uint8 on the host, encode)."""
+    import hashlib
+
+    import torch
+
+    pytest.importorskip("imageio_ffmpeg")
+    from diffusers.utils import export_to_video
+    from diffusers.video_processor import VideoProcessor
+
+    video = torch.rand(1, 3, 9, 32, 48, generator=torch.Generator().manual_seed(5)) * 2 - 1
+    ours = tmp_path / "ours.mp4"
+    hv_mod._write_video(video, str(ours))
+    frames = VideoProcessor(vae_scale_factor=8).postprocess_video(video, output_type="np")[0]
+    theirs = export_to_video(list(frames), str(tmp_path / "theirs.mp4"), fps=24)
+
+    def digest(path):
+        return hashlib.sha256(open(path, "rb").read()).hexdigest()
+
+    assert digest(ours) == digest(theirs)
+    out = capsys.readouterr().out
+    assert f"video saved to {ours}" in out and "to uint8" in out and "encode" in out
 
 
 def test_write_video_falls_back_to_the_decoded_tensor(monkeypatch, tmp_path):
@@ -569,7 +617,7 @@ def test_write_video_falls_back_to_the_decoded_tensor(monkeypatch, tmp_path):
     def boom(*a, **k):
         raise RuntimeError("no codec")
 
-    monkeypatch.setattr("diffusers.utils.export_to_video", boom)
+    monkeypatch.setattr(hv_mod, "_encode_mp4", boom)
     video = torch.rand(1, 3, 5, 16, 16) * 2 - 1
     hv_mod._write_video(video, str(tmp_path / "v.mp4"))
     assert torch.equal(torch.load(tmp_path / "v.pt"), video)
