@@ -1435,6 +1435,8 @@ def wan_snapshot(monkeypatch, tmp_path):
                         lambda orch, stage, **kw: state.stages.append((stage, kw["cli_args"])))
     monkeypatch.setattr(wan_mod, "_decode_latents_host", lambda *a, **k: None)
     monkeypatch.setattr(WanOrchestrator, "download", lambda self: None)
+    # The snapshot holds headers only: nothing for compile's bf16 DiT copies to convert.
+    monkeypatch.setattr(WanOrchestrator, "_make_bf16_dit_copies", lambda self: None)
     return state
 
 
