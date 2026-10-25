@@ -49,13 +49,14 @@ if _ATTENTION_PATH not in ("auto", "sdpa"):
 _KERNEL_DTYPES = (torch.bfloat16, torch.float16)
 _KERNEL_MAX_HEAD_DIM = 128
 _KERNEL_MAX_BATCH_HEADS = 512
-#: The largest batch x seqlen_q x seqlen_k nkilib's attention_cte is tested at
-#: (``_MAX_BS_TIMES_SEQLEN_QK = 32 * 36864 * 36864`` in nkilib/core/attention/attention_cte.py;
-#: above it the kernel only warns). Beyond it the bounded kernel's NKI compile can fail outright:
-#: HunyuanVideo at 720x1280x129, tp4 (6 heads x 119,168 x 119,168 padded joint tokens) failed on
-#: trn2 with "BIR emission failed: colz: body blob exceeds uint32 offset range". Larger calls are
-#: split over the heads (``_head_chunk``).
-_BOUNDED_KERNEL_MAX_BH_SQ_SK = 32 * 36864 * 36864
+#: The largest batch x seqlen_q x seqlen_k one bounded-kernel call takes; larger calls are split
+#: over the heads (``_head_chunk``). Above some size the kernel's NKI compile fails outright with
+#: "BIR emission failed: colz: body blob exceeds uint32 offset range": on trn2 (neuronx-cc 2.28,
+#: nki 0.7) HunyuanVideo at 720x1280x129 failed at 6 heads x 119,168 x 119,168 padded joint
+#: tokens (8.5e10) and again at 3 heads (4.26e10). nkilib tests attention_cte up to
+#: 32 x 36864 x 36864 = 4.35e10 (``_MAX_BS_TIMES_SEQLEN_QK``), so that size is not a safe bound
+#: for the bounded (range-select) path; half of it is used until the real bound is measured.
+_BOUNDED_KERNEL_MAX_BH_SQ_SK = 16 * 36864 * 36864
 
 
 def attention(
@@ -205,9 +206,9 @@ def _flash_attention_bounded(q, k, v, bound_min, bound_max, *, scale: float):
 
 
 def _head_chunk(bh: int, s_q: int, s_k: int) -> int:
-    """Heads per bounded-kernel call: all ``bh`` when ``bh * s_q * s_k`` is within the kernel's
-    tested size (every shape the repo ran before 720p), else the largest divisor of ``bh`` that
-    is (equal chunks: one kernel shape, traced once), at least 1."""
+    """Heads per bounded-kernel call: all ``bh`` when ``bh * s_q * s_k`` is within
+    ``_BOUNDED_KERNEL_MAX_BH_SQ_SK`` (every shape the repo verified before 720p), else the largest
+    divisor of ``bh`` that is (equal chunks: one kernel shape, traced once), at least 1."""
     fits = max(1, _BOUNDED_KERNEL_MAX_BH_SQ_SK // (s_q * s_k))
     return max(c for c in range(1, bh + 1) if bh % c == 0 and c <= fits)
 
