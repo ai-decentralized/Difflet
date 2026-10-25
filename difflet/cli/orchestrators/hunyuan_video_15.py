@@ -84,6 +84,19 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
                 "the Trainium (AoT) application covers the DiT on cached inputs, without a pipeline.")
         reject_unsupported_torchrun_options(_unsupported(self.args), runs=_RUNS)
         root_compile_cache_at_cache_dir(getattr(self.args, "cache_dir", None), tag="hunyuan_video_15")
+        if mode == "compile":  # once, as the Trainium path's pre-shards: the fp32 DiT stored in bf16
+            from difflet.backends.neuron.core.weights_bf16 import ensure_bf16_copy
+            from difflet.pipeline.path_resolver import resolve_model_path
+
+            started = time.perf_counter()
+            try:
+                root = resolve_model_path(_HF_MODEL_ID, revision=getattr(self.args, "revision", None),
+                                          local_files_only=True)
+                copy = ensure_bf16_copy(os.path.join(root, "transformer"))
+                print(f"[hv15] bf16 copy of transformer: {copy} ({time.perf_counter() - started:.1f} s)",
+                      flush=True)
+            except FileNotFoundError as exc:  # no local snapshot: the stages report it themselves
+                print(f"[hv15] bf16 copy skipped: {exc}", flush=True)
         tp, cfg, cp = _layout(self.args)
         work_dir = Path(getattr(self.args, "work_dir", None) or Path.home() / ".cache" / "difflet" / "work" / "hv15")
         work_dir.mkdir(parents=True, exist_ok=True)

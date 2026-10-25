@@ -57,6 +57,7 @@ from difflet.backends.neuron.runtime import check_parallel_supported
 from difflet.backends.neuron.wan.config import NeuronWanConfig
 from difflet.backends.neuron.wan.text_encoder import NeuronWanTextEncoderApplication
 from difflet.backends.neuron.wan.transformer import NeuronWanTransformerApplication
+from difflet.backends.neuron.core.weights_bf16 import resolve_component_dir
 from difflet.backends.neuron.wan.vae import NeuronWanVaeDecoderApplication, default_vae_dtype
 
 logger = logging.getLogger(__name__)
@@ -324,7 +325,7 @@ class TorchNeuronWanApplication(torch.nn.Module):
         self.transformer: NeuronWanTransformerApplication | None = None
         if options["enable_transformer"]:
             self.transformer = NeuronWanTransformerApplication(
-                model_path=transformer_path,
+                model_path=resolve_component_dir(transformer_path, self.dtype),  # the bf16 copy if made
                 config=self.config,
                 parallel=parallel,
                 dtype=self.dtype,
@@ -337,7 +338,7 @@ class TorchNeuronWanApplication(torch.nn.Module):
             config_2 = NeuronWanConfig.from_pretrained(transformer_2_path, **config_overrides)
             _require_same_architecture(self.config, config_2)
             self.transformer_2 = NeuronWanTransformerApplication(
-                model_path=transformer_2_path,
+                model_path=resolve_component_dir(transformer_2_path, self.dtype),
                 config=config_2,
                 parallel=parallel,
                 dtype=self.dtype,

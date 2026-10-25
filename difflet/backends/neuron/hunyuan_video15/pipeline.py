@@ -31,6 +31,8 @@ import os
 import numpy as np
 import torch
 
+from difflet.backends.neuron.core.weights_bf16 import resolve_component_dir
+
 from difflet.backends.neuron.hunyuan_video15.transformer import (
     VAE_SPATIAL,
     VAE_TEMPORAL,
@@ -69,7 +71,8 @@ class TorchNeuronHunyuanVideo15Pipeline:
         self.dtype = dtype
         self.guidance_scale = load_guidance(self.model_path, guidance_scale)
         self.dit = NeuronHunyuanVideo15TransformerApplication(
-            model_path=os.path.join(self.model_path, "transformer"), height=height, width=width,
+            model_path=resolve_component_dir(os.path.join(self.model_path, "transformer"), dtype),  # bf16 copy if made
+            height=height, width=width,
             num_frames=num_frames, text_seq_len=text_seq_len, text_2_seq_len=text_2_seq_len,
             image_tokens=image_tokens, parallel=parallel, dtype=dtype, exec_mode=exec_mode, device=device)
         if self.dit.cfg > 1 and self.guidance_scale is None:

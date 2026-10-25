@@ -270,6 +270,8 @@ class WanOrchestrator(ModelOrchestrator):
         self._reject_unsupported_torchrun_options()
         self._reject_dual_expert_misuse()
         self._root_compile_cache_at_cache_dir()
+        if _torchrun_backend() == "neuron":
+            self._make_bf16_dit_copies()
         full_cores = (self.args.tp_degree or 4) * (self.args.cp_degree or 1) * (
             2 if getattr(self.args, "cfg_parallel", False) else 1
         )
@@ -283,6 +285,28 @@ class WanOrchestrator(ModelOrchestrator):
         runner.run_stage(self.args.model_id, "vae",
                          num_cores=1, virtual_core_size=_VIRTUAL_CORE_SIZE,
                          cli_args=shared)
+
+    def _make_bf16_dit_copies(self) -> None:
+        """Once, at compile time (as the Trainium path's pre-shards): bf16 copies of the fp32
+        experts the stages will load, so a cold start reads half the bytes."""
+        import os
+        import time
+
+        from difflet.backends.neuron.core.weights_bf16 import ensure_bf16_copy
+        from difflet.pipeline.path_resolver import resolve_model_path
+
+        try:
+            root = resolve_model_path(self.args.model_id, revision=getattr(self.args, "revision", None),
+                                      local_files_only=True)
+        except Exception as exc:  # no local snapshot: the stages report it themselves
+            print(f"[wan] bf16 copies skipped: snapshot not resolvable ({exc})", flush=True)
+            return
+        experts = ["transformer"] + (["transformer_2"] if getattr(self.args, "dual_expert", False) else [])
+        for name in experts:
+            started = time.perf_counter()
+            copy = ensure_bf16_copy(os.path.join(root, name))
+            print(f"[wan] bf16 copy of {name}: {copy or 'not needed (no fp32 tensors)'} "
+                  f"({time.perf_counter() - started:.1f} s)", flush=True)
 
     def generate(self) -> None:
         self._reject_unsupported_torchrun_options()
