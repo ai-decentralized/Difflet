@@ -197,11 +197,16 @@ def _flash_attention_bounded(q, k, v, bound_min, bound_max, *, scale: float):
         lo = F.pad(lo, (0, 0, 0, pad_q))
         hi = F.pad(hi, (0, 0, 0, pad_q), value=1)
     chunk = _head_chunk(bh, q3.shape[1], k3.shape[1])
-    outs = [_FLASH_BOUNDED_OP(q3[i:i + chunk].contiguous(), k3[i:i + chunk].contiguous(),
-                              v3[i:i + chunk].contiguous(), lo[i:i + chunk].contiguous(),
-                              hi[i:i + chunk].contiguous(), 1.0)
-            for i in range(0, bh, chunk)]
-    out = outs[0] if len(outs) == 1 else torch.cat(outs, dim=0)
+    if chunk == bh:  # one call on the whole tensors: the graph compiled before the split existed
+        out = _FLASH_BOUNDED_OP(q3.contiguous(), k3.contiguous(), v3.contiguous(),
+                                lo.contiguous(), hi.contiguous(), 1.0)
+    else:
+        out = torch.cat([_FLASH_BOUNDED_OP(q3[i:i + chunk].contiguous(),
+                                           k3[i:i + chunk].contiguous(),
+                                           v3[i:i + chunk].contiguous(),
+                                           lo[i:i + chunk].contiguous(),
+                                           hi[i:i + chunk].contiguous(), 1.0)
+                         for i in range(0, bh, chunk)], dim=0)
     return out[:, :s_q].reshape(*shape[:-1], v.shape[-1])
 
 

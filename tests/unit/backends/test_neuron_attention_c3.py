@@ -263,10 +263,11 @@ def test_attention_path_env_is_validated():
 def fake_bounded_op(monkeypatch):
     """Pretend tensors are on neuron; the bounded kernel op records its q shape and computes exact
     attention over keys bound_min <= j < bound_max (scale already folded into q, as the op gets it)."""
-    calls = []
+    calls = _Calls()
 
     def op(q, k, v, lo, hi, scale):
         calls.append(tuple(q.shape))
+        calls_q.append(q)
         j = torch.arange(k.shape[1]).view(1, 1, -1)
         keep = (j >= lo) & (j < hi)
         scores = (q.float() @ k.float().transpose(-1, -2) * scale).masked_fill(~keep, float("-inf"))
@@ -275,7 +276,13 @@ def fake_bounded_op(monkeypatch):
     monkeypatch.setattr(neuron_attention, "_on_neuron", lambda t: True)
     monkeypatch.setattr(neuron_attention, "_flash_kernel", lambda: object())
     monkeypatch.setattr(neuron_attention, "_FLASH_BOUNDED_OP", op)
+    calls_q = []
+    calls.q = calls_q  # the q each call received
     return calls
+
+
+class _Calls(list):
+    pass
 
 
 def _bounded_case():
@@ -294,6 +301,10 @@ def test_bounded_kernel_runs_in_one_call_within_its_tested_size(fake_bounded_op)
         out = neuron_attention.attention(q, k, v, scale=0.2, bound_min=lo, bound_max=hi,
                                          tp_q=True, tp_k=True)
     assert fake_bounded_op == [(BH, 128, D)]  # SQ=33 and SK=47 padded to 128
+    # One call gets the whole tensor, not a slice of it: the traced graph stays the one compiled
+    # before the head split existed (a full-range slice changed the block graphs' HLO on trn2,
+    # so every cached HunyuanVideo NEFF compiled again).
+    assert fake_bounded_op.q[0]._base is None
     _close_bf16(out, ref)
 
 
