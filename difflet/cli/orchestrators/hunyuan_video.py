@@ -15,12 +15,12 @@ through DiffletPipeline (``_stage_generate_neuron``): rank 0 encodes the prompt 
 diffusers' ``HunyuanVideoPipeline.encode_prompt`` (Llama-3 and CLIP-L, the tensors the clip and
 llama stages produce) and broadcasts them, the ranks denoise (the DiT TP-sharded on every rank's
 core, with SP, or CP in any mode) and rank 0 writes the latents. The decode runs in one of three places (``_vae_placement``):
-in a vae stage of its own on one core after the launch has exited (``_stage_vae_neuron``;
---device-vae, the default); on rank 0's core inside the generate launch after the denoise, as
-the AoT generate stage decodes (--vae-in-process; the application's rank-0 decoder); or on the
+on rank 0's core inside the generate launch after the denoise, as the AoT generate stage
+decodes (--vae-in-process, the default; the application's rank-0 decoder); in a vae stage of its
+own on one core after the launch has exited (``_stage_vae_neuron``; --device-vae); or on the
 host in the driver after the launch has exited (``_decode_latents_host``; --host-vae, diffusers
 in fp32). The device decoder is NeuronHunyuanVideoVaeDecoderApplication (tiled in space and
-time; --vae-dtype bf16|fp32 and --vae-exec-mode eager|compile, fp32 eager by default), and the
+time; --vae-dtype bf16|fp32 and --vae-exec-mode eager|compile, compiled bf16 by default), and the
 frames get diffusers' video post-processing (``_write_video``). ``compile`` is the generate
 stage's load + warm-up (it fills the NEFF cache; in process, the decoder's warm-up too) and its
 stage manifest, plus the vae stage's warm-up decode with the vae launch. --cache-dir becomes DIFFLET_COMPILE_CACHE unless that is
@@ -137,17 +137,24 @@ _TORCHRUN_APPLICATION_KWARGS = {
 #: generate launch has exited (--device-vae); "host", on the host CPU in the driver
 #: (--host-vae).
 _VAE_PLACEMENTS = ("generate", "launch", "host")
-#: The placement when no flag names one: the one-core vae launch. Measured on trn2.3xlarge at
-#: TP4, 320x512x61, 50 steps (2026-10-25, benchmark/trn2/hunyuan_video_neuron.md): the vae
-#: launch decodes and writes in about 96 s (plus about 21 s of launch, load and teardown)
-#: against 410 s for the fp32 host decode on 12 vCPUs, so a warm generate takes 239 s instead
-#: of 540 s. Its one-time cost is the eager kernels' cold compile, about 45 minutes in
-#: `compile`.
-_VAE_PLACEMENT_DEFAULT = "launch"
-#: The device decoder's precision and execution (--vae-dtype, --vae-exec-mode), in the vae
-#: launch and in process alike, when no flag names them: eager fp32, diffusers' tiles.
-_VAE_DTYPE_DEFAULT = "fp32"
-_VAE_EXEC_MODE_DEFAULT = "eager"
+#: The placement when no flag names one: in the generate launch, on rank 0's core. Measured on
+#: trn2.3xlarge at 320x512x61, 50 steps, with the compiled bf16 decoder (2026-10-26,
+#: benchmark/trn2/hunyuan_video_neuron.md, "F1b"): warm e2e 117.8 s at TP4, 157.3-164.3 s at
+#: TP2 and 127.6-138.9 s at TP2xCP2 gather_kv (the eager fp32 vae launch: 222.5-239.1, 300.9
+#: and 250.0 s); the decode takes 16.0 s at every layout. Peak HBM on rank 0's core, DiT shard
+#: plus decoder, allocated / neuron-monitor: 14.74 / 17.95 GiB at TP4, 19.24 / 22.85 GiB at
+#: TP2xCP2 and 19.24 / 23.50 GiB at TP2, of 24 GiB: it fits at the three layouts, with 0.5 GiB
+#: to spare at TP2 by neuron-monitor. --device-vae keeps the one-core vae launch, which never
+#: shares a core with the DiT.
+_VAE_PLACEMENT_DEFAULT = "generate"
+#: The device decoder's precision and execution (--vae-dtype, --vae-exec-mode), in process and
+#: in the vae launch alike, when no flag names them: compiled bf16 on fixed tiles (``F1a``:
+#: 56.07 dB against the fp32 host decode, 16.0 s per decode, a 135 s cold compile into 26
+#: graphs) instead of eager fp32 on diffusers' tiles (136.7 dB, 40.7-43.2 s per decode in a
+#: resident process, a 1752 s cold compile into about 3,751 per-op NEFFs), which
+#: --vae-dtype fp32 --vae-exec-mode eager keeps.
+_VAE_DTYPE_DEFAULT = "bf16"
+_VAE_EXEC_MODE_DEFAULT = "compile"
 #: --vae-dtype's values as the decoder application takes them.
 _VAE_DTYPES = {"bf16": "bfloat16", "fp32": "float32"}
 #: The neuron launches opt into torch-neuronx's NKI trace cache (``difflet/backends/neuron/
