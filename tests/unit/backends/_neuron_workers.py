@@ -759,6 +759,7 @@ def w1_wan_pipeline_worker(rank: int, world_size: int, model_dir: str) -> dict:
     )
 
     app = TorchNeuronWanApplication(
+        text_encoder_dtype=torch.float32,  # the fp32 reference path
         model_path=model_dir,
         parallel=DiffletParallelConfig(tp_degree=world_size),
         dtype=torch.float32,
@@ -826,6 +827,7 @@ def w1_wan22_pipeline_worker(rank: int, world_size: int, model_dir: str) -> dict
     )
 
     app = TorchNeuronWanApplication(
+        text_encoder_dtype=torch.float32,  # the fp32 reference path
         model_path=model_dir,
         parallel=DiffletParallelConfig(tp_degree=world_size),
         dtype=torch.float32,
@@ -877,6 +879,7 @@ def w1_wan_device_text_encoder_worker(rank: int, world_size: int, model_dir: str
         exec_mode="eager",
         device="cpu",
         text_encoder_device="neuron",
+        text_encoder_dtype=torch.float32,  # against transformers' fp32 encoder
     )
     app.load()
     embeds = [app.pipeline.encode_prompt(prompt=prompt) for prompt in prompts]
@@ -910,6 +913,8 @@ def w1_wan_device_vae_worker(rank: int, world_size: int, model_dir: str) -> dict
         device="cpu",
         encoder_threads=2,
         enable_vae_decoder=True,
+        text_encoder_dtype=torch.float32,  # against the fp32 host path
+        vae_dtype=torch.float32,
     )
     app.load()
     prompt_embeds, latents = tiny_wan_pipeline_inputs()
@@ -968,6 +973,7 @@ def w1_wan_cfg_parallel_worker(rank: int, world_size: int, model_dir: str) -> di
     )
 
     app = TorchNeuronWanApplication(
+        text_encoder_dtype=torch.float32,  # the fp32 reference path
         model_path=model_dir,
         parallel=DiffletParallelConfig(tp_degree=world_size // 2, cfg_parallel_enabled=True),
         dtype=torch.float32,
@@ -1030,6 +1036,7 @@ def w1_wan_cp_worker(rank: int, world_size: int, model_dir: str, cp_mode: str) -
     )
 
     app = TorchNeuronWanApplication(
+        text_encoder_dtype=torch.float32,  # the fp32 reference path
         model_path=model_dir,
         parallel=DiffletParallelConfig(tp_degree=world_size // 2, cp_degree=2, cp_mode=cp_mode),
         dtype=torch.float32,
@@ -1086,6 +1093,7 @@ def w1_wan_sp_worker(rank: int, world_size: int, model_dir: str, cfg: bool) -> d
     )
 
     app = TorchNeuronWanApplication(
+        text_encoder_dtype=torch.float32,  # the fp32 reference path
         model_path=model_dir,
         parallel=DiffletParallelConfig(tp_degree=world_size // (2 if cfg else 1),
                                        cfg_parallel_enabled=cfg, sp_enabled=True),

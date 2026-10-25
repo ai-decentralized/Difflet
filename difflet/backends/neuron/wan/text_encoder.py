@@ -6,11 +6,12 @@ the same tensor-parallel layout at the pipeline's TP degree: token embedding and
 position biases split across the embedding dimension, attention projections column-parallel
 with gathered outputs, the gated FFN column- then row-parallel.
 
-It runs in fp32 (about a quarter of the 22.7 GB fp32 encoder per rank), as the host path does:
-umT5 is fragile in bf16 (its FFN output projection ``wo`` produces large activations, which is
-why transformers keeps ``wo`` in fp32 for bf16 loads), its bf16 error against fp32 ranges over
-several x with CPU kernel choice alone, and it runs twice per request, so fp32 costs memory and
-nothing measurable in time. The embeddings are cast to the DiT's dtype afterwards.
+Its precision is the caller's; the application default is bf16 throughout, the precision the
+Trainium path runs it at (and diffusers' Wan pipeline loads it in, there with transformers'
+rule keeping the FFN output projection ``wo`` in fp32). fp32 remains an option: umT5's bf16 error
+against fp32 varies with kernel choice (its ``wo`` produces large activations), so the parity
+gate's floor spans several bf16 implementations. The embeddings are cast to the DiT's dtype
+afterwards.
 
 Like the AoT path it runs one static shape, ``(batch, text_seq_len)`` token ids and mask: a
 prompt is padded to ``text_seq_len`` and encoded whole, the mask keeping padding out of the real

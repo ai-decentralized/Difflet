@@ -93,6 +93,7 @@ def _composed(tiny, **overrides):
         text_seq_len=TINY_TEXT_SEQ_LEN,
         exec_mode="eager",
         device="cpu",
+        text_encoder_dtype=torch.float32,  # the fp32 reference path; the bf16 default is tested directly
     )
     kwargs.update(overrides)
     return na.TorchNeuronWanApplication(**kwargs)
@@ -518,13 +519,18 @@ def test_device_text_encoder_on_four_ranks_matches_hugging_face(tiny):
         torch.testing.assert_close(torch.tensor(got), want, atol=1e-5, rtol=1e-5)
 
 
-def test_device_text_encoder_runs_in_fp32_and_hands_the_dit_its_dtype(tiny):
-    # umT5 is fragile in bf16: it runs in fp32 whatever the DiT's dtype, and only its
-    # embeddings are cast to that dtype (what the host path does).
-    app = _composed(tiny, dtype=torch.bfloat16, text_encoder_device="neuron")
+def test_device_text_encoder_defaults_to_bf16_and_hands_the_dit_its_dtype(tiny):
+    # umT5 in bf16 by default (the Trainium path's precision), fp32 on request; its embeddings
+    # are cast to the DiT's dtype either way.
+    assert na._KWARG_DEFAULTS["text_encoder_dtype"] is torch.bfloat16
+    app = _composed(tiny, dtype=torch.bfloat16, text_encoder_device="neuron", text_encoder_dtype=torch.bfloat16)
     assert isinstance(app.text_encoder, na._DeviceTextEncoder)
-    assert app.text_encoder.app.dtype is torch.float32
+    assert app.text_encoder.app.dtype is torch.bfloat16
     assert app.text_encoder.dtype is torch.bfloat16
+    app = _composed(tiny, dtype=torch.bfloat16, text_encoder_device="neuron", text_encoder_dtype=torch.float32)
+    assert app.text_encoder.app.dtype is torch.float32
+    host = _composed(tiny, dtype=torch.bfloat16, text_encoder_dtype=torch.bfloat16)
+    assert host.text_encoder.encoder_dtype is torch.bfloat16
 
 
 # ---- the VAE decoder on the device (enable_vae_decoder=True) ------------------------------
@@ -549,10 +555,23 @@ def test_device_vae_on_four_ranks_matches_the_host_decode(tiny):
     torch.testing.assert_close(frames, reference_frames, atol=1e-4, rtol=1e-4)
 
 
-def test_device_vae_runs_eager_in_fp32(tiny):
+def test_vae_precision_follows_the_clip_length_as_on_trainium():
+    from difflet.backends.neuron.wan.vae import BF16_MAX_FRAMES, default_vae_dtype
+
+    assert BF16_MAX_FRAMES == 9
+    assert default_vae_dtype(5) is torch.bfloat16 and default_vae_dtype(9) is torch.bfloat16
+    assert default_vae_dtype(13) is torch.float32 and default_vae_dtype(81) is torch.float32
+
+
+def test_device_vae_runs_eager_at_the_default_or_requested_precision(tiny):
+    from difflet.backends.neuron.wan.vae import default_vae_dtype
+
     app = _composed(tiny, dtype=torch.bfloat16, exec_mode="compile", enable_vae_decoder=True)
-    assert app.vae_decoder.dtype is torch.float32
+    frames = (int(app.config.latent_frames) - 1) * 4 + 1
+    assert app.vae_decoder.dtype is default_vae_dtype(frames)
     assert app.vae_decoder.app.exec_mode == "eager"
+    app = _composed(tiny, dtype=torch.bfloat16, enable_vae_decoder=True, vae_dtype=torch.float32)
+    assert app.vae_decoder.dtype is torch.float32
     assert tuple(app.vae_decoder.config.latents_std) == (1.5, 0.8, 1.2, 2.0)
 
 
@@ -572,10 +591,11 @@ def test_cfg_parallel_on_four_ranks_matches_tp1(tiny):
                                atol=1e-4, rtol=1e-4)
 
 
-def test_cfg_parallel_refuses_the_device_text_encoder(tiny):
+def test_cfg_parallel_refuses_the_fp32_device_text_encoder(tiny):
+    # a TP2 shard of the fp32 encoder beside a TP2 shard of the DiT exceeds a core; bf16 is allowed
     with pytest.raises(ValueError, match="encode on the host"):
         _composed(tiny, parallel=DiffletParallelConfig(tp_degree=2, cfg_parallel_enabled=True),
-                  text_encoder_device="neuron")
+                  text_encoder_device="neuron", text_encoder_dtype=torch.float32)
 
 
 # ---- context parallelism (TP2 x CP2) -----------------------------------------------------

@@ -590,10 +590,13 @@ class WanOrchestrator(ModelOrchestrator):
         with open(vae_dir / "config.json", encoding="utf-8") as f:
             z_dim = int(json.load(f)["z_dim"])
         h, w, frames_count = args.height or 480, args.width or 832, args.num_frames or 9
+        from difflet.backends.neuron.wan.vae import default_vae_dtype
+
         app = NeuronWanVaeDecoderApplication(
             model_path=str(vae_dir),
             latent_shape=(1, z_dim, (frames_count - 1) // 4 + 1, h // 8, w // 8),
             parallel=DiffletParallelConfig(tp_degree=1),
+            dtype=default_vae_dtype(frames_count),
             device="neuron",
         )
         app.load(skip_warmup=args.stage_mode != "compile")

@@ -5,11 +5,14 @@ which mirrors diffusers' decoder key for key (``post_quant_conv.*``, ``decoder.*
 the latent frame by frame with diffusers' causal convolution cache. The checkpoint's encoder
 tensors match no parameter and are skipped.
 
-Precision and placement: fp32, as upstream decodes (Wan's model cards load the VAE in fp32 under
-a bf16 pipeline) and as the host decode does; the decoder writes pixels directly and runs once
-per request. It has no tensor-parallel layers, so every rank that runs it holds the whole 0.5 GB
-decoder; the CLI runs it on one rank, in a launch after the transformer stage (its fp32
-activations are about 12 GiB per core at 480x832), as the Trainium path runs its VAE stage.
+Precision (``default_vae_dtype``) follows the Trainium path, clip length by clip length: bf16 up to
+``BF16_MAX_FRAMES`` frames, where it decodes on the device in its pipeline dtype (bf16), and fp32
+beyond, where its compiled decoder exceeds the compiler's instruction limit and it decodes with
+diffusers' VAE on the host in fp32 (as Wan's model cards load it). This application runs eagerly,
+so long clips also decode on the device, at the same fp32. It has no tensor-parallel layers, so
+every rank that runs it holds the whole 0.5 GB decoder; the CLI runs it on one rank, in a launch
+after the transformer stage (its fp32 activations are about 12 GiB per core at 480x832), as the
+Trainium path runs its VAE stage.
 
 Eager only: the decode loop threads a mutable per-convolution frame cache through the blocks,
 which compiled regions would have to guard on every frame. ``exec_mode`` is accepted for the
@@ -22,6 +25,15 @@ import json
 import os
 
 import torch
+
+#: The longest clip the Trainium path decodes on the device (in bf16); longer clips decode on its
+#: host fallback in fp32.
+BF16_MAX_FRAMES = 9
+
+
+def default_vae_dtype(num_frames: int) -> torch.dtype:
+    """The VAE's precision for a clip of ``num_frames`` frames, matching the Trainium path."""
+    return torch.bfloat16 if int(num_frames) <= BF16_MAX_FRAMES else torch.float32
 
 from difflet.backends.neuron.core.application_base import TorchNeuronApplicationBase
 

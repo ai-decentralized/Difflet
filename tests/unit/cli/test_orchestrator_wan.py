@@ -822,10 +822,11 @@ class _FakeNeuronVae:
 
     instances: list = []
 
-    def __init__(self, *, model_path, latent_shape, parallel, device):
+    def __init__(self, *, model_path, latent_shape, parallel, device, dtype=None):
         from difflet.models.wan.vae.modeling_vae import WanVAEDecoderConfig
 
         self.model_path, self.latent_shape, self.device = model_path, latent_shape, device
+        self.dtype = dtype  # the stage passes default_vae_dtype(num_frames)
         self.dtype = __import__("torch").float32
         self.vae_config = WanVAEDecoderConfig(z_dim=4, latents_mean=[0.5] * 4,
                                               latents_std=[2.0] * 4)

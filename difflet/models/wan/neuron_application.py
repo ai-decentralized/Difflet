@@ -57,7 +57,7 @@ from difflet.backends.neuron.runtime import check_parallel_supported
 from difflet.backends.neuron.wan.config import NeuronWanConfig
 from difflet.backends.neuron.wan.text_encoder import NeuronWanTextEncoderApplication
 from difflet.backends.neuron.wan.transformer import NeuronWanTransformerApplication
-from difflet.backends.neuron.wan.vae import NeuronWanVaeDecoderApplication
+from difflet.backends.neuron.wan.vae import NeuronWanVaeDecoderApplication, default_vae_dtype
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +75,10 @@ _KWARG_DEFAULTS: dict[str, Any] = {
     "device": "neuron",
     "encoder_threads": 12,
     "text_encoder_device": "host",
+    # umT5 in bf16, as the Trainium path runs it; the VAE's precision follows the clip length as on
+    # the Trainium path (default_vae_dtype: bf16 up to 9 frames, fp32 beyond). Both overridable.
+    "text_encoder_dtype": torch.bfloat16,
+    "vae_dtype": None,
     "shapes": None,
     "teacache_cadence": None,
     "teacache_online_delta_alpha": None,
@@ -100,11 +104,13 @@ class _HostTextEncoder:
     load"``, so a rank 0 that cannot read it fails every rank there.
     """
 
-    def __init__(self, model_path, *, text_dim: int, seq_len: int, dtype, device, threads: int):
+    def __init__(self, model_path, *, text_dim: int, seq_len: int, dtype, device, threads: int,
+                 encoder_dtype=torch.bfloat16):
         self.model_path = str(model_path)
         self.text_dim = int(text_dim)
         self.seq_len = int(seq_len)
         self.dtype = dtype
+        self.encoder_dtype = encoder_dtype
         self.device = torch.device(device)
         self.threads = int(threads)
         self.model = None  # rank 0 only, after load()
@@ -116,7 +122,7 @@ class _HostTextEncoder:
         from transformers import UMT5EncoderModel
 
         model = UMT5EncoderModel.from_pretrained(
-            os.path.join(self.model_path, "text_encoder"), dtype=torch.float32
+            os.path.join(self.model_path, "text_encoder"), dtype=self.encoder_dtype
         )
         return model.eval().requires_grad_(False)
 
@@ -339,7 +345,9 @@ class TorchNeuronWanApplication(torch.nn.Module):
                 device=self.device,
             )
         self.text_encoder: _HostTextEncoder | _DeviceTextEncoder | None = None
+        text_encoder_dtype = _normalize_dtype(options["text_encoder_dtype"])
         if (options["enable_text_encoder"] and options["text_encoder_device"] == "neuron"
+                and text_encoder_dtype == torch.float32
                 and (self.config.cfg_parallel_enabled or self.config.context_parallel_enabled)):
             raise ValueError(
                 "CFG and context parallelism narrow the TP degree, so a core would hold a TP-"
@@ -354,7 +362,7 @@ class TorchNeuronWanApplication(torch.nn.Module):
                     text_seq_len=self.text_seq_len,
                     batch_size=1,
                     parallel=parallel,
-                    dtype=torch.float32,  # see NeuronWanTextEncoderApplication
+                    dtype=text_encoder_dtype,
                     exec_mode=options["exec_mode"],
                     device=self.device,
                 ),
@@ -369,6 +377,7 @@ class TorchNeuronWanApplication(torch.nn.Module):
                 dtype=self.dtype,
                 device=self.device,
                 threads=int(options["encoder_threads"]),
+                encoder_dtype=text_encoder_dtype,
             )
         self.vae_decoder: _DeviceVaeDecoder | None = None
         if options["enable_vae_decoder"]:
@@ -379,7 +388,8 @@ class TorchNeuronWanApplication(torch.nn.Module):
                     latent_shape=(1, int(cfg.out_channels), cfg.latent_frames,
                                   cfg.latent_height, cfg.latent_width),
                     parallel=parallel,
-                    dtype=torch.float32,  # see NeuronWanVaeDecoderApplication
+                    dtype=(_normalize_dtype(options["vae_dtype"]) if options["vae_dtype"] is not None
+                           else default_vae_dtype((int(cfg.latent_frames) - 1) * 4 + 1)),
                     device=self.device,
                 ),
                 device=self.device,
