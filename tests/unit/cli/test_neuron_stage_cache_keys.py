@@ -72,12 +72,18 @@ CASES = [
     (LTX, [], ["--device-text-encoder"], ["text_encoder_device"]),
     (WAN, [], ["--host-text-encoder"], []),
     (QWEN, [], ["--device-text-encoder"], []),
-    # Where the VAE decodes is the vae stage's business, not the DiT stage's key.
+    # Where the VAE decodes is the vae stage's business, not the DiT stage's key...
     (WAN, [], ["--host-vae"], []),
     (QWEN, [], ["--device-vae"], []),
     (LTX, [], ["--device-vae"], []),
-    (HV, [], ["--device-vae"], []),
-    (HV, [], ["--host-vae"], []),
+    # ...except HunyuanVideo's default, which decodes in the generate stage: its key names the
+    # decoder ("vae"), which a placement outside the stage drops and a decoder option changes;
+    # with the vae launch the decoder options are the vae stage's.
+    (HV, [], ["--device-vae"], ["vae"]),
+    (HV, [], ["--host-vae"], ["vae"]),
+    (HV, [], ["--vae-dtype", "fp32"], ["vae"]),
+    (HV, [], ["--vae-exec-mode", "eager"], ["vae"]),
+    (HV, ["--device-vae"], ["--device-vae", "--vae-dtype", "fp32"], []),
 ]
 
 
