@@ -639,6 +639,27 @@ def test_explain_graphs_counts_graphs_and_breaks():
     assert neuron_compile.explain_graphs(lambda t: t, x) == (0, 0)
 
 
+def test_compile_region_compiles_the_module_itself_with_the_blocks_options(monkeypatch):
+    """One region: the module's own forward, static fullgraph, and for neuron the same shared
+    options dict compile_blocks hands out (fallback off); another backend gets a copy of the
+    caller's options."""
+    seen = []
+    monkeypatch.setattr(nn.Module, "compile", lambda self, *a, **k: seen.append((self, k)))
+    model = _toy(n_blocks=2)
+    assert neuron_compile.compile_region(model) is model
+    neuron_compile.compile_blocks(model)
+    caller = {"x": 1}
+    neuron_compile.compile_region(model, backend="aot_eager", options=caller)
+    region, block0, block1, other = seen
+    assert region[0] is model and block0[0] is model.blocks[0]
+    assert {k: v for k, v in region[1].items() if k != "options"} == {
+        "backend": "neuron", "fullgraph": True, "dynamic": False}
+    assert region[1]["options"] == {"fallback_execution": False}
+    assert region[1]["options"] is block0[1]["options"] is block1[1]["options"]
+    assert other[1]["backend"] == "aot_eager"
+    assert other[1]["options"] == caller and other[1]["options"] is not caller
+
+
 def test_toy_block_rejects_heads_that_do_not_split():
     with pytest.raises(ValueError, match="heads=3"):
         ToyBlock(DIM, HIDDEN, heads=3)

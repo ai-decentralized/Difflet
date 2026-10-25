@@ -271,6 +271,37 @@ def _neuron_options_for(requested: dict[str, Any]) -> dict[str, Any]:
     return shared
 
 
+def _backend_options(
+    backend: str | Callable[..., Any], options: Mapping[str, Any] | None
+) -> dict[str, Any] | None:
+    """The options dict to hand ``backend``: for ``"neuron"``, ``options`` over
+    ``NEURON_COMPILE_OPTIONS`` as the one shared dict (``_neuron_options_for``); for any other
+    backend a copy of ``options``. The caller's dict is never edited."""
+    if backend == "neuron":
+        return _neuron_options_for({**NEURON_COMPILE_OPTIONS, **(options or {})})
+    return None if options is None else dict(options)
+
+
+def compile_region(
+    module: nn.Module,
+    *,
+    backend: str | Callable[..., Any] = "neuron",
+    fullgraph: bool = True,
+    dynamic: bool = False,
+    options: Mapping[str, Any] | None = None,
+) -> nn.Module:
+    """Compile ``module`` in place as one region, with the options ``compile_blocks`` uses.
+
+    For a model that is not a stack of repeated blocks, or one whose blocks are better compiled
+    together (a VAE decoder tile). With ``backend="neuron"``, ``options`` is laid over
+    ``NEURON_COMPILE_OPTIONS`` (a region that fails to lower raises instead of running op by
+    op) and the backend gets the same shared dict ``compile_blocks`` hands it. Returns
+    ``module``.
+    """
+    return compile_inplace(module, backend=backend, fullgraph=fullgraph, dynamic=dynamic,
+                           options=_backend_options(backend, options))
+
+
 def repeated_block_lists(module: nn.Module) -> list[str]:
     """Names of outermost ModuleLists whose two or more members share one class.
 
@@ -336,10 +367,7 @@ def compile_blocks(
     # to the dict it is given (torch_neuronx/neuron_dynamo_backend/backend.py:1862); a fresh
     # copy per block would compile every block separately. For the neuron backend the object
     # is also shared across calls (_neuron_options_for), so other models reuse the graphs too.
-    if backend == "neuron":
-        shared_options = _neuron_options_for({**NEURON_COMPILE_OPTIONS, **(options or {})})
-    else:
-        shared_options = None if options is None else dict(options)
+    shared_options = _backend_options(backend, options)
     compiled: list[str] = []
     for attr in block_attrs:
         try:
