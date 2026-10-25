@@ -457,9 +457,14 @@ class WanOrchestrator(ModelOrchestrator):
             application_kwargs=_torchrun_application_kwargs(args),
             load=False,
         )
+        built_s = time.perf_counter() - start  # prepare_runtime (the process group) and the build
         with _fallback_tracker(pipe) as load_fallbacks:
             pipe.load(skip_warmup=False)
         load_s = time.perf_counter() - start
+        if distributed.is_rank0():
+            components = getattr(pipe.app, "phase_seconds", {}) or {}
+            print(f"[wan] start-up: from_pretrained (prepare_runtime + build) {built_s:.2f} s; "
+                  f"load {load_s - built_s:.1f} s by component {components}", flush=True)
 
         generate_fallbacks: list = []
         if args.stage_mode == "compile":
@@ -471,8 +476,23 @@ class WanOrchestrator(ModelOrchestrator):
             # Only when given: the orchestrator otherwise uses --guidance-scale throughout.
             low_noise = ({"guidance_scale_2": float(args.guidance_scale_2)}
                          if getattr(args, "guidance_scale_2", None) is not None else {})
+            # Step timing without touching the shared orchestrator: the scheduler steps once per
+            # denoising step, after that step's DiT forward(s).
+            marks: list[float] = []
+            scheduler = getattr(getattr(pipe.app, "pipeline", None), "scheduler", None)
+            if scheduler is not None:
+                original_step = scheduler.step
+
+                def timed_step(*a, **k):
+                    result = original_step(*a, **k)
+                    marks.append(time.perf_counter())
+                    return result
+
+                scheduler.step = timed_step
             for req in _replica_requests(args, device=getattr(pipe.app, "device", None)):
                 with _replica_request_scope(args, req):
+                    marks.clear()
+                    called = time.perf_counter()
                     with _fallback_tracker(pipe) as fallbacks:
                         out = pipe(
                             generator=torch.Generator().manual_seed(req.seed),
@@ -488,6 +508,16 @@ class WanOrchestrator(ModelOrchestrator):
                             **low_noise,
                         )
                     generate_fallbacks.extend(fallbacks)
+                    done = time.perf_counter()
+                    if distributed.is_rank0() and len(marks) > 1:
+                        import statistics
+
+                        deltas = sorted(b - a for a, b in zip(marks, marks[1:]))
+                        print(f"[wan] request: {done - called:.2f} s; to the first step's end "
+                              f"{marks[0] - called:.2f} s (prompt encode + step 1); step median "
+                              f"{statistics.median(deltas) * 1e3:.1f} ms (n={len(deltas)}, max "
+                              f"{deltas[-1] * 1e3:.1f}); after the last step {done - marks[-1]:.2f} s",
+                              flush=True)
                     latents_out = out.latents if hasattr(out, "latents") else out[0]
                     if distributed.is_rank0():
                         dest = stage_loop.work_file(args, req, "latents.pt")
