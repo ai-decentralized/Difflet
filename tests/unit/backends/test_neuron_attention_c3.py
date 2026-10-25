@@ -257,3 +257,68 @@ def test_attention_path_env_is_validated():
     env = {**__import__("os").environ, "DIFFLET_NEURON_ATTENTION": "flash"}
     proc = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
     assert proc.returncode != 0 and "must be 'auto' or 'sdpa'" in proc.stderr
+
+
+@pytest.fixture
+def fake_bounded_op(monkeypatch):
+    """Pretend tensors are on neuron; the bounded kernel op records its q shape and computes exact
+    attention over keys bound_min <= j < bound_max (scale already folded into q, as the op gets it)."""
+    calls = []
+
+    def op(q, k, v, lo, hi, scale):
+        calls.append(tuple(q.shape))
+        j = torch.arange(k.shape[1]).view(1, 1, -1)
+        keep = (j >= lo) & (j < hi)
+        scores = (q.float() @ k.float().transpose(-1, -2) * scale).masked_fill(~keep, float("-inf"))
+        return (torch.softmax(scores, dim=-1) @ v.float()).to(q.dtype)
+
+    monkeypatch.setattr(neuron_attention, "_on_neuron", lambda t: True)
+    monkeypatch.setattr(neuron_attention, "_flash_kernel", lambda: object())
+    monkeypatch.setattr(neuron_attention, "_FLASH_BOUNDED_OP", op)
+    return calls
+
+
+def _bounded_case():
+    q, k, v = _bf16(*_inputs())
+    g = torch.Generator().manual_seed(1)
+    bound_min = torch.zeros(BH, SQ, 1, dtype=torch.int32)
+    bound_max = torch.randint(1, SK + 1, (BH, SQ, 1), dtype=torch.int32, generator=g)
+    ref = _reference(q, k, v, scale=0.2, mask=torch.arange(SK).view(1, 1, -1) < bound_max,
+                     tp_q=True, tp_k=True)
+    return q, k, v, bound_min, bound_max, ref
+
+
+def test_bounded_kernel_runs_in_one_call_within_its_tested_size(fake_bounded_op):
+    q, k, v, lo, hi, ref = _bounded_case()
+    with torch.no_grad():
+        out = neuron_attention.attention(q, k, v, scale=0.2, bound_min=lo, bound_max=hi,
+                                         tp_q=True, tp_k=True)
+    assert fake_bounded_op == [(BH, 128, D)]  # SQ=33 and SK=47 padded to 128
+    _close_bf16(out, ref)
+
+
+@pytest.mark.parametrize("limit, calls", [(2 * 128 * 128, [(2, 128, D)] * 3),
+                                          (5 * 128 * 128, [(3, 128, D)] * 2),
+                                          (128 * 128, [(1, 128, D)] * 6),
+                                          (100, [(1, 128, D)] * 6)])
+def test_bounded_kernel_splits_heads_above_its_tested_size(fake_bounded_op, monkeypatch, limit,
+                                                           calls):
+    """TP4 720x1280x129 (6 heads x 119,168 x 119,168 padded joint tokens, 8.5e10) failed on trn2
+    with "BIR emission failed: colz: body blob exceeds uint32 offset range" in the kernel's NKI
+    compile; attention_cte is tested up to 32 x 36864^2 (4.3e10). The heads are split into equal
+    chunks that each stay within that size (the largest divisor of the head count that fits, so
+    every call has one shape and one trace), and the outputs are concatenated: same result."""
+    monkeypatch.setattr(neuron_attention, "_BOUNDED_KERNEL_MAX_BH_SQ_SK", limit)
+    q, k, v, lo, hi, ref = _bounded_case()
+    with torch.no_grad():
+        out = neuron_attention.attention(q, k, v, scale=0.2, bound_min=lo, bound_max=hi,
+                                         tp_q=True, tp_k=True)
+    assert fake_bounded_op == calls
+    _close_bf16(out, ref)
+
+
+def test_bounded_kernel_limit_is_attention_cte_s_tested_size():
+    assert neuron_attention._BOUNDED_KERNEL_MAX_BH_SQ_SK == 32 * 36864 * 36864
+    # TP4 at 720x1280x129: 6 heads of 119,168 padded joint tokens split into 2 calls of 3 heads.
+    assert neuron_attention._head_chunk(6, 119168, 119168) == 3
+    assert neuron_attention._head_chunk(6, 10496, 10496) == 6  # 320x512x61 unchanged
