@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import json
+import os
 import struct
 
 import pytest
@@ -116,6 +117,28 @@ def test_device_vae_is_the_default(launches, tmp_path):
     assert hv_mod._decodes_on_device(_args())
     assert not hv_mod._decodes_on_device(_args(host_vae=True))
     assert hv_mod._decodes_on_device(_args(device_vae=True))
+
+
+@pytest.mark.parametrize("vae_flag", [{}, {"host_vae": True}])
+def test_launches_opt_into_the_nki_trace_cache(launches, monkeypatch, tmp_path, vae_flag):
+    """At 720x1280x129 (119,056 joint tokens) each rank spent 30+ minutes in the NKI trace of
+    the key-bounded attention_cte (py-spy on trn2: nki compile under get_kernel_config in fake
+    mode), and every launch repeats it unless torch-neuronx's NKI trace cache keeps it. Every
+    neuron launch (compile and generate, either decode) runs with DIFFLET_NKI_TRACE_CACHE=1, as
+    HunyuanVideo 1.5's does, and the driver's environment is restored afterwards."""
+    stages, _ = launches
+    monkeypatch.delenv("DIFFLET_NKI_TRACE_CACHE", raising=False)
+    seen = []
+    monkeypatch.setattr(hv_mod.runner, "run_stage", lambda model, stage, **kw: (
+        stages.append((stage, kw)), seen.append(os.environ.get("DIFFLET_NKI_TRACE_CACHE"))))
+    HunyuanVideoOrchestrator(_args(work_dir=str(tmp_path / "w"), **vae_flag)).generate()
+    HunyuanVideoOrchestrator(_args(**vae_flag)).compile()
+    assert seen and seen == ["1"] * len(stages)
+    assert "DIFFLET_NKI_TRACE_CACHE" not in os.environ
+    monkeypatch.setenv("DIFFLET_NKI_TRACE_CACHE", "0")  # an explicit choice is kept
+    seen.clear()
+    HunyuanVideoOrchestrator(_args(work_dir=str(tmp_path / "w"), **vae_flag)).generate()
+    assert seen and set(seen) == {"0"} and os.environ["DIFFLET_NKI_TRACE_CACHE"] == "0"
 
 
 def test_host_vae_decodes_in_the_driver(launches, tmp_path):
