@@ -21,7 +21,7 @@ launch builds one and holds:
   (``NeuronWanTextEncoderApplication``, about a quarter of the 22.7 GB fp32 encoder per rank),
   every rank encoding, the embeddings cast to the DiT's dtype. ``__init__`` refuses it when it
   clearly cannot fit beside the DiT on one core at this tp (``_check_device_text_encoder_fits``:
-  tp2, so CFG or CP on four cores and dp2tp2 replicas, does not fit);
+  in fp32, tp2, so CFG or CP on four cores and dp2tp2 replicas, does not fit; in bf16 it does);
 * ``pipeline``: the backend-neutral ``WanOrchestrator`` (fp32 latents, UniPC on the host), which
   every rank runs on identical inputs; its DiT calls go through ``_OnDeviceTransformer``.
 
@@ -328,7 +328,7 @@ class TorchNeuronWanApplication(TorchNeuronModelApplication):
             )
         text_encoder_dtype = _normalize_dtype(options["text_encoder_dtype"])
         if options["enable_text_encoder"] and options["text_encoder_device"] == "neuron":
-            self._check_device_text_encoder_fits()
+            self._check_device_text_encoder_fits(text_encoder_dtype)
             self.text_encoder = _DeviceTextEncoder(
                 NeuronWanTextEncoderApplication(
                     model_path=os.path.join(self.model_path, "text_encoder"),
@@ -384,7 +384,7 @@ class TorchNeuronWanApplication(TorchNeuronModelApplication):
             "num_frames": int(shape.get("num_frames") or 9),
         }
 
-    def _check_device_text_encoder_fits(self) -> None:
+    def _check_device_text_encoder_fits(self, encoder_dtype: torch.dtype) -> None:
         """umT5 on the device shares each core with this rank's DiT shards: refuse before
         anything loads when the two clearly cannot fit together
         (``difflet/backends/neuron/wan/hbm.py``, ``_check_components_fit``).
@@ -392,7 +392,8 @@ class TorchNeuronWanApplication(TorchNeuronModelApplication):
         The estimate depends on the TP degree and the checkpoint's sizes, not on the mode flags.
         CFG and CP on four cores, DP replicas of tp2 and a plain tp2 all narrow the TP group the
         same way. At tp2 that is at least 10.6 GiB of fp32 encoder beside 13.3 GiB of bf16 DiT on
-        a 24 GiB core. Both experts count when Wan 2.2's low-noise expert is resident.
+        a 24 GiB core; the bf16 encoder (the default) is half that and fits. Both experts count
+        when Wan 2.2's low-noise expert is resident.
         """
         experts = tuple(
             name
@@ -401,8 +402,9 @@ class TorchNeuronWanApplication(TorchNeuronModelApplication):
             if app is not None
         )
         self._check_components_fit(
-            device_text_encoder_components(experts, self.dtype.itemsize),
-            what=f"umT5 (fp32) beside the Wan DiT ({', '.join(experts) or 'none'}) on one core",
+            device_text_encoder_components(experts, self.dtype.itemsize, encoder_dtype.itemsize),
+            what=f"umT5 ({encoder_dtype}) beside the Wan DiT ({', '.join(experts) or 'none'}) "
+            "on one core",
             advice="encode on the host (text_encoder_device='host', --host-text-encoder), or "
             "give the TP group more cores (tp_degree={tp} or more)",
         )

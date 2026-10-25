@@ -787,13 +787,17 @@ def _tokens(tiny) -> int:
 
 def _umt5_budget_between(monkeypatch, root, fits, fails):
     """A per-core budget (DIFFLET_NEURON_HBM_GIB, which also turns the check on off the device)
-    that the umT5 + DiT estimate at ``fits`` = (tp, experts) meets and at ``fails`` exceeds.
-    The DiT is counted in fp32, the dtype the CPU tests load."""
+    that the umT5 + DiT estimate at ``fits`` = (tp, experts[, encoder bytes]) meets and at
+    ``fails`` exceeds. The DiT and, unless given, umT5 are counted in fp32, the dtypes the CPU
+    tests load (``_composed``)."""
     from difflet.backends.neuron.hbm import FIT_FRACTION, GIB
     from difflet.backends.neuron.wan.hbm import device_text_encoder_bytes
 
-    low, high = (device_text_encoder_bytes(root, tp_degree=tp, experts=experts, dit_dtype_bytes=4)
-                 for tp, experts in (fits, fails))
+    def estimate(tp, experts, encoder_dtype_bytes=4):
+        return device_text_encoder_bytes(root, tp_degree=tp, experts=experts, dit_dtype_bytes=4,
+                                         encoder_dtype_bytes=encoder_dtype_bytes)
+
+    low, high = estimate(*fits), estimate(*fails)
     assert low < high
     monkeypatch.setenv("DIFFLET_NEURON_HBM_GIB", repr((low + high) / 2 / FIT_FRACTION / GIB))
 
@@ -821,6 +825,21 @@ def test_a_narrow_tp_refuses_the_device_text_encoder(tiny, monkeypatch, parallel
     alone = _composed(tiny, parallel=parallel, text_encoder_device="neuron",
                       enable_transformer=False)
     assert isinstance(alone.text_encoder, na._DeviceTextEncoder)
+
+
+def test_the_bf16_device_text_encoder_fits_where_fp32_does_not(tiny, monkeypatch):
+    """The estimate costs umT5 in the dtype it loads in: at a budget between the two, tp2 x CFG2
+    takes the bf16 encoder (the default) and refuses the fp32 one."""
+    from difflet.backends.neuron.hbm import HbmBudgetError
+
+    one = ("transformer",)
+    _umt5_budget_between(monkeypatch, tiny.dir, fits=(2, one, 2), fails=(2, one, 4))
+    cfg2 = DiffletParallelConfig(tp_degree=2, cfg_parallel_enabled=True)
+    app = _composed(tiny, parallel=cfg2, text_encoder_device="neuron",
+                    text_encoder_dtype=torch.bfloat16)
+    assert isinstance(app.text_encoder, na._DeviceTextEncoder)
+    with pytest.raises(HbmBudgetError, match=r"umT5 \(torch.float32\).*encode on the host"):
+        _composed(tiny, parallel=cfg2, text_encoder_device="neuron")  # fp32 (_composed)
 
 
 def test_without_a_budget_the_cpu_does_not_check_the_device_text_encoder(tiny):

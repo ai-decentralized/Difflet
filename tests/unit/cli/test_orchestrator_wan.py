@@ -1402,7 +1402,7 @@ def test_host_text_encoder_is_forwarded_and_parsed():
 
 def _header_only_checkpoint(root: Path, *, dual: bool = False) -> Path:
     """A Wan snapshot whose safetensors hold headers only, at the real parameter counts: umT5
-    5.681 B (fp32 on the device), each DiT expert 14.288 B (bf16)."""
+    5.681 B (bf16 on the device, the application's default), each DiT expert 14.288 B (bf16)."""
     import json
     import struct
 
@@ -1441,12 +1441,12 @@ def wan_snapshot(monkeypatch, tmp_path):
 _NOTE = "[wan] umT5 on the device needs at least"
 
 
+# bf16 umT5 at tp1: 10.6 GiB beside 26.6 GiB of DiT per core (tp2 fits: test_umt5_stays_where_it_fits).
 @pytest.mark.parametrize("overrides", [
-    dict(tp_degree=2, cfg_parallel=True),            # --cfg-parallel, or --mode latency
-    dict(tp_degree=2, cp_degree=2, cp_mode="ring"),  # --cp-degree 2
-    dict(tp_degree=2),                               # each replica of --dp 2 --tp-degree 2
-    dict(tp_degree=1, cp_degree=4),
-], ids=["tp2-cfg2", "tp2-cp2", "tp2", "tp1-cp4"])
+    dict(tp_degree=1, cfg_parallel=True),            # --cfg-parallel on two cores
+    dict(tp_degree=1, cp_degree=4),                  # --cp-degree 4
+    dict(tp_degree=1),                               # each replica of --dp 4 --tp-degree 1
+], ids=["tp1-cfg2", "tp1-cp4", "tp1"])
 @pytest.mark.parametrize("mode", ["compile", "generate", "run"])
 def test_a_narrow_tp_moves_umt5_to_the_host_before_any_launch(wan_snapshot, tmp_path, capsys,
                                                                mode, overrides):
@@ -1467,10 +1467,15 @@ def test_a_narrow_tp_moves_umt5_to_the_host_before_any_launch(wan_snapshot, tmp_
 
 @pytest.mark.parametrize("overrides", [
     {}, dict(cfg_parallel=True), dict(cp_degree=2), dict(dual_expert=True),
-    dict(tp_degree=2, host_text_encoder=True),
-], ids=["tp4", "tp4-cfg2", "tp4-cp2", "tp4-dual-expert", "tp2-already-host"])
+    dict(tp_degree=2, cfg_parallel=True),            # --cfg-parallel, or --mode latency
+    dict(tp_degree=2, cp_degree=2, cp_mode="ring"),  # --cp-degree 2
+    dict(tp_degree=2),                               # each replica of --dp 2 --tp-degree 2
+    dict(tp_degree=1, host_text_encoder=True),
+], ids=["tp4", "tp4-cfg2", "tp4-cp2", "tp4-dual-expert", "tp2-cfg2", "tp2-cp2", "tp2",
+        "tp1-already-host"])
 def test_umt5_stays_where_it_fits(wan_snapshot, tmp_path, capsys, overrides):
-    # tp4: 5.3 GiB of encoder beside 6.7 (13.3 with both experts) GiB of DiT per core.
+    # bf16 umT5: tp4 is 2.6 GiB of encoder beside 6.7 (13.3 with both experts) GiB of DiT per
+    # core; tp2 is 5.3 GiB beside 13.3 GiB, inside the 22.8 GiB budget.
     wan_snapshot.root = _header_only_checkpoint(tmp_path / "snapshot",
                                                 dual=overrides.get("dual_expert", False))
     args = _wan_args(model_id=_WAN21_ID, work_dir=str(tmp_path / "work"), **overrides)
@@ -1503,7 +1508,7 @@ def test_aot_backends_never_move_umt5(wan_snapshot, monkeypatch, tmp_path, capsy
     if backend is not None:
         monkeypatch.setenv("DIFFLET_BACKEND", backend)
     wan_snapshot.root = _header_only_checkpoint(tmp_path / "snapshot")
-    args = _wan_args(model_id=_WAN21_ID, work_dir=str(tmp_path / "work"), tp_degree=2,
+    args = _wan_args(model_id=_WAN21_ID, work_dir=str(tmp_path / "work"), tp_degree=1,
                      cfg_parallel=True)
     WanOrchestrator(args).generate()
     assert not getattr(args, "host_text_encoder", False)
@@ -1515,6 +1520,6 @@ def test_dp_workers_inherit_the_host_encoder_from_run(wan_snapshot, tmp_path):
     from difflet.cli.dp.router import worker_cli_args
 
     wan_snapshot.root = _header_only_checkpoint(tmp_path / "snapshot")
-    args = _wan_args(model_id=_WAN21_ID, work_dir=str(tmp_path / "work"), tp_degree=2)
+    args = _wan_args(model_id=_WAN21_ID, work_dir=str(tmp_path / "work"), tp_degree=1)
     WanOrchestrator(args).compile()
     assert "--host-text-encoder" in worker_cli_args(args)
