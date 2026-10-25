@@ -174,8 +174,34 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
         dest="device_vae",
         action="store_true",
         help="Qwen-Image and HunyuanVideo on --backend neuron: decode in a VAE stage of its "
-        "own on one NeuronCore (fp32, eager), after the generate launch has exited, instead of "
-        "on the host CPU. The default; mutually exclusive with --host-vae.",
+        "own on one NeuronCore (Qwen-Image: fp32, eager; HunyuanVideo: see --vae-dtype and "
+        "--vae-exec-mode), after the generate launch has exited, instead of on the host CPU. "
+        "The default; mutually exclusive with --host-vae and --vae-in-process.",
+    )
+    p.add_argument(
+        "--vae-in-process",
+        dest="vae_in_process",
+        action="store_true",
+        help="HunyuanVideo on --backend neuron: decode on rank 0's NeuronCore inside the "
+        "generate launch, after the denoise, beside rank 0's DiT shard (no second launch). "
+        "Mutually exclusive with --host-vae and --device-vae.",
+    )
+    p.add_argument(
+        "--vae-dtype",
+        dest="vae_dtype",
+        choices=["bf16", "fp32"],
+        default=None,
+        help="HunyuanVideo on --backend neuron: the device VAE decoder's precision, in the vae "
+        "launch or in process (default: fp32). Not with --host-vae.",
+    )
+    p.add_argument(
+        "--vae-exec-mode",
+        dest="vae_exec_mode",
+        choices=["eager", "compile"],
+        default=None,
+        help="HunyuanVideo on --backend neuron: the device VAE decoder op by op on diffusers' "
+        "tiles (eager, the default) or compiled region by region on fixed-size tiles "
+        "(compile). Not with --host-vae.",
     )
     p.add_argument(
         "--host-text-encoder",

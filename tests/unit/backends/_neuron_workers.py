@@ -1599,6 +1599,41 @@ def hv1_app_worker(rank: int, world_size: int, root: str, parallel: dict,
     return {"runs": results, "probe": probe}
 
 
+def hv1_app_decode_worker(rank: int, world_size: int, root: str, parallel: dict,
+                          options: dict) -> dict:
+    """The composed HunyuanVideo application with its rank-0 VAE decoder
+    (``enable_vae_decoder=True`` plus ``options``) on the tiny pipeline snapshot, CPU, fp32,
+    eager: one ``generate(prompt=TINY_PROMPT, seed=42, 3 steps, output_type="pt")``. Returns the
+    latents, the frames (None where the rank returned none), whether this rank's decoder loaded
+    its weights, the decoder's phases, and the tuple form's first element's type."""
+    from difflet.models.hunyuan_video.neuron_application import (
+        TorchNeuronHunyuanVideoApplication,
+    )
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_hv1_toy import TINY_PROMPT, TINY_SHAPE
+
+    app = TorchNeuronHunyuanVideoApplication(
+        model_path=root, parallel=DiffletParallelConfig(**parallel), dtype=torch.float32,
+        shape={k: TINY_SHAPE[k] for k in ("height", "width", "num_frames")},
+        text_seq_len=TINY_SHAPE["text_seq_len"], exec_mode="eager", device="cpu",
+        enable_vae_decoder=True, **options)
+    app.load()
+    out = app.generate(prompt=TINY_PROMPT, seed=42, num_inference_steps=3, guidance_scale=6.0,
+                       output_type="pt")
+    as_tuple = app.generate(prompt=TINY_PROMPT, seed=42, num_inference_steps=3,
+                            guidance_scale=6.0, output_type="pt", return_dict=False)
+    decoder = app.vae_decoder.app
+    return {
+        "latents": out.latents.tolist(),
+        "frames": None if out.frames is None else out.frames.tolist(),
+        "frames_dtype": None if out.frames is None else str(out.frames.dtype),
+        "loaded": decoder.vae is not None or decoder.tile_decoder is not None,
+        "vae_phases": sorted(k for k in app.phase_seconds if k.startswith("vae ")),
+        "tuple_frames_equal": (out.frames is None and as_tuple[0] is None)
+        or bool(torch.equal(as_tuple[0], out.frames)),
+    }
+
+
 # --------------------------------------------------------------------------
 # Weight store (core/weight_store.py)
 # --------------------------------------------------------------------------

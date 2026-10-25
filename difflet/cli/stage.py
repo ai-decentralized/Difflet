@@ -97,6 +97,13 @@ def _build_stage_parser() -> argparse.ArgumentParser:
     p.add_argument("--teacache-online-delta", type=float, default=None)
     p.add_argument("--teacache-speedup", type=float, default=None)
     p.add_argument("--teacache-calibration", default=None)
+    # The decode the driver resolved (HunyuanVideo on a torchrun backend): where it runs and the
+    # device decoder's precision and execution.
+    p.add_argument("--vae-placement", dest="vae_placement", default=None,
+                   choices=["generate", "launch", "host"])
+    p.add_argument("--vae-dtype", dest="vae_dtype", default=None, choices=["bf16", "fp32"])
+    p.add_argument("--vae-exec-mode", dest="vae_exec_mode", default=None,
+                   choices=list(EXEC_MODE_CHOICES))
     # DP worker-mode flags (parse_known_args silently drops what isn't declared
     # here — the --sp bug class; keep in sync with main._add_generate_flags).
     p.add_argument("--requests-dir", default=None)

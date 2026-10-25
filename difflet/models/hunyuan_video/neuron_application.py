@@ -20,9 +20,15 @@ registry factory signature, ``compile``/``has_compiled_artifacts``/``load``, ``.
   DiT forward per step, no CFG), which every rank runs on identical inputs; its DiT calls go
   through ``_OnDeviceHunyuanVideoTransformer``.
 
-The decode is not part of this application: the VAE runs after the generate launch has exited,
-in its own one-core launch (as for HunyuanVideo 1.5, LTX-2 and Wan), so ``enable_vae_decoder``
-is refused. ``output_type="latent"`` is the generate stage's output.
+* ``vae_decoder`` (``enable_vae_decoder=True``): ``_Rank0HunyuanVideoVaeDecoder``, the VAE
+  decoder (``NeuronHunyuanVideoVaeDecoderApplication``, by default compiled in bf16 with fixed
+  tiles: ``vae_dtype``, ``vae_exec_mode``) on rank 0's core only, beside rank 0's DiT shard,
+  loaded after the DiT and the text encoder. ``generate(output_type="pt")`` then denoises on
+  every rank and decodes on rank 0 after the last step, as the AoT generate stage does, while
+  the other ranks wait in the phase's status sync; rank 0's output carries the decoded clip on
+  the host, the other ranks' ``frames`` is None. Without it (the default) the decode is not
+  part of this application: the CLI decodes after the generate launch has exited, in a one-core
+  vae launch or on the host, and ``output_type="latent"`` is the generate stage's output.
 
 Parallelism: tensor parallelism, with or without sequence parallelism, and context parallelism
 in every ``cp_mode`` (gather_kv, ulysses, ring). CFG parallelism does not apply (the entry and
@@ -52,7 +58,10 @@ from typing import Any
 
 import torch
 
+from difflet.backends.neuron.core.application_base import _normalize_dtype
+from difflet.backends.neuron.core.distributed import rank0_call
 from difflet.backends.neuron.core.model_application import (
+    DeviceComponent,
     HostTextEncoder,
     OnDeviceDiT,
     TorchNeuronModelApplication,
@@ -74,6 +83,11 @@ _KWARG_DEFAULTS: dict[str, Any] = {
     "batch_size": 1,
     "shapes": None,
     "enable_vae_decoder": False,
+    # The rank-0 decoder's precision and execution (enable_vae_decoder=True): compiled bf16,
+    # fixed tiles, the fastest decoder, at 56 dB against the fp32 host decode
+    # (benchmark/trn2/hunyuan_video_neuron.md, "F1a"); "float32" and "eager" are accepted.
+    "vae_dtype": "bfloat16",
+    "vae_exec_mode": "compile",
     "exec_mode": None,
     "device": "neuron",
     "encoder_threads": 12,
@@ -141,6 +155,31 @@ class _HostHunyuanVideoTextEncoder(HostTextEncoder):
             )
         return (embeds.to(self.dtype).contiguous(), mask.to(torch.int64).contiguous(),
                 pooled.to(self.dtype).contiguous())
+
+
+class _Rank0HunyuanVideoVaeDecoder(DeviceComponent):
+    """The VAE decoder on rank 0's core only (``enable_vae_decoder=True``).
+
+    ``app`` is a ``NeuronHunyuanVideoVaeDecoderApplication`` at the static shape on every rank
+    (building it only reads ``config.json`` and checks the tile grid), but only rank 0 loads it:
+    ``load`` reads the weights and, unless ``skip_warmup``, runs its warm-up (compiled, fixed
+    tiles: one full tile, which builds or loads every graph) inside a status-synced phase
+    (``rank0_call``), so a failure there fails every rank and the other ranks wait for it
+    instead of starting the next phase. ``__call__(latents)`` must be called on every rank: rank
+    0 decodes in the same kind of phase and returns the clip on the host ([1, 3, F, H, W] in
+    [-1, 1], in the decoder's dtype); the other ranks return None. The decode uses one core and
+    no collective, as the phase requires.
+    """
+
+    def load(self, skip_warmup: bool = False) -> None:
+        rank0_call(self.app.load, skip_warmup=skip_warmup, device=self.device,
+                   what="vae decoder load")
+
+    def __call__(self, latents: torch.Tensor) -> torch.Tensor | None:
+        return rank0_call(self._decode, latents, device=self.device, what="vae decode")
+
+    def _decode(self, latents: torch.Tensor) -> torch.Tensor:
+        return self.app.decode(latents.cpu()).cpu()
 
 
 class _HunyuanVideoTeaCacheProbe(NeuronTeaCacheProbe):
@@ -275,6 +314,19 @@ class TorchNeuronHunyuanVideoApplication(TorchNeuronModelApplication):
             self.model_path, seq_len=self.text_seq_len, dtype=self.dtype, device=self.device,
             threads=int(options["encoder_threads"]),
         )
+        if options["enable_vae_decoder"]:
+            from difflet.backends.neuron.hunyuan_video.vae import (
+                NeuronHunyuanVideoVaeDecoderApplication,
+            )
+
+            self.vae_decoder = _Rank0HunyuanVideoVaeDecoder(
+                NeuronHunyuanVideoVaeDecoderApplication(
+                    model_path=os.path.join(self.model_path, "vae"), **self.shape,
+                    dtype=_normalize_dtype(options["vae_dtype"]), device=self.device,
+                    exec_mode=str(options["vae_exec_mode"]),
+                ),
+                device=self.device,
+            )
 
     def _reject_model_options(self, options: dict[str, Any]) -> None:
         if options["text_encoder_device"] != "host":
@@ -282,11 +334,6 @@ class TorchNeuronHunyuanVideoApplication(TorchNeuronModelApplication):
                 "the neuron HunyuanVideo application encodes the prompt on rank 0's host only "
                 "(Llama and CLIP through diffusers' HunyuanVideoPipeline.encode_prompt); got "
                 f"text_encoder_device={options['text_encoder_device']!r}"
-            )
-        if options["enable_vae_decoder"]:
-            raise NotImplementedError(
-                "the neuron HunyuanVideo application does not decode: the VAE runs in its own "
-                "one-core vae launch after the generate launch (enable_vae_decoder=True)"
             )
 
     def _resolve_shape(self, shape: dict[str, int | None], shapes) -> dict[str, int]:
@@ -336,6 +383,20 @@ class TorchNeuronHunyuanVideoApplication(TorchNeuronModelApplication):
 
     # ----------------------------------------------------------------- evidence
 
+    def _device_apps(self):
+        """The DiT only: the rank-0 decoder is not a ``TorchNeuronApplicationBase`` (it has no
+        ``compiled_blocks`` or ``unwarmed_shapes``); its load phases are in ``phase_seconds``."""
+        return [(prefix, app) for prefix, app in super()._device_apps() if prefix != "vae"]
+
+    @property
+    def phase_seconds(self) -> dict[str, float]:
+        """The base's, plus the rank-0 decoder's as ``"vae <phase>"`` (``"vae load"``, ``"vae
+        warmup decode"``; on rank 0 only)."""
+        seconds = TorchNeuronModelApplication.phase_seconds.fget(self)
+        if self.vae_decoder is not None:
+            seconds.update({f"vae {k}": v for k, v in self.vae_decoder.app.phase_seconds.items()})
+        return seconds
+
     def dit_input_contract(self) -> dict[str, dict[str, Any]]:
         """The Trainium contract's six tensors at the static shape (``dit_input_shapes``)."""
         dtypes = {"encoder_attention_mask": torch.int64}
@@ -363,7 +424,11 @@ class TorchNeuronHunyuanVideoApplication(TorchNeuronModelApplication):
           latent shape from ``generator`` (diffusers' ``prepare_latents`` draw) on rank 0,
           broadcast, so a TP/CP group denoises the same latents even when the global RNGs
           differ;
-        * the TeaCache probe's previous signal cleared, so each request starts as the first.
+        * the TeaCache probe's previous signal cleared, so each request starts as the first;
+        * ``output_type="pt"`` with ``enable_vae_decoder``: the latents decoded on rank 0
+          (``_Rank0HunyuanVideoVaeDecoder``) after the last step; ``frames`` is the clip on
+          rank 0 and None elsewhere. Without the decoder, ``"pt"`` is the orchestrator's own
+          host decode, on every rank.
         """
         self._require_loaded()
         if prompt is not None:
@@ -379,8 +444,14 @@ class TorchNeuronHunyuanVideoApplication(TorchNeuronModelApplication):
         probe = self._require_dit().probe
         if probe is not None:
             probe.reset()
-        return self.pipeline(num_inference_steps=num_inference_steps,
-                             guidance_scale=guidance_scale, output_type=output_type, **kwargs)
+        if output_type != "pt" or self.vae_decoder is None:
+            return self.pipeline(num_inference_steps=num_inference_steps,
+                                 guidance_scale=guidance_scale, output_type=output_type, **kwargs)
+        return_dict = kwargs.pop("return_dict", True)
+        out = self.pipeline(num_inference_steps=num_inference_steps,
+                            guidance_scale=guidance_scale, output_type="latent", **kwargs)
+        out.frames = self.vae_decoder(out.latents)
+        return out if return_dict else (out.frames,)
 
     def _initial_latents(self, generator) -> torch.Tensor:
         """Rank 0's fp32 initial noise at the static latent shape, broadcast (see ``generate``)."""
