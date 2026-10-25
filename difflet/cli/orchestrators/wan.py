@@ -7,10 +7,11 @@ Inter-stage tensor: {work_dir}/latents.pt
 With DIFFLET_BACKEND naming a non-AoT torchrun backend (neuron), the transformer stage runs as
 torchrun ranks that build the registry's application through DiffletPipeline
 (_stage_transformer_neuron). Those ranks run TP, SP, CFG and CP at one static shape, and the
-DiT sits on every rank's core. umT5 also runs on the device (fp32, TP-sharded) unless
+DiT sits on every rank's core. umT5 also runs on the device (bf16, TP-sharded) unless
 --host-text-encoder is given. When the TP group is too narrow for umT5 to fit beside the DiT
 (_place_text_encoder), the driver sets that flag itself and says so. The VAE decodes in a vae
-stage of its own on one core (_stage_vae_neuron, fp32 eager), or on the host with --host-vae.
+stage of its own on one core (_stage_vae_neuron, eager; bf16 up to 9 frames, fp32 beyond),
+or on the host with --host-vae.
 DP replicas (--dp) are separate torchrun launches; each one's rank 0 claims the requests
 (_replica_requests). The stage cache key names the backend and exec mode, and --cache-dir
 becomes DIFFLET_COMPILE_CACHE (the NEFF/HLO cache root) unless that is exported. Unset,
@@ -183,9 +184,10 @@ def _require_request_shape_in_set(args: argparse.Namespace):
 
 # TorchNeuronWanApplication keyword arguments for the torchrun transformer stage: the Trainium
 # stage's set, exec_mode=None (the application reads DIFFLET_EXEC_MODE, which --exec-mode
-# exports), umT5 on the device (fp32, TP-sharded; --host-text-encoder keeps it on rank 0's
-# host, and the driver sets that flag itself when the TP group is too narrow for the encoder to
-# fit beside the DiT: WanOrchestrator._place_text_encoder) and, for the host encoder, 12 threads
+# exports), umT5 on the device (bf16, the application's default, TP-sharded; --host-text-encoder
+# keeps it on rank 0's host, and the driver sets that flag itself when the TP group is too narrow
+# for the encoder to fit beside the DiT: WanOrchestrator._place_text_encoder) and, for the host
+# encoder, 12 threads
 # (D70: its fp32 output bits depend on the count).
 _TORCHRUN_APPLICATION_KWARGS = {
     "text_seq_len": 512,
@@ -268,11 +270,12 @@ class WanOrchestrator(ModelOrchestrator):
         """On a torchrun backend (neuron), move umT5 to rank 0's host when it cannot fit on the
         device beside the DiT at this TP degree, and print one line saying so.
 
-        The CLI default is the device encoder (``_TORCHRUN_APPLICATION_KWARGS``). A topology that
-        narrows the TP group (``--cfg-parallel`` or ``--cp-degree>1`` with ``--tp-degree 2``,
-        ``--mode latency``'s CFG, DP replicas of tp2, a plain tp2) leaves each core at least
-        10.6 GiB of fp32 encoder beside 13.3 GiB of DiT, more than its HBM. Before this check the
-        application refused it only after torchrun had started every rank. The estimate
+        The CLI default is the device encoder in bf16 (``_TORCHRUN_APPLICATION_KWARGS``, the
+        application's ``text_encoder_dtype``). At tp2 (``--cfg-parallel`` or ``--cp-degree>1``
+        on four cores, ``--mode latency``'s CFG, DP replicas of tp2) that is about 5.3 GiB of
+        encoder beside 13.3 GiB of DiT, which fits a core; tp1, or tp2 with both of Wan 2.2's
+        experts resident, does not. Before this check the application refused it only after
+        torchrun had started every rank. The estimate
         (``difflet/backends/neuron/wan/hbm.py``) depends on the tp the transformer stage runs and
         the local checkpoint's sizes. Weights that are not local yet (``compile`` before any
         download) leave the flag alone, and the application's own check still refuses. The
