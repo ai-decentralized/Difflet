@@ -34,7 +34,10 @@ from tests.unit.backends._neuron_hv1_toy import (  # noqa: E402
     tiny_inputs,
     write_tiny_hv1_pipeline,
 )
-from tests.unit.backends._neuron_workers import hv1_app_worker  # noqa: E402
+from tests.unit.backends._neuron_workers import (  # noqa: E402
+    hv1_app_decode_worker,
+    hv1_app_worker,
+)
 
 OFFLINE = {"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"}
 ATOL = RTOL = 1e-4
@@ -158,7 +161,6 @@ def test_text_encoder_matches_diffusers_encode_prompt(tiny_pipeline):
         ({"parallel": DiffletParallelConfig(tp_degree=2, cfg_parallel_enabled=True)},
          NotImplementedError, "guidance-distilled"),
         ({"text_encoder_device": "neuron"}, NotImplementedError, "rank 0's host"),
-        ({"enable_vae_decoder": True}, NotImplementedError, "vae"),
         ({"batch_size": 2}, NotImplementedError, "batch_size=1"),
         ({"shapes": [[64, 64, 17], [64, 64, 9]]}, NotImplementedError, "one static shape"),
         ({"shapes": [[64, 64, 9]]}, ValueError, "not the one compiled shape"),
@@ -234,3 +236,65 @@ def test_teacache_delta_is_the_absolute_l2(tiny_pipeline, tmp_path):
     assert d1 == pytest.approx(float(torch.linalg.vector_norm(m1)), rel=1e-5)
     assert d2 == pytest.approx(float(torch.linalg.vector_norm(m2 - m1)), rel=1e-5)
     assert d2 > 0
+
+
+# ----------------------------------------------------------------- the rank-0 VAE decoder
+
+
+def test_vae_decoder_is_off_by_default_and_compiled_bf16_when_enabled(tiny_pipeline):
+    """``enable_vae_decoder`` builds the decoder at the application's static shape, compiled in
+    bf16 with fixed tiles unless ``vae_dtype`` / ``vae_exec_mode`` say otherwise; nothing loads
+    at construction."""
+    assert _app(tiny_pipeline).vae_decoder is None
+    decoder = _app(tiny_pipeline, enable_vae_decoder=True).vae_decoder
+    assert isinstance(decoder, na._Rank0HunyuanVideoVaeDecoder)
+    app = decoder.app
+    assert (app.dtype, app.exec_mode, app.tiling) == (torch.bfloat16, "compile", "fixed")
+    assert (app.height, app.width, app.num_frames) == (64, 64, 17)
+    assert app.model_path.endswith("/vae") and app.vae is None and app.tile_decoder is None
+    app = _app(tiny_pipeline, enable_vae_decoder=True, vae_dtype="float32",
+               vae_exec_mode="eager").vae_decoder.app
+    assert (app.dtype, app.exec_mode, app.tiling) == (torch.float32, "eager", "diffusers")
+
+
+def test_vae_decoder_refuses_an_unknown_exec_mode_or_dtype(tiny_pipeline):
+    with pytest.raises(ValueError, match="exec_mode='jit'"):
+        _app(tiny_pipeline, enable_vae_decoder=True, vae_exec_mode="jit")
+    with pytest.raises(ValueError, match="bf16 or fp32"):
+        _app(tiny_pipeline, enable_vae_decoder=True, vae_dtype="float16")
+
+
+def test_generate_pt_decodes_on_rank0_only(tiny_pipeline, tp1):
+    """TP2 on gloo: both ranks denoise as without the decoder; rank 0 alone loads the decoder
+    and returns the decoded clip, which is the decoder's own decode of those latents (diffusers'
+    tiled decode of ``latents / scaling_factor``); rank 1 returns no frames."""
+    from difflet.backends.neuron.hunyuan_video.vae import NeuronHunyuanVideoVaeDecoderApplication
+
+    rank0, rank1 = run_ranks(hv1_app_decode_worker, tiny_pipeline, {"tp_degree": 2},
+                             {"vae_dtype": "float32", "vae_exec_mode": "eager"}, world_size=2,
+                             env=OFFLINE)
+    _close(rank0["latents"], torch.tensor(tp1["latents"]))
+    assert rank0["latents"] == rank1["latents"]
+    assert (rank0["loaded"], rank1["loaded"]) == (True, False)
+    assert rank0["vae_phases"] == ["vae load", "vae warmup decode"] and rank1["vae_phases"] == []
+    assert rank1["frames"] is None and rank0["frames_dtype"] == "torch.float32"
+    assert rank0["tuple_frames_equal"] and rank1["tuple_frames_equal"]
+    ref = NeuronHunyuanVideoVaeDecoderApplication(model_path=f"{tiny_pipeline}/vae", **SHAPE,
+                                                  device="cpu")
+    ref.load(skip_warmup=True)
+    want = ref.decode(torch.tensor(rank0["latents"]))
+    assert want.shape == (1, 3, 17, 64, 64)
+    torch.testing.assert_close(torch.tensor(rank0["frames"]), want, atol=1e-5, rtol=1e-5)
+
+
+def test_generate_latent_skips_the_decoder(tiny_pipeline, monkeypatch):
+    """``output_type="latent"`` never calls the decoder, even when it is enabled."""
+    app = _app(tiny_pipeline, enable_vae_decoder=True)
+    calls = []
+    app.vae_decoder = lambda latents: calls.append(latents)
+    out = type("Out", (), {"latents": torch.zeros(1), "frames": torch.zeros(1)})()
+    app.pipeline = lambda **kwargs: (calls.append(kwargs["output_type"]), out)[1]
+    app.transformer_adapter = type("A", (), {"probe": None})()
+    app.generate(latents=torch.zeros(1), encoder_hidden_states=torch.zeros(1),
+                 output_type="latent")
+    assert calls == ["latent"]

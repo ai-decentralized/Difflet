@@ -14,15 +14,19 @@ of tp x cp ranks that build the registry's application (TorchNeuronHunyuanVideoA
 through DiffletPipeline (``_stage_generate_neuron``): rank 0 encodes the prompt on its host with
 diffusers' ``HunyuanVideoPipeline.encode_prompt`` (Llama-3 and CLIP-L, the tensors the clip and
 llama stages produce) and broadcasts them, the ranks denoise (the DiT TP-sharded on every rank's
-core, with SP, or CP in any mode) and rank 0 writes the latents. The decode follows LTX-2's
-placement: on the host in the driver after the launch has exited (``_decode_latents_host``), or,
-with --device-vae, in a vae stage of its own on one core (``_stage_vae_neuron``); both run
-diffusers' AutoencoderKLHunyuanVideo in fp32, tiled in space and time
-(NeuronHunyuanVideoVaeDecoderApplication), and diffusers' video post-processing. ``compile`` is
-the generate stage's load + warm-up (it fills the NEFF cache) and its stage manifest, plus the vae
-stage's warm-up decode with --device-vae. --cache-dir becomes DIFFLET_COMPILE_CACHE unless that is
+core, with SP, or CP in any mode) and rank 0 writes the latents. The decode runs in one of three places (``_vae_placement``):
+in a vae stage of its own on one core after the launch has exited (``_stage_vae_neuron``;
+--device-vae, the default); on rank 0's core inside the generate launch after the denoise, as
+the AoT generate stage decodes (--vae-in-process; the application's rank-0 decoder); or on the
+host in the driver after the launch has exited (``_decode_latents_host``; --host-vae, diffusers
+in fp32). The device decoder is NeuronHunyuanVideoVaeDecoderApplication (tiled in space and
+time; --vae-dtype bf16|fp32 and --vae-exec-mode eager|compile, fp32 eager by default), and the
+frames get diffusers' video post-processing (``_write_video``). ``compile`` is the generate
+stage's load + warm-up (it fills the NEFF cache; in process, the decoder's warm-up too) and its
+stage manifest, plus the vae stage's warm-up decode with the vae launch. --cache-dir becomes DIFFLET_COMPILE_CACHE unless that is
 exported. TeaCache runs in every mode. Refused here, before torchrun starts: several --shapes,
---cfg-parallel (the model is guidance-distilled), --host-vae with --device-vae, and a TP degree
+--cfg-parallel (the model is guidance-distilled), more than one placement flag, a decoder
+option with --host-vae, and a TP degree
 whose DiT shard cannot fit one core (tp1: 23.9 GiB of bf16 DiT on a 24 GiB core). DP replicas
 (--dp, --requests) are separate torchrun launches whose rank 0 claims the requests. Unset,
 trainium and tpu keep the AoT path unchanged.
@@ -47,7 +51,6 @@ from difflet.cli.orchestrators.base import (
     write_stage_manifest,
 )
 from difflet.cli.orchestrators.torchrun import (
-    decodes_on_device,
     refuse_dit_overflow,
     refuse_torchrun_conflicts,
     reject_unsupported_torchrun_options,
@@ -58,7 +61,6 @@ from difflet.cli.orchestrators.torchrun import (
     torchrun_backend,
     torchrun_stage_keys,
     torchrun_unsupported_options,
-    vae_placement_conflict,
 )
 
 _HF_MODEL_ID = "hunyuanvideo-community/HunyuanVideo"
@@ -129,13 +131,25 @@ _TORCHRUN_APPLICATION_KWARGS = {
     "encoder_threads": 12,
     "text_encoder_device": "host",
 }
-#: Where the neuron backend decodes when neither --host-vae nor --device-vae is given: in the
-#: one-core vae launch. Measured on trn2.3xlarge at TP4, 320x512x61, 50 steps (2026-10-25,
-#: benchmark/trn2/hunyuan_video_neuron.md): the vae launch decodes and writes in about 96 s
-#: (plus about 21 s of launch, load and teardown) against 410 s for the fp32 host decode on 12
-#: vCPUs, so a warm generate takes 239 s instead of 540 s. Its one-time cost is the eager
-#: kernels' cold compile, about 45 minutes in `compile`.
-_DEVICE_VAE_DEFAULT = True
+#: Where the neuron backend decodes (``_vae_placement``): "generate", on rank 0's core inside
+#: the generate launch after the denoise (--vae-in-process; the application's rank-0 decoder,
+#: as the AoT generate stage decodes); "launch", in a one-core vae launch of its own after the
+#: generate launch has exited (--device-vae); "host", on the host CPU in the driver
+#: (--host-vae).
+_VAE_PLACEMENTS = ("generate", "launch", "host")
+#: The placement when no flag names one: the one-core vae launch. Measured on trn2.3xlarge at
+#: TP4, 320x512x61, 50 steps (2026-10-25, benchmark/trn2/hunyuan_video_neuron.md): the vae
+#: launch decodes and writes in about 96 s (plus about 21 s of launch, load and teardown)
+#: against 410 s for the fp32 host decode on 12 vCPUs, so a warm generate takes 239 s instead
+#: of 540 s. Its one-time cost is the eager kernels' cold compile, about 45 minutes in
+#: `compile`.
+_VAE_PLACEMENT_DEFAULT = "launch"
+#: The device decoder's precision and execution (--vae-dtype, --vae-exec-mode), in the vae
+#: launch and in process alike, when no flag names them: eager fp32, diffusers' tiles.
+_VAE_DTYPE_DEFAULT = "fp32"
+_VAE_EXEC_MODE_DEFAULT = "eager"
+#: --vae-dtype's values as the decoder application takes them.
+_VAE_DTYPES = {"bf16": "bfloat16", "fp32": "float32"}
 #: The neuron launches opt into torch-neuronx's NKI trace cache (``difflet/backends/neuron/
 #: compile.py``), as HunyuanVideo 1.5's do: every process traces the key-bounded attention_cte
 #: kernel again unless the cache keeps it, and that trace grows with the joint length. At
@@ -165,8 +179,13 @@ def _shape(args: argparse.Namespace) -> tuple[int, int, int]:
 
 def _torchrun_application_kwargs(args: argparse.Namespace) -> dict:
     """The application kwargs, plus any TeaCache flag the user gave (the application builds the
-    controller and, for adaptive TeaCache, the probe on the DiT's own modules)."""
+    controller and, for adaptive TeaCache, the probe on the DiT's own modules) and, when the
+    decode runs in the generate launch (``_vae_placement``), the rank-0 decoder and its
+    options."""
     kwargs = dict(_TORCHRUN_APPLICATION_KWARGS)
+    if _vae_placement(args) == "generate":
+        dtype, exec_mode = _vae_decoder(args)
+        kwargs.update(enable_vae_decoder=True, vae_dtype=dtype, vae_exec_mode=exec_mode)
     for app_key, arg_key in (("teacache_speedup", "teacache_speedup"),
                              ("teacache_cadence", "teacache_cadence"),
                              ("teacache_online_delta_alpha", "teacache_online_delta"),
@@ -185,20 +204,54 @@ def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
 
 
 def _torchrun_conflicts(args: argparse.Namespace) -> list[str]:
-    """--cfg-parallel (there are no CFG branches to split) and --host-vae with --device-vae.
-    Torch-free."""
-    cfg = None
+    """--cfg-parallel (there are no CFG branches to split), more than one of --host-vae,
+    --device-vae and --vae-in-process, and a device decoder option with --host-vae (the host
+    decode is diffusers' in fp32). Torch-free."""
+    found = []
     if getattr(args, "cfg_parallel", False):
-        cfg = ("--cfg-parallel does not apply: HunyuanVideo is guidance-distilled (one forward "
-               "pass per step, the guidance scale baked into the timestep embedding)")
-    return [c for c in (cfg, vae_placement_conflict(args)) if c is not None]
+        found.append("--cfg-parallel does not apply: HunyuanVideo is guidance-distilled (one "
+                     "forward pass per step, the guidance scale baked into the timestep "
+                     "embedding)")
+    placements = [flag for flag, dest in (("--host-vae", "host_vae"),
+                                          ("--device-vae", "device_vae"),
+                                          ("--vae-in-process", "vae_in_process"))
+                  if getattr(args, dest, False)]
+    if len(placements) > 1:
+        found.append(f"{' and '.join(placements)} are mutually exclusive (each names where the "
+                     "decode runs)")
+    elif placements == ["--host-vae"]:
+        options = [flag for flag, dest in (("--vae-dtype", "vae_dtype"),
+                                           ("--vae-exec-mode", "vae_exec_mode"))
+                   if getattr(args, dest, None)]
+        if options:
+            found.append(f"{' and '.join(options)} set the device decoder; --host-vae decodes "
+                         "on the host with diffusers in fp32")
+    return found
 
 
-def _decodes_on_device(args: argparse.Namespace) -> bool:
-    """Whether the neuron backend decodes in a vae stage on one core (``_stage_vae_neuron``)
-    instead of on the host in the driver (``_decode_latents_host``). --host-vae wins, then
-    --device-vae, then ``_DEVICE_VAE_DEFAULT``. Torch-free."""
-    return decodes_on_device(args, _DEVICE_VAE_DEFAULT)
+def _vae_placement(args: argparse.Namespace) -> str:
+    """Where the neuron backend decodes (``_VAE_PLACEMENTS``): --host-vae, --device-vae or
+    --vae-in-process (``_torchrun_conflicts`` refuses more than one), else
+    ``_VAE_PLACEMENT_DEFAULT``. A stage process reads the driver's resolved placement
+    (--vae-placement, which ``_shared_cli_args`` forwards). Torch-free."""
+    forwarded = getattr(args, "vae_placement", None)
+    if forwarded:
+        return forwarded
+    if getattr(args, "host_vae", False):
+        return "host"
+    if getattr(args, "device_vae", False):
+        return "launch"
+    if getattr(args, "vae_in_process", False):
+        return "generate"
+    return _VAE_PLACEMENT_DEFAULT
+
+
+def _vae_decoder(args: argparse.Namespace) -> tuple[str, str]:
+    """The device decoder's ``(dtype, exec_mode)`` as the decoder application takes them
+    (``("float32", "eager")``, ``("bfloat16", "compile")``, ...): --vae-dtype and
+    --vae-exec-mode, else ``_VAE_DTYPE_DEFAULT`` and ``_VAE_EXEC_MODE_DEFAULT``. Torch-free."""
+    dtype = getattr(args, "vae_dtype", None) or _VAE_DTYPE_DEFAULT
+    return _VAE_DTYPES[dtype], getattr(args, "vae_exec_mode", None) or _VAE_EXEC_MODE_DEFAULT
 
 
 #: diffusers' ``export_to_video`` encoder settings (imageio-ffmpeg: libx264 at quality 5, frame
@@ -367,20 +420,22 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
 
     def _compile_torchrun(self) -> None:
         """``compile`` on a torchrun backend: the generate stage's load + warm-up (it fills the
-        NEFF cache) and its stage manifest; with --device-vae, the vae stage's warm-up decode."""
+        NEFF cache; with the decode in process, the rank-0 decoder's warm-up too) and its stage
+        manifest; with the vae launch, the vae stage's warm-up decode."""
         self._prepare_torchrun()
         shared = self._shared_cli_args(stage_mode="compile")
         with _nki_trace_cache():
             runner.run_stage(_HF_MODEL_ID, "generate", num_cores=replica_cores(self.args),
                              virtual_core_size=None, cli_args=shared)
-            if _decodes_on_device(self.args):
+            if _vae_placement(self.args) == "launch":
                 runner.run_stage(_HF_MODEL_ID, "vae", num_cores=1, virtual_core_size=None,
                                  cli_args=shared)
 
     def _generate_torchrun(self) -> None:
         """``generate`` on a torchrun backend: the generate stage (prompt encode on rank 0's
-        host, denoise, rank 0 writes latents.pt), then the decode of every request it finished,
-        after torchrun has exited: in a one-core vae stage (--device-vae) or on the host."""
+        host, denoise, rank 0 writes latents.pt and, with the decode in process, decodes and
+        writes the video), then, for the other placements, the decode of every request it
+        finished, after torchrun has exited: in a one-core vae stage or on the host."""
         self._prepare_torchrun()
         _require_request_shape_in_set(self.args)  # fail fast before any stage runs
         work_dir = Path(getattr(self.args, "work_dir", None)
@@ -388,13 +443,14 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
         work_dir.mkdir(parents=True, exist_ok=True)
         shared = self._shared_cli_args(stage_mode="generate", work_dir=str(work_dir))
         try:
+            placement = _vae_placement(self.args)
             with _nki_trace_cache():
                 runner.run_stage(_HF_MODEL_ID, "generate", num_cores=replica_cores(self.args),
                                  virtual_core_size=None, cli_args=shared)
-                if _decodes_on_device(self.args):
+                if placement == "launch":
                     runner.run_stage(_HF_MODEL_ID, "vae", num_cores=1, virtual_core_size=None,
                                      cli_args=shared)
-            if not _decodes_on_device(self.args):
+            if placement == "host":
                 self._decode_on_host(work_dir)
         except Exception:
             print(f"[difflet] work dir preserved at {work_dir} for inspection", file=sys.stderr)
@@ -676,7 +732,10 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
         warm-up (``compile`` mode is that plus the stage manifest) and runs the replica's
         requests. HunyuanVideo's part: the Trainium stage's step and guidance defaults, the
         request's seed (the application draws the initial noise from it on rank 0), and the
-        latents written by rank 0 to the request's ``latents.pt``.
+        latents written by rank 0 to the request's ``latents.pt``. With the decode in process
+        (``_vae_placement`` "generate") the application decodes on rank 0 after the denoise
+        (``output_type="pt"``) and rank 0 also writes the video (``_write_video``), so this
+        stage finishes the request (a DP worker marks it done).
         """
         import torch
 
@@ -684,6 +743,7 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
 
         compile_shapes = _require_request_shape_in_set(args)
         height, width, num_frames = _shape(args)
+        in_process = _vae_placement(args) == "generate"
 
         def request_kwargs(req) -> dict:
             return dict(
@@ -692,13 +752,15 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
                 num_inference_steps=int(stage_loop.effective(req, args, "steps", _DEFAULT_STEPS)),
                 guidance_scale=float(stage_loop.effective(
                     req, args, "guidance_scale", _DEFAULT_GUIDANCE)),
-                output_type="latent",
+                output_type="pt" if in_process else "latent",
             )
 
         def save(req, out) -> None:
             dest = stage_loop.work_file(args, req, "latents.pt")
             torch.save(out.latents.cpu(), dest)
             print(f"[hunyuan_video] latents saved to {dest}", flush=True)
+            if in_process:
+                _write_video(out.frames, req.output)
 
         run_generate_stage(
             args, backend, tag="hunyuan_video", model_id=_HF_MODEL_ID,
@@ -710,14 +772,15 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
             save=save,
             finish_compile=lambda: self._finish_stage_compile(
                 "generate", args, self._stage_compiled_dir("generate", args)),
+            final=in_process,
         )
 
     def _stage_vae_neuron(self, args: argparse.Namespace) -> None:
-        """The neuron backend's vae stage (``run_vae_stage``; --device-vae): one rank, a launch
-        of its own after the generate stage has exited, so the decoder never shares a core with
-        the DiT. NeuronHunyuanVideoVaeDecoderApplication decodes each request's latents (fp32,
-        eager, tiled in space and time), and the frames are written as the host decode writes
-        them."""
+        """The neuron backend's vae stage (``run_vae_stage``; the "launch" placement): one rank,
+        a launch of its own after the generate stage has exited, so the decoder never shares a
+        core with the DiT. NeuronHunyuanVideoVaeDecoderApplication decodes each request's
+        latents (``_vae_decoder``: fp32 and eager by default, tiled in space and time), and the
+        frames are written as the host decode writes them."""
         import torch
 
         from difflet.backends.neuron.hunyuan_video.vae import NeuronHunyuanVideoVaeDecoderApplication
@@ -725,11 +788,13 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
 
         model_dir = self._model_dir()
         height, width, num_frames = _shape(args)
+        dtype, exec_mode = _vae_decoder(args)
 
         def build(parallel):
             return NeuronHunyuanVideoVaeDecoderApplication(
                 model_path=str(Path(model_dir) / "vae"), height=height, width=width,
-                num_frames=num_frames, device="neuron",
+                num_frames=num_frames, device="neuron", dtype=getattr(torch, dtype),
+                exec_mode=exec_mode,
             )
 
         def prepare_decode(decoder):
@@ -787,10 +852,14 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
     def _torchrun_stage_cache_inputs(self, stage: str, args: argparse.Namespace) -> dict:
         """The neuron stages' identities: the generate stage under a component of its own (it
         holds the text encode too, and never matches an AoT DiT artifact) with the backend and
-        the exec mode (``torchrun_stage_keys``), and the vae stage, eager whatever --exec-mode
-        says. There is no clip or llama stage."""
+        the exec mode (``torchrun_stage_keys``) and, with the decode in process, the rank-0
+        decoder's dtype and exec mode; and the vae stage with the decoder's (``_vae_decoder``,
+        whatever --exec-mode says). There is no clip or llama stage."""
         shapes = canonical_shapes_list(args, _DEFAULT_SHAPE)
+        dtype, exec_mode = _vae_decoder(args)
         if stage == "generate":
+            vae = ({"vae": {"dtype": dtype, "exec_mode": exec_mode}}
+                   if _vae_placement(args) == "generate" else {})
             return torchrun_stage_keys({
                 "component": "hunyuan_video_generate",
                 "model_id": _HF_MODEL_ID,
@@ -802,16 +871,17 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
                 "text_seq_len": _TEXT_SEQ_LEN,
                 "shapes": shapes,
                 "toolchain": stage_toolchain_versions(),
+                **vae,
             })
         if stage == "vae":
             return {
                 "component": "hunyuan_video_vae",
                 "model_id": _HF_MODEL_ID,
-                "dtype": "float32",
+                "dtype": dtype,
                 "shapes": shapes,
                 "toolchain": stage_toolchain_versions(),
                 "backend": torchrun_backend(),
-                "exec_mode": "eager",
+                "exec_mode": exec_mode,
             }
         raise ValueError(f"unknown stage {stage!r} on a torchrun backend")
 
@@ -868,6 +938,11 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
         # line stays byte-identical.
         if getattr(a, "exec_mode", None):
             parts += ["--exec-mode", a.exec_mode]
+        if torchrun_backend() is not None:  # the driver's resolved decode, for every stage
+            dtype, exec_mode = _vae_decoder(a)
+            parts += ["--vae-placement", _vae_placement(a),
+                      "--vae-dtype", {v: k for k, v in _VAE_DTYPES.items()}[dtype],
+                      "--vae-exec-mode", exec_mode]
         if getattr(a, "revision", None):
             parts += ["--revision", a.revision]
         if work_dir:

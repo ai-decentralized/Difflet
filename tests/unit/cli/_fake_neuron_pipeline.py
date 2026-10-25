@@ -134,7 +134,12 @@ class FakeHunyuanVideoApp(FakeWanApp):
         if unknown:
             raise TypeError(f"TorchNeuronHunyuanVideoApplication.generate got unexpected keyword "
                             f"arguments {unknown}")
-        return super().__call__(**kwargs)
+        out = super().__call__(**kwargs)
+        if kwargs.get("output_type") == "pt":  # the rank-0 decoder's clip (enable_vae_decoder)
+            import torch
+
+            out.frames = torch.full((1, 3, 5, 16, 16), 0.5)
+        return out
 
 
 class FakePipeline:

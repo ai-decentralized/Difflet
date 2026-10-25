@@ -309,7 +309,8 @@ def run_generate_stage(args: argparse.Namespace, backend: str, *, tag: str, mode
                        pipeline_kwargs: dict[str, Any], application_kwargs: dict[str, Any],
                        request_kwargs: Callable[[Any], dict[str, Any]],
                        save: Callable[[Any, Any], None],
-                       finish_compile: Callable[[], None], timing: bool = False) -> None:
+                       finish_compile: Callable[[], None], timing: bool = False,
+                       final: bool = False) -> None:
     """The DiT stage on a non-AoT torchrun backend (neuron); runs on every rank.
 
     ``DiffletPipeline.from_pretrained(model_id, **pipeline_kwargs, ...)`` prepares the runtime
@@ -322,7 +323,9 @@ def run_generate_stage(args: argparse.Namespace, backend: str, *, tag: str, mode
     files and the compiled dir are the same paths on every rank. In a DP worker
     (``--requests-dir``) the launch is one replica draining the request queue: rank 0 alone
     claims and broadcasts each request's index (``replica_requests``), and a request that fails
-    is marked failed once and stops every rank of the replica (``replica_request_scope``).
+    is marked failed once and stops every rank of the replica (``replica_request_scope``); with
+    ``final`` (a stage that writes the request's output itself, such as a decode in process)
+    rank 0 marks a successful one done.
     Every rank then prints one line of evidence: ``[<tag>] <backend> rank r/world:`` the exec
     mode, the compiled blocks, the unwarmed shapes, the CPU fallbacks, the load and stage
     seconds. The process group is destroyed after a successful stage only: a failing rank exits
@@ -383,7 +386,7 @@ def run_generate_stage(args: argparse.Namespace, backend: str, *, tag: str, mode
 
             scheduler.step = timed_step
         for req in replica_requests(args, device=getattr(pipe.app, "device", None)):
-            with replica_request_scope(args, req):
+            with replica_request_scope(args, req, final=final):
                 marks.clear()
                 called = time.perf_counter()
                 with fallback_tracker(pipe) as fallbacks:
