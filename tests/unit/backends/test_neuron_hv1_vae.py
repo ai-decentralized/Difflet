@@ -172,3 +172,43 @@ def test_compiled_diffusers_tiles_have_room_for_every_edge_shape(tiny):
         app = _app(tiny, exec_mode="compile", tiling="diffusers", compile_backend="aot_eager")
         app.load(skip_warmup=True)
         assert torch._dynamo.config.recompile_limit >= 72
+
+
+def test_fixed_tiling_warmup_decodes_one_full_tile_and_builds_every_graph(tiny):
+    """With fixed tiles every window is one padded tile shape, so the warm-up decodes a single
+    full tile (zeros) instead of the whole clip: it builds every region's graph, and a decode
+    after it builds none."""
+    import torch._dynamo
+
+    graphs = []
+
+    def backend(gm, example_inputs):
+        graphs.append(gm)
+        return gm.forward
+
+    torch._dynamo.reset()
+    app = _app(tiny, exec_mode="compile", compile_backend=backend)
+    tiles = []
+    decode_tile = app._decode_tile
+
+    def counting(padded, valid):
+        tiles.append((tuple(padded.shape), valid))
+        return decode_tile(padded, valid)
+
+    app._decode_tile = counting
+    app.load()
+    assert tiles == [((1, 4, 5, 4, 4), (5, 4, 4))]  # 16 frames -> 5 latent; 32 px -> 4
+    assert set(app.phase_seconds) == {"load", "warmup decode"} and graphs
+    built = len(graphs)
+    app.decode(torch.randn(app.latent_shape, generator=torch.Generator().manual_seed(4)))
+    assert len(graphs) == built and len(tiles) == 1 + 36
+
+
+def test_diffusers_tiling_warmup_decodes_the_whole_clip(tiny):
+    """Eager (diffusers' tiles), each window shape compiles its own kernels: the warm-up still
+    decodes the whole static shape."""
+    app = _app(tiny)
+    decoded = []
+    app.decode = lambda latents: decoded.append(tuple(latents.shape))
+    app.load()
+    assert decoded == [app.latent_shape]

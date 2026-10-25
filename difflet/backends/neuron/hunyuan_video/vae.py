@@ -25,7 +25,8 @@ are:
   diffusers' windows but pads each to the full tile and decodes it with
   ``HunyuanVideoVAEValidTileDecoder``, which confines GroupNorm, attention and the convolution
   borders to the window's valid extent: one set of graphs for every window, the same output as
-  diffusers' tiled decode. Blending runs on the host.
+  diffusers' tiled decode. Blending runs on the host. The warm-up (``load(skip_warmup=False)``)
+  decodes one full tile, which builds or loads every graph.
 * ``tiling="diffusers"`` (the default when eager): diffusers' own tiled decode; compiled, every
   region builds a graph per window shape (12 at 320x512x61), so Dynamo's recompile limit is
   raised (``DIFFUSERS_TILING_RECOMPILE_LIMIT``). The control for the fixed tiling.
@@ -146,8 +147,22 @@ class NeuronHunyuanVideoVaeDecoderApplication:
         self.phase_seconds["load"] = time.perf_counter() - t
         if not skip_warmup:  # compiles the kernels or graphs for this shape (once; cached)
             t = time.perf_counter()
-            self.decode(torch.zeros(self.latent_shape, dtype=self.dtype))
+            if self.tiling == "fixed":
+                self._warmup_tile()
+            else:
+                self.decode(torch.zeros(self.latent_shape, dtype=self.dtype))
             self.phase_seconds["warmup decode"] = time.perf_counter() - t
+
+    @torch.no_grad()  # as decode: a graph built with grad enabled is rebuilt under no_grad
+    def _warmup_tile(self) -> None:
+        """The fixed tiling's warm-up: one full tile of zeros. Every window is padded to this
+        shape and its extent is a tensor input, so the first tile builds (or loads) every
+        region's graph and the rest of a decode builds none; decoding the whole clip as well
+        would only spend another decode (about 16 s in bf16 at 320x512x61 on trn2)."""
+        s, t = self._compression
+        channels = int(self.vae_config.get("latent_channels", 16))
+        tile = (self.tile_frames // t + 1, self.tile_size // s, self.tile_size // s)
+        self._decode_tile(torch.zeros((1, channels, *tile), dtype=self.dtype), tile)
 
     def _build_tile_decoder(self, vae):
         """diffusers' decoder weights in ``HunyuanVideoVAEValidTileDecoder``, on the device,
