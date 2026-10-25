@@ -301,9 +301,12 @@ def test_bounded_kernel_runs_in_one_call_within_its_tested_size(fake_bounded_op)
         out = neuron_attention.attention(q, k, v, scale=0.2, bound_min=lo, bound_max=hi,
                                          tp_q=True, tp_k=True)
     assert fake_bounded_op == [(BH, 128, D)]  # SQ=33 and SK=47 padded to 128
-    # One call gets the whole tensor, not a slice of it: the traced graph stays the one compiled
-    # before the head split existed (a full-range slice changed the block graphs' HLO on trn2,
-    # so every cached HunyuanVideo NEFF compiled again).
+    # One call gets the whole tensor, not a slice of it: within the bound the op runs exactly as
+    # it did before the head split (no slice, no concatenation). This does not keep caches from
+    # before the split valid: the compiled block graphs carry ops_impl/attention.py source lines
+    # as debug metadata, so any edit that moves lines in that file recompiles them once (TP4
+    # 320x512x61 still recompiled at the commit that restored this path; evidence doc, bug
+    # ledger row 4).
     assert fake_bounded_op.q[0]._base is None
     _close_bf16(out, ref)
 
@@ -329,7 +332,7 @@ def test_bounded_kernel_splits_heads_above_its_tested_size(fake_bounded_op, monk
     _close_bf16(out, ref)
 
 
-def test_bounded_kernel_limit_is_attention_cte_s_tested_size():
+def test_bounded_kernel_limit_is_half_attention_cte_s_tested_size():
     # 3 heads x 119,168^2 (4.26e10, just under nkilib's tested 32 x 36864^2) still failed BIR
     # emission on trn2, so the bound is half the tested size.
     assert neuron_attention._BOUNDED_KERNEL_MAX_BH_SQ_SK == 16 * 36864 * 36864
