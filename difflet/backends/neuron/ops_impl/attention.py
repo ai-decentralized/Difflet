@@ -49,6 +49,13 @@ if _ATTENTION_PATH not in ("auto", "sdpa"):
 _KERNEL_DTYPES = (torch.bfloat16, torch.float16)
 _KERNEL_MAX_HEAD_DIM = 128
 _KERNEL_MAX_BATCH_HEADS = 512
+#: The largest batch x seqlen_q x seqlen_k nkilib's attention_cte is tested at
+#: (``_MAX_BS_TIMES_SEQLEN_QK = 32 * 36864 * 36864`` in nkilib/core/attention/attention_cte.py;
+#: above it the kernel only warns). Beyond it the bounded kernel's NKI compile can fail outright:
+#: HunyuanVideo at 720x1280x129, tp4 (6 heads x 119,168 x 119,168 padded joint tokens) failed on
+#: trn2 with "BIR emission failed: colz: body blob exceeds uint32 offset range". Larger calls are
+#: split over the heads (``_head_chunk``).
+_BOUNDED_KERNEL_MAX_BH_SQ_SK = 32 * 36864 * 36864
 
 
 def attention(
@@ -188,9 +195,21 @@ def _flash_attention_bounded(q, k, v, bound_min, bound_max, *, scale: float):
         q3 = F.pad(q3, (0, 0, 0, pad_q))
         lo = F.pad(lo, (0, 0, 0, pad_q))
         hi = F.pad(hi, (0, 0, 0, pad_q), value=1)
-    out = _FLASH_BOUNDED_OP(q3.contiguous(), k3.contiguous(), v3.contiguous(),
-                            lo.contiguous(), hi.contiguous(), 1.0)
+    chunk = _head_chunk(bh, q3.shape[1], k3.shape[1])
+    outs = [_FLASH_BOUNDED_OP(q3[i:i + chunk].contiguous(), k3[i:i + chunk].contiguous(),
+                              v3[i:i + chunk].contiguous(), lo[i:i + chunk].contiguous(),
+                              hi[i:i + chunk].contiguous(), 1.0)
+            for i in range(0, bh, chunk)]
+    out = outs[0] if len(outs) == 1 else torch.cat(outs, dim=0)
     return out[:, :s_q].reshape(*shape[:-1], v.shape[-1])
+
+
+def _head_chunk(bh: int, s_q: int, s_k: int) -> int:
+    """Heads per bounded-kernel call: all ``bh`` when ``bh * s_q * s_k`` is within the kernel's
+    tested size (every shape the repo ran before 720p), else the largest divisor of ``bh`` that
+    is (equal chunks: one kernel shape, traced once), at least 1."""
+    fits = max(1, _BOUNDED_KERNEL_MAX_BH_SQ_SK // (s_q * s_k))
+    return max(c for c in range(1, bh + 1) if bh % c == 0 and c <= fits)
 
 
 def _load_flash_kernel():
