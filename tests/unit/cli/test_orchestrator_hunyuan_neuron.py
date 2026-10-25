@@ -105,21 +105,29 @@ def test_device_vae_runs_generate_on_tp_x_cp_cores_then_vae_on_one(launches, tmp
                for _, kw in stages)
 
 
-def test_device_vae_is_the_default(launches, tmp_path):
-    """Measured on trn2 at TP4, 320x512x61, 50 steps: the one-core vae launch decodes in about
-    96 s against 410 s for the host decode, so without --host-vae or --device-vae the decode is a
-    vae launch of its own after the generate launch, and compile warms it up too."""
+def test_in_process_compiled_bf16_decode_is_the_default(launches, tmp_path):
+    """The default-change rule's runs on trn2 (320x512x61, 50 steps, 2026-10-26): decoding on
+    rank 0's core in the generate launch with the compiled bf16 decoder fits at TP2, TP4 and
+    TP2xCP2 and takes the warm TP4 e2e from 222-239 s to 118 s, at 56 dB against the fp32 host
+    decode. So without a placement flag generate and compile are one generate launch, and the
+    device decoder is compiled bf16; --device-vae, --host-vae and --vae-dtype fp32
+    --vae-exec-mode eager keep the earlier paths."""
     stages, decoded = launches
     HunyuanVideoOrchestrator(_args(work_dir=str(tmp_path / "w"))).generate()
-    assert _plan(stages) == [("generate", 2), ("vae", 1)] and decoded == []
+    assert _plan(stages) == [("generate", 2)] and decoded == []
     stages.clear()
     HunyuanVideoOrchestrator(_args()).compile()
-    assert _plan(stages) == [("generate", 2), ("vae", 1)]
-    assert hv_mod._vae_placement(_args()) == "launch"
+    assert _plan(stages) == [("generate", 2)]
+    assert hv_mod._vae_placement(_args()) == "generate"
     assert hv_mod._vae_placement(_args(host_vae=True)) == "host"
     assert hv_mod._vae_placement(_args(device_vae=True)) == "launch"
     assert hv_mod._vae_placement(_args(vae_in_process=True)) == "generate"
-    assert hv_mod._vae_decoder(_args()) == ("float32", "eager")
+    assert hv_mod._vae_decoder(_args()) == ("bfloat16", "compile")
+    assert hv_mod._vae_decoder(_args(vae_dtype="fp32", vae_exec_mode="eager")) == (
+        "float32", "eager")
+    assert hv_mod._torchrun_application_kwargs(_args()) == {
+        **_NEURON_APP_KWARGS, "enable_vae_decoder": True, "vae_dtype": "bfloat16",
+        "vae_exec_mode": "compile"}
 
 
 @pytest.mark.parametrize("tp, cp, cp_mode", [(2, 1, "gather_kv"), (4, 1, "gather_kv"),
@@ -143,14 +151,15 @@ def test_vae_in_process_is_one_generate_launch(launches, tmp_path, tp, cp, cp_mo
 
 def test_stages_get_the_resolved_placement_and_decoder(launches, tmp_path):
     """Every stage reads the driver's resolution (--vae-placement), not its own defaults:
-    --device-vae reaches the stages as "launch" with the default decoder, fp32 eager."""
+    --device-vae reaches the stages as "launch" with the default decoder, compiled bf16."""
     stages, _ = launches
     HunyuanVideoOrchestrator(_args(work_dir=str(tmp_path / "w"), device_vae=True)).generate()
+    assert _plan(stages) == [("generate", 2), ("vae", 1)]
     for _, kw in stages:
         cli = kw["cli_args"]
         assert cli[cli.index("--vae-placement") + 1] == "launch"
         assert (cli[cli.index("--vae-dtype") + 1], cli[cli.index("--vae-exec-mode") + 1]) == (
-            "fp32", "eager")
+            "bf16", "compile")
     forwarded = argparse.Namespace(vae_placement="host", host_vae=False, device_vae=False,
                                    vae_in_process=True)
     assert hv_mod._vae_placement(forwarded) == "host"
@@ -356,7 +365,7 @@ def test_tp1_is_refused_before_any_stage_runs(monkeypatch, tmp_path, capsys, mod
     err = capsys.readouterr().err
     assert "HunyuanVideo DiT" in err and "--tp-degree 2 or more" in err
     getattr(HunyuanVideoOrchestrator(_args(tp_degree=2, work_dir=str(tmp_path / "w"))), mode)()
-    assert stages == ["generate", "vae"]
+    assert stages == ["generate"]
 
 
 # ----------------------------------------------------------------- the AoT path is unchanged
@@ -400,7 +409,8 @@ def test_neuron_has_no_clip_or_llama_stage(launches):
 def test_neuron_stage_cache_keys_name_the_backend_and_exec_mode(monkeypatch):
     _backend(monkeypatch, "neuron")
     monkeypatch.setenv("DIFFLET_EXEC_MODE", "eager")
-    orch = HunyuanVideoOrchestrator(_args(cache_dir="/c"))
+    orch = HunyuanVideoOrchestrator(_args(cache_dir="/c", device_vae=True, vae_dtype="fp32",
+                                          vae_exec_mode="eager"))
     generate = orch._stage_cache_inputs("generate", orch.args)
     assert generate["component"] == "hunyuan_video_generate"
     assert (generate["backend"], generate["exec_mode"]) == ("neuron", "eager")
@@ -411,12 +421,10 @@ def test_neuron_stage_cache_keys_name_the_backend_and_exec_mode(monkeypatch):
     assert vae["component"] == "hunyuan_video_vae" and "tp" not in vae
     assert (vae["backend"], vae["exec_mode"], vae["dtype"]) == ("neuron", "eager", "float32")
     assert "vae" not in generate  # the decode is not in the generate launch
-    compiled = HunyuanVideoOrchestrator(_args(cache_dir="/c", vae_dtype="bf16",
-                                              vae_exec_mode="compile"))
+    compiled = HunyuanVideoOrchestrator(_args(cache_dir="/c", device_vae=True))
     vae = compiled._stage_cache_inputs("vae", compiled.args)
     assert (vae["exec_mode"], vae["dtype"]) == ("compile", "bfloat16")
-    in_process = HunyuanVideoOrchestrator(_args(cache_dir="/c", vae_in_process=True,
-                                                vae_dtype="bf16", vae_exec_mode="compile"))
+    in_process = HunyuanVideoOrchestrator(_args(cache_dir="/c"))  # the default
     generate_in_process = in_process._stage_cache_inputs("generate", in_process.args)
     assert generate_in_process["vae"] == {"dtype": "bfloat16", "exec_mode": "compile"}
     assert (in_process._stage_compiled_dir("generate", in_process.args)
@@ -444,6 +452,8 @@ def neuron_stage(monkeypatch):
     monkeypatch.setattr(fake_pipeline, "CALLS", [])
     monkeypatch.setattr(DiffletPipeline, "from_pretrained",
                         classmethod(fake_pipeline.fake_from_pretrained))
+    # The in-process decode (the default placement) writes no file from these tests.
+    monkeypatch.setattr(hv_mod, "_write_video", lambda video, output: None)
     return fake_pipeline
 
 
@@ -453,7 +463,8 @@ def test_generate_stage_builds_the_application_and_saves_the_latents(neuron_stag
 
     cache = tmp_path / "cache"
     args = _args(work_dir=str(tmp_path), cache_dir=str(cache), revision="abc123", steps=50,
-                 guidance_scale=6.0, seed=7, tp_degree=2, cp_degree=2, cp_mode="ulysses")
+                 guidance_scale=6.0, seed=7, tp_degree=2, cp_degree=2, cp_mode="ulysses",
+                 vae_placement="launch")
     HunyuanVideoOrchestrator(args)._run_stage_internal("generate", args)
 
     [call] = neuron_stage.CALLS
@@ -488,7 +499,7 @@ def test_generate_stage_defaults_are_the_trainium_stage_s(neuron_stage, tmp_path
 
 def test_generate_stage_hands_the_teacache_flags_to_the_application(neuron_stage, tmp_path):
     args = _args(work_dir=str(tmp_path), teacache_cadence=2, teacache_online_delta=0.6,
-                 teacache_speedup=1.6, teacache_calibration="/c.json")
+                 teacache_speedup=1.6, teacache_calibration="/c.json", vae_placement="launch")
     HunyuanVideoOrchestrator(args)._run_stage_internal("generate", args)
     opts = neuron_stage.CALLS[-1]["kwargs"]["application_kwargs"]
     assert opts == {**_NEURON_APP_KWARGS, "teacache_cadence": 2,
@@ -615,7 +626,7 @@ def test_vae_stage_decodes_the_saved_latents_and_writes_the_video(vae_stage, mon
     [vae] = vae_stage.instances
     assert vae.init == {"model_path": str(tmp_path / "model" / "vae"), "height": 256,
                         "width": 448, "num_frames": 33, "device": "neuron",
-                        "dtype": torch.float32, "exec_mode": "eager"}
+                        "dtype": torch.bfloat16, "exec_mode": "compile"}
     assert vae.loads == [True]  # generate skips the warm-up decode
     [decoded] = vae.decoded
     assert torch.equal(decoded, latents)
@@ -627,11 +638,11 @@ def test_vae_stage_builds_the_decoder_the_flags_name(vae_stage, monkeypatch, tmp
 
     monkeypatch.setattr(hv_mod, "_write_video", lambda video, output: None)
     torch.save(torch.randn(1, 16, 2, 2, 2), tmp_path / "latents.pt")
-    args = _args(work_dir=str(tmp_path), vae_placement="launch", vae_dtype="bf16",
-                 vae_exec_mode="compile")
+    args = _args(work_dir=str(tmp_path), vae_placement="launch", vae_dtype="fp32",
+                 vae_exec_mode="eager")
     HunyuanVideoOrchestrator(args)._run_stage_internal("vae", args)
     [vae] = vae_stage.instances
-    assert (vae.init["dtype"], vae.init["exec_mode"]) == (torch.bfloat16, "compile")
+    assert (vae.init["dtype"], vae.init["exec_mode"]) == (torch.float32, "eager")
 
 
 def test_vae_stage_compile_warms_up_and_writes_the_manifest(vae_stage, tmp_path):
