@@ -127,10 +127,13 @@ _TORCHRUN_APPLICATION_KWARGS = {
     "encoder_threads": 12,
     "text_encoder_device": "host",
 }
-#: Where the neuron backend decodes when neither --host-vae nor --device-vae is given: on the
-#: host in the driver, LTX-2's default. The vae stage's launch and load have not been measured
-#: against the host decode for HunyuanVideo yet.
-_DEVICE_VAE_DEFAULT = False
+#: Where the neuron backend decodes when neither --host-vae nor --device-vae is given: in the
+#: one-core vae launch. Measured on trn2.3xlarge at TP4, 320x512x61, 50 steps (2026-10-25,
+#: benchmark/trn2/hunyuan_video_neuron.md): the vae launch decodes and writes in about 96 s
+#: (plus about 21 s of launch, load and teardown) against 410 s for the fp32 host decode on 12
+#: vCPUs, so a warm generate takes 239 s instead of 540 s. Its one-time cost is the eager
+#: kernels' cold compile, about 45 minutes in `compile`.
+_DEVICE_VAE_DEFAULT = True
 
 
 def _shape(args: argparse.Namespace) -> tuple[int, int, int]:

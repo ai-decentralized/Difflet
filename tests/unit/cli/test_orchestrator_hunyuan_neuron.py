@@ -2,8 +2,8 @@
 
 With DIFFLET_BACKEND=neuron, ``difflet compile/generate --model-id hunyuanvideo-community/
 HunyuanVideo`` is one torchrun launch of the generate stage (the Llama/CLIP encode folded into
-it, on rank 0's host) and then the decode: on the host in the driver by default, or a one-core
-vae launch with --device-vae, as LTX-2 places it. The ranks build TorchNeuronHunyuanVideoApplication
+it, on rank 0's host) and then the decode: a one-core vae launch by default (as Qwen-Image places
+it), or on the host in the driver with --host-vae. The ranks build TorchNeuronHunyuanVideoApplication
 through DiffletPipeline.from_pretrained, here the CPU fake of tests/unit/cli/_fake_neuron_pipeline.py.
 The AoT path (clip, llama, generate) is unchanged. No test touches a NeuronCore.
 """
@@ -103,24 +103,37 @@ def test_device_vae_runs_generate_on_tp_x_cp_cores_then_vae_on_one(launches, tmp
                for _, kw in stages)
 
 
-def test_host_decode_is_the_default(launches, tmp_path):
-    """LTX-2's placement: without --device-vae the driver decodes on the host after the generate
-    launch has exited, and compile has nothing to build for it."""
+def test_device_vae_is_the_default(launches, tmp_path):
+    """Measured on trn2 at TP4, 320x512x61, 50 steps: the one-core vae launch decodes in about
+    96 s against 410 s for the host decode, so without --host-vae or --device-vae the decode is a
+    vae launch of its own after the generate launch, and compile warms it up too."""
+    stages, decoded = launches
+    HunyuanVideoOrchestrator(_args(work_dir=str(tmp_path / "w"))).generate()
+    assert _plan(stages) == [("generate", 2), ("vae", 1)] and decoded == []
+    stages.clear()
+    HunyuanVideoOrchestrator(_args()).compile()
+    assert _plan(stages) == [("generate", 2), ("vae", 1)]
+    assert hv_mod._decodes_on_device(_args())
+    assert not hv_mod._decodes_on_device(_args(host_vae=True))
+    assert hv_mod._decodes_on_device(_args(device_vae=True))
+
+
+def test_host_vae_decodes_in_the_driver(launches, tmp_path):
+    """--host-vae: the driver decodes on the host after the generate launch has exited, and
+    compile has nothing to build for it."""
     stages, decoded = launches
     work = tmp_path / "work"
     out = tmp_path / "out.mp4"
     HunyuanVideoOrchestrator(_args(work_dir=str(work), output=str(out), keep_work_dir=True,
-                                   height=256, width=448, num_frames=33)).generate()
+                                   height=256, width=448, num_frames=33,
+                                   host_vae=True)).generate()
     assert _plan(stages) == [("generate", 2)]
     assert decoded == [((str(work / "latents.pt"), "/fake/model", str(out)),
                         {"height": 256, "width": 448, "num_frames": 33})]
     assert work.exists()  # --keep-work-dir
     stages.clear()
-    HunyuanVideoOrchestrator(_args()).compile()
+    HunyuanVideoOrchestrator(_args(host_vae=True)).compile()
     assert _plan(stages) == [("generate", 2)]
-    assert not hv_mod._decodes_on_device(_args())
-    assert not hv_mod._decodes_on_device(_args(host_vae=True))
-    assert hv_mod._decodes_on_device(_args(device_vae=True))
 
 
 def test_generate_preserves_the_work_dir_when_the_decode_fails(launches, tmp_path, capsys,
@@ -131,7 +144,7 @@ def test_generate_preserves_the_work_dir_when_the_decode_fails(launches, tmp_pat
     monkeypatch.setattr(hv_mod, "_decode_latents_host", boom)
     work = tmp_path / "work"
     with pytest.raises(RuntimeError, match="decode failed"):
-        HunyuanVideoOrchestrator(_args(work_dir=str(work))).generate()
+        HunyuanVideoOrchestrator(_args(work_dir=str(work), host_vae=True)).generate()
     assert work.exists() and "work dir preserved" in capsys.readouterr().err
 
 
@@ -249,7 +262,7 @@ def test_tp1_is_refused_before_any_stage_runs(monkeypatch, tmp_path, capsys, mod
     err = capsys.readouterr().err
     assert "HunyuanVideo DiT" in err and "--tp-degree 2 or more" in err
     getattr(HunyuanVideoOrchestrator(_args(tp_degree=2, work_dir=str(tmp_path / "w"))), mode)()
-    assert stages == ["generate"]
+    assert stages == ["generate", "vae"]
 
 
 # ----------------------------------------------------------------- the AoT path is unchanged

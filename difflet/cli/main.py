@@ -173,9 +173,9 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
         "--device-vae",
         dest="device_vae",
         action="store_true",
-        help="Qwen-Image on --backend neuron: decode in a VAE stage of its own on one "
-        "NeuronCore (fp32, eager), after the generate launch has exited, instead of on the "
-        "host CPU. The default; mutually exclusive with --host-vae.",
+        help="Qwen-Image and HunyuanVideo on --backend neuron: decode in a VAE stage of its "
+        "own on one NeuronCore (fp32, eager), after the generate launch has exited, instead of "
+        "on the host CPU. The default; mutually exclusive with --host-vae.",
     )
     p.add_argument(
         "--host-text-encoder",
