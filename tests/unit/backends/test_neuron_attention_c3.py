@@ -304,9 +304,9 @@ def test_bounded_kernel_runs_in_one_call_within_its_tested_size(fake_bounded_op)
     # One call gets the whole tensor, not a slice of it: within the bound the op runs exactly as
     # it did before the head split (no slice, no concatenation). This does not keep caches from
     # before the split valid: the compiled block graphs carry ops_impl/attention.py source lines
-    # as debug metadata, so any edit that moves lines in that file recompiles them once (TP4
-    # 320x512x61 still recompiled at the commit that restored this path; evidence doc, bug
-    # ledger row 4).
+    # as debug metadata, and TP4 320x512x61 still recompiled once at the commit that restored
+    # this path, likely because that edit moved lines in the file (an inference: evidence doc,
+    # bug ledger row 4).
     assert fake_bounded_op.q[0]._base is None
     _close_bf16(out, ref)
 
