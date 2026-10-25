@@ -6,9 +6,13 @@ diffusers'. The components it calls are adapters onto the neuron applications:
 
 - ``transformer``: the DiT application (TP across the ranks), output returned to the host;
 - ``text_encoder_2``: the T5 application (TP across the ranks), embeddings returned to the host;
-- ``text_encoder``: transformers' ``CLIPTextModel`` on the host (one pooled vector per prompt; the
-  whole 0.25 GB model on every rank, deterministic, so no broadcast);
+- ``text_encoder``: transformers' ``CLIPTextModel`` on every rank's core (one pooled vector per
+  prompt, returned to the host; the whole 0.25 GB model on every rank, deterministic, so no
+  broadcast);
 - ``vae``: the VAE application on rank 0 only; the other ranks return latents.
+
+Component precisions follow diffusers' Flux usage, which the Trainium application also runs: CLIP,
+T5, the DiT and the VAE in bf16. fp32 (and CLIP on the host) remain explicit options.
 
 The adapters are plain objects, not ``nn.Module``s holding device tensors: diffusers infers the
 pipeline's execution device from its modules, and the loop and scheduler belong on the host (each
@@ -35,6 +39,11 @@ _KWARG_DEFAULTS: dict[str, Any] = {
     # bf16 passes the parity gate on the device (0.87x the bf16 control vs fp32) and halves T5's
     # memory per core; fp32 remains an option.
     "t5_dtype": torch.bfloat16,
+    # CLIP and the VAE in bf16, as diffusers' Flux usage and the Trainium application run them;
+    # clip_device None means the application's device ("cpu" puts CLIP on the host).
+    "clip_dtype": torch.bfloat16,
+    "clip_device": None,
+    "vae_dtype": torch.bfloat16,
     # False: no VAE is loaded and every call returns packed latents (the CLI decodes them in a
     # separate stage, as for Wan, so the decoder never shares a core with the DiT and T5 shards).
     "decode_vae": True,
@@ -81,6 +90,23 @@ class _T5:
 
     def __call__(self, input_ids, output_hidden_states=False):
         return (self.app.encode(input_ids).to("cpu", self.dtype),)
+
+
+class _Clip:
+    """transformers' ``CLIPTextModel`` as ``FluxPipeline.text_encoder``, on ``device``: FluxPipeline
+    calls it as ``text_encoder(ids, output_hidden_states=False).pooler_output`` and casts the
+    result to ``text_encoder.dtype`` on its (host) execution device."""
+
+    def __init__(self, model, *, device, dtype) -> None:
+        self.model = model.to(device=device, dtype=dtype)
+        self.device = device
+        self.dtype = dtype
+        self.config = model.config
+
+    @torch.no_grad()
+    def __call__(self, input_ids, output_hidden_states=False, **kwargs):
+        out = self.model(input_ids.to(self.device), output_hidden_states=output_hidden_states)
+        return SimpleNamespace(pooler_output=out.pooler_output.to("cpu"))
 
 
 class _Vae:
@@ -163,7 +189,7 @@ class TorchNeuronFluxApplication:
         if opts["decode_vae"]:
             vae = NeuronFluxVaeDecoderApplication(model_path=self._path("vae"), height=self.height,
                                                   width=self.width, parallel=parallel,
-                                                  device=opts["device"])
+                                                  dtype=opts["vae_dtype"], device=opts["device"])
             vae.load(skip_warmup=skip_warmup)
             vae_scale = vae.scale_factor
         else:
@@ -196,7 +222,8 @@ class TorchNeuronFluxApplication:
         if os.path.isdir(self._path("text_encoder")):
             from transformers import CLIPTextModel
 
-            clip = CLIPTextModel.from_pretrained(self._path("text_encoder")).eval()
+            clip = _Clip(CLIPTextModel.from_pretrained(self._path("text_encoder")).eval(),
+                         device=opts["clip_device"] or opts["device"], dtype=opts["clip_dtype"])
         if os.path.isdir(self._path("tokenizer")):
             from transformers import CLIPTokenizer
 

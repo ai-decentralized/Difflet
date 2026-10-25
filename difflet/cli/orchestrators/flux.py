@@ -306,8 +306,11 @@ class FluxOrchestrator(ModelOrchestrator):
         root = resolve_model_path(_HF_MODEL_ID, revision=getattr(args, "revision", None),
                                   local_files_only=True)
         started = time.perf_counter()
+        from difflet.models.flux.neuron_application import _KWARG_DEFAULTS
+
         app = NeuronFluxVaeDecoderApplication(model_path=os.path.join(root, "vae"), height=h, width=w,
-                                              parallel=parallel, device="neuron")
+                                              parallel=parallel, dtype=_KWARG_DEFAULTS["vae_dtype"],
+                                              device="neuron")
         app.load(skip_warmup=args.stage_mode != "compile")
         print(f"[flux] vae load {time.perf_counter() - started:.1f} s "
               f"{ {k: round(v, 2) for k, v in app.phase_seconds.items()} }", flush=True)

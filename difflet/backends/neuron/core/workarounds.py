@@ -7,6 +7,13 @@ accumulates the statistics in fp32: over HunyuanVideo 1.5's 54 blocks the drift 
 brings the model to 0.92x. ``F.layer_norm`` is wrapped (``nn.LayerNorm`` calls it); other dtypes
 and devices run unchanged.
 
+GroupNorm in bf16. The same failure, much larger, since a group's statistics span channels times
+the spatial size: ``F.group_norm`` in bf16 on the device against fp32, 32 groups, relative L1
+1.8e-2 at 262,144 elements per group, 0.32 at 1,048,576, 0.71 at 2,097,152 and 1.35 at 4,194,304
+(the CPU's bf16 stays at 1.4e-3 throughout). Flux's VAE decoder in bf16 came out at 0.287 against
+fp32 (68x the bf16 CPU control). ``F.group_norm`` is wrapped (``nn.GroupNorm`` calls it) exactly as
+``F.layer_norm`` is.
+
 Boolean bitwise ops on non-contiguous operands. Eager ``bitwise_and`` on ``bool`` neuron tensors
 returns wrong values when an operand is a non-contiguous view, at sizes such as 256 x 256 (a
 64 x 64 case was correct; ``uint8`` and ``int64`` are correct; ``.contiguous()`` on the strided
@@ -61,10 +68,30 @@ def install_layer_norm_fp32() -> None:
     F.layer_norm = layer_norm
 
 
+def install_group_norm_fp32() -> None:
+    """Wrap ``torch.nn.functional.group_norm`` (idempotent)."""
+    import torch.nn.functional as F
+
+    if ("F", "group_norm") in _originals:
+        return
+    original = F.group_norm
+
+    def group_norm(input, num_groups, weight=None, bias=None, eps=1e-5):
+        if _on_neuron(input) and input.dtype == torch.bfloat16:
+            return original(input.float(), num_groups,
+                            None if weight is None else weight.float(),
+                            None if bias is None else bias.float(), eps).to(input.dtype)
+        return original(input, num_groups, weight, bias, eps)
+
+    _originals[("F", "group_norm")] = original
+    F.group_norm = group_norm
+
+
 def install_neuron_workarounds() -> None:
     """Every workaround (idempotent): what prepare_runtime installs."""
     install_bool_bitwise_guard()
     install_layer_norm_fp32()
+    install_group_norm_fp32()
 
 
 def install_bool_bitwise_guard() -> None:
@@ -105,5 +132,6 @@ def uninstall_bool_bitwise_guard() -> None:
 
 uninstall_neuron_workarounds = uninstall_bool_bitwise_guard
 
-__all__ = ["install_bool_bitwise_guard", "install_layer_norm_fp32", "install_neuron_workarounds",
+__all__ = ["install_bool_bitwise_guard", "install_group_norm_fp32", "install_layer_norm_fp32",
+           "install_neuron_workarounds",
            "uninstall_bool_bitwise_guard", "uninstall_neuron_workarounds"]

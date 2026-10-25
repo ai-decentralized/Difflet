@@ -35,7 +35,8 @@ def root(tmp_path_factory):
 def app(root):
     a = TorchNeuronFluxApplication(model_path=root, parallel=DiffletParallelConfig(tp_degree=1),
                                    dtype=torch.float32, shape={"height": PIPE_HW, "width": PIPE_HW},
-                                   device="cpu", exec_mode="eager", text_seq_len=8)
+                                   device="cpu", exec_mode="eager", text_seq_len=8,
+                                   clip_dtype=torch.float32, vae_dtype=torch.float32)  # the fp32 oracle
     a.load()
     return a
 
