@@ -236,6 +236,8 @@ class TpuHunyuanVideoApplication(torch.nn.Module):
         module = transformer._prepare_module().to(device)
         device_runtime.step()
         device_runtime.wait()
+        # Not yet measured under torch.compile, so off unless DIFFLET_TPU_COMPILE=1.
+        module = device_runtime.maybe_compile(module, default=False)
         # Compile the request-shaped graph now, a few ranks at a time (see
         # warmup_eager on why): the first execution costs ~100 s and ~43 GB
         # of host RAM per rank on a v5e, and the serving smoke would
