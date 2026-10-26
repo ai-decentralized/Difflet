@@ -276,9 +276,12 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
                 started = time.perf_counter()
                 video = app.decode(latents).float().cpu()
                 decoded = time.perf_counter()
-                frames = processor.postprocess_video(video, output_type="np")[0]
                 out = Path(req.output or args.output or "hunyuan_video_15.mp4")
                 out.parent.mkdir(parents=True, exist_ok=True)
-                export_to_video(list(frames), str(out), fps=_FPS)
+                if out.suffix == ".pt":  # the decoded frames, free of video-encoding loss
+                    torch.save(video, str(out))
+                else:
+                    frames = processor.postprocess_video(video, output_type="np")[0]
+                    export_to_video(list(frames), str(out), fps=_FPS)
                 print(f"[hv15] request {req.index}: decode {decoded - started:.1f} s; "
                       f"[difflet] video saved to {out}", flush=True)

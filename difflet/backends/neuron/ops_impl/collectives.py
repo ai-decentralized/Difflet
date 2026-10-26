@@ -25,6 +25,8 @@ attention trades a sequence shard for a head shard and back with ``seq_to_heads`
 
 from __future__ import annotations
 
+import os
+
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as fc
@@ -60,6 +62,18 @@ def _wait(tensor: torch.Tensor) -> torch.Tensor:
     # Eager functional collectives return an AsyncCollectiveTensor; under tracing
     # they already end in wait_tensor and return a plain tensor.
     return tensor.wait() if isinstance(tensor, fc.AsyncCollectiveTensor) else tensor
+
+
+#: Sums across ranks in fp32 for half-precision tensors (``1``): upcast, reduce, cast back, as NxD's
+#: all-reduces run. Off by default; read when a graph is traced, so it is part of that graph.
+FP32_REDUCE_ENV = "DIFFLET_NEURON_FP32_REDUCE"
+
+
+def _summed(tensor: torch.Tensor, reduce) -> torch.Tensor:
+    """``reduce(tensor)``, in fp32 for bf16/fp16 inputs when FP32_REDUCE_ENV is set."""
+    if os.environ.get(FP32_REDUCE_ENV) == "1" and tensor.dtype in (torch.bfloat16, torch.float16):
+        return reduce(tensor.float()).to(tensor.dtype)
+    return reduce(tensor)
 
 
 def _divisible_dim(tensor: torch.Tensor, dim: int, parts: int, what: str) -> int:
@@ -111,7 +125,7 @@ def gather_tp_dim(tensor, *, dim: int):
 def reduce_tp(tensor):
     if get_tp_size() == 1:
         return tensor
-    return _wait(fc.all_reduce(tensor, "sum", get_tp_group()))
+    return _summed(tensor, lambda t: _wait(fc.all_reduce(t, "sum", get_tp_group())))
 
 
 def scatter_tp_dim(tensor, *, dim: int):
@@ -147,7 +161,8 @@ def reduce_scatter_to_sequence_parallel_region(tensor, *, dim: int):
     if tp_size == 1:
         return tensor
     axis = _divisible_dim(tensor, dim, tp_size, "reduce-scatter")
-    return _wait(fc.reduce_scatter_single(tensor.contiguous(), "sum", axis, get_tp_group()))
+    return _summed(tensor.contiguous(),
+                   lambda t: _wait(fc.reduce_scatter_single(t, "sum", axis, get_tp_group())))
 
 
 def gather_from_tensor_model_parallel_region_with_dim(tensor, gather_dim: int, process_group=None):
@@ -166,7 +181,7 @@ def reduce_from_tensor_model_parallel_region(tensor, process_group=None):
         return reduce_tp(tensor)
     if int(process_group.size()) == 1:
         return tensor
-    return _wait(fc.all_reduce(tensor, "sum", process_group))
+    return _summed(tensor, lambda t: _wait(fc.all_reduce(t, "sum", process_group)))
 
 
 def scatter_to_tensor_model_parallel_region(tensor, dim: int = -1):
