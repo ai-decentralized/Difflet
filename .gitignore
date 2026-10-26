@@ -11,7 +11,14 @@ dist/
 .venv/
 venv/
 env/
-docs/
+# docs/ stays local working material, except plans and verification records.
+docs/*
+!docs/plans/
+docs/plans/*
+!docs/plans/*.md
+!docs/verification/
+docs/verification/*
+!docs/verification/*.md
 docs_human/
 .history/
 # Compile cache (Trainium AOT artifacts can be huge)
