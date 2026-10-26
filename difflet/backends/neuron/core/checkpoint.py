@@ -195,18 +195,22 @@ def load_sharded_checkpoint(
         on_tensor=on_tensor,
     )
     if slices:
+        from difflet.backends.tpu.core.checkpoint import checkpoint_keys
+
+        # The same keys load_checkpoint_into chose its index by, so both read one index.
+        keys = checkpoint_keys(module, prefix=prefix, rename=rename)
         report = _load_slices(module, model_dir, slices, report, tp_size=tp_size, tp_rank=tp_rank,
-                              strict=strict, on_tensor=on_tensor)
+                              strict=strict, on_tensor=on_tensor, keys=keys)
     module.to(target)
     return report
 
 
 def _load_slices(module, model_dir, slices, report, *, tp_size, tp_rank, strict,
-                 on_tensor=None):
+                 on_tensor=None, keys=None):
     from difflet.backends.tpu.core.checkpoint import build_weight_map
     from difflet.backends.tpu.core.weights import shard_dim
 
-    weight_map = build_weight_map(model_dir)
+    weight_map = build_weight_map(model_dir, keys=keys)
     params = dict(module.named_parameters())
     with torch.no_grad():
         for name, spec in slices.items():

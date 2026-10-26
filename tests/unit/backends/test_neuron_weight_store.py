@@ -150,6 +150,22 @@ def test_a_parameter_sliced_from_a_fused_tensor_counts_as_its_stored_bytes(tmp_p
     assert weight_store._checkpoint_bytes(tmp_path, [bf16_in_ckpt, sliced]) == 16 + 32
 
 
+def test_the_byte_count_reads_the_index_holding_the_module_keys(tmp_path):
+    # LTX-2's text_encoder/ holds two complete indexes; the diffusers one sorts first and holds
+    # none of the module's keys. The count reads the index the load reads.
+    from safetensors.torch import save_file
+
+    save_file({"a": torch.zeros(4, 8, dtype=torch.float32)}, str(tmp_path / "model-1.safetensors"))
+    save_file({"x": torch.zeros(4, dtype=torch.float32)},
+              str(tmp_path / "diffusion_pytorch_model-1.safetensors"))
+    (tmp_path / "model.safetensors.index.json").write_text(
+        json.dumps({"weight_map": {"a": "model-1.safetensors"}}))
+    (tmp_path / "diffusion_pytorch_model.safetensors.index.json").write_text(
+        json.dumps({"weight_map": {"x": "diffusion_pytorch_model-1.safetensors"}}))
+    a = weight_store._Spec("a", "a", (4, 8), torch.bfloat16, None)  # fp32 on disk: 128 bytes
+    assert weight_store._checkpoint_bytes(tmp_path, [a]) == 4 * 8 * 4
+
+
 def test_the_store_file_is_plain_safetensors_in_the_load_dtype(toy, store):
     from safetensors.torch import load_file
 

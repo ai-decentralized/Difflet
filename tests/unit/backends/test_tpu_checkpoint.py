@@ -93,6 +93,53 @@ def test_weight_map_skips_an_index_whose_shards_are_missing(tmp_path):
     assert set(ckpt.build_weight_map(tmp_path)) == {"other.weight"}
 
 
+def _write_two_complete_indexes(tmp_path):
+    """LTX-2's text_encoder/ as downloaded on 2026-10-24: transformers' model.safetensors.index.json
+    and a diffusers diffusion_pytorch_model.safetensors.index.json, both with their shards on disk
+    and with different keys. The diffusers one sorts first."""
+    _write_sharded(tmp_path)
+    other = {"text_encoder.up.weight": torch.zeros(2), "connectors.proj.weight": torch.zeros(2)}
+    safetensors_torch.save_file(
+        other, str(tmp_path / "diffusion_pytorch_model-00001-of-00001.safetensors"))
+    (tmp_path / "diffusion_pytorch_model.safetensors.index.json").write_text(
+        json.dumps({"metadata": {}, "weight_map": {
+            k: "diffusion_pytorch_model-00001-of-00001.safetensors" for k in other}})
+    )
+    return tmp_path, set(other)
+
+
+def test_weight_map_picks_the_complete_index_holding_the_requested_keys(tmp_path):
+    directory, other = _write_two_complete_indexes(tmp_path)
+    assert set(ckpt.build_weight_map(directory, keys=FULL)) == set(FULL)
+    assert set(ckpt.build_weight_map(directory, keys=sorted(other))) == other
+    # One key from each: a tie, broken by name order.
+    assert set(ckpt.build_weight_map(directory, keys=["up.weight", "connectors.proj.weight",
+                                                      "neither"])) == other
+    # No requested keys: the first complete index in name order, as before.
+    assert set(ckpt.build_weight_map(directory)) == other
+    assert set(ckpt.build_weight_map(directory, keys=[])) == other
+
+
+def test_requested_keys_change_nothing_for_one_index_or_none(tmp_path):
+    sharded, single = tmp_path / "sharded", tmp_path / "single"
+    sharded.mkdir()
+    single.mkdir()
+    _write_sharded(sharded)
+    _write_single(single)
+    for directory in (sharded, single):
+        assert ckpt.build_weight_map(directory, keys=["nothing.here"]) == ckpt.build_weight_map(
+            directory)
+
+
+def test_the_loader_resolves_its_keys_from_the_index_holding_them(tmp_path):
+    pm.init_parallel_mesh(MeshSpec(tp=1))
+    directory, _ = _write_two_complete_indexes(tmp_path)
+    block = _Block()
+    report = ckpt.load_checkpoint_into(block, directory, tp_size=1, tp_rank=0)
+    assert report == {"missing": [], "unexpected": []}
+    torch.testing.assert_close(block.up.weight, FULL["up.weight"])
+
+
 def test_missing_checkpoint_directory(tmp_path):
     with pytest.raises(FileNotFoundError, match="no .safetensors"):
         ckpt.build_weight_map(tmp_path)

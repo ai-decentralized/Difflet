@@ -4,6 +4,8 @@ per TP shard within that range."""
 
 from __future__ import annotations
 
+import json
+
 import pytest
 import torch
 import torch.nn as nn
@@ -85,3 +87,24 @@ def test_no_slices_is_the_plain_loader(checkpoint, tmp_path):
     C.init_parallel_mesh(MeshSpec(tp=1))
     with pytest.raises(ValueError, match="had no checkpoint entry"):
         load_sharded_checkpoint(Fused(), model_dir, device="cpu", dtype=torch.float32, rename=_rename)
+
+
+def test_two_complete_indexes_resolve_from_the_one_holding_the_module_keys(checkpoint):
+    # LTX-2's text_encoder/ ships transformers' and diffusers' indexes, both complete; the
+    # diffusers one sorts first and holds none of the module's keys.
+    model_dir, weight, bias = checkpoint
+    (model_dir / "model.safetensors").rename(model_dir / "model-00001-of-00001.safetensors")
+    (model_dir / "model.safetensors.index.json").write_text(json.dumps({"weight_map": {
+        k: "model-00001-of-00001.safetensors" for k in ("proj_out.weight", "proj_out.bias")}}))
+    save_file({"connectors.weight": torch.zeros(2)},
+              str(model_dir / "diffusion_pytorch_model-00001-of-00001.safetensors"))
+    (model_dir / "diffusion_pytorch_model.safetensors.index.json").write_text(json.dumps(
+        {"weight_map": {"connectors.weight": "diffusion_pytorch_model-00001-of-00001.safetensors"}}))
+    C.init_parallel_mesh(MeshSpec(tp=1))
+    module = Fused()
+    report = load_sharded_checkpoint(module, model_dir, device="cpu", dtype=torch.float32,
+                                     rename=_rename, slices=SLICES)
+    assert report == {"missing": [], "unexpected": []}
+    torch.testing.assert_close(module.attn.weight, weight[:, :ATTN])
+    torch.testing.assert_close(module.mlp.weight, weight[:, ATTN:])
+    torch.testing.assert_close(module.attn.bias, bias)
