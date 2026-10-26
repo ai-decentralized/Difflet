@@ -12,6 +12,7 @@ def _wan_args(**overrides) -> argparse.Namespace:
         prompt="a cat walking", output="/tmp/wan.mp4",
         steps=2, guidance_scale=1.0, seed=42,
         work_dir=None, keep_work_dir=False,
+        device_vae=True,  # these tests cover the device VAE stage; the host default is tested elsewhere
         teacache_cadence=None, teacache_online_delta=None,
         teacache_speedup=None, teacache_calibration=None,
     )

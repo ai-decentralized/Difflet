@@ -168,10 +168,17 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
         "--host-vae",
         dest="host_vae",
         action="store_true",
-        help="Decode the VAE on host CPU via diffusers instead of a "
-        "compiled Neuron VAE. Required for Wan clips beyond ~9 "
-        "frames: the single-shot Neuron VAE graph exceeds the "
-        "compiler instruction limit (NCC_EVRF007).",
+        help="Decode the VAE on host CPU via diffusers (fp32) instead of a "
+        "compiled Neuron VAE. Wan already decodes on the host by default; "
+        "the flag remains for other models and for explicitness.",
+    )
+    p.add_argument(
+        "--device-vae",
+        dest="device_vae",
+        action="store_true",
+        help="Wan: decode with the compiled bf16 Neuron VAE instead of the default fp32 host "
+        "decode. Known to degrade short clips (blur, grid artifacts; under investigation); "
+        "beyond ~9 frames the graph also exceeds the compiler instruction limit (NCC_EVRF007).",
     )
     p.add_argument(
         "--taef1",
