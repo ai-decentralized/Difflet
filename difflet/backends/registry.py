@@ -55,12 +55,17 @@ def _auto_detect_backend() -> str:
     if importlib.util.find_spec("torch_neuronx") is not None:
         return "trainium"
 
-    # TPU hosts: torch_xla plus the TPU runtime library. The torch_neuronx
-    # check above must stay first — Neuron venvs also ship torch_xla but
-    # never libtpu, so a Trainium host cannot mis-detect as TPU.
-    if (
-        importlib.util.find_spec("torch_xla") is not None
-        and importlib.util.find_spec("libtpu") is not None
+    # TPU hosts: libtpu plus a TPU runtime library — torch_xla today, torch_tpu
+    # after docs/plans/2026-10-22-torchtpu-migration.md. The torch_neuronx check
+    # above must stay first: Neuron venvs also ship torch_xla but never libtpu,
+    # so a Trainium host cannot mis-detect as TPU.
+    #
+    # Deliberately no import of difflet.backends.tpu here. This function is on
+    # every backend's path, Trainium's included, and must not grow a dependency
+    # on one backend's package — "is this a TPU host" is a different question
+    # from "which runtime do TPU ops call", which device_runtime owns.
+    if importlib.util.find_spec("libtpu") is not None and any(
+        importlib.util.find_spec(m) is not None for m in ("torch_xla", "torch_tpu")
     ):
         return "tpu"
 

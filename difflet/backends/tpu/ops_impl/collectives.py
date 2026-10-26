@@ -100,10 +100,10 @@ def _groups(groups: list[list[int]] | None) -> tuple[list[int], int]:
 def _all_gather_dim(
     tensor: torch.Tensor, dim: int, groups_flat: list[int], group_size: int
 ) -> torch.Tensor:
-    import torch_xla.core.xla_model as xm
+    from difflet.backends.tpu.ops_impl import device_runtime
 
-    return xm.all_gather(
-        tensor, dim=dim, groups=_unflatten(groups_flat, group_size), pin_layout=False
+    return device_runtime.all_gather(
+        tensor, dim=dim, groups=_unflatten(groups_flat, group_size)
     )
 
 
@@ -120,13 +120,10 @@ def _(
 def _all_reduce_sum(
     tensor: torch.Tensor, groups_flat: list[int], group_size: int
 ) -> torch.Tensor:
-    import torch_xla.core.xla_model as xm
+    from difflet.backends.tpu.ops_impl import device_runtime
 
-    return xm.all_reduce(
-        xm.REDUCE_SUM,
-        tensor,
-        groups=_unflatten(groups_flat, group_size),
-        pin_layout=False,
+    return device_runtime.all_reduce_sum(
+        tensor, groups=_unflatten(groups_flat, group_size)
     )
 
 
@@ -139,16 +136,13 @@ def _(tensor: torch.Tensor, groups_flat: list[int], group_size: int) -> torch.Te
 def _reduce_scatter_sum_dim(
     tensor: torch.Tensor, dim: int, groups_flat: list[int], group_size: int
 ) -> torch.Tensor:
-    import torch_xla.core.xla_model as xm
+    from difflet.backends.tpu.ops_impl import device_runtime
 
-    return xm.reduce_scatter(
-        xm.REDUCE_SUM,
+    return device_runtime.reduce_scatter_sum(
         tensor,
-        scale=1.0,
-        scatter_dim=dim,
+        dim=dim,
         shard_count=group_size,
         groups=_unflatten(groups_flat, group_size),
-        pin_layout=False,
     )
 
 
@@ -272,9 +266,9 @@ class SPMDRank(torch.nn.Module):
 
 
 def _global_rank() -> int:
-    import torch_xla.runtime as xr
+    from difflet.backends.tpu.ops_impl import device_runtime
 
-    return int(xr.global_ordinal())
+    return device_runtime.rank()
 
 
 class _WorldGroup:

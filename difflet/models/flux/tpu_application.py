@@ -56,9 +56,9 @@ def _normalize_dtype(dtype: Any) -> torch.dtype:
 
 
 def _is_encoder_rank() -> bool:
-    import torch_xla.runtime as xr
+    from difflet.backends.tpu.ops_impl import device_runtime
 
-    return int(xr.global_ordinal()) == 0
+    return device_runtime.rank() == 0
 
 
 def _is_primary_replica() -> bool:
@@ -194,10 +194,9 @@ class TpuBroadcastT5Encoder:
             return self.model(ids, output_hidden_states=False)[0]
 
     def __call__(self, prompt: str) -> torch.Tensor:
-        import torch_xla
-        import torch_xla.core.xla_model as xm
+        from difflet.backends.tpu.ops_impl import device_runtime
 
-        device = torch_xla.device()
+        device = device_runtime.device()
         embeds = torch.zeros(1, self.seq_len, self.hidden_size, dtype=self.dtype)
         status = _ENCODE_OK
         if self.is_encoder:
@@ -208,8 +207,8 @@ class TpuBroadcastT5Encoder:
                 status = _ENCODE_FAILED
                 embeds = torch.zeros(1, self.seq_len, self.hidden_size, dtype=self.dtype)
         payload = [embeds.to(device), torch.tensor([status], dtype=torch.int32).to(device)]
-        xm.collective_broadcast(payload, root_ordinal=0)
-        xm.mark_step()
+        device_runtime.broadcast(payload)
+        device_runtime.step()
         if int(payload[1].cpu()[0]) != _ENCODE_OK:
             raise RuntimeError("Flux T5 prompt encoding failed on the encoder rank")
         return payload[0].cpu()
@@ -242,24 +241,24 @@ class TpuDeviceImageVae:
     """Flux's ``AutoencoderKL`` decoder on the chip, with the scaling/shift applied on device."""
 
     def __init__(self, vae, dtype: torch.dtype):
-        import torch_xla
+        from difflet.backends.tpu.ops_impl import device_runtime
 
         self.config = vae.config
         self.dtype = dtype
         self.scaling_factor = float(vae.config.scaling_factor)
         self.shift_factor = float(getattr(vae.config, "shift_factor", 0.0) or 0.0)
-        self._device = torch_xla.device()
+        self._device = device_runtime.device()
         self._vae = vae.to(dtype).to(self._device).eval()
 
     def decode(self, latents):
         """(1, C, H, W) *scaled* latents (as the DiT produces them) -> (1, 3, 8H, 8W) fp32 host."""
-        import torch_xla.core.xla_model as xm
+        from difflet.backends.tpu.ops_impl import device_runtime
 
         z = latents.to(torch.float32).to(self._device)
         z = (z / self.scaling_factor + self.shift_factor).to(self.dtype)
         with torch.no_grad():
             out = self._vae.decode(z, return_dict=False)[0]
-        xm.mark_step()
+        device_runtime.step()
         return out.float().cpu()
 
 
@@ -341,18 +340,20 @@ class TpuFluxApplication(torch.nn.Module):
     def load_eager(self) -> None:
         """DiT to the chip (gated warmup compile), then the host encoders, the
         scheduler and — on the primary replica — the VAE on the chip."""
-        import torch_xla
-        import torch_xla.core.xla_model as xm
+        from difflet.backends.tpu.ops_impl import device_runtime
         from diffusers import FlowMatchEulerDiscreteScheduler
 
         transformer = self._require_transformer("load")
-        device = torch_xla.device()
+        device = device_runtime.device()
         mark = time.monotonic()
         module = transformer._prepare_module().to(device)
         transformer.module = module
-        xm.mark_step()
-        xm.wait_device_ops()
+        device_runtime.step()
+        device_runtime.wait()
         self.last_timings["dit_load_s"] = time.monotonic() - mark
+        # Before warmup, so the whole-graph compile lands in startup rather than
+        # in the first real request.
+        module = device_runtime.maybe_compile(module, default=True)  # measured
         seconds = transformer.warmup_eager(module, device)
         self.last_timings["warmup_s"] = seconds
         print(f"[flux] tpu warmup (first compile) in {seconds:.1f}s", flush=True)
@@ -409,11 +410,10 @@ class TpuFluxApplication(torch.nn.Module):
 
     def forward_dit(self, **inputs) -> torch.Tensor:
         """One DiT forward with host tensors in and out (oracle / harness surface)."""
-        import torch_xla
-        import torch_xla.core.xla_model as xm
+        from difflet.backends.tpu.ops_impl import device_runtime
 
         transformer = self._require_transformer("forward")
-        device = torch_xla.device()
+        device = device_runtime.device()
         order = ("hidden_states", "encoder_hidden_states", "pooled_projections", "timestep",
                  "img_ids", "txt_ids", "guidance")
         args = []
@@ -424,14 +424,13 @@ class TpuFluxApplication(torch.nn.Module):
             args.append(None if value is None else value.to(device))
         with torch.no_grad():
             out = transformer.forward(*args)
-        xm.mark_step()
+        device_runtime.step()
         return out.cpu()
 
     def denoise(self, text: dict[str, torch.Tensor], *, num_inference_steps: int, guidance_scale: float,
                 generator, height: int | None = None, width: int | None = None) -> torch.Tensor:
         """Packed fp32 latents on the host after the device-resident loop."""
-        import torch_xla
-        import torch_xla.core.xla_model as xm
+        from difflet.backends.tpu.ops_impl import device_runtime
 
         transformer = self._require_transformer("denoise")
         if self.scheduler is None:
@@ -444,7 +443,7 @@ class TpuFluxApplication(torch.nn.Module):
                 f"got {height}x{width}"
             )
         cfg = transformer.config
-        device = torch_xla.device()
+        device = device_runtime.device()
         packed, img_ids = prepare_packed_latents(
             height, width, in_channels_latent=int(cfg.in_channels) // 4, generator=generator
         )
@@ -471,7 +470,7 @@ class TpuFluxApplication(torch.nn.Module):
 
         with torch.no_grad():
             latents = device_euler_loop(
-                forward, latents, timesteps, deltas, controller=self.teacache, mark_step=xm.mark_step
+                forward, latents, timesteps, deltas, controller=self.teacache, mark_step=device_runtime.step
             )
         out = latents.cpu()
         if self.teacache is not None:

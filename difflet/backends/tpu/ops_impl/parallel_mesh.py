@@ -24,17 +24,15 @@ _MESH_SPEC: MeshSpec | None = None
 
 
 def _runtime_world_size() -> int:
-    import torch_xla.runtime as xr
+    from difflet.backends.tpu.ops_impl import device_runtime
 
-    return int(xr.world_size())
+    return device_runtime.world_size()
 
 
 def _runtime_ordinal() -> int:
-    # torch_xla 2.9 removed xm.get_ordinal()/xm.xrt_world_size(); the
-    # replacements live on torch_xla.runtime.
-    import torch_xla.runtime as xr
+    from difflet.backends.tpu.ops_impl import device_runtime
 
-    return int(xr.global_ordinal())
+    return device_runtime.rank()
 
 
 def mesh_spec_from_config(config) -> MeshSpec:

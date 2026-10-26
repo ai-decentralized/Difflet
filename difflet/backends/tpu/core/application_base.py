@@ -52,7 +52,29 @@ def compile_slot(slots: int | None = None, *, poll_seconds: float = 1.0):
     ``slots`` <= 0 disables the gate. The files live under
     ``$DIFFLET_TPU_COMPILE_LOCK_DIR`` (default ``/tmp``); processes on one
     host that share the directory share the budget.
+
+    **Disabled under torch_tpu, because there it deadlocks.** The gate is only
+    safe on a lazy runtime: under torch_xla the forward inside the slot builds a
+    graph and ``mark_step()`` dispatches it, so the slot is released before any
+    collective blocks on the host. Under torch_tpu the forward is eager, the
+    tp collectives in it block *inside* the slot, and the ranks that hold the
+    two slots wait forever for the two that are waiting for a slot. Observed on
+    FLUX.1-dev at tp=4: 17 minutes silent, ``/proc/locks`` showing two ranks on
+    the two slot files and the other two in ``nanosleep`` polling for one.
+    Qwen-Image and Wan never hit it because they do not call ``warmup_eager``.
+
+    Nor is the gate needed there. It exists to keep four ranks from compiling a
+    60-block DiT at once (~43 GB host each); torch_tpu's tier-2 cache gives one
+    rank the compile and hands the result to the rest, measured in Phase 0d of
+    docs/plans/2026-10-22-torchtpu-migration.md as 37 compilations on one rank
+    and 0 on the other three.
     """
+    from difflet.backends.tpu.ops_impl import device_runtime
+
+    if device_runtime.runtime_name() != device_runtime.TORCH_XLA:
+        yield
+        return
+
     import fcntl
     import time
 
@@ -143,9 +165,9 @@ class TpuApplicationBase(torch.nn.Module):
         """This process's global rank; 0 without a multi-device runtime."""
         if spec.world_size == 1:
             return 0
-        import torch_xla.runtime as xr
+        from difflet.backends.tpu.ops_impl import device_runtime
 
-        return int(xr.global_ordinal())
+        return device_runtime.rank()
 
     def _prepare_module(self) -> torch.nn.Module:
         if self.module is None:
@@ -259,7 +281,8 @@ class TpuApplicationBase(torch.nn.Module):
         import time
 
         import torch
-        import torch_xla.core.xla_model as xm
+
+        from difflet.backends.tpu.ops_impl import device_runtime
 
         try:
             inputs = self.get_example_inputs()
@@ -273,8 +296,8 @@ class TpuApplicationBase(torch.nn.Module):
         with compile_slot(slots):
             with torch.no_grad():
                 out = self.forward(*[t.to(device) if hasattr(t, "to") else t for t in inputs])
-            xm.mark_step()
-        xm.wait_device_ops()
+            device_runtime.step()
+        device_runtime.wait()
         del out
         return time.monotonic() - started
 

@@ -29,6 +29,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import pathlib
 import sys
 from pathlib import Path
 
@@ -243,6 +244,46 @@ def write_outputs(slug: str, res: BenchResult) -> None:
           f"-> {report_path(slug)}", flush=True)
 
 
+def _refuse_cross_device_write(backend: str) -> None:
+    """Refuse to write one backend's results into another backend's folder.
+
+    ``--backend`` and the output folder are independent: the folder comes from
+    ``DIFFLET_BENCH_DEVICE`` (benchmark/models.py), which defaults to ``trn2``.
+    So ``--backend tpu`` with the variable unset runs on TPU and overwrites
+    Trainium's recorded numbers — silently, and on a failed run too. That
+    happened on 2026-10-22 and cost benchmark/trn2/qwen_image.{json,md} until
+    they were restored from git.
+
+    The expected backend is read from the results already in the folder rather
+    than a table here, so a new device folder needs no change to this file and
+    the rule cannot drift from the data it protects. An empty or new folder is
+    allowed: that is how a new device gets its first row.
+    """
+    import json
+
+    from benchmark.models import DEVICE, results_dir
+
+    folder = pathlib.Path(results_dir())
+    recorded = set()
+    for path in sorted(folder.glob("*.json")):
+        try:
+            found = json.loads(path.read_text()).get("backend")
+        except (OSError, json.JSONDecodeError):
+            continue
+        if found:
+            recorded.add(found)
+
+    if recorded and backend not in recorded:
+        owner = ", ".join(sorted(recorded))
+        raise SystemExit(
+            f"refusing to write {backend!r} results into {folder}/, whose existing "
+            f"results were produced by {owner}.\n"
+            f"The output folder is DIFFLET_BENCH_DEVICE (currently {DEVICE!r}), not "
+            f"--backend. Set it to this backend's device, e.g.\n"
+            f"    DIFFLET_BENCH_DEVICE=v5e python -m benchmark.bench --backend tpu ..."
+        )
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description="Difflet diffusion benchmark")
     p.add_argument("--model", help="matrix slug (e.g. ltx_2, flux_1_dev)")
@@ -270,6 +311,8 @@ def main() -> int:
                    help="directory for the decoded outputs of every run (png / mp4 + "
                         "contact sheet), named <slug>_<phase>")
     args = p.parse_args()
+
+    _refuse_cross_device_write(args.backend)
 
     if args.all:
         slugs = list(MATRIX)

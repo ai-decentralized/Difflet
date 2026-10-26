@@ -33,6 +33,7 @@ from the resident request here.
 
 from __future__ import annotations
 
+import itertools
 import multiprocessing as mp
 import os
 import time
@@ -85,15 +86,67 @@ def _worker(rank, world, payload, cmd_q, reply_q):
         raise
 
 
+def _device_tensors(obj, depth=0, seen=None):
+    """Device-resident tensors reachable from a driver, a few attributes deep."""
+    import torch
+
+    if seen is None:
+        seen = set()
+    if id(obj) in seen or depth > 4:
+        return
+    seen.add(id(obj))
+    if isinstance(obj, torch.nn.Module):
+        for tensor in itertools.chain(obj.parameters(), obj.buffers()):
+            if tensor.device.type in ("xla", "tpu"):
+                yield tensor
+        return
+    if isinstance(obj, torch.Tensor):
+        if obj.device.type in ("xla", "tpu"):
+            yield obj
+        return
+    for value in list(getattr(obj, "__dict__", {}).values()):
+        yield from _device_tensors(value, depth + 1, seen)
+
+
+def _materialize_resident(driver) -> int:
+    """Block until every weight the driver put on the chip has actually arrived.
+
+    ``load_seconds`` is not comparable across the two TPU runtimes. torch_xla is
+    lazy: ``.to(device)`` records the transfer and ``mark_step()`` dispatches
+    without waiting, so its load timer stops while the weights are still in
+    flight and the cost lands in the first request. torch_tpu's ``.to()``
+    completes before returning. Measured on the h2d probe: an unforced torch_xla
+    copy reports 20-46 GB/s, a forced one 5.6 GB/s.
+
+    One element per tensor is enough. A computation that depends on a buffer
+    waits for the whole buffer, so this proves every transfer finished without
+    reducing gigabytes of weights.
+
+    **Known confound:** on torch_xla the reduction is itself a graph that must be
+    compiled, and that compile is inside the timed region. It is recorded on its
+    own line (``weights_materialize_s``) rather than folded in, so a reader can
+    see whether a large value is transfer or compilation.
+
+    Returns how many tensors were touched.
+    """
+    total = None
+    count = 0
+    for tensor in _device_tensors(driver):
+        one = tensor.detach().reshape(-1)[:1].float().sum()
+        total = one if total is None else total + one
+        count += 1
+    if total is not None:
+        float(total.cpu())
+    return count
+
+
 def _worker_body(rank, world, payload, cmd_q, reply_q):
     """One rank: bring up its chip, load the model, then serve requests."""
-    from torch_xla._internal import pjrt
+    from difflet.backends.tpu.ops_impl import device_runtime
 
-    pjrt.initialize_multiprocess(rank, world)
+    device_runtime.initialize_replica(rank, world)
 
     import torch
-    import torch_xla
-    import torch_xla.core.xla_model as xm
 
     # The serving adapters decode on the primary replica only; the drivers
     # read the same variable difflet/serving/models/* read.
@@ -106,7 +159,7 @@ def _worker_body(rank, world, payload, cmd_q, reply_q):
     from benchmark.adapters.tpu_models import frames_uint8, make_driver, output_info, save_media
     from benchmark.harness import RealLoopStepTimer
 
-    device = torch_xla.device()
+    device = device_runtime.device()
 
     # Mutable so one worker serves both bases without a reload: the
     # comparable synced pass and the natural pass a serving loop runs. Under
@@ -127,7 +180,7 @@ def _worker_body(rank, world, payload, cmd_q, reply_q):
 
     def _sync():
         if sync_now["on"]:
-            xm.wait_device_ops()
+            device_runtime.wait()
 
     timer = RealLoopStepTimer(sync=_sync)
     driver = make_driver(payload, rank, world, timer)
@@ -135,10 +188,15 @@ def _worker_body(rank, world, payload, cmd_q, reply_q):
     started = time.monotonic()
     stages = driver.load()
     load_seconds = time.monotonic() - started
+    # Additive: load_seconds keeps its historical meaning so old reports stay
+    # comparable to themselves; these two make it comparable across runtimes.
+    mark = time.monotonic()
+    materialized_tensors = _materialize_resident(driver)
+    materialize_seconds = time.monotonic() - mark
 
     def mem_gb():
         try:
-            info = xm.get_memory_info(device)
+            info = device_runtime.memory_info(device)
             used = info.get("peak_bytes_used") or info.get("bytes_used") or 0
             return used / 2**30
         except Exception:  # noqa: BLE001
@@ -146,6 +204,8 @@ def _worker_body(rank, world, payload, cmd_q, reply_q):
 
     reply_q.put({
         "type": "ready", "rank": rank, "load_seconds": load_seconds,
+        "materialize_seconds": materialize_seconds,
+        "materialized_tensors": materialized_tensors,
         "load_stages": {name: round(seconds, 3) for name, seconds in stages.items()},
         "mem_after_load_gb": mem_gb(),
     })
@@ -213,6 +273,8 @@ class TpuAdapter(BackendAdapter):
         self._cmd_qs: list = []
         self._reply_q = None
         self._load_seconds = 0.0
+        self._materialize_seconds = None
+        self._materialized_tensors = None
         self._load_stages: dict[str, float] = {}
         self._mem_after_load_gb = None
         self._tag = "run"
@@ -320,6 +382,11 @@ class TpuAdapter(BackendAdapter):
     def _start(self, spec) -> None:
         world = self.world_size()
         payload = self._payload(spec)
+        # Parent-side launch environment, before any worker exists; a no-op
+        # under torch_xla. See device_runtime.prepare_launch.
+        from difflet.backends.tpu.ops_impl import device_runtime
+
+        device_runtime.prepare_launch(world)
         ctx = mp.get_context("spawn")
         self._cmd_qs = [ctx.Queue() for _ in range(world)]
         self._reply_q = ctx.Queue()
@@ -337,6 +404,8 @@ class TpuAdapter(BackendAdapter):
             pending.discard(reply["rank"])
             if reply["rank"] == 0:
                 self._load_seconds = reply["load_seconds"]
+                self._materialize_seconds = reply.get("materialize_seconds")
+                self._materialized_tensors = reply.get("materialized_tensors")
                 self._load_stages = dict(reply.get("load_stages") or {})
                 self._mem_after_load_gb = reply.get("mem_after_load_gb")
 
@@ -427,6 +496,16 @@ class TpuAdapter(BackendAdapter):
             "stages": stages,
             "weights_shard_total_s": 0.0,
             "weights_load_total_s": round(load, 3),
+            # Comparable across torch_xla and torch_tpu; see _materialize_resident.
+            "weights_materialize_s": (
+                round(self._materialize_seconds, 3)
+                if self._materialize_seconds is not None else None
+            ),
+            "weights_load_materialized_s": (
+                round(load + self._materialize_seconds, 3)
+                if self._materialize_seconds is not None else None
+            ),
+            "weights_materialized_tensors": self._materialized_tensors,
             "wall_total_s": round(wall, 3),
             "compute_and_overhead_s": round(wall - load, 3),
             "note": (
