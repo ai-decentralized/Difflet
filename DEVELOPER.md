@@ -477,8 +477,15 @@ Run unit tests directly:
 PYTHONPATH=. pytest tests/unit -q
 ```
 
-Format Difflet-authored code:
+Lint and format: install the pre-commit hooks once, and ruff, black, and isort run on the
+files each commit touches. CI enforces `ruff check .` repo-wide. The forked-from-NxDI
+directories (`difflet/layers`, `difflet/utils`, `difflet/models/flux`) keep upstream
+formatting.
 
 ```bash
-black difflet/pipeline difflet/cli difflet/registry.py examples tests
+pip install -e ".[dev]"
+pre-commit install
+pre-commit run --files <paths>      # run the hooks by hand
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the pull-request checklist.

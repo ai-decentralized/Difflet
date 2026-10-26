@@ -8,16 +8,42 @@ on:
   push:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  unit-cpu:
+  # ruff is enforced repo-wide. black/isort run through pre-commit on changed
+  # files only until the one-off repo-wide reformat lands.
+  lint:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install ruff==0.15.1
+
+      - name: Ruff
+        run: ruff check --output-format=github .
+
+  unit-cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
           cache: pip
 
       # CPU wheels only: the default index would pull multi-GB CUDA builds.
@@ -40,5 +66,5 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cpu-gate-logs
+          name: cpu-gate-logs-py${{ matrix.python-version }}
           path: ${{ runner.temp }}/cpu-gate

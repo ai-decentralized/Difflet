@@ -14,6 +14,7 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
 
@@ -74,8 +75,10 @@ dev = [
 ]
 
 [project.urls]
-"Source" = "https://github.com/<org>/difflet-diffusion"          # placeholder
-"Tracker" = "https://github.com/<org>/difflet-diffusion/issues"  # placeholder
+"Homepage" = "https://github.com/ai-decentralized/Difflet"
+"Source" = "https://github.com/ai-decentralized/Difflet"
+"Tracker" = "https://github.com/ai-decentralized/Difflet/issues"
+"Documentation" = "https://github.com/ai-decentralized/Difflet/blob/main/README.md"
 
 [project.scripts]
 difflet = "difflet.cli.main:main"

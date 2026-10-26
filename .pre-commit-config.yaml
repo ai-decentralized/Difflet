@@ -1,0 +1,36 @@
+# Install once with `pip install -e ".[dev]" && pre-commit install`.
+# Versions match the pins in pyproject.toml's `dev` extra. The forked-from-NxDI
+# directories keep upstream formatting (see [tool.black] in pyproject.toml);
+# they are excluded here too because black ignores extend-exclude for files
+# passed explicitly, which is how pre-commit invokes it.
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.1
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+
+  - repo: https://github.com/psf/black-pre-commit-mirror
+    rev: 26.1.0
+    hooks:
+      - id: black
+        exclude: &forked ^difflet/(layers|utils|models/flux)/
+
+  - repo: https://github.com/PyCQA/isort
+    rev: 8.0.1
+    hooks:
+      - id: isort
+        exclude: *forked
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+      - id: end-of-file-fixer
+        exclude: ^(artifacts|docs)/
+      - id: trailing-whitespace
+        exclude: ^(artifacts|docs)/
