@@ -178,10 +178,10 @@ def _checkpoint_bytes(model_dir: Path, specs: list[_Spec]) -> int | None:
     there. A spec whose key is not in the checkpoint is a parameter sliced from a fused tensor
     (``CheckpointSlice``, e.g. Flux's ``proj_out_attn``): it counts as its stored bytes, so it
     neither argues for nor against a write, and a same-dtype checkpoint with sliced parameters
-    is still "no gain"."""
+    is still "no gain". The index is picked by the specs' keys, as the load picks it."""
     from difflet.backends.tpu.core.checkpoint import build_weight_map
 
-    weight_map = build_weight_map(model_dir)
+    weight_map = build_weight_map(model_dir, keys=[spec.key for spec in specs])
     headers: dict[str, dict[str, Any]] = {}
     total = 0
     for spec in specs:
