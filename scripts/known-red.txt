@@ -1,0 +1,2 @@
+tests/unit/serving/test_video_storage.py::test_delete_staging_refuses_replaced_inode
+tests/unit/serving/test_video_storage.py::test_staging_validation_rejects_path_mismatch_replacement_and_symlink
