@@ -67,13 +67,14 @@ def test_hunyuan_explicit_neuron_clip_preserves_default_neuron_vae():
     assert resolved.profile.host_vae is False
 
 
-def test_wan_defaults_to_neuron_vae():
+def test_wan_defaults_to_host_vae():
+    # the compiled bf16 device VAE degrades short Wan clips; the fp32 host decode is the default
     resolved = resolve_serving_model(
         ServeOptions(model_id="Wan-AI/Wan2.1-T2V-14B-Diffusers")
     )
 
-    assert resolved.profile.vae_placement == "neuron"
-    assert resolved.profile.host_vae is False
+    assert resolved.profile.vae_placement == "host"
+    assert resolved.profile.host_vae is True
 
 
 def test_ltx_keeps_required_host_vae_default():
