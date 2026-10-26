@@ -7,7 +7,6 @@ dir() reporting, and unknown-name behavior.
 from __future__ import annotations
 
 import importlib
-import os
 
 import pytest
 

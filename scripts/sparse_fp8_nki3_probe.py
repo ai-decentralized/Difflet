@@ -75,7 +75,6 @@ def main() -> int:
     print("=== Build NKI3 kernel ===")
     import nki
     import nki.language as nl
-    import nki.isa as nisa
     from nki.dtype import float8_e4m3fn_x4 as FP8X4
     # private op from NKI2 private path
     from neuronxcc.nki._private.private_api import nc_matmul_sparse

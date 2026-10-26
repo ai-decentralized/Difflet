@@ -1,7 +1,6 @@
 """Unit tests for difflet.layers.embeddings on the CPU backend."""
 
 import importlib
-import math
 
 import numpy as np
 import pytest

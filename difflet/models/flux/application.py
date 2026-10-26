@@ -49,7 +49,7 @@ from difflet.backends.trainium.flux.backbone import (
     NeuronFluxBackboneApplication,
 )
 from difflet.models.flux.pipeline import NeuronFluxPipeline
-from diffusers.models.autoencoders.vae import Decoder, DecoderTiny
+from diffusers.models.autoencoders.vae import DecoderTiny
 from difflet.models.flux.vae.modeling_vae import (
     NeuronVAEDecoderApplication,
     VAEDecoderInferenceConfig,

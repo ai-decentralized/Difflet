@@ -17,15 +17,12 @@ Pipeline:
 from __future__ import annotations
 
 import argparse
-import json
-import statistics
 import sys
 import time
 import traceback
 from pathlib import Path
 
 import torch
-import numpy as np
 
 
 def _build_dense_matmul_kernel():
@@ -57,7 +54,6 @@ def _build_sparse_matmul_kernel():
     """NKI2 sparse nc_matmul_sparse via private API."""
     from neuronxcc import nki
     import neuronxcc.nki.language as nl
-    import neuronxcc.nki.isa as nisa
     from neuronxcc.nki._private.private_api import nc_matmul_sparse
 
     @nki.jit

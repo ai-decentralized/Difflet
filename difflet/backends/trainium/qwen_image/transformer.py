@@ -35,7 +35,6 @@ from difflet.models.qwen_image.modeling_qwen_image import (  # noqa: F401 — re
     _row_parallel_like,
     _safe_tensor_parallel_size,
 )
-from difflet.ops import SPMDRank
 
 
 

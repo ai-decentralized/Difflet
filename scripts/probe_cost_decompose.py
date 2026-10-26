@@ -166,7 +166,6 @@ def _run_trivial(meta, tensors, out_dir: Path) -> dict:
         HunyuanVideoTrivialNEFF,
     )
     from difflet.models.hunyuan_video.application import create_hunyuan_video_backbone_config
-    from difflet.pipeline.parallel_config import DiffletParallelConfig
 
     class _TrivialWrapper(ModelWrapper):
         def __init__(self, config, model_cls, tag="", compiler_args=None,

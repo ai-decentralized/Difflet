@@ -6,7 +6,6 @@ import os
 import sys
 import types
 from types import SimpleNamespace
-from pathlib import Path
 from dataclasses import replace
 
 import pytest

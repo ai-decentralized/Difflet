@@ -11,6 +11,7 @@ import re
 import shutil
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from difflet.cli import runner
 from difflet.cli.orchestrators.base import (
@@ -23,6 +24,9 @@ from difflet.cli.orchestrators.base import (
     stage_toolchain_versions,
     write_stage_manifest,
 )
+
+if TYPE_CHECKING:
+    import torch
 
 # Model id comes from the CLI (--model-id); both Wan 2.2 A14B (MoE, dual
 # transformer) and Wan 2.1 14B (single transformer) route here. The single-vs-

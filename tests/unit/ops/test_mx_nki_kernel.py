@@ -85,7 +85,6 @@ def test_matmul_mx_k_tiles_kernel_simulates_zero_tile():
 )
 @pytest.mark.parametrize("k_tiles", [2, 8])
 def test_matmul_mx_k_tiles_kernel_simulates_numerical_parity(k_tiles):
-    import numpy as np
     import torch
     from nki.simulator import simulate_kernel
 

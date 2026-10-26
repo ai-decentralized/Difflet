@@ -1,6 +1,5 @@
 """Unit tests for difflet.utils.exceptions.LogitMatchingValidationError."""
 
-import pytest
 
 from difflet.utils.exceptions import LogitMatchingValidationError
 

@@ -11,11 +11,9 @@ import io
 import time
 import os
 import pathlib
-import subprocess
 import sys
 from unittest.mock import MagicMock, patch
 
-import pytest
 
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent.parent.parent / "scripts"))
 

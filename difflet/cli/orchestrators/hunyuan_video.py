@@ -13,6 +13,7 @@ import argparse
 import shutil
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from difflet.cli import runner
 from difflet.cli.orchestrators.base import (
@@ -24,6 +25,9 @@ from difflet.cli.orchestrators.base import (
     stage_toolchain_versions,
     write_stage_manifest,
 )
+
+if TYPE_CHECKING:
+    import torch
 
 _HF_MODEL_ID = "hunyuanvideo-community/HunyuanVideo"
 _MODEL_TYPE = "hunyuan_video"

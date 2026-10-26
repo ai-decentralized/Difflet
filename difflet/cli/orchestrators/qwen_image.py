@@ -21,7 +21,6 @@ from difflet.cli.orchestrators.base import (
     canonical_shapes_list,
     has_valid_stage_manifest,
     hashed_stage_dir,
-    parse_shapes_arg,
     require_request_shape_in_set,
     stage_toolchain_versions,
     write_stage_manifest,

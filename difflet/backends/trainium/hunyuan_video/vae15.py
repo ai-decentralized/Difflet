@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, List, Tuple
+from typing import List, Tuple
 
 import torch
 import torch.nn as nn

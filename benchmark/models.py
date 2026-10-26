@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Optional
 
 # The Neuron inference venv all Trainium runs use.
 NXD_VENV = "/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference"
