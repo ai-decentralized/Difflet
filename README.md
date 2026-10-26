@@ -448,6 +448,12 @@ paths, and stage core counts are in [docs/cli-staged-commands.md](docs/cli-stage
 Architecture, the backend abstraction, the compile cache, parallelism internals, the runtime
 protocol, and how to port a new model are in **[DEVELOPER.md](DEVELOPER.md)**.
 
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks, and the
+PR checklist, and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Report security issues privately
+as described in [SECURITY.md](SECURITY.md).
+
 ## License
 
 Apache License 2.0. See [`LICENSE`](LICENSE). Difflet incorporates code derived from

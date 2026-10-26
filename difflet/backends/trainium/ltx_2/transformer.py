@@ -71,7 +71,7 @@ def _difflet_apply_split_rotary_emb(
 
 # ── Tensor-parallel sharding (ports the validated AWS contrib recipe) ────────
 # Reference: aws-neuron/neuronx-distributed-inference/contrib/models/ltx2-video-audio
-# and /home/ubuntu/Armin-Neuron/ltx2/native-pytorch (validated TP=4, ~10 GB/rank).
+# and a native-PyTorch LTX-2 port (validated TP=4, ~10 GB/rank).
 #
 # Per block (x48) the shardable linears are the six LTX2Attention paths plus the
 # two FeedForwards. Q/K/V + FFN up-proj are column-parallel (gather_output=False);

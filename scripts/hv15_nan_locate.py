@@ -65,7 +65,6 @@ def _any_bad(out):
 
 
 def run(dtype, relax_mask2: bool, zero_byt5: bool, relax_mask1: bool = False):
-    import torch.nn as nn
     from diffusers.models.transformers.transformer_hunyuan_video15 import (
         HunyuanVideo15Transformer3DModel,
     )

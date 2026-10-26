@@ -1,7 +1,7 @@
 """Render a BenchResult (dict) into a detailed per-model Markdown performance report."""
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Optional
 
 
 def _fmt_s(x: Optional[float]) -> str:

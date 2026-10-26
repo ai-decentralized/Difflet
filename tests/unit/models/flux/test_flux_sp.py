@@ -34,7 +34,7 @@ def _reload(name):
 import difflet.backends.trainium.core.config as _config_mod  # noqa: E402
 import difflet.layers.normalization as _norm_mod  # noqa: E402
 
-import difflet.ops as _ops  # noqa: E402
+import difflet.ops as _ops  # noqa: E402, F401
 
 _reload("difflet.ops")
 mf = _reload("difflet.models.flux.modeling_flux")

@@ -14,7 +14,6 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from difflet.models.qwen_image import application as app_mod
 from difflet.models.qwen_image.application import (
     NeuronQwenImageApplication,
     QwenImageDiTInputBundle,

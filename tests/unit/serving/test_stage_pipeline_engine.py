@@ -33,7 +33,6 @@ from difflet.serving.types import (
     RuntimePlan,
     ServingProfile,
     StageDefinition,
-    StageExecutionResult,
     StageInvocation,
     StagePayload,
     StageRuntimeSpec,

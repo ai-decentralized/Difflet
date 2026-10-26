@@ -10,8 +10,6 @@ Registry defaults: height=480, width=848, num_frames=121, tp_degree=4
 """
 from __future__ import annotations
 
-import argparse
-import sys
 
 from difflet.cli.orchestrators.base import ModelOrchestrator
 

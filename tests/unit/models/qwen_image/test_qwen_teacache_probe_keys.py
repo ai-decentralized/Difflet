@@ -15,7 +15,6 @@ CPU only — tiny diffusers config, torch-native backend.
 from __future__ import annotations
 
 import json
-import os
 
 import pytest
 import torch

@@ -1,0 +1,63 @@
+name: Bug report
+description: Something is broken or produces wrong output.
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you expected, and what you got instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Command or code to reproduce
+      description: The exact `difflet` command, request, or Python snippet.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Error output / logs
+      description: Traceback or the relevant log tail. Compiler logs can be attached as files.
+      render: text
+  - type: dropdown
+    id: model
+    attributes:
+      label: Model
+      multiple: true
+      options:
+        - FLUX
+        - Qwen-Image
+        - Wan
+        - HunyuanVideo
+        - LTX-2
+        - Other / not model-specific
+    validations:
+      required: true
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Backend
+      options:
+        - Trainium (neuron)
+        - CUDA
+        - CPU reference
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Environment
+      description: |
+        Instance type, parallel flags (TP / CP / DP …), and versions. On Trainium include
+        the neuronx-cc and torch-neuronx versions; `pip list | grep -Ei "neuron|torch|diffusers"` is enough.
+      placeholder: |
+        Instance: trn2.3xlarge
+        Difflet commit: …
+        Flags: --tp-degree 4
+        neuronx-cc: …
+    validations:
+      required: true

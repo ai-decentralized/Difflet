@@ -33,7 +33,7 @@ Review:
 - Done: addressed fresh doc/code review mismatches: Qwen serving artifacts now require a profile-matched serving marker, Qwen revision is forwarded through staged subprocess compile/load helpers, engine docs describe in-flight worker 5xx recovery, and architecture docs distinguish legacy artifact `stage_id` from generic serving stage roles.
 - Done: addressed follow-up fresh-agent findings: chat prompt extraction now uses only the last user message, queue wait returns `504 request_timeout` when the request deadline expires before the worker slot opens, Flux serving uses a common orchestrator helper for pipeline/artifact checks, serving registry metadata exposes stage topology/roles, and docs now match ASGI lifespan startup order plus incremental CLI/common migration.
 - [x] Inspect the serving entry point, model/profile requirements, and runtime dependencies for Trainium deployment.
-- [x] Connect to `16.51.176.130` and inventory the instance hardware, OS, Neuron runtime, disk, and existing model caches.
+- [x] Connect to `<trn2-host>` and inventory the instance hardware, OS, Neuron runtime, disk, and existing model caches.
 - [x] Transfer the current clean branch and install the project without overwriting unrelated remote state.
 - [x] Compile Qwen-Image, run one real inference, and exercise resident-worker startup through its readiness gate.
 - [x] Record exact startup logs, inference outcome, remaining blockers, and verification commands.
@@ -52,7 +52,7 @@ Review:
   `torch`/`numpy` and a writable HuggingFace/Difflet cache in this environment.
 
 Deployment review (2026-07-10):
-- Done: deployed commit `94e6c42` to EC2 `16.51.176.130` in an AWS Neuron SDK 2.30 Ubuntu 24.04 container.
+- Done: deployed commit `94e6c42` to EC2 `<trn2-host>` in an AWS Neuron SDK 2.30 Ubuntu 24.04 container.
 - Done: downloaded Qwen-Image, compiled prompt encoder/denoiser/VAE artifacts, and generated a verified 1024x1024 RGB PNG with exit code 0.
 - Done: fixed Qwen serving preflight to accept NxD `model.pt` plus `neuron_config.json` artifacts; `tests/unit/serving` passes 52 tests.
 - Blocker: resident-worker co-load reaches decoder weight initialization, then segfaults in `libtorchneuron.so`; health/readiness never opens. Offline staged generation remains functional.
@@ -338,7 +338,7 @@ Serving/runtime implementation (2026-07-11):
   record, status queue, heartbeat thread, stage logging, and terminal arbitration.
 - [ ] Run Qwen and Flux Trainium compile/load/smoke before advancing each runtime
   migration phase.
-- Blocked verification: `ubuntu@16.51.182.190` timed out during SSH banner exchange
+- Blocked verification: `<trn2-host>` timed out during SSH banner exchange
   on 2026-07-11, so the new generation layout has not yet been exercised on Neuron.
 - [x] Address serving implementation review: include `artifact_manager.py` in the
   patch, derive rectangular Qwen latent grids from the frozen profile, enforce
@@ -412,7 +412,7 @@ PR review and remediation (2026-07-12):
   smoke remain unavailable in this local environment.
 
 New Trainium serving validation (2026-07-12):
-- [x] Inspect `16.26.177.239`, its Neuron SDK environment, disk, model cache, and
+- [x] Inspect the trn2 benchmark host, its Neuron SDK environment, disk, model cache, and
   artifact-store configuration.
 - [x] Rsync the current local worktree without Git metadata, caches, generated
   artifacts, or local secret files.
@@ -459,8 +459,8 @@ CLI versus serving benchmark (2026-07-12):
 - Verification: Qwen serving averaged 4.691s versus 77.455s for warm independent
   CLI processes (16.5x); Flux serving averaged 3.824s versus 48.770s (12.8x).
   All outputs are valid 1024x1024 RGB PNGs. Raw evidence and the final report are
-  under `artifacts/remote-logs/16.26.177.239/` and
-  `artifacts/cli-vs-serve-16.26.177.239.md`.
+  under `artifacts/remote-logs/<host>/` and
+  `artifacts/cli-vs-serve-2026-07-12.md`.
 
 Serving dotenv loading (2026-07-12):
 - [x] Load current-directory `.env` automatically for `difflet serve` without
@@ -490,7 +490,7 @@ HTTP disconnect, error contract, and artifact TTL review (2026-07-13):
 - [x] Define and test the R2 TTL contract for private presigned URLs versus public
   custom-domain URLs backed by bucket lifecycle deletion.
 - [x] Run focused/full serving tests, type/format/compile/diff checks.
-- [x] Inventory `16.26.110.85`, rsync the safe worktree subset, and validate real
+- [x] Inventory `<trn2-host>`, rsync the safe worktree subset, and validate real
   Flux/Qwen CLI plus serving health/readiness/HTTP generations sequentially.
 - Rationale: cancellation owns both race tasks and awaits every cancelled task;
   a queued cancellation releases admission/lock while an in-flight cancellation
@@ -502,7 +502,7 @@ HTTP disconnect, error contract, and artifact TTL review (2026-07-13):
   Regression tests cover task cleanup on disconnect, sanitized unexpected 500s,
   private `ExpiresIn`, and public custom-domain URL behavior.
 - Trainium verification: current worktree was synced to `/home/ubuntu/Difflet` on
-  four-core `trn2.3xlarge` host `16.26.110.85`. Qwen and Flux compile plus CLI
+  four-core `trn2.3xlarge` host `<trn2-host>`. Qwen and Flux compile plus CLI
   generation both exited 0 and produced validated 1024x1024 RGB PNGs at
   `outputs/{qwen,flux}-cli.png`. Serving ran strictly sequentially at TP4/CP1 and
   1024x1024 on `127.0.0.1:8092`; both passed real four-step startup smoke and
@@ -540,7 +540,7 @@ Malformed JSON error contract (2026-07-13):
 - [x] Run focused and full serving verification.
 - Verification: all 9 API-server tests and all 203 serving tests pass;
   targeted Mypy, Black, `compileall`, and `git diff --check` pass.
-- Trainium verification: synced to `16.26.110.85`, restarted Flux Serving, and
+- Trainium verification: synced to `<trn2-host>`, restarted Flux Serving, and
   confirmed malformed JSON returns the fixed OpenAI-style `400 invalid_request`
   payload while a valid four-step request returns 200 and a downloadable
   1024x1024 RGB PNG. Health and readiness remain 200.
@@ -570,7 +570,7 @@ Inherited NeuronCore compile allocation (2026-07-13):
   inherited core allocation.
 - Verification: 48 focused tests and 211 serving/CLI-runner tests pass locally;
   Black, isolated Mypy, `compileall`, and `git diff --check` pass. On
-  `16.26.110.85`, 32 core/compile-env tests pass including the synthetic `4-7`
+  `<trn2-host>`, 32 core/compile-env tests pass including the synthetic `4-7`
   allocation. A real Flux `--force` compile on the host's physical `0-3` cores,
   worker load, four-step HTTP generation, R2 upload/download, and final ready
   heartbeat all succeeded.

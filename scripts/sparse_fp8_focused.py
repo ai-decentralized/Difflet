@@ -2,7 +2,7 @@
 """Focused minimal sparse fp8 matmul attempt — single semantic layout."""
 from __future__ import annotations
 import sys, time, traceback
-import torch, numpy as np
+import torch
 
 
 def main() -> int:

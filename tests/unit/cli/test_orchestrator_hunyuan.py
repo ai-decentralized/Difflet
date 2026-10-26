@@ -52,7 +52,6 @@ class _Recorder:
 
 class _FakeTokenizer:
     def __init__(self, n):
-        import torch
         self._n = n
 
     @classmethod

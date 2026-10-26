@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from difflet.cli.orchestrators.base import ModelOrchestrator, adaptive_teacache_calibration
+
+if TYPE_CHECKING:
+    import torch
 
 _HF_MODEL_ID = "Lightricks/LTX-2"
 _MODEL_TYPE = "ltx_2"
