@@ -97,6 +97,14 @@ def _save_video(tensor: "torch.Tensor", output_path: str) -> bool:
     return True
 
 
+def _decode_on_device(args) -> bool:
+    """Wan decodes on the host in fp32 unless ``--device-vae`` asks for the compiled Neuron VAE:
+    the bf16 device decoder degrades short clips (blur and a grid pattern; the same latents decode
+    correctly on the host), and beyond ~9 frames its graph exceeds the compiler's instruction
+    limit. ``--host-vae`` keeps the host decode even with ``--device-vae``."""
+    return bool(getattr(args, "device_vae", False)) and not bool(getattr(args, "host_vae", False))
+
+
 def _decode_latents_host(latents_path: str, model_id: str, output_path: str,
                          revision: str | None = None) -> None:
     """Decode DiT latents with the diffusers Wan VAE on host CPU.
@@ -153,7 +161,7 @@ class WanOrchestrator(ModelOrchestrator):
                          num_cores=full_cores,
                          virtual_core_size=_transformer_virtual_core_size(self.args),
                          cli_args=shared)
-        if getattr(self.args, "host_vae", False):
+        if not _decode_on_device(self.args):
             return
         runner.run_stage(self.args.model_id, "vae",
                          num_cores=1, virtual_core_size=_VIRTUAL_CORE_SIZE,
@@ -173,7 +181,7 @@ class WanOrchestrator(ModelOrchestrator):
                              num_cores=full_cores,
                              virtual_core_size=_transformer_virtual_core_size(self.args),
                              cli_args=shared)
-            if getattr(self.args, "host_vae", False):
+            if not _decode_on_device(self.args):
                 _decode_latents_host(str(work_dir / "latents.pt"), self.args.model_id,
                                      self.args.output, revision=self.args.revision)
             else:
