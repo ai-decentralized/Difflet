@@ -9,6 +9,7 @@ All figures were measured on one instance, under matched conditions, by the same
 | Instance | trn2.3xlarge, LNC = 2 (4 logical NeuronCores, 24 GiB HBM each); host Xeon Platinum 8488C, 6 cores / 12 vCPUs, 124 GB RAM |
 | Storage | EBS gp3, 125 MB/s, 3000 IOPS (every cold figure is bounded by it) |
 | AoT stack | neuronx-cc 2.26.6360, PyTorch 2.9.1, torch-neuronx 2.9.0 (XLA), NxD 0.19, NxD Inference 0.10, Python 3.12 |
+| AoT code | Difflet `main` at 52b615f. Later `main` adds the all-reduce dtype to every compiled artifact's identity (`--tp-reduce-dtype`, so earlier artifacts are rebuilt) and decodes Wan on the host in fp32 by default |
 | Native stack | Neuron SDK 2.33 public DLAMI: PyTorch 2.14.0, torch-neuronx 2.14.3.0.1, neuronx-cc 2.28.7631, NKI 0.7.0, Python 3.12; diffusers 0.38.0, transformers 5.20.2 |
 | Models | FLUX.1-dev (rev. 3de623fc); Wan 2.2 T2V A14B (rev. 5be7df96), high-noise expert for all steps, as both CLIs run it; HunyuanVideo 1.5 480p T2V (rev. 286be7ce), native only |
 | Workloads | Flux 1024², 50 steps, guidance 3.5; Wan 480×832×9, 50 steps, CFG 4.0; HunyuanVideo 1.5 480×848×121, 50 steps, CFG 6.0 |
