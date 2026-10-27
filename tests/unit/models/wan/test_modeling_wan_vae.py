@@ -224,3 +224,97 @@ def test_attention_block_output_is_the_same_with_either_attention(monkeypatch):
         monkeypatch.setattr(m, "_spatial_attention_impl", lambda device_type: m._explicit_attention)
         explicit = block(x)
     torch.testing.assert_close(explicit, fused, rtol=1e-10, atol=1e-10)
+
+
+# ---- reduced precision (phase 3: the neuron decoder's bf16 opt-in) ---------------------------
+
+#: The tiny decoder with the real stage layout: the latent (1, 4, 2, 4, 6) decodes to 5 frames
+#: of 32 x 48, through the mid block's attention, two temporal and three spatial upsamples.
+_TINY_BF16_CFG = dict(base_dim=8, z_dim=4, dim_mult=[1, 2, 4, 4], num_res_blocks=1,
+                      temperal_downsample=[False, True, True])
+
+
+def _psnr(actual: torch.Tensor, reference: torch.Tensor) -> float:
+    """PSNR of decoded frames in [-1, 1] (peak-to-peak 2)."""
+    import math
+
+    mse = float(((actual.double() - reference.double()) ** 2).mean())
+    return math.inf if mse == 0 else 10 * math.log10(4.0 / mse)
+
+
+def _tiny_decoders(seed: int, *, fp32_output_head: bool):
+    """``(fp32 decoder, bf16 decoder)`` with the same seeded weights."""
+    from difflet.models.wan.vae.modeling_vae import WanVAEDecoderConfig, WanVAEDecoderModel
+
+    config = WanVAEDecoderConfig(**_TINY_BF16_CFG)
+    with torch.random.fork_rng(devices=[]):
+        torch.manual_seed(seed)
+        fp32 = WanVAEDecoderModel(config, fp32_output_head=fp32_output_head).eval()
+    bf16 = WanVAEDecoderModel(config, fp32_output_head=fp32_output_head).eval()
+    bf16.load_state_dict(fp32.state_dict())
+    return fp32, bf16.to(torch.bfloat16)
+
+
+def test_fp32_output_head_changes_nothing_in_fp32():
+    """The neuron decoder always builds the fp32 head: in fp32 (its default) the decode must be
+    the one it was, bit for bit."""
+    plain, _ = _tiny_decoders(0, fp32_output_head=False)
+    head, _ = _tiny_decoders(0, fp32_output_head=True)
+    assert head.decoder.conv_out.fp32_compute and not plain.decoder.conv_out.fp32_compute
+    z = torch.randn(1, 4, 2, 4, 6, generator=torch.Generator().manual_seed(1))
+    with torch.no_grad():
+        assert torch.equal(head(z), plain(z))
+
+
+def test_the_default_model_keeps_bf16_end_to_end():
+    """Without the head (the Trainium path's model) a bf16 decode stays bf16, as before."""
+    _, bf16 = _tiny_decoders(0, fp32_output_head=False)
+    z = torch.randn(1, 4, 2, 4, 6, generator=torch.Generator().manual_seed(1))
+    with torch.no_grad():
+        assert bf16(z.to(torch.bfloat16)).dtype == torch.bfloat16
+
+
+@pytest.mark.parametrize("attention", ["sdpa", "explicit"])
+@pytest.mark.parametrize("seed", [0, 1, 2])
+def test_bf16_decode_with_the_fp32_head_is_close_to_fp32(monkeypatch, attention, seed):
+    """bf16 weights and activations with the fp32 output head: fp32 frames (the head's weights
+    stay bf16, upcast per call), within bf16's error of the fp32 decode of the same latents. On
+    these random decoders bf16 lands at 48.9-55.3 dB; 40 dB catches a broken path (an fp32 op
+    fed bf16 garbage, a dropped upcast) without tracking rounding noise. The device gate is 50
+    dB on the real decoder (the plan's phase-3 runbook). ``explicit`` is the attention the
+    neuron device runs."""
+    from difflet.models.wan.vae import modeling_vae as m
+
+    if attention == "explicit":
+        monkeypatch.setattr(m, "_spatial_attention_impl", lambda device_type: m._explicit_attention)
+    fp32, bf16 = _tiny_decoders(seed, fp32_output_head=True)
+    assert bf16.decoder.conv_out.weight.dtype == torch.bfloat16
+    z = torch.randn(1, 4, 2, 4, 6, generator=torch.Generator().manual_seed(seed + 10))
+    with torch.no_grad():
+        reference = fp32(z)
+        frames = bf16(z.to(torch.bfloat16))
+    assert frames.dtype == torch.float32 and frames.shape == reference.shape == (1, 3, 5, 32, 48)
+    assert frames.abs().max() <= 1.0
+    assert _psnr(frames, reference) >= 40.0
+    assert float((frames - reference).abs().max()) < 0.15
+
+
+def test_explicit_attention_scores_in_fp32_for_bf16_inputs():
+    """bf16 q, k, v with large logits: the scores and the softmax in fp32 keep the written-out
+    attention near the fp64 result (here 0.48 max abs, against 1.81 for bf16 scores); the output
+    stays in v's dtype."""
+    import torch.nn.functional as F
+
+    from difflet.models.wan.vae import modeling_vae as m
+
+    gen = torch.Generator().manual_seed(0)
+    q, k, v = (torch.randn(2, 1, 300, 32, dtype=torch.float64, generator=gen) * 4
+               for _ in range(3))
+    reference = F.scaled_dot_product_attention(q, k, v)
+    qb, kb, vb = (t.to(torch.bfloat16) for t in (q, k, v))
+    out = m._explicit_attention(qb, kb, vb)
+    bf16_scores = torch.matmul(
+        torch.softmax(torch.matmul(qb, kb.transpose(-1, -2)) * (32 ** -0.5), dim=-1), vb)
+    assert out.dtype == torch.bfloat16
+    error = float((out.double() - reference).abs().max())
+    assert error < 0.5 * float((bf16_scores.double() - reference).abs().max())
