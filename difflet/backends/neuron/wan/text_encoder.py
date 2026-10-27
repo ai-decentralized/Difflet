@@ -7,11 +7,15 @@ position biases split across the embedding dimension, attention projections colu
 with gathered outputs, the gated FFN column- then row-parallel.
 
 Its precision is the caller's; the application default is bf16 throughout, the precision the
-Trainium path runs it at (and diffusers' Wan pipeline loads it in, there with transformers'
-rule keeping the FFN output projection ``wo`` in fp32). fp32 remains an option: umT5's bf16 error
-against fp32 varies with kernel choice (its ``wo`` produces large activations), so the parity
-gate's floor spans several bf16 implementations. The embeddings are cast to the DiT's dtype
-afterwards.
+Trainium path runs it at and diffusers' Wan pipeline loads it in (transformers'
+``_keep_in_fp32_modules`` keeps the FFN output projection ``wo`` in fp32 for fp16 loads only, so a
+bf16 load casts ``wo`` to bf16 too, as the AoT path's bf16 umT5 does). fp32 remains an option (the
+composed application's ``text_encoder_dtype``, the CLI's ``--text-encoder-dtype fp32``): umT5's
+bf16 error against fp32 varies with kernel choice (its ``wo`` produces large activations), so the
+parity gate's floor spans several bf16 implementations. The weight store keys and writes entries
+in the load dtype (``core/weight_store.py``): the fp32 encoder gains nothing from an fp32 entry and
+gets none, the bf16 one gets an 11.36 GB entry (2.84 GB per rank at tp4) instead of re-reading the
+22.7 GB checkpoint on every cold start. The embeddings are cast to the DiT's dtype afterwards.
 
 Like the AoT path it runs one static shape, ``(batch, text_seq_len)`` token ids and mask: a
 prompt is padded to ``text_seq_len`` and encoded whole, the mask keeping padding out of the real

@@ -718,6 +718,83 @@ def test_device_text_encoder_defaults_to_bf16_and_hands_the_dit_its_dtype(tiny):
     assert host.text_encoder.encoder_dtype is torch.bfloat16
 
 
+def test_text_encoder_dtype_applies_on_the_device_and_the_host(tiny):
+    # _composed pins fp32; bf16 (the default) is asked for here explicitly
+    device = _composed(tiny, text_encoder_device="neuron", text_encoder_dtype=torch.bfloat16)
+    assert device.text_encoder.app.dtype is torch.bfloat16
+    assert device.text_encoder.dtype is torch.float32  # the embeddings in the DiT's dtype
+    host = _composed(tiny, text_encoder_dtype="bfloat16")
+    assert isinstance(host.text_encoder, na._HostTextEncoder)
+    assert host.text_encoder.encoder_dtype is torch.bfloat16
+    with pytest.raises(ValueError, match="text_encoder_dtype must be bfloat16 or float32"):
+        _composed(tiny, text_encoder_device="neuron", text_encoder_dtype=torch.float16)
+
+
+def test_bf16_device_text_encoder_is_close_to_fp32_and_stored_in_bf16(tiny, tmp_path,
+                                                                      monkeypatch):
+    """One CPU rank, umT5 alone (``enable_transformer=False``) through the composed
+    application's prompt path, as F13 runs it: bf16 against fp32 per prompt, the empty negative
+    prompt included, over the valid tokens (cosine >= 0.995, F13's gate). The weight store keys
+    and writes in the load dtype: the fp32 encoder from its fp32 checkpoint gains nothing and
+    writes nothing, the bf16 one writes a bf16 entry and the next bf16 load reads it, with
+    the same embeddings."""
+    from safetensors.torch import load_file
+
+    from tests.numerical.neuron_parity import MIN_COSINE, metrics
+
+    store = tmp_path / "store"
+    monkeypatch.setenv("DIFFLET_NEURON_WEIGHT_STORE", str(store))
+    prompts = {"a red fox runs": 5, "": 1}  # valid tokens: the words and </s>
+
+    def encode(dtype):
+        parallel_mesh.destroy_parallel_mesh()
+        app = _composed(tiny, enable_transformer=False, text_encoder_device="neuron",
+                        text_encoder_dtype=dtype)
+        app.load()
+        return app.text_encoder.app, [app.pipeline.encode_prompt(prompt=p) for p in prompts]
+
+    fp32_app, fp32 = encode(torch.float32)
+    assert fp32_app.weight_store.status == "not written"
+    assert not store.exists() or not any(store.iterdir())
+    bf16_app, bf16 = encode(torch.bfloat16)
+    assert bf16_app.weight_store.status == "written"
+    (entry,) = store.iterdir()
+    assert "__bfloat16__tp1__" in entry.name
+    stored = load_file(str(entry / "replicated.safetensors"))
+    assert stored and {t.dtype for t in stored.values()} == {torch.bfloat16}
+    hit_app, hit = encode(torch.bfloat16)
+    assert hit_app.weight_store.status == "hit"
+    for (prompt, valid), want, got, again in zip(prompts.items(), fp32, bf16, hit):
+        assert torch.equal(again, got), prompt
+        assert torch.count_nonzero(got[:, valid:]) == 0, prompt
+        result = metrics(got[:, :valid], want[:, :valid])
+        assert result["cosine"] >= MIN_COSINE, (prompt, result)
+        assert 0 < result["max_abs"], prompt  # bf16 really ran
+
+
+def test_bf16_umt5_counts_half_against_the_hbm_budget(tiny, monkeypatch):
+    """The device encoder's budget check counts umT5 in its load dtype: a budget between the
+    fp32 and the bf16 estimate refuses fp32 umT5 beside the DiT and admits bf16."""
+    from difflet.backends.neuron.hbm import FIT_FRACTION, GIB, HbmBudgetError
+    from difflet.backends.neuron.wan.hbm import device_text_encoder_bytes
+
+    def estimate(tp, experts=("transformer",), encoder_bytes=4):
+        return device_text_encoder_bytes(tiny.dir, tp_degree=tp, experts=experts,
+                                         dit_dtype_bytes=4,
+                                         encoder_dtype_bytes=encoder_bytes)
+
+    assert estimate(1, ()) == 2 * estimate(1, (), encoder_bytes=2)
+    assert estimate(1) - estimate(1, encoder_bytes=2) == estimate(1, (), encoder_bytes=2)
+    high, low = estimate(2), estimate(2, encoder_bytes=2)
+    monkeypatch.setenv("DIFFLET_NEURON_HBM_GIB", repr((low + high) / 2 / FIT_FRACTION / GIB))
+    tp2 = DiffletParallelConfig(tp_degree=2)
+    with pytest.raises(HbmBudgetError, match=r"umT5 \(torch.float32\) beside the Wan DiT"):
+        _composed(tiny, parallel=tp2, text_encoder_device="neuron")
+    app = _composed(tiny, parallel=tp2, text_encoder_device="neuron",
+                    text_encoder_dtype=torch.bfloat16)
+    assert app.text_encoder.app.dtype is torch.bfloat16
+
+
 # ---- the VAE decoder on the device (enable_vae_decoder=True) ------------------------------
 
 
@@ -753,11 +830,59 @@ def test_device_vae_runs_eager_at_the_default_or_requested_precision(tiny):
 
     app = _composed(tiny, dtype=torch.bfloat16, exec_mode="compile", enable_vae_decoder=True)
     frames = (int(app.config.latent_frames) - 1) * 4 + 1
-    assert app.vae_decoder.dtype is default_vae_dtype(frames)
+    assert app.vae_decoder.app.dtype is default_vae_dtype(frames)  # not the DiT's
+    assert app.vae_decoder.dtype is torch.float32  # the un-normalisation, in either decoder dtype
     assert app.vae_decoder.app.exec_mode == "eager"
     app = _composed(tiny, dtype=torch.bfloat16, enable_vae_decoder=True, vae_dtype=torch.float32)
-    assert app.vae_decoder.dtype is torch.float32
+    assert app.vae_decoder.app.dtype is torch.float32
     assert tuple(app.vae_decoder.config.latents_std) == (1.5, 0.8, 1.2, 2.0)
+
+
+def test_device_vae_takes_an_explicit_dtype(tiny):
+    app = _composed(tiny, enable_vae_decoder=True, vae_dtype=torch.bfloat16)
+    assert app.vae_decoder.app.dtype is torch.bfloat16
+    # The orchestrator un-normalises in the adapter's dtype: fp32 whatever the decoder's, as the
+    # CLI vae stage un-normalises on the host.
+    assert app.vae_decoder.dtype is torch.float32
+    assert _composed(tiny, enable_vae_decoder=True,
+                     vae_dtype="bfloat16").vae_decoder.app.dtype is torch.bfloat16
+    with pytest.raises(ValueError, match="vae_dtype must be bfloat16 or float32"):
+        _composed(tiny, enable_vae_decoder=True, vae_dtype=torch.float16)
+
+
+def _vae_decode(tiny, dtype, latents):
+    """One CPU rank: the decoder application loaded from the tiny checkpoint in ``dtype``, then
+    the composed application's adapter decoding ``latents`` (already un-normalised)."""
+    from difflet.backends.neuron.wan.vae import NeuronWanVaeDecoderApplication
+
+    parallel_mesh.destroy_parallel_mesh()
+    app = NeuronWanVaeDecoderApplication(
+        model_path=os.path.join(tiny.dir, "vae"), latent_shape=TINY_LATENT_SHAPE,
+        parallel=DiffletParallelConfig(), dtype=dtype, device="cpu",
+    )
+    app.load(skip_warmup=True)
+    assert {p.dtype for p in app.module.parameters()} == {dtype}
+    return na._DeviceVaeDecoder(app, device="cpu")(latents)
+
+
+def test_device_vae_bf16_decode_is_close_to_the_fp32_decode(tiny):
+    """The same un-normalised latents decoded by the fp32 and the bf16 decoder (weights loaded
+    from the fp32 checkpoint, cast at load): the fp32 decode is diffusers' host decode, the bf16
+    one comes back fp32 (the fp32 output head) within bf16's error of it. 40 dB (frames in
+    [-1, 1]) catches a broken path; the device gate on the real decoder is 50 dB."""
+    import math
+
+    gen = torch.Generator().manual_seed(11)
+    latents = torch.randn(TINY_LATENT_SHAPE, generator=gen)
+    std = torch.tensor([1.5, 0.8, 1.2, 2.0]).view(1, 4, 1, 1, 1)
+    mean = torch.tensor([0.1, -0.2, 0.05, 0.3]).view(1, 4, 1, 1, 1)
+    host = tiny_wan_host_decode(tiny.dir, latents)  # un-normalises itself
+    fp32 = _vae_decode(tiny, torch.float32, latents * std + mean)
+    bf16 = _vae_decode(tiny, torch.bfloat16, latents * std + mean)
+    torch.testing.assert_close(fp32, host, atol=1e-4, rtol=1e-4)
+    assert fp32.dtype == bf16.dtype == torch.float32 and bf16.shape == fp32.shape
+    mse = float(((bf16.double() - fp32.double()) ** 2).mean())
+    assert 0 < mse and 10 * math.log10(4.0 / mse) >= 40.0
 
 
 # ---- CFG parallelism (TP2 x CFG2) ------------------------------------------------------

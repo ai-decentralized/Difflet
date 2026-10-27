@@ -22,11 +22,13 @@ of the torchrun launch builds one and holds:
   it cannot fit beside the DiT on one core at this tp (``_check_device_text_encoder_fits``: tp2,
   so CP2 or dp2tp2, does not fit);
 * ``vae_decoder`` (``enable_vae_decoder=True``): ``_DeviceQwenVaeDecoder``, the decoder on every
-  rank's core in fp32, eager. Qwen-Image's VAE (``AutoencoderKLQwenImage``) is diffusers' Wan 2.1
-  VAE under another name, so this reuses ``NeuronWanVaeDecoderApplication``, as the Trainium
-  VAE stage reuses its Wan decoder; the checkpoint's 108 decoder tensors map key for key and
-  shape for shape onto ``WanVAEDecoderModel``. ``output_type="pt"`` then returns decoded images
-  ``[B, 3, H, W]`` in [-1, 1]. Without it the VAE decodes on the host outside this application;
+  rank's core, eager, in ``vae_dtype`` (fp32 by default; bf16 is the opt-in of the CLI's
+  ``--vae-dtype bf16``, phase 3 of the 2026-10-26 native-vs-AoT plan). Qwen-Image's VAE
+  (``AutoencoderKLQwenImage``) is diffusers' Wan 2.1 VAE under another name, so this reuses
+  ``NeuronWanVaeDecoderApplication``, as the Trainium VAE stage reuses its Wan decoder; the
+  checkpoint's 108 decoder tensors map key for key and shape for shape onto
+  ``WanVAEDecoderModel``. ``output_type="pt"`` then returns decoded images ``[B, 3, H, W]`` in
+  [-1, 1]. Without it the VAE decodes on the host outside this application;
 * ``pipeline``: the backend-neutral ``QwenImageOrchestrator`` (FlowMatch Euler on the host, the
   latents on the host in the application dtype, as on Trainium), which every rank runs on
   identical inputs; its DiT calls go through ``_OnDeviceTransformer``.
@@ -97,8 +99,8 @@ logger = logging.getLogger(__name__)
 #: CLI generate stage passes the Trainium application (difflet/cli/orchestrators/qwen_image.py
 #: ``_stage_generate``) and DiffletPipeline's TeaCache merge (``teacache_calibration``), plus
 #: exec_mode, device, encoder_threads, text_encoder_dtype, text_encoder_device,
-#: enable_text_encoder and enable_vae_decoder. Anything else is a TypeError rather than
-#: silently ignored.
+#: enable_text_encoder, enable_vae_decoder and vae_dtype (the device decoder's precision, fp32
+#: unless asked). Anything else is a TypeError rather than silently ignored.
 _KWARG_DEFAULTS: dict[str, Any] = {
     "text_seq_len": TEXT_SEQ_LEN,
     "batch_size": 1,
@@ -106,6 +108,7 @@ _KWARG_DEFAULTS: dict[str, Any] = {
     "enable_text_encoder": True,
     "enable_transformer": True,
     "enable_vae_decoder": False,
+    "vae_dtype": torch.float32,
     "exec_mode": None,
     "device": "neuron",
     "encoder_threads": 12,
@@ -332,20 +335,22 @@ class _DeviceQwenTextEncoder(DeviceTextEncoder):
 class _DeviceQwenVaeDecoder(DeviceComponent):
     """The orchestrator's VAE: host latents in (already un-normalised), host images out.
 
-    Exposes what ``QwenImageOrchestrator._decode_latents`` reads: ``dtype`` (fp32, the decode
-    precision; the orchestrator un-normalises in it) and ``config`` (``latents_mean`` /
-    ``latents_std``), and no ``decode`` attribute, so the orchestrator calls it directly with
-    ``[B, z_dim, 1, h, w]``. The Wan decoder returns ``[B, 3, 1, H, W]``; the frame axis is
-    dropped here, as diffusers' QwenImage pipeline and the Trainium VAE stage drop it.
+    Exposes what ``QwenImageOrchestrator._decode_latents`` reads: ``dtype`` (fp32, the precision
+    the orchestrator un-normalises in, whatever the decoder's own: ``app.dtype`` is fp32, or bf16
+    with ``vae_dtype``, and only the decoder's input is rounded to it) and ``config``
+    (``latents_mean`` / ``latents_std``), and no ``decode`` attribute, so the orchestrator calls
+    it directly with ``[B, z_dim, 1, h, w]``. The Wan decoder returns ``[B, 3, 1, H, W]``, fp32 in
+    either dtype (its fp32 output head); the frame axis is dropped here, as diffusers' QwenImage
+    pipeline and the Trainium VAE stage drop it.
     """
 
     def __init__(self, app: NeuronWanVaeDecoderApplication, *, device):
         super().__init__(app, device=device)
-        self.dtype = app.dtype
+        self.dtype = torch.float32
         self.config = app.vae_config
 
     def __call__(self, latents: torch.Tensor) -> torch.Tensor:
-        frames = self.app(latents.to(self.dtype).contiguous().to(self.device)).cpu()
+        frames = self.app(latents.to(self.app.dtype).contiguous().to(self.device)).cpu()
         return frames[:, :, 0]
 
 
@@ -504,16 +509,18 @@ class TorchNeuronQwenImageApplication(TorchNeuronModelApplication):
                     latent_shape=(1, int(cfg.out_channels), 1, cfg.latent_height,
                                   cfg.latent_width),
                     parallel=parallel,
-                    dtype=torch.float32,  # see NeuronWanVaeDecoderApplication
+                    # fp32 unless asked: see NeuronWanVaeDecoderApplication
+                    dtype=normalize_dtype(options["vae_dtype"]),
                     device=self.device,
                 ),
                 device=self.device,
             )
 
     def _reject_model_options(self, options: dict[str, Any]) -> None:
-        dtype = normalize_dtype(options["text_encoder_dtype"])
-        if dtype not in (torch.bfloat16, torch.float32):
-            raise ValueError(f"text_encoder_dtype must be bfloat16 or float32, got {dtype}")
+        for name in ("text_encoder_dtype", "vae_dtype"):
+            dtype = normalize_dtype(options[name])
+            if dtype not in (torch.bfloat16, torch.float32):
+                raise ValueError(f"{name} must be bfloat16 or float32, got {dtype}")
 
     def _resolve_shape(self, shape: dict[str, int | None], shapes) -> dict[str, Any]:
         height = int(shape.get("height") or 1024)
