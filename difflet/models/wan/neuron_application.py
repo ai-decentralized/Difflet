@@ -14,20 +14,25 @@ launch builds one and holds:
   and ``transformer`` above. Both stay resident; the second loads after the first (runtime and
   mesh set-up are idempotent) and, its blocks having the first expert's graph, compiles no new
   NEFF;
-* ``text_encoder``: ``_HostTextEncoder``, umT5 in fp32 on rank 0's host only, its embeddings
-  broadcast to every rank (one fp32 copy of the 22.7 GB encoder instead of four); or, with
-  ``text_encoder_device="neuron"``, ``_DeviceTextEncoder``: umT5 on the device in fp32, as on
-  the host, sharded across the TP group with the AoT path's layout
-  (``NeuronWanTextEncoderApplication``, about a quarter of the 22.7 GB fp32 encoder per rank),
-  every rank encoding, the embeddings cast to the DiT's dtype. ``__init__`` refuses it when it
-  clearly cannot fit beside the DiT on one core at this tp (``_check_device_text_encoder_fits``:
-  in fp32, tp2, so CFG or CP on four cores and dp2tp2 replicas, does not fit; in bf16 it does);
+* ``text_encoder``: ``_HostTextEncoder``, umT5 on rank 0's host only, its embeddings broadcast
+  to every rank (one copy of the encoder instead of four); or, with
+  ``text_encoder_device="neuron"``, ``_DeviceTextEncoder``: umT5 on the device, sharded across the
+  TP group with the AoT path's layout (``NeuronWanTextEncoderApplication``, about a quarter of the
+  encoder per rank at tp4), every rank encoding, the embeddings cast to the DiT's dtype.
+  ``text_encoder_dtype`` sets umT5's precision in either place: bf16 by default, as the Trainium
+  path runs it (11.36 GB, and the weight store keeps a bf16 entry for the device encoder); fp32
+  on request (22.7 GB; the CLI's ``--text-encoder-dtype fp32``). ``__init__`` refuses the device
+  encoder when it clearly cannot fit beside the DiT on one core at this tp
+  (``_check_device_text_encoder_fits``: in fp32, tp2, so CFG or CP on four cores and dp2tp2
+  replicas, does not fit; in bf16 it does);
 * ``pipeline``: the backend-neutral ``WanOrchestrator`` (fp32 latents, UniPC on the host), which
   every rank runs on identical inputs; its DiT calls go through ``_OnDeviceTransformer``.
 
 * ``vae_decoder`` (``enable_vae_decoder=True``): ``_DeviceVaeDecoder``, the VAE decoder on every
-  rank's core in fp32, eager (``NeuronWanVaeDecoderApplication``); ``output_type="pt"`` then
-  returns decoded frames. Without it the VAE decodes outside this application: the CLI's vae
+  rank's core, eager (``NeuronWanVaeDecoderApplication``), in ``vae_dtype`` when given (the CLI's
+  ``--vae-dtype``), else ``default_vae_dtype`` of the clip (bf16 up to 9 frames, fp32 beyond, as
+  the Trainium path decodes); ``output_type="pt"`` then returns decoded frames, fp32 in either
+  dtype. Without it the VAE decodes outside this application: the CLI's vae
   stage runs the same decoder on one core, or diffusers on the host with ``--host-vae``.
 
 Parallelism: tensor parallelism, with or without sequence parallelism (Megatron SP within the
@@ -77,7 +82,9 @@ from difflet.backends.neuron.wan.vae import NeuronWanVaeDecoderApplication, defa
 
 #: The keyword arguments the application accepts, with their defaults: the ones the Wan CLI
 #: stage passes the Trainium application (difflet/cli/orchestrators/wan.py) plus exec_mode,
-#: device and encoder_threads. Anything else is a TypeError rather than silently ignored.
+#: device, encoder_threads, text_encoder_device, and text_encoder_dtype and vae_dtype (umT5's
+#: and the device VAE decoder's precision: see the module docstring).
+#: Anything else is a TypeError rather than silently ignored.
 _KWARG_DEFAULTS: dict[str, Any] = {
     "text_seq_len": 512,
     "batch_size": 1,
@@ -101,7 +108,8 @@ _KWARG_DEFAULTS: dict[str, Any] = {
 
 
 class _HostTextEncoder(HostTextEncoder):
-    """umT5 in fp32 on rank 0's host; every rank receives the embeddings by broadcast.
+    """umT5 on rank 0's host in ``encoder_dtype`` (the application's ``text_encoder_dtype``,
+    bf16 by default); every rank receives the embeddings by broadcast.
 
     ``WanOrchestrator.encode_prompt`` tokenizes on every rank (cheap and deterministic) and
     calls this with ``(input_ids, attention_mask)`` padded on the right to ``seq_len``. Rank 0
@@ -189,17 +197,20 @@ class _DeviceTextEncoder(DeviceComponent):
 class _DeviceVaeDecoder(DeviceComponent):
     """The orchestrator's VAE decoder: host latents in (already un-normalised), host frames out.
 
-    Exposes what ``WanOrchestrator._decode_latents`` reads: ``dtype`` (fp32, the decode
-    precision) and ``config`` (``latents_mean``/``latents_std``).
+    Exposes what ``WanOrchestrator._decode_latents`` reads: ``dtype``, the precision the
+    orchestrator un-normalises in, fp32 whatever the decoder's own (``app.dtype``: fp32 or bf16,
+    see ``vae_dtype``), so the un-normalisation is the CLI vae stage's (fp32 on the host) and
+    only the decoder's input is rounded; and ``config`` (``latents_mean``/``latents_std``). The
+    frames come back fp32 in either dtype (the decoder's fp32 output head).
     """
 
     def __init__(self, app: NeuronWanVaeDecoderApplication, *, device):
         super().__init__(app, device=device)
-        self.dtype = app.dtype
+        self.dtype = torch.float32
         self.config = app.vae_config
 
     def __call__(self, latents: torch.Tensor) -> torch.Tensor:
-        return self.app(latents.to(self.device, self.dtype)).cpu()
+        return self.app(latents.to(self.device, self.app.dtype)).cpu()
 
 
 class _OnDeviceTransformer(OnDeviceDiT):
@@ -367,6 +378,14 @@ class TorchNeuronWanApplication(TorchNeuronModelApplication):
                 device=self.device,
             )
         self.transformer_2_adapter: _OnDeviceTransformer | None = None
+
+    def _reject_model_options(self, options: dict[str, Any]) -> None:
+        for name in ("text_encoder_dtype", "vae_dtype"):
+            if options[name] is None and name == "vae_dtype":
+                continue  # default_vae_dtype of the clip
+            dtype = _normalize_dtype(options[name])
+            if dtype not in (torch.bfloat16, torch.float32):
+                raise ValueError(f"{name} must be bfloat16 or float32, got {dtype}")
 
     def _resolve_shape(self, shape: dict[str, int | None], shapes) -> dict[str, int]:
         if shapes:

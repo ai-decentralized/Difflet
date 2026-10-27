@@ -469,6 +469,32 @@ def test_qwen_vae_loads_into_the_wan_decoder_and_decodes_like_diffusers(tiny):
     with torch.no_grad():
         expected = reference.decode(latents, return_dict=False)[0][:, :, 0]
     torch.testing.assert_close(images, expected, **FP32_TOL)
+    assert vae.app.dtype is torch.float32  # fp32 unless vae_dtype asks for bf16
+
+
+def test_qwen_vae_bf16_is_opt_in_and_close_to_the_fp32_decode(tiny):
+    """``vae_dtype=torch.bfloat16`` (the CLI's --vae-dtype bf16): the decoder loads in bf16, the
+    adapter still takes fp32 latents (the orchestrator un-normalises in fp32) and returns fp32
+    images (the decoder's fp32 output head), within bf16's error of the fp32 decode of the same
+    latents. 40 dB (images in [-1, 1]) catches a broken path; the device gate on the real
+    decoder is 50 dB."""
+    import math
+
+    latents = torch.randn(1, TINY_Z_DIM, 1, 8, 12, generator=torch.Generator().manual_seed(8))
+    images = {}
+    for dtype in (torch.float32, torch.bfloat16):
+        app = _composed(tiny, enable_transformer=False, enable_vae_decoder=True, vae_dtype=dtype)
+        vae = app.vae_decoder
+        assert vae.app.dtype is dtype and vae.dtype is torch.float32
+        app.load()
+        assert {p.dtype for p in vae.app.module.parameters()} == {dtype}
+        images[dtype] = vae(latents)
+    fp32, bf16 = images[torch.float32], images[torch.bfloat16]
+    assert fp32.dtype == bf16.dtype == torch.float32 and bf16.shape == TINY_IMAGE_SHAPE
+    mse = float(((bf16.double() - fp32.double()) ** 2).mean())
+    assert 0 < mse and 10 * math.log10(4.0 / mse) >= 40.0
+    with pytest.raises(ValueError, match="vae_dtype must be bfloat16 or float32"):
+        _composed(tiny, enable_vae_decoder=True, vae_dtype=torch.float16)
 
 
 @pytest.mark.skipif(
