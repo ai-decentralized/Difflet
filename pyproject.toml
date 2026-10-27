@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "difflet-diffusion"
 version = "0.0.0.dev0"
-description = "Trainium3-native diffusion inference framework"
+description = "Diffusion transformer inference on AWS Trainium, NVIDIA GPUs and Cloud TPU"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
