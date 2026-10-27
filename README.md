@@ -7,24 +7,26 @@
 
 # Difflet
 
-**Run diffusion transformers on AWS Trainium: FLUX, Qwen-Image, Wan, HunyuanVideo, LTX-2 etc., from one CLI, one Python API, and one OpenAI-compatible server.**
+**Run diffusion transformers on AWS Trainium, NVIDIA GPUs and (experimentally) Cloud TPU: FLUX, Qwen-Image, Wan, HunyuanVideo, LTX-2 etc., from one CLI, one Python API, and one OpenAI-compatible server.**
 
 MiniMax-H3 also supports text-to-video with audio through the staged CLI.
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 ![Status](https://img.shields.io/badge/status-pre--alpha-orange.svg)
 ![Neuron](https://img.shields.io/badge/Neuron-neuronx--cc%202.26-232F3E.svg)
+![CUDA](https://img.shields.io/badge/CUDA-12.8%2B-76B900.svg)
 
 ```bash
 difflet run --model-id black-forest-labs/FLUX.1-dev --tp-degree 4 \
   --prompt "a photorealistic cat sitting in a sunlit garden" --output cat.png
 ```
 
-That one command downloads the weights, AOT-compiles the model for four NeuronCores, caches
-the artifact, and writes a 1024×1024 image. Later runs hit the cache and skip straight to
-load and denoise.
+On Trainium, that one command downloads the weights, AOT-compiles the model for four
+NeuronCores, caches the artifact, and writes a 1024×1024 image. Later runs hit the cache and
+skip straight to load and denoise. On an NVIDIA GPU, set `DIFFLET_BACKEND=cuda` and drop
+`--tp-degree`. The same model then runs eagerly on one card with no compile step.
 
-[Latest news](#latest-news) · [Models](#supported-models) · [Feature support](#feature-support) ·
+[Latest news](#latest-news) · [Hardware](#hardware-support) · [Models](#supported-models) · [Feature support](#feature-support) ·
 [Quick start](#quick-start) · [Choose a topology](#choose-a-topology) · [Serving](#serving) ·
 [Go further](#go-further) · [CLI reference](#cli-reference) · [Troubleshooting](#troubleshooting) ·
 [Developer guide](DEVELOPER.md)
@@ -36,16 +38,43 @@ load and denoise.
 
 ## What Difflet does
 
-Difflet handles the full lifecycle of a diffusion model on Trainium: model download,
-ahead-of-time (AOT) compilation, a content-addressed artifact cache, and SPMD execution across
-NeuronCores. Text encoders, the DiT backbone, and the VAE all run on device for the supported
-models, with no CPU fallbacks in the hot path.
+Difflet handles the full lifecycle of a diffusion model: model download, compilation where the
+hardware needs it, a content-addressed artifact cache, and multi-device execution. Model code
+is written once against a backend-neutral op surface (`difflet.ops`), and each accelerator
+supplies its own implementation:
+
+- **Trainium**: ahead-of-time (AOT) compilation and SPMD execution across NeuronCores. Text
+  encoders, the DiT backbone, and the VAE all run on device for the supported models, with no
+  CPU fallbacks in the hot path.
+- **NVIDIA GPUs**: eager PyTorch on one GPU per model copy, with optional `--torch-compile`.
+- **Cloud TPU** (experimental): tensor-parallel serving across TPU chips.
+
+See [Hardware support](#hardware-support) for what each backend runs today.
 
 Three entry points share one engine:
 
 - **`difflet` CLI** — `run` for one-shot generation, or `download → compile → generate` staged.
 - **`difflet serve`** — a resident, OpenAI-compatible HTTP server for image and video models.
 - **`DiffletPipeline`** — a Python API that mirrors `diffusers`.
+
+## Hardware support
+
+| Backend | `DIFFLET_BACKEND` | Status | Models | Parallelism | Details |
+|---|---|---|---|---|---|
+| AWS Trainium2 | `trainium` | ✅ Supported | All [supported models](#supported-models) | TP, CP, SP, CFG-parallel, DP | [Trainium features](#trainium) |
+| NVIDIA GPUs | `cuda` | ✅ Supported (subset) | FLUX.1-dev, Qwen-Image, Wan 2.2 | DP, CFG-parallel (Wan) | [GPU features](#nvidia-gpus) |
+| Cloud TPU | `tpu` | 🧪 Experimental | Qwen-Image, Wan (`difflet serve` only) | TP | [v5e benchmarks](benchmark/v5e/RESULTS.md) |
+| AMD ROCm | `rocm` | Planned | — | — | — |
+
+Difflet picks the backend automatically, checking Trainium, then TPU, then CUDA, then ROCm.
+Set `DIFFLET_BACKEND` to choose one explicitly. A CPU reference backend (`cpu`) exists for
+numerical tests and CI. It is not meant for generation.
+
+Cloud TPU work in progress, including FLUX, HunyuanVideo and LTX-2 ports, TeaCache in serving,
+and a move from `torch_xla` to TorchTPU, is tracked in open pull requests
+[#60–#65](https://github.com/ai-decentralized/Difflet/pulls?q=is%3Apr+is%3Aopen+TPU) and
+[#119](https://github.com/ai-decentralized/Difflet/pull/119). Until those land, `difflet run`
+and the Python API do not run on TPU.
 
 ## Supported models
 
@@ -63,6 +92,8 @@ Three entry points share one engine:
 
 Which features each model supports today. ✅ = supported · ⚠️ = supported with a caveat
 (see note) · ❌ = not supported · — = not applicable.
+
+### Trainium
 
 **Parallelism**
 
@@ -112,18 +143,51 @@ Which features each model supports today. ✅ = supported · ⚠️ = supported 
 
 Context parallelism (`--cp-degree > 1`) and CFG-parallel both consume the data-parallel lanes, so they are mutually exclusive (and each is mutually exclusive with `--sp`). `world_size = dp × (2 if cfg-parallel else 1) × cp_degree × tp_degree`; `--sp` leaves it unchanged. `difflet plan --model-id <id>` lists the combinations your host can run.
 
+### NVIDIA GPUs
+
+`DIFFLET_BACKEND=cuda`. Each model copy runs on one GPU at tp=1, with no ahead-of-time compile
+step. Verified on RTX PRO 6000 Blackwell (96 GB) and A100 80 GB.
+
+| Model | CLI generation | Serving | `--torch-compile` | TeaCache (fixed cadence) | DP | CFG-parallel | TP / CP / SP | Multi-shape |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| FLUX.1-dev | ✅ image | ✅ image | ✅ | ❌ | ✅ ⁶ | — ¹ | ❌ | ❌ |
+| Qwen-Image | ✅ image | ⚠️ image ⁷ | ✅ | ✅ | ✅ | — ⁸ | ❌ | ❌ |
+| Wan 2.2 | ✅ video | ✅ video | ✅ | ❌ | ⚠️ ⁹ | ✅ ¹⁰ | ❌ | ❌ |
+
+An option the GPU backend does not support is refused with a message naming it, not ignored.
+TeaCache (adaptive), TAEF1, and `--host-vae` are refused on GPUs for all three models.
+
+6. Two replicas verified on 2 × A100 (`--dp 2 --requests` and `serve --dp-degree 2`), with
+   output byte-identical to one card.
+7. `difflet serve` handles one request at a time. A second concurrent request gets `429`
+   after the 30 s queue timeout. Use `serve --dp-degree N` for concurrency.
+8. Qwen-Image runs one transformer pass per step, so there is no CFG branch to split.
+9. `--dp N --requests` works, with output bit-identical to one GPU. `serve --dp-degree` does
+   not apply, because the video service runs one job at a time. Wan 2.1 is routed to the GPU
+   flow but has not been run on a GPU.
+10. Two GPUs under `torchrun`, `difflet run` only. Output is bit-identical to one GPU.
+
+Measured timings against stock diffusers, and the full pass/limit matrix, are in
+[docs/verification/gpu-backend-results.md](docs/verification/gpu-backend-results.md).
+
 ## Quick start
 
 ### Prerequisites
 
-- An AWS Trainium2 instance. Validated on `trn2.3xlarge`: one Trainium2 chip presented as 4
-  logical NeuronCores under the default `LNC=2`. Other Trn2 shapes should work; the
-  tensor-parallel degree must divide the number of visible cores.
+- An accelerator, one of:
+  - **AWS Trainium2.** Validated on `trn2.3xlarge`: one Trainium2 chip presented as 4
+    logical NeuronCores under the default `LNC=2`. Other Trn2 shapes should work; the
+    tensor-parallel degree must divide the number of visible cores.
+  - **An NVIDIA GPU** with a CUDA 12.8+ driver and enough memory for the whole model on one
+    card: FLUX.1-dev and Qwen-Image fit in 80 GB; Wan 2.2 keeps both experts resident and
+    was verified on a 96 GB card. See [Install on NVIDIA GPUs](#install-on-nvidia-gpus).
 - Python 3.10 or newer.
 - A Hugging Face account with access to the gated FLUX.1-dev repo, if you want Flux.
 - Disk: weights are large (LTX-2 alone is 86 GB) and compiled artifacts add tens of GB.
 
 ### Install
+
+On Trainium:
 
 ```bash
 git clone git@github.com:ai-decentralized/Difflet.git
@@ -144,6 +208,30 @@ Sanity-check without touching the device:
 PYTHON_BIN=$PWD/.venv/bin/python ./scripts/check_quick.sh   # import gate + CPU-only unit tests
 difflet --help
 ```
+
+### Install on NVIDIA GPUs
+
+```bash
+git clone git@github.com:ai-decentralized/Difflet.git
+cd Difflet
+python3 -m venv .venv && source .venv/bin/activate
+# torch must come from the CUDA 12.8 index (Blackwell needs a 12.8+ wheel).
+pip install --index-url https://download.pytorch.org/whl/cu128 torch==2.11.0
+pip install -e ".[cuda]"
+huggingface-cli login         # for gated repos such as FLUX.1-dev
+
+DIFFLET_BACKEND=cuda difflet run --model-id Qwen/Qwen-Image \
+  --prompt "a photorealistic cat sitting in a sunlit garden" --output cat.png
+```
+
+There is no compile step. The first run loads the weights and generates. Add `--torch-compile`
+for faster steps after a warm-up, `--dp N` for one replica per GPU, and serve with
+`DIFFLET_BACKEND=cuda difflet serve --model-id <id>`. `requirements-cuda.lock` has the full
+pinned environment, and [DEVELOPER.md](DEVELOPER.md#gpu-backends-cuda) covers the GPU
+internals.
+
+The rest of this Quick start, and the "Choose a topology" section, use Trainium flags
+(`--tp-degree`, `--cp-degree`). On a GPU, drop them.
 
 ### First image
 
@@ -190,6 +278,9 @@ image.save("out.png")
 ```
 
 ## Choose a topology
+
+This section applies to Trainium. On GPUs, each model copy uses one card; scale out with
+`--dp N` (see [NVIDIA GPUs](#nvidia-gpus)).
 
 Every configuration must use exactly the cores you have:
 
@@ -423,6 +514,8 @@ paths, and stage core counts are in [docs/cli-staged-commands.md](docs/cli-stage
 
 ## Troubleshooting
 
+Most entries below are Trainium-specific. The last one is for GPUs.
+
 - **`ImportError` or a missing `libneuronpjrt-path` binary.** Activate the venv. The Neuron
   runtime shells out to helpers in `.venv/bin`, so calling `.venv/bin/difflet` by absolute
   path without `source .venv/bin/activate` fails at import.
@@ -442,6 +535,9 @@ paths, and stage core counts are in [docs/cli-staged-commands.md](docs/cli-stage
 - **Disk filling up.** Compiler scratch accumulates in the working directory; run
   `difflet clean --dry-run` then `difflet clean`. The artifact cache itself is under
   `~/.cache/difflet/` and can be deleted by hand.
+- **GPU: "`DIFFLET_BACKEND=cuda` selected but `torch.cuda.is_available()` is False".** The
+  installed torch is a CPU build, or a CUDA build without a matching driver. Reinstall torch
+  from the `cu128` index as shown in [Install on NVIDIA GPUs](#install-on-nvidia-gpus).
 
 ## Developer guide
 
