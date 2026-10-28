@@ -1765,6 +1765,129 @@ Steady step is the median after the first step (the first step reads the bf16 we
   - The AoT fix needs `attention_cte`'s bounds in the traced graph; it is not in this change.
 - **Masked attention under CP and SP** is unit-tested on CPU only. On the device only TP4 was run.
 
+## Wan2.1 native vs AoT DiT step: cause
+
+Plan item F6a (2026-10-28). Native at `feat/native-followups` `fa3bc3e` with the phase-3 flags (`--vae-dtype bf16 --text-encoder-dtype bf16`); AoT at main `540e5f0`, two-core, `--host-vae`. Raw evidence in `B/nf_wan_step/` (`B` = `/home/ubuntu/bench-2026-10-26-4m`): scripts in `scripts/`, timings in `prof/`, device profiles in `ntff/`, run logs in `cells/` (also linked as `B/wan2_1/nfw_*`). All runs on a quiet host, one device job at a time.
+
+**Result.**
+- **Most of the gap is the block's own device time.** Native compiles each transformer block as its own graph, and that graph runs 12.31 ms on the device against about 10.95 ms per block in AoT's whole-model graph. Over 40 blocks that is 54 ms per forward, as large as the whole gap: 53.5 ms per forward, 107 ms per step.
+- **The compiler version is not the cause.** AoT's own HLO, compiled with native's neuronx-cc 2.28, runs as fast as with 2.26.
+- **About a sixth of the block gap is one compiler flag.** AoT compiles with `--tensorizer-options=--enable-ccop-compute-overlap`; native does not.
+- **The rest, about 40 ms per forward, is not assigned to a measured cause.** *Inference:* it comes from the graph torch-native lowers. Measured: its lowering differs from torch-xla's in the LayerNorm, the GELU and the RoPE, and the native block leaves the matmul engine (PE) idle 4.6 ms per block, against 2.8 ms in AoT; but removing any one of the three never makes the block faster, so no measurement ties the remainder to them.
+  - Removing the LayerNorm, the GELU or the RoPE one at a time does not make the block faster.
+  - So no single op causes it. *Inference:* the cause is how the compiler schedules the native graph as a whole.
+- **No code change in this commit.** The two measured knobs together give −26.8 ms per step (−2.5%), a quarter of the gap. Both change every native model's compiled graphs, and their effect on the other models is not measured (proposals below).
+
+**1. The gap today** (`B/wan2_1/nfw_base`, `nfw_aot`; native and AoT runs interleaved gen0, gen1, gen2; DiT step median of 50 steps without step 0)
+
+| | gen0 | gen1 | gen2 | median |
+|---|---:|---:|---:|---:|
+| native (`fa3bc3e`, phase-3 flags) | 1065.1 | 1064.9 | 1064.5 | **1064.9 ms** |
+| AoT (main, two-core, `--host-vae`) | 957.9 | 959.2 | 957.8 | **957.9 ms** |
+
+- Native is +11.2% (+107.0 ms per step), as on 2026-10-26.
+- Native's latents (`fbd0306e…`) and mp4 (`2da4edd4…`) are bit-identical to the phase-3 cell. The current HEAD therefore keeps the phase-3 quality figures: 22.41 dB / 0.880, latent cosine 0.966.
+
+**2. Where one native forward goes** (`scripts/prof_dit.py`, `prof/base.json`)
+- **How it was measured:**
+  - The DiT is built at TP4 as the CLI builds it: the same application, weight store and NEFF cache.
+  - Each segment is timed between `torch.neuron.synchronize()` calls, median of 8.
+  - The segments re-implement the model's forward; their output equals the full forward exactly (max abs 0).
+
+| segment | ms |
+|---|---:|
+| the CLI's adapter call (host inputs → device → forward → sync → host) | 529.1 |
+| full forward on device inputs | 525.0 |
+| 40 compiled blocks, back to back | **520.1** (13.0 per block; repeats 519.6, 520.2) |
+| eager top level before the blocks (RoPE table, patch-embedding Conv3d, condition embedder) | 3.7 |
+| eager top level after the blocks (modulation, `norm_out`, `proj_out`, unpatchify) | 2.7 |
+| host → device copies of the three inputs | 2.1 |
+| one block alone, synced | 14.9 |
+| host time to issue the 40 blocks, no sync | 9.7 |
+
+- **Per step:** 2 × 529.1 ms of DiT forwards leaves an unmeasured remainder of 6.7 ms in the 1064.9 ms step (1064.9 − 2 × 529.1). *Inference:* the host-side scheduler step and the CFG combine.
+- **Host launches are not the cause.** Issuing the 40 blocks takes 9.7 ms of host time, without a sync, against 520 ms of device time, so launches are asynchronous and hidden.
+- **The eager top level and the input copies cost about 9 ms per forward.** AoT runs this work inside its single graph, where it cannot be timed separately.
+- **CFG is the same on both backends.** Each runs two batch-1 forwards per step (AoT: `ModelWrapperWanBackbone` traces batch 1).
+
+**3. Device profiles: block against block** (neuron-explorer 2.33 `capture`, 4 workers, worker 0 profiled, random inputs; `ntff/*summary.txt`)
+
+| graph | device time | per block |
+|---|---:|---:|
+| native block NEFF (`neuron/neff/46/81/4681…`, neuronx-cc 2.28, `-O2`) | 12.31 ms | **12.31 ms** |
+| AoT whole-DiT NEFF `MODULE_3c8d124d…` (neuronx-cc 2.26, `-O1` + ccop overlap) | 438.1 ms | **10.95 ms** (pre and post included) |
+| the same AoT HLO compiled with native's neuronx-cc 2.28, AoT's flags (`xcc/aot_hlo_cc228/`) | 442.7 ms | 11.07 ms |
+
+**PE and collectives per block on physical core 0** (`scripts/cc_overlap.py` over the parquet export)
+- **Native:** PE busy 7.68 ms, idle 4.63 ms. Collectives run 1.07 ms while the PE is idle. Spill traffic is 1.13 GB.
+- **AoT:** PE busy 8.11 ms, idle 2.84 ms. Collectives run 0.72 ms while the PE is idle. Spill traffic is about 0.58 GB.
+- **Caveat on the AoT figures:** the AoT trace hit the profiler's instruction cap (8,388,078 rows), so it covers the first 319 ms of 438. Its per-block figures are scaled from that window (29.2 blocks).
+- **Native's PE is idle during its dots.** The native timeline (`pq_native`) shows the q, k and v projections each taking 0.85–1.0 ms of wall time for 0.42 ms of PE work. The FFN takes 2.8 ms for 2.2 ms.
+- **Each native block ends with an exposed tail.** The FFN all-reduce plus the residual add form a 1.0 ms tail that nothing overlaps.
+
+**4. The two graphs** (native block StableHLO saved with `TORCH_NEURONX_PRESERVE_COMPILATION_ARTIFACTS=1`, `hlo_native/block.mlir.txt`; AoT `model.hlo_module.pb`, `hlo_aot_hist.json`)
+- **Compile flags:**
+  - native: `neuronx-cc compile module.mlir --framework XLA --target trn2 --lnc 2 -O2 --model-type transformer --auto-cast=none` (torch-neuronx's default for `torch.compile` graphs);
+  - AoT: `--target=trn2 --model-type=transformer -O1 --tensorizer-options=--enable-ccop-compute-overlap --auto-cast=none`.
+- **The same in both graphs:**
+  - every linear is `dot(x, transpose(W))` in bf16, ten dots per block;
+  - three bf16 all-reduces of `[1,4680,5120]` per block, plus four fp32 `[N,1]` all-reduces for the q/k norm statistics;
+  - attention is one `attention_cte` call on `[10,4680,128]` (and `[10,512,128]` for the cross-attention), two-core, with the same `tp_q`/`tp_k` layout;
+  - the residual and modulation math is in fp32. Both backends run `modeling_wan.py`, each at its own commit (AoT at main `540e5f0`, native at `fa3bc3e`); the two copies differ by 59 lines (the `--tp-reduce-dtype` plumbing, a tp1 fused `rms_norm_fp32` path and a `.contiguous()` after the patch flatten), none of them on the TP4 path measured here.
+- **Different:**
+
+| op | AoT (torch-xla) | native (torch-neuronx) |
+|---|---|---|
+| LayerNorm (3 per block) | `batch-norm-training` (the vector engine's BN_STATS instructions) | reduce → divide → subtract → square → reduce → rsqrt → multiply, in fp32 over `[4680,5120]` |
+| GELU (tanh) | `AwsNeuronGeluApprxTanh` custom call | seven bf16 element-wise ops, `power(x, 3)` and `tanh` among them |
+| RoPE's interleaved write | `pad` + `select` | two `scatter` per tensor (q and k) |
+
+**5. Experiments on the block** (40 blocks back to back, ms per forward; base 520.1; `prof/*.json`; each one recompiled)
+
+| change | blocks | Δ |
+|---|---:|---:|
+| `NEURON_CC_FLAGS=--tensorizer-options=--enable-ccop-compute-overlap` (AoT's flag) | 511.0 | **−9.1** |
+| `NEURON_COMPILER_OPT_LEVEL=-O1` (AoT's level) | 540.9 | +20.8 |
+| 2 blocks per graph / 4 blocks per graph | 523.5 / 530.9 | +3.4 / +10.8 |
+| the same, with the ccop flag (1 / 2 / 4 blocks per graph) | 510.6 / 511.7 / 522.6 | −9.5 / −8.4 / +2.5 |
+| RoPE removed (ablation) | 554.7 | +34.6 |
+| RoPE with `stack` + `flatten` instead of strided writes (bit-identical on CPU) | 516.6 | **−3.5** |
+| GELU removed (ablation) / GELU as `x·sigmoid(1.5958·(x + 0.044715x³))` | 526.4 / 529.3 | +6.3 / +9.2 |
+| LayerNorm removed (ablation) | 523.6 | +3.5 |
+| ccop flag + scatter-free RoPE | 508.4 | **−11.7** |
+| ccop flag + scatter-free RoPE + sigmoid GELU | 507.4 | −12.7 |
+
+- **Graph boundaries are not the cost.** Two or four blocks per graph are slower, with or without the ccop flag. Neither per-graph launch overhead nor cross-block overlap explains the gap.
+- **No single element-wise op is the cost.** Removing an op never speeds the block up, and removing RoPE slows it by 35 ms. *Inference:* these ops are not on the critical path, and the compiler's schedule for the torch-native graph is what differs.
+- **-O1 makes native slower,** although AoT compiles at -O1.
+
+**6. Both measured knobs in the real CLI** (cell `nfw_fixab`; a snapshot of `fa3bc3e`'s `difflet/` with the scatter-free RoPE in `backends/neuron/ops_impl/embeddings.py`, plus the ccop flag exported; not committed)
+- **Step:** 1038.5 / 1038.0 / 1038.2 / 1038.0 ms for gen0, gen1, gen2 and q1. That is −26.8 ms (−2.5%) against 1064.9, and the gap to AoT drops from +11.2% to +8.4%.
+- **HBM:** unchanged, 11.83 GiB per core.
+- **Quality against CPU fp32 `ref_50`** (`B/nf_wan_step/quality/`, the same tools as phase 3):
+  - 22.06 dB / 0.876, latent cosine 0.9648;
+  - phase 3: 22.41 dB / 0.880, 0.9664;
+  - against the phase-3 q1 directly: 31.9 dB / 0.976, cosine 0.9952.
+- **The output changed (mp4 `ccba6698…`).** The −0.35 dB is within the 0.5 dB gate used for the bf16 changes. It comes from one seed, though. It is not attributed: the RoPE change is bit-identical on CPU, so *inference:* the ccop flag's collective and compute order changes the bf16 sums.
+
+**7. Ruled out**, each with its evidence:
+- **two-core attention:** both backends run `attention_cte` over both physical cores (F6a audit);
+- **CFG batching:** two batch-1 forwards per step on both backends;
+- **all-reduce dtype:** bf16 on both;
+- **compiler version:** AoT's HLO with 2.28 runs 442.7 ms against 438.1 ms with 2.26;
+- **per-block graph launches and host dispatch:** grouping blocks does not help, and dispatch is asynchronous;
+- **-O level:** -O1 is worse on native.
+
+**Proposed fixes, by measured gain.** Both need the user's decision; each changes every native model's compiled graphs.
+1. **Give native graph compiles AoT's `--tensorizer-options=--enable-ccop-compute-overlap`:** −9.1 ms per forward, −18 ms per step.
+   - The flag reaches neuronx-cc through `NEURON_CC_FLAGS`, which torch-neuronx reads for every graph and eager op. It changes every model's NEFF cache keys, so every root recompiles once.
+   - Qwen-Image, HunyuanVideo and LTX-2 must be measured before it becomes the default. Wan's one-seed quality change must be checked against a second seed.
+2. **Scatter-free RoPE in `difflet/backends/neuron/ops_impl/embeddings.py`:** −3.5 ms per forward. It is bit-identical on CPU. It also changes the Flux and HunyuanVideo native graphs (`difflet.ops.apply_rotary_emb`).
+3. **Compile the top level** (condition embedder, final norm and projection) as graphs of its own: up to about 5 ms per forward of the 9 ms measured. Not tried.
+4. **The remaining ~40 ms per forward** is in how torch-neuronx lowers the block and how neuronx-cc schedules it.
+   - Lowering LayerNorm and GELU as AoT does would need torch-neuronx changes or NKI kernels, and the ablations above give no sign that either alone would pay.
+   - The better route is a newer torch-neuronx, or a report to AWS with the two graphs in `B/nf_wan_step/` as the reproducer.
+
 
 ## Next
 
