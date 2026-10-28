@@ -94,10 +94,11 @@ def _composed(tiny, **overrides):
     return na.TorchNeuronQwenImageApplication(**kwargs)
 
 
-def _host_reference(model_dir, embeds, *, steps=2, seed=7):
-    """diffusers' own two-step loop: the tiny DiT unmasked (mask None, as every Difflet backend
-    runs it) under Qwen-Image's FlowMatch schedule, shifted as QwenImagePipeline shifts it,
-    from the noise ``torch.Generator().manual_seed(seed)`` draws."""
+def _host_reference(model_dir, embeds, mask, *, steps=2, seed=7):
+    """diffusers' own two-step loop: the tiny DiT on the right-padded ``embeds`` with their
+    ``mask`` (the padded rows masked, as QwenImagePipeline masks them) under Qwen-Image's
+    FlowMatch schedule, shifted as QwenImagePipeline shifts it, from the noise
+    ``torch.Generator().manual_seed(seed)`` draws."""
     import numpy as np
     from diffusers import (
         FlowMatchEulerDiscreteScheduler,
@@ -125,7 +126,7 @@ def _host_reference(model_dir, embeds, *, steps=2, seed=7):
                 hidden_states=latents,
                 timestep=t.expand(1) / 1000,
                 encoder_hidden_states=embeds.float(),
-                encoder_hidden_states_mask=None,
+                encoder_hidden_states_mask=mask,
                 img_shapes=[[(1, *TINY_PACKED)]],
                 return_dict=False,
             )[0]
@@ -269,7 +270,7 @@ def test_dit_contract_and_call_dispatch(tiny):
         app(x, x)
 
 
-def test_adapter_takes_the_bundle_drops_mask_and_guidance_and_checks_shapes():
+def test_adapter_takes_the_bundle_passes_the_mask_drops_guidance_and_checks_shapes():
     received = []
 
     def recorder(*args):
@@ -284,15 +285,27 @@ def test_adapter_takes_the_bundle_drops_mask_and_guidance_and_checks_shapes():
     hidden = torch.randn(1, 16, 24).transpose(1, 2)  # a strided host view
     timestep = torch.tensor(0.5).expand(1)
     text = torch.randn(1, 8, TEXT_DIM)
-    mask = torch.ones(1, 8, dtype=torch.bool)
+    mask = torch.zeros(1, 8, dtype=torch.bool)
+    mask[:, :5] = True  # a right-padded prompt: 5 valid rows
     out = adapter(na.QwenImageDiTInputBundle(hidden, timestep, text, mask, torch.zeros(1)))
     assert torch.equal(out, torch.ones(1, 24, 16)) and adapter.calls == 1 and len(seconds) == 1
     adapter(hidden, timestep, text, mask, torch.zeros(1))
-    assert len(received) == 2
+    adapter(hidden, timestep, text)  # no mask: every text row valid
+    assert len(received) == 3
     for args in received:
-        assert len(args) == 3  # mask and guidance never reach the DiT
-        assert all(a.is_contiguous() and a.dtype is torch.bfloat16 for a in args)
+        assert len(args) == 4  # the mask reaches the DiT; guidance never does
+        assert all(a.is_contiguous() and a.dtype is torch.bfloat16 for a in args[:3])
         assert torch.equal(args[0], hidden.to(torch.bfloat16))
+        assert args[3].dtype is torch.int64 and args[3].is_contiguous()
+    assert received[0][3].tolist() == received[1][3].tolist() == [[1] * 5 + [0] * 3]
+    assert received[2][3].tolist() == [[1] * 8]
+    # The DiT masks by valid-row count, so only a prefix of valid rows is accepted.
+    holes = mask.clone()
+    holes[:, 1] = False
+    with pytest.raises(ValueError, match="prefix of valid rows"):
+        adapter(hidden, timestep, text, holes)
+    with pytest.raises(ValueError, match="'encoder_hidden_states_mask' has shape"):
+        adapter(hidden, timestep, text, mask[:, :5])
     with pytest.raises(ValueError, match="zero-pad the prompt embeddings to text_seq_len=8"):
         adapter(hidden, timestep, text[:, :5])
     with pytest.raises(ValueError, match="'hidden_states' has shape"):
@@ -534,8 +547,8 @@ def test_real_qwen_vae_checkpoint_maps_onto_the_wan_decoder():
 
 @pytest.mark.parametrize(("world_size", "tp", "cp_mode"), [(1, 1, "gather_kv"), (2, 2, "gather_kv")])
 def test_end_to_end_two_steps_on_fixed_embeddings_matches_diffusers(tiny, world_size, tp, cp_mode):
-    embeds, _ = tiny_text_inputs()
-    reference, timesteps = _host_reference(tiny.dir, embeds)
+    embeds, mask = tiny_text_inputs()
+    reference, timesteps = _host_reference(tiny.dir, embeds, mask)
     results = run_ranks(q2_pipeline_worker, tiny.dir, tp, cp_mode, "eager", False,
                         world_size=world_size, env=OFFLINE)
     for result in results:
@@ -554,8 +567,8 @@ def test_end_to_end_two_steps_on_fixed_embeddings_matches_diffusers(tiny, world_
 def test_end_to_end_sequence_parallel_tp2_matches_diffusers(tiny, exec_mode):
     """Two steps with Megatron SP over TP2 (the DiT's QwenImageSPTransformer2DModel fork):
     identical on both ranks, equal to TP2 without SP and to diffusers' loop."""
-    embeds, _ = tiny_text_inputs()
-    reference, _ = _host_reference(tiny.dir, embeds)
+    embeds, mask = tiny_text_inputs()
+    reference, _ = _host_reference(tiny.dir, embeds, mask)
     dense = run_ranks(q2_pipeline_worker, tiny.dir, 2, "gather_kv", exec_mode, False,
                       world_size=2, env=OFFLINE)
     results = run_ranks(q2_pipeline_worker, tiny.dir, 2, "gather_kv", exec_mode, False, "latent",
@@ -588,7 +601,7 @@ def test_end_to_end_prompt_on_gloo_ranks_matches_tp1(tiny, world_size, tp, cp_mo
         assert result["unwarmed_shapes"] == []
         assert len(result["compiled_blocks"]) == (2 if exec_mode == "compile" else 0)
     embeds = torch.tensor(results[0]["embeds"]).to(torch.bfloat16)
-    reference, _ = _host_reference(tiny.dir, embeds)
+    reference, _ = _host_reference(tiny.dir, embeds, torch.tensor(results[0]["mask"]))
     torch.testing.assert_close(torch.tensor(results[0]["latents"]), reference, **FP32_TOL)
 
 
@@ -620,6 +633,6 @@ def test_difflet_pipeline_builds_the_neuron_app_without_aot(tiny, tmp_path):
                           env=OFFLINE)
     assert result["app"] == "TorchNeuronQwenImageApplication" and result["backend"] == "neuron"
     assert result["compiled_dir_exists"] is False  # nothing is compiled ahead of time
-    embeds, _ = tiny_text_inputs()
-    reference, _ = _host_reference(tiny.dir, embeds)
+    embeds, mask = tiny_text_inputs()
+    reference, _ = _host_reference(tiny.dir, embeds, mask)
     torch.testing.assert_close(torch.tensor(result["latents"]), reference, **FP32_TOL)

@@ -63,7 +63,7 @@ class NeuronQwenImageConfig:
     height: int = 1024
     width: int = 1024
     #: Text tokens per prompt after zero-padding (``TEXT_SEQ_LEN``,
-    #: ``difflet/common/orchestrators/qwen_image.py``). The DiT attends them unmasked.
+    #: ``difflet/common/orchestrators/qwen_image.py``). The DiT masks the padded rows.
     text_seq_len: int = 1024
     batch_size: int = 1
     vae_scale_factor: int = 8

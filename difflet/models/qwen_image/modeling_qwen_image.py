@@ -322,7 +322,14 @@ class _QwenImageTrainiumAttnProcessor:
         encoder_hidden_states_mask: torch.Tensor | None = None,
         attention_mask: torch.Tensor | None = None,
         image_rotary_emb: tuple[torch.Tensor, torch.Tensor] | None = None,
+        text_valid_len: torch.Tensor | None = None,
+        image_seq_len: int | None = None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        """``text_valid_len`` (int ``[B]``, optional; with ``image_seq_len``, the full image token
+        count before any CP split): the text stream is right-padded and only its first
+        ``text_valid_len[b]`` keys are attended, diffusers' masked semantics
+        (``_masked_joint_attention``). None keeps the unmasked joint attention the Trainium and
+        TPU closures trace."""
         del encoder_hidden_states_mask
         if encoder_hidden_states is None:
             raise ValueError("Qwen-Image Trainium attention requires encoder_hidden_states.")
@@ -367,7 +374,14 @@ class _QwenImageTrainiumAttnProcessor:
         # Under gather_kv (default): each rank all-gathers the full image K,V
         # before running joint attention. Text K,V are always replicated.
         head_dim = txt_query.shape[-1]
-        if self.context_parallel_enabled and self.cp_mode == "ring":
+        if text_valid_len is not None:
+            if attention_mask is not None:
+                raise ValueError("pass text_valid_len or attention_mask, not both")
+            joint_hidden_states = self._masked_joint_attention(
+                img_query, img_key, img_value, txt_query, txt_key, txt_value,
+                text_valid_len=text_valid_len, image_seq_len=image_seq_len,
+            )
+        elif self.context_parallel_enabled and self.cp_mode == "ring":
             if attention_mask is not None:
                 raise NotImplementedError("ring cp_mode does not support attention_mask")
             # Joint ring: image K,V sharded → rotated; text K,V replicated →
@@ -465,6 +479,67 @@ class _QwenImageTrainiumAttnProcessor:
         txt_attn_output = attn.to_add_out(txt_attn_output.contiguous())
 
         return img_attn_output, txt_attn_output
+
+    def _masked_joint_attention(
+        self, img_query, img_key, img_value, txt_query, txt_key, txt_value, *,
+        text_valid_len: torch.Tensor, image_seq_len: int | None,
+    ) -> torch.Tensor:
+        """Joint attention with the text padding masked out of the keys, as diffusers masks it
+        (``[text_mask | ones(image)]`` on the key axis, every query). In ``[B, S, H, d]``, out
+        ``[B, S_txt + S_img_local, H, d]`` in the ``[txt ‖ img]`` order the caller splits.
+
+        No dense mask: the keys are ordered ``[image ‖ text]``, so the valid ones are the
+        contiguous prefix ``[0, image_seq_len + text_valid_len)``, which ``attention``'s
+        ``bound_min``/``bound_max`` take (the key-bounded flash kernel on the neuron device).
+        Ring CP masks the replicated text partial by count (``joint_ring_attention``); Ulysses
+        CP bounds its ``[image_full ‖ text]`` keys the same way (``joint_ulysses_attention``).
+        """
+        scale = 1.0 / math.sqrt(txt_query.shape[-1])
+        valid = text_valid_len.to(torch.int32)
+
+        def bhsd(t):
+            return t.transpose(1, 2)
+
+        if self.context_parallel_enabled and self.cp_mode == "ring":
+            q_joint = torch.cat([txt_query, img_query], dim=1)
+            out = joint_ring_attention(
+                bhsd(q_joint), bhsd(img_key), bhsd(img_value), bhsd(txt_key), bhsd(txt_value),
+                scale=scale, causal=False, text_valid_len=valid,
+            )
+            return bhsd(out)
+        if image_seq_len is None:
+            raise ValueError("the masked joint attention needs image_seq_len (full image tokens)")
+        if self.context_parallel_enabled and self.cp_mode == "ulysses":
+            img_out, txt_out = joint_ulysses_attention(
+                bhsd(img_query), bhsd(txt_query), bhsd(img_key), bhsd(img_value),
+                bhsd(txt_key), bhsd(txt_value), scale=scale, causal=False,
+                key_valid_len=valid + int(image_seq_len),
+            )
+            return bhsd(torch.cat([txt_out, img_out], dim=2))
+        if self.context_parallel_enabled:
+            stacked_kv = gather_from_tensor_model_parallel_region_with_dim(
+                torch.stack([img_key, img_value], dim=0), gather_dim=2,
+                process_group=self.cp_group,
+            )
+            img_key, img_value = torch.unbind(stacked_kv, dim=0)
+        if int(img_key.shape[1]) != int(image_seq_len):
+            raise ValueError(
+                f"image keys {int(img_key.shape[1])} != image_seq_len {int(image_seq_len)}"
+            )
+        q = bhsd(torch.cat([img_query, txt_query], dim=1))
+        k = bhsd(torch.cat([img_key, txt_key], dim=1))
+        v = bhsd(torch.cat([img_value, txt_value], dim=1))
+        b, h, s_q, d = q.shape
+        s_k = k.shape[2]
+        bound_max = (valid + int(image_seq_len)).view(b, 1, 1).expand(b, h, s_q)
+        bound_max = bound_max.reshape(b * h, s_q, 1).contiguous()
+        out = attention(
+            q.reshape(b * h, s_q, d), k.reshape(b * h, s_k, d), v.reshape(b * h, s_k, d),
+            scale=scale, causal=False, bound_min=torch.zeros_like(bound_max),
+            bound_max=bound_max, tp_q=True, tp_k=True, tp_out=False,
+        ).reshape(b, h, s_q, d)
+        n_img = img_query.shape[1]
+        return bhsd(torch.cat([out[:, :, n_img:], out[:, :, :n_img]], dim=2))
 
 
 def _trim_text_padding(
@@ -613,6 +688,8 @@ class _QwenImageTransformerTraceModule(nn.Module):
         encoder_hidden_states: torch.Tensor,
         encoder_hidden_states_mask: torch.Tensor,
         guidance: torch.Tensor,
+        *,
+        text_valid_len: torch.Tensor | None = None,
     ) -> torch.Tensor:
         # The diffusers mask path computes active text length with arange/where.
         # That currently fails during XLA tracing for the fixed-shape M4a
@@ -621,6 +698,10 @@ class _QwenImageTransformerTraceModule(nn.Module):
         # (CUDA) pass it through: diffusers then builds the joint key mask
         # [text_mask | ones(image)] and the processor applies it, so a prompt
         # padded to text_seq_len gives the same output as diffusers' unpadded run.
+        # ``text_valid_len`` (int [B], the count of a right-padded prompt's
+        # valid rows) masks the padding instead, by key count in the attention
+        # processor (``_masked_joint_attention``); the neuron backend passes it
+        # with apply_text_mask=False.
         if self.apply_text_mask:
             if self.context_parallel_enabled:
                 raise NotImplementedError(
@@ -643,6 +724,9 @@ class _QwenImageTransformerTraceModule(nn.Module):
             seq_len, (int(self.img_shapes[0][0][1]), int(self.img_shapes[0][0][2]))
         )
         img_shapes = [[(1, ph, pw)]]
+        attention_kwargs = None
+        if text_valid_len is not None:
+            attention_kwargs = {"text_valid_len": text_valid_len, "image_seq_len": seq_len}
 
         # Context parallel: scatter the image tokens along the sequence axis
         # across the cp axis subgroup before the diffusers forward. The
@@ -665,6 +749,7 @@ class _QwenImageTransformerTraceModule(nn.Module):
             encoder_hidden_states_mask=mask_arg,
             guidance=guidance_arg,
             img_shapes=img_shapes * int(hidden_states.shape[0]),
+            attention_kwargs=attention_kwargs,
             return_dict=False,
         )[0]
 
