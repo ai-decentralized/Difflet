@@ -1696,9 +1696,73 @@ Steady step is the median after the first step (the first step reads the bf16 we
 - **Devices at the bf16 floor:** HunyuanVideo native (0.982 vs floor 0.974) and AoT (0.969 vs 0.970), Qwen-Image AoT (0.961 vs 0.974, 21.5 vs 22.9 dB) and LTX-2 AoT at 20 steps (0.991 vs 0.996). Their gap to fp32 is about what bf16 alone gives.
 - **Devices below the floor, with an extra error source:**
   - **LTX-2 AoT at 50 steps:** 0.725 vs 0.991. Not bf16 itself and not two-core attention (20 steps are fine). An AoT issue; next step a per-step latent comparison against CPU bf16.
-  - **Qwen-Image native:** 0.872 / 16.1 dB vs 0.996 / 32.2 dB. *Inference, unverified:* the native text encode (bf16, no mask) is a candidate.
+  - **Qwen-Image native:** 0.872 / 16.1 dB vs 0.996 / 32.2 dB. Root cause found and fixed: the DiT attended the prompt's zero padding (not the text encode). See the next section.
   - **LTX-2 native:** 0.930 vs 0.991.
   - **Wan2.1:** native 0.967 / 22.7 dB and AoT (host VAE) 0.954 / 21.4 dB vs 0.985 / 27.6 dB: a moderate extra error on both backends.
+
+## Qwen-Image native accuracy: root cause and fix (2026-10-28)
+
+**Root cause:** every Difflet Qwen-Image backend zero-pads the prompt embeddings to `TEXT_SEQ_LEN` = 1024 rows and drops the mask, so the DiT's joint attention attends the padding. A zero row is not an absent key: `txt_norm` / `txt_in` turn it into `txt_in`'s bias, which then flows through every block as a real key and value. The fox prompt has 17 valid rows, so 1007 of the 1041 text keys were padding. diffusers (the CPU references) passes the 17 rows alone. The text encode is not the cause.
+
+**Evidence** (CPU only unless noted; scratch and scripts in `B/nf_qwen_text/`, `B` = `/home/ubuntu/bench-2026-10-26-4m`):
+1. **Text embeddings are fine** (`text_cmp.py`). Against diffusers' fp32 `encode_prompt` (17 x 3584), cosine 0.99988 for both the native host encoder (bf16, run through difflet's `_HostQwenTextEncoder._encode`) and diffusers in bf16, which match each other exactly. The AoT device's `text.pt` gives 0.99991. All three have 17 valid rows and the same 34-token template drop. The CPU bf16 baseline used these same bf16 embeddings and reached 0.996, so the text encode cannot explain 0.872.
+2. **One DiT forward** (`dit_pad_cmp.py`, the real 20B DiT, native noise, the fp32 embeddings). Rel. L2 of the noise prediction against fp32 on the 17 rows:
+
+   | input | t = 1.0 | t = 0.5 |
+   |---|---:|---:|
+   | fp32, padded to 1024, unmasked | 6.5 % | 2.1 % |
+   | fp32, padded to 1024, masked | 3e-7 | 3e-7 |
+   | bf16, 17 rows | 2.7 % | 1.2 % |
+   | bf16, padded to 1024, unmasked | 6.8 % | 2.4 % |
+
+   The padding alone moves the prediction more than bf16 does. With the mask, the padded call equals the unpadded one.
+3. **50 steps on the CPU reproduce the device.** The CPU bf16 baseline with one change, the embeddings padded to 1024 and passed without a mask (`cpu_pad_run.py --mode pad_unmasked`), reaches **0.865 / 15.53 dB / 0.815** against the fp32 reference. The native device reached 0.872 / 16.11 dB / 0.823. The old native device latents are much closer to this padded CPU run (cosine 0.967, 21.6 dB) than to the unpadded CPU bf16 run (0.873).
+4. **Ruled out by the steps above:** VAE (the latents already differ), text encode and template drop (1), timestep dtype, schedule and guidance (identical in the padded CPU run, which reproduces the gap).
+
+**Fix (neuron backend only):** the DiT now receives the mask and attends only the valid text rows, as diffusers does. Shapes stay static.
+- `_OnDeviceTransformer` sends the mask (int64, checked to be a prefix of valid rows) as the DiT's fourth input; guidance is still dropped.
+- The trace module turns the mask into a valid-row count.
+- `_QwenImageTrainiumAttnProcessor._masked_joint_attention` orders the keys `[image ‖ text]`, so the valid keys are the contiguous range `[0, image tokens + count)`. That range goes to the key-bounded flash kernel. Ring and Ulysses CP mask by the same count.
+- The warm-up compiles with an all-ones mask. The count is a tensor, so a different prompt length does not compile a new graph.
+- Trainium and TPU are unchanged: they pass no count and still attend the padding.
+
+**Tests:**
+- New: `test_padded_prompt_attends_only_its_valid_rows`, 8 topologies (tp1 eager and compile, tp2 compile, tp2+SP, CP2 gather_kv / ring / ulysses, tp2xCP2 compile). Before the fix all 8 fail (every element mismatched); after it all 8 pass at 1e-5 against diffusers on the valid rows.
+- Updated to diffusers' masked semantics: the end-to-end and true-CFG / CFG-parallel references of q2 and q5, and the adapter and warm-up shape tests.
+
+**Device** (TP4, 1024x1024, 50 steps, seed 42, `--vae-dtype bf16`; same `initial.pt` `95a4306b…` as `native_tp4_hashcheck/q1`; harness `scripts/bench4m_nfq.py`, which is `bench4m.py` with the native worktree taken from `BENCH4M_NATIVE_WT`):
+- "before" is HEAD `549e6f7` from a snapshot of its `difflet/`.
+- "after" is the fix.
+- Each cell has its own hard-link copy of `roots/qwen_image_native_tp4_p3`.
+
+| vs CPU fp32 `ref_native_noise_50` | latent cosine | PSNR | SSIM |
+|---|---:|---:|---:|
+| native before (`nfq_before/q1`; `final.pt` bit-identical to `native_tp4_hashcheck/q1` and `native_tp4_p3/q1`) | 0.8722 | 16.11 dB | 0.823 |
+| **native after (`nfq_after/q1`)** | **0.9957** | **32.88 dB** | **0.985** |
+| CPU bf16 floor (`ref_native_noise_50_bf16`) | 0.9960 | 32.24 dB | 0.985 |
+
+- The fixed native run is at the bf16 floor. Against CPU bf16 it reaches cosine 0.9959 / 32.41 dB.
+- Its image shows the reference's composition: the fox leaping right, including the reference's smeared muzzle.
+
+**Speed:** both cells ran back to back on a quiet host, interleaved before / after, gen2 and gen3.
+
+| | DiT step median (p10–p90) | warm e2e |
+|---|---:|---:|
+| before | 359.9 ms (359.2–361.1) | 86.5 / 88.2 s |
+| after | 368.5 ms (367.5–369.6) | 86.7 / 86.0 s |
+
+- The step is 8.6 ms slower (+2.4 %). *Inference, not profiled:* the key-bounded kernel path, with its separate q pre-scale, costs more than the plain flash kernel.
+- Warm e2e does not change materially.
+- The first run after the change compiles the new block graph once: load+warmup 67 s, against 37–49 s warm (`nfq_after/cold`, 127 s e2e).
+- Scratch runs before the host was quiet are kept but not used for speed (`nfq_before/gen1`, `nfq_after/gen1`: 377 / 397 ms).
+
+**Left open:**
+- **Trainium (AoT) and TPU still attend the padding.**
+  - On the AoT noise, the CPU bf16 run with the padding unmasked gives 0.938 / 18.6 dB, against 0.974 / 22.9 dB without.
+  - The AoT device itself sits at 0.961. That is between the two, and closer to the unpadded CPU bf16 run (0.951) than to the padded one (0.923).
+  - This seed's AoT-noise trajectory is too sensitive (bf16 alone 0.974) to attribute the AoT device's error on one run.
+  - The AoT fix needs `attention_cte`'s bounds in the traced graph; it is not in this change.
+- **Masked attention under CP and SP** is unit-tested on CPU only. On the device only TP4 was run.
 
 
 ## Next

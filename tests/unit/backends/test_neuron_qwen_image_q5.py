@@ -207,7 +207,8 @@ def tiny(tmp_path_factory):
 
 
 def _diffusers_true_cfg_reference(model_dir, *, scale=4.0, steps=2, seed=7):
-    """diffusers' true-CFG loop on the tiny DiT (unmasked, as every Difflet backend runs it)."""
+    """diffusers' true-CFG loop on the tiny DiT, each branch's right-padded embeddings with its
+    mask (5 and 3 valid rows), as QwenImagePipeline masks them."""
     from diffusers import (
         FlowMatchEulerDiscreteScheduler,
         QwenImagePipeline,
@@ -226,15 +227,16 @@ def _diffusers_true_cfg_reference(model_dir, *, scale=4.0, steps=2, seed=7):
     mu = calculate_shift(latents.shape[1], cfg.base_image_seq_len, cfg.max_image_seq_len,
                          cfg.base_shift, cfg.max_shift)
     scheduler.set_timesteps(sigmas=np.linspace(1.0, 1.0 / steps, steps), mu=mu)
-    embeds, _ = tiny_text_inputs()
-    negative, _ = tiny_negative_inputs()
+    embeds, mask = tiny_text_inputs()
+    negative, negative_mask = tiny_negative_inputs()
     with torch.no_grad():
         for t in scheduler.timesteps:
-            def call(text):
+            def call(text, text_mask):
                 return model(hidden_states=latents, timestep=t.expand(1) / 1000,
-                             encoder_hidden_states=text.float(), encoder_hidden_states_mask=None,
+                             encoder_hidden_states=text.float(),
+                             encoder_hidden_states_mask=text_mask,
                              img_shapes=[[(1, *TINY_PACKED)]], return_dict=False)[0]
-            noise_pred, neg_noise_pred = call(embeds), call(negative)
+            noise_pred, neg_noise_pred = call(embeds, mask), call(negative, negative_mask)
             comb_pred = neg_noise_pred + scale * (noise_pred - neg_noise_pred)
             noise_pred = comb_pred * (torch.norm(noise_pred, dim=-1, keepdim=True)
                                       / torch.norm(comb_pred, dim=-1, keepdim=True))
@@ -261,7 +263,8 @@ def test_cfg_parallel_equals_serial_true_cfg_and_diffusers(tiny, world_size, tp,
         assert result["cfg_group_size"] == 2
         assert result["forwards"] == 2 and result["steps"] == [1, 2]  # one batch-2 call
         # The warm-up runs the pair the step loop sends, so nothing is unwarmed.
-        assert result["warmup_shapes"] == [(2, 24, 16), (2,), (2, TINY_TEXT_SEQ_LEN, 24)]
+        assert result["warmup_shapes"] == [(2, 24, 16), (2,), (2, TINY_TEXT_SEQ_LEN, 24),
+                                           (2, TINY_TEXT_SEQ_LEN)]  # + the int64 mask
         assert result["unwarmed_shapes"] == []
         assert len(result["compiled_blocks"]) == (2 if exec_mode == "compile" else 0)
         if exec_mode == "eager":

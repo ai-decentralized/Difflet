@@ -34,10 +34,13 @@ of the torchrun launch builds one and holds:
   latents on the host in the application dtype, as on Trainium), which every rank runs on
   identical inputs; its DiT calls go through ``_OnDeviceTransformer``.
 
-The text mask is dropped by the DiT, as on Trainium and TPU: the embeddings are zero-padded to
-``text_seq_len`` and attended unmasked (``difflet/backends/neuron/qwen_image/transformer.py``).
-So ``encoder_hidden_states`` must arrive zero-padded to exactly ``text_seq_len`` rows; a shorter
-diffusers-style tensor is rejected rather than silently mis-shaped.
+The text mask reaches the DiT, which attends only the prompt's valid rows, as diffusers does
+(``difflet/backends/neuron/qwen_image/transformer.py``; Trainium and TPU drop it and attend the
+zero padding, which cost the 2026-10-26 fox run most of its accuracy: see
+``benchmark/trn2/four_model_native_vs_aot_2026-10-26.md``). ``encoder_hidden_states`` must
+still arrive zero-padded to exactly ``text_seq_len`` rows (the one static shape), with a mask
+whose valid rows are a prefix; a shorter diffusers-style tensor is rejected rather than silently
+mis-shaped.
 
 Parallelism: tensor parallelism, with or without sequence parallelism (Megatron SP within the
 TP group: the ``QwenImageSPTransformer2DModel`` fork, see
@@ -231,8 +234,8 @@ class _HostQwenTextEncoder(HostTextEncoder):
     * token budget: diffusers truncates at ``1024 + 34`` tokens; here (as on Trainium) at
       ``ENC_SEQ`` = 256, so a prompt longer than about 217 tokens loses its tail (and the
       template's closing tokens). The CLI truncates silently; this logs a warning;
-    * padding: diffusers pads to the batch's longest prompt and masks the padding in the DiT;
-      here the embeddings are zero-padded to ``text_seq_len`` and the DiT attends them unmasked
+    * padding: diffusers pads to the batch's longest prompt; here the embeddings are
+      zero-padded to ``text_seq_len`` (the one static shape). Both mask the padding in the DiT
       (see the module docstring);
     * dtype: diffusers keeps the encoder's dtype; here the embeddings are bf16 (the DiT's
       dtype on the device) whatever ``dtype`` the encoder ran in.
@@ -359,9 +362,10 @@ class _OnDeviceTransformer(OnDeviceDiT):
     """The orchestrator's DiT callable (``OnDeviceDiT``): a ``QwenImageDiTInputBundle`` (the
     orchestrator's call) or positional tensors in, a host tensor out.
 
-    Only ``hidden_states``, ``timestep`` and ``encoder_hidden_states`` go to the device; the
-    mask and guidance are dropped (the DiT attends the zero-padded text unmasked and has no
-    guidance embedder).
+    ``hidden_states``, ``timestep``, ``encoder_hidden_states`` and the text mask go to the
+    device, the floats in ``dtype`` and the mask as int64 (``_text_mask``: checked to be a
+    prefix of valid rows, the only padding the DiT's key bound can mask; all ones when the
+    caller passes none). Guidance is dropped: the DiT has no guidance embedder.
     """
 
     def __call__(
@@ -372,16 +376,44 @@ class _OnDeviceTransformer(OnDeviceDiT):
         encoder_hidden_states_mask=None,
         guidance=None,
     ) -> torch.Tensor:
-        del encoder_hidden_states_mask, guidance
+        del guidance
         if isinstance(hidden_states, QwenImageDiTInputBundle):
             bundle = hidden_states
             hidden_states = bundle.hidden_states
             timestep, encoder_hidden_states = bundle.timestep, bundle.encoder_hidden_states
+            encoder_hidden_states_mask = bundle.encoder_hidden_states_mask
         if timestep is None or encoder_hidden_states is None:
             raise TypeError("the Qwen-Image DiT needs hidden_states, timestep and "
                             "encoder_hidden_states")
         _check_dit_shapes(self.config, hidden_states, encoder_hidden_states)
-        return self._forward((hidden_states, timestep, encoder_hidden_states))
+        mask = _text_mask(encoder_hidden_states_mask, encoder_hidden_states)
+        return self._forward((hidden_states, timestep, encoder_hidden_states, mask))
+
+    def _device_input(self, tensor: torch.Tensor) -> torch.Tensor:
+        if not tensor.is_floating_point():
+            return tensor.contiguous().to(self.device)  # the int64 mask, as the warm-up's
+        return super()._device_input(tensor)
+
+
+def _text_mask(mask: torch.Tensor | None, text: torch.Tensor) -> torch.Tensor:
+    """The DiT's text mask, int64 ``[B, text_seq_len]``: all ones without one, else ``mask``
+    checked to be what the DiT can apply, each row's valid rows a prefix (right padding: the
+    DiT masks the text keys past the row's valid count)."""
+    if mask is None:
+        return torch.ones(text.shape[:2], dtype=torch.int64)
+    if tuple(mask.shape) != tuple(text.shape[:2]):
+        raise ValueError(
+            f"Qwen-Image DiT input 'encoder_hidden_states_mask' has shape {tuple(mask.shape)}, "
+            f"expected {tuple(text.shape[:2])}"
+        )
+    valid = mask.detach().cpu().to(torch.bool)
+    count = valid.sum(dim=1, keepdim=True)
+    if not torch.equal(valid, torch.arange(valid.shape[1]).unsqueeze(0) < count):
+        raise ValueError(
+            "the Qwen-Image text mask must be a prefix of valid rows (right-padded embeddings, "
+            "as the text encoder writes them); the DiT masks by valid-row count"
+        )
+    return valid.to(torch.int64)
 
 
 def _check_dit_shapes(config, hidden_states: torch.Tensor, text: torch.Tensor) -> None:
@@ -400,7 +432,7 @@ def _check_dit_shapes(config, hidden_states: torch.Tensor, text: torch.Tensor) -
         raise ValueError(
             f"Qwen-Image DiT input 'encoder_hidden_states' has shape {tuple(text.shape)}, "
             f"expected {expected}: zero-pad the prompt embeddings to text_seq_len="
-            f"{config.text_seq_len} (the DiT attends them unmasked)"
+            f"{config.text_seq_len} (the DiT's one static shape; the mask marks the valid rows)"
         )
 
 
@@ -580,8 +612,8 @@ class TorchNeuronQwenImageApplication(TorchNeuronModelApplication):
     # ----------------------------------------------------------------- evidence
 
     def dit_input_contract(self) -> dict[str, dict[str, Any]]:
-        """The Trainium/TPU contract, five tensors; the DiT reads the first three (the mask and
-        guidance are accepted and dropped, see the module docstring)."""
+        """The Trainium/TPU contract, five tensors; the DiT reads the first four (the mask masks
+        the padded text rows; guidance is accepted and dropped, see the module docstring)."""
         cfg = self.config
         batch = cfg.dit_batch
         return {

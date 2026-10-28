@@ -25,12 +25,15 @@ biases the un-reduced partials carry (the neuron ``RowParallelLinear`` adds the 
 each partial, as NxD's does). The blocks' collectives are functional collectives, so the block
 graph compiles as one graph per block class, as without SP.
 
-The text mask is dropped, as on Trainium and TPU: prompts are zero-padded to ``text_seq_len``
-and attended unmasked. The modeling's forward deletes ``encoder_hidden_states_mask`` (the
-diffusers mask path builds the active length with ``arange``/``where``, which the fixed-shape
-traces could not take); the padded rows are zeros before ``txt_norm``/``txt_in``, not absent, so
-this matches diffusers only where the mask is all ones, and it is the semantics every Difflet
-Qwen-Image backend shares. Masked attention is a follow-up, not a phase-1 feature.
+The text mask is applied, as diffusers applies it: prompts are zero-padded to ``text_seq_len``
+(the one static shape) and the mask's valid-row count bounds the attended keys. The trace module
+turns the mask into that count (``text_valid_len``) and the backend-neutral attention processor
+(``_QwenImageTrainiumAttnProcessor._masked_joint_attention``) orders the keys ``[image ‖ text]``
+so the valid ones are the prefix ``[0, image tokens + count)``, which the key-bounded flash
+kernel takes (ring and Ulysses CP mask by the same count). The Trainium and TPU closures still
+drop the mask and attend the padding: a zero row is not an absent key (``txt_norm``/``txt_in``
+turn it into ``txt_in``'s bias), and on the 2026-10-26 fox prompt (17 valid rows of 1024) attending
+them moved the CPU fp32 noise prediction by 6.5 % (rel. L2) at t=1, against 2.7 % for bf16.
 """
 
 from __future__ import annotations
@@ -47,6 +50,9 @@ from difflet.backends.neuron.core.config_checks import (
 )
 from difflet.backends.neuron.qwen_image.config import NeuronQwenImageConfig
 
+#: The dtype the text mask reaches the module in, the warm-up's (HunyuanVideo's int64 mask
+#: precedent); any other mask dtype is cast to it first.
+_MASK_DTYPE = torch.int64
 #: The trace module nests the diffusers model under this attribute; checkpoint keys are the
 #: diffusers model's own (``transformer_blocks.0.img_mod.1.weight``, ``norm_out.linear.bias``).
 CHECKPOINT_PREFIX = "transformer."
@@ -64,13 +70,16 @@ def checkpoint_key(name: str) -> str:
 
 
 def _trace_module_class():
-    """``_QwenImageTransformerTraceModule`` with the mask and guidance optional, and CFG
-    parallelism.
+    """``_QwenImageTransformerTraceModule`` with the text mask applied, the mask and guidance
+    optional, and CFG parallelism.
 
-    The warm-up broadcasts tensors only (``broadcast_tensor`` has no None), so it calls the
-    module with the three tensors the DiT actually consumes; the orchestrator's five-argument
-    call keeps working. Built lazily: importing the modeling binds ``difflet.ops`` to the
-    selected backend, which must not happen when this module is merely imported.
+    The mask (``[B, text_seq_len]``, a prefix of valid rows) becomes the valid-row count
+    ``text_valid_len`` the base forward hands the attention processor; without one the text is
+    attended unmasked (the base's behaviour). The warm-up broadcasts tensors only
+    (``broadcast_tensor`` has no None), so it calls the module with the four tensors the DiT
+    consumes; the orchestrator's five-argument call keeps working. Built lazily: importing the
+    modeling binds ``difflet.ops`` to the selected backend, which must not happen when this
+    module is merely imported.
 
     With ``cfg_parallel_enabled`` the call carries the true-CFG pair ``[negative,
     conditional]`` as batch 2 (``QwenImageOrchestrator._true_cfg_step``): each rank keeps the
@@ -107,10 +116,13 @@ def _trace_module_class():
             encoder_hidden_states_mask: torch.Tensor | None = None,
             guidance: torch.Tensor | None = None,
         ) -> torch.Tensor:
+            text_valid_len = None
+            if encoder_hidden_states_mask is not None:
+                text_valid_len = encoder_hidden_states_mask.to(torch.int32).sum(dim=1)
             if not self.cfg_parallel_enabled:
                 return super().forward(
-                    hidden_states, timestep, encoder_hidden_states, encoder_hidden_states_mask,
-                    guidance,
+                    hidden_states, timestep, encoder_hidden_states, None, guidance,
+                    text_valid_len=text_valid_len,
                 )
             rank = get_cfg_rank_spmd(self.cfg_rank_util.get_rank())
 
@@ -122,6 +134,7 @@ def _trace_module_class():
             output = super().forward(
                 mine(hidden_states), mine(timestep), mine(encoder_hidden_states), None,
                 None if guidance is None else mine(guidance),
+                text_valid_len=None if text_valid_len is None else mine(text_valid_len),
             )
             return gather_from_tensor_model_parallel_region_with_dim(
                 output, gather_dim=0, process_group=self.cfg_group
@@ -199,30 +212,44 @@ class NeuronQwenImageTransformerApplication(TorchNeuronApplicationBase):
         encoder_hidden_states_mask: torch.Tensor | None = None,
         guidance: torch.Tensor | None = None,
     ) -> torch.Tensor:
-        """The DiT on ``(hidden_states, timestep, encoder_hidden_states)``; the orchestrator's
-        mask and guidance are accepted and dropped here, before the base's shape bookkeeping.
+        """The DiT on ``(hidden_states, timestep, encoder_hidden_states,
+        encoder_hidden_states_mask)``; guidance is accepted and dropped here (no guidance
+        embedder, ``NeuronQwenImageConfig.validate``).
 
-        The module would drop them anyway (no mask, see the module docstring; no guidance
-        embedder, ``NeuronQwenImageConfig.validate``), but passed through, the mask tensor would
-        make a compile-mode call's input shapes differ from the warm-up's three, and the base
-        would warn of (and record) an uncompiled shape for a call whose blocks hit the warm-up
-        graph.
+        The mask (``[B, text_seq_len]``, True / 1 on the prompt's valid rows, a prefix: the
+        embeddings are right-padded) reaches the module as int64, the dtype the warm-up compiled
+        for, whatever the caller passed; the module counts its valid rows and the attention
+        masks the rest of the text keys (see the module docstring). Without one every text row
+        is valid: an all-ones mask is made at the input's shape, so a three-tensor call hits the
+        warm-up's graph too.
         """
-        del encoder_hidden_states_mask, guidance
-        return super().forward(hidden_states, timestep, encoder_hidden_states)
+        del guidance
+        if encoder_hidden_states_mask is None:
+            encoder_hidden_states_mask = torch.ones(
+                encoder_hidden_states.shape[:2], dtype=_MASK_DTYPE,
+                device=encoder_hidden_states.device,
+            )
+        elif encoder_hidden_states_mask.dtype != _MASK_DTYPE:
+            encoder_hidden_states_mask = encoder_hidden_states_mask.to(_MASK_DTYPE)
+        return super().forward(
+            hidden_states, timestep, encoder_hidden_states, encoder_hidden_states_mask
+        )
 
     def checkpoint_key(self, name: str) -> str:
         return checkpoint_key(name)
 
     def get_example_inputs(self) -> tuple[torch.Tensor, ...]:
-        """``(hidden_states, timestep, encoder_hidden_states)`` at the static shape, in ``dtype``.
+        """``(hidden_states, timestep, encoder_hidden_states, encoder_hidden_states_mask)`` at the
+        static shape, the floats in ``dtype``, the mask int64 and all ones.
 
-        The packed latents ``[B, image_seq_len, in_channels]``, the per-sample timestep and the
-        zero-padded text embeddings ``[B, text_seq_len, joint_attention_dim]``: exactly the
-        per-call shapes the orchestrator sends, so the warm-up compiles the only block graph
-        the run needs. B is 1, or 2 under CFG parallelism (the ``[negative, conditional]``
-        pair, which the module splits over the CFG group: each rank's blocks still see batch
-        1). Under CP every rank receives the full sequence and the module scatters it.
+        The packed latents ``[B, image_seq_len, in_channels]``, the per-sample timestep, the
+        zero-padded text embeddings ``[B, text_seq_len, joint_attention_dim]`` and their mask
+        ``[B, text_seq_len]``: exactly the per-call shapes the orchestrator sends, so the
+        warm-up compiles the only block graph the run needs (the valid-row count is a tensor,
+        so no prompt length compiles anew). B is 1, or 2 under CFG parallelism (the
+        ``[negative, conditional]`` pair, which the module splits over the CFG group: each
+        rank's blocks still see batch 1). Under CP every rank receives the full sequence and
+        the module scatters it.
         """
         cfg = self.config
         batch = cfg.dit_batch
@@ -232,6 +259,7 @@ class NeuronQwenImageTransformerApplication(TorchNeuronApplicationBase):
             torch.zeros(
                 batch, int(cfg.text_seq_len), int(cfg.joint_attention_dim), dtype=self.dtype
             ),
+            torch.ones(batch, int(cfg.text_seq_len), dtype=_MASK_DTYPE),
         )
 
 
