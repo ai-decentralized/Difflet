@@ -102,6 +102,9 @@ def worker_cli_args(args) -> list[str]:
         # The torchrun backends' options: a worker that lost them would, e.g., load the text
         # encoder on the device beside a narrower TP shard than its HBM allows.
         ("--exec-mode", getattr(args, "exec_mode", None)),
+        # Component precisions (a worker that lost them would decode or encode in the default).
+        ("--vae-dtype", getattr(args, "vae_dtype", None)),
+        ("--text-encoder-dtype", getattr(args, "text_encoder_dtype", None)),
         ("--guidance-scale-2", getattr(args, "guidance_scale_2", None)),
         # TeaCache: a worker that lost these would silently run without it.
         ("--teacache-cadence", getattr(args, "teacache_cadence", None)),

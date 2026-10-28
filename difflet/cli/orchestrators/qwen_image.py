@@ -19,7 +19,9 @@ launch has exited, in one of two places (``_decodes_on_device``):
 
 * by default (or with --device-vae), in a vae stage of its own on one NeuronCore
   (``_stage_vae_neuron``): the Wan decoder (Qwen-Image's VAE is Wan 2.1's) in fp32, eager, as
-  Wan's neuron vae stage runs it, about 19 s per 1024x1024 image including the launch;
+  Wan's neuron vae stage runs it, about 19 s per 1024x1024 image including the launch; or in
+  bf16 with --vae-dtype bf16 (the opt-in of phase 3 of the 2026-10-26 native-vs-AoT plan, which
+  adds ``vae_dtype`` to the vae stage key);
 * with --host-vae, on the host: the driver decodes with diffusers ``AutoencoderKLQwenImage``
   in fp32 (``_decode_latents_host``), about 23.6 s per 1024x1024 image on the trn2.3xlarge host.
 
@@ -67,6 +69,7 @@ from difflet.cli.orchestrators.base import (
 )
 from difflet.cli.orchestrators.torchrun import (
     cfg_cp_conflict,
+    component_dtype,
     decodes_on_device,
     device_encoder_overflow,
     refuse,
@@ -80,6 +83,7 @@ from difflet.cli.orchestrators.torchrun import (
     torchrun_backend,
     torchrun_stage_keys,
     torchrun_unsupported_options,
+    vae_dtype_conflict,
     vae_placement_conflict,
 )
 from difflet.cli import runner
@@ -153,7 +157,8 @@ def _torchrun_conflicts(args: argparse.Namespace, *, generating: bool) -> list[s
     if getattr(args, "cfg_parallel", False) and generating and _true_cfg_scale(args) is None:
         cfg_without_true_cfg = ("--cfg-parallel splits the two branches of true classifier-free "
                                 "guidance; Qwen-Image runs them only with --true-cfg-scale > 1")
-    found = (vae_placement_conflict(args), sp_cp, cfg_cp_conflict(args), cfg_without_true_cfg)
+    found = (vae_placement_conflict(args), vae_dtype_conflict(args), sp_cp, cfg_cp_conflict(args),
+             cfg_without_true_cfg)
     return [conflict for conflict in found if conflict is not None]
 
 
@@ -877,11 +882,14 @@ class QwenImageOrchestrator(ModelOrchestrator):
             z_dim = int(json.load(f)["z_dim"])
         h, w = args.height or 1024, args.width or 1024
 
+        dtype = getattr(torch, component_dtype(getattr(args, "vae_dtype", None)))
+
         def build(parallel):
             return vae_mod.NeuronWanVaeDecoderApplication(
                 model_path=str(vae_dir),
                 latent_shape=(1, z_dim, 1, 2 * (h // 16), 2 * (w // 16)),
                 parallel=parallel,
+                dtype=dtype,
                 device="neuron",
             )
 
@@ -920,7 +928,13 @@ class QwenImageOrchestrator(ModelOrchestrator):
         )
 
     def _stage_cache_inputs(self, stage: str, args: argparse.Namespace) -> dict:
-        return torchrun_stage_keys(self._backend_neutral_stage_cache_inputs(stage, args))
+        inputs = torchrun_stage_keys(self._backend_neutral_stage_cache_inputs(stage, args))
+        # Additive, neuron only: a bf16 decoder (--vae-dtype bf16) names its dtype, so the
+        # default (fp32) vae stage keeps its key and its manifests.
+        if (stage == "vae" and torchrun_backend() is not None
+                and getattr(args, "vae_dtype", None) == "bf16"):
+            inputs["vae_dtype"] = component_dtype("bf16")
+        return inputs
 
     def _backend_neutral_stage_cache_inputs(self, stage: str, args: argparse.Namespace) -> dict:
         if stage == "text":
@@ -1029,6 +1043,8 @@ class QwenImageOrchestrator(ModelOrchestrator):
             parts += ["--negative-prompt", a.negative_prompt]
         if getattr(a, "device_text_encoder", False):
             parts += ["--device-text-encoder"]
+        if getattr(a, "vae_dtype", None):  # only when given: a default line stays byte-identical
+            parts += ["--vae-dtype", a.vae_dtype]
         if getattr(a, "teacache_speedup", None) is not None:
             parts += ["--teacache-speedup", str(a.teacache_speedup)]
         if getattr(a, "teacache_calibration", None):
