@@ -42,15 +42,15 @@ Three entry points share one engine:
 
 ## Supported models
 
-| Model                                                                                             | Type                     | Default shape     | Notes                                                                                                             |
-| ------------------------------------------------------------------------------------------------- | ------------------------ | ----------------- | ----------------------------------------------------------------------------------------------------------------- |
-| [black-forest-labs/FLUX.1-dev](https://huggingface.co/black-forest-labs/FLUX.1-dev)               | Text-to-image            | 1024×1024         | Single-process                                                                                                    |
-| [Qwen/Qwen-Image](https://huggingface.co/Qwen/Qwen-Image)                                         | Text-to-image            | 1024×1024         | 3-stage (text → generate → vae)                                                                                   |
-| [Wan-AI/Wan2.2-T2V-A14B-Diffusers](https://huggingface.co/Wan-AI/Wan2.2-T2V-A14B-Diffusers)       | Text-to-video            | 480×832×9         | 2-stage (transformer → vae); true CFG                                                                             |
-| [Wan-AI/Wan2.1-T2V-14B-Diffusers](https://huggingface.co/Wan-AI/Wan2.1-T2V-14B-Diffusers)         | Text-to-video            | 480×832×9         | Same runtime as Wan 2.2                                                                                           |
-| [hunyuanvideo-community/HunyuanVideo](https://huggingface.co/hunyuanvideo-community/HunyuanVideo) | Text-to-video            | 320×512×61        | 3-stage (clip → llama → generate)                                                                                 |
-| [Lightricks/LTX-2](https://huggingface.co/Lightricks/LTX-2)                                       | Text-to-video            | 512×768×121       | Single-process; TP only; exports `.mp4`                                                                           |
-| [MiniMaxAI/MiniMax-H3](https://huggingface.co/MiniMaxAI/MiniMax-H3)                               | Text-to-video with audio | 768×1344×124 ⚠️ ⁵ | Verified at **256×448×124**; TP4; 4-stage CLI (text → generate → video_vae → audio_vae); `.mp4` with stereo audio |
+| Model | Type | Default shape | Notes |
+|---|---|---|---|
+| [black-forest-labs/FLUX.1-dev](https://huggingface.co/black-forest-labs/FLUX.1-dev) | Text-to-image | 1024×1024 | Single-process |
+| [Qwen/Qwen-Image](https://huggingface.co/Qwen/Qwen-Image) | Text-to-image | 1024×1024 | 3-stage (text → generate → vae) |
+| [Wan-AI/Wan2.2-T2V-A14B-Diffusers](https://huggingface.co/Wan-AI/Wan2.2-T2V-A14B-Diffusers) | Text-to-video | 480×832×9 | 2-stage (transformer → vae); true CFG |
+| [Wan-AI/Wan2.1-T2V-14B-Diffusers](https://huggingface.co/Wan-AI/Wan2.1-T2V-14B-Diffusers) | Text-to-video | 480×832×9 | Same runtime as Wan 2.2 |
+| [hunyuanvideo-community/HunyuanVideo](https://huggingface.co/hunyuanvideo-community/HunyuanVideo) | Text-to-video | 320×512×61 | 3-stage (clip → llama → generate) |
+| [Lightricks/LTX-2](https://huggingface.co/Lightricks/LTX-2) | Text-to-video | 512×768×121 | Single-process; TP only; exports `.mp4` |
+| [MiniMaxAI/MiniMax-H3](https://huggingface.co/MiniMaxAI/MiniMax-H3) | Text-to-video with audio | 768×1344×124 ⚠️ ⁵ | Verified at **256×448×124**; TP4; 4-stage CLI (text → generate → video_vae → audio_vae); `.mp4` with stereo audio |
 
 ## Feature support
 
@@ -59,25 +59,25 @@ Which features each model supports today. ✅ = supported · ⚠️ = supported 
 
 **Parallelism**
 
-| Model         |   TP   | CP — all-gather | CP — ring | CP — ulysses | SP  | CFG-parallel |  DP  |
-| ------------- | :----: | :-------------: | :-------: | :----------: | :-: | :----------: | :--: |
-| FLUX.1-dev    |   ✅   |       ✅        |    ✅     |      ✅      | ✅  |     — ¹      |  ✅  |
-| Qwen-Image    |   ✅   |       ✅        |    ✅     |      ✅      | ✅  |     — ¹      |  ✅  |
-| Wan 2.2 / 2.1 |   ✅   |       ✅        |    ✅     |      ✅      | ✅  |      ✅      |  ✅  |
-| HunyuanVideo  |   ✅   |      ⚠️ ²       |    ✅     |      ❌      | ✅  |     — ¹      | ⚠️ ³ |
-| LTX-2         |   ✅   |       ❌        |    ❌     |      ❌      | ❌  |      ✅      |  ✅  |
-| MiniMax-H3    | ✅ TP4 |       ❌        |    ❌     |      ❌      | ❌  |     — ¹      |  ❌  |
+| Model | TP | CP — all-gather | CP — ring | CP — ulysses | SP | CFG-parallel | DP |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| FLUX.1-dev | ✅ | ✅ | ✅ | ✅ | ✅ | — ¹ | ✅ |
+| Qwen-Image | ✅ | ✅ | ✅ | ✅ | ✅ | — ¹ | ✅ |
+| Wan 2.2 / 2.1 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| HunyuanVideo | ✅ | ⚠️ ² | ✅ | ❌ | ✅ | — ¹ | ⚠️ ³ |
+| LTX-2 | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| MiniMax-H3 | ✅ TP4 | ❌ | ❌ | ❌ | ❌ | — ¹ | ❌ |
 
 **Runtime features**
 
-| Model         |     CLI generation      | Multi-shape compile | TeaCache (adaptive) | TeaCache (fixed cadence) |  Serving   | Batch (JSONL) |
-| ------------- | :---------------------: | :-----------------: | :-----------------: | :----------------------: | :--------: | :-----------: |
-| FLUX.1-dev    |        ✅ image         |         ✅          |         ✅          |            ✅            |  ✅ image  |      ✅       |
-| Qwen-Image    |        ✅ image         |         ✅          |         ✅          |            ✅            |  ✅ image  |      ✅       |
-| Wan 2.2 / 2.1 |        ✅ video         |         ✅          |         ✅          |            ✅            | ✅ video ⁴ |      ✅       |
-| HunyuanVideo  |        ✅ video         |         ✅          |         ✅          |            ✅            |  ✅ video  |      ✅       |
-| LTX-2         |        ✅ video         |         ❌          |         ✅          |            ✅            |  ✅ video  |      ✅       |
-| MiniMax-H3    | ✅ video + stereo audio |         ❌          |         ❌          |            ❌            |     ❌     |      ❌       |
+| Model | CLI generation | Multi-shape compile | TeaCache (adaptive) | TeaCache (fixed cadence) | Serving | Batch (JSONL) |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| FLUX.1-dev | ✅ image | ✅ | ✅ | ✅ | ✅ image | ✅ |
+| Qwen-Image | ✅ image | ✅ | ✅ | ✅ | ✅ image | ✅ |
+| Wan 2.2 / 2.1 | ✅ video | ✅ | ✅ | ✅ | ✅ video ⁴ | ✅ |
+| HunyuanVideo | ✅ video | ✅ | ✅ | ✅ | ✅ video | ✅ |
+| LTX-2 | ✅ video | ❌ | ✅ | ✅ | ✅ video | ✅ |
+| MiniMax-H3 | ✅ video + stereo audio | ❌ | ❌ | ❌ | ❌ | ❌ |
 
 **Feature legend**
 
@@ -196,13 +196,13 @@ each is mutually exclusive with `--sp`.
 
 On a 4-core host the useful presets are:
 
-| Goal                              | Flags                                                 | Works for                           |
-| --------------------------------- | ----------------------------------------------------- | ----------------------------------- |
-| Lowest latency, one request       | `--tp-degree 2 --cp-degree 2` or `--tp-degree 4 --sp` | Flux, Qwen-Image, Wan, HunyuanVideo |
-| Lowest latency, true-CFG model    | `--tp-degree 2 --cfg-parallel`                        | Wan, LTX-2                          |
-| Lowest latency, LTX-2             | `--tp-degree 4`                                       | LTX-2                               |
-| Highest throughput, many requests | `--tp-degree 2 --dp 2` or `--tp-degree 1 --dp 4`      | Flux, Qwen-Image, Wan, LTX-2        |
-| Balanced                          | `--mode mixed`                                        | all                                 |
+| Goal | Flags | Works for |
+|---|---|---|
+| Lowest latency, one request | `--tp-degree 2 --cp-degree 2` or `--tp-degree 4 --sp` | Flux, Qwen-Image, Wan, HunyuanVideo |
+| Lowest latency, true-CFG model | `--tp-degree 2 --cfg-parallel` | Wan, LTX-2 |
+| Lowest latency, LTX-2 | `--tp-degree 4` | LTX-2 |
+| Highest throughput, many requests | `--tp-degree 2 --dp 2` or `--tp-degree 1 --dp 4` | Flux, Qwen-Image, Wan, LTX-2 |
+| Balanced | `--mode mixed` | all |
 
 `--mode latency|throughput|mixed` picks `dp`, `cfg`, and `cp` for the model class; explicit
 flags override individual fields. When in doubt, ask the planner. It reads the host's
@@ -286,17 +286,17 @@ listing, deletion, and error codes are in the [Videos API reference](docs/servin
 
 ### Endpoints
 
-| Endpoint                                | Purpose                                      |
-| --------------------------------------- | -------------------------------------------- |
-| `GET /health`                           | Process and worker health                    |
-| `GET /ready`                            | Model readiness after load and smoke test    |
-| `GET /v1/models`                        | The model served by this process             |
-| `POST /v1/chat/completions`             | Text-to-image generation                     |
-| `POST /v1/videos`                       | Create an asynchronous video job             |
-| `POST /v1/videos/sync`                  | Generate a video and return the bytes        |
-| `GET /v1/videos`, `GET /v1/videos/{id}` | List jobs, read one job's status             |
-| `GET /v1/videos/{id}/content`           | Download a completed video                   |
-| `DELETE /v1/videos/{id}`                | Cancel a queued job or delete a finished one |
+| Endpoint | Purpose |
+|---|---|
+| `GET /health` | Process and worker health |
+| `GET /ready` | Model readiness after load and smoke test |
+| `GET /v1/models` | The model served by this process |
+| `POST /v1/chat/completions` | Text-to-image generation |
+| `POST /v1/videos` | Create an asynchronous video job |
+| `POST /v1/videos/sync` | Generate a video and return the bytes |
+| `GET /v1/videos`, `GET /v1/videos/{id}` | List jobs, read one job's status |
+| `GET /v1/videos/{id}/content` | Download a completed video |
+| `DELETE /v1/videos/{id}` | Cancel a queued job or delete a finished one |
 
 Logs go to the console and `./logs/`, capped at 5 MiB per file and rotated on size or date.
 Stop the server with `Ctrl+C` or `SIGTERM`.
@@ -361,58 +361,58 @@ paths, and stage core counts are in [docs/cli-staged-commands.md](docs/cli-stage
 
 ## CLI reference
 
-| Command            | Purpose                                                    |
-| ------------------ | ---------------------------------------------------------- |
-| `difflet run`      | `download` + `compile` + `generate` in one shot            |
-| `difflet download` | Fetch model weights from Hugging Face                      |
-| `difflet compile`  | AOT-compile the model and cache it on disk                 |
-| `difflet generate` | Run inference against a prior `compile`                    |
-| `difflet serve`    | Start the OpenAI-compatible image and video server         |
-| `difflet plan`     | Rank the parallel configurations this host and model allow |
-| `difflet cache ls` | List compiled artifacts with their shapes, TP, and dtype   |
-| `difflet clean`    | Delete Neuron compiler scratch from the working directory  |
+| Command | Purpose |
+|---|---|
+| `difflet run` | `download` + `compile` + `generate` in one shot |
+| `difflet download` | Fetch model weights from Hugging Face |
+| `difflet compile` | AOT-compile the model and cache it on disk |
+| `difflet generate` | Run inference against a prior `compile` |
+| `difflet serve` | Start the OpenAI-compatible image and video server |
+| `difflet plan` | Rank the parallel configurations this host and model allow |
+| `difflet cache ls` | List compiled artifacts with their shapes, TP, and dtype |
+| `difflet clean` | Delete Neuron compiler scratch from the working directory |
 
 ### Flags
 
-| Flag                                                  | Applies to                              | Description                                                                                 |
-| ----------------------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------- |
-| `--model-id`                                          | all                                     | Hugging Face model id (see [Supported models](#supported-models))                           |
-| `--revision REV`                                      | download, compile, generate, run, serve | Pin a Hub revision                                                                          |
-| `--tp-degree N`                                       | compile, generate, run, serve           | Tensor-parallel degree (default: registry default)                                          |
-| `--cp-degree N`                                       | compile, generate, run, serve           | Context-parallel degree (default 1)                                                         |
-| `--cp-mode {gather_kv,ring,ulysses}`                  | compile, generate, run, serve           | Context-parallel attention strategy                                                         |
-| `--cfg-parallel`                                      | compile, generate, run, serve           | Split the uncond/cond CFG passes across 2 ranks (true-CFG models only)                      |
-| `--sp`                                                | compile, generate, run, serve           | Megatron-style sequence parallelism over the TP group (Flux, Qwen-Image, Wan, HunyuanVideo) |
-| `--dp N`                                              | compile, generate, run                  | Data-parallel replicas; a router spreads requests across them                               |
-| `--dp-schedule {round_robin,least_loaded}`            | compile, generate, run                  | Request-to-replica schedule for `--dp > 1`                                                  |
-| `--mode {latency,throughput,mixed}`                   | compile, generate, run                  | Preset that picks `dp`, `cfg`, and `cp` for the model class                                 |
-| `--total-cores N`                                     | compile, generate, run                  | Core budget for validation (default: `NEURON_RT_NUM_CORES`)                                 |
-| `--height/--width/--num-frames`                       | compile, generate, run, serve           | Output shape (default: the model's registry shape)                                          |
-| `--shapes HxWxF[,...]`                                | compile, generate, run, serve           | Compile or serve several shapes from one bucketed artifact                                  |
-| `--teacache-cadence N`                                | generate, run                           | Skip every N-th denoise step                                                                |
-| `--teacache-speedup F`, `--teacache-calibration PATH` | generate, run, serve                    | Adaptive TeaCache target and calibration file                                               |
-| `--teacache-online-delta ALPHA`                       | generate, run                           | Probe-free online-delta TeaCache                                                            |
-| `--prompt`                                            | generate, run                           | Text prompt                                                                                 |
-| `--requests FILE`                                     | generate, run                           | JSONL batch file, one request per line                                                      |
-| `--output PATH`                                       | generate, run                           | Output file (`.png` or `.mp4`)                                                              |
-| `--steps N`, `--guidance-scale F`, `--seed N`         | generate, run                           | Sampler settings (seed default 42)                                                          |
-| `--cache-dir PATH`                                    | compile, generate, run, serve, cache    | Compiled-artifact cache root (default `~/.cache/difflet/`)                                  |
-| `--force`                                             | compile, generate, run, serve           | Recompile even if a valid cache entry exists                                                |
-| `--work-dir PATH`, `--keep-work-dir`                  | generate, run                           | Inter-stage tensor directory for staged models                                              |
-| `--host`, `--port`, `--api-key`                       | serve                                   | Bind address and optional shared API key                                                    |
-| `--clip-placement {host,neuron}`                      | serve                                   | HunyuanVideo CLIP placement                                                                 |
+| Flag | Applies to | Description |
+|---|---|---|
+| `--model-id` | all | Hugging Face model id (see [Supported models](#supported-models)) |
+| `--revision REV` | download, compile, generate, run, serve | Pin a Hub revision |
+| `--tp-degree N` | compile, generate, run, serve | Tensor-parallel degree (default: registry default) |
+| `--cp-degree N` | compile, generate, run, serve | Context-parallel degree (default 1) |
+| `--cp-mode {gather_kv,ring,ulysses}` | compile, generate, run, serve | Context-parallel attention strategy |
+| `--cfg-parallel` | compile, generate, run, serve | Split the uncond/cond CFG passes across 2 ranks (true-CFG models only) |
+| `--sp` | compile, generate, run, serve | Megatron-style sequence parallelism over the TP group (Flux, Qwen-Image, Wan, HunyuanVideo) |
+| `--dp N` | compile, generate, run | Data-parallel replicas; a router spreads requests across them |
+| `--dp-schedule {round_robin,least_loaded}` | compile, generate, run | Request-to-replica schedule for `--dp > 1` |
+| `--mode {latency,throughput,mixed}` | compile, generate, run | Preset that picks `dp`, `cfg`, and `cp` for the model class |
+| `--total-cores N` | compile, generate, run | Core budget for validation (default: `NEURON_RT_NUM_CORES`) |
+| `--height/--width/--num-frames` | compile, generate, run, serve | Output shape (default: the model's registry shape) |
+| `--shapes HxWxF[,...]` | compile, generate, run, serve | Compile or serve several shapes from one bucketed artifact |
+| `--teacache-cadence N` | generate, run | Skip every N-th denoise step |
+| `--teacache-speedup F`, `--teacache-calibration PATH` | generate, run, serve | Adaptive TeaCache target and calibration file |
+| `--teacache-online-delta ALPHA` | generate, run | Probe-free online-delta TeaCache |
+| `--prompt` | generate, run | Text prompt |
+| `--requests FILE` | generate, run | JSONL batch file, one request per line |
+| `--output PATH` | generate, run | Output file (`.png` or `.mp4`) |
+| `--steps N`, `--guidance-scale F`, `--seed N` | generate, run | Sampler settings (seed default 42) |
+| `--cache-dir PATH` | compile, generate, run, serve, cache | Compiled-artifact cache root (default `~/.cache/difflet/`) |
+| `--force` | compile, generate, run, serve | Recompile even if a valid cache entry exists |
+| `--work-dir PATH`, `--keep-work-dir` | generate, run | Inter-stage tensor directory for staged models |
+| `--host`, `--port`, `--api-key` | serve | Bind address and optional shared API key |
+| `--clip-placement {host,neuron}` | serve | HunyuanVideo CLIP placement |
 
 `difflet <command> --help` is the authoritative list.
 
 ### Where things land
 
-| What                | Where                                                                        |
-| ------------------- | ---------------------------------------------------------------------------- |
-| Downloaded weights  | `~/.cache/huggingface/hub/models--<org>--<name>/`                            |
-| Compiled artifacts  | `~/.cache/difflet/` (override with `--cache-dir` or `DIFFLET_COMPILE_CACHE`) |
-| Inter-stage tensors | `--work-dir` (default `~/.cache/difflet/work/<model>/`)                      |
-| Serving logs        | `./logs/`                                                                    |
-| Compiler scratch    | the working directory; remove with `difflet clean`                           |
+| What | Where |
+|---|---|
+| Downloaded weights | `~/.cache/huggingface/hub/models--<org>--<name>/` |
+| Compiled artifacts | `~/.cache/difflet/` (override with `--cache-dir` or `DIFFLET_COMPILE_CACHE`) |
+| Inter-stage tensors | `--work-dir` (default `~/.cache/difflet/work/<model>/`) |
+| Serving logs | `./logs/` |
+| Compiler scratch | the working directory; remove with `difflet clean` |
 
 ## Troubleshooting
 
