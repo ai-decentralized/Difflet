@@ -63,6 +63,7 @@ def test_joint_cp_attention_matches_dense_joint_softmax(world_size, tp, mode):
                                        [1, hl, JOINT_S_TXT, JOINT_D]]
         errors = {name: r[name] for name in ("ring_err", "ulysses_img_err", "ulysses_txt_err",
                                              "masked_img_err", "masked_txt_err")}
+        errors.update({f"ring_masked_{n}": e for n, e in r["ring_masked_errs"].items()})
         assert all(e < TOL for e in errors.values()), (rank, errors)
         assert "divisible by cp_degree" in r["head_error"], (rank, r["head_error"])
 
@@ -76,6 +77,30 @@ def test_joint_ring_attention_without_context_parallelism_is_dense_joint_attenti
     out = A.joint_ring_attention(q, k_i, v_i, k_t, v_t, scale=0.3)
     torch.testing.assert_close(out, _dense(q, torch.cat([k_t, k_i], 2), torch.cat([v_t, v_i], 2),
                                            scale=0.3))
+
+
+@pytest.mark.parametrize("n", [0, 1, 3, 5])
+def test_joint_ring_text_valid_len_attends_only_the_valid_text_keys_at_cp1(n):
+    """``text_valid_len`` masks the padded text keys and keeps every image key, as diffusers'
+    ``[text_mask | ones(image)]`` key mask does; a count of 0 (an all-padding text mask)
+    attends the image keys alone and stays finite."""
+    (q_t, k_t, v_t), (q_i, k_i, v_i) = _streams()
+    q = torch.cat([q_t, q_i], 2)
+    out = A.joint_ring_attention(q, k_i, v_i, k_t, v_t, scale=0.3,
+                                 text_valid_len=torch.tensor([n], dtype=torch.int32))
+    assert bool(torch.isfinite(out).all())
+    torch.testing.assert_close(out, _dense(q, torch.cat([k_t[:, :, :n], k_i], 2),
+                                           torch.cat([v_t[:, :, :n], v_i], 2), scale=0.3))
+
+
+def test_masked_partial_with_no_valid_key_contributes_nothing():
+    """A text partial with no valid key is the empty softmax: output 0 and logsumexp -inf, so
+    the logsumexp merge gives it weight 0 (no NaN from ``exp(-inf - -inf)``)."""
+    (q_t, k_t, v_t), _ = _streams()
+    out, lse = A._masked_attention_with_lse(q_t, k_t, v_t, scale=0.3,
+                                            key_valid_len=torch.tensor([0], dtype=torch.int32))
+    assert torch.equal(out, torch.zeros_like(out))
+    assert bool(torch.isneginf(lse).all())
 
 
 def test_joint_ulysses_attention_without_context_parallelism_is_dense_joint_attention():

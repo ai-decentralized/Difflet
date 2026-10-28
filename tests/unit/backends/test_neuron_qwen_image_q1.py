@@ -3,11 +3,12 @@
 The model is the tiny diffusers-layout Qwen-Image of tests/unit/backends/_neuron_qwen_toy.py
 (2 blocks, 4 heads x 32, a sharded checkpoint with an index). The reference is diffusers'
 ``QwenImageTransformer2DModel`` itself, reloaded from the same files and called with
-``encoder_hidden_states_mask=None``: the unmasked joint attention the Difflet modeling runs on
-every backend. Every forward runs in a spawned gloo process (``_neuron_gloo.run_ranks``, one rank
-for the single-rank cases): at TP2 the column/row-parallel shards and their all-gathers and
-all-reduces run, at CP2 the image-token scatter, the K/V all-gather and the output gather. Nothing
-here touches the device.
+``encoder_hidden_states_mask=None`` on a prompt whose every text row is valid; a right-padded
+prompt with its mask is checked against diffusers on its valid rows alone (section e2). Every
+forward runs in a spawned gloo process (``_neuron_gloo.run_ranks``, one rank for the single-rank
+cases): at TP2 the column/row-parallel shards and their all-gathers and all-reduces run, at CP2
+the image-token scatter, the K/V all-gather and the output gather. Nothing here touches the
+device.
 """
 
 import pytest
@@ -34,6 +35,7 @@ from tests.unit.backends._neuron_qwen_toy import (  # noqa: E402
     TINY_HIDDEN_SHAPE,
     TINY_IMAGE_SEQ_LEN,
     TINY_OUT_SHAPE,
+    TINY_PADDED_VALID_ROWS,
     TINY_QWEN_TRANSFORMER,
     TINY_SHAPE,
     TINY_TEXT_SEQ_LEN,
@@ -51,7 +53,9 @@ LOAD_PHASES = {
     "runtime init", "build on meta", "load checkpoint", "eval", "compile", "warmup forward"
 }
 TINY_BLOCK_NAMES = [f"transformer.transformer_blocks.{i}" for i in range(2)]
-WARMUP_SHAPES = [TINY_HIDDEN_SHAPE, (1,), TINY_TEXT_SHAPE]
+TINY_MASK_SHAPE = (1, TINY_TEXT_SHAPE[1])
+#: The warm-up's four inputs: latents, timestep, padded text and its int64 mask.
+WARMUP_SHAPES = [TINY_HIDDEN_SHAPE, (1,), TINY_TEXT_SHAPE, TINY_MASK_SHAPE]
 CLEAN_REPORT = {"missing": [], "unexpected": []}
 # Tight fp32: the same math as diffusers, except real-valued RoPE for its complex product.
 ATOL = RTOL = 1e-5
@@ -74,7 +78,11 @@ def tiny(tmp_path_factory):
     pytest.importorskip("diffusers")
     root = tmp_path_factory.mktemp("tiny_qwen")
     ref = write_tiny_qwen_model(root)
-    return SimpleNamespace(dir=str(root), transformer=root / "transformer", ref=ref)
+    transformer = root / "transformer"
+    # diffusers on the prompt's valid rows alone = diffusers' masked call on the padded prompt.
+    ref_masked = diffusers_reference(transformer, valid_rows=TINY_PADDED_VALID_ROWS)
+    return SimpleNamespace(dir=str(root), transformer=transformer, ref=ref,
+                           ref_masked=ref_masked)
 
 
 def _run(tiny, *, world_size=1, tp=1, cp_mode="gather_kv", exec_mode="eager", num_layers=None,
@@ -249,14 +257,16 @@ def test_example_inputs_are_the_per_step_shapes(tiny):
         model_path=tiny.transformer, config=tiny_qwen_config(), dtype=torch.float32, device="cpu"
     )
     assert [(tuple(t.shape), t.dtype) for t in app.get_example_inputs()] == [
-        (shape, torch.float32) for shape in WARMUP_SHAPES
-    ]
+        (shape, torch.float32) for shape in WARMUP_SHAPES[:3]
+    ] + [(TINY_MASK_SHAPE, torch.int64)]
+    assert bool(app.get_example_inputs()[3].all())  # the warm-up attends every text row
     # The real geometry at 1024x1024: 64x64 packed tokens, 1024 padded text rows.
     real = NeuronQwenImageTransformerApplication(
         model_path="/unused", config=NeuronQwenImageConfig(), dtype=torch.bfloat16, device="cpu"
     )
     assert [(tuple(t.shape), t.dtype) for t in real.get_example_inputs()] == [
-        ((1, 4096, 64), torch.bfloat16), ((1,), torch.bfloat16), ((1, 1024, 3584), torch.bfloat16)
+        ((1, 4096, 64), torch.bfloat16), ((1,), torch.bfloat16), ((1, 1024, 3584), torch.bfloat16),
+        ((1, 1024), torch.int64),
     ]
 
 
@@ -354,7 +364,7 @@ def test_single_rank_eager_matches_diffusers(tiny):
     assert result["local_heads"] == 4 and result["num_blocks"] == 2
     assert result["processor"] == ["_QwenImageTrainiumAttnProcessor", False, "gather_kv"]
     assert result["params_on_meta"] == 0
-    assert result["five_arg_equal"] is True  # the mask is dropped, as documented
+    assert result["five_arg_equal"] is True  # an all-ones mask is no mask; guidance is dropped
     assert result["other_differs"] is True
 
 
@@ -411,7 +421,7 @@ def test_tp2_sequence_parallel_matches_tp2_and_tp1(tiny, exec_mode):
         if exec_mode == "eager":
             # Every forward's first block sees this rank's half of the 24 image tokens and of
             # the 8 text rows.
-            assert result["block_rows"] == [[12, 4]] * 3
+            assert result["block_rows"] == [[12, 4]] * 5  # the worker's five forwards
         else:
             assert result["compiled_blocks"] == TINY_BLOCK_NAMES
             assert result["unique_graphs_after_warmup"] == 1
@@ -451,6 +461,43 @@ def test_cp2_gather_kv_matches_tp1(tiny, world_size, tp, exec_mode):
             assert result["compiled_blocks"] == TINY_BLOCK_NAMES
             assert result["unique_graphs_after_forwards"] == 1
             assert result["collectives_per_graph"] == [1]
+
+
+# ---- (e2) the text mask ----------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("world_size", "tp", "cp_mode", "exec_mode", "sp"),
+    [
+        (1, 1, "gather_kv", "eager", False),
+        (1, 1, "gather_kv", "compile", False),
+        (2, 2, "gather_kv", "compile", False),
+        (2, 2, "gather_kv", "eager", True),
+        (2, 1, "gather_kv", "eager", False),
+        (2, 1, "ring", "eager", False),
+        (2, 1, "ulysses", "eager", False),
+        (4, 2, "gather_kv", "compile", False),
+    ],
+)
+def test_padded_prompt_attends_only_its_valid_rows(tiny, world_size, tp, cp_mode, exec_mode, sp):
+    """A prompt zero-padded to text_seq_len with its mask (5 valid rows of 8) gives diffusers'
+    output on the 5 rows alone, on every topology: the padded text keys are masked, as diffusers
+    masks them. Without the mask the zero rows are attended (txt_in turns them into its bias),
+    which moves the output: the error the 2026-10-26 fox run measured on the device. In compile
+    mode the masked call reuses the warm-up's one block graph (the count is a tensor)."""
+    results = _run(tiny, world_size=world_size, tp=tp, cp_mode=cp_mode, exec_mode=exec_mode,
+                   sp=sp)
+    masked = [torch.tensor(result["out_masked"]) for result in results]
+    for out in masked:
+        assert torch.equal(out, masked[0])
+    torch.testing.assert_close(masked[0], tiny.ref_masked, atol=ATOL, rtol=RTOL)
+    unmasked = torch.tensor(results[0]["out_unmasked_padded"])
+    assert not torch.allclose(unmasked, tiny.ref_masked, atol=1e-3)
+    for result in results:
+        assert result["unwarmed_shapes"] == []
+        if exec_mode == "compile":
+            assert result["unique_graphs_after_forwards"] == 1
+            assert result["graph_breaks"] == 0
 
 
 # ---- (f) compile mode ------------------------------------------------------------------------

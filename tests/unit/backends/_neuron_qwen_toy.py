@@ -5,9 +5,8 @@ by pytest).
 safetensors checkpoint (with its ``.safetensors.index.json``, the real snapshot's layout) of a
 seeded diffusers ``QwenImageTransformer2DModel`` (2 blocks, 4 heads x 32, RoPE axes (8, 12, 12)),
 and returns diffusers' own fp32 output on ``tiny_qwen_inputs()``: the model reloaded from those
-files, called with ``encoder_hidden_states_mask=None`` and the packed ``img_shapes``, which is
-the unmasked joint attention every Difflet Qwen-Image backend runs. The reference never touches
-``difflet.ops``.
+files, called with ``encoder_hidden_states_mask=None`` and the packed ``img_shapes`` (every text
+row of ``tiny_qwen_inputs()`` is valid). The reference never touches ``difflet.ops``.
 
 The workers live here rather than in ``_neuron_workers.py`` so this suite can grow without
 editing a file other suites append to; ``_neuron_gloo.run_ranks`` only needs them importable.
@@ -53,6 +52,8 @@ TINY_WEIGHT_SEED = 0
 TINY_INPUT_SEED = 1
 #: The orchestrator passes sigma-scale timesteps (t / 1000); diffusers' embedder scales by 1000.
 TINY_TIMESTEP = 0.75
+#: Valid rows of the right-padded prompt the masked forwards use (``tiny_padded_text``).
+TINY_PADDED_VALID_ROWS = 5
 #: Small enough that the tiny checkpoint spans several files plus an index.
 TINY_MAX_SHARD_SIZE = "40KB"
 
@@ -70,6 +71,16 @@ def tiny_qwen_inputs(*, dtype: torch.dtype = torch.float32):
     text = torch.randn(TINY_TEXT_SHAPE, generator=gen)
     timestep = torch.tensor([TINY_TIMESTEP])
     return hidden.to(dtype), timestep.to(dtype), text.to(dtype)
+
+
+def tiny_padded_text(text: torch.Tensor, valid: int = TINY_PADDED_VALID_ROWS):
+    """``text`` right-padded as the text encoder writes a short prompt: rows past ``valid``
+    zeroed, and its bool mask ``[1, TINY_TEXT_SEQ_LEN]`` (the first ``valid`` rows True)."""
+    padded = text.clone()
+    padded[:, valid:] = 0
+    mask = torch.zeros(text.shape[:2], dtype=torch.bool)
+    mask[:, :valid] = True
+    return padded, mask
 
 
 def tiny_qwen_config(**overrides):
@@ -104,9 +115,13 @@ def _diffusers_model(num_layers: int, seed: int):
     return model.eval().requires_grad_(False)
 
 
-def diffusers_reference(transformer_dir, *, num_layers: int | None = None) -> torch.Tensor:
+def diffusers_reference(
+    transformer_dir, *, num_layers: int | None = None, valid_rows: int | None = None
+) -> torch.Tensor:
     """diffusers' fp32 output on ``tiny_qwen_inputs()`` from the saved files, unmasked; with
-    ``num_layers`` only the first that many blocks run (the override's semantics)."""
+    ``num_layers`` only the first that many blocks run (the override's semantics). With
+    ``valid_rows`` the prompt is its first ``valid_rows`` text rows only, diffusers' own
+    unpadded call: what diffusers' masked call on ``tiny_padded_text`` computes too."""
     from diffusers import QwenImageTransformer2DModel
 
     model = QwenImageTransformer2DModel.from_pretrained(
@@ -115,6 +130,8 @@ def diffusers_reference(transformer_dir, *, num_layers: int | None = None) -> to
     if num_layers is not None:
         model.transformer_blocks = model.transformer_blocks[:num_layers]
     hidden, timestep, text = tiny_qwen_inputs()
+    if valid_rows is not None:
+        text = text[:, :valid_rows]
     with torch.no_grad():
         return model(
             hidden_states=hidden,
@@ -260,9 +277,14 @@ def q1_qwen_worker(
     hidden, timestep, text = tiny_qwen_inputs()
     out = app(hidden, timestep, text)
     other = app(hidden, timestep * 0.5, -text)
-    # The orchestrator's five-argument call: the mask and guidance are dropped before the
-    # base's shape bookkeeping, so in compile mode it is no unwarmed shape either.
+    # The orchestrator's five-argument call with an all-ones float mask: cast to the warm-up's
+    # int64 and guidance dropped before the base's shape bookkeeping, so in compile mode it is
+    # no unwarmed shape either.
     out_five = app(hidden, timestep, text, torch.ones(1, TINY_TEXT_SEQ_LEN), None)
+    # A right-padded prompt and its mask: only the valid rows may be attended.
+    padded, mask = tiny_padded_text(text)
+    out_masked = app(hidden, timestep, padded, mask)
+    out_unmasked_padded = app(hidden, timestep, padded)
     unwarmed = list(app.unwarmed_shapes)
     graphs_after_forwards = counters["stats"]["unique_graphs"]
     block0 = app.module.transformer.transformer_blocks[0]
@@ -290,6 +312,8 @@ def q1_qwen_worker(
         "params_on_meta": sum(p.is_meta for p in app.module.parameters()),
         "out": out.float().tolist(),
         "five_arg_equal": bool(torch.equal(out, out_five)),
+        "out_masked": out_masked.float().tolist(),
+        "out_unmasked_padded": out_unmasked_padded.float().tolist(),
         "other_differs": not bool(torch.equal(out, other)),
     }
 
