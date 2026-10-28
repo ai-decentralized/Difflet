@@ -188,10 +188,17 @@ def _compile_identity(
         "toolchain": toolchain_versions(),
     }
     if stage != "text":
-        from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+        from difflet.pipeline.bucketing import canonicalize_shapes
 
         profile_shapes = profile.shapes or ((profile.height, profile.width, None),)
         inputs["shapes"] = [list(shape) for shape in canonicalize_shapes(profile_shapes)]
+    if stage == "generate":
+        import torch
+
+        from difflet.common.tp_reduce import tp_reduce_cache_fields
+
+        # Serving runs the default bf16 all-reduce; pre-bf16 DiTs reduced in fp32.
+        inputs.update(tp_reduce_cache_fields(torch.bfloat16, legacy=torch.float32))
     return CompileArtifactIdentity.from_cache_inputs(inputs)
 
 

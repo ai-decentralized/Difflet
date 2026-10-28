@@ -45,6 +45,7 @@ from diffusers.models.embeddings import (
 from diffusers.models.normalization import FP32LayerNorm
 
 from difflet.ops import (
+    rms_norm_fp32,
     ColumnParallelLinear,
     RMSNorm,
     RowParallelLinear,
@@ -80,6 +81,13 @@ def _safe_tp_size() -> int:
         return int(get_tensor_model_parallel_size())
     except Exception:
         return 1
+
+
+def _wan_reduce_dtype(config, dtype: Optional[torch.dtype]) -> Optional[torch.dtype]:
+    """Row-parallel all-reduce dtype: --tp-reduce-dtype (via the Trainium
+    config's neuron_config) when set, else ``dtype`` as before the flag."""
+    neuron_config = getattr(config, "neuron_config", None)
+    return getattr(neuron_config, "rpl_reduce_dtype", None) or dtype
 
 
 def _sp_unbias(x: torch.Tensor, row_linear: nn.Module) -> torch.Tensor:
@@ -314,6 +322,7 @@ class WanFeedForward(nn.Module):
         inner_dim: int,
         dtype: Optional[torch.dtype] = None,
         sp_enabled: bool = False,
+        reduce_dtype: Optional[torch.dtype] = None,
     ):
         super().__init__()
         self.sp_enabled = sp_enabled
@@ -331,7 +340,9 @@ class WanFeedForward(nn.Module):
             bias=True,
             input_is_parallel=True,
             dtype=dtype,
-            reduce_dtype=dtype,
+            # None (no --tp-reduce-dtype in the config) keeps NxD's fallback to
+            # dtype, i.e. the activation dtype when dtype is None.
+            reduce_dtype=reduce_dtype or dtype,
             # Under Megatron-SP the cross-rank sum is folded into the ḡ
             # reduce-scatter below, so the row-parallel must not also all-reduce.
             reduce_output=not sp_enabled,
@@ -414,8 +425,10 @@ class WanAttention(nn.Module):
         context_parallel_enabled: bool = False,
         cp_mode: str = "gather_kv",
         sp_enabled: bool = False,
+        reduce_dtype: Optional[torch.dtype] = None,
     ):
         super().__init__()
+        reduce_dtype = reduce_dtype or dtype
         self.dim = dim
         self.heads = heads
         self.head_dim = head_dim
@@ -462,7 +475,7 @@ class WanAttention(nn.Module):
                     bias=True,
                     input_is_parallel=True,
                     dtype=dtype,
-                    reduce_dtype=dtype,
+                    reduce_dtype=reduce_dtype,
                     # Under Megatron-SP the cross-rank sum is folded into the ḡ
                     # reduce-scatter in forward(); don't also all-reduce here.
                     reduce_output=not sp_enabled,
@@ -488,12 +501,16 @@ class WanAttention(nn.Module):
         no-ops, so this is bit-identical to a plain ``RMSNorm`` — the path the CPU
         reference and unit tests exercise.
         """
+        eps = getattr(norm, "eps", None) or getattr(norm, "variance_epsilon", None) or 1e-6
+        if self.tp_degree == 1 and self._rank_util is None:
+            # No shard to reduce over: the whole norm is one op, fused where the backend has
+            # a kernel (CUDA), the same fp32 reference math elsewhere.
+            return rms_norm_fp32(x, getattr(norm, "weight", None), eps)
         local_dim = x.shape[-1]
         local_sq = x.float().pow(2).sum(dim=-1, keepdim=True)
         global_sq = reduce_from_tensor_model_parallel_region(local_sq)
         full_dim = local_dim * self.tp_degree
         # difflet's RMSNorm is a CustomRMSNorm (eps stored as variance_epsilon).
-        eps = getattr(norm, "eps", None) or getattr(norm, "variance_epsilon", None) or 1e-6
         x_normed = x.float() * torch.rsqrt(global_sq / full_dim + eps)
         weight = getattr(norm, "weight", None)
         if weight is not None:
@@ -594,6 +611,7 @@ class WanTransformerBlock(nn.Module):
         context_parallel_enabled: bool = False,
         cp_mode: str = "gather_kv",
         sp_enabled: bool = False,
+        reduce_dtype: Optional[torch.dtype] = None,
     ):
         super().__init__()
         head_dim = dim // num_heads
@@ -602,13 +620,13 @@ class WanTransformerBlock(nn.Module):
         self.attn1 = WanAttention(
             dim, num_heads, head_dim, eps=eps, is_cross_attention=False, dtype=dtype,
             context_parallel_enabled=context_parallel_enabled, cp_mode=cp_mode,
-            sp_enabled=sp_enabled,
+            sp_enabled=sp_enabled, reduce_dtype=reduce_dtype,
         )
 
         self.attn2 = WanAttention(
             dim, num_heads, head_dim, eps=eps, is_cross_attention=True, dtype=dtype,
             context_parallel_enabled=context_parallel_enabled, cp_mode=cp_mode,
-            sp_enabled=sp_enabled,
+            sp_enabled=sp_enabled, reduce_dtype=reduce_dtype,
         )
         self.norm2 = (
             FP32LayerNorm(dim, eps, elementwise_affine=True)
@@ -616,7 +634,9 @@ class WanTransformerBlock(nn.Module):
             else nn.Identity()
         )
 
-        self.ffn = WanFeedForward(dim, ffn_dim, dtype=dtype, sp_enabled=sp_enabled)
+        self.ffn = WanFeedForward(
+            dim, ffn_dim, dtype=dtype, sp_enabled=sp_enabled, reduce_dtype=reduce_dtype
+        )
         self.norm3 = FP32LayerNorm(dim, eps, elementwise_affine=False)
 
         self.scale_shift_table = nn.Parameter(torch.randn(1, 6, dim) / dim**0.5)
@@ -754,6 +774,7 @@ class WanTransformer3DModel(nn.Module):
                     context_parallel_enabled=self.context_parallel_enabled,
                     cp_mode=self.cp_mode,
                     sp_enabled=self.sp_enabled,
+                    reduce_dtype=_wan_reduce_dtype(config, dtype),
                 )
                 for _ in range(config.num_layers)
             ]

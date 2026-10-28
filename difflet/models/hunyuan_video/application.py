@@ -13,6 +13,8 @@ from typing import Any
 
 import torch
 
+from difflet.common.tp_reduce import parse_tp_reduce_dtype
+
 try:
     from difflet.backends.trainium.core.config import NeuronConfig
     from difflet.backends.trainium.core.multi_component_application import (
@@ -119,7 +121,7 @@ def allowed_hunyuan_video_latent_shapes(config: Any) -> list[tuple[int, ...]]:
                 int(config.latent_width),
             )
         ]
-    from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+    from difflet.pipeline.bucketing import canonicalize_shapes
 
     shapes = []
     for height, width, num_frames in canonicalize_shapes(compile_shapes):
@@ -261,6 +263,7 @@ def create_hunyuan_video_backbone_config(
     cp_mode: str = "gather_kv",
     sp_enabled: bool = False,
     compile_shapes=None,
+    tp_reduce_dtype: torch.dtype = torch.bfloat16,
 ):
     from difflet.backends.trainium.hunyuan_video.backbone import (
         HunyuanVideoBackboneInferenceConfig,
@@ -272,6 +275,7 @@ def create_hunyuan_video_backbone_config(
         tp_degree=tp_degree,
         world_size=world_size,
         torch_dtype=dtype,
+        rpl_reduce_dtype=tp_reduce_dtype,
     )
     extra = {}
     if compile_shapes:
@@ -438,7 +442,7 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
         self.compile_shapes = None
         raw_shapes = kwargs.get("shapes")
         if raw_shapes:
-            from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+            from difflet.pipeline.bucketing import canonicalize_shapes
 
             self.compile_shapes = canonicalize_shapes(raw_shapes)
             if self.model_version == "1.5" and len(self.compile_shapes) > 1:
@@ -583,6 +587,7 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                 cp_mode=parallel.cp_mode,
                 sp_enabled=bool(getattr(parallel, "sp_enabled", False)),
                 compile_shapes=self.compile_shapes,
+                tp_reduce_dtype=parse_tp_reduce_dtype(kwargs.get("tp_reduce_dtype")),
             )
             self.transformer = NeuronHunyuanVideoBackboneApplication(
                 model_path=self.transformer_path,

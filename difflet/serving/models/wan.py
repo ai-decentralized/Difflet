@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from difflet.pipeline.compile_cache import CacheSpec, toolchain_versions
+from difflet.pipeline.difflet_pipeline import _cache_application_kwargs
 from difflet.registry import resolve_model
 from difflet.serving.artifact_manager import ImmutableArtifactManager
 from difflet.serving.engines.stage_pipeline import (
@@ -664,7 +665,8 @@ def _compile_spec(
         num_frames=profile.num_frames,
         shapes=profile.shapes,
         revision=source.resolved_source_id,
-        application_kwargs=_application_kwargs(),
+        # The identity DiffletPipeline keys the artifact with (incl. tp_reduce_dtype).
+        application_kwargs=_cache_application_kwargs(_application_kwargs(), model_name=_MODEL_TYPE),
     )
     identity = CompileArtifactIdentity.from_cache_inputs(
         {"component_id": "generation", "cache_inputs": cache_spec.cache_inputs()}
@@ -687,7 +689,7 @@ def _compile_specs(
         return (generation,)
     # v2: the decoder identity carries the canonical shape SET (K=1 uses the
     # same list form) instead of a single height/width/num_frames.
-    from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+    from difflet.pipeline.bucketing import canonicalize_shapes
 
     profile_shapes = profile.shapes or ((profile.height, profile.width, profile.num_frames),)
     shapes_list = [list(shape) for shape in canonicalize_shapes(profile_shapes)]

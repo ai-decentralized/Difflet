@@ -3,12 +3,12 @@
 Spec: docs/superpowers/specs/2026-07-06-dp-replication-routing-design.md §Router.
 Workers are full difflet CLI invocations with dp=1 semantics; NEURON_RT_* are
 plain-assigned (run_stage's setdefault must see the worker's range, not the
-parent's).
+parent's). On a GPU platform a replica's range is GPUs, pinned through the platform's
+visible-devices variable, and no Neuron variable reaches the worker.
 """
 
 from __future__ import annotations
 
-import ctypes
 import dataclasses
 import os
 import signal
@@ -20,6 +20,7 @@ from typing import Mapping
 
 from difflet.cli.dp.claims import mark_failed, summarize
 from difflet.cli.dp.requests_io import RequestSpec, write_manifest
+from difflet.cli.parent_death import die_with_parent
 
 
 def replica_core_ranges(dp: int, replica_cores: int) -> list[str]:
@@ -53,7 +54,15 @@ def worker_env(
     replica_cores: int,
     *,
     root_comm_id: str | None = None,
+    backend: str = "trainium",
 ) -> dict[str, str]:
+    from difflet.platforms import get_platform
+
+    platform = get_platform(backend)
+    if platform.capabilities.flow == "gpu":
+        # The range counts from this process's visible GPUs; a replica with more than one
+        # GPU (cfg/cp) re-execs under torchrun inside it.
+        return platform.worker_env(base_env, _expand_range(core_range))
     env = dict(base_env)
     env["NEURON_RT_VISIBLE_CORES"] = core_range
     env["NEURON_RT_NUM_CORES"] = str(replica_cores)
@@ -69,19 +78,16 @@ def worker_env(
     return env
 
 
-def _die_with_parent() -> None:
-    """``preexec_fn`` for worker processes: SIGKILL the worker when the router
-    dies. The verification driver SIGKILLs a timed-out ``difflet generate``;
-    without this the workers outlived it and kept all four NeuronCores
-    (observed on device, 2026-09-07: two LTX-2 workers held cores 0-3 for hours
-    after the router was gone)."""
-    if not sys.platform.startswith("linux"):
-        return
-    PR_SET_PDEATHSIG = 1
-    libc = ctypes.CDLL("libc.so.6", use_errno=True)
-    libc.prctl(PR_SET_PDEATHSIG, int(signal.SIGKILL), 0, 0, 0)
-    if os.getppid() == 1:  # the parent already died between fork and here
-        os.kill(os.getpid(), signal.SIGKILL)
+def _expand_range(core_range: str) -> list[int]:
+    lo, _, hi = core_range.partition("-")
+    return list(range(int(lo), int(hi or lo) + 1))
+
+
+#: ``preexec_fn`` for worker processes: SIGKILL the worker when the router dies. The
+#: verification driver SIGKILLs a timed-out ``difflet generate``; without this the workers
+#: outlived it and kept all four NeuronCores (observed on device, 2026-09-07: two LTX-2
+#: workers held cores 0-3 for hours after the router was gone).
+_die_with_parent = die_with_parent(signal.SIGKILL)
 
 
 def worker_cli_args(args) -> list[str]:
@@ -122,6 +128,7 @@ def worker_cli_args(args) -> list[str]:
         ("--cfg-parallel", "cfg_parallel"),
         ("--sp", "sp_enabled"),
         ("--keep-work-dir", "keep_work_dir"),
+        ("--torch-compile", "torch_compile"),
         ("--host-text-encoder", "host_text_encoder"),
         ("--device-text-encoder", "device_text_encoder"),
         ("--host-vae", "host_vae"),
@@ -130,6 +137,8 @@ def worker_cli_args(args) -> list[str]:
     ):
         if getattr(args, name, False):
             argv.append(flag)
+    if getattr(args, "tp_reduce_dtype", None):
+        argv += ["--tp-reduce-dtype", args.tp_reduce_dtype]
     return argv
 
 
@@ -173,6 +182,11 @@ def run_router(
     _check_hbm(args)
 
     prefix = worker_argv_prefix or [sys.executable, "-m", "difflet.cli.main"]
+    from difflet.platforms import current_platform
+
+    platform = current_platform()
+    backend = platform.name
+    unit = "GPUs" if platform.capabilities.flow == "gpu" else "cores"
 
     procs = []
     for w, core_range in enumerate(replica_core_ranges(dp, replica_cores)):
@@ -182,8 +196,8 @@ def run_router(
             "--dp-schedule", schedule,
             "--work-dir", str(work_dir / f"worker_{w}"),
         ]
-        env = worker_env(os.environ, core_range, replica_cores)
-        print(f"[dp-router] worker {w}: cores {core_range}", flush=True)
+        env = worker_env(os.environ, core_range, replica_cores, backend=backend)
+        print(f"[dp-router] worker {w}: {unit} {core_range}", flush=True)
         procs.append(subprocess.Popen(argv, env=env, preexec_fn=_die_with_parent))
 
     exit_codes = [p.wait() for p in procs]

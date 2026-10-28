@@ -32,8 +32,7 @@ from torch import Tensor
 from torch.nn import Parameter
 from torch.nn import functional as F, init
 
-from diffusers.models.autoencoders.vae import Decoder, DecoderTiny
-from typing import List, Tuple
+from diffusers.models.autoencoders.vae import DecoderTiny
 
 
 # Replace torch.nn.GroupNorm with PatchedGroupNorm when running the decoder in bfloat16.

@@ -80,7 +80,7 @@ class DiffletPipeline:
         )
         canonical_shapes = None
         if shapes:
-            from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+            from difflet.pipeline.bucketing import canonicalize_shapes
 
             canonical_shapes = canonicalize_shapes(shapes)
             if height is None and width is None and num_frames is None:
@@ -257,12 +257,45 @@ def _merge_teacache_kwargs(
     return merged or None
 
 
+# All-reduce dtype each DiffletPipeline-keyed model's artifact used before
+# --tp-reduce-dtype existed (None: the artifact mixed dtypes).
+_TP_REDUCE_LEGACY: dict[str, str | None] = {
+    "qwen_image": "fp32",
+    "ltx_2": "fp32",
+    "hunyuan_video": "fp32",
+    "flux": None,  # bf16 DiT, fp32 T5/CLIP
+    "wan": None,  # bf16 DiT, fp32 umT5
+}
+# Trainium models whose artifacts --tp-reduce-dtype does not change.
+_TP_REDUCE_UNAFFECTED: frozenset[str] = frozenset({"minimax_h3", "hunyuan_video_15"})
+
+
+def _tp_reduce_cache_kwargs(application_kwargs: dict[str, Any], model_name: str | None) -> dict:
+    """Pop the raw tp_reduce_dtype kwarg; return the model's cache-key fields for it.
+
+    ``model_name`` is None off-Trainium. Every built-in Trainium model is listed
+    in _TP_REDUCE_LEGACY or _TP_REDUCE_UNAFFECTED (pinned by
+    tests/unit/pipeline/test_tp_reduce_cache_table.py).
+    """
+    requested = application_kwargs.pop("tp_reduce_dtype", None)
+    if model_name not in _TP_REDUCE_LEGACY:
+        return {}
+    from difflet.common.tp_reduce import parse_tp_reduce_dtype, tp_reduce_cache_fields
+
+    legacy = _TP_REDUCE_LEGACY[model_name]
+    return tp_reduce_cache_fields(
+        parse_tp_reduce_dtype(requested),
+        legacy=None if legacy is None else parse_tp_reduce_dtype(legacy),
+    )
+
+
 def _cache_application_kwargs(
     application_kwargs: dict[str, Any] | None, *, model_name: str | None = None
 ) -> dict[str, Any] | None:
-    if not application_kwargs and model_name != "hunyuan_video":
-        return None
     cache_kwargs = dict(application_kwargs or {})
+    cache_kwargs.update(_tp_reduce_cache_kwargs(cache_kwargs, model_name))
+    if not cache_kwargs and model_name != "hunyuan_video":
+        return None
     if model_name == "hunyuan_video":
         # Recompile backbones whose long-mask integer reduction could truncate
         # the attention range on Trainium LNC2, including non-TeaCache requests.
@@ -343,7 +376,9 @@ def _resolve_load_rank_range(
     start_rank_id: int | None,
     local_ranks_size: int | None,
 ) -> tuple[int | None, int | None]:
-    return get_backend("trainium").resolve_load_rank_range(
+    # The load-rank policy belongs to whichever backend is selected:
+    # Trainium maps one torchrun rank to one NeuronCore; CPU and CUDA pass through.
+    return get_backend().resolve_load_rank_range(
         start_rank_id=start_rank_id,
         local_ranks_size=local_ranks_size,
     )

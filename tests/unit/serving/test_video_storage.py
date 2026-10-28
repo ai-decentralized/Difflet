@@ -68,6 +68,14 @@ def _write(target, payload: bytes = b"fake mp4 bytes") -> None:
     target.staging_path.write_bytes(payload)
 
 
+def _replace_inode(path, aside) -> None:
+    # Keep the original alive while the replacement is created: after a plain
+    # unlink, ext4 hands the freed inode number straight back to the new file.
+    path.rename(aside)
+    path.write_bytes(b"replacement")
+    assert path.stat().st_ino != aside.stat().st_ino
+
+
 def test_allocate_staging_uses_real_mp4_suffix_and_private_inode(tmp_path):
     store = LocalVideoArtifactStore(tmp_path / "videos")
 
@@ -302,8 +310,7 @@ def test_staging_validation_rejects_path_mismatch_replacement_and_symlink(tmp_pa
     with pytest.raises(VideoArtifactPathViolation, match="reported path"):
         store.validate_staging(target, reported_path=tmp_path / "elsewhere.mp4")
 
-    target.staging_path.unlink()
-    target.staging_path.write_bytes(b"replacement")
+    _replace_inode(target.staging_path, tmp_path / "original.mp4")
     with pytest.raises(VideoArtifactPathViolation, match="inode was replaced"):
         store.validate_staging(target)
 
@@ -355,8 +362,7 @@ def test_staging_size_is_nonempty_bounded_and_exact(tmp_path):
 def test_delete_staging_refuses_replaced_inode(tmp_path):
     store = LocalVideoArtifactStore(tmp_path / "videos")
     target = store.allocate_staging("video_gen_1")
-    target.staging_path.unlink()
-    target.staging_path.write_bytes(b"replacement")
+    _replace_inode(target.staging_path, tmp_path / "original.mp4")
 
     with pytest.raises(VideoArtifactPathViolation, match="replaced staging inode"):
         store.delete_staging(target)

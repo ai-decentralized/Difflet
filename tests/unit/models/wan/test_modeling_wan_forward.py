@@ -165,6 +165,26 @@ def test_global_rms_norm_matches_plain_rmsnorm():
     assert normed.shape == x.shape
 
 
+def _reference_global_rms_norm(x: torch.Tensor, weight: torch.Tensor, eps: float) -> torch.Tensor:
+    # The unfused tp=1 math, verbatim (fp32 statistics, normalisation and affine, cast back).
+    sq = x.float().pow(2).sum(dim=-1, keepdim=True)
+    return (x.float() * torch.rsqrt(sq / x.shape[-1] + eps) * weight.float()).to(x.dtype)
+
+
+def test_global_rms_norm_at_tp1_is_the_fp32_reference_bit_for_bit():
+    # At tp=1 the across-heads norm is the ``rms_norm_fp32`` op; on the CPU reference
+    # backend that op IS the old math, so the bits do not move.
+    torch.manual_seed(0)
+    attn = wan.WanAttention(dim=16, heads=4, head_dim=4, eps=1e-6)
+    with torch.no_grad():
+        attn.norm_q.weight.copy_(torch.rand(16) + 0.5)
+    for dtype in (torch.float32, torch.bfloat16):
+        x = torch.randn(2, 5, 16).to(dtype)
+        normed = attn._global_rms_norm(attn.norm_q, x)
+        assert normed.dtype == dtype
+        assert torch.equal(normed, _reference_global_rms_norm(x, attn.norm_q.weight, 1e-6))
+
+
 def test_transformer_block_forward_3d_temb():
     torch.manual_seed(0)
     block = wan.WanTransformerBlock(dim=16, ffn_dim=32, num_heads=4)

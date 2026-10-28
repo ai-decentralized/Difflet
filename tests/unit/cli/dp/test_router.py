@@ -60,6 +60,13 @@ def test_worker_cli_args_forward_sp_and_keep_work_dir():
     assert "--sp" in argv and "--keep-work-dir" in argv
 
 
+def test_worker_cli_args_forward_torch_compile():
+    # A CUDA replica compiles its DiT blocks exactly as a one-process run would.
+    assert "--torch-compile" in worker_cli_args(_args(torch_compile=True))
+    assert "--torch-compile" not in worker_cli_args(_args(torch_compile=False))
+    assert "--torch-compile" not in worker_cli_args(_args())  # an older namespace
+
+
 def test_check_hbm_skips_when_weights_missing(monkeypatch, capsys):
     from difflet.cli.dp import router as router_mod
 
@@ -127,7 +134,13 @@ _STUB = textwrap.dedent("""
     p.add_argument("--dp-schedule", required=True)
     p.add_argument("--fail-index", type=int, default=None)
     p.add_argument("--crash-worker", type=int, default=None)
+    p.add_argument("--env-dump", default=None)
     args, _ = p.parse_known_args()
+    if args.env_dump:
+        import json, os
+        keys = [k for k in os.environ if k.startswith(("NEURON_RT_", "CUDA_VISIBLE"))]
+        with open(f"{args.env_dump}/worker_{args.worker_index}.json", "w") as fh:
+            json.dump({k: os.environ[k] for k in keys}, fh)
     if args.crash_worker == args.worker_index:
         sys.exit(3)
     while (req := claims.claim_next(args.requests_dir, args.worker_index,
@@ -168,6 +181,32 @@ def test_run_router_all_success(tmp_path):
     assert rc == 0
     s = summarize(tmp_path / "work" / "requests")
     assert s.done == [0, 1, 2, 3, 4] and not s.failed and not s.unfinished
+
+
+def test_run_router_twice_over_the_same_work_dir_regenerates(tmp_path):
+    # Stale claim/done markers must not make the second run report done without working
+    # (a second `--dp 2 --requests` over the same file reported done=2 without generating).
+    from difflet.cli.dp.requests_io import read_manifest
+
+    args = _args(work_dir=str(tmp_path / "work"))
+    assert (
+        run_router(args, _requests(3), replica_cores=4, worker_argv_prefix=_stub_prefix(tmp_path))
+        == 0
+    )
+    requests_dir = tmp_path / "work" / "requests"
+    first_done = (requests_dir / "req_0000.done").stat().st_mtime_ns
+    import time
+
+    time.sleep(0.02)
+    assert (
+        run_router(args, _requests(2), replica_cores=4, worker_argv_prefix=_stub_prefix(tmp_path))
+        == 0
+    )
+    s = summarize(requests_dir)
+    assert s.done == [0, 1] and not s.failed and not s.unfinished
+    assert len(read_manifest(requests_dir)) == 2
+    assert (requests_dir / "req_0000.done").stat().st_mtime_ns > first_done
+    assert not (requests_dir / "req_0002.json").exists()
 
 
 def test_run_router_reports_failed_request(tmp_path):
@@ -241,6 +280,27 @@ def test_workers_are_killed_when_the_router_dies(tmp_path):
     assert not _alive(worker_pid), "worker outlived the killed router"
 
 
+def test_router_workers_keep_their_sigkill_death_signal(monkeypatch):
+    """The DP workers' preexec stays SIGKILL (torchrun's child gets SIGTERM instead)."""
+    import ctypes
+    import signal
+
+    from difflet.cli.dp.router import _die_with_parent
+
+    prctl_calls = []
+
+    class _Libc:
+        def prctl(self, *args):
+            prctl_calls.append(args)
+            return 0
+
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(ctypes, "CDLL", lambda name, use_errno=False: _Libc())
+    monkeypatch.setattr(os, "getppid", lambda: 4242)
+    _die_with_parent()
+    assert prctl_calls == [(1, int(signal.SIGKILL), 0, 0, 0)]
+
+
 def _alive(pid: int) -> bool:
     try:
         os.kill(pid, 0)
@@ -266,3 +326,94 @@ def test_run_router_rerun_in_the_same_work_dir_starts_a_fresh_queue(tmp_path):
     assert rc == 0
     s = summarize(tmp_path / "work" / "requests")
     assert s.done == [0, 1, 2, 3] and not s.failed and not s.unfinished
+# ------------------------------------------------- CUDA replicas
+
+
+def test_cuda_worker_env_pins_the_replica_gpus_and_drops_neuron_variables():
+    base = {
+        "NEURON_RT_NUM_CORES": "16",
+        "NEURON_RT_VISIBLE_CORES": "0-15",
+        "NEURON_RT_ROOT_COMM_ID": "localhost:62182",
+        "PATH": "/bin",
+    }
+    env = worker_env(base, "2-3", 2, backend="cuda")
+    assert env["CUDA_VISIBLE_DEVICES"] == "2,3" and env["PATH"] == "/bin"
+    assert not [k for k in env if k.startswith("NEURON_RT_")]
+    assert worker_env({}, "1", 1, backend="cuda")["CUDA_VISIBLE_DEVICES"] == "1"
+
+
+def test_cuda_worker_env_indexes_into_an_inherited_device_list():
+    # The parent's CUDA_VISIBLE_DEVICES is the GPU budget the replica ranges count from:
+    # replica "1" of a parent restricted to GPUs 4,6 is physical GPU 6, not GPU 1.
+    base = {"CUDA_VISIBLE_DEVICES": "4,6"}
+    assert worker_env(base, "0", 1, backend="cuda")["CUDA_VISIBLE_DEVICES"] == "4"
+    assert worker_env(base, "1", 1, backend="cuda")["CUDA_VISIBLE_DEVICES"] == "6"
+    assert worker_env(base, "0-1", 2, backend="cuda")["CUDA_VISIBLE_DEVICES"] == "4,6"
+    with pytest.raises(ValueError, match="CUDA_VISIBLE_DEVICES"):
+        worker_env(base, "2", 1, backend="cuda")
+
+
+def test_trainium_worker_env_is_the_default_and_sets_no_cuda_devices():
+    env = worker_env({"PATH": "/bin"}, "0-3", 4)
+    assert "CUDA_VISIBLE_DEVICES" not in env and env["NEURON_RT_VISIBLE_CORES"] == "0-3"
+
+
+def test_run_router_on_cuda_gives_each_worker_its_own_gpu(tmp_path, monkeypatch):
+    monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
+    monkeypatch.setenv("NEURON_RT_NUM_CORES", "16")
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    dump = tmp_path / "env"
+    dump.mkdir()
+    args = _args(work_dir=str(tmp_path / "work"), dp=2, tp_degree=None)
+    rc = run_router(
+        args,
+        _requests(4),
+        replica_cores=1,
+        worker_argv_prefix=_stub_prefix(tmp_path) + ["--env-dump", str(dump)],
+    )
+    assert rc == 0
+    import json
+
+    envs = [json.loads((dump / f"worker_{w}.json").read_text()) for w in (0, 1)]
+    assert envs == [{"CUDA_VISIBLE_DEVICES": "0"}, {"CUDA_VISIBLE_DEVICES": "1"}]
+    s = summarize(tmp_path / "work" / "requests")
+    assert s.done == [0, 1, 2, 3] and not s.failed and not s.unfinished
+
+
+def test_run_router_on_cuda_two_gpu_replicas(tmp_path, monkeypatch):
+    # dp=2 x cfg=2: each replica is a torchrun world on its own pair of GPUs.
+    monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    dump = tmp_path / "env"
+    dump.mkdir()
+    args = _args(work_dir=str(tmp_path / "work"), dp=2, tp_degree=None, cfg_parallel=True)
+    rc = run_router(
+        args,
+        _requests(2),
+        replica_cores=2,
+        worker_argv_prefix=_stub_prefix(tmp_path) + ["--env-dump", str(dump)],
+    )
+    assert rc == 0
+    import json
+
+    envs = [json.loads((dump / f"worker_{w}.json").read_text()) for w in (0, 1)]
+    assert envs == [{"CUDA_VISIBLE_DEVICES": "0,1"}, {"CUDA_VISIBLE_DEVICES": "2,3"}]
+
+
+def test_run_router_on_trainium_keeps_the_neuron_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("DIFFLET_BACKEND", "trainium")
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    dump = tmp_path / "env"
+    dump.mkdir()
+    args = _args(work_dir=str(tmp_path / "work"), dp=2)
+    rc = run_router(
+        args,
+        _requests(2),
+        replica_cores=4,
+        worker_argv_prefix=_stub_prefix(tmp_path) + ["--env-dump", str(dump)],
+    )
+    assert rc == 0
+    import json
+
+    env0 = json.loads((dump / "worker_0.json").read_text())
+    assert env0["NEURON_RT_VISIBLE_CORES"] == "0-3" and "CUDA_VISIBLE_DEVICES" not in env0

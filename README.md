@@ -1,30 +1,32 @@
 <div align="center">
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/yotta-logo-white.svg">
-  <img alt="Yotta AI" src="docs/assets/yotta-logo-black.svg" width="260">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/yotta-logo-white.png">
+  <img alt="Yotta Labs" src="docs/assets/yotta-logo-black.png" width="260">
 </picture>
 </div>
 
 # Difflet
 
-**Run diffusion transformers on AWS Trainium: FLUX, Qwen-Image, Wan, HunyuanVideo, and LTX-2, from one CLI, one Python API, and one OpenAI-compatible server.**
+**Run diffusion transformers on NVIDIA GPUs, AWS Trainium and (experimentally) Cloud TPU: FLUX, Qwen-Image, Wan, HunyuanVideo, LTX-2 etc., from one CLI, one Python API, and one OpenAI-compatible server.**
 
 MiniMax-H3 also supports text-to-video with audio through the staged CLI.
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 ![Status](https://img.shields.io/badge/status-pre--alpha-orange.svg)
+![CUDA](https://img.shields.io/badge/CUDA-12.8%2B-76B900.svg)
 ![Neuron](https://img.shields.io/badge/Neuron-neuronx--cc%202.26-232F3E.svg)
 
 ```bash
-difflet run --model-id black-forest-labs/FLUX.1-dev --tp-degree 4 \
+DIFFLET_BACKEND=cuda difflet run --model-id black-forest-labs/FLUX.1-dev \
   --prompt "a photorealistic cat sitting in a sunlit garden" --output cat.png
 ```
 
-That one command downloads the weights, AOT-compiles the model for four NeuronCores, caches
-the artifact, and writes a 1024×1024 image. Later runs hit the cache and skip straight to
-load and denoise.
+On an NVIDIA GPU, that one command downloads the weights, loads the model onto the card, and
+writes a 1024×1024 image. There is no compile step. On Trainium, drop `DIFFLET_BACKEND` and add
+`--tp-degree 4`: the first run AOT-compiles the model for four NeuronCores and caches the
+artifact, and later runs skip straight to load and denoise.
 
-[Latest news](#latest-news) · [Models](#supported-models) · [Feature support](#feature-support) ·
+[Latest news](#latest-news) · [Hardware](#hardware-support) · [Models](#supported-models) · [Feature support](#feature-support) ·
 [Quick start](#quick-start) · [Choose a topology](#choose-a-topology) · [Serving](#serving) ·
 [Go further](#go-further) · [CLI reference](#cli-reference) · [Troubleshooting](#troubleshooting) ·
 [Developer guide](DEVELOPER.md)
@@ -36,16 +38,44 @@ load and denoise.
 
 ## What Difflet does
 
-Difflet handles the full lifecycle of a diffusion model on Trainium: model download,
-ahead-of-time (AOT) compilation, a content-addressed artifact cache, and SPMD execution across
-NeuronCores. Text encoders, the DiT backbone, and the VAE all run on device for the supported
-models, with no CPU fallbacks in the hot path.
+Difflet handles the full lifecycle of a diffusion model: model download, compilation where the
+hardware needs it, a content-addressed artifact cache, and multi-device execution. Model code
+is written once against a backend-neutral op surface (`difflet.ops`), and each accelerator
+supplies its own implementation:
+
+- **NVIDIA GPUs**: eager PyTorch on one GPU per model copy, with optional `--torch-compile`.
+- **Trainium**: ahead-of-time (AOT) compilation and SPMD execution across NeuronCores. Text
+  encoders, the DiT backbone, and the VAE all run on device for the supported models, with no
+  CPU fallbacks in the hot path.
+- **Cloud TPU** (experimental): tensor-parallel serving across TPU chips.
+
+See [Hardware support](#hardware-support) for what each backend runs today.
 
 Three entry points share one engine:
 
 - **`difflet` CLI** — `run` for one-shot generation, or `download → compile → generate` staged.
 - **`difflet serve`** — a resident, OpenAI-compatible HTTP server for image and video models.
 - **`DiffletPipeline`** — a Python API that mirrors `diffusers`.
+
+## Hardware support
+
+| Backend | `DIFFLET_BACKEND` | Status | Models | Parallelism | Details |
+|---|---|---|---|---|---|
+| NVIDIA GPUs | `cuda` | ✅ Supported (subset) | FLUX.1-dev, Qwen-Image, Wan 2.2 | DP, CFG-parallel (Wan) | [GPU features](#nvidia-gpus) |
+| AWS Trainium2 | `trainium` | ✅ Supported | All [supported models](#supported-models) | TP, CP, SP, CFG-parallel, DP | [Trainium features](#trainium) |
+| Cloud TPU | `tpu` | 🧪 Experimental | Qwen-Image, Wan (`difflet serve` only) | TP | [v5e benchmarks](benchmark/v5e/RESULTS.md) |
+| AMD ROCm | `rocm` | Planned | — | — | — |
+
+Without `DIFFLET_BACKEND`, Difflet picks the backend it detects on the host. It checks Trainium,
+then TPU, then CUDA, then ROCm, which only matters on a host with more than one accelerator.
+Set `DIFFLET_BACKEND` to choose one explicitly. A CPU reference backend (`cpu`) exists for
+numerical tests and CI. It is not meant for generation.
+
+Cloud TPU work in progress, including FLUX, HunyuanVideo and LTX-2 ports, TeaCache in serving,
+and a move from `torch_xla` to TorchTPU, is tracked in open pull requests
+[#60–#65](https://github.com/ai-decentralized/Difflet/pulls?q=is%3Apr+is%3Aopen+TPU) and
+[#119](https://github.com/ai-decentralized/Difflet/pull/119). Until those land, `difflet run`
+and the Python API do not run on TPU.
 
 ## Supported models
 
@@ -57,44 +87,22 @@ Three entry points share one engine:
 | [Wan-AI/Wan2.1-T2V-14B-Diffusers](https://huggingface.co/Wan-AI/Wan2.1-T2V-14B-Diffusers) | Text-to-video | 480×832×9 | Same runtime as Wan 2.2 |
 | [hunyuanvideo-community/HunyuanVideo](https://huggingface.co/hunyuanvideo-community/HunyuanVideo) | Text-to-video | 320×512×61 | 3-stage (clip → llama → generate) |
 | [Lightricks/LTX-2](https://huggingface.co/Lightricks/LTX-2) | Text-to-video | 512×768×121 | Single-process; TP only; exports `.mp4` |
-| [MiniMaxAI/MiniMax-H3](https://huggingface.co/MiniMaxAI/MiniMax-H3) | Text-to-video with audio | 768×1344×124 ⚠️ ⁵ | Verified at **256×448×124**; TP4; 4-stage CLI (text → generate → video_vae → audio_vae); `.mp4` with stereo audio |
+| [MiniMaxAI/MiniMax-H3](https://huggingface.co/MiniMaxAI/MiniMax-H3) | Text-to-video with audio | 768×1344×124 ⚠️ ¹¹ | Verified at **256×448×124**; TP4; 4-stage CLI (text → generate → video_vae → audio_vae); `.mp4` with stereo audio |
 
 ## Feature support
 
 Which features each model supports today. ✅ = supported · ⚠️ = supported with a caveat
 (see note) · ❌ = not supported · — = not applicable.
 
-**Parallelism**
-
-| Model | TP | CP — all-gather | CP — ring | CP — ulysses | SP | CFG-parallel | DP |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| FLUX.1-dev | ✅ | ✅ | ✅ | ✅ | ✅ | — ¹ | ✅ |
-| Qwen-Image | ✅ | ✅ | ✅ | ✅ | ✅ | — ¹ | ✅ |
-| Wan 2.2 / 2.1 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| HunyuanVideo | ✅ | ⚠️ ² | ✅ | ❌ | ✅ | — ¹ | ⚠️ ³ |
-| LTX-2 | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
-| MiniMax-H3 | ✅ TP4 | ❌ | ❌ | ❌ | ❌ | — ¹ | ❌ |
-
-**Runtime features**
-
-| Model | CLI generation | Multi-shape compile | TeaCache (adaptive) | TeaCache (fixed cadence) | Serving | Batch (JSONL) |
-|---|:---:|:---:|:---:|:---:|:---:|:---:|
-| FLUX.1-dev | ✅ image | ✅ | ✅ | ✅ | ✅ image | ✅ |
-| Qwen-Image | ✅ image | ✅ | ✅ | ✅ | ✅ image | ✅ |
-| Wan 2.2 / 2.1 | ✅ video | ✅ | ✅ | ✅ | ✅ video ⁴ | ✅ |
-| HunyuanVideo | ✅ video | ✅ | ✅ | ✅ | ✅ video | ✅ |
-| LTX-2 | ✅ video | ❌ | ✅ | ✅ | ✅ video | ✅ |
-| MiniMax-H3 | ✅ video + stereo audio | ❌ | ❌ | ❌ | ❌ | ❌ |
-
 **Feature legend**
 
-- **TP** — tensor parallelism (`--tp-degree`). Splits each layer across NeuronCores.
+- **TP** — tensor parallelism (`--tp-degree`). Splits each layer across devices (NeuronCores on Trainium).
 - **CP — all-gather** — context parallelism with gather-KV attention (`--cp-degree N --cp-mode gather_kv`, the default). Splits the sequence across ranks.
 - **CP — ring** — context parallelism with ring attention (`--cp-degree N --cp-mode ring`). Lower memory than all-gather for long sequences.
 - **CP — ulysses** — context parallelism with head-sharded attention (`--cp-mode ulysses`). Needs the model's head count divisible by `tp_degree × cp_degree`.
 - **SP** — Megatron-style sequence parallelism (`--sp`). Shards the norm/modulation/residual regions along the sequence axis across the existing tensor-parallel group; `world_size` is unchanged. Mutually exclusive with `--cp-degree > 1`.
 - **CFG-parallel** — splits the conditional/unconditional CFG passes across 2 data-parallel ranks (`--cfg-parallel`). Only meaningful for true two-pass classifier-free guidance, not working for distilled guidance.
-- **DP** — data-parallel replicas (`--dp N`). A router spawns N full model copies on disjoint core ranges and distributes requests across them; use `--mode throughput` or `--mode mixed` for a preset.
+- **DP** — data-parallel replicas (`--dp N`). A router spawns N full model copies on disjoint core ranges or GPUs and distributes requests across them; use `--mode throughput` or `--mode mixed` for a preset.
 - **CLI generation** — generate media with `difflet run` or `download → compile → generate`. MiniMax-H3 exports video and stereo audio together in one MP4.
 - **Multi-shape compile** — one bucketed artifact covering several request shapes (`--shapes 320x512x61,320x512x33`), sharing a single weight copy on device. `difflet serve --shapes` serves all of them from one resident worker.
 - **TeaCache (adaptive)** — calibration-driven step-skipping (`--teacache-speedup` / `--teacache-online-delta`, with `--teacache-calibration`).
@@ -102,13 +110,66 @@ Which features each model supports today. ✅ = supported · ⚠️ = supported 
 - **Serving** — resident `difflet serve` worker. Image models answer `/v1/chat/completions`; video models answer the [Videos API](docs/serving/videos_api.md).
 - **Batch (JSONL)** — `--requests FILE` runs one request per line (prompt, output, seed, optional negative prompt, guidance scale, steps) through one loaded model.
 
+### NVIDIA GPUs
+
+`DIFFLET_BACKEND=cuda`. Each model copy runs on one GPU at tp=1, with no ahead-of-time compile
+step. Verified on RTX PRO 6000 Blackwell (96 GB) and A100 80 GB.
+
+| Model | CLI generation | Serving | `--torch-compile` | TeaCache (fixed cadence) | DP | CFG-parallel | TP / CP / SP | Multi-shape |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| FLUX.1-dev | ✅ image | ✅ image | ✅ | ❌ | ✅ ² | — ¹ | ❌ | ❌ |
+| Qwen-Image | ✅ image | ⚠️ image ³ | ✅ | ✅ | ✅ | — ⁴ | ❌ | ❌ |
+| Wan 2.2 | ✅ video | ✅ video | ✅ | ❌ | ⚠️ ⁵ | ✅ ⁶ | ❌ | ❌ |
+
+An option the GPU backend does not support is refused with a message naming it, not ignored.
+TeaCache (adaptive), TAEF1, and `--host-vae` are refused on GPUs for all three models.
+
+1. Guidance-distilled model (the guidance scale is baked into the timestep embedding), so there
+   is no second CFG branch to split.
+2. Two replicas verified on 2 × A100 (`--dp 2 --requests` and `serve --dp-degree 2`), with
+   output byte-identical to one card.
+3. `difflet serve` handles one request at a time. A second concurrent request gets `429`
+   after the 30 s queue timeout. Use `serve --dp-degree N` for concurrency.
+4. Qwen-Image runs one transformer pass per step, so there is no CFG branch to split.
+5. `--dp N --requests` works, with output bit-identical to one GPU. `serve --dp-degree` does
+   not apply, because the video service runs one job at a time. Wan 2.1 is routed to the GPU
+   flow but has not been run on a GPU.
+6. Two GPUs under `torchrun`, `difflet run` only. Output is bit-identical to one GPU.
+
+Measured timings against stock diffusers, and the full pass/limit matrix, are in
+[docs/verification/gpu-backend-results.md](docs/verification/gpu-backend-results.md).
+
+### Trainium
+
+**Parallelism**
+
+| Model | TP | CP — all-gather | CP — ring | CP — ulysses | SP | CFG-parallel | DP |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
+| FLUX.1-dev | ✅ | ✅ | ✅ | ✅ | ✅ | — ⁷ | ✅ |
+| Qwen-Image | ✅ | ✅ | ✅ | ✅ | ✅ | — ⁷ | ✅ |
+| Wan 2.2 / 2.1 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| HunyuanVideo | ✅ | ⚠️ ⁸ | ✅ | ❌ | ✅ | — ⁷ | ⚠️ ⁹ |
+| LTX-2 | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| MiniMax-H3 | ✅ TP4 | ❌ | ❌ | ❌ | ❌ | — ⁷ | ❌ |
+
+**Runtime features**
+
+| Model | CLI generation | Multi-shape compile | TeaCache (adaptive) | TeaCache (fixed cadence) | Serving | Batch (JSONL) |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| FLUX.1-dev | ✅ image | ✅ | ✅ | ✅ | ✅ image | ✅ |
+| Qwen-Image | ✅ image | ✅ | ✅ | ✅ | ✅ image | ✅ |
+| Wan 2.2 / 2.1 | ✅ video | ✅ | ✅ | ✅ | ✅ video ¹⁰ | ✅ |
+| HunyuanVideo | ✅ video | ✅ | ✅ | ✅ | ✅ video | ✅ |
+| LTX-2 | ✅ video | ❌ | ✅ | ✅ | ✅ video | ✅ |
+| MiniMax-H3 | ✅ video + stereo audio | ❌ | ❌ | ❌ | ❌ | ❌ |
+
 **Notes**
 
-1. Guidance-distilled model (single forward pass with the guidance scale baked into the timestep embedding) — there is no second CFG branch to split.
-2. `tp2 cp2` with gather-KV hits a `neuronx-cc` internal error (`NCC_INLA001` / `NCC_IBIR243`) on the CP-degree-2 DiT graph; ring CP and `tp4 --sp` are the working multi-core paths. See [DEVELOPER.md](DEVELOPER.md).
-3. DP works, but on a 4-core `trn2.3xlarge` each 2-core replica runs out of HBM loading the compiled VAE at the default 320×512×61 shape. Use a smaller shape or a host with more cores per replica.
-4. Wan 2.1 is the qualified serving checkpoint. Wan 2.2 can be started for experiments but its dual-transformer path has not passed resident-serving acceptance.
-5. MiniMax-H3 supports the Trainium four-stage CLI at TP4 and CP1: text and DiT use four cores, and each VAE uses one core. The verified end-to-end shape is **256×448×124**; pass `--height 256 --width 448 --num-frames 124`. The registry default **768×1344×124** is not qualified on `trn2.3xlarge`: the standard DiT graph exceeds device memory, and compilation with precomputed AdaLN exceeded host memory. The 640×1152×124 DiT compiled successfully but has not been verified end to end. Python API generation, resident serving, DP, JSONL batching, multi-shape compilation, and TeaCache are not supported for H3. See the [verification](docs/design/minimax_h3/01_e2e_reverification_2026-09-30.md) and [bring-up handoff](docs/design/minimax_h3/00_trainium_bringup_handoff.md).
+7. Guidance-distilled model (single forward pass with the guidance scale baked into the timestep embedding) — there is no second CFG branch to split.
+8. `tp2 cp2` with gather-KV hits a `neuronx-cc` internal error (`NCC_INLA001` / `NCC_IBIR243`) on the CP-degree-2 DiT graph; ring CP and `tp4 --sp` are the working multi-core paths. See [DEVELOPER.md](DEVELOPER.md).
+9. DP works, but on a 4-core `trn2.3xlarge` each 2-core replica runs out of HBM loading the compiled VAE at the default 320×512×61 shape. Use a smaller shape or a host with more cores per replica.
+10. Wan 2.1 is the qualified serving checkpoint. Wan 2.2 can be started for experiments but its dual-transformer path has not passed resident-serving acceptance.
+11. MiniMax-H3 supports the Trainium four-stage CLI at TP4 and CP1: text and DiT use four cores, and each VAE uses one core. The verified end-to-end shape is **256×448×124**; pass `--height 256 --width 448 --num-frames 124`. The registry default **768×1344×124** is not qualified on `trn2.3xlarge`: the standard DiT graph exceeds device memory, and compilation with precomputed AdaLN exceeded host memory. The 640×1152×124 DiT compiled successfully but has not been verified end to end. Python API generation, resident serving, DP, JSONL batching, multi-shape compilation, and TeaCache are not supported for H3. See the [verification](docs/design/minimax_h3/01_e2e_reverification_2026-09-30.md) and [bring-up handoff](docs/design/minimax_h3/00_trainium_bringup_handoff.md).
 
 Context parallelism (`--cp-degree > 1`) and CFG-parallel both consume the data-parallel lanes, so they are mutually exclusive (and each is mutually exclusive with `--sp`). `world_size = dp × (2 if cfg-parallel else 1) × cp_degree × tp_degree`; `--sp` leaves it unchanged. `difflet plan --model-id <id>` lists the combinations your host can run.
 
@@ -116,14 +177,37 @@ Context parallelism (`--cp-degree > 1`) and CFG-parallel both consume the data-p
 
 ### Prerequisites
 
-- An AWS Trainium2 instance. Validated on `trn2.3xlarge`: one Trainium2 chip presented as 4
-  logical NeuronCores under the default `LNC=2`. Other Trn2 shapes should work; the
-  tensor-parallel degree must divide the number of visible cores.
+- An accelerator, one of:
+  - **An NVIDIA GPU** with a CUDA 12.8+ driver and enough memory for the whole model on one
+    card: FLUX.1-dev and Qwen-Image fit in 80 GB; Wan 2.2 keeps both experts resident and
+    was verified on a 96 GB card.
+  - **AWS Trainium2.** Validated on `trn2.3xlarge`: one Trainium2 chip presented as 4
+    logical NeuronCores under the default `LNC=2`. Other Trn2 shapes should work; the
+    tensor-parallel degree must divide the number of visible cores.
 - Python 3.10 or newer.
 - A Hugging Face account with access to the gated FLUX.1-dev repo, if you want Flux.
-- Disk: weights are large (LTX-2 alone is 86 GB) and compiled artifacts add tens of GB.
+- Disk: weights are large (LTX-2 alone is 86 GB). On Trainium, compiled artifacts add tens of
+  GB.
 
 ### Install
+
+**On NVIDIA GPUs:**
+
+```bash
+git clone git@github.com:ai-decentralized/Difflet.git
+cd Difflet
+python3 -m venv .venv && source .venv/bin/activate
+# torch must come from the CUDA 12.8 index (Blackwell needs a 12.8+ wheel).
+pip install --index-url https://download.pytorch.org/whl/cu128 torch==2.11.0
+pip install -e ".[cuda]"
+huggingface-cli login         # for gated repos such as FLUX.1-dev
+export DIFFLET_BACKEND=cuda
+```
+
+`requirements-cuda.lock` has the full pinned environment, and
+[DEVELOPER.md](DEVELOPER.md#gpu-backends-cuda) covers the GPU internals.
+
+**On Trainium:**
 
 ```bash
 git clone git@github.com:ai-decentralized/Difflet.git
@@ -138,7 +222,7 @@ huggingface-cli login         # for gated repos such as FLUX.1-dev
 longer ship the old `/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference` venv, so the repo
 builds its own.
 
-Sanity-check without touching the device:
+Sanity-check without touching the device (either backend):
 
 ```bash
 PYTHON_BIN=$PWD/.venv/bin/python ./scripts/check_quick.sh   # import gate + CPU-only unit tests
@@ -148,27 +232,32 @@ difflet --help
 ### First image
 
 ```bash
-# The first run AOT-compiles the model, which takes tens of minutes; later runs reuse the cache.
 difflet run --model-id black-forest-labs/FLUX.1-dev \
-  --tp-degree 4 --height 1024 --width 1024 \
+  --height 1024 --width 1024 \
   --prompt "a photorealistic cat sitting in a sunlit garden" \
   --output cat.png
 ```
 
-The first run compiles. Artifacts are cached
-under `~/.cache/difflet/`; every later run with the same model, shape, parallel config, and
-toolchain skips straight to load and denoise.
+On a GPU there is no compile step: the run loads the weights and generates. Add
+`--torch-compile` for faster steps after a warm-up, or `--dp N` for one replica per GPU.
+
+On Trainium, add `--tp-degree 4`. The first run AOT-compiles the model, which takes tens of
+minutes. Artifacts are cached under `~/.cache/difflet/`, and every later run with the same
+model, shape, parallel config, and toolchain skips straight to load and denoise.
 
 ### First video
 
 ```bash
 difflet run --model-id Wan-AI/Wan2.2-T2V-A14B-Diffusers \
-  --tp-degree 2 --cp-degree 2 \
   --height 480 --width 832 --num-frames 9 \
   --steps 40 --guidance-scale 4.0 --seed 42 \
   --prompt "a cat walking through a garden" \
   --output cat.mp4
 ```
+
+On a GPU, Wan 2.2 keeps both experts on one card (verified on 96 GB). Add `--cfg-parallel` to
+split the guidance passes across two GPUs; `difflet run` relaunches itself under `torchrun`.
+On Trainium, add `--tp-degree 2 --cp-degree 2`.
 
 ### Python API
 
@@ -177,7 +266,7 @@ from difflet import DiffletPipeline, DiffletParallelConfig
 
 pipe = DiffletPipeline.from_pretrained(
     "black-forest-labs/FLUX.1-dev",
-    parallel=DiffletParallelConfig(tp_degree=4),
+    parallel=DiffletParallelConfig(),  # one GPU; on Trainium: DiffletParallelConfig(tp_degree=4)
     height=1024,
     width=1024,
 )
@@ -189,7 +278,14 @@ image = pipe(
 image.save("out.png")
 ```
 
+Pass `parallel` explicitly on GPUs: a model's registry default is its Trainium layout (for
+example `tp_degree=8` for Flux), which the GPU backend refuses. On GPUs, the Python API is
+covered by unit tests; hardware verification so far is through the CLI and `difflet serve`.
+
 ## Choose a topology
+
+This section applies to Trainium. On GPUs, each model copy uses one card; scale out with
+`--dp N` (see [NVIDIA GPUs](#nvidia-gpus)).
 
 Every configuration must use exactly the cores you have:
 
@@ -223,11 +319,24 @@ difflet plan --model-id Wan-AI/Wan2.1-T2V-14B-Diffusers --objective throughput -
 
 ## Serving
 
-`difflet serve` loads one model with one immutable compiled profile into a resident Trainium
-worker. HTTP requests never trigger compilation, so the request shape must be one the server
+`difflet serve` loads one model with one immutable profile into a resident worker. HTTP
+requests never trigger compilation or reloading, so the request shape must be one the server
 was started with.
 
 ### Start
+
+On NVIDIA GPUs:
+
+```bash
+DIFFLET_BACKEND=cuda difflet serve \
+  --model-id Qwen/Qwen-Image \
+  --host 0.0.0.0 --port 8092
+```
+
+The worker handles one request at a time. Add `--dp-degree N` to serve from N GPUs, with one
+replica each, or `--torch-compile` for faster steps after a warm-up.
+
+On Trainium:
 
 ```bash
 difflet serve \
@@ -237,7 +346,7 @@ difflet serve \
   --host 0.0.0.0 --port 8092
 ```
 
-The first start downloads weights, compiles artifacts, loads the worker, and
+On Trainium, the first start downloads weights, compiles artifacts, loads the worker, and
 runs a real generation smoke test before `/ready` opens. Warm restarts reuse the cache. One
 serving profile owns all four cores on a `trn2.3xlarge`, so you cannot run two servers, or a
 server and a CLI generation, at the same time.
@@ -307,6 +416,14 @@ listing, deletion, and error codes are in the [Videos API reference](docs/servin
 
 Logs go to the console and `./logs/`, capped at 5 MiB per file and rotated on size or date.
 Stop the server with `Ctrl+C` or `SIGTERM`.
+
+### Observability
+
+The server logs each stage's start and completion with its duration (`stage.start`,
+`stage.complete`), not the device memory each stage keeps resident. A per-request stage
+breakdown and per-stage memory (from those logs plus `neuron-monitor` on Trainium or
+`nvidia-smi` on GPUs) are planned as a skill under `.claude/skills/`, so the serving code
+itself carries no instrumentation.
 
 ### Hardening
 
@@ -415,6 +532,14 @@ paths, and stage core counts are in [docs/cli-staged-commands.md](docs/cli-stage
 
 ## Troubleshooting
 
+**On GPUs**
+
+- **"`DIFFLET_BACKEND=cuda` selected but `torch.cuda.is_available()` is False".** The
+  installed torch is a CPU build, or a CUDA build without a matching driver. Reinstall torch
+  from the `cu128` index as shown in [Install](#install).
+
+**On Trainium**
+
 - **`ImportError` or a missing `libneuronpjrt-path` binary.** Activate the venv. The Neuron
   runtime shells out to helpers in `.venv/bin`, so calling `.venv/bin/difflet` by absolute
   path without `source .venv/bin/activate` fails at import.
@@ -444,6 +569,12 @@ paths, and stage core counts are in [docs/cli-staged-commands.md](docs/cli-stage
 
 Architecture, the backend abstraction, the compile cache, parallelism internals, the runtime
 protocol, and how to port a new model are in **[DEVELOPER.md](DEVELOPER.md)**.
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, checks, and the
+PR checklist, and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md). Report security issues privately
+as described in [SECURITY.md](SECURITY.md).
 
 ## License
 

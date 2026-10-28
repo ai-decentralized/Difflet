@@ -22,9 +22,8 @@
 
 import copy
 import math
-import os
 import logging
-from typing import List, Optional, Tuple, Union
+from typing import Optional, Tuple, Union
 
 import torch
 from difflet.ops import (
@@ -41,6 +40,12 @@ from transformers.modeling_outputs import (
     BaseModelOutputWithPastAndCrossAttentions,
 )
 
+from difflet.common.tp_reduce import config_reduce_dtype
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:  # annotations only: importing the model must not load the AoT backend
+    from difflet.backends.trainium.core.config import InferenceConfig
 
 _HARDWARE = hardware(get_platform_target())
 
@@ -82,7 +87,13 @@ class NeuronT5DenseActDense(nn.Module):
     def __init__(self, config: "InferenceConfig"):
         super().__init__()
         self.wi = ColumnParallelLinear(config.d_model, config.d_ff, bias=False, gather_output=False)
-        self.wo = RowParallelLinear(config.d_ff, config.d_model, bias=False, input_is_parallel=True)
+        self.wo = RowParallelLinear(
+            config.d_ff,
+            config.d_model,
+            bias=False,
+            input_is_parallel=True,
+            reduce_dtype=config_reduce_dtype(config),
+        )
         self.dropout = nn.Dropout(config.dropout_rate)
         self.act = ACT2FN[config.dense_act_fn]
 
@@ -109,7 +120,13 @@ class NeuronT5DenseGatedActDense(nn.Module):
         self.wi_1 = ColumnParallelLinear(
             config.d_model, config.d_ff, bias=False, gather_output=False
         )
-        self.wo = RowParallelLinear(config.d_ff, config.d_model, bias=False, input_is_parallel=True)
+        self.wo = RowParallelLinear(
+            config.d_ff,
+            config.d_model,
+            bias=False,
+            input_is_parallel=True,
+            reduce_dtype=config_reduce_dtype(config),
+        )
         self.dropout = nn.Dropout(config.dropout_rate)
         self.act = ACT2FN[config.dense_act_fn]
 

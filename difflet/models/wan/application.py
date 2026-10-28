@@ -9,6 +9,7 @@ from typing import Any
 import torch
 
 from difflet.backends.trainium.core.config import NeuronConfig
+from difflet.common.tp_reduce import parse_tp_reduce_dtype
 from difflet.backends.trainium.core.multi_component_application import (
     ComponentSpec,
     MultiComponentApplication,
@@ -32,6 +33,7 @@ def create_wan_backbone_config(
     cfg_parallel_enabled: bool = False,
     sp_enabled: bool = False,
     compile_shapes=None,
+    tp_reduce_dtype: torch.dtype = torch.bfloat16,
 ):
     from difflet.backends.trainium.wan.backbone import WanBackboneInferenceConfig
 
@@ -41,6 +43,7 @@ def create_wan_backbone_config(
         tp_degree=tp_degree,
         world_size=world_size,
         torch_dtype=dtype,
+        rpl_reduce_dtype=tp_reduce_dtype,
     )
     extra = {}
     if compile_shapes:
@@ -67,6 +70,7 @@ def create_wan_text_encoder_config(
     dtype: torch.dtype,
     text_seq_len: int = 512,
     batch_size: int = 1,
+    tp_reduce_dtype: torch.dtype = torch.bfloat16,
 ):
     from difflet.backends.trainium.wan.text_encoder import WanTextEncoderInferenceConfig
 
@@ -76,6 +80,7 @@ def create_wan_text_encoder_config(
         tp_degree=tp_degree,
         world_size=world_size,
         torch_dtype=dtype,
+        rpl_reduce_dtype=tp_reduce_dtype,
     )
     return WanTextEncoderInferenceConfig(
         neuron_config=neuron_config,
@@ -169,6 +174,7 @@ class NeuronWanApplication(MultiComponentApplication):
 
         text_seq_len = int(kwargs.get("text_seq_len", 512))
         batch_size = int(kwargs.get("batch_size", 1))
+        tp_reduce_dtype = parse_tp_reduce_dtype(kwargs.get("tp_reduce_dtype"))
         # CFG parallel stacks [uncond, cond] into batch=2 before scattering one
         # branch to each data-parallel rank, so the transformer compiles at
         # batch=2 while the rest of the components stay at the base batch.
@@ -185,7 +191,7 @@ class NeuronWanApplication(MultiComponentApplication):
         backbone_compile_shapes = None
         raw_shapes = kwargs.get("shapes")
         if raw_shapes:
-            from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+            from difflet.pipeline.bucketing import canonicalize_shapes
 
             self.compile_shapes = canonicalize_shapes(raw_shapes)
             height, width, num_frames = (
@@ -216,6 +222,7 @@ class NeuronWanApplication(MultiComponentApplication):
                 cfg_parallel_enabled=cfg_parallel_enabled,
                 sp_enabled=bool(getattr(parallel, "sp_enabled", False)),
                 compile_shapes=backbone_compile_shapes,
+                tp_reduce_dtype=tp_reduce_dtype,
             )
             self.transformer = NeuronWanBackboneApplication(
                 model_path=self.transformer_path,
@@ -240,6 +247,7 @@ class NeuronWanApplication(MultiComponentApplication):
                 cfg_parallel_enabled=cfg_parallel_enabled,
                 sp_enabled=bool(getattr(parallel, "sp_enabled", False)),
                 compile_shapes=backbone_compile_shapes,
+                tp_reduce_dtype=tp_reduce_dtype,
             )
             self.transformer_2 = NeuronWanBackboneApplication(
                 model_path=self.transformer_2_path,
@@ -258,6 +266,7 @@ class NeuronWanApplication(MultiComponentApplication):
                 dtype=self.dtype,
                 text_seq_len=text_seq_len,
                 batch_size=batch_size,
+                tp_reduce_dtype=tp_reduce_dtype,
             )
             self.text_encoder = NeuronWanTextEncoderApplication(
                 model_path=self.text_encoder_path,

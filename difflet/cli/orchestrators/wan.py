@@ -29,6 +29,7 @@ import re
 import shutil
 import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from difflet.cli import runner
 from difflet.cli.orchestrators.base import (
@@ -58,6 +59,9 @@ from difflet.cli.orchestrators.torchrun import (
     vae_exec_mode_conflict,
     vae_exec_mode_key,
 )
+
+if TYPE_CHECKING:
+    import torch
 
 # Model id comes from the CLI (--model-id); both Wan 2.2 A14B (MoE, dual
 # transformer) and Wan 2.1 14B (single transformer) route here. The single-vs-
@@ -130,6 +134,21 @@ def _save_video(tensor: "torch.Tensor", output_path: str) -> bool:
         return False
     print(f"[wan] video saved to {output_path}", flush=True)
     return True
+
+
+def _decode_on_device(args) -> bool:
+    """Whether Wan decodes with a device VAE stage rather than on the host in fp32.
+
+    ``--host-vae`` always decodes on the host. On ``--backend neuron`` the device VAE stage is
+    the default (bf16 up to 9 frames, fp32 beyond; parity-gated). On Trainium (AoT) the host
+    is the default and ``--device-vae`` opts into the compiled bf16 decoder, which degrades
+    short clips (blur and a grid pattern; the same latents decode correctly on the host) and
+    beyond ~9 frames exceeds the compiler's instruction limit."""
+    if getattr(args, "host_vae", False):
+        return False
+    if _torchrun_backend() == "neuron":
+        return True
+    return bool(getattr(args, "device_vae", False))
 
 
 def _decode_latents_host(latents_path: str, model_id: str, output_path: str,
@@ -387,7 +406,7 @@ class WanOrchestrator(ModelOrchestrator):
                          num_cores=full_cores,
                          virtual_core_size=_transformer_virtual_core_size(self.args),
                          cli_args=shared)
-        if getattr(self.args, "host_vae", False):
+        if not _decode_on_device(self.args):
             return
         runner.run_stage(self.args.model_id, "vae",
                          num_cores=1, virtual_core_size=_VIRTUAL_CORE_SIZE,
@@ -431,7 +450,7 @@ class WanOrchestrator(ModelOrchestrator):
                              num_cores=full_cores,
                              virtual_core_size=_transformer_virtual_core_size(self.args),
                              cli_args=shared)
-            if getattr(self.args, "host_vae", False):
+            if not _decode_on_device(self.args):
                 _decode_latents_host(str(work_dir / "latents.pt"), self.args.model_id,
                                      self.args.output, revision=self.args.revision)
             else:
@@ -504,6 +523,7 @@ class WanOrchestrator(ModelOrchestrator):
             teacache_cadence=getattr(args, "teacache_cadence", None),
             teacache_online_delta_alpha=getattr(args, "teacache_online_delta", None),
             teacache_calibration_path=teacache_calibration,
+            tp_reduce_dtype=getattr(args, "tp_reduce_dtype", None),
         )
         if args.stage_mode == "compile":
             app.compile(str(compiled_dir))
@@ -714,6 +734,8 @@ class WanOrchestrator(ModelOrchestrator):
             # Additive: the probe key appears only for a calibrated-adaptive
             # request, so every existing artifact keeps its identity.
             probe = {"teacache_probe": True} if _teacache_probe_required(args) else {}
+            from difflet.common.tp_reduce import parse_tp_reduce_dtype, tp_reduce_cache_fields
+
             return {
                 **probe,
                 "component": f"{prefix}_transformer",
@@ -727,6 +749,11 @@ class WanOrchestrator(ModelOrchestrator):
                 "text_seq_len": 512,
                 "shapes": canonical_shapes_list(args, (480, 832, 9)),
                 "toolchain": stage_toolchain_versions(),
+                # The artifact holds the DiT (bf16 reduce) and umT5 (fp32 reduce
+                # before this flag): mixed legacy, so it always names its dtype.
+                **tp_reduce_cache_fields(
+                    parse_tp_reduce_dtype(getattr(args, "tp_reduce_dtype", None)), legacy=None
+                ),
             }
         if stage == "vae":
             return {
@@ -773,6 +800,8 @@ class WanOrchestrator(ModelOrchestrator):
             parts += ["--shapes", str(a.shapes)]
         if getattr(a, "cfg_parallel", False):
             parts.append("--cfg-parallel")
+        if getattr(a, "tp_reduce_dtype", None):
+            parts += ["--tp-reduce-dtype", a.tp_reduce_dtype]
         if getattr(a, "sp_enabled", False):
             parts.append("--sp")
         if getattr(a, "dual_expert", False):

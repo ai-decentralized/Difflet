@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "difflet-diffusion"
 version = "0.0.0.dev0"
-description = "Trainium3-native diffusion inference framework"
+description = "Diffusion transformer inference on NVIDIA GPUs, AWS Trainium and Cloud TPU"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
@@ -14,6 +14,7 @@ classifiers = [
     "License :: OSI Approved :: Apache Software License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
 ]
 
@@ -33,6 +34,7 @@ dependencies = [
     "av",                                         # video I/O (Wan/Hunyuan output) — difflet/serving/video_media.py
     "imageio-ffmpeg",                             # ffmpeg binary for video encoding
     "accelerate",                                 # used by diffusers' from_pretrained weight loading
+    "transformers",                               # text encoders (CLIP/T5/UMT5/Qwen2-VL); was only implied via diffusers
 
     # Serving stack — `difflet serve` is part of the CLI, so these are required,
     # not optional. fastapi and boto3 are already in the venv; listed anyway to
@@ -52,6 +54,16 @@ test = [
     "imageio",
     "imageio-ffmpeg",
 ]
+# CUDA backend (docs/design/gpu_backend.md). Pinned from an RTX PRO 6000 host
+# (requirements-cuda.lock has the full freeze). torch must come from the CUDA 12.8
+# index, which an extra cannot express:
+#   uv pip install --index-url https://download.pytorch.org/whl/cu128 torch==2.11.0
+#   pip install -e ".[test,cuda]"
+cuda = [
+    "torch==2.11.0",                              # +cu128 build; Blackwell sm_120 needs a CUDA 12.8+ wheel
+    "triton==3.6.0",                              # ships with the torch wheel; pinned for the cache key
+    "hf_transfer",                                # fast Hub downloads (54 GB Qwen-Image in ~90 s on the box)
+]
 dev = [
     "difflet-diffusion[test]",
     "black==26.1.0",
@@ -63,8 +75,10 @@ dev = [
 ]
 
 [project.urls]
-"Source" = "https://github.com/<org>/difflet-diffusion"          # placeholder
-"Tracker" = "https://github.com/<org>/difflet-diffusion/issues"  # placeholder
+"Homepage" = "https://github.com/ai-decentralized/Difflet"
+"Source" = "https://github.com/ai-decentralized/Difflet"
+"Tracker" = "https://github.com/ai-decentralized/Difflet/issues"
+"Documentation" = "https://github.com/ai-decentralized/Difflet/blob/main/README.md"
 
 [project.scripts]
 difflet = "difflet.cli.main:main"
@@ -138,6 +152,7 @@ markers = [
     "slow: marks tests as slow (run with -m slow)",
     "neuron: requires NeuronCore hardware",
     "numerical: numerical correctness vs HF diffusers reference",
+    "multirank: spawns several torch.distributed (gloo) processes on the CPU host",
 ]
 
 # Coverage is measured over the CPU-executable, first-party surface of difflet/.

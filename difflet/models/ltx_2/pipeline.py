@@ -21,6 +21,8 @@ import torch
 from difflet.models.ltx_2.contract import LTX2DiTInputBundle
 from difflet.models.ltx_2.contract import LTX_2_DEFAULT_NUM_FRAMES
 from difflet.models.ltx_2.contract import LTX_2_DEFAULT_TEXT_SEQ_LEN
+from difflet.utils.latent_dump import dump_latents
+from difflet.utils.step_timing import StepTimer, maybe_forward
 
 
 @dataclass
@@ -536,6 +538,9 @@ class LTX2Orchestrator:
     ) -> tuple[torch.Tensor, torch.Tensor]:
         latents = bundle.hidden_states
         audio_latents = bundle.audio_hidden_states
+        dump_latents("initial_video", latents)
+        dump_latents("initial_audio", audio_latents)
+        step_timer = StepTimer.from_env()
         audio_scheduler = copy.deepcopy(self.scheduler) if self.scheduler is not None else None
         # TeaCache: the controller tracks only the video stream; the audio residual is
         # maintained manually here. cclog 87 fix: cache the raw VELOCITY model output (what
@@ -663,8 +668,8 @@ class LTX2Orchestrator:
                 noise_pred_video = ctrl.skip_noise_pred(mod_input=mod_input)
                 noise_pred_audio = prev_audio_vel + cached_audio_vel_res
             else:
-                noise_pred_video_x0, noise_pred_audio_x0, video_cond_x0, audio_cond_x0 = (
-                    self._full_dit_step(
+                with maybe_forward(step_timer):
+                    full_step = self._full_dit_step(
                         model_bundle=model_bundle,
                         latents=latents,
                         audio_latents=audio_latents,
@@ -683,7 +688,7 @@ class LTX2Orchestrator:
                         use_cross_timestep=use_cross_timestep,
                         attention_kwargs=attention_kwargs,
                     )
-                )
+                noise_pred_video_x0, noise_pred_audio_x0, video_cond_x0, audio_cond_x0 = full_step
                 if float(guidance_rescale) > 0.0:
                     noise_pred_video_x0 = rescale_ltx_2_noise_cfg(
                         noise_pred_video_x0,
@@ -723,8 +728,12 @@ class LTX2Orchestrator:
             )
             if trajectory is not None:
                 trajectory.append((latents.detach().cpu(), audio_latents.detach().cpu()))
+            if step_timer is not None:
+                step_timer.step_done(step_index)
         if ctrl is not None:
             print(f"[teacache] stats: {ctrl.stats()}", flush=True)
+        dump_latents("final_video", latents)
+        dump_latents("final_audio", audio_latents)
         return latents, audio_latents
 
     def _full_dit_step(

@@ -214,3 +214,169 @@ def test_single_process_launch_adds_no_neuron_cache_variables(
 
     assert captured_launch["api"] == "run"
     assert [name for name in NEURON_CACHE_VARS if name in captured_launch["env"]] == []
+# ------------------------------------------------------------------ run_torchrun
+
+_RANK_ARGV = ["-m", "difflet.cli.main", "generate", "--model-id", "x", "--cfg-parallel"]
+
+
+def test_run_torchrun_launches_a_standalone_torchrun_of_the_module(monkeypatch):
+    import subprocess
+
+    captured = {}
+
+    def fake(cmd, env, check, **kw):
+        captured.update(cmd=cmd, env=env, check=check)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr("subprocess.run", fake)
+    monkeypatch.setattr("os.cpu_count", lambda: 16)
+    from difflet.cli.runner import run_torchrun
+
+    assert run_torchrun(2, list(_RANK_ARGV), env={"DIFFLET_BACKEND": "cuda"}) == 0
+    assert captured["cmd"] == [
+        sys.executable,
+        "-m",
+        "torch.distributed.run",
+        "--standalone",
+        "--nproc_per_node",
+        "2",
+        *_RANK_ARGV,
+    ]
+    # OMP_NUM_THREADS was absent: the host cores are split across the ranks.
+    assert captured["env"] == {"DIFFLET_BACKEND": "cuda", "OMP_NUM_THREADS": "8"}
+    # The return code is the caller's to judge: no CalledProcessError.
+    assert captured["check"] is False
+
+
+def test_run_torchrun_returns_the_child_return_code(monkeypatch):
+    import subprocess
+
+    monkeypatch.setattr(
+        "subprocess.run", lambda cmd, env, check, **kw: subprocess.CompletedProcess(cmd, 3)
+    )
+    from difflet.cli.runner import run_torchrun
+
+    assert run_torchrun(2, list(_RANK_ARGV)) == 3
+
+
+def test_run_torchrun_inherits_the_environment_by_default(monkeypatch):
+    import os
+    import subprocess
+
+    captured = {}
+    monkeypatch.setenv("DIFFLET_TORCHRUN_PROBE", "1")
+    monkeypatch.setenv("OMP_NUM_THREADS", "3")  # an explicit choice is the caller's
+    monkeypatch.setattr(
+        "subprocess.run",
+        lambda cmd, env, check, **kw: captured.update(env=env)
+        or subprocess.CompletedProcess(cmd, 0),
+    )
+    from difflet.cli.runner import run_torchrun
+
+    run_torchrun(2, list(_RANK_ARGV))
+    assert captured["env"] == dict(os.environ)
+    assert captured["env"]["DIFFLET_TORCHRUN_PROBE"] == "1"
+    assert captured["env"]["OMP_NUM_THREADS"] == "3"
+
+
+def test_torchrun_parses_the_command_as_a_module_launch(monkeypatch):
+    """The launcher's own parser reads the command: ``-m`` is torchrun's ``--module`` and
+    everything after the module name reaches the ranks untouched."""
+    import subprocess
+
+    captured = {}
+    monkeypatch.setattr(
+        "subprocess.run",
+        lambda cmd, env, check, **kw: captured.update(cmd=cmd)
+        or subprocess.CompletedProcess(cmd, 0),
+    )
+    from difflet.cli.runner import run_torchrun
+
+    run_torchrun(2, list(_RANK_ARGV))
+    from torch.distributed.run import get_args_parser
+
+    cmd = captured["cmd"]
+    assert cmd[1:3] == ["-m", "torch.distributed.run"]
+    parsed = get_args_parser().parse_args(cmd[3:])
+    assert parsed.standalone is True and parsed.nproc_per_node == "2"
+    assert parsed.module is True and parsed.training_script == "difflet.cli.main"
+    assert parsed.training_script_args == ["generate", "--model-id", "x", "--cfg-parallel"]
+
+
+def _capture_torchrun_kwargs(monkeypatch):
+    import subprocess
+
+    captured = {}
+
+    def fake(cmd, env, check, **kw):
+        captured.update(env=env, **kw)
+        return subprocess.CompletedProcess(cmd, 0)
+
+    monkeypatch.setattr("subprocess.run", fake)
+    return captured
+
+
+@pytest.mark.parametrize(
+    "cpus,world,expected", [(16, 2, "8"), (3, 2, "1"), (1, 2, "1"), (None, 2, "1"), (64, 1, "64")]
+)
+def test_run_torchrun_splits_host_threads_across_ranks_when_omp_is_unset(
+    monkeypatch, cpus, world, expected
+):
+    """torchrun pins every rank to OMP_NUM_THREADS=1 when the variable is unset; the Wan
+    loop keeps the scheduler and fp32 latents on the host, so give each rank its share."""
+    captured = _capture_torchrun_kwargs(monkeypatch)
+    monkeypatch.delenv("OMP_NUM_THREADS", raising=False)
+    monkeypatch.setattr("os.cpu_count", lambda: cpus)
+    from difflet.cli.runner import run_torchrun
+
+    run_torchrun(world, list(_RANK_ARGV))
+    assert captured["env"]["OMP_NUM_THREADS"] == expected
+
+
+class _FakeLibc:
+    def __init__(self):
+        self.prctl_calls = []
+
+    def prctl(self, *args):
+        self.prctl_calls.append(args)
+        return 0
+
+
+def _run_preexec(monkeypatch, preexec) -> list:
+    """Call a parent-death ``preexec_fn`` with libc faked: return its prctl calls."""
+    import ctypes
+    import os
+
+    libc = _FakeLibc()
+    monkeypatch.setattr(sys, "platform", "linux")
+    monkeypatch.setattr(ctypes, "CDLL", lambda name, use_errno=False: libc)
+    monkeypatch.setattr(os, "getppid", lambda: 4242)  # the parent is alive
+    monkeypatch.setattr(os, "kill", lambda *a: pytest.fail("the parent is alive: no kill"))
+    preexec()
+    return libc.prctl_calls
+
+
+def test_run_torchrun_child_gets_sigterm_when_the_parent_dies_on_linux(monkeypatch):
+    """A killed parent (timeout, SIGTERM, the DP router's own death signal) must not orphan
+    torchrun and both ranks' GPUs. SIGTERM, not SIGKILL: torchrun's elastic agent
+    terminates its workers on SIGTERM, while a SIGKILLed agent would orphan the ranks."""
+    import signal
+
+    captured = _capture_torchrun_kwargs(monkeypatch)
+    monkeypatch.setattr(sys, "platform", "linux")
+    from difflet.cli.runner import run_torchrun
+
+    run_torchrun(2, list(_RANK_ARGV))
+    preexec = captured.get("preexec_fn")
+    assert callable(preexec)
+    PR_SET_PDEATHSIG = 1
+    assert _run_preexec(monkeypatch, preexec) == [(PR_SET_PDEATHSIG, int(signal.SIGTERM), 0, 0, 0)]
+
+
+def test_run_torchrun_passes_no_preexec_off_linux(monkeypatch):
+    captured = _capture_torchrun_kwargs(monkeypatch)
+    monkeypatch.setattr(sys, "platform", "darwin")
+    from difflet.cli.runner import run_torchrun
+
+    run_torchrun(2, list(_RANK_ARGV))
+    assert captured.get("preexec_fn") is None

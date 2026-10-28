@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 import sys
 import types
@@ -522,3 +521,15 @@ def test_qwen_request_validator_enforces_shape_set_membership(tmp_path):
     assert exc.value.code == "profile_mismatch"
     assert "768x768" in exc.value.message
     assert "1024x1024" in exc.value.message and "512x512" in exc.value.message
+
+
+def test_qwen_generate_identity_names_bf16_reduce(tmp_path):
+    # Serving builds a bf16-all-reduce DiT since the bf16 default; its identity
+    # must differ from the pre-bf16 (fp32 reduce) one. Text/VAE are unchanged.
+    specs = qwen_image.build_compile_plan(_source(tmp_path), _profile(tmp_path))
+    identities = {
+        spec.component_id: json.loads(spec.identity.canonical_cache_inputs_json) for spec in specs
+    }
+    assert identities["generate"]["tp_reduce_dtype"] == "bfloat16"
+    assert "tp_reduce_dtype" not in identities["text"]
+    assert "tp_reduce_dtype" not in identities["vae"]

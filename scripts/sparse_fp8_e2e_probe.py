@@ -24,7 +24,7 @@ But verifier said all 3 partitions must match — so probably:
 We'll try and let the error guide us.
 """
 from __future__ import annotations
-import sys, time, traceback
+import sys, time
 import numpy as np
 import torch
 
@@ -125,7 +125,6 @@ def main() -> int:
 
     from neuronxcc import nki
     import neuronxcc.nki.language as nl
-    import neuronxcc.nki.isa as nisa
     from neuronxcc.nki._private.private_api import nc_matmul_sparse
     from nki.dtype import float8_e4m3fn_x4 as FP8X4
 
@@ -175,7 +174,7 @@ def main() -> int:
     # We need to recompute since tags_u16 (= tags_unpacked_u8) is shape [M, K_groups*R] = [64, 128]
     # = [M, K_groups, R] flattened over (K_groups, R) on M side.
     # Convert back: reshape [M, K_groups, R] then permute and flatten
-    tags_for_B = (tags_u16.reshape(M, K_packed, R)            # [M, K_g, R]
+    tags_for_B = (tags_i16.reshape(M, K_packed, R)            # [M, K_g, R]
                   .permute(1, 0, 2)                            # [K_g, M, R]
                   .reshape(K_packed, M * R)                    # [K_g=32, M*R=256]
                   .contiguous())

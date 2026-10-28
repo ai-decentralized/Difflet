@@ -82,6 +82,17 @@ def _add_parallel_flags(p: argparse.ArgumentParser) -> None:
         "by tp_degree * cp_degree.",
     )
     p.add_argument(
+        "--tp-reduce-dtype",
+        dest="tp_reduce_dtype",
+        choices=["bf16", "fp32"],
+        default=None,
+        help="Precision of the tensor-parallel all-reduce (default: bf16). "
+        "'fp32' makes every tensor-parallel all-reduce fp32 (DiT and text "
+        "encoders) and reuses the pre-bf16 artifacts of Qwen-Image, LTX-2 and "
+        "HunyuanVideo; Flux and Wan artifacts recompile once with either "
+        "value. Not supported for MiniMax-H3.",
+    )
+    p.add_argument(
         "--cfg-parallel",
         dest="cfg_parallel",
         action="store_true",
@@ -161,23 +172,26 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
         "--host-vae",
         dest="host_vae",
         action="store_true",
-        help="Decode the VAE on host CPU via diffusers instead of on a "
-        "NeuronCore. Trainium (AoT): required for Wan clips beyond ~9 "
-        "frames, whose single-shot compiled VAE graph exceeds the "
-        "compiler instruction limit (NCC_EVRF007). --backend neuron: "
-        "optional; Wan's VAE stage otherwise decodes eagerly in fp32 on "
-        "one core, as Qwen-Image's does by default; --host-vae keeps the "
-        "decode on the host instead.",
+        help="Decode the VAE on host CPU via diffusers (fp32) instead of on a NeuronCore. "
+        "Trainium (AoT): Wan already decodes on the host by default (its compiled bf16 device "
+        "VAE degrades short clips; beyond ~9 frames its graph exceeds the compiler instruction "
+        "limit, NCC_EVRF007); the flag remains for other models and for explicitness. "
+        "--backend neuron: optional; Wan's VAE stage otherwise decodes on one core (bf16 up to "
+        "9 frames, fp32 beyond), as Qwen-Image's does by default; --host-vae keeps the decode "
+        "on the host instead.",
     )
     p.add_argument(
         "--device-vae",
         dest="device_vae",
         action="store_true",
-        help="Qwen-Image and HunyuanVideo on --backend neuron: decode in a VAE stage of its "
-        "own on one NeuronCore (see --vae-dtype and --vae-exec-mode), after the generate "
-        "launch has exited, instead of on the host CPU. "
-        "The default for Qwen-Image (HunyuanVideo's is --vae-in-process); mutually exclusive "
-        "with --host-vae and --vae-in-process.",
+        help="Trainium (AoT), Wan: decode with the compiled bf16 Neuron VAE instead of the default "
+        "fp32 host decode. Known to degrade short clips (blur, grid artifacts; under "
+        "investigation); beyond ~9 frames the graph also exceeds the compiler instruction limit "
+        "(NCC_EVRF007). "
+        "--backend neuron, Qwen-Image and HunyuanVideo: decode in a VAE stage of its own on one "
+        "NeuronCore (see --vae-dtype and --vae-exec-mode), after the generate launch has exited, "
+        "instead of on the host CPU. The default for Qwen-Image (HunyuanVideo's is "
+        "--vae-in-process); mutually exclusive with --host-vae and --vae-in-process.",
     )
     p.add_argument(
         "--vae-in-process",
@@ -448,6 +462,11 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
     )
     p.add_argument("--seed", type=int, default=42)
     p.add_argument(
+        "--torch-compile",
+        action="store_true",
+        help="CUDA backend only: torch.compile the DiT blocks (opt-in; eager is the default)",
+    )
+    p.add_argument(
         "--work-dir", default=None, help="Directory for inter-stage tensors (staged models only)"
     )
     p.add_argument(
@@ -560,6 +579,11 @@ def _add_serve_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--host", default="0.0.0.0")
     p.add_argument("--port", type=int, default=8091)
     p.add_argument(
+        "--torch-compile",
+        action="store_true",
+        help="CUDA backend only: torch.compile the DiT blocks (opt-in; eager is the default)",
+    )
+    p.add_argument(
         "--api-key",
         type=_api_key,
         default=None,
@@ -575,6 +599,17 @@ def _add_serve_flags(p: argparse.ArgumentParser) -> None:
         default=8,
         metavar="COUNT",
         help="Maximum requests waiting behind the active request (default: 8; 0 disables queuing)",
+    )
+    p.add_argument(
+        "--dp-degree",
+        dest="replicas",
+        type=_positive_int,
+        default=1,
+        metavar="N",
+        help=(
+            "Resident replicas of the model, one GPU each; requests go to the least loaded "
+            "(CUDA backend only; default: 1)"
+        ),
     )
     p.add_argument(
         "--queue-timeout",
@@ -944,13 +979,28 @@ def _opt_in_true_cfg_backend(capabilities) -> bool:
     return _lookup_backend(None).name in capabilities.true_cfg_backends
 
 
-def _replica_cores(args: argparse.Namespace) -> int:
+def _platform():
+    from difflet.platforms import current_platform
+
+    return current_platform()
+
+
+def _replica_tp(args: argparse.Namespace) -> int:
+    """The tp degree one replica runs at: the platform's default when it has one (1 on a GPU
+    platform, where a replica is ``cfg x cp x tp`` GPUs), else the registry default."""
+    platform_default = _platform().default_tp_degree()
+    if platform_default is not None:
+        return args.tp_degree or platform_default
     from difflet.registry import resolve_model
 
     entry = resolve_model(args.model_id, model_type=_MODEL_TYPE[args.model_id])
-    tp = args.tp_degree or entry.default_parallel.tp_degree
+    return args.tp_degree or entry.default_parallel.tp_degree
+
+
+def _replica_cores(args: argparse.Namespace) -> int:
+    """Devices per replica: NeuronCores on Trainium, GPUs on CUDA (``cfg x cp x tp``)."""
     cfg = 2 if getattr(args, "cfg_parallel", False) else 1
-    return tp * (args.cp_degree or 1) * cfg
+    return _replica_tp(args) * (args.cp_degree or 1) * cfg
 
 
 def _resolve_total_cores(args: argparse.Namespace) -> tuple[int | None, str]:
@@ -968,6 +1018,14 @@ def _resolve_total_cores(args: argparse.Namespace) -> tuple[int | None, str]:
     if total is not None:
         return total, "--total-cores"
 
+    platform = _platform()
+    if platform.capabilities.flow == "gpu":
+        # GPUs, not NeuronCores: the visible-devices variable already narrows the count.
+        count = platform.device_count()
+        if count is not None:
+            return count, "torch.cuda.device_count()"
+        return None, "undetected"
+
     env_value = os.environ.get("NEURON_RT_NUM_CORES", "").strip()
     if env_value:
         try:
@@ -984,7 +1042,7 @@ def _resolve_total_cores(args: argparse.Namespace) -> tuple[int | None, str]:
 
 
 def _validate_capacity(args: argparse.Namespace) -> None:
-    """Reject a parallel config that cannot fit the available NeuronCores.
+    """Reject a parallel config that cannot fit the available NeuronCores (GPUs on CUDA).
 
     ``world_size = dp * cfg * cp * tp`` is a hard requirement: every rank needs
     its own core. Before hardware detection this could only be checked when the
@@ -1001,13 +1059,18 @@ def _validate_capacity(args: argparse.Namespace) -> None:
     if needed <= total:
         return
 
-    from difflet.registry import resolve_model
+    tp = _replica_tp(args)
+    platform = _platform()
+    if platform.capabilities.flow == "gpu":
+        unit, tp_note = platform.capabilities.device_unit, ""
+    else:
+        from difflet.registry import resolve_model
 
-    entry = resolve_model(args.model_id, model_type=_MODEL_TYPE[args.model_id])
-    tp = args.tp_degree or entry.default_parallel.tp_degree
-    tp_note = "" if args.tp_degree else f" (registry default for {entry.name})"
+        entry = resolve_model(args.model_id, model_type=_MODEL_TYPE[args.model_id])
+        unit = "NeuronCores"
+        tp_note = "" if args.tp_degree else f" (registry default for {entry.name})"
     print(
-        f"Error: this parallel config needs {needed} NeuronCores but only "
+        f"Error: this parallel config needs {needed} {unit} but only "
         f"{total} are available ({origin}).\n"
         f"  dp={getattr(args, 'dp', None) or 1} x cfg={2 if getattr(args, 'cfg_parallel', False) else 1} "
         f"x cp={args.cp_degree or 1} x tp={tp}{tp_note} = {needed}\n"
@@ -1074,6 +1137,25 @@ def _dispatch_dp(args: argparse.Namespace) -> None:
 
 
 def _get_orchestrator(args: argparse.Namespace):
+    platform = _platform()
+    if getattr(args, "torch_compile", False) and not platform.capabilities.supports_torch_compile:
+        raise SystemExit(
+            "[difflet] --torch-compile is a GPU-backend option; "
+            f"the {platform.name} backend does not take it"
+        )
+    if platform.capabilities.flow == "gpu":
+        # The whole model runs in one process: no Neuron stages.
+        from difflet.backends.gpu.cli import GpuOrchestrator
+        from difflet.models.spec import gpu_spec_for_cli_model_id
+
+        spec = gpu_spec_for_cli_model_id(args.model_id)
+        if spec is None:
+            raise SystemExit(
+                f"[difflet] {args.model_id} is not supported on the {platform.display_name} "
+                "backend yet; set DIFFLET_BACKEND=trainium for the staged Neuron path"
+            )
+        return GpuOrchestrator(args, spec)
+
     from difflet.cli.orchestrators.flux import FluxOrchestrator
     from difflet.cli.orchestrators.hunyuan_video import HunyuanVideoOrchestrator
     from difflet.cli.orchestrators.hunyuan_video_15 import HunyuanVideo15Orchestrator
@@ -1195,6 +1277,8 @@ def main(argv: list[str] | None = None) -> None:
         _validate_teacache(args)
         _validate_dp(args)
         if args.requests_dir is None and (args.requests is not None or (args.dp or 1) > 1):
+            # Both backends: on CUDA each replica is a single-GPU (or cfg-pair torchrun)
+            # worker pinned through CUDA_VISIBLE_DEVICES.
             _dispatch_dp(args)  # raises SystemExit
 
     # Only for the weight-loading commands, where jemalloc pays off. This list

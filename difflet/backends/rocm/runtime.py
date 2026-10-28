@@ -1,22 +1,6 @@
-"""ROCm backend placeholder runtime."""
+"""The rocm runtime: the platform in ``difflet.platforms.rocm`` under its historical names."""
 
-from difflet.backends.base import BackendCapabilities, BackendRuntime
+from difflet.platforms.rocm import RocmPlatform as RocmBackend
+from difflet.platforms.rocm import create_platform as create_backend
 
-
-class RocmBackend(BackendRuntime):
-    name = "rocm"
-    capabilities = BackendCapabilities(
-        requires_aot=False,
-        single_process_multi_core=False,
-        supports_torchrun_mpmd=True,
-    )
-
-    def prepare_runtime(self, parallel) -> None:
-        raise NotImplementedError(
-            "DIFFLET_BACKEND=rocm is reserved but not implemented yet. "
-            "Use DIFFLET_BACKEND=trainium for the current Flux path."
-        )
-
-
-def create_backend() -> RocmBackend:
-    return RocmBackend()
+__all__ = ["RocmBackend", "create_backend"]

@@ -5,20 +5,9 @@ these names lazily for existing imports.
 """
 
 import os
-from typing import List, Optional, Tuple, Union
+from typing import List, Tuple
 import torch
-import torch.nn as nn
-from transformers.activations import ACT2FN
-from transformers.modeling_attn_mask_utils import (
-    _create_4d_causal_attention_mask,
-    _prepare_4d_attention_mask,
-)
-from transformers.modeling_outputs import BaseModelOutput, BaseModelOutputWithPooling
 from difflet.ops import (
-    ColumnParallelLinear,
-    RowParallelLinear,
-    get_platform_target,
-    get_tensor_model_parallel_size,
     hardware,
 )
 from difflet.backends.trainium.core.application_base import NeuronApplicationBase

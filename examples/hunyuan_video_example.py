@@ -35,13 +35,11 @@ run into --llama-compiled / --clip-compiled.
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import time
 from pathlib import Path
 
 import torch
-import torch.nn.functional as F
 
 _DEFAULT_CACHE = Path(__file__).resolve().parent.parent / ".difflet-cache"
 

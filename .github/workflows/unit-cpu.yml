@@ -1,0 +1,70 @@
+name: unit-cpu
+
+# CPU-only unit suite with the CPU reference backend selected. No accelerator,
+# no Neuron SDK. GPU and Trainium tests remain manual.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ruff is enforced repo-wide. black/isort run through pre-commit on changed
+  # files only until the one-off repo-wide reformat lands.
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install ruff==0.15.1
+
+      - name: Ruff
+        run: ruff check --output-format=github .
+
+  unit-cpu:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      # CPU wheels only: the default index would pull multi-GB CUDA builds.
+      - name: Install torch (CPU)
+        run: pip install --index-url https://download.pytorch.org/whl/cpu torch
+
+      - name: Install Difflet with test extras
+        run: pip install -e ".[test]"
+
+      # The gate runs the import guard and tests/unit with DIFFLET_BACKEND=cpu, and
+      # fails on any red test not in known-red.txt and on any Neuron-only skip not
+      # in neuron-skips.txt (a regression hiding as a skip). Full logs are uploaded.
+      - name: CPU gate (import guard + unit tests)
+        env:
+          PYTHON_BIN: python
+          CPU_GATE_LOGDIR: ${{ runner.temp }}/cpu-gate
+        run: scripts/cpu-gate.sh
+
+      - name: Upload gate logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpu-gate-logs-py${{ matrix.python-version }}
+          path: ${{ runner.temp }}/cpu-gate

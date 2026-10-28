@@ -122,6 +122,20 @@ class ModelEntry:
         backend: str,
         application_kwargs: dict[str, Any] | None = None,
     ) -> Any:
+        from difflet.platforms import get_platform
+
+        if get_platform(backend).capabilities.flow == "gpu":
+            # Every GPU platform runs the generic flow, driven by the model's spec.
+            from difflet.backends.gpu.application import create_gpu_application
+
+            return create_gpu_application(
+                self.name,
+                model_path=model_path,
+                parallel=parallel,
+                dtype=dtype,
+                shape=shape,
+                **(application_kwargs or {}),
+            )
         factory = _resolve_factory(self.application_factory)
         return factory(
             model_path=model_path,
@@ -242,9 +256,10 @@ def _register_builtin_flux() -> None:
     @register_model(
         name="flux",
         application_factory="difflet.models.flux.entry:create_flux_application",
-        # trainium (AoT), and the neuron backend (TorchNeuron, torchrun ranks; DiT and T5 TP on
-        # the device, CLIP on the host, the VAE on rank 0's core).
-        backends=("trainium", "neuron"),
+        # trainium (AoT); the neuron backend (TorchNeuron, torchrun ranks; the DiT and T5 TP-sharded
+        # on the device, CLIP and the VAE on the device, all bf16); CUDA: tp=1, one GPU,
+        # FluxPipeline around the Difflet DiT.
+        backends=("trainium", "cuda", "neuron"),
         hf_paths=(
             "black-forest-labs/FLUX.1-dev",
             "black-forest-labs/FLUX.1-schnell",
@@ -291,7 +306,8 @@ def _register_builtin_wan() -> None:
         # (see difflet/models/wan/tpu_application.py on expert residency), and the first
         # on the neuron backend (TorchNeuron, torchrun ranks; umT5 and the VAE on the device
         # or the host).
-        backends=("trainium", "tpu", "neuron"),
+        # CUDA: tp=1, one GPU, both experts resident by default.
+        backends=("trainium", "tpu", "cuda", "neuron"),
     )
     class _WanRegistration:
         pass
@@ -402,7 +418,7 @@ def _register_builtin_qwen_image() -> None:
         ),
         # Qwen-Image is the first model on the TPU backend (plan Phase 4), and the second on
         # the neuron backend (TorchNeuron, torchrun ranks; host Qwen2.5-VL, host or device VAE).
-        backends=("trainium", "tpu", "neuron"),
+        backends=("trainium", "tpu", "cuda", "neuron"),
     )
     class _QwenImageRegistration:
         pass

@@ -5,9 +5,6 @@ these names lazily for existing imports.
 """
 
 import torch
-from torch import Tensor
-from torch.nn import Parameter
-from torch.nn import functional as F, init
 from diffusers.models.autoencoders.vae import Decoder, DecoderTiny
 from difflet.backends.trainium.core.bucketing import (
     ShapeBucketedInputGenerator,

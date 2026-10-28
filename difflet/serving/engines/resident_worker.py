@@ -130,6 +130,11 @@ class ResidentWorkerServingEngine:
             return True
         return self._worker.is_healthy()
 
+    @property
+    def pending_requests(self) -> int:
+        """Admitted requests (running + queued); what a replica dispatcher balances on."""
+        return self._pending
+
     async def generate(self, request: DiffletGenerateRequest) -> GenerateOutput:
         if self._draining:
             raise DiffletServingError(503, "engine_draining", "engine is draining", "server_error")
@@ -1152,6 +1157,12 @@ def _apply_worker_runtime_environment(runtime: ResolvedRuntimeBundle) -> None:
             f"requires {num_cores}, has {len(available_core_ids)}"
         )
     visible_core_ids = available_core_ids[:num_cores]
+    gpu_platform = _gpu_platform_of(plan)
+    if gpu_platform is not None:
+        # One worker per GPU: the plan's core ids count from the parent's
+        # visible devices, as the DP router's do, so the worker's first device is its own card.
+        var = gpu_platform.visible_devices_var
+        os.environ[var] = gpu_platform.visible_devices(os.environ.get(var), visible_core_ids)
     virtual_core_size = _validated_optional_positive_int(
         "NEURON_RT_VIRTUAL_CORE_SIZE",
         allocation.effective_virtual_core_size,
@@ -1179,6 +1190,17 @@ def _apply_worker_runtime_environment(runtime: ResolvedRuntimeBundle) -> None:
     os.environ["LOCAL_WORLD_SIZE"] = str(child.local_world_size)
     os.environ["RANK"] = str(child.rank)
     os.environ["LOCAL_RANK"] = str(child.local_rank)
+
+
+def _gpu_platform_of(plan):
+    """The GPU platform the plan's stages are placed on, or ``None`` for a Neuron plan."""
+    from difflet.platforms import get_platform, platform_names
+
+    gpu_names = platform_names(flow="gpu")
+    for stage in plan.stages:
+        if stage.placement in gpu_names:
+            return get_platform(stage.placement)
+    return None
 
 
 def _validated_optional_positive_int(name: str, value: int | None) -> int | None:

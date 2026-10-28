@@ -33,7 +33,6 @@ import json
 import os
 import statistics
 import sys
-import time
 from pathlib import Path
 
 from difflet.backends.neuron.compile import configure_compile_cache

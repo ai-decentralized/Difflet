@@ -23,6 +23,7 @@ def _wan_args(**overrides) -> argparse.Namespace:
         prompt="a cat walking", output="/tmp/wan.mp4",
         steps=2, guidance_scale=1.0, seed=42, stage_mode="generate",
         work_dir=None, keep_work_dir=False, host_vae=False,
+        device_vae=True,  # these tests exercise the device VAE stage; the host default is tested below
         teacache_cadence=None, teacache_online_delta=None,
         teacache_speedup=None, teacache_calibration=None,
     )
@@ -1721,3 +1722,46 @@ def test_vae_exec_mode_is_refused_with_host_vae_on_neuron(monkeypatch, tmp_path,
 
     assert exc.value.code == 2
     assert "--vae-exec-mode sets the device decoder" in capsys.readouterr().err
+# ------------------------------------------------------ the default VAE placement
+
+def test_default_compile_skips_the_device_vae(monkeypatch):
+    stages = []
+    monkeypatch.setattr(wan_mod.runner, "run_stage", lambda orch, stage, **kw: stages.append(stage))
+    WanOrchestrator(_wan_args(device_vae=False)).compile()
+    assert stages == ["transformer"]
+
+
+def test_default_generate_decodes_on_the_host(monkeypatch, tmp_path):
+    stages, decoded = [], {}
+    monkeypatch.setattr(wan_mod.runner, "run_stage", lambda orch, stage, **kw: stages.append(stage))
+    monkeypatch.setattr(wan_mod, "_decode_latents_host",
+                        lambda latents_path, model_id, output_path, revision=None: decoded.update(out=output_path))
+    args = _wan_args(device_vae=False, work_dir=str(tmp_path / "work"), output=str(tmp_path / "wan.mp4"))
+    WanOrchestrator(args).generate()
+    assert stages == ["transformer"] and decoded["out"] == str(tmp_path / "wan.mp4")
+
+
+def test_host_vae_wins_over_device_vae():
+    assert not wan_mod._decode_on_device(_wan_args(device_vae=True, host_vae=True))
+    assert wan_mod._decode_on_device(_wan_args(device_vae=True, host_vae=False))
+    assert not wan_mod._decode_on_device(_wan_args(device_vae=False))
+
+
+def test_wan_serving_decodes_on_the_host_by_default():
+    from difflet.common.registry.wan import serving_metadata
+
+    assert serving_metadata().default_host_vae is True
+
+
+# ---------------------------------------------- VAE placement by backend (merge of #117)
+
+def test_neuron_decodes_with_the_device_vae_stage_by_default(monkeypatch):
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    assert wan_mod._decode_on_device(_wan_args(device_vae=False, host_vae=False))
+    assert not wan_mod._decode_on_device(_wan_args(device_vae=False, host_vae=True))
+
+
+def test_trainium_decodes_on_the_host_by_default(monkeypatch):
+    monkeypatch.delenv("DIFFLET_BACKEND", raising=False)
+    assert not wan_mod._decode_on_device(_wan_args(device_vae=False, host_vae=False))
+    assert wan_mod._decode_on_device(_wan_args(device_vae=True, host_vae=False))

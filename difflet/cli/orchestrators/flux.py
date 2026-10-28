@@ -334,7 +334,7 @@ class FluxOrchestrator(ModelOrchestrator):
 
     def _load_pipeline(self):
         from difflet.pipeline.compile_cache import CacheSpec, cache_path, has_valid_manifest
-        from difflet.pipeline.difflet_pipeline import DiffletPipeline
+        from difflet.pipeline.difflet_pipeline import DiffletPipeline, _cache_application_kwargs
         from difflet.pipeline.path_resolver import resolve_model_path
         from difflet.registry import resolve_model
 
@@ -361,7 +361,10 @@ class FluxOrchestrator(ModelOrchestrator):
             dtype=self._dtype(),
             height=shape.get("height"), width=shape.get("width"),
             num_frames=shape.get("num_frames"), revision=self.args.revision,
-            application_kwargs=self._application_kwargs() or None,
+            # The identity compile wrote through DiffletPipeline (tp_reduce_dtype keyed).
+            application_kwargs=_cache_application_kwargs(
+                self._application_kwargs(), model_name=entry.name
+            ),
             shapes=self._compile_shapes(),
         )
         compiled = cache_path(self.args.cache_dir, spec)
@@ -389,7 +392,7 @@ class FluxOrchestrator(ModelOrchestrator):
 
     def _compile_shapes(self):
         """Canonical (h, w) bucket set from --shapes, or None for single-shape."""
-        from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+        from difflet.pipeline.bucketing import canonicalize_shapes
         from difflet.cli.orchestrators.base import parse_shapes_arg
 
         shapes = parse_shapes_arg(getattr(self.args, "shapes", None))
@@ -418,7 +421,9 @@ class FluxOrchestrator(ModelOrchestrator):
 
     def _application_kwargs(self) -> dict[str, Any]:
         """Model-opt kwargs shared by compile and load (hashed into the cache key)."""
-        app_kwargs: dict[str, Any] = {}
+        app_kwargs: dict[str, Any] = {
+            "tp_reduce_dtype": getattr(self.args, "tp_reduce_dtype", None) or "bf16",
+        }
         if getattr(self.args, "teacache_cadence", None) is not None:
             app_kwargs["teacache_cadence"] = self.args.teacache_cadence
         if getattr(self.args, "teacache_online_delta", None) is not None:

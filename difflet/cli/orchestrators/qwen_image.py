@@ -63,7 +63,6 @@ from difflet.cli.orchestrators.base import (
     canonical_shapes_list,
     has_valid_stage_manifest,
     hashed_stage_dir,
-    parse_shapes_arg,
     require_request_shape_in_set,
     stage_toolchain_versions,
     write_stage_manifest,
@@ -683,6 +682,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
             teacache_calibration_path=getattr(args, "teacache_calibration", None),
             teacache_cadence=getattr(args, "teacache_cadence", None),
             teacache_online_delta_alpha=getattr(args, "teacache_online_delta", None),
+            tp_reduce_dtype=getattr(args, "tp_reduce_dtype", None),
         )
         if args.stage_mode == "compile":
             app.compile(str(compiled_dir))
@@ -956,6 +956,10 @@ class QwenImageOrchestrator(ModelOrchestrator):
                 "toolchain": stage_toolchain_versions(),
             }
         if stage == "generate":
+            import torch
+
+            from difflet.common.tp_reduce import parse_tp_reduce_dtype, tp_reduce_cache_fields
+
             return {
                 "component": "qwen_image_dit",
                 "model_id": _HF_MODEL_ID,
@@ -974,6 +978,11 @@ class QwenImageOrchestrator(ModelOrchestrator):
                 "text_seq_len": _TEXT_SEQ_LEN,
                 "shapes": canonical_shapes_list(args, (1024, 1024)),
                 "toolchain": stage_toolchain_versions(),
+                # Additive: pre-bf16 DiT artifacts reduced in fp32 and keep their key.
+                **tp_reduce_cache_fields(
+                    parse_tp_reduce_dtype(getattr(args, "tp_reduce_dtype", None)),
+                    legacy=torch.float32,
+                ),
             }
         if stage == "vae":
             return {
@@ -1055,6 +1064,8 @@ class QwenImageOrchestrator(ModelOrchestrator):
             parts += ["--vae-dtype", a.vae_dtype]
         if getattr(a, "vae_exec_mode", None):
             parts += ["--vae-exec-mode", a.vae_exec_mode]
+        if getattr(a, "tp_reduce_dtype", None):
+            parts += ["--tp-reduce-dtype", a.tp_reduce_dtype]
         if getattr(a, "teacache_speedup", None) is not None:
             parts += ["--teacache-speedup", str(a.teacache_speedup)]
         if getattr(a, "teacache_calibration", None):

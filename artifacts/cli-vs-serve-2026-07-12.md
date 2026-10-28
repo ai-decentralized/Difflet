@@ -1,7 +1,7 @@
 # Difflet CLI vs Resident Serving Benchmark
 
 Date: 2026-07-12  
-Host: `16.26.177.239` (`trn2.3xlarge`, 4 logical NeuronCores, 96 GiB HBM)  
+Host: a `trn2.3xlarge` instance (4 logical NeuronCores, 96 GiB HBM)  
 Source: current local worktree synced to `/home/ubuntu/Difflet`
 
 ## Fixed Parameters
@@ -101,7 +101,7 @@ are excluded from HTTP latency and will be reused by later warm starts.
 The complete follow-up evidence is under:
 
 ```text
-artifacts/remote-logs/16.26.177.239/cli-vs-serve/benchmark-cli-20steps-20260712T074956Z/
+artifacts/remote-logs/<host>/cli-vs-serve/benchmark-cli-20steps-20260712T074956Z/
 ```
 
 ## Comparison With The Previous Flux Run
@@ -164,7 +164,7 @@ required and optional R2 variables.
 All remote evidence is stored under:
 
 ```text
-artifacts/remote-logs/16.26.177.239/
+artifacts/remote-logs/<host>/
 ```
 
 Key benchmark files:

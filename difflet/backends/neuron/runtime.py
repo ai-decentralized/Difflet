@@ -52,12 +52,39 @@ _runtime_prepared = False
 
 
 class NeuronBackend(BackendRuntime):
+    """The torch-native Neuron backend, registered as the ``neuron`` platform: PyTorch native on
+    Trainium, one torchrun process per NeuronCore, no NxD or XLA. Layer-boundary markers are the
+    identity (they delimit layers for the AoT compiler only)."""
+
     name = "neuron"
+    display_name = "Neuron (torch-native)"
     capabilities = BackendCapabilities(
         requires_aot=False,
         single_process_multi_core=False,
         supports_torchrun_mpmd=True,
+        flow="torchrun",
+        supports_torch_compile=True,
+        device_unit="NeuronCores",
     )
+
+    @classmethod
+    def detect(cls) -> bool:
+        # torch-neuronx without torch_xla is the native stack; with torch_xla it is Trainium (AoT).
+        import importlib.util
+
+        return (importlib.util.find_spec("torch_neuronx") is not None
+                and importlib.util.find_spec("torch_xla") is None)
+
+    def toolchain_versions(self) -> dict[str, str | None]:
+        import importlib.metadata
+
+        versions: dict[str, str | None] = {}
+        for package in ("torch-neuronx", "neuronx-cc", "nki"):
+            try:
+                versions[package] = importlib.metadata.version(package)
+            except importlib.metadata.PackageNotFoundError:
+                versions[package] = None
+        return versions
 
     def prepare_runtime(self, parallel: Any) -> None:
         if parallel is not None:

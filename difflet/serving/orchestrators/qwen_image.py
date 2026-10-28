@@ -558,7 +558,7 @@ class QwenImageServingStageAdapter:
 
     def _load_vae_stage_tpu(self, profile: ServingProfile) -> None:
         import torch
-        import torch_xla
+        import torch_xla  # noqa: F401  (registers the XLA device)
         from diffusers import AutoencoderKLQwenImage
 
         assert self.model_dir is not None

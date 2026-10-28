@@ -192,6 +192,7 @@ class HunyuanVideoFeedForward(nn.Module):
         mult: float = 4.0,
         activation_fn: str = "gelu-approximate",
         sp_enabled: bool = False,
+        reduce_dtype: torch.dtype = torch.bfloat16,
     ):
         super().__init__()
         self.sp_enabled = sp_enabled
@@ -216,6 +217,7 @@ class HunyuanVideoFeedForward(nn.Module):
                     bias=True,
                     input_is_parallel=True,
                     reduce_output=not sp_enabled,
+                    reduce_dtype=reduce_dtype,
                 ),
             ]
         )
@@ -244,6 +246,7 @@ class HunyuanVideoSelfAttention(nn.Module):
         heads: int,
         dim_head: int,
         bias: bool = True,
+        reduce_dtype: torch.dtype = torch.bfloat16,
     ):
         super().__init__()
         tp_degree = get_tensor_model_parallel_size()
@@ -260,7 +263,11 @@ class HunyuanVideoSelfAttention(nn.Module):
         self.to_out = nn.ModuleList(
             [
                 RowParallelLinear(
-                    self.inner_dim, query_dim, bias=True, input_is_parallel=True
+                    self.inner_dim,
+                    query_dim,
+                    bias=True,
+                    input_is_parallel=True,
+                    reduce_dtype=reduce_dtype,
                 ),
                 nn.Dropout(0.0),
             ]
@@ -323,6 +330,7 @@ class HunyuanVideoAttention(nn.Module):
         context_parallel_enabled: bool = False,
         cp_mode: str = "gather_kv",
         sp_enabled: bool = False,
+        reduce_dtype: torch.dtype = torch.bfloat16,
     ):
         super().__init__()
         if qk_norm != "rms_norm":
@@ -385,6 +393,7 @@ class HunyuanVideoAttention(nn.Module):
                         # Under Megatron-SP the cross-rank sum is folded into the ḡ
                         # reduce-scatter in forward(); don't also all-reduce here.
                         reduce_output=not sp_enabled,
+                        reduce_dtype=reduce_dtype,
                     ),
                     nn.Dropout(0.0),
                 ]
@@ -402,6 +411,7 @@ class HunyuanVideoAttention(nn.Module):
                 bias=True,
                 input_is_parallel=True,
                 reduce_output=True,
+                reduce_dtype=reduce_dtype,
             )
         else:
             self.to_add_out = None
@@ -574,6 +584,7 @@ class HunyuanVideoTransformerBlock(nn.Module):
         context_parallel_enabled: bool = False,
         cp_mode: str = "gather_kv",
         sp_enabled: bool = False,
+        reduce_dtype: torch.dtype = torch.bfloat16,
     ):
         super().__init__()
         self.sp_enabled = sp_enabled
@@ -592,14 +603,17 @@ class HunyuanVideoTransformerBlock(nn.Module):
             context_parallel_enabled=context_parallel_enabled,
             cp_mode=cp_mode,
             sp_enabled=sp_enabled,
+            reduce_dtype=reduce_dtype,
         )
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         # Latent/video-only SP: shard the latent FF; the text FF stays dense
         # (full sequence, normal all-reduce) since the text stream is never sharded.
-        self.ff = HunyuanVideoFeedForward(hidden_size, mult=mlp_ratio, sp_enabled=sp_enabled)
+        self.ff = HunyuanVideoFeedForward(
+            hidden_size, mult=mlp_ratio, sp_enabled=sp_enabled, reduce_dtype=reduce_dtype
+        )
         self.norm2_context = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
         self.ff_context = HunyuanVideoFeedForward(
-            hidden_size, mult=mlp_ratio, sp_enabled=False
+            hidden_size, mult=mlp_ratio, sp_enabled=False, reduce_dtype=reduce_dtype
         )
 
     def forward(
@@ -663,6 +677,7 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
         context_parallel_enabled: bool = False,
         cp_mode: str = "gather_kv",
         sp_enabled: bool = False,
+        reduce_dtype: torch.dtype = torch.bfloat16,
     ):
         super().__init__()
         self.sp_enabled = sp_enabled
@@ -680,6 +695,7 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
             context_parallel_enabled=context_parallel_enabled,
             cp_mode=cp_mode,
             sp_enabled=sp_enabled,
+            reduce_dtype=reduce_dtype,
         )
         self.norm = AdaLayerNormZeroSingle(hidden_size, norm_type="layer_norm")
         self.proj_mlp = ColumnParallelLinear(hidden_size, mlp_dim, bias=True, gather_output=False)
@@ -691,6 +707,8 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
         # [attn_r || mlp_r] input with the wrong weight columns. Use two RowParallelLinears —
         # one per stream, each matching its own input sharding — reduce once, add bias after.
         # (Same TP-layout fix as Flux's NeuronFluxSingleTransformerBlock.)
+        # reduce_output=False: these layers never all-reduce themselves (the sum
+        # below is reduced in the activation dtype); reduce_dtype is stated anyway.
         self.proj_out_attn = RowParallelLinear(
             hidden_size,
             hidden_size,
@@ -698,6 +716,7 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
             input_is_parallel=True,
             reduce_output=False,
             skip_bias_add=True,
+            reduce_dtype=reduce_dtype,
         )
         self.proj_out_mlp = RowParallelLinear(
             mlp_dim,
@@ -705,6 +724,7 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
             bias=False,
             input_is_parallel=True,
             reduce_output=False,
+            reduce_dtype=reduce_dtype,
         )
 
     def forward(
@@ -815,6 +835,7 @@ class HunyuanVideoIndividualTokenRefinerBlock(nn.Module):
         mlp_width_ratio: float = 4.0,
         mlp_drop_rate: float = 0.0,
         attention_bias: bool = True,
+        reduce_dtype: torch.dtype = torch.bfloat16,
     ) -> None:
         super().__init__()
         hidden_size = num_attention_heads * attention_head_dim
@@ -824,12 +845,14 @@ class HunyuanVideoIndividualTokenRefinerBlock(nn.Module):
             heads=num_attention_heads,
             dim_head=attention_head_dim,
             bias=attention_bias,
+            reduce_dtype=reduce_dtype,
         )
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=True, eps=1e-6)
         self.ff = HunyuanVideoFeedForward(
             hidden_size,
             mult=mlp_width_ratio,
             activation_fn="linear-silu",
+            reduce_dtype=reduce_dtype,
         )
         if mlp_drop_rate != 0.0:
             self.ff.net[1] = nn.Dropout(mlp_drop_rate)
@@ -865,6 +888,7 @@ class HunyuanVideoIndividualTokenRefiner(nn.Module):
         mlp_width_ratio: float = 4.0,
         mlp_drop_rate: float = 0.0,
         attention_bias: bool = True,
+        reduce_dtype: torch.dtype = torch.bfloat16,
     ) -> None:
         super().__init__()
         self.refiner_blocks = nn.ModuleList(
@@ -875,6 +899,7 @@ class HunyuanVideoIndividualTokenRefiner(nn.Module):
                     mlp_width_ratio=mlp_width_ratio,
                     mlp_drop_rate=mlp_drop_rate,
                     attention_bias=attention_bias,
+                    reduce_dtype=reduce_dtype,
                 )
                 for _ in range(num_layers)
             ]
@@ -913,6 +938,7 @@ class HunyuanVideoTokenRefiner(nn.Module):
         mlp_ratio: float = 4.0,
         mlp_drop_rate: float = 0.0,
         attention_bias: bool = True,
+        reduce_dtype: torch.dtype = torch.bfloat16,
     ) -> None:
         super().__init__()
         hidden_size = num_attention_heads * attention_head_dim
@@ -928,6 +954,7 @@ class HunyuanVideoTokenRefiner(nn.Module):
             mlp_width_ratio=mlp_ratio,
             mlp_drop_rate=mlp_drop_rate,
             attention_bias=attention_bias,
+            reduce_dtype=reduce_dtype,
         )
 
     def forward(
@@ -1026,10 +1053,16 @@ class HunyuanVideoTransformer3DModel(nn.Module):
         context_parallel_enabled: bool = False,
         cp_mode: str = "gather_kv",
         sp_enabled: bool = False,
+        reduce_dtype: torch.dtype | None = None,
     ) -> None:
         super().__init__()
         if not isinstance(in_channels, int):
             config = in_channels
+            # Trainium inference configs carry the all-reduce dtype on neuron_config.
+            if reduce_dtype is None:
+                reduce_dtype = getattr(
+                    getattr(config, "neuron_config", None), "rpl_reduce_dtype", None
+                )
             context_parallel_enabled = getattr(config, "context_parallel_enabled", False)
             cp_mode = getattr(config, "cp_mode", "gather_kv")
             sp_enabled = getattr(config, "sp_enabled", False)
@@ -1076,6 +1109,7 @@ class HunyuanVideoTransformer3DModel(nn.Module):
 
         inner_dim = self.config.inner_dim
         out_channels = out_channels or in_channels
+        reduce_dtype = reduce_dtype or torch.bfloat16
 
         self.context_parallel_enabled = context_parallel_enabled
         # Megatron-style sequence parallelism reuses the TP group; it is mutually
@@ -1110,6 +1144,7 @@ class HunyuanVideoTransformer3DModel(nn.Module):
             num_attention_heads,
             attention_head_dim,
             num_layers=num_refiner_layers,
+            reduce_dtype=reduce_dtype,
         )
         self.time_text_embed = HunyuanVideoConditionEmbedding(
             inner_dim,
@@ -1128,6 +1163,7 @@ class HunyuanVideoTransformer3DModel(nn.Module):
                     context_parallel_enabled=context_parallel_enabled,
                     cp_mode=cp_mode,
                     sp_enabled=sp_enabled,
+                    reduce_dtype=reduce_dtype,
                 )
                 for _ in range(num_layers)
             ]
@@ -1142,6 +1178,7 @@ class HunyuanVideoTransformer3DModel(nn.Module):
                     context_parallel_enabled=context_parallel_enabled,
                     cp_mode=cp_mode,
                     sp_enabled=sp_enabled,
+                    reduce_dtype=reduce_dtype,
                 )
                 for _ in range(num_single_layers)
             ]

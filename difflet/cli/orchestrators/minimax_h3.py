@@ -499,6 +499,11 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
             raise NotImplementedError(
                 "MiniMax-H3 SP is deferred until the dense TP4 graph is qualified."
             )
+        if getattr(self.args, "tp_reduce_dtype", None) is not None:
+            raise NotImplementedError(
+                "--tp-reduce-dtype is not supported for MiniMax-H3; its all-reduces "
+                "keep the NxD fp32 default."
+            )
 
     def _stage_cores(self, stage: str) -> int:
         return (self.args.tp_degree or 4) if stage in {"text", "generate"} else 1

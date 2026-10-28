@@ -4,24 +4,11 @@ Moved from ``difflet.models.flux.t5.modeling_t5`` unchanged, so the model module
 these names lazily for existing imports.
 """
 
-import copy
-import math
 import os
-import logging
-from typing import List, Optional, Tuple, Union
+from typing import List, Tuple
 import torch
 from difflet.ops import (
-    ColumnParallelLinear,
-    ParallelEmbedding,
-    RowParallelLinear,
-    get_platform_target,
     hardware,
-)
-from torch import nn
-from transformers.activations import ACT2FN
-from transformers.modeling_outputs import (
-    BaseModelOutput,
-    BaseModelOutputWithPastAndCrossAttentions,
 )
 from difflet.backends.trainium.core.application_base import NeuronApplicationBase
 from difflet.backends.trainium.core.config import InferenceConfig

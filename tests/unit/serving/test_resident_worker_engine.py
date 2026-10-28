@@ -810,3 +810,45 @@ def test_worker_heartbeat_logs_independently_of_reply_queue(caplog):
     assert busy_with_queue["pending_requests"] == 2
     assert busy_with_queue["request_capacity"] == 9
     assert "running_requests=1 queued_requests=1 pending_requests=2 capacity=9" in caplog.text
+
+
+# --- GPU: the worker pins its GPU (`difflet serve --dp-degree N`) ---------------------------
+
+
+def _cuda_runtime(core_ids: tuple[int, ...]) -> ResolvedRuntimeBundle:
+    runtime = _runtime()
+    plan = runtime.runtime_plan
+    stage = replace(plan.stages[0], placement="cuda", artifact_id=None)
+    return replace(
+        runtime,
+        runtime_plan=replace(
+            plan,
+            environment=replace(plan.environment, available_core_ids=core_ids),
+            stages=(stage,),
+        ),
+    )
+
+
+def test_cuda_worker_pins_its_gpu(monkeypatch, preserve_worker_environment):
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    _apply_worker_runtime_environment(_cuda_runtime((1,)))
+    assert os.environ["CUDA_VISIBLE_DEVICES"] == "1"
+
+
+def test_cuda_worker_pins_within_the_parent_s_visible_devices(
+    monkeypatch, preserve_worker_environment
+):
+    # The plan's core ids count from the parent's visible devices, as the DP router's do.
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "4,5")
+    _apply_worker_runtime_environment(_cuda_runtime((1,)))
+    assert os.environ["CUDA_VISIBLE_DEVICES"] == "5"
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "4")
+    with pytest.raises(ValueError, match="outside the parent"):
+        _apply_worker_runtime_environment(_cuda_runtime((1,)))
+
+
+def test_neuron_worker_environment_is_unchanged(monkeypatch, preserve_worker_environment):
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    _apply_worker_runtime_environment(_runtime())
+    assert "CUDA_VISIBLE_DEVICES" not in os.environ
+    assert os.environ["NEURON_RT_VISIBLE_CORES"] == "0"

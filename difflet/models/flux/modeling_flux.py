@@ -24,9 +24,7 @@
 # <<< NxDI fork banner <<<
 import logging
 import math
-import os
-from typing import Any, Dict, List, Optional, Tuple
-from contextlib import contextmanager
+from typing import Any, Dict, Optional
 
 import numpy as np
 import torch
@@ -35,11 +33,11 @@ import torch.nn.functional as F
 
 from difflet.layers.activations import NeuronGELU
 from difflet.layers.embeddings import (
-    FluxPosEmbed,
     NeuronCombinedTimestepGuidanceTextProjEmbeddings,
     NeuronCombinedTimestepTextProjEmbeddings,
     apply_rotary_emb,
 )
+from difflet.layers.markers import ModuleMarkerEndWrapper, ModuleMarkerStartWrapper
 from difflet.layers.normalization import (
     NeuronAdaLayerNormContinuous,
     NeuronAdaLayerNormZero,
@@ -72,11 +70,7 @@ from difflet.ops import (
     scatter_to_process_group_spmd,
 )
 
-
 _HARDWARE = hardware(get_platform_target())
-
-if not os.environ.get("NEURON_PLATFORM_TARGET_OVERRIDE"):
-    os.environ["NEURON_PLATFORM_TARGET_OVERRIDE"] = get_platform_target()
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
@@ -94,6 +88,12 @@ def _safe_tp_size() -> int:
         return int(get_tensor_model_parallel_size())
     except Exception:
         return 1
+
+
+def _flux_reduce_dtype(neuron_config) -> torch.dtype:
+    """All-reduce dtype of the DiT: --tp-reduce-dtype when set, else the model
+    dtype (bf16), which is what the DiT reduced in before the flag existed."""
+    return getattr(neuron_config, "rpl_reduce_dtype", None) or neuron_config.torch_dtype
 
 
 def _sp_unbias(x: torch.Tensor, row_linear: nn.Module) -> torch.Tensor:
@@ -236,7 +236,7 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
 
     def __init__(
         self,
-        config: "InferenceConfig",
+        config: Any,
     ):
         super().__init__()
         self.config = config
@@ -271,6 +271,7 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
             self.out_channels = self.config.in_channels
 
         self.inner_dim = self.config.num_attention_heads * self.config.attention_head_dim
+        reduce_dtype = _flux_reduce_dtype(self.config.neuron_config)
 
         text_time_guidance_cls = (
             NeuronCombinedTimestepGuidanceTextProjEmbeddings
@@ -280,7 +281,7 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
         self.time_text_embed = text_time_guidance_cls(
             embedding_dim=self.inner_dim,
             pooled_projection_dim=self.config.pooled_projection_dim,
-            reduce_dtype=self.config.neuron_config.torch_dtype,
+            reduce_dtype=reduce_dtype,
         )
 
         # We can't use gather_output=False, there is a LayerNorm at the beginning of the next FluxTransformerBlock
@@ -288,10 +289,10 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
             self.config.joint_attention_dim,
             self.inner_dim,
             gather_output=True,
-            reduce_dtype=self.config.neuron_config.torch_dtype,
+            reduce_dtype=reduce_dtype,
         )
         self.x_embedder = ColumnParallelLinear(
-            self.config.in_channels, self.inner_dim, gather_output=True, reduce_dtype=self.config.neuron_config.torch_dtype,
+            self.config.in_channels, self.inner_dim, gather_output=True, reduce_dtype=reduce_dtype,
         )
 
         self.transformer_blocks = nn.ModuleList(
@@ -300,7 +301,7 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
                     dim=self.inner_dim,
                     num_attention_heads=self.config.num_attention_heads,
                     attention_head_dim=self.config.attention_head_dim,
-                    reduce_dtype=self.config.neuron_config.torch_dtype,
+                    reduce_dtype=reduce_dtype,
                     context_parallel_enabled=self.context_parallel_enabled,
                     cp_mode=self.cp_mode,
                     sp_enabled=self.sp_enabled,
@@ -315,7 +316,7 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
                     dim=self.inner_dim,
                     num_attention_heads=self.config.num_attention_heads,
                     attention_head_dim=self.config.attention_head_dim,
-                    reduce_dtype=self.config.neuron_config.torch_dtype,
+                    reduce_dtype=reduce_dtype,
                     context_parallel_enabled=self.context_parallel_enabled,
                     cp_mode=self.cp_mode,
                     sp_enabled=self.sp_enabled,
@@ -339,7 +340,7 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
             self.config.patch_size * self.config.patch_size * self.out_channels,
             bias=True,
             gather_output=True,
-            reduce_dtype=self.config.neuron_config.torch_dtype,
+            reduce_dtype=reduce_dtype,
         )
 
     def _sp_seq_scatter(self, tensor: torch.Tensor, *, dim: int) -> torch.Tensor:
@@ -1484,3 +1485,60 @@ def __getattr__(name):
 
         return getattr(backbone, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+def convert_flux_hf_state_dict(
+    state_dict: Dict[str, torch.Tensor],
+    *,
+    num_single_layers: int,
+    inner_dim: int,
+    clone: bool = True,
+) -> Dict[str, torch.Tensor]:
+    """Convert a diffusers ``FluxTransformer2DModel`` state dict to this module's names.
+
+    Splits each single block's fused ``proj_out`` (``[attn | mlp]`` along the input
+    dim, split at ``inner_dim``) into ``proj_out_attn`` (which takes the bias) and
+    ``proj_out_mlp``. The fused keys are left out, so the result loads with
+    ``strict=True``. The caller's dict is not modified.
+
+    With ``clone=True`` (the default) every value is a contiguous clone. With
+    ``clone=False`` the untouched tensors (and the renamed bias) are returned as they
+    are, with no copy, and only the two ``proj_out`` weight slices per single block are
+    made contiguous copies -- for a caller that copies the values on anyway (the CUDA
+    loader's ``load_state_dict``, the Trainium converter's in-place clone) and must not
+    hold the checkpoint twice on the host. The Trainium application's
+    ``convert_hf_to_neuron_state_dict`` delegates here and adds its Trainium-only state
+    (``global_rank.rank``, the SPMD rank buffer).
+    """
+    fused = {
+        f"single_transformer_blocks.{i}.proj_out.{name}"
+        for i in range(num_single_layers)
+        for name in ("weight", "bias")
+    }
+    converted = {key: value for key, value in state_dict.items() if key not in fused}
+    for i in range(num_single_layers):
+        prefix = f"single_transformer_blocks.{i}"
+        weight = state_dict[f"{prefix}.proj_out.weight"]
+        attn_weight = weight[:, :inner_dim]
+        mlp_weight = weight[:, inner_dim:]
+        if not clone:
+            # A real copy even when the slice is already contiguous (one row), so the
+            # split never keeps the fused weight alive.
+            attn_weight = attn_weight.clone().contiguous()
+            mlp_weight = mlp_weight.clone().contiguous()
+        converted[f"{prefix}.proj_out_attn.weight"] = attn_weight
+        converted[f"{prefix}.proj_out_attn.bias"] = state_dict[f"{prefix}.proj_out.bias"]
+        converted[f"{prefix}.proj_out_mlp.weight"] = mlp_weight
+    if not clone:
+        return converted
+    return {key: value.clone().detach().contiguous() for key, value in converted.items()}
+
+
+def clone_state_dict_in_place(state_dict: Dict[str, torch.Tensor]) -> Dict[str, torch.Tensor]:
+    """Replace every value with a contiguous clone, one key at a time, and return the dict.
+
+    Keys and order are kept. Each original tensor is released as soon as its clone
+    replaces it (when nothing else holds it), so the transient host peak is one tensor,
+    not the whole dict -- the Trainium converter's original final pass.
+    """
+    for k, v in state_dict.items():
+        state_dict[k] = v.clone().detach().contiguous()
+    return state_dict

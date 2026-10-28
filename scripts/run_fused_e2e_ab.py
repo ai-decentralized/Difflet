@@ -48,13 +48,11 @@ NUM_STEPS = 50
 
 def main() -> int:
     from difflet.models.hunyuan_video.application import (
-        HunyuanVideoDiTInputBundle,
         NeuronHunyuanVideoApplication,
     )
     from difflet.pipeline.parallel_config import DiffletParallelConfig
     from difflet.pipeline.teacache import TeaCacheCalibration, TeaCacheController
     from scripts.verify_teacache_speedup import (
-        _build_hv_bundle,
         _load_hv_bundle,
         _run_hv_bundle,
         _tensor_cosine,

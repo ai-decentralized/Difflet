@@ -28,6 +28,7 @@ def create_flux_application(
             f"Flux supports the trainium and neuron backends, got {backend!r}"
         )
 
+    from difflet.common.tp_reduce import parse_tp_reduce_dtype
     from difflet.models.flux.application import (
         NeuronFluxApplication,
         create_flux_config,
@@ -38,9 +39,10 @@ def create_flux_application(
     width = int(shape.get("width") or 1024)
     taef1 = bool(kwargs.pop("taef1", False))
     taef1_path = kwargs.pop("taef1_path", None)
+    tp_reduce_dtype = parse_tp_reduce_dtype(kwargs.pop("tp_reduce_dtype", None))
     compile_shapes = kwargs.pop("shapes", None)
     if compile_shapes:
-        from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+        from difflet.pipeline.bucketing import canonicalize_shapes
 
         compile_shapes = canonicalize_shapes(compile_shapes)
     world_size = get_flux_parallelism_config(
@@ -62,6 +64,7 @@ def create_flux_application(
         taef1=taef1,
         taef1_path=taef1_path,
         compile_shapes=compile_shapes,
+        tp_reduce_dtype=tp_reduce_dtype,
     )
     return NeuronFluxApplication(
         model_path,

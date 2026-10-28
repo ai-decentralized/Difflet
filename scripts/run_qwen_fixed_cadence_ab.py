@@ -22,9 +22,7 @@ import argparse
 import json
 import os
 import sys
-import time
 from pathlib import Path
-from typing import Any
 
 NEURON_VENV = Path("/opt/aws_neuronx_venv_pytorch_2_9_nxd_inference")
 NEURON_PYTHON = NEURON_VENV / "bin" / "python"
@@ -45,7 +43,6 @@ def ensure_runtime_python() -> None:
 
 ensure_runtime_python()
 
-import torch  # noqa: E402
 
 from difflet.pipeline.teacache import TeaCacheCalibration, TeaCacheController  # noqa: E402
 from scripts.run_qwen_teacache_e2e import (  # noqa: E402

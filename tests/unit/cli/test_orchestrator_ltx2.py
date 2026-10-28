@@ -197,12 +197,15 @@ def test_load_pipeline_threads_probe_free_teacache_kwargs(monkeypatch):
         "enable_host_pipeline": True,
         "enable_decode_components": True,
         "teacache_cadence": 2,
+        "tp_reduce_dtype": "bf16",
     }
     kw = _load_pipeline_kwargs(monkeypatch, teacache_online_delta=0.6)
     assert kw["application_kwargs"]["teacache_online_delta_alpha"] == 0.6
     assert "teacache_cadence" not in kw["application_kwargs"]
     kw = _load_pipeline_kwargs(monkeypatch)
-    assert set(kw["application_kwargs"]) == {"enable_host_pipeline", "enable_decode_components"}
+    assert set(kw["application_kwargs"]) == {
+        "enable_host_pipeline", "enable_decode_components", "tp_reduce_dtype",
+    }
 
 
 def test_probe_free_teacache_kwargs_do_not_change_ltx2_cache_key():
@@ -253,6 +256,7 @@ def test_load_pipeline_threads_adaptive_calibration_as_runtime_only(monkeypatch,
         "enable_host_pipeline": True,
         "enable_decode_components": True,
         "teacache_calibration_path": calib,
+        "tp_reduce_dtype": "bf16",
     }
     assert "teacache_speedup" not in kw and "teacache_calibration_path" not in kw
 
@@ -291,10 +295,12 @@ def test_adaptive_compile_builds_the_probe_artifact_the_load_resolves(monkeypatc
         classmethod(lambda cls, *a, **kw: compiled.update(kw) or object()),
     )
     LTX2Orchestrator(_ltx2_args(teacache_speedup=1.5, teacache_calibration=calib)).compile()
-    assert compiled["application_kwargs"] == {"teacache_calibration_path": calib}
+    assert compiled["application_kwargs"] == {
+        "teacache_calibration_path": calib, "tp_reduce_dtype": "bf16",
+    }
     # the pipeline-level identity of that request carries the probe ...
     assert _cache_application_kwargs(compiled["application_kwargs"], model_name="ltx_2") == \
-        {"teacache_probe_enabled": True}
+        {"teacache_probe_enabled": True, "tp_reduce_dtype": "bfloat16"}
     # ... and the load resolves the same calibration
     kw = _load_pipeline_kwargs(monkeypatch, teacache_speedup=1.5, teacache_calibration=calib)
     assert kw["application_kwargs"]["teacache_calibration_path"] == calib
@@ -305,12 +311,17 @@ def test_plain_and_probe_free_compiles_keep_the_tp4_identity(monkeypatch):
 
     monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path",
                         lambda *a, **kw: "/fake/path")
-    for overrides in ({}, {"teacache_cadence": 2}, {"teacache_online_delta": 0.6}):
-        compiled = {}
-        monkeypatch.setattr(
-            "difflet.pipeline.difflet_pipeline.DiffletPipeline.precompile",
-            classmethod(lambda cls, *a, **kw: compiled.update(kw) or object()),
-        )
-        LTX2Orchestrator(_ltx2_args(**overrides)).compile()
-        assert "application_kwargs" not in compiled
-    assert _cache_application_kwargs({}, model_name="ltx_2") is None
+    # Probe-free modes compile the plain identity: the bf16 all-reduce one by
+    # default, and the pre-bf16 one (no application identity) with fp32.
+    for dtype, identity in ((None, {"tp_reduce_dtype": "bfloat16"}), ("fp32", None)):
+        for overrides in ({}, {"teacache_cadence": 2}, {"teacache_online_delta": 0.6}):
+            compiled = {}
+            monkeypatch.setattr(
+                "difflet.pipeline.difflet_pipeline.DiffletPipeline.precompile",
+                classmethod(lambda cls, *a, **kw: compiled.update(kw) or object()),
+            )
+            LTX2Orchestrator(_ltx2_args(tp_reduce_dtype=dtype, **overrides)).compile()
+            assert compiled["application_kwargs"] == {"tp_reduce_dtype": dtype or "bf16"}
+            assert _cache_application_kwargs(
+                compiled["application_kwargs"], model_name="ltx_2"
+            ) == identity

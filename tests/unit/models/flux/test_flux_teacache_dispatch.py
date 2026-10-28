@@ -101,13 +101,15 @@ def _build_pipeline():
     return pipe, transformer
 
 
-def test_probe_free_controller_is_consulted_without_a_mounted_probe():
+def test_probe_free_controller_is_consulted_without_a_mounted_probe(monkeypatch):
     """Regression for a9f71fa.
 
     Fails against the old dispatch condition (``teacache_probe is not
     None`` alone) and passes against the current one (``... or
     teacache_controller is not None``).
     """
+    # CPU tensors: keep the pipeline off torch_xla's mark_step on a Neuron host.
+    monkeypatch.setattr("difflet.models.flux.pipeline.XLA_AVAILABLE", False)
     pipe, transformer = _build_pipeline()
 
     # Probe-free: mirrors NeuronFluxApplication building a controller from

@@ -16,7 +16,6 @@ the sample-pixel ones.
 
 from __future__ import annotations
 
-import os
 import time
 
 import torch

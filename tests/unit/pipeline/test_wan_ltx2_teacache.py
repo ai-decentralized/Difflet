@@ -5,7 +5,6 @@ property), and the LTX-2 dual-stream velocity-cache skip/reuse logic at the cont
 level (the shape of the `_denoise` wiring, without loading the real models).
 """
 
-import json
 from pathlib import Path
 
 import pytest

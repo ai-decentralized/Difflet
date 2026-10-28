@@ -181,9 +181,9 @@ class ModelWrapperFluxTeacacheProbeFused(ModelWrapper):
     def forward(self, hidden_states, timestep, pooled_projections, guidance):
         if self.model is None:
             raise RuntimeError("Forward called before load.")
-        # Cast floating inputs to the compiled dtype (the backbone wrapper does
-        # the same at modeling_flux.py:1369-1380). The pipeline builds guidance
-        # as float32; the NEFF expects bf16.
+        # Cast floating inputs to the compiled dtype (the backbone wrapper,
+        # backbone.ModelWrapperFluxBackbone.forward, does the same). The
+        # pipeline builds guidance as float32; the NEFF expects bf16.
         dtype = self.config.neuron_config.torch_dtype
         hidden_states = hidden_states.to(dtype)
         timestep = timestep.to(dtype)

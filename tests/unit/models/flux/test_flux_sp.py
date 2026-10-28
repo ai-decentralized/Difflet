@@ -34,10 +34,11 @@ def _reload(name):
 import difflet.backends.trainium.core.config as _config_mod  # noqa: E402
 import difflet.layers.normalization as _norm_mod  # noqa: E402
 
-import difflet.ops as _ops  # noqa: E402
+import difflet.ops as _ops  # noqa: E402, F401
 
 _reload("difflet.ops")
 mf = _reload("difflet.models.flux.modeling_flux")
+tb = _reload("difflet.backends.trainium.flux.backbone")
 
 NeuronConfig = _config_mod.NeuronConfig
 
@@ -143,7 +144,7 @@ def _backbone_config(num_layers=1, num_single_layers=1, guidance_embeds=False, *
         out_channels=4,
     )
     kwargs.update(overrides)
-    return mf.FluxBackboneInferenceConfig(**kwargs)
+    return tb.FluxBackboneInferenceConfig(**kwargs)
 
 
 # ------------------------------------------------------------------ threading

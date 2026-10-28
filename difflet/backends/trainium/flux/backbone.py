@@ -1,10 +1,28 @@
-"""Trainium (AoT) application, inference config and model wrapper for the Flux DiT backbone.
+# Copyright 2024 Black Forest Labs, The HuggingFace Team and The InstantX Team. All rights reserved.
+#
+# This implementation is derived from the Diffusers library.
+# The original codebase has been optimized and modified to achieve optimal performance
+# characteristics when executed on Amazon Neuron devices.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+"""The Trainium (NxD) wrapper around the backend-neutral Flux DiT.
 
-Moved from ``difflet.models.flux.modeling_flux`` unchanged, so the model module is backend-neutral;
-``modeling_flux`` re-exports these names lazily for existing imports.
+``FluxBackboneInferenceConfig``, ``ModelWrapperFluxBackbone`` and
+``NeuronFluxBackboneApplication`` moved here verbatim from ``modeling_flux.py`` so the modeling
+module imports nothing from
+``difflet.backends.trainium``; only their import path changed. The checkpoint
+conversion delegates to the neutral ``convert_flux_hf_state_dict``.
 """
-
-from __future__ import annotations
 
 import logging
 import os
@@ -18,8 +36,17 @@ from difflet.backends.trainium.core.bucketing import ShapeBucketedInputGenerator
 from difflet.backends.trainium.core.config import InferenceConfig
 from difflet.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
 from difflet.layers.embeddings import FluxPosEmbed
-from difflet.models.flux.modeling_flux import _HARDWARE, NeuronFluxTransformer2DModel
-from difflet.ops import hardware
+from difflet.models.flux.modeling_flux import (
+    NeuronFluxTransformer2DModel,
+    clone_state_dict_in_place,
+    convert_flux_hf_state_dict,
+)
+from difflet.ops import get_platform_target, hardware
+
+_HARDWARE = hardware(get_platform_target())
+
+if not os.environ.get("NEURON_PLATFORM_TARGET_OVERRIDE"):
+    os.environ["NEURON_PLATFORM_TARGET_OVERRIDE"] = get_platform_target()
 
 logger = logging.getLogger(__name__)  # pylint: disable=invalid-name
 
@@ -36,7 +63,7 @@ class FluxBackboneInferenceConfig(InferenceConfig):
         # single height/width convention to the priority shape.
         shapes = getattr(self, "compile_shapes", None)
         if shapes:
-            from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+            from difflet.pipeline.bucketing import canonicalize_shapes
 
             self.compile_shapes = canonicalize_shapes(shapes)
             self.height = self.compile_shapes[0][0]
@@ -255,23 +282,25 @@ class NeuronFluxBackboneApplication(NeuronApplicationBase):
 
     @staticmethod
     def convert_hf_to_neuron_state_dict(state_dict: dict, config: InferenceConfig) -> dict:
+        converted = convert_flux_hf_state_dict(
+            state_dict,
+            num_single_layers=config.num_single_layers,
+            inner_dim=config.num_attention_heads * config.attention_head_dim,
+            clone=False,
+        )
+        # The Trainium checkpoint has always kept the fused HF
+        # ``single_transformer_blocks.{i}.proj_out.*`` keys next to the split ones,
+        # updating the caller's dict in place, and carries the SPMD rank buffer
+        # (Trainium state the neutral conversion leaves out). Keep that exactly (same
+        # keys, same order, every value a contiguous clone) so the sharded checkpoint
+        # and the shared weight store see no change: original keys in place, then
+        # ``global_rank.rank``, then the split keys per single block. ``clone=False``
+        # aliases the untouched tensors, so the clone pass below replaces one tensor at
+        # a time and the host peak stays the original one.
         state_dict["global_rank.rank"] = torch.arange(
             0, config.neuron_config.world_size, dtype=torch.int32
         )
-        inner_dim = config.num_attention_heads * config.attention_head_dim
-        for i in range(config.num_single_layers):
-            state_dict[f"single_transformer_blocks.{i}.proj_out_attn.weight"] = state_dict[
-                f"single_transformer_blocks.{i}.proj_out.weight"
-            ][:, :inner_dim].contiguous()
-            state_dict[f"single_transformer_blocks.{i}.proj_out_attn.bias"] = (
-                state_dict[f"single_transformer_blocks.{i}.proj_out.bias"]
-                .clone()
-                .detach()
-                .contiguous()
-            )
-            state_dict[f"single_transformer_blocks.{i}.proj_out_mlp.weight"] = state_dict[
-                f"single_transformer_blocks.{i}.proj_out.weight"
-            ][:, inner_dim:].contiguous()
-        for k, v in state_dict.items():
-            state_dict[k] = v.clone().detach().contiguous()
-        return state_dict
+        converted.pop("global_rank.rank", None)
+        state_dict.update(converted)
+        del converted  # drop the aliases before cloning, or every original stays alive
+        return clone_state_dict_in_place(state_dict)

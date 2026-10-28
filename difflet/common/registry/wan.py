@@ -62,5 +62,6 @@ def serving_metadata() -> ServingModelMetadata:
         orchestrator_factory=f"{_RUNNER_MODULE}:WanServingStageAdapter",
         request_validator_factory=f"{_RUNNER_MODULE}:WanServingRequestValidator",
         default_fps=16,
-        default_host_vae=False,
+        # fp32 host decode: the compiled bf16 device VAE degrades short clips (under investigation).
+        default_host_vae=True,
     )

@@ -11,10 +11,8 @@ Strategy:
 - Call nc_matmul_sparse(...) inside; output to PSUM fp32 tile of size M_out x N
 """
 from __future__ import annotations
-import sys, traceback, time, json
-from pathlib import Path
+import sys, traceback, time
 import torch
-import numpy as np
 
 
 def _show(name, t):
@@ -130,7 +128,6 @@ def main() -> int:
     print("=== Step 6: build NKI kernel calling nc_matmul_sparse ===")
     from neuronxcc import nki
     import neuronxcc.nki.language as nl
-    import neuronxcc.nki.isa as nisa
     from neuronxcc.nki._private.private_api import nc_matmul_sparse
 
     @nki.jit

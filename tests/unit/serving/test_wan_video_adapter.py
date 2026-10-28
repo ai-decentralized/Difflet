@@ -230,6 +230,7 @@ def test_compile_identity_binds_commit_shape_topology_and_component(monkeypatch,
         "enable_transformer_2": False,
         "enable_vae_decoder": False,
         "text_seq_len": 512,
+        "tp_reduce_dtype": "bfloat16",
     }
     assert str(tmp_path) not in first.identity.canonical_cache_inputs_json.decode()
 
@@ -999,3 +1000,10 @@ def test_multi_shape_decoder_identity_covers_the_set(monkeypatch, tmp_path):
     assert inputs["compile_contract_version"] == 2
     assert inputs["shapes"] == [[64, 96, 9], [64, 96, 5]]
     assert "height" not in inputs
+
+
+def test_generation_identity_names_bf16_reduce(monkeypatch, tmp_path):
+    monkeypatch.setattr(wan, "_torch_bfloat16", lambda: "bfloat16")
+    spec = wan._compile_spec(_source(tmp_path), _profile(tmp_path))
+    identity = json.loads(spec.identity.canonical_cache_inputs_json)
+    assert identity["cache_inputs"]["application_kwargs"]["tp_reduce_dtype"] == "bfloat16"

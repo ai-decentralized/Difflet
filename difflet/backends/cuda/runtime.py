@@ -1,22 +1,6 @@
-"""CUDA backend placeholder runtime."""
+"""The cuda runtime: the platform in ``difflet.platforms.cuda`` under its historical names."""
 
-from difflet.backends.base import BackendCapabilities, BackendRuntime
+from difflet.platforms.cuda import CudaPlatform as CudaBackend
+from difflet.platforms.cuda import create_platform as create_backend
 
-
-class CudaBackend(BackendRuntime):
-    name = "cuda"
-    capabilities = BackendCapabilities(
-        requires_aot=False,
-        single_process_multi_core=False,
-        supports_torchrun_mpmd=True,
-    )
-
-    def prepare_runtime(self, parallel) -> None:
-        raise NotImplementedError(
-            "DIFFLET_BACKEND=cuda is reserved but not implemented yet. "
-            "Use DIFFLET_BACKEND=trainium for the current Flux path."
-        )
-
-
-def create_backend() -> CudaBackend:
-    return CudaBackend()
+__all__ = ["CudaBackend", "create_backend"]

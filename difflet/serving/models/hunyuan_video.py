@@ -743,7 +743,7 @@ def _compile_specs(
         "virtual_core_size": _VIRTUAL_CORE_SIZE,
         "toolchain": toolchain_versions(),
     }
-    from difflet.backends.trainium.core.bucketing import canonicalize_shapes
+    from difflet.pipeline.bucketing import canonicalize_shapes
 
     profile_shapes = getattr(profile, "shapes", None) or (
         (profile.height, profile.width, profile.num_frames),
@@ -757,12 +757,18 @@ def _compile_specs(
             "tensor_capture": _LLAMA_CAPTURE,
         }
     )
+    import torch
+
+    from difflet.common.tp_reduce import tp_reduce_cache_fields
+
     denoiser_identity = CompileArtifactIdentity.from_cache_inputs(
         {
             **common,
             "component_id": "denoiser",
             "shapes": shapes_list,
             "text_seq_len": _TEXT_SEQ_LEN,
+            # Serving runs the default bf16 all-reduce; pre-bf16 DiTs reduced in fp32.
+            **tp_reduce_cache_fields(torch.bfloat16, legacy=torch.float32),
         }
     )
     specs: list[DiffletCompileSpec] = []

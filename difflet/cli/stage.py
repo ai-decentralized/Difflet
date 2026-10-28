@@ -71,6 +71,7 @@ def _build_stage_parser() -> argparse.ArgumentParser:
     p.add_argument("--tp-degree", type=int, default=None)
     p.add_argument("--cp-degree", type=int, default=1)
     p.add_argument("--cp-mode", choices=list(CP_MODES), default="gather_kv")
+    p.add_argument("--tp-reduce-dtype", dest="tp_reduce_dtype", choices=["bf16", "fp32"], default=None)
     p.add_argument("--cfg-parallel", dest="cfg_parallel", action="store_true")
     p.add_argument("--sp", dest="sp_enabled", action="store_true")
     p.add_argument("--height", type=int, default=None)
