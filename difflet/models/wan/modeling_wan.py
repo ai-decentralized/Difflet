@@ -699,10 +699,14 @@ class WanTransformer3DModel(nn.Module):
                 "(both shard the sequence dimension)."
             )
         if self.cfg_parallel_enabled and self.context_parallel_enabled:
-            raise ValueError(
-                "cfg_parallel_enabled and context_parallel_enabled are mutually "
-                "exclusive (both consume the data-parallel lanes)."
-            )
+            from difflet.pipeline.parallel_config import cfg_cp_composable
+
+            if not cfg_cp_composable():
+                raise ValueError(
+                    "cfg_parallel_enabled and context_parallel_enabled are mutually "
+                    "exclusive on this backend (both consume the data-parallel lanes; "
+                    "they compose on the neuron mesh)."
+                )
         # CFG parallel scatters the batch dim (uncond/cond) over the cfg axis;
         # CP scatters the sequence dim over the cp axis. Each collective fires
         # only in its own axis subgroup — the dp axis carries nothing here.

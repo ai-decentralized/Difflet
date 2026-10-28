@@ -82,6 +82,7 @@ def test_main_download_skips_cfg_and_teacache_validation(monkeypatch):
 
 
 def test_cfg_parallel_rejected_with_cp_degree(monkeypatch, capsys):
+    monkeypatch.setenv("DIFFLET_BACKEND", "trainium")  # AoT: no composing mesh (CI auto-detects it too)
     with pytest.raises(SystemExit) as exc:
         cli_main.main([
             "generate", "--model-id", "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
@@ -100,3 +101,10 @@ def test_cfg_parallel_rejected_for_distilled_model(monkeypatch, capsys):
         ])
     assert exc.value.code == 1
     assert "guidance-distilled" in capsys.readouterr().err
+
+
+def test_cfg_parallel_with_cp_degree_passes_validation_on_neuron():
+    import argparse
+
+    cli_main._validate_cfg_parallel(argparse.Namespace(cfg_parallel=True, cp_degree=2, backend="neuron",
+                                                       model_id="Wan-AI/Wan2.2-T2V-A14B-Diffusers"))

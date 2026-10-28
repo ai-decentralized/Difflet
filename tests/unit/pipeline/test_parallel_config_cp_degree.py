@@ -35,9 +35,17 @@ def test_cp_degree_below_one_rejected():
         DiffletParallelConfig(tp_degree=2, cp_degree=0)
 
 
-def test_cp_and_cfg_mutually_exclusive():
+def test_cp_and_cfg_mutually_exclusive(monkeypatch):
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")  # a backend without the composing mesh
     with pytest.raises(ValueError, match="mutually exclusive"):
         DiffletParallelConfig(tp_degree=2, cp_degree=2, cfg_parallel_enabled=True)
+
+
+def test_cp_and_cfg_compose_on_the_neuron_mesh(monkeypatch):
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    cfg = DiffletParallelConfig(tp_degree=2, cp_degree=2, cfg_parallel_enabled=True)
+    spec = cfg.mesh_spec
+    assert (spec.tp, spec.cp, spec.cfg) == (2, 2, 2)
 
 
 def test_cache_dict_includes_all_fields():

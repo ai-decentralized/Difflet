@@ -1120,6 +1120,61 @@ def w1_wan_initial_noise_worker(rank: int, world_size: int, model_dir: str) -> d
     }
 
 
+def w1_wan_cfg_cp_worker(rank: int, world_size: int, model_dir: str, cp_mode: str) -> dict:
+    """The composed application at TP=world/4 x CP2 x CFG2: two steps at guidance 5.0."""
+    import hashlib
+
+    from difflet.models.wan.neuron_application import TorchNeuronWanApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_wan_toy import (
+        TINY_LATENT_SHAPE,
+        TINY_SHAPE,
+        TINY_TEXT_SEQ_LEN,
+        tiny_wan_pipeline_inputs,
+    )
+
+    app = TorchNeuronWanApplication(
+        text_encoder_dtype=torch.float32,  # the fp32 reference path
+        model_path=model_dir,
+        parallel=DiffletParallelConfig(tp_degree=world_size // 4, cp_degree=2, cp_mode=cp_mode,
+                                       cfg_parallel_enabled=True),
+        dtype=torch.float32,
+        shape=dict(TINY_SHAPE),
+        text_seq_len=TINY_TEXT_SEQ_LEN,
+        exec_mode="eager",
+        device="cpu",
+        encoder_threads=2,
+    )
+    app.load()
+    calls: list[float] = []
+    app.transformer_adapter.forward_hook = calls.append
+    block_rows = record_block_rows(app.transformer.module.blocks[0])
+    prompt_embeds, latents = tiny_wan_pipeline_inputs()
+    out = app(prompt_embeds=prompt_embeds, latents=latents, channels=TINY_LATENT_SHAPE[1],
+              num_inference_steps=2, guidance_scale=5.0, output_type="latent")
+    final = out.latents
+    return {
+        "latents": final.tolist(),
+        "sha256": hashlib.sha256(final.contiguous().numpy().tobytes()).hexdigest(),
+        "dit_calls": len(calls),
+        "block_rows": block_rows,
+    }
+
+
+def hv15_cfg_cp_worker(rank: int, world_size: int, model_dir: str, shape: dict, inputs: dict,
+                       tp: int, cp: int, mode: str) -> list:
+    """HunyuanVideo 1.5's DiT at TP=tp x CP=cp x CFG2 (world 2 * tp * cp), inputs stacked [uncond, cond]."""
+    from difflet.backends.neuron.hunyuan_video15.transformer import NeuronHunyuanVideo15TransformerApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+
+    parallel = DiffletParallelConfig(tp_degree=tp, cp_degree=cp, cp_mode=mode, cfg_parallel_enabled=True)
+    app = NeuronHunyuanVideo15TransformerApplication(model_path=model_dir, parallel=parallel,
+                                                     dtype=torch.float32, exec_mode="eager", device="cpu",
+                                                     **shape)
+    app.load()
+    return app(**inputs)[0].tolist()
+
+
 def w1_wan_cp_worker(rank: int, world_size: int, model_dir: str, cp_mode: str) -> dict:
     """The composed application at TP2 x CP2: two steps at guidance 5.0 on the fixed inputs."""
     import hashlib

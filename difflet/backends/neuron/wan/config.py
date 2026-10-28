@@ -140,9 +140,6 @@ class NeuronWanConfig(WanTransformerConfig):
         if self.context_parallel_enabled and self.sp_enabled:
             raise exclusive_modes("Wan", "sp_enabled", "context_parallel_enabled",
                                   "both shard the sequence dimension")
-        if self.context_parallel_enabled and self.cfg_parallel_enabled:
-            raise exclusive_modes("Wan", "cfg_parallel_enabled", "context_parallel_enabled",
-                                  "both consume the data-parallel lanes")
         heads, tp = int(self.num_attention_heads), int(self.tp_degree)
         seq = int(self.image_seq_len)
         if self.sp_enabled:

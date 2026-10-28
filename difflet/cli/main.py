@@ -901,10 +901,12 @@ def _validate_taef1(args: argparse.Namespace) -> None:
 def _validate_cfg_parallel(args: argparse.Namespace) -> None:
     if not getattr(args, "cfg_parallel", False):
         return
-    if (getattr(args, "cp_degree", 1) or 1) > 1:
+    from difflet.pipeline.parallel_config import cfg_cp_composable
+
+    if (getattr(args, "cp_degree", 1) or 1) > 1 and not cfg_cp_composable(getattr(args, "backend", None)):
         print(
-            "Error: --cfg-parallel and --cp-degree>1 are mutually exclusive "
-            "(both consume the data-parallel lanes).",
+            "Error: --cfg-parallel and --cp-degree>1 are mutually exclusive on this backend "
+            "(both consume the data-parallel lanes; they compose on --backend neuron).",
             file=sys.stderr,
         )
         raise SystemExit(1)

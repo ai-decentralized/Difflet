@@ -133,7 +133,6 @@ def test_config_validates_tp_and_shape(tiny):
 @pytest.mark.parametrize("overrides, match", [
     (dict(cp_mode="striped"), "cp_mode must be one of"),
     (dict(context_parallel_enabled=True, sp_enabled=True), "mutually exclusive"),
-    (dict(context_parallel_enabled=True, cfg_parallel_enabled=True), "mutually exclusive"),
     (dict(cp_degree=2), "needs context_parallel_enabled=True"),
     # 12 image tokens: CP and SP split them without padding.
     (dict(context_parallel_enabled=True, cp_degree=5), r"image_seq_len=12 .* cp_degree=5"),
@@ -1000,6 +999,26 @@ def test_context_parallel_on_four_ranks_matches_tp1(tiny, cp_mode):
         # Review T4: serial CFG (two batch-1 calls per step), each block on this rank's half of
         # the tokens; the ranks agreeing proves nothing about the split.
         assert result["block_rows"] == [[1, _tokens(tiny) // 2]] * 4
+    torch.testing.assert_close(torch.tensor(results[0]["latents"]), reference,
+                               atol=1e-4, rtol=1e-4)
+
+
+# ---- context parallelism composed with CFG parallelism (TP1 x CP2 x CFG2) ---------------
+
+
+@pytest.mark.parametrize("cp_mode", ["ulysses", "gather_kv"])
+def test_context_and_cfg_parallel_compose_on_four_ranks(tiny, cp_mode):
+    """On the neuron mesh each rank runs one CFG branch on its half of the sequence: one batched
+    DiT call per step, batch 1 and half the tokens per block, and the TP1 reference's result."""
+    from tests.unit.backends._neuron_workers import w1_wan_cfg_cp_worker
+
+    reference = tiny_wan_pipeline_reference(tiny.dir, num_inference_steps=2, guidance_scale=5.0)
+    results = run_ranks(w1_wan_cfg_cp_worker, tiny.dir, cp_mode, world_size=4,
+                        env={**OFFLINE, "DIFFLET_BACKEND": "neuron"})
+    for result in results:
+        assert result["sha256"] == results[0]["sha256"]
+        assert result["dit_calls"] == 2  # one batched call per step
+        assert result["block_rows"] == [[1, _tokens(tiny) // 2]] * 2
     torch.testing.assert_close(torch.tensor(results[0]["latents"]), reference,
                                atol=1e-4, rtol=1e-4)
 

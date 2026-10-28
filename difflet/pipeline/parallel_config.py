@@ -6,6 +6,21 @@ from dataclasses import asdict, dataclass
 
 from difflet.pipeline.parallel_mesh import MeshSpec
 
+#: Backends whose ranks form an orthogonal {dp, cfg, cp, tp} mesh with a process group per axis,
+#: so CFG branches and CP shards are separate axes and compose. Elsewhere (AoT's NxD groups)
+#: both draw on the same data-parallel group and stay mutually exclusive.
+_CFG_CP_COMPOSABLE_BACKENDS = frozenset({"neuron"})
+
+
+def cfg_cp_composable(backend: str | None = None) -> bool:
+    """True when ``backend`` (default: the active one) composes CP with CFG parallelism."""
+    from difflet.backends.registry import resolve_backend_name
+
+    try:
+        return resolve_backend_name(backend) in _CFG_CP_COMPOSABLE_BACKENDS
+    except Exception:  # unknown or undetectable backend: keep the conservative rule
+        return False
+
 # The CP attention strategies, in the order the CLI offers them. Single source of
 # truth: the argparse ``choices`` in difflet.cli.main and difflet.cli.stage import
 # this rather than re-declaring the list.
@@ -31,8 +46,9 @@ class DiffletParallelConfig:
 
     Every mode other than ``gather_kv`` requires ``cp_degree > 1``.
 
-    Context parallelism and CFG parallelism both consume extra data-parallel lanes,
-    so they are mutually exclusive.
+    Context parallelism and CFG parallelism compose on mesh backends (``cfg_cp_composable``):
+    the CFG branches and the CP shards are separate mesh axes, ``world = tp x cp x cfg``. On
+    other backends both consume the same data-parallel lanes and are mutually exclusive.
 
     ``sp_enabled`` turns on **Megatron-style sequence parallelism**: the
     otherwise-replicated norm / modulation / residual regions are sharded along
@@ -59,8 +75,9 @@ class DiffletParallelConfig:
             raise ValueError("cp_degree must be >= 1")
         if self.dp_degree < 1:
             raise ValueError("dp_degree must be >= 1")
-        if self.cp_degree > 1 and self.cfg_parallel_enabled:
-            raise ValueError("cp_degree > 1 and cfg_parallel_enabled are mutually exclusive")
+        if self.cp_degree > 1 and self.cfg_parallel_enabled and not cfg_cp_composable():
+            raise ValueError("cp_degree > 1 and cfg_parallel_enabled are mutually exclusive "
+                             "on this backend (they compose on the neuron mesh)")
         if self.cp_mode not in CP_MODES:
             raise ValueError(
                 f"cp_mode must be one of {set(CP_MODES)}, got {self.cp_mode!r}"

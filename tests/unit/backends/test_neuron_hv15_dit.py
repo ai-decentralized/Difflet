@@ -184,6 +184,22 @@ def test_ring_and_gather_kv_context_parallel_match_diffusers(tiny, tp, cp, mode)
         torch.testing.assert_close(torch.tensor(out), reference, atol=1e-4, rtol=1e-4)
 
 
+@pytest.mark.parametrize("mode", ["ulysses", "gather_kv"])
+@pytest.mark.parametrize("tp, cp", [(1, 2), (2, 2)], ids=["cp2-cfg2", "tp2-cp2-cfg2"])
+def test_context_and_cfg_parallel_compose(tiny, tp, cp, mode):
+    """On the neuron mesh each CFG group runs its branch, sequence-sharded over its CP group:
+    each half of the gathered output equals diffusers' forward on that branch alone."""
+    from tests.unit.backends._neuron_gloo import run_ranks
+    from tests.unit.backends._neuron_workers import hv15_cfg_cp_worker
+
+    u, c = _uncond_inputs(), _inputs()
+    stacked = {k: torch.cat([u[k], c[k]]) for k in c}
+    want = torch.cat([_reference_for(tiny, u), _reference_for(tiny, c)])
+    for out in run_ranks(hv15_cfg_cp_worker, tiny, SHAPE, stacked, tp, cp, mode,
+                         world_size=2 * tp * cp, env={"DIFFLET_BACKEND": "neuron"}):
+        torch.testing.assert_close(torch.tensor(out), want, atol=1e-4, rtol=1e-4)
+
+
 @pytest.mark.parametrize("tp", [2, 4], ids=["tp2-sp", "tp4-sp"])
 def test_sequence_parallel_matches_diffusers(tiny, tp):
     """The image stream sequence-sharded across the TP group; attention and image-MLP inputs
