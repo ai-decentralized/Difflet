@@ -22,8 +22,9 @@ of the torchrun launch builds one and holds:
   it cannot fit beside the DiT on one core at this tp (``_check_device_text_encoder_fits``: tp2,
   so CP2 or dp2tp2, does not fit);
 * ``vae_decoder`` (``enable_vae_decoder=True``): ``_DeviceQwenVaeDecoder``, the decoder on every
-  rank's core, eager, in ``vae_dtype`` (fp32 by default; bf16 is the opt-in of the CLI's
-  ``--vae-dtype bf16``, phase 3 of the 2026-10-26 native-vs-AoT plan). Qwen-Image's VAE
+  rank's core, eager, in ``vae_dtype`` (bf16 by default, 56.7 dB from the fp32 decode on the
+  device in phase 3 of the 2026-10-26 native-vs-AoT plan; fp32 with the CLI's
+  ``--vae-dtype fp32``). Qwen-Image's VAE
   (``AutoencoderKLQwenImage``) is diffusers' Wan 2.1 VAE under another name, so this reuses
   ``NeuronWanVaeDecoderApplication``, as the Trainium VAE stage reuses its Wan decoder; the
   checkpoint's 108 decoder tensors map key for key and shape for shape onto
@@ -99,7 +100,7 @@ logger = logging.getLogger(__name__)
 #: CLI generate stage passes the Trainium application (difflet/cli/orchestrators/qwen_image.py
 #: ``_stage_generate``) and DiffletPipeline's TeaCache merge (``teacache_calibration``), plus
 #: exec_mode, device, encoder_threads, text_encoder_dtype, text_encoder_device,
-#: enable_text_encoder, enable_vae_decoder and vae_dtype (the device decoder's precision, fp32
+#: enable_text_encoder, enable_vae_decoder and vae_dtype (the device decoder's precision, bf16
 #: unless asked). Anything else is a TypeError rather than silently ignored.
 _KWARG_DEFAULTS: dict[str, Any] = {
     "text_seq_len": TEXT_SEQ_LEN,
@@ -108,7 +109,7 @@ _KWARG_DEFAULTS: dict[str, Any] = {
     "enable_text_encoder": True,
     "enable_transformer": True,
     "enable_vae_decoder": False,
-    "vae_dtype": torch.float32,
+    "vae_dtype": torch.bfloat16,
     "exec_mode": None,
     "device": "neuron",
     "encoder_threads": 12,
@@ -336,7 +337,7 @@ class _DeviceQwenVaeDecoder(DeviceComponent):
     """The orchestrator's VAE: host latents in (already un-normalised), host images out.
 
     Exposes what ``QwenImageOrchestrator._decode_latents`` reads: ``dtype`` (fp32, the precision
-    the orchestrator un-normalises in, whatever the decoder's own: ``app.dtype`` is fp32, or bf16
+    the orchestrator un-normalises in, whatever the decoder's own: ``app.dtype`` is bf16, or fp32
     with ``vae_dtype``, and only the decoder's input is rounded to it) and ``config``
     (``latents_mean`` / ``latents_std``), and no ``decode`` attribute, so the orchestrator calls
     it directly with ``[B, z_dim, 1, h, w]``. The Wan decoder returns ``[B, 3, 1, H, W]``, fp32 in
