@@ -746,13 +746,13 @@ class QwenImageOrchestrator(ModelOrchestrator):
         0 (``compile`` mode is that load plus the stage manifest) and runs the replica's
         requests. Qwen-Image's part: --model-path (a local snapshot) binds the pipeline to it;
         per request, the application encodes the prompt on rank 0's host (the Trainium text
-        stage's template, drop and zero-pad to TEXT_SEQ_LEN; the DiT attends the padded text
-        unmasked, as on Trainium), draws the noise from the seeded generator on rank 0 (the noise
-        the Trainium stage draws after ``torch.manual_seed(seed)``), sets the shifted FlowMatch
-        schedule as ``_stage_generate`` does, and runs true CFG only with --true-cfg-scale > 1
-        (``_true_cfg_kwargs``); the guidance scale is passed as the Trainium stage passes it (the
-        DiT drops it: guidance_embeds is off); rank 0 writes the packed latents the vae stage
-        reads.
+        stage's template, drop and zero-pad to TEXT_SEQ_LEN; the DiT masks the padded rows, as
+        diffusers does, where Trainium attends them), draws the noise from the seeded generator
+        on rank 0 (the noise the Trainium stage draws after ``torch.manual_seed(seed)``), sets
+        the shifted FlowMatch schedule as ``_stage_generate`` does, and runs true CFG only with
+        --true-cfg-scale > 1 (``_true_cfg_kwargs``); the guidance scale is passed as the
+        Trainium stage passes it (the DiT drops it: guidance_embeds is off); rank 0 writes the
+        packed latents the vae stage reads.
         """
         import torch
 

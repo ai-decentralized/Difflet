@@ -1370,6 +1370,19 @@ def joint_cp_worker(rank: int, world_size: int, tp: int, mode: str) -> dict:
         img(q_i), txt(q_t), img(k_i), img(v_i), txt(k_t), txt(v_t), scale=scale, causal=False,
         key_valid_len=torch.tensor([valid], dtype=torch.int32))
 
+    # Ring with a valid-text count, in Qwen's [text ‖ image] order (the padded text keys sit
+    # between the valid ones and the image keys): every query attends the valid text keys and
+    # all image keys, as diffusers' [text_mask | ones(image)] key mask does. A count of 0 leaves
+    # the image keys alone (the text partial must then contribute nothing, not NaN).
+    ring_masked_errs = {}
+    for n in (0, 1, JOINT_S_TXT - 2):
+        expected = _joint_reference(torch.cat([q_t, q_i], 2), torch.cat([k_t[:, :, :n], k_i], 2),
+                                    torch.cat([v_t[:, :, :n], v_i], 2), scale=scale)[:, heads]
+        out = ring(torch.cat([txt(q_t), img(q_i)], 2), img(k_i), img(v_i), txt(k_t), txt(v_t),
+                   scale=scale, causal=False, text_valid_len=torch.tensor([n], dtype=torch.int32))
+        ring_masked_errs[n] = err_or_nan(out, torch.cat(
+            [expected[:, :, :JOINT_S_TXT], expected[:, :, JOINT_S_TXT:][:, :, img_rows]], 2))
+
     # One head per rank cannot split over cp >= 2 ranks; raised before any collective.
     try:
         A.joint_ulysses_attention(*(t[:, :1] for t in (img(q_i), txt(q_t), img(k_i), img(v_i),
@@ -1390,8 +1403,17 @@ def joint_cp_worker(rank: int, world_size: int, tp: int, mode: str) -> dict:
         "ulysses_txt_err": err(txt_out, ref_txt),
         "masked_img_err": err(img_masked, masked[:, :, :JOINT_S_IMG][:, :, img_rows]),
         "masked_txt_err": err(txt_masked, masked[:, :, JOINT_S_IMG:]),
+        "ring_masked_errs": ring_masked_errs,
         "head_error": head_error,
     }
+
+
+def err_or_nan(out, expected) -> float:
+    """Max abs error, or NaN when ``out`` holds a non-finite value (so a NaN output never
+    passes a ``< TOL`` check by comparing as False the other way)."""
+    if not bool(torch.isfinite(out).all()):
+        return float("nan")
+    return (out.double() - expected).abs().max().item()
 
 
 def flux_dit_worker(rank: int, world_size: int, model_dir: str) -> dict:
