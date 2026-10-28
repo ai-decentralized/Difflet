@@ -327,6 +327,85 @@ def test_neuron_vae_stage_compile_warms_up_and_writes_the_manifest(monkeypatch, 
     assert not (tmp_path / "w").exists()
 
 
+# ------------------------------------------- --vae-dtype bf16 (phase 3's opt-in)
+
+
+def test_neuron_vae_stage_decodes_in_bf16_when_asked(monkeypatch, tmp_path, clean_neuron_mesh):
+    """--vae-dtype bf16: the vae stage builds the decoder in bf16 (bf16 weights), the image
+    comes back fp32 and within bf16's error of the fp32 stage's decode of the same latents (40
+    dB here on a random decoder; the device gate on the real one is 50 dB)."""
+    import math
+
+    import torch
+
+    _backend(monkeypatch, "neuron")
+    model = tmp_path / "model"
+    _tiny_vae_snapshot(model)
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path",
+                        lambda *a, **k: str(model))
+    monkeypatch.setattr(qwen_mod, "_save_image_pil",
+                        lambda image, path: (_ for _ in ()).throw(RuntimeError("keep the .pt")))
+    built = _cpu_vae_stage(monkeypatch)
+    height, width = 64, 96
+    work = tmp_path / "work"
+    work.mkdir()
+    packed = torch.randn(1, (height // 16) * (width // 16), 16,
+                         generator=torch.Generator().manual_seed(3)).to(torch.bfloat16)
+    torch.save(packed, work / "latents.pt")
+    images = {}
+    for flag in ("fp32", "bf16"):
+        from difflet.backends.neuron.ops_impl import parallel_mesh
+
+        parallel_mesh.destroy_parallel_mesh()
+        args = _qwen_args(height=height, width=width, work_dir=str(work), vae_dtype=flag,
+                          output=str(tmp_path / f"{flag}.png"), cache_dir=str(tmp_path / "c"))
+        QwenImageOrchestrator(args)._run_stage_internal("vae", args)
+        images[flag] = torch.load(tmp_path / f"{flag}.pt")
+    fp32_app, bf16_app = built
+    assert fp32_app.dtype is torch.float32 and bf16_app.dtype is torch.bfloat16
+    assert {p.dtype for p in bf16_app.module.parameters()} == {torch.bfloat16}
+    assert images["fp32"].dtype == images["bf16"].dtype == torch.float32
+    mse = float(((images["bf16"].double() - images["fp32"].double()) ** 2).mean())
+    assert 0 < mse and 10 * math.log10(4.0 / mse) >= 40.0
+
+
+def test_vae_dtype_is_forwarded_only_when_given_and_keys_the_vae_stage(monkeypatch):
+    plain_args = _qwen_args(cache_dir="/c")
+    assert "--vae-dtype" not in QwenImageOrchestrator(plain_args)._shared_cli_args("generate")
+    bf16_args = _qwen_args(cache_dir="/c", vae_dtype="bf16")
+    parts = QwenImageOrchestrator(bf16_args)._shared_cli_args("generate")
+    assert parts[parts.index("--vae-dtype") + 1] == "bf16"
+
+    def keyed(backend, args):
+        _backend(monkeypatch, backend)
+        orch = QwenImageOrchestrator(args)
+        return {s: (orch._stage_cache_inputs(s, args), orch._stage_compiled_dir(s, args))
+                for s in ("text", "generate", "vae")}
+
+    for backend in (None, "trainium", "tpu"):  # the AoT paths do not read the flag
+        assert keyed(backend, bf16_args) == keyed(backend, plain_args)
+    neuron, bf16 = keyed("neuron", plain_args), keyed("neuron", bf16_args)
+    assert keyed("neuron", _qwen_args(cache_dir="/c", vae_dtype="fp32")) == neuron
+    assert bf16["vae"][0] == {**neuron["vae"][0], "vae_dtype": "bfloat16"}
+    assert bf16["vae"][1] != neuron["vae"][1]
+    assert (bf16["text"], bf16["generate"]) == (neuron["text"], neuron["generate"])
+
+
+@pytest.mark.parametrize("mode", ["compile", "generate", "run"])
+def test_vae_dtype_with_host_vae_is_refused(monkeypatch, tmp_path, capsys, mode):
+    _backend(monkeypatch, "neuron")
+    monkeypatch.setattr(qwen_mod.runner, "run_stage",
+                        lambda *a, **k: pytest.fail("no stage may be launched"))
+    monkeypatch.setattr(QwenImageOrchestrator, "download",
+                        lambda self: pytest.fail("rejected before the download"))
+    args = _qwen_args(host_vae=True, vae_dtype="bf16", work_dir=str(tmp_path / "w"))
+    with pytest.raises(SystemExit) as exc:
+        getattr(QwenImageOrchestrator(args), mode)()
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "--vae-dtype sets the device decoder; --host-vae decodes on the host" in err
+
+
 # ----------------------------------------------------------------- driver-side rejection
 
 _REJECTED = [

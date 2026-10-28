@@ -114,6 +114,24 @@ def vae_placement_conflict(args: argparse.Namespace) -> str | None:
     return None
 
 
+#: --vae-dtype / --text-encoder-dtype values as the neuron applications take them.
+COMPONENT_DTYPES = {"bf16": "bfloat16", "fp32": "float32"}
+
+
+def component_dtype(value: str | None, default: str = "fp32") -> str:
+    """A --vae-dtype / --text-encoder-dtype value (or ``default`` when it is not given) as the
+    neuron applications take it: ``"float32"`` or ``"bfloat16"``. Torch-free."""
+    return COMPONENT_DTYPES[value or default]
+
+
+def vae_dtype_conflict(args: argparse.Namespace) -> str | None:
+    """--vae-dtype with --host-vae (the host decode is diffusers' in fp32). Torch-free."""
+    if getattr(args, "host_vae", False) and getattr(args, "vae_dtype", None):
+        return ("--vae-dtype sets the device decoder; --host-vae decodes on the host with "
+                "diffusers in fp32")
+    return None
+
+
 def cfg_cp_conflict(args: argparse.Namespace) -> str | None:
     """--cfg-parallel with --cp-degree > 1: both take the data-parallel lanes (the neuron
     configs refuse the pair in every rank as well). Torch-free."""

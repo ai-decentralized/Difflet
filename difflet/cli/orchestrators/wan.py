@@ -11,7 +11,9 @@ DiT sits on every rank's core. umT5 also runs on the device (bf16, TP-sharded) u
 --host-text-encoder is given. When the TP group is too narrow for umT5 to fit beside the DiT
 (_place_text_encoder), the driver sets that flag itself and says so. The VAE decodes in a vae
 stage of its own on one core (_stage_vae_neuron, eager; bf16 up to 9 frames, fp32 beyond),
-or on the host with --host-vae.
+or on the host with --host-vae. --text-encoder-dtype and --vae-dtype override umT5's and the
+device decoder's precision; a stage key gains a field only for a precision other than its
+default (_component_dtype_keys), so a default command line keeps its keys.
 DP replicas (--dp) are separate torchrun launches; each one's rank 0 claims the requests
 (_replica_requests). The stage cache key names the backend and exec mode, and --cache-dir
 becomes DIFFLET_COMPILE_CACHE (the NEFF/HLO cache root) unless that is exported. Unset,
@@ -38,8 +40,10 @@ from difflet.cli.orchestrators.base import (
     write_stage_manifest,
 )
 from difflet.cli.orchestrators.torchrun import (
+    component_dtype,
     device_encoder_overflow,
     refuse,
+    refuse_torchrun_conflicts,
     reject_unsupported_torchrun_options,
     replica_cores,
     root_compile_cache_at_cache_dir,
@@ -48,6 +52,7 @@ from difflet.cli.orchestrators.torchrun import (
     torchrun_backend as _torchrun_backend,
     torchrun_stage_keys,
     torchrun_unsupported_options,
+    vae_dtype_conflict,
 )
 
 # Model id comes from the CLI (--model-id); both Wan 2.2 A14B (MoE, dual
@@ -222,12 +227,15 @@ def _dual_expert_misuse(args: argparse.Namespace, torchrun_backend: str | None) 
 def _torchrun_application_kwargs(args: argparse.Namespace) -> dict:
     """The application kwargs, plus any TeaCache flag the user gave (the application builds the
     controller and, for a calibrated signal, one probe per expert). --dual-expert
-    loads Wan 2.2 A14B's low-noise expert (``transformer_2``)."""
+    loads Wan 2.2 A14B's low-noise expert (``transformer_2``). --text-encoder-dtype, only when
+    given, sets umT5's precision (``text_encoder_dtype``; the application's default is bf16)."""
     kwargs = dict(_TORCHRUN_APPLICATION_KWARGS)
     if getattr(args, "dual_expert", False):
         kwargs["enable_transformer_2"] = True
     if getattr(args, "host_text_encoder", False):
         kwargs["text_encoder_device"] = "host"
+    if getattr(args, "text_encoder_dtype", None):
+        kwargs["text_encoder_dtype"] = component_dtype(args.text_encoder_dtype)
     for app_key, arg_key in (
         ("teacache_cadence", "teacache_cadence"),
         ("teacache_online_delta_alpha", "teacache_online_delta"),
@@ -237,6 +245,44 @@ def _torchrun_application_kwargs(args: argparse.Namespace) -> dict:
         if value is not None:
             kwargs[app_key] = value
     return kwargs
+
+
+#: ``difflet.backends.neuron.wan.vae.BF16_MAX_FRAMES``, copied so the driver stays torch-free
+#: (a unit test pins the two equal): the device decoder runs in bf16 up to this many frames and
+#: in fp32 beyond, as the Trainium path decodes.
+_VAE_BF16_MAX_FRAMES = 9
+
+
+def _default_vae_dtype_flag(args: argparse.Namespace) -> str:
+    """``default_vae_dtype`` of the request's clip as a --vae-dtype value. Torch-free."""
+    return "bf16" if int(args.num_frames or 9) <= _VAE_BF16_MAX_FRAMES else "fp32"
+
+
+def _vae_dtype_name(args: argparse.Namespace) -> str:
+    """The neuron vae stage's decoder dtype as torch names it: --vae-dtype when given, else
+    ``default_vae_dtype`` of the clip. Torch-free."""
+    return component_dtype(getattr(args, "vae_dtype", None) or _default_vae_dtype_flag(args))
+
+
+def _component_dtype_keys(stage: str, args: argparse.Namespace) -> dict:
+    """The neuron stage key fields of --text-encoder-dtype and --vae-dtype:
+    ``text_encoder_dtype`` on the transformer stage (umT5 runs there) and ``vae_dtype`` on the
+    vae stage, each only when the flag asks for a precision other than the default (umT5: bf16;
+    the decoder: ``default_vae_dtype`` of the clip), so a default stage, given the flag or not,
+    keeps the key, and the manifests, it had. Nothing on the AoT backends, whose paths these
+    flags do not change. Torch-free."""
+    if _torchrun_backend() is None:
+        return {}
+    if stage == "transformer":
+        flag, default = "text_encoder_dtype", "bf16"
+    elif stage == "vae":
+        flag, default = "vae_dtype", _default_vae_dtype_flag(args)
+    else:
+        return {}
+    value = getattr(args, flag, None)
+    if value is None or value == default:
+        return {}
+    return {flag: component_dtype(value)}
 
 
 class WanOrchestrator(ModelOrchestrator):
@@ -260,6 +306,9 @@ class WanOrchestrator(ModelOrchestrator):
             runs="tensor, sequence, CFG and context parallelism at one static shape, DP "
             "replicas and TeaCache",
         )
+        # --vae-dtype sets the device decoder: refused with --host-vae (the AoT backends keep
+        # their own paths for these flags).
+        refuse_torchrun_conflicts([c for c in (vae_dtype_conflict(self.args),) if c])
 
     def _reject_dual_expert_misuse(self) -> None:
         """--dual-expert off the neuron backend, or --guidance-scale-2 without it: print one
@@ -274,11 +323,13 @@ class WanOrchestrator(ModelOrchestrator):
         application's ``text_encoder_dtype``). At tp2 (``--cfg-parallel`` or ``--cp-degree>1``
         on four cores, ``--mode latency``'s CFG, DP replicas of tp2) that is about 5.3 GiB of
         encoder beside 13.3 GiB of DiT, which fits a core; tp1, or tp2 with both of Wan 2.2's
-        experts resident, does not. Before this check the application refused it only after
+        experts resident, does not; with ``--text-encoder-dtype fp32`` the encoder doubles and
+        tp2 does not fit either. Before this check the application refused it only after
         torchrun had started every rank. The estimate
-        (``difflet/backends/neuron/wan/hbm.py``) depends on the tp the transformer stage runs and
-        the local checkpoint's sizes. Weights that are not local yet (``compile`` before any
-        download) leave the flag alone, and the application's own check still refuses. The
+        (``difflet/backends/neuron/wan/hbm.py``) depends on the tp the transformer stage runs,
+        the local checkpoint's sizes and umT5's precision. Weights that are not local yet
+        (``compile`` before any download) leave the flag alone, and the application's own check
+        still refuses. The
         setting lands on ``self.args``, so ``_shared_cli_args`` hands it to the stages, and a
         ``run`` that dispatches DP workers after ``compile`` forwards it to them
         (``worker_cli_args``). Torch-free, like every driver check.
@@ -291,11 +342,13 @@ class WanOrchestrator(ModelOrchestrator):
 
         experts = (("transformer", "transformer_2") if getattr(args, "dual_expert", False)
                    else ("transformer",))
+        encoder_bytes = 4 if getattr(args, "text_encoder_dtype", None) == "fp32" else 2
         overflow = device_encoder_overflow(
             lambda: resolve_model_path(args.model_id, revision=args.revision,
                                        local_files_only=True),
             lambda model_dir, tp_degree: device_text_encoder_fits(
-                model_dir, tp_degree=tp_degree, experts=experts),
+                model_dir, tp_degree=tp_degree, experts=experts,
+                encoder_dtype_bytes=encoder_bytes),
             args.tp_degree or 4,
         )
         if overflow is None:
@@ -589,9 +642,10 @@ class WanOrchestrator(ModelOrchestrator):
         """The neuron backend's vae stage (``run_vae_stage``), structured as Trainium's: a launch
         of its own after the transformer stage has exited, so the decoder's activations (about
         12 GiB per core at 480x832 in fp32) never share a core with the DiT and the text
-        encoder. One rank decodes in fp32, eager (``NeuronWanVaeDecoderApplication``) at the
-        request's latent video shape. The latents are un-normalised as the host decode and the
-        orchestrator do, and rank 0 writes the frames."""
+        encoder. One rank decodes eager (``NeuronWanVaeDecoderApplication``) at the request's
+        latent video shape, in --vae-dtype when given, else ``default_vae_dtype`` of the clip
+        (bf16 up to 9 frames, fp32 beyond; the frames come back fp32 either way). The latents are un-normalised in fp32 as the host decode and
+        the orchestrator do, and rank 0 writes the frames."""
         import torch
 
         from difflet.backends.neuron.core import distributed
@@ -606,14 +660,14 @@ class WanOrchestrator(ModelOrchestrator):
         with open(vae_dir / "config.json", encoding="utf-8") as f:
             z_dim = int(json.load(f)["z_dim"])
         h, w, frames_count = args.height or 480, args.width or 832, args.num_frames or 9
-        from difflet.backends.neuron.wan.vae import default_vae_dtype
+        dtype = getattr(torch, _vae_dtype_name(args))
 
         def build(parallel):
             return NeuronWanVaeDecoderApplication(
                 model_path=str(vae_dir),
                 latent_shape=(1, z_dim, (frames_count - 1) // 4 + 1, h // 8, w // 8),
                 parallel=parallel,
-                dtype=default_vae_dtype(frames_count),
+                dtype=dtype,
                 device="neuron",
             )
 
@@ -642,7 +696,8 @@ class WanOrchestrator(ModelOrchestrator):
     # ------------------------------------------------------------ helpers
 
     def _stage_cache_inputs(self, stage: str, args: argparse.Namespace) -> dict:
-        return torchrun_stage_keys(self._backend_neutral_stage_cache_inputs(stage, args))
+        return {**torchrun_stage_keys(self._backend_neutral_stage_cache_inputs(stage, args)),
+                **_component_dtype_keys(stage, args)}
 
     def _backend_neutral_stage_cache_inputs(self, stage: str, args: argparse.Namespace) -> dict:
         prefix = _cache_prefix(self.args.model_id)
@@ -715,6 +770,11 @@ class WanOrchestrator(ModelOrchestrator):
             parts.append("--dual-expert")
         if getattr(a, "host_text_encoder", False):
             parts.append("--host-text-encoder")
+        # Only when given, so a default command line stays byte-identical.
+        if getattr(a, "text_encoder_dtype", None):
+            parts += ["--text-encoder-dtype", a.text_encoder_dtype]
+        if getattr(a, "vae_dtype", None):
+            parts += ["--vae-dtype", a.vae_dtype]
         if getattr(a, "guidance_scale_2", None) is not None:
             parts += ["--guidance-scale-2", str(a.guidance_scale_2)]
         if getattr(a, "teacache_cadence", None) is not None:

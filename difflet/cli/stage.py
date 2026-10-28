@@ -86,6 +86,8 @@ def _build_stage_parser() -> argparse.ArgumentParser:
     p.add_argument("--guidance-scale-2", dest="guidance_scale_2", type=float, default=None)
     p.add_argument("--dual-expert", dest="dual_expert", action="store_true")
     p.add_argument("--host-text-encoder", dest="host_text_encoder", action="store_true")
+    p.add_argument("--text-encoder-dtype", dest="text_encoder_dtype", default=None,
+                   choices=["bf16", "fp32"])
     p.add_argument("--device-text-encoder", dest="device_text_encoder", action="store_true")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--work-dir", default=None)
@@ -98,7 +100,7 @@ def _build_stage_parser() -> argparse.ArgumentParser:
     p.add_argument("--teacache-speedup", type=float, default=None)
     p.add_argument("--teacache-calibration", default=None)
     # The decode the driver resolved (HunyuanVideo on a torchrun backend): where it runs and the
-    # device decoder's precision and execution.
+    # device decoder's precision and execution. Wan and Qwen-Image read --vae-dtype alone.
     p.add_argument("--vae-placement", dest="vae_placement", default=None,
                    choices=["generate", "launch", "host"])
     p.add_argument("--vae-dtype", dest="vae_dtype", default=None, choices=["bf16", "fp32"])

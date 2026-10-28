@@ -192,8 +192,11 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
         dest="vae_dtype",
         choices=["bf16", "fp32"],
         default=None,
-        help="HunyuanVideo on --backend neuron: the device VAE decoder's precision, in the vae "
-        "launch or in process (default: bf16). Not with --host-vae.",
+        help="--backend neuron: the device VAE decoder's precision. HunyuanVideo: in the vae "
+        "launch or in process (default: bf16). Wan: in the vae stage (default: bf16 up to 9 "
+        "frames, fp32 beyond, as the Trainium path decodes). Qwen-Image: in the vae stage "
+        "(default: fp32). In bf16 the Wan/Qwen-Image decoder keeps the norms, the attention "
+        "scores and the output head in fp32. Not with --host-vae.",
     )
     p.add_argument(
         "--vae-exec-mode",
@@ -213,6 +216,16 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
         "default). Set automatically when the "
         "TP group is too narrow for umT5 to fit beside the DiT (tp2, e.g. --cfg-parallel or "
         "--cp-degree 2 on four cores, or --dp 2 --tp-degree 2)",
+    )
+    p.add_argument(
+        "--text-encoder-dtype",
+        dest="text_encoder_dtype",
+        choices=["bf16", "fp32"],
+        default=None,
+        help="Wan on --backend neuron: umT5's precision, on the device or with "
+        "--host-text-encoder on the host (default: bf16, as the Trainium path runs it; the "
+        "neuron weight store keeps a bf16 copy). fp32 doubles what umT5 reads and holds, so at "
+        "tp2 it moves to the host.",
     )
     p.add_argument(
         "--device-text-encoder",
