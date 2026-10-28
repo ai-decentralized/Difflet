@@ -1773,7 +1773,7 @@ Plan item F6a (2026-10-28). Native at `feat/native-followups` `fa3bc3e` with the
 - **Most of the gap is the block's own device time.** Native compiles each transformer block as its own graph, and that graph runs 12.31 ms on the device against about 10.95 ms per block in AoT's whole-model graph. Over 40 blocks that is 54 ms per forward, as large as the whole gap: 53.5 ms per forward, 107 ms per step.
 - **The compiler version is not the cause.** AoT's own HLO, compiled with native's neuronx-cc 2.28, runs as fast as with 2.26.
 - **About a sixth of the block gap is one compiler flag.** AoT compiles with `--tensorizer-options=--enable-ccop-compute-overlap`; native does not.
-- **The rest comes from the graph torch-native lowers.** Its lowering differs from torch-xla's in the LayerNorm, the GELU and the RoPE. The native block leaves the matmul engine (PE) idle 4.6 ms per block, against 2.8 ms in AoT.
+- **The rest, about 40 ms per forward, is not assigned to a measured cause.** *Inference:* it comes from the graph torch-native lowers. Measured: its lowering differs from torch-xla's in the LayerNorm, the GELU and the RoPE, and the native block leaves the matmul engine (PE) idle 4.6 ms per block, against 2.8 ms in AoT; but removing any one of the three never makes the block faster, so no measurement ties the remainder to them.
   - Removing the LayerNorm, the GELU or the RoPE one at a time does not make the block faster.
   - So no single op causes it. *Inference:* the cause is how the compiler schedules the native graph as a whole.
 - **No code change in this commit.** The two measured knobs together give −26.8 ms per step (−2.5%), a quarter of the gap. Both change every native model's compiled graphs, and their effect on the other models is not measured (proposals below).
@@ -1805,7 +1805,7 @@ Plan item F6a (2026-10-28). Native at `feat/native-followups` `fa3bc3e` with the
 | one block alone, synced | 14.9 |
 | host time to issue the 40 blocks, no sync | 9.7 |
 
-- **Per step:** 2 × 529.1 + 6.7 ms of host scheduler work gives the 1064.9 ms step.
+- **Per step:** 2 × 529.1 ms of DiT forwards leaves an unmeasured remainder of 6.7 ms in the 1064.9 ms step (1064.9 − 2 × 529.1). *Inference:* the host-side scheduler step and the CFG combine.
 - **Host launches are not the cause.** Issuing the 40 blocks takes 9.7 ms of host time, without a sync, against 520 ms of device time, so launches are asynchronous and hidden.
 - **The eager top level and the input copies cost about 9 ms per forward.** AoT runs this work inside its single graph, where it cannot be timed separately.
 - **CFG is the same on both backends.** Each runs two batch-1 forwards per step (AoT: `ModelWrapperWanBackbone` traces batch 1).
@@ -1833,7 +1833,7 @@ Plan item F6a (2026-10-28). Native at `feat/native-followups` `fa3bc3e` with the
   - every linear is `dot(x, transpose(W))` in bf16, ten dots per block;
   - three bf16 all-reduces of `[1,4680,5120]` per block, plus four fp32 `[N,1]` all-reduces for the q/k norm statistics;
   - attention is one `attention_cte` call on `[10,4680,128]` (and `[10,512,128]` for the cross-attention), two-core, with the same `tp_q`/`tp_k` layout;
-  - the residual and modulation math is in fp32. Both backends run the same `modeling_wan.py`.
+  - the residual and modulation math is in fp32. Both backends run `modeling_wan.py`, each at its own commit (AoT at main `540e5f0`, native at `fa3bc3e`); the two copies differ by 59 lines (the `--tp-reduce-dtype` plumbing, a tp1 fused `rms_norm_fp32` path and a `.contiguous()` after the patch flatten), none of them on the TP4 path measured here.
 - **Different:**
 
 | op | AoT (torch-xla) | native (torch-neuronx) |
