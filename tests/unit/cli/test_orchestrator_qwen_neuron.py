@@ -256,8 +256,9 @@ def clean_neuron_mesh(monkeypatch, tmp_path):
 
 def test_neuron_vae_stage_decodes_what_the_host_decode_does(monkeypatch, tmp_path,
                                                             clean_neuron_mesh):
-    """The vae stage (the Wan decoder through the application's adapter, fp32 eager, here on
-    the CPU) against the host decode (diffusers' AutoencoderKLQwenImage, fp32) on the same
+    """The vae stage (the Wan decoder through the application's adapter, eager, here on the CPU,
+    with --vae-dtype fp32: the default is bf16) against the host decode (diffusers'
+    AutoencoderKLQwenImage, fp32) on the same
     packed latents of a non-square tiny image: the same unpack and latents_mean/std, the same
     [1, 3, H, W] image in [-1, 1], equal to fp32 rounding."""
     import numpy as np
@@ -276,7 +277,7 @@ def test_neuron_vae_stage_decodes_what_the_host_decode_does(monkeypatch, tmp_pat
     packed = torch.randn(1, (height // 16) * (width // 16), 16,
                          generator=torch.Generator().manual_seed(3)).to(torch.bfloat16)
     torch.save(packed, work / "latents.pt")
-    args = _qwen_args(height=height, width=width, work_dir=str(work),
+    args = _qwen_args(height=height, width=width, work_dir=str(work), vae_dtype="fp32",
                       output=str(tmp_path / "device.png"), cache_dir=str(tmp_path / "cache"))
     QwenImageOrchestrator(args)._run_stage_internal("vae", args)
     qwen_mod._decode_latents_host(str(work / "latents.pt"), str(model),
@@ -327,13 +328,14 @@ def test_neuron_vae_stage_compile_warms_up_and_writes_the_manifest(monkeypatch, 
     assert not (tmp_path / "w").exists()
 
 
-# ------------------------------------------- --vae-dtype bf16 (phase 3's opt-in)
+# ------------------------------------------- --vae-dtype (bf16 by default, fp32 on request)
 
 
-def test_neuron_vae_stage_decodes_in_bf16_when_asked(monkeypatch, tmp_path, clean_neuron_mesh):
-    """--vae-dtype bf16: the vae stage builds the decoder in bf16 (bf16 weights), the image
-    comes back fp32 and within bf16's error of the fp32 stage's decode of the same latents (40
-    dB here on a random decoder; the device gate on the real one is 50 dB)."""
+def test_neuron_vae_stage_decodes_in_bf16_by_default(monkeypatch, tmp_path, clean_neuron_mesh):
+    """The vae stage builds the decoder in bf16 (bf16 weights) by default and with --vae-dtype
+    bf16, in fp32 with --vae-dtype fp32. The image comes back fp32 either way, the bf16 one
+    within bf16's error of the fp32 stage's decode of the same latents (40 dB here on a random
+    decoder; the device gate on the real one passed at 56.7 dB)."""
     import math
 
     import torch
@@ -353,7 +355,7 @@ def test_neuron_vae_stage_decodes_in_bf16_when_asked(monkeypatch, tmp_path, clea
                          generator=torch.Generator().manual_seed(3)).to(torch.bfloat16)
     torch.save(packed, work / "latents.pt")
     images = {}
-    for flag in ("fp32", "bf16"):
+    for flag in ("fp32", "bf16", None):
         from difflet.backends.neuron.ops_impl import parallel_mesh
 
         parallel_mesh.destroy_parallel_mesh()
@@ -361,20 +363,26 @@ def test_neuron_vae_stage_decodes_in_bf16_when_asked(monkeypatch, tmp_path, clea
                           output=str(tmp_path / f"{flag}.png"), cache_dir=str(tmp_path / "c"))
         QwenImageOrchestrator(args)._run_stage_internal("vae", args)
         images[flag] = torch.load(tmp_path / f"{flag}.pt")
-    fp32_app, bf16_app = built
+    fp32_app, bf16_app, default_app = built
     assert fp32_app.dtype is torch.float32 and bf16_app.dtype is torch.bfloat16
+    assert default_app.dtype is torch.bfloat16
     assert {p.dtype for p in bf16_app.module.parameters()} == {torch.bfloat16}
+    torch.testing.assert_close(images[None], images["bf16"], atol=0, rtol=0)
     assert images["fp32"].dtype == images["bf16"].dtype == torch.float32
     mse = float(((images["bf16"].double() - images["fp32"].double()) ** 2).mean())
     assert 0 < mse and 10 * math.log10(4.0 / mse) >= 40.0
 
 
-def test_vae_dtype_is_forwarded_only_when_given_and_keys_the_vae_stage(monkeypatch):
+def test_vae_dtype_is_forwarded_only_when_given_and_keys_only_a_non_default_vae_stage(
+        monkeypatch):
+    """--vae-dtype reaches the stage processes only when given; the vae stage key gains
+    ``vae_dtype`` only for the non-default precision (fp32), so a default stage, given
+    --vae-dtype bf16 or not, keeps one key, as Wan's neuron vae stage does."""
     plain_args = _qwen_args(cache_dir="/c")
     assert "--vae-dtype" not in QwenImageOrchestrator(plain_args)._shared_cli_args("generate")
-    bf16_args = _qwen_args(cache_dir="/c", vae_dtype="bf16")
-    parts = QwenImageOrchestrator(bf16_args)._shared_cli_args("generate")
-    assert parts[parts.index("--vae-dtype") + 1] == "bf16"
+    fp32_args = _qwen_args(cache_dir="/c", vae_dtype="fp32")
+    parts = QwenImageOrchestrator(fp32_args)._shared_cli_args("generate")
+    assert parts[parts.index("--vae-dtype") + 1] == "fp32"
 
     def keyed(backend, args):
         _backend(monkeypatch, backend)
@@ -383,12 +391,12 @@ def test_vae_dtype_is_forwarded_only_when_given_and_keys_the_vae_stage(monkeypat
                 for s in ("text", "generate", "vae")}
 
     for backend in (None, "trainium", "tpu"):  # the AoT paths do not read the flag
-        assert keyed(backend, bf16_args) == keyed(backend, plain_args)
-    neuron, bf16 = keyed("neuron", plain_args), keyed("neuron", bf16_args)
-    assert keyed("neuron", _qwen_args(cache_dir="/c", vae_dtype="fp32")) == neuron
-    assert bf16["vae"][0] == {**neuron["vae"][0], "vae_dtype": "bfloat16"}
-    assert bf16["vae"][1] != neuron["vae"][1]
-    assert (bf16["text"], bf16["generate"]) == (neuron["text"], neuron["generate"])
+        assert keyed(backend, fp32_args) == keyed(backend, plain_args)
+    neuron, fp32 = keyed("neuron", plain_args), keyed("neuron", fp32_args)
+    assert keyed("neuron", _qwen_args(cache_dir="/c", vae_dtype="bf16")) == neuron
+    assert fp32["vae"][0] == {**neuron["vae"][0], "vae_dtype": "float32"}
+    assert fp32["vae"][1] != neuron["vae"][1]
+    assert (fp32["text"], fp32["generate"]) == (neuron["text"], neuron["generate"])
 
 
 @pytest.mark.parametrize("mode", ["compile", "generate", "run"])
@@ -409,7 +417,7 @@ def test_vae_dtype_with_host_vae_is_refused(monkeypatch, tmp_path, capsys, mode)
 # ------------------------------------ --vae-exec-mode compile (phase 7's opt-in)
 
 
-@pytest.mark.parametrize("vae_dtype", [None, "bf16"])
+@pytest.mark.parametrize("vae_dtype", ["fp32", None])
 def test_neuron_vae_stage_compiled_by_region_decodes_as_the_eager_stage(
         monkeypatch, tmp_path, clean_neuron_mesh, vae_dtype):
     """--vae-exec-mode compile: the vae stage builds the decoder compiled region by region (on
@@ -447,7 +455,7 @@ def test_neuron_vae_stage_compiled_by_region_decodes_as_the_eager_stage(
     assert (eager_app.exec_mode, compiled_app.exec_mode) == ("eager", "compile")
     eager, compiled = images[None], images["compile"]
     assert compiled.dtype == eager.dtype == torch.float32 and compiled.shape == eager.shape
-    if vae_dtype is None:
+    if vae_dtype == "fp32":
         torch.testing.assert_close(compiled, eager, atol=2e-5, rtol=1e-4)
     else:
         mse = float(((compiled.double() - eager.double()) ** 2).mean())

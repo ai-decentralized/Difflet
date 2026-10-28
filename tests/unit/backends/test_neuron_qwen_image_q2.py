@@ -453,7 +453,8 @@ def test_qwen_vae_loads_into_the_wan_decoder_and_decodes_like_diffusers(tiny):
     every decoder tensor loads, and the decode equals ``AutoencoderKLQwenImage.decode``."""
     from diffusers import AutoencoderKLQwenImage
 
-    app = _composed(tiny, enable_transformer=False, enable_vae_decoder=True)
+    app = _composed(tiny, enable_transformer=False, enable_vae_decoder=True,
+                    vae_dtype=torch.float32)
     vae = app.vae_decoder
     assert vae.dtype is torch.float32 and vae.app.exec_mode == "eager"
     assert vae.app.latent_shape == (1, TINY_Z_DIM, 1, 2 * TINY_PACKED[0], 2 * TINY_PACKED[1])
@@ -469,17 +470,19 @@ def test_qwen_vae_loads_into_the_wan_decoder_and_decodes_like_diffusers(tiny):
     with torch.no_grad():
         expected = reference.decode(latents, return_dict=False)[0][:, :, 0]
     torch.testing.assert_close(images, expected, **FP32_TOL)
-    assert vae.app.dtype is torch.float32  # fp32 unless vae_dtype asks for bf16
+    assert vae.app.dtype is torch.float32  # asked for: the default is bf16
 
 
-def test_qwen_vae_bf16_is_opt_in_and_close_to_the_fp32_decode(tiny):
-    """``vae_dtype=torch.bfloat16`` (the CLI's --vae-dtype bf16): the decoder loads in bf16, the
-    adapter still takes fp32 latents (the orchestrator un-normalises in fp32) and returns fp32
-    images (the decoder's fp32 output head), within bf16's error of the fp32 decode of the same
-    latents. 40 dB (images in [-1, 1]) catches a broken path; the device gate on the real
-    decoder is 50 dB."""
+def test_qwen_vae_bf16_is_the_default_and_close_to_the_fp32_decode(tiny):
+    """bf16 is the decoder's default (``vae_dtype=torch.float32``, the CLI's --vae-dtype fp32,
+    keeps fp32): the decoder loads in bf16, the adapter still takes fp32 latents (the
+    orchestrator un-normalises in fp32) and returns fp32 images (the decoder's fp32 output head),
+    within bf16's error of the fp32 decode of the same latents. 40 dB (images in [-1, 1])
+    catches a broken path; the device gate on the real decoder passed at 56.7 dB."""
     import math
 
+    default = _composed(tiny, enable_transformer=False, enable_vae_decoder=True).vae_decoder
+    assert default.app.dtype is torch.bfloat16 and default.dtype is torch.float32
     latents = torch.randn(1, TINY_Z_DIM, 1, 8, 12, generator=torch.Generator().manual_seed(8))
     images = {}
     for dtype in (torch.float32, torch.bfloat16):

@@ -305,6 +305,7 @@ def q2_pipeline_worker(
         encoder_threads=2,
         enable_text_encoder=use_prompt,
         enable_vae_decoder=output_type == "pt",
+        vae_dtype=torch.float32,  # the decoder's default is bf16; this toy runs fp32 throughout
         text_encoder_dtype=text_encoder_dtype,
     )
     app.load()

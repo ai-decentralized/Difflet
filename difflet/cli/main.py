@@ -195,7 +195,7 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
         help="--backend neuron: the device VAE decoder's precision. HunyuanVideo: in the vae "
         "launch or in process (default: bf16). Wan: in the vae stage (default: bf16 up to 9 "
         "frames, fp32 beyond, as the Trainium path decodes). Qwen-Image: in the vae stage "
-        "(default: fp32). In bf16 the Wan/Qwen-Image decoder keeps the norms, the attention "
+        "(default: bf16). In bf16 the Wan/Qwen-Image decoder keeps the norms, the attention "
         "scores and the output head in fp32. Not with --host-vae.",
     )
     p.add_argument(

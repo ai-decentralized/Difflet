@@ -18,11 +18,12 @@ the ranks denoise, and rank 0 writes latents.pt in the packed format the vae sta
 launch has exited, in one of two places (``_decodes_on_device``):
 
 * by default (or with --device-vae), in a vae stage of its own on one NeuronCore
-  (``_stage_vae_neuron``): the Wan decoder (Qwen-Image's VAE is Wan 2.1's) in fp32, eager, as
-  Wan's neuron vae stage runs it, about 19 s per 1024x1024 image including the launch; or in
-  bf16 with --vae-dtype bf16 (the opt-in of phase 3 of the 2026-10-26 native-vs-AoT plan, which
-  adds ``vae_dtype`` to the vae stage key); --vae-exec-mode compile (phase 7's opt-in, which
-  adds ``vae_exec_mode``) compiles the decoder region by region instead of running it eager;
+  (``_stage_vae_neuron``): the Wan decoder (Qwen-Image's VAE is Wan 2.1's), eager, in bf16 by
+  default (``_DEFAULT_VAE_DTYPE``; norms, attention scores and the output head stay fp32; 56.7
+  dB from the fp32 decode on the device, phase 3 of the 2026-10-26 native-vs-AoT plan), or in
+  fp32 with --vae-dtype fp32, which adds ``vae_dtype`` to the vae stage key; --vae-exec-mode
+  compile (phase 7's opt-in, which adds ``vae_exec_mode``) compiles the decoder region by
+  region instead of running it eager;
 * with --host-vae, on the host: the driver decodes with diffusers ``AutoencoderKLQwenImage``
   in fp32 (``_decode_latents_host``), about 23.6 s per 1024x1024 image on the trn2.3xlarge host.
 
@@ -97,6 +98,8 @@ _CLI_NAME = qwen_common.CLI_NAME
 _VIRTUAL_CORE_SIZE = qwen_common.VIRTUAL_CORE_SIZE
 _ENC_SEQ = qwen_common.ENC_SEQ
 _TEXT_SEQ_LEN = qwen_common.TEXT_SEQ_LEN
+#: The neuron vae stage's decoder precision when --vae-dtype is not given (a --vae-dtype value).
+_DEFAULT_VAE_DTYPE = "bf16"
 
 _QWEN_TEMPLATE = qwen_common.QWEN_TEMPLATE
 _QWEN_DROP_IDX = qwen_common.QWEN_DROP_IDX
@@ -885,7 +888,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
             z_dim = int(json.load(f)["z_dim"])
         h, w = args.height or 1024, args.width or 1024
 
-        dtype = getattr(torch, component_dtype(getattr(args, "vae_dtype", None)))
+        dtype = getattr(torch, component_dtype(getattr(args, "vae_dtype", None), _DEFAULT_VAE_DTYPE))
         exec_mode = getattr(args, "vae_exec_mode", None) or "eager"
 
         def build(parallel):
@@ -934,11 +937,12 @@ class QwenImageOrchestrator(ModelOrchestrator):
 
     def _stage_cache_inputs(self, stage: str, args: argparse.Namespace) -> dict:
         inputs = torchrun_stage_keys(self._backend_neutral_stage_cache_inputs(stage, args))
-        # Additive, neuron only: a bf16 decoder (--vae-dtype bf16) names its dtype, so the
-        # default (fp32) vae stage keeps its key and its manifests.
+        # Additive, neuron only: a decoder in the non-default precision (--vae-dtype fp32) names
+        # its dtype, so the default (bf16) vae stage, given --vae-dtype bf16 or not, keeps one key.
+        vae_dtype = getattr(args, "vae_dtype", None)
         if (stage == "vae" and torchrun_backend() is not None
-                and getattr(args, "vae_dtype", None) == "bf16"):
-            inputs["vae_dtype"] = component_dtype("bf16")
+                and vae_dtype not in (None, _DEFAULT_VAE_DTYPE)):
+            inputs["vae_dtype"] = component_dtype(vae_dtype)
         # Likewise the decoder compiled by region (--vae-exec-mode compile, phase 7).
         if stage == "vae" and torchrun_backend() is not None:
             inputs.update(vae_exec_mode_key(args))
