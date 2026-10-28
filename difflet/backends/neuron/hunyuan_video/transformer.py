@@ -5,7 +5,8 @@ hunyuan_video/modeling_hunyuan_video.py``), the class the Trainium path compiles
 CPU parity test holds to diffusers (``tests/numerical/test_hunyuan_video_vs_diffusers.py``); HV1.5's
 neuron port wraps diffusers' class only because no Difflet port of 1.5 exists. The port builds
 its own tensor parallelism from ``difflet.ops`` (q/k/v and the MLP inputs column-parallel, the
-attention and MLP outputs row-parallel, 24 heads split over tp), its context parallelism (image
+attention and MLP outputs row-parallel, 24 heads split over tp; the port adds the blocks' AdaLN
+modulation linears, column-parallel with the output gathered), its context parallelism (image
 tokens scattered over the CP group, the text replicated) and its sequence parallelism (the image
 stream of the dual-stream blocks sharded over the TP group), and ``difflet.ops`` dispatches to
 this backend's ``ops_impl``. Here the lifecycle is ``TorchNeuronApplicationBase``'s: the module
@@ -101,6 +102,33 @@ def _tensor_signature_class():
     return _HunyuanVideoTensorSignature
 
 
+def _shard_modulation_linears(module: torch.nn.Module) -> None:
+    """Make the blocks' AdaLN modulation linears column-parallel with the output gathered:
+    each dual-stream block's ``norm1.linear`` and ``norm1_context.linear`` (3072 -> 6 x 3072)
+    and each single-stream block's ``norm.linear`` (3072 -> 3 x 3072).
+
+    The shared modeling builds them as diffusers' ``AdaLayerNormZero`` /
+    ``AdaLayerNormZeroSingle``, whose ``linear`` is a plain ``nn.Linear``, so every rank would
+    hold all 80 of them (6.80 GB in bf16). Their input is the per-sample ``[B, inner]``
+    conditioning vector, so gathering the output is one tiny all-gather per layer; the loader
+    reads each rank's rows of the unchanged checkpoint keys (``_difflet_shard``). The swap is
+    here and not in the shared modeling, which the Trainium path also compiles. HV1.5's port
+    does the same (``hunyuan_video15/transformer.py``), as does this model's own token
+    refiner."""
+    from difflet.backends.neuron.ops_impl.linear import ColumnParallelLinear
+
+    def col(lin: torch.nn.Linear) -> ColumnParallelLinear:
+        return ColumnParallelLinear(lin.in_features, lin.out_features, bias=lin.bias is not None,
+                                    gather_output=True, dtype=lin.weight.dtype,
+                                    device=lin.weight.device)
+
+    for block in module.transformer_blocks:
+        block.norm1.linear = col(block.norm1.linear)
+        block.norm1_context.linear = col(block.norm1_context.linear)
+    for block in module.single_transformer_blocks:
+        block.norm.linear = col(block.norm.linear)
+
+
 class NeuronHunyuanVideoTransformerApplication(TorchNeuronApplicationBase):
     """The HunyuanVideo DiT, sharded across the TP group, at the config's static shape.
 
@@ -168,7 +196,9 @@ class NeuronHunyuanVideoTransformerApplication(TorchNeuronApplicationBase):
             self.skipped_checkpoint_prefixes = skipped
 
     def build_module(self) -> torch.nn.Module:
-        return _tensor_signature_class()(self.config)
+        module = _tensor_signature_class()(self.config)
+        _shard_modulation_linears(module)
+        return module
 
     def checkpoint_key(self, name: str) -> str:
         return checkpoint_key(name)
@@ -208,8 +238,8 @@ class NeuronHunyuanVideoTransformerApplication(TorchNeuronApplicationBase):
         """The TeaCache signal, as the model defines it (``HunyuanVideoTransformer3DModel.
         teacache_mod_input``, the method the Trainium probe runs): block 0's modulated image
         input. Its modulation depends on the timestep, the pooled projection and the guidance;
-        the method ignores the text, so none is passed. The modulation linears are replicated
-        ``nn.Linear``s, so every rank holds the result whole. Host inputs; moved to this rank's
+        the method ignores the text, so none is passed. The modulation linears gather their
+        output, so every rank holds the result whole. Host inputs; moved to this rank's
         device in the model's dtype."""
         dev, dt = self.device, self.dtype
         return self.module.teacache_mod_input(

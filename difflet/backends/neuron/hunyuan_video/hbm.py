@@ -2,11 +2,12 @@
 
 The DiT is 12.8 B parameters, 23.9 GiB in bf16. One 24 GiB core can give the weights at most
 ``FIT_FRACTION`` of its HBM (22.8 GiB), so tp1 cannot fit; its TP layers shard each block's
-attentions and feed-forwards over the TP group, so one rank holds about 23.9 / tp GiB plus the
-replicated rest (the patch and text embedders, the token refiner, the timestep and guidance
-embeddings, the per-block modulation tables and q/k norms): about 12 GiB at tp2 and 6 GiB at
-tp4. A topology that narrows the TP group (CP or SP on the same four cores) narrows every rank's
-share the same way. The application base checks the exact meta-built bytes when the DiT loads
+attentions, feed-forwards and AdaLN modulation linears over the TP group, so one rank holds about
+23.9 / tp GiB plus the replicated rest (the patch and text embedders, parts of the token refiner,
+the timestep and guidance embeddings, the q/k norms): 12.0 GiB at tp2 and 6.1 GiB at tp4 (15.2
+and 10.8 GiB while the 6.80 GB of modulation linears were replicated). A topology that narrows
+the TP group (CP or SP on the same four cores) narrows every rank's share the same way. The
+application base checks the exact meta-built bytes when the DiT loads
 (``difflet/backends/neuron/hbm.py``); the CLI driver uses the estimate here to refuse the launch
 before torchrun starts any rank.
 
