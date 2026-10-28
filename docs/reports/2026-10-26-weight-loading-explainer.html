@@ -1,0 +1,565 @@
+<title>Native vs AoT Weight Loading</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..125,500..800&family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one reading column (~68ch) with wide figures that break out to ~1080px; sections are numbered because the page is a sequence of ideas. */
+:root {
+  --bg: #f6f7f6;          /* page */
+  --surface: #ffffff;     /* figures, cards */
+  --ink: #15191c;         /* primary text */
+  --muted: #59616a;       /* secondary text */
+  --rule: #dde2e1;        /* hairlines */
+  --tint: #edf1f0;        /* quiet fills */
+  --accent: #0d6a6e;      /* structure, links (not data) */
+  --s1: #2a78d6;          /* data: native  (categorical slot 1) */
+  --s2: #eb6834;          /* data: AoT     (categorical slot 2) */
+  --s3: #1baf7a;          /* data: slot 3 */
+  --s4: #eda100;          /* data: slot 4 */
+  --s5: #e87ba4;          /* data: slot 5 */
+  --display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --body: "Source Sans 3", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111416; --surface: #181c1f; --ink: #e8ecec; --muted: #a2aab0; --rule: #2b3236; --tint: #1f2528;
+    --accent: #55b8b1; --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111416; --surface: #181c1f; --ink: #e8ecec; --muted: #a2aab0; --rule: #2b3236; --tint: #1f2528;
+  --accent: #55b8b1; --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; color-scheme: dark;
+}
+body { background: var(--bg); color: var(--ink); font-family: var(--body); font-size: 17px; line-height: 1.6; }
+.wrap { max-width: 1080px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 40px 72px; }
+.col { max-width: 68ch; }
+h1, h2, h3 { font-family: var(--display); text-wrap: balance; line-height: 1.15; margin: 0; }
+h1 { font-size: clamp(2rem, 5vw, 3.1rem); font-weight: 800; font-stretch: 85%; letter-spacing: -0.01em; }
+h2 { font-size: clamp(1.45rem, 3vw, 1.9rem); font-weight: 750; font-stretch: 90%; }
+h3 { font-size: 1.12rem; font-weight: 700; }
+p { margin: 0; }
+a { color: var(--accent); }
+.eyebrow { font-family: var(--mono); font-size: 0.74rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.lede { font-size: 1.2rem; color: var(--muted); }
+.stack { display: grid; gap: 14px; }
+section { display: grid; gap: 18px; padding-top: 56px; }
+.secnum { font-family: var(--mono); color: var(--accent); font-size: 0.85rem; letter-spacing: 0.06em; }
+.mono { font-family: var(--mono); font-size: 0.9em; }
+.num { font-variant-numeric: tabular-nums; }
+.note { font-size: 0.92rem; color: var(--muted); }
+.tag { display: inline-block; font-family: var(--mono); font-size: 0.72rem; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--rule); color: var(--muted); white-space: nowrap; vertical-align: 2px; }
+.tag.inferred { border-style: dashed; }
+.key { display: inline-flex; align-items: center; gap: 6px; font-weight: 600; }
+.swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; flex: none; }
+
+/* Short answer */
+.answers { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 8px; }
+.answer { background: var(--surface); border: 1px solid var(--rule); border-radius: 10px; padding: 18px 18px 16px; display: grid; gap: 8px; align-content: start; min-width: 0; }
+.answer h3 { font-size: 1.05rem; }
+.answer .big { font-family: var(--display); font-weight: 750; font-stretch: 90%; font-size: 1.3rem; line-height: 1.2; }
+
+/* Glossary */
+.gloss { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 28px; }
+.gloss div { border-top: 1px solid var(--rule); padding-top: 10px; min-width: 0; }
+.gloss dt { font-weight: 700; }
+.gloss dd { margin: 2px 0 0; color: var(--muted); }
+
+/* Pipeline figure */
+.figure { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 20px; display: grid; gap: 14px; min-width: 0; }
+.figure figcaption, .figcap { font-size: 0.9rem; color: var(--muted); }
+.pipe { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; }
+.pipe .node { flex: 1 1 140px; min-width: 0; background: var(--tint); border-radius: 8px; padding: 12px; display: grid; gap: 4px; align-content: start; }
+.pipe .node b { font-family: var(--display); font-weight: 700; font-stretch: 92%; }
+.pipe .node span { font-size: 0.88rem; color: var(--muted); }
+.pipe .node.main { background: color-mix(in srgb, var(--accent) 14%, var(--tint)); }
+.pipe .arrow { align-self: center; color: var(--muted); font-family: var(--mono); }
+
+/* Model tabs */
+.tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.tabs button { font: inherit; font-weight: 600; font-size: 0.95rem; padding: 7px 14px; border-radius: 999px; border: 1px solid var(--rule); background: var(--surface); color: var(--ink); cursor: pointer; }
+.tabs button[aria-selected="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.tabs button:focus-visible, .bar:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 0.93rem; }
+th, td { text-align: left; vertical-align: top; padding: 9px 10px; border-bottom: 1px solid var(--rule); }
+th { font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); font-weight: 600; }
+td.r, th.r { text-align: right; white-space: nowrap; }
+tr:last-child td { border-bottom: 0; }
+.model-meta { color: var(--muted); font-size: 0.95rem; }
+
+/* Two ways */
+.ways { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.way { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 18px; display: grid; gap: 12px; align-content: start; min-width: 0; }
+.way h3 { display: flex; align-items: center; gap: 8px; }
+.steps { margin: 0; padding-left: 1.3em; display: grid; gap: 6px; }
+.flow { display: grid; grid-template-columns: auto 1fr; gap: 6px 10px; font-size: 0.9rem; align-items: center; }
+.flow .lab { font-family: var(--mono); font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.cores { display: flex; gap: 4px; }
+.core { flex: 1; text-align: center; font-family: var(--mono); font-size: 0.72rem; padding: 6px 0; border-radius: 5px; background: var(--tint); }
+.file { background: var(--tint); border-radius: 5px; padding: 6px 8px; font-family: var(--mono); font-size: 0.75rem; }
+
+/* Bar charts */
+.chart { display: grid; gap: 10px; }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 0.9rem; }
+.legend .key { font-weight: 600; }
+.rows { display: grid; gap: 14px; }
+.row { display: grid; grid-template-columns: 9.5rem minmax(0, 1fr); gap: 10px; align-items: center; }
+.row .rl { font-weight: 600; font-size: 0.95rem; line-height: 1.25; }
+.row .rl small { display: block; font-weight: 400; color: var(--muted); font-size: 0.8rem; }
+.pair { display: grid; gap: 4px; }
+.track { position: relative; height: 22px; }
+.bar { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 0 4px 4px 0; display: flex; align-items: center; cursor: default; }
+.bar .v { position: absolute; left: calc(100% + 6px); font-size: 0.82rem; font-variant-numeric: tabular-nums; color: var(--ink); white-space: nowrap; }
+.stackbar { position: relative; height: 30px; display: flex; gap: 2px; }
+.seg { height: 100%; position: relative; min-width: 2px; }
+.seg:last-child { border-radius: 0 4px 4px 0; }
+.seg .sl { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; font-weight: 600; color: #fff; white-space: nowrap; overflow: hidden; }
+.axis { display: grid; grid-template-columns: 9.5rem minmax(0, 1fr); gap: 10px; }
+.ticks { position: relative; height: 18px; border-top: 1px solid var(--rule); }
+.ticks span { position: absolute; top: 2px; transform: translateX(-50%); font-size: 0.72rem; color: var(--muted); font-variant-numeric: tabular-nums; }
+.ticks span:first-child { transform: none; }
+.grid { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--rule); }
+.tip { position: fixed; z-index: 20; pointer-events: none; background: var(--ink); color: var(--bg); font-size: 0.82rem; line-height: 1.35; padding: 7px 9px; border-radius: 6px; max-width: 260px; box-shadow: 0 4px 14px rgb(0 0 0 / 0.18); }
+
+/* Verdicts */
+.verdicts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+.verdict { background: var(--surface); border: 1px solid var(--rule); border-radius: 12px; padding: 18px; display: grid; gap: 10px; align-content: start; min-width: 0; }
+.verdict .who { display: flex; flex-wrap: wrap; gap: 8px; }
+.pill { font-size: 0.8rem; font-weight: 700; padding: 2px 9px; border-radius: 999px; background: var(--tint); }
+.pill.native { box-shadow: inset 3px 0 0 var(--s1); }
+.pill.aot { box-shadow: inset 3px 0 0 var(--s2); }
+.pill.tie { box-shadow: inset 3px 0 0 var(--muted); }
+
+/* Ideas */
+.ideas { counter-reset: idea; display: grid; gap: 14px; }
+.idea { display: grid; grid-template-columns: 2.4rem minmax(0, 1fr); gap: 4px 12px; border-top: 1px solid var(--rule); padding-top: 14px; }
+.idea::before { counter-increment: idea; content: counter(idea); font-family: var(--display); font-weight: 800; font-size: 1.6rem; color: var(--accent); line-height: 1; grid-row: span 3; }
+.idea .gain { font-size: 0.9rem; color: var(--muted); }
+
+footer { margin-top: 64px; border-top: 1px solid var(--rule); padding-top: 18px; display: grid; gap: 10px; font-size: 0.88rem; color: var(--muted); }
+
+@media (max-width: 760px) {
+  .answers, .ways, .verdicts, .gloss { grid-template-columns: minmax(0, 1fr); }
+  .row, .axis { grid-template-columns: 6.6rem minmax(0, 1fr); }
+  body { font-size: 16px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .bar, .seg { transition: filter 120ms ease; }
+}
+.bar:hover, .seg:hover, .bar:focus-visible { filter: brightness(1.1); }
+</style>
+
+<div class="wrap">
+
+<header class="stack col">
+  <p class="eyebrow">Difflet on AWS Trainium2 · trn2.3xlarge · TP4</p>
+  <h1>How fast do the weights get onto the chip?</h1>
+  <p class="lede">Difflet runs the same diffusion models on two backends: <strong>PyTorch-native</strong> (“native”) and <strong>ahead-of-time compiled</strong> (“AoT”). Before a model can draw anything, billions of numbers have to travel from disk to the accelerator. This page explains how each backend does that, which one is faster for each of our four models, and why.</p>
+</header>
+
+<div class="answers" aria-label="The short answer">
+  <div class="answer">
+    <p class="eyebrow">Cold start · weights come from disk</p>
+    <p class="big">Whoever reads fewer bytes wins.</p>
+    <p>Native is faster for HunyuanVideo and LTX-2, level with AoT for Qwen-Image, and slower for Wan2.1. The disk is the bottleneck, so the amount each side reads most likely decides it. <span class="tag inferred">cause inferred</span></p>
+  </div>
+  <div class="answer">
+    <p class="eyebrow">Warm start · weights are already in memory</p>
+    <p class="big">About even, often slightly in AoT’s favour.</p>
+    <p>Native copies its share of the weights faster (3.6–5.4 s vs 12–28 s for the main model), but it also builds the model and runs a warm-up pass. Counted until the model is ready, AoT is 1–5 s ahead for three of the four models.</p>
+  </div>
+  <div class="answer">
+    <p class="eyebrow">Whole request · warm</p>
+    <p class="big">Weights are not where native loses time.</p>
+    <p>Native spends 9–27 s starting its processes before loading even begins, and in the benchmarked setup ran slower video decoders. Those, not weight loading, explain why its warm requests take longer.</p>
+  </div>
+</div>
+
+<section class="col" id="basics">
+  <p class="secnum">01 · Vocabulary</p>
+  <h2>Six words you need</h2>
+  <dl class="gloss">
+    <div><dt>Weights</dt><dd>The numbers a trained model has learned. A 13-billion-parameter model is 13 billion of them. Running the model means multiplying your input by these numbers, so they must sit next to the accelerator.</dd></div>
+    <div><dt>Checkpoint</dt><dd>The files on disk that hold the weights, as published by the model’s authors (here in Hugging Face’s <span class="mono">safetensors</span> format).</dd></div>
+    <div><dt>bf16 and fp32</dt><dd>Two ways to store each number: bf16 takes 2 bytes, fp32 takes 4. Both backends run most components in bf16 (a few stay in fp32), so an fp32 checkpoint means reading twice the bytes that end up being used.</dd></div>
+    <div><dt>NeuronCore and HBM</dt><dd>The accelerator has 4 NeuronCores. Each has 24 GiB of its own fast memory (HBM). Weights must end up in HBM before a core can use them.</dd></div>
+    <div><dt>TP4</dt><dd>“Tensor parallel across 4 cores”: each large layer is cut into 4 slices, one per core, so a model too big for one core fits on four. Every run on this page uses TP4.</dd></div>
+    <div><dt>Page cache</dt><dd>Linux keeps a copy of recently read files in spare RAM. Reading a file the second time comes from RAM, not disk. This is what makes a “warm” start warm.</dd></div>
+  </dl>
+</section>
+
+<section id="models">
+  <div class="col stack">
+    <p class="secnum">02 · Anatomy</p>
+    <h2>What is inside each model</h2>
+    <p>All four models follow the same recipe. A <strong>text encoder</strong> turns the prompt into numbers, the <strong>DiT</strong> (diffusion transformer) turns random noise into a picture or video over many steps, and a <strong>VAE decoder</strong> expands the result to full size. The DiT is by far the largest part, and it runs 50 times (or 100) per request while the others run once.</p>
+  </div>
+
+  <figure class="figure" aria-label="Generic pipeline">
+    <div class="pipe">
+      <div class="node"><b>Prompt</b><span>“a red fox running through a snowy forest”</span></div>
+      <div class="arrow" aria-hidden="true">→</div>
+      <div class="node"><b>Text encoder(s)</b><span>Turn the words into numeric “meaning vectors”. Run once per request.</span></div>
+      <div class="arrow" aria-hidden="true">→</div>
+      <div class="node main"><b>DiT × 50 steps</b><span>Starts from noise and removes a little at each step, following the meaning vectors. Works on a small compressed version of the image (the “latent”).</span></div>
+      <div class="arrow" aria-hidden="true">→</div>
+      <div class="node"><b>VAE decoder</b><span>Expands the finished latent into full-size pixels. Run once.</span></div>
+      <div class="arrow" aria-hidden="true">→</div>
+      <div class="node"><b>Image or video</b><span>PNG or MP4 written to disk.</span></div>
+    </div>
+    <figcaption>Every component has its own weights, and each backend decides where each one runs: on the host CPU or on the NeuronCores.</figcaption>
+  </figure>
+
+  <div class="stack">
+    <div class="tabs" role="tablist" aria-label="Model">
+      <button role="tab" id="tab-hv" aria-controls="panel-hv" aria-selected="true">HunyuanVideo 1.0</button>
+      <button role="tab" id="tab-qwen" aria-controls="panel-qwen" aria-selected="false">Qwen-Image</button>
+      <button role="tab" id="tab-wan" aria-controls="panel-wan" aria-selected="false">Wan2.1 14B</button>
+      <button role="tab" id="tab-ltx" aria-controls="panel-ltx" aria-selected="false">LTX-2</button>
+    </div>
+
+    <div class="figure" role="tabpanel" id="panel-hv" aria-labelledby="tab-hv">
+      <p class="model-meta"><strong>Text to video.</strong> Benchmark: 320×512 pixels, 61 frames, 50 steps. Guidance is built into the DiT, so each step is one DiT pass.</p>
+      <div class="scroll"><table>
+        <thead><tr><th>Part</th><th>What it does</th><th class="r">Size on disk</th><th>Native</th><th>AoT</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Llama</strong> text encoder</td><td>Reads the prompt and produces one meaning vector per word piece: the detailed description of what to draw.</td><td class="r num">7.5 B · fp16<br>15.0 GB</td><td>Host CPU of the first process, bf16; result sent to the other cores.</td><td>Its own process on 4 cores, bf16, from pre-cut files.</td></tr>
+          <tr><td><strong>CLIP-L</strong> text encoder</td><td>Reads the prompt again and squeezes it into one summary vector, a global hint about content and style.</td><td class="r num">0.12 B · fp16<br>0.25 GB</td><td>Host CPU, next to Llama.</td><td>Its own process on 1 core.</td></tr>
+          <tr><td><strong>DiT</strong></td><td>The painter. Runs 50 times, each time removing some noise from the compressed video.</td><td class="r num">12.8 B · bf16<br>25.6 GB</td><td>Split over 4 cores. Each core reads its quarter straight from the checkpoint.</td><td>Split over 4 cores from pre-cut files (46.5 GB in total: some layers are copied into every core’s file).</td></tr>
+          <tr><td><strong>VAE decoder</strong></td><td>Expands the finished latent video into 61 full-size frames.</td><td class="r num">0.15 B · fp32<br>~1 GB file</td><td>Benchmarked: a separate 1-core process after the DiT finishes, fp32, eager (per-op kernels). Since commit <span class="mono">74fc979</span> the default decodes inside the DiT process with a compiled bf16 decoder (not yet benchmarked here).</td><td>Inside the DiT process, compiled, bf16.</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+
+    <div class="figure" role="tabpanel" id="panel-qwen" aria-labelledby="tab-qwen" hidden>
+      <p class="model-meta"><strong>Text to image.</strong> Benchmark: 1024×1024, 50 steps, one DiT pass per step.</p>
+      <div class="scroll"><table>
+        <thead><tr><th>Part</th><th>What it does</th><th class="r">Size on disk</th><th>Native</th><th>AoT</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Qwen2.5-VL</strong> text encoder</td><td>A vision-language model used only to read the prompt and produce meaning vectors. Its vision part is not needed here.</td><td class="r num">8.3 B · bf16<br>16.6 GB</td><td>Host CPU of the first process (one copy, not one per core).</td><td>Its own process on 4 cores, from pre-cut files.</td></tr>
+          <tr><td><strong>DiT</strong></td><td>The painter. Runs 50 times on the compressed image.</td><td class="r num">20.4 B · bf16<br>40.9 GB</td><td>Split over 4 cores, read straight from the checkpoint.</td><td>Split over 4 cores from pre-cut files (40.9 GB).</td></tr>
+          <tr><td><strong>VAE decoder</strong></td><td>Expands the latent into the final 1024×1024 picture.</td><td class="r num">0.07 B · bf16<br>0.25 GB</td><td>A separate 1-core process, fp32.</td><td>Its own 1-core process, compiled, bf16.</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+
+    <div class="figure" role="tabpanel" id="panel-wan" aria-labelledby="tab-wan" hidden>
+      <p class="model-meta"><strong>Text to video.</strong> Benchmark: 480×832, 9 frames, 50 steps, guidance 5. Guidance here means two DiT passes per step.</p>
+      <div class="scroll"><table>
+        <thead><tr><th>Part</th><th>What it does</th><th class="r">Size on disk</th><th>Native</th><th>AoT</th></tr></thead>
+        <tbody>
+          <tr><td><strong>umT5-XXL</strong> text encoder</td><td>A multilingual encoder that reads the prompt and produces meaning vectors.</td><td class="r num">5.7 B · fp32<br>22.7 GB</td><td>Split over 4 cores and kept in <strong>fp32</strong>, because it loses accuracy in bf16. So the full 22.7 GB is read on every cold start.</td><td>Same process as the DiT, 4 cores, converted to bf16 at compile time (11.4 GB of pre-cut files).</td></tr>
+          <tr><td><strong>DiT</strong></td><td>The painter. Runs 2 × 50 times.</td><td class="r num">14.3 B · fp32<br>57.2 GB</td><td>Split over 4 cores in bf16. The first load converts it and saves a bf16 copy (the “weight store”, 7.5 GB per core); later loads read that copy.</td><td>Split over 4 cores from pre-cut bf16 files (~30 GB).</td></tr>
+          <tr><td><strong>VAE decoder</strong></td><td>Expands the latent video into frames.</td><td class="r num">0.07 B · fp32<br>0.51 GB</td><td>A separate 1-core process, fp32.</td><td>Benchmarked on the host CPU in fp32 (its default is a compiled 1-core process).</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+
+    <div class="figure" role="tabpanel" id="panel-ltx" aria-labelledby="tab-ltx" hidden>
+      <p class="model-meta"><strong>Text to video with sound.</strong> Benchmark: 480×704, 49 frames, 50 steps, guidance 1.</p>
+      <div class="scroll"><table>
+        <thead><tr><th>Part</th><th>What it does</th><th class="r">Size on disk</th><th>Native</th><th>AoT</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Gemma-3 12B</strong> text encoder</td><td>A large language model that reads the prompt; the outputs of all its layers are stacked into the description of what to show and hear.</td><td class="r num">12.2 B · fp32<br>48.8 GB</td><td>Split over 4 cores in bf16. The weight store saves a bf16 copy (5.9 GB per core) and later loads read it.</td><td>Host CPU, read from the 48.8 GB fp32 files on every cold start.</td></tr>
+          <tr><td><strong>Text connectors</strong></td><td>A small adapter that splits Gemma’s output into one stream for the picture and one for the sound.</td><td class="r num">1.4 B · bf16<br>2.9 GB</td><td>Host CPU.</td><td>Host CPU.</td></tr>
+          <tr><td><strong>DiT</strong> (audio + video)</td><td>The painter for picture and sound together, keeping them in sync.</td><td class="r num">18.9 B · bf16<br>37.8 GB</td><td>Split over 4 cores, read straight from the checkpoint.</td><td>Split over 4 cores from pre-cut files (39.8 GB).</td></tr>
+          <tr><td><strong>Video VAE, audio VAE, vocoder</strong></td><td>Expand the latent video into frames, the latent audio into a spectrogram, and the spectrogram into a sound wave.</td><td class="r num">0.6 B · bf16<br>2.7 GB</td><td>Host CPU.</td><td>Host CPU.</td></tr>
+        </tbody>
+      </table></div>
+    </div>
+  </div>
+</section>
+
+<section id="lifecycle">
+  <div class="col stack">
+    <p class="secnum">03 · One request, start to finish</p>
+    <h2>Where loading fits</h2>
+    <p>Each <span class="mono">difflet generate</span> runs these steps in order. Loading is step 2, and it happens on every request unless a server keeps the model resident.</p>
+    <ol class="steps">
+      <li><strong>Launch.</strong> Start the processes and connect them to the cores.</li>
+      <li><strong>Load weights.</strong> Move every component’s weights to where it runs.</li>
+      <li><strong>Warm up.</strong> Run the model once on dummy input. This traces the model and loads its compiled programs (native only; AoT prepared everything at compile time).</li>
+      <li><strong>Encode</strong> the prompt with the text encoder(s).</li>
+      <li><strong>Denoise:</strong> run the DiT 50 times.</li>
+      <li><strong>Decode</strong> the latent with the VAE and write the file.</li>
+    </ol>
+  </div>
+
+  <figure class="figure chart" id="chart-life" aria-label="HunyuanVideo warm request breakdown">
+    <h3>HunyuanVideo, one warm request: where the seconds go</h3>
+    <div class="legend" aria-hidden="true">
+      <span class="key"><i class="swatch" style="background:var(--s1)"></i>Launch, gaps, prompt encode</span>
+      <span class="key"><i class="swatch" style="background:var(--s2)"></i>Load weights</span>
+      <span class="key"><i class="swatch" style="background:var(--s3)"></i>Warm-up pass</span>
+      <span class="key"><i class="swatch" style="background:var(--s4)"></i>Denoise (50 steps)</span>
+      <span class="key"><i class="swatch" style="background:var(--s5)"></i>Decode + write video</span>
+    </div>
+    <div class="rows">
+      <div class="row"><div class="rl">Native<small>241 s</small></div>
+        <div class="stackbar" data-total="241.1">
+          <div class="seg" tabindex="0" style="background:var(--s1)" data-w="25.9" data-tip="Native · launch, gaps and prompt encode: 25.9 s (launch 23.6 s, host encode 2.3 s)"><span class="sl">26</span></div>
+          <div class="seg" tabindex="0" style="background:var(--s2)" data-w="31.1" data-tip="Native · load weights: 31.1 s (model outline 1.0 s, DiT 4.0 s, host Llama + CLIP 15.4 s, decoder 10.7 s in its own process)"><span class="sl">31</span></div>
+          <div class="seg" tabindex="0" style="background:var(--s3)" data-w="36.6" data-tip="Native · warm-up pass: 36.6 s, mostly tracing the attention kernel (13.5 s with the NKI trace cache, commit f4d9ac1)"><span class="sl">37</span></div>
+          <div class="seg" tabindex="0" style="background:var(--s4)" data-w="40.4" data-tip="Native · denoise, 50 steps: 40.4 s"><span class="sl">40</span></div>
+          <div class="seg" tabindex="0" style="background:var(--s5)" data-w="107.1" data-tip="Native · decode + write: 107.1 s (separate 1-core process: start-up 7.6 s, decode 73.9 s, write 21.9 s, exit 3.7 s)"><span class="sl">107</span></div>
+        </div></div>
+      <div class="row"><div class="rl">AoT<small>133 s</small></div>
+        <div class="stackbar" data-total="133.1">
+          <div class="seg" tabindex="0" style="background:var(--s1)" data-w="20.6" data-tip="AoT · launch, gaps and prompt encode: 20.6 s (process start-ups, stage gaps, CLIP and Llama encode)"><span class="sl">21</span></div>
+          <div class="seg" tabindex="0" style="background:var(--s2)" data-w="53.7" data-tip="AoT · load weights: 53.7 s (CLIP 6.9 s and Llama 10.6 s in their own stages, DiT and decoder 36.2 s)"><span class="sl">54</span></div>
+          <div class="seg" tabindex="0" style="background:var(--s4)" data-w="41.0" data-tip="AoT · denoise, 50 steps: 41.0 s (no warm-up pass: prepared at compile time)"><span class="sl">41</span></div>
+          <div class="seg" tabindex="0" style="background:var(--s5)" data-w="17.8" data-tip="AoT · decode + write: 17.8 s (compiled bf16 decoder inside the DiT process)"><span class="sl">18</span></div>
+        </div></div>
+    </div>
+    <div class="axis" aria-hidden="true"><div></div><div class="ticks" data-max="250" data-step="50"></div></div>
+    <figcaption>Weight loading itself is faster on native (31 s vs 54 s), but native adds a 37 s warm-up pass (13.5 s since the NKI trace-cache fix). Most of the 108 s gap is the decoder: the benchmarked native default ran an eager fp32 decoder in a separate process (107 s with writing), AoT a compiled bf16 one (18 s). Since commit <span class="mono">74fc979</span> native decodes in process with a compiled bf16 decoder by default; that setup is not measured here. Measured 2026-10-25, TP4, 320×512×61, 50 steps, one warm run each; native’s load/warm-up split comes from a run on the same cache with the same model.</figcaption>
+  </figure>
+</section>
+
+<section id="two-ways">
+  <div class="col stack">
+    <p class="secnum">04 · Two strategies</p>
+    <h2>Cut the weights when you load, or cut them ahead of time</h2>
+    <p>With TP4 every big layer has to be cut into four slices. The two backends differ mainly in <em>when</em> that cutting happens and <em>who</em> does the reading.</p>
+  </div>
+
+  <div class="ways">
+    <div class="way">
+      <h3><i class="swatch" style="background:var(--s1)"></i>Native: cut at load time</h3>
+      <div class="flow" aria-label="Native data flow">
+        <span class="lab">disk</span><div class="file">original checkpoint (as published)</div>
+        <span class="lab">read by</span><div class="cores"><span class="core">proc 0</span><span class="core">proc 1</span><span class="core">proc 2</span><span class="core">proc 3</span></div>
+        <span class="lab">into</span><div class="cores"><span class="core">core 0</span><span class="core">core 1</span><span class="core">core 2</span><span class="core">core 3</span></div>
+      </div>
+      <ol class="steps">
+        <li>One process per core starts. Each builds an empty outline of the model that takes no memory.</li>
+        <li>It checks that its share fits in its core’s 24 GiB before reading anything.</li>
+        <li>It opens the original checkpoint and reads <em>only its own quarter</em> of each split layer (small shared pieces are read whole), one tensor at a time, converting to bf16 on the way.</li>
+        <li><strong>Weight store:</strong> the first time, if a ready-cut copy would be at least 10% smaller than what it just read, it saves one. That only happens for fp32 checkpoints loaded as bf16 (in practice the Wan2.1 DiT and LTX-2’s Gemma-3). Later loads read that copy instead.</li>
+        <li>It runs one warm-up pass, which traces the model and loads its compiled programs.</li>
+        <li>Text encoders that run on the host CPU are loaded whole, by the first process only, with the standard Hugging Face loader.</li>
+      </ol>
+    </div>
+    <div class="way">
+      <h3><i class="swatch" style="background:var(--s2)"></i>AoT: cut once, at compile time</h3>
+      <div class="flow" aria-label="AoT data flow">
+        <span class="lab">compile</span><div class="file">whole checkpoint → 4 pre-cut bf16 files</div>
+        <span class="lab">read by</span><div class="cores"><span class="core" style="flex:4">one process</span></div>
+        <span class="lab">into</span><div class="cores"><span class="core">core 0</span><span class="core">core 1</span><span class="core">core 2</span><span class="core">core 3</span></div>
+      </div>
+      <ol class="steps">
+        <li>At compile time, one process reads the <em>whole</em> checkpoint into RAM, converts it to bf16 and writes one file per core (2 to 21 minutes in our runs: Wan2.1 119 s, HunyuanVideo 313 s, Qwen-Image 362 s, LTX-2 391–1269 s). The files are shared and reused when you compile another resolution.</li>
+        <li>At start-up, one process per <em>stage</em> (text encoder, DiT, VAE) reads all four files for that stage.</li>
+        <li>It hands each core its file in one step. The compiled program was built with the model, so no warm-up pass is needed.</li>
+      </ol>
+    </div>
+  </div>
+
+  <div class="figure">
+    <div class="scroll"><table>
+      <thead><tr><th>Question</th><th>Native</th><th>AoT</th></tr></thead>
+      <tbody>
+        <tr><td>When are the weights cut into 4?</td><td>Every load (unless the weight store has a ready-cut copy)</td><td>Once, at compile time</td></tr>
+        <tr><td>Who reads them at start-up?</td><td>4 processes in parallel, each its own quarter</td><td>1 process per stage, all four quarters</td></tr>
+        <tr><td>When is fp32 turned into bf16?</td><td>While loading, every time (skipped on a store hit)</td><td>Once, at compile time</td></tr>
+        <tr><td>What is saved on disk?</td><td>A bf16 weight store, only when it saves at least 10% of the bytes read</td><td>Always: one pre-cut bf16 file per core</td></tr>
+        <tr><td>Peak host RAM while loading</td><td>Low for the parts on the cores (one tensor at a time); host text encoders are loaded whole</td><td>High at compile time (the whole checkpoint); at start-up, all files of a stage</td></tr>
+        <tr><td>Checks HBM before loading?</td><td>Yes, per core</td><td>No per-core check</td></tr>
+        <tr><td>One-time cost at compile</td><td>Writing the store, only for fp32 checkpoints loaded as bf16 (Wan2.1: 192–215 s per core)</td><td>Cutting and writing ~40 GB of files (Wan2.1 119 s, Qwen-Image 362 s, LTX-2 391–1269 s)</td></tr>
+      </tbody>
+    </table></div>
+  </div>
+</section>
+
+<section class="col" id="cold-warm">
+  <p class="secnum">05 · Cold and warm</p>
+  <h2>Why the first run is so much slower</h2>
+  <p>The disk on this machine reads about <strong class="num">130 MB per second</strong>. At that speed every gigabyte costs about 7.7 seconds, so the 25.6 GB HunyuanVideo DiT alone takes over three minutes to read. Copying the same bytes from RAM takes seconds.</p>
+  <p><strong>Cold start</strong> means the weights are not in RAM: the machine just booted, or other files pushed them out of the page cache. The disk is the bottleneck, and the backend that reads fewer bytes wins.</p>
+  <p><strong>Warm start</strong> means the files were read recently and Linux still has them in the page cache. Disk speed no longer matters. What remains is copying into HBM plus each backend’s fixed start-up work.</p>
+  <p class="note">The benchmarks force a cold start by telling Linux to drop its page cache before the run.</p>
+</section>
+
+<section id="by-model">
+  <div class="col stack">
+    <p class="secnum">06 · Model by model</p>
+    <h2>Who is faster, and why</h2>
+    <p>Cold numbers are whole requests started with an empty page cache, so they include everything, but on a cold start loading dominates.</p>
+  </div>
+
+  <figure class="figure chart" id="chart-cold" aria-label="Cold start, whole request">
+    <h3>Cold start, whole request (seconds, lower is faster)</h3>
+    <div class="legend" aria-hidden="true">
+      <span class="key"><i class="swatch" style="background:var(--s1)"></i>Native</span>
+      <span class="key"><i class="swatch" style="background:var(--s2)"></i>AoT</span>
+    </div>
+    <div class="rows">
+      <div class="row"><div class="rl">HunyuanVideo<small>native −7.6%</small></div><div class="pair">
+        <div class="track"><div class="bar" tabindex="0" style="background:var(--s1)" data-w="570.4" data-tip="HunyuanVideo · native, cold: 570.4 s (2026-10-25)"><span class="v">570</span></div></div>
+        <div class="track"><div class="bar" tabindex="0" style="background:var(--s2)" data-w="617.3" data-tip="HunyuanVideo · AoT, cold: 617.3 s (2026-10-25)"><span class="v">617</span></div></div></div></div>
+      <div class="row"><div class="rl">Qwen-Image<small>even</small></div><div class="pair">
+        <div class="track"><div class="bar" tabindex="0" style="background:var(--s1)" data-w="502.0" data-tip="Qwen-Image · native, cold: 502.0 s (2026-10-25)"><span class="v">502</span></div></div>
+        <div class="track"><div class="bar" tabindex="0" style="background:var(--s2)" data-w="504.2" data-tip="Qwen-Image · AoT, cold: 504.2 s (2026-10-25)"><span class="v">504</span></div></div></div></div>
+      <div class="row"><div class="rl">Wan2.1 14B<small>native +21%</small></div><div class="pair">
+        <div class="track"><div class="bar" tabindex="0" style="background:var(--s1)" data-w="542.7" data-tip="Wan2.1 · native, cold: 542.7 s (2026-10-25)"><span class="v">543</span></div></div>
+        <div class="track"><div class="bar" tabindex="0" style="background:var(--s2)" data-w="447.5" data-tip="Wan2.1 · AoT (two-core attention), cold: 447.5 s; stock AoT 455.6 s (2026-10-25)"><span class="v">448</span></div></div></div></div>
+      <div class="row"><div class="rl">LTX-2<small>native −25%</small></div><div class="pair">
+        <div class="track"><div class="bar" tabindex="0" style="background:var(--s1)" data-w="588.3" data-tip="LTX-2 · native, cold: 588.3 s (2026-10-20, 50 steps)"><span class="v">588</span></div></div>
+        <div class="track"><div class="bar" tabindex="0" style="background:var(--s2)" data-w="781.3" data-tip="LTX-2 · AoT (two-core attention), cold: 781.3 s; stock AoT 785.5 s (2026-10-20, 50 steps)"><span class="v">781</span></div></div></div></div>
+    </div>
+    <div class="axis" aria-hidden="true"><div></div><div class="ticks" data-max="800" data-step="200"></div></div>
+    <figcaption>Each pair: native on top, AoT below. Wan2.1 and LTX-2 compare against AoT with two-core attention, the faster AoT variant. LTX-2 was measured on 2026-10-20 on an earlier instance and toolchain; the others on 2026-10-25.</figcaption>
+  </figure>
+
+  <div class="verdicts">
+    <article class="verdict">
+      <h3>HunyuanVideo 1.0</h3>
+      <div class="who"><span class="pill native">Cold: native</span><span class="pill tie">Warm: about even</span></div>
+      <p>On a cold start, native reads about <strong class="num">41 GB</strong> (the 25.6 GB DiT checkpoint plus the Llama and CLIP files). AoT reads about <strong class="num">63 GB</strong>, because its pre-cut DiT files hold 46.5 GB: some layers are copied into every core’s file, while native’s four processes share one checkpoint. AoT also reads Llama (129 s) and then the DiT (371 s) in two separate stages, which is the reason the benchmark report gives. <span class="tag inferred">bytes as the cause is inferred; sizes are measured</span></p>
+      <p class="note">Warm: native’s DiT copy takes 4.0 s vs 28.4 s, but its load plus warm-up is 57 s (34.5 s after the NKI trace-cache fix) vs AoT’s 36 s plus its two text-encoder stages.</p>
+    </article>
+    <article class="verdict">
+      <h3>Qwen-Image</h3>
+      <div class="who"><span class="pill tie">Cold: even</span><span class="pill tie">Warm: even</span></div>
+      <p>Both read the same bf16 DiT bytes (40.9 GB of checkpoint vs 40.9 GB of pre-cut files), so both take about the same time: 311 s vs 316 s. The weight store saves nothing on a bf16 checkpoint, so native always reads the original.</p>
+      <p class="note">Warm: load plus warm-up 16.1 s native (including its host text encoder) vs 15.2 s for AoT’s DiT, plus AoT’s separate 16.4 s text-encoder stage.</p>
+    </article>
+    <article class="verdict">
+      <h3>Wan2.1 14B</h3>
+      <div class="who"><span class="pill aot">Cold: AoT</span><span class="pill aot">Warm: AoT, slightly</span></div>
+      <p>Both checkpoints are fp32. AoT converted both parts to bf16 at compile time and reads about <strong class="num">41 GB</strong> in 323 s. Native reads the DiT from its bf16 weight store (217 s) but keeps the umT5 text encoder in fp32 for accuracy, so it reads all 22.7 GB of it from the checkpoint every time (172.5 s). Total about <strong class="num">51 GB</strong> and 390 s.</p>
+      <p class="note">Warm: load plus warm-up 22.2 s native vs 16.9 s AoT. <span class="tag inferred">bytes-cause-gap is inferred</span></p>
+    </article>
+    <article class="verdict">
+      <h3>LTX-2</h3>
+      <div class="who"><span class="pill native">Cold: native</span><span class="pill aot">Warm: AoT, slightly</span></div>
+      <p>The 48.8 GB Gemma-3 text encoder most likely decides it. Native runs it on the cores in bf16 and reads the store’s 23.5 GB copy (179 s). AoT runs it on the host CPU and reads the full fp32 files every cold start (about 374 s). The DiT costs about the same on both (287 s vs about 310 s). <span class="tag inferred">cause inferred</span></p>
+      <p class="note">Warm: load plus warm-up 21.2 s native vs about 17 s AoT. The component times come from 2026-10-18/19 runs (AoT split: stock AoT at 20 steps); no component split exists for the 50-step cold runs in the chart.</p>
+    </article>
+  </div>
+
+  <div class="figure">
+    <h3>Warm start: two ways to count</h3>
+    <div class="scroll"><table>
+      <thead><tr><th>Model</th><th class="r">Native: copy DiT from RAM</th><th class="r">AoT: load DiT</th><th class="r">Native: ready to run</th><th class="r">AoT: ready to run</th></tr></thead>
+      <tbody>
+        <tr><td>HunyuanVideo</td><td class="r num">4.0 s</td><td class="r num">28.4 s</td><td class="r num">57.0 s (34.5 s*)</td><td class="r num">36.2 s + text stages</td></tr>
+        <tr><td>Qwen-Image</td><td class="r num">3.7 s</td><td class="r num">15.2 s</td><td class="r num">16.1 s</td><td class="r num">15.2 s + text stage</td></tr>
+        <tr><td>Wan2.1 14B</td><td class="r num">3.6 s</td><td class="r num">16.9 s</td><td class="r num">22.2 s</td><td class="r num">16.9 s</td></tr>
+        <tr><td>LTX-2 (Oct 18/19)</td><td class="r num">5.4 s</td><td class="r num">12.0 s</td><td class="r num">21.2 s</td><td class="r num">~17 s</td></tr>
+      </tbody>
+    </table></div>
+    <p class="figcap">The left pair is the raw copy, where native’s four parallel processes win. The right pair is what a user waits for: native adds building the model outline, its text encoder and a warm-up pass, while AoT’s figure already includes handing the weights to the cores. Wan2.1’s AoT figures include umT5 (it shares the DiT’s process). LTX-2’s AoT “ready” figure adds the 5.0 s host text encoder to the 12.0 s DiT. HunyuanVideo and Qwen-Image run their AoT text encoders in separate stages, not counted here. *After the NKI trace-cache fix (commit <span class="mono">f4d9ac1</span>).</p>
+  </div>
+</section>
+
+<section id="ideas">
+  <div class="col stack">
+    <p class="secnum">07 · What native can improve</p>
+    <h2>Where native weight loading can get faster</h2>
+    <p>These are proposals. None of them has been measured yet; the expected effect is estimated from the numbers above.</p>
+  </div>
+  <div class="ideas col">
+    <div class="idea">
+      <h3>Use the disk while the processes are still starting</h3>
+      <p>On a cold start, native spends 9–27 s launching its processes and building the model outline before the first byte of weights is read, and the disk sits idle meanwhile. Starting to read the weight files into the page cache as soon as the command runs, before the processes are up, puts that idle time to use.</p>
+      <p class="gain">Expected: up to ~20 s off a cold start. (Reading the text encoder and the DiT at the same time would not help on this machine: the reads already run at the disk’s full speed, ~130 MB/s, one after the other.)</p>
+    </div>
+    <div class="idea">
+      <h3>Load umT5 in bf16, if accuracy allows</h3>
+      <p>Wan2.1 most likely loses its cold-start race because umT5 stays in fp32, so the weight store never applies and 22.7 GB are re-read every time. If a bf16 umT5 passes an accuracy check (the code notes it is sensitive to bf16), the store would hold an 11.4 GB copy.</p>
+      <p class="gain">Expected: about 85 s off Wan2.1’s cold start, roughly closing the gap to AoT. Needs an accuracy check first.</p>
+    </div>
+    <div class="idea">
+      <h3>Write the weight store off the critical path</h3>
+      <p>The store is written during the first load. On 2026-10-19 that write took Wan2.1’s first compile from 314 s to 519 s and LTX-2’s from 119 s to 307 s; in the latest Wan2.1 compile it took 192–215 s per core. It also pushes the just-read checkpoint out of the page cache. Writing after warm-up, in the background, or with a hint to Linux not to cache the written pages would remove both costs.</p>
+      <p class="gain">Expected: about 3 minutes off the first compile for Wan2.1 and LTX-2.</p>
+    </div>
+    <div class="idea">
+      <h3>Shrink the fixed cost of every request</h3>
+      <p>Every native request pays the process launch (9–27 s) and a warm-up pass. The NKI trace cache already cut HunyuanVideo’s warm-up from 36.5 s to 13.5 s. Making the launch time steadier, caching more of the warm-up, and keeping a resident server process so weights load once rather than per request attack the rest.</p>
+      <p class="gain">Expected: 10–20 s per warm request; a resident server removes loading from requests entirely.</p>
+    </div>
+    <div class="idea">
+      <h3>Put the weight store on faster storage</h3>
+      <p>On this ~130 MB/s disk, a ready-cut copy only helps when it is smaller than the original, which is why bf16 checkpoints get none. On local NVMe the store would help every model, including bf16 ones, because reading would be several times faster. This has not been tested.</p>
+      <p class="gain">Expected: cold loads limited by NVMe speed instead of the network disk.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <p><strong>Setup.</strong> AWS trn2.3xlarge: one Trainium2 device with 4 NeuronCores (24 GiB HBM each), 12 vCPUs, 124.8 GiB RAM, one EBS volume at ~130 MB/s. Every run uses TP4, seed 42 and the prompt “a cinematic shot of a red fox running through a snowy forest”.</p>
+  <p><strong>Sources.</strong> Measurements from <span class="mono">benchmark/trn2/hunyuan_video_neuron.md</span>, <span class="mono">native_vs_aot_tp4_2026-10-25.md</span>, <span class="mono">neuron_final.md</span>, <span class="mono">ltx_2_neuron.md</span>, <span class="mono">neuron_feature_matrix.md</span> and <span class="mono">shared_weight_store_AB.md</span>; mechanism from <span class="mono">docs/reports/2026-10-26-weight-loading-native-vs-aot.md</span> (branch <span class="mono">feat/hunyuan-neuron</span>). Sizes on disk are from the checkpoint files’ headers.</p>
+  <p><strong>Caveats.</strong> HunyuanVideo, Qwen-Image and Wan2.1 end-to-end numbers were measured on 2026-10-25; LTX-2 and the weight-store compile costs on 2026-10-18 to 2026-10-20 on an earlier instance and toolchain. The HunyuanVideo request breakdown is a single warm run per backend (the three-run mean gap is 106 s). Explanations tagged as inferred are drawn from file sizes, not from separate measurements; the sizes themselves are measured.</p>
+</footer>
+
+</div>
+<div class="tip" id="tip" hidden></div>
+
+<script>
+(function () {
+  // Bars: width as a share of the chart's axis maximum.
+  document.querySelectorAll('.figure.chart').forEach(function (fig) {
+    var ticks = fig.querySelector('.ticks');
+    var max = Number(ticks.dataset.max), step = Number(ticks.dataset.step);
+    for (var t = 0; t <= max; t += step) {
+      var s = document.createElement('span');
+      s.style.left = (t / max * 100) + '%';
+      s.textContent = t + (t === max ? ' s' : '');
+      ticks.appendChild(s);
+    }
+    fig.querySelectorAll('.bar').forEach(function (b) {
+      b.style.width = (Number(b.dataset.w) / max * 100) + '%';
+    });
+    fig.querySelectorAll('.stackbar').forEach(function (sb) {
+      sb.style.width = (Number(sb.dataset.total) / max * 100) + '%';
+      sb.querySelectorAll('.seg').forEach(function (seg) {
+        seg.style.flex = Number(seg.dataset.w) + ' 1 0';
+        if (Number(seg.dataset.w) / max < 0.06) seg.querySelector('.sl').textContent = '';
+      });
+    });
+  });
+
+  // Tooltips on hover and keyboard focus.
+  var tip = document.getElementById('tip');
+  function show(el, x, y) {
+    tip.textContent = el.dataset.tip;
+    tip.hidden = false;
+    var w = tip.offsetWidth, h = tip.offsetHeight;
+    var left = Math.min(Math.max(8, x + 12), window.innerWidth - w - 8);
+    var top = y - h - 12 < 8 ? y + 16 : y - h - 12;
+    tip.style.left = left + 'px'; tip.style.top = top + 'px';
+  }
+  document.querySelectorAll('[data-tip]').forEach(function (el) {
+    el.setAttribute('aria-label', el.dataset.tip);
+    el.addEventListener('mousemove', function (e) { show(el, e.clientX, e.clientY); });
+    el.addEventListener('mouseleave', function () { tip.hidden = true; });
+    el.addEventListener('focus', function () { var r = el.getBoundingClientRect(); show(el, r.left + r.width / 2, r.top); });
+    el.addEventListener('blur', function () { tip.hidden = true; });
+  });
+
+  // Model tabs (#hv, #qwen, #wan, #ltx).
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('[role="tab"]'));
+  function select(id) {
+    tabs.forEach(function (t) {
+      var on = t.id === 'tab-' + id;
+      t.setAttribute('aria-selected', on ? 'true' : 'false');
+      t.tabIndex = on ? 0 : -1;
+      document.getElementById(t.getAttribute('aria-controls')).hidden = !on;
+    });
+  }
+  tabs.forEach(function (t, i) {
+    t.addEventListener('click', function () { select(t.id.slice(4)); });
+    t.addEventListener('keydown', function (e) {
+      if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+      var n = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length];
+      select(n.id.slice(4)); n.focus();
+    });
+  });
+  var h = (location.hash || '').slice(1);
+  if (['hv', 'qwen', 'wan', 'ltx'].indexOf(h) >= 0) select(h); else select('hv');
+})();
+</script>
