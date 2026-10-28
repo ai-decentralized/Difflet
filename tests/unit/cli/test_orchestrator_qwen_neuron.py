@@ -406,6 +406,90 @@ def test_vae_dtype_with_host_vae_is_refused(monkeypatch, tmp_path, capsys, mode)
     assert "--vae-dtype sets the device decoder; --host-vae decodes on the host" in err
 
 
+# ------------------------------------ --vae-exec-mode compile (phase 7's opt-in)
+
+
+@pytest.mark.parametrize("vae_dtype", [None, "bf16"])
+def test_neuron_vae_stage_compiled_by_region_decodes_as_the_eager_stage(
+        monkeypatch, tmp_path, clean_neuron_mesh, vae_dtype):
+    """--vae-exec-mode compile: the vae stage builds the decoder compiled region by region (on
+    the CPU: aot_eager) and writes the image the eager stage writes, to fp32 rounding (fp32) or
+    within bf16 rounding (bf16: the first latent frame's convolutions sum fewer zero terms)."""
+    import math
+
+    import torch
+
+    _backend(monkeypatch, "neuron")
+    model = tmp_path / "model"
+    _tiny_vae_snapshot(model)
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path",
+                        lambda *a, **k: str(model))
+    monkeypatch.setattr(qwen_mod, "_save_image_pil",
+                        lambda image, path: (_ for _ in ()).throw(RuntimeError("keep the .pt")))
+    built = _cpu_vae_stage(monkeypatch)
+    height, width = 64, 96
+    work = tmp_path / "work"
+    work.mkdir()
+    packed = torch.randn(1, (height // 16) * (width // 16), 16,
+                         generator=torch.Generator().manual_seed(3)).to(torch.bfloat16)
+    torch.save(packed, work / "latents.pt")
+    images = {}
+    for exec_mode in (None, "compile"):
+        from difflet.backends.neuron.ops_impl import parallel_mesh
+
+        parallel_mesh.destroy_parallel_mesh()
+        args = _qwen_args(height=height, width=width, work_dir=str(work), vae_dtype=vae_dtype,
+                          vae_exec_mode=exec_mode, output=str(tmp_path / f"{exec_mode}.png"),
+                          cache_dir=str(tmp_path / "c"))
+        QwenImageOrchestrator(args)._run_stage_internal("vae", args)
+        images[exec_mode] = torch.load(tmp_path / f"{exec_mode}.pt")
+    eager_app, compiled_app = built
+    assert (eager_app.exec_mode, compiled_app.exec_mode) == ("eager", "compile")
+    eager, compiled = images[None], images["compile"]
+    assert compiled.dtype == eager.dtype == torch.float32 and compiled.shape == eager.shape
+    if vae_dtype is None:
+        torch.testing.assert_close(compiled, eager, atol=2e-5, rtol=1e-4)
+    else:
+        mse = float(((compiled.double() - eager.double()) ** 2).mean())
+        assert mse == 0 or 10 * math.log10(4.0 / mse) >= 50.0
+
+
+def test_vae_exec_mode_is_forwarded_only_when_given_and_keys_the_vae_stage(monkeypatch):
+    plain_args = _qwen_args(cache_dir="/c")
+    assert "--vae-exec-mode" not in QwenImageOrchestrator(plain_args)._shared_cli_args("generate")
+    compiled_args = _qwen_args(cache_dir="/c", vae_exec_mode="compile")
+    parts = QwenImageOrchestrator(compiled_args)._shared_cli_args("generate")
+    assert parts[parts.index("--vae-exec-mode") + 1] == "compile"
+
+    def keyed(backend, args):
+        _backend(monkeypatch, backend)
+        orch = QwenImageOrchestrator(args)
+        return {s: (orch._stage_cache_inputs(s, args), orch._stage_compiled_dir(s, args))
+                for s in ("text", "generate", "vae")}
+
+    for backend in (None, "trainium", "tpu"):  # the AoT paths do not read the flag
+        assert keyed(backend, compiled_args) == keyed(backend, plain_args)
+    neuron, compiled = keyed("neuron", plain_args), keyed("neuron", compiled_args)
+    assert keyed("neuron", _qwen_args(cache_dir="/c", vae_exec_mode="eager")) == neuron
+    assert compiled["vae"][0] == {**neuron["vae"][0], "vae_exec_mode": "compile"}
+    assert compiled["vae"][1] != neuron["vae"][1]
+    assert (compiled["text"], compiled["generate"]) == (neuron["text"], neuron["generate"])
+
+
+@pytest.mark.parametrize("mode", ["compile", "generate", "run"])
+def test_vae_exec_mode_with_host_vae_is_refused(monkeypatch, tmp_path, capsys, mode):
+    _backend(monkeypatch, "neuron")
+    monkeypatch.setattr(qwen_mod.runner, "run_stage",
+                        lambda *a, **k: pytest.fail("no stage may be launched"))
+    monkeypatch.setattr(QwenImageOrchestrator, "download",
+                        lambda self: pytest.fail("rejected before the download"))
+    args = _qwen_args(host_vae=True, vae_exec_mode="compile", work_dir=str(tmp_path / "w"))
+    with pytest.raises(SystemExit) as exc:
+        getattr(QwenImageOrchestrator(args), mode)()
+    assert exc.value.code == 2
+    assert "--vae-exec-mode sets the device decoder" in capsys.readouterr().err
+
+
 # ----------------------------------------------------------------- driver-side rejection
 
 _REJECTED = [

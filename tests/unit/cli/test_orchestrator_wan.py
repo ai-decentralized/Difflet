@@ -822,11 +822,13 @@ class _FakeNeuronVae:
 
     instances: list = []
 
-    def __init__(self, *, model_path, latent_shape, parallel, device, dtype=None):
+    def __init__(self, *, model_path, latent_shape, parallel, device, dtype=None,
+                 exec_mode="eager"):
         from difflet.models.wan.vae.modeling_vae import WanVAEDecoderConfig
 
         self.model_path, self.latent_shape, self.device = model_path, latent_shape, device
-        self.dtype = dtype  # the stage passes --vae-dtype or default_vae_dtype(num_frames)
+        # the stage passes --vae-dtype or default_vae_dtype(num_frames), and --vae-exec-mode
+        self.dtype, self.exec_mode = dtype, exec_mode
         self.vae_config = WanVAEDecoderConfig(z_dim=4, latents_mean=[0.5] * 4,
                                               latents_std=[2.0] * 4)
         self.loaded, self.skip_warmup, self.decoded = False, None, []
@@ -840,9 +842,11 @@ class _FakeNeuronVae:
         return z.cpu() + 1.0
 
 
+@pytest.mark.parametrize("vae_exec_mode", [None, "eager", "compile"])
 @pytest.mark.parametrize("vae_dtype", [None, "fp32", "bf16"])
 @pytest.mark.parametrize("mode", ["compile", "generate"])
-def test_neuron_vae_stage_decodes_on_the_device(monkeypatch, tmp_path, mode, vae_dtype):
+def test_neuron_vae_stage_decodes_on_the_device(monkeypatch, tmp_path, mode, vae_dtype,
+                                                vae_exec_mode):
     import json
 
     import torch
@@ -877,7 +881,7 @@ def test_neuron_vae_stage_decodes_on_the_device(monkeypatch, tmp_path, mode, vae
     torch.save(z, work / "latents.pt")
     args = _wan_args(model_id=_WAN21_ID, stage_mode=mode, work_dir=str(work),
                      cache_dir=str(tmp_path / "cache"), output=str(tmp_path / "out" / "clip.pt"),
-                     vae_dtype=vae_dtype)
+                     vae_dtype=vae_dtype, vae_exec_mode=vae_exec_mode)
 
     WanOrchestrator(args)._stage_vae(args)
 
@@ -885,6 +889,8 @@ def test_neuron_vae_stage_decodes_on_the_device(monkeypatch, tmp_path, mode, vae
     assert app.loaded and app.latent_shape == (1, 4, 3, 60, 104) and app.device == "neuron"
     # default_vae_dtype of the 9-frame clip (bf16) unless --vae-dtype says otherwise.
     assert app.dtype is (torch.float32 if vae_dtype == "fp32" else torch.bfloat16)
+    # eager unless --vae-exec-mode compile (the phase-7 opt-in).
+    assert app.exec_mode == (vae_exec_mode or "eager")
     # Its NEFF cache is DIFFLET_COMPILE_CACHE's, not torch-neuronx's /tmp/neff_cache.
     assert os.environ["TORCH_NEURONX_NEFF_CACHE_DIR"] == str(
         tmp_path / "compile_cache" / "neuron" / "neff")
@@ -1646,3 +1652,72 @@ def test_fp32_umt5_moves_to_the_host_where_bf16_would_fit(wan_snapshot, tmp_path
     assert [("--host-text-encoder" in cli) for _, cli in wan_snapshot.stages] == [True, True]
     assert all(cli[cli.index("--text-encoder-dtype") + 1] == "fp32"
                for _, cli in wan_snapshot.stages)
+
+
+# ------------------------- phase 7: --vae-exec-mode compile (the decoder compiled by region)
+
+
+def test_vae_exec_mode_is_forwarded_only_when_given_and_parsed():
+    from difflet.cli.main import _build_parser
+    from difflet.cli.stage import _build_stage_parser
+
+    plain = WanOrchestrator(_wan_args())._shared_cli_args(stage_mode="generate")
+    assert "--vae-exec-mode" not in plain
+    parts = WanOrchestrator(_wan_args(vae_exec_mode="compile"))._shared_cli_args(
+        stage_mode="compile")
+    assert parts[parts.index("--vae-exec-mode") + 1] == "compile"
+    for command in ("compile", "generate", "run"):
+        cli = _build_parser().parse_args([command, "--model-id", _WAN21_ID,
+                                          "--vae-exec-mode", "compile"])
+        assert cli.vae_exec_mode == "compile"
+        assert _build_parser().parse_args([command, "--model-id", _WAN21_ID]).vae_exec_mode is None
+    stage, _ = _build_stage_parser().parse_known_args(
+        ["--orchestrator", _WAN21_ID, "--stage", "vae", *parts])
+    assert stage.vae_exec_mode == "compile"
+
+
+def test_vae_exec_mode_reaches_dp_workers():
+    from difflet.cli.dp.router import worker_cli_args
+
+    argv = worker_cli_args(_wan_args(model_id=_WAN21_ID, vae_exec_mode="compile"))
+    assert argv[argv.index("--vae-exec-mode") + 1] == "compile"
+    assert "--vae-exec-mode" not in worker_cli_args(_wan_args(model_id=_WAN21_ID))
+
+
+def test_compiled_vae_gets_its_own_neuron_vae_stage_key(monkeypatch):
+    """--vae-exec-mode compile adds one field to the neuron vae stage's key; eager, given or
+    not, keeps the key (and its manifests), and the AoT backends' keys never change."""
+    def keyed(backend, **flags):
+        _unset(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE")
+        if backend is not None:
+            monkeypatch.setenv("DIFFLET_BACKEND", backend)
+        args = _wan_args(model_id=_WAN21_ID, cache_dir="/c", **flags)
+        orch = WanOrchestrator(args)
+        return {s: (orch._stage_cache_inputs(s, args), orch._stage_compiled_dir(s, args))
+                for s in ("transformer", "vae")}
+
+    for backend in (None, "trainium", "tpu"):
+        assert keyed(backend, vae_exec_mode="compile") == keyed(backend)
+    neuron = keyed("neuron")
+    assert keyed("neuron", vae_exec_mode="eager") == neuron
+    compiled = keyed("neuron", vae_exec_mode="compile")
+    assert compiled["vae"][0] == {**neuron["vae"][0], "vae_exec_mode": "compile"}
+    assert compiled["vae"][1] != neuron["vae"][1]
+    assert compiled["transformer"] == neuron["transformer"]
+    both = keyed("neuron", vae_exec_mode="compile", vae_dtype="fp32")
+    assert both["vae"][0] == {**neuron["vae"][0], "vae_exec_mode": "compile",
+                              "vae_dtype": "float32"}
+    assert keyed("neuron", vae_exec_mode="compile", vae_dtype="bf16") == compiled
+
+
+@pytest.mark.parametrize("mode", ["compile", "generate", "run"])
+def test_vae_exec_mode_is_refused_with_host_vae_on_neuron(monkeypatch, tmp_path, capsys, mode):
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    _refuse_launches(monkeypatch)
+    args = _wan_args(work_dir=str(tmp_path / "work"), host_vae=True, vae_exec_mode="compile")
+
+    with pytest.raises(SystemExit) as exc:
+        getattr(WanOrchestrator(args), mode)()
+
+    assert exc.value.code == 2
+    assert "--vae-exec-mode sets the device decoder" in capsys.readouterr().err

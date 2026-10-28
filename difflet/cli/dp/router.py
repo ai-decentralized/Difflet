@@ -104,6 +104,7 @@ def worker_cli_args(args) -> list[str]:
         ("--exec-mode", getattr(args, "exec_mode", None)),
         # Component precisions (a worker that lost them would decode or encode in the default).
         ("--vae-dtype", getattr(args, "vae_dtype", None)),
+        ("--vae-exec-mode", getattr(args, "vae_exec_mode", None)),
         ("--text-encoder-dtype", getattr(args, "text_encoder_dtype", None)),
         ("--guidance-scale-2", getattr(args, "guidance_scale_2", None)),
         # TeaCache: a worker that lost these would silently run without it.

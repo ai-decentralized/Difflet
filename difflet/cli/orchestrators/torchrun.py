@@ -132,6 +132,24 @@ def vae_dtype_conflict(args: argparse.Namespace) -> str | None:
     return None
 
 
+def vae_exec_mode_conflict(args: argparse.Namespace) -> str | None:
+    """--vae-exec-mode with --host-vae (the host decode is diffusers', eager). Torch-free."""
+    if getattr(args, "host_vae", False) and getattr(args, "vae_exec_mode", None):
+        return ("--vae-exec-mode sets the device decoder; --host-vae decodes on the host with "
+                "diffusers")
+    return None
+
+
+def vae_exec_mode_key(args: argparse.Namespace) -> dict:
+    """The vae stage key field of Wan's and Qwen-Image's --vae-exec-mode compile (phase 7 of the
+    2026-10-26 native-vs-AoT plan): ``{"vae_exec_mode": "compile"}``, else nothing, so the
+    default (eager) stage keeps its key and its manifests. The caller adds it on the neuron
+    backend only. Torch-free."""
+    if getattr(args, "vae_exec_mode", None) == "compile":
+        return {"vae_exec_mode": "compile"}
+    return {}
+
+
 def cfg_cp_conflict(args: argparse.Namespace) -> str | None:
     """--cfg-parallel with --cp-degree > 1: both take the data-parallel lanes (the neuron
     configs refuse the pair in every rank as well). Torch-free."""

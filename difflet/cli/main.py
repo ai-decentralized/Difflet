@@ -174,8 +174,8 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
         dest="device_vae",
         action="store_true",
         help="Qwen-Image and HunyuanVideo on --backend neuron: decode in a VAE stage of its "
-        "own on one NeuronCore (Qwen-Image: fp32, eager; HunyuanVideo: see --vae-dtype and "
-        "--vae-exec-mode), after the generate launch has exited, instead of on the host CPU. "
+        "own on one NeuronCore (see --vae-dtype and --vae-exec-mode), after the generate "
+        "launch has exited, instead of on the host CPU. "
         "The default for Qwen-Image (HunyuanVideo's is --vae-in-process); mutually exclusive "
         "with --host-vae and --vae-in-process.",
     )
@@ -203,9 +203,11 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
         dest="vae_exec_mode",
         choices=["eager", "compile"],
         default=None,
-        help="HunyuanVideo on --backend neuron: the device VAE decoder compiled region by "
-        "region on fixed-size tiles (compile, the default) or op by op on diffusers' tiles "
-        "(eager). Not with --host-vae.",
+        help="--backend neuron: the device VAE decoder compiled region by region or run op by "
+        "op. HunyuanVideo: on fixed-size tiles (compile, the default) or on diffusers' tiles "
+        "(eager). Wan and Qwen-Image: in the vae stage, eager (the default) or compile (the "
+        "opt-in: whole frames, one set of graphs for the first latent frame and one for every "
+        "later frame). Not with --host-vae.",
     )
     p.add_argument(
         "--host-text-encoder",
