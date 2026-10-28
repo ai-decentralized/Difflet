@@ -1702,7 +1702,7 @@ Steady step is the median after the first step (the first step reads the bf16 we
 
 ## Qwen-Image native accuracy: root cause and fix (2026-10-28)
 
-**Root cause:** every Difflet Qwen-Image backend zero-pads the prompt embeddings to `TEXT_SEQ_LEN` = 1024 rows and drops the mask, so the DiT's joint attention attends the padding. A zero row is not an absent key: `txt_norm` / `txt_in` turn it into `txt_in`'s bias, which then flows through every block as a real key and value. The fox prompt has 17 valid rows, so 1007 of the 1041 text keys were padding. diffusers (the CPU references) passes the 17 rows alone. The text encode is not the cause.
+**Root cause:** every Difflet Qwen-Image backend zero-pads the prompt embeddings to `TEXT_SEQ_LEN` = 1024 rows and drops the mask, so the DiT's joint attention attends the padding. A zero row is not an absent key: `txt_norm` / `txt_in` turn it into `txt_in`'s bias, which then flows through every block as a real key and value. The fox prompt has 17 valid rows, so 1007 of the 1024 text keys were padding. diffusers (the CPU references) passes the 17 rows alone. The text encode is not the cause.
 
 **Evidence** (CPU only unless noted; scratch and scripts in `B/nf_qwen_text/`, `B` = `/home/ubuntu/bench-2026-10-26-4m`):
 1. **Text embeddings are fine** (`text_cmp.py`). Against diffusers' fp32 `encode_prompt` (17 x 3584), cosine 0.99988 for both the native host encoder (bf16, run through difflet's `_HostQwenTextEncoder._encode`) and diffusers in bf16, which match each other exactly. The AoT device's `text.pt` gives 0.99991. All three have 17 valid rows and the same 34-token template drop. The CPU bf16 baseline used these same bf16 embeddings and reached 0.996, so the text encode cannot explain 0.872.
@@ -1727,7 +1727,8 @@ Steady step is the median after the first step (the first step reads the bf16 we
 - Trainium and TPU are unchanged: they pass no count and still attend the padding.
 
 **Tests:**
-- New: `test_padded_prompt_attends_only_its_valid_rows`, 8 topologies (tp1 eager and compile, tp2 compile, tp2+SP, CP2 gather_kv / ring / ulysses, tp2xCP2 compile). Before the fix all 8 fail (every element mismatched); after it all 8 pass at 1e-5 against diffusers on the valid rows.
+- New: `test_padded_prompt_attends_only_its_valid_rows`, 8 topologies (tp1 eager and compile, tp2 compile, tp2+SP, CP2 gather_kv / ring / ulysses, tp2xCP2 compile). The run that wrote the fix saw all 8 fail before it (every element mismatched; that log was not kept); after it all 8 pass at 1e-5 against diffusers on the valid rows.
+- Follow-up (2026-10-28 review): under ring CP, a mask with no valid row at all (all-False, reachable only through the tensor API: encoded prompts always keep the template's closing tokens) made the whole output NaN, because the text partial's softmax over no key gave `exp(-inf - -inf)`. `_masked_attention_with_lse` now returns the empty partial (output 0, logsumexp -inf, weight 0 in the merge), so ring attends the image keys alone, as gather_kv, Ulysses and diffusers do; unchanged (bit for bit) when a key is valid. `tests/unit/backends/test_neuron_joint_attention_cp.py` covers counts 0, 1 and more at cp 1, 2 and 4, eager and compiled.
 - Updated to diffusers' masked semantics: the end-to-end and true-CFG / CFG-parallel references of q2 and q5, and the adapter and warm-up shape tests.
 
 **Device** (TP4, 1024x1024, 50 steps, seed 42, `--vae-dtype bf16`; same `initial.pt` `95a4306b…` as `native_tp4_hashcheck/q1`; harness `scripts/bench4m_nfq.py`, which is `bench4m.py` with the native worktree taken from `BENCH4M_NATIVE_WT`):

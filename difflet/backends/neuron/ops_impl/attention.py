@@ -415,15 +415,21 @@ def joint_ring_attention(q, image_k, image_v, text_k, text_v, *, scale: float,
 def _masked_attention_with_lse(q, k, v, *, scale: float, key_valid_len):
     """Dense attention on ``[B, H, L, d]`` with keys at or beyond ``key_valid_len[b]`` masked, and its
     logsumexp ``[B, H, L]`` (fp32), max-subtracted (not ``torch.logsumexp``: the compiled
-    ``logaddexp`` bug). For short key blocks (a padded text stream). At least one valid key."""
+    ``logaddexp`` bug). For short key blocks (a padded text stream).
+
+    A row with no valid key (``key_valid_len[b] == 0``) is the empty partial: output 0 and
+    logsumexp -inf, which ``_merge_partials`` weighs 0. The max is floored at fp32's lowest
+    finite value so ``exp(-inf - m)`` is 0 rather than ``exp(-inf - -inf)`` = NaN, and the sum at
+    a tiny positive value so ``0 / 0`` cannot occur; with a valid key the max is finite and the
+    sum at least 1, so both floors leave the result unchanged."""
     scores = torch.matmul(q.float(), k.float().transpose(-1, -2)) * scale
     keys = torch.arange(k.shape[-2], device=k.device).view(1, 1, 1, -1)
     valid = keys < key_valid_len.to(k.device).view(-1, 1, 1, 1)
     scores = scores.masked_fill(~valid, float("-inf"))
-    m = scores.amax(dim=-1, keepdim=True)
+    m = scores.amax(dim=-1, keepdim=True).clamp_min(torch.finfo(torch.float32).min)
     p = torch.exp(scores - m)
     total = p.sum(dim=-1, keepdim=True)
-    out = torch.matmul(p / total, v.float()).to(q.dtype)
+    out = torch.matmul(p / total.clamp_min(torch.finfo(torch.float32).tiny), v.float()).to(q.dtype)
     return out, (m + torch.log(total)).squeeze(-1)
 
 
