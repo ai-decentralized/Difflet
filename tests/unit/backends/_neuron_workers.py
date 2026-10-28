@@ -1532,6 +1532,77 @@ def hv1_dit_worker(rank: int, world_size: int, model_dir: str, parallel: dict, e
     }
 
 
+#: The AdaLN modulation linears of the HunyuanVideo DiT: each dual-stream block's two, each
+#: single-stream block's one (diffusers' ``AdaLayerNormZero`` / ``AdaLayerNormZeroSingle``).
+HV1_MODULATION_SUFFIXES = (".norm1.linear", ".norm1_context.linear", ".norm.linear")
+
+
+def _hv1_modulation_layers(module) -> dict:
+    return {name: layer for name, layer in module.named_modules()
+            if name.endswith(HV1_MODULATION_SUFFIXES)
+            and name.startswith(("transformer_blocks.", "single_transformer_blocks."))}
+
+
+def hv1_modulation_worker(rank: int, world_size: int, model_dir: str) -> dict:
+    """HunyuanVideo's DiT application on CPU, fp32, at tp = world: per modulation linear, the
+    layer type, its weight and bias shard dims, this rank's weight and bias (as loaded), and its
+    output on a fixed ``[2, inner]`` conditioning vector (what the block feeds it: SiLU of the
+    timestep-guidance-pooled embedding)."""
+    from difflet.backends.neuron.core.checkpoint import shard_dim
+    from difflet.backends.neuron.hunyuan_video.config import NeuronHunyuanVideoConfig
+    from difflet.backends.neuron.hunyuan_video.transformer import (
+        NeuronHunyuanVideoTransformerApplication,
+    )
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_hv1_toy import TINY_SHAPE
+
+    config = NeuronHunyuanVideoConfig.from_pretrained(model_dir, tp_degree=world_size,
+                                                      **TINY_SHAPE)
+    app = NeuronHunyuanVideoTransformerApplication(
+        model_path=model_dir, config=config, parallel=DiffletParallelConfig(tp_degree=world_size),
+        dtype=torch.float32, exec_mode="eager", device="cpu")
+    app.load(skip_warmup=True)
+    emb = torch.randn(2, config.inner_dim, generator=torch.Generator().manual_seed(3))
+    layers = {}
+    with torch.no_grad():
+        for name, layer in _hv1_modulation_layers(app.module).items():
+            layers[name] = {
+                "type": type(layer).__name__,
+                "shard": [shard_dim(app.module, f"{name}.weight"),
+                          shard_dim(app.module, f"{name}.bias")],
+                "weight": layer.weight.tolist(),
+                "bias": layer.bias.tolist(),
+                "out": layer(emb).tolist(),
+            }
+    return {"report": app.load_report, "emb": emb.tolist(), "layers": layers}
+
+
+def hv1_meta_bytes_worker(rank: int, world_size: int) -> dict:
+    """The full-size HunyuanVideo DiT (the snapshot's config, 20 + 40 blocks) built on meta at
+    tp = world, nothing loaded: this rank's bf16 weight bytes (what the application's HBM check
+    counts) and the bytes of the modulation linears in it."""
+    from difflet.backends.neuron.core.application_base import rank_weight_bytes
+    from difflet.backends.neuron.core.checkpoint import build_on_meta
+    from difflet.backends.neuron.hunyuan_video.config import NeuronHunyuanVideoConfig
+    from difflet.backends.neuron.hunyuan_video.transformer import (
+        NeuronHunyuanVideoTransformerApplication,
+    )
+    from difflet.backends.neuron.ops_impl import parallel_mesh
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+
+    parallel = DiffletParallelConfig(tp_degree=world_size)
+    app = NeuronHunyuanVideoTransformerApplication(
+        model_path="unused", config=NeuronHunyuanVideoConfig(tp_degree=world_size),
+        parallel=parallel, dtype=torch.bfloat16, device="cpu")
+    parallel_mesh.init_parallel_mesh(parallel.mesh_spec)
+    module = build_on_meta(app.build_module)
+    modulation = sum(p.numel() * 2 for layer in _hv1_modulation_layers(module).values()
+                     for p in layer.parameters())
+    return {"weight_bytes": rank_weight_bytes(module, torch.bfloat16),
+            "modulation_bytes": modulation,
+            "modulation_layers": len(_hv1_modulation_layers(module))}
+
+
 def hv1_app_worker(rank: int, world_size: int, root: str, parallel: dict,
                    options: dict | None = None, generate: dict | None = None,
                    runs: int = 1) -> dict:

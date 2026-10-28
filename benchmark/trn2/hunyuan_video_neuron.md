@@ -379,6 +379,29 @@ Raw evidence under `B26/f1b/` (the VAE runs) and `B26/hunyuan_video/f1b_*` (the 
 - **SP gives nothing at tp4 here:** +0.07% per step (809.3 vs 808.7 ms); 0.06 GiB less allocated HBM (11.61 vs 11.67 GiB) but 0.10 GiB more by neuron-monitor (13.08 vs 12.98 GiB). *Inference:* at 10,240 tokens the norm and modulation regions SP shards are small next to the attention and MLP.
 - **TeaCache cadence 2 takes 40% off the denoise (40.4 → 24.3 s) but only 4.6% off the warm e2e (239.1 → 228.2 s)**, because the denoise is 17% of the e2e. Its output stays close: final latents vs the run without TeaCache have rel-L1 1.51e-2 and cosine 0.99984, and the mid frame shows the same fox and scene (`tp4_teacache2/gen0/mid.png`). The skipped steps take 1.3–2.6 ms each (host-side residual reuse).
 
+## F11: column-parallel AdaLN modulation (native, 2026-10-28)
+
+The modulation linears (`norm1.linear` and `norm1_context.linear` in the 20 dual-stream blocks, `norm.linear` in the 40 single-stream blocks; 6.80 GB in bf16) were plain `nn.Linear`s, so every rank held all of them. The native port now makes them `ColumnParallelLinear(gather_output=True)`, as HunyuanVideo 1.5's port does: each rank loads its rows of the unchanged checkpoint keys and all-gathers the `[B, 6 x 3072]` / `[B, 3 x 3072]` output (`neuron/hunyuan_video/transformer.py`, `_shard_modulation_linears`). The shared modeling, and so the AoT backend, is unchanged (plan item F11b).
+
+Same host, same day, TP4, 320x512x61, 50 steps, seed 42, the campaign prompt, guidance 6.0, harness `bench4m.py` (`run`, native venv). *Before* is `549e6f7` (`origin/feat/native-followups`), *after* is this change; each on a copy of the same compile root, recompiled in its first run. Raw evidence under `/home/ubuntu/bench-2026-10-26-4m/nf_hv_adaln/` (`N` below; the compile roots were deleted afterwards).
+
+| metric | before (`549e6f7`) | after (F11a) | change |
+|---|---:|---:|---:|
+| HBM estimate the application checks (meta module, bf16, per rank) | 11.63 GB | 6.54 GB | −5.10 GB (exactly 3/4 of 6.80 GB) |
+| peak allocated HBM, DiT-only cores / rank 0's core (DiT + decoder) | 11.67 / 14.74 GiB | 6.95 / 10.01 GiB | −4.72 GiB (5.07 GB) |
+| peak HBM by neuron-monitor, DiT-only cores / rank 0's core | 12.92 / 17.89 GiB | 8.26 / 13.23 GiB | −4.66 GiB |
+| full-depth DiT forward, interleaved B A B A (`check_neuron_hv1_dit.py --oracle none --frames 61`, 10 x 3 timed) | 839.1, 841.9 ms | 833.5, 831.5 ms | −0.9% |
+| generate step median (gen0, q1, gen1, in the order B B A A B A) | 843.5, 842.8, 865.1 ms | 862.2, 860.4, 836.4 ms | within noise |
+| output (`q1`) | `out.pt` `a17c9714…`, `final.pt` `1e11ad6a…` | the same, bit for bit | none |
+| vs the CPU fp32 reference `ref_native_noise_50` (`quality_metrics.py`) | 20.78 dB / SSIM 0.8689 / latent cosine 0.9818 | 20.78 dB / 0.8689 / 0.9818 | none |
+| logs | `N/hunyuan_video/base/` | `N/hunyuan_video/adaln/`, `N/ditbench/`, `N/quality/` | |
+
+- **HBM: about 4.7 GiB less on every core,** as computed (5.10 GB). TP2 is not measured; the estimate there drops from 16.30 to 12.91 GB per rank, which would give rank 0's core (0.5 GiB to spare at TP2 with the in-process decoder, open issue 9) about 3.2 GiB more room.
+- **The step is unchanged.** The generate step medians on this host spread over 836–865 ms between runs (load average about 10 on 12 vCPUs from another session's CPU jobs), and neither version was faster in every pair, so the interleaved DiT forward timing is the better comparison: 0.9% faster after. *Inference:* the 80 extra all-gathers per step (each a few KB) cost about what the smaller weight reads save (1.7 instead of 6.8 GB of modulation weights per core per step).
+- **The output is bit-identical** (`out.pt`, final latents, and the initial latents bit-identical to `hunyuan_video/native_tp4_hashcheck/q1/initial.pt`), so the quality scores are the same as before. *Inference:* each output element is still one full-length dot product; the gather only concatenates the slices.
+- **Device parity** at TP4 compile, 2+2 blocks, 5x320x512, t=900, 20 valid text tokens: rel-L1 6.169e-3 = **0.961x** the bf16 control (gate 1.15x), cosine 0.999979, the four ranks identical, 4 of 4 blocks compiled, no fallback (`N/parity/adaln_tp4.{log,json}`).
+- **CPU gloo parity against diffusers** still passes at TP1, TP2 and TP4 (eager and compile), TP2 + SP and CP2 / TP2 x CP2 (gather_kv, ulysses, ring); new tests check that each rank holds only its rows of every modulation weight and bias and returns the whole output, and that the TP4 estimate drops by three quarters of the modulation bytes (`tests/unit/backends/test_neuron_hv1_dit.py`).
+
 ## Parity (reused from this campaign's verification stages)
 
 | check | result | log (`J = /home/ubuntu/.claude/jobs/28e8164e/tmp/hv1_device`) |
@@ -399,7 +422,7 @@ Raw evidence under `B26/f1b/` (the VAE runs) and `B26/hunyuan_video/f1b_*` (the 
 7. **720x1280x129 does not compile on trn2.3xlarge** (section "720x1280x129"): with the bounded attention kernel split to one head per call, neuronx-cc's block-graph compile is OOM-killed at 109.8 GiB of host memory (of 124.8 GiB). Untried options and their cost are listed there.
 8. **Editing `difflet/backends/neuron/ops_impl/attention.py` recompiles every cached block graph once** (the graphs carry its source lines; *inference* from the NEFFs' debug metadata and the recompiles after `ce9d212` and `195fc8c`). Not a Difflet bug, but a cache that survives code edits would need torch-neuronx to key graphs without source locations.
 
-9. **With the decode in the generate launch, TP2 leaves 0.5 GiB of HBM on rank 0's core** (23.50 of 24 GiB by neuron-monitor, 19.24 GiB allocated; "F1b"). The three default layouts fit; an option that adds HBM at TP2 was not measured. `--device-vae` keeps the decoder in a launch of its own.
+9. **With the decode in the generate launch, TP2 leaves 0.5 GiB of HBM on rank 0's core** (23.50 of 24 GiB by neuron-monitor, 19.24 GiB allocated; "F1b"). The three default layouts fit; an option that adds HBM at TP2 was not measured. `--device-vae` keeps the decoder in a launch of its own. Since F11a (column-parallel modulation, 2026-10-28) the DiT's estimate at TP2 is 3.39 GB smaller per rank (computed; TP2 not re-measured).
 
 ## Reproduction
 

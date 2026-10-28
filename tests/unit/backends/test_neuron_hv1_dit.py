@@ -25,7 +25,11 @@ from tests.unit.backends._neuron_hv1_toy import (  # noqa: E402
     tiny_inputs,
     write_tiny_hv1,
 )
-from tests.unit.backends._neuron_workers import hv1_dit_worker  # noqa: E402
+from tests.unit.backends._neuron_workers import (  # noqa: E402
+    hv1_dit_worker,
+    hv1_meta_bytes_worker,
+    hv1_modulation_worker,
+)
 
 CLEAN = {"missing": [], "unexpected": []}
 
@@ -115,6 +119,17 @@ def test_dit_matches_diffusers_short_prompt(tiny):
 
 
 @pytest.mark.parametrize("exec_mode", ["eager", "compile"])
+def test_dit_matches_diffusers_tp4_gloo(tiny, exec_mode):
+    """Four TP ranks: one of the toy's four heads per rank, and a quarter of every modulation
+    linear's output columns."""
+    reference = diffusers_reference(tiny, tiny_inputs(9))
+    for r in run_ranks(hv1_dit_worker, tiny, {"tp_degree": 4}, exec_mode, 9, world_size=4):
+        assert r["report"] == CLEAN
+        assert r["unwarmed_shapes"] == []
+        _assert_matches(r["out"], reference)
+
+
+@pytest.mark.parametrize("exec_mode", ["eager", "compile"])
 def test_dit_matches_diffusers_tp2_gloo(tiny, exec_mode):
     reference = diffusers_reference(tiny, tiny_inputs(9))
     results = run_ranks(hv1_dit_worker, tiny, {"tp_degree": 2}, exec_mode, 9, world_size=2)
@@ -183,10 +198,61 @@ def test_truncated_depth_skips_the_cut_blocks(tiny):
         _assert_matches(r["out"], reference)
 
 
-@pytest.mark.parametrize("tp", [1, 2])
+@pytest.mark.parametrize("tp", [1, 2, 4])
 def test_teacache_mod_input_matches_diffusers_block0(tiny, tp):
     """The port's ``teacache_mod_input`` is diffusers' block-0 modulated input, whole on every
-    rank under TP (the modulation linears are replicated)."""
+    rank under TP (the column-parallel modulation linears gather their output)."""
     reference = diffusers_teacache_reference(tiny, tiny_inputs())
     for r in run_ranks(hv1_dit_worker, tiny, {"tp_degree": tp}, "eager", world_size=tp):
         _assert_matches(r["teacache"], reference)
+
+
+@pytest.mark.parametrize("tp", [2, 4])
+def test_modulation_linears_are_column_parallel(tiny, tp):
+    """Every AdaLN modulation linear (``norm1.linear`` and ``norm1_context.linear`` per
+    dual-stream block, ``norm.linear`` per single-stream block) holds only its rank's rows of
+    the checkpoint's weight and bias, and gathers diffusers' whole output on every rank."""
+    from diffusers import HunyuanVideoTransformer3DModel
+
+    reference = HunyuanVideoTransformer3DModel.from_pretrained(tiny).eval()
+    results = run_ranks(hv1_modulation_worker, tiny, world_size=tp)
+    emb = torch.tensor(results[0]["emb"])
+    names = sorted(results[0]["layers"])
+    assert names == ["single_transformer_blocks.0.norm.linear",
+                     "single_transformer_blocks.1.norm.linear",
+                     "transformer_blocks.0.norm1.linear",
+                     "transformer_blocks.0.norm1_context.linear"]
+    for rank, r in enumerate(results):
+        assert r["report"] == CLEAN
+        for name in names:
+            layer, full = r["layers"][name], reference.get_submodule(name)
+            rows = full.out_features // tp
+            assert layer["type"] == "ColumnParallelLinear" and layer["shard"] == [0, 0], name
+            torch.testing.assert_close(torch.tensor(layer["weight"]),
+                                       full.weight.detach()[rank * rows:(rank + 1) * rows],
+                                       atol=0, rtol=0)
+            torch.testing.assert_close(torch.tensor(layer["bias"]),
+                                       full.bias.detach()[rank * rows:(rank + 1) * rows],
+                                       atol=0, rtol=0)
+            with torch.no_grad():
+                expected = full(emb)
+            torch.testing.assert_close(torch.tensor(layer["out"]), expected,
+                                       atol=1e-5, rtol=1e-5)
+
+
+#: One TP4 rank's bf16 weight bytes of the full-size DiT with the 80 modulation linears
+#: replicated (the port before they became column-parallel): the HBM check's estimate.
+_TP4_BYTES_REPLICATED_MODULATION = 11_634_280_992
+#: The 80 modulation linears in bf16: 20 x 2 x (3072 x 18432 + 18432) + 40 x (3072 x 9216 +
+#: 9216), about 6.80 GB.
+_MODULATION_BYTES = 2 * (20 * 2 * (3072 * 18432 + 18432) + 40 * (3072 * 9216 + 9216))
+
+
+def test_hbm_estimate_drops_by_three_quarters_of_the_modulation_at_tp4():
+    """At TP4 each rank holds a quarter of the 6.80 GB of modulation linears, so the HBM check's
+    per-rank estimate is about 5.1 GB below the replicated layout's."""
+    results = run_ranks(hv1_meta_bytes_worker, world_size=4, timeout=600.0)
+    for r in results:
+        assert r["modulation_layers"] == 80
+        assert r["modulation_bytes"] == _MODULATION_BYTES // 4
+        assert r["weight_bytes"] == _TP4_BYTES_REPLICATED_MODULATION - _MODULATION_BYTES * 3 // 4
