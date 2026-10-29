@@ -374,6 +374,7 @@ class TorchNeuronWanApplication(TorchNeuronModelApplication):
                     dtype=(_normalize_dtype(options["vae_dtype"]) if options["vae_dtype"] is not None
                            else default_vae_dtype((int(cfg.latent_frames) - 1) * 4 + 1)),
                     device=self.device,
+                    ccop_overlap=True,  # Wan's compiler flag (compile_options)
                 ),
                 device=self.device,
             )

@@ -9,6 +9,10 @@ identical ``WanTransformerBlock``s in ``blocks`` are compiled in place into one 
 the top level (Conv3d patch embedding, condition embedder, rotary tables, final norm and
 projection) stays eager. The warm-up runs at the one static shape of ``NeuronWanConfig``.
 
+Wan's two DiT-step levers apply here (``compile_options``): the ccop overlap flag joins
+``NEURON_CC_FLAGS`` in ``__init__`` on the neuron device, and ``build_module`` gives the
+self-attentions the scatter-free rotary embedding.
+
 "One expert" is the unit, as on TPU: Wan2.1 has one DiT; Wan2.2 A14B's second expert would be a
 second instance of this class.
 """
@@ -25,6 +29,10 @@ from difflet.backends.neuron.core.config_checks import (
     require_bf16_on_device,
     resolve_cp_degree,
     truncated_block_prefixes,
+)
+from difflet.backends.neuron.wan.compile_options import (
+    apply_ccop_overlap,
+    scatter_free_rope_enabled,
 )
 from difflet.backends.neuron.wan.config import NeuronWanConfig
 
@@ -85,6 +93,9 @@ class NeuronWanTransformerApplication(TorchNeuronApplicationBase):
         config = resolve_cp_degree("NeuronWanConfig", config, self.parallel)
         config.validate()
         require_bf16_on_device("Wan", self.device.type, self.dtype)
+        # Before anything compiles: the AoT path's ccop overlap flag, held while this application
+        # lives (compile_options).
+        apply_ccop_overlap(self.device, self)
         self.config = config
         # Blocks past num_layers are in the checkpoint on purpose when num_layers was cut.
         skipped = truncated_block_prefixes(config, "blocks.")
@@ -92,9 +103,18 @@ class NeuronWanTransformerApplication(TorchNeuronApplicationBase):
             self.skipped_checkpoint_prefixes = skipped
 
     def build_module(self) -> torch.nn.Module:
-        from difflet.models.wan.modeling_wan import WanTransformer3DModel
+        from difflet.models.wan.modeling_wan import WanAttention, WanTransformer3DModel
 
-        return WanTransformer3DModel(self.config, dtype=self.dtype)
+        module = WanTransformer3DModel(self.config, dtype=self.dtype)
+        if scatter_free_rope_enabled():
+            # The rotary embedding without strided writes (compile_options): set here, not in
+            # the shared modeling, which the Trainium and TPU paths also build.
+            from difflet.backends.neuron.ops_impl.embeddings import apply_rotary_emb_stacked
+
+            for attention in module.modules():
+                if isinstance(attention, WanAttention) and not attention.is_cross_attention:
+                    attention.rotary_fn = apply_rotary_emb_stacked
+        return module
 
     def checkpoint_key(self, name: str) -> str:
         return checkpoint_key(name)

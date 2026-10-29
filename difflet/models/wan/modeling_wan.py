@@ -403,6 +403,11 @@ class WanAttention(nn.Module):
     Returns: (B, S_q, dim).
     """
 
+    #: The rotary embedding the self-attention applies to q and k: ``difflet.ops.apply_rotary_emb``
+    #: of the active backend. A backend's application may set a numerically identical one on an
+    #: instance (the neuron Wan DiT does: ``difflet/backends/neuron/wan/compile_options.py``).
+    rotary_fn = staticmethod(apply_rotary_emb)
+
     def __init__(
         self,
         dim: int,
@@ -533,8 +538,8 @@ class WanAttention(nn.Module):
 
         if rotary_emb is not None and not self.is_cross_attention:
             cos, sin = rotary_emb
-            q = apply_rotary_emb(q, cos, sin)
-            k = apply_rotary_emb(k, cos, sin)
+            q = self.rotary_fn(q, cos, sin)
+            k = self.rotary_fn(k, cos, sin)
 
         # (B, S, heads, dim) → (B, heads, S, dim) for the kernel.
         q = q.transpose(1, 2)

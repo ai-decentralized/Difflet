@@ -32,6 +32,7 @@ import os
 import torch
 
 from difflet.backends.neuron.core.application_base import TorchNeuronApplicationBase
+from difflet.backends.neuron.wan.compile_options import apply_ccop_overlap
 
 
 class NeuronWanTextEncoderApplication(TorchNeuronApplicationBase):
@@ -63,6 +64,9 @@ class NeuronWanTextEncoderApplication(TorchNeuronApplicationBase):
             device=device,
             **kwargs,
         )
+        # Before anything compiles: Wan's ccop overlap flag, held while this application lives
+        # (wan/compile_options.py).
+        apply_ccop_overlap(self.device, self)
         self.text_seq_len = int(text_seq_len)
         self.batch_size = int(batch_size)
         self.encoder_config = self._read_config()

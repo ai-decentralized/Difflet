@@ -16,6 +16,10 @@ device decoder's precision; a stage key gains a field only for a precision other
 default (_component_dtype_keys), so a default command line keeps its keys.
 --vae-exec-mode compile (phase 7 of the 2026-10-26 native-vs-AoT plan) compiles the vae stage's
 decoder region by region instead of running it eager, and keys the vae stage the same way.
+Wan's two DiT-step levers on the neuron backend (the AoT path's ccop overlap compiler flag in
+every Wan process, a scatter-free RoPE in the DiT; difflet/backends/neuron/wan/compile_options.py)
+are on by default and key the stages they change (_step_lever_keys);
+DIFFLET_NEURON_WAN_CCOP_OVERLAP=0 and DIFFLET_NEURON_WAN_SCATTER_FREE_ROPE=0 turn them off.
 DP replicas (--dp) are separate torchrun launches; each one's rank 0 claims the requests
 (_replica_requests). The stage cache key names the backend and exec mode, and --cache-dir
 becomes DIFFLET_COMPILE_CACHE (the NEFF/HLO cache root) unless that is exported. Unset,
@@ -289,6 +293,20 @@ def _component_dtype_keys(stage: str, args: argparse.Namespace) -> dict:
     if value is None or value == default:
         return keys
     return {**keys, flag: component_dtype(value)}
+
+
+def _step_lever_keys(stage: str) -> dict:
+    """The neuron stage key fields of Wan's DiT-step levers that are on
+    (``difflet/backends/neuron/wan/compile_options.py``): the ccop overlap flag on both stages
+    (unless a user --tensorizer-options in NEURON_CC_FLAGS keeps it out of the stage processes,
+    which inherit this environment), the scatter-free RoPE on the transformer stage. Both are on by default, so a default stage
+    no longer matches a manifest written before them (their NEFFs differ); with both switched
+    off the key is the one it was. Nothing on the AoT backends. Torch-free."""
+    if _torchrun_backend() != "neuron":
+        return {}
+    from difflet.backends.neuron.wan.compile_options import stage_key_fields
+
+    return stage_key_fields(stage)
 
 
 class WanOrchestrator(ModelOrchestrator):
@@ -678,6 +696,7 @@ class WanOrchestrator(ModelOrchestrator):
                 dtype=dtype,
                 exec_mode=exec_mode,
                 device="neuron",
+                ccop_overlap=True,  # Wan's compiler flag (compile_options); Qwen-Image's not
             )
 
         def prepare_decode(app):
@@ -706,7 +725,8 @@ class WanOrchestrator(ModelOrchestrator):
 
     def _stage_cache_inputs(self, stage: str, args: argparse.Namespace) -> dict:
         return {**torchrun_stage_keys(self._backend_neutral_stage_cache_inputs(stage, args)),
-                **_component_dtype_keys(stage, args)}
+                **_component_dtype_keys(stage, args),
+                **_step_lever_keys(stage)}
 
     def _backend_neutral_stage_cache_inputs(self, stage: str, args: argparse.Namespace) -> dict:
         prefix = _cache_prefix(self.args.model_id)
