@@ -12,11 +12,20 @@ from difflet.backends.neuron.core import workarounds
 
 @pytest.fixture
 def installed(monkeypatch):
+    # Start from torch's own function even if an earlier test left the workarounds
+    # installed (preparing the neuron runtime installs them), and leave that state as found.
+    owners = {"Tensor": torch.Tensor, "torch": torch, "F": F}
+    before_originals = dict(workarounds._originals)
+    before_wrappers = {key: getattr(owners[key[0]], key[1]) for key in before_originals}
+    workarounds.uninstall_neuron_workarounds()
     original = F.group_norm
     workarounds.install_group_norm_fp32()
     yield original
     workarounds.uninstall_neuron_workarounds()
     assert F.group_norm is original
+    for (owner, name), wrapper in before_wrappers.items():
+        setattr(owners[owner], name, wrapper)
+    workarounds._originals.update(before_originals)
 
 
 def _inputs(dtype):

@@ -118,11 +118,8 @@ def test_config_defaults_are_the_real_text_encoders():
 def test_mrope_with_text_positions_is_the_1d_rope():
     """transformers' multimodal RoPE with the three identical position axes a text prompt gets
     equals ``rotary_tables``' 1-D RoPE, bit for bit (Qwen-Image's 16/24/24 sections)."""
-    from transformers.models.qwen2_5_vl.modeling_qwen2_5_vl import (
-        Qwen2_5_VLRotaryEmbedding,
-        apply_multimodal_rotary_pos_emb,
-    )
     from transformers import Qwen2_5_VLTextConfig
+    from transformers.models.qwen2_5_vl import modeling_qwen2_5_vl as hf
 
     hf_config = Qwen2_5_VLTextConfig(
         hidden_size=3584, num_attention_heads=28, rope_theta=1000000.0,
@@ -131,10 +128,14 @@ def test_mrope_with_text_positions_is_the_1d_rope():
     positions = torch.arange(256)[None].expand(3, 1, 256)  # get_rope_index for text
     q = torch.randn(1, 28, 256, 128, generator=torch.Generator().manual_seed(1))
     k = torch.randn(1, 4, 256, 128, generator=torch.Generator().manual_seed(2))
-    hf_cos, hf_sin = Qwen2_5_VLRotaryEmbedding(hf_config)(q, positions)
-    hf_q, hf_k = apply_multimodal_rotary_pos_emb(q, k, hf_cos, hf_sin, [16, 24, 24])
+    hf_cos, hf_sin = hf.Qwen2_5_VLRotaryEmbedding(hf_config)(q, positions)
+    if hasattr(hf, "apply_multimodal_rotary_pos_emb"):  # transformers 4.x: per-axis tables
+        hf_q, hf_k = hf.apply_multimodal_rotary_pos_emb(q, k, hf_cos, hf_sin, [16, 24, 24])
+        hf_cos, hf_sin = hf_cos[0], hf_sin[0]
+    else:  # transformers 5.x: the rotary embedding merges the sections itself
+        hf_q, hf_k = hf.apply_rotary_pos_emb(q, k, hf_cos, hf_sin)
     cos, sin = rotary_tables(128, 256, 1000000.0)
-    assert torch.equal(cos, hf_cos[0, 0]) and torch.equal(sin, hf_sin[0, 0])
+    assert torch.equal(cos, hf_cos[0]) and torch.equal(sin, hf_sin[0])
 
     def rotate(x):
         x1, x2 = x[..., :64], x[..., 64:]

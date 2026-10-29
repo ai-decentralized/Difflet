@@ -513,10 +513,10 @@ def _apply_backend_flags(args: argparse.Namespace) -> None:
     list --backend, or when --exec-mode is given for an AoT backend.
 
     Without --backend, a DIFFLET_BACKEND already in the environment selects the backend
-    the same way (a non-AoT one such as neuron makes every stage a torchrun launch), so
-    the model check runs for it too when it names a non-AoT backend; an AoT backend
-    (trainium, tpu) keeps its old path, which never checked here. An unknown
-    DIFFLET_BACKEND exits 2 as well.
+    the same way (a torchrun backend such as neuron makes every stage a torchrun launch), so
+    the model check runs for it too when it names a torchrun backend; other backends (the
+    AoT ones, the CPU reference, GPUs) keep their old path, which never checked here. An
+    unknown DIFFLET_BACKEND exits 2 as well.
     """
     backend = getattr(args, "backend", None)
     exec_mode = getattr(args, "exec_mode", None)
@@ -525,7 +525,7 @@ def _apply_backend_flags(args: argparse.Namespace) -> None:
         _require_model_backend(model_id, backend)
     elif backend is None and model_id is not None and envs.DIFFLET_BACKEND:
         ambient = _lookup_backend(None)
-        if not ambient.capabilities.requires_aot:
+        if ambient.capabilities.flow == "torchrun":
             _require_model_backend(
                 model_id, ambient.name, source=f"DIFFLET_BACKEND={envs.DIFFLET_BACKEND}"
             )
