@@ -824,10 +824,11 @@ class _FakeNeuronVae:
     instances: list = []
 
     def __init__(self, *, model_path, latent_shape, parallel, device, dtype=None,
-                 exec_mode="eager"):
+                 exec_mode="eager", ccop_overlap=False):
         from difflet.models.wan.vae.modeling_vae import WanVAEDecoderConfig
 
         self.model_path, self.latent_shape, self.device = model_path, latent_shape, device
+        self.ccop_overlap = ccop_overlap  # Wan's stage opts in; Qwen-Image's never does
         # the stage passes --vae-dtype or default_vae_dtype(num_frames), and --vae-exec-mode
         self.dtype, self.exec_mode = dtype, exec_mode
         self.vae_config = WanVAEDecoderConfig(z_dim=4, latents_mean=[0.5] * 4,
@@ -888,6 +889,7 @@ def test_neuron_vae_stage_decodes_on_the_device(monkeypatch, tmp_path, mode, vae
 
     [app] = _FakeNeuronVae.instances
     assert app.loaded and app.latent_shape == (1, 4, 3, 60, 104) and app.device == "neuron"
+    assert app.ccop_overlap is True  # Wan's compiler flag (compile_options), asked by Wan only
     # default_vae_dtype of the 9-frame clip (bf16) unless --vae-dtype says otherwise.
     assert app.dtype is (torch.float32 if vae_dtype == "fp32" else torch.bfloat16)
     # eager unless --vae-exec-mode compile (the phase-7 opt-in).
@@ -1131,6 +1133,11 @@ def test_aot_backends_skip_the_torchrun_option_check(monkeypatch, tmp_path, caps
 def test_cache_inputs_unchanged_for_trainium_and_distinct_for_neuron(monkeypatch):
     args = _wan_args(model_id=_WAN21_ID, cache_dir="/c")
     orch = WanOrchestrator(args)
+    # Wan's DiT-step levers at their default, on (test_neuron_stage_cache_keys.py switches them).
+    _unset(monkeypatch, "DIFFLET_NEURON_WAN_CCOP_OVERLAP", "DIFFLET_NEURON_WAN_SCATTER_FREE_ROPE")
+    ccop = "--tensorizer-options=--enable-ccop-compute-overlap"
+    levers = {"transformer": {"neuron_cc_flags": ccop, "rope": "stack"},
+              "vae": {"neuron_cc_flags": ccop}}
 
     def keyed(backend, exec_mode=None):
         monkeypatch.delenv("DIFFLET_BACKEND", raising=False)
@@ -1152,7 +1159,8 @@ def test_cache_inputs_unchanged_for_trainium_and_distinct_for_neuron(monkeypatch
         assert keyed(backend) == (base, base_dirs)
     neuron, neuron_dirs = keyed("neuron")
     for stage in ("transformer", "vae"):
-        assert neuron[stage] == {**base[stage], "backend": "neuron", "exec_mode": "compile"}
+        assert neuron[stage] == {**base[stage], "backend": "neuron", "exec_mode": "compile",
+                                 **levers[stage]}
         assert neuron_dirs[stage] != base_dirs[stage]
         assert neuron_dirs[stage].parent == base_dirs[stage].parent
     # resolve_exec_mode: an omitted --exec-mode keys like the default (compile); eager differs.

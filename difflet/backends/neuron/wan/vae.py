@@ -53,6 +53,7 @@ def default_vae_dtype(num_frames: int) -> torch.dtype:
     return torch.bfloat16 if int(num_frames) <= BF16_MAX_FRAMES else torch.float32
 
 from difflet.backends.neuron.core.application_base import TorchNeuronApplicationBase
+from difflet.backends.neuron.wan.compile_options import apply_ccop_overlap
 
 
 class NeuronWanVaeDecoderApplication(TorchNeuronApplicationBase):
@@ -64,7 +65,9 @@ class NeuronWanVaeDecoderApplication(TorchNeuronApplicationBase):
     ``(batch, z_dim, latent_frames, latent_height, latent_width)`` the warm-up decodes. Its
     input is ``dtype``; its output is fp32 in either dtype (the fp32 output head).
     ``compile_backend`` overrides the ``torch.compile`` backend of the compile mode (default
-    ``"neuron"`` on the device; the CPU tests pass ``"aot_eager"``).
+    ``"neuron"`` on the device; the CPU tests pass ``"aot_eager"``). ``ccop_overlap=True`` (Wan's
+    callers only) applies Wan's ccop overlap compiler flag on the neuron device
+    (``wan/compile_options.py``); Qwen-Image, which reuses this decoder, leaves it False.
     """
 
     EXEC_MODES = ("eager", "compile")
@@ -90,6 +93,7 @@ class NeuronWanVaeDecoderApplication(TorchNeuronApplicationBase):
         exec_mode: str | None = "eager",
         device="neuron",
         compile_backend=None,
+        ccop_overlap: bool = False,
         **kwargs,
     ) -> None:
         exec_mode = "eager" if exec_mode is None else exec_mode
@@ -104,6 +108,10 @@ class NeuronWanVaeDecoderApplication(TorchNeuronApplicationBase):
             device=device,
             **kwargs,
         )
+        # Before anything compiles: Wan's ccop overlap flag (wan/compile_options.py), only for the
+        # Wan callers: Qwen-Image builds this decoder too and keeps its compile flags.
+        if ccop_overlap:
+            apply_ccop_overlap(self.device, self)
         if compile_backend is not None:
             self.compile_backend = compile_backend
         if self.dtype not in (torch.float32, torch.bfloat16):

@@ -51,6 +51,23 @@ def _no_hardware_probe(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _neuron_cc_flags_restored(monkeypatch):
+    """A Wan application built for the neuron device appends the ccop overlap flag to this
+    process's NEURON_CC_FLAGS while it lives (``difflet/backends/neuron/wan/compile_options.py``);
+    restore the variable after every test, so no later test's device compile gets the flag, and
+    drop the test's holds first, so an application of this test collected during a later one
+    leaves that test's NEURON_CC_FLAGS alone."""
+    current = os.environ.get("NEURON_CC_FLAGS")
+    monkeypatch.setenv("NEURON_CC_FLAGS", current or "")
+    if current is None:
+        monkeypatch.delenv("NEURON_CC_FLAGS")
+    yield
+    from difflet.backends.neuron.wan import compile_options
+
+    compile_options._forget_holders()
+
+
+@pytest.fixture(autouse=True)
 def _neuron_weight_store_off(monkeypatch):
     """The neuron backend's weight store is on by default and lives under the compile cache
     (``~/.cache/difflet``); unit tests must not write there. Tests of the store point

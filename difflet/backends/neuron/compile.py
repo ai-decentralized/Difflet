@@ -56,6 +56,8 @@ NEFF_CACHE_ENV = "TORCH_NEURONX_NEFF_CACHE_DIR"
 NEFF_LOCAL_CACHE_ENV = "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR"
 HLO_CACHE_ENV = "TORCH_NEURONX_HLO_CACHE_DIR"
 NKI_TRACE_CACHE_ENV = "NKI_ENABLE_TRACE_CACHE"
+#: Extra neuronx-cc options torch-neuronx passes to every compile (``append_cc_flags``).
+NEURON_CC_FLAGS_ENV = "NEURON_CC_FLAGS"
 #: Opt-in to torch-neuronx's NKI trace cache (off by default: torch-neuronx warns that its key may
 #: miss environment dependencies and serve stale kernels). Kernels whose every input is a call
 #: argument are safe to cache; some are expensive to trace (the key-bounded attention_cte at
@@ -179,6 +181,53 @@ def configure_compile_cache(
     if target is os.environ:
         _warn_if_hlo_cache_dir_fixed(settings[HLO_CACHE_ENV])
     return settings
+
+
+def cc_flags_to_add(flags: str, *, env: Mapping[str, str] | None = None) -> list[str]:
+    """The options of ``flags`` that ``append_cc_flags`` would add to ``NEURON_CC_FLAGS`` in
+    ``env`` (``os.environ`` by default), in order: those it lacks, except a
+    ``--tensorizer-options=...`` when ``env`` already has one (neuronx-cc takes one such option,
+    so a second would replace the user's). Reads ``env`` only."""
+    source = os.environ if env is None else env
+    tokens = (source.get(NEURON_CC_FLAGS_ENV) or "").split()
+    added: list[str] = []
+    for flag in flags.split():
+        if flag in tokens or flag in added:
+            continue
+        option = flag.split("=", 1)[0]
+        if option == "--tensorizer-options" and any(
+                t.split("=", 1)[0] == option for t in tokens):
+            continue
+        added.append(flag)
+    return added
+
+
+def append_cc_flags(flags: str, *, env: MutableMapping[str, str] | None = None) -> str:
+    """Append neuronx-cc ``flags`` (space-separated options) to ``NEURON_CC_FLAGS`` in ``env``
+    (``os.environ`` by default), each option once; return the value now set.
+
+    torch-neuronx reads ``NEURON_CC_FLAGS`` whenever it creates a kernel, for every
+    ``torch.compile`` graph and every eager op, adds it to the neuronx-cc command line and to
+    the kernel's NEFF cache key (csrc/core/KernelExecution.cpp, ``GetCompileAdditionalArgs``;
+    cache/CompilationCacheKey.cpp, ``BuildCompilerExtension``). Setting it in-process before a
+    compile is therefore enough, and a NEFF compiled without the flag is never served for a
+    compile with it.
+
+    The value already in ``env`` (a user's flags) is kept as written; an option it already has is
+    not added again. A ``--tensorizer-options=...`` is not added when ``env`` already has one
+    (``cc_flags_to_add``): that case logs a warning and leaves the user's option in place.
+    """
+    target = os.environ if env is None else env
+    current = (target.get(NEURON_CC_FLAGS_ENV) or "").strip()
+    added = cc_flags_to_add(flags, env=target)
+    for flag in flags.split():
+        if flag not in added and flag not in current.split():
+            logger.warning(
+                "%s already has a %s option (%r); not adding %r, which would replace it",
+                NEURON_CC_FLAGS_ENV, flag.split("=", 1)[0], current, flag)
+    value = " ".join([current, *added]) if current else " ".join(added)
+    target[NEURON_CC_FLAGS_ENV] = value
+    return value
 
 
 def stack_version_tag() -> str:

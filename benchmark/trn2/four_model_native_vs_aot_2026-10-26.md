@@ -1878,15 +1878,97 @@ Plan item F6a (2026-10-28). Native at `feat/native-followups` `fa3bc3e` with the
 - **per-block graph launches and host dispatch:** grouping blocks does not help, and dispatch is asynchronous;
 - **-O level:** -O1 is worse on native.
 
-**Proposed fixes, by measured gain.** Both need the user's decision; each changes every native model's compiled graphs.
+**Proposed fixes, by measured gain.** As first written, each changed every native model's compiled graphs and needed the user's decision. Proposals 1 and 2 are now **implemented for Wan only** (section "Task 6" below); the other models keep their graphs.
 1. **Give native graph compiles AoT's `--tensorizer-options=--enable-ccop-compute-overlap`:** −9.1 ms per forward, −18 ms per step.
    - The flag reaches neuronx-cc through `NEURON_CC_FLAGS`, which torch-neuronx reads for every graph and eager op. It changes every model's NEFF cache keys, so every root recompiles once.
    - Qwen-Image, HunyuanVideo and LTX-2 must be measured before it becomes the default. Wan's one-seed quality change must be checked against a second seed.
+   - **Implemented for Wan only (task 6):** the Wan neuron applications add the flag to their own processes, default on, opt-out `DIFFLET_NEURON_WAN_CCOP_OVERLAP=0`. The second seed passed the gate. The other models were not measured with it and do not get it.
 2. **Scatter-free RoPE in `difflet/backends/neuron/ops_impl/embeddings.py`:** −3.5 ms per forward. It is bit-identical on CPU. It also changes the Flux and HunyuanVideo native graphs (`difflet.ops.apply_rotary_emb`).
+   - **Implemented for Wan only (task 6):** a separate `apply_rotary_emb_stacked` that only the Wan neuron DiT uses, default on, opt-out `DIFFLET_NEURON_WAN_SCATTER_FREE_ROPE=0`. The shared `apply_rotary_emb` is unchanged, so Flux, HunyuanVideo, the CPU backend and the AoT paths keep their graphs.
 3. **Compile the top level** (condition embedder, final norm and projection) as graphs of its own: up to about 5 ms per forward of the 9 ms measured. Not tried.
 4. **The remaining ~40 ms per forward** is in how torch-neuronx lowers the block and how neuronx-cc schedules it.
    - Lowering LayerNorm and GELU as AoT does would need torch-neuronx changes or NKI kernels, and the ablations above give no sign that either alone would pay.
    - The better route is a newer torch-neuronx, or a report to AWS with the two graphs in `B/nf_wan_step/` as the reproducer.
+
+
+## Task 6: Wan-only native step speed-up (ccop overlap + scatter-free RoPE)
+
+2026-10-29. This implements proposals 1 and 2 above for Wan2.1/Wan2.2 on the native neuron backend only. Both levers are **on by default**:
+
+| lever | what changes | opt-out |
+|---|---|---|
+| ccop overlap flag | The Wan neuron applications append `--tensorizer-options=--enable-ccop-compute-overlap` to their own process's `NEURON_CC_FLAGS`, once and after any flags the user exported. These are the DiT, the device umT5 and the device VAE when built by Wan's callers. | `DIFFLET_NEURON_WAN_CCOP_OVERLAP=0` |
+| scatter-free RoPE | The Wan neuron DiT's self-attentions use `apply_rotary_emb_stacked` (`stack` + `flatten`, bit-identical on CPU) | `DIFFLET_NEURON_WAN_SCATTER_FREE_ROPE=0` |
+
+`off`, `false` and `no` also work for both switches. Each lever adds a field to the Wan neuron stage key while it is on: `neuron_cc_flags` on the transformer and vae stages, `rope` on the transformer stage. A manifest from an older compile is therefore not reused, and the stage asks for `difflet compile`. With both switches off, the keys and graphs are exactly those of `d1d2e5b`.
+
+**Setup.**
+- **Model and flags:** Wan2.1 14B, 480x832, 9 frames, TP4, 50 steps, phase-3 flags (`--vae-dtype bf16 --text-encoder-dtype bf16`).
+- **Before:** a `git archive` of `d1d2e5b`. **After:** `d1d2e5b` plus the task-6 change.
+- **Roots:** each side ran on its own hardlinked copy of the p3 root.
+- **Runs:** interleaved; per side, 1 compile, 4 timed generates and 2 quality runs (seeds 42 and 7). The opt-out run used the after tree on the before root.
+- **Evidence:** in `B/nf_wan6/` (`cells/`, `stats.json`, `quality/`, `logs/device/`). Unit-level scope checks are in the repo's tests.
+
+**Speed** (DiT step, median of 50 steps without step 0)
+
+| | before (`d1d2e5b`) | after (task 6) | Δ |
+|---|---:|---:|---:|
+| DiT step, timed gen1–3 (median of medians) | 1065.9 / 1064.8 / 1065.5 → **1065.5 ms** | 1038.5 / 1038.5 / 1038.0 → **1038.5 ms** | **−27.0 ms (−2.53%)** |
+| all 6 generates per side | 1064.8–1065.9 ms | 1037.7–1039.0 ms | |
+| step 0 | 1.111 s | 1.085 s | −26 ms |
+| gap to AoT (957.9 ms, section 1 above) | +11.2% | +8.4% | |
+| opt-out (both switches 0) | | 1065.6 ms, mp4 `2da4edd4` (the before bits) | back to before |
+
+- The step matches the uncommitted `nfw_fixab` experiment (1038.1 ms), and seed 42's output is bit-identical to it (final latents `f52ee861…`, mp4 `ccba6698…`).
+- The opt-out key matched `d1d2e5b`'s manifest, so that run needed no compile and wrote no new HLO.
+- **e2e, CLI generate wall, gen1–3 median:** 129.6 s before, 127.3 s after. This number is noisy. Each side spreads over about 11 s (119.0–130.7 s before, 120.5–129.8 s after). The transformer-stage process alone takes either about 89 s or about 98 s, on both sides. *Inference:* the real e2e saving is the step saving, about 50 × 27 ms + 26 ms ≈ 1.4 s, which is smaller than this noise.
+- **HBM:** unchanged. The neuron-monitor peak was 11.83 GiB per core on every after run; the before runs peaked at 11.83 GiB, with 11.98 GiB on two of them. The probe peaks were 6.24 / 10.67 GiB on both sides.
+- **The flag reaches neuronx-cc:** all 299 neuronx-cc command lines of the after compile carry it. None of the 5 command lines from the before side and the opt-out run do.
+
+**Compile, the one-time cost of the new keys**
+- **Wall time:** the first compile with the levers took 988 s. Of that, 489 s is the 27 GB bf16 copy of the fp32 DiT checkpoint, which any compile at `d1d2e5b` writes into a root that has none (the feature from `1e183b4`, not the levers). That leaves about 499 s, against 138 s for the before side's compile, which reused its NEFFs: **about +360 s**.
+- **Per stage:** transformer 296 s against 105 s, vae 173 s against 18.5 s.
+- **Cause:** every Wan NEFF has the flag in its cache key, so all of them (about 300) recompile cold. The transformer stage also read its checkpoints more slowly: DiT 61 s against 4 s, umT5 87 s against 1 s. *Inference:* the page cache was cold after the copy.
+- *Inference, not measured:* later compiles reuse the NEFFs, as the before side's compile did.
+- **Disk:** upgrading a root made before `1e183b4` needs 27 GB free for that copy.
+- **Moving the tree:** moving it to another path recompiles the 4 block NEFFs, because their debug info holds absolute source paths. This is torch-neuronx behaviour, not caused by this change.
+
+**Quality against CPU fp32 references.** Gate: on each seed, after − before ≥ −0.5 dB mean PSNR and ≥ −0.01 mean SSIM.
+
+| seed | reference | side | PSNR mean / worst (dB) | SSIM mean / worst | latent cosine | Δ PSNR / Δ SSIM | gate |
+|---|---|---|---:|---:|---:|---:|---|
+| 42 | `ref_50` | before | 22.414 / 20.332 | 0.8800 / 0.8399 | 0.96635 | | |
+| 42 | `ref_50` | after | 22.060 / 19.963 | 0.8757 / 0.8340 | 0.96479 | −0.353 / −0.0043 | **PASS** |
+| 7 | `ref_50_seed7` (new) | before | 29.517 / 27.154 | 0.9613 / 0.9511 | 0.98962 | | |
+| 7 | `ref_50_seed7` (new) | after | 29.701 / 27.304 | 0.9626 / 0.9523 | 0.98963 | +0.183 / +0.0012 | **PASS** |
+
+- **After against before directly:** seed 42 is 31.92 dB mean / 28.51 worst, SSIM 0.976, latent cosine 0.99516. Seed 7 is 36.24 / 33.42 dB, SSIM 0.990, cosine 0.99705.
+- **The new seed-7 reference:** `B/wan2_1/cpu_ref/ref_50_seed7/`, a 50-step CPU fp32 diffusers run.
+  - It took 4 h 31 min and peaked at 62.6 GiB RSS.
+  - It starts from the device's seed-7 noise, bit-identical (raw `d51a24b0…`).
+  - Schedule, prompt and negative-prompt embeddings, CFG settings and pipeline config are identical to `ref_50`.
+- **Strips** (`B/nf_wan6/quality/strips/`): after and before show the same composition, pose and colour. The ×4 difference holds only fine texture and edge noise. Frame 0 is speckled in every row, the CPU reference included.
+- *Inference:* the change of the output comes from the ccop flag, which reorders bf16 sums. The RoPE change is bit-identical on CPU. Each lever alone was not run on the device.
+
+**Scope, other models unchanged**
+- **Flux, HunyuanVideo 1.0/1.5 and MiniMax:** they keep the shared `apply_rotary_emb`. Checks on CPU, both trees:
+  - HunyuanVideo 1.0's neuron generate-stage key and directory are identical.
+  - `NEURON_CC_FLAGS` stays unset after building the HunyuanVideo 1.0 and Flux DiT applications for the neuron device.
+  - Tiny HunyuanVideo 1.0 and Flux DiTs in compile mode give identical aten graphs and identical output bits.
+- **Qwen-Image:** its native VAE reuses Wan's `NeuronWanVaeDecoderApplication`. A review found that this class added the flag in Qwen-Image processes too. Fix: the class now adds the flag only when its Wan callers pass `ccop_overlap=True`. Unit tests build Qwen-Image's CLI vae stage decoder and its composed application with the device VAE (with and without its DiT) for the neuron device, and check that `NEURON_CC_FLAGS` stays unset. Qwen-Image's stage keys are unchanged.
+- **The AoT (trainium, TPU) and CPU backends:** keys and graphs unchanged. The shared modeling file keeps the old RoPE as its default.
+- **In-process API callers:** the flag is held by the Wan applications that added it. When the last one is released (garbage collected, or `release_ccop_overlap`), `NEURON_CC_FLAGS` gets its previous value back. A model built after that in the same Python process compiles without the flag. A model built while a Wan application is still alive does get it. The CLI runs each Wan stage in a process of its own, and the stages keep their applications until they exit.
+- **A user `--tensorizer-options` in `NEURON_CC_FLAGS` wins:** the flag is not added, a warning is logged, and the stage keys do not name the flag. This came from the review. Before the fix, the key recorded the flag although the stages compiled without it.
+
+**Device behaviour after the review fixes.** The three review fixes do not change what a default Wan run compiles. Recomputed from the fixed tree for the device runs' command line:
+- the default keys equal the after manifests (`6b2db266…` transformer, `af4a926a…` vae);
+- the opt-out keys equal the before manifests (`41c1fae1…`, `a9a52a99…`).
+
+The cells were therefore not re-run.
+
+**Not done.**
+- Wan2.2 A14B on the device. Its two experts are two instances of the same DiT application, so they get both levers. *Inference, not measured.*
+- Each lever on its own on the device.
 
 
 ## Next

@@ -31,6 +31,8 @@ if TYPE_CHECKING:
     DIFFLET_NEURON_HBM_GIB: str | None = None
     DIFFLET_NEURON_WEIGHT_STORE: str | None = None
     DIFFLET_NEURON_WEIGHT_STORE_ALL: str | None = None
+    DIFFLET_NEURON_WAN_CCOP_OVERLAP: bool = True
+    DIFFLET_NEURON_WAN_SCATTER_FREE_ROPE: bool = True
 
     # ----- Distributed framework (set by torchrun / launcher / tests) -----
     RANK: int = 0
@@ -54,6 +56,11 @@ if TYPE_CHECKING:
     NXD_INFERENCE_CAPTURE_OUTPUT_FORMAT: str | None = None
     NXD_INFERENCE_CAPTURE_AT_REQUESTS: str | None = None
     NXD_INFERENCE_CAPTURE_FOR_TOKENS: str | None = None
+
+
+def _on_unless_off(name: str) -> bool:
+    """A default-on switch: off only for "0", "off", "false" or "no" (any case, trimmed)."""
+    return os.environ.get(name, "").strip().lower() not in ("0", "off", "false", "no")
 
 
 # Doc generators and grep look for these markers.
@@ -110,6 +117,22 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # a faster disk than the checkpoint (DIFFLET_NEURON_WEIGHT_STORE on local NVMe).
     "DIFFLET_NEURON_WEIGHT_STORE_ALL":
     lambda: os.environ.get("DIFFLET_NEURON_WEIGHT_STORE_ALL"),
+
+    # Wan on the ``neuron`` backend (``difflet/backends/neuron/wan/compile_options.py``): the
+    # Wan applications built for the neuron device append neuronx-cc's
+    # ``--tensorizer-options=--enable-ccop-compute-overlap`` (the AoT path's flag) to this
+    # process's NEURON_CC_FLAGS while they live (a user --tensorizer-options wins), and the Wan
+    # neuron stage keys name it. On unless "0", "off", "false" or "no"; no other model is
+    # affected either way (Qwen-Image's device VAE, Wan's decoder class, does not ask for it).
+    "DIFFLET_NEURON_WAN_CCOP_OVERLAP":
+    lambda: _on_unless_off("DIFFLET_NEURON_WAN_CCOP_OVERLAP"),
+
+    # Wan on the ``neuron`` backend: the DiT's self-attentions apply the rotary embedding with
+    # ``stack`` + ``flatten`` (``apply_rotary_emb_stacked``, bit-identical on CPU) instead of the
+    # shared helper's strided writes, which torch-neuronx lowers to scatters; the Wan neuron
+    # transformer stage key names it. On unless "0", "off", "false" or "no".
+    "DIFFLET_NEURON_WAN_SCATTER_FREE_ROPE":
+    lambda: _on_unless_off("DIFFLET_NEURON_WAN_SCATTER_FREE_ROPE"),
 
     # Hardlink pre-sharded weights into a shape-independent store under
     # ``<DIFFLET_COMPILE_CACHE>/_shared_weights/`` so that every compiled shape
