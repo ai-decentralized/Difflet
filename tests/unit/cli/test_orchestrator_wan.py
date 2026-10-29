@@ -1146,7 +1146,7 @@ def test_cache_inputs_unchanged_for_trainium_and_distinct_for_neuron(monkeypatch
     base, base_dirs = keyed(None)
     assert set(base["transformer"]) == {"component", "model_id", "tp", "cp", "cp_mode",
                                         "cfg_parallel", "sp", "dtype", "text_seq_len", "shapes",
-                                        "toolchain"}
+                                        "toolchain", "tp_reduce_dtype"}
     assert set(base["vae"]) == {"component", "model_id", "dtype", "shapes", "toolchain"}
     for backend in ("trainium", "tpu"):  # AoT: byte-identical keys and dirs
         assert keyed(backend) == (base, base_dirs)

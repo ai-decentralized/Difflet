@@ -52,6 +52,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 import torch
+
+from difflet.common.tp_reduce import config_reduce_dtype
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -165,7 +167,8 @@ class Gemma3Attention(nn.Module):
         self.q_proj = ColumnParallelLinear(hidden, q_out, bias=bias, gather_output=False)
         self.k_proj = ColumnParallelLinear(hidden, kv_out, bias=bias, gather_output=False)
         self.v_proj = ColumnParallelLinear(hidden, kv_out, bias=bias, gather_output=False)
-        self.o_proj = RowParallelLinear(q_out, hidden, bias=bias, input_is_parallel=True)
+        self.o_proj = RowParallelLinear(q_out, hidden, bias=bias, input_is_parallel=True,
+                                        reduce_dtype=config_reduce_dtype(config))
         self.q_norm = Gemma3RMSNorm(self.head_dim, eps=config.rms_norm_eps)
         self.k_norm = Gemma3RMSNorm(self.head_dim, eps=config.rms_norm_eps)
 
@@ -195,7 +198,8 @@ class Gemma3MLP(nn.Module):
         hidden, inter = int(config.hidden_size), int(config.intermediate_size)
         self.gate_proj = ColumnParallelLinear(hidden, inter, bias=False, gather_output=False)
         self.up_proj = ColumnParallelLinear(hidden, inter, bias=False, gather_output=False)
-        self.down_proj = RowParallelLinear(inter, hidden, bias=False, input_is_parallel=True)
+        self.down_proj = RowParallelLinear(inter, hidden, bias=False, input_is_parallel=True,
+                                           reduce_dtype=config_reduce_dtype(config))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         gate = self.gate_proj(x)

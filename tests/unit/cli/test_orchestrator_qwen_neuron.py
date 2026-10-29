@@ -621,7 +621,7 @@ def test_cache_inputs_unchanged_for_aot_backends_and_distinct_for_neuron(monkeyp
 
     base, base_dirs = keyed(None)
     assert set(base["generate"]) == {"component", "model_id", "tp", "cp", "cp_mode", "sp",
-                                     "dtype", "text_seq_len", "shapes", "toolchain"}
+                                     "dtype", "text_seq_len", "shapes", "toolchain", "tp_reduce_dtype"}
     for backend in ("trainium", "tpu"):  # AoT: byte-identical keys and dirs
         assert keyed(backend) == (base, base_dirs)
     neuron, neuron_dirs = keyed("neuron")

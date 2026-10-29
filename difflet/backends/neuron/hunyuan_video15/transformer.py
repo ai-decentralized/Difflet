@@ -387,7 +387,9 @@ def _install_tensor_parallel(model, tp: int, sp: bool = False) -> None:
 
     def row(lin, sequence_parallel=False):
         # Under SP the caller reduce-scatters: no all-reduce here, and the bias handed back to add once.
+        # reduce_dtype: the neuron layer ignores it (native bf16 sums); stated for the AoT rule.
         return RowParallelLinear(lin.in_features, lin.out_features, bias=lin.bias is not None,
+                                 reduce_dtype=torch.bfloat16,
                                  input_is_parallel=True, reduce_output=not sequence_parallel,
                                  skip_bias_add=sequence_parallel, dtype=lin.weight.dtype,
                                  device=lin.weight.device)

@@ -32,7 +32,7 @@ else:
 
 
 def test_create_flux_application_rejects_non_trainium_backend():
-    with pytest.raises(NotImplementedError, match="only the trainium backend"):
+    with pytest.raises(NotImplementedError, match="trainium and neuron backends, got 'tpu'"):
         entry.create_flux_application(
             model_path="/fake/model",
             parallel=DiffletParallelConfig(),

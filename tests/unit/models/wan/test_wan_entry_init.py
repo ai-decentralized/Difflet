@@ -22,7 +22,7 @@ def _create_on_cuda(tmp_path, parallel, shape=None):
 
 
 def test_create_wan_application_rejects_unsupported_backend(tmp_path):
-    with pytest.raises(NotImplementedError, match="trainium, tpu and neuron backends, got 'cuda'"):
+    with pytest.raises(NotImplementedError, match="trainium, tpu and neuron backends, got 'rocm'"):
         entry.create_wan_application(
             model_path=str(tmp_path),
             parallel=DiffletParallelConfig(),
@@ -73,12 +73,12 @@ def test_create_wan_application_builds_neuron_app(tmp_path):
         assert app.transformer is not None and app.text_encoder is not None
         assert app.text_encoder.threads == 12
         assert app.pipeline is None  # built, not loaded
-    with pytest.raises(NotImplementedError, match="host"):  # no device VAE: --host-vae
-        entry.create_wan_application(
-            model_path=str(tmp_path), parallel=DiffletParallelConfig(tp_degree=1),
-            dtype=torch.bfloat16, shape=dict(TINY_SHAPE), backend="neuron", device="cpu",
-            enable_vae_decoder=True,
-        )
+    with_vae = entry.create_wan_application(  # the device VAE stage (bf16 up to 9 frames)
+        model_path=str(tmp_path), parallel=DiffletParallelConfig(tp_degree=1),
+        dtype=torch.bfloat16, shape=dict(TINY_SHAPE), backend="neuron", device="cpu",
+        enable_vae_decoder=True,
+    )
+    assert type(with_vae.vae_decoder).__name__ == "_DeviceVaeDecoder"
 def test_registry_builds_the_cuda_wan_application(tmp_path, monkeypatch):
     """The cuda backend routes to the one-process GPU application.
 

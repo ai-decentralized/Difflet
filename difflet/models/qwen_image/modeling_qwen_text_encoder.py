@@ -47,6 +47,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import torch
+
+from difflet.common.tp_reduce import config_reduce_dtype
 import torch.nn as nn
 import torch.nn.functional as F
 
@@ -195,7 +197,8 @@ class QwenTextAttention(nn.Module):
         self.v_proj = ColumnParallelLinear(d, config.num_key_value_heads * hd, bias=True,
                                            gather_output=False)
         self.o_proj = RowParallelLinear(config.num_attention_heads * hd, d, bias=False,
-                                        input_is_parallel=True)
+                                        input_is_parallel=True,
+                                        reduce_dtype=config_reduce_dtype(config))
 
     def forward(self, x: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor) -> torch.Tensor:
         b, s, _ = x.shape
@@ -215,7 +218,8 @@ class QwenTextMLP(nn.Module):
         d, ff = config.hidden_size, config.intermediate_size
         self.gate_proj = ColumnParallelLinear(d, ff, bias=False, gather_output=False)
         self.up_proj = ColumnParallelLinear(d, ff, bias=False, gather_output=False)
-        self.down_proj = RowParallelLinear(ff, d, bias=False, input_is_parallel=True)
+        self.down_proj = RowParallelLinear(ff, d, bias=False, input_is_parallel=True,
+                                           reduce_dtype=config_reduce_dtype(config))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.down_proj(F.silu(self.gate_proj(x)) * self.up_proj(x))
