@@ -165,9 +165,17 @@ def broadcast_tensor(tensor: torch.Tensor | None, *, device, src: int = 0) -> to
     return wire.to(dtype).reshape(shape)
 
 
+def _device_type(device) -> str:
+    """The device type name, read without ``torch.device`` parsing it: ``"neuron"`` is only a
+    known device type once torch-neuronx is imported, and this check runs on any host."""
+    if isinstance(device, torch.device):
+        return device.type
+    return str(device).split(":", 1)[0]
+
+
 def _narrows_int64(device) -> bool:
     """Whether collectives on ``device`` carry int64 as int32 (the neuron process group does)."""
-    return torch.device(device).type == "neuron"
+    return _device_type(device) == "neuron"
 
 
 def _wire_dtype(dtype: torch.dtype, device) -> torch.dtype:
@@ -185,7 +193,7 @@ def _check_payload(tensor: torch.Tensor, device) -> None:
     if low < _INT32_MIN or high > _INT32_MAX:
         raise ValueError(
             f"broadcast_tensor: int64 values in [{low}, {high}] are outside the int32 range, "
-            f"and the {torch.device(device).type} process group carries int64 as int32, so "
+            f"and the {_device_type(device)} process group carries int64 as int32, so "
             "they would arrive narrowed; split them into int32 parts before broadcasting"
         )
 

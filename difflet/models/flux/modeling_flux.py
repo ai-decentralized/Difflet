@@ -1472,19 +1472,6 @@ def split_along_dim(tensor, dim, rank, process_group):
     return tensor
 
 
-# The Trainium (AoT) application, its inference config and its model wrapper live in
-# difflet.backends.trainium.flux.backbone. They are re-exported here lazily, on first access, so
-# existing imports from this module keep working while importing the model itself does not load
-# the AoT backend.
-_AOT_EXPORTS = ("FluxBackboneInferenceConfig", "ModelWrapperFluxBackbone", "NeuronFluxBackboneApplication")
-
-
-def __getattr__(name):
-    if name in _AOT_EXPORTS:
-        from difflet.backends.trainium.flux import backbone
-
-        return getattr(backbone, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 def convert_flux_hf_state_dict(
     state_dict: Dict[str, torch.Tensor],
     *,

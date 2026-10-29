@@ -239,10 +239,14 @@ def test_prewarm_lookup_error_keeps_old_behaviour(monkeypatch, prewarm_threads):
 def test_prewarm_follows_auto_detected_backend(monkeypatch, prewarm_threads, detected, starts):
     """Without DIFFLET_BACKEND the gate follows auto-detection, which picks neuron on a
     TorchNeuron host: the flux / ltx_2 orchestrators call prewarm in-process too."""
+    import difflet.platforms as platforms
     from difflet.backends import registry
     from difflet.cli.prewarm import prewarm_neuron_runtime
 
     monkeypatch.delenv("DIFFLET_BACKEND", raising=False)
+    # The backend registry aliases the platform registry, whose resolver calls its own
+    # detect_platform_name: patch that one (and the alias, for any direct caller).
+    monkeypatch.setattr(platforms, "detect_platform_name", lambda: detected)
     monkeypatch.setattr(registry, "_auto_detect_backend", lambda: detected)
 
     assert (prewarm_neuron_runtime(4) is not None) is starts
@@ -751,12 +755,12 @@ def test_main_ambient_non_aot_backend_the_model_lists_goes_ahead(monkeypatch, tm
 
 
 def test_registry_wan_lists_neuron():
-    """W5: both Wan ids resolve to the entry that lists neuron (after trainium and tpu)."""
+    """W5: both Wan ids resolve to the entry that lists neuron (after trainium, tpu and cuda)."""
     from difflet.registry import resolve_model
 
     for model_id in (WAN_ID, "Wan-AI/Wan2.2-T2V-A14B-Diffusers"):
         entry = resolve_model(model_id)
-        assert (entry.name, entry.backends) == ("wan", ("trainium", "tpu", "neuron"))
+        assert (entry.name, entry.backends) == ("wan", ("trainium", "tpu", "cuda", "neuron"))
 
 
 @pytest.mark.parametrize("command", ["compile", "generate", "run"])

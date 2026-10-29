@@ -160,7 +160,7 @@ def test_entry_routes_neuron_and_registry_lists_it(tiny):
     from difflet.models.qwen_image.entry import create_qwen_image_application
     from difflet.registry import resolve_model
 
-    assert resolve_model("Qwen/Qwen-Image").backends == ("trainium", "tpu", "neuron")
+    assert resolve_model("Qwen/Qwen-Image").backends == ("trainium", "tpu", "cuda", "neuron")
     app = create_qwen_image_application(
         model_path=tiny.dir, parallel=DiffletParallelConfig(), dtype=torch.float32,
         shape=dict(TINY_SHAPE), backend="neuron", device="cpu", exec_mode="eager",
