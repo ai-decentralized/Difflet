@@ -412,8 +412,11 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
                     **embeds, num_inference_steps=int(stage_loop.effective(req, args, "steps", 50)),
                     generator=torch.Generator().manual_seed(int(stage_loop.effective(req, args, "seed", 42))),
                     callback=lambda i, t, x: marks.append(time.perf_counter()))
+                steps = sorted(b - a for a, b in zip(marks, marks[1:]))
+                timing = (f", median {steps[len(steps) // 2] * 1e3:.0f} ms (first {(marks[1] - marks[0]) * 1e3:.0f} ms)"
+                          if steps else "")
                 print(f"[hv15] request {req.index}: denoise {marks[-1] - marks[0]:.1f} s, "
-                      f"{len(marks) - 1} steps", flush=True)
+                      f"{len(marks) - 1} steps{timing}", flush=True)
                 torch.save(latents, stage_loop.work_file(args, req, "latents.pt"))
 
     def _stage_aot_vae(self, args: argparse.Namespace) -> None:
