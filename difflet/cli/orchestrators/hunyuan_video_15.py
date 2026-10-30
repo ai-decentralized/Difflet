@@ -17,7 +17,12 @@ request done. A DP replica is ``tp x cp (x2 with CFG)`` cores: on 4 cores, ``--d
 runs two TP2 replicas with classifier-free guidance's two passes in sequence (the 8.3B DiT does not
 fit one core beside 121 frames' activations, so DP4 is not an option).
 
-The Trainium (AoT) path is not implemented: its application covers the DiT on cached inputs only.
+On the Trainium (AoT) backend (``_run_aot``: any backend but neuron), the same layout runs three
+stages: the same host ``encode``; ``aot_transformer``, one process whose NxD application drives
+all ``tp x cp (x2 with CFG)`` cores (``aot15.build_aot_denoiser``: the compiled DiT, plus the
+TeaCache probe compiled into the same artifact on the first adaptive run), writing each request's
+latents; and ``aot_vae``, the tiled bf16 decoder on one core (``vae15``), writing the MP4. Each
+compiled artifact lives in a hashed dir under --cache-dir (``_aot_stage_cache_inputs``).
 
 Default HF model: hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v
 Registry defaults: height=480, width=848, num_frames=121
@@ -79,9 +84,7 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
 
     def _run(self, mode: str) -> None:
         if torchrun_backend() != "neuron":
-            raise NotImplementedError(
-                f"difflet {mode} --model-id {_HF_MODEL_ID} runs on the neuron (TorchNeuron) backend only; "
-                "the Trainium (AoT) application covers the DiT on cached inputs, without a pipeline.")
+            return self._run_aot(mode)
         reject_unsupported_torchrun_options(_unsupported(self.args), runs=_RUNS)
         root_compile_cache_at_cache_dir(getattr(self.args, "cache_dir", None), tag="hunyuan_video_15")
         if mode == "compile":  # once, as the Trainium path's pre-shards: the fp32 DiT stored in bf16
@@ -158,6 +161,10 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
             self._stage_transformer(args)
         elif stage == "vae":
             self._stage_vae(args)
+        elif stage == "aot_transformer":
+            self._stage_aot_transformer(args)
+        elif stage == "aot_vae":
+            self._stage_aot_vae(args)
         else:
             raise ValueError(f"Unknown HunyuanVideo 1.5 stage: {stage!r}")
 
@@ -285,3 +292,188 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
                     export_to_video(list(frames), str(out), fps=_FPS)
                 print(f"[hv15] request {req.index}: decode {decoded - started:.1f} s; "
                       f"[difflet] video saved to {out}", flush=True)
+
+    # ------------------------------------------------------------ Trainium (AoT) path
+
+    def _run_aot(self, mode: str) -> None:
+        """encode (host) -> aot_transformer (one NxD process on all the layout's cores) -> aot_vae."""
+        tp, cfg, cp = _layout(self.args)
+        work_dir = Path(getattr(self.args, "work_dir", None) or Path.home() / ".cache" / "difflet" / "work" / "hv15")
+        work_dir.mkdir(parents=True, exist_ok=True)
+        cli = self._stage_cli_args(mode, str(work_dir), tp, cfg, cp)
+        try:
+            if mode == "generate":
+                runner.run_stage(_HF_MODEL_ID, "encode", num_cores=1, virtual_core_size=None, cli_args=cli)
+            runner.run_stage(_HF_MODEL_ID, "aot_transformer", num_cores=tp * (2 if cfg else 1) * cp,
+                             virtual_core_size=_AOT_VIRTUAL_CORE_SIZE, cli_args=cli)
+            runner.run_stage(_HF_MODEL_ID, "aot_vae", num_cores=1, virtual_core_size=_AOT_VIRTUAL_CORE_SIZE,
+                             cli_args=cli)
+        except Exception:
+            print(f"[difflet] work dir preserved at {work_dir} for inspection", file=sys.stderr)
+            raise
+        if not getattr(self.args, "keep_work_dir", False):
+            shutil.rmtree(work_dir, ignore_errors=True)
+
+    def _aot_parallel(self, args: argparse.Namespace):
+        from difflet.pipeline.parallel_config import DiffletParallelConfig
+
+        return DiffletParallelConfig(tp_degree=int(args.tp_degree or 1), cp_degree=int(args.cp_degree or 1),
+                                     cfg_parallel_enabled=bool(getattr(args, "cfg_parallel", False)),
+                                     sp_enabled=bool(getattr(args, "sp_enabled", False)),
+                                     cp_mode=_aot_cp_mode(args))
+
+    def _aot_stage_cache_inputs(self, args: argparse.Namespace, component: str) -> dict:
+        """One AoT artifact's identity (hashed into its dir, recorded in its manifest). Not part of
+        it: the TeaCache options (the probe is an additive component of the DiT artifact), the
+        steps, seed and prompt."""
+        from difflet.cli.orchestrators.base import stage_toolchain_versions
+
+        shape = {"height": int(args.height or 480), "width": int(args.width or 848),
+                 "num_frames": int(args.num_frames or 121)}
+        if component == "transformer":
+            return {"component": "hunyuan_video_15_aot_dit", "model": _HF_MODEL_ID,
+                    "revision": getattr(args, "revision", None), "tp": int(args.tp_degree or 1),
+                    "cp": int(args.cp_degree or 1), "cp_mode": _aot_cp_mode(args),
+                    "sp": bool(getattr(args, "sp_enabled", False)), "cfg": bool(getattr(args, "cfg_parallel", False)),
+                    "dtype": "bfloat16", **shape, "text_seq_len": 1000, "text_seq_len_2": 256,
+                    "image_seq_len": 729, "toolchain": stage_toolchain_versions()}
+        if component == "vae":
+            return {"component": "hunyuan_video_15_aot_vae", "model": _HF_MODEL_ID,
+                    "revision": getattr(args, "revision", None), "dtype": "bfloat16", "shape": shape,
+                    "tile": {"sample_min_height": 256, "sample_min_width": 256, "overlap_factor": 0.25},
+                    "toolchain": stage_toolchain_versions()}
+        raise ValueError(f"unknown HunyuanVideo 1.5 AoT component {component!r}")
+
+    def _aot_compiled_dir(self, args: argparse.Namespace, component: str) -> Path:
+        from difflet.cli.orchestrators.base import hashed_stage_dir
+
+        inputs = self._aot_stage_cache_inputs(args, component)
+        base = Path(getattr(args, "cache_dir", None) or Path.home() / ".cache" / "difflet").expanduser()
+        return hashed_stage_dir(base, str(inputs["component"]), inputs)
+
+    def _aot_require_artifact(self, args: argparse.Namespace, component: str, compiled_dir: Path) -> None:
+        from difflet.cli.orchestrators.base import has_valid_stage_manifest
+
+        if not has_valid_stage_manifest(compiled_dir, self._aot_stage_cache_inputs(args, component)):
+            raise SystemExit(f"[hv15] no valid compiled {component} artifact at {compiled_dir} (manifest missing "
+                             "or configuration changed); run `difflet compile` with the same flags first.")
+
+    def _stage_aot_transformer(self, args: argparse.Namespace) -> None:
+        """One process, NxD driving every core of the layout: compile the DiT (with the probe for
+        adaptive TeaCache), or load it once and denoise each claimed request into its latents."""
+        import torch
+
+        from difflet.cli.orchestrators.base import write_stage_manifest
+        from difflet.models.hunyuan_video import aot15
+
+        root, parallel = self._root(args), self._aot_parallel(args)
+        compiled_dir = self._aot_compiled_dir(args, "transformer")
+        shape = dict(height=int(args.height), width=int(args.width), num_frames=int(args.num_frames))
+        adaptive = bool(getattr(args, "teacache_speedup", None) or getattr(args, "teacache_calibration", None))
+        started = time.perf_counter()
+        if args.stage_mode == "compile":
+            app = aot15.build_aot_application(model_path=root, parallel=parallel, teacache_fused=adaptive, **shape)
+            app.compile(str(compiled_dir))
+            write_stage_manifest(compiled_dir, self._aot_stage_cache_inputs(args, "transformer"))
+            print(f"[hv15] aot transformer compiled into {compiled_dir} ({time.perf_counter() - started:.1f} s)",
+                  flush=True)
+            return
+        from difflet.cli.dp import stage_loop
+        from difflet.models.hunyuan_video.pipeline15 import cfg_on, load_hv15_guidance
+
+        self._aot_require_artifact(args, "transformer", compiled_dir)
+        denoiser = aot15.build_aot_denoiser(
+            model_path=root, compiled_model_path=str(compiled_dir), parallel=parallel, **shape,
+            guidance_scale=getattr(args, "guidance_scale", None),
+            teacache_cadence=getattr(args, "teacache_cadence", None),
+            teacache_online_delta_alpha=getattr(args, "teacache_online_delta", None),
+            teacache_speedup=getattr(args, "teacache_speedup", None),
+            teacache_calibration_path=getattr(args, "teacache_calibration", None))
+        app = denoiser.dit.app
+        if adaptive and not app.has_compiled_artifacts(str(compiled_dir), select=["teacache_probe"]):
+            # The probe is an additive component of the DiT artifact, built on first adaptive use.
+            print(f"[hv15] compiling the TeaCache probe into {compiled_dir} (first adaptive run; "
+                  "the DiT artifact is reused)", flush=True)
+            app.compile(str(compiled_dir), select=["teacache_probe"])
+        denoiser.load(skip_warmup=True)
+        print(f"[hv15] aot transformer load {time.perf_counter() - started:.1f} s", flush=True)
+        default_on = cfg_on(denoiser.guidance_scale)
+        for req in stage_loop.claimed_requests(args):
+            with stage_loop.request_scope(args, req, final=False):
+                requested = stage_loop.effective(req, args, "guidance_scale", None)
+                scale = load_hv15_guidance(root, requested)  # the guider's own scale, or None when off
+                if cfg_on(scale) != default_on:
+                    raise ValueError(f"request {req.index}: guidance_scale={requested} would switch classifier-"
+                                     "free guidance on or off, which the stage's layout fixes")
+                denoiser.guidance_scale = scale
+                embeds = torch.load(stage_loop.work_file(args, req, "embeds.pt"), weights_only=True)
+                marks = [time.perf_counter()]
+                latents = denoiser(
+                    **embeds, num_inference_steps=int(stage_loop.effective(req, args, "steps", 50)),
+                    generator=torch.Generator().manual_seed(int(stage_loop.effective(req, args, "seed", 42))),
+                    callback=lambda i, t, x: marks.append(time.perf_counter()))
+                print(f"[hv15] request {req.index}: denoise {marks[-1] - marks[0]:.1f} s, "
+                      f"{len(marks) - 1} steps", flush=True)
+                torch.save(latents, stage_loop.work_file(args, req, "latents.pt"))
+
+    def _stage_aot_vae(self, args: argparse.Namespace) -> None:
+        """One core: the tiled bf16 decoder (an artifact of its own), diffusers' post-processing, MP4."""
+        import torch
+
+        from difflet.backends.trainium.hunyuan_video.vae15 import NeuronHunyuanVideo15VAEDecoderApplication
+        from difflet.cli.orchestrators.base import write_stage_manifest
+        from difflet.models.hunyuan_video.application import create_hunyuan_video15_vae_decoder_config
+
+        root = self._root(args)
+        compiled_dir = self._aot_compiled_dir(args, "vae")
+        config = create_hunyuan_video15_vae_decoder_config(
+            model_path=root, world_size=1, tp_degree=1, dtype=torch.bfloat16, height=int(args.height),
+            width=int(args.width), num_frames=int(args.num_frames))
+        app = NeuronHunyuanVideo15VAEDecoderApplication(model_path=os.path.join(root, "vae"), config=config)
+        started = time.perf_counter()
+        if args.stage_mode == "compile":
+            app.compile(str(compiled_dir))
+            write_stage_manifest(compiled_dir, self._aot_stage_cache_inputs(args, "vae"))
+            print(f"[hv15] aot vae compiled into {compiled_dir} ({time.perf_counter() - started:.1f} s)", flush=True)
+            return
+        from difflet.cli.dp import stage_loop
+
+        self._aot_require_artifact(args, "vae", compiled_dir)
+        app.load(str(compiled_dir), skip_warmup=True)
+        scaling_factor = float(app.config.scaling_factor)
+        for req in stage_loop.claimed_requests(args):
+            with stage_loop.request_scope(args, req, final=True):
+                latents = torch.load(stage_loop.work_file(args, req, "latents.pt"), weights_only=True)
+                started = time.perf_counter()
+                # vae15 neither divides by the scaling factor nor returns a tensor by default.
+                video = app.decode(latents.to(torch.bfloat16) / scaling_factor, return_dict=False)[0].float().cpu()
+                out = Path(req.output or args.output or "hunyuan_video_15.mp4")
+                _aot_write_output(video, out)
+                print(f"[hv15] request {req.index}: decode {time.perf_counter() - started:.1f} s; "
+                      f"[difflet] video saved to {out}", flush=True)
+
+
+_AOT_VIRTUAL_CORE_SIZE = 2
+
+
+def _aot_cp_mode(args: argparse.Namespace) -> str:
+    return (getattr(args, "cp_mode", None) or "ulysses") if int(args.cp_degree or 1) > 1 else "gather_kv"
+
+
+def _aot_write_output(video, out: Path) -> None:
+    """``.pt``: the decoded frames as they are; otherwise diffusers' post-processing and an MP4
+    (``_stage_vae``'s, repeated so the native stage stays as it is)."""
+    import inspect
+
+    import diffusers
+    import torch
+    from diffusers.utils import export_to_video
+
+    out = Path(out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    if out.suffix == ".pt":
+        torch.save(video, str(out))
+        return
+    processor = inspect.getmodule(diffusers.HunyuanVideo15Pipeline).HunyuanVideo15ImageProcessor(vae_scale_factor=16)
+    frames = processor.postprocess_video(video, output_type="np")[0]
+    export_to_video(list(frames), str(out), fps=_FPS)
