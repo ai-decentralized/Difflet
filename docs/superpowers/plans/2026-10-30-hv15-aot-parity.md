@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development（执行方式已由用户选定）to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking. Task 0 和 Task 10 在设备上执行，按 `.claude/skills/difflet-device-verify/SKILL.md` 进行。
 
-**Goal:** 让 `difflet compile/generate --model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v` 在 Trainium AOT（NxD 静态图）上端到端生成视频，并具备 native 后端已有的能力：真 CFG、TP、SP、CP（ulysses、gather_kv；ring 见决策点）、CFG-parallel、DP 与 JSONL 批处理，以及 TeaCache 的固定步长、online-delta 和自适应三种模式。
+**Goal:** 让 `difflet compile/generate --model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v` 在 Trainium AOT（NxD 静态图）上端到端生成视频，并具备 native 后端已有的能力：真 CFG、TP、SP、CP（ulysses、gather_kv；ring 与 HV1.0 一致，AOT 上记为 N/A）、CFG-parallel、DP 与 JSONL 批处理，以及 TeaCache 的固定步长、online-delta 和自适应三种模式。
 
 **Architecture:**
 - **native 代码一行不动。** AOT 写自己的 HV1.5 去噪循环（`difflet/models/hunyuan_video/pipeline15.py`），以 diffusers 的 `HunyuanVideo15Pipeline` 为语义参照，单元测试直接对比 diffusers。
@@ -27,18 +27,24 @@
 | 5 | CFG-parallel | native 的默认布局：同样 4 核，每步少跑一次串行前向 | 4 |
 | 6 | SP | 降低每核的激活内存 | 5 |
 | 7 | CP：ulysses（必做）、gather_kv（视 Task 0 spike 结果） | 把图像 token 切到多个核上，降低单请求延迟、支持更长序列 | 6 |
-| 8 | CP：ring（**需要你决定**，见下面的决策点） | 同上，另一种 CP 实现 | 6a（可选） |
+| 8 | CP：ring —— 与 HV1.0 一致：native 可用，AOT 记为 N/A (mask)，AOT 上编译前拒绝 | 行为与 HV1.0 统一，用户在 AOT 上用 ring 时几秒内得到明确提示 | 6 |
 | 9 | AOT 应用接入循环 + TeaCache probe | 把上面这些串起来；TeaCache 大约省 40% 去噪时间 | 7 |
 | 10 | HV1.5 TeaCache calibration 采集 | 自适应 TeaCache 需要 calibration；现有脚本只支持 HV1.0 | 7b |
 | 11 | CLI 的 AOT 分支 + DP / JSONL | 用户入口；现在在 Trainium 上直接 `NotImplementedError` | 8 |
 | 12 | 元数据和验证矩阵翻转 | 设备验证通过后对外宣布支持 | 9 |
 | 13 | 设备 spike（Task 0）和 on-device campaign（Task 10） | 尽早排除编译器风险，最后在 trn2 上证明可用，并与 native 对比精度和速度 | 0、10 |
 
-## 决策点（需要你在 review 时拍板）
+## 已定：ring CP 与 HV1.0 保持一致（用户决定，2026-10-30）
 
-**ring CP 怎么处理？** Trainium 的 `joint_ring_attention` 只要收到文本 padding 长度（`text_valid_len`）就抛 `NotImplementedError`（`difflet/backends/trainium/ops_impl/attention.py:278-282`）。HV1.5 的文本永远带 padding（uncond 分支的 prompt 是 `""`，ByT5 那一路通常整段都是 padding），feature catalog 也已经把 HV1.0 的 AOT ring 标成 N/A。有两个选项：
-- **(A，推荐)** AOT 上不支持 hv15 ring：编译前就报错，提示改用 ulysses，矩阵里记为 N/A（与 HV1.0 一致）。零风险。
-- **(B)** 加 Task 6a：给 Trainium 的 `joint_ring_attention` 的文本 partial 加上 key mask。这会改一个 HV1.0 也在用的共享 op，需要单独做设备 spike，并让 HV1.0 的 ring cell 重新跑一遍回归。
+背景：Trainium 的 `joint_ring_attention` 只要收到 `text_valid_len` 就抛 `NotImplementedError`（`difflet/backends/trainium/ops_impl/attention.py:278-282`），而 HV1.5 的文本永远带 padding。HV1.0 的做法是：
+- registry 不限制 `cp_modes`（默认就是全部三种），因此 native 上 ring 可用；
+- AOT 上 ring 在 feature catalog 里记为 N/A (mask)（`feature-catalog.md:94`，`RING_UNSUPPORTED`）。
+
+hv15 照此处理：
+- registry **不写** `cp_modes`，避免把 native 上可用的 `--cp-mode ring` 一起封掉；
+- 只在 AOT 的代码路径里，在编译前拒绝 ring，并提示改用 ulysses；
+- 矩阵里记为 N/A (mask)；
+- 不改共享的 ring kernel。
 
 ## 明确不做（及原因）
 - **planner（`difflet plan`、`difflet/planner/`）**：用户明确不需要。hv15 在 planner 里继续显示为 scaffold。
@@ -93,7 +99,7 @@
 
 **Interfaces:**
 - Produces：
-  - `ModelCapabilities(num_attention_heads=16, is_distilled=False, supports_cp=True, supports_sp=True, cp_modes=frozenset({"ulysses", "gather_kv"}))`。若决策点选 B，再加上 `"ring"`。
+  - `ModelCapabilities(num_attention_heads=16, is_distilled=False, supports_cp=True, supports_sp=True)`：与 HV1.0 一样**不写** `cp_modes`，默认就是全部三种模式，native 的 ring 不受影响。
   - `default_parallel=DiffletParallelConfig(tp_degree=2, cfg_parallel_enabled=True)`。
 
 - [ ] **Step 1: 改测试和新增测试**
@@ -268,7 +274,7 @@
   - 循环之后沿 CP 组做一次 all-gather。
 - `JointUlyssesProcessor(num_image_tokens)` → `difflet.ops.joint_ulysses_attention(q, eq, k, v, ek, ev, scale=..., key_valid_len=N + text_valid)`。joint 序列长度同样要先补到 128 的倍数，复用 `bounded_joint_attention` 的 pad 规则；如果 op 内部不做 pad，就把 pad 加在调用之前。
 - `JointGatherKvProcessor(num_image_tokens)`：**仅当 Task 0 的 gather_kv spike 通过时才实现**。预期它不会通过：`trainium/ops_impl/attention.py:476-479` 已经记录，neuronx-cc 拒绝这种"分片的 q 对全量的 k"的 bounded 形状。所以默认按 BLOCKED 处理，spike 只用来在当前 toolchain 上确认一次。做法是 HV1.0 的路线：all-gather 图像 K/V，分片的 q 对全量的 k 做 bounded attention，并 pad 到 128。spike 失败时，`cp_mode="gather_kv"` 在编译前报错，并引用 spike 的证据。**不要**改走 additive-mask 的稠密 SDPA，那是 O(L²) 内存。
-- `cp_mode="ring"`：决策点选 A 时，编译前报错并提示改用 ulysses。
+- `cp_mode="ring"`：在 `create_hunyuan_video15_application`（AOT 入口）中编译前拒绝，抛 `NotImplementedError`。报错说明 Trainium 的 ring kernel 没有处理文本 mask 的路径，与 HV1.0 相同，并提示改用 `--cp-mode ulysses`。native 路径不受影响。
 - 编译前检查：ulysses 要求 `(16 // tp) % cp == 0` 且 `N % cp == 0`；所有模式都要求 `N % cp == 0`。
 
 - [ ] **Step 1: 测试**
@@ -277,15 +283,12 @@
     - 背景：CP scatter 之后，processor 看到的图像 token 只有 N/cp 个；如果 N 是从张量形状推出来的，bound 会悄悄漏掉一半的图像 key。world 1 时两种写法结果一样，测不出来。
     - 做法：构造 processor 时传 `num_image_tokens = 2 * shard`，monkeypatch 掉 CPU 的 `joint_ulysses_attention` 以抓取 `key_valid_len`，断言它等于 `2*shard + text_valid`；
   - `test_ulysses_rejects_heads_indivisible`（tp4 cp8）；
-  - `test_ring_rejected_before_compile`（决策点选 A 时）；
+  - `test_ring_rejected_before_compile`：在 AOT 入口上断言抛 `NotImplementedError`，且消息里包含 `ulysses`；
+  - `test_registry_keeps_ring_for_native`：hv15 的 `capabilities.cp_modes` 里包含 `"ring"`；
   - `test_cp_scatter_happens_once`：数一下 forward 里 scatter 的调用次数，应为 1 次；
   - `test_create_application15_accepts_context_parallel`。
 - [ ] **Step 2–4:** 确认失败 → 实现 → 运行通过
 - [ ] **Step 5: Commit** `feat(trainium/hv15): context parallelism (ulysses, gather_kv per spike)`
-
-### Task 6a（可选，仅当决策点选 B）：Trainium `joint_ring_attention` 支持文本 key mask
-
-**Files:** `difflet/backends/trainium/ops_impl/attention.py`（文本 partial 加上 `text_valid_len` 的 bound）、`parallel15.py`（`JointRingProcessor`）。测试：trainium ops 的 CPU 等价测试；设备上先跑一次 spike，并重跑 HV1.0 的 `tp2cp2ring` 回归 cell。
 
 ### Task 7: AOT 应用接入循环 + TeaCache probe
 
@@ -395,7 +398,7 @@
 **Files:**（planner 不在本计划范围内：`difflet/planner/` 下的代码一律不改，现有 planner 测试必须保持绿）
 - `scripts/verify_cli.py`（`MODELS` 中 hv15 的 shape 等字段已在 Task 1 改好）：
   - `EXPECTED_FAIL_CELLS` 中的 hv15 条目按 Task 10 的结论翻转，结论为 BLOCKED 或 LIMIT 的 cell 保留并写明原因；
-  - 决策点选 A 时，把 hv15 加入 ring 不支持的集合。
+  - feature catalog 中 `RING_UNSUPPORTED` 一行加上 `hunyuan_video_15`，与 HV1.0 并列。
 - `.claude/skills/difflet-device-verify/references/feature-catalog.md`：更新 hv15 行，新增 "Trainium AOT backend: HunyuanVideo 1.5" 一节。
 - `README.md`：Trainium 的两张表和 Supported models 表各加一行 HunyuanVideo 1.5。
 - 测试：
@@ -429,7 +432,7 @@
 | aot-tp4sp | TP4 + SP | 与 aot-tp4 余弦 ≥ 0.999 |
 | aot-tp2cp2-ulysses | TP2 × CP2 ulysses | 与 aot-tp2 余弦 ≥ 0.999 |
 | aot-tp2cp2-gather_kv | 仅当 Task 0 spike 通过时运行 | 与 aot-tp2 余弦 ≥ 0.999；否则记为 BLOCKED |
-| ring | 决策点 A：记为 N/A，并验证编译前报错在几秒内出现；决策点 B：同上面的门槛 | — |
+| ring | 与 HV1.0 一致：记为 N/A (mask)；验证 AOT 上 `--cp-mode ring` 在编译前几秒内报错 | — |
 | aot-vae | `vae15` 的 tiled decode（tile 大小 16 latent，blend 25%），9 帧，320×512；与 diffusers 的 CPU decode 对比（`scripts/hunyuan15_vae_parity.py`） | PSNR ≥ 40 dB，无接缝；记录最大绝对误差。最终交付物是 MP4，这一行专门防止 tile 拼接的 bug 混过 latents 的检查 |
 
 注：aot-tp2（串行 CFG）每步要跑两次 host refiner（cond 和 uncond 各一次），所以会比 TP2×CFG2 慢，这是预期内的；在证据文档里注明。
@@ -443,7 +446,7 @@
 
 **Phase 3 —— 默认 shape**
 - [ ] TP2×CFG2，480×848×121，50 步：记录端到端时间、单步时间，并输出 MP4。与 native 同布局、同一台机器的重测结果对比（`neuron-backend-results.md` 里 native 的单步时间是 12.6 s，仅作参考）。
-- [ ] tp4 SP（以及决策点选 A 时的 ring）在默认 shape 下必须在**编译前、几秒之内**报错；记录报错文本。
+- [ ] tp4 SP 在默认 shape 下必须在**编译前、几秒之内**报错；记录报错文本。
 
 **Phase 4 —— TeaCache**
 - [ ] 固定步长，TP4 串行 CFG 版本：`REPO=$PWD SHAPE_FLAGS="--height 320 --width 512 --num-frames 61" bash .claude/skills/difflet-device-verify/scripts/teacache_cadence_ab.sh hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v 50 mp4`。
