@@ -154,10 +154,10 @@ MODELS: dict[str, ModelSpec] = {
     "hunyuan_video_15": ModelSpec(
         key="hunyuan_video_15",
         model_id="hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
-        # scaffold: compile/generate raise NotImplementedError before shape matters
-        shape_flags=(), generate_flags=(), prompt="a cat sitting on a bench",
+        shape_flags=("--height", "320", "--width", "512", "--num-frames", "61"),
+        generate_flags=("--steps", "50"), prompt="a cat sitting on a bench",
         output_name="hunyuan15.mp4", artifact_names=("hunyuan15.mp4", "hunyuan15.pt"),
-        staged=False,
+        staged=True,
     ),
 }
 
@@ -203,6 +203,11 @@ ULYSSES_UNSUPPORTED = frozenset({"hunyuan_video"})
 EXPECTED_FAIL_CELLS = frozenset({
     ("hunyuan_video_15", "tp4"),
     ("hunyuan_video_15", "dp2tp2"),
+    # pending AOT port: runnable since the registry gained CP/SP/true CFG; flipped when the AOT DiT lands
+    ("hunyuan_video_15", "tp2cp2"),
+    ("hunyuan_video_15", "tp2cp2ulysses"),
+    ("hunyuan_video_15", "tp2cfg"),
+    ("hunyuan_video_15", "tp4sp"),
     ("hunyuan_video", "tp2cp2"),
     ("hunyuan_video", "dp2tp2"),
 })

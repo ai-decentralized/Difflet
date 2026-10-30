@@ -24,10 +24,15 @@ def test_all_six_models_classified():
         assert model_class(mid) in {"distilled", "true_cfg", "true_cfg_no_cp"}
 
 
-@pytest.mark.parametrize("mid", [FLUX, HYV, HYV15, QWEN])
+@pytest.mark.parametrize("mid", [FLUX, HYV, QWEN])
 def test_distilled_never_gets_cfg2(mid):
     for mode in ("latency", "throughput", "mixed"):
         assert resolve_mode(mid, mode, _args()).cfg_parallel is False
+
+
+def test_hv15_is_true_cfg():
+    assert model_class(HYV15) == "true_cfg"
+    assert resolve_mode(HYV15, "latency", _args()) == ModeConfig(1, True, 1)
 
 
 def test_mode_table_matches_spec():

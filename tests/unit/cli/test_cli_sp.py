@@ -60,7 +60,6 @@ def test_sp_allowed_for_supported_models(model_id, monkeypatch):
     "model_id",
     [
         "Lightricks/LTX-2",
-        "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
     ],
 )
 def test_sp_rejected_for_unsupported_models(model_id, monkeypatch, capsys):

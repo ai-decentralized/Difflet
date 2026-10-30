@@ -84,7 +84,7 @@ def test_model_ids():
 
 def test_staged_flags():
     staged = {k for k, m in MODELS.items() if m.staged}
-    assert staged == {"qwen_image", "wan", "wan2_1", "hunyuan_video"}
+    assert staged == {"qwen_image", "wan", "wan2_1", "hunyuan_video", "hunyuan_video_15"}
 
 
 # ------------------------------------------------------------- skip-rule sets
@@ -97,11 +97,12 @@ def test_staged_flags():
 # a capability edited in the registry without the docs following.
 
 def test_distilled_set_matches_documented_matrix():
-    assert DISTILLED == {"flux", "qwen_image", "hunyuan_video", "hunyuan_video_15"}
+    assert DISTILLED == {"flux", "qwen_image", "hunyuan_video"}
 
 
 def test_sp_supported_set_matches_documented_matrix():
-    assert SP_SUPPORTED == {"flux", "wan", "wan2_1", "hunyuan_video", "qwen_image"}
+    assert SP_SUPPORTED == {"flux", "wan", "wan2_1", "hunyuan_video", "qwen_image",
+                            "hunyuan_video_15"}
 
 
 def test_all_model_ids_valid_in_cli():
@@ -110,9 +111,9 @@ def test_all_model_ids_valid_in_cli():
 
 
 def test_cp_unsupported_models():
-    # Rule lives in the model entries (ltx_2/entry.py, hunyuan_video/entry.py),
+    # Rule lives in the model entries (ltx_2/entry.py),
     # not in difflet.cli.main — pinned here as data.
-    assert CP_UNSUPPORTED == {"ltx_2", "hunyuan_video_15"}
+    assert CP_UNSUPPORTED == {"ltx_2"}
 
 
 def test_ulysses_unsupported_models():
@@ -126,6 +127,10 @@ def test_expected_fail_cells():
     assert EXPECTED_FAIL_CELLS == {
         ("hunyuan_video_15", "tp4"),      # scaffold: NotImplementedError
         ("hunyuan_video_15", "dp2tp2"),   # same scaffold gap via the router
+        ("hunyuan_video_15", "tp2cp2"),   # pending AOT port
+        ("hunyuan_video_15", "tp2cp2ulysses"),  # pending AOT port
+        ("hunyuan_video_15", "tp2cfg"),   # pending AOT port
+        ("hunyuan_video_15", "tp4sp"),    # pending AOT port
         ("hunyuan_video", "tp2cp2"),      # neuronx-cc 2.25 NCC_INLA001 internal error
         ("hunyuan_video", "dp2tp2"),      # VAE alloc failure: f121 exceeds 2-core replica
     }
@@ -142,10 +147,6 @@ _EXPECTED_SKIPS = {
     ("ltx_2", "tp4sp"): "no-SP",
     ("hunyuan_video", "tp2cfg"): "distilled",
     ("hunyuan_video", "tp2cp2ulysses"): "no-ulysses",
-    ("hunyuan_video_15", "tp2cp2"): "no-CP",
-    ("hunyuan_video_15", "tp2cp2ulysses"): "no-CP",
-    ("hunyuan_video_15", "tp2cfg"): "distilled",
-    ("hunyuan_video_15", "tp4sp"): "no-SP",
 }
 
 
@@ -164,10 +165,12 @@ def test_plan_cells_counts():
     # tp2cp2ulysses is a CP config, so it adds the same two no-CP skips as
     # tp2cp2, plus hunyuan_video's no-ulysses skip (attention_mask); qwen's
     # tp4sp is runnable since the modeling_qwen SP fork landed (2026-09-02).
-    assert len(skipped) == 11
-    assert len(runnable) == 31
+    assert len(skipped) == 7
+    assert len(runnable) == 35
     xfail = {(c.model_key, c.config_key) for c in runnable if c.expected_fail}
     assert xfail == {("hunyuan_video_15", "tp4"), ("hunyuan_video_15", "dp2tp2"),
+                     ("hunyuan_video_15", "tp2cp2"), ("hunyuan_video_15", "tp2cp2ulysses"),
+                     ("hunyuan_video_15", "tp2cfg"), ("hunyuan_video_15", "tp4sp"),
                      ("hunyuan_video", "tp2cp2"), ("hunyuan_video", "dp2tp2")}
 
 
@@ -240,7 +243,7 @@ def test_hunyuan_video_15_compile_cmd_minimal():
     assert cmd[: len(_DIFFLET_CMD) + 3] == _DIFFLET_CMD + [
         "compile", "--model-id",
         "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"]
-    assert "--height" not in cmd  # scaffold fails before shape matters
+    assert "--height" in cmd and cmd[cmd.index("--height") + 1] == "320"
 
 
 def test_build_generate_cmd_non_staged():
