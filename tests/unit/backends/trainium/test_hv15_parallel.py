@@ -200,6 +200,44 @@ def test_trace_module_does_not_patch_diffusers_class(tmp_path, backbone15):
     assert trace_module.transformer.forward.__func__ is backbone15._hv15_static_reorder_forward
 
 
+class _NoBool(torch.Tensor):
+    """A tensor whose truth value cannot be taken: what a lazy XLA tensor is during the trace."""
+
+    def __bool__(self):
+        raise RuntimeError("the forward took a Python bool of image_embeds-derived data")
+
+
+def test_trace_forward_keeps_the_t2v_switch_in_graph(tmp_path, backbone15, parallel15):
+    """On device (2026-10-30) the TP2 x CFG2 compile segfaulted while tracing ``if is_t2v:``:
+    under CFG parallelism image_embeds comes from the SPMD cfg scatter, and taking its truth
+    value forced a partial-graph execution mid-trace. The switch must stay arithmetic."""
+    torch.manual_seed(0)
+    module = backbone15._HunyuanVideo15TraceModule(_config(tmp_path)).eval()
+    inputs = list(_dit_inputs())
+    with torch.no_grad():
+        plain = module(*inputs)
+        inputs[7] = torch.zeros(1, 4, 6).as_subclass(_NoBool)
+        lazy = module(*inputs)
+        # image-to-video: the image stream is kept and its tokens are valid (all four first)
+        inputs[7] = torch.randn(1, 4, 6)
+        inputs[8] = parallel15.hv15_text_order(torch.ones(1, 4, dtype=torch.int64), inputs[6], inputs[3])
+        i2v = module(*inputs)
+    assert torch.equal(lazy.as_subclass(torch.Tensor), plain)
+    assert not torch.allclose(i2v, plain)
+
+
+def test_trace_forward_reduces_the_t2v_flag_with_a_full_max():
+    """The first in-graph form, ``amax()`` with no dims, traced on device to NO reduction
+    (``Shapes are not compatible for broadcasting: f32[1,729,2048] vs. f32[1,729,1152]``)."""
+    import inspect
+
+    from difflet.backends.trainium.hunyuan_video import backbone15
+
+    source = inspect.getsource(backbone15._hv15_static_reorder_forward)
+    assert "image_embeds.abs().float().max() > 0" in source
+    assert ".amax()" not in source
+
+
 def test_trace_module_uses_bounded_processor_without_env(
     tmp_path, monkeypatch, backbone15, parallel15
 ):
