@@ -317,9 +317,8 @@ def _register_builtin_hunyuan_video() -> None:
     def is_hunyuan_video(model_id: str) -> bool:
         value = model_id.lower()
         return (
-            ("hunyuanvideo" in value or "hunyuan-video" in value or "hunyuan_video" in value)
-            and not _is_hunyuan_video_15(value)
-        )
+            "hunyuanvideo" in value or "hunyuan-video" in value or "hunyuan_video" in value
+        ) and not _is_hunyuan_video_15(value)
 
     @register_model(
         name="hunyuan_video",
@@ -337,7 +336,7 @@ def _register_builtin_hunyuan_video() -> None:
             supports_cp=True,
             supports_sp=True,
         ),
-        backends=("trainium", "neuron"),
+        backends=("trainium", "cuda", "neuron"),
     )
     class _HunyuanVideoRegistration:
         pass
@@ -395,9 +394,7 @@ def _register_builtin_qwen_image() -> None:
     @register_model(
         name="qwen_image",
         application_factory="difflet.models.qwen_image.entry:create_qwen_image_application",
-        hf_paths=(
-            "Qwen/Qwen-Image",
-        ),
+        hf_paths=("Qwen/Qwen-Image",),
         detector=is_qwen_image,
         default_parallel=DiffletParallelConfig(tp_degree=4),
         default_shape={"height": 1024, "width": 1024, "num_frames": None},
@@ -472,19 +469,12 @@ def _register_builtin_minimax_h3() -> None:
 def _register_builtin_ltx_2() -> None:
     def is_ltx_2(model_id: str) -> bool:
         value = model_id.lower()
-        return (
-            "ltx-2" in value
-            or "ltx2" in value
-            or "ltx_2" in value
-            or "lightricks/ltx" in value
-        )
+        return "ltx-2" in value or "ltx2" in value or "ltx_2" in value or "lightricks/ltx" in value
 
     @register_model(
         name="ltx_2",
         application_factory="difflet.models.ltx_2.entry:create_ltx_2_application",
-        hf_paths=(
-            "Lightricks/LTX-2",
-        ),
+        hf_paths=("Lightricks/LTX-2",),
         detector=is_ltx_2,
         default_parallel=DiffletParallelConfig(tp_degree=4),
         default_shape={"height": 512, "width": 768, "num_frames": 121},

@@ -29,6 +29,8 @@ from difflet.backends.gpu.policy import (
     cfg_parallel_does_not_apply,
     is_set,
     unsupported_parallel,
+    validate_gpu_shape,
+    validate_gpu_steps,
 )
 from difflet.models.spec import ModelSpec
 
@@ -53,14 +55,18 @@ def gpu_pipeline_kwargs(
     from difflet.backends.gpu.policy import gpu_platform
     from difflet.pipeline.parallel_config import DiffletParallelConfig
 
+    height = spec.default_height if height is None else height
+    width = spec.default_width if width is None else width
+    num_frames = spec.default_num_frames if num_frames is None else num_frames
+    validate_gpu_shape(spec, height=height, width=width, num_frames=num_frames)
     kwargs = dict(
         backend=gpu_platform().name,
         parallel=DiffletParallelConfig(
             tp_degree=tp_degree or 1, cfg_parallel_enabled=bool(cfg_parallel)
         ),
         dtype="bf16",
-        height=height or spec.default_height,
-        width=width or spec.default_width,
+        height=height,
+        width=width,
         compile_cache_dir=cache_dir,
         local_files_only=True,
         revision=revision,
@@ -68,7 +74,7 @@ def gpu_pipeline_kwargs(
         load=load,
     )
     if spec.output == "video":
-        kwargs["num_frames"] = num_frames or spec.default_num_frames
+        kwargs["num_frames"] = num_frames
     if torch_compile:
         kwargs["application_kwargs"] = {"torch_compile": True}
     return kwargs
@@ -118,6 +124,14 @@ class GpuOrchestrator(ModelOrchestrator):
         from difflet.platforms.base import PARALLEL_MODE_FLAGS
 
         args = self.args
+        validate_gpu_steps(self.spec.default_steps if args.steps is None else args.steps)
+        h, w, f = (getattr(args, n, None) for n in ("height", "width", "num_frames"))
+        validate_gpu_shape(
+            self.spec,
+            height=self.spec.default_height if h is None else h,
+            width=self.spec.default_width if w is None else w,
+            num_frames=self.spec.default_num_frames if f is None else f,
+        )
         parallel = SimpleNamespace(
             tp_degree=getattr(args, "tp_degree", None),
             sp_enabled=getattr(args, "sp_enabled", False),
@@ -184,7 +198,8 @@ class GpuOrchestrator(ModelOrchestrator):
 
         args = self.args
         spec = self.spec
-        steps = stage_loop.effective(request, args, "steps", None) or spec.default_steps
+        steps = stage_loop.effective(request, args, "steps", spec.default_steps)
+        steps = validate_gpu_steps(steps)
         kwargs = dict(
             num_inference_steps=int(steps),
             seed=args.seed if request is None else request.seed,
@@ -211,14 +226,22 @@ class GpuOrchestrator(ModelOrchestrator):
             image = result[0]
             image.save(out)
             return f"{out} ({image.size[0]}x{image.size[1]})"
-        # A (B, 3, F, H, W) tensor in [-1, 1]: MP4 through the Trainium orchestrator's writer,
-        # else the tensor as ``.pt``.
-        from difflet.cli.orchestrators.wan import _save_video
-
         _, _, frames, height, width = result.shape
         shape = f"({frames} frames, {height}x{width})"
-        if out.suffix == ".mp4" and _save_video(result, str(out)):
-            return f"{out} {shape}"
+        if out.suffix == ".mp4":
+            from difflet.serving.video_media import VideoMediaError, encode_tensor_to_mp4
+
+            try:
+                encode_tensor_to_mp4(
+                    result,
+                    out.absolute(),
+                    fps=self.spec.default_fps,
+                    layout="BCTHW",
+                    value_range="minus_one_to_one",
+                )
+                return f"{out} {shape}"
+            except VideoMediaError as error:
+                print(f"[difflet] MP4 encoding failed ({error}); saving as .pt", flush=True)
         pt = out.with_suffix(".pt")
         import torch
 

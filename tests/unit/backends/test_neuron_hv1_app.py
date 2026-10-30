@@ -75,7 +75,7 @@ def test_registry_builds_the_neuron_application(tiny_pipeline):
     from difflet.registry import resolve_model
 
     entry = resolve_model("hunyuanvideo-community/HunyuanVideo")
-    assert entry.backends == ("trainium", "neuron")
+    assert entry.backends == ("trainium", "cuda", "neuron")
     app = entry.create_application(
         model_path=tiny_pipeline, parallel=DiffletParallelConfig(), dtype=torch.float32,
         shape=dict(SHAPE), backend="neuron",

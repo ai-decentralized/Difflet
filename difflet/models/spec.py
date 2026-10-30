@@ -76,6 +76,10 @@ class ModelSpec:
     smoke_prompt: str = "a small red square"
     #: The application class, as ``module:attribute``; imported only where torch is loaded.
     application: str = ""
+    #: Spatial divisibility and temporal compression: valid video frame counts are n*stride+1.
+    height_multiple: int = 1
+    width_multiple: int = 1
+    frame_stride: int = 1
 
 
 #: Models with a GPU spec, by registry entry name.
@@ -83,6 +87,7 @@ _GPU_SPEC_MODULES = {
     "qwen_image": "difflet.models.qwen_image.spec",
     "flux": "difflet.models.flux.spec",
     "wan": "difflet.models.wan.spec",
+    "hunyuan_video": "difflet.models.hunyuan_video.spec",
 }
 
 

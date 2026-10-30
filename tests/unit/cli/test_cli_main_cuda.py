@@ -42,10 +42,15 @@ def test_cpu_and_trainium_keep_the_staged_orchestrator(monkeypatch):
 def test_other_models_on_cuda_point_at_the_trainium_path(monkeypatch):
     monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
     with pytest.raises(SystemExit) as exc:
-        _cli()._get_orchestrator(argparse.Namespace(model_id="hunyuanvideo-community/HunyuanVideo"))
+        _cli()._get_orchestrator(
+            argparse.Namespace(
+                model_id="hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
+            )
+        )
     message = str(exc.value)
     assert (
-        "DIFFLET_BACKEND=trainium" in message and "hunyuanvideo-community/HunyuanVideo" in message
+        "DIFFLET_BACKEND=trainium" in message
+        and "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v" in message
     )
     # Wan runs on the GPU flow: the fallback does not name it.
     assert "Wan" not in message

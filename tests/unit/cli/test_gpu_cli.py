@@ -15,7 +15,7 @@ import torch
 from PIL import Image
 
 from difflet.backends.gpu.cli import GpuOrchestrator
-from difflet.cli.orchestrators import wan as trainium_wan
+from difflet.serving import video_media
 from difflet.models.spec import gpu_model_specs
 from difflet.platforms.base import PARALLEL_MODE_FLAGS
 
@@ -111,13 +111,31 @@ def saved(monkeypatch):
     """Record the MP4 writer's calls; write a marker file so the output exists."""
     calls = []
 
-    def fake(tensor, output_path):
-        calls.append((tensor, output_path))
+    def fake(tensor, output_path, *, fps, layout, value_range):
+        assert layout == "BCTHW" and value_range == "minus_one_to_one"
+        calls.append((tensor, str(output_path)))
         Path(output_path).write_bytes(b"mp4")
         return True
 
-    monkeypatch.setattr(trainium_wan, "_save_video", fake)
+    monkeypatch.setattr(video_media, "encode_tensor_to_mp4", fake)
     return calls
+
+
+@pytest.mark.parametrize(
+    "video_spec", [s for s in SPECS if s.output == "video"], ids=lambda s: s.model_type
+)
+def test_video_writer_uses_each_models_declared_fps(video_spec, monkeypatch, tmp_path):
+    import torch
+
+    captured = {}
+
+    def write(tensor, path, **kwargs):
+        captured.update(kwargs)
+        return True
+
+    monkeypatch.setattr(video_media, "encode_tensor_to_mp4", write)
+    _orch(video_spec).save_result(torch.zeros(1, 3, 9, 32, 48), tmp_path / "clip.mp4")
+    assert captured["fps"] == video_spec.default_fps
 
 
 def _exploding_generate(message):
@@ -161,6 +179,20 @@ def test_generate_defaults_come_from_the_spec(spec, recorder, tmp_path):
     assert kw.get("num_frames") == spec.default_num_frames
     # No --negative-prompt flag: the application's default applies.
     assert "negative_prompt" not in kw
+
+
+@pytest.mark.parametrize("steps", [0, -1, 1.9, True])
+def test_invalid_steps_are_rejected_before_pipeline_loading(spec, recorder, steps):
+    with pytest.raises(ValueError, match="steps"):
+        _orch(spec, steps=steps).generate()
+    assert recorder == []
+
+
+def test_zero_batch_steps_are_not_replaced_by_defaults(spec):
+    from types import SimpleNamespace
+
+    with pytest.raises(ValueError, match="steps"):
+        _orch(spec, steps=7).generate_kwargs(SimpleNamespace(steps=0, seed=0))
 
 
 def test_flags_reach_from_pretrained_and_generate(spec, recorder, tmp_path):

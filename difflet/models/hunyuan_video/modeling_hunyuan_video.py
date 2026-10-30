@@ -97,12 +97,13 @@ class HunyuanVideoTransformerConfig:
     context_parallel_enabled: bool = False
     cp_mode: str = "gather_kv"
     sp_enabled: bool = False
+    joint_attention_mask_mode: str = "bounds"
 
     def __post_init__(self) -> None:
+        if self.joint_attention_mask_mode not in {"bounds", "compact"}:
+            raise ValueError("joint_attention_mask_mode must be bounds or compact")
         if self.qk_norm != "rms_norm":
-            raise NotImplementedError(
-                "HunyuanVideo M3 currently supports only qk_norm='rms_norm'."
-            )
+            raise NotImplementedError("HunyuanVideo M3 currently supports only qk_norm='rms_norm'.")
         supported = {None, "latent_concat", "token_replace"}
         if self.image_condition_type not in supported:
             raise ValueError(
@@ -330,6 +331,7 @@ class HunyuanVideoAttention(nn.Module):
         context_parallel_enabled: bool = False,
         cp_mode: str = "gather_kv",
         sp_enabled: bool = False,
+        joint_attention_mask_mode: str = "bounds",
         reduce_dtype: torch.dtype = torch.bfloat16,
     ):
         super().__init__()
@@ -339,6 +341,7 @@ class HunyuanVideoAttention(nn.Module):
         self.context_parallel_enabled = context_parallel_enabled
         self.cp_mode = cp_mode
         self.sp_enabled = sp_enabled
+        self.joint_attention_mask_mode = joint_attention_mask_mode
         self.cp_group = get_cp_group() if context_parallel_enabled else None
 
         tp_degree = get_tensor_model_parallel_size()
@@ -354,9 +357,15 @@ class HunyuanVideoAttention(nn.Module):
         self.context_pre_only = context_pre_only
         self.pre_only = pre_only
 
-        self.to_q = ColumnParallelLinear(hidden_size, self.inner_dim, bias=True, gather_output=False)
-        self.to_k = ColumnParallelLinear(hidden_size, self.inner_dim, bias=True, gather_output=False)
-        self.to_v = ColumnParallelLinear(hidden_size, self.inner_dim, bias=True, gather_output=False)
+        self.to_q = ColumnParallelLinear(
+            hidden_size, self.inner_dim, bias=True, gather_output=False
+        )
+        self.to_k = ColumnParallelLinear(
+            hidden_size, self.inner_dim, bias=True, gather_output=False
+        )
+        self.to_v = ColumnParallelLinear(
+            hidden_size, self.inner_dim, bias=True, gather_output=False
+        )
         self.norm_q = RMSNorm(attention_head_dim, eps=eps)
         self.norm_k = RMSNorm(attention_head_dim, eps=eps)
 
@@ -486,22 +495,26 @@ class HunyuanVideoAttention(nn.Module):
             # partial. Summed as float then cast, as the ulysses branch does.
             text_valid_len = None
             if attention_mask is not None:
-                m = attention_mask.reshape(attention_mask.shape[0], -1)[:, -context_k.shape[1]:]
+                m = attention_mask.reshape(attention_mask.shape[0], -1)[:, -context_k.shape[1] :]
                 valid = m if m.dtype == torch.bool else (m != 0)
                 text_valid_len = valid.sum(dim=-1, dtype=torch.float32).to(torch.int32)  # [B]
             scale = 1.0 / math.sqrt(self.head_dim)
-            q_img = latent_q.transpose(1, 2)      # [B, H, S_img/cp, d]
-            q_txt = context_q.transpose(1, 2)     # [B, H, S_txt, d]
-            q_joint = torch.cat([q_img, q_txt], dim=2)   # [B, H, S_img/cp + S_txt, d]
+            q_img = latent_q.transpose(1, 2)  # [B, H, S_img/cp, d]
+            q_txt = context_q.transpose(1, 2)  # [B, H, S_txt, d]
+            q_joint = torch.cat([q_img, q_txt], dim=2)  # [B, H, S_img/cp + S_txt, d]
             o_joint = joint_ring_attention(
                 q_joint,
-                latent_k.transpose(1, 2), latent_v.transpose(1, 2),
-                context_k.transpose(1, 2), context_v.transpose(1, 2),
-                scale=scale, causal=False, text_valid_len=text_valid_len,
+                latent_k.transpose(1, 2),
+                latent_v.transpose(1, 2),
+                context_k.transpose(1, 2),
+                context_v.transpose(1, 2),
+                scale=scale,
+                causal=False,
+                text_valid_len=text_valid_len,
             )  # [B, H, S_img/cp + S_txt, d]
-            o_joint = o_joint.transpose(1, 2)     # [B, S_img/cp + S_txt, H, d]
+            o_joint = o_joint.transpose(1, 2)  # [B, S_img/cp + S_txt, H, d]
             img_len = latent_q.shape[1]
-            hidden_states = o_joint[:, :img_len]          # [B, S_img/cp, H, d]
+            hidden_states = o_joint[:, :img_len]  # [B, S_img/cp, H, d]
             encoder_hidden_states = o_joint[:, img_len:]  # [B, S_txt, H, d]
         elif self.context_parallel_enabled and self.cp_mode == "ulysses":
             # Joint ulysses: image (latent) K,V sharded → all-to-all'd into a head shard
@@ -523,12 +536,17 @@ class HunyuanVideoAttention(nn.Module):
                 key_valid_len = valid.sum(dim=-1, dtype=torch.float32).to(torch.int32)  # [B]
             scale = 1.0 / math.sqrt(self.head_dim)
             img_out, txt_out = joint_ulysses_attention(
-                latent_q.transpose(1, 2), context_q.transpose(1, 2),
-                latent_k.transpose(1, 2), latent_v.transpose(1, 2),
-                context_k.transpose(1, 2), context_v.transpose(1, 2),
-                scale=scale, causal=False, key_valid_len=key_valid_len,
+                latent_q.transpose(1, 2),
+                context_q.transpose(1, 2),
+                latent_k.transpose(1, 2),
+                latent_v.transpose(1, 2),
+                context_k.transpose(1, 2),
+                context_v.transpose(1, 2),
+                scale=scale,
+                causal=False,
+                key_valid_len=key_valid_len,
             )  # [B, H, S_img/cp, d], [B, H, S_txt, d]
-            hidden_states = img_out.transpose(1, 2)          # [B, S_img/cp, H, d]
+            hidden_states = img_out.transpose(1, 2)  # [B, S_img/cp, H, d]
             encoder_hidden_states = txt_out.transpose(1, 2)  # [B, S_txt, H, d]
         else:
             # gather_kv path: each rank all-gathers latent K,V to the full sequence
@@ -549,6 +567,7 @@ class HunyuanVideoAttention(nn.Module):
                 context_k,
                 context_v,
                 attention_mask=attention_mask,
+                joint_attention_mask_mode=self.joint_attention_mask_mode,
                 scale=1.0 / math.sqrt(self.head_dim),
             )
         hidden_states = hidden_states.flatten(2, 3).to(latent_q.dtype)
@@ -559,9 +578,7 @@ class HunyuanVideoAttention(nn.Module):
             # Megatron-SP ḡ: reduce the row-parallel partial across the TP group and
             # scatter back to this rank's sequence shard [B, S/tp, H].
             if self.sp_enabled:
-                hidden_states = reduce_scatter_to_sequence_parallel_region(
-                    hidden_states, dim=1
-                )
+                hidden_states = reduce_scatter_to_sequence_parallel_region(hidden_states, dim=1)
                 hidden_states = _sp_unbias(hidden_states, self.to_out[0])
             hidden_states = self.to_out[1](hidden_states)
         if self.to_add_out is not None:
@@ -585,6 +602,8 @@ class HunyuanVideoTransformerBlock(nn.Module):
         cp_mode: str = "gather_kv",
         sp_enabled: bool = False,
         reduce_dtype: torch.dtype = torch.bfloat16,
+        *,
+        joint_attention_mask_mode: str = "bounds",
     ):
         super().__init__()
         self.sp_enabled = sp_enabled
@@ -603,6 +622,7 @@ class HunyuanVideoTransformerBlock(nn.Module):
             context_parallel_enabled=context_parallel_enabled,
             cp_mode=cp_mode,
             sp_enabled=sp_enabled,
+            joint_attention_mask_mode=joint_attention_mask_mode,
             reduce_dtype=reduce_dtype,
         )
         self.norm2 = nn.LayerNorm(hidden_size, elementwise_affine=False, eps=1e-6)
@@ -649,8 +669,8 @@ class HunyuanVideoTransformerBlock(nn.Module):
         )
 
         hidden_states = hidden_states + attn_output * gate_msa.unsqueeze(1)
-        encoder_hidden_states = (
-            encoder_hidden_states + context_attn_output * c_gate_msa.unsqueeze(1)
+        encoder_hidden_states = encoder_hidden_states + context_attn_output * c_gate_msa.unsqueeze(
+            1
         )
 
         norm_hidden_states = self.norm2(hidden_states)
@@ -678,6 +698,8 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
         cp_mode: str = "gather_kv",
         sp_enabled: bool = False,
         reduce_dtype: torch.dtype = torch.bfloat16,
+        *,
+        joint_attention_mask_mode: str = "bounds",
     ):
         super().__init__()
         self.sp_enabled = sp_enabled
@@ -695,6 +717,7 @@ class HunyuanVideoSingleTransformerBlock(nn.Module):
             context_parallel_enabled=context_parallel_enabled,
             cp_mode=cp_mode,
             sp_enabled=sp_enabled,
+            joint_attention_mask_mode=joint_attention_mask_mode,
             reduce_dtype=reduce_dtype,
         )
         self.norm = AdaLayerNormZeroSingle(hidden_size, norm_type="layer_norm")
@@ -1054,6 +1077,8 @@ class HunyuanVideoTransformer3DModel(nn.Module):
         cp_mode: str = "gather_kv",
         sp_enabled: bool = False,
         reduce_dtype: torch.dtype | None = None,
+        *,
+        joint_attention_mask_mode: str = "bounds",
     ) -> None:
         super().__init__()
         if not isinstance(in_channels, int):
@@ -1066,6 +1091,7 @@ class HunyuanVideoTransformer3DModel(nn.Module):
             context_parallel_enabled = getattr(config, "context_parallel_enabled", False)
             cp_mode = getattr(config, "cp_mode", "gather_kv")
             sp_enabled = getattr(config, "sp_enabled", False)
+            joint_attention_mask_mode = getattr(config, "joint_attention_mask_mode", "bounds")
             in_channels = config.in_channels
             out_channels = config.out_channels
             num_attention_heads = config.num_attention_heads
@@ -1105,6 +1131,7 @@ class HunyuanVideoTransformer3DModel(nn.Module):
             context_parallel_enabled=context_parallel_enabled,
             cp_mode=cp_mode,
             sp_enabled=sp_enabled,
+            joint_attention_mask_mode=joint_attention_mask_mode,
         )
 
         inner_dim = self.config.inner_dim
@@ -1163,6 +1190,7 @@ class HunyuanVideoTransformer3DModel(nn.Module):
                     context_parallel_enabled=context_parallel_enabled,
                     cp_mode=cp_mode,
                     sp_enabled=sp_enabled,
+                    joint_attention_mask_mode=joint_attention_mask_mode,
                     reduce_dtype=reduce_dtype,
                 )
                 for _ in range(num_layers)
@@ -1178,6 +1206,7 @@ class HunyuanVideoTransformer3DModel(nn.Module):
                     context_parallel_enabled=context_parallel_enabled,
                     cp_mode=cp_mode,
                     sp_enabled=sp_enabled,
+                    joint_attention_mask_mode=joint_attention_mask_mode,
                     reduce_dtype=reduce_dtype,
                 )
                 for _ in range(num_single_layers)
@@ -1241,6 +1270,14 @@ class HunyuanVideoTransformer3DModel(nn.Module):
         mask_indices = indices >= effective_sequence_length.unsqueeze(1)
         attention_mask = attention_mask.masked_fill(mask_indices, False)
         attention_mask = attention_mask.unsqueeze(1).unsqueeze(1)
+        if (
+            self.config.joint_attention_mask_mode == "compact"
+            and not self.context_parallel_enabled
+            and not self.sp_enabled
+        ):
+            # Prepare the linear-sized additive bias outside regional compilation.
+            # Inductor otherwise materializes bool-mask conversion at Q x K size.
+            attention_mask = _prepare_compact_joint_bias(attention_mask, hidden_states.dtype)
 
         # Context parallel: scatter the latent tokens (and their rotary embeddings)
         # along the sequence axis across the CP (data-parallel) group. The text
@@ -1368,6 +1405,7 @@ def dual_stream_attention(
     *,
     attention_mask: torch.Tensor | None = None,
     scale: float | None = None,
+    joint_attention_mask_mode: str = "bounds",
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """HunyuanVideo joint attention over latent and context streams.
 
@@ -1417,7 +1455,23 @@ def dual_stream_attention(
     v_flat = v.permute(0, 2, 1, 3).reshape(batch * heads, kv_len, head_dim)
     mask_flat = _flatten_attention_mask(attention_mask, batch=batch, heads=heads)
 
-    if mask_flat is not None:
+    if joint_attention_mask_mode not in {"bounds", "compact"}:
+        raise ValueError("joint_attention_mask_mode must be bounds or compact")
+    if mask_flat is not None and joint_attention_mask_mode == "compact":
+        # Keep the singleton query dimension: explicit bounds would expand this
+        # key-padding mask to Q x K in eager CUDA before SDPA dispatch.
+        out = attention(
+            q_flat,
+            k_flat,
+            v_flat,
+            scale=scale,
+            causal=False,
+            attention_mask=mask_flat,
+            tp_q=True,
+            tp_k=True,
+            tp_out=False,
+        )
+    elif mask_flat is not None:
         # Route the contiguous (right-padded) key-padding mask to attention_cte's
         # lossless bound_min/bound_max range instead of the SDPA fallback. SDPA
         # materializes the full q_len x kv_len scores+mask, which is catastrophic for
@@ -1480,7 +1534,7 @@ def _keypad_bounds_from_mask(
     # FP32 represents these token counts exactly. See the device regression in
     # tests/manual/check_hunyuan_video_mask_bounds.py.
     count = valid.sum(dim=-1, keepdim=True, dtype=torch.float32).to(torch.int32)
-    bound_max = count.expand(bh, q_len, 1).contiguous()       # (B*heads, q_len, 1)
+    bound_max = count.expand(bh, q_len, 1).contiguous()  # (B*heads, q_len, 1)
     bound_min = torch.zeros_like(bound_max)
     return bound_min, bound_max
 
@@ -1493,6 +1547,11 @@ def _check_stream_shapes(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, *, n
             f"{name} Q/K/V shapes must match: q={tuple(q.shape)} "
             f"k={tuple(k.shape)} v={tuple(v.shape)}"
         )
+
+
+def _prepare_compact_joint_bias(keep_mask: torch.Tensor, dtype: torch.dtype) -> torch.Tensor:
+    """SDPA boolean-mask semantics, without tracing conversion into each block."""
+    return torch.zeros_like(keep_mask, dtype=dtype).masked_fill(~keep_mask, float("-inf"))
 
 
 def _flatten_attention_mask(

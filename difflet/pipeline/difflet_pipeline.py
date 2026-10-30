@@ -100,9 +100,28 @@ class DiffletPipeline:
         )
         entry.require_backend(backend_runtime.name)
         parallel_cfg = parallel or entry.default_parallel
+        if (
+            parallel is None
+            and getattr(getattr(backend_runtime, "capabilities", None), "flow", None) == "gpu"
+        ):
+            parallel_cfg = DiffletParallelConfig(tp_degree=backend_runtime.default_tp_degree())
+        shape = entry.resolve_shape(height=height, width=width, num_frames=num_frames)
+        if getattr(getattr(backend_runtime, "capabilities", None), "flow", None) == "gpu":
+            from difflet.backends.gpu.policy import validate_gpu_application
+            from difflet.models.spec import gpu_model_spec
+
+            gpu_spec = gpu_model_spec(entry.name)
+            if gpu_spec is None:
+                raise NotImplementedError(f"No GPU application spec for {entry.name}")
+            shape = validate_gpu_application(
+                gpu_spec,
+                shape=shape,
+                parallel=parallel_cfg,
+                kwargs=application_kwargs or {},
+                platform=backend_runtime,
+            )
         backend_runtime.prepare_runtime(parallel_cfg)
         dtype = dtype if dtype is not None else _default_dtype()
-        shape = entry.resolve_shape(height=height, width=width, num_frames=num_frames)
         overrides = (model_path_override, resolved_source_id, compiled_path_override)
         bound_mode = any(value is not None for value in overrides)
         if bound_mode and not all(value is not None for value in overrides):
@@ -149,11 +168,9 @@ class DiffletPipeline:
             application_kwargs=application_kwargs,
         )
 
-        # Non-AoT backends (neuron: eager, or torch.compile inside load) have no
-        # artifact to build or validate. compiled_path and the CacheSpec above are
-        # computed unchanged; AoT backends (trainium, tpu) keep the exact
-        # compile-then-load sequence.
-        if _requires_aot(backend_runtime):
+        # AoT backends build executable artifacts; GPU backends prepare the
+        # manifest their load() validates. Neuron's in-process path needs neither.
+        if _requires_compile_setup(backend_runtime):
             cache_ready = has_valid_manifest(compiled_path, spec) and _compiled_artifacts_ready(
                 app, compiled_path
             )
@@ -191,7 +208,7 @@ class DiffletPipeline:
         return cls.from_pretrained(model_id, **kwargs)
 
     def compile(self, *, force: bool = False, debug: bool = False) -> None:
-        if not _requires_aot(self.backend):
+        if not _requires_compile_setup(self.backend):
             return  # nothing is built ahead of time; load() compiles in-process
         # Use the same cache-validity check as `from_pretrained` so a stale or
         # missing manifest still triggers recompile even when the artifact dir
@@ -338,10 +355,16 @@ def _requires_aot(backend: Any) -> bool:
 
     True (the historical behaviour) for backend objects without capabilities,
     such as the test doubles in tests/unit/pipeline/test_difflet_pipeline_extra.py.
-    Only trainium and tpu are AoT; cpu, cuda, rocm and neuron are not.
+    Only Trainium and TPU build AoT artifacts.
     """
     capabilities = getattr(backend, "capabilities", None)
     return bool(getattr(capabilities, "requires_aot", True))
+
+
+def _requires_compile_setup(backend: Any) -> bool:
+    """AoT artifacts or GPU manifests must be prepared before load."""
+    capabilities = getattr(backend, "capabilities", None)
+    return _requires_aot(backend) or (getattr(capabilities, "flow", None) == "gpu")
 
 
 def _load_app(

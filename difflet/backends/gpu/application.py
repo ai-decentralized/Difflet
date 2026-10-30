@@ -41,8 +41,8 @@ from difflet.backends.gpu.policy import (
     cfg_parallel_does_not_apply,
     gpu_platform,
     unsupported_parallel,
+    validate_gpu_application,
 )
-from difflet.platforms.base import PARALLEL_MODE_FLAGS, Platform
 
 logger = logging.getLogger(__name__)
 
@@ -57,14 +57,22 @@ def _manifest_path(compiled_model_path) -> Path:
     return Path(compiled_model_path) / MANIFEST_FILE_NAME
 
 
-def compile_blocks(block_lists: Iterable[torch.nn.ModuleList], *, dynamic: bool) -> int:
+def compile_blocks(
+    block_lists: Iterable[torch.nn.ModuleList],
+    *,
+    dynamic: bool,
+    options: dict[str, Any] | None = None,
+) -> int:
     """Replace every block in each list with its ``torch.compile`` wrapper, in place; return how
     many were compiled. Per block, so one graph is reused across the stack and the module
     around the blocks stays eager."""
+    compile_kwargs = {"mode": COMPILE_MODE}
+    if options:
+        compile_kwargs = {"options": {**torch._inductor.list_mode_options(COMPILE_MODE), **options}}
     count = 0
     for blocks in block_lists:
         for i, block in enumerate(blocks):
-            blocks[i] = torch.compile(block, mode=COMPILE_MODE, dynamic=dynamic, fullgraph=False)
+            blocks[i] = torch.compile(block, dynamic=dynamic, fullgraph=False, **compile_kwargs)
             count += 1
     return count
 
@@ -117,6 +125,10 @@ class GpuComponent(torch.nn.Module):
         """The block lists ``torch.compile`` wraps block by block."""
         return []
 
+    def compile_options(self) -> dict[str, Any] | None:
+        """Model-specific compiler overrides, merged with the shared mode preset."""
+        return None
+
     def apply_load_time_swaps(self, module: torch.nn.Module) -> None:
         """Replace modules after the weights are on the device and before compile."""
 
@@ -144,7 +156,11 @@ class GpuComponent(torch.nn.Module):
             self.apply_load_time_swaps(module)
             if self.torch_compile:
                 # ``self.module`` stays the eager module around the compiled blocks.
-                compile_blocks(self.repeated_blocks(module), dynamic=self.compile_dynamic)
+                compile_blocks(
+                    self.repeated_blocks(module),
+                    dynamic=self.compile_dynamic,
+                    options=self.compile_options(),
+                )
             self.module = module
         return self.module
 
@@ -269,35 +285,6 @@ class GpuComponent(torch.nn.Module):
 # --------------------------------------------------------------------- refusals
 
 
-def _refuse_parallel(spec: ModelSpec, parallel: Any, platform: Platform) -> None:
-    modes = unsupported_parallel(spec, parallel, platform)
-    if not modes:
-        return
-    mode = modes[0]
-    if mode == "cfg":
-        raise NotImplementedError(cfg_parallel_does_not_apply(spec))
-    raise NotImplementedError(
-        f"{PARALLEL_MODE_FLAGS[mode]} is not supported for {spec.display_name} on the "
-        f"{platform.display_name} backend yet"
-    )
-
-
-def _refuse_kwargs(spec: ModelSpec, kwargs: dict[str, Any], platform: Platform) -> None:
-    """Refuse an application keyword the model does not take. A key is refused only when it
-    carries a request (not None / False): the CLI and DiffletPipeline pass several of them with
-    their "off" value."""
-    for key, value in kwargs.items():
-        if value is None or value is False:
-            continue
-        if key in spec.refused_application_kwargs or key.startswith(
-            spec.refused_application_kwarg_prefixes
-        ):
-            raise NotImplementedError(
-                f"{key} is not supported for {spec.display_name} on the "
-                f"{platform.display_name} backend yet ({spec.refused_application_kwargs_reason})"
-            )
-
-
 def normalize_dtype(dtype: Any, spec: ModelSpec) -> torch.dtype:
     if isinstance(dtype, torch.dtype):
         return dtype
@@ -338,21 +325,13 @@ class GpuApplication(torch.nn.Module):
         super().__init__()
         spec = self.spec
         platform = gpu_platform()
-        _refuse_kwargs(spec, kwargs, platform)
-        _refuse_parallel(spec, parallel, platform)
         self.platform = platform
         self.model_path = model_path
         self.parallel = parallel
         self.dtype = normalize_dtype(dtype, spec)
-        self.shape = {
-            "height": int(shape.get("height") or spec.default_height),
-            "width": int(shape.get("width") or spec.default_width),
-            "num_frames": (
-                int(shape.get("num_frames") or spec.default_num_frames)
-                if spec.output == "video"
-                else None
-            ),
-        }
+        self.shape = validate_gpu_application(
+            spec, shape=shape, parallel=parallel, kwargs=kwargs, platform=platform
+        )
         self.kwargs = kwargs
         self.device = torch.device(kwargs.get("device", DEFAULT_DEVICE))
         self.torch_compile = bool(kwargs.get("torch_compile", False))

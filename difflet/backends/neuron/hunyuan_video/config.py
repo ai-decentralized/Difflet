@@ -89,6 +89,8 @@ class NeuronHunyuanVideoConfig:
     cp_mode: str = "gather_kv"
     sp_enabled: bool = False
     cfg_parallel_enabled: bool = False
+    # Keep Neuron's existing bound-based attention when the shared port reads its policy.
+    joint_attention_mask_mode: str = "bounds"
 
     def __post_init__(self) -> None:
         self.rope_axes_dim = tuple(int(d) for d in self.rope_axes_dim)
