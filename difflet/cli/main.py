@@ -413,6 +413,19 @@ def _add_teacache_flags(p: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_dual_expert_flag(p: argparse.ArgumentParser) -> None:
+    """On compile as well as generate/run: compile prepares both experts' weights (each
+    expert's bf16 copy), so the first two-expert request does not."""
+    p.add_argument(
+        "--dual-expert",
+        dest="dual_expert",
+        action="store_true",
+        help="Wan 2.2 A14B on the neuron backend: hold both experts, the high-noise one above "
+        "the checkpoint's boundary timestep and the low-noise one below it (default: the "
+        "high-noise expert for every step, as on trainium and tpu)",
+    )
+
+
 def _add_generate_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--prompt", required=False, default=None)
     p.add_argument("--output", required=False, default=None, help="Output file path (.png or .mp4)")
@@ -434,14 +447,7 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
         help="Wan 2.2 A14B with --dual-expert: guidance for the low-noise expert's steps "
         "(default: --guidance-scale)",
     )
-    p.add_argument(
-        "--dual-expert",
-        dest="dual_expert",
-        action="store_true",
-        help="Wan 2.2 A14B on the neuron backend: hold both experts, the high-noise one above "
-        "the checkpoint's boundary timestep and the low-noise one below it (default: the "
-        "high-noise expert for every step, as on trainium and tpu)",
-    )
+    _add_dual_expert_flag(p)
     p.add_argument(
         "--true-cfg-scale",
         dest="true_cfg_scale",
@@ -746,6 +752,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_shape_flags(cp_cmd)
     _add_cache_flags(cp_cmd)
     _add_teacache_flags(cp_cmd)
+    _add_dual_expert_flag(cp_cmd)
     _add_backend_flags(cp_cmd)
 
     gen = sub.add_parser("generate", help="Run inference (requires prior compile)")
