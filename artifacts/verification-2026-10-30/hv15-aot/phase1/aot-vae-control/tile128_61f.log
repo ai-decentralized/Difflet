@@ -1,0 +1,47 @@
+date: 2026-10-30T22:17:43+0000
+cmd: bash /home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_py.sh scripts/hunyuan15_vae_parity.py --vae-dir /home/ubuntu/.cache/huggingface/hub/models--hunyuanvideo-community--HunyuanVideo-1.5-Diffusers-480p_t2v/snapshots/286be7ce72277246578a3e3cc2487e95ddae5bcf/vae --cache-dir /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/vae-neff/tile128_61f --height 320 --width 512 --num-frames 61 --tile-sample-min-height 128 --tile-sample-min-width 128 --latents-in /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/native-tp2cfg/gen50.work/latents.pt --divide-scaling-factor --skip-reference --skip-warmup --save-trainium /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/vae-control/tile128_61f_video.pt --metrics-out /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/vae-control/tile128_61f_metrics.json
+env: ['PYTHONPATH=/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan', 'NEURON_RT_VIRTUAL_CORE_SIZE=2', 'NEURON_RT_NUM_CORES=1', 'HF_HUB_OFFLINE=1']
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+..........(GenericCopy: I-86496), tensorizer(output tensor: bfloat16<128 x 512> $86496[i1_0, i0_0, i0_1_0], id: 63457 output tensor: bfloat16<128 x 416> $86497[i1_0, i0_0, i0_1_0], id: 63457) [INTERNAL_ERROR] [NCC_IBIR229] State buffer allocation failed: total size of tensors that need to be allocated in state buffer to execute I-86496 exceeds state buffer capacity.
+Tensor details:
+custom_call.17_sub0: 32768 Bytes per Partition and total of: 4194304 Bytes in SB
+concatenate.66_sub0: 183600 Bytes per Partition and total of: 23500800 Bytes in SB
+
+Total available SB Size: 29360128 - Please open a support ticket at https://github.com/aws-neuron/aws-neuron-sdk/issues/new. You may also be able to obtain more information using the 'XLA_IR_DEBUG' and 'XLA_HLO_DEBUG' environment variables.
+.
+2026-10-30T22:21:16Z Non-signal exit. Backend exited with code 1 and stderr: (GenericCopy: I-86496), tensorizer(output tensor: bfloat16<128 x 512> $86496[i1_0, i0_0, i0_1_0], id: 63457 output tensor: bfloat16<128 x 416> $86497[i1_0, i0_0, i0_1_0], id: 63457) [INTERNAL_ERROR] [NCC_IBIR229] State buffer allocation failed: total size of tensors that need to be allocated in state buffer to execute I-86496 exceeds state buffer capacity.
+Tensor details:
+custom_call.17_sub0: 32768 Bytes per Partition and total of: 4194304 Bytes in SB
+concatenate.66_sub0: 183600 Bytes per Partition and total of: 23500800 Bytes in SB
+
+Total available SB Size: 29360128 - Please open a support ticket at https://github.com/aws-neuron/aws-neuron-sdk/issues/new. You may also be able to obtain more information using the 'XLA_IR_DEBUG' and 'XLA_HLO_DEBUG' environment variables.
+
+Traceback (most recent call last):
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/scripts/hunyuan15_vae_parity.py", line 265, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/scripts/hunyuan15_vae_parity.py", line 155, in main
+    app.compile(str(cache_dir))
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/backends/trainium/hunyuan_video/vae15.py", line 258, in compile
+    traced = torch_neuronx.trace(
+             ^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/torch_neuronx/xla_impl/trace.py", line 603, in trace
+    neff_filename, metaneff, flattener, packer, weights = _trace(
+                                                          ^^^^^^^
+  File "/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/torch_neuronx/xla_impl/trace.py", line 683, in _trace
+    neff_artifacts = generate_neff(
+                     ^^^^^^^^^^^^^^
+  File "/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/torch_neuronx/xla_impl/trace.py", line 518, in generate_neff
+    neff_filename = hlo_compile(
+                    ^^^^^^^^^^^^
+  File "/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/torch_neuronx/xla_impl/trace.py", line 341, in hlo_compile
+    raise RuntimeError(f"neuronx-cc failed with {status}")
+RuntimeError: neuronx-cc failed with 70
+[curated: 124 per-tensor "Found torch.float32 weights in checkpoint ... Will convert to torch.bfloat16" warnings removed]

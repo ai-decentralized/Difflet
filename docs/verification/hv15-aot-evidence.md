@@ -198,3 +198,105 @@ native noise (`scripts/hv15_aot_denoise_from_inputs.py --noise-seed-fp32-round 4
 - The 3-step median (3728 ms) is above the 50-step median (1325 ms): with 3 steps the median is
   the second step, which (inference) still carries post-warm-up cost. Use the 50-step figure as
   the native per-step time at this shape.
+
+### Phase 1: correctness gates (3 steps, 320x512x61, seed 42)
+
+**How the gates are evaluated here.** Each AOT cell runs `difflet compile` and then `difflet
+generate --steps 3 --keep-work-dir` on the trainium backend; the AOT stack's own encode stage
+writes `embeds.pt` and draws the noise. Same-stack cells compare their `latents.pt` with
+aot-tp2's. The native comparison (aot-tp2 only) runs the compiled AOT DiT on the native run's
+`embeds.pt` and native noise through `scripts/hv15_aot_denoise_from_inputs.py`, and a third
+reference, diffusers' own pipeline on the CPU in bf16 from the same embeds and noise
+(`scripts/hv15_diffusers_cpu_latents.py`), arbitrates. Metrics come from
+`scripts/hv15_aot_compare_latents.py` (cosine, rel-L1 = sum|a-b| / sum|ref|, max-abs, NaN/Inf).
+
+**The 0.999 cosine gate at 3 steps is below the bf16 noise floor for this model.** With
+identical embeds and noise, three bf16 implementations of the same pipeline land this far
+apart after 3 steps:
+
+| pair (3 steps, identical inputs) | cosine | rel-L1 | max-abs |
+|---|---|---|---|
+| AOT TP2 vs native TP2xCFG2 | 0.982189 | 0.1712 | 3.82 |
+| AOT TP2 vs diffusers CPU bf16 | 0.985041 | 0.1576 | 4.06 |
+| native TP2xCFG2 vs diffusers CPU bf16 | 0.983536 | 0.1723 | 3.35 |
+
+and after 1 step (a single DiT forward per branch, x0 = noise - v):
+
+| pair (1 step, identical inputs) | cosine | rel-L1 | max-abs |
+|---|---|---|---|
+| AOT TP2 vs native TP2xCFG2 | 0.999160 | 0.0434 | 0.56 |
+| AOT TP2 vs diffusers CPU bf16 | 0.999609 | 0.0291 | 0.38 |
+| native TP2xCFG2 vs diffusers CPU bf16 | 0.999136 | 0.0442 | 0.56 |
+
+Native is no closer to diffusers than AOT is; AOT is slightly closer at both depths. The 3-step
+trajectory amplifies per-forward bf16 differences (three steps of size 1/3 from pure noise), so
+no pair of bf16 implementations meets 0.999 there, native vs diffusers included. This campaign
+therefore reports both depths: the per-forward gate (1 step, cosine >= 0.999 against native,
+which AOT meets) and the 3-step distance against the noise floor in the first table. Gate
+verdicts below say which one they use. Evidence: `E/phase1/aot-tp2/cmp_*.json`,
+`native_inputs{1,3}_vs_native.json`, `E/phase1/diffusers-cpu/` (diffusers 1 step 161.8 s,
+3 steps 616.5 s on the host CPU).
+
+**Inputs.** The AOT stack's encode gives `embeds.pt` sha `3051691e…`, the native stack's
+`eba584fa…`: the Qwen2.5-VL embeddings differ slightly (prompt cos 0.999560, negative cos
+0.999399, bf16 max-abs 7 and 9), the ByT5 embeddings and all four masks are bit-identical. The
+seed-42 noise differs as described in Phase 0. `native_noise.pt` (torch 2.9 fp32 draw rounded to
+bf16) sha `4785aa5f…`.
+
+#### aot-tp2 (TP2, CFG's two passes in sequence)
+
+| step | outcome | wall | detail | peak HBM per core (GiB) |
+|---|---|---|---|---|
+| `compile --tp-degree 2` | DiT PASS, VAE FAIL (see aot-vae) | 623.9 s | DiT compiled in 566.8 s into `hunyuan_video_15_aot_dit/039f757f7229a3ac`; the aot_vae stage then failed `NCC_EVRF007` | n/a (compile) |
+| `generate --steps 3`, attempt 1 | FAIL, **bug 1** | 124.3 s | encode 103.1 s, then the aot_transformer stage died in `nrt_init`: ``NEURON_RT_NUM_CORES` must request one core, or the whole device (multiple of 8)`` | — |
+| `generate --steps 3`, after fix `1bfe577` | DiT PASS; VAE stage exits (no artifact) | 222.1 s | encode 51.4 s; aot transformer load 134.7 s; denoise 10.2 s, median 2691 ms (first 4874 ms) | 10.25 on each of the 2 cores |
+| DiT on native inputs, 3 steps | see tables | 52.8 s | load 35.4 s; denoise 10.1 s, median 2717 ms | 10.25 / 10.25 |
+| DiT on native inputs, 1 step | see tables | — | load 35.8 s | — |
+
+- **Gate (native, per forward): PASS**, cosine 0.999160 at 1 step; 3 steps 0.982189, inside the
+  bf16 floor (native vs diffusers 0.983536). No NaN / Inf in any AOT latents.
+- The serial-CFG layout runs the host refiner twice per step (cond and uncond); 2691 ms per step
+  on 2 cores against native TP2xCFG2's 1325 ms on 4 cores (50-step median) is expected, not
+  comparable.
+- The DiT load in the CLI (134.7 s) vs the helper (35.4 s) is page-cache state, an inference: the
+  CLI run was the first to read this artifact after the compile.
+- `latents.pt` sha `aeaab2fb…` (CLI); full list in `E/phase1/aot-tp2/sha256.txt`.
+- The device VAE does not compile (aot-vae), so the MP4 is missing. For a visual check the CLI
+  latents were decoded with diffusers' VAE on the CPU (bf16, tiled 256 px):
+  `E/phase1/aot-tp2/gen3_cpudecode.mp4`, `gen3_cpudecode_mid.png`, which shows a red fox running
+  through snow (3 steps, so soft and noisy, like native's `E/phase0-native/gen3_mid.png`).
+- First attempt's NRT diagnostic (from the kernel log, the run's own log was overwritten by the
+  rerun): `E/phase1/aot-tp2/gen3_attempt1_nrt_dmesg.log`, `gen3_attempt1.meta.json`.
+
+**Bug 1 (`1bfe577`), `fix(cli/runner)`: partial multi-core AoT stages exported
+`NEURON_RT_NUM_CORES=<n>`, which NRT 2.35 accepts only as 1 or a whole device.** Any AoT stage
+on 1 < n < all cores (here TP2 serial CFG on a 4-core trn2.3xlarge) died at runtime init. The
+runner now exports `NEURON_RT_VISIBLE_CORES` (the first n cores of the inherited or detected
+allocation) for those stages; one-core stages keep `NEURON_RT_NUM_CORES=1`, and a shell-exported
+`NEURON_RT_NUM_CORES` is still respected. Control: the same NEFFs launched by hand with
+`NEURON_RT_VISIBLE_CORES=0,1` ran before the fix; after it the CLI cell runs.
+Unit test `tests/unit/cli/test_cli_runner.py::test_partial_multi_core_stage_names_its_cores`.
+
+#### aot-vae: BLOCKED (vae15 does not compile on neuronx-cc 2.26.6360)
+
+The single-graph `vae15` decoder (diffusers' `HunyuanVideo15Decoder3D` with the channel-repeat
+workaround, traced whole per tile with `torch_neuronx.trace`, `--model-type=unet-inference -O1
+--auto-cast=none`) fails in neuronx-cc at every shape tried, so neither the plan's parity cell
+nor any CLI generate can produce an MP4 on the AOT path:
+
+| shape (latent tile) | flags | result | log |
+|---|---|---|---|
+| 61 frames, 256 px tile (16x16), the CLI's | default | `[NCC_EVRF007] Instructions generated by compiler 13,279,851 exceeds the typical limit of 10,000,000` | `E/phase1/aot-tp2/compile.log` |
+| 61 frames, 128 px tile (8x8), native's tile | default | `[NCC_IBIR229] State buffer allocation failed` on `GenericCopy bf16<128 x 512> -> <128 x 416>` | `E/phase1/aot-vae-control/tile128_61f.log` |
+| 9 frames, 256 px tile, the plan's aot-vae cell | default | `[NCC_IBIR229]` on `GenericCopy bf16<128 x 512> -> <128 x 64>` | `E/phase1/aot-vae/tile256_9f.log` |
+| 9 frames, 256 px tile | `--model-type=transformer -O1 --auto-cast=none` | `[NCC_IBIR229]`, same op | `E/phase1/aot-vae-control/probe_transformer_9f.log` |
+| 1 frame, 256 px tile | default | `[NCC_EXTP003] Instructions generated by compiler 2359296 exceeds the typical limit of 300000` (`_convolution.3952`) | `E/phase1/aot-vae-control/tile256_1f.log` |
+
+Not a campaign artifact: the module is unchanged since the M6a import (`a4936a3`, May 2026,
+older toolchain); HV1.0's AOT VAE needed a 16-NEFF segmented decoder to get past a neuronx-cc
+lowering bug in the same position, and the native backend's device VAE decodes HV1.5 with 128 px
+tiles through TorchNeuron. The fix is a design choice and is left to the controller (NEEDS_CONTEXT):
+a segmented vae15 (HV1.0 pattern), a host decode on the AOT path (diffusers' CPU VAE, 254 s for
+61 frames at 320x512 in bf16 here), or a toolchain bump. The parity script now supports the
+diffusers reference (`--reference diffusers`, PSNR), but that path is not exercised until a
+decoder compiles.

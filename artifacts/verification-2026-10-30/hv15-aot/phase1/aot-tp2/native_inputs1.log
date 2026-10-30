@@ -1,0 +1,19 @@
+date: 2026-10-30T22:34:28+0000
+cmd: bash /home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_py.sh scripts/hv15_aot_denoise_from_inputs.py --compiled-dir /home/ubuntu/.cache/difflet/hunyuan_video_15_aot_dit/039f757f7229a3ac --embeds /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/native-tp2cfg/gen1.work/embeds.pt --tp-degree 2 --height 320 --width 512 --num-frames 61 --steps 1 --noise-seed-fp32-round 42 --out /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/aot-tp2/native_inputs1.latents.pt
+env: ['PYTHONPATH=/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan', 'NEURON_RT_VIRTUAL_CORE_SIZE=2', 'NEURON_RT_VISIBLE_CORES=0,1', 'HF_HUB_OFFLINE=1']
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+INFO:Neuron:Loading presharded checkpoints for ranks: 0...1
+INFO:Neuron:Presharded file read: 0.06s for 2 shard(s) (16209.0 MB total)
+INFO:Neuron:Initializing traced model weights for ranks: 0...1 (runtime_start_rank_id=0)
+INFO:Neuron:Finished traced model weight initialization in 33.66s (device init 33.66s, total load_weights 33.72s)
+INFO:Neuron:Skipping model warmup
+[hv15-inputs] load 34.4 s
+[hv15-inputs] denoise 3.6 s, 1 steps, median 3619 ms (first 3619 ms)
+[hv15-inputs] latents saved to /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/aot-tp2/native_inputs1.latents.pt
