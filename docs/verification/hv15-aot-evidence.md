@@ -142,3 +142,59 @@ that a single 51k bounded attention costs more than 45 min of compile on its own
 - `torch_neuronx.trace` was chosen because it is the simplest single-core path, and it compiles
   the same `attention()` op and the same NKI `attention_cte[2]` kernel that the NxD ModelBuilder
   path compiles. It runs no SPMD or collective lowering, which is intended here.
+
+## Campaign (Task 10), Phase 0 and Phase 1: 2026-10-30
+
+Branch `worktree-hv15-aot-parity-plan`, campaign base `376c628`. Curated evidence (logs with host
+identifiers scrubbed, per-step `meta.json` with wall time and neuron-monitor per-core peak HBM,
+mid-frame PNGs, sha256 lists of the work-dir tensors) lives under
+`E = artifacts/verification-2026-10-30/hv15-aot/`. Raw run dirs, work-dir tensors and NEFFs stay
+outside the repo. Every CLI call ran through the plan's `run_difflet.sh` wrapper, wrapped by a
+campaign cell runner that samples `neuron-monitor` once per second (`memory_used`, per-core sum
+of the runtime's usage breakdown). Common flags: `--model-id
+hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v --height 320 --width 512
+--num-frames 61 --seed 42 --prompt "a cinematic shot of a red fox running through a snowy forest"`,
+`HF_HUB_OFFLINE=1`, snapshot rev `286be7ce`.
+
+### Phase 0: host and native reference
+
+**Host check** (`.claude/skills/difflet-device-verify/scripts/env_check.sh`): trn2.3xlarge, 4
+logical cores (LNC 2), 96 GiB HBM, 0 busy processes at start; 1.2 TB free; HF token present;
+HV1.5 snapshot 50 GB in the HF cache. `<repo>/.venv` is absent, as ruled (R5: no `.venv`).
+
+**Environment finding: the native backend does not run in `/home/ubuntu/venvs/difflet-neuron`.**
+That venv is the AOT stack (torch 2.9.1, torch-neuronx 2.9.0.2.15, neuronx-cc 2.26.6360,
+NxD 0.19.28492, NxDI 0.10.18399, nki 0.5.0, diffusers 0.38.0). A native `difflet compile` there
+fails in every rank at process-group init, before any model code:
+`AssertionError: Unknown backend type neuron` (`difflet/backends/neuron/runtime.py:228`,
+`dist.init_process_group("neuron")`). The `neuron` process-group backend comes from TorchNeuron,
+which is installed in `/home/ubuntu/venvs/native-312` (torch 2.14.0, torch-neuronx 2.14.3.0.1,
+neuronx-cc 2.28.7631, nki 0.7.0, diffusers 0.38.0). Not a Difflet bug; the native reference runs
+use that venv (same wrapper, `PATH` overridden through `HV15_ENV_FILE`). AOT cells use
+`difflet-neuron`.
+
+**Cross-stack noise.** The two stacks draw different bf16 initial noise for the same seed:
+`randn_tensor(..., dtype=bfloat16)` with seed 42 at the 320x512x61 latent shape `[1,32,16,20,32]`
+hashes `0ed37154…` on torch 2.9.1 and `02b85e79…` on torch 2.14.0. Drawing fp32 and rounding to
+bf16 on torch 2.9.1 gives `02b85e79…`, bit-identical to torch 2.14's bf16 draw (the behaviour
+`docs/verification/neuron-backend-results.md` describes). The hv15 encode stage also runs on the
+two different torch versions. So an AOT CLI run and a native CLI run do not start from the same
+inputs, and the native-parity gate below feeds the AOT DiT the native run's `embeds.pt` and the
+native noise (`scripts/hv15_aot_denoise_from_inputs.py --noise-seed-fp32-round 42`).
+
+**Native reference, TP2 x CFG2** (`DIFFLET_BACKEND=neuron`, native-312 venv, `--tp-degree 2 --cfg-parallel`):
+
+| step | outcome | wall | stage timings (from the log) | peak HBM per core (GiB) | evidence |
+|---|---|---|---|---|---|
+| `compile` | PASS | 923.8 s | transformer load 179.0 s (warmup forward 153.1 s); vae load 30.9 s | 9.72 / 9.62 / 10.20 / 9.62 | `E/phase0-native/compile.log` |
+| `generate --steps 3` | PASS | 235.9 s | encode 101.2 s (first, cold page cache); denoise 30.1 s, median 3728 ms (first 25096 ms); decode 32.0 s | 9.58 / 9.66 / 9.92 / 9.66 | `E/phase0-native/gen3.log`, `gen3_mid.png` |
+| `generate --steps 50` | PASS | 176.2 s | encode 6.8 s; denoise 79.4 s, median 1325 ms (first 14416 ms); decode 31.4 s | 9.66 / 9.66 / 9.90 / 9.66 | `E/phase0-native/gen50.log`, `gen50.mp4`, `gen50_mid.png` |
+
+- `embeds.pt` sha256 `eba584fa…004b4f`, identical in both native runs.
+- `latents.pt` sha256: 3 steps `4646fa9b…7d3cf6`, 50 steps `33baa167…a1897d` (full hashes in
+  `E/phase0-native/sha256.txt`).
+- The 50-step video: 61 frames at 320x512, minimum per-frame pixel std 79.0, mean frame-to-frame
+  difference 36.5 grey levels; the mid frame shows a red fox running through snow.
+- The 3-step median (3728 ms) is above the 50-step median (1325 ms): with 3 steps the median is
+  the second step, which (inference) still carries post-warm-up cost. Use the 50-step figure as
+  the native per-step time at this shape.
