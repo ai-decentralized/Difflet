@@ -314,6 +314,8 @@ def _row(linear: nn.Linear, *, reduce_output: bool) -> nn.Module:
         bias=linear.bias is not None,
         input_is_parallel=True,
         reduce_output=reduce_output,
+        # hv15 is in _TP_REDUCE_UNAFFECTED (difflet_pipeline.py): always fp32, whatever --tp-reduce-dtype says.
+        reduce_dtype=torch.float32,
     )
     return _copy_weights(layer, linear)
 
