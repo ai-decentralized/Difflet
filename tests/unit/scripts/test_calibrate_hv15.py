@@ -118,7 +118,15 @@ def test_calibration_model_key(tmp_path):
     assert cal.main() == 0
     doc = json.loads(out.read_text())
     assert doc["model"] == "hunyuan_video_15" and doc["shape_label"] == "320x512x61"
-    assert doc["num_steps"] == 50 and doc["mod_input_source"] == cal.HV15_MOD_INPUT_SOURCE
+    assert doc["num_steps"] == 50 and doc["mod_input_source"] == "block0_modulated_input"
+    from difflet.pipeline.teacache import load_teacache_calibration_or_raise
+    from difflet.serving.options import _load_serving_teacache_calibration
+
+    loaded = load_teacache_calibration_or_raise(out, model="hunyuan_video_15", shape_label="320x512x61")
+    assert loaded.num_steps == 50 and len(loaded.poly_coef) == 4
+    _load_serving_teacache_calibration(
+        str(out), model="hunyuan_video_15", shape_label="320x512x61", requested_speedup=1.2
+    )
 
 
 def test_hv15_pairs_doc_shape(monkeypatch, denoiser):
@@ -128,3 +136,13 @@ def test_hv15_pairs_doc_shape(monkeypatch, denoiser):
     doc = cal._collect_hv15_pairs(args)
     assert (doc["model"], doc["shape_label"], doc["num_steps"]) == ("hunyuan_video_15", "320x512x61", STEPS)
     assert doc["schema"] == cal.PAIRS_SCHEMA and len(doc["samples"]) == STEPS - 1
+
+
+def test_collector_leaves_trajectory_unchanged(denoiser):
+    def run():
+        denoiser.dit.n = 0
+        return denoiser(**_embeds(), num_inference_steps=STEPS, generator=torch.Generator().manual_seed(0))
+
+    plain = run()
+    cal.collect_hv15_samples(denoiser, _embeds(), num_inference_steps=STEPS, generator=torch.Generator().manual_seed(0))
+    assert torch.equal(plain, run())
