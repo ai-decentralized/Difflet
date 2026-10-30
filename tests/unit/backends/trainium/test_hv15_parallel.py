@@ -52,7 +52,17 @@ _TINY = {
 }
 
 
-def _config(tmp_path, *, tp_degree: int = 1, batch_size: int = 1, **overrides):
+def _config(
+    tmp_path,
+    *,
+    tp_degree: int = 1,
+    batch_size: int = 1,
+    world_size: int | None = None,
+    height: int = 32,
+    width: int = 48,
+    num_frames: int = 5,
+    **overrides,
+):
     from difflet.backends.trainium.core.config import NeuronConfig
     from difflet.backends.trainium.hunyuan_video import backbone15
     from difflet.utils.diffusers_adapter import load_diffusers_config
@@ -64,14 +74,14 @@ def _config(tmp_path, *, tp_degree: int = 1, batch_size: int = 1, **overrides):
         neuron_config=NeuronConfig(
             batch_size=batch_size,
             tp_degree=tp_degree,
-            world_size=tp_degree,
+            world_size=world_size or tp_degree,
             torch_dtype=torch.float32,
             skip_sharding=True,
         ),
         load_config=load_diffusers_config(transformer_dir),
-        height=32,
-        width=48,
-        num_frames=5,
+        height=height,
+        width=width,
+        num_frames=num_frames,
         text_seq_len=7,
         text_seq_len_2=3,
         image_seq_len=4,
@@ -304,7 +314,7 @@ def test_global_rank_key_matches_module_state(tmp_path, monkeypatch, backbone15)
     monkeypatch.setattr(backbone15, "SPMDRank", _RankParam)
     convert = backbone15.NeuronHunyuanVideo15BackboneApplication.convert_hf_to_neuron_state_dict
 
-    cfg = _config(tmp_path, cfg_parallel_enabled=True)
+    cfg = _config(tmp_path, batch_size=2, cfg_parallel_enabled=True)
     state = backbone15._HunyuanVideo15TraceModule(cfg).state_dict()
     transformer_keys = {k for k in state if k.startswith("transformer.")}
     hf = {k[len("transformer."):]: v for k, v in state.items() if k in transformer_keys}
@@ -322,7 +332,7 @@ def test_mesh_initialized_when_sharding(tmp_path, monkeypatch, backbone15):
     monkeypatch.setattr(backbone15, "init_parallel_mesh", calls.append)
     backbone15._HunyuanVideo15TraceModule(_config(tmp_path))
     assert calls == []
-    cfg = _config(tmp_path, cfg_parallel_enabled=True)
+    cfg = _config(tmp_path, batch_size=2, cfg_parallel_enabled=True)
     backbone15._HunyuanVideo15TraceModule(cfg)
     assert calls == [cfg]
 
@@ -383,11 +393,163 @@ def test_cfg_with_cp_follows_composable_rule(tmp_path, monkeypatch):
 
     monkeypatch.setattr(parallel_config, "cfg_cp_composable", lambda backend=None: False)
     with pytest.raises(NotImplementedError, match="cfg_cp_composable|compose"):
-        _config(tmp_path, cfg_parallel_enabled=True, context_parallel_enabled=True)
+        _config(tmp_path, batch_size=2, cfg_parallel_enabled=True, context_parallel_enabled=True)
 
     monkeypatch.setattr(parallel_config, "cfg_cp_composable", lambda backend=None: True)
-    assert _config(tmp_path, cfg_parallel_enabled=True, context_parallel_enabled=True)
+    assert _config(tmp_path, batch_size=2, cfg_parallel_enabled=True, context_parallel_enabled=True)
     # CFG alone and CP alone never consult the rule.
     monkeypatch.setattr(parallel_config, "cfg_cp_composable", lambda backend=None: False)
-    assert _config(tmp_path, cfg_parallel_enabled=True)
+    assert _config(tmp_path, batch_size=2, cfg_parallel_enabled=True)
     assert _config(tmp_path, context_parallel_enabled=True)
+
+
+def test_cfg_requires_batch_two_before_compile(tmp_path):
+    with pytest.raises(ValueError, match="batch_size=1"):
+        _config(tmp_path, cfg_parallel_enabled=True)
+    assert _config(tmp_path, batch_size=2, cfg_parallel_enabled=True)
+
+
+@pytest.mark.parametrize(
+    "parallel",
+    [
+        {"cfg_parallel_enabled": True, "world_size": 2},
+        {"cp_degree": 2, "world_size": 2},
+        {"sp_enabled": True, "tp_degree": 4, "world_size": 4},
+    ],
+    ids=["cfg", "cp", "sp"],
+)
+def test_segmented_runtime_rejects_parallel_modes_before_compile(tmp_path, monkeypatch, parallel):
+    from difflet.models.hunyuan_video import application as app
+
+    model_dir = tmp_path / "model"
+    (model_dir / "transformer").mkdir(parents=True)
+    (model_dir / "transformer" / "config.json").write_text(json.dumps(_TINY))
+    monkeypatch.setenv("DIFFLET_HUNYUAN15_TRANSFORMER_RUNTIME", "segmented")
+    fields = {"tp_degree": 1, "cp_degree": 1, "cp_mode": "ulysses", **parallel}
+    with pytest.raises(NotImplementedError, match="monolithic"):
+        app.NeuronHunyuanVideoApplication(
+            model_path=str(model_dir),
+            parallel=SimpleNamespace(**fields),
+            dtype=torch.float32,
+            shape={"height": 32, "width": 48, "num_frames": 5},
+            model_version="1.5",
+            text_seq_len=7,
+            text_seq_len_2=3,
+            image_seq_len=4,
+        )
+
+
+# --------------------------------------------------------------------------- #
+# Megatron sequence parallelism
+# --------------------------------------------------------------------------- #
+def test_sp_rejects_indivisible_tokens_before_compile(tmp_path):
+    # 480x848x121 -> latent 31x30x53 = 49290 image tokens, 49290 % 4 == 2.
+    with pytest.raises(ValueError, match="49290") as err:
+        _config(tmp_path, tp_degree=4, sp_enabled=True, height=480, width=848, num_frames=121)
+    # Even latent frame counts divide: 117 (30 latent frames) and 125 (32).
+    assert "117" in str(err.value) and "125" in str(err.value)
+
+
+def test_sp_requires_tensor_parallel(tmp_path):
+    with pytest.raises(ValueError, match="tp_degree"):
+        _config(tmp_path, sp_enabled=True)
+
+
+def test_sp_rejects_cp(tmp_path):
+    with pytest.raises(NotImplementedError, match="context"):
+        _config(tmp_path, tp_degree=4, sp_enabled=True, context_parallel_enabled=True)
+
+
+def test_sp_with_cfg_writes_tp_rank_util(tmp_path, monkeypatch, backbone15):
+    monkeypatch.setattr(backbone15, "SPMDRank", _RankParam)
+    convert = backbone15.NeuronHunyuanVideo15BackboneApplication.convert_hf_to_neuron_state_dict
+
+    # SP + CFG: world = 2 * tp, so the scatter needs the TP-local rank, not the global one.
+    cfg = _config(
+        tmp_path,
+        tp_degree=2,
+        world_size=4,
+        batch_size=2,
+        sp_enabled=True,
+        cfg_parallel_enabled=True,
+    )
+    state = backbone15._HunyuanVideo15TraceModule(cfg).state_dict()
+    transformer_keys = {k for k in state if k.startswith("transformer.")}
+    hf = {k[len("transformer."):]: v for k, v in state.items() if k in transformer_keys}
+
+    converted = convert(dict(hf), cfg)
+    assert set(state) - transformer_keys == {"global_rank.rank", "tp_rank_util.rank"}
+    assert set(converted) - transformer_keys == {"global_rank.rank", "tp_rank_util.rank"}
+    assert converted["tp_rank_util.rank"].tolist() == [0, 1]
+    assert converted["tp_rank_util.rank"].dtype == torch.int32
+    assert converted["global_rank.rank"].tolist() == [0, 1, 2, 3]
+
+    no_sp = _config(tmp_path, tp_degree=2, world_size=4, batch_size=2, cfg_parallel_enabled=True)
+    assert "tp_rank_util.rank" not in backbone15._HunyuanVideo15TraceModule(no_sp).state_dict()
+    assert "tp_rank_util.rank" not in convert(dict(hf), no_sp)
+
+
+def _dit_inputs():
+    from difflet.backends.trainium.hunyuan_video.parallel15 import hv15_text_order
+
+    torch.manual_seed(1)
+    mask = torch.tensor([[1, 0, 1, 1, 0, 0, 1]])
+    mask_2 = torch.tensor([[1, 0, 1]])
+    return (
+        torch.randn(1, 65, 2, 2, 3),
+        torch.tensor([500.0]),
+        torch.randn(1, 7, 32),  # host-refined mllm stream (inner_dim)
+        mask,
+        torch.zeros(1),
+        torch.randn(1, 3, 10),
+        mask_2,
+        torch.zeros(1, 4, 6),
+        hv15_text_order(torch.zeros(1, 4, dtype=torch.int64), mask_2, mask),
+    )
+
+
+def test_sp_forward_scatters_once_with_tp_rank(tmp_path, monkeypatch, backbone15):
+    calls = {"scatter": [], "gather": []}
+    monkeypatch.setattr(backbone15, "SPMDRank", _RankParam)
+
+    def scatter(x, partition_dim, rank, process_group):
+        calls["scatter"].append((tuple(x.shape), partition_dim, rank, process_group))
+        return x
+
+    def gather(x, *, dim):
+        calls["gather"].append((tuple(x.shape), dim))
+        return x
+
+    monkeypatch.setattr(backbone15, "scatter_to_process_group_spmd", scatter)
+    monkeypatch.setattr(backbone15, "gather_from_sequence_parallel_region", gather, raising=False)
+    module = backbone15._HunyuanVideo15TraceModule(
+        _config(tmp_path, tp_degree=4, sp_enabled=True)
+    ).eval()
+    with torch.no_grad():
+        module(*_dit_inputs())
+
+    # One scatter of the image stream [B, N, C] before the blocks, one gather after.
+    assert len(calls["scatter"]) == 1
+    shape, dim, rank, group = calls["scatter"][0]
+    assert shape == (1, 12, 32) and dim == 1 and group is None
+    assert rank is module.tp_rank_util.rank
+    assert calls["gather"] == [((1, 12, 32), 1)]
+
+
+def test_sp_world1_matches_dense(tmp_path, backbone15, parallel15):
+    torch.manual_seed(0)
+    dense = backbone15._HunyuanVideo15TraceModule(_config(tmp_path)).eval()
+    sp = backbone15._HunyuanVideo15TraceModule(
+        _config(tmp_path, tp_degree=4, sp_enabled=True)
+    ).eval()
+    sp.transformer.load_state_dict(dense.transformer.state_dict())
+    block = sp.transformer.transformer_blocks[0]
+    assert isinstance(block.ff, parallel15._SequenceParallelFeedForward)
+    assert block.attn.processor.sp
+
+    inputs = _dit_inputs()
+    with torch.no_grad():
+        expected = dense(*inputs)
+        out = sp(*inputs)
+    assert out.shape == expected.shape == (1, 32, 2, 2, 3)
+    assert torch.allclose(out, expected, atol=1e-5)

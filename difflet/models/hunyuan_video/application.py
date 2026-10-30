@@ -564,6 +564,17 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                         "runtime: per-block process loading has no single graph for the "
                         "persistent prev_mod Parameter. Use transformer_runtime='monolithic'."
                     )
+                if (
+                    config.cfg_parallel_enabled
+                    or config.context_parallel_enabled
+                    or config.sp_enabled
+                ):
+                    raise NotImplementedError(
+                        "HunyuanVideo 1.5 CFG-parallel, context-parallel and sequence-parallel "
+                        "run only in the monolithic DiT; the segmented runtime has none of "
+                        "them. Use transformer_runtime='monolithic' "
+                        "(DIFFLET_HUNYUAN15_TRANSFORMER_RUNTIME=monolithic)."
+                    )
                 from difflet.backends.trainium.hunyuan_video.segmented15 import (
                     DEFAULT_ATTENTION_COMPILER_ARGS,
                     DEFAULT_BLOCK_COMPILER_ARGS,
