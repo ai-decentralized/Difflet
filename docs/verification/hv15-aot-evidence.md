@@ -340,3 +340,19 @@ load 111.1 s; denoise 9.3 s, median 2719 ms) gives `latents.pt` **bit-identical*
 run (`aeaab2fb…`, `cmp_gen3_postfix.work_latents__vs__aot-tp2_gen3.work_latents.json`): the
 in-graph switch changes nothing numerically, and the AOT DiT is deterministic across a recompile.
 The native-input comparisons above used the pre-fix NEFF and therefore stand.
+
+#### aot-tp4 (TP4, CFG in sequence)
+
+| step | outcome | wall | detail | peak HBM per core (GiB) |
+|---|---|---|---|---|
+| `compile --tp-degree 4` | DiT PASS, VAE FAIL (aot-vae) | 596.6 s | DiT compiled in 572.3 s into `hunyuan_video_15_aot_dit/2eef1e7d012eea0a` | — |
+| `generate --steps 3` | DiT PASS; VAE stage exits | 78.7 s | encode 9.6 s; DiT load 23.7 s; denoise 6.8 s, median 1749 ms (first 3336 ms) | 5.75 on each of 4 cores |
+
+- `embeds.pt` sha `3051691e…` (same as aot-tp2); `latents.pt` sha `579a01b9…`.
+- **Gate (vs aot-tp2): per forward PASS**, cosine 0.999720 / rel-L1 0.0262 / max-abs 0.38 at
+  1 step; 3 steps 0.985482 / 0.1718 / 3.95, inside the bf16 floor. No NaN / Inf.
+- **Device check (3), TP > 1 numerics: PASS.** TP2 and TP4 (different shardings and
+  all-reduce trees of the same DiT) agree per forward to 0.99972, TP2 x CFG2 to 0.99982, and the
+  TP2 DiT agrees with diffusers' CPU pipeline per forward to 0.99961 (closer than native TP2 x
+  CFG2, 0.99914).
+- Evidence: `E/phase1/aot-tp4/`.
