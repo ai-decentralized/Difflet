@@ -1,0 +1,132 @@
+date: 2026-10-30T23:09:48+0000
+cmd: bash /home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_difflet.sh trainium compile --model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v --height 320 --width 512 --num-frames 61 --tp-degree 2 --cfg-parallel
+env: ['HF_HUB_OFFLINE=1', 'PYTHONFAULTHANDLER=1']
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+INFO:Neuron:Saving the neuron_config to /home/ubuntu/.cache/difflet/hunyuan_video_15_aot_dit/58d5f319c159f86a/transformer/
+INFO:Neuron:Generating HLOs for the following models: ['HunyuanVideo15Transformer3DModel']
+[2026-10-30 23:09:53.257: I neuronx_distributed/parallel_layers/parallel_state.py:638] > initializing tensor model parallel with size 2
+[2026-10-30 23:09:53.257: I neuronx_distributed/parallel_layers/parallel_state.py:639] > initializing pipeline model parallel with size 1
+[2026-10-30 23:09:53.257: I neuronx_distributed/parallel_layers/parallel_state.py:640] > initializing context model parallel with size 1
+[2026-10-30 23:09:53.257: I neuronx_distributed/parallel_layers/parallel_state.py:641] > initializing data parallel with size 2
+[2026-10-30 23:09:53.257: I neuronx_distributed/parallel_layers/parallel_state.py:642] > initializing world size to 4
+[2026-10-30 23:09:53.257: I neuronx_distributed/parallel_layers/parallel_state.py:387] [rank_0_pp-1_tp-1_dp-1_cp-1] Chosen Logic for replica groups ret_logic=<PG_Group_Logic.LOGIC1: (<function ascending_ring_PG_group at 0x74b195481260>, 'Ascending Ring PG Group')>
+[2026-10-30 23:09:53.257: I neuronx_distributed/parallel_layers/parallel_state.py:666] [rank_0_pp-1_tp-1_dp-1_cp-1] tp_groups: replica_groups.tp_groups=[[0, 1], [2, 3]]
+[2026-10-30 23:09:53.257: I neuronx_distributed/parallel_layers/parallel_state.py:667] [rank_0_pp-1_tp-1_dp-1_cp-1] dp_groups: replica_groups.dp_groups=[[0, 2], [1, 3]]
+[2026-10-30 23:09:53.257: I neuronx_distributed/parallel_layers/parallel_state.py:668] [rank_0_pp-1_tp-1_dp-1_cp-1] pp_groups: replica_groups.pp_groups=[[0], [1], [2], [3]]
+[2026-10-30 23:09:53.257: I neuronx_distributed/parallel_layers/parallel_state.py:669] [rank_0_pp-1_tp-1_dp-1_cp-1] cp_groups: replica_groups.cp_groups=[[0], [1], [2], [3]]
+[2026-10-30 23:09:53.257: I neuronx_distributed/parallel_layers/parallel_state.py:670] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_model_groups: replica_groups.ep_model_groups=[[0], [1], [2], [3]]
+[2026-10-30 23:09:53.257: I neuronx_distributed/parallel_layers/parallel_state.py:671] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_data_groups: replica_groups.ep_data_groups=[[0, 2], [1, 3]]
+INFO:Neuron:Generating 1 hlos for key: HunyuanVideo15Transformer3DModel
+INFO:Neuron:Minimal metadata will be added to HLO
+INFO:Neuron:Started loading module HunyuanVideo15Transformer3DModel
+INFO:Neuron:Finished loading module HunyuanVideo15Transformer3DModel in 37.457160234451294 seconds
+INFO:Neuron:generating HLO: HunyuanVideo15Transformer3DModel, input example shape = torch.Size([2, 65, 16, 20, 32])
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/parallel_layers/layers.py:531: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=4, shape=torch.Size([2]), dtype=torch.bfloat16). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+INFO:Neuron:Finished generating HLO for HunyuanVideo15Transformer3DModel in 100.12466049194336 seconds, input example shape = torch.Size([2, 65, 16, 20, 32])
+INFO:Neuron:Generated all HLOs in 138.30984663963318 seconds
+INFO:Neuron:Starting compilation for the priority HLO
+INFO:Neuron:'HunyuanVideo15Transformer3DModel' is the priority model with bucket rank 0
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/libneuronxla/neuron_cc_wrapper.py:287: SyntaxWarning: str format compiler_flags is discouraged as its handling involves repeated joining and splitting, which can easily make mistakes if something is quoted or escaped. Use list[str] instead. Refer to documentation of the Python subprocess module for details.
+  warnings.warn(SyntaxWarning(
+.........
+Compiler status PASS
+2026-10-30 23:15:01.000697:  1517864  [INFO]: Compilation Successfully Completed for model.MODULE_98167172f54210ec9e5f+3a96b5ed.hlo_module.pb
+INFO:Neuron:Done compilation for the priority HLO in 170.24912786483765 seconds
+INFO:Neuron:Done optimizing weight layout for all HLOs in 0.09583330154418945 seconds
+INFO:Neuron:Starting compilation for all HLOs
+INFO:Neuron:Finished Compilation for all HLOs in 0.0054013729095458984 seconds
+.......
+Compiler status PASS
+INFO:Neuron:Done preparing weight layout transformation
+INFO:Neuron:Finished building model in 439.27877736091614 seconds
+INFO:Neuron:Pre-sharding checkpoints.
+INFO:Neuron:Sharding weights for ranks: 0...3
+[2026-10-30 23:17:12.670: I neuronx_distributed/parallel_layers/parallel_state.py:638] > initializing tensor model parallel with size 2
+[2026-10-30 23:17:12.670: I neuronx_distributed/parallel_layers/parallel_state.py:639] > initializing pipeline model parallel with size 1
+[2026-10-30 23:17:12.670: I neuronx_distributed/parallel_layers/parallel_state.py:640] > initializing context model parallel with size 1
+[2026-10-30 23:17:12.670: I neuronx_distributed/parallel_layers/parallel_state.py:641] > initializing data parallel with size 2
+[2026-10-30 23:17:12.670: I neuronx_distributed/parallel_layers/parallel_state.py:642] > initializing world size to 4
+[2026-10-30 23:17:12.670: I neuronx_distributed/parallel_layers/parallel_state.py:387] [rank_0_pp-1_tp-1_dp-1_cp-1] Chosen Logic for replica groups ret_logic=<PG_Group_Logic.LOGIC1: (<function ascending_ring_PG_group at 0x74b195481260>, 'Ascending Ring PG Group')>
+[2026-10-30 23:17:12.670: I neuronx_distributed/parallel_layers/parallel_state.py:666] [rank_0_pp-1_tp-1_dp-1_cp-1] tp_groups: replica_groups.tp_groups=[[0, 1], [2, 3]]
+[2026-10-30 23:17:12.670: I neuronx_distributed/parallel_layers/parallel_state.py:667] [rank_0_pp-1_tp-1_dp-1_cp-1] dp_groups: replica_groups.dp_groups=[[0, 2], [1, 3]]
+[2026-10-30 23:17:12.670: I neuronx_distributed/parallel_layers/parallel_state.py:668] [rank_0_pp-1_tp-1_dp-1_cp-1] pp_groups: replica_groups.pp_groups=[[0], [1], [2], [3]]
+[2026-10-30 23:17:12.670: I neuronx_distributed/parallel_layers/parallel_state.py:669] [rank_0_pp-1_tp-1_dp-1_cp-1] cp_groups: replica_groups.cp_groups=[[0], [1], [2], [3]]
+[2026-10-30 23:17:12.670: I neuronx_distributed/parallel_layers/parallel_state.py:670] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_model_groups: replica_groups.ep_model_groups=[[0], [1], [2], [3]]
+[2026-10-30 23:17:12.670: I neuronx_distributed/parallel_layers/parallel_state.py:671] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_data_groups: replica_groups.ep_data_groups=[[0, 2], [1, 3]]
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/trace/trace.py:642: UserWarning: Removing redundant keys from checkpoint: []
+  warnings.warn(f"Removing redundant keys from checkpoint: {keys_to_delete}")
+INFO:Neuron:Done Sharding weights in 178.74146747397026
+INFO:Neuron:Pre-sharding complete in 179.5s: 4 shard file(s), 32418.0 MB total under /home/ubuntu/.cache/difflet/hunyuan_video_15_aot_dit/58d5f319c159f86a/transformer/weights/
+[hv15] aot transformer compiled into /home/ubuntu/.cache/difflet/hunyuan_video_15_aot_dit/58d5f319c159f86a (619.5 s)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+.
+2026-10-30T23:22:00Z WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+I0000 00:00:1793402519.152095 1519551 main.cc:735] IR signature: 5cf82e297d6cd99d65564f308818997178c74e33ac82f02426d33b27f40954c9 for model
+2026-10-30 23:22:00.079840: E hilo/hlo_passes/NeuronHloVerifier.cc:1443] [ERROR] [NCC_EVRF007] Instructions generated by compiler 13,279,851 exceeds the typical limit of 10,000,000. Input computation graph is too big or has large operators. Consider using --optlevel=1, smaller batches or sequence length, or applying model parallelism. For further troubleshooting visit https://awsdocs-neuron.readthedocs-hosted.com/en/latest/libraries/nxd-training/app_notes/nxd-training-tp-appnote.html.
+
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/stage.py", line 153, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/stage.py", line 148, in main
+    orchestrator._run_stage_internal(args.stage, args)
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/orchestrators/hunyuan_video_15.py", line 167, in _run_stage_internal
+    self._stage_aot_vae(args)
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/orchestrators/hunyuan_video_15.py", line 438, in _stage_aot_vae
+    app.compile(str(compiled_dir))
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/backends/trainium/hunyuan_video/vae15.py", line 258, in compile
+    traced = torch_neuronx.trace(
+             ^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/torch_neuronx/xla_impl/trace.py", line 603, in trace
+    neff_filename, metaneff, flattener, packer, weights = _trace(
+                                                          ^^^^^^^
+  File "/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/torch_neuronx/xla_impl/trace.py", line 683, in _trace
+    neff_artifacts = generate_neff(
+                     ^^^^^^^^^^^^^^
+  File "/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/torch_neuronx/xla_impl/trace.py", line 518, in generate_neff
+    neff_filename = hlo_compile(
+                    ^^^^^^^^^^^^
+  File "/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/torch_neuronx/xla_impl/trace.py", line 341, in hlo_compile
+    raise RuntimeError(f"neuronx-cc failed with {status}")
+RuntimeError: neuronx-cc failed with 70
+[difflet] work dir preserved at /home/ubuntu/.cache/difflet/work/hv15 for inspection
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/main.py", line 1336, in <module>
+    main()
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/main.py", line 1332, in main
+    getattr(orchestrator, args.command)()
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/orchestrators/hunyuan_video_15.py", line 78, in compile
+    self._run("compile")
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/orchestrators/hunyuan_video_15.py", line 87, in _run
+    return self._run_aot(mode)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/orchestrators/hunyuan_video_15.py", line 309, in _run_aot
+    runner.run_stage(_HF_MODEL_ID, "aot_vae", num_cores=1, virtual_core_size=_AOT_VIRTUAL_CORE_SIZE,
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/runner.py", line 255, in run_stage
+    subprocess.run(cmd, env=env, check=True)
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['/home/ubuntu/venvs/difflet-neuron/bin/python', '-m', 'difflet.cli.stage', '--orchestrator', 'hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v', '--stage', 'aot_vae', '--model-id', 'hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v', '--stage-mode', 'compile', '--work-dir', '/home/ubuntu/.cache/difflet/work/hv15', '--tp-degree', '2', '--cp-degree', '1', '--height', '320', '--width', '512', '--num-frames', '61', '--steps', '50', '--seed', '42', '--cfg-parallel', '--dp-schedule', 'round_robin']' returned non-zero exit status 1.
+[curated: 1925 per-tensor "Found torch.float32 weights in checkpoint ... Will convert to torch.bfloat16" warnings removed]

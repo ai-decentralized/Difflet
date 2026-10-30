@@ -300,3 +300,33 @@ a segmented vae15 (HV1.0 pattern), a host decode on the AOT path (diffusers' CPU
 61 frames at 320x512 in bf16 here), or a toolchain bump. The parity script now supports the
 diffusers reference (`--reference diffusers`, PSNR), but that path is not exercised until a
 decoder compiles.
+
+#### aot-tp2cfg (TP2 x CFG2, the default layout)
+
+| step | outcome | wall | detail | peak HBM per core (GiB) |
+|---|---|---|---|---|
+| `compile --tp-degree 2 --cfg-parallel`, attempts 1-2 | FAIL, **bug 2** | 46.1 s, 45.2 s | SIGSEGV while ModelBuilder traced the batch-2 DiT; faulthandler: `backbone15.py:674 if is_t2v:` | — |
+| attempt 3 (first fix, dimless `amax()`) | FAIL | 44.8 s | `RuntimeError: Shapes are not compatible for broadcasting: f32[1,729,2048] vs. f32[1,729,1152]` at the new flag: the torch-xla trace lowered `amax()` with no dims to no reduction | — |
+| attempt 4 (fix `fd2a8aa`, full `max()`) | DiT PASS, VAE FAIL (aot-vae) | 733.8 s | DiT compiled in 619.5 s into `hunyuan_video_15_aot_dit/58d5f319c159f86a` | — |
+| `generate --steps 3` | DiT PASS; VAE stage exits | 279.3 s | encode 109.4 s; load 126.0 s; denoise 10.9 s, median 1593 ms (first 7701 ms) | 9.69 on each of 4 cores |
+| DiT 1 step, AOT embeds, seed 42 | — | — | load 35.3 s; 2746 ms | — |
+
+- `embeds.pt` sha `3051691e…`, identical to aot-tp2's (the AOT stack's encode is deterministic).
+- **Gate (vs aot-tp2): per forward PASS**, cosine 0.999820 / rel-L1 0.0207 / max-abs 0.34 at
+  1 step; 3 steps 0.986882 / 0.1631 / 2.73, inside the bf16 floor. No NaN / Inf.
+  `latents.pt` sha `c99ce43a…`.
+- **Device check (2), int64 `text_order` and the masks scattered under CFG: PASS.** Every DiT
+  input, `text_order` (int64) and both masks included, goes through
+  `scatter_to_process_group_spmd` on the cfg group in this layout (`backbone15.py` forward), and
+  the per-forward result matches the serial-CFG layout to cosine 0.99982.
+- Evidence: `E/phase1/aot-tp2cfg/` (`compile_attempt{1,2,3}*` for the failures).
+
+**Bug 2 (`fd2a8aa`), `fix(trainium/hv15)`: the hv15 trace forward took a Python bool of
+`torch.all(image_embeds == 0)`** (diffusers' t2v branch, kept in the static-reorder fork). That
+executes the partial graph mid-trace; with CFG parallelism `image_embeds` comes from the SPMD cfg
+scatter and the trace segfaults. The switch is now in-graph: a float `max() > 0` flag multiplies
+the image stream and forms its mask (identical to diffusers' two branches; the host already
+refuses non-zero `image_embeds` on the AOT path). The graph changed, so aot-tp2 was recompiled
+after the fix (below). Unit tests: `test_trace_forward_keeps_the_t2v_switch_in_graph`,
+`test_trace_forward_reduces_the_t2v_flag_with_a_full_max`
+(`tests/unit/backends/trainium/test_hv15_parallel.py`).
