@@ -15,6 +15,8 @@ from difflet.backends.trainium.core.config import InferenceConfig
 from difflet.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
 from difflet.backends.trainium.hunyuan_video.parallel15 import (
     JointBoundedProcessor,
+    JointGatherKvProcessor,
+    JointUlyssesProcessor,
     install_tensor_parallel,
 )
 from difflet.ops import (
@@ -23,6 +25,8 @@ from difflet.ops import (
     gather_from_tensor_model_parallel_region_with_dim,
     get_cfg_group,
     get_cfg_rank_spmd,
+    get_cp_group,
+    get_cp_rank_spmd,
     get_world_group,
     init_parallel_mesh,
     scatter_to_process_group_spmd,
@@ -306,6 +310,22 @@ class HunyuanVideo15BackboneInferenceConfig(InferenceConfig):
         ratio = int(self.temporal_compression_ratio)
         return (int(self.num_frames) - 1) // ratio + 1
 
+    @property
+    def num_image_tokens(self) -> int:
+        """Full image-stream length N after patchify (before any sequence sharding)."""
+        p, p_t = int(self.patch_size), int(self.patch_size_t)
+        return (
+            (self.latent_frames // p_t) * (self.latent_height // p) * (self.latent_width // p)
+        )
+
+    @property
+    def cp_degree(self) -> int:
+        """CP degree as the mesh infers it: world / (tp * cfg) when CP is enabled."""
+        if not self.context_parallel_enabled:
+            return 1
+        cfg = 2 if self.cfg_parallel_enabled else 1
+        return int(self.neuron_config.world_size) // (int(self.neuron_config.tp_degree) * cfg)
+
     def validate_config(self):
         super().validate_config()
         if isinstance(self.rope_axes_dim, list):
@@ -349,6 +369,40 @@ class HunyuanVideo15BackboneInferenceConfig(InferenceConfig):
             )
         if self.sp_enabled:
             self._validate_sequence_parallel(heads, tp)
+        if self.cp_degree > 1:
+            self._validate_context_parallel(heads, tp, self.cp_degree)
+
+    def _divisible_frames(self, degree: int) -> list[int]:
+        """num_frames nearest below and above whose image-token count divides ``degree``."""
+        p, p_t = int(self.patch_size), int(self.patch_size_t)
+        hw = (self.latent_height // p) * (self.latent_width // p)
+        step = p_t * (degree // math.gcd(hw, degree))
+        lower = (self.latent_frames // step) * step
+        ratio = int(self.temporal_compression_ratio)
+        return [(t - 1) * ratio + 1 for t in (lower, lower + step) if t >= 1]
+
+    def _validate_context_parallel(self, heads: int, tp: int, cp: int) -> None:
+        if self.cp_mode not in ("ulysses", "gather_kv"):
+            raise NotImplementedError(
+                f"HunyuanVideo 1.5 AOT context parallelism supports cp_mode 'ulysses' and "
+                f"'gather_kv', got {self.cp_mode!r}; use --cp-mode ulysses."
+            )
+        if self.cp_mode == "ulysses" and (heads // tp) % cp:
+            cps = [d for d in range(2, heads // tp + 1) if (heads // tp) % d == 0]
+            raise ValueError(
+                f"HunyuanVideo 1.5 Ulysses splits the num_attention_heads={heads} // "
+                f"tp_degree={tp} = {heads // tp} heads per TP rank over cp_degree={cp}, "
+                f"which does not divide them; use cp_degree in {cps or [1]}, or "
+                "cp_mode='gather_kv'."
+            )
+        tokens = self.num_image_tokens
+        if tokens % cp:
+            raise ValueError(
+                f"HunyuanVideo 1.5 context parallelism splits the N={tokens} image tokens "
+                f"of {self.height}x{self.width}x{self.num_frames} over cp_degree={cp}, but "
+                f"N % {cp} = {tokens % cp}; use num_frames in {self._divisible_frames(cp)} "
+                "at this resolution."
+            )
 
     def _validate_sequence_parallel(self, heads: int, tp: int) -> None:
         if tp <= 1:
@@ -362,15 +416,9 @@ class HunyuanVideo15BackboneInferenceConfig(InferenceConfig):
                 "HunyuanVideo 1.5 sequence parallelism does not compose with "
                 "context parallelism (both shard the image sequence); enable only one."
             )
-        p, p_t = int(self.patch_size), int(self.patch_size_t)
-        hw = (self.latent_height // p) * (self.latent_width // p)
-        tokens = (self.latent_frames // p_t) * hw
+        tokens = self.num_image_tokens
         if tokens % tp:
-            # Latent frame counts whose token count divides tp, nearest below and above.
-            step = p_t * (tp // math.gcd(hw, tp))
-            lower = (self.latent_frames // step) * step
-            ratio = int(self.temporal_compression_ratio)
-            frames = [(t - 1) * ratio + 1 for t in (lower, lower + step) if t >= 1]
+            frames = self._divisible_frames(tp)
             tps = [d for d in range(2, heads + 1) if heads % d == 0 and tokens % d == 0]
             raise ValueError(
                 f"HunyuanVideo 1.5 sequence parallelism splits the N={tokens} image tokens "
@@ -598,6 +646,9 @@ def _hv15_static_reorder_forward(
       (int32 ``[B]``, counted in fp32) in the ``attention_mask`` slot and the processor
       attends keys ``[0, N + text_valid)``. The encoder stream has no rope, so the order
       only has to be valid-first; padding embeds are zeroed.
+    * Under context parallelism the image stream and its rope are scattered over the CP
+      group once before the blocks and the image stream is gathered once after; the text
+      stream stays replicated. Megatron-SP does the same over the TP group.
     """
     from diffusers.models.modeling_outputs import Transformer2DModelOutput
 
@@ -666,6 +717,21 @@ def _hv15_static_reorder_forward(
             hidden_states, partition_dim=1, rank=sp_rank_util.get_rank(), process_group=None
         )
 
+    # Context parallel: the image stream and its rope (cos, sin) are scattered along N
+    # over the CP group by this rank's CP rank (from the root SPMD rank buffer), once for
+    # all blocks; the processors take the full N from their build-time num_image_tokens.
+    cp_rank_source = getattr(self, "_cp_rank_source", None)
+    if cp_rank_source is not None:
+        cp_group = get_cp_group()
+        cp_rank = get_cp_rank_spmd(cp_rank_source.get_rank())
+        hidden_states = scatter_to_process_group_spmd(
+            hidden_states, partition_dim=1, rank=cp_rank, process_group=cp_group
+        )
+        image_rotary_emb = tuple(
+            scatter_to_process_group_spmd(t, partition_dim=0, rank=cp_rank, process_group=cp_group)
+            for t in image_rotary_emb
+        )
+
     for block in self.transformer_blocks:
         hidden_states, encoder_hidden_states = block(
             hidden_states,
@@ -677,6 +743,10 @@ def _hv15_static_reorder_forward(
 
     if sp_rank_util is not None:
         hidden_states = gather_from_sequence_parallel_region(hidden_states, dim=1)
+    if cp_rank_source is not None:
+        hidden_states = gather_from_tensor_model_parallel_region_with_dim(
+            hidden_states, gather_dim=1, process_group=cp_group
+        )
 
     hidden_states = self.norm_out(hidden_states, temb)
     hidden_states = self.proj_out(hidden_states)
@@ -695,8 +765,9 @@ class _HunyuanVideo15TraceModule(nn.Module):
     """Fixed-tuple wrapper around diffusers HunyuanVideo15Transformer3DModel.
 
     The transformer runs the static-reorder forward (bound to this instance), the
-    key-bounded ``JointBoundedProcessor`` in every dual-stream block, and tensor-parallel
-    linears in those blocks. The token refiner runs on host (application.forward_dit).
+    key-bounded ``JointBoundedProcessor`` (or its context-parallel ulysses / gather_kv
+    variant) in every dual-stream block, and tensor-parallel linears in those blocks.
+    The token refiner runs on host (application.forward_dit).
     """
 
     def __init__(self, config: InferenceConfig) -> None:
@@ -727,7 +798,17 @@ class _HunyuanVideo15TraceModule(nn.Module):
             # the transformer without registering it there (no second state_dict key).
             self.tp_rank_util = SPMDRank(world_size=int(config.neuron_config.tp_degree))
             object.__setattr__(self.transformer, "_sp_rank_util", self.tp_rank_util)
-        processor = JointBoundedProcessor(sp=sp)
+        if getattr(config, "context_parallel_enabled", False):
+            # The forward's one CP scatter reads the root SPMD rank buffer, referenced
+            # without registering it (the state_dict keeps one ``global_rank.rank``).
+            object.__setattr__(self.transformer, "_cp_rank_source", self.global_rank)
+            cp_processor = {
+                "ulysses": JointUlyssesProcessor,
+                "gather_kv": JointGatherKvProcessor,
+            }[config.cp_mode]
+            processor = cp_processor(num_image_tokens=config.num_image_tokens)
+        else:
+            processor = JointBoundedProcessor(sp=sp)
         for block in self.transformer.transformer_blocks:
             block.attn.set_processor(processor)
         install_tensor_parallel(self.transformer, sp=sp)

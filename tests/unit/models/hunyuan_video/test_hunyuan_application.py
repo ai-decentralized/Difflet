@@ -667,8 +667,8 @@ def test_backbone_world_size_is_process_world(monkeypatch, parallel):
 
 @pytest.mark.parametrize("parallel", _PARALLEL_CONFIGS)
 def test_backbone15_world_size_is_process_world(monkeypatch, parallel):
-    # 1.5 had the same tp_degree wiring the 1.0 VAE crashed on; it is latent
-    # only because 1.5 has no CP yet.
+    # 1.5 has CP (and CFG) now, so world = tp * cp * (2 if cfg else 1) != tp: the
+    # backbone must get the process world, the tp_degree wiring the 1.0 VAE crashed on.
     captured = _capture_config_factory(monkeypatch, "create_hunyuan_video15_backbone_config")
     monkeypatch.setattr(app, "_load_diffusers_config", lambda path: SimpleNamespace())
     with tempfile.TemporaryDirectory() as path:

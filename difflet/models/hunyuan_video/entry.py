@@ -67,8 +67,13 @@ def create_hunyuan_video15_application(
         raise NotImplementedError(
             f"HunyuanVideo 1.5 currently supports only the trainium backend, got {backend!r}"
         )
-    if parallel.cp_degree > 1:
-        raise NotImplementedError("HunyuanVideo 1.5 CP is deferred until the transformer port")
+    if parallel.cp_degree > 1 and parallel.cp_mode == "ring":
+        # Same as HV1.0: the registry keeps ring for the native backend; only AOT rejects.
+        raise NotImplementedError(
+            "HunyuanVideo 1.5 on the trainium backend has no ring context parallelism: "
+            "the Trainium joint ring-attention kernel has no text-mask path for the "
+            "padded text stream. Use --cp-mode ulysses (or gather_kv)."
+        )
 
     from difflet.models.hunyuan_video.application import NeuronHunyuanVideoApplication
 

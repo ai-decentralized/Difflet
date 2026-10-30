@@ -538,9 +538,9 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
 
             config = create_hunyuan_video15_backbone_config(
                 transformer_path=self.transformer_path,
-                # Process world, not tp: identical today (1.5 has no CP yet), but
-                # the same tp==world coincidence hid the 1.0 VAE crash for two
-                # months. See the 1.0 VAE comment below and world_check.py.
+                # Process world, not tp: world = tp * cp * (2 if cfg else 1). A
+                # tp==world coincidence hid the 1.0 VAE crash for two months. See
+                # the 1.0 VAE comment below and world_check.py.
                 world_size=parallel.world_size,
                 tp_degree=parallel.tp_degree,
                 dtype=self.dtype,
