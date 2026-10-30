@@ -71,14 +71,17 @@ def test_create_application_rejects_cfg_parallel():
         )
 
 
-def test_create_application15_rejects_cfg_parallel():
-    with pytest.raises(NotImplementedError, match="CFG-parallel"):
-        entry.create_hunyuan_video15_application(
-            model_path="x",
+def test_create_application15_accepts_cfg_parallel():
+    with tempfile.TemporaryDirectory() as path:
+        application = entry.create_hunyuan_video15_application(
+            model_path=path,
             parallel=_parallel(cfg_parallel_enabled=True),
-            dtype="bf16",
+            dtype=torch.float32,
             shape={},
         )
+    # [uncond, cond] are stacked into batch 2 and scattered one branch per cfg rank.
+    assert application.backbone_batch_size == 2
+    assert application.batch_size == 1  # VAE and other components stay at the base batch
 
 
 def test_create_application15_rejects_context_parallel():

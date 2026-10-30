@@ -519,6 +519,11 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
         self.text_seq_len_2 = int(kwargs.get("text_seq_len_2", 256))
         self.image_seq_len = int(kwargs.get("image_seq_len", 729))
         self.batch_size = int(kwargs.get("batch_size", 1))
+        # CFG parallel stacks [uncond, cond] into batch 2 and scatters one branch per cfg
+        # rank, so only the transformer compiles at batch 2.
+        self.backbone_batch_size = (
+            2 if bool(getattr(parallel, "cfg_parallel_enabled", False)) else self.batch_size
+        )
 
         enable_transformer = bool(kwargs.get("enable_transformer", True))
         enable_vae_decoder = bool(kwargs.get("enable_vae_decoder", False))
@@ -545,7 +550,7 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                 text_seq_len=int(kwargs.get("text_seq_len", 1000)),
                 text_seq_len_2=self.text_seq_len_2,
                 image_seq_len=self.image_seq_len,
-                batch_size=self.batch_size,
+                batch_size=self.backbone_batch_size,
                 cfg_parallel_enabled=bool(getattr(parallel, "cfg_parallel_enabled", False)),
                 cp_degree=int(getattr(parallel, "cp_degree", 1)),
                 cp_mode=str(getattr(parallel, "cp_mode", "ulysses")),

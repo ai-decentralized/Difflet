@@ -69,12 +69,6 @@ def create_hunyuan_video15_application(
         )
     if parallel.cp_degree > 1:
         raise NotImplementedError("HunyuanVideo 1.5 CP is deferred until the transformer port")
-    if parallel.cfg_parallel_enabled:
-        raise NotImplementedError(
-            "HunyuanVideo 1.5 is guidance-distilled (single forward pass with the "
-            "guidance scale baked into the timestep embedding); CFG-parallel "
-            "requires true two-pass classifier-free guidance and does not apply."
-        )
 
     from difflet.models.hunyuan_video.application import NeuronHunyuanVideoApplication
 

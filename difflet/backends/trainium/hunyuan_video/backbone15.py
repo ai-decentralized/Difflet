@@ -17,7 +17,15 @@ from difflet.backends.trainium.hunyuan_video.parallel15 import (
     JointBoundedProcessor,
     install_tensor_parallel,
 )
-from difflet.ops import SPMDRank, get_world_group, init_parallel_mesh
+from difflet.ops import (
+    SPMDRank,
+    gather_from_tensor_model_parallel_region_with_dim,
+    get_cfg_group,
+    get_cfg_rank_spmd,
+    get_world_group,
+    init_parallel_mesh,
+    scatter_to_process_group_spmd,
+)
 
 
 class _HunyuanVideo15NoMaskAttnProcessor:
@@ -315,6 +323,15 @@ class HunyuanVideo15BackboneInferenceConfig(InferenceConfig):
             raise ValueError("HunyuanVideo 1.5 latent height/width must be divisible by patch_size.")
         if self.latent_frames % self.patch_size_t != 0:
             raise ValueError("HunyuanVideo 1.5 latent frame count must be divisible by patch_size_t.")
+        if self.cfg_parallel_enabled and self.context_parallel_enabled:
+            from difflet.pipeline.parallel_config import cfg_cp_composable
+
+            if not cfg_cp_composable():
+                raise NotImplementedError(
+                    "HunyuanVideo 1.5 CFG-parallel and context-parallel do not compose on "
+                    "this backend (both consume the data-parallel lanes, see "
+                    "cfg_cp_composable); enable only one of them."
+                )
         heads, tp = int(self.num_attention_heads), int(self.neuron_config.tp_degree)
         if heads % tp != 0:
             options = [d for d in range(1, heads + 1) if heads % d == 0]
@@ -642,6 +659,9 @@ class _HunyuanVideo15TraceModule(nn.Module):
             # root ``global_rank.rank`` is filled by convert_hf_to_neuron_state_dict).
             init_parallel_mesh(config)
             self.global_rank = SPMDRank(world_size=get_world_group().size())
+        self.cfg_parallel = bool(getattr(config, "cfg_parallel_enabled", False))
+        if self.cfg_parallel:
+            self.cfg_group = get_cfg_group()
 
         self.transformer = HunyuanVideo15Transformer3DModel(**_model_kwargs_from_config(config))
         self.transformer.forward = types.MethodType(_hv15_static_reorder_forward, self.transformer)
@@ -682,7 +702,37 @@ class _HunyuanVideo15TraceModule(nn.Module):
         image_embeds: torch.Tensor,
         text_order: torch.Tensor,
     ) -> torch.Tensor:
-        return self.transformer(
+        if self.cfg_parallel:
+            # The caller stacks [uncond, cond] into batch 2; each cfg rank denoises one
+            # branch. Every input (incl. text_order and both masks) is batch-major.
+            cfg_rank = get_cfg_rank_spmd(self.global_rank.get_rank())
+            (
+                hidden_states,
+                timestep,
+                encoder_hidden_states,
+                encoder_attention_mask,
+                timestep_r,
+                encoder_hidden_states_2,
+                encoder_attention_mask_2,
+                image_embeds,
+                text_order,
+            ) = (
+                scatter_to_process_group_spmd(
+                    x, partition_dim=0, rank=cfg_rank, process_group=self.cfg_group
+                )
+                for x in (
+                    hidden_states,
+                    timestep,
+                    encoder_hidden_states,
+                    encoder_attention_mask,
+                    timestep_r,
+                    encoder_hidden_states_2,
+                    encoder_attention_mask_2,
+                    image_embeds,
+                    text_order,
+                )
+            )
+        out = self.transformer(
             hidden_states=hidden_states,
             timestep=timestep,
             encoder_hidden_states=encoder_hidden_states,
@@ -694,3 +744,8 @@ class _HunyuanVideo15TraceModule(nn.Module):
             text_order=text_order,
             return_dict=False,
         )[0]
+        if self.cfg_parallel:
+            out = gather_from_tensor_model_parallel_region_with_dim(
+                out, gather_dim=0, process_group=self.cfg_group
+            )
+        return out

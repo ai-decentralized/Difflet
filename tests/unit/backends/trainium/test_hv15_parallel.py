@@ -52,7 +52,7 @@ _TINY = {
 }
 
 
-def _config(tmp_path, *, tp_degree: int = 1, **overrides):
+def _config(tmp_path, *, tp_degree: int = 1, batch_size: int = 1, **overrides):
     from difflet.backends.trainium.core.config import NeuronConfig
     from difflet.backends.trainium.hunyuan_video import backbone15
     from difflet.utils.diffusers_adapter import load_diffusers_config
@@ -62,7 +62,7 @@ def _config(tmp_path, *, tp_degree: int = 1, **overrides):
     (transformer_dir / "config.json").write_text(json.dumps(_TINY))
     return backbone15.HunyuanVideo15BackboneInferenceConfig(
         neuron_config=NeuronConfig(
-            batch_size=1,
+            batch_size=batch_size,
             tp_degree=tp_degree,
             world_size=tp_degree,
             torch_dtype=torch.float32,
@@ -325,3 +325,69 @@ def test_mesh_initialized_when_sharding(tmp_path, monkeypatch, backbone15):
     cfg = _config(tmp_path, cfg_parallel_enabled=True)
     backbone15._HunyuanVideo15TraceModule(cfg)
     assert calls == [cfg]
+
+
+def test_cfg_input_generator_traces_batch2(tmp_path, backbone15):
+    cfg = _config(tmp_path, batch_size=2, cfg_parallel_enabled=True)
+    wrapper = backbone15.ModelWrapperHunyuanVideo15Backbone(
+        config=cfg, model_cls=object, tag="HunyuanVideo15Transformer3DModel"
+    )
+    inputs = wrapper.input_generator()[0]
+    assert len(inputs) == 9
+    assert [x.shape[0] for x in inputs] == [2] * 9
+
+
+def test_cfg_forward_scatters_all_inputs_and_gathers_output(tmp_path, monkeypatch, backbone15):
+    calls = {"scatter": [], "gather": []}
+    group = object()
+    monkeypatch.setattr(backbone15, "init_parallel_mesh", lambda cfg: None)
+    monkeypatch.setattr(backbone15, "SPMDRank", _RankParam)
+    monkeypatch.setattr(backbone15, "get_cfg_group", lambda: group)
+    monkeypatch.setattr(backbone15, "get_cfg_rank_spmd", lambda rank: ("cfg_rank", rank))
+
+    def scatter(x, partition_dim, rank, process_group):
+        calls["scatter"].append((partition_dim, rank, process_group))
+        return x[:1]
+
+    def gather(x, gather_dim, process_group):
+        calls["gather"].append((gather_dim, process_group))
+        return torch.cat([x, x], dim=0)
+
+    monkeypatch.setattr(backbone15, "scatter_to_process_group_spmd", scatter)
+    monkeypatch.setattr(backbone15, "gather_from_tensor_model_parallel_region_with_dim", gather)
+
+    cfg = _config(tmp_path, batch_size=2, cfg_parallel_enabled=True)
+    module = backbone15._HunyuanVideo15TraceModule(cfg)
+    seen = {}
+
+    class _FakeTransformer(nn.Module):
+        def forward(self, **kwargs):
+            seen.update(kwargs)
+            return (torch.zeros(1, 32, 2, 2, 3),)
+
+    module.transformer = _FakeTransformer()
+    wrapper = backbone15.ModelWrapperHunyuanVideo15Backbone(
+        config=cfg, model_cls=object, tag="HunyuanVideo15Transformer3DModel"
+    )
+    out = module(*wrapper.input_generator()[0])
+
+    assert len(calls["scatter"]) == 9
+    assert all(c[0] == 0 and c[2] is group and c[1][0] == "cfg_rank" for c in calls["scatter"])
+    assert seen["hidden_states"].shape[0] == 1 and seen["text_order"].shape[0] == 1
+    assert calls["gather"] == [(0, group)]
+    assert out.shape[0] == 2
+
+
+def test_cfg_with_cp_follows_composable_rule(tmp_path, monkeypatch):
+    import difflet.pipeline.parallel_config as parallel_config
+
+    monkeypatch.setattr(parallel_config, "cfg_cp_composable", lambda backend=None: False)
+    with pytest.raises(NotImplementedError, match="cfg_cp_composable|compose"):
+        _config(tmp_path, cfg_parallel_enabled=True, context_parallel_enabled=True)
+
+    monkeypatch.setattr(parallel_config, "cfg_cp_composable", lambda backend=None: True)
+    assert _config(tmp_path, cfg_parallel_enabled=True, context_parallel_enabled=True)
+    # CFG alone and CP alone never consult the rule.
+    monkeypatch.setattr(parallel_config, "cfg_cp_composable", lambda backend=None: False)
+    assert _config(tmp_path, cfg_parallel_enabled=True)
+    assert _config(tmp_path, context_parallel_enabled=True)
