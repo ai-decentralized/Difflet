@@ -10,6 +10,8 @@ sub-range off disk, so each rank pays roughly ``38 GiB / tp`` instead of the
 whole file. The split axis still comes from the layer's own ``_difflet_shard``
 declaration on the owning module, exactly as in ``weights.py`` — one source of
 truth for how a parameter is partitioned.
+
+Phase 4 of docs/plans/2026-08-16-tpu-backend-support.md.
 """
 
 from __future__ import annotations
@@ -17,7 +19,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterable
 
 import torch
 import torch.nn as nn
@@ -29,18 +31,36 @@ logger = logging.getLogger(__name__)
 INDEX_SUFFIX = ".safetensors.index.json"
 
 
-def build_weight_map(model_dir) -> dict[str, str]:
+def build_weight_map(model_dir, keys: Iterable[str] | None = None) -> dict[str, str]:
     """Map every checkpoint key to the file holding it.
 
     Handles both layouts: a sharded checkpoint with an index json, and a
     single ``*.safetensors`` with no index.
+
+    A directory can hold several indexes: LTX-2's ``text_encoder/`` ships transformers'
+    ``model.safetensors.index.json`` and a diffusers ``diffusion_pytorch_model.safetensors.index.json``
+    (another checkpoint, text encoder plus connectors, with none of Gemma's
+    ``language_model.model.*`` keys). A download filtered to the files a pipeline reads keeps only
+    the first's shards, so only indexes whose files all exist are candidates; a full download has
+    both complete, so among those the one holding the most of ``keys`` (the checkpoint keys the
+    caller is going to load) is used, ties and calls without ``keys`` going to name order. When
+    no index is complete, the first one, as before (the load then names the missing file).
     """
     from safetensors import safe_open
 
     directory = Path(model_dir)
     indexes = sorted(directory.glob("*" + INDEX_SUFFIX))
     if indexes:
-        body = json.loads(indexes[0].read_text())
+        bodies = [json.loads(index.read_text()) for index in indexes]
+        complete = [
+            body for body in bodies
+            if all((directory / name).is_file() for name in set(body["weight_map"].values()))
+        ]
+        wanted = set(keys or ())
+        if wanted and len(complete) > 1:
+            # max() returns the first of equal counts: a tie keeps name order.
+            complete = [max(complete, key=lambda b: len(wanted.intersection(b["weight_map"])))]
+        body = (complete or bodies)[0]
         return {k: str(directory / v) for k, v in body["weight_map"].items()}
 
     files = sorted(directory.glob("*.safetensors"))
@@ -52,6 +72,32 @@ def build_weight_map(model_dir) -> dict[str, str]:
             for key in handle.keys():
                 weight_map[key] = str(path)
     return weight_map
+
+
+def _load_targets(module: nn.Module) -> dict[str, torch.Tensor]:
+    """The parameters and persistent buffers a checkpoint fills, by module name.
+
+    state_dict() omits non-persistent buffers by definition — they are computed, not stored, so
+    a checkpoint never contains them and their absence is not "missing". (Qwen-Image's static
+    RoPE is exactly this.)"""
+    persistent = set(module.state_dict().keys())
+    return {
+        name: tensor
+        for name, tensor in [*module.named_parameters(), *module.named_buffers()]
+        if name in persistent
+    }
+
+
+def _checkpoint_key(name: str, prefix: str, rename: Callable[[str], str] | None) -> str:
+    key = name[len(prefix):] if prefix and name.startswith(prefix) else name
+    return rename(key) if rename is not None else key
+
+
+def checkpoint_keys(module: nn.Module, *, prefix: str = "",
+                    rename: Callable[[str], str] | None = None) -> set[str]:
+    """The checkpoint keys ``load_checkpoint_into`` reads for ``module`` (``prefix`` stripped,
+    then ``rename``), which ``build_weight_map(keys=)`` uses to pick between complete indexes."""
+    return {_checkpoint_key(name, prefix, rename) for name in _load_targets(module)}
 
 
 def _read_shard(path: str, key: str, *, dim: int | None, tp_size: int, tp_rank: int):
@@ -67,7 +113,9 @@ def _read_shard(path: str, key: str, *, dim: int | None, tp_size: int, tp_rank: 
         axis = dim % len(shape)
         size = shape[axis]
         if size % tp_size != 0:
-            raise ValueError(f"{key}: dim {axis} of size {size} is not divisible by tp={tp_size}")
+            raise ValueError(
+                f"{key}: dim {axis} of size {size} is not divisible by tp={tp_size}"
+            )
         width = size // tp_size
         lo, hi = tp_rank * width, (tp_rank + 1) * width
         # safetensors slices with plain indexing; only this range is read.
@@ -86,6 +134,7 @@ def load_checkpoint_into(
     dtype: torch.dtype | None = None,
     strict: bool = True,
     rename: Callable[[str], str] | None = None,
+    on_tensor: Callable[[str, torch.Tensor], None] | None = None,
 ) -> dict[str, list[str]]:
     """Load ``model_dir`` into ``module``, sharding per ``_difflet_shard``.
 
@@ -99,58 +148,51 @@ def load_checkpoint_into(
     a parameter that exists has exactly one place to come from; the reverse
     direction would have to guess. Defaults to identity.
 
+    ``on_tensor(name, tensor)`` is called with each module name and the host
+    tensor copied into it (this rank's slice, already cast), after the copy: the
+    neuron backend's weight store writes exactly these bytes.
+
     Returns ``{"missing": [...], "unexpected": [...]}`` — with ``strict`` the
     missing list is an error instead.
     """
-    weight_map = build_weight_map(model_dir)
-    # state_dict() omits non-persistent buffers by definition — they are
-    # computed, not stored, so a checkpoint never contains them and their
-    # absence is not "missing". (Qwen-Image's static RoPE is exactly this.)
-    persistent = set(module.state_dict().keys())
-    targets = {
-        name: tensor
-        for name, tensor in (list(module.named_parameters()) + list(module.named_buffers()))
-        if name in persistent
-    }
+    targets = _load_targets(module)
+    wanted = {_checkpoint_key(name, prefix, rename) for name in targets}  # = checkpoint_keys()
+    weight_map = build_weight_map(model_dir, keys=wanted)
 
     missing: list[str] = []
     loaded = 0
     with torch.no_grad():
         for name, target in targets.items():
-            key = name[len(prefix) :] if prefix and name.startswith(prefix) else name
-            if rename is not None:
-                key = rename(key)
+            key = _checkpoint_key(name, prefix, rename)
             path = weight_map.get(key)
             if path is None:
                 missing.append(name)
                 continue
             dim = shard_dim(module, name)
-            tensor = _read_shard(path, key, dim=dim, tp_size=tp_size, tp_rank=tp_rank)
+            tensor = _read_shard(
+                path, key, dim=dim, tp_size=tp_size, tp_rank=tp_rank
+            )
             if tuple(tensor.shape) != tuple(target.shape):
                 raise ValueError(
                     f"{name}: checkpoint slice {tuple(tensor.shape)} != parameter "
                     f"{tuple(target.shape)} (shard dim {dim}, tp={tp_size})"
                 )
-            target.copy_(tensor.to(dtype or target.dtype))
+            tensor = tensor.to(dtype or target.dtype)
+            target.copy_(tensor)
+            if on_tensor is not None:
+                on_tensor(name, tensor)
             loaded += 1
 
-    wanted = set()
-    for n in targets:
-        key = n[len(prefix) :] if prefix and n.startswith(prefix) else n
-        wanted.add(rename(key) if rename is not None else key)
     unexpected = sorted(set(weight_map) - wanted)
     logger.info(
         "loaded %d tensors from %s (rank %d/%d); %d missing, %d unexpected",
-        loaded,
-        model_dir,
-        tp_rank,
-        tp_size,
-        len(missing),
-        len(unexpected),
+        loaded, model_dir, tp_rank, tp_size, len(missing), len(unexpected),
     )
     if strict and missing:
-        raise ValueError(f"{len(missing)} parameters had no checkpoint entry: {missing[:5]}")
+        raise ValueError(
+            f"{len(missing)} parameters had no checkpoint entry: {missing[:5]}"
+        )
     return {"missing": missing, "unexpected": unexpected}
 
 
-__all__ = ["build_weight_map", "load_checkpoint_into"]
+__all__ = ["build_weight_map", "checkpoint_keys", "load_checkpoint_into"]

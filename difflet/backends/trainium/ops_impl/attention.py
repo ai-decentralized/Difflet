@@ -257,7 +257,10 @@ def _merge_unnormalized_partials(partials, bs: int, s_q: int, *, out_dtype):
     return (o_acc / s_acc).to(out_dtype)
 
 
-def joint_ring_attention(q, image_k, image_v, text_k, text_v, *, scale: float, causal: bool = False):
+def joint_ring_attention(
+    q, image_k, image_v, text_k, text_v, *, scale: float, causal: bool = False,
+    text_valid_len=None,
+):
     """Joint-MMDiT ring self-attention (Approach A — device-validated, Task 3).
 
     Approach B (reuse ``ring_attention_spmd_fwd`` for the image stream and merge a
@@ -280,6 +283,11 @@ def joint_ring_attention(q, image_k, image_v, text_k, text_v, *, scale: float, c
     text_k, text_v   [B, H, S_txt,    d]           replicated — local partial
     returns          [B, H, S_img/cp + S_txt, d]
     """
+    if text_valid_len is not None:
+        raise NotImplementedError(
+            "joint_ring_attention device path has no text key-padding mask "
+            "(text_valid_len); use cp_mode='gather_kv' or 'ulysses' for padded text."
+        )
     if causal:
         raise NotImplementedError(
             "joint_ring_attention device path supports only non-causal joint MMDiT "

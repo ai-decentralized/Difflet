@@ -20,6 +20,7 @@ from difflet.platforms.base import (
 
 PLATFORM_FACTORIES = {
     "cpu": "difflet.platforms.cpu:create_platform",
+    "neuron": "difflet.platforms.neuron:create_platform",
     "trainium": "difflet.platforms.trainium:create_platform",
     "tpu": "difflet.platforms.tpu:create_platform",
     "cuda": "difflet.platforms.cuda:create_platform",
@@ -28,7 +29,8 @@ PLATFORM_FACTORIES = {
 
 #: Auto-detection order. Trainium stays first: Neuron venvs also ship torch_xla, and a host with
 #: torch_neuronx is a Trainium host whatever else it has.
-_DETECTION_ORDER = ("trainium", "tpu", "cuda", "rocm")
+#: ``neuron`` (torch-neuronx without torch_xla) before ``trainium`` (with it), as the backend registry.
+_DETECTION_ORDER = ("neuron", "trainium", "tpu", "cuda", "rocm")
 
 
 def resolve_platform_name(name: str | None = None) -> str:
@@ -71,7 +73,7 @@ def _platform_class(name: str) -> type[Platform]:
 
 
 def detect_platform_name() -> str:
-    for name in _DETECTION_ORDER[:2]:
+    for name in _DETECTION_ORDER[:3]:
         if _platform_class(name).detect():
             return name
     try:
@@ -80,7 +82,7 @@ def detect_platform_name() -> str:
         # Difflet is Trainium-first. Falling back to Trainium keeps unit tests and local
         # metadata paths usable on hosts without torch.
         return "trainium"
-    for name in _DETECTION_ORDER[2:]:
+    for name in _DETECTION_ORDER[3:]:
         if _platform_class(name).detect():
             return name
     # No accelerator found: keep the historical Trainium default rather than failing before

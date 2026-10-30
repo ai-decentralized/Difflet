@@ -5,6 +5,7 @@ import math
 import os
 import sys
 
+from difflet import envs
 from difflet.pipeline.parallel_config import CP_MODES
 
 VALID_MODELS = {
@@ -159,7 +160,10 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument(
         "--cache-dir",
         default=None,
-        help="Compiled artifact cache root (default: ~/.cache/difflet/)",
+        help="Compiled artifact cache root (default: ~/.cache/difflet/). Trainium/TPU: the "
+        "compiled stage artifacts. --backend neuron: the stage manifests, and the NEFF/HLO "
+        "compile cache under <dir>/neuron/ (exported as DIFFLET_COMPILE_CACHE when that is "
+        "unset; an exported DIFFLET_COMPILE_CACHE keeps the compile cache).",
     )
     p.add_argument(
         "--force", action="store_true", help="Recompile even if a valid cache entry exists"
@@ -168,17 +172,86 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
         "--host-vae",
         dest="host_vae",
         action="store_true",
-        help="Decode the VAE on host CPU via diffusers (fp32) instead of a "
-        "compiled Neuron VAE. Wan already decodes on the host by default; "
-        "the flag remains for other models and for explicitness.",
+        help="Decode the VAE on host CPU via diffusers (fp32) instead of on a NeuronCore. "
+        "Trainium (AoT): Wan already decodes on the host by default (its compiled bf16 device "
+        "VAE degrades short clips; beyond ~9 frames its graph exceeds the compiler instruction "
+        "limit, NCC_EVRF007); the flag remains for other models and for explicitness. "
+        "--backend neuron: optional; Wan's VAE stage otherwise decodes on one core (bf16 up to "
+        "9 frames, fp32 beyond), as Qwen-Image's does by default; --host-vae keeps the decode "
+        "on the host instead.",
     )
     p.add_argument(
         "--device-vae",
         dest="device_vae",
         action="store_true",
-        help="Wan: decode with the compiled bf16 Neuron VAE instead of the default fp32 host "
-        "decode. Known to degrade short clips (blur, grid artifacts; under investigation); "
-        "beyond ~9 frames the graph also exceeds the compiler instruction limit (NCC_EVRF007).",
+        help="Trainium (AoT), Wan: decode with the compiled bf16 Neuron VAE instead of the default "
+        "fp32 host decode. Known to degrade short clips (blur, grid artifacts; under "
+        "investigation); beyond ~9 frames the graph also exceeds the compiler instruction limit "
+        "(NCC_EVRF007). "
+        "--backend neuron, Qwen-Image and HunyuanVideo: decode in a VAE stage of its own on one "
+        "NeuronCore (see --vae-dtype and --vae-exec-mode), after the generate launch has exited, "
+        "instead of on the host CPU. The default for Qwen-Image (HunyuanVideo's is "
+        "--vae-in-process); mutually exclusive with --host-vae and --vae-in-process.",
+    )
+    p.add_argument(
+        "--vae-in-process",
+        dest="vae_in_process",
+        action="store_true",
+        help="HunyuanVideo on --backend neuron: decode on rank 0's NeuronCore inside the "
+        "generate launch, after the denoise, beside rank 0's DiT shard (no second launch). "
+        "The default; mutually exclusive with --host-vae and --device-vae.",
+    )
+    p.add_argument(
+        "--vae-dtype",
+        dest="vae_dtype",
+        choices=["bf16", "fp32"],
+        default=None,
+        help="--backend neuron: the device VAE decoder's precision. HunyuanVideo: in the vae "
+        "launch or in process (default: bf16). Wan: in the vae stage (default: bf16 up to 9 "
+        "frames, fp32 beyond, as the Trainium path decodes). Qwen-Image: in the vae stage "
+        "(default: fp32). In bf16 the Wan/Qwen-Image decoder keeps the norms, the attention "
+        "scores and the output head in fp32. Not with --host-vae.",
+    )
+    p.add_argument(
+        "--vae-exec-mode",
+        dest="vae_exec_mode",
+        choices=["eager", "compile"],
+        default=None,
+        help="--backend neuron: the device VAE decoder compiled region by region or run op by "
+        "op. HunyuanVideo: on fixed-size tiles (compile, the default) or on diffusers' tiles "
+        "(eager). Wan and Qwen-Image: in the vae stage, eager (the default) or compile (the "
+        "opt-in: whole frames, one set of graphs for the first latent frame and one for every "
+        "later frame). Not with --host-vae.",
+    )
+    p.add_argument(
+        "--host-text-encoder",
+        dest="host_text_encoder",
+        action="store_true",
+        help="Wan and LTX-2 on the neuron backend: encode prompts on rank 0's host CPU (Wan: "
+        "umT5 in fp32; LTX-2: Gemma-3 in bf16) instead of on the device (TP-sharded, the "
+        "default). Set automatically when the "
+        "TP group is too narrow for umT5 to fit beside the DiT (tp2, e.g. --cfg-parallel or "
+        "--cp-degree 2 on four cores, or --dp 2 --tp-degree 2)",
+    )
+    p.add_argument(
+        "--text-encoder-dtype",
+        dest="text_encoder_dtype",
+        choices=["bf16", "fp32"],
+        default=None,
+        help="Wan on --backend neuron: umT5's precision, on the device or with "
+        "--host-text-encoder on the host (default: bf16, as the Trainium path runs it; the "
+        "neuron weight store keeps a bf16 copy). fp32 doubles what umT5 reads and holds, so at "
+        "tp2 it moves to the host.",
+    )
+    p.add_argument(
+        "--device-text-encoder",
+        dest="device_text_encoder",
+        action="store_true",
+        help="Qwen-Image on the neuron backend: encode prompts with Qwen2.5-VL's language model "
+        "on the device (bf16, TP-sharded beside the DiT) instead of on rank 0's host CPU (the "
+        "default for now; LTX-2's Gemma-3 is on the device by default). Dropped, with a note, "
+        "when the TP group is too narrow for it to fit "
+        "beside the DiT (tp2, e.g. --cp-degree 2 on four cores or --dp 2 --tp-degree 2)",
     )
     p.add_argument(
         "--taef1",
@@ -353,6 +426,40 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
     p.add_argument("--worker-index", type=int, default=None, help=argparse.SUPPRESS)
     p.add_argument("--steps", type=int, default=None)
     p.add_argument("--guidance-scale", type=float, default=None)
+    p.add_argument(
+        "--guidance-scale-2",
+        dest="guidance_scale_2",
+        type=float,
+        default=None,
+        help="Wan 2.2 A14B with --dual-expert: guidance for the low-noise expert's steps "
+        "(default: --guidance-scale)",
+    )
+    p.add_argument(
+        "--dual-expert",
+        dest="dual_expert",
+        action="store_true",
+        help="Wan 2.2 A14B on the neuron backend: hold both experts, the high-noise one above "
+        "the checkpoint's boundary timestep and the low-noise one below it (default: the "
+        "high-noise expert for every step, as on trainium and tpu)",
+    )
+    p.add_argument(
+        "--true-cfg-scale",
+        dest="true_cfg_scale",
+        type=float,
+        default=None,
+        help="Qwen-Image on the neuron backend: opt-in true classifier-free guidance, two DiT "
+        "forwards per step combined as diffusers' QwenImagePipeline does (above 1 enables it; "
+        "default: off, one forward per step). Needed for --cfg-parallel, which runs the two "
+        "branches on two TP groups",
+    )
+    p.add_argument(
+        "--negative-prompt",
+        dest="negative_prompt",
+        default=None,
+        help="Qwen-Image on the neuron backend: the negative prompt of --true-cfg-scale "
+        "(default with --true-cfg-scale: ' ', diffusers' empty negative prompt). A --requests "
+        "line's negative_prompt wins over it",
+    )
     p.add_argument("--seed", type=int, default=42)
     p.add_argument(
         "--torch-compile",
@@ -368,6 +475,104 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
         help="Do not delete work-dir after successful generation",
     )
     _add_teacache_flags(p)
+
+
+def _add_backend_flags(p: argparse.ArgumentParser) -> None:
+    # Imported here, not at module top: `python -m difflet.cli.stage` imports the
+    # difflet.cli package (and so this module) before running the stage module as
+    # __main__, and a top-level import would make runpy load it twice.
+    from difflet.backends.registry import available_backends
+    from difflet.cli.stage import EXEC_MODE_CHOICES
+
+    p.add_argument(
+        "--backend",
+        choices=available_backends(),
+        default=None,
+        help="Hardware backend (default: $DIFFLET_BACKEND, else auto-detected). Exported "
+        "as DIFFLET_BACKEND to every stage; 'neuron' runs each stage under torchrun, "
+        "one process per NeuronCore.",
+    )
+    p.add_argument(
+        "--exec-mode",
+        dest="exec_mode",
+        choices=EXEC_MODE_CHOICES,
+        default=None,
+        help="Execution mode for non-AoT backends: 'eager', or 'compile' (per-block "
+        "torch.compile). Default: $DIFFLET_EXEC_MODE, else compile. Unrelated to "
+        "--mode, the latency/throughput preset.",
+    )
+
+
+def _apply_backend_flags(args: argparse.Namespace) -> None:
+    """Check --backend / --exec-mode, then export them for every process this command spawns.
+
+    Stages inherit the environment; nothing goes through the orchestrators'
+    ``_shared_cli_args``, whose flags the stage-parser drift test pins
+    (tests/unit/cli/test_stage.py:109-145). Exits with code 2, before anything is
+    exported or any orchestrator is built, when the model's registry entry does not
+    list --backend, or when --exec-mode is given for an AoT backend.
+
+    Without --backend, a DIFFLET_BACKEND already in the environment selects the backend
+    the same way (a torchrun backend such as neuron makes every stage a torchrun launch), so
+    the model check runs for it too when it names a torchrun backend; other backends (the
+    AoT ones, the CPU reference, GPUs) keep their old path, which never checked here. An
+    unknown DIFFLET_BACKEND exits 2 as well.
+    """
+    backend = getattr(args, "backend", None)
+    exec_mode = getattr(args, "exec_mode", None)
+    model_id = getattr(args, "model_id", None)
+    if backend is not None and model_id is not None:
+        _require_model_backend(model_id, backend)
+    elif backend is None and model_id is not None and envs.DIFFLET_BACKEND:
+        ambient = _lookup_backend(None)
+        if ambient.capabilities.flow == "torchrun":
+            _require_model_backend(
+                model_id, ambient.name, source=f"DIFFLET_BACKEND={envs.DIFFLET_BACKEND}"
+            )
+    if exec_mode is not None:
+        runtime = _lookup_backend(backend)
+        if runtime.capabilities.requires_aot:
+            print(
+                f"Error: --exec-mode applies to non-AoT backends only; backend "
+                f"{runtime.name!r} compiles ahead of time (use --backend neuron).",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+    if backend is not None:
+        os.environ["DIFFLET_BACKEND"] = backend
+    if exec_mode is not None:
+        os.environ["DIFFLET_EXEC_MODE"] = exec_mode
+
+
+def _lookup_backend(name: str | None):
+    """``get_backend(name)``; ``None`` means DIFFLET_BACKEND, else auto-detection.
+
+    An unknown DIFFLET_BACKEND exits 2 with the registry's message instead of a traceback
+    (--backend itself is limited to the known names by argparse).
+    """
+    from difflet.backends import get_backend
+
+    try:
+        return get_backend(name)
+    except ValueError as exc:
+        source = "DIFFLET_BACKEND" if name is None else "--backend"
+        print(f"Error: {exc} ({source}).", file=sys.stderr)
+        raise SystemExit(2) from None
+
+
+def _require_model_backend(model_id: str, backend: str, *, source: str | None = None) -> None:
+    """Exit 2 unless ``model_id``'s registry entry lists ``backend`` (ModelEntry.require_backend).
+
+    ``source`` names where the backend came from in the message (default ``--backend NAME``).
+    """
+    from difflet.registry import resolve_model
+
+    entry = resolve_model(model_id, model_type=_MODEL_TYPE.get(model_id))
+    try:
+        entry.require_backend(backend)
+    except ValueError as exc:
+        print(f"Error: {exc} ({source or f'--backend {backend}'}).", file=sys.stderr)
+        raise SystemExit(2) from None
 
 
 def _add_serve_flags(p: argparse.ArgumentParser) -> None:
@@ -541,6 +746,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_shape_flags(cp_cmd)
     _add_cache_flags(cp_cmd)
     _add_teacache_flags(cp_cmd)
+    _add_backend_flags(cp_cmd)
 
     gen = sub.add_parser("generate", help="Run inference (requires prior compile)")
     _add_model_flag(gen)
@@ -549,6 +755,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_shape_flags(gen)
     _add_cache_flags(gen)
     _add_generate_flags(gen)
+    _add_backend_flags(gen)
 
     run_cmd = sub.add_parser("run", help="Download + compile + generate in one shot")
     _add_model_flag(run_cmd)
@@ -557,6 +764,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_shape_flags(run_cmd)
     _add_cache_flags(run_cmd)
     _add_generate_flags(run_cmd)
+    _add_backend_flags(run_cmd)
 
     plan_cmd = sub.add_parser(
         "plan",
@@ -728,16 +936,31 @@ def _validate_taef1(args: argparse.Namespace) -> None:
 def _validate_cfg_parallel(args: argparse.Namespace) -> None:
     if not getattr(args, "cfg_parallel", False):
         return
-    if (getattr(args, "cp_degree", 1) or 1) > 1:
+    from difflet.pipeline.parallel_config import cfg_cp_composable
+
+    if (getattr(args, "cp_degree", 1) or 1) > 1 and not cfg_cp_composable(getattr(args, "backend", None)):
         print(
-            "Error: --cfg-parallel and --cp-degree>1 are mutually exclusive "
-            "(both consume the data-parallel lanes).",
+            "Error: --cfg-parallel and --cp-degree>1 are mutually exclusive on this backend "
+            "(both consume the data-parallel lanes; they compose on --backend neuron).",
             file=sys.stderr,
         )
         raise SystemExit(1)
     # The staged CLI path builds the app directly, bypassing each model's
     # entry.py guard, so this has to reject before dispatch.
-    if not _capabilities(args.model_id).supports_cfg_parallel:
+    capabilities = _capabilities(args.model_id)
+    if not capabilities.supports_cfg_parallel and _opt_in_true_cfg_backend(capabilities):
+        # A distilled-by-default model with opt-in true CFG on this backend (Qwen-Image on
+        # neuron): compile only warms the batch-2 graph up; generate needs the two branches.
+        if args.command == "compile" or (getattr(args, "true_cfg_scale", None) or 0) > 1:
+            return
+        print(
+            f"Error: --cfg-parallel splits the two branches of true classifier-free guidance; "
+            f"{args.model_id} runs them only with --true-cfg-scale > 1 (opt-in; by default it "
+            "runs one forward per step).",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    if not capabilities.supports_cfg_parallel:
         print(
             f"Error: {args.model_id} is guidance-distilled (single forward pass "
             "with the guidance scale baked into the timestep embedding); "
@@ -746,6 +969,14 @@ def _validate_cfg_parallel(args: argparse.Namespace) -> None:
             file=sys.stderr,
         )
         raise SystemExit(1)
+
+
+def _opt_in_true_cfg_backend(capabilities) -> bool:
+    """Whether the selected torchrun backend is one where this model runs opt-in true CFG
+    (``ModelCapabilities.true_cfg_backends``)."""
+    if not capabilities.true_cfg_backends or not _torchrun_backend_selected():
+        return False
+    return _lookup_backend(None).name in capabilities.true_cfg_backends
 
 
 def _platform():
@@ -890,6 +1121,7 @@ def _dispatch_dp(args: argparse.Namespace) -> None:
                 prompt=args.prompt,
                 output=args.output,
                 seed=args.seed,
+                negative_prompt=getattr(args, "negative_prompt", None),
                 guidance_scale=args.guidance_scale,
                 steps=args.steps,
             )
@@ -977,6 +1209,16 @@ def _ensure_jemalloc() -> None:
     os.execv(sys.executable, [sys.executable, "-m", "difflet.cli.main", *sys.argv[1:]])
 
 
+def _torchrun_backend_selected() -> bool:
+    """Whether DIFFLET_BACKEND (which ``_apply_backend_flags`` exports from --backend) names a
+    non-AoT torchrun-MPMD backend (neuron): the launcher's own rule
+    (``runner._torchrun_mpmd_selected``), true exactly when every stage runs as torchrun ranks.
+    Unset, trainium and tpu are False; auto-detection is not consulted."""
+    from difflet.cli import runner
+
+    return runner._torchrun_mpmd_selected()
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
@@ -1004,6 +1246,7 @@ def main(argv: list[str] | None = None) -> None:
         raise SystemExit(1)
 
     if args.command in ("compile", "generate", "run"):
+        _apply_backend_flags(args)
         _validate_cfg_parallel(args)
         _validate_sp(args)
         _validate_taef1(args)
@@ -1042,8 +1285,11 @@ def main(argv: list[str] | None = None) -> None:
     # is NOT the safety boundary for compilation: `run` also compiles when the
     # cache is cold, and neuronx-cc aborts under jemalloc. The compile path
     # strips the preload itself for exactly that reason -- see
-    # difflet/backends/trainium/utils/compile_allocator.py.
-    if argv is None and args.command in ("generate", "run"):
+    # difflet/backends/trainium/utils/compile_allocator.py. A torchrun backend (neuron)
+    # gets no preload at all: run_stage hands this process's environment to torchrun and
+    # its ranks, whose per-block torch.compile warm-up spawns neuronx-cc with it, and the
+    # weight load jemalloc speeds up is the Trainium one.
+    if argv is None and args.command in ("generate", "run") and not _torchrun_backend_selected():
         _ensure_jemalloc()
 
     if args.command == "plan":

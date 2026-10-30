@@ -55,6 +55,7 @@ def test_cfg_parallel_rejected_for_distilled_model(model_id, monkeypatch, capsys
 
 
 def test_cfg_parallel_with_cp_degree_rejected(monkeypatch, capsys):
+    monkeypatch.setenv("DIFFLET_BACKEND", "trainium")  # AoT: no composing mesh (CI auto-detects it too)
     cli = _cli()
     monkeypatch.setattr(cli, "_get_orchestrator", lambda args: None)
     with pytest.raises(SystemExit) as exc:

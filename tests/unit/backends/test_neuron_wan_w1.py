@@ -1,0 +1,1042 @@
+"""W1 unit tests (CPU only): the neuron Wan DiT application and the composed Wan application.
+
+The model is the tiny diffusers-layout Wan2.1 of tests/unit/backends/_neuron_wan_toy.py (4 heads,
+2 blocks, a one-layer umT5). Multi-rank cases run on 4 gloo processes through
+tests/unit/backends/_neuron_gloo.py: at TP4 the SPMDRank weight slice, the qk-norm all-reduces
+and the row-parallel all-reduces all run, which TP1 skips. Nothing here touches the device.
+"""
+
+import pytest
+
+# importorskip first, as in test_neuron_application_c8.py: it keeps torch_neuronx's import-time
+# nki.jit DeprecationWarning out of the report when this module is collected first.
+torch = pytest.importorskip("torch")
+
+import inspect  # noqa: E402
+import os  # noqa: E402
+import re  # noqa: E402
+import time  # noqa: E402
+from pathlib import Path  # noqa: E402
+from types import SimpleNamespace  # noqa: E402
+
+from difflet.backends.neuron import runtime  # noqa: E402
+from difflet.backends.neuron.ops_impl import parallel_mesh  # noqa: E402
+from difflet.backends.neuron.wan.config import NeuronWanConfig  # noqa: E402
+from difflet.backends.neuron.wan.transformer import (  # noqa: E402
+    NeuronWanTransformerApplication,
+    checkpoint_key,
+)
+from difflet.models.wan import neuron_application as na  # noqa: E402
+from difflet.pipeline.parallel_config import DiffletParallelConfig  # noqa: E402
+from tests.unit.backends._neuron_gloo import run_ranks  # noqa: E402
+from tests.unit.backends._neuron_toy import tp1_mesh  # noqa: E402
+from tests.unit.backends._neuron_wan_toy import (  # noqa: E402
+    TINY_BLOCK_NAMES,
+    TINY_LATENT_SHAPE,
+    TINY_SHAPE,
+    TINY_TEXT_SEQ_LEN,
+    TINY_TEXT_SHAPE,
+    TINY_WAN_TRANSFORMER,
+    tiny_wan_config,
+    tiny_wan_host_decode,
+    tiny_wan_pipeline_reference,
+    tiny_wan_tp1_model,
+    write_tiny_wan22_model,
+    write_tiny_wan_model,
+)
+from tests.unit.backends._neuron_workers import (  # noqa: E402
+    w1_fake_hidden,
+    w1_host_text_encoder_worker,
+    w1_wan_lifecycle_worker,
+    w1_wan_initial_noise_worker,
+    w1_wan_one_graph_worker,
+    w1_wan_truncated_worker,
+    w1_wan22_pipeline_worker,
+    w1_wan_cfg_parallel_worker,
+    w1_wan_cp_worker,
+    w1_wan_sp_worker,
+    w1_wan_device_text_encoder_worker,
+    w1_wan_device_vae_worker,
+    w1_wan_pipeline_worker,
+)
+
+LOAD_PHASES = {
+    "runtime init", "build on meta", "load checkpoint", "eval", "compile", "warmup forward"
+}
+CONTRACT_KEYS = ["hidden_states", "timestep", "encoder_hidden_states"]
+# No rank may reach for the Hub: every model file is local.
+OFFLINE = {"HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1"}
+HOST_ENCODER_TIMEOUT = 120.0
+
+
+@pytest.fixture(autouse=True)
+def _clean_mesh(monkeypatch):
+    monkeypatch.delenv("DIFFLET_EXEC_MODE", raising=False)
+    parallel_mesh.destroy_parallel_mesh()
+    yield
+    parallel_mesh.destroy_parallel_mesh()
+
+
+@pytest.fixture(scope="module")
+def tiny(tmp_path_factory):
+    pytest.importorskip("safetensors.torch")
+    pytest.importorskip("accelerate")
+    pytest.importorskip("transformers")
+    root = tmp_path_factory.mktemp("tiny_wan")
+    ref = write_tiny_wan_model(root)
+    return SimpleNamespace(dir=str(root), transformer=root / "transformer", ref=ref)
+
+
+def _composed(tiny, **overrides):
+    kwargs = dict(
+        model_path=tiny.dir,
+        parallel=DiffletParallelConfig(),
+        dtype=torch.float32,
+        shape=dict(TINY_SHAPE),
+        text_seq_len=TINY_TEXT_SEQ_LEN,
+        exec_mode="eager",
+        device="cpu",
+        text_encoder_dtype=torch.float32,  # the fp32 reference path; the bf16 default is tested directly
+    )
+    kwargs.update(overrides)
+    return na.TorchNeuronWanApplication(**kwargs)
+
+
+def _shapes_and_dtypes(tensors):
+    return [(tuple(t.shape), t.dtype) for t in tensors]
+
+
+def test_config_validates_tp_and_shape(tiny):
+    config = NeuronWanConfig.from_pretrained(
+        tiny.transformer, tp_degree=4, text_seq_len=TINY_TEXT_SEQ_LEN, **TINY_SHAPE
+    )
+    assert config.patch_size == (1, 2, 2) and config.num_layers == 2
+    geometry = (config.latent_frames, config.latent_height, config.latent_width)
+    assert geometry == TINY_LATENT_SHAPE[2:] and config.image_seq_len == 12
+    with pytest.raises(ValueError, match="does not divide tp=3"):
+        NeuronWanConfig.from_pretrained(tiny.transformer, tp_degree=3)
+    with pytest.raises(ValueError, match=r"num_frames=6 must satisfy \(num_frames - 1\) % 4"):
+        NeuronWanConfig.from_pretrained(tiny.transformer, num_frames=6)
+    NeuronWanConfig.from_pretrained(tiny.transformer, sp_enabled=True).validate()
+    NeuronWanConfig.from_pretrained(tiny.transformer, context_parallel_enabled=True,
+                                    cp_mode="ring").validate()
+    NeuronWanConfig.from_pretrained(tiny.transformer, cfg_parallel_enabled=True).validate()
+    NeuronWanConfig.from_pretrained(tiny.transformer, context_parallel_enabled=True,
+                                    cp_mode="ulysses").validate()
+    # The defaults are Wan2.1-T2V-14B at the benchmark shape 480x832x9.
+    default = NeuronWanConfig(tp_degree=4)
+    default.validate()
+    geometry = (default.latent_frames, default.latent_height, default.latent_width)
+    assert geometry == (3, 60, 104) and default.image_seq_len == 4680
+
+
+@pytest.mark.parametrize("overrides, match", [
+    (dict(cp_mode="striped"), "cp_mode must be one of"),
+    (dict(context_parallel_enabled=True, sp_enabled=True), "mutually exclusive"),
+    (dict(cp_degree=2), "needs context_parallel_enabled=True"),
+    # 12 image tokens: CP and SP split them without padding.
+    (dict(context_parallel_enabled=True, cp_degree=5), r"image_seq_len=12 .* cp_degree=5"),
+    (dict(sp_enabled=True, tp_degree=1, num_frames=1), None),
+    # 4 heads: Ulysses shards heads / tp over cp.
+    (dict(context_parallel_enabled=True, cp_degree=4, tp_degree=2, cp_mode="ulysses"),
+     r"this rank's 2 heads \(heads=4 / tp=2\) over cp_degree=4"),
+    (dict(context_parallel_enabled=True, cp_degree=4, tp_degree=2, cp_mode="ring"), None),
+    (dict(context_parallel_enabled=True, cp_degree=2, tp_degree=2, cp_mode="ulysses"), None),
+    (dict(context_parallel_enabled=True, cp_mode="ulysses"), None),  # cp unknown: the mesh's
+])
+def test_config_validates_the_parallel_modes(tiny, overrides, match):
+    def build():
+        return NeuronWanConfig.from_pretrained(
+            tiny.transformer, text_seq_len=TINY_TEXT_SEQ_LEN, **{**TINY_SHAPE, **overrides})
+
+    if match is None:
+        build()
+        return
+    with pytest.raises(ValueError, match=match):
+        build()
+
+
+def test_sp_needs_the_sequence_to_split_over_tp(tiny):
+    # 32x48x5 has 12 patch tokens (tp=4 splits them, the 4-rank SP test runs it); 32x48x1 has
+    # 6, which do not split over tp=4.
+    with pytest.raises(ValueError, match=r"splits image_seq_len=6 over tp=4"):
+        NeuronWanConfig.from_pretrained(tiny.transformer, sp_enabled=True, tp_degree=4,
+                                        height=32, width=48, num_frames=1)
+
+
+def test_transformer_application_matches_its_config_to_the_mesh(tiny):
+    def make(parallel, **config):
+        return NeuronWanTransformerApplication(
+            model_path=tiny.transformer,
+            config=NeuronWanConfig.from_pretrained(tiny.transformer, **{**TINY_SHAPE, **config}),
+            parallel=parallel, dtype=torch.float32, device="cpu")
+
+    cp2 = DiffletParallelConfig(tp_degree=2, cp_degree=2, cp_mode="ulysses")
+    with pytest.raises(ValueError, match="context_parallel_enabled=False but .* cp_degree=2"):
+        make(cp2, tp_degree=2)
+    with pytest.raises(ValueError, match="cp_mode='ring' but .* cp_mode='ulysses'"):
+        make(cp2, tp_degree=2, context_parallel_enabled=True, cp_mode="ring")
+    with pytest.raises(ValueError, match="cp_degree=4 but the parallel config has cp_degree=2"):
+        make(DiffletParallelConfig(tp_degree=2, cp_degree=2), tp_degree=2,
+             context_parallel_enabled=True, cp_degree=4)
+    app = make(cp2, tp_degree=2, context_parallel_enabled=True, cp_mode="ulysses")
+    assert app.config.cp_degree == 2  # filled from the parallel config, on a copy
+    # The 4 heads at tp1 x cp4 Ulysses: 4 % 4 == 0 fits; tp2 x cp4 would not (8 ranks).
+    make(DiffletParallelConfig(tp_degree=1, cp_degree=4, cp_mode="ulysses"),
+         context_parallel_enabled=True, cp_mode="ulysses")
+
+
+def test_num_layers_override_records_the_checkpoint_depth(tiny):
+    config = NeuronWanConfig.from_pretrained(tiny.transformer, num_layers=1, **TINY_SHAPE)
+    assert (config.num_layers, config.checkpoint_num_layers) == (1, 2)
+    full = NeuronWanConfig.from_pretrained(tiny.transformer, **TINY_SHAPE)
+    assert (full.num_layers, full.checkpoint_num_layers) == (2, 2)
+    with pytest.raises(ValueError, match="exceeds the checkpoint's 2 blocks"):
+        NeuronWanConfig.from_pretrained(tiny.transformer, num_layers=3)
+    with pytest.raises(ValueError, match="num_layers=0 must be >= 1"):
+        NeuronWanConfig.from_pretrained(tiny.transformer, num_layers=0)
+    app = NeuronWanTransformerApplication(
+        model_path=tiny.transformer, config=config, dtype=torch.float32, device="cpu"
+    )
+    assert app.skipped_checkpoint_prefixes == ("blocks.1.",)
+    whole = NeuronWanTransformerApplication(
+        model_path=tiny.transformer, config=full, dtype=torch.float32, device="cpu"
+    )
+    assert whole.skipped_checkpoint_prefixes == ()
+
+
+def _truncated_reference(num_layers: int):
+    """The seeded TP1 DiT (the tiny checkpoint's weights) with only its first blocks."""
+    from tests.unit.backends._neuron_wan_toy import tiny_wan_inputs
+
+    with tp1_mesh():
+        model = tiny_wan_tp1_model()
+        model.blocks = model.blocks[:num_layers]
+        with torch.no_grad():
+            return model(*tiny_wan_inputs())
+
+
+@pytest.mark.parametrize("cp, exec_mode", [(2, "eager"), (1, "compile")],
+                         ids=["tp2-cp2-eager", "tp4-compile"])
+def test_num_layers_loads_the_first_blocks_and_skips_the_rest(tiny, cp, exec_mode):
+    """The on-device parity runs' cut: the first block of the real checkpoint, the second
+    reported as skipped (not unexpected), equal to diffusers-layout TP1 with one block. The
+    preflight's cp_scatter hook on norm_out sees this rank's sequence shard, and it leaves the
+    compiled blocks' graph unbroken."""
+    from safetensors import safe_open
+
+    reference = _truncated_reference(1)
+    assert not torch.allclose(reference, tiny.ref, atol=1e-3)  # the second block mattered
+    results = run_ranks(w1_wan_truncated_worker, tiny.dir, 1, cp, exec_mode, world_size=4,
+                        env=OFFLINE)
+    with safe_open(str(tiny.transformer / "diffusion_pytorch_model.safetensors"), "pt") as f:
+        block1 = sorted(k for k in f.keys() if k.startswith("blocks.1."))
+    assert block1
+    for result in results:
+        assert result["num_blocks"] == 1
+        assert result["load_report"] == {"missing": [], "unexpected": [], "skipped": block1}
+        assert result["sha256"] == results[0]["sha256"]  # ranks_identical
+        assert result["tokens"] == [result["image_seq_len"] // cp]  # cp_scatter
+        assert result["graph_breaks"] == 0 and result["unwarmed_shapes"] == []
+    torch.testing.assert_close(torch.tensor(results[0]["out"]), reference, atol=1e-4, rtol=1e-4)
+
+
+def test_checkpoint_key_round_trip(tiny):
+    assert checkpoint_key("blocks.0.ffn.net_in.weight") == "blocks.0.ffn.net.0.proj.weight"
+    assert checkpoint_key("blocks.39.ffn.net_out.bias") == "blocks.39.ffn.net.2.bias"
+    for name in (
+        "blocks.0.attn1.to_q.weight",
+        "blocks.0.attn2.to_out.0.bias",
+        "blocks.1.attn1.norm_k.weight",
+        "blocks.1.norm2.weight",
+        "blocks.1.scale_shift_table",
+        "patch_embedding.weight",
+        "condition_embedder.time_embedder.linear_1.weight",
+        "proj_out.bias",
+        "scale_shift_table",
+    ):
+        assert checkpoint_key(name) == name
+    app = NeuronWanTransformerApplication(
+        model_path=tiny.transformer, config=tiny_wan_config(), dtype=torch.float32, device="cpu"
+    )
+    assert app.checkpoint_key("blocks.0.ffn.net_in.bias") == "blocks.0.ffn.net.0.proj.bias"
+    # Every module parameter maps onto exactly the diffusers keys on disk, and back.
+    from safetensors import safe_open
+
+    with safe_open(str(tiny.transformer / "diffusion_pytorch_model.safetensors"), "pt") as f:
+        on_disk = set(f.keys())
+    with tp1_mesh():
+        names = list(tiny_wan_tp1_model().state_dict())
+    assert sorted(app.checkpoint_key(n) for n in names) == sorted(on_disk)
+    assert any(".ffn.net.2." in key for key in on_disk)
+
+
+def test_example_inputs_match_the_contract(tiny):
+    app = _composed(tiny)
+    contract = app.dit_input_contract()
+    assert list(contract) == CONTRACT_KEYS
+    expected = [(c["shape"], c["dtype"]) for c in contract.values()]
+    assert expected == [
+        (TINY_LATENT_SHAPE, torch.float32), ((1,), torch.float32), (TINY_TEXT_SHAPE, torch.float32)
+    ]
+    assert _shapes_and_dtypes(app.transformer.get_example_inputs()) == expected
+    # At the real geometry the warm-up compiles exactly the per-step shapes (one graph).
+    real = NeuronWanTransformerApplication(
+        model_path="/unused", config=NeuronWanConfig(), dtype=torch.bfloat16, device="cpu"
+    )
+    assert _shapes_and_dtypes(real.get_example_inputs()) == [
+        ((1, 16, 3, 60, 104), torch.bfloat16),
+        ((1,), torch.bfloat16),
+        ((1, 512, 4096), torch.bfloat16),
+    ]
+
+
+def test_transformer_application_guards_tp_and_dtype(tiny):
+    with pytest.raises(ValueError, match="tp_degree=4.*tp_degree=1"):
+        NeuronWanTransformerApplication(
+            model_path=tiny.transformer, config=tiny_wan_config(tp_degree=4),
+            parallel=DiffletParallelConfig(tp_degree=1), dtype=torch.float32, device="cpu",
+        )
+    # Decision D42: bf16 is the only dtype on the device (reduce_dtype == activation dtype).
+    with pytest.raises(ValueError, match="bfloat16"):
+        NeuronWanTransformerApplication(
+            model_path=tiny.transformer, config=tiny_wan_config(), dtype=torch.float32,
+            device="neuron",
+        )
+    app = NeuronWanTransformerApplication(
+        model_path=tiny.transformer, config=tiny_wan_config(), dtype=torch.bfloat16,
+        device="neuron",
+    )
+    assert app.device.type == "neuron" and app.is_loaded is False
+    assert runtime._neuron_runtime_initialized() is False  # constructing touched nothing
+
+
+@pytest.mark.parametrize("exec_mode", ["eager", "compile"])
+def test_four_rank_lifecycle_matches_tp1(tiny, exec_mode):
+    results = run_ranks(w1_wan_lifecycle_worker, tiny.dir, exec_mode, world_size=4, env=OFFLINE)
+    with tp1_mesh():
+        full_numel = sum(p.numel() for p in tiny_wan_tp1_model().parameters())
+    outs = [torch.tensor(result["out"]) for result in results]
+    for rank, (result, out) in enumerate(zip(results, outs, strict=True)):
+        assert (result["rank"], result["world_size"]) == (rank, 4)
+        assert result["load_report"] == {"missing": [], "unexpected": []}
+        assert result["warmup_shapes"] == [TINY_LATENT_SHAPE, (1,), TINY_TEXT_SHAPE]
+        assert result["compiled_blocks"] == (TINY_BLOCK_NAMES if exec_mode == "compile" else [])
+        assert result["unwarmed_shapes"] == []
+        assert result["local_heads"] == 1  # 4 heads over 4 ranks
+        assert result["param_numel"] < full_numel  # sharded, not four TP1 copies
+        assert torch.equal(out, outs[0])  # the all-reduced output is replicated
+        torch.testing.assert_close(out, tiny.ref, atol=1e-4, rtol=1e-4)
+
+
+def test_compile_mode_traces_one_graph_for_all_blocks(tiny):
+    # Errata P1-3: at TP4, where SPMDRank.get_rank(), the weight narrow and the functional
+    # all-reduces are inside the block; tp=1 skips all three.
+    results = run_ranks(w1_wan_one_graph_worker, tiny.dir, world_size=4, env=OFFLINE)
+    for result in results:
+        assert result["compiled_blocks"] == TINY_BLOCK_NAMES
+        assert result["unique_graphs_after_warmup"] == 1  # both blocks share the warm-up graph
+        assert result["unique_graphs_after_forwards"] == 1  # and the CFG forwards reuse it
+        assert result["graph_breaks"] == 0
+        assert result["recorded_graphs"] == 1
+        # q/k qk-norm sums and the to_out all-reduce of each attention, plus the FFN's.
+        assert result["collectives_per_graph"] == [7]
+        assert result["unwarmed_shapes"] == []
+
+
+def _contiguous_outputs_backend(gm, example_inputs):
+    """A Dynamo backend that runs the graph eagerly but returns every output contiguous, as a
+    NEFF writes them on the neuron device. ``aot_eager`` instead keeps eager layout
+    propagation (an add with a transposed input returns a transposed output), which hides a
+    strided input to the block stack: each block then hands the next the same strides."""
+    del example_inputs
+
+    def run(*args):
+        return tuple(o.contiguous() if isinstance(o, torch.Tensor) else o for o in gm(*args))
+
+    return run
+
+
+def test_block_stack_input_is_contiguous_so_compiled_blocks_share_one_graph():
+    from torch._dynamo.utils import counters
+
+    from difflet.backends.neuron.compile import compile_blocks
+    from tests.unit.backends._neuron_wan_toy import tiny_wan_inputs
+
+    torch._dynamo.reset()
+    counters.clear()
+    with tp1_mesh():
+        model = tiny_wan_tp1_model()
+        seen = []
+        handle = model.blocks[0].register_forward_pre_hook(
+            lambda module, args: seen.append(args[0].is_contiguous())
+        )
+        latents, timestep, text = tiny_wan_inputs()
+        with torch.no_grad():
+            model(latents, timestep, text)
+        handle.remove()
+        # The patch embedding's flatten(2).transpose(1, 2) view must not reach the blocks.
+        assert seen == [True]
+
+        compile_blocks(model, backend=_contiguous_outputs_backend)
+        with torch.no_grad():
+            model(latents, timestep, text)
+            model(latents, timestep * 0.5, -text)
+    # Block 0's input and the later blocks' inputs (block outputs) have the same strides, so
+    # Dynamo's static stride guards hold and every block reuses the first block's graph.
+    assert counters["stats"]["unique_graphs"] == 1
+    assert sum(counters["graph_break"].values()) == 0
+    torch._dynamo.reset()
+
+
+def test_adapter_passes_contiguous_inputs():
+    received = []
+
+    class Recorder:
+        def __call__(self, *args):
+            received.append(args)
+            return torch.ones(1, 4, 2, 4, 6)
+
+    import dataclasses
+
+    from tests.unit.backends._neuron_wan_toy import tiny_wan_config
+
+    seconds = []
+    sent = []
+    # Strided host views as the orchestrator can hand them over: transposed latents and text,
+    # and _batch_timestep's expanded 0-dim timestep (stride 0). The second call is already in
+    # the adapter dtype, so only the adapter's .contiguous() can make it dense. Batch 2 is the
+    # CFG-parallel [uncond, cond] call.
+    recorder = Recorder()
+    for dtype, batch in ((torch.float32, 1), (torch.bfloat16, 2)):
+        config = dataclasses.replace(tiny_wan_config(), cfg_parallel_enabled=batch == 2)
+        adapter = na._OnDeviceTransformer(recorder, config, torch.bfloat16, "cpu")
+        assert adapter.dtype is torch.bfloat16 and adapter.config is config
+        adapter.forward_hook = seconds.append
+        latents = torch.randn(batch, 4, 2, 6, 4).to(dtype).transpose(-1, -2)
+        timestep = torch.tensor(999.0, dtype=dtype).expand(batch)
+        text = torch.randn(batch, 24, 8).to(dtype).transpose(1, 2)
+        assert not latents.is_contiguous() and not text.is_contiguous()
+        assert timestep.stride() == (0,)
+        out = adapter(latents, timestep, text)
+        assert out.device.type == "cpu" and torch.equal(out, torch.ones(1, 4, 2, 4, 6))
+        sent.append((latents, timestep, text))
+    assert len(received) == 2
+    for args, originals in zip(received, sent, strict=True):
+        for got, original in zip(args, originals, strict=True):
+            assert got.is_contiguous() and got.dtype is torch.bfloat16
+            assert torch.equal(got, original.to(torch.bfloat16))
+    assert received[1][1].stride() == (1,)  # the batch-2 timestep was materialised
+    assert len(seconds) == 2 and all(s >= 0.0 for s in seconds)
+
+
+@pytest.mark.parametrize("name, shape", [
+    ("hidden_states", (1, 4, 2, 4, 8)),        # another width: a new block graph per block
+    ("hidden_states", (2, 4, 2, 4, 6)),        # both CFG branches without CFG parallelism
+    ("timestep", (2,)),
+    ("encoder_hidden_states", (1, 6, 24)),     # text not padded to text_seq_len
+])
+def test_adapter_refuses_any_other_shape_than_the_static_one(name, shape):
+    """A different shape must raise, not compile new block graphs (or, eager, misuse the static
+    rotary tables) on every rank: the module is never called."""
+    from tests.unit.backends._neuron_wan_toy import tiny_wan_config
+
+    def module(*args):
+        raise AssertionError("the DiT must not run at another shape")
+
+    config = tiny_wan_config()
+    adapter = na._OnDeviceTransformer(module, config, torch.float32, "cpu")
+    inputs = {"hidden_states": torch.zeros(TINY_LATENT_SHAPE), "timestep": torch.zeros(1),
+              "encoder_hidden_states": torch.zeros(TINY_TEXT_SHAPE)}
+    assert {k: tuple(v.shape) for k, v in inputs.items()} == na.dit_input_shapes(config)
+    inputs[name] = torch.zeros(shape)
+    with pytest.raises(ValueError, match=rf"'{name}' has shape {re.escape(str(shape))}, "
+                                         r"expected .*the one static shape, 32x48x5"):
+        adapter(*inputs.values())
+    assert adapter.calls == 0
+    # Under CFG parallelism the one call is the [uncond, cond] batch of 2.
+    import dataclasses
+
+    cfg = dataclasses.replace(config, cfg_parallel_enabled=True)
+    assert na.dit_input_shapes(cfg)["hidden_states"][0] == 2
+    with pytest.raises(ValueError, match="CFG-parallel batch of 2"):
+        na._OnDeviceTransformer(module, cfg, torch.float32, "cpu")(
+            torch.zeros(TINY_LATENT_SHAPE), torch.zeros(1), torch.zeros(TINY_TEXT_SHAPE))
+
+
+def test_host_text_encoder_broadcasts_rank0_result():
+    start = time.monotonic()
+    results = run_ranks(
+        w1_host_text_encoder_worker, world_size=4, timeout=HOST_ENCODER_TIMEOUT, env=OFFLINE
+    )
+    assert time.monotonic() - start < HOST_ENCODER_TIMEOUT
+    # Rank 0 encoded only the 6 valid tokens, with its own thread count, then re-padded to 8.
+    ids = torch.tensor([[3, 4, 5, 6, 7, 1]])
+    expected = torch.zeros(TINY_TEXT_SHAPE)
+    expected[:, :6] = w1_fake_hidden(ids, TINY_TEXT_SHAPE[-1])
+    expected = expected.to(torch.bfloat16)
+    for rank, result in enumerate(results):
+        for call in ("ok", "recovered"):
+            assert result[call]["outcome"] == "ok" and result[call]["dtype"] == "torch.bfloat16"
+            assert torch.equal(torch.tensor(result[call]["embeds"]).to(torch.bfloat16), expected)
+        assert result["threads_restored"] is True
+        if rank == 0:
+            assert result["calls"] == [((1, 6), 2)] * 3
+            assert result["failed"]["outcome"] == "ValueError: fake umT5 failure"
+            assert result["load"]["outcome"].split(":")[0] != "RankFailureError"
+            assert result["load"]["outcome"] != "ok"
+        else:
+            assert result["calls"] == []  # only rank 0 encodes
+            assert result["failed"]["outcome"].startswith(
+                "RankFailureError: prompt encode: failed on rank 0"
+            )
+            assert result["load"]["outcome"].startswith(
+                "RankFailureError: text encoder load: failed on rank 0"
+            )
+        assert result["loaded_model"] is False
+
+
+def test_application_call_dispatch(tiny):
+    app = _composed(tiny)
+    with pytest.raises(RuntimeError, match="not loaded"):
+        app(prompt="a cat")
+    with pytest.raises(RuntimeError, match="not loaded"):
+        app(torch.zeros(1), torch.zeros(1), torch.zeros(1))
+    app.transformer_adapter = lambda *args, **kwargs: ("adapter", len(args), kwargs)
+
+    class Pipeline:
+        """The orchestrator's call, and the draw ``__call__`` makes for it without latents."""
+
+        def prepare_latents(self, **kwargs):
+            return ("noise", kwargs["generator"])
+
+        def __call__(self, *args, **kwargs):
+            return ("pipeline", len(args), kwargs)
+
+    app.pipeline = Pipeline()
+    x = torch.zeros(1)
+    assert app(x, x, x) == ("adapter", 3, {})
+    assert app(prompt="a cat", num_inference_steps=2) == (
+        "pipeline", 0, {"prompt": "a cat", "num_inference_steps": 2, "latents": ("noise", None)}
+    )
+    assert app("a cat", guidance_scale=5.0, latents=x) == (
+        "pipeline", 1, {"guidance_scale": 5.0, "latents": x})
+    with pytest.raises(ValueError, match="seed or generator"):
+        app(prompt="a cat", seed=1, generator=torch.Generator())
+    with pytest.raises(TypeError, match="seed applies to the orchestrator call"):
+        app(x, x, x, seed=1)
+    # The DiffletPipeline contract (difflet_pipeline.py inspects these parameter names).
+    assert list(inspect.signature(app.load).parameters) == [
+        "compiled_model_path", "start_rank_id", "local_ranks_size", "skip_warmup"
+    ]
+    assert list(inspect.signature(app.compile).parameters) == ["compiled_model_path", "debug"]
+    assert app.compile("/unused") is None and app.has_compiled_artifacts("/unused") is True
+    # The orchestrator's shapes argument with one entry is the shape.
+    single = _composed(tiny, shape={"height": None, "width": None, "num_frames": None},
+                       shapes=((32, 48, 5),))
+    assert single.config.image_seq_len == 12
+    for kwargs, match in (
+        ({"shapes": ((32, 48, 5), (32, 48, 9))}, "one static shape"),
+        ({"batch_size": 2}, "batch_size"),
+        ({"parallel": DiffletParallelConfig(dp_degree=2)}, "supports tensor, sequence"),
+    ):
+        with pytest.raises(NotImplementedError, match=match):
+            _composed(tiny, **kwargs)
+    with pytest.raises(TypeError, match="encoder_thread"):
+        _composed(tiny, encoder_thread=4)
+
+
+def test_every_rank_starts_from_rank0s_initial_noise(tiny):
+    """Each rank's global RNG and generator differ; the initial latents are rank 0's draw on
+    every rank, exactly what the orchestrator itself would have drawn there."""
+    results = run_ranks(w1_wan_initial_noise_worker, tiny.dir, world_size=4, env=OFFLINE)
+    shape = TINY_LATENT_SHAPE
+    expected = {
+        "global_rng": torch.randn(shape, generator=torch.Generator().manual_seed(100)),
+        "seed": torch.randn(shape, generator=torch.Generator().manual_seed(7)),
+        "generator": torch.randn(shape, generator=torch.Generator().manual_seed(7)),
+    }
+    for result in results:
+        for name, want in expected.items():
+            assert torch.equal(torch.tensor(result[name]), want), name
+
+
+def test_prompt_goes_through_the_tokenizer_and_the_host_encoder(tiny):
+    # One process (no process group): the CLI's app(prompt=...) path up to the DiT, with
+    # enable_transformer=False so nothing but the text encoder loads.
+    from transformers import UMT5EncoderModel
+
+    app = _composed(tiny, enable_transformer=False, encoder_threads=2)
+    assert app.transformer is None
+    app.load()
+    assert set(app.phase_seconds) == {"text encoder load"} and app.compiled_blocks == []
+    out = app(prompt="a cat on the moon", num_inference_steps=1, output_type="latent")
+    embeds = out.prompt_embeds
+    assert tuple(embeds.shape) == TINY_TEXT_SHAPE and embeds.dtype == torch.float32
+    # 5 words + </s> are valid; the 2 padded rows are zero.
+    assert torch.count_nonzero(embeds[:, 6:]) == 0 and bool(embeds[:, :6].abs().sum(-1).all())
+    encoder = UMT5EncoderModel.from_pretrained(
+        str(Path(tiny.dir, "text_encoder")), dtype=torch.float32
+    ).eval()
+    ids = torch.tensor([[3, 4, 5, 6, 7, 1, 0, 0]])
+    mask = torch.tensor([[1, 1, 1, 1, 1, 1, 0, 0]])
+    with torch.no_grad():
+        full = encoder(ids, mask).last_hidden_state  # untrimmed, as diffusers encodes
+    torch.testing.assert_close(embeds[:, :6], full[:, :6], atol=1e-5, rtol=1e-5)
+    with pytest.raises(RuntimeError, match="DiT is not loaded"):
+        app(torch.zeros(1), torch.zeros(1), torch.zeros(1))
+
+
+def test_end_to_end_two_steps_on_cpu_matches_tp1(tiny):
+    reference = tiny_wan_pipeline_reference(tiny.dir, num_inference_steps=2, guidance_scale=5.0)
+    results = run_ranks(w1_wan_pipeline_worker, tiny.dir, world_size=4, env=OFFLINE)
+    latents = [torch.tensor(result["latents"]) for result in results]
+    for rank, result in enumerate(results):
+        assert result["dtype"] == "torch.float32"
+        assert result["sha256"] == results[0]["sha256"]  # bit-identical on every rank
+        assert torch.equal(latents[rank], latents[0])
+        # step_hook: one stamp per denoise iteration, after both CFG forwards (errata P0-2).
+        assert result["steps"] == [2, 4]
+        assert len(result["forward_seconds"]) == 4
+        # The "" negative prompt went through the rank-0 host encoder (1 valid token, </s>),
+        # not the orchestrator's zeros fallback.
+        assert result["encoder_inputs"] == ([(1, 1)] if rank == 0 else [])
+        assert len(result["negative_abs_sums"]) == 1 and result["negative_abs_sums"][0] > 0
+        assert set(result["phase_seconds"]) == LOAD_PHASES | {"text encoder load"}
+        assert result["unwarmed_shapes"] == []
+    assert tuple(latents[0].shape) == TINY_LATENT_SHAPE
+    torch.testing.assert_close(latents[0], reference, atol=1e-4, rtol=1e-4)
+    assert not torch.equal(reference, torch.zeros_like(reference))
+    assert Path(tiny.dir, "tokenizer", "tokenizer.json").is_file()
+
+
+# ---- Wan 2.2 A14B: the low-noise expert ---------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def tiny22(tmp_path_factory):
+    pytest.importorskip("safetensors.torch")
+    pytest.importorskip("accelerate")
+    pytest.importorskip("transformers")
+    root = tmp_path_factory.mktemp("tiny_wan22")
+    write_tiny_wan22_model(root)
+    return SimpleNamespace(dir=str(root))
+
+
+def test_low_noise_expert_needs_a_two_expert_checkpoint(tiny):
+    with pytest.raises(ValueError, match="transformer_2"):
+        _composed(tiny, enable_transformer_2=True)  # Wan 2.1 layout: no transformer_2/
+    with pytest.raises(ValueError, match="requires enable_transformer"):
+        _composed(tiny, enable_transformer=False, enable_transformer_2=True)
+
+
+def test_low_noise_expert_must_share_the_architecture(tmp_path):
+    pytest.importorskip("safetensors.torch")
+    write_tiny_wan22_model(tmp_path, transformer_2_config={**TINY_WAN_TRANSFORMER, "ffn_dim": 64})
+    with pytest.raises(ValueError, match="ffn_dim"):
+        _composed(SimpleNamespace(dir=str(tmp_path)), enable_transformer_2=True)
+
+
+def test_one_expert_is_unchanged_on_a_two_expert_checkpoint(tiny22):
+    app = _composed(tiny22)
+    assert app.transformer_2 is None and app.expert_calls == {}
+
+
+def test_two_experts_on_four_ranks_match_tp1(tiny22):
+    reference = tiny_wan_pipeline_reference(
+        tiny22.dir, num_inference_steps=4, guidance_scale=5.0, guidance_scale_2=3.0, dual=True
+    )
+    high_noise_only = tiny_wan_pipeline_reference(
+        tiny22.dir, num_inference_steps=4, guidance_scale=5.0, guidance_scale_2=3.0
+    )
+    results = run_ranks(w1_wan22_pipeline_worker, tiny22.dir, world_size=4, env=OFFLINE)
+    for result in results:
+        assert result["sha256"] == results[0]["sha256"]  # bit-identical on every rank
+        calls = result["expert_calls"]
+        # Four CFG steps = eight forwards, each step on one expert, both experts used.
+        assert calls["transformer"] > 0 and calls["transformer_2"] > 0
+        assert calls["transformer"] + calls["transformer_2"] == 8
+        assert calls["transformer"] % 2 == 0 and calls["transformer_2"] % 2 == 0
+        assert result["forwards_timed"] == 8  # one hook times both experts
+        assert {f"transformer_2 {phase}" for phase in LOAD_PHASES} <= set(result["phase_seconds"])
+        assert result["unwarmed_shapes"] == []
+    latents = torch.tensor(results[0]["latents"])
+    torch.testing.assert_close(latents, reference, atol=1e-4, rtol=1e-4)
+    assert not torch.allclose(reference, high_noise_only, atol=1e-3)  # the second expert mattered
+
+
+# ---- umT5 on the device (text_encoder_device="neuron") ----------------------------------
+
+
+def test_text_encoder_device_must_be_host_or_neuron(tiny):
+    with pytest.raises(ValueError, match="text_encoder_device"):
+        _composed(tiny, text_encoder_device="gpu")
+
+
+def test_device_text_encoder_on_four_ranks_matches_hugging_face(tiny):
+    """Difflet's umT5, sharded at TP4, against the transformers UMT5EncoderModel the host path
+    runs: same tokens, same padding, fp32, on every rank."""
+    from transformers import AutoTokenizer, UMT5EncoderModel
+
+    prompts = ["a red fox runs", ""]  # the negative prompt is the empty one
+    tokenizer = AutoTokenizer.from_pretrained(os.path.join(tiny.dir, "tokenizer"))
+    encoder = UMT5EncoderModel.from_pretrained(
+        os.path.join(tiny.dir, "text_encoder"), dtype=torch.float32
+    ).eval()
+    references = []
+    for prompt in prompts:
+        tokens = tokenizer([prompt], padding="max_length", truncation=True,
+                           max_length=TINY_TEXT_SEQ_LEN, return_tensors="pt")
+        with torch.no_grad():
+            hidden = encoder(tokens["input_ids"], tokens["attention_mask"]).last_hidden_state
+        hidden = hidden * tokens["attention_mask"][..., None]  # padded rows are zeros
+        references.append(hidden)
+
+    results = run_ranks(w1_wan_device_text_encoder_worker, tiny.dir, prompts, world_size=4,
+                        env=OFFLINE)
+    for result in results:
+        assert result["embeds"] == results[0]["embeds"]  # identical on every rank
+        assert {f"text_encoder {phase}" for phase in LOAD_PHASES} <= set(result["phase_seconds"])
+        assert "text encoder load" not in result["phase_seconds"]  # no host encoder
+        assert result["unwarmed_shapes"] == []
+    for got, want in zip(results[0]["embeds"], references):
+        torch.testing.assert_close(torch.tensor(got), want, atol=1e-5, rtol=1e-5)
+
+
+def test_device_text_encoder_defaults_to_bf16_and_hands_the_dit_its_dtype(tiny):
+    # umT5 in bf16 by default (the Trainium path's precision), fp32 on request; its embeddings
+    # are cast to the DiT's dtype either way.
+    assert na._KWARG_DEFAULTS["text_encoder_dtype"] is torch.bfloat16
+    app = _composed(tiny, dtype=torch.bfloat16, text_encoder_device="neuron", text_encoder_dtype=torch.bfloat16)
+    assert isinstance(app.text_encoder, na._DeviceTextEncoder)
+    assert app.text_encoder.app.dtype is torch.bfloat16
+    assert app.text_encoder.dtype is torch.bfloat16
+    app = _composed(tiny, dtype=torch.bfloat16, text_encoder_device="neuron", text_encoder_dtype=torch.float32)
+    assert app.text_encoder.app.dtype is torch.float32
+    host = _composed(tiny, dtype=torch.bfloat16, text_encoder_dtype=torch.bfloat16)
+    assert host.text_encoder.encoder_dtype is torch.bfloat16
+
+
+def test_text_encoder_dtype_applies_on_the_device_and_the_host(tiny):
+    # _composed pins fp32; bf16 (the default) is asked for here explicitly
+    device = _composed(tiny, text_encoder_device="neuron", text_encoder_dtype=torch.bfloat16)
+    assert device.text_encoder.app.dtype is torch.bfloat16
+    assert device.text_encoder.dtype is torch.float32  # the embeddings in the DiT's dtype
+    host = _composed(tiny, text_encoder_dtype="bfloat16")
+    assert isinstance(host.text_encoder, na._HostTextEncoder)
+    assert host.text_encoder.encoder_dtype is torch.bfloat16
+    with pytest.raises(ValueError, match="text_encoder_dtype must be bfloat16 or float32"):
+        _composed(tiny, text_encoder_device="neuron", text_encoder_dtype=torch.float16)
+
+
+def test_bf16_device_text_encoder_is_close_to_fp32_and_stored_in_bf16(tiny, tmp_path,
+                                                                      monkeypatch):
+    """One CPU rank, umT5 alone (``enable_transformer=False``) through the composed
+    application's prompt path, as F13 runs it: bf16 against fp32 per prompt, the empty negative
+    prompt included, over the valid tokens (cosine >= 0.995, F13's gate). The weight store keys
+    and writes in the load dtype: the fp32 encoder from its fp32 checkpoint gains nothing and
+    writes nothing, the bf16 one writes a bf16 entry and the next bf16 load reads it, with
+    the same embeddings."""
+    from safetensors.torch import load_file
+
+    from tests.numerical.neuron_parity import MIN_COSINE, metrics
+
+    store = tmp_path / "store"
+    monkeypatch.setenv("DIFFLET_NEURON_WEIGHT_STORE", str(store))
+    prompts = {"a red fox runs": 5, "": 1}  # valid tokens: the words and </s>
+
+    def encode(dtype):
+        parallel_mesh.destroy_parallel_mesh()
+        app = _composed(tiny, enable_transformer=False, text_encoder_device="neuron",
+                        text_encoder_dtype=dtype)
+        app.load()
+        return app.text_encoder.app, [app.pipeline.encode_prompt(prompt=p) for p in prompts]
+
+    fp32_app, fp32 = encode(torch.float32)
+    assert fp32_app.weight_store.status == "not written"
+    assert not store.exists() or not any(store.iterdir())
+    bf16_app, bf16 = encode(torch.bfloat16)
+    assert bf16_app.weight_store.status == "written"
+    (entry,) = store.iterdir()
+    assert "__bfloat16__tp1__" in entry.name
+    stored = load_file(str(entry / "replicated.safetensors"))
+    assert stored and {t.dtype for t in stored.values()} == {torch.bfloat16}
+    hit_app, hit = encode(torch.bfloat16)
+    assert hit_app.weight_store.status == "hit"
+    for (prompt, valid), want, got, again in zip(prompts.items(), fp32, bf16, hit):
+        assert torch.equal(again, got), prompt
+        assert torch.count_nonzero(got[:, valid:]) == 0, prompt
+        result = metrics(got[:, :valid], want[:, :valid])
+        assert result["cosine"] >= MIN_COSINE, (prompt, result)
+        assert 0 < result["max_abs"], prompt  # bf16 really ran
+
+
+def test_bf16_umt5_counts_half_against_the_hbm_budget(tiny, monkeypatch):
+    """The device encoder's budget check counts umT5 in its load dtype: a budget between the
+    fp32 and the bf16 estimate refuses fp32 umT5 beside the DiT and admits bf16."""
+    from difflet.backends.neuron.hbm import FIT_FRACTION, GIB, HbmBudgetError
+    from difflet.backends.neuron.wan.hbm import device_text_encoder_bytes
+
+    def estimate(tp, experts=("transformer",), encoder_bytes=4):
+        return device_text_encoder_bytes(tiny.dir, tp_degree=tp, experts=experts,
+                                         dit_dtype_bytes=4,
+                                         encoder_dtype_bytes=encoder_bytes)
+
+    assert estimate(1, ()) == 2 * estimate(1, (), encoder_bytes=2)
+    assert estimate(1) - estimate(1, encoder_bytes=2) == estimate(1, (), encoder_bytes=2)
+    high, low = estimate(2), estimate(2, encoder_bytes=2)
+    monkeypatch.setenv("DIFFLET_NEURON_HBM_GIB", repr((low + high) / 2 / FIT_FRACTION / GIB))
+    tp2 = DiffletParallelConfig(tp_degree=2)
+    with pytest.raises(HbmBudgetError, match=r"umT5 \(torch.float32\) beside the Wan DiT"):
+        _composed(tiny, parallel=tp2, text_encoder_device="neuron")
+    app = _composed(tiny, parallel=tp2, text_encoder_device="neuron",
+                    text_encoder_dtype=torch.bfloat16)
+    assert app.text_encoder.app.dtype is torch.bfloat16
+
+
+# ---- the VAE decoder on the device (enable_vae_decoder=True) ------------------------------
+
+
+def test_device_vae_on_four_ranks_matches_the_host_decode(tiny):
+    """The two-step run decoded on the device in fp32: identical on every rank, and equal to
+    diffusers' fp32 decode (the CLI's host path) of the TP1 reference latents."""
+    reference_latents = tiny_wan_pipeline_reference(tiny.dir, num_inference_steps=2,
+                                                    guidance_scale=5.0)
+    reference_frames = tiny_wan_host_decode(tiny.dir, reference_latents)
+
+    results = run_ranks(w1_wan_device_vae_worker, tiny.dir, world_size=4, env=OFFLINE)
+    for result in results:
+        assert result["sha256"] == results[0]["sha256"]
+        assert {f"vae {phase}" for phase in LOAD_PHASES} <= set(result["phase_seconds"])
+    torch.testing.assert_close(torch.tensor(results[0]["latents"]), reference_latents,
+                               atol=1e-4, rtol=1e-4)
+    frames = torch.tensor(results[0]["frames"])
+    assert tuple(frames.shape) == (1, 3, TINY_SHAPE["num_frames"], TINY_SHAPE["height"],
+                                   TINY_SHAPE["width"])
+    torch.testing.assert_close(frames, reference_frames, atol=1e-4, rtol=1e-4)
+
+
+def test_vae_precision_follows_the_clip_length_as_on_trainium():
+    from difflet.backends.neuron.wan.vae import BF16_MAX_FRAMES, default_vae_dtype
+
+    assert BF16_MAX_FRAMES == 9
+    assert default_vae_dtype(5) is torch.bfloat16 and default_vae_dtype(9) is torch.bfloat16
+    assert default_vae_dtype(13) is torch.float32 and default_vae_dtype(81) is torch.float32
+
+
+def test_device_vae_runs_eager_at_the_default_or_requested_precision(tiny):
+    from difflet.backends.neuron.wan.vae import default_vae_dtype
+
+    app = _composed(tiny, dtype=torch.bfloat16, exec_mode="compile", enable_vae_decoder=True)
+    frames = (int(app.config.latent_frames) - 1) * 4 + 1
+    assert app.vae_decoder.app.dtype is default_vae_dtype(frames)  # not the DiT's
+    assert app.vae_decoder.dtype is torch.float32  # the un-normalisation, in either decoder dtype
+    assert app.vae_decoder.app.exec_mode == "eager"
+    app = _composed(tiny, dtype=torch.bfloat16, enable_vae_decoder=True, vae_dtype=torch.float32)
+    assert app.vae_decoder.app.dtype is torch.float32
+    assert tuple(app.vae_decoder.config.latents_std) == (1.5, 0.8, 1.2, 2.0)
+
+
+def test_device_vae_takes_an_explicit_dtype(tiny):
+    app = _composed(tiny, enable_vae_decoder=True, vae_dtype=torch.bfloat16)
+    assert app.vae_decoder.app.dtype is torch.bfloat16
+    # The orchestrator un-normalises in the adapter's dtype: fp32 whatever the decoder's, as the
+    # CLI vae stage un-normalises on the host.
+    assert app.vae_decoder.dtype is torch.float32
+    assert _composed(tiny, enable_vae_decoder=True,
+                     vae_dtype="bfloat16").vae_decoder.app.dtype is torch.bfloat16
+    with pytest.raises(ValueError, match="vae_dtype must be bfloat16 or float32"):
+        _composed(tiny, enable_vae_decoder=True, vae_dtype=torch.float16)
+
+
+def _vae_decode(tiny, dtype, latents):
+    """One CPU rank: the decoder application loaded from the tiny checkpoint in ``dtype``, then
+    the composed application's adapter decoding ``latents`` (already un-normalised)."""
+    from difflet.backends.neuron.wan.vae import NeuronWanVaeDecoderApplication
+
+    parallel_mesh.destroy_parallel_mesh()
+    app = NeuronWanVaeDecoderApplication(
+        model_path=os.path.join(tiny.dir, "vae"), latent_shape=TINY_LATENT_SHAPE,
+        parallel=DiffletParallelConfig(), dtype=dtype, device="cpu",
+    )
+    app.load(skip_warmup=True)
+    assert {p.dtype for p in app.module.parameters()} == {dtype}
+    return na._DeviceVaeDecoder(app, device="cpu")(latents)
+
+
+def test_device_vae_bf16_decode_is_close_to_the_fp32_decode(tiny):
+    """The same un-normalised latents decoded by the fp32 and the bf16 decoder (weights loaded
+    from the fp32 checkpoint, cast at load): the fp32 decode is diffusers' host decode, the bf16
+    one comes back fp32 (the fp32 output head) within bf16's error of it. 40 dB (frames in
+    [-1, 1]) catches a broken path; the device gate on the real decoder is 50 dB."""
+    import math
+
+    gen = torch.Generator().manual_seed(11)
+    latents = torch.randn(TINY_LATENT_SHAPE, generator=gen)
+    std = torch.tensor([1.5, 0.8, 1.2, 2.0]).view(1, 4, 1, 1, 1)
+    mean = torch.tensor([0.1, -0.2, 0.05, 0.3]).view(1, 4, 1, 1, 1)
+    host = tiny_wan_host_decode(tiny.dir, latents)  # un-normalises itself
+    fp32 = _vae_decode(tiny, torch.float32, latents * std + mean)
+    bf16 = _vae_decode(tiny, torch.bfloat16, latents * std + mean)
+    torch.testing.assert_close(fp32, host, atol=1e-4, rtol=1e-4)
+    assert fp32.dtype == bf16.dtype == torch.float32 and bf16.shape == fp32.shape
+    mse = float(((bf16.double() - fp32.double()) ** 2).mean())
+    assert 0 < mse and 10 * math.log10(4.0 / mse) >= 40.0
+
+
+# ---- CFG parallelism (TP2 x CFG2) ------------------------------------------------------
+
+
+def test_cfg_parallel_on_four_ranks_matches_tp1(tiny):
+    """[uncond, cond] as one batched DiT call per step, each branch on its own TP2 group:
+    identical on every rank and equal to the serial TP1 reference."""
+    reference = tiny_wan_pipeline_reference(tiny.dir, num_inference_steps=2, guidance_scale=5.0)
+    results = run_ranks(w1_wan_cfg_parallel_worker, tiny.dir, world_size=4, env=OFFLINE)
+    for result in results:
+        assert result["sha256"] == results[0]["sha256"]
+        assert result["dit_calls"] == 2  # one batched call per step, not two
+        assert result["unwarmed_shapes"] == []
+        # Review T3: each rank's blocks see its own branch of the pair, batch 1, and every
+        # token; a module running both branches on every rank would match the reference too.
+        assert result["block_rows"] == [[1, _tokens(tiny)]] * 2
+    torch.testing.assert_close(torch.tensor(results[0]["latents"]), reference,
+                               atol=1e-4, rtol=1e-4)
+
+
+def _tokens(tiny) -> int:
+    """The tiny model's patch tokens at TINY_SHAPE: the sequence CP and SP shard."""
+    return NeuronWanConfig.from_pretrained(tiny.transformer, text_seq_len=TINY_TEXT_SEQ_LEN,
+                                           **TINY_SHAPE).image_seq_len
+
+
+def _umt5_budget_between(monkeypatch, root, fits, fails):
+    """A per-core budget (DIFFLET_NEURON_HBM_GIB, which also turns the check on off the device)
+    that the umT5 + DiT estimate at ``fits`` = (tp, experts[, encoder bytes]) meets and at
+    ``fails`` exceeds. The DiT and, unless given, umT5 are counted in fp32, the dtypes the CPU
+    tests load (``_composed``)."""
+    from difflet.backends.neuron.hbm import FIT_FRACTION, GIB
+    from difflet.backends.neuron.wan.hbm import device_text_encoder_bytes
+
+    def estimate(tp, experts, encoder_dtype_bytes=4):
+        return device_text_encoder_bytes(root, tp_degree=tp, experts=experts, dit_dtype_bytes=4,
+                                         encoder_dtype_bytes=encoder_dtype_bytes)
+
+    low, high = estimate(*fits), estimate(*fails)
+    assert low < high
+    monkeypatch.setenv("DIFFLET_NEURON_HBM_GIB", repr((low + high) / 2 / FIT_FRACTION / GIB))
+
+
+@pytest.mark.parametrize("parallel", [
+    DiffletParallelConfig(tp_degree=2, cfg_parallel_enabled=True),
+    DiffletParallelConfig(tp_degree=2, cp_degree=2, cp_mode="ulysses"),
+    DiffletParallelConfig(tp_degree=2),  # one dp2tp2 replica, or a plain tp2
+], ids=["tp2-cfg2", "tp2-cp2", "tp2"])
+def test_a_narrow_tp_refuses_the_device_text_encoder(tiny, monkeypatch, parallel):
+    """The check follows tp and the checkpoint's sizes, not the mode flags: wherever the TP
+    group is too narrow for umT5 to fit beside the DiT, construction fails, before any load."""
+    from difflet.backends.neuron.hbm import HbmBudgetError
+
+    one = ("transformer",)
+    _umt5_budget_between(monkeypatch, tiny.dir, fits=(4, one), fails=(2, one))
+    with pytest.raises(HbmBudgetError, match=r"at tp=2 .*encode on the host \(text_encoder_dev"):
+        _composed(tiny, parallel=parallel, text_encoder_device="neuron")
+    app = _composed(tiny, parallel=DiffletParallelConfig(tp_degree=4),
+                    text_encoder_device="neuron")  # tp4 fits
+    assert isinstance(app.text_encoder, na._DeviceTextEncoder)
+    host = _composed(tiny, parallel=parallel, text_encoder_device="host")  # the host is fine
+    assert isinstance(host.text_encoder, na._HostTextEncoder)
+    # Without the DiT on the core the encoder alone fits.
+    alone = _composed(tiny, parallel=parallel, text_encoder_device="neuron",
+                      enable_transformer=False)
+    assert isinstance(alone.text_encoder, na._DeviceTextEncoder)
+
+
+def test_the_bf16_device_text_encoder_fits_where_fp32_does_not(tiny, monkeypatch):
+    """The estimate costs umT5 in the dtype it loads in: at a budget between the two, tp2 x CFG2
+    takes the bf16 encoder (the default) and refuses the fp32 one."""
+    from difflet.backends.neuron.hbm import HbmBudgetError
+
+    one = ("transformer",)
+    _umt5_budget_between(monkeypatch, tiny.dir, fits=(2, one, 2), fails=(2, one, 4))
+    cfg2 = DiffletParallelConfig(tp_degree=2, cfg_parallel_enabled=True)
+    app = _composed(tiny, parallel=cfg2, text_encoder_device="neuron",
+                    text_encoder_dtype=torch.bfloat16)
+    assert isinstance(app.text_encoder, na._DeviceTextEncoder)
+    with pytest.raises(HbmBudgetError, match=r"umT5 \(torch.float32\).*encode on the host"):
+        _composed(tiny, parallel=cfg2, text_encoder_device="neuron")  # fp32 (_composed)
+
+
+def test_without_a_budget_the_cpu_does_not_check_the_device_text_encoder(tiny):
+    # On the CPU (no DIFFLET_NEURON_HBM_GIB) there is no HBM to check: the gloo tests run it.
+    app = _composed(tiny, parallel=DiffletParallelConfig(tp_degree=2, cfg_parallel_enabled=True),
+                    text_encoder_device="neuron")
+    assert isinstance(app.text_encoder, na._DeviceTextEncoder)
+
+
+def test_the_low_noise_expert_counts_against_the_device_text_encoder(tiny22, monkeypatch):
+    from difflet.backends.neuron.hbm import HbmBudgetError
+
+    _umt5_budget_between(monkeypatch, tiny22.dir, fits=(4, ("transformer",)),
+                         fails=(4, ("transformer", "transformer_2")))
+    four = DiffletParallelConfig(tp_degree=4)
+    _composed(tiny22, parallel=four, text_encoder_device="neuron")
+    with pytest.raises(HbmBudgetError, match=r"transformer, transformer_2\) on one core"):
+        _composed(tiny22, parallel=four, text_encoder_device="neuron",
+                  enable_transformer_2=True)
+
+
+# ---- context parallelism (TP2 x CP2) -----------------------------------------------------
+
+
+@pytest.mark.parametrize("cp_mode", ["ulysses", "gather_kv", "ring"])
+def test_context_parallel_on_four_ranks_matches_tp1(tiny, cp_mode):
+    """The sequence sharded over the CP group and each branch's heads over TP: identical on
+    every rank and equal to the TP1 reference."""
+    reference = tiny_wan_pipeline_reference(tiny.dir, num_inference_steps=2, guidance_scale=5.0)
+    results = run_ranks(w1_wan_cp_worker, tiny.dir, cp_mode, world_size=4, env=OFFLINE)
+    for result in results:
+        assert result["sha256"] == results[0]["sha256"]
+        # Review T4: serial CFG (two batch-1 calls per step), each block on this rank's half of
+        # the tokens; the ranks agreeing proves nothing about the split.
+        assert result["block_rows"] == [[1, _tokens(tiny) // 2]] * 4
+    torch.testing.assert_close(torch.tensor(results[0]["latents"]), reference,
+                               atol=1e-4, rtol=1e-4)
+
+
+# ---- context parallelism composed with CFG parallelism (TP1 x CP2 x CFG2) ---------------
+
+
+@pytest.mark.parametrize("cp_mode", ["ulysses", "gather_kv"])
+def test_context_and_cfg_parallel_compose_on_four_ranks(tiny, cp_mode):
+    """On the neuron mesh each rank runs one CFG branch on its half of the sequence: one batched
+    DiT call per step, batch 1 and half the tokens per block, and the TP1 reference's result."""
+    from tests.unit.backends._neuron_workers import w1_wan_cfg_cp_worker
+
+    reference = tiny_wan_pipeline_reference(tiny.dir, num_inference_steps=2, guidance_scale=5.0)
+    results = run_ranks(w1_wan_cfg_cp_worker, tiny.dir, cp_mode, world_size=4,
+                        env={**OFFLINE, "DIFFLET_BACKEND": "neuron"})
+    for result in results:
+        assert result["sha256"] == results[0]["sha256"]
+        assert result["dit_calls"] == 2  # one batched call per step
+        assert result["block_rows"] == [[1, _tokens(tiny) // 2]] * 2
+    torch.testing.assert_close(torch.tensor(results[0]["latents"]), reference,
+                               atol=1e-4, rtol=1e-4)
+
+
+# ---- sequence parallelism (Megatron SP within the TP group) ------------------------------
+
+
+@pytest.mark.parametrize("cfg", [False, True], ids=["tp4-sp", "tp2-cfg2-sp"])
+def test_sequence_parallel_on_four_ranks_matches_tp1(tiny, cfg):
+    """The sequence sharded over the TP group between the matmuls: identical on every rank and
+    equal to the TP1 reference, alone and combined with CFG parallelism."""
+    reference = tiny_wan_pipeline_reference(tiny.dir, num_inference_steps=2, guidance_scale=5.0)
+    results = run_ranks(w1_wan_sp_worker, tiny.dir, cfg, world_size=4, env=OFFLINE)
+    tp = 2 if cfg else 4
+    for result in results:
+        assert result["sha256"] == results[0]["sha256"]
+        # The blocks see this rank's 1/tp of the tokens, and under CFG parallelism one branch
+        # per call (one call per step), else two batch-1 calls per step.
+        assert result["block_rows"] == [[1, _tokens(tiny) // tp]] * (2 if cfg else 4)
+    torch.testing.assert_close(torch.tensor(results[0]["latents"]), reference,
+                               atol=1e-4, rtol=1e-4)

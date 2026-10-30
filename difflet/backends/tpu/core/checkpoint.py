@@ -14,12 +14,11 @@ truth for how a parameter is partitioned.
 Phase 4 of docs/plans/2026-08-16-tpu-backend-support.md.
 """
 
-# Lifted into difflet.backends._torch_megatron; re-exported here so
-# the TPU backend and its tests keep their import paths.
+# Lifted into difflet.backends._torch_megatron (shared with CUDA); re-exported here so the TPU
+# and neuron backends and their tests keep their import paths.
 from difflet.backends._torch_megatron.checkpoint import (  # noqa: F401
     INDEX_SUFFIX,
     build_weight_map,
+    checkpoint_keys,
     load_checkpoint_into,
 )
-
-__all__ = ["build_weight_map", "load_checkpoint_into"]

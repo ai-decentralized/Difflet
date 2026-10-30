@@ -27,9 +27,25 @@ def create_wan_application(
             **kwargs,
         )
 
+    if backend == "neuron":
+        # TorchNeuron, one process per NeuronCore (torchrun): the DiT on the device (TP, SP,
+        # CFG, CP), umT5 on rank 0's host by default or on the device
+        # (text_encoder_device="neuron", the CLI's default), the VAE on the device
+        # (enable_vae_decoder=True) or the host. Keyword arguments and their defaults:
+        # neuron_application._KWARG_DEFAULTS.
+        from difflet.models.wan.neuron_application import TorchNeuronWanApplication
+
+        return TorchNeuronWanApplication(
+            model_path=model_path,
+            parallel=parallel,
+            dtype=dtype,
+            shape=shape,
+            **kwargs,
+        )
+
     if backend != "trainium":
         raise NotImplementedError(
-            f"Wan supports the trainium and tpu backends, got {backend!r}"
+            f"Wan supports the trainium, tpu and neuron backends, got {backend!r}"
         )
 
     from difflet.models.wan.application import NeuronWanApplication

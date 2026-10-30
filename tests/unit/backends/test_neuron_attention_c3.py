@@ -1,0 +1,341 @@
+"""Unit tests for the neuron backend's attention contract, run on CPU tensors; no Neuron hardware needed."""
+
+import math
+
+import pytest
+
+torch = pytest.importorskip("torch")
+
+from difflet.backends.cpu.ops_impl import attention as cpu_attention  # noqa: E402
+from difflet.backends.neuron.ops_impl import attention as neuron_attention  # noqa: E402
+
+BH, SQ, SK, D = 6, 33, 47, 16
+
+
+def _reference(q, k, v, *, scale=None, causal=False, mask=None, tp_q=False, tp_k=False, tp_out=False):
+    """Independent fp64 implementation of the attention_cte calling contract."""
+    q = (q if tp_q else q.transpose(-1, -2)).double()
+    k = (k if tp_k else k.transpose(-1, -2)).double()
+    scores = q @ k.transpose(-1, -2) * (1.0 if scale is None else scale)
+    if causal:
+        tril = torch.ones(scores.shape[-2:], dtype=torch.bool).tril()
+        scores = scores.masked_fill(~tril, float("-inf"))
+    if mask is not None:
+        scores = scores.masked_fill(~mask, float("-inf")) if mask.dtype == torch.bool else scores + mask.double()
+    out = torch.softmax(scores, dim=-1) @ v.double()
+    return out.transpose(-1, -2) if tp_out else out
+
+
+def _inputs(tp_q=True, tp_k=True, s_k=SK):
+    g = torch.Generator().manual_seed(0)
+    q = torch.randn(BH, SQ, D, generator=g)
+    k = torch.randn(BH, s_k, D, generator=g)
+    v = torch.randn(BH, s_k, D, generator=g)
+    return (q if tp_q else q.transpose(-1, -2).contiguous(),
+            k if tp_k else k.transpose(-1, -2).contiguous(), v)
+
+
+def _close(out, ref):
+    torch.testing.assert_close(out.double(), ref, rtol=1e-5, atol=1e-5)
+
+
+@pytest.mark.parametrize("tp_q", [True, False])
+@pytest.mark.parametrize("tp_k", [True, False])
+@pytest.mark.parametrize("tp_out", [True, False])
+def test_layout_flags(tp_q, tp_k, tp_out):
+    q, k, v = _inputs(tp_q, tp_k)
+    flags = dict(tp_q=tp_q, tp_k=tp_k, tp_out=tp_out)
+    _close(neuron_attention.attention(q, k, v, scale=0.3, **flags), _reference(q, k, v, scale=0.3, **flags))
+
+
+@pytest.mark.parametrize("scale", [None, 1.0 / math.sqrt(D), 0.05])
+def test_scale_none_means_one(scale):
+    q, k, v = _inputs()
+    out = neuron_attention.attention(q, k, v, scale=scale, tp_q=True, tp_k=True)
+    _close(out, _reference(q, k, v, scale=scale, tp_q=True, tp_k=True))
+
+
+def test_matches_cpu_backend_in_the_standard_layout():
+    q, k, v = _inputs()
+    flags = dict(scale=1.0 / math.sqrt(D), tp_q=True, tp_k=True, tp_out=False)
+    torch.testing.assert_close(
+        neuron_attention.attention(q, k, v, **flags), cpu_attention.attention(q, k, v, **flags),
+        rtol=1e-5, atol=1e-5,
+    )
+
+
+def test_causal():
+    q, k, v = _inputs(s_k=SQ)
+    out = neuron_attention.attention(q, k, v, scale=0.2, causal=True, tp_q=True, tp_k=True)
+    _close(out, _reference(q, k, v, scale=0.2, causal=True, tp_q=True, tp_k=True))
+
+
+def test_bool_and_float_masks():
+    q, k, v = _inputs()
+    keep = torch.rand(BH, SQ, SK, generator=torch.Generator().manual_seed(1)) > 0.3
+    keep[..., 0] = True  # every row keeps at least one key
+    bias = torch.randn(BH, SQ, SK)
+    for mask in (keep, bias):
+        out = neuron_attention.attention(q, k, v, scale=0.2, attention_mask=mask, tp_q=True, tp_k=True)
+        _close(out, _reference(q, k, v, scale=0.2, mask=mask, tp_q=True, tp_k=True))
+
+
+def test_causal_with_mask():
+    q, k, v = _inputs(s_k=SQ)
+    keep = torch.ones(BH, SQ, SQ, dtype=torch.bool)
+    keep[..., 1] = False
+    keep[..., 0] = True
+    out = neuron_attention.attention(q, k, v, scale=0.2, causal=True, attention_mask=keep, tp_q=True, tp_k=True)
+    _close(out, _reference(q, k, v, scale=0.2, causal=True, mask=keep, tp_q=True, tp_k=True))
+
+
+def test_bounds():
+    q, k, v = _inputs()
+    bound_min = torch.zeros(BH, SQ, 1, dtype=torch.int32)
+    bound_max = torch.randint(1, SK + 1, (BH, SQ, 1), dtype=torch.int32)
+    out = neuron_attention.attention(
+        q, k, v, scale=0.2, bound_min=bound_min, bound_max=bound_max, tp_q=True, tp_k=True
+    )
+    keep = torch.arange(SK).view(1, 1, -1) < bound_max
+    _close(out, _reference(q, k, v, scale=0.2, mask=keep, tp_q=True, tp_k=True))
+
+
+def test_bounds_contract_errors():
+    q, k, v = _inputs()
+    bound = torch.zeros(BH, SQ, 1, dtype=torch.int32)
+    with pytest.raises(ValueError, match="both be provided"):
+        neuron_attention.attention(q, k, v, bound_min=bound, tp_q=True, tp_k=True)
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        neuron_attention.attention(
+            q, k, v, bound_min=bound, bound_max=bound + 1,
+            attention_mask=torch.ones(BH, SQ, SK, dtype=torch.bool), tp_q=True, tp_k=True,
+        )
+
+
+def test_cross_attention_uses_the_transposed_layout():
+    q, k, v = _inputs(tp_q=False, tp_k=False)
+    _close(neuron_attention.cross_attention(q, k, v, scale=0.2), _reference(q, k, v, scale=0.2))
+
+
+def test_unknown_kwargs_raise():
+    q, k, v = _inputs()
+    with pytest.raises(NotImplementedError, match="attention_cte-only kwargs: sliding_window"):
+        neuron_attention.attention(q, k, v, tp_q=True, tp_k=True, sliding_window=4)
+
+
+def test_attention_with_lse_matches_logsumexp_off_device():
+    g = torch.Generator().manual_seed(1)
+    q, k, v = (torch.randn(1, 2, n, 8, generator=g) for n in (5, 7, 7))
+    out, lse = neuron_attention._attention_with_lse(q, k, v, scale=0.5)
+    scores = (q @ k.transpose(-1, -2)) * 0.5
+    torch.testing.assert_close(lse, torch.logsumexp(scores, -1))
+    torch.testing.assert_close(out, torch.softmax(scores, -1) @ v)
+
+
+@pytest.mark.parametrize("offset", [0.0, 150.0, 400.0])
+def test_merge_partials_is_exact_and_stable_at_large_logsumexp(offset):
+    # Two halves of one key set, logsumexps shifted to ~offset (where a naive log(e^a + e^b)
+    # overflows): the merge must equal attention over all keys, with no inf or nan.
+    g = torch.Generator().manual_seed(2)
+    q, k, v = torch.randn(1, 2, 5, 8, generator=g), torch.randn(1, 2, 12, 8, generator=g), \
+        torch.randn(1, 2, 12, 8, generator=g)
+    o1, l1 = neuron_attention._attention_with_lse(q, k[:, :, :6], v[:, :, :6], scale=0.5)
+    o2, l2 = neuron_attention._attention_with_lse(q, k[:, :, 6:], v[:, :, 6:], scale=0.5)
+    out, lse = neuron_attention._merge_partials(o1, l1 + offset, o2, l2 + offset)
+    scores = (q @ k.transpose(-1, -2)) * 0.5
+    torch.testing.assert_close(out, torch.softmax(scores, -1) @ v)
+    torch.testing.assert_close(lse, torch.logsumexp(scores, -1) + offset)
+
+
+def test_ring_attention_without_context_parallelism_is_plain_attention():
+    g = torch.Generator().manual_seed(0)
+    q, k, v = (torch.randn(1, 2, 6, 8, generator=g) for _ in range(3))
+    torch.testing.assert_close(neuron_attention.ring_attention(q, k, v, scale=0.5),
+                               torch.nn.functional.scaled_dot_product_attention(q, k, v, scale=0.5))
+    with pytest.raises(NotImplementedError, match="non-causal"):
+        neuron_attention.ring_attention(q, k, v, scale=0.5, causal=True)
+
+
+def test_ulysses_attention_without_context_parallelism_is_plain_attention():
+    g = torch.Generator().manual_seed(0)
+    q, k, v = (torch.randn(1, 2, 6, 8, generator=g) for _ in range(3))  # [B, H, S, d]
+    out = neuron_attention.ulysses_attention(q, k, v, scale=0.5)
+    torch.testing.assert_close(out, torch.nn.functional.scaled_dot_product_attention(
+        q, k, v, scale=0.5))
+    with pytest.raises(NotImplementedError, match="non-causal"):
+        neuron_attention.ulysses_attention(q, k, v, scale=0.5, causal=True)
+
+
+# ---- routing between the NKI flash kernel and SDPA ----------------------------------
+
+
+@pytest.fixture
+def fake_kernel(monkeypatch):
+    """Pretend tensors are on neuron and record kernel calls; the fake computes exact attention."""
+    calls = []
+
+    def kernel(q, k, v, *, is_causal, scale, training):
+        calls.append(dict(shape=tuple(q.shape), is_causal=is_causal, scale=scale, training=training))
+        return torch.nn.functional.scaled_dot_product_attention(q, k, v, is_causal=is_causal, scale=scale)
+
+    monkeypatch.setattr(neuron_attention, "_on_neuron", lambda t: True)
+    monkeypatch.setattr(neuron_attention, "_flash_kernel", lambda: kernel)
+    return calls
+
+
+def _bf16(*tensors):
+    return [t.to(torch.bfloat16) for t in tensors]
+
+
+def _close_bf16(out, ref):
+    torch.testing.assert_close(out.double(), ref, rtol=2e-2, atol=2e-2)
+
+
+def test_unmasked_attention_uses_the_kernel_at_non_512_lengths(fake_kernel):
+    q, k, v = _bf16(*_inputs())  # SQ=33, SK=47: neither a multiple of 512
+    with torch.no_grad():
+        out = neuron_attention.attention(q, k, v, scale=0.2, tp_q=True, tp_k=True)
+    assert fake_kernel == [dict(shape=(1, BH, SQ, D), is_causal=False, scale=0.2, training=False)]
+    _close_bf16(out, _reference(q, k, v, scale=0.2, tp_q=True, tp_k=True))
+
+
+def test_kernel_keeps_scale_none_as_one_and_4d_inputs(fake_kernel):
+    q, k, v = (t.reshape(2, BH // 2, *t.shape[1:]) for t in _bf16(*_inputs()))
+    with torch.no_grad():
+        out = neuron_attention.attention(q, k, v, causal=False, tp_q=True, tp_k=True)
+    assert fake_kernel[0]["shape"] == (2, BH // 2, SQ, D) and fake_kernel[0]["scale"] == 1.0
+    _close_bf16(out, _reference(q, k, v, scale=1.0, tp_q=True, tp_k=True))
+
+
+def test_kernel_handles_the_transposed_layout(fake_kernel):
+    q, k, v = _bf16(*_inputs(tp_q=False, tp_k=False))
+    with torch.no_grad():
+        out = neuron_attention.cross_attention(q, k, v, scale=0.2)
+    assert len(fake_kernel) == 1
+    _close_bf16(out, _reference(q, k, v, scale=0.2))
+
+
+@pytest.mark.parametrize("case", ["fp32", "mask", "head_dim", "batch_heads", "kv_shape", "autograd"])
+def test_falls_back_to_sdpa_outside_the_kernel_limits(fake_kernel, case):
+    q, k, v = _bf16(*_inputs())
+    kwargs = {}
+    if case == "fp32":
+        q, k, v = _inputs()
+    elif case == "mask":
+        kwargs["attention_mask"] = torch.ones(BH, SQ, SK, dtype=torch.bool)
+    elif case == "head_dim":
+        q, k, v = _bf16(*(torch.randn(2, 8, 160) for _ in range(3)))
+    elif case == "batch_heads":
+        q, k, v = _bf16(*(torch.randn(513, 8, 16) for _ in range(3)))
+    elif case == "kv_shape":
+        v = torch.randn(BH, SK, D + 8).to(torch.bfloat16)
+    elif case == "autograd":
+        q.requires_grad_(True)
+    out = neuron_attention.attention(q, k, v, scale=0.2, tp_q=True, tp_k=True, **kwargs)
+    assert fake_kernel == []
+    if case == "fp32":
+        _close(out, _reference(q, k, v, scale=0.2, tp_q=True, tp_k=True))
+    elif case in ("mask", "autograd"):
+        _close_bf16(out.detach(), _reference(q.detach(), k, v, scale=0.2, tp_q=True, tp_k=True))
+
+
+def test_sdpa_switch_skips_the_kernel(fake_kernel, monkeypatch):
+    # DIFFLET_NEURON_ATTENTION=sdpa (read at import) forces F.scaled_dot_product_attention.
+    monkeypatch.setattr(neuron_attention, "_ATTENTION_PATH", "sdpa")
+    q, k, v = _bf16(*_inputs())
+    with torch.no_grad():
+        out = neuron_attention.attention(q, k, v, scale=0.2, tp_q=True, tp_k=True)
+    assert fake_kernel == []
+    _close_bf16(out, _reference(q, k, v, scale=0.2, tp_q=True, tp_k=True))
+
+
+def test_attention_path_env_is_validated():
+    import subprocess
+    import sys
+
+    code = "import difflet.backends.neuron.ops_impl.attention"
+    env = {**__import__("os").environ, "DIFFLET_NEURON_ATTENTION": "flash"}
+    proc = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
+    assert proc.returncode != 0 and "must be 'auto' or 'sdpa'" in proc.stderr
+
+
+@pytest.fixture
+def fake_bounded_op(monkeypatch):
+    """Pretend tensors are on neuron; the bounded kernel op records its q shape and computes exact
+    attention over keys bound_min <= j < bound_max (scale already folded into q, as the op gets it)."""
+    calls = _Calls()
+
+    def op(q, k, v, lo, hi, scale):
+        calls.append(tuple(q.shape))
+        calls_q.append(q)
+        j = torch.arange(k.shape[1]).view(1, 1, -1)
+        keep = (j >= lo) & (j < hi)
+        scores = (q.float() @ k.float().transpose(-1, -2) * scale).masked_fill(~keep, float("-inf"))
+        return (torch.softmax(scores, dim=-1) @ v.float()).to(q.dtype)
+
+    monkeypatch.setattr(neuron_attention, "_on_neuron", lambda t: True)
+    monkeypatch.setattr(neuron_attention, "_flash_kernel", lambda: object())
+    monkeypatch.setattr(neuron_attention, "_FLASH_BOUNDED_OP", op)
+    calls_q = []
+    calls.q = calls_q  # the q each call received
+    return calls
+
+
+class _Calls(list):
+    pass
+
+
+def _bounded_case():
+    q, k, v = _bf16(*_inputs())
+    g = torch.Generator().manual_seed(1)
+    bound_min = torch.zeros(BH, SQ, 1, dtype=torch.int32)
+    bound_max = torch.randint(1, SK + 1, (BH, SQ, 1), dtype=torch.int32, generator=g)
+    ref = _reference(q, k, v, scale=0.2, mask=torch.arange(SK).view(1, 1, -1) < bound_max,
+                     tp_q=True, tp_k=True)
+    return q, k, v, bound_min, bound_max, ref
+
+
+def test_bounded_kernel_runs_in_one_call_within_its_tested_size(fake_bounded_op):
+    q, k, v, lo, hi, ref = _bounded_case()
+    with torch.no_grad():
+        out = neuron_attention.attention(q, k, v, scale=0.2, bound_min=lo, bound_max=hi,
+                                         tp_q=True, tp_k=True)
+    assert fake_bounded_op == [(BH, 128, D)]  # SQ=33 and SK=47 padded to 128
+    # One call gets the whole tensor, not a slice of it: within the bound the op runs exactly as
+    # it did before the head split (no slice, no concatenation). This does not keep caches from
+    # before the split valid: the compiled block graphs carry ops_impl/attention.py source lines
+    # as debug metadata, and TP4 320x512x61 still recompiled once at the commit that restored
+    # this path, likely because that edit moved lines in the file (an inference: evidence doc,
+    # bug ledger row 4).
+    assert fake_bounded_op.q[0]._base is None
+    _close_bf16(out, ref)
+
+
+@pytest.mark.parametrize("limit, calls", [(2 * 128 * 128, [(2, 128, D)] * 3),
+                                          (5 * 128 * 128, [(3, 128, D)] * 2),
+                                          (128 * 128, [(1, 128, D)] * 6),
+                                          (100, [(1, 128, D)] * 6)])
+def test_bounded_kernel_splits_heads_above_its_tested_size(fake_bounded_op, monkeypatch, limit,
+                                                           calls):
+    """TP4 720x1280x129 (6 heads x 119,168 x 119,168 padded joint tokens, 8.5e10) failed on trn2
+    with "BIR emission failed: colz: body blob exceeds uint32 offset range" in the kernel's NKI
+    compile, and again at 3 heads; attention_cte is tested up to 32 x 36864^2 (4.3e10). The
+    heads are split into equal chunks that each stay within the bound (the largest divisor of the
+    head count that fits, so every call has one shape and one trace), and the outputs are
+    concatenated: same result."""
+    monkeypatch.setattr(neuron_attention, "_BOUNDED_KERNEL_MAX_BH_SQ_SK", limit)
+    q, k, v, lo, hi, ref = _bounded_case()
+    with torch.no_grad():
+        out = neuron_attention.attention(q, k, v, scale=0.2, bound_min=lo, bound_max=hi,
+                                         tp_q=True, tp_k=True)
+    assert fake_bounded_op == calls
+    _close_bf16(out, ref)
+
+
+def test_bounded_kernel_limit_is_half_attention_cte_s_tested_size():
+    # 3 heads x 119,168^2 (4.26e10, just under nkilib's tested 32 x 36864^2) still failed BIR
+    # emission on trn2, so the bound is half the tested size.
+    assert neuron_attention._BOUNDED_KERNEL_MAX_BH_SQ_SK == 16 * 36864 * 36864
+    # TP4 at 720x1280x129: 6 heads of 119,168 padded joint tokens, one head per call.
+    assert neuron_attention._head_chunk(6, 119168, 119168) == 1
+    assert neuron_attention._head_chunk(6, 10496, 10496) == 6  # 320x512x61 unchanged

@@ -4,6 +4,16 @@ This module is hardware-neutral: it imports only torch, stdlib, and pure
 diffusers utilities. W3c intentionally implements decoder-only inference:
 ``post_quant_conv`` followed by ``WanDecoder3d`` with causal-conv feature
 cache. Encoder, KL sampling, and tiled decode remain outside the spike.
+
+Reduced precision (bf16 or fp16 weights and activations): the RMS norms normalise in fp32
+(``WanRMSNorm``) and the nearest upsampling runs in fp32 (``WanUpsample``), as before. With
+``fp32_output_head=True`` (the neuron backend's decoder sets it) the output head also runs in
+fp32: ``decoder.conv_out`` upcasts its input, weight and bias, so the decoded frames, their
+concatenation and the final clamp are fp32 instead of being rounded to bf16 (about one
+8-bit level near +-1). The written-out attention the neuron device runs
+(``_explicit_attention``) computes its scores and softmax in fp32 for such inputs. fp32 and
+fp64 inputs run exactly as before, and the default model (``fp32_output_head=False``, the
+Trainium path's) is unchanged in every dtype.
 """
 
 from __future__ import annotations
@@ -22,6 +32,13 @@ CACHE_T = 2
 def _tail_cache(x: torch.Tensor) -> torch.Tensor:
     start = max(int(x.shape[2]) - CACHE_T, 0)
     return x[:, :, start:, :, :].clone()
+
+
+def _is_reduced_precision(dtype: torch.dtype) -> bool:
+    """bf16, fp16 or an fp8/fp4 type: the dtypes whose numerically sensitive steps run in fp32."""
+    return dtype in (torch.float16, torch.bfloat16) or any(
+        marker in str(dtype) for marker in ("float4_", "float8_")
+    )
 
 
 @dataclass
@@ -99,6 +116,10 @@ class WanCausalConv3d(nn.Conv3d):
             0,
         )
         self.padding = (0, 0, 0)
+        #: When True, a bf16/fp16 input runs this convolution in fp32 (input, weight and bias
+        #: upcast) and returns fp32; see the module docstring. Set by ``WanDecoder3d`` on its
+        #: ``conv_out`` only.
+        self.fp32_compute = False
 
     def forward(self, x: torch.Tensor, cache_x: Optional[torch.Tensor] = None) -> torch.Tensor:
         padding = list(self._padding)
@@ -107,6 +128,9 @@ class WanCausalConv3d(nn.Conv3d):
             x = torch.cat([cache_x, x], dim=2)
             padding[4] -= cache_x.shape[2]
         x = F.pad(x, padding)
+        if self.fp32_compute and _is_reduced_precision(x.dtype):
+            bias = None if self.bias is None else self.bias.float()
+            return self._conv_forward(x.float(), self.weight.float(), bias)
         return super().forward(x)
 
 
@@ -129,11 +153,9 @@ class WanRMSNorm(nn.Module):
         self.bias = nn.Parameter(torch.zeros(shape)) if bias else 0.0
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        needs_fp32 = x.dtype in (torch.float16, torch.bfloat16) or any(
-            marker in str(x.dtype) for marker in ("float4_", "float8_")
-        )
         normalized = F.normalize(
-            x.float() if needs_fp32 else x, dim=(1 if self.channel_first else -1)
+            x.float() if _is_reduced_precision(x.dtype) else x,
+            dim=(1 if self.channel_first else -1),
         ).to(x.dtype)
         return normalized * self.scale * self.gamma + self.bias
 
@@ -267,6 +289,35 @@ class WanResidualBlock(nn.Module):
         return x + h
 
 
+def _explicit_attention(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+    """``softmax(q k^T / sqrt(d)) v``: what ``F.scaled_dot_product_attention`` computes without
+    a mask, dropout or causality, written out as two matmuls and a softmax.
+
+    For bf16/fp16 inputs the scores and the softmax are fp32 (q and k upcast; the
+    probabilities are cast back to ``v``'s dtype for the second matmul): bf16 scores round a
+    logit of 50 to a multiple of 0.25, and a fused SDPA keeps them in fp32 too. The fp32
+    scores are what the fp32 decoder already holds (1 GiB at 16384 tokens). fp32 and fp64
+    inputs run as before, bit for bit."""
+    if _is_reduced_precision(q.dtype):
+        scores = torch.matmul(q.float(), k.float().transpose(-1, -2)) * (q.shape[-1] ** -0.5)
+        return torch.matmul(torch.softmax(scores, dim=-1).to(v.dtype), v)
+    scores = torch.matmul(q, k.transpose(-1, -2)) * (q.shape[-1] ** -0.5)
+    return torch.matmul(torch.softmax(scores, dim=-1), v)
+
+
+def _spatial_attention_impl(device_type: str):
+    """The attention of ``WanAttentionBlock`` on ``device_type``.
+
+    The neuron backend (TorchNeuron, eager) lowers ``F.scaled_dot_product_attention`` to nkilib's
+    flash kernel ``attention_cte``, which fails this block's one head of d=384 at 8192 key tokens
+    or more (``AssertionError: Out-of-bound access ... index 7 exceed dimension size of 6`` while
+    it traces; 6240 tokens, Wan's 480x832 latent, pass, and splitting the queries does not help).
+    Qwen-Image's 1024x1024 latent has 128x128 = 16384 tokens. The written-out attention needs
+    ``tokens^2`` fp32 of scores (1 GiB at 16384), which one core holds. Every other device (the
+    CPU, Trainium/TPU's XLA traces) keeps the fused call, so their graphs do not change."""
+    return _explicit_attention if device_type == "neuron" else F.scaled_dot_product_attention
+
+
 class WanAttentionBlock(nn.Module):
     """Single-head spatial attention per frame."""
 
@@ -285,7 +336,7 @@ class WanAttentionBlock(nn.Module):
         qkv = qkv.reshape(batch_size * time, 1, channels * 3, -1)
         qkv = qkv.permute(0, 1, 3, 2).contiguous()
         q, k, v = qkv.chunk(3, dim=-1)
-        x = F.scaled_dot_product_attention(q, k, v)
+        x = _spatial_attention_impl(q.device.type)(q, k, v)
         x = x.squeeze(1).permute(0, 2, 1).reshape(batch_size * time, channels, height, width)
         x = self.proj(x)
         x = x.view(batch_size, time, channels, height, width).permute(0, 2, 1, 3, 4)
@@ -372,6 +423,7 @@ class WanDecoder3d(nn.Module):
         dropout: float = 0.0,
         non_linearity: str = "silu",
         out_channels: int = 3,
+        fp32_output_head: bool = False,
     ) -> None:
         super().__init__()
         dim_mult = dim_mult if dim_mult is not None else [1, 2, 4, 4]
@@ -407,6 +459,7 @@ class WanDecoder3d(nn.Module):
             )
         self.norm_out = WanRMSNorm(out_dim, images=False)
         self.conv_out = WanCausalConv3d(out_dim, out_channels, 3, padding=1)
+        self.conv_out.fp32_compute = bool(fp32_output_head)
 
     def forward(
         self,
@@ -457,10 +510,11 @@ class WanVAEDecoderModel(nn.Module):
     """Decoder-only Wan VAE component.
 
     Input is denoised latent video ``(B, z_dim, T_latent, H/8, W/8)``.
-    Output is decoded video tensor ``(B, out_channels, T_video, H, W)``.
+    Output is decoded video tensor ``(B, out_channels, T_video, H, W)``: in the input's dtype,
+    or fp32 for a bf16/fp16 input with ``fp32_output_head=True`` (see the module docstring).
     """
 
-    def __init__(self, config: WanVAEDecoderConfig):
+    def __init__(self, config: WanVAEDecoderConfig, *, fp32_output_head: bool = False):
         super().__init__()
         self.config = config
         self.post_quant_conv = WanCausalConv3d(config.z_dim, config.z_dim, 1)
@@ -473,6 +527,7 @@ class WanVAEDecoderModel(nn.Module):
             temperal_upsample=config.temperal_upsample,
             dropout=config.dropout,
             out_channels=config.out_channels,
+            fp32_output_head=fp32_output_head,
         )
         self._conv_count = sum(isinstance(m, WanCausalConv3d) for m in self.decoder.modules())
 

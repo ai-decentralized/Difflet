@@ -1,0 +1,367 @@
+"""Tensor-parallel collectives for the neuron (TorchNeuron) backend.
+
+Every collective is a functional collective
+(``torch.distributed._functional_collectives``), so one code path serves eager
+mode and ``torch.compile(backend="neuron", fullgraph=True)``. torch_neuronx
+registers PrivateUse1 kernels for ``all_gather_into_tensor``,
+``reduce_scatter_tensor`` and ``all_reduce``
+(``torch_neuronx/distributed/ops/functional_collectives.py``), and its dynamo
+backend rewrites the group name into replica groups
+(``neuron_dynamo_backend/fx/passes/collective_legalization.py``). Nothing here
+uses a barrier, a broadcast or an object collective: the neuron process group
+supports barrier only on the default group, has no functional broadcast, and
+forces object collectives to graph-break.
+
+Each process is one rank of an MPMD launch, so a rank is a Python constant: the
+NxD ``*_spmd`` helpers take an int rank, and ``SPMDRank`` holds no rank buffer.
+
+Tensor, CFG and context parallelism are supported (see ``parallel_mesh`` for the groups).
+The CFG and CP paths are the shared model code's: ``scatter_to_process_group_spmd`` over an
+axis group is a local slice by this rank's coordinate on that axis (a Python int), and
+``gather_from_tensor_model_parallel_region_with_dim`` over it is one all-gather. Ulysses
+attention trades a sequence shard for a head shard and back with ``seq_to_heads`` and
+``heads_to_seq``, one ``all_to_all_single`` each over the CP group.
+"""
+
+from __future__ import annotations
+
+import os
+
+import torch
+import torch.distributed as dist
+import torch.distributed._functional_collectives as fc
+from torch import nn
+
+from difflet.backends.neuron.ops_impl.parallel_mesh import (
+    destroy_parallel_mesh,
+    get_axis_group,
+    get_axis_size,
+    get_mesh_spec,
+    get_tp_group,
+    get_tp_rank,
+    get_tp_size,
+    init_parallel_mesh,
+    is_mesh_initialized,
+)
+from difflet.pipeline.parallel_mesh import MeshSpec
+
+#: The parallel modes one neuron launch runs, worded as ``runtime.check_parallel_supported``
+#: words them (SP runs within the TP group, so it has no group of its own).
+_SUPPORTED_MODES = "the neuron backend supports tensor, sequence, context and CFG parallelism"
+
+
+class _TrivialGroup:
+    """Stand-in for the process group of a size-1 axis; no torch group behind it."""
+
+    def size(self) -> int:
+        return 1
+
+    def rank(self) -> int:
+        return 0
+
+
+def _wait(tensor: torch.Tensor) -> torch.Tensor:
+    # Eager functional collectives return an AsyncCollectiveTensor; under tracing
+    # they already end in wait_tensor and return a plain tensor.
+    return tensor.wait() if isinstance(tensor, fc.AsyncCollectiveTensor) else tensor
+
+
+#: Sums across ranks in fp32 for half-precision tensors (``1``): upcast, reduce, cast back, as NxD's
+#: all-reduces run. Off by default; read when a graph is traced, so it is part of that graph.
+FP32_REDUCE_ENV = "DIFFLET_NEURON_FP32_REDUCE"
+
+
+def _summed(tensor: torch.Tensor, reduce) -> torch.Tensor:
+    """``reduce(tensor)``, in fp32 for bf16/fp16 inputs when FP32_REDUCE_ENV is set."""
+    if os.environ.get(FP32_REDUCE_ENV) == "1" and tensor.dtype in (torch.bfloat16, torch.float16):
+        return reduce(tensor.float()).to(tensor.dtype)
+    return reduce(tensor)
+
+
+def _divisible_dim(tensor: torch.Tensor, dim: int, parts: int, what: str) -> int:
+    axis = dim % tensor.dim()
+    size = tensor.shape[axis]
+    if size % parts != 0:
+        raise ValueError(f"cannot {what} dimension {axis} of size {size} across {parts} ranks")
+    return axis
+
+
+def _shard(tensor: torch.Tensor, axis: int, rank: int, parts: int) -> torch.Tensor:
+    """This rank's slice along ``axis``, with the strides a fresh tensor of its shape has.
+
+    ``contiguous()`` alone is not enough: a narrow behind size-1 leading dimensions (a batch-1
+    sequence shard ``[1, S/tp, D]``) already counts as contiguous, so it keeps the parent's
+    stride on the size-1 axis (``S * D`` instead of ``S/tp * D``). Dynamo guards on every
+    stride, so the first compiled block, fed the shard, and the next ones, fed a block output
+    of the same shape, would compile two graphs (Megatron SP's entry scatter did). The copy
+    happens only when the strides differ.
+    """
+    width = tensor.shape[axis] // parts
+    shard = tensor.narrow(axis, rank * width, width)
+    if tuple(shard.stride()) != _contiguous_strides(shard.shape):
+        shard = shard.clone(memory_format=torch.contiguous_format)
+    return shard
+
+
+def _contiguous_strides(shape) -> tuple[int, ...]:
+    """The strides ``torch.empty(shape)`` has (row-major; a size-0/1 axis counts as 1)."""
+    strides, step = [], 1
+    for size in reversed(tuple(shape)):
+        strides.append(step)
+        step *= max(int(size), 1)
+    return tuple(reversed(strides))
+
+
+def _gather_dim(tensor, dim: int, group) -> torch.Tensor:
+    """All-gather ``tensor`` along ``dim`` over ``group`` as one plain collective."""
+    axis = dim % tensor.dim()
+    if axis == 0:
+        return _wait(fc.all_gather_single(tensor.contiguous(), 0, group))
+    # all_gather_single on another dim gathers on dim 0 and then re-concatenates
+    # with chunk + cat; move the axis to dim 0 instead, so the gather is one plain
+    # collective on the device. The result is made contiguous, as cat's is, so
+    # callers can .view() it.
+    moved = tensor.movedim(axis, 0).contiguous()
+    gathered = _wait(fc.all_gather_single(moved, 0, group))
+    return gathered.movedim(0, axis).contiguous()
+
+
+def _spec_or_trivial() -> MeshSpec:
+    return get_mesh_spec() if is_mesh_initialized() else MeshSpec()
+
+
+def _dist_ready() -> bool:
+    return dist.is_available() and dist.is_initialized()
+
+
+# --------------------------------------------------------------------------
+# difflet.ops collectives surface
+# --------------------------------------------------------------------------
+
+
+def gather_tp_dim(tensor, *, dim: int):
+    if get_tp_size() == 1:
+        return tensor
+    return _gather_dim(tensor, dim, get_tp_group())
+
+
+def reduce_tp(tensor):
+    if get_tp_size() == 1:
+        return tensor
+    return _summed(tensor, lambda t: _wait(fc.all_reduce(t, "sum", get_tp_group())))
+
+
+def scatter_tp_dim(tensor, *, dim: int):
+    # Local slice, no collective (as on Trainium and TPU).
+    tp_size = get_tp_size()
+    if tp_size == 1:
+        return tensor
+    axis = _divisible_dim(tensor, dim, tp_size, "scatter")
+    return _shard(tensor, axis, get_tp_rank(), tp_size)
+
+
+def get_tensor_model_parallel_size() -> int:
+    return get_tp_size()
+
+
+def get_tensor_model_parallel_rank() -> int:
+    return get_tp_rank()
+
+
+def scatter_to_sequence_parallel_region(tensor, *, dim: int):
+    """Megatron-SP forward entry: this rank's chunk of the sequence."""
+    return scatter_tp_dim(tensor, dim=dim)
+
+
+def gather_from_sequence_parallel_region(tensor, *, dim: int):
+    """Megatron-SP ``g``: all-gather the sequence shards back to the full sequence."""
+    return gather_tp_dim(tensor, dim=dim)
+
+
+def reduce_scatter_to_sequence_parallel_region(tensor, *, dim: int):
+    """Megatron-SP ``g-bar``: sum the row-parallel partials and scatter along ``dim``."""
+    tp_size = get_tp_size()
+    if tp_size == 1:
+        return tensor
+    axis = _divisible_dim(tensor, dim, tp_size, "reduce-scatter")
+    return _summed(tensor.contiguous(),
+                   lambda t: _wait(fc.reduce_scatter_single(t, "sum", axis, get_tp_group())))
+
+
+def gather_from_tensor_model_parallel_region_with_dim(tensor, gather_dim: int, process_group=None):
+    """All-gather along ``gather_dim`` over ``process_group`` (default: the TP group)."""
+    if process_group is None:
+        return gather_tp_dim(tensor, dim=gather_dim)
+    if int(process_group.size()) == 1:
+        return tensor
+    return _gather_dim(tensor, gather_dim, process_group)
+
+
+def reduce_from_tensor_model_parallel_region(tensor, process_group=None):
+    """All-reduce (sum) over ``process_group`` (default: the TP group), as NxD's: model code may
+    pass a layer's ``tensor_parallel_group`` explicitly (Flux's single-stream blocks)."""
+    if process_group is None:
+        return reduce_tp(tensor)
+    if int(process_group.size()) == 1:
+        return tensor
+    return _summed(tensor, lambda t: _wait(fc.all_reduce(t, "sum", process_group)))
+
+
+def scatter_to_tensor_model_parallel_region(tensor, dim: int = -1):
+    return scatter_tp_dim(tensor, dim=dim)
+
+
+def scatter_to_process_group_spmd(tensor, partition_dim: int, rank, process_group=None):
+    """Slice ``rank`` of ``partition_dim`` split over ``process_group``: a local narrow, no
+    collective.
+
+    With ``process_group=None`` (the TP group) ``rank`` may be the global rank, as the model
+    code passes it (``SPMDRank.get_rank()``); it is mapped to its TP coordinate, ``rank % tp``
+    in the mesh layout (a TP-local rank maps to itself). With an explicit group ``rank`` is the
+    caller's coordinate in that group (the CFG scatter passes ``get_cfg_rank_spmd``)."""
+    size = get_tp_size() if process_group is None else int(process_group.size())
+    if size == 1:
+        return tensor
+    if isinstance(rank, torch.Tensor):
+        raise TypeError(
+            "the neuron backend runs one process per rank, so the scatter rank must be a "
+            "Python int (SPMDRank.get_rank() returns one); got a tensor"
+        )
+    rank = int(rank)
+    if process_group is None and is_mesh_initialized() and 0 <= rank < get_mesh_spec().world_size:
+        rank = get_mesh_spec().axis_rank(rank, "tp")
+    if not 0 <= rank < size:
+        raise ValueError(f"rank {rank} is outside the process group of size {size}")
+    axis = _divisible_dim(tensor, partition_dim, size, "scatter")
+    return _shard(tensor, axis, rank, size)
+
+
+class SPMDRank(nn.Module):
+    """NxD-compatible rank holder; the rank is a Python constant (one process per rank)."""
+
+    def __init__(self, world_size: int):
+        super().__init__()
+        self.world_size = int(world_size)
+
+    def get_rank(self) -> int:
+        return dist.get_rank() if _dist_ready() else 0
+
+
+def get_world_group():
+    return dist.group.WORLD if _dist_ready() else _TrivialGroup()
+
+
+def _trivial_axis_group(axis: str) -> _TrivialGroup:
+    size = _spec_or_trivial().axis_size(axis)
+    if size > 1:
+        raise NotImplementedError(
+            f"{_SUPPORTED_MODES}; no {axis} group exists ({axis}={size})")
+    return _TrivialGroup()
+
+
+def get_cfg_group():
+    """This rank's CFG group (two ranks, one per guidance branch) or a size-1 stand-in."""
+    if get_axis_size("cfg") > 1:
+        return get_axis_group("cfg")
+    return _trivial_axis_group("cfg")
+
+
+def get_cp_group():
+    """This rank's CP group or a size-1 stand-in."""
+    if get_axis_size("cp") > 1:
+        return get_axis_group("cp")
+    return _trivial_axis_group("cp")
+
+
+def seq_to_heads(tensor, group, parts: int):
+    """Ulysses forward swap over ``group`` (``parts`` ranks): ``[B, H, S/parts, d]`` to
+    ``[B, H/parts, S, d]``.
+
+    Head block ``j`` goes to the group's ``j``-th rank; the blocks received from ranks
+    ``0..parts-1`` (their sequence shards, in order) concatenate along the sequence. One
+    ``all_to_all_single`` on dim 0 after moving heads there.
+    """
+    b, h, s, d = tensor.shape
+    _divisible_dim(tensor, 1, parts, "split the heads of")
+    x = tensor.permute(1, 0, 2, 3).contiguous()                          # [H, B, S/p, d]
+    y = _wait(fc.all_to_all_single(x, None, None, group))                # [p(src) * H/p, B, S/p, d]
+    y = y.reshape(parts, h // parts, b, s, d)
+    return y.permute(2, 1, 0, 3, 4).reshape(b, h // parts, parts * s, d)
+
+
+def ring_shift(tensor, group, parts: int, rank: int):
+    """Send ``tensor`` to the next rank of ``group`` and return the previous rank's.
+
+    ``rank`` is this rank's coordinate in ``group``. One ``all_to_all_single``: slot
+    ``(rank + 1) % parts`` of the input carries ``tensor``, the other slots zeros, and slot
+    ``(rank - 1) % parts`` of the output is the received block. ``permute_tensor`` would express
+    this directly but fails on the neuron backend (eager: a shape error; compiled: NEFF setup
+    fails). At ``parts == 2`` only the partner's slot crosses ranks; at larger degrees the zero
+    slots cost bandwidth that point-to-point send/recv would not.
+    """
+    if parts == 1:
+        return tensor
+    zeros = torch.zeros_like(tensor)
+    slots = [zeros] * parts
+    slots[(rank + 1) % parts] = tensor
+    out = _wait(fc.all_to_all_single(torch.stack(slots).contiguous(), None, None, group))
+    return out[(rank - 1) % parts]
+
+
+def heads_to_seq(tensor, group, parts: int):
+    """Ulysses inverse swap: ``[B, H/parts, S, d]`` to ``[B, H, S/parts, d]``."""
+    b, hl, s, d = tensor.shape
+    _divisible_dim(tensor, 2, parts, "split the sequence of")
+    x = tensor.reshape(b, hl, parts, s // parts, d).permute(2, 0, 1, 3, 4)  # [p(dst), B, H/p, S/p, d]
+    x = x.contiguous().reshape(parts * b, hl, s // parts, d)
+    y = _wait(fc.all_to_all_single(x, None, None, group)).reshape(parts, b, hl, s // parts, d)
+    return y.permute(1, 0, 2, 3, 4).reshape(b, parts * hl, s // parts, d)
+
+
+def get_cfg_rank_spmd(global_rank):
+    """cfg coordinate of a global rank: ``(rank // (tp*cp)) % cfg``."""
+    spec = _spec_or_trivial()
+    if isinstance(global_rank, torch.Tensor):
+        return torch.remainder(
+            torch.div(global_rank, spec.tp * spec.cp, rounding_mode="floor"), spec.cfg
+        ).to(torch.int32)
+    return (int(global_rank) // (spec.tp * spec.cp)) % spec.cfg
+
+
+def get_cp_rank_spmd(global_rank):
+    """cp coordinate of a global rank: ``(rank // tp) % cp``."""
+    spec = _spec_or_trivial()
+    if isinstance(global_rank, torch.Tensor):
+        return torch.remainder(
+            torch.div(global_rank, spec.tp, rounding_mode="floor"), spec.cp
+        ).to(torch.int32)
+    return (int(global_rank) // spec.tp) % spec.cp
+
+
+__all__ = [
+    "SPMDRank",
+    "destroy_parallel_mesh",
+    "gather_from_sequence_parallel_region",
+    "gather_from_tensor_model_parallel_region_with_dim",
+    "gather_tp_dim",
+    "get_cfg_group",
+    "get_cfg_rank_spmd",
+    "get_cp_group",
+    "get_cp_rank_spmd",
+    "get_mesh_spec",
+    "get_tensor_model_parallel_rank",
+    "get_tensor_model_parallel_size",
+    "get_tp_group",
+    "get_tp_rank",
+    "get_tp_size",
+    "get_world_group",
+    "init_parallel_mesh",
+    "is_mesh_initialized",
+    "reduce_from_tensor_model_parallel_region",
+    "reduce_scatter_to_sequence_parallel_region",
+    "reduce_tp",
+    "scatter_to_process_group_spmd",
+    "scatter_to_sequence_parallel_region",
+    "scatter_to_tensor_model_parallel_region",
+    "scatter_tp_dim",
+]

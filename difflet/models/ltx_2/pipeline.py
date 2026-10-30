@@ -18,9 +18,9 @@ from typing import Any
 import numpy as np
 import torch
 
-from difflet.models.ltx_2.application import LTX2DiTInputBundle
-from difflet.models.ltx_2.application import LTX_2_DEFAULT_NUM_FRAMES
-from difflet.models.ltx_2.application import LTX_2_DEFAULT_TEXT_SEQ_LEN
+from difflet.models.ltx_2.contract import LTX2DiTInputBundle
+from difflet.models.ltx_2.contract import LTX_2_DEFAULT_NUM_FRAMES
+from difflet.models.ltx_2.contract import LTX_2_DEFAULT_TEXT_SEQ_LEN
 from difflet.utils.latent_dump import dump_latents
 from difflet.utils.step_timing import StepTimer, maybe_forward
 

@@ -27,6 +27,23 @@ def test_worker_cli_args_never_forward_dp_or_mode():
     assert "--dp" not in argv and "--mode" not in argv
 
 
+def test_worker_cli_args_forward_the_torchrun_backend_options():
+    import argparse
+
+    from difflet.cli.dp.router import worker_cli_args
+
+    args = argparse.Namespace(
+        model_id="m", tp_degree=2, cp_degree=None, cp_mode=None, cfg_parallel=False,
+        sp_enabled=False, height=None, width=None, num_frames=None, steps=None,
+        guidance_scale=None, seed=42, cache_dir=None, revision=None, keep_work_dir=False,
+        dp=2, mode=None, exec_mode="compile", guidance_scale_2=3.0, host_text_encoder=True,
+        host_vae=True, dual_expert=True,
+    )
+    argv = worker_cli_args(args)
+    assert argv[argv.index("--exec-mode") + 1] == "compile"
+    assert argv[argv.index("--guidance-scale-2") + 1] == "3.0"
+    assert {"--host-text-encoder", "--host-vae", "--dual-expert"} <= set(argv)
+    assert "--dp" not in argv
 @pytest.mark.parametrize("value", ["fp32", "bf16"])
 def test_worker_cli_args_forward_tp_reduce_dtype(value):
     from difflet.cli.dp.router import worker_cli_args

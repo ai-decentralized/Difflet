@@ -16,14 +16,16 @@ def create_qwen_image_application(
     backend: str = "trainium",
     **kwargs: Any,
 ) -> Any:
-    if backend not in {"trainium", "tpu"}:
+    if backend not in {"trainium", "tpu", "neuron"}:
         raise NotImplementedError(
-            f"Qwen-Image supports the trainium and tpu backends, got {backend!r}"
+            f"Qwen-Image supports the trainium, tpu and neuron backends, got {backend!r}"
         )
     # Two different parallel-config types reach this factory: the pipeline's
     # DiffletParallelConfig and serving's ParallelTopology, which carries no
-    # cfg flag. Ask, do not assume.
-    if getattr(parallel, "cfg_parallel_enabled", False):
+    # cfg flag. Ask, do not assume. The neuron application runs opt-in true CFG
+    # (true_cfg_scale > 1 with a negative prompt) and splits its two branches
+    # under CFG parallelism; it refuses a call without true CFG itself.
+    if getattr(parallel, "cfg_parallel_enabled", False) and backend != "neuron":
         raise NotImplementedError(
             "Qwen-Image is guidance-distilled (single forward pass with the "
             "guidance scale baked into the timestep embedding); CFG-parallel "
@@ -34,6 +36,22 @@ def create_qwen_image_application(
         from difflet.models.qwen_image.tpu_application import TpuQwenImageApplication
 
         return TpuQwenImageApplication(
+            model_path=model_path,
+            parallel=parallel,
+            dtype=dtype,
+            shape=shape,
+            **kwargs,
+        )
+
+    if backend == "neuron":
+        # TorchNeuron, one process per NeuronCore (torchrun): the DiT on the device, Qwen2.5-VL
+        # on rank 0's host, the VAE on the host unless enable_vae_decoder. Keyword arguments
+        # and their defaults: neuron_application._KWARG_DEFAULTS.
+        from difflet.models.qwen_image.neuron_application import (
+            TorchNeuronQwenImageApplication,
+        )
+
+        return TorchNeuronQwenImageApplication(
             model_path=model_path,
             parallel=parallel,
             dtype=dtype,

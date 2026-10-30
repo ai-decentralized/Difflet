@@ -26,6 +26,45 @@ neuronx-cc 2.26. Model keys are `scripts/verify_cli.py` keys; CLI model ids in p
 Anything that lands differently from this table in a new campaign is a finding: either a
 regression, a fix that upgraded a cell, or a NOT MEASURED cell finally measured — call it out.
 
+The table above is the Trainium AoT backend (NxD stages). The PyTorch-native **neuron** backend
+(`--backend neuron`, torchrun, one process per NeuronCore, per-block `torch.compile`, neuronx-cc
+2.28) is a separate runtime with its own rows below; do not carry a cell over between the two.
+
+### Neuron backend: HunyuanVideo (verified 2026-10-24/25, trn2.3xlarge)
+
+`difflet generate --backend neuron --model-id hunyuanvideo-community/HunyuanVideo` runs two
+launches: `generate` on tp×cp cores (Llama/CLIP encode on rank 0's host, denoise, latents.pt),
+then a one-core `vae` launch (diffusers' decoder, fp32, eager, tiled; the default since
+`d6ffb9a`; `--host-vae` decodes on the host instead). Floor TP2 (tp1 is refused before torchrun:
+the 23.9 GiB DiT does not fit one core). Evidence: `docs/verification/hunyuan-video-neuron-evidence.md`
+(parity) and `benchmark/trn2/hunyuan_video_neuron.md` (timings).
+
+| Feature | neuron backend, HunyuanVideo |
+|---|---|
+| TP2 / TP4 | PASS (CLI 320×512×61, 50 steps: 1461.8 / 808.3 ms per step, e2e 300.9 / 239.1 s before `f4d9ac1`; TP4 222.5 s after) |
+| CP gather_kv (TP2×CP2) | PASS (CLI: 905.1 ms per step, e2e 250.0 s; e2e parity 1.021x) |
+| CP ulysses / ring (TP2×CP2) | PASS at DiT level (truncated-depth parity, compiled mask bounds); CLI NOT MEASURED. Ring takes the valid-text count as `text_valid_len` |
+| SP | PASS (TP2+SP DiT parity at truncated depth; at full depth on the t=900 oracle 1.190x, like every compiled layout; TP4 `--sp` CLI: no gain, 809.3 ms) |
+| CFG-parallel | N/A (guidance-distilled; refused) |
+| DP / serving / multi-shape | NOT MEASURED (out of the plan's scope) |
+| TeaCache fixed cadence | PASS (`--teacache-cadence 2`: 20/50 steps skipped, latents cos 0.99984) |
+| TeaCache adaptive | NOT MEASURED (no HunyuanVideo calibration exists) |
+| DiT parity, full depth | LIMIT: compiled layouts 1.19x the bf16 control on the t=900 / 20-token input (gate 1.15x), 0.84–1.05x on 7 other inputs; eager 1.006x; gate decision pending |
+| e2e parity (3 steps, latents) | PASS (TP2 1.003x, TP2×CP2 gather_kv 1.021x; host encoder equal to diffusers') |
+| Device VAE | PASS fp32 (default; 3.5e-7 vs host fp32); bf16 BLOCKED by accuracy (20.8 dB, banding) |
+| 720×1280×129 (TP4) | BLOCKED on trn2.3xlarge: after `f4d9ac1`/`15b503f`/`ce9d212` the block graph's neuronx-cc compile is OOM-killed at 109.8 GiB of the host's 124.8 GiB RAM; no forward ran |
+
+Gotchas: a `pytest` process in the native venv held `/dev/neuron0` in this campaign (*inference:*
+importing torch-neuronx opens it), so never run unit tests while a device job runs or is about to
+start. The venv's `bin/` must be on PATH (neuronx-cc is spawned by name: `posix_spawn failed`
+otherwise). `difflet compile` with the device vae costs about 48 min cold (29 min eager decoder
+compile, then a 927 s exit); the vae stage's NEFFs are layout-independent, so a root that already
+holds them only compiles the DiT (about 3 min with the checkpoint in the page cache). At long
+sequences the bounded attention kernel's NKI trace dominates a cold compile (at 119k joint tokens:
+44 min with 6 heads per call, about 5 min with 1); the NKI trace cache (`DIFFLET_NKI_TRACE_CACHE`,
+on for HunyuanVideo since `f4d9ac1`) keeps it for later launches and also takes 23 s off every
+320×512×61 launch. Editing `ops_impl/attention.py` recompiles every cached block graph once.
+
 ## Models and their verification shapes (verify_cli.py MODELS)
 
 | key | model id | shape | steps | pipeline |

@@ -59,17 +59,26 @@ def ring_attention(q, k, v, *, scale: float, causal: bool = False):
     return _load("ring_attention")(q, k, v, scale=scale, causal=causal)
 
 
-def joint_ring_attention(q, image_k, image_v, text_k, text_v, *, scale: float, causal: bool = False):
+def joint_ring_attention(
+    q, image_k, image_v, text_k, text_v, *, scale: float, causal: bool = False,
+    text_valid_len=None,
+):
     """Joint-MMDiT ring self-attention for text-replicated models.
 
     Rings the sequence-sharded image K,V and merges a replicated text partial via
     online softmax. ``q`` is this rank's joint local query
     ``[B, H, S_img/cp + S_txt, d]``; ``image_*`` are the sharded image K,V;
     ``text_*`` are the replicated text K,V. Returns ``[B, H, q.shape[2], d]``.
+
+    ``text_valid_len`` (optional, int32 ``[B]``): number of valid text keys per batch
+    row, for a right-padded text stream (HunyuanVideo's padded-Llama key-padding
+    mask). Text keys at index >= ``text_valid_len[b]`` are masked out for every
+    query; image keys are all valid. ``None`` = no mask. Trainium refuses a count.
     """
 
     return _load("joint_ring_attention")(
-        q, image_k, image_v, text_k, text_v, scale=scale, causal=causal
+        q, image_k, image_v, text_k, text_v, scale=scale, causal=causal,
+        text_valid_len=text_valid_len,
     )
 
 

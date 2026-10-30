@@ -36,6 +36,9 @@ def _make_adapter(name: str):
     if name == "tpu":
         from benchmark.adapters.tpu import TpuAdapter
         return TpuAdapter()
+    if name == "neuron":
+        from benchmark.adapters.neuron import NeuronAdapter
+        return NeuronAdapter()
     raise SystemExit(f"unknown backend: {name}")
 
 
@@ -181,7 +184,7 @@ def main() -> int:
     args = p.parse_args()
 
     if args.all:
-        slugs = list(MATRIX)
+        slugs = [s for s, c in MATRIX.items() if c.backends is None or args.backend in c.backends]
     elif args.model:
         if args.model not in MATRIX:
             raise SystemExit(f"unknown model '{args.model}'. known: {', '.join(MATRIX)}")

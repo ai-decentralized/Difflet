@@ -44,6 +44,8 @@ from difflet.layers.normalization import (
     NeuronAdaLayerNormZeroSingle,
 )
 from difflet.ops import (
+    ModuleMarkerEndWrapper,
+    ModuleMarkerStartWrapper,
     ColumnParallelLinear,
     CustomRMSNorm,
     LayerNorm,

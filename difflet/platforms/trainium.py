@@ -19,7 +19,9 @@ class TrainiumPlatform(Platform):
 
     @classmethod
     def detect(cls) -> bool:
-        return importlib.util.find_spec("torch_neuronx") is not None
+        # The AoT stack: torch-neuronx with torch_xla (without it, the native ``neuron`` platform).
+        return (importlib.util.find_spec("torch_neuronx") is not None
+                and importlib.util.find_spec("torch_xla") is not None)
 
     def prepare_runtime(self, parallel) -> None:
         return None

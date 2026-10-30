@@ -2,6 +2,12 @@
 
 Called by runner.run_stage() as:
     python -m difflet.cli.stage --orchestrator <hf-id> --stage <stage> [forwarded args]
+or, when DIFFLET_BACKEND names a non-AoT torchrun-MPMD backend (neuron), once per
+NeuronCore:
+    python -m torch.distributed.run --standalone --nproc-per-node <N> \
+        -m difflet.cli.stage --orchestrator <hf-id | pkg.module:Class> --stage <stage> ...
+An exception leaves the process with a non-zero exit code; under torchrun that is
+what makes the launcher stop the other ranks, which may be blocked in a collective.
 """
 
 from __future__ import annotations
@@ -11,7 +17,13 @@ import importlib
 import os
 import sys
 
+from difflet.backends.registry import available_backends
 from difflet.pipeline.parallel_config import CP_MODES
+
+# Execution modes of non-AoT backends: the same values as
+# difflet.backends.neuron.compile.EXEC_MODES, repeated so the CLI parsers never
+# import a backend module (or torch). test_neuron_launch_c10.py pins the two together.
+EXEC_MODE_CHOICES: tuple[str, ...] = ("eager", "compile")
 
 _ORCHESTRATOR_MAP: dict[str, str] = {
     "Wan-AI/Wan2.2-T2V-A14B-Diffusers": "difflet.cli.orchestrators.wan.WanOrchestrator",
@@ -23,11 +35,23 @@ _ORCHESTRATOR_MAP: dict[str, str] = {
         "difflet.cli.orchestrators.hunyuan_video_15.HunyuanVideo15Orchestrator"
     ),
     "Qwen/Qwen-Image": "difflet.cli.orchestrators.qwen_image.QwenImageOrchestrator",
+    "black-forest-labs/FLUX.1-dev": "difflet.cli.orchestrators.flux.FluxOrchestrator",
+    "Lightricks/LTX-2": "difflet.cli.orchestrators.ltx_2.LTX2Orchestrator",
     "MiniMaxAI/MiniMax-H3": "difflet.cli.orchestrators.minimax_h3.MiniMaxH3Orchestrator",
 }
 
 
 def _load_orchestrator_class(name: str):
+    if ":" in name:
+        # "pkg.module:Class" names an orchestrator outside the model map, such as
+        # the test-only toy application (tests/unit/backends/_neuron_toy.py).
+        module_path, _, cls_name = name.partition(":")
+        if not module_path or not cls_name:
+            sys.exit(
+                f"[difflet.cli.stage] invalid orchestrator reference: {name!r} "
+                "(expected 'pkg.module:Class')"
+            )
+        return getattr(importlib.import_module(module_path), cls_name)
     if name not in _ORCHESTRATOR_MAP:
         sys.exit(f"[difflet.cli.stage] unknown orchestrator: {name!r}")
     cls_path = _ORCHESTRATOR_MAP[name]
@@ -58,6 +82,14 @@ def _build_stage_parser() -> argparse.ArgumentParser:
     p.add_argument("--output", default=None)
     p.add_argument("--steps", type=int, default=None)
     p.add_argument("--guidance-scale", type=float, default=None)
+    p.add_argument("--true-cfg-scale", dest="true_cfg_scale", type=float, default=None)
+    p.add_argument("--negative-prompt", dest="negative_prompt", default=None)
+    p.add_argument("--guidance-scale-2", dest="guidance_scale_2", type=float, default=None)
+    p.add_argument("--dual-expert", dest="dual_expert", action="store_true")
+    p.add_argument("--host-text-encoder", dest="host_text_encoder", action="store_true")
+    p.add_argument("--text-encoder-dtype", dest="text_encoder_dtype", default=None,
+                   choices=["bf16", "fp32"])
+    p.add_argument("--device-text-encoder", dest="device_text_encoder", action="store_true")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--work-dir", default=None)
     p.add_argument("--cache-dir", default=None)
@@ -68,24 +100,46 @@ def _build_stage_parser() -> argparse.ArgumentParser:
     p.add_argument("--teacache-online-delta", type=float, default=None)
     p.add_argument("--teacache-speedup", type=float, default=None)
     p.add_argument("--teacache-calibration", default=None)
+    # The decode the driver resolved (HunyuanVideo on a torchrun backend): where it runs and the
+    # device decoder's precision and execution. Wan and Qwen-Image read --vae-dtype and
+    # --vae-exec-mode (their vae stage's decoder).
+    p.add_argument("--vae-placement", dest="vae_placement", default=None,
+                   choices=["generate", "launch", "host"])
+    p.add_argument("--vae-dtype", dest="vae_dtype", default=None, choices=["bf16", "fp32"])
+    p.add_argument("--vae-exec-mode", dest="vae_exec_mode", default=None,
+                   choices=list(EXEC_MODE_CHOICES))
     # DP worker-mode flags (parse_known_args silently drops what isn't declared
     # here — the --sp bug class; keep in sync with main._add_generate_flags).
     p.add_argument("--requests-dir", default=None)
     p.add_argument("--worker-index", type=int, default=None)
     p.add_argument("--dp-schedule", default="round_robin")
     p.add_argument("--keep-work-dir", action="store_true")
+    # Backend selection. main() exports both to the environment before the
+    # orchestrator loads, so difflet.ops, DiffletPipeline and the application
+    # resolve the same backend and execution mode in every rank.
+    p.add_argument("--backend", choices=available_backends(), default=None)
+    p.add_argument("--exec-mode", dest="exec_mode", choices=EXEC_MODE_CHOICES, default=None)
     return p
+
+
+def _export_backend_selection(args: argparse.Namespace) -> None:
+    if args.backend is not None:
+        os.environ["DIFFLET_BACKEND"] = args.backend
+    if args.exec_mode is not None:
+        os.environ["DIFFLET_EXEC_MODE"] = args.exec_mode
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = _build_stage_parser()
     args, _ = parser.parse_known_args(argv)
+    _export_backend_selection(args)
     cls = _load_orchestrator_class(args.orchestrator)
     orchestrator = cls(args)
     if args.stage_mode == "generate":
         # Overlap this stage's ~6.7s one-time NeuronCore bring-up with its load.
         # Gated to generate: compile runs on the host compiler and must not spin
-        # up the device.
+        # up the device. prewarm_neuron_runtime returns early for non-AoT
+        # backends, whose ranks must bind their core before the runtime starts.
         from difflet.cli.prewarm import prewarm_neuron_runtime
         num_cores = int(os.environ.get("NEURON_RT_NUM_CORES") or 0) or (
             (args.tp_degree or 1) * (args.cp_degree or 1)

@@ -120,7 +120,11 @@ def init_parallel_mesh(config) -> None:
 
 def _require_spec() -> MeshSpec:
     if _MESH_SPEC is None:
-        raise RuntimeError("CUDA parallel mesh is not initialized; call init_parallel_mesh() first")
+        from difflet.ops.collectives import ParallelMeshNotInitializedError
+
+        raise ParallelMeshNotInitializedError(
+            "CUDA parallel mesh is not initialized; call init_parallel_mesh() first"
+        )
     return _MESH_SPEC
 
 

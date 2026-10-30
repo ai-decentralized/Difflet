@@ -1,0 +1,591 @@
+"""Wan application for the neuron backend (TorchNeuron, one process per NeuronCore).
+
+``TorchNeuronWanApplication`` keeps the outward contract of the Trainium ``NeuronWanApplication``
+(``difflet/models/wan/application.py``, which already owns that name): the registry factory
+signature, ``compile``/``has_compiled_artifacts``/``load``, ``.pipeline``, and a ``__call__`` that
+sends a positional three-tensor call to the DiT and every other call -- the CLI stage's
+``app(generator=..., prompt=..., ...)`` -- to the ``WanOrchestrator``. Every rank of the torchrun
+launch builds one and holds:
+
+* ``transformer``: ``NeuronWanTransformerApplication``, the DiT on this rank's core;
+* ``transformer_2`` (``enable_transformer_2=True``, Wan 2.2 A14B): the low-noise expert, a second
+  ``NeuronWanTransformerApplication`` on ``<model>/transformer_2`` with the same architecture.
+  The orchestrator runs it for timesteps below ``boundary_ratio`` x 1000 (``model_index.json``)
+  and ``transformer`` above. Both stay resident; the second loads after the first (runtime and
+  mesh set-up are idempotent) and, its blocks having the first expert's graph, compiles no new
+  NEFF;
+* ``text_encoder``: ``_HostTextEncoder``, umT5 on rank 0's host only, its embeddings broadcast
+  to every rank (one copy of the encoder instead of four); or, with
+  ``text_encoder_device="neuron"``, ``_DeviceTextEncoder``: umT5 on the device, sharded across the
+  TP group with the AoT path's layout (``NeuronWanTextEncoderApplication``, about a quarter of the
+  encoder per rank at tp4), every rank encoding, the embeddings cast to the DiT's dtype.
+  ``text_encoder_dtype`` sets umT5's precision in either place: bf16 by default, as the Trainium
+  path runs it (11.36 GB, and the weight store keeps a bf16 entry for the device encoder); fp32
+  on request (22.7 GB; the CLI's ``--text-encoder-dtype fp32``). ``__init__`` refuses the device
+  encoder when it clearly cannot fit beside the DiT on one core at this tp
+  (``_check_device_text_encoder_fits``: in fp32, tp2, so CFG or CP on four cores and dp2tp2
+  replicas, does not fit; in bf16 it does);
+* ``pipeline``: the backend-neutral ``WanOrchestrator`` (fp32 latents, UniPC on the host), which
+  every rank runs on identical inputs; its DiT calls go through ``_OnDeviceTransformer``.
+
+* ``vae_decoder`` (``enable_vae_decoder=True``): ``_DeviceVaeDecoder``, the VAE decoder on every
+  rank's core, eager (``NeuronWanVaeDecoderApplication``), in ``vae_dtype`` when given (the CLI's
+  ``--vae-dtype``), else ``default_vae_dtype`` of the clip (bf16 up to 9 frames, fp32 beyond, as
+  the Trainium path decodes); ``output_type="pt"`` then returns decoded frames, fp32 in either
+  dtype. Without it the VAE decodes outside this application: the CLI's vae
+  stage runs the same decoder on one core, or diffusers on the host with ``--host-vae``.
+
+Parallelism: tensor parallelism, with or without sequence parallelism (Megatron SP within the
+TP group), CFG parallelism (one batch-2 DiT call per step, each branch on its own TP group) and
+context parallelism in every ``cp_mode`` (gather_kv, ulysses, ring). Data parallelism is a set
+of separate replicas, each a torchrun launch of its own (``--dp``, the CLI's request router),
+so ``dp_degree`` within one application is rejected. Each rank starts from rank 0's initial
+noise (``__call__``).
+
+Phase 1 limits, each rejected in ``__init__`` (or, for the shape, at every DiT call): one
+static shape, batch 1. TeaCache runs (``_teacache_probes``: one probe per loaded expert).
+
+Timing hooks (for the benchmark): ``step_hook`` is called with no arguments once per denoise
+iteration, right after the orchestrator's scheduler step (``load`` wraps
+``WanOrchestrator._scheduler_step`` on this instance), never per DiT call: at guidance > 1 one
+iteration is two DiT forwards plus the host UniPC step. ``transformer_adapter.forward_hook`` is
+called after every DiT forward with that call's wall seconds (host -> device copies, forward,
+device sync, copy back), whichever expert ran it; ``expert_calls`` counts the forwards per expert.
+
+The lifecycle, the evidence properties, the hooks and the initial-latents broadcast are the
+composed neuron application's (``TorchNeuronModelApplication``,
+``difflet/backends/neuron/core/model_application.py``); what is Wan's is here.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import os
+from typing import Any
+
+import torch
+
+from difflet.backends.neuron.core.application_base import _normalize_dtype
+from difflet.backends.neuron.core.model_application import (
+    DeviceComponent,
+    HostTextEncoder,
+    OnDeviceDiT,
+    TorchNeuronModelApplication,
+    broadcast_from_rank0,
+)
+from difflet.backends.neuron.wan.config import NeuronWanConfig
+from difflet.backends.neuron.wan.hbm import device_text_encoder_components
+from difflet.backends.neuron.wan.text_encoder import NeuronWanTextEncoderApplication
+from difflet.backends.neuron.wan.transformer import NeuronWanTransformerApplication
+from difflet.backends.neuron.core.weights_bf16 import resolve_component_dir
+from difflet.backends.neuron.wan.vae import NeuronWanVaeDecoderApplication, default_vae_dtype
+
+#: The keyword arguments the application accepts, with their defaults: the ones the Wan CLI
+#: stage passes the Trainium application (difflet/cli/orchestrators/wan.py) plus exec_mode,
+#: device, encoder_threads, text_encoder_device, and text_encoder_dtype and vae_dtype (umT5's
+#: and the device VAE decoder's precision: see the module docstring).
+#: Anything else is a TypeError rather than silently ignored.
+_KWARG_DEFAULTS: dict[str, Any] = {
+    "text_seq_len": 512,
+    "batch_size": 1,
+    "enable_text_encoder": True,
+    "enable_transformer": True,
+    "enable_transformer_2": False,
+    "enable_vae_decoder": False,
+    "exec_mode": None,
+    "device": "neuron",
+    "encoder_threads": 12,
+    "text_encoder_device": "host",
+    # umT5 in bf16, as the Trainium path runs it; the VAE's precision follows the clip length as on
+    # the Trainium path (default_vae_dtype: bf16 up to 9 frames, fp32 beyond). Both overridable.
+    "text_encoder_dtype": torch.bfloat16,
+    "vae_dtype": None,
+    "shapes": None,
+    "teacache_cadence": None,
+    "teacache_online_delta_alpha": None,
+    "teacache_calibration_path": None,
+}
+
+
+class _HostTextEncoder(HostTextEncoder):
+    """umT5 on rank 0's host in ``encoder_dtype`` (the application's ``text_encoder_dtype``,
+    bf16 by default); every rank receives the embeddings by broadcast.
+
+    ``WanOrchestrator.encode_prompt`` tokenizes on every rank (cheap and deterministic) and
+    calls this with ``(input_ids, attention_mask)`` padded on the right to ``seq_len``. Rank 0
+    encodes (``HostTextEncoder``: inside ``rank0_call``, with ``threads`` intra-op threads, 12
+    from the CLI: D70, the fp32 output bits depend on the count) and the result is broadcast in
+    ``dtype`` and returned on the host. Only the valid prefix is encoded and the result re-padded
+    with zeros: T5 attention is masked, so the padding never reaches the real tokens, and the
+    orchestrator zeroes the padded rows anyway (``_zero_padding_embeds``).
+
+    No warm-up encode is spent at load (``warmup_args`` stays None), unlike Qwen-Image's and
+    LTX-2's bf16 host encoders: the first-encode variance was measured on those, and adding one
+    here would change what every Wan process runs before its first request (review W4: it needs
+    its own device check first).
+    """
+
+    def __init__(self, model_path, *, text_dim: int, seq_len: int, dtype, device, threads: int,
+                 encoder_dtype=torch.bfloat16):
+        super().__init__(model_path, device=device, threads=threads)
+        self.text_dim = int(text_dim)
+        self.seq_len = int(seq_len)
+        self.dtype = dtype
+        self.encoder_dtype = encoder_dtype
+        self.model = None  # rank 0 only, after load()
+
+    def _load(self) -> None:
+        self.model = self._load_model()
+
+    def _load_model(self):
+        from transformers import UMT5EncoderModel
+
+        model = UMT5EncoderModel.from_pretrained(
+            os.path.join(self.model_path, "text_encoder"), dtype=self.encoder_dtype
+        )
+        return model.eval().requires_grad_(False)
+
+    def __call__(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+        embeds = self._rank0_encode(input_ids, attention_mask)
+        return broadcast_from_rank0(None if embeds is None else (embeds,), 1,
+                                    device=self.device)[0]
+
+    def _encode(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+        if self.model is None:
+            raise RuntimeError("the text encoder is not loaded on rank 0; call load() first")
+        valid = max(int(attention_mask.sum(dim=-1).max()), 1)
+        if attention_mask[:, valid:].any():
+            raise ValueError("expected right-padded prompts (the tokenizer pads on the right)")
+        with self._pinned():
+            hidden = self.model(
+                input_ids[:, :valid].to(torch.int64),
+                attention_mask[:, :valid].to(torch.int32),
+            ).last_hidden_state
+        embeds = torch.zeros(input_ids.shape[0], self.seq_len, self.text_dim, dtype=self.dtype)
+        embeds[:, :valid] = hidden.to(self.dtype)
+        return embeds
+
+
+class _DeviceTextEncoder(DeviceComponent):
+    """umT5 on the device (``NeuronWanTextEncoderApplication``), called like ``_HostTextEncoder``.
+
+    Every rank encodes (the encoder's TP collectives need all of them) and every rank gets the
+    full embeddings, so nothing is broadcast. Each prompt row is encoded alone at the static
+    ``(1, seq_len)`` shape, padding included and masked; the rows past the valid prefix are then
+    zeroed, as the host path returns them (the orchestrator zeroes them as well).
+    """
+
+    def __init__(self, app: NeuronWanTextEncoderApplication, *, dtype, device):
+        super().__init__(app, device=device)
+        self.dtype = dtype
+
+    def __call__(self, input_ids: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+        rows = []
+        for ids, mask in zip(input_ids, attention_mask):
+            valid = max(int(mask.sum()), 1)
+            if mask[valid:].any():
+                raise ValueError("expected right-padded prompts (the tokenizer pads on the right)")
+            hidden = self.app(
+                ids[None].to(self.device, torch.int64), mask[None].to(self.device, torch.int32)
+            )
+            row = hidden.to("cpu", self.dtype)
+            row[:, valid:] = 0
+            rows.append(row)
+        return torch.cat(rows)
+
+
+class _DeviceVaeDecoder(DeviceComponent):
+    """The orchestrator's VAE decoder: host latents in (already un-normalised), host frames out.
+
+    Exposes what ``WanOrchestrator._decode_latents`` reads: ``dtype``, the precision the
+    orchestrator un-normalises in, fp32 whatever the decoder's own (``app.dtype``: fp32 or bf16,
+    see ``vae_dtype``), so the un-normalisation is the CLI vae stage's (fp32 on the host) and
+    only the decoder's input is rounded; and ``config`` (``latents_mean``/``latents_std``). The
+    frames come back fp32 in either dtype (the decoder's fp32 output head).
+    """
+
+    def __init__(self, app: NeuronWanVaeDecoderApplication, *, device):
+        super().__init__(app, device=device)
+        self.dtype = torch.float32
+        self.config = app.vae_config
+
+    def __call__(self, latents: torch.Tensor) -> torch.Tensor:
+        return self.app(latents.to(self.device, self.app.dtype)).cpu()
+
+
+class _OnDeviceTransformer(OnDeviceDiT):
+    """The orchestrator's DiT callable (``OnDeviceDiT``): the three host tensors in, a host
+    tensor out. The latents stay fp32 on the host between steps, as on TPU, because UniPC's
+    corrector collapses in bf16. A call at any other shape than the static one raises
+    (``_check_dit_shapes``) instead of compiling new block graphs. ``.config`` carries
+    ``cfg_parallel_enabled`` for the orchestrator.
+
+    ``hook_from``: another adapter whose ``forward_hook`` this one reports to (the low-noise
+    expert's adapter reports to the high-noise one's, so one hook times every DiT forward).
+    """
+
+    def __init__(self, module, config, dtype, device, hook_from=None):
+        super().__init__(module, config, dtype, device)
+        self.hook_from = hook_from
+
+    def __call__(self, hidden_states, timestep, encoder_hidden_states) -> torch.Tensor:
+        _check_dit_shapes(self.config, hidden_states, timestep, encoder_hidden_states)
+        return self._forward((hidden_states, timestep, encoder_hidden_states))
+
+    def _forward_hook(self):
+        return self.forward_hook if self.hook_from is None else self.hook_from.forward_hook
+
+
+def dit_input_shapes(config) -> dict[str, tuple[int, ...]]:
+    """The per-call DiT input shapes at the config's one static shape: batch 1, or the
+    ``[uncond, cond]`` batch of 2 that CFG parallelism sends in one call (the module splits it
+    over the CFG group). They are exactly the warm-up's (``get_example_inputs``)."""
+    batch = 2 if config.cfg_parallel_enabled else int(config.batch_size)
+    return {
+        "hidden_states": (batch, int(config.in_channels), config.latent_frames,
+                          config.latent_height, config.latent_width),
+        "timestep": (batch,),
+        "encoder_hidden_states": (batch, int(config.text_seq_len), int(config.text_dim)),
+    }
+
+
+def _check_dit_shapes(config, hidden_states, timestep, encoder_hidden_states) -> None:
+    """Refuse a DiT call at any other shape than the one the warm-up compiled.
+
+    In compile mode, a new shape does not fail on its own. Every compiled block traces and
+    compiles a new graph (minutes per block graph for the 14B on a cold cache), and Dynamo
+    fails only after ``recompile_limit`` shapes. The base merely logs the first such shape. In
+    eager mode the precomputed rotary tables and the CP/SP sequence split assume the static
+    shape too. Every rank receives the same call, so every rank raises here, before any device
+    work or collective.
+    """
+    expected = dit_input_shapes(config)
+    given = {"hidden_states": hidden_states, "timestep": timestep,
+             "encoder_hidden_states": encoder_hidden_states}
+    for name, tensor in given.items():
+        if tuple(tensor.shape) != expected[name]:
+            raise ValueError(
+                f"Wan DiT input {name!r} has shape {tuple(tensor.shape)}, expected "
+                f"{expected[name]} (the one static shape, {config.height}x{config.width}x"
+                f"{config.num_frames}, text_seq_len={config.text_seq_len}"
+                + (", the CFG-parallel batch of 2" if config.cfg_parallel_enabled else "")
+                + "); the neuron backend compiles one static shape per process"
+            )
+
+
+class TorchNeuronWanApplication(TorchNeuronModelApplication):
+    """umT5 (rank 0's host, or the device) + the DiT on each rank's core (+ the device VAE) +
+    ``WanOrchestrator``, on every rank.
+
+    Factory signature (``difflet/registry.py`` ``create_application``): ``model_path`` is the
+    diffusers snapshot root, ``shape`` the request's ``height``/``width``/``num_frames``. Keyword
+    arguments and their defaults are ``_KWARG_DEFAULTS``; ``device`` is ``"neuron"`` except in
+    CPU tests (``"cpu"`` on gloo).
+    """
+
+    MODEL_LABEL = "Wan"
+    KWARG_DEFAULTS = _KWARG_DEFAULTS
+    #: Nothing refused: TeaCache runs on Wan's neuron path (``_teacache_probes``; the options
+    #: reach WanOrchestrator in ``_build_pipeline``).
+    TEACACHE_KWARGS = ()
+
+    def __init__(
+        self,
+        *,
+        model_path,
+        parallel,
+        dtype: Any,
+        shape: dict[str, int | None],
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(model_path=model_path, parallel=parallel, dtype=dtype, shape=shape,
+                         **kwargs)
+        options = self.options
+        transformer_path = os.path.join(self.model_path, "transformer")
+        config_overrides = dict(
+            **self.shape,
+            batch_size=1,
+            text_seq_len=self.text_seq_len,
+            tp_degree=int(parallel.tp_degree),
+            cp_degree=int(getattr(parallel, "cp_degree", 1) or 1),
+            cfg_parallel_enabled=bool(getattr(parallel, "cfg_parallel_enabled", False)),
+            context_parallel_enabled=int(getattr(parallel, "cp_degree", 1) or 1) > 1,
+            sp_enabled=bool(getattr(parallel, "sp_enabled", False)),
+            cp_mode=str(getattr(parallel, "cp_mode", "gather_kv")),
+            torch_dtype=self.dtype,
+        )
+        self.config = NeuronWanConfig.from_pretrained(transformer_path, **config_overrides)
+        if options["enable_transformer"]:
+            self.transformer = NeuronWanTransformerApplication(
+                model_path=resolve_component_dir(transformer_path, self.dtype),  # the bf16 copy if made
+                config=self.config,
+                parallel=parallel,
+                dtype=self.dtype,
+                exec_mode=options["exec_mode"],
+                device=self.device,
+            )
+        self.transformer_2: NeuronWanTransformerApplication | None = None
+        if options["enable_transformer_2"]:
+            transformer_2_path = self._low_noise_expert_path(options)
+            config_2 = NeuronWanConfig.from_pretrained(transformer_2_path, **config_overrides)
+            _require_same_architecture(self.config, config_2)
+            self.transformer_2 = NeuronWanTransformerApplication(
+                model_path=resolve_component_dir(transformer_2_path, self.dtype),
+                config=config_2,
+                parallel=parallel,
+                dtype=self.dtype,
+                exec_mode=options["exec_mode"],
+                device=self.device,
+            )
+        text_encoder_dtype = _normalize_dtype(options["text_encoder_dtype"])
+        if options["enable_text_encoder"] and options["text_encoder_device"] == "neuron":
+            self._check_device_text_encoder_fits(text_encoder_dtype)
+            self.text_encoder = _DeviceTextEncoder(
+                NeuronWanTextEncoderApplication(
+                    model_path=os.path.join(self.model_path, "text_encoder"),
+                    text_seq_len=self.text_seq_len,
+                    batch_size=1,
+                    parallel=parallel,
+                    dtype=text_encoder_dtype,
+                    exec_mode=options["exec_mode"],
+                    device=self.device,
+                ),
+                dtype=self.dtype,
+                device=self.device,
+            )
+        elif options["enable_text_encoder"]:
+            self.text_encoder = _HostTextEncoder(
+                self.model_path,
+                text_dim=int(self.config.text_dim),
+                seq_len=self.text_seq_len,
+                dtype=self.dtype,
+                device=self.device,
+                threads=int(options["encoder_threads"]),
+                encoder_dtype=text_encoder_dtype,
+            )
+        if options["enable_vae_decoder"]:
+            cfg = self.config
+            self.vae_decoder = _DeviceVaeDecoder(
+                NeuronWanVaeDecoderApplication(
+                    model_path=os.path.join(self.model_path, "vae"),
+                    latent_shape=(1, int(cfg.out_channels), cfg.latent_frames,
+                                  cfg.latent_height, cfg.latent_width),
+                    parallel=parallel,
+                    dtype=(_normalize_dtype(options["vae_dtype"]) if options["vae_dtype"] is not None
+                           else default_vae_dtype((int(cfg.latent_frames) - 1) * 4 + 1)),
+                    device=self.device,
+                ),
+                device=self.device,
+            )
+        self.transformer_2_adapter: _OnDeviceTransformer | None = None
+
+    def _reject_model_options(self, options: dict[str, Any]) -> None:
+        for name in ("text_encoder_dtype", "vae_dtype"):
+            if options[name] is None and name == "vae_dtype":
+                continue  # default_vae_dtype of the clip
+            dtype = _normalize_dtype(options[name])
+            if dtype not in (torch.bfloat16, torch.float32):
+                raise ValueError(f"{name} must be bfloat16 or float32, got {dtype}")
+
+    def _resolve_shape(self, shape: dict[str, int | None], shapes) -> dict[str, int]:
+        if shapes:
+            shapes = list(shapes)
+            if len(shapes) > 1:
+                raise NotImplementedError(
+                    "the neuron backend compiles one static shape per process (phase 1); "
+                    f"got shapes={shapes}"
+                )
+            height, width, num_frames = (int(v) for v in shapes[0])
+            return {"height": height, "width": width, "num_frames": num_frames}
+        return {
+            "height": int(shape.get("height") or 480),
+            "width": int(shape.get("width") or 832),
+            "num_frames": int(shape.get("num_frames") or 9),
+        }
+
+    def _check_device_text_encoder_fits(self, encoder_dtype: torch.dtype) -> None:
+        """umT5 on the device shares each core with this rank's DiT shards: refuse before
+        anything loads when the two clearly cannot fit together
+        (``difflet/backends/neuron/wan/hbm.py``, ``_check_components_fit``).
+
+        The estimate depends on the TP degree and the checkpoint's sizes, not on the mode flags.
+        CFG and CP on four cores, DP replicas of tp2 and a plain tp2 all narrow the TP group the
+        same way. At tp2 that is at least 10.6 GiB of fp32 encoder beside 13.3 GiB of bf16 DiT on
+        a 24 GiB core; the bf16 encoder (the default) is half that and fits. Both experts count
+        when Wan 2.2's low-noise expert is resident.
+        """
+        experts = tuple(
+            name
+            for name, app in (("transformer", self.transformer),
+                              ("transformer_2", self.transformer_2))
+            if app is not None
+        )
+        self._check_components_fit(
+            device_text_encoder_components(experts, self.dtype.itemsize, encoder_dtype.itemsize),
+            what=f"umT5 ({encoder_dtype}) beside the Wan DiT ({', '.join(experts) or 'none'}) "
+            "on one core",
+            advice="encode on the host (text_encoder_device='host', --host-text-encoder), or "
+            "give the TP group more cores (tp_degree={tp} or more)",
+        )
+
+    def _low_noise_expert_path(self, options: dict[str, Any]) -> str:
+        if not options["enable_transformer"]:
+            raise ValueError(
+                "enable_transformer_2 requires enable_transformer: the low-noise expert runs "
+                "below the boundary timestep and the high-noise expert above it"
+            )
+        path = os.path.join(self.model_path, "transformer_2")
+        if not os.path.isfile(os.path.join(path, "config.json")):
+            raise ValueError(
+                f"enable_transformer_2: {path} has no config.json; only two-expert checkpoints "
+                "(Wan 2.2 A14B) have a low-noise expert (transformer_2)"
+            )
+        return path
+
+    # --------------------------------------------------------------------- load
+
+    def _orchestrator_class(self) -> type:
+        from difflet.models.wan.pipeline import WanOrchestrator
+
+        return WanOrchestrator
+
+    def _dit_adapter(self, app) -> _OnDeviceTransformer:
+        return _OnDeviceTransformer(app, self.config, self.dtype, self.device)
+
+    def _load_transformers(self, skip_warmup: bool) -> None:
+        """The high-noise expert, then the low-noise one, whose adapter reports its forwards to
+        the first adapter's ``forward_hook``."""
+        super()._load_transformers(skip_warmup)
+        if self.transformer_2 is not None:
+            self.transformer_2.load(skip_warmup=skip_warmup)
+            self.transformer_2_adapter = _OnDeviceTransformer(
+                self.transformer_2, self.transformer_2.config, self.dtype, self.device,
+                hook_from=self.transformer_adapter,
+            )
+
+    def _build_pipeline(self, orchestrator_class: type):
+        return orchestrator_class(
+            model_path=self.model_path,
+            text_encoder=self.text_encoder,
+            transformer=self.transformer_adapter,
+            transformer_2=self.transformer_2_adapter,
+            vae_decoder=self.vae_decoder,
+            dtype=self.dtype,
+            max_text_length=self.text_seq_len,
+            teacache_calibration_path=self.options["teacache_calibration_path"],
+            teacache_probes=self._teacache_probes(),
+            teacache_cadence=self.options["teacache_cadence"],
+            teacache_online_delta_alpha=self.options["teacache_online_delta_alpha"],
+            **self.shape,
+        )
+
+    def _teacache_probes(self) -> dict[int, Any]:
+        """One TeaCache probe per loaded expert, keyed as WanOrchestrator looks them up (the id of
+        the transformer callable it was given), when the calibration needs a per-step signal; so
+        the Trainium CPU shadow is never built. Empty for the probe-free modes and without TeaCache."""
+        if not self.options["teacache_calibration_path"]:
+            return {}
+        from difflet.backends.neuron.core.teacache import NeuronTeaCacheProbe
+
+        probes = {}
+        for adapter, app in ((getattr(self, "transformer_adapter", None), getattr(self, "transformer", None)),
+                             (getattr(self, "transformer_2_adapter", None), getattr(self, "transformer_2", None))):
+            if adapter is not None and app is not None:
+                probes[id(adapter)] = NeuronTeaCacheProbe(app.teacache_mod_input)
+        return probes
+
+    # ----------------------------------------------------------------- evidence
+
+    def _device_apps(self) -> list:
+        """The low-noise expert's phases and blocks follow the DiT's, as ``"transformer_2
+        <phase>"`` and ``"transformer_2.<block>"``."""
+        apps = super()._device_apps()
+        if self.transformer_2 is not None:
+            apps.insert(1 if self.transformer is not None else 0,
+                        ("transformer_2", self.transformer_2))
+        return apps
+
+    @property
+    def expert_calls(self) -> dict[str, int]:
+        """DiT forwards per expert since load: which expert the boundary actually selected."""
+        calls = {}
+        if self.transformer_adapter is not None:
+            calls["transformer"] = self.transformer_adapter.calls
+        if self.transformer_2_adapter is not None:
+            calls["transformer_2"] = self.transformer_2_adapter.calls
+        return calls
+
+    def dit_input_contract(self) -> dict[str, dict[str, Any]]:
+        cfg = self.config
+        batch = int(cfg.batch_size)
+        return {
+            "hidden_states": {
+                "shape": (
+                    batch,
+                    int(cfg.in_channels),
+                    cfg.latent_frames,
+                    cfg.latent_height,
+                    cfg.latent_width,
+                ),
+                "dtype": self.dtype,
+            },
+            "timestep": {"shape": (batch,), "dtype": self.dtype},
+            "encoder_hidden_states": {
+                "shape": (batch, int(cfg.text_seq_len), int(cfg.text_dim)),
+                "dtype": self.dtype,
+            },
+        }
+
+    # ---------------------------------------------------------------- inference
+
+    def __call__(self, *args: Any, seed: int | None = None, **kwargs: Any):
+        """``app(latents, timestep, text)`` runs the DiT (the high-noise expert when there are
+        two); anything else runs the orchestrator (``WanOrchestrator.__call__``'s arguments),
+        with two additions:
+
+        * ``seed``: a ``torch.Generator`` seeded with it (pass one or ``generator``);
+        * without ``latents``, the initial noise is drawn on rank 0 (from ``generator``, or the
+          global RNG) and broadcast (``_draw_on_rank0``), so every rank of the TP/CP/CFG group
+          denoises the same latents even when the caller's generators or global RNGs differ.
+        """
+        if len(args) >= 3:
+            if seed is not None:
+                raise TypeError("seed applies to the orchestrator call, not a DiT call")
+            return self._require_dit()(*args, **kwargs)
+        self._require_loaded()
+        self._apply_seed(kwargs, seed)
+        if kwargs.get("latents") is None:
+            kwargs["latents"] = self._initial_latents(kwargs)
+        return self.pipeline(*args, **kwargs)
+
+    def _initial_latents(self, kwargs: dict[str, Any]) -> torch.Tensor:
+        """Rank 0's fp32 initial noise, broadcast: the orchestrator's own ``prepare_latents``
+        draw, at the call's batch, channels and shape."""
+        pipeline = self.pipeline
+
+        def draw() -> torch.Tensor:
+            return pipeline.prepare_latents(
+                batch_size=int(kwargs.get("batch_size", 1)),
+                channels=int(kwargs.get("channels", 16)),
+                height=kwargs.get("height"),
+                width=kwargs.get("width"),
+                num_frames=kwargs.get("num_frames"),
+                dtype=torch.float32,
+                generator=kwargs.get("generator"),
+            )
+
+        return self._draw_on_rank0(draw)
+
+
+def _require_same_architecture(config, config_2) -> None:
+    """The two experts must share one architecture: one block graph, one input contract."""
+    first, second = dataclasses.asdict(config), dataclasses.asdict(config_2)
+    differ = sorted(name for name in first if first[name] != second.get(name))
+    if differ:
+        raise ValueError(
+            "transformer and transformer_2 configs differ in "
+            + ", ".join(f"{name} ({first[name]!r} vs {second.get(name)!r})" for name in differ)
+        )
+
+
+__all__ = ["TorchNeuronWanApplication"]

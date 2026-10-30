@@ -59,11 +59,11 @@ import torch.nn as nn
 from neuronx_distributed.trace.model_builder import BaseModelInstance
 from difflet.backends.trainium.core.application_base import NeuronApplicationBase
 from difflet.backends.trainium.core.model_wrapper import ModelWrapper
-from difflet.models.flux.modeling_flux import NeuronFluxTransformer2DModel
 from difflet.backends.trainium.flux.backbone import (
     FluxBackboneInferenceConfig,
     NeuronFluxBackboneApplication,
 )
+from difflet.models.flux.modeling_flux import NeuronFluxTransformer2DModel
 
 #: Tensors the probe adds on top of the backbone. Aliased in place by the
 #: ModelInstance below, so they are NEFF state (zero-initialised at load), not

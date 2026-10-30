@@ -22,7 +22,7 @@ def _create_on_cuda(tmp_path, parallel, shape=None):
 
 
 def test_create_wan_application_rejects_unsupported_backend(tmp_path):
-    with pytest.raises(NotImplementedError, match="trainium and tpu"):
+    with pytest.raises(NotImplementedError, match="trainium, tpu and neuron backends, got 'rocm'"):
         entry.create_wan_application(
             model_path=str(tmp_path),
             parallel=DiffletParallelConfig(),
@@ -32,6 +32,53 @@ def test_create_wan_application_rejects_unsupported_backend(tmp_path):
         )
 
 
+def test_create_wan_application_builds_neuron_app(tmp_path):
+    """The neuron branch builds TorchNeuronWanApplication with the keyword arguments the CLI
+    stage passes through the registry (difflet/cli/orchestrators/wan.py), never the Trainium
+    application. ``device="cpu"``: nothing touches a NeuronCore; nothing loads either."""
+    import torch
+
+    from difflet.models.wan.neuron_application import TorchNeuronWanApplication
+    from difflet.registry import resolve_model
+    from tests.unit.backends._neuron_wan_toy import TINY_SHAPE, write_tiny_wan_model
+
+    pytest.importorskip("safetensors.torch")
+    write_tiny_wan_model(tmp_path)
+    cli_kwargs = {
+        "text_seq_len": 8, "batch_size": 1, "enable_text_encoder": True,
+        "enable_transformer": True, "enable_transformer_2": False,
+        "enable_vae_decoder": False, "exec_mode": None, "encoder_threads": 12,
+    }
+    direct = entry.create_wan_application(
+        model_path=str(tmp_path),
+        parallel=DiffletParallelConfig(tp_degree=1),
+        dtype=torch.bfloat16,
+        shape=dict(TINY_SHAPE),
+        backend="neuron",
+        device="cpu",
+        **cli_kwargs,
+    )
+    via_registry = resolve_model("Wan-AI/Wan2.1-T2V-14B-Diffusers").create_application(
+        model_path=str(tmp_path),
+        parallel=DiffletParallelConfig(tp_degree=1),
+        dtype=torch.bfloat16,
+        shape=dict(TINY_SHAPE),
+        backend="neuron",
+        application_kwargs={**cli_kwargs, "device": "cpu"},
+    )
+    for app in (direct, via_registry):
+        assert isinstance(app, TorchNeuronWanApplication)
+        assert app.device == torch.device("cpu") and app.dtype is torch.bfloat16
+        assert app.shape == TINY_SHAPE and app.text_seq_len == 8
+        assert app.transformer is not None and app.text_encoder is not None
+        assert app.text_encoder.threads == 12
+        assert app.pipeline is None  # built, not loaded
+    with_vae = entry.create_wan_application(  # the device VAE stage (bf16 up to 9 frames)
+        model_path=str(tmp_path), parallel=DiffletParallelConfig(tp_degree=1),
+        dtype=torch.bfloat16, shape=dict(TINY_SHAPE), backend="neuron", device="cpu",
+        enable_vae_decoder=True,
+    )
+    assert type(with_vae.vae_decoder).__name__ == "_DeviceVaeDecoder"
 def test_registry_builds_the_cuda_wan_application(tmp_path, monkeypatch):
     """The cuda backend routes to the one-process GPU application.
 

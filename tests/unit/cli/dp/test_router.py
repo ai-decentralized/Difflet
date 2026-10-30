@@ -95,6 +95,34 @@ def test_check_hbm_runs_against_local_weights(monkeypatch, tmp_path):
     router_mod._check_hbm(_args())  # tiny weights fit; no raise
 
 
+def test_check_hbm_resolves_the_pinned_revision(monkeypatch, capsys, tmp_path):
+    """A cache that holds only the pinned snapshot (no refs/main) must not skip the check: the
+    router resolves --revision as its workers do (device run 2026-10-17: ``--revision 75e0b4…``
+    printed "weights not local; skipping HBM fit check" with the snapshot on disk)."""
+    import json
+    import struct
+
+    from difflet.cli.dp import router as router_mod
+
+    header = {"w": {"dtype": "BF16", "shape": [4, 4], "data_offsets": [0, 32]}}
+    blob = json.dumps(header).encode("utf-8")
+    st = tmp_path / "transformer" / "m.safetensors"
+    st.parent.mkdir(parents=True)
+    st.write_bytes(struct.pack("<Q", len(blob)) + blob + b"\x00" * 32)
+    calls = []
+
+    def resolve(model_id, *, revision=None, local_files_only=False, **kw):
+        calls.append((model_id, revision, local_files_only))
+        if revision != "abc123":  # only the pinned snapshot is local
+            raise OSError("no refs/main")
+        return str(tmp_path)
+
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path", resolve)
+    router_mod._check_hbm(_args(revision="abc123"))
+    assert calls == [("Wan-AI/Wan2.2-T2V-A14B-Diffusers", "abc123", True)]
+    assert "skipping HBM fit check" not in capsys.readouterr().out
+
+
 # A stub "worker" used instead of difflet.cli.main: claims and completes requests.
 _STUB = textwrap.dedent("""
     import argparse, sys
@@ -286,6 +314,18 @@ def _alive(pid: int) -> bool:
         return False
 
 
+def test_run_router_rerun_in_the_same_work_dir_starts_a_fresh_queue(tmp_path):
+    # A failed run leaves claim/failed markers behind; a rerun in the same work dir must not
+    # inherit them (it used to: every request looked claimed or failed, nothing ran).
+    args = _args(work_dir=str(tmp_path / "work"))
+    first = run_router(args, _requests(4), replica_cores=4,
+                       worker_argv_prefix=_stub_prefix(tmp_path) + ["--fail-index", "2"])
+    assert first != 0
+    rc = run_router(args, _requests(4), replica_cores=4,
+                    worker_argv_prefix=_stub_prefix(tmp_path))
+    assert rc == 0
+    s = summarize(tmp_path / "work" / "requests")
+    assert s.done == [0, 1, 2, 3] and not s.failed and not s.unfinished
 # ------------------------------------------------- CUDA replicas
 
 

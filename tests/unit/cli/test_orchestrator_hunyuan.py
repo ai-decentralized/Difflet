@@ -72,10 +72,11 @@ def test_download_resolves_remote(monkeypatch):
     calls = []
     monkeypatch.setattr(
         "difflet.pipeline.path_resolver.resolve_model_path",
-        lambda model_id, *, local_files_only: calls.append(local_files_only),
+        lambda model_id, *, revision=None, local_files_only: calls.append((revision, local_files_only)),
     )
     HunyuanVideoOrchestrator(_hv_args()).download()
-    assert calls == [False]
+    HunyuanVideoOrchestrator(_hv_args(revision="abc123")).download()
+    assert calls == [(None, False), ("abc123", False)]
 
 
 # ----------------------------------------------------------------- generate orchestration

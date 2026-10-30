@@ -22,6 +22,11 @@ from difflet.platforms import (
 )
 
 
+def available_backends() -> tuple[str, ...]:
+    """Every name ``resolve_backend_name`` accepts, sorted (the CLI ``--backend`` choices)."""
+    return tuple(sorted(_BACKEND_FACTORIES))
+
+
 def current_backend() -> str:
     return resolve_backend_name()
 
@@ -30,6 +35,7 @@ __all__ = [
     "_BACKEND_FACTORIES",
     "_auto_detect_backend",
     "_get_backend_by_name",
+    "available_backends",
     "current_backend",
     "get_backend",
     "importlib",

@@ -5,14 +5,25 @@ import re
 import signal
 import subprocess
 import sys
+import time
 import uuid
 from collections.abc import Mapping
 
+from difflet import envs
 from difflet.cli.parent_death import die_with_parent
 from difflet.common.neuron_cores import (
     resolve_available_neuron_core_ids,
     select_neuron_core_ids,
 )
+
+# Rank variables owned by torchrun. A copy inherited from the caller (run_stage
+# called inside a process torchrun itself launched) must not reach the new launch.
+_TORCHRUN_RANK_ENV: tuple[str, ...] = ("WORLD_SIZE", "RANK", "LOCAL_RANK", "LOCAL_WORLD_SIZE")
+# torchrun's grace period for its ranks after it forwards a stop signal (torch.distributed
+# LaunchConfig.shutdown_timeout), and the extra time an interrupted launch gives torchrun.
+_TORCHRUN_SHUTDOWN_TIMEOUT_ENV = "TORCH_ELASTIC_SHUTDOWN_TIMEOUT"
+_TORCHRUN_SHUTDOWN_DEFAULT_S = 30
+_TORCHRUN_STOP_MARGIN_S = 30
 
 
 def _is_whole_device(num_cores: int) -> bool:
@@ -31,6 +42,148 @@ def _is_whole_device(num_cores: int) -> bool:
         return False
 
 
+def build_stage_command(
+    orchestrator: str,
+    stage: str,
+    cli_args: list[str],
+    *,
+    nproc: int | None = None,
+) -> list[str]:
+    """Command line of one stage launch.
+
+    ``nproc=None`` is the single stage process every AoT backend uses (unchanged).
+    An int runs ``nproc`` ranks of the same stage module under torchrun, one per
+    NeuronCore, for a non-AoT torchrun-MPMD backend.
+    """
+    stage_module = [
+        "-m",
+        "difflet.cli.stage",
+        "--orchestrator",
+        orchestrator,
+        "--stage",
+        stage,
+        *cli_args,
+    ]
+    if nproc is None:
+        return [sys.executable, *stage_module]
+    if nproc < 1:
+        raise ValueError(f"nproc must be >= 1 for a torchrun launch, got {nproc}")
+    return [
+        sys.executable,
+        "-m",
+        "torch.distributed.run",
+        "--standalone",
+        "--nproc-per-node",
+        str(nproc),
+        *stage_module,
+    ]
+
+
+def _torchrun_mpmd_selected() -> bool:
+    """True when DIFFLET_BACKEND explicitly names a non-AoT torchrun-MPMD backend.
+
+    Opt-in only: auto-detection already resolves to ``neuron`` on a TorchNeuron
+    host (difflet/backends/registry.py, _auto_detect_backend), so keying on the
+    resolved backend would silently change every existing stage launch there. An
+    unknown name raises ValueError here, before anything is spawned.
+    """
+    name = envs.DIFFLET_BACKEND
+    if not name:
+        return False
+    from difflet.backends import get_backend
+
+    capabilities = get_backend(name).capabilities
+    return capabilities.supports_torchrun_mpmd and not capabilities.requires_aot
+
+
+def _prepare_mpmd_env(env: dict[str, str], num_cores: int, *, strict_environment: bool) -> None:
+    """Environment for ``num_cores`` torchrun ranks, one per NeuronCore.
+
+    Each rank binds its own core from NEURON_RT_VISIBLE_CORES
+    (difflet/backends/neuron/runtime.py, bind_core), so NEURON_RT_NUM_CORES and
+    NEURON_RT_VIRTUAL_CORE_SIZE, which size one process's multi-core allocation,
+    are never set here. The ranks' process-group timeout is
+    ``runtime.TORCHRUN_PG_TIMEOUT_S`` (3 h, against torch's 30 min) unless
+    DIFFLET_NEURON_PG_TIMEOUT_S is exported with a value.
+    """
+    for name in _TORCHRUN_RANK_ENV:
+        env.pop(name, None)
+    from difflet.backends.neuron.runtime import PG_TIMEOUT_ENV, TORCHRUN_PG_TIMEOUT_S
+
+    if not (env.get(PG_TIMEOUT_ENV) or "").strip():
+        env[PG_TIMEOUT_ENV] = str(TORCHRUN_PG_TIMEOUT_S)
+    # Before the ranks start: the HLO cache location is read when torch_neuronx is imported,
+    # so prepare_runtime (which sets the NEFF cache) is too late for it.
+    from difflet.backends.neuron.compile import configure_compile_cache
+
+    configure_compile_cache(env=env)
+    if strict_environment:
+        visible_core_ids = select_neuron_core_ids(required_num_cores=num_cores)
+        env["NEURON_RT_VISIBLE_CORES"] = ",".join(str(core_id) for core_id in visible_core_ids)
+        # A stale inherited count would contradict the per-rank binding.
+        env.pop("NEURON_RT_NUM_CORES", None)
+
+
+def _torchrun_stop_timeout(env: Mapping[str, str]) -> float:
+    """How long an interrupted launch waits for torchrun before killing it.
+
+    torchrun signals every rank, waits TORCH_ELASTIC_SHUTDOWN_TIMEOUT (30 s unless set; parsed
+    with int() as torchrun does) and then SIGKILLs the ranks still running; the margin covers
+    that and its own teardown.
+    """
+    try:
+        shutdown_s = int(env.get(_TORCHRUN_SHUTDOWN_TIMEOUT_ENV, _TORCHRUN_SHUTDOWN_DEFAULT_S))
+    except ValueError:
+        shutdown_s = _TORCHRUN_SHUTDOWN_DEFAULT_S
+    return float(max(shutdown_s, 0) + _TORCHRUN_STOP_MARGIN_S)
+
+
+def _run_torchrun(cmd: list[str], env: dict[str, str]) -> None:
+    """``subprocess.run(cmd, env=env, check=True)`` for a torchrun launch, except that torchrun
+    is never killed before it has stopped its ranks.
+
+    torchrun starts every rank in a session of its own, so a terminal's Ctrl-C reaches torchrun
+    (in this process's group) but not the ranks, and only torchrun can stop them: it forwards
+    the signal, waits, then SIGKILLs the ranks still running (one blocked in a native Neuron
+    compile or collective cannot run Python's SIGINT handler). ``subprocess.run`` SIGKILLs
+    torchrun 0.25 s after a KeyboardInterrupt, which would leave such ranks holding their
+    NeuronCores. On KeyboardInterrupt this waits for torchrun instead (another Ctrl-C does not
+    cut the wait short; torchrun receives that one too), kills it only after
+    ``_torchrun_stop_timeout``, and re-raises. Any other exception first sends torchrun
+    SIGTERM, which it handles like SIGINT. A non-zero exit raises CalledProcessError.
+    """
+    proc = subprocess.Popen(cmd, env=env)
+    try:
+        returncode = proc.wait()
+    except BaseException as exc:
+        if not isinstance(exc, KeyboardInterrupt):
+            proc.terminate()
+        _await_torchrun_exit(proc, _torchrun_stop_timeout(env))
+        raise
+    if returncode:
+        raise subprocess.CalledProcessError(returncode, cmd)
+
+
+def _await_torchrun_exit(proc: subprocess.Popen, timeout: float) -> None:
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            proc.wait(timeout=max(deadline - time.monotonic(), 0.0))
+            return
+        except KeyboardInterrupt:
+            continue  # Ctrl-C again: torchrun got it as well and is still stopping its ranks
+        except subprocess.TimeoutExpired:
+            break
+    print(
+        f"[difflet] torchrun (pid {proc.pid}) did not exit {timeout:.0f}s after being "
+        "interrupted; killing it (its ranks may still hold NeuronCores)",
+        file=sys.stderr,
+        flush=True,
+    )
+    proc.kill()
+    proc.wait()
+
+
 def run_stage(
     orchestrator: str,
     stage: str,
@@ -43,7 +196,16 @@ def run_stage(
 
     Staged CLI calls preserve explicit shell overrides. Serving compilation uses
     ``strict_environment=True`` so the compiled topology matches its identity.
+    When DIFFLET_BACKEND names a non-AoT torchrun-MPMD backend (neuron), the stage
+    runs as ``num_cores`` torchrun ranks and ``virtual_core_size`` does not apply; an
+    interrupt then waits for torchrun to stop its ranks (``_run_torchrun``). The ranks
+    also get the neuron compile-cache locations (NEFF, NEFF locks, HLO) under
+    DIFFLET_COMPILE_CACHE, and NKI_ENABLE_TRACE_CACHE=0: torch-neuronx fixes its HLO
+    lock directory when a rank imports torch, before any Difflet code runs there.
+    Locations the shell exported are kept; the NKI trace cache is turned off as
+    ``prepare_runtime`` would turn it off in each rank anyway.
     """
+    nproc = num_cores if _torchrun_mpmd_selected() else None
     env = os.environ.copy()
     # Give every stage invocation its own compiler scratch dir. The vendor
     # ModelBuilder.trace() starts by rmtree-ing its workdir, and the default
@@ -56,7 +218,9 @@ def run_stage(
     if "BASE_COMPILE_WORK_DIR" not in os.environ:
         slug = re.sub(r"[^A-Za-z0-9._-]+", "_", orchestrator.split("/")[-1]).lower()
         env["BASE_COMPILE_WORK_DIR"] = f"/tmp/nxd_model/{slug}-{stage}-{uuid.uuid4().hex[:8]}/"
-    if strict_environment:
+    if nproc is not None:
+        _prepare_mpmd_env(env, num_cores, strict_environment=strict_environment)
+    elif strict_environment:
         visible_core_ids = select_neuron_core_ids(required_num_cores=num_cores)
         env["NEURON_RT_VISIBLE_CORES"] = ",".join(str(core_id) for core_id in visible_core_ids)
         if not _is_whole_device(num_cores):
@@ -77,18 +241,12 @@ def run_stage(
         if virtual_core_size is not None:
             env.setdefault("NEURON_RT_VIRTUAL_CORE_SIZE", str(virtual_core_size))
 
-    cmd = [
-        sys.executable,
-        "-m",
-        "difflet.cli.stage",
-        "--orchestrator",
-        orchestrator,
-        "--stage",
-        stage,
-        *cli_args,
-    ]
+    cmd = build_stage_command(orchestrator, stage, cli_args, nproc=nproc)
     try:
-        subprocess.run(cmd, env=env, check=True)
+        if nproc is None:
+            subprocess.run(cmd, env=env, check=True)
+        else:
+            _run_torchrun(cmd, env)
     except BaseException:
         # Keep the scratch dir for post-mortem on failure.
         raise

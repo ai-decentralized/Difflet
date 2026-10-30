@@ -69,6 +69,9 @@ class BenchConfig:
     # note about stages that run on the host (not a Neuron load line), explaining
     # the compute residual for host-pipeline models.
     e2e_host_note: str = ""
+    # The benchmark backends (bench.py --backend) this entry is for; None = any. `bench.py
+    # --all` skips an entry whose tuple excludes the selected backend.
+    backends: tuple[str, ...] | None = None
 
     def shape_flags(self) -> list[str]:
         f: list[str] = []
@@ -129,6 +132,20 @@ MATRIX: dict[str, BenchConfig] = {
         config_label="tp=4, bf16, single-transformer (no MoE), attention_cte, 2-stage "
                      "(transformer + VAE) subprocess pipeline",
         stage_names=["text_encoder (UMT5)", "transformer (denoise loop)", "vae_decoder"],
+    ),
+    # The neuron backend (TorchNeuron, one process per NeuronCore): same model, revision,
+    # shape, prompt and seed as wan_2_1, 50 steps. guidance 1.0 keeps the row comparable with
+    # the trn2 one; benchmark/neuron_cold_warm.py measures guidance 5.0 (the headline) too.
+    "wan_2_1_neuron": BenchConfig(
+        model_id="Wan-AI/Wan2.1-T2V-14B-Diffusers",
+        revision="38ec498cb3208fb688890f8cc7e94ede2cbd7f68",
+        model_type="wan",
+        tp=4, height=480, width=832, num_frames=9, steps=50, guidance_scale=1.0,
+        output_kind="video",
+        extra_generate_flags=["--host-vae", "--backend", "neuron", "--exec-mode", "compile"],
+        config_label="tp=4, bf16, TorchNeuron per-block torch.compile, host fp32 umT5 on "
+                     "rank 0, host VAE",
+        backends=("neuron",),
     ),
     "wan_2_2": BenchConfig(
         model_id="Wan-AI/Wan2.2-T2V-A14B-Diffusers",

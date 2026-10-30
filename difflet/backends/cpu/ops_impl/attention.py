@@ -70,18 +70,28 @@ def ring_attention(q, k, v, *, scale: float, causal: bool = False):
     return out.reshape(b, h, s_q, d)
 
 
-def joint_ring_attention(q, image_k, image_v, text_k, text_v, *, scale: float, causal: bool = False):
+def joint_ring_attention(
+    q, image_k, image_v, text_k, text_v, *, scale: float, causal: bool = False,
+    text_valid_len=None,
+):
     # cp_degree == 1 reference: the ring degenerates to plain full joint attention
     # over the concatenated [image, text] keys. This is the merge-math oracle.
     full_k = torch.cat([image_k, text_k], dim=2)
     full_v = torch.cat([image_v, text_v], dim=2)
     b, h, s_q, d = q.shape
     s_k = full_k.shape[2]
+    bounds = {}
+    if text_valid_len is not None:
+        # Right-padded text after the (all-valid) image keys: keys
+        # [0, S_img + count) are valid for every query.
+        count = image_k.shape[2] + text_valid_len.to(torch.int32).reshape(b, 1, 1, 1)
+        bound_max = count.expand(b, h, s_q, 1).reshape(b * h, s_q, 1).contiguous()
+        bounds = {"bound_min": torch.zeros_like(bound_max), "bound_max": bound_max}
     out = attention(
         q.reshape(b * h, s_q, d),
         full_k.reshape(b * h, s_k, d),
         full_v.reshape(b * h, s_k, d),
-        scale=scale, causal=causal, tp_q=True, tp_k=True, tp_out=False,
+        scale=scale, causal=causal, tp_q=True, tp_k=True, tp_out=False, **bounds,
     )
     return out.reshape(b, h, s_q, d)
 

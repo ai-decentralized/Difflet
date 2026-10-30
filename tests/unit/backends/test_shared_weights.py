@@ -309,6 +309,7 @@ def test_link_failure_leaves_no_partial_directory(tmp_path, monkeypatch):
 
 def test_probe_and_backbone_apps_share_one_store_entry(tmp_path):
     """Full-layout probes share shards; prefix-only probes use a separate store."""
+    pytest.importorskip("neuronx_distributed")  # the Trainium probe applications need NxD
     from difflet.backends.trainium.flux.teacache_probe_fused import (
         NeuronFluxTeacacheProbeFusedApplication,
     )

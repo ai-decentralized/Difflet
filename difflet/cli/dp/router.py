@@ -105,19 +105,40 @@ def worker_cli_args(args) -> list[str]:
         ("--seed", args.seed),
         ("--cache-dir", args.cache_dir),
         ("--revision", getattr(args, "revision", None)),
+        # The torchrun backends' options: a worker that lost them would, e.g., load the text
+        # encoder on the device beside a narrower TP shard than its HBM allows.
+        ("--exec-mode", getattr(args, "exec_mode", None)),
+        # Component precisions (a worker that lost them would decode or encode in the default).
+        ("--vae-dtype", getattr(args, "vae_dtype", None)),
+        ("--vae-exec-mode", getattr(args, "vae_exec_mode", None)),
+        ("--text-encoder-dtype", getattr(args, "text_encoder_dtype", None)),
+        ("--guidance-scale-2", getattr(args, "guidance_scale_2", None)),
+        # TeaCache: a worker that lost these would silently run without it.
+        ("--teacache-cadence", getattr(args, "teacache_cadence", None)),
+        ("--teacache-online-delta", getattr(args, "teacache_online_delta", None)),
+        ("--teacache-speedup", getattr(args, "teacache_speedup", None)),
+        ("--teacache-calibration", getattr(args, "teacache_calibration", None)),
+        ("--true-cfg-scale", getattr(args, "true_cfg_scale", None)),
+        # The default for requests without one of their own (a manifest line's wins).
+        ("--negative-prompt", getattr(args, "negative_prompt", None)),
     ):
         if value is not None:
             argv += [flag, str(value)]
-    if getattr(args, "cfg_parallel", False):
-        argv.append("--cfg-parallel")
-    if getattr(args, "sp_enabled", False):
-        argv.append("--sp")
+    for flag, name in (
+        ("--cfg-parallel", "cfg_parallel"),
+        ("--sp", "sp_enabled"),
+        ("--keep-work-dir", "keep_work_dir"),
+        ("--torch-compile", "torch_compile"),
+        ("--host-text-encoder", "host_text_encoder"),
+        ("--device-text-encoder", "device_text_encoder"),
+        ("--host-vae", "host_vae"),
+        ("--device-vae", "device_vae"),
+        ("--dual-expert", "dual_expert"),
+    ):
+        if getattr(args, name, False):
+            argv.append(flag)
     if getattr(args, "tp_reduce_dtype", None):
         argv += ["--tp-reduce-dtype", args.tp_reduce_dtype]
-    if getattr(args, "keep_work_dir", False):
-        argv.append("--keep-work-dir")
-    if getattr(args, "torch_compile", False):
-        argv.append("--torch-compile")
     return argv
 
 
@@ -126,7 +147,11 @@ def _check_hbm(args) -> None:
     from difflet.pipeline.path_resolver import resolve_model_path
 
     try:
-        model_path = resolve_model_path(args.model_id, local_files_only=True)
+        # The pinned --revision, as the workers resolve it: without it the check would read
+        # refs/main (another snapshot, or none at all in a cache that holds only the pin).
+        model_path = resolve_model_path(
+            args.model_id, revision=getattr(args, "revision", None), local_files_only=True
+        )
     except OSError:
         print("[dp-router] weights not local; skipping HBM fit check", flush=True)
         return
@@ -149,6 +174,10 @@ def run_router(
         requests = [
             dataclasses.replace(req, assigned_worker=req.index % dp) for req in requests
         ]
+    # A new queue: an earlier run's claim/done/failed markers in a reused work dir would make
+    # every request look claimed or failed, and the workers would exit with nothing done.
+    for stale in requests_dir.glob("req_*"):
+        stale.unlink()
     write_manifest(requests, requests_dir)
     _check_hbm(args)
 

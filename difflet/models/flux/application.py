@@ -37,7 +37,7 @@ from difflet.backends.trainium.core.multi_component_application import (
     ComponentSpec,
     MultiComponentApplication,
 )
-from difflet.models.flux.clip.modeling_clip import (
+from difflet.backends.trainium.flux.clip import (
     CLIPInferenceConfig,
     NeuronClipApplication,
 )
@@ -50,11 +50,11 @@ from difflet.backends.trainium.flux.backbone import (
 )
 from difflet.models.flux.pipeline import NeuronFluxPipeline
 from diffusers.models.autoencoders.vae import DecoderTiny
-from difflet.models.flux.vae.modeling_vae import (
+from difflet.backends.trainium.flux.vae import (
     NeuronVAEDecoderApplication,
     VAEDecoderInferenceConfig,
 )
-from difflet.models.flux.t5.modeling_t5 import (
+from difflet.backends.trainium.flux.t5 import (
     NeuronT5Application,
     T5InferenceConfig,
 )

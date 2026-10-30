@@ -3,6 +3,16 @@
 The first M4a runtime path keeps Qwen2.5-VL prompt encoding, scheduler setup,
 and VAE decode on the host side. The Trainium boundary is the packed-latent
 DiT call represented by ``QwenImageDiTInputBundle``.
+
+True classifier-free guidance is opt-in (``true_cfg_scale`` > 1 with negative
+prompt embeddings), as in diffusers 0.38's ``QwenImagePipeline``: two DiT
+forwards per step, the conditional one and the negative one, combined by
+``true_cfg_noise_pred`` (``neg + scale * (cond - neg)``, rescaled to the
+conditional prediction's norm over the channel axis). Without it every call is
+the single forward per step it always was, bit for bit. A transformer whose
+config has ``cfg_parallel_enabled`` (the neuron backend's CFG parallelism)
+gets the two branches as one batch-2 call, ``[negative, conditional]``, and
+splits them over its CFG group itself.
 """
 
 from __future__ import annotations
@@ -15,6 +25,8 @@ from typing import Any
 import numpy as np
 import torch
 
+# From the NxD-free contract module (application.py re-exports the same class): the neuron and
+# TPU applications build this orchestrator in environments without neuronx_distributed.
 from difflet.models.qwen_image.contract import QwenImageDiTInputBundle
 from difflet.utils.latent_dump import dump_latents
 from difflet.utils.step_timing import StepTimer, maybe_forward
@@ -187,7 +199,14 @@ class QwenImageOrchestrator:
         generator: torch.Generator | None = None,
         return_dict: bool = True,
         return_trajectory: bool = False,
+        true_cfg_scale: float | None = None,
+        negative_encoder_hidden_states: torch.Tensor | None = None,
+        negative_encoder_hidden_states_mask: torch.Tensor | None = None,
     ) -> QwenImagePipelineOutput | tuple[torch.Tensor]:
+        """The denoise loop (and the decode for ``output_type="pt"``). ``true_cfg_scale`` > 1
+        with ``negative_encoder_hidden_states`` (and its mask, all-True when omitted) runs true
+        classifier-free guidance; either one alone warns and runs without it, as diffusers'
+        ``QwenImagePipeline`` does."""
         if output_type not in {"latent", "pt"}:
             raise ValueError("Qwen-Image output_type currently supports only 'latent' or 'pt'.")
         if bundle is None:
@@ -208,6 +227,12 @@ class QwenImageOrchestrator:
             )
 
         packed_latents = bundle.hidden_states
+        negative = _negative_bundle(
+            bundle,
+            true_cfg_scale=true_cfg_scale,
+            encoder_hidden_states=negative_encoder_hidden_states,
+            encoder_hidden_states_mask=negative_encoder_hidden_states_mask,
+        )
         trajectory: list[torch.Tensor] | None = [] if return_trajectory else None
         if trajectory is not None:
             trajectory.append(packed_latents.detach().cpu())
@@ -234,11 +259,18 @@ class QwenImageOrchestrator:
                     controller.calibration.num_steps
                 ):
                     controller = None
+            if negative is not None and controller is not None:
+                raise ValueError(
+                    "Qwen-Image true classifier-free guidance (true_cfg_scale > 1) does not "
+                    "combine with TeaCache"
+                )
             packed_latents = self._denoise(
                 bundle=bundle,
                 timesteps=timesteps,
                 trajectory=trajectory,
                 controller=controller,
+                negative=negative,
+                true_cfg_scale=true_cfg_scale,
             )
 
         images = packed_latents
@@ -276,6 +308,8 @@ class QwenImageOrchestrator:
         timesteps: torch.Tensor,
         trajectory: list[torch.Tensor] | None,
         controller: Any | None,
+        negative: QwenImageDiTInputBundle | None = None,
+        true_cfg_scale: float | None = None,
     ) -> torch.Tensor:
         latents = bundle.hidden_states
         dump_latents("initial", latents)
@@ -311,7 +345,10 @@ class QwenImageOrchestrator:
                 # Skipped entirely in fixed-cadence mode (probe-free, cclog 84).
                 delta_t = self.transformer.teacache_delta(model_bundle)
                 delta_scalar = float(delta_t.detach().cpu().item())
-            if controller is not None and controller.should_skip(
+            if negative is not None:
+                noise_pred = self._true_cfg_step(model_bundle, negative, model_dtype,
+                                                 float(true_cfg_scale))
+            elif controller is not None and controller.should_skip(
                 step_index,
                 None,
                 diff_norm=delta_scalar,
@@ -329,6 +366,36 @@ class QwenImageOrchestrator:
                 step_timer.step_done(step_index)
         dump_latents("final", latents)
         return latents
+
+    def _true_cfg_step(
+        self,
+        model_bundle: QwenImageDiTInputBundle,
+        negative: QwenImageDiTInputBundle,
+        model_dtype: torch.dtype,
+        true_cfg_scale: float,
+    ) -> torch.Tensor:
+        """One true-CFG noise prediction: the conditional forward, then the negative one (in
+        diffusers' order), or one batch-2 ``[negative, conditional]`` forward when the
+        transformer splits the batch over a CFG group (``cfg_parallel_enabled``)."""
+        negative_bundle = QwenImageDiTInputBundle(
+            hidden_states=model_bundle.hidden_states,
+            timestep=model_bundle.timestep,
+            encoder_hidden_states=negative.encoder_hidden_states.to(dtype=model_dtype),
+            encoder_hidden_states_mask=negative.encoder_hidden_states_mask,
+            guidance=model_bundle.guidance,
+        )
+        if bool(getattr(_component_config(self.transformer), "cfg_parallel_enabled", False)):
+            pair = (negative_bundle, model_bundle)
+            joint = QwenImageDiTInputBundle(
+                *(torch.cat([getattr(b, name) for b in pair], dim=0)
+                  for name in ("hidden_states", "timestep", "encoder_hidden_states",
+                               "encoder_hidden_states_mask", "guidance"))
+            )
+            negative_pred, noise_pred = _first_tensor(self.transformer(joint)).chunk(2)
+        else:
+            noise_pred = _first_tensor(self.transformer(model_bundle))
+            negative_pred = _first_tensor(self.transformer(negative_bundle))
+        return true_cfg_noise_pred(noise_pred, negative_pred, true_cfg_scale)
 
     def _scheduler_step(
         self,
@@ -371,6 +438,67 @@ class QwenImageOrchestrator:
         if decode is None:
             return _first_tensor(self.vae(latents.to(dtype=dtype)))
         return _first_tensor(decode(latents.to(dtype=dtype), return_dict=False))
+
+
+def true_cfg_noise_pred(
+    noise_pred: torch.Tensor, negative_noise_pred: torch.Tensor, true_cfg_scale: float
+) -> torch.Tensor:
+    """diffusers 0.38 ``QwenImagePipeline``'s true-CFG combination, verbatim: the guided
+    prediction ``neg + scale * (cond - neg)``, rescaled per token to the conditional
+    prediction's norm over the channel axis (so guidance changes the direction of the update,
+    not its size). Computed in the predictions' dtype, as there."""
+    comb_pred = negative_noise_pred + true_cfg_scale * (noise_pred - negative_noise_pred)
+    cond_norm = torch.norm(noise_pred, dim=-1, keepdim=True)
+    noise_norm = torch.norm(comb_pred, dim=-1, keepdim=True)
+    return comb_pred * (cond_norm / noise_norm)
+
+
+def _negative_bundle(
+    bundle: QwenImageDiTInputBundle,
+    *,
+    true_cfg_scale: float | None,
+    encoder_hidden_states: torch.Tensor | None,
+    encoder_hidden_states_mask: torch.Tensor | None,
+) -> QwenImageDiTInputBundle | None:
+    """The negative branch's inputs when true CFG is on (``true_cfg_scale`` > 1 and negative
+    embeddings), else None. As diffusers does, a scale without negative embeddings, or negative
+    embeddings without a scale above 1, warns and leaves guidance off. The negative embeddings
+    must have the conditional ones' shape: a CFG-parallel call batches the two."""
+    enabled = true_cfg_scale is not None and float(true_cfg_scale) > 1.0
+    if enabled and encoder_hidden_states is None:
+        warnings.warn(
+            f"true_cfg_scale is passed as {true_cfg_scale}, but classifier-free guidance is not "
+            "enabled since no negative prompt is provided",
+            RuntimeWarning,
+            stacklevel=3,
+        )
+        return None
+    if not enabled:
+        if encoder_hidden_states is not None:
+            warnings.warn(
+                "negative prompt embeddings are passed but classifier-free guidance is not "
+                "enabled since true_cfg_scale <= 1",
+                RuntimeWarning,
+                stacklevel=3,
+            )
+        return None
+    if tuple(encoder_hidden_states.shape) != tuple(bundle.encoder_hidden_states.shape):
+        raise ValueError(
+            "negative_encoder_hidden_states has shape "
+            f"{tuple(encoder_hidden_states.shape)}, the prompt's "
+            f"{tuple(bundle.encoder_hidden_states.shape)}: pad both to the same text length"
+        )
+    if encoder_hidden_states_mask is None:
+        encoder_hidden_states_mask = torch.ones(
+            encoder_hidden_states.shape[:2], dtype=torch.bool, device=encoder_hidden_states.device
+        )
+    return QwenImageDiTInputBundle(
+        hidden_states=bundle.hidden_states,
+        timestep=bundle.timestep,
+        encoder_hidden_states=encoder_hidden_states,
+        encoder_hidden_states_mask=encoder_hidden_states_mask,
+        guidance=bundle.guidance,
+    )
 
 
 def pack_qwen_image_latents(latents: torch.Tensor) -> torch.Tensor:
