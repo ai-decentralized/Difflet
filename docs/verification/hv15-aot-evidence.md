@@ -330,3 +330,13 @@ refuses non-zero `image_embeds` on the AOT path). The graph changed, so aot-tp2 
 after the fix (below). Unit tests: `test_trace_forward_keeps_the_t2v_switch_in_graph`,
 `test_trace_forward_reduces_the_t2v_flag_with_a_full_max`
 (`tests/unit/backends/trainium/test_hv15_parallel.py`).
+
+**aot-tp2 after bug 2.** `difflet compile --tp-degree 2` after `fd2a8aa` returned in 0.2 s
+("compiled into …039f757f7229a3ac (0.2 s)"): the stage reuses an existing artifact, and its key
+has no code version, so the pre-fix NEFF would have stayed in use. The stale dir was moved aside
+(`039f757f7229a3ac.stale-pre-fd2a8aa`, not deleted) and the DiT recompiled in 462.2 s (483.9 s
+wall, `E/phase1/aot-tp2/compile_postfix.log`). The post-fix 3-step generate (154.4 s wall; DiT
+load 111.1 s; denoise 9.3 s, median 2719 ms) gives `latents.pt` **bit-identical** to the pre-fix
+run (`aeaab2fb…`, `cmp_gen3_postfix.work_latents__vs__aot-tp2_gen3.work_latents.json`): the
+in-graph switch changes nothing numerically, and the AOT DiT is deterministic across a recompile.
+The native-input comparisons above used the pre-fix NEFF and therefore stand.
