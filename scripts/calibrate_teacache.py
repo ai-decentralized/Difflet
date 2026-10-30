@@ -315,6 +315,118 @@ def _collect_hunyuan_video_pairs(args: argparse.Namespace) -> dict[str, Any]:
     }
 
 
+HV15_MODEL = "hunyuan_video_15"
+# The x signal is the runtime probe's output (rel-L1 of block-0's modulated input vs the previous
+# step), not HV1.0's L2 norm, so the fitted polynomial is applied to the same quantity at runtime.
+HV15_MOD_INPUT_SOURCE = "block0_modulated_input_rel_l1"
+
+
+def _rel_l1(cur: torch.Tensor, prev: torch.Tensor) -> float:
+    cur, prev = cur.float(), prev.float()
+    return float(((cur - prev).abs().sum() / prev.abs().sum()).item())
+
+
+def collect_hv15_samples(
+    denoiser: Any,
+    embeds: dict[str, torch.Tensor],
+    *,
+    num_inference_steps: int,
+    generator: torch.Generator | None = None,
+) -> list[dict[str, Any]]:
+    """Run the full denoising trajectory, one (probe rel-L1, guided noise_pred rel-L1) pair per step.
+
+    Observes the unmodified AOT loop: the DiT adapter's first call each step sees that step's
+    latent_input (-> the DiT's own ``make_teacache_probe()``, as at runtime) and the scheduler
+    sees the guided noise_pred. ``denoiser`` must be loaded and built without TeaCache.
+    """
+    dit, scheduler = denoiser.dit, denoiser.scheduler
+    probe = dit.make_teacache_probe()
+    probe.reset()
+    state: dict[str, Any] = {"fresh": True, "x": [], "pred": []}
+
+    class _ProbingDit:
+        def __getattr__(self, name):
+            return getattr(dit, name)
+
+        def __call__(self, **kw):
+            if state["fresh"]:
+                state["fresh"] = False
+                state["x"].append(float(probe.teacache_delta(kw["hidden_states"], kw["timestep"])))
+            return dit(**kw)
+
+    real_step = scheduler.step
+
+    def _step(noise_pred, *args, **kwargs):
+        state["pred"].append(noise_pred.detach().float().cpu().clone())
+        state["fresh"] = True
+        return real_step(noise_pred, *args, **kwargs)
+
+    denoiser.dit, scheduler.step = _ProbingDit(), _step
+    try:
+        denoiser(**embeds, num_inference_steps=int(num_inference_steps), generator=generator)
+    finally:
+        denoiser.dit, scheduler.step = dit, real_step
+    return [
+        {
+            "step_index": i,
+            "mod_input_diff_norm": state["x"][i],
+            "noise_pred_diff_norm": _rel_l1(state["pred"][i], state["pred"][i - 1]),
+        }
+        for i in range(1, len(state["pred"]))
+    ]
+
+
+def _load_hv15_denoiser(args: argparse.Namespace):
+    from difflet.models.hunyuan_video.aot15 import AotHunyuanVideo15DiT, build_aot_application
+    from difflet.models.hunyuan_video.pipeline15 import HunyuanVideo15Denoiser
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+
+    # The probe component is compiled with the DiT; the loop itself runs without TeaCache so
+    # every step is a full step.
+    app = build_aot_application(
+        model_path=args.source_dir,
+        parallel=DiffletParallelConfig(tp_degree=args.tp_degree),
+        height=args.height,
+        width=args.width,
+        num_frames=args.num_frames,
+        teacache_fused=True,
+    )
+    dit = AotHunyuanVideo15DiT(app, args.compiled_dir, cfg=1)
+    denoiser = HunyuanVideo15Denoiser(
+        dit,
+        model_path=str(args.source_dir),
+        height=args.height,
+        width=args.width,
+        num_frames=args.num_frames,
+        dtype=app.dtype,
+    )
+    denoiser.load(skip_warmup=bool(args.skip_warmup))
+    return denoiser
+
+
+def _collect_hv15_pairs(args: argparse.Namespace) -> dict[str, Any]:
+    num_steps = int(args.num_inference_steps or 50)
+    embeds = torch.load(args.embeds, map_location="cpu")
+    started = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    samples = collect_hv15_samples(
+        _load_hv15_denoiser(args),
+        embeds,
+        num_inference_steps=num_steps,
+        generator=torch.Generator().manual_seed(int(args.seed)),
+    )
+    return {
+        "schema": PAIRS_SCHEMA,
+        "model": HV15_MODEL,
+        "shape_label": f"{args.height}x{args.width}x{args.num_frames}",
+        "num_steps": num_steps,
+        "mod_input_source": HV15_MOD_INPUT_SOURCE,
+        "hardware_measured": True,
+        "started_at": started,
+        "completed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "samples": samples,
+    }
+
+
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pairs-json", default=None, help="Collected scalar pair JSON")
@@ -350,6 +462,11 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--dtype", default="bfloat16", choices=("bfloat16", "float16", "float32"))
     parser.add_argument("--num-inference-steps", type=int, default=None)
     parser.add_argument("--skip-warmup", action="store_true")
+    parser.add_argument("--embeds", default=None, help="hunyuan_video_15: the encode stage's embeds.pt")
+    parser.add_argument("--height", type=int, default=320)
+    parser.add_argument("--width", type=int, default=512)
+    parser.add_argument("--num-frames", type=int, default=61)
+    parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--allow-hardware", action="store_true")
     parser.add_argument("--foreground-ack", default="")
     return parser.parse_args()
@@ -357,7 +474,16 @@ def _parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = _parse_args()
-    if args.collect_hv_pairs_out:
+    if args.model == HV15_MODEL and args.pairs_json is None:
+        if not args.allow_hardware or args.foreground_ack != FOREGROUND_ACK:
+            raise RuntimeError(f"{HV15_MODEL} collection needs --allow-hardware and --foreground-ack {FOREGROUND_ACK!r}")
+        if not (args.source_dir and args.compiled_dir and args.embeds and args.out):
+            raise ValueError(f"{HV15_MODEL} collection needs --source-dir, --compiled-dir, --embeds and --out")
+        pairs_out = Path(args.collect_hv_pairs_out or str(args.out) + ".pairs.json")
+        pairs_out.parent.mkdir(parents=True, exist_ok=True)
+        pairs_out.write_text(json.dumps(_collect_hv15_pairs(args), indent=2, sort_keys=True) + "\n")
+        args.pairs_json = str(pairs_out)
+    elif args.collect_hv_pairs_out:
         pairs_doc = _collect_hunyuan_video_pairs(args)
         collect_out = Path(args.collect_hv_pairs_out)
         collect_out.parent.mkdir(parents=True, exist_ok=True)
