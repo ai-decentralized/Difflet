@@ -458,6 +458,40 @@ def test_dit_input_contract_15_shapes():
     assert contract["image_embeds"]["shape"] == (1, 4, 7)
 
 
+def test_host_refiner_matches_diffusers_context_embedder(tmp_path):
+    # diffusers builds context_embedder with the refiner's default mlp_ratio (4.0),
+    # not the transformer's; a config with mlp_ratio != 4 must still load and match.
+    from diffusers.models.transformers.transformer_hunyuan_video15 import (
+        HunyuanVideo15Transformer3DModel,
+    )
+    from safetensors.torch import save_file
+
+    torch.manual_seed(0)
+    dims = dict(
+        text_embed_dim=12, num_attention_heads=4, attention_head_dim=8, num_refiner_layers=1,
+        mlp_ratio=2.0,
+    )
+    model = HunyuanVideo15Transformer3DModel(
+        in_channels=4, out_channels=4, num_layers=1, text_embed_2_dim=10, image_embed_dim=6,
+        rope_axes_dim=(2, 2, 4), **dims,
+    ).eval()
+    (tmp_path / "transformer").mkdir()
+    save_file(
+        {k: v.contiguous() for k, v in model.state_dict().items() if k.startswith("context_embedder.")},
+        str(tmp_path / "transformer" / "diffusion_pytorch_model.safetensors"),
+    )
+    application = app.NeuronHunyuanVideoApplication(
+        model_path=str(tmp_path), parallel=_parallel(), dtype=torch.float32, shape={},
+        model_version="1.5",
+    )
+    application.transformer = SimpleNamespace(config=SimpleNamespace(**dims))
+    raw, timestep, mask = torch.randn(1, 5, 12), torch.tensor([500.0]), torch.ones(1, 5)
+    with torch.no_grad():
+        refined = application._get_host_refiner()(raw, timestep, mask)
+        expected = model.context_embedder(raw, timestep, mask)
+    assert torch.allclose(refined, expected, atol=1e-5)
+
+
 # --------------------------------------------------------------------------- #
 # TeaCache probe sub-app: opt-out for callers that never run adaptive modes
 # --------------------------------------------------------------------------- #

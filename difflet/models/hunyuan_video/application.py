@@ -854,12 +854,13 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
         from safetensors.torch import load_file
 
         cfg = self.transformer.config
+        # Built exactly like diffusers' context_embedder: the refiner keeps its own default
+        # mlp_ratio (4.0); the transformer's mlp_ratio applies to the dual-stream blocks only.
         refiner = HunyuanVideo15TokenRefiner(
             in_channels=int(cfg.text_embed_dim),
             num_attention_heads=int(cfg.num_attention_heads),
             attention_head_dim=int(cfg.attention_head_dim),
             num_layers=int(cfg.num_refiner_layers),
-            mlp_ratio=float(getattr(cfg, "mlp_ratio", 4.0)),
         )
         prefix = "context_embedder."
         state: dict[str, torch.Tensor] = {}
