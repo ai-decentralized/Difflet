@@ -7,6 +7,7 @@ reference path is covered by CPU tests.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 from dataclasses import dataclass
 from typing import Any
@@ -79,7 +80,9 @@ class HunyuanVideo15DiTInputBundle:
     """Host-side contract for one HunyuanVideo 1.5 DiT call.
 
     HunyuanVideo 1.5 uses Qwen2.5-VL embeddings, ByT5 glyph embeddings, and
-    image-semantic embeddings in addition to the latent tensor.
+    image-semantic embeddings in addition to the latent tensor. ``text_order`` is the
+    valid-first permutation of the joint ``[image, byt5, mllm]`` text stream
+    (``hv15_text_order``); ``forward_dit`` derives it from the masks when it is None.
     """
 
     hidden_states: torch.Tensor
@@ -90,9 +93,10 @@ class HunyuanVideo15DiTInputBundle:
     encoder_hidden_states_2: torch.Tensor
     encoder_attention_mask_2: torch.Tensor
     image_embeds: torch.Tensor
+    text_order: torch.Tensor | None = None
 
     def as_model_inputs(self) -> tuple[torch.Tensor, ...]:
-        return (
+        inputs = (
             self.hidden_states,
             self.timestep,
             self.encoder_hidden_states,
@@ -102,6 +106,7 @@ class HunyuanVideo15DiTInputBundle:
             self.encoder_attention_mask_2,
             self.image_embeds,
         )
+        return inputs if self.text_order is None else (*inputs, self.text_order)
 
 
 def allowed_hunyuan_video_latent_shapes(config: Any) -> list[tuple[int, ...]]:
@@ -223,6 +228,10 @@ def validate_hunyuan_video15_dit_inputs(
         ),
         "encoder_attention_mask_2": ((batch_size, text_seq_len_2), torch.int64),
         "image_embeds": ((batch_size, image_seq_len, int(config.image_embed_dim)), dtype),
+        "text_order": (
+            (batch_size, image_seq_len + text_seq_len_2 + text_seq_len),
+            torch.int64,
+        ),
     }
     tensors = {
         "hidden_states": bundle.hidden_states,
@@ -234,6 +243,8 @@ def validate_hunyuan_video15_dit_inputs(
         "encoder_attention_mask_2": bundle.encoder_attention_mask_2,
         "image_embeds": bundle.image_embeds,
     }
+    if bundle.text_order is not None:
+        tensors["text_order"] = bundle.text_order
     for name, tensor in tensors.items():
         shape, tensor_dtype = expected[name]
         if tuple(tensor.shape) != shape:
@@ -307,6 +318,10 @@ def create_hunyuan_video15_backbone_config(
     text_seq_len_2: int = 256,
     image_seq_len: int = 729,
     batch_size: int = 1,
+    cfg_parallel_enabled: bool = False,
+    cp_degree: int = 1,
+    cp_mode: str = "ulysses",
+    sp_enabled: bool = False,
 ):
     from difflet.backends.trainium.hunyuan_video.backbone15 import (
         HunyuanVideo15BackboneInferenceConfig,
@@ -327,6 +342,10 @@ def create_hunyuan_video15_backbone_config(
         text_seq_len=text_seq_len,
         text_seq_len_2=text_seq_len_2,
         image_seq_len=image_seq_len,
+        cfg_parallel_enabled=cfg_parallel_enabled,
+        context_parallel_enabled=cp_degree > 1,
+        cp_mode=cp_mode,
+        sp_enabled=sp_enabled,
     )
 
 
@@ -401,6 +420,18 @@ def create_hunyuan_video15_vae_decoder_config(
     )
 
 
+def _hv15_text_order(bundle: HunyuanVideo15DiTInputBundle) -> torch.Tensor:
+    """Host valid-first text order from the bundle's masks (image: 0 for t2v, else 1)."""
+    from difflet.backends.trainium.hunyuan_video.parallel15 import hv15_text_order
+
+    image_valid = 0 if bool(torch.all(bundle.image_embeds == 0)) else 1
+    batch_size, image_seq_len = bundle.image_embeds.shape[:2]
+    mask_image = torch.full((batch_size, image_seq_len), image_valid, dtype=torch.int64)
+    return hv15_text_order(
+        mask_image, bundle.encoder_attention_mask_2, bundle.encoder_attention_mask
+    )
+
+
 def _normalize_dtype(dtype: Any) -> torch.dtype:
     if isinstance(dtype, torch.dtype):
         return dtype
@@ -463,13 +494,19 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
         self.vae_decoder = None
         self.teacache_probe = None
         self.teacache_probe_fused = False
+        self.transformer_runtime = str(
+            kwargs.get(
+                "transformer_runtime",
+                os.environ.get("DIFFLET_HUNYUAN15_TRANSFORMER_RUNTIME", "monolithic"),
+            )
+        )
         # host-refiner (cclog 86): the HV-1.5 token refiner self-attends over the sparse
         # mllm stream (<128 valid keys), which NaNs the Neuron flash kernel; run it on host
-        # (eager, exact) and feed refined embeds into the NEFF instead.
+        # (eager, exact) and feed refined embeds into the NEFF instead. Always on for the
+        # 1.5 monolithic DiT; the segmented runtime runs its own frontend on raw embeds.
         self._host_refiner = None
         self._host_refiner_on = (
-            os.environ.get("DIFFLET_HUNYUAN15_HOST_REFINER") == "1"
-            and str(kwargs.get("model_version", "1.0")) == "1.5"
+            self.model_version == "1.5" and self.transformer_runtime == "monolithic"
         )
         # refined embeds depend only on (raw_mllm, timestep, mask); the prompt is fixed
         # within a generation and the timesteps repeat across the gate/baseline/teacache
@@ -482,12 +519,6 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
         self.text_seq_len_2 = int(kwargs.get("text_seq_len_2", 256))
         self.image_seq_len = int(kwargs.get("image_seq_len", 729))
         self.batch_size = int(kwargs.get("batch_size", 1))
-        self.transformer_runtime = str(
-            kwargs.get(
-                "transformer_runtime",
-                os.environ.get("DIFFLET_HUNYUAN15_TRANSFORMER_RUNTIME", "monolithic"),
-            )
-        )
 
         enable_transformer = bool(kwargs.get("enable_transformer", True))
         enable_vae_decoder = bool(kwargs.get("enable_vae_decoder", False))
@@ -515,6 +546,10 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                 text_seq_len_2=self.text_seq_len_2,
                 image_seq_len=self.image_seq_len,
                 batch_size=self.batch_size,
+                cfg_parallel_enabled=bool(getattr(parallel, "cfg_parallel_enabled", False)),
+                cp_degree=int(getattr(parallel, "cp_degree", 1)),
+                cp_mode=str(getattr(parallel, "cp_mode", "ulysses")),
+                sp_enabled=bool(getattr(parallel, "sp_enabled", False)),
             )
             teacache_fused_15 = bool(kwargs.get("teacache_fused", False))
             if self.transformer_runtime == "segmented":
@@ -805,6 +840,10 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                     "shape": (batch_size, image_seq_len, int(config.image_embed_dim)),
                     "dtype": self.dtype,
                 },
+                "text_order": {
+                    "shape": (batch_size, image_seq_len + text_seq_len_2 + text_seq_len),
+                    "dtype": torch.int64,
+                },
             }
         text_seq_len = int(getattr(config, "text_seq_len", 256))
         return {
@@ -900,6 +939,8 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                 config=self.transformer.config,
                 dtype=self.dtype,
             )
+            if self._host_refiner_on and bundle.text_order is None:
+                bundle = dataclasses.replace(bundle, text_order=_hv15_text_order(bundle))
             inputs = list(bundle.as_model_inputs())
             if self._host_refiner_on:
                 # inputs = (hidden_states, timestep, encoder_hidden_states[mllm],
@@ -1002,7 +1043,7 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                 "encoder_attention_mask_2",
                 "image_embeds",
             }
-            if not args and direct_keys_15.issubset(kwargs):
+            if not args and direct_keys_15.issubset(kwargs):  # text_order is optional
                 bundle = HunyuanVideo15DiTInputBundle(**kwargs)
                 return self.forward_dit(bundle)
         direct_keys = {

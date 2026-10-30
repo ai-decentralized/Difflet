@@ -507,16 +507,20 @@ def test_hunyuan_video_15_backbone_inference_config_shapes(tmp_path):
         tag="HunyuanVideo15Transformer3DModel",
     )
     inputs = wrapper.input_generator()[0]
+    assert len(inputs) == 9
     assert tuple(inputs[0].shape) == (1, 65, 2, 2, 3)
     assert tuple(inputs[1].shape) == (1,)
-    assert tuple(inputs[2].shape) == (1, 7, 12)
+    # The token refiner runs on host: the NEFF takes refined mllm embeds (inner_dim).
+    assert tuple(inputs[2].shape) == (1, 7, 32)
     assert tuple(inputs[3].shape) == (1, 7)
     assert tuple(inputs[4].shape) == (1,)
     assert tuple(inputs[5].shape) == (1, 3, 10)
     assert tuple(inputs[6].shape) == (1, 3)
     assert tuple(inputs[7].shape) == (1, 4, 6)
+    assert tuple(inputs[8].shape) == (1, 4 + 3 + 7)  # text_order
     assert inputs[0].dtype == torch.bfloat16
     assert inputs[3].dtype == torch.int64
+    assert inputs[8].dtype == torch.int64
 
 
 def test_hunyuan_video_15_dit_input_contract_validates_shapes_and_dtypes(tmp_path):
@@ -651,12 +655,14 @@ def test_hunyuan_video_15_trace_module_accepts_fixed_tuple_for_t2v(tmp_path):
         output = model(
             torch.randn([1, 65, 2, 2, 3]),
             torch.ones([1]),
-            torch.randn([1, 7, 12]),
+            torch.randn([1, 7, 32]),  # host-refined mllm embeds (inner_dim)
             torch.ones([1, 7], dtype=torch.int64),
             torch.ones([1]),
             torch.randn([1, 3, 10]),
             torch.ones([1, 3], dtype=torch.int64),
             torch.zeros([1, 4, 6]),
+            # text_order: t2v image tokens (0..3) are invalid, every text token is valid.
+            torch.cat([torch.arange(4, 14), torch.arange(4)]).unsqueeze(0),
         )
 
     assert tuple(output.shape) == (1, 32, 2, 2, 3)
