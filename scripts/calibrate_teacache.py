@@ -316,9 +316,9 @@ def _collect_hunyuan_video_pairs(args: argparse.Namespace) -> dict[str, Any]:
 
 
 HV15_MODEL = "hunyuan_video_15"
-# The x signal is the runtime probe's output (rel-L1 of block-0's modulated input vs the previous
+# The x signal is the runtime probe output (rel-L1 of block-0's modulated input vs the previous
 # step), not HV1.0's L2 norm, so the fitted polynomial is applied to the same quantity at runtime.
-HV15_MOD_INPUT_SOURCE = "block0_modulated_input_rel_l1"
+HV15_MOD_INPUT_SOURCE = "block0_modulated_input"  # the serving validator accepts only this
 
 
 def _rel_l1(cur: torch.Tensor, prev: torch.Tensor) -> float:
