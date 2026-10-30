@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -57,6 +58,30 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--skip-reference", action="store_true")
     parser.add_argument("--skip-warmup", action="store_true")
     parser.add_argument("--metrics-out", default="/tmp/difflet_hunyuan15_vae15_parity_metrics.json")
+    parser.add_argument(
+        "--reference",
+        choices=["difflet", "diffusers"],
+        default="difflet",
+        help="difflet: this repo's decoder module on the CPU, untiled; diffusers: diffusers' "
+        "AutoencoderKLHunyuanVideo15 on the CPU with enable_tiling() at the same tile settings",
+    )
+    parser.add_argument("--reference-dtype", choices=["bf16", "fp32"], default="bf16")
+    parser.add_argument(
+        "--untiled-reference",
+        action="store_true",
+        help="also decode untiled in fp32 with diffusers and report the distance to it (seam check)",
+    )
+    parser.add_argument(
+        "--latent-frames",
+        type=int,
+        default=None,
+        help="with --latents-in: keep the first N latent frames (the causal VAE decodes them alone)",
+    )
+    parser.add_argument(
+        "--divide-scaling-factor",
+        action="store_true",
+        help="with --latents-in: divide by the VAE's scaling factor first, as the pipelines do",
+    )
     return parser
 
 
@@ -90,6 +115,29 @@ def _reference_decode(
         return model(latents)
 
 
+def _diffusers_decode(
+    vae_dir: str,
+    latents: torch.Tensor,
+    dtype: torch.dtype,
+    tiling: dict | None,
+) -> torch.Tensor:
+    from diffusers import AutoencoderKLHunyuanVideo15
+
+    vae = AutoencoderKLHunyuanVideo15.from_pretrained(vae_dir, torch_dtype=dtype).eval()
+    if tiling is not None:
+        vae.enable_tiling(**tiling)
+    with torch.no_grad():
+        return vae.decode(latents.to(dtype), return_dict=False)[0]
+
+
+def _psnr(a: torch.Tensor, ref: torch.Tensor) -> float:
+    """PSNR in dB on frames clamped to [-1, 1] and mapped to [0, 1] (peak 1)."""
+    a01 = (a.float().clamp(-1, 1) + 1) / 2
+    r01 = (ref.float().clamp(-1, 1) + 1) / 2
+    mse = float(((a01 - r01) ** 2).mean())
+    return float("inf") if mse == 0 else 10.0 * math.log10(1.0 / mse)
+
+
 def main() -> int:
     args = build_parser().parse_args()
     config = _make_config(args)
@@ -117,6 +165,10 @@ def main() -> int:
             latents = latents.get("latents", latents.get("sample"))
         if not isinstance(latents, torch.Tensor):
             raise TypeError(f"--latents-in must contain a tensor, got {type(latents)!r}")
+        if args.latent_frames is not None:
+            latents = latents[:, :, : int(args.latent_frames)]
+        if args.divide_scaling_factor:
+            latents = latents.float() / float(config.scaling_factor)
         latents = latents.to(dtype=torch.bfloat16)
     else:
         generator = torch.Generator(device="cpu").manual_seed(int(args.seed))
@@ -158,7 +210,19 @@ def main() -> int:
     }
     if not args.skip_reference:
         t_ref = time.perf_counter()
-        reference = _reference_decode(app, config, latents)
+        if args.reference == "diffusers":
+            reference = _diffusers_decode(
+                args.vae_dir,
+                latents,
+                torch.bfloat16 if args.reference_dtype == "bf16" else torch.float32,
+                {
+                    "tile_sample_min_height": int(args.tile_sample_min_height),
+                    "tile_sample_min_width": int(args.tile_sample_min_width),
+                    "tile_overlap_factor": float(args.tile_overlap_factor),
+                },
+            )
+        else:
+            reference = _reference_decode(app, config, latents)
         ref_elapsed = time.perf_counter() - t_ref
         diff = (trainium.float() - reference.float()).abs()
         metrics.update(
@@ -173,8 +237,17 @@ def main() -> int:
                 ),
                 "max_abs": float(diff.max()),
                 "mean_abs": float(diff.mean()),
+                "reference": args.reference + (f" {args.reference_dtype}" if args.reference == "diffusers" else ""),
+                "psnr_db": _psnr(trainium, reference),
+                "nan": int(torch.isnan(trainium.float()).sum()),
+                "inf": int(torch.isinf(trainium.float()).sum()),
             }
         )
+    if args.untiled_reference:
+        untiled = _diffusers_decode(args.vae_dir, latents, torch.float32, None)
+        metrics["untiled_fp32_psnr_db"] = {"trainium": _psnr(trainium, untiled)}
+        if not args.skip_reference:
+            metrics["untiled_fp32_psnr_db"]["reference"] = _psnr(reference, untiled)
     if args.save_trainium:
         save_path = Path(args.save_trainium)
         save_path.parent.mkdir(parents=True, exist_ok=True)
