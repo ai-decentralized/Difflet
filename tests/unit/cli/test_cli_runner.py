@@ -13,20 +13,49 @@ NEURON_CACHE_VARS = (
 )
 
 
-def test_sets_neuron_rt_num_cores(monkeypatch):
+def test_one_core_stage_sets_neuron_rt_num_cores(monkeypatch):
     captured = {}
     monkeypatch.setattr("subprocess.run", lambda cmd, env, check: captured.update({"env": env}))
     monkeypatch.delenv("NEURON_RT_NUM_CORES", raising=False)
-    # a 16-core host, so 8 cores is a genuine under-fill (host-size probing is
-    # patched: this suite also runs on 4-core dev boxes and CI containers)
+    monkeypatch.delenv("NEURON_RT_VISIBLE_CORES", raising=False)
+    # host-size probing is patched: this suite also runs on dev boxes and CI containers
     monkeypatch.setattr(
         "difflet.cli.runner.resolve_available_neuron_core_ids",
-        lambda required_num_cores: tuple(range(16)),
+        lambda required_num_cores: tuple(range(4)),
     )
     from difflet.cli.runner import run_stage
 
-    run_stage("wan", "transformer", num_cores=8, virtual_core_size=None, cli_args=[])
-    assert captured["env"]["NEURON_RT_NUM_CORES"] == "8"
+    run_stage("wan", "vae", num_cores=1, virtual_core_size=None, cli_args=[])
+    assert captured["env"]["NEURON_RT_NUM_CORES"] == "1"
+    assert "NEURON_RT_VISIBLE_CORES" not in captured["env"]
+
+
+@pytest.mark.parametrize("host, inherited, num_cores, expected", [
+    (4, None, 2, "0,1"),        # hv15 AOT TP2 (serial CFG) on a trn2.3xlarge
+    (16, None, 8, "0,1,2,3,4,5,6,7"),
+    (4, "2-3", 1, None),        # one core keeps NEURON_RT_NUM_CORES (see above)
+    (8, "4-7", 2, "4,5"),       # stays inside the inherited allocation
+])
+def test_partial_multi_core_stage_names_its_cores(monkeypatch, host, inherited, num_cores, expected):
+    """NRT 2.35 refuses NEURON_RT_NUM_CORES other than one core or a whole device: on device
+    (2026-10-30, trn2.3xlarge) the hv15 AOT TP2 transformer stage died in nrt_init with
+    "`NEURON_RT_NUM_CORES` must request one core, or the whole device (multiple of 8)"."""
+    captured = {}
+    monkeypatch.setattr("subprocess.run", lambda cmd, env, check: captured.update({"env": env}))
+    monkeypatch.delenv("NEURON_RT_NUM_CORES", raising=False)
+    if inherited is None:
+        monkeypatch.delenv("NEURON_RT_VISIBLE_CORES", raising=False)
+        monkeypatch.setattr("difflet.common.neuron_cores.default_neuron_core_ids", lambda: tuple(range(host)))
+    else:
+        monkeypatch.setenv("NEURON_RT_VISIBLE_CORES", inherited)
+    from difflet.cli.runner import run_stage
+
+    run_stage("hv15", "aot_transformer", num_cores=num_cores, virtual_core_size=2, cli_args=[])
+    if expected is None:
+        assert captured["env"]["NEURON_RT_NUM_CORES"] == "1"
+    else:
+        assert "NEURON_RT_NUM_CORES" not in captured["env"]
+        assert captured["env"]["NEURON_RT_VISIBLE_CORES"] == expected
 
 
 def test_whole_device_stage_leaves_num_cores_unset(monkeypatch):
