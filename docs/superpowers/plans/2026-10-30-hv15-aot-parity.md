@@ -41,6 +41,7 @@
 - **(B)** 加 Task 6a：给 Trainium 的 `joint_ring_attention` 的文本 partial 加上 key mask。这会改一个 HV1.0 也在用的共享 op，需要单独做设备 spike，并让 HV1.0 的 ring cell 重新跑一遍回归。
 
 ## 明确不做（及原因）
+- **planner（`difflet plan`、`difflet/planner/`）**：用户明确不需要。hv15 在 planner 里继续显示为 scaffold。
 - **AOT 的 fp32→bf16 DiT 副本**：NxD 编译时已经把每个 rank 的权重预切分好写到磁盘，冷加载读的是切分后的分片。
 - **把 token refiner 放到设备上**：AOT 的 flash kernel 在少于 128 个有效 key 时会出 NaN（cclog 86）；host refiner 结果精确，并且按 timestep 缓存。如果 Task 10 的 profile 显示它占单步时间超过 5%，再另行立项。
 
@@ -96,7 +97,7 @@
   - `default_parallel=DiffletParallelConfig(tp_degree=2, cfg_parallel_enabled=True)`。
 
 - [ ] **Step 1: 改测试和新增测试**
-  - `tests/unit/planner/test_model_capabilities.py:20` 中 hv15 一行改为 `(16, False, True, True)`。
+  - `tests/unit/planner/test_model_capabilities.py:20` 中 hv15 一行改为 `(16, False, True, True)`。这个测试是 registry 能力字段的镜像，registry 改了它必须跟着改；planner 的代码不动，`test_feasibility.py` 里 hv15 的 scaffold 断言保持原样，也保持绿。
   - `tests/unit/registry/test_hunyuan_video_registration.py:22` 的 `test_hunyuan_video_15_registry_defaults_are_production_480p` 改为断言 `tp_degree == 2` 且 `cfg_parallel_enabled is True`。
   - `tests/unit/cli/test_cli_cfg_parallel.py`：从 `test_cfg_parallel_rejected_for_distilled_model` 的参数化里删掉 hv15，新增 `test_hv15_cfg_parallel_allowed`。
   - `tests/unit/cli/test_cli_sp.py`：从 `test_sp_rejected_for_unsupported_models` 里删掉 hv15。
@@ -391,21 +392,14 @@
 
 ### Task 9: 元数据与验证矩阵翻转（等 Task 10 中对应的 cell 有了结论再合入）
 
-**Files:**
-- `difflet/planner/feasibility.py`：删掉 `KNOWN_BAD[("hunyuan_video_15", None)]`。
-- `difflet/planner/model_profile.py`：
-  - hv15 的 `text_seq_len` 改为图里实际的 joint 文本长度 1985（1000 + 256 + 729）；
-  - 去掉 `unverified`；
-  - `WeightFootprint.total_bytes` 用 `component_weight_bytes(<480p snapshot>)` 的结果求和，与其他模型的口径一致，不从 load 日志里取。
+**Files:**（planner 不在本计划范围内：`difflet/planner/` 下的代码一律不改，现有 planner 测试必须保持绿）
 - `scripts/verify_cli.py`（`MODELS` 中 hv15 的 shape 等字段已在 Task 1 改好）：
   - `EXPECTED_FAIL_CELLS` 中的 hv15 条目按 Task 10 的结论翻转，结论为 BLOCKED 或 LIMIT 的 cell 保留并写明原因；
   - 决策点选 A 时，把 hv15 加入 ring 不支持的集合。
 - `.claude/skills/difflet-device-verify/references/feature-catalog.md`：更新 hv15 行，新增 "Trainium AOT backend: HunyuanVideo 1.5" 一节。
 - `README.md`：Trainium 的两张表和 Supported models 表各加一行 HunyuanVideo 1.5。
 - 测试：
-  - `tests/unit/cli/test_verify_cli.py`：`test_expected_fail_cells`、`_EXPECTED_SKIPS`、`test_plan_cells_counts`；
-  - `tests/unit/planner/test_feasibility.py:169`；
-  - `tests/unit/planner/test_model_profile.py`：新增对 `text_seq_len` 和 `total_bytes` 的断言。
+  - `tests/unit/cli/test_verify_cli.py`：`test_expected_fail_cells`、`_EXPECTED_SKIPS`、`test_plan_cells_counts`。
 
 - [ ] **Step 1–4:** 改测试 → 确认失败 → 实现 → `pytest tests/unit -q` 全部通过
 - [ ] **Step 5: Commit**（矩阵翻转单独一个 commit）：`chore(matrix): HunyuanVideo 1.5 on Trainium AOT verified`
