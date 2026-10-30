@@ -818,20 +818,23 @@ def test_hunyuan_video_still_rejects_cfg_parallel(tmp_path):
         )
 
 
-def test_hunyuan_video_15_rejects_cp_until_transformer_port(tmp_path):
+def test_hunyuan_video_15_accepts_cp(tmp_path):
     model_dir = tmp_path / "HunyuanVideo-1.5-Diffusers-480p_t2v"
     model_dir.mkdir()
 
-    with pytest.raises(NotImplementedError, match="CP is deferred"):
-        DiffletPipeline.from_pretrained(
-            str(model_dir),
-            model_type="hunyuan_video_15",
-            parallel=DiffletParallelConfig(tp_degree=4, cp_degree=2),
-            dtype="bf16",
-            compile_cache_dir=str(tmp_path / "cache"),
-            skip_compile=True,
-            load=False,
-        )
+    pipe = DiffletPipeline.from_pretrained(
+        str(model_dir),
+        model_type="hunyuan_video_15",
+        parallel=DiffletParallelConfig(tp_degree=4, cp_degree=2),
+        dtype="bf16",
+        compile_cache_dir=str(tmp_path / "cache"),
+        skip_compile=True,
+        load=False,
+    )
+
+    assert pipe.model_entry.name == "hunyuan_video_15"
+    assert pipe.parallel == DiffletParallelConfig(tp_degree=4, cp_degree=2)
+    assert pipe.parallel.world_size == 8
 
 
 def test_hunyuan_video_backbone_inference_config_shapes(tmp_path):

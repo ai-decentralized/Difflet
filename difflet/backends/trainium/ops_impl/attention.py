@@ -475,8 +475,11 @@ def joint_ulysses_attention(
     dense attention below runs on attention_cte's lossless contiguous-bound path
     instead of unmasked -- and it is exactly this path that makes a key-padding
     mask expressible under Ulysses: after the all-to-all both Q and K are the full
-    joint sequence, so q_len == kv_len, which the bound kernel requires (the
-    gather_kv route's sharded-query-vs-full-key shape is what neuronx-cc rejects).
+    joint sequence, so q_len == kv_len. (The gather_kv route's sharded-query-vs-full-key
+    bound shape was once thought to be rejected by neuronx-cc; the HV1.5 Task 0 spike,
+    docs/verification/hv15-aot-evidence.md "Spikes", compiled and ran it correctly at
+    kernel level on neuronx-cc 2.26 with q and k each padded to 128. Whether a whole CP
+    DiT graph using it compiles is still open: HV1.0 hit NCC_INLA001 on its CP graph.)
 
     q_img/image_k/image_v  [B, H_local, S_img/cp, d]  sequence-sharded over cp
     q_txt/text_k/text_v    [B, H_local, S_txt,    d]  replicated on every rank
