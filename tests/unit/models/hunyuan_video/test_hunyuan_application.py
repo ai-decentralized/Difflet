@@ -406,7 +406,19 @@ def test_call_with_positional_args_forwards_to_transformer():
     assert application.transformer.calls[-1] == (torch.zeros(1), torch.zeros(1))
 
 
-def test_call_15_with_direct_kwargs_builds_bundle():
+def test_validate_dit15_inputs_checks_text_order():
+    good = app.HunyuanVideo15DiTInputBundle(
+        **{**_bundle_15().__dict__, "text_order": torch.arange(9).unsqueeze(0)}
+    )
+    app.validate_hunyuan_video15_dit_inputs(good, config=_config_15(), dtype=torch.float32)
+    bad = app.HunyuanVideo15DiTInputBundle(
+        **{**_bundle_15().__dict__, "text_order": torch.arange(8).unsqueeze(0)}
+    )
+    with pytest.raises(ValueError, match="text_order"):
+        app.validate_hunyuan_video15_dit_inputs(bad, config=_config_15(), dtype=torch.float32)
+
+
+def test_call_15_with_direct_kwargs_builds_bundle(monkeypatch):
     with tempfile.TemporaryDirectory() as path:
         application = app.NeuronHunyuanVideoApplication(
             model_path=path,
@@ -426,7 +438,17 @@ def test_call_15_with_direct_kwargs_builds_bundle():
                 return torch.zeros(1)
 
         application.transformer = _Fake15Transformer()
-        bundle = _bundle_15(dtype=torch.float32)
+        refined = torch.full((1, 3, 32), 9.0)  # host refiner output (inner_dim)
+        monkeypatch.setattr(
+            application, "_get_host_refiner", lambda: (lambda raw, ts, mask: refined)
+        )
+        bundle = app.HunyuanVideo15DiTInputBundle(
+            **{
+                **_bundle_15(dtype=torch.float32).__dict__,
+                "encoder_attention_mask": torch.tensor([[1, 0, 1]]),
+                "encoder_attention_mask_2": torch.tensor([[0, 1]]),
+            }
+        )
         application(
             hidden_states=bundle.hidden_states,
             timestep=bundle.timestep,
@@ -438,7 +460,12 @@ def test_call_15_with_direct_kwargs_builds_bundle():
             image_embeds=bundle.image_embeds,
         )
         assert len(application.transformer.calls) == 1
-        assert len(application.transformer.calls[0]) == 8
+        inputs = application.transformer.calls[0]
+        assert len(inputs) == 9
+        assert torch.equal(inputs[2], refined)
+        # [image(4, t2v: invalid), byt5(2), mllm(3)] -> valid byt5 5, mllm 6 and 8 first.
+        assert inputs[8].dtype == torch.int64
+        assert inputs[8][0, :3].tolist() == [5, 6, 8]
 
 
 def test_dit_input_contract_15_shapes():
@@ -456,6 +483,7 @@ def test_dit_input_contract_15_shapes():
     assert "image_embeds" in contract
     assert "encoder_hidden_states_2" in contract
     assert contract["image_embeds"]["shape"] == (1, 4, 7)
+    assert contract["text_order"] == {"shape": (1, 4 + 2 + 3), "dtype": torch.int64}
 
 
 def test_host_refiner_matches_diffusers_context_embedder(tmp_path):
@@ -658,3 +686,7 @@ def test_backbone15_world_size_is_process_world(monkeypatch, parallel):
             )
     assert captured["world_size"] == parallel.world_size
     assert captured["tp_degree"] == parallel.tp_degree
+    assert captured["cp_degree"] == parallel.cp_degree
+    assert captured["cp_mode"] == parallel.cp_mode
+    assert captured["cfg_parallel_enabled"] is False
+    assert captured["sp_enabled"] is False

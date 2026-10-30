@@ -20,8 +20,8 @@ def gather_tp_dim(tensor, *, dim: int):
     return tensor
 
 
-def gather_from_tensor_model_parallel_region_with_dim(tensor, gather_dim: int):
-    del gather_dim
+def gather_from_tensor_model_parallel_region_with_dim(tensor, gather_dim: int, process_group=None):
+    del gather_dim, process_group
     return tensor
 
 
