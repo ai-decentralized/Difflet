@@ -25,9 +25,9 @@
 |---|---|---|---|---|
 | **A1** | `--dual-expert`：同时加载 high-noise `transformer` 和 low-noise `transformer_2`，按 `boundary_ratio × 1000` 切换 | Wan 2.2 A14B 是按两个专家训练的。AOT 现在每一步都用 high-noise 专家，输出不是 Wan 2.2 的正确推理语义，后段低噪步的细节会变差 | `wan.py:519` 写死 `enable_transformer_2=False`；`_dual_expert_misuse`（`wan.py:233-247`）拒绝非 neuron 后端。应用类本身已支持：`application.py:232-255` | P0 |
 | **A2** | `--guidance-scale-2`：给低噪专家单独设置 CFG | Wan 2.2 官方配方两段用不同的 CFG。没有这个参数，AOT 只能整程用同一个 scale | AOT 的 `app(...)` 调用（`wan.py:540-553`）没有传这个参数；编排器本身支持（`pipeline.py:251, 462-475`） | P0 |
-| **A3** | 双专家的检查点和架构校验：没有 `transformer_2`、没有 `boundary_ratio`、两个专家架构不一致时，在启动前拒绝 | 否则 Wan 2.1 加 `--dual-expert` 会悄悄退化成单专家，用户以为跑的是双专家 | AOT 找不到 `transformer_2/config.json` 时直接跳过不报错（`application.py:232`）；Native 会拒绝（`neuron_application.py:431-443, 580-588`） | P0 |
+| **A3** | 双专家的检查点和架构校验：没有 `transformer_2`、两个专家的输入契约不一致、没有 `boundary_ratio` 时，在启动前拒绝 | 否则 Wan 2.1 加 `--dual-expert` 会悄悄退化成单专家，用户以为跑的是双专家 | AOT 找不到 `transformer_2/config.json` 时直接跳过不报错（`application.py:232`）。Native 只在缺 `transformer_2/config.json` 时拒绝（`neuron_application.py:431-443`），两份 config 有任何差异也拒绝（`:578-588`）。**两个后端都不检查 `boundary_ratio`**：缺这个字段时，两边都会悄悄只用 high-noise 专家（`pipeline.py:341-343, 453-460`）。因此 driver 层的这项检查对两个后端都是新增 | P0 |
 | **A4** | 按核估算 HBM 的预检（同时计入两个专家和 umT5） | 双专家在 tp2（CFG / CP / DP 副本）上放不下。没有预检时，用户要先等几十分钟编译、再写约 60 GB 分片，最后才在加载时 OOM；有预检则几秒内拒绝，并给出可行的 tp | AOT 没有任何按核检查。只有 DP router 用整卡 96 GB 粗查（`dp/hbm_check.py:13`） | P1 |
-| **A5** | 按专家输出证据：`expert_calls`、每步由哪个专家执行的轨迹、按步计时、按专家的步耗时中位数 | 设备上证明两个专家确实都跑了、并且在正确的那一步切换。还补上 AOT Wan 一直缺的按步计时，目前文档只能用 (T50−T10)/40 估算 | AOT 没有任何计数或计时（`neuron-backend-results.md:30`） | P0 |
+| **A5** | 按专家输出证据：`expert_calls`、每步由哪个专家执行的轨迹、按步计时、按专家的步耗时中位数，以及启动阶段按组件拆分的耗时（对应 Native 的 `phase_seconds`，`torchrun.py:401-404`） | 设备上证明两个专家确实都跑了、并且在正确的那一步切换。还补上 AOT Wan 一直缺的按步计时，目前文档只能用 (T50−T10)/40 估算 | AOT 没有任何计数或计时（`neuron-backend-results.md:30`） | P0 |
 | **A6** | TeaCache 跨专家边界的统计修正：输出总计，并新增按专家的统计行 | 切换专家时控制器会 `reset()`，现在 `[teacache] stats` 只统计最后一段，会少算。验证 TeaCache 加双专家时需要准确的数字 | `pipeline.py:396-398`；`teacache.py:146-158` | P1 |
 | **B1** | `--host-text-encoder`：umT5 放在 host CPU 上，不编译 umT5 NEFF | 每核省出约 2.65 GiB HBM（tp4）或 5.3 GiB（tp2），给双专家或长片段腾地方，编译也更短。Native 的 81 帧在 umT5 放设备时 OOM，放 host 后通过（`neuron_feature_matrix.md:70-71`） | AOT 能解析这个 flag 并转发给 stage，但 stage 不读它（`wan.py:509-527`） | P1 |
 | **B2** | `--text-encoder-dtype fp32`（host 路径） | 不新增 NEFF、没有编译风险，就能得到精确的 fp32 文本条件，可作为 AOT 画质漂移的参照 | AOT 的 umT5 固定用 pipeline dtype（`application.py:266`） | P1 |
@@ -51,13 +51,13 @@
 | `--cache-dir` → `DIFFLET_COMPILE_CACHE` | AOT 的 `--cache-dir` 本身就存放编译产物 |
 | stage key 里的 backend / exec_mode 字段 | 这些字段只是为了把 torchrun 的产物和 AOT 产物分开 |
 | bf16 DiT 副本（`_make_bf16_dit_copies`） | **AOT 已有等价机制**：编译时预切 bf16 分片，并通过 `_shared_weights` 硬链接；`transformer_2` 成为组件后自动享有（`shared_weights.py:1-28`） |
-| per-expert TeaCache probe | **AOT 已有**（`application.py:297-315`，已有测试 `test_wan_ltx2_device_probe.py:153-246`） |
+| per-expert TeaCache probe | **AOT 已有**（`application.py:297-315`，已有测试 `tests/unit/pipeline/test_wan_ltx2_device_probe.py:153-246`） |
 | `num_layers` 截断（parity 工具） | 不作为 CLI 功能移植。它只能加速 parity 验证，但需要改 NxD 的 checkpoint 转换，收益不抵成本。如需要，作为后续项单独立项 |
 
 ### 0.3 两边都没有、本轮跳过（按你的要求）
 
 - `difflet serve` 下的双专家：两个后端都拒绝 `guidance_scale_2` / `boundary_ratio`，并把 `enable_transformer_2` 固定为 False（`serving/models/wan.py:201-208, 727`）。
-- serving 的设备端 VAE 修复或 region 化：Native 没有 Wan serving 的设备端 decoder；而且 Wan serving 被强制 `default_host_vae=True`（`registry/wan.py:66`）。
+- serving 的设备端 VAE 修复或 region 化：Native 没有 Wan serving 的设备端 decoder；而且 Wan serving 被强制 `default_host_vae=True`（`difflet/common/registry/wan.py:66`）。
 - JSONL 里按请求设置 `guidance_scale_2`；TeaCache 在 DP / batch 模式下的行为（两边都拒绝，`main.py:1096-1105`）。
 - 在 tp2 上靠"边界处换入换出专家"来放下双专家。
 - VAE region 激活常驻设备的链式执行，即 device chaining 的性能优化。Native 有这种性能，但它不是功能缺口；先交付正确性，性能作为后续项（D8）。
@@ -80,16 +80,16 @@
 
 | # | 决策 | 推荐 | 理由 |
 |---|---|---|---|
-| **D1** | C1 / C3 设备验证通过后，AOT Wan 默认是否改为设备端 VAE（`--host-vae` 作为 opt-out）？ | **是，但等 Phase 3/4 的设备关卡通过后单独提交** | 和 Native 一致，每个请求省约 30 s。代价是默认 compile 要多编一次 VAE（整图约 1.5 h；region 方案估计 10-30 min，未测）。旧缓存会在 vae stage 缺产物，所以必须配合 Task 3.3 的预检提示 |
+| **D1** | C1 / C3 设备验证通过后，AOT Wan 默认是否改为设备端 VAE（`--host-vae` 作为 opt-out）？ | **只有 region decoder（Phase 4）落地、且实测 VAE 编译 ≤ 30 min 时才切换**；如果只有整图修复落地，就保持 opt-in（`--device-vae`） | 和 Native 一致，每个请求省约 30 s。但整图方案下，每次默认 `difflet compile`/`run` 都要多编约 1.5 h，还会悄悄改变 verify_cli 的 `wan` cell（它不传 `--host-vae`）。旧缓存会在 vae stage 缺产物，所以必须配合 Task 3.3 的预检提示 |
 | **D2** | ≤9 帧的画质修复走哪条路：(a) 修整图 NEFF（WLO / 精度岛 / pad），还是 (b) 直接用 region decoder 替代整图？ | **先做 Task 3.0 和 Task 4.0 两个诊断，按关卡 G3 的规则自动选**：(a) 有便宜的修法且通过关卡就先发 (a)；region 无论如何都要做（C3 需要）。region 也通过后，整图从 CLI 路径退役 | 根因未知：核验指出 WLO 和多帧时间路径都是嫌疑。每试一次整图要编 1.5 h，盲目照搬 Native 的精度岛可能完全无效 |
-| **D3** | 双专家的画质参照选哪种？ | **(b) Native `--dual-expert` 设备运行的 latents 做交叉对照 +(c) 功能性证据；(a) CPU bf16 双专家参照作为可选** | CPU fp32 双专家需要约 137 GB 内存，超过本机 124 GB。(b) 还能补上 Native 双专家第一次真机运行的证据，目前文档里两条 CLI 都只跑过 high-noise 专家。代价是一次 Native 编译，外加约 30 GB 磁盘（见 D6） |
-| **D4** | 是否实现设备端 fp32 umT5 NEFF（Native 有）？ | **否，本轮不做** | Native 的 parity 关卡显示 bf16 umT5 落在 bf16 噪声内（相对对照 0.83-0.86×）；B2 的 host fp32 已经提供精确 fp32。设备 fp32 需要新编译，每核还要多占 5.3 GiB，和双专家抢 HBM |
+| **D3** | 双专家的画质参照选哪种？ | **(a) CPU bf16 diffusers 双专家参照（必做，与后端无关）+ (c) 功能性证据；(b) Native `--dual-expert` 设备交叉对照为可选（视 D6 的磁盘而定）** | CPU fp32 双专家需要约 137 GB 内存，超过本机 124 GB；CPU bf16 约需 69 GB，放得下，并且不占磁盘。阈值不拍脑袋：先用单专家标定（V0.3：AOT 单专家对 CPU bf16 单专家的差距），双专家的门槛按这个差距设定。CPU 耗时为若干小时，未测，必须与设备计时错开。(b) 能补上 Native 双专家的首次真机证据，代价是一次 Native 编译外加约 30 GB 磁盘 |
+| **D4** | 是否实现设备端 fp32 umT5 NEFF（Native 有）？ | **否，本轮不做** | Native 的 parity 关卡显示 bf16 umT5 落在 bf16 噪声内（相对对照：`neuron-backend-results.md:74` 为 0.83–0.86×，`neuron_feature_matrix.md:103` 为 0.83–0.96×）；B2 的 host fp32 已经提供精确 fp32。设备 fp32 需要新编译，每核还要多占 5.3 GiB，和双专家抢 HBM |
 | **D5** | AOT 的 umT5 默认放哪里？ | **保持设备 bf16**；host 只作为 opt-in，或在 B3 判定放不下时自动切换 | 和 Native 的 CLI 默认一致；不改变现有默认 key |
 | **D6** | 设备 campaign 的磁盘：根分区只剩 44 GB，双专家要 +30 GB，Wan2.1 冷编译要 +41 GB，再加 VAE 产物 | **campaign 开始前你批准一份删除清单**（Phase V 第 0 步会列出 `du` 明细和候选项），没批准的一律不删 | skill 规定，删除缓存前必须得到你的明确批准 |
-| **D7** | 共享编排器改动后，Native 的证据日志会多出 `[teacache] stats by expert` 和 `[wan] experts:` 两行 | **接受**（单专家的数值逐字节不变，有单测钉住） | 如果你希望 Native 输出完全冻结，可以改成只在 AOT stage 打印 |
+| **D7** | 共享编排器改动（Task 1.6）后，Native 的日志会多出一行 `[teacache] stats by expert`；`[wan] experts:` 行（Task 1.5）只在 AOT stage 打印。Native 是否也打印 experts 行？Native 已有 `expert_calls`，见 `neuron_application.py:510-515` | **接受 teacache 新增的那一行**（单专家数值逐字节不变，有单测钉住）；**Native 的 experts 行本轮不加** | 如果你希望 Native 输出完全冻结，可以把 by-expert 那行也改成只在 AOT stage 打印 |
 | **D8** | VAE region 激活常驻设备的链式执行（性能项） | **本轮不做** | 正确性优先。host 往返解码 81 帧估计 1.5-3 min，仍比 host 慢解码快；NxD 能否跨 key 喂设备张量没有先例 |
 | **D9** | A4 的 HBM 预检只针对 `--dual-expert`，还是也覆盖单专家（例如 tp1）？ | **只针对 `--dual-expert`** | 单专家的行为严格保持不变 |
-| **D10** | AOT 长片段（>9 帧）VAE 的默认 dtype | **和 Native 一样：shape 集合里最大帧数 ≤9 用 bf16，否则 fp32**；`--vae-dtype` 可覆盖 | 按整个集合取最大值，保证 compile 和 generate 的 key 一致 |
+| **D10** | AOT 长片段（>9 帧）VAE 的默认 dtype | **和 Native 一样：shape 集合里最大帧数 ≤9 用 bf16，否则 fp32**；`--vae-dtype` 可覆盖 | 按整个集合取最大值，保证 compile 和 generate 的 key 一致。注意这与 Native 不同：Native 的 `_default_vae_dtype_flag` 按单个请求的帧数决定（`wan.py:279-281`）。两边的 key 互相独立，所以不冲突 |
 
 ---
 
@@ -98,7 +98,9 @@
 - **只改 Wan**：Qwen-Image 复用了 `NeuronWanVAEDecoderApplication` / `ModelWrapperWanVAEDecoder`（`cli/orchestrators/qwen_image.py:803-838`，`serving/orchestrators/qwen_image.py:469-495`）。它的图和 stage key 必须逐字节不变，并有测试钉住。
 - **cache key 只做追加**：不带新 flag 的默认命令行，在 wan 和 wan2_1 × tp4 / tp2cp2 / tp2cfg / tp4sp / dp2tp2 / tp2cp2ulysses 下，transformer 和 vae 的 stage cache inputs 都必须与改动前完全相等（Task 0.1 的金标准测试）。新增字段只在显式给出 flag 时出现。
 - **后端谓词**：所有 AOT 专属行为都用新的 torch-free 谓词 `_aot_trainium_backend()` 判断，不再用 `_torchrun_backend() is None`，因为后者把 `tpu` 和未设置的情况也算了进来。`DIFFLET_BACKEND=tpu` 下的 key 和行为保持逐字节不变。
-- **driver 不导入 torch**：`difflet/cli/orchestrators/wan.py` 新增的检查在 `sys.modules['torch']=None` 时必须能导入并运行，与现有约定一致。
+- **driver 不导入 torch**：
+  - `difflet/cli/orchestrators/wan.py` 新增的**检查**（误用检查、HBM 预检、放置判断）以及 **vae stage key 的计算**，在 `sys.modules['torch']=None` 时必须能导入并运行，与现有约定一致。
+  - 注意：**transformer stage key 本身已经不是 torch-free 的**。`_backend_neutral_stage_cache_inputs` 会经过 `difflet/common/tp_reduce.py:12`，后者导入 torch。所以任何 driver 预检都不能去算 transformer key。
 - **Native 不回归**：`tests/unit/models/wan/test_wan_vae_regions.py` 全绿；`tests/unit/backends/_neuron_workers.py:795-815` 对 `_HostTextEncoder.model` 的注入契约保持不变；Native 的 stage key 不变。
 - **不改 TPU / CUDA 的数值**：共享的 `WanOrchestrator._decode_latents` 不改。fp32 反归一化放在 AOT 侧的 adapter 里做，因为 CUDA 的 `_CudaVaeDecoder` 依赖现有行为。
 - **设备纪律**（来自 difflet-device-verify）：
@@ -136,7 +138,9 @@
 | `difflet/backends/trainium/wan/vae.py` | `get_model_instance` 使用 `model_init_kwargs`；可配置 WLO 开关；导出图身份 | 3.1 |
 | `difflet/models/wan/vae/modeling_vae.py` | `WanAttentionBlock.explicit_attention`（opt-in）；可选 `spatial_pad_in_conv`（仅在诊断确认需要时加） | 3.1 |
 | `difflet/models/wan/vae/regions.py` | `call=` 钩子和 device 覆盖。不改默认行为，Native 测试保持全绿 | 4.1 |
-| `difflet/models/wan/vae/region_plan.py`（新） | 在 meta device 上推导 region 计划，生成 plan_sha | 4.1 |
+| `difflet/models/wan/vae/region_plan.py`（新） | 在 meta device 上推导 region 计划，生成 plan_sha（仅用于 load 守卫） | 4.1 |
+| `difflet/models/wan/vae/region_key.py`（新，torch-free） | `REGION_PLAN_SCHEMA`、`region_key_sha`，供 driver 计算 vae key | 4.1, 4.3 |
+| `tests/manual/wan_umt5_placement_parity.py`（新） | dump 三种 umT5 放置方式的 embeddings，与 CPU fp32 对比 | 0.4 |
 | `difflet/backends/trainium/wan/vae_regions.py`（新） | AOT 的 region decoder 应用（架构由 G4 决定） | 4.2 |
 | `difflet/pipeline/difflet_pipeline.py` | `_cache_application_kwargs` 去掉只在运行时生效的 host umT5 kwargs | 2.2 |
 | `scripts/verify_cli.py`、`tests/unit/cli/test_verify_cli.py` | `ModelSpec.extra_flags` / `revision`；`wan_dual` 模型；skip 集合 | 0.3 |
@@ -163,7 +167,9 @@
 - Produces: 测试 fixture `GOLDEN_STAGE_INPUTS`，形式为 `{(model_id, config, backend, stage): dict}`，供后续所有任务断言"默认 key 不变"。
 
 - [ ] **Step 1：写失败测试**
-  - `test_default_stage_inputs_match_golden`：monkeypatch `difflet.cli.orchestrators.base.stage_toolchain_versions` 返回常量；
+  - `test_default_stage_inputs_match_golden`：monkeypatch **`difflet.cli.orchestrators.wan.stage_toolchain_versions`**，让它返回常量。
+    - `wan.py:35-44` 是按名字导入这个函数的，所以 patch `base` 模块里的同名符号没有效果；
+    - 不 patch 的话，字面量里会带上生成它的那个 venv 的工具链版本，在另一个 venv 里就会失败。
   - 覆盖：Wan2.2 和 Wan2.1 × 6 个 verify_cli 配置 × `DIFFLET_BACKEND ∈ {unset, trainium, tpu}` × `stage ∈ {transformer, vae}`；
   - 断言 `_stage_cache_inputs(stage, args)` 等于测试文件里的字面量字典。字面量在本步骤中用当前 `main` 的实际输出生成并贴进测试。
   - `test_aot_trainium_backend_predicate`：unset 和 `trainium` 返回 True；`tpu` 和 `neuron` 返回 False；在 `sys.modules['torch']=None` 的子进程里也能运行。
@@ -201,9 +207,13 @@
   - 新增 skip 集合 `DUAL_EXPERT_TP4_ONLY = frozenset({"wan_dual"})`：
     - 非 tp4 / tp4sp 的配置一律 SKIP，原因写 `dual-expert needs tp4 (HBM)`；
     - `tp4sp` 也 SKIP，原因写 `disk: per-rank SP shards for both experts`。
+- 新的 skip 集合必须接入 `skip_reason()`（`verify_cli.py:214-225`），这是唯一的 skip 来源。
 - Test: `tests/unit/cli/test_verify_cli.py`
   - 更新 `MODEL_KEYS` / `test_all_seven_models_present`，改为 8 个模型；
   - 更新 `test_model_ids`；
+  - 更新 `test_plan_cells_counts`（`:159-171`），从 42/11/31 改为 48 个 cell、16 个 skip、32 个可运行；
+  - 在 `test_skip_reason_full_support_table`（`:137-156`）的 `_EXPECTED_SKIPS` 中加入 `wan_dual` 的条目；
+  - 修改 `test_dp_config_never_skipped`（`:174-176`）：给 `wan_dual` 开例外，因为双专家在 dp2tp2 上是按设计 SKIP；
   - 新增 `test_wan_dual_skips_non_tp4`；
   - 新增 `test_extra_flags_in_compile_and_generate_argv`；
   - 新增 `test_revision_passed`。
@@ -218,14 +228,21 @@
   - `--guidance-scale-2`、`--num-frames`、`--prompt`、`--steps`、`--dtype {fp32,bf16}`；
   - `--dump-latents`：通过 `callback_on_step_end` 保存最终 latents。
 - Modify: `scripts/quality_vs_reference.py`
-  - 接受 `latents.pt` / `final.pt`，以及 `[-1,1]` 或 `[0,1]` 范围的 BCTHW / BCFHW `.pt` 帧；
+  - `compare_runs` 现在要求每个目录里有 `final*.pt` 和 `out.png|out.mp4`（`:101-123`）。在此基础上：
+    - 在 `_read_frames` 里新增一个分支，接受 `out.pt`，即 `[-1,1]` 或 `[0,1]` 范围的 BCTHW / BCFHW 帧；
+    - latents 的查找扩展为 `final*.pt` 或 `latents.pt`；
   - 统一转换为 uint8，然后复用现有的 `frame_metrics`（逐帧 PSNR，以及 255 量程的 Gaussian SSIM）；
   - 不要另写一套指标。
+- Create: `tests/manual/wan_umt5_placement_parity.py`（V2.1 使用）
+  - 对一个固定 prompt，分别 dump AOT device bf16、host bf16、host fp32 三种 umT5 的 prompt embeddings，保存为 `.pt`，调用方式为 `app.pipeline.encode_prompt(...)`；
+  - 每种都与 CPU fp32 umT5 比较，计算 cosine 和 rel-L1，输出 JSON；
+  - CPU 冒烟测试放在 `tests/unit/scripts/test_wan_umt5_placement_parity.py`，用 fake encoder。
 - Modify: `.claude/skills/difflet-device-verify/scripts/teacache_cadence_ab.sh`
   - 新增 `EXTRA_FLAGS` 环境变量，同时作用于 baseline 和 cadence 两次运行。
 - Test: `tests/unit/scripts/test_quality_vs_reference.py`
   - `test_pt_frames_range_detection`：同一画面分别以 `[-1,1]` 和 `[0,1]` 两种范围输入，得到的 uint8 完全相同；
-  - `test_latents_metrics`：两份相同的 latents，cosine 为 1。
+  - `test_latents_metrics`：两份相同的 latents，cosine 为 1；
+  - `test_compare_runs_accepts_out_pt_and_latents_pt`。
 
 - [ ] Step 1-5：TDD 后 commit。CPU 参照脚本**不在单测里加载真实权重**。
 
@@ -253,6 +270,9 @@
 - `dual_expert_checkpoint_misuse(model_dir) -> str | None`
   - 以下任一情况返回拒绝消息：缺 `transformer_2/config.json`；缺 `boundary_ratio`；`expert_contract_diff` 非空。
   - **其余字段不同只告警、不拒绝**：AOT 用 `transformer_2` 自己的 config 编译，字段不同只会让 NEFF 缓存不命中，不影响正确性。
+  - **这项 driver 检查对 neuron 和 trainium 两个后端都生效**，因为 `_reject_dual_expert_misuse` 对 neuron 也会运行。对 neuron 来说，"缺 `boundary_ratio`"这一条是新增的拒绝。
+  - Native 应用层原有的 `_require_same_architecture`（`neuron_application.py:578-588`）**保持不变**，任何字段不同仍然拒绝，因为 Native 的两个专家共用一张 block graph。
+  - 结果是：同一份"非契约字段不同"的 checkpoint，在 AOT 上只告警并照常运行，在 Native 上会在应用层被拒绝。这是有意为之，要写进 docstring 和 DEVELOPER.md。
 
 - [ ] **Step 1：写失败测试**
   - `test_checkpoint_without_transformer_2_refused`：消息中包含 `transformer_2`；
@@ -293,6 +313,7 @@
     - `test_dual_expert_allowed_on_trainium_and_unset`：通过误用检查，不在这一步就 exit 2。
   - `test_guidance_scale_2_without_dual_refused_everywhere`
   - `test_wan21_dual_expert_refused_from_local_snapshot`：tmp 快照里没有 `transformer_2`，exit 2，且没有调用 `runner.run_stage`。
+  - `test_missing_boundary_ratio_refused_on_both_backends`：DIFFLET_BACKEND 分别为 trainium 和 neuron 时都 exit 2。
   - `test_compile_accepts_dual_expert_and_gs2`（在 `test_cli_main.py` 中）
   - `test_misuse_check_torch_free`：在子进程中设置 `sys.modules['torch']=None`，DIFFLET_BACKEND 分别为 unset 和 trainium。
 - [ ] **Step 2：确认 FAIL。** → **Step 3：实现。** → **Step 4：确认 PASS。** → **Step 5：commit。**
@@ -341,7 +362,9 @@
 - Test: `tests/unit/cli/test_orchestrator_wan.py`、`tests/unit/cli/test_main_dp.py`
 
 - [ ] **Step 1：写失败测试**
-  - 测试快照：只写 safetensors header，内容是 `<Q` 长度加 JSON header；`transformer` 和 `transformer_2` 各声明 14_290_000_000 个元素，`text_encoder` 声明 5_680_000_000 个；环境变量 `DIFFLET_NEURON_HBM_GIB=24`。
+  - 测试快照：**复用已有的 `_header_only_checkpoint(root, dual=True)`**（`test_orchestrator_wan.py:1413-1427`，元素数为 14_288M 和 5_681M），不要新写。
+  - 环境变量设 `DIFFLET_BACKEND=trainium` 和 `DIFFLET_NEURON_HBM_GIB=24`。注意已有的 `wan_snapshot` fixture 会设成 `neuron`（`:1431-1434`），这里不能直接用。
+  - umT5 在 host 时，只用专家的 `Component` 直接调用 `components_fit`（`neuron/hbm.py:157`），因为 `device_text_encoder_fits` 总会把 umT5 算进去。
   - `test_hbm_refuses_tp2_dual`：消息里包含 `tp=2` 和 `GiB`；
   - `test_hbm_allows_tp4_dual`：返回 None。header 估算值为 15.95 GiB，低于 22.8 GiB 的上限；
   - `test_hbm_counts_only_experts_with_host_umt5`
@@ -374,6 +397,7 @@
     - 计时行；
     - `[wan] experts: transformer steps 0..{k-1}, transformer_2 steps {k}..{N-1} (boundary_ratio r, boundary timestep r*1000); expert_calls {...}; step median by expert {...}`。
   - 单专家时也打印，显示 `transformer steps 0..N-1`。
+  - stage 启动时打印一行按组件拆分的加载耗时 `[wan] load phases: {component: seconds}`，对应 Native 的 `phase_seconds`（`torchrun.py:401-404`）。计时方式是在 `app.load` 中逐个组件计时，只是包一层计时，不改变加载逻辑。
   - **本任务不重构 Native 的 `run_generate_stage`**。如果要统一，另开一个 commit，并且必须有逐字节一致的字符串测试（D7）。
 - Test: `tests/unit/models/wan/test_wan_pipeline_orchestrator.py`、`tests/unit/cli/test_step_timing.py`、`tests/unit/cli/test_orchestrator_wan.py`
 
@@ -386,6 +410,7 @@
   - `test_expert_step_medians_attribution`：marks `[0,1,2,3.5,5]` 配 trace `[(t,F),(t,F),(t2,F),(t2,F),(t2,F)]`，得到 `{t: (1.0,1), t2: (1.5,2)}`；
   - `test_timer_restores_scheduler_step`
   - `test_aot_stage_prints_experts_line`：fake app，用 capsys 捕获输出；
+  - `test_aot_stage_prints_load_phases`；
   - 回归：现有的 `test_wan_pipeline_orchestrator.py:447-483`（单专家 stats 字面量）保持不变。
 - [ ] **Step 2：确认 FAIL。** → **Step 3：实现。** → **Step 4：确认 PASS**，且 `pytest tests/unit/models/wan tests/unit/pipeline -k wan` 全绿。→ **Step 5：commit。**
 
@@ -505,11 +530,11 @@
 - 规则：
   - host 模式下，`text_encoder_dtype=component_dtype(args.text_encoder_dtype)`，只在运行时生效，**不进入 key**。
   - 设备模式加 `--text-encoder-dtype fp32` 时（D4，本轮不做设备 fp32）：
-    - 先由 B3 的自动放置判断；
-    - 如果判断结果仍是设备，就 `refuse()`："device fp32 umT5 is not built on AOT; use --host-text-encoder"。
+    - 本任务中**无条件** `refuse()`："device fp32 umT5 is not built on AOT; use --host-text-encoder"；
+    - Task 2.4 落地后，这条拒绝会放宽：自动放置先运行，判定 umT5 会移到 host 时就不拒绝。届时由 Task 2.4 改写下面这个测试。
 - [ ] **Step 1：写失败测试**
   - `test_host_fp32_dtype_passed_and_unkeyed`
-  - `test_device_fp32_refused_with_hint`
+  - `test_device_fp32_refused_with_hint`：本任务中所有 tp 都拒绝
 - [ ] **Step 2：确认 FAIL。** → **Step 3：实现。** → **Step 4：确认 PASS。** → **Step 5：commit。**
 
 ### Task 2.4：AOT 自动放置 umT5，带"DiT 单独放不下"的守卫
@@ -536,6 +561,10 @@
       - tp1：不打印移动说明；
     - tpu：永不移动。
   - `test_aot_dp_workers_inherit_auto_host`，对应 Native 的 `:1528-1537`；
+  - 改写 Task 2.3 的 `test_device_fp32_refused_with_hint`：
+    - tp4 设备 fp32：仍然拒绝，因为放得下，不会自动移到 host；
+    - tp2 + CFG + fp32：不拒绝，自动移到 host，走 host fp32；
+    - 放置检查必须在 dtype 拒绝**之前**运行，在 compile 和 generate 中都是如此；
   - `test_aot_dp_host_fp32_ram_warning`
 - [ ] **Step 2：确认 FAIL。** → **Step 3：实现。** → **Step 4：确认 PASS。** → **Step 5：commit。**
 
@@ -637,19 +666,32 @@
 
 > 这一项不改 NEFF，也不改 key：没有经过 decoder 的输出不变；经过 decoder 时，只有输入的 rounding 改变。
 
-### Task 3.3：生成前的产物预检，以及 vae stage 的短路
+### Task 3.3：生成前的产物预检，以及 vae / transformer stage 的短路
 
 **Files:** `difflet/cli/orchestrators/wan.py`
 - `generate()` 在启动 transformer stage **之前**，检查即将使用的 vae stage 产物是否存在（只在会走设备端解码时检查）。
   - 缺少产物时 exit 2，提示："run `difflet compile` with the same flags, or pass `--host-vae`"，并点名缺少的 (hw, dtype)。
+  - 预检**只计算 vae key**，因为它是 torch-free 的。transformer key 依赖 torch（见 Global Constraints），所以不在 driver 里预检它。
 - `_stage_vae` 的 compile 分支加入 `_stage_is_compiled("vae", args, compiled_dir)` 短路，与 `qwen_image.py:840` 的做法相同。
+- AOT `_stage_transformer` 的 compile 分支也加入同样的短路。
+  - 命中时打印 `[difflet] stage 'transformer' already compiled ... skipping`，跳过构建 app，节省 HLO 重新 trace 和主机内存。
+  - 现在 transformer stage 每次都会调用 `app.compile`（`wan.py:528-535`），而组件级的跳过只写在 `logger.info` 里，CLI 不显示。
 
 - [ ] **Step 1：写失败测试**
   - `test_generate_preflight_missing_vae_artifact`：断言 `runner.run_stage` 没有被调用；
+  - `test_generate_preflight_is_torch_free`
   - `test_stage_vae_compile_short_circuits_when_compiled`
+  - `test_stage_transformer_compile_short_circuits_when_compiled`：fake 的 `NeuronWanApplication` 不被构造
 - [ ] **Step 2：确认 FAIL。** → **Step 3：实现。** → **Step 4：确认 PASS。** → **Step 5：commit。**
 
-### Task 3.4：（D1 = 是，并且设备关卡通过后才做）默认改为设备端 VAE
+### Task 3.4：默认改为设备端 VAE
+
+**前提**：D1 = 是，且 Phase 4 的 region decoder 已落地，且实测 VAE 编译 ≤ 30 min。只有整图修复落地时**不做本任务**。
+
+**与验证的顺序**：本任务改变默认值后，verify_cli 的 `wan` 和 `wan2_1` cell 默认会多出一个 vae stage。因此：
+- Phase V 的 V4.1 并行矩阵回归，必须在本任务合入**之前**的 commit 上运行；
+- 或者给这些 cell 加上 `--host-vae`。
+- 无论选哪种，都要在证据文档中说明。
 
 **Files:** `difflet/cli/orchestrators/wan.py`、`difflet/cli/main.py`、README
 - `_decode_on_device` 的新规则：
@@ -689,10 +731,15 @@
 
 - [ ] **路线 (a)**：一个 ModelBuilder 承载 66 个 key，绕过 router，直接调用 bucket script。
   - 风险：NxD 的 router 只按输入 shape 字符串路由，重复的会被静默覆盖；`shard_checkpoint`、packer 和 StateInitializer 都只用第一个 key。
-- [ ] **路线 (b)**：沿用 HunyuanVideo `6299647^` 的做法，每个 region bucket 单独做一次 `torch_neuronx.trace`，内联权重，由 host 遍历调用。这条路线绕开了上述所有陷阱。
+- [ ] **路线 (b)**：**每个 region bucket 一个 `NeuronApplicationBase` 子类实例，配一个 `ModelWrapper`，由 host 遍历调用**。
+  - 这是 HunyuanVideo `6299647^` 的真实做法：`_NeuronHunyuanVideoVAEDecoderSegmentApplication(NeuronApplicationBase)` 配 `ModelWrapperHunyuanVideoVAEDecoderSegment`，每个 segment 一个 ModelBuilder。
+  - 优点：沿用现有的 `_compile_one` 标记、`_compiled_config_matches`、`NeuronConfig(logical_nc_config=1)` 以及 `_shared_weights`，并绕开路线 (a) 的 router、packer 和"只用第一个 key"等陷阱。
+  - 代价：121 个 ModelBuilder，因此 spike 必须额外测出它们的总编译时间和主机内存。
 - [ ] 每条路线都要测：
   1. 3 个 region（head、一个 conv、一个 conv_residual），与 CPU `RegionCallable` 做 parity，bf16 rel-L2 < 1e-2（推断阈值）；
-  2. **编译并加载一整套 480x832 bf16 region**，记录加载后的 HBM 和最大调用时的 HBM；必须 ≤ LNC=1 单核的可用量，先用 `neuron-ls` 确认这个量；
+  2. **编译并加载一整套 480x832 bf16 region**，记录加载后的 HBM 和最大调用时的 HBM。
+     - 先记录 vae stage **实际运行时的 LNC**：`runner.py:239-242` 只设置 `NEURON_RT_NUM_CORES=1`，而 NEFF 固定为 lnc=1。
+     - 再用 `neuron-ls` 确认这个 LNC 下单核的可用量：LNC=1 推断为 12 GiB，LNC=2 为 24 GiB。HBM 上限以此为准。
   3. 编译总墙钟时间，以及期间主机内存峰值（< 100 GB）；
   4. 9 帧完整解码，跑 VAE-only 关卡；
   5. 每个 region 分别在 WLO 开和关两种设置下做 parity。
@@ -711,7 +758,10 @@
   - `RegionEntry(index, tag, kind, takes_cache, buckets)`
   - `build_region_plan(config, hw_set, dtype, *, batch_size=1) -> list[RegionEntry]`：在 meta device 上推导；
   - `hw_set_from_shapes(shapes) -> tuple[tuple[int,int],...]`：使用 `canonicalize_shapes` 的顺序（从大到小）并按 (H, W) 去重；
-  - `plan_sha(plan) -> str`
+  - `plan_sha(plan) -> str`：基于 meta 计划计算，**只写入产物的 `region_plan.json`**，作为 load 时的守卫（Task 4.2），不进入 stage key。
+- Create: `difflet/models/wan/vae/region_key.py`（**torch-free**，供 driver 使用）
+  - `REGION_PLAN_SCHEMA = "regions-v1"`：`regions.py` 或 `region_plan.py` 改变区域划分时必须手动 bump；
+  - `region_key_sha(vae_config: dict, hw_set, dtype_name: str) -> str`：对决定计划形状的 vae `config.json` 字段（`dim_mult`、`num_res_blocks`、`temperal_upsample`、`z_dim`、`base_dim`）、hw 集合、dtype 和 schema 做 sha256。
 - Modify: `difflet/models/wan/vae/regions.py`
   - `WanVAERegionDecoder.forward(..., *, call=None, device=None)`：给出 `call` 时不把张量移到模型所在 device；
   - **默认路径的行为不变**。
@@ -721,8 +771,12 @@
   - `test_plan_counts_480x832`：66 个 entry，121 个 bucket，46 个不同的图，11 个 entry 只有单个 bucket；
   - `test_hw_set_order_and_dedupe`
   - `test_plan_sha_changes_with_region_change`
+  - `test_region_key_sha_torch_free`：子进程中设 `sys.modules['torch']=None` 后，仍能导入并计算；
+  - `test_region_schema_bump_guard`：
+    - 测试文件中固定一个"计划指纹"，即 meta 计划的 `plan_sha` 在 Wan2.2 config × 480x832 × bf16 下的值，和 `REGION_PLAN_SCHEMA` 一起钉住；
+    - 计划改变但 schema 没有 bump 时，测试失败，提示需要 bump；
   - `test_call_hook_matches_default_decode_on_cpu`：tiny config，`call` 走 CPU，结果与默认路径完全相等；
-  - `test_regions_imports_whitelist_unchanged`：现有的 `test_wan_vae_regions.py:64-74`。
+  - 现有的 `test_regions_imports_only_from_allowed_modules`（`test_wan_vae_regions.py:64`）保持全绿。
 - [ ] **Step 2：确认 FAIL。** → **Step 3：实现。** → **Step 4：确认 PASS**，且 `test_wan_vae_regions.py` 全绿。→ **Step 5：commit。**
 
 ### Task 4.2：AOT region decoder 应用（按 G4 选定的路线实现）
@@ -748,7 +802,8 @@
 
 **Files:** `difflet/cli/orchestrators/wan.py`、`difflet/models/wan/application.py`
 - `_aot_vae_stage_cache_inputs(args) -> dict` 只在 `_aot_trainium_backend()` 时使用，内容为：
-  - `component`、`model_id`、`decoder: "regions-v1"`、`plan_sha`、`dtype`、`hw`、`toolchain`；
+  - `component`、`model_id`、`decoder: REGION_PLAN_SCHEMA`、`region_key: region_key_sha(...)`、`dtype`、`hw`、`toolchain`；
+  - 全部 torch-free：只读取本地快照的 `vae/config.json`，权重不在本地时退化为不含 `region_key` 的形式，并由 stage 再校验；
   - **不含帧数**，因此同一 (H, W, dtype) 的一份产物可服务 9、33、81 帧。
 - `_stage_vae` 的 AOT 分支：
   - 构建 `NeuronWanApplication(..., vae_decoder_impl="regions", vae_dtype=...)`；
@@ -759,6 +814,7 @@
 - [ ] **Step 1：写失败测试**
   - `test_region_key_frame_independent`：9 帧和 81 帧的 key 相同；
   - `test_region_key_trainium_only`：tpu 和 neuron 下与金标准相等；
+  - `test_region_vae_key_torch_free`：Task 3.3 的预检能在禁用 torch 的情况下计算这个 key；
   - `test_stage_vae_region_branch_denorm_fp32`
   - `test_shapes_set_hw_dedupe`
 - [ ] **Step 2：确认 FAIL。** → **Step 3：实现。** → **Step 4：确认 PASS。** → **Step 5：commit。**
@@ -795,7 +851,7 @@
     - 补充编译时间和磁盘占用；
     - 迁移说明：旧 VAE 产物会成为孤儿；
   - `modeling_vae.py:14-16` 的 docstring；
-  - `registry/wan.py:65` 的注释；
+  - `difflet/common/registry/wan.py:65` 的注释；
   - `neuron-backend-results.md:69` 的 open item。
 
 ---
@@ -818,7 +874,9 @@
 ### V0 准备（不改代码）
 
 - [ ] **V0.1 磁盘**：
-  - 输出 `df -h /`，以及 `du` 明细（`~/.cache/difflet/*`、`_shared_weights/*`、`/var/tmp/neuron-compile-cache`）；
+  - 输出 `df -h /`，以及 `du` 明细，覆盖：
+    - `~/.cache/difflet/*`、`_shared_weights/*`、`/var/tmp/neuron-compile-cache`；
+    - `/tmp/nxd_model/*`：`BASE_COMPILE_WORK_DIR` 默认就在这个快满的根分区上（`runner.py:218-220`），Task 3.0 的各个 variant 和 121-bucket 编译都会在这里留下工作目录。
   - 列出删除候选，例如 tp_reduce fp32 的 Wan stage dir `a3376f0870314c9b`、旧的整图 VAE 目录、其他模型的 store 条目，并给出每项可回收的 GB；
   - **交给你审批（D6）**，审批之前不删任何东西。
   - 下方各组按磁盘占用排了顺序。
@@ -828,21 +886,26 @@
   2. 同一份 latents 用 `--host-vae` 解码，作为后续 VAE 关卡的参照。
   - 记录 stage dir 的哈希名和 latents 的 sha。
   - **两次不一致时**：后续所有 "bit-identical" 判据改为 cosine ≥ 0.9999。
+- [ ] **V0.3 画质标定（CPU，与设备计时错开）**：
+  - 用 `tests/manual/wan_e2e_reference.py --dtype bf16` 跑 Wan2.2 单专家，flags 和 seed 与 V0.2 相同，并 dump latents；
+  - 计算 V0.2 的 AOT latents 与它的 cosine，以及帧 PSNR 和 SSIM（两者都用 host fp32 解码）。
+  - 得到的"AOT 对 CPU bf16 单专家差距"作为 V1.9 双专家门槛的基准。
+  - 耗时：CPU 若干小时，未测。
 
 ### 设备 cell 清单（按执行顺序）
 
 | # | Cell | 命令要点 | 通过判据 | 预计时间 / 新增磁盘 |
 |---|---|---|---|---|
-| V1.0 | CPU 单测门 | `pytest tests/unit/cli tests/unit/models tests/unit/backends tests/unit/pipeline tests/unit/scripts -k "wan or verify_cli or qwen" -q`，设备空闲时运行 | 0 failures | 15 min / 0 |
+| V1.0 | CPU 单测门 | `pytest tests/unit/cli tests/unit/models tests/unit/backends tests/unit/pipeline tests/unit/scripts -k "wan or verify_cli or qwen" -q`，设备空闲时运行，在 supervise 下跑，AOT venv 和 native venv 各跑一次 | 0 failures | ≥ 60 min / 0（review 时实测，光三个文件就超过了 600 s） |
 | V1.1 | 只拒绝、不写盘（双专家） | 四种情况：Wan2.1 + `--dual-expert`；Wan2.2 tp2 + `--cfg-parallel --dual-expert`；tp2 cp2（含 ring）+ `--dual-expert`；dp2tp2 + `--requests` + `--dual-expert`。另加 `--guidance-scale-2` 缺少 `--dual-expert` | 每种都在 5 s 内 exit 2，打印一行 `Error: ...`，没有启动 stage 子进程，没有写盘 | 2 min / 0 |
-| V1.2 | 回归：单专家 key 不变 | 分支上用 V0.2 的 root 再跑一次 compile 和 generate | 没有新的哈希 stage dir；每个组件打印 `already compiled ... skipping`；latents 与 V0.2 逐位一致（或按 V0.2 的结论用 cosine）；新增的 `[wan] experts:` 行显示 `transformer steps 0..39`，`expert_calls={'transformer': 80}` | 5 min / 0 |
+| V1.2 | 回归：单专家 key 不变 | 分支上用 V0.2 的 root 再跑一次 compile 和 generate | `wan_transformer/` 下没有新目录；打印 `[difflet] stage 'transformer' already compiled ... skipping`（Task 3.3 的短路），compile 墙钟时间 < 60 s；latents 与 V0.2 逐位一致（或按 V0.2 的结论用 cosine）；新增的 `[wan] experts:` 行显示 `transformer steps 0..39`，`expert_calls={'transformer': 80}` | 5 min / 0 |
 | V1.3 | 双专家 tp4 编译 | `compile ... --dual-expert`，同时每 5 s 采样一次 `/proc/meminfo` | exit 0；出现新的 stage dir，manifest 含 `dual_expert: true`；有 `transformer_2/`（`model.pt` 和 4 个分片，每个约 7.498 GB）；`_shared_weights` 中 `grep -c '__transformer_2__5be7df96__bfloat16__tp4__'` == 1；text_encoder 和 transformer 显示 `Reused 4 shard(s)`；记录 `transformer_2` 的 NEFF 编译秒数和缓存是否命中；主机内存峰值 < 115 GB（超过 100 GB 则合入 Task 1.7 的可选改动） | 15-30 min / **+30 GB** |
 | V1.4 | 双专家 tp4 生成 | 运行 3 次（1 次预热，2 次计时）：`--dual-expert --steps 40 --guidance-scale 4.0 --guidance-scale-2 3.0 --seed 42` + 同一 prompt；用 neuron-monitor 每 1 s 采样 HBM | `[wan] experts:` 中 k == **13**；`expert_calls == {'transformer': 26, 'transformer_2': 54}`（单个请求）；两次计时运行的 latents 一致（逐位一致或 cosine 判据）；两个专家的步耗时中位数相差 ≤5%，并与 V1.2 的单专家步耗时相差 ≤5%；每核 HBM 峰值 ≤ 22.8 GiB（预测 17.3-18.0 GiB）；首次冷读另记一个时间 | 10 min / 0 |
 | V1.5 | 单专家与双专家的结果不同、gs2 等价性 | (i) 不带 `--dual-expert`：sha 与 V1.4 不同；(ii) `--guidance-scale-2 4.0` 与不带 gs2 的双专家结果对比；(iii) `--guidance-scale-2 3.0` | (ii) 两者逐位一致（cosine 判据下 ≥0.9999）；(iii) 结果与 (ii) 不同 | 8 min / 0 |
-| V1.6 | 双专家 + TeaCache cadence | `EXTRA_FLAGS='--dual-expert --guidance-scale-2 3.0 ...' teacache_cadence_ab.sh` | stats 总计 `full+skipped == 40`；`skipped_steps` 等于单测参考公式（N=40，k=13）算出的值；第 13、14 步不跳过；输出与基线不同 | 10 min / 0 |
+| V1.6 | 双专家 + TeaCache cadence | `EXTRA_FLAGS='--dual-expert --guidance-scale-2 3.0 ...' teacache_cadence_ab.sh` | stats 总计 `full+skipped == 40`；`skipped_steps == 14`，跳过的步集合为 {6,8,10,12,16,18,…,34}（N=40，k=13，cadence 2，与单测参考实现一致）；第 13、14 步不跳过；输出与基线不同 | 10 min / 0 |
 | V1.7 | 双专家 + 自适应 TeaCache（**条件执行**：需要有 Wan 480x832x9、cadence 0 的标定 JSON） | 用 `--teacache-speedup`、`--teacache-calibration` 编译并生成 | 产物中有 `teacache_probe/` 和 `teacache_probe_2/`；两个专家段的 `probe_calls` 都 > 0；如实报告加速比，标定在第二个专家上不适用也属于正常发现 | 20 min / 小 |
 | V1.8 | 双专家 + `--requests`（dp=1） | 2 个请求的 JSONL，`--dual-expert --guidance-scale-2 3.0` | 输出 `[dp-router] done=2 failed=0`；每个请求的 k 都是 13；r0 的 latents 等于 V1.4（同 seed） | 6 min / 0 |
-| V1.9 | 双专家画质（D3） | **(b)** Native `--backend neuron --dual-expert`，与 V1.4 相同的 flags 和 seed，在新 root 上运行，需要 D6 腾出约 30 GB；比较 AOT 与 Native 的 latents，并都用 host 解码。**(a 可选)** CPU bf16 双专家参照 | AOT 与 Native 的 latents cosine ≥ 0.99（推断阈值；单专家时 native device 与 host umT5 的值为 0.9956，`neuron_feature_matrix.md:104`）；帧 PSNR 与单专家时 AOT 对 Native 的差距同量级；同时记录 Native 双专家的首次真机证据 | Native 编译 15 min + 生成 5 min / **+30 GB（需 D6）** |
+| V1.9 | 双专家画质（D3） | **(a，必做)** `wan_e2e_reference.py --dual-expert --guidance-scale-2 3.0 --dtype bf16`，flags 和 seed 与 V1.4 相同，dump latents；V1.4 的 latents 用 host fp32 解码后与它比较。**(b，可选，需 D6)** Native `--backend neuron --dual-expert`，同样的 flags，作交叉对照 | AOT 双专家对 CPU bf16 双专家：latents cosine ≥ V0.3 标定值 − 0.005，帧 PSNR ≥ V0.3 标定值 − 1 dB，SSIM ≥ V0.3 标定值 − 0.02；(b) 只做记录，作为 Native 双专家的首次真机证据 | CPU 若干小时，未测，与设备错开 / 0；(b) 编译 15 min + 生成 5 min，+30 GB |
 | V1.10 | 双专家测完后清理 | 只删除你在 D6 中批准的条目 | — | — |
 | V2.1 | host umT5 bf16 | 在 V0.2 的 Wan2.2 单专家 root 上加 `--host-text-encoder` 编译并生成；另用 `tests/manual/wan_umt5_placement_parity.py` dump prompt embeddings | 产物中没有 `text_encoder/`，key 带 `text_encoder: host`；embeddings 与 host fp32 的 cosine ≥ 0.9999，rel-L1 在 Native bf16 对照的范围内（门槛设在 embedding 上）；latents 对 V0.2 的 cosine 只做记录；每核 HBM 下降约 2.65 GiB；在 host 空闲时连续生成 3 次，最多允许 1 次不一致，并说明原因（`model_application.py:153-155`）；DiT 分片通过硬链接复用 | 编译约 10 min，生成 3 × 2.5 min / 小 |
 | V2.2 | host umT5 fp32 | V2.1 再加 `--text-encoder-dtype fp32` | key 与 V2.1 相同（fp32 只在运行时生效）；embeddings 比 bf16 更接近 fp32 参照；记录主机内存峰值（约多 22.7 GB） | 5 min / 0 |
@@ -851,11 +914,11 @@
 | V3.x | VAE 根因诊断与 spike | 就是 Task 3.0 的 S0-S4 和 Task 4.0 的 (a)/(b)，在实现阶段执行；Phase V 只**重新验证最终方案** | — | — |
 | V3.1 | ≤9 帧设备 VAE 关卡 | 用最终方案（整图修复或 region）编译 Wan2.2 480x832x9 的 vae stage，分别解码 V0.2 的 latents 和 host fp32 解码结果 | VAE-only 关卡全部通过（比值 ≤1.15、cos ≥0.995、PSNR ≥ min(对照) − 0.5 dB、网格纹 ≤1.5×）；端到端 PSNR 与 SSIM 对 CPU fp32 参照 ≥ 同一份 latents 用 host 解码的值 − 0.5 dB；记录解码耗时 | 编译 10 min（region，推断）到 1.5 h（整图）/ 待测 |
 | V3.2 | 33 帧和 81 帧设备 VAE（region） | 用固定的 latents.pt：`randn([1,16,21,60,104])`（seed 0，存一份），以及 9 帧真实 latents 的切片，**不依赖 AOT 的 81 帧 DiT**。通过 `difflet.cli.main` 或 runner 的等价环境运行 vae stage，与 `_decode_latents_host` 比较 | fp32：PSNR ≥ 90 dB 对 host fp32；bf16：PSNR ≥ 50 dB（Native 实测 55.91 dB）；没有 NCC_EVRF007；VAE 核 HBM 峰值低于上限；同一产物服务 9、33、81 帧（vae compile 显示 `already compiled ... skipping`，耗时 < 30 s） | 编译 fp32 和 bf16 各一次 / 待测 |
-| V3.3 | `--vae-dtype` 与冲突 | `--vae-dtype fp32` 与 bf16 对比；`--host-vae --vae-dtype bf16`；`--vae-exec-mode compile` | 两个 dtype 的 stage dir 不同；冲突在 5 s 内 exit 2 | 5 min |
-| V3.4 | Qwen-Image VAE 回归（**只要改了共享 VAE 代码就必须跑**） | 在已有 root 上运行 Qwen-Image AOT 的 compile 和 generate | vae stage 显示 `already compiled`（key 不变）；PNG sha 与改动前一致 | 5 min / 0 |
+| V3.3 | `--vae-dtype` 与冲突 | **仅在 region 路径落地时**做 `--vae-dtype fp32` 与 bf16 的设备对比。整图路径下 fp32 是一次新的约 1.5 h 编译，还可能撞上 NCC_EVRF007 或 HBM 上限，因此只做冲突检查。冲突检查：`--host-vae --vae-dtype bf16`；`--vae-exec-mode compile` | 两个 dtype 的 stage dir 不同；冲突在 5 s 内 exit 2 | 5 min（不含编译） |
+| V3.4 | Qwen-Image VAE 回归（**只要改了共享 VAE 代码就必须跑**） | 在**新的** `--cache-dir` 上重新编译 Qwen-Image 的 vae stage（qwen_image_vae 只有约 39 MB），然后 generate | 新编译出的 `model.pt`/NEFF sha 与改动前 root 里的一致（图不变）；PNG sha 与改动前一致；stage key 不变。只在旧 root 上运行只能证明 key 没变，证明不了图没变，会得出虚假的 PASS | 编译若干分钟 / 小 |
 | V3.5 | 旧缓存预检 | 用 V0.2（改动前）的 root，在分支上 generate，并带设备端 VAE | transformer stage 启动**之前**就 exit 2，并给出可执行的提示 | 1 min |
 | V3.6 | 默认切换（D1 = 是时） | 不加 VAE 相关 flag 运行 `run` | 日志显示 vae stage 在 1 个核上运行；帧与 V3.1 一致；warm e2e 比 `--host-vae` 快 ≥ 25 s；720x1280x9 走 host，不启动 vae compile | 10 min |
-| V4.1 | 现有并行矩阵回归 | `run_cells.sh "wan wan2_1" "tp4 tp2cp2 tp2cfg tp4sp dp2tp2 tp2cp2ulysses"`，在 `supervise.sh` 下运行；**main 与分支使用同一套缓存** | 每个 cell 的结果与 main 相同（PASS）；分支上的 compile 全部命中 manifest；每个 cell 的 latents 与 main 逐位一致（或 cosine）；dp2tp2 另外跑 `verify_dp_correctness.py --tp-degree 2 --dp 2`，4 个请求都一致。Wan2.1 部分是否运行取决于 D6 | main 冷编译多个 cell，tp2cfg 约 1469 s；分支重跑每个模型约 15 min / **tp2 布局每个 rank 一份分片（需 D6）** |
+| V4.1 | 现有并行矩阵回归 | `run_cells.sh "wan wan2_1" "tp4 tp2cp2 tp2cfg tp4sp dp2tp2 tp2cp2ulysses"`，在 `supervise.sh` 下运行；**main 与分支使用同一套缓存**。如果 Task 3.4（默认 VAE 切换）已合入，就在它之前的 commit 上跑，或者给 cell 加 `--host-vae`，并在证据中注明 | 每个 cell 的结果与 main 相同（PASS）；分支上的 compile 全部命中 manifest；每个 cell 的 latents 与 main 逐位一致（或 cosine）；dp2tp2 另外跑 `verify_dp_correctness.py --tp-degree 2 --dp 2`，4 个请求都一致。Wan2.1 部分是否运行取决于 D6 | main 冷编译多个 cell，tp2cfg 约 1469 s；分支重跑每个模型约 15 min / **tp2 布局每个 rank 一份分片（需 D6）** |
 
 > 时间是根据仓库里已有数据推断的，标注为"待测"的项没有任何先例。V1.3 / V1.4 是双专家的核心证据，V3.1 / V3.2 是 VAE 的核心证据。
 
@@ -896,3 +959,24 @@
 - Phase 3.0 和 Phase 4.0 的设备 spike 可以和 Phase 1、2 的代码工作并行，因为它们只占设备；
 - 在 G3 / G4 这两个关卡，需要你确认后再继续；
 - 最后执行 Phase V。
+
+---
+
+## 附录：评审记录
+
+- **设计调研**：9 个 agent。4 组设计（双专家、VAE 精度、VAE 长片段与 dtype、umT5 放置），每组配一个对抗核验，另有一个完整性检查兼设备工具链调研。被核验驳倒的论断都已在正文中更正，例如：分片是 7.498 GB 而不是 7.15 GB；Flux VAE 并不是"同 flags"的对照，它关闭了 WLO；store 条目命名为 `bfloat16`；以及测试文件的位置。
+- **Fable 5.1 独立评审**（基于 commit ed195b4）：1 个 blocker、11 个 major、若干 minor，均已处理：
+  - **blocker**：region vae key 原本依赖 torch 上的 meta 计划，和 driver 预检的 torch-free 约束冲突。改为 torch-free 的 `region_key_sha` 加 `REGION_PLAN_SCHEMA`；meta 计划的 sha 只作为 load 时的守卫（Task 4.1/4.3）。
+  - **Task 0.1**：monkeypatch 的目标改为 `wan.stage_toolchain_versions`。
+  - **Task 0.3**：补上另外 3 个会被打破的测试。
+  - **D1**：默认 VAE 切换绑定到 region decoder 落地。
+  - **Task 4.0 路线 (b)**：按真实先例改写，即每个 bucket 一个 `NeuronApplicationBase`。
+  - **V2.1**：补上缺失的脚本。
+  - **V3.4**：改为在新 root 上编译，避免虚假的 PASS。
+  - **V1.2**：判据改为"没有新目录 + 短路行"。
+  - **V1.9**：改为 CPU bf16 双专家参照，阈值由 V0.3 单专家标定得出。
+  - **A3**：更正为"Native 也没有 `boundary_ratio` 检查"。
+  - **Task 2.3/2.4**：理顺了依赖顺序。
+  - **D7**：表述更正。
+  - **其他**：fixture 复用、名称和路径更正、补充预算、加入启动阶段的分组件计时。
+  - Fable 独立复算并确认：k_ref（N=40 时为 13，N=50 时为 16，N=20 时为 7）、`expert_calls` 26/54、cadence-2 时跳过 14 步、HBM 15.95 GiB、分片 7,498,045,044 B。
