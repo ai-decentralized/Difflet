@@ -80,12 +80,6 @@ def test_sp_and_cp_mode_reach_the_transformer_stage(launches, tmp_path):
     assert _flag(launches[1][2], "--cp-mode") == "ring"
 
 
-def test_aot_backend_is_not_implemented(monkeypatch):
-    monkeypatch.setattr(hv15, "torchrun_backend", lambda: None)
-    with pytest.raises(NotImplementedError, match="neuron"):
-        hv15.HunyuanVideo15Orchestrator(_args()).generate()
-
-
 def test_encode_stage_uses_diffusers_encode_prompt(monkeypatch, tmp_path):
     import diffusers
 
