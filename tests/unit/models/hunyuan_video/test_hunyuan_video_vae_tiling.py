@@ -124,7 +124,14 @@ def test_fixed_tile_decode_walks_and_blends_as_diffusers_does(vae):
             t, h, w = x.shape[-3:]
             return self.decoder(_pad(x))[:, :, : (t - 1) * 4 + 1, : h * 8, : w * 8]
 
-    got = fixed_tile_decode(z, lambda padded, valid: _plain(vae, padded), **TILE)
+    def decode_tile(padded, valid):
+        # post_quant_conv on the window, as diffusers runs it: the 1x1 conv on the padded tile is
+        # the same math, but BLAS may block the two shapes differently (MKL's AVX2 path does)
+        t, h, w = valid
+        with torch.no_grad():
+            return vae.decoder(_pad(vae.post_quant_conv(padded[:, :, :t, :h, :w])))
+
+    got = fixed_tile_decode(z, decode_tile, **TILE)
     original = vae.decoder
     vae.decoder = _PadCrop()
     try:
