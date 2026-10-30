@@ -19,6 +19,7 @@ from difflet.backends.trainium.hunyuan_video.parallel15 import (
 )
 from difflet.ops import (
     SPMDRank,
+    gather_from_sequence_parallel_region,
     gather_from_tensor_model_parallel_region_with_dim,
     get_cfg_group,
     get_cfg_rank_spmd,
@@ -339,6 +340,44 @@ class HunyuanVideo15BackboneInferenceConfig(InferenceConfig):
                 f"HunyuanVideo 1.5 num_attention_heads={heads} must be divisible by "
                 f"tp_degree={tp}; use a tensor-parallel degree in {options}."
             )
+        batch = int(self.neuron_config.batch_size)
+        if self.cfg_parallel_enabled and batch != 2:
+            raise ValueError(
+                "HunyuanVideo 1.5 CFG-parallel stacks [uncond, cond] into one batch-2 "
+                f"compile and gives each cfg rank one branch; got batch_size={batch}, "
+                "use batch_size=2."
+            )
+        if self.sp_enabled:
+            self._validate_sequence_parallel(heads, tp)
+
+    def _validate_sequence_parallel(self, heads: int, tp: int) -> None:
+        if tp <= 1:
+            options = [d for d in range(2, heads + 1) if heads % d == 0]
+            raise ValueError(
+                "HunyuanVideo 1.5 sequence parallelism shards the image stream over the "
+                f"tensor-parallel group; got tp_degree={tp}, use a tp_degree in {options}."
+            )
+        if self.context_parallel_enabled:
+            raise NotImplementedError(
+                "HunyuanVideo 1.5 sequence parallelism does not compose with "
+                "context parallelism (both shard the image sequence); enable only one."
+            )
+        p, p_t = int(self.patch_size), int(self.patch_size_t)
+        hw = (self.latent_height // p) * (self.latent_width // p)
+        tokens = (self.latent_frames // p_t) * hw
+        if tokens % tp:
+            # Latent frame counts whose token count divides tp, nearest below and above.
+            step = p_t * (tp // math.gcd(hw, tp))
+            lower = (self.latent_frames // step) * step
+            ratio = int(self.temporal_compression_ratio)
+            frames = [(t - 1) * ratio + 1 for t in (lower, lower + step) if t >= 1]
+            tps = [d for d in range(2, heads + 1) if heads % d == 0 and tokens % d == 0]
+            raise ValueError(
+                f"HunyuanVideo 1.5 sequence parallelism splits the N={tokens} image tokens "
+                f"of {self.height}x{self.width}x{self.num_frames} over tp_degree={tp}, but "
+                f"N % {tp} = {tokens % tp}; use num_frames in {frames} at this resolution"
+                + (f", or tp_degree in {tps}." if tps else ".")
+            )
 
 
 class ModelWrapperHunyuanVideo15Backbone(ModelWrapper):
@@ -492,6 +531,11 @@ class NeuronHunyuanVideo15BackboneApplication(NeuronApplicationBase):
         ):
             world_size = config.neuron_config.world_size
             state_dict["global_rank.rank"] = torch.arange(0, world_size, dtype=torch.int32)
+        # Megatron-SP scatters by the TP-local rank (root tp_rank_util, sharded over the
+        # TP group as in Wan): under SP+CFG the global ranks reach 2*tp-1.
+        if getattr(config, "sp_enabled", False):
+            tp_degree = config.neuron_config.tp_degree
+            state_dict["tp_rank_util.rank"] = torch.arange(0, tp_degree, dtype=torch.int32)
         return state_dict
 
     @staticmethod
@@ -612,6 +656,16 @@ def _hv15_static_reorder_forward(
     # fp32 count, then int32: Trainium LNC2 miscompiles long integer reductions.
     text_valid = encoder_attention_mask.float().sum(1).to(torch.int32)
 
+    # Megatron-SP: only the image stream is sequence-sharded over the TP group, once
+    # here for all blocks (the processor/FFN gather and reduce-scatter internally). The
+    # scatter takes the materialized SPMD rank buffer: nxd's
+    # scatter_to_sequence_parallel_region bakes group.rank() into a trace constant.
+    sp_rank_util = getattr(self, "_sp_rank_util", None)
+    if sp_rank_util is not None:
+        hidden_states = scatter_to_process_group_spmd(
+            hidden_states, partition_dim=1, rank=sp_rank_util.get_rank(), process_group=None
+        )
+
     for block in self.transformer_blocks:
         hidden_states, encoder_hidden_states = block(
             hidden_states,
@@ -620,6 +674,9 @@ def _hv15_static_reorder_forward(
             text_valid,
             image_rotary_emb,
         )
+
+    if sp_rank_util is not None:
+        hidden_states = gather_from_sequence_parallel_region(hidden_states, dim=1)
 
     hidden_states = self.norm_out(hidden_states, temb)
     hidden_states = self.proj_out(hidden_states)
@@ -665,6 +722,11 @@ class _HunyuanVideo15TraceModule(nn.Module):
 
         self.transformer = HunyuanVideo15Transformer3DModel(**_model_kwargs_from_config(config))
         self.transformer.forward = types.MethodType(_hv15_static_reorder_forward, self.transformer)
+        if sp:
+            # One TP-local rank buffer at the root (``tp_rank_util.rank``), referenced by
+            # the transformer without registering it there (no second state_dict key).
+            self.tp_rank_util = SPMDRank(world_size=int(config.neuron_config.tp_degree))
+            object.__setattr__(self.transformer, "_sp_rank_util", self.tp_rank_util)
         processor = JointBoundedProcessor(sp=sp)
         for block in self.transformer.transformer_blocks:
             block.attn.set_processor(processor)
