@@ -553,3 +553,169 @@ def test_sp_world1_matches_dense(tmp_path, backbone15, parallel15):
         out = sp(*inputs)
     assert out.shape == expected.shape == (1, 32, 2, 2, 3)
     assert torch.allclose(out, expected, atol=1e-5)
+
+
+# --------------------------------------------------------------------------- #
+# Context parallelism (ulysses / gather_kv)
+# --------------------------------------------------------------------------- #
+def _cp_processor_cls(parallel15, mode):
+    return {
+        "ulysses": parallel15.JointUlyssesProcessor,
+        "gather_kv": parallel15.JointGatherKvProcessor,
+    }[mode]
+
+
+@pytest.mark.parametrize("mode", ["ulysses", "gather_kv"])
+def test_cp_processors_world1_match_bounded(mode, parallel15):
+    from diffusers.models.transformers.transformer_hunyuan_video15 import (
+        HunyuanVideo15TransformerBlock,
+    )
+
+    torch.manual_seed(0)
+    attn = HunyuanVideo15TransformerBlock(4, 8, mlp_ratio=2.0).attn.eval()
+    hidden_states = torch.randn(1, 12, 32)
+    encoder_hidden_states = torch.randn(1, 14, 32)
+    rope = _rope(12, 8)
+    text_valid = torch.tensor([9], dtype=torch.int32)
+    with torch.no_grad():
+        expected = parallel15.JointBoundedProcessor()(
+            attn, hidden_states, encoder_hidden_states, text_valid, rope
+        )
+        out = _cp_processor_cls(parallel15, mode)(num_image_tokens=12)(
+            attn, hidden_states, encoder_hidden_states, text_valid, rope
+        )
+    for got, want in zip(out, expected):
+        assert got.shape == want.shape
+        assert torch.allclose(got, want, atol=1e-4)
+
+
+def test_ulysses_bound_uses_full_image_tokens(monkeypatch, parallel15):
+    # After the CP scatter the processor holds N/cp image tokens; a bound derived from
+    # the local shape would silently drop half the image keys (invisible at world 1).
+    from diffusers.models.transformers.transformer_hunyuan_video15 import (
+        HunyuanVideo15TransformerBlock,
+    )
+
+    shard, text_len, text_valid = 12, 14, 9
+    seen = {}
+
+    def spy(q_img, q_txt, k_img, v_img, k_txt, v_txt, *, scale, key_valid_len, **kwargs):
+        seen.update(key_valid_len=key_valid_len, q_txt=q_txt.shape, k_txt=k_txt.shape)
+        return torch.zeros_like(q_img), torch.zeros_like(q_txt)
+
+    monkeypatch.setattr(parallel15, "joint_ulysses_attention", spy)
+    attn = HunyuanVideo15TransformerBlock(4, 8, mlp_ratio=2.0).attn.eval()
+    processor = parallel15.JointUlyssesProcessor(num_image_tokens=2 * shard)
+    with torch.no_grad():
+        img, txt = processor(
+            attn,
+            torch.randn(1, shard, 32),
+            torch.randn(1, text_len, 32),
+            torch.tensor([text_valid], dtype=torch.int32),
+            _rope(shard, 8),
+        )
+
+    assert seen["key_valid_len"].tolist() == [2 * shard + text_valid]
+    assert seen["key_valid_len"].dtype == torch.int32
+    # The op's joint [image_full ‖ text] length is padded to a multiple of 128.
+    assert (2 * shard + seen["q_txt"][2]) % 128 == 0
+    assert seen["k_txt"] == seen["q_txt"]
+    assert img.shape == (1, shard, 32) and txt.shape == (1, text_len, 32)
+
+
+def test_gather_kv_pads_query_and_keys_to_tiles(monkeypatch, parallel15):
+    # Sharded q (N/cp + text) against full k/v (N + text), each padded to 128 on its own.
+    torch.manual_seed(0)
+    q = torch.randn(1, 1, 300, 8)
+    k, v = (torch.randn(1, 1, 500, 8) for _ in range(2))
+    seen = {}
+    real_attention = parallel15.attention
+
+    def spy(q_, k_, v_, **kwargs):
+        seen.update(q=q_.shape, k=k_.shape, bound_max=kwargs["bound_max"])
+        return real_attention(q_, k_, v_, **kwargs)
+
+    monkeypatch.setattr(parallel15, "attention", spy)
+    out = parallel15.bounded_joint_attention(
+        q, k, v, torch.tensor([450], dtype=torch.int32), scale=8**-0.5
+    )
+    assert seen["q"] == (1, 384, 8) and seen["k"] == (1, 512, 8)
+    assert seen["bound_max"].shape == (1, 384, 1)
+    assert (seen["bound_max"][:, :300] == 450).all()
+    assert (seen["bound_max"][:, 300:] == 1).all()
+    assert out.shape == (1, 1, 300, 8)
+    probs = torch.softmax(q[0, 0] @ k[0, 0, :450].T * 8**-0.5, dim=-1)
+    assert torch.allclose(out[0, 0], probs @ v[0, 0, :450], atol=1e-5)
+
+
+def test_ulysses_rejects_heads_indivisible(tmp_path):
+    # tp4 cp8 on 4 heads: 1 head per TP rank cannot be split over 8 CP ranks.
+    # 13 frames -> 4x2x3 = 24 image tokens, so N % cp == 0 and only the heads fail.
+    shape = {"tp_degree": 4, "world_size": 32, "num_frames": 13, "context_parallel_enabled": True}
+    with pytest.raises(ValueError, match="num_attention_heads"):
+        _config(tmp_path, cp_mode="ulysses", **shape)
+    assert _config(tmp_path, cp_mode="gather_kv", **shape)
+
+
+@pytest.mark.parametrize("mode", ["ulysses", "gather_kv"])
+def test_cp_rejects_indivisible_image_tokens(tmp_path, mode):
+    # 32x48x1 -> 1x2x3 = 6 image tokens over cp 4 (4 heads split fine for ulysses).
+    with pytest.raises(ValueError, match="N=6") as err:
+        _config(tmp_path, world_size=4, num_frames=1, context_parallel_enabled=True, cp_mode=mode)
+    assert "cp_degree=4" in str(err.value)
+    # Suggested frame counts at this resolution: 2 latent frames (5) gives N=12.
+    assert "[5]" in str(err.value)
+
+
+def test_cp_scatter_happens_once(tmp_path, monkeypatch, backbone15):
+    calls = {"scatter": [], "gather": []}
+    group = object()
+    monkeypatch.setattr(backbone15, "init_parallel_mesh", lambda cfg: None)
+    monkeypatch.setattr(backbone15, "SPMDRank", _RankParam)
+    monkeypatch.setattr(backbone15, "get_cp_group", lambda: group)
+    monkeypatch.setattr(backbone15, "get_cp_rank_spmd", lambda rank: ("cp_rank", rank))
+
+    def scatter(x, partition_dim, rank, process_group):
+        calls["scatter"].append((tuple(x.shape), partition_dim, rank, process_group))
+        return x
+
+    def gather(x, gather_dim, process_group):
+        calls["gather"].append((tuple(x.shape), gather_dim, process_group))
+        return x
+
+    monkeypatch.setattr(backbone15, "scatter_to_process_group_spmd", scatter)
+    monkeypatch.setattr(backbone15, "gather_from_tensor_model_parallel_region_with_dim", gather)
+    module = backbone15._HunyuanVideo15TraceModule(
+        _config(tmp_path, context_parallel_enabled=True)
+    ).eval()
+    with torch.no_grad():
+        module(*_dit_inputs())
+
+    # Once before the blocks (not per block): the image stream [B, N, C] on dim 1 and
+    # rope cos/sin [N, d] on dim 0, by this rank's CP rank over the CP group. One
+    # gather of the image stream after the blocks.
+    shapes = [(shape, dim) for shape, dim, _, _ in calls["scatter"]]
+    assert shapes == [((1, 12, 32), 1), ((12, 8), 0), ((12, 8), 0)]
+    rank = ("cp_rank", module.global_rank.rank)
+    assert all(r == rank and g is group for _, _, r, g in calls["scatter"])
+    assert calls["gather"] == [((1, 12, 32), 1, group)]
+
+
+@pytest.mark.parametrize("mode", ["ulysses", "gather_kv"])
+def test_cp_world1_matches_dense(tmp_path, mode, backbone15, parallel15):
+    torch.manual_seed(0)
+    dense = backbone15._HunyuanVideo15TraceModule(_config(tmp_path)).eval()
+    cp = backbone15._HunyuanVideo15TraceModule(
+        _config(tmp_path, context_parallel_enabled=True, cp_mode=mode)
+    ).eval()
+    cp.transformer.load_state_dict(dense.transformer.state_dict())
+    processor = cp.transformer.transformer_blocks[0].attn.processor
+    assert isinstance(processor, _cp_processor_cls(parallel15, mode))
+    assert processor.num_image_tokens == 12
+
+    inputs = _dit_inputs()
+    with torch.no_grad():
+        expected = dense(*inputs)
+        out = cp(*inputs)
+    assert out.shape == expected.shape
+    assert torch.allclose(out, expected, atol=1e-4)

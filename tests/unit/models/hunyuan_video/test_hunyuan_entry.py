@@ -84,11 +84,39 @@ def test_create_application15_accepts_cfg_parallel():
     assert application.batch_size == 1  # VAE and other components stay at the base batch
 
 
-def test_create_application15_rejects_context_parallel():
-    with pytest.raises(NotImplementedError, match="CP is deferred"):
+@pytest.mark.parametrize("cp_mode", ["ulysses", "gather_kv"])
+def test_create_application15_accepts_context_parallel(cp_mode):
+    with tempfile.TemporaryDirectory() as path:
+        application = entry.create_hunyuan_video15_application(
+            model_path=path,
+            parallel=_parallel(cp_degree=2, cp_mode=cp_mode),
+            dtype=torch.float32,
+            shape={},
+        )
+    assert application.model_version == "1.5"
+    assert application.parallel.world_size == 2
+
+
+def test_ring_rejected_before_compile(monkeypatch):
+    from difflet.models.hunyuan_video import application as app
+
+    def built(**kwargs):
+        raise AssertionError("ring must be rejected before the application is built")
+
+    monkeypatch.setattr(app, "NeuronHunyuanVideoApplication", built)
+    with pytest.raises(NotImplementedError, match="ulysses") as err:
         entry.create_hunyuan_video15_application(
             model_path="x",
-            parallel=_parallel(cp_degree=2),
+            parallel=_parallel(cp_degree=2, cp_mode="ring"),
             dtype="bf16",
             shape={},
         )
+    assert "text" in str(err.value)
+
+
+def test_registry_keeps_ring_for_native():
+    # Only the AOT entry rejects ring; the native backend's ring path stays registered.
+    from difflet.registry import resolve_model
+
+    model = resolve_model("hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v")
+    assert "ring" in model.capabilities.cp_modes
