@@ -985,21 +985,42 @@ def _platform():
     return current_platform()
 
 
+def _registry_layout(args: argparse.Namespace) -> tuple[int, bool]:
+    """(tp, cfg_parallel) of a replica on a platform with no default tp (Trainium).
+
+    A registry default that declares a whole layout (hv15: TP2 x CFG2) applies only when the
+    user gave none of tp, cfg, cp; once any is given the rest default to 1, as the model's
+    orchestrator does (``hunyuan_video_15._layout``). Other entries only default the tp.
+    """
+    from difflet.registry import resolve_model
+
+    default = resolve_model(args.model_id, model_type=_MODEL_TYPE[args.model_id]).default_parallel
+    cfg = bool(getattr(args, "cfg_parallel", False))
+    if default.cfg_parallel_enabled and not (args.tp_degree or cfg or (args.cp_degree or 1) > 1):
+        return default.tp_degree, True
+    if default.cfg_parallel_enabled:
+        return args.tp_degree or 1, cfg
+    return args.tp_degree or default.tp_degree, cfg
+
+
 def _replica_tp(args: argparse.Namespace) -> int:
     """The tp degree one replica runs at: the platform's default when it has one (1 on a GPU
     platform, where a replica is ``cfg x cp x tp`` GPUs), else the registry default."""
     platform_default = _platform().default_tp_degree()
     if platform_default is not None:
         return args.tp_degree or platform_default
-    from difflet.registry import resolve_model
+    return _registry_layout(args)[0]
 
-    entry = resolve_model(args.model_id, model_type=_MODEL_TYPE[args.model_id])
-    return args.tp_degree or entry.default_parallel.tp_degree
+
+def _replica_cfg(args: argparse.Namespace) -> bool:
+    if _platform().default_tp_degree() is not None:
+        return bool(getattr(args, "cfg_parallel", False))
+    return _registry_layout(args)[1]
 
 
 def _replica_cores(args: argparse.Namespace) -> int:
     """Devices per replica: NeuronCores on Trainium, GPUs on CUDA (``cfg x cp x tp``)."""
-    cfg = 2 if getattr(args, "cfg_parallel", False) else 1
+    cfg = 2 if _replica_cfg(args) else 1
     return _replica_tp(args) * (args.cp_degree or 1) * cfg
 
 
@@ -1072,7 +1093,7 @@ def _validate_capacity(args: argparse.Namespace) -> None:
     print(
         f"Error: this parallel config needs {needed} {unit} but only "
         f"{total} are available ({origin}).\n"
-        f"  dp={getattr(args, 'dp', None) or 1} x cfg={2 if getattr(args, 'cfg_parallel', False) else 1} "
+        f"  dp={getattr(args, 'dp', None) or 1} x cfg={2 if _replica_cfg(args) else 1} "
         f"x cp={args.cp_degree or 1} x tp={tp}{tp_note} = {needed}\n"
         f"  Lower a degree, or pass --total-cores to plan for a larger host.",
         file=sys.stderr,
@@ -1133,7 +1154,12 @@ def _dispatch_dp(args: argparse.Namespace) -> None:
         orch = _get_orchestrator(args)
         orch.download()
         orch.compile()
-    raise SystemExit(router.run_router(args, requests, replica_cores=_replica_cores(args)))
+    replica = _replica_cores(args)
+    # Hand the workers the layout the replica was sized for, not their own defaults.
+    args.cfg_parallel = _replica_cfg(args)
+    if _platform().default_tp_degree() is None:
+        args.tp_degree = _replica_tp(args)
+    raise SystemExit(router.run_router(args, requests, replica_cores=replica))
 
 
 def _get_orchestrator(args: argparse.Namespace):

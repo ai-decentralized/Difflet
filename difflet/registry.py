@@ -356,16 +356,15 @@ def _register_builtin_hunyuan_video_15() -> None:
             "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_t2v",
         ),
         detector=is_hunyuan_video_15,
-        default_parallel=DiffletParallelConfig(tp_degree=4),
+        # TP2 x CFG2: the orchestrator's default layout (hunyuan_video_15._layout).
+        default_parallel=DiffletParallelConfig(tp_degree=2, cfg_parallel_enabled=True),
         default_shape={"height": 480, "width": 848, "num_frames": 121},
         capabilities=ModelCapabilities(
             num_attention_heads=16,
-            is_distilled=True,
-            # CP and SP are both deferred until the transformer port lands; the
-            # segmented runtime has no CP foundation to build SP on.
-            supports_cp=False,
-            supports_sp=False,
-            cp_modes=frozenset(),
+            # Two-pass CFG: the checkpoint's guider is ClassifierFreeGuidance (scale 6.0).
+            is_distilled=False,
+            supports_cp=True,
+            supports_sp=True,
         ),
         backends=("trainium", "neuron"),
     )

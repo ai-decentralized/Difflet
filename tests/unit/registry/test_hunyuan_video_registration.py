@@ -23,7 +23,8 @@ def test_hunyuan_video_15_registry_defaults_are_production_480p():
     entry = resolve_model("hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v")
 
     assert entry.name == "hunyuan_video_15"
-    assert entry.default_parallel == DiffletParallelConfig(tp_degree=4)
+    assert entry.default_parallel.tp_degree == 2
+    assert entry.default_parallel.cfg_parallel_enabled is True
     assert entry.default_shape == {"height": 480, "width": 848, "num_frames": 121}
 
 
