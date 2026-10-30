@@ -670,20 +670,16 @@ def _hv15_static_reorder_forward(
         torch.ones_like(encoder_hidden_states_2[:, :, 0], dtype=torch.long)
     )
     encoder_hidden_states_3 = self.image_embedder(image_embeds)
-    is_t2v = torch.all(image_embeds == 0)
-    if is_t2v:
-        encoder_hidden_states_3 = encoder_hidden_states_3 * 0.0
-        encoder_attention_mask_3 = torch.zeros(
-            (batch_size, encoder_hidden_states_3.shape[1]),
-            dtype=encoder_attention_mask.dtype,
-            device=encoder_attention_mask.device,
-        )
-    else:
-        encoder_attention_mask_3 = torch.ones(
-            (batch_size, encoder_hidden_states_3.shape[1]),
-            dtype=encoder_attention_mask.dtype,
-            device=encoder_attention_mask.device,
-        )
+    # diffusers' `if torch.all(image_embeds == 0)` (t2v: zero the image stream, mask it out),
+    # kept in the graph: a Python bool of a lazy tensor executes the partial graph mid-trace,
+    # which segfaults under CFG parallelism (image_embeds then comes from the SPMD scatter).
+    # The flag is a float max (no integer reduction); x * 0.0 / x * 1.0 match both branches.
+    # A full max: the torch-xla trace lowered a dimless amax to no reduction at all.
+    has_image = (image_embeds.abs().float().max() > 0).to(encoder_hidden_states_3.dtype)
+    encoder_hidden_states_3 = encoder_hidden_states_3 * has_image
+    encoder_attention_mask_3 = has_image.to(encoder_attention_mask.dtype).expand(
+        batch_size, encoder_hidden_states_3.shape[1]
+    )
     encoder_hidden_states_3 = encoder_hidden_states_3 + self.cond_type_embed(
         2 * torch.ones_like(encoder_hidden_states_3[:, :, 0], dtype=torch.long)
     )
