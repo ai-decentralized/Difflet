@@ -1,7 +1,7 @@
 <div align="center">
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/yotta-logo-white.png">
-  <img alt="Yotta Labs" src="docs/assets/yotta-logo-black.png" width="260">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/yotta-logo-white.svg">
+  <img alt="Yotta Labs" src="docs/assets/yotta-logo-black.svg" width="260">
 </picture>
 </div>
 
