@@ -7,6 +7,7 @@ reference path is covered by CPU tests.
 
 from __future__ import annotations
 
+import copy
 import dataclasses
 import os
 from dataclasses import dataclass
@@ -609,9 +610,14 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                         NeuronHunyuanVideo15TeacacheProbeFusedApplication,
                     )
 
+                    # The probe always runs at batch 1 (block-0 modulation is identical
+                    # for the cond and uncond rows), so under CFG it gets its own batch-1
+                    # copy of the backbone config; world and tp stay the backbone's.
+                    probe_config = copy.deepcopy(config)
+                    probe_config.neuron_config.batch_size = 1
                     self.teacache_probe = NeuronHunyuanVideo15TeacacheProbeFusedApplication(
                         model_path=self.transformer_path,
-                        config=config,
+                        config=probe_config,
                     )
                     self.teacache_probe_fused = True
             else:
@@ -734,6 +740,10 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                     model_path=self.vae_decoder_path,
                     config=vae_config,
                 )
+        if self.model_version == "1.5":
+            # 1.5 is driven by pipeline15.HunyuanVideo15Denoiser (aot15.build_aot_denoiser),
+            # not by the 1.0 orchestrator.
+            return
         from difflet.models.hunyuan_video.pipeline import HunyuanVideoOrchestrator
 
         self.pipeline = HunyuanVideoOrchestrator(
@@ -945,6 +955,14 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
         refiner.token_refiner.forward = types.MethodType(_host_keyonly, refiner.token_refiner)
         self._host_refiner = refiner
         return refiner
+
+    def reset_refiner_cache(self) -> None:
+        """Forget the host refiner's memoized outputs (call at the start of every request).
+
+        The cache's prompt fingerprint is cheap and can collide across requests (e.g. the
+        same negative prompt in row 0 and positive prompts of equal valid length)."""
+        self._refiner_cache = {}
+        self._refiner_fp = None
 
     def forward_dit(self, bundle: HunyuanVideoDiTInputBundle):
         if self.transformer is None:

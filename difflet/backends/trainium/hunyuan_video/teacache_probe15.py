@@ -212,3 +212,19 @@ class NeuronHunyuanVideo15TeacacheProbeFusedApplication(NeuronApplicationBase):
     def teacache_delta(self, hidden_states, timestep, timestep_r):
         out = self.models[0](hidden_states, timestep, timestep_r)
         return out[0] if isinstance(out, (tuple, list)) else out
+
+    def reset_state(self) -> None:
+        """Zero the on-device ``prev_mod`` on every local rank (start of a request).
+
+        Before load there is nothing to clear: NxD zero-initialises the state at load.
+        """
+        if self.traced_model is None:
+            return
+        nxd = self.traced_model.nxd_model
+        for rank, states in enumerate(nxd.states):
+            for key in PROBE_STATE_TENSORS:
+                if key in states:
+                    buf = states[key]
+                    nxd.write_to_neuron_buffer(
+                        torch.zeros(buf.shape, dtype=buf.dtype), key, rank
+                    )

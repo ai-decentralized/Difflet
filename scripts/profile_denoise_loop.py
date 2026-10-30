@@ -1026,6 +1026,7 @@ def _run_hunyuan_video15(
     meta: dict[str, Any],
 ) -> tuple[dict[str, Any], Any]:
     from difflet.models.hunyuan_video.application import HunyuanVideo15DiTInputBundle
+    from difflet.models.hunyuan_video.pipeline15 import load_hv15_scheduler, set_hv15_timesteps
 
     bundle_path = Path(args.bundle)
     tensors = load_safetensors_file(str(bundle_path), device="cpu")
@@ -1067,7 +1068,9 @@ def _run_hunyuan_video15(
     latents = tensors["hidden_states"].to(dtype=args.dtype).contiguous()
     timesteps = tensors["timesteps"].contiguous()
     timestep_r = tensors.get("timestep_r", torch.ones([latents.shape[0]], dtype=args.dtype))
-    scheduler_loop = app.pipeline
+    # The scheduler and schedule the AOT loop (HunyuanVideo15Denoiser) steps with.
+    scheduler = load_hv15_scheduler(app.model_path)
+    scheduler_timesteps = set_hv15_timesteps(scheduler, int(timesteps.shape[0]))
     steps: list[dict[str, Any]] = []
     xla_metrics = _XlaMetricsSampler()
 
@@ -1097,12 +1100,12 @@ def _run_hunyuan_video15(
         noise_pred = _first_tensor(_call_target(target, bundle))
         device_elapsed = time.perf_counter() - device_start
         scheduler_start = time.perf_counter()
-        next_latents = scheduler_loop._scheduler_step(  # noqa: SLF001
-            noise_pred,
-            timestep,
+        next_latents = scheduler.step(
+            noise_pred.to(dtype=latents.dtype),
+            scheduler_timesteps[step_index],
             latents,
-            int(timesteps.shape[0]),
-        )
+            return_dict=False,
+        )[0]
         scheduler_elapsed = time.perf_counter() - scheduler_start
         mark_elapsed = _xla_mark_step() if args.mark_step else 0.0
         host_elapsed = time.perf_counter() - host_start

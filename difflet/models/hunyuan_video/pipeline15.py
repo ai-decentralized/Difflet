@@ -58,6 +58,27 @@ def load_hv15_guidance(model_path: str, guidance_scale: float | None = None) -> 
     return scale if scale > 1.0 else None
 
 
+def load_hv15_scheduler(model_path: str):
+    """The snapshot's diffusers scheduler (the one the denoiser steps with)."""
+    import diffusers
+
+    with open(os.path.join(model_path, "model_index.json"), encoding="utf-8") as f:
+        _, scheduler_cls = json.load(f)["scheduler"]
+    return getattr(diffusers, scheduler_cls).from_pretrained(os.path.join(model_path, "scheduler"))
+
+
+def set_hv15_timesteps(scheduler, num_inference_steps: int) -> torch.Tensor:
+    """Set diffusers' t2v schedule (sigmas ``linspace(1, 0, steps + 1)[:-1]``) and return it."""
+    import inspect
+
+    import diffusers
+
+    retrieve_timesteps = inspect.getmodule(diffusers.HunyuanVideo15Pipeline).retrieve_timesteps
+    sigmas = np.linspace(1.0, 0.0, int(num_inference_steps) + 1)[:-1]
+    timesteps, _ = retrieve_timesteps(scheduler, int(num_inference_steps), "cpu", sigmas=sigmas)
+    return timesteps
+
+
 def cfg_on(scale: float | None) -> bool:
     return scale is not None and float(scale) > 1.0
 
@@ -146,13 +167,7 @@ class HunyuanVideo15Denoiser:
             )
 
     def load(self, skip_warmup: bool = False) -> None:
-        import diffusers
-
-        with open(os.path.join(self.model_path, "model_index.json"), encoding="utf-8") as f:
-            _, scheduler_cls = json.load(f)["scheduler"]
-        self.scheduler = getattr(diffusers, scheduler_cls).from_pretrained(
-            os.path.join(self.model_path, "scheduler")
-        )
+        self.scheduler = load_hv15_scheduler(self.model_path)
         self.dit.load(skip_warmup=skip_warmup)
 
     def _dit(self, latent_input, timestep, text, image_embeds) -> torch.Tensor:
@@ -184,12 +199,7 @@ class HunyuanVideo15Denoiser:
         latents=None,
         callback=None,
     ) -> torch.Tensor:
-        import inspect
-
-        import diffusers
         from diffusers.utils.torch_utils import randn_tensor
-
-        retrieve_timesteps = inspect.getmodule(diffusers.HunyuanVideo15Pipeline).retrieve_timesteps
 
         dt = self.dtype
         scale = self.guidance_scale
@@ -199,10 +209,7 @@ class HunyuanVideo15Denoiser:
         if self.dit.cfg > 1 and not cfg:
             raise ValueError("CFG parallelism needs classifier-free guidance (guidance_scale > 1)")
 
-        sigmas = np.linspace(1.0, 0.0, num_inference_steps + 1)[:-1]
-        timesteps, num_inference_steps = retrieve_timesteps(
-            self.scheduler, num_inference_steps, "cpu", sigmas=sigmas
-        )
+        timesteps = set_hv15_timesteps(self.scheduler, num_inference_steps)
         shape = (
             1,
             int(self.dit.model_config["out_channels"]),
