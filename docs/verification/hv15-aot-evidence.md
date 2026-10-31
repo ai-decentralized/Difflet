@@ -388,3 +388,15 @@ The native-input comparisons above used the pre-fix NEFF and therefore stand.
   TP2 x CFG2 layout to 0.99972, the same agreement as every other layout pair. (The tp4sp cell
   has no CFG, so it does not exercise this.)
 - Evidence: `E/phase1/aot-tp2cfgsp/`.
+
+#### aot-tp2cp2-ulysses (TP2 x CP2, `--cp-mode ulysses`)
+
+| step | outcome | wall | detail | peak HBM per core (GiB) |
+|---|---|---|---|---|
+| `compile --tp-degree 2 --cp-degree 2 --cp-mode ulysses` | DiT PASS, VAE FAIL (aot-vae) | 731.2 s | DiT compiled in 615.9 s into `hunyuan_video_15_aot_dit/16020e50bb9f6f06` | — |
+| `generate --steps 3` | DiT PASS; VAE stage exits | 315.2 s | encode 125.5 s; DiT load 133.6 s; denoise 6.8 s, median 1834 ms (first 3184 ms) | 8.74 on each of 4 cores |
+
+- `embeds.pt` sha `3051691e…`; `latents.pt` sha `72274456…`.
+- **Gate (vs aot-tp2): per forward PASS**, cosine 0.999727 / rel-L1 0.0260 / max-abs 0.38 at
+  1 step; 3 steps 0.985001 / 0.1746 / 3.67, inside the bf16 floor. No NaN / Inf.
+- Evidence: `E/phase1/aot-tp2cp2-ulysses/`.

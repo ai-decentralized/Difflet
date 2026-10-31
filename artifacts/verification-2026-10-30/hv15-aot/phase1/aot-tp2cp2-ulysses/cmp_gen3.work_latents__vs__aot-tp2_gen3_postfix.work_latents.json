@@ -1,0 +1,28 @@
+{
+  "candidate": "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/aot-tp2cp2-ulysses/gen3.work/latents.pt",
+  "reference": "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/aot-tp2/gen3_postfix.work/latents.pt",
+  "sha256": [
+    "7227445634a663cc4121e5d8898f1897ca56a6795fad933a5c46a10ecbe74d2c",
+    "aeaab2fbc43a95cb5780c0fab3fc92c67291b26670961b8fc23f0701f17111de"
+  ],
+  "shape": [
+    1,
+    32,
+    16,
+    20,
+    32
+  ],
+  "cosine": 0.9850007207183868,
+  "rel_l1": 0.17464740659898773,
+  "max_abs": 3.671875,
+  "mean_abs": 0.20753682295326142,
+  "nan": [
+    0,
+    0
+  ],
+  "inf": [
+    0,
+    0
+  ],
+  "bit_identical": false
+}
