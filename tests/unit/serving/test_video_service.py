@@ -584,6 +584,35 @@ def test_async_jobs_transition_from_queued_to_completed_or_sanitized_failed(
     asyncio.run(_run())
 
 
+def test_failed_job_is_visible_only_after_its_staging_file_is_deleted(
+    tmp_path,
+    monkeypatch,
+):
+    # A slow staging delete widens the window between the two steps; the job must not read
+    # "failed" while its partial output is still on disk.
+    _patch_media_validation_without_pyav(monkeypatch)
+
+    async def _run() -> None:
+        engine = _FakeVideoEngine(failing_prompts={"fail"})
+        service, _, artifacts = _service(tmp_path, engine)
+        delete_staging = artifacts.delete_staging
+
+        def slow_delete_staging(target):
+            time.sleep(0.2)
+            return delete_staging(target)
+
+        monkeypatch.setattr(artifacts, "delete_staging", slow_delete_staging)
+        await service.start()
+        try:
+            await service.create_async(_request("video_fail", prompt="fail"))
+            await _wait_for_status(service, "video_fail", "failed")
+            assert tuple(artifacts.staging_root.iterdir()) == ()
+        finally:
+            await service.shutdown()
+
+    asyncio.run(_run())
+
+
 def test_sync_generation_creates_no_job_row_and_explicit_cleanup_removes_artifact(
     tmp_path,
     monkeypatch,

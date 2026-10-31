@@ -841,8 +841,19 @@ class VideoGenerationService:
             finally:
                 item.task = None
 
+    async def _discard_outputs(self, item: _VideoWorkItem) -> None:
+        """Delete a failed item's committed artifact, if any, and its staging file."""
+        if item.artifact is not None:
+            deleted = await self._delete_or_schedule_orphan(item.artifact)
+            if deleted:
+                await self._release_item_storage(item)
+        if item.target is not None:
+            with suppress(Exception):
+                await asyncio.to_thread(self.artifacts.delete_staging, item.target)
+
     async def _execute_item(self, item: _VideoWorkItem) -> None:
         keep_artifact = False
+        outputs_discarded = False
         worker_output_fenced = True
         started = time.perf_counter()
         deadline = self._item_deadline(item)
@@ -1002,6 +1013,10 @@ class VideoGenerationService:
             if not worker_output_fenced:
                 await self._wait_for_engine_fence()
                 worker_output_fenced = True
+            # Clean up before the job turns terminal: a client that sees "failed" must not
+            # find this request's files still on disk.
+            outputs_discarded = True
+            await self._discard_outputs(item)
             if item.job_backed and not item.delete_requested:
                 await self._mark_failed(
                     item.key,
@@ -1024,19 +1039,18 @@ class VideoGenerationService:
         except BaseException as exc:
             error = _public_job_error(exc)
             logger.exception("video.generation_failed request_id=%s code=%s", item.key, error.code)
+            if worker_output_fenced:
+                # As in the cancellation branch: clean up before the job turns terminal.
+                outputs_discarded = True
+                await self._discard_outputs(item)
             if item.job_backed and not item.delete_requested:
                 await self._mark_failed(item.key, error)
             if item.future is not None and not item.future.done():
                 item.future.set_exception(_public_exception(exc))
         finally:
             if not keep_artifact and worker_output_fenced:
-                if item.artifact is not None:
-                    deleted = await self._delete_or_schedule_orphan(item.artifact)
-                    if deleted:
-                        await self._release_item_storage(item)
-                if item.target is not None:
-                    with suppress(Exception):
-                        await asyncio.to_thread(self.artifacts.delete_staging, item.target)
+                if not outputs_discarded:
+                    await self._discard_outputs(item)
             elif not worker_output_fenced:
                 logger.critical(
                     "video.staging_quarantined_without_worker_fence request_id=%s",
