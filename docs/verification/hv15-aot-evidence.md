@@ -499,6 +499,7 @@ the `aot_vae` stage. *RSS*: peak host RSS of the `aot_transformer` / `aot_vae` s
 |---|---|---|---|---|---|---|---|---|---|---|
 | tp2cfg (`--tp-degree 2 --cfg-parallel`) | **PASS** | 6.6 (619.5) | 802.8 | 273.6 | 79.8 / 1573 | 9.69 x4 | 417.0 | 37.4 / 18.5 | ref (no NaN/Inf) | `E/phase2/tp2cfg/` |
 | tp4 (`--tp-degree 4`) | **PASS** | 5.8 (572.3) | 687.0 | 144.8 | 87.7 / 1731 | 5.76 x4 | 422.7 | 19.3 / 18.4 | 0.968992 (no NaN/Inf) | `E/phase2/tp4/` |
+| tp4sp (`--tp-degree 4 --sp`) | **PASS** | 6.1 (327.3) | 544.8 | 22.1 (warm) | 81.2 / 1601 | 5.25 x4 | 409.4 | 21.0 / 18.5 | 0.955830 (no NaN/Inf) | `E/phase2/tp4sp/` |
 
 **tp2cfg.** Encode 9.0 s. Mid frame: a red fox running left to right across snow, snowy
 pines behind (`gen50_mid.png`); 61 frames, minimum per-frame std 67.3, mean frame-to-frame
@@ -515,3 +516,12 @@ was 0.985; the 50-step trajectory accumulates more bf16 difference, informationa
 CFG's two passes in sequence, so its step (1731 ms) is slower than tp2cfg's (1573 ms) with the
 same four cores, but each core holds half the weights (5.76 vs 9.69 GiB) and the DiT loads in
 144.8 s instead of 273.6 s.
+
+**tp4sp.** Encode 9.2 s. Mid frame: the same fox and snow scene (`gen50_mid.png`); minimum
+per-frame std 67.6, mean frame-to-frame difference 41.0. Cosine 0.956 vs tp2cfg (informational).
+SP trims the per-core HBM from 5.76 to 5.25 GiB against plain TP4, and the step from 1731 to
+1601 ms. The DiT load (22.1 s) is warm-page-cache: a first tp4sp generate had loaded the same
+shards minutes earlier and was killed during its host decode when the harness's 30-minute
+monitor that supervised the job expired (the whole process tree went with it, `setsid`
+notwithstanding). The killed attempt is not a Difflet failure; the job was relaunched as a
+plain background task, and its partial log is kept outside the repo.
