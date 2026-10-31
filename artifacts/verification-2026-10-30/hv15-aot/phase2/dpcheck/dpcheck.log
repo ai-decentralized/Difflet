@@ -1,0 +1,122 @@
+date: 2026-10-31T02:32:27+0000
+cmd: bash /home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_py.sh scripts/verify_dp_correctness.py --model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v --dp 2 --tp-degree 2 --steps 3 -- --height 320 --width 512 --num-frames 61
+env: ['DIFFLET_BACKEND=trainium', 'HF_HUB_OFFLINE=1', 'TMPDIR=/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p2-dpcheck/tmp', 'PYTHONPATH=/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan']
++ /home/ubuntu/venvs/difflet-neuron/bin/python -m difflet.cli.main generate --model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v --dp 1 --tp-degree 2 --steps 3 --requests /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p2-dpcheck/tmp/dp_correctness_3rqfve8y/serial/requests.jsonl --work-dir /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p2-dpcheck/tmp/dp_correctness_3rqfve8y/serial/work --keep-work-dir --height 320 --width 512 --num-frames 61
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+[dp-router] worker 0: cores 0-1
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+Loading pipeline components...:   0%|          | 0/7 [00:00<?, ?it/s]
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s][A
+Loading checkpoint shards:  50%|█████     | 1/2 [00:10<00:10, 10.95s/it][ALoading checkpoint shards: 100%|██████████| 2/2 [00:10<00:00,  5.48s/it]
+Loading pipeline components...:  14%|█▍        | 1/7 [00:10<01:05, 10.97s/it]
+Loading checkpoint shards:   0%|          | 0/3 [00:00<?, ?it/s][A
+Loading checkpoint shards:  33%|███▎      | 1/3 [00:00<00:00,  9.72it/s][A
+Loading checkpoint shards:  67%|██████▋   | 2/3 [00:00<00:00,  8.80it/s][A
+Loading checkpoint shards: 100%|██████████| 3/3 [00:00<00:00,  8.98it/s][ALoading checkpoint shards: 100%|██████████| 3/3 [00:00<00:00,  9.01it/s]
+Loading pipeline components...:  43%|████▎     | 3/7 [00:11<00:11,  2.98s/it]Loading pipeline components...:  57%|█████▋    | 4/7 [00:11<00:06,  2.04s/it]Loading pipeline components...:  71%|███████▏  | 5/7 [00:17<00:06,  3.42s/it]Guiders are currently an experimental feature under active development. The API is subject to breaking changes in future releases.
+Loading pipeline components...: 100%|██████████| 7/7 [00:17<00:00,  2.54s/it]
+[hv15] encode: load 17.8 s
+[hv15] encode request 0: 902.0 s (prompt + negative)
+[hv15] encode request 1: 7.4 s (prompt + negative)
+[hv15] encode request 2: 7.4 s (prompt + negative)
+[hv15] encode request 3: 7.4 s (prompt + negative)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+Neuron: Loading presharded checkpoints for ranks: 0...1
+Neuron: Presharded file read: 0.06s for 2 shard(s) (16209.0 MB total)
+Neuron: Initializing traced model weights for ranks: 0...1 (runtime_start_rank_id=0)
+Neuron: Finished traced model weight initialization in 27.23s (device init 27.23s, total load_weights 27.29s)
+Neuron: Skipping model warmup
+[hv15] aot transformer load 28.0 s
+[hv15] request 0: denoise 9.5 s, 3 steps, median 2696 ms (first 4140 ms)
+[hv15] request 1: denoise 8.1 s, 3 steps, median 2686 ms (first 2714 ms)
+[hv15] request 2: denoise 8.1 s, 3 steps, median 2694 ms (first 2696 ms)
+[hv15] request 3: denoise 8.1 s, 3 steps, median 2693 ms (first 2696 ms)
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00, 227.95it/s]
+[hv15] host vae load 0.0 s
+[hv15] request 0: host decode 414.7 s; [difflet] video saved to /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p2-dpcheck/tmp/dp_correctness_3rqfve8y/serial/out_0.mp4
+[hv15] request 1: host decode 410.0 s; [difflet] video saved to /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p2-dpcheck/tmp/dp_correctness_3rqfve8y/serial/out_1.mp4
+[hv15] request 2: host decode 409.8 s; [difflet] video saved to /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p2-dpcheck/tmp/dp_correctness_3rqfve8y/serial/out_2.mp4
+[hv15] request 3: host decode 411.4 s; [difflet] video saved to /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p2-dpcheck/tmp/dp_correctness_3rqfve8y/serial/out_3.mp4
+[dp-router] done=4 failed=0 unfinished=0
++ /home/ubuntu/venvs/difflet-neuron/bin/python -m difflet.cli.main generate --model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v --dp 2 --tp-degree 2 --steps 3 --requests /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p2-dpcheck/tmp/dp_correctness_3rqfve8y/parallel/requests.jsonl --work-dir /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p2-dpcheck/tmp/dp_correctness_3rqfve8y/parallel/work --keep-work-dir --height 320 --width 512 --num-frames 61
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+[dp-router] worker 0: cores 0-1
+[dp-router] worker 1: cores 2-3
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+Loading pipeline components...:   0%|          | 0/7 [00:00<?, ?it/s]
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s][ALoading pipeline components...:   0%|          | 0/7 [00:00<?, ?it/s]Guiders are currently an experimental feature under active development. The API is subject to breaking changes in future releases.
+
+Loading checkpoint shards:  50%|█████     | 1/2 [00:00<00:00,  2.64it/s][ALoading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00,  5.06it/s]
+Loading pipeline components...:  14%|█▍        | 1/7 [00:00<00:02,  2.45it/s]Loading pipeline components...:  29%|██▊       | 2/7 [00:00<00:00,  6.99it/s]
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s][ALoading pipeline components...:  29%|██▊       | 2/7 [00:00<00:01,  3.38it/s]
+Loading checkpoint shards:  50%|█████     | 1/2 [00:00<00:00,  2.74it/s][ALoading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00,  5.33it/s]
+Loading pipeline components...:  57%|█████▋    | 4/7 [00:00<00:00,  5.79it/s]
+Loading checkpoint shards:   0%|          | 0/3 [00:00<?, ?it/s][ALoading checkpoint shards: 100%|██████████| 3/3 [00:00<00:00, 193.68it/s]
+Loading pipeline components...:  43%|████▎     | 3/7 [00:00<00:01,  3.74it/s]Loading pipeline components...:  57%|█████▋    | 4/7 [00:00<00:00,  4.96it/s]
+Loading checkpoint shards:   0%|          | 0/3 [00:00<?, ?it/s][ALoading checkpoint shards: 100%|██████████| 3/3 [00:00<00:00, 193.85it/s]
+Guiders are currently an experimental feature under active development. The API is subject to breaking changes in future releases.
+Loading pipeline components...: 100%|██████████| 7/7 [00:01<00:00,  6.99it/s]
+[hv15] encode: load 1.0 s
+Loading pipeline components...:  86%|████████▌ | 6/7 [00:01<00:00,  5.60it/s]Loading pipeline components...: 100%|██████████| 7/7 [00:01<00:00,  6.62it/s]
+[hv15] encode: load 1.1 s
+[hv15] encode request 1: 22.2 s (prompt + negative)
+[hv15] encode request 0: 22.6 s (prompt + negative)
+[hv15] encode request 3: 20.1 s (prompt + negative)
+[hv15] encode request 2: 20.2 s (prompt + negative)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+Neuron: Loading presharded checkpoints for ranks: 0...1
+Neuron: Presharded file read: 0.06s for 2 shard(s) (16209.0 MB total)
+Neuron: Initializing traced model weights for ranks: 0...1 (runtime_start_rank_id=0)
+Neuron: Loading presharded checkpoints for ranks: 0...1
+Neuron: Presharded file read: 0.06s for 2 shard(s) (16209.0 MB total)
+Neuron: Initializing traced model weights for ranks: 0...1 (runtime_start_rank_id=0)
+Neuron: Finished traced model weight initialization in 24.65s (device init 24.65s, total load_weights 24.71s)
+Neuron: Skipping model warmup
+[hv15] aot transformer load 25.4 s
+[hv15] request 1: denoise 10.6 s, 3 steps, median 3143 ms (first 4334 ms)
+Neuron: Finished traced model weight initialization in 39.81s (device init 39.81s, total load_weights 39.87s)
+Neuron: Skipping model warmup
+[hv15] aot transformer load 40.6 s
+[hv15] request 3: denoise 9.3 s, 3 steps, median 3130 ms (first 3141 ms)
+[hv15] request 0: denoise 10.1 s, 3 steps, median 2944 ms (first 4371 ms)
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00, 222.92it/s]
+[hv15] host vae load 0.0 s
+[hv15] request 2: denoise 9.5 s, 3 steps, median 3315 ms (first 2788 ms)
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00, 129.83it/s]
+[hv15] host vae load 0.0 s
+[hv15] request 1: host decode 739.4 s; [difflet] video saved to /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p2-dpcheck/tmp/dp_correctness_3rqfve8y/parallel/out_1.mp4
+[hv15] request 0: host decode 734.9 s; [difflet] video saved to /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p2-dpcheck/tmp/dp_correctness_3rqfve8y/parallel/out_0.mp4
+[hv15] request 3: host decode 744.4 s; [difflet] video saved to /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p2-dpcheck/tmp/dp_correctness_3rqfve8y/parallel/out_3.mp4
+[hv15] request 2: host decode 735.5 s; [difflet] video saved to /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p2-dpcheck/tmp/dp_correctness_3rqfve8y/parallel/out_2.mp4
+[dp-router] done=4 failed=0 unfinished=0
+PASS bit-identical: latents_req0000.pt
+PASS bit-identical: latents_req0001.pt
+PASS bit-identical: latents_req0002.pt
+PASS bit-identical: latents_req0003.pt
+[verify_dp_correctness] 4/4 identical

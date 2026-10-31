@@ -552,3 +552,35 @@ passes in sequence, so its step (2690 ms) matches Phase 1's aot-tp2 (2719 ms at 
 2-core replica fits: 9.98 / 10.25 GiB per core at peak, no HBM limit. Mid frame: the same fox and
 snow scene (`gen50_mid.png`); minimum per-frame std 67.7. Cosine 0.969 vs tp2cfg
 (informational). Bit-identity across replicas is the separate DP check below.
+
+#### DP bit-identity (`scripts/verify_dp_correctness.py`): PASS, 4/4 bit-identical
+
+Command (through the plan's `run_py.sh`, `DIFFLET_BACKEND=trainium HF_HUB_OFFLINE=1`,
+`TMPDIR` in the cell dir): `python scripts/verify_dp_correctness.py --model-id
+hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v --dp 2 --tp-degree 2 --steps 3 --
+--height 320 --width 512 --num-frames 61`. The script sends four requests (prompts "a red fox
+in snow", "a sailboat at dusk", "a neon city street", "a bowl of ramen"; seeds 1000-1003) once
+with `--dp 1` and once with `--dp 2`, then compares each request's `latents_req000N.pt`.
+
+| run | placement | denoise step median (3 steps) | host decode per request | result |
+|---|---|---|---|---|
+| `--dp 1` | `[dp-router] worker 0: cores 0-1`, requests 0-3 | 2686-2696 ms | 409.8-414.7 s (one at a time) | `done=4 failed=0` |
+| `--dp 2` | `worker 0: cores 0-1` (requests 0, 2), `worker 1: cores 2-3` (requests 1, 3) | 2944-3315 ms | 734.9-744.4 s (two at once on the 6-core host) | `done=4 failed=0` |
+
+`PASS bit-identical: latents_req0000.pt` … `latents_req0003.pt`, `[verify_dp_correctness] 4/4
+identical`, exit 0, 4270.7 s wall. The sha256 of each request's latents is the same in both
+runs, including requests 1 and 3, which ran on the other replica's cores (cores 2-3) in the
+DP run: req0 `fcf19655…`, req1 `a4b0b76e…`, req2 `ba9673c7…`, req3 `23c73e85…` (full list in
+`E/phase2/dpcheck/sha256.txt`). Per-core HBM peak 10.25 GiB on all four cores; no 2-core
+replica ran out of HBM, so this is not a LIMIT cell. Peak host RSS: 41.7 GiB for the two
+concurrent `aot_vae` processes.
+
+Timing notes. The first request's encode took 902.0 s: the Qwen2.5-VL weights had left the page
+cache and the root EBS volume was reading at about 15-17 MB/s at the time (measured from
+`/proc/diskstats` while the encode process sat in uninterruptible disk sleep), against the
+seconds it takes warm (7.4 s for requests 1-3). That is a host I/O condition, not a Difflet
+issue. In the DP run the two replicas' steps are 10-20% slower than one replica alone (2944-3315
+vs 2686-2696 ms); with 3 steps per request this is a handful of samples, and both replicas'
+host-side work (scheduler, the per-step host refiner calls of serial CFG) shares 6 physical
+cores (inference, not profiled). The decodes of the two replicas overlap on the same CPU, so
+DP does not shorten the host-decode part of the wall time.
