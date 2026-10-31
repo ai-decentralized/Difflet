@@ -554,18 +554,8 @@ class NeuronHunyuanVideo15BackboneApplication(NeuronApplicationBase):
         return self.models[0](*model_inputs, **kwargs)
 
     def get_compiler_args(self) -> str:
-        override = os.environ.get("DIFFLET_HUNYUAN15_COMPILER_ARGS")
-        if override:
-            os.environ["LOCAL_WORLD_SIZE"] = str(self.config.neuron_config.world_size)
-            return override
-        compiler_args = (
-            "--model-type=transformer -O1 "
-            "--tensorizer-options='--enable-ccop-compute-overlap' "
-            "--auto-cast=none "
-            "--internal-hlo2tensorizer-options='--verify-hlo=true'"
-        )
         os.environ["LOCAL_WORLD_SIZE"] = str(self.config.neuron_config.world_size)
-        return compiler_args
+        return hv15_dit_compiler_args()
 
     @staticmethod
     def convert_hf_to_neuron_state_dict(state_dict: dict, config: InferenceConfig) -> dict:
@@ -765,6 +755,20 @@ def _hv15_static_reorder_forward(
 # ``_aot_stage_cache_inputs``), so a changed graph compiles into a fresh dir instead of
 # loading a stale artifact. Bump it whenever the traced DiT graph's inputs or structure
 # change. 2: ``text_valid`` became graph input #10 (no in-graph mask count, NCC_IRPX901).
+# NCC_IRPX901 (RelaxPredicates) on the text-stream LayerNorm at 480x848x121 when compiled with
+# --tensorizer-options='--enable-ccop-compute-overlap'; without it the DiT compiles and runs.
+_HV15_DIT_DEFAULT_COMPILER_ARGS = (
+    "--model-type=transformer -O1 "
+    "--auto-cast=none "
+    "--internal-hlo2tensorizer-options='--verify-hlo=true'"
+)
+
+
+def hv15_dit_compiler_args() -> str:
+    """The effective DiT compiler args: the env override if set, else the default."""
+    return os.environ.get("DIFFLET_HUNYUAN15_COMPILER_ARGS") or _HV15_DIT_DEFAULT_COMPILER_ARGS
+
+
 _AOT_DIT_GRAPH_VERSION = 2
 
 
