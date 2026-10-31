@@ -1,0 +1,32 @@
+{
+  "name": "p1r-tp2cfg/compile",
+  "backend": "trainium",
+  "cmd": [
+    "bash",
+    "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_difflet.sh",
+    "trainium",
+    "compile",
+    "--model-id",
+    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+    "--height",
+    "320",
+    "--width",
+    "512",
+    "--num-frames",
+    "61",
+    "--tp-degree",
+    "2",
+    "--cfg-parallel"
+  ],
+  "env": [
+    "HF_HUB_OFFLINE=1"
+  ],
+  "rc": 0,
+  "wall_s": 462.8,
+  "nmon_peak_gib": {},
+  "host_rss_peak_gib": {
+    "_total": 32.59,
+    "aot_transformer": 31.61,
+    "other": 7.53
+  }
+}

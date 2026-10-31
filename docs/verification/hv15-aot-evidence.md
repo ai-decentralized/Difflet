@@ -855,3 +855,4 @@ generate` without any override; the artifact is already compiled.
 | cell (new artifact) | compile s (DiT / wall) | 1 step vs native: cos / rel-L1 / max-abs | 1 step vs diffusers cos | 3 steps vs diffusers: cos (distance ratio vs native) | 3 steps vs native cos | NaN/Inf | gate | evidence |
 |---|---|---|---|---|---|---|---|---|
 | tp2 (`78b5bd73…`) | 516.0 / 530.1 (HLO 103.3) | **0.999160** / 0.0434 / 0.56 | 0.999609 | **0.985041** (0.91x) | 0.982189 | none | **PASS** | `E/phase1-regate/tp2/` |
+| tp2cfg (`d3d575ba…`) | 448.1 / 462.8 (HLO 101.8) | **0.999124** / 0.0448 / 0.56 | 0.999566 | **0.986107** (0.84x) | 0.978131 | none | **PASS** | `E/phase1-regate/tp2cfg/` |
