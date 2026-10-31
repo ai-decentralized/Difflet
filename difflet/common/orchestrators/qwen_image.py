@@ -199,6 +199,9 @@ def _compile_identity(
 
         # Serving runs the default bf16 all-reduce; pre-bf16 DiTs reduced in fp32.
         inputs.update(tp_reduce_cache_fields(torch.bfloat16, legacy=torch.float32))
+        # The DiT masks the prompt padding by its valid-row count; an older DiT's graph
+        # attends it.
+        inputs["text_mask"] = "valid-len"
     return CompileArtifactIdentity.from_cache_inputs(inputs)
 
 

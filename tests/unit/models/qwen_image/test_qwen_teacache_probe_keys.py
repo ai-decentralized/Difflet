@@ -103,7 +103,10 @@ def _hf_state_dict(backbone) -> dict:
 
 def test_probe_model_is_the_backbone_trace_module():
     assert issubclass(probe_mod.QwenImageTeacacheProbeFusedModel, _QwenImageTransformerTraceModule)
-    assert NeuronQwenImageTransformerApplication._model_cls is _QwenImageTransformerTraceModule
+    # The backbone masks the prompt padding in its forward only; it adds no parameter, so the
+    # probe's names still equal the backbone's (test_probe_parameter_names_equal_backbone_...).
+    backbone_cls = NeuronQwenImageTransformerApplication._model_cls
+    assert backbone_cls.__bases__ == (_QwenImageTransformerTraceModule,)
     assert probe_mod.NeuronQwenImageTeacacheProbeFusedApplication._model_cls is (
         probe_mod.QwenImageTeacacheProbeFusedModel
     )

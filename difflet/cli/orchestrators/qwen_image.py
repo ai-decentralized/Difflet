@@ -937,6 +937,10 @@ class QwenImageOrchestrator(ModelOrchestrator):
 
     def _stage_cache_inputs(self, stage: str, args: argparse.Namespace) -> dict:
         inputs = torchrun_stage_keys(self._backend_neutral_stage_cache_inputs(stage, args))
+        # Trainium only: its DiT masks the prompt padding by the valid-row count, where an older
+        # DiT's graph attends it (the neuron NEFF cache keys the graph itself).
+        if stage == "generate" and torchrun_backend() is None:
+            inputs["text_mask"] = "valid-len"
         # Additive, neuron only: a decoder in the non-default precision (--vae-dtype fp32) names
         # its dtype, so the default (bf16) vae stage, given --vae-dtype bf16 or not, keeps one key.
         vae_dtype = getattr(args, "vae_dtype", None)

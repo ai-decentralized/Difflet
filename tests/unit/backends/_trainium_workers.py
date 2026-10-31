@@ -23,6 +23,50 @@ HV1_TINY = dict(
 )
 
 
+def qwen_masked_dit_worker(rank: int, world_size: int, transformer_dir: str) -> dict:
+    """The trainium Qwen-Image DiT trace module (``_QwenImageMaskedTraceModule``) and the shared
+    one it subclasses, loaded from the tiny checkpoint, on the CPU backend: their outputs on the
+    tiny inputs with the prompt right-padded (and masked) and with every row valid."""
+    from diffusers import QwenImageTransformer2DModel
+
+    from difflet.backends.trainium.qwen_image.transformer import _QwenImageMaskedTraceModule
+    from difflet.models.qwen_image.modeling_qwen_image import _QwenImageTransformerTraceModule
+    from tests.unit.backends._neuron_qwen_toy import (
+        tiny_padded_text,
+        tiny_qwen_config,
+        tiny_qwen_inputs,
+    )
+
+    weights = QwenImageTransformer2DModel.from_pretrained(
+        transformer_dir, torch_dtype=torch.float32
+    ).state_dict()
+    config = tiny_qwen_config()
+
+    def build(cls):
+        module = cls(config).eval()
+        missing, unexpected = module.load_state_dict(
+            {f"transformer.{key}": value for key, value in weights.items()}, strict=False
+        )
+        assert not unexpected, unexpected
+        assert not [key for key in missing if key.startswith("transformer.")], missing
+        return module
+
+    masked, unmasked = build(_QwenImageMaskedTraceModule), build(_QwenImageTransformerTraceModule)
+    hidden, timestep, text = tiny_qwen_inputs()
+    padded, mask = tiny_padded_text(text)
+    full_mask = torch.ones(text.shape[:2], dtype=torch.bool)
+    # numpy, not tensors: a tensor crosses the result queue as shared memory that is gone once
+    # the rank exits.
+    with torch.no_grad():
+        return {
+            "mask_text": masked.mask_text,
+            "masked_padded": masked(hidden, timestep, padded, mask, timestep).numpy(),
+            "unmasked_padded": unmasked(hidden, timestep, padded, mask, timestep).numpy(),
+            "masked_full": masked(hidden, timestep, text, full_mask, timestep).numpy(),
+            "unmasked_full": unmasked(hidden, timestep, text, full_mask, timestep).numpy(),
+        }
+
+
 def _hv1_modulation_names(module) -> list[str]:
     names = []
     for i, _ in enumerate(module.transformer_blocks):

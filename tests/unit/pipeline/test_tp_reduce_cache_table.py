@@ -26,9 +26,11 @@ def test_every_builtin_model_has_a_tp_reduce_decision():
 @pytest.mark.parametrize(
     ("kwargs", "expected"),
     [
-        (None, {"tp_reduce_dtype": "bfloat16"}),
-        ({"tp_reduce_dtype": "bf16"}, {"tp_reduce_dtype": "bfloat16"}),
-        ({"tp_reduce_dtype": "fp32"}, None),  # the pre-bf16 Qwen DiT key
+        (None, {"text_mask": "valid-len", "tp_reduce_dtype": "bfloat16"}),
+        ({"tp_reduce_dtype": "bf16"}, {"text_mask": "valid-len", "tp_reduce_dtype": "bfloat16"}),
+        # The fp32 reduce adds no field; the masked DiT's graph revision is always named, so no
+        # pre-mask artifact is reused.
+        ({"tp_reduce_dtype": "fp32"}, {"text_mask": "valid-len"}),
     ],
 )
 def test_qwen_image_is_keyed(kwargs, expected):
