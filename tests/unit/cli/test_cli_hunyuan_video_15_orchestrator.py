@@ -70,7 +70,7 @@ def _driver_args(**over) -> argparse.Namespace:
                 output="/tmp/o.mp4", guidance_scale=None, cache_dir=None, revision=None, exec_mode=None,
                 work_dir=None, keep_work_dir=False, sp_enabled=False, requests_dir=None, requests=None,
                 dp=None, teacache_cadence=None, teacache_online_delta=None, teacache_speedup=None,
-                teacache_calibration=None)
+                teacache_calibration=None, shapes=None, host_vae=False, device_vae=False)
     base.update(over)
     return argparse.Namespace(**base)
 
@@ -83,7 +83,7 @@ def _stage_args(tmp_path, **over) -> argparse.Namespace:
                 prompt="a cat", output=str(tmp_path / "o.pt"), guidance_scale=None, revision=None,
                 exec_mode=None, requests_dir=None, worker_index=None, dp_schedule="round_robin",
                 teacache_cadence=None, teacache_online_delta=None, teacache_speedup=None,
-                teacache_calibration=None)
+                teacache_calibration=None, device_vae=False)
     base.update(over)
     os.makedirs(base["work_dir"], exist_ok=True)
     return argparse.Namespace(**base)
@@ -106,13 +106,58 @@ def _flag(cli, name):
 def test_aot_generate_runs_three_stages(aot_launches, tmp_path):
     hv15.HunyuanVideo15Orchestrator(_driver_args(work_dir=str(tmp_path / "w"))).generate()
     assert [(s, n) for s, n, _, _ in aot_launches] == [("encode", 1), ("aot_transformer", 4), ("aot_vae", 1)]
-    assert [v for s, _, v, _ in aot_launches if s.startswith("aot_")] == [2, 2]
+    # The host decode (the default) is a host stage, as the encoder is: no virtual core size.
+    assert [v for s, _, v, _ in aot_launches if s.startswith("aot_")] == [2, None]
+    assert all("--device-vae" not in cli for _, _, _, cli in aot_launches)
     assert not (tmp_path / "w").exists()
 
 
 def test_aot_compile_skips_the_encoder(aot_launches, tmp_path):
-    hv15.HunyuanVideo15Orchestrator(_driver_args(work_dir=str(tmp_path / "w"))).compile()
+    hv15.HunyuanVideo15Orchestrator(_driver_args(work_dir=str(tmp_path / "w"), device_vae=True)).compile()
     assert [s for s, _, _, _ in aot_launches] == ["aot_transformer", "aot_vae"]
+
+
+def test_aot_compile_skips_vae_by_default(aot_launches, tmp_path):
+    """The compiled vae15 decoder does not build on neuronx-cc 2.26 (NCC_EVRF007 and others):
+    the default host decode needs no artifact, so `difflet compile` compiles only the DiT."""
+    hv15.HunyuanVideo15Orchestrator(_driver_args(work_dir=str(tmp_path / "w"))).compile()
+    assert [s for s, _, _, _ in aot_launches] == ["aot_transformer"]
+    hv15.HunyuanVideo15Orchestrator(_driver_args(work_dir=str(tmp_path / "w"), host_vae=True,
+                                                 device_vae=True)).compile()  # --host-vae wins, as Wan's
+    assert [s for s, _, _, _ in aot_launches] == ["aot_transformer", "aot_transformer"]
+
+
+def test_aot_compile_includes_vae_when_opted_in(aot_launches, tmp_path):
+    from difflet.cli import stage as stage_mod
+
+    for mode in ("compile", "generate"):
+        aot_launches.clear()
+        orch = hv15.HunyuanVideo15Orchestrator(_driver_args(work_dir=str(tmp_path / "w"), device_vae=True))
+        getattr(orch, mode)()
+        (vae,) = [launch for launch in aot_launches if launch[0] == "aot_vae"]
+        assert vae[1:3] == (1, 2) and "--device-vae" in vae[3]
+        assert all("--device-vae" not in cli for s, _, _, cli in aot_launches if s != "aot_vae")
+        parsed, _ = stage_mod._build_stage_parser().parse_known_args(
+            ["--orchestrator", hv15._HF_MODEL_ID, "--stage", "aot_vae", *vae[3]])
+        assert parsed.device_vae is True  # the stage parser keeps the flag (not silently dropped)
+
+
+def test_aot_rejects_ring_before_encode(aot_launches, tmp_path):
+    for mode in ("generate", "compile"):
+        orch = hv15.HunyuanVideo15Orchestrator(_driver_args(work_dir=str(tmp_path / "w"), tp_degree=2,
+                                                            cp_degree=2, cp_mode="ring"))
+        with pytest.raises(SystemExit, match=r"ring.*--cp-mode ulysses"):
+            getattr(orch, mode)()
+    assert aot_launches == []
+
+
+def test_aot_rejects_multi_shape_before_encode(aot_launches, tmp_path):
+    for mode in ("generate", "compile"):
+        orch = hv15.HunyuanVideo15Orchestrator(_driver_args(work_dir=str(tmp_path / "w"),
+                                                            shapes="480x848x121,480x848x61"))
+        with pytest.raises(SystemExit, match=r"one shape.*--height/--width/--num-frames"):
+            getattr(orch, mode)()
+    assert aot_launches == []
 
 
 def test_aot_default_layout_is_tp2_cfg2(aot_launches, tmp_path):
@@ -482,7 +527,8 @@ def test_aot_vae_divides_scaling_factor(monkeypatch, tmp_path):
 
     monkeypatch.setattr(vae15.NeuronHunyuanVideo15VAEDecoderApplication, "load", load)
     # One latent tile exactly (256 px = 16 latents): no padding, so the decode is diffusers' own.
-    args = _stage_args(tmp_path, height=256, width=256, num_frames=1, output=str(tmp_path / "out" / "v.pt"))
+    args = _stage_args(tmp_path, height=256, width=256, num_frames=1, output=str(tmp_path / "out" / "v.pt"),
+                       device_vae=True)
     compiled = _compiled(args, "vae")
     latents = torch.randn(1, 4, 1, 16, 16, generator=torch.Generator().manual_seed(0))
     torch.save(latents, tmp_path / "work" / "latents.pt")
@@ -507,12 +553,96 @@ def test_aot_vae_compile_writes_the_manifest(monkeypatch, tmp_path):
     compiles = []
     monkeypatch.setattr(vae15.NeuronHunyuanVideo15VAEDecoderApplication, "compile",
                         lambda self, path, **kw: compiles.append((path, self.config.neuron_config.world_size)))
-    args = _stage_args(tmp_path, stage_mode="compile", height=256, width=256)
+    args = _stage_args(tmp_path, stage_mode="compile", height=256, width=256, device_vae=True)
     orch = hv15.HunyuanVideo15Orchestrator(args)
     orch._run_stage_internal("aot_vae", args)
     compiled = orch._aot_compiled_dir(args, "vae")
     assert compiles == [(str(compiled), 1)]
     assert has_valid_stage_manifest(compiled, orch._aot_stage_cache_inputs(args, "vae"))
+
+
+class _RecordingHostVae:
+    """Stands in for diffusers' AutoencoderKLHunyuanVideo15: records the load, tiling and decode."""
+
+    calls: list = []
+
+    def __init__(self):
+        self.config = argparse.Namespace(scaling_factor=0.5)
+
+    @classmethod
+    def from_pretrained(cls, path, torch_dtype=None):
+        cls.calls.append(("from_pretrained", path, torch_dtype))
+        return cls()
+
+    def eval(self):
+        return self
+
+    def enable_tiling(self):
+        self.calls.append(("enable_tiling",))
+
+    def decode(self, latents, return_dict=True):
+        self.calls.append(("decode", latents.clone()))
+        return (torch.zeros(1, 3, 1, 32, 32),)
+
+
+def test_aot_vae_defaults_to_host_decode(monkeypatch, aot_launches, tmp_path):
+    import diffusers
+
+    from difflet.backends.trainium.hunyuan_video import vae15
+
+    # The driver: with default flags the aot_vae stage is a host stage (no --device-vae).
+    hv15.HunyuanVideo15Orchestrator(_driver_args(work_dir=str(tmp_path / "w"))).generate()
+    (vae_launch,) = [launch for launch in aot_launches if launch[0] == "aot_vae"]
+    assert vae_launch[1:3] == (1, None) and "--device-vae" not in vae_launch[3]
+    # The stage: diffusers' VAE on the CPU in fp32, tiled, decoding latents / scaling_factor.
+    _RecordingHostVae.calls = []
+    monkeypatch.setattr(diffusers, "AutoencoderKLHunyuanVideo15", _RecordingHostVae)
+
+    class _NoCompiledVae:
+        def __init__(self, *a, **kw):
+            raise AssertionError("the compiled vae15 decoder must not be built by default")
+
+    monkeypatch.setattr(vae15, "NeuronHunyuanVideo15VAEDecoderApplication", _NoCompiledVae)
+    monkeypatch.setattr(hv15.HunyuanVideo15Orchestrator, "_root", lambda self, args: str(tmp_path / "snap"))
+    args = _stage_args(tmp_path, output=str(tmp_path / "out" / "v.pt"))
+    latents = torch.randn(1, 4, 1, 2, 2, generator=torch.Generator().manual_seed(0))
+    torch.save(latents.to(torch.bfloat16), tmp_path / "work" / "latents.pt")
+    hv15.HunyuanVideo15Orchestrator(args)._run_stage_internal("aot_vae", args)
+    calls = _RecordingHostVae.calls
+    assert calls[0] == ("from_pretrained", str(tmp_path / "snap" / "vae"), torch.float32)
+    assert ("enable_tiling",) in calls
+    (decoded,) = [c[1] for c in calls if c[0] == "decode"]
+    assert decoded.dtype == torch.float32
+    assert torch.equal(decoded, latents.to(torch.bfloat16).float() / 0.5)
+    assert torch.load(tmp_path / "out" / "v.pt").shape == (1, 3, 1, 32, 32)
+    # Compile with the host placement has nothing to build.
+    _RecordingHostVae.calls = []
+    args = _stage_args(tmp_path, stage_mode="compile")
+    hv15.HunyuanVideo15Orchestrator(args)._run_stage_internal("aot_vae", args)
+    assert _RecordingHostVae.calls == []
+
+
+def test_aot_host_vae_matches_diffusers(monkeypatch, tmp_path):
+    """The host decode with the tiny AutoencoderKLHunyuanVideo15 equals diffusers' own
+    ``vae.decode(latents / scaling_factor)`` (fp32, tiled; two tiles across the width)."""
+    from diffusers import AutoencoderKLHunyuanVideo15
+
+    root = _snapshot(tmp_path, vae=True)
+    monkeypatch.setattr(hv15.HunyuanVideo15Orchestrator, "_root", lambda self, args: root)
+    args = _stage_args(tmp_path, height=256, width=512, num_frames=1, output=str(tmp_path / "out" / "v.pt"))
+    latents = torch.randn(1, 4, 1, 16, 32, generator=torch.Generator().manual_seed(0))
+    torch.save(latents, tmp_path / "work" / "latents.pt")
+    hv15.HunyuanVideo15Orchestrator(args)._run_stage_internal("aot_vae", args)
+    video = torch.load(tmp_path / "out" / "v.pt")
+    reference = AutoencoderKLHunyuanVideo15.from_pretrained(os.path.join(root, "vae"),
+                                                            torch_dtype=torch.float32).eval()
+    reference.enable_tiling()
+    with torch.no_grad():
+        expected = reference.decode(latents / reference.config.scaling_factor, return_dict=False)[0].float()
+        undivided = reference.decode(latents, return_dict=False)[0].float()
+    assert video.dtype == torch.float32 and video.shape == expected.shape == (1, 3, 1, 256, 512)
+    assert torch.allclose(video, expected, atol=1e-5), (video - expected).abs().max()
+    assert not torch.allclose(video, undivided, atol=1e-2)
 
 
 def test_aot_write_output_mp4(monkeypatch, tmp_path):
@@ -574,13 +704,27 @@ _NO_NATIVE = textwrap.dedent("""
         cp_degree=1, cp_mode="gather_kv", cfg_parallel=False, sp_enabled=False, height=32, width=32,
         num_frames=1, steps=1, seed=0, prompt="p", output=os.path.join(tmp, "o.pt"), guidance_scale=1.0,
         revision=None, exec_mode=None, requests_dir=None, worker_index=None, dp_schedule="round_robin",
-        teacache_cadence=None, teacache_online_delta=None, teacache_speedup=None, teacache_calibration=None)
+        teacache_cadence=None, teacache_online_delta=None, teacache_speedup=None, teacache_calibration=None,
+        device_vae=True)
     torch.save({}, os.path.join(tmp, "embeds.pt"))
     orch = hv15.HunyuanVideo15Orchestrator(args)
     for mode in ("compile", "generate"):
         args.stage_mode = mode
         orch._run_stage_internal("aot_transformer", args)
         orch._run_stage_internal("aot_vae", args)
+    assert os.path.exists(os.path.join(tmp, "o.pt"))
+    os.remove(os.path.join(tmp, "o.pt"))
+    import diffusers
+
+    class HostVae(Vae):  # the default host decode (diffusers' class stubbed)
+        @classmethod
+        def from_pretrained(cls, path, torch_dtype=None): return cls()
+        def eval(self): return self
+        def enable_tiling(self): pass
+
+    diffusers.AutoencoderKLHunyuanVideo15 = HostVae
+    args.device_vae = False
+    orch._run_stage_internal("aot_vae", args)
     assert os.path.exists(os.path.join(tmp, "o.pt"))
     native = sorted(m for m in sys.modules if m.startswith("difflet.backends.neuron"))
     assert not native, native
