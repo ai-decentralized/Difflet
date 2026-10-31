@@ -46,11 +46,11 @@ from difflet.platforms.base import PARALLEL_MODE_FLAGS, Platform
 
 logger = logging.getLogger(__name__)
 
+# The file name predates the platform split and is kept: renaming it would orphan every
+# existing GPU artifact directory. The body names the platform (``device_type``).
 MANIFEST_FILE_NAME = "cuda_manifest.json"
 MANIFEST_FORMAT = "eager"
 COMPILE_MODE = "max-autotune-no-cudagraphs"
-#: The torch device type of every GPU platform.
-DEFAULT_DEVICE = "cuda"
 
 
 def _manifest_path(compiled_model_path) -> Path:
@@ -82,7 +82,9 @@ class GpuComponent(torch.nn.Module):
     def __init__(self, config=None, *, device=None, dtype=None, torch_compile: bool = False):
         super().__init__()
         self.config = config
-        self.device = torch.device(device if device is not None else DEFAULT_DEVICE)
+        self.device = torch.device(
+            device if device is not None else gpu_platform().device_type
+        )
         self.dtype = dtype
         self.torch_compile = bool(torch_compile)
         self.module: torch.nn.Module | None = None
@@ -231,13 +233,18 @@ class GpuComponent(torch.nn.Module):
     # ------------------------------------------------------------ manifest
 
     def _manifest_body(self, spec) -> dict:
+        # Only ``mesh`` and ``dtype`` are compared on read; the rest is provenance. Manifests
+        # written before the platform split carry ``"cuda": <runtime>`` instead of
+        # ``device_type``/``toolchain`` and stay valid.
+        platform = gpu_platform()
         return {
             "format": MANIFEST_FORMAT,
             "world_size": spec.world_size,
             "mesh": {"dp": spec.dp, "cfg": spec.cfg, "cp": spec.cp, "tp": spec.tp},
             "dtype": str(self.dtype),
             "torch": torch.__version__,
-            "cuda": torch.version.cuda,
+            "device_type": platform.device_type,
+            "toolchain": platform.toolchain_versions(),
         }
 
     def _write_manifest(self, compiled_model_path, spec) -> None:
@@ -354,7 +361,7 @@ class GpuApplication(torch.nn.Module):
             ),
         }
         self.kwargs = kwargs
-        self.device = torch.device(kwargs.get("device", DEFAULT_DEVICE))
+        self.device = torch.device(kwargs.get("device", platform.device_type))
         self.torch_compile = bool(kwargs.get("torch_compile", False))
         self.transformer_path = os.path.join(model_path, "transformer")
         self.transformer = None
@@ -461,7 +468,6 @@ def create_gpu_application(model_type: str, **kwargs: Any) -> GpuApplication:
 
 __all__ = [
     "COMPILE_MODE",
-    "DEFAULT_DEVICE",
     "MANIFEST_FILE_NAME",
     "MANIFEST_FORMAT",
     "GpuApplication",
