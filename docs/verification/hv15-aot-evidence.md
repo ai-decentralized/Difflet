@@ -858,3 +858,4 @@ generate` without any override; the artifact is already compiled.
 | tp2cfg (`d3d575ba…`) | 448.1 / 462.8 (HLO 101.8) | **0.999124** / 0.0448 / 0.56 | 0.999566 | **0.986107** (0.84x) | 0.978131 | none | **PASS** | `E/phase1-regate/tp2cfg/` |
 | tp4 (`b2122b91…`) | 301.4 / 315.3 (HLO 50.2) | **0.999131** / 0.0445 / 0.53 | 0.999573 | **0.987437** (0.76x) | 0.984438 | none | **PASS** | `E/phase1-regate/tp4/` |
 | tp4sp (`eaea3dc3…`) | 317.3 / 330.3 (HLO 55.5) | **0.999142** / 0.0439 / 0.53 | 0.999578 | **0.990780** (0.56x) | 0.982686 | none | **PASS** | `E/phase1-regate/tp4sp/` |
+| tp2cp2-ulysses (`--cp-mode ulysses`, `2cb886e3…`) | 327.2 / 341.7 (HLO 60.9) | **0.999132** / 0.0443 / 0.53 | 0.999569 | **0.991254** (0.53x) | 0.981850 | none | **PASS** | `E/phase1-regate/tp2cp2-ulysses/` |
