@@ -200,6 +200,11 @@ class TorchNeuronApplicationBase(torch.nn.Module):
         """Checkpoint key for module parameter ``name`` (module -> checkpoint direction)."""
         return name
 
+    def _after_load(self, module: torch.nn.Module) -> None:
+        """Hook after the weights are on the device and before the blocks compile: load-time
+        swaps that need the loaded tensors (the fp8 linears pack their weights for the kernel).
+        Nothing by default."""
+
     # ---------------------------------------------------- DiffletPipeline API
 
     def compile(self, compiled_model_path, debug: bool = False) -> None:
@@ -263,6 +268,7 @@ class TorchNeuronApplicationBase(torch.nn.Module):
                                self.load_report["unexpected"][:5])
         with self._phase("eval"):
             self.module = module.eval().requires_grad_(False)
+            self._after_load(self.module)
         with self._phase("compile"):
             if self.exec_mode == "compile":
                 # A "neuron" string gets compile_blocks' NEURON_COMPILE_OPTIONS

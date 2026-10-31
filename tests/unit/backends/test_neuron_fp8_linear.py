@@ -112,9 +112,9 @@ def test_dequant_is_the_quantized_weight_not_the_bf16_one():
     assert rel_fake < 0.1
 
 
-def test_nki_compute_needs_the_kernel_module():
+def test_nki_compute_needs_the_packed_weight():
     layer = Q.FP8Linear(8, 16, compute="nki")
-    with pytest.raises((ImportError, NotImplementedError, AttributeError)):
+    with pytest.raises(RuntimeError, match="prepare_fp8_kernels_"):
         layer(torch.randn(2, 8))
 
 
@@ -300,3 +300,78 @@ def test_tp4_fp8_mlp_matches_the_unsharded_reference(mode):
         assert out.shape == expect.shape
         # The all-reduce sums four fp32 partials in another order than one matmul: tolerance.
         assert torch.allclose(out, expect, atol=1e-5, rtol=1e-5), rank
+
+
+# ------------------------------------------------------------ the kernel's host side
+
+
+def test_pack_x4_round_trips_and_puts_the_lowest_k_in_byte_zero():
+    from difflet.backends.neuron.ops_impl import fp8_kernels as K
+
+    t = (torch.arange(2 * 8, dtype=torch.float32).reshape(2, 8) - 7).to(torch.float8_e4m3fn)
+    packed = K.pack_x4(t)
+    assert packed.dtype == torch.int32 and packed.shape == (2, 2)
+    assert torch.equal(K.unpack_x4(packed).float(), t.float())
+    # Element (p, row) packs t[row, 4p .. 4p+3], byte 0 (the low byte) is k = 4p.
+    low_byte = packed[0, 0].item() & 0xFF
+    assert low_byte == t[0, 0].view(torch.uint8).item()
+
+
+def test_k_tiles_and_weight_chunks_cover_the_qwen_shard_shapes():
+    from difflet.backends.neuron.ops_impl import fp8_kernels as K
+
+    assert K.k_tiles(3072) == (6, 0)
+    assert K.k_tiles(768) == (1, 64)       # tp4 row-parallel attention out
+    assert K.k_tiles(12288) == (24, 0)     # tp1 MLP down
+    with pytest.raises(ValueError, match="32, 64 or 128"):
+        K.k_tiles(3072 + 16)
+    assert K.weight_chunk(3072, 3072) == 3072       # 72 KiB per partition: resident
+    assert K.weight_chunk(768, 768) == 768
+    chunk = K.weight_chunk(12288, 3072)             # tp1 MLP up: 295 KiB would not fit
+    assert chunk % K.BANK == 0 and 12288 % chunk == 0 and chunk < 12288
+    chunk = K.weight_chunk(3072, 12288)             # tp1 MLP down: 24 K tiles
+    assert chunk % K.BANK == 0 and 3072 % chunk == 0 and 24 * 4 * chunk <= K.WEIGHT_SBUF_BYTES
+    assert K.padded_rows(5120, 2) == 5120 and K.padded_rows(5000, 2) == 5120
+    assert K.padded_rows(4097, 2) == 4352
+
+
+def test_prepare_kernel_packs_the_weight_and_drops_the_unpacked_one():
+    from difflet.backends.neuron.ops_impl import fp8_kernels as K
+
+    torch.manual_seed(0)
+    layer = Q.FP8Linear(768, 512, compute="nki")
+    weight = torch.randn(512, 768) * 0.1
+    _fill(layer, weight)
+    expect_packed = K.pack_x4(layer.weight.detach())
+    expect_scale = (layer.input_scale * layer.weight_scale).item()
+    layer.prepare_kernel_(lnc=2)
+    assert layer.weight is None
+    assert torch.equal(layer.weight_packed, expect_packed)
+    assert layer.out_scale.shape == (128, 1) and layer.out_scale[5, 0].item() == pytest.approx(expect_scale)
+    assert (layer.kernel_n_chunk, layer.kernel_k_full, layer.kernel_k_rem, layer.kernel_lnc) == (512, 1, 64, 2)
+    assert "weight_packed" not in layer.state_dict()
+    layer.prepare_kernel_(lnc=2)  # idempotent
+    dequant = Q.FP8Linear(8, 8, compute="dequant")
+    dequant.prepare_kernel_()
+    assert dequant.weight is not None and dequant.weight_packed is None
+
+
+def test_kernel_reference_is_the_fake_quant_arithmetic():
+    from difflet.backends.neuron.ops_impl import fp8_kernels as K
+
+    torch.manual_seed(0)
+    x = torch.randn(4, 16).to(torch.bfloat16)
+    linear = nn.Linear(16, 8, bias=False)
+    wq, ws = law.quantize_weight(linear.weight.detach())
+    xs = law.activation_scale(4.0, margin=1.25)
+    fake = FakeQuantLinear(wq, ws, xs, None, fp8_max=448.0)
+    assert torch.equal(K.reference(x, wq, ws, xs, fp8_max=448.0), fake(x))
+
+
+def test_pack_x4_equals_the_byte_wise_permute():
+    from difflet.backends.neuron.ops_impl import fp8_kernels as K
+
+    torch.manual_seed(0)
+    t = (torch.randn(6, 16) * 3).to(torch.float8_e4m3fn)
+    byte_wise = t.reshape(6, 4, 4).permute(1, 0, 2).contiguous().view(torch.int32).squeeze(-1)
+    assert torch.equal(K.pack_x4(t), byte_wise)

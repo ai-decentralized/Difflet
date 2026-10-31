@@ -74,6 +74,11 @@ class _FP8LinearBase(nn.Module):
             self.bias = nn.Parameter(torch.empty(out_local, dtype=dtype, device=device))
         else:
             self.register_parameter("bias", None)
+        # The kernel path's state, filled by prepare_kernel_ after the load (non-persistent).
+        self.register_buffer("weight_packed", None, persistent=False)
+        self.register_buffer("out_scale", None, persistent=False)
+        self.kernel_n_chunk = self.kernel_k_full = self.kernel_k_rem = 0
+        self.kernel_lnc = 1
 
     def _matmul(self, x: torch.Tensor, bias: torch.Tensor | None = None) -> torch.Tensor:
         """``x @ W^T (+ bias)`` on this rank's shard, in ``x``'s dtype. The column layers pass
@@ -83,11 +88,33 @@ class _FP8LinearBase(nn.Module):
             # fp8 -> fp32 is exact; one rounding to the activation dtype after the scale.
             weight = (self.weight.float() * self.weight_scale).to(x.dtype)
             return F.linear(x, weight, bias)
+        if self.weight_packed is None:
+            raise RuntimeError(
+                "the fp8 kernel path needs the packed weight: call prepare_fp8_kernels_(module) "
+                "after the load (TorchNeuronApplicationBase does, after load_with_store)")
         from difflet.backends.neuron.ops_impl import fp8_kernels
 
-        out = fp8_kernels.fp8_linear(x, self.weight, self.weight_scale, self.input_scale,
-                                     fp8_max=self.fp8_max)
+        out = fp8_kernels.fp8_linear(
+            x, self.weight_packed, self.out_scale, self.input_scale, fp8_max=self.fp8_max,
+            n_chunk=self.kernel_n_chunk, k_full=self.kernel_k_full, k_rem=self.kernel_k_rem,
+            lnc=self.kernel_lnc)
         return out if bias is None else out + bias
+
+    def prepare_kernel_(self, *, lnc: int | None = None) -> None:
+        """After the load, for the ``nki`` path: pack the fp8 weight into the kernel's
+        ``[K/4, N]`` int32 layout, precompute the output scale, and drop the unpacked weight
+        (the two would double the layer's HBM). A no-op in dequant mode."""
+        if self.compute != "nki" or self.weight_packed is not None:
+            return
+        from difflet.backends.neuron.ops_impl import fp8_kernels
+
+        packed, out_scale, chunk, k_full, k_rem = fp8_kernels.prepare_weight(
+            self.weight, self.weight_scale, self.input_scale)
+        self.register_buffer("weight_packed", packed, persistent=False)
+        self.register_buffer("out_scale", out_scale, persistent=False)
+        self.kernel_n_chunk, self.kernel_k_full, self.kernel_k_rem = chunk, k_full, k_rem
+        self.kernel_lnc = fp8_kernels.logical_cores() if lnc is None else int(lnc)
+        self.weight = None  # the Parameter slot stays, empty: nothing reloads after this
 
     def _repr_tail(self) -> str:
         return f"compute={self.compute}, fp8_max={self.fp8_max:g}"
@@ -250,6 +277,16 @@ def fp8_linears(module: nn.Module) -> list[str]:
     return [name for name, child in module.named_modules() if isinstance(child, _FP8LinearBase)]
 
 
+def prepare_fp8_kernels_(module: nn.Module, *, lnc: int | None = None) -> int:
+    """``prepare_kernel_`` on every fp8 linear of ``module``; returns how many were packed."""
+    count = 0
+    for child in module.modules():
+        if isinstance(child, _FP8LinearBase) and child.compute == "nki":
+            child.prepare_kernel_(lnc=lnc)
+            count += 1
+    return count
+
+
 def tp_size() -> int:
     return get_tp_size()
 
@@ -261,5 +298,6 @@ __all__ = [
     "FP8RowParallelLinear",
     "fp8_linears",
     "fp8_twin",
+    "prepare_fp8_kernels_",
     "quantize_module_",
 ]

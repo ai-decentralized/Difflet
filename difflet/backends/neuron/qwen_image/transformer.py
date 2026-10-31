@@ -213,6 +213,12 @@ class NeuronQwenImageTransformerApplication(TorchNeuronApplicationBase):
             self.quantized_linears = quantize_module_(module, self.quant)
         return module
 
+    def _after_load(self, module: torch.nn.Module) -> None:
+        if self.quant is not None and self.quant.compute == "nki":
+            from difflet.backends.neuron.ops_impl.fp8_linear import prepare_fp8_kernels_
+
+            prepare_fp8_kernels_(module)
+
     def forward(
         self,
         hidden_states: torch.Tensor,
