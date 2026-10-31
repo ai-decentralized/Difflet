@@ -82,8 +82,9 @@ class HunyuanVideo15DiTInputBundle:
 
     HunyuanVideo 1.5 uses Qwen2.5-VL embeddings, ByT5 glyph embeddings, and
     image-semantic embeddings in addition to the latent tensor. ``text_order`` is the
-    valid-first permutation of the joint ``[image, byt5, mllm]`` text stream
-    (``hv15_text_order``); ``forward_dit`` derives it from the masks when it is None.
+    valid-first permutation of the joint ``[image, byt5, mllm]`` text stream and
+    ``text_valid`` (int32 ``[B]``) its valid-token count, both from ``hv15_text_layout``;
+    ``forward_dit`` derives them from the masks when they are None.
     """
 
     hidden_states: torch.Tensor
@@ -95,6 +96,7 @@ class HunyuanVideo15DiTInputBundle:
     encoder_attention_mask_2: torch.Tensor
     image_embeds: torch.Tensor
     text_order: torch.Tensor | None = None
+    text_valid: torch.Tensor | None = None
 
     def as_model_inputs(self) -> tuple[torch.Tensor, ...]:
         inputs = (
@@ -107,7 +109,16 @@ class HunyuanVideo15DiTInputBundle:
             self.encoder_attention_mask_2,
             self.image_embeds,
         )
-        return inputs if self.text_order is None else (*inputs, self.text_order)
+        if self.text_order is None:
+            if self.text_valid is not None:
+                raise ValueError(
+                    "HunyuanVideo 1.5 DiT input 'text_valid' follows 'text_order' "
+                    "(graph inputs 9 and 10); set both or neither."
+                )
+            return inputs
+        if self.text_valid is None:
+            return (*inputs, self.text_order)
+        return (*inputs, self.text_order, self.text_valid)
 
 
 def allowed_hunyuan_video_latent_shapes(config: Any) -> list[tuple[int, ...]]:
@@ -233,6 +244,7 @@ def validate_hunyuan_video15_dit_inputs(
             (batch_size, image_seq_len + text_seq_len_2 + text_seq_len),
             torch.int64,
         ),
+        "text_valid": ((batch_size,), torch.int32),
     }
     tensors = {
         "hidden_states": bundle.hidden_states,
@@ -246,6 +258,8 @@ def validate_hunyuan_video15_dit_inputs(
     }
     if bundle.text_order is not None:
         tensors["text_order"] = bundle.text_order
+    if bundle.text_valid is not None:
+        tensors["text_valid"] = bundle.text_valid
     for name, tensor in tensors.items():
         shape, tensor_dtype = expected[name]
         if tuple(tensor.shape) != shape:
@@ -421,14 +435,15 @@ def create_hunyuan_video15_vae_decoder_config(
     )
 
 
-def _hv15_text_order(bundle: HunyuanVideo15DiTInputBundle) -> torch.Tensor:
-    """Host valid-first text order from the bundle's masks (image: 0 for t2v, else 1)."""
-    from difflet.backends.trainium.hunyuan_video.parallel15 import hv15_text_order
+def _hv15_text_layout(bundle: HunyuanVideo15DiTInputBundle) -> tuple[torch.Tensor, torch.Tensor]:
+    """Host ``(text_order, text_valid)`` from the bundle's masks (image: 0 for t2v, else 1,
+    as the graph's ``has_image`` switch), both from one joint mask so they always agree."""
+    from difflet.backends.trainium.hunyuan_video.parallel15 import hv15_text_layout
 
     image_valid = 0 if bool(torch.all(bundle.image_embeds == 0)) else 1
     batch_size, image_seq_len = bundle.image_embeds.shape[:2]
     mask_image = torch.full((batch_size, image_seq_len), image_valid, dtype=torch.int64)
-    return hv15_text_order(
+    return hv15_text_layout(
         mask_image, bundle.encoder_attention_mask_2, bundle.encoder_attention_mask
     )
 
@@ -870,6 +885,7 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                     "shape": (batch_size, image_seq_len + text_seq_len_2 + text_seq_len),
                     "dtype": torch.int64,
                 },
+                "text_valid": {"shape": (batch_size,), "dtype": torch.int32},
             }
         text_seq_len = int(getattr(config, "text_seq_len", 256))
         return {
@@ -973,8 +989,13 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                 config=self.transformer.config,
                 dtype=self.dtype,
             )
-            if self._host_refiner_on and bundle.text_order is None:
-                bundle = dataclasses.replace(bundle, text_order=_hv15_text_order(bundle))
+            if self._host_refiner_on and (bundle.text_order is None or bundle.text_valid is None):
+                text_order, text_valid = _hv15_text_layout(bundle)
+                bundle = dataclasses.replace(
+                    bundle,
+                    text_order=text_order if bundle.text_order is None else bundle.text_order,
+                    text_valid=text_valid if bundle.text_valid is None else bundle.text_valid,
+                )
             inputs = list(bundle.as_model_inputs())
             if self._host_refiner_on:
                 # inputs = (hidden_states, timestep, encoder_hidden_states[mllm],
@@ -1077,7 +1098,7 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                 "encoder_attention_mask_2",
                 "image_embeds",
             }
-            if not args and direct_keys_15.issubset(kwargs):  # text_order is optional
+            if not args and direct_keys_15.issubset(kwargs):  # text_order/text_valid optional
                 bundle = HunyuanVideo15DiTInputBundle(**kwargs)
                 return self.forward_dit(bundle)
         direct_keys = {

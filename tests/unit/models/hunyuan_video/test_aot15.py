@@ -212,7 +212,7 @@ def test_aot_denoiser_cfg2_one_call_per_step(hv15_snapshot, monkeypatch, tmp_pat
     calls = app.transformer.calls
     assert len(calls) == 3
     for inputs in calls:
-        assert len(inputs) == 9  # host refiner on: text_order appended
+        assert len(inputs) == 10  # host refiner on: text_order and text_valid appended
         assert all(t.shape[0] == 2 for t in inputs)
     assert latents.shape == (1, 4, *LATENT)
 

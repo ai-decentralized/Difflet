@@ -114,6 +114,23 @@ def test_text_order_puts_valid_first(parallel15):
     assert sorted(order[0].tolist()) == list(range(11))
 
 
+def test_text_valid_matches_mask_count(parallel15):
+    """The host count the graph gets (R20: the in-graph count hit NCC_IRPX901 at
+    480x848x121) is the joint mask's sum, from the same mask as the order."""
+    mask_image = torch.zeros(3, 4, dtype=torch.int64)
+    mask_image[2] = 1  # i2v row: the image tokens are valid
+    mask_byt5 = torch.tensor([[1, 0, 1, 0], [0, 0, 0, 0], [0, 1, 0, 0]])  # non-prefix
+    mask_mllm = torch.tensor([[0, 1, 1], [0, 0, 0], [1, 0, 1]])
+    order, valid = parallel15.hv15_text_layout(mask_image, mask_byt5, mask_mllm)
+    assert valid.dtype == torch.int32 and valid.shape == (3,)
+    joint = torch.cat([mask_image, mask_byt5, mask_mllm], dim=1).bool()
+    assert valid.tolist() == joint.sum(1).tolist() == [4, 0, 7]  # incl. 0 valid tokens
+    assert torch.equal(order, parallel15.hv15_text_order(mask_image, mask_byt5, mask_mllm))
+    for row in range(3):  # exactly the first `valid` ordered tokens are the valid ones
+        n = int(valid[row])
+        assert joint[row, order[row, :n]].all() and not joint[row, order[row, n:]].any()
+
+
 # --------------------------------------------------------------------------- #
 # Whole trace module vs a freshly built diffusers model
 # --------------------------------------------------------------------------- #
@@ -171,7 +188,7 @@ def test_trace_module_matches_diffusers_non_prefix_mask(tmp_path, backbone15):
         encoder_attention_mask_2=torch.tensor([[1, 0, 1]]),
         image_embeds=torch.zeros(1, 4, 6),
     )
-    assert bundle.text_order is None  # derived on host (callers only hold masks)
+    assert bundle.text_order is None and bundle.text_valid is None  # derived on host
     with torch.no_grad():
         out = application.forward_dit(bundle)
         expected = reference(
@@ -220,7 +237,9 @@ def test_trace_forward_keeps_the_t2v_switch_in_graph(tmp_path, backbone15, paral
         lazy = module(*inputs)
         # image-to-video: the image stream is kept and its tokens are valid (all four first)
         inputs[7] = torch.randn(1, 4, 6)
-        inputs[8] = parallel15.hv15_text_order(torch.ones(1, 4, dtype=torch.int64), inputs[6], inputs[3])
+        inputs[8], inputs[9] = parallel15.hv15_text_layout(
+            torch.ones(1, 4, dtype=torch.int64), inputs[6], inputs[3]
+        )
         i2v = module(*inputs)
     assert torch.equal(lazy.as_subclass(torch.Tensor), plain)
     assert not torch.allclose(i2v, plain)
@@ -236,6 +255,47 @@ def test_trace_forward_reduces_the_t2v_flag_with_a_full_max():
     source = inspect.getsource(backbone15._hv15_static_reorder_forward)
     assert "image_embeds.abs().float().max() > 0" in source
     assert ".amax()" not in source
+
+
+def test_trace_graph_has_no_in_graph_text_count(tmp_path, monkeypatch, backbone15):
+    """R20: neuronx-cc 2.26/2.28 hit NCC_IRPX901 (RelaxPredicates) at 480x848x121 on the
+    in-graph ``mask.float().sum(1)``. The forward must take the host count as given: no
+    reduction over the joint text mask, and the blocks see the passed ``text_valid``."""
+    from torch.overrides import TorchFunctionMode
+
+    module = backbone15._HunyuanVideo15TraceModule(_config(tmp_path)).eval()
+    seen = []
+
+    class _Spy:  # named parameters: diffusers filters the processor's kwargs by signature
+        def __init__(self, real):
+            self.real = real
+
+        def __call__(self, attn, hidden_states, encoder_hidden_states=None,
+                     attention_mask=None, image_rotary_emb=None):
+            seen.append(attention_mask)
+            return self.real(attn, hidden_states, encoder_hidden_states, attention_mask,
+                             image_rotary_emb)
+
+    for block in module.transformer.transformer_blocks:
+        block.attn.processor = _Spy(block.attn.processor)
+
+    joint_text_len = 4 + 3 + 7
+    sums = []
+
+    class _SumSpy(TorchFunctionMode):
+        def __torch_function__(self, func, types, args=(), kwargs=None):
+            name = getattr(func, "__name__", "")
+            if name in ("sum", "count_nonzero") and args and args[0].shape[-1:] == (joint_text_len,):
+                sums.append((name, tuple(args[0].shape)))
+            return func(*args, **(kwargs or {}))
+
+    inputs = list(_dit_inputs())
+    assert inputs[9].tolist() == [4 + 2]  # the masks' real count (mllm 4, byt5 2)
+    inputs[9] = torch.tensor([2], dtype=torch.int32)  # deliberately not the masks' count
+    with torch.no_grad(), _SumSpy():
+        module(*inputs)
+    assert sums == []
+    assert len(seen) == 2 and all(s.tolist() == [2] and s.dtype == torch.int32 for s in seen)
 
 
 def test_trace_module_uses_bounded_processor_without_env(
@@ -381,8 +441,9 @@ def test_cfg_input_generator_traces_batch2(tmp_path, backbone15):
         config=cfg, model_cls=object, tag="HunyuanVideo15Transformer3DModel"
     )
     inputs = wrapper.input_generator()[0]
-    assert len(inputs) == 9
-    assert [x.shape[0] for x in inputs] == [2] * 9
+    assert len(inputs) == 10
+    assert [x.shape[0] for x in inputs] == [2] * 10
+    assert inputs[9].shape == (2,) and inputs[9].dtype == torch.int32  # text_valid
 
 
 def test_cfg_forward_scatters_all_inputs_and_gathers_output(tmp_path, monkeypatch, backbone15):
@@ -419,11 +480,47 @@ def test_cfg_forward_scatters_all_inputs_and_gathers_output(tmp_path, monkeypatc
     )
     out = module(*wrapper.input_generator()[0])
 
-    assert len(calls["scatter"]) == 9
+    assert len(calls["scatter"]) == 10
     assert all(c[0] == 0 and c[2] is group and c[1][0] == "cfg_rank" for c in calls["scatter"])
     assert seen["hidden_states"].shape[0] == 1 and seen["text_order"].shape[0] == 1
     assert calls["gather"] == [(0, group)]
     assert out.shape[0] == 2
+
+
+def test_cfg_scatter_includes_text_valid(tmp_path, monkeypatch, backbone15):
+    """Under CFG every one of the 10 graph inputs, text_valid included, is scattered on
+    dim 0, and the transformer gets this cfg rank's own count."""
+    scattered = []
+    monkeypatch.setattr(backbone15, "init_parallel_mesh", lambda cfg: None)
+    monkeypatch.setattr(backbone15, "SPMDRank", _RankParam)
+    monkeypatch.setattr(backbone15, "get_cfg_group", lambda: None)
+    monkeypatch.setattr(backbone15, "get_cfg_rank_spmd", lambda rank: 1)
+
+    def scatter(x, partition_dim, rank, process_group):
+        scattered.append((x, partition_dim))
+        return x[rank : rank + 1]
+
+    monkeypatch.setattr(backbone15, "scatter_to_process_group_spmd", scatter)
+    monkeypatch.setattr(
+        backbone15, "gather_from_tensor_model_parallel_region_with_dim", lambda x, **kw: x
+    )
+    module = backbone15._HunyuanVideo15TraceModule(
+        _config(tmp_path, batch_size=2, cfg_parallel_enabled=True)
+    )
+    seen = {}
+
+    class _FakeTransformer(nn.Module):
+        def forward(self, **kwargs):
+            seen.update(kwargs)
+            return (torch.zeros(1, 32, 2, 2, 3),)
+
+    module.transformer = _FakeTransformer()
+    inputs = [torch.cat([x, x]) for x in _dit_inputs()]
+    inputs[9] = torch.tensor([4, 9], dtype=torch.int32)  # [uncond, cond] counts
+    module(*inputs)
+    assert len(scattered) == 10 and all(dim == 0 for _, dim in scattered)
+    assert [x is t for (x, _), t in zip(scattered, inputs)] == [True] * 10
+    assert seen["text_valid"].tolist() == [9]
 
 
 def test_cfg_with_cp_follows_composable_rule(tmp_path, monkeypatch):
@@ -528,11 +625,12 @@ def test_sp_with_cfg_writes_tp_rank_util(tmp_path, monkeypatch, backbone15):
 
 
 def _dit_inputs():
-    from difflet.backends.trainium.hunyuan_video.parallel15 import hv15_text_order
+    from difflet.backends.trainium.hunyuan_video.parallel15 import hv15_text_layout
 
     torch.manual_seed(1)
     mask = torch.tensor([[1, 0, 1, 1, 0, 0, 1]])
     mask_2 = torch.tensor([[1, 0, 1]])
+    text_order, text_valid = hv15_text_layout(torch.zeros(1, 4, dtype=torch.int64), mask_2, mask)
     return (
         torch.randn(1, 65, 2, 2, 3),
         torch.tensor([500.0]),
@@ -542,7 +640,8 @@ def _dit_inputs():
         torch.randn(1, 3, 10),
         mask_2,
         torch.zeros(1, 4, 6),
-        hv15_text_order(torch.zeros(1, 4, dtype=torch.int64), mask_2, mask),
+        text_order,
+        text_valid,
     )
 
 

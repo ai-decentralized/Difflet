@@ -1,6 +1,7 @@
 """Parallel building blocks for the HunyuanVideo 1.5 AOT DiT (traced NxD SPMD graph).
 
-* ``hv15_text_order``: host-side valid-first permutation of the joint text stream.
+* ``hv15_text_layout`` / ``hv15_text_order``: host-side valid-first permutation of the
+  joint text stream and its valid-token count (both graph inputs).
 * ``install_tensor_parallel``: swaps the dual-stream blocks' linears for difflet.ops
   column/row-parallel layers in place (parameter names unchanged).
 * ``bounded_joint_attention`` / ``JointBoundedProcessor``: joint image+text attention
@@ -38,17 +39,29 @@ from difflet.ops import (
 _ATTENTION_TILE = 128
 
 
+def hv15_text_layout(
+    mask_image: torch.Tensor, mask_byt5: torch.Tensor, mask_mllm: torch.Tensor
+) -> tuple[torch.LongTensor, torch.IntTensor]:
+    """Host-side ``(text_order, text_valid)`` of the joint text stream ``[image_3, byt5, mllm]``.
+
+    ``text_order`` is stable, so valid tokens keep their order and come first, exactly
+    diffusers' ``[valid_image, valid_byt5, valid_mllm, invalid_image, invalid_byt5,
+    invalid_mllm]`` reorder; ``text_valid`` (int32 ``[B]``) counts them, so the first
+    ``text_valid`` ordered tokens are exactly the valid ones. Both come from one joint
+    mask and are graph inputs: the count is NOT reduced in-graph (neuronx-cc 2.26/2.28
+    failed with NCC_IRPX901 on that reduction at 480x848x121). ``mask_image`` follows
+    the static forward: all 0 for t2v, all 1 otherwise.
+    """
+    mask = torch.cat([mask_image, mask_byt5, mask_mllm], dim=1).bool()
+    order = torch.argsort((~mask).to(torch.int8), dim=1, stable=True)
+    return order, mask.sum(dim=1).to(torch.int32)
+
+
 def hv15_text_order(
     mask_image: torch.Tensor, mask_byt5: torch.Tensor, mask_mllm: torch.Tensor
 ) -> torch.LongTensor:
-    """Host-side valid-first order of the joint text stream ``[image_3, byt5, mllm]``.
-
-    Stable, so valid tokens keep their order and come first, exactly diffusers'
-    ``[valid_image, valid_byt5, valid_mllm, invalid_image, invalid_byt5, invalid_mllm]``
-    reorder. ``mask_image`` follows the static forward: all 0 for t2v, all 1 otherwise.
-    """
-    mask = torch.cat([mask_image, mask_byt5, mask_mllm], dim=1).bool()
-    return torch.argsort((~mask).to(torch.int8), dim=1, stable=True)
+    """``hv15_text_layout``'s valid-first order alone."""
+    return hv15_text_layout(mask_image, mask_byt5, mask_mllm)[0]
 
 
 def bounded_joint_attention(
@@ -353,6 +366,7 @@ __all__ = [
     "JointGatherKvProcessor",
     "JointUlyssesProcessor",
     "bounded_joint_attention",
+    "hv15_text_layout",
     "hv15_text_order",
     "install_tensor_parallel",
 ]

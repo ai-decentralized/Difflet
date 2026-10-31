@@ -507,7 +507,7 @@ def test_hunyuan_video_15_backbone_inference_config_shapes(tmp_path):
         tag="HunyuanVideo15Transformer3DModel",
     )
     inputs = wrapper.input_generator()[0]
-    assert len(inputs) == 9
+    assert len(inputs) == 10
     assert tuple(inputs[0].shape) == (1, 65, 2, 2, 3)
     assert tuple(inputs[1].shape) == (1,)
     # The token refiner runs on host: the NEFF takes refined mllm embeds (inner_dim).
@@ -521,6 +521,8 @@ def test_hunyuan_video_15_backbone_inference_config_shapes(tmp_path):
     assert inputs[0].dtype == torch.bfloat16
     assert inputs[3].dtype == torch.int64
     assert inputs[8].dtype == torch.int64
+    assert tuple(inputs[9].shape) == (1,)  # text_valid: host count of valid text tokens
+    assert inputs[9].dtype == torch.int32
 
 
 def test_hunyuan_video_15_dit_input_contract_validates_shapes_and_dtypes(tmp_path):
@@ -663,6 +665,7 @@ def test_hunyuan_video_15_trace_module_accepts_fixed_tuple_for_t2v(tmp_path):
             torch.zeros([1, 4, 6]),
             # text_order: t2v image tokens (0..3) are invalid, every text token is valid.
             torch.cat([torch.arange(4, 14), torch.arange(4)]).unsqueeze(0),
+            torch.tensor([3 + 7], dtype=torch.int32),  # text_valid
         )
 
     assert tuple(output.shape) == (1, 32, 2, 2, 3)

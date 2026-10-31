@@ -482,6 +482,8 @@ class ModelWrapperHunyuanVideo15Backbone(ModelWrapper):
                 torch.zeros([batch_size, image_seq_len, self.config.image_embed_dim], dtype=dtype),
                 # text_order: host-computed valid-first permutation of [image, byt5, mllm].
                 torch.arange(text_len, dtype=torch.int64).expand(batch_size, text_len).contiguous(),
+                # text_valid: host-computed count of valid text tokens (int32 [B]).
+                torch.full([batch_size], text_len, dtype=torch.int32),
             )
         ]
 
@@ -505,6 +507,7 @@ class ModelWrapperHunyuanVideo15Backbone(ModelWrapper):
         encoder_attention_mask_2,
         image_embeds,
         text_order,
+        text_valid,
     ):
         if self.model is None:
             raise RuntimeError("Forward called before load. Run load() first.")
@@ -518,6 +521,7 @@ class ModelWrapperHunyuanVideo15Backbone(ModelWrapper):
             encoder_attention_mask_2,
             image_embeds,
             text_order,
+            text_valid,
         )
 
 
@@ -629,6 +633,7 @@ def _hv15_static_reorder_forward(
     encoder_attention_mask_2=None,
     image_embeds=None,
     text_order=None,
+    text_valid=None,
     attention_kwargs=None,
     return_dict=True,
 ):
@@ -641,11 +646,13 @@ def _hv15_static_reorder_forward(
       refiner runs on host, so ``context_embedder`` is skipped here.
     * The data-dependent valid-first reorder (``text[text_mask]`` boolean indexing, a
       dynamic shape that cannot lower to a static NEFF) is replaced by a gather with the
-      host-computed ``text_order`` permutation (``parallel15.hv15_text_order``). After it
+      host-computed ``text_order`` permutation (``parallel15.hv15_text_layout``). After it
       the valid text tokens are the contiguous prefix, so the blocks get ``text_valid``
-      (int32 ``[B]``, counted in fp32) in the ``attention_mask`` slot and the processor
-      attends keys ``[0, N + text_valid)``. The encoder stream has no rope, so the order
-      only has to be valid-first; padding embeds are zeroed.
+      (int32 ``[B]``, the host count from the same masks) in the ``attention_mask`` slot
+      and the processor attends keys ``[0, N + text_valid)``. The count is a graph input,
+      never reduced in-graph: neuronx-cc 2.26/2.28 failed with NCC_IRPX901
+      (RelaxPredicates) on ``mask.float().sum(1)`` at 480x848x121. The encoder stream has
+      no rope, so the order only has to be valid-first; padding embeds are zeroed.
     * Under context parallelism the image stream and its rope are scattered over the CP
       group once before the blocks and the image stream is gathered once after; the text
       stream stays replicated. Megatron-SP does the same over the TP group.
@@ -685,7 +692,8 @@ def _hv15_static_reorder_forward(
     )
 
     # [image_3, byt5, mllm] in place, padding embeds zeroed, then the static valid-first
-    # gather (replaces diffusers' boolean-index reorder).
+    # gather (replaces diffusers' boolean-index reorder). The valid count ``text_valid``
+    # comes from the host (see the docstring): nothing here reduces the mask.
     m1 = encoder_attention_mask.bool()
     m2 = encoder_attention_mask_2.bool()
     m3 = encoder_attention_mask_3.bool()
@@ -693,15 +701,11 @@ def _hv15_static_reorder_forward(
     ehs2 = encoder_hidden_states_2 * m2.unsqueeze(-1).to(encoder_hidden_states_2.dtype)
     ehs3 = encoder_hidden_states_3 * m3.unsqueeze(-1).to(encoder_hidden_states_3.dtype)
     encoder_hidden_states = torch.cat([ehs3, ehs2, ehs1], dim=1)
-    encoder_attention_mask = torch.cat([m3, m2, m1], dim=1)
     encoder_hidden_states = torch.gather(
         encoder_hidden_states,
         1,
         text_order[..., None].expand(-1, -1, encoder_hidden_states.shape[-1]),
     )
-    encoder_attention_mask = torch.gather(encoder_attention_mask, 1, text_order)
-    # fp32 count, then int32: Trainium LNC2 miscompiles long integer reductions.
-    text_valid = encoder_attention_mask.float().sum(1).to(torch.int32)
 
     # Megatron-SP: only the image stream is sequence-sharded over the TP group, once
     # here for all blocks (the processor/FFN gather and reduce-scatter internally). The
@@ -840,10 +844,12 @@ class _HunyuanVideo15TraceModule(nn.Module):
         encoder_attention_mask_2: torch.Tensor,
         image_embeds: torch.Tensor,
         text_order: torch.Tensor,
+        text_valid: torch.Tensor,
     ) -> torch.Tensor:
         if self.cfg_parallel:
             # The caller stacks [uncond, cond] into batch 2; each cfg rank denoises one
-            # branch. Every input (incl. text_order and both masks) is batch-major.
+            # branch. Every input (incl. text_order, text_valid and both masks) is
+            # batch-major.
             cfg_rank = get_cfg_rank_spmd(self.global_rank.get_rank())
             (
                 hidden_states,
@@ -855,6 +861,7 @@ class _HunyuanVideo15TraceModule(nn.Module):
                 encoder_attention_mask_2,
                 image_embeds,
                 text_order,
+                text_valid,
             ) = (
                 scatter_to_process_group_spmd(
                     x, partition_dim=0, rank=cfg_rank, process_group=self.cfg_group
@@ -869,6 +876,7 @@ class _HunyuanVideo15TraceModule(nn.Module):
                     encoder_attention_mask_2,
                     image_embeds,
                     text_order,
+                    text_valid,
                 )
             )
         out = self.transformer(
@@ -881,6 +889,7 @@ class _HunyuanVideo15TraceModule(nn.Module):
             encoder_attention_mask_2=encoder_attention_mask_2,
             image_embeds=image_embeds,
             text_order=text_order,
+            text_valid=text_valid,
             return_dict=False,
         )[0]
         if self.cfg_parallel:
