@@ -400,3 +400,32 @@ The native-input comparisons above used the pre-fix NEFF and therefore stand.
 - **Gate (vs aot-tp2): per forward PASS**, cosine 0.999727 / rel-L1 0.0260 / max-abs 0.38 at
   1 step; 3 steps 0.985001 / 0.1746 / 3.67, inside the bf16 floor. No NaN / Inf.
 - Evidence: `E/phase1/aot-tp2cp2-ulysses/`.
+
+#### aot-tp2cp2-gather_kv (TP2 x CP2, `--cp-mode gather_kv`)
+
+The Task 0 spike passed at kernel level, so the cell ran (it is not BLOCKED). The open question
+from the spike, whether the whole CP-2 DiT graph hits HV1.0's `NCC_INLA001`, is answered: it
+does not on neuronx-cc 2.26.6360 at this shape.
+
+| step | outcome | wall | detail | peak HBM per core (GiB) |
+|---|---|---|---|---|
+| `compile --tp-degree 2 --cp-degree 2 --cp-mode gather_kv` | DiT PASS, VAE FAIL (aot-vae) | 354.8 s | DiT compiled in 332.8 s into `hunyuan_video_15_aot_dit/3c8c02fac8aec15c`; no `NCC_INLA001` / `NCC_IBIR243` | — |
+| `generate --steps 3` | DiT PASS; VAE stage exits | 62.5 s | encode 8.0 s; DiT load 20.6 s; denoise 7.0 s, median 1899 ms (first 3252 ms) | 8.94 on each of 4 cores |
+
+- `embeds.pt` sha `3051691e…`; `latents.pt` sha `25f719c2…`.
+- **Gate (vs aot-tp2): per forward PASS**, cosine 0.999730 / rel-L1 0.0260 / max-abs 0.37 at
+  1 step; 3 steps 0.987910 / 0.1599 / 2.73, inside the bf16 floor. No NaN / Inf.
+- Evidence: `E/phase1/aot-tp2cp2-gather_kv/`.
+
+#### ring: N/A (mask), rejected before compile
+
+Same as HV1.0: the registry keeps ring for the native backend, and only the AOT path refuses it.
+
+| command | wall | result |
+|---|---|---|
+| `compile --tp-degree 2 --cp-degree 2 --cp-mode ring` | **6.7 s** | exit 1 at the start of the aot_transformer stage, before any trace: `NotImplementedError: HunyuanVideo 1.5 on the trainium backend has no ring context parallelism: the Trainium joint ring-attention kernel has no text-mask path for the padded text stream. Use --cp-mode ulysses (or gather_kv).` |
+| `generate … --cp-mode ring` (no artifact) | 32.0 s | the host encode runs first (10.2 s), then `[hv15] no valid compiled transformer artifact at …/hunyuan_video_15_aot_dit/2b98ee6d55211302 (manifest missing or configuration changed); run \`difflet compile\` with the same flags first.` The ring message only appears from `compile`. |
+
+The generate path's message points at `difflet compile`, which then names the real reason in
+seconds; a pre-encode ring check in `_run_aot` would say it directly (the Task 8 review's
+deferred minor). Evidence: `E/phase1/ring/`.

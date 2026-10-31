@@ -1,0 +1,46 @@
+{
+  "name": "aot-tp2cp2-gather_kv/gen3",
+  "backend": "trainium",
+  "cmd": [
+    "bash",
+    "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_difflet.sh",
+    "trainium",
+    "generate",
+    "--model-id",
+    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+    "--height",
+    "320",
+    "--width",
+    "512",
+    "--num-frames",
+    "61",
+    "--steps",
+    "3",
+    "--seed",
+    "42",
+    "--tp-degree",
+    "2",
+    "--cp-degree",
+    "2",
+    "--cp-mode",
+    "gather_kv",
+    "--prompt",
+    "a cinematic shot of a red fox running through a snowy forest",
+    "--keep-work-dir",
+    "--work-dir",
+    "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/aot-tp2cp2-gather_kv/gen3.work",
+    "--output",
+    "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/aot-tp2cp2-gather_kv/gen3.mp4"
+  ],
+  "env": [
+    "HF_HUB_OFFLINE=1"
+  ],
+  "rc": 1,
+  "wall_s": 62.5,
+  "nmon_peak_gib": {
+    "0": 8.94,
+    "1": 8.94,
+    "2": 8.94,
+    "3": 8.94
+  }
+}
