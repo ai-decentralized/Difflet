@@ -181,7 +181,21 @@ block graph: the projections are not where the block's time goes.
 
 The first subset runs of this probe were invalid: `--targets` was applied only on the static
 branch, so every "subset" quantized all 12 layers (all read 13.4 ms per block against bf16
-16.4 ms). Corrected runs: see the table below. A bf16 block with a trivial NKI copy kernel
+16.4 ms). Corrected runs (one core, 2 blocks, 10 iterations, `blockstep_mx7_*.log`):
+
+| quantized layers (per block) | ms per block | vs bf16 16.4 |
+|---|---|---|
+| none (bf16) | 16.4 | — |
+| MLP up only (2) | 15.8 | −0.6 |
+| MLP up + down (4) | 15.2 | −1.2 |
+| q/k/v + add_q/k/v (6) | 15.6 | −0.8 |
+| q/k/v + to_out + to_add_out (8) | **17.7** | **+1.3** |
+| all 12 | 13.4–13.6 | −2.8 to −3.0 |
+
+The savings are not additive (MLP −1.2 and attention +1.3 do not sum to −2.8), and
+quantizing the two output projections on top of q/k/v costs 2.1 ms: the compiler's schedule
+for the whole block changes with each substitution, so single-layer microbenchmarks (section
+5: 2.0–2.2x on the MLP shapes) do not predict the block. A bf16 block with a trivial NKI copy kernel
 inserted before `to_q`, `to_out`, `to_add_out` or MLP-down stays at 16.4–16.9 ms (19.8 ms
 before `to_q`), so the presence of a custom op by itself does not change the compiler's
 schedule. The elementwise work at the per-rank shapes is not small: standalone compiled
