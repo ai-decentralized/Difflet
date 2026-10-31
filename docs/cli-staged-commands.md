@@ -199,8 +199,15 @@ kernel); no calibration file. `compile` writes the quantized checkpoint once und
 299 ms in bf16 (0.87x); PSNR 31.6 dB / SSIM 0.987 / LPIPS 0.02 against the bf16 image. The
 flag is refused on the AoT `trainium` backend, on trn2, under `--exec-mode eager`, with
 `--teacache-speedup`, and for models other than Qwen-Image. `--quant fp8 --quant-calibration
-FILE` is the per-tensor static variant (its kernel path is not usable on the 2.28 compiler;
-`--quant-compute dequant` stores fp8 and computes in bf16).
+FILE` is the per-tensor static variant (Qwen-Image only; its kernel path is not usable on the
+2.28 compiler; `--quant-compute dequant` stores fp8 and computes in bf16).
+
+FLUX.1-dev accepts `--quant mxfp8` on the same path (`difflet compile/generate --model-id
+black-forest-labs/FLUX.1-dev --backend neuron --tp-degree 4 --quant mxfp8`): the dual-stream
+blocks' q/k/v and MLPs and the single-stream blocks' q/k/v and `proj_mlp` run in mxfp8, the
+output projections stay bf16. Measured on trn3 (tp4, 1024x1024, 28 steps): PSNR 31.7 dB /
+SSIM 0.972 / LPIPS 0.023 against bf16, deterministic, but the DiT step is 220 ms against bf16's
+222 ms: a memory saving only, until the single blocks' fused `proj_out` is quantized too.
 
 ```bash
 DIFFLET_BACKEND=neuron difflet compile --model-id Qwen/Qwen-Image \

@@ -319,8 +319,29 @@ attention + MLP output), is kept bf16 (the module reads it as two column ranges 
 checkpoint tensor, which the quantized writer would have to slice with its block scales), so
 only ~58% of a single block's linear FLOPs are quantized against ~86% of a Qwen block's; and
 the profiler's finding (6e) that a bf16 matmul left between custom calls compiles worse
-applies to `proj_out` in every single block. Layer-set variants (dual blocks only, single
-blocks only, dual MLPs only) follow.
+applies to `proj_out` in every single block. Layer-set variants (`DIFFLET_QUANT_TARGETS`,
+`/home/ubuntu/fp8-bench/flux_<variant>_tp4/`, one 28-step run each, vs `bf16_gena.png`):
+
+| quantized layers | step median | vs bf16 222 ms | PSNR | SSIM | LPIPS |
+|---|---|---|---|---|---|
+| default FLUX set (dual q/k/v + MLPs, single q/k/v + proj_mlp) | 219–220 ms | 0.99x | 31.72 dB | 0.972 | 0.023 |
+| dual blocks only (their q/k/v + both MLPs) | 211.3 ms | 0.95x | 25.06 dB | 0.935 | 0.040 |
+| single blocks only (q/k/v + proj_mlp) | 230.0 ms | **1.04x** | 35.49 dB | 0.980 | 0.013 |
+| dual MLPs only | 216.0 ms | 0.97x | 24.74 dB | 0.931 | 0.046 |
+
+Quantizing the single-stream blocks makes the step *slower* (230 against 222 ms): their
+`proj_out` stays a bf16 dot between the q/k/v and `proj_mlp` custom calls, the configuration
+the profiler showed compiling worst (6e). The dual blocks alone give 5%. The single-prompt
+quality numbers swing by 6–10 dB between layer sets in no monotonic order (fewer quantized
+layers, lower PSNR), so at one seed they rank nothing; the default set's 31.7 dB and the
+Qwen multi-prompt table (6d-ii) are the quality evidence that counts.
+
+**FLUX conclusion**: the wiring is correct and deterministic and the default set passes the
+quality gates, but at tp4 / 1024x1024 there is no speed-up to ship (0.99x). What would change
+it is quantizing the single blocks' `proj_out` (the writer slicing block scales along K for
+the `proj_out_attn` / `proj_out_mlp` column ranges) so no bf16 dot is left between custom
+calls — and, as for Qwen, a kernel that overlaps its neighbours. FLUX keeps its default target
+set; `--quant mxfp8` on FLUX is available and documented as memory-only for now.
 
 ## Bug ledger
 
