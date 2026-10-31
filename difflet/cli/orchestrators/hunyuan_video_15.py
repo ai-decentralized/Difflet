@@ -21,8 +21,12 @@ On the Trainium (AoT) backend (``_run_aot``: any backend but neuron), the same l
 stages: the same host ``encode``; ``aot_transformer``, one process whose NxD application drives
 all ``tp x cp (x2 with CFG)`` cores (``aot15.build_aot_denoiser``: the compiled DiT, plus the
 TeaCache probe compiled into the same artifact on the first adaptive run), writing each request's
-latents; and ``aot_vae``, the tiled bf16 decoder on one core (``vae15``), writing the MP4. Each
-compiled artifact lives in a hashed dir under --cache-dir (``_aot_stage_cache_inputs``).
+latents; and ``aot_vae``, writing the MP4: by default on the host (diffusers' tiled VAE in fp32,
+as Wan's Trainium path decodes; the compiled decoder does not build on neuronx-cc 2.26), or with
+--device-vae the tiled bf16 decoder on one core (``vae15``), which `difflet compile` then
+compiles. Each compiled artifact lives in a hashed dir under --cache-dir
+(``_aot_stage_cache_inputs``). --cp-mode ring and a multi-shape --shapes are refused before any
+stage launches (``_aot_reject_unsupported``).
 
 Default HF model: hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v
 Registry defaults: height=480, width=848, num_frames=121
@@ -296,8 +300,12 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
     # ------------------------------------------------------------ Trainium (AoT) path
 
     def _run_aot(self, mode: str) -> None:
-        """encode (host) -> aot_transformer (one NxD process on all the layout's cores) -> aot_vae."""
+        """encode (host) -> aot_transformer (one NxD process on all the layout's cores) -> aot_vae
+        (the host decode by default; the compiled decoder, compiled by `difflet compile`, only
+        with --device-vae)."""
+        _aot_reject_unsupported(self.args)
         tp, cfg, cp = _layout(self.args)
+        device_vae = _aot_device_vae(self.args)
         work_dir = Path(getattr(self.args, "work_dir", None) or Path.home() / ".cache" / "difflet" / "work" / "hv15")
         work_dir.mkdir(parents=True, exist_ok=True)
         cli = self._stage_cli_args(mode, str(work_dir), tp, cfg, cp)
@@ -306,8 +314,11 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
                 runner.run_stage(_HF_MODEL_ID, "encode", num_cores=1, virtual_core_size=None, cli_args=cli)
             runner.run_stage(_HF_MODEL_ID, "aot_transformer", num_cores=tp * (2 if cfg else 1) * cp,
                              virtual_core_size=_AOT_VIRTUAL_CORE_SIZE, cli_args=cli)
-            runner.run_stage(_HF_MODEL_ID, "aot_vae", num_cores=1, virtual_core_size=_AOT_VIRTUAL_CORE_SIZE,
-                             cli_args=cli)
+            if device_vae:
+                runner.run_stage(_HF_MODEL_ID, "aot_vae", num_cores=1, virtual_core_size=_AOT_VIRTUAL_CORE_SIZE,
+                                 cli_args=cli + ["--device-vae"])
+            elif mode == "generate":  # a host stage, launched as the encoder is
+                runner.run_stage(_HF_MODEL_ID, "aot_vae", num_cores=1, virtual_core_size=None, cli_args=cli)
         except Exception:
             print(f"[difflet] work dir preserved at {work_dir} for inspection", file=sys.stderr)
             raise
@@ -420,6 +431,41 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
                 torch.save(latents, stage_loop.work_file(args, req, "latents.pt"))
 
     def _stage_aot_vae(self, args: argparse.Namespace) -> None:
+        """The host decode (the default), or with --device-vae the compiled decoder on one core."""
+        if getattr(args, "device_vae", False):
+            self._stage_aot_device_vae(args)
+        else:
+            self._stage_aot_host_vae(args)
+
+    def _stage_aot_host_vae(self, args: argparse.Namespace) -> None:
+        """Host CPU: diffusers' AutoencoderKLHunyuanVideo15 in fp32, tiled, decoding
+        ``latents / scaling_factor`` as diffusers' pipeline does; post-processing, MP4. No artifact
+        (the compiled vae15 decoder does not build on neuronx-cc 2.26: NCC_EVRF007 and others)."""
+        if args.stage_mode == "compile":
+            return
+        import torch
+        from diffusers import AutoencoderKLHunyuanVideo15
+
+        from difflet.cli.dp import stage_loop
+
+        started = time.perf_counter()
+        vae = AutoencoderKLHunyuanVideo15.from_pretrained(os.path.join(self._root(args), "vae"),
+                                                          torch_dtype=torch.float32).eval()
+        vae.enable_tiling()
+        print(f"[hv15] host vae load {time.perf_counter() - started:.1f} s", flush=True)
+        scaling_factor = float(vae.config.scaling_factor)
+        for req in stage_loop.claimed_requests(args):
+            with stage_loop.request_scope(args, req, final=True):
+                latents = torch.load(stage_loop.work_file(args, req, "latents.pt"), weights_only=True)
+                started = time.perf_counter()
+                with torch.no_grad():
+                    video = vae.decode(latents.to(torch.float32) / scaling_factor, return_dict=False)[0].float().cpu()
+                out = Path(req.output or args.output or "hunyuan_video_15.mp4")
+                _aot_write_output(video, out)
+                print(f"[hv15] request {req.index}: host decode {time.perf_counter() - started:.1f} s; "
+                      f"[difflet] video saved to {out}", flush=True)
+
+    def _stage_aot_device_vae(self, args: argparse.Namespace) -> None:
         """One core: the tiled bf16 decoder (an artifact of its own), diffusers' post-processing, MP4."""
         import torch
 
@@ -457,6 +503,25 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
 
 
 _AOT_VIRTUAL_CORE_SIZE = 2
+
+
+def _aot_device_vae(args: argparse.Namespace) -> bool:
+    """--device-vae opts into the compiled decoder; --host-vae (or neither) decodes on the host,
+    as Wan's Trainium path does (``wan._decode_on_device``)."""
+    return bool(getattr(args, "device_vae", False)) and not getattr(args, "host_vae", False)
+
+
+def _aot_reject_unsupported(args: argparse.Namespace) -> None:
+    """Before any stage launches: ring CP (the Trainium ring kernel has no text-mask path) and a
+    --shapes naming more than one shape (the AoT application compiles one). Torch-free: the
+    shapes are counted, not parsed."""
+    if getattr(args, "cp_mode", None) == "ring":
+        raise SystemExit("[hv15] --cp-mode ring is not supported on the Trainium (AoT) backend: its ring "
+                         "attention kernel has no text-mask path. Use --cp-mode ulysses (or gather_kv).")
+    shapes = getattr(args, "shapes", None)
+    if shapes and len([token for token in str(shapes).split(",") if token.strip()]) > 1:
+        raise SystemExit(f"[hv15] --shapes {shapes} names more than one shape; the Trainium (AoT) HunyuanVideo "
+                         "1.5 application compiles one shape: pass --height/--width/--num-frames instead.")
 
 
 def _aot_cp_mode(args: argparse.Namespace) -> str:
