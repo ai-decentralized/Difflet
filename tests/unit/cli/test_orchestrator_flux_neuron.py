@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 from types import SimpleNamespace
 
 import pytest
@@ -192,3 +193,37 @@ def test_registry_routes_flux_to_the_neuron_application():
     app = create_flux_application(model_path="/m", parallel=DiffletParallelConfig(tp_degree=4),
                                   dtype=None, shape={"height": 1024, "width": 1024}, backend="neuron")
     assert isinstance(app, TorchNeuronFluxApplication)
+
+
+def test_quant_reaches_the_stage_and_its_application(launches, monkeypatch, tmp_path):
+    """--quant mxfp8 is forwarded to the transformer stage, which hands the spec to the
+    application; the driver's quantized-checkpoint step is skipped when the weights are not
+    local (the ranks report it)."""
+    import difflet.backends.registry as registry
+    import difflet.pipeline.difflet_pipeline as dp
+
+    import difflet.pipeline.path_resolver as resolver
+
+    monkeypatch.delenv("DIFFLET_NKI_TRACE_CACHE", raising=False)
+    monkeypatch.setattr(resolver, "resolve_model_path",
+                        lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError("not downloaded")))
+    args = _args(work_dir=str(tmp_path / "w"), model_id="black-forest-labs/FLUX.1-dev",
+                 quant="mxfp8", quant_calibration=None, quant_compute=None)
+    flux_cli.FluxOrchestrator(args).generate()
+    cli = launches[0]["cli_args"]
+    assert cli[cli.index("--quant") + 1] == "mxfp8" and "--quant-compute" not in cli
+    assert os.environ.get("DIFFLET_NKI_TRACE_CACHE") == "1"
+    plain = _args(work_dir=str(tmp_path / "w2"), model_id="black-forest-labs/FLUX.1-dev")
+    flux_cli.FluxOrchestrator(plain).generate()
+    assert "--quant" not in launches[1]["cli_args"]
+
+    monkeypatch.setattr(registry, "get_backend",
+                        lambda name: SimpleNamespace(prepare_runtime=lambda parallel: None))
+    built = []
+    monkeypatch.setattr(dp.DiffletPipeline, "from_pretrained",
+                        classmethod(lambda cls, *a, **k: built.append(k) or (_ for _ in ()).throw(SystemExit(0))))
+    with pytest.raises(SystemExit):
+        flux_cli.FluxOrchestrator(args)._run_stage_internal("transformer", args)
+    quant = built[0]["application_kwargs"]["quant"]
+    assert quant["format"] == "mxfp8" and quant["tp_degree"] == 4
+    assert any("single_transformer_blocks" in t for t in quant["targets"])

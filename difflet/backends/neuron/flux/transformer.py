@@ -28,7 +28,9 @@ from difflet.backends.neuron.core.checkpoint import (
     single_block_proj_out_key,
     single_block_proj_out_slices,
 )
+from difflet.backends.neuron.core.config_checks import require_fp8_supported
 from difflet.backends.neuron.flux.config import NeuronFluxConfig
+from difflet.quant.spec import QuantSpec
 
 
 def checkpoint_key(name: str) -> str:
@@ -47,13 +49,19 @@ def flux_position_ids(config: NeuronFluxConfig) -> tuple[torch.Tensor, torch.Ten
 
 
 class NeuronFluxTransformerApplication(TorchNeuronApplicationBase):
-    """The Flux DiT, sharded across the TP group, at the config's static shape."""
+    """The Flux DiT, sharded across the TP group, at the config's static shape.
+
+    ``quant`` (a ``QuantSpec`` or its dict) swaps the spec's target linears for their FP8 twins
+    on the meta module (``ops_impl/fp8_linear.quantize_module_``) before the load, so
+    ``model_path`` must then be the quantized checkpoint directory (``difflet/quant/checkpoint.py``)
+    whose tensors those layers hold. Trainium3 and compile mode only (decision D43).
+    """
 
     block_attrs = ("transformer_blocks", "single_transformer_blocks")
 
     def __init__(self, *, model_path, config: NeuronFluxConfig, parallel=None,
                  dtype=torch.bfloat16, exec_mode: str | None = None, device="neuron",
-                 **kwargs) -> None:
+                 quant: QuantSpec | dict | None = None, **kwargs) -> None:
         super().__init__(model_path=model_path, parallel=parallel, dtype=dtype,
                          exec_mode=exec_mode, device=device, **kwargs)
         config.torch_dtype = self.dtype
@@ -63,11 +71,31 @@ class NeuronFluxTransformerApplication(TorchNeuronApplicationBase):
                              f"config has tp_degree={self.parallel.tp_degree}")
         self.config = config
         self._rotary: dict[tuple, torch.Tensor] = {}
+        if isinstance(quant, dict):
+            quant = QuantSpec.from_dict(quant)
+        self.quant: QuantSpec | None = quant
+        if quant is not None:
+            require_fp8_supported("FLUX", self.device.type, self.exec_mode)
+        #: The module names ``build_module`` quantized (empty without ``quant``).
+        self.quantized_linears: list[str] = []
 
     def build_module(self) -> torch.nn.Module:
         from difflet.models.flux.modeling_flux import NeuronFluxTransformer2DModel
 
-        return NeuronFluxTransformer2DModel(self.config)
+        module = NeuronFluxTransformer2DModel(self.config)
+        if self.quant is not None:
+            from difflet.backends.neuron.ops_impl.fp8_linear import quantize_module_
+
+            self.quantized_linears = quantize_module_(module, self.quant)
+        return module
+
+    def _after_load(self, module: torch.nn.Module) -> None:
+        # Pack (kernel path) or dequantize once (dequant path) after the load, as Qwen-Image's
+        # application does. No q/k/v fusion: this attention reads to_q/to_k/to_v directly.
+        if self.quant is not None:
+            from difflet.backends.neuron.ops_impl.fp8_linear import prepare_fp8_kernels_
+
+            prepare_fp8_kernels_(module)
 
     def checkpoint_key(self, name: str) -> str:
         return checkpoint_key(name)

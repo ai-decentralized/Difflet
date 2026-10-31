@@ -48,11 +48,48 @@ QWEN_IMAGE_ROW_PARALLEL: tuple[str, ...] = (
     rf"{_BLOCK}\.(img_mlp|txt_mlp)\.net\.2",
 )
 
+# FLUX.1 (diffusers' FluxTransformer2DModel names, which ``difflet/models/flux/modeling_flux.py``
+# keeps): the 19 dual-stream blocks' q/k/v for both streams and both MLPs (``ff``, ``ff_context``),
+# the 38 single-stream blocks' q/k/v and MLP-up (``proj_mlp``). The output projections stay bf16
+# as for Qwen-Image: the dual blocks' ``to_out.0`` / ``to_add_out`` and the single blocks'
+# ``proj_out`` (which the neuron model splits into ``proj_out_attn`` / ``proj_out_mlp``, read as
+# column ranges of the checkpoint's ``proj_out``: a quantized target there would also need the
+# writer to slice the block scales).
+_SINGLE = r"single_transformer_blocks\.\d+"
+
+FLUX_TARGETS: tuple[str, ...] = (
+    rf"{_BLOCK}\.attn\.(to_q|to_k|to_v|add_q_proj|add_k_proj|add_v_proj)",
+    rf"{_BLOCK}\.(ff|ff_context)\.net\.0\.proj",
+    rf"{_BLOCK}\.(ff|ff_context)\.net\.2",
+    rf"{_SINGLE}\.attn\.(to_q|to_k|to_v)",
+    rf"{_SINGLE}\.proj_mlp",
+)
+
+FLUX_KEPT_BF16: tuple[str, ...] = (
+    rf"{_BLOCK}\.attn\.(to_out\.0|to_add_out)",
+    rf"{_SINGLE}\.proj_out",
+    rf"{_SINGLE}\.proj_out_(attn|mlp)",
+    rf"{_BLOCK}\.norm1(_context)?\.linear",
+    rf"{_SINGLE}\.norm\.linear",
+    r"time_text_embed\..*",
+    r"context_embedder",
+    r"x_embedder",
+    r"norm_out\.linear",
+    r"proj_out",
+)
+
+FLUX_ROW_PARALLEL: tuple[str, ...] = (
+    rf"{_BLOCK}\.attn\.(to_out\.0|to_add_out)",  # not default targets; kept for overrides
+    rf"{_BLOCK}\.(ff|ff_context)\.net\.2",
+)
+
 TARGETS_BY_MODEL: dict[str, tuple[str, ...]] = {
     "qwen_image": QWEN_IMAGE_TARGETS,
+    "flux": FLUX_TARGETS,
 }
 ROW_PARALLEL_BY_MODEL: dict[str, tuple[str, ...]] = {
     "qwen_image": QWEN_IMAGE_ROW_PARALLEL,
+    "flux": FLUX_ROW_PARALLEL,
 }
 
 
@@ -88,6 +125,9 @@ def default_spec(model: str, **overrides) -> QuantSpec:
 
 
 __all__ = [
+    "FLUX_KEPT_BF16",
+    "FLUX_ROW_PARALLEL",
+    "FLUX_TARGETS",
     "QWEN_IMAGE_KEPT_BF16",
     "QWEN_IMAGE_ROW_PARALLEL",
     "QWEN_IMAGE_TARGETS",

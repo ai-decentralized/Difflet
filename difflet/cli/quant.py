@@ -22,7 +22,12 @@ from difflet.quant.spec import COMPUTE_MODES, DEFAULT_COMPUTE, FORMATS, QuantSpe
 from difflet.quant.targets import TARGETS_BY_MODEL, default_spec
 
 #: CLI model ids with FP8 target layers, by their ``difflet.quant.targets`` key.
-QUANT_MODELS: dict[str, str] = {"Qwen/Qwen-Image": "qwen_image"}
+QUANT_MODELS: dict[str, str] = {
+    "Qwen/Qwen-Image": "qwen_image",
+    "black-forest-labs/FLUX.1-dev": "flux",
+}
+#: Models with an activation calibration tool (``--quant fp8``); the others take ``mxfp8`` only.
+CALIBRATED_MODELS: frozenset[str] = frozenset({"qwen_image"})
 
 
 def add_quant_flags(p: argparse.ArgumentParser) -> None:
@@ -36,7 +41,7 @@ def add_quant_flags(p: argparse.ArgumentParser) -> None:
         "modulation, embedders and output projection stay bf16. 'mxfp8': OCP microscaling, "
         "32-value block scales for weights and activations (in the kernel), no calibration. "
         "'fp8': per-tensor weights and static per-tensor activation scales from "
-        "--quant-calibration. Qwen-Image only.",
+        "--quant-calibration (Qwen-Image only). Qwen-Image and FLUX.1-dev.",
     )
     p.add_argument(
         "--quant-calibration",
@@ -84,6 +89,9 @@ def validate_quant(args: argparse.Namespace) -> None:
     if exec_mode == "eager":
         _fail("--quant needs the compiled DiT (--exec-mode compile, the default): eager "
               "quantizes every activation op by op.")
+    if quant == "fp8" and QUANT_MODELS[model_id] not in CALIBRATED_MODELS:
+        _fail(f"--quant fp8 (static activation scales) has no calibration tool for {model_id}; "
+              "use --quant mxfp8, which needs none.")
     if quant == "fp8" and calibration is None:
         _fail("--quant fp8 needs --quant-calibration PATH (the activation calibration file); "
               "--quant mxfp8 needs none.")
@@ -140,4 +148,4 @@ def quant_cli_args(args: argparse.Namespace) -> list[str]:
     return parts
 
 
-__all__ = ["QUANT_MODELS", "add_quant_flags", "quant_cli_args", "quant_spec", "validate_quant"]
+__all__ = ["CALIBRATED_MODELS", "QUANT_MODELS", "add_quant_flags", "quant_cli_args", "quant_spec", "validate_quant"]

@@ -59,7 +59,11 @@ def test_refusals(calibration, capsys, monkeypatch, tmp_path):
              "--quant-calibration needs --quant", capsys)
     _refused(argparse.Namespace(**{**base, "backend": "trainium"}), "neuron backend", capsys)
     _refused(argparse.Namespace(**{**base, "backend": None}), "neuron backend", capsys)
-    _refused(argparse.Namespace(**{**base, "model_id": FLUX}), "not available for", capsys)
+    _refused(argparse.Namespace(**{**base, "model_id": "Wan-AI/Wan2.2-T2V-A14B-Diffusers"}),
+             "not available for", capsys)
+    _refused(argparse.Namespace(**{**base, "model_id": FLUX}), "no calibration tool", capsys)
+    Q.validate_quant(argparse.Namespace(**{**base, "model_id": FLUX, "quant": "mxfp8",
+                                           "quant_calibration": None}))  # FLUX: mxfp8
     _refused(argparse.Namespace(**{**base, "exec_mode": "eager"}), "compile", capsys)
     _refused(argparse.Namespace(**{**base, "quant_calibration": None}), "--quant-calibration PATH",
              capsys)

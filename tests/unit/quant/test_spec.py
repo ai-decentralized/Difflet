@@ -112,3 +112,42 @@ def test_weights_identity_ignores_the_compute_path():
     b = default_spec("qwen_image", compute="dequant")
     assert a.weights_identity() == b.weights_identity()
     assert a.cache_fields() != b.cache_fields()
+
+
+@pytest.mark.parametrize("name", [
+    "transformer_blocks.0.attn.to_q",
+    "transformer_blocks.18.attn.add_v_proj",
+    "transformer_blocks.3.ff.net.0.proj",
+    "transformer_blocks.3.ff_context.net.2",
+    "single_transformer_blocks.37.attn.to_k",
+    "single_transformer_blocks.0.proj_mlp",
+])
+def test_flux_targets_match_the_block_projections(name):
+    assert default_spec("flux", format="mxfp8").matches(name)
+
+
+@pytest.mark.parametrize("name", [
+    "transformer_blocks.0.attn.to_out.0",
+    "transformer_blocks.0.attn.to_add_out",
+    "single_transformer_blocks.0.proj_out",
+    "single_transformer_blocks.0.proj_out_attn",
+    "single_transformer_blocks.0.proj_out_mlp",
+    "transformer_blocks.0.norm1.linear",
+    "transformer_blocks.0.norm1_context.linear",
+    "single_transformer_blocks.0.norm.linear",
+    "time_text_embed.timestep_embedder.linear_1",
+    "context_embedder",
+    "x_embedder",
+    "norm_out.linear",
+    "proj_out",
+])
+def test_flux_targets_keep_outputs_conditioning_and_io_in_bf16(name):
+    import re
+
+    from difflet.quant.targets import FLUX_KEPT_BF16
+
+    spec = default_spec("flux", format="mxfp8", tp_degree=4)
+    assert not spec.matches(name)
+    assert any(re.fullmatch(p, name) for p in FLUX_KEPT_BF16), name
+    assert spec.k_shards("transformer_blocks.0.ff.net.2") == 4
+    assert spec.k_shards("transformer_blocks.0.ff.net.0.proj") == 1
