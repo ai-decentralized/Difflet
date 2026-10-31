@@ -378,12 +378,15 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
             # graph's inputs or structure change, so the change compiles into a fresh dir.
             # compiler_args: the effective args (env override or default) are keyed, so changing
             # either compiles fresh; that also invalidates v2 artifacts built with the ccop
-            # overlap option, hence no _AOT_DIT_GRAPH_VERSION bump.
+            # overlap option, hence no _AOT_DIT_GRAPH_VERSION bump. The default depends on the
+            # image-token count N (16x spatial / 4x temporal VAE, patch size 1).
             from difflet.backends.trainium.hunyuan_video.backbone15 import (
                 _AOT_DIT_GRAPH_VERSION, hv15_dit_compiler_args)
 
+            image_tokens = (((shape["num_frames"] - 1) // 4 + 1) * (shape["height"] // 16)
+                            * (shape["width"] // 16))
             return {"component": "hunyuan_video_15_aot_dit", "graph_version": _AOT_DIT_GRAPH_VERSION,
-                    "compiler_args": hv15_dit_compiler_args(),
+                    "compiler_args": hv15_dit_compiler_args(image_tokens),
                     "model": _HF_MODEL_ID,
                     "revision": getattr(args, "revision", None), "tp": int(args.tp_degree or 1),
                     "cp": int(args.cp_degree or 1), "cp_mode": _aot_cp_mode(args),

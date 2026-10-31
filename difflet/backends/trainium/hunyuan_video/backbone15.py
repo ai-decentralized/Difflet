@@ -555,7 +555,7 @@ class NeuronHunyuanVideo15BackboneApplication(NeuronApplicationBase):
 
     def get_compiler_args(self) -> str:
         os.environ["LOCAL_WORLD_SIZE"] = str(self.config.neuron_config.world_size)
-        return hv15_dit_compiler_args()
+        return hv15_dit_compiler_args(self.config.num_image_tokens)
 
     @staticmethod
     def convert_hf_to_neuron_state_dict(state_dict: dict, config: InferenceConfig) -> dict:
@@ -755,20 +755,35 @@ def _hv15_static_reorder_forward(
 # ``_aot_stage_cache_inputs``), so a changed graph compiles into a fresh dir instead of
 # loading a stale artifact. Bump it whenever the traced DiT graph's inputs or structure
 # change. 2: ``text_valid`` became graph input #10 (no in-graph mask count, NCC_IRPX901).
-# NCC_IRPX901 (RelaxPredicates) on the text-stream LayerNorm at 480x848x121 when compiled with
-# --tensorizer-options='--enable-ccop-compute-overlap'; without it the DiT compiles and runs.
-_HV15_DIT_DEFAULT_COMPILER_ARGS = (
+# --enable-ccop-compute-overlap speeds the DiT up on short sequences but trips NCC_IRPX901
+# (RelaxPredicates, text-stream LayerNorm) on long ones. Measured (tp2cfg): with it, 320x512x61
+# (N = 16*20*32 = 10240) runs at ~1602 ms/step vs 1816.5 ms without (13.4% slower); with it,
+# 480x848x121 (N = 31*30*53 = 49290) fails to compile, without it it works. So keep it up to
+# this image-token count N (latent_frames * latent_height * latent_width, patch size 1).
+_HV15_CCOP_OVERLAP_MAX_IMAGE_TOKENS = 16384
+_HV15_DIT_BASE_COMPILER_ARGS = (
     "--model-type=transformer -O1 "
     "--auto-cast=none "
     "--internal-hlo2tensorizer-options='--verify-hlo=true'"
 )
+_HV15_CCOP_OVERLAP_ARGS = "--tensorizer-options='--enable-ccop-compute-overlap'"
 
 
-def hv15_dit_compiler_args() -> str:
-    """The effective DiT compiler args: the env override if set, else the default."""
-    return os.environ.get("DIFFLET_HUNYUAN15_COMPILER_ARGS") or _HV15_DIT_DEFAULT_COMPILER_ARGS
+def hv15_dit_compiler_args(num_image_tokens: int) -> str:
+    """The effective DiT compiler args for an image-token count N: the env override if set
+    (verbatim), else the defaults, with the ccop overlap option only for N <= the threshold."""
+    override = os.environ.get("DIFFLET_HUNYUAN15_COMPILER_ARGS")
+    if override:
+        return override
+    if int(num_image_tokens) <= _HV15_CCOP_OVERLAP_MAX_IMAGE_TOKENS:
+        return f"{_HV15_DIT_BASE_COMPILER_ARGS} {_HV15_CCOP_OVERLAP_ARGS}"
+    return _HV15_DIT_BASE_COMPILER_ARGS
 
 
+# The traced DiT graph's version, part of the AOT stage cache key (the orchestrator's
+# ``_aot_stage_cache_inputs``), so a changed graph compiles into a fresh dir instead of
+# loading a stale artifact. Bump it whenever the traced DiT graph's inputs or structure
+# change. 2: ``text_valid`` became graph input #10 (no in-graph mask count, NCC_IRPX901).
 _AOT_DIT_GRAPH_VERSION = 2
 
 

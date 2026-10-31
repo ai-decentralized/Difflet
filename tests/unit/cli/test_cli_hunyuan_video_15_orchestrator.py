@@ -317,6 +317,15 @@ def test_aot_stage_cache_key_has_graph_version(tmp_path, monkeypatch):
     assert orch._aot_compiled_dir(args, "vae") == vae
 
 
+def test_aot_stage_cache_key_compiler_args_follow_image_tokens(tmp_path, monkeypatch):
+    monkeypatch.delenv("DIFFLET_HUNYUAN15_COMPILER_ARGS", raising=False)
+    orch = hv15.HunyuanVideo15Orchestrator(_stage_args(tmp_path))
+    short = orch._aot_stage_cache_inputs(_stage_args(tmp_path, height=512, width=320, num_frames=61), "transformer")
+    long = orch._aot_stage_cache_inputs(_stage_args(tmp_path, height=480, width=848, num_frames=121), "transformer")
+    assert "enable-ccop-compute-overlap" in short["compiler_args"]
+    assert "enable-ccop-compute-overlap" not in long["compiler_args"]
+
+
 # ------------------------------------------------- the aot_transformer stage (application stubbed)
 
 
