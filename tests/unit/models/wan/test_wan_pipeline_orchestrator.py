@@ -500,3 +500,82 @@ def test_online_delta_mode_builds_probe_free_controller(tmp_path):
     )
     assert pipeline._teacache_controller.needs_signal() is False
     assert pipeline._teacache_controller.calibration.online_delta_alpha == pytest.approx(0.6)
+
+
+# ------------------------------------------------- Wan 2.2 dual expert: the boundary, the evidence
+
+# Wan-AI/Wan2.2-T2V-A14B-Diffusers scheduler/scheduler_config.json (flow_shift 3.0), whose
+# timesteps decide which expert runs each step.
+_WAN22_SCHEDULER = {
+    "_class_name": "UniPCMultistepScheduler", "beta_end": 0.02, "beta_schedule": "linear",
+    "beta_start": 0.0001, "disable_corrector": [], "dynamic_thresholding_ratio": 0.995,
+    "final_sigmas_type": "zero", "flow_shift": 3.0, "lower_order_final": True,
+    "num_train_timesteps": 1000, "predict_x0": True, "prediction_type": "flow_prediction",
+    "rescale_betas_zero_snr": False, "sample_max_value": 1.0, "solver_order": 2,
+    "solver_p": None, "solver_type": "bh2", "steps_offset": 0, "thresholding": False,
+    "time_shift_type": "exponential", "timestep_spacing": "linspace", "trained_betas": None,
+    "use_beta_sigmas": False, "use_dynamic_shifting": False, "use_exponential_sigmas": False,
+    "use_flow_sigmas": True, "use_karras_sigmas": False,
+}
+
+
+def _wan22_model_path(tmp_path):
+    import json
+
+    (tmp_path / "scheduler").mkdir()
+    (tmp_path / "scheduler" / "scheduler_config.json").write_text(json.dumps(_WAN22_SCHEDULER))
+    (tmp_path / "model_index.json").write_text(json.dumps({"boundary_ratio": 0.875}))
+    return str(tmp_path)
+
+
+_TINY = dict(latents=torch.zeros((1, 16, 3, 4, 4)), height=32, width=32, num_frames=9)
+
+
+def _run_dual(tmp_path, *, steps, guidance_scale, guidance_scale_2=None):
+    high_noise, low_noise = FakeTransformer(), FakeTransformer()
+    pipeline = WanOrchestrator(model_path=_wan22_model_path(tmp_path), transformer=high_noise,
+                               transformer_2=low_noise, dtype=torch.float32)
+    pipeline(prompt_embeds=torch.ones((1, 5, 8)), negative_prompt_embeds=torch.zeros((1, 5, 8)),
+             num_inference_steps=steps, guidance_scale=guidance_scale,
+             guidance_scale_2=guidance_scale_2, **_TINY)
+    return pipeline, high_noise, low_noise
+
+
+def test_the_step_at_exactly_the_boundary_stays_on_the_high_noise_expert(tmp_path):
+    # At 40 steps the real schedule lands on 875.0 = boundary_ratio x 1000 exactly (step 12);
+    # diffusers and Wan2.2's generate.py keep t >= boundary on the high-noise expert.
+    pipeline, high_noise, low_noise = _run_dual(tmp_path, steps=40, guidance_scale=1.0)
+
+    assert high_noise.calls[-1]["timestep"].item() == pytest.approx(875.0)
+    assert pipeline.last_step_experts == ["transformer"] * 13 + ["transformer_2"] * 27
+    assert len(high_noise.calls) == 13 and len(low_noise.calls) == 27
+
+
+def test_expert_calls_count_every_forward_per_expert(tmp_path):
+    # True CFG on both experts: two forwards per step.
+    pipeline, _, _ = _run_dual(tmp_path, steps=40, guidance_scale=4.0, guidance_scale_2=3.0)
+    assert pipeline.expert_calls == {"transformer": 26, "transformer_2": 54}
+    assert len(pipeline.last_step_seconds) == 40
+
+    # Cumulative across requests; the per-request trace starts afresh.
+    pipeline(prompt_embeds=torch.ones((1, 5, 8)), negative_prompt_embeds=torch.zeros((1, 5, 8)),
+             num_inference_steps=2, guidance_scale=1.0, **_TINY)
+    assert pipeline.expert_calls == {"transformer": 27, "transformer_2": 55}
+    assert pipeline.last_step_experts == ["transformer", "transformer_2"]
+
+
+def test_a_single_expert_counts_every_step_on_the_high_noise_expert(tmp_path):
+    transformer = FakeTransformer()
+    pipeline = WanOrchestrator(model_path=_wan22_model_path(tmp_path), transformer=transformer,
+                               dtype=torch.float32)
+    pipeline(prompt_embeds=torch.ones((1, 5, 8)), num_inference_steps=4, guidance_scale=1.0,
+             **_TINY)
+    assert pipeline.expert_calls == {"transformer": 4}
+    assert pipeline.last_step_experts == ["transformer"] * 4
+
+
+def test_expert_summary_names_the_switch_step_and_the_calls(tmp_path):
+    pipeline, _, _ = _run_dual(tmp_path, steps=40, guidance_scale=4.0, guidance_scale_2=3.0)
+    assert pipeline.expert_summary().startswith(
+        "transformer steps 0..12, transformer_2 steps 13..39 (boundary timestep 875.0); "
+        "expert_calls {'transformer': 26, 'transformer_2': 54}; step median by expert ")

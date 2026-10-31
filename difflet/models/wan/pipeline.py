@@ -8,12 +8,15 @@ guidance, and VAE decode normalization around them.
 
 from __future__ import annotations
 
-import json
 import os
+import statistics
+import time
 from dataclasses import dataclass
 from typing import Any
 
 import torch
+
+from difflet.models.wan.experts import HIGH_NOISE, LOW_NOISE, read_boundary_ratio
 
 
 @dataclass
@@ -71,6 +74,12 @@ class WanOrchestrator:
         self._teacache_shadows: dict[int, Any] = {}
         self._teacache_probes = teacache_probes or {}
         self._teacache_last_model_id: int | None = None
+        # Evidence of which expert ran (Wan 2.2): DiT forwards per expert since construction,
+        # and the last request's expert and wall seconds per denoise step.
+        self.expert_calls: dict[str, int] = {}
+        self.last_step_experts: list[str] = []
+        self.last_step_seconds: list[float] = []
+        self._last_boundary_timestep: float | None = None
         # Probe-free TeaCache modes (fixed cadence / online-delta): host-side
         # skip decisions only — no CPU shadow, no calibration file, no NEFF
         # change. num_steps is synced to the request in _denoise.
@@ -359,8 +368,15 @@ class WanOrchestrator:
             ctrl.reset()
             self._teacache_last_model_id = None
 
+        self._last_boundary_timestep = boundary_timestep
+        self.last_step_experts = []
+        self.last_step_seconds = []
         for step_index, timestep in enumerate(timesteps):
+            step_started = time.perf_counter()
             current_model = self._select_transformer(timestep, boundary_timestep)
+            expert = LOW_NOISE if (self.transformer_2 is not None
+                                   and current_model is self.transformer_2) else HIGH_NOISE
+            self.last_step_experts.append(expert)
             scale = self._select_guidance_scale(timestep, boundary_timestep, guidance_scale, guidance_scale_2)
             model_dtype = _component_dtype(current_model, self.dtype)
             timestep_dtype = _component_timestep_dtype(current_model, model_dtype)
@@ -378,9 +394,11 @@ class WanOrchestrator:
                 out = _first_tensor(
                     current_model(batched_latents, batched_timestep, batched_embeds)
                 )
+                self._count_forwards(expert, 1)
                 uncond, cond = out[0:1], out[1:2]
                 noise_pred = uncond + scale * (cond - uncond)
                 latents = self._scheduler_step(noise_pred, timestep, latents, num_inference_steps)
+                self.last_step_seconds.append(time.perf_counter() - step_started)
                 continue
 
             timestep_batch = _batch_timestep(
@@ -429,6 +447,7 @@ class WanOrchestrator:
                         prompt_embeds.to(dtype=model_dtype),
                     )
                 )
+                self._count_forwards(expert, 2 if scale > 1.0 else 1)
                 if scale > 1.0:
                     if negative_prompt_embeds is None:
                         negative_prompt_embeds = self._negative_prompt_embeds(prompt_embeds)
@@ -444,11 +463,35 @@ class WanOrchestrator:
                     ctrl.record_full_step(noise_pred, mod_input=mod_input)
 
             latents = self._scheduler_step(noise_pred, timestep, latents, num_inference_steps)
+            self.last_step_seconds.append(time.perf_counter() - step_started)
 
         if ctrl is not None:
             self._teacache_last_stats = ctrl.stats()
             print(f"[teacache] stats: {self._teacache_last_stats}", flush=True)
         return latents
+
+    def _count_forwards(self, expert: str, forwards: int) -> None:
+        self.expert_calls[expert] = self.expert_calls.get(expert, 0) + forwards
+
+    def expert_summary(self) -> str:
+        """One line on the last request: each expert's step range, the boundary timestep, the
+        cumulative ``expert_calls`` and each expert's median step seconds (step 0 excluded: it
+        carries the first-call cost)."""
+        ranges = []
+        for expert in dict.fromkeys(self.last_step_experts):
+            steps = [i for i, name in enumerate(self.last_step_experts) if name == expert]
+            ranges.append(f"{expert} steps {steps[0]}..{steps[-1]}")
+        boundary = ("no boundary" if self._last_boundary_timestep is None
+                    else f"boundary timestep {self._last_boundary_timestep:.1f}")
+        medians = {}
+        for expert in dict.fromkeys(self.last_step_experts):
+            seconds = [s for i, (name, s) in enumerate(zip(self.last_step_experts,
+                                                           self.last_step_seconds))
+                       if name == expert and i > 0]
+            if seconds:
+                medians[expert] = round(statistics.median(seconds), 3)
+        return (f"{', '.join(ranges)} ({boundary}); expert_calls {self.expert_calls}; "
+                f"step median by expert {medians}")
 
     def _select_transformer(self, timestep: torch.Tensor, boundary_timestep: float | None):
         if (
@@ -535,13 +578,7 @@ def _load_scheduler(model_path: str):
 
 
 def _read_boundary_ratio(model_path: str) -> float | None:
-    index_path = os.path.join(model_path, "model_index.json")
-    if not os.path.exists(index_path):
-        return None
-    with open(index_path, "r", encoding="utf-8") as handle:
-        data = json.load(handle)
-    value = data.get("boundary_ratio")
-    return None if value is None else float(value)
+    return read_boundary_ratio(model_path)
 
 
 def _first_tensor(value: Any) -> torch.Tensor:
