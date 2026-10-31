@@ -52,14 +52,18 @@ def lpips_distance(ref: np.ndarray, cand: np.ndarray) -> float | None:
         return float(net(t(ref), t(cand)).item())
 
 
-def compare(ref_latents: Path, cand_latents: Path, ref_image: Path | None,
+def compare(ref_latents: Path | None, cand_latents: Path | None, ref_image: Path | None,
             cand_image: Path | None) -> dict:
+    """Latent metrics when both latent files are given, image metrics when both images are
+    (a run that decodes in process, FLUX at tp4, saves no latents)."""
     qvr = _qvr()
-    out: dict = {"ref_latents": str(ref_latents), "cand_latents": str(cand_latents)}
-    ref = torch.load(ref_latents, map_location="cpu", weights_only=True)
-    cand = torch.load(cand_latents, map_location="cpu", weights_only=True)
-    out["latents"] = qvr.latent_metrics(ref, cand)
-    out["latents"]["bit_identical"] = bool(torch.equal(ref, cand))
+    out: dict = {}
+    if ref_latents and cand_latents:
+        out.update(ref_latents=str(ref_latents), cand_latents=str(cand_latents))
+        ref = torch.load(ref_latents, map_location="cpu", weights_only=True)
+        cand = torch.load(cand_latents, map_location="cpu", weights_only=True)
+        out["latents"] = qvr.latent_metrics(ref, cand)
+        out["latents"]["bit_identical"] = bool(torch.equal(ref, cand))
     if ref_image and cand_image:
         a, b = _image(Path(ref_image)), _image(Path(cand_image))
         frames = qvr.frame_metrics(a[None], b[None])
@@ -71,12 +75,14 @@ def compare(ref_latents: Path, cand_latents: Path, ref_image: Path | None,
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("--ref-latents", type=Path, required=True)
-    p.add_argument("--cand-latents", type=Path, required=True)
+    p.add_argument("--ref-latents", type=Path, default=None)
+    p.add_argument("--cand-latents", type=Path, default=None)
     p.add_argument("--ref-image", type=Path, default=None)
     p.add_argument("--cand-image", type=Path, default=None)
     p.add_argument("--out", type=Path, default=None)
     args = p.parse_args()
+    if not ((args.ref_latents and args.cand_latents) or (args.ref_image and args.cand_image)):
+        p.error("give both latent files, both images, or both pairs")
     result = compare(args.ref_latents, args.cand_latents, args.ref_image, args.cand_image)
     text = json.dumps(result, indent=1)
     if args.out:
