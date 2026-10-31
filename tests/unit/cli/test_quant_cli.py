@@ -143,3 +143,19 @@ def test_application_kwargs_carry_the_spec(calibration, monkeypatch):
     assert kwargs["quant"]["format"] == "fp8" and kwargs["quant"]["compute"] == "nki"
     assert kwargs["quant_calibration"] == calibration
     assert "quant" not in _torchrun_application_kwargs(_parse("generate", "--model-id", QWEN))
+
+
+def test_mxfp8_needs_no_calibration_and_keys_its_tp(monkeypatch):
+    monkeypatch.delenv("DIFFLET_EXEC_MODE", raising=False)
+    monkeypatch.delenv("UNSAFE_FP8FNCAST", raising=False)
+    args = _parse("generate", "--model-id", QWEN, "--backend", "neuron", "--quant", "mxfp8",
+                  "--tp-degree", "2")
+    Q.validate_quant(args)
+    spec = Q.quant_spec(args)
+    assert spec.format == "mxfp8" and spec.is_mx and spec.calibration_sha256 is None
+    assert spec.tp_degree == 2 and spec.k_shards("transformer_blocks.0.attn.to_out.0") == 2
+    assert Q.quant_cli_args(args) == ["--quant", "mxfp8"]
+    from difflet.cli.orchestrators.qwen_image import _torchrun_application_kwargs
+
+    kwargs = _torchrun_application_kwargs(args)
+    assert kwargs["quant"]["format"] == "mxfp8" and kwargs["quant_calibration"] is None
