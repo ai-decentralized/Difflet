@@ -837,3 +837,21 @@ generate` without any override; the artifact is already compiled.
   what Phases 1-2 measured. The override env var is not in the AOT cache key either.
   Evidence: `E/phase3-retry/tp2cfg/` (`compile.log`, `gen50.log`, `*.meta.json`,
   `gen50.mp4`, `gen50_mid.png`, `cmp_gen50__vs__p3-native-tp2cfg.json`, `sha256.txt`).
+
+### Phase 1 re-gate on the new graph (320x512x61, seed 42, default compiler flags)
+
+**Method (ruling R16).**
+- Each layout is compiled fresh with `difflet compile`. The new `graph_version` gives every
+  layout a new artifact dir, and the default hv15 compiler flags apply, overlap included.
+- The compiled DiT is then run through `scripts/hv15_aot_denoise_from_inputs.py` on the
+  **native run's `embeds.pt` and native noise** (`native_noise.pt`, the same inputs as Phase 1's
+  aot-tp2 native comparison), for 1 step and for 3 steps.
+- **Gate 1:** at 1 step, cosine ≥ 0.999 against native TP2xCFG2's 1-step latents.
+- **Gate 2:** at 3 steps, distance (1 − cosine) to diffusers' CPU bf16 3-step reference
+  ≤ 1.15x native's own distance. Native's distance is 1 − 0.983536 = 0.016464, so the bound is
+  0.018934, i.e. cosine ≥ 0.981066.
+- In Phase 1 only aot-tp2 was compared with native. Here every layout is.
+
+| cell (new artifact) | compile s (DiT / wall) | 1 step vs native: cos / rel-L1 / max-abs | 1 step vs diffusers cos | 3 steps vs diffusers: cos (distance ratio vs native) | 3 steps vs native cos | NaN/Inf | gate | evidence |
+|---|---|---|---|---|---|---|---|---|
+| tp2 (`78b5bd73…`) | 516.0 / 530.1 (HLO 103.3) | **0.999160** / 0.0434 / 0.56 | 0.999609 | **0.985041** (0.91x) | 0.982189 | none | **PASS** | `E/phase1-regate/tp2/` |
