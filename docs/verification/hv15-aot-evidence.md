@@ -429,3 +429,43 @@ Same as HV1.0: the registry keeps ring for the native backend, and only the AOT 
 The generate path's message points at `difflet compile`, which then names the real reason in
 seconds; a pre-encode ring check in `_run_aot` would say it directly (the Task 8 review's
 deferred minor). Evidence: `E/phase1/ring/`.
+
+### Phase 0-1 summary
+
+| cell | outcome | compile (DiT) | generate wall (3 steps) | step median | peak HBM / core | 1 step vs ref (cos / rel-L1 / max-abs) | 3 steps vs ref (cos) |
+|---|---|---|---|---|---|---|---|
+| native TP2xCFG2 (reference) | PASS | 923.8 s wall (full compile) | 235.9 s | 1325 ms (50 steps) | 9.92 | ref | ref |
+| aot-tp2 | **PASS** (per forward); latents only | 566.8 s (462.2 s post-fix) | 154.4 s | 2719 ms | 10.25 (2 cores) | vs native 0.999160 / 0.0434 / 0.56 | vs native 0.982189 (floor: native vs diffusers 0.983536) |
+| aot-tp2cfg | **PASS** (per forward) after bug 2 | 619.5 s | 279.3 s | 1593 ms | 9.69 | vs aot-tp2 0.999820 / 0.0207 / 0.34 | 0.986882 |
+| aot-tp4 | **PASS** (per forward) | 572.3 s | 78.7 s | 1749 ms | 5.75 | vs aot-tp2 0.999720 / 0.0262 / 0.38 | 0.985482 |
+| aot-tp4sp | **PASS** (per forward) | 327.3 s | 196.2 s | 1618 ms | 5.25 | vs aot-tp4 0.999701 / 0.0274 / 0.38 | 0.983685 |
+| aot-tp2cfgsp (extra) | **PASS** (per forward) | 639.5 s | 165.6 s | 1469 ms | 9.78 | vs aot-tp2cfg 0.999717 / 0.0265 / 0.41 | 0.983093 |
+| aot-tp2cp2-ulysses | **PASS** (per forward) | 615.9 s | 315.2 s | 1834 ms | 8.74 | vs aot-tp2 0.999727 / 0.0260 / 0.38 | 0.985001 |
+| aot-tp2cp2-gather_kv | **PASS** (per forward) | 332.8 s | 62.5 s | 1899 ms | 8.94 | vs aot-tp2 0.999730 / 0.0260 / 0.37 | 0.987910 |
+| ring | **N/A (mask)**, rejected in 6.7 s | — | — | — | — | — | — |
+| aot-vae | **BLOCKED** (vae15 does not compile on neuronx-cc 2.26) | — | — | — | — | — | — |
+
+- Generate wall times include the host encode (8-126 s depending on page cache) and the
+  aot_vae stage's immediate exit; every AOT generate exits 1 because no VAE artifact exists.
+  The step median is from the `[hv15] request 0: denoise …` line (`636edaf` added it).
+- No AOT latents file in Phase 1 contains NaN or Inf.
+- Not measured here: the decoded-frame (PSNR) distance to diffusers at 9 frames. It needs a
+  device VAE; the latents-level comparison with diffusers' CPU pipeline at 61 frames stands in
+  for it (AOT is closer to diffusers than native is, at 1 and 3 steps).
+
+**Device checks from code review.**
+1. SP + CFG uses TP-local ranks: **PASS** (aot-tp2cfgsp, 1 step 0.999717 vs TP2 x CFG2).
+2. int64 `text_order` and masks scattered under CFG: **PASS** (aot-tp2cfg, 1 step 0.999820 vs
+   serial CFG; every input goes through the cfg scatter).
+3. TP > 1 numerics: **PASS** (TP2, TP4, CFG, SP and CP layouts agree per forward at
+   0.99970-0.99982; TP2 vs diffusers CPU 0.999609).
+
+**Bug ledger (Phase 0-1).**
+- `1bfe577` fix(cli/runner): partial multi-core AoT stages exported `NEURON_RT_NUM_CORES=<n>`,
+  which NRT 2.35 refuses unless it is 1 or the whole device; such stages now name their cores
+  with `NEURON_RT_VISIBLE_CORES`.
+- `fd2a8aa` fix(trainium/hv15): the trace forward took a Python bool of
+  `torch.all(image_embeds == 0)`, which segfaults the CFG-parallel trace; the t2v switch is now
+  in-graph (full `max()`; a dimless `amax()` traced to no reduction).
+- Open, not fixed (needs a design decision): vae15 does not compile (aot-vae).
+- Tooling: `636edaf` (AOT step-median log line), `fe4c51c` (comparison and reference scripts).
