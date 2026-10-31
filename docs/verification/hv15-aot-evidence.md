@@ -501,6 +501,7 @@ the `aot_vae` stage. *RSS*: peak host RSS of the `aot_transformer` / `aot_vae` s
 | tp4 (`--tp-degree 4`) | **PASS** | 5.8 (572.3) | 687.0 | 144.8 | 87.7 / 1731 | 5.76 x4 | 422.7 | 19.3 / 18.4 | 0.968992 (no NaN/Inf) | `E/phase2/tp4/` |
 | tp4sp (`--tp-degree 4 --sp`) | **PASS** | 6.1 (327.3) | 544.8 | 22.1 (warm) | 81.2 / 1601 | 5.25 x4 | 409.4 | 21.0 / 18.5 | 0.955830 (no NaN/Inf) | `E/phase2/tp4sp/` |
 | tp2cp2-ulysses (`--tp-degree 2 --cp-degree 2 --cp-mode ulysses`) | **PASS** | 6.6 (615.9) | 1235.9 | 697.0 (cold) | 90.5 / 1783 | 8.69 x4 | 417.5 | 35.9 / 19.4 | 0.963593 (no NaN/Inf) | `E/phase2/tp2cp2-ulysses/` |
+| tp2cp2-gather_kv (`--tp-degree 2 --cp-degree 2 --cp-mode gather_kv`) | **PASS** | 6.9 (332.8) | 606.8 | 67.2 (warm) | 94.1 / 1858 | 8.89 x4 | 414.1 | 35.9 / 17.2 | 0.955108 (no NaN/Inf) | `E/phase2/tp2cp2-gather_kv/` |
 
 **tp2cfg.** Encode 9.0 s. Mid frame: a red fox running left to right across snow, snowy
 pines behind (`gen50_mid.png`); 61 frames, minimum per-frame std 67.3, mean frame-to-frame
@@ -534,3 +535,10 @@ this artifact's shards are 32 GB on disk and (inference, not measured) were no l
 page cache after the three cells before it, so the 1235.9 s generate wall is a cold-read figure.
 The step (1783 ms) is 13% slower than tp2cfg's on the same four cores: CP2 pays two
 all-to-alls per attention, CFG-parallel none.
+
+**tp2cp2-gather_kv.** Encode 9.9 s. Mid frame: the same fox and snow scene
+(`gen50_mid.png`); minimum per-frame std 68.7, mean frame-to-frame difference 41.6. Cosine 0.955
+vs tp2cfg (informational). Step 1858 ms, 4% slower than ulysses (1783 ms): every CP rank gathers
+the full K/V. Its weight shards are hardlinks of the ulysses artifact's (same inode, link count
+3: `tp0_sharded_checkpoint.safetensors`, 8.5 GB), which the ulysses cell had just read, so its
+67.2 s load is a warm-page-cache figure.
