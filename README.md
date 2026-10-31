@@ -163,6 +163,15 @@ Measured timings against stock diffusers, and the full pass/limit matrix, are in
 | LTX-2 | ✅ video | ❌ | ✅ | ✅ | ✅ video | ✅ |
 | MiniMax-H3 | ✅ video + stereo audio | ❌ | ❌ | ❌ | ❌ | ❌ |
 
+**FP8 on Trainium3** (PyTorch-native `neuron` backend, `--quant mxfp8`): Qwen-Image's DiT
+runs its attention and MLP linears in OCP MXFP8 through nkilib's `matmul_mxfp8` NKI kernel,
+no calibration needed. Measured on trn3.48xlarge at tp4, 1024×1024: DiT step 267 ms against
+299 ms in bf16 (0.89×), PSNR 29.2 dB / SSIM 0.973 / LPIPS 0.04 against the bf16 image, half
+the DiT weight bytes. Refused on the AoT `trainium` backend, on trn2 and for other models;
+see [docs/cli-staged-commands.md](docs/cli-staged-commands.md#qwen-image-in-fp8-pytorch-native-neuron-backend-trainium3-only)
+and the evidence in
+[docs/verification/2026-10-31-qwen-image-fp8-native-trn3.md](docs/verification/2026-10-31-qwen-image-fp8-native-trn3.md).
+
 **Notes**
 
 7. Guidance-distilled model (single forward pass with the guidance scale baked into the timestep embedding) — there is no second CFG branch to split.
