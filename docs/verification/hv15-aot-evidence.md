@@ -676,3 +676,22 @@ the backend's time on 51k-token bounded attention is unknown: spike (c) ran a si
 for more than 45 min without finishing. Evidence: `E/phase3/tp2cfg/compile.log`,
 `ncc226_O1_log_tail.log`, `ncc226_O2_log_tail.log`, `ncc228_O1_log_tail.log`,
 `ncc_command.log`.
+
+#### Native TP2 x CFG2 at 480x848x121, same host (reference): PASS
+
+Native backend, `/home/ubuntu/venvs/native-312` (torch 2.14, neuronx-cc 2.28), same wrapper and
+flags as Phase 0, `--height 480 --width 848 --num-frames 121 --steps 50 --tp-degree 2
+--cfg-parallel`, run on this host right after the AOT attempt.
+
+| step | wall | stage timings (from the log) | HBM GiB/core | host RSS peak | evidence |
+|---|---|---|---|---|---|
+| `compile` (cold) | **2807.1 s** | transformer load 1732.5 s (load checkpoint 126.6 s, warmup forward 1591.4 s); vae load 37.5 s | 18.77 x4 | 78.3 GiB (4 transformer ranks) | `E/phase3/native-tp2cfg/compile.log` |
+| `generate --steps 50` | **960.7 s** | encode 8.4 s; transformer load 43.6 s; denoise 754.9 s, **median 11178 ms** (first 195214 ms); device decode 89.0 s | 18.48-18.52 | 70.9 GiB (transformer ranks) | `gen50.log`, `gen50.mp4`, `gen50_mid.png` |
+
+The 121-frame video's mid frame shows a red fox leaping through deep snow among snow-laden pines
+(`gen50_mid.png`); minimum per-frame std 63.1, mean frame-to-frame difference 25.3. The
+documented native figures (`neuron-backend-results.md`, other run: compile 2837 s, warm e2e
+934.7 s, 12625 ms per step) agree within 1% for the compile and 3% for the e2e; the step
+median here is 11% lower. The first step (195.2 s) carries per-process one-time work that the
+compile run's warmup forward already did once (inference: the bounded kernel's first launch in
+this process). The AOT backend has no 480x848x121 DiT to compare against (above).
