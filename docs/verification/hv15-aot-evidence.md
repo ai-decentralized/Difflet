@@ -469,3 +469,40 @@ deferred minor). Evidence: `E/phase1/ring/`.
   in-graph (full `max()`; a dimless `amax()` traced to no reduction).
 - Open, not fixed (needs a design decision): vae15 does not compile (aot-vae).
 - Tooling: `636edaf` (AOT step-median log line), `fe4c51c` (comparison and reference scripts).
+
+## Campaign (Task 10), Phase 2 and Phase 3: 2026-10-31
+
+HEAD at start `b9d9301`. Since Phase 1, `b7b939b` made the AOT `aot_vae` stage decode on the
+host by default (diffusers' `AutoencoderKLHunyuanVideo15`, fp32, tiled), so every AOT generate
+now writes an MP4; `difflet compile` no longer compiles a VAE. The DiT graph is unchanged since
+`fd2a8aa`, so `difflet compile` reuses the Phase 1 DiT artifacts (a manifest hit in under 7 s;
+the Phase 1 compile time is quoted next to it). Same runner, wrapper, venvs and common flags as
+Phase 0-1, plus `--steps 50`. The cell runner now also samples host RSS every 2 s per stage
+process (`host_rss_peak_gib` in each `meta.json`). Cells were driven with direct CLI commands
+(not `run_cells.sh`/`verify_cli.py`): the plan's prompt and `--cp-mode` are then explicit in
+every command, and the latents are kept for the cosine check.
+
+### Phase 2: parallelism matrix (50 steps, 320x512x61, seed 42)
+
+**Gate (ruling R16).** Correctness was gated in Phase 1; Phase 2 is a performance and
+functionality matrix. Each 50-step cell must exit 0 with no NaN/Inf in its latents and write
+an MP4 whose mid frame shows the prompt (a red fox running through snow). The latents cosine
+against the AOT tp2cfg 50-step run is reported for information only.
+
+**Columns.** *compile*: wall of `difflet compile` (a DiT manifest hit here). *generate*: the
+staged wall time of `difflet generate` (host encode + DiT load + denoise + host decode).
+*load*: `aot transformer load` (weights onto the cores). *step median*: from `[hv15] request 0:
+denoise …`. *HBM*: neuron-monitor per-core peak during generate. *decode*: `host decode` of
+the `aot_vae` stage. *RSS*: peak host RSS of the `aot_transformer` / `aot_vae` stage process.
+
+| cell | outcome | compile s (Phase 1 DiT compile) | generate s | load s | denoise s / step median ms | HBM GiB/core | host decode s | RSS GiB DiT / VAE | cos vs tp2cfg | evidence |
+|---|---|---|---|---|---|---|---|---|---|---|
+| tp2cfg (`--tp-degree 2 --cfg-parallel`) | **PASS** | 6.6 (619.5) | 802.8 | 273.6 | 79.8 / 1573 | 9.69 x4 | 417.0 | 37.4 / 18.5 | ref (no NaN/Inf) | `E/phase2/tp2cfg/` |
+
+**tp2cfg.** Encode 9.0 s. Mid frame: a red fox running left to right across snow, snowy
+pines behind (`gen50_mid.png`); 61 frames, minimum per-frame std 67.3, mean frame-to-frame
+difference 39.5 grey levels. Against the native TP2xCFG2 50-step latents (Phase 0) the cosine
+is 0.584: the two stacks start from different seed-42 noise and slightly different embeds
+(Phase 0), so this cross-stack number is not a parity measure. The native run's per-step median
+at this shape was 1325 ms (Phase 0); AOT tp2cfg is 1573 ms (1.19x). The host decode (417 s) is
+now the largest part of the generate wall; native decodes on a core in 31.4 s.
