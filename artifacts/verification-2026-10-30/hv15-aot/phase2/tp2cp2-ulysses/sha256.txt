@@ -1,0 +1,2 @@
+f7f934a00a4824237bb1f7edeabd8a4008135e42a008dbe795c51adaceba6e96  ./gen50.work/embeds.pt
+3b6b3b499167edc3ebb7b7457324d41ee22c36e68351e4f866db70cf03fc4c34  ./gen50.work/latents.pt
