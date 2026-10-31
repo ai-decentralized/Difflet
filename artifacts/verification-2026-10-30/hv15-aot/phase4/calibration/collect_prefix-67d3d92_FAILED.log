@@ -1,0 +1,47 @@
+date: 2026-10-31T19:36:14+0000
+cmd: bash /home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_py.sh scripts/calibrate_teacache.py --model hunyuan_video_15 --allow-hardware --foreground-ack I am running TeaCache T0 in the foreground --source-dir /home/ubuntu/.cache/huggingface/hub/models--hunyuanvideo-community--HunyuanVideo-1.5-Diffusers-480p_t2v/snapshots/286be7ce72277246578a3e3cc2487e95ddae5bcf --compiled-dir /home/ubuntu/.cache/difflet/hunyuan_video_15_aot_dit/9667b25006443bb5 --embeds /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p4-tp2cfg/gen50.work/embeds.pt --tp-degree 4 --num-inference-steps 50 --seed 42 --skip-warmup --target-speedup 1.5 --out /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p4-calib/calibration_hunyuan_video_15_320x512x61_50.json
+env: ['PYTHONPATH=/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan', 'NEURON_RT_VIRTUAL_CORE_SIZE=2', 'HF_HUB_OFFLINE=1']
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+INFO:Neuron:Loading presharded checkpoints for ranks: 0...3
+INFO:Neuron:Presharded file read: 5.39s for 4 shard(s) (16863.0 MB total)
+INFO:Neuron:Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+INFO:Neuron:Finished traced model weight initialization in 152.82s (device init 152.82s, total load_weights 158.21s)
+INFO:Neuron:Skipping model warmup
+INFO:Neuron:Loading presharded checkpoints for ranks: 0...3
+INFO:Neuron:Presharded file read: 0.18s for 4 shard(s) (16863.0 MB total)
+INFO:Neuron:Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+INFO:Neuron:Finished traced model weight initialization in 1.42s (device init 1.42s, total load_weights 1.60s)
+INFO:Neuron:Skipping model warmup
+Traceback (most recent call last):
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/scripts/calibrate_teacache.py", line 560, in <module>
+    raise SystemExit(main())
+                     ^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/scripts/calibrate_teacache.py", line 484, in main
+    pairs_out.write_text(json.dumps(_collect_hv15_pairs(args), indent=2, sort_keys=True) + "\n")
+                                    ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/scripts/calibrate_teacache.py", line 411, in _collect_hv15_pairs
+    samples = collect_hv15_samples(
+              ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/scripts/calibrate_teacache.py", line 344, in collect_hv15_samples
+    probe.reset()
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/models/hunyuan_video/aot15.py", line 34, in reset
+    self.app.teacache_probe.reset_state()
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/backends/trainium/hunyuan_video/teacache_probe15.py", line 224, in reset_state
+    for rank, states in enumerate(nxd.states):
+                                  ^^^^^^^^^^
+  File "/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/torch/jit/_script.py", line 823, in __getattr__
+    return super().__getattr__(attr)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/torch/jit/_script.py", line 536, in __getattr__
+    return super().__getattr__(attr)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/torch/nn/modules/module.py", line 1964, in __getattr__
+    raise AttributeError(
+AttributeError: 'RecursiveScriptModule' object has no attribute 'states'

@@ -1,0 +1,46 @@
+date: 2026-10-31T19:43:21+0000
+cmd: bash /home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_py.sh scripts/calibrate_teacache.py --model hunyuan_video_15 --allow-hardware --foreground-ack I am running TeaCache T0 in the foreground --source-dir /home/ubuntu/.cache/huggingface/hub/models--hunyuanvideo-community--HunyuanVideo-1.5-Diffusers-480p_t2v/snapshots/286be7ce72277246578a3e3cc2487e95ddae5bcf --compiled-dir /home/ubuntu/.cache/difflet/hunyuan_video_15_aot_dit/9667b25006443bb5 --embeds /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p4-tp2cfg/gen50.work/embeds.pt --tp-degree 4 --num-inference-steps 50 --seed 42 --skip-warmup --target-speedup 1.5 --out /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p4-calib/calibration_hunyuan_video_15_320x512x61_50.json
+env: ['PYTHONPATH=/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan', 'NEURON_RT_VIRTUAL_CORE_SIZE=2', 'HF_HUB_OFFLINE=1']
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+INFO:Neuron:Loading presharded checkpoints for ranks: 0...3
+INFO:Neuron:Presharded file read: 0.38s for 4 shard(s) (16863.0 MB total)
+INFO:Neuron:Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+INFO:Neuron:Finished traced model weight initialization in 26.46s (device init 26.46s, total load_weights 26.84s)
+INFO:Neuron:Skipping model warmup
+INFO:Neuron:Loading presharded checkpoints for ranks: 0...3
+INFO:Neuron:Presharded file read: 0.18s for 4 shard(s) (16863.0 MB total)
+INFO:Neuron:Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+INFO:Neuron:Finished traced model weight initialization in 1.42s (device init 1.42s, total load_weights 1.60s)
+INFO:Neuron:Skipping model warmup
+{
+  "accumulate": false,
+  "cadence": 0,
+  "cooldown_steps": 5,
+  "fit_r2": 0.40632438362288126,
+  "hardware_measured": true,
+  "mod_input_source": "block0_modulated_input",
+  "model": "hunyuan_video_15",
+  "n_samples": 49,
+  "num_steps": 50,
+  "online_delta_alpha": 0.0,
+  "poly_coef": [
+    0.4093019913610454,
+    -18.022681862699084,
+    292.7013435894034,
+    -1252.9223723760745
+  ],
+  "schema": "difflet-m9-teacache-calibration-v1",
+  "shape_label": "320x512x61",
+  "skip_run_length": 1,
+  "source_pairs_json": "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p4-calib/calibration_hunyuan_video_15_320x512x61_50.json.pairs.json",
+  "target_speedup": 1.5,
+  "threshold": 0.2218164378192247,
+  "warmup_steps": 5
+}

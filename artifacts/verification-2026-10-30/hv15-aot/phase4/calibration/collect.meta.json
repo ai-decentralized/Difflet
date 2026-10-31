@@ -1,0 +1,48 @@
+{
+  "name": "p4-calib/collect",
+  "backend": "trainium",
+  "cmd": [
+    "bash",
+    "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_py.sh",
+    "scripts/calibrate_teacache.py",
+    "--model",
+    "hunyuan_video_15",
+    "--allow-hardware",
+    "--foreground-ack",
+    "I am running TeaCache T0 in the foreground",
+    "--source-dir",
+    "/home/ubuntu/.cache/huggingface/hub/models--hunyuanvideo-community--HunyuanVideo-1.5-Diffusers-480p_t2v/snapshots/286be7ce72277246578a3e3cc2487e95ddae5bcf",
+    "--compiled-dir",
+    "/home/ubuntu/.cache/difflet/hunyuan_video_15_aot_dit/9667b25006443bb5",
+    "--embeds",
+    "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p4-tp2cfg/gen50.work/embeds.pt",
+    "--tp-degree",
+    "4",
+    "--num-inference-steps",
+    "50",
+    "--seed",
+    "42",
+    "--skip-warmup",
+    "--target-speedup",
+    "1.5",
+    "--out",
+    "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p4-calib/calibration_hunyuan_video_15_320x512x61_50.json"
+  ],
+  "env": [
+    "PYTHONPATH=/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan",
+    "NEURON_RT_VIRTUAL_CORE_SIZE=2",
+    "HF_HUB_OFFLINE=1"
+  ],
+  "rc": 0,
+  "wall_s": 142.2,
+  "nmon_peak_gib": {
+    "0": 9.9,
+    "1": 9.9,
+    "2": 9.9,
+    "3": 9.9
+  },
+  "host_rss_peak_gib": {
+    "_total": 20.35,
+    "other": 20.35
+  }
+}

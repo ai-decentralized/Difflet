@@ -1017,3 +1017,96 @@ R generate --model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v
 # A/B: scripts/hv15_aot_denoise_from_inputs.py --compiled-dir <dir> --embeds <gen50 embeds.pt> --tp-degree 2 --cfg-parallel \
 #   --height 320 --width 512 --num-frames 61 --steps 50 --seed 42 --out x.pt   (NEURON_RT_VIRTUAL_CORE_SIZE=2)
 ```
+
+### Phase 4c: adaptive TeaCache (calibration + `--teacache-speedup`)
+
+**Code under test moved during this cell (recorded so the artifact ids make sense).**
+- The calibration was collected on HEAD `67d3d92` (no-ccop default).
+- Before the adaptive generate, the controller landed `420d2fa` + `d001314` (R25: the ccop
+  overlap is kept for N ≤ 16384 image tokens, so 320x512x61 = 10240 tokens compiles **with** it
+  again). So the adaptive generate, the reset check and Phase 5 run on a fresh overlap artifact,
+  `69162f72…` (manifest `compiler_args` include `--enable-ccop-compute-overlap`).
+- Its no-TeaCache 50-step DiT output (`base`, `hv15_aot_denoise_from_inputs.py`, same `embeds.pt`
+  and seed) is **bit-identical** to the Phase 2 re-run's overlap tp2cfg latents (`p2r`). That
+  makes it the reference for this cell. Step median 1607 ms, the same as the R23 A/B's overlap
+  arm (1598-1606).
+
+**Bug found and fixed first: `67d3d92`.** The first collection attempt died before step 0 in
+`teacache_probe15.reset_state`:
+`AttributeError: 'RecursiveScriptModule' object has no attribute 'states'`
+(`E/phase4/calibration/collect_prefix-67d3d92_FAILED.log`). The CLI's adaptive path calls the same
+reset once per request, so **every adaptive hv15 AOT request failed**. Root cause, fix and device check
+are in the bug ledger below.
+
+**Calibration (Task 7b collector).** TP4 serial CFG (the collector runs `cfg=1`, TP only), so a
+TP4 DiT + probe was compiled first. It used `difflet compile --tp-degree 4 --teacache-speedup 1.5
+--teacache-calibration <the output path>`, which builds the probe with the DiT (344.5 s,
+`9667b250…`). The collection itself:
+```
+scripts/calibrate_teacache.py --model hunyuan_video_15 --allow-hardware --foreground-ack "I am running TeaCache T0 in the foreground" \
+  --source-dir <HF snapshot root> --compiled-dir <tp4 dir> --embeds <this section's AOT embeds.pt> --tp-degree 4 \
+  --num-inference-steps 50 --seed 42 --skip-warmup --target-speedup 1.5 --out calibration_hunyuan_video_15_320x512x61_50.json
+```
+- PASS, 142.2 s. The output's labels are model `hunyuan_video_15`, `shape_label 320x512x61`,
+  `num_steps 50`, `mod_input_source block0_modulated_input`, 49 samples (one prompt, seed 42).
+  The cubic fit has threshold 0.2218 at target 1.5x.
+- **Signal fit: weak, and the wrong sign.**
+  - Cubic **R² 0.406** (the collector evaluates on its training samples).
+  - Linear **Pearson −0.116** over all 49 steps (R² 0.013); −0.475 over the skip window,
+    steps 5-44 (R² 0.225).
+  - The probe's block-0 modulated-input rel-L1 rises monotonically, from 0.006 (step 1) to
+    0.108 (step 49).
+  - The guided noise_pred rel-L1 falls from 0.70 to about 0.12 by step 33, then rises again
+    to 0.46.
+  - The probe therefore does not track the quantity TeaCache needs, which is what the plan
+    expected for hv15. `E/phase4/calibration/pairs_stats.txt` has the per-step pairs.
+- **Context for 4a/4b:** the guided noise_pred changes by **12-70% per step** on hv15 (median
+  18%). Reusing the cached residual on a skipped step therefore costs more here than on HV1.0.
+  This is consistent with the 0.92-0.94 cosines in 4a/4b.
+
+**Adaptive generate** on `69162f72…`: `--teacache-speedup 1.5 --teacache-calibration <above>`,
+TP2xCFG2. The first adaptive use compiled the probe into the DiT's dir, as designed ("compiling the
+TeaCache probe into … the DiT artifact is reused").
+
+| run | `[teacache] stats` | denoise s (first step) | vs no-TeaCache | latents vs no-TeaCache (`base`) | mid frame | HBM GiB/core |
+|---|---|---|---|---|---|---|
+| no TeaCache (`base`, DiT only) | — | 82.1 (2.7) | ref | ref | (Phase 2 re-run video) | 9.69 |
+| `--teacache-speedup 1.5` (`adapt`) | `full_steps 32, skipped_steps 18, probe_calls 50, last_delta_estimate -0.984` | **51.2** (2.6) | **-38%** (with 50 probe calls) | **cos 0.910548**, rel-L1 0.478, max-abs 4.77, no NaN/Inf | same fox and scene, **visibly degraded**: higher contrast/saturation, smeared legs (min frame std 77.2 vs 68.4) | **17.59** |
+
+- **Outcome: LIMIT (weak signal).**
+  - The controller engages: 18 of 50 steps skipped, which matches the 1.5x target (32 full
+    steps).
+  - The skips come from a signal that does not predict output change, and the quality loss
+    is visible.
+  - `last_delta_estimate` is negative: the cubic's prediction at the runtime signal. A
+    negative predicted delta always skips. *Inference:* the runtime probe values fall where
+    the cubic, fitted on 49 points from one prompt, has no meaning.
+  - Recommendation: keep adaptive TeaCache off for hv15. Cadence 2 skips more (20), costs
+    less (cos 0.939) and needs no probe.
+- **Generate wall 575.2 s** (encode 8.4 s, probe compile + DiT load 69.3 s, denoise 51.2 s,
+  host decode 416.3 s).
+- **HBM: the probe costs a full second copy of the DiT weights on device.**
+  - Per core: 17.59 GiB with the probe vs 9.69 without, at TP2xCFG2. The reset check (load
+    only, no compile) shows the same 17.59.
+  - The calibration's TP4 run: 9.9 vs 5.76 GiB.
+  - The probe's `weights/tp*_sharded_checkpoint.safetensors` are hard links to the DiT's
+    shards (link count 7), so disk is shared, but NxD loads the whole shard for the probe
+    model.
+  - At the default shape the DiT alone already uses 23.58 GiB per core, so adaptive TeaCache
+    would need about 31.5 GiB of the 24 GiB per core and cannot fit there.
+  - Recorded as a follow-up: load only the probe's few block-0 weights, or share the device
+    weights between the DiT and the probe.
+- **Per-request reset: PASS.** `reset_check.py` builds one TP2xCFG2 adaptive denoiser, loads it
+  once, and runs two identical requests:
+  - Both print `full_steps 32, skipped_steps 18, probe_calls 50, last_delta_estimate -0.984`.
+  - Their latents are **bit-identical** (sha `5c02d1e1…`), and also bit-identical to the CLI
+    `adapt` run.
+  - So the controller and the probe's on-device `prev_mod` both reset per request.
+  - Before `67d3d92` this script failed in the same `reset_state`.
+- The CLI still refuses TeaCache flags with `--requests` ("per-request controller reset is a
+  follow-up"); the reset itself is verified above at the API level.
+
+Evidence: `E/phase4/calibration/` (calibration JSON, pairs JSON, `pairs_stats.txt`, logs),
+`E/phase4/tp4-probe-compile/`, `E/phase4/adaptive/` (`adapt.mp4`, `adapt_mid.png`, `base` and
+`reset` logs, comparisons), `E/phase4/probe-reset-device/`. Helper scripts in `E/phase4/`:
+`pairs_stats.py`, `reset_check.py`, `probe_reset_device.py`.

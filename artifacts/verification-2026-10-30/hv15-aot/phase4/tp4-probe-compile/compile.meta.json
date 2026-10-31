@@ -1,0 +1,35 @@
+{
+  "name": "p4-tp4/compile",
+  "backend": "trainium",
+  "cmd": [
+    "bash",
+    "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_difflet.sh",
+    "trainium",
+    "compile",
+    "--model-id",
+    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+    "--height",
+    "320",
+    "--width",
+    "512",
+    "--num-frames",
+    "61",
+    "--tp-degree",
+    "4",
+    "--teacache-speedup",
+    "1.5",
+    "--teacache-calibration",
+    "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p4-calib/calibration_hunyuan_video_15_320x512x61_50.json"
+  ],
+  "env": [
+    "HF_HUB_OFFLINE=1"
+  ],
+  "rc": 0,
+  "wall_s": 344.5,
+  "nmon_peak_gib": {},
+  "host_rss_peak_gib": {
+    "_total": 37.18,
+    "aot_transformer": 36.2,
+    "other": 6.7
+  }
+}
