@@ -727,3 +727,64 @@ volume. Evidence: `E/phase3/hostvae/`.
 | AOT host VAE decode at 480x848x121 | measured on native latents | 2518.7 s, 27.98 GiB peak RSS |
 | tp4 + SP at 480x848x121 | **PASS** (rejected before compile) | 6.4 s, `N % 4 = 2; use num_frames in [117, 125] … or tp_degree in [2]` |
 | native TP2xCFG2 at 480x848x121 (same host) | PASS | compile 2807.1 s, generate 960.7 s, step median 11178 ms, decode 89.0 s |
+
+## Campaign (Task 10), Phase 3 retry and re-gate on the 10-input DiT graph: 2026-10-31
+
+HEAD at start `93dde78`. Three commits since Phase 3 change the AOT DiT:
+- `1a9625b`: the valid-text count `text_valid` (int32 `[B]`) is computed on the host and passed
+  as DiT graph input #10. No mask reduction is left in the graph.
+- `a41ecc9`: the AOT stage cache key carries `graph_version` (now 2). `difflet compile`
+  therefore writes new artifact dirs; the Phase 1-2 dirs (9-input graph) are left in place and
+  are not reused.
+- `93dde78`: `_run_aot` checks the SP/CP shape rules before the encode stage.
+
+**Graph labels.** In this section, *old graph* means the 9-input graph with the in-graph
+count (Phases 1-3 above). *New graph* means the 10-input graph (`graph_version` 2). Every
+number in this section is from the new graph unless it is marked otherwise.
+
+Same runner, wrappers, venvs and common flags as Phases 2-3. Curated evidence:
+`E/phase3-retry/`, `E/phase1-regate/`, `E/phase2-regate/`.
+
+### Phase 3 retry: AOT TP2 x CFG2 at 480x848x121
+
+#### Attempt 1 (new graph, Difflet's default compiler flags): BLOCKED, NCC_IRPX901 again, on a different op
+
+`difflet compile --height 480 --width 848 --num-frames 121 --tp-degree 2 --cfg-parallel` exits
+1 after **1788.9 s** wall.
+
+| phase | time | observation |
+|---|---|---|
+| module load | ~38 s | |
+| HLO generation | **1707.1 s** (all HLOs 1745.1 s) | input example `[2, 65, 31, 30, 53]`; peak stage RSS 31.7 GiB (total 32.7 GiB) |
+| neuronx-cc 2.26.6360 (`--model-type=transformer -O1 --tensorizer-options=--enable-ccop-compute-overlap --auto-cast=none --internal-hlo2tensorizer-options=--verify-hlo=true`) | Tensorizer 27.5 s | fails in pass `RelaxPredicates` on subgraph sg0000, exit code 70 |
+
+```
+…/HunyuanVideo15Transformer3DModel[.1]/HunyuanVideo15TransformerBlock[.1]/AdaLayerNormZero[.2]/LayerNorm[.5]/aten.view.default/aten__native_batch_norm_batch-norm-training.575 [INTERNAL_ERROR] [NCC_IRPX901] RelaxPredicates assertion error: inst should be valid after relaxing predicates
+```
+
+**Which op.** In the decoded HLO module, `batch-norm-training.575` takes `gather.574`, a bf16
+`[1, 1985, 2048]` tensor, from `torch/nn/modules/normalization.py:229`. That is the text-stream
+LayerNorm (`norm1_context`) of the first block, applied to the output of the static
+`text_order` gather in `backbone15.py`. The old graph's failing op, the count reduce, also read
+the gathered text mask. With the count gone, the compiler trips on the next reduction over the
+gathered text stream. The op's shape is the same at 320x512x61, which compiles. So this is the
+same vendor compiler internal error, in the same pass, and it depends on the surrounding graph.
+It is not a new Difflet logic bug.
+
+**Compiler-flag probes** (CPU only: the saved HLO re-run through neuronx-cc 2.26.6360 until the
+Tensorizer finishes or fails, ~30 s each):
+
+| flags | sg0000 RelaxPredicates | result |
+|---|---|---|
+| Difflet's flags, without the `--verify-hlo` internal option (control) | assertion | **same NCC_IRPX901, same op** |
+| `--model-type=transformer -O1`, **no `--enable-ccop-compute-overlap`** | `Finished (changed=True)` | passes RelaxPredicates; still in BirCodeGenLoop when the probe stopped it |
+| `--model-type=generic -O1 --tensorizer-options=--enable-ccop-compute-overlap` | `Finished (changed=True)` | `Tensorizer finished after 28.9 s`, no error |
+
+So the assertion appears only with the transformer model type *and* compute/collective overlap
+on. Difflet's hv15 backbone already reads the compiler flags from the
+`DIFFLET_HUNYUAN15_COMPILER_ARGS` environment override (`backbone15.py`
+`NeuronHunyuanVideo15BackboneApplication.get_compiler_args`). Attempt 2 below uses that
+override with the overlap option removed, so no code changes. The override is not in the AOT
+cache key; at this shape there was no prior artifact, so nothing stale can be reused.
+Evidence: `E/phase3-retry/tp2cfg-attempt1/` (`compile.log`, `ncc_log_excerpt.log`,
+`ncc_command.log`, `probe-*_log_excerpt.log`).

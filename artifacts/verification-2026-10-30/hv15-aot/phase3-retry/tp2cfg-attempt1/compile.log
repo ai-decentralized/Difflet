@@ -1,0 +1,111 @@
+date: 2026-10-31T14:34:37+0000
+cmd: bash /home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_difflet.sh trainium compile --model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v --height 480 --width 848 --num-frames 121 --tp-degree 2 --cfg-parallel
+env: ['HF_HUB_OFFLINE=1', 'PYTHONFAULTHANDLER=1']
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+INFO:Neuron:Saving the neuron_config to /home/ubuntu/.cache/difflet/hunyuan_video_15_aot_dit/5161ab1fe7b07b80/transformer/
+INFO:Neuron:Generating HLOs for the following models: ['HunyuanVideo15Transformer3DModel']
+[2026-10-31 14:34:47.795: I neuronx_distributed/parallel_layers/parallel_state.py:638] > initializing tensor model parallel with size 2
+[2026-10-31 14:34:47.796: I neuronx_distributed/parallel_layers/parallel_state.py:639] > initializing pipeline model parallel with size 1
+[2026-10-31 14:34:47.796: I neuronx_distributed/parallel_layers/parallel_state.py:640] > initializing context model parallel with size 1
+[2026-10-31 14:34:47.796: I neuronx_distributed/parallel_layers/parallel_state.py:641] > initializing data parallel with size 2
+[2026-10-31 14:34:47.796: I neuronx_distributed/parallel_layers/parallel_state.py:642] > initializing world size to 4
+[2026-10-31 14:34:47.796: I neuronx_distributed/parallel_layers/parallel_state.py:387] [rank_0_pp-1_tp-1_dp-1_cp-1] Chosen Logic for replica groups ret_logic=<PG_Group_Logic.LOGIC1: (<function ascending_ring_PG_group at 0x76a7d1b11940>, 'Ascending Ring PG Group')>
+[2026-10-31 14:34:47.796: I neuronx_distributed/parallel_layers/parallel_state.py:666] [rank_0_pp-1_tp-1_dp-1_cp-1] tp_groups: replica_groups.tp_groups=[[0, 1], [2, 3]]
+[2026-10-31 14:34:47.796: I neuronx_distributed/parallel_layers/parallel_state.py:667] [rank_0_pp-1_tp-1_dp-1_cp-1] dp_groups: replica_groups.dp_groups=[[0, 2], [1, 3]]
+[2026-10-31 14:34:47.796: I neuronx_distributed/parallel_layers/parallel_state.py:668] [rank_0_pp-1_tp-1_dp-1_cp-1] pp_groups: replica_groups.pp_groups=[[0], [1], [2], [3]]
+[2026-10-31 14:34:47.796: I neuronx_distributed/parallel_layers/parallel_state.py:669] [rank_0_pp-1_tp-1_dp-1_cp-1] cp_groups: replica_groups.cp_groups=[[0], [1], [2], [3]]
+[2026-10-31 14:34:47.796: I neuronx_distributed/parallel_layers/parallel_state.py:670] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_model_groups: replica_groups.ep_model_groups=[[0], [1], [2], [3]]
+[2026-10-31 14:34:47.796: I neuronx_distributed/parallel_layers/parallel_state.py:671] [rank_0_pp-1_tp-1_dp-1_cp-1] ep_data_groups: replica_groups.ep_data_groups=[[0, 2], [1, 3]]
+INFO:Neuron:Generating 1 hlos for key: HunyuanVideo15Transformer3DModel
+INFO:Neuron:Minimal metadata will be added to HLO
+INFO:Neuron:Started loading module HunyuanVideo15Transformer3DModel
+INFO:Neuron:Finished loading module HunyuanVideo15Transformer3DModel in 37.494771242141724 seconds
+INFO:Neuron:generating HLO: HunyuanVideo15Transformer3DModel, input example shape = torch.Size([2, 65, 31, 30, 53])
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/parallel_layers/layers.py:531: FutureWarning: `torch.cuda.amp.autocast(args...)` is deprecated. Please use `torch.amp.autocast('cuda', args...)` instead.
+  with torch.cuda.amp.autocast(enabled=False):
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/torch_neuronx/xla_impl/hlo_conversion.py:470: UserWarning: Received an input tensor that was unused or used in a non-static way when traced so the tensor will be ignored. (index=4, shape=torch.Size([2]), dtype=torch.bfloat16). The non-static usage could happen when the traced function expects the input tensor's shape to change (i.e., using the shape to do index slicing), which is not allowed by inference trace expecting static input shapes.
+  warnings.warn(
+INFO:Neuron:Finished generating HLO for HunyuanVideo15Transformer3DModel in 1707.127035856247 seconds, input example shape = torch.Size([2, 65, 31, 30, 53])
+INFO:Neuron:Generated all HLOs in 1745.0712373256683 seconds
+INFO:Neuron:Starting compilation for the priority HLO
+INFO:Neuron:'HunyuanVideo15Transformer3DModel' is the priority model with bucket rank 0
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/libneuronxla/neuron_cc_wrapper.py:287: SyntaxWarning: str format compiler_flags is discouraged as its handling involves repeated joining and splitting, which can easily make mistakes if something is quoted or escaped. Use list[str] instead. Refer to documentation of the Python subprocess module for details.
+  warnings.warn(SyntaxWarning(
+..
+2026-10-31 15:04:24.000034:  1732735  [ERROR]: Failed compilation with ['neuronx-cc', 'compile', '--framework=XLA', '/tmp/nxd_model/hunyuanvideo-1.5-diffusers-480p_t2v-aot_transformer-cfe37fd2/transformer/HunyuanVideo15Transformer3DModel/_tp0_bk0/model.MODULE_c09198d30413c21f308f+e16d647b.hlo_module.pb', '--output', '/tmp/nxd_model/hunyuanvideo-1.5-diffusers-480p_t2v-aot_transformer-cfe37fd2/transformer/HunyuanVideo15Transformer3DModel/_tp0_bk0/model.MODULE_c09198d30413c21f308f+e16d647b.neff', '--target=trn2', '--model-type=transformer', '-O1', '--tensorizer-options=--enable-ccop-compute-overlap', '--auto-cast=none', '--internal-hlo2tensorizer-options=--verify-hlo=true', '--internal-hlo2tensorizer-options=--verify-hlo=true', '--verbose=35', '--logfile=/tmp/nxd_model/hunyuanvideo-1.5-diffusers-480p_t2v-aot_transformer-cfe37fd2/transformer/HunyuanVideo15Transformer3DModel/_tp0_bk0/log-neuron-cc.txt', '--enable-internal-neff-wrapper']:
+2026-10-31T15:04:23Z NeuronHunyuanVideoApplication[.1]/NeuronHunyuanVideo15BackboneApplication[.1]/_HunyuanVideo15TraceModule[.1]/HunyuanVideo15Transformer3DModel[.1]/HunyuanVideo15TransformerBlock[.1]/AdaLayerNormZero[.2]/LayerNorm[.5]/aten.view.default/aten__native_batch_norm_batch-norm-training.575 [INTERNAL_ERROR] [NCC_IRPX901] RelaxPredicates assertion error: inst should be valid after relaxing predicates - Please open a support ticket at https://github.com/aws-neuron/aws-neuron-sdk/issues/new. You may also be able to obtain more information using the 'XLA_IR_DEBUG' and 'XLA_HLO_DEBUG' environment variables.
+[libneuronxla 2.2.17544.0+fb9962bf]
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/stage.py", line 156, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/stage.py", line 151, in main
+    orchestrator._run_stage_internal(args.stage, args)
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/orchestrators/hunyuan_video_15.py", line 170, in _run_stage_internal
+    self._stage_aot_transformer(args)
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/orchestrators/hunyuan_video_15.py", line 424, in _stage_aot_transformer
+    app.compile(str(compiled_dir))
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/backends/trainium/core/multi_component_application.py", line 69, in compile
+    self._compile_one(spec, compiled_model_path, compiler_workdir, debug)
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/backends/trainium/core/multi_component_application.py", line 172, in _compile_one
+    spec.component.compile(str(component_path), debug=debug)
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/backends/trainium/core/application_base.py", line 429, in compile
+    traced_model = self.get_builder(debug).trace(**trace_kwargs)
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/trace/model_builder.py", line 651, in trace
+    neff_bytes, wrapped_neff_bytes = neuron_xla_wlo_compile(module_bytes, compiler_args,
+                                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/backends/trainium/utils/compile_retry.py", line 40, in wrapper
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/libneuronxla/neuron_cc_wrapper.py", line 300, in neuron_xla_wlo_compile
+    neuron_xla_compile_impl(
+  File "/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/libneuronxla/neuron_cc_wrapper.py", line 393, in neuron_xla_compile_impl
+    return compile_cache_entry(output, entry, execution_mode,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/libneuronxla/neuron_cc_wrapper.py", line 235, in compile_cache_entry
+    raise (e)
+  File "/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/libneuronxla/neuron_cc_wrapper.py", line 207, in compile_cache_entry
+    ret = call_neuron_compiler(
+          ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/libneuronxla/neuron_cc_wrapper.py", line 120, in call_neuron_compiler
+    raise subprocess.CalledProcessError(res.returncode, cmd, stderr=error_with_cmd)
+subprocess.CalledProcessError: Command '['neuronx-cc', 'compile', '--framework=XLA', '/tmp/nxd_model/hunyuanvideo-1.5-diffusers-480p_t2v-aot_transformer-cfe37fd2/transformer/HunyuanVideo15Transformer3DModel/_tp0_bk0/model.MODULE_c09198d30413c21f308f+e16d647b.hlo_module.pb', '--output', '/tmp/nxd_model/hunyuanvideo-1.5-diffusers-480p_t2v-aot_transformer-cfe37fd2/transformer/HunyuanVideo15Transformer3DModel/_tp0_bk0/model.MODULE_c09198d30413c21f308f+e16d647b.neff', '--target=trn2', '--model-type=transformer', '-O1', '--tensorizer-options=--enable-ccop-compute-overlap', '--auto-cast=none', '--internal-hlo2tensorizer-options=--verify-hlo=true', '--internal-hlo2tensorizer-options=--verify-hlo=true', '--verbose=35', '--logfile=/tmp/nxd_model/hunyuanvideo-1.5-diffusers-480p_t2v-aot_transformer-cfe37fd2/transformer/HunyuanVideo15Transformer3DModel/_tp0_bk0/log-neuron-cc.txt', '--enable-internal-neff-wrapper']' returned non-zero exit status 70.
+[difflet] work dir preserved at /home/ubuntu/.cache/difflet/work/hv15 for inspection
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/main.py", line 1338, in <module>
+    main()
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/main.py", line 1334, in main
+    getattr(orchestrator, args.command)()
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/orchestrators/hunyuan_video_15.py", line 83, in compile
+    self._run("compile")
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/orchestrators/hunyuan_video_15.py", line 92, in _run
+    return self._run_aot(mode)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/orchestrators/hunyuan_video_15.py", line 317, in _run_aot
+    runner.run_stage(_HF_MODEL_ID, "aot_transformer", num_cores=tp * (2 if cfg else 1) * cp,
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/runner.py", line 258, in run_stage
+    subprocess.run(cmd, env=env, check=True)
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['/home/ubuntu/venvs/difflet-neuron/bin/python', '-m', 'difflet.cli.stage', '--orchestrator', 'hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v', '--stage', 'aot_transformer', '--model-id', 'hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v', '--stage-mode', 'compile', '--work-dir', '/home/ubuntu/.cache/difflet/work/hv15', '--tp-degree', '2', '--cp-degree', '1', '--height', '480', '--width', '848', '--num-frames', '121', '--steps', '50', '--seed', '42', '--cfg-parallel', '--dp-schedule', 'round_robin']' returned non-zero exit status 1.
