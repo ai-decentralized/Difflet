@@ -767,6 +767,8 @@ def _compile_specs(
             "component_id": "denoiser",
             "shapes": shapes_list,
             "text_seq_len": _TEXT_SEQ_LEN,
+            # The AdaLN modulation linears are column-parallel (shard_modulation_linears).
+            "adaln_modulation": "column-parallel",
             # Serving runs the default bf16 all-reduce; pre-bf16 DiTs reduced in fp32.
             **tp_reduce_cache_fields(torch.bfloat16, legacy=torch.float32),
         }

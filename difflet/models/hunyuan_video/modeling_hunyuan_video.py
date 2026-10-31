@@ -1022,6 +1022,39 @@ class HunyuanVideoRotaryPosEmbed(nn.Module):
         return freqs_cos, freqs_sin
 
 
+def shard_modulation_linears(module: HunyuanVideoTransformer3DModel) -> None:
+    """Make the blocks' AdaLN modulation linears column-parallel with the output gathered:
+    each dual-stream block's ``norm1.linear`` and ``norm1_context.linear`` (3072 -> 6 x 3072)
+    and each single-stream block's ``norm.linear`` (3072 -> 3 x 3072).
+
+    The blocks build them as diffusers' ``AdaLayerNormZero`` / ``AdaLayerNormZeroSingle``,
+    whose ``linear`` is a plain ``nn.Linear``, so every TP rank would hold all 80 of them
+    (6.80 GB in bf16). Their input is the per-sample ``[B, inner]`` conditioning vector, so
+    gathering the output is one tiny all-gather per layer, and each output element is still one
+    full dot product. The checkpoint keys are unchanged; each rank loads its rows of them. The
+    token refiner's ``HunyuanVideoAdaNorm`` is already built this way.
+
+    Called by the neuron and trainium backends after they build the module. The CPU reference
+    and the TeaCache probes keep the plain layers.
+    """
+
+    def col(linear: nn.Linear) -> nn.Module:
+        return ColumnParallelLinear(
+            linear.in_features,
+            linear.out_features,
+            bias=linear.bias is not None,
+            gather_output=True,
+            dtype=linear.weight.dtype,
+            device=linear.weight.device,
+        )
+
+    for block in module.transformer_blocks:
+        block.norm1.linear = col(block.norm1.linear)
+        block.norm1_context.linear = col(block.norm1_context.linear)
+    for block in module.single_transformer_blocks:
+        block.norm.linear = col(block.norm.linear)
+
+
 class HunyuanVideoTransformer3DModel(nn.Module):
     _supports_gradient_checkpointing = False
     _no_split_modules = [

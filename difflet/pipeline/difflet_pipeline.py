@@ -300,6 +300,9 @@ def _cache_application_kwargs(
         # Recompile backbones whose long-mask integer reduction could truncate
         # the attention range on Trainium LNC2, including non-TeaCache requests.
         cache_kwargs["attention_mask_accumulation"] = "fp32-v1"
+        # The AdaLN modulation linears are column-parallel (shard_modulation_linears):
+        # an older backbone's graph and rank files hold them whole.
+        cache_kwargs["adaln_modulation"] = "column-parallel"
     from difflet.pipeline.teacache import requires_teacache_probe
 
     calibrated_probe = model_name in {"wan", "ltx_2"} and requires_teacache_probe(
