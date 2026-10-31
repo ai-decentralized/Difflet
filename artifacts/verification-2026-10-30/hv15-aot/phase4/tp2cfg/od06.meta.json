@@ -1,0 +1,52 @@
+{
+  "name": "p4-tp2cfg/od06",
+  "backend": "trainium",
+  "cmd": [
+    "bash",
+    "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_difflet.sh",
+    "trainium",
+    "generate",
+    "--model-id",
+    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+    "--height",
+    "320",
+    "--width",
+    "512",
+    "--num-frames",
+    "61",
+    "--steps",
+    "50",
+    "--seed",
+    "42",
+    "--tp-degree",
+    "2",
+    "--cfg-parallel",
+    "--prompt",
+    "a cinematic shot of a red fox running through a snowy forest",
+    "--keep-work-dir",
+    "--work-dir",
+    "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p4-tp2cfg/od06.work",
+    "--output",
+    "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p4-tp2cfg/od06.mp4",
+    "--teacache-online-delta",
+    "0.6"
+  ],
+  "env": [
+    "HF_HUB_OFFLINE=1"
+  ],
+  "rc": 0,
+  "wall_s": 539.0,
+  "nmon_peak_gib": {
+    "0": 9.75,
+    "1": 9.75,
+    "2": 9.75,
+    "3": 9.75
+  },
+  "host_rss_peak_gib": {
+    "_total": 38.54,
+    "aot_transformer": 37.55,
+    "aot_vae": 19.75,
+    "encode": 16.55,
+    "other": 0.99
+  }
+}

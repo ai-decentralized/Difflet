@@ -919,3 +919,101 @@ Reference rows (from Phase 1, same inputs): native TP2xCFG2 vs diffusers, 1 step
 
 The Phase 1-2 numbers in the earlier sections stay as they are: they are from the old 9-input
 graph. The old artifact dirs and the `039f757f…stale-pre-fd2a8aa` dir are still on disk.
+
+## Campaign (Task 10), Phase 4 and Phase 5 on the no-ccop default: 2026-10-31
+
+HEAD at start `dca10f3`. That commit makes the hv15 AOT DiT compile **without**
+`--tensorizer-options=--enable-ccop-compute-overlap` by default (the option caused NCC_IRPX901 at
+480x848x121) and puts the effective compiler args into the AOT stage cache key. Every artifact
+in this section is therefore freshly compiled; the earlier dirs are not reused.
+`DIFFLET_HUNYUAN15_COMPILER_ARGS` is not set anywhere in this section.
+
+Same runner (`runcell.py`: plan wrapper, neuron-monitor 1 s, host-RSS sampler), wrappers, venv
+(`difflet-neuron`) and common flags as Phases 2-3: 320x512x61, `--seed 42`, `--prompt "a
+cinematic shot of a red fox running through a snowy forest"`, `HF_HUB_OFFLINE=1`, one device
+job at a time. Curated evidence: `E/phase4/`, `E/phase5/`.
+
+### No-ccop perf check (R23): TP2xCFG2, 50 steps: **13% slower per step than with the overlap option**
+
+| step | outcome | wall | detail | HBM GiB/core | host RSS |
+|---|---|---|---|---|---|
+| `compile --tp-degree 2 --cfg-parallel` | PASS, new dir `f464ca8f…` (manifest `compiler_args`: `--model-type=transformer -O1 --auto-cast=none --internal-hlo2tensorizer-options='--verify-hlo=true'`) | 450.7 s | DiT 438.3 s (old graph-v2 tp2cfg with overlap: 448.1 s) | n/a | 32.8 GiB |
+| `generate --steps 50` | PASS | 719.0 s | encode 103.2 s (cold), DiT load 31.9 s, denoise 125.3 s, **median 1778 ms** (first 38030 ms, cold), host decode 412.3 s | 9.75 x4 | DiT 38.1 / VAE 18.5 GiB |
+
+- **Latents vs the previous tp2cfg 50-step run** (`p2r-tp2cfg`, same graph, overlap on, same
+  `embeds.pt` sha `3051691e…`, same seed): **cos 0.954898**, rel-L1 0.278, max-abs 4.44, no
+  NaN/Inf. Not bit-identical, as expected from a different compile; the value sits in the
+  50-step cross-layout band measured in Phase 2 (0.955-0.969). The MP4 shows the fox running
+  through snow (`E/phase4/tp2cfg/gen50_mid.png`).
+- **Same-session A/B, to separate the flag from host drift.** The DiT alone
+  (`scripts/hv15_aot_denoise_from_inputs.py`, same `embeds.pt`, seed 42, 50 steps), alternating
+  the old overlap artifact `d3d575ba…` and the new `f464ca8f…`, each loaded warm:
+
+  | run | artifact | denoise s | step median ms | first step ms | latents |
+  |---|---|---|---|---|---|
+  | ov1 | overlap on (`d3d575ba…`) | 81.4 | 1606 | 2720 | **bit-identical** to the Phase 2 re-run CLI latents |
+  | no1 | overlap off (`f464ca8f…`) | 92.1 | 1817 | 2980 | **bit-identical** to this section's CLI `gen50` latents |
+  | ov2 | overlap on | 80.9 | 1598 | 2522 | bit-identical to ov1 |
+  | no2 | overlap off | 92.0 | 1816 | 2931 | bit-identical to no1 |
+
+  **Dropping the overlap option costs +13.4% per step at 320x512x61** (1816.5 vs 1602 ms,
+  medians of the two runs each; +13.5% on the whole denoise). The step times are stable to
+  ±0.3% across runs. This is above the 5% bar of R23: **the flag should be made shape-aware**
+  (keep the overlap where it compiles). Evidence: `E/phase4/noccop-ab/`.
+- The CLI's 1778 ms vs the helper's 1817 ms: same artifact and latents; the CLI run is a single
+  sample and the helper times include its own host loop. The A/B uses one harness for both arms.
+
+### Phase 4a: TeaCache fixed cadence, TP2xCFG2, 50 steps
+
+Two explicit `generate` commands on the `f464ca8f…` artifact, identical apart from
+`--teacache-cadence 2`; the no-TeaCache run is the R23 run above.
+
+| run | `[teacache] stats` | denoise s (first step) | denoise minus first step | step median ms | latents vs no-TeaCache | mid frame |
+|---|---|---|---|---|---|---|
+| no TeaCache (`gen50`) | — | 125.3 (38.0 cold) | 87.3 s | 1778 | ref | fox in snow |
+| `--teacache-cadence 2` (`cad2`) | `full_steps 30, skipped_steps 20, probe_calls 0` | 54.6 (3.2) | **51.4 s (-41%)** | 1768 (full steps) | **cos 0.938644**, rel-L1 0.346, max-abs 5.32, no NaN/Inf | same fox, same pose/scene/framing; leg and snow-spray detail differ |
+
+- **skipped_steps 20 of 50: PASS.** With CFG parallel both CFG halves live in one batched DiT
+  call, so a skipped step skips both (one `_dit` call per step; the 30 full steps are 30 calls).
+- **Denoise time saved: 41%** (warm-equivalent; the no-TeaCache run's first step was a cold
+  38 s, so first steps are excluded on both sides; the helper's warm no-TeaCache denoise is
+  92 s, against which cadence 2 saves 44%). End to end the gain is small because the host VAE
+  (410 s) dominates (`generate` wall 719.0 → 529.5 s, but 94 s of that is the cold encode).
+- **Latents cos ≥ 0.99: NOT MET (0.9386).** Triage, no Difflet bug:
+  - The output is right: the MP4 shows the same video (`E/phase4/tp2cfg/{gen50,cad2}_mid.png`).
+  - The 0.99 bar is above this model's 50-step floor. A **pure compiler-flag change** (above:
+    no computational change, ULP-level differences per step) already moves the 50-step latents
+    to **cos 0.9549**; the Phase 2 cross-layout spread was 0.955-0.969. Skipping 20 of 50 steps
+    is a much larger perturbation than that, yet its distance (1 − cos = 0.061) is only 1.36x the
+    recompile's (0.045). cad2 vs the old overlap run: 0.9353.
+  - HV1.0's 0.99984 at cadence 2 (`benchmark/trn2/hunyuan_video_neuron.md`) is not comparable:
+    HV1.0 is guidance-distilled (one DiT pass/step) and its trajectory is far flatter.
+  - Ruling needed: accept on skipped steps + visual + time, or set an hv15 cadence gate from the
+    floor (e.g. distance ≤ 2x the same-layout recompile distance).
+- `teacache_cadence_ab.sh` (TP4 serial CFG) **not run**: it sources `<repo>/.venv`, which does
+  not exist here (R5: AOT uses `difflet-neuron`), and its prompt differs from the campaign's. The
+  explicit TP2xCFG2 pair above covers the same check. Optional per the brief.
+
+### Phase 4b: TeaCache online-delta, TP2xCFG2, 50 steps
+
+`--teacache-online-delta 0.6`. `difflet/pipeline/teacache.py` has no default alpha (the mode is
+off at 0.0); 0.6 is the value the CLI spec and plans use (`docs/plans/2026-06-23-cli.md`).
+
+| run | `[teacache] stats` | denoise s (first step) | denoise minus first step | latents vs no-TeaCache | mid frame |
+|---|---|---|---|---|---|
+| `--teacache-online-delta 0.6` (`od06`) | `full_steps 33, skipped_steps 17, probe_calls 0, last_delta_estimate 0.1426` | 60.3 (3.2) | **57.1 s (-35%)** | **cos 0.918296**, rel-L1 0.373, max-abs 6.44, no NaN/Inf | same fox and scene |
+
+- 17 skipped. The mode never skips two steps in a row, so within the 40-step window between
+  warmup and cooldown at most 20 can be skipped (cadence 2 skips exactly those 20). It skips
+  fewer steps than cadence 2 but drifts more (0.918 vs 0.939); which steps it skipped is not
+  logged, so the reason is not established here.
+- Same floor argument as 4a; the video is right (`E/phase4/tp2cfg/od06_mid.png`).
+
+Reproduce (each one command; `R` = the plan wrapper `run_difflet.sh trainium`):
+```
+R compile  --model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v --height 320 --width 512 --num-frames 61 --tp-degree 2 --cfg-parallel
+R generate --model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v --height 320 --width 512 --num-frames 61 --tp-degree 2 --cfg-parallel \
+  --steps 50 --seed 42 --prompt "a cinematic shot of a red fox running through a snowy forest" --output gen50.mp4 [--teacache-cadence 2 | --teacache-online-delta 0.6]
+# A/B: scripts/hv15_aot_denoise_from_inputs.py --compiled-dir <dir> --embeds <gen50 embeds.pt> --tp-degree 2 --cfg-parallel \
+#   --height 320 --width 512 --num-frames 61 --steps 50 --seed 42 --out x.pt   (NEURON_RT_VIRTUAL_CORE_SIZE=2)
+```
