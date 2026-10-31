@@ -90,13 +90,28 @@ def _stage_args(tmp_path, **over) -> argparse.Namespace:
 
 
 @pytest.fixture
-def aot_launches(monkeypatch):
+def aot_launches(monkeypatch, tmp_path):
     calls = []
     monkeypatch.setattr(hv15, "torchrun_backend", lambda: None)
     monkeypatch.setattr(hv15.runner, "run_stage",
                         lambda model, stage, num_cores, virtual_core_size, cli_args:
                         calls.append((stage, num_cores, virtual_core_size, list(cli_args))))
+    # The driver validates the DiT shape rules against the snapshot's transformer config
+    # before launching anything: a local snapshot holding the 480p t2v DiT's config.
+    snapshot = tmp_path / "driver_snapshot"
+    (snapshot / "transformer").mkdir(parents=True)
+    (snapshot / "transformer" / "config.json").write_text(json.dumps(_HV15_TRANSFORMER_CONFIG))
+    monkeypatch.setattr(hv15.HunyuanVideo15Orchestrator, "_root", lambda self, args: str(snapshot))
     return calls
+
+
+_HV15_TRANSFORMER_CONFIG = {
+    "_class_name": "HunyuanVideo15Transformer3DModel", "attention_head_dim": 128, "image_embed_dim": 1152,
+    "in_channels": 65, "mlp_ratio": 4.0, "num_attention_heads": 16, "num_layers": 54,
+    "num_refiner_layers": 2, "out_channels": 32, "patch_size": 1, "patch_size_t": 1, "qk_norm": "rms_norm",
+    "rope_axes_dim": [16, 56, 56], "rope_theta": 256.0, "target_size": 640, "task_type": "t2v",
+    "text_embed_2_dim": 1472, "text_embed_dim": 3584, "use_meanflow": False,
+}
 
 
 def _flag(cli, name):
@@ -158,6 +173,47 @@ def test_aot_rejects_multi_shape_before_encode(aot_launches, tmp_path):
         with pytest.raises(SystemExit, match=r"one shape.*--height/--width/--num-frames"):
             getattr(orch, mode)()
     assert aot_launches == []
+
+
+def test_aot_rejects_sp_shape_before_encode(aot_launches, tmp_path):
+    """On device `generate --tp-degree 4 --sp` at 480x848x121 ran the encode stage, then failed
+    with "no valid compiled artifact": the DiT's N % tp rule must fail first, in the driver."""
+    for mode in ("generate", "compile"):
+        orch = hv15.HunyuanVideo15Orchestrator(_driver_args(work_dir=str(tmp_path / "w"), tp_degree=4,
+                                                            sp_enabled=True))
+        with pytest.raises(SystemExit, match=r"49290.*tp_degree=4"):
+            getattr(orch, mode)()
+    assert aot_launches == []
+    assert not (tmp_path / "w").exists()
+
+
+@pytest.mark.parametrize("over, match", [
+    (dict(cp_degree=4, cp_mode="ulysses"), r"N=49290.*cp_degree=4"),  # N % cp
+    (dict(tp_degree=4, cp_degree=8, cp_mode="ulysses"), r"num_attention_heads=16.*cp_degree=8"),  # heads
+], ids=["tokens", "ulysses-heads"])
+def test_aot_rejects_cp_shape_before_encode(aot_launches, tmp_path, over, match):
+    orch = hv15.HunyuanVideo15Orchestrator(_driver_args(work_dir=str(tmp_path / "w"), **over))
+    with pytest.raises(SystemExit, match=match):
+        orch.generate()
+    assert aot_launches == []
+
+
+def test_aot_shape_check_passes_valid_layouts(aot_launches, tmp_path):
+    for over in (dict(), dict(tp_degree=2, sp_enabled=True), dict(cp_degree=2, cp_mode="gather_kv"),
+                 dict(tp_degree=2, cp_degree=2, cp_mode="ulysses")):
+        aot_launches.clear()
+        hv15.HunyuanVideo15Orchestrator(_driver_args(work_dir=str(tmp_path / "w"), **over)).generate()
+        assert [s for s, _, _, _ in aot_launches] == ["encode", "aot_transformer", "aot_vae"], over
+
+
+def test_aot_shape_check_without_a_local_snapshot_defers_to_the_stages(aot_launches, monkeypatch, tmp_path):
+    def missing(self, args):
+        raise FileNotFoundError("no local snapshot")
+
+    monkeypatch.setattr(hv15.HunyuanVideo15Orchestrator, "_root", missing)
+    hv15.HunyuanVideo15Orchestrator(_driver_args(work_dir=str(tmp_path / "w"), tp_degree=4,
+                                                 sp_enabled=True)).generate()
+    assert [s for s, _, _, _ in aot_launches] == ["encode", "aot_transformer", "aot_vae"]
 
 
 def test_aot_default_layout_is_tp2_cfg2(aot_launches, tmp_path):
