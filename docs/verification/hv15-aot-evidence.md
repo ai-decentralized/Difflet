@@ -356,3 +356,17 @@ The native-input comparisons above used the pre-fix NEFF and therefore stand.
   TP2 DiT agrees with diffusers' CPU pipeline per forward to 0.99961 (closer than native TP2 x
   CFG2, 0.99914).
 - Evidence: `E/phase1/aot-tp4/`.
+
+#### aot-tp4sp (TP4 + Megatron SP)
+
+| step | outcome | wall | detail | peak HBM per core (GiB) |
+|---|---|---|---|---|
+| `compile --tp-degree 4 --sp` | DiT PASS, VAE FAIL (aot-vae) | 355.2 s | DiT compiled in 327.3 s into `hunyuan_video_15_aot_dit/6e2e215d0c101025` | — |
+| `generate --steps 3` | DiT PASS; VAE stage exits | 196.2 s | encode 123.8 s (inference: cold page cache for the text encoders); DiT load 32.7 s; denoise 6.1 s, median 1618 ms (first 2891 ms) | 5.25 on each of 4 cores |
+
+- `embeds.pt` sha `3051691e…`; `latents.pt` sha `6d9ef64b…`.
+- **Gate (vs aot-tp4): per forward PASS**, cosine 0.999701 / rel-L1 0.0274 / max-abs 0.38 at
+  1 step; 3 steps 0.983685 / 0.1805 / 3.66, inside the bf16 floor. No NaN / Inf.
+- SP lowers the per-core peak (5.25 vs 5.75 GiB) and the step median (1618 vs 1749 ms) against
+  plain TP4 at this shape.
+- Evidence: `E/phase1/aot-tp4sp/`.
