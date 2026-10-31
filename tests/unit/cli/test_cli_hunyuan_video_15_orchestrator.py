@@ -810,3 +810,13 @@ def test_aot_stages_do_not_import_native(tmp_path):
     result = subprocess.run([sys.executable, "-c", _NO_NATIVE, str(tmp_path)], env=env,
                             capture_output=True, text=True, timeout=600)
     assert result.returncode == 0 and result.stdout.strip().endswith("OK"), result.stderr[-3000:]
+
+
+def test_aot_stage_cache_key_includes_compiler_args(tmp_path, monkeypatch):
+    args = _stage_args(tmp_path)
+    orch = hv15.HunyuanVideo15Orchestrator(args)
+    monkeypatch.delenv("DIFFLET_HUNYUAN15_COMPILER_ARGS", raising=False)
+    dit, vae = orch._aot_compiled_dir(args, "transformer"), orch._aot_compiled_dir(args, "vae")
+    monkeypatch.setenv("DIFFLET_HUNYUAN15_COMPILER_ARGS", "--model-type=transformer -O2")
+    assert orch._aot_compiled_dir(args, "transformer") != dit
+    assert orch._aot_compiled_dir(args, "vae") == vae

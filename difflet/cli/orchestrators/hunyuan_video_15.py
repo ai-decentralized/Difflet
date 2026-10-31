@@ -376,9 +376,14 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
         if component == "transformer":
             # graph_version: bump backbone15._AOT_DIT_GRAPH_VERSION whenever the traced DiT
             # graph's inputs or structure change, so the change compiles into a fresh dir.
-            from difflet.backends.trainium.hunyuan_video.backbone15 import _AOT_DIT_GRAPH_VERSION
+            # compiler_args: the effective args (env override or default) are keyed, so changing
+            # either compiles fresh; that also invalidates v2 artifacts built with the ccop
+            # overlap option, hence no _AOT_DIT_GRAPH_VERSION bump.
+            from difflet.backends.trainium.hunyuan_video.backbone15 import (
+                _AOT_DIT_GRAPH_VERSION, hv15_dit_compiler_args)
 
             return {"component": "hunyuan_video_15_aot_dit", "graph_version": _AOT_DIT_GRAPH_VERSION,
+                    "compiler_args": hv15_dit_compiler_args(),
                     "model": _HF_MODEL_ID,
                     "revision": getattr(args, "revision", None), "tp": int(args.tp_degree or 1),
                     "cp": int(args.cp_degree or 1), "cp_mode": _aot_cp_mode(args),
