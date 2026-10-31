@@ -9,6 +9,7 @@ declaration, and ``no_components_message`` / ``dit_input_contract`` branches.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import tempfile
 from types import SimpleNamespace
@@ -418,6 +419,29 @@ def test_validate_dit15_inputs_checks_text_order():
         app.validate_hunyuan_video15_dit_inputs(bad, config=_config_15(), dtype=torch.float32)
 
 
+def test_validate_dit15_inputs_checks_text_valid():
+    good = app.HunyuanVideo15DiTInputBundle(
+        **{**_bundle_15().__dict__, "text_valid": torch.tensor([3], dtype=torch.int32)}
+    )
+    app.validate_hunyuan_video15_dit_inputs(good, config=_config_15(), dtype=torch.float32)
+    with pytest.raises(ValueError, match="text_valid"):
+        app.validate_hunyuan_video15_dit_inputs(
+            dataclasses.replace(good, text_valid=torch.tensor([[3]], dtype=torch.int32)),
+            config=_config_15(),
+            dtype=torch.float32,
+        )
+    with pytest.raises(TypeError, match="text_valid"):
+        app.validate_hunyuan_video15_dit_inputs(
+            dataclasses.replace(good, text_valid=torch.tensor([3])),  # int64
+            config=_config_15(),
+            dtype=torch.float32,
+        )
+    both = dataclasses.replace(good, text_order=torch.arange(9).unsqueeze(0))
+    inputs = both.as_model_inputs()
+    assert len(inputs) == 10
+    assert inputs[8] is both.text_order and inputs[9] is both.text_valid
+
+
 def test_call_15_with_direct_kwargs_builds_bundle(monkeypatch):
     with tempfile.TemporaryDirectory() as path:
         application = app.NeuronHunyuanVideoApplication(
@@ -461,11 +485,14 @@ def test_call_15_with_direct_kwargs_builds_bundle(monkeypatch):
         )
         assert len(application.transformer.calls) == 1
         inputs = application.transformer.calls[0]
-        assert len(inputs) == 9
+        assert len(inputs) == 10
         assert torch.equal(inputs[2], refined)
         # [image(4, t2v: invalid), byt5(2), mllm(3)] -> valid byt5 5, mllm 6 and 8 first.
         assert inputs[8].dtype == torch.int64
         assert inputs[8][0, :3].tolist() == [5, 6, 8]
+        # text_valid: the host count of those valid tokens (graph input #10).
+        assert inputs[9].dtype == torch.int32
+        assert inputs[9].tolist() == [3]
 
 
 def test_dit_input_contract_15_shapes():
@@ -484,6 +511,8 @@ def test_dit_input_contract_15_shapes():
     assert "encoder_hidden_states_2" in contract
     assert contract["image_embeds"]["shape"] == (1, 4, 7)
     assert contract["text_order"] == {"shape": (1, 4 + 2 + 3), "dtype": torch.int64}
+    assert contract["text_valid"] == {"shape": (1,), "dtype": torch.int32}
+    assert list(contract)[-2:] == ["text_order", "text_valid"]
 
 
 def test_host_refiner_matches_diffusers_context_embedder(tmp_path):
