@@ -1,0 +1,32 @@
+{
+  "name": "p3-tp4sp-reject/compile",
+  "backend": "trainium",
+  "cmd": [
+    "bash",
+    "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_difflet.sh",
+    "trainium",
+    "compile",
+    "--model-id",
+    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+    "--height",
+    "480",
+    "--width",
+    "848",
+    "--num-frames",
+    "121",
+    "--tp-degree",
+    "4",
+    "--sp"
+  ],
+  "env": [
+    "HF_HUB_OFFLINE=1"
+  ],
+  "rc": 1,
+  "wall_s": 6.4,
+  "nmon_peak_gib": {},
+  "host_rss_peak_gib": {
+    "_total": 1.0,
+    "aot_transformer": 0.97,
+    "other": 0.03
+  }
+}

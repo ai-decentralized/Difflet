@@ -584,3 +584,44 @@ vs 2686-2696 ms); with 3 steps per request this is a handful of samples, and bot
 host-side work (scheduler, the per-step host refiner calls of serial CFG) shares 6 physical
 cores (inference, not profiled). The decodes of the two replicas overlap on the same CPU, so
 DP does not shorten the host-decode part of the wall time.
+
+#### Phase 2 summary
+
+- All six layouts and the DP check **PASS** at 50 steps: every generate exits 0, no latents file
+  has NaN or Inf, and every mid frame shows the fox running through snow. The latents cosines
+  against tp2cfg after 50 steps are 0.955-0.969 (informational; the per-forward gate was Phase 1's).
+- Step median (ms): tp2cfg 1573 · tp4sp 1601 · tp4 1731 · ulysses 1783 · gather_kv 1858 ·
+  dp2tp2 replica 2690 (serial CFG on 2 cores). Native TP2xCFG2 at the same shape: 1325 ms
+  (Phase 0, other venv and toolchain); the fastest AOT layout is 1.19x slower per step.
+- The host decode costs 409-423 s for 61 frames at 320x512 in every cell (fp32, tiled, 6
+  physical cores at ~580% CPU, 17-19 GiB RSS). It is now the largest part of each generate wall
+  (native decodes on a core in 31.4 s). At the default 480x848x121 the decode has about 5x the
+  pixels and frames (Phase 3 below).
+- Load times swing with the page cache and with the root volume's read rate (cold ulysses 697 s,
+  warm tp4sp 22 s); the generate walls above carry that noise. During the DP check the root EBS
+  volume was serving reads at about 15-17 MB/s.
+- Process note: the first tp4sp attempt was killed when the harness monitor that supervised the
+  job expired; the remaining cells ran as a plain background task.
+
+### Phase 3: default shape 480x848x121, 50 steps
+
+#### tp4 + SP at the default shape: rejected before compile in 6.4 s
+
+`difflet compile --height 480 --width 848 --num-frames 121 --tp-degree 4 --sp` exits 1 after
+6.4 s wall, at the configuration check of the aot_transformer stage, before any HLO is generated:
+
+```
+ValueError: HunyuanVideo 1.5 sequence parallelism splits the N=49290 image tokens of 480x848x121 over tp_degree=4, but N % 4 = 2; use num_frames in [117, 125] at this resolution, or tp_degree in [2].
+```
+
+N = 31 latent frames x 30 x 53 = 49290, and 49290 mod 4 = 2, as the message says.
+`difflet generate` with the same flags behaves as the ring case did in Phase 1: the host encode
+runs first (10.0 s here), and the aot_transformer stage then stops with `[hv15] no valid compiled
+transformer artifact at …/hunyuan_video_15_aot_dit/275d3f909e43f791 … run \`difflet compile\`
+with the same flags first.` (32.5 s wall). `difflet compile` then names the constraint in seconds.
+`b7b939b` moved the ring and multi-shape refusals in front of the encode; this SP shape check
+lives in the DiT config and still runs inside the transformer stage. Not counted as a bug (generate
+needs a compiled artifact, and compile fails fast with guidance). The follow-up option is a
+pre-encode check in `_run_aot` for generate: that the DiT manifest exists, or the token
+divisibility itself. Either one avoids an encode that can take minutes when the page cache is
+cold. Evidence: `E/phase3/tp4sp-reject/`.
