@@ -136,7 +136,7 @@ class _FP8LinearBase(nn.Module):
 
         if self.mx:
             if self.weight is None:
-                return
+                return  # already prepared, or fused into FusedFP8Projections
             if self.compute == "nki":
                 packed, scales = fp8_kernels.prepare_mx_weight(self.weight, self.weight_scale)
                 self.register_buffer("weight_packed", packed, persistent=False)
@@ -325,6 +325,82 @@ def fp8_linears(module: nn.Module) -> list[str]:
     return [name for name, child in module.named_modules() if isinstance(child, _FP8LinearBase)]
 
 
+class FusedFP8Projections(nn.Module):
+    """Several mxfp8 projections of one input (attention's q, k and v) as one kernel call.
+
+    The MX kernel quantizes its activation once per call, which at the attention projections'
+    small per-rank N (768 at tp4) costs as much as the matmul; three calls on the same input
+    pay it three times. Concatenating the three weights along N gives one call whose output is
+    split back. Built after the load from the three prepared layers' fp8 weights and scales
+    (``prepare_fp8_kernels_``), which then drop theirs; the attention processor calls
+    ``attn.fused_qkv`` / ``attn.fused_add_qkv`` when they exist.
+    """
+
+    def __init__(self, layers: list[_FP8LinearBase]) -> None:
+        super().__init__()
+        from difflet.backends.neuron.ops_impl import fp8_kernels
+
+        if not layers or any(not (l.mx and l.compute == "nki") for l in layers):
+            raise ValueError("fused projections need mxfp8 layers on the kernel path")
+        if any(l.weight is None for l in layers):
+            raise ValueError("fuse before the layers drop their weights (prepare_kernel_)")
+        if len({int(l.weight.shape[1]) for l in layers}) != 1:
+            raise ValueError("fused projections must share the input size")
+        biases = [l.bias for l in layers]
+        if any(b is None for b in biases) and not all(b is None for b in biases):
+            raise ValueError("fused projections must all have a bias or none")
+        weight = torch.cat([l.weight for l in layers], dim=0)
+        scale = torch.cat([l.weight_scale for l in layers], dim=0)
+        packed, scales = fp8_kernels.prepare_mx_weight(weight, scale)
+        self.register_buffer("weight_packed", packed, persistent=False)
+        self.register_buffer("weight_scales_hw", scales, persistent=False)
+        self.register_buffer("bias", None if biases[0] is None else torch.cat(biases, dim=0).detach(),
+                             persistent=False)
+        self.splits = [int(l.weight.shape[0]) for l in layers]
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
+        from difflet.backends.neuron.ops_impl import fp8_kernels
+
+        out = fp8_kernels.mx_linear(x, self.weight_packed, self.weight_scales_hw)
+        if self.bias is not None:
+            out = out + self.bias
+        return tuple(out.split(self.splits, dim=-1))
+
+    def extra_repr(self) -> str:
+        return f"splits={self.splits}, mxfp8 nki"
+
+
+#: Attention projections that consume one input: the attribute the fused layer gets, and the
+#: layers it fuses (``difflet.models.qwen_image.modeling_qwen_image`` reads the attributes).
+FUSED_PROJECTION_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("fused_qkv", ("to_q", "to_k", "to_v")),
+    ("fused_add_qkv", ("add_q_proj", "add_k_proj", "add_v_proj")),
+)
+
+
+def fuse_projections_(module: nn.Module) -> list[str]:
+    """Give every submodule whose ``to_q``/``to_k``/``to_v`` (and ``add_*_proj``) are mxfp8
+    kernel-path layers with their weights still loaded a :class:`FusedFP8Projections`; the
+    three layers then drop their weights. Returns the fused attributes' names. Only layers
+    whose output is not gathered (``gather_output=False`` or plain) fuse: a gathered output
+    would have to be gathered per split."""
+    fused: list[str] = []
+    for name, child in list(module.named_modules()):
+        for attr, members in FUSED_PROJECTION_GROUPS:
+            layers = [getattr(child, m, None) for m in members]
+            if not all(isinstance(l, _FP8LinearBase) and l.mx and l.compute == "nki"
+                       and l.weight is not None for l in layers):
+                continue
+            if any(getattr(l, "gather_output", False) for l in layers):
+                continue
+            child.add_module(attr, FusedFP8Projections(layers))
+            for l in layers:
+                l.weight = None
+                l.weight_scale = None
+            fused.append(f"{name}.{attr}" if name else attr)
+    return fused
+
+
 def prepare_fp8_kernels_(module: nn.Module, *, lnc: int | None = None) -> int:
     """``prepare_kernel_`` on every fp8 linear of ``module`` and tie the input scales of
     siblings that quantize the same activation; returns how many layers were packed.
@@ -339,6 +415,7 @@ def prepare_fp8_kernels_(module: nn.Module, *, lnc: int | None = None) -> int:
     keeps its own quantize op either way.
     """
     count = 0
+    fuse_projections_(module)
     by_parent: dict[str, list[_FP8LinearBase]] = {}
     for name, child in module.named_modules():
         if isinstance(child, _FP8LinearBase) and (child.compute == "nki" or child.mx):
@@ -370,6 +447,9 @@ __all__ = [
     "FP8ColumnParallelLinear",
     "FP8Linear",
     "FP8RowParallelLinear",
+    "FUSED_PROJECTION_GROUPS",
+    "FusedFP8Projections",
+    "fuse_projections_",
     "fp8_linears",
     "fp8_twin",
     "prepare_fp8_kernels_",

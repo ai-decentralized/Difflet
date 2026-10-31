@@ -184,3 +184,52 @@ def test_quantized_dir_mx(tmp_path):
     with pytest.raises(ValueError, match="needs a calibration"):
         prepare_quantized_checkpoint(src, default_spec("qwen_image"), None, create=True,
                                      cache_root=tmp_path / "cache")
+
+
+def test_fused_projections_concatenate_q_k_v():
+    torch.manual_seed(0)
+    attn = nn.Module()
+    layers = []
+    for name in ("to_q", "to_k", "to_v"):
+        layer = Q.FP8Linear(256, 64, compute="nki", mx=True)
+        _fill_mx(layer, torch.randn(64, 256) * 0.1)
+        with torch.no_grad():
+            layer.bias.normal_()
+        setattr(attn, name, layer)
+        layers.append(layer)
+    attn.to_out = nn.ModuleList([Q.FP8Linear(256, 256, compute="nki", mx=True)])  # K: 128-multiple
+    _fill_mx(attn.to_out[0], torch.randn(256, 256) * 0.1)
+    expect_w = torch.cat([l.weight for l in layers], 0)
+    expect_s = torch.cat([l.weight_scale for l in layers], 0)
+    expect_bias = torch.cat([l.bias for l in layers], 0)
+    data, scales = mx.kernel_layout(expect_w, expect_s)
+    root = nn.Module()
+    root.attn = attn
+    assert Q.fuse_projections_(root) == ["attn.fused_qkv"]
+    fused = root.attn.fused_qkv
+    assert isinstance(fused, Q.FusedFP8Projections) and fused.splits == [64, 64, 64]
+    assert torch.equal(fused.weight_packed, data) and torch.equal(fused.weight_scales_hw, scales)
+    assert torch.equal(fused.bias, expect_bias)
+    assert all(l.weight is None for l in layers) and attn.to_out[0].weight is not None
+    assert Q.fuse_projections_(root) == []  # idempotent: the weights are gone
+    # prepare_fp8_kernels_ fuses first, then prepares what is left.
+    assert Q.prepare_fp8_kernels_(root, lnc=2) == 4
+    assert attn.to_out[0].weight_packed is not None
+
+
+def test_gathered_or_partial_groups_do_not_fuse():
+    pm.init_parallel_mesh(MeshSpec(tp=2))
+    attn = nn.Module()
+    for name in ("to_q", "to_k", "to_v"):
+        layer = Q.FP8ColumnParallelLinear(256, 64, gather_output=True, compute="nki", mx=True)
+        _fill_mx(layer, torch.randn(32, 256))
+        setattr(attn, name, layer)
+    root = nn.Module()
+    root.attn = attn
+    assert Q.fuse_projections_(root) == []
+    attn2 = nn.Module()
+    attn2.to_q = Q.FP8Linear(256, 64, compute="nki", mx=True)
+    attn2.to_k = nn.Linear(256, 64)
+    root2 = nn.Module()
+    root2.attn = attn2
+    assert Q.fuse_projections_(root2) == []

@@ -329,12 +329,22 @@ class _QwenImageTrainiumAttnProcessor:
 
         seq_txt = encoder_hidden_states.shape[1]
 
-        img_query = attn.to_q(hidden_states)
-        img_key = attn.to_k(hidden_states)
-        img_value = attn.to_v(hidden_states)
-        txt_query = attn.add_q_proj(encoder_hidden_states)
-        txt_key = attn.add_k_proj(encoder_hidden_states)
-        txt_value = attn.add_v_proj(encoder_hidden_states)
+        # The neuron backend's FP8 path fuses each stream's three projections into one kernel
+        # call (``ops_impl/fp8_linear.FusedFP8Projections``); other backends have no such attr.
+        fused_qkv = getattr(attn, "fused_qkv", None)
+        if fused_qkv is not None:
+            img_query, img_key, img_value = fused_qkv(hidden_states)
+        else:
+            img_query = attn.to_q(hidden_states)
+            img_key = attn.to_k(hidden_states)
+            img_value = attn.to_v(hidden_states)
+        fused_add_qkv = getattr(attn, "fused_add_qkv", None)
+        if fused_add_qkv is not None:
+            txt_query, txt_key, txt_value = fused_add_qkv(encoder_hidden_states)
+        else:
+            txt_query = attn.add_q_proj(encoder_hidden_states)
+            txt_key = attn.add_k_proj(encoder_hidden_states)
+            txt_value = attn.add_v_proj(encoder_hidden_states)
 
         img_query = img_query.unflatten(-1, (attn.heads, -1))
         img_key = img_key.unflatten(-1, (attn.heads, -1))
