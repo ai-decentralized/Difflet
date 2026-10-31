@@ -149,7 +149,7 @@ call (N = 2304) is the next win (`probe_qkv_share.py`: one fp8 call 0.30 ms vs t
 |---|---|---|
 | quantized checkpoint | 26 GB (`quantized/…/transformer/mxfp8-545621be9e816402`), written by `compile` | `compile.log` |
 | compile (cold NEFF cache) | 5 min 55 s wall; 60 blocks; load+warmup 264 s | `compile.log` |
-| generate start-up (warm) | load 57–66 s, of which `eval` 43–49 s = `prepare_fp8_kernels_` building the kernel layout on the device (to optimise); warm-up forward 5 s | `gen*.log` |
+| generate start-up (warm) | load 57–66 s, of which `eval` 43–49 s = `prepare_fp8_kernels_` building the kernel layout on the device; after commit `d5e8e4c` (layout on the host) load 36.6 s, `eval` 22.8 s (`qwen_mx_nki_tp4_fused/gen3.log`); warm-up forward 5 s | `gen*.log` |
 | **DiT step median** | **267 ms** (n=49, max 271; the same on all four runs) | `gen50a.log` `request:` line |
 | warm e2e (CLI wall) | 2 min 25 s at 50 steps (the start-up above dominates) | `gen50a.log` |
 | determinism | gen50a.png == gen50b.png (md5 `271c9fcde17a…`) | |
@@ -160,7 +160,33 @@ The bf16 step by the same `request:` timing (`qwen_bf16_tp4_timed/gen50a.log`, `
 **298.8 / 299.2 ms** (n=49). So mxfp8 is **0.89x** per step, between the proposed 0.80x
 "ship" and 0.90x "no-go" marks. (The 50-vs-25-step difference method overstated the bf16 step
 at 336 ms because it included per-launch costs.) bf16's start-up is 16 s of load against
-mxfp8's 57–66 s (the 45 s kernel-layout preparation on the device).
+mxfp8's 57–66 s (the 45 s kernel-layout preparation on the device; 36.6 s after `d5e8e4c`).
+
+### 6a. Fusing q/k/v into one kernel call: no step-time change
+
+Commit `5c92643` concatenates each stream's three projections (N = 3 x 768 at tp4) into one
+`matmul_mxfp8` call, so the in-kernel activation quantize runs once instead of three times
+(`FusedFP8Projections`, built after the load; the attention processor calls
+`attn.fused_qkv` / `attn.fused_add_qkv`). On the device the step median is unchanged:
+**267.7 ms** at 50 steps (`qwen_mx_nki_tp4_fused/gen50a.log`, n=49, max 271; 266.9 at 3
+steps) against 267.7 ms unfused; the tp1 2-block probe is 13.6 vs 13.4 ms per block. Quality
+vs the bf16 baseline is the same as unfused: PSNR 29.28 dB, SSIM 0.974, LPIPS 0.039, latent
+cosine 0.9912 (`vs_bf16_gen50a.json`); the image differs from the unfused run's bits (the
+kernel's N tiling changes the accumulation order). The compile dropped from 5 min 55 s to 2 min 19 s (60
+blocks, load+warmup 85.7 s), mostly the host-side layout. The fusion stays (it is correct and
+costs nothing) but the single-layer microbenchmark's 0.30-vs-0.57 ms did not carry into the
+block graph: the projections are not where the block's time goes.
+
+### 6b. Where the block's time goes (tp1 2-block probe, `probe_block_step.py`)
+
+The first subset runs of this probe were invalid: `--targets` was applied only on the static
+branch, so every "subset" quantized all 12 layers (all read 13.4 ms per block against bf16
+16.4 ms). Corrected runs: see the table below. A bf16 block with a trivial NKI copy kernel
+inserted before `to_q`, `to_out`, `to_add_out` or MLP-down stays at 16.4–16.9 ms (19.8 ms
+before `to_q`), so the presence of a custom op by itself does not change the compiler's
+schedule. The elementwise work at the per-rank shapes is not small: standalone compiled
+`gelu(tanh)` on 5120 x 3072 bf16 is 0.34 ms, a modulation 0.16 ms, a residual add 0.16 ms, a
+layer norm 0.23 ms (one core); a 3072 x 3072 bf16 matmul on the same rows is 0.74 ms.
 
 ## Bug ledger
 
@@ -168,5 +194,11 @@ mxfp8's 57–66 s (the 45 s kernel-layout preparation on the device).
    behaviour, worked around by moving the quantize into the kernel (mxfp8). A minimal repro is
    `probe_variants.py` case B; not filed with AWS (user decision).
 2. **NKI kernel trace repeated per launch**: without `DIFFLET_NKI_TRACE_CACHE=1` every generate
-   re-traced the kernel at 720 call sites (191 s). The FP8 jobs set it; making `--quant` turn
-   it on is a follow-up.
+   re-traced the kernel at 720 call sites (191 s). Fixed in `d5e8e4c`: the Qwen orchestrator
+   sets it for the ranks when `--quant`'s compute is the kernel (an explicit value is kept).
+3. **mxfp8 dequant mode dequantized inside the block graph**: the application prepared layers
+   after the load only on the kernel path, so `--quant-compute dequant` traced the block-scale
+   dequantization (a permutation gather) into every block: 6.9 s per block on one core.
+   Fixed in `596cffb` (prepare every quantized layer; the dequant path dequantizes once).
+4. **`prepare_fp8_kernels_` 45 s on the device**: `kernel_layout` eager on the device is a
+   chain of small launches per layer. Fixed in `d5e8e4c` (layout on the host, moved once).
