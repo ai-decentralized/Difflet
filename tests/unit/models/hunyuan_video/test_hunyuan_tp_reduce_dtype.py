@@ -88,6 +88,56 @@ def test_fp32_opt_in(monkeypatch):
 
 
 @pytest.mark.parametrize(
+    ("constructor", "args"),
+    [
+        (
+            "HunyuanVideoTransformer3DModel",
+            (
+                2,
+                2,
+                2,
+                4,
+                1,
+                1,
+                1,
+                2.0,
+                2,
+                1,
+                "rms_norm",
+                True,
+                6,
+                5,
+                256.0,
+                (2, 2, 0),
+                None,
+                False,
+                "gather_kv",
+                False,
+                torch.float32,
+            ),
+        ),
+        (
+            "HunyuanVideoTransformerBlock",
+            (2, 4, 2.0, "rms_norm", False, "gather_kv", False, torch.float32),
+        ),
+        (
+            "HunyuanVideoSingleTransformerBlock",
+            (2, 4, 2.0, "rms_norm", False, "gather_kv", False, torch.float32),
+        ),
+    ],
+)
+def test_legacy_positional_reduce_dtype_is_preserved(monkeypatch, constructor, args):
+    recorder = _Recorder()
+    monkeypatch.setattr(hv, "RowParallelLinear", recorder)
+    module = getattr(hv, constructor)(*args)
+    assert recorder.calls
+    assert {call["reduce_dtype"] for call in recorder.calls} == {torch.float32}
+    attention = getattr(module, "attn", None)
+    if attention is not None:
+        assert attention.joint_attention_mask_mode == "bounds"
+
+
+@pytest.mark.parametrize(
     ("rpl_reduce_dtype", "expected"),
     [(None, torch.bfloat16), (torch.float32, torch.float32), (torch.bfloat16, torch.bfloat16)],
 )

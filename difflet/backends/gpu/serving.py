@@ -155,6 +155,9 @@ def refuse_unsupported_profile(profile: ServingProfile, spec: ModelSpec) -> None
     ``build_serving_profile`` already refuses ``--cfg-parallel`` and the TeaCache modes it
     cannot serve for every model; these checks are the worker's backstop for a bundle that did
     not come through it."""
+    from difflet.backends.gpu.policy import validate_gpu_shape
+
+    validate_gpu_shape(spec, height=profile.height, width=profile.width, num_frames=profile.num_frames)
     if profile.shapes:
         _refuse(spec, "--shapes (bucketed request shapes)")
     parallel = profile.parallel

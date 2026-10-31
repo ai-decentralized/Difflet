@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import importlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable
 
 from difflet.common.registry.base import ServingModelMetadata
@@ -55,6 +55,10 @@ def resolve_serving_model(options: ServeOptions) -> ResolvedServingModel:
         from difflet.serving.errors import feature_not_supported
 
         metadata = _gpu_serving_metadata(entry.name, options.model_id, platform)
+        if options.clip_placement is not None:
+            raise feature_not_supported(
+                "--clip-placement is a Trainium placement option; GPU serving keeps its text encoders on the GPU"
+            )
         if normalized not in metadata.checkpoint_ids:
             allowed = ", ".join(metadata.checkpoint_ids)
             raise feature_not_supported(
@@ -103,6 +107,10 @@ def resolve_serving_model(options: ServeOptions) -> ResolvedServingModel:
         teacache_calibration=options.teacache_calibration,
         torch_compile=bool(getattr(options, "torch_compile", False)),
     )
+    if on_gpu and profile.clip_placement is not None:
+        # The staged Hunyuan profile defaults CLIP to the host; GPU execution has
+        # no host/Neuron placement split. Explicit overrides were refused above.
+        profile = replace(profile, clip_placement=None)
     return ResolvedServingModel(
         model_id=options.model_id,
         base_entry=entry,

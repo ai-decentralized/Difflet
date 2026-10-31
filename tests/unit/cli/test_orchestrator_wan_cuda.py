@@ -1,5 +1,5 @@
-"""Wan 2.2 on the GPU CLI flow: what only Wan does. The video output (MP4 through the Trainium
-orchestrator's ``_save_video``, ``.pt`` fallback), CFG-parallel under ``torchrun`` and per-request
+"""Wan 2.2 on the GPU CLI flow: what only Wan does. The video output (shared MP4 encoder,
+``.pt`` fallback), CFG-parallel under ``torchrun`` and per-request
 negative prompts. The flow itself is tested once per model in test_gpu_cli.py.
 
 CPU-only: DiffletPipeline.from_pretrained is replaced by a recorder; no weights, no GPU.
@@ -13,7 +13,7 @@ import sys
 import pytest
 import torch
 
-from difflet.cli.orchestrators import wan as trainium_wan
+from difflet.serving import video_media
 from difflet.models.wan.spec import SPEC
 from tests.unit.cli import test_gpu_cli as gpu_cli_tests
 from tests.unit.cli.test_gpu_cli import _App, _batch, _exploding_generate, _manifest, _orch
@@ -39,7 +39,10 @@ def test_generate_writes_the_mp4_through_save_video(recorder, saved, tmp_path):
 
 
 def test_a_failed_mp4_export_falls_back_to_a_pt_tensor(recorder, monkeypatch, tmp_path):
-    monkeypatch.setattr(trainium_wan, "_save_video", lambda tensor, path: False)
+    def fail(*args, **kwargs):
+        raise video_media.VideoMediaEncodingError("encoding failed")
+
+    monkeypatch.setattr(video_media, "encode_tensor_to_mp4", fail)
     out = tmp_path / "wan.mp4"
     orch = _orch(SPEC, output=str(out))
     orch.generate()

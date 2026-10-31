@@ -41,6 +41,11 @@ SCANNED = [
     Path("difflet/models/qwen_image/spec.py"),
     Path("difflet/models/wan/dit_config.py"),
     Path("difflet/models/wan/spec.py"),
+    Path("difflet/models/hunyuan_video/modeling_hunyuan_video.py"),
+    Path("difflet/models/hunyuan_video/dit_config.py"),
+    Path("difflet/models/hunyuan_video/prompt.py"),
+    Path("difflet/models/hunyuan_video/spec.py"),
+    Path("difflet/models/hunyuan_video/checkpoint/transformer.py"),
 ]
 
 OPS_MODULES = ("attention", "collectives", "embeddings", "linear", "mx", "norm", "platform")
