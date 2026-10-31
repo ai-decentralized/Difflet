@@ -298,6 +298,30 @@ norm + rope + bias in a kernel epilogue, or an un-fused q/k/v the compiler can p
 (ii) a kernel load path without the gather-transpose (activations handed over pre-laid-out);
 (iii) the throttle. None is in this change.
 
+## 7. FLUX.1-dev in mxfp8 (`--quant mxfp8`), tp4, 1024x1024, 28 steps, seed 42
+
+Commit `23c731d` wires FLUX (targets: the dual-stream blocks' q/k/v for both streams and both
+MLPs, the single-stream blocks' q/k/v and `proj_mlp`; `to_out.0`, `to_add_out` and the single
+blocks' `proj_out` stay bf16). The native backend's first FLUX run on trn3; the bf16 compile
+(VAE 71 s, DiT 33 s) and both arms ran clean. `/home/ubuntu/fp8-bench/flux_tp4/`.
+
+| | bf16 | mxfp8 (default FLUX targets, 18 per dual+single pair) |
+|---|---|---|
+| DiT step median (n=27) | 222.6 / 222.1 ms | 220.1 / 218.5 ms (**0.99x**) |
+| compile | VAE 71 s + DiT 33 s + T5 9 s | quantized checkpoint written; DiT load 60 s |
+| generate load (warm) | 15.5 s (DiT 6.7) | 25 s (DiT 16) |
+| determinism | gena == genb (md5 `8b217058…`) | gena == genb (md5 `0175c118…`) |
+| image vs bf16 | — | **PSNR 31.72 dB, SSIM 0.972, LPIPS 0.023** |
+
+Quality passes the gates; the step does not move. Two differences from Qwen-Image explain
+part of it: the single-stream blocks' largest matmul, `proj_out` (15360 → 3072, the fused
+attention + MLP output), is kept bf16 (the module reads it as two column ranges of the
+checkpoint tensor, which the quantized writer would have to slice with its block scales), so
+only ~58% of a single block's linear FLOPs are quantized against ~86% of a Qwen block's; and
+the profiler's finding (6e) that a bf16 matmul left between custom calls compiles worse
+applies to `proj_out` in every single block. Layer-set variants (dual blocks only, single
+blocks only, dual MLPs only) follow.
+
 ## Bug ledger
 
 1. **Static-FP8 kernel path pathological inside block graphs** (section 5): compiler
