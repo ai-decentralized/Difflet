@@ -502,6 +502,7 @@ the `aot_vae` stage. *RSS*: peak host RSS of the `aot_transformer` / `aot_vae` s
 | tp4sp (`--tp-degree 4 --sp`) | **PASS** | 6.1 (327.3) | 544.8 | 22.1 (warm) | 81.2 / 1601 | 5.25 x4 | 409.4 | 21.0 / 18.5 | 0.955830 (no NaN/Inf) | `E/phase2/tp4sp/` |
 | tp2cp2-ulysses (`--tp-degree 2 --cp-degree 2 --cp-mode ulysses`) | **PASS** | 6.6 (615.9) | 1235.9 | 697.0 (cold) | 90.5 / 1783 | 8.69 x4 | 417.5 | 35.9 / 19.4 | 0.963593 (no NaN/Inf) | `E/phase2/tp2cp2-ulysses/` |
 | tp2cp2-gather_kv (`--tp-degree 2 --cp-degree 2 --cp-mode gather_kv`) | **PASS** | 6.9 (332.8) | 606.8 | 67.2 (warm) | 94.1 / 1858 | 8.89 x4 | 414.1 | 35.9 / 17.2 | 0.955108 (no NaN/Inf) | `E/phase2/tp2cp2-gather_kv/` |
+| dp2tp2 (`--tp-degree 2 --dp 2`, 1 request) | **PASS** | 6.1 (462.2, TP2) | 748.6 | 155.4 / 156.0 | 137.1 / 2690 | 9.98 / 9.98 / 10.25 / 10.25 | 415.6 | 37.5 (both workers) / 19.7 | 0.969352 (no NaN/Inf) | `E/phase2/dp2tp2/` |
 
 **tp2cfg.** Encode 9.0 s. Mid frame: a red fox running left to right across snow, snowy
 pines behind (`gen50_mid.png`); 61 frames, minimum per-frame std 67.3, mean frame-to-frame
@@ -542,3 +543,12 @@ vs tp2cfg (informational). Step 1858 ms, 4% slower than ulysses (1783 ms): every
 the full K/V. Its weight shards are hardlinks of the ulysses artifact's (same inode, link count
 3: `tp0_sharded_checkpoint.safetensors`, 8.5 GB), which the ulysses cell had just read, so its
 67.2 s load is a warm-page-cache figure.
+
+**dp2tp2.** One request, as `verify_cli`'s dp2tp2 cell sends: the CLI warns `--dp > 1 with a
+single request leaves replicas idle`, the router pins `worker 0: cores 0-1` and `worker 1: cores
+2-3`, both workers encode-load and load the TP2 DiT (155.4 / 156.0 s), worker 0 denoises and
+decodes, and the router ends `done=1 failed=0 unfinished=0`. A replica is TP2 with CFG's two
+passes in sequence, so its step (2690 ms) matches Phase 1's aot-tp2 (2719 ms at 3 steps). Each
+2-core replica fits: 9.98 / 10.25 GiB per core at peak, no HBM limit. Mid frame: the same fox and
+snow scene (`gen50_mid.png`); minimum per-frame std 67.7. Cosine 0.969 vs tp2cfg
+(informational). Bit-identity across replicas is the separate DP check below.
