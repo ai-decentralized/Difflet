@@ -244,6 +244,23 @@ def test_aot_stage_cache_key_fields(tmp_path):
     assert {"model", "dtype", "shape", "tile", "toolchain"} <= set(vae_inputs)
 
 
+def test_aot_stage_cache_key_has_graph_version(tmp_path, monkeypatch):
+    """A changed traced DiT graph (e.g. text_valid becoming input #10) must compile into a
+    fresh dir rather than load a stale artifact: the graph version is part of the key."""
+    from difflet.backends.trainium.hunyuan_video import backbone15
+
+    args = _stage_args(tmp_path)
+    orch = hv15.HunyuanVideo15Orchestrator(args)
+    inputs = orch._aot_stage_cache_inputs(args, "transformer")
+    assert inputs["graph_version"] == backbone15._AOT_DIT_GRAPH_VERSION >= 2
+    assert "graph_version" not in orch._aot_stage_cache_inputs(args, "vae")
+    before = orch._aot_compiled_dir(args, "transformer")
+    vae = orch._aot_compiled_dir(args, "vae")
+    monkeypatch.setattr(backbone15, "_AOT_DIT_GRAPH_VERSION", backbone15._AOT_DIT_GRAPH_VERSION + 1)
+    assert orch._aot_compiled_dir(args, "transformer") != before
+    assert orch._aot_compiled_dir(args, "vae") == vae
+
+
 # ------------------------------------------------- the aot_transformer stage (application stubbed)
 
 
