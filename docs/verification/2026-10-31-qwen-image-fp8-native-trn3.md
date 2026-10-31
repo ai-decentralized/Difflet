@@ -245,6 +245,47 @@ metrics move by about 1.5 dB between layer sets that should order the other way 
 30.2 dB vs 10 layers 31.6 dB), so differences of that size are noise, not signal. **noout is
 the default layer set** (commit below); `DIFFLET_QUANT_TARGETS` restores any other.
 
+### 6e. Profiler: where the block's time goes (neuron-explorer 2.33, one logical core)
+
+Captures of the cached one-block NEFFs (tp1 shapes; `neuron-profile` is a stub, the tool is
+`neuron-explorer capture --num-exec=3 --profile-nth-exec=3`, then `view --output-format
+summary-text|json`); scripts and the 2 GB JSON profiles under
+`/home/ubuntu/.claude/jobs/238a7774/tmp/profile/`. Device time per block (the probe's wall time
+is ~1.5 ms more in every variant: launch glue outside the NEFF):
+
+| | bf16 | mxfp8, all 12 (fused q/k/v) | mxfp8, attention only |
+|---|---|---|---|
+| device time | 14.87 ms | 12.03 ms | 16.12 ms |
+| TensorE busy | 13.80 ms (93%) | 8.41 ms (70%) | 12.03 ms (75%) |
+| VectorE / ScalarE / GpSimd busy | 7.97 / 4.48 / 3.06 | 9.56 / 2.95 / 4.76 | 9.25 / 5.22 / 3.02 |
+| SBUF write bytes; spill reloads | 11.8 GB; 1.5 GB | 36.1 GB; 12.9 GB | 20.8 GB; 5.1 GB |
+| utilisation-throttled time | 2.6 ms | 6.0 ms | 6.1 ms |
+
+The bf16 block: the 12 quantizable linears are **8.0 ms** of TensorE time (img MLP up/down
+2.06 + 2.09, q/k/v 0.58 + 0.57 + 0.53, txt MLP 0.53 + 0.51, to_out 0.51, add_q/k/v ~0.17 each,
+to_add_out 0.13); the attention kernel is 4.0 ms and softmax-bound on VectorE (FP8 does not
+touch it); modulation linears 0.2 ms; norms, rope, GELU and residuals ~2.5 ms, mostly
+overlapped with the matmuls (TensorE 91–98% busy in every phase).
+
+The mxfp8 block: the eight `matmul_mxfp8` calls span **5.2 ms** (1.55x the bf16 dots, not the
+microbenchmark's 2x) with TensorE busy only 55% of that span: the kernel is bound by GpSimd
+`DMA_GATHER_TRANSPOSE` loads of the activation tiles (3.4 ms, absent in bf16) and VectorE
+`QUANTIZE_MX` plus copies (2.7 ms); when `MATMUL_MX` runs it is fast (~390 TFLOPS active
+against bf16's 117). The custom call is opaque to the compiler: q/k RMSNorm, rope and the
+bias add that overlapped the bf16 q/k/v dots now wait for the kernel and run with TensorE
+21% busy for 1.6 ms (~1.3 ms lost). Hardware utilisation throttling is active 6.0 of 12.0 ms
+against 2.6 of 14.9 in bf16.
+
+Attention-only is slower for two reasons the table shows: the same post-kernel idle window
+(+1.3 ms), and the untouched bf16 img MLP compiling worse once custom calls split the graph:
+4.57 → 6.1 ms (up and down no longer interleaved, GELU serialised on ScalarE with the down
+projection, 11.4k ACTIVATE instructions against 6.8k, semaphore waits 1.73 vs 0.17 ms).
+
+What would move the step further, in order: (i) let the kernel overlap its neighbours (q/k
+norm + rope + bias in a kernel epilogue, or an un-fused q/k/v the compiler can pipeline);
+(ii) a kernel load path without the gather-transpose (activations handed over pre-laid-out);
+(iii) the throttle. None is in this change.
+
 ## Bug ledger
 
 1. **Static-FP8 kernel path pathological inside block graphs** (section 5): compiler
