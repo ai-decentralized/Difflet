@@ -313,20 +313,24 @@ def test_probe_reset_state_zeroes_prev_mod():
         NeuronHunyuanVideo15TeacacheProbeFusedApplication as ProbeApp,
     )
 
-    class _Nxd:
+    # The shape of what torch.jit.load hands back (neuronx_distributed.trace.spmd.NxDModel):
+    # per-rank device state in ``.state``; no ``.states`` and no ``write_to_neuron_buffer``
+    # (those are the newer, non-jit NxDModel's). On device the old code died here with
+    # AttributeError: 'RecursiveScriptModule' object has no attribute 'states'.
+    class _JitLoadedNxd:
         def __init__(self):
-            self.states = [{"prev_mod": torch.ones(1, 3, 2)}, {"prev_mod": torch.ones(1, 3, 2)}]
-            self.writes = []
+            self.state = [{"prev_mod": torch.ones(1, 3, 2)}, {"prev_mod": torch.ones(1, 3, 2)}]
 
-        def write_to_neuron_buffer(self, tensor, key, rank):
-            self.writes.append((key, rank))
-            self.states[rank][key].copy_(tensor)
+        def __getattr__(self, name):
+            raise AttributeError(f"'RecursiveScriptModule' object has no attribute '{name}'")
 
-    nxd = _Nxd()
+    nxd = _JitLoadedNxd()
+    buffers = [s["prev_mod"] for s in nxd.state]
     probe = SimpleNamespace(traced_model=SimpleNamespace(nxd_model=nxd))
     ProbeApp.reset_state(probe)
-    assert nxd.writes == [("prev_mod", 0), ("prev_mod", 1)]
-    assert all(not s["prev_mod"].any() for s in nxd.states)
+    # Zeroed in place: the device buffers the probe NEFF reads are these tensor objects.
+    assert all(s["prev_mod"] is b for s, b in zip(nxd.state, buffers))
+    assert all(not b.any() for b in buffers)
     # Before load there is no device state: prev_mod is zero-initialised at load.
     ProbeApp.reset_state(SimpleNamespace(traced_model=None))
 
