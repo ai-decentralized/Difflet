@@ -625,3 +625,54 @@ needs a compiled artifact, and compile fails fast with guidance). The follow-up 
 pre-encode check in `_run_aot` for generate: that the DiT manifest exists, or the token
 divisibility itself. Either one avoids an encode that can take minutes when the page cache is
 cold. Evidence: `E/phase3/tp4sp-reject/`.
+
+#### AOT TP2 x CFG2 at 480x848x121: BLOCKED (neuronx-cc internal error NCC_IRPX901)
+
+`difflet compile --height 480 --width 848 --num-frames 121 --tp-degree 2 --cfg-parallel` exits
+1 after **1807.7 s** wall. No NEFF is written and there is nothing to generate from.
+
+| phase | time | observation |
+|---|---|---|
+| module load | 37.9 s | `Finished loading module HunyuanVideo15Transformer3DModel` |
+| HLO generation (torch-xla trace of the whole DiT, one process at 100% CPU) | **1729.8 s** | input example `[2, 65, 31, 30, 53]`; stage RSS rose steadily to a 31.9 GiB peak |
+| neuronx-cc 2.26.6360 (`-O1 --model-type=transformer`) | ~30 s | fails in the Tensorizer, pass `RelaxPredicates`, right after `LegalizeSundaAccess` (`instance_count_change=+136991`) |
+
+```
+…/HunyuanVideo15Transformer3DModel[.1]/aten.sum.dim_IntList/aten__sum_reduce.223 [INTERNAL_ERROR] [NCC_IRPX901] RelaxPredicates assertion error: inst should be valid after relaxing predicates - Please open a support ticket at https://github.com/aws-neuron/aws-neuron-sdk/issues/new.
+```
+
+**Which op.** Decoding the HLO module (`libneuronxla.proto.hlo_pb2`) shows that `reduce.223` is
+an f32 sum over dim 1 of `convert.216`, an f32 `[1, 1985]` tensor, giving `[1]`. 1985 = 1000
+(Qwen) + 256 (ByT5) + 729 (image) text slots. That is the fp32 valid-text count in
+`backbone15.py:704`, `text_valid = encoder_attention_mask.float().sum(1).to(torch.int32)`, which
+feeds the bounded attention kernel's bounds in every block. Phase 1 and Phase 2 compiled the
+same reduction at 320x512x61 (10240 image tokens) in every layout. Only the surrounding graph
+changes at 49290 image tokens, so the failure depends on context. The op's own shape is the
+same at both sizes.
+
+**Toolchain and flags (CPU-only re-runs of the saved HLO, stopped after the Tensorizer):**
+
+| compiler | flags | result |
+|---|---|---|
+| neuronx-cc 2.26.6360 (AOT venv) | as Difflet (`-O1`) | NCC_IRPX901 on `aten__sum_reduce.223` |
+| neuronx-cc 2.26.6360 | `-O2` | same NCC_IRPX901, same op |
+| neuronx-cc 2.28.7631 (native-312 venv) | as Difflet (`-O1`) | same NCC_IRPX901, same op |
+
+So a toolchain bump to 2.28 does not lift it, and neither does the optimisation level. This is
+a vendor compiler internal error, not a Difflet logic bug. It would need a Difflet-side
+workaround in the traced graph (see the follow-up options below).
+
+**Follow-up options (not attempted; each changes the DiT graph at every shape):**
+1. Feed `text_valid` as a precomputed int32 input. It is the number of valid entries across
+   the three text masks; `text_order` only permutes them. It would be computed on the host (or
+   in the encode stage), and the in-graph reduction disappears.
+2. Compute the count without a reduce op, e.g. `mask.float() @ ones(1985, 1)`, keeping the
+   fp32-then-int32 rule.
+
+Both change the traced graph at every shape, so with the current cache key (no code version)
+every Phase 1/2 artifact would have to be invalidated by hand and re-gated. Each default-shape
+attempt costs at least 30 min of HLO generation before neuronx-cc starts. Past the Tensorizer,
+the backend's time on 51k-token bounded attention is unknown: spike (c) ran a single such call
+for more than 45 min without finishing. Evidence: `E/phase3/tp2cfg/compile.log`,
+`ncc226_O1_log_tail.log`, `ncc226_O2_log_tail.log`, `ncc228_O1_log_tail.log`,
+`ncc_command.log`.
