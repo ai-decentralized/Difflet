@@ -32,7 +32,6 @@ def test_one_core_stage_sets_neuron_rt_num_cores(monkeypatch):
 
 @pytest.mark.parametrize("host, inherited, num_cores, expected", [
     (4, None, 2, "0,1"),        # hv15 AOT TP2 (serial CFG) on a trn2.3xlarge
-    (16, None, 8, "0,1,2,3,4,5,6,7"),
     (4, "2-3", 1, None),        # one core keeps NEURON_RT_NUM_CORES (see above)
     (8, "4-7", 2, "4,5"),       # stays inside the inherited allocation
 ])
@@ -56,6 +55,37 @@ def test_partial_multi_core_stage_names_its_cores(monkeypatch, host, inherited, 
     else:
         assert "NEURON_RT_NUM_CORES" not in captured["env"]
         assert captured["env"]["NEURON_RT_VISIBLE_CORES"] == expected
+
+
+def test_partial_multiple_of_8_stage_keeps_num_cores(monkeypatch):
+    captured = {}
+    monkeypatch.setattr("subprocess.run", lambda cmd, env, check: captured.update({"env": env}))
+    monkeypatch.delenv("NEURON_RT_NUM_CORES", raising=False)
+    monkeypatch.delenv("NEURON_RT_VISIBLE_CORES", raising=False)
+    monkeypatch.setattr("difflet.common.neuron_cores.default_neuron_core_ids", lambda: tuple(range(32)))
+    from difflet.cli.runner import run_stage
+
+    run_stage("hv15", "aot_transformer", num_cores=8, virtual_core_size=2, cli_args=[])
+    assert captured["env"]["NEURON_RT_NUM_CORES"] == "8"
+    assert "NEURON_RT_VISIBLE_CORES" not in captured["env"]
+
+
+def test_partial_stage_falls_back_when_core_detection_fails(monkeypatch):
+    captured = {}
+    monkeypatch.setattr("subprocess.run", lambda cmd, env, check: captured.update({"env": env}))
+    monkeypatch.delenv("NEURON_RT_NUM_CORES", raising=False)
+    monkeypatch.delenv("NEURON_RT_VISIBLE_CORES", raising=False)
+
+    def boom(required_num_cores):
+        raise RuntimeError("no neuron devices")
+
+    monkeypatch.setattr("difflet.cli.runner.resolve_available_neuron_core_ids", boom)
+    monkeypatch.setattr("difflet.cli.runner.select_neuron_core_ids", boom)
+    from difflet.cli.runner import run_stage
+
+    run_stage("hv15", "aot_transformer", num_cores=2, virtual_core_size=2, cli_args=[])
+    assert captured["env"]["NEURON_RT_NUM_CORES"] == "2"
+    assert "NEURON_RT_VISIBLE_CORES" not in captured["env"]
 
 
 def test_whole_device_stage_leaves_num_cores_unset(monkeypatch):

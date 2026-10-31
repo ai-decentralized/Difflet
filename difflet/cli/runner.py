@@ -237,15 +237,18 @@ def run_stage(
         env.update({"WORLD_SIZE": "1", "LOCAL_WORLD_SIZE": "1", "RANK": "0", "LOCAL_RANK": "0"})
     else:
         if not _is_whole_device(num_cores):
-            if num_cores == 1 or "NEURON_RT_NUM_CORES" in os.environ:
+            # NRT 2.35 rejects partial non-multiple-of-8 NEURON_RT_NUM_CORES (multiples of 8 are accepted),
+            # so such a stage names its cores instead; if they cannot be resolved, keep the old path.
+            visible_core_ids = None
+            if num_cores != 1 and num_cores % 8 != 0 and "NEURON_RT_NUM_CORES" not in os.environ:
+                try:
+                    visible_core_ids = select_neuron_core_ids(required_num_cores=num_cores)
+                except Exception:
+                    visible_core_ids = None
+            if visible_core_ids is None:
                 env.setdefault("NEURON_RT_NUM_CORES", str(num_cores))
             else:
-                # The runtime accepts NEURON_RT_NUM_CORES only as one core or a whole device
-                # ("must request one core, or the whole device (multiple of 8)", NRT 2.35);
-                # a partial multi-core stage names its cores instead.
-                env["NEURON_RT_VISIBLE_CORES"] = ",".join(
-                    str(core_id) for core_id in select_neuron_core_ids(required_num_cores=num_cores)
-                )
+                env["NEURON_RT_VISIBLE_CORES"] = ",".join(str(core_id) for core_id in visible_core_ids)
         if virtual_core_size is not None:
             env.setdefault("NEURON_RT_VIRTUAL_CORE_SIZE", str(virtual_core_size))
 
