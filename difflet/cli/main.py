@@ -1030,7 +1030,7 @@ def _resolve_total_cores(args: argparse.Namespace) -> tuple[int | None, str]:
         # GPUs, not NeuronCores: the visible-devices variable already narrows the count.
         count = platform.device_count()
         if count is not None:
-            return count, "torch.cuda.device_count()"
+            return count, f"torch.{platform.device_type}.device_count()"
         return None, "undetected"
 
     env_value = os.environ.get("NEURON_RT_NUM_CORES", "").strip()

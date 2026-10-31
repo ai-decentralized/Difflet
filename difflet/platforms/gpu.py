@@ -1,8 +1,12 @@
-"""The GPU platform family: eager torch on ``cuda``-type devices, one process per GPU.
+"""The GPU platform family: eager torch on one torch device type per platform, one process per
+device.
 
 CUDA and ROCm share it: torch on ROCm exposes its devices under the ``cuda`` device type, so
 the generic GPU flow (``difflet.backends.gpu``) runs on either; a subclass supplies detection,
-runtime checks and its toolchain versions.
+runtime checks and its toolchain versions. The flow never names a device type itself: it reads
+``device_type`` and calls the device hooks (``device_available``, ``set_current_device``,
+``device_count``, ``device_memory_bytes``), whose defaults here are the ``torch.cuda`` ones. A
+platform with another device type overrides those hooks and nothing in the flow.
 """
 
 from __future__ import annotations
@@ -29,18 +33,48 @@ class GpuPlatform(Platform):
         supports_torch_compile=True,
         device_unit="GPUs",
     )
+    #: The torch device type the flow builds ``torch.device(...)`` from and checks tensors
+    #: against after load.
+    device_type = "cuda"
     #: The environment variable that restricts a process to some of the host's GPUs.
     visible_devices_var = "CUDA_VISIBLE_DEVICES"
     #: ``torch.distributed`` backend for multi-process runs.
     distributed_backend = "nccl"
 
-    def _require_device(self) -> None:
+    # ------------------------------------------------------------ device hooks
+
+    def device_available(self) -> bool:
+        """True when torch can use a device of ``device_type`` on this host."""
         import torch
 
-        if not torch.cuda.is_available():
+        return bool(torch.cuda.is_available())
+
+    def set_current_device(self, index: int) -> None:
+        """Bind this process to device ``index`` (counted among its visible devices)."""
+        import torch
+
+        torch.cuda.set_device(index)
+
+    def device_count(self) -> int | None:
+        import torch
+
+        return int(torch.cuda.device_count()) if self.device_available() else None
+
+    def device_memory_bytes(self) -> int | None:
+        import torch
+
+        if not self.device_available():
+            return None
+        return int(torch.cuda.get_device_properties(0).total_memory)
+
+    # ---------------------------------------------------------------- runtime
+
+    def _require_device(self) -> None:
+        if not self.device_available():
             raise RuntimeError(
-                f"DIFFLET_BACKEND={self.name} selected but torch.cuda.is_available() is False: "
-                f"no {self.display_name} device, driver, or matching torch build on this host."
+                f"DIFFLET_BACKEND={self.name} selected but torch.{self.device_type}.is_available() "
+                f"is False: no {self.display_name} device, driver, or matching torch build on "
+                "this host."
             )
 
     def prepare_runtime(self, parallel) -> None:
@@ -48,8 +82,8 @@ class GpuPlatform(Platform):
 
         self._require_device()
         world_size = int(os.environ.get("WORLD_SIZE", "1"))
-        # Bind the device first so the communicator is created on this rank's GPU.
-        torch.cuda.set_device(int(os.environ.get("LOCAL_RANK", "0")))
+        # Bind the device first so the communicator is created on this rank's device.
+        self.set_current_device(int(os.environ.get("LOCAL_RANK", "0")))
         if world_size > 1:
             if not torch.distributed.is_available():
                 raise RuntimeError(
@@ -61,18 +95,6 @@ class GpuPlatform(Platform):
                 # The group this call created is torn down at exit, so a rank does not
                 # leave the communicator to the interpreter's finalisers (warnings, a hung exit).
                 atexit.register(_destroy_process_group_at_exit)
-
-    def device_count(self) -> int | None:
-        import torch
-
-        return int(torch.cuda.device_count()) if torch.cuda.is_available() else None
-
-    def device_memory_bytes(self) -> int | None:
-        import torch
-
-        if not torch.cuda.is_available():
-            return None
-        return int(torch.cuda.get_device_properties(0).total_memory)
 
     def default_tp_degree(self) -> int:
         # The registry's default degrees describe Trainium topologies; a GPU run is one card
