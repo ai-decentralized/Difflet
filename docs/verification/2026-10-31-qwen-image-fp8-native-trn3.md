@@ -156,8 +156,11 @@ call (N = 2304) is the next win (`probe_qkv_share.py`: one fp8 call 0.30 ms vs t
 | vs bf16 baseline, latents (50 steps, same seed) | cosine 0.9909, rel L2 0.135 | `vs_bf16_gen50a.json` |
 | vs bf16 baseline, image | **PSNR 29.17 dB, SSIM 0.973, LPIPS 0.041** | `vs_bf16_gen50a.json` |
 
-The bf16 step by the same `request:` timing is being measured (`qwen_bf16_tp4_timed/`);
-by the 50-vs-25-step difference the bf16 step was 336 ms, so 267 ms is about 0.79x.
+The bf16 step by the same `request:` timing (`qwen_bf16_tp4_timed/gen50a.log`, `gen50b.log`):
+**298.8 / 299.2 ms** (n=49). So mxfp8 is **0.89x** per step, between the proposed 0.80x
+"ship" and 0.90x "no-go" marks. (The 50-vs-25-step difference method overstated the bf16 step
+at 336 ms because it included per-launch costs.) bf16's start-up is 16 s of load against
+mxfp8's 57–66 s (the 45 s kernel-layout preparation on the device).
 
 ## Bug ledger
 

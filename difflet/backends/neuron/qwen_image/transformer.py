@@ -214,7 +214,10 @@ class NeuronQwenImageTransformerApplication(TorchNeuronApplicationBase):
         return module
 
     def _after_load(self, module: torch.nn.Module) -> None:
-        if self.quant is not None and self.quant.compute == "nki":
+        # Every quantized layer prepares after the load: the kernel path packs its weight, and
+        # the mxfp8 dequant path dequantizes once here rather than in the compiled graph (a
+        # block-scale dequantization traced into the block graph ran at 6.9 s per block).
+        if self.quant is not None:
             from difflet.backends.neuron.ops_impl.fp8_linear import prepare_fp8_kernels_
 
             prepare_fp8_kernels_(module)
