@@ -856,3 +856,20 @@ def test_cp_world1_matches_dense(tmp_path, mode, backbone15, parallel15):
         out = cp(*inputs)
     assert out.shape == expected.shape
     assert torch.allclose(out, expected, atol=1e-4)
+
+
+def test_hv15_default_compiler_args_drop_ccop_overlap(monkeypatch):
+    from difflet.backends.trainium.hunyuan_video.backbone15 import hv15_dit_compiler_args
+
+    monkeypatch.delenv("DIFFLET_HUNYUAN15_COMPILER_ARGS", raising=False)
+    args = hv15_dit_compiler_args()
+    assert "enable-ccop-compute-overlap" not in args
+    for needle in ("--model-type=transformer", "-O1", "--auto-cast=none"):
+        assert needle in args
+
+
+def test_hv15_compiler_args_override_respected(monkeypatch):
+    from difflet.backends.trainium.hunyuan_video.backbone15 import hv15_dit_compiler_args
+
+    monkeypatch.setenv("DIFFLET_HUNYUAN15_COMPILER_ARGS", "--foo -O2")
+    assert hv15_dit_compiler_args() == "--foo -O2"
