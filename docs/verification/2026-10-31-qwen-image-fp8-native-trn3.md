@@ -172,7 +172,8 @@ Commit `5c92643` concatenates each stream's three projections (N = 3 x 768 at tp
 steps) against 267.7 ms unfused; the tp1 2-block probe is 13.6 vs 13.4 ms per block. Quality
 vs the bf16 baseline is the same as unfused: PSNR 29.28 dB, SSIM 0.974, LPIPS 0.039, latent
 cosine 0.9912 (`vs_bf16_gen50a.json`); the image differs from the unfused run's bits (the
-kernel's N tiling changes the accumulation order). The compile dropped from 5 min 55 s to 2 min 19 s (60
+kernel's N tiling changes the accumulation order) and is deterministic across runs (gen50a ==
+gen50b, md5 `6f79968f…`; gen50b step median 268.3 ms). The compile dropped from 5 min 55 s to 2 min 19 s (60
 blocks, load+warmup 85.7 s), mostly the host-side layout. The fusion stays (it is correct and
 costs nothing) but the single-layer microbenchmark's 0.30-vs-0.57 ms did not carry into the
 block graph: the projections are not where the block's time goes.
