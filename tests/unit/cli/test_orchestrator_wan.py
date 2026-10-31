@@ -1765,3 +1765,15 @@ def test_trainium_decodes_on_the_host_by_default(monkeypatch):
     monkeypatch.delenv("DIFFLET_BACKEND", raising=False)
     assert not wan_mod._decode_on_device(_wan_args(device_vae=False, host_vae=False))
     assert wan_mod._decode_on_device(_wan_args(device_vae=True, host_vae=False))
+
+
+def test_compile_accepts_dual_expert_like_generate():
+    """compile prepares both experts' weights for a two-expert run, so it takes --dual-expert."""
+    from difflet.cli.main import _build_parser
+
+    base = ["--model-id", "Wan-AI/Wan2.2-T2V-A14B-Diffusers", "--height", "480", "--width", "832",
+            "--num-frames", "9", "--tp-degree", "4"]
+    parser = _build_parser()
+    assert parser.parse_args(["compile", *base, "--dual-expert"]).dual_expert is True
+    assert parser.parse_args(["compile", *base]).dual_expert is False
+    assert parser.parse_args(["generate", *base, "--dual-expert", "--prompt", "x"]).dual_expert is True
