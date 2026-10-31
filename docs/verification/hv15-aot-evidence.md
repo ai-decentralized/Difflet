@@ -498,6 +498,7 @@ the `aot_vae` stage. *RSS*: peak host RSS of the `aot_transformer` / `aot_vae` s
 | cell | outcome | compile s (Phase 1 DiT compile) | generate s | load s | denoise s / step median ms | HBM GiB/core | host decode s | RSS GiB DiT / VAE | cos vs tp2cfg | evidence |
 |---|---|---|---|---|---|---|---|---|---|---|
 | tp2cfg (`--tp-degree 2 --cfg-parallel`) | **PASS** | 6.6 (619.5) | 802.8 | 273.6 | 79.8 / 1573 | 9.69 x4 | 417.0 | 37.4 / 18.5 | ref (no NaN/Inf) | `E/phase2/tp2cfg/` |
+| tp4 (`--tp-degree 4`) | **PASS** | 5.8 (572.3) | 687.0 | 144.8 | 87.7 / 1731 | 5.76 x4 | 422.7 | 19.3 / 18.4 | 0.968992 (no NaN/Inf) | `E/phase2/tp4/` |
 
 **tp2cfg.** Encode 9.0 s. Mid frame: a red fox running left to right across snow, snowy
 pines behind (`gen50_mid.png`); 61 frames, minimum per-frame std 67.3, mean frame-to-frame
@@ -506,3 +507,11 @@ is 0.584: the two stacks start from different seed-42 noise and slightly differe
 (Phase 0), so this cross-stack number is not a parity measure. The native run's per-step median
 at this shape was 1325 ms (Phase 0); AOT tp2cfg is 1573 ms (1.19x). The host decode (417 s) is
 now the largest part of the generate wall; native decodes on a core in 31.4 s.
+
+**tp4.** Encode 9.9 s. Mid frame: the same fox and setting, a near-identical composition to
+tp2cfg's (`gen50_mid.png`); minimum per-frame std 68.3, mean frame-to-frame difference 41.0.
+Latents cosine 0.969 vs tp2cfg after 50 steps (Phase 1's 3-step distance between these layouts
+was 0.985; the 50-step trajectory accumulates more bf16 difference, informational). TP4 runs
+CFG's two passes in sequence, so its step (1731 ms) is slower than tp2cfg's (1573 ms) with the
+same four cores, but each core holds half the weights (5.76 vs 9.69 GiB) and the DiT loads in
+144.8 s instead of 273.6 s.
