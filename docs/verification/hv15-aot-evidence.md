@@ -370,3 +370,21 @@ The native-input comparisons above used the pre-fix NEFF and therefore stand.
 - SP lowers the per-core peak (5.25 vs 5.75 GiB) and the step median (1618 vs 1749 ms) against
   plain TP4 at this shape.
 - Evidence: `E/phase1/aot-tp4sp/`.
+
+#### aot-tp2cfgsp (TP2 x CFG2 + SP; extra cell for device check (1))
+
+| step | outcome | wall | detail | peak HBM per core (GiB) |
+|---|---|---|---|---|
+| `compile --tp-degree 2 --cfg-parallel --sp` | DiT PASS, VAE FAIL (aot-vae) | 664.4 s | DiT compiled in 639.5 s into `hunyuan_video_15_aot_dit/7a2dd70cb206fe42` | — |
+| `generate --steps 3` | DiT PASS; VAE stage exits | 165.6 s | encode 11.4 s; DiT load 123.7 s; denoise 5.9 s, median 1469 ms (first 2926 ms) | 9.78 on each of 4 cores |
+
+- `embeds.pt` sha `3051691e…`; `latents.pt` sha `60dba0e6…`.
+- vs aot-tp2cfg: 1 step cosine 0.999717 / rel-L1 0.0265 / max-abs 0.41; 3 steps 0.983093 /
+  0.1834 / 3.15. No NaN / Inf.
+- **Device check (1), SP + CFG scatters with TP-local ranks: PASS.** With CFG2 x TP2 the global
+  ranks are 0-3 and each cfg group's TP ranks are 0-1; SP's sequence scatter must use the
+  TP-local rank (`tp_rank_util`); with the global rank, ranks 2-3 would index past a TP2 group's
+  two slices (inference from the code, not run). The per-forward result matches the no-SP
+  TP2 x CFG2 layout to 0.99972, the same agreement as every other layout pair. (The tp4sp cell
+  has no CFG, so it does not exercise this.)
+- Evidence: `E/phase1/aot-tp2cfgsp/`.
