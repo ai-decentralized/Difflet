@@ -858,18 +858,47 @@ def test_cp_world1_matches_dense(tmp_path, mode, backbone15, parallel15):
     assert torch.allclose(out, expected, atol=1e-4)
 
 
-def test_hv15_default_compiler_args_drop_ccop_overlap(monkeypatch):
+def _hv15_n(height, width, num_frames):
+    return ((num_frames - 1) // 4 + 1) * (height // 16) * (width // 16)
+
+
+def test_hv15_compiler_args_keep_overlap_for_short_sequences(monkeypatch):
     from difflet.backends.trainium.hunyuan_video.backbone15 import hv15_dit_compiler_args
 
     monkeypatch.delenv("DIFFLET_HUNYUAN15_COMPILER_ARGS", raising=False)
-    args = hv15_dit_compiler_args()
+    n = _hv15_n(512, 320, 61)
+    assert n == 10240
+    args = hv15_dit_compiler_args(n)
+    assert "--enable-ccop-compute-overlap" in args
+    for needle in ("--model-type=transformer", "-O1", "--auto-cast=none"):
+        assert needle in args
+
+
+def test_hv15_compiler_args_drop_overlap_for_long_sequences(monkeypatch):
+    from difflet.backends.trainium.hunyuan_video.backbone15 import hv15_dit_compiler_args
+
+    monkeypatch.delenv("DIFFLET_HUNYUAN15_COMPILER_ARGS", raising=False)
+    n = _hv15_n(480, 848, 121)
+    assert n == 49290
+    args = hv15_dit_compiler_args(n)
     assert "enable-ccop-compute-overlap" not in args
     for needle in ("--model-type=transformer", "-O1", "--auto-cast=none"):
         assert needle in args
+
+
+def test_hv15_compiler_args_overlap_threshold_boundary(monkeypatch):
+    from difflet.backends.trainium.hunyuan_video.backbone15 import (
+        _HV15_CCOP_OVERLAP_MAX_IMAGE_TOKENS, hv15_dit_compiler_args)
+
+    monkeypatch.delenv("DIFFLET_HUNYUAN15_COMPILER_ARGS", raising=False)
+    assert _HV15_CCOP_OVERLAP_MAX_IMAGE_TOKENS == 16384
+    assert "enable-ccop-compute-overlap" in hv15_dit_compiler_args(16384)
+    assert "enable-ccop-compute-overlap" not in hv15_dit_compiler_args(16385)
 
 
 def test_hv15_compiler_args_override_respected(monkeypatch):
     from difflet.backends.trainium.hunyuan_video.backbone15 import hv15_dit_compiler_args
 
     monkeypatch.setenv("DIFFLET_HUNYUAN15_COMPILER_ARGS", "--foo -O2")
-    assert hv15_dit_compiler_args() == "--foo -O2"
+    assert hv15_dit_compiler_args(10240) == "--foo -O2"
+    assert hv15_dit_compiler_args(49290) == "--foo -O2"
