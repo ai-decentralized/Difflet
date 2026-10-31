@@ -860,3 +860,62 @@ generate` without any override; the artifact is already compiled.
 | tp4sp (`eaea3dc3…`) | 317.3 / 330.3 (HLO 55.5) | **0.999142** / 0.0439 / 0.53 | 0.999578 | **0.990780** (0.56x) | 0.982686 | none | **PASS** | `E/phase1-regate/tp4sp/` |
 | tp2cp2-ulysses (`--cp-mode ulysses`, `2cb886e3…`) | 327.2 / 341.7 (HLO 60.9) | **0.999132** / 0.0443 / 0.53 | 0.999569 | **0.991254** (0.53x) | 0.981850 | none | **PASS** | `E/phase1-regate/tp2cp2-ulysses/` |
 | tp2cp2-gather_kv (`--cp-mode gather_kv`, `698cde4d…`) | 337.6 / 351.4 (HLO 57.9) | **0.999149** / 0.0435 / 0.56 | 0.999602 | **0.979483 (1.25x)** | 0.984527 | none | gate 1 PASS, **gate 2 FAIL** (see below) | `E/phase1-regate/tp2cp2-gather_kv/` |
+
+Reference rows (from Phase 1, same inputs): native TP2xCFG2 vs diffusers, 1 step 0.999136, 3 steps
+0.983536 (distance 0.016464).
+
+- **The graph change is numerically neutral.** On the same native inputs, the new-graph tp2
+  latents are **bit-identical** to Phase 1's old-graph aot-tp2 latents at 1 step and at 3 steps
+  (`cmp_native_inputs{1,3}__vs__aot-tp2_native_inputs{1,3}.json`). Phase 2 tp2cfg below shows
+  the same at 50 steps.
+- **Gate 1 (1 step, ≥ 0.999 vs native): all six layouts PASS**, at 0.999124-0.999160. Every
+  layout is also closer to diffusers per forward (0.999566-0.999609) than native is (0.999136).
+- **Gate 2 (3 steps, ≤ 1.15x native's distance to diffusers): five PASS, gather_kv misses.**
+  - tp2 0.91x, tp2cfg 0.84x, tp4 0.76x, tp4sp 0.56x, ulysses 0.53x.
+  - **gather_kv: 1.25x** (cos 0.979483 vs diffusers; rel-L1 0.1838 vs native's 0.1723,
+    i.e. 1.07x).
+  - The miss is deterministic. A second 3-step run of the same artifact is bit-identical
+    (`native_inputs3b`, `cmp_native_inputs3b__vs__…native_inputs3.json`).
+- **Context for the gather_kv miss** (no conclusion drawn here; the controller should rule):
+  - Per forward, gather_kv is the layout closest to diffusers (0.999602).
+  - At 3 steps it is closer to native (0.984527) than tp2 is (0.982189).
+  - The 3-step spread between AOT layouts on identical inputs is itself 0.9765-0.9870:
+    gather_kv vs tp2 0.983062, gather_kv vs ulysses 0.976528, ulysses vs tp2 0.985139, tp4 vs
+    tp2 0.987026.
+  - So the 3-step metric moves by about 1-2% of cosine between layouts that agree to
+    0.9991+ per forward. gather_kv's distance sits at the edge of that spread, not outside it.
+  - Phase 1 had no gather_kv-vs-diffusers measurement (it was compared with aot-tp2 on AOT
+    inputs, 3 steps 0.98791), so there is no old-graph number to compare with.
+  - Phase 2's 50-step gather_kv video (old graph) showed the prompt correctly.
+- HBM and load times are as in Phase 1. The helper's 1-step loads after a fresh compile are
+  page-cache cold (159-279 s); the 3-step loads right after are warm (25-38 s).
+
+### Phase 2 re-run: tp2cfg, 50 steps, 320x512x61, new graph
+
+| step | outcome | wall | detail | HBM GiB/core | host RSS |
+|---|---|---|---|---|---|
+| `compile --tp-degree 2 --cfg-parallel` | PASS (manifest hit on the re-gate's `d3d575ba…`) | 12.9 s | DiT 0.0 s | n/a | — |
+| `generate --steps 50` | **PASS** | 902.0 s | encode 102.8 s (cold), DiT load 213.2 s, denoise 80.5 s, **median 1577 ms** (first 3076 ms), host decode 430.8 s | 9.69 x4 | DiT 33.3 / VAE 18.5 GiB |
+
+- The 50-step latents are **bit-identical** to Phase 2's old-graph tp2cfg latents: same sha256
+  `73685bc9…`, cosine 1.000000.
+- The step median is 1577 ms against 1573 ms on the old graph, so moving the count to the
+  host costs nothing measurable per step.
+- The MP4 shows the same fox as Phase 2; the mid frame has min per-frame std 67.3 and mean
+  frame-to-frame difference 39.5, identical to the old run.
+- Evidence: `E/phase2-regate/tp2cfg/` (`gen50.mp4`, `gen50_mid.png`, logs, meta,
+  `cmp_gen50__vs__p2-tp2cfg.json`).
+
+### Summary of the retry and re-gate
+
+| item | graph | outcome |
+|---|---|---|
+| AOT TP2xCFG2 compile at 480x848x121, default flags | new | **BLOCKED**: NCC_IRPX901 on the text-stream LayerNorm after the `text_order` gather (1788.9 s to failure) |
+| AOT TP2xCFG2 at 480x848x121, `--enable-ccop-compute-overlap` removed via `DIFFLET_HUNYUAN15_COMPILER_ARGS` | new | **PASS**: compile 3970 s (HLO 1706 s, neuronx-cc 2079 s); generate e2e 4132.8 s; step median 13072 ms (native 11178 ms, 1.17x); host VAE 2699.2 s (LIMIT); MP4 shows the prompt |
+| Phase 1 gate 1 (1 step vs native ≥ 0.999), six layouts | new | **PASS** x6 (0.999124-0.999160) |
+| Phase 1 gate 2 (3 steps vs diffusers ≤ 1.15x native) | new | PASS x5 (0.53-0.91x); **gather_kv 1.25x, deterministic, needs a ruling** |
+| Phase 2 tp2cfg 50 steps | new | **PASS**; bit-identical to the old graph; 1577 ms/step |
+| Pre-encode shape check (`93dde78`) and the all-core stage | new | **PASS** (stage claimed 4 cores, no NRT errors) |
+
+The Phase 1-2 numbers in the earlier sections stay as they are: they are from the old 9-input
+graph. The old artifact dirs and the `039f757f…stale-pre-fd2a8aa` dir are still on disk.
