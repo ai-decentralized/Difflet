@@ -896,6 +896,46 @@ def test_hv15_compiler_args_overlap_threshold_boundary(monkeypatch):
     assert "enable-ccop-compute-overlap" not in hv15_dit_compiler_args(16385)
 
 
+_HV15_ARGS_WITH_OVERLAP = (
+    "--model-type=transformer -O1 --tensorizer-options='--enable-ccop-compute-overlap' "
+    "--auto-cast=none --internal-hlo2tensorizer-options='--verify-hlo=true'"
+)
+_HV15_ARGS_WITHOUT_OVERLAP = (
+    "--model-type=transformer -O1 --auto-cast=none "
+    "--internal-hlo2tensorizer-options='--verify-hlo=true'"
+)
+
+
+def test_hv15_default_compiler_args_exact_strings(monkeypatch):
+    from difflet.backends.trainium.hunyuan_video.backbone15 import hv15_dit_compiler_args
+
+    monkeypatch.delenv("DIFFLET_HUNYUAN15_COMPILER_ARGS", raising=False)
+    assert hv15_dit_compiler_args(10240) == _HV15_ARGS_WITH_OVERLAP
+    assert hv15_dit_compiler_args(16384) == _HV15_ARGS_WITH_OVERLAP
+    assert hv15_dit_compiler_args(49290) == _HV15_ARGS_WITHOUT_OVERLAP
+
+
+@pytest.mark.parametrize("shape", [(512, 320, 61), (480, 848, 121)])
+def test_hv15_cache_key_compiler_args_match_application(tmp_path, monkeypatch, shape):
+    import argparse
+    from types import SimpleNamespace
+
+    from difflet.backends.trainium.hunyuan_video import backbone15
+    from difflet.cli.orchestrators import hunyuan_video_15 as hv15_orch
+
+    monkeypatch.delenv("DIFFLET_HUNYUAN15_COMPILER_ARGS", raising=False)
+    height, width, frames = shape
+    cfg = _config(tmp_path, height=height, width=width, num_frames=frames)
+    assert cfg.num_image_tokens == backbone15.hv15_num_image_tokens(height, width, frames)
+    app = SimpleNamespace(config=cfg)
+    compiled = backbone15.NeuronHunyuanVideo15BackboneApplication.get_compiler_args(app)
+    args = argparse.Namespace(
+        height=height, width=width, num_frames=frames, tp_degree=1, cp_degree=1, cp_mode="gather_kv",
+        sp_enabled=False, cfg_parallel=False, revision=None, model_id=hv15_orch._HF_MODEL_ID)
+    orch = hv15_orch.HunyuanVideo15Orchestrator(args)
+    assert orch._aot_stage_cache_inputs(args, "transformer")["compiler_args"] == compiled
+
+
 def test_hv15_compiler_args_override_respected(monkeypatch):
     from difflet.backends.trainium.hunyuan_video.backbone15 import hv15_dit_compiler_args
 
