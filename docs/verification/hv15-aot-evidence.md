@@ -695,3 +695,35 @@ documented native figures (`neuron-backend-results.md`, other run: compile 2837 
 median here is 11% lower. The first step (195.2 s) carries per-process one-time work that the
 compile run's warmup forward already did once (inference: the bounded kernel's first launch in
 this process). The AOT backend has no 480x848x121 DiT to compare against (above).
+
+#### AOT host VAE at 480x848x121 (measured on the native run's latents): 2518.7 s, 28.0 GiB RSS
+
+The AOT DiT gives no default-shape latents, so the AOT `aot_vae` stage's host decode was measured
+on the native run's 50-step latents (`[1, 32, 31, 30, 53]` latent grid, copied into a fresh work
+dir). Invocation: `python -m difflet.cli.stage --orchestrator hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v
+--stage aot_vae --stage-mode generate --height 480 --width 848 --num-frames 121 --tp-degree 2
+--cfg-parallel --work-dir <dir> --output decode.mp4` with `DIFFLET_BACKEND=trainium`. This is
+the code path `difflet generate` runs after the DiT, on the host CPU only; no other job ran
+meanwhile.
+
+| | value |
+|---|---|
+| host decode (`[hv15] request 0: host decode …`) | **2518.7 s** (42 min), stage wall 2535.1 s |
+| peak host RSS of the stage | **27.98 GiB** |
+| output | 121 frames, 480x848, minimum per-frame std 63.0, mean frame-to-frame difference 25.3 (native's device decode of the same latents: 63.1 / 25.3) |
+| mid frame | the same leaping fox as native's (`decode_mid.png`) |
+
+Against native's on-device decode of the same latents (89.0 s), the host decode is 28x slower,
+and at this shape it would cost about 3.3x the whole native denoise (754.9 s). It grows about
+6x from 320x512x61 (409-423 s) to 480x848x121, in line with the about 4.9x larger pixel x frame
+volume. Evidence: `E/phase3/hostvae/`.
+
+#### Phase 3 summary
+
+| item | outcome | numbers |
+|---|---|---|
+| AOT TP2xCFG2 compile at 480x848x121 | **BLOCKED** (neuronx-cc NCC_IRPX901 on the fp32 valid-text count reduce; same on 2.28 and at -O2) | 1807.7 s wall to failure; HLO generation 1729.8 s; peak RSS 31.9 GiB |
+| AOT TP2xCFG2 generate at 480x848x121 | not run (no artifact) | — |
+| AOT host VAE decode at 480x848x121 | measured on native latents | 2518.7 s, 27.98 GiB peak RSS |
+| tp4 + SP at 480x848x121 | **PASS** (rejected before compile) | 6.4 s, `N % 4 = 2; use num_frames in [117, 125] … or tp_degree in [2]` |
+| native TP2xCFG2 at 480x848x121 (same host) | PASS | compile 2807.1 s, generate 960.7 s, step median 11178 ms, decode 89.0 s |

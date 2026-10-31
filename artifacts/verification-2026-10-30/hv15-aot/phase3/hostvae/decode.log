@@ -1,0 +1,6 @@
+date: 2026-10-31T05:19:12+0000
+cmd: bash /home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_py.sh -m difflet.cli.stage --orchestrator hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v --stage aot_vae --model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v --stage-mode generate --work-dir /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p3-hostvae/work --tp-degree 2 --cp-degree 1 --cfg-parallel --height 480 --width 848 --num-frames 121 --steps 50 --seed 42 --output /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p3-hostvae/decode.mp4
+env: ['DIFFLET_BACKEND=trainium', 'HF_HUB_OFFLINE=1', 'PYTHONPATH=/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan']
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00, 130.95it/s]
+[hv15] host vae load 0.0 s
+[hv15] request 0: host decode 2518.7 s; [difflet] video saved to /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p3-hostvae/decode.mp4
