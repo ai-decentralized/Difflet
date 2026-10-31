@@ -32,9 +32,11 @@ def add_quant_flags(p: argparse.ArgumentParser) -> None:
         choices=list(FORMATS),
         default=None,
         help="--backend neuron on Trainium3: run the DiT's attention and MLP linears in FP8 "
-        "(float8_e4m3fn weights and activations, static per-tensor scales) from a quantized "
-        "checkpoint that `compile` writes under the cache dir; the modulation, embedders and "
-        "output projection stay bf16. Needs --quant-calibration. Qwen-Image only.",
+        "from a quantized checkpoint that `compile` writes under the cache dir; the "
+        "modulation, embedders and output projection stay bf16. 'mxfp8': OCP microscaling, "
+        "32-value block scales for weights and activations (in the kernel), no calibration. "
+        "'fp8': per-tensor weights and static per-tensor activation scales from "
+        "--quant-calibration. Qwen-Image only.",
     )
     p.add_argument(
         "--quant-calibration",
@@ -82,9 +84,10 @@ def validate_quant(args: argparse.Namespace) -> None:
     if exec_mode == "eager":
         _fail("--quant needs the compiled DiT (--exec-mode compile, the default): eager "
               "quantizes every activation op by op.")
-    if calibration is None:
-        _fail("--quant needs --quant-calibration PATH (the activation calibration file).")
-    if not os.path.isfile(calibration):
+    if quant == "fp8" and calibration is None:
+        _fail("--quant fp8 needs --quant-calibration PATH (the activation calibration file); "
+              "--quant mxfp8 needs none.")
+    if calibration is not None and not os.path.isfile(calibration):
         _fail(f"--quant-calibration {calibration}: no such file.")
     if getattr(args, "teacache_speedup", None) is not None:
         _fail("--quant and adaptive TeaCache (--teacache-speedup) are mutually exclusive; use "
@@ -104,8 +107,12 @@ def quant_spec(args: argparse.Namespace) -> QuantSpec | None:
         raise ValueError(f"no FP8 targets for {model}")
     compute = getattr(args, "quant_compute", None) or DEFAULT_COMPUTE
     calibration = getattr(args, "quant_calibration", None)
-    sha = file_sha256(calibration) if calibration else None
-    return default_spec(model, format=quant, compute=compute, calibration_sha256=sha)
+    sha = file_sha256(calibration) if (calibration and quant == "fp8") else None
+    # The row-parallel weights of mxfp8 are quantized per rank K range: the tp the launch uses
+    # (the Qwen-Image driver's default is 4, cli/orchestrators/qwen_image.py).
+    tp = int(getattr(args, "tp_degree", None) or 4)
+    return default_spec(model, format=quant, compute=compute, calibration_sha256=sha,
+                        tp_degree=tp)
 
 
 def quant_cli_args(args: argparse.Namespace) -> list[str]:

@@ -529,13 +529,19 @@ class TorchNeuronQwenImageApplication(TorchNeuronModelApplication):
             dtype = normalize_dtype(options[name])
             if dtype not in (torch.bfloat16, torch.float32):
                 raise ValueError(f"{name} must be bfloat16 or float32, got {dtype}")
-        if options["quant"] is None:
+        quant = options["quant"]
+        if quant is None:
             given = [n for n in ("quant_calibration", "quant_checkpoint") if options[n]]
             if given:
                 raise ValueError(f"{', '.join(given)} need quant='fp8' (or a QuantSpec)")
-        elif options["quant_checkpoint"] is None and options["quant_calibration"] is None:
-            raise ValueError("quant needs quant_calibration (the activation calibration file) "
-                             "or quant_checkpoint (an existing quantized directory)")
+        else:
+            fmt = quant if isinstance(quant, str) else (
+                quant["format"] if isinstance(quant, dict) else getattr(quant, "format", None))
+            if (fmt == "fp8" and options["quant_checkpoint"] is None
+                    and options["quant_calibration"] is None):
+                raise ValueError("quant='fp8' needs quant_calibration (the activation "
+                                 "calibration file) or quant_checkpoint (an existing quantized "
+                                 "directory); 'mxfp8' needs neither")
 
     def _resolve_quant(self, options: dict[str, Any], transformer_path: str):
         """``(spec, DiT directory)``: the quantized checkpoint for ``quant`` (resolved under the
@@ -549,7 +555,8 @@ class TorchNeuronQwenImageApplication(TorchNeuronModelApplication):
         if quant is None:
             return None, transformer_path
         if isinstance(quant, str):
-            spec = default_spec("qwen_image", format=quant)
+            spec = default_spec("qwen_image", format=quant,
+                                tp_degree=int(self.parallel.tp_degree))
         elif isinstance(quant, dict):
             spec = QuantSpec.from_dict(quant)
         elif isinstance(quant, QuantSpec):

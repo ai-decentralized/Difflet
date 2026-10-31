@@ -92,6 +92,11 @@ def main() -> int:
     p.add_argument("--calibration-prompts", type=int, default=2,
                    help="how many of the prompts (from the first) calibrate; the rest are held out")
     p.add_argument("--margin", type=float, default=1.25)
+    p.add_argument("--format", choices=["fp8", "mxfp8"], default="fp8",
+                   help="fp8: per-tensor static (calibrates on the first prompts); mxfp8: block-32 "
+                        "MX scales, no calibration (the bf16 arm still runs as the reference)")
+    p.add_argument("--tp", type=int, default=4,
+                   help="mxfp8: the TP degree whose row-parallel K shards the blocks follow")
     p.add_argument("--threads", type=int, default=None)
     args = p.parse_args()
 
@@ -113,8 +118,11 @@ def main() -> int:
     print(f"[arbiter] loaded in {time.perf_counter() - t0:.0f}s; threads={torch.get_num_threads()}",
           flush=True)
 
-    spec = default_spec("qwen_image", activation_margin=args.margin)
-    calib_prompts = args.prompts[: args.calibration_prompts]
+    if args.format == "mxfp8":
+        spec = default_spec("qwen_image", format="mxfp8", tp_degree=args.tp)
+    else:
+        spec = default_spec("qwen_image", activation_margin=args.margin)
+    calib_prompts = args.prompts[: args.calibration_prompts] if spec.needs_calibration else []
     results: list[dict] = []
 
     # ---- arm A: bf16, calibrating on the first prompts
@@ -136,20 +144,23 @@ def main() -> int:
               f"{time.perf_counter() - t:.0f}s, {(time.perf_counter() - t) / args.steps:.1f}s/step",
               flush=True)
 
-    amax = calibrator.amax()
-    cal_path = write_calibration(
-        out / "calibration.json", amax=amax, model="qwen_image", checkpoint=_snapshot(model_dir),
-        prompts=calib_prompts, steps=args.steps,
-        shape={"height": args.height, "width": args.width, "seed": args.seed,
-               "true_cfg_scale": 1.0}, calls=calibrator.calls(),
-        extra={"collector": "scripts/qwen_image_fp8_cpu_reference.py", "dtype": "bfloat16"})
-    calibration = read_calibration(cal_path)
-    spec = dataclasses.replace(spec, calibration_sha256=calibration.sha256)
+    calibration = None
+    cal_path = None
+    if spec.needs_calibration:
+        amax = calibrator.amax()
+        cal_path = write_calibration(
+            out / "calibration.json", amax=amax, model="qwen_image", checkpoint=_snapshot(model_dir),
+            prompts=calib_prompts, steps=args.steps,
+            shape={"height": args.height, "width": args.width, "seed": args.seed,
+                   "true_cfg_scale": 1.0}, calls=calibrator.calls(),
+            extra={"collector": "scripts/qwen_image_fp8_cpu_reference.py", "dtype": "bfloat16"})
+        calibration = read_calibration(cal_path)
+        spec = dataclasses.replace(spec, calibration_sha256=calibration.sha256)
+        top = sorted(amax.items(), key=lambda kv: -kv[1])[:5]
+        print(f"[arbiter] calibration: {len(amax)} linears; largest amax {top}", flush=True)
     (out / "spec.json").write_text(json.dumps(spec.to_dict(), indent=1) + "\n")
-    top = sorted(amax.items(), key=lambda kv: -kv[1])[:5]
-    print(f"[arbiter] calibration: {len(amax)} linears; largest amax {top}", flush=True)
 
-    # ---- arm B: fake-quant static fp8 on the same seeds
+    # ---- arm B: fake-quant fp8 (static per-tensor, or mx block scales) on the same seeds
     replaced = fake_quantize_model_(pipe.transformer, spec, calibration)
     print(f"[arbiter] fake-quantized {len(replaced)} linears", flush=True)
     for i, prompt in enumerate(args.prompts):
@@ -173,12 +184,13 @@ def main() -> int:
     passed = all(r["psnr"] >= GATE_PSNR_DB for r in results)
     summary = {"model": _snapshot(model_dir), "steps": args.steps, "seed": args.seed,
                "shape": [args.height, args.width], "spec": spec.to_dict(),
-               "calibration": str(cal_path), "gate_psnr_db": GATE_PSNR_DB, "passed": passed,
+               "calibration": None if cal_path is None else str(cal_path),
+               "gate_psnr_db": GATE_PSNR_DB, "passed": passed,
                "results": results}
     (out / "metrics.json").write_text(json.dumps(summary, indent=1) + "\n")
     lines = ["# Qwen-Image FP8 CPU arbiter", "",
-             f"bf16 vs fake-quant static fp8 (per-tensor e4m3fn ±{spec.fp8_max:g}, margin "
-             f"{spec.activation_margin}), {args.steps} steps, {args.height}x{args.width}, seed "
+             f"bf16 vs fake-quant {spec.format} ({'block-32 MX scales, tp ' + str(spec.tp_degree) if spec.is_mx else f'per-tensor e4m3fn ±{spec.fp8_max:g}, margin {spec.activation_margin}'}), "
+             f"{args.steps} steps, {args.height}x{args.width}, seed "
              f"{args.seed}, true_cfg 1.0, CPU bf16. Gate: PSNR >= {GATE_PSNR_DB:g} dB.", "",
              "| # | prompt | calib | PSNR dB | SSIM | latent cos | latent rel L2 |",
              "|---|---|---|---:|---:|---:|---:|"]

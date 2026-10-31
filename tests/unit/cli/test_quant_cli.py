@@ -123,7 +123,8 @@ def test_qwen_orchestrator_forwards_and_keys_quant(calibration, monkeypatch):
     added = sorted(k for k in fp8 if k not in plain)
     assert added == ["quant", "quant_activation", "quant_activation_margin",
                      "quant_calibration_sha256", "quant_compute", "quant_fp8_max",
-                     "quant_schema", "quant_targets_sha256", "quant_weight_granularity"]
+                     "quant_schema", "quant_targets_sha256", "quant_tp_degree",
+                     "quant_weight_granularity"]
     assert {k: v for k, v in fp8.items() if k not in added} == plain
     assert fp8_dir != plain_dir and fp8_dir.parent == plain_dir.parent
     assert fp8_cli[fp8_cli.index("--quant") + 1] == "fp8"

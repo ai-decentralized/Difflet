@@ -35,8 +35,18 @@ QWEN_IMAGE_KEPT_BF16: tuple[str, ...] = (
     r"proj_out",
 )
 
+#: The targets whose weight the TP layer shards along K (row-parallel): under ``mxfp8`` each
+#: rank's K range is quantized with its own block layout (``difflet/quant/mx.py``).
+QWEN_IMAGE_ROW_PARALLEL: tuple[str, ...] = (
+    rf"{_BLOCK}\.attn\.(to_out\.0|to_add_out)",
+    rf"{_BLOCK}\.(img_mlp|txt_mlp)\.net\.2",
+)
+
 TARGETS_BY_MODEL: dict[str, tuple[str, ...]] = {
     "qwen_image": QWEN_IMAGE_TARGETS,
+}
+ROW_PARALLEL_BY_MODEL: dict[str, tuple[str, ...]] = {
+    "qwen_image": QWEN_IMAGE_ROW_PARALLEL,
 }
 
 
@@ -50,15 +60,33 @@ def targets_for(model: str) -> tuple[str, ...]:
         ) from None
 
 
+def row_parallel_for(model: str) -> tuple[str, ...]:
+    return ROW_PARALLEL_BY_MODEL.get(model, ())
+
+
 def default_spec(model: str, **overrides) -> QuantSpec:
-    """The v1 recipe for ``model``: fp8, per-tensor weights, static activations."""
+    """The recipe for ``model``: ``fp8`` (per-tensor weights, static activations) unless
+    ``format="mxfp8"`` (block-32 weights, MX activations) is asked for; the granularities
+    follow the format."""
+    from difflet.quant.spec import FORMAT_LAWS, FORMATS
+
+    fmt = overrides.get("format", "fp8")
+    if fmt not in FORMAT_LAWS:
+        raise ValueError(f"quant format must be one of {FORMATS}, got {fmt!r}")
+    granularity, activation = FORMAT_LAWS[fmt]
+    overrides.setdefault("weight_granularity", granularity)
+    overrides.setdefault("activation", activation)
+    overrides.setdefault("row_parallel", row_parallel_for(model))
     return QuantSpec(targets=targets_for(model), **overrides)
 
 
 __all__ = [
     "QWEN_IMAGE_KEPT_BF16",
+    "QWEN_IMAGE_ROW_PARALLEL",
     "QWEN_IMAGE_TARGETS",
+    "ROW_PARALLEL_BY_MODEL",
     "TARGETS_BY_MODEL",
     "default_spec",
+    "row_parallel_for",
     "targets_for",
 ]

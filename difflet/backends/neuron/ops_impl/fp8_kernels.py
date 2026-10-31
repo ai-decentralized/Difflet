@@ -207,12 +207,82 @@ def _load_op():
     return fp8_linear_smx
 
 
+def _load_mx_op():
+    """The ``mxfp8`` linear: nkilib's ``matmul_mxfp8`` with the bf16 activation as the kernel
+    input (quantized inside, MX block scales) and the weight pre-quantized in the swizzled x4
+    layout (``difflet/quant/mx.kernel_layout``). ``difflet_neuron::mx_linear(x2d, data,
+    scales) -> bf16 [M, N]``. The kernel takes the activation straight from the producing op,
+    which is what keeps it out of the compiler's slow path (see ``mx.py``)."""
+    try:
+        return torch.ops.difflet_neuron.mx_linear
+    except (AttributeError, RuntimeError):
+        pass
+    try:
+        import nki
+        import nki.language as nl
+        from nkilib.experimental.matmul_mxfp8.matmul_mxfp8_generic_kernel import matmul_mxfp8
+        from torch_neuronx import wrap_nki
+        from torch_neuronx.nki_hop import nki_op
+    except ImportError:
+        return None
+
+    @nki.jit
+    def mx_linear_kernel(x, w_data, w_scales):
+        w_x4 = w_data.view(nl.float8_e4m3fn_x4)
+        return matmul_mxfp8(x, w_x4, rhs_scales=w_scales, lhs_is_swizzled=False,
+                            float8_dtype="float8_e4m3fn", output_dtype=nl.bfloat16,
+                            run_with_lnc2=True)
+
+    kernel = wrap_nki(mx_linear_kernel)
+
+    def fake(x, w_data, w_scales):
+        return torch.empty((x.shape[0], w_data.shape[1]), dtype=torch.bfloat16, device=x.device)
+
+    @nki_op("difflet_neuron::mx_linear", mutates_args={}, fake_fn=fake)
+    def mx_linear(x: torch.Tensor, w_data: torch.Tensor, w_scales: torch.Tensor) -> torch.Tensor:
+        grid = (logical_cores(),)
+        return kernel[grid](x, w_data, w_scales)
+
+    return mx_linear
+
+
 # Resolved once at import: no import or registration inside traced (compiled) code.
 _FP8_OP = _load_op()
+_MX_OP = _load_mx_op()
 
 
 def available() -> bool:
     return _FP8_OP is not None
+
+
+def mx_available() -> bool:
+    return _MX_OP is not None
+
+
+def mx_linear(x: torch.Tensor, weight_packed: torch.Tensor, weight_scales: torch.Tensor
+              ) -> torch.Tensor:
+    """``x @ W^T`` on the MX path: ``x`` ``[..., K]`` bf16 (quantized in the kernel),
+    ``weight_packed`` int32 ``[K/4, N]`` and ``weight_scales`` uint8 ``[K/4, N]`` from
+    ``prepare_mx_weight``; returns ``[..., N]`` in ``x``'s dtype."""
+    if _MX_OP is None:
+        raise RuntimeError("the mxfp8 kernel needs torch_neuronx and nkilib (the Neuron SDK); "
+                           "use compute='dequant' elsewhere")
+    k = x.shape[-1]
+    n = weight_packed.shape[1]
+    x2 = x.reshape(-1, k)
+    if x2.dtype != torch.bfloat16:
+        x2 = x2.to(torch.bfloat16)
+    out = _MX_OP(x2.contiguous(), weight_packed, weight_scales)
+    return out.reshape(*x.shape[:-1], n).to(x.dtype)
+
+
+def prepare_mx_weight(weight_q: torch.Tensor, weight_scale: torch.Tensor
+                      ) -> tuple[torch.Tensor, torch.Tensor]:
+    """``(fp8 [N, K], uint8 [N, K/32])`` of this rank's shard -> the kernel's ``(data, scales)``
+    (``difflet/quant/mx.kernel_layout``), on the weight's device."""
+    from difflet.quant import mx
+
+    return mx.kernel_layout(weight_q, weight_scale)
 
 
 # ------------------------------------------------------------------------- the torch side
@@ -273,8 +343,11 @@ __all__ = [
     "fp8_linear",
     "k_tiles",
     "logical_cores",
+    "mx_available",
+    "mx_linear",
     "pack_x4",
     "padded_rows",
+    "prepare_mx_weight",
     "prepare_weight",
     "reference",
     "unpack_x4",

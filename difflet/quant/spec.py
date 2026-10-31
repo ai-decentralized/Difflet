@@ -25,9 +25,14 @@ from typing import Any
 #: and cache entries are then never matched.
 QUANT_SCHEMA = 1
 
-FORMATS = ("fp8",)
-WEIGHT_GRANULARITIES = ("tensor",)
-ACTIVATION_MODES = ("static",)
+#: ``fp8``: per-tensor float8_e4m3fn weights, static calibrated per-tensor activation scales.
+#: ``mxfp8``: OCP microscaling, 32-value E8M0 block scales for weights (offline) and activations
+#: (in the kernel, no calibration), in Trainium3's own block membership (``mx.py``).
+FORMATS = ("fp8", "mxfp8")
+WEIGHT_GRANULARITIES = ("tensor", "block32")
+ACTIVATION_MODES = ("static", "mx")
+#: What each format implies for the two granularities.
+FORMAT_LAWS = {"fp8": ("tensor", "static"), "mxfp8": ("block32", "mx")}
 #: ``dequant``: fp8 weights, bf16 matmul (memory only). ``nki``: the FP8 tensor-engine kernel.
 COMPUTE_MODES = ("nki", "dequant")
 DEFAULT_COMPUTE = "nki"
@@ -51,8 +56,16 @@ class QuantSpec:
     activation: str = "static"
     activation_margin: float = DEFAULT_ACTIVATION_MARGIN
     compute: str = DEFAULT_COMPUTE
-    #: sha256 of the calibration file's bytes: the activation scales are part of the identity.
+    #: sha256 of the calibration file's bytes: the activation scales are part of the identity
+    #: (``fp8`` only; ``mxfp8`` needs no calibration).
     calibration_sha256: str | None = None
+    #: ``mxfp8``: the TP degree the row-parallel weights were quantized for. A row-parallel
+    #: layer's rank holds a K range, and MX blocks follow each rank's own K layout, so the
+    #: quantized weights of those layers depend on tp (``checkpoint.py``). 1 for ``fp8``.
+    tp_degree: int = 1
+    #: Patterns (as ``targets``) of the targets whose weight the TP layer shards along K; under
+    #: ``mxfp8`` at ``tp_degree > 1`` those are quantized per rank K range.
+    row_parallel: tuple[str, ...] = ()
     schema: int = QUANT_SCHEMA
 
     def __post_init__(self) -> None:
@@ -67,6 +80,15 @@ class QuantSpec:
             raise ValueError(
                 f"activation must be one of {ACTIVATION_MODES}, got {self.activation!r}"
             )
+        law = FORMAT_LAWS[self.format]
+        if (self.weight_granularity, self.activation) != law:
+            raise ValueError(
+                f"format {self.format!r} quantizes weights per {law[0]} with {law[1]} activation "
+                f"scales; got weight_granularity={self.weight_granularity!r}, "
+                f"activation={self.activation!r}"
+            )
+        if int(self.tp_degree) < 1:
+            raise ValueError(f"tp_degree must be >= 1, got {self.tp_degree}")
         if self.compute not in COMPUTE_MODES:
             raise ValueError(f"compute must be one of {COMPUTE_MODES}, got {self.compute!r}")
         if not self.targets or any(not t for t in self.targets):
@@ -75,7 +97,7 @@ class QuantSpec:
             raise ValueError(f"fp8_max must be positive, got {self.fp8_max}")
         if not float(self.activation_margin) >= 1.0:
             raise ValueError(f"activation_margin must be >= 1, got {self.activation_margin}")
-        for pattern in self.targets:
+        for pattern in (*self.targets, *self.row_parallel):
             re.compile(pattern)
 
     # ------------------------------------------------------------------ matching
@@ -87,18 +109,37 @@ class QuantSpec:
         bare = strip_prefix(name)
         return any(re.fullmatch(p, bare) for p in self.targets)
 
+    def is_row_parallel(self, name: str) -> bool:
+        bare = strip_prefix(name)
+        return any(re.fullmatch(p, bare) for p in self.row_parallel)
+
+    def k_shards(self, name: str) -> int:
+        """How many K ranges the weight at ``name`` is quantized in under ``mxfp8``: the TP
+        degree for a row-parallel target, else 1."""
+        return int(self.tp_degree) if (self.is_mx and self.is_row_parallel(name)) else 1
+
     # ------------------------------------------------------------- serialisation
 
     def to_dict(self) -> dict[str, Any]:
         body = dataclasses.asdict(self)
         body["targets"] = list(self.targets)
+        body["row_parallel"] = list(self.row_parallel)
         return body
 
     @classmethod
     def from_dict(cls, body: dict[str, Any]) -> QuantSpec:
         body = dict(body)
         body["targets"] = tuple(body["targets"])
+        body["row_parallel"] = tuple(body.get("row_parallel", ()))
         return cls(**body)
+
+    @property
+    def needs_calibration(self) -> bool:
+        return self.activation == "static"
+
+    @property
+    def is_mx(self) -> bool:
+        return self.format == "mxfp8"
 
     def cache_fields(self) -> dict[str, Any]:
         """The additive cache-key fields for an artifact built with this spec: everything that
@@ -114,6 +155,7 @@ class QuantSpec:
             "quant_compute": self.compute,
             "quant_targets_sha256": self.targets_sha256(),
             "quant_calibration_sha256": self.calibration_sha256,
+            "quant_tp_degree": int(self.tp_degree),
         }
 
     def targets_sha256(self) -> str:
@@ -130,7 +172,9 @@ class QuantSpec:
             "quant_activation": self.activation,
             "quant_activation_margin": self.activation_margin,
             "quant_targets": list(self.targets),
+            "quant_row_parallel": list(self.row_parallel),
             "quant_calibration_sha256": self.calibration_sha256,
+            "quant_tp_degree": int(self.tp_degree),
         }
 
 
@@ -161,6 +205,7 @@ __all__ = [
     "DEFAULT_ACTIVATION_MARGIN",
     "DEFAULT_COMPUTE",
     "FORMATS",
+    "FORMAT_LAWS",
     "FP8_MAX",
     "QUANT_SCHEMA",
     "QuantSpec",

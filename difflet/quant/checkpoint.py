@@ -117,17 +117,28 @@ def iter_source_tensors(model_dir: Path) -> Iterator[tuple[str, torch.Tensor, st
                 yield key, handle.get_tensor(key), Path(path).name
 
 
-def quantize_tensors(model_dir: Path, spec: QuantSpec, calibration: Calibration
+def quantize_tensors(model_dir: Path, spec: QuantSpec, calibration: Calibration | None
                      ) -> Iterator[tuple[str, torch.Tensor, bool]]:
     """Every tensor of the quantized component in write order: ``(key, tensor, quantized)``.
-    A target weight yields three entries (``.weight`` fp8, ``.weight_scale``, ``.input_scale``)."""
+    A target weight yields ``.weight`` (fp8) and ``.weight_scale`` (``fp8``: fp32 ``[1]``;
+    ``mxfp8``: uint8 E8M0 ``[N, K/32]``, a row-parallel target quantized per rank K range),
+    and for ``fp8`` the calibrated ``.input_scale``."""
+    if spec.needs_calibration and calibration is None:
+        raise ValueError(f"format {spec.format!r} needs a calibration file")
     for key, tensor, _ in iter_source_tensors(model_dir):
         prefix = _tensor_key_prefix(key)
         if prefix is not None and spec.matches(prefix) and tensor.dim() == 2:
-            weight_q, weight_scale = quantize_weight(tensor, fp8_max=spec.fp8_max)
-            yield key, weight_q, True
-            yield f"{prefix}.weight_scale", weight_scale, True
-            yield f"{prefix}.input_scale", calibration.input_scale(prefix, spec), True
+            if spec.is_mx:
+                from difflet.quant import mx
+
+                weight_q, weight_scale = mx.quantize_mx_sharded(tensor, spec.k_shards(prefix))
+                yield key, weight_q, True
+                yield f"{prefix}.weight_scale", weight_scale, True
+            else:
+                weight_q, weight_scale = quantize_weight(tensor, fp8_max=spec.fp8_max)
+                yield key, weight_q, True
+                yield f"{prefix}.weight_scale", weight_scale, True
+                yield f"{prefix}.input_scale", calibration.input_scale(prefix, spec), True
         else:
             yield key, tensor, False
 
@@ -196,13 +207,16 @@ class _ShardWriter:
 
 
 def write_quantized_dir(model_dir: str | Path, out_dir: str | Path, spec: QuantSpec,
-                        calibration: Calibration, *, shard_bytes: int = SHARD_BYTES
-                        ) -> dict[str, Any]:
+                        calibration: Calibration | None = None, *,
+                        shard_bytes: int = SHARD_BYTES) -> dict[str, Any]:
     """Quantize ``model_dir`` into ``out_dir`` (created; must not already hold a manifest) and
     return the manifest. Written to a temporary sibling and renamed, so a reader never sees a
-    half-written directory."""
+    half-written directory. ``calibration`` is required by ``fp8`` and unused by ``mxfp8``."""
     model_dir, out_dir = Path(model_dir), Path(out_dir)
-    if spec.calibration_sha256 is not None and spec.calibration_sha256 != calibration.sha256:
+    if spec.needs_calibration and calibration is None:
+        raise ValueError(f"format {spec.format!r} needs a calibration file")
+    if (calibration is not None and spec.calibration_sha256 is not None
+            and spec.calibration_sha256 != calibration.sha256):
         raise ValueError("spec.calibration_sha256 does not match the calibration file")
     if (out_dir / MANIFEST).exists():
         raise FileExistsError(f"{out_dir} already holds a quantized checkpoint")
@@ -230,8 +244,9 @@ def write_quantized_dir(model_dir: str | Path, out_dir: str | Path, spec: QuantS
             "spec": spec.to_dict(),
             "source": {"path": str(model_dir), "fingerprint": source_fingerprint(model_dir),
                        "bytes": source_bytes(model_dir)},
-            "calibration": {"sha256": calibration.sha256, "path": str(calibration.path),
-                            **calibration.provenance},
+            "calibration": (None if calibration is None else
+                            {"sha256": calibration.sha256, "path": str(calibration.path),
+                             **calibration.provenance}),
             "quantized_linears": quantized,
             "tensors": {"quantized": len(quantized), "kept": kept, "total": len(weight_map)},
             "bytes": total,
@@ -267,7 +282,8 @@ def check_quantized_dir(quantized: str | Path, model_dir: str | Path, spec: Quan
         raise ValueError(f"{quantized}: built with another quantization spec")
     if manifest["source"]["fingerprint"] != source_fingerprint(model_dir):
         raise ValueError(f"{quantized}: built from another checkpoint than {model_dir}")
-    if calibration_sha256 is not None and manifest["calibration"]["sha256"] != calibration_sha256:
+    stored = (manifest.get("calibration") or {}).get("sha256")
+    if calibration_sha256 is not None and stored != calibration_sha256:
         raise ValueError(f"{quantized}: built with another calibration file")
     for name in manifest["files"] + [_INDEX]:
         if not (quantized / name).is_file():
@@ -276,12 +292,13 @@ def check_quantized_dir(quantized: str | Path, model_dir: str | Path, spec: Quan
 
 
 def ensure_quantized_dir(cache_root: str | Path, model_dir: str | Path, spec: QuantSpec,
-                         calibration: Calibration, *, create: bool) -> Path:
+                         calibration: Calibration | None, *, create: bool) -> Path:
     """The valid quantized directory for ``model_dir``/``spec``, written when ``create`` and
     absent (``difflet compile`` creates; ``generate`` only resolves)."""
     target = quantized_dir(cache_root, model_dir, spec)
     try:
-        check_quantized_dir(target, model_dir, spec, calibration.sha256)
+        check_quantized_dir(target, model_dir, spec,
+                            None if calibration is None else calibration.sha256)
         return target
     except ValueError as exc:
         if not create:
@@ -308,21 +325,26 @@ def default_cache_root() -> Path:
 
 
 def prepare_quantized_checkpoint(model_dir: str | Path, spec: QuantSpec,
-                                 calibration_path: str | Path, *, create: bool,
+                                 calibration_path: str | Path | None, *, create: bool,
                                  cache_root: str | Path | None = None
                                  ) -> tuple[Path, QuantSpec]:
     """The quantized directory for ``model_dir`` and the spec completed with the calibration's
-    sha256: what an application needs. ``create`` writes the directory when it is missing (the
-    CLI's ``compile``, on the driver); without it a missing directory is an error naming the
-    fix (every rank of a ``generate`` resolves, none writes)."""
+    sha256 (``fp8``; ``mxfp8`` needs no calibration and ignores the path): what an application
+    needs. ``create`` writes the directory when it is missing (the CLI's ``compile``, on the
+    driver); without it a missing directory is an error naming the fix (every rank of a
+    ``generate`` resolves, none writes)."""
     from difflet.quant.calibration import read_calibration
 
-    calibration = read_calibration(calibration_path)
-    if spec.calibration_sha256 is None:
-        spec = dataclasses.replace(spec, calibration_sha256=calibration.sha256)
-    elif spec.calibration_sha256 != calibration.sha256:
-        raise ValueError(f"{calibration_path}: the calibration file changed since the spec "
-                         "was made (sha256 mismatch)")
+    calibration = None
+    if spec.needs_calibration:
+        if calibration_path is None:
+            raise ValueError(f"format {spec.format!r} needs a calibration file")
+        calibration = read_calibration(calibration_path)
+        if spec.calibration_sha256 is None:
+            spec = dataclasses.replace(spec, calibration_sha256=calibration.sha256)
+        elif spec.calibration_sha256 != calibration.sha256:
+            raise ValueError(f"{calibration_path}: the calibration file changed since the spec "
+                             "was made (sha256 mismatch)")
     root = default_cache_root() if cache_root is None else Path(cache_root)
     return ensure_quantized_dir(root, model_dir, spec, calibration, create=create), spec
 

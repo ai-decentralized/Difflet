@@ -61,15 +61,26 @@ class _FP8LinearBase(nn.Module):
     sharding and the collectives."""
 
     def _init_tensors(self, out_local: int, in_local: int, bias: bool, *, dtype, device,
-                      compute: str, fp8_max: float) -> None:
+                      compute: str, fp8_max: float, mx: bool) -> None:
         self.compute = _check_compute(compute)
         self.fp8_max = float(fp8_max)
+        self.mx = bool(mx)
         # Never requires_grad: autograd has no float8 kernels, and this is inference.
         self.weight = nn.Parameter(
             torch.empty(out_local, in_local, dtype=FP8_DTYPE, device=device), requires_grad=False
         )
-        self.register_buffer("weight_scale", torch.ones(1, dtype=torch.float32, device=device))
-        self.register_buffer("input_scale", torch.ones(1, dtype=torch.float32, device=device))
+        if mx:
+            # E8M0 block scales, [out, in/32], sharded with the weight; activations are
+            # block-scaled inside the kernel, so there is no input scale.
+            if in_local % 32:
+                raise ValueError(f"mxfp8 needs in_features a multiple of 32, got {in_local}")
+            self.register_buffer("weight_scale",
+                                 torch.zeros(out_local, in_local // 32, dtype=torch.uint8,
+                                             device=device))
+            self.register_buffer("input_scale", None)
+        else:
+            self.register_buffer("weight_scale", torch.ones(1, dtype=torch.float32, device=device))
+            self.register_buffer("input_scale", torch.ones(1, dtype=torch.float32, device=device))
         if bias:
             self.bias = nn.Parameter(torch.empty(out_local, dtype=dtype, device=device))
         else:
@@ -77,6 +88,8 @@ class _FP8LinearBase(nn.Module):
         # The kernel path's state, filled by prepare_kernel_ after the load (non-persistent).
         self.register_buffer("weight_packed", None, persistent=False)
         self.register_buffer("out_scale", None, persistent=False)
+        self.register_buffer("weight_scales_hw", None, persistent=False)
+        self.register_buffer("weight_bf16", None, persistent=False)
         self.kernel_n_chunk = self.kernel_k_full = self.kernel_k_rem = 0
         self.kernel_lnc = 1
 
@@ -85,9 +98,24 @@ class _FP8LinearBase(nn.Module):
         their per-partition bias here (fused into the matmul, as ``F.linear`` does for the
         plain layers); the row layer adds its replicated bias after the all-reduce."""
         if self.compute == "dequant":
-            # fp8 -> fp32 is exact; one rounding to the activation dtype after the scale.
-            weight = (self.weight.float() * self.weight_scale).to(x.dtype)
+            if self.weight_bf16 is not None:
+                return F.linear(x, self.weight_bf16.to(x.dtype), bias)
+            if self.mx:
+                from difflet.quant import mx
+
+                weight = mx.dequantize_mx(self.weight, self.weight_scale).to(x.dtype)
+            else:
+                # fp8 -> fp32 is exact; one rounding to the activation dtype after the scale.
+                weight = (self.weight.float() * self.weight_scale).to(x.dtype)
             return F.linear(x, weight, bias)
+        if self.mx:
+            if self.weight_packed is None:
+                raise RuntimeError("the mxfp8 kernel path needs the packed weight: call "
+                                   "prepare_fp8_kernels_(module) after the load")
+            from difflet.backends.neuron.ops_impl import fp8_kernels
+
+            out = fp8_kernels.mx_linear(x, self.weight_packed, self.weight_scales_hw)
+            return out if bias is None else out + bias
         if self.weight_packed is None:
             raise RuntimeError(
                 "the fp8 kernel path needs the packed weight: call prepare_fp8_kernels_(module) "
@@ -104,10 +132,24 @@ class _FP8LinearBase(nn.Module):
         """After the load, for the ``nki`` path: pack the fp8 weight into the kernel's
         ``[K/4, N]`` int32 layout, precompute the output scale, and drop the unpacked weight
         (the two would double the layer's HBM). A no-op in dequant mode."""
-        if self.compute != "nki" or self.weight_packed is not None:
-            return
         from difflet.backends.neuron.ops_impl import fp8_kernels
 
+        if self.mx:
+            if self.weight is None:
+                return
+            if self.compute == "nki":
+                packed, scales = fp8_kernels.prepare_mx_weight(self.weight, self.weight_scale)
+                self.register_buffer("weight_packed", packed, persistent=False)
+                self.register_buffer("weight_scales_hw", scales, persistent=False)
+            else:
+                from difflet.quant import mx
+
+                dequant = mx.dequantize_mx(self.weight, self.weight_scale).to(torch.bfloat16)
+                self.register_buffer("weight_bf16", dequant, persistent=False)
+            self.weight = None
+            return
+        if self.compute != "nki" or self.weight_packed is not None:
+            return
         packed, out_scale, chunk, k_full, k_rem = fp8_kernels.prepare_weight(
             self.weight, self.weight_scale, self.input_scale)
         self.register_buffer("weight_packed", packed, persistent=False)
@@ -117,19 +159,20 @@ class _FP8LinearBase(nn.Module):
         self.weight = None  # the Parameter slot stays, empty: nothing reloads after this
 
     def _repr_tail(self) -> str:
-        return f"compute={self.compute}, fp8_max={self.fp8_max:g}"
+        fmt = "mxfp8" if self.mx else f"fp8_max={self.fp8_max:g}"
+        return f"compute={self.compute}, {fmt}"
 
 
 class FP8Linear(_FP8LinearBase):
     """``nn.Linear`` with an fp8 weight: the replicated (tp=1) case."""
 
     def __init__(self, in_features, out_features, bias=True, *, dtype=None, device=None,
-                 compute: str, fp8_max: float = FP8_MAX) -> None:
+                 compute: str, fp8_max: float = FP8_MAX, mx: bool = False) -> None:
         super().__init__()
         self.in_features = int(in_features)
         self.out_features = int(out_features)
         self._init_tensors(self.out_features, self.in_features, bias, dtype=dtype, device=device,
-                           compute=compute, fp8_max=fp8_max)
+                           compute=compute, fp8_max=fp8_max, mx=mx)
         self._difflet_shard = {"weight": None, "bias": None, "weight_scale": None,
                                "input_scale": None}
 
@@ -150,7 +193,8 @@ class FP8ColumnParallelLinear(_FP8LinearBase):
         return get_tp_group()
 
     def __init__(self, input_size, output_size, bias=True, gather_output=True, dtype=None,
-                 device=None, *, compute: str, fp8_max: float = FP8_MAX, **kwargs) -> None:
+                 device=None, *, compute: str, fp8_max: float = FP8_MAX, mx: bool = False,
+                 **kwargs) -> None:
         super().__init__()
         if kwargs.get("skip_bias_add"):
             raise NotImplementedError(
@@ -163,8 +207,10 @@ class FP8ColumnParallelLinear(_FP8LinearBase):
         self.gather_output = gather_output
         self.output_size_per_partition = _split_evenly(output_size, "output_size")
         self._init_tensors(self.output_size_per_partition, input_size, bias, dtype=dtype,
-                           device=device, compute=compute, fp8_max=fp8_max)
-        self._difflet_shard = {"weight": 0, "bias": 0, "weight_scale": None, "input_scale": None}
+                           device=device, compute=compute, fp8_max=fp8_max, mx=mx)
+        # The MX block scales follow the weight's rows; a per-tensor scale is replicated.
+        self._difflet_shard = {"weight": 0, "bias": 0, "weight_scale": 0 if mx else None,
+                               "input_scale": None}
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         # The bias is per-partition, so it folds straight into the local matmul.
@@ -190,7 +236,7 @@ class FP8RowParallelLinear(_FP8LinearBase):
 
     def __init__(self, input_size, output_size, bias=True, input_is_parallel=False, dtype=None,
                  device=None, reduce_output=True, skip_bias_add=False, *, compute: str,
-                 fp8_max: float = FP8_MAX, **kwargs) -> None:
+                 fp8_max: float = FP8_MAX, mx: bool = False, **kwargs) -> None:
         super().__init__()
         _reject_sequence_parallel("FP8RowParallelLinear", kwargs)
         self.input_size = input_size
@@ -200,8 +246,10 @@ class FP8RowParallelLinear(_FP8LinearBase):
         self.skip_bias_add = skip_bias_add
         self.input_size_per_partition = _split_evenly(input_size, "input_size")
         self._init_tensors(output_size, self.input_size_per_partition, bias, dtype=dtype,
-                           device=device, compute=compute, fp8_max=fp8_max)
-        self._difflet_shard = {"weight": 1, "bias": None, "weight_scale": None,
+                           device=device, compute=compute, fp8_max=fp8_max, mx=mx)
+        # The MX block scales follow the weight's K columns (the rank's own K range, quantized
+        # as such, difflet/quant/mx.py); a per-tensor scale is replicated.
+        self._difflet_shard = {"weight": 1, "bias": None, "weight_scale": 1 if mx else None,
                                "input_scale": None}
 
     def forward(self, x: torch.Tensor):
@@ -227,25 +275,25 @@ class FP8RowParallelLinear(_FP8LinearBase):
 # ------------------------------------------------------------------------------- the swap
 
 
-def fp8_twin(linear: nn.Module, *, compute: str, fp8_max: float) -> _FP8LinearBase:
+def fp8_twin(linear: nn.Module, *, compute: str, fp8_max: float, mx: bool = False
+             ) -> _FP8LinearBase:
     """The fp8 layer that replaces ``linear`` (``nn.Linear``, ``ColumnParallelLinear`` or
     ``RowParallelLinear``), same geometry, flags, bias, dtype and device."""
     weight = linear.weight
     factory = {"dtype": weight.dtype if weight.dtype != FP8_DTYPE else torch.bfloat16,
-               "device": weight.device}
+               "device": weight.device, "compute": compute, "fp8_max": fp8_max, "mx": mx}
     has_bias = getattr(linear, "bias", None) is not None
     if isinstance(linear, ColumnParallelLinear):
         return FP8ColumnParallelLinear(
             linear.input_size, linear.output_size, bias=has_bias,
-            gather_output=linear.gather_output, compute=compute, fp8_max=fp8_max, **factory)
+            gather_output=linear.gather_output, **factory)
     if isinstance(linear, RowParallelLinear):
         return FP8RowParallelLinear(
             linear.input_size, linear.output_size, bias=has_bias,
             input_is_parallel=linear.input_is_parallel, reduce_output=linear.reduce_output,
-            skip_bias_add=linear.skip_bias_add, compute=compute, fp8_max=fp8_max, **factory)
+            skip_bias_add=linear.skip_bias_add, **factory)
     if type(linear) is nn.Linear:
-        return FP8Linear(linear.in_features, linear.out_features, bias=has_bias, compute=compute,
-                         fp8_max=fp8_max, **factory)
+        return FP8Linear(linear.in_features, linear.out_features, bias=has_bias, **factory)
     raise TypeError(f"cannot quantize a {type(linear).__name__}")
 
 
@@ -264,7 +312,7 @@ def quantize_module_(module: nn.Module, spec: QuantSpec) -> list[str]:
     for name, child in targets:
         parent_path, _, leaf = name.rpartition(".")
         parent = module.get_submodule(parent_path) if parent_path else module
-        twin = fp8_twin(child, compute=spec.compute, fp8_max=spec.fp8_max)
+        twin = fp8_twin(child, compute=spec.compute, fp8_max=spec.fp8_max, mx=spec.is_mx)
         if isinstance(parent, (nn.ModuleList, nn.Sequential)):
             parent[int(leaf)] = twin
         else:
@@ -293,14 +341,16 @@ def prepare_fp8_kernels_(module: nn.Module, *, lnc: int | None = None) -> int:
     count = 0
     by_parent: dict[str, list[_FP8LinearBase]] = {}
     for name, child in module.named_modules():
-        if isinstance(child, _FP8LinearBase) and child.compute == "nki":
+        if isinstance(child, _FP8LinearBase) and (child.compute == "nki" or child.mx):
             by_parent.setdefault(name.rpartition(".")[0], []).append(child)
     for siblings in by_parent.values():
         for child in siblings:
+            if child.mx:
+                continue
             for other in siblings:
                 if other is child:
                     break
-                if (other.input_scale is not child.input_scale
+                if (not other.mx and other.input_scale is not child.input_scale
                         and torch.equal(other.input_scale, child.input_scale)):
                     child.input_scale = other.input_scale  # the same tensor object
                     break
