@@ -126,6 +126,10 @@ def _diffusers_decode(
     vae = AutoencoderKLHunyuanVideo15.from_pretrained(vae_dir, torch_dtype=dtype).eval()
     if tiling is not None:
         vae.enable_tiling(**tiling)
+        # diffusers tiles on tile_latent_min_*, which enable_tiling() does not recompute from the
+        # sample sizes; derive them as the Difflet side does so both decode with the same tiles.
+        vae.tile_latent_min_height = vae.tile_sample_min_height // vae.spatial_compression_ratio
+        vae.tile_latent_min_width = vae.tile_sample_min_width // vae.spatial_compression_ratio
     with torch.no_grad():
         return vae.decode(latents.to(dtype), return_dict=False)[0]
 
