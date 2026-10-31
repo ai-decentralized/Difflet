@@ -173,7 +173,8 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
         dest="host_vae",
         action="store_true",
         help="Decode the VAE on host CPU via diffusers (fp32) instead of on a NeuronCore. "
-        "Trainium (AoT): Wan already decodes on the host by default (its compiled bf16 device "
+        "Trainium (AoT): Wan and HunyuanVideo 1.5 already decode on the host by default "
+        "(Wan's compiled bf16 device "
         "VAE degrades short clips; beyond ~9 frames its graph exceeds the compiler instruction "
         "limit, NCC_EVRF007); the flag remains for other models and for explicitness. "
         "--backend neuron: optional; Wan's VAE stage otherwise decodes on one core (bf16 up to "
@@ -187,7 +188,8 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
         help="Trainium (AoT), Wan: decode with the compiled bf16 Neuron VAE instead of the default "
         "fp32 host decode. Known to degrade short clips (blur, grid artifacts; under "
         "investigation); beyond ~9 frames the graph also exceeds the compiler instruction limit "
-        "(NCC_EVRF007). "
+        "(NCC_EVRF007). Trainium (AoT), HunyuanVideo 1.5: likewise opts into the compiled tiled "
+        "bf16 decoder (compiled by `difflet compile`; it does not build on neuronx-cc 2.26). "
         "--backend neuron, Qwen-Image and HunyuanVideo: decode in a VAE stage of its own on one "
         "NeuronCore (see --vae-dtype and --vae-exec-mode), after the generate launch has exited, "
         "instead of on the host CPU. The default for Qwen-Image (HunyuanVideo's is "

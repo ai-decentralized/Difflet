@@ -105,6 +105,9 @@ def _build_stage_parser() -> argparse.ArgumentParser:
     # --vae-exec-mode (their vae stage's decoder).
     p.add_argument("--vae-placement", dest="vae_placement", default=None,
                    choices=["generate", "launch", "host"])
+    # HunyuanVideo 1.5 on Trainium (AoT): the aot_vae stage runs the compiled decoder instead of
+    # the default host decode.
+    p.add_argument("--device-vae", dest="device_vae", action="store_true")
     p.add_argument("--vae-dtype", dest="vae_dtype", default=None, choices=["bf16", "fp32"])
     p.add_argument("--vae-exec-mode", dest="vae_exec_mode", default=None,
                    choices=list(EXEC_MODE_CHOICES))
