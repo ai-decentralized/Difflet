@@ -834,6 +834,9 @@ class QwenImageOrchestrator(ModelOrchestrator):
             save=save,
             finish_compile=lambda: self._finish_stage_compile(
                 "generate", args, self._stage_compiled_dir("generate", args)),
+            # Rank 0 prints the start-up split and, per request, the median DiT step (the
+            # scheduler steps once per denoising step): the per-step number the FP8 gate reads.
+            timing=True,
         )
 
     def _stage_vae(self, args: argparse.Namespace) -> None:
