@@ -245,6 +245,18 @@ metrics move by about 1.5 dB between layer sets that should order the other way 
 30.2 dB vs 10 layers 31.6 dB), so differences of that size are noise, not signal. **noout is
 the default layer set** (commit below); `DIFFLET_QUANT_TARGETS` restores any other.
 
+### 6d-ii. The default layer set on four prompts (tp4, 1024x1024, 50 steps, seed 42, vs bf16)
+
+`/home/ubuntu/fp8-bench/multiprompt/` (the cat prompt is 6d's noout row). Every prompt clears
+PSNR >= 30, SSIM >= 0.97, LPIPS <= 0.05; the step is 260 ms on each against bf16's 298–299.
+
+| prompt | PSNR | SSIM | LPIPS | latent cos | mxfp8 step | bf16 step |
+|---|---|---|---|---|---|---|
+| a cat sitting on a bench | 31.59 dB | 0.987 | 0.017 | 0.9963 | 260.2 ms | 299 ms |
+| watercolor lighthouse at dawn | 42.61 dB | 0.996 | 0.005 | 0.9997 | 260.5 ms | 299.0 ms |
+| vintage brass typewriter | 31.22 dB | 0.976 | 0.035 | 0.9947 | 260.0 ms | 298.4 ms |
+| astronaut, neon city at night | 33.94 dB | 0.985 | 0.033 | 0.9970 | 260.1 ms | — |
+
 ### 6e. Profiler: where the block's time goes (neuron-explorer 2.33, one logical core)
 
 Captures of the cached one-block NEFFs (tp1 shapes; `neuron-profile` is a stub, the tool is
