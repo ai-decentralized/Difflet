@@ -39,7 +39,7 @@ def test_generate_writes_the_mp4_through_save_video(recorder, saved, tmp_path):
 
 
 def test_a_failed_mp4_export_falls_back_to_a_pt_tensor(recorder, monkeypatch, tmp_path):
-    monkeypatch.setattr(trainium_wan, "_save_video", lambda tensor, path: False)
+    monkeypatch.setattr(trainium_wan, "_save_video", lambda tensor, path, **kwargs: False)
     out = tmp_path / "wan.mp4"
     orch = _orch(SPEC, output=str(out))
     orch.generate()

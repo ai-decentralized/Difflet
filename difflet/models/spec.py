@@ -83,6 +83,7 @@ _GPU_SPEC_MODULES = {
     "qwen_image": "difflet.models.qwen_image.spec",
     "flux": "difflet.models.flux.spec",
     "wan": "difflet.models.wan.spec",
+    "hunyuan_video": "difflet.models.hunyuan_video.spec",
 }
 
 

@@ -103,6 +103,10 @@ def resolve_serving_model(options: ServeOptions) -> ResolvedServingModel:
         teacache_calibration=options.teacache_calibration,
         torch_compile=bool(getattr(options, "torch_compile", False)),
     )
+    if on_gpu and entry.name == "hunyuan_video":
+        from difflet.backends.cuda.hunyuan_video.serving import resolve_clip_profile
+
+        profile = resolve_clip_profile(options, profile)
     return ResolvedServingModel(
         model_id=options.model_id,
         base_entry=entry,

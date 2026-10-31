@@ -120,9 +120,10 @@ step. Verified on RTX PRO 6000 Blackwell (96 GB) and A100 80 GB.
 | FLUX.1-dev | ✅ image | ✅ image | ✅ | ❌ | ✅ ² | — ¹ | ❌ | ❌ |
 | Qwen-Image | ✅ image | ⚠️ image ³ | ✅ | ✅ | ✅ | — ⁴ | ❌ | ❌ |
 | Wan 2.2 | ✅ video | ✅ video | ✅ | ❌ | ⚠️ ⁵ | ✅ ⁶ | ❌ | ❌ |
+| HunyuanVideo (original) | ⚠️ experimental ⁷ | ⚠️ experimental ⁷ | ⚠️ execution observed ⁷ | ❌ | Not measured | — ¹ | ❌ | ❌ |
 
 An option the GPU backend does not support is refused with a message naming it, not ignored.
-TeaCache (adaptive), TAEF1, and `--host-vae` are refused on GPUs for all three models.
+TeaCache (adaptive), TAEF1, and `--host-vae` are refused on GPUs for these models.
 
 1. Guidance-distilled model (the guidance scale is baked into the timestep embedding), so there
    is no second CFG branch to split.
@@ -135,6 +136,10 @@ TeaCache (adaptive), TAEF1, and `--host-vae` are refused on GPUs for all three m
    not apply, because the video service runs one job at a time. Wan 2.1 is routed to the GPU
    flow but has not been run on a GPU.
 6. Two GPUs under `torchrun`, `difflet run` only. Output is bit-identical to one GPU.
+7. Experimental single-GPU BF16 support for `hunyuanvideo-community/HunyuanVideo`.
+   Eager and compiled Python, CLI and HTTP generation were verified at 320×512×61,
+   50 steps on a 96 GB GPU. See the [HunyuanVideo CUDA guide](docs/verification/hunyuanvideo-cuda.md)
+   for usage, accuracy and benchmark limits. HunyuanVideo 1.5 is a separate model.
 
 Measured timings against stock diffusers, and the full pass/limit matrix, are in
 [docs/verification/gpu-backend-results.md](docs/verification/gpu-backend-results.md).
@@ -278,9 +283,10 @@ image = pipe(
 image.save("out.png")
 ```
 
-Pass `parallel` explicitly on GPUs: a model's registry default is its Trainium layout (for
-example `tp_degree=8` for Flux), which the GPU backend refuses. On GPUs, the Python API is
-covered by unit tests; hardware verification so far is through the CLI and `difflet serve`.
+For HunyuanVideo CUDA, pass `parallel=DiffletParallelConfig(tp_degree=1)` explicitly.
+Omitting `parallel` preserves the model-specific registry default, including HunyuanVideo's
+Trainium topology. GPU Python API paths have unit coverage; see the
+[per-model results](docs/verification/gpu-backend-results.md) for hardware coverage.
 
 ## Choose a topology
 

@@ -124,7 +124,7 @@ def _cache_prefix(model_id: str) -> str:
     return re.sub(r"[^a-z0-9]+", "_", model_id.split("/")[-1].lower()).strip("_")
 
 
-def _save_video(tensor: "torch.Tensor", output_path: str) -> bool:
+def _save_video(tensor: "torch.Tensor", output_path: str, *, fps: int = 16) -> bool:
     """Write (1, C, T, H, W) tensor to MP4. Returns True on success."""
     try:
         import torch
@@ -137,7 +137,7 @@ def _save_video(tensor: "torch.Tensor", output_path: str) -> bool:
     # (uint8 input wraps to 256-v: color inversion).
     frames = frames[0].permute(1, 2, 3, 0).cpu().numpy().astype("float32")
     try:
-        export_to_video(list(frames), output_path, fps=16)
+        export_to_video(list(frames), output_path, fps=fps)
     except Exception as exc:
         print(f"[wan] mp4 export failed ({exc}); saving as .pt instead", flush=True)
         return False
