@@ -188,3 +188,22 @@ def test_the_kernel_path_turns_on_the_nki_trace_cache(monkeypatch, tmp_path):
     monkeypatch.setenv("DIFFLET_NKI_TRACE_CACHE", "0")
     prepare("--quant", "mxfp8")
     assert os.environ["DIFFLET_NKI_TRACE_CACHE"] == "0"
+
+
+def test_quant_targets_env_replaces_the_layer_set_and_keys_the_spec(monkeypatch):
+    monkeypatch.delenv("DIFFLET_EXEC_MODE", raising=False)
+    monkeypatch.delenv(Q.QUANT_TARGETS_ENV, raising=False)
+    args = _parse("generate", "--model-id", QWEN, "--quant", "mxfp8")
+    default = Q.quant_spec(args)
+    monkeypatch.setenv(Q.QUANT_TARGETS_ENV,
+                       r"transformer_blocks\.\d+\.(img_mlp|txt_mlp)\.net\.0\.proj;;"
+                       r"transformer_blocks\.\d+\.(img_mlp|txt_mlp)\.net\.2")
+    narrowed = Q.quant_spec(args)
+    assert len(narrowed.targets) == 2 and narrowed.targets != default.targets
+    assert narrowed.matches("transformer_blocks.3.img_mlp.net.2")
+    assert not narrowed.matches("transformer_blocks.3.attn.to_q")
+    assert default.matches("transformer_blocks.3.attn.to_q")
+    assert narrowed.cache_fields()["quant_targets_sha256"] != default.cache_fields()["quant_targets_sha256"]
+    assert narrowed.weights_identity() != default.weights_identity()
+    monkeypatch.setenv(Q.QUANT_TARGETS_ENV, "")
+    assert Q.quant_spec(args).targets == default.targets

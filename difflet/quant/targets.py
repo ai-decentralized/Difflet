@@ -67,7 +67,7 @@ def row_parallel_for(model: str) -> tuple[str, ...]:
 def default_spec(model: str, **overrides) -> QuantSpec:
     """The recipe for ``model``: ``fp8`` (per-tensor weights, static activations) unless
     ``format="mxfp8"`` (block-32 weights, MX activations) is asked for; the granularities
-    follow the format."""
+    follow the format. ``targets=`` replaces the model's default layer set."""
     from difflet.quant.spec import FORMAT_LAWS, FORMATS
 
     fmt = overrides.get("format", "fp8")
@@ -77,7 +77,8 @@ def default_spec(model: str, **overrides) -> QuantSpec:
     overrides.setdefault("weight_granularity", granularity)
     overrides.setdefault("activation", activation)
     overrides.setdefault("row_parallel", row_parallel_for(model))
-    return QuantSpec(targets=targets_for(model), **overrides)
+    overrides.setdefault("targets", targets_for(model))
+    return QuantSpec(**overrides)
 
 
 __all__ = [

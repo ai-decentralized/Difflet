@@ -97,6 +97,11 @@ def validate_quant(args: argparse.Namespace) -> None:
               "with OCP float8_e4m3fn (NCC_EOCP001).")
 
 
+#: Semicolon-separated regexes replacing the model's default target layers (experiments on
+#: which layers to quantize; see ``difflet/quant/targets.py`` for the defaults).
+QUANT_TARGETS_ENV = "DIFFLET_QUANT_TARGETS"
+
+
 def quant_spec(args: argparse.Namespace) -> QuantSpec | None:
     """The spec the flags describe, with the calibration file's sha256, or None when off."""
     quant = getattr(args, "quant", None)
@@ -111,8 +116,15 @@ def quant_spec(args: argparse.Namespace) -> QuantSpec | None:
     # The row-parallel weights of mxfp8 are quantized per rank K range: the tp the launch uses
     # (the Qwen-Image driver's default is 4, cli/orchestrators/qwen_image.py).
     tp = int(getattr(args, "tp_degree", None) or 4)
+    overrides = {}
+    targets = os.environ.get(QUANT_TARGETS_ENV)
+    if targets:
+        # An experiment knob, not a flag: the layer set is part of the recipe, and the spec's
+        # targets_sha256 keys the quantized checkpoint and the stage cache, so two settings
+        # never share an artifact.
+        overrides["targets"] = tuple(t for t in targets.split(";") if t)
     return default_spec(model, format=quant, compute=compute, calibration_sha256=sha,
-                        tp_degree=tp)
+                        tp_degree=tp, **overrides)
 
 
 def quant_cli_args(args: argparse.Namespace) -> list[str]:
