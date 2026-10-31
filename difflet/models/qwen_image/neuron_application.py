@@ -120,6 +120,12 @@ _KWARG_DEFAULTS: dict[str, Any] = {
     "teacache_calibration_path": None,
     "teacache_cadence": None,
     "teacache_online_delta_alpha": None,
+    # FP8 DiT linears (difflet/quant): the spec (a QuantSpec, its dict, or "fp8" for the
+    # default recipe) and either the quantized checkpoint directory or the calibration file
+    # it is resolved from (the directory must already exist: `difflet compile` writes it).
+    "quant": None,
+    "quant_calibration": None,
+    "quant_checkpoint": None,
 }
 _TEACACHE_KWARGS = (
     "teacache_speedup",
@@ -466,14 +472,16 @@ class TorchNeuronQwenImageApplication(TorchNeuronModelApplication):
             cfg_parallel_enabled=bool(getattr(parallel, "cfg_parallel_enabled", False)),
             torch_dtype=self.dtype,
         )
+        self.quant, dit_path = self._resolve_quant(options, transformer_path)
         if options["enable_transformer"]:
             self.transformer = NeuronQwenImageTransformerApplication(
-                model_path=transformer_path,
+                model_path=dit_path,
                 config=self.config,
                 parallel=parallel,
                 dtype=self.dtype,
                 exec_mode=options["exec_mode"],
                 device=self.device,
+                quant=self.quant,
             )
             self.config = self.transformer.config  # cp_degree filled from the parallel config
         if options["enable_text_encoder"] and options["text_encoder_device"] == "neuron":
@@ -521,6 +529,40 @@ class TorchNeuronQwenImageApplication(TorchNeuronModelApplication):
             dtype = normalize_dtype(options[name])
             if dtype not in (torch.bfloat16, torch.float32):
                 raise ValueError(f"{name} must be bfloat16 or float32, got {dtype}")
+        if options["quant"] is None:
+            given = [n for n in ("quant_calibration", "quant_checkpoint") if options[n]]
+            if given:
+                raise ValueError(f"{', '.join(given)} need quant='fp8' (or a QuantSpec)")
+        elif options["quant_checkpoint"] is None and options["quant_calibration"] is None:
+            raise ValueError("quant needs quant_calibration (the activation calibration file) "
+                             "or quant_checkpoint (an existing quantized directory)")
+
+    def _resolve_quant(self, options: dict[str, Any], transformer_path: str):
+        """``(spec, DiT directory)``: the quantized checkpoint for ``quant`` (resolved under the
+        compile cache from the calibration file, never written here: every rank resolves,
+        ``difflet compile`` writes on the driver), else ``(None, transformer_path)``."""
+        from difflet.quant.checkpoint import check_quantized_dir, prepare_quantized_checkpoint
+        from difflet.quant.spec import QuantSpec
+        from difflet.quant.targets import default_spec
+
+        quant = options["quant"]
+        if quant is None:
+            return None, transformer_path
+        if isinstance(quant, str):
+            spec = default_spec("qwen_image", format=quant)
+        elif isinstance(quant, dict):
+            spec = QuantSpec.from_dict(quant)
+        elif isinstance(quant, QuantSpec):
+            spec = quant
+        else:
+            raise TypeError(f"quant must be 'fp8', a QuantSpec or its dict, got {type(quant)}")
+        checkpoint = options["quant_checkpoint"]
+        if checkpoint is None:
+            checkpoint, spec = prepare_quantized_checkpoint(
+                transformer_path, spec, options["quant_calibration"], create=False)
+        else:
+            check_quantized_dir(checkpoint, transformer_path, spec, spec.calibration_sha256)
+        return spec, str(checkpoint)
 
     def _resolve_shape(self, shape: dict[str, int | None], shapes) -> dict[str, Any]:
         height = int(shape.get("height") or 1024)

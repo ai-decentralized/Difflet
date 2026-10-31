@@ -58,6 +58,7 @@ import sys
 from pathlib import Path
 
 from difflet.common.orchestrators import qwen_image as qwen_common
+from difflet.cli.quant import quant_cli_args, quant_spec
 from difflet.cli.orchestrators.base import (
     ModelOrchestrator,
     canonical_shapes_list,
@@ -198,6 +199,12 @@ def _torchrun_application_kwargs(args: argparse.Namespace) -> dict:
     kwargs = dict(_TORCHRUN_APPLICATION_KWARGS)
     if getattr(args, "device_text_encoder", False):
         kwargs["text_encoder_device"] = "neuron"
+    spec = quant_spec(args)
+    if spec is not None:
+        # The spec (with the calibration's sha256) and the calibration file; the application
+        # resolves the quantized directory the driver's `compile` wrote (never writes one).
+        kwargs["quant"] = spec.to_dict()
+        kwargs["quant_calibration"] = args.quant_calibration
     for app_key, arg_key in (
         ("teacache_speedup", "teacache_speedup"),
         ("teacache_cadence", "teacache_cadence"),
@@ -361,11 +368,44 @@ class QwenImageOrchestrator(ModelOrchestrator):
         """
         if torchrun_backend() is None:
             return
+        import functools
+
         from difflet.backends.neuron.qwen_image.hbm import dit_fits
         from difflet.pipeline.path_resolver import resolve_model_path
 
+        if self._quantized_dit is not None:
+            # The FP8 DiT: the quantized directory's bytes as stored (fp8 weights), not bf16.
+            dit_fits = functools.partial(dit_fits, dit_dir=self._quantized_dit)
         refuse_dit_overflow("Qwen-Image", lambda: self._model_dir(self.args, resolve_model_path),
                             dit_fits, self.args.tp_degree or 4)
+
+    #: The quantized DiT directory (--quant), once ``_prepare_quant`` resolved it.
+    _quantized_dit: str | None = None
+
+    def _prepare_quant(self, *, create: bool) -> None:
+        """With --quant on a torchrun backend, resolve the quantized DiT directory under the
+        compile cache, writing it when ``create`` (``compile``; ``generate`` only resolves and
+        refuses with the fix when it is missing). Before ``_check_dit_fits`` so the HBM estimate
+        counts fp8 bytes, and before any rank starts so none writes."""
+        spec = quant_spec(self.args)
+        if spec is None or torchrun_backend() is None:
+            return
+        from difflet.pipeline.path_resolver import resolve_model_path
+        from difflet.quant.checkpoint import prepare_quantized_checkpoint
+
+        try:
+            model_dir = self._model_dir(self.args, resolve_model_path)
+        except Exception:  # not downloaded yet: the application resolves it in the ranks
+            return
+        root_compile_cache_at_cache_dir(getattr(self.args, "cache_dir", None), tag="qwen_image")
+        transformer_dir = str(Path(model_dir) / "transformer")
+        try:
+            quantized, _ = prepare_quantized_checkpoint(
+                transformer_dir, spec, self.args.quant_calibration, create=create)
+        except ValueError as exc:
+            refuse(f"--quant: {exc}")
+        self._quantized_dit = str(quantized)
+        print(f"[qwen_image] FP8 DiT ({spec.compute}): {quantized}", flush=True)
 
     def _place_text_encoder(self) -> None:
         """On a torchrun backend (neuron) with --device-text-encoder, keep Qwen2.5-VL on rank
@@ -401,6 +441,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
 
     def compile(self) -> None:
         self._reject_unsupported_torchrun_options(generating=False)
+        self._prepare_quant(create=True)
         self._check_dit_fits()
         self._place_text_encoder()
         root_compile_cache_at_cache_dir(getattr(self.args, "cache_dir", None), tag="qwen_image")
@@ -445,6 +486,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
 
     def generate(self) -> None:
         self._reject_unsupported_torchrun_options()
+        self._prepare_quant(create=False)
         self._check_dit_fits()
         self._place_text_encoder()
         root_compile_cache_at_cache_dir(getattr(self.args, "cache_dir", None), tag="qwen_image")
@@ -959,6 +1001,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
             import torch
 
             from difflet.common.tp_reduce import parse_tp_reduce_dtype, tp_reduce_cache_fields
+            from difflet.quant.spec import quant_cache_fields
 
             return {
                 "component": "qwen_image_dit",
@@ -983,6 +1026,9 @@ class QwenImageOrchestrator(ModelOrchestrator):
                     parse_tp_reduce_dtype(getattr(args, "tp_reduce_dtype", None)),
                     legacy=torch.float32,
                 ),
+                # Additive, neuron only: the FP8 DiT names its recipe, calibration and compute
+                # path (difflet/quant/spec.py); a bf16 DiT adds nothing.
+                **quant_cache_fields(quant_spec(args)),
             }
         if stage == "vae":
             return {
@@ -1066,6 +1112,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
             parts += ["--vae-exec-mode", a.vae_exec_mode]
         if getattr(a, "tp_reduce_dtype", None):
             parts += ["--tp-reduce-dtype", a.tp_reduce_dtype]
+        parts += quant_cli_args(a)  # only when given
         if getattr(a, "teacache_speedup", None) is not None:
             parts += ["--teacache-speedup", str(a.teacache_speedup)]
         if getattr(a, "teacache_calibration", None):

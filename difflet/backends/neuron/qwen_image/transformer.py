@@ -42,10 +42,12 @@ from difflet.backends.neuron.core.config_checks import (
     check_flag_matches,
     check_tp_matches,
     require_bf16_on_device,
+    require_fp8_supported,
     resolve_cp_degree,
     truncated_block_prefixes,
 )
 from difflet.backends.neuron.qwen_image.config import NeuronQwenImageConfig
+from difflet.quant.spec import QuantSpec
 
 #: The trace module nests the diffusers model under this attribute; checkpoint keys are the
 #: diffusers model's own (``transformer_blocks.0.img_mod.1.weight``, ``norm_out.linear.bias``).
@@ -149,6 +151,12 @@ class NeuronQwenImageTransformerApplication(TorchNeuronApplicationBase):
     A ``num_layers`` below the checkpoint's (``NeuronQwenImageConfig.from_pretrained(...,
     num_layers=N)``) loads the first N blocks and reports the others under
     ``load_report["skipped"]``.
+
+    ``quant`` (a ``QuantSpec`` or its dict) swaps the spec's target linears for their FP8 twins
+    on the meta module (``ops_impl/fp8_linear.quantize_module_``) before the load, so
+    ``model_path`` must then be the quantized checkpoint directory
+    (``difflet/quant/checkpoint.py``) whose tensors those layers hold. Trainium3 and compile
+    mode only (decision D43, ``require_fp8_supported``); the activations stay bf16 (D42).
     """
 
     block_attrs = ("transformer.transformer_blocks",)
@@ -162,6 +170,7 @@ class NeuronQwenImageTransformerApplication(TorchNeuronApplicationBase):
         dtype=torch.bfloat16,
         exec_mode: str | None = None,
         device="neuron",
+        quant: QuantSpec | dict | None = None,
         **kwargs,
     ) -> None:
         super().__init__(
@@ -183,13 +192,26 @@ class NeuronQwenImageTransformerApplication(TorchNeuronApplicationBase):
         config.validate()
         require_bf16_on_device("Qwen-Image", self.device.type, self.dtype)
         self.config = config
+        if isinstance(quant, dict):
+            quant = QuantSpec.from_dict(quant)
+        self.quant: QuantSpec | None = quant
+        if quant is not None:
+            require_fp8_supported("Qwen-Image", self.device.type, self.exec_mode)
+        #: The module names ``build_module`` quantized (empty without ``quant``).
+        self.quantized_linears: list[str] = []
         # Blocks past num_layers are in the checkpoint on purpose when num_layers was cut.
         skipped = truncated_block_prefixes(config, "transformer_blocks.")
         if skipped:
             self.skipped_checkpoint_prefixes = skipped
 
     def build_module(self) -> torch.nn.Module:
-        return _trace_module_class()(self.config)
+        module = _trace_module_class()(self.config)
+        if self.quant is not None:
+            from difflet.backends.neuron.ops_impl.fp8_linear import quantize_module_
+
+            # After the TP replacement (the trace module's __init__), still on meta.
+            self.quantized_linears = quantize_module_(module, self.quant)
+        return module
 
     def forward(
         self,

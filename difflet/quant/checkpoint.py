@@ -25,6 +25,7 @@ checkpoint, another target set or another calibration is another directory.
 
 from __future__ import annotations
 
+import dataclasses
 import hashlib
 import json
 import os
@@ -296,6 +297,36 @@ def quantized_linear_names(quantized: str | Path) -> list[str]:
     return list(read_manifest(quantized)["quantized_linears"])
 
 
+def default_cache_root() -> Path:
+    """Where quantized directories live by default: beside the neuron NEFF cache and the
+    weight store, under ``DIFFLET_COMPILE_CACHE`` (the CLI's ``--cache-dir``) or
+    ``~/.cache/difflet``."""
+    from difflet import envs
+
+    cache = envs.DIFFLET_COMPILE_CACHE or "~/.cache/difflet"
+    return Path(os.path.abspath(os.path.expanduser(cache)))
+
+
+def prepare_quantized_checkpoint(model_dir: str | Path, spec: QuantSpec,
+                                 calibration_path: str | Path, *, create: bool,
+                                 cache_root: str | Path | None = None
+                                 ) -> tuple[Path, QuantSpec]:
+    """The quantized directory for ``model_dir`` and the spec completed with the calibration's
+    sha256: what an application needs. ``create`` writes the directory when it is missing (the
+    CLI's ``compile``, on the driver); without it a missing directory is an error naming the
+    fix (every rank of a ``generate`` resolves, none writes)."""
+    from difflet.quant.calibration import read_calibration
+
+    calibration = read_calibration(calibration_path)
+    if spec.calibration_sha256 is None:
+        spec = dataclasses.replace(spec, calibration_sha256=calibration.sha256)
+    elif spec.calibration_sha256 != calibration.sha256:
+        raise ValueError(f"{calibration_path}: the calibration file changed since the spec "
+                         "was made (sha256 mismatch)")
+    root = default_cache_root() if cache_root is None else Path(cache_root)
+    return ensure_quantized_dir(root, model_dir, spec, calibration, create=create), spec
+
+
 def is_fp8(tensor: torch.Tensor) -> bool:
     return tensor.dtype == FP8_DTYPE
 
@@ -304,7 +335,9 @@ __all__ = [
     "MANIFEST",
     "SHARD_BYTES",
     "check_quantized_dir",
+    "default_cache_root",
     "ensure_quantized_dir",
+    "prepare_quantized_checkpoint",
     "iter_source_tensors",
     "quantize_tensors",
     "quantized_digest",
