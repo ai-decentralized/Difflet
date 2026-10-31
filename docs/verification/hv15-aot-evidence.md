@@ -788,3 +788,52 @@ override with the overlap option removed, so no code changes. The override is no
 cache key; at this shape there was no prior artifact, so nothing stale can be reused.
 Evidence: `E/phase3-retry/tp2cfg-attempt1/` (`compile.log`, `ncc_log_excerpt.log`,
 `ncc_command.log`, `probe-*_log_excerpt.log`).
+
+#### Attempt 2 (new graph, compute/collective overlap off): PASS, compiles and generates the video
+
+Same command, plus `DIFFLET_HUNYUAN15_COMPILER_ARGS="--model-type=transformer -O1 --auto-cast=none
+--internal-hlo2tensorizer-options='--verify-hlo=true'"`. These are Difflet's hv15 DiT flags with
+only `--tensorizer-options=--enable-ccop-compute-overlap` removed. Then a 50-step `difflet
+generate` without any override; the artifact is already compiled.
+
+| step | outcome | wall | breakdown (from the log) | HBM GiB/core | host RSS peak |
+|---|---|---|---|---|---|
+| `compile` | **PASS** | **3970.0 s** | module load 37.9 s; **HLO generation 1706.3 s**; neuronx-cc (Tensorizer passes in 17.8 s) 2078.8 s; model built in 3952.2 s, into `hunyuan_video_15_aot_dit/5161ab1fe7b07b80` (32 GB) | n/a | 31.5 GiB stage process; **116.5 GiB** total with the neuronx-cc processes (host has 124 GiB) |
+| `generate --steps 50` | **PASS** | **4132.8 s** e2e | encode load 47.7 s, encode 103.1 s; DiT load 574.4 s (cold); denoise 661.9 s, **median 13072 ms** (first 21178 ms); **host VAE decode 2699.2 s** | **23.58** x4 | aot_transformer stage 102.2 GiB; aot_vae 34.8 GiB; encode 16.5 GiB |
+
+- Output: 121 frames at 480x848, minimum per-frame std 44.4, mean frame-to-frame difference
+  24.6. The mid frame (`gen50_mid.png`) shows a red fox running through snow in a birch forest.
+  `gen50.mp4` (0.8 MB) is in the evidence dir.
+- No NaN or Inf in the latents (`latents.pt` sha `35c65be5…`). The cosine against the native
+  50-step latents at this shape is 0.234. As at 320x512 (0.584), the two stacks start from
+  different seed-42 noise and slightly different embeds, so this is not a parity measure. Parity
+  is gated per forward at 320x512x61 (re-gate below).
+- **Against native, same host, same layout (Phase 3 reference):**
+  - Step median: AOT 13072 ms vs native 11178 ms, so the AOT step is **1.17x slower**.
+  - Denoise total: AOT 661.9 s vs native 754.9 s. AOT is lower because native's first step
+    takes 195.2 s (per-process one-time work) and AOT's takes 21.2 s.
+  - Compile: AOT 3970 s vs native 2807 s.
+  - e2e: AOT 4132.8 s vs native 960.7 s. The difference is the host VAE (2699.2 s vs native's
+    device decode of 89.0 s) and the cold DiT load (574.4 s vs 43.6 s). The host decode agrees
+    with the 2518.7 s measured on native's latents in Phase 3 (within 7%).
+  - Without the VAE and load (encode + denoise): AOT 765 s, native 763 s.
+- The VAE stays host-decoded (user decision). At this shape it is **LIMIT**: 2699 s, 65% of the
+  e2e wall.
+- **Core claim with the pre-encode shape check (`93dde78`): PASS.** `_run_aot` now imports
+  torch_neuronx / neuronx_distributed in the CLI driver before it launches the all-core
+  aot_transformer stage. This generate is the first one on the new code. The stage loaded on
+  all four cores (23.58 GiB on each), and there was no "cores busy" or NRT allocation error
+  anywhere in the log.
+- **Host memory.** Peaks: the compile reached 116.5 GiB of the host's 124 GiB, and the DiT load
+  peaked at 102.2 GiB RSS in the aot_transformer stage. Native's ranks peaked at 70.9 GiB.
+  Neither run failed, but the default-shape compile has little headroom on this host. The RSS
+  sampler also recorded small (about 2.3 GiB) processes keyed `hang`/`toy`/`transformer`/
+  `generate`. These are not part of this run; they come from another session's processes whose
+  command line contains `difflet`.
+- **Follow-up (not a code change in this campaign).** Difflet's default hv15 DiT flags fail at
+  480x848x121 (NCC_IRPX901, attempt 1); the same flags without
+  `--enable-ccop-compute-overlap` compile and run. Making that the default at this shape (or
+  for all shapes) needs a decision and a perf check at 320x512x61, where the overlap flag is
+  what Phases 1-2 measured. The override env var is not in the AOT cache key either.
+  Evidence: `E/phase3-retry/tp2cfg/` (`compile.log`, `gen50.log`, `*.meta.json`,
+  `gen50.mp4`, `gen50_mid.png`, `cmp_gen50__vs__p3-native-tp2cfg.json`, `sha256.txt`).
