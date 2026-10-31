@@ -203,6 +203,26 @@ schedule. The elementwise work at the per-rank shapes is not small: standalone c
 `gelu(tanh)` on 5120 x 3072 bf16 is 0.34 ms, a modulation 0.16 ms, a residual add 0.16 ms, a
 layer norm 0.23 ms (one core); a 3072 x 3072 bf16 matmul on the same rows is 0.74 ms.
 
+### 6c. CPU arbiter for mxfp8 (fake-quant vs bf16, 20 steps, 1024x1024, seed 42)
+
+`scripts/qwen_image_fp8_cpu_reference.py --format mxfp8 --tp 4`, no calibration;
+`/home/ubuntu/fp8-bench/cpu_arbiter_mx/metrics.json`. The same four prompts as section 2
+(all four are "held out" here: MX needs no calibration set).
+
+| prompt | PSNR | SSIM | latent cos | static fp8 (section 2) |
+|---|---|---|---|---|
+| cat on a bench | 33.27 dB | 0.979 | 0.9948 | 33.99 dB |
+| watercolor lighthouse | 40.12 dB | 0.992 | 0.9997 | 37.72 dB |
+| brass typewriter | **28.74 dB** | 0.958 | 0.9919 | 32.34 dB |
+| astronaut, neon city | **27.57 dB** | 0.948 | 0.9852 | 28.64 dB |
+
+Gate (min PSNR >= 30 dB): **fail**, two of four below; static fp8 failed one. Reading: the
+E8M0 (power-of-two) block scales are coarser than a per-tensor fp32 scale on prompts the
+static calibration covers, so mxfp8 is 1–2 dB behind there, and ahead where static's single
+scale saturates; neither recipe clears 30 dB on every prompt at 20 steps. The device's 50-step
+29.2 dB (section 6) sits inside this distribution. A 20-step comparison penalises both: the
+fake-quant and bf16 trajectories diverge further per step at the larger step size.
+
 ## Bug ledger
 
 1. **Static-FP8 kernel path pathological inside block graphs** (section 5): compiler
