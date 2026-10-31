@@ -278,10 +278,34 @@ def fp8_linears(module: nn.Module) -> list[str]:
 
 
 def prepare_fp8_kernels_(module: nn.Module, *, lnc: int | None = None) -> int:
-    """``prepare_kernel_`` on every fp8 linear of ``module``; returns how many were packed."""
+    """``prepare_kernel_`` on every fp8 linear of ``module`` and tie the input scales of
+    siblings that quantize the same activation; returns how many layers were packed.
+
+    The quantize-and-pack of the activation is the kernel path's fixed cost (~0.13 ms on a
+    trn3 core at 5120 x 3072, as much as a small projection's matmul). Attention's q, k and v
+    projections (and the text stream's add_q/k/v) consume one tensor, so their calibrated
+    scales are equal; when the three modules hold the *same* ``input_scale`` tensor object the
+    three quantize subgraphs are identical and the compiler folds them into one (measured:
+    0.555 ms -> 0.295 ms for the three 3072x768 projections, against 0.565 ms in bf16).
+    Tying by equal value under one parent changes no number: a layer whose input differs
+    keeps its own quantize op either way.
+    """
     count = 0
-    for child in module.modules():
+    by_parent: dict[str, list[_FP8LinearBase]] = {}
+    for name, child in module.named_modules():
         if isinstance(child, _FP8LinearBase) and child.compute == "nki":
+            by_parent.setdefault(name.rpartition(".")[0], []).append(child)
+    for siblings in by_parent.values():
+        for child in siblings:
+            for other in siblings:
+                if other is child:
+                    break
+                if (other.input_scale is not child.input_scale
+                        and torch.equal(other.input_scale, child.input_scale)):
+                    child.input_scale = other.input_scale  # the same tensor object
+                    break
+    for siblings in by_parent.values():
+        for child in siblings:
             child.prepare_kernel_(lnc=lnc)
             count += 1
     return count

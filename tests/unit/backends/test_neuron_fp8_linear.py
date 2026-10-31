@@ -375,3 +375,26 @@ def test_pack_x4_equals_the_byte_wise_permute():
     t = (torch.randn(6, 16) * 3).to(torch.float8_e4m3fn)
     byte_wise = t.reshape(6, 4, 4).permute(1, 0, 2).contiguous().view(torch.int32).squeeze(-1)
     assert torch.equal(K.pack_x4(t), byte_wise)
+
+
+def test_prepare_ties_equal_input_scales_of_siblings_only():
+    attn = nn.Module()
+    for name in ("to_q", "to_k", "to_v"):
+        layer = Q.FP8Linear(256, 128, compute="nki")
+        _fill(layer, torch.randn(128, 256), input_amax=3.0)
+        setattr(attn, name, layer)
+    attn.to_out = nn.ModuleList([Q.FP8Linear(128, 256, compute="nki")])
+    _fill(attn.to_out[0], torch.randn(256, 128), input_amax=3.0)  # equal value, another parent
+    other = Q.FP8Linear(256, 128, compute="nki")
+    _fill(other, torch.randn(128, 256), input_amax=5.0)  # a sibling with another scale
+    attn.other = other
+    root = nn.Module()
+    root.attn = attn
+    assert Q.prepare_fp8_kernels_(root, lnc=2) == 5
+    assert attn.to_k.input_scale is attn.to_q.input_scale
+    assert attn.to_v.input_scale is attn.to_q.input_scale
+    assert attn.other.input_scale is not attn.to_q.input_scale
+    assert attn.to_out[0].input_scale is not attn.to_q.input_scale
+    assert attn.to_k.out_scale.shape == (128, 1)
+    assert attn.to_k.out_scale[0].item() == pytest.approx((attn.to_k.input_scale * attn.to_k.weight_scale).item())
+    assert attn.to_q.weight is None and attn.to_q.weight_packed is not None
