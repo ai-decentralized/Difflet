@@ -26,7 +26,8 @@ as Wan's Trainium path decodes; the compiled decoder does not build on neuronx-c
 --device-vae the tiled bf16 decoder on one core (``vae15``), which `difflet compile` then
 compiles. Each compiled artifact lives in a hashed dir under --cache-dir
 (``_aot_stage_cache_inputs``). --cp-mode ring and a multi-shape --shapes are refused before any
-stage launches (``_aot_reject_unsupported``).
+stage launches (``_aot_reject_unsupported``), as is a shape the DiT's parallel layout cannot split
+(``_aot_validate_dit_shape``).
 
 Default HF model: hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v
 Registry defaults: height=480, width=848, num_frames=121
@@ -305,6 +306,7 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
         with --device-vae)."""
         _aot_reject_unsupported(self.args)
         tp, cfg, cp = _layout(self.args)
+        self._aot_validate_dit_shape(tp, cfg, cp)
         device_vae = _aot_device_vae(self.args)
         work_dir = Path(getattr(self.args, "work_dir", None) or Path.home() / ".cache" / "difflet" / "work" / "hv15")
         work_dir.mkdir(parents=True, exist_ok=True)
@@ -324,6 +326,36 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
             raise
         if not getattr(self.args, "keep_work_dir", False):
             shutil.rmtree(work_dir, ignore_errors=True)
+
+    def _aot_validate_dit_shape(self, tp: int, cfg: bool, cp: int) -> None:
+        """Before any stage launches: the DiT's shape and parallel rules (SP: tp > 1, no CP,
+        N % tp; CP: N % cp, Ulysses heads; heads % tp; CFG x CP), by building the DiT config
+        the aot_transformer stage builds (``HunyuanVideo15BackboneInferenceConfig`` validates
+        on construction) from the snapshot's transformer/config.json. Without a local
+        snapshot the check is left to the stages, which report the missing snapshot."""
+        a = self.args
+        try:
+            transformer_path = os.path.join(self._root(a), "transformer")
+        except FileNotFoundError as exc:
+            print(f"[hv15] DiT shape check deferred to the stages: {exc}", flush=True)
+            return
+        if not os.path.exists(os.path.join(transformer_path, "config.json")):
+            print(f"[hv15] DiT shape check deferred to the stages: no {transformer_path}/config.json",
+                  flush=True)
+            return
+        import torch
+
+        from difflet.models.hunyuan_video.application import create_hunyuan_video15_backbone_config
+
+        try:
+            create_hunyuan_video15_backbone_config(
+                transformer_path=transformer_path, world_size=tp * cp * (2 if cfg else 1), tp_degree=tp,
+                dtype=torch.bfloat16, height=int(a.height or 480), width=int(a.width or 848),
+                num_frames=int(a.num_frames or 121), batch_size=2 if cfg else 1, cfg_parallel_enabled=cfg,
+                cp_degree=cp, cp_mode=(getattr(a, "cp_mode", None) or "ulysses") if cp > 1 else "gather_kv",
+                sp_enabled=bool(getattr(a, "sp_enabled", False)))
+        except (ValueError, NotImplementedError) as exc:
+            raise SystemExit(f"[hv15] {exc}") from exc
 
     def _aot_parallel(self, args: argparse.Namespace):
         from difflet.pipeline.parallel_config import DiffletParallelConfig
