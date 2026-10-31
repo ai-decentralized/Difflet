@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import os
 import json
 
 import pytest
@@ -159,3 +160,31 @@ def test_mxfp8_needs_no_calibration_and_keys_its_tp(monkeypatch):
 
     kwargs = _torchrun_application_kwargs(args)
     assert kwargs["quant"]["format"] == "mxfp8" and kwargs["quant_calibration"] is None
+
+
+def test_the_kernel_path_turns_on_the_nki_trace_cache(monkeypatch, tmp_path):
+    """--quant mxfp8 (kernel compute) sets DIFFLET_NKI_TRACE_CACHE=1 for the ranks before any
+    launch unless the user chose; dequant compute and no --quant leave it alone."""
+    cli_main = importlib.import_module("difflet.cli.main")
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    monkeypatch.setenv("DIFFLET_EXEC_MODE", "compile")
+    monkeypatch.delenv("DIFFLET_NKI_TRACE_CACHE", raising=False)
+
+    def prepare(*flags):
+        args = cli_main._build_parser().parse_args(
+            ["generate", "--model-id", QWEN, "--cache-dir", str(tmp_path), "--tp-degree", "4",
+             *flags])
+        orch = cli_main._get_orchestrator(args)
+        # the model is not downloaded: _prepare_quant returns after the environment choice
+        orch._model_dir = lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError())
+        orch._prepare_quant(create=False)
+
+    prepare()
+    assert "DIFFLET_NKI_TRACE_CACHE" not in os.environ
+    prepare("--quant", "mxfp8", "--quant-compute", "dequant")
+    assert "DIFFLET_NKI_TRACE_CACHE" not in os.environ
+    prepare("--quant", "mxfp8")
+    assert os.environ["DIFFLET_NKI_TRACE_CACHE"] == "1"
+    monkeypatch.setenv("DIFFLET_NKI_TRACE_CACHE", "0")
+    prepare("--quant", "mxfp8")
+    assert os.environ["DIFFLET_NKI_TRACE_CACHE"] == "0"

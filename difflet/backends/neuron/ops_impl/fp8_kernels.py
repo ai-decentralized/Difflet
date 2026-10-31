@@ -282,6 +282,13 @@ def prepare_mx_weight(weight_q: torch.Tensor, weight_scale: torch.Tensor
     (``difflet/quant/mx.kernel_layout``), on the weight's device."""
     from difflet.quant import mx
 
+    device = weight_q.device
+    if device.type != "cpu":
+        # The layout is a permutation gather plus a scatter: eager on the device that is a
+        # chain of small launches per layer (45 s of start-up for Qwen-Image's 720 layers);
+        # on the host it is milliseconds, and the result moves once.
+        data, scales = mx.kernel_layout(weight_q.cpu(), weight_scale.cpu())
+        return data.to(device), scales.to(device)
     return mx.kernel_layout(weight_q, weight_scale)
 
 

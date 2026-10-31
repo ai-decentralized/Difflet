@@ -53,6 +53,7 @@ the replica finished. Unset, trainium and tpu keep their three stages unchanged.
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -390,6 +391,12 @@ class QwenImageOrchestrator(ModelOrchestrator):
         spec = quant_spec(self.args)
         if spec is None or torchrun_backend() is None:
             return
+        if spec.compute == "nki":
+            # The mxfp8 kernel path traces nkilib's matmul_mxfp8 once per launch per rank
+            # unless the trace cache keeps it: 191 s of start-up measured without it (trn3,
+            # 2026-10-31). Its inputs are all call arguments, so a cached trace cannot go
+            # stale. An explicit choice is kept; the ranks inherit the variable.
+            os.environ.setdefault("DIFFLET_NKI_TRACE_CACHE", "1")
         from difflet.pipeline.path_resolver import resolve_model_path
         from difflet.quant.checkpoint import prepare_quantized_checkpoint
 
