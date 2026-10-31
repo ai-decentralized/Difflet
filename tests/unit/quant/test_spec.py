@@ -26,8 +26,6 @@ def test_unknown_model_has_no_targets():
 @pytest.mark.parametrize("name", [
     "transformer_blocks.0.attn.to_q",
     "transformer_blocks.59.attn.add_k_proj",
-    "transformer_blocks.3.attn.to_out.0",
-    "transformer_blocks.3.attn.to_add_out",
     "transformer_blocks.7.img_mlp.net.0.proj",
     "transformer_blocks.7.txt_mlp.net.2",
     "transformer.transformer_blocks.7.txt_mlp.net.2",  # the trace-module prefix is stripped
@@ -44,6 +42,8 @@ def test_qwen_targets_match_the_block_projections(name):
     "txt_in",
     "norm_out.linear",
     "proj_out",
+    "transformer_blocks.3.attn.to_out.0",  # measured: faster and closer to bf16 when kept bf16
+    "transformer_blocks.3.attn.to_add_out",
     "transformer_blocks.0.attn.to_out",  # the Sequential, not its linear
     "transformer_blocks.0.attn.to_q.weight",  # a parameter, not a module
 ])

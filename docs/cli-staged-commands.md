@@ -190,12 +190,13 @@ difflet generate --model-id Qwen/Qwen-Image \
 
 ### Qwen-Image in FP8 (PyTorch-native `neuron` backend, Trainium3 only)
 
-`--quant mxfp8` quantizes the DiT's attention and MLP linears to OCP MXFP8 (fp8 e4m3 weights
+`--quant mxfp8` quantizes the DiT's attention q/k/v and MLP linears to OCP MXFP8 (the attention
+output projections stay bf16: measured faster and closer to bf16 that way) (fp8 e4m3 weights
 with one shared scale per 32 values, the activation quantized inside nkilib's `matmul_mxfp8`
 kernel); no calibration file. `compile` writes the quantized checkpoint once under the cache
-(`<cache-dir>/quantized/<model>/transformer/mxfp8-<id>/`, 26 GB for 40 GB of bf16) and
-`generate` reads it. Measured on trn3 at tp4, 1024x1024, 50 steps: DiT step 267 ms against
-299 ms in bf16 (0.89x); PSNR 29.2 dB / SSIM 0.973 / LPIPS 0.04 against the bf16 image. The
+(`<cache-dir>/quantized/<model>/transformer/mxfp8-<id>/`, 27 GB for 40 GB of bf16) and
+`generate` reads it. Measured on trn3 at tp4, 1024x1024, 50 steps: DiT step 260 ms against
+299 ms in bf16 (0.87x); PSNR 31.6 dB / SSIM 0.987 / LPIPS 0.02 against the bf16 image. The
 flag is refused on the AoT `trainium` backend, on trn2, under `--exec-mode eager`, with
 `--teacache-speedup`, and for models other than Qwen-Image. `--quant fp8 --quant-calibration
 FILE` is the per-tensor static variant (its kernel path is not usable on the 2.28 compiler;

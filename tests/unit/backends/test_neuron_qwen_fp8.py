@@ -36,7 +36,7 @@ from tests.unit.backends._neuron_qwen_toy import (  # noqa: E402
     write_tiny_qwen_model,
 )
 
-TINY_TARGETS = 2 * 12
+TINY_TARGETS = 2 * 10  # per block: q/k/v, add_q/k/v, two MLPs x up/down (to_out, to_add_out stay bf16)
 
 
 @pytest.fixture(autouse=True)

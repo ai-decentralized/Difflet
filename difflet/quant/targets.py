@@ -1,12 +1,18 @@
 """Which linears each DiT quantizes. Torch-free.
 
-Only the per-token projections go to FP8: attention q/k/v/out and the MLP up/down. They hold
-about 67% of Qwen-Image's parameters and essentially all of its linear-layer compute. Everything
-that conditions the blocks stays bf16: the per-block modulation (``img_mod.1``/``txt_mod.1``: a
+Only the per-token projections go to FP8: attention q/k/v and the MLP up/down. They hold
+about 60% of Qwen-Image's parameters and most of its linear-layer compute. Everything that
+conditions the blocks stays bf16: the per-block modulation (``img_mod.1``/``txt_mod.1``: a
 third of the parameters, but applied to one ``[B, D]`` vector, so no compute to win and the
 scale/shift/gate it produces is precision-sensitive), the embedders, ``img_in``/``txt_in``,
-``norm_out`` and ``proj_out``. This is the layer choice NVIDIA ModelOpt and FastVideo make for
-DiTs too.
+``norm_out`` and ``proj_out``.
+
+The attention output projections (``to_out.0``, ``to_add_out``) also stay bf16, against the
+ModelOpt / FastVideo convention, on measurement (trn3, tp4, 1024x1024, 50 steps, mxfp8 vs
+bf16; ``docs/verification/2026-10-31-qwen-image-fp8-native-trn3.md`` 6d): with them quantized
+the step is 267.7 ms and the image 29.3 dB PSNR; with them in bf16, 260.2 ms and 31.6 dB.
+They sit right before the residual add, so their error lands unattenuated, and the compiler
+schedules the block worse with a custom op there (the single-core probe: +1.3 ms per block).
 
 Patterns are regexes full-matched against diffusers' module names (the ``transformer.`` trace
 prefix is stripped by :meth:`QuantSpec.matches`).
@@ -20,13 +26,13 @@ _BLOCK = r"transformer_blocks\.\d+"
 
 QWEN_IMAGE_TARGETS: tuple[str, ...] = (
     rf"{_BLOCK}\.attn\.(to_q|to_k|to_v|add_q_proj|add_k_proj|add_v_proj)",
-    rf"{_BLOCK}\.attn\.(to_out\.0|to_add_out)",
     rf"{_BLOCK}\.(img_mlp|txt_mlp)\.net\.0\.proj",
     rf"{_BLOCK}\.(img_mlp|txt_mlp)\.net\.2",
 )
 
 #: Qwen-Image modules a reader may expect quantized that are deliberately not.
 QWEN_IMAGE_KEPT_BF16: tuple[str, ...] = (
+    rf"{_BLOCK}\.attn\.(to_out\.0|to_add_out)",
     rf"{_BLOCK}\.(img_mod|txt_mod)\.1",
     r"time_text_embed\..*",
     r"img_in",
@@ -38,7 +44,7 @@ QWEN_IMAGE_KEPT_BF16: tuple[str, ...] = (
 #: The targets whose weight the TP layer shards along K (row-parallel): under ``mxfp8`` each
 #: rank's K range is quantized with its own block layout (``difflet/quant/mx.py``).
 QWEN_IMAGE_ROW_PARALLEL: tuple[str, ...] = (
-    rf"{_BLOCK}\.attn\.(to_out\.0|to_add_out)",
+    rf"{_BLOCK}\.attn\.(to_out\.0|to_add_out)",  # not a default target; kept for overrides
     rf"{_BLOCK}\.(img_mlp|txt_mlp)\.net\.2",
 )
 

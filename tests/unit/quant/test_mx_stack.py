@@ -33,7 +33,7 @@ def test_default_mx_spec():
     spec = default_spec("qwen_image", format="mxfp8", tp_degree=4)
     assert (spec.weight_granularity, spec.activation) == ("block32", "mx")
     assert spec.is_mx and not spec.needs_calibration and spec.calibration_sha256 is None
-    assert spec.k_shards("transformer_blocks.3.attn.to_out.0") == 4
+    assert spec.k_shards("transformer_blocks.3.attn.to_out.0") == 4  # row-parallel even when not a target
     assert spec.k_shards("transformer.transformer_blocks.3.img_mlp.net.2") == 4
     assert spec.k_shards("transformer_blocks.3.attn.to_q") == 1
     assert spec.k_shards("transformer_blocks.3.img_mlp.net.0.proj") == 1

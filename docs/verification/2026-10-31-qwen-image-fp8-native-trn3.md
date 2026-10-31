@@ -232,12 +232,18 @@ quantized checkpoint and NEFFs. `/home/ubuntu/fp8-bench/qwen_mx_<variant>_tp4/`.
 |---|---|---|---|---|---|---|
 | all 12 (q/k/v, add_q/k/v, to_out, to_add_out, MLP up/down x2) | 267.7 ms | 0.89x | 29.28 dB | 0.974 | 0.039 | 0.9912 |
 | **noout**: all but `to_out.0` / `to_add_out` (10) | **260.2 ms** | **0.87x** | **31.59 dB** | **0.987** | **0.017** | 0.9963 |
+| noout minus `add_q/k/v` (image q/k/v + MLPs, 8) | 256.6 ms | 0.86x | 30.23 dB | 0.982 | 0.036 | 0.9944 |
+| MLP up/down only (4) | 273.8 ms | 0.92x | 28.96 dB | 0.976 | 0.048 | 0.9916 |
 
 Keeping the two attention output projections in bf16 is faster *and* better: the tp1 probe
 (6b) already showed quantizing them costs block time, and they sit right before the residual
 add, where their error lands unattenuated. The noout variant clears all three quality gates
-(PSNR >= 30, SSIM >= 0.97, LPIPS <= 0.05). Further variants (text-stream q/k/v in bf16; MLP
-only) follow below.
+(PSNR >= 30, SSIM >= 0.97, LPIPS <= 0.05). Two readings from the other rows: step time is
+not monotonic in the number of quantized layers (MLP-only is slower than all 12), so the
+compiler's block schedule, not the kernel count, sets it; and the single-prompt quality
+metrics move by about 1.5 dB between layer sets that should order the other way (8 layers
+30.2 dB vs 10 layers 31.6 dB), so differences of that size are noise, not signal. **noout is
+the default layer set** (commit below); `DIFFLET_QUANT_TARGETS` restores any other.
 
 ## Bug ledger
 

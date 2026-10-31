@@ -154,7 +154,7 @@ def test_mxfp8_needs_no_calibration_and_keys_its_tp(monkeypatch):
     Q.validate_quant(args)
     spec = Q.quant_spec(args)
     assert spec.format == "mxfp8" and spec.is_mx and spec.calibration_sha256 is None
-    assert spec.tp_degree == 2 and spec.k_shards("transformer_blocks.0.attn.to_out.0") == 2
+    assert spec.tp_degree == 2 and spec.k_shards("transformer_blocks.0.img_mlp.net.2") == 2
     assert Q.quant_cli_args(args) == ["--quant", "mxfp8"]
     from difflet.cli.orchestrators.qwen_image import _torchrun_application_kwargs
 
