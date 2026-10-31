@@ -245,6 +245,27 @@ class _ZeroLikeModule(nn.Module):
         return torch.zeros_like(hidden_states)
 
 
+_HV15_SPATIAL_COMPRESSION_RATIO = 16
+_HV15_TEMPORAL_COMPRESSION_RATIO = 4
+
+
+def hv15_num_image_tokens(
+    height: int,
+    width: int,
+    num_frames: int,
+    *,
+    spatial_compression_ratio: int = _HV15_SPATIAL_COMPRESSION_RATIO,
+    temporal_compression_ratio: int = _HV15_TEMPORAL_COMPRESSION_RATIO,
+    patch_size: int = 1,
+    patch_size_t: int = 1,
+) -> int:
+    """Full image-stream length N after patchify for a pixel shape (the one source of N)."""
+    frames = (int(num_frames) - 1) // int(temporal_compression_ratio) + 1
+    lat_h = int(height) // int(spatial_compression_ratio)
+    lat_w = int(width) // int(spatial_compression_ratio)
+    return (frames // int(patch_size_t)) * (lat_h // int(patch_size)) * (lat_w // int(patch_size))
+
+
 class HunyuanVideo15BackboneInferenceConfig(InferenceConfig):
     """Inference config for the HunyuanVideo 1.5 transformer component."""
 
@@ -259,9 +280,9 @@ class HunyuanVideo15BackboneInferenceConfig(InferenceConfig):
         if not hasattr(self, "image_seq_len"):
             self.image_seq_len = 729
         if not hasattr(self, "spatial_compression_ratio"):
-            self.spatial_compression_ratio = 16
+            self.spatial_compression_ratio = _HV15_SPATIAL_COMPRESSION_RATIO
         if not hasattr(self, "temporal_compression_ratio"):
-            self.temporal_compression_ratio = 4
+            self.temporal_compression_ratio = _HV15_TEMPORAL_COMPRESSION_RATIO
         for name, default in (
             ("cfg_parallel_enabled", False),
             ("context_parallel_enabled", False),
@@ -313,9 +334,14 @@ class HunyuanVideo15BackboneInferenceConfig(InferenceConfig):
     @property
     def num_image_tokens(self) -> int:
         """Full image-stream length N after patchify (before any sequence sharding)."""
-        p, p_t = int(self.patch_size), int(self.patch_size_t)
-        return (
-            (self.latent_frames // p_t) * (self.latent_height // p) * (self.latent_width // p)
+        return hv15_num_image_tokens(
+            self.height,
+            self.width,
+            self.num_frames,
+            spatial_compression_ratio=self.spatial_compression_ratio,
+            temporal_compression_ratio=self.temporal_compression_ratio,
+            patch_size=self.patch_size,
+            patch_size_t=self.patch_size_t,
         )
 
     @property
@@ -761,12 +787,12 @@ def _hv15_static_reorder_forward(
 # 480x848x121 (N = 31*30*53 = 49290) fails to compile, without it it works. So keep it up to
 # this image-token count N (latent_frames * latent_height * latent_width, patch size 1).
 _HV15_CCOP_OVERLAP_MAX_IMAGE_TOKENS = 16384
-_HV15_DIT_BASE_COMPILER_ARGS = (
-    "--model-type=transformer -O1 "
+_HV15_DIT_COMPILER_ARGS_HEAD = "--model-type=transformer -O1 "
+_HV15_DIT_COMPILER_ARGS_TAIL = (
     "--auto-cast=none "
     "--internal-hlo2tensorizer-options='--verify-hlo=true'"
 )
-_HV15_CCOP_OVERLAP_ARGS = "--tensorizer-options='--enable-ccop-compute-overlap'"
+_HV15_CCOP_OVERLAP_ARGS = "--tensorizer-options='--enable-ccop-compute-overlap' "
 
 
 def hv15_dit_compiler_args(num_image_tokens: int) -> str:
@@ -776,8 +802,8 @@ def hv15_dit_compiler_args(num_image_tokens: int) -> str:
     if override:
         return override
     if int(num_image_tokens) <= _HV15_CCOP_OVERLAP_MAX_IMAGE_TOKENS:
-        return f"{_HV15_DIT_BASE_COMPILER_ARGS} {_HV15_CCOP_OVERLAP_ARGS}"
-    return _HV15_DIT_BASE_COMPILER_ARGS
+        return _HV15_DIT_COMPILER_ARGS_HEAD + _HV15_CCOP_OVERLAP_ARGS + _HV15_DIT_COMPILER_ARGS_TAIL
+    return _HV15_DIT_COMPILER_ARGS_HEAD + _HV15_DIT_COMPILER_ARGS_TAIL
 
 
 # The traced DiT graph's version, part of the AOT stage cache key (the orchestrator's
