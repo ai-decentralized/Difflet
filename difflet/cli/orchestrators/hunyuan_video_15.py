@@ -342,7 +342,12 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
         shape = {"height": int(args.height or 480), "width": int(args.width or 848),
                  "num_frames": int(args.num_frames or 121)}
         if component == "transformer":
-            return {"component": "hunyuan_video_15_aot_dit", "model": _HF_MODEL_ID,
+            # graph_version: bump backbone15._AOT_DIT_GRAPH_VERSION whenever the traced DiT
+            # graph's inputs or structure change, so the change compiles into a fresh dir.
+            from difflet.backends.trainium.hunyuan_video.backbone15 import _AOT_DIT_GRAPH_VERSION
+
+            return {"component": "hunyuan_video_15_aot_dit", "graph_version": _AOT_DIT_GRAPH_VERSION,
+                    "model": _HF_MODEL_ID,
                     "revision": getattr(args, "revision", None), "tp": int(args.tp_degree or 1),
                     "cp": int(args.cp_degree or 1), "cp_mode": _aot_cp_mode(args),
                     "sp": bool(getattr(args, "sp_enabled", False)), "cfg": bool(getattr(args, "cfg_parallel", False)),
