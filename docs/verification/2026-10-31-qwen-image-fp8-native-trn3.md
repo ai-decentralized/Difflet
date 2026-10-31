@@ -223,6 +223,22 @@ scale saturates; neither recipe clears 30 dB on every prompt at 20 steps. The de
 29.2 dB (section 6) sits inside this distribution. A 20-step comparison penalises both: the
 fake-quant and bf16 trajectories diverge further per step at the larger step size.
 
+### 6d. Layer-set variants on the device (tp4, 1024x1024, 50 steps, seed 42, vs bf16)
+
+`DIFFLET_QUANT_TARGETS` (commit `a39bffb`) replaces the layer set; each variant gets its own
+quantized checkpoint and NEFFs. `/home/ubuntu/fp8-bench/qwen_mx_<variant>_tp4/`.
+
+| variant (quantized layers) | step median | vs bf16 299 ms | PSNR | SSIM | LPIPS | latent cos |
+|---|---|---|---|---|---|---|
+| all 12 (q/k/v, add_q/k/v, to_out, to_add_out, MLP up/down x2) | 267.7 ms | 0.89x | 29.28 dB | 0.974 | 0.039 | 0.9912 |
+| **noout**: all but `to_out.0` / `to_add_out` (10) | **260.2 ms** | **0.87x** | **31.59 dB** | **0.987** | **0.017** | 0.9963 |
+
+Keeping the two attention output projections in bf16 is faster *and* better: the tp1 probe
+(6b) already showed quantizing them costs block time, and they sit right before the residual
+add, where their error lands unattenuated. The noout variant clears all three quality gates
+(PSNR >= 30, SSIM >= 0.97, LPIPS <= 0.05). Further variants (text-stream q/k/v in bf16; MLP
+only) follow below.
+
 ## Bug ledger
 
 1. **Static-FP8 kernel path pathological inside block graphs** (section 5): compiler
