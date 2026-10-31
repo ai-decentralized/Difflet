@@ -9,8 +9,8 @@ backends run on different PyTorch stacks, and the same seed draws different bf16
 draws the noise the way the native stack does.
 
 Launch with the AOT runtime's environment (one process drives all the layout's cores):
-NEURON_RT_VIRTUAL_CORE_SIZE=2, and NEURON_RT_NUM_CORES=<tp x cfg x cp> when that is below the
-device's core count.
+NEURON_RT_VIRTUAL_CORE_SIZE=2, and NEURON_RT_VISIBLE_CORES=0..n-1 (n = tp x cfg x cp) when n is
+below the device's core count and not a multiple of 8 (NRT 2.35 rejects NEURON_RT_NUM_CORES there).
 
     python scripts/hv15_aot_denoise_from_inputs.py --compiled-dir DIR --embeds embeds.pt \
         --tp-degree 2 --height 320 --width 512 --num-frames 61 --steps 3 --noise-seed-fp32-round 42 \
