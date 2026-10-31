@@ -18,6 +18,15 @@ import torch
 import torch.nn as nn
 
 
+FLOAT8_DTYPES = (torch.float8_e4m3fn, torch.float8_e5m2)
+
+
+def is_float8(dtype: torch.dtype) -> bool:
+    """A quantized weight dtype: materialised and counted at its own 1-byte size, never cast to
+    the application dtype."""
+    return dtype in FLOAT8_DTYPES
+
+
 def shard_dim(module: nn.Module, name: str) -> int | None:
     """Split axis declared for parameter ``name`` (dotted, from ``module``).
 
@@ -129,13 +138,16 @@ def materialize_meta_(module: nn.Module, device="cpu", dtype: torch.dtype | None
     difference between fitting on a v5e chip and not: allocating fp32 and
     converting the *incoming* tensor just upcasts it straight back, doubling
     the per-rank footprint. Buffers keep their computed dtype — the rope math
-    runs in fp32 internally.
+    runs in fp32 internally. Float8 parameters keep theirs too: an fp8 weight
+    (``difflet/backends/neuron/ops_impl/fp8_linear.py``) materialised in bf16
+    would double its bytes and no longer match its checkpoint tensor.
     """
     for sub in module.modules():
         for name, param in list(sub._parameters.items()):
             if param is not None and param.is_meta:
+                target = param.dtype if is_float8(param.dtype) else dtype
                 sub._parameters[name] = torch.nn.Parameter(
-                    torch.empty_like(param, device=device, dtype=dtype),
+                    torch.empty_like(param, device=device, dtype=target),
                     requires_grad=param.requires_grad,
                 )
         for name, buf in list(sub._buffers.items()):
@@ -144,6 +156,8 @@ def materialize_meta_(module: nn.Module, device="cpu", dtype: torch.dtype | None
 
 
 __all__ = [
+    "FLOAT8_DTYPES",
+    "is_float8",
     "load_sharded_state_dict",
     "materialize_meta_",
     "narrow_to_rank",
