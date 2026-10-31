@@ -132,7 +132,8 @@ backend-neutral modules always, the Trainium modules only when the Neuron SDK is
 
 ### GPU backends (CUDA)
 
-`DIFFLET_BACKEND=cuda` runs Qwen-Image, FLUX.1-dev and Wan 2.2 T2V-A14B on NVIDIA GPUs: the DiT
+`DIFFLET_BACKEND=cuda` routes Qwen-Image, FLUX.1-dev, Wan 2.2 T2V-A14B and original
+HunyuanVideo through the GPU flow (see the measured qualification limits): the DiT
 through `difflet.ops`, the text encoders, VAE and scheduler loop in the same process on the
 same device. There is no ahead-of-time compile step: `compile()` writes `cuda_manifest.json`,
 `load()` builds the module eagerly from the diffusers safetensors. Design:
@@ -153,7 +154,7 @@ How the code is laid out:
   CLI orchestrator), `serving.py` (the resident serving adapter), `policy.py` (refusals).
 - `difflet/backends/cuda/<model>/` — only what differs per model: the transformer component
   (`transformer.py`), the application subclass that wires encoders, decoder and the denoise
-  driver (`application.py`), and load-time swaps (`flux/proj_out.py`).
+  driver (`application.py`), and load-time swaps (`flux/proj_out.py`, `hunyuan_video/numerics.py`).
 
 `ModelEntry.create_application` sends every model on a GPU platform to
 `backends/gpu/application.py`; `difflet run` and `difflet serve` pick the generic CLI

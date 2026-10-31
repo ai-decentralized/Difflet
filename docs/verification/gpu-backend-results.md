@@ -54,7 +54,17 @@ The Qwen-Image prompt trim took its DiT forward from 516 ms to 323 ms; the fused
 q/k RMSNorm took Wan's from 614 ms to 536 ms. Two GPUs: Wan `--cfg-parallel` 26.1 s against
 50.9 s on one GPU (1.95×); Qwen `--dp 2` ran four requests in 58 s against 190 s serially.
 
-## Not measured
+## Original HunyuanVideo
+
+Experimental BF16 support passed 12 full-length accuracy cases and 24 timed-video checks
+at 320×512×61, 50 steps, guidance 6, seeds 0–2 on an RTX PRO 6000 Blackwell 96 GB.
+Public Python, CLI and resident HTTP checks passed in eager and compiled modes.
+Six matched eager pairs measured 65.626 s versus 67.300 s for the unmodified Omni
+Diffusers adapter on a controlled common runtime. The modified compiled control is
+supplementary; an official compiled comparison remains unavailable. See the
+[HunyuanVideo CUDA guide](hunyuanvideo-cuda.md) for methodology and limits.
+
+## Remaining qualification
 
 1. Wan `--dp` × `--cfg-parallel` (needs four GPUs; allowed by construction).
 2. FLUX.1-dev with two replicas on two RTX PRO 6000s (measured on 2 × A100 instead).

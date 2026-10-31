@@ -405,7 +405,11 @@ def test_the_clip_length_is_part_of_the_profile_identity(spec, source):
     assert a != _prepare(spec, _profile(spec, num_frames=17)).runtime_plan.profile_identity
 
 
-@_video_only
+@_specs(
+    lambda s: s.output == "video"
+    and s.accepts_negative_prompt
+    and "guidance_scale_2" not in dict(s.refused_video_fields)
+)
 def test_both_experts_guidance_and_a_negative_prompt_are_accepted(spec, source):
     v = _validator(_prepare(spec, _profile(spec)))
     v.validate(_request(spec, video={"guidance_scale_2": 3.0, "negative_prompt": "blurry"}))
@@ -428,6 +432,8 @@ def test_fields_the_application_does_not_take_are_refused(spec, source):
 @_video_only
 @pytest.mark.parametrize("video", [{"num_frames": 17}, {"fps": 24}])
 def test_request_clip_length_and_fps_must_equal_the_profile(spec, source, video):
+    if "fps" in video:
+        video = {"fps": spec.default_fps + 1}
     with pytest.raises(DiffletServingError) as exc:
         _validator(_prepare(spec, _profile(spec))).validate(_request(spec, video=video))
     assert exc.value.code == "profile_mismatch"
@@ -557,7 +563,11 @@ def test_videos_sync_serves_a_clip_through_the_gpu_adapter(
                     ("prompt", "a cat in a garden"),
                     ("size", f"{W}x{H}"),
                     ("num_frames", str(F)),
-                    ("guidance_scale_2", "3.0"),
+                    *(
+                        ([("guidance_scale_2", "3.0")])
+                        if "guidance_scale_2" not in dict(spec.refused_video_fields)
+                        else []
+                    ),
                     ("seed", "5"),
                 )
             ],
@@ -576,7 +586,11 @@ def test_videos_sync_serves_a_clip_through_the_gpu_adapter(
         assert meta.size_bytes == len(response.content)
         prompt, kw = adapter.pipe.app.calls[-1]
         assert prompt == "a cat in a garden" and kw["seed"] == 5
-        assert kw["guidance_scale"] == spec.default_guidance_scale and kw["guidance_scale_2"] == 3.0
+        assert kw["guidance_scale"] == spec.default_guidance_scale
+        if "guidance_scale_2" not in dict(spec.refused_video_fields):
+            assert kw["guidance_scale_2"] == 3.0
+        else:
+            assert "guidance_scale_2" not in kw
         assert kw["num_inference_steps"] == spec.default_steps and kw["num_frames"] == F
         # A field the application does not take is refused before the worker.
         n = len(adapter.pipe.app.calls)
@@ -588,5 +602,8 @@ def test_videos_sync_serves_a_clip_through_the_gpu_adapter(
         )
         assert refused.status_code == 400, refused.text
         # The GPU validator's message, not the form parser's: the validator runs in the server.
-        assert "[wan/cuda serve] flow_shift is not taken by Wan" in refused.text
+        assert (
+            f"[{spec.model_type}/cuda serve] flow_shift is not taken by {spec.display_name}"
+            in refused.text
+        )
         assert len(adapter.pipe.app.calls) == n
