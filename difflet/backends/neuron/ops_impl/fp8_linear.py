@@ -401,7 +401,7 @@ def fuse_projections_(module: nn.Module) -> list[str]:
     return fused
 
 
-def prepare_fp8_kernels_(module: nn.Module, *, lnc: int | None = None) -> int:
+def prepare_fp8_kernels_(module: nn.Module, *, lnc: int | None = None, fuse: bool = False) -> int:
     """``prepare_kernel_`` on every fp8 linear of ``module`` and tie the input scales of
     siblings that quantize the same activation; returns how many layers were packed.
 
@@ -415,7 +415,10 @@ def prepare_fp8_kernels_(module: nn.Module, *, lnc: int | None = None) -> int:
     keeps its own quantize op either way.
     """
     count = 0
-    fuse_projections_(module)
+    if fuse:
+        # Only for a model whose attention calls ``fused_qkv`` / ``fused_add_qkv`` when present
+        # (Qwen-Image's processor): the fused layers' three members drop their weights.
+        fuse_projections_(module)
     by_parent: dict[str, list[_FP8LinearBase]] = {}
     for name, child in module.named_modules():
         if isinstance(child, _FP8LinearBase) and (child.compute == "nki" or child.mx):

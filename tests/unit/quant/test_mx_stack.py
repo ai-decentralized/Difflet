@@ -213,7 +213,7 @@ def test_fused_projections_concatenate_q_k_v():
     assert all(l.weight is None for l in layers) and attn.to_out[0].weight is not None
     assert Q.fuse_projections_(root) == []  # idempotent: the weights are gone
     # prepare_fp8_kernels_ fuses first, then prepares what is left.
-    assert Q.prepare_fp8_kernels_(root, lnc=2) == 4
+    assert Q.prepare_fp8_kernels_(root, lnc=2, fuse=True) == 4
     assert attn.to_out[0].weight_packed is not None
 
 

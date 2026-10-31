@@ -220,7 +220,7 @@ class NeuronQwenImageTransformerApplication(TorchNeuronApplicationBase):
         if self.quant is not None:
             from difflet.backends.neuron.ops_impl.fp8_linear import prepare_fp8_kernels_
 
-            prepare_fp8_kernels_(module)
+            prepare_fp8_kernels_(module, fuse=True)  # the attention processor reads fused_qkv
 
     def forward(
         self,
