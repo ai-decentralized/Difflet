@@ -859,3 +859,4 @@ generate` without any override; the artifact is already compiled.
 | tp4 (`b2122b91…`) | 301.4 / 315.3 (HLO 50.2) | **0.999131** / 0.0445 / 0.53 | 0.999573 | **0.987437** (0.76x) | 0.984438 | none | **PASS** | `E/phase1-regate/tp4/` |
 | tp4sp (`eaea3dc3…`) | 317.3 / 330.3 (HLO 55.5) | **0.999142** / 0.0439 / 0.53 | 0.999578 | **0.990780** (0.56x) | 0.982686 | none | **PASS** | `E/phase1-regate/tp4sp/` |
 | tp2cp2-ulysses (`--cp-mode ulysses`, `2cb886e3…`) | 327.2 / 341.7 (HLO 60.9) | **0.999132** / 0.0443 / 0.53 | 0.999569 | **0.991254** (0.53x) | 0.981850 | none | **PASS** | `E/phase1-regate/tp2cp2-ulysses/` |
+| tp2cp2-gather_kv (`--cp-mode gather_kv`, `698cde4d…`) | 337.6 / 351.4 (HLO 57.9) | **0.999149** / 0.0435 / 0.56 | 0.999602 | **0.979483 (1.25x)** | 0.984527 | none | gate 1 PASS, **gate 2 FAIL** (see below) | `E/phase1-regate/tp2cp2-gather_kv/` |

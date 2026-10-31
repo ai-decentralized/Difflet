@@ -1,0 +1,48 @@
+{
+  "name": "p1r-tp2cp2-gather_kv/native_inputs3",
+  "backend": "trainium",
+  "cmd": [
+    "bash",
+    "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_py.sh",
+    "scripts/hv15_aot_denoise_from_inputs.py",
+    "--compiled-dir",
+    "/home/ubuntu/.cache/difflet/hunyuan_video_15_aot_dit/698cde4d19c0580b",
+    "--embeds",
+    "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/native-tp2cfg/gen3.work/embeds.pt",
+    "--tp-degree",
+    "2",
+    "--cp-degree",
+    "2",
+    "--cp-mode",
+    "gather_kv",
+    "--height",
+    "320",
+    "--width",
+    "512",
+    "--num-frames",
+    "61",
+    "--steps",
+    "3",
+    "--noise",
+    "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/aot-tp2/native_noise.pt",
+    "--out",
+    "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p1r-tp2cp2-gather_kv/native_inputs3.latents.pt"
+  ],
+  "env": [
+    "PYTHONPATH=/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan",
+    "NEURON_RT_VIRTUAL_CORE_SIZE=2",
+    "HF_HUB_OFFLINE=1"
+  ],
+  "rc": 0,
+  "wall_s": 39.3,
+  "nmon_peak_gib": {
+    "0": 8.89,
+    "1": 8.89,
+    "2": 8.89,
+    "3": 8.89
+  },
+  "host_rss_peak_gib": {
+    "_total": 35.09,
+    "other": 35.09
+  }
+}
