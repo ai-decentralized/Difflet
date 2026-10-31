@@ -96,10 +96,74 @@ the baseline):
 Weight-only FP8 (bf16 activations) on the device; the picture is the same cat on the same
 bench. For scale: the bf16 run at 25 steps against itself at 50 steps is 22.7 dB / LPIPS 0.18.
 
-## 5. Device V2–V4: `--quant-compute nki`
+## 5. Static FP8 on the kernel path: unusable in the block graph (resolved by the pivot)
 
-_pending_.
+`--quant fp8 --quant-compute nki`, tp4: compile 6 min 41 s (the NKI kernel traced per block
+graph: 720 call sites; warm-up 349.6 s, 191 s on every later launch without
+`DIFFLET_NKI_TRACE_CACHE=1`), then **178 s per step** (`qwen_fp8_nki_tp4_3steps/a.log`:
+step median 178,107 ms, n=2). The ranks sat at 100 % CPU; no new NEFFs were compiled.
+
+Bisected on one core (`/home/ubuntu/.claude/jobs/238a7774/tmp/probe_*.py`):
+
+| graph | time |
+|---|---:|
+| fp8 kernel alone (quantize+pack in the graph from a graph input) | 0.42–0.53 ms |
+| `x * s` → quantize+pack → kernel | **984 ms** (compile 25 s) |
+| `matmul(x)` → quantize+pack → kernel | 986 ms |
+| kernel → gelu / residual / another kernel | 0.5–0.8 ms (fine) |
+| `layer_norm(x) * s` → quantize+pack → kernel | 0.9 ms (fine) |
+| any barrier (sum, fp32 round trip, mean) between producer and quantize | ~1007 ms (no help) |
+| `x * s` → trivial NKI copy kernel → quantize+pack → kernel | 0.61 ms (fine) |
+| trivial copy kernel fed by `x*s`, gelu, matmul | 0.26–1.9 ms (additive, fine) |
+
+So the pathology is neuronx-cc 2.28's handling of the torch-side quantize/transpose/pack chain
+when its input is a compiler-internal tensor; a kernel that takes the activation directly is
+unaffected. On tp1 shapes the same chain hits `[NCC_IINL902] InferNonlocalTensors error: tuple
+index out of range` (q/k/v and MLP-up quantized alone in a 1-block graph; to_out compiles but
+runs 77 ms per block, MLP-down 3,185 ms per block against 16.5 ms in bf16).
+
+Resolution: the activation quantization moves into the kernel. nkilib's `matmul_mxfp8`
+(MXFP8, block-32 E8M0 scales computed in the kernel) takes the bf16 activation and a
+pre-quantized weight; `difflet/quant/mx.py` reproduces its block membership and law in torch
+(bit-exact against nkilib's numpy reference) so the CPU reference equals the device. One core,
+5120 rows (`probe_mx_parity.py`):
+
+| shape (K → N) | mx | bf16 | ratio | rel vs CPU MX reference |
+|---|---:|---:|---:|---:|
+| 3072 → 3072 | 0.393 ms | 0.780 ms | 1.98x | 1.67e-3 |
+| 3072 → 768 (tp4 q/k/v) | 0.309 ms | 0.312 ms | 1.01x | 1.68e-3 |
+| 768 → 3072 (tp4 to_out) | 0.220 ms | 0.243 ms | 1.11x | 1.68e-3 |
+| 1024 rows, 3072 → 12288 | 0.296 ms | 0.653 ms | 2.21x | 1.68e-3 |
+| 1024 rows, 12288 → 3072 | 0.321 ms | 0.721 ms | 2.24x | 1.68e-3 |
+
+With an in-graph producer (`x * s`): 0.49 ms; `matmul → mx → gelu`: additive (2.15 ms). The
+small-N projections pay the in-kernel activation quantize once per call; fusing q/k/v into one
+call (N = 2304) is the next win (`probe_qkv_share.py`: one fp8 call 0.30 ms vs three bf16
+0.57 ms).
+
+## 6. mxfp8 on the device (`--quant mxfp8 --quant-compute nki`), tp4, 1024x1024
+
+`/home/ubuntu/fp8-bench/qwen_mx_nki_tp4/`, `DIFFLET_NKI_TRACE_CACHE=1`, no calibration file.
+
+| metric | value | source |
+|---|---|---|
+| quantized checkpoint | 26 GB (`quantized/…/transformer/mxfp8-545621be9e816402`), written by `compile` | `compile.log` |
+| compile (cold NEFF cache) | 5 min 55 s wall; 60 blocks; load+warmup 264 s | `compile.log` |
+| generate start-up (warm) | load 57–66 s, of which `eval` 43–49 s = `prepare_fp8_kernels_` building the kernel layout on the device (to optimise); warm-up forward 5 s | `gen*.log` |
+| **DiT step median** | **267 ms** (n=49, max 271; the same on all four runs) | `gen50a.log` `request:` line |
+| warm e2e (CLI wall) | 2 min 25 s at 50 steps (the start-up above dominates) | `gen50a.log` |
+| determinism | gen50a.png == gen50b.png (md5 `271c9fcde17a…`) | |
+| vs bf16 baseline, latents (50 steps, same seed) | cosine 0.9909, rel L2 0.135 | `vs_bf16_gen50a.json` |
+| vs bf16 baseline, image | **PSNR 29.17 dB, SSIM 0.973, LPIPS 0.041** | `vs_bf16_gen50a.json` |
+
+The bf16 step by the same `request:` timing is being measured (`qwen_bf16_tp4_timed/`);
+by the 50-vs-25-step difference the bf16 step was 336 ms, so 267 ms is about 0.79x.
 
 ## Bug ledger
 
-(none yet)
+1. **Static-FP8 kernel path pathological inside block graphs** (section 5): compiler
+   behaviour, worked around by moving the quantize into the kernel (mxfp8). A minimal repro is
+   `probe_variants.py` case B; not filed with AWS (user decision).
+2. **NKI kernel trace repeated per launch**: without `DIFFLET_NKI_TRACE_CACHE=1` every generate
+   re-traced the kernel at 720 call sites (191 s). The FP8 jobs set it; making `--quant` turn
+   it on is a follow-up.
