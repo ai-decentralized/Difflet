@@ -20,6 +20,13 @@ DP replicas (--dp) are separate torchrun launches; each one's rank 0 claims the 
 (_replica_requests). The stage cache key names the backend and exec mode, and --cache-dir
 becomes DIFFLET_COMPILE_CACHE (the NEFF/HLO cache root) unless that is exported. Unset,
 trainium and tpu keep their paths unchanged.
+
+--dual-expert (Wan 2.2 A14B) runs on neuron and trainium (unset included): the transformer
+stage also loads the low-noise expert, transformer_2, which WanOrchestrator runs below the
+checkpoint's boundary timestep with --guidance-scale-2. The driver refuses it on tpu, on a
+checkpoint that cannot switch (models/wan/experts.py) and, on trainium, at a TP degree both
+experts cannot fit (_aot_dual_expert_hbm_misuse). On trainium transformer_2 is a compiled
+component of its own, so the transformer stage key gains "dual_expert" (_dual_expert_keys).
 """
 from __future__ import annotations
 
@@ -31,6 +38,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from difflet import envs
 from difflet.cli import runner
 from difflet.cli.orchestrators.base import (
     ModelOrchestrator,
@@ -43,6 +51,7 @@ from difflet.cli.orchestrators.base import (
     write_stage_manifest,
 )
 from difflet.cli.orchestrators.torchrun import (
+    _local_snapshot,
     component_dtype,
     device_encoder_overflow,
     refuse,
@@ -233,18 +242,48 @@ _TORCHRUN_APPLICATION_KWARGS = {
 def _dual_expert_misuse(args: argparse.Namespace, torchrun_backend: str | None) -> str | None:
     """Why --dual-expert / --guidance-scale-2 cannot run as given, else None. Torch-free.
 
-    The trainium and tpu Wan paths hold the high-noise expert alone (expert residency) and run
-    it for every step; only the neuron application loads ``transformer_2``. A low-noise
+    The neuron and trainium applications load ``transformer_2``; the tpu Wan path holds the
+    high-noise expert alone (expert residency) and runs it for every step. A low-noise
     guidance scale without the low-noise expert would be ignored, so it is refused too.
     """
     dual = getattr(args, "dual_expert", False)
     if getattr(args, "guidance_scale_2", None) is not None and not dual:
         return "--guidance-scale-2 sets the low-noise expert's guidance; it needs --dual-expert"
-    if dual and torchrun_backend is None:
-        return ("--dual-expert runs on the neuron backend only (pass --backend neuron): the "
-                "trainium and tpu Wan paths hold the high-noise expert alone and run it for "
-                "every step")
+    if dual and torchrun_backend is None and (envs.DIFFLET_BACKEND or "").strip().lower() == "tpu":
+        return ("--dual-expert runs on the neuron and trainium backends: the tpu Wan path holds "
+                "the high-noise expert alone and runs it for every step")
     return None
+
+
+def _aot_dual_expert_hbm_misuse(model_dir: str, tp: int) -> str | None:
+    """Why both Wan 2.2 experts and umT5 cannot share each core of an AoT TP group of ``tp``,
+    else None. AoT keeps every component resident on every core of the group, so the bf16
+    weights per core are (two experts + umT5) / tp: about 16 GiB at tp4, 32 GiB at tp2
+    (``--cfg-parallel``, ``--cp-degree 2`` or a tp2 ``--dp`` replica on four cores). A lower
+    bound (``difflet/backends/neuron/wan/hbm.py``), so a refusal means it clearly cannot fit.
+    Torch-free."""
+    from difflet.backends.neuron.hbm import GIB
+    from difflet.backends.neuron.wan.hbm import device_text_encoder_fits
+    from difflet.models.wan.experts import HIGH_NOISE, LOW_NOISE
+
+    fits, estimate, limit = device_text_encoder_fits(model_dir, tp_degree=tp,
+                                                     experts=(HIGH_NOISE, LOW_NOISE))
+    if fits:
+        return None
+    return (f"--dual-expert holds both Wan 2.2 experts and umT5 on every core of the TP group: at "
+            f"least {estimate / GIB:.1f} GiB of bf16 weights per core at tp={tp}, over the "
+            f"{limit / GIB:.1f} GiB budget of one NeuronCore; use --tp-degree 4 without "
+            "--cfg-parallel or --cp-degree (each --dp replica is its own TP group)")
+
+
+def _dual_expert_keys(stage: str, args: argparse.Namespace) -> dict:
+    """The AoT transformer stage key field of --dual-expert: the artifact gains the compiled
+    ``transformer_2``. Additive, so a single-expert command line keeps its key; nothing on the
+    neuron backend, whose stage artifact is the same with one expert or two. Torch-free."""
+    if (stage == "transformer" and getattr(args, "dual_expert", False)
+            and _torchrun_backend() is None):
+        return {"dual_expert": True}
+    return {}
 
 
 def _torchrun_application_kwargs(args: argparse.Namespace) -> dict:
@@ -337,9 +376,26 @@ class WanOrchestrator(ModelOrchestrator):
                                                vae_exec_mode_conflict(self.args)) if c])
 
     def _reject_dual_expert_misuse(self) -> None:
-        """--dual-expert off the neuron backend, or --guidance-scale-2 without it: print one
-        message and exit 2 before anything is launched (or downloaded, for ``run``)."""
-        refuse(_dual_expert_misuse(self.args, _torchrun_backend()))
+        """--dual-expert on tpu, --guidance-scale-2 without it, --dual-expert on a checkpoint that
+        cannot switch experts (``dual_expert_checkpoint_misuse``: no transformer_2, no
+        boundary_ratio), or, on AoT, a TP group both experts cannot fit
+        (``_aot_dual_expert_hbm_misuse``): print one message and exit 2 before anything is
+        launched (or downloaded, for ``run``). Weights that are not local yet skip the checkpoint
+        checks; the AoT stage repeats them. Torch-free."""
+        args = self.args
+        refuse(_dual_expert_misuse(args, _torchrun_backend()))
+        if not getattr(args, "dual_expert", False):
+            return
+        from difflet.models.wan.experts import dual_expert_checkpoint_misuse
+        from difflet.pipeline.path_resolver import resolve_model_path
+
+        model_dir = _local_snapshot(lambda: resolve_model_path(
+            args.model_id, revision=args.revision, local_files_only=True))
+        if model_dir is None:
+            return
+        refuse(dual_expert_checkpoint_misuse(model_dir))
+        if _torchrun_backend() is None:
+            refuse(_aot_dual_expert_hbm_misuse(model_dir, args.tp_degree or 4))
 
     def _place_text_encoder(self) -> None:
         """On a torchrun backend (neuron), move umT5 to rank 0's host when it cannot fit on the
@@ -488,6 +544,14 @@ class WanOrchestrator(ModelOrchestrator):
         model_dir = resolve_model_path(self.args.model_id,
                                        revision=self.args.revision,
                                        local_files_only=True)
+        dual = bool(getattr(args, "dual_expert", False))
+        if dual:
+            # The driver checked too, unless the weights were not local yet.
+            from difflet.models.wan.experts import dual_expert_checkpoint_misuse
+
+            misuse = dual_expert_checkpoint_misuse(model_dir)
+            if misuse:
+                raise SystemExit(f"[wan] {misuse}")
         compile_shapes = _require_request_shape_in_set(args)
         parallel = DiffletParallelConfig(
             tp_degree=args.tp_degree or 4,
@@ -516,7 +580,8 @@ class WanOrchestrator(ModelOrchestrator):
             batch_size=1,
             enable_text_encoder=True,
             enable_transformer=True,
-            enable_transformer_2=False,
+            # Wan 2.2's low-noise expert, a component of its own (_dual_expert_keys).
+            enable_transformer_2=dual,
             enable_vae_decoder=False,
             # Probe-free TeaCache (fixed cadence / online-delta): host-side skip
             # logic only; not in _stage_cache_inputs, so the warm artifact hits.
@@ -535,6 +600,8 @@ class WanOrchestrator(ModelOrchestrator):
         self._require_stage_artifact("transformer", args, compiled_dir)
         app.load(str(compiled_dir), start_rank_id=0,
                  local_ranks_size=parallel.world_size, skip_warmup=True)
+        low_noise = ({"guidance_scale_2": float(args.guidance_scale_2)}
+                     if getattr(args, "guidance_scale_2", None) is not None else {})
         for req in stage_loop.claim_requests(args):
             with stage_loop.request_scope(args, req, final=False):
                 out = app(
@@ -550,11 +617,13 @@ class WanOrchestrator(ModelOrchestrator):
                         stage_loop.effective(req, args, "guidance_scale", 1.0)
                     ),
                     output_type="latent",
+                    **low_noise,
                 )
                 latents_out = out.latents if hasattr(out, "latents") else out[0]
                 dest = stage_loop.work_file(args, req, "latents.pt")
                 torch.save(latents_out.cpu(), dest)
                 print(f"[wan] latents saved to {dest}")
+                print(f"[wan] experts: {app.pipeline.expert_summary()}", flush=True)
 
     def _stage_transformer_neuron(self, args: argparse.Namespace, backend: str) -> None:
         """The transformer stage on a non-AoT torchrun backend (neuron); runs on every rank.
@@ -726,7 +795,8 @@ class WanOrchestrator(ModelOrchestrator):
 
     def _stage_cache_inputs(self, stage: str, args: argparse.Namespace) -> dict:
         return {**torchrun_stage_keys(self._backend_neutral_stage_cache_inputs(stage, args)),
-                **_component_dtype_keys(stage, args)}
+                **_component_dtype_keys(stage, args),
+                **_dual_expert_keys(stage, args)}
 
     def _backend_neutral_stage_cache_inputs(self, stage: str, args: argparse.Namespace) -> dict:
         prefix = _cache_prefix(self.args.model_id)

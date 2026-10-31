@@ -46,6 +46,9 @@ class _FakeWanApp:
         self.kwargs = kwargs
         self.compiled = None
         self.loaded = None
+        self.pipeline = types.SimpleNamespace(
+            expert_summary=lambda: "transformer steps 0..1 (no boundary); expert_calls "
+            "{'transformer': 2}; step median by expert {}")
         _FakeWanApp.instances.append(self)
 
     def compile(self, path):
@@ -1333,13 +1336,10 @@ def _refuse_launches(monkeypatch):
                         lambda self: pytest.fail("rejected before the download"))
 
 
-@pytest.mark.parametrize("backend", [None, "trainium", "tpu"])
 @pytest.mark.parametrize("mode", ["compile", "generate", "run"])
-def test_dual_expert_is_refused_off_neuron(monkeypatch, tmp_path, capsys, backend, mode):
-    # The trainium and tpu Wan paths hold one expert by design (expert residency).
-    _unset(monkeypatch, "DIFFLET_BACKEND")
-    if backend is not None:
-        monkeypatch.setenv("DIFFLET_BACKEND", backend)
+def test_dual_expert_is_refused_on_tpu(monkeypatch, tmp_path, capsys, mode):
+    # The tpu Wan path holds the high-noise expert alone (expert residency).
+    monkeypatch.setenv("DIFFLET_BACKEND", "tpu")
     _refuse_launches(monkeypatch)
     args = _wan_args(work_dir=str(tmp_path / "work"), host_vae=True, dual_expert=True)
 
@@ -1347,7 +1347,201 @@ def test_dual_expert_is_refused_off_neuron(monkeypatch, tmp_path, capsys, backen
         getattr(WanOrchestrator(args), mode)()
 
     assert exc.value.code == 2
-    assert "--dual-expert runs on the neuron backend only" in capsys.readouterr().err
+    assert "--dual-expert runs on the neuron and trainium backends" in capsys.readouterr().err
+
+
+def _dual_snapshot(root: Path, *, transformer_2: bool = True, boundary_ratio=0.875) -> Path:
+    """A header-only Wan 2.2 snapshot (``_header_only_checkpoint``) with the configs the
+    driver's expert checks read."""
+    import json
+
+    _header_only_checkpoint(root, dual=transformer_2)
+    contract = {"in_channels": 16, "out_channels": 16, "patch_size": [1, 2, 2], "text_dim": 4096}
+    for name in ("transformer", "transformer_2") if transformer_2 else ("transformer",):
+        (root / name / "config.json").write_text(json.dumps(contract))
+    index = {} if boundary_ratio is None else {"boundary_ratio": boundary_ratio}
+    (root / "model_index.json").write_text(json.dumps(index))
+    return root
+
+
+@pytest.fixture
+def aot_snapshot(monkeypatch, tmp_path):
+    """The trainium backend at 24 GiB per core; ``.root`` is the local snapshot (None: not
+    local), ``.stages`` the launched stages."""
+    monkeypatch.setenv("DIFFLET_BACKEND", "trainium")
+    monkeypatch.setenv("DIFFLET_NEURON_HBM_GIB", "24")
+    state = types.SimpleNamespace(root=None, stages=[])
+
+    def resolve(model_id, *, revision=None, local_files_only=False, **_):
+        assert local_files_only, "the driver check must never download"
+        if state.root is None:
+            raise FileNotFoundError(f"{model_id} is not local")
+        return str(state.root)
+
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path", resolve)
+    monkeypatch.setattr(wan_mod.runner, "run_stage",
+                        lambda orch, stage, **kw: state.stages.append((stage, kw["cli_args"])))
+    monkeypatch.setattr(wan_mod, "_decode_latents_host", lambda *a, **k: None)
+    monkeypatch.setattr(WanOrchestrator, "download", lambda self: None)
+    return state
+
+
+@pytest.mark.parametrize("backend", ["trainium", None])
+def test_aot_driver_lets_dual_expert_through(aot_snapshot, monkeypatch, tmp_path, capsys, backend):
+    if backend is None:
+        _unset(monkeypatch, "DIFFLET_BACKEND")
+    aot_snapshot.root = _dual_snapshot(tmp_path / "snap")
+    args = _wan_args(work_dir=str(tmp_path / "work"), host_vae=True, dual_expert=True,
+                     guidance_scale_2=3.0)
+
+    WanOrchestrator(args).generate()
+
+    [(stage, cli_args)] = aot_snapshot.stages
+    assert stage == "transformer"
+    assert "--dual-expert" in cli_args
+    assert cli_args[cli_args.index("--guidance-scale-2") + 1] == "3.0"
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize("backend", ["trainium", "neuron"])
+@pytest.mark.parametrize(("snapshot", "message"), [
+    (dict(transformer_2=False), "has no transformer_2/config.json"),
+    (dict(boundary_ratio=None), "needs the checkpoint's boundary_ratio"),
+])
+def test_dual_expert_refuses_a_checkpoint_that_cannot_switch(
+        aot_snapshot, monkeypatch, tmp_path, capsys, backend, snapshot, message):
+    # Wan 2.1 (no transformer_2) or no boundary_ratio: the run would silently use the
+    # high-noise expert for every step, on either backend.
+    monkeypatch.setenv("DIFFLET_BACKEND", backend)
+    monkeypatch.setattr(WanOrchestrator, "_make_bf16_dit_copies", lambda self: None)
+    aot_snapshot.root = _dual_snapshot(tmp_path / "snap", **snapshot)
+    args = _wan_args(work_dir=str(tmp_path / "work"), host_vae=True, dual_expert=True)
+
+    with pytest.raises(SystemExit) as exc:
+        WanOrchestrator(args).compile()
+
+    assert exc.value.code == 2
+    assert message in capsys.readouterr().err
+    assert aot_snapshot.stages == []
+
+
+@pytest.mark.parametrize("overrides", [dict(tp_degree=2, cfg_parallel=True),
+                                       dict(tp_degree=2, cp_degree=2),
+                                       dict(tp_degree=2, dp=2)])
+def test_aot_dual_expert_refuses_a_tp_group_both_experts_cannot_fit(
+        aot_snapshot, tmp_path, capsys, overrides):
+    # Two bf16 experts and umT5 at tp2: about 31.9 GiB per core, over 22.8.
+    aot_snapshot.root = _dual_snapshot(tmp_path / "snap")
+    args = _wan_args(work_dir=str(tmp_path / "work"), host_vae=True, dual_expert=True,
+                     **overrides)
+
+    with pytest.raises(SystemExit) as exc:
+        WanOrchestrator(args).compile()
+
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert "holds both Wan 2.2 experts and umT5" in err and "tp=2" in err
+    assert aot_snapshot.stages == []
+
+
+def test_aot_dual_expert_checks_wait_for_local_weights(aot_snapshot, tmp_path, capsys):
+    # compile before any download: the stage re-checks once the weights are local.
+    args = _wan_args(work_dir=str(tmp_path / "work"), host_vae=True, dual_expert=True,
+                     tp_degree=2, cfg_parallel=True)
+
+    WanOrchestrator(args).compile()
+
+    assert [stage for stage, _ in aot_snapshot.stages] == ["transformer"]
+
+
+def test_dual_expert_driver_checks_import_no_torch(tmp_path):
+    root = _dual_snapshot(tmp_path / "snap")
+    code = (
+        "import sys; sys.modules['torch'] = None\n"
+        "import argparse, os\n"
+        "os.environ.update(DIFFLET_BACKEND='trainium', DIFFLET_NEURON_HBM_GIB='24')\n"
+        "from difflet.cli.orchestrators import wan\n"
+        "from difflet.models.wan.experts import dual_expert_checkpoint_misuse\n"
+        "args = argparse.Namespace(dual_expert=True, guidance_scale_2=3.0)\n"
+        "assert wan._dual_expert_misuse(args, None) is None\n"
+        f"assert dual_expert_checkpoint_misuse({str(root)!r}) is None\n"
+        f"assert wan._aot_dual_expert_hbm_misuse({str(root)!r}, 4) is None\n"
+        f"assert 'tp=2' in wan._aot_dual_expert_hbm_misuse({str(root)!r}, 2)\n"
+    )
+    subprocess.run([sys.executable, "-c", code], check=True)
+
+
+def _setup_dual_stage(monkeypatch, tmp_path, **overrides):
+    _setup_wan_fakes(monkeypatch)
+    snapshot = _dual_snapshot(tmp_path / "snap")
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path",
+                        lambda *a, **kw: str(snapshot))
+    args = _wan_args(stage_mode="generate", work_dir=str(tmp_path), cache_dir=str(tmp_path),
+                     **overrides)
+    orch = WanOrchestrator(args)
+    orch._finish_stage_compile("transformer", args, orch._stage_compiled_dir("transformer", args))
+    return orch, args
+
+
+def test_aot_stage_holds_the_low_noise_expert_and_its_guidance(monkeypatch, tmp_path, capsys):
+    _unset(monkeypatch, "DIFFLET_BACKEND")
+    orch, args = _setup_dual_stage(monkeypatch, tmp_path, dual_expert=True, guidance_scale=4.0,
+                                   guidance_scale_2=3.0)
+
+    orch._stage_transformer(args)
+
+    app = _FakeWanApp.instances[-1]
+    assert app.kwargs["enable_transformer_2"] is True
+    assert app.call_kwargs["guidance_scale"] == 4.0
+    assert app.call_kwargs["guidance_scale_2"] == 3.0
+    assert "[wan] experts: transformer steps 0..1" in capsys.readouterr().out
+
+
+def test_aot_stage_single_expert_call_is_unchanged(monkeypatch, tmp_path):
+    _unset(monkeypatch, "DIFFLET_BACKEND")
+    orch, args = _setup_dual_stage(monkeypatch, tmp_path)
+
+    orch._stage_transformer(args)
+
+    app = _FakeWanApp.instances[-1]
+    assert app.kwargs["enable_transformer_2"] is False
+    assert "guidance_scale_2" not in app.call_kwargs
+
+
+def test_aot_stage_refuses_a_checkpoint_that_cannot_switch(monkeypatch, tmp_path):
+    # The stage re-checks: the driver skips its check when the weights were not local yet.
+    _unset(monkeypatch, "DIFFLET_BACKEND")
+    orch, args = _setup_dual_stage(monkeypatch, tmp_path, dual_expert=True)
+    (tmp_path / "snap" / "model_index.json").write_text("{}")
+
+    with pytest.raises(SystemExit, match="boundary_ratio"):
+        orch._stage_transformer(args)
+
+    assert _FakeWanApp.instances == []
+
+
+@pytest.mark.parametrize("backend", [None, "trainium"])
+def test_dual_expert_adds_one_field_to_the_aot_transformer_key(monkeypatch, backend):
+    _unset(monkeypatch, "DIFFLET_BACKEND")
+    if backend is not None:
+        monkeypatch.setenv("DIFFLET_BACKEND", backend)
+    single, dual = _wan_args(), _wan_args(dual_expert=True)
+    orch = WanOrchestrator(single)
+
+    assert orch._stage_cache_inputs("transformer", dual) == {
+        **orch._stage_cache_inputs("transformer", single), "dual_expert": True}
+    assert orch._stage_cache_inputs("vae", dual) == orch._stage_cache_inputs("vae", single)
+    assert orch._stage_compiled_dir("transformer", dual) != \
+        orch._stage_compiled_dir("transformer", single)
+
+
+def test_dual_expert_leaves_the_neuron_keys_alone(monkeypatch):
+    # The neuron artifact is a warm-up marker; its key keeps the identity it has.
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    single, dual = _wan_args(), _wan_args(dual_expert=True)
+    orch = WanOrchestrator(single)
+    assert orch._stage_cache_inputs("transformer", dual) == \
+        orch._stage_cache_inputs("transformer", single)
 
 
 @pytest.mark.parametrize("backend", ["neuron", "trainium"])
@@ -1488,8 +1682,8 @@ def test_a_narrow_tp_moves_umt5_to_the_host_before_any_launch(wan_snapshot, tmp_
 def test_umt5_stays_where_it_fits(wan_snapshot, tmp_path, capsys, overrides):
     # bf16 umT5: tp4 is 2.6 GiB of encoder beside 6.7 (13.3 with both experts) GiB of DiT per
     # core; tp2 is 5.3 GiB beside 13.3 GiB, inside the 22.8 GiB budget.
-    wan_snapshot.root = _header_only_checkpoint(tmp_path / "snapshot",
-                                                dual=overrides.get("dual_expert", False))
+    wan_snapshot.root = (_dual_snapshot if overrides.get("dual_expert") else
+                         _header_only_checkpoint)(tmp_path / "snapshot")
     args = _wan_args(model_id=_WAN21_ID, work_dir=str(tmp_path / "work"), **overrides)
 
     WanOrchestrator(args).generate()
@@ -1500,7 +1694,7 @@ def test_umt5_stays_where_it_fits(wan_snapshot, tmp_path, capsys, overrides):
 
 
 def test_two_experts_at_tp2_move_umt5_to_the_host(wan_snapshot, tmp_path, capsys):
-    wan_snapshot.root = _header_only_checkpoint(tmp_path / "snapshot", dual=True)
+    wan_snapshot.root = _dual_snapshot(tmp_path / "snapshot")
     args = _wan_args(work_dir=str(tmp_path / "work"), tp_degree=2, dual_expert=True)
     WanOrchestrator(args).compile()
     assert args.host_text_encoder is True and _NOTE in capsys.readouterr().out

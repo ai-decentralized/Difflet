@@ -414,15 +414,17 @@ def _add_teacache_flags(p: argparse.ArgumentParser) -> None:
 
 
 def _add_dual_expert_flag(p: argparse.ArgumentParser) -> None:
-    """On compile as well as generate/run: compile prepares both experts' weights (each
-    expert's bf16 copy), so the first two-expert request does not."""
+    """On compile as well as generate/run: compile prepares both experts' weights (neuron: each
+    expert's bf16 copy; trainium: transformer_2 compiled and pre-sharded as its own component),
+    so the first two-expert request does not."""
     p.add_argument(
         "--dual-expert",
         dest="dual_expert",
         action="store_true",
-        help="Wan 2.2 A14B on the neuron backend: hold both experts, the high-noise one above "
-        "the checkpoint's boundary timestep and the low-noise one below it (default: the "
-        "high-noise expert for every step, as on trainium and tpu)",
+        help="Wan 2.2 A14B on the neuron and trainium backends: hold both experts, the "
+        "high-noise one at or above the checkpoint's boundary timestep and the low-noise one "
+        "below it (default: the high-noise expert for every step, as on tpu). On trainium both "
+        "experts and umT5 sit on every core of the TP group, which fits at --tp-degree 4",
     )
 
 
