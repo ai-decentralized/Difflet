@@ -1022,7 +1022,9 @@ class HunyuanVideoRotaryPosEmbed(nn.Module):
         return freqs_cos, freqs_sin
 
 
-def shard_modulation_linears(module: HunyuanVideoTransformer3DModel) -> None:
+def shard_modulation_linears(
+    module: HunyuanVideoTransformer3DModel, *, linear_cls: type[nn.Module] | None = None
+) -> None:
     """Make the blocks' AdaLN modulation linears column-parallel with the output gathered:
     each dual-stream block's ``norm1.linear`` and ``norm1_context.linear`` (3072 -> 6 x 3072)
     and each single-stream block's ``norm.linear`` (3072 -> 3 x 3072).
@@ -1034,12 +1036,16 @@ def shard_modulation_linears(module: HunyuanVideoTransformer3DModel) -> None:
     full dot product. The checkpoint keys are unchanged; each rank loads its rows of them. The
     token refiner's ``HunyuanVideoAdaNorm`` is already built this way.
 
-    Called by the neuron and trainium backends after they build the module. The CPU reference
-    and the TeaCache probes keep the plain layers.
+    ``linear_cls`` (default ``difflet.ops.ColumnParallelLinear``) builds each layer, with the
+    ``ColumnParallelLinear`` arguments. The trainium backbone passes a layer that folds the bias
+    into the local matmul, as the neuron backend's does (``backends/trainium/hunyuan_video/
+    backbone.py``). Called by the neuron and trainium backends after they build the module. The
+    CPU reference and the TeaCache probes keep the plain layers.
     """
+    linear_cls = ColumnParallelLinear if linear_cls is None else linear_cls
 
     def col(linear: nn.Linear) -> nn.Module:
-        return ColumnParallelLinear(
+        return linear_cls(
             linear.in_features,
             linear.out_features,
             bias=linear.bias is not None,

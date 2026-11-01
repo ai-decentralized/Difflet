@@ -40,16 +40,18 @@ def test_each_rank_file_holds_its_rows_of_every_modulation_linear():
         assert set(layers) == set(expected), rank
         for name, out_features in expected.items():
             layer = layers[name]
-            assert layer["type"] == "ColumnParallelLinear", (rank, name)
-            assert layer["gather_output"], (rank, name)
-            # The weight is split by output rows; the bias is added after the gather, whole.
+            assert layer["type"] == "_ColumnParallelFusedBias", (rank, name)
+            # The weight and the bias are both split by output rows (the bias is folded into
+            # the local matmul, not added whole after the gather).
             assert layer["weight_shape"] == (out_features // TP, inner), (rank, name)
             assert layer["weight_is_my_rows"], (rank, name)
-            assert layer["bias_shape"] == (out_features,), (rank, name)
-            assert layer["bias_is_full"], (rank, name)
-            # Every rank gets the whole output, the unsharded layer's up to fp32 rounding.
+            assert layer["bias_shape"] == (out_features // TP,), (rank, name)
+            assert layer["bias_is_my_rows"], (rank, name)
+            # Every rank gets the whole output, the unsharded layer's up to fp32 rounding, and
+            # in bf16 exactly each shard's fused F.linear(x, W_r, b_r).
             assert layer["out_shape"] == (2, out_features), (rank, name)
             assert layer["out_max_err"] < 1e-5, (rank, name, layer["out_max_err"])
+            assert layer["bf16_equals_fused_shards"], (rank, name)
 
 
 def test_backbone_shards_the_modulation_before_the_model_is_traced(monkeypatch):
@@ -62,7 +64,10 @@ def test_backbone_shards_the_modulation_before_the_model_is_traced(monkeypatch):
         built.append(module)
         return module
 
-    monkeypatch.setattr(backbone, "shard_modulation_linears", sharded.append)
+    monkeypatch.setattr(
+        backbone, "shard_modulation_linears",
+        lambda module, **kwargs: sharded.append((module, kwargs)),
+    )
     wrapper = object.__new__(backbone.ModelWrapperHunyuanVideoBackbone)
     wrapper.model_cls = model_cls
     wrapper.config = SimpleNamespace(neuron_config=SimpleNamespace(torch_dtype=torch.bfloat16))
@@ -70,6 +75,6 @@ def test_backbone_shards_the_modulation_before_the_model_is_traced(monkeypatch):
     instance = wrapper.get_model_instance()
     instance.load_module()
 
-    assert sharded == built
+    assert sharded == [(built[0], {"linear_cls": backbone._ColumnParallelFusedBias})]
     assert instance.module is built[0]
     assert instance.module.weight.dtype == torch.bfloat16
