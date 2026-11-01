@@ -928,6 +928,7 @@ def test_hv15_cache_key_compiler_args_match_application(tmp_path, monkeypatch, s
     cfg = _config(tmp_path, height=height, width=width, num_frames=frames)
     assert cfg.num_image_tokens == backbone15.hv15_num_image_tokens(height, width, frames)
     app = SimpleNamespace(config=cfg)
+    monkeypatch.setenv("LOCAL_WORLD_SIZE", "1")  # get_compiler_args writes it; restored after
     compiled = backbone15.NeuronHunyuanVideo15BackboneApplication.get_compiler_args(app)
     args = argparse.Namespace(
         height=height, width=width, num_frames=frames, tp_degree=1, cp_degree=1, cp_mode="gather_kv",
