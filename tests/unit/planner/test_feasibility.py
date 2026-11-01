@@ -165,10 +165,11 @@ def test_known_bad_cells_are_reported_separately_from_infeasible_ones():
     assert "neuronx-cc" in reason
 
 
-def test_scaffold_model_denies_every_configuration():
+def test_hunyuan_video_15_is_no_longer_a_scaffold():
+    """HV1.5's AOT cells pass on device; no blanket known-bad entry remains."""
     report = _report("hunyuan_video_15")
-    assert report.feasible == ()
-    assert any(r.kind == "known-bad" for r in report.rejected)
+    assert "tp4" in set(report.labels())
+    assert not any(r.kind == "known-bad" for r in report.rejected)
 
 
 # ---------------------------------------------------- ulysses head divisibility
