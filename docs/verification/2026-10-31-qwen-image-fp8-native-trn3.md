@@ -354,6 +354,23 @@ different trajectory. The same happened between the FLUX layer sets (section 7).
 PSNR against bf16 is therefore a noisy gate: a tp2-vs-tp4 bf16 control (two bf16
 implementations differing only in reduction order) is run below to show the noise floor.
 
+**Noise-floor control** (`bf16_tp2_control/`: bf16 at tp2 against bf16 at tp4, same seed and
+prompt, 50 steps; tp2's step is 524 ms):
+
+| prompt | PSNR | SSIM | LPIPS | latent cos |
+|---|---|---|---|---|
+| cat on a bench | 44.31 dB | 0.997 | 0.001 | 0.99975 |
+| brass typewriter | 39.13 dB | 0.995 | 0.008 | 0.99915 |
+| watercolor lighthouse | 45.84 dB | 0.997 | 0.004 | 0.99985 |
+
+Two bf16 implementations land 39–46 dB apart; mxfp8 lands 27.5–42.6 dB from bf16 across the
+four prompts and the two kernel builds. So the quantization error is real and visible in the
+metric (it is not the noise floor), and its image-level size varies by 4–8 dB with the
+prompt and with any bit change in the build: a per-prompt, single-seed PSNR >= 30 is a noisy
+gate for this recipe, which sits at about 30 dB on its hardest prompt (31.2 and 27.5 on two
+builds of the same recipe). A multi-seed mean, or a looser per-image floor beside a mean, is
+the honest form of the gate; the choice is the user's.
+
 ### 6g. The "utilization-limited" time is dI/dt throttling, not a setting
 
 The profiles' `throttle_activity_1` entries (limit 0.5; 6.0 ms of the mxfp8 block's 12.0 ms,
