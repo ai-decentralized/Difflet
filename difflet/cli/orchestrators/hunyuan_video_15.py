@@ -311,6 +311,8 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
         work_dir = Path(getattr(self.args, "work_dir", None) or Path.home() / ".cache" / "difflet" / "work" / "hv15")
         work_dir.mkdir(parents=True, exist_ok=True)
         cli = self._stage_cli_args(mode, str(work_dir), tp, cfg, cp)
+        if getattr(self.args, "negative_prompt", None) is not None:  # _stage_cli_args drops it
+            cli += ["--negative-prompt", str(self.args.negative_prompt)]
         try:
             if mode == "generate":
                 runner.run_stage(_HF_MODEL_ID, "encode", num_cores=1, virtual_core_size=None, cli_args=cli)
