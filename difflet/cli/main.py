@@ -1014,6 +1014,14 @@ def _registry_layout(args: argparse.Namespace) -> tuple[int, bool]:
     return args.tp_degree or default.tp_degree, cfg
 
 
+def _registry_layout_is_cfg_parallel(args: argparse.Namespace) -> bool:
+    """Whether the model's registry default declares a CFG-parallel layout (hv15)."""
+    from difflet.registry import resolve_model
+
+    entry = resolve_model(args.model_id, model_type=_MODEL_TYPE[args.model_id])
+    return bool(entry.default_parallel.cfg_parallel_enabled)
+
+
 def _replica_tp(args: argparse.Namespace) -> int:
     """The tp degree one replica runs at: the platform's default when it has one (1 on a GPU
     platform, where a replica is ``cfg x cp x tp`` GPUs), else the registry default."""
@@ -1166,10 +1174,11 @@ def _dispatch_dp(args: argparse.Namespace) -> None:
         orch.download()
         orch.compile()
     replica = _replica_cores(args)
-    # Hand the workers the layout the replica was sized for, not their own defaults.
-    args.cfg_parallel = _replica_cfg(args)
-    if _platform().default_tp_degree() is None:
-        args.tp_degree = _replica_tp(args)
+    if _platform().default_tp_degree() is None and _registry_layout_is_cfg_parallel(args):
+        # Hand the workers the layout the replica was sized for (hv15: TP2 x CFG2), not their
+        # own defaults. Both are read before either is written: _registry_layout drops to
+        # tp 1 once cfg is set. Other models' workers keep their own defaults, as before.
+        args.tp_degree, args.cfg_parallel = _registry_layout(args)
     raise SystemExit(router.run_router(args, requests, replica_cores=replica))
 
 
