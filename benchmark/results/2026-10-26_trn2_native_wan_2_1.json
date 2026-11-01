@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "model": "wan_2_1",
+  "model_id": "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+  "platform": "trn2",
+  "device": "trn2.3xlarge / 4 NeuronCores (LNC=2) / 24 GiB HBM per core",
+  "backend": "native",
+  "parallel": "TP4",
+  "shape": {
+    "height": 480,
+    "width": 832,
+    "num_frames": 9
+  },
+  "steps": 50,
+  "seed": 42,
+  "guidance_scale": 5.0,
+  "dtype": "bf16",
+  "toolchain": {
+    "python": "3.12.3",
+    "torch": "2.14.0",
+    "torch-neuronx": "2.14.3.0.1+b1b6c66",
+    "neuronx-cc": "2.28.7631.0+8f7b0cf5",
+    "aws-neuronx-runtime-lib": "2.35.30.0"
+  },
+  "metrics": {
+    "dit_step_ms": 1063.6,
+    "warm_e2e_s": 128.5,
+    "cold_e2e_s": 542.7,
+    "compile_s": 600.3,
+    "psnr_db": 22.66,
+    "ssim": 0.885
+  },
+  "status": "ok",
+  "notes": [
+    "Numbers reused from an earlier run on this host at 8b2408c; confirmed at the 2026-10-26 HEAD by bit-identical outputs",
+    "Cold e2e uses the native weight store; umT5 and VAE kept in fp32",
+    "PSNR/SSIM against a CPU fp32 reference shared with AOT (same noise)"
+  ],
+  "date": "2026-10-26",
+  "commit": "8b2408c",
+  "source": "benchmark/trn2/four_model_native_vs_aot_2026-10-26.md"
+}

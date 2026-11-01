@@ -14,10 +14,11 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import subprocess
 import sys
 from pathlib import Path
 
-from benchmark import report
+from benchmark import perf, report
 from benchmark.harness import BenchResult, Stats
 from benchmark.models import MATRIX
 
@@ -160,11 +161,26 @@ def write_outputs(slug: str, res: BenchResult) -> None:
     d["prompt"] = cfg.prompt
     d["guidance_scale"] = cfg.guidance_scale
     d["output_kind"] = cfg.output_kind
+    d["commit"] = _git_commit()
     Path(json_path(slug)).write_text(json.dumps(d, indent=2))
     Path(report_path(slug)).write_text(report.render(d))
     print(f"[bench] {slug}: status={res.status}  "
           f"compile={res.compile_seconds}  e2e_cold={res.e2e_cold_seconds}  "
           f"-> {report_path(slug)}", flush=True)
+    # The perf page record. Commit it to publish the run (see benchmark/README.md).
+    try:
+        rec_path = perf.write_record(perf.record_from_bench(d, source=json_path(slug)))
+        print(f"[bench] {slug}: perf record -> {rec_path}", flush=True)
+    except (ValueError, FileExistsError) as e:
+        print(f"[bench] {slug}: no perf record written: {e}", flush=True)
+
+
+def _git_commit() -> str | None:
+    try:
+        return subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True,
+                              text=True, check=True, cwd=Path(__file__).parent).stdout.strip() or None
+    except (OSError, subprocess.CalledProcessError):
+        return None
 
 
 def main() -> int:

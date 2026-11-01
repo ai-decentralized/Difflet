@@ -1,0 +1,39 @@
+{
+  "schema": 1,
+  "model": "qwen_image",
+  "model_id": "Qwen/Qwen-Image",
+  "platform": "v5e",
+  "device": "Cloud TPU v5litepod-4 / 4 chips / topology 2x2 / 16 GB HBM per chip",
+  "backend": "tpu",
+  "parallel": "TP4",
+  "shape": {
+    "height": 1024,
+    "width": 1024,
+    "num_frames": null
+  },
+  "steps": 20,
+  "seed": 42,
+  "guidance_scale": 4.0,
+  "dtype": "bf16",
+  "toolchain": {
+    "torch": "2.9.0+cpu",
+    "torch-xla": "2.9.0",
+    "libtpu": "0.0.20",
+    "diffusers": "0.38.0",
+    "transformers": "5.15.1",
+    "accelerator_type": "v5litepod-4"
+  },
+  "metrics": {
+    "dit_step_ms": 502.34,
+    "warm_e2e_s": 13.52,
+    "cold_e2e_s": 80.57,
+    "compile_s": null,
+    "psnr_db": null,
+    "ssim": null
+  },
+  "status": "ok",
+  "notes": [],
+  "date": "2026-08-24 02:17 UTC",
+  "commit": null,
+  "source": "benchmark/v5e/qwen_image.md"
+}
