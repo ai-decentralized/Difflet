@@ -78,20 +78,14 @@ def bounded_joint_attention(
     longer than q: gather_kv's sharded queries against the full keys); real query rows
     attend ``[0, key_valid_len)`` and padded query rows ``[0, 1)`` (finite, sliced off).
     Bounds use expand/reshape/cat only (trace-safe; validated on device by the Task 0
-    spike). ``key_valid_len`` is an int32 ``[B]`` count accumulated in fp32 upstream.
+    spike). ``key_valid_len`` is an int32 ``[B]`` count: the image tokens plus the host-computed
+    ``text_valid`` (graph input #10; no in-graph mask reduction).
     """
     batch, heads, seq, head_dim = q.shape
     pad = -seq % _ATTENTION_TILE
     padded = seq + pad
     kv_pad = -k.shape[2] % _ATTENTION_TILE
     kv_padded = k.shape[2] + kv_pad
-    if padded % _ATTENTION_TILE or kv_padded % _ATTENTION_TILE:
-        # attention_cte's bound path is only validated for 128-aligned q and k (Task 0
-        # spike); fail here, at trace time, rather than inside neuronx-cc.
-        raise ValueError(
-            f"HunyuanVideo 1.5 bounded attention needs q/k lengths padded to a multiple "
-            f"of {_ATTENTION_TILE}; got q={padded}, k={kv_padded}."
-        )
     if pad:
         q = F.pad(q, (0, 0, 0, pad))
     if kv_pad:
