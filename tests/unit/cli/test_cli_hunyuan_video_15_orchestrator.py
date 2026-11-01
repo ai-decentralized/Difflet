@@ -205,6 +205,75 @@ def test_aot_rejects_multi_shape_before_encode(aot_launches, tmp_path):
     assert aot_launches == []
 
 
+@pytest.mark.parametrize("over", [
+    dict(),  # the default TP2 x CFG2 layout
+    dict(tp_degree=2, cfg_parallel=True),
+], ids=["default-layout", "explicit-cfg"])
+def test_aot_rejects_guidance_off_on_a_cfg_layout_before_encode(aot_launches, tmp_path, over):
+    for mode in ("generate", "compile"):
+        orch = hv15.HunyuanVideo15Orchestrator(_driver_args(work_dir=str(tmp_path / "w"), guidance_scale=1.0,
+                                                            **over))
+        with pytest.raises(SystemExit, match=r"guidance.*--tp-degree 2 without --cfg-parallel"):
+            getattr(orch, mode)()
+    assert aot_launches == []
+
+
+def test_aot_rejects_a_cfg_layout_when_the_snapshot_guider_is_off(aot_launches, tmp_path):
+    guider = tmp_path / "driver_snapshot" / "guider"
+    guider.mkdir()
+    (guider / "guider_config.json").write_text(json.dumps(
+        {"_class_name": "ClassifierFreeGuidance", "guidance_scale": 6.0, "enabled": False}))
+    with pytest.raises(SystemExit, match=r"guidance.*--tp-degree 2 without --cfg-parallel"):
+        hv15.HunyuanVideo15Orchestrator(_driver_args(work_dir=str(tmp_path / "w"))).generate()
+    assert aot_launches == []
+    # Without CFG parallelism a guidance-off run is the single-pass layout: it launches.
+    hv15.HunyuanVideo15Orchestrator(_driver_args(work_dir=str(tmp_path / "w"), tp_degree=2)).generate()
+    assert [s for s, _, _, _ in aot_launches] == ["encode", "aot_transformer", "aot_vae"]
+
+
+def test_aot_guidance_on_keeps_the_cfg_layout(aot_launches, tmp_path):
+    hv15.HunyuanVideo15Orchestrator(_driver_args(work_dir=str(tmp_path / "w"), guidance_scale=6.0)).generate()
+    assert [s for s, _, _, _ in aot_launches] == ["encode", "aot_transformer", "aot_vae"]
+
+
+@pytest.mark.parametrize("over", [
+    dict(shapes="480x848x61"),  # frames differ from the request's (default 121)
+    dict(shapes="320x512x61", height=320, width=512, num_frames=33),
+], ids=["vs-defaults", "vs-flags"])
+def test_aot_rejects_a_shapes_entry_other_than_the_request_shape(aot_launches, tmp_path, over):
+    for mode in ("generate", "compile"):
+        orch = hv15.HunyuanVideo15Orchestrator(_driver_args(work_dir=str(tmp_path / "w"), **over))
+        with pytest.raises(SystemExit, match=r"--shapes.*request shape"):
+            getattr(orch, mode)()
+    assert aot_launches == []
+
+
+def test_aot_accepts_a_shapes_entry_equal_to_the_request_shape(aot_launches, tmp_path):
+    hv15.HunyuanVideo15Orchestrator(_driver_args(work_dir=str(tmp_path / "w"), shapes="480x848x121")).generate()
+    assert [s for s, _, _, _ in aot_launches] == ["encode", "aot_transformer", "aot_vae"]
+
+
+@pytest.mark.parametrize("over", [
+    dict(),  # the default layout is CFG-parallel
+    dict(tp_degree=2, cfg_parallel=True),
+    dict(tp_degree=2, cp_degree=2, cp_mode="ulysses"),
+    dict(tp_degree=2, sp_enabled=True),
+], ids=["default", "cfg", "cp", "sp"])
+def test_aot_rejects_segmented_runtime_with_a_parallel_layout_before_encode(aot_launches, monkeypatch,
+                                                                           tmp_path, over):
+    monkeypatch.setenv("DIFFLET_HUNYUAN15_TRANSFORMER_RUNTIME", "segmented")
+    orch = hv15.HunyuanVideo15Orchestrator(_driver_args(work_dir=str(tmp_path / "w"), **over))
+    with pytest.raises(SystemExit, match=r"segmented.*monolithic"):
+        orch.generate()
+    assert aot_launches == []
+
+
+def test_aot_segmented_runtime_with_plain_tp_launches(aot_launches, monkeypatch, tmp_path):
+    monkeypatch.setenv("DIFFLET_HUNYUAN15_TRANSFORMER_RUNTIME", "segmented")
+    hv15.HunyuanVideo15Orchestrator(_driver_args(work_dir=str(tmp_path / "w"), tp_degree=2)).generate()
+    assert [s for s, _, _, _ in aot_launches] == ["encode", "aot_transformer", "aot_vae"]
+
+
 def test_aot_rejects_sp_shape_before_encode(aot_launches, tmp_path):
     """On device `generate --tp-degree 4 --sp` at 480x848x121 ran the encode stage, then failed
     with "no valid compiled artifact": the DiT's N % tp rule must fail first, in the driver."""

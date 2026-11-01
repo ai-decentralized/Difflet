@@ -25,9 +25,10 @@ latents; and ``aot_vae``, writing the MP4: by default on the host (diffusers' ti
 as Wan's Trainium path decodes; the compiled decoder does not build on neuronx-cc 2.26), or with
 --device-vae the tiled bf16 decoder on one core (``vae15``), which `difflet compile` then
 compiles. Each compiled artifact lives in a hashed dir under --cache-dir
-(``_aot_stage_cache_inputs``). --cp-mode ring and a multi-shape --shapes are refused before any
-stage launches (``_aot_reject_unsupported``), as is a shape the DiT's parallel layout cannot split
-(``_aot_validate_dit_shape``).
+(``_aot_stage_cache_inputs``). --cp-mode ring, a --shapes other than the one request shape and
+the segmented DiT runtime with a CFG/CP/SP layout are refused before any stage launches
+(``_aot_reject_unsupported``), as are a CFG-parallel layout with guidance off and a shape the DiT's
+parallel layout cannot split (``_aot_validate_dit_shape``).
 
 Default HF model: hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v
 Registry defaults: height=480, width=848, num_frames=121
@@ -337,10 +338,13 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
         snapshot the check is left to the stages, which report the missing snapshot."""
         a = self.args
         try:
-            transformer_path = os.path.join(self._root(a), "transformer")
+            root = self._root(a)
         except FileNotFoundError as exc:
+            _aot_reject_cfg_without_guidance(a, None, tp, cfg)
             print(f"[hv15] DiT shape check deferred to the stages: {exc}", flush=True)
             return
+        _aot_reject_cfg_without_guidance(a, root, tp, cfg)
+        transformer_path = os.path.join(root, "transformer")
         if not os.path.exists(os.path.join(transformer_path, "config.json")):
             print(f"[hv15] DiT shape check deferred to the stages: no {transformer_path}/config.json",
                   flush=True)
@@ -354,7 +358,7 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
                 transformer_path=transformer_path, world_size=tp * cp * (2 if cfg else 1), tp_degree=tp,
                 dtype=torch.bfloat16, height=int(a.height or 480), width=int(a.width or 848),
                 num_frames=int(a.num_frames or 121), batch_size=2 if cfg else 1, cfg_parallel_enabled=cfg,
-                cp_degree=cp, cp_mode=(getattr(a, "cp_mode", None) or "ulysses") if cp > 1 else "gather_kv",
+                cp_degree=cp, cp_mode=_aot_cp_mode(a),
                 sp_enabled=bool(getattr(a, "sp_enabled", False)))
         except (ValueError, NotImplementedError) as exc:
             raise SystemExit(f"[hv15] {exc}") from exc
@@ -558,9 +562,12 @@ def _aot_device_vae(args: argparse.Namespace) -> bool:
 
 
 def _aot_reject_unsupported(args: argparse.Namespace) -> None:
-    """Before any stage launches: ring CP (the Trainium ring kernel has no text-mask path) and a
-    --shapes naming more than one shape (the AoT application compiles one). Torch-free: the
-    shapes are counted, not parsed."""
+    """Before any stage launches: ring CP (the Trainium ring kernel has no text-mask path), a
+    --shapes naming more than one shape (the AoT application compiles one) or one other than the
+    request's, and the segmented DiT runtime with a CFG, CP or SP layout (it runs none of them).
+    Torch-free."""
+    from difflet.cli.orchestrators.base import parse_shapes_arg
+
     if getattr(args, "cp_mode", None) == "ring":
         raise SystemExit("[hv15] --cp-mode ring is not supported on the Trainium (AoT) backend: its ring "
                          "attention kernel has no text-mask path. Use --cp-mode ulysses (or gather_kv).")
@@ -568,6 +575,50 @@ def _aot_reject_unsupported(args: argparse.Namespace) -> None:
     if shapes and len([token for token in str(shapes).split(",") if token.strip()]) > 1:
         raise SystemExit(f"[hv15] --shapes {shapes} names more than one shape; the Trainium (AoT) HunyuanVideo "
                          "1.5 application compiles one shape: pass --height/--width/--num-frames instead.")
+    request = (int(args.height or 480), int(args.width or 848), int(args.num_frames or 121))
+    try:
+        parsed = parse_shapes_arg(shapes) or []
+    except ValueError as exc:
+        raise SystemExit(f"[hv15] {exc}") from exc
+    for shape in parsed:
+        if tuple(shape) != request[:len(shape)]:
+            raise SystemExit(f"[hv15] --shapes {shapes} differs from the request shape "
+                             f"{'x'.join(map(str, request))} (--height/--width/--num-frames, else 480x848x121); "
+                             "the Trainium (AoT) application compiles the request shape only: drop --shapes "
+                             "or make the two agree.")
+    tp, cfg, cp = _layout(args)
+    if (os.environ.get("DIFFLET_HUNYUAN15_TRANSFORMER_RUNTIME", "monolithic") == "segmented"
+            and (cfg or cp > 1 or getattr(args, "sp_enabled", False))):
+        raise SystemExit(f"[hv15] DIFFLET_HUNYUAN15_TRANSFORMER_RUNTIME=segmented runs neither CFG, context nor "
+                         f"sequence parallelism (layout: tp={tp} cfg={2 if cfg else 1} cp={cp}"
+                         f"{' sp' if getattr(args, 'sp_enabled', False) else ''}). Unset it for the monolithic "
+                         f"DiT, or run --tp-degree {tp} without --cfg-parallel, --cp-degree or --sp.")
+
+
+def _aot_reject_cfg_without_guidance(args: argparse.Namespace, root: str | None, tp: int, cfg: bool) -> None:
+    """Before any stage launches: a CFG-parallel layout (explicit, or the default TP2 x CFG2) with
+    classifier-free guidance off (--guidance-scale <= 1, or the snapshot's guider disabled), which
+    the aot_transformer stage would refuse only after the encode. The guider is read when the
+    snapshot is local; otherwise only --guidance-scale is checked."""
+    if not cfg:
+        return
+    requested = getattr(args, "guidance_scale", None)
+    guider = os.path.join(root, "guider", "guider_config.json") if root else None
+    if guider and os.path.exists(guider):
+        from difflet.models.hunyuan_video.pipeline15 import cfg_on, load_hv15_guidance
+
+        try:
+            on = cfg_on(load_hv15_guidance(root, requested))
+        except NotImplementedError as exc:
+            raise SystemExit(f"[hv15] {exc}") from exc
+    else:
+        on = requested is None or float(requested) > 1.0
+    if not on:
+        source = (f"--guidance-scale {requested}" if requested is not None and float(requested) <= 1.0
+                  else "the snapshot's guider is disabled")
+        raise SystemExit(f"[hv15] classifier-free guidance is off ({source}) but the layout is CFG-parallel "
+                         f"(tp={tp} x cfg=2): there is no second branch to run. Use --tp-degree {tp} without "
+                         "--cfg-parallel.")
 
 
 def _aot_cp_mode(args: argparse.Namespace) -> str:
