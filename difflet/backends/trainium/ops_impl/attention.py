@@ -478,8 +478,9 @@ def joint_ulysses_attention(
     joint sequence, so q_len == kv_len. (The gather_kv route's sharded-query-vs-full-key
     bound shape was once thought to be rejected by neuronx-cc; the HV1.5 Task 0 spike,
     docs/verification/hv15-aot-evidence.md "Spikes", compiled and ran it correctly at
-    kernel level on neuronx-cc 2.26 with q and k each padded to 128. Whether a whole CP
-    DiT graph using it compiles is still open: HV1.0 hit NCC_INLA001 on its CP graph.)
+    kernel level on neuronx-cc 2.26 with q and k each padded to 128, and HV1.5 Phase 1
+    compiled the whole tp2 x cp2 gather_kv DiT graph using it on neuronx-cc 2.26, cos
+    0.99973 against diffusers -- no NCC_INLA001, which HV1.0 hit on its CP graph.)
 
     q_img/image_k/image_v  [B, H_local, S_img/cp, d]  sequence-sharded over cp
     q_txt/text_k/text_v    [B, H_local, S_txt,    d]  replicated on every rank

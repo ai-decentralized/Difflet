@@ -777,10 +777,6 @@ def _hv15_static_reorder_forward(
     return Transformer2DModelOutput(sample=hidden_states)
 
 
-# The traced DiT graph's version, part of the AOT stage cache key (the orchestrator's
-# ``_aot_stage_cache_inputs``), so a changed graph compiles into a fresh dir instead of
-# loading a stale artifact. Bump it whenever the traced DiT graph's inputs or structure
-# change. 2: ``text_valid`` became graph input #10 (no in-graph mask count, NCC_IRPX901).
 # --enable-ccop-compute-overlap speeds the DiT up on short sequences but trips NCC_IRPX901
 # (RelaxPredicates, text-stream LayerNorm) on long ones. Measured (tp2cfg): with it, 320x512x61
 # (N = 16*20*32 = 10240) runs at ~1602 ms/step vs 1816.5 ms without (13.4% slower); with it,
