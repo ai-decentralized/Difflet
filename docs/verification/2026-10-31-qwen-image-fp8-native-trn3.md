@@ -321,6 +321,31 @@ step median **239.1 / 239.0 ms** at tp4, 1024x1024, 50 steps = **0.80x of bf16's
 PSNR 31.73 dB, SSIM 0.987, LPIPS 0.017 vs bf16; gen50a == gen50b. The PE-swizzle variant for
 the q/k/v widths (N <= 2304, the activation handed over transposed) is the next run.
 
+A third sweep (`mx_options3.log`) re-measured the fused q/k/v shape with `fast_dma_transpose`
+at 0.326 ms against 0.568 in the second sweep (same code, same core), and the PE-swizzle
+variant at 0.394–0.424: the one-core numbers for a single 0.3–0.6 ms kernel move by up to 1.7x
+between runs (the dI/dt throttle below depends on the gaps around the burst), so they rank
+variants only coarsely and the device step time is the arbiter. In the third sweep
+`fast_dma_transpose` is best or tied at every shape (768: 0.186 vs 0.218; 2304: 0.326 vs
+0.394; 3072: 0.267 vs 0.331); block/tile overrides (`TILES_IN_BLOCK_K=6`, `TILES_IN_LOAD_M=2`,
+shard-M) are within 3%.
+
+### 6g. The "utilization-limited" time is dI/dt throttling, not a setting
+
+The profiles' `throttle_activity_1` entries (limit 0.5; 6.0 ms of the mxfp8 block's 12.0 ms,
+2.6 of bf16's 14.9) are the TensorE's **delta-current (dI/dt) ramp**: on trn2/trn3 the engine
+starts at ~50% utilisation after any window (~1.6 µs on trn3) in which utilisation fell below
+50%, and ramps back up over that time (Neuron docs, neuron-explorer "Understanding throttling",
+added in 2.33; the throttle type is `activity_*`, not `power_*`/`temp_*`, and the idle core's
+`ham_throttle` sysfs reads 128/255 = 50%). It tracks TensorE burstiness, not power: the
+variant with the lowest TensorE active time (mxfp8, 70%) throttles most. Nothing on the host
+sets it: no `NEURON_RT_*` variable, no sysfs knob (`current_perf_profile` is an HBM-speed
+firmware profile, `hbm_7200_capable=0` here; the `ham_throttle` write only sets the averaging
+window), no `neuron-ls`/`neuron-top` option. The documented mitigation is kernel-side: keep the
+TensorE above 50% (longer matmul bursts, overlap the quantize/DMA with matmul, even dummy
+matmuls in gaps). The nkilib MXFP deep dive notes that Matmul-MX produces at twice the rate
+Quantize-MX (VectorE) consumes, which is the starvation that re-engages the limit.
+
 ## 7. FLUX.1-dev in mxfp8 (`--quant mxfp8`), tp4, 1024x1024, 28 steps, seed 42
 
 Commit `23c731d` wires FLUX (targets: the dual-stream blocks' q/k/v for both streams and both
