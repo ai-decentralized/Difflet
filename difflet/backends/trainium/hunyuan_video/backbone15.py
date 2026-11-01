@@ -812,6 +812,21 @@ def hv15_dit_compiler_args(num_image_tokens: int) -> str:
 # change. 2: ``text_valid`` became graph input #10 (no in-graph mask count, NCC_IRPX901).
 _AOT_DIT_GRAPH_VERSION = 2
 
+# Diagnostic switches read by ``_HunyuanVideo15TraceModule`` (capacity / attention probes):
+# each changes the traced graph, so the set ones are part of the AOT stage cache key too.
+_HV15_DIAGNOSTIC_GRAPH_SWITCHES = (
+    "DIFFLET_HUNYUAN15_NKI_ATTENTION",
+    "DIFFLET_HUNYUAN15_NO_ATTENTION_MASK",
+    "DIFFLET_HUNYUAN15_ATTENTION_QUERY_CHUNK_SIZE",
+    "DIFFLET_HUNYUAN15_ZERO_BLOCK_ATTN",
+    "DIFFLET_HUNYUAN15_ZERO_BLOCK_FF",
+)
+
+
+def hv15_diagnostic_graph_switches() -> dict[str, str]:
+    """The diagnostic graph switches set in the environment (empty in production)."""
+    return {name: os.environ[name] for name in _HV15_DIAGNOSTIC_GRAPH_SWITCHES if os.environ.get(name)}
+
 
 class _HunyuanVideo15TraceModule(nn.Module):
     """Fixed-tuple wrapper around diffusers HunyuanVideo15Transformer3DModel.

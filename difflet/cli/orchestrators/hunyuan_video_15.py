@@ -386,18 +386,26 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
             # either compiles fresh; that also invalidates v2 artifacts built with the ccop
             # overlap option, hence no _AOT_DIT_GRAPH_VERSION bump. The default depends on the
             # image-token count N (backbone15.hv15_num_image_tokens, also used by the config).
+            # diagnostic_switches: the backbone15 probes that change the traced graph, keyed
+            # only when set (production keys are unchanged).
             from difflet.backends.trainium.hunyuan_video.backbone15 import (
-                _AOT_DIT_GRAPH_VERSION, hv15_dit_compiler_args, hv15_num_image_tokens)
+                _AOT_DIT_GRAPH_VERSION, hv15_diagnostic_graph_switches, hv15_dit_compiler_args,
+                hv15_num_image_tokens)
 
             image_tokens = hv15_num_image_tokens(shape["height"], shape["width"], shape["num_frames"])
-            return {"component": "hunyuan_video_15_aot_dit", "graph_version": _AOT_DIT_GRAPH_VERSION,
-                    "compiler_args": hv15_dit_compiler_args(image_tokens),
-                    "model": _HF_MODEL_ID,
-                    "revision": getattr(args, "revision", None), "tp": int(args.tp_degree or 1),
-                    "cp": int(args.cp_degree or 1), "cp_mode": _aot_cp_mode(args),
-                    "sp": bool(getattr(args, "sp_enabled", False)), "cfg": bool(getattr(args, "cfg_parallel", False)),
-                    "dtype": "bfloat16", **shape, "text_seq_len": 1000, "text_seq_len_2": 256,
-                    "image_seq_len": 729, "toolchain": stage_toolchain_versions()}
+            inputs = {"component": "hunyuan_video_15_aot_dit", "graph_version": _AOT_DIT_GRAPH_VERSION,
+                      "compiler_args": hv15_dit_compiler_args(image_tokens),
+                      "model": _HF_MODEL_ID,
+                      "revision": getattr(args, "revision", None), "tp": int(args.tp_degree or 1),
+                      "cp": int(args.cp_degree or 1), "cp_mode": _aot_cp_mode(args),
+                      "sp": bool(getattr(args, "sp_enabled", False)),
+                      "cfg": bool(getattr(args, "cfg_parallel", False)),
+                      "dtype": "bfloat16", **shape, "text_seq_len": 1000, "text_seq_len_2": 256,
+                      "image_seq_len": 729, "toolchain": stage_toolchain_versions()}
+            switches = hv15_diagnostic_graph_switches()
+            if switches:
+                inputs["diagnostic_switches"] = switches
+            return inputs
         if component == "vae":
             return {"component": "hunyuan_video_15_aot_vae", "model": _HF_MODEL_ID,
                     "revision": getattr(args, "revision", None), "dtype": "bfloat16", "shape": shape,
