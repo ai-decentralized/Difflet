@@ -407,21 +407,33 @@ def test_call_with_positional_args_forwards_to_transformer():
     assert application.transformer.calls[-1] == (torch.zeros(1), torch.zeros(1))
 
 
+_TEXT_VALID = torch.tensor([3], dtype=torch.int32)
+
+
 def test_validate_dit15_inputs_checks_text_order():
     good = app.HunyuanVideo15DiTInputBundle(
-        **{**_bundle_15().__dict__, "text_order": torch.arange(9).unsqueeze(0)}
+        **{**_bundle_15().__dict__, "text_order": torch.arange(9).unsqueeze(0), "text_valid": _TEXT_VALID}
     )
     app.validate_hunyuan_video15_dit_inputs(good, config=_config_15(), dtype=torch.float32)
-    bad = app.HunyuanVideo15DiTInputBundle(
-        **{**_bundle_15().__dict__, "text_order": torch.arange(8).unsqueeze(0)}
-    )
+    bad = dataclasses.replace(good, text_order=torch.arange(8).unsqueeze(0))
     with pytest.raises(ValueError, match="text_order"):
         app.validate_hunyuan_video15_dit_inputs(bad, config=_config_15(), dtype=torch.float32)
 
 
+@pytest.mark.parametrize("only", ["text_order", "text_valid"])
+def test_dit15_text_order_and_text_valid_come_together(only):
+    value = {"text_order": torch.arange(9).unsqueeze(0), "text_valid": _TEXT_VALID}[only]
+    bundle = dataclasses.replace(_bundle_15(), **{only: value})
+    with pytest.raises(ValueError, match="text_order.*text_valid.*both or neither"):
+        app.validate_hunyuan_video15_dit_inputs(bundle, config=_config_15(), dtype=torch.float32)
+    with pytest.raises(ValueError, match="text_order.*text_valid.*both or neither"):
+        bundle.as_model_inputs()
+    assert len(_bundle_15().as_model_inputs()) == 8  # neither: the 8 mask-derived inputs
+
+
 def test_validate_dit15_inputs_checks_text_valid():
     good = app.HunyuanVideo15DiTInputBundle(
-        **{**_bundle_15().__dict__, "text_valid": torch.tensor([3], dtype=torch.int32)}
+        **{**_bundle_15().__dict__, "text_order": torch.arange(9).unsqueeze(0), "text_valid": _TEXT_VALID}
     )
     app.validate_hunyuan_video15_dit_inputs(good, config=_config_15(), dtype=torch.float32)
     with pytest.raises(ValueError, match="text_valid"):
@@ -436,10 +448,9 @@ def test_validate_dit15_inputs_checks_text_valid():
             config=_config_15(),
             dtype=torch.float32,
         )
-    both = dataclasses.replace(good, text_order=torch.arange(9).unsqueeze(0))
-    inputs = both.as_model_inputs()
+    inputs = good.as_model_inputs()
     assert len(inputs) == 10
-    assert inputs[8] is both.text_order and inputs[9] is both.text_valid
+    assert inputs[8] is good.text_order and inputs[9] is good.text_valid
 
 
 def test_call_15_with_direct_kwargs_builds_bundle(monkeypatch):
@@ -493,6 +504,42 @@ def test_call_15_with_direct_kwargs_builds_bundle(monkeypatch):
         # text_valid: the host count of those valid tokens (graph input #10).
         assert inputs[9].dtype == torch.int32
         assert inputs[9].tolist() == [3]
+
+
+def test_host_refiner_recomputes_every_call():
+    """No memo: two embeds a cheap fingerprint cannot tell apart (same shape, channel-0 sum and
+    valid count, e.g. cond vs uncond) at one timestep must each be refined from their own raw."""
+    with tempfile.TemporaryDirectory() as path:
+        application = app.NeuronHunyuanVideoApplication(
+            model_path=path, parallel=_parallel(), dtype=torch.float32, shape={}, model_version="1.5"
+        )
+        calls = []
+
+        class _Fake15Transformer:
+            config = _config_15()
+
+            def __call__(self, *inputs):
+                calls.append(inputs)
+                return torch.zeros(1)
+
+        application.transformer = _Fake15Transformer()
+        refines = []
+
+        def refiner(raw, ts, mask):
+            refines.append(raw)
+            return raw.clone()
+
+        application._get_host_refiner = lambda: refiner
+        mask = torch.tensor([[1, 1, 0]])
+        first = torch.zeros(1, 3, 6)
+        second = first.clone()
+        second[0, :, 1] = 5.0  # channel 0 (the old fingerprint) unchanged
+        for raw in (first, second):
+            application.forward_dit(dataclasses.replace(
+                _bundle_15(), encoder_hidden_states=raw, encoder_attention_mask=mask))
+        application.reset_refiner_cache()  # kept as a harmless per-request hook
+    assert len(refines) == 2
+    assert torch.equal(calls[0][2], first) and torch.equal(calls[1][2], second)
 
 
 def test_dit_input_contract_15_shapes():

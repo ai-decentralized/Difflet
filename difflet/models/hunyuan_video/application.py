@@ -109,16 +109,18 @@ class HunyuanVideo15DiTInputBundle:
             self.encoder_attention_mask_2,
             self.image_embeds,
         )
+        _require_text_layout_pair(self)
         if self.text_order is None:
-            if self.text_valid is not None:
-                raise ValueError(
-                    "HunyuanVideo 1.5 DiT input 'text_valid' follows 'text_order' "
-                    "(graph inputs 9 and 10); set both or neither."
-                )
             return inputs
-        if self.text_valid is None:
-            return (*inputs, self.text_order)
         return (*inputs, self.text_order, self.text_valid)
+
+
+def _require_text_layout_pair(bundle: HunyuanVideo15DiTInputBundle) -> None:
+    if (bundle.text_order is None) != (bundle.text_valid is None):
+        raise ValueError(
+            "HunyuanVideo 1.5 DiT inputs 'text_order' and 'text_valid' (graph inputs 9 and 10) "
+            "come from one hv15_text_layout call; set both or neither."
+        )
 
 
 def allowed_hunyuan_video_latent_shapes(config: Any) -> list[tuple[int, ...]]:
@@ -214,6 +216,7 @@ def validate_hunyuan_video15_dit_inputs(
 ) -> None:
     """Validate the HunyuanVideo 1.5 embedding/latent contract before dispatch."""
 
+    _require_text_layout_pair(bundle)
     batch_size = int(getattr(config.neuron_config, "batch_size", 1))
     text_seq_len = int(getattr(config, "text_seq_len", 1000))
     text_seq_len_2 = int(getattr(config, "text_seq_len_2", 256))
@@ -524,12 +527,6 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
         self._host_refiner_on = (
             self.model_version == "1.5" and self.transformer_runtime == "monolithic"
         )
-        # refined embeds depend only on (raw_mllm, timestep, mask); the prompt is fixed
-        # within a generation and the timesteps repeat across the gate/baseline/teacache
-        # trajectories, so memoize by timestep (keyed under a cheap prompt fingerprint).
-        # Lazy (not eager-precompute-all): a TeaCache-skipped step never computes it.
-        self._refiner_cache: dict[float, torch.Tensor] = {}
-        self._refiner_fp = None
         self.pipeline = None
         self.text_seq_len = int(kwargs.get("text_seq_len", 256))
         self.text_seq_len_2 = int(kwargs.get("text_seq_len_2", 256))
@@ -973,12 +970,7 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
         return refiner
 
     def reset_refiner_cache(self) -> None:
-        """Forget the host refiner's memoized outputs (call at the start of every request).
-
-        The cache's prompt fingerprint is cheap and can collide across requests (e.g. the
-        same negative prompt in row 0 and positive prompts of equal valid length)."""
-        self._refiner_cache = {}
-        self._refiner_fp = None
+        """Per-request hook (``aot15`` calls it); a no-op: the host refiner keeps no memo."""
 
     def forward_dit(self, bundle: HunyuanVideoDiTInputBundle):
         if self.transformer is None:
@@ -989,32 +981,21 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                 config=self.transformer.config,
                 dtype=self.dtype,
             )
-            if self._host_refiner_on and (bundle.text_order is None or bundle.text_valid is None):
+            if self._host_refiner_on and bundle.text_order is None:  # validated: both or neither
                 text_order, text_valid = _hv15_text_layout(bundle)
-                bundle = dataclasses.replace(
-                    bundle,
-                    text_order=text_order if bundle.text_order is None else bundle.text_order,
-                    text_valid=text_valid if bundle.text_valid is None else bundle.text_valid,
-                )
+                bundle = dataclasses.replace(bundle, text_order=text_order, text_valid=text_valid)
             inputs = list(bundle.as_model_inputs())
             if self._host_refiner_on:
                 # inputs = (hidden_states, timestep, encoder_hidden_states[mllm],
                 #           encoder_attention_mask, timestep_r, ...) — refine the raw mllm
-                # on host (fp32) and feed the inner_dim result into the NEFF.
+                # on host (fp32) and feed the inner_dim result into the NEFF. Recomputed on
+                # every call: each step has its own timestep, so a memo never hit, and a
+                # cheap prompt fingerprint could hand one branch the other's embeds.
                 raw, ts, mask = inputs[2], inputs[1], inputs[3]
-                # cheap prompt fingerprint (one channel across tokens + valid count); reset
-                # the per-timestep cache when the prompt changes.
-                fp = (tuple(raw.shape), round(float(raw[0, :, 0].float().sum()), 3), int(mask.sum()))
-                if fp != self._refiner_fp:
-                    self._refiner_cache = {}
-                    self._refiner_fp = fp
-                tkey = round(float(ts.flatten()[0]), 6)
-                refined = self._refiner_cache.get(tkey)
-                if refined is None:
-                    refiner = self._get_host_refiner()
-                    with torch.no_grad():
-                        refined = refiner(raw.to(torch.float32), ts.to(torch.float32), mask).to(self.dtype)
-                    self._refiner_cache[tkey] = refined
+                with torch.no_grad():
+                    refined = self._get_host_refiner()(
+                        raw.to(torch.float32), ts.to(torch.float32), mask
+                    ).to(self.dtype)
                 inputs[2] = refined
             return self.transformer(*inputs)
         validate_hunyuan_video_dit_inputs(

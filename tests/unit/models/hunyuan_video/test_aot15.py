@@ -219,8 +219,8 @@ def test_aot_denoiser_cfg2_one_call_per_step(hv15_snapshot, monkeypatch, tmp_pat
 
 def test_refiner_cache_reset_per_request(hv15_snapshot, monkeypatch, tmp_path):
     # Same negative prompt (row 0 under CFG), positive prompts that differ only in
-    # content, not in valid length: the refiner cache's cheap fingerprint cannot tell
-    # them apart, so the per-request reset is what makes request 2 refine again.
+    # content, not in valid length: a cheap prompt fingerprint cannot tell them apart,
+    # so the host refiner keeps no memo and request 2 refines again on every step.
     d = aot15.build_aot_denoiser(
         model_path=hv15_snapshot,
         compiled_model_path=str(tmp_path),
