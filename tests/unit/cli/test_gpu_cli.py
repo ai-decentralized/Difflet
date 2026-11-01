@@ -111,7 +111,7 @@ def saved(monkeypatch):
     """Record the MP4 writer's calls; write a marker file so the output exists."""
     calls = []
 
-    def fake(tensor, output_path):
+    def fake(tensor, output_path, *, fps=16):
         calls.append((tensor, output_path))
         Path(output_path).write_bytes(b"mp4")
         return True

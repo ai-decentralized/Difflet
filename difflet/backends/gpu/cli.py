@@ -217,7 +217,7 @@ class GpuOrchestrator(ModelOrchestrator):
 
         _, _, frames, height, width = result.shape
         shape = f"({frames} frames, {height}x{width})"
-        if out.suffix == ".mp4" and _save_video(result, str(out)):
+        if out.suffix == ".mp4" and _save_video(result, str(out), fps=self.spec.default_fps):
             return f"{out} {shape}"
         pt = out.with_suffix(".pt")
         import torch
