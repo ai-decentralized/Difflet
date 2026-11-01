@@ -6,9 +6,6 @@ import os
 from typing import List
 
 import torch
-import torch.nn.functional as F
-from neuronx_distributed.parallel_layers.layers import ColumnParallelLinear
-from neuronx_distributed.parallel_layers.mappings import gather_from_tensor_model_parallel_region
 
 from difflet.backends.trainium.core.application_base import NeuronApplicationBase
 from difflet.backends.trainium.core.bucketing import (
@@ -23,29 +20,6 @@ from difflet.models.hunyuan_video.modeling_hunyuan_video import (
     HunyuanVideoTransformer3DModel,
     shard_modulation_linears,
 )
-
-
-class _ColumnParallelFusedBias(ColumnParallelLinear):
-    """NxD's ``ColumnParallelLinear`` with the bias sharded and folded into the local matmul,
-    then the output gathered: ``gather(F.linear(x, W_rank, b_rank))``, as the neuron backend's
-    layer computes it.
-
-    With ``gather_output=True`` NxD keeps the whole bias on every rank and adds it after the
-    gather, so the matmul's bf16 output is rounded once more before the bias lands. For the
-    AdaLN modulation that moved about a quarter of the outputs by one bf16 step against the
-    unsharded ``nn.Linear`` (``F.linear(x, W, b)``, one fused op), and the DiT's output with them.
-    Folding the bias keeps every element the unsharded layer's single fused dot product. Built
-    with ``gather_output=False``, so NxD shards the bias by rows like the weight (each rank file
-    holds its rows of the unchanged ``.bias`` key); ``gather_output`` is accepted and ignored.
-    """
-
-    def __init__(self, *args, gather_output: bool = True, **kwargs):
-        del gather_output
-        super().__init__(*args, gather_output=False, **kwargs)
-
-    def forward(self, input: torch.Tensor) -> torch.Tensor:  # noqa: A002 - NxD's name
-        out = F.linear(input, self.weight, self.bias)
-        return gather_from_tensor_model_parallel_region(out, process_group=self.tensor_parallel_group)
 
 
 class HunyuanVideoBackboneInferenceConfig(InferenceConfig):
@@ -202,9 +176,8 @@ class ModelWrapperHunyuanVideoBackbone(ShapeBucketedInputGenerator, ModelWrapper
         def _create_model():
             model = self.model_cls(self.config)
             # Column-parallel AdaLN modulation: shard_checkpoint then writes each rank its rows of
-            # those weights instead of all 6.80 GB of them into every rank file. The bias is
-            # folded into the local matmul so the output keeps the unsharded layer's rounding.
-            shard_modulation_linears(model, linear_cls=_ColumnParallelFusedBias)
+            # those weights instead of all 6.80 GB of them into every rank file.
+            shard_modulation_linears(model)
             model = model.to(dtype=self.config.neuron_config.torch_dtype)
             model.eval()
             return model
