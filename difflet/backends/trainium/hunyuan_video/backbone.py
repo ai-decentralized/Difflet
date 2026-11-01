@@ -16,7 +16,10 @@ from difflet.backends.trainium.core.bucketing import (
 )
 from difflet.backends.trainium.core.config import InferenceConfig
 from difflet.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
-from difflet.models.hunyuan_video.modeling_hunyuan_video import HunyuanVideoTransformer3DModel
+from difflet.models.hunyuan_video.modeling_hunyuan_video import (
+    HunyuanVideoTransformer3DModel,
+    shard_modulation_linears,
+)
 
 
 class HunyuanVideoBackboneInferenceConfig(InferenceConfig):
@@ -172,6 +175,9 @@ class ModelWrapperHunyuanVideoBackbone(ShapeBucketedInputGenerator, ModelWrapper
     def get_model_instance(self):
         def _create_model():
             model = self.model_cls(self.config)
+            # Column-parallel AdaLN modulation: shard_checkpoint then writes each rank its rows of
+            # those weights instead of all 6.80 GB of them into every rank file.
+            shard_modulation_linears(model)
             model = model.to(dtype=self.config.neuron_config.torch_dtype)
             model.eval()
             return model

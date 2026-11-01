@@ -294,12 +294,19 @@ def _cache_application_kwargs(
 ) -> dict[str, Any] | None:
     cache_kwargs = dict(application_kwargs or {})
     cache_kwargs.update(_tp_reduce_cache_kwargs(cache_kwargs, model_name))
-    if not cache_kwargs and model_name != "hunyuan_video":
+    if not cache_kwargs and model_name not in {"hunyuan_video", "qwen_image"}:
         return None
     if model_name == "hunyuan_video":
         # Recompile backbones whose long-mask integer reduction could truncate
         # the attention range on Trainium LNC2, including non-TeaCache requests.
         cache_kwargs["attention_mask_accumulation"] = "fp32-v1"
+        # The AdaLN modulation linears are column-parallel (shard_modulation_linears):
+        # an older backbone's graph and rank files hold them whole.
+        cache_kwargs["adaln_modulation"] = "column-parallel"
+    if model_name == "qwen_image":
+        # The DiT masks the prompt padding by its valid-row count; an older DiT's
+        # graph attends the padding.
+        cache_kwargs["text_mask"] = "valid-len"
     from difflet.pipeline.teacache import requires_teacache_probe
 
     calibrated_probe = model_name in {"wan", "ltx_2"} and requires_teacache_probe(

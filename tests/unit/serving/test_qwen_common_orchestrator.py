@@ -136,6 +136,9 @@ def test_qwen_compile_plan_is_path_free_and_pins_source(tmp_path):
     assert identities["generate"]["stage_inputs"]["text_seq_len"] == qwen_image.TEXT_SEQ_LEN
     assert identities["generate"]["virtual_core_size"] == qwen_image.VIRTUAL_CORE_SIZE
     assert "toolchain" in identities["generate"]
+    # The DiT masks the prompt padding; no pre-mask DiT artifact is reused.
+    assert identities["generate"]["text_mask"] == "valid-len"
+    assert "text_mask" not in identities["text"] and "text_mask" not in identities["vae"]
 
 
 def test_qwen_compile_identity_changes_with_stage_contract_and_toolchain(monkeypatch, tmp_path):

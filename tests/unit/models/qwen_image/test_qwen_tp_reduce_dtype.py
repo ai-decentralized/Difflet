@@ -15,9 +15,11 @@ from difflet.cli.orchestrators.qwen_image import QwenImageOrchestrator
 from difflet.models.qwen_image import modeling_qwen_image as qmod
 from difflet.models.qwen_image.application import create_qwen_image_transformer_config
 
-# Pre-bf16 key of the Qwen DiT stage at 1024x1024 / tp4, toolchain stubbed to
-# _STUB_TOOLCHAIN. --tp-reduce-dtype fp32 must keep hashing to it.
-EXPECTED_LEGACY_KEY = "e8af81d4e33a97f8"
+# Key of the Trainium Qwen DiT stage at 1024x1024 / tp4 with --tp-reduce-dtype fp32 (which adds
+# no field: the legacy reduce), toolchain stubbed to _STUB_TOOLCHAIN. It was the pre-bf16 key
+# e8af81d4e33a97f8 until the DiT masked the prompt padding ("text_mask"), which changed the graph
+# no older artifact may be reused for.
+EXPECTED_LEGACY_KEY = "0ec2a0022defa6a9"
 _STUB_TOOLCHAIN = {"stub": "toolchain"}
 
 

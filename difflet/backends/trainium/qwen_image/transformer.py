@@ -10,6 +10,7 @@ working unchanged. What stays here is what is actually Trainium: the
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import List
 
@@ -36,6 +37,46 @@ from difflet.models.qwen_image.modeling_qwen_image import (  # noqa: F401 — re
     _safe_tensor_parallel_size,
 )
 
+logger = logging.getLogger(__name__)
+
+
+class _QwenImageMaskedTraceModule(_QwenImageTransformerTraceModule):
+    """The trace module with the prompt padding masked, as diffusers masks it.
+
+    The text stage zero-pads the prompt to ``text_seq_len`` and marks its valid rows with a
+    prefix mask. A zero row is not an absent key (``txt_norm``/``txt_in`` turn it into
+    ``txt_in``'s bias), so attending the padding moves the output. The mask becomes the valid-row
+    count ``text_valid_len``, which the attention processor turns into key bounds
+    (``_masked_joint_attention``): static shapes, one NEFF for every prompt length.
+
+    Ring CP is the exception: Trainium's ``joint_ring_attention`` takes no valid-row count, so a
+    ring DiT still attends the padding.
+    """
+
+    def __init__(self, config):
+        super().__init__(config)
+        self.mask_text = not (self.context_parallel_enabled and self.cp_mode == "ring")
+        if not self.mask_text:
+            logger.warning(
+                "Qwen-Image with cp_mode='ring' attends the prompt padding on Trainium "
+                "(no masked ring attention); use cp_mode='gather_kv' or 'ulysses' to mask it"
+            )
+
+    def forward(
+        self,
+        hidden_states: torch.Tensor,
+        timestep: torch.Tensor,
+        encoder_hidden_states: torch.Tensor,
+        encoder_hidden_states_mask: torch.Tensor,
+        guidance: torch.Tensor,
+    ) -> torch.Tensor:
+        text_valid_len = None
+        if self.mask_text:
+            text_valid_len = encoder_hidden_states_mask.to(torch.int32).sum(dim=1)
+        return super().forward(
+            hidden_states, timestep, encoder_hidden_states, None, guidance,
+            text_valid_len=text_valid_len,
+        )
 
 
 class QwenImageTransformerInferenceConfig(InferenceConfig):
@@ -216,7 +257,7 @@ class ModelWrapperQwenImageTransformer(ShapeBucketedInputGenerator, ModelWrapper
 class NeuronQwenImageTransformerApplication(NeuronApplicationBase):
     """Compile/load wrapper for ``QwenImageTransformer2DModel``."""
 
-    _model_cls = _QwenImageTransformerTraceModule
+    _model_cls = _QwenImageMaskedTraceModule
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)

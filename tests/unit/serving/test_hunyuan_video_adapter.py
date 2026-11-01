@@ -266,6 +266,9 @@ def test_compile_identities_bind_commit_toolchain_components_and_denoiser_shape(
     assert denoiser["shapes"] == [[64, 96, 5]]
     assert denoiser["compile_contract_version"] == 2
     assert denoiser["text_seq_len"] == 256
+    # The column-parallel AdaLN modulation changed the graph and the rank files.
+    assert denoiser["adaln_modulation"] == "column-parallel"
+    assert "adaln_modulation" not in llama
     assert str(tmp_path) not in first[0].identity.canonical_cache_inputs_json.decode()
 
 

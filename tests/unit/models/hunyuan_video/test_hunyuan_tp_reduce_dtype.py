@@ -30,9 +30,11 @@ from difflet.cli.orchestrators.base import stage_cache_key  # noqa: E402
 from difflet.cli.orchestrators.hunyuan_video import HunyuanVideoOrchestrator  # noqa: E402
 from difflet.pipeline.difflet_pipeline import _cache_application_kwargs  # noqa: E402
 
-# Pre-bf16 key of the HunyuanVideo DiT stage at 320x512x61 / tp4, toolchain
-# stubbed to _STUB_TOOLCHAIN. --tp-reduce-dtype fp32 must keep hashing to it.
-EXPECTED_LEGACY_KEY = "f61bd88411cadb3b"
+# Key of the HunyuanVideo DiT stage at 320x512x61 / tp4 with --tp-reduce-dtype fp32 (which adds
+# no field: the legacy reduce), toolchain stubbed to _STUB_TOOLCHAIN. It was the pre-bf16 key
+# f61bd88411cadb3b until the column-parallel AdaLN modulation ("adaln_modulation") changed the
+# graph and the rank files, which no older artifact may be reused for.
+EXPECTED_LEGACY_KEY = "4c60fb45a8d57df4"
 _STUB_TOOLCHAIN = {"stub": "toolchain"}
 
 
@@ -162,8 +164,10 @@ def test_stage_argv_omits_absent_flag():
 @pytest.mark.parametrize(
     ("kwargs", "expected"),
     [
-        ({"tp_reduce_dtype": "fp32"}, {"attention_mask_accumulation": "fp32-v1"}),
-        ({}, {"attention_mask_accumulation": "fp32-v1", "tp_reduce_dtype": "bfloat16"}),
+        ({"tp_reduce_dtype": "fp32"},
+         {"attention_mask_accumulation": "fp32-v1", "adaln_modulation": "column-parallel"}),
+        ({}, {"attention_mask_accumulation": "fp32-v1", "adaln_modulation": "column-parallel",
+              "tp_reduce_dtype": "bfloat16"}),
     ],
 )
 def test_difflet_pipeline_cache_kwargs(kwargs, expected):

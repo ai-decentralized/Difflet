@@ -629,12 +629,18 @@ def test_cache_inputs_unchanged_for_aot_backends_and_distinct_for_neuron(monkeyp
 
     base, base_dirs = keyed(None)
     assert set(base["generate"]) == {"component", "model_id", "tp", "cp", "cp_mode", "sp",
-                                     "dtype", "text_seq_len", "shapes", "toolchain", "tp_reduce_dtype"}
+                                     "dtype", "text_seq_len", "shapes", "toolchain",
+                                     "tp_reduce_dtype", "text_mask"}
+    # The AoT DiT masks the prompt padding: its key names that, so no older DiT is reused.
+    assert base["generate"]["text_mask"] == "valid-len"
     for backend in ("trainium", "tpu"):  # AoT: byte-identical keys and dirs
         assert keyed(backend) == (base, base_dirs)
     neuron, neuron_dirs = keyed("neuron")
+    # The neuron NEFF cache keys the graph itself; its stage key has no text_mask field.
+    aot_only = {"generate": {"text_mask"}}
     for stage in stages:
-        assert neuron[stage] == {**base[stage], "backend": "neuron", "exec_mode": "compile"}
+        shared = {k: v for k, v in base[stage].items() if k not in aot_only.get(stage, ())}
+        assert neuron[stage] == {**shared, "backend": "neuron", "exec_mode": "compile"}
         assert neuron_dirs[stage] != base_dirs[stage]
         assert neuron_dirs[stage].parent == base_dirs[stage].parent
     # An omitted --exec-mode keys like the default (compile); eager differs.

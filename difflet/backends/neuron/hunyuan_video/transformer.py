@@ -102,33 +102,6 @@ def _tensor_signature_class():
     return _HunyuanVideoTensorSignature
 
 
-def _shard_modulation_linears(module: torch.nn.Module) -> None:
-    """Make the blocks' AdaLN modulation linears column-parallel with the output gathered:
-    each dual-stream block's ``norm1.linear`` and ``norm1_context.linear`` (3072 -> 6 x 3072)
-    and each single-stream block's ``norm.linear`` (3072 -> 3 x 3072).
-
-    The shared modeling builds them as diffusers' ``AdaLayerNormZero`` /
-    ``AdaLayerNormZeroSingle``, whose ``linear`` is a plain ``nn.Linear``, so every rank would
-    hold all 80 of them (6.80 GB in bf16). Their input is the per-sample ``[B, inner]``
-    conditioning vector, so gathering the output is one tiny all-gather per layer; the loader
-    reads each rank's rows of the unchanged checkpoint keys (``_difflet_shard``). The swap is
-    here and not in the shared modeling, which the Trainium path also compiles. HV1.5's port
-    does the same (``hunyuan_video15/transformer.py``), as does this model's own token
-    refiner."""
-    from difflet.backends.neuron.ops_impl.linear import ColumnParallelLinear
-
-    def col(lin: torch.nn.Linear) -> ColumnParallelLinear:
-        return ColumnParallelLinear(lin.in_features, lin.out_features, bias=lin.bias is not None,
-                                    gather_output=True, dtype=lin.weight.dtype,
-                                    device=lin.weight.device)
-
-    for block in module.transformer_blocks:
-        block.norm1.linear = col(block.norm1.linear)
-        block.norm1_context.linear = col(block.norm1_context.linear)
-    for block in module.single_transformer_blocks:
-        block.norm.linear = col(block.norm.linear)
-
-
 class NeuronHunyuanVideoTransformerApplication(TorchNeuronApplicationBase):
     """The HunyuanVideo DiT, sharded across the TP group, at the config's static shape.
 
@@ -196,8 +169,11 @@ class NeuronHunyuanVideoTransformerApplication(TorchNeuronApplicationBase):
             self.skipped_checkpoint_prefixes = skipped
 
     def build_module(self) -> torch.nn.Module:
+        from difflet.models.hunyuan_video.modeling_hunyuan_video import shard_modulation_linears
+
         module = _tensor_signature_class()(self.config)
-        _shard_modulation_linears(module)
+        # Each rank loads its rows of the unchanged checkpoint keys (``_difflet_shard``).
+        shard_modulation_linears(module)
         return module
 
     def checkpoint_key(self, name: str) -> str:

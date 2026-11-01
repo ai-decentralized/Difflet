@@ -862,6 +862,9 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
                 "text_seq_len": _TEXT_SEQ_LEN,
                 "shapes": canonical_shapes_list(args, (320, 512, 61)),
                 "toolchain": stage_toolchain_versions(),
+                # The AdaLN modulation linears are column-parallel (shard_modulation_linears):
+                # an older DiT's graph and rank files hold them whole.
+                "adaln_modulation": "column-parallel",
                 # Additive: pre-bf16 DiT artifacts reduced in fp32 and keep their key.
                 **tp_reduce_cache_fields(
                     parse_tp_reduce_dtype(getattr(args, "tp_reduce_dtype", None)),
