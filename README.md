@@ -15,6 +15,7 @@ MiniMax-H3 also supports text-to-video with audio through the staged CLI.
 ![Status](https://img.shields.io/badge/status-pre--alpha-orange.svg)
 ![CUDA](https://img.shields.io/badge/CUDA-12.8%2B-76B900.svg)
 ![Neuron](https://img.shields.io/badge/Neuron-neuronx--cc%202.26-232F3E.svg)
+[![Perf](https://img.shields.io/badge/perf-compare%20models-0b6e69.svg)](https://ai-decentralized.github.io/Difflet/perf/)
 
 ```bash
 DIFFLET_BACKEND=cuda difflet run --model-id black-forest-labs/FLUX.1-dev \
@@ -27,6 +28,7 @@ writes a 1024×1024 image. There is no compile step. On Trainium, drop `DIFFLET_
 artifact, and later runs skip straight to load and denoise.
 
 [Latest news](#latest-news) · [Hardware](#hardware-support) · [Models](#supported-models) · [Feature support](#feature-support) ·
+[**Perf**](https://ai-decentralized.github.io/Difflet/perf/) ·
 [Quick start](#quick-start) · [Choose a topology](#choose-a-topology) · [Serving](#serving) ·
 [Go further](#go-further) · [CLI reference](#cli-reference) · [Troubleshooting](#troubleshooting) ·
 [Developer guide](DEVELOPER.md)

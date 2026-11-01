@@ -78,6 +78,53 @@ retune. Shapes default to what fits a single **trn2.3xlarge** (1 Neuron device, 
 cores × 24 GB), so `tp=4` is the max (FLUX's registry default of tp=8 is overridden
 to 4).
 
+## Publishing results
+
+The [perf page](https://ai-decentralized.github.io/Difflet/perf/) compares models across
+platforms. It is built from `benchmark/results/`: one JSON record per run, and the page
+shows the newest record for each model, platform and backend. A push to `main` that
+changes `benchmark/results/` rebuilds and deploys the page
+(`.github/workflows/perf-pages.yml`). Older records stay in the folder as history.
+
+To publish a run:
+
+1. **Run the benchmark.** `python -m benchmark.bench` writes the record for you, e.g.
+   `benchmark/results/2026-11-01_0930_trn2_aot_wan_2_1.json`, next to its usual
+   `benchmark/<device>/<slug>.json`.
+2. **Add what the harness doesn't measure**, if you have it. Convert the run again
+   with the extra fields:
+
+   ```bash
+   python -m benchmark.perf add benchmark/trn2/wan_2_1.json --force \
+       --psnr 22.66 --ssim 0.885 --note "VAE kept in fp32"
+   ```
+
+   `add` also converts a result JSON from another machine (`--backend native|aot|cuda|tpu`
+   overrides the backend it infers from the adapter, `--model` the slug).
+3. **Commit the record** (`git add benchmark/results/…`) and open a PR. CI validates it;
+   the page updates once it merges.
+
+For a run made outside `bench.py` (for example the native-vs-AoT campaign scripts), copy
+the closest existing record in `benchmark/results/`, edit the values, and check it:
+
+```bash
+python -m benchmark.perf check
+```
+
+Record fields: `model` (matrix slug), `platform` (device slug: `trn2`, `trn3`, `h100`,
+`b300`, `v5e`), `backend` (`native`, `aot`, `cuda`, `tpu`), `device`, `parallel` (e.g.
+`TP4`), `shape`, `steps`, `toolchain` (at least `torch`), `metrics` (`dit_step_ms`,
+`warm_e2e_s`, `cold_e2e_s`, `compile_s`, `psnr_db`, `ssim`; `null` when not measured),
+`status` (`ok`, `failed`, `oom`), `date`, and optionally `commit`, `source` (the report the
+page links to) and `notes` (short lines shown next to the result).
+
+Preview the page locally:
+
+```bash
+python -m benchmark.perf build --out docs/perf/perf.json
+python -m http.server -d docs/perf      # then open http://localhost:8000
+```
+
 ## Results are namespaced per hardware
 
 Each hardware target gets its own folder so reproductions sit side-by-side:

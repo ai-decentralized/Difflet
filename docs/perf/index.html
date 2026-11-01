@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Difflet Performance</title>
+<meta name="description" content="Compare Difflet benchmark results across models and platforms: DiT step time, end-to-end latency, compile time, PSNR and SSIM.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<!--
+  Data: perf.json, built by `python -m benchmark.perf build` from benchmark/results/*.json.
+  Preview locally:
+    python -m benchmark.perf build --out docs/perf/perf.json && python -m http.server -d docs/perf
+-->
+<style>
+/* Layout: one tool column — pickers, the grouped bar chart, then the matching table. */
+:root {
+  --bg: #f4f6f8; --surface: #ffffff; --fg: #18202a; --muted: #5b6774; --faint: #8a95a1; --line: #d7dde4; --grid: #e8ecf0;
+  --accent: #0b6e69; --accent-soft: #dcefec; --warn: #8a5300; --warn-soft: #fbf0dc;
+  /* categorical slots, fixed order: a platform keeps its color whatever is selected */
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #6250d6; --s8: #e34948; --s-other: #8a95a1;
+  --font-ui: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root {
+  --bg: #11161b; --surface: #182028; --fg: #e4e9ef; --muted: #9aa6b2; --faint: #6d7884; --line: #2b3540; --grid: #222b34;
+  --accent: #52c3bb; --accent-soft: #163a37; --warn: #e6a64c; --warn-soft: #3a2b14;
+  --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #008300; --s7: #9085e9; --s8: #e66767; --s-other: #6d7884;
+  color-scheme: dark; } }
+
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font-ui); font-size: 14px; line-height: 1.5; }
+.wrap { max-width: 1080px; margin: 0 auto; padding: 28px max(16px, env(safe-area-inset-right, 0px)) 56px max(16px, env(safe-area-inset-left, 0px)); display: grid; gap: 20px; }
+h1 { margin: 0; font-size: 1.6rem; font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; }
+h2 { margin: 0; font-size: 1rem; font-weight: 600; }
+p { margin: 0; max-width: 76ch; }
+a { color: var(--accent); }
+.eyebrow { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent); display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.eyebrow a { text-decoration: none; }
+.eyebrow a:hover { text-decoration: underline; }
+.lede { color: var(--muted); }
+header { display: grid; gap: 8px; }
+code { font-family: var(--font-mono); font-size: 0.86em; }
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 18px 20px; display: grid; gap: 16px; min-width: 0; }
+@media (max-width: 600px) { .panel { padding: 14px; } }
+
+.controls { display: grid; gap: 14px; }
+.ctl { display: grid; grid-template-columns: 88px 1fr; gap: 6px 12px; align-items: start; }
+@media (max-width: 600px) { .ctl { grid-template-columns: 1fr; } }
+.ctl-label { font-family: var(--font-mono); font-size: 0.72rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); padding-top: 6px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.chip { font: inherit; font-size: 0.86rem; display: inline-flex; align-items: center; gap: 7px; padding: 4px 11px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--muted); cursor: pointer; }
+.chip:hover { border-color: var(--faint); color: var(--fg); }
+.chip:focus-visible, .mini:focus-visible, .seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.chip[aria-pressed="true"] { background: var(--accent-soft); border-color: var(--accent); color: var(--fg); }
+.chip .sw { width: 9px; height: 9px; border-radius: 2px; flex: none; }
+.chip[aria-pressed="false"] .sw { opacity: .35; }
+.chip .sub { color: var(--faint); font-size: 0.78rem; }
+.mini { font: inherit; font-size: 0.78rem; color: var(--accent); background: none; border: 0; padding: 4px 6px; cursor: pointer; border-radius: 4px; }
+.mini:hover { text-decoration: underline; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; flex-wrap: wrap; }
+.seg button { font: inherit; font-size: 0.86rem; padding: 4px 12px; border: 0; background: transparent; color: var(--muted); cursor: pointer; }
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { background: var(--fg); color: var(--surface); }
+
+.chart-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 6px 16px; }
+.chart-sub { color: var(--muted); font-size: 0.86rem; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 0.82rem; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend i { width: 10px; height: 10px; border-radius: 2px; }
+.note { background: var(--warn-soft); color: var(--fg); border-radius: 6px; padding: 8px 12px; font-size: 0.86rem; }
+.note b { color: var(--warn); }
+.chart-box { position: relative; min-width: 0; min-height: 120px; }
+svg.chart { display: block; width: 100%; height: auto; overflow: visible; }
+svg.chart text { font-family: var(--font-ui); font-size: 11px; fill: var(--muted); font-variant-numeric: tabular-nums; }
+svg.chart .xl { font-size: 12px; fill: var(--fg); font-weight: 500; }
+svg.chart .val { fill: var(--fg); font-size: 10.5px; }
+svg.chart .grid { stroke: var(--grid); }
+svg.chart .base { stroke: var(--faint); }
+svg.chart .hit { fill: transparent; }
+svg.chart .bar { transition: opacity .12s; }
+svg.chart.hovering .bar:not(.on) { opacity: .35; }
+.tip { position: absolute; pointer-events: none; background: var(--fg); color: var(--surface); font-size: 0.8rem; padding: 7px 10px; border-radius: 6px; white-space: nowrap; transform: translate(-50%, calc(-100% - 10px)); line-height: 1.4; z-index: 2; }
+.tip b { font-weight: 600; }
+.empty { color: var(--muted); padding: 40px 0; text-align: center; }
+
+.scroll { overflow-x: auto; min-width: 0; }
+table { border-collapse: collapse; font-variant-numeric: tabular-nums; width: 100%; min-width: 1180px; font-size: 0.86rem; }
+th, td { padding: 7px 10px; text-align: left; white-space: nowrap; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-weight: 600; color: var(--muted); font-size: 0.76rem; letter-spacing: 0.03em; text-transform: uppercase; }
+td.num, th.num { text-align: right; }
+th.cur, td.cur { background: var(--accent-soft); }
+td.notes { white-space: normal; min-width: 260px; max-width: 380px; color: var(--muted); font-size: 0.8rem; }
+td.notes ul { margin: 0; padding-left: 1.1em; }
+tr.grp td { border-bottom: 0; padding-top: 14px; font-weight: 600; color: var(--fg); }
+td .sw { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 7px; }
+td a { text-decoration: none; }
+td a:hover { text-decoration: underline; }
+.best { font-weight: 600; }
+.dim { color: var(--faint); }
+.foot { color: var(--muted); font-size: 0.82rem; display: grid; gap: 4px; }
+@media (prefers-reduced-motion: reduce) { svg.chart .bar { transition: none; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="eyebrow"><a href="https://github.com/ai-decentralized/Difflet">Difflet</a><span id="updated"></span><a href="https://github.com/ai-decentralized/Difflet/blob/main/benchmark/README.md#publishing-results">Add a result</a></div>
+    <h1>Performance across models and platforms</h1>
+    <p class="lede">Pick models, platforms and a metric. The chart and the table update together and show the newest result for each model, platform and backend. The link in the address bar keeps your selection, so you can share a comparison.</p>
+  </header>
+
+  <div class="panel">
+    <div class="controls">
+      <div class="ctl"><div class="ctl-label" id="lab-m">Models</div><div class="chips" id="models" role="group" aria-labelledby="lab-m"></div></div>
+      <div class="ctl"><div class="ctl-label" id="lab-p">Platforms</div><div class="chips" id="plats" role="group" aria-labelledby="lab-p"></div></div>
+      <div class="ctl"><div class="ctl-label" id="lab-x">Metric</div><div><div class="seg" id="metric" role="group" aria-labelledby="lab-x"></div></div></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="chart-head">
+      <div><h2 id="chart-title">DiT step time</h2><div class="chart-sub" id="chart-sub"></div></div>
+      <div class="legend" id="legend"></div>
+    </div>
+    <div class="note" id="note" hidden></div>
+    <div class="chart-box" id="chart-box"><div class="tip" id="tip" hidden></div><div class="empty" id="loading">Loading results…</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>Results and setup</h2>
+    <div class="scroll" id="table"></div>
+    <div class="foot">
+      <div>The best value of the chosen metric for each model is in bold. “vs best” compares only the platforms you selected: times slower for speed, the gap in dB or SSIM for quality. “—” means not measured.</div>
+      <div>DiT step time is the one metric that compares fairly across platforms. End-to-end times depend on the step count, which differs between runs (see Steps).</div>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const REPO = "https://github.com/ai-decentralized/Difflet/blob/main/";
+const METRICS = [
+  { k: "dit_step_ms", id: "dit",     name: "DiT step", unit: "ms", title: "DiT step time", sub: "Per denoising step, lower is better. Comparable across platforms." },
+  { k: "warm_e2e_s",  id: "warm",    name: "Warm e2e", unit: "s",  title: "Warm end-to-end", sub: "Full generation with weights already loaded, lower is better." },
+  { k: "cold_e2e_s",  id: "cold",    name: "Cold e2e", unit: "s",  title: "Cold end-to-end", sub: "Full generation from a cold start, lower is better." },
+  { k: "compile_s",   id: "compile", name: "Compile",  unit: "s",  title: "Compile time", sub: "One-time compile, cached afterwards. Eager backends have no compile step." },
+  { k: "psnr_db",     id: "psnr",    name: "PSNR",     unit: "dB", hi: true, title: "PSNR vs CPU fp32 reference", sub: "Output quality against a CPU fp32 diffusers reference, higher is better." },
+  { k: "ssim",        id: "ssim",    name: "SSIM",     unit: "",   hi: true, title: "SSIM vs CPU fp32 reference", sub: "Structural similarity against the same reference, 0 to 1, higher is better." },
+];
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const fmt = (v, unit) => v == null ? "—" : unit === "ms" ? v.toFixed(1) + " ms" : unit === "dB" ? v.toFixed(2) + " dB" : unit === "" ? v.toFixed(3)
+  : v >= 600 ? (v / 60).toFixed(0) + " min" : (v >= 100 ? v.toFixed(0) : String(+v.toFixed(1))) + " s";
+const fmtS = v => v == null ? "—" : (v >= 100 ? v.toFixed(1) : String(+v.toFixed(2))) + " s";
+const tickFmt = (t, unit) => unit === "" ? t.toFixed(1) : unit === "dB" ? (+t.toFixed(1)) + " dB" : fmt(t, unit).replace(".0 ms", " ms");
+const bestOf = (arr, hi) => { const v = arr.filter(x => x != null); return v.length ? (hi ? Math.max(...v) : Math.min(...v)) : null; };
+const relTxt = (v, best, unit, hi) => v == null || best == null ? "—" : v === best ? null
+  : hi ? (unit === "dB" ? "−" + (best - v).toFixed(2) + " dB" : "−" + (best - v).toFixed(3)) : (v / best).toFixed(2) + "×";
+
+let DATA, CONFIGS, MODELS, RES;  // RES: model slug -> config key -> result
+const state = { models: new Set(), plats: new Set(), metric: 0 };
+
+function readHash() {
+  const h = new URLSearchParams(location.hash.slice(1));
+  if (!h.has("m") && !h.has("p") && !h.has("x")) return false;
+  if (h.has("m")) state.models = new Set(h.get("m").split(",").filter(s => MODELS.some(m => m.slug === s)));
+  if (h.has("p")) state.plats = new Set(h.get("p").split(",").filter(k => CONFIGS.some(c => c.key === k)));
+  if (h.has("x")) { const i = METRICS.findIndex(m => m.id === h.get("x")); if (i >= 0) state.metric = i; }
+  return true;
+}
+function save() {
+  const h = `m=${[...state.models].join(",")}&p=${[...state.plats].join(",")}&x=${METRICS[state.metric].id}`;
+  history.replaceState(null, "", "#" + h);
+  try { localStorage.setItem("difflet-perf", h); } catch (e) { /* storage blocked: the hash still works */ }
+}
+
+function chip(label, on, color, sub, onClick) {
+  const b = document.createElement("button"); b.type = "button"; b.className = "chip"; b.setAttribute("aria-pressed", on);
+  b.innerHTML = (color ? `<span class="sw" style="background:${color}"></span>` : "") + esc(label) + (sub ? ` <span class="sub">${esc(sub)}</span>` : "");
+  b.onclick = onClick; return b;
+}
+function mini(label, onClick) { const b = document.createElement("button"); b.type = "button"; b.className = "mini"; b.textContent = label; b.onclick = onClick; return b; }
+const toggle = (set, k) => set.has(k) ? set.delete(k) : set.add(k);
+const parSub = c => { const p = new Set(Object.values(RES).map(r => r[c.key]?.parallel).filter(Boolean)); return [...p].join(", "); };
+
+function renderControls() {
+  $("models").replaceChildren(
+    ...MODELS.map(x => chip(x.name, state.models.has(x.slug), null, x.shape, () => { toggle(state.models, x.slug); update(); })),
+    mini("All", () => { state.models = new Set(MODELS.map(x => x.slug)); update(); }),
+    mini("Clear", () => { state.models.clear(); update(); }));
+  const presets = [mini("All", () => { state.plats = new Set(CONFIGS.map(x => x.key)); update(); })];
+  const trn = CONFIGS.filter(c => c.platform.startsWith("trn"));
+  if (trn.length > 1) presets.push(mini("Trainium only", () => { state.plats = new Set(trn.map(c => c.key)); update(); }));
+  const nva = CONFIGS.filter(c => c.platform === "trn2" && (c.backend === "native" || c.backend === "aot"));
+  if (nva.length === 2) presets.push(mini("trn2 Native vs AOT", () => { state.plats = new Set(nva.map(c => c.key)); update(); }));
+  $("plats").replaceChildren(...CONFIGS.map(x => chip(x.label, state.plats.has(x.key), x.color, parSub(x), () => { toggle(state.plats, x.key); update(); })), ...presets);
+  $("metric").replaceChildren(...METRICS.map((x, i) => { const b = document.createElement("button"); b.type = "button"; b.textContent = x.name; b.setAttribute("aria-pressed", state.metric === i); b.onclick = () => { state.metric = i; update(); }; return b; }));
+}
+
+function niceStep(max, n = 5) { const raw = max / n, p = 10 ** Math.floor(Math.log10(raw)); for (const f of [1, 2, 2.5, 5, 10]) if (f * p >= raw) return f * p; }
+const sel = () => [MODELS.filter(m => state.models.has(m.slug)), CONFIGS.filter(c => state.plats.has(c.key))];
+const val = (m, c, k) => { const r = RES[m]?.[c]; return r ? r.metrics[k] : undefined; };
+
+function renderChart() {
+  const box = $("chart-box"), tip = $("tip"), met = METRICS[state.metric];
+  const [models, plats] = sel();
+  $("chart-title").textContent = met.title; $("chart-sub").textContent = met.sub;
+  $("legend").innerHTML = plats.map(p => `<span><i style="background:${p.color}"></i>${esc(p.label)}</span>`).join("");
+  const stepSet = new Set(), have = models.some(m => plats.some(p => val(m.slug, p.key, met.k) != null));
+  models.forEach(m => plats.forEach(p => { const r = RES[m.slug]?.[p.key]; if (r) stepSet.add(r.steps); }));
+  const note = $("note");
+  if ((met.k === "warm_e2e_s" || met.k === "cold_e2e_s") && stepSet.size > 1) { note.hidden = false; note.innerHTML = `<b>Not a like-for-like comparison.</b> The selected runs use different step counts (${[...stepSet].sort((a, b) => a - b).join(", ")}). Switch to DiT step to compare compute speed.`; }
+  else if (met.hi) { note.hidden = false; note.innerHTML = `<b>Quality is measured on few runs so far.</b> Platforms without a measurement show “—”. Check each row's notes for how its reference was made.`; }
+  else note.hidden = true;
+
+  box.querySelectorAll("svg, .empty").forEach(n => n.remove()); tip.hidden = true;
+  if (!models.length || !plats.length) { box.insertAdjacentHTML("beforeend", `<div class="empty">Select at least one model and one platform.</div>`); return; }
+  if (!have) { box.insertAdjacentHTML("beforeend", `<div class="empty">No ${esc(met.name)} measurements for this selection yet.</div>`); return; }
+
+  const W = Math.max(320, box.clientWidth), H = W < 560 ? 280 : 340;
+  const L = 52, R = 8, T = 18, B = 40, pw = W - L - R, ph = H - T - B;
+  const vals = []; models.forEach(m => plats.forEach(p => { const v = val(m.slug, p.key, met.k); if (v != null) vals.push(v); }));
+  const maxV = Math.max(...vals), st = niceStep(maxV), top = Math.ceil(maxV / st - 1e-9) * st || 1;
+  const y = v => T + ph - (v / top) * ph;
+  const gw = pw / models.length, inner = gw * 0.78, bw = Math.max(3, Math.min(40, (inner - 2 * (plats.length - 1)) / plats.length));
+  const groupW = bw * plats.length + 2 * (plats.length - 1);
+  const showVals = bw >= 30 && models.length * plats.length <= 20;
+  let s = `<svg class="chart" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(met.title)} by model and platform">`;
+  for (let i = 0; i * st <= top + 1e-9; i++) { const t = i * st, ty = y(t);
+    s += `<line class="${t === 0 ? "base" : "grid"}" x1="${L}" x2="${W - R}" y1="${ty}" y2="${ty}"/><text x="${L - 8}" y="${ty + 4}" text-anchor="end">${tickFmt(t, met.unit)}</text>`; }
+  const bars = [];
+  models.forEach((m, gi) => {
+    const gx = L + gi * gw + (gw - groupW) / 2, cx = L + gi * gw + gw / 2;
+    s += `<text class="xl" x="${cx}" y="${T + ph + 18}" text-anchor="middle">${esc(gw < 110 ? m.name.split(" ")[0] : m.name)}</text>`;
+    s += `<text x="${cx}" y="${T + ph + 33}" text-anchor="middle">${esc(m.shape)}</text>`;
+    const best = bestOf(plats.map(p => val(m.slug, p.key, met.k)), met.hi);
+    plats.forEach((p, pi) => {
+      const v = val(m.slug, p.key, met.k), x = gx + pi * (bw + 2), id = bars.length;
+      bars.push({ m, p, v, best, x: x + bw / 2, r: RES[m.slug]?.[p.key] });
+      if (v == null) { s += `<text x="${x + bw / 2}" y="${T + ph - 4}" text-anchor="middle" class="dim">—</text>`; }
+      else { const by = y(v), h = Math.max(T + ph - by, 1), r = Math.min(4, bw / 2, h);
+        s += `<path class="bar" data-i="${id}" d="M${x},${T + ph} v-${h - r} a${r},${r} 0 0 1 ${r},-${r} h${bw - 2 * r} a${r},${r} 0 0 1 ${r},${r} v${h - r} z" fill="${p.color}"/>`;
+        if (showVals) s += `<text class="val" x="${x + bw / 2}" y="${by - 5}" text-anchor="middle"${v === best ? ' font-weight="600"' : ""}>${fmt(v, met.unit).replace(/ (ms|s|min|dB)$/, "")}</text>`; }
+      s += `<rect class="hit" data-i="${id}" x="${x - 1}" y="${T}" width="${bw + 2}" height="${ph}"/>`;
+    });
+  });
+  box.insertAdjacentHTML("beforeend", s + `</svg>`);
+  const svg = box.querySelector("svg");
+  const hide = () => { svg.classList.remove("hovering"); tip.hidden = true; };
+  svg.addEventListener("pointermove", e => {
+    const i = e.target.dataset ? e.target.dataset.i : undefined; if (i == null) { hide(); return; }
+    const b = bars[+i]; svg.classList.add("hovering");
+    svg.querySelectorAll(".bar").forEach(n => n.classList.toggle("on", n.dataset.i === i));
+    const rt = relTxt(b.v, b.best, met.unit, met.hi);
+    const rel = b.v == null ? "" : rt === null ? (met.hi ? " · best of selected" : " · fastest of selected") : met.hi ? ` · ${rt} vs best` : ` · ${rt} the fastest`;
+    const setup = b.r ? `<br>${esc(b.p.backend_label)} · torch ${esc(b.r.torch || "?")} · ${esc(b.r.parallel)} · ${b.r.steps} steps · ${esc(b.r.date)}` : "";
+    tip.innerHTML = `<b>${esc(b.m.name)}</b> · ${esc(b.p.label)}<br>${b.v == null ? (!b.r ? "No run" : met.k === "compile_s" && b.p.backend === "cuda" ? "No compile step (eager)" : "Not measured") : fmt(b.v, met.unit) + rel}${setup}`;
+    const sc = svg.clientWidth / W, by = b.v == null ? T + ph : y(b.v);
+    tip.style.left = Math.min(Math.max(b.x * sc, 130), box.clientWidth - 130) + "px"; tip.style.top = (by * sc) + "px"; tip.hidden = false;
+  });
+  svg.addEventListener("pointerleave", hide);
+}
+
+function renderTable() {
+  const [models, plats] = sel(), met = METRICS[state.metric];
+  if (!models.length || !plats.length) { $("table").innerHTML = `<div class="empty">Nothing selected.</div>`; return; }
+  const cols = [["Platform"], ["Backend"], ["PyTorch"], ["Parallel"], ["Steps", 1], ["DiT step", 1, "dit_step_ms"], [`vs best (${met.name})`, 1], ["Warm e2e", 1, "warm_e2e_s"],
+    ["Cold e2e", 1, "cold_e2e_s"], ["Compile", 1, "compile_s"], ["PSNR", 1, "psnr_db"], ["SSIM", 1, "ssim"], ["Measured"], ["Notes"]];
+  const cellFmt = { dit_step_ms: v => v.toFixed(1) + " ms", warm_e2e_s: fmtS, cold_e2e_s: fmtS, compile_s: v => fmt(v, "s"), psnr_db: v => v.toFixed(2) + " dB", ssim: v => v.toFixed(3) };
+  let h = `<table><thead><tr>${cols.map(c => `<th class="${c[1] ? "num" : ""}${c[2] === met.k ? " cur" : ""}">${esc(c[0])}</th>`).join("")}</tr></thead><tbody>`;
+  for (const m of models) {
+    h += `<tr class="grp"><td colspan="${cols.length}">${esc(m.name)} <span class="dim" style="font-weight:400">· ${esc(m.shape)}</span></td></tr>`;
+    const best = bestOf(plats.map(p => val(m.slug, p.key, met.k)), met.hi);
+    for (const p of plats) {
+      const r = RES[m.slug]?.[p.key], sw = `<span class="sw" style="background:${p.color}"></span>`;
+      if (!r) { h += `<tr><td>${sw}${esc(p.label)}</td><td colspan="${cols.length - 1}" class="dim">No run yet</td></tr>`; continue; }
+      const cell = k => { const v = r.metrics[k], cls = `num${k === met.k ? " cur" : ""}`;
+        const txt = v == null ? (k === "dit_step_ms" && r.status !== "ok" ? r.status.toUpperCase() : "—") : (k === met.k && v === best ? `<span class="best">${cellFmt[k](v)}</span>` : cellFmt[k](v));
+        return `<td class="${cls}">${txt}</td>`; };
+      const rt = relTxt(r.metrics[met.k], best, met.unit, met.hi);
+      const rel = rt === null ? `<span class="best">${met.hi ? "best" : "fastest"}</span>` : rt;
+      const notes = r.notes.length ? `<ul>${r.notes.map(n => `<li>${esc(n)}</li>`).join("")}</ul>` : "";
+      const commit = r.commit ? ` <span class="dim">${esc(r.commit)}</span>` : "";
+      h += `<tr><td>${sw}${esc(p.label)}</td><td>${esc(p.backend_label)}</td><td><code>${esc(r.torch || "—")}</code></td><td>${esc(r.parallel)}</td><td class="num">${r.steps}</td>
+        ${cell("dit_step_ms")}<td class="num">${rel}</td>${cell("warm_e2e_s")}${cell("cold_e2e_s")}${cell("compile_s")}${cell("psnr_db")}${cell("ssim")}
+        <td><a href="${REPO}${esc(r.source)}" title="${esc(p.device)}">${esc(r.date)}</a>${commit}</td><td class="notes">${notes}</td></tr>`;
+    }
+  }
+  $("table").innerHTML = h + `</tbody></table>`;
+}
+
+function update() { save(); renderControls(); renderChart(); renderTable(); }
+
+async function init() {
+  try {
+    const res = await fetch("perf.json", { cache: "no-cache" });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    DATA = await res.json();
+  } catch (e) {
+    $("loading").textContent = `Could not load perf.json (${e.message}). Build it with: python -m benchmark.perf build --out docs/perf/perf.json`;
+    return;
+  }
+  $("loading").remove();
+  CONFIGS = DATA.configs.map((c, i) => ({ ...c, color: i < 8 ? `var(--s${i + 1})` : "var(--s-other)" }));
+  MODELS = DATA.models;
+  RES = {};
+  for (const r of DATA.results) (RES[r.model] ||= {})[r.config] = r;
+  if (DATA.generated) $("updated").textContent = `Newest result ${DATA.generated}`;
+  if (!readHash()) {
+    let restored = false;
+    try { const s = localStorage.getItem("difflet-perf"); if (s) { history.replaceState(null, "", "#" + s); restored = readHash(); } } catch (e) { /* ignore */ }
+    if (!restored) { state.models = new Set(MODELS.slice(0, 4).map(m => m.slug)); state.plats = new Set(CONFIGS.map(c => c.key)); }
+  }
+  update();
+  let rz, lastW = 0;
+  new ResizeObserver(() => { const w = $("chart-box").clientWidth; if (w === lastW) return; lastW = w; clearTimeout(rz); rz = setTimeout(renderChart, 60); }).observe($("chart-box"));
+  addEventListener("hashchange", () => { if (readHash()) { renderControls(); renderChart(); renderTable(); } });
+}
+init();
+</script>
+</body>
+</html>

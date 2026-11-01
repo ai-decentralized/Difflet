@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "model": "wan_2_1",
+  "model_id": "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+  "platform": "trn2",
+  "device": "trn2.3xlarge / 4 NeuronCores (LNC=2) / 24 GiB HBM per core",
+  "backend": "aot",
+  "parallel": "TP4",
+  "shape": {
+    "height": 480,
+    "width": 832,
+    "num_frames": 9
+  },
+  "steps": 50,
+  "seed": 42,
+  "guidance_scale": 5.0,
+  "dtype": "bf16",
+  "toolchain": {
+    "python": "3.12.3",
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "aws-neuronx-runtime-lib": "2.35.30.0"
+  },
+  "metrics": {
+    "dit_step_ms": 956.4,
+    "warm_e2e_s": 123.16,
+    "cold_e2e_s": 449.4,
+    "compile_s": 5935.7,
+    "psnr_db": 21.4,
+    "ssim": 0.853
+  },
+  "status": "ok",
+  "notes": [
+    "e2e and PSNR use --host-vae (fp32 host decode): the compiled bf16 device VAE corrupts frames on this commit",
+    "Compile includes 5486.1 s for the device-VAE stage; the transformer stage alone takes 430.5 s",
+    "PSNR/SSIM against a CPU fp32 reference shared with native (same noise)"
+  ],
+  "date": "2026-10-26",
+  "commit": "540e5f0",
+  "source": "benchmark/trn2/four_model_native_vs_aot_2026-10-26.md"
+}

@@ -1,0 +1,66 @@
+name: perf-pages
+
+# Builds the perf page from benchmark/results/*.json and deploys it to GitHub Pages:
+# https://ai-decentralized.github.io/Difflet/perf/
+# One-time setup: Settings -> Pages -> Source: "GitHub Actions".
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "benchmark/results/**"
+      - "benchmark/perf.py"
+      - "docs/perf/**"
+      - ".github/workflows/perf-pages.yml"
+  pull_request:
+    paths:
+      - "benchmark/results/**"
+      - "benchmark/perf.py"
+      - "docs/perf/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: perf-pages-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # benchmark/perf.py is standard library only: no install step.
+      - name: Validate records and build perf.json
+        run: |
+          python -m benchmark.perf check
+          mkdir -p _site/perf
+          python -m benchmark.perf build --out _site/perf/perf.json
+          cp docs/perf/index.html _site/perf/index.html
+          printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=perf/"><a href="perf/">Difflet performance</a>\n' > _site/index.html
+
+      - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request'
+        with:
+          path: _site
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}perf/
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "model": "qwen_image",
+  "model_id": "Qwen/Qwen-Image",
+  "platform": "trn2",
+  "device": "trn2.3xlarge / 4 NeuronCores (LNC=2) / 24 GiB HBM per core",
+  "backend": "aot",
+  "parallel": "TP4",
+  "shape": {
+    "height": 1024,
+    "width": 1024,
+    "num_frames": null
+  },
+  "steps": 50,
+  "seed": 42,
+  "guidance_scale": 4.0,
+  "dtype": "bf16",
+  "toolchain": {
+    "python": "3.12.3",
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "aws-neuronx-runtime-lib": "2.35.30.0"
+  },
+  "metrics": {
+    "dit_step_ms": 360.6,
+    "warm_e2e_s": 73.7,
+    "cold_e2e_s": 515.6,
+    "compile_s": 1209.9,
+    "psnr_db": 21.48,
+    "ssim": 0.912
+  },
+  "status": "ok",
+  "notes": [
+    "PSNR/SSIM against a 50-step CPU fp32 reference started from this backend's own noise"
+  ],
+  "date": "2026-10-26",
+  "commit": "540e5f0",
+  "source": "benchmark/trn2/four_model_native_vs_aot_2026-10-26.md"
+}

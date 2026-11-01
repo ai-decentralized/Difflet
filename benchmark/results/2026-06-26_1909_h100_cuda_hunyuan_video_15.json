@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "model": "hunyuan_video_15",
+  "model_id": "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+  "platform": "h100",
+  "device": "NVIDIA H100 PCIe",
+  "backend": "cuda",
+  "parallel": "1 GPU",
+  "shape": {
+    "height": 480,
+    "width": 848,
+    "num_frames": 121
+  },
+  "steps": 20,
+  "seed": 42,
+  "guidance_scale": 6.0,
+  "dtype": "bf16",
+  "toolchain": {
+    "torch": "2.9.1",
+    "diffusers": "0.38.0",
+    "transformers": "4.57.6",
+    "accelerate": "1.14.0",
+    "cuda": "12.8"
+  },
+  "metrics": {
+    "dit_step_ms": null,
+    "warm_e2e_s": null,
+    "cold_e2e_s": null,
+    "compile_s": null,
+    "psnr_db": null,
+    "ssim": null
+  },
+  "status": "oom",
+  "notes": [
+    "FAILED: CUDA out of memory"
+  ],
+  "date": "2026-06-26 19:09 UTC",
+  "commit": null,
+  "source": "benchmark/h100/hunyuan_video_15.md"
+}

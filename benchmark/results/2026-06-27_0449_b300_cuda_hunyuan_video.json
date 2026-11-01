@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "model": "hunyuan_video",
+  "model_id": "hunyuanvideo-community/HunyuanVideo",
+  "platform": "b300",
+  "device": "NVIDIA B300 SXM6 AC",
+  "backend": "cuda",
+  "parallel": "1 GPU",
+  "shape": {
+    "height": 320,
+    "width": 512,
+    "num_frames": 61
+  },
+  "steps": 20,
+  "seed": 42,
+  "guidance_scale": 6.0,
+  "dtype": "bf16",
+  "toolchain": {
+    "torch": "2.9.1+cu128",
+    "diffusers": "0.38.0",
+    "transformers": "4.57.6",
+    "accelerate": "1.14.0",
+    "cuda": "12.8"
+  },
+  "metrics": {
+    "dit_step_ms": 874.51,
+    "warm_e2e_s": 27.78,
+    "cold_e2e_s": 30.43,
+    "compile_s": null,
+    "psnr_db": null,
+    "ssim": null
+  },
+  "status": "ok",
+  "notes": [],
+  "date": "2026-06-27 04:49 UTC",
+  "commit": null,
+  "source": "benchmark/b300/hunyuan_video.md"
+}

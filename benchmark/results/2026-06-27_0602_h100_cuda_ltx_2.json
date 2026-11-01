@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "model": "ltx_2",
+  "model_id": "Lightricks/LTX-2",
+  "platform": "h100",
+  "device": "NVIDIA H100 PCIe",
+  "backend": "cuda",
+  "parallel": "1 GPU",
+  "shape": {
+    "height": 480,
+    "width": 704,
+    "num_frames": 49
+  },
+  "steps": 20,
+  "seed": 42,
+  "guidance_scale": 1.0,
+  "dtype": "bf16",
+  "toolchain": {
+    "torch": "2.9.1+cu128",
+    "diffusers": "0.38.0",
+    "transformers": "4.57.6",
+    "accelerate": "1.14.0",
+    "cuda": "12.8"
+  },
+  "metrics": {
+    "dit_step_ms": 313.07,
+    "warm_e2e_s": 24.91,
+    "cold_e2e_s": 28.06,
+    "compile_s": null,
+    "psnr_db": null,
+    "ssim": null
+  },
+  "status": "ok",
+  "notes": [],
+  "date": "2026-06-27 06:02 UTC",
+  "commit": null,
+  "source": "benchmark/h100/ltx_2.md"
+}

@@ -19,6 +19,9 @@ docs/plans/*
 !docs/verification/
 docs/verification/*
 !docs/verification/*.md
+# The perf page; its perf.json is built from benchmark/results/ by CI.
+!docs/perf/
+docs/perf/perf.json
 docs_human/
 .history/
 # Compile cache (Trainium AOT artifacts can be huge)

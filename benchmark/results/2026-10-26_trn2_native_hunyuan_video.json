@@ -1,0 +1,42 @@
+{
+  "schema": 1,
+  "model": "hunyuan_video",
+  "model_id": "hunyuanvideo-community/HunyuanVideo",
+  "platform": "trn2",
+  "device": "trn2.3xlarge / 4 NeuronCores (LNC=2) / 24 GiB HBM per core",
+  "backend": "native",
+  "parallel": "TP4",
+  "shape": {
+    "height": 320,
+    "width": 512,
+    "num_frames": 61
+  },
+  "steps": 50,
+  "seed": 42,
+  "guidance_scale": 6.0,
+  "dtype": "bf16",
+  "toolchain": {
+    "python": "3.12.3",
+    "torch": "2.14.0",
+    "torch-neuronx": "2.14.3.0.1+b1b6c66",
+    "neuronx-cc": "2.28.7631.0+8f7b0cf5",
+    "aws-neuronx-runtime-lib": "2.35.30.0"
+  },
+  "metrics": {
+    "dit_step_ms": 808.2,
+    "warm_e2e_s": 126.7,
+    "cold_e2e_s": 457.8,
+    "compile_s": 274.5,
+    "psnr_db": 20.78,
+    "ssim": 0.869
+  },
+  "status": "ok",
+  "notes": [
+    "Numbers reused from an earlier run on this host at eadddec; confirmed at the 2026-10-26 HEAD by bit-identical outputs",
+    "Prompt encoded on rank 0's host",
+    "PSNR/SSIM against a 50-step CPU fp32 reference started from this backend's own noise"
+  ],
+  "date": "2026-10-26",
+  "commit": "eadddec",
+  "source": "benchmark/trn2/four_model_native_vs_aot_2026-10-26.md"
+}

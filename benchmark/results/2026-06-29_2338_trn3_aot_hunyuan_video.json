@@ -1,0 +1,38 @@
+{
+  "schema": 1,
+  "model": "hunyuan_video",
+  "model_id": "hunyuanvideo-community/HunyuanVideo",
+  "platform": "trn3",
+  "device": "trn3pd98.3xlarge / 4 NeuronCores / 144 GB/device",
+  "backend": "aot",
+  "parallel": "TP4",
+  "shape": {
+    "height": 320,
+    "width": 512,
+    "num_frames": 61
+  },
+  "steps": 20,
+  "seed": 42,
+  "guidance_scale": 6.0,
+  "dtype": "bf16",
+  "toolchain": {
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.14.27725+e2ff0410",
+    "neuronx-cc": "2.25.3371.0+f524f7f8",
+    "neuronx-distributed": "0.19.28093+fc70b593",
+    "diffusers": "0.38.0"
+  },
+  "metrics": {
+    "dit_step_ms": 649.99,
+    "warm_e2e_s": 129.65,
+    "cold_e2e_s": 520.6,
+    "compile_s": 2410.1,
+    "psnr_db": null,
+    "ssim": null
+  },
+  "status": "ok",
+  "notes": [],
+  "date": "2026-06-29 23:38 UTC",
+  "commit": null,
+  "source": "benchmark/trn3/hunyuan_video.md"
+}

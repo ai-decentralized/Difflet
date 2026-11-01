@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "model": "ltx_2",
+  "model_id": "Lightricks/LTX-2",
+  "platform": "trn2",
+  "device": "trn2.3xlarge / 4 NeuronCores (LNC=2) / 24 GiB HBM per core",
+  "backend": "native",
+  "parallel": "TP4",
+  "shape": {
+    "height": 480,
+    "width": 704,
+    "num_frames": 49
+  },
+  "steps": 50,
+  "seed": 42,
+  "guidance_scale": 1.0,
+  "dtype": "bf16",
+  "toolchain": {
+    "python": "3.12.3",
+    "torch": "2.14.0",
+    "torch-neuronx": "2.14.3.0.1+b1b6c66",
+    "neuronx-cc": "2.28.7631.0+8f7b0cf5",
+    "aws-neuronx-runtime-lib": "2.35.30.0"
+  },
+  "metrics": {
+    "dit_step_ms": 350.5,
+    "warm_e2e_s": 92.46,
+    "cold_e2e_s": 594.76,
+    "compile_s": 327.59,
+    "psnr_db": 18.06,
+    "ssim": 0.811
+  },
+  "status": "ok",
+  "notes": [
+    "Gemma-3 runs on the device (higher HBM); cold e2e uses its weight store",
+    "PSNR/SSIM against a 50-step CPU fp32 reference started from this backend's own noise"
+  ],
+  "date": "2026-10-26",
+  "commit": "009d3dd",
+  "source": "benchmark/trn2/four_model_native_vs_aot_2026-10-26.md"
+}
