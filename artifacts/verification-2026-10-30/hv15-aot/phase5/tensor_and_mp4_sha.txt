@@ -1,0 +1,11 @@
+defdb4145415c5b1  (1, 32, 16, 20, 32) torch.bfloat16  batch.work/worker_0/latents_req0000.pt
+defdb4145415c5b1  (1, 32, 16, 20, 32) torch.bfloat16  single0.work/latents.pt
+15073ca130878e63  (1, 32, 16, 20, 32) torch.bfloat16  prefix_single0.work/latents.pt
+5a31b8332422344c  (1, 32, 16, 20, 32) torch.bfloat16  batch.work/worker_0/latents_req0001.pt
+5a31b8332422344c  (1, 32, 16, 20, 32) torch.bfloat16  single1.work/latents.pt
+243455a911ec016ffb99ba6c5fac538304d4578cc0f740212cf4d345f5ba1916  batch_req0.mp4
+243455a911ec016ffb99ba6c5fac538304d4578cc0f740212cf4d345f5ba1916  single0.mp4
+2fce5c3a046b889a42ba1c7fb4de5bd59df6ce43d872c0ef59bfb91630b38a68  prefix_single0.mp4
+329a6343b6fed0790f10f166bde0e113356e143735167de657aff764bc927e6b  batch_req1.mp4
+329a6343b6fed0790f10f166bde0e113356e143735167de657aff764bc927e6b  single1.mp4
+prefix_single0.work/latents.pt is bit-identical to p2r-tp2cfg/gen50.work/latents.pt (Phase 2 re-run, no negative prompt)

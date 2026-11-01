@@ -1,0 +1,2 @@
+{"prompt": "a cinematic shot of a red fox running through a snowy forest", "negative_prompt": "blurry, low quality, distorted, watermark", "output": "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p5-batch/batch_req0.mp4"}
+{"prompt": "a red panda eating bamboo in a misty bamboo forest, soft morning light", "seed": 1234, "output": "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p5-batch/batch_req1.mp4"}

@@ -1110,3 +1110,81 @@ Evidence: `E/phase4/calibration/` (calibration JSON, pairs JSON, `pairs_stats.tx
 `E/phase4/tp4-probe-compile/`, `E/phase4/adaptive/` (`adapt.mp4`, `adapt_mid.png`, `base` and
 `reset` logs, comparisons), `E/phase4/probe-reset-device/`. Helper scripts in `E/phase4/`:
 `pairs_stats.py`, `reset_check.py`, `probe_reset_device.py`.
+
+### Phase 5: JSONL batch (`--requests`, 2 requests), TP2xCFG2, 50 steps: **PASS after one fix**
+
+Run on the `69162f72…` overlap artifact (HEAD `d001314` for the batch and request 1, `47b2f74`
+for request 0's single run; the fix touches only the CLI's argument plumbing, not the DiT).
+`requests.jsonl` (`E/phase5/requests.jsonl`):
+- request 0: the campaign prompt, `negative_prompt "blurry, low quality, distorted, watermark"`,
+  no seed (so `--seed`'s default 42);
+- request 1: `"a red panda eating bamboo in a misty bamboo forest, soft morning light"`, `seed 1234`.
+
+Each single run repeats its request's prompt, negative prompt, seed, steps and layout
+(`E/phase5/p5.sh`). Equality is checked on the tensors' bytes (`tsha.py`): `torch.save` writes the
+file name into the archive, so the batch's `latents_req0000.pt` and a single run's `latents.pt`
+never share a file sha256 even when the tensors are identical.
+
+| run | wall s | encode s | DiT load s | denoise s (step median ms) | host decode s | HBM GiB/core | latents (tensor sha) | vs batch |
+|---|---|---|---|---|---|---|---|---|
+| batch, request 0 | 1275.8 (both) | 9.7 | **27.0, once for both** | 80.2 (1579) | 455.5 | 9.69 | `defdb414…` | — |
+| batch, request 1 | (same) | 9.5 | (same load) | 78.9 (1578) | 586.7 | 9.69 | `5a31b833…` | — |
+| single 0, before the fix | 568.8 | 11.9 | 29.1 | 81.1 (1586) | 416.5 | 9.69 | `15073ca1…` | **cos 0.615843**, rel-L1 0.852, max-abs 7.08 |
+| single 0, after `47b2f74` | 549.0 | 8.0 | 27.0 | 79.4 (1559) | 407.0 | 9.69 | `defdb414…` | **bit-identical**; MP4 byte-identical |
+| single 1 | 948.0 (cold encode 103 s, DiT load 275 s) | 103.2 | 275.1 | 84.5 (1562) | 413.5 | 9.69 | `5a31b833…` | **bit-identical**; MP4 byte-identical |
+
+- **DiT loaded once: PASS.** The batch log has one `aot transformer load 27.0 s` line (one NxD load
+  on 4 cores, `[dp-router] worker 0: cores 0-3`), then `request 0: denoise` and `request 1: denoise`,
+  and ends `[dp-router] done=2 failed=0 unfinished=0`. The encoder (load 0.9 s) and the host VAE are
+  also loaded once.
+- **Per-request seed and negative prompt: PASS.** The claimed request files carry `seed 42` +
+  the negative prompt (request 0) and `seed 1234` + none (request 1). Request 0's
+  `negative_prompt_embeds` differ from the empty negative's; request 1's equal it.
+- **Bit-identity: PASS for both requests** (after the fix). The MP4s are byte-identical too
+  (`243455a9…` request 0, `329a6343…` request 1), so the host decode is deterministic as well.
+- **The failure before the fix was a Difflet bug, not batch-vs-single noise.**
+  - The pre-fix single 0 had the same prompt embeds as batch request 0 but different
+    `negative_prompt_embeds` (cos 0.920) and mask (cos 0.655).
+  - Its embeds file was byte-identical to the no-negative embeds of Phases 1-4 (`3051691e…`), and
+    its latents were bit-identical to the Phase 2 re-run's no-negative latents (`p2r-tp2cfg`).
+  - So the single run never saw `--negative-prompt`. Request 1, which has no negative prompt,
+    matched bit for bit from the start, which also rules out a noise-path difference between
+    batch and single mode.
+  - Root cause, fix and test are in the Phase 4-5 bug ledger below.
+- Mid frames (`E/phase5/*_mid.png`): request 0 shows a red fox walking through snow among
+  snow-covered firs; request 1 a red panda holding a bamboo leaf in a bamboo grove. The
+  pre-fix single 0 (`prefix_single0_mid.png`) is the no-negative video of Phase 2.
+- `--requests` with TeaCache flags is still refused by the CLI (Phase 4c); this batch runs
+  without TeaCache.
+
+Evidence: `E/phase5/` (logs, meta, `batch_req{0,1}.mp4`, mid frames, comparisons,
+`tensor_and_mp4_sha.txt`, `sha256.txt`; `prefix_single0.*` is the pre-fix run).
+
+Reproduce (`R` = `run_difflet.sh trainium`):
+```
+R generate --model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v --height 320 --width 512 --num-frames 61 \
+  --steps 50 --tp-degree 2 --cfg-parallel --requests requests.jsonl --keep-work-dir --work-dir batch.work
+R generate ... --prompt "a cinematic shot of a red fox running through a snowy forest" \
+  --negative-prompt "blurry, low quality, distorted, watermark" --seed 42 --keep-work-dir --work-dir single0.work --output single0.mp4
+R generate ... --prompt "a red panda eating bamboo in a misty bamboo forest, soft morning light" --seed 1234 \
+  --keep-work-dir --work-dir single1.work --output single1.mp4
+```
+
+### Bug ledger (Phase 4-5)
+
+| commit | bug | how it showed | fix | test | device check |
+|---|---|---|---|---|---|
+| `67d3d92` | `teacache_probe15.reset_state` used the non-jit NxDModel API (`.states`, `write_to_neuron_buffer`); the application loads its model with `torch.jit.load` (`.state`, no `write_to_neuron_buffer`) | every adaptive hv15 AOT request died before step 0: `AttributeError: 'RecursiveScriptModule' object has no attribute 'states'` (calibration collector and `--teacache-speedup` alike) | zero each rank's `prev_mod` in place through `.state` | `tests/unit/models/hunyuan_video/test_aot15.py` mocks the jit-loaded shape | after reset every rank's `prev_mod` reads back all-zero, and `delta(x1)` equals the fresh-load value; two identical adaptive requests on one load are bit-identical (Phase 4c) |
+| `47b2f74` | outside `--requests`, `--negative-prompt` reached no hv15 stage: the shared `_stage_cli_args` does not forward it, and `stage_loop`'s single (legacy) request carried no `negative_prompt`, so the encode stage encoded `""` | Phase 5: single run 0 vs batch request 0, cos 0.616; the single run's embeds were the no-negative embeds | `_run_aot` appends `--negative-prompt` to the stage args; the legacy request carries `args.negative_prompt` (a `--requests` line's still wins) | `test_legacy_request_carries_the_negative_prompt` (`tests/unit/cli/dp/test_stage_loop.py`), `test_aot_generate_forwards_the_negative_prompt` (driver → stage parser → encode stage); both fail on the parent commit | single 0 re-run: bit-identical to batch request 0, MP4 byte-identical |
+
+Not fixed, and recorded:
+- **Native has the same gap.** `_stage_cli_args` is shared with the native path, and the plan
+  forbids changing its body (global constraint). So `--backend neuron` hv15 still ignores
+  `--negative-prompt` outside `--requests`. The fix there is one tuple entry in
+  `_stage_cli_args`; it needs a waiver of the constraint.
+- **The CLI-wide default in batch mode.** The module docstring says a batch request without a
+  negative prompt takes the command line's. The encode stage reads only `req.negative_prompt`,
+  so a `--negative-prompt` given next to `--requests` is still ignored for such requests, on
+  both backends. `stage_loop.effective(req, args, "negative_prompt", None)` in `_stage_encode`
+  would fix it, but that is also a native-shared function body.
+- `--negative-prompt`'s help text still calls it a Qwen-Image option.
