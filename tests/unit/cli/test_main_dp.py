@@ -167,3 +167,42 @@ def test_cuda_capacity_accepts_dp2_on_two_gpus(monkeypatch):
     )
     args.command = "generate"
     cli_main._validate_dp(args)  # 2 x 1 = 2 GPUs: fits
+
+
+# ------------------------------------------- DP workers: which layout they inherit
+
+_HV15 = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
+
+
+def _route_dp2(monkeypatch, tmp_path, model):
+    from difflet.cli.dp.router import worker_cli_args
+
+    seen = {}
+
+    def fake_router(args, requests, *, replica_cores, worker_argv_prefix=None):
+        seen["argv"] = worker_cli_args(args)
+        seen["replica_cores"] = replica_cores
+        return 0
+
+    monkeypatch.setattr("difflet.cli.dp.router.run_router", fake_router)
+    req = tmp_path / "r.jsonl"
+    req.write_text(json.dumps({"prompt": "x", "output": str(tmp_path / "x.png")}) + "\n")
+    with pytest.raises(SystemExit) as exc:
+        cli_main.main(["generate", "--model-id", model, "--dp", "2", "--requests", str(req),
+                       "--total-cores", "16"])
+    assert exc.value.code == 0
+    return seen
+
+
+def test_dp_workers_of_a_cfg_parallel_model_get_its_registry_layout(monkeypatch, tmp_path):
+    seen = _route_dp2(monkeypatch, tmp_path, _HV15)
+    argv = seen["argv"]
+    assert argv[argv.index("--tp-degree") + 1] == "2" and "--cfg-parallel" in argv
+    assert seen["replica_cores"] == 4
+
+
+def test_dp_workers_of_other_models_keep_their_own_defaults(monkeypatch, tmp_path):
+    # As before the hv15 branch: Flux workers get no forced tp (their native TP4 default
+    # stays theirs) even though the replica is sized from the registry tp.
+    seen = _route_dp2(monkeypatch, tmp_path, "black-forest-labs/FLUX.1-dev")
+    assert "--tp-degree" not in seen["argv"] and "--cfg-parallel" not in seen["argv"]
