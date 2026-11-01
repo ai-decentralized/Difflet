@@ -1,8 +1,134 @@
 # HunyuanVideo 1.5 on the AOT (trainium) backend: on-device evidence
 
 Plan: `docs/superpowers/plans/2026-10-30-hv15-aot-parity.md`. Host: `trn2.3xlarge`, one Neuron
-device, 4 logical NeuronCores (logical config 2), 96 GB HBM. Logs and NEFFs live outside the repo
-under `S = /home/ubuntu/.claude/jobs/294a04fc/tmp/spike/`.
+device, 4 logical NeuronCores (logical config 2), 96 GB HBM. The spike's logs and NEFFs live
+outside the repo, in the spike script's work directory (`S` below). Campaign evidence is curated
+under `E = artifacts/verification-2026-10-30/hv15-aot/`.
+
+## Summary (Phase 6, 2026-11-01)
+
+HunyuanVideo 1.5 (`hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v`, rev `286be7ce`)
+generates video end to end on the Trainium AOT backend with true CFG, TP, CFG-parallel, SP,
+CP (ulysses, gather_kv), DP, JSONL batching and TeaCache, at the 320x512x61 verification shape
+and at the default 480x848x121 shape. The VAE decodes on the host (LIMIT); the compiled device
+VAE is BLOCKED on the toolchain. Ring CP is N/A (mask), as for HunyuanVideo 1.0. The sections
+below this summary hold the per-cell evidence, commands and logs.
+
+### Toolchain
+
+| stack | versions |
+|---|---|
+| AOT (`DIFFLET_BACKEND=trainium`, venv `difflet-neuron`) | neuronx-cc 2.26.6360.0 · torch-neuronx 2.9.0.2.15.32035 · neuronx-distributed 0.19.28492 · NxDI 0.10.18399 · nki 0.5.0 · torch 2.9.1 · torch-xla 2.9.0 · diffusers 0.38.0 |
+| native reference (`--backend neuron`, venv `native-312`) | neuronx-cc 2.28.7631 · torch-neuronx 2.14.3.0.1 · torch 2.14.0 · nki 0.7.0 · diffusers 0.38.0 |
+| runtime (both) | NRT 2.35.30.0 · driver 2.31.7.0 · trn2.3xlarge, 4 logical cores (LNC 2), 96 GiB HBM, 124 GiB host RAM |
+
+The two stacks draw different bf16 seed-42 noise (torch 2.9.1 vs 2.14), so AOT-vs-native parity
+is gated by feeding the AOT DiT the native run's `embeds.pt` and noise (Phase 0, Phase 1 re-gate).
+
+### Support matrix
+
+PASS = verified on device · LIMIT = works with a stated cost or restriction · BLOCKED = does not
+work for a reason outside Difflet (toolchain) · N/A = not applicable by design · NOT MEASURED =
+not run in this campaign. Shape 320x512x61, 50 steps, seed 42 unless the row says otherwise.
+
+| feature | native | AOT | evidence (this doc) |
+|---|---|---|---|
+| TP2 (CFG's two passes in sequence) | NOT MEASURED | **PASS** | Phase 1 re-gate tp2: 1 step cos 0.999160 vs native; 3 steps 0.91x native's distance to diffusers |
+| TP2 x CFG2 (default layout) | **PASS** (1325 ms/step) | **PASS** (1573-1607 ms/step) | Phase 0 native; Phase 1 re-gate tp2cfg 0.999124; Phase 2 and re-run (50 steps) |
+| TP4 | NOT MEASURED | **PASS** | Phase 1 re-gate tp4 0.999131; Phase 2 tp4 1731 ms/step |
+| TP4 + SP | NOT MEASURED | **PASS** at 320x512x61; refused before compile at 480x848x121 (N % 4 = 2, 6.4 s) | Phase 1 re-gate tp4sp 0.999142; Phase 2 tp4sp 1601 ms/step; Phase 3 |
+| TP2 x CP2 ulysses | NOT MEASURED | **PASS** | Phase 1 re-gate 0.999132, 3 steps 0.53x; Phase 2 1783 ms/step |
+| TP2 x CP2 gather_kv | NOT MEASURED | **PASS**, watch item (3-step gate 2 at 1.25x, R24) | Phase 1 re-gate 0.999149, 3 steps 1.25x; Phase 2 1858 ms/step |
+| CP ring | NOT MEASURED (registry keeps ring for native) | **N/A (mask)**: refused before compile | Phase 1 "ring": joint ring kernel has no text-mask path; refused in 6.7 s; refused before encode since `b7b939b` |
+| DP (`--dp 2 --tp-degree 2`) | NOT MEASURED | **PASS** | Phase 2 dp2tp2 (2690 ms/step per replica); DP bit-identity 4/4 |
+| JSONL batch (`--requests`) | NOT MEASURED | **PASS** (after `47b2f74`) | Phase 5: DiT loaded once (27.0 s); both requests bit-identical to their single runs; MP4s byte-identical |
+| TeaCache fixed cadence | **PASS** (cadence 2: 20 skipped, cos 0.932074) | **PASS** (cadence 2: 20 skipped, -41% denoise, cos 0.938644) | Phase 4a; Phase 4 reference (R26); ruling R30 |
+| TeaCache online-delta | NOT MEASURED | **PASS** (alpha 0.6: 17 skipped, -35%, cos 0.918296) | Phase 4b |
+| TeaCache adaptive | NOT MEASURED | **LIMIT**: weak signal, not recommended (R31) | Phase 4c: cubic R² 0.406, Pearson −0.116; 18 skipped, cos 0.910548, visibly degraded; probe doubles HBM (17.59 vs 9.69 GiB/core) |
+| host VAE (AOT default) | NOT MEASURED | **LIMIT**: correct, slow (409-431 s at 61 frames, 2699 s at 121 frames) | Phase 2 host decode; Phase 3 retry attempt 2 |
+| device VAE | **PASS** (31.4 s at 61 frames, 89.0 s at 121 frames) | **BLOCKED**: `vae15` does not compile on neuronx-cc 2.26 (NCC_EVRF007 / NCC_IBIR229 / NCC_EXTP003) | Phase 1 "aot-vae"; user decision: host decode this round |
+| default shape 480x848x121, TP2 x CFG2 | **PASS** (11178 ms/step, same host) | **PASS** (13072 ms/step; compile 3970 s); VAE LIMIT as above | Phase 3 native reference; Phase 3 retry attempt 2 (after `1a9625b`; compiler flags that `dca10f3`/`420d2fa` made the default for this shape) |
+
+### Performance, AOT vs native (TP2 x CFG2, 50 steps)
+
+| metric | shape | native | AOT | AOT / native |
+|---|---|---|---|---|
+| DiT step median | 320x512x61 | 1325 ms | 1573 ms (graph v1), 1577 ms (v2), 1607 ms (HEAD flags, Phase 4c) | 1.19-1.21x |
+| DiT step median | 480x848x121 | 11178 ms | 13072 ms | 1.17x |
+| compile wall | 320x512x61 | 923.8 s (DiT + device VAE) | 462.8 s (DiT 448.1 s, graph v2; no VAE to compile) | 0.50x |
+| compile wall | 480x848x121 | 2807.1 s | 3970.0 s (host RSS peak 116.5 of 124 GiB) | 1.41x |
+| VAE decode | 320x512x61 | 31.4 s (device) | 409-431 s (host, fp32, tiled) | ~13x |
+| VAE decode | 480x848x121 | 89.0 s (device) | 2699.2 s (host; 28-35 GiB RSS) | 30x |
+| encode + denoise | 480x848x121 | 763 s | 765 s | 1.00x |
+| generate e2e | 480x848x121 | 960.7 s | 4132.8 s (host VAE 2699 s, cold DiT load 574 s) | 4.3x |
+
+Other AOT layouts at 320x512x61 (ms/step): TP4+SP 1601 · TP4 1731 · ulysses 1783 · gather_kv
+1858 · DP replica (TP2, serial CFG) 2690. Peak HBM per core: TP2xCFG2 9.69 GiB (23.58 GiB at
+480x848x121), TP4 5.76, TP4+SP 5.25, CP2 8.69-8.89.
+
+### Gates and why
+
+- **Phase 1 correctness (R16).** Gate 1: at 1 step, cosine ≥ 0.999 against native TP2xCFG2 on
+  the same inputs. All six layouts pass (0.999124-0.999160), and each is closer to diffusers'
+  CPU reference per forward (0.999566-0.999609) than native is (0.999136). Gate 2: at 3 steps,
+  distance to diffusers' CPU bf16 reference ≤ 1.15x native's own distance (native cos
+  0.983536). The plan's 0.999 at 3 steps is unattainable for any backend: native itself sits at
+  0.9835 against diffusers.
+  **Exceedance, verbatim:** gather_kv is at **1.25x** (cos 0.979483 vs diffusers),
+  deterministic. Ruled PASS with a watch item (R24): it has the best 1-step parity (0.999149),
+  and the 3-step spread between AOT layouts on identical inputs is itself 0.9765-0.9870.
+- **Phase 2 (R16).** A functional and performance matrix: each 50-step cell exits 0, has no
+  NaN/Inf in its latents and decodes to a mid frame that shows the prompt. 50-step cosines
+  across layouts (0.955-0.969) are informational.
+- **TeaCache (R26, R30).** The plan's latents cosine ≥ 0.99 is unattainable on either stack.
+  The cells are judged against native's own cadence 2 on the same settings.
+  **Exceedance, verbatim:** TeaCache cos is **~0.91-0.94 on both stacks**: native cadence 2
+  0.932074; AOT cadence 2 0.938644, online-delta 0.918296, adaptive 0.910548.
+- **DP and JSONL.** Bit-identity of every request against a single-replica / single run.
+
+### Bugs found and fixed
+
+| commit | found | bug and fix |
+|---|---|---|
+| `1bfe577`, `86d4715` | device, Phase 1 | runner: partial multi-core AoT stages exported `NEURON_RT_NUM_CORES=<n>`, which NRT 2.35 refuses unless it is 1 or the whole device; such stages now name their cores with `NEURON_RT_VISIBLE_CORES`, and multiples of 8 keep `NUM_CORES` (R19) |
+| `fd2a8aa` | device, Phase 1 | the t2v image-stream switch was a Python bool of a tensor, which segfaulted the CFG-parallel trace; it is now in-graph |
+| `1a9625b` | device, Phase 3 | NCC_IRPX901 at 480x848x121 on the in-graph fp32 valid-text count; `text_valid` is now computed on the host and passed as DiT input #10 |
+| `dca10f3`, `420d2fa`, `d001314` | device, Phase 3 retry and Phase 4 | NCC_IRPX901 at 480x848x121 with `--enable-ccop-compute-overlap`; the option is now kept only up to 16384 image tokens (dropping it costs 13.4% per step at 320x512x61), from one token-count helper shared with the cache key, which now carries the compiler args |
+| `67d3d92` | device, Phase 4c | the TeaCache probe's `reset_state` used the non-jit NxDModel API; every adaptive request died with `AttributeError`; `prev_mod` is now zeroed through `.state` |
+| `47b2f74` | device, Phase 5 | outside `--requests`, `--negative-prompt` reached no AOT stage; `_run_aot` forwards it and the legacy request carries it |
+| `29661ce` | CPU parity tests, Task 3 | the host token refiner used the transformer's mlp_ratio; it now uses 4.0, as diffusers' context_embedder does |
+| `376c628` | unit coverage test | the parallel15 RowParallelLinear site now states `reduce_dtype=torch.float32` (NxD's default; no behaviour change) |
+
+Related hardening from device findings: `b7b939b` (host VAE by default; ring and multi-shape
+refused before encode), `a41ecc9` (`graph_version` in the AOT stage cache key, after stale
+artifacts were silently reused), `93dde78` (DiT shape rules checked before encode).
+
+### Known limitations and follow-ups
+
+- **Device VAE: BLOCKED.** `vae15` does not compile on neuronx-cc 2.26 at any tried shape. The
+  host decode is the default (LIMIT: 13x native's device decode at 61 frames, 30x at 121
+  frames). Follow-ups: a segmented decoder (the HunyuanVideo 1.0 pattern) or a toolchain bump.
+- **Ring CP: N/A (mask).** The Trainium joint ring-attention kernel has no text-mask path, and
+  HV1.5's text is always padded; the AOT path refuses `--cp-mode ring` before encode. Native
+  keeps ring. Same as HunyuanVideo 1.0.
+- **Adaptive TeaCache: not recommended.** The calibration signal is weak (cubic R² 0.406,
+  Pearson −0.116) and the output is visibly degraded. The probe loads a second copy of the DiT
+  weights (17.59 vs 9.69 GiB/core at 320x512x61), so at the default shape (23.58 GiB/core
+  without it) it cannot fit in 24 GiB per core. Use `--teacache-cadence 2`. Follow-up: load
+  only the probe's block-0 weights.
+- **DP + adaptive TeaCache:** the lazy probe compile can race between replicas (as for
+  HunyuanVideo 1.0). Not measured. TeaCache flags with `--requests` are refused by the CLI.
+- **`--mode latency`** resolves hv15 to TP1 x CFG2, which was not verified; pass
+  `--tp-degree 2 --cfg-parallel` (the default) or another layout from the matrix.
+- **Negative prompt on native (R32).** Native hv15 still drops `--negative-prompt` outside
+  `--requests`, and in batch mode neither backend applies a CLI `--negative-prompt` to request
+  lines without one. The fix touches native-shared function bodies and is left for a later round.
+- **TP4 + SP at 480x848x121** is refused before compile (N % 4 = 2); use TP2 x CFG2.
+- **Host memory at the default shape:** the compile peaked at 116.5 of 124 GiB host RAM and the
+  DiT load at 102.2 GiB RSS.
+- **Default shape on HEAD:** the 480x848x121 run used the compiler flags (overlap off) through
+  `DIFFLET_HUNYUAN15_COMPILER_ARGS`, before `dca10f3`/`420d2fa` made them the default for that
+  shape; it was not re-run on the final code.
 
 ## Spikes
 
