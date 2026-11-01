@@ -1219,3 +1219,25 @@ Not fixed, and recorded:
   both backends. `stage_loop.effective(req, args, "negative_prompt", None)` in `_stage_encode`
   would fix it, but that is also a native-shared function body.
 - `--negative-prompt`'s help text still calls it a Qwen-Image option.
+
+### Phase 4-5 summary
+
+| item | verdict | key numbers | evidence |
+|---|---|---|---|
+| R23 no-ccop perf check | done; the flag is now shape-aware (`420d2fa`, `d001314`) | no-ccop +13.4% per step at 320x512x61; overlap kept for N ≤ 16384 image tokens | `E/phase4/noccop-ab/` |
+| 4a cadence 2, TP2xCFG2 | **PASS** on skips, time and video; cos gate **not met on either stack** | `skipped_steps 20` (both CFG halves skipped together), -41% warm denoise, cos 0.938644 | `E/phase4/tp2cfg/` |
+| 4b online-delta 0.6 | PASS (engages), same drift class | 17 skipped, -35%, cos 0.918296 | `E/phase4/tp2cfg/` |
+| 4c adaptive (calibration + speedup 1.5) | **LIMIT** (weak signal) after bug fix `67d3d92` | cubic R² 0.406, Pearson −0.116; 18 skipped, -38%, cos 0.910548, visibly degraded; probe doubles HBM (17.59 vs 9.69 GiB/core); per-request reset bit-identical | `E/phase4/{calibration,adaptive,probe-reset-device}/` |
+| R26 native cadence 2 | reference | native cos 0.932074 vs AOT 0.938644 at 20 skips, both -41%; native deterministic (re-run bit-identical) | `E/phase4/native-cad2/` |
+| 5 JSONL batch (2 requests) | **PASS** after bug fix `47b2f74` | DiT loaded once (27.0 s); both requests bit-identical to their single runs; MP4s byte-identical | `E/phase5/` |
+
+Rulings still open from this section:
+1. **The hv15 TeaCache cosine gate.** Native shows the same drift at cadence 2, so 0.99 is not
+   reachable on HV1.5 at CFG 6. Proposal: gate hv15 TeaCache on `skipped_steps` plus the visual
+   check, plus a distance no worse than native's at the same cadence (AOT 1 − cos = 0.061 vs
+   native 0.068).
+2. **Adaptive TeaCache for hv15:** keep it off. The signal is weak and the probe costs a second
+   copy of the DiT weights in HBM, so it cannot fit at the default shape.
+3. **Native `--negative-prompt` outside `--requests`, and the CLI default in batch mode:** both
+   still dropped (bug ledger above). Fixing them needs a waiver of the "native function bodies
+   unchanged" constraint.
