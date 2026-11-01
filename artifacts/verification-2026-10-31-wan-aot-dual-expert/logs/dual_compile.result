@@ -1,0 +1,1 @@
+dual_compile exit=0 secs=1144 {"samples_with_runtime": 5, "peak_gib_per_core": {"0": 0.0, "1": 0.0, "2": 0.0, "3": 0.0}, "peak_gib_max": 0.0, "host_used_peak_gib": 124.0}

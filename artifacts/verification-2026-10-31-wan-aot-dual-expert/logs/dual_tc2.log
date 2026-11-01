@@ -1,0 +1,30 @@
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+[teacache] probe-free controller enabled for wan/480x832x9: cadence=2 online_delta_alpha=0.0
+Neuron: Loading presharded checkpoints for ranks: 0...3
+Neuron: Presharded file read: 0.03s for 4 shard(s) (10836.7 MB total)
+Neuron: Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+Neuron: Finished traced model weight initialization in 9.07s (device init 9.07s, total load_weights 9.10s)
+Neuron: Skipping model warmup
+Neuron: Loading presharded checkpoints for ranks: 0...3
+Neuron: Presharded file read: 0.11s for 4 shard(s) (28602.8 MB total)
+Neuron: Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+Neuron: Finished traced model weight initialization in 8.28s (device init 8.28s, total load_weights 8.39s)
+Neuron: Skipping model warmup
+Neuron: Loading presharded checkpoints for ranks: 0...3
+Neuron: Presharded file read: 0.31s for 4 shard(s) (28602.8 MB total)
+Neuron: Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+Neuron: Finished traced model weight initialization in 8.06s (device init 8.06s, total load_weights 8.37s)
+Neuron: Skipping model warmup
+[teacache] stats: {'full_steps': 17, 'skipped_steps': 10, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[wan] latents saved to /home/ubuntu/campaigns/wan-dual-2026-10-31/work/dual_tc2/latents.pt
+[wan] experts: transformer steps 0..12, transformer_2 steps 13..39 (boundary timestep 875.0); expert_calls {'transformer': 18, 'transformer_2': 34}; step median by expert {'transformer': 1.153, 'transformer_2': 1.153}
+[wan] video saved to /home/ubuntu/campaigns/wan-dual-2026-10-31/out/dual_tc2.mp4

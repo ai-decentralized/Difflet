@@ -1,0 +1,1 @@
+dual_gen1 exit=0 secs=640 {"samples_with_runtime": 103, "peak_gib_per_core": {"0": 17.52, "1": 17.52, "2": 17.52, "3": 17.52}, "peak_gib_max": 17.52, "host_used_peak_gib": 87.6}

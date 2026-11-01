@@ -1,0 +1,1 @@
+dual_tc2 exit=0 secs=115 {"samples_with_runtime": 12, "peak_gib_per_core": {"0": 17.52, "1": 17.52, "2": 17.52, "3": 17.52}, "peak_gib_max": 17.52, "host_used_peak_gib": 87.9}

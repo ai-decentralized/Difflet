@@ -1,0 +1,2 @@
+{"prompt": "a cinematic shot of a red fox running through a snowy forest", "output": "/home/ubuntu/campaigns/wan-dual-2026-10-31/out/dual_req0.mp4", "seed": 42, "steps": 40, "guidance_scale": 4.0}
+{"prompt": "a cat walking through a sunlit garden, cinematic", "output": "/home/ubuntu/campaigns/wan-dual-2026-10-31/out/dual_req1.mp4", "seed": 43, "steps": 40, "guidance_scale": 4.0}

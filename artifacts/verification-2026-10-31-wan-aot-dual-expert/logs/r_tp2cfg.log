@@ -1,0 +1,2 @@
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+Error: --dual-expert holds both Wan 2.2 experts and umT5 on every core of the TP group: at least 31.9 GiB of bf16 weights per core at tp=2, over the 22.8 GiB budget of one NeuronCore; use --tp-degree 4 without --cfg-parallel or --cp-degree (each --dp replica is its own TP group); nothing was launched.

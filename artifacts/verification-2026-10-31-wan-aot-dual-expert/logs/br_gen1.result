@@ -1,0 +1,1 @@
+br_gen1 exit=0 secs=123 {"samples_with_runtime": 14, "peak_gib_per_core": {"0": 10.34, "1": 10.34, "2": 10.34, "3": 10.34}, "peak_gib_max": 10.34, "host_used_peak_gib": 58.9}

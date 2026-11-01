@@ -1,0 +1,10 @@
+Loading pipeline components...:   0%|          | 0/5 [00:00<?, ?it/s]Loading pipeline components...:  20%|██        | 1/5 [00:03<00:13,  3.27s/it]
+Loading checkpoint shards:   0%|          | 0/3 [00:00<?, ?it/s][ALoading checkpoint shards: 100%|██████████| 3/3 [00:00<00:00, 188.07it/s]
+
+Loading checkpoint shards:   0%|          | 0/12 [00:00<?, ?it/s][A
+Loading checkpoint shards:   8%|▊         | 1/12 [00:36<06:37, 36.12s/it][A
+Loading checkpoint shards:  17%|█▋        | 2/12 [01:13<06:09, 36.94s/it][A
+Loading checkpoint shards:  25%|██▌       | 3/12 [01:51<05:34, 37.20s/it][A
+Loading checkpoint shards:  33%|███▎      | 4/12 [02:28<04:58, 37.32s/it][A
+Loading checkpoint shards:  42%|████▏     | 5/12 [03:06<04:21, 37.43s/it][A
+Loading checkpoint shards:  50%|█████     | 6/12 [03:43<03:44, 37.47s/it][A

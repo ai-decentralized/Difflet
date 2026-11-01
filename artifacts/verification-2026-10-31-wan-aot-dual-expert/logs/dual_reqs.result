@@ -1,0 +1,1 @@
+dual_reqs exit=1 secs=132 {"samples_with_runtime": 24, "peak_gib_per_core": {"0": 17.52, "1": 17.52, "2": 17.52, "3": 17.52}, "peak_gib_max": 17.52, "host_used_peak_gib": 79.9}
