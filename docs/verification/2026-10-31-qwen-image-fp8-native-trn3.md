@@ -298,6 +298,29 @@ norm + rope + bias in a kernel epilogue, or an un-fused q/k/v the compiler can p
 (ii) a kernel load path without the gather-transpose (activations handed over pre-laid-out);
 (iii) the throttle. None is in this change.
 
+### 6f. Kernel load-path options (2026-11-01): 260 -> 239 ms, 0.80x
+
+The user chose to keep chasing the 0.80x gate. One-core sweeps of nkilib `matmul_mxfp8`'s
+load/layout options at the tp4 per-rank shapes, inside a compiled graph with a producer
+(`probe_mx_options.py`, `/home/ubuntu/fp8-bench/mx_options*.log`; bf16 `F.linear` with the
+same producer for scale):
+
+| shape (M x K -> N) | bf16 | default | `fast_dma_transpose` | PE swizzle on x^T (`K_BY_F`) |
+|---|---|---|---|---|
+| 4096 x 3072 -> 2304 (fused q/k/v) | 0.564 ms | 0.569 | 0.568 | **0.400** |
+| 1024 x 3072 -> 2304 (text q/k/v) | 0.203 | 0.128 | 0.111 | 0.103 (bm4 / shard-M: 0.092) |
+| 4096 x 3072 -> 3072 (MLP) | 0.655 | 0.339 | **0.282** (bk6 / lm2 / shard-M 0.266) | 0.324 |
+| 1024 x 3072 -> 3072 (text MLP) | 0.244 | 0.150 | **0.117** | 0.140 |
+
+Not usable: `quant_scheme="1x32"` (wrong numbers, cosine 0.003), `disable_dma_transpose`
+(unsupported for this loader), non-`mnk` loop orders (unsupported), `TILES_IN_BLOCK_M=8` at
+1024 rows (LNC2 M-sharding). Numbers were identical across all usable variants.
+
+**On the device**, `fast_dma_transpose=True` alone (commit above; `qwen_mx_fastT_tp4/`):
+step median **239.1 / 239.0 ms** at tp4, 1024x1024, 50 steps = **0.80x of bf16's 299**;
+PSNR 31.73 dB, SSIM 0.987, LPIPS 0.017 vs bf16; gen50a == gen50b. The PE-swizzle variant for
+the q/k/v widths (N <= 2304, the activation handed over transposed) is the next run.
+
 ## 7. FLUX.1-dev in mxfp8 (`--quant mxfp8`), tp4, 1024x1024, 28 steps, seed 42
 
 Commit `23c731d` wires FLUX (targets: the dual-stream blocks' q/k/v for both streams and both
