@@ -31,6 +31,18 @@ def test_legacy_single_request_and_paths(tmp_path):
     assert len(reqs) == 1
     assert reqs[0].prompt == "a cat" and reqs[0].seed == 7 and reqs[0].steps == 3
     assert stage_loop.work_file(args, reqs[0], "latents.pt") == Path(args.work_dir) / "latents.pt"
+    assert reqs[0].negative_prompt is None  # no --negative-prompt: the stage's own default
+
+
+def test_legacy_request_carries_the_negative_prompt(tmp_path):
+    """A single (non --requests) run's --negative-prompt reaches the stage's request; it was
+    dropped, so HunyuanVideo 1.5 encoded the empty negative prompt instead."""
+    args = _legacy_args(tmp_path)
+    args.negative_prompt = "blurry"
+    (req,) = stage_loop.claim_requests(args)
+    assert req.negative_prompt == "blurry"
+    (req,) = stage_loop.claimed_requests(args)
+    assert req.negative_prompt == "blurry"
 
 
 def test_legacy_scope_propagates_exceptions(tmp_path):
