@@ -1,0 +1,40 @@
+2026-10-31T04:16:34Z INFO 1572592 [sg0002/Tensorizer/RelaxPredicates]: Running RelaxPredicates
+2026-10-31T04:16:34Z INFO 1572590 [sg0000/Tensorizer/DelinearIndices]: Finished (changed=False)
+2026-10-31T04:16:34Z INFO 1572590 [sg0000/Tensorizer/DelinearIndices]: DelinearIndices finished after 0.017 seconds
+2026-10-31T04:16:34Z INFO 1572590 [sg0000/Tensorizer/PGLayoutTilingPipeline]: Running PGLayoutTilingPipeline
+2026-10-31T04:16:34Z INFO 1572590 [sg0000/Tensorizer/LowerCCOpBlockAxis]: Running LowerCCOpBlockAxis
+2026-10-31T04:16:34Z INFO 1572592 [sg0002/Tensorizer/RelaxPredicates]: Finished (changed=False)
+2026-10-31T04:16:34Z INFO 1572592 [sg0002/Tensorizer/RelaxPredicates]: RelaxPredicates finished after 0.010 seconds
+2026-10-31T04:16:34Z INFO 1572592 [sg0002/Tensorizer/TensorInitialization]: Running TensorInitialization
+2026-10-31T04:16:34Z INFO 1572592 [sg0002/Tensorizer/TensorInitialization]: Finished (changed=False)
+2026-10-31T04:16:34Z INFO 1572592 [sg0002/Tensorizer/TensorInitialization]: TensorInitialization finished after 0.002 seconds
+2026-10-31T04:16:34Z INFO 1572592 [sg0002/Tensorizer/NeuronSimplifyPredicates]: Running NeuronSimplifyPredicates
+2026-10-31T04:16:34Z INFO 1572590 [sg0000/Tensorizer/LowerCCOpBlockAxis]: Finished (changed=True)
+2026-10-31T04:16:34Z INFO 1572590 [sg0000/Tensorizer/LowerCCOpBlockAxis]: LowerCCOpBlockAxis finished after 0.016 seconds
+2026-10-31T04:16:34Z INFO 1572590 [sg0000/Tensorizer/CanonicalizeMXAxes]: Running CanonicalizeMXAxes
+2026-10-31T04:16:34Z INFO 1572590 [sg0000/Tensorizer/CanonicalizeMXAxes]: Finished (changed=False)
+2026-10-31T04:16:34Z INFO 1572590 [sg0000/Tensorizer/CanonicalizeMXAxes]: CanonicalizeMXAxes finished after 0.003 seconds
+2026-10-31T04:16:34Z INFO 1572590 [sg0000/Tensorizer/LayoutPreprocessingAndAnalysis]: Running LayoutPreprocessingAndAnalysis
+2026-10-31T04:16:34Z INFO 1572590 [sg0000/Tensorizer/LayoutPreprocessing]: Running LayoutPreprocessing
+2026-10-31T04:16:34Z INFO 1572590 [sg0000/Tensorizer/Delinearization]: Running Delinearization
+2026-10-31T04:16:34Z INFO 1572592 [sg0002/Tensorizer/NeuronSimplifyPredicates]: Finished (changed=False)
+2026-10-31T04:16:34Z INFO 1572592 [sg0002/Tensorizer/NeuronSimplifyPredicates]: NeuronSimplifyPredicates finished after 0.038 seconds
+2026-10-31T04:16:34Z INFO 1572592 [sg0002/Tensorizer/ExpandISAMacro]: Running ExpandISAMacro
+2026-10-31T04:16:34Z INFO 1572592 [sg0002/Tensorizer/ExpandISAMacro]: Finished (changed=False)
+2026-10-31T04:16:34Z INFO 1572592 [sg0002/Tensorizer/ExpandISAMacro]: ExpandISAMacro finished after 0.003 seconds
+2026-10-31T04:16:34Z INFO 1572592 [sg0002/Tensorizer/SimplifyNeuronTensor]: Running SimplifyNeuronTensor
+2026-10-31T04:16:34Z INFO 1572590 [sg0000/Tensorizer/Delinearization]: Finished (changed=False)
+2026-10-31T04:16:34Z INFO 1572590 [sg0000/Tensorizer/Delinearization]: Delinearization finished after 0.007 seconds
+2026-10-31T04:16:34Z INFO 1572591 [sg0001/Tensorizer/AGOrderingAnalysisPass]: AGOrderingAnalysisPass finished after 0.059 seconds
+2026-10-31T04:16:34Z INFO 1572591 [sg0001/Tensorizer/StaticTransposeLocalTensor]: Running StaticTransposeLocalTensor
+2026-10-31T04:16:34Z INFO 1572592 [sg0002/Tensorizer/SimplifyNeuronTensor]: Running DeadCodeElimination_iteration_0
+2026-10-31T04:16:34Z INFO 1572592 [sg0002/Tensorizer/SimplifyNeuronTensor]: DeadCodeElimination_iteration_0 finished after 0.000 seconds
+2026-10-31T04:16:34Z INFO 1572592 [sg0002/Tensorizer/SimplifyNeuronTensor]: Finished (changed=True)
+2026-10-31T04:16:34Z INFO 1572592 [sg0002/Tensorizer/SimplifyNeuronTensor]: SimplifyNeuronTensor finished after 0.006 seconds
+2026-10-31T04:16:34Z INFO 1572592 [sg0002/Tensorizer/DMALocalityOpt]: Running DMALocalityOpt
+2026-10-31T04:16:34Z INFO 1572592 [sg0002/Tensorizer/DMALocalityOpt]: Finished (changed=True)
+2026-10-31T04:16:34Z INFO 1572592 [sg0002/Tensorizer/DMALocalityOpt]: DMALocalityOpt finished after 0.001 seconds
+2026-10-31T04:16:34Z INFO 1572592 [sg0002/Tensorizer/DataStreaming]: Running DataStreaming
+2026-10-31T04:16:34Z INFO 1572592 [sg0002/Tensorizer/DataStreaming]: Finished (changed=True)
+2026-10-31T04:16:34Z INFO 1572592 [sg0002/Tensorizer/DataStreaming]: DataStreaming finished after 0.003 seconds
+2026-10-31T04:16:34Z INFO 1572592 [sg0002/Tensorizer/SFKVectorizer]: Running SFKVectorizer

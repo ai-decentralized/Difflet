@@ -1,0 +1,8 @@
+3051691ed6819408ea24b31e74f4d5d77034336988a9681016e4e4e32341aa12  ./gen3.work/embeds.pt
+aeaab2fbc43a95cb5780c0fab3fc92c67291b26670961b8fc23f0701f17111de  ./gen3.work/latents.pt
+3051691ed6819408ea24b31e74f4d5d77034336988a9681016e4e4e32341aa12  ./gen3_postfix.work/embeds.pt
+aeaab2fbc43a95cb5780c0fab3fc92c67291b26670961b8fc23f0701f17111de  ./gen3_postfix.work/latents.pt
+454f3f1e4e015a748bb70ea338931eef1cb8de0f48a731c4215397b1b12a8f30  ./native_inputs1.latents.pt
+74921afc87b801cbf266907ae99cfe040ca814f5f4b62eeb5e4ec317170c90af  ./native_inputs3.latents.pt
+4785aa5f9ba831c9c725a94a7cf3eeb3222a6a904bb1586360bc6b85ae0136c4  ./native_noise.pt
+cfb519c880e1a9579c9ba434901daa3329d55d0a3f9ffc8042ee3f0fd0fbe1d6  ./own_inputs1.latents.pt

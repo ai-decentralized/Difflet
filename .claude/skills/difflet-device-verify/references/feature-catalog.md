@@ -3,25 +3,25 @@
 Everything here was device-verified on trn2.3xlarge (4 NeuronCores, LNC=2, 96 GiB HBM) with
 neuronx-cc 2.26. Model keys are `scripts/verify_cli.py` keys; CLI model ids in parentheses.
 
-## Verified support snapshot (2026-08-31, use as the default expectation per cell)
+## Verified support snapshot (2026-08-31; HunyuanVideo 1.5 column 2026-11-01; use as the default expectation per cell)
 
-| Feature | FLUX | Qwen-Image | Wan 2.2 | HunyuanVideo | LTX-2 |
-|---|---|---|---|---|---|
-| TP | PASS | PASS | PASS | PASS | PASS |
-| CP gather_kv | PASS | PASS | PASS | BLOCKED (NCC_INLA001 behind %128 bounds) | N/A |
-| CP ring | PASS | PASS | LIMIT (%128; PASS @512×512×9) | N/A (mask) | N/A |
-| CP ulysses | PASS | PASS | PASS | PASS (bounds route) | N/A |
-| SP | PASS | N/A (deferred) | PASS | PASS | N/A |
-| CFG-parallel | N/A (distilled) | N/A | PASS | N/A | PASS |
-| DP router | PASS | PASS | PASS | BLOCKED (HBM @121f) | PASS |
-| DP bit-identity | PASS | NOT MEASURED | NOT MEASURED | BLOCKED | NOT MEASURED |
-| Bucketed `--shapes` compile | PASS | PASS | PASS | PASS (earlier) | LIMIT (flag ignored) |
-| Shared weight store | PASS (proof) | PASS | PASS (proof) | PASS | PASS |
-| Serving | PASS chat | PASS chat (cp=1) | PASS videos | PASS videos | PASS videos (host VAE) |
-| Multi-shape serving | PASS | PASS | PASS | PASS (earlier) | N/A |
-| TeaCache fixed cadence | PASS | PASS | N/A (CLI) | N/A (CLI) | N/A (CLI) |
-| TeaCache adaptive | PASS | LIMIT (weak signal) | N/A (CLI) | N/A (CLI) | N/A (CLI) |
-| TAEF1 | PASS | N/A | N/A | N/A | N/A |
+| Feature | FLUX | Qwen-Image | Wan 2.2 | HunyuanVideo | HunyuanVideo 1.5 | LTX-2 |
+|---|---|---|---|---|---|---|
+| TP | PASS | PASS | PASS | PASS | PASS (TP2, TP4) | PASS |
+| CP gather_kv | PASS | PASS | PASS | BLOCKED (NCC_INLA001 behind %128 bounds) | PASS (watch: 3-step 1.25x) | N/A |
+| CP ring | PASS | PASS | LIMIT (%128; PASS @512×512×9) | N/A (mask) | N/A (mask) | N/A |
+| CP ulysses | PASS | PASS | PASS | PASS (bounds route) | PASS | N/A |
+| SP | PASS | N/A (deferred) | PASS | PASS | PASS (refused @480×848×121: N%4) | N/A |
+| CFG-parallel | N/A (distilled) | N/A | PASS | N/A | PASS (default TP2×CFG2) | PASS |
+| DP router | PASS | PASS | PASS | BLOCKED (HBM @121f) | PASS | PASS |
+| DP bit-identity | PASS | NOT MEASURED | NOT MEASURED | BLOCKED | PASS (4/4) | NOT MEASURED |
+| Bucketed `--shapes` compile | PASS | PASS | PASS | PASS (earlier) | N/A (one shape; refused) | LIMIT (flag ignored) |
+| Shared weight store | PASS (proof) | PASS | PASS (proof) | PASS | NOT MEASURED | PASS |
+| Serving | PASS chat | PASS chat (cp=1) | PASS videos | PASS videos | N/A (not wired) | PASS videos (host VAE) |
+| Multi-shape serving | PASS | PASS | PASS | PASS (earlier) | N/A | N/A |
+| TeaCache fixed cadence | PASS | PASS | N/A (CLI) | N/A (CLI) | PASS (parity with native) | N/A (CLI) |
+| TeaCache adaptive | PASS | LIMIT (weak signal) | N/A (CLI) | N/A (CLI) | LIMIT (weak signal; not recommended) | N/A (CLI) |
+| TAEF1 | PASS | N/A | N/A | N/A | N/A | N/A |
 
 Anything that lands differently from this table in a new campaign is a finding: either a
 regression, a fix that upgraded a cell, or a NOT MEASURED cell finally measured — call it out.
@@ -29,6 +29,33 @@ regression, a fix that upgraded a cell, or a NOT MEASURED cell finally measured 
 The table above is the Trainium AoT backend (NxD stages). The PyTorch-native **neuron** backend
 (`--backend neuron`, torchrun, one process per NeuronCore, per-block `torch.compile`, neuronx-cc
 2.28) is a separate runtime with its own rows below; do not carry a cell over between the two.
+
+### Trainium AOT backend: HunyuanVideo 1.5 (verified 2026-10-30 to 2026-11-01, trn2.3xlarge)
+
+`difflet compile|generate --model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v`
+(trainium backend) runs three stages: `encode` (host: Qwen2.5-VL + ByT5, `embeds.pt`),
+`aot_transformer` (one NxD process on all `tp × cp (×2 with CFG)` cores, `latents.pt`) and
+`aot_vae` (host decode by default, diffusers' tiled fp32 decoder; `--device-vae` opts into the
+compiled `vae15`, which does not build on neuronx-cc 2.26). True CFG at 6.0 on every step; default
+layout TP2×CFG2. Evidence: `docs/verification/hv15-aot-evidence.md` (Summary at the top).
+
+| Feature | AOT backend, HunyuanVideo 1.5 (320×512×61, 50 steps unless stated) |
+|---|---|
+| TP2 / TP2×CFG2 / TP4 / TP4+SP | PASS (1-step cos vs native 0.99912-0.99916; 2690 replica / 1573 / 1731 / 1601 ms per step; native TP2×CFG2 1325 ms) |
+| CP ulysses / gather_kv (TP2×CP2) | PASS (1783 / 1858 ms per step). gather_kv watch item: 3-step distance to diffusers 1.25x native's (gate 1.15x), deterministic |
+| CP ring | N/A (mask): refused before encode (`--cp-mode ring`) |
+| DP / JSONL batch | PASS (`verify_dp_correctness.py` 4/4 bit-identical; `--requests` loads the DiT once, each request bit-identical to its single run) |
+| TeaCache cadence 2 / online-delta 0.6 | PASS (20 / 17 skipped, -41% / -35% denoise; cos 0.939 / 0.918 vs no TeaCache; native cadence 2 is 0.932, so 0.99 is not reachable on either stack) |
+| TeaCache adaptive | LIMIT, not recommended (calibration R² 0.41, Pearson −0.12, visibly degraded; the probe doubles per-core HBM and does not fit at 480×848×121). `--requests` refuses TeaCache flags |
+| Default shape 480×848×121 (TP2×CFG2) | PASS: compile 3970 s (host RAM peak 116.5/124 GiB), 13072 ms per step (native 11178); `--tp-degree 4 --sp` refused before compile (N % 4 = 2) |
+| VAE | host decode LIMIT (409-431 s @61f, 2699 s @121f vs native device 31 / 89 s); device `vae15` BLOCKED (NCC_EVRF007 / NCC_IBIR229 / NCC_EXTP003) |
+
+Gotchas: the default-shape DiT compiles only without `--enable-ccop-compute-overlap` (NCC_IRPX901);
+Difflet drops the option above 16384 image tokens and keys the artifact on the compiler args.
+The AOT and native stacks draw different seed-42 noise (torch 2.9.1 vs 2.14), so cross-stack
+latents are not comparable from CLI runs; gate parity with `scripts/hv15_aot_denoise_from_inputs.py`
+on the native run's `embeds.pt` and noise. Native reference runs need the `native-312` venv (the
+AOT venv lacks the `neuron` process-group backend).
 
 ### Neuron backend: HunyuanVideo (verified 2026-10-24/25, trn2.3xlarge)
 
@@ -74,7 +101,7 @@ on for HunyuanVideo since `f4d9ac1`) keeps it for later launches and also takes 
 | `wan` | Wan-AI/Wan2.2-T2V-A14B-Diffusers | 480×832×9f | 40 | staged: transformer → vae |
 | `wan2_1` | Wan-AI/Wan2.1-T2V-14B-Diffusers | same as wan | 40 | staged (same runtime) |
 | `hunyuan_video` | hunyuanvideo-community/HunyuanVideo | 320×512×121f | 50 | staged: clip → llama → generate |
-| `hunyuan_video_15` | …HunyuanVideo-1.5-Diffusers-480p_t2v | — | — | download-only scaffold (XFAIL) |
+| `hunyuan_video_15` | …HunyuanVideo-1.5-Diffusers-480p_t2v | 320×512×61f | 50 | staged: encode → aot_transformer → aot_vae (host) |
 | `ltx_2` | Lightricks/LTX-2 | 256×384×121f | 40 | Neuron DiT, host prompt/decode |
 
 Staged models report *staged CLI wall time* (three process loads + denoise + VAE), which is not
@@ -88,12 +115,15 @@ comparable to a single-process generate. Say which kind of number you are quotin
 Skip / expected-fail rules live in `verify_cli.py` and are pinned by
 `tests/unit/cli/test_verify_cli.py`; when a fix changes support, edit both. Sets as of the campaign:
 
-- `DISTILLED` = flux, qwen_image, hunyuan_video, hunyuan_video_15 → `tp2cfg` SKIP (no CFG branch).
-- `SP_SUPPORTED` = flux, wan, wan2_1, hunyuan_video → others SKIP `tp4sp` (Qwen deferred by design).
-- `CP_UNSUPPORTED` = ltx_2, hunyuan_video_15 → all CP configs SKIP.
-- `RING_UNSUPPORTED` = hunyuan_video (always carries an attention mask; ring kernel has no mask path).
+- `DISTILLED` = flux, qwen_image, hunyuan_video → `tp2cfg` SKIP (no CFG branch). HunyuanVideo 1.5
+  runs true CFG (TP2×CFG2 is its default).
+- `SP_SUPPORTED` = flux, qwen_image, wan, wan2_1, hunyuan_video, hunyuan_video_15 → others SKIP `tp4sp`.
+- `CP_UNSUPPORTED` = ltx_2 → all CP configs SKIP.
+- `RING_UNSUPPORTED` = hunyuan_video, hunyuan_video_15 (always carry an attention mask; the Trainium
+  ring kernel has no mask path). No ring config is in `PARALLEL_CONFIGS`, so this is a catalog
+  rule, not a code set.
 - `ULYSSES_UNSUPPORTED` = ∅ since the masked-text bounds route (HV ulysses PASSes).
-- `EXPECTED_FAIL_CELLS`: hv15 `tp4`/`dp2tp2` (scaffold); hunyuan `tp2cp2` (neuronx-cc SBUF bug
+- `EXPECTED_FAIL_CELLS`: none for hv15 (all six configs PASS on device); hunyuan `tp2cp2` (neuronx-cc SBUF bug
   `NCC_INLA001` behind the %128 bounds constraint); hunyuan `dp2tp2` (121-frame VAE exceeds a
   2-core replica's HBM); wan/wan2_1 `tp2cp2ring` at the default shape (see ring rule).
 
@@ -105,7 +135,8 @@ Skip / expected-fail rules live in `verify_cli.py` and are pinned by
   (nkilib `ring_attention_spmd_fwd`); Wan 480×832×9 → 2340/rank fails fast, 512×512×9 → 1536 passes.
   Ring also needs `NEURON_RT_VIRTUAL_CORE_SIZE=2` on stage subprocesses (wan orchestrator sets it
   for ring only). Ulysses needs heads % (tp·cp) == 0.
-- **CFG-parallel**: manifest `cfg_parallel_enabled: true`; true-CFG models only (wan, ltx_2).
+- **CFG-parallel**: manifest `cfg_parallel_enabled: true`; true-CFG models only (wan, ltx_2,
+  hunyuan_video_15).
 - **SP**: weights byte-identical to tp4 — SP re-shards activations; proof is the separate store entry
   / artifact hash and the generate-time profile.
 - **DP**: `[dp-router] worker 0: cores 0-1` / `worker 1: cores 2-3` in `step_generate.log`; one
@@ -160,6 +191,9 @@ a calibration. Harnesses do compile → record-only signal gate → fit → same
   "functional, not beneficial; use cadence".
 
 Wan/LTX-2 TeaCache is Python-API-only on main (no CLI wiring); HV's CLI disables its probe.
+HunyuanVideo 1.5's AOT CLI wires all three modes (`--teacache-cadence`, `--teacache-online-delta`,
+`--teacache-speedup` + a `scripts/calibrate_teacache.py --model hunyuan_video_15` calibration);
+use cadence 2, adaptive is not recommended for it (weak signal, second weight copy in HBM).
 
 ## TAEF1 (flux only)
 

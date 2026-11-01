@@ -1,0 +1,3 @@
+3051691ed6819408ea24b31e74f4d5d77034336988a9681016e4e4e32341aa12  ./gen3.work/embeds.pt
+c99ce43ab6345c9039ba20baab7cdb2cecce37b611e05c91a8dead7d0dad22bf  ./gen3.work/latents.pt
+142e43417cd674840788fbc4f94d095eb7e13d790ce7ebadebe16565b0347421  ./own_inputs1.latents.pt

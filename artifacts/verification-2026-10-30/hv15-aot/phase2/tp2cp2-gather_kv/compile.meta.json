@@ -1,0 +1,35 @@
+{
+  "name": "p2-tp2cp2-gather_kv/compile",
+  "backend": "trainium",
+  "cmd": [
+    "bash",
+    "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_difflet.sh",
+    "trainium",
+    "compile",
+    "--model-id",
+    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+    "--height",
+    "320",
+    "--width",
+    "512",
+    "--num-frames",
+    "61",
+    "--tp-degree",
+    "2",
+    "--cp-degree",
+    "2",
+    "--cp-mode",
+    "gather_kv"
+  ],
+  "env": [
+    "HF_HUB_OFFLINE=1"
+  ],
+  "rc": 0,
+  "wall_s": 6.9,
+  "nmon_peak_gib": {},
+  "host_rss_peak_gib": {
+    "_total": 1.0,
+    "aot_transformer": 0.97,
+    "other": 0.03
+  }
+}

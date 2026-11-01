@@ -1,0 +1,161 @@
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/FactorizeThreadAxesInFreeDims]: Finished (changed=False)
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/FactorizeThreadAxesInFreeDims]: FactorizeThreadAxesInFreeDims finished after 0.004 seconds
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/PartialSimdFusion]: Running PartialSimdFusion
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/PartialSimdFusion]: Running PartialSimdFusion_iteration_0
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/PartialSimdFusion]: PartialSimdFusion_iteration_0 finished after 0.204 seconds
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/PartialSimdFusion]: Finished (changed=True)
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/PartialSimdFusion]: PartialSimdFusion finished after 0.204 seconds
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/TritiumFusion]: Running TritiumFusion
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/TritiumFusion]: Finished (changed=True)
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/TritiumFusion]: TritiumFusion finished after 0.162 seconds
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/CCOpFusion]: Running CCOpFusion
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/CCOpFusion]: Running CCOpFusion_iteration_0
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/CCOpFusion]: CCOpFusion_iteration_0 finished after 0.069 seconds
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/CCOpFusion]: Finished (changed=True)
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/CCOpFusion]: CCOpFusion finished after 0.069 seconds
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/VectorizeMatMult]: Running VectorizeMatMult
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/VectorizeMatMult]: Finished (changed=False)
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/VectorizeMatMult]: VectorizeMatMult finished after 0.057 seconds
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/PartialLoopFusion]: Running PartialLoopFusion
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/PartialLoopFusion]: Running PartialLoopFusion_iteration_0
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/PartialLoopFusion]: PartialLoopFusion_iteration_0 finished after 0.143 seconds
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/PartialLoopFusion]: Finished (changed=True)
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/PartialLoopFusion]: PartialLoopFusion finished after 0.144 seconds
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/NeuronLICM]: Running NeuronLICM
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/NeuronLICM]: Finished (changed=True)
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/NeuronLICM]: NeuronLICM finished after 0.021 seconds
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/LowerTranspose]: Running LowerTranspose
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/LowerTranspose]: Finished (changed=True)
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/LowerTranspose]: LowerTranspose finished after 0.121 seconds
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/LowerBroadcast]: Running LowerBroadcast
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/LowerBroadcast]: Finished (changed=True)
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/LowerBroadcast]: LowerBroadcast finished after 0.008 seconds
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/LateNeuronInstComb]: Running LateNeuronInstComb
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/LateNeuronInstComb]: Running LateNeuronInstComb_iteration_0
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/LateNeuronInstComb]: LateNeuronInstComb_iteration_0 finished after 0.024 seconds
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/LateNeuronInstComb]: Running LateNeuronInstComb_iteration_1
+2026-10-31T04:14:28Z INFO 1571841 [sg0000/Tensorizer/LateNeuronInstComb]: LateNeuronInstComb_iteration_1 finished after 0.018 seconds
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/LateNeuronInstComb]: Finished (changed=True)
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/LateNeuronInstComb]: LateNeuronInstComb finished after 0.116 seconds
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/SplitAccGrp]: Running SplitAccGrp
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/SplitAccGrp]: Finished (changed=False)
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/SplitAccGrp]: SplitAccGrp finished after 0.004 seconds
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/SpillPSum]: Running SpillPSum
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/SpillPSum]: Finished (changed=True)
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/SpillPSum]: SpillPSum finished after 0.065 seconds
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/LowerIntrinsics]: Running LowerIntrinsics
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/LowerIntrinsics]: Finished (changed=False)
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/LowerIntrinsics]: LowerIntrinsics finished after 0.004 seconds
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/InlineNativeKernels]: Running InlineNativeKernels
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/InlineNativeKernels]: Finished (changed=False)
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/InlineNativeKernels]: InlineNativeKernels finished after 0.004 seconds
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/NeuronLICM]: Running NeuronLICM
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/NeuronLICM]: Finished (changed=False)
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/NeuronLICM]: NeuronLICM finished after 0.019 seconds
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/InferPSumTensor]: Running InferPSumTensor
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/InferPSumTensor]: Running InferPSumTensor_iteration_0
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/InferPSumTensor]: InferPSumTensor_iteration_0 finished after 0.059 seconds
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/InferPSumTensor]: Running InferPSumTensor_iteration_1
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/InferPSumTensor]: InferPSumTensor_iteration_1 finished after 0.055 seconds
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/InferPSumTensor]: Finished (changed=True)
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/InferPSumTensor]: InferPSumTensor finished after 0.114 seconds
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/LegalizeType]: Running LegalizeType
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/LegalizeType]: Finished (changed=True)
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/LegalizeType]: LegalizeType finished after 0.041 seconds
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/WeightCoalescing]: Running WeightCoalescing
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/WeightCoalescing]: Finished (changed=False)
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/WeightCoalescing]: WeightCoalescing finished after 0.009 seconds
+2026-10-31T04:14:29Z INFO 1571841 [sg0000/Tensorizer/LegalizeSundaAccess]: Running LegalizeSundaAccess
+2026-10-31T04:14:35Z INFO 1571841 [sg0000/Tensorizer/LegalizeSundaAccess]: Finished (changed=True instance_count_change=+136991)
+2026-10-31T04:14:35Z INFO 1571841 [sg0000/Tensorizer/LegalizeSundaAccess]: LegalizeSundaAccess finished after 5.763 seconds
+2026-10-31T04:14:35Z INFO 1571841 [sg0000/Tensorizer/RelaxPredicates]: Running RelaxPredicates
+2026-10-31T04:14:35Z INFO 1571841 [sg0000/Tensorizer/RelaxPredicates]: RelaxPredicates finished after 0.025 seconds
+2026-10-31T04:14:35Z ERROR 1571841 [Tensorizer]: Transformation error on operator: NeuronHunyuanVideoApplication[.1]/NeuronHunyuanVideo15BackboneApplication[.1]/_HunyuanVideo15TraceModule[.1]/HunyuanVideo15Transformer3DModel[.1]/aten.sum.dim_IntList/aten__sum_reduce.223
+2026-10-31T04:14:35Z ERROR 1571841 [/usr/lib/python3.12/concurrent/futures/process.py:263]: Assertion failed: False
+2026-10-31T04:14:35Z USER 1571803 [root/Tensorizer/Tensorizer]: Tensorizer finished after 28.329 seconds
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]: ***************************************************************
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:  An Internal Compiler Error has occurred
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]: ***************************************************************
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]: 
+2026-10-31T04:14:35Z USER 1571803 [neuronxcc.driver.CommandDriver]: NeuronHunyuanVideoApplication[.1]/NeuronHunyuanVideo15BackboneApplication[.1]/_HunyuanVideo15TraceModule[.1]/HunyuanVideo15Transformer3DModel[.1]/aten.sum.dim_IntList/aten__sum_reduce.223 [INTERNAL_ERROR] [NCC_IRPX901] RelaxPredicates assertion error: inst should be valid after relaxing predicates - Please open a support ticket at https://github.com/aws-neuron/aws-neuron-sdk/issues/new. You may also be able to obtain more information using the 'XLA_IR_DEBUG' and 'XLA_HLO_DEBUG' environment variables.
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]: 
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]: Internal details:
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]: Type: <class 'neuronxlogger.error.NeuronAssertion'>
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/driver/CommandDriver.py", line 346, in neuronxcc.driver.CommandDriver.CommandDriver.run_subcommand
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/driver/commands/CompileCommand.py", line 1711, in neuronxcc.driver.commands.CompileCommand.CompileCommand.run
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/driver/commands/CompileCommand.py", line 1621, in neuronxcc.driver.commands.CompileCommand.CompileCommand.runPipeline
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/driver/commands/CompileCommand.py", line 1673, in neuronxcc.driver.commands.CompileCommand.CompileCommand.runPipeline
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/driver/commands/CompileCommand.py", line 1650, in neuronxcc.driver.commands.CompileCommand.CompileCommand.runPipeline
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/driver/commands/CompileCommand.py", line 1653, in neuronxcc.driver.commands.CompileCommand.CompileCommand.runPipeline
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/driver/Job.py", line 373, in neuronxcc.driver.Job.SingleInputJob.run
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/driver/Job.py", line 402, in neuronxcc.driver.Job.SingleInputJob.runOnState
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/driver/Pipeline.py", line 31, in neuronxcc.driver.Pipeline.Pipeline.runSingleInput
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/driver/Job.py", line 373, in neuronxcc.driver.Job.SingleInputJob.run
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/driver/Job.py", line 402, in neuronxcc.driver.Job.SingleInputJob.runOnState
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/driver/jobs/Frontend.py", line 155, in neuronxcc.driver.jobs.Frontend.Frontend.runSingleInput
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/driver/jobs/Frontend.py", line 102, in neuronxcc.driver.jobs.Frontend.Frontend.runXLAFrontend
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/driver/jobs/Frontend.py", line 107, in neuronxcc.driver.jobs.Frontend.Frontend.runXLAFrontend
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/Penguin.py", line 354, in neuronxcc.starfish.penguin.Penguin.runPenguin
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/Frontend.py", line 183, in neuronxcc.starfish.penguin.Frontend.tensorizeXla
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/Frontend.py", line 191, in neuronxcc.starfish.penguin.Frontend.tensorizeXla
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/Frontend.py", line 219, in neuronxcc.starfish.penguin.Frontend.tensorizeXla
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/Frontend.py", line 284, in neuronxcc.starfish.penguin.Frontend.parallelCompileSubGraphs
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/Frontend.py", line 291, in neuronxcc.starfish.penguin.Frontend.parallelCompileSubGraphs
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "/usr/lib/python3.12/concurrent/futures/_base.py", line 456, in result
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:     return self.__get_result()
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:            ^^^^^^^^^^^^^^^^^^^
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "/usr/lib/python3.12/concurrent/futures/_base.py", line 401, in __get_result
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:     raise self._exception
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]: Cause:
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/DotTransform.py", line 257, in neuronxcc.starfish.penguin.DotTransform.DotTransform.run_with_exception_handling
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/DotTransform.py", line 349, in neuronxcc.starfish.penguin.DotTransform.DotTransform.timed_run_
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/DotTransform.py", line 359, in neuronxcc.starfish.penguin.DotTransform.DotTransform.timed_run_
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/DotTransform.py", line 361, in neuronxcc.starfish.penguin.DotTransform.DotTransform.timed_run_
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/DotTransform.py", line 391, in neuronxcc.starfish.penguin.DotTransform.DotTransform.run_
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/DotTransform.py", line 393, in neuronxcc.starfish.penguin.DotTransform.DotTransform.run_
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/DotTransform.py", line 564, in neuronxcc.starfish.penguin.DotTransform.DotTransform.transformFunction
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/DotTransform.py", line 556, in neuronxcc.starfish.penguin.DotTransform.DotTransform.runTransforms
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/DotTransform.py", line 544, in neuronxcc.starfish.penguin.DotTransform.DotTransform.transformStmts
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/DotTransform.py", line 170, in neuronxcc.starfish.penguin.DotTransform.DotTransform.transform
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/DotTransform.py", line 615, in neuronxcc.starfish.penguin.DotTransform.DotTransform.transformBasicBlock
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/DotTransform.py", line 170, in neuronxcc.starfish.penguin.DotTransform.DotTransform.transform
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/DotTransform.py", line 586, in neuronxcc.starfish.penguin.DotTransform.DotTransform.transformBlock
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/DotTransform.py", line 170, in neuronxcc.starfish.penguin.DotTransform.DotTransform.transform
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/DotTransform.py", line 586, in neuronxcc.starfish.penguin.DotTransform.DotTransform.transformBlock
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/DotTransform.py", line 170, in neuronxcc.starfish.penguin.DotTransform.DotTransform.transform
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/targets/transforms/RelaxPredicates.py", line 404, in neuronxcc.starfish.penguin.targets.transforms.RelaxPredicates.RelaxPredicates.transformTensorReduceOp
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/targets/transforms/RelaxPredicates.py", line 400, in neuronxcc.starfish.penguin.targets.transforms.RelaxPredicates.RelaxPredicates.transformReduceLikeOp
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/targets/transforms/RelaxPredicates.py", line 247, in neuronxcc.starfish.penguin.targets.transforms.RelaxPredicates.RelaxPredicates.initTensor
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/targets/transforms/RelaxPredicates.py", line 285, in neuronxcc.starfish.penguin.targets.transforms.RelaxPredicates.RelaxPredicates.relaxProducerPredicates
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/targets/transforms/RelaxPredicates.py", line 172, in neuronxcc.starfish.penguin.targets.transforms.RelaxPredicates.RelaxPredicates.relaxCopyLikeDstParIndices
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/targets/transforms/RelaxPredicates.py", line 247, in neuronxcc.starfish.penguin.targets.transforms.RelaxPredicates.RelaxPredicates.initTensor
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/targets/transforms/RelaxPredicates.py", line 285, in neuronxcc.starfish.penguin.targets.transforms.RelaxPredicates.RelaxPredicates.relaxProducerPredicates
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/targets/transforms/RelaxPredicates.py", line 167, in neuronxcc.starfish.penguin.targets.transforms.RelaxPredicates.RelaxPredicates.relaxCopyLikeDstParIndices
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/targets/transforms/RelaxPredicates.py", line 80, in neuronxcc.starfish.penguin.targets.transforms.RelaxPredicates.RelaxPredicates.relaxPredicates
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]: AssertionError: inst should be valid after relaxing predicates
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]: 
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]: During handling of the above exception, another exception occurred:
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]: 
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]: Traceback (most recent call last):
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "/usr/lib/python3.12/concurrent/futures/process.py", line 263, in _process_worker
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:     r = call_item.fn(*call_item.args, **call_item.kwargs)
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/Frontend.py", line 382, in neuronxcc.starfish.penguin.Frontend.tensorizeXlaFromFile
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/Compile.py", line 490, in neuronxcc.starfish.penguin.Compile.compile_module
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/Compile.py", line 497, in neuronxcc.starfish.penguin.Compile.compile_module
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/Compile.py", line 554, in neuronxcc.starfish.penguin.Compile.compile_module
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/DotTransform.py", line 743, in neuronxcc.starfish.penguin.DotTransform.PassManager.transformModule
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/DotTransform.py", line 762, in neuronxcc.starfish.penguin.DotTransform.PassManager.transformFunction
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/DotTransform.py", line 179, in neuronxcc.starfish.penguin.DotTransform.DotTransform.runOnFunction
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/DotTransform.py", line 272, in neuronxcc.starfish.penguin.DotTransform.DotTransform.run_with_exception_handling
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "neuronxcc/starfish/penguin/DotTransform.py", line 311, in neuronxcc.starfish.penguin.DotTransform.DotTransform.rethrow_exception
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:   File "/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronxlogger/error.py", line 104, in neuron_internal_assert
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]:     raise NeuronAssertion(
+2026-10-31T04:14:35Z ERROR 1571803 [neuronxcc.driver.CommandDriver]: neuronxlogger.error.NeuronAssertion: NeuronHunyuanVideoApplication[.1]/NeuronHunyuanVideo15BackboneApplication[.1]/_HunyuanVideo15TraceModule[.1]/HunyuanVideo15Transformer3DModel[.1]/aten.sum.dim_IntList/aten__sum_reduce.223 [INTERNAL_ERROR] [NCC_IRPX901] RelaxPredicates assertion error: inst should be valid after relaxing predicates - Please open a support ticket at https://github.com/aws-neuron/aws-neuron-sdk/issues/new. You may also be able to obtain more information using the 'XLA_IR_DEBUG' and 'XLA_HLO_DEBUG' environment variables.
+2026-10-31T04:14:35Z USER 1571803 [neuronxcc.driver.CommandDriver]: 
+2026-10-31T04:14:35Z USER 1571803 [neuronxcc.driver.CommandDriver]: Diagnostic information:
+2026-10-31T04:14:35Z USER 1571803 [neuronxcc.driver.CommandDriver]:   NeuronX Compiler version 2.26.6360.0+6f180f47
+2026-10-31T04:14:35Z USER 1571803 [neuronxcc.driver.CommandDriver]:   
+2026-10-31T04:14:35Z USER 1571803 [neuronxcc.driver.CommandDriver]:   Python version 3.12.3
+2026-10-31T04:14:35Z USER 1571803 [neuronxcc.driver.CommandDriver]:   HWM version 2.26.0.6360++6f180f47
+2026-10-31T04:14:35Z USER 1571803 [neuronxcc.driver.CommandDriver]:   NumPy version 2.5.2

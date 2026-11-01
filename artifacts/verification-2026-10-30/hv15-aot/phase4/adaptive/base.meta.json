@@ -1,0 +1,45 @@
+{
+  "name": "p4c-tp2cfg/base",
+  "backend": "trainium",
+  "cmd": [
+    "bash",
+    "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_py.sh",
+    "scripts/hv15_aot_denoise_from_inputs.py",
+    "--compiled-dir",
+    "/home/ubuntu/.cache/difflet/hunyuan_video_15_aot_dit/69162f720d26ba85",
+    "--embeds",
+    "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p4-tp2cfg/gen50.work/embeds.pt",
+    "--tp-degree",
+    "2",
+    "--cfg-parallel",
+    "--height",
+    "320",
+    "--width",
+    "512",
+    "--num-frames",
+    "61",
+    "--steps",
+    "50",
+    "--seed",
+    "42",
+    "--out",
+    "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p4c-tp2cfg/base.latents.pt"
+  ],
+  "env": [
+    "PYTHONPATH=/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan",
+    "NEURON_RT_VIRTUAL_CORE_SIZE=2",
+    "HF_HUB_OFFLINE=1"
+  ],
+  "rc": 0,
+  "wall_s": 122.3,
+  "nmon_peak_gib": {
+    "0": 9.69,
+    "1": 9.69,
+    "2": 9.69,
+    "3": 9.69
+  },
+  "host_rss_peak_gib": {
+    "_total": 36.35,
+    "other": 36.35
+  }
+}

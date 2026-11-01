@@ -1,0 +1,39 @@
+{
+  "name": "p3-native-tp2cfg/compile",
+  "backend": "neuron",
+  "cmd": [
+    "bash",
+    "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_difflet.sh",
+    "neuron",
+    "compile",
+    "--model-id",
+    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+    "--height",
+    "480",
+    "--width",
+    "848",
+    "--num-frames",
+    "121",
+    "--tp-degree",
+    "2",
+    "--cfg-parallel"
+  ],
+  "env": [
+    "HF_HUB_OFFLINE=1",
+    "PATH=/home/ubuntu/venvs/native-312/bin:/opt/aws/neuron/bin:/usr/local/bin:/usr/bin:/bin"
+  ],
+  "rc": 0,
+  "wall_s": 2807.1,
+  "nmon_peak_gib": {
+    "0": 18.77,
+    "1": 18.77,
+    "2": 18.77,
+    "3": 18.77
+  },
+  "host_rss_peak_gib": {
+    "_total": 79.01,
+    "other": 2.92,
+    "transformer": 78.26,
+    "vae": 6.22
+  }
+}

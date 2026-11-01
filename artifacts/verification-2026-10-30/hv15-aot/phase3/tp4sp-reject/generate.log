@@ -1,0 +1,43 @@
+date: 2026-10-31T03:43:56+0000
+cmd: bash /home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_difflet.sh trainium generate --model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v --height 480 --width 848 --num-frames 121 --steps 50 --seed 42 --tp-degree 4 --sp --prompt a cinematic shot of a red fox running through a snowy forest --keep-work-dir --work-dir /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p3-tp4sp-reject/generate.work --output /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p3-tp4sp-reject/generate.mp4
+env: ['HF_HUB_OFFLINE=1']
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+Loading pipeline components...:   0%|          | 0/7 [00:00<?, ?it/s]
+Loading checkpoint shards:   0%|          | 0/3 [00:00<?, ?it/s][ALoading checkpoint shards: 100%|██████████| 3/3 [00:00<00:00, 186.54it/s]
+
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s][A
+Loading checkpoint shards:  50%|█████     | 1/2 [00:00<00:00,  2.64it/s][ALoading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00,  5.13it/s]
+Loading pipeline components...:  43%|████▎     | 3/7 [00:00<00:00,  6.69it/s]Guiders are currently an experimental feature under active development. The API is subject to breaking changes in future releases.
+Loading pipeline components...:  71%|███████▏  | 5/7 [00:00<00:00,  7.21it/s]Loading pipeline components...: 100%|██████████| 7/7 [00:00<00:00,  8.74it/s]
+[hv15] encode: load 0.8 s
+[hv15] encode request 0: 10.0 s (prompt + negative)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+[hv15] no valid compiled transformer artifact at /home/ubuntu/.cache/difflet/hunyuan_video_15_aot_dit/275d3f909e43f791 (manifest missing or configuration changed); run `difflet compile` with the same flags first.
+[difflet] work dir preserved at /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p3-tp4sp-reject/generate.work for inspection
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/main.py", line 1338, in <module>
+    main()
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/main.py", line 1334, in main
+    getattr(orchestrator, args.command)()
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/orchestrators/hunyuan_video_15.py", line 85, in generate
+    self._run("generate")
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/orchestrators/hunyuan_video_15.py", line 91, in _run
+    return self._run_aot(mode)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/orchestrators/hunyuan_video_15.py", line 315, in _run_aot
+    runner.run_stage(_HF_MODEL_ID, "aot_transformer", num_cores=tp * (2 if cfg else 1) * cp,
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/runner.py", line 258, in run_stage
+    subprocess.run(cmd, env=env, check=True)
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['/home/ubuntu/venvs/difflet-neuron/bin/python', '-m', 'difflet.cli.stage', '--orchestrator', 'hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v', '--stage', 'aot_transformer', '--model-id', 'hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v', '--stage-mode', 'generate', '--work-dir', '/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p3-tp4sp-reject/generate.work', '--tp-degree', '4', '--cp-degree', '1', '--height', '480', '--width', '848', '--num-frames', '121', '--steps', '50', '--seed', '42', '--sp', '--prompt', 'a cinematic shot of a red fox running through a snowy forest', '--output', '/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p3-tp4sp-reject/generate.mp4', '--dp-schedule', 'round_robin']' returned non-zero exit status 1.

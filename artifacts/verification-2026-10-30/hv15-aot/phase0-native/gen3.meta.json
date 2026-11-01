@@ -1,0 +1,44 @@
+{
+  "name": "native-tp2cfg/gen3",
+  "backend": "neuron",
+  "cmd": [
+    "bash",
+    "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_difflet.sh",
+    "neuron",
+    "generate",
+    "--model-id",
+    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+    "--height",
+    "320",
+    "--width",
+    "512",
+    "--num-frames",
+    "61",
+    "--steps",
+    "3",
+    "--seed",
+    "42",
+    "--tp-degree",
+    "2",
+    "--cfg-parallel",
+    "--prompt",
+    "a cinematic shot of a red fox running through a snowy forest",
+    "--keep-work-dir",
+    "--work-dir",
+    "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/native-tp2cfg/gen3.work",
+    "--output",
+    "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/native-tp2cfg/gen3.mp4"
+  ],
+  "env": [
+    "HF_HUB_OFFLINE=1",
+    "PATH=/home/ubuntu/venvs/native-312/bin:/opt/aws/neuron/bin:/usr/local/bin:/usr/bin:/bin"
+  ],
+  "rc": 0,
+  "wall_s": 235.9,
+  "nmon_peak_gib": {
+    "0": 9.58,
+    "1": 9.66,
+    "2": 9.92,
+    "3": 9.66
+  }
+}

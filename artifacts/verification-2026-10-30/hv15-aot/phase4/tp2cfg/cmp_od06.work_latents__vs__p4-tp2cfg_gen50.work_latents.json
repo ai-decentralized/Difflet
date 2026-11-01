@@ -1,0 +1,28 @@
+{
+  "candidate": "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p4-tp2cfg/od06.work/latents.pt",
+  "reference": "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p4-tp2cfg/gen50.work/latents.pt",
+  "sha256": [
+    "f193d7b0262bb412845576c54f753e486a3cf20889eda3facf3cb3e0fb0c56b1",
+    "c13285e0f4b03713162c3ef251ade565ce922cc274bae8ab4d28db0b0650a480"
+  ],
+  "shape": [
+    1,
+    32,
+    16,
+    20,
+    32
+  ],
+  "cosine": 0.9182960845777142,
+  "rel_l1": 0.3729801985366358,
+  "max_abs": 6.4375,
+  "mean_abs": 0.3203130858659279,
+  "nan": [
+    0,
+    0
+  ],
+  "inf": [
+    0,
+    0
+  ],
+  "bit_identical": false
+}

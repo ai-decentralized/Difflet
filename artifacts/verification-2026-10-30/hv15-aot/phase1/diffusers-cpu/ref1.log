@@ -1,0 +1,22 @@
+date: 2026-10-30T22:36:06+0000
+cmd: bash /home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_py.sh scripts/hv15_diffusers_cpu_latents.py --embeds /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/native-tp2cfg/gen1.work/embeds.pt --noise-seed-fp32-round 42 --height 320 --width 512 --num-frames 61 --steps 1 --out /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/diffusers-cpu/ref1.latents.pt
+env: ['PYTHONPATH=/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan', 'HF_HUB_OFFLINE=1', 'TORCH_DEVICE_BACKEND_AUTOLOAD=0']
+Loading pipeline components...:   0%|          | 0/4 [00:00<?, ?it/s]
+Loading checkpoint shards:   0%|          | 0/7 [00:00<?, ?it/s][A
+Loading checkpoint shards:  14%|█▍        | 1/7 [00:06<00:39,  6.50s/it][A
+Loading checkpoint shards:  29%|██▊       | 2/7 [00:38<01:48, 21.67s/it][A
+Loading checkpoint shards:  43%|████▎     | 3/7 [01:09<01:42, 25.60s/it][A
+Loading checkpoint shards:  57%|█████▋    | 4/7 [01:46<01:30, 30.27s/it][A
+Loading checkpoint shards:  71%|███████▏  | 5/7 [02:23<01:05, 32.71s/it][A
+Loading checkpoint shards:  86%|████████▌ | 6/7 [03:00<00:34, 34.30s/it][A
+Loading checkpoint shards: 100%|██████████| 7/7 [03:27<00:00, 31.90s/it][ALoading checkpoint shards: 100%|██████████| 7/7 [03:27<00:00, 29.70s/it]
+Loading pipeline components...:  25%|██▌       | 1/4 [03:27<10:23, 207.95s/it]
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s][A
+Loading checkpoint shards:  50%|█████     | 1/2 [00:00<00:00,  3.69it/s][ALoading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00,  7.17it/s]
+Loading pipeline components...:  75%|███████▌  | 3/4 [03:28<00:54, 54.02s/it] Guiders are currently an experimental feature under active development. The API is subject to breaking changes in future releases.
+Loading pipeline components...: 100%|██████████| 4/4 [03:28<00:00, 52.06s/it]
+[hv15-diffusers] load 208.2 s
+  0%|          | 0/1 [00:00<?, ?it/s]Modular Diffusers is currently an experimental feature under active development. The API is subject to breaking changes in future releases.
+100%|██████████| 1/1 [02:33<00:00, 153.15s/it]100%|██████████| 1/1 [02:41<00:00, 161.80s/it]
+[hv15-diffusers] denoise 161.8 s, 1 steps
+[hv15-diffusers] latents (1, 32, 16, 20, 32) torch.bfloat16 saved to /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/diffusers-cpu/ref1.latents.pt

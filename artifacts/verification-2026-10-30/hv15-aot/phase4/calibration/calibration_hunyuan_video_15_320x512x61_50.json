@@ -1,0 +1,25 @@
+{
+  "accumulate": false,
+  "cadence": 0,
+  "cooldown_steps": 5,
+  "fit_r2": 0.40632438362288126,
+  "hardware_measured": true,
+  "mod_input_source": "block0_modulated_input",
+  "model": "hunyuan_video_15",
+  "n_samples": 49,
+  "num_steps": 50,
+  "online_delta_alpha": 0.0,
+  "poly_coef": [
+    0.4093019913610454,
+    -18.022681862699084,
+    292.7013435894034,
+    -1252.9223723760745
+  ],
+  "schema": "difflet-m9-teacache-calibration-v1",
+  "shape_label": "320x512x61",
+  "skip_run_length": 1,
+  "source_pairs_json": "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p4-calib/calibration_hunyuan_video_15_320x512x61_50.json.pairs.json",
+  "target_speedup": 1.5,
+  "threshold": 0.2218164378192247,
+  "warmup_steps": 5
+}

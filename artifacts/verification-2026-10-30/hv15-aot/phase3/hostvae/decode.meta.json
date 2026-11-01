@@ -1,0 +1,54 @@
+{
+  "name": "p3-hostvae/decode",
+  "backend": "trainium",
+  "cmd": [
+    "bash",
+    "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_py.sh",
+    "-m",
+    "difflet.cli.stage",
+    "--orchestrator",
+    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+    "--stage",
+    "aot_vae",
+    "--model-id",
+    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+    "--stage-mode",
+    "generate",
+    "--work-dir",
+    "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p3-hostvae/work",
+    "--tp-degree",
+    "2",
+    "--cp-degree",
+    "1",
+    "--cfg-parallel",
+    "--height",
+    "480",
+    "--width",
+    "848",
+    "--num-frames",
+    "121",
+    "--steps",
+    "50",
+    "--seed",
+    "42",
+    "--output",
+    "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p3-hostvae/decode.mp4"
+  ],
+  "env": [
+    "DIFFLET_BACKEND=trainium",
+    "HF_HUB_OFFLINE=1",
+    "PYTHONPATH=/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan"
+  ],
+  "rc": 0,
+  "wall_s": 2535.1,
+  "nmon_peak_gib": {
+    "0": 0.0,
+    "1": 0.0,
+    "2": 0.0,
+    "3": 0.0
+  },
+  "host_rss_peak_gib": {
+    "_total": 27.98,
+    "aot_vae": 27.98
+  }
+}

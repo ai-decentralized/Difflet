@@ -1,0 +1,28 @@
+{
+  "candidate": "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p1r-tp2cfg/native_inputs3.latents.pt",
+  "reference": "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/diffusers-cpu/ref3.latents.pt",
+  "sha256": [
+    "abf95d14f555b9152023219613d98ecca9657b60d8e0fc46e5d2caaa84ad7bc4",
+    "69744b47eff2aa5b4097907d13866e25dc1e5506ca1edcad2dee06b104f93e42"
+  ],
+  "shape": [
+    1,
+    32,
+    16,
+    20,
+    32
+  ],
+  "cosine": 0.9861074911725186,
+  "rel_l1": 0.1625908270927079,
+  "max_abs": 3.021484375,
+  "mean_abs": 0.22406464091036468,
+  "nan": [
+    0,
+    0
+  ],
+  "inf": [
+    0,
+    0
+  ],
+  "bit_identical": false
+}

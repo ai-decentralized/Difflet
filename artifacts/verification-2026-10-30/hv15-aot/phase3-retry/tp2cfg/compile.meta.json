@@ -1,0 +1,34 @@
+{
+  "name": "p3r-tp2cfg-noccop/compile",
+  "backend": "trainium",
+  "cmd": [
+    "bash",
+    "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_difflet.sh",
+    "trainium",
+    "compile",
+    "--model-id",
+    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+    "--height",
+    "480",
+    "--width",
+    "848",
+    "--num-frames",
+    "121",
+    "--tp-degree",
+    "2",
+    "--cfg-parallel"
+  ],
+  "env": [
+    "HF_HUB_OFFLINE=1",
+    "PYTHONFAULTHANDLER=1",
+    "DIFFLET_HUNYUAN15_COMPILER_ARGS=\"--model-type=transformer -O1 --auto-cast=none --internal-hlo2tensorizer-options='--verify-hlo=true'\""
+  ],
+  "rc": 0,
+  "wall_s": 3970.0,
+  "nmon_peak_gib": {},
+  "host_rss_peak_gib": {
+    "_total": 116.52,
+    "aot_transformer": 31.46,
+    "other": 107.51
+  }
+}

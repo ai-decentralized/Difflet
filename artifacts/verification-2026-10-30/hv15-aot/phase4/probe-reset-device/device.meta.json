@@ -1,0 +1,27 @@
+{
+  "name": "p4-probe-reset/device",
+  "backend": "trainium",
+  "cmd": [
+    "bash",
+    "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_py.sh",
+    "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/p45/probe_reset_device.py",
+    "/home/ubuntu/.cache/difflet/hunyuan_video_15_aot_dit/9667b25006443bb5"
+  ],
+  "env": [
+    "PYTHONPATH=/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan",
+    "NEURON_RT_VIRTUAL_CORE_SIZE=2",
+    "HF_HUB_OFFLINE=1"
+  ],
+  "rc": 0,
+  "wall_s": 34.8,
+  "nmon_peak_gib": {
+    "0": 9.82,
+    "1": 9.82,
+    "2": 9.11,
+    "3": 9.12
+  },
+  "host_rss_peak_gib": {
+    "_total": 20.12,
+    "other": 20.12
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "name": "vae-control/tile256_1f",
+  "backend": "trainium",
+  "cmd": [
+    "bash",
+    "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_py.sh",
+    "scripts/hunyuan15_vae_parity.py",
+    "--vae-dir",
+    "/home/ubuntu/.cache/huggingface/hub/models--hunyuanvideo-community--HunyuanVideo-1.5-Diffusers-480p_t2v/snapshots/286be7ce72277246578a3e3cc2487e95ddae5bcf/vae",
+    "--cache-dir",
+    "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/vae-neff/tile256_1f",
+    "--height",
+    "256",
+    "--width",
+    "256",
+    "--num-frames",
+    "1",
+    "--tile-sample-min-height",
+    "256",
+    "--tile-sample-min-width",
+    "256",
+    "--skip-reference",
+    "--skip-warmup",
+    "--metrics-out",
+    "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/vae-control/tile256_1f_metrics.json"
+  ],
+  "env": [
+    "PYTHONPATH=/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan",
+    "NEURON_RT_VIRTUAL_CORE_SIZE=2",
+    "NEURON_RT_NUM_CORES=1",
+    "HF_HUB_OFFLINE=1"
+  ],
+  "rc": 1,
+  "wall_s": 43.4,
+  "nmon_peak_gib": {
+    "0": 0.0,
+    "1": 0.0,
+    "2": 0.0,
+    "3": 0.0
+  }
+}

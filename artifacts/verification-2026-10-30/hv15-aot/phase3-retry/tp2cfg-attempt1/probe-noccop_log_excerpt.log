@@ -1,0 +1,9 @@
+1:2026-10-31T15:05:21Z INFO 1736934 [root]: /home/ubuntu/venvs/difflet-neuron/bin/neuronx-cc compile --framework=XLA /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p3r-tp2cfg/ncc/model.MODULE_c09198d30413c21f308f+e16d647b.hlo_module.pb --output model.neff --target=trn2 --model-type=transformer -O1 --auto-cast=none --verbose=35 --logfile=log-neuron-cc.txt --enable-internal-neff-wrapper
+2:2026-10-31T15:05:21Z INFO 1736934 [root]: NeuronX Compiler version 2.26.6360.0+6f180f47 Python version 3.12.3 HWM version 2.26.0.6360++6f180f47 NumPy version 2.5.2
+2202:2026-10-31T15:05:25Z INFO 1736988 [sg0002/Tensorizer/RelaxPredicates]: Running RelaxPredicates
+2209:2026-10-31T15:05:25Z INFO 1736988 [sg0002/Tensorizer/RelaxPredicates]: RelaxPredicates finished after 0.010 seconds
+3072:2026-10-31T15:05:28Z INFO 1736987 [sg0001/Tensorizer/RelaxPredicates]: Running RelaxPredicates
+3088:2026-10-31T15:05:28Z INFO 1736987 [sg0001/Tensorizer/RelaxPredicates]: RelaxPredicates finished after 0.024 seconds
+3312:2026-10-31T15:05:30Z INFO 1736986 [sg0000/Tensorizer/RelaxPredicates]: Running RelaxPredicates
+3313:2026-10-31T15:05:30Z INFO 1736986 [sg0000/Tensorizer/RelaxPredicates]: Finished (changed=True)
+3314:2026-10-31T15:05:30Z INFO 1736986 [sg0000/Tensorizer/RelaxPredicates]: RelaxPredicates finished after 0.029 seconds

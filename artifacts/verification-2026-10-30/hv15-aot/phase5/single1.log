@@ -1,0 +1,43 @@
+date: 2026-11-01T22:27:27+0000
+cmd: bash /home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_difflet.sh trainium generate --model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v --height 320 --width 512 --num-frames 61 --steps 50 --tp-degree 2 --cfg-parallel --prompt a red panda eating bamboo in a misty bamboo forest, soft morning light --seed 1234 --keep-work-dir --work-dir /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p5-batch/single1.work --output /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p5-batch/single1.mp4
+env: ['HF_HUB_OFFLINE=1']
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+Loading pipeline components...:   0%|          | 0/7 [00:00<?, ?it/s]Guiders are currently an experimental feature under active development. The API is subject to breaking changes in future releases.
+Loading pipeline components...:  43%|████▎     | 3/7 [00:00<00:00,  9.95it/s]Loading pipeline components...:  57%|█████▋    | 4/7 [00:06<00:05,  1.92s/it]
+Loading checkpoint shards:   0%|          | 0/3 [00:00<?, ?it/s][A
+Loading checkpoint shards:  67%|██████▋   | 2/3 [00:00<00:00,  8.75it/s][A
+Loading checkpoint shards: 100%|██████████| 3/3 [00:00<00:00,  8.32it/s][ALoading checkpoint shards: 100%|██████████| 3/3 [00:00<00:00,  8.40it/s]
+Loading pipeline components...:  71%|███████▏  | 5/7 [00:06<00:02,  1.43s/it]
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s][A
+Loading checkpoint shards:  50%|█████     | 1/2 [00:37<00:37, 37.65s/it][A
+Loading checkpoint shards: 100%|██████████| 2/2 [00:38<00:00, 15.99s/it][ALoading checkpoint shards: 100%|██████████| 2/2 [00:38<00:00, 19.24s/it]
+Loading pipeline components...: 100%|██████████| 7/7 [00:44<00:00,  9.88s/it]Loading pipeline components...: 100%|██████████| 7/7 [00:44<00:00,  6.41s/it]
+[hv15] encode: load 44.9 s
+[hv15] encode request 0: 103.2 s (prompt + negative)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+Neuron: Loading presharded checkpoints for ranks: 0...3
+Neuron: Presharded file read: 5.51s for 4 shard(s) (32418.0 MB total)
+Neuron: Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+Neuron: Finished traced model weight initialization in 268.93s (device init 268.93s, total load_weights 274.44s)
+Neuron: Skipping model warmup
+[hv15] aot transformer load 275.1 s
+[hv15] request 0: denoise 84.5 s, 50 steps, median 1562 ms (first 7758 ms)
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00, 232.27it/s]
+[hv15] host vae load 0.0 s
+[hv15] request 0: host decode 413.5 s; [difflet] video saved to /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p5-batch/single1.mp4

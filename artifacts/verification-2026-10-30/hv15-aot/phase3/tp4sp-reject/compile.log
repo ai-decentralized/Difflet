@@ -1,0 +1,64 @@
+date: 2026-10-31T03:43:50+0000
+cmd: bash /home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_difflet.sh trainium compile --model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v --height 480 --width 848 --num-frames 121 --tp-degree 4 --sp
+env: ['HF_HUB_OFFLINE=1']
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/stage.py", line 156, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/stage.py", line 151, in main
+    orchestrator._run_stage_internal(args.stage, args)
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/orchestrators/hunyuan_video_15.py", line 169, in _run_stage_internal
+    self._stage_aot_transformer(args)
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/orchestrators/hunyuan_video_15.py", line 386, in _stage_aot_transformer
+    app = aot15.build_aot_application(model_path=root, parallel=parallel, teacache_fused=adaptive, **shape)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/models/hunyuan_video/aot15.py", line 117, in build_aot_application
+    return create_hunyuan_video15_application(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/models/hunyuan_video/entry.py", line 80, in create_hunyuan_video15_application
+    return NeuronHunyuanVideoApplication(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/models/hunyuan_video/application.py", line 540, in __init__
+    config = create_hunyuan_video15_backbone_config(
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/models/hunyuan_video/application.py", line 337, in create_hunyuan_video15_backbone_config
+    return HunyuanVideo15BackboneInferenceConfig(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/backends/trainium/core/config.py", line 884, in __init__
+    self.validate_config()
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/backends/trainium/hunyuan_video/backbone15.py", line 371, in validate_config
+    self._validate_sequence_parallel(heads, tp)
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/backends/trainium/hunyuan_video/backbone15.py", line 423, in _validate_sequence_parallel
+    raise ValueError(
+ValueError: HunyuanVideo 1.5 sequence parallelism splits the N=49290 image tokens of 480x848x121 over tp_degree=4, but N % 4 = 2; use num_frames in [117, 125] at this resolution, or tp_degree in [2].
+[difflet] work dir preserved at /home/ubuntu/.cache/difflet/work/hv15 for inspection
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/main.py", line 1338, in <module>
+    main()
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/main.py", line 1334, in main
+    getattr(orchestrator, args.command)()
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/orchestrators/hunyuan_video_15.py", line 82, in compile
+    self._run("compile")
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/orchestrators/hunyuan_video_15.py", line 91, in _run
+    return self._run_aot(mode)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/orchestrators/hunyuan_video_15.py", line 315, in _run_aot
+    runner.run_stage(_HF_MODEL_ID, "aot_transformer", num_cores=tp * (2 if cfg else 1) * cp,
+  File "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/difflet/cli/runner.py", line 258, in run_stage
+    subprocess.run(cmd, env=env, check=True)
+  File "/usr/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['/home/ubuntu/venvs/difflet-neuron/bin/python', '-m', 'difflet.cli.stage', '--orchestrator', 'hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v', '--stage', 'aot_transformer', '--model-id', 'hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v', '--stage-mode', 'compile', '--work-dir', '/home/ubuntu/.cache/difflet/work/hv15', '--tp-degree', '4', '--cp-degree', '1', '--height', '480', '--width', '848', '--num-frames', '121', '--steps', '50', '--seed', '42', '--sp', '--dp-schedule', 'round_robin']' returned non-zero exit status 1.

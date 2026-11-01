@@ -1,0 +1,45 @@
+{
+  "name": "p2-dpcheck/dpcheck",
+  "backend": "trainium",
+  "cmd": [
+    "bash",
+    "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_py.sh",
+    "scripts/verify_dp_correctness.py",
+    "--model-id",
+    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+    "--dp",
+    "2",
+    "--tp-degree",
+    "2",
+    "--steps",
+    "3",
+    "--",
+    "--height",
+    "320",
+    "--width",
+    "512",
+    "--num-frames",
+    "61"
+  ],
+  "env": [
+    "DIFFLET_BACKEND=trainium",
+    "HF_HUB_OFFLINE=1",
+    "TMPDIR=/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p2-dpcheck/tmp",
+    "PYTHONPATH=/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan"
+  ],
+  "rc": 0,
+  "wall_s": 4270.7,
+  "nmon_peak_gib": {
+    "0": 10.25,
+    "1": 10.25,
+    "2": 10.25,
+    "3": 10.25
+  },
+  "host_rss_peak_gib": {
+    "_total": 41.81,
+    "aot_transformer": 40.08,
+    "aot_vae": 41.72,
+    "encode": 33.28,
+    "other": 0.09
+  }
+}

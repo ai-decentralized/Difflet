@@ -1,0 +1,40 @@
+2026-10-31T04:17:18Z INFO 1572852 [sg0002/Tensorizer/RelaxPredicates]: Running RelaxPredicates
+2026-10-31T04:17:18Z INFO 1572850 [sg0000/Tensorizer/MaskPropagation]: Finished (changed=False)
+2026-10-31T04:17:18Z INFO 1572850 [sg0000/Tensorizer/MaskPropagation]: MaskPropagation finished after 0.010 seconds
+2026-10-31T04:17:18Z INFO 1572850 [sg0000/Tensorizer/Recompute]: Running Recompute
+2026-10-31T04:17:18Z INFO 1572850 [sg0000/Tensorizer/Recompute]: Finished (changed=False)
+2026-10-31T04:17:18Z INFO 1572850 [sg0000/Tensorizer/Recompute]: Recompute finished after 0.000 seconds
+2026-10-31T04:17:18Z INFO 1572850 [Tensorizer]: After optimization: 128 statements
+2026-10-31T04:17:18Z INFO 1572850 [sg0000/Tensorizer/DoNothing]: Running DoNothing
+2026-10-31T04:17:18Z INFO 1572850 [sg0000/Tensorizer/DoNothing]: Finished (changed=True)
+2026-10-31T04:17:18Z INFO 1572850 [sg0000/Tensorizer/DoNothing]: DoNothing finished after 0.000 seconds
+2026-10-31T04:17:18Z INFO 1572850 [sg0000/Tensorizer/MutateDataType]: Running MutateDataType
+2026-10-31T04:17:18Z INFO 1572852 [sg0002/Tensorizer/RelaxPredicates]: Finished (changed=False)
+2026-10-31T04:17:18Z INFO 1572852 [sg0002/Tensorizer/RelaxPredicates]: RelaxPredicates finished after 0.010 seconds
+2026-10-31T04:17:18Z INFO 1572852 [sg0002/Tensorizer/TensorInitialization]: Running TensorInitialization
+2026-10-31T04:17:18Z INFO 1572850 [sg0000/Tensorizer/MutateDataType]: Finished (changed=True)
+2026-10-31T04:17:18Z INFO 1572850 [sg0000/Tensorizer/MutateDataType]: MutateDataType finished after 0.003 seconds
+2026-10-31T04:17:18Z INFO 1572850 [sg0000/Tensorizer/Simplifier]: Running Simplifier
+2026-10-31T04:17:18Z INFO 1572850 [sg0000/Tensorizer/Simplifier]: Running Simplifier_iteration_0
+2026-10-31T04:17:18Z INFO 1572852 [sg0002/Tensorizer/TensorInitialization]: Finished (changed=False)
+2026-10-31T04:17:18Z INFO 1572852 [sg0002/Tensorizer/TensorInitialization]: TensorInitialization finished after 0.002 seconds
+2026-10-31T04:17:18Z INFO 1572852 [sg0002/Tensorizer/NeuronSimplifyPredicates]: Running NeuronSimplifyPredicates
+2026-10-31T04:17:18Z INFO 1572850 [sg0000/Tensorizer/Simplifier]: Simplifier_iteration_0 finished after 0.034 seconds
+2026-10-31T04:17:18Z INFO 1572850 [sg0000/Tensorizer/Simplifier]: Finished (changed=False)
+2026-10-31T04:17:18Z INFO 1572850 [sg0000/Tensorizer/Simplifier]: Simplifier finished after 0.035 seconds
+2026-10-31T04:17:18Z INFO 1572850 [sg0000/Tensorizer/TileCCOps]: Running TileCCOps
+2026-10-31T04:17:18Z INFO 1572852 [sg0002/Tensorizer/NeuronSimplifyPredicates]: Finished (changed=False)
+2026-10-31T04:17:18Z INFO 1572852 [sg0002/Tensorizer/NeuronSimplifyPredicates]: NeuronSimplifyPredicates finished after 0.038 seconds
+2026-10-31T04:17:18Z INFO 1572852 [sg0002/Tensorizer/ExpandISAMacro]: Running ExpandISAMacro
+2026-10-31T04:17:18Z INFO 1572852 [sg0002/Tensorizer/ExpandISAMacro]: Finished (changed=False)
+2026-10-31T04:17:18Z INFO 1572852 [sg0002/Tensorizer/ExpandISAMacro]: ExpandISAMacro finished after 0.003 seconds
+2026-10-31T04:17:18Z INFO 1572852 [sg0002/Tensorizer/SimplifyNeuronTensor]: Running SimplifyNeuronTensor
+2026-10-31T04:17:18Z INFO 1572850 [sg0000/Tensorizer/TileCCOps]: pass did not tile CC tensor due to `multi_rank_size=24576 is not above min_allgather_tile_size_in_bytes=8388608`
+2026-10-31T04:17:18Z INFO 1572850 [sg0000/Tensorizer/TileCCOps]:   in   bfloat16 (12288,) %'all_gather.1' = AllGatherOp-253 AllGather_add(bfloat16 (6144,) %'dot.3', replica_groups = [[0, 1], [2, 3]],all_gather_dim = DimensionSet((12288,), {0}),stream_id = -1) # dl = tensor_op_name: NeuronHunyuanVideoApplication[.1]/NeuronHunyuanVideo15BackboneApplication[.1]/_HunyuanVideo15TraceModule[.1]/HunyuanVideo15Transformer3DModel[.1]/HunyuanVideo15TransformerBlock[.1]/AdaLayerNormZero[.1]/ColumnParallelLinear[.1][1]/_cpl_maybe_gather_output/gather_from_tensor_model_parallel_region/_gather_along_last_dim/wrapped_fn/aten.transpose.int/xla__all_gather_all-gather.105 | hlo_id: 118 | /home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/parallel_layers/mappings.py:249:0 | , id = 253
+2026-10-31T04:17:18Z INFO 1572850 [sg0000/Tensorizer/TileCCOps]: pass did not tile CC tensor due to `multi_rank_size=24576 is not above min_allgather_tile_size_in_bytes=8388608`
+2026-10-31T04:17:18Z INFO 1572850 [sg0000/Tensorizer/TileCCOps]:   in   bfloat16 (12288,) %'all_gather.2' = AllGatherOp-579 AllGather_add(bfloat16 (6144,) %'add.16', replica_groups = [[0, 1], [2, 3]],all_gather_dim = DimensionSet((12288,), {0}),stream_id = -1) # dl = tensor_op_name: NeuronHunyuanVideoApplication[.1]/NeuronHunyuanVideo15BackboneApplication[.1]/_HunyuanVideo15TraceModule[.1]/HunyuanVideo15Transformer3DModel[.1]/HunyuanVideo15TransformerBlock[.1]/AdaLayerNormZero[.2]/ColumnParallelLinear[.2][2]/_cpl_maybe_gather_output/gather_from_tensor_model_parallel_region/_gather_along_last_dim/wrapped_fn/aten.transpose.int/xla__all_gather_all-gather.126 | hlo_id: 431 | /home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/parallel_layers/mappings.py:249:0 | , id = 579
+2026-10-31T04:17:18Z INFO 1572852 [sg0002/Tensorizer/SimplifyNeuronTensor]: Running DeadCodeElimination_iteration_0
+2026-10-31T04:17:18Z INFO 1572852 [sg0002/Tensorizer/SimplifyNeuronTensor]: DeadCodeElimination_iteration_0 finished after 0.001 seconds
+2026-10-31T04:17:18Z INFO 1572852 [sg0002/Tensorizer/SimplifyNeuronTensor]: Finished (changed=True)
+2026-10-31T04:17:18Z INFO 1572852 [sg0002/Tensorizer/SimplifyNeuronTensor]: SimplifyNeuronTensor finished after 0.006 seconds
+2026-10-31T04:17:18Z INFO 1572852 [sg0002/Tensorizer/DMALocalityOpt]: Running DMALocalityOpt

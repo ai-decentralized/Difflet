@@ -1,0 +1,51 @@
+{
+  "name": "p3-native-tp2cfg/gen50",
+  "backend": "neuron",
+  "cmd": [
+    "bash",
+    "/home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_difflet.sh",
+    "neuron",
+    "generate",
+    "--model-id",
+    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+    "--height",
+    "480",
+    "--width",
+    "848",
+    "--num-frames",
+    "121",
+    "--steps",
+    "50",
+    "--seed",
+    "42",
+    "--tp-degree",
+    "2",
+    "--cfg-parallel",
+    "--prompt",
+    "a cinematic shot of a red fox running through a snowy forest",
+    "--keep-work-dir",
+    "--work-dir",
+    "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p3-native-tp2cfg/gen50.work",
+    "--output",
+    "/home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p3-native-tp2cfg/gen50.mp4"
+  ],
+  "env": [
+    "HF_HUB_OFFLINE=1",
+    "PATH=/home/ubuntu/venvs/native-312/bin:/opt/aws/neuron/bin:/usr/local/bin:/usr/bin:/bin"
+  ],
+  "rc": 0,
+  "wall_s": 960.7,
+  "nmon_peak_gib": {
+    "0": 18.48,
+    "1": 18.52,
+    "2": 18.48,
+    "3": 18.48
+  },
+  "host_rss_peak_gib": {
+    "_total": 70.93,
+    "encode": 17.22,
+    "other": 0.03,
+    "transformer": 70.9,
+    "vae": 5.81
+  }
+}

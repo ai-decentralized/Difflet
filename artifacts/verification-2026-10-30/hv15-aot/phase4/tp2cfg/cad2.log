@@ -1,0 +1,42 @@
+date: 2026-10-31T19:03:52+0000
+cmd: bash /home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_difflet.sh trainium generate --model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v --height 320 --width 512 --num-frames 61 --steps 50 --seed 42 --tp-degree 2 --cfg-parallel --prompt a cinematic shot of a red fox running through a snowy forest --keep-work-dir --work-dir /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p4-tp2cfg/cad2.work --output /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p4-tp2cfg/cad2.mp4 --teacache-cadence 2
+env: ['HF_HUB_OFFLINE=1']
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+Loading pipeline components...:   0%|          | 0/7 [00:00<?, ?it/s]Guiders are currently an experimental feature under active development. The API is subject to breaking changes in future releases.
+
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s][A
+Loading checkpoint shards:  50%|█████     | 1/2 [00:00<00:00,  2.46it/s][ALoading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00,  4.78it/s]
+Loading pipeline components...:  43%|████▎     | 3/7 [00:00<00:00,  6.95it/s]Loading pipeline components...:  71%|███████▏  | 5/7 [00:00<00:00, 10.09it/s]
+Loading checkpoint shards:   0%|          | 0/3 [00:00<?, ?it/s][ALoading checkpoint shards: 100%|██████████| 3/3 [00:00<00:00, 194.92it/s]
+Loading pipeline components...: 100%|██████████| 7/7 [00:00<00:00,  8.83it/s]Loading pipeline components...: 100%|██████████| 7/7 [00:00<00:00,  8.72it/s]
+[hv15] encode: load 0.8 s
+[hv15] encode request 0: 9.6 s (prompt + negative)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:100: DeprecationWarning: torch_neuronx.nki_jit is deprecated, use nki.jit instead.
+  component, error = import_nki(config)
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+/home/ubuntu/venvs/difflet-neuron/lib/python3.12/site-packages/neuronx_distributed/modules/moe/blockwise.py:102: UserWarning: Warning: Failed to import blockwise_mm_bwd_baseline_shard_hidden: No module named 'neuronxcc.nki._private.blockwise_mm_bwd'
+  warnings.warn(f"Warning: {error}")
+[teacache] probe-free controller enabled for hunyuan_video_15/320x512x61: cadence=2 online_delta_alpha=0.0
+Neuron: Loading presharded checkpoints for ranks: 0...3
+Neuron: Presharded file read: 0.37s for 4 shard(s) (32418.0 MB total)
+Neuron: Initializing traced model weights for ranks: 0...3 (runtime_start_rank_id=0)
+Neuron: Finished traced model weight initialization in 25.81s (device init 25.81s, total load_weights 26.18s)
+Neuron: Skipping model warmup
+[hv15] aot transformer load 26.9 s
+[teacache] stats: {'full_steps': 30, 'skipped_steps': 20, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[hv15] request 0: denoise 54.6 s, 50 steps, median 1768 ms (first 3180 ms)
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00, 234.45it/s]
+[hv15] host vae load 0.0 s
+[hv15] request 0: host decode 409.9 s; [difflet] video saved to /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p4-tp2cfg/cad2.mp4

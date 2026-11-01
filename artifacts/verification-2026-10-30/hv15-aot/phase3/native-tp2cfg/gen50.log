@@ -1,0 +1,42 @@
+date: 2026-10-31T05:02:50+0000
+cmd: bash /home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_difflet.sh neuron generate --model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v --height 480 --width 848 --num-frames 121 --steps 50 --seed 42 --tp-degree 2 --cfg-parallel --prompt a cinematic shot of a red fox running through a snowy forest --keep-work-dir --work-dir /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p3-native-tp2cfg/gen50.work --output /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p3-native-tp2cfg/gen50.mp4
+env: ['HF_HUB_OFFLINE=1', 'PATH=/home/ubuntu/venvs/native-312/bin:/opt/aws/neuron/bin:/usr/local/bin:/usr/bin:/bin']
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+Loading pipeline components...:   0%|          | 0/7 [00:00<?, ?it/s]Guiders are currently an experimental feature under active development. The API is subject to breaking changes in future releases.
+
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s][A
+Loading checkpoint shards:  50%|█████     | 1/2 [00:00<00:00,  3.12it/s][ALoading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00,  6.05it/s]
+Loading pipeline components...:  43%|████▎     | 3/7 [00:00<00:00,  8.34it/s]Loading pipeline components...:  57%|█████▋    | 4/7 [00:00<00:00,  6.53it/s]
+Loading checkpoint shards:   0%|          | 0/3 [00:00<?, ?it/s][ALoading checkpoint shards: 100%|██████████| 3/3 [00:00<00:00, 119.33it/s]
+Loading pipeline components...:  86%|████████▌ | 6/7 [00:01<00:00,  5.26it/s]Loading pipeline components...: 100%|██████████| 7/7 [00:01<00:00,  6.70it/s]
+[hv15] encode: load 1.0 s
+[hv15] encode request 0: 8.4 s (prompt + negative)
+
+*****************************************
+Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+*****************************************
+/source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+  _warn_trace_cache_once()
+/source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+  _warn_trace_cache_once()
+/source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+  _warn_trace_cache_once()
+/source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+  _warn_trace_cache_once()
+[weight store] rank 2/4 NeuronHunyuanVideo15TransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (8.38 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/home/ubuntu/.cache/difflet/neuron/weights/286be7ce72277246578a3e3cc2487e95ddae5bcf__transformer__bfloat16__tp2__6256e1e651a8b5d7)
+[weight store] rank 1/4 NeuronHunyuanVideo15TransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (8.38 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/home/ubuntu/.cache/difflet/neuron/weights/286be7ce72277246578a3e3cc2487e95ddae5bcf__transformer__bfloat16__tp2__6256e1e651a8b5d7)
+[weight store] rank 3/4 NeuronHunyuanVideo15TransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (8.38 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/home/ubuntu/.cache/difflet/neuron/weights/286be7ce72277246578a3e3cc2487e95ddae5bcf__transformer__bfloat16__tp2__6256e1e651a8b5d7)
+[weight store] rank 0/4 NeuronHunyuanVideo15TransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (8.38 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/home/ubuntu/.cache/difflet/neuron/weights/286be7ce72277246578a3e3cc2487e95ddae5bcf__transformer__bfloat16__tp2__6256e1e651a8b5d7)
+[hv15] transformer load 43.6 s {'runtime init': 0.0, 'build on meta': 1.6, 'load checkpoint': 40.2, 'eval': 0.0, 'compile': 0.4}
+/source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/neuron_dynamo_backend/executor.py:181: UserWarning: 0The operator aten::contiguous appears to be a view operator, but it has no implementation for the backend "neuron:2". View operators don't support falling back to run on the CPU, since the tensor's storage cannot be shared across devices. (Triggered internally at /__w/pytorch/pytorch/aten/src/ATen/native/CPUFallback.cpp:304.)
+  tensor = tensor.contiguous()
+/source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/neuron_dynamo_backend/executor.py:181: UserWarning: 0The operator aten::contiguous appears to be a view operator, but it has no implementation for the backend "neuron:1". View operators don't support falling back to run on the CPU, since the tensor's storage cannot be shared across devices. (Triggered internally at /__w/pytorch/pytorch/aten/src/ATen/native/CPUFallback.cpp:304.)
+  tensor = tensor.contiguous()
+/source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/neuron_dynamo_backend/executor.py:181: UserWarning: 0The operator aten::contiguous appears to be a view operator, but it has no implementation for the backend "neuron:0". View operators don't support falling back to run on the CPU, since the tensor's storage cannot be shared across devices. (Triggered internally at /__w/pytorch/pytorch/aten/src/ATen/native/CPUFallback.cpp:304.)
+  tensor = tensor.contiguous()
+/source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/neuron_dynamo_backend/executor.py:181: UserWarning: 0The operator aten::contiguous appears to be a view operator, but it has no implementation for the backend "neuron:3". View operators don't support falling back to run on the CPU, since the tensor's storage cannot be shared across devices. (Triggered internally at /__w/pytorch/pytorch/aten/src/ATen/native/CPUFallback.cpp:304.)
+  tensor = tensor.contiguous()
+[hv15] request 0: denoise 754.9 s, 50 steps, median 11178 ms (first 195214 ms)
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:  50%|█████     | 1/2 [00:00<00:00,  3.23it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00,  6.27it/s]
+[hv15] vae load 12.5 s {'load': 10.7}
+[hv15] request 0: decode 89.0 s; [difflet] video saved to /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/p3-native-tp2cfg/gen50.mp4
