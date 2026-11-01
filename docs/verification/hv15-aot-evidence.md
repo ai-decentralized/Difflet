@@ -1111,6 +1111,37 @@ Evidence: `E/phase4/calibration/` (calibration JSON, pairs JSON, `pairs_stats.tx
 `reset` logs, comparisons), `E/phase4/probe-reset-device/`. Helper scripts in `E/phase4/`:
 `pairs_stats.py`, `reset_check.py`, `probe_reset_device.py`.
 
+### Phase 4 reference (R26): native TeaCache cadence 2 on the same settings
+
+Is the 0.92-0.94 drift above a property of skipping steps on HV1.5, or of the AOT TeaCache?
+Native TP2xCFG2 (`native-312` venv, `--backend neuron`), 320x512x61, 50 steps, seed 42, the
+campaign prompt, no negative prompt: the same command as Phase 0's `gen50`, plus
+`--teacache-cadence 2`.
+- **No-TeaCache reference:** Phase 0's native `gen50` (same command, flag absent).
+- **Re-checked here:** a re-run (`gen50b`) is bit-identical to it (sha `33baa167…`). Native is
+  deterministic across sessions, and no native code changed since Phase 0 (the branch's diff
+  under `difflet/backends/neuron/` is empty).
+- **Embeds:** the encode output is tensor-identical to Phase 0's.
+
+| run | `[teacache] stats` | denoise s (first step) | denoise minus first step | step median ms | latents vs native no-TeaCache | mid frame |
+|---|---|---|---|---|---|---|
+| native no TeaCache (`gen50`, `gen50b`) | — | 79.4 / 79.0 (14.4 / 14.2) | 65.0 s | 1325 / 1324 | ref (`gen50b` bit-identical) | fox in snow |
+| native `--teacache-cadence 2` (`cad2`) | `full_steps 30, skipped_steps 20, probe_calls 0` (each rank) | 52.8 (14.4) | **38.4 s (-41%)** | 1323 (full steps) | **cos 0.932074**, rel-L1 0.366, max-abs 8.94, no NaN/Inf | same fox, pose and scene; visibly softer, with a color fringe on the ear |
+
+**Side by side** (each vs its own stack's no-TeaCache run, same settings):
+
+| stack | mode | skipped | cos | rel-L1 | max-abs |
+|---|---|---|---|---|---|
+| AOT | cadence 2 | 20 | **0.938644** | 0.346 | 5.32 |
+| AOT | online-delta 0.6 | 17 | 0.918296 | 0.373 | 6.44 |
+| AOT | adaptive, speedup 1.5 | 18 | 0.910548 | 0.478 | 4.77 |
+| **native** | **cadence 2** | **20** | **0.932074** | 0.366 | 8.94 |
+
+**Interpretation.** At cadence 2, native drifts as far as AOT does (0.932 vs 0.939; AOT is
+slightly closer to its own reference) and saves the same 41% of warm denoise time. So the drift
+is a property of skipping steps on HV1.5 at CFG 6, not an AOT TeaCache defect. A cos ≥ 0.99
+gate for hv15 TeaCache cannot be met on either stack. Evidence: `E/phase4/native-cad2/`.
+
 ### Phase 5: JSONL batch (`--requests`, 2 requests), TP2xCFG2, 50 steps: **PASS after one fix**
 
 Run on the `69162f72…` overlap artifact (HEAD `d001314` for the batch and request 1, `47b2f74`

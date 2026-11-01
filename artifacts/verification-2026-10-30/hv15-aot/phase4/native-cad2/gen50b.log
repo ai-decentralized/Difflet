@@ -1,0 +1,34 @@
+date: 2026-11-01T23:01:09+0000
+cmd: bash /home/ubuntu/Difflet/.claude/worktrees/hv15-aot-parity-plan/.superpowers/sdd/2026-10-30-hv15-aot-parity/run_difflet.sh neuron generate --model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v --height 320 --width 512 --num-frames 61 --steps 50 --seed 42 --tp-degree 2 --cfg-parallel --prompt a cinematic shot of a red fox running through a snowy forest --keep-work-dir --work-dir /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/native-tp2cfg/gen50b.work --output /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/native-tp2cfg/gen50b.mp4
+env: ['HF_HUB_OFFLINE=1', 'PATH=/home/ubuntu/venvs/native-312/bin:/opt/aws/neuron/bin:/usr/local/bin:/usr/bin:/bin']
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+Loading pipeline components...:   0%|          | 0/7 [00:00<?, ?it/s]
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s][A
+Loading checkpoint shards:  50%|█████     | 1/2 [00:00<00:00,  2.96it/s][ALoading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00,  5.77it/s]
+Loading pipeline components...:  14%|█▍        | 1/7 [00:00<00:02,  2.78it/s]Guiders are currently an experimental feature under active development. The API is subject to breaking changes in future releases.
+Loading pipeline components...:  71%|███████▏  | 5/7 [00:00<00:00,  7.56it/s]
+Loading checkpoint shards:   0%|          | 0/3 [00:00<?, ?it/s][ALoading checkpoint shards: 100%|██████████| 3/3 [00:00<00:00, 190.39it/s]
+Loading pipeline components...: 100%|██████████| 7/7 [00:00<00:00,  9.10it/s]
+[hv15] encode: load 0.8 s
+[hv15] encode request 0: 7.2 s (prompt + negative)
+
+*****************************************
+Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+*****************************************
+/source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+  _warn_trace_cache_once()
+/source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+  _warn_trace_cache_once()
+/source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+  _warn_trace_cache_once()
+/source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+  _warn_trace_cache_once()
+[weight store] rank 2/4 NeuronHunyuanVideo15TransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (8.38 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/home/ubuntu/.cache/difflet/neuron/weights/286be7ce72277246578a3e3cc2487e95ddae5bcf__transformer__bfloat16__tp2__6256e1e651a8b5d7)
+[weight store] rank 3/4 NeuronHunyuanVideo15TransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (8.38 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/home/ubuntu/.cache/difflet/neuron/weights/286be7ce72277246578a3e3cc2487e95ddae5bcf__transformer__bfloat16__tp2__6256e1e651a8b5d7)
+[weight store] rank 1/4 NeuronHunyuanVideo15TransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (8.38 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/home/ubuntu/.cache/difflet/neuron/weights/286be7ce72277246578a3e3cc2487e95ddae5bcf__transformer__bfloat16__tp2__6256e1e651a8b5d7)
+[weight store] rank 0/4 NeuronHunyuanVideo15TransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (8.38 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/home/ubuntu/.cache/difflet/neuron/weights/286be7ce72277246578a3e3cc2487e95ddae5bcf__transformer__bfloat16__tp2__6256e1e651a8b5d7)
+[hv15] transformer load 6.2 s {'runtime init': 0.0, 'build on meta': 1.6, 'load checkpoint': 3.1, 'eval': 0.0, 'compile': 0.2}
+[hv15] request 0: denoise 79.0 s, 50 steps, median 1324 ms (first 14161 ms)
+Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:  50%|█████     | 1/2 [00:00<00:00,  3.02it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00,  5.88it/s]
+[hv15] vae load 11.3 s {'load': 9.7}
+[hv15] request 0: decode 30.9 s; [difflet] video saved to /home/ubuntu/.claude/jobs/294a04fc/tmp/campaign/cells/native-tp2cfg/gen50b.mp4
