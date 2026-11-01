@@ -406,7 +406,7 @@ def _load_hv15_denoiser(args: argparse.Namespace):
 
 def _collect_hv15_pairs(args: argparse.Namespace) -> dict[str, Any]:
     num_steps = int(args.num_inference_steps or 50)
-    embeds = torch.load(args.embeds, map_location="cpu")
+    embeds = torch.load(args.embeds, map_location="cpu", weights_only=True)
     started = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     samples = collect_hv15_samples(
         _load_hv15_denoiser(args),

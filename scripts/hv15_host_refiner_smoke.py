@@ -45,12 +45,13 @@ BUNDLE = ROOT / ".difflet-cache" / "hunyuan15_dit_inputs" / "real_320x512x61_4st
 def build_host_refiner(cfg):
     from diffusers.models.transformers.transformer_hunyuan_video15 import HunyuanVideo15TokenRefiner
 
+    # Built like diffusers' context_embedder: the refiner keeps its own default mlp_ratio (4.0),
+    # not the transformer's (as application._get_host_refiner does).
     refiner = HunyuanVideo15TokenRefiner(
         in_channels=int(cfg["text_embed_dim"]),
         num_attention_heads=int(cfg["num_attention_heads"]),
         attention_head_dim=int(cfg["attention_head_dim"]),
         num_layers=int(cfg["num_refiner_layers"]),
-        mlp_ratio=float(cfg.get("mlp_ratio", 4.0)),
     )
     state = {}
     for f in sorted(glob.glob(str(TRANS / "*.safetensors"))):
