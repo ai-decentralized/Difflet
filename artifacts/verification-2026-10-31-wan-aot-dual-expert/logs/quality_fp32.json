@@ -1,0 +1,74 @@
+{
+ "diffusers_bf16_dual_vs_fp32_dual": {
+  "rel_l2": 0.3238,
+  "cosine": 0.9474,
+  "psnr_mean": 21.5535,
+  "psnr_worst": 18.8416,
+  "ssim_mean": 0.8111,
+  "psnr_per_frame": [
+   18.84,
+   19.55,
+   21.39,
+   21.96,
+   22.04,
+   22.46,
+   22.53,
+   22.61,
+   22.6
+  ]
+ },
+ "aot_dual_vs_fp32_dual": {
+  "rel_l2": 0.2438,
+  "cosine": 0.97,
+  "psnr_mean": 24.183,
+  "psnr_worst": 22.3457,
+  "ssim_mean": 0.88,
+  "psnr_per_frame": [
+   22.35,
+   23.23,
+   23.43,
+   24.26,
+   24.49,
+   24.96,
+   24.99,
+   25.0,
+   24.96
+  ]
+ },
+ "aot_single_vs_fp32_dual": {
+  "rel_l2": 0.7235,
+  "cosine": 0.6966,
+  "psnr_mean": 15.2677,
+  "psnr_worst": 13.5218,
+  "ssim_mean": 0.4025,
+  "psnr_per_frame": [
+   13.52,
+   14.09,
+   15.17,
+   15.44,
+   15.42,
+   15.81,
+   15.94,
+   16.01,
+   16.02
+  ]
+ },
+ "aot_single_vs_aot_dual": {
+  "rel_l2": 0.7225,
+  "cosine": 0.699,
+  "psnr_mean": 15.365,
+  "psnr_worst": 13.4973,
+  "ssim_mean": 0.4018,
+  "psnr_per_frame": [
+   13.5,
+   14.16,
+   15.28,
+   15.55,
+   15.53,
+   15.92,
+   16.06,
+   16.14,
+   16.15
+  ]
+ }
+}

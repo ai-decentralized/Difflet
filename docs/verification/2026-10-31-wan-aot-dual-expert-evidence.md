@@ -26,12 +26,15 @@ fp32 VAE decode (the AOT default). Dual-expert cells add `--guidance-scale-2 3.0
   {'transformer': 26, 'transformer_2': 54}`. Step 12's timestep is exactly 875.0 and stays on the
   high-noise expert, the rule of diffusers' WanPipeline and Wan2.2's `generate.py` (`t >=
   boundary`). Pinned beforehand by a unit test on the same scheduler config.
-- **Quality tracks diffusers' own dual expert.** AOT dual vs CPU bf16 diffusers dual: latent
-  cosine 0.950, frames PSNR 22.1 dB mean, SSIM 0.825. A single-expert run against the same
-  reference scores cosine 0.693, 15.2 dB, SSIM 0.393, so the gate separates the two. Calibration
-  (AOT single vs diffusers single, the path AOT already ships): cosine 0.902, 20.3 dB, SSIM
-  0.738. The gate (dual within 0.005 cosine, 1 dB and 0.02 SSIM of the calibration) passes with
-  margin: the dual expert tracks its reference more closely than the single expert tracks its own.
+- **Quality: closer to the fp32 baseline than diffusers' own bf16 inference.** Baseline: diffusers
+  dual expert in fp32 on the CPU. AOT dual: latent cosine 0.970, frames PSNR 24.18 dB mean
+  (22.35 worst), SSIM 0.880. Diffusers bf16 dual, i.e. what bf16 inference itself costs: 0.947,
+  21.55 dB, 0.811. AOT single expert against the same baseline: 0.697, 15.27 dB, 0.403, the
+  cost of running the wrong expert for 27 of the 40 steps. Why AOT lands closer to fp32 than
+  diffusers bf16 is not established by this campaign; the earlier native-vs-AoT report saw the
+  same for AoT Flux (`docs/verification/neuron-backend-results.md`).
+- **Against bf16 references (first pass, kept for the record).** AOT dual vs diffusers bf16 dual:
+  0.950, 22.1 dB, 0.825; AOT single vs diffusers bf16 single (calibration): 0.902, 20.3 dB, 0.738.
 - **Memory and speed.** Peak HBM 17.52 GiB per core with both experts and umT5 resident (single
   expert: 10.34 GiB); budget 22.8 GiB. Step median 1.152 s on either expert, the same as single
   expert (1.153 s). Warm generate 133–145 s against 123–129 s for single expert.
@@ -88,7 +91,31 @@ fp32 VAE decode (the AOT default). Dual-expert cells add `--guidance-scale-2 3.0
    (`difflet/cli/orchestrators/wan.py`, `generate`), and the router reports both requests
    failed.
 
-## Quality against diffusers on the CPU
+## Quality against the fp32 baseline (diffusers dual expert, CPU fp32)
+
+Baseline: `tests/manual/wan_e2e_reference.py --dtype fp32 --swap-experts --steps 40
+--guidance-scale 4.0 --guidance-scale-2 3.0`, same prompt and seed. Two fp32 experts do not fit
+124 GB together (about 137 GB), so `--swap-experts` keeps one resident at a time: umT5 freed
+after encoding, the high-noise expert for steps 0–12, then the low-noise one. Its loop is
+WanPipeline's; `--check-swap 4` (bf16, 4 steps, two per expert, one swap) gave latents equal to
+WanPipeline's own (`equal True, rel_l2 0`), `logs/check_swap.log`. fp32 run: 15536 s, peak RSS
+55.6 GB, about 305–590 s per step, `logs/ref_dual_fp32.log`; it also switches after step 12
+(t=875 on the high-noise expert). All latents decoded by the same fp32 VAE;
+`scripts/quality_fp32.py`.
+
+| Against fp32 dual baseline | Latent cosine | rel L2 | PSNR mean | PSNR worst | SSIM |
+|---|---|---|---|---|---|
+| diffusers bf16 dual (cost of bf16 inference) | 0.947 | 0.324 | 21.55 dB | 18.84 dB | 0.811 |
+| **AOT dual** | **0.970** | **0.244** | **24.18 dB** | **22.35 dB** | **0.880** |
+| AOT single (wrong expert for steps 13–39) | 0.697 | 0.724 | 15.27 dB | 13.52 dB | 0.403 |
+| AOT single vs AOT dual (direct) | 0.699 | 0.723 | 15.37 dB | 13.50 dB | 0.402 |
+
+Per-frame PSNR, AOT dual: 22.4, 23.2, 23.4, 24.3, 24.5, 25.0, 25.0, 25.0, 25.0 dB; diffusers
+bf16: 18.8, 19.6, 21.4, 22.0, 22.0, 22.5, 22.5, 22.6, 22.6 dB. The coloured speckle in frames
+0–1 is in the fp32 baseline too (`fp32_bf16_aot_dual.jpg`: fp32, bf16, AOT, top to bottom), so
+it belongs to the model at this shape, not to bf16 or the AOT path.
+
+## Quality against bf16 references (first pass)
 
 References: `tests/manual/wan_e2e_reference.py --dtype bf16 --steps 40 --guidance-scale 4.0`,
 same prompt and seed, initial noise drawn in fp32 from the seeded CPU generator as the
@@ -106,13 +133,30 @@ compared with `scripts/quality_vs_reference.py`'s metrics (uint8 per-frame PSNR,
 
 Per-frame PSNR of the gate: 18.5, 19.5, 22.5, 22.9, 22.8, 23.1, 23.2, 23.3, 23.3 dB. Frames 0–1
 are lower and show coloured speckle; the diffusers reference shows the same speckle at the same
-frames (`ref_vs_aot_dual.jpg`: reference on top, AOT below), so it comes from the model at this
-shape and precision, not from the AOT path. CPU references: dual 5923 s (load 872 s, about
+frames (`ref_vs_aot_dual.jpg`: reference on top, AOT below), and so does the fp32 baseline (see
+above): it comes from the model at this shape, not from the precision or the AOT path. CPU references: dual 5923 s (load 872 s, about
 123 s/step), single 5647 s (load 406 s, about 129 s/step).
 
 **Gate: PASS.** Rule set before the run: the dual pair within 0.005 cosine, 1 dB PSNR and 0.02
 SSIM of the single-expert calibration pair. Dual 0.950 / 22.11 dB / 0.825 against calibration
 0.902 / 20.32 dB / 0.738.
+
+## Performance (from the runs above; nothing re-run for these)
+
+| Metric | AOT single | AOT dual | Source / caveat |
+|---|---|---|---|
+| DiT step (one denoise step: cond + uncond forward + host UniPC), median of 40, step 0 excluded | 1.153 s | 1.152 s on either expert | `[wan] experts` line |
+| e2e warm (CLI wall, host fp32 VAE decode included) | 123–129 s | 133–145 s | `br_gen1`, `main_gen2`; `dual_gen2/3`, `dual_gs2eq`, `dual_nogs2` |
+| of which weight load | about 19 s (umT5 10.3, DiT 8.7) | about 26 s (umT5 8.9, two experts about 8.4 each) | `Finished traced model weight initialization` |
+| e2e first run after compile | 386 s | 640 s | `main_gen1`, `dual_gen1`. Page cache not dropped: not a true cold start |
+| of which weight load | about 199 s (umT5 102, DiT 97) | about 449 s (umT5 94, transformer 236, transformer_2 119) | same lines |
+| compile | 981 s cold (umT5 compile 7 s + shard 86 s; DiT compile 71 s + shard 543 s) | 1144 s, not clean (note 1): transformer compile 76 s; transformer_2 compile 74 s + shard 575 s; umT5 reused | `Done compilation`, `Pre-sharding complete` |
+| compile, artifact present | 6 s | — | `br_compile` |
+| peak HBM per core | 10.34 GiB | 17.52 GiB | neuron-monitor |
+
+The clean cost of the second expert at compile is about 11 min (transformer_2 compile plus its
+fp32-to-bf16 pre-shard). Not recorded: the host VAE decode on its own, a page-cache-dropped cold
+start, an uninterrupted cold dual compile.
 
 ## How to inspect manually
 
@@ -135,7 +179,7 @@ SSIM of the single-expert calibration pair. Dual 0.950 / 22.11 dB / 0.825 agains
 Holds Wan 2.2 A14B's high-noise and low-noise experts and switches at the checkpoint's boundary.
 | Wan 2.2 (trainium) | Wan 2.1 | tpu |
 |---|---|---|
-| PASS · tp4, k=13 of 40, 17.52 GiB/core, quality cosine 0.950 vs diffusers dual | N/A · one-expert checkpoint, refused (unit test; Wan 2.1 weights not on this host) | N/A · refused by design |
+| PASS · tp4, k=13 of 40, 17.52 GiB/core; vs fp32 diffusers dual 24.18 dB / SSIM 0.880 (diffusers bf16: 21.55 / 0.811) | N/A · one-expert checkpoint, refused (unit test; Wan 2.1 weights not on this host) | N/A · refused by design |
 
 ### Low-noise guidance   `--guidance-scale-2`
 | Wan 2.2 (trainium) |
