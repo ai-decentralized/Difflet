@@ -1,0 +1,40 @@
+{
+  "schema": 1,
+  "model": "wan_2_1",
+  "model_id": "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+  "platform": "trn2",
+  "device": "trn2.3xlarge / 4 NeuronCores (logical config 2) / 96 GiB/device",
+  "backend": "native",
+  "parallel": "TP4",
+  "shape": {
+    "height": 480,
+    "width": 832,
+    "num_frames": 9
+  },
+  "steps": 50,
+  "seed": 42,
+  "guidance_scale": 1.0,
+  "dtype": "bf16",
+  "toolchain": {
+    "torch": "2.14.0+cpu",
+    "torch-neuronx": "2.14.3.0.0+unknown.dev",
+    "neuronx-cc": "2.28.4568.0+0163fa9e",
+    "nki": "0.7.0+36523665040.g7b8cdcef",
+    "diffusers": "0.38.0",
+    "transformers": "4.57.6",
+    "numpy": "2.5.3"
+  },
+  "metrics": {
+    "dit_step_ms": 534.83,
+    "warm_e2e_s": 114.15,
+    "cold_e2e_s": 186.28,
+    "compile_s": 60.9,
+    "psnr_db": null,
+    "ssim": null
+  },
+  "status": "ok",
+  "notes": [],
+  "date": "2026-10-11 12:08 UTC",
+  "commit": null,
+  "source": "benchmark/trn2/wan_2_1_neuron.md"
+}

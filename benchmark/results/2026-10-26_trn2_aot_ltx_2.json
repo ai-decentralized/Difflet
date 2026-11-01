@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "model": "ltx_2",
+  "model_id": "Lightricks/LTX-2",
+  "platform": "trn2",
+  "device": "trn2.3xlarge / 4 NeuronCores (LNC=2) / 24 GiB HBM per core",
+  "backend": "aot",
+  "parallel": "TP4",
+  "shape": {
+    "height": 480,
+    "width": 704,
+    "num_frames": 49
+  },
+  "steps": 50,
+  "seed": 42,
+  "guidance_scale": 1.0,
+  "dtype": "bf16",
+  "toolchain": {
+    "python": "3.12.3",
+    "torch": "2.9.1",
+    "torch-neuronx": "2.9.0.2.15.32035+de43f57c",
+    "neuronx-cc": "2.26.6360.0+6f180f47",
+    "aws-neuronx-runtime-lib": "2.35.30.0"
+  },
+  "metrics": {
+    "dit_step_ms": 400.1,
+    "warm_e2e_s": 66.55,
+    "cold_e2e_s": 778.1,
+    "compile_s": 1052.2,
+    "psnr_db": 16.21,
+    "ssim": 0.66
+  },
+  "status": "ok",
+  "notes": [
+    "Gemma-3 runs on the host",
+    "PSNR/SSIM against a 50-step CPU fp32 reference started from this backend's own noise"
+  ],
+  "date": "2026-10-26",
+  "commit": "540e5f0",
+  "source": "benchmark/trn2/four_model_native_vs_aot_2026-10-26.md"
+}
