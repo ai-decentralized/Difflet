@@ -334,6 +334,26 @@ variants only coarsely and the device step time is the arbiter. In the third swe
 0.394; 3072: 0.267 vs 0.331); block/tile overrides (`TILES_IN_BLOCK_K=6`, `TILES_IN_LOAD_M=2`,
 shard-M) are within 3%.
 
+**Quality with the final kernel, four prompts** (`multiprompt_fastT/`, 50 steps, seed 42, vs
+the same bf16 references as 6d-ii):
+
+| prompt | PSNR (final kernel) | PSNR (6d-ii, earlier kernel build) | SSIM | LPIPS | latent cos |
+|---|---|---|---|---|---|
+| cat on a bench | 31.73 dB | 31.59 | 0.987 | 0.017 | 0.9964 |
+| watercolor lighthouse | 34.46 dB | 42.61 | 0.987 | 0.032 | 0.9983 |
+| brass typewriter | **27.54 dB** | 31.22 | 0.961 | 0.065 | 0.9893 |
+| astronaut, neon city | 34.29 dB | 33.94 | 0.987 | 0.019 | 0.9975 |
+
+The typewriter prompt now misses all three gates while the lighthouse lost 8 dB and the
+astronaut gained 0.4. The loaders are **bit-identical** in isolation (`probe_mx_numerics.py`:
+default, `fast_dma_transpose` and PE swizzle give equal outputs at every shape and magnitude,
+rel 1.67e-3 against the exact CPU MX reference), so the per-layer quantization error did not
+change; what changed is the rest of the compiled block (the compiler re-schedules around a
+different custom call, which moves bf16 rounding), and 50 denoising steps amplify that into a
+different trajectory. The same happened between the FLUX layer sets (section 7). Single-seed
+PSNR against bf16 is therefore a noisy gate: a tp2-vs-tp4 bf16 control (two bf16
+implementations differing only in reduction order) is run below to show the noise floor.
+
 ### 6g. The "utilization-limited" time is dI/dt throttling, not a setting
 
 The profiles' `throttle_activity_1` entries (limit 0.5; 6.0 ms of the mxfp8 block's 12.0 ms,
