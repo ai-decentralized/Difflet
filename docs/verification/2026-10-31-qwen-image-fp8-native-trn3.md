@@ -318,8 +318,12 @@ Not usable: `quant_scheme="1x32"` (wrong numbers, cosine 0.003), `disable_dma_tr
 
 **On the device**, `fast_dma_transpose=True` alone (commit above; `qwen_mx_fastT_tp4/`):
 step median **239.1 / 239.0 ms** at tp4, 1024x1024, 50 steps = **0.80x of bf16's 299**;
-PSNR 31.73 dB, SSIM 0.987, LPIPS 0.017 vs bf16; gen50a == gen50b. The PE-swizzle variant for
-the q/k/v widths (N <= 2304, the activation handed over transposed) is the next run.
+PSNR 31.73 dB, SSIM 0.987, LPIPS 0.017 vs bf16; gen50a == gen50b.
+
+The PE-swizzle variant for the q/k/v widths (N <= 2304, the activation handed over
+transposed; `qwen_mx_peswz_tp4/`) was **slower on the device: 244.9 ms** against 239.1 with
+`fast_dma_transpose` everywhere, with bit-identical output (the two loaders quantize the same
+values). Reverted; the kernel call keeps the single `fast_dma_transpose=True` option.
 
 A third sweep (`mx_options3.log`) re-measured the fused q/k/v shape with `fast_dma_transpose`
 at 0.326 ms against 0.568 in the second sweep (same code, same core), and the PE-swizzle
