@@ -47,7 +47,7 @@ not run in this campaign. Shape 320x512x61, 50 steps, seed 42 unless the row say
 | TeaCache adaptive | NOT MEASURED | **LIMIT**: weak signal, not recommended (R31) | Phase 4c: cubic R² 0.406, Pearson −0.116; 18 skipped, cos 0.910548, visibly degraded; probe doubles HBM (17.59 vs 9.69 GiB/core) |
 | host VAE (AOT default) | NOT MEASURED | **LIMIT**: correct, slow (409-431 s at 61 frames, 2699 s at 121 frames) | Phase 2 host decode; Phase 3 retry attempt 2 |
 | device VAE | **PASS** (31.4 s at 61 frames, 89.0 s at 121 frames) | **BLOCKED**: `vae15` does not compile on neuronx-cc 2.26 (NCC_EVRF007 / NCC_IBIR229 / NCC_EXTP003) | Phase 1 "aot-vae"; user decision: host decode this round |
-| default shape 480x848x121, TP2 x CFG2 | **PASS** (11178 ms/step, same host) | **PASS** (13072 ms/step; compile 3970 s); VAE LIMIT as above | Phase 3 native reference; Phase 3 retry attempt 2 (after `1a9625b`; compiler flags that `dca10f3`/`420d2fa` made the default for this shape) |
+| default shape 480x848x121, TP2 x CFG2 | **PASS** (11178 ms/step, same host) | **PASS** (13072 ms/step; compile 3970 s); VAE LIMIT as above | Phase 3 native reference; Phase 3 retry attempt 2 (after `1a9625b`; set through `DIFFLET_HUNYUAN15_COMPILER_ARGS`, a string byte-identical to the final default for this shape — `d001314` pins it in `test_hv15_default_compiler_args_exact_strings` — so the result stands without a rerun) |
 
 ### Performance, AOT vs native (TP2 x CFG2, 50 steps)
 
