@@ -127,6 +127,36 @@ def test_aot_generate_runs_three_stages(aot_launches, tmp_path):
     assert not (tmp_path / "w").exists()
 
 
+def test_aot_generate_forwards_the_negative_prompt(aot_launches, monkeypatch, tmp_path):
+    """--negative-prompt outside --requests: it reached no stage (``_stage_cli_args`` does not
+    forward it and the single request had none), so the encode stage encoded "" instead."""
+    import diffusers
+
+    from difflet.cli import stage as stage_mod
+
+    hv15.HunyuanVideo15Orchestrator(_driver_args(work_dir=str(tmp_path / "w"),
+                                                 negative_prompt="blurry, low quality")).generate()
+    assert all(_flag(cli, "--negative-prompt") == "blurry, low quality" for _, _, _, cli in aot_launches)
+    hv15.HunyuanVideo15Orchestrator(_driver_args(work_dir=str(tmp_path / "w2"))).generate()
+    assert all("--negative-prompt" not in cli for _, _, _, cli in aot_launches[3:])
+
+    encode_cli = aot_launches[0][3]
+    parsed, _ = stage_mod._build_stage_parser().parse_known_args(
+        ["--orchestrator", hv15._HF_MODEL_ID, "--stage", "encode", *encode_cli])
+    prompts = []
+
+    class FakePipe:
+        def encode_prompt(self, prompt, device, dtype):
+            prompts.append(prompt)
+            return (torch.ones(1, 4, 8), torch.ones(1, 4), torch.zeros(1, 2, 3), torch.zeros(1, 2))
+
+    monkeypatch.setattr(diffusers.HunyuanVideo15Pipeline, "from_pretrained",
+                        classmethod(lambda cls, *a, **k: FakePipe()))
+    os.makedirs(parsed.work_dir, exist_ok=True)
+    hv15.HunyuanVideo15Orchestrator(parsed)._run_stage_internal("encode", parsed)
+    assert prompts == ["a cat", "blurry, low quality"]
+
+
 def test_aot_compile_skips_the_encoder(aot_launches, tmp_path):
     hv15.HunyuanVideo15Orchestrator(_driver_args(work_dir=str(tmp_path / "w"), device_vae=True)).compile()
     assert [s for s, _, _, _ in aot_launches] == ["aot_transformer", "aot_vae"]
