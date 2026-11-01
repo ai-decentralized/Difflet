@@ -24,6 +24,7 @@ import argparse
 import json
 import math
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -88,7 +89,7 @@ def main() -> int:
     ap.add_argument("--heads", type=int, default=8)  # 16 heads / tp2
     ap.add_argument("--cp", type=int, default=2)     # gather_kv query shard factor
     ap.add_argument("--seed", type=int, default=0)
-    ap.add_argument("--work-dir", default="/home/ubuntu/.claude/jobs/294a04fc/tmp/spike")
+    ap.add_argument("--work-dir", default=os.path.join(tempfile.gettempdir(), "hv15_aot_attention_spike"))
     args = ap.parse_args()
 
     n_img = ((args.num_frames - 1) // 4 + 1) * (args.height // 16) * (args.width // 16)

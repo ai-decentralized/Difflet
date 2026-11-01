@@ -71,14 +71,8 @@ def _pearson(xs, ys):
 
 
 def main() -> int:
-    # cclog 86: key-only attention mask (avoids the symmetric-mask softmax 0/0 NaN
-    # on the Neuron kernel). Must be set before the trace module is built/compiled.
-    os.environ["DIFFLET_HUNYUAN15_KEY_MASK_ATTENTION"] = "1"
-    # cclog 86: run the token refiner on host (the Neuron flash kernel NaNs at <128 valid
-    # keys; the refiner self-attends over the 13/1000-valid mllm stream). The NEFF then
-    # receives the already-refined (inner_dim) embeds.
-    os.environ["DIFFLET_HUNYUAN15_HOST_REFINER"] = "1"
-
+    # The 1.5 monolithic DiT always runs the token refiner on host and its blocks' key-bounded
+    # attention over the valid-first text order (forward_dit derives text_order/text_valid).
     from difflet.models.hunyuan_video.application import (
         HunyuanVideo15DiTInputBundle,
         NeuronHunyuanVideoApplication,
@@ -88,10 +82,7 @@ def main() -> int:
 
     tns = load_safetensors_file(str(BUNDLE), device="cpu")
     dtype = torch.bfloat16
-    # cclog 86: the monolithic-DiT NaN was the attention softmax dividing by zero
-    # on fully-masked query rows (default symmetric mask). Fixed by the key-only
-    # mask processor (DIFFLET_HUNYUAN15_KEY_MASK_ATTENTION below), so we now pass the
-    # REAL masks (padding keys correctly ignored; no all-masked query row).
+    # The REAL masks: padding keys are bounded out of attention (no all-masked query row).
     mask2 = tns["encoder_attention_mask_2"].to(torch.int64)
     embeds = {
         "encoder_hidden_states": tns["encoder_hidden_states"].to(dtype),

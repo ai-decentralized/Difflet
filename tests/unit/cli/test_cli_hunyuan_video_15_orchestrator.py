@@ -875,7 +875,8 @@ _NO_NATIVE = textwrap.dedent("""
     import difflet.cli.orchestrators.hunyuan_video_15 as hv15
     import difflet.models.hunyuan_video.aot15 as aot15
     import difflet.models.hunyuan_video.application as application
-    from difflet.backends.trainium.hunyuan_video import vae15
+    import difflet.models.hunyuan_video.entry  # noqa: F401  (the AoT code the stages reach)
+    from difflet.backends.trainium.hunyuan_video import backbone15, parallel15, vae15  # noqa: F401
     from difflet.cli.orchestrators.base import write_stage_manifest
 
     tmp = sys.argv[1]
