@@ -229,9 +229,13 @@ def _load_mx_op():
     @nki.jit
     def mx_linear_kernel(x, w_data, w_scales):
         w_x4 = w_data.view(nl.float8_e4m3fn_x4)
+        # fast_dma_transpose: the activation's gather-transpose load addresses the source with
+        # a direct 4-D pattern instead of per-element offset buffers in SBUF. Measured on one
+        # trn3 core at Qwen's tp4 MLP shape (5120 x 3072 -> 3072): 0.460 -> 0.343 ms, the same
+        # numbers; no change at N = 768 (2026-11-01, probe_mx_options.py).
         return matmul_mxfp8(x, w_x4, rhs_scales=w_scales, lhs_is_swizzled=False,
                             float8_dtype="float8_e4m3fn", output_dtype=nl.bfloat16,
-                            run_with_lnc2=True)
+                            run_with_lnc2=True, fast_dma_transpose=True)
 
     kernel = wrap_nki(mx_linear_kernel)
 
