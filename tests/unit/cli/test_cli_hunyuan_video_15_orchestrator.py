@@ -416,6 +416,32 @@ def test_aot_stage_cache_key_has_graph_version(tmp_path, monkeypatch):
     assert orch._aot_compiled_dir(args, "vae") == vae
 
 
+_DIAGNOSTIC_SWITCHES = ("DIFFLET_HUNYUAN15_NKI_ATTENTION", "DIFFLET_HUNYUAN15_NO_ATTENTION_MASK",
+                        "DIFFLET_HUNYUAN15_ATTENTION_QUERY_CHUNK_SIZE", "DIFFLET_HUNYUAN15_ZERO_BLOCK_ATTN",
+                        "DIFFLET_HUNYUAN15_ZERO_BLOCK_FF")
+
+
+def test_aot_stage_cache_key_follows_the_diagnostic_graph_switches(tmp_path, monkeypatch):
+    """The backbone15 diagnostic switches swap processors / zero blocks in the traced graph: a
+    run with one set must not load (or overwrite) the production artifact."""
+    for name in _DIAGNOSTIC_SWITCHES:
+        monkeypatch.delenv(name, raising=False)
+    args = _stage_args(tmp_path)
+    orch = hv15.HunyuanVideo15Orchestrator(args)
+    production = orch._aot_compiled_dir(args, "transformer")
+    assert "diagnostic_switches" not in orch._aot_stage_cache_inputs(args, "transformer")  # key unchanged
+    vae = orch._aot_compiled_dir(args, "vae")
+    seen = {production}
+    for name in _DIAGNOSTIC_SWITCHES:
+        monkeypatch.setenv(name, "1")
+        compiled = orch._aot_compiled_dir(args, "transformer")
+        assert compiled not in seen, name
+        seen.add(compiled)
+        assert orch._aot_compiled_dir(args, "vae") == vae
+        monkeypatch.delenv(name)
+    assert orch._aot_compiled_dir(args, "transformer") == production
+
+
 def test_aot_stage_cache_key_compiler_args_follow_image_tokens(tmp_path, monkeypatch):
     monkeypatch.delenv("DIFFLET_HUNYUAN15_COMPILER_ARGS", raising=False)
     orch = hv15.HunyuanVideo15Orchestrator(_stage_args(tmp_path))
