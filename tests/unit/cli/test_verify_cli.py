@@ -124,13 +124,9 @@ def test_ulysses_unsupported_models():
 
 
 def test_expected_fail_cells():
+    # hunyuan_video_15 has none: all six configs PASSed on device (Trainium AOT,
+    # docs/verification/hv15-aot-evidence.md).
     assert EXPECTED_FAIL_CELLS == {
-        ("hunyuan_video_15", "tp4"),      # scaffold: NotImplementedError
-        ("hunyuan_video_15", "dp2tp2"),   # same scaffold gap via the router
-        ("hunyuan_video_15", "tp2cp2"),   # pending AOT port
-        ("hunyuan_video_15", "tp2cp2ulysses"),  # pending AOT port
-        ("hunyuan_video_15", "tp2cfg"),   # pending AOT port
-        ("hunyuan_video_15", "tp4sp"),    # pending AOT port
         ("hunyuan_video", "tp2cp2"),      # neuronx-cc 2.25 NCC_INLA001 internal error
         ("hunyuan_video", "dp2tp2"),      # VAE alloc failure: f121 exceeds 2-core replica
     }
@@ -168,10 +164,7 @@ def test_plan_cells_counts():
     assert len(skipped) == 7
     assert len(runnable) == 35
     xfail = {(c.model_key, c.config_key) for c in runnable if c.expected_fail}
-    assert xfail == {("hunyuan_video_15", "tp4"), ("hunyuan_video_15", "dp2tp2"),
-                     ("hunyuan_video_15", "tp2cp2"), ("hunyuan_video_15", "tp2cp2ulysses"),
-                     ("hunyuan_video_15", "tp2cfg"), ("hunyuan_video_15", "tp4sp"),
-                     ("hunyuan_video", "tp2cp2"), ("hunyuan_video", "dp2tp2")}
+    assert xfail == {("hunyuan_video", "tp2cp2"), ("hunyuan_video", "dp2tp2")}
 
 
 def test_dp_config_never_skipped():
