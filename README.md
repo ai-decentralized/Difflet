@@ -165,8 +165,9 @@ Measured timings against stock diffusers, and the full pass/limit matrix, are in
 
 **FP8 on Trainium3** (PyTorch-native `neuron` backend, `--quant mxfp8`): Qwen-Image's DiT
 runs its attention q/k/v and MLP linears in OCP MXFP8 through nkilib's `matmul_mxfp8` NKI kernel,
-no calibration needed. Measured on trn3.48xlarge at tp4, 1024×1024: DiT step 260 ms against
-299 ms in bf16 (0.87×), PSNR 31.6 dB / SSIM 0.987 / LPIPS 0.02 against the bf16 image, and
+no calibration needed. Measured on trn3.48xlarge at tp4, 1024×1024: DiT step 239 ms against
+299 ms in bf16 (0.80×); against the bf16 image, PSNR 26.8–39.2 dB over 4 prompts × 3 seeds
+(mean 32.5), SSIM 0.955–0.990, LPIPS 0.014–0.092 (bf16-vs-bf16 at another TP degree: 39–46 dB); and
 the DiT weights at 60% of their bf16 bytes. FLUX.1-dev takes the same flag (quality 31.7 dB against bf16) but gains no step time at
 tp4 / 1024×1024 yet: its single-stream blocks' fused output projection stays bf16. Refused on the
 AoT `trainium` backend, on trn2 and for other models;

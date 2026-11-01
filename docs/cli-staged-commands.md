@@ -195,8 +195,9 @@ output projections stay bf16: measured faster and closer to bf16 that way) (fp8 
 with one shared scale per 32 values, the activation quantized inside nkilib's `matmul_mxfp8`
 kernel); no calibration file. `compile` writes the quantized checkpoint once under the cache
 (`<cache-dir>/quantized/<model>/transformer/mxfp8-<id>/`, 27 GB for 40 GB of bf16) and
-`generate` reads it. Measured on trn3 at tp4, 1024x1024, 50 steps: DiT step 260 ms against
-299 ms in bf16 (0.87x); PSNR 31.6 dB / SSIM 0.987 / LPIPS 0.02 against the bf16 image. The
+`generate` reads it. Measured on trn3 at tp4, 1024x1024, 50 steps: DiT step 239 ms against
+299 ms in bf16 (0.80x); against the bf16 image, PSNR 26.8–39.2 dB over 4 prompts x 3 seeds
+(mean 32.5), SSIM 0.955–0.990, LPIPS 0.014–0.092. The
 flag is refused on the AoT `trainium` backend, on trn2, under `--exec-mode eager`, with
 `--teacache-speedup`, and for models other than Qwen-Image. `--quant fp8 --quant-calibration
 FILE` is the per-tensor static variant (Qwen-Image only; its kernel path is not usable on the

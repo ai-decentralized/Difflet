@@ -371,6 +371,28 @@ gate for this recipe, which sits at about 30 dB on its hardest prompt (31.2 and 
 builds of the same recipe). A multi-seed mean, or a looser per-image floor beside a mean, is
 the honest form of the gate; the choice is the user's.
 
+### 6h. Quality gate, 4 prompts x 3 seeds (final kernel, tp4, 1024x1024, 50 steps)
+
+Gate as redefined (the user accepted the proposed default): mean PSNR over prompts x seeds
+>= 30 dB, every image >= 27 dB. Seeds 42 / 7 / 1234; `multiprompt_fastT/`, `qwen_mx_fastT_tp4/`
+and `multiseed/`; each cell is mxfp8 against the bf16 run of the same seed.
+
+| prompt | seed 42 | seed 7 | seed 1234 | prompt mean |
+|---|---|---|---|---|
+| a cat sitting on a bench | 31.73 dB · 0.987 · 0.017 | **26.83** · 0.959 · 0.063 | 30.32 · 0.975 · 0.056 | 29.6 dB |
+| watercolor lighthouse at dawn | 34.46 · 0.987 · 0.032 | 39.20 · 0.990 · 0.014 | 36.72 · 0.986 · 0.053 | 36.8 dB |
+| vintage brass typewriter | 27.54 · 0.961 · 0.065 | 30.53 · 0.956 · 0.078 | 29.22 · 0.955 · 0.092 | 29.1 dB |
+| astronaut, neon city at night | 34.29 · 0.987 · 0.019 | 33.20 · 0.987 · 0.027 | 36.33 · 0.990 · 0.016 | 34.6 dB |
+
+(PSNR · SSIM · LPIPS.) **Mean PSNR 32.5 dB (passes >= 30); minimum 26.83 dB (misses the 27 dB
+floor by 0.17 dB on one of twelve images).** SSIM is below 0.97 on 4 of 12 images (0.955–0.961),
+LPIPS above 0.05 on 5 of 12 (max 0.092). Two prompts (cat, typewriter) average 29–30 dB, the
+other two 35–37; the spread within a prompt across seeds is 4–5 dB, as large as the spread
+between prompts, so neither a single seed nor a single prompt characterises the recipe. The
+bf16 noise floor (6f) is 39–46 dB. The recipe's quantization error is therefore clearly
+visible in the metrics while the images stay the same scene and composition (the cat / seed 7
+pair is the 26.8 dB case).
+
 ### 6g. The "utilization-limited" time is dI/dt throttling, not a setting
 
 The profiles' `throttle_activity_1` entries (limit 0.5; 6.0 ms of the mxfp8 block's 12.0 ms,
