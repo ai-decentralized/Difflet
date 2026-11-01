@@ -56,6 +56,11 @@ _KWARG_DEFAULTS: dict[str, Any] = {
     "teacache_calibration_path": None,
     "teacache_cadence": None,
     "teacache_online_delta_alpha": None,
+    # FP8 DiT linears (difflet/quant): the spec (a QuantSpec, its dict, or a format name for the
+    # default recipe) and, optionally, the quantized checkpoint directory; without one it is
+    # resolved under the compile cache (never written here: `difflet compile` writes it).
+    "quant": None,
+    "quant_checkpoint": None,
 }
 
 
@@ -161,6 +166,35 @@ class TorchNeuronFluxApplication:
     def _path(self, name: str) -> str:
         return os.path.join(self.model_path, name)
 
+    def _resolve_quant(self, options: dict[str, Any], transformer_path: str):
+        """``(spec, DiT directory)``: the quantized checkpoint for ``quant`` (resolved under the
+        compile cache, never written here), else ``(None, transformer_path)``."""
+        from difflet.quant.checkpoint import check_quantized_dir, prepare_quantized_checkpoint
+        from difflet.quant.spec import QuantSpec
+        from difflet.quant.targets import default_spec
+
+        quant = options["quant"]
+        if quant is None:
+            if options["quant_checkpoint"] is not None:
+                raise ValueError("quant_checkpoint needs quant (a format name or a QuantSpec)")
+            return None, transformer_path
+        if isinstance(quant, str):
+            spec = default_spec("flux", format=quant, tp_degree=int(self.parallel.tp_degree))
+        elif isinstance(quant, dict):
+            spec = QuantSpec.from_dict(quant)
+        elif isinstance(quant, QuantSpec):
+            spec = quant
+        else:
+            raise TypeError(f"quant must be a format name, a QuantSpec or its dict, got {type(quant)}")
+        if spec.needs_calibration:
+            raise ValueError("FLUX has no activation calibration tool: use the mxfp8 format")
+        checkpoint = options["quant_checkpoint"]
+        if checkpoint is None:
+            checkpoint, spec = prepare_quantized_checkpoint(transformer_path, spec, None, create=False)
+        else:
+            check_quantized_dir(checkpoint, transformer_path, spec, None)
+        return spec, str(checkpoint)
+
     def load(self, compiled_model_path=None, skip_warmup: bool = False) -> None:
         """Build and load every component (``compiled_model_path`` is an AoT notion: unused).
         ``skip_warmup`` skips each application's warm-up forward."""
@@ -206,8 +240,9 @@ class TorchNeuronFluxApplication:
             context_parallel_enabled=int(getattr(parallel, "cp_degree", 1) or 1) > 1,
             cp_mode=getattr(parallel, "cp_mode", "gather_kv") or "gather_kv",
             sp_enabled=bool(getattr(parallel, "sp_enabled", False)))
-        dit = NeuronFluxTransformerApplication(model_path=self._path("transformer"), config=config,
-                                               dtype=self.dtype, **common)
+        self.quant, dit_path = self._resolve_quant(opts, self._path("transformer"))
+        dit = NeuronFluxTransformerApplication(model_path=dit_path, config=config,
+                                               dtype=self.dtype, quant=self.quant, **common)
         dit.load(skip_warmup=skip_warmup)
         lap("dit")
 

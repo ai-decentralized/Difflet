@@ -6,6 +6,8 @@ import os
 import sys
 
 from difflet import envs
+from difflet.cli.quant import add_quant_flags as _add_quant_flags
+from difflet.cli.quant import validate_quant
 from difflet.pipeline.parallel_config import CP_MODES
 
 VALID_MODELS = {
@@ -754,6 +756,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_teacache_flags(cp_cmd)
     _add_dual_expert_flag(cp_cmd)
     _add_backend_flags(cp_cmd)
+    _add_quant_flags(cp_cmd)
 
     gen = sub.add_parser("generate", help="Run inference (requires prior compile)")
     _add_model_flag(gen)
@@ -763,6 +766,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_cache_flags(gen)
     _add_generate_flags(gen)
     _add_backend_flags(gen)
+    _add_quant_flags(gen)
 
     run_cmd = sub.add_parser("run", help="Download + compile + generate in one shot")
     _add_model_flag(run_cmd)
@@ -772,6 +776,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_cache_flags(run_cmd)
     _add_generate_flags(run_cmd)
     _add_backend_flags(run_cmd)
+    _add_quant_flags(run_cmd)
 
     plan_cmd = sub.add_parser(
         "plan",
@@ -1257,6 +1262,7 @@ def main(argv: list[str] | None = None) -> None:
         _validate_cfg_parallel(args)
         _validate_sp(args)
         _validate_taef1(args)
+        validate_quant(args)
         from difflet.cli.modes import resolve_mode
 
         mode_cfg = resolve_mode(args.model_id, getattr(args, "mode", None), args)

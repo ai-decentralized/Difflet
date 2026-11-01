@@ -1,0 +1,139 @@
+"""Which linears each DiT quantizes. Torch-free.
+
+Only the per-token projections go to FP8: attention q/k/v and the MLP up/down. They hold
+about 60% of Qwen-Image's parameters and most of its linear-layer compute. Everything that
+conditions the blocks stays bf16: the per-block modulation (``img_mod.1``/``txt_mod.1``: a
+third of the parameters, but applied to one ``[B, D]`` vector, so no compute to win and the
+scale/shift/gate it produces is precision-sensitive), the embedders, ``img_in``/``txt_in``,
+``norm_out`` and ``proj_out``.
+
+The attention output projections (``to_out.0``, ``to_add_out``) also stay bf16, against the
+ModelOpt / FastVideo convention, on measurement (trn3, tp4, 1024x1024, 50 steps, mxfp8 vs
+bf16; ``docs/verification/2026-10-31-qwen-image-fp8-native-trn3.md`` 6d): with them quantized
+the step is 267.7 ms and the image 29.3 dB PSNR; with them in bf16, 260.2 ms and 31.6 dB.
+They sit right before the residual add, so their error lands unattenuated, and the compiler
+schedules the block worse with a custom op there (the single-core probe: +1.3 ms per block).
+
+Patterns are regexes full-matched against diffusers' module names (the ``transformer.`` trace
+prefix is stripped by :meth:`QuantSpec.matches`).
+"""
+
+from __future__ import annotations
+
+from difflet.quant.spec import QuantSpec
+
+_BLOCK = r"transformer_blocks\.\d+"
+
+QWEN_IMAGE_TARGETS: tuple[str, ...] = (
+    rf"{_BLOCK}\.attn\.(to_q|to_k|to_v|add_q_proj|add_k_proj|add_v_proj)",
+    rf"{_BLOCK}\.(img_mlp|txt_mlp)\.net\.0\.proj",
+    rf"{_BLOCK}\.(img_mlp|txt_mlp)\.net\.2",
+)
+
+#: Qwen-Image modules a reader may expect quantized that are deliberately not.
+QWEN_IMAGE_KEPT_BF16: tuple[str, ...] = (
+    rf"{_BLOCK}\.attn\.(to_out\.0|to_add_out)",
+    rf"{_BLOCK}\.(img_mod|txt_mod)\.1",
+    r"time_text_embed\..*",
+    r"img_in",
+    r"txt_in",
+    r"norm_out\.linear",
+    r"proj_out",
+)
+
+#: The targets whose weight the TP layer shards along K (row-parallel): under ``mxfp8`` each
+#: rank's K range is quantized with its own block layout (``difflet/quant/mx.py``).
+QWEN_IMAGE_ROW_PARALLEL: tuple[str, ...] = (
+    rf"{_BLOCK}\.attn\.(to_out\.0|to_add_out)",  # not a default target; kept for overrides
+    rf"{_BLOCK}\.(img_mlp|txt_mlp)\.net\.2",
+)
+
+# FLUX.1 (diffusers' FluxTransformer2DModel names, which ``difflet/models/flux/modeling_flux.py``
+# keeps): the 19 dual-stream blocks' q/k/v for both streams and both MLPs (``ff``, ``ff_context``),
+# the 38 single-stream blocks' q/k/v and MLP-up (``proj_mlp``). The output projections stay bf16
+# as for Qwen-Image: the dual blocks' ``to_out.0`` / ``to_add_out`` and the single blocks'
+# ``proj_out`` (which the neuron model splits into ``proj_out_attn`` / ``proj_out_mlp``, read as
+# column ranges of the checkpoint's ``proj_out``: a quantized target there would also need the
+# writer to slice the block scales).
+_SINGLE = r"single_transformer_blocks\.\d+"
+
+FLUX_TARGETS: tuple[str, ...] = (
+    rf"{_BLOCK}\.attn\.(to_q|to_k|to_v|add_q_proj|add_k_proj|add_v_proj)",
+    rf"{_BLOCK}\.(ff|ff_context)\.net\.0\.proj",
+    rf"{_BLOCK}\.(ff|ff_context)\.net\.2",
+    rf"{_SINGLE}\.attn\.(to_q|to_k|to_v)",
+    rf"{_SINGLE}\.proj_mlp",
+)
+
+FLUX_KEPT_BF16: tuple[str, ...] = (
+    rf"{_BLOCK}\.attn\.(to_out\.0|to_add_out)",
+    rf"{_SINGLE}\.proj_out",
+    rf"{_SINGLE}\.proj_out_(attn|mlp)",
+    rf"{_BLOCK}\.norm1(_context)?\.linear",
+    rf"{_SINGLE}\.norm\.linear",
+    r"time_text_embed\..*",
+    r"context_embedder",
+    r"x_embedder",
+    r"norm_out\.linear",
+    r"proj_out",
+)
+
+FLUX_ROW_PARALLEL: tuple[str, ...] = (
+    rf"{_BLOCK}\.attn\.(to_out\.0|to_add_out)",  # not default targets; kept for overrides
+    rf"{_BLOCK}\.(ff|ff_context)\.net\.2",
+)
+
+TARGETS_BY_MODEL: dict[str, tuple[str, ...]] = {
+    "qwen_image": QWEN_IMAGE_TARGETS,
+    "flux": FLUX_TARGETS,
+}
+ROW_PARALLEL_BY_MODEL: dict[str, tuple[str, ...]] = {
+    "qwen_image": QWEN_IMAGE_ROW_PARALLEL,
+    "flux": FLUX_ROW_PARALLEL,
+}
+
+
+def targets_for(model: str) -> tuple[str, ...]:
+    try:
+        return TARGETS_BY_MODEL[model]
+    except KeyError:
+        raise ValueError(
+            f"no FP8 target layers are defined for {model!r}; "
+            f"models with FP8 support: {sorted(TARGETS_BY_MODEL)}"
+        ) from None
+
+
+def row_parallel_for(model: str) -> tuple[str, ...]:
+    return ROW_PARALLEL_BY_MODEL.get(model, ())
+
+
+def default_spec(model: str, **overrides) -> QuantSpec:
+    """The recipe for ``model``: ``fp8`` (per-tensor weights, static activations) unless
+    ``format="mxfp8"`` (block-32 weights, MX activations) is asked for; the granularities
+    follow the format. ``targets=`` replaces the model's default layer set."""
+    from difflet.quant.spec import FORMAT_LAWS, FORMATS
+
+    fmt = overrides.get("format", "fp8")
+    if fmt not in FORMAT_LAWS:
+        raise ValueError(f"quant format must be one of {FORMATS}, got {fmt!r}")
+    granularity, activation = FORMAT_LAWS[fmt]
+    overrides.setdefault("weight_granularity", granularity)
+    overrides.setdefault("activation", activation)
+    overrides.setdefault("row_parallel", row_parallel_for(model))
+    overrides.setdefault("targets", targets_for(model))
+    return QuantSpec(**overrides)
+
+
+__all__ = [
+    "FLUX_KEPT_BF16",
+    "FLUX_ROW_PARALLEL",
+    "FLUX_TARGETS",
+    "QWEN_IMAGE_KEPT_BF16",
+    "QWEN_IMAGE_ROW_PARALLEL",
+    "QWEN_IMAGE_TARGETS",
+    "ROW_PARALLEL_BY_MODEL",
+    "TARGETS_BY_MODEL",
+    "default_spec",
+    "row_parallel_for",
+    "targets_for",
+]

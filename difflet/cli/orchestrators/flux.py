@@ -9,6 +9,7 @@ from typing import Any
 
 from difflet.cli import runner
 from difflet.cli.orchestrators.base import ModelOrchestrator, require_request_shape_in_set
+from difflet.cli.quant import quant_cli_args, quant_spec
 from difflet.cli.orchestrators.torchrun import (
     reject_unsupported_torchrun_options,
     replica_request_scope,
@@ -119,6 +120,7 @@ class FluxOrchestrator(ModelOrchestrator):
         reject_unsupported_torchrun_options(_torchrun_unsupported_options(self.args),
                                             runs=_TORCHRUN_RUNS)
         root_compile_cache_at_cache_dir(getattr(self.args, "cache_dir", None), tag="flux")
+        self._prepare_quant(create=(mode == "compile"))
         work_dir = Path(getattr(self.args, "work_dir", None) or Path.home() / ".cache" / "difflet" / "work" / "flux")
         work_dir.mkdir(parents=True, exist_ok=True)
         cli_args = self._stage_cli_args(mode, work_dir=str(work_dir))
@@ -136,6 +138,32 @@ class FluxOrchestrator(ModelOrchestrator):
 
     def _replica_cores(self) -> int:
         return int(self.args.tp_degree or 4) * int(getattr(self.args, "cp_degree", None) or 1)
+
+    def _prepare_quant(self, *, create: bool) -> None:
+        """With --quant, resolve the quantized DiT directory under the compile cache, writing it
+        when ``create`` (``compile``; ``generate`` only resolves and refuses with the fix when it
+        is missing), before any rank starts so none writes. The ranks resolve it again (read
+        only) from the spec the stage flags carry."""
+        spec = quant_spec(self.args)
+        if spec is None:
+            return
+        if spec.compute == "nki":
+            os.environ.setdefault("DIFFLET_NKI_TRACE_CACHE", "1")  # as Qwen-Image's driver
+        from difflet.pipeline.path_resolver import resolve_model_path
+        from difflet.quant.checkpoint import prepare_quantized_checkpoint
+
+        try:
+            model_dir = resolve_model_path(_HF_MODEL_ID, revision=getattr(self.args, "revision", None),
+                                           local_files_only=True)
+        except Exception:  # not downloaded yet: the ranks report it
+            return
+        try:
+            quantized, _ = prepare_quantized_checkpoint(
+                str(Path(model_dir) / "transformer"), spec, None, create=create)
+        except ValueError as exc:
+            print(f"Error: --quant: {exc}", file=sys.stderr)
+            raise SystemExit(1) from None
+        print(f"[flux] FP8 DiT ({spec.format}, {spec.compute}): {quantized}", flush=True)
 
     def _stage_cli_args(self, mode: str, *, work_dir: str) -> list[str]:
         a = self.args
@@ -163,6 +191,7 @@ class FluxOrchestrator(ModelOrchestrator):
                 parts += [flag, str(value)]
         if getattr(a, "keep_work_dir", False):
             parts.append("--keep-work-dir")
+        parts += quant_cli_args(a)
         return parts
 
     def _run_stage_internal(self, stage: str, args: argparse.Namespace) -> None:
@@ -200,6 +229,9 @@ class FluxOrchestrator(ModelOrchestrator):
                 app_kwargs[option] = value
         if getattr(args, "exec_mode", None):
             app_kwargs["exec_mode"] = args.exec_mode
+        spec = quant_spec(args)
+        if spec is not None:
+            app_kwargs["quant"] = spec.to_dict()
         cp = int(getattr(args, "cp_degree", None) or 1)
         parallel = DiffletParallelConfig(
             tp_degree=int(args.tp_degree or 4), cp_degree=cp,

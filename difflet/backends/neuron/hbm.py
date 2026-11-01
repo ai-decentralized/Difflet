@@ -120,6 +120,29 @@ def safetensors_numel(
     return total
 
 
+def safetensors_bytes(directory: str | Path, *, index: str | None = None) -> int:
+    """Total data bytes of the ``*.safetensors`` files directly in ``directory`` (or of the
+    shards ``index`` lists), from the headers' ``data_offsets``: the bytes as stored, whatever
+    their dtypes (a quantized checkpoint mixes fp8 weights, fp32 scales and bf16 tensors)."""
+    directory = Path(directory)
+    index_path = directory / index if index else None
+    if index_path is not None and index_path.is_file():
+        names = sorted(set(json.loads(index_path.read_text())["weight_map"].values()))
+        paths = [directory / name for name in names]
+    else:
+        paths = sorted(directory.glob("*.safetensors"))
+    total = 0
+    for path in paths:
+        with path.open("rb") as handle:
+            (header_len,) = struct.unpack("<Q", handle.read(8))
+            header = json.loads(handle.read(header_len))
+        for name, info in header.items():
+            if name != "__metadata__":
+                lo, hi = info["data_offsets"]
+                total += int(hi) - int(lo)
+    return total
+
+
 @dataclass(frozen=True)
 class Component:
     """One checkpoint subdirectory a device component loads, for the estimates below.
@@ -198,6 +221,7 @@ def check_fits(estimate_bytes: int, *, what: str, tp_degree: int, advice: str = 
 __all__ = [
     "Component",
     "FIT_FRACTION",
+    "safetensors_bytes",
     "GIB",
     "HBM_ENV",
     "HbmBudgetError",

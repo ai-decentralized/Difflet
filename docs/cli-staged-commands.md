@@ -188,6 +188,38 @@ difflet generate --model-id Qwen/Qwen-Image \
   2>&1 | tee /tmp/logs/qwen-generate.log
 ```
 
+### Qwen-Image in FP8 (PyTorch-native `neuron` backend, Trainium3 only)
+
+`--quant mxfp8` quantizes the DiT's attention q/k/v and MLP linears to OCP MXFP8 (the attention
+output projections stay bf16: measured faster and closer to bf16 that way) (fp8 e4m3 weights
+with one shared scale per 32 values, the activation quantized inside nkilib's `matmul_mxfp8`
+kernel); no calibration file. `compile` writes the quantized checkpoint once under the cache
+(`<cache-dir>/quantized/<model>/transformer/mxfp8-<id>/`, 27 GB for 40 GB of bf16) and
+`generate` reads it. Measured on trn3 at tp4, 1024x1024, 50 steps: DiT step 239 ms against
+299 ms in bf16 (0.80x); against the bf16 image, PSNR 26.8–39.2 dB over 4 prompts x 3 seeds
+(mean 32.5), SSIM 0.955–0.990, LPIPS 0.014–0.092. The
+flag is refused on the AoT `trainium` backend, on trn2, under `--exec-mode eager`, with
+`--teacache-speedup`, and for models other than Qwen-Image. `--quant fp8 --quant-calibration
+FILE` is the per-tensor static variant (Qwen-Image only; its kernel path is not usable on the
+2.28 compiler; `--quant-compute dequant` stores fp8 and computes in bf16).
+
+FLUX.1-dev accepts `--quant mxfp8` on the same path (`difflet compile/generate --model-id
+black-forest-labs/FLUX.1-dev --backend neuron --tp-degree 4 --quant mxfp8`): the dual-stream
+blocks' q/k/v and MLPs and the single-stream blocks' q/k/v and `proj_mlp` run in mxfp8, the
+output projections stay bf16. Measured on trn3 (tp4, 1024x1024, 28 steps): PSNR 31.7 dB /
+SSIM 0.972 / LPIPS 0.023 against bf16, deterministic, but the DiT step is 220 ms against bf16's
+222 ms: a memory saving only, until the single blocks' fused `proj_out` is quantized too.
+
+```bash
+DIFFLET_BACKEND=neuron difflet compile --model-id Qwen/Qwen-Image \
+  --tp-degree 4 --height 1024 --width 1024 --quant mxfp8 \
+  2>&1 | tee /tmp/logs/qwen-compile-mxfp8.log
+DIFFLET_BACKEND=neuron difflet generate --model-id Qwen/Qwen-Image \
+  --tp-degree 4 --height 1024 --width 1024 --quant mxfp8 \
+  --steps 50 --seed 42 --prompt "a cat sitting on a bench" --output qwen-mxfp8.png \
+  2>&1 | tee /tmp/logs/qwen-generate-mxfp8.log
+```
+
 ---
 
 ## HunyuanVideo 1.5 (compile/generate not yet implemented)

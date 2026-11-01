@@ -108,6 +108,10 @@ def _build_stage_parser() -> argparse.ArgumentParser:
     p.add_argument("--vae-dtype", dest="vae_dtype", default=None, choices=["bf16", "fp32"])
     p.add_argument("--vae-exec-mode", dest="vae_exec_mode", default=None,
                    choices=list(EXEC_MODE_CHOICES))
+    # FP8 DiT linears on the neuron backend (difflet/cli/quant.py); forwarded only when given.
+    from difflet.cli.quant import add_quant_flags
+
+    add_quant_flags(p)
     # DP worker-mode flags (parse_known_args silently drops what isn't declared
     # here — the --sp bug class; keep in sync with main._add_generate_flags).
     p.add_argument("--requests-dir", default=None)
