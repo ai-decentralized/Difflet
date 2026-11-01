@@ -1,0 +1,56 @@
+{
+ "aot_dual_vs_ref_dual": {
+  "rel_l2": 0.3134,
+  "cosine": 0.9504,
+  "psnr_mean": 22.1137,
+  "psnr_worst": 18.4639,
+  "ssim_mean": 0.8248,
+  "psnr_per_frame": [
+   18.46,
+   19.49,
+   22.53,
+   22.92,
+   22.82,
+   23.12,
+   23.17,
+   23.25,
+   23.26
+  ]
+ },
+ "aot_single_vs_ref_single": {
+  "rel_l2": 0.4398,
+  "cosine": 0.9018,
+  "psnr_mean": 20.3156,
+  "psnr_worst": 17.5075,
+  "ssim_mean": 0.7384,
+  "psnr_per_frame": [
+   17.51,
+   18.46,
+   20.47,
+   20.77,
+   21.08,
+   21.11,
+   21.1,
+   21.15,
+   21.21
+  ]
+ },
+ "aot_single_vs_ref_dual": {
+  "rel_l2": 0.7277,
+  "cosine": 0.6932,
+  "psnr_mean": 15.1785,
+  "psnr_worst": 13.3453,
+  "ssim_mean": 0.3933,
+  "psnr_per_frame": [
+   13.35,
+   13.92,
+   15.09,
+   15.35,
+   15.33,
+   15.74,
+   15.88,
+   15.97,
+   15.99
+  ]
+ }
+}

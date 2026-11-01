@@ -29,7 +29,9 @@ fp32 VAE decode (the AOT default). Dual-expert cells add `--guidance-scale-2 3.0
 - **Quality tracks diffusers' own dual expert.** AOT dual vs CPU bf16 diffusers dual: latent
   cosine 0.950, frames PSNR 22.1 dB mean, SSIM 0.825. A single-expert run against the same
   reference scores cosine 0.693, 15.2 dB, SSIM 0.393, so the gate separates the two. Calibration
-  (AOT single vs diffusers single): PENDING.
+  (AOT single vs diffusers single, the path AOT already ships): cosine 0.902, 20.3 dB, SSIM
+  0.738. The gate (dual within 0.005 cosine, 1 dB and 0.02 SSIM of the calibration) passes with
+  margin: the dual expert tracks its reference more closely than the single expert tracks its own.
 - **Memory and speed.** Peak HBM 17.52 GiB per core with both experts and umT5 resident (single
   expert: 10.34 GiB); budget 22.8 GiB. Step median 1.152 s on either expert, the same as single
   expert (1.153 s). Warm generate 133–145 s against 123–129 s for single expert.
@@ -99,14 +101,18 @@ compared with `scripts/quality_vs_reference.py`'s metrics (uint8 per-frame PSNR,
 | Pair | Latent cosine | rel L2 | PSNR mean | PSNR worst | SSIM |
 |---|---|---|---|---|---|
 | AOT dual vs diffusers dual (the gate) | 0.950 | 0.313 | 22.11 dB | 18.46 dB (frame 0) | 0.825 |
-| AOT single vs diffusers single (calibration) | PENDING | | | | |
+| AOT single vs diffusers single (calibration) | 0.902 | 0.440 | 20.32 dB | 17.51 dB (frame 0) | 0.738 |
 | AOT single vs diffusers dual (must be far) | 0.693 | 0.728 | 15.18 dB | 13.35 dB | 0.393 |
 
 Per-frame PSNR of the gate: 18.5, 19.5, 22.5, 22.9, 22.8, 23.1, 23.2, 23.3, 23.3 dB. Frames 0–1
 are lower and show coloured speckle; the diffusers reference shows the same speckle at the same
 frames (`ref_vs_aot_dual.jpg`: reference on top, AOT below), so it comes from the model at this
-shape and precision, not from the AOT path. CPU dual reference: load 872 s, 40 steps at about
-123 s/step, 5923 s in all.
+shape and precision, not from the AOT path. CPU references: dual 5923 s (load 872 s, about
+123 s/step), single 5647 s (load 406 s, about 129 s/step).
+
+**Gate: PASS.** Rule set before the run: the dual pair within 0.005 cosine, 1 dB PSNR and 0.02
+SSIM of the single-expert calibration pair. Dual 0.950 / 22.11 dB / 0.825 against calibration
+0.902 / 20.32 dB / 0.738.
 
 ## How to inspect manually
 
