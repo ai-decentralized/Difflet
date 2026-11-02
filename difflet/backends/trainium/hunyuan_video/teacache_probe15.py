@@ -212,3 +212,20 @@ class NeuronHunyuanVideo15TeacacheProbeFusedApplication(NeuronApplicationBase):
     def teacache_delta(self, hidden_states, timestep, timestep_r):
         out = self.models[0](hidden_states, timestep, timestep_r)
         return out[0] if isinstance(out, (tuple, list)) else out
+
+    def reset_state(self) -> None:
+        """Zero the on-device ``prev_mod`` on every local rank (start of a request).
+
+        Before load there is nothing to clear: NxD zero-initialises the state at load.
+        The traced model comes from ``torch.jit.load``, i.e. NxD's TorchScript
+        ``spmd.NxDModel``: its per-rank device state is ``.state`` (it has no ``.states`` and no
+        ``write_to_neuron_buffer``, which belong to the newer non-jit NxDModel), and the buffers
+        are zeroed in place, as that API's ``write_to_neuron_buffer`` does with ``copy_``.
+        """
+        if self.traced_model is None:
+            return
+        for states in self.traced_model.nxd_model.state:
+            for key in PROBE_STATE_TENSORS:
+                if key in states:
+                    buf = states[key]
+                    buf.copy_(torch.zeros(buf.shape, dtype=buf.dtype))

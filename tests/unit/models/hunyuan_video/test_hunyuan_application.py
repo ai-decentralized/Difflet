@@ -9,6 +9,7 @@ declaration, and ``no_components_message`` / ``dit_input_contract`` branches.
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import tempfile
 from types import SimpleNamespace
@@ -406,7 +407,53 @@ def test_call_with_positional_args_forwards_to_transformer():
     assert application.transformer.calls[-1] == (torch.zeros(1), torch.zeros(1))
 
 
-def test_call_15_with_direct_kwargs_builds_bundle():
+_TEXT_VALID = torch.tensor([3], dtype=torch.int32)
+
+
+def test_validate_dit15_inputs_checks_text_order():
+    good = app.HunyuanVideo15DiTInputBundle(
+        **{**_bundle_15().__dict__, "text_order": torch.arange(9).unsqueeze(0), "text_valid": _TEXT_VALID}
+    )
+    app.validate_hunyuan_video15_dit_inputs(good, config=_config_15(), dtype=torch.float32)
+    bad = dataclasses.replace(good, text_order=torch.arange(8).unsqueeze(0))
+    with pytest.raises(ValueError, match="text_order"):
+        app.validate_hunyuan_video15_dit_inputs(bad, config=_config_15(), dtype=torch.float32)
+
+
+@pytest.mark.parametrize("only", ["text_order", "text_valid"])
+def test_dit15_text_order_and_text_valid_come_together(only):
+    value = {"text_order": torch.arange(9).unsqueeze(0), "text_valid": _TEXT_VALID}[only]
+    bundle = dataclasses.replace(_bundle_15(), **{only: value})
+    with pytest.raises(ValueError, match="text_order.*text_valid.*both or neither"):
+        app.validate_hunyuan_video15_dit_inputs(bundle, config=_config_15(), dtype=torch.float32)
+    with pytest.raises(ValueError, match="text_order.*text_valid.*both or neither"):
+        bundle.as_model_inputs()
+    assert len(_bundle_15().as_model_inputs()) == 8  # neither: the 8 mask-derived inputs
+
+
+def test_validate_dit15_inputs_checks_text_valid():
+    good = app.HunyuanVideo15DiTInputBundle(
+        **{**_bundle_15().__dict__, "text_order": torch.arange(9).unsqueeze(0), "text_valid": _TEXT_VALID}
+    )
+    app.validate_hunyuan_video15_dit_inputs(good, config=_config_15(), dtype=torch.float32)
+    with pytest.raises(ValueError, match="text_valid"):
+        app.validate_hunyuan_video15_dit_inputs(
+            dataclasses.replace(good, text_valid=torch.tensor([[3]], dtype=torch.int32)),
+            config=_config_15(),
+            dtype=torch.float32,
+        )
+    with pytest.raises(TypeError, match="text_valid"):
+        app.validate_hunyuan_video15_dit_inputs(
+            dataclasses.replace(good, text_valid=torch.tensor([3])),  # int64
+            config=_config_15(),
+            dtype=torch.float32,
+        )
+    inputs = good.as_model_inputs()
+    assert len(inputs) == 10
+    assert inputs[8] is good.text_order and inputs[9] is good.text_valid
+
+
+def test_call_15_with_direct_kwargs_builds_bundle(monkeypatch):
     with tempfile.TemporaryDirectory() as path:
         application = app.NeuronHunyuanVideoApplication(
             model_path=path,
@@ -426,7 +473,17 @@ def test_call_15_with_direct_kwargs_builds_bundle():
                 return torch.zeros(1)
 
         application.transformer = _Fake15Transformer()
-        bundle = _bundle_15(dtype=torch.float32)
+        refined = torch.full((1, 3, 32), 9.0)  # host refiner output (inner_dim)
+        monkeypatch.setattr(
+            application, "_get_host_refiner", lambda: (lambda raw, ts, mask: refined)
+        )
+        bundle = app.HunyuanVideo15DiTInputBundle(
+            **{
+                **_bundle_15(dtype=torch.float32).__dict__,
+                "encoder_attention_mask": torch.tensor([[1, 0, 1]]),
+                "encoder_attention_mask_2": torch.tensor([[0, 1]]),
+            }
+        )
         application(
             hidden_states=bundle.hidden_states,
             timestep=bundle.timestep,
@@ -438,7 +495,51 @@ def test_call_15_with_direct_kwargs_builds_bundle():
             image_embeds=bundle.image_embeds,
         )
         assert len(application.transformer.calls) == 1
-        assert len(application.transformer.calls[0]) == 8
+        inputs = application.transformer.calls[0]
+        assert len(inputs) == 10
+        assert torch.equal(inputs[2], refined)
+        # [image(4, t2v: invalid), byt5(2), mllm(3)] -> valid byt5 5, mllm 6 and 8 first.
+        assert inputs[8].dtype == torch.int64
+        assert inputs[8][0, :3].tolist() == [5, 6, 8]
+        # text_valid: the host count of those valid tokens (graph input #10).
+        assert inputs[9].dtype == torch.int32
+        assert inputs[9].tolist() == [3]
+
+
+def test_host_refiner_recomputes_every_call():
+    """No memo: two embeds a cheap fingerprint cannot tell apart (same shape, channel-0 sum and
+    valid count, e.g. cond vs uncond) at one timestep must each be refined from their own raw."""
+    with tempfile.TemporaryDirectory() as path:
+        application = app.NeuronHunyuanVideoApplication(
+            model_path=path, parallel=_parallel(), dtype=torch.float32, shape={}, model_version="1.5"
+        )
+        calls = []
+
+        class _Fake15Transformer:
+            config = _config_15()
+
+            def __call__(self, *inputs):
+                calls.append(inputs)
+                return torch.zeros(1)
+
+        application.transformer = _Fake15Transformer()
+        refines = []
+
+        def refiner(raw, ts, mask):
+            refines.append(raw)
+            return raw.clone()
+
+        application._get_host_refiner = lambda: refiner
+        mask = torch.tensor([[1, 1, 0]])
+        first = torch.zeros(1, 3, 6)
+        second = first.clone()
+        second[0, :, 1] = 5.0  # channel 0 (the old fingerprint) unchanged
+        for raw in (first, second):
+            application.forward_dit(dataclasses.replace(
+                _bundle_15(), encoder_hidden_states=raw, encoder_attention_mask=mask))
+        application.reset_refiner_cache()  # kept as a harmless per-request hook
+    assert len(refines) == 2
+    assert torch.equal(calls[0][2], first) and torch.equal(calls[1][2], second)
 
 
 def test_dit_input_contract_15_shapes():
@@ -456,6 +557,43 @@ def test_dit_input_contract_15_shapes():
     assert "image_embeds" in contract
     assert "encoder_hidden_states_2" in contract
     assert contract["image_embeds"]["shape"] == (1, 4, 7)
+    assert contract["text_order"] == {"shape": (1, 4 + 2 + 3), "dtype": torch.int64}
+    assert contract["text_valid"] == {"shape": (1,), "dtype": torch.int32}
+    assert list(contract)[-2:] == ["text_order", "text_valid"]
+
+
+def test_host_refiner_matches_diffusers_context_embedder(tmp_path):
+    # diffusers builds context_embedder with the refiner's default mlp_ratio (4.0),
+    # not the transformer's; a config with mlp_ratio != 4 must still load and match.
+    from diffusers.models.transformers.transformer_hunyuan_video15 import (
+        HunyuanVideo15Transformer3DModel,
+    )
+    from safetensors.torch import save_file
+
+    torch.manual_seed(0)
+    dims = dict(
+        text_embed_dim=12, num_attention_heads=4, attention_head_dim=8, num_refiner_layers=1,
+        mlp_ratio=2.0,
+    )
+    model = HunyuanVideo15Transformer3DModel(
+        in_channels=4, out_channels=4, num_layers=1, text_embed_2_dim=10, image_embed_dim=6,
+        rope_axes_dim=(2, 2, 4), **dims,
+    ).eval()
+    (tmp_path / "transformer").mkdir()
+    save_file(
+        {k: v.contiguous() for k, v in model.state_dict().items() if k.startswith("context_embedder.")},
+        str(tmp_path / "transformer" / "diffusion_pytorch_model.safetensors"),
+    )
+    application = app.NeuronHunyuanVideoApplication(
+        model_path=str(tmp_path), parallel=_parallel(), dtype=torch.float32, shape={},
+        model_version="1.5",
+    )
+    application.transformer = SimpleNamespace(config=SimpleNamespace(**dims))
+    raw, timestep, mask = torch.randn(1, 5, 12), torch.tensor([500.0]), torch.ones(1, 5)
+    with torch.no_grad():
+        refined = application._get_host_refiner()(raw, timestep, mask)
+        expected = model.context_embedder(raw, timestep, mask)
+    assert torch.allclose(refined, expected, atol=1e-5)
 
 
 # --------------------------------------------------------------------------- #
@@ -605,8 +743,8 @@ def test_backbone_world_size_is_process_world(monkeypatch, parallel):
 
 @pytest.mark.parametrize("parallel", _PARALLEL_CONFIGS)
 def test_backbone15_world_size_is_process_world(monkeypatch, parallel):
-    # 1.5 had the same tp_degree wiring the 1.0 VAE crashed on; it is latent
-    # only because 1.5 has no CP yet.
+    # 1.5 has CP (and CFG) now, so world = tp * cp * (2 if cfg else 1) != tp: the
+    # backbone must get the process world, the tp_degree wiring the 1.0 VAE crashed on.
     captured = _capture_config_factory(monkeypatch, "create_hunyuan_video15_backbone_config")
     monkeypatch.setattr(app, "_load_diffusers_config", lambda path: SimpleNamespace())
     with tempfile.TemporaryDirectory() as path:
@@ -624,3 +762,7 @@ def test_backbone15_world_size_is_process_world(monkeypatch, parallel):
             )
     assert captured["world_size"] == parallel.world_size
     assert captured["tp_degree"] == parallel.tp_degree
+    assert captured["cp_degree"] == parallel.cp_degree
+    assert captured["cp_mode"] == parallel.cp_mode
+    assert captured["cfg_parallel_enabled"] is False
+    assert captured["sp_enabled"] is False

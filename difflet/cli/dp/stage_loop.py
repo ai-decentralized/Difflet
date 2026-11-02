@@ -28,6 +28,7 @@ def _legacy_request(args) -> RequestSpec:
         prompt=args.prompt,
         output=args.output,
         seed=int(getattr(args, "seed", 42)),
+        negative_prompt=getattr(args, "negative_prompt", None),
         guidance_scale=getattr(args, "guidance_scale", None),
         steps=getattr(args, "steps", None),
     )

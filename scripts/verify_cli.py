@@ -154,10 +154,10 @@ MODELS: dict[str, ModelSpec] = {
     "hunyuan_video_15": ModelSpec(
         key="hunyuan_video_15",
         model_id="hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
-        # scaffold: compile/generate raise NotImplementedError before shape matters
-        shape_flags=(), generate_flags=(), prompt="a cat sitting on a bench",
+        shape_flags=("--height", "320", "--width", "512", "--num-frames", "61"),
+        generate_flags=("--steps", "50"), prompt="a cat sitting on a bench",
         output_name="hunyuan15.mp4", artifact_names=("hunyuan15.mp4", "hunyuan15.pt"),
-        staged=False,
+        staged=True,
     ),
 }
 
@@ -186,9 +186,11 @@ CP_UNSUPPORTED = frozenset(k for k in MODELS if not _capabilities(k).supports_cp
 ULYSSES_UNSUPPORTED = frozenset({"hunyuan_video"})
 
 # Documented known gaps:
-# - hunyuan_video_15 is a scaffold: compile/generate raise NotImplementedError
-#   (difflet/cli/orchestrators/hunyuan_video_15.py). Its dp cell fails the
-#   same way (DP inherits automatically once generate lands).
+# - hunyuan_video_15 has no expected-fail cell: every config here PASSed on
+#   device on the Trainium AOT backend (docs/verification/hv15-aot-evidence.md,
+#   Summary). Its N/A cell, ring CP (no text-mask path in the ring kernel, as
+#   for hunyuan_video), has no config in this matrix; the AOT CLI refuses it
+#   before encode.
 # - hunyuan_video tp2cp2: neuronx-cc 2.25.3371.0 dies with INTERNAL_ERROR
 #   NCC_INLA001 (SBUF alloc out of bound) on the CP-degree-2 DiT graph —
 #   deterministic, reproduced twice; HLO repro preserved for an
@@ -201,8 +203,6 @@ ULYSSES_UNSUPPORTED = frozenset({"hunyuan_video"})
 #   2026-07-12, NRT 2.33.10 / neuronx-cc 2.26.6360.0), while 4-core tp4
 #   passes. hunyuan_video has never fit any 2-core-per-shard config.
 EXPECTED_FAIL_CELLS = frozenset({
-    ("hunyuan_video_15", "tp4"),
-    ("hunyuan_video_15", "dp2tp2"),
     ("hunyuan_video", "tp2cp2"),
     ("hunyuan_video", "dp2tp2"),
 })

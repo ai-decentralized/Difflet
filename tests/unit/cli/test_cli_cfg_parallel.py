@@ -41,7 +41,6 @@ def test_cfg_parallel_store_true():
     [
         "black-forest-labs/FLUX.1-dev",
         "hunyuanvideo-community/HunyuanVideo",
-        "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
         "Qwen/Qwen-Image",
     ],
 )
@@ -52,6 +51,20 @@ def test_cfg_parallel_rejected_for_distilled_model(model_id, monkeypatch, capsys
         cli.main(["compile", "--model-id", model_id, "--cfg-parallel"])
     assert exc.value.code == 1
     assert "guidance-distilled" in capsys.readouterr().err
+
+
+def test_hv15_cfg_parallel_allowed(monkeypatch):
+    cli = _cli()
+    calls = []
+
+    class FakeOrch:
+        def compile(self):
+            calls.append("compile")
+
+    monkeypatch.setattr(cli, "_get_orchestrator", lambda args: FakeOrch())
+    cli.main(["compile", "--model-id", "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+              "--cfg-parallel"])
+    assert calls == ["compile"]
 
 
 def test_cfg_parallel_with_cp_degree_rejected(monkeypatch, capsys):

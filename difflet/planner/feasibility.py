@@ -51,9 +51,6 @@ KNOWN_BAD: dict[tuple[str, str | None], str] = {
     ("hunyuan_video", "dp2tp2"): (
         "a single replica's weights exceed one Trainium2 chip's HBM at dp=2"
     ),
-    ("hunyuan_video_15", None): (
-        "HunyuanVideo 1.5 is a scaffold: only `difflet download` is implemented"
-    ),
 }
 
 # Ulysses all-to-alls the sequence shard into a head shard and that kernel has

@@ -7,6 +7,8 @@ reference path is covered by CPU tests.
 
 from __future__ import annotations
 
+import copy
+import dataclasses
 import os
 from dataclasses import dataclass
 from typing import Any
@@ -79,7 +81,10 @@ class HunyuanVideo15DiTInputBundle:
     """Host-side contract for one HunyuanVideo 1.5 DiT call.
 
     HunyuanVideo 1.5 uses Qwen2.5-VL embeddings, ByT5 glyph embeddings, and
-    image-semantic embeddings in addition to the latent tensor.
+    image-semantic embeddings in addition to the latent tensor. ``text_order`` is the
+    valid-first permutation of the joint ``[image, byt5, mllm]`` text stream and
+    ``text_valid`` (int32 ``[B]``) its valid-token count, both from ``hv15_text_layout``;
+    ``forward_dit`` derives them from the masks when they are None.
     """
 
     hidden_states: torch.Tensor
@@ -90,9 +95,11 @@ class HunyuanVideo15DiTInputBundle:
     encoder_hidden_states_2: torch.Tensor
     encoder_attention_mask_2: torch.Tensor
     image_embeds: torch.Tensor
+    text_order: torch.Tensor | None = None
+    text_valid: torch.Tensor | None = None
 
     def as_model_inputs(self) -> tuple[torch.Tensor, ...]:
-        return (
+        inputs = (
             self.hidden_states,
             self.timestep,
             self.encoder_hidden_states,
@@ -101,6 +108,18 @@ class HunyuanVideo15DiTInputBundle:
             self.encoder_hidden_states_2,
             self.encoder_attention_mask_2,
             self.image_embeds,
+        )
+        _require_text_layout_pair(self)
+        if self.text_order is None:
+            return inputs
+        return (*inputs, self.text_order, self.text_valid)
+
+
+def _require_text_layout_pair(bundle: HunyuanVideo15DiTInputBundle) -> None:
+    if (bundle.text_order is None) != (bundle.text_valid is None):
+        raise ValueError(
+            "HunyuanVideo 1.5 DiT inputs 'text_order' and 'text_valid' (graph inputs 9 and 10) "
+            "come from one hv15_text_layout call; set both or neither."
         )
 
 
@@ -197,6 +216,7 @@ def validate_hunyuan_video15_dit_inputs(
 ) -> None:
     """Validate the HunyuanVideo 1.5 embedding/latent contract before dispatch."""
 
+    _require_text_layout_pair(bundle)
     batch_size = int(getattr(config.neuron_config, "batch_size", 1))
     text_seq_len = int(getattr(config, "text_seq_len", 1000))
     text_seq_len_2 = int(getattr(config, "text_seq_len_2", 256))
@@ -223,6 +243,11 @@ def validate_hunyuan_video15_dit_inputs(
         ),
         "encoder_attention_mask_2": ((batch_size, text_seq_len_2), torch.int64),
         "image_embeds": ((batch_size, image_seq_len, int(config.image_embed_dim)), dtype),
+        "text_order": (
+            (batch_size, image_seq_len + text_seq_len_2 + text_seq_len),
+            torch.int64,
+        ),
+        "text_valid": ((batch_size,), torch.int32),
     }
     tensors = {
         "hidden_states": bundle.hidden_states,
@@ -234,6 +259,10 @@ def validate_hunyuan_video15_dit_inputs(
         "encoder_attention_mask_2": bundle.encoder_attention_mask_2,
         "image_embeds": bundle.image_embeds,
     }
+    if bundle.text_order is not None:
+        tensors["text_order"] = bundle.text_order
+    if bundle.text_valid is not None:
+        tensors["text_valid"] = bundle.text_valid
     for name, tensor in tensors.items():
         shape, tensor_dtype = expected[name]
         if tuple(tensor.shape) != shape:
@@ -307,6 +336,10 @@ def create_hunyuan_video15_backbone_config(
     text_seq_len_2: int = 256,
     image_seq_len: int = 729,
     batch_size: int = 1,
+    cfg_parallel_enabled: bool = False,
+    cp_degree: int = 1,
+    cp_mode: str = "ulysses",
+    sp_enabled: bool = False,
 ):
     from difflet.backends.trainium.hunyuan_video.backbone15 import (
         HunyuanVideo15BackboneInferenceConfig,
@@ -327,6 +360,10 @@ def create_hunyuan_video15_backbone_config(
         text_seq_len=text_seq_len,
         text_seq_len_2=text_seq_len_2,
         image_seq_len=image_seq_len,
+        cfg_parallel_enabled=cfg_parallel_enabled,
+        context_parallel_enabled=cp_degree > 1,
+        cp_mode=cp_mode,
+        sp_enabled=sp_enabled,
     )
 
 
@@ -401,6 +438,19 @@ def create_hunyuan_video15_vae_decoder_config(
     )
 
 
+def _hv15_text_layout(bundle: HunyuanVideo15DiTInputBundle) -> tuple[torch.Tensor, torch.Tensor]:
+    """Host ``(text_order, text_valid)`` from the bundle's masks (image: 0 for t2v, else 1,
+    as the graph's ``has_image`` switch), both from one joint mask so they always agree."""
+    from difflet.backends.trainium.hunyuan_video.parallel15 import hv15_text_layout
+
+    image_valid = 0 if bool(torch.all(bundle.image_embeds == 0)) else 1
+    batch_size, image_seq_len = bundle.image_embeds.shape[:2]
+    mask_image = torch.full((batch_size, image_seq_len), image_valid, dtype=torch.int64)
+    return hv15_text_layout(
+        mask_image, bundle.encoder_attention_mask_2, bundle.encoder_attention_mask
+    )
+
+
 def _normalize_dtype(dtype: Any) -> torch.dtype:
     if isinstance(dtype, torch.dtype):
         return dtype
@@ -463,30 +513,29 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
         self.vae_decoder = None
         self.teacache_probe = None
         self.teacache_probe_fused = False
-        # host-refiner (cclog 86): the HV-1.5 token refiner self-attends over the sparse
-        # mllm stream (<128 valid keys), which NaNs the Neuron flash kernel; run it on host
-        # (eager, exact) and feed refined embeds into the NEFF instead.
-        self._host_refiner = None
-        self._host_refiner_on = (
-            os.environ.get("DIFFLET_HUNYUAN15_HOST_REFINER") == "1"
-            and str(kwargs.get("model_version", "1.0")) == "1.5"
-        )
-        # refined embeds depend only on (raw_mllm, timestep, mask); the prompt is fixed
-        # within a generation and the timesteps repeat across the gate/baseline/teacache
-        # trajectories, so memoize by timestep (keyed under a cheap prompt fingerprint).
-        # Lazy (not eager-precompute-all): a TeaCache-skipped step never computes it.
-        self._refiner_cache: dict[float, torch.Tensor] = {}
-        self._refiner_fp = None
-        self.pipeline = None
-        self.text_seq_len = int(kwargs.get("text_seq_len", 256))
-        self.text_seq_len_2 = int(kwargs.get("text_seq_len_2", 256))
-        self.image_seq_len = int(kwargs.get("image_seq_len", 729))
-        self.batch_size = int(kwargs.get("batch_size", 1))
         self.transformer_runtime = str(
             kwargs.get(
                 "transformer_runtime",
                 os.environ.get("DIFFLET_HUNYUAN15_TRANSFORMER_RUNTIME", "monolithic"),
             )
+        )
+        # host-refiner (cclog 86): the HV-1.5 token refiner self-attends over the sparse
+        # mllm stream (<128 valid keys), which NaNs the Neuron flash kernel; run it on host
+        # (eager, exact) and feed refined embeds into the NEFF instead. Always on for the
+        # 1.5 monolithic DiT; the segmented runtime runs its own frontend on raw embeds.
+        self._host_refiner = None
+        self._host_refiner_on = (
+            self.model_version == "1.5" and self.transformer_runtime == "monolithic"
+        )
+        self.pipeline = None
+        self.text_seq_len = int(kwargs.get("text_seq_len", 256))
+        self.text_seq_len_2 = int(kwargs.get("text_seq_len_2", 256))
+        self.image_seq_len = int(kwargs.get("image_seq_len", 729))
+        self.batch_size = int(kwargs.get("batch_size", 1))
+        # CFG parallel stacks [uncond, cond] into batch 2 and scatters one branch per cfg
+        # rank, so only the transformer compiles at batch 2.
+        self.backbone_batch_size = (
+            2 if bool(getattr(parallel, "cfg_parallel_enabled", False)) else self.batch_size
         )
 
         enable_transformer = bool(kwargs.get("enable_transformer", True))
@@ -502,9 +551,9 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
 
             config = create_hunyuan_video15_backbone_config(
                 transformer_path=self.transformer_path,
-                # Process world, not tp: identical today (1.5 has no CP yet), but
-                # the same tp==world coincidence hid the 1.0 VAE crash for two
-                # months. See the 1.0 VAE comment below and world_check.py.
+                # Process world, not tp: world = tp * cp * (2 if cfg else 1). A
+                # tp==world coincidence hid the 1.0 VAE crash for two months. See
+                # the 1.0 VAE comment below and world_check.py.
                 world_size=parallel.world_size,
                 tp_degree=parallel.tp_degree,
                 dtype=self.dtype,
@@ -514,7 +563,11 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                 text_seq_len=int(kwargs.get("text_seq_len", 1000)),
                 text_seq_len_2=self.text_seq_len_2,
                 image_seq_len=self.image_seq_len,
-                batch_size=self.batch_size,
+                batch_size=self.backbone_batch_size,
+                cfg_parallel_enabled=bool(getattr(parallel, "cfg_parallel_enabled", False)),
+                cp_degree=int(getattr(parallel, "cp_degree", 1)),
+                cp_mode=str(getattr(parallel, "cp_mode", "ulysses")),
+                sp_enabled=bool(getattr(parallel, "sp_enabled", False)),
             )
             teacache_fused_15 = bool(kwargs.get("teacache_fused", False))
             if self.transformer_runtime == "segmented":
@@ -523,6 +576,17 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                         "HunyuanVideo 1.5 TeaCache is not supported with the segmented "
                         "runtime: per-block process loading has no single graph for the "
                         "persistent prev_mod Parameter. Use transformer_runtime='monolithic'."
+                    )
+                if (
+                    config.cfg_parallel_enabled
+                    or config.context_parallel_enabled
+                    or config.sp_enabled
+                ):
+                    raise NotImplementedError(
+                        "HunyuanVideo 1.5 CFG-parallel, context-parallel and sequence-parallel "
+                        "run only in the monolithic DiT; the segmented runtime has none of "
+                        "them. Use transformer_runtime='monolithic' "
+                        "(DIFFLET_HUNYUAN15_TRANSFORMER_RUNTIME=monolithic)."
                     )
                 from difflet.backends.trainium.hunyuan_video.segmented15 import (
                     DEFAULT_ATTENTION_COMPILER_ARGS,
@@ -558,9 +622,14 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                         NeuronHunyuanVideo15TeacacheProbeFusedApplication,
                     )
 
+                    # The probe always runs at batch 1 (block-0 modulation is identical
+                    # for the cond and uncond rows), so under CFG it gets its own batch-1
+                    # copy of the backbone config; world and tp stay the backbone's.
+                    probe_config = copy.deepcopy(config)
+                    probe_config.neuron_config.batch_size = 1
                     self.teacache_probe = NeuronHunyuanVideo15TeacacheProbeFusedApplication(
                         model_path=self.transformer_path,
-                        config=config,
+                        config=probe_config,
                     )
                     self.teacache_probe_fused = True
             else:
@@ -683,6 +752,10 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                     model_path=self.vae_decoder_path,
                     config=vae_config,
                 )
+        if self.model_version == "1.5":
+            # 1.5 is driven by pipeline15.HunyuanVideo15Denoiser (aot15.build_aot_denoiser),
+            # not by the 1.0 orchestrator.
+            return
         from difflet.models.hunyuan_video.pipeline import HunyuanVideoOrchestrator
 
         self.pipeline = HunyuanVideoOrchestrator(
@@ -805,6 +878,11 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                     "shape": (batch_size, image_seq_len, int(config.image_embed_dim)),
                     "dtype": self.dtype,
                 },
+                "text_order": {
+                    "shape": (batch_size, image_seq_len + text_seq_len_2 + text_seq_len),
+                    "dtype": torch.int64,
+                },
+                "text_valid": {"shape": (batch_size,), "dtype": torch.int32},
             }
         text_seq_len = int(getattr(config, "text_seq_len", 256))
         return {
@@ -854,12 +932,13 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
         from safetensors.torch import load_file
 
         cfg = self.transformer.config
+        # Built exactly like diffusers' context_embedder: the refiner keeps its own default
+        # mlp_ratio (4.0); the transformer's mlp_ratio applies to the dual-stream blocks only.
         refiner = HunyuanVideo15TokenRefiner(
             in_channels=int(cfg.text_embed_dim),
             num_attention_heads=int(cfg.num_attention_heads),
             attention_head_dim=int(cfg.attention_head_dim),
             num_layers=int(cfg.num_refiner_layers),
-            mlp_ratio=float(getattr(cfg, "mlp_ratio", 4.0)),
         )
         prefix = "context_embedder."
         state: dict[str, torch.Tensor] = {}
@@ -890,6 +969,9 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
         self._host_refiner = refiner
         return refiner
 
+    def reset_refiner_cache(self) -> None:
+        """Per-request hook (``aot15`` calls it); a no-op: the host refiner keeps no memo."""
+
     def forward_dit(self, bundle: HunyuanVideoDiTInputBundle):
         if self.transformer is None:
             raise NotImplementedError("HunyuanVideo forward_dit requires an active transformer.")
@@ -899,25 +981,21 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                 config=self.transformer.config,
                 dtype=self.dtype,
             )
+            if self._host_refiner_on and bundle.text_order is None:  # validated: both or neither
+                text_order, text_valid = _hv15_text_layout(bundle)
+                bundle = dataclasses.replace(bundle, text_order=text_order, text_valid=text_valid)
             inputs = list(bundle.as_model_inputs())
             if self._host_refiner_on:
                 # inputs = (hidden_states, timestep, encoder_hidden_states[mllm],
                 #           encoder_attention_mask, timestep_r, ...) — refine the raw mllm
-                # on host (fp32) and feed the inner_dim result into the NEFF.
+                # on host (fp32) and feed the inner_dim result into the NEFF. Recomputed on
+                # every call: each step has its own timestep, so a memo never hit, and a
+                # cheap prompt fingerprint could hand one branch the other's embeds.
                 raw, ts, mask = inputs[2], inputs[1], inputs[3]
-                # cheap prompt fingerprint (one channel across tokens + valid count); reset
-                # the per-timestep cache when the prompt changes.
-                fp = (tuple(raw.shape), round(float(raw[0, :, 0].float().sum()), 3), int(mask.sum()))
-                if fp != self._refiner_fp:
-                    self._refiner_cache = {}
-                    self._refiner_fp = fp
-                tkey = round(float(ts.flatten()[0]), 6)
-                refined = self._refiner_cache.get(tkey)
-                if refined is None:
-                    refiner = self._get_host_refiner()
-                    with torch.no_grad():
-                        refined = refiner(raw.to(torch.float32), ts.to(torch.float32), mask).to(self.dtype)
-                    self._refiner_cache[tkey] = refined
+                with torch.no_grad():
+                    refined = self._get_host_refiner()(
+                        raw.to(torch.float32), ts.to(torch.float32), mask
+                    ).to(self.dtype)
                 inputs[2] = refined
             return self.transformer(*inputs)
         validate_hunyuan_video_dit_inputs(
@@ -1001,7 +1079,7 @@ class NeuronHunyuanVideoApplication(MultiComponentApplication):
                 "encoder_attention_mask_2",
                 "image_embeds",
             }
-            if not args and direct_keys_15.issubset(kwargs):
+            if not args and direct_keys_15.issubset(kwargs):  # text_order/text_valid optional
                 bundle = HunyuanVideo15DiTInputBundle(**kwargs)
                 return self.forward_dit(bundle)
         direct_keys = {

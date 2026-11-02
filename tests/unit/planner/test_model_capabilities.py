@@ -17,7 +17,7 @@ EXPECTED = {
     "qwen_image": (24, True, True, True),
     "wan": (40, False, True, True),
     "hunyuan_video": (24, True, True, True),
-    "hunyuan_video_15": (16, True, False, False),
+    "hunyuan_video_15": (16, False, True, True),
     "ltx_2": (32, False, False, False),
 }
 

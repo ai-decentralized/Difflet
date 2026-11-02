@@ -108,3 +108,23 @@ def test_cfg_parallel_with_cp_degree_passes_validation_on_neuron():
 
     cli_main._validate_cfg_parallel(argparse.Namespace(cfg_parallel=True, cp_degree=2, backend="neuron",
                                                        model_id="Wan-AI/Wan2.2-T2V-A14B-Diffusers"))
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [[], ["--cfg-parallel"], ["--dp", "2", "--tp-degree", "2"], ["--mode", "latency"]],
+)
+def test_replica_cores_match_stage_layout(extra):
+    """The DP router's replica size must equal what the hv15 transformer stage launches.
+
+    Covers the Trainium path (no platform default tp), where the registry default layout
+    (TP2 x CFG2) applies when no tp/cfg/cp is given; the CUDA semantics are pinned in
+    test_main_dp.py.
+    """
+    from difflet.cli.orchestrators.hunyuan_video_15 import _layout
+
+    model = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
+    args = cli_main._build_parser().parse_args(
+        ["generate", "--model-id", model, "--prompt", "p", "--output", "o.mp4", *extra])
+    tp, cfg, cp = _layout(args)
+    assert cli_main._replica_cores(args) == tp * (2 if cfg else 1) * cp

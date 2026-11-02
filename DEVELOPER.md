@@ -247,13 +247,15 @@ mesh `{dp, cfg, cp, tp}` (tp innermost, dp outermost):
   with `cp_mode` (`gather_kv` or `ring`).
 - `cfg_parallel_enabled` — splits the CFG conditional/unconditional batch across a cfg axis of
   size 2. Mutually exclusive with `cp_degree > 1` at the pipeline level, and only valid for
-  true-CFG models (Wan, LTX-2) — guidance-distilled models (Flux, HunyuanVideo, HunyuanVideo
-  1.5, Qwen-Image) run a single forward pass and reject it.
+  true-CFG models (Wan, LTX-2, HunyuanVideo 1.5) — guidance-distilled models (Flux,
+  HunyuanVideo) and Qwen-Image run a single forward pass and reject it. HunyuanVideo 1.5 is
+  not guidance-distilled: its guider runs classifier-free guidance at 6.0 on every step, and
+  `--cfg-parallel` (TP2 × CFG2) is its default layout.
 - `sp_enabled` — Megatron-style sequence parallelism: shards the otherwise-replicated
   norm/modulation/residual regions along the sequence axis across the *existing*
   tensor-parallel group (reduce-scatter replaces the row-parallel all-reduce). Adds no mesh
   axis, so `world_size` is unchanged. Mutually exclusive with `cp_degree > 1`. Device-verified
-  for Flux, Wan 2.1/2.2, HunyuanVideo, and Qwen-Image (support is read from each model's
+  for Flux, Wan 2.1/2.2, HunyuanVideo, HunyuanVideo 1.5, and Qwen-Image (support is read from each model's
   registry `ModelCapabilities.supports_sp`, not a hand-list; parity gates live in
   `scripts/*_sp_parity_smoke.sh`).
 - `dp_degree` — data-parallel replica axis (reserved: groups exist, the replication feature is
@@ -284,8 +286,10 @@ Wan backbone at `tp=2×cfg=2` and `tp=2×cp=2` against the pre-refactor baseline
 byte-identical outputs on device.
 
 On the 4-core `trn2.3xlarge`, the four-core configurations are `tp=4`, `tp=2 cp=2`,
-`tp=2 + --cfg-parallel` (true-CFG models), and `tp=4 --sp` (SP-capable models); LTX-2 and
-HunyuanVideo 1.5 support neither CP nor SP and use `tp=4`. All combinations are exercised
+`tp=2 + --cfg-parallel` (true-CFG models), and `tp=4 --sp` (SP-capable models); LTX-2 supports
+neither CP nor SP and uses `tp=4`. HunyuanVideo 1.5 supports CP (ulysses, gather_kv; ring is
+refused on the Trainium AOT backend) and SP, and defaults to `tp=2 + --cfg-parallel`. All
+combinations are exercised
 end-to-end by `scripts/verify_cli.py` (see Development workflow).
 
 ## Runtime protocol

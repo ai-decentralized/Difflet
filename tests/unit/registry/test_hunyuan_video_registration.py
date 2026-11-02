@@ -23,7 +23,8 @@ def test_hunyuan_video_15_registry_defaults_are_production_480p():
     entry = resolve_model("hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v")
 
     assert entry.name == "hunyuan_video_15"
-    assert entry.default_parallel == DiffletParallelConfig(tp_degree=4)
+    assert entry.default_parallel.tp_degree == 2
+    assert entry.default_parallel.cfg_parallel_enabled is True
     assert entry.default_shape == {"height": 480, "width": 848, "num_frames": 121}
 
 
@@ -506,16 +507,22 @@ def test_hunyuan_video_15_backbone_inference_config_shapes(tmp_path):
         tag="HunyuanVideo15Transformer3DModel",
     )
     inputs = wrapper.input_generator()[0]
+    assert len(inputs) == 10
     assert tuple(inputs[0].shape) == (1, 65, 2, 2, 3)
     assert tuple(inputs[1].shape) == (1,)
-    assert tuple(inputs[2].shape) == (1, 7, 12)
+    # The token refiner runs on host: the NEFF takes refined mllm embeds (inner_dim).
+    assert tuple(inputs[2].shape) == (1, 7, 32)
     assert tuple(inputs[3].shape) == (1, 7)
     assert tuple(inputs[4].shape) == (1,)
     assert tuple(inputs[5].shape) == (1, 3, 10)
     assert tuple(inputs[6].shape) == (1, 3)
     assert tuple(inputs[7].shape) == (1, 4, 6)
+    assert tuple(inputs[8].shape) == (1, 4 + 3 + 7)  # text_order
     assert inputs[0].dtype == torch.bfloat16
     assert inputs[3].dtype == torch.int64
+    assert inputs[8].dtype == torch.int64
+    assert tuple(inputs[9].shape) == (1,)  # text_valid: host count of valid text tokens
+    assert inputs[9].dtype == torch.int32
 
 
 def test_hunyuan_video_15_dit_input_contract_validates_shapes_and_dtypes(tmp_path):
@@ -650,12 +657,15 @@ def test_hunyuan_video_15_trace_module_accepts_fixed_tuple_for_t2v(tmp_path):
         output = model(
             torch.randn([1, 65, 2, 2, 3]),
             torch.ones([1]),
-            torch.randn([1, 7, 12]),
+            torch.randn([1, 7, 32]),  # host-refined mllm embeds (inner_dim)
             torch.ones([1, 7], dtype=torch.int64),
             torch.ones([1]),
             torch.randn([1, 3, 10]),
             torch.ones([1, 3], dtype=torch.int64),
             torch.zeros([1, 4, 6]),
+            # text_order: t2v image tokens (0..3) are invalid, every text token is valid.
+            torch.cat([torch.arange(4, 14), torch.arange(4)]).unsqueeze(0),
+            torch.tensor([3 + 7], dtype=torch.int32),  # text_valid
         )
 
     assert tuple(output.shape) == (1, 32, 2, 2, 3)
@@ -811,20 +821,23 @@ def test_hunyuan_video_still_rejects_cfg_parallel(tmp_path):
         )
 
 
-def test_hunyuan_video_15_rejects_cp_until_transformer_port(tmp_path):
+def test_hunyuan_video_15_accepts_cp(tmp_path):
     model_dir = tmp_path / "HunyuanVideo-1.5-Diffusers-480p_t2v"
     model_dir.mkdir()
 
-    with pytest.raises(NotImplementedError, match="CP is deferred"):
-        DiffletPipeline.from_pretrained(
-            str(model_dir),
-            model_type="hunyuan_video_15",
-            parallel=DiffletParallelConfig(tp_degree=4, cp_degree=2),
-            dtype="bf16",
-            compile_cache_dir=str(tmp_path / "cache"),
-            skip_compile=True,
-            load=False,
-        )
+    pipe = DiffletPipeline.from_pretrained(
+        str(model_dir),
+        model_type="hunyuan_video_15",
+        parallel=DiffletParallelConfig(tp_degree=4, cp_degree=2),
+        dtype="bf16",
+        compile_cache_dir=str(tmp_path / "cache"),
+        skip_compile=True,
+        load=False,
+    )
+
+    assert pipe.model_entry.name == "hunyuan_video_15"
+    assert pipe.parallel == DiffletParallelConfig(tp_degree=4, cp_degree=2)
+    assert pipe.parallel.world_size == 8
 
 
 def test_hunyuan_video_backbone_inference_config_shapes(tmp_path):
