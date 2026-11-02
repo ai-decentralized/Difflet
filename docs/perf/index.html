@@ -41,6 +41,8 @@ a { color: var(--accent); }
 .eyebrow a { text-decoration: none; }
 .eyebrow a:hover { text-decoration: underline; }
 .lede { color: var(--muted); }
+.updated { font-size: 0.9rem; font-weight: 500; font-variant-numeric: tabular-nums; }
+.updated time { color: var(--accent); }
 header { display: grid; gap: 8px; }
 code { font-family: var(--font-mono); font-size: 0.86em; }
 
@@ -108,8 +110,9 @@ td a:hover { text-decoration: underline; }
 <body>
 <div class="wrap">
   <header>
-    <div class="eyebrow"><a href="https://github.com/ai-decentralized/Difflet">Difflet</a><span id="updated"></span><a href="https://github.com/ai-decentralized/Difflet/blob/main/benchmark/README.md#publishing-results">Add a result</a></div>
-    <h1>Performance across models and platforms</h1>
+    <div class="eyebrow"><a href="https://github.com/ai-decentralized/Difflet">Difflet</a><a href="https://github.com/ai-decentralized/Difflet/blob/main/benchmark/README.md#publishing-results">Add a result</a></div>
+    <h1>Compare models across platforms</h1>
+    <p class="updated" id="updated" hidden></p>
     <p class="lede">Pick models, platforms and a metric. The chart and the table update together and show the newest result for each model, platform and backend. The link in the address bar keeps your selection, so you can share a comparison.</p>
   </header>
 
@@ -309,7 +312,11 @@ async function init() {
   MODELS = DATA.models;
   RES = {};
   for (const r of DATA.results) (RES[r.model] ||= {})[r.config] = r;
-  if (DATA.generated) $("updated").textContent = `Newest result ${DATA.generated}`;
+  if (DATA.generated) {
+    const fresh = CONFIGS.filter(c => DATA.results.some(r => r.date === DATA.generated && r.config === c.key)).map(c => c.label);
+    $("updated").innerHTML = `Latest update: <time datetime="${esc(DATA.generated)}">${esc(DATA.generated)}</time>` + (fresh.length ? ` <span class="dim">· ${esc(fresh.join(", "))}</span>` : "");
+    $("updated").hidden = false;
+  }
   if (!readHash()) {
     let restored = false;
     try { const s = localStorage.getItem("difflet-perf"); if (s) { history.replaceState(null, "", "#" + s); restored = readHash(); } } catch (e) { /* ignore */ }
