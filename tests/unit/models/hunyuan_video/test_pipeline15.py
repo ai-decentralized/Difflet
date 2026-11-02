@@ -104,11 +104,7 @@ def _gen():
 
 def test_loop_matches_diffusers_with_cfg(hv15_snapshot):
     import diffusers
-    from diffusers import (
-        AutoencoderKLHunyuanVideo15,
-        FlowMatchEulerDiscreteScheduler,
-        HunyuanVideo15Transformer3DModel,
-    )
+    from diffusers import AutoencoderKLHunyuanVideo15, FlowMatchEulerDiscreteScheduler
     from diffusers.guiders import ClassifierFreeGuidance
 
     d, dit = _denoiser(hv15_snapshot)
