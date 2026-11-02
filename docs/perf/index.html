@@ -313,8 +313,7 @@ async function init() {
   RES = {};
   for (const r of DATA.results) (RES[r.model] ||= {})[r.config] = r;
   if (DATA.generated) {
-    const fresh = CONFIGS.filter(c => DATA.results.some(r => r.date === DATA.generated && r.config === c.key)).map(c => c.label);
-    $("updated").innerHTML = `Latest update: <time datetime="${esc(DATA.generated)}">${esc(DATA.generated)}</time>` + (fresh.length ? ` <span class="dim">· ${esc(fresh.join(", "))}</span>` : "");
+    $("updated").innerHTML = `Latest update: <time datetime="${esc(DATA.generated)}">${esc(DATA.generated)}</time>`;
     $("updated").hidden = false;
   }
   if (!readHash()) {
