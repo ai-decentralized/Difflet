@@ -80,8 +80,8 @@ class AotHunyuanVideo15DiT:
     ) -> torch.Tensor:
         if bool(torch.any(image_embeds != 0)):
             raise ValueError(
-                "HunyuanVideo 1.5 AOT runs text-to-video only: the compiled DiT bakes the "
-                "t2v image stream, so non-zero image_embeds (image-to-video) are refused."
+                "HunyuanVideo 1.5 AOT is text-to-video only: image-to-video (non-zero "
+                "image_embeds) is not supported or verified on the AOT path yet."
             )
         dt = self.app.dtype
         batch = int(hidden_states.shape[0])
