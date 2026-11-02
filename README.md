@@ -86,6 +86,7 @@ and the Python API do not run on TPU.
 | [Wan-AI/Wan2.2-T2V-A14B-Diffusers](https://huggingface.co/Wan-AI/Wan2.2-T2V-A14B-Diffusers) | Text-to-video | 480×832×9 | 2-stage (transformer → vae); true CFG |
 | [Wan-AI/Wan2.1-T2V-14B-Diffusers](https://huggingface.co/Wan-AI/Wan2.1-T2V-14B-Diffusers) | Text-to-video | 480×832×9 | Same runtime as Wan 2.2 |
 | [hunyuanvideo-community/HunyuanVideo](https://huggingface.co/hunyuanvideo-community/HunyuanVideo) | Text-to-video | 320×512×61 | 3-stage (clip → llama → generate) |
+| [hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v](https://huggingface.co/hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v) | Text-to-video | 480×848×121 | 3-stage (encode → transformer → vae); true CFG (6.0), default `--tp-degree 2 --cfg-parallel`; on Trainium the VAE decodes on the host ¹⁴ |
 | [Lightricks/LTX-2](https://huggingface.co/Lightricks/LTX-2) | Text-to-video | 512×768×121 | Single-process; TP only; exports `.mp4` |
 | [MiniMaxAI/MiniMax-H3](https://huggingface.co/MiniMaxAI/MiniMax-H3) | Text-to-video with audio | 768×1344×124 ⚠️ ¹¹ | Verified at **256×448×124**; TP4; 4-stage CLI (text → generate → video_vae → audio_vae); `.mp4` with stereo audio |
 
@@ -148,7 +149,8 @@ Measured timings against stock diffusers, and the full pass/limit matrix, are in
 | FLUX.1-dev | ✅ | ✅ | ✅ | ✅ | ✅ | — ⁷ | ✅ |
 | Qwen-Image | ✅ | ✅ | ✅ | ✅ | ✅ | — ⁷ | ✅ |
 | Wan 2.2 / 2.1 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| HunyuanVideo | ✅ | ⚠️ ⁸ | ✅ | ❌ | ✅ | — ⁷ | ⚠️ ⁹ |
+| HunyuanVideo | ✅ | ⚠️ ⁸ | — ¹² | ✅ | ✅ | — ⁷ | ⚠️ ⁹ |
+| HunyuanVideo 1.5 | ✅ | ✅ | — ¹² | ✅ | ⚠️ ¹³ | ✅ | ✅ |
 | LTX-2 | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
 | MiniMax-H3 | ✅ TP4 | ❌ | ❌ | ❌ | ❌ | — ⁷ | ❌ |
 
@@ -160,16 +162,21 @@ Measured timings against stock diffusers, and the full pass/limit matrix, are in
 | Qwen-Image | ✅ image | ✅ | ✅ | ✅ | ✅ image | ✅ |
 | Wan 2.2 / 2.1 | ✅ video | ✅ | ✅ | ✅ | ✅ video ¹⁰ | ✅ |
 | HunyuanVideo | ✅ video | ✅ | ✅ | ✅ | ✅ video | ✅ |
+| HunyuanVideo 1.5 | ⚠️ video ¹⁴ | ❌ | ⚠️ ¹⁵ | ✅ | ❌ | ✅ |
 | LTX-2 | ✅ video | ❌ | ✅ | ✅ | ✅ video | ✅ |
 | MiniMax-H3 | ✅ video + stereo audio | ❌ | ❌ | ❌ | ❌ | ❌ |
 
 **Notes**
 
 7. Guidance-distilled model (single forward pass with the guidance scale baked into the timestep embedding) — there is no second CFG branch to split.
-8. `tp2 cp2` with gather-KV hits a `neuronx-cc` internal error (`NCC_INLA001` / `NCC_IBIR243`) on the CP-degree-2 DiT graph; ring CP and `tp4 --sp` are the working multi-core paths. See [DEVELOPER.md](DEVELOPER.md).
+8. `tp2 cp2` with gather-KV hits a `neuronx-cc` internal error (`NCC_INLA001` / `NCC_IBIR243`) on the CP-degree-2 DiT graph; ulysses CP and `tp4 --sp` are the working multi-core paths. See [DEVELOPER.md](DEVELOPER.md).
 9. DP works, but on a 4-core `trn2.3xlarge` each 2-core replica runs out of HBM loading the compiled VAE at the default 320×512×61 shape. Use a smaller shape or a host with more cores per replica.
 10. Wan 2.1 is the qualified serving checkpoint. Wan 2.2 can be started for experiments but its dual-transformer path has not passed resident-serving acceptance.
 11. MiniMax-H3 supports the Trainium four-stage CLI at TP4 and CP1: text and DiT use four cores, and each VAE uses one core. The verified end-to-end shape is **256×448×124**; pass `--height 256 --width 448 --num-frames 124`. The registry default **768×1344×124** is not qualified on `trn2.3xlarge`: the standard DiT graph exceeds device memory, and compilation with precomputed AdaLN exceeded host memory. The 640×1152×124 DiT compiled successfully but has not been verified end to end. Python API generation, resident serving, DP, JSONL batching, multi-shape compilation, and TeaCache are not supported for H3. See the [verification](docs/design/minimax_h3/01_e2e_reverification_2026-09-30.md) and [bring-up handoff](docs/design/minimax_h3/00_trainium_bringup_handoff.md).
+12. Not applicable: the model always carries a padded-text attention mask, and the Trainium ring-attention kernel has no text-mask path. `--cp-mode ring` is refused (for HunyuanVideo 1.5 before any stage launches); use `--cp-mode ulysses` (or `gather_kv` for HunyuanVideo 1.5).
+13. `--tp-degree 4 --sp` needs the image token count divisible by 4. It works at 320×512×61; at the default 480×848×121 it is refused before compile, so use the default `--tp-degree 2 --cfg-parallel` there.
+14. The DiT runs on the NeuronCores; the VAE decodes on the host by default (diffusers' tiled decoder in fp32), because the compiled decoder does not build on neuronx-cc 2.26 (`--device-vae` opts into it). The host decode takes about 7 minutes at 320×512×61 and about 45 minutes at 480×848×121. Verified on device: TP2, TP2 × CFG2, TP4, TP4 + SP, TP2 × CP2 (ulysses and gather_kv), DP, JSONL batches and the default shape; see [docs/verification/hv15-aot-evidence.md](docs/verification/hv15-aot-evidence.md).
+15. Available but not recommended for HunyuanVideo 1.5: the calibration signal is weak and the output is visibly degraded, and the probe loads a second copy of the DiT weights, so it does not fit at the default shape. Use `--teacache-cadence 2` (20 of 50 steps skipped, about 40% less denoise time).
 
 Context parallelism (`--cp-degree > 1`) and CFG-parallel both consume the data-parallel lanes, so they are mutually exclusive (and each is mutually exclusive with `--sp`). `world_size = dp × (2 if cfg-parallel else 1) × cp_degree × tp_degree`; `--sp` leaves it unchanged. `difflet plan --model-id <id>` lists the combinations your host can run.
 
@@ -302,7 +309,7 @@ On a 4-core host the useful presets are:
 | Goal | Flags | Works for |
 |---|---|---|
 | Lowest latency, one request | `--tp-degree 2 --cp-degree 2` or `--tp-degree 4 --sp` | Flux, Qwen-Image, Wan, HunyuanVideo |
-| Lowest latency, true-CFG model | `--tp-degree 2 --cfg-parallel` | Wan, LTX-2 |
+| Lowest latency, true-CFG model | `--tp-degree 2 --cfg-parallel` | Wan, LTX-2, HunyuanVideo 1.5 |
 | Lowest latency, LTX-2 | `--tp-degree 4` | LTX-2 |
 | Highest throughput, many requests | `--tp-degree 2 --dp 2` or `--tp-degree 1 --dp 4` | Flux, Qwen-Image, Wan, LTX-2 |
 | Balanced | `--mode mixed` | all |
@@ -498,7 +505,7 @@ paths, and stage core counts are in [docs/cli-staged-commands.md](docs/cli-stage
 | `--cp-degree N` | compile, generate, run, serve | Context-parallel degree (default 1) |
 | `--cp-mode {gather_kv,ring,ulysses}` | compile, generate, run, serve | Context-parallel attention strategy |
 | `--cfg-parallel` | compile, generate, run, serve | Split the uncond/cond CFG passes across 2 ranks (true-CFG models only) |
-| `--sp` | compile, generate, run, serve | Megatron-style sequence parallelism over the TP group (Flux, Qwen-Image, Wan, HunyuanVideo) |
+| `--sp` | compile, generate, run, serve | Megatron-style sequence parallelism over the TP group (Flux, Qwen-Image, Wan, HunyuanVideo, HunyuanVideo 1.5) |
 | `--dp N` | compile, generate, run | Data-parallel replicas; a router spreads requests across them |
 | `--dp-schedule {round_robin,least_loaded}` | compile, generate, run | Request-to-replica schedule for `--dp > 1` |
 | `--mode {latency,throughput,mixed}` | compile, generate, run | Preset that picks `dp`, `cfg`, and `cp` for the model class |
@@ -547,7 +554,7 @@ paths, and stage core counts are in [docs/cli-staged-commands.md](docs/cli-stage
   `neuronx-cc` to 2.27. The lock pins 2.26.6360.0; reinstall from
   `requirements-neuron.lock`.
 - **`NCC_INLA001` or `NCC_IBIR243` on HunyuanVideo.** The `tp2 cp2` gather-KV graph crashes
-  the compiler. Use `--cp-mode ring` or `--tp-degree 4 --sp`.
+  the compiler. Use `--cp-mode ulysses` or `--tp-degree 4 --sp`.
 - **`NRT` allocation failure while loading a DP replica.** HunyuanVideo does not fit on
   2-core replicas at its default shape. Use `--tp-degree 4` without `--dp` or a smaller
   shape.

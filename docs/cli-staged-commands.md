@@ -8,7 +8,8 @@ mkdir -p /tmp/logs
 ```
 
 CP support: Flux, Wan, HunyuanVideo, Qwen-Image use `tp=2 cp=2`.
-LTX-2 and HunyuanVideo 1.5 do not support CP yet — use `tp=4`.
+LTX-2 does not support CP — use `tp=4`. HunyuanVideo 1.5 supports CP (ulysses, gather_kv) but
+defaults to `tp=2 --cfg-parallel` (true CFG).
 
 ## Artifact locations
 
@@ -190,21 +191,55 @@ difflet generate --model-id Qwen/Qwen-Image \
 
 ---
 
-## HunyuanVideo 1.5 (compile/generate not yet implemented)
+## HunyuanVideo 1.5 (3-stage: encode → aot_transformer → aot_vae)
 
-`download` works; `compile` and `generate` raise `NotImplementedError` pending implementation
-of the Qwen2.5-VL + ByT5 glyph + image-semantic text encoder pipeline.
+On the Trainium (AOT) backend, `generate` spawns: `encode` (host, one process: Qwen2.5-VL + ByT5
+prompt and negative-prompt embeddings), `aot_transformer` (one NxD process on all
+`tp × cp (×2 with --cfg-parallel)` cores, `NEURON_RT_VIRTUAL_CORE_SIZE=2`) and `aot_vae`. The VAE
+decodes **on the host by default** (diffusers' tiled decoder in fp32; about 7 min at 320×512×61,
+about 45 min at 480×848×121), because the compiled `vae15` decoder does not build on neuronx-cc
+2.26; `--device-vae` opts into it, and `compile` then compiles it too. `compile` builds only the
+DiT. HunyuanVideo 1.5 runs true CFG (6.0), and `--tp-degree 2 --cfg-parallel` is its default
+layout. `--cp-mode ring` and a multi-shape `--shapes` are refused before any stage launches.
+Verified layouts and numbers: `docs/verification/hv15-aot-evidence.md`.
 
 ```bash
-# Step 1: Download (works today)
+# Step 1: Download
 # Artifacts: ~/.cache/huggingface/hub/models--hunyuanvideo-community--HunyuanVideo-1.5-Diffusers-480p_t2v/snapshots/<hash>/
 difflet download --model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v \
   2>&1 | tee /tmp/logs/hv15-download.log
 
-# Steps 2 & 3: Not yet available
-# difflet compile --model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v ...   # raises NotImplementedError
-# difflet generate --model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v ...  # raises NotImplementedError
+# Step 2: Compile (DiT only; ~8 min at 320x512x61, ~66 min at 480x848x121)
+# Artifacts:
+#   ~/.cache/difflet/hunyuan_video_15_aot_dit/<hash>/   (DiT NEFF + sharded weights; the
+#                                                        TeaCache probe joins it on first adaptive use)
+difflet compile --model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v \
+  --tp-degree 2 --cfg-parallel \
+  --height 320 --width 512 --num-frames 61 \
+  2>&1 | tee /tmp/logs/hv15-compile.log
+
+# Step 3: Generate
+# Inter-stage tensors (--keep-work-dir):
+#   /tmp/logs/hv15-work/embeds.pt   (prompt + negative-prompt embeddings and masks)
+#   /tmp/logs/hv15-work/latents.pt  (denoised latents)
+# Output: hv15.mp4
+difflet generate --model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v \
+  --tp-degree 2 --cfg-parallel \
+  --height 320 --width 512 --num-frames 61 \
+  --steps 50 --seed 42 \
+  --prompt "a cinematic shot of a red fox running through a snowy forest" \
+  --output hv15.mp4 \
+  --work-dir /tmp/logs/hv15-work \
+  --keep-work-dir \
+  2>&1 | tee /tmp/logs/hv15-generate.log
 ```
+
+Other verified layouts: `--tp-degree 4`, `--tp-degree 4 --sp` (not at 480×848×121),
+`--tp-degree 2 --cp-degree 2 --cp-mode ulysses|gather_kv`, `--tp-degree 2 --dp 2`.
+TeaCache: `--teacache-cadence 2` is the recommended mode (20 of 50 steps skipped);
+`--teacache-online-delta` works; adaptive `--teacache-speedup` is available but not recommended
+for HunyuanVideo 1.5 (weak calibration signal, visibly degraded output, and the probe's second
+weight copy does not fit in HBM at the default shape).
 
 ---
 
@@ -216,5 +251,5 @@ difflet download --model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-48
 | Lightricks/LTX-2 | no | 4 | 1 | none (in-process) | unset | — |
 | Wan-AI/Wan2.2-T2V-A14B-Diffusers | yes | 2 | 2 | transformer (4 cores), vae (1 core) | unset | `latents.pt` |
 | hunyuanvideo-community/HunyuanVideo | yes | 2 | 2 | clip (1), llama (4), generate (4) | 2 | `clip.pt`, `llama.pt` |
-| hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v | no | 4 | 1 | TBD (compile/generate not implemented) | 2 | TBD |
+| hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v | yes (ulysses, gather_kv) | 2 (+ `--cfg-parallel`) | 1 | encode (host), aot_transformer (4), aot_vae (host by default; 1 with `--device-vae`) | 2 | `embeds.pt`, `latents.pt` |
 | Qwen/Qwen-Image | yes | 2 | 2 | text (4), generate (4), vae (1) | 2 | `text.pt`, `latents.pt` |
