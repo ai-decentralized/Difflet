@@ -266,7 +266,6 @@ def build(results_dir: Path = RESULTS_DIR, repo_root: Optional[Path] = None) -> 
                 "backend": backend,
                 "label": config_label(platform, backend),
                 "backend_label": BACKEND_LABELS.get(backend, backend),
-                "device": rec["device"],
             },
         )
         models.setdefault(
@@ -281,6 +280,7 @@ def build(results_dir: Path = RESULTS_DIR, repo_root: Optional[Path] = None) -> 
             {
                 "model": model,
                 "config": ckey,
+                "device": rec["device"],  # per result: one platform's runs can differ (e.g. LNC)
                 "status": rec["status"],
                 "steps": rec["steps"],
                 "parallel": rec["parallel"],

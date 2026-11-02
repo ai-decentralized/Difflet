@@ -146,6 +146,7 @@ def test_build_keeps_newest_per_model_platform_backend(tmp_path):
     assert h100[0]["metrics"]["psnr_db"] == 21.5 and h100[0]["metrics"]["ssim"] is None
     assert h100[0]["source"] == h100[0]["record"] == "2026-10-26_h100_cuda_flux_1_dev.json"
     assert data["generated"] == "2026-10-26"
+    assert h100[0]["device"] == "NVIDIA H100 PCIe"
 
 
 def test_build_reports_every_invalid_file(tmp_path):

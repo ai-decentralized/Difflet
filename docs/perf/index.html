@@ -104,6 +104,11 @@ td a:hover { text-decoration: underline; }
 .best { font-weight: 600; }
 .dim { color: var(--faint); }
 .foot { color: var(--muted); font-size: 0.82rem; display: grid; gap: 4px; }
+.table-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 16px; }
+.btn { font: inherit; font-size: 0.86rem; font-weight: 500; padding: 5px 14px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: var(--surface); cursor: pointer; }
+.btn:hover { filter: brightness(1.08); }
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn:disabled { background: transparent; color: var(--faint); border-color: var(--line); cursor: not-allowed; filter: none; }
 @media (prefers-reduced-motion: reduce) { svg.chart .bar { transition: none; } }
 </style>
 </head>
@@ -134,7 +139,10 @@ td a:hover { text-decoration: underline; }
   </div>
 
   <div class="panel">
-    <h2>Results and setup</h2>
+    <div class="table-head">
+      <h2>Results and setup</h2>
+      <button type="button" class="btn" id="export" disabled title="Download every metric for the selected models and platforms as a CSV file that opens in Excel">Export to Excel</button>
+    </div>
     <div class="scroll" id="table"></div>
     <div class="foot">
       <div>The best value of the chosen metric for each model is in bold. “vs best” compares only the platforms you selected: times slower for speed, the gap in dB or SSIM for quality. “—” means not measured.</div>
@@ -177,7 +185,7 @@ function readHash() {
 }
 function save() {
   const h = `m=${[...state.models].join(",")}&p=${[...state.plats].join(",")}&x=${METRICS[state.metric].id}`;
-  history.replaceState(null, "", "#" + h);
+  try { history.replaceState(null, "", "#" + h); } catch (e) { /* sandboxed frame: selection still works, just not in the link */ }
   try { localStorage.setItem("difflet-perf", h); } catch (e) { /* storage blocked: the hash still works */ }
 }
 
@@ -290,13 +298,48 @@ function renderTable() {
       const commit = r.commit ? ` <span class="dim">${esc(r.commit)}</span>` : "";
       h += `<tr><td>${sw}${esc(p.label)}</td><td>${esc(p.backend_label)}</td><td><code>${esc(r.torch || "—")}</code></td><td>${esc(r.parallel)}</td><td class="num">${r.steps}</td>
         ${cell("dit_step_ms")}<td class="num">${rel}</td>${cell("warm_e2e_s")}${cell("cold_e2e_s")}${cell("compile_s")}${cell("psnr_db")}${cell("ssim")}
-        <td><a href="${REPO}${esc(r.source)}" title="${esc(p.device)}">${esc(r.date)}</a>${commit}</td><td class="notes">${notes}</td></tr>`;
+        <td><a href="${REPO}${esc(r.source)}" title="${esc(r.device)}">${esc(r.date)}</a>${commit}</td><td class="notes">${notes}</td></tr>`;
     }
   }
   $("table").innerHTML = h + `</tbody></table>`;
 }
 
-function update() { save(); renderControls(); renderChart(); renderTable(); }
+// Excel export: a CSV of the current selection. Raw numbers (units in the headers) so Excel can
+// compute with them; a UTF-8 BOM so Excel reads ×, — and µ correctly.
+function csvCell(v) {
+  if (v == null) return "";
+  if (typeof v === "number") return String(v);
+  let s = String(v);
+  if (/^[=+\-@\t\r]/.test(s)) s = "'" + s;  // keep Excel from running a cell as a formula
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+// Every metric is exported, whichever one the chart shows; models and platforms follow the selection.
+function exportRows() {
+  const [models, plats] = sel();
+  const head = ["Model", "Shape", "Platform", "Device", "Backend", "PyTorch", "Parallel", "Steps",
+    ...METRICS.map(m => `${m.name}${m.unit ? ` (${m.unit})` : ""}`), "Status", "Measured", "Commit", "Source", "Notes"];
+  const rows = [];
+  for (const m of models) for (const p of plats) {
+    const r = RES[m.slug]?.[p.key];
+    if (r) rows.push([m.name, r.shape, p.label, r.device, p.backend_label, r.torch, r.parallel, r.steps,
+      ...METRICS.map(x => r.metrics[x.k]), r.status, r.date, r.commit, REPO + r.source, r.notes.join("; ")]);
+  }
+  return [head, ...rows];
+}
+function exportCsv() {
+  const rows = exportRows();
+  if (rows.length < 2) return;
+  const csv = "﻿" + rows.map(r => r.map(csvCell).join(",")).join("\r\n") + "\r\n";
+  const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+  const a = Object.assign(document.createElement("a"), { href: url, download: `difflet-perf-${DATA.generated || "results"}.csv` });
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function update() {
+  save(); renderControls(); renderChart(); renderTable();
+  $("export").disabled = exportRows().length < 2;
+}
 
 async function init() {
   try {
@@ -308,6 +351,7 @@ async function init() {
     return;
   }
   $("loading").remove();
+  $("export").onclick = exportCsv;
   CONFIGS = DATA.configs.map((c, i) => ({ ...c, color: i < 8 ? `var(--s${i + 1})` : "var(--s-other)" }));
   MODELS = DATA.models;
   RES = {};
@@ -324,7 +368,7 @@ async function init() {
   update();
   let rz, lastW = 0;
   new ResizeObserver(() => { const w = $("chart-box").clientWidth; if (w === lastW) return; lastW = w; clearTimeout(rz); rz = setTimeout(renderChart, 60); }).observe($("chart-box"));
-  addEventListener("hashchange", () => { if (readHash()) { renderControls(); renderChart(); renderTable(); } });
+  addEventListener("hashchange", () => { if (readHash()) update(); });
 }
 init();
 </script>
