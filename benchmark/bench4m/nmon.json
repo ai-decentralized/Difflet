@@ -1,0 +1,7 @@
+{
+  "period": "1s",
+  "neuron_runtimes": [
+    {"tag_filter": ".*", "metrics": [{"type": "memory_used"}]}
+  ],
+  "system_metrics": [{"type": "memory_info"}]
+}
