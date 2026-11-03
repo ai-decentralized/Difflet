@@ -33,7 +33,8 @@
   "status": "ok",
   "notes": [
     "DiT step carried over from Wan2.1 (same transformer per benchmark design)",
-    "Compile was a cache hit (shares the Wan2.1 transformer)"
+    "The compile cache hit comes from the shared Wan2.1 transformer",
+    "Compile was a cache hit (no component was built), so there is no compile time"
   ],
   "date": "2026-06-30 19:17 UTC",
   "commit": null,

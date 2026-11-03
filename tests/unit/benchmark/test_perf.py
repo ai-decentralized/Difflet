@@ -147,6 +147,7 @@ def test_build_keeps_newest_per_model_platform_backend(tmp_path):
     assert h100[0]["source"] == h100[0]["record"] == "2026-10-26_h100_cuda_flux_1_dev.json"
     assert data["generated"] == "2026-10-26"
     assert h100[0]["device"] == "NVIDIA H100 PCIe"
+    assert h100[0]["guidance_scale"] == 3.5  # part of the workload the page compares
 
 
 def test_build_reports_every_invalid_file(tmp_path):
@@ -190,3 +191,119 @@ def test_committed_records_are_valid():
     """Every record in benchmark/results/ must load, so the Pages build cannot break on main."""
     data = perf.build()
     assert data["results"], "no committed perf records"
+
+
+@pytest.mark.parametrize(
+    "adapter, backend",
+    [("trainium", "aot"), ("neuron", "native"), ("cuda", "cuda"), ("tpu", "tpu")],
+)
+def test_adapter_maps_to_backend(adapter, backend):
+    assert perf.record_from_bench(dict(BENCH, backend=adapter))["backend"] == backend
+
+
+def test_backend_variant_slug_maps_to_its_page_model():
+    d = dict(BENCH, backend="neuron", config_slug="wan_2_1_neuron", device_slug="trn2")
+    rec = perf.record_from_bench(d)
+    assert rec["model"] == "wan_2_1" and rec["backend"] == "native"
+
+
+def test_every_matrix_slug_is_a_page_model():
+    """A new MATRIX entry must get a page name (perf.MODELS) or an alias, not show as a raw slug."""
+    from benchmark.models import MATRIX
+
+    assert [s for s in MATRIX if perf.MODEL_ALIASES.get(s, s) not in perf.MODELS] == []
+
+
+def test_sync_record_rewrites_in_place_and_keeps_manual_fields(tmp_path):
+    bench, res = tmp_path / "flux.json", tmp_path / "results"
+    failed = dict(BENCH, status="failed", notes=["FAILED: boom"], step_latency=None, e2e_warm=None)
+    bench.write_text(json.dumps(failed))
+    first = perf.sync_record(bench, source="benchmark/h100/flux_1_dev.md", results_dir=res)
+    # PSNR and a note added by hand
+    argv = ["--results-dir", str(res), "add", str(bench), "--force", "--psnr", "30.5"]
+    assert perf.main(argv + ["--note", "host VAE"]) == 0
+    # a follow-up script patches the bench JSON (same timestamp): the run now has a warm number
+    bench.write_text(json.dumps(dict(BENCH, e2e_warm={"mean": 14.0})))
+    second = perf.sync_record(bench, results_dir=res)
+    assert second == first and len(list(res.glob("*.json"))) == 1
+    rec = json.loads(second.read_text())
+    assert rec["status"] == "ok" and rec["metrics"]["warm_e2e_s"] == 14.0
+    assert rec["metrics"]["psnr_db"] == 30.5 and rec["metrics"]["ssim"] is None
+    assert rec["notes"] == ["host VAE"]  # the stale failure reason is gone
+    assert rec["source"] == "benchmark/h100/flux_1_dev.md"
+
+
+def test_sync_quietly_reports_instead_of_raising(tmp_path, capsys):
+    assert perf.sync_quietly(tmp_path / "missing.json", results_dir=tmp_path) is None
+    bad = tmp_path / "bad.json"
+    bad.write_text(json.dumps(dict(BENCH, backend="mystery")))
+    assert perf.sync_quietly(bad, results_dir=tmp_path) is None
+    assert capsys.readouterr().out.count("no perf record written") == 2
+    assert list(tmp_path.glob("*_h100_*.json")) == []
+
+
+def test_flagged_run_is_published_with_its_flag_note():
+    """neuron_cold_warm marks a completed run 'flagged' when only soft checks fail."""
+    d = dict(
+        BENCH, status="flagged", notes=["Methodology.", "FLAGGED (soft): warm spread 6%. More."]
+    )
+    rec = perf.record_from_bench(d)
+    assert rec["status"] == "ok" and rec["notes"] == ["FLAGGED (soft): warm spread 6%"]
+
+
+def test_cache_hit_compile_is_not_a_compile_time():
+    trn = dict(BENCH, backend="trainium", device_slug="trn3")
+    hit = perf.record_from_bench(
+        dict(trn, compile_seconds=5.83, compile_breakdown={"wall_total_s": 5.83})
+    )
+    assert hit["metrics"]["compile_s"] is None and hit["notes"] == [perf.CACHE_HIT_NOTE]
+    built = {"transformer": {"wall_s": 900.0}, "wall_total_s": 901.8}
+    real = perf.record_from_bench(dict(trn, compile_seconds=901.84, compile_breakdown=built))
+    assert real["metrics"]["compile_s"] == 901.8 and real["notes"] == []
+
+
+def test_add_force_note_replaces_old_notes(tmp_path):
+    bench, res = tmp_path / "flux.json", tmp_path / "results"
+    bench.write_text(json.dumps(BENCH))
+    base = ["--results-dir", str(res), "add", str(bench)]
+    perf.main(base + ["--note", "VAE kept in fp16", "--psnr", "30.5"])
+    perf.main(base + ["--force", "--note", "VAE kept in fp32"])
+    rec = json.loads(next(res.glob("*.json")).read_text())
+    assert rec["notes"] == ["VAE kept in fp32"] and rec["metrics"]["psnr_db"] == 30.5
+    perf.main(base + ["--force"])  # no --note: the notes are kept
+    assert json.loads(next(res.glob("*.json")).read_text())["notes"] == ["VAE kept in fp32"]
+
+
+def test_unreadable_record_is_replaced(tmp_path):
+    bench, res = tmp_path / "flux.json", tmp_path / "results"
+    bench.write_text(json.dumps(BENCH))
+    path = perf.sync_record(bench, results_dir=res)
+    path.write_text("<<<<<<< HEAD\n{}\n=======\n[]\n>>>>>>> branch\n")  # merge conflict
+    assert perf.main(["--results-dir", str(res), "add", str(bench), "--force"]) == 0
+    assert perf.validate(json.loads(path.read_text())) == []
+    path.write_text("[]")  # valid JSON, not a record
+    assert perf.sync_record(bench, results_dir=res) == path
+    assert perf.validate(json.loads(path.read_text())) == []
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf")])
+def test_non_finite_metric_is_rejected(bad):
+    rec = _rec()
+    rec["metrics"]["warm_e2e_s"] = bad
+    assert any("finite" in e for e in perf.validate(rec))
+
+
+@pytest.mark.parametrize(
+    "g, ok",
+    [
+        (None, True),
+        (4, True),
+        (3.5, True),
+        ("4.0", False),
+        (True, False),
+        (-1, False),
+        (float("nan"), False),
+    ],
+)
+def test_guidance_scale_must_be_a_number(g, ok):
+    assert (perf.validate(_rec(guidance_scale=g)) == []) is ok

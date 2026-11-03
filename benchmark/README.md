@@ -82,15 +82,22 @@ to 4).
 
 The [perf page](https://ai-decentralized.github.io/Difflet/perf/) compares models across
 platforms. It is built from `benchmark/results/`: one JSON record per run, and the page
-shows the newest record for each model, platform and backend. A push to `main` that
-changes `benchmark/results/` rebuilds and deploys the page
-(`.github/workflows/perf-pages.yml`). Older records stay in the folder as history.
+shows the newest record for each model, platform and backend. Each result shows its
+workload (shape, steps, guidance), and the page warns when the results it compares differ
+in one of them. A push to `main` that changes `benchmark/results/` rebuilds and deploys the
+page (`.github/workflows/perf-pages.yml`). Older records stay in the folder as history.
 
 To publish a run:
 
 1. **Run the benchmark.** `python -m benchmark.bench` writes the record for you, e.g.
    `benchmark/results/2026-11-01_0930_trn2_aot_wan_2_1.json`, next to its usual
-   `benchmark/<device>/<slug>.json`.
+   `benchmark/<device>/<slug>.json`. The follow-up scripts that patch that JSON
+   (`cold_warm_e2e`, `warm_e2e`, `step_latency`, `step_realloop`, `backfill_breakdowns`)
+   rewrite the same record in place, so run them before you commit. `neuron_cold_warm`
+   writes the record of a completed native Wan run (not a stopped job, a `--steps` smoke run, or
+   one with `--out-json`/`--out-md`).
+   Writing a record never fails the benchmark: a problem is printed as
+   `[perf] no perf record written …`.
 2. **Add what the harness doesn't measure**, if you have it. Convert the run again
    with the extra fields:
 
@@ -99,8 +106,11 @@ To publish a run:
        --psnr 22.66 --ssim 0.885 --note "VAE kept in fp32"
    ```
 
-   `add` also converts a result JSON from another machine (`--backend native|aot|cuda|tpu`
-   overrides the backend it infers from the adapter, `--model` the slug).
+   PSNR, SSIM and notes added this way survive later re-syncs. `add --force` keeps them
+   when you leave the flags out; a `--note` given with `--force` replaces the old notes.
+   A cache-hit compile is published as no compile time, with a note. `add` also converts a result JSON from another
+   machine (`--backend native|aot|cuda|tpu` overrides the backend it infers from the
+   adapter, `--model` the slug).
 3. **Commit the record** (`git add benchmark/results/…`) and open a PR. CI validates it;
    the page updates once it merges.
 

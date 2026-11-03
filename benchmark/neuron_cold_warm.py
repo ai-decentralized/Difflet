@@ -60,6 +60,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
+from benchmark import perf
 from benchmark.adapters import neuron as na
 from benchmark.harness import BenchResult, OutputInfo, Stats
 from benchmark.models import MATRIX
@@ -973,6 +974,16 @@ def assemble(records: Mapping[str, Any], *, adapter: na.NeuronAdapter, out_json:
     return doc
 
 
+def publish_record(args: argparse.Namespace, stopped: str | None, out_json: Path,
+                   out_md: Path) -> Path | None:
+    """Write the perf record (benchmark/results/) of a completed benchmark in the repo: not of a
+    stopped job, a smoke run with --steps, or explicit --out-* paths. The record is the MATRIX
+    entry's guidance, the top level of the result JSON."""
+    if stopped is None and STEPS_OVERRIDE is None and not (args.out_json or args.out_md):
+        return perf.sync_quietly(out_json, source=f"benchmark/trn2/{out_md.name}")
+    return None
+
+
 def _interrupt(signum, frame):  # noqa: ARG001 - signal handler signature
     raise KeyboardInterrupt(f"signal {signum}")
 
@@ -1110,6 +1121,7 @@ def main(argv: list[str] | None = None) -> int:
                        extra_notes=superseded_note(record_dir))
         print(f"[neuron_cold_warm] wrote {out_json} and {out_md} "
               f"({list(doc['results_by_guidance'])})", flush=True)
+        publish_record(args, stopped, out_json, out_md)
     except Exception as exc:  # noqa: BLE001 - the launch records stay for --assemble-only
         print(f"[neuron_cold_warm] assembly failed: {type(exc).__name__}: {exc}", flush=True)
         if stopped is None:

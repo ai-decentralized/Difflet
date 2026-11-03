@@ -10,8 +10,8 @@ DiT-step latency, which is what "optimal performance" should report.
     source /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/activate
     python -m benchmark.step_latency --model wan_2_1 [--iters 20]
 
-Patches benchmark/<device>/<slug>.json (step_latency, throughput) and re-renders
-benchmark/<slug>.md.
+Patches benchmark/<device>/<slug>.json (step_latency, throughput), re-renders
+benchmark/<slug>.md and re-syncs the run's perf record in benchmark/results/ (benchmark.perf.sync_quietly).
 """
 from __future__ import annotations
 
@@ -21,7 +21,7 @@ import sys
 import time
 from pathlib import Path
 
-from benchmark import report
+from benchmark import perf, report
 from benchmark.harness import Stats
 from benchmark.models import MATRIX
 
@@ -125,6 +125,7 @@ def main() -> int:
         jp.write_text(json.dumps(d, indent=2))
         Path(report_path(args.model)).write_text(report.render(d))
         print(f"[step] patched {report_path(args.model)}", flush=True)
+        perf.sync_quietly(jp, source=report_path(args.model))
     return 0
 
 

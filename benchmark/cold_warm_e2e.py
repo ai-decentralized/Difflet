@@ -8,8 +8,8 @@ Per model:
 Both are measured in the same session under controlled cache state, so the
 cold>warm ordering is honest (the previously-stored e2e_cold was a lucky run with
 the host weights already cached -> 8 s host load instead of a true cold read).
-Patches benchmark/<device>/<slug>.json after EACH run (real-time) and re-renders
-the md. Cold/warm use separate log dirs so their breakdowns don't clobber.
+Patches benchmark/<device>/<slug>.json after EACH run (real-time), re-renders
+the md and re-syncs the run's perf record in benchmark/results/ (benchmark.perf.sync_quietly). Cold/warm use separate log dirs so their breakdowns don't clobber.
 
     source /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/activate
     python -m benchmark.cold_warm_e2e --model ltx_2
@@ -22,7 +22,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from benchmark import report
+from benchmark import perf, report
 from benchmark.adapters.trainium import TrainiumAdapter
 from benchmark.harness import Stats
 from benchmark.models import MATRIX
@@ -52,6 +52,7 @@ def _patch(slug: str, note: str | None = None, **kv) -> dict:
     jp.write_text(json.dumps(d, indent=2))
     from benchmark.models import report_path
     Path(report_path(slug)).write_text(report.render(d))
+    perf.sync_quietly(jp, source=report_path(slug))
     return d
 
 

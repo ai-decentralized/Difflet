@@ -302,6 +302,8 @@ def test_main_stops_on_an_interrupt_and_assembles_into_results(tmp_path, monkeyp
     monkeypatch.setattr(cw, "run_launch", interrupted)
     monkeypatch.setattr(cw, "sudo_available", lambda: False)
     monkeypatch.setattr(cw, "host_info", lambda adapter: dict(fake.HOST))
+    synced = []
+    monkeypatch.setattr(cw.perf, "sync_quietly", lambda *a, **k: synced.append((a, k)))
     repo = [na.REPO_ROOT / "benchmark" / "trn2" / f"wan_2_1_neuron.{ext}" for ext in ("json", "md")]
     before = [(p.stat().st_mtime_ns, p.read_bytes()) for p in repo]
     handler = cw.signal.getsignal(cw.signal.SIGTERM)
@@ -316,6 +318,24 @@ def test_main_stops_on_an_interrupt_and_assembles_into_results(tmp_path, monkeyp
     assert list(doc["results_by_guidance"]) == ["5.0"]
     assert (tmp_path / "results" / "wan_2_1_neuron.md").is_file()
     assert [(p.stat().st_mtime_ns, p.read_bytes()) for p in repo] == before  # untouched
+    assert synced == []  # a stopped job publishes no perf record
+
+
+@pytest.mark.parametrize("stopped, steps, out_json, publishes", [
+    (None, None, None, True),               # completed benchmark in the repo
+    ("an interrupt (SIGINT)", None, None, False),
+    (None, 2, None, False),                 # --steps smoke run
+    (None, None, "/tmp/x.json", False),     # explicit --out-json
+])
+def test_publish_record_only_for_a_completed_benchmark(monkeypatch, tmp_path, stopped, steps,
+                                                        out_json, publishes):
+    calls = []
+    monkeypatch.setattr(cw.perf, "sync_quietly", lambda path, source=None: calls.append((path, source)))
+    monkeypatch.setattr(cw, "STEPS_OVERRIDE", steps)
+    args = cw.argparse.Namespace(out_json=out_json, out_md=None)
+    out = tmp_path / "wan_2_1_neuron.json"
+    cw.publish_record(args, stopped, out, tmp_path / "wan_2_1_neuron.md")
+    assert calls == ([(out, "benchmark/trn2/wan_2_1_neuron.md")] if publishes else [])
 
 
 def test_bench_script_note_says_how_the_tree_relates_to_the_runs():

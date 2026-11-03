@@ -2,7 +2,8 @@
 
 Re-parses each model's saved compile/generate log (benchmark/<device>/logs/) with
 parse_compile / parse_generate and writes the detailed, *named* breakdowns back
-into benchmark/<device>/<slug>.json, then re-renders the md. Idempotent.
+into benchmark/<device>/<slug>.json, then re-renders the md and
+re-syncs the run's perf record in benchmark/results/ (benchmark.perf.sync_quietly). Idempotent.
 
     source /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/activate
     python -m benchmark.backfill_breakdowns
@@ -12,7 +13,7 @@ from __future__ import annotations
 import json
 import os
 
-from benchmark import parse_compile, parse_generate, report
+from benchmark import parse_compile, parse_generate, perf, report
 
 # slug -> {compile log stem, generate log stem, stage-name template, host note}
 # stage_names overrides parser labels when the log has no [role] markers
@@ -70,8 +71,11 @@ def main() -> int:
                 d["e2e_breakdown"] = eb
                 d["load_seconds"] = eb["weights_load_total_s"]
 
-        json.dump(d, open(jp, "w"), indent=2)
-        open(report_path(slug), "w").write(report.render(d))
+        with open(jp, "w") as f:
+            json.dump(d, f, indent=2)
+        with open(report_path(slug), "w") as f:
+            f.write(report.render(d))
+        perf.sync_quietly(jp, source=report_path(slug))
         eb = d.get("e2e_breakdown", {})
         print(f"{slug:14} compile={d.get('compile_seconds')}  "
               f"load_total={d.get('load_seconds')}  "

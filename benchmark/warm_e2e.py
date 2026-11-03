@@ -17,7 +17,8 @@ Backend-generic (the harness is, so this is too): pick the adapter with --backen
   the load reads a WARM disk cache (the numeric equivalent of B300's in-process second
   iter). ``--warmups`` defaults to 0 here (the cold run already warmed the disk).
 
-Writes e2e_warm into benchmark/<device>/<slug>.json and re-renders the md; uses an
+Writes e2e_warm into benchmark/<device>/<slug>.json, re-renders the md and
+re-syncs the run's perf record in benchmark/results/ (benchmark.perf.sync_quietly); uses an
 isolated log dir so the cold-run logs (and their breakdowns) survive.
 
     source /opt/aws_neuronx_venv_pytorch_2_9_nxd_inference/bin/activate
@@ -33,7 +34,7 @@ import json
 import sys
 from pathlib import Path
 
-from benchmark import report
+from benchmark import perf, report
 from benchmark.harness import Stats
 from benchmark.models import MATRIX, json_path, report_path, logs_dir
 
@@ -88,6 +89,7 @@ def run(slug: str, backend: str, warmups: int, iters: int) -> int:
     jp.write_text(json.dumps(d, indent=2))
     Path(report_path(slug)).write_text(report.render(d))
     print(f"[warm] {slug}: mean {st.mean:.1f}s median {st.median:.1f}s n={st.n} -> patched", flush=True)
+    perf.sync_quietly(jp, source=report_path(slug))
     return 0
 
 

@@ -167,12 +167,9 @@ def write_outputs(slug: str, res: BenchResult) -> None:
     print(f"[bench] {slug}: status={res.status}  "
           f"compile={res.compile_seconds}  e2e_cold={res.e2e_cold_seconds}  "
           f"-> {report_path(slug)}", flush=True)
-    # The perf page record. Commit it to publish the run (see benchmark/README.md).
-    try:
-        rec_path = perf.write_record(perf.record_from_bench(d, source=json_path(slug)))
-        print(f"[bench] {slug}: perf record -> {rec_path}", flush=True)
-    except (ValueError, FileExistsError) as e:
-        print(f"[bench] {slug}: no perf record written: {e}", flush=True)
+    # The perf page record (commit it to publish the run; see benchmark/README.md). The
+    # follow-up scripts that patch this JSON re-sync the same record.
+    perf.sync_quietly(json_path(slug), source=report_path(slug))
 
 
 def _git_commit() -> str | None:

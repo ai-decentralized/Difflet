@@ -17,14 +17,17 @@ on:
       - "benchmark/results/**"
       - "benchmark/perf.py"
       - "docs/perf/**"
+      - ".github/workflows/perf-pages.yml"
   workflow_dispatch:
 
 permissions:
   contents: read
 
+# A newer PR push cancels the older check; a deploy is never cancelled mid-flight
+# (pushes to main queue instead).
 concurrency:
   group: perf-pages-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -46,15 +49,18 @@ jobs:
           cp docs/perf/index.html _site/perf/index.html
           printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=perf/"><a href="perf/">Difflet performance</a>\n' > _site/index.html
 
+      # Only main deploys: PR runs (ref refs/pull/N/merge) and dispatches on other branches
+      # just validate and build.
       - uses: actions/upload-pages-artifact@v3
-        if: github.event_name != 'pull_request'
+        if: github.ref == 'refs/heads/main'
         with:
           path: _site
 
   deploy:
-    if: github.event_name != 'pull_request'
+    if: github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       pages: write
       id-token: write

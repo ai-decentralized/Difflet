@@ -32,7 +32,8 @@
   },
   "status": "ok",
   "notes": [
-    "Compile was a cache-hit re-run; a clean build takes about 21 min (trn3 RESULTS.md)"
+    "A clean build takes about 21 min (trn3 RESULTS.md)",
+    "Compile was a cache hit (no component was built), so there is no compile time"
   ],
   "date": "2026-06-29 23:11 UTC",
   "commit": null,

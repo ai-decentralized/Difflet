@@ -103,6 +103,9 @@ td a { text-decoration: none; }
 td a:hover { text-decoration: underline; }
 .best { font-weight: 600; }
 .dim { color: var(--faint); }
+td.diff { background: var(--warn-soft); color: var(--warn); font-weight: 600; }
+span.diff { color: var(--warn); }
+.note div + div { margin-top: 6px; }
 .foot { color: var(--muted); font-size: 0.82rem; display: grid; gap: 4px; }
 .table-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 8px 16px; }
 .btn { font: inherit; font-size: 0.86rem; font-weight: 500; padding: 5px 14px; border-radius: 6px; border: 1px solid var(--accent); background: var(--accent); color: var(--surface); cursor: pointer; }
@@ -145,8 +148,8 @@ td a:hover { text-decoration: underline; }
     </div>
     <div class="scroll" id="table"></div>
     <div class="foot">
-      <div>The best value of the chosen metric for each model is in bold. “vs best” compares only the platforms you selected: times slower for speed, the gap in dB or SSIM for quality. “—” means not measured.</div>
-      <div>DiT step time is the one metric that compares fairly across platforms. End-to-end times depend on the step count, which differs between runs (see Steps).</div>
+      <div>The best value of the chosen metric for each model is in bold. “vs best” compares only the platforms you selected that ran the same workload (shape and guidance, plus the step count for end-to-end times and quality): times slower for speed, the gap in dB or SSIM for quality. “—” means not measured or nothing to compare with.</div>
+      <div>DiT step time compares across platforms when the shape and guidance match; end-to-end times and quality also need the same step count. The page warns and highlights the values when the compared runs differ.</div>
     </div>
   </div>
 </div>
@@ -154,13 +157,15 @@ td a:hover { text-decoration: underline; }
 <script>
 "use strict";
 const REPO = "https://github.com/ai-decentralized/Difflet/blob/main/";
+// cmp: the workload fields that must match for two results of a model to be comparable.
+const PER_STEP = ["shape", "guidance_scale"], WHOLE_RUN = ["shape", "guidance_scale", "steps"];
 const METRICS = [
-  { k: "dit_step_ms", id: "dit",     name: "DiT step", unit: "ms", title: "DiT step time", sub: "Per denoising step, lower is better. Comparable across platforms." },
-  { k: "warm_e2e_s",  id: "warm",    name: "Warm e2e", unit: "s",  title: "Warm end-to-end", sub: "Full generation with weights already loaded, lower is better." },
-  { k: "cold_e2e_s",  id: "cold",    name: "Cold e2e", unit: "s",  title: "Cold end-to-end", sub: "Full generation from a cold start, lower is better." },
-  { k: "compile_s",   id: "compile", name: "Compile",  unit: "s",  title: "Compile time", sub: "One-time compile, cached afterwards. Eager backends have no compile step." },
-  { k: "psnr_db",     id: "psnr",    name: "PSNR",     unit: "dB", hi: true, title: "PSNR vs CPU fp32 reference", sub: "Output quality against a CPU fp32 diffusers reference, higher is better." },
-  { k: "ssim",        id: "ssim",    name: "SSIM",     unit: "",   hi: true, title: "SSIM vs CPU fp32 reference", sub: "Structural similarity against the same reference, 0 to 1, higher is better." },
+  { k: "dit_step_ms", id: "dit",     name: "DiT step", unit: "ms", cmp: PER_STEP,  title: "DiT step time", sub: "Per denoising step, lower is better. Comparable across platforms when shape and guidance match." },
+  { k: "warm_e2e_s",  id: "warm",    name: "Warm e2e", unit: "s",  cmp: WHOLE_RUN, title: "Warm end-to-end", sub: "Full generation with weights already loaded, lower is better." },
+  { k: "cold_e2e_s",  id: "cold",    name: "Cold e2e", unit: "s",  cmp: WHOLE_RUN, title: "Cold end-to-end", sub: "Full generation from a cold start, lower is better." },
+  { k: "compile_s",   id: "compile", name: "Compile",  unit: "s",  cmp: PER_STEP,  title: "Compile time", sub: "One-time compile, cached afterwards. Eager backends have no compile step." },
+  { k: "psnr_db",     id: "psnr",    name: "PSNR",     unit: "dB", cmp: WHOLE_RUN, hi: true, title: "PSNR vs CPU fp32 reference", sub: "Output quality against a CPU fp32 diffusers reference, higher is better." },
+  { k: "ssim",        id: "ssim",    name: "SSIM",     unit: "",   cmp: WHOLE_RUN, hi: true, title: "SSIM vs CPU fp32 reference", sub: "Structural similarity against the same reference, 0 to 1, higher is better." },
 ];
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
@@ -212,21 +217,55 @@ function renderControls() {
   $("metric").replaceChildren(...METRICS.map((x, i) => { const b = document.createElement("button"); b.type = "button"; b.textContent = x.name; b.setAttribute("aria-pressed", state.metric === i); b.onclick = () => { state.metric = i; update(); }; return b; }));
 }
 
-function niceStep(max, n = 5) { const raw = max / n, p = 10 ** Math.floor(Math.log10(raw)); for (const f of [1, 2, 2.5, 5, 10]) if (f * p >= raw) return f * p; }
+function niceStep(max, n = 5) { if (!(max > 0)) return 1; const raw = max / n, p = 10 ** Math.floor(Math.log10(raw)); for (const f of [1, 2, 2.5, 5, 10]) if (f * p >= raw) return f * p; }
 const sel = () => [MODELS.filter(m => state.models.has(m.slug)), CONFIGS.filter(c => state.plats.has(c.key))];
 const val = (m, c, k) => { const r = RES[m]?.[c]; return r ? r.metrics[k] : undefined; };
+
+// The workload a result was measured on. Per-step time depends on the shape and on guidance
+// (classifier-free guidance runs the DiT twice per step); end-to-end time and quality also
+// depend on the step count.
+const fmtG = v => v == null ? "?" : Number(v).toFixed(1);
+const WL = {
+  shape:          { label: "shape",    get: r => r.shape,          fmt: v => v,       why: "A larger shape costs more per step." },
+  guidance_scale: { label: "guidance", get: r => r.guidance_scale, fmt: fmtG,        why: "With classifier-free guidance a model runs the DiT twice per step." },
+  steps:          { label: "steps",    get: r => r.steps,          fmt: v => `${v}`, why: "End-to-end time and quality change with the step count." },
+};
+const distinct = (rows, f) => [...new Set(rows.map(WL[f].get))].sort((a, b) => (typeof a === "number" && typeof b === "number") ? a - b : String(a).localeCompare(String(b)));
+// model slug -> {diff: [workload fields that differ], rows} among the rows compared for this metric
+function mismatches(models, plats, met) {
+  const out = {};
+  for (const m of models) {
+    const rows = plats.map(p => RES[m.slug]?.[p.key]).filter(r => r && r.metrics[met.k] != null);
+    const diff = met.cmp.filter(f => distinct(rows, f).length > 1);
+    if (diff.length) out[m.slug] = { diff, rows };
+  }
+  return out;
+}
+// "Fastest"/"vs best" compare a run only with the selected runs of the same model that share its
+// workload for this metric, so a CFG run is never ranked against a non-CFG one.
+const wkey = (r, met) => met.cmp.map(f => String(WL[f].get(r))).join("|");
+function peers(m, plats, met, r) {
+  const vals = plats.map(p => RES[m.slug]?.[p.key]).filter(x => x && x.metrics[met.k] != null && wkey(x, met) === wkey(r, met)).map(x => x.metrics[met.k]);
+  return { best: bestOf(vals, met.hi), n: vals.length };
+}
 
 function renderChart() {
   const box = $("chart-box"), tip = $("tip"), met = METRICS[state.metric];
   const [models, plats] = sel();
   $("chart-title").textContent = met.title; $("chart-sub").textContent = met.sub;
   $("legend").innerHTML = plats.map(p => `<span><i style="background:${p.color}"></i>${esc(p.label)}</span>`).join("");
-  const stepSet = new Set(), have = models.some(m => plats.some(p => val(m.slug, p.key, met.k) != null));
-  models.forEach(m => plats.forEach(p => { const r = RES[m.slug]?.[p.key]; if (r) stepSet.add(r.steps); }));
+  const have = models.some(m => plats.some(p => val(m.slug, p.key, met.k) != null));
+  const mm = mismatches(models, plats, met), msgs = [];
+  if (Object.keys(mm).length) {
+    const fields = new Set(Object.values(mm).flatMap(x => x.diff));
+    const parts = models.filter(m => mm[m.slug]).map(m => `${esc(m.name)}: ` +
+      mm[m.slug].diff.map(f => `${WL[f].label} ${distinct(mm[m.slug].rows, f).map(WL[f].fmt).map(esc).join(" vs ")}`).join(", "));
+    msgs.push(`<b>Not a like-for-like comparison.</b> ${parts.join("; ")}. ${[...fields].map(f => WL[f].why).join(" ")} The differing values are highlighted in the table.`);
+  }
+  if (met.hi) msgs.push(`<b>Quality is measured on few runs so far.</b> Platforms without a measurement show “—”. Check each row's notes for how its reference was made.`);
   const note = $("note");
-  if ((met.k === "warm_e2e_s" || met.k === "cold_e2e_s") && stepSet.size > 1) { note.hidden = false; note.innerHTML = `<b>Not a like-for-like comparison.</b> The selected runs use different step counts (${[...stepSet].sort((a, b) => a - b).join(", ")}). Switch to DiT step to compare compute speed.`; }
-  else if (met.hi) { note.hidden = false; note.innerHTML = `<b>Quality is measured on few runs so far.</b> Platforms without a measurement show “—”. Check each row's notes for how its reference was made.`; }
-  else note.hidden = true;
+  note.hidden = !msgs.length;
+  note.innerHTML = msgs.map(x => `<div>${x}</div>`).join("");
 
   box.querySelectorAll("svg, .empty").forEach(n => n.remove()); tip.hidden = true;
   if (!models.length || !plats.length) { box.insertAdjacentHTML("beforeend", `<div class="empty">Select at least one model and one platform.</div>`); return; }
@@ -248,10 +287,12 @@ function renderChart() {
     const gx = L + gi * gw + (gw - groupW) / 2, cx = L + gi * gw + gw / 2;
     s += `<text class="xl" x="${cx}" y="${T + ph + 18}" text-anchor="middle">${esc(gw < 110 ? m.name.split(" ")[0] : m.name)}</text>`;
     s += `<text x="${cx}" y="${T + ph + 33}" text-anchor="middle">${esc(m.shape)}</text>`;
-    const best = bestOf(plats.map(p => val(m.slug, p.key, met.k)), met.hi);
+    const split = !!mm[m.slug];
     plats.forEach((p, pi) => {
-      const v = val(m.slug, p.key, met.k), x = gx + pi * (bw + 2), id = bars.length;
-      bars.push({ m, p, v, best, x: x + bw / 2, r: RES[m.slug]?.[p.key] });
+      const v = val(m.slug, p.key, met.k), x = gx + pi * (bw + 2), id = bars.length, rr = RES[m.slug]?.[p.key];
+      const pr = rr ? peers(m, plats, met, rr) : { best: null, n: 0 }, lone = split && pr.n < 2;
+      const best = lone ? null : pr.best;
+      bars.push({ m, p, v, best, lone, split, x: x + bw / 2, r: rr });
       if (v == null) { s += `<text x="${x + bw / 2}" y="${T + ph - 4}" text-anchor="middle" class="dim">—</text>`; }
       else { const by = y(v), h = Math.max(T + ph - by, 1), r = Math.min(4, bw / 2, h);
         s += `<path class="bar" data-i="${id}" d="M${x},${T + ph} v-${h - r} a${r},${r} 0 0 1 ${r},-${r} h${bw - 2 * r} a${r},${r} 0 0 1 ${r},${r} v${h - r} z" fill="${p.color}"/>`;
@@ -266,9 +307,10 @@ function renderChart() {
     const i = e.target.dataset ? e.target.dataset.i : undefined; if (i == null) { hide(); return; }
     const b = bars[+i]; svg.classList.add("hovering");
     svg.querySelectorAll(".bar").forEach(n => n.classList.toggle("on", n.dataset.i === i));
-    const rt = relTxt(b.v, b.best, met.unit, met.hi);
-    const rel = b.v == null ? "" : rt === null ? (met.hi ? " · best of selected" : " · fastest of selected") : met.hi ? ` · ${rt} vs best` : ` · ${rt} the fastest`;
-    const setup = b.r ? `<br>${esc(b.p.backend_label)} · torch ${esc(b.r.torch || "?")} · ${esc(b.r.parallel)} · ${b.r.steps} steps · ${esc(b.r.date)}` : "";
+    const rt = relTxt(b.v, b.best, met.unit, met.hi), same = b.split ? " with the same workload" : " of selected";
+    const rel = b.v == null ? "" : b.lone ? " · no other selected run has the same workload"
+      : rt === null ? ` · ${met.hi ? "best" : "fastest"}${same}` : met.hi ? ` · ${rt} vs best${b.split ? same : ""}` : ` · ${rt} the fastest${b.split ? same : ""}`;
+    const setup = b.r ? `<br>${esc(b.p.backend_label)} · torch ${esc(b.r.torch || "?")} · ${esc(b.r.parallel)} · ${b.r.steps} steps · guidance ${fmtG(b.r.guidance_scale)} · ${esc(b.r.date)}` : "";
     tip.innerHTML = `<b>${esc(b.m.name)}</b> · ${esc(b.p.label)}<br>${b.v == null ? (!b.r ? "No run" : met.k === "compile_s" && b.p.backend === "cuda" ? "No compile step (eager)" : "Not measured") : fmt(b.v, met.unit) + rel}${setup}`;
     const sc = svg.clientWidth / W, by = b.v == null ? T + ph : y(b.v);
     tip.style.left = Math.min(Math.max(b.x * sc, 130), box.clientWidth - 130) + "px"; tip.style.top = (by * sc) + "px"; tip.hidden = false;
@@ -279,24 +321,32 @@ function renderChart() {
 function renderTable() {
   const [models, plats] = sel(), met = METRICS[state.metric];
   if (!models.length || !plats.length) { $("table").innerHTML = `<div class="empty">Nothing selected.</div>`; return; }
-  const cols = [["Platform"], ["Backend"], ["PyTorch"], ["Parallel"], ["Steps", 1], ["DiT step", 1, "dit_step_ms"], [`vs best (${met.name})`, 1], ["Warm e2e", 1, "warm_e2e_s"],
+  const cols = [["Platform"], ["Backend"], ["PyTorch"], ["Parallel"], ["Steps", 1], ["Guidance", 1], ["DiT step", 1, "dit_step_ms"], [`vs best (${met.name})`, 1], ["Warm e2e", 1, "warm_e2e_s"],
     ["Cold e2e", 1, "cold_e2e_s"], ["Compile", 1, "compile_s"], ["PSNR", 1, "psnr_db"], ["SSIM", 1, "ssim"], ["Measured"], ["Notes"]];
   const cellFmt = { dit_step_ms: v => v.toFixed(1) + " ms", warm_e2e_s: fmtS, cold_e2e_s: fmtS, compile_s: v => fmt(v, "s"), psnr_db: v => v.toFixed(2) + " dB", ssim: v => v.toFixed(3) };
+  const mm = mismatches(models, plats, met);
+  const wcell = (m, r, f) => { const d = mm[m.slug]?.diff.includes(f) && mm[m.slug].rows.includes(r);
+    return `<td class="num${d ? " diff" : ""}"${d ? ' title="Differs from the other compared rows"' : ""}>${esc(WL[f].fmt(WL[f].get(r)))}</td>`; };
   let h = `<table><thead><tr>${cols.map(c => `<th class="${c[1] ? "num" : ""}${c[2] === met.k ? " cur" : ""}">${esc(c[0])}</th>`).join("")}</tr></thead><tbody>`;
   for (const m of models) {
-    h += `<tr class="grp"><td colspan="${cols.length}">${esc(m.name)} <span class="dim" style="font-weight:400">· ${esc(m.shape)}</span></td></tr>`;
-    const best = bestOf(plats.map(p => val(m.slug, p.key, met.k)), met.hi);
+    const shapes = distinct(plats.map(p => RES[m.slug]?.[p.key]).filter(Boolean), "shape");
+    const shapeTxt = (shapes.length ? shapes : [m.shape]).map(esc).join(" / ");
+    h += `<tr class="grp"><td colspan="${cols.length}">${esc(m.name)} <span class="${mm[m.slug]?.diff.includes("shape") ? "diff" : "dim"}" style="font-weight:400">· ${shapeTxt}</span></td></tr>`;
+    const split = !!mm[m.slug];
     for (const p of plats) {
       const r = RES[m.slug]?.[p.key], sw = `<span class="sw" style="background:${p.color}"></span>`;
       if (!r) { h += `<tr><td>${sw}${esc(p.label)}</td><td colspan="${cols.length - 1}" class="dim">No run yet</td></tr>`; continue; }
+      const pr = peers(m, plats, met, r), lone = split && pr.n < 2, best = lone ? null : pr.best;
       const cell = k => { const v = r.metrics[k], cls = `num${k === met.k ? " cur" : ""}`;
         const txt = v == null ? (k === "dit_step_ms" && r.status !== "ok" ? r.status.toUpperCase() : "—") : (k === met.k && v === best ? `<span class="best">${cellFmt[k](v)}</span>` : cellFmt[k](v));
         return `<td class="${cls}">${txt}</td>`; };
       const rt = relTxt(r.metrics[met.k], best, met.unit, met.hi);
-      const rel = rt === null ? `<span class="best">${met.hi ? "best" : "fastest"}</span>` : rt;
+      const rel = lone && r.metrics[met.k] != null ? `<span class="dim" title="No other selected run has the same workload">—</span>`
+        : rt === null ? `<span class="best"${split ? ' title="Fastest among the selected runs with the same workload"' : ""}>${met.hi ? "best" : "fastest"}</span>`
+        : split ? `<span title="Compared with the selected runs that have the same workload">${rt}</span>` : rt;
       const notes = r.notes.length ? `<ul>${r.notes.map(n => `<li>${esc(n)}</li>`).join("")}</ul>` : "";
       const commit = r.commit ? ` <span class="dim">${esc(r.commit)}</span>` : "";
-      h += `<tr><td>${sw}${esc(p.label)}</td><td>${esc(p.backend_label)}</td><td><code>${esc(r.torch || "—")}</code></td><td>${esc(r.parallel)}</td><td class="num">${r.steps}</td>
+      h += `<tr><td>${sw}${esc(p.label)}</td><td>${esc(p.backend_label)}</td><td><code>${esc(r.torch || "—")}</code></td><td>${esc(r.parallel)}</td>${wcell(m, r, "steps")}${wcell(m, r, "guidance_scale")}
         ${cell("dit_step_ms")}<td class="num">${rel}</td>${cell("warm_e2e_s")}${cell("cold_e2e_s")}${cell("compile_s")}${cell("psnr_db")}${cell("ssim")}
         <td><a href="${REPO}${esc(r.source)}" title="${esc(r.device)}">${esc(r.date)}</a>${commit}</td><td class="notes">${notes}</td></tr>`;
     }
@@ -316,12 +366,12 @@ function csvCell(v) {
 // Every metric is exported, whichever one the chart shows; models and platforms follow the selection.
 function exportRows() {
   const [models, plats] = sel();
-  const head = ["Model", "Shape", "Platform", "Device", "Backend", "PyTorch", "Parallel", "Steps",
+  const head = ["Model", "Shape", "Platform", "Device", "Backend", "PyTorch", "Parallel", "Steps", "Guidance",
     ...METRICS.map(m => `${m.name}${m.unit ? ` (${m.unit})` : ""}`), "Status", "Measured", "Commit", "Source", "Notes"];
   const rows = [];
   for (const m of models) for (const p of plats) {
     const r = RES[m.slug]?.[p.key];
-    if (r) rows.push([m.name, r.shape, p.label, r.device, p.backend_label, r.torch, r.parallel, r.steps,
+    if (r) rows.push([m.name, r.shape, p.label, r.device, p.backend_label, r.torch, r.parallel, r.steps, r.guidance_scale,
       ...METRICS.map(x => r.metrics[x.k]), r.status, r.date, r.commit, REPO + r.source, r.notes.join("; ")]);
   }
   return [head, ...rows];

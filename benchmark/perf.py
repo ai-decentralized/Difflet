@@ -10,8 +10,12 @@ Every published result is one file in ``benchmark/results/``. The perf page
     python -m benchmark.perf check                                    # validate every record
     python -m benchmark.perf build --out docs/perf/perf.json          # page data
 
-``benchmark.bench`` writes a record automatically after each run. For a run made
-outside ``bench.py``, copy an existing record, edit it, and run ``check``.
+``benchmark.bench`` writes a record automatically after each run, and the scripts that
+later patch its result JSON (``cold_warm_e2e``, ``warm_e2e``, ``step_latency``,
+``step_realloop``, ``backfill_breakdowns``) re-sync that record in place, keeping PSNR/SSIM
+and notes added by hand. ``neuron_cold_warm`` writes the record of a completed run (not a
+stopped job, a ``--steps`` smoke run, or one with ``--out-json``/``--out-md``). For a run
+made outside these scripts, copy an existing record, edit it, and run ``check``.
 
 Standard library only: the Pages workflow runs this without installing anything.
 """
@@ -21,6 +25,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -67,6 +72,10 @@ MODELS = {
     "wan_2_2": "Wan2.2 A14B",
     "hunyuan_video_15": "HunyuanVideo 1.5",
 }
+# MATRIX slugs that are a backend-specific variant of a model the page already shows.
+MODEL_ALIASES = {"wan_2_1_neuron": "wan_2_1"}
+# Measured outside bench.py and added by hand; kept when a run's record is re-synced.
+MANUAL_METRICS = ("psnr_db", "ssim")
 
 
 def _order(table: dict, key: str) -> tuple:
@@ -116,15 +125,21 @@ def validate(rec: Any) -> list[str]:
         for k, v in metrics.items():
             if k not in METRICS:
                 errs.append(f"unknown metric '{k}' (known: {', '.join(METRICS)})")
-            elif v is not None and (
-                not isinstance(v, (int, float)) or isinstance(v, bool) or v < 0
-            ):
-                errs.append(f"metric '{k}' must be a non-negative number or null")
+            elif v is not None and not _finite_non_negative(v):
+                # NaN/Infinity would also break perf.json for the page (JSON has no such values)
+                errs.append(f"metric '{k}' must be a finite non-negative number or null")
         if rec["status"] == "ok" and all(metrics.get(k) is None for k in METRICS):
             errs.append("status is 'ok' but every metric is null")
+    g = rec.get("guidance_scale")
+    if g is not None and not _finite_non_negative(g):
+        errs.append("guidance_scale must be a finite non-negative number or null")
     if not isinstance(rec.get("notes", []), list):
         errs.append("notes must be a list of strings")
     return errs
+
+
+def _finite_non_negative(v: Any) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v) and v >= 0
 
 
 def _parallel(d: dict, backend: str) -> str:
@@ -151,19 +166,28 @@ def record_from_bench(d: dict, backend: Optional[str] = None, source: Optional[s
     sl, warm = d.get("step_latency") or {}, d.get("e2e_warm") or {}
     compile_s = d.get("compile_seconds")
     status = d.get("status")
-    # bench.py's notes are methodology for its own report; the page only gets the failure reason.
-    failures = [n for n in d.get("notes") or [] if isinstance(n, str) and n.startswith("FAILED")]
-    if status == "failed" and any("out of memory" in n.lower() for n in failures):
+    # bench.py's notes are methodology for its own report. The page gets only the reason a run
+    # failed, or why a completed run was flagged (neuron_cold_warm: soft checks only, the
+    # numbers stand).
+    raw = [n for n in d.get("notes") or [] if isinstance(n, str)]
+    failures = [n for n in raw if n.startswith("FAILED")]
+    flags = [n for n in raw if n.startswith("FLAGGED")]
+    if status == "flagged":
+        status = "ok"
+    elif status == "failed" and any("out of memory" in n.lower() for n in failures):
         status = "oom"
     elif status not in STATUSES:
         status = "failed"
-    notes = [n.split(". ")[0][:160] for n in failures] if status != "ok" else []
+    notes = [n.split(". ")[0][:160] for n in (flags if status == "ok" else failures)]
+    if compile_s and _cache_hit(d, backend):
+        compile_s = None
+        notes.append(CACHE_HIT_NOTE)
     ts = d.get("timestamp") or datetime.datetime.now(datetime.timezone.utc).strftime(
         "%Y-%m-%d %H:%M UTC"
     )
     return {
         "schema": SCHEMA,
-        "model": d.get("config_slug"),
+        "model": MODEL_ALIASES.get(d.get("config_slug"), d.get("config_slug")),
         "model_id": d.get("model_id"),
         "platform": d.get("device_slug"),
         "device": _device(d),
@@ -197,6 +221,16 @@ def record_from_bench(d: dict, backend: Optional[str] = None, source: Optional[s
     }
 
 
+CACHE_HIT_NOTE = "Compile was a cache hit (no component was built), so there is no compile time"
+
+
+def _cache_hit(d: dict, backend: str) -> bool:
+    """An AOT compile that built nothing: its breakdown has only the wall total, no component
+    (the rule backfill_breakdowns uses for cache-hit logs). Its seconds are not a compile time."""
+    cb = d.get("compile_breakdown")
+    return backend == "aot" and isinstance(cb, dict) and set(cb) == {"wall_total_s"}
+
+
 def record_filename(rec: dict) -> str:
     stamp = str(rec["date"]).replace(" UTC", "").replace(":", "").replace(" ", "_")
     return f"{stamp}_{rec['platform']}_{rec['backend']}_{rec['model']}.json"
@@ -211,6 +245,71 @@ def write_record(rec: dict, results_dir: Path = RESULTS_DIR, force: bool = False
     if path.exists() and not force:
         raise FileExistsError(f"{path} already exists (use --force to replace it)")
     path.write_text(json.dumps(rec, indent=2) + "\n")
+    return path
+
+
+def keep_manual_fields(rec: dict, old: dict, keep_notes: bool = True) -> dict:
+    """Carry what was added by hand to an earlier version of the same record into ``rec``:
+    PSNR/SSIM that ``rec`` lacks, and (with ``keep_notes``) its notes, except the generated
+    failure/flag reasons, which ``rec`` brings fresh. The old source link is kept only when
+    ``rec`` has none: a script re-sync links its own report."""
+    old_metrics = old.get("metrics") or {}
+    for k in MANUAL_METRICS:
+        if rec["metrics"].get(k) is None and old_metrics.get(k) is not None:
+            rec["metrics"][k] = old_metrics[k]
+    if keep_notes:
+        generated = ("FAILED", "FLAGGED", CACHE_HIT_NOTE)
+        kept = [
+            n for n in old.get("notes") or [] if isinstance(n, str) and not n.startswith(generated)
+        ]
+        rec["notes"] = kept + [n for n in rec["notes"] if n not in kept]
+    if not rec.get("source") and old.get("source"):
+        rec["source"] = old["source"]
+    return rec
+
+
+def _old_record(path: Path) -> Optional[dict]:
+    """The existing record at ``path`` to merge from, or None when there is none or it cannot be
+    read (e.g. left with merge-conflict markers): then it is simply replaced."""
+    if not path.exists():
+        return None
+    try:
+        old = json.loads(path.read_text())
+    except (OSError, ValueError) as e:
+        print(f"[perf] replacing unreadable {path}: {e}", file=sys.stderr, flush=True)
+        return None
+    return old if isinstance(old, dict) else None
+
+
+def sync_record(
+    bench_json: Path | str, source: Optional[str] = None, results_dir: Path = RESULTS_DIR
+) -> Path:
+    """Write (or rewrite in place) the record of a ``benchmark.bench`` result JSON.
+
+    The file name comes from the run's timestamp, which the patch scripts leave alone, so
+    re-syncing after a patch replaces the same record instead of adding a stale twin."""
+    rec = record_from_bench(json.loads(Path(bench_json).read_text()), source=source)
+    old = _old_record(results_dir / record_filename(rec))
+    if old is not None:
+        keep_manual_fields(rec, old)
+    return write_record(rec, results_dir, force=True)
+
+
+def sync_quietly(
+    bench_json: Path | str, source: Optional[str] = None, results_dir: Path = RESULTS_DIR
+) -> Optional[Path]:
+    """``sync_record`` for the benchmark scripts: report, never raise. A perf record must
+    not fail a run that already wrote its results."""
+    try:
+        path = sync_record(bench_json, source=source, results_dir=results_dir)
+    except Exception as e:  # noqa: BLE001 - see docstring
+        print(
+            f"[perf] no perf record written for {bench_json}: {type(e).__name__}: {e}", flush=True
+        )
+        return None
+    print(
+        f"[perf] perf record -> {path} (commit it to publish; see benchmark/README.md)", flush=True
+    )
     return path
 
 
@@ -281,6 +380,8 @@ def build(results_dir: Path = RESULTS_DIR, repo_root: Optional[Path] = None) -> 
                 "model": model,
                 "config": ckey,
                 "device": rec["device"],  # per result: one platform's runs can differ (e.g. LNC)
+                # with shape and steps, the workload: the page warns when compared rows differ
+                "guidance_scale": rec.get("guidance_scale"),
                 "status": rec["status"],
                 "steps": rec["steps"],
                 "parallel": rec["parallel"],
@@ -330,9 +431,16 @@ def main(argv: Optional[list[str]] = None) -> int:
     a.add_argument("--psnr", type=float, help="PSNR in dB against the reference")
     a.add_argument("--ssim", type=float, help="SSIM against the reference")
     a.add_argument(
-        "--note", action="append", default=[], help="note shown next to the result (repeatable)"
+        "--note",
+        action="append",
+        default=[],
+        help="note shown next to the result (repeatable); with --force, replaces the old notes",
     )
-    a.add_argument("--force", action="store_true", help="replace a record with the same name")
+    a.add_argument(
+        "--force",
+        action="store_true",
+        help="replace a record with the same name, keeping its PSNR/SSIM and notes unless given",
+    )
 
     sub.add_parser("check", help="validate every record")
 
@@ -351,6 +459,10 @@ def main(argv: Optional[list[str]] = None) -> int:
             rec["metrics"]["psnr_db"] = args.psnr
             rec["metrics"]["ssim"] = args.ssim
             rec["notes"] += args.note
+            old = _old_record(args.results_dir / record_filename(rec)) if args.force else None
+            if old is not None:
+                # given --note values replace the old notes; given --psnr/--ssim replace too
+                keep_manual_fields(rec, old, keep_notes=not args.note)
             print(f"[perf] wrote {write_record(rec, args.results_dir, force=args.force)}")
     elif args.cmd == "check":
         n = len(load_records(args.results_dir))
@@ -358,7 +470,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     elif args.cmd == "build":
         data = build(args.results_dir)
         args.out.parent.mkdir(parents=True, exist_ok=True)
-        args.out.write_text(json.dumps(data, indent=1, ensure_ascii=False) + "\n")
+        args.out.write_text(json.dumps(data, indent=1, ensure_ascii=False, allow_nan=False) + "\n")
         print(
             f"[perf] {len(data['results'])} results, {len(data['configs'])} platforms -> {args.out}"
         )
