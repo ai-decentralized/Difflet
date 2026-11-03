@@ -4,22 +4,26 @@
 # <model>: qwen_image | ltx_2 | wan2_1 | hunyuan_video.  Output and log: B/<model>/cpu_ref/<name>/ (run.log, rc, reference.json, ...).
 # One reference at a time: refuses to start while another cpu_ref python process is alive.
 set -u
-B=/home/ubuntu/bench-2026-10-26-4m
-PY=/home/ubuntu/venvs/difflet-neuron/bin/python
+# Host paths are settings (2026-11-03, moved into the repo): BENCH4M_DIR is the data root, the
+# AoT venv's python runs the reference, and the reference scripts sit next to this file. Only
+# cpu_ref_qwen.py was moved into the repo.
+B=${BENCH4M_DIR:?set BENCH4M_DIR (see benchmark/bench4m/README.md)}
+PY=${BENCH4M_AOT_VENV:?set BENCH4M_AOT_VENV}/bin/python
+HERE=$(cd "$(dirname "$0")" && pwd)
 model=$1; name=$2; shift 2
 [ "${1:-}" = "--" ] && shift
 case "$model" in
-  qwen_image) script=$B/scripts/cpu_ref_qwen.py ;;
-  ltx_2) script=$B/scripts/cpu_ref_ltx2.py ;;
-  wan2_1) script=$B/scripts/cpu_ref_wan.py ;;
-  hunyuan_video) script=$B/scripts/cpu_ref_hv.py ;;
+  qwen_image) script=$HERE/cpu_ref_qwen.py ;;
+  ltx_2) script=$HERE/cpu_ref_ltx2.py ;;
+  wan2_1) script=$HERE/cpu_ref_wan.py ;;
+  hunyuan_video) script=$HERE/cpu_ref_hv.py ;;
   *) echo "unknown model $model" >&2; exit 2 ;;
 esac
 out=$B/$model/cpu_ref/$name
 if [ -e "$out/rc" ]; then echo "$out already has an rc; refusing to overwrite" >&2; exit 2; fi
 mkdir -p "$out"
 log=$out/run.log
-others=$(pgrep -f "scripts/cpu_ref_(qwen|ltx2|wan|hv)\.py" | grep -v "^$$\$" || true)
+others=$(pgrep -f "/cpu_ref_(qwen|ltx2|wan|hv)\.py" | grep -v "^$$\$" || true)
 if [ -n "$others" ]; then
   echo "another CPU reference is running (pids $others); one at a time" | tee -a "$log"; echo 9 > "$out/rc"; exit 9
 fi

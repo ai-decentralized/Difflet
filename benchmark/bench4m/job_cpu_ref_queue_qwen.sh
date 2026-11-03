@@ -5,9 +5,11 @@
 # job_cpu_ref_queue_qwen_ltx2.sh (which a later stage can resume: it skips runs that have an rc).
 #   systemd-run --user --unit=cpuref_qwen_queue --collect -- bash job_cpu_ref_queue_qwen.sh
 set -u
-B=/home/ubuntu/bench-2026-10-26-4m
-J=$B/scripts/job_cpu_ref.sh
-QWEN=/home/ubuntu/.cache/huggingface/hub/models--Qwen--Qwen-Image/snapshots/75e0b4be04f60ec59a75f475837eced720f823b6
+# Host paths are settings (2026-11-03, moved into the repo): BENCH4M_DIR is the data root,
+# job_cpu_ref.sh sits next to this file, and the snapshot is HF_HOME's (or QWEN_SNAPSHOT).
+B=${BENCH4M_DIR:?set BENCH4M_DIR (see benchmark/bench4m/README.md)}
+J=$(cd "$(dirname "$0")" && pwd)/job_cpu_ref.sh
+QWEN=${QWEN_SNAPSHOT:-${HF_HOME:-$HOME/.cache/huggingface}/hub/models--Qwen--Qwen-Image/snapshots/75e0b4be04f60ec59a75f475837eced720f823b6}
 Q_AOT=$B/qwen_image/aot_main_tp4/q1
 Q_NAT=$B/qwen_image/native_tp4_hashcheck/q1
 qlog=$B/cpu_ref_queue_qwen.log

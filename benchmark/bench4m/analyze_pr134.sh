@@ -3,12 +3,16 @@
 # definitions as the 2026-10-26 four-model campaign (quality_part1.sh / quality_part2_hv_aot.sh):
 # the CPU fp32 references with the AoT noise, 50 steps, seed 42, the fox prompt.
 set -eu
-D=/home/ubuntu/dv-2026-11-01-aot
-B=/home/ubuntu/bench-2026-10-26-4m
-PY=/home/ubuntu/venvs/difflet-neuron/bin/python
-export PATH=/home/ubuntu/venvs/difflet-neuron/bin:$PATH
-M=$D/scripts/quality_metrics.py
-MAP=$D/scripts/frames_map.py
+# Host paths are settings (2026-11-03, moved into the repo): BENCH4M_DIR is this run's data root,
+# BENCH4M_REF_DIR the root holding the CPU references (default BENCH4M_DIR), the AoT venv's
+# python scores, and the helper scripts sit next to this file.
+D=${BENCH4M_DIR:?set BENCH4M_DIR (see benchmark/bench4m/README.md)}
+B=${BENCH4M_REF_DIR:-$D}
+HERE=$(cd "$(dirname "$0")" && pwd)
+PY=${BENCH4M_AOT_VENV:?set BENCH4M_AOT_VENV}/bin/python
+export PATH=$BENCH4M_AOT_VENV/bin:$PATH
+M=$HERE/quality_metrics.py
+MAP=$HERE/frames_map.py
 O=$D/analysis
 mkdir -p "$O/mapped"
 cd /tmp

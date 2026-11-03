@@ -72,14 +72,30 @@ import subprocess
 import sys
 import time
 
-BENCH = "/home/ubuntu/bench-2026-10-26-4m"
-WTS = {"native": "/home/ubuntu/Difflet/.claude/worktrees/hunyuan-neuron",
-       "aot": "/home/ubuntu/aot-main"}
-VENVS = {"native": "/home/ubuntu/venvs/native-312", "aot": "/home/ubuntu/venvs/difflet-neuron"}
+# Host paths (2026-11-03, moved into the repo; nothing else changed). The data root and the two
+# venvs are required settings; the worktrees default to this checkout; the HF hub cache is
+# HF_HOME's (HF_HUB_CACHE is dropped from every run's env below, so it is not read here either).
+# The helper scripts, the probe and nmon.json sit next to this file (they were under
+# BENCH/scripts and BENCH/probe).
+HERE = os.path.dirname(os.path.abspath(__file__))
+REPO = os.path.dirname(os.path.dirname(HERE))
+
+
+def _required(name):
+    value = os.environ.get(name)
+    if not value:
+        sys.exit(f"bench4m: set {name} (see benchmark/bench4m/README.md)")
+    return value
+
+
+BENCH = _required("BENCH4M_DIR")  # run dirs, summary.jsonl and roots/ live here
+WTS = {"native": os.environ.get("BENCH4M_NATIVE_WT") or REPO,
+       "aot": os.environ.get("BENCH4M_AOT_WT") or REPO}
+VENVS = {"native": _required("BENCH4M_NATIVE_VENV"), "aot": _required("BENCH4M_AOT_VENV")}
 PROMPT = "a cinematic shot of a red fox running through a snowy forest"
-CHECK_MP4 = os.path.join(BENCH, "scripts", "check_mp4.py")
-CHECK_PT = os.path.join(BENCH, "scripts", "check_pt_video.py")
-HF = "/home/ubuntu/.cache/huggingface/hub"
+CHECK_MP4 = os.path.join(HERE, "check_mp4.py")
+CHECK_PT = os.path.join(HERE, "check_pt_video.py")
+HF = os.path.join(os.environ.get("HF_HOME") or os.path.expanduser("~/.cache/huggingface"), "hub")
 
 MODELS = {
     "qwen_image": {
@@ -327,7 +343,7 @@ def check_pt(run_dir, model=None):
     pt = os.path.join(run_dir, "out.pt")
     if not os.path.exists(pt):
         return None
-    chk = os.path.join(BENCH, "scripts", MODELS[model]["check_pt"]) if model and \
+    chk = os.path.join(HERE, MODELS[model]["check_pt"]) if model and \
         MODELS[model].get("check_pt") else CHECK_PT
     r = subprocess.run([os.path.join(VENVS["aot"], "bin", "python"), "-I", chk, pt,
                         os.path.join(run_dir, "mid.png")], capture_output=True, text=True)
@@ -369,7 +385,7 @@ def build(model, cell, run, mode, venv, flags, root_cell=None, extra_env=None, r
               "HV1_DUMP_LATENTS_DIR"):
         env.pop(k, None)
     env.update({
-        "PYTHONPATH": f"{BENCH}/probe:{wt}",
+        "PYTHONPATH": f"{HERE}/probe:{wt}",
         "PATH": f"{V}/bin:" + env.get("PATH", "/usr/bin:/bin"),
         "HF_HUB_OFFLINE": "1",
         "HV1_PROBE_OUT": os.path.join(run_dir, "probe"),
@@ -485,7 +501,7 @@ def run_one(model, cell, run, mode, venv, flags, drop=False, root_cell=None, do_
     log(f"{model}/{cell}/{run} {mode} start: {' '.join(cmd)}")
     nmon_f = open(os.path.join(run_dir, "nmon.jsonl"), "w")
     nmon = subprocess.Popen(["/opt/aws/neuron/bin/neuron-monitor", "-c",
-                             f"{BENCH}/scripts/nmon.json"], stdout=nmon_f,
+                             os.path.join(HERE, "nmon.json")], stdout=nmon_f,
                             stderr=subprocess.DEVNULL)
     t = time.time()
     with open(os.path.join(run_dir, "run.log"), "w") as lf:

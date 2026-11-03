@@ -5,17 +5,25 @@
 # Every run takes /home/ubuntu/neuron-device.lock (shared with the HunyuanVideo agent) and
 # releases it after. Flags exactly native_tp4_p3's (--backend neuron --tp-degree 4 --vae-dtype bf16).
 #   systemd-run --user --unit=nfq_dev --collect -- bash job_device.sh [runs...]
-B=/home/ubuntu/bench-2026-10-26-4m
+# Host paths are settings (2026-11-03, moved into the repo): BENCH4M_DIR is the data root (plus
+# bench4m.py's own BENCH4M_* settings), NFQ_AFTER_WT the fixed worktree, NFQ_BEFORE_WT the
+# unfixed one (default: the snapshot dir it was), NEURON_DEVICE_LOCK the shared lock file.
+# bench4m_nfq.py differed from bench4m.py only in honouring BENCH4M_NATIVE_WT, which
+# bench4m.py now does, so this calls bench4m.py.
+B=${BENCH4M_DIR:?set BENCH4M_DIR (see benchmark/bench4m/README.md)}
 S=$B/nf_qwen_text
+HERE=$(cd "$(dirname "$0")" && pwd)
+LOCK=${NEURON_DEVICE_LOCK:-$HOME/neuron-device.lock}
+mkdir -p $S
 exec >> $S/device.log 2>&1
 cd $B
-BEFORE_WT=$S/src_head
-AFTER_WT=/home/ubuntu/Difflet/.claude/worktrees/native-followups
+BEFORE_WT=${NFQ_BEFORE_WT:-$S/src_head}
+AFTER_WT=${NFQ_AFTER_WT:?set NFQ_AFTER_WT to the worktree with the fix}
 run() {  # cell run wt [bench4m args...]
   local cell=$1 r=$2 wt=$3; shift 3
   if [ -f $B/qwen_image/$cell/$r/summary.json ]; then echo "[job] $cell/$r exists, skip"; return 0; fi
   echo "[job] $cell/$r start $(date -u +%FT%TZ) wt=$wt"
-  BENCH4M_NATIVE_WT=$wt flock /home/ubuntu/neuron-device.lock /usr/bin/python3 scripts/bench4m_nfq.py \
+  BENCH4M_NATIVE_WT=$wt flock $LOCK /usr/bin/python3 $HERE/bench4m.py \
     run --model qwen_image --cell $cell --run $r --mode generate --venv native "$@" \
     -- --backend neuron --tp-degree 4 --vae-dtype bf16
   local rc=$?

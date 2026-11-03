@@ -5,11 +5,14 @@
 # (genuine failure, reported, never retried); a run dir without summary.json (killed mid-run) is
 # moved aside, and for a compile its root too, then the run starts over.
 set -u
-D=/home/ubuntu/dv-2026-11-01-aot
-H="/usr/bin/python3 $D/scripts/bench4m.py"
-export PATH=/home/ubuntu/venvs/difflet-neuron/bin:$PATH
-AFTER=/home/ubuntu/Difflet/.claude/worktrees/aot-followups
-BEFORE=/home/ubuntu/dv-aot-before
+# Host paths are settings (2026-11-03, moved into the repo): BENCH4M_DIR is the data root (plus
+# bench4m.py's own BENCH4M_* settings), PR134_AFTER_WT / PR134_BEFORE_WT the two checkouts.
+# bench4m.py now takes the AoT worktree as BENCH4M_AOT_WT (it was DV_AOT_WT).
+D=${BENCH4M_DIR:?set BENCH4M_DIR (see benchmark/bench4m/README.md)}
+H="/usr/bin/python3 $(cd "$(dirname "$0")" && pwd)/bench4m.py"
+export PATH=${BENCH4M_AOT_VENV:?set BENCH4M_AOT_VENV}/bin:$PATH
+AFTER=${PR134_AFTER_WT:?set PR134_AFTER_WT}
+BEFORE=${PR134_BEFORE_WT:?set PR134_BEFORE_WT}
 MARKER=$D/job.done
 mkdir -p $D/status
 
@@ -28,7 +31,7 @@ step() {
   ts=$(date +%s)
   if [ -e "$dir" ]; then mv "$dir" "$dir.partial-$ts"; fi
   if [ "$mode" = compile ] && [ -e "$root" ]; then mv "$root" "$root.partial-$ts"; fi
-  DV_AOT_WT=$wt $H run --model "$model" --cell "$cell" --run "$run" --mode "$mode" --venv aot -- "$@"
+  BENCH4M_AOT_WT=$wt $H run --model "$model" --cell "$cell" --run "$run" --mode "$mode" --venv aot -- "$@"
   rc=$?
   wall=$(/usr/bin/python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('wall_s'))" "$dir/summary.json" 2>/dev/null)
   echo "DONE $model/$cell/$run rc=$rc wall_s=$wall" > "$status"

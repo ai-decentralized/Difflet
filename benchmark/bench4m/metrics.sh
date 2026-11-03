@@ -1,13 +1,17 @@
 #!/bin/bash
 # Quality metrics for the Qwen-Image native text-mask investigation (2026-10-28; not in repo).
 # Usage: metrics.sh LABEL REF_DIR_OR_FILE_LATENTS CAND_LATENTS [REF_FRAMES CAND_FRAMES]
-B=/home/ubuntu/bench-2026-10-26-4m
+# Host paths are settings (2026-11-03, moved into the repo): BENCH4M_DIR is the data root, the
+# native venv's python scores, and quality_metrics.py sits next to this file.
+B=${BENCH4M_DIR:?set BENCH4M_DIR (see benchmark/bench4m/README.md)}
+PY=${BENCH4M_NATIVE_VENV:?set BENCH4M_NATIVE_VENV}/bin/python
+HERE=$(cd "$(dirname "$0")" && pwd)
 mkdir -p $B/nf_qwen_text/metrics
 cd $B
 label=$1; rl=$2; cl=$3; rf=$4; cf=$5
 args=(--latents final "$rl" "$cl" --label "$label" --out "nf_qwen_text/metrics/$label.json")
 [ -n "$rf" ] && args+=(--ref-frames "$rf" --cand-frames "$cf")
-/home/ubuntu/venvs/native-312/bin/python scripts/quality_metrics.py "${args[@]}" > /dev/null
+"$PY" "$HERE/quality_metrics.py" "${args[@]}" > /dev/null
 /usr/bin/python3 - "nf_qwen_text/metrics/$label.json" <<'EOF'
 import json, sys
 d = json.load(open(sys.argv[1]))
