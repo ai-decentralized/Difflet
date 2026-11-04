@@ -574,11 +574,13 @@ class LTX2Orchestrator:
                 )
             model_latents = torch.cat([latents] * 2) if do_cfg else latents
             model_audio_latents = torch.cat([audio_latents] * 2) if do_cfg else audio_latents
+            # diffusers passes the scheduler's timestep (and sigma) to the DiT unrounded (fp32);
+            # a DiT that declares ``timestep_dtype`` gets it in that dtype, others the model dtype.
             timestep_batch = _batch_timestep(
                 timestep,
                 model_latents.shape[0],
                 latents.device,
-                model_dtype,
+                getattr(self.transformer, "timestep_dtype", model_dtype),
             )
             model_bundle = LTX2DiTInputBundle(
                 hidden_states=model_latents.to(dtype=model_dtype),
