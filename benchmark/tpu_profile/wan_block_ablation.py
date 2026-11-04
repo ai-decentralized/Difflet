@@ -234,13 +234,13 @@ def _worker(rank, world, trace_dir, reply_q):
          lambda: M._attn_kernel(q, k, v, head_dim=HD), (1, heads_local, S, HD), attn_flops)
 
     big = torch.randn(1, S, D, dtype=dtype, device=device)
-    bare("  [bare] all-reduce (1,4680,5120)", lambda: C.reduce_tp(big), (1, S, D))
+    bare("  [bare] all-reduce (1,4680,5120)", lambda: collectives.reduce_tp(big), (1, S, D))
     # Bandwidth curve: is 48 MB in ~0.84 ms near the ICI limit, or is a bigger
     # message faster per byte? Ring bus bandwidth = 2 (n-1)/n * bytes / time.
     for rows in (S // 4, S // 2, 2 * S):
         msg = torch.randn(1, rows, D, dtype=dtype, device=device)
         bare(f"  [bare] all-reduce (1,{rows},5120) {rows * D * 2 / 2**20:.0f} MiB",
-             lambda msg=msg: C.reduce_tp(msg), (1, rows, D))
+             lambda msg=msg: collectives.reduce_tp(msg), (1, rows, D))
 
     w = torch.randn(D, local, dtype=dtype, device=device)
     bare("  [bare] matmul S x 5120 x 1280", lambda: big @ w, (1, S, local), 2 * S * D * local)

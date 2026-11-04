@@ -191,7 +191,6 @@ class TpuDeviceVideoVae:
         self._vae.decoder.to(self._device)
 
     def decode(self, latents, timestep=None, return_dict=False):
-        from difflet.backends.tpu.ops_impl import device_runtime
 
         with torch.no_grad():
             out = self._vae.decode(

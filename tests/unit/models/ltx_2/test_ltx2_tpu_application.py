@@ -57,7 +57,6 @@ def test_broadcast_prompt_encoder_matches_diffusers_call_surface(monkeypatch):
     """diffusers' encode_prompt calls _get_gemma_prompt_embeds(prompt, num_videos_per_prompt=,
     max_sequence_length=, scale_factor=, device=, dtype=); the first serve on the v5e died
     with `_encode() got an unexpected keyword argument 'dtype'`."""
-    import sys
     import types
 
     from difflet.models.ltx_2 import tpu_application as mod
@@ -89,7 +88,6 @@ def test_device_vae_wrapper_exposes_the_normalization_buffers(monkeypatch):
     (registered buffers) and silently skips when they are missing; the wrapper
     must carry them, or every frame comes out un-denormalized (v5e: right
     structure, wrong colours, 0.17/px off the host decode of the same latents)."""
-    import sys
     import types
 
     from difflet.models.ltx_2 import tpu_application as mod

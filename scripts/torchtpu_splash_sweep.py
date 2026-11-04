@@ -10,7 +10,7 @@ import itertools
 import time
 
 import torch
-import torch_tpu
+import torch_tpu  # noqa: F401  (registers the tpu device)
 
 dev = torch.device("tpu")
 SHAPES = [

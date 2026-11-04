@@ -5,8 +5,6 @@ and the T5 broadcast encoder's call surface."""
 from __future__ import annotations
 
 import json
-import sys
-import types
 from types import SimpleNamespace
 
 import pytest
