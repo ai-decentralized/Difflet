@@ -255,7 +255,6 @@ class TpuDeviceImageVae:
 
     def decode(self, latents):
         """(1, C, H, W) *scaled* latents (as the DiT produces them) -> (1, 3, 8H, 8W) fp32 host."""
-        from difflet.backends.tpu.ops_impl import device_runtime
 
         z = latents.to(torch.float32).to(self._device)
         z = (z / self.scaling_factor + self.shift_factor).to(self.dtype)

@@ -179,7 +179,8 @@ def _device_case(vae_host, z, ref, dtype_name: str, compile_: bool, iters: int,
         case["mem_peak_gb"] = device_runtime.memory_info(dev)["peak_bytes_used"] / 2**30
         case.update(_compare(out, ref))
         case["status"] = "ok"
-        del vae, zd, out
+        del vae, out
+        zd = None  # once() closes over it, so rebind rather than del
     except Exception as exc:  # noqa: BLE001 -- the failure IS the finding
         case["status"] = "error"
         case["error"] = repr(exc)
