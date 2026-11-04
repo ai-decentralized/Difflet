@@ -1,0 +1,11 @@
+=== bench baseline2 (two decodes) 04:33:56
+exit=0
+[rank0] iter0 [synced] e2e_latent=34.86s steps=27 mean_step=1.097s stage={'dit_load_s': 6.231070112000452, 'warmup_s': 54.91635298199981, 'host_load_s': 0.5182106899992505, 'encode_s': 4.826327238999511, 'denoise_s': 30.031931692003127}
+[rank1] iter0 [synced] e2e_latent=33.91s steps=27 mean_step=1.094s stage={'dit_load_s': 6.2713288010018005, 'warmup_s': 54.865821572999266, 'host_load_s': 1.466072761999385, 'encode_s': 3.901679217000492, 'denoise_s': 30.00934629299809}
+[rank2] iter0 [synced] e2e_latent=35.09s steps=27 mean_step=1.095s stage={'dit_load_s': 5.995202226000401, 'warmup_s': 55.226211746001354, 'host_load_s': 0.28955009400306153, 'encode_s': 5.0393684250011574, 'denoise_s': 30.048237341998174}
+[rank3] iter0 [synced] e2e_latent=35.08s steps=27 mean_step=1.095s stage={'dit_load_s': 5.467940107002505, 'warmup_s': 55.79514664599992, 'host_load_s': 0.2960271539996029, 'encode_s': 5.039347664998786, 'denoise_s': 30.042199211999105}
+[rank1] iter1 [natural] e2e_latent=8.84s steps=27 mean_step=0.153s stage={'dit_load_s': 6.2713288010018005, 'warmup_s': 54.865821572999266, 'host_load_s': 1.466072761999385, 'encode_s': 3.5500878729981196, 'denoise_s': 5.289763500000845}
+[rank2] iter1 [natural] e2e_latent=8.84s steps=27 mean_step=0.150s stage={'dit_load_s': 5.995202226000401, 'warmup_s': 55.226211746001354, 'host_load_s': 0.28955009400306153, 'encode_s': 3.6031070120006916, 'denoise_s': 5.236869100997865}
+[rank0] iter1 [natural] e2e_latent=8.83s steps=27 mean_step=0.152s stage={'dit_load_s': 6.231070112000452, 'warmup_s': 54.91635298199981, 'host_load_s': 0.5182106899992505, 'encode_s': 3.5782321719998436, 'denoise_s': 5.255594640999334}
+[rank3] iter1 [natural] e2e_latent=8.84s steps=27 mean_step=0.151s stage={'dit_load_s': 5.467940107002505, 'warmup_s': 55.79514664599992, 'host_load_s': 0.2960271539996029, 'encode_s': 3.616682130999834, 'denoise_s': 5.224316190997342}
+DDONE 04:37:57

@@ -9,6 +9,15 @@ from difflet.serving.model_registry import load_request_validator_factory, resol
 from difflet.serving.options import ServeOptions
 
 
+@pytest.fixture(autouse=True)
+def _ambient_trainium(monkeypatch):
+    """resolve_serving_model gates on the current backend; the tests below
+    describe Trainium profiles, and a torch_xla venv would otherwise
+    auto-detect tpu and reject FLUX before the assertion under test. The
+    TPU tests set the variable themselves."""
+    monkeypatch.setenv("DIFFLET_BACKEND", "trainium")
+
+
 def test_flux_serving_profile_uses_registry_defaults():
     resolved = resolve_serving_model(ServeOptions(model_id="black-forest-labs/FLUX.1-dev"))
 
@@ -211,17 +220,82 @@ def test_flux_serving_profile_carries_frozen_adaptive_teacache(tmp_path):
     assert resolved.profile.teacache_calibration_data.target_speedup == 1.5
 
 
-def test_serving_profile_rejects_unimplemented_teacache_modes():
+@pytest.mark.parametrize(
+    ("model_id", "options", "cadence", "alpha"),
+    [
+        ("Qwen/Qwen-Image", {"teacache_cadence": 2}, 2, None),
+        ("Qwen/Qwen-Image", {"teacache_online_delta": 0.6}, None, 0.6),
+        ("Wan-AI/Wan2.2-T2V-A14B-Diffusers", {"teacache_cadence": 3}, 3, None),
+        ("Wan-AI/Wan2.2-T2V-A14B-Diffusers", {"teacache_online_delta": 0.5}, None, 0.5),
+    ],
+)
+def test_serving_profile_carries_probe_free_teacache_modes(
+    monkeypatch, model_id, options, cadence, alpha
+):
+    """Fixed cadence / online-delta are host-side controller state in the Qwen
+    and Wan pipelines (no probe graph, no calibration), so on the TPU backend
+    the profile carries them through to the adapter."""
+    monkeypatch.setenv("DIFFLET_BACKEND", "tpu")
+    resolved = resolve_serving_model(ServeOptions(model_id=model_id, **options))
+
+    assert resolved.profile.teacache_cadence == cadence
+    assert resolved.profile.teacache_online_delta == alpha
+    # Probe-free never means adaptive: no frozen calibration is synthesized.
+    assert resolved.profile.teacache_speedup is None
+    assert resolved.profile.teacache_calibration_data is None
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    ["Qwen/Qwen-Image", "Wan-AI/Wan2.2-T2V-A14B-Diffusers", "black-forest-labs/FLUX.1-dev"],
+)
+def test_serving_profile_refuses_probe_free_teacache_off_tpu(model_id):
+    """Off TPU the probe-free modes are refused at option resolution, as before
+    they existed: they were measured on TPU only."""
     with pytest.raises(DiffletServingError) as exc:
-        resolve_serving_model(
-            ServeOptions(
-                model_id="black-forest-labs/FLUX.1-dev",
-                teacache_cadence=2,
-            )
-        )
+        resolve_serving_model(ServeOptions(model_id=model_id, teacache_cadence=2))
 
     assert exc.value.code == "invalid_extra_body"
-    assert "--teacache-cadence" in exc.value.message
+    assert "does not yet implement --teacache-cadence" in exc.value.message
+
+
+def test_serving_profile_carries_probe_free_teacache_for_hunyuan_on_tpu(monkeypatch):
+    """The option layer lets the modes through for HunyuanVideo; the adapter
+    then accepts them on TPU and rejects them on Trainium."""
+    monkeypatch.setenv("DIFFLET_BACKEND", "tpu")
+    resolved = resolve_serving_model(
+        ServeOptions(model_id="hunyuanvideo-community/HunyuanVideo", teacache_cadence=2)
+    )
+    assert resolved.profile.teacache_cadence == 2
+
+
+@pytest.mark.parametrize(
+    ("options", "match"),
+    [
+        ({"teacache_cadence": 2, "teacache_online_delta": 0.6}, "mutually exclusive"),
+        (
+            {
+                "teacache_cadence": 2,
+                "teacache_speedup": 1.5,
+                "teacache_calibration": "/unused.json",
+            },
+            "mutually exclusive",
+        ),
+        ({"teacache_cadence": 1}, ">= 2"),
+        ({"teacache_cadence": 0}, ">= 2"),
+        ({"teacache_cadence": True}, ">= 2"),
+        ({"teacache_online_delta": 0.0}, "finite positive"),
+        ({"teacache_online_delta": -0.5}, "finite positive"),
+        ({"teacache_online_delta": float("inf")}, "finite positive"),
+    ],
+)
+def test_serving_profile_rejects_invalid_probe_free_teacache(monkeypatch, options, match):
+    monkeypatch.setenv("DIFFLET_BACKEND", "tpu")
+    with pytest.raises(DiffletServingError) as exc:
+        resolve_serving_model(ServeOptions(model_id="Qwen/Qwen-Image", **options))
+
+    assert exc.value.code == "invalid_extra_body"
+    assert match in exc.value.message
 
 
 def test_serving_profile_ignores_calibration_without_speedup():
@@ -314,3 +388,39 @@ def test_serving_profile_reports_invalid_parallel_values(options, message):
 
     assert exc.value.code == "invalid_extra_body"
     assert message in exc.value.message
+
+
+def test_serving_rejects_unported_models_on_tpu_before_touching_weights(monkeypatch):
+    """Seen on a v5e: `difflet serve` for HunyuanVideo resolved the snapshot and
+    then died in _build_llama_app with ModuleNotFoundError('neuronx_distributed_inference');
+    FLUX got as far as a gated-repo 401. The registry's backend list must gate
+    serving the way it gates DiffletPipeline. Every serving model is ported to
+    TPU now, so the gate is pinned by presenting FLUX as Trainium-only."""
+    from dataclasses import replace
+
+    from difflet.registry import resolve_model
+    from difflet.serving import model_registry
+
+    monkeypatch.setenv("DIFFLET_BACKEND", "tpu")
+    trainium_only = replace(resolve_model("black-forest-labs/FLUX.1-dev"), backends=("trainium",))
+    monkeypatch.setattr(model_registry, "resolve_model", lambda model_id: trainium_only)
+
+    with pytest.raises(ValueError, match="does not support backend 'tpu'"):
+        resolve_serving_model(ServeOptions(model_id="black-forest-labs/FLUX.1-dev"))
+
+
+@pytest.mark.parametrize(
+    "model_id",
+    [
+        "Qwen/Qwen-Image",
+        "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+        "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+        "hunyuanvideo-community/HunyuanVideo",
+        "Lightricks/LTX-2",
+        "black-forest-labs/FLUX.1-dev",
+    ],
+)
+def test_serving_accepts_the_tpu_ported_models(monkeypatch, model_id):
+    monkeypatch.setenv("DIFFLET_BACKEND", "tpu")
+
+    assert resolve_serving_model(ServeOptions(model_id=model_id)).model_id == model_id

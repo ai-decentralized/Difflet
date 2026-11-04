@@ -1007,3 +1007,59 @@ def test_generation_identity_names_bf16_reduce(monkeypatch, tmp_path):
     spec = wan._compile_spec(_source(tmp_path), _profile(tmp_path))
     identity = json.loads(spec.identity.canonical_cache_inputs_json)
     assert identity["cache_inputs"]["application_kwargs"]["tp_reduce_dtype"] == "bfloat16"
+
+
+# --- Probe-free TeaCache (--teacache-cadence / --teacache-online-delta) --------
+
+
+def test_validate_profile_accepts_probe_free_teacache_on_tpu_only(monkeypatch, tmp_path):
+    monkeypatch.setattr(wan, "_backend_is_tpu", lambda: True)
+    wan._validate_profile(replace(_profile(tmp_path), teacache_cadence=2))
+    wan._validate_profile(replace(_profile(tmp_path), teacache_online_delta=0.6))
+    with pytest.raises(ValueError, match="does not support TeaCache"):
+        wan._validate_profile(replace(_profile(tmp_path), teacache_speedup=1.5))
+    monkeypatch.setattr(wan, "_backend_is_tpu", lambda: False)
+    with pytest.raises(ValueError, match="on TPU only"):
+        wan._validate_profile(replace(_profile(tmp_path), teacache_cadence=2))
+
+
+def test_teacache_kwargs_stay_out_of_the_compile_identity(monkeypatch, tmp_path):
+    """Neither probe-free mode changes the compiled graph, so toggling one must
+    not invalidate the Trainium artifact cache."""
+    monkeypatch.setattr(wan, "_torch_bfloat16", lambda: "bfloat16")
+    source = _source(tmp_path)
+    baseline = wan._compile_spec(source, _profile(tmp_path))
+    with_cadence = wan._compile_spec(source, replace(_profile(tmp_path), teacache_cadence=2))
+    assert with_cadence.identity == baseline.identity
+    assert wan._teacache_kwargs(_profile(tmp_path)) == {}
+    assert wan._teacache_kwargs(replace(_profile(tmp_path), teacache_cadence=2)) == {
+        "teacache_cadence": 2
+    }
+    assert wan._teacache_kwargs(replace(_profile(tmp_path), teacache_online_delta=0.6)) == {
+        "teacache_online_delta_alpha": 0.6
+    }
+
+
+def test_build_application_forwards_probe_free_teacache_on_tpu(monkeypatch, tmp_path):
+    captured = {}
+    entry = ModuleType("difflet.models.wan.entry")
+
+    def create_wan_application(**kwargs):
+        captured.update(kwargs)
+        return "tpu-app"
+
+    entry.create_wan_application = create_wan_application
+    monkeypatch.setitem(sys.modules, "difflet.models.wan.entry", entry)
+    monkeypatch.setattr(wan, "_backend_is_tpu", lambda: True)
+    monkeypatch.setattr(wan, "_torch_bfloat16", lambda: "bfloat16")
+
+    app = wan._build_application(
+        _source(tmp_path), replace(_profile(tmp_path), teacache_online_delta=0.6)
+    )
+
+    assert app == "tpu-app"
+    assert captured["backend"] == "tpu"
+    assert captured["teacache_online_delta_alpha"] == 0.6
+    assert "teacache_cadence" not in captured
+    # The compile-identity kwargs are still passed, unchanged.
+    assert captured["enable_transformer_2"] is False

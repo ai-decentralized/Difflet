@@ -44,7 +44,7 @@ FLASH_BLOCK = 512
 #: 24 M and 48 M, so the threshold is set in the middle.
 FLASH_MIN_SCORE_ELEMENTS = 32 * 1024 * 1024
 
-#: Resolved lazily and cached: the ``custom_kernel`` module, or False.
+#: Resolved lazily and cached: the Pallas flash kernel wrapper, or False.
 _FLASH_KERNEL: object | None = None
 
 #: Above this many score elements per attention call, compute the attention in
@@ -62,9 +62,8 @@ _FLASH_KERNEL: object | None = None
 #: is not needed at this size. It stays as the guard for genuinely larger
 #: shapes, not as the normal path.
 #:
-#: The TPU Pallas flash-attention kernel would be better than either, removing
-#: the matrix rather than bounding it, but torch_xla 2.9 pins it to jax==0.7.1,
-#: which requires Python >= 3.11; this toolchain is on 3.10.
+#: The Pallas flash kernel (``DIFFLET_TPU_PALLAS=1``) removes the matrix
+#: rather than bounding it; it is opt-in while it is slower in the model.
 DEFAULT_MAX_SCORE_ELEMENTS = 512 * 1024 * 1024
 
 #: Query rows per block once chunking kicks in. Peak score memory becomes
@@ -148,28 +147,136 @@ def _chunked_attention(q, k, v, *, scale: float, causal: bool):
     return torch.cat(outputs, dim=-2)
 
 
-def _flash_kernel():
-    """``torch_xla.experimental.custom_kernel``, or None when unusable.
+#: Opt-in, while it is being measured: the JAX Pallas flash kernel (the one
+#: the old torch_xla backend used), run through ``torch.tpu.pallas.jax_op``.
+PALLAS_ENV = "DIFFLET_TPU_PALLAS"
 
-    The kernel lowers through Pallas and therefore needs ``jax``. On Python
-    3.10 there is no usable jax: ``pip install jax[tpu]`` resolves to 0.6.2 and
-    downgrades libtpu out from under torch_xla. So this returns None on that
-    toolchain and every caller falls back to SDPA — the backend stays correct,
-    just slower. ``DIFFLET_TPU_FLASH=0`` forces the fallback for A/B testing.
+
+class _TorchTpuPallasFlash:
+    """The JAX Pallas flash kernel on TorchTPU, behind the call shape the
+    torch_xla backend used.
+
+    ``jax.experimental.pallas.ops.tpu.flash_attention`` runs through
+    ``jax_op``. It keeps the ``flash_attention(q, k, v, *, causal, sm_scale,
+    q_segment_ids, kv_segment_ids)`` method of torch_xla's ``custom_kernel``,
+    so ``_flash_attention`` and ``_flash_attention_key_bounds`` call it
+    unchanged, padding masks included.
+
+    **Block sizes are torch_xla's, not JAX's.** ``BlockSizes.get_default()`` is
+    128 everywhere (its source carries a TODO to choose better); torch_xla
+    passes 512 / 512 / 512 with ``block_b`` 2. Measured at Qwen-Image's joint
+    shape (6, 5120, 128): 4.53 ms at 128, 0.639 ms at 512 against SDPA's 0.631.
+
+    The scale is folded into q — softmax(s·qKᵀ) = softmax((s·q)Kᵀ) — so the kernel
+    runs at ``sm_scale=1.0`` and no Python float crosses ``jax_op``, which would
+    otherwise retrace per distinct value.
+
+    **Correct, and slower in the model under DeferAndFuse — leave it off.**
+    Qwen-Image at tp=4 (per-step):
+
+                        SDPA      this kernel
+        Strict eager    1.004 s   0.971 s
+        DeferAndFuse    0.333 s   0.566 s
+
+    In isolation and under Strict it matches or beats SDPA. Under DeferAndFuse
+    it costs 70%, because a ``jax_op`` is opaque to TorchTPU's fusion: every
+    call forces a materialisation on either side and the surrounding ops stop
+    fusing. splash_sdpa pays the same toll (0.567 s) for the same reason. It is
+    kept because it is numerically right — padding masks and key windows
+    included — and because the cost should vanish under ``torch.compile``,
+    where the kernel becomes one call inside a single compiled graph.
+
+    **Under ``torch.compile`` the op Dynamo sees is ours, not ``jax_op``'s.**
+    Dynamo cannot trace a ``jax_op`` op: on Qwen-Image it graph-broke at every
+    attention call (24 breaks), and on Wan's padded shape it failed outright —
+    the fake-tensor check found ``difflet::tpu_pallas_flash_segmented`` declared
+    as ``(Tensor q, Tensor k, Tensor v)`` against the five tensors passed
+    (2026-10-27, root cause inside ``jax_op`` unconfirmed). So ``jax_op`` is only
+    the bridge, registered once with a fixed five-tensor signature (no mask is
+    all-zero segment ids, which costs nothing measurable: 1.18 ms either way),
+    and Dynamo sees a ``torch.library.custom_op`` with an explicit schema and a
+    fake that returns ``q``'s shape.
+    """
+
+    def __init__(self):
+        import jax
+        import torch_tpu  # noqa: F401 — registers torch.tpu.pallas
+        from jax.experimental.pallas.ops.tpu import flash_attention as fa
+
+        def blocks(batch, q_len, k_len):
+            return fa.BlockSizes(block_q=min(512, q_len), block_k_major=min(512, k_len),
+                                 block_k=min(512, k_len), block_b=min(2, batch))
+
+        def segmented(q, k, v, q_seg, kv_seg):
+            return fa.flash_attention(q, k, v, segment_ids=fa.SegmentIds(q=q_seg, kv=kv_seg),
+                                      causal=False, sm_scale=1.0,
+                                      block_sizes=blocks(q.shape[0], q.shape[2], k.shape[2]))
+
+        # jax_op insists on annotations and resolves them by name in the
+        # function's module. This module has `from __future__ import
+        # annotations`, which turns `jax.Array` into a string, and jax is a
+        # local here (it must stay out of module scope: CPU hosts import this
+        # file without jax installed). Setting the real types directly skips
+        # the lookup. The first in-model run fell back to SDPA on exactly this
+        # NameError — caught only because the path logs whether it was used.
+        segmented.__annotations__ = {"q": jax.Array, "k": jax.Array, "v": jax.Array,
+                                     "q_seg": jax.Array, "kv_seg": jax.Array,
+                                     "return": jax.Array}
+        bridge = torch.tpu.pallas.jax_op("difflet::tpu_pallas_flash_bridge", segmented)
+        try:
+            schema = torch.ops.difflet.tpu_pallas_flash_bridge.default._schema
+        except Exception as exc:  # noqa: BLE001 -- diagnostic only
+            schema = "unavailable (%r)" % exc
+        print("[difflet tpu] jax_op bridge schema: %s" % schema, flush=True)
+
+        @torch.library.custom_op(
+            "difflet::tpu_pallas_flash", mutates_args=(),
+            schema="(Tensor q, Tensor k, Tensor v, Tensor q_seg, Tensor kv_seg) -> Tensor",
+        )
+        def flash(q, k, v, q_seg, kv_seg):
+            return bridge(q, k, v, q_seg, kv_seg)
+
+        @flash.register_fake
+        def _(q, k, v, q_seg, kv_seg):
+            return torch.empty_like(q)
+
+        self._flash = flash
+        self._reported = set()
+
+    def flash_attention(self, q, k, v, *, causal=False, sm_scale=1.0,
+                        q_segment_ids=None, kv_segment_ids=None):
+        if causal:
+            raise ValueError("the torch_tpu Pallas path is non-causal only")
+        shape = tuple(q.shape)
+        # A print under Dynamo is a graph break; while compiling, the evidence
+        # that the kernel ran is the op in the trace instead.
+        if shape not in self._reported and not torch.compiler.is_compiling():
+            self._reported.add(shape)
+            print("[difflet tpu] pallas flash via jax_op USED q=%s segmented=%s"
+                  % (shape, q_segment_ids is not None or kv_segment_ids is not None), flush=True)
+        q = q * sm_scale
+        batch = int(q.shape[0])
+        if q_segment_ids is None:
+            q_segment_ids = torch.zeros(batch, int(q.shape[2]), dtype=torch.int32, device=q.device)
+        if kv_segment_ids is None:
+            kv_segment_ids = torch.zeros(batch, int(k.shape[2]), dtype=torch.int32, device=q.device)
+        return self._flash(q, k, v, q_segment_ids.to(torch.int32), kv_segment_ids.to(torch.int32))
+
+
+def _flash_kernel():
+    """The Pallas flash kernel when ``DIFFLET_TPU_PALLAS=1``, else None (SDPA).
+
+    Opt-in until it is faster in the model; see :class:`_TorchTpuPallasFlash`.
     """
     global _FLASH_KERNEL
     if _FLASH_KERNEL is None:
-        if os.environ.get("DIFFLET_TPU_FLASH", "1").lower() in ("0", "false", "no"):
-            _FLASH_KERNEL = False
-        else:
+        _FLASH_KERNEL = False
+        if os.environ.get(PALLAS_ENV, "0").strip().lower() in ("1", "true", "yes"):
             try:
-                import jax  # noqa: F401
-                from torch_xla.experimental import custom_kernel
-
-                _FLASH_KERNEL = custom_kernel
+                _FLASH_KERNEL = _TorchTpuPallasFlash()
             except Exception as exc:  # noqa: BLE001
-                logger.info("TPU flash attention unavailable (%s); using SDPA", exc)
-                _FLASH_KERNEL = False
+                print("[difflet tpu] pallas flash unavailable (%s); using SDPA" % exc,
+                      flush=True)
     return _FLASH_KERNEL or None
 
 
@@ -191,6 +298,80 @@ def _should_flash(q, k, causal: bool) -> bool:
     if score_elements < FLASH_MIN_SCORE_ELEMENTS:
         return False
     return _flash_kernel() is not None
+
+
+#: Opt-in, while it is being measured: TorchTPU's splash kernel in place of SDPA.
+SPLASH_ENV = "DIFFLET_TPU_SPLASH"
+
+#: Shapes already reported, so the eligibility line prints once per shape.
+_SPLASH_REPORTED: set = set()
+
+
+def _should_splash(q, k, causal: bool) -> bool:
+    """Whether to route this call through ``torch.tpu.ops.splash_sdpa``.
+
+    **Measured, and leave it off.** Inside Qwen-Image at tp=4 — splash applied
+    to every joint-attention call, q = k = (6, 5120, 128) — per-step was 0.567 s
+    against 0.333 s on SDPA, 70% slower, and against 0.276 s for torch_xla's
+    Pallas kernel. That matches the isolated measurement (0.68x SDPA at 4096
+    tokens). torch_tpu's own SDPA is the fastest attention it has today; this
+    path exists so the next TorchTPU release can be re-measured with one
+    environment variable rather than new code.
+
+    The constraints are correctness, not speed:
+
+    - **Never causal**, and the call below passes ``is_causal=False`` itself.
+      splash_sdpa *defaults* to causal while describing itself as a drop-in for
+      ``F.scaled_dot_product_attention``, whose default is not; left alone it
+      returns cosine 0.40 against SDPA without a word.
+    - **The key length must already be a block multiple.** splash has no
+      segment ids, so padded keys could not be masked out of the softmax — the
+      exact error ``_flash_attention`` documents at Wan's 4680 (5.4e-2 relative
+      error). Padded *queries* are harmless and are padded below.
+    """
+    if os.environ.get(SPLASH_ENV, "0").strip().lower() not in ("1", "true", "yes"):
+        return False
+
+    head_dim = int(q.shape[-1])
+    keys = int(k.shape[-2])
+    reason = None
+    if causal:
+        reason = "causal"
+    elif head_dim != int(k.shape[-1]) or head_dim % 128:
+        reason = "head_dim %d" % head_dim
+    elif keys % FLASH_BLOCK:
+        reason = "key length %d is not a multiple of %d and splash cannot mask padding" % (
+            keys, FLASH_BLOCK)
+    elif _leading_size(q) * int(q.shape[-2]) * keys < FLASH_MIN_SCORE_ELEMENTS:
+        reason = "below the fused-kernel threshold"
+
+    shape = (tuple(q.shape), tuple(k.shape))
+    if shape not in _SPLASH_REPORTED:
+        _SPLASH_REPORTED.add(shape)
+        # print, not logger: the serving worker is a spawned process with no
+        # logging handler.
+        print("[difflet tpu] splash %s q=%s k=%s"
+              % ("USED" if reason is None else "skipped (%s)" % reason, shape[0], shape[1]),
+              flush=True)
+    return reason is None
+
+
+def _splash_attention(q, k, v, *, scale: float):
+    """Fused attention through TorchTPU's splash kernel."""
+    import torch_tpu  # noqa: F401 — registers torch.tpu.ops
+
+    leading = _leading_size(q)
+    seq_q = int(q.shape[-2])
+    pad_q = _align(seq_q)
+    q4 = q.reshape(1, leading, seq_q, q.shape[-1])
+    k4 = k.reshape(1, leading, int(k.shape[-2]), k.shape[-1])
+    v4 = v.reshape(1, leading, int(v.shape[-2]), v.shape[-1])
+    if pad_q != seq_q:
+        # Extra query rows cost compute and are discarded; they never enter
+        # another row's softmax, so no mask is needed for them.
+        q4 = F.pad(q4, (0, 0, 0, pad_q - seq_q))
+    out = torch.tpu.ops.splash_sdpa(q4, k4, v4, scale=float(scale), is_causal=False)
+    return out[:, :, :seq_q, :].reshape(q.shape[:-1] + (v.shape[-1],))
 
 
 def _flash_attention(q, k, v, *, scale: float):
@@ -230,6 +411,57 @@ def _flash_attention(q, k, v, *, scale: float):
     return out[:, :, :seq_q, :].reshape(shape[:-1] + (v.shape[-1],))
 
 
+def _flash_attention_key_bounds(q, k, v, *, scale: float, bound_min, bound_max):
+    """Fused attention with a per-row key window ``[bound_min, bound_max)``.
+
+    The masked SDPA path materializes the score matrix, which at HunyuanVideo's
+    joint sequence (10 496 tokens, 6 heads per rank) is 1.3 GB in bf16 plus
+    the fp32 softmax — on a v5e that sits on top of an 11.6 GB weight shard.
+    The kernel never builds it: the window becomes kv segment ids, exactly
+    like the block padding in ``_flash_attention``.
+
+    Bounds are laid out per (row, query, 1) by the attention_cte contract;
+    the kernel's segment ids are per (batch, key), so each row is treated as
+    its own batch element and its window is taken as the union over the
+    row's queries (``amin``/``amax`` — device ops, no host sync). That is
+    exact whenever the window does not vary across queries within a row,
+    which is what every producer in the repo emits (HunyuanVideo's
+    ``_keypad_bounds_from_mask``: ``[0, #valid keys)``, uniform). Query-
+    varying windows are attention_cte's generality, not a difflet need.
+    """
+    kernel = _flash_kernel()
+    leading = _leading_size(q)
+    seq_q, seq_k = int(q.shape[-2]), int(k.shape[-2])
+    pad_q, pad_k = _align(seq_q), _align(seq_k)
+
+    shape = q.shape
+    # batch=rows, heads=1: segment ids are per batch element, so this is what
+    # lets every row carry its own window.
+    q4 = q.reshape(leading, 1, seq_q, q.shape[-1])
+    k4 = k.reshape(leading, 1, seq_k, k.shape[-1])
+    v4 = v.reshape(leading, 1, seq_k, v.shape[-1])
+    if pad_q != seq_q or pad_k != seq_k:
+        q4 = F.pad(q4, (0, 0, 0, pad_q - seq_q))
+        k4 = F.pad(k4, (0, 0, 0, pad_k - seq_k))
+        v4 = F.pad(v4, (0, 0, 0, pad_k - seq_k))
+
+    lo = bound_min.reshape(leading, -1).amin(dim=-1, keepdim=True).to(torch.int32)
+    hi = bound_max.reshape(leading, -1).amax(dim=-1, keepdim=True).to(torch.int32)
+    key_idx = torch.arange(pad_k, device=k.device, dtype=torch.int32).view(1, -1)
+    # Segment 0 = attend, 1 = never: real queries carry 0; keys outside the
+    # window (and the block padding, which is >= seq_k >= hi) carry 1.
+    kv_ids = ((key_idx < lo) | (key_idx >= hi)).to(torch.int32)
+    q_ids = torch.zeros(leading, pad_q, dtype=torch.int32, device=q.device)
+    if pad_q != seq_q:
+        q_ids[:, seq_q:] = 1
+
+    out = kernel.flash_attention(
+        q4, k4, v4, causal=False, sm_scale=float(scale),
+        q_segment_ids=q_ids, kv_segment_ids=kv_ids,
+    )
+    return out[:, :, :seq_q, :].reshape(shape[:-1] + (v.shape[-1],))
+
+
 def attention(
     q,
     k,
@@ -246,11 +478,21 @@ def attention(
     **kwargs,
 ):
     del tp_q, tp_k, tp_out, kwargs
-    attention_mask = _bounds_to_mask(k, bound_min, bound_max, attention_mask)
     # NOTE: the op contract treats scale=None as 1.0, NOT as SDPA's default
     # 1/sqrt(head_dim). Passing None through to SDPA would silently rescale
     # every score.
     scale = 1.0 if scale is None else scale
+
+    if (
+        bound_min is not None
+        and bound_max is not None
+        and attention_mask is None
+        and _should_flash(q, k, causal)
+    ):
+        return _flash_attention_key_bounds(
+            q, k, v, scale=scale, bound_min=bound_min, bound_max=bound_max
+        )
+    attention_mask = _bounds_to_mask(k, bound_min, bound_max, attention_mask)
 
     if attention_mask is None:
         # The fused kernel removes the score matrix rather than merely
@@ -263,6 +505,8 @@ def attention(
         # masked call; see _should_flash.
         if _should_flash(q, k, causal):
             return _flash_attention(q, k, v, scale=scale)
+        if _should_splash(q, k, causal):
+            return _splash_attention(q, k, v, scale=scale)
         if _should_chunk(q, k):
             return _chunked_attention(q, k, v, scale=scale, causal=causal)
         return F.scaled_dot_product_attention(q, k, v, is_causal=causal, scale=scale)

@@ -781,7 +781,8 @@ def test_main_accepts_backend_neuron_for_wan(monkeypatch, tmp_path, command):
 
 @pytest.mark.parametrize(
     "backend, model_id",
-    [("trainium", WAN_ID), ("tpu", WAN_ID), ("tpu", HUNYUAN_ID), ("Trainium ", HUNYUAN_ID)],
+    # tpu is not here: its compile/generate/run refuse (tests/unit/backends/test_tpu_cli.py).
+    [("trainium", WAN_ID), ("Trainium ", HUNYUAN_ID)],
 )
 @pytest.mark.parametrize("command", ["compile", "generate"])
 def test_main_ambient_aot_backend_keeps_its_old_path(monkeypatch, tmp_path, backend, model_id,
@@ -878,7 +879,7 @@ def test_main_torchrun_backend_skips_the_jemalloc_reexec(monkeypatch, tmp_path, 
 @pytest.mark.parametrize("command", ["generate", "run"])
 @pytest.mark.parametrize("flags, ambient, detected", [
     (["--backend", "trainium"], None, "neuron"),
-    (["--backend", "tpu"], None, "neuron"),
+    # (["--backend", "tpu"], ...) is gone: tpu refuses generate/run (test_tpu_cli.py).
     ([], "trainium", "neuron"),
     ([], None, "neuron"),  # unset on a TorchNeuron host (auto-detects neuron): as before
     ([], None, "trainium"),
@@ -955,8 +956,7 @@ def test_main_torchrun_backend_routes_batches_to_the_router(monkeypatch, capsys,
     assert built == []
 
 
-@pytest.mark.parametrize("flags, ambient", [(["--backend", "trainium"], None),
-                                            ([], "tpu"), ([], None)])
+@pytest.mark.parametrize("flags, ambient", [(["--backend", "trainium"], None), ([], None)])
 @pytest.mark.parametrize("batch", ["requests", "dp"])
 def test_main_aot_backend_batches_still_go_to_the_router(monkeypatch, tmp_path, flags, ambient,
                                                          batch):

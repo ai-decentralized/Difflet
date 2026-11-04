@@ -1,0 +1,63 @@
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+/mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/io/image.py:14: UserWarning: Failed to load image Python extension: 'Could not load this library: /mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/image.so'If you don't plan on using image functionality from `torchvision.io`, you can ignore this warning. Otherwise, there might be something wrong with your environment. Did you have `libjpeg` or `libpng` installed before building `torchvision` from source?
+  warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/io/image.py:14: UserWarning: Failed to load image Python extension: 'Could not load this library: /mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/image.so'If you don't plan on using image functionality from `torchvision.io`, you can ignore this warning. Otherwise, there might be something wrong with your environment. Did you have `libjpeg` or `libpng` installed before building `torchvision` from source?
+  warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/io/image.py:14: UserWarning: Failed to load image Python extension: 'Could not load this library: /mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/image.so'If you don't plan on using image functionality from `torchvision.io`, you can ignore this warning. Otherwise, there might be something wrong with your environment. Did you have `libjpeg` or `libpng` installed before building `torchvision` from source?
+  warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/io/image.py:14: UserWarning: Failed to load image Python extension: 'Could not load this library: /mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/image.so'If you don't plan on using image functionality from `torchvision.io`, you can ignore this warning. Otherwise, there might be something wrong with your environment. Did you have `libjpeg` or `libpng` installed before building `torchvision` from source?
+  warn(
+[rank3] checkpoint loaded on host in 53s host_rss=14.2G
+[rank0] checkpoint loaded on host in 54s host_rss=14.2G
+[rank1] checkpoint loaded on host in 53s host_rss=14.2G
+[rank2] checkpoint loaded on host in 54s host_rss=14.2G
+[rank3] resident hbm={'bytes_used': 9.28, 'bytes_limit': 15.75, 'peak_bytes_used': 9.28} host_rss=14.4G
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+[rank1] resident hbm={'bytes_used': 9.28, 'bytes_limit': 15.75, 'peak_bytes_used': 9.28} host_rss=14.4G
+[rank2] resident hbm={'bytes_used': 9.28, 'bytes_limit': 15.75, 'peak_bytes_used': 9.28} host_rss=14.4G
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+[rank0] resident hbm={'bytes_used': 9.28, 'bytes_limit': 15.75, 'peak_bytes_used': 9.28} host_rss=14.4G
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+[rank1] forward 0 in 73.36s hbm={'bytes_used': 9.34, 'bytes_limit': 15.75, 'peak_bytes_used': 9.35} host_rss=14.6G
+[rank2] forward 0 in 73.218s hbm={'bytes_used': 9.34, 'bytes_limit': 15.75, 'peak_bytes_used': 9.36} host_rss=14.6G
+[rank0] forward 0 in 73.137s hbm={'bytes_used': 9.34, 'bytes_limit': 15.75, 'peak_bytes_used': 9.36} host_rss=14.6G
+[rank3] forward 0 in 73.671s hbm={'bytes_used': 9.34, 'bytes_limit': 15.75, 'peak_bytes_used': 9.36} host_rss=14.6G
+[rank1] forward 1 in 1.677s hbm={'bytes_used': 9.34, 'bytes_limit': 15.75, 'peak_bytes_used': 9.35} host_rss=14.6G
+[rank3] forward 1 in 1.677s hbm={'bytes_used': 9.34, 'bytes_limit': 15.75, 'peak_bytes_used': 9.36} host_rss=14.6G
+[rank0] forward 1 in 1.677s hbm={'bytes_used': 9.34, 'bytes_limit': 15.75, 'peak_bytes_used': 9.36} host_rss=14.6G
+[rank2] forward 1 in 1.677s hbm={'bytes_used': 9.34, 'bytes_limit': 15.75, 'peak_bytes_used': 9.36} host_rss=14.6G
+[rank2] forward 2 in 1.68s hbm={'bytes_used': 9.34, 'bytes_limit': 15.75, 'peak_bytes_used': 9.36} host_rss=14.6G
+[rank3] forward 2 in 1.68s hbm={'bytes_used': 9.34, 'bytes_limit': 15.75, 'peak_bytes_used': 9.36} host_rss=14.6G
+[rank1] forward 2 in 1.68s hbm={'bytes_used': 9.34, 'bytes_limit': 15.75, 'peak_bytes_used': 9.35} host_rss=14.6G
+[rank0] forward 2 in 1.68s hbm={'bytes_used': 9.34, 'bytes_limit': 15.75, 'peak_bytes_used': 9.36} host_rss=14.6G
+{
+ "step_s": [
+  73.137,
+  1.677,
+  1.68
+ ],
+ "video_shape": [
+  1,
+  6144,
+  128
+ ],
+ "audio_shape": [
+  1,
+  126,
+  128
+ ],
+ "finite": true,
+ "hbm_peak_gb": 9.36
+}

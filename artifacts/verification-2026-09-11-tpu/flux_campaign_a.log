@@ -1,0 +1,53 @@
+=== oracle ref 1024x1024/512 fp32 04:13:55
+exit=0 peak_host_used=48G
+fp32 forward 43s out (1, 4096, 64) finite=True
+wrote /mnt/models/teacache_runs/oracle_flux_ref.pt
+=== oracle ref 256x256/64 fp32+bf16 control 04:14:55
+exit=0 peak_host_used=47G
+fp32 forward 5s out (1, 256, 64) finite=True
+bf16 host control 9s cos=0.989741
+wrote /mnt/models/teacache_runs/oracle_flux_ref_small.pt
+=== oracle cmp 1024 04:15:25
+exit=0 peak_host_used=62G
+RESULT {
+ "step_s": [
+ "hbm_peak_gb": 10.18,
+  "cosine": 0.9994640350341797,
+  "rel_l1": 0.02991184964776039,
+=== oracle cmp 256 04:16:21
+exit=0 peak_host_used=62G
+  "cosine": 0.9901911020278931,
+  "rel_l1": 0.13498131930828094,
+  "cosine": 0.9997402429580688,
+  "rel_l1": 0.021959776058793068,
+  "cosine": 0.9897407293319702,
+  "rel_l1": 0.13802233338356018,
+=== bench baseline 04:17:16
+exit=0 peak_host_used=72G
+[flux] host encoders loaded in 0.3s (T5 on this rank: False)
+[rank2] loaded in 54.4s timings={'dit_load_s': 6.9192278269983944, 'warmup_s': 46.18146279299981, 'host_load_s': 0.2916540840014932} mem={'bytes_used': 10.176, 'bytes_limit': 15.748, 'peak_bytes_used': 10.181}
+[flux] host encoders loaded in 0.3s (T5 on this rank: False)
+[rank3] loaded in 54.4s timings={'dit_load_s': 6.7594548300003225, 'warmup_s': 46.30817654999919, 'host_load_s': 0.29181552400041255} mem={'bytes_used': 10.176, 'bytes_limit': 15.748, 'peak_bytes_used': 10.181}
+[flux] host encoders loaded in 0.9s (T5 on this rank: False)
+[rank0] loaded in 55.0s timings={'dit_load_s': 6.517645915002504, 'warmup_s': 46.55039582599784, 'host_load_s': 0.9370276020017627} mem={'bytes_used': 10.332, 'bytes_limit': 15.748, 'peak_bytes_used': 10.332}
+[flux] host encoders loaded in 4.9s (T5 on this rank: True)
+[rank1] loaded in 59.0s timings={'dit_load_s': 6.3392657289987255, 'warmup_s': 46.777890050998394, 'host_load_s': 4.873409566000191} mem={'bytes_used': 10.176, 'bytes_limit': 15.748, 'peak_bytes_used': 10.181}
+[rank3] iter0 [synced] e2e_latent=37.21s steps=27 mean_step=1.037s stage={'dit_load_s': 6.7594548300003225, 'warmup_s': 46.30817654999919, 'host_load_s': 0.29181552400041255, 'encode_s': 8.724260202998266, 'denoise_s': 28.485099051998986}
+[rank2] iter0 [synced] e2e_latent=37.21s steps=27 mean_step=1.037s stage={'dit_load_s': 6.9192278269983944, 'warmup_s': 46.18146279299981, 'host_load_s': 0.2916540840014932, 'encode_s': 8.73340864200145, 'denoise_s': 28.47555608300172}
+[rank0] iter0 [synced] e2e_latent=36.56s steps=27 mean_step=1.039s stage={'dit_load_s': 6.517645915002504, 'warmup_s': 46.55039582599784, 'host_load_s': 0.9370276020017627, 'encode_s': 8.08723260500119, 'denoise_s': 28.476933261998056}
+[rank1] iter0 [synced] e2e_latent=32.63s steps=27 mean_step=1.036s stage={'dit_load_s': 6.3392657289987255, 'warmup_s': 46.777890050998394, 'host_load_s': 4.873409566000191, 'encode_s': 4.188383708999027, 'denoise_s': 28.440845073000673}
+=== bench cadence2 04:21:23
+exit=0 peak_host_used=73G
+[teacache] stats: {'full_steps': 19, 'skipped_steps': 9, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[teacache] stats: {'full_steps': 19, 'skipped_steps': 9, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[rank3] iter0 [synced] e2e_latent=55.99s steps=18 mean_step=2.825s stage={'dit_load_s': 5.372561446001782, 'warmup_s': 44.82383771199966, 'host_load_s': 0.2664616459987883, 'encode_s': 4.678799971999979, 'denoise_s': 51.316025529999024}
+[rank1] iter0 [synced] e2e_latent=54.83s steps=18 mean_step=2.825s stage={'dit_load_s': 5.815880428002856, 'warmup_s': 44.39170241000102, 'host_load_s': 1.4353027020006266, 'encode_s': 3.514269883999077, 'denoise_s': 51.312047520001215}
+[teacache] stats: {'full_steps': 19, 'skipped_steps': 9, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[rank2] iter0 [synced] e2e_latent=56.00s steps=18 mean_step=2.824s stage={'dit_load_s': 6.367621708002844, 'warmup_s': 43.87685599999895, 'host_load_s': 0.26498622599683586, 'encode_s': 4.6964922709994426, 'denoise_s': 51.30084705000263}
+[teacache] stats: {'full_steps': 19, 'skipped_steps': 9, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[rank0] iter0 [synced] e2e_latent=55.42s steps=18 mean_step=2.827s stage={'dit_load_s': 6.23712463999982, 'warmup_s': 44.03390043699983, 'host_load_s': 0.8453053639968857, 'encode_s': 4.101220343000023, 'denoise_s': 51.319378460000735}
+[teacache] stats: {'full_steps': 19, 'skipped_steps': 9, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[teacache] stats: {'full_steps': 19, 'skipped_steps': 9, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[teacache] stats: {'full_steps': 19, 'skipped_steps': 9, 'probe_calls': 0, 'last_delta_estimate': None, 'cache_initialized': True}
+[rank3] iter1 [synced] e2e_latent=7.63s steps=18 mean_step=0.188s stage={'dit_load_s': 5.372561446001782, 'warmup_s': 44.82383771199966, 'host_load_s': 0.2664616459987883, 'encode_s': 3.902438846002042, 'denoise_s': 3.7318280590006907}
+ALLDONE 04:25:44

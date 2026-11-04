@@ -1,0 +1,92 @@
+Fetching 29 files:   0%|          | 0/29 [00:00<?, ?it/s]Fetching 29 files: 100%|██████████| 29/29 [00:00<00:00, 2493.54it/s]
+2026-09-11 23:05:31.079 INFO:     Started server process [116074]
+2026-09-11 23:05:31.080 INFO:     Waiting for application startup.
+2026-09-11 23:05:31.080 INFO:     serving startup begin model=hunyuanvideo-community/HunyuanVideo
+2026-09-11 23:05:33.899 WARNING:  libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+2026-09-11 23:05:34.673 INFO:     worker_process_start model=hunyuanvideo-community/HunyuanVideo profile_identity= startup_timeout=900.0
+2026-09-11 23:05:34.674 INFO:     worker_process_terminate model=hunyuanvideo-community/HunyuanVideo
+[difflet serve] tpu backend: eager stages, no compile artifacts
+[difflet serve] stage topology:
+  - clip: role=prompt_encoder kind=extracted placement=host artifact=-
+  - llama: role=prompt_encoder kind=extracted placement=tpu artifact=-
+  - denoiser: role=denoiser kind=extracted placement=tpu artifact=-
+  - decoder: role=decoder kind=extracted placement=host artifact=-
+2026-09-11 23:05:42.252 INFO:     worker heartbeat transition state=starting request_id=None stage=None running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+2026-09-11 23:06:12.253 INFO:     worker heartbeat state_dwell_seconds=30.00 from_state=starting to_state=loading
+2026-09-11 23:06:12.253 INFO:     worker heartbeat transition state=loading request_id=None stage=None running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-09-11 23:06:42.253 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=hunyuanvideo-community/HunyuanVideo profile= running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+2026-09-11 23:07:12.253 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=hunyuanvideo-community/HunyuanVideo profile= running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-09-11 23:07:42.253 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=hunyuanvideo-community/HunyuanVideo profile= running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-09-11 23:08:12.253 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=hunyuanvideo-community/HunyuanVideo profile= running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+[hunyuan_video] tpu warmup (first compile) in 173.8s
+[hunyuan_video] tpu warmup (first compile) in 173.6s
+[hunyuan_video] tpu warmup (first compile) in 173.9s
+[hunyuan_video] tpu warmup (first compile) in 174.0s
+2026-09-11 23:08:42.254 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=hunyuanvideo-community/HunyuanVideo profile= running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+/mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/io/image.py:14: UserWarning: Failed to load image Python extension: 'Could not load this library: /mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/image.so'If you don't plan on using image functionality from `torchvision.io`, you can ignore this warning. Otherwise, there might be something wrong with your environment. Did you have `libjpeg` or `libpng` installed before building `torchvision` from source?
+  warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/io/image.py:14: UserWarning: Failed to load image Python extension: 'Could not load this library: /mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/image.so'If you don't plan on using image functionality from `torchvision.io`, you can ignore this warning. Otherwise, there might be something wrong with your environment. Did you have `libjpeg` or `libpng` installed before building `torchvision` from source?
+  warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/io/image.py:14: UserWarning: Failed to load image Python extension: 'Could not load this library: /mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/image.so'If you don't plan on using image functionality from `torchvision.io`, you can ignore this warning. Otherwise, there might be something wrong with your environment. Did you have `libjpeg` or `libpng` installed before building `torchvision` from source?
+  warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/io/image.py:14: UserWarning: Failed to load image Python extension: 'Could not load this library: /mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/image.so'If you don't plan on using image functionality from `torchvision.io`, you can ignore this warning. Otherwise, there might be something wrong with your environment. Did you have `libjpeg` or `libpng` installed before building `torchvision` from source?
+  warn(
+Loading weights:   0%|          | 0/196 [00:00<?, ?it/s]Loading weights:   0%|          | 0/196 [00:00<?, ?it/s]Loading weights:   0%|          | 0/196 [00:00<?, ?it/s]Loading weights:   0%|          | 0/196 [00:00<?, ?it/s]Loading weights: 100%|██████████| 196/196 [00:00<00:00, 5216.30it/s]
+Loading weights: 100%|██████████| 196/196 [00:00<00:00, 4736.92it/s]
+Loading weights: 100%|██████████| 196/196 [00:00<00:00, 4563.99it/s]
+Loading weights: 100%|██████████| 196/196 [00:00<00:00, 4819.54it/s]
+Loading weights:   0%|          | 0/290 [00:00<?, ?it/s]Loading weights:  11%|█         | 32/290 [00:01<00:09, 26.98it/s]Loading weights:  23%|██▎       | 68/290 [00:01<00:03, 62.39it/s]Loading weights:  35%|███▌      | 102/290 [00:01<00:01, 98.55it/s]Loading weights:  48%|████▊     | 138/290 [00:01<00:01, 137.95it/s]Loading weights:  60%|██████    | 174/290 [00:01<00:00, 171.00it/s]Loading weights:  72%|███████▏  | 210/290 [00:01<00:00, 201.02it/s]Loading weights:  85%|████████▍ | 246/290 [00:01<00:00, 228.75it/s]Loading weights:  96%|█████████▌| 279/290 [00:01<00:00, 249.99it/s]Loading weights: 100%|██████████| 290/290 [00:01<00:00, 146.39it/s]
+2026-09-11 23:09:12.254 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=hunyuanvideo-community/HunyuanVideo profile= running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-09-11 23:09:42.254 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=hunyuanvideo-community/HunyuanVideo profile= running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-09-11 23:10:12.254 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=hunyuanvideo-community/HunyuanVideo profile= running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-09-11 23:10:42.254 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=hunyuanvideo-community/HunyuanVideo profile= running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-09-11 23:11:12.255 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=hunyuanvideo-community/HunyuanVideo profile= running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-09-11 23:11:40.295 INFO:     worker_process_ready model=hunyuanvideo-community/HunyuanVideo replicas=4
+2026-09-11 23:11:40.296 INFO:     video.service_start ephemeral_jobs=true staging_removed=0 artifacts_removed=0
+2026-09-11 23:11:40.296 INFO:     serving startup complete model=hunyuanvideo-community/HunyuanVideo
+2026-09-11 23:11:40.296 INFO:     Application startup complete.
+2026-09-11 23:11:40.296 INFO:     Uvicorn running on http://127.0.0.1:8097 (Press CTRL+C to quit)
+2026-09-11 23:11:41.858 INFO:     127.0.0.1:47270 - "GET /ready HTTP/1.1" 200
+2026-09-11 23:11:42.255 INFO:     worker heartbeat state_dwell_seconds=330.00 from_state=loading to_state=ready
+2026-09-11 23:11:42.255 INFO:     worker heartbeat transition state=ready request_id=None stage=None running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-09-11 23:11:56.893 INFO:     127.0.0.1:53278 - "GET /ready HTTP/1.1" 200
+2026-09-11 23:11:56.944 INFO:     engine.generate admitted request_id=video_sync_b2217fa9bad14d76aa62efbf9dc45ada model=hunyuanvideo-community/HunyuanVideo queued=0/1
+2026-09-11 23:11:56.944 INFO:     engine.queue_acquired request_id=video_sync_b2217fa9bad14d76aa62efbf9dc45ada
+2026-09-11 23:11:56.944 INFO:     engine.lock_acquired request_id=video_sync_b2217fa9bad14d76aa62efbf9dc45ada
+2026-09-11 23:11:56.944 INFO:     engine.run_start request_id=video_sync_b2217fa9bad14d76aa62efbf9dc45ada
+2026-09-11 23:11:56.945 INFO:     worker_process_run_start request_id=video_sync_b2217fa9bad14d76aa62efbf9dc45ada model=hunyuanvideo-community/HunyuanVideo deadline_remaining=300.000
+2026-09-11 23:12:12.255 INFO:     worker heartbeat state_dwell_seconds=30.00 from_state=ready to_state=busy
+2026-09-11 23:12:12.255 INFO:     worker heartbeat transition state=busy request_id=video_sync_b2217fa9bad14d76aa62efbf9dc45ada stage=denoiser running_requests=1 queued_requests=0 pending_requests=1 capacity=1
+2026-09-11 23:12:42.255 INFO:     worker heartbeat state_dwell_seconds=30.00 from_state=busy to_state=busy
+2026-09-11 23:12:42.255 INFO:     worker heartbeat transition state=busy request_id=video_sync_b2217fa9bad14d76aa62efbf9dc45ada stage=decoder running_requests=1 queued_requests=0 pending_requests=1 capacity=1
+2026-09-11 23:13:12.255 INFO:     worker heartbeat alive state=busy request_id=video_sync_b2217fa9bad14d76aa62efbf9dc45ada stage=decoder model=hunyuanvideo-community/HunyuanVideo profile= running_requests=1 queued_requests=0 pending_requests=1 capacity=1
+2026-09-11 23:13:42.256 INFO:     worker heartbeat alive state=busy request_id=video_sync_b2217fa9bad14d76aa62efbf9dc45ada stage=decoder model=hunyuanvideo-community/HunyuanVideo profile= running_requests=1 queued_requests=0 pending_requests=1 capacity=1
+2026-09-11 23:14:12.256 INFO:     worker heartbeat alive state=busy request_id=video_sync_b2217fa9bad14d76aa62efbf9dc45ada stage=decoder model=hunyuanvideo-community/HunyuanVideo profile= running_requests=1 queued_requests=0 pending_requests=1 capacity=1
+2026-09-11 23:14:42.256 INFO:     worker heartbeat alive state=busy request_id=video_sync_b2217fa9bad14d76aa62efbf9dc45ada stage=decoder model=hunyuanvideo-community/HunyuanVideo profile= running_requests=1 queued_requests=0 pending_requests=1 capacity=1
+2026-09-11 23:15:08.183 INFO:     worker_process_generation_ok request_id=video_sync_b2217fa9bad14d76aa62efbf9dc45ada
+2026-09-11 23:15:08.183 INFO:     engine.run_complete request_id=video_sync_b2217fa9bad14d76aa62efbf9dc45ada
+2026-09-11 23:15:08.255 INFO:     127.0.0.1:53286 - "POST /v1/videos/sync HTTP/1.1" 200
+2026-09-11 23:15:12.256 INFO:     worker heartbeat state_dwell_seconds=150.00 from_state=busy to_state=ready
+2026-09-11 23:15:12.256 INFO:     worker heartbeat transition state=ready request_id=None stage=None running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-09-11 23:15:42.256 INFO:     worker heartbeat alive state=ready request_id=None stage=None model=hunyuanvideo-community/HunyuanVideo profile= running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-09-11 23:15:42.993 INFO:     Shutting down
+2026-09-11 23:15:43.094 INFO:     Waiting for application shutdown.
+2026-09-11 23:15:43.094 INFO:     serving shutdown begin model=hunyuanvideo-community/HunyuanVideo
+2026-09-11 23:15:43.094 INFO:     video.service_stop ephemeral_jobs=true staging_removed=0 artifacts_removed=0
+2026-09-11 23:15:43.095 INFO:     worker_process_shutdown requested model=hunyuanvideo-community/HunyuanVideo alive=True
+2026-09-11 23:15:51.371 INFO:     worker_process_terminate model=hunyuanvideo-community/HunyuanVideo
+2026-09-11 23:15:51.373 INFO:     serving shutdown complete model=hunyuanvideo-community/HunyuanVideo
+2026-09-11 23:15:51.373 INFO:     Application shutdown complete.
+2026-09-11 23:15:51.373 INFO:     Finished server process [116074]

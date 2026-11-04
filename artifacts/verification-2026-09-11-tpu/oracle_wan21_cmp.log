@@ -1,0 +1,22 @@
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+
+wan  output [1, 16, 3, 60, 104]  vs diffusers fp32 on CPU
+attention    cos vs fp32    rel_l1 |   cos vs bf16    rel_l1
+fused         0.99967456  2.47e-02 |    0.99974883  2.03e-02
+sdpa          0.99967539  2.47e-02 |    0.99975008  2.03e-02
+[control]     0.99971920  2.30e-02 |                          diffusers bf16 vs its own fp32

@@ -1,0 +1,61 @@
+[difflet serve] resolving Flux weights for black-forest-labs/FLUX.1-dev
+Fetching 25 files:   0%|          | 0/25 [00:00<?, ?it/s]Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+Fetching 25 files:   0%|          | 0/25 [00:00<?, ?it/s]
+httpx.HTTPStatusError: Client error '401 Unauthorized' for url 'https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/3de623fc3c33e44ffbe2bad470d0f45bccf2eb21/text_encoder_2/model-00001-of-00002.safetensors'
+For more information check: https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/401
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "/mnt/models/tpuenv312/bin/difflet", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/mnt/models/Difflet/difflet/cli/main.py", line 950, in main
+    run(args)
+  File "/mnt/models/Difflet/difflet/cli/serve.py", line 226, in run
+    stack = build_serving_stack(options)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/Difflet/difflet/serving/factory.py", line 39, in build_serving_stack
+    runtime = preparer.prepare_runtime(
+              ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/Difflet/difflet/serving/orchestrators/flux.py", line 72, in prepare_runtime
+    source = resolve_hf_model_source(
+             ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/Difflet/difflet/serving/orchestrators/base.py", line 37, in resolve_hf_model_source
+    resolve_model_path(
+  File "/mnt/models/Difflet/difflet/pipeline/path_resolver.py", line 75, in resolve_model_path
+    return snapshot_download(
+           ^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/huggingface_hub/utils/_validators.py", line 88, in _inner_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/huggingface_hub/_snapshot_download.py", line 522, in snapshot_download
+    hf_thread_map(
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/huggingface_hub/utils/tqdm.py", line 441, in hf_thread_map
+    results[future_to_index[future]] = future.result()
+                                       ^^^^^^^^^^^^^^^
+  File "/mnt/models/uvpy/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/concurrent/futures/_base.py", line 449, in result
+    return self.__get_result()
+           ^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/uvpy/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/concurrent/futures/_base.py", line 401, in __get_result
+    raise self._exception
+  File "/mnt/models/uvpy/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/concurrent/futures/thread.py", line 59, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/huggingface_hub/_snapshot_download.py", line 502, in _inner_hf_hub_download
+    hf_hub_download(  # type: ignore
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/huggingface_hub/utils/_validators.py", line 88, in _inner_fn
+    return fn(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/huggingface_hub/file_download.py", line 1019, in hf_hub_download
+    return _hf_hub_download_to_cache_dir(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/huggingface_hub/file_download.py", line 1166, in _hf_hub_download_to_cache_dir
+    _raise_on_head_call_error(head_call_error, force_download, local_files_only)
+  File "/mnt/models/tpuenv312/lib/python3.12/site-packages/huggingface_hub/file_download.py", line 1905, in _raise_on_head_call_error
+    raise head_call_error
+huggingface_hub.errors.GatedRepoError: 401 Client Error. (Request ID: Root=1-6aa47461-65586c72486223ba7769da4a;ab85a0f1-2e74-4b1f-a6b4-fdc54e5f288a)
+
+Cannot access gated repo for url https://huggingface.co/black-forest-labs/FLUX.1-dev/resolve/3de623fc3c33e44ffbe2bad470d0f45bccf2eb21/text_encoder_2/model-00001-of-00002.safetensors.
+Access to model black-forest-labs/FLUX.1-dev is restricted. You must have access to it and be authenticated to access it. Please log in.
+exit=1

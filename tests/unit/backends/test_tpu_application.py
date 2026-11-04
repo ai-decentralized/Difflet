@@ -1,12 +1,8 @@
-"""Unit tests for the TPU component lifecycle (plan Phase 3).
+"""Unit tests for the TPU component lifecycle.
 
-No TPU needed: the artifact layout, manifest validation and weight-sharding
-logic are all pure host code. The on-device round-trip (compile in 4 procs →
-load in 4 fresh procs → forward matches a full-weight oracle) is verified
-separately on real hardware.
+No TPU needed: the contract (no ahead-of-time artifact on TorchTPU) and the
+weight-sharding logic are pure host code.
 """
-
-import json
 
 import pytest
 import torch
@@ -42,71 +38,18 @@ def test_signatures_match_what_the_pipeline_reflects_on():
         assert name in load_params
 
 
-def test_forward_before_load_is_an_explicit_error():
+def test_compile_and_load_refuse_with_the_reason():
     app = ab.TpuApplicationBase()
-    with pytest.raises(RuntimeError, match="not loaded"):
+    for call in (lambda: app.compile("/tmp/x"), lambda: app.load("/tmp/x")):
+        with pytest.raises(NotImplementedError, match="no ahead-of-time artifact"):
+            call()
+    assert app.has_compiled_artifacts("/tmp/x") is False
+
+
+def test_forward_before_the_module_is_built_is_an_explicit_error():
+    app = ab.TpuApplicationBase()
+    with pytest.raises(RuntimeError, match="not built"):
         app(torch.zeros(1))
-
-
-def test_forward_rejects_kwargs():
-    app = ab.TpuApplicationBase()
-    app.graph_module = lambda *a: a  # stand in for a loaded graph
-    with pytest.raises(TypeError, match="positional inputs only"):
-        app(torch.zeros(1), foo=1)
-
-
-# ------------------------------------------------------------------ manifest
-
-
-def _app_with_mesh(spec):
-    pm.init_parallel_mesh(spec)
-    return ab.TpuApplicationBase()
-
-
-def test_has_compiled_artifacts_requires_every_rank(tmp_path):
-    app = _app_with_mesh(MeshSpec(tp=4))
-    app._write_manifest(tmp_path, app._mesh())
-    assert app.has_compiled_artifacts(tmp_path) is False
-
-    for rank in range(4):
-        (tmp_path / ab.RANK_DIR_TEMPLATE.format(rank=rank)).mkdir()
-    assert app.has_compiled_artifacts(tmp_path) is True
-
-
-def test_has_compiled_artifacts_is_false_without_a_manifest(tmp_path):
-    app = _app_with_mesh(MeshSpec(tp=1))
-    assert app.has_compiled_artifacts(tmp_path) is False
-
-
-def test_has_compiled_artifacts_survives_a_corrupt_manifest(tmp_path):
-    app = _app_with_mesh(MeshSpec(tp=1))
-    (tmp_path / ab.MANIFEST_FILE_NAME).write_text("{not json")
-    # A half-written manifest must read as "not ready", not crash the caller.
-    assert app.has_compiled_artifacts(tmp_path) is False
-
-
-def test_manifest_round_trips_the_mesh(tmp_path):
-    app = _app_with_mesh(MeshSpec(dp=1, cfg=2, cp=1, tp=2))
-    app._write_manifest(tmp_path, app._mesh())
-    body = json.loads((tmp_path / ab.MANIFEST_FILE_NAME).read_text())
-    assert body["mesh"] == {"dp": 1, "cfg": 2, "cp": 1, "tp": 2}
-    assert body["world_size"] == 4
-    app._validate_manifest(tmp_path, app._mesh())  # must not raise
-
-
-def test_loading_an_artifact_compiled_for_another_mesh_is_rejected(tmp_path):
-    app = _app_with_mesh(MeshSpec(tp=4))
-    app._write_manifest(tmp_path, app._mesh())
-    # Same world size, different factorization — the collectives would be
-    # wired differently, so this must not be accepted.
-    with pytest.raises(ValueError, match="compiled for mesh"):
-        app._validate_manifest(tmp_path, MeshSpec(tp=2, cp=2))
-
-
-def test_validate_manifest_missing_file(tmp_path):
-    app = _app_with_mesh(MeshSpec(tp=1))
-    with pytest.raises(FileNotFoundError, match="manifest"):
-        app._validate_manifest(tmp_path, app._mesh())
 
 
 # ------------------------------------------------------------- weight shards
@@ -196,3 +139,35 @@ def test_tp1_sharding_is_identity():
     got = W.shard_state_dict(block, full, tp_size=1, tp_rank=0)
     for name, tensor in full.items():
         assert torch.equal(got[name], tensor)
+
+
+# --- compile slots -------------------------------------------------------------
+
+
+def test_warmup_eager_goes_through_the_subclass_forward(monkeypatch):
+    """LTX-2's application maps the positional bundle onto diffusers' keyword
+    arguments in its forward; calling the bare module positionally instead
+    misfiled them (v5e: `arange() ... end=NoneType`)."""
+    from difflet.backends.tpu.core.application_base import TpuApplicationBase
+    from difflet.backends.tpu.ops_impl import device_runtime
+
+    monkeypatch.setattr(device_runtime, "wait", lambda: None)
+    seen = {}
+
+    class App(TpuApplicationBase):
+        def __init__(self):
+            super().__init__(config=None)
+            self.module = None
+
+        def get_example_inputs(self):
+            return (torch.ones(2), torch.zeros(2))
+
+        def forward(self, a, b):
+            seen["called_with"] = (a, b)
+            return self.module(a=a, b=b)
+
+    app = App()
+    module = lambda *, a, b: a + b  # keyword-only: a positional call would raise
+    app.warmup_eager(module, device="cpu")
+    assert app.module is module
+    assert torch.equal(seen["called_with"][0], torch.ones(2))

@@ -1,0 +1,97 @@
+[difflet serve] resolving LTX-2 weights for Lightricks/LTX-2
+Fetching 46 files:   0%|          | 0/46 [00:00<?, ?it/s]Fetching 46 files: 100%|██████████| 46/46 [00:00<00:00, 2974.18it/s]
+2026-09-12 03:10:33.585 INFO:     Started server process [297708]
+2026-09-12 03:10:33.585 INFO:     Waiting for application startup.
+2026-09-12 03:10:33.585 INFO:     serving startup begin model=Lightricks/LTX-2
+2026-09-12 03:10:37.510 WARNING:  libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+2026-09-12 03:10:39.316 INFO:     worker_process_start model=Lightricks/LTX-2 profile_identity= startup_timeout=900.0
+2026-09-12 03:10:39.316 INFO:     worker_process_terminate model=Lightricks/LTX-2
+[difflet serve] tpu backend: eager stages, no compile artifacts
+[difflet serve] stage topology:
+  - pipeline: role=pipeline kind=opaque_pipeline placement=tpu artifact=-
+2026-09-12 03:10:47.134 INFO:     worker heartbeat transition state=starting request_id=None stage=None running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+2026-09-12 03:11:17.134 INFO:     worker heartbeat state_dwell_seconds=30.00 from_state=starting to_state=loading
+2026-09-12 03:11:17.134 INFO:     worker heartbeat transition state=loading request_id=None stage=None running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-09-12 03:11:47.134 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Lightricks/LTX-2 profile= running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+2026-09-12 03:12:17.134 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Lightricks/LTX-2 profile= running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-09-12 03:12:47.134 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Lightricks/LTX-2 profile= running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+[difflet serve] loading LTX-2 worker profile ServingProfile(model_id='Lightricks/LTX-2', model_type='ltx_2', height=480, width=704, num_frames=49, parallel=DiffletParallelConfig(tp_degree=4, cp_degree=1, cfg_parallel_enabled=False, cp_mode='gather_kv', sp_enabled=False, dp_degree=1), cache_dir=None, revision='47da56e2ad66ce4125a9922b4a8826bf407f9d0a', dtype='bfloat16', output_modality='video', output_mime_type='video/mp4', teacache_speedup=None, teacache_calibration=None, teacache_calibration_data=None, teacache_cadence=None, teacache_online_delta=None, output_fps=24, host_vae=True, clip_placement=None, shapes=None)
+[ltx_2] tpu warmup (first compile) in 139.9s
+[difflet serve] loading LTX-2 worker profile ServingProfile(model_id='Lightricks/LTX-2', model_type='ltx_2', height=480, width=704, num_frames=49, parallel=DiffletParallelConfig(tp_degree=4, cp_degree=1, cfg_parallel_enabled=False, cp_mode='gather_kv', sp_enabled=False, dp_degree=1), cache_dir=None, revision='47da56e2ad66ce4125a9922b4a8826bf407f9d0a', dtype='bfloat16', output_modality='video', output_mime_type='video/mp4', teacache_speedup=None, teacache_calibration=None, teacache_calibration_data=None, teacache_cadence=None, teacache_online_delta=None, output_fps=24, host_vae=True, clip_placement=None, shapes=None)
+[ltx_2] tpu warmup (first compile) in 140.1s
+[difflet serve] loading LTX-2 worker profile ServingProfile(model_id='Lightricks/LTX-2', model_type='ltx_2', height=480, width=704, num_frames=49, parallel=DiffletParallelConfig(tp_degree=4, cp_degree=1, cfg_parallel_enabled=False, cp_mode='gather_kv', sp_enabled=False, dp_degree=1), cache_dir=None, revision='47da56e2ad66ce4125a9922b4a8826bf407f9d0a', dtype='bfloat16', output_modality='video', output_mime_type='video/mp4', teacache_speedup=None, teacache_calibration=None, teacache_calibration_data=None, teacache_cadence=None, teacache_online_delta=None, output_fps=24, host_vae=True, clip_placement=None, shapes=None)
+[ltx_2] tpu warmup (first compile) in 140.1s
+[difflet serve] loading LTX-2 worker profile ServingProfile(model_id='Lightricks/LTX-2', model_type='ltx_2', height=480, width=704, num_frames=49, parallel=DiffletParallelConfig(tp_degree=4, cp_degree=1, cfg_parallel_enabled=False, cp_mode='gather_kv', sp_enabled=False, dp_degree=1), cache_dir=None, revision='47da56e2ad66ce4125a9922b4a8826bf407f9d0a', dtype='bfloat16', output_modality='video', output_mime_type='video/mp4', teacache_speedup=None, teacache_calibration=None, teacache_calibration_data=None, teacache_cadence=None, teacache_online_delta=None, output_fps=24, host_vae=True, clip_placement=None, shapes=None)
+[ltx_2] tpu warmup (first compile) in 140.9s
+Loading pipeline components...:   0%|          | 0/6 [00:00<?, ?it/s]Loading pipeline components...:   0%|          | 0/6 [00:00<?, ?it/s]Loading pipeline components...:   0%|          | 0/6 [00:00<?, ?it/s]Loading pipeline components...:  17%|█▋        | 1/6 [00:00<00:01,  4.90it/s]Loading weights:   0%|          | 0/1065 [00:00<?, ?it/s]Loading weights:  83%|████████▎ | 889/1065 [00:00<00:00, 8868.55it/s]Loading weights: 100%|██████████| 1065/1065 [00:00<00:00, 8917.51it/s]
+Loading pipeline components...:   0%|          | 0/7 [00:00<?, ?it/s]2026-09-12 03:13:17.525 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Lightricks/LTX-2 profile= running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+Loading pipeline components...:  29%|██▊       | 2/7 [00:00<00:00,  8.29it/s]Loading pipeline components...:  83%|████████▎ | 5/6 [00:00<00:00,  6.85it/s]Loading pipeline components...:  86%|████████▌ | 6/7 [00:00<00:00,  5.84it/s]Loading pipeline components...:  17%|█▋        | 1/6 [00:01<00:08,  1.67s/it]Loading pipeline components...:  50%|█████     | 3/6 [00:01<00:01,  1.79it/s]Loading pipeline components...:  83%|████████▎ | 5/6 [00:02<00:00,  2.45it/s]Loading pipeline components...:  33%|███▎      | 2/6 [00:02<00:04,  1.18s/it]Loading pipeline components...: 100%|██████████| 6/6 [00:02<00:00,  1.90it/s]Loading pipeline components...: 100%|██████████| 6/6 [00:02<00:00,  2.38it/s]
+[ltx_2] host pipeline loaded in 2.7s (text encoder on this rank: False)
+[difflet serve] LTX-2 worker loaded (tpu)
+Loading pipeline components...: 100%|██████████| 6/6 [00:02<00:00,  2.52it/s]Loading pipeline components...: 100%|██████████| 6/6 [00:02<00:00,  2.36it/s]
+[ltx_2] host pipeline loaded in 2.7s (text encoder on this rank: False)
+[ltx_2] video VAE resident on the chip (primary replica)
+[difflet serve] LTX-2 worker loaded (tpu)
+Loading pipeline components...:  50%|█████     | 3/6 [00:02<00:02,  1.16it/s]Loading pipeline components...: 100%|██████████| 6/6 [00:03<00:00,  1.95it/s]
+[ltx_2] host pipeline loaded in 3.2s (text encoder on this rank: False)
+[difflet serve] LTX-2 worker loaded (tpu)
+Loading pipeline components...: 100%|██████████| 7/7 [00:03<00:00,  1.71it/s]Loading pipeline components...: 100%|██████████| 7/7 [00:03<00:00,  2.23it/s]
+[ltx_2] host pipeline loaded in 3.8s (text encoder on this rank: True)
+[difflet serve] LTX-2 worker loaded (tpu)
+2026-09-12 03:13:47.570 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Lightricks/LTX-2 profile= running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-09-12 03:14:17.570 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=Lightricks/LTX-2 profile= running_requests=0 queued_requests=0 pending_requests=0 capacity=1
+2026-09-12 03:14:37.693 INFO:     worker_process_ready model=Lightricks/LTX-2 replicas=4
+2026-09-12 03:14:37.694 INFO:     video.service_start ephemeral_jobs=true staging_removed=0 artifacts_removed=0
+2026-09-12 03:14:37.694 INFO:     serving startup complete model=Lightricks/LTX-2
+2026-09-12 03:14:37.694 INFO:     Application startup complete.
+2026-09-12 03:14:37.695 INFO:     Uvicorn running on http://127.0.0.1:8098 (Press CTRL+C to quit)
+2026-09-12 03:14:39.367 INFO:     127.0.0.1:59912 - "GET /ready HTTP/1.1" 200
+2026-09-12 03:14:39.380 INFO:     127.0.0.1:59920 - "GET /ready HTTP/1.1" 200
+2026-09-12 03:14:39.393 INFO:     engine.generate admitted request_id=video_sync_bd530907a72d41d79a0bd77820ed7c9b model=Lightricks/LTX-2 queued=0/1
+2026-09-12 03:14:39.394 INFO:     engine.queue_acquired request_id=video_sync_bd530907a72d41d79a0bd77820ed7c9b
+2026-09-12 03:14:39.394 INFO:     engine.lock_acquired request_id=video_sync_bd530907a72d41d79a0bd77820ed7c9b
+2026-09-12 03:14:39.394 INFO:     engine.run_start request_id=video_sync_bd530907a72d41d79a0bd77820ed7c9b
+2026-09-12 03:14:39.394 INFO:     worker_process_run_start request_id=video_sync_bd530907a72d41d79a0bd77820ed7c9b model=Lightricks/LTX-2 deadline_remaining=300.000
+2026-09-12 03:14:47.570 INFO:     worker heartbeat state_dwell_seconds=210.44 from_state=loading to_state=busy
+2026-09-12 03:14:47.571 INFO:     worker heartbeat transition state=busy request_id=video_sync_bd530907a72d41d79a0bd77820ed7c9b stage=pipeline running_requests=1 queued_requests=0 pending_requests=1 capacity=1
+2026-09-12 03:15:17.571 INFO:     worker heartbeat alive state=busy request_id=video_sync_bd530907a72d41d79a0bd77820ed7c9b stage=pipeline model=Lightricks/LTX-2 profile= running_requests=1 queued_requests=0 pending_requests=1 capacity=1
+2026-09-12 03:15:30.935 INFO:     worker_process_generation_ok request_id=video_sync_bd530907a72d41d79a0bd77820ed7c9b
+2026-09-12 03:15:30.935 INFO:     engine.run_complete request_id=video_sync_bd530907a72d41d79a0bd77820ed7c9b
+2026-09-12 03:15:31.012 INFO:     127.0.0.1:59928 - "POST /v1/videos/sync HTTP/1.1" 200
+2026-09-12 03:15:31.028 INFO:     engine.generate admitted request_id=video_sync_13aea579f33f4b9090eb9b35b09a0523 model=Lightricks/LTX-2 queued=0/1
+2026-09-12 03:15:31.028 INFO:     engine.queue_acquired request_id=video_sync_13aea579f33f4b9090eb9b35b09a0523
+2026-09-12 03:15:31.028 INFO:     engine.lock_acquired request_id=video_sync_13aea579f33f4b9090eb9b35b09a0523
+2026-09-12 03:15:31.028 INFO:     engine.run_start request_id=video_sync_13aea579f33f4b9090eb9b35b09a0523
+2026-09-12 03:15:31.028 INFO:     worker_process_run_start request_id=video_sync_13aea579f33f4b9090eb9b35b09a0523 model=Lightricks/LTX-2 deadline_remaining=299.999
+2026-09-12 03:15:47.571 INFO:     worker heartbeat state_dwell_seconds=60.00 from_state=busy to_state=busy
+2026-09-12 03:15:47.572 INFO:     worker heartbeat transition state=busy request_id=video_sync_13aea579f33f4b9090eb9b35b09a0523 stage=pipeline running_requests=1 queued_requests=0 pending_requests=1 capacity=1
+2026-09-12 03:16:17.571 INFO:     worker heartbeat alive state=busy request_id=video_sync_13aea579f33f4b9090eb9b35b09a0523 stage=pipeline model=Lightricks/LTX-2 profile= running_requests=1 queued_requests=0 pending_requests=1 capacity=1
+2026-09-12 03:16:21.141 INFO:     worker_process_generation_ok request_id=video_sync_13aea579f33f4b9090eb9b35b09a0523
+2026-09-12 03:16:21.142 INFO:     engine.run_complete request_id=video_sync_13aea579f33f4b9090eb9b35b09a0523
+2026-09-12 03:16:21.175 INFO:     127.0.0.1:39194 - "POST /v1/videos/sync HTTP/1.1" 200
+2026-09-12 03:16:21.199 INFO:     Shutting down
+2026-09-12 03:16:21.299 INFO:     Waiting for application shutdown.
+2026-09-12 03:16:21.299 INFO:     serving shutdown begin model=Lightricks/LTX-2
+2026-09-12 03:16:21.299 INFO:     video.service_stop ephemeral_jobs=true staging_removed=0 artifacts_removed=0
+2026-09-12 03:16:21.300 INFO:     worker_process_shutdown requested model=Lightricks/LTX-2 alive=True
+[difflet serve] running LTX-2 generation smoke
+[difflet serve] running LTX-2 generation smoke
+[difflet serve] running LTX-2 generation smoke
+[difflet serve] LTX-2 generation smoke passed
+[difflet serve] running LTX-2 generation smoke
+2026-09-12 03:16:30.538 INFO:     worker_process_terminate model=Lightricks/LTX-2
+2026-09-12 03:16:30.540 INFO:     serving shutdown complete model=Lightricks/LTX-2
+2026-09-12 03:16:30.540 INFO:     Application shutdown complete.
+2026-09-12 03:16:30.540 INFO:     Finished server process [297708]

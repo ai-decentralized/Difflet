@@ -1,0 +1,236 @@
+world=4 args={'model_dir': '/mnt/models/hf/hub/models--Wan-AI--Wan2.1-T2V-14B-Diffusers/snapshots/38ec498cb3208fb688890f8cc7e94ede2cbd7f68', 'height': 480, 'width': 832, 'num_frames': 9, 'steps': 20, 'guidance': 1.0, 'seed': 42, 'iters': 2, 'natural_iters': 1, 'both_experts': False, 'decode': True, 'teacache_cadence': None, 'teacache_online_delta': None, 'text_seq_len': 512, 'out': '/mnt/models/teacache_runs/wan21_baseline'}
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+[rank0] config seq_len=4680 latent=3x60x104 experts=1
+[rank2] config seq_len=4680 latent=3x60x104 experts=1
+[rank1] config seq_len=4680 latent=3x60x104 experts=1
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+[rank3] config seq_len=4680 latent=3x60x104 experts=1
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+[rank0] transformer resident in 77.9s mem={'bytes_used': 6.985, 'bytes_limit': 15.748, 'peak_bytes_used': 6.985}
+[rank1] transformer resident in 78.2s mem={'bytes_used': 6.985, 'bytes_limit': 15.748, 'peak_bytes_used': 6.985}
+[rank3] transformer resident in 78.3s mem={'bytes_used': 6.985, 'bytes_limit': 15.748, 'peak_bytes_used': 6.985}
+[rank2] transformer resident in 78.6s mem={'bytes_used': 6.985, 'bytes_limit': 15.748, 'peak_bytes_used': 6.985}
+[rank0] umT5 on host in 0.0s (ordinal 2; skipped, not ordinal 0)
+[rank3] umT5 on host in 0.0s (ordinal 1; skipped, not ordinal 0)
+Loading weights:   0%|          | 0/242 [00:00<?, ?it/s][rank2] umT5 on host in 0.0s (ordinal 3; skipped, not ordinal 0)
+[rank0] boundary_ratio=None scheduler=UniPCMultistepScheduler
+Loading weights:  52%|█████▏    | 127/242 [00:00<00:00, 1231.39it/s]Loading weights: 100%|██████████| 242/242 [00:00<00:00, 1214.92it/s]
+[rank3] boundary_ratio=None scheduler=UniPCMultistepScheduler
+[rank2] boundary_ratio=None scheduler=UniPCMultistepScheduler
+[rank1] umT5 on host in 1.6s (ordinal 0; loaded)
+[rank1] boundary_ratio=None scheduler=UniPCMultistepScheduler
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+[rank0] iter0 [synced] denoise=52.50s encode=33.67s steps=19 mean_step=0.611s throughput_step=2.625s
+[rank1] iter0 [synced] denoise=52.50s encode=31.92s steps=19 mean_step=0.611s throughput_step=2.625s
+[rank3] iter0 [synced] denoise=52.50s encode=33.43s steps=19 mean_step=0.611s throughput_step=2.625s
+[rank2] iter0 [synced] denoise=52.50s encode=33.33s steps=19 mean_step=0.611s throughput_step=2.625s
+{
+  "type": "result",
+  "iteration": 0,
+  "basis": "synced",
+  "throughput_step_seconds": 2.625169378449937,
+  "wall_seconds": 52.50338756899873,
+  "encode_seconds": 33.668617761999485,
+  "load_seconds": 78.26792557899898,
+  "step_seconds": [
+    0.6049506490016938,
+    0.6285517369979061,
+    0.6222653280019586,
+    0.6073830069981341,
+    0.6227165380005317,
+    0.6087627180022537,
+    0.6039728989999276,
+    0.6075070469996717,
+    0.6079564879983081,
+    0.6087834079989989,
+    0.6093418880009267,
+    0.60945855799946,
+    0.6133310879995406,
+    0.6097448780019477,
+    0.6101236579997931,
+    0.6100000469996303,
+    0.6094022879988188,
+    0.6021255289997498,
+    0.6066620570018131
+  ],
+  "mem_before": {
+    "bytes_used": 0.0,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 0.0
+  },
+  "mem_after_load": {
+    "bytes_used": 6.985,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 6.985
+  },
+  "mem_after_run": {
+    "bytes_used": 7.503,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 7.513
+  },
+  "latent_shape": [
+    1,
+    16,
+    3,
+    60,
+    104
+  ],
+  "finite": true,
+  "min": -3.5778369903564453,
+  "max": 3.4942195415496826,
+  "mean": -0.0689268410205841,
+  "std": 0.6625224351882935,
+  "teacache": null
+}
+[rank1] iter1 [synced] denoise=12.16s encode=0.68s steps=19 mean_step=0.608s throughput_step=0.608s
+[rank3] iter1 [synced] denoise=12.16s encode=0.68s steps=19 mean_step=0.608s throughput_step=0.608s
+[rank2] iter1 [synced] denoise=12.16s encode=0.68s steps=19 mean_step=0.608s throughput_step=0.608s
+[rank0] iter1 [synced] denoise=12.16s encode=0.68s steps=19 mean_step=0.608s throughput_step=0.608s
+{
+  "type": "result",
+  "iteration": 1,
+  "basis": "synced",
+  "throughput_step_seconds": 0.6078335984499063,
+  "wall_seconds": 12.156671968998126,
+  "encode_seconds": 0.683512586998404,
+  "load_seconds": 78.26792557899898,
+  "step_seconds": [
+    0.6118750679997902,
+    0.6070057580000139,
+    0.6057751379994443,
+    0.60978256800081,
+    0.6074210170008882,
+    0.606577628001105,
+    0.6055998689989792,
+    0.6254821369984711,
+    0.6071547080027813,
+    0.6065354079983081,
+    0.6084956480008259,
+    0.6068800680004642,
+    0.6059860679997655,
+    0.6066536979997181,
+    0.6066028380009811,
+    0.6060721479989297,
+    0.607092117999855,
+    0.6053320280007028,
+    0.6067283679985849
+  ],
+  "mem_before": {
+    "bytes_used": 0.0,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 0.0
+  },
+  "mem_after_load": {
+    "bytes_used": 6.985,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 6.985
+  },
+  "mem_after_run": {
+    "bytes_used": 7.503,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 7.513
+  },
+  "latent_shape": [
+    1,
+    16,
+    3,
+    60,
+    104
+  ],
+  "finite": true,
+  "min": -3.5778369903564453,
+  "max": 3.4942195415496826,
+  "mean": -0.0689268410205841,
+  "std": 0.6625224351882935,
+  "teacache": null
+}
+[rank1] iter2 [natural] denoise=12.13s encode=0.64s steps=19 mean_step=0.606s throughput_step=0.607s
+[rank2] iter2 [natural] denoise=12.13s encode=0.64s steps=19 mean_step=0.606s throughput_step=0.607s
+[rank3] iter2 [natural] denoise=12.13s encode=0.64s steps=19 mean_step=0.606s throughput_step=0.606s
+[rank0] iter2 [natural] denoise=12.13s encode=0.64s steps=19 mean_step=0.606s throughput_step=0.607s
+{
+  "type": "result",
+  "iteration": 2,
+  "basis": "natural",
+  "throughput_step_seconds": 0.6065726155000448,
+  "wall_seconds": 12.131452310000896,
+  "encode_seconds": 0.6375246969982982,
+  "load_seconds": 78.26792557899898,
+  "step_seconds": [
+    0.6052359280001838,
+    0.6054520079997019,
+    0.6100262680010928,
+    0.6118730579983094,
+    0.6136517080012709,
+    0.6068975279995357,
+    0.6099852080005803,
+    0.6057978770004411,
+    0.6038276289982605,
+    0.6043316480026988,
+    0.6038983469989034,
+    0.6045658590010135,
+    0.6038758079994295,
+    0.6035278780000226,
+    0.604688677998638,
+    0.6058204780019878,
+    0.6055734580004355,
+    0.6055637369972828,
+    0.6044899490007083
+  ],
+  "mem_before": {
+    "bytes_used": 0.0,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 0.0
+  },
+  "mem_after_load": {
+    "bytes_used": 6.985,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 6.985
+  },
+  "mem_after_run": {
+    "bytes_used": 7.503,
+    "bytes_limit": 15.748,
+    "peak_bytes_used": 7.513
+  },
+  "latent_shape": [
+    1,
+    16,
+    3,
+    60,
+    104
+  ],
+  "finite": true,
+  "min": -3.5778369903564453,
+  "max": 3.4942195415496826,
+  "mean": -0.0689268410205841,
+  "std": 0.6625224351882935,
+  "teacache": null
+}
+[rank0] device decode failed (Value out of range (expected to be in range of [-1, 0], but got -2)); falling back to host
+{
+  "type": "decoded",
+  "seconds": 25.688949049999792,
+  "where": "host",
+  "shape": [
+    1,
+    3,
+    9,
+    480,
+    832
+  ],
+  "finite": true
+}
+/mnt/models/uvpy/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/subprocess.py:1885: RuntimeWarning: os.fork() was called. os.fork() is incompatible with multithreaded code, and JAX is multithreaded, so this will likely lead to a deadlock.
+  self.pid = _fork_exec(

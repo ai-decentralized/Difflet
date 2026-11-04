@@ -1,0 +1,208 @@
+[
+  {
+    "type": "result",
+    "iteration": 0,
+    "basis": "synced",
+    "wall_seconds": 55.42064050300178,
+    "load_seconds": 52.068506584000716,
+    "stage_seconds": {
+      "dit_load_s": 6.23712463999982,
+      "warmup_s": 44.03390043699983,
+      "host_load_s": 0.8453053639968857,
+      "encode_s": 4.101220343000023,
+      "denoise_s": 51.319378460000735
+    },
+    "step_seconds": [
+      23.85946506000255,
+      24.005144396000105,
+      0.18927018599788425,
+      0.1865222470005392,
+      0.18637463599952753,
+      0.2285498759993061,
+      0.18782210600329563,
+      0.18630829699759488,
+      0.18624169599934248,
+      0.18635240600269753,
+      0.1862370569979248,
+      0.18622596700151917,
+      0.18674887599991052,
+      0.1863056959991809,
+      0.18627733700122917,
+      0.1869792769975902,
+      0.18646846600313438,
+      0.18659430699699442
+    ],
+    "mem_before": {
+      "bytes_used": 0.0,
+      "bytes_limit": 15.748,
+      "peak_bytes_used": 0.0
+    },
+    "mem_after_load": {
+      "bytes_used": 10.332,
+      "bytes_limit": 15.748,
+      "peak_bytes_used": 10.332
+    },
+    "mem_after_run": {
+      "bytes_used": 10.402,
+      "bytes_limit": 15.748,
+      "peak_bytes_used": 10.412
+    },
+    "latent_shape": [
+      1,
+      4096,
+      64
+    ],
+    "finite": true,
+    "mean": -0.07426249980926514,
+    "std": 1.1369996070861816,
+    "teacache": {
+      "full_steps": 19,
+      "skipped_steps": 9,
+      "probe_calls": 0,
+      "last_delta_estimate": null,
+      "cache_initialized": true
+    }
+  },
+  {
+    "type": "result",
+    "iteration": 1,
+    "basis": "synced",
+    "wall_seconds": 7.628113075999863,
+    "load_seconds": 52.068506584000716,
+    "stage_seconds": {
+      "dit_load_s": 6.23712463999982,
+      "warmup_s": 44.03390043699983,
+      "host_load_s": 0.8453053639968857,
+      "encode_s": 3.893914706000942,
+      "denoise_s": 3.7341596389996994
+    },
+    "step_seconds": [
+      0.2067215759998362,
+      0.18773827599943615,
+      0.1864995670002827,
+      0.18653534600161947,
+      0.18673489700086066,
+      0.18778177700005472,
+      0.1865668359969277,
+      0.18667977600125596,
+      0.18637889700039523,
+      0.18638541600012104,
+      0.18688455699884798,
+      0.18759749600212672,
+      0.1863802659972862,
+      0.18634383700191393,
+      0.18636686700119753,
+      0.18628406599964364,
+      0.1874649959972885,
+      0.18627882700093323
+    ],
+    "mem_before": {
+      "bytes_used": 0.0,
+      "bytes_limit": 15.748,
+      "peak_bytes_used": 0.0
+    },
+    "mem_after_load": {
+      "bytes_used": 10.332,
+      "bytes_limit": 15.748,
+      "peak_bytes_used": 10.332
+    },
+    "mem_after_run": {
+      "bytes_used": 10.402,
+      "bytes_limit": 15.748,
+      "peak_bytes_used": 10.412
+    },
+    "latent_shape": [
+      1,
+      4096,
+      64
+    ],
+    "finite": true,
+    "mean": -0.07426249980926514,
+    "std": 1.1369996070861816,
+    "teacache": {
+      "full_steps": 19,
+      "skipped_steps": 9,
+      "probe_calls": 0,
+      "last_delta_estimate": null,
+      "cache_initialized": true
+    }
+  },
+  {
+    "type": "result",
+    "iteration": 2,
+    "basis": "natural",
+    "wall_seconds": 7.093198795999342,
+    "load_seconds": 52.068506584000716,
+    "stage_seconds": {
+      "dit_load_s": 6.23712463999982,
+      "warmup_s": 44.03390043699983,
+      "host_load_s": 0.8453053639968857,
+      "encode_s": 3.467880005002371,
+      "denoise_s": 3.625290281001071
+    },
+    "step_seconds": [
+      0.15389597700050217,
+      0.15313536699977703,
+      0.15318235700033256,
+      0.15335726700141095,
+      0.15345808699930785,
+      0.15434902800188866,
+      0.15493765700011863,
+      0.15412492599716643,
+      0.1540241770017019,
+      0.1539200580009492,
+      0.15383246700002928,
+      0.1532771269994555,
+      0.1544655369980319,
+      0.1541845169995213,
+      0.1529345570015721,
+      0.15260865700111026,
+      0.1529997679972439,
+      0.15284485700249206
+    ],
+    "mem_before": {
+      "bytes_used": 0.0,
+      "bytes_limit": 15.748,
+      "peak_bytes_used": 0.0
+    },
+    "mem_after_load": {
+      "bytes_used": 10.332,
+      "bytes_limit": 15.748,
+      "peak_bytes_used": 10.332
+    },
+    "mem_after_run": {
+      "bytes_used": 10.402,
+      "bytes_limit": 15.748,
+      "peak_bytes_used": 10.427
+    },
+    "latent_shape": [
+      1,
+      4096,
+      64
+    ],
+    "finite": true,
+    "mean": -0.07426249980926514,
+    "std": 1.1369996070861816,
+    "teacache": {
+      "full_steps": 19,
+      "skipped_steps": 9,
+      "probe_calls": 0,
+      "last_delta_estimate": null,
+      "cache_initialized": true
+    }
+  },
+  {
+    "type": "decoded",
+    "seconds": 116.87853679999898,
+    "where": "device",
+    "size": [
+      1024,
+      1024
+    ],
+    "mem_after_decode": {
+      "bytes_used": 10.469,
+      "bytes_limit": 15.748,
+      "peak_bytes_used": 10.488
+    }
+  }
+]

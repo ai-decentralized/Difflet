@@ -100,10 +100,10 @@ def _groups(groups: list[list[int]] | None) -> tuple[list[int], int]:
 def _all_gather_dim(
     tensor: torch.Tensor, dim: int, groups_flat: list[int], group_size: int
 ) -> torch.Tensor:
-    import torch_xla.core.xla_model as xm
+    from difflet.backends.tpu.ops_impl import device_runtime
 
-    return xm.all_gather(
-        tensor, dim=dim, groups=_unflatten(groups_flat, group_size), pin_layout=False
+    return device_runtime.all_gather(
+        tensor, dim=dim, groups=_unflatten(groups_flat, group_size)
     )
 
 
@@ -120,13 +120,10 @@ def _(
 def _all_reduce_sum(
     tensor: torch.Tensor, groups_flat: list[int], group_size: int
 ) -> torch.Tensor:
-    import torch_xla.core.xla_model as xm
+    from difflet.backends.tpu.ops_impl import device_runtime
 
-    return xm.all_reduce(
-        xm.REDUCE_SUM,
-        tensor,
-        groups=_unflatten(groups_flat, group_size),
-        pin_layout=False,
+    return device_runtime.all_reduce_sum(
+        tensor, groups=_unflatten(groups_flat, group_size)
     )
 
 
@@ -139,16 +136,13 @@ def _(tensor: torch.Tensor, groups_flat: list[int], group_size: int) -> torch.Te
 def _reduce_scatter_sum_dim(
     tensor: torch.Tensor, dim: int, groups_flat: list[int], group_size: int
 ) -> torch.Tensor:
-    import torch_xla.core.xla_model as xm
+    from difflet.backends.tpu.ops_impl import device_runtime
 
-    return xm.reduce_scatter(
-        xm.REDUCE_SUM,
+    return device_runtime.reduce_scatter_sum(
         tensor,
-        scale=1.0,
-        scatter_dim=dim,
+        dim=dim,
         shard_count=group_size,
         groups=_unflatten(groups_flat, group_size),
-        pin_layout=False,
     )
 
 
@@ -179,10 +173,54 @@ def gather_tp_dim(tensor, *, dim: int):
     return torch.ops.difflet_tpu.all_gather_dim(tensor, dim, flat, size)
 
 
+#: Opt-in, while it is being measured: on torch_tpu, all-reduce through
+#: torch's functional collective rather than the opaque custom op. The custom
+#: op runs ``clone`` + in-place ``dist.all_reduce`` and its result is consumed
+#: at once, and in a compiled Wan block every reduce ran synchronously beside
+#: no compute -- 2.5 ms of 8.8 (benchmark/tpu_profile, 2026-10-27). A
+#: functional all-reduce returns an async tensor that is waited on at first
+#: use, which leaves the compiler room to schedule it.
+#:
+#: **Measured slower -- leave it off.** TorchTPU compiles each functional
+#: all-reduce as a program of its own (``tt_jit_distributed.all_reduce``), so
+#: the block that was one program becomes many: 9.18 ms against 8.99, and 9.34
+#: chunked x2 (2026-10-28). Only the custom op keeps the reduce in-graph. The
+#: overlap that does work is a collective matmul through ``jax_op`` -- see
+#: benchmark/tpu_profile/collective_matmul_probe.py.
+FUNCOL_ENV = "DIFFLET_TPU_FUNCOL"
+
+
+def _use_funcol() -> bool:
+    import os
+
+    return os.environ.get(FUNCOL_ENV, "").strip().lower() in ("1", "true", "yes")
+
+
+def warm_process_groups() -> None:
+    """Build the TP process group now, before anything is compiled.
+
+    ``dist.new_group`` is collective; reached for the first time while Dynamo
+    traces ``reduce_tp`` it would run inside the trace. The custom-op path
+    builds the same group lazily on its first eager call, so this only moves
+    that call earlier.
+    """
+    from difflet.backends.tpu.ops_impl import device_runtime
+
+    if get_tp_size() > 1:
+        device_runtime._process_group(get_tp_groups())
+
+
 def reduce_tp(tensor):
     if get_tp_size() == 1:
         return tensor
     flat, size = _groups(None)
+    if _use_funcol():
+        import torch.distributed._functional_collectives as funcol
+
+        from difflet.backends.tpu.ops_impl import device_runtime
+
+        group = device_runtime._process_group(_unflatten(flat, size))
+        return funcol.all_reduce(tensor, "sum", group)
     return torch.ops.difflet_tpu.all_reduce_sum(tensor, flat, size)
 
 
@@ -272,9 +310,9 @@ class SPMDRank(torch.nn.Module):
 
 
 def _global_rank() -> int:
-    import torch_xla.runtime as xr
+    from difflet.backends.tpu.ops_impl import device_runtime
 
-    return int(xr.global_ordinal())
+    return device_runtime.rank()
 
 
 class _WorldGroup:

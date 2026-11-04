@@ -1,0 +1,29 @@
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+Traceback (most recent call last):
+  File "<frozen runpy>", line 198, in _run_module_as_main
+  File "<frozen runpy>", line 88, in _run_code
+  File "/mnt/models/Difflet/difflet/cli/stage.py", line 96, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/mnt/models/Difflet/difflet/cli/stage.py", line 91, in main
+    orchestrator._run_stage_internal(args.stage, args)
+  File "/mnt/models/Difflet/difflet/cli/orchestrators/qwen_image.py", line 121, in _run_stage_internal
+    self._stage_text(args)
+  File "/mnt/models/Difflet/difflet/cli/orchestrators/qwen_image.py", line 134, in _stage_text
+    from neuronx_distributed_inference.models.config import NeuronConfig, TensorCaptureConfig
+ModuleNotFoundError: No module named 'neuronx_distributed_inference'
+[difflet] work dir preserved at /home/shiyangcheng/.cache/difflet/work/qwen-image for inspection
+Traceback (most recent call last):
+  File "/mnt/models/tpuenv312/bin/difflet", line 10, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/mnt/models/Difflet/difflet/cli/main.py", line 953, in main
+    getattr(orchestrator, args.command)()
+  File "/mnt/models/Difflet/difflet/cli/orchestrators/qwen_image.py", line 92, in generate
+    runner.run_stage(
+  File "/mnt/models/Difflet/difflet/cli/runner.py", line 88, in run_stage
+    subprocess.run(cmd, env=env, check=True)
+  File "/mnt/models/uvpy/cpython-3.12.14-linux-x86_64-gnu/lib/python3.12/subprocess.py", line 571, in run
+    raise CalledProcessError(retcode, process.args,
+subprocess.CalledProcessError: Command '['/mnt/models/tpuenv312/bin/python', '-m', 'difflet.cli.stage', '--orchestrator', 'Qwen/Qwen-Image', '--stage', 'text', '--model-id', 'Qwen/Qwen-Image', '--tp-degree', '4', '--cp-degree', '1', '--cp-mode', 'gather_kv', '--height', '1024', '--width', '1024', '--steps', '2', '--guidance-scale', '4.0', '--seed', '42', '--stage-mode', 'generate', '--prompt', 'a red fox', '--output', '/mnt/models/teacache_runs/cli_qwen_image.out', '--revision', '75e0b4be04f60ec59a75f475837eced720f823b6', '--work-dir', '/home/shiyangcheng/.cache/difflet/work/qwen-image']' returned non-zero exit status 1.
+exit=1

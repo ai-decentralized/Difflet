@@ -16,6 +16,17 @@ def create_hunyuan_video_application(
     backend: str = "trainium",
     **kwargs: Any,
 ) -> Any:
+    if backend == "tpu":
+        # TPU: the DiT on the chips, Llama/CLIP/VAE on the host.
+        if parallel.cfg_parallel_enabled:
+            raise NotImplementedError(
+                "HunyuanVideo is guidance-distilled; CFG-parallel does not apply."
+            )
+        from difflet.models.hunyuan_video.tpu_application import TpuHunyuanVideoApplication
+
+        return TpuHunyuanVideoApplication(
+            model_path=model_path, parallel=parallel, dtype=dtype, shape=shape, **kwargs
+        )
     if backend not in {"trainium", "neuron"}:
         raise NotImplementedError(
             f"HunyuanVideo supports the trainium and neuron backends, got {backend!r}"

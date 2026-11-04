@@ -63,7 +63,7 @@ Three entry points share one engine:
 |---|---|---|---|---|---|
 | NVIDIA GPUs | `cuda` | ✅ Supported (subset) | FLUX.1-dev, Qwen-Image, Wan 2.2 | DP, CFG-parallel (Wan) | [GPU features](#nvidia-gpus) |
 | AWS Trainium2 | `trainium` | ✅ Supported | All [supported models](#supported-models) | TP, CP, SP, CFG-parallel, DP | [Trainium features](#trainium) |
-| Cloud TPU | `tpu` | 🧪 Experimental | Qwen-Image, Wan (`difflet serve` only) | TP | [v5e benchmarks](benchmark/v5e/RESULTS.md) |
+| Cloud TPU | `tpu` | 🧪 Experimental | FLUX.1-dev, Qwen-Image, Wan, HunyuanVideo, LTX-2 (`difflet serve` and the benchmark runners) | TP | [v5e benchmarks](benchmark/v5e/RESULTS.md) |
 | AMD ROCm | `rocm` | Planned | — | — | — |
 
 Without `DIFFLET_BACKEND`, Difflet picks the backend it detects on the host. It checks Trainium,
@@ -71,11 +71,9 @@ then TPU, then CUDA, then ROCm, which only matters on a host with more than one 
 Set `DIFFLET_BACKEND` to choose one explicitly. A CPU reference backend (`cpu`) exists for
 numerical tests and CI. It is not meant for generation.
 
-Cloud TPU work in progress, including FLUX, HunyuanVideo and LTX-2 ports, TeaCache in serving,
-and a move from `torch_xla` to TorchTPU, is tracked in open pull requests
-[#60–#65](https://github.com/ai-decentralized/Difflet/pulls?q=is%3Apr+is%3Aopen+TPU) and
-[#119](https://github.com/ai-decentralized/Difflet/pull/119). Until those land, `difflet run`
-and the Python API do not run on TPU.
+On Cloud TPU the runtime is TorchTPU (`torch_tpu`), one process per chip, eager or `torch.compile`.
+Probe-free TeaCache (`--teacache-cadence` / `--teacache-online-delta`) works in serving there.
+`difflet compile/generate/run` and the Python API do not run on TPU.
 
 ## Supported models
 
