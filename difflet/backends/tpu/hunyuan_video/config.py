@@ -96,10 +96,14 @@ class TpuHunyuanVideoConfig(HunyuanVideoTransformerConfig):
                 f"HunyuanVideo latent frames {self.latent_frames} is not divisible "
                 f"by the temporal patch {self.patch_size_t}"
             )
+        # Sequence parallelism runs only as DIFFLET_TPU_SP=1 (backends/tpu/hunyuan_video/sp.py),
+        # which fuses each gather / reduce-scatter into its matmul.
+        from difflet.backends.tpu.ops_impl import collective_matmul
+
         for mode, enabled in (
             ("context parallelism", self.context_parallel_enabled),
             ("cfg parallelism", self.cfg_parallel_enabled),
-            ("sequence parallelism", self.sp_enabled),
+            ("sequence parallelism", self.sp_enabled and not collective_matmul.requested()),
         ):
             if enabled:
                 raise NotImplementedError(

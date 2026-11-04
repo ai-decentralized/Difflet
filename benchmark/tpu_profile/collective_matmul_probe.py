@@ -18,6 +18,8 @@ all compiled, each checked against T:
     J5    physical ring, both directions (half the columns each way)
     J5rs  J5 without the closing all_gather: the reduce-scatter half alone,
           the shape a sequence-parallel block would consume
+    J5rs2 J5rs with an optimization_barrier between each partial and its add,
+          so XLA cannot fuse the matmul onto the received accumulator
     J6    jax_op: a plain global x @ w, no shard_map -- the SPMD partitioner
           places the reduce, so XLA's windowed einsum (collective matmul)
           can rewrite it when its libtpu flags are on
@@ -148,6 +150,27 @@ def _worker(rank, world, reply_q):
                 right = jax.lax.ppermute(right, "tp", ccw) + pr
         return jax.numpy.concatenate([left, right], axis=1)
 
+    def bidir_rs2(x, w, ids):
+        # bidir_rs with each partial fenced off from the add that consumes the
+        # received accumulator. Without the fence XLA fuses "next partial +
+        # received" into one convolution_add_fusion, so the matmul waits for the
+        # hop instead of running under it (the attn_out trace, 2026-11-03: 88 us
+        # idle in permute-done, then the 41 us matmul).
+        j = ids[0]
+        half = w.shape[1] // 2
+        wl, wr = w[:, :half], w[:, half:]
+        left = right = None
+        for step in range(world):
+            pl = row_chunk(x, (j - 1 - step) % world) @ wl
+            pr = row_chunk(x, (j + 1 + step) % world) @ wr
+            pl, pr = jax.lax.optimization_barrier((pl, pr))
+            if left is None:
+                left, right = pl, pr
+            else:
+                left = jax.lax.ppermute(left, "tp", cw) + pl
+                right = jax.lax.ppermute(right, "tp", ccw) + pr
+        return jax.numpy.concatenate([left, right], axis=1)
+
     def gathered(rs):
         def body(x, w, ids):
             return jax.lax.all_gather(rs(x, w, ids), "tp", axis=0, tiled=True)
@@ -170,6 +193,7 @@ def _worker(rank, world, reply_q):
     variants = (("J1", "devices", j1, P()), ("J3", "devices", gathered(ring_rs), P()),
                 ("J4", "ring", gathered(ring_rs), P()), ("J5", "ring", gathered(bidir_rs), P()),
                 ("J5rs", "ring", bidir_rs, P("tp", None)),
+                ("J5rs2", "ring", bidir_rs2, P("tp", None)),
                 ("J6", "ring", j6(meshes["ring"], P()), P()),
                 ("J6rs", "ring", j6(meshes["ring"], P("tp", None)), P("tp", None)))
     wanted = os.environ.get("CM_VARIANTS")
@@ -236,7 +260,7 @@ def _worker(rank, world, reply_q):
                                                         backend="tpu")
                     out, ms = timed(fn, x, w, ids[mesh_key])
                     entry = {"ms": ms}
-                    if name.endswith("rs"):
+                    if out_spec != P():  # a sharded output: this chip's rows
                         # This chip's rows of the full sum, in ring position.
                         pos = int(ids[mesh_key].cpu()[0])
                         entry["max_abs_vs_T"] = (out.float().cpu()

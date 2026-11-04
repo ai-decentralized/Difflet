@@ -46,6 +46,11 @@ def _normalize_dtype(dtype: Any) -> torch.dtype:
     return torch.float32
 
 
+def _sp_requested() -> bool:
+    from difflet.backends.tpu.ops_impl import collective_matmul
+
+    return collective_matmul.requested()
+
 class TpuBroadcastLlamaEncoder:
     """Llama-3 hidden state on one rank, broadcast to the rest.
 
@@ -188,7 +193,7 @@ class TpuHunyuanVideoApplication(torch.nn.Module):
             torch_dtype=self.dtype,
             context_parallel_enabled=int(getattr(parallel, "cp_degree", 1)) > 1,
             cfg_parallel_enabled=bool(getattr(parallel, "cfg_parallel", False)),
-            sp_enabled=bool(getattr(parallel, "sp_enabled", False)),
+            sp_enabled=bool(getattr(parallel, "sp_enabled", False)) or _sp_requested(),
             cp_mode=getattr(parallel, "cp_mode", "gather_kv"),
         )
         self.transformer = TpuHunyuanVideoTransformerApplication(
@@ -233,6 +238,12 @@ class TpuHunyuanVideoApplication(torch.nn.Module):
         device = device_runtime.device()
         module = transformer._prepare_module().to(device)
         device_runtime.wait()
+        if self.config.sp_enabled and _sp_requested():
+            from difflet.backends.tpu.hunyuan_video import sp
+            from difflet.backends.tpu.ops_impl import collective_matmul
+
+            collective_matmul.require_compiled(default=False)  # as maybe_compile below
+            sp.install(module, latent_seq_len=int(self.config.image_seq_len))
         # Not yet measured under torch.compile, so off unless DIFFLET_TPU_COMPILE=1.
         module = device_runtime.maybe_compile(module, default=False)
         # Compile the request-shaped graph now, a few ranks at a time (see

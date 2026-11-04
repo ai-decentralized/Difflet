@@ -49,6 +49,24 @@ def _normalize_dtype(dtype: Any) -> torch.dtype:
     return torch.bfloat16
 
 
+def _sp_requested() -> bool:
+    from difflet.backends.tpu.ops_impl import collective_matmul
+
+    return collective_matmul.requested()
+
+
+def _install_sp(module, config) -> None:
+    """``DIFFLET_TPU_SP=1``: fuse the sequence-parallel collectives into the
+    matmuls (backends/tpu/wan/sp.py). Needs the compiled path: through jax_op,
+    eager re-exports every ring on every call."""
+    if not getattr(config, "sp_enabled", False) or not _sp_requested():
+        return
+    from difflet.backends.tpu.ops_impl import collective_matmul
+    from difflet.backends.tpu.wan import sp
+
+    collective_matmul.require_compiled(default=True)  # as maybe_compile below
+    sp.install(module, seq_len=int(config.image_seq_len))
+
 class _BroadcastTextEncoder:
     """umT5 on one rank, broadcast to the rest.
 
@@ -238,7 +256,7 @@ class TpuWanApplication(torch.nn.Module):
             torch_dtype=self.dtype,
             context_parallel_enabled=int(getattr(parallel, "cp_degree", 1)) > 1,
             cfg_parallel_enabled=bool(getattr(parallel, "cfg_parallel", False)),
-            sp_enabled=bool(getattr(parallel, "sp_enabled", False)),
+            sp_enabled=bool(getattr(parallel, "sp_enabled", False)) or _sp_requested(),
             cp_mode=getattr(parallel, "cp_mode", "gather_kv"),
         )
         self.transformer = TpuWanTransformerApplication(
@@ -262,7 +280,7 @@ class TpuWanApplication(torch.nn.Module):
                 torch_dtype=self.dtype,
                 context_parallel_enabled=int(getattr(parallel, "cp_degree", 1)) > 1,
                 cfg_parallel_enabled=bool(getattr(parallel, "cfg_parallel", False)),
-                sp_enabled=bool(getattr(parallel, "sp_enabled", False)),
+                sp_enabled=bool(getattr(parallel, "sp_enabled", False)) or _sp_requested(),
                 cp_mode=getattr(parallel, "cp_mode", "gather_kv"),
             )
             self.transformer_2 = TpuWanTransformerApplication(
@@ -328,6 +346,7 @@ class TpuWanApplication(torch.nn.Module):
         expert = self._require_transformer("load")
         module = expert._prepare_module().to(device_runtime.device())
         device_runtime.wait()
+        _install_sp(module, self.config)
         module = device_runtime.maybe_compile(module, default=True)  # measured
 
         transformer = _OnDeviceTransformer(module, self.config, self.dtype)
@@ -336,6 +355,7 @@ class TpuWanApplication(torch.nn.Module):
         if self.transformer_2 is not None:
             module_2 = self.transformer_2._prepare_module().to(device_runtime.device())
             device_runtime.wait()
+            _install_sp(module_2, self.transformer_2.config)
             module_2 = device_runtime.maybe_compile(module_2, default=True)  # measured
             transformer_2 = _OnDeviceTransformer(
                 module_2, self.transformer_2.config, self.dtype
