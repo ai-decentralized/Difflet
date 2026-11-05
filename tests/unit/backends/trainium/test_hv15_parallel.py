@@ -867,7 +867,7 @@ def _hv15_n(height, width, num_frames):
 
 
 def test_hv15_compiler_args_keep_overlap_for_short_sequences(monkeypatch):
-    from difflet.backends.trainium.hunyuan_video.backbone15 import hv15_dit_compiler_args
+    from difflet.models.hunyuan_video.aot15_graph import hv15_dit_compiler_args
 
     monkeypatch.delenv("DIFFLET_HUNYUAN15_COMPILER_ARGS", raising=False)
     n = _hv15_n(512, 320, 61)
@@ -879,7 +879,7 @@ def test_hv15_compiler_args_keep_overlap_for_short_sequences(monkeypatch):
 
 
 def test_hv15_compiler_args_drop_overlap_for_long_sequences(monkeypatch):
-    from difflet.backends.trainium.hunyuan_video.backbone15 import hv15_dit_compiler_args
+    from difflet.models.hunyuan_video.aot15_graph import hv15_dit_compiler_args
 
     monkeypatch.delenv("DIFFLET_HUNYUAN15_COMPILER_ARGS", raising=False)
     n = _hv15_n(480, 848, 121)
@@ -891,7 +891,7 @@ def test_hv15_compiler_args_drop_overlap_for_long_sequences(monkeypatch):
 
 
 def test_hv15_compiler_args_overlap_threshold_boundary(monkeypatch):
-    from difflet.backends.trainium.hunyuan_video.backbone15 import (
+    from difflet.models.hunyuan_video.aot15_graph import (
         _HV15_CCOP_OVERLAP_MAX_IMAGE_TOKENS, hv15_dit_compiler_args)
 
     monkeypatch.delenv("DIFFLET_HUNYUAN15_COMPILER_ARGS", raising=False)
@@ -911,7 +911,7 @@ _HV15_ARGS_WITHOUT_OVERLAP = (
 
 
 def test_hv15_default_compiler_args_exact_strings(monkeypatch):
-    from difflet.backends.trainium.hunyuan_video.backbone15 import hv15_dit_compiler_args
+    from difflet.models.hunyuan_video.aot15_graph import hv15_dit_compiler_args
 
     monkeypatch.delenv("DIFFLET_HUNYUAN15_COMPILER_ARGS", raising=False)
     assert hv15_dit_compiler_args(10240) == _HV15_ARGS_WITH_OVERLAP
@@ -942,7 +942,7 @@ def test_hv15_cache_key_compiler_args_match_application(tmp_path, monkeypatch, s
 
 
 def test_hv15_compiler_args_override_respected(monkeypatch):
-    from difflet.backends.trainium.hunyuan_video.backbone15 import hv15_dit_compiler_args
+    from difflet.models.hunyuan_video.aot15_graph import hv15_dit_compiler_args
 
     monkeypatch.setenv("DIFFLET_HUNYUAN15_COMPILER_ARGS", "--foo -O2")
     assert hv15_dit_compiler_args(10240) == "--foo -O2"
