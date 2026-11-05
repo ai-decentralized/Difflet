@@ -941,6 +941,9 @@ _NO_NATIVE = textwrap.dedent("""
 
 
 def test_aot_stages_do_not_import_native(tmp_path):
+    # The subprocess imports the trainium hunyuan_video package, which needs NxD; its
+    # ModuleNotFoundError surfaces here as an AssertionError the gate cannot classify.
+    pytest.importorskip("neuronx_distributed")
     env = dict(os.environ, DIFFLET_BACKEND="cpu")
     result = subprocess.run([sys.executable, "-c", _NO_NATIVE, str(tmp_path)], env=env,
                             capture_output=True, text=True, timeout=600)

@@ -17,8 +17,11 @@ os.environ.setdefault("DIFFLET_BACKEND", "cpu")
 # Imported lazily, never at collection: several HV1.0 test modules importlib.reload()
 # modeling_hunyuan_video while being collected, and an earlier import of the trainium
 # hunyuan_video package would pin HV1.0's backbone to the pre-reload classes.
+# The package imports NxD (core/application_base.py), so these skip on a host without
+# the Neuron SDK; the gate does not convert fixture (setup) errors into skips.
 @pytest.fixture
 def backbone15():
+    pytest.importorskip("neuronx_distributed")
     from difflet.backends.trainium.hunyuan_video import backbone15 as module
 
     return module
@@ -26,6 +29,7 @@ def backbone15():
 
 @pytest.fixture
 def parallel15():
+    pytest.importorskip("neuronx_distributed")
     from difflet.backends.trainium.hunyuan_video import parallel15 as module
 
     return module
