@@ -380,15 +380,15 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
         shape = {"height": int(args.height or 480), "width": int(args.width or 848),
                  "num_frames": int(args.num_frames or 121)}
         if component == "transformer":
-            # graph_version: bump backbone15._AOT_DIT_GRAPH_VERSION whenever the traced DiT
+            # graph_version: bump aot15_graph._AOT_DIT_GRAPH_VERSION whenever the traced DiT
             # graph's inputs or structure change, so the change compiles into a fresh dir.
             # compiler_args: the effective args (env override or default) are keyed, so changing
             # either compiles fresh; that also invalidates v2 artifacts built with the ccop
             # overlap option, hence no _AOT_DIT_GRAPH_VERSION bump. The default depends on the
-            # image-token count N (backbone15.hv15_num_image_tokens, also used by the config).
+            # image-token count N (aot15_graph.hv15_num_image_tokens, also used by the config).
             # diagnostic_switches: the backbone15 probes that change the traced graph, keyed
             # only when set (production keys are unchanged).
-            from difflet.backends.trainium.hunyuan_video.backbone15 import (
+            from difflet.models.hunyuan_video.aot15_graph import (
                 _AOT_DIT_GRAPH_VERSION, hv15_diagnostic_graph_switches, hv15_dit_compiler_args,
                 hv15_num_image_tokens)
 
