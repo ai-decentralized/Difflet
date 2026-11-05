@@ -399,7 +399,7 @@ class NeuronLtx2TransformerApplication(TorchNeuronApplicationBase):
 
     def get_example_inputs(self) -> tuple[torch.Tensor, ...]:
         """The seven call tensors at the static shape: the packed video and audio latents and
-        the two text streams in ``dtype``, a mid-schedule timestep, and the pipeline's own fp32
+        the two text streams in ``dtype``, a mid-schedule fp32 timestep, and the pipeline's own fp32
         RoPE coordinates (so the warm-up also fills the host RoPE cache). B is 1, or 2 under
         CFG parallelism (the pair the module splits: each rank's blocks still see batch 1)."""
         cfg = self.config
@@ -415,7 +415,7 @@ class NeuronLtx2TransformerApplication(TorchNeuronApplicationBase):
                         ).to(self.dtype),
             torch.randn(batch, int(cfg.text_seq_len), cfg.audio_text_dim, generator=gen
                         ).to(self.dtype),
-            torch.full((batch,), 500.0, dtype=self.dtype),
+            torch.full((batch,), 500.0, dtype=torch.float32),
             video_coords,
             audio_coords,
         )
