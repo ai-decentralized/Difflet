@@ -1,0 +1,159 @@
+"""QuantSpec: validation, matching, serialisation and the cache fields (torch-free)."""
+
+from __future__ import annotations
+
+import dataclasses
+
+import pytest
+
+from difflet.quant.spec import FORMAT, QUANT_SCHEMA, QuantSpec, quant_cache_fields
+from difflet.quant.targets import QWEN_IMAGE_KEPT_BF16, QWEN_IMAGE_TARGETS, default_spec, targets_for
+
+
+def test_default_qwen_spec_is_mxfp8_on_the_kernel():
+    spec = default_spec("qwen_image")
+    assert spec.format == FORMAT == "mxfp8"
+    assert spec.compute == "nki" and spec.schema == QUANT_SCHEMA and spec.tp_degree == 1
+    assert spec.targets == QWEN_IMAGE_TARGETS
+
+
+def test_unknown_model_has_no_targets():
+    with pytest.raises(ValueError, match="no FP8 target layers"):
+        targets_for("minimax_h3")
+
+
+@pytest.mark.parametrize("name", [
+    "transformer_blocks.0.attn.to_q",
+    "transformer_blocks.59.attn.add_k_proj",
+    "transformer_blocks.7.img_mlp.net.0.proj",
+    "transformer_blocks.7.txt_mlp.net.2",
+    "transformer.transformer_blocks.7.txt_mlp.net.2",  # the trace-module prefix is stripped
+])
+def test_qwen_targets_match_the_block_projections(name):
+    assert default_spec("qwen_image").matches(name)
+
+
+@pytest.mark.parametrize("name", [
+    "transformer_blocks.0.img_mod.1",
+    "transformer_blocks.0.txt_mod.1",
+    "time_text_embed.timestep_embedder.linear_1",
+    "img_in",
+    "txt_in",
+    "norm_out.linear",
+    "proj_out",
+    "transformer_blocks.3.attn.to_out.0",  # measured: faster and closer to bf16 when kept bf16
+    "transformer_blocks.3.attn.to_add_out",
+    "transformer_blocks.0.attn.to_out",  # the Sequential, not its linear
+    "transformer_blocks.0.attn.to_q.weight",  # a parameter, not a module
+])
+def test_qwen_targets_keep_conditioning_and_io_in_bf16(name):
+    import re
+
+    spec = default_spec("qwen_image")
+    assert not spec.matches(name)
+    if name in ("transformer_blocks.0.attn.to_out", "transformer_blocks.0.attn.to_q.weight"):
+        return
+    assert any(re.fullmatch(p, name) for p in QWEN_IMAGE_KEPT_BF16), name
+
+
+def test_row_parallel_targets_are_quantized_per_rank_k_range():
+    spec = default_spec("qwen_image", tp_degree=4)
+    assert spec.k_shards("transformer_blocks.3.attn.to_out.0") == 4  # row-parallel even when not a target
+    assert spec.k_shards("transformer.transformer_blocks.3.img_mlp.net.2") == 4
+    assert spec.k_shards("transformer_blocks.3.attn.to_q") == 1
+    assert spec.k_shards("transformer_blocks.3.img_mlp.net.0.proj") == 1
+    assert default_spec("qwen_image").k_shards("transformer_blocks.3.img_mlp.net.2") == 1
+
+
+def test_dict_round_trip_and_frozen():
+    spec = default_spec("qwen_image", compute="dequant", tp_degree=2)
+    body = spec.to_dict()
+    assert body["format"] == "mxfp8"
+    assert QuantSpec.from_dict(body) == spec
+    assert QuantSpec.from_dict({k: v for k, v in body.items() if k != "format"}) == spec
+    with pytest.raises(ValueError, match="quant format"):
+        QuantSpec.from_dict({**body, "format": "fp8"})
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        spec.compute = "nki"  # type: ignore[misc]
+
+
+@pytest.mark.parametrize("field, value, message", [
+    ("compute", "torchao", "compute must"),
+    ("tp_degree", 0, "tp_degree"),
+    ("targets", (), "at least one"),
+    ("targets", ("(",), None),  # an invalid regex raises re.error
+])
+def test_invalid_specs_are_refused(field, value, message):
+    kwargs = {"targets": QWEN_IMAGE_TARGETS, field: value}
+    with pytest.raises(Exception, match=message) if message else pytest.raises(Exception):
+        QuantSpec(**kwargs)
+
+
+def test_cache_fields_absent_when_off_and_complete_when_on():
+    assert quant_cache_fields(None) == {}
+    spec = default_spec("qwen_image", tp_degree=4)
+    fields = quant_cache_fields(spec)
+    assert fields == {"quant": "mxfp8", "quant_schema": QUANT_SCHEMA, "quant_compute": "nki",
+                      "quant_targets_sha256": spec.targets_sha256(), "quant_tp_degree": 4}
+    # Every field is JSON-able (the keys are hashed as JSON).
+    import json
+
+    json.dumps(fields, sort_keys=True)
+
+
+def test_cache_fields_change_with_what_changes_the_artifact():
+    base = default_spec("qwen_image", tp_degree=4)
+    variants = [
+        dataclasses.replace(base, compute="dequant"),
+        dataclasses.replace(base, tp_degree=2),
+        dataclasses.replace(base, targets=base.targets[:1]),
+    ]
+    keys = {str(sorted(v.cache_fields().items())) for v in [base, *variants]}
+    assert len(keys) == len(variants) + 1
+
+
+def test_weights_identity_ignores_the_compute_path():
+    a = default_spec("qwen_image", compute="nki")
+    b = default_spec("qwen_image", compute="dequant")
+    assert a.weights_identity() == b.weights_identity()
+    assert a.cache_fields() != b.cache_fields()
+    assert a.weights_identity() != dataclasses.replace(a, tp_degree=2).weights_identity()
+
+
+@pytest.mark.parametrize("name", [
+    "transformer_blocks.0.attn.to_q",
+    "transformer_blocks.18.attn.add_v_proj",
+    "transformer_blocks.3.ff.net.0.proj",
+    "transformer_blocks.3.ff_context.net.2",
+    "single_transformer_blocks.37.attn.to_k",
+    "single_transformer_blocks.0.proj_mlp",
+])
+def test_flux_targets_match_the_block_projections(name):
+    assert default_spec("flux").matches(name)
+
+
+@pytest.mark.parametrize("name", [
+    "transformer_blocks.0.attn.to_out.0",
+    "transformer_blocks.0.attn.to_add_out",
+    "single_transformer_blocks.0.proj_out",
+    "single_transformer_blocks.0.proj_out_attn",
+    "single_transformer_blocks.0.proj_out_mlp",
+    "transformer_blocks.0.norm1.linear",
+    "transformer_blocks.0.norm1_context.linear",
+    "single_transformer_blocks.0.norm.linear",
+    "time_text_embed.timestep_embedder.linear_1",
+    "context_embedder",
+    "x_embedder",
+    "norm_out.linear",
+    "proj_out",
+])
+def test_flux_targets_keep_outputs_conditioning_and_io_in_bf16(name):
+    import re
+
+    from difflet.quant.targets import FLUX_KEPT_BF16
+
+    spec = default_spec("flux", tp_degree=4)
+    assert not spec.matches(name)
+    assert any(re.fullmatch(p, name) for p in FLUX_KEPT_BF16), name
+    assert spec.k_shards("transformer_blocks.0.ff.net.2") == 4
+    assert spec.k_shards("transformer_blocks.0.ff.net.0.proj") == 1
