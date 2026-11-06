@@ -28,7 +28,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from difflet.backends.neuron.hbm import Component, components_bytes, components_fit
+from difflet.backends.neuron.hbm import (
+    FIT_FRACTION,
+    Component,
+    components_bytes,
+    components_fit,
+    per_core_hbm_bytes,
+    safetensors_bytes,
+)
 
 #: The DiT runs in bf16 on the device (decision D42, ``NeuronQwenImageTransformerApplication``).
 DIT_DTYPE_BYTES = 2
@@ -48,15 +55,24 @@ def text_encoder_lm_numel(model_dir: str | Path) -> int:
 
 
 def dit_bytes(model_dir: str | Path, *, tp_degree: int,
-              dit_dtype_bytes: int = DIT_DTYPE_BYTES) -> int:
-    """Lower bound of one rank's DiT weight bytes: ``<model_dir>/transformer`` over tp."""
+              dit_dtype_bytes: int = DIT_DTYPE_BYTES, dit_dir: str | Path | None = None) -> int:
+    """Lower bound of one rank's DiT weight bytes: ``<model_dir>/transformer`` over tp, or,
+    with ``dit_dir`` (a quantized checkpoint, ``difflet/quant/checkpoint.py``), that directory's
+    bytes as stored (fp8 weights, fp32 scales, bf16 rest) over tp."""
+    if dit_dir is not None:
+        return safetensors_bytes(dit_dir) // max(int(tp_degree), 1)
     return components_bytes(model_dir, (DIT.in_dtype(dit_dtype_bytes),), tp_degree=tp_degree)
 
 
 def dit_fits(model_dir: str | Path, *, tp_degree: int,
-             dit_dtype_bytes: int = DIT_DTYPE_BYTES) -> tuple[bool, int, int]:
+             dit_dtype_bytes: int = DIT_DTYPE_BYTES,
+             dit_dir: str | Path | None = None) -> tuple[bool, int, int]:
     """``(fits, estimate, limit)``: ``dit_bytes`` against ``FIT_FRACTION`` of one core's HBM."""
-    return components_fit(model_dir, (DIT.in_dtype(dit_dtype_bytes),), tp_degree=tp_degree)
+    if dit_dir is None:
+        return components_fit(model_dir, (DIT.in_dtype(dit_dtype_bytes),), tp_degree=tp_degree)
+    estimate = dit_bytes(model_dir, tp_degree=tp_degree, dit_dir=dit_dir)
+    limit = int(per_core_hbm_bytes()[0] * FIT_FRACTION)
+    return estimate <= limit, estimate, limit
 
 
 def device_text_encoder_components(encoder_dtype_bytes: int = TEXT_ENCODER_DTYPE_BYTES,
