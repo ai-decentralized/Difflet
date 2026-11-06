@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import time
@@ -332,6 +333,7 @@ class WanHostDecoderStageRunner:
         started = time.monotonic()
         invocation.context.cancellation.throw_if_cancelled()
         if not _is_primary_replica():
+            _vae_peer_hold(self.adapter)
             request = invocation.request
             assert request.video is not None
             return stage_result(
@@ -351,15 +353,18 @@ class WanHostDecoderStageRunner:
                 started_monotonic=started,
             )
         vae = self.adapter._require_vae()
-        latents = invocation.input.latents.detach().to(device="cpu", dtype=torch.float32)
-        mean = torch.tensor(vae.config.latents_mean).view(1, int(vae.config.z_dim), 1, 1, 1)
-        inverse_std = 1.0 / torch.tensor(vae.config.latents_std).view(
-            1, int(vae.config.z_dim), 1, 1, 1
-        )
-        latents = latents / inverse_std + mean
-        with torch.no_grad():
-            frames = vae.decode(latents, return_dict=False)[0]
-        frames = frames.to(torch.float32).clamp(-1.0, 1.0)
+        if _backend_is_tpu():
+            frames = _tpu_decode(self.adapter, vae, invocation.input.latents)
+        else:
+            latents = invocation.input.latents.detach().to(device="cpu", dtype=torch.float32)
+            mean = torch.tensor(vae.config.latents_mean).view(1, int(vae.config.z_dim), 1, 1, 1)
+            inverse_std = 1.0 / torch.tensor(vae.config.latents_std).view(
+                1, int(vae.config.z_dim), 1, 1, 1
+            )
+            latents = latents / inverse_std + mean
+            with torch.no_grad():
+                frames = vae.decode(latents, return_dict=False)[0]
+            frames = frames.to(torch.float32).clamp(-1.0, 1.0)
         invocation.context.cancellation.throw_if_cancelled()
         output = encode_video_tensor(
             frames,
@@ -468,6 +473,11 @@ class WanServingStageAdapter:
         # limit -- the DiT leaves ~7.6 GB free per chip.
         if runtime.profile.host_vae or tpu:
             self.vae = _load_host_vae(runtime.source.pinned_model_path)
+            if tpu:
+                from difflet.backends.tpu.ops_impl import device_runtime
+
+                # Host unless DIFFLET_TPU_DEVICE_VAE=1 on the primary replica.
+                self.vae = device_runtime.maybe_device_vae(self.vae)
         else:
             decoder_binding = runtime.artifacts.require("decoder")
             vae_app = _build_neuron_vae(runtime.source, runtime.profile)
@@ -646,8 +656,15 @@ def _validate_profile(profile: ServingProfile) -> None:
         raise ValueError("Wan resident serving requires CFG parallel off")
     if profile.world_size != _WORLD_SIZE:
         raise ValueError("Wan resident serving requires world_size=4")
+    # Adaptive TeaCache needs the block-0 CPU shadow + a calibration file and is
+    # not wired for serving. On TPU the probe-free modes (teacache_cadence /
+    # teacache_online_delta) are: they live in WanOrchestrator's host-side
+    # controller and reach it through _build_application.
     if profile.teacache_speedup is not None or profile.teacache_calibration_data is not None:
         raise ValueError("Wan resident video serving does not support TeaCache")
+    probe_free = profile.teacache_cadence is not None or profile.teacache_online_delta is not None
+    if probe_free and not _backend_is_tpu():
+        raise ValueError("Wan resident video serving supports probe-free TeaCache on TPU only")
 
 
 def _compile_spec(
@@ -729,6 +746,21 @@ def _application_kwargs() -> dict[str, Any]:
     }
 
 
+def _teacache_kwargs(profile: ServingProfile) -> dict[str, Any]:
+    """Probe-free TeaCache kwargs for the TPU application.
+
+    Kept OUT of ``_application_kwargs``: that dict is part of the compile-cache
+    identity (``CacheSpec.application_kwargs``), and neither mode changes the
+    graph.
+    """
+    kwargs: dict[str, Any] = {}
+    if profile.teacache_cadence is not None:
+        kwargs["teacache_cadence"] = int(profile.teacache_cadence)
+    if profile.teacache_online_delta is not None:
+        kwargs["teacache_online_delta_alpha"] = float(profile.teacache_online_delta)
+    return kwargs
+
+
 def _build_application(source: ResolvedModelSource, profile: ServingProfile):
     if _backend_is_tpu():
         from difflet.models.wan.entry import create_wan_application
@@ -740,6 +772,7 @@ def _build_application(source: ResolvedModelSource, profile: ServingProfile):
             shape=profile.shape_dict(),
             backend="tpu",
             **_application_kwargs(),
+            **_teacache_kwargs(profile),
         )
 
     from difflet.models.wan.application import NeuronWanApplication
@@ -809,12 +842,12 @@ def _runtime_plan(
     if isinstance(specs, DiffletCompileSpec):
         specs = (specs,)
     by_component = {spec.component_id: spec for spec in specs}
-    # No specs means the TPU backend, which runs eagerly: there is no compiled
-    # artifact to name, and the profile identity has nothing to hash. Mirrors
+    # The TPU backend runs eagerly: there is no compiled artifact to name, and
+    # the profile identity has nothing to hash. Mirrors
     # the Qwen-Image orchestrator, which carries artifact_id=None and
     # placement="tpu" through the same structure rather than branching the
     # whole plan.
-    tpu = not specs
+    tpu = _backend_is_tpu()
     generation = by_component.get("generation")
     environment, allocation = resident_environment(profile, allocation_id="wan-resident")
     topology = ParallelTopology(
@@ -940,6 +973,47 @@ def _build_neuron_vae(source: ResolvedModelSource, profile: ServingProfile):
             ]
 
     return WanServingNeuronVAEApplication(decoder)
+
+
+def _tpu_decode(adapter, vae, latents):
+    """TPU: decode on the VAE's own device -- the host, or the primary's chip with
+    DIFFLET_TPU_DEVICE_VAE=1, the DiT moved off it around the decode."""
+    import torch
+
+    with _vae_decode_room(adapter, vae):
+        device = next(vae.parameters()).device
+        latents = latents.detach().to(device=device, dtype=torch.float32)
+        z_dim = int(vae.config.z_dim)
+        mean = torch.tensor(vae.config.latents_mean, device=device).view(1, z_dim, 1, 1, 1)
+        inverse_std = 1.0 / torch.tensor(vae.config.latents_std, device=device).view(
+            1, z_dim, 1, 1, 1
+        )
+        with torch.no_grad():
+            frames = vae.decode(latents / inverse_std + mean, return_dict=False)[0]
+        return frames.to(device="cpu", dtype=torch.float32).clamp(-1.0, 1.0)
+
+
+def _vae_decode_room(adapter, vae):
+    """TPU: move the DiT off the primary's chip around a chip VAE decode.
+
+    A no-op on every other backend and whenever the VAE is on the host.
+    """
+    if not _backend_is_tpu() or adapter.application is None:
+        return contextlib.nullcontext()
+    from difflet.backends.tpu.ops_impl import device_runtime
+
+    return device_runtime.vae_decode_room(vae, adapter.application.on_chip_modules())
+
+
+def _vae_peer_hold(adapter) -> None:
+    """TPU: a non-primary replica's side of the DiT peer stash around the primary's
+    chip decode (DIFFLET_TPU_VAE_PEER_STASH=1). A no-op on every other backend.
+    """
+    if not _backend_is_tpu() or adapter.application is None:
+        return
+    from difflet.backends.tpu.ops_impl import device_runtime
+
+    device_runtime.vae_peer_hold(adapter.application.on_chip_modules())
 
 
 def _load_host_vae(model_path: str):

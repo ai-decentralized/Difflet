@@ -1,0 +1,134 @@
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+[rank2] checkpoint loaded on host host_rss=15.6G
+[rank0] checkpoint loaded on host host_rss=15.6G
+[rank3] checkpoint loaded on host host_rss=15.6G
+[rank1] checkpoint loaded on host host_rss=15.6G
+[rank2] module.to(device) traced host_rss=15.8G
+[rank2] resident hbm={'bytes_used': 10.84, 'bytes_limit': 15.75, 'peak_bytes_used': 10.84} host_rss=15.8G
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+[rank3] module.to(device) traced host_rss=15.7G
+[rank3] resident hbm={'bytes_used': 10.84, 'bytes_limit': 15.75, 'peak_bytes_used': 10.84} host_rss=15.7G
+[rank0] module.to(device) traced host_rss=15.7G
+[rank0] resident hbm={'bytes_used': 10.84, 'bytes_limit': 15.75, 'peak_bytes_used': 10.84} host_rss=15.7G
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+[rank1] module.to(device) traced host_rss=15.7G
+[rank1] resident hbm={'bytes_used': 10.84, 'bytes_limit': 15.75, 'peak_bytes_used': 10.84} host_rss=15.7G
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+[rank2] fused forward 0 traced host_rss=15.9G
+[rank3] fused forward 0 traced host_rss=15.8G
+[rank0] fused forward 0 traced host_rss=15.8G
+[rank1] fused forward 0 traced host_rss=15.8G
+[rank1] fused forward 0 done in 90.0s hbm={'bytes_used': 12.52, 'bytes_limit': 15.75, 'peak_bytes_used': 12.53} host_rss=37.4G
+[rank0] fused forward 0 done in 90.0s hbm={'bytes_used': 12.52, 'bytes_limit': 15.75, 'peak_bytes_used': 12.53} host_rss=37.4G
+[rank2] fused forward 0 done in 90.1s hbm={'bytes_used': 12.52, 'bytes_limit': 15.75, 'peak_bytes_used': 12.53} host_rss=35.7G
+[rank3] fused forward 0 done in 90.0s hbm={'bytes_used': 12.52, 'bytes_limit': 15.75, 'peak_bytes_used': 12.53} host_rss=35.7G
+[rank1] fused forward 1 traced host_rss=37.4G
+[rank2] fused forward 1 traced host_rss=35.7G
+[rank3] fused forward 1 traced host_rss=35.7G
+[rank0] fused forward 1 traced host_rss=37.4G
+[rank1] fused forward 1 done in 1.0s hbm={'bytes_used': 12.52, 'bytes_limit': 15.75, 'peak_bytes_used': 12.53} host_rss=37.4G
+[rank0] fused forward 1 done in 1.0s hbm={'bytes_used': 12.52, 'bytes_limit': 15.75, 'peak_bytes_used': 12.53} host_rss=37.4G
+[rank2] fused forward 1 done in 1.0s hbm={'bytes_used': 12.52, 'bytes_limit': 15.75, 'peak_bytes_used': 12.53} host_rss=35.7G
+[rank3] fused forward 1 done in 1.0s hbm={'bytes_used': 12.52, 'bytes_limit': 15.75, 'peak_bytes_used': 12.53} host_rss=35.7G
+[rank1] fused forward 2 traced host_rss=37.4G
+[rank2] fused forward 2 traced host_rss=35.7G
+[rank0] fused forward 2 traced host_rss=37.4G
+[rank3] fused forward 2 traced host_rss=35.7G
+[rank1] fused forward 2 done in 1.0s hbm={'bytes_used': 12.52, 'bytes_limit': 15.75, 'peak_bytes_used': 12.53} host_rss=37.4G
+[rank0] fused forward 2 done in 1.0s hbm={'bytes_used': 12.52, 'bytes_limit': 15.75, 'peak_bytes_used': 12.53} host_rss=37.4G
+[rank2] fused forward 2 done in 1.0s hbm={'bytes_used': 12.52, 'bytes_limit': 15.75, 'peak_bytes_used': 12.53} host_rss=35.7G
+[rank3] fused forward 2 done in 1.0s hbm={'bytes_used': 12.52, 'bytes_limit': 15.75, 'peak_bytes_used': 12.53} host_rss=35.7G
+[rank2] sdpa forward 0 traced host_rss=35.7G
+[rank1] sdpa forward 0 traced host_rss=37.4G
+[rank3] sdpa forward 0 traced host_rss=35.7G
+[rank0] sdpa forward 0 traced host_rss=37.4G
+[rank0] sdpa forward 0 done in 110.6s hbm={'bytes_used': 12.54, 'bytes_limit': 15.75, 'peak_bytes_used': 12.55} host_rss=11.7G
+[rank2] sdpa forward 0 done in 110.6s hbm={'bytes_used': 12.54, 'bytes_limit': 15.75, 'peak_bytes_used': 12.55} host_rss=11.6G
+[rank3] sdpa forward 0 done in 110.6s hbm={'bytes_used': 12.54, 'bytes_limit': 15.75, 'peak_bytes_used': 12.55} host_rss=11.6G
+[rank1] sdpa forward 0 done in 110.6s hbm={'bytes_used': 12.54, 'bytes_limit': 15.75, 'peak_bytes_used': 12.55} host_rss=11.6G
+[rank0] sdpa forward 1 traced host_rss=11.7G
+[rank2] sdpa forward 1 traced host_rss=11.6G
+[rank3] sdpa forward 1 traced host_rss=11.7G
+[rank1] sdpa forward 1 traced host_rss=11.6G
+[rank2] sdpa forward 1 done in 2.0s hbm={'bytes_used': 12.54, 'bytes_limit': 15.75, 'peak_bytes_used': 12.55} host_rss=11.6G
+[rank0] sdpa forward 1 done in 2.0s hbm={'bytes_used': 12.54, 'bytes_limit': 15.75, 'peak_bytes_used': 12.55} host_rss=11.7G
+[rank3] sdpa forward 1 done in 2.0s hbm={'bytes_used': 12.54, 'bytes_limit': 15.75, 'peak_bytes_used': 12.55} host_rss=11.7G
+[rank1] sdpa forward 1 done in 2.0s hbm={'bytes_used': 12.54, 'bytes_limit': 15.75, 'peak_bytes_used': 12.55} host_rss=11.6G
+[rank0] sdpa forward 2 traced host_rss=11.7G
+[rank2] sdpa forward 2 traced host_rss=11.6G
+[rank3] sdpa forward 2 traced host_rss=11.7G
+[rank1] sdpa forward 2 traced host_rss=11.6G
+[rank0] sdpa forward 2 done in 2.0s hbm={'bytes_used': 12.54, 'bytes_limit': 15.75, 'peak_bytes_used': 12.55} host_rss=11.7G
+[rank2] sdpa forward 2 done in 2.0s hbm={'bytes_used': 12.54, 'bytes_limit': 15.75, 'peak_bytes_used': 12.55} host_rss=11.6G
+[rank3] sdpa forward 2 done in 2.0s hbm={'bytes_used': 12.54, 'bytes_limit': 15.75, 'peak_bytes_used': 12.55} host_rss=11.7G
+[rank1] sdpa forward 2 done in 2.0s hbm={'bytes_used': 12.54, 'bytes_limit': 15.75, 'peak_bytes_used': 12.55} host_rss=11.6G
+{
+ "results": {
+  "fused": {
+   "kernel_available": true,
+   "step_s": [
+    90.043,
+    1.01,
+    0.991
+   ],
+   "cosine": 0.9994888305664062,
+   "rel_l1": 0.030789026990532875,
+   "max_abs": 0.3529021739959717,
+   "vs_bf16": {
+    "cosine": 0.9998446106910706,
+    "rel_l1": 0.0142808947712183,
+    "max_abs": 0.125
+   }
+  },
+  "sdpa": {
+   "kernel_available": false,
+   "step_s": [
+    110.602,
+    2.035,
+    2.03
+   ],
+   "cosine": 0.9994861483573914,
+   "rel_l1": 0.030889291316270828,
+   "max_abs": 0.3529021739959717,
+   "vs_bf16": {
+    "cosine": 0.9998422861099243,
+    "rel_l1": 0.014425385743379593,
+    "max_abs": 0.125
+   }
+  }
+ },
+ "control": {
+  "cosine": 0.9994624257087708,
+  "rel_l1": 0.03153279051184654,
+  "max_abs": 0.3587615489959717
+ },
+ "load_s": 20.6,
+ "mem_after_load_gb": {
+  "bytes_used": 10.835,
+  "bytes_limit": 15.748,
+  "peak_bytes_used": 10.835
+ },
+ "mem_after_fwd_gb": {
+  "bytes_used": 12.526,
+  "bytes_limit": 15.748,
+  "peak_bytes_used": 12.548
+ }
+}
+
+hunyuan_video vs diffusers fp32 on CPU
+attention    cos vs fp32    rel_l1 |   cos vs bf16    rel_l1 | step s
+fused         0.99948883  3.08e-02 |    0.99984461  1.43e-02 | [90.043, 1.01, 0.991]
+sdpa          0.99948615  3.09e-02 |    0.99984229  1.44e-02 | [110.602, 2.035, 2.03]
+[control]     0.99946243  3.15e-02 |   diffusers bf16 vs its own fp32

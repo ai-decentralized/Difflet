@@ -65,16 +65,17 @@ def run_one(slug: str, backend: str, *, skip_download: bool, skip_compile: bool,
         res.notes.append(
             "The config_label comes from models.py::MATRIX and describes the "
             "TRAINIUM recipe — 'attention_cte' is a Neuron kernel and is NOT what "
-            "ran here; the TPU backend uses scaled_dot_product_attention. The "
-            "tp=4/cp=1 sharding IS accurate: the DiT is split across 4 v5e chips, "
-            "one worker process per chip. Attention uses the Pallas fused kernel "
-            "(torch_xla.experimental.custom_kernel) above 32M score elements and "
-            "scaled_dot_product_attention below it. compile_seconds=0 means no AOT "
-            "artifact was built or reused, not that compilation is free — XLA "
-            "compiles on each process's first execution, inside e2e_cold. "
-            "step_latency is on a throughput basis (denoise wall clock / steps): "
-            "unsynced inter-step deltas under lazy XLA measure the enqueue rate, "
-            "not device time.")
+            "ran here; the TPU backend runs on TorchTPU and uses its "
+            "scaled_dot_product_attention (the JAX Pallas flash kernel only with "
+            "DIFFLET_TPU_PALLAS=1). The tp=4/cp=1 sharding IS accurate: the DiT is "
+            "split across 4 v5e chips, one worker process per chip, under "
+            "torch.compile where the model defaults to it (Qwen-Image, Wan, FLUX; "
+            "DIFFLET_TPU_COMPILE overrides). compile_seconds=0 means no AOT "
+            "artifact exists, not that compilation is free — TorchTPU compiles "
+            "just in time on each process's first execution (inside e2e_cold) and "
+            "caches the executables on disk, so a later process mostly re-traces. "
+            "step_latency is the device-synced inter-step delta of the real loop, "
+            "step 0 excluded.")
     try:
         if not skip_download:
             adapter.prepare(cfg)

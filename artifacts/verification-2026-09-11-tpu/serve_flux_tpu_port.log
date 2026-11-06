@@ -1,0 +1,104 @@
+[difflet serve] resolving Flux weights for black-forest-labs/FLUX.1-dev
+Fetching 25 files:   0%|          | 0/25 [00:00<?, ?it/s]Fetching 25 files: 100%|██████████| 25/25 [00:00<00:00, 2147.49it/s]
+2026-09-12 04:25:49.289 INFO:     Started server process [345554]
+2026-09-12 04:25:49.289 INFO:     Waiting for application startup.
+2026-09-12 04:25:49.289 INFO:     serving startup begin model=black-forest-labs/FLUX.1-dev
+2026-09-12 04:25:53.549 INFO:     worker_process_start model=black-forest-labs/FLUX.1-dev profile_identity= startup_timeout=1800.0
+2026-09-12 04:25:53.549 INFO:     worker_process_terminate model=black-forest-labs/FLUX.1-dev
+[difflet serve] tpu backend: eager stages, no compile artifacts
+[difflet serve] stage topology:
+  - pipeline: role=pipeline kind=opaque_pipeline placement=tpu artifact=-
+2026-09-12 04:26:01.162 INFO:     worker heartbeat transition state=starting request_id=None stage=None running_requests=0 queued_requests=0 pending_requests=0 capacity=9
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+2026-09-12 04:26:31.162 INFO:     worker heartbeat state_dwell_seconds=30.00 from_state=starting to_state=loading
+2026-09-12 04:26:31.162 INFO:     worker heartbeat transition state=loading request_id=None stage=None running_requests=0 queued_requests=0 pending_requests=0 capacity=9
+[difflet serve] loading Flux worker profile ServingProfile(model_id='black-forest-labs/FLUX.1-dev', model_type='flux', height=1024, width=1024, num_frames=None, parallel=DiffletParallelConfig(tp_degree=4, cp_degree=1, cfg_parallel_enabled=False, cp_mode='gather_kv', sp_enabled=False, dp_degree=1), cache_dir=None, revision='3de623fc3c33e44ffbe2bad470d0f45bccf2eb21', dtype='bfloat16', output_modality='image', output_mime_type='image/png', teacache_speedup=None, teacache_calibration=None, teacache_calibration_data=None, teacache_cadence=None, teacache_online_delta=None, output_fps=None, host_vae=False, clip_placement=None, shapes=None)
+[flux] tpu warmup (first compile) in 44.0s
+[difflet serve] loading Flux worker profile ServingProfile(model_id='black-forest-labs/FLUX.1-dev', model_type='flux', height=1024, width=1024, num_frames=None, parallel=DiffletParallelConfig(tp_degree=4, cp_degree=1, cfg_parallel_enabled=False, cp_mode='gather_kv', sp_enabled=False, dp_degree=1), cache_dir=None, revision='3de623fc3c33e44ffbe2bad470d0f45bccf2eb21', dtype='bfloat16', output_modality='image', output_mime_type='image/png', teacache_speedup=None, teacache_calibration=None, teacache_calibration_data=None, teacache_cadence=None, teacache_online_delta=None, output_fps=None, host_vae=False, clip_placement=None, shapes=None)
+[flux] tpu warmup (first compile) in 43.8s
+[difflet serve] loading Flux worker profile ServingProfile(model_id='black-forest-labs/FLUX.1-dev', model_type='flux', height=1024, width=1024, num_frames=None, parallel=DiffletParallelConfig(tp_degree=4, cp_degree=1, cfg_parallel_enabled=False, cp_mode='gather_kv', sp_enabled=False, dp_degree=1), cache_dir=None, revision='3de623fc3c33e44ffbe2bad470d0f45bccf2eb21', dtype='bfloat16', output_modality='image', output_mime_type='image/png', teacache_speedup=None, teacache_calibration=None, teacache_calibration_data=None, teacache_cadence=None, teacache_online_delta=None, output_fps=None, host_vae=False, clip_placement=None, shapes=None)
+[flux] tpu warmup (first compile) in 45.0s
+[difflet serve] loading Flux worker profile ServingProfile(model_id='black-forest-labs/FLUX.1-dev', model_type='flux', height=1024, width=1024, num_frames=None, parallel=DiffletParallelConfig(tp_degree=4, cp_degree=1, cfg_parallel_enabled=False, cp_mode='gather_kv', sp_enabled=False, dp_degree=1), cache_dir=None, revision='3de623fc3c33e44ffbe2bad470d0f45bccf2eb21', dtype='bfloat16', output_modality='image', output_mime_type='image/png', teacache_speedup=None, teacache_calibration=None, teacache_calibration_data=None, teacache_cadence=None, teacache_online_delta=None, output_fps=None, host_vae=False, clip_placement=None, shapes=None)
+[flux] tpu warmup (first compile) in 44.2s
+Loading weights:   0%|          | 0/196 [00:00<?, ?it/s]Loading weights:   0%|          | 0/196 [00:00<?, ?it/s]Loading weights:   0%|          | 0/196 [00:00<?, ?it/s]Loading weights: 100%|██████████| 196/196 [00:00<00:00, 5494.11it/s]
+Loading weights: 100%|██████████| 196/196 [00:00<00:00, 5706.73it/s]
+Loading weights: 100%|██████████| 196/196 [00:00<00:00, 5843.48it/s]
+[flux] host encoders loaded in 0.3s (T5 on this rank: False)
+[difflet serve] Flux worker loaded (tpu)
+[flux] host encoders loaded in 0.3s (T5 on this rank: False)
+[difflet serve] Flux worker loaded (tpu)
+Loading weights:   0%|          | 0/219 [00:00<?, ?it/s]Loading weights:  32%|███▏      | 70/219 [00:00<00:00, 662.69it/s][flux] VAE resident on the chip (primary replica)
+[flux] host encoders loaded in 0.6s (T5 on this rank: False)
+[difflet serve] Flux worker loaded (tpu)
+Loading weights:  63%|██████▎   | 137/219 [00:00<00:00, 495.90it/s]Loading weights:  86%|████████▋ | 189/219 [00:00<00:00, 414.38it/s]Loading weights: 100%|██████████| 219/219 [00:00<00:00, 420.49it/s]
+Loading weights:   0%|          | 0/196 [00:00<?, ?it/s]Loading weights: 100%|██████████| 196/196 [00:00<00:00, 7351.26it/s]
+[flux] host encoders loaded in 1.2s (T5 on this rank: True)
+[difflet serve] Flux worker loaded (tpu)
+2026-09-12 04:27:01.162 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=black-forest-labs/FLUX.1-dev profile= running_requests=0 queued_requests=0 pending_requests=0 capacity=9
+2026-09-12 04:27:31.162 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=black-forest-labs/FLUX.1-dev profile= running_requests=0 queued_requests=0 pending_requests=0 capacity=9
+2026-09-12 04:28:01.162 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=black-forest-labs/FLUX.1-dev profile= running_requests=0 queued_requests=0 pending_requests=0 capacity=9
+2026-09-12 04:28:31.163 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=black-forest-labs/FLUX.1-dev profile= running_requests=0 queued_requests=0 pending_requests=0 capacity=9
+2026-09-12 04:29:01.163 INFO:     worker heartbeat alive state=loading request_id=None stage=None model=black-forest-labs/FLUX.1-dev profile= running_requests=0 queued_requests=0 pending_requests=0 capacity=9
+2026-09-12 04:29:20.585 INFO:     worker_process_ready model=black-forest-labs/FLUX.1-dev replicas=4
+2026-09-12 04:29:20.585 INFO:     serving startup complete model=black-forest-labs/FLUX.1-dev
+2026-09-12 04:29:20.585 INFO:     Application startup complete.
+2026-09-12 04:29:20.585 INFO:     Uvicorn running on http://127.0.0.1:8099 (Press CTRL+C to quit)
+2026-09-12 04:29:24.764 INFO:     127.0.0.1:56832 - "GET /ready HTTP/1.1" 200
+2026-09-12 04:29:24.779 INFO:     127.0.0.1:56840 - "GET /ready HTTP/1.1" 200
+2026-09-12 04:29:24.788 INFO:     http.request_started path=/v1/chat/completions method=POST model=black-forest-labs/FLUX.1-dev request_id=2ab45a3a-bcfc-4f84-bd71-8980a167f6b1 client=127.0.0.1
+2026-09-12 04:29:24.790 INFO:     chat request normalized model=black-forest-labs/FLUX.1-dev request_id=2ab45a3a-bcfc-4f84-bd71-8980a167f6b1 prompt_len=80 steps=28 guidance=3.5 seed=42
+2026-09-12 04:29:24.790 INFO:     engine.generate admitted request_id=2ab45a3a-bcfc-4f84-bd71-8980a167f6b1 model=black-forest-labs/FLUX.1-dev queued=0/9
+2026-09-12 04:29:24.790 INFO:     engine.queue_acquired request_id=2ab45a3a-bcfc-4f84-bd71-8980a167f6b1
+2026-09-12 04:29:24.790 INFO:     engine.lock_acquired request_id=2ab45a3a-bcfc-4f84-bd71-8980a167f6b1
+2026-09-12 04:29:24.790 INFO:     engine.run_start request_id=2ab45a3a-bcfc-4f84-bd71-8980a167f6b1
+2026-09-12 04:29:24.790 INFO:     worker_process_run_start request_id=2ab45a3a-bcfc-4f84-bd71-8980a167f6b1 model=black-forest-labs/FLUX.1-dev deadline_remaining=300.000
+2026-09-12 04:29:31.163 INFO:     worker heartbeat state_dwell_seconds=180.00 from_state=loading to_state=busy
+2026-09-12 04:29:31.164 INFO:     worker heartbeat transition state=busy request_id=2ab45a3a-bcfc-4f84-bd71-8980a167f6b1 stage=pipeline running_requests=1 queued_requests=0 pending_requests=1 capacity=9
+2026-09-12 04:29:34.915 INFO:     worker_process_generation_ok request_id=2ab45a3a-bcfc-4f84-bd71-8980a167f6b1
+2026-09-12 04:29:34.915 INFO:     engine.run_complete request_id=2ab45a3a-bcfc-4f84-bd71-8980a167f6b1
+2026-09-12 04:29:34.915 INFO:     chat request engine_ok request_id=2ab45a3a-bcfc-4f84-bd71-8980a167f6b1 model=black-forest-labs/FLUX.1-dev latency_ms=10125.10
+2026-09-12 04:29:34.918 INFO:     chat request image_inline_ready request_id=2ab45a3a-bcfc-4f84-bd71-8980a167f6b1 bytes=1118780
+2026-09-12 04:29:34.918 INFO:     chat request completed request_id=2ab45a3a-bcfc-4f84-bd71-8980a167f6b1 model=black-forest-labs/FLUX.1-dev total_ms=10128.14
+2026-09-12 04:29:34.918 INFO:     http.request_completed path=/v1/chat/completions status=200 model=black-forest-labs/FLUX.1-dev request_id=2ab45a3a-bcfc-4f84-bd71-8980a167f6b1 duration_ms=10130.04
+2026-09-12 04:29:34.923 INFO:     127.0.0.1:56856 - "POST /v1/chat/completions HTTP/1.1" 200
+2026-09-12 04:29:34.973 INFO:     http.request_started path=/v1/chat/completions method=POST model=black-forest-labs/FLUX.1-dev request_id=853113d3-ba8d-4afe-b5e2-13300d8517f9 client=127.0.0.1
+2026-09-12 04:29:34.974 INFO:     chat request normalized model=black-forest-labs/FLUX.1-dev request_id=853113d3-ba8d-4afe-b5e2-13300d8517f9 prompt_len=80 steps=28 guidance=3.5 seed=42
+2026-09-12 04:29:34.974 INFO:     engine.generate admitted request_id=853113d3-ba8d-4afe-b5e2-13300d8517f9 model=black-forest-labs/FLUX.1-dev queued=0/9
+2026-09-12 04:29:34.974 INFO:     engine.queue_acquired request_id=853113d3-ba8d-4afe-b5e2-13300d8517f9
+2026-09-12 04:29:34.974 INFO:     engine.lock_acquired request_id=853113d3-ba8d-4afe-b5e2-13300d8517f9
+2026-09-12 04:29:34.974 INFO:     engine.run_start request_id=853113d3-ba8d-4afe-b5e2-13300d8517f9
+2026-09-12 04:29:34.975 INFO:     worker_process_run_start request_id=853113d3-ba8d-4afe-b5e2-13300d8517f9 model=black-forest-labs/FLUX.1-dev deadline_remaining=300.000
+2026-09-12 04:29:44.310 INFO:     worker_process_generation_ok request_id=853113d3-ba8d-4afe-b5e2-13300d8517f9
+2026-09-12 04:29:44.310 INFO:     engine.run_complete request_id=853113d3-ba8d-4afe-b5e2-13300d8517f9
+2026-09-12 04:29:44.311 INFO:     chat request engine_ok request_id=853113d3-ba8d-4afe-b5e2-13300d8517f9 model=black-forest-labs/FLUX.1-dev latency_ms=9336.36
+2026-09-12 04:29:44.313 INFO:     chat request image_inline_ready request_id=853113d3-ba8d-4afe-b5e2-13300d8517f9 bytes=1118780
+2026-09-12 04:29:44.313 INFO:     chat request completed request_id=853113d3-ba8d-4afe-b5e2-13300d8517f9 model=black-forest-labs/FLUX.1-dev total_ms=9338.72
+2026-09-12 04:29:44.313 INFO:     http.request_completed path=/v1/chat/completions status=200 model=black-forest-labs/FLUX.1-dev request_id=853113d3-ba8d-4afe-b5e2-13300d8517f9 duration_ms=9339.64
+2026-09-12 04:29:44.318 INFO:     127.0.0.1:32978 - "POST /v1/chat/completions HTTP/1.1" 200
+2026-09-12 04:29:44.450 INFO:     Shutting down
+2026-09-12 04:29:44.551 INFO:     Waiting for application shutdown.
+2026-09-12 04:29:44.551 INFO:     serving shutdown begin model=black-forest-labs/FLUX.1-dev
+2026-09-12 04:29:44.551 INFO:     worker_process_shutdown requested model=black-forest-labs/FLUX.1-dev alive=True
+[difflet serve] running Flux generation smoke
+[difflet serve] Flux generation smoke passed
+[difflet serve] running Flux generation smoke
+[difflet serve] Flux generation smoke passed
+[difflet serve] running Flux generation smoke
+[difflet serve] Flux generation smoke passed
+[difflet serve] running Flux generation smoke
+[difflet serve] Flux generation smoke passed
+2026-09-12 04:29:52.783 INFO:     worker_process_terminate model=black-forest-labs/FLUX.1-dev
+2026-09-12 04:29:52.785 INFO:     serving shutdown complete model=black-forest-labs/FLUX.1-dev
+2026-09-12 04:29:52.785 INFO:     Application shutdown complete.
+2026-09-12 04:29:52.785 INFO:     Finished server process [345554]

@@ -25,11 +25,11 @@ class TpuPlatform(Platform):
 
     @classmethod
     def detect(cls) -> bool:
-        # torch_xla plus the TPU runtime library. Neuron venvs also ship torch_xla but never
-        # libtpu, and Trainium is detected first, so a Trainium host cannot mis-detect as TPU.
-        return (
-            importlib.util.find_spec("torch_xla") is not None
-            and importlib.util.find_spec("libtpu") is not None
+        # libtpu plus a TPU runtime library: torch_tpu (TorchTPU), or torch_xla. Neuron venvs
+        # also ship torch_xla but never libtpu, and Trainium is detected first, so a Trainium
+        # host cannot mis-detect as TPU.
+        return importlib.util.find_spec("libtpu") is not None and any(
+            importlib.util.find_spec(m) is not None for m in ("torch_tpu", "torch_xla")
         )
 
     def prepare_runtime(self, parallel) -> None:

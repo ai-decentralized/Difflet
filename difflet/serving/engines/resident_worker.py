@@ -576,6 +576,13 @@ class _ResidentWorkerProcess:
         )
         self.terminate()
         replicas = self._replica_count
+        if replicas > 1 and _on_tpu():
+            # Parent-side, before spawn. torch_tpu needs TORCH_TPU_TOPOLOGY et al.
+            # set here or every worker's init_process_group fails; torch_xla needs
+            # nothing and this is a no-op there.
+            from difflet.backends.tpu.ops_impl import device_runtime
+
+            device_runtime.prepare_launch(replicas)
         self._cmd_qs = [self._ctx.Queue() for _ in range(replicas)]
         self._cancel_qs = [self._ctx.Queue() for _ in range(replicas)]
         self._reply_q = self._ctx.Queue()
@@ -955,12 +962,24 @@ class _RankedReplyQueue:
             self._inner.put(payload)
 
 
+def _on_tpu() -> bool:
+    """The multi-replica launch below is TPU's; other platforms keep their own path."""
+    from difflet.platforms import current_platform
+
+    try:
+        return current_platform().capabilities.flow == "tpu"
+    except Exception:  # noqa: BLE001 - never fail startup on platform lookup
+        return False
+
+
 def _initialize_replica_runtime(replica_rank: int, replica_count: int) -> None:
     """Give this process its own accelerator before anything else touches it.
 
     This is what ``torch_xla.launch`` does internally. It cannot be used here:
     it owns the process lifecycle and blocks, while a resident worker has to
-    stay alive on a command queue across many requests.
+    stay alive on a command queue across many requests. On TPU the TPU
+    runtime shim does it (torch_tpu or torch_xla); every other platform keeps
+    the torch_xla call it had.
 
     Also divides the CPU threads. PyTorch defaults to one thread per core *per
     process*, so N replicas oversubscribe the host N-fold — measured as a
@@ -970,9 +989,15 @@ def _initialize_replica_runtime(replica_rank: int, replica_count: int) -> None:
     import os
 
     import torch
-    from torch_xla._internal import pjrt
 
-    pjrt.initialize_multiprocess(replica_rank, replica_count)
+    if _on_tpu():
+        from difflet.backends.tpu.ops_impl import device_runtime
+
+        device_runtime.initialize_replica(replica_rank, replica_count)
+    else:
+        from torch_xla._internal import pjrt
+
+        pjrt.initialize_multiprocess(replica_rank, replica_count)
 
     cores = os.cpu_count() or replica_count
     share = max(1, cores // max(1, replica_count))

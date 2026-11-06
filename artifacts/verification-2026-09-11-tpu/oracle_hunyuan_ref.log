@@ -1,0 +1,10 @@
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+/mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/io/image.py:14: UserWarning: Failed to load image Python extension: 'Could not load this library: /mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/image.so'If you don't plan on using image functionality from `torchvision.io`, you can ignore this warning. Otherwise, there might be something wrong with your environment. Did you have `libjpeg` or `libpng` installed before building `torchvision` from source?
+  warn(
+loading diffusers HunyuanVideoTransformer3DModel fp32 (61 frames, latent 16x40x64) ...
+Loading checkpoint shards:   0%|          | 0/6 [00:00<?, ?it/s]Loading checkpoint shards:  17%|█▋        | 1/6 [00:06<00:34,  6.91s/it]Loading checkpoint shards:  33%|███▎      | 2/6 [00:13<00:27,  6.86s/it]Loading checkpoint shards:  50%|█████     | 3/6 [00:20<00:20,  6.76s/it]Loading checkpoint shards:  67%|██████▋   | 4/6 [00:27<00:13,  6.75s/it]Loading checkpoint shards:  83%|████████▎ | 5/6 [00:33<00:06,  6.77s/it]Loading checkpoint shards: 100%|██████████| 6/6 [00:35<00:00,  4.87s/it]Loading checkpoint shards: 100%|██████████| 6/6 [00:35<00:00,  5.85s/it]
+  loaded in 35.2s; 12.821B params
+  forward in 86.7s -> (1, 16, 16, 40, 64)
+  bf16 control forward in 366.7s
+  diffusers bf16 vs diffusers fp32: cosine 0.99946243  rel_l1 3.15e-02
+wrote /mnt/models/teacache_runs/oracle_hunyuan_ref.pt

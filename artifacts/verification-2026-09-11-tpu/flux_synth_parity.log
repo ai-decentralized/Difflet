@@ -1,0 +1,28 @@
+reference written: out (1, 256, 64) control cos(bf16,fp32)=0.815794
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+[rank3] float32: {'cos_vs_fp32': 0.9999995231628418, 'max_abs_vs_fp32': 0.005105733871459961, 'cos_vs_bf16': 0.8158276081085205, 'finite': True} host_rss=5.5G
+[rank0] float32: {'cos_vs_fp32': 0.9999995231628418, 'max_abs_vs_fp32': 0.005105733871459961, 'cos_vs_bf16': 0.8158276081085205, 'finite': True} host_rss=5.5G
+[rank1] float32: {'cos_vs_fp32': 0.9999995231628418, 'max_abs_vs_fp32': 0.005105733871459961, 'cos_vs_bf16': 0.8158276081085205, 'finite': True} host_rss=5.5G
+[rank2] float32: {'cos_vs_fp32': 0.9999995231628418, 'max_abs_vs_fp32': 0.005105733871459961, 'cos_vs_bf16': 0.8158276081085205, 'finite': True} host_rss=5.5G
+[rank1] bfloat16: {'cos_vs_fp32': 0.8151513338088989, 'max_abs_vs_fp32': 3.0863687992095947, 'cos_vs_bf16': 0.9999136328697205, 'finite': True} host_rss=5.4G
+[rank3] bfloat16: {'cos_vs_fp32': 0.8151513338088989, 'max_abs_vs_fp32': 3.0863687992095947, 'cos_vs_bf16': 0.9999136328697205, 'finite': True} host_rss=5.4G
+[rank0] bfloat16: {'cos_vs_fp32': 0.8151513338088989, 'max_abs_vs_fp32': 3.0863687992095947, 'cos_vs_bf16': 0.9999136328697205, 'finite': True} host_rss=5.4G
+[rank2] bfloat16: {'cos_vs_fp32': 0.8151513338088989, 'max_abs_vs_fp32': 3.0863687992095947, 'cos_vs_bf16': 0.9999136328697205, 'finite': True} host_rss=5.4G
+RESULT {
+ "float32": {
+  "cos_vs_fp32": 0.9999995231628418,
+  "max_abs_vs_fp32": 0.005105733871459961,
+  "cos_vs_bf16": 0.8158276081085205,
+  "finite": true
+ },
+ "bfloat16": {
+  "cos_vs_fp32": 0.8151513338088989,
+  "max_abs_vs_fp32": 3.0863687992095947,
+  "cos_vs_bf16": 0.9999136328697205,
+  "finite": true
+ },
+ "control_cos_bf16_vs_fp32": 0.815794050693512
+}

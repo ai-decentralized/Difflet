@@ -39,16 +39,14 @@ def worker(rank, world, model, ref_path, q):
 
 
 def _worker(rank, world, model, ref_path, q):
-    from torch_xla._internal import pjrt
+    from difflet.backends.tpu.ops_impl import device_runtime
 
-    pjrt.initialize_multiprocess(rank, world)
+    device_runtime.initialize_replica(rank, world)
 
     import torch
-    import torch_xla
-    import torch_xla.core.xla_model as xm
 
     torch.set_num_threads(max(1, (os.cpu_count() or world) // world))
-    device = torch_xla.device()
+    device = device_runtime.device()
     blob = torch.load(ref_path, weights_only=False)
     reference = blob["reference"]
     # The same upstream implementation in bf16. Comparing against fp32 alone
@@ -85,20 +83,18 @@ def _worker(rank, world, model, ref_path, q):
                   blob["encoder_hidden_states"], None, None)
 
     module = holder._prepare_module().to(device)
-    xm.mark_step()
-    xm.wait_device_ops()
+    device_runtime.wait()
 
     from difflet.backends.tpu.ops_impl import attention as A
 
     results = {}
     for label, flash in (("fused", True), ("sdpa", False)):
         A._FLASH_KERNEL = None
-        os.environ["DIFFLET_TPU_FLASH"] = "1" if flash else "0"
+        os.environ[A.PALLAS_ENV] = "1" if flash else "0"
         available = A._flash_kernel() is not None
         with torch.no_grad():
             out = module(*[t.to(torch.bfloat16).to(device) if t is not None else None
                            for t in inputs])
-            xm.mark_step()
             out = out.cpu()
         if rank == 0:
             entry = {"kernel_available": available, **_metrics(out, reference)}
@@ -133,6 +129,9 @@ def main() -> int:
     ref = a.ref or f"/mnt/models/oracle_{a.model}.pt"
 
     world = len(list(Path("/dev/vfio").glob("[0-9]*"))) or 1
+    from difflet.backends.tpu.ops_impl import device_runtime
+
+    device_runtime.prepare_launch(world)  # TorchTPU's launch env, before any worker exists
     ctx = mp.get_context("spawn")
     q = ctx.Queue()
     procs = [ctx.Process(target=worker, args=(r, world, a.model, ref, q))

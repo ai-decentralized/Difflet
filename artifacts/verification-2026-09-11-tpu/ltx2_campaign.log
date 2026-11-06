@@ -1,0 +1,7 @@
+=== baseline 02:58:21
+=== cadence2 03:04:37
+=== serve 03:10:32
+serve alive=y ready_after=246s
+request 1: http=200 time=51.625787s bytes=705067
+request 2: http=200 time=50.152310s bytes=705067
+=== done 03:16:31 serve gone after 10s

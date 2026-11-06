@@ -134,14 +134,7 @@ class TpuQwenImageTransformerApplication(TpuApplicationBase):
         )
 
     def forward(self, *args, **kwargs):
-        """Run the loaded graph, or the eager module before a load().
-
-        Falls back to eager deliberately: it makes the module usable for
-        numerical checks without a compile step, which is how the parity
-        tests drive it.
-        """
-        if self.graph_module is not None:
-            return super().forward(*args, **kwargs)
+        """Run the module, building it on first use (how the parity tests drive it)."""
         if self.module is None:
             self._init_runtime()
             self._prepare_module()

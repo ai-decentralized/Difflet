@@ -852,3 +852,36 @@ def test_neuron_worker_environment_is_unchanged(monkeypatch, preserve_worker_env
     _apply_worker_runtime_environment(_runtime())
     assert "CUDA_VISIBLE_DEVICES" not in os.environ
     assert os.environ["NEURON_RT_VISIBLE_CORES"] == "0"
+
+
+def test_a_backend_without_torchrun_mpmd_gets_exactly_one_replica(monkeypatch):
+    """Trainium must never reach the TPU launch path, and this is what stops it.
+
+    `_initialize_replica_runtime` initializes a TPU chip per process. Its only
+    caller guards on `replica_count > 1`, so the guarantee that Trainium never
+    executes it rests entirely on `_replica_count()` returning 1 for a backend
+    whose `supports_torchrun_mpmd` is False. Nothing was pinning that, and the
+    TorchTPU migration (docs/plans/2026-10-22-torchtpu-migration.md) leans on
+    it to keep a shared serving file off the Trainium path.
+    """
+    from difflet.backends.base import BackendCapabilities
+    from difflet.serving.engines import resident_worker as rw
+
+    class _Backend:
+        capabilities = BackendCapabilities(
+            requires_aot=True,
+            single_process_multi_core=True,
+            supports_torchrun_mpmd=False,  # Trainium's
+        )
+
+    monkeypatch.setattr(
+        "difflet.backends.get_backend", lambda *a, **k: _Backend(), raising=False
+    )
+
+    class _Profile:
+        world_size = 8  # would be 8 replicas if the capability were honoured wrongly
+
+    class _Runtime:
+        profile = _Profile()
+
+    assert rw._replica_count(_Runtime()) == 1

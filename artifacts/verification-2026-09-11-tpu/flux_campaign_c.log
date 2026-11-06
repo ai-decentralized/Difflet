@@ -1,0 +1,37 @@
+=== oracle ref 1024 with bf16 control 04:30:00
+exit=0
+fp32 forward 37s out (1, 4096, 64) finite=True
+bf16 host control 131s cos=0.999464
+wrote /mnt/models/teacache_runs/oracle_flux_ref.pt
+=== oracle cmp 1024 vs fp32 + bf16 control 04:33:00
+exit=0
+RESULT {
+ "step_s": [
+  23.638,
+  0.339,
+  0.332
+ ],
+ "out_shape": [
+  1,
+  4096,
+  64
+ ],
+ "finite": true,
+ "hbm_peak_gb": 10.18,
+ "vs_fp32": {
+  "cosine": 0.9994640350341797,
+  "rel_l1": 0.02991184964776039,
+  "max_abs": 0.04969647526741028
+ },
+ "vs_bf16_host": {
+  "cosine": 0.9998572468757629,
+  "rel_l1": 0.013818039558827877,
+  "max_abs": 0.0234375
+ },
+ "control_bf16_vs_fp32": {
+  "cosine": 0.9994642734527588,
+  "rel_l1": 0.02927185781300068,
+  "max_abs": 0.0481056272983551
+ }
+}
+CDONE 04:33:51

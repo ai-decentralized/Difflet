@@ -1,36 +1,25 @@
 """TPU component lifecycle: the ``NeuronApplicationBase`` equivalent.
 
-Implements the Phase 0 verdict — **Direction A**, `torch.export` →
-StableHLO → save at ``compile()``, reload at ``load()``. Nothing here touches
-NxD, ``ModelBuilder.trace()``, NEFFs, or ``nxd_model``.
-
-The signatures below are fixed by ``DiffletPipeline``, which calls them
+The method names below are fixed by ``DiffletPipeline``, which calls them
 reflectively (``difflet/pipeline/difflet_pipeline.py``: ``_compile_app``,
-``_compiled_artifacts_ready``, ``_load_app``). Renaming a parameter here
-silently changes what the pipeline passes, so they must match exactly.
+``_compiled_artifacts_ready``, ``_load_app``), so they stay -- but the TPU
+backend has **no ahead-of-time artifact**. It runs on TorchTPU, which compiles
+just in time: the first execution of each graph traces it (Dynamo, under
+``torch.compile``) and compiles it (XLA), and the XLA executables persist in
+TorchTPU's on-disk compilation cache (``device_runtime._enable_compilation_cache``),
+so a later process skips the XLA compile. There is nothing for ``compile()`` to
+write or ``load()`` to read, and both refuse with that explanation.
 
-Two honest limitations of this v1, both measured rather than assumed:
-
-1. **``load()`` does not skip compilation.** The artifact persists the
-   *traced and lowered graph*, not a compiled executable: loading it is
-   ~instant, but the first execution still pays XLA's StableHLO → TPU
-   compile. Direction B, the only mechanism that would cache the executable,
-   fails on torch_xla (``UNIMPLEMENTED: Deserializing serialized executable
-   not supported``), so no path avoids this today. ``has_compiled_artifacts``
-   therefore means "the graph is exported", NOT "compilation is done".
-2. **Artifacts are per-rank.** Each rank exports its own directory because
-   its weight shard differs. Graph/weight separation would let ranks share
-   one graph; that is a follow-up, not a correctness issue.
-
-Phase 3 of docs/plans/2026-08-16-tpu-backend-support.md.
+The torch_xla backend this replaced exported a StableHLO graph at ``compile()``
+and reloaded it at ``load()``; that saved the trace but not the compile (torch_xla
+cannot deserialise an executable), and it was never what serving ran. Serving
+and the benchmarks build the module in place (``_prepare_module``) and warm it
+with one forward (:meth:`warmup_eager`).
 """
 
 from __future__ import annotations
 
-import json
 import logging
-import os
-from pathlib import Path
 
 import torch
 
@@ -40,37 +29,26 @@ from difflet.backends.tpu.ops_impl.platform import configure_matmul_precision
 
 logger = logging.getLogger(__name__)
 
-MANIFEST_FILE_NAME = "tpu_manifest.json"
-RANK_DIR_TEMPLATE = "tpu_rank{rank}"
-
-
-def normalize_path(path) -> str:
-    """Match ``NeuronApplicationBase.normalize_path``: trailing separator."""
-    return os.path.join(os.path.normpath(str(path)), "")
-
-
-def _rank_dir(compiled_model_path, rank: int) -> Path:
-    return Path(normalize_path(compiled_model_path)) / RANK_DIR_TEMPLATE.format(rank=rank)
-
-
-def _manifest_path(compiled_model_path) -> Path:
-    return Path(normalize_path(compiled_model_path)) / MANIFEST_FILE_NAME
+NO_AOT_ARTIFACT = (
+    "the TPU backend has no ahead-of-time artifact: TorchTPU compiles each graph on "
+    "its first run and keeps the executables in its on-disk compilation cache "
+    "(.difflet-cache/torchtpu, or $DIFFLET_TPU_CACHE_DIR). Use 'difflet serve', which "
+    "warms the cache before /ready, or python -m benchmark.bench --backend tpu."
+)
 
 
 class TpuApplicationBase(torch.nn.Module):
-    """Compile/load lifecycle for one TPU component.
+    """One TPU component: build the sharded module and run it.
 
-    Subclasses provide the module and its example inputs; everything else —
-    export, artifact layout, manifest validation — is handled here.
+    Subclasses provide the module (and, for :meth:`warmup_eager`, example
+    inputs); ``compile`` / ``load`` exist for ``DiffletPipeline``'s signature
+    and refuse (see the module docstring).
     """
 
     def __init__(self, config=None):
         super().__init__()
         self.config = config
         self.module: torch.nn.Module | None = None
-        self.graph_module = None
-        self.is_compiled = False
-        self.is_loaded = False
 
     # ---------------------------------------------------------------- hooks
 
@@ -79,7 +57,7 @@ class TpuApplicationBase(torch.nn.Module):
         raise NotImplementedError
 
     def get_example_inputs(self) -> tuple:
-        """Positional example inputs that fix the exported graph's shapes."""
+        """Positional example inputs at the request shape (for warmup_eager)."""
         raise NotImplementedError
 
     def get_state_dict(self) -> dict | None:
@@ -103,9 +81,9 @@ class TpuApplicationBase(torch.nn.Module):
         """This process's global rank; 0 without a multi-device runtime."""
         if spec.world_size == 1:
             return 0
-        import torch_xla.runtime as xr
+        from difflet.backends.tpu.ops_impl import device_runtime
 
-        return int(xr.global_ordinal())
+        return device_runtime.rank()
 
     def _prepare_module(self) -> torch.nn.Module:
         if self.module is None:
@@ -125,27 +103,9 @@ class TpuApplicationBase(torch.nn.Module):
     # -------------------------------------------------------- the contract
 
     def compile(self, compiled_model_path, debug: bool = False) -> None:
-        """Export this rank's graph to ``compiled_model_path``."""
-        self._init_runtime()
-        module = self._prepare_module()
-        spec = self._mesh()
-        rank = self._runtime_rank(spec)
-        target = _rank_dir(compiled_model_path, rank)
-        target.parent.mkdir(parents=True, exist_ok=True)
-
-        from torch_xla import stablehlo as xla_stablehlo
-
-        example = self.get_example_inputs()
-        if debug:
-            logger.info("exporting rank %s to %s (example=%s)", rank, target,
-                        [tuple(t.shape) for t in example if hasattr(t, "shape")])
-        # NOTE: a failed torch.export leaves XLA process state poisoned — a
-        # later mark_step() segfaults (observed in the Phase 0 spike). Let the
-        # exception propagate rather than continuing in a broken process.
-        xla_stablehlo.save_torch_model_as_stablehlo(module, example, str(target))
-
-        self._write_manifest(compiled_model_path, spec)
-        self.is_compiled = True
+        """Refused: there is no ahead-of-time artifact on TPU."""
+        del compiled_model_path, debug
+        raise NotImplementedError(NO_AOT_ARTIFACT)
 
     def load(
         self,
@@ -154,102 +114,42 @@ class TpuApplicationBase(torch.nn.Module):
         local_ranks_size=None,
         skip_warmup: bool = False,
     ) -> None:
-        """Reload this rank's exported graph.
-
-        ``start_rank_id``/``local_ranks_size`` exist for signature parity with
-        ``NeuronApplicationBase`` (the pipeline passes them reflectively).
-        They describe Trainium's MPMD rank-range protocol; on TPU each process
-        owns exactly one chip and gets its rank from the XLA runtime, so they
-        are accepted and ignored rather than silently reinterpreted.
-        """
-        del start_rank_id, local_ranks_size
-        self._init_runtime()
-        spec = self._mesh()
-        self._validate_manifest(compiled_model_path, spec)
-
-        from torch_xla import stablehlo as xla_stablehlo
-
-        rank = self._runtime_rank(spec)
-        target = _rank_dir(compiled_model_path, rank)
-        if not target.is_dir():
-            raise FileNotFoundError(f"no exported graph for rank {rank} at {target}")
-        self.graph_module = xla_stablehlo.StableHLOGraphModule.load(str(target))
-        self.is_loaded = True
-
-        if not skip_warmup:
-            # Warm-up is where XLA's StableHLO -> executable compile actually
-            # happens; see the module docstring on why load() cannot skip it.
-            self.warmup()
+        """Refused: there is no ahead-of-time artifact on TPU."""
+        del compiled_model_path, start_rank_id, local_ranks_size, skip_warmup
+        raise NotImplementedError(NO_AOT_ARTIFACT)
 
     def has_compiled_artifacts(self, compiled_model_path) -> bool:
-        """True when every rank's graph is exported.
+        """Always False: TPU never has an artifact to load."""
+        del compiled_model_path
+        return False
 
-        Reminder: this means "exported", not "compiled" — see the module
-        docstring. Checking every rank rather than just this one keeps a
-        partially-written artifact directory from reading as ready.
-        """
-        manifest = _manifest_path(compiled_model_path)
-        if not manifest.is_file():
-            return False
-        try:
-            data = json.loads(manifest.read_text())
-        except (OSError, json.JSONDecodeError):
-            return False
-        world = int(data.get("world_size", 0))
-        if world <= 0:
-            return False
-        return all(
-            _rank_dir(compiled_model_path, r).is_dir() for r in range(world)
-        )
+    def warmup_eager(self, module, device) -> float:
+        """Run one forward of ``module`` (already on ``device``) so the
+        request-shaped graph is traced and compiled now, not on the first
+        request. Returns the seconds taken."""
+        import time
 
-    def warmup(self) -> None:
-        if self.graph_module is None:
-            return
+        from difflet.backends.tpu.ops_impl import device_runtime
+
         try:
-            self.graph_module(*self.get_example_inputs())
+            inputs = self.get_example_inputs()
         except NotImplementedError:
-            pass  # subclass provides no example inputs; nothing to warm
+            return 0.0
+        started = time.monotonic()
+        # Through the application's own forward, not the bare module: a
+        # subclass may map the positional bundle onto keyword arguments (LTX-2
+        # hands diffusers' transformer its geometry as kwargs).
+        self.module = module
+        with torch.no_grad():
+            out = self.forward(*[t.to(device) if hasattr(t, "to") else t for t in inputs])
+        device_runtime.wait()
+        del out
+        return time.monotonic() - started
 
     def forward(self, *args, **kwargs):
-        if self.graph_module is None:
-            raise RuntimeError("model is not loaded; call load() first")
-        if kwargs:
-            raise TypeError(
-                "the exported graph takes positional inputs only; got kwargs "
-                f"{sorted(kwargs)}"
-            )
-        return self.graph_module(*args)
-
-    # ------------------------------------------------------------ manifest
-
-    def _manifest_body(self, spec) -> dict:
-        return {
-            "format": "stablehlo",
-            "world_size": spec.world_size,
-            "mesh": {"dp": spec.dp, "cfg": spec.cfg, "cp": spec.cp, "tp": spec.tp},
-        }
-
-    def _write_manifest(self, compiled_model_path, spec) -> None:
-        # Every rank writes the same content, so concurrent writers are safe;
-        # write-then-rename keeps a reader from seeing a half-written file.
-        path = _manifest_path(compiled_model_path)
-        body = json.dumps(self._manifest_body(spec), indent=2, sort_keys=True)
-        tmp = path.with_suffix(f".{os.getpid()}.tmp")
-        tmp.write_text(body)
-        os.replace(tmp, path)
-
-    def _validate_manifest(self, compiled_model_path, spec) -> None:
-        path = _manifest_path(compiled_model_path)
-        if not path.is_file():
-            raise FileNotFoundError(f"no TPU artifact manifest at {path}")
-        data = json.loads(path.read_text())
-        want = self._manifest_body(spec)
-        if data.get("mesh") != want["mesh"]:
-            raise ValueError(
-                f"artifact was compiled for mesh {data.get('mesh')} but this "
-                f"process has {want['mesh']}; recompile or match the parallel "
-                f"config"
-            )
+        if self.module is None:
+            raise RuntimeError("module is not built; call _prepare_module() first")
+        return self.module(*args, **kwargs)
 
 
-__all__ = ["MANIFEST_FILE_NAME", "TpuApplicationBase", "normalize_path"]
+__all__ = ["NO_AOT_ARTIFACT", "TpuApplicationBase"]

@@ -258,8 +258,9 @@ def _register_builtin_flux() -> None:
         application_factory="difflet.models.flux.entry:create_flux_application",
         # trainium (AoT); the neuron backend (TorchNeuron, torchrun ranks; the DiT and T5 TP-sharded
         # on the device, CLIP and the VAE on the device, all bf16); CUDA: tp=1, one GPU,
-        # FluxPipeline around the Difflet DiT.
-        backends=("trainium", "cuda", "neuron"),
+        # FluxPipeline around the Difflet DiT. TPU: diffusers' transformer TP-sharded per rank
+        # (models/flux/tp_sharding.py), tp only.
+        backends=("trainium", "cuda", "neuron", "tpu"),
         hf_paths=(
             "black-forest-labs/FLUX.1-dev",
             "black-forest-labs/FLUX.1-schnell",
@@ -337,7 +338,9 @@ def _register_builtin_hunyuan_video() -> None:
             supports_cp=True,
             supports_sp=True,
         ),
-        backends=("trainium", "cuda", "neuron"),
+        # TPU: DiT on the chips, Llama/CLIP/VAE on the host
+        # (see difflet/models/hunyuan_video/tpu_application.py).
+        backends=("trainium", "cuda", "neuron", "tpu"),
     )
     class _HunyuanVideoRegistration:
         pass
@@ -499,7 +502,9 @@ def _register_builtin_ltx_2() -> None:
         # The neuron backend (TorchNeuron, torchrun ranks) runs the DiT on the device with TP
         # and CFG parallelism; the Gemma-3 text path stays on rank 0's host and the decode on
         # the host after the generate launch.
-        backends=("trainium", "neuron"),
+        # TPU: DiT on the chips, Gemma-3/connectors/VAEs on the host
+        # (see difflet/models/ltx_2/tpu_application.py).
+        backends=("trainium", "neuron", "tpu"),
         download_patterns=(
             "*.json",
             "*.txt",

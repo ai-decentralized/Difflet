@@ -554,6 +554,32 @@ def _apply_backend_flags(args: argparse.Namespace) -> None:
         os.environ["DIFFLET_EXEC_MODE"] = exec_mode
 
 
+_TPU_CLI_UNSUPPORTED = (
+    "Error: 'difflet {command}' is not supported on the tpu backend.\n"
+    "  Why: compile/generate/run are the ahead-of-time flow -- 'compile' writes compiled\n"
+    "  artifacts to disk and 'generate' loads them, through stage processes built on the\n"
+    "  Neuron toolchain. The TPU backend runs on TorchTPU, which compiles just in time: the\n"
+    "  first request traces and compiles each graph, and the executables persist in\n"
+    "  TorchTPU's on-disk compilation cache (.difflet-cache/torchtpu, or\n"
+    "  $DIFFLET_TPU_CACHE_DIR), so there is no artifact for 'compile' to produce.\n"
+    "  Use instead:\n"
+    "    difflet serve --model-id {model_id}           (warms the cache before /ready)\n"
+    "    python -m benchmark.bench --backend tpu --model <slug>   (one-shot run)"
+)
+
+
+def _refuse_tpu_cli(args: argparse.Namespace) -> None:
+    """Exit 2 with an explanation when compile/generate/run is asked of the tpu backend.
+
+    Only the tpu backend is refused; every other backend keeps its path.
+    """
+    if _lookup_backend(None).name != "tpu":
+        return
+    print(_TPU_CLI_UNSUPPORTED.format(command=args.command, model_id=args.model_id),
+          file=sys.stderr)
+    raise SystemExit(2)
+
+
 def _lookup_backend(name: str | None):
     """``get_backend(name)``; ``None`` means DIFFLET_BACKEND, else auto-detection.
 
@@ -1293,6 +1319,7 @@ def main(argv: list[str] | None = None) -> None:
 
     if args.command in ("compile", "generate", "run"):
         _apply_backend_flags(args)
+        _refuse_tpu_cli(args)
         _validate_cfg_parallel(args)
         _validate_sp(args)
         _validate_taef1(args)

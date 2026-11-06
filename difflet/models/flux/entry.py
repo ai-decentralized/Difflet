@@ -16,6 +16,15 @@ def create_flux_application(
     backend: str = "trainium",
     **kwargs: Any,
 ) -> Any:
+    if backend == "tpu":
+        # TPU: diffusers' transformer TP-sharded per rank; tp only.
+        if parallel.cp_degree > 1:
+            raise NotImplementedError("Flux on TPU runs with tp only (no CP yet)")
+        from difflet.models.flux.tpu_application import TpuFluxApplication
+
+        return TpuFluxApplication(
+            model_path=model_path, parallel=parallel, dtype=dtype, shape=shape, **kwargs
+        )
     if backend == "neuron":
         # TorchNeuron, one process per NeuronCore (torchrun). Keyword arguments and their
         # defaults: neuron_application._KWARG_DEFAULTS.

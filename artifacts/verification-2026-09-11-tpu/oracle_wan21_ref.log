@@ -1,0 +1,10 @@
+WARNING:root:libtpu.so and TPU device found. Setting PJRT_DEVICE=TPU.
+/mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/io/image.py:14: UserWarning: Failed to load image Python extension: 'Could not load this library: /mnt/models/tpuenv312/lib/python3.12/site-packages/torchvision/image.so'If you don't plan on using image functionality from `torchvision.io`, you can ignore this warning. Otherwise, there might be something wrong with your environment. Did you have `libjpeg` or `libpng` installed before building `torchvision` from source?
+  warn(
+loading diffusers WanTransformer3DModel fp32 (9 frames, latent 3x60x104) ...
+Loading checkpoint shards:   0%|          | 0/12 [00:00<?, ?it/s]Loading checkpoint shards:  92%|█████████▏| 11/12 [00:00<00:00, 102.41it/s]Loading checkpoint shards: 100%|██████████| 12/12 [00:00<00:00, 103.99it/s]
+  loaded in 0.2s; 14.288B params
+  forward in 56.0s -> (1, 16, 3, 60, 104)
+  bf16 control forward in 257.2s
+  diffusers bf16 vs diffusers fp32: cosine 0.99971920  rel_l1 2.30e-02
+wrote /mnt/models/teacache_runs/oracle_wan21_ref.pt

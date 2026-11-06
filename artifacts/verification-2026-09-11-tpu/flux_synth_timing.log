@@ -1,0 +1,50 @@
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+WARNING:torch_xla.backends:Setting mat mul precision multiple times is not recommended. If you need to do so, please empirically verify that the precision setting is behaving as expected.
+[rank2] random weights: 5.445B params/rank in 168s host_rss=15.0G
+[rank0] random weights: 5.445B params/rank in 168s host_rss=15.1G
+[rank1] random weights: 5.445B params/rank in 168s host_rss=15.0G
+[rank3] random weights: 5.445B params/rank in 168s host_rss=15.1G
+[rank2] to device in 2s hbm={'bytes_used': 10.14, 'bytes_limit': 15.75, 'peak_bytes_used': 10.14} host_rss=15.2G
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+[rank0] to device in 2s hbm={'bytes_used': 10.14, 'bytes_limit': 15.75, 'peak_bytes_used': 10.14} host_rss=15.2G
+[rank1] to device in 2s hbm={'bytes_used': 10.14, 'bytes_limit': 15.75, 'peak_bytes_used': 10.14} host_rss=15.2G
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+[rank3] to device in 2s hbm={'bytes_used': 10.14, 'bytes_limit': 15.75, 'peak_bytes_used': 10.14} host_rss=15.2G
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+/mnt/models/tpuenv312/lib/python3.12/site-packages/jax/_src/cloud_tpu_init.py:86: UserWarning: Transparent hugepages are not enabled. TPU runtime startup and shutdown time should be significantly improved on TPU v5e and newer. If not already set, you may need to enable transparent hugepages in your VM image (sudo sh -c "echo always > /sys/kernel/mm/transparent_hugepage/enabled")
+  warnings.warn(
+[rank3] warmup (compile) 44s hbm={'bytes_used': 10.18, 'bytes_limit': 15.75, 'peak_bytes_used': 10.18} host_rss=15.4G
+[rank2] warmup (compile) 45s hbm={'bytes_used': 10.18, 'bytes_limit': 15.75, 'peak_bytes_used': 10.18} host_rss=15.4G
+[rank0] warmup (compile) 44s hbm={'bytes_used': 10.18, 'bytes_limit': 15.75, 'peak_bytes_used': 10.18} host_rss=15.4G
+[rank1] warmup (compile) 44s hbm={'bytes_used': 10.18, 'bytes_limit': 15.75, 'peak_bytes_used': 10.18} host_rss=15.4G
+[rank0] forward x5: [0.342, 0.335, 0.335, 0.334, 0.336] hbm={'bytes_used': 10.18, 'bytes_limit': 15.75, 'peak_bytes_used': 10.18} host_rss=15.4G
+[rank2] forward x5: [0.344, 0.335, 0.335, 0.334, 0.336] hbm={'bytes_used': 10.18, 'bytes_limit': 15.75, 'peak_bytes_used': 10.18} host_rss=15.4G
+[rank3] forward x5: [0.337, 0.335, 0.335, 0.334, 0.336] hbm={'bytes_used': 10.18, 'bytes_limit': 15.75, 'peak_bytes_used': 10.18} host_rss=15.4G
+[rank1] forward x5: [0.344, 0.335, 0.335, 0.334, 0.336] hbm={'bytes_used': 10.18, 'bytes_limit': 15.75, 'peak_bytes_used': 10.18} host_rss=15.4G
+RESULT {
+ "params_per_rank_B": 5.445148736,
+ "hbm_after_weights": {
+  "bytes_used": 10.14,
+  "bytes_limit": 15.75,
+  "peak_bytes_used": 10.14
+ },
+ "warmup_s": 43.92357358699883,
+ "forward_s": [
+  0.342,
+  0.335,
+  0.335,
+  0.334,
+  0.336
+ ],
+ "hbm_peak_gb": 10.18,
+ "out_shape": [
+  1,
+  4096,
+  64
+ ]
+}
