@@ -23,10 +23,15 @@ class TpuWanConfig(WanDiTConfig):
 
     def validate(self) -> None:
         super().validate()
+        # Sequence parallelism runs only as DIFFLET_TPU_SP=1 (backends/tpu/wan/sp.py),
+        # which fuses each gather / reduce-scatter into its matmul; the shared
+        # model's unfused path is slower on TPU than the all-reduce it replaces.
+        from difflet.backends.tpu.ops_impl import collective_matmul
+
         for mode, enabled in (
             ("context parallelism", self.context_parallel_enabled),
             ("cfg parallelism", self.cfg_parallel_enabled),
-            ("sequence parallelism", self.sp_enabled),
+            ("sequence parallelism", self.sp_enabled and not collective_matmul.requested()),
         ):
             if enabled:
                 raise NotImplementedError(

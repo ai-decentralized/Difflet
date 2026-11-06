@@ -112,8 +112,23 @@ class TpuQwenImageTransformerApplication(TpuApplicationBase):
         # so no parameter should ever record a graph. A caller who forgets
         # torch.no_grad() then wastes nothing and cannot blow the HBM budget.
         module.requires_grad_(False)
+        self._install_sp(module)
         self.module = module.eval()
         return self.module
+
+    def _install_sp(self, module) -> None:
+        """``DIFFLET_TPU_SP=1``: fuse the sequence-parallel collectives into the matmuls
+        (backends/tpu/qwen_image/sp.py). Compiled path only: through jax_op, eager
+        re-exports every ring on every call."""
+        from difflet.backends.tpu.ops_impl import collective_matmul
+
+        if not getattr(self.config, "sp_enabled", False) or not collective_matmul.requested():
+            return
+        collective_matmul.require_compiled(default=True)  # Qwen's maybe_compile default
+        from difflet.backends.tpu.qwen_image import sp
+
+        sp.install(module, image_seq_len=int(self.config.image_seq_len),
+                   text_seq_len=int(self.config.text_seq_len))
 
     def get_example_inputs(self) -> tuple:
         """Fixed-shape inputs that pin the exported graph.

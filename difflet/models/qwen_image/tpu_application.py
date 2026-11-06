@@ -69,6 +69,12 @@ class TpuQwenImageApplication(torch.nn.Module):
             context_parallel_enabled=int(getattr(parallel, "cp_degree", 1)) > 1,
             cp_mode=getattr(parallel, "cp_mode", "gather_kv"),
         )
+        from difflet.backends.tpu.ops_impl import collective_matmul
+
+        if collective_matmul.requested():
+            # Megatron-SP with the gathers / reduce-scatters fused into the matmuls
+            # (backends/tpu/qwen_image/sp.py, installed by the transformer application).
+            self.config.sp_enabled = True
         self.transformer = TpuQwenImageTransformerApplication(
             model_path=self.transformer_path, config=self.config
         )

@@ -230,11 +230,16 @@ def _worker_body(rank, world, payload, cmd_q, reply_q):
         "mem_after_load_gb": mem_gb(),
     })
 
+    # DIFFLET_BENCH_TRACE_DIR: a jax.profiler trace of rank 0's denoise in the first
+    # unsynced (natural) request -- warm, compiled, and with no per-step sync to
+    # serialise the steps. jax's tracer sees torch_tpu's device ops (profiler_probe).
+    trace_dir = os.environ.get("DIFFLET_BENCH_TRACE_DIR") if rank == 0 else None
     while True:
         cmd = cmd_q.get()
         if cmd["type"] == "shutdown":
             return
         sync_now["on"] = bool(cmd.get("sync_steps", True))
+        tracing = bool(trace_dir) and not sync_now["on"]
         timer.stamps.clear()
         round_trips_before = device_runtime.VAE_ROOM_ROUND_TRIPS
         prompt = payload["prompt"]
@@ -245,8 +250,17 @@ def _worker_body(rank, world, payload, cmd_q, reply_q):
         # Every driver's denoise ends with the latents on the host, so this
         # wall clock already includes every queued step -- it is real, unlike
         # the unsynced deltas.
+        if tracing:
+            import jax
+
+            jax.profiler.start_trace(trace_dir)
         latents = driver.denoise(text)
         denoise_s = time.monotonic() - mark
+        if tracing:
+            jax.profiler.stop_trace()
+            trace_dir = None
+            print(f"[bench] denoise trace written to {os.environ['DIFFLET_BENCH_TRACE_DIR']}",
+                  flush=True)
         decode_s = 0.0
         decoded = None
         if driver.primary:
