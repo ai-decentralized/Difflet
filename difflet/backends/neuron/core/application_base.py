@@ -95,15 +95,21 @@ def rank_weight_bytes(module: torch.nn.Module, dtype: torch.dtype) -> int:
     """Bytes this rank's ``module`` will hold on the device once ``load_sharded_checkpoint`` has
     filled it.
 
-    Meta parameters are counted in ``dtype``, the dtype ``materialize_meta_`` gives them. Their
-    shapes are already this rank's shards, because a TP layer sizes its partition in ``__init__``
-    and its ``_difflet_shard`` declaration only tells the loader how to slice the checkpoint to
-    that shape. Parameters with storage keep their own dtype, as do all buffers: meta buffers
-    are materialised in their own dtype, and real ones (the rotary tables) move as they are.
+    Meta parameters are counted in ``dtype``, the dtype ``materialize_meta_`` gives them, except
+    float8 ones, which it keeps at their own byte (the fp8 linears). Their shapes are already
+    this rank's shards, because a TP layer sizes its partition in ``__init__`` and its
+    ``_difflet_shard`` declaration only tells the loader how to slice the checkpoint to that
+    shape. Parameters with storage keep their own dtype, as do all buffers: meta buffers are
+    materialised in their own dtype, and real ones (the rotary tables) move as they are.
     """
+    from difflet.backends._torch_megatron.weights import is_float8
+
     total = 0
     for param in module.parameters():
-        itemsize = dtype.itemsize if param.is_meta else param.element_size()
+        if param.is_meta and not is_float8(param.dtype):
+            itemsize = dtype.itemsize
+        else:
+            itemsize = param.element_size()
         total += param.numel() * itemsize
     for buf in module.buffers():
         total += buf.numel() * buf.element_size()
@@ -194,6 +200,11 @@ class TorchNeuronApplicationBase(torch.nn.Module):
         """Checkpoint key for module parameter ``name`` (module -> checkpoint direction)."""
         return name
 
+    def _after_load(self, module: torch.nn.Module) -> None:
+        """Hook after the weights are on the device and before the blocks compile: load-time
+        swaps that need the loaded tensors (the fp8 linears pack their weights for the kernel).
+        Nothing by default."""
+
     # ---------------------------------------------------- DiffletPipeline API
 
     def compile(self, compiled_model_path, debug: bool = False) -> None:
@@ -257,6 +268,7 @@ class TorchNeuronApplicationBase(torch.nn.Module):
                                self.load_report["unexpected"][:5])
         with self._phase("eval"):
             self.module = module.eval().requires_grad_(False)
+            self._after_load(self.module)
         with self._phase("compile"):
             if self.exec_mode == "compile":
                 # A "neuron" string gets compile_blocks' NEURON_COMPILE_OPTIONS

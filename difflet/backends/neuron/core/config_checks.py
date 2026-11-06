@@ -154,6 +154,35 @@ def require_bf16_on_device(model: str, device_type: str, dtype: Any) -> None:
         )
 
 
+#: The platforms whose tensor engine computes OCP ``float8_e4m3fn`` natively. Trainium2's
+#: legacy E4M3 (max 240) is not the format the quantized checkpoints hold.
+FP8_PLATFORMS = ("trn3",)
+
+
+def require_fp8_supported(model: str, device_type: str, exec_mode: str,
+                          platform: str | None = None) -> None:
+    """Decision D43: FP8 DiT linears run on the neuron device on Trainium3 only, in compile
+    mode (the eager fp8 cast of a 4k-token activation costs ~28 ms per linear, which no one
+    wants by accident), and on the CPU for the unit tests. ``platform`` defaults to the
+    detected target when the device is neuron."""
+    if exec_mode != "compile":
+        raise ValueError(
+            f"the {model} FP8 DiT needs exec_mode='compile', got {exec_mode!r} (decision D43: "
+            "eager quantizes every activation op by op)"
+        )
+    if device_type != "neuron":
+        return
+    if platform is None:
+        from difflet.backends.neuron.ops_impl.platform import get_platform_target
+
+        platform = get_platform_target()
+    if platform not in FP8_PLATFORMS:
+        raise ValueError(
+            f"the {model} FP8 DiT runs on {', '.join(FP8_PLATFORMS)} only, this host is "
+            f"{platform!r} (decision D43: OCP float8_e4m3fn is native to Trainium3)"
+        )
+
+
 def truncated_block_prefixes(config: Any, block_prefix: str) -> tuple[str, ...]:
     """The checkpoint prefixes of the blocks past ``config.num_layers`` when it was cut below
     the checkpoint's own count: in the checkpoint on purpose, so reported as skipped rather
@@ -165,6 +194,7 @@ def truncated_block_prefixes(config: Any, block_prefix: str) -> tuple[str, ...]:
 
 
 __all__ = [
+    "FP8_PLATFORMS",
     "check_cp_enabled",
     "check_cp_mode",
     "check_cp_split",
@@ -176,6 +206,7 @@ __all__ = [
     "check_ulysses_heads",
     "exclusive_modes",
     "require_bf16_on_device",
+    "require_fp8_supported",
     "resolve_cp_degree",
     "truncated_block_prefixes",
 ]
