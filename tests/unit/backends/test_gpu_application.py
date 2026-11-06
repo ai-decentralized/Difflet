@@ -24,6 +24,19 @@ MODELS = [spec.model_type for spec in gpu_model_specs()]
 SHAPE = {"height": 64, "width": 64}
 # Tiny transformer/config.json per model: enough to build the components, never loaded.
 TINY_CONFIGS = {
+    "hunyuan_video": dict(
+        in_channels=2,
+        out_channels=2,
+        num_attention_heads=2,
+        attention_head_dim=8,
+        num_layers=1,
+        num_single_layers=1,
+        num_refiner_layers=1,
+        mlp_ratio=2.0,
+        text_embed_dim=12,
+        pooled_projection_dim=8,
+        rope_axes_dim=[2, 2, 4],
+    ),
     "qwen_image": dict(
         patch_size=2,
         in_channels=16,

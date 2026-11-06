@@ -340,7 +340,7 @@ def _register_builtin_hunyuan_video() -> None:
         ),
         # TPU: DiT on the chips, Llama/CLIP/VAE on the host
         # (see difflet/models/hunyuan_video/tpu_application.py).
-        backends=("trainium", "neuron", "tpu"),
+        backends=("trainium", "cuda", "neuron", "tpu"),
     )
     class _HunyuanVideoRegistration:
         pass

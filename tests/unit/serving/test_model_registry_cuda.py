@@ -17,6 +17,7 @@ _QWEN = "Qwen/Qwen-Image"
 _FLUX = "black-forest-labs/FLUX.1-dev"
 _WAN22 = "Wan-AI/Wan2.2-T2V-A14B-Diffusers"
 _WAN21 = "Wan-AI/Wan2.1-T2V-14B-Diffusers"
+_HUNYUAN = "hunyuanvideo-community/HunyuanVideo"
 
 
 def _resolve_model(monkeypatch, model_id, backend="cuda", **options):
@@ -84,10 +85,10 @@ def test_video_serving_on_cuda_refuses_replicas_and_image_serving_keeps_them(mon
     assert _resolve_model(monkeypatch, _FLUX, replicas=2).metadata.model_type == "flux"
 
 
-def test_models_without_a_gpu_spec_name_the_three_that_have_one(monkeypatch):
+def test_models_without_a_gpu_spec_name_supported_checkpoints(monkeypatch):
     monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
     with pytest.raises(DiffletServingError) as exc:
-        resolve_serving_model(ServeOptions(model_id="hunyuanvideo-community/HunyuanVideo"))
+        resolve_serving_model(ServeOptions(model_id="Lightricks/LTX-2"))
     assert exc.value.code == "feature_not_supported"
     message = exc.value.message
     assert "black-forest-labs/FLUX.1-dev, Wan-AI/Wan2.2-T2V-A14B-Diffusers" in message
@@ -109,3 +110,16 @@ def test_a_lone_teacache_calibration_is_refused_on_cuda_not_dropped(monkeypatch,
         _resolve_model(monkeypatch, model_id, teacache_calibration="/cal.json")
     assert exc.value.code == "feature_not_supported"
     assert "--teacache-calibration" in exc.value.message
+
+
+@pytest.mark.parametrize("placement", ["host", "neuron"])
+def test_gpu_serving_refuses_explicit_clip_placement(monkeypatch, placement):
+    with pytest.raises(DiffletServingError, match="clip-placement"):
+        _resolve_model(monkeypatch, _HUNYUAN, clip_placement=placement)
+
+
+def test_gpu_serving_does_not_record_a_host_clip_default(monkeypatch):
+    assert _resolve_model(monkeypatch, _HUNYUAN).profile.clip_placement is None
+    assert (
+        _resolve_model(monkeypatch, _HUNYUAN, backend="trainium").profile.clip_placement == "host"
+    )

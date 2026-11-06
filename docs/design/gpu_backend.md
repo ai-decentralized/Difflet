@@ -72,7 +72,10 @@ checkpoints the CLI routes and serving accepts, default shape and steps, the gui
 (`none`, `distilled`, `cfg`) and defaults, refused CLI flags, serving options, video fields and
 application kwargs, prompt budgets per tokenizer, the output kind, and the application class.
 It imports no torch, because the serving parent process reads it. Fields another model will need
-(audio, frame rules, encoder residency, several prompt budgets) are added with that model.
+(audio, encoder residency, several prompt budgets) are added with that model. Spatial multiples
+and a frame stride are declarative fields: original HunyuanVideo requires H/W multiples of 16
+and `4n+1` frames. One torch-free validator applies these rules before application loading,
+CLI download and serving worker startup; other models keep their existing defaults.
 
 ## The generic GPU flow
 
