@@ -32,7 +32,9 @@ artifact, and later runs skip straight to load and denoise.
 [Developer guide](DEVELOPER.md)
 
 ## Latest News
-
+- [11/02] **HunyuanVideo 1.5 generates video end to end on Trainium.** The 480p text-to-video model runs on both the AOT and the native backend with true CFG, TP, CFG-parallel, SP, CP (Ulysses, all-gather), DP, JSONL batching and TeaCache, at the default 480×848×121 shape; the VAE decodes on the host by default. See the [AOT verification](docs/verification/hv15-aot-evidence.md).
+- [10/31] **The CUDA backend grows into a shared GPU platform.** Every GPU model now goes through one application, serving and CLI path, with data parallelism (`--dp`, `serve --dp-degree`; two replicas on 2 × A100, output identical to one card), CFG-parallel Wan 2.2 on two GPUs, `--torch-compile`, and experimental single-GPU HunyuanVideo. See the [GPU backend results](docs/verification/gpu-backend-results.md).
+- [10/29] **Difflet runs on Trainium through native PyTorch.** The new `neuron` backend executes models with torch-neuronx, eagerly or through `torch.compile`, without ahead-of-time tracing, for all seven Trainium models (FLUX.1-dev, Qwen-Image, Wan 2.1/2.2, HunyuanVideo 1.0/1.5, LTX-2) with TP, SP, CP, CFG-parallel and DP layouts, on Trainium2 and Trainium3. See the [native backend results](docs/verification/neuron-backend-results.md).
 - [09/30] **MiniMax-H3 text-to-video with audio is verified on Trainium2.** The four-stage CLI generated a 256×448, 124-frame MP4 with stereo audio on `trn2.3xlarge` using TP4. See the [end-to-end verification](docs/design/minimax_h3/01_e2e_reverification_2026-09-30.md).
 - [09/10] **Difflet 1.0 is released.**
 
