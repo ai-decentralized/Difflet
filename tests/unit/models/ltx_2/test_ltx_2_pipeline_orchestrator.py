@@ -805,3 +805,26 @@ def test_ltx_2_orchestrator_applies_decode_noise_before_video_denormalize(tmp_pa
     expected = expected_noise * 4.0 / 2.0 + 2.0
     assert torch.allclose(vae.calls[0][0], expected)
     assert torch.allclose(vae.calls[0][1], torch.tensor([0.5]))
+
+
+class _Bf16Transformer(FakeDualStreamTransformer):
+    def __init__(self, timestep_dtype=None):
+        super().__init__()
+        self.dtype = torch.bfloat16
+        if timestep_dtype is not None:
+            self.timestep_dtype = timestep_dtype
+
+
+@pytest.mark.parametrize("declared, expected", [(None, torch.bfloat16), (torch.float32, torch.float32)])
+def test_ltx_2_dit_gets_the_timestep_in_its_declared_dtype(tmp_path, declared, expected):
+    """A DiT declaring ``timestep_dtype`` gets the scheduler timestep unrounded in that dtype (as
+    diffusers passes it); one that declares nothing keeps the model dtype."""
+    transformer = _Bf16Transformer(declared)
+    with pytest.warns(RuntimeWarning, match="scheduler_config.json"):
+        pipeline = LTX2Orchestrator(model_path=str(tmp_path), transformer=transformer, dtype=torch.bfloat16,
+                                    height=64, width=96, num_frames=17, audio_num_frames=4)
+    exact = torch.tensor([989.7009, 500.3])
+    pipeline(bundle=_bundle(), timesteps=exact)
+    sent = torch.stack([call.timestep[0] for call in transformer.calls])
+    assert sent.dtype == expected
+    assert torch.equal(sent.float(), exact.to(expected).float())

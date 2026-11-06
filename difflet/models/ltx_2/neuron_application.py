@@ -281,6 +281,9 @@ class _OnDeviceLtx2Transformer(OnDeviceDiT):
 
     supports_ltx_2_extra_kwargs = False
     teacache_probe_fused = False
+    # As diffusers passes it: the scheduler's timestep unrounded. bf16 holds only multiples of 4
+    # between 512 and 1024, which shifts the sinusoidal timestep embedding at every step.
+    timestep_dtype = torch.float32
 
     def __init__(self, module, config: NeuronLtx2Config, dtype, device):
         super().__init__(module, config, dtype, device)
@@ -297,10 +300,12 @@ class _OnDeviceLtx2Transformer(OnDeviceDiT):
         _check_dit_shapes(self.config, bundle)
         coords = tuple(t.to(torch.float32).contiguous()
                        for t in (bundle.video_coords, bundle.audio_coords))
+        # The timestep goes to the device in fp32, not through _forward's cast to the model dtype.
+        timestep = bundle.timestep.to(self.timestep_dtype).contiguous().to(self.device)
         return self._forward(
             (bundle.hidden_states, bundle.audio_hidden_states, bundle.encoder_hidden_states,
-             bundle.audio_encoder_hidden_states, bundle.timestep),
-            extra=coords,
+             bundle.audio_encoder_hidden_states),
+            extra=(timestep, *coords),
         )
 
 
@@ -556,8 +561,8 @@ class TorchNeuronLtx2Application(TorchNeuronModelApplication):
                                       "dtype": self.dtype},
             "audio_encoder_hidden_states": {"shape": (b, text, cfg.audio_text_dim),
                                             "dtype": self.dtype},
-            "timestep": {"shape": (b,), "dtype": self.dtype},
-            "sigma": {"shape": (b,), "dtype": self.dtype},
+            "timestep": {"shape": (b,), "dtype": torch.float32},
+            "sigma": {"shape": (b,), "dtype": torch.float32},
             "encoder_attention_mask": {"shape": (b, text), "dtype": torch.bool},
             "audio_encoder_attention_mask": {"shape": (b, text), "dtype": torch.bool},
             "video_coords": {"shape": (b, 3, cfg.video_seq_len, 2), "dtype": torch.float32},
