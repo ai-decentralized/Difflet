@@ -320,6 +320,25 @@ def test_a_hub_checkpoint_s_manifest_names_no_copy_source(tiny, tmp_path):
     assert "bf16_copy_of" not in manifest["source"]
 
 
+def test_unit_tests_never_quantize_a_real_snapshot(tiny, tmp_path, monkeypatch):
+    """The drivers' path to the writer (``prepare_quantized_checkpoint`` ->
+    ``ensure_quantized_dir`` -> the module's ``write_quantized_dir``) is refused for a source
+    under the hub cache (the conftest guard): HunyuanVideo is quantized straight from its hub
+    snapshot, so a driver test whose resolver patch missed would write about 19 GB per call.
+    A fake hub that holds safetensors stands in for the real one, since the fingerprint reads
+    the source's headers before the writer runs."""
+    from huggingface_hub import constants
+
+    monkeypatch.setattr(constants, "HF_HUB_CACHE", str(tmp_path / "hub"))
+    src = (tmp_path / "hub" / "models--hunyuanvideo-community--HunyuanVideo" / "snapshots"
+           / ("0" * 40) / "transformer")
+    shutil.copytree(tiny["transformer_dir"], src)
+    with pytest.raises(AssertionError, match="quantized directory of a real snapshot"):
+        prepare_quantized_checkpoint(src, tiny["spec"], create=True,
+                                     cache_root=tmp_path / "cache")
+    assert not (tmp_path / "cache" / "quantized").exists()
+
+
 def test_the_copy_s_manifest_name_is_one_constant():
     """``source_fingerprint`` names the copy's manifest without importing the backend (the
     neuron package's ``__init__`` loads the runtime), so the quant module owns the name and the
