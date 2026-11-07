@@ -54,13 +54,12 @@ the replica finished. Unset, trainium and tpu keep their three stages unchanged.
 from __future__ import annotations
 
 import argparse
-import os
 import shutil
 import sys
 from pathlib import Path
 
 from difflet.common.orchestrators import qwen_image as qwen_common
-from difflet.cli.quant import quant_cli_args, quant_spec
+from difflet.cli.quant import prepare_quant, quant_cli_args, quant_spec
 from difflet.cli.orchestrators.base import (
     ModelOrchestrator,
     canonical_shapes_list,
@@ -71,6 +70,7 @@ from difflet.cli.orchestrators.base import (
     write_stage_manifest,
 )
 from difflet.cli.orchestrators.torchrun import (
+    _local_snapshot,
     cfg_cp_conflict,
     component_dtype,
     decodes_on_device,
@@ -387,33 +387,20 @@ class QwenImageOrchestrator(ModelOrchestrator):
 
     def _prepare_quant(self, *, create: bool) -> None:
         """With --quant on a torchrun backend, resolve the quantized DiT directory under the
-        compile cache, writing it when ``create`` (``compile``; ``generate`` only resolves and
-        refuses with the fix when it is missing). Before ``_check_dit_fits`` so the HBM estimate
-        counts fp8 bytes, and before any rank starts so none writes."""
-        spec = quant_spec(self.args)
-        if spec is None or torchrun_backend() is None:
+        compile cache (``prepare_quant``), writing it when ``create`` (``compile``; ``generate``
+        only resolves and refuses with the fix when it is missing). Before ``_check_dit_fits``
+        so the HBM estimate counts fp8 bytes, and before any rank starts so none writes; the
+        compile cache is rooted at --cache-dir first so the directory lands under it."""
+        if getattr(self.args, "quant", None) is None or torchrun_backend() is None:
             return
-        if spec.compute == "nki":
-            # The mxfp8 kernel path traces nkilib's matmul_mxfp8 once per launch per rank
-            # unless the trace cache keeps it: 191 s of start-up measured without it (trn3,
-            # 2026-10-31). Its inputs are all call arguments, so a cached trace cannot go
-            # stale. An explicit choice is kept; the ranks inherit the variable.
-            os.environ.setdefault("DIFFLET_NKI_TRACE_CACHE", "1")
         from difflet.pipeline.path_resolver import resolve_model_path
-        from difflet.quant.checkpoint import prepare_quantized_checkpoint
 
-        try:
-            model_dir = self._model_dir(self.args, resolve_model_path)
-        except Exception:  # not downloaded yet: the application resolves it in the ranks
-            return
         root_compile_cache_at_cache_dir(getattr(self.args, "cache_dir", None), tag="qwen_image")
-        transformer_dir = str(Path(model_dir) / "transformer")
-        try:
-            quantized = prepare_quantized_checkpoint(transformer_dir, spec, create=create)
-        except ValueError as exc:
-            refuse(f"--quant: {exc}")
-        self._quantized_dit = str(quantized)
-        print(f"[qwen_image] MXFP8 DiT ({spec.compute}): {quantized}", flush=True)
+        model_dir = _local_snapshot(lambda: self._model_dir(self.args, resolve_model_path))
+        sources = {"transformer": str(Path(model_dir) / "transformer")} if model_dir else {}
+        prepared = prepare_quant(self.args, sources, create=create, tag="qwen_image")
+        if prepared is not None:
+            self._quantized_dit = prepared["transformer"]
 
     def _place_text_encoder(self) -> None:
         """On a torchrun backend (neuron) with --device-text-encoder, keep Qwen2.5-VL on rank
