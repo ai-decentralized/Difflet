@@ -84,6 +84,7 @@ from difflet.backends.neuron.core.model_application import (
     TorchNeuronModelApplication,
     broadcast_from_rank0,
 )
+from difflet.backends.neuron.core.quant import resolve_quant
 from difflet.backends.neuron.qwen_image.config import NeuronQwenImageConfig
 from difflet.backends.neuron.qwen_image.hbm import device_text_encoder_components
 from difflet.backends.neuron.qwen_image.text_encoder import NeuronQwenTextEncoderApplication
@@ -561,36 +562,12 @@ class TorchNeuronQwenImageApplication(TorchNeuronModelApplication):
             dtype = normalize_dtype(options[name])
             if dtype not in (torch.bfloat16, torch.float32):
                 raise ValueError(f"{name} must be bfloat16 or float32, got {dtype}")
-        if options["quant"] is None and options["quant_checkpoint"] is not None:
-            raise ValueError("quant_checkpoint needs quant ('mxfp8' or a QuantSpec)")
 
     def _resolve_quant(self, options: dict[str, Any], transformer_path: str):
-        """``(spec, DiT directory)``: the quantized checkpoint for ``quant`` (resolved under the
-        compile cache, never written here: every rank resolves, ``difflet compile`` writes on
-        the driver), else ``(None, transformer_path)``."""
-        from difflet.quant.checkpoint import check_quantized_dir, prepare_quantized_checkpoint
-        from difflet.quant.spec import FORMAT, QuantSpec
-        from difflet.quant.targets import default_spec
-
-        quant = options["quant"]
-        if quant is None:
-            return None, transformer_path
-        if isinstance(quant, str):
-            if quant != FORMAT:
-                raise ValueError(f"quant must be {FORMAT!r}, a QuantSpec or its dict, got {quant!r}")
-            spec = default_spec("qwen_image", tp_degree=int(self.parallel.tp_degree))
-        elif isinstance(quant, dict):
-            spec = QuantSpec.from_dict(quant)
-        elif isinstance(quant, QuantSpec):
-            spec = quant
-        else:
-            raise TypeError(f"quant must be {FORMAT!r}, a QuantSpec or its dict, got {type(quant)}")
-        checkpoint = options["quant_checkpoint"]
-        if checkpoint is None:
-            checkpoint = prepare_quantized_checkpoint(transformer_path, spec, create=False)
-        else:
-            check_quantized_dir(checkpoint, transformer_path, spec)
-        return spec, str(checkpoint)
+        """``(spec, DiT directory)`` for the ``quant`` options (``core/quant.resolve_quant``):
+        Qwen-Image's target table at the launch's tp."""
+        return resolve_quant("qwen_image", options["quant"], options["quant_checkpoint"],
+                             transformer_path, tp_degree=int(self.parallel.tp_degree))
 
     def _resolve_shape(self, shape: dict[str, int | None], shapes) -> dict[str, Any]:
         height = int(shape.get("height") or 1024)

@@ -19,7 +19,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from difflet.backends.neuron.hbm import Component, components_bytes, components_fit
+from difflet.backends.neuron.hbm import (
+    Component,
+    components_bytes,
+    components_fit,
+    quantized_dir_bytes,
+    quantized_dir_fits,
+)
 
 #: The DiT runs in bf16 on the device (decision D42, ``NeuronLtx2TransformerApplication``).
 DIT_DTYPE_BYTES = 2
@@ -44,41 +50,55 @@ def text_encoder_lm_numel(model_dir: str | Path) -> int:
 
 
 def dit_bytes(model_dir: str | Path, *, tp_degree: int,
-              dit_dtype_bytes: int = DIT_DTYPE_BYTES) -> int:
-    """Lower bound of one rank's DiT weight bytes: ``<model_dir>/transformer`` over tp."""
+              dit_dtype_bytes: int = DIT_DTYPE_BYTES, dit_dir: str | Path | None = None) -> int:
+    """Lower bound of one rank's DiT weight bytes: ``<model_dir>/transformer`` over tp, or,
+    with ``dit_dir`` (a quantized checkpoint, ``difflet/quant/checkpoint.py``), that directory's
+    bytes as stored over tp (``quantized_dir_bytes``)."""
+    if dit_dir is not None:
+        return quantized_dir_bytes(dit_dir, tp_degree=tp_degree)
     return components_bytes(model_dir, (DIT.in_dtype(dit_dtype_bytes),), tp_degree=tp_degree)
 
 
 def dit_fits(model_dir: str | Path, *, tp_degree: int,
-             dit_dtype_bytes: int = DIT_DTYPE_BYTES) -> tuple[bool, int, int]:
+             dit_dtype_bytes: int = DIT_DTYPE_BYTES,
+             dit_dir: str | Path | None = None) -> tuple[bool, int, int]:
     """``(fits, estimate, limit)``: ``dit_bytes`` against ``FIT_FRACTION`` of one core's HBM."""
+    if dit_dir is not None:
+        return quantized_dir_fits(dit_dir, tp_degree=tp_degree)
     return components_fit(model_dir, (DIT.in_dtype(dit_dtype_bytes),), tp_degree=tp_degree)
 
 
 def device_text_encoder_components(encoder_dtype_bytes: int = TEXT_ENCODER_DTYPE_BYTES,
-                                   dit_dtype_bytes: int = DIT_DTYPE_BYTES
+                                   dit_dtype_bytes: int = DIT_DTYPE_BYTES,
+                                   dit_dir: str | Path | None = None
                                    ) -> tuple[Component, Component]:
-    """The language model beside the DiT on the same cores."""
-    return TEXT_ENCODER.in_dtype(encoder_dtype_bytes), DIT.in_dtype(dit_dtype_bytes)
+    """The language model beside the DiT on the same cores; with ``dit_dir`` (a quantized
+    checkpoint) the DiT is counted as that directory stores it, not in ``dit_dtype_bytes``."""
+    dit = DIT.in_dtype(dit_dtype_bytes) if dit_dir is None else DIT.stored_in(dit_dir)
+    return TEXT_ENCODER.in_dtype(encoder_dtype_bytes), dit
 
 
 def device_text_encoder_bytes(model_dir: str | Path, *, tp_degree: int,
                               encoder_dtype_bytes: int = TEXT_ENCODER_DTYPE_BYTES,
-                              dit_dtype_bytes: int = DIT_DTYPE_BYTES) -> int:
+                              dit_dtype_bytes: int = DIT_DTYPE_BYTES,
+                              dit_dir: str | Path | None = None) -> int:
     """Lower bound of one rank's weight bytes with the language model on the device beside the
     DiT, both sharded over ``tp_degree``."""
     return components_bytes(
-        model_dir, device_text_encoder_components(encoder_dtype_bytes, dit_dtype_bytes),
+        model_dir,
+        device_text_encoder_components(encoder_dtype_bytes, dit_dtype_bytes, dit_dir),
         tp_degree=tp_degree)
 
 
 def device_text_encoder_fits(model_dir: str | Path, *, tp_degree: int,
                              encoder_dtype_bytes: int = TEXT_ENCODER_DTYPE_BYTES,
-                             dit_dtype_bytes: int = DIT_DTYPE_BYTES) -> tuple[bool, int, int]:
+                             dit_dtype_bytes: int = DIT_DTYPE_BYTES,
+                             dit_dir: str | Path | None = None) -> tuple[bool, int, int]:
     """``(fits, estimate, limit)``: ``device_text_encoder_bytes`` against ``FIT_FRACTION`` of
     one core's HBM."""
     return components_fit(
-        model_dir, device_text_encoder_components(encoder_dtype_bytes, dit_dtype_bytes),
+        model_dir,
+        device_text_encoder_components(encoder_dtype_bytes, dit_dtype_bytes, dit_dir),
         tp_degree=tp_degree)
 
 

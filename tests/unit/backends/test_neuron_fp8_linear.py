@@ -568,3 +568,61 @@ def test_base_fuses_q_k_v_after_load_only_when_the_model_says_so(tmp_path, fuse)
     else:
         assert not hasattr(app.module.attn, "fused_qkv")
         assert all(l.weight_packed is not None for l in members)
+
+
+# ------------------------------------------------------ the pipeline side's resolver
+
+
+@pytest.fixture(scope="module")
+def tiny_quantized_toy(tmp_path_factory):
+    """``_TwoLinears`` saved in bf16 as a one-file checkpoint, and its ``fc1`` quantized for a
+    tp2 spec under a cache root: what a pipeline application resolves from ``"mxfp8"``."""
+    from safetensors.torch import save_file
+
+    from difflet.quant.checkpoint import prepare_quantized_checkpoint
+
+    root = tmp_path_factory.mktemp("tiny_quantized")
+    transformer_dir = root / "transformer"
+    transformer_dir.mkdir()
+    torch.manual_seed(0)
+    save_file({k: v.to(torch.bfloat16) for k, v in _TwoLinears(128, 16).state_dict().items()},
+              str(transformer_dir / "model.safetensors"))
+    spec = QuantSpec(targets=("fc1",), tp_degree=2)
+    quantized = prepare_quantized_checkpoint(transformer_dir, spec, create=True,
+                                             cache_root=root / "cache")
+    return {"cache": root / "cache", "transformer_dir": str(transformer_dir), "spec": spec,
+            "quantized": str(quantized)}
+
+
+def test_resolve_quant_default_spec_and_checkpoint(tiny_quantized_toy, monkeypatch):
+    """One resolver for every pipeline application: ``"mxfp8"`` is the model's default spec at
+    the launch's tp and the quantized directory under the compile cache (never written here:
+    every rank resolves, ``difflet compile`` writes on the driver); a spec or its dict is taken
+    as given; an explicit directory is checked against the spec; a directory without a spec,
+    another spelling than ``"mxfp8"`` and a quant of another type are refused by name."""
+    from difflet.backends.neuron.core.quant import resolve_quant
+    from difflet.quant import targets
+
+    toy = tiny_quantized_toy
+    monkeypatch.setitem(targets.TARGETS_BY_MODEL, "toy", ("fc1",))
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(toy["cache"]))
+    spec, path = resolve_quant("toy", "mxfp8", None, toy["transformer_dir"], tp_degree=2)
+    assert spec == targets.default_spec("toy", tp_degree=2) and path == toy["quantized"]
+    resolved = (toy["spec"], toy["quantized"])
+    for given in (toy["spec"], toy["spec"].to_dict()):
+        assert resolve_quant("toy", given, None, toy["transformer_dir"], tp_degree=2) == resolved
+    assert resolve_quant("toy", toy["spec"], toy["quantized"], toy["transformer_dir"],
+                         tp_degree=2) == resolved
+    assert resolve_quant("toy", None, None, toy["transformer_dir"], tp_degree=2) \
+        == (None, toy["transformer_dir"])
+    with pytest.raises(ValueError, match="difflet compile"):  # no tp1 directory was written
+        resolve_quant("toy", "mxfp8", None, toy["transformer_dir"], tp_degree=1)
+    with pytest.raises(ValueError, match="another quantization spec"):
+        resolve_quant("toy", QuantSpec(targets=("fc2",)), toy["quantized"],
+                      toy["transformer_dir"], tp_degree=2)
+    with pytest.raises(ValueError, match="quant_checkpoint needs quant"):
+        resolve_quant("toy", None, "/q", toy["transformer_dir"], tp_degree=1)
+    with pytest.raises(ValueError, match="quant must be 'mxfp8'"):
+        resolve_quant("toy", "fp8", None, toy["transformer_dir"], tp_degree=1)
+    with pytest.raises(TypeError, match="quant must be 'mxfp8'"):
+        resolve_quant("toy", 8, None, toy["transformer_dir"], tp_degree=1)
