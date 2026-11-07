@@ -1628,7 +1628,9 @@ def hv1_dit_worker(rank: int, world_size: int, model_dir: str, parallel: dict, e
     ``overrides`` go to the config (``num_single_layers=1`` cuts the depth). ``quant`` (a
     ``QuantSpec`` dict) runs the MXFP8 DiT from ``quantized_dir``, the quantized directory of
     ``model_dir``, which the config is still read from; the result names the linears the
-    application quantized and each FP8 twin's class."""
+    application quantized and each FP8 twin's class, and gives the first single block's
+    ``proj_out_attn`` as loaded: its class and flags (the twin must keep the merged all-reduce
+    and the bias out of the shard) and, for a plain row layer, its weight."""
     from difflet.backends.neuron.hunyuan_video.config import NeuronHunyuanVideoConfig
     from difflet.backends.neuron.hunyuan_video.transformer import (
         NeuronHunyuanVideoTransformerApplication,
@@ -1651,6 +1653,7 @@ def hv1_dit_worker(rank: int, world_size: int, model_dir: str, parallel: dict, e
     out = app(*inputs.values())
     teacache = app.teacache_mod_input(inputs["hidden_states"], inputs["timestep"],
                                       inputs["pooled_projections"], inputs["guidance"])
+    attn = app.module.single_transformer_blocks[0].proj_out_attn
     return {
         "out": out.tolist(),
         "teacache": teacache.tolist(),
@@ -1660,6 +1663,9 @@ def hv1_dit_worker(rank: int, world_size: int, model_dir: str, parallel: dict, e
         "quantized_linears": list(app.quantized_linears),
         "fp8": {name: type(m).__name__ for name, m in app.module.named_modules()
                 if isinstance(m, _FP8LinearBase)},
+        "attn_twin": [type(attn).__name__, attn.skip_bias_add, attn.reduce_output],
+        # None for an FP8 twin: it drops its fp8 weight once the load has laid it out.
+        "attn_weight": None if attn.weight is None else attn.weight.detach().float().tolist(),
     }
 
 

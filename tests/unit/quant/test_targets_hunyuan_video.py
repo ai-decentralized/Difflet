@@ -1,10 +1,10 @@
 """The HunyuanVideo MXFP8 target table against diffusers' own module names (the checkpoint keys):
-the dual-stream q/k/v of both streams and both MLPs, the single-stream q/k/v and MLP-up are
-quantized; the output projections, the modulation, the token refiner, the embedders, the output
-layer and the single blocks' fused ``proj_out`` stay bf16 (until the spec splits it); the
-row-parallel set is every layer the TP layer shards along K, the token refiner's included, with
-an MX layout at tp 1, 2, 4 and 8 on the real geometry. A spec naming the fused ``proj_out`` is
-found by ``fused_proj_out_targets``, which the application and the driver refuse it with."""
+the dual-stream q/k/v of both streams and both MLPs, the single-stream q/k/v, MLP-up and the
+two halves of the split ``proj_out`` are quantized; the dual blocks' output projections, the
+modulation, the token refiner, the embedders and the output layer stay bf16, and the fused
+``proj_out`` is never a target (the spec stores it as its halves); the row-parallel set is
+every layer the TP layer shards along K, the token refiner's and the halves included, with an
+MX layout at tp 1, 2, 4 and 8 on the real geometry."""
 
 from __future__ import annotations
 
@@ -17,16 +17,16 @@ import pytest
 import torch
 
 from difflet.cli.quant import QUANT_MODELS, quant_spec
-from difflet.quant.spec import LAYOUT_K, QuantSpec
+from difflet.quant.spec import LAYOUT_K
 from difflet.quant.targets import (
-    FUSED_PROJ_OUT_REASON,
     HUNYUAN_VIDEO_KEPT_BF16,
     HUNYUAN_VIDEO_ROW_PARALLEL,
     HUNYUAN_VIDEO_TARGETS,
     ROW_PARALLEL_BY_MODEL,
+    SINGLE_BLOCK_SPLIT_LINEARS,
+    SPLITS_BY_MODEL,
     TARGETS_BY_MODEL,
     default_spec,
-    fused_proj_out_targets,
 )
 
 pytest.importorskip("diffusers")
@@ -45,8 +45,8 @@ HV1 = "hunyuanvideo-community/HunyuanVideo"
 PER_DUAL = {"attn.to_q", "attn.to_k", "attn.to_v", "attn.add_q_proj", "attn.add_k_proj",
             "attn.add_v_proj", "ff.net.0.proj", "ff.net.2", "ff_context.net.0.proj",
             "ff_context.net.2"}
-#: Per single-stream block: the joint q/k/v and the MLP-up (``proj_out`` waits for its split).
-PER_SINGLE = {"attn.to_q", "attn.to_k", "attn.to_v", "proj_mlp"}
+#: Per single-stream block: the joint q/k/v, the MLP-up and the halves of the split ``proj_out``.
+PER_SINGLE = {"attn.to_q", "attn.to_k", "attn.to_v", "proj_mlp", "proj_out_attn", "proj_out_mlp"}
 
 
 @pytest.fixture(scope="module")
@@ -58,23 +58,55 @@ def _linears(model):
     return [n for n, m in model.named_modules() if isinstance(m, torch.nn.Linear)]
 
 
+def _stored_linears(model, spec) -> dict[str, int]:
+    """The linears of the quantized directory under ``spec`` with their K: a split linear
+    ``[N, K]`` as its halves ``<name>_attn`` (K = N) and ``<name>_mlp`` (K - N), as the writer
+    stores them and the neuron module names them, every other one as itself."""
+    linears = {}
+    for n, m in model.named_modules():
+        if not isinstance(m, torch.nn.Linear):
+            continue
+        if spec.is_split(n):
+            linears[f"{n}_attn"] = m.out_features
+            linears[f"{n}_mlp"] = m.in_features - m.out_features
+        else:
+            linears[n] = m.in_features
+    return linears
+
+
 def test_default_targets_cover_the_block_qkv_and_mlps_only(model):
     spec = default_spec("hunyuan_video")
-    names = [n for n in _linears(model) if spec.matches(n)]
+    names = [n for n in _stored_linears(model, spec) if spec.matches(n)]
     assert {n.split(".", 2)[2] for n in names if n.startswith("transformer_blocks.")} == PER_DUAL
     assert {n.split(".", 2)[2] for n in names if n.startswith("single_")} == PER_SINGLE
     assert len(names) == (10 * TINY_FP8_HV1["num_layers"]
-                          + 4 * TINY_FP8_HV1["num_single_layers"])
+                          + 6 * TINY_FP8_HV1["num_single_layers"])
     assert not any(n.startswith("context_embedder.") for n in names)  # the refiner's own ff/attn
+
+
+def test_the_single_blocks_proj_out_is_stored_and_quantized_as_its_halves():
+    """HunyuanVideo's spec splits the single blocks' fused ``proj_out`` (phase D's writer), so
+    the targets name the halves the neuron module runs, never the fused linear, and each half
+    is row-parallel: quantized per rank K range of its own."""
+    assert SPLITS_BY_MODEL["hunyuan_video"] is SINGLE_BLOCK_SPLIT_LINEARS
+    assert default_spec("hunyuan_video").split_linears == SINGLE_BLOCK_SPLIT_LINEARS
+    spec = default_spec("hunyuan_video", tp_degree=4)
+    assert spec.is_split("single_transformer_blocks.0.proj_out")
+    assert spec.matches("single_transformer_blocks.0.proj_out_attn")
+    assert spec.matches("single_transformer_blocks.39.proj_out_mlp")
+    assert not spec.matches("single_transformer_blocks.0.proj_out")
+    assert (spec.k_shards("single_transformer_blocks.0.proj_out_attn")
+            == spec.k_shards("single_transformer_blocks.0.proj_out_mlp") == 4)
 
 
 #: The neuron module's row layers (``RowParallelLinear`` in
 #: ``difflet/models/hunyuan_video/modeling_hunyuan_video.py``) with a checkpoint key of their
-#: own, by owner: the dual blocks' output projections and MLP-downs, and the token refiner's
-#: attention output and MLP-down. The single blocks' ``proj_out_attn`` / ``proj_out_mlp`` are
-#: row layers too, read as column ranges of the fused ``proj_out`` until the spec splits it.
+#: own in the quantized directory, by owner: the dual blocks' output projections and MLP-downs,
+#: the single blocks' ``proj_out`` halves (tensors of their own: the spec splits the fused
+#: weight), and the token refiner's attention output and MLP-down.
 ROW_LAYERS = {
     "transformer_blocks.": ("attn.to_out.0", "attn.to_add_out", "ff.net.2", "ff_context.net.2"),
+    "single_transformer_blocks.": ("proj_out_attn", "proj_out_mlp"),
     "context_embedder.token_refiner.": ("attn.to_out.0", "ff.net.2"),
 }
 
@@ -87,15 +119,17 @@ def test_the_row_parallel_set_is_every_row_layer_with_a_key_of_its_own(model):
     ranks would read other block memberships than the weight was scaled in, with no error. The
     refiner's row layers are not default targets: they are listed for overrides."""
     spec = default_spec("hunyuan_video", tp_degree=4)
-    row = {n for n in _linears(model) if spec.is_row_parallel(n)}
-    assert row == {n for n in _linears(model) for owner, layers in ROW_LAYERS.items()
+    stored = _stored_linears(model, spec)
+    row = {n for n in stored if spec.is_row_parallel(n)}
+    assert row == {n for n in stored for owner, layers in ROW_LAYERS.items()
                    if n.startswith(owner) and n.endswith(layers)}
     assert spec.k_shards("context_embedder.token_refiner.refiner_blocks.0.attn.to_out.0") == 4
 
 
 def test_targets_and_kept_bf16_cover_every_linear_once(model):
     """The kept-bf16 table is documentation: with the targets it covers every linear of the
-    model exactly once, so a reader can tell each layer's precision from the table alone."""
+    model exactly once, so a reader can tell each layer's precision from the table alone; the
+    fused ``proj_out`` by the kept table, since the targets name its halves."""
     for n in _linears(model):
         hits = [any(re.fullmatch(p, n) for p in table)
                 for table in (HUNYUAN_VIDEO_TARGETS, HUNYUAN_VIDEO_KEPT_BF16)]
@@ -104,43 +138,21 @@ def test_targets_and_kept_bf16_cover_every_linear_once(model):
 
 def test_every_default_target_has_an_mx_layout_at_tp_1_2_4_8():
     """On the real geometry (diffusers' defaults are HunyuanVideo's own: 20 + 40 blocks of 24
-    heads x 128) the 360 default targets have a K per rank that is a multiple of the MX layout's
-    tile at tp 1, 2, 4 and 8, so the default set refuses no tp: the column targets have K 3072
-    and the MLP-downs 12288 / tp."""
+    heads x 128) the 440 default targets have a K per rank that is a multiple of the MX layout's
+    tile at tp 1, 2, 4 and 8, so the default set refuses no tp: the column targets have K 3072,
+    the MLP-downs 12288 / tp, and the ``proj_out`` halves 3072 / tp and 12288 / tp (768 at tp 4:
+    one 512-wide tile and a partial one of 256)."""
     accelerate = pytest.importorskip("accelerate")
     with accelerate.init_empty_weights():
         real = HunyuanVideoTransformer3DModel()
     for tp in (1, 2, 4, 8):
         spec = default_spec("hunyuan_video", tp_degree=tp)
-        targets = [(n, m) for n, m in real.named_modules()
-                   if isinstance(m, torch.nn.Linear) and spec.matches(n)]
-        assert len(targets) == 360
-        assert all((m.in_features // spec.k_shards(n)) % LAYOUT_K == 0 for n, m in targets), tp
-
-
-def test_fused_proj_out_targets_name_the_single_blocks_proj_out():
-    assert fused_proj_out_targets(default_spec("hunyuan_video"), 40) == []
-    every = QuantSpec(targets=(r"single_transformer_blocks\.\d+\.proj_out",))
-    assert fused_proj_out_targets(every, 2) == ["single_transformer_blocks.0.proj_out",
-                                                "single_transformer_blocks.1.proj_out"]
-    one = QuantSpec(targets=(r"single_transformer_blocks\.1\.proj_out",))
-    assert fused_proj_out_targets(one, 2) == ["single_transformer_blocks.1.proj_out"]
-    # module spelling: no checkpoint key, so the writer's dead-pattern refusal owns it
-    split = QuantSpec(targets=(r"single_transformer_blocks\.\d+\.proj_out_attn",))
-    assert fused_proj_out_targets(split, 2) == []
-
-
-def test_the_fused_proj_out_reason_reads_after_the_callers_prefix():
-    """The application puts ``HunyuanVideo: <name>`` before the reason and the driver
-    ``--quant: <name>``, so the reason names the model no second time, its clause on the
-    checkpoint is about ``proj_out`` (not the neuron module), and it keeps the substrings the
-    application's refusal test matches."""
-    message = f"HunyuanVideo: single_transformer_blocks.1.proj_out {FUSED_PROJ_OUT_REASON}"
-    assert re.search(r"single_transformer_blocks\.1\.proj_out is read as two column ranges "
-                     r"\(proj_out_attn / proj_out_mlp\) by the neuron module, and .*phase D",
-                     message)
-    assert message.count("HunyuanVideo") == 1
-    assert ", which " not in FUSED_PROJ_OUT_REASON
+        targets = {n: k for n, k in _stored_linears(real, spec).items() if spec.matches(n)}
+        assert len(targets) == 440
+        halves = {n: k for n, k in targets.items()
+                  if n.endswith(("proj_out_attn", "proj_out_mlp"))}
+        assert len(halves) == 80 and set(halves.values()) == {3072, 12288}
+        assert all((k // spec.k_shards(n)) % LAYOUT_K == 0 for n, k in targets.items()), tp
 
 
 def test_the_cli_id_resolves_to_the_table_at_the_launchs_tp(monkeypatch):

@@ -41,17 +41,20 @@ its mask as ``m & m.transpose(2, 3)``).
 
 MXFP8 (``quant=``, the base's wiring, ``difflet.quant.targets``' ``"hunyuan_video"`` table): the
 dual-stream blocks' q/k/v of both streams and both MLPs and the single-stream blocks' joint
-q/k/v and ``proj_mlp`` become their FP8 twins on the meta module before the load. The patterns
-are diffusers' names, which are this module's and the checkpoint's wherever they reach, and
-``model_path`` is then the quantized directory, written straight from the hub's ``transformer``
-(already bf16, so there is no bf16 copy). The attention calls each projection directly, so there
-is no q/k/v fusion. The single blocks' ``proj_out`` stays bf16: the quantized directory holds it
-fused as the hub does, and the slices above read its column ranges. A spec that names it is
-refused at construction (``fused_proj_out_targets``) until the spec stores its halves (roadmap
-task E6): the writer would quantize the fused tensor whole, and every rank would then refuse a
-pattern that names none of its modules, without the cause. Under SP the image stream's
-``ff.net.2`` and ``to_out.0`` run with ``reduce_output=False`` (corrected by ``_sp_unbias``),
-and the FP8 row twin keeps that flag and adds the whole bias, as the bf16 layer does.
+q/k/v, ``proj_mlp``, ``proj_out_attn`` and ``proj_out_mlp`` become their FP8 twins on the meta
+module before the load. The patterns are diffusers' names, which are this module's and the
+checkpoint's wherever they reach, and ``model_path`` is then the quantized directory, written
+straight from the hub's ``transformer`` (already bf16, so there is no bf16 copy). The attention
+calls each projection directly, so there is no q/k/v fusion. The quantized directory has no
+fused ``proj_out.weight`` (the spec splits it: ``difflet.quant.targets``' ``SPLITS_BY_MODEL``):
+it holds ``proj_out_attn.weight`` / ``proj_out_mlp.weight`` as tensors of their own, read by
+name, since the base drops the slices its spec splits; each half is fp8 with its scales,
+quantized per rank K range of its own, when targeted, else in the source's dtype. The
+attention half's twin keeps the layer's ``reduce_output=False`` / ``skip_bias_add=True``, so
+the block's one merged all-reduce and its single bias add run as in bf16. Under SP the image
+stream's ``ff.net.2`` and ``to_out.0`` run with ``reduce_output=False`` (corrected by
+``_sp_unbias``), and the FP8 row twin keeps that flag and adds the whole bias, as the bf16
+layer does.
 """
 
 from __future__ import annotations
@@ -75,7 +78,6 @@ from difflet.backends.neuron.core.config_checks import (
 )
 from difflet.backends.neuron.hunyuan_video.config import NeuronHunyuanVideoConfig
 from difflet.quant.spec import QuantSpec
-from difflet.quant.targets import FUSED_PROJ_OUT_REASON, fused_proj_out_targets
 
 #: Valid text tokens in the warm-up's mask: any count compiles the same block graphs (the
 #: mask is a key bound, not a shape).
@@ -132,9 +134,9 @@ class NeuronHunyuanVideoTransformerApplication(TorchNeuronApplicationBase):
     ``quant`` (a ``QuantSpec`` or its dict) is the base's MXFP8 wiring (the module docstring
     says which linears), and ``model_path`` is then the quantized directory. It is a keyword of
     its own, passed to the base: in ``overrides`` it would reach the config, which has no such
-    field, or be refused as an override beside ``config``. The MLP-downs are row-parallel,
-    quantized per rank K range for the launch's tp, so a spec for another tp is refused, as are
-    eager mode (decision D43) and a spec that names a single block's fused ``proj_out``.
+    field, or be refused as an override beside ``config``. The MLP-downs and the ``proj_out``
+    halves are row-parallel, quantized per rank K range for the launch's tp, so a spec for
+    another tp is refused, as is eager mode (decision D43).
     """
 
     block_attrs = ("transformer_blocks", "single_transformer_blocks")
@@ -184,10 +186,6 @@ class NeuronHunyuanVideoTransformerApplication(TorchNeuronApplicationBase):
         # config and the parallel config describe the same mesh.
         config = resolve_cp_degree(name, config, self.parallel)
         config.validate()
-        if self.quant is not None:
-            fused = fused_proj_out_targets(self.quant, config.num_single_layers)
-            if fused:
-                raise ValueError(f"HunyuanVideo: {fused[0]} {FUSED_PROJ_OUT_REASON}")
         require_bf16_on_device("HunyuanVideo", self.device.type, self.dtype)
         self.config = config
         # Blocks past num_layers / num_single_layers are in the checkpoint on purpose when the
