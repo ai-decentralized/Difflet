@@ -34,6 +34,13 @@ def launches(monkeypatch):
     import difflet.cli.orchestrators.torchrun as torchrun_helpers
 
     monkeypatch.delenv("DIFFLET_NKI_TRACE_CACHE", raising=False)  # the driver sets it: restore after each test
+
+    def no_local_snapshot(*args, **kwargs):
+        # compile() makes a bf16 copy of the real fp32 DiT when the snapshot is local (33 GB
+        # under the test's cache, refused by tests/unit/conftest.py): a driver test never needs it.
+        raise FileNotFoundError("no local snapshot (test)")
+
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path", no_local_snapshot)
     monkeypatch.setattr(hv15, "torchrun_backend", lambda: "neuron")
     monkeypatch.setattr(torchrun_helpers, "torchrun_backend", lambda: "neuron")  # the refusal checks it too
     def run_stage(model, stage, num_cores, virtual_core_size, cli_args):
