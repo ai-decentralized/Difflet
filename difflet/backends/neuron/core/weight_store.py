@@ -92,7 +92,8 @@ __all__ = [
 ]
 
 #: Bump when the key inputs or the file layout change: old entries are then never matched.
-STORE_FORMAT = 1
+#: 2: float8 tensors (the fp8 linears' weights) are stored; their specs carry their own dtype.
+STORE_FORMAT = 2
 STORE_ENV = "DIFFLET_NEURON_WEIGHT_STORE"
 _OFF_VALUES = ("0", "off", "false", "none", "no")
 ALL_ENV = "DIFFLET_NEURON_WEIGHT_STORE_ALL"
@@ -116,6 +117,8 @@ _DTYPES: dict[torch.dtype, str] = {
     torch.int8: "I8",
     torch.uint8: "U8",
     torch.bool: "BOOL",
+    torch.float8_e4m3fn: "F8_E4M3",
+    torch.float8_e5m2: "F8_E5M2",
 }
 _ITEMSIZE = {"F64": 8, "F32": 4, "F16": 2, "BF16": 2, "I64": 8, "I32": 4, "I16": 2, "I8": 1,
              "U8": 1, "BOOL": 1, "F8_E4M3": 1, "F8_E5M2": 1}
@@ -154,7 +157,9 @@ class _Spec:
 def _module_specs(module: nn.Module, *, dtype: torch.dtype, tp_size: int, prefix: str,
                   rename: Callable[[str], str] | None) -> list[_Spec]:
     """The tensors ``load_checkpoint_into`` fills, in its order, as they are on the device:
-    meta parameters in ``dtype`` (``materialize_meta_``), everything else in its own dtype."""
+    meta parameters in ``dtype`` (``materialize_meta_``; float8 ones keep theirs), everything
+    else in its own dtype."""
+    from difflet.backends._torch_megatron.weights import is_float8
     from difflet.backends.tpu.core.weights import shard_dim
 
     persistent = set(module.state_dict().keys())
@@ -166,7 +171,8 @@ def _module_specs(module: nn.Module, *, dtype: torch.dtype, tp_size: int, prefix
         if rename is not None:
             key = rename(key)
         is_param = isinstance(tensor, nn.Parameter)
-        target_dtype = dtype if (is_param and tensor.is_meta) else tensor.dtype
+        materialised = is_param and tensor.is_meta and not is_float8(tensor.dtype)
+        target_dtype = dtype if materialised else tensor.dtype
         dim = shard_dim(module, name) if tp_size > 1 else None
         specs.append(_Spec(name, key, tuple(int(n) for n in tensor.shape), target_dtype, dim))
     return specs
