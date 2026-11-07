@@ -206,11 +206,17 @@ def _write_frames(frames, output: str) -> None:
 
 def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
     """The options the torchrun (neuron) ranks reject in phase 1, as the command line names
-    them: every torchrun backend's (TeaCache), plus a --shapes with more than one shape. The
-    application holds one static shape per process (``_resolve_shape``), so a bucketed set
-    used to fail only after torchrun had started every rank. Torch-free: the shapes are
-    counted, not parsed, so a malformed --shapes fails where it always did."""
-    return torchrun_unsupported_options(args)
+    them: every torchrun backend's (TeaCache), a --shapes with more than one shape, and
+    --quant. The application holds one static shape per process (``_resolve_shape``), so a
+    bucketed set used to fail only after torchrun had started every rank. --quant passes the
+    CLI's model check (``QUANT_MODELS`` names both Wan ids for their target table) but this
+    driver does not yet write the quantized directories, forward the flag to its stage or key
+    the cache on it, so a launch would run the bf16 DiT without a word. Torch-free: the shapes
+    are counted, not parsed, so a malformed --shapes fails where it always did."""
+    found = torchrun_unsupported_options(args)
+    if getattr(args, "quant", None) is not None:
+        found.append("--quant")
+    return found
 
 
 def _require_request_shape_in_set(args: argparse.Namespace):

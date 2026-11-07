@@ -1055,14 +1055,17 @@ def test_neuron_driver_accepts_teacache(monkeypatch, tmp_path, capsys, overrides
     assert "does not support" not in capsys.readouterr().err
 
 
-# One static shape per process: a bucketed set failed only once every rank had started.
-_SHAPES_REJECTED = [
+# One static shape per process: a bucketed set failed only once every rank had started. --quant
+# passes the CLI's model check (QUANT_MODELS names Wan for its target table) but the driver
+# does not carry it yet: refused here, not run as the bf16 DiT.
+_REJECTED_BEFORE_LAUNCH = [
     (dict(shapes="480x832x9,480x832x5"), "--shapes with more than one shape"),
     (dict(shapes="480x832x9, 480x832x5", teacache_cadence=2), "--shapes with more than one shape"),
+    (dict(quant="mxfp8"), "--quant"),
 ]
 
 
-@pytest.mark.parametrize("overrides, named", _SHAPES_REJECTED)
+@pytest.mark.parametrize("overrides, named", _REJECTED_BEFORE_LAUNCH)
 @pytest.mark.parametrize("mode", ["compile", "generate", "run"])
 def test_neuron_driver_rejects_several_shapes_before_any_launch(monkeypatch, tmp_path, capsys,
                                                                 mode, overrides, named):

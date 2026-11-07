@@ -53,7 +53,7 @@ def test_refusals(capsys, monkeypatch):
              "--quant-compute needs --quant", capsys)
     _refused(argparse.Namespace(**{**base, "backend": "trainium"}), "neuron backend", capsys)
     _refused(argparse.Namespace(**{**base, "backend": None}), "neuron backend", capsys)
-    _refused(argparse.Namespace(**{**base, "model_id": "Wan-AI/Wan2.2-T2V-A14B-Diffusers"}),
+    _refused(argparse.Namespace(**{**base, "model_id": "hunyuanvideo-community/HunyuanVideo"}),
              "not available for", capsys)
     _refused(argparse.Namespace(**{**base, "exec_mode": "eager"}), "compile", capsys)
     _refused(argparse.Namespace(**{**base, "teacache_speedup": 1.5}), "TeaCache", capsys)
