@@ -14,11 +14,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from difflet.backends._torch_megatron.weights import is_float8, materialize_meta_
-from difflet.backends.neuron.core.application_base import rank_weight_bytes
+from difflet.backends.neuron.core.application_base import (
+    TorchNeuronApplicationBase,
+    rank_weight_bytes,
+)
 from difflet.backends.neuron.ops_impl import fp8_linear as Q
 from difflet.backends.neuron.ops_impl import linear as L
 from difflet.backends.neuron.ops_impl import parallel_mesh as pm
 from difflet.backends.tpu.core.weights import load_sharded_state_dict, shard_dim
+from difflet.pipeline.parallel_config import DiffletParallelConfig
 from difflet.pipeline.parallel_mesh import MeshSpec
 from difflet.quant import mx
 from difflet.quant.fake_linear import FakeQuantMXLinear
@@ -407,3 +411,86 @@ def test_prepare_kernel_lays_the_weight_out_and_drops_the_unpacked_one():
     assert "weight_packed" not in layer.state_dict()
     layer.prepare_kernel_()  # idempotent
     assert Q.prepare_fp8_kernels_(nn.Sequential(layer)) == 1
+
+
+# ------------------------------------------------------------ the application base
+
+
+class _TwoLinears(nn.Module):
+    """``fc1`` (K=128, the spec's target) and ``fc2`` (K=16: no MX layout, stays as it is)."""
+
+    def __init__(self, dim: int, hidden: int):
+        super().__init__()
+        self.fc1 = nn.Linear(dim, hidden)
+        self.fc2 = nn.Linear(hidden, dim)
+
+    def forward(self, x):
+        return self.fc2(F.gelu(self.fc1(x)))
+
+
+class _ToyApp(TorchNeuronApplicationBase):
+    """The base's lifecycle over ``_TwoLinears`` on the CPU at tp=1, no block stack to compile:
+    the subclass declares its target table's key and builds the bf16 module, nothing else."""
+
+    quant_model = "toy"
+    block_attrs = ()
+
+    def build_module(self):
+        return _TwoLinears(128, 16)
+
+    def get_example_inputs(self):
+        return (torch.randn(2, 128),)
+
+
+_SPEC = QuantSpec(targets=("fc1",), compute="dequant")
+
+
+def test_base_refuses_quant_without_a_target_table():
+    """A subclass without ``quant_model`` has no FP8 support: ``quant=`` is refused at
+    construction, not run as the bf16 module against a quantized checkpoint."""
+    class NoQuant(_ToyApp):
+        quant_model = None
+
+    with pytest.raises(NotImplementedError, match="NoQuant has no MXFP8 target layers"):
+        NoQuant(model_path="/x", device="cpu", exec_mode="compile", quant=_SPEC)
+    assert NoQuant(model_path="/x", device="cpu", exec_mode="compile").quant is None
+
+
+def test_base_refuses_eager_with_quant_under_the_models_label():
+    """The D43 refusal names the model by ``quant_label``, or by its target-table key."""
+    class Labelled(_ToyApp):
+        quant_label = "Toy DiT"
+
+    with pytest.raises(ValueError, match="the Toy DiT FP8 DiT needs exec_mode='compile'"):
+        Labelled(model_path="/x", device="cpu", exec_mode="eager", quant=_SPEC)
+    with pytest.raises(ValueError, match="the toy FP8 DiT needs exec_mode='compile'"):
+        _ToyApp(model_path="/x", device="cpu", exec_mode="eager", quant=_SPEC.to_dict())
+
+
+def test_base_quantizes_after_build_and_prepares_after_load(tmp_path):
+    """``load`` swaps the spec's targets on the meta module ``build_module`` returned, fills
+    them from the quantized directory and prepares them in ``_after_load``, so the forward is
+    the dequant one on the checkpoint's fp8 weight."""
+    from safetensors.torch import save_file
+
+    torch.manual_seed(0)
+    reference = _TwoLinears(128, 16)
+    q, s = mx.quantize_mx(reference.fc1.weight.detach())
+    save_file({"fc1.weight": q, "fc1.weight_scale": s, "fc1.bias": reference.fc1.bias.detach(),
+               "fc2.weight": reference.fc2.weight.detach(),
+               "fc2.bias": reference.fc2.bias.detach()},
+              str(tmp_path / "model.safetensors"))
+    app = _ToyApp(model_path=str(tmp_path), parallel=DiffletParallelConfig(), dtype=torch.float32,
+                  exec_mode="compile", device="cpu", quant=_SPEC.to_dict())
+    assert app.quant == _SPEC and app.quantized_linears == []
+    app.load()
+    assert app.quantized_linears == ["fc1"]
+    assert app.load_report == {"missing": [], "unexpected": []}
+    assert isinstance(app.module.fc1, Q.FP8Linear) and type(app.module.fc2) is nn.Linear
+    assert app.module.fc1.weight is None and app.module.fc1.weight_bf16 is not None  # prepared
+    x = torch.randn(2, 128)
+    with torch.no_grad():
+        reference.fc1.weight.copy_(mx.dequantize_mx(q, s))
+        expect = reference(x)
+    # The prepared bf16 weight copy rounds the dequantized weight once more than the reference.
+    assert torch.allclose(app(x), expect, atol=2e-2, rtol=2e-2)
