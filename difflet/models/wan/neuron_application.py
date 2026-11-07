@@ -35,6 +35,17 @@ launch builds one and holds:
   dtype. Without it the VAE decodes outside this application: the CLI's vae
   stage runs the same decoder on one core, or diffusers on the host with ``--host-vae``.
 
+``quant`` (``"mxfp8"``, a ``QuantSpec`` or its dict) and ``quant_checkpoint`` are the MXFP8
+DiT options (``difflet/backends/neuron/core/quant.py``). The spec is resolved once, at the
+launch's tp, and both experts take it: they share one block graph, so one target table. Each
+expert loads its own quantized directory, resolved from the directory the expert would load in
+bf16, its bf16 copy when ``difflet compile`` made one (the hub DiTs are fp32;
+``resolve_component_dir``), so the writer read bf16 tensors and the fp32 hub files never, and
+the directory's fingerprint carries the copy's manifest. ``quant_checkpoint`` names one
+directory, so it is refused with two experts: theirs are resolved from the compile cache, and
+a launch that quantizes one expert and not the other cannot be built. The HBM check beside
+the device text encoder counts every quantized expert as stored (``quantized_dits``).
+
 Parallelism: tensor parallelism, with or without sequence parallelism (Megatron SP within the
 TP group), CFG parallelism (one batch-2 DiT call per step, each branch on its own TP group) and
 context parallelism in every ``cp_mode`` (gather_kv, ulysses, ring). Data parallelism is a set
@@ -73,6 +84,7 @@ from difflet.backends.neuron.core.model_application import (
     TorchNeuronModelApplication,
     broadcast_from_rank0,
 )
+from difflet.backends.neuron.core.quant import resolve_quant
 from difflet.backends.neuron.wan.config import NeuronWanConfig
 from difflet.backends.neuron.wan.hbm import device_text_encoder_components
 from difflet.backends.neuron.wan.text_encoder import NeuronWanTextEncoderApplication
@@ -104,6 +116,12 @@ _KWARG_DEFAULTS: dict[str, Any] = {
     "teacache_cadence": None,
     "teacache_online_delta_alpha": None,
     "teacache_calibration_path": None,
+    # MXFP8 DiT linears (difflet/quant): the spec (a QuantSpec, its dict, or "mxfp8" for the
+    # default recipe), shared by both experts, and, optionally, the one expert's quantized
+    # checkpoint directory; without one each expert's is resolved under the compile cache (it
+    # must already exist: `difflet compile` writes it).
+    "quant": None,
+    "quant_checkpoint": None,
 }
 
 
@@ -315,27 +333,49 @@ class TorchNeuronWanApplication(TorchNeuronModelApplication):
             torch_dtype=self.dtype,
         )
         self.config = NeuronWanConfig.from_pretrained(transformer_path, **config_overrides)
+        tp_degree = int(parallel.tp_degree)
+        # Each expert loads its bf16 copy when `difflet compile` made one (the hub DiTs are
+        # fp32), and its quantized directory is resolved from that same source: what the
+        # writer read is what the expert loads without quant.
+        self.quant, dit_path = resolve_quant(
+            "wan", options["quant"], options["quant_checkpoint"],
+            resolve_component_dir(transformer_path, self.dtype), tp_degree=tp_degree)
+        #: The quantized directory of each expert (``quant``: ``{"transformer": dir[,
+        #: "transformer_2": dir]}``), which the HBM estimates count as stored
+        #: (``_check_device_text_encoder_fits``); empty without ``quant``.
+        self.quantized_dits: dict[str, str] = {}
+        if self.quant is not None:
+            self.quantized_dits["transformer"] = dit_path
         if options["enable_transformer"]:
             self.transformer = NeuronWanTransformerApplication(
-                model_path=resolve_component_dir(transformer_path, self.dtype),  # the bf16 copy if made
+                model_path=dit_path,
                 config=self.config,
                 parallel=parallel,
                 dtype=self.dtype,
                 exec_mode=options["exec_mode"],
                 device=self.device,
+                quant=self.quant,
             )
         self.transformer_2: NeuronWanTransformerApplication | None = None
         if options["enable_transformer_2"]:
             transformer_2_path = self._low_noise_expert_path(options)
             config_2 = NeuronWanConfig.from_pretrained(transformer_2_path, **config_overrides)
             _require_same_architecture(self.config, config_2)
+            # The resolved spec (one block graph: one table at one tp) and this expert's own
+            # directory, never a named one (``_reject_model_options``).
+            _, dit_path_2 = resolve_quant(
+                "wan", self.quant, None, resolve_component_dir(transformer_2_path, self.dtype),
+                tp_degree=tp_degree)
+            if self.quant is not None:
+                self.quantized_dits["transformer_2"] = dit_path_2
             self.transformer_2 = NeuronWanTransformerApplication(
-                model_path=resolve_component_dir(transformer_2_path, self.dtype),
+                model_path=dit_path_2,
                 config=config_2,
                 parallel=parallel,
                 dtype=self.dtype,
                 exec_mode=options["exec_mode"],
                 device=self.device,
+                quant=self.quant,
             )
         text_encoder_dtype = _normalize_dtype(options["text_encoder_dtype"])
         if options["enable_text_encoder"] and options["text_encoder_device"] == "neuron":
@@ -386,6 +426,11 @@ class TorchNeuronWanApplication(TorchNeuronModelApplication):
             dtype = _normalize_dtype(options[name])
             if dtype not in (torch.bfloat16, torch.float32):
                 raise ValueError(f"{name} must be bfloat16 or float32, got {dtype}")
+        if options["quant_checkpoint"] is not None and options["enable_transformer_2"]:
+            raise ValueError(
+                "quant_checkpoint names one directory; Wan 2.2's two experts resolve theirs "
+                "from the cache"
+            )
 
     def _resolve_shape(self, shape: dict[str, int | None], shapes) -> dict[str, int]:
         if shapes:
@@ -412,7 +457,9 @@ class TorchNeuronWanApplication(TorchNeuronModelApplication):
         CFG and CP on four cores, DP replicas of tp2 and a plain tp2 all narrow the TP group the
         same way. At tp2 that is at least 10.6 GiB of fp32 encoder beside 13.3 GiB of bf16 DiT on
         a 24 GiB core; the bf16 encoder (the default) is half that and fits. Both experts count
-        when Wan 2.2's low-noise expert is resident.
+        when Wan 2.2's low-noise expert is resident. With ``quant`` each is counted as its
+        quantized directory stores it (fp8 weights and block scales), not as the bf16 source,
+        which would refuse a tp the quantized experts fit.
         """
         experts = tuple(
             name
@@ -421,7 +468,8 @@ class TorchNeuronWanApplication(TorchNeuronModelApplication):
             if app is not None
         )
         self._check_components_fit(
-            device_text_encoder_components(experts, self.dtype.itemsize, encoder_dtype.itemsize),
+            device_text_encoder_components(experts, self.dtype.itemsize, encoder_dtype.itemsize,
+                                           dit_dirs=self.quantized_dits),
             what=f"umT5 ({encoder_dtype}) beside the Wan DiT ({', '.join(experts) or 'none'}) "
             "on one core",
             advice="encode on the host (text_encoder_device='host', --host-text-encoder), or "

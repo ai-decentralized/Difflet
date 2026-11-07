@@ -17,6 +17,11 @@ is a lower bound: everything is counted as sharded over the TP group, though the
 and norms are replicated, so a rejection means the components clearly cannot fit. Both callers
 use it: ``TorchNeuronWanApplication.__init__``, so an API caller gets the error before any rank
 loads, and the Wan CLI driver, which moves umT5 to the host before torchrun starts.
+
+A quantized expert (``--quant``, ``dit_dirs``) is counted as its quantized directory stores it,
+fp8 weights and uint8 block scales beside the bf16 rest (``Component.stored_in``), each expert of
+Wan 2.2 by its own directory: the bf16 estimate would count every fp8 weight at twice its size
+and refuse a tp the quantized experts fit.
 """
 
 from __future__ import annotations
@@ -34,12 +39,21 @@ TEXT_ENCODER = Component("text_encoder", TEXT_ENCODER_DTYPE_BYTES)
 def device_text_encoder_components(experts: tuple[str, ...] = ("transformer",),
                                    dit_dtype_bytes: int = 2,
                                    encoder_dtype_bytes: int = TEXT_ENCODER_DTYPE_BYTES,
+                                   dit_dirs: dict[str, str | Path] | None = None,
                                    ) -> tuple[Component, ...]:
     """umT5 in ``encoder_dtype_bytes`` and the DiT ``experts`` (the checkpoint subdirectories
     that stay resident with it: ``("transformer",)``, plus ``"transformer_2"`` for Wan 2.2's
-    low-noise expert, or none)."""
-    return (TEXT_ENCODER.in_dtype(encoder_dtype_bytes),
-            *(Component(name, int(dit_dtype_bytes)) for name in experts))
+    low-noise expert, or none). An expert named in ``dit_dirs`` (expert -> its quantized
+    directory, ``difflet/quant/checkpoint.py``) is counted as that directory stores it, not in
+    ``dit_dtype_bytes``."""
+    dit_dirs = dit_dirs or {}
+    components = []
+    for name in experts:
+        expert = Component(name, int(dit_dtype_bytes))
+        if name in dit_dirs:
+            expert = expert.stored_in(dit_dirs[name])
+        components.append(expert)
+    return (TEXT_ENCODER.in_dtype(encoder_dtype_bytes), *components)
 
 
 def device_text_encoder_bytes(
@@ -49,11 +63,14 @@ def device_text_encoder_bytes(
     experts: tuple[str, ...] = ("transformer",),
     dit_dtype_bytes: int = 2,
     encoder_dtype_bytes: int = TEXT_ENCODER_DTYPE_BYTES,
+    dit_dirs: dict[str, str | Path] | None = None,
 ) -> int:
     """Lower bound of one rank's weight bytes with umT5 (in ``encoder_dtype_bytes``) on the
-    device beside the DiT ``experts``, all sharded over ``tp_degree``."""
+    device beside the DiT ``experts`` (the quantized ones as their ``dit_dirs`` store them),
+    all sharded over ``tp_degree``."""
     return components_bytes(
-        model_dir, device_text_encoder_components(experts, dit_dtype_bytes, encoder_dtype_bytes),
+        model_dir,
+        device_text_encoder_components(experts, dit_dtype_bytes, encoder_dtype_bytes, dit_dirs),
         tp_degree=tp_degree)
 
 
@@ -64,11 +81,13 @@ def device_text_encoder_fits(
     experts: tuple[str, ...] = ("transformer",),
     dit_dtype_bytes: int = 2,
     encoder_dtype_bytes: int = TEXT_ENCODER_DTYPE_BYTES,
+    dit_dirs: dict[str, str | Path] | None = None,
 ) -> tuple[bool, int, int]:
     """``(fits, estimate, limit)``: the ``device_text_encoder_bytes`` estimate against
     ``FIT_FRACTION`` of one core's HBM."""
     return components_fit(
-        model_dir, device_text_encoder_components(experts, dit_dtype_bytes, encoder_dtype_bytes),
+        model_dir,
+        device_text_encoder_components(experts, dit_dtype_bytes, encoder_dtype_bytes, dit_dirs),
         tp_degree=tp_degree)
 
 
