@@ -154,16 +154,34 @@ def compare(a: Path, b: Path) -> dict:
     return out
 
 
-def _latent_metrics(ref, cand) -> dict:
-    """``latent_metrics`` plus ``bit_identical`` for one tensor pair, or one such block per key
-    when the files hold dicts (LTX-2's orchestrator saves ``{"video": ..., "audio": ...}``);
-    the two dicts must hold the same keys."""
+def _latent_metrics(ref: torch.Tensor | dict, cand: torch.Tensor | dict) -> dict:
+    """``latent_metrics`` plus ``bit_identical`` for one tensor pair, or one such block per
+    tensor key when the files hold dicts: LTX-2's orchestrator saves ``{"video", "audio"}``,
+    MiniMax-H3's ``{"video_latents", "audio_latents", "height", "width", "num_frames"}``. The
+    two dicts must hold the same keys; a non-tensor value (shape metadata) must be equal on
+    both sides and gets no block. Anything else is refused by name rather than left to fail
+    inside the metrics."""
     if isinstance(ref, dict) or isinstance(cand, dict):
         if not (isinstance(ref, dict) and isinstance(cand, dict)) or ref.keys() != cand.keys():
-            ref_keys = sorted(ref) if isinstance(ref, dict) else "a tensor"
-            cand_keys = sorted(cand) if isinstance(cand, dict) else "a tensor"
-            raise ValueError(f"latents differ in kind or keys: ref holds {ref_keys}, cand holds {cand_keys}")
-        return {key: _latent_metrics(ref[key], cand[key]) for key in ref}
+            ref_keys = sorted(map(str, ref)) if isinstance(ref, dict) else "a tensor"
+            cand_keys = sorted(map(str, cand)) if isinstance(cand, dict) else "a tensor"
+            raise ValueError(
+                f"latents differ in kind or keys: ref holds {ref_keys}, cand holds {cand_keys}")
+        if not ref:
+            raise ValueError("latents hold no tensors (an empty dict)")
+        out = {}
+        for key in ref:
+            a, b = ref[key], cand[key]
+            if isinstance(a, (torch.Tensor, dict)) or isinstance(b, (torch.Tensor, dict)):
+                out[key] = _latent_metrics(a, b)
+            elif a != b:
+                raise ValueError(f"latents metadata {key!r} differs: ref {a!r}, cand {b!r}")
+        if not out:
+            raise ValueError(f"latents hold no tensors, only {sorted(map(str, ref))}")
+        return out
+    if not (isinstance(ref, torch.Tensor) and isinstance(cand, torch.Tensor)):
+        raise ValueError(
+            f"latents hold a {type(ref).__name__} and a {type(cand).__name__}, not tensors")
     metrics = _qvr().latent_metrics(ref, cand)
     metrics["bit_identical"] = bool(torch.equal(ref, cand))
     return metrics
@@ -179,7 +197,10 @@ def compare_runs(ref_latents: Path | None, cand_latents: Path | None, ref_output
         out.update(ref_latents=str(ref_latents), cand_latents=str(cand_latents))
         ref = torch.load(ref_latents, map_location="cpu", weights_only=True)
         cand = torch.load(cand_latents, map_location="cpu", weights_only=True)
-        out["latents"] = _latent_metrics(ref, cand)
+        try:
+            out["latents"] = _latent_metrics(ref, cand)
+        except ValueError as exc:
+            raise ValueError(f"{ref_latents} vs {cand_latents}: {exc}") from None
     if ref_output and cand_output:
         ref_output, cand_output = Path(ref_output), Path(cand_output)
         key = "video" if _is_video(ref_output) or _is_video(cand_output) else "image"
