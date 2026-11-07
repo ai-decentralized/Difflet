@@ -167,33 +167,12 @@ class TorchNeuronFluxApplication:
         return os.path.join(self.model_path, name)
 
     def _resolve_quant(self, options: dict[str, Any], transformer_path: str):
-        """``(spec, DiT directory)``: the quantized checkpoint for ``quant`` (resolved under the
-        compile cache, never written here), else ``(None, transformer_path)``."""
-        from difflet.quant.checkpoint import check_quantized_dir, prepare_quantized_checkpoint
-        from difflet.quant.spec import FORMAT, QuantSpec
-        from difflet.quant.targets import default_spec
+        """``(spec, DiT directory)`` for the ``quant`` options (``core/quant.resolve_quant``):
+        FLUX's target table at the launch's tp."""
+        from difflet.backends.neuron.core.quant import resolve_quant
 
-        quant = options["quant"]
-        if quant is None:
-            if options["quant_checkpoint"] is not None:
-                raise ValueError("quant_checkpoint needs quant ('mxfp8' or a QuantSpec)")
-            return None, transformer_path
-        if isinstance(quant, str):
-            if quant != FORMAT:
-                raise ValueError(f"quant must be {FORMAT!r}, a QuantSpec or its dict, got {quant!r}")
-            spec = default_spec("flux", tp_degree=int(self.parallel.tp_degree))
-        elif isinstance(quant, dict):
-            spec = QuantSpec.from_dict(quant)
-        elif isinstance(quant, QuantSpec):
-            spec = quant
-        else:
-            raise TypeError(f"quant must be {FORMAT!r}, a QuantSpec or its dict, got {type(quant)}")
-        checkpoint = options["quant_checkpoint"]
-        if checkpoint is None:
-            checkpoint = prepare_quantized_checkpoint(transformer_path, spec, create=False)
-        else:
-            check_quantized_dir(checkpoint, transformer_path, spec)
-        return spec, str(checkpoint)
+        return resolve_quant("flux", options["quant"], options["quant_checkpoint"],
+                             transformer_path, tp_degree=int(self.parallel.tp_degree))
 
     def load(self, compiled_model_path=None, skip_warmup: bool = False) -> None:
         """Build and load every component (``compiled_model_path`` is an AoT notion: unused).

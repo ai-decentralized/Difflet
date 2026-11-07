@@ -349,3 +349,58 @@ def test_every_neuron_application_is_checked(make, fixture, request, monkeypatch
     with pytest.raises(hbm.HbmBudgetError, match=type(again).__name__):
         again.load(skip_warmup=True)
     assert not again.is_loaded
+
+
+# ---- a quantized DiT directory is counted as stored --------------------------------------
+
+
+@pytest.fixture(scope="module")
+def tiny_quantized_toy(tmp_path_factory):
+    """A two-linear bf16 checkpoint and its quantized directory: ``fc1`` (K=128) becomes an fp8
+    weight with uint8 block scales (one per 32 of K); ``fc2`` and the biases stay bf16."""
+    pytest.importorskip("safetensors.torch")
+    from safetensors.torch import save_file
+
+    from difflet.quant.checkpoint import write_quantized_dir
+    from difflet.quant.spec import QuantSpec
+
+    root = tmp_path_factory.mktemp("hbm_quantized")
+    (root / "transformer").mkdir()
+    torch.manual_seed(0)
+    save_file({"fc1.weight": torch.randn(16, 128).to(torch.bfloat16),
+               "fc1.bias": torch.randn(16).to(torch.bfloat16),
+               "fc2.weight": torch.randn(128, 16).to(torch.bfloat16),
+               "fc2.bias": torch.randn(128).to(torch.bfloat16)},
+              str(root / "transformer" / "model.safetensors"))
+    write_quantized_dir(root / "transformer", root / "quantized", QuantSpec(targets=("fc1",)))
+    stored = 16 * 128 + 16 * (128 // 32) + (16 + 128 * 16 + 128) * 2  # fp8, scales, bf16 rest
+    return SimpleNamespace(model_dir=root, quantized=root / "quantized", stored_bytes=stored)
+
+
+def test_quantized_dir_bytes_count_fp8_as_stored(tiny_quantized_toy, monkeypatch):
+    """With ``--quant`` the DiT's bytes are the quantized directory's as stored (fp8 weights,
+    uint8 scales, the bf16 rest) over tp, not the bf16 source's: the bf16 estimate counts every
+    fp8 weight at twice its size and would refuse a tp the quantized DiT fits."""
+    toy = tiny_quantized_toy
+    assert hbm.safetensors_bytes(toy.quantized) == toy.stored_bytes
+    assert hbm.quantized_dir_bytes(toy.quantized, tp_degree=2) == toy.stored_bytes // 2
+    assert hbm.quantized_dir_bytes(toy.quantized, tp_degree=1) < hbm.components_bytes(
+        toy.model_dir, (hbm.Component("transformer", 2),), tp_degree=1)
+    monkeypatch.setenv(hbm.HBM_ENV, _budget_gib(toy.stored_bytes // 2 + 1))
+    fits, estimate, limit = hbm.quantized_dir_fits(toy.quantized, tp_degree=2)
+    assert (fits, estimate) == (True, toy.stored_bytes // 2) and limit >= estimate
+    assert not hbm.quantized_dir_fits(toy.quantized, tp_degree=1)[0]
+
+
+def test_component_stored_in_a_directory(tiny_quantized_toy):
+    """A component ``stored_in`` a directory counts that directory's bytes as stored, whatever
+    its dtypes and the component's own element size, beside the other components' elements:
+    the device text encoder's check then sees the fp8 DiT it shares the cores with."""
+    toy = tiny_quantized_toy
+    dit = hbm.Component("transformer", 2).stored_in(toy.quantized)
+    assert dit.stored_dir == str(toy.quantized)
+    assert hbm.components_bytes(toy.model_dir, (dit,), tp_degree=1) == toy.stored_bytes
+    bf16 = hbm.Component("transformer", 2)
+    both = hbm.components_bytes(toy.model_dir, (dit, bf16), tp_degree=2)
+    assert both == (toy.stored_bytes + bf16.numel(toy.model_dir) * 2) // 2
+    assert hbm.components_bytes(toy.model_dir, (dit.in_dtype(4),), tp_degree=1) == toy.stored_bytes
