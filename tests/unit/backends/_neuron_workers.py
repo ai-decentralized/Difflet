@@ -1620,15 +1620,20 @@ def hv15_sp_worker(rank: int, world_size: int, model_dir: str, shape: dict, inpu
 
 
 def hv1_dit_worker(rank: int, world_size: int, model_dir: str, parallel: dict, exec_mode: str,
-                   valid_text: int = 16, overrides: dict | None = None) -> dict:
+                   valid_text: int = 16, overrides: dict | None = None, quant: dict | None = None,
+                   quantized_dir: str | None = None) -> dict:
     """HunyuanVideo's DiT application (tests/unit/backends/_neuron_hv1_toy.py) on CPU, fp32, at
     the layout ``parallel`` names (``DiffletParallelConfig`` keywords; world = tp x cp), on the
     toy's inputs with ``valid_text`` valid text tokens: the output and the TeaCache signal.
-    ``overrides`` go to the config (``num_single_layers=1`` cuts the depth)."""
+    ``overrides`` go to the config (``num_single_layers=1`` cuts the depth). ``quant`` (a
+    ``QuantSpec`` dict) runs the MXFP8 DiT from ``quantized_dir``, the quantized directory of
+    ``model_dir``, which the config is still read from; the result names the linears the
+    application quantized and each FP8 twin's class."""
     from difflet.backends.neuron.hunyuan_video.config import NeuronHunyuanVideoConfig
     from difflet.backends.neuron.hunyuan_video.transformer import (
         NeuronHunyuanVideoTransformerApplication,
     )
+    from difflet.backends.neuron.ops_impl.fp8_linear import _FP8LinearBase
     from difflet.pipeline.parallel_config import DiffletParallelConfig
     from tests.unit.backends._neuron_hv1_toy import TINY_SHAPE, tiny_inputs
 
@@ -1638,8 +1643,9 @@ def hv1_dit_worker(rank: int, world_size: int, model_dir: str, parallel: dict, e
         context_parallel_enabled=cp > 1, cp_mode=parallel.get("cp_mode", "gather_kv"),
         sp_enabled=bool(parallel.get("sp_enabled", False)), **TINY_SHAPE, **(overrides or {}))
     app = NeuronHunyuanVideoTransformerApplication(
-        model_path=model_dir, config=config, parallel=DiffletParallelConfig(**parallel),
-        dtype=torch.float32, exec_mode=exec_mode, device="cpu")
+        model_path=quantized_dir or model_dir, config=config,
+        parallel=DiffletParallelConfig(**parallel), dtype=torch.float32, exec_mode=exec_mode,
+        device="cpu", quant=quant)
     app.load()
     inputs = tiny_inputs(valid_text)
     out = app(*inputs.values())
@@ -1651,6 +1657,9 @@ def hv1_dit_worker(rank: int, world_size: int, model_dir: str, parallel: dict, e
         "report": app.load_report,
         "compiled_blocks": list(app.compiled_blocks),
         "unwarmed_shapes": list(app.unwarmed_shapes),
+        "quantized_linears": list(app.quantized_linears),
+        "fp8": {name: type(m).__name__ for name, m in app.module.named_modules()
+                if isinstance(m, _FP8LinearBase)},
     }
 
 

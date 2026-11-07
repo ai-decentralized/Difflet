@@ -38,6 +38,20 @@ on the device run attention_cte's key-bounded flash kernel. Numerics depend on t
 workarounds installed by ``prepare_runtime`` (``core/workarounds.py``): fp32 LayerNorm for bf16
 inputs (every adaptive norm is a LayerNorm) and the bool bitwise guard (the token refiner builds
 its mask as ``m & m.transpose(2, 3)``).
+
+MXFP8 (``quant=``, the base's wiring, ``difflet.quant.targets``' ``"hunyuan_video"`` table): the
+dual-stream blocks' q/k/v of both streams and both MLPs and the single-stream blocks' joint
+q/k/v and ``proj_mlp`` become their FP8 twins on the meta module before the load. The patterns
+are diffusers' names, which are this module's and the checkpoint's wherever they reach, and
+``model_path`` is then the quantized directory, written straight from the hub's ``transformer``
+(already bf16, so there is no bf16 copy). The attention calls each projection directly, so there
+is no q/k/v fusion. The single blocks' ``proj_out`` stays bf16: the quantized directory holds it
+fused as the hub does, and the slices above read its column ranges. A spec that names it is
+refused at construction (``fused_proj_out_targets``) until the spec stores its halves (roadmap
+task E6): the writer would quantize the fused tensor whole, and every rank would then refuse a
+pattern that names none of its modules, without the cause. Under SP the image stream's
+``ff.net.2`` and ``to_out.0`` run with ``reduce_output=False`` (corrected by ``_sp_unbias``),
+and the FP8 row twin keeps that flag and adds the whole bias, as the bf16 layer does.
 """
 
 from __future__ import annotations
@@ -60,6 +74,8 @@ from difflet.backends.neuron.core.config_checks import (
     truncated_block_prefixes,
 )
 from difflet.backends.neuron.hunyuan_video.config import NeuronHunyuanVideoConfig
+from difflet.quant.spec import QuantSpec
+from difflet.quant.targets import FUSED_PROJ_OUT_REASON, fused_proj_out_targets
 
 #: Valid text tokens in the warm-up's mask: any count compiles the same block graphs (the
 #: mask is a key bound, not a shape).
@@ -112,9 +128,18 @@ class NeuronHunyuanVideoTransformerApplication(TorchNeuronApplicationBase):
     ``cp_degree`` is filled from it. On the neuron device the dtype must be ``torch.bfloat16``
     (decision D42). A config cut below the checkpoint's depth loads the first blocks of each
     stack and reports the others under ``load_report["skipped"]``.
+
+    ``quant`` (a ``QuantSpec`` or its dict) is the base's MXFP8 wiring (the module docstring
+    says which linears), and ``model_path`` is then the quantized directory. It is a keyword of
+    its own, passed to the base: in ``overrides`` it would reach the config, which has no such
+    field, or be refused as an override beside ``config``. The MLP-downs are row-parallel,
+    quantized per rank K range for the launch's tp, so a spec for another tp is refused, as are
+    eager mode (decision D43) and a spec that names a single block's fused ``proj_out``.
     """
 
     block_attrs = ("transformer_blocks", "single_transformer_blocks")
+    quant_model = "hunyuan_video"
+    quant_label = "HunyuanVideo"
 
     def __init__(
         self,
@@ -125,6 +150,7 @@ class NeuronHunyuanVideoTransformerApplication(TorchNeuronApplicationBase):
         dtype=torch.bfloat16,
         exec_mode: str | None = None,
         device="neuron",
+        quant: QuantSpec | dict | None = None,
         **overrides,
     ) -> None:
         super().__init__(
@@ -133,6 +159,7 @@ class NeuronHunyuanVideoTransformerApplication(TorchNeuronApplicationBase):
             dtype=dtype,
             exec_mode=exec_mode,
             device=device,
+            quant=quant,
         )
         if config is None:
             p = self.parallel
@@ -157,6 +184,10 @@ class NeuronHunyuanVideoTransformerApplication(TorchNeuronApplicationBase):
         # config and the parallel config describe the same mesh.
         config = resolve_cp_degree(name, config, self.parallel)
         config.validate()
+        if self.quant is not None:
+            fused = fused_proj_out_targets(self.quant, config.num_single_layers)
+            if fused:
+                raise ValueError(f"HunyuanVideo: {fused[0]} {FUSED_PROJ_OUT_REASON}")
         require_bf16_on_device("HunyuanVideo", self.device.type, self.dtype)
         self.config = config
         # Blocks past num_layers / num_single_layers are in the checkpoint on purpose when the
