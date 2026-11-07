@@ -1456,6 +1456,27 @@ def flux_dit_worker(rank: int, world_size: int, model_dir: str) -> dict:
     return {"out": out.tolist(), "report": app.load_report}
 
 
+def flux_dit_fp8_worker(rank: int, world_size: int, quantized_dir: str, spec: dict) -> dict:
+    """The MXFP8 Flux DiT application at TP=world_size on CPU (compile mode, dequant compute)
+    on a quantized toy directory, with the flags of the first single block's
+    ``proj_out_attn`` twin: it must keep the merged all-reduce and the bias out of the shard."""
+    from difflet.backends.neuron.flux.config import NeuronFluxConfig
+    from difflet.backends.neuron.flux.transformer import NeuronFluxTransformerApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_flux_toy import TINY_SHAPE, first, tiny_inputs
+
+    config = NeuronFluxConfig.from_pretrained(quantized_dir, tp_degree=world_size, **TINY_SHAPE)
+    app = NeuronFluxTransformerApplication(model_path=quantized_dir, config=config,
+                                           parallel=DiffletParallelConfig(tp_degree=world_size),
+                                           dtype=torch.float32, exec_mode="compile", device="cpu",
+                                           quant=spec)
+    app.load()
+    attn = app.module.single_transformer_blocks[0].proj_out_attn
+    out = first(app(**tiny_inputs(config)))
+    return {"out": out.tolist(), "report": app.load_report,
+            "attn_twin": [type(attn).__name__, attn.skip_bias_add, attn.reduce_output]}
+
+
 def flux_t5_worker(rank: int, world_size: int, model_dir: str) -> dict:
     """Flux's T5 encoder application at TP=world_size on CPU (eager), on the tiny checkpoint."""
     from difflet.backends.neuron.flux.text_encoder import NeuronFluxT5Application

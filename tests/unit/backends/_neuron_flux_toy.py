@@ -12,6 +12,9 @@ TINY_SHAPE = dict(height=64, width=64, text_seq_len=8)  # 4x4 packed image token
 #: The toy's dims with a 128-wide inner dimension: the MX block layout wants K in multiples of
 #: 128 (``difflet/quant/mx.swizzle_perm``), the toy's 32 is below that.
 TINY_FP8 = {**TINY, "attention_head_dim": 32, "axes_dims_rope": (8, 12, 12)}
+#: The MXFP8 geometry at tp2: inner 256 and MLP 1024, so the single blocks' ``proj_out_attn``
+#: (K 256) and every other row-parallel target keep a multiple of 128 per rank.
+TINY_FP8_TP2 = {**TINY, "attention_head_dim": 64, "axes_dims_rope": (16, 24, 24)}
 
 
 def mx_toy_weights_(model: torch.nn.Module) -> None:

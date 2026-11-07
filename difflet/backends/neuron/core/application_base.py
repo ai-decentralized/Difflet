@@ -308,6 +308,13 @@ class TorchNeuronApplicationBase(torch.nn.Module):
                 )
             self._check_hbm_budget(module)
             slices = self.checkpoint_slices() or {}
+            if self.quant is not None:
+                # A quantized directory whose spec splits a fused linear holds its column
+                # ranges as tensors of their own (``difflet/quant/checkpoint.py``), under the
+                # parameter names, and no fused source: those parameters load by name. Before
+                # the weight-store key, so a fully split directory has no slice in it.
+                slices = {name: s for name, s in slices.items()
+                          if not self.quant.is_split(s.key.removesuffix(".weight"))}
             self.load_report, self.weight_store = load_with_store(
                 module, model_dir, device=self.device, dtype=self.dtype,
                 rename=self.checkpoint_key,
