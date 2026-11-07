@@ -21,8 +21,10 @@ from typing import Any
 
 #: Bump when the quantized checkpoint layout or the scale law changes: old quantized directories
 #: and cache entries are then never matched. 2: mxfp8 only (the per-tensor static ``fp8`` recipe
-#: and its calibration are gone).
-QUANT_SCHEMA = 2
+#: and its calibration are gone). 3: a K remainder of 384 per rank is laid out as the kernel's
+#: fast-DMA loader reads it, one partial tile, not the legacy 256 + 128 sub-tiles (``mx.py``;
+#: every directory with K per rank a multiple of 512 is byte-identical to schema 2's).
+QUANT_SCHEMA = 3
 
 #: The one format: OCP microscaling, 32-value E8M0 block scales for weights (offline) and
 #: activations (in the kernel, no calibration), in Trainium3's own block membership (``mx.py``).
