@@ -45,13 +45,12 @@ from tests.unit.backends._neuron_wan_toy import (  # noqa: E402
     write_tiny_wan_model,
 )
 
-#: Per block: q/k/v of the self- and the cross-attention and the FFN's up and down; every
-#: to_out.0, the modulation tables, the embedders and proj_out stay bf16.
-TARGETS_PER_BLOCK = 8
+#: Per block: the cross-attention's q/k/v and the FFN's up and down; the self-attention's q/k/v,
+#: every to_out.0, the modulation tables, the embedders and proj_out stay bf16.
+TARGETS_PER_BLOCK = 5
 TINY_TARGETS_WAN = TARGETS_PER_BLOCK * TINY_FP8_WAN["num_layers"]
 #: The targets in the module's spelling (``quantized_linears`` addresses the module) ...
-MODULE_TARGETS = {"attn1.to_q", "attn1.to_k", "attn1.to_v", "attn2.to_q", "attn2.to_k",
-                  "attn2.to_v", "ffn.net_in", "ffn.net_out"}
+MODULE_TARGETS = {"attn2.to_q", "attn2.to_k", "attn2.to_v", "ffn.net_in", "ffn.net_out"}
 #: ... and in the checkpoint's (what the table and the quantized directory name).
 CHECKPOINT_TARGETS = (MODULE_TARGETS - {"ffn.net_in", "ffn.net_out"}) | {"ffn.net.0.proj",
                                                                          "ffn.net.2"}
@@ -123,7 +122,7 @@ def test_application_quantizes_through_the_checkpoint_key(tiny):
     block = app.module.blocks[0]
     assert isinstance(block.ffn.net_in, FP8ColumnParallelLinear)
     assert isinstance(block.ffn.net_out, FP8RowParallelLinear)
-    assert isinstance(block.attn1.to_q, FP8ColumnParallelLinear)
+    assert not isinstance(block.attn1.to_q, _FP8LinearBase)  # self-attention q/k/v stay bf16
     assert isinstance(block.attn2.to_v, FP8ColumnParallelLinear)
     assert block.ffn.net_in.weight is None and block.ffn.net_in.weight_bf16 is not None  # prepared
     # Every output projection and the top level are the linears they were; the modulation
