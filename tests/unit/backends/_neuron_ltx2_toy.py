@@ -63,6 +63,13 @@ TINY_LTX2_TRANSFORMER: dict = {
     "timestep_scale_multiplier": 1000,
     "vae_scale_factors": [8, 32, 32],
 }
+#: The MXFP8 geometry: 4 heads x 32 = 128 inner for both streams and 128-wide text, so every
+#: quantized weight's K is 128 (q/k/v, MLP-up) or 512 (MLP-down), the smallest K the MX
+#: layout tiles (``difflet.quant.spec.LAYOUT_K``); the 8- and 4-wide heads of
+#: ``TINY_LTX2_TRANSFORMER`` would give K=32.
+TINY_FP8_LTX2: dict = {**TINY_LTX2_TRANSFORMER, "attention_head_dim": 32,
+                       "audio_attention_head_dim": 32, "cross_attention_dim": 128,
+                       "audio_cross_attention_dim": 128}
 #: 64x96x17 -> latent 3 frames x 2 x 3 = 18 video tokens; round(17/24 * 25) = 18 audio frames.
 TINY_SHAPE = {"height": 64, "width": 96, "num_frames": 17}
 TINY_VIDEO_SEQ_LEN = 18

@@ -14,6 +14,24 @@ the step is 267.7 ms and the image 29.3 dB PSNR; with them in bf16, 260.2 ms and
 They sit right before the residual add, so their error lands unattenuated, and the compiler
 schedules the block worse with a custom op there (the single-core probe: +1.3 ms per block).
 
+LTX-2 (diffusers' ``LTX2VideoTransformer3DModel``) runs a video stream (4096 wide: 32 heads x
+128) and an audio stream (2048 wide: 32 x 64) through 48 blocks; each block has, per stream, a
+self-attention, a text cross-attention and a 4x MLP (``ff`` 16384 wide, ``audio_ff`` 8192), and
+one cross-attention each way between the streams. The targets are the linears whose input is
+the video or the text stream: the video ``attn1`` / ``attn2`` q/k/v, the video queries of
+``audio_to_video_attn``, the video keys and values of ``video_to_audio_attn``, and the video
+MLP. The audio-input linears (``audio_attn1``, ``audio_attn2``, ``audio_ff``, the audio keys and
+values of ``audio_to_video_attn``, the audio queries of ``video_to_audio_attn``) stay bf16 by
+default: the audio stream is 126 tokens at the default shape, too few rows for the kernel to
+win anything, and a device variant through ``DIFFLET_QUANT_TARGETS`` decides them. Every
+``to_out.0`` stays bf16 as above; the per-block modulation is a parameter table, not a linear;
+the embedders, ``proj_in`` / ``audio_proj_in``, the caption projections, the ``av_cross_attn_*``
+scale-shift and gate embedders and ``proj_out`` / ``audio_proj_out`` are bf16 top-level layers.
+At tp > 1 every ``to_out.0`` (K 4096 or 2048) and both MLP-downs (16384 and 8192) are
+row-parallel, quantized per rank K range: the default row-parallel target, ``ff.net.2``, keeps
+a K per rank that is a multiple of 128 at every tp its 32 heads divide; an override that
+quantizes a 2048-wide ``to_out.0`` has one up to tp 16.
+
 Patterns are regexes full-matched against diffusers' module names (the ``transformer.`` trace
 prefix is stripped by :meth:`QuantSpec.matches`).
 """
@@ -83,13 +101,56 @@ FLUX_ROW_PARALLEL: tuple[str, ...] = (
     rf"{_BLOCK}\.(ff|ff_context)\.net\.2",
 )
 
+# LTX-2 (diffusers' LTX2VideoTransformer3DModel names, which
+# ``difflet/models/ltx_2/modeling_ltx_2.py`` keeps under the ``transformer.`` trace prefix): the
+# linears fed by the video or the text stream.
+_LTX_2_ATTNS = r"(attn1|attn2|audio_attn1|audio_attn2|audio_to_video_attn|video_to_audio_attn)"
+
+LTX_2_TARGETS: tuple[str, ...] = (
+    rf"{_BLOCK}\.attn1\.(to_q|to_k|to_v)",
+    rf"{_BLOCK}\.attn2\.(to_q|to_k|to_v)",
+    rf"{_BLOCK}\.audio_to_video_attn\.to_q",
+    rf"{_BLOCK}\.video_to_audio_attn\.(to_k|to_v)",
+    rf"{_BLOCK}\.ff\.net\.0\.proj",
+    rf"{_BLOCK}\.ff\.net\.2",
+)
+
+#: LTX-2 modules a reader may expect quantized that are deliberately not: the output
+#: projections, the audio-input linears (a ``DIFFLET_QUANT_TARGETS`` variant decides them on
+#: the device) and the bf16 top level.
+LTX_2_KEPT_BF16: tuple[str, ...] = (
+    rf"{_BLOCK}\.{_LTX_2_ATTNS}\.to_out\.0",
+    rf"{_BLOCK}\.(audio_attn1|audio_attn2)\.(to_q|to_k|to_v)",
+    rf"{_BLOCK}\.audio_to_video_attn\.(to_k|to_v)",
+    rf"{_BLOCK}\.video_to_audio_attn\.to_q",
+    rf"{_BLOCK}\.audio_ff\.net\.0\.proj",
+    rf"{_BLOCK}\.audio_ff\.net\.2",
+    r"proj_in",
+    r"audio_proj_in",
+    r"caption_projection\..*",
+    r"audio_caption_projection\..*",
+    r"time_embed\..*",
+    r"audio_time_embed\..*",
+    r"av_cross_attn_.*",
+    r"proj_out",
+    r"audio_proj_out",
+)
+
+LTX_2_ROW_PARALLEL: tuple[str, ...] = (
+    rf"{_BLOCK}\.{_LTX_2_ATTNS}\.to_out\.0",  # not default targets; kept for overrides
+    rf"{_BLOCK}\.ff\.net\.2",
+    rf"{_BLOCK}\.audio_ff\.net\.2",  # not a default target; kept for overrides
+)
+
 TARGETS_BY_MODEL: dict[str, tuple[str, ...]] = {
     "qwen_image": QWEN_IMAGE_TARGETS,
     "flux": FLUX_TARGETS,
+    "ltx_2": LTX_2_TARGETS,
 }
 ROW_PARALLEL_BY_MODEL: dict[str, tuple[str, ...]] = {
     "qwen_image": QWEN_IMAGE_ROW_PARALLEL,
     "flux": FLUX_ROW_PARALLEL,
+    "ltx_2": LTX_2_ROW_PARALLEL,
 }
 
 
@@ -119,6 +180,9 @@ __all__ = [
     "FLUX_KEPT_BF16",
     "FLUX_ROW_PARALLEL",
     "FLUX_TARGETS",
+    "LTX_2_KEPT_BF16",
+    "LTX_2_ROW_PARALLEL",
+    "LTX_2_TARGETS",
     "QWEN_IMAGE_KEPT_BF16",
     "QWEN_IMAGE_ROW_PARALLEL",
     "QWEN_IMAGE_TARGETS",

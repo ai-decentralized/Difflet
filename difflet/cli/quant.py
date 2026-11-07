@@ -26,6 +26,7 @@ from difflet.quant.targets import TARGETS_BY_MODEL, default_spec
 QUANT_MODELS: dict[str, str] = {
     "Qwen/Qwen-Image": "qwen_image",
     "black-forest-labs/FLUX.1-dev": "flux",
+    "Lightricks/LTX-2": "ltx_2",
 }
 
 
@@ -39,7 +40,7 @@ def add_quant_flags(p: argparse.ArgumentParser) -> None:
         "OCP MXFP8 (32-value block scales for weights, offline, and for activations, in the "
         "kernel; no calibration) from a quantized checkpoint that `compile` writes under the "
         "cache dir; the output projections, modulation, embedders and the output layer stay "
-        "bf16. Qwen-Image and FLUX.1-dev.",
+        "bf16 (LTX-2: its audio stream too). Qwen-Image, FLUX.1-dev and LTX-2.",
     )
     p.add_argument(
         "--quant-compute",
