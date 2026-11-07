@@ -2,16 +2,19 @@
 dual-stream blocks' image and text q/k/v and both MLPs (diffusers' module names are the
 checkpoint keys, so the table matches them as they are), loads the quantized directory and, in
 dequant mode, matches diffusers' model run with the weights the directory holds dequantized, at
-tp1, tp2 x CFG2 and tp2 with SP. Each rank's row-parallel weights are its own K range quantized
-as such, compared exactly, since the outputs cannot tell. The output projections, the
-modulation, the token refiner and the top level stay as they were; eager mode and a spec
-quantized for another tp are refused. The native path has no stage cache key, so what keeps a
-quantized and a bf16 DiT apart is checked here: their block graphs differ (the kernel call per
-target, which the NEFF cache keys on through the HLO) and so do their weight-store entries.
+tp1, tp2 x CFG2, tp2 with SP and tp2 x CP2. Each rank's row-parallel weights are its own K
+range quantized as such, compared exactly, since the outputs cannot tell. The output
+projections, the modulation, the token refiner and the top level stay as they were; eager mode
+and a spec quantized for another tp are refused. The native path has no stage cache key, so
+what keeps a quantized and a bf16 DiT apart is checked here: their block graphs differ (the
+kernel call per target, which the NEFF cache keys on through the HLO) and so do their
+weight-store entries, by layout as well as by source.
 """
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -60,6 +63,13 @@ def _mx_linear_stub_fake(x, data, scales):
 def _stub_calls(graphs) -> list[int]:
     """The kernel calls in each recorded graph."""
     return [sum("mx_linear_stub" in str(node.target) for node in gm.graph.nodes) for gm in graphs]
+
+
+def _store_key(app) -> dict:
+    """The key inputs the weight-store entry ``app`` wrote, as its manifest records them (one
+    data file at tp1: everything is replicated)."""
+    (manifest,) = Path(app.weight_store.directory).glob("*.manifest.json")
+    return json.loads(manifest.read_text())["key"]
 
 
 @pytest.fixture(autouse=True)
@@ -132,15 +142,18 @@ def test_a_spec_for_another_tp_is_refused(tiny):
         _app(tiny, quant=default_spec("hunyuan_video_15", compute="dequant", tp_degree=2))
 
 
-@pytest.mark.parametrize(("tp", "cfg", "sp", "world"), [(2, True, False, 4), (2, False, True, 2)],
-                         ids=["tp2-cfg2", "tp2-sp"])
-def test_quantized_layouts_match_the_dequantized_reference(tiny, tmp_path, tp, cfg, sp, world):
+@pytest.mark.parametrize(("tp", "cfg", "sp", "cp", "world"),
+                         [(2, True, False, 1, 4), (2, False, True, 1, 2), (2, False, False, 2, 4)],
+                         ids=["tp2-cfg2", "tp2-sp", "tp2-cp2"])
+def test_quantized_layouts_match_the_dequantized_reference(tiny, tmp_path, tp, cfg, sp, cp,
+                                                           world):
     """Review Focus 4. Under CFG2 each group runs its branch of the stacked inputs; under SP the
     image MLP's row twin returns its unreduced partial and the bias (the worker checks the
-    flags). Every rank's ``net.2`` weights must be its own K range quantized as such. A whole-K
-    quantization, dequantized and sliced, puts other values in rank 0's range (the toy's
-    scaled-down half of K) while the outputs move only 6e-7, far inside the tolerance: only the
-    weight check sees it."""
+    flags); under CP2 (F6's device layout adds it, Ulysses) both CP replicas of a TP rank load
+    that rank's weights. Every rank's ``net.2`` weights must be its own K range quantized as
+    such. A whole-K quantization, dequantized and sliced, puts other values in rank 0's range
+    (the toy's scaled-down half of K) while the outputs move only 6e-7, far inside the
+    tolerance: only the weight check sees it."""
     spec = default_spec("hunyuan_video_15", compute="dequant", tp_degree=tp)
     quantized = prepare_quantized_checkpoint(tiny.transformer_dir, spec, create=True,
                                              cache_root=tmp_path / "cache")
@@ -150,7 +163,7 @@ def test_quantized_layouts_match_the_dequantized_reference(tiny, tmp_path, tp, c
     want = torch.cat([hv15_reference(tiny.transformer_dir, b, spec=spec) for b in branches])
     source = safetensors_torch.load_file(next(tiny.transformer_dir.glob("*.safetensors")))
     results = run_ranks(hv15_fp8_worker, str(quantized), TINY_SHAPE_HV15, inputs,
-                        spec.to_dict(), tp, cfg, sp, world_size=world)
+                        spec.to_dict(), tp, cfg, sp, cp, world_size=world)
     assert {r["tp_rank"] for r in results} == set(range(tp))
     for name in HV15_ROW_TARGETS:
         w = source[f"{name}.weight"]
@@ -168,7 +181,9 @@ def test_a_quantized_and_a_bf16_dit_share_no_block_graph_and_no_store_entry(tiny
                                                                              monkeypatch):
     """The native path has no stage cache key: NEFFs are keyed by the HLO, the weight store by
     content and layout. So the quantized DiT's block graph must hold one kernel call per
-    target and the bf16 one none, and the two must write different store entries. The kernel
+    target and the bf16 one none, and the two must write different store entries. Their
+    sources differ, which alone names two directories, so the entries' recorded keys must also
+    differ in the module layout half (the fp8 data and scales against bf16 weights). The kernel
     is a stub op (no Neuron SDK here), both DiTs are bf16 as on the device, and the directory
     is built from the bf16 copy, as ``difflet compile`` builds it."""
     monkeypatch.setattr(fp8_kernels, "_MX_OP", _mx_linear_stub)
@@ -196,3 +211,5 @@ def test_a_quantized_and_a_bf16_dit_share_no_block_graph_and_no_store_entry(tiny
     assert _stub_calls(bf16_graphs) and not any(_stub_calls(bf16_graphs))
     assert bf16_app.weight_store.status == quant_app.weight_store.status == "written"
     assert bf16_app.weight_store.directory != quant_app.weight_store.directory
+    bf16_key, quant_key = (_store_key(app) for app in (bf16_app, quant_app))
+    assert bf16_key["layout_sha256"] != quant_key["layout_sha256"]
