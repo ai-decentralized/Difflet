@@ -287,36 +287,46 @@ def fp8_twin(linear: nn.Module, *, compute: str) -> _FP8LinearBase:
 def quantize_module_(module: nn.Module, spec: QuantSpec, *,
                      key_fn: Callable[[str], str] | None = None) -> list[str]:
     """Replace every linear the ``spec`` targets with its mxfp8 twin, in place (on the meta
-    module, before the checkpoint is loaded). Returns the replaced module names. A target that
-    matches no linear is an error: the spec would silently quantize less than it claims.
+    module, before the checkpoint is loaded). Returns the replaced module names. A target
+    pattern that matches no linear is an error naming the pattern
+    (``QuantSpec.unmatched_targets``): the spec would silently quantize less than it claims,
+    and the device would then run bf16 layers against a checkpoint holding their fp8 weights.
 
-    ``key_fn`` maps a module name to its checkpoint key before the spec is consulted: target
-    patterns are written against the checkpoint's key names (the quantized checkpoint writer
-    matches those), and a model whose module names differ from its keys (Wan's ``ffn.net_in``
-    is ``ffn.net.0.proj`` on disk, ``wan/transformer.checkpoint_key``) would otherwise quantize
-    a different set of layers on the device than in the checkpoint. The returned names stay
-    module names: they address this module.
+    ``key_fn`` is the application's ``checkpoint_key`` (a parameter name to its checkpoint
+    key): target patterns are written against the checkpoint's key names (the quantized
+    checkpoint writer matches those), and a model whose module names differ from its keys
+    (Wan's ``ffn.net_in`` is ``ffn.net.0.proj`` on disk, ``wan/transformer.checkpoint_key``)
+    would otherwise quantize a different set of layers on the device than in the checkpoint.
+    The module name is mapped through its weight's key, the way the writer derives the prefix
+    it matches (``checkpoint._tensor_key_prefix``), since the key functions rename parameter
+    keys and leave a bare module name as it is. The returned names stay module names: they
+    address this module.
 
     A twin that refuses its geometry (``_init_tensors``: a per-rank K with no MX layout) is
     re-raised with the layer's name, since the bare message cannot say which of a model's
-    hundreds of linears it is about; the usual cause is a row-parallel layer whose whole K
-    divides by 128 but whose per-rank K at this tp does not."""
-    key = key_fn if key_fn is not None else (lambda name: name)
-    targets = [
+    hundreds of linears it is about; a row layer's own text says how its K was split. Every
+    twin is built before any is swapped in, so a caller that catches the refusal (the driver
+    holding a spec against the meta module) still holds the module it gave."""
+    key = ((lambda name: key_fn(f"{name}.weight").removesuffix(".weight"))
+           if key_fn is not None else (lambda name: name))
+    linears = [
         (name, child) for name, child in module.named_modules()
-        if spec.matches(key(name))
-        and isinstance(child, (nn.Linear, ColumnParallelLinear, RowParallelLinear))
+        if isinstance(child, (nn.Linear, ColumnParallelLinear, RowParallelLinear))
         and not isinstance(child, _FP8LinearBase)
     ]
-    if not targets:
-        raise ValueError("the quantization spec's target patterns match no linear in the module")
+    dead = spec.unmatched_targets(key(name) for name, _ in linears)
+    if dead:
+        raise ValueError(f"quantization target patterns match no linear in the module: {dead}")
+    targets = [(name, child) for name, child in linears if spec.matches(key(name))]
+    twins = []
     for name, child in targets:
+        try:
+            twins.append((name, fp8_twin(child, compute=spec.compute)))
+        except ValueError as exc:
+            raise ValueError(f"{name}: {exc}") from exc
+    for name, twin in twins:
         parent_path, _, leaf = name.rpartition(".")
         parent = module.get_submodule(parent_path) if parent_path else module
-        try:
-            twin = fp8_twin(child, compute=spec.compute)
-        except ValueError as exc:
-            raise ValueError(f"{name}: {exc} (tp too high for this layer at this spec?)") from exc
         if isinstance(parent, (nn.ModuleList, nn.Sequential)):
             parent[int(leaf)] = twin
         else:

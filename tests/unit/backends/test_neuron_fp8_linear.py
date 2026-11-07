@@ -245,23 +245,61 @@ def test_quantize_module_refuses_a_spec_matching_nothing():
         Q.quantize_module_(_Model(), QuantSpec(targets=(r"nothing",)))
 
 
+def _wan_ffn_toy() -> nn.Module:
+    """``blocks.0.ffn.net_in``: the module name Wan's application gives the first FFN
+    projection, whose checkpoint key is ``blocks.0.ffn.net.0.proj.weight``."""
+    block = nn.Module()
+    block.ffn = nn.Module()
+    block.ffn.net_in = nn.Linear(128, 16)
+    module = nn.Module()
+    module.blocks = nn.ModuleList([block])
+    return module
+
+
 def test_quantize_module_matches_through_a_key_function():
-    """A model whose module names differ from its checkpoint keys (Wan's ``ffn.net_in`` is
-    ``ffn.net.0.proj`` on disk) matches the spec through the key function; the returned names
-    are still the module's."""
-    module = torch.nn.Module()
-    module.net_in = torch.nn.Linear(128, 16)
-    spec = QuantSpec(targets=(r"net\.0\.proj",), compute="dequant")
-    rename = lambda name: name.replace("net_in", "net.0.proj")
-    assert Q.quantize_module_(module, spec, key_fn=rename) == ["net_in"]
-    assert isinstance(module.net_in, Q.FP8Linear)
+    """A model whose module names differ from its checkpoint keys matches the spec through the
+    application's ``checkpoint_key`` (the real Wan one, which renames parameter keys: the
+    module name is mapped through its weight's key, as the writer derives its prefix); the
+    returned names are still the module's. Once the key function is in force a pattern written
+    against the module name matches nothing: the device would otherwise quantize a layer the
+    checkpoint holds in bf16."""
+    from difflet.backends.neuron.wan.transformer import checkpoint_key
+
+    module = _wan_ffn_toy()
+    spec = QuantSpec(targets=(r"blocks\.\d+\.ffn\.net\.0\.proj",), compute="dequant")
+    assert Q.quantize_module_(module, spec, key_fn=checkpoint_key) == ["blocks.0.ffn.net_in"]
+    assert isinstance(module.blocks[0].ffn.net_in, Q.FP8Linear)
+    module = _wan_ffn_toy()
+    by_module_name = QuantSpec(targets=(r"blocks\.\d+\.ffn\.net_in",), compute="dequant")
+    with pytest.raises(ValueError, match=r"match no linear.*net_in"):
+        Q.quantize_module_(module, by_module_name, key_fn=checkpoint_key)
+    assert type(module.blocks[0].ffn.net_in) is nn.Linear
+
+
+def test_quantize_module_names_every_dead_pattern():
+    """One live pattern does not excuse a dead one: the refusal names the patterns that match
+    no linear, and the module is left as it was."""
+    module = nn.Module()
+    module.a = nn.Linear(128, 16)
+    module.b = nn.Linear(128, 16)
+    spec = QuantSpec(targets=("a", "zzz", r"b\.weight"), compute="dequant")
+    with pytest.raises(ValueError, match=r"match no linear.*\['zzz', 'b\\\\.weight'\]"):
+        Q.quantize_module_(module, spec)
+    assert type(module.a) is nn.Linear and type(module.b) is nn.Linear
 
 
 def test_quantize_module_names_the_layer_whose_k_is_wrong():
-    module = torch.nn.Module()
-    module.proj = torch.nn.Linear(64, 16)
-    with pytest.raises(ValueError, match=r"proj: mxfp8 needs in_features a multiple of 128"):
-        Q.quantize_module_(module, QuantSpec(targets=("proj",), compute="dequant"))
+    """The refusal carries the layer's name and the layer's own text (a plain linear has no
+    tp to blame; a row layer's text says ``split over tp=``), and no twin is swapped in before
+    every target has been built, so a caller that catches the error holds the module it gave."""
+    module = nn.Module()
+    module.ok = nn.Linear(128, 16)
+    module.proj = nn.Linear(64, 16)
+    spec = QuantSpec(targets=("ok", "proj"), compute="dequant")
+    with pytest.raises(ValueError, match=r"proj: mxfp8 needs in_features a multiple of 128") as e:
+        Q.quantize_module_(module, spec)
+    assert "tp" not in str(e.value)
+    assert type(module.ok) is nn.Linear and type(module.proj) is nn.Linear
 
 
 # ------------------------------------------------ meta materialisation and bytes

@@ -15,6 +15,7 @@ import dataclasses
 import hashlib
 import json
 import re
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -77,6 +78,16 @@ class QuantSpec:
         wrappers around it."""
         bare = strip_prefix(name)
         return any(re.fullmatch(p, bare) for p in self.targets)
+
+    def unmatched_targets(self, names: Iterable[str]) -> list[str]:
+        """The target patterns that match none of ``names`` (as :meth:`matches`, prefix
+        stripped). A pattern that matches nothing would silently quantize less than the spec
+        claims, and the layers it missed would surface only at the load, as a dtype mismatch
+        that names no pattern; so every site that applies a spec refuses when this is
+        non-empty, naming the patterns. Torch-free, so the driver can hold a spec against a
+        checkpoint's key names before any rank builds a module."""
+        bare = [strip_prefix(name) for name in names]
+        return [p for p in self.targets if not any(re.fullmatch(p, name) for name in bare)]
 
     def is_row_parallel(self, name: str) -> bool:
         bare = strip_prefix(name)

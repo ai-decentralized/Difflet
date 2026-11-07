@@ -56,6 +56,19 @@ def test_qwen_targets_keep_conditioning_and_io_in_bf16(name):
     assert any(re.fullmatch(p, name) for p in QWEN_IMAGE_KEPT_BF16), name
 
 
+def test_unmatched_targets_names_the_dead_patterns():
+    """A pattern that full-matches none of the names is reported by itself, so a spec with
+    one live and one dead pattern is refused naming the dead one instead of quantizing less
+    than it claims; the trace-module prefix is stripped from the names as in ``matches``."""
+    spec = QuantSpec(
+        targets=(r"blocks\.\d+\.ffn\.net\.0\.proj", r"blocks\.\d+\.attn\.to_q", "zzz"))
+    names = ["transformer.blocks.0.ffn.net.0.proj", "blocks.1.ffn.net.0.proj",
+             "blocks.0.proj_out"]
+    assert spec.unmatched_targets(names) == [r"blocks\.\d+\.attn\.to_q", "zzz"]
+    assert spec.unmatched_targets(iter(names + ["blocks.0.attn.to_q"])) == ["zzz"]
+    assert spec.unmatched_targets([]) == list(spec.targets)
+
+
 def test_row_parallel_targets_are_quantized_per_rank_k_range():
     spec = default_spec("qwen_image", tp_degree=4)
     assert spec.k_shards("transformer_blocks.3.attn.to_out.0") == 4  # row-parallel even when not a target
