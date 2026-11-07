@@ -8,7 +8,10 @@ projections, the modulation, the token refiner and the top level stay as they we
 and a spec quantized for another tp are refused. The native path has no stage cache key, so
 what keeps a quantized and a bf16 DiT apart is checked here: their block graphs differ (the
 kernel call per target, which the NEFF cache keys on through the HLO) and so do their
-weight-store entries, by layout as well as by source.
+weight-store entries, by layout as well as by source. The pipeline resolves the quantized
+directory from the bf16 copy (the hub DiT is fp32 and ``difflet compile`` quantizes the copy)
+at the launch's tp, loads the copy without ``quant``, and refuses a launch whose directory
+was never written.
 """
 
 from __future__ import annotations
@@ -24,11 +27,15 @@ pytest.importorskip("diffusers")
 safetensors_torch = pytest.importorskip("safetensors.torch")
 
 from difflet.backends.neuron.core.weights_bf16 import ensure_bf16_copy  # noqa: E402
+from difflet.backends.neuron.hunyuan_video15.pipeline import (  # noqa: E402
+    TorchNeuronHunyuanVideo15Pipeline,
+)
 from difflet.backends.neuron.hunyuan_video15.transformer import (  # noqa: E402
     NeuronHunyuanVideo15TransformerApplication,
 )
 from difflet.backends.neuron.ops_impl import fp8_kernels, parallel_mesh  # noqa: E402
 from difflet.backends.neuron.ops_impl.fp8_linear import FP8Linear, _FP8LinearBase  # noqa: E402
+from difflet.pipeline.parallel_config import DiffletParallelConfig  # noqa: E402
 from difflet.quant import mx  # noqa: E402
 from difflet.quant.checkpoint import prepare_quantized_checkpoint, read_manifest  # noqa: E402
 from difflet.quant.targets import default_spec  # noqa: E402
@@ -213,3 +220,72 @@ def test_a_quantized_and_a_bf16_dit_share_no_block_graph_and_no_store_entry(tiny
     assert bf16_app.weight_store.directory != quant_app.weight_store.directory
     bf16_key, quant_key = (_store_key(app) for app in (bf16_app, quant_app))
     assert bf16_key["layout_sha256"] != quant_key["layout_sha256"]
+
+
+@pytest.fixture(scope="module")
+def snap(tmp_path_factory):
+    """The toy with what ``difflet compile`` leaves under one cache root for a ``--quant``
+    launch: the bf16 copy of the fp32 DiT and, built from that copy, the default quantized
+    directory at tp1 and at tp2. The tests point ``DIFFLET_COMPILE_CACHE`` at the cache, where
+    the pipeline looks for both."""
+    root = write_tiny_hv15_snapshot(tmp_path_factory.mktemp("tiny_hv15_pipe_fp8"))
+    cache = root / "cache"
+    copy = ensure_bf16_copy(root / "transformer", cache)
+    quantized = {tp: prepare_quantized_checkpoint(
+        copy, default_spec("hunyuan_video_15", tp_degree=tp), create=True, cache_root=cache)
+        for tp in (1, 2)}
+    return SimpleNamespace(root=root, cache=cache, copy=copy, quantized=quantized)
+
+
+def _pipe(model_path, **overrides) -> TorchNeuronHunyuanVideo15Pipeline:
+    """The pipeline in bf16 on the CPU at the toy's shape: the DiT is built (not loaded) and
+    the quant options resolved."""
+    kwargs = dict(model_path=model_path, dtype=torch.bfloat16, exec_mode="compile",
+                  device="cpu", **TINY_SHAPE_HV15)
+    kwargs.update(overrides)
+    return TorchNeuronHunyuanVideo15Pipeline(**kwargs)
+
+
+def test_pipeline_resolves_the_quantized_directory_from_the_bf16_copy(snap, monkeypatch):
+    """The directory is resolved from what the DiT would load in bf16, the copy, so the writer
+    read bf16 tensors and never the hub's fp32 files; the stage passes the spec as a dict."""
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(snap.cache))
+    spec = default_spec("hunyuan_video_15", tp_degree=1)
+    pipe = _pipe(snap.root, quant="mxfp8")
+    assert pipe.dit.model_path == pipe.quantized_dit == str(snap.quantized[1])
+    assert pipe.quant == pipe.dit.quant == spec
+    assert _pipe(snap.root, quant=spec.to_dict()).quant == spec
+
+
+def test_the_pipeline_spec_takes_the_launch_tp(snap, monkeypatch):
+    """``net.2`` is quantized per rank K range, so ``"mxfp8"`` means the table at the launch's
+    tp, and the directory is that tp's."""
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(snap.cache))
+    pipe = _pipe(snap.root, quant="mxfp8",
+                 parallel=DiffletParallelConfig(tp_degree=2, cfg_parallel_enabled=True))
+    assert pipe.quant.tp_degree == 2
+    assert pipe.quant == pipe.dit.quant == default_spec("hunyuan_video_15", tp_degree=2)
+    assert pipe.dit.model_path == pipe.quantized_dit == str(snap.quantized[2])
+
+
+def test_bf16_loads_the_copy_and_holds_no_spec(snap, monkeypatch):
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(snap.cache))
+    pipe = _pipe(snap.root)
+    assert pipe.dit.model_path == str(snap.copy)
+    assert pipe.quant is None and pipe.dit.quant is None
+    assert pipe.quantized_dit is None
+
+
+def test_without_the_copy_the_quantized_directory_is_missing(snap, monkeypatch, tmp_path):
+    """A snapshot ``difflet compile`` never ran on has no copy, so the directory is resolved
+    from the fp32 source, which nothing quantized: refused, naming the fix, and nothing is
+    written (every rank of a ``generate`` resolves, none writes)."""
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(snap.cache))
+    bare = write_tiny_hv15_snapshot(tmp_path / "bare")
+    written = lambda: (sorted(snap.cache.rglob("*")), sorted(bare.rglob("*")))  # noqa: E731
+    before = written()
+    with pytest.raises(ValueError, match="run `difflet compile`"):
+        _pipe(bare, quant="mxfp8")
+    assert written() == before
+    with pytest.raises(ValueError, match="quant_checkpoint needs quant"):
+        _pipe(snap.root, quant_checkpoint="/q")
