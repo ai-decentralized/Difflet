@@ -649,7 +649,9 @@ class LTX2Orchestrator(ModelOrchestrator):
         stage manifest) and runs the replica's requests. LTX-2's part: the request's negative
         prompt (its manifest line's, else --negative-prompt), the Trainium CLI's step and
         guidance defaults, and the packed video and audio latents written by rank 0 to one
-        ``latents.pt``.
+        ``latents.pt``. With ``timing`` rank 0 reports the start-up split and the DiT step
+        median per request: the video scheduler's steps, one per denoising iteration (the audio
+        scheduler is its deep copy and is not counted).
         """
         import torch
 
@@ -683,6 +685,7 @@ class LTX2Orchestrator(ModelOrchestrator):
             save=save,
             finish_compile=lambda: write_stage_manifest(self._stage_compiled_dir(args),
                                                         self._stage_cache_inputs(args)),
+            timing=True,
         )
 
     def _stage_cache_inputs(self, args: argparse.Namespace) -> dict:
