@@ -1620,10 +1620,11 @@ def hv15_sp_worker(rank: int, world_size: int, model_dir: str, shape: dict, inpu
 
 
 def hv15_fp8_worker(rank: int, world_size: int, model_dir: str, shape: dict, inputs: dict,
-                    spec: dict, tp: int, cfg: bool, sp: bool) -> dict:
+                    spec: dict, tp: int, cfg: bool, sp: bool, cp: int = 1) -> dict:
     """HunyuanVideo-1.5's MXFP8 DiT (``_neuron_hv15_toy``) on CPU, fp32, compile mode, from the
-    quantized directory ``model_dir`` at tp (x CFG2 with ``cfg``, SP with ``sp``): the output,
-    this rank's TP rank and, per ``HV15_ROW_TARGETS``, the rank's ``[N, K/tp]`` weight as loaded
+    quantized directory ``model_dir`` at tp (x CFG2 with ``cfg``, SP with ``sp``, x CP=cp in the
+    driver's default Ulysses mode): the output, this rank's TP rank (a TP rank's CP replicas load
+    the same weights) and, per ``HV15_ROW_TARGETS``, the rank's ``[N, K/tp]`` weight as loaded
     (``weight_bf16``, which ``_after_load`` dequantizes in dequant mode; an E4M3 value times its
     power-of-two scale is exact in bf16). The weights are what tell a per rank K range
     quantization from a slice of a whole-K one, which moves the outputs only 6e-7."""
@@ -1635,7 +1636,9 @@ def hv15_fp8_worker(rank: int, world_size: int, model_dir: str, shape: dict, inp
     from difflet.pipeline.parallel_config import DiffletParallelConfig
     from tests.unit.backends._neuron_hv15_toy import HV15_ROW_TARGETS
 
-    parallel = DiffletParallelConfig(tp_degree=tp, cfg_parallel_enabled=cfg, sp_enabled=sp)
+    parallel = DiffletParallelConfig(tp_degree=tp, cp_degree=cp,
+                                     cp_mode="ulysses" if cp > 1 else "gather_kv",
+                                     cfg_parallel_enabled=cfg, sp_enabled=sp)
     app = NeuronHunyuanVideo15TransformerApplication(
         model_path=model_dir, parallel=parallel, dtype=torch.float32, exec_mode="compile",
         device="cpu", quant=spec, **shape)
