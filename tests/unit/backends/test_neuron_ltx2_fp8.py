@@ -2,7 +2,8 @@
 module's video- and text-input linears, loads the quantized checkpoint directory and, in
 dequant mode, matches diffusers' model run with the dequantized fp8 weights; the audio stream,
 every output projection and the top level stay bf16; the TP replicate flags and eager mode are
-refused with a spec.
+refused with a spec. The pipeline application resolves the quantized directory from its
+``quant`` options and counts it as stored in the HBM check beside the device text encoder.
 """
 
 from __future__ import annotations
@@ -15,6 +16,12 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("diffusers")
 pytest.importorskip("accelerate")
 
+from difflet.backends.neuron.hbm import (  # noqa: E402
+    FIT_FRACTION,
+    GIB,
+    HbmBudgetError,
+    safetensors_bytes,
+)
 from difflet.backends.neuron.ltx_2.transformer import NeuronLtx2TransformerApplication  # noqa: E402
 from difflet.backends.neuron.ops_impl import parallel_mesh  # noqa: E402
 from difflet.backends.neuron.ops_impl.fp8_linear import FP8Linear  # noqa: E402
@@ -24,6 +31,8 @@ from difflet.quant.checkpoint import prepare_quantized_checkpoint, read_manifest
 from difflet.quant.targets import default_spec  # noqa: E402
 from tests.unit.backends._neuron_ltx2_toy import (  # noqa: E402
     TINY_FP8_LTX2,
+    TINY_SHAPE,
+    TINY_TEXT_SEQ_LEN,
     diffusers_forward,
     tiny_ltx2_config,
     tiny_ltx2_inputs,
@@ -116,3 +125,78 @@ def test_eager_mode_is_refused_with_quant(tiny):
     assert _app(tiny, quant=tiny.spec.to_dict()).quant == tiny.spec
     with pytest.raises(ValueError, match="D43"):
         _app(tiny, exec_mode="eager")
+
+
+# --------------------------------------------------------------------------
+# the pipeline application (TorchNeuronLtx2Application)
+# --------------------------------------------------------------------------
+
+
+def _pipeline_app(tiny, **overrides):
+    """The composed application on the CPU with the text encoder and the decoders off: the DiT
+    is built (not loaded) and the quant options resolved."""
+    from difflet.models.ltx_2.neuron_application import TorchNeuronLtx2Application
+
+    kwargs = dict(model_path=str(tiny.root), parallel=DiffletParallelConfig(),
+                  dtype=torch.float32, shape=dict(TINY_SHAPE), text_seq_len=TINY_TEXT_SEQ_LEN,
+                  exec_mode="compile", device="cpu", enable_text_encoder=False,
+                  enable_decode_components=False)
+    kwargs.update(overrides)
+    return TorchNeuronLtx2Application(**kwargs)
+
+
+def test_pipeline_application_resolves_the_quantized_directory(tiny, monkeypatch):
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tiny.root / "cache"))
+    # "mxfp8" names the default recipe at the launch's tp (the kernel compute); the directory
+    # is the one `difflet compile` wrote under the cache for the source and the spec.
+    app = _pipeline_app(tiny, quant="mxfp8")
+    assert app.quant == default_spec("ltx_2", tp_degree=1) and app.quant.compute == "nki"
+    assert app.quantized_dit == str(tiny.quantized)
+    assert app.transformer.model_path == str(tiny.quantized)
+    assert app.transformer.quant == app.quant
+    # A spec (or its dict) is taken as given; an explicit directory is checked and used.
+    app = _pipeline_app(tiny, quant=tiny.spec.to_dict(), quant_checkpoint=str(tiny.quantized))
+    assert app.quant == tiny.spec and app.quantized_dit == str(tiny.quantized)
+    # Without quant the DiT is the source directory and there is no quantized one.
+    app = _pipeline_app(tiny)
+    assert app.quant is None and app.quantized_dit is None
+    assert app.transformer.model_path == str(tiny.transformer_dir)
+
+
+def test_pipeline_application_option_refusals(tiny, monkeypatch, tmp_path):
+    with pytest.raises(ValueError, match="needs quant"):
+        _pipeline_app(tiny, quant_checkpoint=str(tiny.quantized))
+    with pytest.raises(ValueError, match="quant must be"):
+        _pipeline_app(tiny, quant="fp8")
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path / "empty"))
+    with pytest.raises(ValueError, match="difflet compile"):
+        _pipeline_app(tiny, quant="mxfp8")
+
+
+def test_pipeline_application_counts_the_quantized_dit_as_stored_beside_the_text_encoder(
+        tiny, monkeypatch):
+    """The device text encoder's fit check reads the quantized directory's bytes as stored
+    (fp8 weights, uint8 scales, the kept tensors), not the source's estimate in the DiT's
+    dtype: a budget 1 KiB under those bytes refuses, 1 KiB over passes. The DiT is bf16, as on
+    the device; the toy's source is fp32, so its kept tensors make the directory larger than
+    the bf16 estimate (the real checkpoint is bf16 and its directory smaller), and the bf16
+    DiT passes the budget that refuses the quantized one. The toy has no text encoder, so the
+    DiT alone is counted."""
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tiny.root / "cache"))
+    stored = safetensors_bytes(tiny.quantized)
+    margin = 1024
+
+    def budget(limit_bytes: int) -> None:
+        """The env budget whose ``FIT_FRACTION`` is ``limit_bytes``."""
+        monkeypatch.setenv("DIFFLET_NEURON_HBM_GIB", repr(limit_bytes / FIT_FRACTION / GIB))
+
+    def check(**overrides) -> None:
+        app = _pipeline_app(tiny, dtype=torch.bfloat16, **overrides)
+        app._check_device_text_encoder_fits(torch.bfloat16)
+
+    budget(stored - margin)
+    with pytest.raises(HbmBudgetError, match=r"Gemma-3 .* beside the LTX-2 DiT"):
+        check(quant="mxfp8")
+    check()
+    budget(stored + margin)
+    check(quant="mxfp8")
