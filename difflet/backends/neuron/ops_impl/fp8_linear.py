@@ -59,12 +59,14 @@ class _FP8LinearBase(nn.Module):
     the sharding and the collectives."""
 
     def _init_tensors(self, out_local: int, in_local: int, bias: bool, *, dtype, device,
-                      compute: str) -> None:
+                      compute: str, split: str = "") -> None:
         self.compute = _check_compute(compute)
-        # The per-rank K: a row-parallel layer is checked at the launch's tp, where it is built.
+        # The per-rank K, checked at this process's tp (the launch's inside a rank; 1 on a bare
+        # host, where a row layer's K is whole). ``split`` is how a row layer's K got here, so
+        # the refusal names the full K and the tp, not the per-rank number alone.
         if in_local % LAYOUT_K:
             raise ValueError(f"mxfp8 needs in_features a multiple of {LAYOUT_K} (the MX layout), "
-                             f"got {in_local}")
+                             f"got {in_local}" + (f" ({split})" if split else ""))
         # Never requires_grad: autograd has no float8 kernels, and this is inference.
         self.weight = nn.Parameter(
             torch.empty(out_local, in_local, dtype=FP8_DTYPE, device=device), requires_grad=False
@@ -208,7 +210,8 @@ class FP8RowParallelLinear(_FP8LinearBase):
         self.skip_bias_add = skip_bias_add
         self.input_size_per_partition = _split_evenly(input_size, "input_size")
         self._init_tensors(output_size, self.input_size_per_partition, bias, dtype=dtype,
-                           device=device, compute=compute)
+                           device=device, compute=compute,
+                           split=f"{input_size} split over tp={get_tp_size()}")
         self._difflet_shard = {"weight": 1, "bias": None, "weight_scale": 1}
 
     def forward(self, x: torch.Tensor):
