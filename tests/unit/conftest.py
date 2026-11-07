@@ -56,3 +56,30 @@ def _neuron_weight_store_off(monkeypatch):
     (``~/.cache/difflet``); unit tests must not write there. Tests of the store point
     DIFFLET_NEURON_WEIGHT_STORE at a temp dir themselves (gloo workers inherit it)."""
     monkeypatch.setenv("DIFFLET_NEURON_WEIGHT_STORE", "0")
+
+
+@pytest.fixture(autouse=True)
+def _no_bf16_copy_of_a_real_snapshot(monkeypatch):
+    """``ensure_bf16_copy`` (the drivers' compile step for fp32 DiTs: Wan, HunyuanVideo-1.5)
+    is refused for anything under the Hugging Face hub cache: a driver test that reaches it
+    with the real weights local wrote a 27 GB copy per call under tmp_path and filled the host
+    (2026-11-07). Toys under tmp_path still copy; a test that wants the real thing is not a
+    unit test."""
+    from pathlib import Path
+
+    from difflet.backends.neuron.core import weights_bf16
+
+    try:
+        from huggingface_hub.constants import HF_HUB_CACHE
+    except ImportError:  # pragma: no cover
+        HF_HUB_CACHE = os.path.expanduser("~/.cache/huggingface/hub")
+    hub = Path(HF_HUB_CACHE).expanduser().resolve()
+    real = weights_bf16.ensure_bf16_copy
+
+    def guarded(component_dir, cache_root=None):
+        if Path(component_dir).resolve().is_relative_to(hub):
+            raise AssertionError(
+                f"a unit test asked for a bf16 copy of a real snapshot: {component_dir}")
+        return real(component_dir, cache_root)
+
+    monkeypatch.setattr(weights_bf16, "ensure_bf16_copy", guarded)

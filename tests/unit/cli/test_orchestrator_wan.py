@@ -790,6 +790,7 @@ def test_neuron_runs_the_vae_stage(monkeypatch, tmp_path, capsys, mode):
     # As on Trainium: the VAE decodes in a launch of its own after the transformer stage
     # (the device decoder needs ~12 GiB of activations per core at 480x832 in fp32).
     monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    _no_local_snapshot(monkeypatch)
     stages, decoded = [], []
     monkeypatch.setattr(wan_mod.runner, "run_stage",
                         lambda orch, stage, **kw: stages.append(stage))
@@ -806,6 +807,7 @@ def test_neuron_runs_the_vae_stage(monkeypatch, tmp_path, capsys, mode):
 @pytest.mark.parametrize("mode", ["compile", "generate"])
 def test_neuron_host_vae_decodes_on_the_host(monkeypatch, tmp_path, mode):
     monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    _no_local_snapshot(monkeypatch)
     stages, decoded = [], []
     monkeypatch.setattr(wan_mod.runner, "run_stage",
                         lambda orch, stage, **kw: stages.append(stage))
@@ -942,7 +944,18 @@ def _record_launch_envs(monkeypatch) -> list[dict]:
                         lambda cmd, env: launches.append(dict(env)))
     monkeypatch.setattr(wan_mod, "_decode_latents_host", lambda *a, **k: None)
     monkeypatch.setattr(WanOrchestrator, "download", lambda self: None)
+    _no_local_snapshot(monkeypatch)
     return launches
+
+
+def _no_local_snapshot(monkeypatch) -> None:
+    """The driver's compile makes bf16 copies of the real fp32 experts when the snapshot is
+    local (``_make_bf16_dit_copies``): on a host that holds Wan 2.1 these tests then wrote
+    27 GB per call under tmp_path and filled the disk. A driver test never needs the weights."""
+    def missing(*args, **kwargs):
+        raise FileNotFoundError("no local snapshot (test)")
+
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path", missing)
 
 
 @pytest.mark.parametrize("ambient", [None, ""])
@@ -1207,6 +1220,7 @@ def neuron_torchrun(monkeypatch, tmp_path):
     monkeypatch.setenv(fake_pipeline.FAKE_RECORDS_ENV, str(records))
     monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
     monkeypatch.setenv("DIFFLET_DISABLE_PREWARM", "1")
+    _no_local_snapshot(monkeypatch)  # no 27 GB bf16 copy of a local Wan 2.1 under tmp_path
     # run_stage exports the neuron cache locations under it to the ranks, and their
     # `import torch` (torch_neuronx autoload) creates the HLO one: keep it in tmp_path.
     monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path / "difflet-cache"))
