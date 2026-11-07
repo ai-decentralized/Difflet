@@ -268,10 +268,11 @@ def test_a_bf16_copy_is_fingerprinted_with_its_manifest(tiny, tmp_path):
     entry. A directory without one (every hub checkpoint) is fingerprinted as before."""
     src = tiny["transformer_dir"]
     assert source_fingerprint(src) == _file_identity(src)
-    # The toy's digest from before the manifest entry existed (its files' names and sizes and
-    # the Qwen targets fix it, not the random weights): the literal every Qwen, FLUX and LTX-2
-    # directory written since hangs on, which a formula mirrored in the test cannot pin.
-    assert quantized_digest(tiny["spec"], source_fingerprint(src)) == "e11f9d28946c0cb7"
+    # The toy's digest (its files' names and sizes, the Qwen targets and the schema fix it, not
+    # the random weights): a literal, which a formula mirrored in the test cannot pin. It moves
+    # only with QUANT_SCHEMA (2: e11f9d28946c0cb7; 3, the K-remainder layout: 17bfb1e6d80f20ff),
+    # never with the manifest entry below.
+    assert quantized_digest(tiny["spec"], source_fingerprint(src)) == "17bfb1e6d80f20ff"
     copy = ensure_bf16_copy(src, cache_root=tmp_path / "cache")
     manifest = copy / BF16_MANIFEST
     fingerprint = source_fingerprint(copy)

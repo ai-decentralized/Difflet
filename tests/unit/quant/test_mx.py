@@ -16,16 +16,22 @@ from nkilib.core.utils.mx_torch_common import quantize_to_mx  # noqa: E402
 import nki.language as nl  # noqa: E402
 
 
-@pytest.mark.parametrize("k", [512, 3072, 768, 128, 256, 1536])
+@pytest.mark.parametrize("k", [512, 3072, 768, 128, 256, 1536, 384, 896, 3456])
 def test_swizzle_perm_matches_nkilib(k):
-    """``t[:, perm]`` reshaped to ``[R, K/4, 4]`` is nkilib's ``_swizzle(t.T)`` transposed."""
+    """``t[:, perm]`` reshaped to ``[R, K/4, 4]`` is nkilib's ``_swizzle(t.T)`` transposed, for
+    the loader difflet calls the kernel with (``fast_dma_transpose=True``, ``fp8_kernels.py``):
+    nkilib's golden says the legacy and fast-DMA layouts differ for exactly one K remainder,
+    384 (Wan's ``ffn.net_out`` at tp4: 13824/4 = 6 x 512 + 384), the legacy loader splitting
+    it into 256 + 128 sub-tiles and the fast-DMA loader taking it as one partial tile."""
     f = 8
     t = torch.arange(k * f, dtype=torch.float32).reshape(f, k)
     perm = mx.swizzle_perm(k)
     assert sorted(perm.tolist()) == list(range(k))
     ours = t[:, perm].reshape(f, k // 4, 4).permute(1, 0, 2).reshape(k // 4, f * 4)
-    theirs = nkilib_torch._swizzle(t.t().contiguous().numpy())
+    theirs = nkilib_torch._swizzle(t.t().contiguous().numpy(), fast_dma_transpose=True)
     assert np.array_equal(ours.numpy(), theirs)
+    if k % 512 != 384:  # every other remainder: the two loaders agree, so the legacy golden too
+        assert np.array_equal(ours.numpy(), nkilib_torch._swizzle(t.t().contiguous().numpy()))
 
 
 def test_quantize_mx_matches_nkilib_on_the_swizzled_weight():
@@ -40,7 +46,7 @@ def test_quantize_mx_matches_nkilib_on_the_swizzled_weight():
     assert data.dtype == torch.int32 and data.shape == (k // 4, n)
     assert scales_hw.shape == (k // 4, n)
 
-    sw = nkilib_torch._swizzle(w.t().contiguous().numpy())            # [K/4, N*4]
+    sw = nkilib_torch._swizzle(w.t().contiguous().numpy(), fast_dma_transpose=True)  # [K/4, N*4]
     packed, scale_block = quantize_to_mx(sw, nl.float8_e4m3fn_x4)   # [K/4, N] x4, [K/32, N]
     theirs = torch.from_numpy(np.ascontiguousarray(packed).view(np.int32).copy())
     assert torch.equal(data, theirs)
