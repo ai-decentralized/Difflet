@@ -323,8 +323,9 @@ class _JointRingProcessor:
 class _JointUlyssesProcessor:
     """``HunyuanVideo15AttnProcessor2_0`` with the attention done by ``joint_ulysses_attention``:
     the image stream arrives sharded (this rank's ``N/cp`` tokens, rotary rows to match), the text
-    stream replicated; projections, QK norms and rotary are diffusers' own. Keys are masked by
-    count (valid image keys, then the valid text keys diffusers reordered to the front)."""
+    stream replicated; projections and QK norms are diffusers' own, the rotary is diffusers' law
+    through the neuron op (``_joint_qkv``). Keys are masked by count (valid image keys, then the
+    valid text keys diffusers reordered to the front)."""
 
     def __init__(self, num_image_tokens: int) -> None:
         self.num_image_tokens = int(num_image_tokens)
