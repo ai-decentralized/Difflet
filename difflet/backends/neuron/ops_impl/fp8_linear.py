@@ -232,22 +232,46 @@ class FP8RowParallelLinear(_FP8LinearBase):
 # ------------------------------------------------------------------------------- the swap
 
 
+def _parallel_kind(linear: nn.Module) -> str | None:
+    """``"column"`` / ``"row"`` for this backend's parallel linears, and for another backend's
+    classes of the same name: a model module binds ``difflet.ops.ColumnParallelLinear`` when it
+    is first imported, from whichever backend was selected then (in a CPU-only process that is
+    the CPU backend's, a plain ``nn.Linear`` subclass at tp=1), so the class identity alone
+    does not say which layer it is."""
+    if isinstance(linear, ColumnParallelLinear):
+        return "column"
+    if isinstance(linear, RowParallelLinear):
+        return "row"
+    name = type(linear).__name__
+    if isinstance(linear, nn.Linear) and name == "ColumnParallelLinear":
+        return "column"
+    if isinstance(linear, nn.Linear) and name == "RowParallelLinear":
+        return "row"
+    return None
+
+
 def fp8_twin(linear: nn.Module, *, compute: str) -> _FP8LinearBase:
     """The mxfp8 layer that replaces ``linear`` (``nn.Linear``, ``ColumnParallelLinear`` or
-    ``RowParallelLinear``), same geometry, flags, bias, dtype and device."""
+    ``RowParallelLinear``), same geometry, flags, bias, dtype and device. A parallel linear of
+    another backend (``_parallel_kind``) keeps the flags it carries and the defaults of the
+    ones it does not (the CPU backend's drop them: it is tp=1)."""
     weight = linear.weight
     factory = {"dtype": weight.dtype if weight.dtype != FP8_DTYPE else torch.bfloat16,
                "device": weight.device, "compute": compute}
     has_bias = getattr(linear, "bias", None) is not None
-    if isinstance(linear, ColumnParallelLinear):
+    kind = _parallel_kind(linear)
+    if kind == "column":
         return FP8ColumnParallelLinear(
-            linear.input_size, linear.output_size, bias=has_bias,
-            gather_output=linear.gather_output, **factory)
-    if isinstance(linear, RowParallelLinear):
+            getattr(linear, "input_size", getattr(linear, "in_features", None)),
+            getattr(linear, "output_size", getattr(linear, "out_features", None)), bias=has_bias,
+            gather_output=getattr(linear, "gather_output", True), **factory)
+    if kind == "row":
         return FP8RowParallelLinear(
-            linear.input_size, linear.output_size, bias=has_bias,
-            input_is_parallel=linear.input_is_parallel, reduce_output=linear.reduce_output,
-            skip_bias_add=linear.skip_bias_add, **factory)
+            getattr(linear, "input_size", getattr(linear, "in_features", None)),
+            getattr(linear, "output_size", getattr(linear, "out_features", None)), bias=has_bias,
+            input_is_parallel=getattr(linear, "input_is_parallel", False),
+            reduce_output=getattr(linear, "reduce_output", True),
+            skip_bias_add=getattr(linear, "skip_bias_add", False), **factory)
     if type(linear) is nn.Linear:
         return FP8Linear(linear.in_features, linear.out_features, bias=has_bias, **factory)
     raise TypeError(f"cannot quantize a {type(linear).__name__}")

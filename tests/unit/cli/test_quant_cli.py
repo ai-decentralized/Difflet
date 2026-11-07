@@ -141,7 +141,11 @@ def test_the_kernel_path_turns_on_the_nki_trace_cache(monkeypatch, tmp_path):
     cli_main = importlib.import_module("difflet.cli.main")
     monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
     monkeypatch.setenv("DIFFLET_EXEC_MODE", "compile")
-    monkeypatch.delenv("DIFFLET_NKI_TRACE_CACHE", raising=False)
+    # setenv first records the variable's original state, so the undo restores it even
+    # though the orchestrator sets it with os.environ.setdefault (delenv of an unset variable
+    # records nothing, and the value leaked into later tests' compile-cache layout).
+    monkeypatch.setenv("DIFFLET_NKI_TRACE_CACHE", "")
+    monkeypatch.delenv("DIFFLET_NKI_TRACE_CACHE")
 
     def prepare(*flags):
         args = cli_main._build_parser().parse_args(

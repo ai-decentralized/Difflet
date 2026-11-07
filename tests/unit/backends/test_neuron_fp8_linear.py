@@ -208,6 +208,22 @@ def test_quantize_module_replaces_exactly_the_targets_and_keeps_their_flags():
         Q.quantize_module_(model, SPEC)
 
 
+def test_another_backends_parallel_linears_are_recognised_by_name():
+    """A model module bound difflet.ops' linears from the CPU backend (a CPU-only session):
+    plain nn.Linear subclasses without the TP attributes, still swapped by their kind."""
+    from difflet.backends.cpu.ops_impl import linear as cpu_linear
+
+    col = cpu_linear.ColumnParallelLinear(128, 64, gather_output=False)
+    row = cpu_linear.RowParallelLinear(128, 64, input_is_parallel=True, skip_bias_add=True)
+    twin_col = Q.fp8_twin(col, compute="dequant")
+    twin_row = Q.fp8_twin(row, compute="dequant")
+    assert isinstance(twin_col, Q.FP8ColumnParallelLinear) and twin_col.weight.shape == (64, 128)
+    assert twin_col.gather_output is True  # the CPU class drops the flag: the tp=1 default
+    assert isinstance(twin_row, Q.FP8RowParallelLinear) and twin_row.skip_bias_add is True
+    with pytest.raises(TypeError, match="cannot quantize"):
+        Q.fp8_twin(nn.Conv1d(4, 4, 1), compute="dequant")
+
+
 def test_quantize_module_refuses_a_spec_matching_nothing():
     with pytest.raises(ValueError, match="match no linear"):
         Q.quantize_module_(_Model(), QuantSpec(targets=(r"nothing",)))
