@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import os
+from pathlib import Path
 
 import pytest
 
@@ -75,6 +76,76 @@ def test_spec_from_args():
     assert Q.quant_spec(args).compute == "dequant"
     assert Q.quant_spec(_parse("generate", "--model-id", QWEN)) is None
     assert Q.quant_spec(_parse("generate", "--model-id", QWEN, "--quant", "mxfp8")).tp_degree == 4
+
+
+def test_quant_spec_takes_the_drivers_tp():
+    """The row-parallel weights are quantized per rank K range, so the spec's tp is the launch's:
+    the args' --tp-degree or 4, unless the driver passes its own default."""
+    args = _parse("generate", "--model-id", QWEN, "--backend", "neuron", "--quant", "mxfp8")
+    assert Q.quant_spec(args).tp_degree == 4 and Q.quant_spec(args, tp_degree=2).tp_degree == 2
+    args = _parse("generate", "--model-id", QWEN, "--backend", "neuron", "--quant", "mxfp8",
+                  "--tp-degree", "8")
+    assert Q.quant_spec(args).tp_degree == 8 and Q.quant_spec(args, tp_degree=2).tp_degree == 2
+
+
+@pytest.fixture(scope="module")
+def tiny_dir(tmp_path_factory):
+    """The tiny diffusers-layout Qwen-Image DiT's transformer directory (4 heads x 32, a
+    512-wide MLP: every target's K per rank is 128 at the driver's default tp4). torch and
+    diffusers load here only; the rest of this module is as torch-free as the driver."""
+    pytest.importorskip("diffusers")
+    from tests.unit.backends._neuron_qwen_toy import write_tiny_qwen_model
+
+    root = tmp_path_factory.mktemp("tiny_qwen_quant")
+    write_tiny_qwen_model(root)
+    return str(root / "transformer")
+
+
+@pytest.fixture
+def _trace_cache_restored(monkeypatch):
+    """Undo the DIFFLET_NKI_TRACE_CACHE the preparer sets with os.environ.setdefault: setenv
+    first records the variable's original state (delenv of an unset variable records
+    nothing, and the value leaked into later tests' compile-cache layout)."""
+    monkeypatch.setenv("DIFFLET_NKI_TRACE_CACHE", "")
+    monkeypatch.delenv("DIFFLET_NKI_TRACE_CACHE")
+
+
+def test_prepare_quant_writes_on_create_and_refuses_when_missing(
+        tmp_path, monkeypatch, capsys, tiny_dir, _trace_cache_restored):
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path))
+    args = _parse("compile", "--model-id", QWEN, "--backend", "neuron", "--quant", "mxfp8")
+    with pytest.raises(SystemExit):  # generate's resolve-only call before any compile wrote it
+        Q.prepare_quant(args, {"transformer": tiny_dir}, create=False, tag="t")
+    assert "Error: --quant: " in capsys.readouterr().err
+    out = Q.prepare_quant(args, {"transformer": tiny_dir}, create=True, tag="t")
+    assert (Path(out["transformer"]) / "difflet_quant.json").is_file()
+    assert Path(out["transformer"]).is_relative_to(tmp_path)
+    assert capsys.readouterr().out.startswith(f"[t] MXFP8 transformer (nki): {out['transformer']}")
+    assert os.environ["DIFFLET_NKI_TRACE_CACHE"] == "1"
+    # Resolve-only now finds it, and a second component is prepared under its own name.
+    both = Q.prepare_quant(args, {"transformer": tiny_dir, "twin": tiny_dir}, create=False,
+                           tag="t")
+    assert both == {"transformer": out["transformer"], "twin": out["transformer"]}
+
+
+def test_prepare_quant_is_off_without_the_flag_or_the_weights(tmp_path, capsys,
+                                                              _trace_cache_restored):
+    """None and no line when --quant is off, or when the weights are not downloaded yet (the
+    ranks report that); the trace-cache choice is still made for the ranks in the second case,
+    and dequant compute leaves it alone."""
+    missing = {"transformer": str(tmp_path / "not-downloaded" / "transformer")}
+    assert Q.prepare_quant(_parse("compile", "--model-id", QWEN), missing, create=True,
+                           tag="t") is None
+    assert "DIFFLET_NKI_TRACE_CACHE" not in os.environ
+    args = _parse("compile", "--model-id", QWEN, "--backend", "neuron", "--quant", "mxfp8",
+                  "--quant-compute", "dequant")
+    assert Q.prepare_quant(args, missing, create=True, tag="t") is None
+    assert "DIFFLET_NKI_TRACE_CACHE" not in os.environ
+    args = _parse("compile", "--model-id", QWEN, "--backend", "neuron", "--quant", "mxfp8")
+    assert Q.prepare_quant(args, missing, create=True, tag="t") is None
+    assert Q.prepare_quant(args, {}, create=True, tag="t") is None
+    assert os.environ["DIFFLET_NKI_TRACE_CACHE"] == "1"
+    assert capsys.readouterr() == ("", "")
 
 
 def test_flags_are_forwarded_only_when_given_and_consumed_by_the_stage_parser():
