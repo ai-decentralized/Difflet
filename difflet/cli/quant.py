@@ -43,7 +43,8 @@ def add_quant_flags(p: argparse.ArgumentParser) -> None:
         "OCP MXFP8 (32-value block scales for weights, offline, and for activations, in the "
         "kernel; no calibration) from a quantized checkpoint that `compile` writes under the "
         "cache dir; the output projections, modulation, embedders and the output layer stay "
-        "bf16 (LTX-2: its audio stream too). Qwen-Image, FLUX.1-dev, LTX-2, Wan 2.1, "
+        "bf16 (except FLUX's single-stream output projection, quantized as its attention and "
+        "MLP halves; LTX-2: its audio stream too). Qwen-Image, FLUX.1-dev, LTX-2, Wan 2.1, "
         "Wan 2.2-A14B (both experts) and HunyuanVideo.",
     )
     p.add_argument(

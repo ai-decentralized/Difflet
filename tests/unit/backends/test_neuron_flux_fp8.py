@@ -46,8 +46,8 @@ from tests.unit.backends._neuron_flux_toy import (  # noqa: E402
 )
 
 # per dual block: q/k/v, add_q/k/v, ff up/down, ff_context up/down = 10; per single block: q/k/v,
-# proj_mlp = 4 (to_out, to_add_out, proj_out stay bf16)
-TINY_TARGETS = TINY["num_layers"] * 10 + TINY["num_single_layers"] * 4
+# proj_mlp and proj_out's two halves = 6 (to_out, to_add_out stay bf16)
+TINY_TARGETS = TINY["num_layers"] * 10 + TINY["num_single_layers"] * 6
 #: FLUX's targets before the split (``FLUX_TARGETS`` as of 917d087), written out so that the
 #: tests of the halves keep their sets when the default changes.
 PRE_D = (
@@ -137,18 +137,17 @@ def _app(model_path, config, spec: QuantSpec) -> NeuronFluxTransformerApplicatio
     return app
 
 
-def test_the_quantized_directory_holds_the_default_targets_and_the_halves_by_name(tiny):
+def test_the_quantized_directory_holds_the_default_targets_with_the_halves_quantized(tiny):
+    """FLUX's default quantizes the single blocks' proj_out as its two halves (D5's
+    measurement); the bias stays the fused one and the fused weight is never stored."""
     manifest = read_manifest(tiny.quantized)
     assert manifest["tensors"]["quantized"] == TINY_TARGETS
     stored, source = _tensors(tiny.quantized), _tensors(tiny.transformer_dir)
-    n = tiny.config.inner_dim
     for i in range(TINY["num_single_layers"]):
         p = f"single_transformer_blocks.{i}"
-        fused = source[f"{p}.proj_out.weight"]
-        for half, cols in (("proj_out_attn", fused[:, :n]), ("proj_out_mlp", fused[:, n:])):
-            assert stored[f"{p}.{half}.weight"].dtype == torch.float32  # the toy's dtype
-            assert torch.equal(stored[f"{p}.{half}.weight"], cols)
-            assert f"{p}.{half}.weight_scale" not in stored
+        for half in ("proj_out_attn", "proj_out_mlp"):
+            assert stored[f"{p}.{half}.weight"].dtype == mx.FP8_DTYPE
+            assert stored[f"{p}.{half}.weight_scale"].dtype == torch.uint8
         assert torch.equal(stored[f"{p}.proj_out.bias"], source[f"{p}.proj_out.bias"])
         assert f"{p}.proj_out.weight" not in stored
 
@@ -174,7 +173,8 @@ def test_application_quantizes_the_targets_and_matches_the_weight_only_reference
     assert isinstance(dual.attn.to_q, FP8ColumnParallelLinear)
     assert isinstance(single.proj_mlp, FP8ColumnParallelLinear)
     assert not isinstance(dual.attn.to_out[0], FP8ColumnParallelLinear)
-    assert type(single.proj_out_attn).__name__ == "RowParallelLinear"
+    assert isinstance(single.proj_out_attn, FP8RowParallelLinear)
+    assert isinstance(single.proj_out_mlp, FP8RowParallelLinear)
     assert type(dual.attn.to_add_out).__name__ == "RowParallelLinear"
     out = first(app(**tiny_inputs(tiny.config)))
     torch.testing.assert_close(out, tiny.reference, atol=1e-4, rtol=1e-4)

@@ -115,14 +115,16 @@ QWEN_IMAGE_ROW_PARALLEL: tuple[str, ...] = (
 # FLUX.1 (diffusers' FluxTransformer2DModel names, which ``difflet/models/flux/modeling_flux.py``
 # keeps): the 19 dual-stream blocks' q/k/v for both streams and both MLPs (``ff``, ``ff_context``),
 # the 38 single-stream blocks' q/k/v and MLP-up (``proj_mlp``). The output projections stay bf16
-# by default as for Qwen-Image: the dual blocks' ``to_out.0`` / ``to_add_out`` and the single
-# blocks' ``proj_out``. FLUX's spec splits that ``proj_out`` (``SINGLE_BLOCK_SPLIT_LINEARS``),
+# by default as for Qwen-Image: the dual blocks' ``to_out.0`` / ``to_add_out``; the single
+# blocks' ``proj_out`` is quantized as its two halves (below). FLUX's spec splits that ``proj_out`` (``SINGLE_BLOCK_SPLIT_LINEARS``),
 # so its quantized checkpoint stores ``proj_out_attn`` / ``proj_out_mlp``, the two row-parallel
 # linears the neuron model runs, as tensors of their own, read by name; untargeted they are the
-# fused weight's column ranges in the source's dtype. The halves can be quantized, each per rank
-# K range of its own, but they are override targets (``FLUX_SPLIT_TARGETS``) until the device
-# picks the default (``docs/plans/2026-11-07-mxfp8-proj-out-rope.md`` D5): Wan's self-attention
-# q/k/v went into its default unmeasured and cost the tp4 block 5x.
+# fused weight's column ranges in the source's dtype. The default quantizes both halves, each per
+# rank K range of its own, on measurement (trn3, tp4, 1024x1024, 50 steps;
+# docs/verification/2026-11-07-mxfp8-video-models.md section 6): 183.4 ms per step against
+# 222.3 in bf16 (0.82x) and 191.1 without them, and no more drift from bf16 over 4 prompts x
+# 3 seeds than without them (mean 24.7 against 24.2 dB; two bf16 runs at different TP degrees
+# are 29.3 dB apart at 50 steps, so the absolute verdict is the CPU fp32 reference's).
 _SINGLE = r"single_transformer_blocks\.\d+"
 
 #: FLUX's and HunyuanVideo's single-stream ``proj_out``: one checkpoint ``Linear(dim + mlp_dim,
@@ -137,6 +139,7 @@ FLUX_TARGETS: tuple[str, ...] = (
     rf"{_BLOCK}\.(ff|ff_context)\.net\.2",
     rf"{_SINGLE}\.attn\.(to_q|to_k|to_v)",
     rf"{_SINGLE}\.proj_mlp",
+    rf"{_SINGLE}\.proj_out_(attn|mlp)",
 )
 
 #: The single blocks' ``proj_out`` halves as targets (row-parallel: each quantized per rank K
@@ -146,7 +149,6 @@ FLUX_SPLIT_TARGETS: tuple[str, ...] = (rf"{_SINGLE}\.proj_out_(attn|mlp)",)
 FLUX_KEPT_BF16: tuple[str, ...] = (
     rf"{_BLOCK}\.attn\.(to_out\.0|to_add_out)",
     rf"{_SINGLE}\.proj_out",
-    rf"{_SINGLE}\.proj_out_(attn|mlp)",
     rf"{_BLOCK}\.norm1(_context)?\.linear",
     rf"{_SINGLE}\.norm\.linear",
     r"time_text_embed\..*",

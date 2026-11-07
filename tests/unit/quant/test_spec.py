@@ -172,6 +172,8 @@ def test_split_linears_stay_out_of_every_unsplit_spec():
     "transformer_blocks.3.ff_context.net.2",
     "single_transformer_blocks.37.attn.to_k",
     "single_transformer_blocks.0.proj_mlp",
+    "single_transformer_blocks.0.proj_out_attn",
+    "single_transformer_blocks.37.proj_out_mlp",
 ])
 def test_flux_targets_match_the_block_projections(name):
     assert default_spec("flux").matches(name)
@@ -181,8 +183,6 @@ def test_flux_targets_match_the_block_projections(name):
     "transformer_blocks.0.attn.to_out.0",
     "transformer_blocks.0.attn.to_add_out",
     "single_transformer_blocks.0.proj_out",
-    "single_transformer_blocks.0.proj_out_attn",
-    "single_transformer_blocks.0.proj_out_mlp",
     "transformer_blocks.0.norm1.linear",
     "transformer_blocks.0.norm1_context.linear",
     "single_transformer_blocks.0.norm.linear",
@@ -205,18 +205,20 @@ def test_flux_targets_keep_outputs_conditioning_and_io_in_bf16(name):
 
 
 def test_flux_splits_its_proj_out_and_the_halves_are_row_parallel_override_targets():
-    """FLUX's spec stores the single blocks' ``proj_out`` as its halves from now on, but the
-    default set does not quantize them until the device picks it; an override that names them
-    gets them per rank K range of each half."""
+    """FLUX's spec stores the single blocks' ``proj_out`` as its halves, and its default set
+    quantizes them (D5's measurement), each per rank K range of its own; the fused name is
+    never a target."""
     from difflet.quant.targets import FLUX_SPLIT_TARGETS, FLUX_TARGETS
 
     spec = default_spec("flux", tp_degree=4)
     assert spec.split_linears == SINGLE_BLOCK_SPLIT_LINEARS
     assert spec.is_split("single_transformer_blocks.0.proj_out")
-    assert not spec.matches("single_transformer_blocks.0.proj_out_attn")
+    assert spec.matches("single_transformer_blocks.0.proj_out_attn")
+    assert not spec.matches("single_transformer_blocks.0.proj_out")
+    assert FLUX_TARGETS[-len(FLUX_SPLIT_TARGETS):] == FLUX_SPLIT_TARGETS
     assert spec.k_shards("single_transformer_blocks.0.proj_out_attn") == 4
     assert spec.k_shards("single_transformer_blocks.37.proj_out_mlp") == 4
-    d = default_spec("flux", tp_degree=4, targets=FLUX_TARGETS + FLUX_SPLIT_TARGETS)
+    d = default_spec("flux", tp_degree=4, targets=FLUX_TARGETS)
     assert d.matches("single_transformer_blocks.0.proj_out_attn")
     assert d.matches("single_transformer_blocks.37.proj_out_mlp")
     assert not d.matches("single_transformer_blocks.0.proj_out")
