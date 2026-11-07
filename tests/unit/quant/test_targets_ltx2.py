@@ -5,11 +5,13 @@ and the row-parallel set is what the TP layer shards along K."""
 from __future__ import annotations
 
 import argparse
+import json
 
 import pytest
 import torch
 
 from difflet.cli.quant import QUANT_MODELS, quant_spec
+from difflet.quant.spec import LAYOUT_K
 from difflet.quant.targets import (
     LTX_2_KEPT_BF16,
     LTX_2_ROW_PARALLEL,
@@ -21,7 +23,17 @@ from difflet.quant.targets import (
 
 pytest.importorskip("diffusers")
 
-from tests.unit.backends._neuron_ltx2_toy import TINY_FP8_LTX2  # noqa: E402
+from tests.unit.backends._neuron_ltx2_toy import (  # noqa: E402
+    TINY_FP8_LTX2,
+    TINY_LTX2_TRANSFORMER,
+    tiny_ltx2_config,
+    write_tiny_ltx2_model,
+)
+
+#: What TINY_FP8_LTX2 changes against the L1 toy: 32-wide heads and 128-wide text, so every
+#: target's K is a multiple of the MX layout's tile.
+FP8_GEOMETRY = ("attention_head_dim", "audio_attention_head_dim", "cross_attention_dim",
+                "audio_cross_attention_dim")
 
 #: Per block: 3 q/k/v for the two video attentions, the a2v query, the v2a key and value,
 #: and the two video MLP linears.
@@ -53,6 +65,24 @@ def test_default_targets_cover_the_video_and_text_input_linears_only(model):
                for n, _ in model.named_modules())
     assert not any(spec.matches(n) for n in (
         "proj_out", "caption_projection.linear_1", "transformer_blocks.0.audio_ff.net.2"))
+
+
+def test_the_fp8_toy_is_written_and_configured_with_its_own_geometry(model, tmp_path):
+    """Every default target's K in the fp8 toy is a multiple of the MX layout's tile, and the
+    toy writer carries that geometry through to the saved ``config.json`` and to
+    ``tiny_ltx2_config`` (not the L1 toy's 8-wide heads, which would build a 32-wide module
+    against 128-wide weights)."""
+    spec = default_spec("ltx_2")
+    for name in _linears(model):
+        if spec.matches(name):
+            assert model.get_submodule(name).in_features % LAYOUT_K == 0, name
+    assert all(TINY_FP8_LTX2[k] != TINY_LTX2_TRANSFORMER[k] for k in FP8_GEOMETRY)
+    write_tiny_ltx2_model(tmp_path, config=TINY_FP8_LTX2)
+    saved = json.loads((tmp_path / "transformer" / "config.json").read_text())
+    config = tiny_ltx2_config(config=TINY_FP8_LTX2)
+    for key in FP8_GEOMETRY:
+        assert saved[key] == getattr(config, key) == TINY_FP8_LTX2[key], key
+    assert tiny_ltx2_config().attention_head_dim == TINY_LTX2_TRANSFORMER["attention_head_dim"]
 
 
 def test_every_linear_is_a_target_or_documented_bf16(model):
