@@ -1,6 +1,6 @@
 # MXFP8 on the video DiTs — device evidence (Trainium3)
 
-**Status:** in progress (2026-11-07). Host `trn3.48xlarge` (16 devices, LNC=2 is the host
+**Status:** LTX-2 device matrix complete (2026-11-07); CPU fp32 reference pending (section G). Host `trn3.48xlarge` (16 devices, LNC=2 is the host
 default, 192 vCPU), Neuron SDK: torch_neuronx 2.14.3, nkilib 0.7.0 (`matmul_mxfp8`
 experimental). Branch `feat/mxfp8-video-models` on `feat/fp8-native-trn3` (`03b43ba`).
 Plan: `docs/plans/2026-11-07-mxfp8-video-models.md`. Every run: tp4, 50 steps, seed 42,
@@ -119,6 +119,97 @@ cache): the NEFF cache key depends on the source path. Qwen-Image's md5 matched 
 paths, so it costs a compile per checkout, nothing else.
 | frames | 121 x 512 x 768, a cat on a garden path (`bf16_frame_{1,2,3}.png`) |
 
-## 3. LTX-2 mxfp8
+## 3. LTX-2 mxfp8 (`--quant mxfp8`, default target set), tp4, 512x768x121, 50 steps, seed 42
 
-(pending)
+Same prompt, cache and host as section 2; the run from a snapshot of `fc8b94c` carrying the
+B7/B8 patches (`/home/ubuntu/.claude/jobs/4e438750/tmp/scratch-fc8b94c`, identical to the
+later commits), `mx_compile.log`, `mx_gen50{a,b}.log`.
+
+| | bf16 | mxfp8 (video + text linears; audio stream and output projections bf16) |
+|---|---|---|
+| quantized DiT directory | — | 24 GB (`quantized/Lightricks--LTX-2__64f65d09/transformer/mxfp8-825b78f48b70b6c8`), bf16 source 37.8 GB |
+| compile | 96 blocks, 302.6 s | 96 blocks, 138.9 s load + warm-up, no fallbacks |
+| generate load + warm-up | 55–57 s | 61.5 s |
+| request (encode + 50 steps) | 71.9 s | 56.2 s |
+| **DiT step median** | **1283.9 ms** (n=49, max 1315.8) | **966.4 / 968.2 ms** (n=49, max 991.9 / 970.4) = **0.75x** |
+| determinism | mp4 `0702ffd2…`, latents `2805c388…` on both runs | mp4 `c1057ed5…`, latents `80316ff7…` on both runs |
+| video latents vs bf16 | — | cosine 0.9909, rel L2 0.134 |
+| audio latents vs bf16 (not quantized) | — | cosine 0.9998, rel L2 0.019 |
+| clip vs bf16 (121 frames, per-frame mean) | — | PSNR 22.47 dB (worst frame 20.85, #92), SSIM 0.830, LPIPS 0.078 |
+
+The two clips show the same scene and the same cat (`bf16_frame_2.png`, `mx_frame_2.png`,
+frame 60); the difference is in the fine foliage texture and, on the worst frame (#92,
+`frame92_bf16_vs_mx.png`, mean |diff| 16/255, p99 77), the cat's pose by a few pixels: a
+different sample along a diverged trajectory, which 50 steps amplify from any small
+perturbation. Whether 22 dB is fp8 damage or the video's own sensitivity is
+answered by the bf16-vs-bf16 noise floor (section 3a) and, finally, by the CPU fp32 reference
+(section G).
+
+### 3a. bf16 noise floor: tp2 against tp4
+
+A bf16 run at tp2 (`bf16_tp2_gen50a.log`; step 2379.4 ms on two cores) differs from the tp4
+run only in the TP all-reduce order. Against the tp4 bf16 clip:
+
+| | bf16 tp2 vs bf16 tp4 (noise floor) | mxfp8 tp4 vs bf16 tp4 |
+|---|---|---|
+| video latents | cosine 0.9975, rel L2 0.071 | cosine 0.9909, rel L2 0.134 |
+| audio latents | cosine 0.9999, rel L2 0.014 | cosine 0.9998, rel L2 0.019 |
+| clip PSNR (mean / worst frame) | 25.9 dB / 23.6 | 22.5 dB / 20.8 |
+| SSIM / LPIPS | 0.909 / 0.040 | 0.830 / 0.078 |
+
+mxfp8 sits 3.5 dB below the bf16 noise floor at twice its latent distance: distinguishable from
+reduction-order noise, by about the margin Qwen-Image showed (32–38 dB against a 39–46 dB floor).
+The CPU fp32 reference (section G) is the gate.
+
+### 3b. Audio-stream variant (`DIFFLET_QUANT_TARGETS` = the default six patterns + the six audio ones)
+
+`mx_audio_compile.log`, `mx_audio_gen50a.log`; quantized directory `mxfp8-8121daf377ecfe89`
+(12 patterns, every linear of the block except the output projections; the audio rows are
+padded 126 -> 128 by B7). One run each:
+
+| | default set (video + text) | + audio stream |
+|---|---|---|
+| DiT step median | 966.4 ms | 972.3 ms (max 1270.5) |
+| clip vs bf16 | 22.47 dB / 0.830 / 0.078 | 22.70 dB / 0.835 / 0.076 |
+| video latents vs bf16 | cosine 0.9909 | cosine 0.9918 |
+| audio latents vs bf16 | cosine 0.9998, rel 0.019 | cosine 0.9997, rel 0.030 |
+
+No speed to gain (the audio stream is 126 of 7,294 tokens), the video quality is the same
+within the single-seed noise, and the audio latents' own error doubles. The default stays
+video + text; the audio linears remain an override, now runnable.
+
+### 3c. Context parallelism: tp4 x CP2 (gather_kv), mxfp8, default set
+
+`mx_cp2_compile.log` (8 ranks, 96 blocks, 106.6 s warm-up, no fallbacks), `mx_cp2_gen50a.log`:
+DiT step median **625.4 ms** (n=49, max 626.9) on eight cores against 966.4 ms on four;
+request 42.5 s. The clip (`02eaadeb…`) against the tp4 clips:
+
+| CP2 mxfp8 vs | PSNR (mean / worst) | SSIM | LPIPS |
+|---|---|---|---|
+| tp4 bf16 | 23.4 dB / 21.3 | 0.855 | 0.068 |
+| tp4 mxfp8 | 24.7 dB / 22.2 | 0.879 | 0.052 |
+
+CP2 moves the mxfp8 output by about the bf16 reduction-order floor (section 3a): the
+quantized layers behave under gather_kv as the bf16 ones do.
+
+### 3d. Data parallelism: `--dp 2` (two tp4 replicas), mxfp8, two requests
+
+`mx_dp2.log`, `dp2_requests.jsonl` (the cat prompt at seed 42 and a second prompt). The
+router placed worker 0 on cores 0-3 and worker 1 on cores 4-7; both workers printed
+`[ltx_2] MXFP8 transformer (nki): .../mxfp8-825b78f48b70b6c8` (the `--quant` flags reach the
+workers, `difflet/cli/dp/router.py`), both ran at the single-launch speed (step medians 968.9
+and 970.3 ms, no interference), and worker 0's clip is bit-identical to the single-launch
+mxfp8 clip (`dp2_cat.mp4` md5 `c1057ed5…` = `mx_gen50a.mp4`).
+
+### 3e. Summary for LTX-2
+
+| layout | DiT step | vs bf16 tp4 clip |
+|---|---|---|
+| bf16 tp4 | 1283.9 ms | — (noise floor tp2: 25.9 dB / 0.909 / 0.040) |
+| **mxfp8 tp4 (default set)** | **966.4 ms = 0.75x** | 22.5 dB / 0.830 / 0.078 |
+| mxfp8 tp4 + audio stream | 972.3 ms | 22.7 dB / 0.835 / 0.076 |
+| mxfp8 tp4 x CP2 | 625.4 ms | 23.4 dB / 0.855 / 0.068 |
+| mxfp8 dp2 (each replica) | 968.9 / 970.3 ms | bit-identical to tp4 mxfp8 |
+
+Speed passes the "recommended" line (<= 0.90x) by a wide margin; quality is judged against the
+CPU fp32 reference in section G.

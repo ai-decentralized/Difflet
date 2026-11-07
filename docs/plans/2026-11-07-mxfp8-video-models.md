@@ -419,7 +419,7 @@ multiples of 8, which is why nothing noticed.
 - Produces `padded_rows(m: int) -> int` (the padded count) beside it, torch-free, so the HBM /
   shape notes can name it.
 
-- [ ] **Step 1: Write the failing test** (CPU: monkeypatch `fp8_kernels._MX_OP` with a fake that
+- [x] **Step 1: Write the failing test** (CPU: monkeypatch `fp8_kernels._MX_OP` with a fake that
   asserts its input's row count is a multiple of 8 and returns `x2 @ W` for a known `W`)
 
 ```python
@@ -436,11 +436,11 @@ def test_mx_linear_pads_the_rows_to_a_multiple_of_8(monkeypatch):
     fp8_kernels.mx_linear(torch.randn(8, 256).to(torch.bfloat16), ...); assert seen[-1] == (8, 256)  # no pad
 ```
 
-- [ ] **Step 2: Run** — `pytest tests/unit/backends/test_neuron_fp8_linear.py -k pads_the_rows -v`; FAIL (assert on 252).
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** — PASS; then the fp8/quant selection.
-- [ ] **Step 5: Commit** — `fix(fp8): mx_linear pads the activation rows to a multiple of 8 (the kernel's F-dim rule; LTX-2 audio, HV1.5, Wan+CP2)`; push.
-- [ ] **Step 6 (device):** re-run the probe's audio shapes (`probe_mx_shapes.py`, the `[variant]` rows); expected: they pass like the video shapes.
+- [x] **Step 2: Run** — `pytest tests/unit/backends/test_neuron_fp8_linear.py -k pads_the_rows -v`; FAIL (assert on 252).
+- [x] **Step 3: Implement.**
+- [x] **Step 4: Run** — PASS; then the fp8/quant selection.
+- [x] **Step 5: Commit** — `fix(fp8): mx_linear pads the activation rows to a multiple of 8 (the kernel's F-dim rule; LTX-2 audio, HV1.5, Wan+CP2)`; push.
+- [x] **Step 6 (device):** re-run the probe's audio shapes (`probe_mx_shapes.py`, the `[variant]` rows); expected: they pass like the video shapes.
 
 ### Task B8: the stage's step timing survives a deep-copied scheduler; LTX-2 reports its DiT step
 
@@ -465,15 +465,15 @@ unchanged on Qwen-Image and Wan (one scheduler).
 **Interfaces:** unchanged signatures; the hook body as described (`step_fn = type(scheduler).step`;
 `scheduler.step = types.MethodType(timed_step, scheduler)`; `if self_ is scheduler: marks.append(...)`).
 
-- [ ] **Step 1: Write the failing test** — a fake `pipe.app.pipeline` whose `scheduler` has a
+- [x] **Step 1: Write the failing test** — a fake `pipe.app.pipeline` whose `scheduler` has a
   class-level `step` that advances `self.i` and raises past `self.n`; the test runs the hook
   the way `run_generate_stage` does (factor the hook into `_time_scheduler_steps(pipe, marks) -> None`
   so it is testable), deep-copies the scheduler afterwards as LTX-2 does, steps both `n` times,
   and asserts: no exception, the original's `i == n`, the copy's `i == n`, `len(marks) == n`.
-- [ ] **Step 2: Run** — FAIL (IndexError-like from the copy driving the original).
-- [ ] **Step 3: Implement** the hook change; add `timing=True` to the LTX-2 stage call.
-- [ ] **Step 4: Run** — PASS; `pytest tests/unit/cli -q` (the Qwen stage tests unchanged).
-- [ ] **Step 5: Commit** — `fix(cli): the stage's step timing survives LTX-2's deep-copied audio scheduler; the LTX-2 driver reports the DiT step median`; push.
+- [x] **Step 2: Run** — FAIL (IndexError-like from the copy driving the original).
+- [x] **Step 3: Implement** the hook change; add `timing=True` to the LTX-2 stage call.
+- [x] **Step 4: Run** — PASS; `pytest tests/unit/cli -q` (the Qwen stage tests unchanged).
+- [x] **Step 5: Commit** — `fix(cli): the stage's step timing survives LTX-2's deep-copied audio scheduler; the LTX-2 driver reports the DiT step median`; push.
 
 ### Task B6: LTX-2 on the device (trn3, tp4, 512x768x121, 50 steps, seed 42, LNC=2)
 
@@ -484,10 +484,10 @@ into `docs/verification/2026-11-07-mxfp8-video-models.md` (new; one section per 
 - [x] **Step 1: kernel shape probe (one core):** a `nki` script calling `fp8_kernels.mx_linear` at the per-rank shapes `(6144 x 4096 -> 1024)`, `(6144 x 4096 -> 4096)`, `(6144 x 16384/4 -> 4096)` (row), `(1024 x 4096 -> 1024)`, `(126 x 2048 -> 512)` (the audio variant), against `mx.dequantize_mx` on the CPU; expected rel error < 2e-3 at every shape, no kernel assert. Record the per-shape time only as a sanity figure.
 - [x] **Step 2: download** `Lightricks/LTX-2` (38 GB transformer + the rest); `df` before and after.
 - [x] **Step 3: bf16 bring-up:** `difflet compile ... --backend neuron --tp-degree 4` then two `difflet generate` with the fixed config; expected: identical md5s, a step median (the first trn3 number for LTX-2), the bf16-vs-bf16 noise floor from a second seed pair is NOT needed here (determinism is bit-exact); profile one block if the budget allows and note the quantizable share.
-- [ ] **Step 4: mxfp8:** `difflet compile ... --quant mxfp8` (writes the quantized directory; record its size and the HBM estimate line), two generates; expected: identical md5s; `compare_difflet_runs.py` vs the bf16 clip; the step ratio.
-- [ ] **Step 5: audio variant:** `DIFFLET_QUANT_TARGETS="<default>;<audio patterns>"` one compile + generate; record the ratio and PSNR; keep whichever set is faster at equal quality as the default (a code change to `targets.py` + commit if it is the audio set).
-- [ ] **Step 6: CP2 (gather_kv) and DP2** at the same config: `--cp-degree 2` one generate (md5 recorded, PSNR vs the tp4 clip); a DP2 launch to prove the worker forwards `--quant` (its log line `[ltx_2] MXFP8 transformer (nki)` on both workers).
-- [ ] **Step 7: evidence and docs:** the evidence doc section, README's feature note gains LTX-2, `docs/cli-staged-commands.md` the LTX-2 quant command; `git commit -m "docs: LTX-2 in MXFP8 on Trainium3 — evidence, README, staged commands"`; push; status page updated.
+- [x] **Step 4: mxfp8:** `difflet compile ... --quant mxfp8` (writes the quantized directory; record its size and the HBM estimate line), two generates; expected: identical md5s; `compare_difflet_runs.py` vs the bf16 clip; the step ratio.
+- [x] **Step 5: audio variant:** `DIFFLET_QUANT_TARGETS="<default>;<audio patterns>"` one compile + generate; record the ratio and PSNR; keep whichever set is faster at equal quality as the default (a code change to `targets.py` + commit if it is the audio set).
+- [x] **Step 6: CP2 (gather_kv) and DP2** at the same config: `--cp-degree 2` one generate (md5 recorded, PSNR vs the tp4 clip); a DP2 launch to prove the worker forwards `--quant` (its log line `[ltx_2] MXFP8 transformer (nki)` on both workers).
+- [x] **Step 7: evidence and docs:** the evidence doc section, README's feature note gains LTX-2, `docs/cli-staged-commands.md` the LTX-2 quant command; `git commit -m "docs: LTX-2 in MXFP8 on Trainium3 — evidence, README, staged commands"`; push; status page updated.
 
 ## Roadmap after phase B (each gets its own plan file when reached)
 

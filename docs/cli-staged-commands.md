@@ -200,7 +200,7 @@ kernel); no calibration file. `compile` writes the quantized checkpoint once und
 299 ms in bf16 (0.80x); against the bf16 image, PSNR 26.8–39.2 dB over 4 prompts x 3 seeds
 (mean 32.5), SSIM 0.955–0.990, LPIPS 0.014–0.092. The
 flag is refused on the AoT `trainium` backend, on trn2, under `--exec-mode eager`, with
-`--teacache-speedup`, and for models other than Qwen-Image and FLUX.1-dev. `--quant-compute
+`--teacache-speedup`, and for models other than Qwen-Image, FLUX.1-dev and LTX-2. `--quant-compute
 dequant` stores the fp8 weights and computes in bf16 (memory only, for debugging). MXFP8 is the
 only recipe: a per-tensor static fp8 variant was built and measured first (see the evidence
 doc) and removed, because its kernel path is unusable in the compiled block graph on
@@ -212,6 +212,17 @@ blocks' q/k/v and MLPs and the single-stream blocks' q/k/v and `proj_mlp` run in
 output projections stay bf16. Measured on trn3 (tp4, 1024x1024, 28 steps): PSNR 31.7 dB /
 SSIM 0.972 / LPIPS 0.023 against bf16, deterministic, but the DiT step is 220 ms against bf16's
 222 ms: a memory saving only, until the single blocks' fused `proj_out` is quantized too.
+
+LTX-2 takes the flag on the same path (`difflet compile/generate --model-id Lightricks/LTX-2
+--backend neuron --tp-degree 4 --height 512 --width 768 --num-frames 121 --quant mxfp8`): the
+video stream's attention q/k/v (self and text cross-attention), the audio-to-video query, the
+video-to-audio keys/values and the video MLP run in mxfp8; the audio stream (126 tokens at that
+shape), every output projection, the modulation and the embedders stay bf16. Measured on trn3
+(tp4, 512x768x121, 50 steps, seed 42): DiT step 966 ms against 1284 ms in bf16 (0.75x),
+deterministic; the quantized DiT is 24 GB for 37.8 GB of bf16; against the bf16 clip PSNR
+22.5 dB / SSIM 0.83 / LPIPS 0.078, where two bf16 runs at different TP degrees are 25.9 dB /
+0.91 / 0.040 apart. `DIFFLET_QUANT_TARGETS` can add the audio linears (no step time to gain,
+measured). Evidence: `docs/verification/2026-11-07-mxfp8-video-models.md`.
 
 ```bash
 DIFFLET_BACKEND=neuron difflet compile --model-id Qwen/Qwen-Image \
