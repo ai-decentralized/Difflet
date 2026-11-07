@@ -22,7 +22,9 @@ from pathlib import Path
 
 import torch
 
-MANIFEST = "difflet-bf16-manifest.json"
+# One name for the copy's manifest: the quantized checkpoint (``difflet/quant/checkpoint.py``)
+# fingerprints a copy by it and labels the directory it writes by the source the manifest names.
+from difflet.quant.checkpoint import BF16_MANIFEST as MANIFEST
 
 
 def _cache_root() -> Path:
