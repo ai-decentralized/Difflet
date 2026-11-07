@@ -23,6 +23,8 @@ import argparse
 import contextlib
 import os
 import sys
+import time
+import types
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -345,6 +347,34 @@ def torchrun_parallel(args: argparse.Namespace):
     )
 
 
+def _time_scheduler_steps(pipe, marks: list[float]) -> None:
+    """Step timing without touching the shared orchestrator: append ``time.perf_counter()``
+    to ``marks`` after each ``step`` of the pipeline's scheduler (one per denoising step, after
+    that step's DiT forwards). A pipeline without a scheduler is left alone.
+
+    The hook is a ``types.MethodType`` bound to the scheduler, not a closure over its bound
+    ``step``: ``LTX2Orchestrator`` deep-copies the video scheduler into its audio scheduler on
+    every generate, after this hook is installed, and ``copy`` treats a plain function as atomic
+    (the copy's ``step`` would still call the original's, driving the video scheduler's step
+    index twice per iteration and past its last sigma) but rebinds a method to the copied
+    instance (``copy._deepcopy_method``). The copy then steps itself, and only the original's
+    steps are marked, so the marks count one video step per iteration; a model with one
+    scheduler (Wan, Qwen-Image) sees no difference.
+    """
+    scheduler = getattr(getattr(pipe.app, "pipeline", None), "scheduler", None)
+    if scheduler is None:
+        return
+    step_fn = type(scheduler).step
+
+    def timed_step(self_, *a, **k):
+        result = step_fn(self_, *a, **k)
+        if self_ is scheduler:
+            marks.append(time.perf_counter())
+        return result
+
+    scheduler.step = types.MethodType(timed_step, scheduler)
+
+
 def run_generate_stage(args: argparse.Namespace, backend: str, *, tag: str, model_id: str,
                        pipeline_kwargs: dict[str, Any], application_kwargs: dict[str, Any],
                        request_kwargs: Callable[[Any], dict[str, Any]],
@@ -371,13 +401,12 @@ def run_generate_stage(args: argparse.Namespace, backend: str, *, tag: str, mode
     seconds. The process group is destroyed after a successful stage only: a failing rank exits
     with its exception and torchrun stops its peers, which may be blocked in a collective.
 
-    With ``timing`` (Wan), rank 0 also prints the start-up split (``from_pretrained`` against
-    ``load``, with the application's ``phase_seconds`` by component) and, per request, the
-    wall time, the time to the first step's end and the median step, read from the scheduler's
-    ``step`` calls (one per denoising step, after that step's DiT forwards).
+    With ``timing`` (Wan, Qwen-Image, LTX-2), rank 0 also prints the start-up split
+    (``from_pretrained`` against ``load``, with the application's ``phase_seconds`` by
+    component) and, per request, the wall time, the time to the first step's end and the median
+    step, read from the scheduler's ``step`` calls (``_time_scheduler_steps``: one per denoising
+    step, after that step's DiT forwards).
     """
-    import time
-
     import torch
     import torch.distributed as dist
 
@@ -412,19 +441,9 @@ def run_generate_stage(args: argparse.Namespace, backend: str, *, tag: str, mode
         if distributed.is_rank0():
             finish_compile()
     else:
-        # Step timing without touching the shared orchestrator: the scheduler steps once per
-        # denoising step, after that step's DiT forward(s).
         marks: list[float] = []
-        scheduler = getattr(getattr(pipe.app, "pipeline", None), "scheduler", None)
-        if timing and scheduler is not None:
-            original_step = scheduler.step
-
-            def timed_step(*a, **k):
-                result = original_step(*a, **k)
-                marks.append(time.perf_counter())
-                return result
-
-            scheduler.step = timed_step
+        if timing:
+            _time_scheduler_steps(pipe, marks)
         for req in replica_requests(args, device=getattr(pipe.app, "device", None)):
             with replica_request_scope(args, req, final=final):
                 marks.clear()
