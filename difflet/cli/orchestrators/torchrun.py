@@ -350,7 +350,9 @@ def torchrun_parallel(args: argparse.Namespace):
 def _time_scheduler_steps(pipe, marks: list[float]) -> None:
     """Step timing without touching the shared orchestrator: append ``time.perf_counter()``
     to ``marks`` after each ``step`` of the pipeline's scheduler (one per denoising step, after
-    that step's DiT forwards). A pipeline without a scheduler is left alone.
+    that step's DiT forwards). Timing is evidence, never the stage's failure: a pipeline without
+    a scheduler, or a scheduler whose ``step`` is not a method of its class (one set on the
+    instance, which the rebinding below cannot wrap), is left alone and un-timed.
 
     The hook is a ``types.MethodType`` bound to the scheduler, not a closure over its bound
     ``step``: ``LTX2Orchestrator`` deep-copies the video scheduler into its audio scheduler on
@@ -362,9 +364,9 @@ def _time_scheduler_steps(pipe, marks: list[float]) -> None:
     scheduler (Wan, Qwen-Image) sees no difference.
     """
     scheduler = getattr(getattr(pipe.app, "pipeline", None), "scheduler", None)
-    if scheduler is None:
+    step_fn = getattr(type(scheduler), "step", None)
+    if step_fn is None:
         return
-    step_fn = type(scheduler).step
 
     def timed_step(self_, *a, **k):
         result = step_fn(self_, *a, **k)
