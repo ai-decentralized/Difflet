@@ -651,7 +651,10 @@ returns to READY. An explicitly allowlisted request error may also be
 sets `process_unsafe`: completed output may still be delivered, while the worker is
 replaced before another request. Unknown errors, missing/unknown dispositions, all
 5xx, worker death, or no terminal within `worker_cancel_timeout` are
-`process_unsafe`.
+`process_unsafe`. A caller that detaches before the request deadline (a client
+disconnect) gives the run the rest of that deadline instead, because a
+single-stage image pipeline cannot stop mid-generation; meanwhile the engine stays
+READY, new requests queue for the slot, and the recovery fence holds.
 
 For a process-unsafe outcome the engine atomically marks the worker unavailable and
 enters RECOVERING. It terminates the old process, drains its queues, starts a new
@@ -868,7 +871,8 @@ The parent has one terminal reader and routes a terminal only to the matching
 engine-owned `RequestRecord` for the current worker instance. There is no terminal
 route transfer between caller and recovery. A detached caller does not change
 terminal ownership; it only prevents output delivery. If abort produces no terminal
-within `worker_cancel_timeout`, the parent isolates and replaces the process.
+within `worker_cancel_timeout` (for a caller that detached before the deadline, within
+the rest of the deadline), the parent isolates and replaces the process.
 
 Status traffic must not share the terminal reply queue used by `READY`,
 `REQUEST_COMPLETED`, `REQUEST_ABORTED`, and `REQUEST_ERROR`. This prevents a

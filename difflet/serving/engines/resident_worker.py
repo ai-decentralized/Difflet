@@ -224,7 +224,7 @@ class ResidentWorkerServingEngine:
                 raise asyncio.TimeoutError
             except asyncio.CancelledError:
                 release_lock = not self._start_inflight_recovery(
-                    run_task, reason="caller_cancelled"
+                    run_task, reason="caller_cancelled", deadline=deadline
                 )
                 raise
             except asyncio.TimeoutError as exc:
@@ -327,23 +327,30 @@ class ResidentWorkerServingEngine:
             ),
         }
 
-    def _start_inflight_recovery(self, run_task: asyncio.Task, *, reason: str) -> bool:
+    def _start_inflight_recovery(
+        self, run_task: asyncio.Task, *, reason: str, deadline: float | None = None
+    ) -> bool:
         if self._closed or self._draining:
             return False
         if self._recovery_task is not None and not self._recovery_task.done():
             return True
         logger.warning("engine.recovery_start request reason=%s", reason)
-        self._recovering = True
+        # A caller that went away (a client disconnect) leaves a busy worker, not a broken one:
+        # the engine stays ready and new requests queue for the run lock while the run ends.
+        # The fence (_recovery_done) still holds until it has.
+        self._recovering = reason != "caller_cancelled"
         self._recovery_done.clear()
         task = asyncio.create_task(
-            self._recover_worker(run_task, reason=reason),
+            self._recover_worker(run_task, reason=reason, deadline=deadline),
             name=f"difflet-worker-recovery-{reason}",
         )
         self._recovery_task = task
         task.add_done_callback(self._clear_recovery_task)
         return True
 
-    async def _recover_worker(self, run_task: asyncio.Task, *, reason: str) -> None:
+    async def _recover_worker(
+        self, run_task: asyncio.Task, *, reason: str, deadline: float | None = None
+    ) -> None:
         clean_cancel = False
         fence_established = False
         try:
@@ -353,11 +360,12 @@ class ResidentWorkerServingEngine:
                 return
             if reason in {"caller_cancelled", "timeout", "request_timeout"}:
                 self._worker.cancel_inflight()
-                clean_cancel = await self._wait_for_terminal_state(run_task)
+                clean_cancel = await self._wait_for_terminal_state(run_task, deadline=deadline)
                 logger.info("engine.recovery_cancel_done reason=%s clean=%s", reason, clean_cancel)
             if clean_cancel:
                 fence_established = True
             else:
+                self._recovering = True
                 async with self._lifecycle_lock:
                     await self._run_worker_call_uncancellable(
                         self._worker.terminate,
@@ -488,19 +496,41 @@ class ResidentWorkerServingEngine:
                 "server_error",
             )
 
-    async def _wait_for_terminal_state(self, run_task: asyncio.Task) -> bool:
+    async def _wait_for_terminal_state(
+        self, run_task: asyncio.Task, *, deadline: float | None = None
+    ) -> bool:
+        """Whether the cancelled run ended and left an idle, healthy worker (no restart).
+
+        The worker gets ``worker_cancel_timeout`` to honour the cancel or, when the caller went
+        away before the request's ``deadline``, the rest of that time: a single-stage image
+        pipeline (FLUX, Qwen-Image) cannot stop mid-generation and finishes instead. A run that
+        ends normally, or acknowledges the cancel, is a clean end. A shutdown ends the wait.
+        """
+        timeout = float(self.config.worker_cancel_timeout)
+        if deadline is not None:
+            timeout = max(timeout, deadline - time.monotonic())
+        draining_task = asyncio.create_task(self._draining_event.wait())
         try:
-            await asyncio.wait_for(
-                asyncio.shield(run_task),
-                timeout=float(self.config.worker_cancel_timeout),
+            done, _ = await asyncio.wait(
+                (run_task, draining_task),
+                timeout=timeout,
+                return_when=asyncio.FIRST_COMPLETED,
             )
+        finally:
+            draining_task.cancel()
+            with suppress(BaseException):
+                await draining_task
+        if run_task not in done:
             return False
+        try:
+            run_task.result()
         except DiffletServingError as exc:
             if exc.code == "request_cancelled" or exc.status_code < 500:
                 return self._worker.is_ready() and self._worker.is_healthy()
             return False
-        except (asyncio.TimeoutError, asyncio.CancelledError):
+        except asyncio.CancelledError:
             return False
+        return self._worker.is_ready() and self._worker.is_healthy()
 
 
 def _requires_worker_recovery(exc: DiffletServingError) -> bool:

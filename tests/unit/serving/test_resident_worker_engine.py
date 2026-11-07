@@ -347,6 +347,96 @@ def test_resident_worker_engine_restarts_when_cancel_is_not_acknowledged():
     assert output.data == b"hello:64x64"
 
 
+def _fake_engine(**config) -> ResidentWorkerServingEngine:
+    return ResidentWorkerServingEngine(
+        runtime=_runtime(),
+        orchestrator_factory="tests.unit.serving.fake_worker:FakeServingOrchestrator",
+        config=ResidentWorkerConfig(worker_restart_timeout=5, **config),
+    )
+
+
+def test_caller_disconnect_lets_an_uncancellable_run_finish_without_a_restart():
+    # A single-stage image pipeline (FLUX, Qwen-Image) cannot stop mid-generation. A client
+    # that disconnects must not get the healthy worker killed and its model reloaded.
+    async def _run():
+        engine = _fake_engine(request_timeout=10, worker_cancel_timeout=0.05)
+        await engine.start()
+        try:
+            pid = engine._worker._process.pid
+            gone = asyncio.create_task(engine.generate(_request("req-gone", "ignore-cancel:0.6")))
+            await asyncio.sleep(0.2)
+            gone.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await gone
+            # Busy, not broken: the engine stays ready and the next request queues (no 503).
+            assert engine.ready
+            # Callers that clean up after a cancelled request stay fenced until the run is over.
+            with pytest.raises(asyncio.TimeoutError):
+                await engine.wait_for_recovery(timeout=0.1)
+            out = await engine.generate(_request("req-next", "hello"))
+            await engine.wait_for_recovery(timeout=2)
+            return out, pid, engine._worker._process.pid
+        finally:
+            await engine.shutdown()
+
+    out, pid_before, pid_after = asyncio.run(_run())
+
+    assert out.data == b"hello:64x64"
+    assert pid_after == pid_before
+
+
+def test_a_run_that_returns_normally_during_its_cancel_wait_ends_cleanly(monkeypatch):
+    # The cancel can land after the pipeline's last cancellation check: the run then returns its
+    # output, and the idle, healthy worker must be kept rather than restarted.
+    async def _run():
+        engine = _fake_engine(request_timeout=1, worker_cancel_timeout=0.5)
+        monkeypatch.setattr(engine._worker, "is_ready", lambda: True)
+        monkeypatch.setattr(engine._worker, "is_healthy", lambda: True)
+        run_task = asyncio.create_task(asyncio.sleep(0, result="output"))
+        return await engine._wait_for_terminal_state(run_task)
+
+    assert asyncio.run(_run()) is True
+
+
+def test_caller_disconnect_still_restarts_a_worker_that_overruns_the_deadline():
+    async def _run():
+        engine = _fake_engine(request_timeout=0.5, worker_cancel_timeout=0.05)
+        await engine.start()
+        try:
+            pid = engine._worker._process.pid
+            gone = asyncio.create_task(engine.generate(_request("req-stuck", "ignore-cancel:3.0")))
+            await asyncio.sleep(0.1)
+            gone.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await gone
+            await engine.wait_for_recovery(timeout=5)
+            out = await engine.generate(_request("req-after-restart", "hello"))
+            return out, pid, engine._worker._process.pid
+        finally:
+            await engine.shutdown()
+
+    out, pid_before, pid_after = asyncio.run(_run())
+
+    assert out.data == b"hello:64x64"
+    assert pid_after != pid_before
+
+
+def test_shutdown_does_not_wait_out_an_abandoned_run():
+    async def _run():
+        engine = _fake_engine(request_timeout=30, worker_cancel_timeout=0.05)
+        await engine.start()
+        gone = asyncio.create_task(engine.generate(_request("req-gone", "ignore-cancel:20")))
+        await asyncio.sleep(0.2)
+        gone.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await gone
+        started = asyncio.get_running_loop().time()
+        await engine.shutdown()
+        return asyncio.get_running_loop().time() - started
+
+    assert asyncio.run(_run()) < 10
+
+
 def test_resident_worker_engine_ready_reflects_idle_worker_death():
     async def _run():
         engine = ResidentWorkerServingEngine(
