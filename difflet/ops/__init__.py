@@ -16,6 +16,7 @@ _EXPORTS = {
     "ulysses_attention": ("attention", "ulysses_attention"),
     "joint_ulysses_attention": ("attention", "joint_ulysses_attention"),
     "apply_rotary_emb": ("embeddings", "apply_rotary_emb"),
+    "apply_rotary_emb_fp32": ("embeddings", "apply_rotary_emb_fp32"),
     "ModuleMarkerStartWrapper": ("markers", "ModuleMarkerStartWrapper"),
     "ModuleMarkerEndWrapper": ("markers", "ModuleMarkerEndWrapper"),
     "dequantize_mx": ("mx", "dequantize_mx"),
