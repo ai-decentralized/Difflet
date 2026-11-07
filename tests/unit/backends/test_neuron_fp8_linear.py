@@ -146,6 +146,15 @@ def test_row_shards_the_input_and_its_block_scales_and_replicates_the_bias():
     assert layer._difflet_shard == {"weight": 1, "bias": None, "weight_scale": 1}
 
 
+def test_a_row_layers_per_rank_k_is_checked_at_the_tp_it_is_built_at():
+    """K=256 is whole in a column layer and has a layout; split over tp=4 it is 64 per rank and
+    has none, and the refusal says so with the full K and the tp, not the per-rank K alone."""
+    _spec_only(4)
+    Q.FP8ColumnParallelLinear(256, 16, compute="dequant")
+    with pytest.raises(ValueError, match=r"multiple of 128 .*got 64 \(256 split over tp=4\)"):
+        Q.FP8RowParallelLinear(256, 16, compute="dequant")
+
+
 def test_sharded_layers_load_their_slice_of_the_full_fp8_weights():
     _spec_only(4)
     model = ToyFP8MLP(DIM, HIDDEN, dtype=torch.float32)
