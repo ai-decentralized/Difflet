@@ -210,8 +210,14 @@ def _torchrun_application_kwargs(args: argparse.Namespace) -> dict:
 def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
     """The options the torchrun (neuron) ranks do not run, as the command line names them: every
     torchrun backend's but TeaCache, which runs on HunyuanVideo's neuron path (several --shapes:
-    one static shape per process). Torch-free."""
-    return [f for f in torchrun_unsupported_options(args) if not f.startswith("--teacache")]
+    one static shape per process), and --quant: the CLI's model check admits it
+    (``QUANT_MODELS`` names HunyuanVideo for its target table) but this driver does not yet write
+    the quantized directory, forward the flag to its stage or key the cache on it, so a launch
+    would run the bf16 DiT without a word. Torch-free."""
+    found = [f for f in torchrun_unsupported_options(args) if not f.startswith("--teacache")]
+    if getattr(args, "quant", None) is not None:
+        found.append("--quant")
+    return found
 
 
 def _torchrun_conflicts(args: argparse.Namespace) -> list[str]:

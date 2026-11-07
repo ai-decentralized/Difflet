@@ -49,6 +49,30 @@ above; the per-block modulation is ``scale_shift_table``, a parameter, not a lin
 (K 5120) and ``ffn.net.2`` (K 13824) are row-parallel: ``net.2``'s K per rank is a multiple of
 128 at tp 1, 2 and 4 (3456) but not at tp 8 (1728), which the writer refuses naming the layer.
 
+HunyuanVideo 1.0 (diffusers' ``HunyuanVideoTransformer3DModel`` names, which the neuron module
+keeps and the checkpoint uses) runs 20 dual-stream and 40 single-stream blocks of 3072 (24 heads
+x 128) with a 12288-wide MLP. A dual block keeps the image stream (10,240 tokens at the default
+320x512x61, 118,800 at 720x1280x129) and the text stream (256 tokens) apart outside the joint
+attention; a single block runs both as one sequence. The targets are FLUX's, one pattern per
+device-bisection group: the dual blocks' image q/k/v (``to_q/k/v``, whose outputs feed the q/k
+RMSNorm, the rotary op and the attention kernel), text q/k/v (``add_*_proj``: 256 rows) and both
+MLPs (``ff`` on the image rows, ``ff_context`` on the 256 text rows), and the single blocks'
+joint q/k/v and MLP-up (``proj_mlp``), each on the image and text rows together. Every column
+target has K 3072. The output projections stay bf16 as above, and so do the per-block
+modulation (``norm1.linear``, ``norm1_context.linear``, ``norm.linear``: applied to one
+``[B, D]`` vector, as Qwen-Image's), the token refiner (``context_embedder``: its own attention
+and MLP on the text, before the blocks), the embedders, ``norm_out`` and ``proj_out``. The
+single blocks' ``proj_out`` waits for phase D: it is one checkpoint ``Linear(3072 + 12288,
+3072)`` that the neuron module reads as two row-parallel column ranges (``proj_out_attn`` /
+``proj_out_mlp``), and until HunyuanVideo's spec splits it (``SPLITS_BY_MODEL``) the writer
+would spend minutes on a directory holding it quantized whole, which every rank then refuses as
+a pattern that names none of its modules, without naming the cause; so a spec that names it is
+refused by name before anything is written (:func:`fused_proj_out_targets`). At tp > 1 the
+MLP-downs (``ff.net.2``, ``ff_context.net.2``: K 12288) are row-parallel with a K per rank of
+6144, 3072 and 1536 at tp 2, 4 and 8, whole 512-wide kernel tiles; an override that quantizes
+``to_out.0`` / ``to_add_out`` (K 3072) has 1536, 768 and 384, multiples of 128 with a partial
+last tile at tp 4 and 8.
+
 Patterns are regexes full-matched against diffusers' module names (the ``transformer.`` trace
 prefix is stripped by :meth:`QuantSpec.matches`).
 """
@@ -208,17 +232,73 @@ WAN_ROW_PARALLEL: tuple[str, ...] = (
     rf"{_WAN_BLOCK}\.ffn\.net\.2",
 )
 
+# HunyuanVideo 1.0 (diffusers' HunyuanVideoTransformer3DModel names, the checkpoint keys): one
+# pattern per device-bisection group, in this order (the device campaign drops groups by index).
+# The set starts out equal to FLUX's but is HunyuanVideo's own: the bisection may drop a group for
+# HunyuanVideo alone.
+HUNYUAN_VIDEO_TARGETS: tuple[str, ...] = (
+    rf"{_BLOCK}\.attn\.(to_q|to_k|to_v)",  # G1 dual image q/k/v (RMSNorm + rotary)
+    rf"{_BLOCK}\.attn\.(add_q_proj|add_k_proj|add_v_proj)",  # G2 dual text q/k/v (256 rows)
+    rf"{_BLOCK}\.ff\.net\.(0\.proj|2)",  # G3 dual image MLP
+    rf"{_BLOCK}\.ff_context\.net\.(0\.proj|2)",  # G4 dual text MLP (256 rows)
+    rf"{_SINGLE}\.attn\.(to_q|to_k|to_v)",  # G5 single joint q/k/v
+    rf"{_SINGLE}\.proj_mlp",  # G6 single joint MLP-up
+)
+
+#: HunyuanVideo modules a reader may expect quantized that are deliberately not: the output
+#: projections, the modulation, the single blocks' fused ``proj_out`` (and the neuron module's
+#: names for its halves), the token refiner and the embedders, and the output layer.
+HUNYUAN_VIDEO_KEPT_BF16: tuple[str, ...] = (
+    rf"{_BLOCK}\.attn\.(to_out\.0|to_add_out)",
+    rf"{_BLOCK}\.norm1(_context)?\.linear",
+    rf"{_SINGLE}\.norm\.linear",
+    rf"{_SINGLE}\.proj_out",  # phase D: the writer must store its two column ranges
+    rf"{_SINGLE}\.proj_out_(attn|mlp)",  # the neuron module's names for it
+    r"context_embedder\..*",
+    r"time_text_embed\..*",
+    r"norm_out\.linear",
+    r"proj_out",
+)
+
+HUNYUAN_VIDEO_ROW_PARALLEL: tuple[str, ...] = (
+    rf"{_BLOCK}\.attn\.(to_out\.0|to_add_out)",  # not default targets; kept for overrides
+    rf"{_BLOCK}\.(ff|ff_context)\.net\.2",
+)
+
+#: Why a HunyuanVideo spec may not name a single block's fused ``proj_out``, after its name.
+FUSED_PROJ_OUT_REASON: str = (
+    "is read as two column ranges (proj_out_attn / proj_out_mlp) by the neuron module, which "
+    "HunyuanVideo's MXFP8 checkpoint does not split yet (roadmap phase D); drop it from the "
+    "targets"
+)
+
+
+def fused_proj_out_targets(spec: QuantSpec, num_single_layers: int) -> list[str]:
+    """The single blocks' fused ``proj_out`` names (``single_transformer_blocks.{i}.proj_out``,
+    ``i < num_single_layers``) that ``spec`` quantizes, in block order: the targets a
+    HunyuanVideo spec is refused for (``FUSED_PROJ_OUT_REASON``), on the driver before the writer
+    runs and in the application. The names are checkpoint keys, so a pattern on the neuron
+    module's ``proj_out_attn`` / ``proj_out_mlp`` matches none of them; the writer's dead-pattern
+    refusal names that one. FLUX's single blocks have the same names and the same split, but
+    FLUX's spec stores the halves (``SPLITS_BY_MODEL``), so its writer refuses the fused name
+    itself, naming the halves; only HunyuanVideo calls this, until its spec splits too."""
+    names = (f"single_transformer_blocks.{i}.proj_out" for i in range(num_single_layers))
+    return [name for name in names if spec.matches(name)]
+
+
 TARGETS_BY_MODEL: dict[str, tuple[str, ...]] = {
     "qwen_image": QWEN_IMAGE_TARGETS,
     "flux": FLUX_TARGETS,
     "ltx_2": LTX_2_TARGETS,
     "wan": WAN_TARGETS,
+    "hunyuan_video": HUNYUAN_VIDEO_TARGETS,
 }
 ROW_PARALLEL_BY_MODEL: dict[str, tuple[str, ...]] = {
     "qwen_image": QWEN_IMAGE_ROW_PARALLEL,
     "flux": FLUX_ROW_PARALLEL,
     "ltx_2": LTX_2_ROW_PARALLEL,
     "wan": WAN_ROW_PARALLEL,
+    "hunyuan_video": HUNYUAN_VIDEO_ROW_PARALLEL,
 }
 #: The fused checkpoint linears each model's quantized checkpoint stores as two column ranges
 #: (``QuantSpec.split_linears``). A model without an entry keeps every weight whole, and its
@@ -260,6 +340,10 @@ __all__ = [
     "FLUX_ROW_PARALLEL",
     "FLUX_SPLIT_TARGETS",
     "FLUX_TARGETS",
+    "FUSED_PROJ_OUT_REASON",
+    "HUNYUAN_VIDEO_KEPT_BF16",
+    "HUNYUAN_VIDEO_ROW_PARALLEL",
+    "HUNYUAN_VIDEO_TARGETS",
     "LTX_2_KEPT_BF16",
     "LTX_2_ROW_PARALLEL",
     "LTX_2_TARGETS",
@@ -274,6 +358,7 @@ __all__ = [
     "WAN_ROW_PARALLEL",
     "WAN_TARGETS",
     "default_spec",
+    "fused_proj_out_targets",
     "row_parallel_for",
     "splits_for",
     "targets_for",

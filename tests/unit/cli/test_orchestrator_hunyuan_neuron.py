@@ -292,6 +292,18 @@ def test_main_refuses_cfg_parallel_on_neuron(monkeypatch, tmp_path, capsys):
 
 
 @pytest.mark.parametrize("mode", ["generate", "compile"])
+def test_quant_is_refused_until_the_driver_carries_it(launches, capsys, mode):
+    """``QUANT_MODELS`` names HunyuanVideo for its target table, so --quant passes the CLI's
+    model check; the driver neither writes the quantized directory nor forwards the flag yet,
+    so it is refused here instead of running the bf16 DiT."""
+    stages, _ = launches
+    with pytest.raises(SystemExit) as exc:
+        getattr(HunyuanVideoOrchestrator(_args(quant="mxfp8")), mode)()
+    assert exc.value.code == 2 and stages == []
+    assert "does not support --quant" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("mode", ["generate", "compile"])
 def test_several_shapes_and_both_vae_flags_are_refused(launches, capsys, mode):
     stages, _ = launches
     with pytest.raises(SystemExit) as exc:
