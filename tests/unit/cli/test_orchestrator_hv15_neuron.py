@@ -68,7 +68,7 @@ def launches(monkeypatch):
     import difflet.cli.orchestrators.torchrun as torchrun_helpers
 
     # The driver and prepare_quant set it: setenv first records the original state (a delenv
-    # of an unset variable records nothing to undo, and a refused launch leaves it set).
+    # of an unset variable records nothing to undo), so a leak cannot reach the next test.
     monkeypatch.setenv("DIFFLET_NKI_TRACE_CACHE", "")
     monkeypatch.delenv("DIFFLET_NKI_TRACE_CACHE")
     _no_local_snapshot(monkeypatch)
@@ -168,13 +168,16 @@ def test_quant_generate_before_compile_is_refused_before_any_launch(launches, mo
                                                                    tmp_path, capsys):
     """A host where compile never ran has no bf16 copy, so the directory is looked for from the
     fp32 source, which nothing quantized: refused on the driver (exit 2, as its other
-    refusals), naming `difflet compile`, before the encode stage, the work dir or any write."""
+    refusals), naming `difflet compile`, before the encode stage, the work dir or any write.
+    prepare_quant opts in to the trace cache before it refuses, and the driver still restores
+    its environment (an in-process caller outlives the refusal)."""
     _toy_snapshot(monkeypatch, tmp_path)
     with pytest.raises(SystemExit) as exc:
         hv15.HunyuanVideo15Orchestrator(_args(work_dir=str(tmp_path / "w"),
                                               quant="mxfp8")).generate()
     err = capsys.readouterr().err
     assert exc.value.code == 2 and launches == []
+    assert "DIFFLET_NKI_TRACE_CACHE" not in os.environ
     assert err.startswith("Error: --quant: transformer: ")
     assert "run `difflet compile` with the same --quant flags first" in err
     assert err.endswith("; nothing was launched.\n")
@@ -203,7 +206,11 @@ def test_the_native_path_keeps_no_args_keyed_artifact(launches, monkeypatch, tmp
     """A regression pin, not a proof: the native path never calls the stage-manifest helpers,
     so this passes whether or not the NEFFs key on the HLO (F2's graph-and-store test in
     test_neuron_hv15_fp8.py proves that). It fails once a change gives the native path an
-    args-keyed stage artifact, which a --quant launch would then have to key."""
+    args-keyed stage artifact, which a --quant launch would then have to key: on the driver or
+    in the transformer stage (the launches are stubbed, so the stage runs here itself), and
+    whether the helper is imported in the function, as today, or at the driver's top."""
+    import difflet.backends.neuron.hunyuan_video15.pipeline as P
+    import difflet.backends.registry as registry
     import difflet.cli.orchestrators.base as base
 
     def keyed(*args, **kwargs):
@@ -211,11 +218,24 @@ def test_the_native_path_keeps_no_args_keyed_artifact(launches, monkeypatch, tmp
 
     for name in ("hashed_stage_dir", "write_stage_manifest", "has_valid_stage_manifest"):
         monkeypatch.setattr(base, name, keyed)
+        monkeypatch.setattr(hv15, name, keyed, raising=False)
     _toy_snapshot(monkeypatch, tmp_path)
     for mode in ("compile", "generate"):
         getattr(hv15.HunyuanVideo15Orchestrator(_args(work_dir=str(tmp_path / "w"),
                                                       quant="mxfp8")), mode)()
     assert [s for s, _, _ in launches] == ["transformer", "vae", "encode", "transformer", "vae"]
+    monkeypatch.setattr(registry, "get_backend",
+                        lambda name: SimpleNamespace(prepare_runtime=lambda p: None))
+    seen = {}
+    monkeypatch.setattr(P, "TorchNeuronHunyuanVideo15Pipeline", _fake_pipeline(seen))
+    stage_dir = tmp_path / "stage"
+    stage_dir.mkdir()
+    torch.save({"prompt_embeds": torch.zeros(1)}, stage_dir / "embeds.pt")
+    for mode in ("compile", "generate"):
+        args = _args(work_dir=str(stage_dir), quant="mxfp8", tp_degree=2, cfg_parallel=True,
+                     height=480, width=848, num_frames=121, steps=50, stage_mode=mode)
+        hv15.HunyuanVideo15Orchestrator(args)._run_stage_internal("transformer", args)
+        assert seen["init"]["quant"] is not None
 
 
 def test_a_quant_launch_restores_the_trace_cache_opt_in(launches, monkeypatch, tmp_path):
@@ -234,14 +254,20 @@ def test_a_quant_launch_restores_the_trace_cache_opt_in(launches, monkeypatch, t
 def test_the_driver_module_imports_no_torch_and_no_neuron_backend():
     """A regression pin, never skipped: the AoT path's native-free contract needs the driver
     free of torch and of every neuron backend module at import (its own guard is skipped
-    without neuronx_distributed), so --quant's torch imports live inside the functions."""
+    without neuronx_distributed), so --quant's torch imports live inside the functions. The
+    child runs from this checkout's root with it as its path, so it imports the very module
+    under test whatever the caller's directory or PYTHONPATH."""
+    module = Path(hv15.__file__).resolve()
+    root = str(module.parents[3])
     code = ("import sys\n"
-            "import difflet.cli.orchestrators.hunyuan_video_15\n"
+            "from pathlib import Path\n"
+            "import difflet.cli.orchestrators.hunyuan_video_15 as driver\n"
+            f"assert Path(driver.__file__).resolve() == Path({str(module)!r}), driver.__file__\n"
             "bad = sorted(m for m in sys.modules if m == 'torch' or "
             "m.startswith('difflet.backends.neuron'))\n"
             "assert not bad, bad\n")
-    subprocess.run([sys.executable, "-c", code], check=True,
-                   env=dict(os.environ, DIFFLET_BACKEND="cpu"))
+    subprocess.run([sys.executable, "-c", code], check=True, cwd=root,
+                   env=dict(os.environ, DIFFLET_BACKEND="cpu", PYTHONPATH=root))
 
 
 def test_explicit_tp4_runs_cfg_sequentially(launches, tmp_path):
