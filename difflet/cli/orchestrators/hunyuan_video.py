@@ -213,7 +213,9 @@ def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
     one static shape per process), and --quant: the CLI's model check admits it
     (``QUANT_MODELS`` names HunyuanVideo for its target table) but this driver does not yet write
     the quantized directory, forward the flag to its stage or key the cache on it, so a launch
-    would run the bf16 DiT without a word. Torch-free."""
+    would run the bf16 DiT without a word. ``generate --dp N`` / ``--requests`` reach the DP
+    router before this driver: the router forwards --quant and each worker refuses it here, as
+    its own driver. Torch-free."""
     found = [f for f in torchrun_unsupported_options(args) if not f.startswith("--teacache")]
     if getattr(args, "quant", None) is not None:
         found.append("--quant")
