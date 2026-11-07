@@ -202,3 +202,22 @@ def test_flux_targets_keep_outputs_conditioning_and_io_in_bf16(name):
     assert any(re.fullmatch(p, name) for p in FLUX_KEPT_BF16), name
     assert spec.k_shards("transformer_blocks.0.ff.net.2") == 4
     assert spec.k_shards("transformer_blocks.0.ff.net.0.proj") == 1
+
+
+def test_flux_splits_its_proj_out_and_the_halves_are_row_parallel_override_targets():
+    """FLUX's spec stores the single blocks' ``proj_out`` as its halves from now on, but the
+    default set does not quantize them until the device picks it; an override that names them
+    gets them per rank K range of each half."""
+    from difflet.quant.targets import FLUX_SPLIT_TARGETS, FLUX_TARGETS
+
+    spec = default_spec("flux", tp_degree=4)
+    assert spec.split_linears == SINGLE_BLOCK_SPLIT_LINEARS
+    assert spec.is_split("single_transformer_blocks.0.proj_out")
+    assert not spec.matches("single_transformer_blocks.0.proj_out_attn")
+    assert spec.k_shards("single_transformer_blocks.0.proj_out_attn") == 4
+    assert spec.k_shards("single_transformer_blocks.37.proj_out_mlp") == 4
+    d = default_spec("flux", tp_degree=4, targets=FLUX_TARGETS + FLUX_SPLIT_TARGETS)
+    assert d.matches("single_transformer_blocks.0.proj_out_attn")
+    assert d.matches("single_transformer_blocks.37.proj_out_mlp")
+    assert not d.matches("single_transformer_blocks.0.proj_out")
+    assert default_spec("qwen_image").split_linears == ()
