@@ -74,8 +74,10 @@ def test_dtype_names_the_bias_not_the_weight():
 def test_unknown_compute_and_odd_k_are_refused():
     with pytest.raises(ValueError, match="fp8 compute"):
         Q.FP8Linear(128, 16, compute="torchao")
-    with pytest.raises(ValueError, match="multiple of 32"):
+    with pytest.raises(ValueError, match="multiple of 128"):
         Q.FP8Linear(40, 16, compute="dequant")
+    with pytest.raises(ValueError, match="multiple of 128"):
+        Q.FP8Linear(64, 8, compute="dequant")  # a multiple of 32 but not of 128
 
 
 # --------------------------------------------------------------- dequant at tp == 1

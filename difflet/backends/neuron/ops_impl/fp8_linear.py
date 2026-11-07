@@ -44,7 +44,7 @@ from difflet.backends.neuron.ops_impl.linear import (
     _reject_sequence_parallel,
     _split_evenly,
 )
-from difflet.quant.mx import BLOCK, FP8_DTYPE
+from difflet.quant.mx import BLOCK, FP8_DTYPE, LAYOUT_K
 from difflet.quant.spec import COMPUTE_MODES, QuantSpec
 
 
@@ -61,8 +61,10 @@ class _FP8LinearBase(nn.Module):
     def _init_tensors(self, out_local: int, in_local: int, bias: bool, *, dtype, device,
                       compute: str) -> None:
         self.compute = _check_compute(compute)
-        if in_local % BLOCK:
-            raise ValueError(f"mxfp8 needs in_features a multiple of {BLOCK}, got {in_local}")
+        # The per-rank K: a row-parallel layer is checked at the launch's tp, where it is built.
+        if in_local % LAYOUT_K:
+            raise ValueError(f"mxfp8 needs in_features a multiple of {LAYOUT_K} (the MX layout), "
+                             f"got {in_local}")
         # Never requires_grad: autograd has no float8 kernels, and this is inference.
         self.weight = nn.Parameter(
             torch.empty(out_local, in_local, dtype=FP8_DTYPE, device=device), requires_grad=False
