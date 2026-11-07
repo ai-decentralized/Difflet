@@ -29,7 +29,6 @@ def _args(**overrides):
         ({"shapes": "480x704x49,512x768x121"}, "--shapes with more than one shape"),
         ({"cp_degree": 2, "cp_mode": "ring"}, "--cp-mode ring"),
         ({"sp_enabled": True}, "--sp"),
-        ({"quant": "mxfp8"}, "--quant"),
     ],
 )
 def test_driver_lists_what_the_ranks_do_not_run(overrides, flag):
@@ -64,13 +63,6 @@ def test_rejection_exits_2_before_anything_launches(monkeypatch, capsys):
     with pytest.raises(SystemExit) as exc:
         orch.generate()
     assert exc.value.code == 2 and launched == []
-    # --quant passes the CLI's model check (QUANT_MODELS names LTX-2) but the driver does not
-    # carry it yet: refused here, not run as the bf16 DiT.
-    orch = cli.LTX2Orchestrator(_args(quant="mxfp8"))
-    with pytest.raises(SystemExit) as exc:
-        orch.generate()
-    assert exc.value.code == 2 and launched == []
-    assert "--quant" in capsys.readouterr().err
 
 
 def test_compile_on_neuron_is_one_generate_stage_on_tp_times_cfg_cores(monkeypatch):
@@ -204,3 +196,71 @@ def test_stage_dispatch_knows_ltx_2():
     from difflet.cli import stage
 
     assert stage._ORCHESTRATOR_MAP["Lightricks/LTX-2"].endswith("ltx_2.LTX2Orchestrator")
+
+
+def test_stage_and_dp_worker_lines_carry_quant():
+    """A stage launch or a DP worker that dropped --quant would run the bf16 DiT against the
+    fp8 stage key: both lines carry the flags, and only when given (a bf16 line is unchanged)."""
+    from difflet.cli.dp.router import worker_cli_args
+
+    args = _args(quant="mxfp8", quant_compute="dequant", dp=2)
+    stage = cli.LTX2Orchestrator(args)._shared_cli_args("generate", work_dir="/w")
+    assert stage[stage.index("--quant") + 1] == "mxfp8"
+    assert stage[stage.index("--quant-compute") + 1] == "dequant"
+    worker = worker_cli_args(args)
+    assert worker[worker.index("--quant") + 1] == "mxfp8"
+    assert worker[worker.index("--quant-compute") + 1] == "dequant"
+    for line in (cli.LTX2Orchestrator(_args())._shared_cli_args("generate", work_dir="/w"),
+                 worker_cli_args(_args())):
+        assert "--quant" not in line and "--quant-compute" not in line
+
+
+def test_quant_is_prepared_before_the_fit_checks_and_written_on_compile_only(monkeypatch,
+                                                                              tmp_path):
+    """The quantized directory is resolved (written by ``compile``, only read by ``generate``)
+    before the DiT fit check and the text encoder placement, so both count the fp8 bytes, and
+    before any rank starts, so none writes."""
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path / "cache"))
+    monkeypatch.setattr(cli.runner, "run_stage", lambda *a, **k: None)
+    monkeypatch.setattr(cli.LTX2Orchestrator, "_decode_on_host", lambda self, work_dir: None)
+    calls = []
+    monkeypatch.setattr(cli.LTX2Orchestrator, "_prepare_quant",
+                        lambda self, *, create: calls.append(("prepare_quant", create)))
+    monkeypatch.setattr(cli.LTX2Orchestrator, "_check_dit_fits",
+                        lambda self: calls.append(("check_dit_fits", None)))
+    monkeypatch.setattr(cli.LTX2Orchestrator, "_place_text_encoder",
+                        lambda self: calls.append(("place_text_encoder", None)))
+    cli.LTX2Orchestrator(_args(quant="mxfp8")).compile()
+    assert calls == [("prepare_quant", True), ("check_dit_fits", None),
+                     ("place_text_encoder", None)]
+    calls.clear()
+    cli.LTX2Orchestrator(_args(quant="mxfp8", work_dir=str(tmp_path / "w"))).generate()
+    assert calls == [("prepare_quant", False), ("check_dit_fits", None),
+                     ("place_text_encoder", None)]
+
+
+def test_fit_checks_count_the_quantized_directory_as_stored(monkeypatch, tmp_path, capsys):
+    """With --quant the DiT is counted as its quantized directory stores it (fp8 weights), not
+    as the bf16 source: the source refuses tp1 (35 GiB per core) and moves Gemma-3 to the host
+    at tp2; a directory of 2 KB passes both checks."""
+    _header_only_checkpoint(tmp_path / "transformer", "w", 18_876_000_000)
+    _header_only_checkpoint(tmp_path / "text_encoder", "language_model.model.w", 11_770_000_000)
+    _header_only_checkpoint(tmp_path / "quantized", "w", 1_000)
+    monkeypatch.setenv("DIFFLET_NEURON_HBM_GIB", "24")
+    monkeypatch.setattr(cli.LTX2Orchestrator, "_model_dir", lambda self: str(tmp_path))
+    orch = cli.LTX2Orchestrator(_args(tp_degree=1, quant="mxfp8"))
+    with pytest.raises(SystemExit) as exc:
+        orch._check_dit_fits()
+    assert exc.value.code == 2
+    orch._quantized_dit = str(tmp_path / "quantized")
+    orch._check_dit_fits()
+    orch = cli.LTX2Orchestrator(_args(tp_degree=2, quant="mxfp8"))
+    orch._place_text_encoder()
+    assert orch.args.device_text_encoder is False
+    assert "encoding on rank 0's host instead" in capsys.readouterr().out
+    orch = cli.LTX2Orchestrator(_args(tp_degree=2, quant="mxfp8"))
+    orch._quantized_dit = str(tmp_path / "quantized")
+    orch._place_text_encoder()
+    assert orch.args.device_text_encoder is True
+    assert capsys.readouterr().out == ""
