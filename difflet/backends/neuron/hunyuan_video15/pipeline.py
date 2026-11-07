@@ -31,8 +31,8 @@ import os
 import numpy as np
 import torch
 
+from difflet.backends.neuron.core.quant import resolve_quant
 from difflet.backends.neuron.core.weights_bf16 import resolve_component_dir
-
 from difflet.backends.neuron.hunyuan_video15.transformer import (
     VAE_SPATIAL,
     VAE_TEMPORAL,
@@ -58,23 +58,41 @@ def load_guidance(model_path: str, guidance_scale: float | None = None) -> float
 
 
 class TorchNeuronHunyuanVideo15Pipeline:
-    """``load()``, then ``__call__(prompt_embeds, ..., negative_prompt_embeds, ...) -> latents``."""
+    """``load()``, then ``__call__(prompt_embeds, ..., negative_prompt_embeds, ...) -> latents``.
+
+    ``quant`` (``"mxfp8"``, a ``QuantSpec`` or its dict) runs the DiT in MXFP8 from a quantized
+    directory, the one ``quant_checkpoint`` names or else the one ``difflet compile`` wrote
+    under the compile cache (``core/quant.resolve_quant``). The hub DiT is fp32 and compile
+    quantizes the bf16 copy it makes, so the directory is resolved from the directory the DiT
+    would load in bf16 (the copy when it exists): a host without the copy resolves from the
+    fp32 one, which nothing quantized, and is refused naming ``difflet compile``. ``"mxfp8"``
+    is the default table at the launch's tp, since the MLPs' ``net.2`` are row-parallel,
+    quantized per rank K range.
+    """
 
     def __init__(self, *, model_path, parallel=None, height: int = 480, width: int = 848, num_frames: int = 121,
                  dtype=torch.bfloat16, exec_mode: str | None = None, device="neuron",
                  guidance_scale: float | None = None, text_seq_len: int = 1000, text_2_seq_len: int = 256,
                  image_tokens: int = 729, teacache_cadence: int | None = None,
                  teacache_online_delta_alpha: float | None = None, teacache_speedup: float | None = None,
-                 teacache_calibration_path: str | None = None) -> None:
+                 teacache_calibration_path: str | None = None, quant=None,
+                 quant_checkpoint: str | None = None) -> None:
         self.model_path = str(model_path)
         self.height, self.width, self.num_frames = int(height), int(width), int(num_frames)
         self.dtype = dtype
         self.guidance_scale = load_guidance(self.model_path, guidance_scale)
+        tp = int(getattr(parallel, "tp_degree", 1) or 1)
+        self.quant, dit_path = resolve_quant(
+            "hunyuan_video_15", quant, quant_checkpoint,
+            resolve_component_dir(os.path.join(self.model_path, "transformer"), dtype),
+            tp_degree=tp)
+        #: The DiT's quantized directory, None without ``quant``.
+        self.quantized_dit: str | None = dit_path if self.quant is not None else None
         self.dit = NeuronHunyuanVideo15TransformerApplication(
-            model_path=resolve_component_dir(os.path.join(self.model_path, "transformer"), dtype),  # bf16 copy if made
-            height=height, width=width,
+            model_path=dit_path, height=height, width=width,
             num_frames=num_frames, text_seq_len=text_seq_len, text_2_seq_len=text_2_seq_len,
-            image_tokens=image_tokens, parallel=parallel, dtype=dtype, exec_mode=exec_mode, device=device)
+            image_tokens=image_tokens, parallel=parallel, dtype=dtype, exec_mode=exec_mode,
+            device=device, quant=self.quant)
         if self.dit.cfg > 1 and self.guidance_scale is None:
             raise ValueError("CFG parallelism needs classifier-free guidance (the guider is disabled)")
         self.scheduler = None
