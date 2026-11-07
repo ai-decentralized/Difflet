@@ -20,10 +20,11 @@ Two compute paths, chosen by ``compute``:
 Decision D42 (``core/config_checks.require_bf16_on_device``) is untouched: activations between
 layers and the row-parallel all-reduce stay bf16; fp8 exists only inside the matmul.
 
-Why the fp8 weight is a ``Parameter`` and the scales are buffers: the module is built on
-``meta`` and ``materialize_meta_`` (``_torch_megatron/weights.py``) gives every meta parameter
-storage in the application dtype, except float8 parameters, which keep theirs; a meta buffer
-would keep its dtype but ``build_on_meta`` makes buffers real anyway (they are small).
+Why the fp8 weight is a ``Parameter`` and the scales are buffers: the twins are created on
+their linear's device, ``meta`` under ``build_on_meta`` (which leaves buffers as they are made),
+and ``materialize_meta_`` (``_torch_megatron/weights.py``) gives a meta parameter storage in
+the application dtype unless it is float8, which keeps its own; a meta buffer keeps its dtype,
+so the uint8 scales get their storage at the load as they are.
 """
 
 from __future__ import annotations

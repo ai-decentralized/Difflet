@@ -139,8 +139,10 @@ class TorchNeuronApplicationBase(torch.nn.Module):
     the quantized checkpoint directory (``difflet/quant/checkpoint.py``) whose tensors those
     layers hold, and prepares them after it (``_after_load``). A model opts in by declaring
     ``quant_model``; one without is refused a spec at construction rather than run as the
-    bf16 module against an fp8 checkpoint. Trainium3 and compile mode only (decision D43,
-    ``require_fp8_supported``); the activations stay bf16 (D42).
+    bf16 module against an fp8 checkpoint, as is a spec quantized for another tp than the
+    launch's (its row-parallel weights are grouped for that tp's shards). Trainium3 and
+    compile mode only (decision D43, ``require_fp8_supported``); the activations stay bf16
+    (D42).
     """
 
     #: Attributes of the built module whose children are compiled one region each.
@@ -180,14 +182,28 @@ class TorchNeuronApplicationBase(torch.nn.Module):
         self.device = _resolve_device(device)
         if isinstance(quant, dict):
             quant = QuantSpec.from_dict(quant)
+        if quant is not None and not isinstance(quant, QuantSpec):
+            # The pipeline application's "mxfp8" spelling is resolved to a spec there; anything
+            # else stored here would fail only in load's collective phase, naming no cause.
+            raise TypeError(
+                f"{type(self).__name__}: quant must be a QuantSpec or its dict, got "
+                f"{type(quant).__name__} (the pipeline application resolves 'mxfp8' to a spec)"
+            )
         #: The MXFP8 spec ``load`` applies, or None.
         self.quant: QuantSpec | None = quant
         if quant is not None:
             if self.quant_model is None:
                 raise NotImplementedError(f"{type(self).__name__} has no MXFP8 target layers")
-            require_fp8_supported(
-                self.quant_label or self.quant_model, self.device.type, self.exec_mode
-            )
+            label = self.quant_label or self.quant_model
+            require_fp8_supported(label, self.device.type, self.exec_mode)
+            if int(quant.tp_degree) != int(self.parallel.tp_degree):
+                # A row-parallel weight is quantized per rank K range: another tp's directory
+                # holds shape-compatible slices whose scales group the wrong K blocks.
+                raise ValueError(
+                    f"the {label} FP8 DiT spec was quantized for tp_degree={quant.tp_degree} "
+                    f"but this launch has tp_degree={self.parallel.tp_degree} (row-parallel "
+                    "weights are quantized per rank K range)"
+                )
         #: The module names ``load`` quantized (empty without ``quant``).
         self.quantized_linears: list[str] = []
         self.kwargs = dict(kwargs)
