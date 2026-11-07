@@ -20,10 +20,12 @@ self-attention, a text cross-attention and a 4x MLP (``ff`` 16384 wide, ``audio_
 one cross-attention each way between the streams. The targets are the linears whose input is
 the video or the text stream: the video ``attn1`` / ``attn2`` q/k/v, the video queries of
 ``audio_to_video_attn``, the video keys and values of ``video_to_audio_attn``, and the video
-MLP. The audio-input linears (``audio_attn1``, ``audio_attn2``, ``audio_ff``, the audio keys and
-values of ``audio_to_video_attn``, the audio queries of ``video_to_audio_attn``) stay bf16 by
-default: the audio stream is 126 tokens at the default shape, too few rows for the kernel to
-win anything, and a device variant through ``DIFFLET_QUANT_TARGETS`` decides them. Every
+MLP. The audio stream's linears stay bf16 by default: ``audio_attn1``, ``audio_attn2.to_q``,
+``audio_ff``, the audio keys and values of ``audio_to_video_attn`` and the audio queries of
+``video_to_audio_attn`` are fed by the audio stream, 126 tokens at the default shape, too few
+rows for the kernel to win anything; ``audio_attn2.to_k`` / ``to_v`` are fed by the text stream
+(the audio caption projection: 1024 rows, K 2048) but kept with the audio stream, so a device
+variant through ``DIFFLET_QUANT_TARGETS`` decides that stream as a whole. Every
 ``to_out.0`` stays bf16 as above; the per-block modulation is a parameter table, not a linear;
 the embedders, ``proj_in`` / ``audio_proj_in``, the caption projections, the ``av_cross_attn_*``
 scale-shift and gate embedders and ``proj_out`` / ``audio_proj_out`` are bf16 top-level layers.
@@ -116,8 +118,9 @@ LTX_2_TARGETS: tuple[str, ...] = (
 )
 
 #: LTX-2 modules a reader may expect quantized that are deliberately not: the output
-#: projections, the audio-input linears (a ``DIFFLET_QUANT_TARGETS`` variant decides them on
-#: the device) and the bf16 top level.
+#: projections, the audio stream's linears (``audio_attn2.to_k`` / ``to_v`` are text-fed but
+#: kept with the stream; a ``DIFFLET_QUANT_TARGETS`` variant decides it on the device) and the
+#: bf16 top level.
 LTX_2_KEPT_BF16: tuple[str, ...] = (
     rf"{_BLOCK}\.{_LTX_2_ATTNS}\.to_out\.0",
     rf"{_BLOCK}\.(audio_attn1|audio_attn2)\.(to_q|to_k|to_v)",

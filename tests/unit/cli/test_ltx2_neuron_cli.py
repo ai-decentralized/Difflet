@@ -29,6 +29,7 @@ def _args(**overrides):
         ({"shapes": "480x704x49,512x768x121"}, "--shapes with more than one shape"),
         ({"cp_degree": 2, "cp_mode": "ring"}, "--cp-mode ring"),
         ({"sp_enabled": True}, "--sp"),
+        ({"quant": "mxfp8"}, "--quant"),
     ],
 )
 def test_driver_lists_what_the_ranks_do_not_run(overrides, flag):
@@ -63,6 +64,13 @@ def test_rejection_exits_2_before_anything_launches(monkeypatch, capsys):
     with pytest.raises(SystemExit) as exc:
         orch.generate()
     assert exc.value.code == 2 and launched == []
+    # --quant passes the CLI's model check (QUANT_MODELS names LTX-2) but the driver does not
+    # carry it yet: refused here, not run as the bf16 DiT.
+    orch = cli.LTX2Orchestrator(_args(quant="mxfp8"))
+    with pytest.raises(SystemExit) as exc:
+        orch.generate()
+    assert exc.value.code == 2 and launched == []
+    assert "--quant" in capsys.readouterr().err
 
 
 def test_compile_on_neuron_is_one_generate_stage_on_tp_times_cfg_cores(monkeypatch):

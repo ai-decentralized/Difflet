@@ -138,13 +138,18 @@ def _torchrun_application_kwargs(args: argparse.Namespace) -> dict:
 
 def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
     """The options the torchrun (neuron) ranks do not run, as the command line names them:
-    every torchrun backend's (TeaCache), several --shapes (one static shape per process), and
-    the parallel modes LTX-2 has no implementation of (--cp-mode ring, --sp). Torch-free."""
+    every torchrun backend's (TeaCache), several --shapes (one static shape per process), the
+    parallel modes LTX-2 has no implementation of (--cp-mode ring, --sp), and --quant: the CLI's
+    model check admits it (``QUANT_MODELS`` names LTX-2 for its target table) but this driver
+    does not yet write the quantized directory, forward the flag to its stage or key the cache
+    on it, so a launch would run the bf16 DiT without a word. Torch-free."""
     found = torchrun_unsupported_options(args)
     if (getattr(args, "cp_degree", None) or 1) > 1 and getattr(args, "cp_mode", None) == "ring":
         found.append("--cp-mode ring")
     if getattr(args, "sp_enabled", False):
         found.append("--sp")
+    if getattr(args, "quant", None) is not None:
+        found.append("--quant")
     return found
 
 
