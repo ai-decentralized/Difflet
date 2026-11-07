@@ -245,6 +245,25 @@ def test_quantize_module_refuses_a_spec_matching_nothing():
         Q.quantize_module_(_Model(), QuantSpec(targets=(r"nothing",)))
 
 
+def test_quantize_module_matches_through_a_key_function():
+    """A model whose module names differ from its checkpoint keys (Wan's ``ffn.net_in`` is
+    ``ffn.net.0.proj`` on disk) matches the spec through the key function; the returned names
+    are still the module's."""
+    module = torch.nn.Module()
+    module.net_in = torch.nn.Linear(128, 16)
+    spec = QuantSpec(targets=(r"net\.0\.proj",), compute="dequant")
+    rename = lambda name: name.replace("net_in", "net.0.proj")
+    assert Q.quantize_module_(module, spec, key_fn=rename) == ["net_in"]
+    assert isinstance(module.net_in, Q.FP8Linear)
+
+
+def test_quantize_module_names_the_layer_whose_k_is_wrong():
+    module = torch.nn.Module()
+    module.proj = torch.nn.Linear(64, 16)
+    with pytest.raises(ValueError, match=r"proj: mxfp8 needs in_features a multiple of 128"):
+        Q.quantize_module_(module, QuantSpec(targets=("proj",), compute="dequant"))
+
+
 # ------------------------------------------------ meta materialisation and bytes
 
 
