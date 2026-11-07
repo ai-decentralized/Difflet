@@ -3,11 +3,18 @@
 from __future__ import annotations
 
 import dataclasses
+import re
 
 import pytest
 
 from difflet.quant.spec import FORMAT, QUANT_SCHEMA, QuantSpec, quant_cache_fields
-from difflet.quant.targets import QWEN_IMAGE_KEPT_BF16, QWEN_IMAGE_TARGETS, default_spec, targets_for
+from difflet.quant.targets import (
+    QWEN_IMAGE_KEPT_BF16,
+    QWEN_IMAGE_TARGETS,
+    SINGLE_BLOCK_SPLIT_LINEARS,
+    default_spec,
+    targets_for,
+)
 
 
 def test_default_qwen_spec_is_mxfp8_on_the_kernel():
@@ -131,6 +138,31 @@ def test_weights_identity_ignores_the_compute_path():
     assert a.weights_identity() == b.weights_identity()
     assert a.cache_fields() != b.cache_fields()
     assert a.weights_identity() != dataclasses.replace(a, tp_degree=2).weights_identity()
+
+
+def test_split_linears_stay_out_of_every_unsplit_spec():
+    """A spec without splits serialises and identifies its weights as before the field existed,
+    so the Qwen-Image, LTX-2 and Wan directories keep their digests; a split changes the bytes,
+    not the compiled graph, so it enters the weights identity and no cache field."""
+    for model in ("qwen_image", "ltx_2", "wan"):
+        spec = default_spec(model, tp_degree=4)
+        assert spec.split_linears == ()
+        assert "split_linears" not in spec.to_dict()
+        assert "quant_split_linears" not in spec.weights_identity()
+    spec = QuantSpec(targets=(r"single_transformer_blocks\.\d+\.proj_mlp",),
+                     split_linears=SINGLE_BLOCK_SPLIT_LINEARS)
+    assert spec.to_dict()["split_linears"] == list(SINGLE_BLOCK_SPLIT_LINEARS)
+    assert QuantSpec.from_dict(spec.to_dict()) == spec
+    assert spec.is_split("transformer.single_transformer_blocks.3.proj_out")
+    assert not spec.is_split("single_transformer_blocks.3.proj_out_attn")
+    unsplit = dataclasses.replace(spec, split_linears=())
+    assert spec.weights_identity() != unsplit.weights_identity()
+    assert spec.cache_fields() == unsplit.cache_fields()
+    assert spec.unmatched_splits(["single_transformer_blocks.0.proj_out"]) == []
+    assert spec.unmatched_splits(["single_transformer_blocks.0.proj_out_attn"]) == list(
+        SINGLE_BLOCK_SPLIT_LINEARS)
+    with pytest.raises(re.error):
+        QuantSpec(targets=QWEN_IMAGE_TARGETS, split_linears=("(",))
 
 
 @pytest.mark.parametrize("name", [

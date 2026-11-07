@@ -92,6 +92,12 @@ QWEN_IMAGE_ROW_PARALLEL: tuple[str, ...] = (
 # writer to slice the block scales).
 _SINGLE = r"single_transformer_blocks\.\d+"
 
+#: FLUX's and HunyuanVideo's single-stream ``proj_out``: one checkpoint ``Linear(dim + mlp_dim,
+#: dim)`` over ``cat([attn, mlp])`` that the neuron models run as two row-parallel linears, each
+#: on its own input sharding. A spec that splits it stores ``proj_out_attn`` / ``proj_out_mlp``
+#: as tensors of their own (``checkpoint.py``), so each half can be quantized per rank K range.
+SINGLE_BLOCK_SPLIT_LINEARS: tuple[str, ...] = (rf"{_SINGLE}\.proj_out",)
+
 FLUX_TARGETS: tuple[str, ...] = (
     rf"{_BLOCK}\.attn\.(to_q|to_k|to_v|add_q_proj|add_k_proj|add_v_proj)",
     rf"{_BLOCK}\.(ff|ff_context)\.net\.0\.proj",
@@ -240,6 +246,7 @@ __all__ = [
     "QWEN_IMAGE_ROW_PARALLEL",
     "QWEN_IMAGE_TARGETS",
     "ROW_PARALLEL_BY_MODEL",
+    "SINGLE_BLOCK_SPLIT_LINEARS",
     "TARGETS_BY_MODEL",
     "WAN_KEPT_BF16",
     "WAN_ROW_PARALLEL",

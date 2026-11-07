@@ -22,11 +22,13 @@ from difflet.pipeline.parallel_config import DiffletParallelConfig  # noqa: E402
 from difflet.quant import mx  # noqa: E402
 from difflet.quant.checkpoint import prepare_quantized_checkpoint, read_manifest  # noqa: E402
 from difflet.quant.targets import default_spec  # noqa: E402
-from tests.unit.backends._neuron_flux_toy import TINY, TINY_SHAPE, first, tiny_inputs  # noqa: E402
-
-#: The toy's dims with a 128-wide inner dimension: the MX block layout wants K in multiples of
-#: 128 (``difflet/quant/mx.swizzle_perm``), the toy's 32 is below that.
-TINY_FP8 = {**TINY, "attention_head_dim": 32, "axes_dims_rope": (8, 12, 12)}
+from tests.unit.backends._neuron_flux_toy import (  # noqa: E402
+    TINY,
+    TINY_FP8,
+    TINY_SHAPE,
+    first,
+    tiny_inputs,
+)
 
 # per dual block: q/k/v, add_q/k/v, ff up/down, ff_context up/down = 10; per single block: q/k/v,
 # proj_mlp = 4 (to_out, to_add_out, proj_out stay bf16)
