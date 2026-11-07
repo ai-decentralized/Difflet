@@ -388,9 +388,10 @@ class QwenImageOrchestrator(ModelOrchestrator):
     def _prepare_quant(self, *, create: bool) -> None:
         """With --quant on a torchrun backend, resolve the quantized DiT directory under the
         compile cache (``prepare_quant``), writing it when ``create`` (``compile``; ``generate``
-        only resolves and refuses with the fix when it is missing). Before ``_check_dit_fits``
-        so the HBM estimate counts fp8 bytes, and before any rank starts so none writes; the
-        compile cache is rooted at --cache-dir first so the directory lands under it."""
+        only resolves and refuses with the fix when it is missing, through ``refuse`` as this
+        driver's other refusals). Before ``_check_dit_fits`` so the HBM estimate counts fp8
+        bytes, and before any rank starts so none writes; the compile cache is rooted at
+        --cache-dir first so the directory lands under it."""
         if getattr(self.args, "quant", None) is None or torchrun_backend() is None:
             return
         from difflet.pipeline.path_resolver import resolve_model_path
@@ -398,7 +399,8 @@ class QwenImageOrchestrator(ModelOrchestrator):
         root_compile_cache_at_cache_dir(getattr(self.args, "cache_dir", None), tag="qwen_image")
         model_dir = _local_snapshot(lambda: self._model_dir(self.args, resolve_model_path))
         sources = {"transformer": str(Path(model_dir) / "transformer")} if model_dir else {}
-        prepared = prepare_quant(self.args, sources, create=create, tag="qwen_image")
+        prepared = prepare_quant(self.args, sources, create=create, tag="qwen_image",
+                                 fail=refuse)
         if prepared is not None:
             self._quantized_dit = prepared["transformer"]
 

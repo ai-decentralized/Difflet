@@ -143,7 +143,8 @@ class FluxOrchestrator(ModelOrchestrator):
     def _prepare_quant(self, *, create: bool) -> None:
         """With --quant, resolve the quantized DiT directory under the compile cache
         (``prepare_quant``), writing it when ``create`` (``compile``; ``generate`` only resolves
-        and refuses with the fix when it is missing), before any rank starts so none writes."""
+        and refuses with the fix when it is missing: exit 1, as this driver's other checks),
+        before any rank starts so none writes."""
         if getattr(self.args, "quant", None) is None:
             return
         from difflet.pipeline.path_resolver import resolve_model_path
