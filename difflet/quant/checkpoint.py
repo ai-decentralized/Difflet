@@ -19,6 +19,10 @@ Layout of ``<cache>/quantized/<source label>/<component>/mxfp8-<digest>/``:
   :func:`check_quantized_dir` refuses a directory whose manifest does not match what the caller
   asks for.
 
+A spec with a target pattern that matches no 2-D weight of the source is refused before anything
+is written, naming the patterns (:func:`write_quantized_dir`): the directory would hold less than
+the spec claims.
+
 The digest hashes the spec's weights identity and the source fingerprint (file names, sizes and
 Hugging Face blob names, which are content hashes), so another checkpoint, another target set
 or another TP degree is another directory.
@@ -99,21 +103,43 @@ def _tensor_key_prefix(key: str) -> str | None:
     return key[: -len(".weight")] if key.endswith(".weight") else None
 
 
+def _keys_by_file(model_dir: Path) -> dict[str, list[str]]:
+    """The component's tensor keys by the safetensors file holding them (the index's, when
+    there is one)."""
+    from difflet.backends._torch_megatron.checkpoint import build_weight_map
+
+    by_file: dict[str, list[str]] = {}
+    for key, path in build_weight_map(model_dir).items():
+        by_file.setdefault(path, []).append(key)
+    return by_file
+
+
 def iter_source_tensors(model_dir: Path) -> Iterator[tuple[str, torch.Tensor, str]]:
     """``(key, tensor, file name)`` for every tensor of the component, file by file, in the
     index's order when there is one."""
     from safetensors import safe_open
 
-    from difflet.backends._torch_megatron.checkpoint import build_weight_map
-
-    weight_map = build_weight_map(model_dir)
-    by_file: dict[str, list[str]] = {}
-    for key, path in weight_map.items():
-        by_file.setdefault(path, []).append(key)
+    by_file = _keys_by_file(model_dir)
     for path in sorted(by_file):
         with safe_open(path, framework="pt") as handle:
             for key in sorted(by_file[path]):
                 yield key, handle.get_tensor(key), Path(path).name
+
+
+def _quantizable_prefixes(model_dir: Path) -> list[str]:
+    """The key prefixes ``quantize_tensors`` can quantize: every 2-D ``<prefix>.weight`` of the
+    component, from the safetensors headers alone (no tensor data is read)."""
+    from safetensors import safe_open
+
+    by_file = _keys_by_file(model_dir)
+    prefixes: list[str] = []
+    for path in sorted(by_file):
+        with safe_open(path, framework="pt") as handle:
+            for key in sorted(by_file[path]):
+                prefix = _tensor_key_prefix(key)
+                if prefix is not None and len(handle.get_slice(key).get_shape()) == 2:
+                    prefixes.append(prefix)
+    return prefixes
 
 
 def quantize_tensors(model_dir: Path, spec: QuantSpec) -> Iterator[tuple[str, torch.Tensor, bool]]:
@@ -208,6 +234,14 @@ def write_quantized_dir(model_dir: str | Path, out_dir: str | Path, spec: QuantS
     model_dir, out_dir = Path(model_dir), Path(out_dir)
     if (out_dir / MANIFEST).exists():
         raise FileExistsError(f"{out_dir} already holds a quantized checkpoint")
+    dead = spec.unmatched_targets(_quantizable_prefixes(model_dir))
+    if dead:
+        # Refused here, on the driver, before anything is quantized: the directory would hold
+        # less than the spec claims, and every rank would refuse it (``quantize_module_``) only
+        # after the driver spent minutes writing it. The patterns verbatim, separated as
+        # ``DIFFLET_QUANT_TARGETS`` separates them.
+        raise ValueError(f"target patterns match no linear weight in {model_dir}: "
+                         f"{'; '.join(dead)}")
     tmp = out_dir.with_name(f".{out_dir.name}.tmp-{os.getpid()}")
     if tmp.exists():
         shutil.rmtree(tmp)

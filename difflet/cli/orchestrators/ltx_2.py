@@ -26,9 +26,10 @@ connectors on rank 0's host (``--host-text-encoder`` keeps it on rank 0's host);
 it to the host itself when it cannot fit, at tp2 (``_place_text_encoder``).
 --quant mxfp8 (``difflet/cli/quant.py``): ``compile`` writes the quantized DiT directory under
 the compile cache and ``generate`` only resolves it (``_prepare_quant``), before the fit checks,
-which count that directory as stored, and before any rank starts; the stage line and the DP
-workers carry the flags, the generate stage's key names the spec, and the ranks build the
-application with it (``_torchrun_application_kwargs``).
+which count that directory as stored, and before any rank starts; weights not yet downloaded
+and a target pattern matching no linear weight are refused there, on the driver. The stage
+line and the DP workers carry the flags, the generate stage's key names the spec, and the ranks
+build the application with it (``_torchrun_application_kwargs``).
 """
 
 from __future__ import annotations
@@ -71,6 +72,8 @@ from difflet.cli.quant import prepare_quant, quant_cli_args, quant_spec
 from difflet.quant.spec import quant_cache_fields
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import torch
 
 _HF_MODEL_ID = "Lightricks/LTX-2"
@@ -438,18 +441,27 @@ class LTX2Orchestrator(ModelOrchestrator):
         """With --quant, resolve the quantized DiT directory under the compile cache
         (``prepare_quant``), writing it when ``create`` (``compile``; ``generate`` only resolves
         and refuses with the fix when it is missing, through ``refuse`` as this driver's other
-        refusals). Before ``_check_dit_fits`` and ``_place_text_encoder`` so the HBM estimates
-        count fp8 bytes, and before any rank starts so none writes; ``_prepare_torchrun`` roots
-        the compile cache at --cache-dir first so the directory lands under it."""
+        refusals; a target pattern matching no linear weight is refused by the writer, naming
+        it, before anything is quantized). Before ``_check_dit_fits`` and
+        ``_place_text_encoder`` so the HBM estimates count fp8 bytes, and before any rank
+        starts so none writes; ``_prepare_torchrun`` roots the compile cache at --cache-dir
+        first so the directory lands under it. Weights that are not local yet are refused here,
+        naming ``difflet download``: the bf16 path leaves them to the ranks, but this step needs
+        them on the driver (to write the directory, or to resolve it and count its bytes), and
+        torchrun would otherwise start tp x cp ranks that each report the missing weights."""
         if getattr(self.args, "quant", None) is None:
             return
         model_dir = _local_snapshot(self._model_dir)
-        sources = {"transformer": str(Path(model_dir) / "transformer")} if model_dir else {}
+        if model_dir is None:
+            refuse(f"--quant: the {_HF_MODEL_ID} weights are not local; run `difflet download "
+                   f"--model-id {_HF_MODEL_ID}` first")
+        sources = {"transformer": str(Path(model_dir) / "transformer")}
         prepared = prepare_quant(self.args, sources, create=create, tag="ltx_2", fail=refuse)
         if prepared is not None:
             self._quantized_dit = prepared["transformer"]
 
-    def _fits_as_stored(self, fits):
+    def _fits_as_stored(self, fits: Callable[..., tuple[bool, int, int]]
+                        ) -> Callable[..., tuple[bool, int, int]]:
         """``fits`` (an ``ltx_2/hbm.py`` estimate) reading the quantized DiT directory as stored
         (fp8 weights and block scales) once ``_prepare_quant`` resolved one: the bf16 source's
         count would refuse a tp the quantized DiT fits."""
@@ -465,7 +477,8 @@ class LTX2Orchestrator(ModelOrchestrator):
         from difflet.backends.neuron.ltx_2.hbm import dit_fits
 
         refuse_dit_overflow("LTX-2", self._model_dir, self._fits_as_stored(dit_fits),
-                            self.args.tp_degree or 4)
+                            self.args.tp_degree or 4,
+                            stored="bf16" if self._quantized_dit is None else "MXFP8")
 
     def _place_text_encoder(self) -> None:
         """Put the Gemma-3 encode on the device (``_DEVICE_TEXT_ENCODER_DEFAULT``) unless

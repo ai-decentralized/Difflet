@@ -126,7 +126,9 @@ def prepare_quant(args: argparse.Namespace, component_dirs: dict[str, str], *, c
     driver's does). One line per component, ``[tag] MXFP8 name (compute): path``.
 
     A refusal (a stale or, on ``generate``, missing directory; a component without safetensors,
-    a partial download) names the component and goes through ``fail``: ``_fail`` (exit 1)
+    a partial download; a target pattern matching no linear weight of the component, which the
+    writer names before quantizing anything) names the component and goes through ``fail``:
+    ``_fail`` (exit 1)
     unless the driver passes the helper its other refusals use (``refuse``, exit 2), so a
     refused ``--quant`` exits the way the rest of that driver's refusals do.
 

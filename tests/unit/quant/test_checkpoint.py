@@ -167,6 +167,26 @@ def test_a_target_whose_per_rank_k_has_no_layout_is_refused_by_name(tmp_path):
     write_quantized_dir(src, tmp_path / "tp1", dataclasses.replace(row, tp_degree=1))
 
 
+def test_a_target_pattern_that_matches_no_linear_weight_is_refused_before_writing(tiny, tmp_path):
+    """A dead pattern (a ``DIFFLET_QUANT_TARGETS`` typo) is refused by name, verbatim, before
+    anything is quantized or written: the directory would otherwise hold less than the spec
+    claims, and every rank would refuse it (``quantize_module_``) only after the driver spent
+    minutes writing it. A pattern that matches only a 1-D weight (a norm) is dead too: the
+    writer quantizes 2-D weights, the ranks their linears."""
+    spec = tiny["spec"]
+    for dead in (r"transformer_blocks\.\d+\.attn\.to_qkv", r"transformer_blocks\.\d+\.attn\.norm_q"):
+        with pytest.raises(ValueError, match="match no linear weight") as exc:
+            write_quantized_dir(tiny["transformer_dir"], tmp_path / "out",
+                                dataclasses.replace(spec, targets=(*spec.targets, dead)))
+        assert str(exc.value).endswith(f"{tiny['transformer_dir']}: {dead}")
+        assert list(tmp_path.iterdir()) == []  # nothing written, no temporary sibling
+    both = (r"transformer_blocks\.\d+\.attn\.to_qkv", r"transformer_blocks\.\d+\.attn\.norm_q")
+    with pytest.raises(ValueError) as exc:  # every dead pattern, as the env var separates them
+        write_quantized_dir(tiny["transformer_dir"], tmp_path / "out",
+                            dataclasses.replace(spec, targets=both))
+    assert str(exc.value).endswith(f": {both[0]}; {both[1]}")
+
+
 def test_check_and_ensure(tiny, tmp_path):
     cache = tmp_path / "cache"
     spec, src = tiny["spec"], tiny["transformer_dir"]

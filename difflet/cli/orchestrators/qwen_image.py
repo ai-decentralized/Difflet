@@ -376,11 +376,13 @@ class QwenImageOrchestrator(ModelOrchestrator):
         from difflet.backends.neuron.qwen_image.hbm import dit_fits
         from difflet.pipeline.path_resolver import resolve_model_path
 
+        stored = "bf16"
         if self._quantized_dit is not None:
             # The FP8 DiT: the quantized directory's bytes as stored (fp8 weights), not bf16.
             dit_fits = functools.partial(dit_fits, dit_dir=self._quantized_dit)
+            stored = "MXFP8"
         refuse_dit_overflow("Qwen-Image", lambda: self._model_dir(self.args, resolve_model_path),
-                            dit_fits, self.args.tp_degree or 4)
+                            dit_fits, self.args.tp_degree or 4, stored=stored)
 
     #: The quantized DiT directory (--quant), once ``_prepare_quant`` resolved it.
     _quantized_dit: str | None = None
