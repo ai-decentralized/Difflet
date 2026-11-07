@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from typing import Callable
 
 from difflet.quant.spec import COMPUTE_MODES, DEFAULT_COMPUTE, FORMAT, QuantSpec
 from difflet.quant.targets import TARGETS_BY_MODEL, default_spec
@@ -88,10 +89,12 @@ def validate_quant(args: argparse.Namespace) -> None:
 QUANT_TARGETS_ENV = "DIFFLET_QUANT_TARGETS"
 
 
-def quant_spec(args: argparse.Namespace, *, tp_degree: int | None = None) -> QuantSpec | None:
+def quant_spec(args: argparse.Namespace, *, default_tp_degree: int = 4) -> QuantSpec | None:
     """The spec the flags describe, or None when off. The row-parallel weights are quantized
-    per rank K range, so the spec carries the tp the launch uses: ``--tp-degree`` or 4, unless
-    the driver passes ``tp_degree`` (one whose default tp is not 4 passes its own)."""
+    per rank K range, so the spec carries the tp the launch uses: ``--tp-degree``, else
+    ``default_tp_degree`` (a driver whose default tp is not 4 passes its own). The default is a
+    fallback, never an override: the flag wins on the driver as it does on the stage line the
+    driver launches, so both sides build the same spec."""
     quant = getattr(args, "quant", None)
     if quant is None:
         return None
@@ -99,9 +102,7 @@ def quant_spec(args: argparse.Namespace, *, tp_degree: int | None = None) -> Qua
     if model not in TARGETS_BY_MODEL:
         raise ValueError(f"no MXFP8 targets for {model}")
     compute = getattr(args, "quant_compute", None) or DEFAULT_COMPUTE
-    if tp_degree is None:
-        tp_degree = getattr(args, "tp_degree", None) or 4
-    tp = int(tp_degree)
+    tp = int(getattr(args, "tp_degree", None) or default_tp_degree)
     overrides = {}
     targets = os.environ.get(QUANT_TARGETS_ENV)
     if targets:
@@ -113,19 +114,26 @@ def quant_spec(args: argparse.Namespace, *, tp_degree: int | None = None) -> Qua
 
 
 def prepare_quant(args: argparse.Namespace, component_dirs: dict[str, str], *, create: bool,
-                  tag: str, tp_degree: int | None = None) -> dict[str, str] | None:
+                  tag: str, default_tp_degree: int = 4,
+                  fail: Callable[[str], None] = _fail) -> dict[str, str] | None:
     """The driver's ``--quant`` step, before any rank starts: for every ``name -> source_dir``
     (a diffusers component directory, ``transformer``), the quantized directory under the
     compile cache as ``name -> path``, written when ``create`` (``compile``) and only resolved
     otherwise (``generate``: a missing or stale one is refused with the fix, so no rank writes).
-    Every rank resolves it again, read only, from the spec the stage flags carry. One line per
-    component, ``[tag] MXFP8 name (compute): path``.
+    Every rank resolves it again, read only, from the spec the stage flags carry, so the stage
+    line names the tp this step quantized for (``--tp-degree``, flag or default, as every
+    driver's does). One line per component, ``[tag] MXFP8 name (compute): path``.
+
+    A refusal (a stale or, on ``generate``, missing directory; a component without safetensors,
+    a partial download) names the component and goes through ``fail``: ``_fail`` (exit 1)
+    unless the driver passes the helper its other refusals use (``refuse``, exit 2), so a
+    refused ``--quant`` exits the way the rest of that driver's refusals do.
 
     None when ``--quant`` is off, and None without a line when no source directory is there
     (none given, or one missing: the weights are not downloaded yet, and the ranks report
     that). The trace-cache choice is made before that, so the ranks inherit it either way.
     """
-    spec = quant_spec(args, tp_degree=tp_degree)
+    spec = quant_spec(args, default_tp_degree=default_tp_degree)
     if spec is None:
         return None
     if spec.compute == "nki":
@@ -142,8 +150,8 @@ def prepare_quant(args: argparse.Namespace, component_dirs: dict[str, str], *, c
     for name, source_dir in component_dirs.items():
         try:
             quantized = prepare_quantized_checkpoint(source_dir, spec, create=create)
-        except ValueError as exc:
-            _fail(f"--quant: {exc}")
+        except (ValueError, FileNotFoundError) as exc:
+            fail(f"--quant: {name}: {exc}")
         prepared[name] = str(quantized)
         print(f"[{tag}] MXFP8 {name} ({spec.compute}): {quantized}", flush=True)
     return prepared
