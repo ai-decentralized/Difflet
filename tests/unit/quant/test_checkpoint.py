@@ -13,14 +13,16 @@ import pytest
 import torch
 
 from difflet.backends._torch_megatron.checkpoint import build_weight_map
-from difflet.backends.neuron.core.weights_bf16 import MANIFEST as BF16_MANIFEST
+from difflet.backends.neuron.core import weights_bf16
 from difflet.backends.neuron.core.weights_bf16 import ensure_bf16_copy
 from difflet.quant import mx
 from difflet.quant.checkpoint import (
+    BF16_MANIFEST,
     MANIFEST,
     check_quantized_dir,
     ensure_quantized_dir,
     prepare_quantized_checkpoint,
+    quantized_digest,
     quantized_dir,
     quantized_linear_names,
     read_manifest,
@@ -266,6 +268,10 @@ def test_a_bf16_copy_is_fingerprinted_with_its_manifest(tiny, tmp_path):
     entry. A directory without one (every hub checkpoint) is fingerprinted as before."""
     src = tiny["transformer_dir"]
     assert source_fingerprint(src) == _file_identity(src)
+    # The toy's digest from before the manifest entry existed (its files' names and sizes and
+    # the Qwen targets fix it, not the random weights): the literal every Qwen, FLUX and LTX-2
+    # directory written since hangs on, which a formula mirrored in the test cannot pin.
+    assert quantized_digest(tiny["spec"], source_fingerprint(src)) == "e11f9d28946c0cb7"
     copy = ensure_bf16_copy(src, cache_root=tmp_path / "cache")
     manifest = copy / BF16_MANIFEST
     fingerprint = source_fingerprint(copy)
@@ -294,10 +300,45 @@ def test_a_quantized_directory_built_from_a_copy_follows_the_copy_s_source(tiny,
     copy = ensure_bf16_copy(src, cache_root=cache)
     spec = tiny["spec"]
     made = ensure_quantized_dir(cache, copy, spec, create=True)
-    assert read_manifest(made)["source"]["fingerprint"][-1][0] == BF16_MANIFEST
+    source = read_manifest(made)["source"]
+    assert source["fingerprint"][-1][0] == BF16_MANIFEST
+    # The copy's manifest stays behind (the quantized directory is no bf16 copy of anything);
+    # the fp32 snapshot it named is recorded in the quant manifest instead.
+    assert not (made / BF16_MANIFEST).exists() and (made / "config.json").is_file()
+    assert source["bf16_copy_of"] == str(src.resolve())
     check_quantized_dir(made, copy, spec)
     os.utime(src / "config.json", ns=(1, 1))  # the source changed under the copy
     assert ensure_bf16_copy(src, cache_root=cache) == copy  # remade in place, new manifest
     with pytest.raises(ValueError, match="built from another checkpoint"):
         check_quantized_dir(made, copy, spec)
     assert quantized_dir(cache, copy, spec) != made
+
+
+def test_a_hub_checkpoint_s_manifest_names_no_copy_source(tiny, tmp_path):
+    manifest = write_quantized_dir(tiny["transformer_dir"], tmp_path / "mxfp8", tiny["spec"])
+    assert "bf16_copy_of" not in manifest["source"]
+
+
+def test_the_copy_s_manifest_name_is_one_constant():
+    """``source_fingerprint`` names the copy's manifest without importing the backend (the
+    neuron package's ``__init__`` loads the runtime), so the quant module owns the name and the
+    copy writer takes it from there: one object, not two literals that could drift."""
+    assert weights_bf16.MANIFEST is BF16_MANIFEST
+
+
+def test_a_copy_built_directory_sits_under_its_fp32_source_s_label(tiny, tmp_path):
+    """A bf16 copy lives under ``weights-bf16/<snapshot>/<component>``, which names no repo:
+    the quantized directory built from it takes the label of the hub snapshot the copy's
+    manifest names, beside where the fp32 directory's own would sit, at another digest."""
+    cache = tmp_path / "cache"
+    snapshot = "0123456789abcdef0123456789abcdef01234567"
+    src = (tmp_path / "hub" / "models--Wan-AI--Wan2.1-T2V-14B-Diffusers" / "snapshots" / snapshot
+           / "transformer")
+    shutil.copytree(tiny["transformer_dir"], src)
+    copy = ensure_bf16_copy(src, cache_root=cache)
+    assert copy.parent.name == snapshot
+    spec = tiny["spec"]
+    of_copy, of_fp32 = quantized_dir(cache, copy, spec), quantized_dir(cache, src, spec)
+    assert of_copy.parent.parent.name == "Wan-AI--Wan2.1-T2V-14B-Diffusers__01234567"
+    assert of_copy.parent == of_fp32.parent and of_copy != of_fp32
+    assert of_copy.parent.parent.parent == cache / "quantized"
