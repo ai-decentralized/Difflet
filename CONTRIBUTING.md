@@ -37,6 +37,9 @@ scripts/cpu-gate.sh     # import guard + tests/unit with DIFFLET_BACKEND=cpu (wh
 ruff check .            # lint (CI-enforced)
 ```
 
+The gate runs the tests in parallel (`-n logical`, one worker per logical CPU). On a
+shared host, cap it with `scripts/cpu-gate.sh -n 8`; `-n 0` runs serially.
+
 `cpu-gate.sh` fails on any failing test that is not listed in `scripts/known-red.txt`
 and on any new Neuron-only skip that is not in `scripts/neuron-skips.txt`. If your change
 fixes a test listed in either file, remove it from that list in the same PR; the gate
