@@ -14,13 +14,29 @@ TINY_SHAPE = dict(height=64, width=64, text_seq_len=8)  # 4x4 packed image token
 TINY_FP8 = {**TINY, "attention_head_dim": 32, "axes_dims_rope": (8, 12, 12)}
 
 
+def mx_toy_weights_(model: torch.nn.Module) -> None:
+    """Re-draw every 2-D weight of ``model`` as a Gaussian of the variance diffusers' default
+    init gives it (kaiming-uniform's bound ``1/sqrt(K)`` is std ``1/sqrt(3K)``), from the
+    current seed. Under the uniform init every MX block's maximum sits just under the bound, so
+    nearly every block gets one E8M0 scale and every shard law (whole K, per rank K range,
+    a slice of the fused weight's quantization) writes the same bytes; a Gaussian block's
+    maximum depends on which 32 values it holds, so a test of the law can fail."""
+    with torch.no_grad():
+        for param in model.parameters():
+            if param.dim() == 2:
+                param.copy_(torch.randn_like(param) * (3 * param.shape[1]) ** -0.5)
+
+
 def write_tiny_flux(root, *, config: dict | None = None) -> str:
     """The seeded diffusers DiT as ``root/transformer``; ``config`` picks the geometry
-    (``TINY`` by default, ``TINY_FP8`` for the MXFP8 tests)."""
+    (``TINY`` by default, ``TINY_FP8`` for the MXFP8 tests), and a model built from one gets
+    :func:`mx_toy_weights_`."""
     from diffusers import FluxTransformer2DModel
 
     torch.manual_seed(0)
     model = FluxTransformer2DModel(**(config or TINY))
+    if config is not None:
+        mx_toy_weights_(model)
     path = f"{root}/transformer"
     model.save_pretrained(path, safe_serialization=True)
     return path

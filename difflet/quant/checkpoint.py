@@ -28,9 +28,10 @@ Layout of ``<cache>/quantized/<source label>/<component>/mxfp8-<digest>/``:
   asks for.
 
 A spec with a target pattern that matches no 2-D weight of the source (a split one counting as
-its two halves), or a split pattern that matches none, is refused before anything is written,
-naming the patterns (:func:`write_quantized_dir`): the directory would hold less than the spec
-claims.
+its two halves), a split pattern that matches none, or a row-parallel pattern on a split
+linear's fused name is refused before anything is written, naming the patterns
+(:func:`write_quantized_dir`): the directory would hold less than the spec claims, or a half
+quantized over another K range than its ranks read.
 
 The digest hashes the spec's weights identity and the source fingerprint (file names, sizes and
 Hugging Face blob names, which are content hashes), so another checkpoint, another target set
@@ -47,7 +48,7 @@ import os
 import re
 import shutil
 import time
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -206,6 +207,24 @@ def _quantizable_prefixes(shapes: dict[str, list[int]], spec: QuantSpec) -> list
     return prefixes
 
 
+def _on_fused_names(patterns: Iterable[str], shapes: dict[str, list[int]], spec: QuantSpec
+                    ) -> tuple[list[str], str]:
+    """The ``patterns`` that name a split linear's fused weight, which the directory does not
+    hold (it stores the halves), and a note naming the halves of the first such linear (``""``
+    when there is none): a spec written before the split names the fused linear."""
+    split = [prefix for prefix in shapes if spec.is_split(prefix)]
+    hits, first = [], None
+    for pattern in patterns:
+        named = [prefix for prefix in split if re.fullmatch(pattern, strip_prefix(prefix))]
+        if named:
+            hits.append(pattern)
+            first = first or named[0]
+    if first is None:
+        return hits, ""
+    attn, mlp = (part for part, _, _ in _split_parts(first, shapes[first]))
+    return hits, f" ({first} is split by split_linears: name {attn} / {mlp})"
+
+
 def _quantize_weight(prefix: str, weight: torch.Tensor, spec: QuantSpec
                      ) -> Iterator[tuple[str, torch.Tensor, bool]]:
     k_shards = spec.k_shards(prefix)
@@ -323,10 +342,18 @@ def write_quantized_dir(model_dir: str | Path, out_dir: str | Path, spec: QuantS
     if dead:
         # Refused here, on the driver, before anything is quantized: the directory would hold
         # less than the spec claims, and every rank would refuse it (``quantize_module_``) only
-        # after the driver spent minutes writing it. The patterns verbatim, separated as
+        # after the driver spent minutes writing it. The patterns verbatim, last, separated as
         # ``DIFFLET_QUANT_TARGETS`` separates them.
-        raise ValueError(f"target patterns match no linear weight in {model_dir}: "
+        _, note = _on_fused_names(dead, shapes, spec)
+        raise ValueError(f"target patterns match no linear weight in {model_dir}{note}: "
                          f"{'; '.join(dead)}")
+    fused, note = _on_fused_names(spec.row_parallel, shapes, spec)
+    if fused:
+        # A half takes its shard count from its own name: under a pattern on the fused name a
+        # row-parallel half would be quantized over its whole K, with scales over a block
+        # membership no rank reads. Refused at every tp, so a tp-1 run catches the spec.
+        raise ValueError(f"row-parallel patterns name the fused weight of a split linear in "
+                         f"{model_dir}{note}: {'; '.join(fused)}")
     tmp = out_dir.with_name(f".{out_dir.name}.tmp-{os.getpid()}")
     if tmp.exists():
         shutil.rmtree(tmp)

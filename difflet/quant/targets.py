@@ -87,9 +87,8 @@ QWEN_IMAGE_ROW_PARALLEL: tuple[str, ...] = (
 # keeps): the 19 dual-stream blocks' q/k/v for both streams and both MLPs (``ff``, ``ff_context``),
 # the 38 single-stream blocks' q/k/v and MLP-up (``proj_mlp``). The output projections stay bf16
 # as for Qwen-Image: the dual blocks' ``to_out.0`` / ``to_add_out`` and the single blocks'
-# ``proj_out`` (which the neuron model splits into ``proj_out_attn`` / ``proj_out_mlp``, read as
-# column ranges of the checkpoint's ``proj_out``: a quantized target there would also need the
-# writer to slice the block scales).
+# ``proj_out`` (which the neuron model runs as ``proj_out_attn`` / ``proj_out_mlp``, read as
+# column ranges of the checkpoint's ``proj_out`` unless the spec splits it, below).
 _SINGLE = r"single_transformer_blocks\.\d+"
 
 #: FLUX's and HunyuanVideo's single-stream ``proj_out``: one checkpoint ``Linear(dim + mlp_dim,

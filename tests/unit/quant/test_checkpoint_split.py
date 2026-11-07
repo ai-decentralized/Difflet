@@ -1,7 +1,8 @@
 """A split linear in the quantized checkpoint: the single-stream blocks' fused ``proj_out`` stored
 as its attention and MLP column ranges, each quantized per rank K range of its own when a target
 names it and kept in the source's dtype otherwise, and the halves what the neuron loader's
-slices read from the fused weight."""
+slices read from the fused weight; the patterns that name the fused weight refused; and the
+MXFP8 toys' weights, which tell the shard laws apart."""
 
 from __future__ import annotations
 
@@ -12,7 +13,7 @@ import torch
 
 from difflet.quant import mx
 from difflet.quant.checkpoint import write_quantized_dir
-from difflet.quant.spec import QuantSpec
+from difflet.quant.spec import LAYOUT_K, QuantSpec
 from difflet.quant.targets import SINGLE_BLOCK_SPLIT_LINEARS
 
 SPLIT = SINGLE_BLOCK_SPLIT_LINEARS
@@ -44,6 +45,36 @@ def _tensors(directory) -> dict[str, torch.Tensor]:
     for path in sorted(Path(directory).glob("*.safetensors")):
         tensors.update(load_file(str(path)))
     return tensors
+
+
+def _toy(model, tmp_path):
+    """``model``'s MXFP8 toy DiT: its directory, its config dict and the ``proj_out`` slices
+    the neuron application itself asks the loader for (its own ``checkpoint_slices``, so its
+    own MLP width)."""
+    pytest.importorskip("diffusers")
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+
+    if model == "flux":
+        from difflet.backends.neuron.flux.config import NeuronFluxConfig as Config
+        from difflet.backends.neuron.flux.transformer import (
+            NeuronFluxTransformerApplication as Application,
+        )
+        from tests.unit.backends._neuron_flux_toy import TINY_FP8 as config
+        from tests.unit.backends._neuron_flux_toy import TINY_SHAPE
+        from tests.unit.backends._neuron_flux_toy import write_tiny_flux as write
+    else:
+        from difflet.backends.neuron.hunyuan_video.config import NeuronHunyuanVideoConfig as Config
+        from difflet.backends.neuron.hunyuan_video.transformer import (
+            NeuronHunyuanVideoTransformerApplication as Application,
+        )
+        from tests.unit.backends._neuron_hv1_toy import TINY_FP8_HV1 as config
+        from tests.unit.backends._neuron_hv1_toy import TINY_SHAPE
+        from tests.unit.backends._neuron_hv1_toy import write_tiny_hv1 as write
+    src = write(tmp_path, config=config)
+    app = Application(model_path=src, config=Config.from_pretrained(src, **TINY_SHAPE),
+                      parallel=DiffletParallelConfig(), dtype=torch.float32,
+                      exec_mode="compile", device="cpu")
+    return src, config, app.checkpoint_slices()
 
 
 def test_a_split_linear_is_written_as_its_two_column_ranges(tmp_path):
@@ -90,7 +121,8 @@ def test_a_split_linear_that_no_target_names_keeps_the_source_dtype(tmp_path, dt
 def test_a_split_pattern_that_matches_no_linear_weight_is_refused_before_writing(tmp_path):
     """A dead split pattern, a split linear without the MLP columns after the attention ones,
     and a target on the fused name of a split linear are each refused before anything is
-    written: the directory would hold another layout than the spec claims."""
+    written: the directory would hold another layout than the spec claims. The last names the
+    halves (a pre-split target set replayed through ``DIFFLET_QUANT_TARGETS`` meets it)."""
     src, *_ = _source(tmp_path)
     with pytest.raises(ValueError, match="split patterns match no linear weight") as exc:
         write_quantized_dir(src, tmp_path / "q",
@@ -104,38 +136,73 @@ def test_a_split_pattern_that_matches_no_linear_weight_is_refused_before_writing
     with pytest.raises(ValueError, match="target patterns match no linear weight") as exc:
         write_quantized_dir(src, tmp_path / "q", QuantSpec(targets=fused, split_linears=SPLIT))
     assert str(exc.value).endswith(f": {fused[0]}")
+    assert f"name {P}.proj_out_attn / {P}.proj_out_mlp" in str(exc.value)
     assert list(tmp_path.iterdir()) == [src]
 
 
+@pytest.mark.parametrize("tp", [1, 2])
+def test_a_row_parallel_pattern_on_the_fused_name_of_a_split_linear_is_refused(tmp_path, tp):
+    """A half takes its shard count from its own name, so a row-parallel pattern written on
+    the fused name would quantize both halves over their whole K at tp > 1, with scales over a
+    block membership no rank reads. Refused before anything is written, at every tp (a tp-1 run
+    catches the spec a tp-4 run would get wrong), naming the pattern and the halves; a list
+    that also names the halves is refused too, since the fused name names no stored weight."""
+    src, *_ = _source(tmp_path)
+    for row_parallel in (SPLIT, (*HALVES, *SPLIT)):
+        spec = QuantSpec(targets=HALVES, row_parallel=row_parallel, split_linears=SPLIT,
+                         tp_degree=tp)
+        with pytest.raises(ValueError, match="row-parallel patterns name the fused weight") as exc:
+            write_quantized_dir(src, tmp_path / "q", spec)
+        assert str(exc.value).endswith(f": {SPLIT[0]}")
+        assert f"name {P}.proj_out_attn / {P}.proj_out_mlp" in str(exc.value)
+        assert list(tmp_path.iterdir()) == [src]
+
+
 @pytest.mark.parametrize("model", ["flux", "hunyuan_video"])
-def test_the_split_law_is_what_the_neuron_loader_slices(model, tmp_path):
+def test_the_mxfp8_toys_tell_the_block_memberships_apart(model, tmp_path):
+    """On weights whose MX blocks all get one scale (diffusers' kaiming-uniform init: every
+    block's maximum sits just under the bound) every shard law writes the same bytes, so a test
+    of the law passes whichever law the writer used. The MXFP8 toys' weights make a block's
+    scale depend on which 32 values it holds: a half quantized on its own differs from the
+    slice of the fused weight's quantization, and every weight whose K splits over tp 2 into
+    ranges the layout takes differs between one K range and two (unless K/2 is a whole number
+    of 512-wide tiles: then the two laws have one block membership, and no weights tell them
+    apart)."""
+    src, config, _ = _toy(model, tmp_path)
+    t = _tensors(src)
+    for i in range(config["num_single_layers"]):
+        W = t[f"single_transformer_blocks.{i}.proj_out.weight"]
+        n, fused = W.shape[0], mx.quantize_mx(W)[1]
+        assert not torch.equal(mx.quantize_mx(W[:, :n])[1], fused[:, :n // 32]), i
+        assert not torch.equal(mx.quantize_mx(W[:, n:])[1], fused[:, n // 32:]), i
+    sharded = [key for key, w in t.items() if w.dim() == 2 and w.shape[1] % (2 * LAYOUT_K) == 0
+               and (w.shape[1] // 2) % mx.TILE_K]
+    assert sharded
+    for key in sharded:
+        one, two = (mx.quantize_mx_sharded(t[key], k)[1] for k in (1, 2))
+        assert not torch.equal(one, two), key
+
+
+@pytest.mark.parametrize("tp", [1, 2])
+@pytest.mark.parametrize("model", ["flux", "hunyuan_video"])
+def test_the_split_law_is_what_the_neuron_loader_slices(model, tp, tmp_path):
     """The halves the writer stores are, byte for byte, the column ranges the neuron FLUX and
-    HunyuanVideo loaders slice from the fused ``proj_out.weight`` (``CheckpointSlice``), so a
-    split directory loads them by name in place of the slices."""
-    pytest.importorskip("diffusers")
+    HunyuanVideo applications slice from the fused ``proj_out.weight`` (their own
+    ``checkpoint_slices``), on every rank: rank r's K range of a half read by name is what its
+    shard of the slice gave. So a split directory loads them by name in place of the slices."""
     from difflet.backends._torch_megatron.checkpoint import build_weight_map
-    from difflet.backends.neuron.core.checkpoint import (
-        _read_checkpoint_slice,
-        single_block_proj_out_slices,
-    )
+    from difflet.backends.neuron.core.checkpoint import _read_checkpoint_slice
 
-    if model == "flux":
-        from tests.unit.backends._neuron_flux_toy import TINY_FP8, write_tiny_flux
-
-        config, src = TINY_FP8, write_tiny_flux(tmp_path, config=TINY_FP8)
-    else:
-        from tests.unit.backends._neuron_hv1_toy import TINY_FP8_HV1, write_tiny_hv1
-
-        config, src = TINY_FP8_HV1, write_tiny_hv1(tmp_path, config=TINY_FP8_HV1)
+    src, config, slices = _toy(model, tmp_path)
     num_single = config["num_single_layers"]
-    inner = config["num_attention_heads"] * config["attention_head_dim"]
     write_quantized_dir(src, tmp_path / "q", QuantSpec(targets=MLP_UP, split_linears=SPLIT))
     stored, src_map = _tensors(tmp_path / "q"), build_weight_map(src)
-    slices = single_block_proj_out_slices(num_single, inner, 4 * inner)
     assert len(slices) == 2 * num_single
     for name, sl in slices.items():
-        expect = _read_checkpoint_slice(src_map[sl.key], sl, shard=None, tp_size=1, tp_rank=0)
-        assert torch.equal(stored[name], expect), name
+        width = sl.length // tp
+        for r in range(tp):  # a row-parallel half: both loaders shard dim 1
+            expect = _read_checkpoint_slice(src_map[sl.key], sl, shard=1, tp_size=tp, tp_rank=r)
+            assert torch.equal(stored[name][:, r * width:(r + 1) * width], expect), (name, r)
     for i in range(num_single):
         assert f"single_transformer_blocks.{i}.proj_out.bias" in stored
         assert f"single_transformer_blocks.{i}.proj_out.weight" not in stored
