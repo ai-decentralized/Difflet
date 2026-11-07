@@ -19,6 +19,7 @@ FLUX = "black-forest-labs/FLUX.1-dev"
 LTX2 = "Lightricks/LTX-2"
 WAN21 = "Wan-AI/Wan2.1-T2V-14B-Diffusers"
 WAN22 = "Wan-AI/Wan2.2-T2V-A14B-Diffusers"
+HV1 = "hunyuanvideo-community/HunyuanVideo"
 
 
 def _parse(*flags):
@@ -422,6 +423,60 @@ def test_wan_application_kwargs_carry_the_spec():
     assert kwargs["quant"]["tp_degree"] == 4 and "quant_checkpoint" not in kwargs
     assert kwargs["enable_transformer_2"] is True
     assert "quant" not in _torchrun_application_kwargs(_parse("generate", "--model-id", WAN22))
+
+
+def test_hunyuan_video_orchestrator_forwards_and_keys_quant(monkeypatch):
+    """The HunyuanVideo generate stage's key gains the spec's fields with --quant, at the tp
+    the launch uses (--tp-degree 2), and its stage line carries the flags so the ranks rebuild
+    the same spec; the vae stage's key is unchanged (the decoder reads latents, whatever the
+    DiT's precision) and a bf16 line keeps its key and its words."""
+    cli_main = importlib.import_module("difflet.cli.main")
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    monkeypatch.setenv("DIFFLET_EXEC_MODE", "compile")
+
+    def key(*flags):
+        args = cli_main._build_parser().parse_args(
+            ["generate", "--model-id", HV1, "--cache-dir", "/c", "--tp-degree", "2", *flags])
+        orch = cli_main._get_orchestrator(args)
+        return (orch._stage_cache_inputs("generate", args),
+                orch._stage_compiled_dir("generate", args),
+                orch._shared_cli_args("generate", work_dir="/w"), orch)
+
+    plain, plain_dir, plain_cli, _ = key()
+    assert not any(k.startswith("quant") for k in plain)
+    assert "--quant" not in plain_cli
+    mx, mx_dir, mx_cli, orch = key("--quant", "mxfp8")
+    added = sorted(k for k in mx if k not in plain)
+    assert added == ["quant", "quant_compute", "quant_schema", "quant_targets_sha256",
+                     "quant_tp_degree"]
+    assert mx["quant"] == "mxfp8" and mx["quant_tp_degree"] == 2
+    assert {k: v for k, v in mx.items() if k not in added} == plain
+    assert mx_dir != plain_dir and mx_dir.parent == plain_dir.parent
+    assert mx_cli[mx_cli.index("--quant") + 1] == "mxfp8"
+    stage_args, extra = _build_stage_parser().parse_known_args(
+        ["--orchestrator", HV1, "--stage", "generate", *mx_cli])
+    assert extra == [] and Q.quant_spec(stage_args) == Q.quant_spec(orch.args)
+    assert Q.quant_spec(stage_args).tp_degree == 2
+    assert not any(k.startswith("quant") for k in orch._stage_cache_inputs("vae", orch.args))
+    dequant, dequant_dir, dequant_cli, _ = key("--quant", "mxfp8", "--quant-compute", "dequant")
+    assert sorted(k for k in mx if mx[k] != dequant.get(k)) == ["quant_compute"]
+    assert dequant_dir != mx_dir
+    assert dequant_cli[dequant_cli.index("--quant-compute") + 1] == "dequant"
+
+
+def test_hunyuan_video_application_kwargs_carry_the_spec():
+    """The ranks build TorchNeuronHunyuanVideoApplication with the spec's dict: it resolves
+    the quantized directory itself, read-only, from the spec, so no directory is named
+    (``quant_checkpoint``), and every other keyword is the bf16 launch's."""
+    from difflet.cli.orchestrators.hunyuan_video import _torchrun_application_kwargs
+
+    args = _parse("generate", "--model-id", HV1, "--backend", "neuron", "--quant", "mxfp8")
+    kwargs = _torchrun_application_kwargs(args)
+    assert kwargs["quant"]["format"] == "mxfp8" and kwargs["quant"]["compute"] == "nki"
+    assert kwargs["quant"]["tp_degree"] == 4 and "quant_checkpoint" not in kwargs
+    plain = _torchrun_application_kwargs(_parse("generate", "--model-id", HV1))
+    assert "quant" not in plain
+    assert {k: v for k, v in kwargs.items() if k != "quant"} == plain
 
 
 @pytest.fixture(scope="module")
