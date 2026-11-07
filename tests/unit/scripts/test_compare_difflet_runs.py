@@ -256,9 +256,43 @@ def test_dict_latents_are_compared_per_key(cdr, tmp_path):
     assert out["latents"]["video"]["rel_l2"] == pytest.approx(0.01, rel=1e-3)
 
 
-def test_dict_latents_with_different_keys_are_refused(cdr, tmp_path):
+def test_dict_latents_with_different_keys_are_refused_naming_both_files(cdr, tmp_path):
     torch.save({"video": torch.zeros(2)}, tmp_path / "ref.pt")
     torch.save({"audio": torch.zeros(2)}, tmp_path / "cand.pt")
-    with pytest.raises(ValueError, match="video") as info:
+    with pytest.raises(ValueError, match=r"ref\.pt vs .*cand\.pt: .*\['video'\].*\['audio'\]"):
         cdr.compare_runs(tmp_path / "ref.pt", tmp_path / "cand.pt", None, None)
-    assert "audio" in str(info.value)
+
+
+@pytest.mark.parametrize("tensor_side", ["ref", "cand"])
+def test_a_tensor_against_a_dict_is_refused(cdr, tmp_path, tensor_side):
+    """The likely mistake: a Wan/HunyuanVideo latents.pt (one tensor) against LTX-2's dict."""
+    files = {"ref": tmp_path / "ref.pt", "cand": tmp_path / "cand.pt"}
+    for side, path in files.items():
+        torch.save(torch.zeros(2) if side == tensor_side else {"video": torch.zeros(2)}, path)
+    with pytest.raises(ValueError, match=r"a tensor|\['video'\]") as info:
+        cdr.compare_runs(files["ref"], files["cand"], None, None)
+    assert "a tensor" in str(info.value) and "['video']" in str(info.value)
+
+
+def test_dict_metadata_beside_the_tensors_must_match_and_gets_no_block(cdr, tmp_path):
+    """MiniMax-H3's latents.pt holds height/width/num_frames beside its two tensors."""
+    video, audio = torch.ones(1, 8), torch.zeros(1, 4)
+    meta = {"height": 480, "width": 832, "num_frames": 9}
+    torch.save({"video_latents": video, "audio_latents": audio, **meta}, tmp_path / "ref.pt")
+    torch.save({"video_latents": video, "audio_latents": audio, **meta}, tmp_path / "cand.pt")
+    out = cdr.compare_runs(tmp_path / "ref.pt", tmp_path / "cand.pt", None, None)
+    assert set(out["latents"]) == {"video_latents", "audio_latents"}
+    assert all(block["bit_identical"] for block in out["latents"].values())
+    torch.save({"video_latents": video, "audio_latents": audio, **meta, "height": 720},
+               tmp_path / "other.pt")
+    with pytest.raises(ValueError, match="metadata 'height' differs: ref 480, cand 720"):
+        cdr.compare_runs(tmp_path / "ref.pt", tmp_path / "other.pt", None, None)
+
+
+def test_dict_latents_without_tensors_are_refused(cdr, tmp_path):
+    torch.save({}, tmp_path / "empty.pt")
+    with pytest.raises(ValueError, match="no tensors"):
+        cdr.compare_runs(tmp_path / "empty.pt", tmp_path / "empty.pt", None, None)
+    torch.save({"height": 480}, tmp_path / "meta.pt")
+    with pytest.raises(ValueError, match=r"no tensors, only \['height'\]"):
+        cdr.compare_runs(tmp_path / "meta.pt", tmp_path / "meta.pt", None, None)
