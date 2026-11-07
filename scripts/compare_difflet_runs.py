@@ -154,6 +154,21 @@ def compare(a: Path, b: Path) -> dict:
     return out
 
 
+def _latent_metrics(ref, cand) -> dict:
+    """``latent_metrics`` plus ``bit_identical`` for one tensor pair, or one such block per key
+    when the files hold dicts (LTX-2's orchestrator saves ``{"video": ..., "audio": ...}``);
+    the two dicts must hold the same keys."""
+    if isinstance(ref, dict) or isinstance(cand, dict):
+        if not (isinstance(ref, dict) and isinstance(cand, dict)) or ref.keys() != cand.keys():
+            ref_keys = sorted(ref) if isinstance(ref, dict) else "a tensor"
+            cand_keys = sorted(cand) if isinstance(cand, dict) else "a tensor"
+            raise ValueError(f"latents differ in kind or keys: ref holds {ref_keys}, cand holds {cand_keys}")
+        return {key: _latent_metrics(ref[key], cand[key]) for key in ref}
+    metrics = _qvr().latent_metrics(ref, cand)
+    metrics["bit_identical"] = bool(torch.equal(ref, cand))
+    return metrics
+
+
 def compare_runs(ref_latents: Path | None, cand_latents: Path | None, ref_output: Path | None,
                  cand_output: Path | None) -> dict:
     """Latent metrics when both latent files are given, decoded-output metrics when both outputs
@@ -164,8 +179,7 @@ def compare_runs(ref_latents: Path | None, cand_latents: Path | None, ref_output
         out.update(ref_latents=str(ref_latents), cand_latents=str(cand_latents))
         ref = torch.load(ref_latents, map_location="cpu", weights_only=True)
         cand = torch.load(cand_latents, map_location="cpu", weights_only=True)
-        out["latents"] = _qvr().latent_metrics(ref, cand)
-        out["latents"]["bit_identical"] = bool(torch.equal(ref, cand))
+        out["latents"] = _latent_metrics(ref, cand)
     if ref_output and cand_output:
         ref_output, cand_output = Path(ref_output), Path(cand_output)
         key = "video" if _is_video(ref_output) or _is_video(cand_output) else "image"
