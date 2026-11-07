@@ -1055,13 +1055,10 @@ def test_neuron_driver_accepts_teacache(monkeypatch, tmp_path, capsys, overrides
     assert "does not support" not in capsys.readouterr().err
 
 
-# One static shape per process: a bucketed set failed only once every rank had started. --quant
-# passes the CLI's model check (QUANT_MODELS names Wan for its target table) but the driver
-# does not carry it yet: refused here, not run as the bf16 DiT.
+# One static shape per process: a bucketed set failed only once every rank had started.
 _REJECTED_BEFORE_LAUNCH = [
     (dict(shapes="480x832x9,480x832x5"), "--shapes with more than one shape"),
     (dict(shapes="480x832x9, 480x832x5", teacache_cadence=2), "--shapes with more than one shape"),
-    (dict(quant="mxfp8"), "--quant"),
 ]
 
 
@@ -1974,3 +1971,241 @@ def test_compile_accepts_dual_expert_like_generate():
     assert parser.parse_args(["compile", *base, "--dual-expert"]).dual_expert is True
     assert parser.parse_args(["compile", *base]).dual_expert is False
     assert parser.parse_args(["generate", *base, "--dual-expert", "--prompt", "x"]).dual_expert is True
+
+
+# ------------------------------------------------ --quant mxfp8 (neuron backend)
+
+_EXPERTS = ("transformer", "transformer_2")
+
+
+def test_stage_and_dp_worker_lines_carry_quant_beside_dual_expert():
+    """A stage launch or a DP worker that dropped --quant would run the bf16 DiT against the
+    fp8 stage key, and one that dropped --dual-expert would quantize one expert and run it for
+    every step: both lines carry both flags, the stage parser takes them back, and only when
+    given (a bf16 line is unchanged)."""
+    from difflet.cli.dp.router import worker_cli_args
+    from difflet.cli.stage import _build_stage_parser
+
+    args = _wan_args(quant="mxfp8", quant_compute="dequant", dual_expert=True, dp=2)
+    stage = WanOrchestrator(args)._shared_cli_args("generate", work_dir="/w")
+    worker = worker_cli_args(args)
+    for line in (stage, worker):
+        assert line[line.index("--quant") + 1] == "mxfp8"
+        assert line[line.index("--quant-compute") + 1] == "dequant"
+        assert "--dual-expert" in line
+    parsed, extra = _build_stage_parser().parse_known_args(
+        ["--orchestrator", args.model_id, "--stage", "transformer", *stage])
+    assert extra == [] and parsed.quant == "mxfp8" and parsed.quant_compute == "dequant"
+    assert parsed.dual_expert is True
+    for line in (WanOrchestrator(_wan_args())._shared_cli_args("generate", work_dir="/w"),
+                 worker_cli_args(_wan_args())):
+        assert "--quant" not in line and "--quant-compute" not in line
+
+
+def test_quant_is_prepared_after_the_bf16_copies_and_before_umt5_placement(monkeypatch,
+                                                                            tmp_path):
+    """The quantized directories are resolved (written by ``compile``, only read by
+    ``generate``) after ``compile`` made the bf16 copies they are built from, before umT5's
+    placement so it counts the fp8 bytes, before any rank starts so none writes, and after the
+    compile cache is rooted at --cache-dir, so the copies and the directories land where the
+    ranks, which inherit that root, resolve them (``checkpoint.default_cache_root`` and
+    ``weights_bf16._cache_root`` read DIFFLET_COMPILE_CACHE when the directory is made)."""
+    _unset(monkeypatch, *_CACHE_ENV)
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    monkeypatch.setattr(wan_mod.runner, "run_stage", lambda *a, **k: None)
+    monkeypatch.setattr(wan_mod, "_decode_latents_host", lambda *a, **k: None)
+    calls = []
+    monkeypatch.setattr(WanOrchestrator, "_make_bf16_dit_copies", lambda self: calls.append(
+        ("bf16_copies", os.environ.get("DIFFLET_COMPILE_CACHE"))))
+    monkeypatch.setattr(WanOrchestrator, "_prepare_quant", lambda self, *, create: calls.append(
+        ("prepare_quant", create, os.environ.get("DIFFLET_COMPILE_CACHE"))))
+    monkeypatch.setattr(WanOrchestrator, "_place_text_encoder",
+                        lambda self: calls.append(("place_text_encoder",)))
+    cache_dir = str(tmp_path / "cache")
+    root = os.path.abspath(cache_dir)
+    WanOrchestrator(_wan_args(quant="mxfp8", cache_dir=cache_dir)).compile()
+    assert calls == [("bf16_copies", root), ("prepare_quant", True, root),
+                     ("place_text_encoder",)]
+    calls.clear()
+    monkeypatch.delenv("DIFFLET_COMPILE_CACHE")  # compile exported it; generate exports again
+    WanOrchestrator(_wan_args(quant="mxfp8", cache_dir=cache_dir,
+                              work_dir=str(tmp_path / "work"))).generate()
+    assert calls == [("prepare_quant", False, root), ("place_text_encoder",)]
+
+
+def test_quant_refuses_before_the_weights_are_downloaded(monkeypatch, capsys):
+    """--quant needs the weights on the driver (``compile`` writes the quantized directories
+    from their bf16 copies, ``generate`` resolves them and counts their bytes), so a launch
+    before `difflet download` is refused here, naming the fix, instead of starting tp x cp
+    ranks that each report the missing weights. The bf16 path leaves them to the ranks."""
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+
+    def not_local(self):
+        raise OSError("not local")
+
+    monkeypatch.setattr(WanOrchestrator, "_model_dir", not_local)
+    for create in (True, False):
+        with pytest.raises(SystemExit) as exc:
+            WanOrchestrator(_wan_args(model_id=_WAN21_ID, quant="mxfp8"))._prepare_quant(
+                create=create)
+        assert exc.value.code == 2
+        assert capsys.readouterr().err == (
+            f"Error: --quant: the {_WAN21_ID} weights are not local; run `difflet download "
+            f"--model-id {_WAN21_ID}` first; nothing was launched.\n")
+    WanOrchestrator(_wan_args(model_id=_WAN21_ID))._prepare_quant(create=True)
+    assert capsys.readouterr() == ("", "")
+
+
+@pytest.fixture(scope="module")
+def tiny_wan22_fp8(tmp_path_factory):
+    """The tiny Wan 2.2 snapshot in the MXFP8 geometry, fp32 as the hub's: what the driver's
+    --quant step reads (the bf16 copies ``compile`` makes, then the quantized directories)."""
+    pytest.importorskip("diffusers")
+    pytest.importorskip("transformers")
+    from tests.unit.backends._neuron_wan_toy import TINY_FP8_WAN, write_tiny_wan22_model
+
+    root = tmp_path_factory.mktemp("tiny_wan22_quant")
+    write_tiny_wan22_model(root, config=TINY_FP8_WAN)
+    return root
+
+
+@pytest.fixture
+def quant_driver(monkeypatch, tmp_path, tiny_wan22_fp8):
+    """The neuron driver on the tiny Wan 2.2 snapshot at 24 GiB per core, with the compile
+    cache at ``.cache`` (a fresh root per test: no bf16 copy and no quantized directory until
+    ``compile`` makes them); no stage runs, ``.stages`` records the launches."""
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    monkeypatch.setenv("DIFFLET_EXEC_MODE", "compile")
+    monkeypatch.setenv("DIFFLET_NEURON_HBM_GIB", "24")
+    # prepare_quant sets the trace cache with os.environ.setdefault: setenv first records the
+    # variable's original state, so the value does not leak into later tests' cache layout.
+    monkeypatch.setenv("DIFFLET_NKI_TRACE_CACHE", "")
+    monkeypatch.delenv("DIFFLET_NKI_TRACE_CACHE")
+    _unset(monkeypatch, *_CACHE_ENV)
+    cache = tmp_path / "cache"
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(cache))
+    state = types.SimpleNamespace(root=tiny_wan22_fp8, cache=cache, stages=[])
+
+    def resolve(model_id, *, revision=None, local_files_only=False, **_):
+        assert local_files_only, "the driver check must never download"
+        return str(state.root)
+
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path", resolve)
+    monkeypatch.setattr(wan_mod.runner, "run_stage",
+                        lambda orch, stage, **kw: state.stages.append((stage, kw["cli_args"])))
+    monkeypatch.setattr(wan_mod, "_decode_latents_host", lambda *a, **k: None)
+    monkeypatch.setattr(WanOrchestrator, "download", lambda self: None)
+    return state
+
+
+def test_generate_without_a_bf16_copy_refuses_naming_compile_and_writes_nothing(
+        quant_driver, tmp_path, capsys):
+    """A ``generate`` on a host where ``compile`` never ran has no bf16 copy, so each expert's
+    quantized directory is resolved from the fp32 source, which has none either: refused on
+    the driver naming ``difflet compile`` (exit 2, as this driver's other refusals) and the
+    expert, and nothing is written, no copy, no directory, no rank."""
+    args = _wan_args(work_dir=str(tmp_path / "work"), dual_expert=True, quant="mxfp8")
+    with pytest.raises(SystemExit) as exc:
+        WanOrchestrator(args).generate()
+    assert exc.value.code == 2
+    out, err = capsys.readouterr()
+    assert err.startswith("Error: --quant: transformer: ")
+    assert "run `difflet compile` with the same --quant flags first" in err
+    assert err.endswith("; nothing was launched.\n")
+    assert "MXFP8" not in out and quant_driver.stages == []
+    assert not quant_driver.cache.exists()
+
+
+def test_compile_quantizes_each_expert_from_its_bf16_copy_and_generate_resolves_them(
+        quant_driver, tmp_path, capsys):
+    """``compile --dual-expert --quant mxfp8`` writes one quantized directory per expert under
+    the compile cache, each built from the bf16 copy it has just made (the writer reads bf16
+    tensors, and the directory names its fp32 source), prints one ``[wan] MXFP8 <expert>``
+    line per expert and launches the stage with both flags; ``generate`` resolves the same
+    two directories and launches the same way."""
+    from difflet.backends.neuron.core.weights_bf16 import copy_dir
+    from difflet.quant.checkpoint import read_manifest
+
+    compiling = WanOrchestrator(_wan_args(work_dir=str(tmp_path / "work"), dual_expert=True,
+                                          quant="mxfp8"))
+    assert compiling._quantized_dits == {}
+    compiling.compile()
+    dirs = compiling._quantized_dits
+    assert sorted(dirs) == list(_EXPERTS) and len(set(dirs.values())) == 2
+    out = capsys.readouterr().out
+    for name in _EXPERTS:
+        path = Path(dirs[name])
+        assert path.is_relative_to(quant_driver.cache)
+        assert copy_dir(quant_driver.root / name, quant_driver.cache).is_dir()
+        source = read_manifest(path)["source"]
+        assert source["path"] == str(copy_dir(quant_driver.root / name, quant_driver.cache))
+        assert source["bf16_copy_of"] == str((quant_driver.root / name).resolve())
+        assert f"[wan] MXFP8 {name} (nki): {path}\n" in out
+    assert out.index("MXFP8 transformer ") < out.index("MXFP8 transformer_2 ")
+    assert os.environ["DIFFLET_NKI_TRACE_CACHE"] == "1"
+    assert [stage for stage, _ in quant_driver.stages] == ["transformer", "vae"]
+    quant_driver.stages.clear()
+    generating = WanOrchestrator(_wan_args(work_dir=str(tmp_path / "work"), dual_expert=True,
+                                           quant="mxfp8"))
+    generating.generate()
+    assert generating._quantized_dits == dirs
+    assert "MXFP8 transformer_2 (nki)" in capsys.readouterr().out
+    assert [stage for stage, _ in quant_driver.stages] == ["transformer", "vae"]
+    for _, line in quant_driver.stages:
+        assert line[line.index("--quant") + 1] == "mxfp8" and "--dual-expert" in line
+
+
+def test_tp8_is_refused_by_the_writer_through_the_drivers_refusal(quant_driver, tmp_path,
+                                                                  capsys):
+    """At tp8 ``ffn.net.2``'s K per rank (1728 on the 14B DiT, 64 on the toy) is not a
+    multiple of 128, so the writer refuses naming the layer, K and tp, and the driver turns
+    that into its usual refusal (exit 2) before any rank starts; nothing is quantized."""
+    args = _wan_args(work_dir=str(tmp_path / "work"), tp_degree=8, quant="mxfp8")
+    with pytest.raises(SystemExit) as exc:
+        WanOrchestrator(args).compile()
+    assert exc.value.code == 2
+    out, err = capsys.readouterr()
+    assert err.startswith("Error: --quant: transformer: blocks.0.ffn.net.2 (K=512 split over "
+                          "tp=8): K=64 must be a multiple of 128")
+    assert err.endswith("; nothing was launched.\n")
+    assert "MXFP8" not in out and quant_driver.stages == []
+    assert not list(quant_driver.cache.rglob("difflet_quant.json"))
+
+
+def test_umt5_placement_counts_both_quantized_experts(quant_driver, monkeypatch, tmp_path,
+                                                      capsys):
+    """umT5's placement beside Wan 2.2's two experts counts each as its quantized directory
+    stores it (fp8 weights, uint8 block scales, the bf16 rest), both of them: at a budget
+    between the two bf16 experts and the two quantized ones (umT5 beside them), bf16 moves
+    umT5 to the host and --quant keeps it on the device; 1 KiB under the quantized pair's
+    bytes moves it too, so both directories were read."""
+    from difflet.backends.neuron.hbm import FIT_FRACTION, GIB
+    from difflet.backends.neuron.wan.hbm import device_text_encoder_bytes
+
+    compiling = WanOrchestrator(_wan_args(work_dir=str(tmp_path / "work"), dual_expert=True,
+                                          quant="mxfp8"))
+    compiling.compile()
+
+    def estimate(dit_dirs=None) -> int:
+        return device_text_encoder_bytes(quant_driver.root, tp_degree=4, experts=_EXPERTS,
+                                         dit_dirs=dit_dirs)
+
+    two_bf16, two_quantized = estimate(), estimate(compiling._quantized_dits)
+    assert two_quantized < two_bf16
+
+    def budget(limit_bytes: float) -> None:
+        """The env budget whose ``FIT_FRACTION`` is ``limit_bytes``."""
+        monkeypatch.setenv("DIFFLET_NEURON_HBM_GIB", repr(limit_bytes / FIT_FRACTION / GIB))
+
+    def on_device(**overrides) -> bool:
+        args = _wan_args(work_dir=str(tmp_path / "work"), dual_expert=True, **overrides)
+        WanOrchestrator(args).generate()
+        moved = getattr(args, "host_text_encoder", False)
+        assert (_NOTE in capsys.readouterr().out) is moved
+        return not moved
+
+    budget((two_bf16 + two_quantized) / 2)
+    assert on_device() is False
+    assert on_device(quant="mxfp8") is True
+    budget(two_quantized - 1024)
+    assert on_device(quant="mxfp8") is False
