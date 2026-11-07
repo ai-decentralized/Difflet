@@ -25,7 +25,9 @@ the spec claims.
 
 The digest hashes the spec's weights identity and the source fingerprint (file names, sizes and
 Hugging Face blob names, which are content hashes), so another checkpoint, another target set
-or another TP degree is another directory.
+or another TP degree is another directory. A source that is a bf16 copy (Wan's fp32 hub DiTs)
+adds its copy manifest's sha256: the copy's files carry no blob name, and the manifest is what
+names the fp32 snapshot the copy, and so the quantized directory, were built from.
 """
 
 from __future__ import annotations
@@ -60,7 +62,18 @@ _SAFE = re.compile(r"[^A-Za-z0-9._-]+")
 def source_fingerprint(model_dir: str | Path) -> list[list[Any]]:
     """The source's identity without reading its data: every safetensors file's name, size and
     resolved blob name (a Hugging Face blob is named by its content hash), and every index
-    file's sha256. No mtime: a copied checkpoint is the same checkpoint."""
+    file's sha256. No mtime: a copied checkpoint is the same checkpoint.
+
+    A bf16 copy (``core/weights_bf16.py``) ends with its manifest's sha256: the copy writes its
+    own safetensors, so their names say nothing about the hub snapshot, and the manifest (the
+    fp32 source's file names, sizes and mtimes) is the copy's own tie to it. A remade copy is
+    another manifest, so the quantized directory built from the old one is another checkpoint's.
+    A directory without a manifest (every hub checkpoint) keeps the fingerprint it had, so every
+    digest written before the entry existed still resolves."""
+    # Imported where it is used, as the loader's weight map is: the quant package names no
+    # backend module at import.
+    from difflet.backends.neuron.core.weights_bf16 import MANIFEST as BF16_MANIFEST
+
     model_dir = Path(model_dir)
     entries: list[list[Any]] = []
     for path in sorted(model_dir.glob("*.safetensors")):
@@ -70,6 +83,9 @@ def source_fingerprint(model_dir: str | Path) -> list[list[Any]]:
         entries.append([path.name, hashlib.sha256(path.read_bytes()).hexdigest()])
     if not entries:
         raise FileNotFoundError(f"no .safetensors under {model_dir}")
+    manifest = model_dir / BF16_MANIFEST
+    if manifest.is_file():
+        entries.append([manifest.name, hashlib.sha256(manifest.read_bytes()).hexdigest()])
     return entries
 
 
