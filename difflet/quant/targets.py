@@ -62,16 +62,21 @@ target has K 3072. The output projections stay bf16 as above, and so do the per-
 modulation (``norm1.linear``, ``norm1_context.linear``, ``norm.linear``: applied to one
 ``[B, D]`` vector, as Qwen-Image's), the token refiner (``context_embedder``: its own attention
 and MLP on the text, before the blocks), the embedders, ``norm_out`` and ``proj_out``. The
-single blocks' ``proj_out`` waits for phase D: it is one checkpoint ``Linear(3072 + 12288,
+single blocks' ``proj_out`` waits for its split: it is one checkpoint ``Linear(3072 + 12288,
 3072)`` that the neuron module reads as two row-parallel column ranges (``proj_out_attn`` /
-``proj_out_mlp``), and until HunyuanVideo's spec splits it (``SPLITS_BY_MODEL``) the writer
-would spend minutes on a directory holding it quantized whole, which every rank then refuses as
-a pattern that names none of its modules, without naming the cause; so a spec that names it is
-refused by name before anything is written (:func:`fused_proj_out_targets`). At tp > 1 the
-MLP-downs (``ff.net.2``, ``ff_context.net.2``: K 12288) are row-parallel with a K per rank of
-6144, 3072 and 1536 at tp 2, 4 and 8, whole 512-wide kernel tiles; an override that quantizes
-``to_out.0`` / ``to_add_out`` (K 3072) has 1536, 768 and 384, multiples of 128 with a partial
-last tile at tp 4 and 8.
+``proj_out_mlp``), and until HunyuanVideo's spec splits it (``SPLITS_BY_MODEL``: phase D's
+writer, which Task E6 adopts) the writer would spend minutes on a directory holding it quantized
+whole, which every rank then refuses as a pattern that names none of its modules, without
+naming the cause; so a spec that names it is refused by name before anything is written
+(:func:`fused_proj_out_targets`). At tp > 1 the MLP-downs (``ff.net.2``, ``ff_context.net.2``:
+K 12288) are row-parallel with a K per rank of 6144, 3072 and 1536 at tp 2, 4 and 8, whole
+512-wide kernel tiles; an override that quantizes ``to_out.0`` / ``to_add_out`` (K 3072) has
+1536, 768 and 384, multiples of 128 with a partial last tile at tp 4 and 8. The token refiner's
+``attn.to_out.0`` and ``ff.net.2`` are row layers of the same K: the row-parallel set names
+them for overrides, since the FP8 twin of a row layer shards its weight along K whatever the
+set says, and a weight the writer laid out as one K range is read in other block memberships
+than it was scaled in wherever a rank's range is not whole tiles (``attn.to_out.0`` at tp 4
+and 8).
 
 Patterns are regexes full-matched against diffusers' module names (the ``transformer.`` trace
 prefix is stripped by :meth:`QuantSpec.matches`).
@@ -252,7 +257,7 @@ HUNYUAN_VIDEO_KEPT_BF16: tuple[str, ...] = (
     rf"{_BLOCK}\.attn\.(to_out\.0|to_add_out)",
     rf"{_BLOCK}\.norm1(_context)?\.linear",
     rf"{_SINGLE}\.norm\.linear",
-    rf"{_SINGLE}\.proj_out",  # phase D: the writer must store its two column ranges
+    rf"{_SINGLE}\.proj_out",  # until HunyuanVideo's spec splits it (Task E6)
     rf"{_SINGLE}\.proj_out_(attn|mlp)",  # the neuron module's names for it
     r"context_embedder\..*",
     r"time_text_embed\..*",
@@ -260,16 +265,21 @@ HUNYUAN_VIDEO_KEPT_BF16: tuple[str, ...] = (
     r"proj_out",
 )
 
+#: Every row layer of the neuron module with a checkpoint key of its own (the single blocks'
+#: ``proj_out`` halves join with the split).
 HUNYUAN_VIDEO_ROW_PARALLEL: tuple[str, ...] = (
     rf"{_BLOCK}\.attn\.(to_out\.0|to_add_out)",  # not default targets; kept for overrides
     rf"{_BLOCK}\.(ff|ff_context)\.net\.2",
+    # not default targets; kept for overrides
+    r"context_embedder\.token_refiner\.refiner_blocks\.\d+\.(attn\.to_out\.0|ff\.net\.2)",
 )
 
-#: Why a HunyuanVideo spec may not name a single block's fused ``proj_out``, after its name.
+#: Why a HunyuanVideo spec may not name a single block's fused ``proj_out``, after the caller's
+#: model or flag and the layer's name.
 FUSED_PROJ_OUT_REASON: str = (
-    "is read as two column ranges (proj_out_attn / proj_out_mlp) by the neuron module, which "
-    "HunyuanVideo's MXFP8 checkpoint does not split yet (roadmap phase D); drop it from the "
-    "targets"
+    "is read as two column ranges (proj_out_attn / proj_out_mlp) by the neuron module, and this "
+    "model's MXFP8 checkpoint does not store it as those halves yet (phase D's split writer, "
+    "adopted in roadmap task E6); drop it from the targets"
 )
 
 

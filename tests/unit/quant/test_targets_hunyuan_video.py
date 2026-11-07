@@ -1,10 +1,10 @@
 """The HunyuanVideo MXFP8 target table against diffusers' own module names (the checkpoint keys):
 the dual-stream q/k/v of both streams and both MLPs, the single-stream q/k/v and MLP-up are
 quantized; the output projections, the modulation, the token refiner, the embedders, the output
-layer and the single blocks' fused ``proj_out`` stay bf16 (phase D); the row-parallel set is
-what the TP layer shards along K, with an MX layout at tp 1, 2, 4 and 8 on the real geometry. A
-spec naming the fused ``proj_out`` is found by ``fused_proj_out_targets``, which the
-application and the driver refuse it with."""
+layer and the single blocks' fused ``proj_out`` stay bf16 (until the spec splits it); the
+row-parallel set is every layer the TP layer shards along K, the token refiner's included, with
+an MX layout at tp 1, 2, 4 and 8 on the real geometry. A spec naming the fused ``proj_out`` is
+found by ``fused_proj_out_targets``, which the application and the driver refuse it with."""
 
 from __future__ import annotations
 
@@ -19,6 +19,7 @@ import torch
 from difflet.cli.quant import QUANT_MODELS, quant_spec
 from difflet.quant.spec import LAYOUT_K, QuantSpec
 from difflet.quant.targets import (
+    FUSED_PROJ_OUT_REASON,
     HUNYUAN_VIDEO_KEPT_BF16,
     HUNYUAN_VIDEO_ROW_PARALLEL,
     HUNYUAN_VIDEO_TARGETS,
@@ -44,7 +45,7 @@ HV1 = "hunyuanvideo-community/HunyuanVideo"
 PER_DUAL = {"attn.to_q", "attn.to_k", "attn.to_v", "attn.add_q_proj", "attn.add_k_proj",
             "attn.add_v_proj", "ff.net.0.proj", "ff.net.2", "ff_context.net.0.proj",
             "ff_context.net.2"}
-#: Per single-stream block: the joint q/k/v and the MLP-up (``proj_out`` waits for phase D).
+#: Per single-stream block: the joint q/k/v and the MLP-up (``proj_out`` waits for its split).
 PER_SINGLE = {"attn.to_q", "attn.to_k", "attn.to_v", "proj_mlp"}
 
 
@@ -65,9 +66,31 @@ def test_default_targets_cover_the_block_qkv_and_mlps_only(model):
     assert len(names) == (10 * TINY_FP8_HV1["num_layers"]
                           + 4 * TINY_FP8_HV1["num_single_layers"])
     assert not any(n.startswith("context_embedder.") for n in names)  # the refiner's own ff/attn
-    assert {n for n in _linears(model) if spec.is_row_parallel(n)} == {
-        n for n in _linears(model) if n.startswith("transformer_blocks.")
-        and n.endswith(("attn.to_out.0", "attn.to_add_out", "ff.net.2", "ff_context.net.2"))}
+
+
+#: The neuron module's row layers (``RowParallelLinear`` in
+#: ``difflet/models/hunyuan_video/modeling_hunyuan_video.py``) with a checkpoint key of their
+#: own, by owner: the dual blocks' output projections and MLP-downs, and the token refiner's
+#: attention output and MLP-down. The single blocks' ``proj_out_attn`` / ``proj_out_mlp`` are
+#: row layers too, read as column ranges of the fused ``proj_out`` until the spec splits it.
+ROW_LAYERS = {
+    "transformer_blocks.": ("attn.to_out.0", "attn.to_add_out", "ff.net.2", "ff_context.net.2"),
+    "context_embedder.token_refiner.": ("attn.to_out.0", "ff.net.2"),
+}
+
+
+def test_the_row_parallel_set_is_every_row_layer_with_a_key_of_its_own(model):
+    """The FP8 twin of a row layer is picked by the module's type and shards the stored weight
+    along K, but the writer lays a weight out per rank K range only where ``row_parallel`` names
+    it. A row layer the set missed would be written as one K range, and wherever a rank's range
+    is not whole 512-wide tiles (the refiner's ``attn.to_out.0``, K 3072, at tp 4 and 8) the
+    ranks would read other block memberships than the weight was scaled in, with no error. The
+    refiner's row layers are not default targets: they are listed for overrides."""
+    spec = default_spec("hunyuan_video", tp_degree=4)
+    row = {n for n in _linears(model) if spec.is_row_parallel(n)}
+    assert row == {n for n in _linears(model) for owner, layers in ROW_LAYERS.items()
+                   if n.startswith(owner) and n.endswith(layers)}
+    assert spec.k_shards("context_embedder.token_refiner.refiner_blocks.0.attn.to_out.0") == 4
 
 
 def test_targets_and_kept_bf16_cover_every_linear_once(model):
@@ -105,6 +128,19 @@ def test_fused_proj_out_targets_name_the_single_blocks_proj_out():
     # module spelling: no checkpoint key, so the writer's dead-pattern refusal owns it
     split = QuantSpec(targets=(r"single_transformer_blocks\.\d+\.proj_out_attn",))
     assert fused_proj_out_targets(split, 2) == []
+
+
+def test_the_fused_proj_out_reason_reads_after_the_callers_prefix():
+    """The application puts ``HunyuanVideo: <name>`` before the reason and the driver
+    ``--quant: <name>``, so the reason names the model no second time, its clause on the
+    checkpoint is about ``proj_out`` (not the neuron module), and it keeps the substrings the
+    application's refusal test matches."""
+    message = f"HunyuanVideo: single_transformer_blocks.1.proj_out {FUSED_PROJ_OUT_REASON}"
+    assert re.search(r"single_transformer_blocks\.1\.proj_out is read as two column ranges "
+                     r"\(proj_out_attn / proj_out_mlp\) by the neuron module, and .*phase D",
+                     message)
+    assert message.count("HunyuanVideo") == 1
+    assert ", which " not in FUSED_PROJ_OUT_REASON
 
 
 def test_the_cli_id_resolves_to_the_table_at_the_launchs_tp(monkeypatch):

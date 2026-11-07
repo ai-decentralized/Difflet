@@ -291,14 +291,20 @@ def test_main_refuses_cfg_parallel_on_neuron(monkeypatch, tmp_path, capsys):
     assert "guidance-distilled" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("mode", ["generate", "compile"])
-def test_quant_is_refused_until_the_driver_carries_it(launches, capsys, mode):
+@pytest.mark.parametrize(("mode", "dp_worker"), [
+    ("generate", False), ("compile", False), ("run", False), ("generate", True),
+], ids=["generate", "compile", "run", "dp-worker"])
+def test_quant_is_refused_until_the_driver_carries_it(launches, capsys, tmp_path, mode,
+                                                      dp_worker):
     """``QUANT_MODELS`` names HunyuanVideo for its target table, so --quant passes the CLI's
     model check; the driver neither writes the quantized directory nor forwards the flag yet,
-    so it is refused here instead of running the bf16 DiT."""
+    so it is refused here instead of running the bf16 DiT. ``generate --dp N`` / ``--requests``
+    reach the DP router before any orchestrator: the router forwards --quant to each worker
+    (``--requests-dir``), and the worker refuses it as its own driver."""
     stages, _ = launches
+    args = _args(quant="mxfp8", requests_dir=str(tmp_path / "requests") if dp_worker else None)
     with pytest.raises(SystemExit) as exc:
-        getattr(HunyuanVideoOrchestrator(_args(quant="mxfp8")), mode)()
+        getattr(HunyuanVideoOrchestrator(args), mode)()
     assert exc.value.code == 2 and stages == []
     assert "does not support --quant" in capsys.readouterr().err
 
