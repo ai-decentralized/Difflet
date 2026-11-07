@@ -19,7 +19,9 @@ Before anything is built, the estimates from the checkpoint headers answer the s
 for components that share a core: ``Component`` names a checkpoint subdirectory, the dtype it
 holds on the device and the tensors it skips, and ``components_fit`` adds the components up over
 the TP group (a device text encoder beside the DiT, which the per-component check at load would
-only catch once the DiT had loaded). Each model's ``hbm.py`` declares its components.
+only catch once the DiT had loaded). Each model's ``hbm.py`` declares its components. A
+quantized DiT (``--quant``) is counted as its directory stores it, fp8 weights and uint8 block
+scales rather than the bf16 source (``quantized_dir_fits``, ``Component.stored_in``).
 
 One core's HBM comes from ``DIFFLET_NEURON_HBM_GIB`` if set, else from ``neuron-ls``
 (``memory_size`` over the logical cores of a device), else from trn2's numbers: 96 GiB per
@@ -123,7 +125,8 @@ def safetensors_numel(
 def safetensors_bytes(directory: str | Path, *, index: str | None = None) -> int:
     """Total data bytes of the ``*.safetensors`` files directly in ``directory`` (or of the
     shards ``index`` lists), from the headers' ``data_offsets``: the bytes as stored, whatever
-    their dtypes (a quantized checkpoint mixes fp8 weights, fp32 scales and bf16 tensors)."""
+    their dtypes (a quantized checkpoint mixes fp8 weights, uint8 block scales and bf16
+    tensors)."""
     directory = Path(directory)
     index_path = directory / index if index else None
     if index_path is not None and index_path.is_file():
@@ -143,6 +146,27 @@ def safetensors_bytes(directory: str | Path, *, index: str | None = None) -> int
     return total
 
 
+def _against_budget(estimate: int) -> tuple[bool, int, int]:
+    """``(fits, estimate, limit)``: ``estimate`` against ``FIT_FRACTION`` of one core's HBM."""
+    limit = int(per_core_hbm_bytes()[0] * FIT_FRACTION)
+    return estimate <= limit, estimate, limit
+
+
+def quantized_dir_bytes(dit_dir: str | Path, *, tp_degree: int) -> int:
+    """Lower bound of one rank's bytes of a quantized DiT directory
+    (``difflet/quant/checkpoint.py``, the ``--quant`` launches): the directory's safetensors as
+    stored (fp8 weights, uint8 block scales, the bf16 rest) over tp. The bf16 estimate of the
+    source checkpoint would count every fp8 weight at twice its size and refuse a tp the
+    quantized DiT fits."""
+    return safetensors_bytes(dit_dir) // max(int(tp_degree), 1)
+
+
+def quantized_dir_fits(dit_dir: str | Path, *, tp_degree: int) -> tuple[bool, int, int]:
+    """``(fits, estimate, limit)``: ``quantized_dir_bytes`` against ``FIT_FRACTION`` of one
+    core's HBM. Torch-free, like ``components_fit``."""
+    return _against_budget(quantized_dir_bytes(dit_dir, tp_degree=tp_degree))
+
+
 @dataclass(frozen=True)
 class Component:
     """One checkpoint subdirectory a device component loads, for the estimates below.
@@ -150,30 +174,49 @@ class Component:
     ``subdir`` is relative to the snapshot root; ``dtype_bytes`` is the element size the
     component holds on the device (not the checkpoint's); tensors whose names start with one of
     ``skipped_prefixes`` are never loaded (a vision tower, an ``lm_head``); ``index`` names the
-    safetensors index whose shards are the component's (``safetensors_numel``)."""
+    safetensors index whose shards are the component's (``safetensors_numel``). A component
+    ``stored_in`` a directory (a quantized DiT, ``quantized_dir_bytes``) loads that directory
+    and is counted as it stores it, whatever ``dtype_bytes`` says."""
 
     subdir: str
     dtype_bytes: int
     skipped_prefixes: tuple[str, ...] = ()
     index: str | None = None
+    stored_dir: str | None = None
 
     def numel(self, model_dir: str | Path) -> int:
-        """The element count this component loads from ``<model_dir>/<subdir>``."""
+        """The element count this component loads from ``<model_dir>/<subdir>``, or from
+        ``stored_dir``."""
         skipped = self.skipped_prefixes
         keep = (lambda name: not name.startswith(skipped)) if skipped else None
-        return safetensors_numel(Path(model_dir) / self.subdir, keep, index=self.index)
+        directory = Path(model_dir) / self.subdir
+        if self.stored_dir is not None:
+            directory = Path(self.stored_dir)
+        return safetensors_numel(directory, keep, index=self.index)
+
+    def nbytes(self, model_dir: str | Path) -> int:
+        """The bytes this component holds on the device: its elements in ``dtype_bytes``, or,
+        ``stored_in`` a directory, that directory's bytes as stored (``safetensors_bytes``)."""
+        if self.stored_dir is not None:
+            return safetensors_bytes(self.stored_dir, index=self.index)
+        return self.numel(model_dir) * int(self.dtype_bytes)
 
     def in_dtype(self, dtype_bytes: int) -> Component:
         """The same tensors held in another element size."""
         return replace(self, dtype_bytes=int(dtype_bytes))
 
+    def stored_in(self, directory: str | Path) -> Component:
+        """The same component loaded from ``directory`` and counted as it is stored there."""
+        return replace(self, stored_dir=str(directory))
+
 
 def components_bytes(model_dir: str | Path, components: Iterable[Component], *,
                      tp_degree: int) -> int:
     """Lower bound of one rank's weight bytes when ``components`` share every core of a TP group
-    of ``tp_degree``: their elements times their element sizes, all counted as sharded over tp
-    (replicated tensors do not shrink, so a rejection means the weights clearly cannot fit)."""
-    total = sum(c.numel(model_dir) * int(c.dtype_bytes) for c in components)
+    of ``tp_degree``: their elements times their element sizes (a component ``stored_in`` a
+    directory: its bytes as stored), all counted as sharded over tp (replicated tensors do not
+    shrink, so a rejection means the weights clearly cannot fit)."""
+    total = sum(c.nbytes(model_dir) for c in components)
     return total // max(int(tp_degree), 1)
 
 
@@ -181,9 +224,7 @@ def components_fit(model_dir: str | Path, components: Iterable[Component], *,
                    tp_degree: int) -> tuple[bool, int, int]:
     """``(fits, estimate, limit)``: ``components_bytes`` against ``FIT_FRACTION`` of one core's
     HBM. Torch-free, for the CLI drivers' checks before torchrun starts any rank."""
-    estimate = components_bytes(model_dir, components, tp_degree=tp_degree)
-    limit = int(per_core_hbm_bytes()[0] * FIT_FRACTION)
-    return estimate <= limit, estimate, limit
+    return _against_budget(components_bytes(model_dir, components, tp_degree=tp_degree))
 
 
 def suggested_tp(estimate_bytes: int, tp_degree: int, limit_bytes: int) -> int:
@@ -230,6 +271,8 @@ __all__ = [
     "components_bytes",
     "components_fit",
     "per_core_hbm_bytes",
+    "quantized_dir_bytes",
+    "quantized_dir_fits",
     "safetensors_numel",
     "suggested_tp",
 ]
