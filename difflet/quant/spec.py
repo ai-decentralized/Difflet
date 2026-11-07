@@ -56,6 +56,11 @@ class QuantSpec:
     #: Patterns (as ``targets``) of the targets whose weight the TP layer shards along K; at
     #: ``tp_degree > 1`` those are quantized per rank K range.
     row_parallel: tuple[str, ...] = ()
+    #: Patterns (as ``targets``) of the fused checkpoint linears the model runs as two column
+    #: ranges (FLUX's and HunyuanVideo's single-stream ``proj_out``). The quantized checkpoint
+    #: stores each as ``<name>_attn`` / ``<name>_mlp`` (``checkpoint.py``), so targets and
+    #: ``row_parallel`` name the halves, never the fused linear.
+    split_linears: tuple[str, ...] = ()
     schema: int = QUANT_SCHEMA
 
     def __post_init__(self) -> None:
@@ -65,7 +70,7 @@ class QuantSpec:
             raise ValueError(f"compute must be one of {COMPUTE_MODES}, got {self.compute!r}")
         if not self.targets or any(not t for t in self.targets):
             raise ValueError("a QuantSpec needs at least one non-empty target pattern")
-        for pattern in (*self.targets, *self.row_parallel):
+        for pattern in (*self.targets, *self.row_parallel, *self.split_linears):
             re.compile(pattern)
 
     @property
@@ -100,12 +105,31 @@ class QuantSpec:
         row-parallel target, else 1."""
         return int(self.tp_degree) if self.is_row_parallel(name) else 1
 
+    def is_split(self, name: str) -> bool:
+        """Whether the checkpoint linear at ``name`` is stored as its two column ranges (as
+        :meth:`matches`, prefix stripped)."""
+        bare = strip_prefix(name)
+        return any(re.fullmatch(p, bare) for p in self.split_linears)
+
+    def unmatched_splits(self, names: Iterable[str]) -> list[str]:
+        """The split patterns that match none of ``names``: refused as
+        :meth:`unmatched_targets` is, since a dead split would leave the fused weight where the
+        spec claims the halves."""
+        bare = [strip_prefix(name) for name in names]
+        return [p for p in self.split_linears if not any(re.fullmatch(p, name) for name in bare)]
+
     # ------------------------------------------------------------- serialisation
 
     def to_dict(self) -> dict[str, Any]:
+        """The spec as JSON. ``split_linears`` only when non-empty, so every spec written
+        before the field existed reads back as the same dict."""
         body = dataclasses.asdict(self)
         body["targets"] = list(self.targets)
         body["row_parallel"] = list(self.row_parallel)
+        if self.split_linears:
+            body["split_linears"] = list(self.split_linears)
+        else:
+            del body["split_linears"]
         body["format"] = FORMAT
         return body
 
@@ -117,6 +141,7 @@ class QuantSpec:
             raise ValueError(f"quant format must be {FORMAT!r}, got {fmt!r}")
         body["targets"] = tuple(body["targets"])
         body["row_parallel"] = tuple(body.get("row_parallel", ()))
+        body["split_linears"] = tuple(body.get("split_linears", ()))
         return cls(**body)
 
     def cache_fields(self) -> dict[str, Any]:
@@ -136,14 +161,19 @@ class QuantSpec:
 
     def weights_identity(self) -> dict[str, Any]:
         """The fields that decide the quantized checkpoint's bytes (not the compute path): the
-        quantized directory is keyed by these, so ``dequant`` and ``nki`` share one directory."""
-        return {
+        quantized directory is keyed by these, so ``dequant`` and ``nki`` share one directory.
+        The split linears enter only when there are any: they change the bytes (the halves in
+        place of the fused weight), and a spec without them keeps the digest it had before."""
+        identity = {
             "quant": FORMAT,
             "quant_schema": self.schema,
             "quant_targets": list(self.targets),
             "quant_row_parallel": list(self.row_parallel),
             "quant_tp_degree": int(self.tp_degree),
         }
+        if self.split_linears:
+            identity["quant_split_linears"] = list(self.split_linears)
+        return identity
 
 
 def strip_prefix(name: str) -> str:

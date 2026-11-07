@@ -9,13 +9,18 @@ TINY = dict(patch_size=1, in_channels=8, num_layers=1, num_single_layers=2, atte
             num_attention_heads=4, joint_attention_dim=32, pooled_projection_dim=16,
             guidance_embeds=True, axes_dims_rope=(2, 2, 4))
 TINY_SHAPE = dict(height=64, width=64, text_seq_len=8)  # 4x4 packed image tokens
+#: The toy's dims with a 128-wide inner dimension: the MX block layout wants K in multiples of
+#: 128 (``difflet/quant/mx.swizzle_perm``), the toy's 32 is below that.
+TINY_FP8 = {**TINY, "attention_head_dim": 32, "axes_dims_rope": (8, 12, 12)}
 
 
-def write_tiny_flux(root) -> str:
+def write_tiny_flux(root, *, config: dict | None = None) -> str:
+    """The seeded diffusers DiT as ``root/transformer``; ``config`` picks the geometry
+    (``TINY`` by default, ``TINY_FP8`` for the MXFP8 tests)."""
     from diffusers import FluxTransformer2DModel
 
     torch.manual_seed(0)
-    model = FluxTransformer2DModel(**TINY)
+    model = FluxTransformer2DModel(**(config or TINY))
     path = f"{root}/transformer"
     model.save_pretrained(path, safe_serialization=True)
     return path
