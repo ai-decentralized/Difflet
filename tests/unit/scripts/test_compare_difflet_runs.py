@@ -8,6 +8,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import math
+import sys
 from pathlib import Path
 
 import imageio.v3 as iio
@@ -61,11 +62,60 @@ def test_identical_clip_reads_as_identical_frames(cdr, tmp_path):
     a = _write_mp4(tmp_path / "a.mp4", _clip())
     result = cdr.compare(a, a)
     assert math.isinf(result["psnr"])
+    assert math.isinf(result["psnr_worst"])
+    assert result["identical_frames"] == _FRAMES
     assert result["ssim"] == pytest.approx(1.0)
     assert result["lpips"] is None
     assert result["frames"] == _FRAMES
     assert result["min_psnr_frame"] == 0
     assert (result["ref"], result["cand"]) == (str(a), str(a))
+
+
+def test_one_identical_frame_leaves_the_clip_psnr_finite(cdr, tmp_path):
+    """A conditioning or static frame that matches bit for bit must not report the clip as
+    identical: the mean skips it, the count says how many matched, the worst frame is finite."""
+    ref = np.full((_FRAMES, _H, _W, 3), 100, dtype=np.uint8)
+    cand = ref + 1  # 48.1308 dB
+    cand[0] = ref[0]
+    result = cdr.compare(_write_frame_dir(tmp_path / "ref", ref),
+                         _write_frame_dir(tmp_path / "cand", cand))
+    assert result["psnr"] == pytest.approx(48.1308, abs=1e-3)
+    assert result["psnr_worst"] == pytest.approx(48.1308, abs=1e-3)
+    assert result["identical_frames"] == 1
+    assert result["min_psnr_frame"] == 1
+
+
+def _write_pt(path: Path, frames: np.ndarray) -> Path:
+    """The orchestrator's lossless fallback: ``(B, F, C, H, W)`` float in [0, 1]."""
+    torch.save(torch.from_numpy(frames).permute(0, 3, 1, 2).float().div(255).unsqueeze(0), path)
+    return path
+
+
+def test_pt_tensor_is_read_as_the_orchestrators_lossless_clip(cdr, tmp_path):
+    clip = _clip()
+    other = clip.copy()
+    other[2] = 255 - other[2]
+    a = _write_pt(tmp_path / "a.pt", clip)
+    b = _write_pt(tmp_path / "b.pt", other)
+    same = cdr.compare(a, a)
+    assert math.isinf(same["psnr"]) and same["frames"] == _FRAMES
+    result = cdr.compare(a, b)
+    assert 0.0 < result["psnr"] < math.inf
+    assert result["min_psnr_frame"] == 2
+    assert cdr.compare_runs(None, None, a, b).keys() == {"video"}
+
+
+def test_pt_tensor_is_truncated_to_uint8_as_export_to_video_does(cdr, tmp_path):
+    """0.5 * 255 = 127.5 must land on 127 (truncation), the value the .mp4 route encodes."""
+    torch.save(torch.full((1, _FRAMES, 3, _H, _W), 0.5), tmp_path / "a.pt")
+    pngs = _write_frame_dir(tmp_path / "pngs", np.full((_FRAMES, _H, _W, 3), 127, dtype=np.uint8))
+    assert math.isinf(cdr.compare(tmp_path / "a.pt", pngs)["psnr"])
+
+
+def test_pt_tensor_in_another_layout_is_refused(cdr, tmp_path):
+    torch.save(torch.zeros(1, 3, _FRAMES, _H, _W), tmp_path / "wan.pt")  # Wan's (B, C, T, H, W)
+    with pytest.raises(ValueError, match=r"\(B, F, 3, H, W\).*\[1, 3, 4, 32, 32\]"):
+        cdr.compare(tmp_path / "wan.pt", tmp_path / "wan.pt")
 
 
 def test_clip_pair_is_compared_frame_by_frame(cdr, tmp_path):
@@ -103,6 +153,40 @@ def test_empty_frame_directory_is_refused(cdr, tmp_path):
     (tmp_path / "empty").mkdir()
     with pytest.raises(FileNotFoundError, match="empty"):
         cdr.compare(tmp_path / "empty", tmp_path / "empty")
+
+
+def test_frame_directory_is_read_in_natural_order(cdr, tmp_path):
+    """Unpadded names: frame_10 follows frame_9, not frame_1; a .PNG counts; the worst frame is
+    named, since its index is a position in that order."""
+    frames = 10
+    names = [f"frame_{i + 1}.png" for i in range(frames)]
+    names[2] = "frame_3.PNG"
+    ref = np.full((frames, _H, _W, 3), 100, dtype=np.uint8)
+    cand = ref.copy()
+    cand[9] = 255 - cand[9]  # the frame named frame_10
+    for frame_dir, clip in ((tmp_path / "ref", ref), (tmp_path / "cand", cand)):
+        frame_dir.mkdir()
+        for file_name, frame in zip(names, clip):
+            iio.imwrite(frame_dir / file_name, frame, extension=".png")
+    result = cdr.compare(tmp_path / "ref", tmp_path / "cand")
+    assert result["frames"] == frames
+    assert result["identical_frames"] == frames - 1
+    assert result["min_psnr_frame"] == 9
+    assert result["min_psnr_file"] == "frame_10.png"
+
+
+def test_clip_that_decodes_to_no_frames_is_refused_naming_it(cdr, tmp_path, monkeypatch):
+    a = _write_mp4(tmp_path / "a.mp4", _clip())
+    monkeypatch.setattr("imageio.v3.imiter", lambda path: iter(()))
+    with pytest.raises(FileNotFoundError, match=r"no frames decoded from .*a\.mp4"):
+        cdr.compare(a, a)
+
+
+def test_missing_imageio_is_named_for_a_clip(cdr, tmp_path, monkeypatch):
+    a = _write_mp4(tmp_path / "a.mp4", _clip())
+    monkeypatch.setitem(sys.modules, "imageio.v3", None)
+    with pytest.raises(ImportError, match=r"pip install imageio"):
+        cdr.compare(a, a)
 
 
 def test_lpips_is_averaged_over_the_frames(cdr, tmp_path, monkeypatch):
