@@ -69,6 +69,9 @@ from difflet.backends.neuron.ltx_2.config import NeuronLtx2Config
 CHECKPOINT_PREFIX = "transformer."
 #: The diffusers model's rotary-embedding modules, each computed once per forward.
 ROPE_ATTRS = ("rope", "audio_rope", "cross_attn_rope", "cross_attn_audio_rope")
+#: The modeling's TP layout knobs (``_shard_ltx2_transformer``: the attentions or the MLPs
+#: stay whole on every rank), which ``quant`` refuses.
+_REPLICATE_FLAGS = ("DIFFLET_LTX2_TP_REPLICATE_ATTN", "DIFFLET_LTX2_TP_REPLICATE_MLP")
 
 
 def checkpoint_key(name: str) -> str:
@@ -347,9 +350,23 @@ class NeuronLtx2TransformerApplication(TorchNeuronApplicationBase):
     bf16 only). A ``num_layers`` below the checkpoint's (``NeuronLtx2Config.from_pretrained(...,
     num_layers=N)``) loads the first N blocks and reports the others under
     ``load_report["skipped"]``.
+
+    ``quant`` (a ``QuantSpec`` or its dict) is the base's MXFP8 wiring: the spec's target
+    linears (``difflet.quant.targets``' ``"ltx_2"`` table: the video- and text-input linears;
+    the audio stream, every ``to_out.0`` and the top level stay bf16) become their FP8 twins on
+    the meta module before the load, so ``model_path`` must then be the quantized checkpoint
+    directory (``difflet/quant/checkpoint.py``) whose tensors those layers hold. No q/k/v
+    fusion: the processors call ``to_q``/``to_k``/``to_v`` directly. The TP layout knobs
+    ``DIFFLET_LTX2_TP_REPLICATE_ATTN`` / ``_MLP`` are refused with a spec: they keep the
+    attentions' or the MLPs' linears whole on every rank, while the directory holds a
+    row-parallel weight (``ff.net.2``) quantized per rank K range for the launch's tp, each
+    range's scales in its own block order, which a whole-K layer would read as the wrong
+    blocks. Trainium3 and compile mode only (decision D43, ``require_fp8_supported``).
     """
 
     block_attrs = ("transformer.transformer_blocks",)
+    quant_model = "ltx_2"
+    quant_label = "LTX-2"
 
     def __init__(
         self,
@@ -370,6 +387,16 @@ class NeuronLtx2TransformerApplication(TorchNeuronApplicationBase):
             device=device,
             **kwargs,
         )
+        if self.quant is not None:
+            # The modeling's own reading of the flags; imported here, not at module level, for
+            # the reason _trace_module_class gives (it binds difflet.ops).
+            from difflet.models.ltx_2.modeling_ltx_2 import _env_flag
+
+            if any(_env_flag(flag) for flag in _REPLICATE_FLAGS):
+                raise ValueError(
+                    "--quant mxfp8 quantizes the row-parallel layers per rank K range; unset "
+                    "DIFFLET_LTX2_TP_REPLICATE_ATTN / _MLP"
+                )
         name = "NeuronLtx2Config"
         check_tp_matches(name, config, self.parallel)
         check_flag_matches(name, config, self.parallel, "cfg_parallel_enabled")

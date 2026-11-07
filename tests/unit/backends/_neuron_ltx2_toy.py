@@ -152,6 +152,20 @@ def _round_rope_to_bf16(model) -> None:
         rope.forward = wrapped
 
 
+def diffusers_forward(model, *, batch: int = 1, scale: float = 1.0):
+    """diffusers' ``(video, audio)`` of ``model`` (an ``LTX2VideoTransformer3DModel``, however
+    its weights were prepared) on ``tiny_ltx2_inputs()``, without text masks; ``sigma`` is the
+    timestep, as the orchestrator passes it."""
+    hidden, audio, text, audio_text, timestep, vcoords, acoords = tiny_ltx2_inputs(
+        batch=batch, scale=scale)
+    with torch.no_grad():
+        return model(
+            hidden_states=hidden, audio_hidden_states=audio, encoder_hidden_states=text,
+            audio_encoder_hidden_states=audio_text, timestep=timestep, sigma=timestep,
+            video_coords=vcoords, audio_coords=acoords, return_dict=False,
+        )
+
+
 def diffusers_reference(transformer_dir, *, num_layers: int | None = None, batch: int = 1,
                         scale: float = 1.0, bf16_rope: bool = False):
     """diffusers' fp32 ``(video, audio)`` on ``tiny_ltx2_inputs()`` from the saved files, without
@@ -166,15 +180,7 @@ def diffusers_reference(transformer_dir, *, num_layers: int | None = None, batch
         model.transformer_blocks = model.transformer_blocks[:num_layers]
     if bf16_rope:
         _round_rope_to_bf16(model)
-    hidden, audio, text, audio_text, timestep, vcoords, acoords = tiny_ltx2_inputs(
-        batch=batch, scale=scale)
-    with torch.no_grad():
-        video_out, audio_out = model(
-            hidden_states=hidden, audio_hidden_states=audio, encoder_hidden_states=text,
-            audio_encoder_hidden_states=audio_text, timestep=timestep, sigma=timestep,
-            video_coords=vcoords, audio_coords=acoords, return_dict=False,
-        )
-    return video_out, audio_out
+    return diffusers_forward(model, batch=batch, scale=scale)
 
 
 def write_tiny_ltx2_model(root, *, num_layers: int = 2, config: dict | None = None):
