@@ -185,9 +185,12 @@ def _local_snapshot(resolve_model_dir: Callable[[], str]) -> str | None:
 
 
 def refuse_dit_overflow(model: str, resolve_model_dir: Callable[[], str],
-                        dit_fits: Callable[..., tuple[bool, int, int]], tp: int) -> None:
+                        dit_fits: Callable[..., tuple[bool, int, int]], tp: int, *,
+                        stored: str = "bf16") -> None:
     """Refuse a TP degree whose DiT shard clearly cannot fit one core (``dit_fits``, the model's
-    ``hbm.py``) before any rank starts: print one message and exit 2.
+    ``hbm.py``) before any rank starts: print one message and exit 2. ``stored`` names what
+    ``dit_fits`` counted, so the line says what it measured: the bf16 source checkpoint, or
+    ``"MXFP8"`` for a quantized directory read as stored (a ``--quant`` launch).
 
     The application base refuses it too, but only once torchrun has started every rank and each
     has built the model on meta; a DP router would start every replica for it. The per-rank
@@ -202,10 +205,11 @@ def refuse_dit_overflow(model: str, resolve_model_dir: Callable[[], str],
         return
     from difflet.backends.neuron.hbm import GIB, suggested_tp
 
-    print(f"Error: the {model} DiT needs at least {estimate / GIB:.1f} GiB of bf16 weights per "
-          f"core at tp={tp}, over the {limit / GIB:.1f} GiB budget of one NeuronCore (every DP "
-          f"replica is its own TP group); use --tp-degree {suggested_tp(estimate, tp, limit)} "
-          "or more; nothing was launched.", file=sys.stderr, flush=True)
+    print(f"Error: the {model} DiT needs at least {estimate / GIB:.1f} GiB of {stored} weights "
+          f"per core at tp={tp}, over the {limit / GIB:.1f} GiB budget of one NeuronCore "
+          f"(every DP replica is its own TP group); use --tp-degree "
+          f"{suggested_tp(estimate, tp, limit)} or more; nothing was launched.",
+          file=sys.stderr, flush=True)
     raise SystemExit(2)
 
 

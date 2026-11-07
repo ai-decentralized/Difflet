@@ -219,40 +219,101 @@ def test_quant_is_prepared_before_the_fit_checks_and_written_on_compile_only(mon
                                                                               tmp_path):
     """The quantized directory is resolved (written by ``compile``, only read by ``generate``)
     before the DiT fit check and the text encoder placement, so both count the fp8 bytes, and
-    before any rank starts, so none writes."""
+    before any rank starts, so none writes; and after the compile cache is rooted at
+    --cache-dir, so the directory lands where the ranks, which inherit that root, resolve it
+    (``checkpoint.default_cache_root`` reads DIFFLET_COMPILE_CACHE when the directory is made:
+    rooted afterwards, compile would write under ~/.cache/difflet and the ranks refuse with
+    'run difflet compile first')."""
+    import os
+
     monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
-    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path / "cache"))
+    # setenv first records the variable's original state: the driver exports it with a plain
+    # os.environ write, which a delenv of an unset variable would not undo.
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", "")
+    monkeypatch.delenv("DIFFLET_COMPILE_CACHE")
     monkeypatch.setattr(cli.runner, "run_stage", lambda *a, **k: None)
     monkeypatch.setattr(cli.LTX2Orchestrator, "_decode_on_host", lambda self, work_dir: None)
     calls = []
     monkeypatch.setattr(cli.LTX2Orchestrator, "_prepare_quant",
-                        lambda self, *, create: calls.append(("prepare_quant", create)))
+                        lambda self, *, create: calls.append(
+                            ("prepare_quant", create, os.environ.get("DIFFLET_COMPILE_CACHE"))))
     monkeypatch.setattr(cli.LTX2Orchestrator, "_check_dit_fits",
-                        lambda self: calls.append(("check_dit_fits", None)))
+                        lambda self: calls.append(("check_dit_fits",)))
     monkeypatch.setattr(cli.LTX2Orchestrator, "_place_text_encoder",
-                        lambda self: calls.append(("place_text_encoder", None)))
-    cli.LTX2Orchestrator(_args(quant="mxfp8")).compile()
-    assert calls == [("prepare_quant", True), ("check_dit_fits", None),
-                     ("place_text_encoder", None)]
+                        lambda self: calls.append(("place_text_encoder",)))
+    cache_dir = str(tmp_path / "c")
+    cli.LTX2Orchestrator(_args(quant="mxfp8", cache_dir=cache_dir)).compile()
+    assert calls == [("prepare_quant", True, os.path.abspath(cache_dir)), ("check_dit_fits",),
+                     ("place_text_encoder",)]
     calls.clear()
-    cli.LTX2Orchestrator(_args(quant="mxfp8", work_dir=str(tmp_path / "w"))).generate()
-    assert calls == [("prepare_quant", False), ("check_dit_fits", None),
-                     ("place_text_encoder", None)]
+    monkeypatch.delenv("DIFFLET_COMPILE_CACHE")  # compile exported it; generate exports again
+    cli.LTX2Orchestrator(_args(quant="mxfp8", cache_dir=cache_dir,
+                               work_dir=str(tmp_path / "w"))).generate()
+    assert calls == [("prepare_quant", False, os.path.abspath(cache_dir)), ("check_dit_fits",),
+                     ("place_text_encoder",)]
+
+
+def test_quant_refuses_before_the_weights_are_downloaded(monkeypatch, capsys):
+    """--quant needs the weights on the driver (``compile`` writes the quantized directory from
+    them, ``generate`` resolves it and counts its bytes), so a launch before `difflet download`
+    is refused here, naming the fix, instead of starting tp x cp ranks that each report the
+    missing weights. The bf16 path leaves them to the ranks, as before."""
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+
+    def not_local(self):
+        raise OSError("not local")
+
+    monkeypatch.setattr(cli.LTX2Orchestrator, "_model_dir", not_local)
+    for create in (True, False):
+        with pytest.raises(SystemExit) as exc:
+            cli.LTX2Orchestrator(_args(quant="mxfp8"))._prepare_quant(create=create)
+        assert exc.value.code == 2
+        assert capsys.readouterr().err == (
+            "Error: --quant: the Lightricks/LTX-2 weights are not local; run `difflet download "
+            "--model-id Lightricks/LTX-2` first; nothing was launched.\n")
+    cli.LTX2Orchestrator(_args())._prepare_quant(create=True)
+    assert capsys.readouterr() == ("", "")
+
+
+def _stored_checkpoint(directory, name, nbytes):
+    """A safetensors file whose one fp8 tensor's ``data_offsets`` span ``nbytes`` of payload:
+    what the fit checks count for a quantized directory (its bytes as stored)."""
+    import json
+    import struct
+
+    directory.mkdir(parents=True, exist_ok=True)
+    header = json.dumps({name: {"dtype": "F8_E4M3", "shape": [nbytes],
+                                "data_offsets": [0, nbytes]}})
+    (directory / "model.safetensors").write_bytes(
+        struct.pack("<Q", len(header)) + header.encode() + bytes(nbytes))
+
+
+def _budget_gib(nbytes: int) -> str:
+    """A DIFFLET_NEURON_HBM_GIB whose fit budget (``FIT_FRACTION`` of it) is ``nbytes``."""
+    from difflet.backends.neuron.hbm import FIT_FRACTION, GIB
+
+    return repr(nbytes / FIT_FRACTION / GIB)
 
 
 def test_fit_checks_count_the_quantized_directory_as_stored(monkeypatch, tmp_path, capsys):
-    """With --quant the DiT is counted as its quantized directory stores it (fp8 weights), not
-    as the bf16 source: the source refuses tp1 (35 GiB per core) and moves Gemma-3 to the host
-    at tp2; a directory of 2 KB passes both checks."""
+    """With --quant the DiT is counted as its quantized directory stores it (fp8 weights and
+    block scales), not as the bf16 source: the source refuses tp1 (35 GiB per core) and moves
+    Gemma-3 to the host at tp2; a directory of 2,000 stored bytes passes both checks under a
+    24 GiB budget. Those bytes are what is compared with the budget: one under them refuses
+    the tp, naming MXFP8 weights, and one that holds them but not Gemma-3 beside them moves
+    Gemma-3 to the host."""
+    from difflet.backends.neuron.hbm import quantized_dir_bytes
+
     _header_only_checkpoint(tmp_path / "transformer", "w", 18_876_000_000)
     _header_only_checkpoint(tmp_path / "text_encoder", "language_model.model.w", 11_770_000_000)
-    _header_only_checkpoint(tmp_path / "quantized", "w", 1_000)
+    _stored_checkpoint(tmp_path / "quantized", "w", 2_000)
+    assert quantized_dir_bytes(str(tmp_path / "quantized"), tp_degree=1) == 2_000
     monkeypatch.setenv("DIFFLET_NEURON_HBM_GIB", "24")
     monkeypatch.setattr(cli.LTX2Orchestrator, "_model_dir", lambda self: str(tmp_path))
     orch = cli.LTX2Orchestrator(_args(tp_degree=1, quant="mxfp8"))
     with pytest.raises(SystemExit) as exc:
         orch._check_dit_fits()
-    assert exc.value.code == 2
+    assert exc.value.code == 2 and "GiB of bf16 weights per core" in capsys.readouterr().err
     orch._quantized_dit = str(tmp_path / "quantized")
     orch._check_dit_fits()
     orch = cli.LTX2Orchestrator(_args(tp_degree=2, quant="mxfp8"))
@@ -264,3 +325,21 @@ def test_fit_checks_count_the_quantized_directory_as_stored(monkeypatch, tmp_pat
     orch._place_text_encoder()
     assert orch.args.device_text_encoder is True
     assert capsys.readouterr().out == ""
+
+    monkeypatch.setenv("DIFFLET_NEURON_HBM_GIB", _budget_gib(1_500))
+    orch = cli.LTX2Orchestrator(_args(tp_degree=1, quant="mxfp8"))
+    orch._quantized_dit = str(tmp_path / "quantized")
+    with pytest.raises(SystemExit) as exc:
+        orch._check_dit_fits()
+    assert exc.value.code == 2
+    assert "GiB of MXFP8 weights per core at tp=1" in capsys.readouterr().err
+    small = tmp_path / "small"  # Gemma-3 of 500 bf16 elements: 1,000 bytes beside the DiT
+    _header_only_checkpoint(small / "text_encoder", "language_model.model.w", 500)
+    monkeypatch.setattr(cli.LTX2Orchestrator, "_model_dir", lambda self: str(small))
+    monkeypatch.setenv("DIFFLET_NEURON_HBM_GIB", _budget_gib(2_500))
+    orch = cli.LTX2Orchestrator(_args(tp_degree=1, quant="mxfp8"))
+    orch._quantized_dit = str(tmp_path / "quantized")
+    orch._check_dit_fits()  # 2,000 stored bytes fit a 2,500-byte budget ...
+    orch._place_text_encoder()  # ... but not with Gemma-3's 1,000 beside them
+    assert orch.args.device_text_encoder is False
+    assert "encoding on rank 0's host instead" in capsys.readouterr().out

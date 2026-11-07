@@ -410,3 +410,30 @@ def test_ltx2_driver_refuses_quant_the_way_it_refuses_everything_else(
     generating = orchestrator("generate", 1)
     generating._prepare_quant(create=False)
     assert generating._quantized_dit == compiling._quantized_dit
+
+
+def test_ltx2_driver_refuses_a_dead_target_pattern_before_writing(
+        monkeypatch, tmp_path, capsys, tiny_ltx2_dir, _trace_cache_restored):
+    """A target pattern that matches no linear weight (a DIFFLET_QUANT_TARGETS typo) is refused
+    on the driver, naming the pattern, before the DiT is quantized and before torchrun starts:
+    the writer would otherwise quantize less than the spec claims, print the MXFP8 line, and
+    the refusal would land in every rank (``quantize_module_``) after minutes of quantizing."""
+    cli_main = importlib.import_module("difflet.cli.main")
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    monkeypatch.setenv("DIFFLET_EXEC_MODE", "compile")
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path))
+    live = r"transformer_blocks\.\d+\.attn1\.(to_q|to_k|to_v)"
+    dead = r"transformer_blocks\.\d+\.audio_attn9\.to_q"
+    monkeypatch.setenv(Q.QUANT_TARGETS_ENV, f"{live};{dead}")
+    args = cli_main._build_parser().parse_args(
+        ["compile", "--model-id", LTX2, "--quant", "mxfp8", "--tp-degree", "1"])
+    orch = cli_main._get_orchestrator(args)
+    orch._model_dir = lambda: tiny_ltx2_dir
+    with pytest.raises(SystemExit) as exc:
+        orch._prepare_quant(create=True)
+    out, err = capsys.readouterr()
+    assert exc.value.code == 2 and out == ""
+    assert err.startswith("Error: --quant: transformer: ") and "match no linear weight" in err
+    assert err.endswith(f": {dead}; nothing was launched.\n")
+    assert orch._quantized_dit is None
+    assert not (tmp_path / "quantized").exists()
