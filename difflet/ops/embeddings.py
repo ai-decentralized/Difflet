@@ -5,6 +5,10 @@ def apply_rotary_emb(hidden_states, freqs_cos, freqs_sin):
     return _load("apply_rotary_emb")(hidden_states, freqs_cos, freqs_sin)
 
 
+def apply_rotary_emb_fp32(hidden_states, freqs_cos, freqs_sin):
+    return _load("apply_rotary_emb_fp32")(hidden_states, freqs_cos, freqs_sin)
+
+
 def _load(name: str):
     from difflet.ops._dispatch import load_backend_attr
 

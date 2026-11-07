@@ -31,6 +31,7 @@ from difflet.ops import (
     ColumnParallelLinear,
     ParallelEmbedding,
     RowParallelLinear,
+    apply_rotary_emb_fp32,
 )
 from torch import nn as nn
 
@@ -64,9 +65,9 @@ def apply_rotary_emb(
         cos, sin = cos.to(x.device), sin.to(x.device)
 
         if use_real_unbind_dim == -1:
-            # Used for flux, cogvideox, hunyuan-dit
-            x_real, x_imag = x.reshape(*x.shape[:-1], -1, 2).unbind(-1)  # [B, S, H, D//2]
-            x_rotated = torch.stack([-x_imag, x_real], dim=-1).flatten(3)
+            # Used for flux, cogvideox, hunyuan-dit. The backend's op: diffusers' own lines on
+            # every backend but neuron, whose pair swap is a matmul (no stride-2 gather).
+            return apply_rotary_emb_fp32(x, cos, sin)
         elif use_real_unbind_dim == -2:
             # Used for Stable Audio
             x_real, x_imag = x.reshape(*x.shape[:-1], 2, -1).unbind(-2)  # [B, S, H, D//2]
