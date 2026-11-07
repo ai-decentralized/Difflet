@@ -495,21 +495,24 @@ def test_a_target_on_the_fused_proj_out_is_refused_before_the_writer(launches, m
                                                                      tmp_path, capsys,
                                                                      tiny_fp8_snapshot):
     """A spec naming a single block's fused ``proj_out`` (a hand-written DIFFLET_QUANT_TARGETS
-    before task E6) is refused on the driver, naming the first block's and why, before the
-    writer runs: it would quantize the fused tensor whole (minutes and about 17 GB on the real
-    DiT), and every rank would then refuse a pattern that names none of its modules."""
+    from before the split) is refused on the driver by the split writer, as a pattern matching
+    no weight it stores (it stores the halves), naming the halves, before anything is
+    quantized and before any rank starts."""
     from difflet.cli.quant import QUANT_TARGETS_ENV
-    from difflet.quant.targets import FUSED_PROJ_OUT_REASON
 
     stages, _ = launches
     cache = _quant_cache(monkeypatch, tmp_path, tiny_fp8_snapshot)
-    monkeypatch.setenv(QUANT_TARGETS_ENV, r"single_transformer_blocks\.\d+\.proj_out")
+    fused = r"single_transformer_blocks\.\d+\.proj_out"
+    monkeypatch.setenv(QUANT_TARGETS_ENV, fused)
     with pytest.raises(SystemExit) as exc:
         HunyuanVideoOrchestrator(_args(quant="mxfp8")).compile()
     out, err = capsys.readouterr()
     assert exc.value.code == 2
-    assert err == (f"Error: --quant: single_transformer_blocks.0.proj_out "
-                   f"{FUSED_PROJ_OUT_REASON}; nothing was launched.\n")
+    assert err.startswith("Error: --quant: transformer: target patterns match no linear weight")
+    assert ("(single_transformer_blocks.0.proj_out is split by split_linears: name "
+            "single_transformer_blocks.0.proj_out_attn / single_transformer_blocks.0.proj_out_mlp)"
+            in err)
+    assert err.endswith(f": {fused}; nothing was launched.\n")
     assert "MXFP8" not in out and stages == []
     assert not (cache / "quantized").exists()
 

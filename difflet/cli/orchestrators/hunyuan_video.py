@@ -33,17 +33,17 @@ trainium and tpu keep the AoT path unchanged.
 --quant mxfp8 (``difflet/cli/quant.py``): ``compile`` writes the quantized DiT directory under
 the compile cache straight from the hub's ``transformer``, which is already bf16, and
 ``generate`` only resolves it (``_prepare_quant``), before the DiT fit check, which counts that
-directory as stored, and before any rank starts; weights not yet downloaded, a target pattern
-matching no linear weight and one naming a single block's fused ``proj_out`` are refused there,
-on the driver, while the stage line, the DP workers and the generate stage's key carry the spec
-to the ranks, which build the application with it (``_torchrun_application_kwargs``).
+directory as stored, and before any rank starts; weights not yet downloaded and a target
+pattern matching no linear weight (one naming a single block's fused ``proj_out``, which the
+directory stores as its halves, among them) are refused there, on the driver, while the stage
+line, the DP workers and the generate stage's key carry the spec to the ranks, which build the
+application with it (``_torchrun_application_kwargs``).
 """
 from __future__ import annotations
 
 import argparse
 import contextlib
 import functools
-import json
 import os
 import shutil
 import sys
@@ -76,7 +76,6 @@ from difflet.cli.orchestrators.torchrun import (
 )
 from difflet.cli.quant import prepare_quant, quant_cli_args, quant_spec
 from difflet.quant.spec import quant_cache_fields
-from difflet.quant.targets import FUSED_PROJ_OUT_REASON, fused_proj_out_targets
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -197,20 +196,6 @@ def _nki_trace_cache():
     finally:
         if previous is None:
             os.environ.pop(_NKI_TRACE_OPT_IN, None)
-
-
-#: The hub DiT's single-stream depth, for the fused ``proj_out`` check when the snapshot holds
-#: no transformer config yet (a partial download; the ranks report it).
-_NUM_SINGLE_LAYERS = 40
-
-
-def _num_single_layers(transformer_dir: Path) -> int:
-    """The single-stream blocks ``<transformer_dir>/config.json`` declares, else
-    ``_NUM_SINGLE_LAYERS``: the ``proj_out`` names a spec is refused for. Torch-free."""
-    config = transformer_dir / "config.json"
-    if not config.is_file():
-        return _NUM_SINGLE_LAYERS
-    return int(json.loads(config.read_text()).get("num_single_layers", _NUM_SINGLE_LAYERS))
 
 
 def _shape(args: argparse.Namespace) -> tuple[int, int, int]:
@@ -456,16 +441,14 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
         (``prepare_quant``), writing it when ``create`` (``compile``; ``generate`` only resolves
         and refuses with the fix when it is missing, through ``refuse`` as this driver's other
         refusals; a target pattern matching no linear weight is refused by the writer, naming
-        it, before anything is quantized). The source is the snapshot's ``transformer``
-        itself: the hub DiT is bf16, so there is no bf16 copy to make first. A spec naming a
-        single block's fused ``proj_out`` is refused before the writer runs: the writer would
-        spend minutes quantizing the fused tensor whole, and every rank would then refuse a
-        pattern that names none of its modules (``FUSED_PROJ_OUT_REASON``). Before
-        ``_check_dit_fits`` so the HBM estimate counts fp8 bytes, and before any rank starts so
-        none writes; ``_prepare_torchrun`` roots the compile cache at --cache-dir first so the
-        directory lands under it. Weights that are not local yet are refused here, naming
-        ``difflet download``: the bf16 path leaves them to the ranks, but this step needs them
-        on the driver (to write the directory, or to resolve it and count its bytes), and
+        it, before anything is quantized, a single block's fused ``proj_out`` among them: the
+        spec stores it as its halves, which the writer names). The source is the snapshot's
+        ``transformer`` itself: the hub DiT is bf16, so there is no bf16 copy to make first.
+        Before ``_check_dit_fits`` so the HBM estimate counts fp8 bytes, and before any rank
+        starts so none writes; ``_prepare_torchrun`` roots the compile cache at --cache-dir
+        first so the directory lands under it. Weights that are not local yet are refused here,
+        naming ``difflet download``: the bf16 path leaves them to the ranks, but this step needs
+        them on the driver (to write the directory, or to resolve it and count its bytes), and
         torchrun would otherwise start tp x cp ranks that each report the missing weights."""
         if getattr(self.args, "quant", None) is None:
             return
@@ -474,9 +457,6 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
             refuse(f"--quant: the {_HF_MODEL_ID} weights are not local; run `difflet download "
                    f"--model-id {_HF_MODEL_ID}` first")
         transformer = Path(model_dir) / "transformer"
-        fused = fused_proj_out_targets(quant_spec(self.args), _num_single_layers(transformer))
-        if fused:
-            refuse(f"--quant: {fused[0]} {FUSED_PROJ_OUT_REASON}")
         prepared = prepare_quant(self.args, {"transformer": str(transformer)}, create=create,
                                  tag="hunyuan_video", fail=refuse)
         if prepared is not None:
