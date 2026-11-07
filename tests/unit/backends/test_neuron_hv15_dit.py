@@ -69,6 +69,20 @@ def test_matches_diffusers(tiny):
     torch.testing.assert_close(app(**_inputs())[0], _reference(tiny), atol=1e-4, rtol=1e-4)
 
 
+def test_the_processors_rotate_with_the_neuron_op(tiny, monkeypatch):
+    """diffusers' rotary patched to fail once the reference has run: the processors rotate q/k
+    with the neuron op, and the output is still diffusers'."""
+    import diffusers.models.embeddings as E
+
+    reference = _reference(tiny)  # diffusers' own forward, before the patch
+    monkeypatch.setattr(E, "apply_rotary_emb",
+                        lambda *a, **k: pytest.fail("diffusers' rotary on the neuron path"))
+    app = NeuronHunyuanVideo15TransformerApplication(model_path=tiny, dtype=torch.float32,
+                                                     exec_mode="eager", device="cpu", **SHAPE)
+    app.load()
+    torch.testing.assert_close(app(**_inputs())[0], reference, atol=1e-4, rtol=1e-4)
+
+
 @pytest.mark.parametrize("cp", [2, 4])
 def test_ulysses_context_parallel_matches_diffusers(tiny, cp):
     """12 image tokens split over cp ranks, text replicated, joint Ulysses with key_valid_len:
