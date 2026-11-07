@@ -19,9 +19,15 @@ def _args(**over):
                 guidance_scale=None, cache_dir=None, revision=None, exec_mode=None, work_dir=None,
                 keep_work_dir=False, sp_enabled=False, requests_dir=None, requests=None, dp=None,
                 teacache_cadence=None, teacache_online_delta=None, teacache_speedup=None,
-                teacache_calibration=None, stage_mode="generate")
+                teacache_calibration=None, stage_mode="generate", quant=None,
+                quant_compute=None)
     base.update(over)
     return argparse.Namespace(**base)
+
+
+@pytest.fixture(autouse=True)
+def _no_quant_targets_override(monkeypatch):
+    monkeypatch.delenv("DIFFLET_QUANT_TARGETS", raising=False)
 
 
 class _Calls(list):
@@ -66,6 +72,18 @@ def test_default_layout_is_tp2_x_cfg2(launches, tmp_path):
     assert _flag(cli, "--tp-degree") == "2" and "--cfg-parallel" in cli
     assert _flag(cli, "--steps") == "50" and _flag(cli, "--num-frames") == "121"
     assert not (tmp_path / "w").exists()
+
+
+def test_quant_is_refused_until_the_driver_carries_it(launches, tmp_path, capsys):
+    """``QUANT_MODELS`` names HunyuanVideo-1.5 for its target table, so --quant passes the CLI's
+    model check; the driver neither writes the quantized directory nor forwards the flag yet, so
+    it is refused here instead of running the bf16 DiT."""
+    orch = hv15.HunyuanVideo15Orchestrator(_args(work_dir=str(tmp_path / "w"), quant="mxfp8"))
+    with pytest.raises(SystemExit) as exc:
+        orch.generate()
+    err = capsys.readouterr().err
+    assert exc.value.code == 2 and launches == []
+    assert "--quant" in err and err.endswith("nothing was launched.\n")
 
 
 def test_explicit_tp4_runs_cfg_sequentially(launches, tmp_path):
