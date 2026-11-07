@@ -467,6 +467,26 @@ def test_base_refuses_eager_with_quant_under_the_models_label():
         _ToyApp(model_path="/x", device="cpu", exec_mode="eager", quant=_SPEC.to_dict())
 
 
+def test_base_refuses_a_spec_quantized_for_another_tp():
+    """A row-parallel weight is quantized per rank K range, so a spec made for one tp holds
+    scales grouped for that tp's shards: at another tp every rank would load a shape-compatible
+    slice with the wrong block membership. Refused at construction, naming both degrees; the
+    pipeline's ``"mxfp8"`` spelling builds its spec at the launch's tp, a spec given directly
+    is the caller's."""
+    with pytest.raises(ValueError, match=r"the toy FP8 DiT spec was quantized for tp_degree=1 "
+                                         r"but this launch has tp_degree=2"):
+        _ToyApp(model_path="/x", device="cpu", exec_mode="compile",
+                parallel=DiffletParallelConfig(tp_degree=2), quant=_SPEC)
+
+
+def test_base_refuses_a_quant_that_is_not_a_spec():
+    """``"mxfp8"`` is the pipeline application's spelling, which resolves it to a spec; the
+    transformer base takes the spec or its dict and refuses anything else at construction,
+    not in ``load``'s collective phase with an AttributeError that names no cause."""
+    with pytest.raises(TypeError, match="_ToyApp: quant must be a QuantSpec or its dict, got str"):
+        _ToyApp(model_path="/x", device="cpu", exec_mode="compile", quant="mxfp8")
+
+
 def test_base_quantizes_after_build_and_prepares_after_load(tmp_path):
     """``load`` swaps the spec's targets on the meta module ``build_module`` returned, fills
     them from the quantized directory and prepares them in ``_after_load``, so the forward is
@@ -494,3 +514,57 @@ def test_base_quantizes_after_build_and_prepares_after_load(tmp_path):
         expect = reference(x)
     # The prepared bf16 weight copy rounds the dequantized weight once more than the reference.
     assert torch.allclose(app(x), expect, atol=2e-2, rtol=2e-2)
+
+
+class _Attention(nn.Module):
+    """One attention-shaped module: ``attn.to_q``/``to_k``/``to_v`` over K=128, the group
+    ``fuse_projections_`` reads. No forward: the kernel path runs on the device only."""
+
+    def __init__(self, dim: int, inner: int):
+        super().__init__()
+        self.attn = nn.Module()
+        for name in ("to_q", "to_k", "to_v"):
+            setattr(self.attn, name, nn.Linear(dim, inner))
+
+
+_ATTN_SPEC = QuantSpec(targets=(r"attn\.to_[qkv]",), compute="nki")
+
+
+@pytest.mark.parametrize("fuse", [True, False])
+def test_base_fuses_q_k_v_after_load_only_when_the_model_says_so(tmp_path, fuse):
+    """``_after_load`` prepares the kernel-path twins under ``quant_fuse_qkv``: a model whose
+    attention reads ``fused_qkv`` gets its three projections fused into one kernel call (the
+    members drop their weights), any other keeps three prepared layers. The kernel layout is
+    laid out on the host; the forward needs the device, so the warm-up is skipped."""
+    from safetensors.torch import save_file
+
+    class Fusing(_ToyApp):
+        quant_fuse_qkv = fuse
+
+        def build_module(self):
+            return _Attention(128, 16)
+
+    torch.manual_seed(0)
+    reference = _Attention(128, 16)
+    tensors = {}
+    for name in ("to_q", "to_k", "to_v"):
+        linear = getattr(reference.attn, name)
+        q, s = mx.quantize_mx(linear.weight.detach())
+        tensors[f"attn.{name}.weight"], tensors[f"attn.{name}.weight_scale"] = q, s
+        tensors[f"attn.{name}.bias"] = linear.bias.detach()
+    save_file(tensors, str(tmp_path / "model.safetensors"))
+    app = Fusing(model_path=str(tmp_path), dtype=torch.float32, exec_mode="compile",
+                 device="cpu", quant=_ATTN_SPEC)
+    app.load(skip_warmup=True)
+    assert app.quantized_linears == ["attn.to_q", "attn.to_k", "attn.to_v"]
+    assert app.load_report == {"missing": [], "unexpected": []}
+    members = [getattr(app.module.attn, n) for n in ("to_q", "to_k", "to_v")]
+    assert all(isinstance(l, Q.FP8Linear) and l.compute == "nki" and l.weight is None
+               for l in members)
+    if fuse:
+        assert isinstance(app.module.attn.fused_qkv, Q.FusedFP8Projections)
+        assert app.module.attn.fused_qkv.splits == [16, 16, 16]
+        assert all(l.weight_packed is None for l in members)
+    else:
+        assert not hasattr(app.module.attn, "fused_qkv")
+        assert all(l.weight_packed is not None for l in members)
