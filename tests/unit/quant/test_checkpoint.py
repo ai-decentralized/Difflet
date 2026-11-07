@@ -3,12 +3,18 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
+import os
+import shutil
+from pathlib import Path
 
 import pytest
 import torch
 
 from difflet.backends._torch_megatron.checkpoint import build_weight_map
+from difflet.backends.neuron.core.weights_bf16 import MANIFEST as BF16_MANIFEST
+from difflet.backends.neuron.core.weights_bf16 import ensure_bf16_copy
 from difflet.quant import mx
 from difflet.quant.checkpoint import (
     MANIFEST,
@@ -239,3 +245,59 @@ def test_source_fingerprint_ignores_mtime_but_not_content(tiny, tmp_path):
     shard = sorted(copy.glob("*.safetensors"))[0]
     shard.write_bytes(shard.read_bytes() + b"\0")
     assert source_fingerprint(copy) != before
+
+
+def _file_identity(model_dir):
+    """The fingerprint as it was before a bf16 copy's manifest joined it: every safetensors
+    file's name, size and blob name, every index's sha256. Computed here, not by the function
+    under test, because every Qwen, FLUX and LTX-2 digest hangs on it staying byte-identical."""
+    entries = []
+    for path in sorted(Path(model_dir).glob("*.safetensors")):
+        entries.append([path.name, path.stat().st_size, os.path.basename(os.path.realpath(path))])
+    for path in sorted(Path(model_dir).glob("*.safetensors.index.json")):
+        entries.append([path.name, hashlib.sha256(path.read_bytes()).hexdigest()])
+    return entries
+
+
+def test_a_bf16_copy_is_fingerprinted_with_its_manifest(tiny, tmp_path):
+    """A bf16 copy's safetensors are written by the copy, so they carry no hub blob name; its
+    manifest (the fp32 source's file names, sizes and mtimes) is what ties a quantized
+    directory built from the copy to the hub snapshot, and joins the fingerprint as the last
+    entry. A directory without one (every hub checkpoint) is fingerprinted as before."""
+    src = tiny["transformer_dir"]
+    assert source_fingerprint(src) == _file_identity(src)
+    copy = ensure_bf16_copy(src, cache_root=tmp_path / "cache")
+    manifest = copy / BF16_MANIFEST
+    fingerprint = source_fingerprint(copy)
+    assert fingerprint[-1] == [BF16_MANIFEST, hashlib.sha256(manifest.read_bytes()).hexdigest()]
+    assert fingerprint[:-1] == _file_identity(copy)
+    # The copy's files without the manifest: a plain bf16 checkpoint (LTX-2's), as before.
+    plain = tmp_path / "plain"
+    shutil.copytree(copy, plain)
+    (plain / BF16_MANIFEST).unlink()
+    assert source_fingerprint(plain) == _file_identity(plain) == fingerprint[:-1]
+    # Another fp32 source behind the same bf16 bytes is another manifest, so another fingerprint.
+    stale = json.loads(manifest.read_text())
+    stale["files"]["config.json"][1] += 1
+    manifest.write_text(json.dumps(stale))
+    changed = source_fingerprint(copy)
+    assert changed[:-1] == fingerprint[:-1] and changed[-1] != fingerprint[-1]
+
+
+def test_a_quantized_directory_built_from_a_copy_follows_the_copy_s_source(tiny, tmp_path):
+    """``difflet compile`` remakes the copy when its fp32 source changed, with a new manifest:
+    the quantized directory built from the old copy is then another checkpoint's (refused by
+    the check, another digest for the next compile), never silently reused."""
+    cache = tmp_path / "cache"
+    src = tmp_path / "snap" / "transformer"
+    shutil.copytree(tiny["transformer_dir"], src)
+    copy = ensure_bf16_copy(src, cache_root=cache)
+    spec = tiny["spec"]
+    made = ensure_quantized_dir(cache, copy, spec, create=True)
+    assert read_manifest(made)["source"]["fingerprint"][-1][0] == BF16_MANIFEST
+    check_quantized_dir(made, copy, spec)
+    os.utime(src / "config.json", ns=(1, 1))  # the source changed under the copy
+    assert ensure_bf16_copy(src, cache_root=cache) == copy  # remade in place, new manifest
+    with pytest.raises(ValueError, match="built from another checkpoint"):
+        check_quantized_dir(made, copy, spec)
+    assert quantized_dir(cache, copy, spec) != made
