@@ -1,6 +1,6 @@
 """The CLI's MXFP8 flags (``difflet/cli/quant.py``): parsing on compile/generate/run, the
 driver's refusals, the spec and its forwarding to the stage parser and the DP workers, and the
-Qwen-Image DiT stage key (additive: a bf16 command line's key is unchanged)."""
+Qwen-Image and LTX-2 DiT stage keys (additive: a bf16 command line's key is unchanged)."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ from difflet.cli.stage import _build_stage_parser
 
 QWEN = "Qwen/Qwen-Image"
 FLUX = "black-forest-labs/FLUX.1-dev"
+LTX2 = "Lightricks/LTX-2"
 
 
 def _parse(*flags):
@@ -313,3 +314,99 @@ def test_quant_targets_env_replaces_the_layer_set_and_keys_the_spec(monkeypatch)
     assert narrowed.weights_identity() != default.weights_identity()
     monkeypatch.setenv(Q.QUANT_TARGETS_ENV, "")
     assert Q.quant_spec(args).targets == default.targets
+
+
+def test_ltx2_orchestrator_forwards_and_keys_quant(monkeypatch):
+    """The LTX-2 generate stage's key gains the spec's fields with --quant, at the tp the launch
+    uses (--tp-degree 2), and its stage line carries the flags so the ranks rebuild the same
+    spec; the vae stage's key is unchanged (the decoder reads latents, whatever the DiT's
+    precision) and a bf16 line keeps its key and its words."""
+    cli_main = importlib.import_module("difflet.cli.main")
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    monkeypatch.setenv("DIFFLET_EXEC_MODE", "compile")
+
+    def key(*flags):
+        args = cli_main._build_parser().parse_args(
+            ["generate", "--model-id", LTX2, "--cache-dir", "/c", "--tp-degree", "2", *flags])
+        orch = cli_main._get_orchestrator(args)
+        return (orch._stage_cache_inputs(args), orch._stage_compiled_dir(args),
+                orch._shared_cli_args("generate", work_dir="/w"), orch)
+
+    plain, plain_dir, plain_cli, _ = key()
+    assert not any(k.startswith("quant") for k in plain)
+    assert "--quant" not in plain_cli
+    mx, mx_dir, mx_cli, orch = key("--quant", "mxfp8")
+    added = sorted(k for k in mx if k not in plain)
+    assert added == ["quant", "quant_compute", "quant_schema", "quant_targets_sha256",
+                     "quant_tp_degree"]
+    assert mx["quant"] == "mxfp8" and mx["quant_tp_degree"] == 2
+    assert {k: v for k, v in mx.items() if k not in added} == plain
+    assert mx_dir != plain_dir and mx_dir.parent == plain_dir.parent
+    assert mx_cli[mx_cli.index("--quant") + 1] == "mxfp8"
+    stage_args, extra = _build_stage_parser().parse_known_args(
+        ["--orchestrator", LTX2, "--stage", "generate", *mx_cli])
+    assert extra == [] and Q.quant_spec(stage_args) == Q.quant_spec(orch.args)
+    assert Q.quant_spec(stage_args).tp_degree == 2
+    vae = orch._stage_cache_inputs(argparse.Namespace(**{**vars(orch.args), "stage": "vae"}))
+    assert not any(k.startswith("quant") for k in vae)
+    dequant, dequant_dir, dequant_cli, _ = key("--quant", "mxfp8", "--quant-compute", "dequant")
+    assert sorted(k for k in mx if mx[k] != dequant.get(k)) == ["quant_compute"]
+    assert dequant_dir != mx_dir
+    assert dequant_cli[dequant_cli.index("--quant-compute") + 1] == "dequant"
+
+
+def test_ltx2_application_kwargs_carry_the_spec():
+    from difflet.cli.orchestrators.ltx_2 import _torchrun_application_kwargs
+
+    args = _parse("generate", "--model-id", LTX2, "--backend", "neuron", "--quant", "mxfp8")
+    kwargs = _torchrun_application_kwargs(args)
+    assert kwargs["quant"]["format"] == "mxfp8" and kwargs["quant"]["compute"] == "nki"
+    assert kwargs["quant"]["tp_degree"] == 4 and "quant_checkpoint" not in kwargs
+    assert "quant" not in _torchrun_application_kwargs(_parse("generate", "--model-id", LTX2))
+
+
+@pytest.fixture(scope="module")
+def tiny_ltx2_dir(tmp_path_factory):
+    """The tiny diffusers-layout LTX-2 snapshot in the MXFP8 geometry (every target's K per
+    rank a multiple of 128 at tp1); torch and diffusers load here only."""
+    pytest.importorskip("diffusers")
+    from tests.unit.backends._neuron_ltx2_toy import TINY_FP8_LTX2, write_tiny_ltx2_model
+
+    root = tmp_path_factory.mktemp("tiny_ltx2_quant")
+    write_tiny_ltx2_model(root, config=TINY_FP8_LTX2)
+    return str(root)
+
+
+def test_ltx2_driver_refuses_quant_the_way_it_refuses_everything_else(
+        monkeypatch, tmp_path, capsys, tiny_ltx2_dir, _trace_cache_restored):
+    """A refused --quant exits as the LTX-2 driver's other refusals do (``refuse``: exit 2,
+    '; nothing was launched.'), naming the component; ``compile`` writes the directory under the
+    compile cache and keeps it for the fit checks (``_quantized_dit``)."""
+    cli_main = importlib.import_module("difflet.cli.main")
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    monkeypatch.setenv("DIFFLET_EXEC_MODE", "compile")
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path))
+
+    def orchestrator(command, tp):
+        args = cli_main._build_parser().parse_args(
+            [command, "--model-id", LTX2, "--quant", "mxfp8", "--tp-degree", str(tp)])
+        orch = cli_main._get_orchestrator(args)
+        orch._model_dir = lambda: tiny_ltx2_dir
+        return orch
+
+    with pytest.raises(SystemExit) as exc:  # generate before any compile wrote the directory
+        orchestrator("generate", 1)._prepare_quant(create=False)
+    err = capsys.readouterr().err
+    assert exc.value.code == 2
+    assert err.startswith("Error: --quant: transformer: ") and err.endswith(
+        "; nothing was launched.\n")
+    compiling = orchestrator("compile", 1)
+    assert compiling._quantized_dit is None
+    compiling._prepare_quant(create=True)
+    assert (Path(compiling._quantized_dit) / "difflet_quant.json").is_file()
+    assert Path(compiling._quantized_dit).is_relative_to(tmp_path)
+    assert capsys.readouterr().out.startswith(
+        f"[ltx_2] MXFP8 transformer (nki): {compiling._quantized_dit}")
+    generating = orchestrator("generate", 1)
+    generating._prepare_quant(create=False)
+    assert generating._quantized_dit == compiling._quantized_dit
