@@ -32,8 +32,9 @@ TINY_HV1 = dict(in_channels=4, out_channels=4, num_attention_heads=4, attention_
                 patch_size_t=1, text_embed_dim=32, pooled_projection_dim=16,
                 rope_axes_dim=(4, 6, 6), guidance_embeds=True)
 #: The MXFP8 geometry: 4 heads x 32 = hidden 128 and MLP 512, so the single blocks' fused
-#: ``proj_out`` is ``[128, 640]`` and every K is a multiple of the 128 the MX layout tiles
-#: (``difflet.quant.spec.LAYOUT_K``); the rope axes still sum to the head dim.
+#: ``proj_out`` is ``[128, 640]`` and at tp1 every K is a multiple of the 128 the MX layout
+#: tiles (``difflet.quant.spec.LAYOUT_K``; at tp2 a K-sharded layer on the hidden size has 64
+#: per rank); the rope axes still sum to the head dim.
 TINY_FP8_HV1 = {**TINY_HV1, "attention_head_dim": 32, "rope_axes_dim": (8, 12, 12)}
 #: 17 frames -> 5 latent frames; 64 x 64 -> an 8 x 8 latent, 4 x 4 after the patch.
 TINY_SHAPE = dict(height=64, width=64, num_frames=17, text_seq_len=16)
@@ -41,12 +42,18 @@ TINY_SHAPE = dict(height=64, width=64, num_frames=17, text_seq_len=16)
 
 def write_tiny_hv1(root, *, config: dict | None = None) -> str:
     """The seeded diffusers DiT as ``root/transformer``; ``config`` picks the geometry
-    (``TINY_HV1`` by default, ``TINY_FP8_HV1`` for the MXFP8 tests)."""
+    (``TINY_HV1`` by default, ``TINY_FP8_HV1`` for the MXFP8 tests), and a model built from one
+    gets ``mx_toy_weights_`` (``_neuron_flux_toy``: weights whose MX block scales depend on the
+    block membership, so a test of a shard law can tell the laws apart)."""
     from diffusers import HunyuanVideoTransformer3DModel
+
+    from tests.unit.backends._neuron_flux_toy import mx_toy_weights_
 
     torch.manual_seed(0)
     path = f"{root}/transformer"
     model = HunyuanVideoTransformer3DModel(**(config or TINY_HV1))
+    if config is not None:
+        mx_toy_weights_(model)
     model.save_pretrained(path, safe_serialization=True)
     return path
 
