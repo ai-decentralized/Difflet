@@ -43,8 +43,9 @@ shape effect (section 1a). The kernel requires the activation's row count to be 
 8: LTX-2's audio stream (126 tokens at 512x768x121, 51 at 480x704x49), HunyuanVideo-1.5
 (49,290 image and 1,985 text tokens) and Wan under CP2 (2,340) all violate it, so `mx_linear`
 pads the rows to a multiple of 8 and slices the output (plan task B7). With that padding
-(`probe_mx_shapes_padded.json`, run against a scratch copy carrying the fix before it was
-committed) the audio shapes pass like the others:
+(`probe_mx_shapes_padded.json`, first run against a scratch copy carrying the fix, re-run
+from the committed fix `100f150` with the criterion below) the audio shapes pass like the
+others:
 
 | layer (per rank) | M x K -> N | rel L2 | cosine | output |
 |---|---|---|---|---|
@@ -53,6 +54,31 @@ committed) the audio shapes pass like the others:
 | audio_ff.net.2 (row, K = 8192/4) | 126 x 2048 -> 2048 | 2.36e-3 | 0.999987 | [126, 2048] |
 
 The default LTX-2 target set (video and text streams) never needed the pad.
+
+The probe's `pass` flag is rel L2 < 3e-3 and cosine > 0.9999 at the output's expected shape
+(the two bf16 roundings of section 1a measure 2.3e-3). The first two runs
+(`probe_mx_shapes.json`, `probe_mx_shapes_padded.json` of 08:02) were judged at the plan's
+provisional rel L2 < 2e-3 and so record `"pass": false` at the values above; the criterion
+was widened after section 1a explained the 2.3e-3, and `probe_mx_shapes_padded.json` was
+re-run under it (the video-shape JSON keeps its pre-fix refusal rows as the evidence for them).
+
+**LNC2 M-sharding (`probe_mx_shapes_lnc2.json`, the B7 review):** with a pre-quantized weight
+the kernel splits the activation's rows across the two physical cores of a logical core
+(`resolve_lnc2_sharding` -> SHARD_M for M > 128, `M // 2` rows each) and asserts the
+multiple-of-8 rule on the full M only, so a padded count whose half is not a multiple of 8
+was unverified: every per-core count the device had seen (512, 1536, 2048, 3072) was a
+multiple of 128, no partial last tile either. The same probe on a free device (core 2) at the
+HunyuanVideo-1.5 text and Wan+CP2 counts through `mx_linear`'s pad, plus a per-core count that
+is a multiple of 8 with a partial tile:
+
+| M (per core) | K -> N | rel L2 | cosine | output |
+|---|---|---|---|---|
+| 1040 (520: 4 tiles + 8 rows) | 4096 -> 1024 | 2.34e-3 | 0.999973 | [1040, 1024] |
+| 1985 -> 1992 (996: 7 tiles + 100 rows) | 4096 -> 1024 | 2.33e-3 | 0.999976 | [1985, 1024] |
+| 2340 -> 2344 (1172: 9 tiles + 20 rows) | 4096 -> 1024 | 2.33e-3 | 0.999980 | [2340, 1024] |
+
+Same error as every other shape, correct shapes: the per-core half needs no alignment, so
+`M_MULTIPLE` stays 8 (16 would have padded the same models to 2,000 and 2,352 for nothing).
 
 ### 1a. Output rounding (`probe_rounding.py`, 1024 x 4096 -> 1024)
 

@@ -84,6 +84,11 @@ def mx_available() -> bool:
 #: probe, 2026-11-07). Every token count of Qwen-Image, FLUX and LTX-2's video and text streams
 #: is one; LTX-2's audio stream (126 tokens at the default shape, 51 at 480x704x49),
 #: HunyuanVideo-1.5 (49,290 image and 1,985 text tokens) and Wan under CP2 (2,340) are not.
+#: Under LNC2 the kernel gives each physical core ``M // 2`` rows (a pre-quantized weight
+#: shards the activation, ``resolve_lnc2_sharding``) and asserts the rule on the full ``M``
+#: only; that half need not be a multiple of 8: 996 and 1172 rows per core (1,985 -> 1,992 and
+#: 2,340 -> 2,344, a partial last 128-row tile) came back correct on the device
+#: (``probe_mx_shapes_lnc2.json``), so 8 is the whole rule, not 16.
 M_MULTIPLE = 8
 
 
