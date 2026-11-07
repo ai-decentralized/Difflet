@@ -240,3 +240,25 @@ def test_main_takes_a_clip_pair_as_the_outputs(cdr, tmp_path, monkeypatch, capsy
     assert written["video"]["frames"] == _FRAMES
     assert written["video"]["psnr"] == math.inf  # Infinity: the determinism signal, as for images
     assert json.loads(capsys.readouterr().out) == written
+
+
+def test_dict_latents_are_compared_per_key(cdr, tmp_path):
+    """LTX-2's orchestrator saves ``{"video": ..., "audio": ...}``: one metrics block per key."""
+    gen = torch.Generator().manual_seed(0)
+    video = torch.randn(1, 16, 8, generator=gen)
+    audio = torch.randn(1, 4, 8, generator=gen)
+    torch.save({"video": video, "audio": audio}, tmp_path / "ref.pt")
+    torch.save({"video": video * 1.01, "audio": audio.clone()}, tmp_path / "cand.pt")
+    out = cdr.compare_runs(tmp_path / "ref.pt", tmp_path / "cand.pt", None, None)
+    assert set(out["latents"]) == {"video", "audio"}
+    assert out["latents"]["audio"]["bit_identical"] and not out["latents"]["video"]["bit_identical"]
+    assert out["latents"]["video"]["cosine"] > 0.999
+    assert out["latents"]["video"]["rel_l2"] == pytest.approx(0.01, rel=1e-3)
+
+
+def test_dict_latents_with_different_keys_are_refused(cdr, tmp_path):
+    torch.save({"video": torch.zeros(2)}, tmp_path / "ref.pt")
+    torch.save({"audio": torch.zeros(2)}, tmp_path / "cand.pt")
+    with pytest.raises(ValueError, match="video") as info:
+        cdr.compare_runs(tmp_path / "ref.pt", tmp_path / "cand.pt", None, None)
+    assert "audio" in str(info.value)
