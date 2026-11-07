@@ -61,7 +61,14 @@ _NKI_TRACE_OPT_IN = "DIFFLET_NKI_TRACE_CACHE"
 
 
 def _unsupported(args: argparse.Namespace) -> list[str]:
-    return [f for f in torchrun_unsupported_options(args) if not f.startswith("--teacache")]  # all run
+    """Every TeaCache flag runs on the neuron path. --quant does not yet: the CLI's model check
+    admits it (``QUANT_MODELS`` names HunyuanVideo-1.5 for its target table), but this driver
+    neither writes the quantized directory nor forwards the flag to its stages, so a launch
+    would run the bf16 DiT without a word."""
+    found = [f for f in torchrun_unsupported_options(args) if not f.startswith("--teacache")]
+    if getattr(args, "quant", None) is not None:
+        found.append("--quant")
+    return found
 
 
 def _layout(args: argparse.Namespace) -> tuple[int, bool, int]:
