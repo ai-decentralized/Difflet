@@ -6,7 +6,9 @@ mode, matches diffusers' model run with the weights the directory holds dequanti
 tp2, tp2 with SP (the image stream's unreduced row-parallel partials) and cp2; the output
 projections, the modulation, the token refiner and the single blocks' fused ``proj_out`` stay
 bf16, and a spec that names that ``proj_out`` is refused at construction until the spec stores
-its halves. Eager mode and a spec quantized for another tp are refused.
+its halves. Eager mode and a spec quantized for another tp are refused. The pipeline application
+resolves the quantized directory from the source ``transformer`` at the launch's tp and refuses
+what the shared resolver refuses.
 
 Every run of the Difflet port is in a fresh gloo process (``hv1_dit_worker``): importing the
 port binds ``difflet.ops`` to the backend of the moment, so it must not be imported here.
@@ -26,6 +28,7 @@ from difflet.backends.neuron.hunyuan_video.config import NeuronHunyuanVideoConfi
 from difflet.backends.neuron.hunyuan_video.transformer import (  # noqa: E402
     NeuronHunyuanVideoTransformerApplication,
 )
+from difflet.pipeline.parallel_config import DiffletParallelConfig  # noqa: E402
 from difflet.quant import mx  # noqa: E402
 from difflet.quant.checkpoint import prepare_quantized_checkpoint, read_manifest  # noqa: E402
 from difflet.quant.spec import QuantSpec  # noqa: E402
@@ -161,3 +164,53 @@ def test_a_target_on_the_fused_single_block_proj_out_is_refused_until_phase_d(ti
                r"\(proj_out_attn / proj_out_mlp\).*phase D")
     with pytest.raises(ValueError, match=refusal):
         _app(model_path=tiny.transformer_dir, quant=spec, exec_mode="compile", **TINY_SHAPE)
+
+
+# --------------------------------------------------------------------------
+# the pipeline application (TorchNeuronHunyuanVideoApplication)
+# --------------------------------------------------------------------------
+
+
+def _pipeline_app(tiny, **kw):
+    """The composed application on the CPU, constructed only: the DiT is built (not loaded) and
+    the quant options resolved. Construction reads ``transformer/`` and nothing else, so the
+    root needs no text encoders or tokenizers."""
+    from difflet.models.hunyuan_video.neuron_application import (
+        TorchNeuronHunyuanVideoApplication,
+    )
+
+    return TorchNeuronHunyuanVideoApplication(
+        model_path=str(tiny.root), parallel=kw.pop("parallel", DiffletParallelConfig()),
+        dtype=torch.float32, shape=dict(height=64, width=64, num_frames=17), text_seq_len=16,
+        device="cpu", exec_mode="compile", **kw)
+
+
+def test_pipeline_application_resolves_the_quantized_directory(tiny, monkeypatch):
+    """``"mxfp8"`` is the default recipe at the launch's tp (the kernel compute; dequant shares
+    the directory, whose bytes do not depend on the compute path), and the DiT loads the
+    directory `difflet compile` wrote under the cache from the source ``transformer``."""
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tiny.root / "cache"))
+    app = _pipeline_app(tiny, quant="mxfp8")
+    assert app.quant == default_spec("hunyuan_video", tp_degree=1)
+    assert app.transformer.quant is app.quant
+    assert app.transformer.model_path == str(tiny.quantized[1])
+    tp2 = _pipeline_app(tiny, quant="mxfp8", parallel=DiffletParallelConfig(tp_degree=2))
+    assert tp2.quant.tp_degree == 2 and tp2.transformer.model_path == str(tiny.quantized[2])
+    plain = _pipeline_app(tiny)
+    assert plain.quant is None and plain.transformer.quant is None
+    assert plain.transformer.model_path == str(tiny.transformer_dir)
+    explicit = _pipeline_app(tiny, quant=tiny.specs[1].to_dict(),
+                             quant_checkpoint=str(tiny.quantized[1]))
+    assert explicit.transformer.model_path == str(tiny.quantized[1])
+
+
+def test_pipeline_application_option_refusals(tiny, monkeypatch, tmp_path):
+    with pytest.raises(ValueError, match="quant_checkpoint needs quant"):
+        _pipeline_app(tiny, quant_checkpoint=str(tiny.quantized[1]))
+    with pytest.raises(ValueError, match="quant must be"):
+        _pipeline_app(tiny, quant="fp8")
+    with pytest.raises(ValueError, match="built with another quantization spec"):
+        _pipeline_app(tiny, quant=tiny.specs[1], quant_checkpoint=str(tiny.quantized[2]))
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path / "empty"))
+    with pytest.raises(ValueError, match="difflet compile"):
+        _pipeline_app(tiny, quant="mxfp8")
