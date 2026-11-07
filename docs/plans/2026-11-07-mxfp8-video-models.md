@@ -69,7 +69,7 @@ through those helpers and takes it to the device.
 - Produces: `difflet.quant.mx.LAYOUT_K: int = 128`; `_init_tensors` raises
   `ValueError("mxfp8 needs in_features a multiple of 128 (the MX layout), got {in_local}")`.
 
-- [ ] **Step 1: Extend the failing test**
+- [x] **Step 1: Extend the failing test**
 
 ```python
 def test_unknown_compute_and_odd_k_are_refused():
@@ -78,10 +78,10 @@ def test_unknown_compute_and_odd_k_are_refused():
         Q.FP8Linear(64, 8, compute="dequant")        # a multiple of 32 but not of 128
 ```
 
-- [ ] **Step 2: Run it** — `pytest tests/unit/backends/test_neuron_fp8_linear.py -k odd_k -v`; expected FAIL (64 is accepted today).
-- [ ] **Step 3: Implement** — `mx.LAYOUT_K = 128`; `_init_tensors` checks `in_local % LAYOUT_K`.
-- [ ] **Step 4: Run** — the same command; expected PASS. Then `pytest tests/unit/quant tests/unit/backends/test_neuron_fp8_linear.py -q`; expected all green.
-- [ ] **Step 5: Commit** — `fix(quant): the MX layout needs K in multiples of 128, checked where the layer is built`; push.
+- [x] **Step 2: Run it** — `pytest tests/unit/backends/test_neuron_fp8_linear.py -k odd_k -v`; expected FAIL (64 is accepted today).
+- [x] **Step 3: Implement** — `mx.LAYOUT_K = 128`; `_init_tensors` checks `in_local % LAYOUT_K`.
+- [x] **Step 4: Run** — the same command; expected PASS. Then `pytest tests/unit/quant tests/unit/backends/test_neuron_fp8_linear.py -q`; expected all green.
+- [x] **Step 5: Commit** — `fix(quant): the MX layout needs K in multiples of 128, checked where the layer is built`; push.
 
 ### Task A2: `quantize_module_` matches by checkpoint key and names the first bad layer
 
@@ -95,7 +95,7 @@ def test_unknown_compute_and_odd_k_are_refused():
   are still module names. A twin whose construction raises `ValueError` is re-raised as
   `ValueError(f"{name}: {exc} (tp too high for this layer at this spec?)")`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 def test_quantize_module_matches_through_a_key_function():
@@ -113,10 +113,10 @@ def test_quantize_module_names_the_layer_whose_k_is_wrong():
         Q.quantize_module_(module, QuantSpec(targets=("proj",), compute="dequant"))
 ```
 
-- [ ] **Step 2: Run** — `pytest tests/unit/backends/test_neuron_fp8_linear.py -k "key_function or k_is_wrong" -v`; expected FAIL (`key_fn` unknown; bare message).
-- [ ] **Step 3: Implement** in `quantize_module_` (apply `key_fn` only for matching; wrap the twin construction).
-- [ ] **Step 4: Run** — same selection, PASS; then the whole file.
-- [ ] **Step 5: Commit** — `feat(fp8): quantize_module_ matches through a checkpoint-key function and names a layer whose K is wrong`; push.
+- [x] **Step 2: Run** — `pytest tests/unit/backends/test_neuron_fp8_linear.py -k "key_function or k_is_wrong" -v`; expected FAIL (`key_fn` unknown; bare message).
+- [x] **Step 3: Implement** in `quantize_module_` (apply `key_fn` only for matching; wrap the twin construction).
+- [x] **Step 4: Run** — same selection, PASS; then the whole file.
+- [x] **Step 5: Commit** — `feat(fp8): quantize_module_ matches through a checkpoint-key function and names a layer whose K is wrong`; push.
 
 ### Task A3: the transformer application base owns the quant wiring
 
@@ -143,7 +143,7 @@ def test_quantize_module_names_the_layer_whose_k_is_wrong():
   `quant_fuse_qkv = True`; no `quant` parameter, no `build_module`/`_after_load` quant code.
   FLUX's: `quant_model = "flux"`, `quant_label = "FLUX"`.
 
-- [ ] **Step 1: Write the failing tests** (in `test_neuron_fp8_linear.py`, CPU, tp=1, using `tests/unit/backends/_neuron_fp8_workers.py`'s `FP8Toy` or a two-linear toy built on meta)
+- [x] **Step 1: Write the failing tests** (in `test_neuron_fp8_linear.py`, CPU, tp=1, using `tests/unit/backends/_neuron_fp8_workers.py`'s `FP8Toy` or a two-linear toy built on meta)
 
 ```python
 class _ToyApp(TorchNeuronApplicationBase):
@@ -164,10 +164,10 @@ def test_base_quantizes_after_build_and_prepares_after_load(tmp_path):
     assert app.module.fc1.weight is None and app.module.fc1.weight_bf16 is not None
 ```
 
-- [ ] **Step 2: Run** — `pytest tests/unit/backends/test_neuron_fp8_linear.py -k base -v`; expected FAIL.
-- [ ] **Step 3: Implement** the base-class changes; delete the duplicated code from the Qwen and FLUX applications; keep their docstrings' D43 note.
-- [ ] **Step 4: Run** — `pytest tests/unit/backends/test_neuron_fp8_linear.py tests/unit/backends/test_neuron_qwen_fp8.py tests/unit/backends/test_neuron_flux_fp8.py tests/unit/backends/test_neuron_qwen_image_l1.py -q`; expected all PASS (the Qwen/FLUX fp8 tests unchanged).
-- [ ] **Step 5: Commit** — `refactor(neuron): the application base owns the MXFP8 wiring (quant_model, quant_fuse_qkv, _after_load)`; push.
+- [x] **Step 2: Run** — `pytest tests/unit/backends/test_neuron_fp8_linear.py -k base -v`; expected FAIL.
+- [x] **Step 3: Implement** the base-class changes; delete the duplicated code from the Qwen and FLUX applications; keep their docstrings' D43 note.
+- [x] **Step 4: Run** — `pytest tests/unit/backends/test_neuron_fp8_linear.py tests/unit/backends/test_neuron_qwen_fp8.py tests/unit/backends/test_neuron_flux_fp8.py tests/unit/backends/test_neuron_qwen_image_l1.py -q`; expected all PASS (the Qwen/FLUX fp8 tests unchanged).
+- [x] **Step 5: Commit** — `refactor(neuron): the application base owns the MXFP8 wiring (quant_model, quant_fuse_qkv, _after_load)`; push.
 
 ### Task A4: one resolver for the pipeline side and one HBM helper for quantized directories
 
@@ -194,7 +194,7 @@ def test_base_quantizes_after_build_and_prepares_after_load(tmp_path):
   `device_text_encoder_components(..., dit_dir=None)` returns `DIT.stored_in(dit_dir)` for the DiT
   when given; `device_text_encoder_fits(..., dit_dir=None)` passes it.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 def test_resolve_quant_default_spec_and_checkpoint(tiny_quantized_toy, tmp_path):
@@ -212,10 +212,10 @@ def test_component_stored_in_a_directory(tiny_quantized_toy):
     assert components_bytes(model_dir, (comp,), tp_degree=1) == safetensors_bytes(quantized_dir)
 ```
 
-- [ ] **Step 2: Run** — `pytest tests/unit/backends/test_neuron_fp8_linear.py -k resolve tests/unit/backends/test_neuron_hbm.py -k "quantized or stored_in" -v`; expected FAIL (imports).
-- [ ] **Step 3: Implement**; replace the two `_resolve_quant` bodies with one-line calls to the helper (Qwen passes `"qwen_image"`, FLUX `"flux"`).
-- [ ] **Step 4: Run** — `pytest tests/unit/backends tests/unit/quant -q -x`; expected PASS.
-- [ ] **Step 5: Commit** — `refactor(neuron): one quant resolver for the pipeline applications; HBM estimates read a quantized directory as stored`; push.
+- [x] **Step 2: Run** — `pytest tests/unit/backends/test_neuron_fp8_linear.py -k resolve tests/unit/backends/test_neuron_hbm.py -k "quantized or stored_in" -v`; expected FAIL (imports).
+- [x] **Step 3: Implement**; replace the two `_resolve_quant` bodies with one-line calls to the helper (Qwen passes `"qwen_image"`, FLUX `"flux"`).
+- [x] **Step 4: Run** — `pytest tests/unit/backends tests/unit/quant -q -x`; expected PASS.
+- [x] **Step 5: Commit** — `refactor(neuron): one quant resolver for the pipeline applications; HBM estimates read a quantized directory as stored`; push.
 
 ### Task A5: one driver-side preparer, with the launch's tp
 
@@ -235,7 +235,7 @@ def test_component_stored_in_a_directory(tiny_quantized_toy):
   `print("Error: --quant: ...", file=sys.stderr); raise SystemExit(1)`. A missing source
   directory (not downloaded) returns `None` and prints nothing.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```python
 def test_quant_spec_takes_the_drivers_tp(monkeypatch):
@@ -251,16 +251,16 @@ def test_prepare_quant_writes_on_create_and_refuses_when_missing(tmp_path, monke
     assert os.environ["DIFFLET_NKI_TRACE_CACHE"] == "1"
 ```
 
-- [ ] **Step 2: Run** — `pytest tests/unit/cli/test_quant_cli.py -k "drivers_tp or prepare_quant" -v`; FAIL.
-- [ ] **Step 3: Implement**; the Qwen and FLUX orchestrators call `prepare_quant` (Qwen keeps `self._quantized_dit = out["transformer"]`).
-- [ ] **Step 4: Run** — `pytest tests/unit/cli/test_quant_cli.py tests/unit/cli/test_orchestrator_flux_neuron.py tests/unit/cli/test_orchestrator_qwen_image*.py -q`; PASS.
-- [ ] **Step 5: Commit** — `refactor(cli): one --quant preparer for the drivers; quant_spec takes the launch's tp`; push.
+- [x] **Step 2: Run** — `pytest tests/unit/cli/test_quant_cli.py -k "drivers_tp or prepare_quant" -v`; FAIL.
+- [x] **Step 3: Implement**; the Qwen and FLUX orchestrators call `prepare_quant` (Qwen keeps `self._quantized_dit = out["transformer"]`).
+- [x] **Step 4: Run** — `pytest tests/unit/cli/test_quant_cli.py tests/unit/cli/test_orchestrator_flux_neuron.py tests/unit/cli/test_orchestrator_qwen_image*.py -q`; PASS.
+- [x] **Step 5: Commit** — `refactor(cli): one --quant preparer for the drivers; quant_spec takes the launch's tp`; push.
 
 ### Task A6: the full CPU gate, then Qwen bit-identity on the device
 
-- [ ] **Step 1:** `pytest tests/unit -q -x -p no:cacheprovider` (the CPU gate the CI runs; `scripts/neuron-skips.txt` as before); expected: the same pass count as `03b43ba` plus the new tests.
-- [ ] **Step 2 (device):** `difflet generate --model-id Qwen/Qwen-Image --backend neuron --tp-degree 4 --quant mxfp8 --steps 50 --seed 42 --height 1024 --width 1024 --prompt "<the evidence doc's cat prompt>" --output /home/ubuntu/fp8-bench/refactor_check/qwen_mx.png`; expected: md5 equal to the branch's recorded mxfp8 image for that prompt/seed (`/home/ubuntu/fp8-bench/qwen_mx_tp4_ref2/` per the status memory) and step median within 239 ± 3 ms.
-- [ ] **Step 3:** record both in the status page; commit nothing (verification only).
+- [x] **Step 1:** `pytest tests/unit -q -x -p no:cacheprovider` (the CPU gate the CI runs; `scripts/neuron-skips.txt` as before); expected: the same pass count as `03b43ba` plus the new tests.
+- [x] **Step 2 (device):** `difflet generate --model-id Qwen/Qwen-Image --backend neuron --tp-degree 4 --quant mxfp8 --steps 50 --seed 42 --height 1024 --width 1024 --prompt "<the evidence doc's cat prompt>" --output /home/ubuntu/fp8-bench/refactor_check/qwen_mx.png`; expected: md5 equal to the branch's recorded mxfp8 image for that prompt/seed (`/home/ubuntu/fp8-bench/qwen_mx_tp4_ref2/` per the status memory) and step median within 239 ± 3 ms.
+- [x] **Step 3:** record both in the status page; commit nothing (verification only).
 
 # Phase B — LTX-2
 
@@ -288,7 +288,7 @@ def test_prepare_quant_writes_on_create_and_refuses_when_missing(tmp_path, monke
     `rf"{_BLOCK}\.ff\.net\.2"`, `rf"{_BLOCK}\.audio_ff\.net\.2"`.
 - The module docstring gets an LTX-2 paragraph with the dims (video 4096, audio 2048, ff 16384 / 8192).
 
-- [ ] **Step 1: Write the failing test** — builds `diffusers.LTX2VideoTransformer3DModel(**TINY_FP8_LTX2)` (Task B2's toy; put the dict in `tests/unit/backends/_neuron_ltx2_toy.py` now) and asserts:
+- [x] **Step 1: Write the failing test** — builds `diffusers.LTX2VideoTransformer3DModel(**TINY_FP8_LTX2)` (Task B2's toy; put the dict in `tests/unit/backends/_neuron_ltx2_toy.py` now) and asserts:
 
 ```python
 def test_default_targets_cover_the_video_and_text_input_linears_only():
@@ -303,10 +303,10 @@ def test_default_targets_cover_the_video_and_text_input_linears_only():
     assert not any(spec.matches(n) for n in ("proj_out", "caption_projection.linear_1", "transformer_blocks.0.audio_ff.net.2"))
 ```
 
-- [ ] **Step 2: Run** — `pytest tests/unit/quant/test_targets_ltx2.py -v`; FAIL (`ltx_2` unknown).
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** — PASS; also `pytest tests/unit/cli/test_quant_cli.py -q`.
-- [ ] **Step 5: Commit** — `feat(quant): the LTX-2 MXFP8 target table (video- and text-input linears; audio stream and output projections bf16)`; push.
+- [x] **Step 2: Run** — `pytest tests/unit/quant/test_targets_ltx2.py -v`; FAIL (`ltx_2` unknown).
+- [x] **Step 3: Implement.**
+- [x] **Step 4: Run** — PASS; also `pytest tests/unit/cli/test_quant_cli.py -q`.
+- [x] **Step 5: Commit** — `feat(quant): the LTX-2 MXFP8 target table (video- and text-input linears; audio stream and output projections bf16)`; push.
 
 ### Task B2: the LTX-2 transformer application
 
@@ -324,7 +324,7 @@ def test_default_targets_cover_the_video_and_text_input_linears_only():
   (4 heads x 32 = 128 inner for both streams; every quantized K is 128 or 512).
 - `TINY_TARGETS_LTX2 = 11 * num_layers`.
 
-- [ ] **Step 1: Write the failing tests** (CPU, tp=1, `compute="dequant"`, the `tiny` fixture as in `test_neuron_flux_fp8.py:45-66` with `write_tiny_ltx2_model(root, config=TINY_FP8_LTX2)`; the weight-only reference built from `diffusers_reference` with the dequantized weights)
+- [x] **Step 1: Write the failing tests** (CPU, tp=1, `compute="dequant"`, the `tiny` fixture as in `test_neuron_flux_fp8.py:45-66` with `write_tiny_ltx2_model(root, config=TINY_FP8_LTX2)`; the weight-only reference built from `diffusers_reference` with the dequantized weights)
 
 ```python
 def test_the_quantized_directory_holds_the_default_targets_only(tiny): ...  # manifest["tensors"]["quantized"] == TINY_TARGETS_LTX2
@@ -343,10 +343,10 @@ def test_replicate_flags_are_refused_with_quant(tiny, monkeypatch):
 def test_eager_is_refused(tiny): ...  # ValueError match "D43"
 ```
 
-- [ ] **Step 2: Run** — `pytest tests/unit/backends/test_neuron_ltx2_fp8.py -v`; FAIL (`quant` refused: no target table).
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** — PASS; then `pytest tests/unit/backends/test_neuron_ltx2_l1.py -q` (unchanged).
-- [ ] **Step 5: Commit** — `feat(ltx-2): --quant mxfp8 on the DiT application (base-class wiring; replicate flags refused)`; push.
+- [x] **Step 2: Run** — `pytest tests/unit/backends/test_neuron_ltx2_fp8.py -v`; FAIL (`quant` refused: no target table).
+- [x] **Step 3: Implement.**
+- [x] **Step 4: Run** — PASS; then `pytest tests/unit/backends/test_neuron_ltx2_l1.py -q` (unchanged).
+- [x] **Step 5: Commit** — `feat(ltx-2): --quant mxfp8 on the DiT application (base-class wiring; replicate flags refused)`; push.
 
 ### Task B3: the LTX-2 pipeline application
 
@@ -360,11 +360,11 @@ def test_eager_is_refused(tiny): ...  # ValueError match "D43"
   (the directory, or None). `_check_device_text_encoder_fits` passes `dit_dir=self.quantized_dit`
   to `device_text_encoder_components`.
 
-- [ ] **Step 1: Write the failing test** (as `test_neuron_flux_fp8.py::test_pipeline_application_resolves_the_quantized_directory`): construct `TorchNeuronLtx2Application` on the CPU with `enable_text_encoder=False, enable_decode_components=False, quant="mxfp8"`, `DIFFLET_COMPILE_CACHE` at the toy's cache root; assert `app.transformer.model_path == str(tiny.quantized)` and `app.quant == default_spec("ltx_2", tp_degree=1)`; and `quant_checkpoint` without `quant` raises.
-- [ ] **Step 2: Run** — FAIL (`TypeError`: unknown kwarg).
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** — `pytest tests/unit/backends/test_neuron_ltx2_fp8.py tests/unit/backends/test_neuron_ltx2_l2.py -q`; PASS.
-- [ ] **Step 5: Commit** — `feat(ltx-2): the pipeline application resolves the quantized DiT directory and counts its HBM bytes as stored`; push.
+- [x] **Step 1: Write the failing test** (as `test_neuron_flux_fp8.py::test_pipeline_application_resolves_the_quantized_directory`): construct `TorchNeuronLtx2Application` on the CPU with `enable_text_encoder=False, enable_decode_components=False, quant="mxfp8"`, `DIFFLET_COMPILE_CACHE` at the toy's cache root; assert `app.transformer.model_path == str(tiny.quantized)` and `app.quant == default_spec("ltx_2", tp_degree=1)`; and `quant_checkpoint` without `quant` raises.
+- [x] **Step 2: Run** — FAIL (`TypeError`: unknown kwarg).
+- [x] **Step 3: Implement.**
+- [x] **Step 4: Run** — `pytest tests/unit/backends/test_neuron_ltx2_fp8.py tests/unit/backends/test_neuron_ltx2_l2.py -q`; PASS.
+- [x] **Step 5: Commit** — `feat(ltx-2): the pipeline application resolves the quantized DiT directory and counts its HBM bytes as stored`; push.
 
 ### Task B4: the LTX-2 orchestrator
 
@@ -372,11 +372,11 @@ def test_eager_is_refused(tiny): ...  # ValueError match "D43"
 - Modify: `difflet/cli/orchestrators/ltx_2.py:122-137` (`_torchrun_application_kwargs` + `quant`), `:419-426` (`_check_dit_fits` with `dit_dir`), `:455-459` (`_prepare_torchrun` calls `prepare_quant` before `_check_dit_fits`; `create = not generating`), `:631-658` (`_stage_cache_inputs` + `**quant_cache_fields(quant_spec(args))`), `:665-707` (`_shared_cli_args` + `quant_cli_args(a)`)
 - Test: `tests/unit/cli/test_quant_cli.py` (an LTX-2 twin of `test_qwen_orchestrator_forwards_and_keys_quant` and of `test_application_kwargs_carry_the_spec`), `tests/unit/cli/test_ltx2_neuron_cli.py` (DP worker forwarding: `worker_cli_args` already carries `--quant`; assert it for the LTX-2 args namespace)
 
-- [ ] **Step 1: Write the failing tests** (copy the Qwen ones with `LTX2 = "Lightricks/LTX-2"`; the key test asserts the five added fields and `quant_tp_degree == 2` when `--tp-degree 2`).
-- [ ] **Step 2: Run** — `pytest tests/unit/cli/test_quant_cli.py -k ltx2 -v`; FAIL.
-- [ ] **Step 3: Implement.**
-- [ ] **Step 4: Run** — `pytest tests/unit/cli -q -x`; PASS.
-- [ ] **Step 5: Commit** — `feat(ltx-2): --quant mxfp8 through the driver — quantized directory on compile, stage flags, cache key, HBM`; push.
+- [x] **Step 1: Write the failing tests** (copy the Qwen ones with `LTX2 = "Lightricks/LTX-2"`; the key test asserts the five added fields and `quant_tp_degree == 2` when `--tp-degree 2`).
+- [x] **Step 2: Run** — `pytest tests/unit/cli/test_quant_cli.py -k ltx2 -v`; FAIL.
+- [x] **Step 3: Implement.**
+- [x] **Step 4: Run** — `pytest tests/unit/cli -q -x`; PASS.
+- [x] **Step 5: Commit** — `feat(ltx-2): --quant mxfp8 through the driver — quantized directory on compile, stage flags, cache key, HBM`; push.
 
 ### Task B5: the comparison tool reads videos
 
@@ -391,9 +391,89 @@ def test_eager_is_refused(tiny): ...  # ValueError match "D43"
   averaged over frames, plus `frames`, `min_psnr_frame`; images keep today's output. A frame
   count mismatch is an error naming both counts.
 
-- [ ] **Step 1: Write the failing test** — two synthetic 4-frame clips written with the same reader library; `compare(a, a)["psnr"] == inf`-safe (capped as today), `compare(a, b)["frames"] == 4`, mismatch raises.
-- [ ] **Step 2: Run** — FAIL. **Step 3: Implement.** **Step 4: Run** — PASS.
-- [ ] **Step 5: Commit** — `scripts: compare_difflet_runs reads videos (per-frame PSNR/SSIM/LPIPS averaged)`; push.
+- [x] **Step 1: Write the failing test** — two synthetic 4-frame clips written with the same reader library; `compare(a, a)["psnr"] == inf`-safe (capped as today), `compare(a, b)["frames"] == 4`, mismatch raises.
+- [x] **Step 2: Run** — FAIL. **Step 3: Implement.** **Step 4: Run** — PASS.
+- [x] **Step 5: Commit** — `scripts: compare_difflet_runs reads videos (per-frame PSNR/SSIM/LPIPS averaged)`; push.
+
+### Task B7: `mx_linear` pads the activation rows to a multiple of 8
+
+Found by the one-core probe (`/home/ubuntu/fp8-bench/ltx2_probe/probe_mx_shapes.py`, 2026-11-07):
+nkilib's `matmul_mxfp8` refuses an activation whose row count is not a multiple of 8
+(`NCC_INKI016 ... F dim must be divisible by 8 for quantization, got F=126`). LTX-2's audio
+stream has 126 tokens at the default shape (51 at 480x704x49), HunyuanVideo-1.5 has 49,290
+image and 1,985 text tokens, Wan under CP2 has 2,340: every one of them reaches the kernel as
+`M` rows. The video and text streams of LTX-2 (6144 / 3072 / 1024) and Qwen-Image / FLUX are
+multiples of 8, which is why nothing noticed.
+
+**Files:**
+- Modify: `difflet/backends/neuron/ops_impl/fp8_kernels.py` (`mx_linear`)
+- Test: `tests/unit/backends/test_neuron_fp8_linear.py`
+
+**Interfaces:**
+- Produces `difflet.backends.neuron.ops_impl.fp8_kernels.M_MULTIPLE: int = 8` and, in
+  `mx_linear(x, weight_packed, weight_scales)`: after `x2 = x.reshape(-1, k)`, when
+  `x2.shape[0] % M_MULTIPLE`, `x2` is zero-padded along dim 0 to the next multiple
+  (`torch.nn.functional.pad(x2, (0, 0, 0, pad))`), the op runs on the padded rows, and the
+  output is sliced back to the original row count before the reshape. No pad when the count is
+  already a multiple (the compiled graph of every current model is unchanged: same HLO).
+- Produces `padded_rows(m: int) -> int` (the padded count) beside it, torch-free, so the HBM /
+  shape notes can name it.
+
+- [ ] **Step 1: Write the failing test** (CPU: monkeypatch `fp8_kernels._MX_OP` with a fake that
+  asserts its input's row count is a multiple of 8 and returns `x2 @ W` for a known `W`)
+
+```python
+def test_mx_linear_pads_the_rows_to_a_multiple_of_8(monkeypatch):
+    seen = []
+    def fake_op(x2, packed, scales):
+        seen.append(tuple(x2.shape)); assert x2.shape[0] % 8 == 0
+        return x2.float()[:, :packed.shape[1]].to(torch.bfloat16)  # any row-wise function
+    monkeypatch.setattr(fp8_kernels, "_MX_OP", fake_op)
+    x = torch.randn(2, 126, 256).to(torch.bfloat16)
+    out = fp8_kernels.mx_linear(x, torch.zeros(64, 32, dtype=torch.int32), torch.zeros(64, 32, dtype=torch.uint8))
+    assert out.shape == (2, 126, 32) and seen == [(256, 256)]          # 252 -> 256 rows
+    assert torch.equal(out.reshape(-1, 32), x.reshape(-1, 256).float()[:, :32].to(torch.bfloat16))
+    fp8_kernels.mx_linear(torch.randn(8, 256).to(torch.bfloat16), ...); assert seen[-1] == (8, 256)  # no pad
+```
+
+- [ ] **Step 2: Run** — `pytest tests/unit/backends/test_neuron_fp8_linear.py -k pads_the_rows -v`; FAIL (assert on 252).
+- [ ] **Step 3: Implement.**
+- [ ] **Step 4: Run** — PASS; then the fp8/quant selection.
+- [ ] **Step 5: Commit** — `fix(fp8): mx_linear pads the activation rows to a multiple of 8 (the kernel's F-dim rule; LTX-2 audio, HV1.5, Wan+CP2)`; push.
+- [ ] **Step 6 (device):** re-run the probe's audio shapes (`probe_mx_shapes.py`, the `[variant]` rows); expected: they pass like the video shapes.
+
+### Task B8: the stage's step timing survives a deep-copied scheduler; LTX-2 reports its DiT step
+
+Found on the device (2026-11-07, `/home/ubuntu/fp8-bench/ltx2_tp4/bf16_gen50c_timed.log`): the
+LTX-2 driver passes no `timing=True` to `run_generate_stage`, so no per-step median is printed;
+and passing it breaks the run with `IndexError: index 51 is out of bounds for dimension 0 with
+size 51` in `scheduling_flow_match_euler_discrete.step`. The hook
+(`difflet/cli/orchestrators/torchrun.py:411-424`) sets `scheduler.step` to a plain closure over
+the *video* scheduler's bound `step`; `LTX2Orchestrator` then `copy.deepcopy`s that scheduler
+into its audio scheduler (`difflet/models/ltx_2/pipeline.py:544`), `copy` treats functions as
+atomic, and the audio scheduler's `step` drives the video scheduler's step index twice per
+iteration. `copy` *does* rebind a `types.MethodType` to the copied instance
+(`copy._deepcopy_method`), so a method wrapper that calls `type(self).step(self, ...)` and marks
+only when `self is` the original scheduler times one video step per iteration on LTX-2 and is
+unchanged on Qwen-Image and Wan (one scheduler).
+
+**Files:**
+- Modify: `difflet/cli/orchestrators/torchrun.py:411-424`
+- Modify: `difflet/cli/orchestrators/ltx_2.py:620-629` (`timing=True`)
+- Test: `tests/unit/cli/test_neuron_stage_timing.py` (new)
+
+**Interfaces:** unchanged signatures; the hook body as described (`step_fn = type(scheduler).step`;
+`scheduler.step = types.MethodType(timed_step, scheduler)`; `if self_ is scheduler: marks.append(...)`).
+
+- [ ] **Step 1: Write the failing test** — a fake `pipe.app.pipeline` whose `scheduler` has a
+  class-level `step` that advances `self.i` and raises past `self.n`; the test runs the hook
+  the way `run_generate_stage` does (factor the hook into `_time_scheduler_steps(pipe, marks) -> None`
+  so it is testable), deep-copies the scheduler afterwards as LTX-2 does, steps both `n` times,
+  and asserts: no exception, the original's `i == n`, the copy's `i == n`, `len(marks) == n`.
+- [ ] **Step 2: Run** — FAIL (IndexError-like from the copy driving the original).
+- [ ] **Step 3: Implement** the hook change; add `timing=True` to the LTX-2 stage call.
+- [ ] **Step 4: Run** — PASS; `pytest tests/unit/cli -q` (the Qwen stage tests unchanged).
+- [ ] **Step 5: Commit** — `fix(cli): the stage's step timing survives LTX-2's deep-copied audio scheduler; the LTX-2 driver reports the DiT step median`; push.
 
 ### Task B6: LTX-2 on the device (trn3, tp4, 512x768x121, 50 steps, seed 42, LNC=2)
 
@@ -401,9 +481,9 @@ No code unless a step fails (then one bug, one commit, as `difflet-device-verify
 Work dir `/home/ubuntu/fp8-bench/ltx2_tp4/`; each step's command, step-time median and md5s go
 into `docs/verification/2026-11-07-mxfp8-video-models.md` (new; one section per model).
 
-- [ ] **Step 1: kernel shape probe (one core):** a `nki` script calling `fp8_kernels.mx_linear` at the per-rank shapes `(6144 x 4096 -> 1024)`, `(6144 x 4096 -> 4096)`, `(6144 x 16384/4 -> 4096)` (row), `(1024 x 4096 -> 1024)`, `(126 x 2048 -> 512)` (the audio variant), against `mx.dequantize_mx` on the CPU; expected rel error < 2e-3 at every shape, no kernel assert. Record the per-shape time only as a sanity figure.
-- [ ] **Step 2: download** `Lightricks/LTX-2` (38 GB transformer + the rest); `df` before and after.
-- [ ] **Step 3: bf16 bring-up:** `difflet compile ... --backend neuron --tp-degree 4` then two `difflet generate` with the fixed config; expected: identical md5s, a step median (the first trn3 number for LTX-2), the bf16-vs-bf16 noise floor from a second seed pair is NOT needed here (determinism is bit-exact); profile one block if the budget allows and note the quantizable share.
+- [x] **Step 1: kernel shape probe (one core):** a `nki` script calling `fp8_kernels.mx_linear` at the per-rank shapes `(6144 x 4096 -> 1024)`, `(6144 x 4096 -> 4096)`, `(6144 x 16384/4 -> 4096)` (row), `(1024 x 4096 -> 1024)`, `(126 x 2048 -> 512)` (the audio variant), against `mx.dequantize_mx` on the CPU; expected rel error < 2e-3 at every shape, no kernel assert. Record the per-shape time only as a sanity figure.
+- [x] **Step 2: download** `Lightricks/LTX-2` (38 GB transformer + the rest); `df` before and after.
+- [x] **Step 3: bf16 bring-up:** `difflet compile ... --backend neuron --tp-degree 4` then two `difflet generate` with the fixed config; expected: identical md5s, a step median (the first trn3 number for LTX-2), the bf16-vs-bf16 noise floor from a second seed pair is NOT needed here (determinism is bit-exact); profile one block if the budget allows and note the quantizable share.
 - [ ] **Step 4: mxfp8:** `difflet compile ... --quant mxfp8` (writes the quantized directory; record its size and the HBM estimate line), two generates; expected: identical md5s; `compare_difflet_runs.py` vs the bf16 clip; the step ratio.
 - [ ] **Step 5: audio variant:** `DIFFLET_QUANT_TARGETS="<default>;<audio patterns>"` one compile + generate; record the ratio and PSNR; keep whichever set is faster at equal quality as the default (a code change to `targets.py` + commit if it is the audio set).
 - [ ] **Step 6: CP2 (gather_kv) and DP2** at the same config: `--cp-degree 2` one generate (md5 recorded, PSNR vs the tp4 clip); a DP2 launch to prove the worker forwards `--quant` (its log line `[ltx_2] MXFP8 transformer (nki)` on both workers).
