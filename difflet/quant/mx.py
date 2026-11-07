@@ -30,14 +30,11 @@ from __future__ import annotations
 
 import torch
 
+from difflet.quant.spec import BLOCK, LAYOUT_K  # the block and sub-tile sizes, torch-free there
+
 FP8_DTYPE = torch.float8_e4m3fn
 #: OCP E4M3FN: the format Trainium3 computes natively.
 FP8_MAX = 448.0
-BLOCK = 32
-#: The smallest K the swizzle lays out (one 128-element sub-tile, see :func:`_tile_sizes`): a
-#: weight's K per rank must be a multiple of this, not merely of ``BLOCK``, or it has no MX
-#: layout at all; the fp8 layers check it where they are built so a bad spec fails on the host.
-LAYOUT_K = 128
 #: e4m3fn: the largest exponent (biased 134 = 2^7) the block maximum is scaled into.
 E4M3_MAX_EXP = 7
 E4M3_MAX = 448.0

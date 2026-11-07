@@ -29,6 +29,12 @@ FORMAT = "mxfp8"
 #: ``dequant``: fp8 weights, bf16 matmul (memory only). ``nki``: the MXFP8 tensor-engine kernel.
 COMPUTE_MODES = ("nki", "dequant")
 DEFAULT_COMPUTE = "nki"
+#: One E8M0 scale per ``BLOCK`` values along K, and the smallest K the swizzle lays out (one
+#: 128-element sub-tile, ``mx._tile_sizes``): a weight's K per rank must be a multiple of
+#: ``LAYOUT_K``, not merely of ``BLOCK``, or it has no MX layout at all. Defined here, torch-free,
+#: so the driver can hold a spec against a checkpoint's shapes without importing ``mx``.
+BLOCK = 32
+LAYOUT_K = 128
 #: The trace-module prefix the neuron Qwen-Image and LTX-2 applications put before diffusers'
 #: own module names; target patterns are written against the diffusers names.
 STRIPPED_PREFIXES = ("transformer.",)
@@ -149,9 +155,11 @@ def file_sha256(path: str | Path) -> str:
 
 
 __all__ = [
+    "BLOCK",
     "COMPUTE_MODES",
     "DEFAULT_COMPUTE",
     "FORMAT",
+    "LAYOUT_K",
     "QUANT_SCHEMA",
     "QuantSpec",
     "file_sha256",
