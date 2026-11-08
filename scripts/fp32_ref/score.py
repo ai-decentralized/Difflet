@@ -67,10 +67,11 @@ DEVICE_OUTPUTS = {
         "mx": {"output": "hv1_tp4/loo_V15_gen50a.mp4",
                "latents": "hv1_tp4/work_loo_V15_gen50a/latents.pt"},
     },
-    # 9 frames; MXFP8 arm u3 = 9f6aedc's default set.
+    # 9 frames; MXFP8 arm nod4/mx = 9f6aedc's default set on the tree without D4 (F7, dd3eed2),
+    # not u3 (the same set and directory with D4's rotary, another clip); bf16 is one clip on both.
     "hunyuan_video_15": {
         "bf16": {"output": "hv15/bf16_9/gena.mp4", "latents": "hv15/bf16_9/work_a/latents.pt"},
-        "mx": {"output": "hv15/u3/gena.mp4", "latents": "hv15/u3/work_a/latents.pt"},
+        "mx": {"output": "hv15/nod4/mx_gena.mp4", "latents": "hv15/nod4/work_mx_a/latents.pt"},
     },
 }
 
