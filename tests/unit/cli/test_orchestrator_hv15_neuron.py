@@ -1,8 +1,9 @@
 """HunyuanVideo 1.5's CLI on the neuron backend (CPU, stages stubbed): the stage chain and its layout,
-the refusals, what the encode and transformer stages write, and --quant mxfp8 from the driver's
-quantized directory (built from the bf16 copy at the layout's tp) to the spec the ranks build
-the pipeline with. A test that needs weights resolves a toy snapshot or none: the real one may
-be in the hub cache, and its bf16 copy is 16.7 GB."""
+the refusals, what the encode and transformer stages write, the transformer stage's memory
+lines (the DiT's resident bytes per rank, the peak HBM on the device), and --quant mxfp8 from
+the driver's quantized directory (built from the bf16 copy at the layout's tp) to the spec the
+ranks build the pipeline with. A test that needs weights resolves a toy snapshot or none: the
+real one may be in the hub cache, and its bf16 copy is 16.7 GB."""
 
 from __future__ import annotations
 
@@ -91,13 +92,16 @@ def _flag(cli, name):
 def _fake_pipeline(seen: dict, latents=lambda generator: torch.full((1, 4, 2, 2, 3), 7.0)) -> type:
     """The transformer stage's pipeline class without a device: it records in ``seen`` what the
     stage builds it with (``init``), loads it with (``skip_warmup``) and runs it with
-    (``steps``, each request's seed under ``seeds``), and returns ``latents(generator)``. One
-    fake for every transformer-stage test."""
+    (``steps``, each request's seed under ``seeds``), and returns ``latents(generator)``. Its
+    ``dit`` holds what the stage's memory lines read: a bf16 module on the CPU, so the stage
+    reports the DiT's bytes and no peak HBM. One fake for every transformer-stage test."""
 
     class FakePipeline:
         def __init__(self, **kw):
             seen["init"] = kw
-            self.dit = SimpleNamespace(phase_seconds={})
+            self.dit = SimpleNamespace(phase_seconds={}, module=torch.nn.Linear(2, 2),
+                                       dtype=torch.bfloat16, weight_bytes=8, quant=None,
+                                       device=torch.device("cpu"))
             self.guidance_scale = 6.0
 
         def load(self, skip_warmup=False):
@@ -311,7 +315,7 @@ def test_encode_stage_uses_diffusers_encode_prompt(monkeypatch, tmp_path):
                           "negative_prompt_embeds_mask_2"}
 
 
-def test_transformer_stage_saves_latents(monkeypatch, tmp_path):
+def test_transformer_stage_saves_latents(monkeypatch, tmp_path, capsys):
     import difflet.backends.neuron.hunyuan_video15.pipeline as P
     import difflet.backends.registry as registry
 
@@ -326,6 +330,39 @@ def test_transformer_stage_saves_latents(monkeypatch, tmp_path):
     assert seen["skip_warmup"] is True and seen["steps"] == 50
     assert seen["init"]["parallel"].cfg_parallel_enabled and seen["init"]["parallel"].tp_degree == 2
     assert torch.equal(torch.load(tmp_path / "latents.pt"), torch.full((1, 4, 2, 2, 3), 7.0))
+    out = capsys.readouterr().out
+    assert "[hv15] DiT weights per rank: " in out and "peak HBM" not in out  # the CPU has no HBM
+
+
+def test_dit_memory_line_names_resident_and_estimated_bytes():
+    """Review Focus 3: the memory decision rests on what the loaded module holds (the kernel's
+    ``[K/4, N]`` scale layout included), so the line reads the module, not the pre-load
+    estimate, and shows the estimate beside it. A meta 32768 x 32768 linear is 2 GiB in bf16
+    against an estimate of 1 GiB."""
+    from difflet.backends.neuron.hbm import GIB
+    from difflet.cli.orchestrators.hunyuan_video_15 import _dit_memory_line
+    from difflet.quant.targets import default_spec
+
+    dit = SimpleNamespace(module=torch.nn.Linear(32768, 32768, bias=False, device="meta"),
+                          dtype=torch.bfloat16, weight_bytes=GIB, quant=None)
+    assert _dit_memory_line(dit) == ("[hv15] DiT weights per rank: 2.00 GiB resident "
+                                     "(1.00 GiB estimated at load), bf16")
+    dit.quant = default_spec("hunyuan_video_15", tp_degree=2)
+    assert _dit_memory_line(dit).endswith(", MXFP8 nki")
+
+
+def test_peak_hbm_line_only_on_the_device(monkeypatch):
+    """The allocator's peak against one core's HBM, on the device only: the CPU has neither.
+    Both are read when the line is made, so the patched ones are the ones it calls."""
+    from difflet.backends.neuron import hbm
+    from difflet.cli.orchestrators.hunyuan_video_15 import _peak_hbm_line
+
+    assert _peak_hbm_line(SimpleNamespace(device=torch.device("cpu"))) is None
+    monkeypatch.setitem(sys.modules, "torch_neuronx",
+                        SimpleNamespace(max_memory_allocated=lambda: 20 * hbm.GIB))
+    monkeypatch.setattr(hbm, "per_core_hbm_bytes", lambda: (36 * hbm.GIB, "test"))
+    assert _peak_hbm_line(SimpleNamespace(device=SimpleNamespace(type="neuron"))) == (
+        "[hv15] peak HBM (rank 0, allocator): 20.00 GiB of 36.0 GiB per core, 16.00 GiB free")
 
 
 def test_transformer_stage_builds_the_pipeline_with_the_spec(monkeypatch, tmp_path):
