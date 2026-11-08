@@ -226,14 +226,8 @@ class NeuronHunyuanVideo15TransformerApplication(TorchNeuronApplicationBase):
 
 def _joint_qkv(attn, hidden_states, encoder_hidden_states, image_rotary_emb):
     """diffusers' HunyuanVideo15AttnProcessor2_0 up to the attention: projections, QK norms, rotary
-    on the image stream; ``[B, H, S, d]`` (this rank's heads) for image and text.
-
-    The rotary is diffusers' ``apply_rotary_emb(..., sequence_dim=1)`` law (fp32 products,
-    interleaved pairs) through the neuron op, whose rotated operand is one signed-permutation
-    matmul instead of diffusers' stride-2 ``unbind`` / ``stack`` (why, and when it is exact: the
-    op's docstring); on the CPU it is bit-identical. The ``[S, d]`` tables broadcast over
-    ``[B, S, H, d]`` as diffusers' ``sequence_dim=1`` does."""
-    from difflet.backends.neuron.ops_impl.embeddings import apply_rotary_emb_fp32
+    on the image stream; ``[B, H, S, d]`` (this rank's heads) for image and text."""
+    from diffusers.models.embeddings import apply_rotary_emb
 
     def heads(t):
         return t.unflatten(2, (attn.heads, -1))
@@ -241,8 +235,8 @@ def _joint_qkv(attn, hidden_states, encoder_hidden_states, image_rotary_emb):
     q, k, v = heads(attn.to_q(hidden_states)), heads(attn.to_k(hidden_states)), heads(attn.to_v(hidden_states))
     q, k = attn.norm_q(q), attn.norm_k(k)
     if image_rotary_emb is not None:
-        cos, sin = (t[None, :, None, :].to(q.device) for t in image_rotary_emb)
-        q, k = apply_rotary_emb_fp32(q, cos, sin), apply_rotary_emb_fp32(k, cos, sin)
+        q = apply_rotary_emb(q, image_rotary_emb, sequence_dim=1)
+        k = apply_rotary_emb(k, image_rotary_emb, sequence_dim=1)
     eq = heads(attn.add_q_proj(encoder_hidden_states))
     ek = heads(attn.add_k_proj(encoder_hidden_states))
     ev = heads(attn.add_v_proj(encoder_hidden_states))
@@ -346,9 +340,8 @@ class _JointRingProcessor:
 class _JointUlyssesProcessor:
     """``HunyuanVideo15AttnProcessor2_0`` with the attention done by ``joint_ulysses_attention``:
     the image stream arrives sharded (this rank's ``N/cp`` tokens, rotary rows to match), the text
-    stream replicated; projections and QK norms are diffusers' own, the rotary is diffusers' law
-    through the neuron op (``_joint_qkv``). Keys are masked by count (valid image keys, then the
-    valid text keys diffusers reordered to the front)."""
+    stream replicated; projections, QK norms and rotary are diffusers' own. Keys are masked by
+    count (valid image keys, then the valid text keys diffusers reordered to the front)."""
 
     def __init__(self, num_image_tokens: int) -> None:
         self.num_image_tokens = int(num_image_tokens)
