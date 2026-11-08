@@ -38,6 +38,16 @@ def test_flags_parse_on_every_command(command):
         _parse(command, "--model-id", QWEN, "--quant", "fp8")
 
 
+def test_the_help_names_the_attention_qkv_a_default_keeps_bf16():
+    """The help says the DiT's attention q/k/v run in MXFP8, so it names the q/k/v a model's
+    default table keeps bf16: HunyuanVideo's image q/k/v and Wan's self-attention q/k/v."""
+    parser = argparse.ArgumentParser()
+    Q.add_quant_flags(parser)
+    help_text = next(a.help for a in parser._actions if a.dest == "quant")
+    assert "HunyuanVideo: its image q/k/v too" in help_text
+    assert "Wan: its self-attention q/k/v too" in help_text
+
+
 def _refused(args, match, capsys):
     with pytest.raises(SystemExit):
         Q.validate_quant(args)

@@ -3,15 +3,15 @@ cross-attention q/k/v and the FFN through ``checkpoint_key`` (the table is writt
 checkpoint keys ``ffn.net.0.proj`` / ``ffn.net.2``; the module names its FFN ``net_in`` /
 ``net_out``), loads the quantized checkpoint directory and, in dequant mode, matches diffusers'
 model run with the dequantized fp8 weights; the self-attention q/k/v, every output projection,
-the modulation tables and the top level stay as they were, and so does the interleaved rotary;
-eager mode and a spec quantized for another tp are refused. An override that quantizes a
-self-attention q or k (one block's q, or H2's set: every attention q/k/v and the FFN) puts every
-self-attention of the module in the half-split rotary layout (the q/k rows reordered before the
-twins are prepared), on either compute path and at tp2, and the output is still the interleaved
-reference's. The pipeline application resolves one quantized directory per expert from the
-expert's bf16 copy with one spec for both of Wan 2.2's experts, refuses ``quant_checkpoint``
-with two experts, and counts both quantized experts as stored in the HBM check beside the device
-text encoder.
+the modulation tables and the top level stay as they were, and so does the interleaved rotary,
+at tp1 and at tp2; eager mode and a spec quantized for another tp are refused. An override that
+quantizes a self-attention q or k (one block's q, or H2's set: every attention q/k/v and the
+FFN) puts every self-attention of the module in the half-split rotary layout (the q/k rows
+reordered before the twins are prepared), on either compute path and at tp2, and the output is
+still the interleaved reference's. The pipeline application resolves one quantized directory
+per expert from the expert's bf16 copy with one spec for both of Wan 2.2's experts, refuses
+``quant_checkpoint`` with two experts, and counts both quantized experts as stored in the HBM
+check beside the device text encoder.
 """
 
 from __future__ import annotations
@@ -286,22 +286,27 @@ def test_the_dequant_path_uses_the_same_layout(tiny, every_qkv):
 
 
 @pytest.mark.multirank
-def test_tp2_matches_the_reference(tiny, tmp_path):
-    """Under H2's set at tp2 each rank reorders the q/k rows of its own heads (a column shard
-    is whole heads), slices its heads of the reordered q/k norm weights and reads
-    ``ffn.net.2`` per rank K range: every rank is in the half-split layout and its output is
-    the reference's."""
+@pytest.mark.parametrize(("targets", "layout"), [
+    ({}, "interleaved"),
+    ({"targets": EVERY_QKV_AND_FFN}, "half_split"),
+], ids=["default", "every_qkv"])
+def test_tp2_matches_the_reference(tiny, tmp_path, targets, layout):
+    """At tp2 every rank reads ``ffn.net.2`` per rank K range and its output is the
+    reference's. The default set, the one that ships at tp > 1, quantizes no self-attention
+    q/k, so every rank keeps the interleaved rotary; under H2's set each rank reorders the q/k
+    rows of its own heads (a column shard is whole heads), slices its heads of the reordered
+    q/k norm weights, and every rank is in the half-split layout."""
     from tests.unit.backends._neuron_gloo import run_ranks
     from tests.unit.backends._neuron_workers import wan_fp8_worker
 
-    spec = default_spec("wan", compute="dequant", tp_degree=2, targets=EVERY_QKV_AND_FFN)
+    spec = default_spec("wan", compute="dequant", tp_degree=2, **targets)
     quantized = prepare_quantized_checkpoint(tiny.transformer_dir, spec, create=True,
                                              cache_root=tmp_path / "cache")
     reference = _reference(tiny.transformer_dir, spec)
     results = run_ranks(wan_fp8_worker, str(quantized), spec.to_dict(), world_size=2)
     for r in results:
         assert r["report"] == {"missing": [], "unexpected": []}
-        assert r["rope_layouts"] == ["half_split"]
+        assert r["rope_layouts"] == [layout]
         torch.testing.assert_close(torch.tensor(r["out"]), reference, atol=1e-4, rtol=1e-4)
 
 

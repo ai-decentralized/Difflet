@@ -59,19 +59,20 @@ class NeuronWanTransformerApplication(TorchNeuronApplicationBase):
     ``load_report["skipped"]``.
 
     ``quant`` (a ``QuantSpec`` or its dict) is the base's MXFP8 wiring: the spec's target
-    linears (``difflet.quant.targets``' ``"wan"`` table: the attention q/k/v and the FFN;
-    every ``to_out.0``, the modulation tables, the embedders and ``proj_out`` stay bf16)
-    become their FP8 twins on the meta module before the load, so ``model_path`` must then be
-    the quantized checkpoint directory (``difflet/quant/checkpoint.py``) whose tensors those
-    layers hold. The table is written in checkpoint-key spelling (``ffn.net.0.proj`` /
-    ``ffn.net.2``) and the base matches it through :func:`checkpoint_key`, the same mapping
-    the loader applies, so the FFN's ``net_in`` / ``net_out`` are quantized here exactly when
-    the directory holds them quantized; the names in ``quantized_linears`` are the module's.
+    linears (``difflet.quant.targets``' ``"wan"`` table: the text cross-attention's q/k/v and
+    the FFN; the self-attention q/k/v, every ``to_out.0``, the modulation tables, the embedders
+    and ``proj_out`` stay bf16) become their FP8 twins on the meta module before the load, so
+    ``model_path`` must then be the quantized checkpoint directory
+    (``difflet/quant/checkpoint.py``) whose tensors those layers hold. The table is written in
+    checkpoint-key spelling (``ffn.net.0.proj`` / ``ffn.net.2``) and the base matches it
+    through :func:`checkpoint_key`, the same mapping the loader applies, so the FFN's
+    ``net_in`` / ``net_out`` are quantized here exactly when the directory holds them
+    quantized; the names in ``quantized_linears`` are the module's.
     No q/k/v fusion: ``WanAttention`` calls ``to_q``/``to_k``/``to_v`` directly. ``ffn.net.2``
     is row-parallel, quantized per rank K range for the launch's tp, so a spec for another tp
     is refused at construction. One spec serves both experts of Wan 2.2 (one block graph).
-    A quantized self-attention q or k puts the module in the half-split rotary layout
-    (``_after_load``). Trainium3 and compile mode only (decision D43,
+    An override that quantizes a self-attention q or k puts the module in the half-split
+    rotary layout (``_after_load``). Trainium3 and compile mode only (decision D43,
     ``require_fp8_supported``).
     """
 
