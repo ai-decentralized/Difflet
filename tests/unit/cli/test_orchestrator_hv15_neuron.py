@@ -89,19 +89,21 @@ def _flag(cli, name):
     return cli[cli.index(name) + 1] if name in cli else None
 
 
-def _fake_pipeline(seen: dict, latents=lambda generator: torch.full((1, 4, 2, 2, 3), 7.0)) -> type:
+def _fake_pipeline(seen: dict, latents=lambda generator: torch.full((1, 4, 2, 2, 3), 7.0),
+                   device=torch.device("cpu")) -> type:
     """The transformer stage's pipeline class without a device: it records in ``seen`` what the
     stage builds it with (``init``), loads it with (``skip_warmup``) and runs it with
     (``steps``, each request's seed under ``seeds``), and returns ``latents(generator)``. Its
-    ``dit`` holds what the stage's memory lines read: a bf16 module on the CPU, so the stage
-    reports the DiT's bytes and no peak HBM. One fake for every transformer-stage test."""
+    ``dit`` holds what the stage's memory lines read: a bf16 module on ``device``, the CPU
+    unless a test stands in for the neuron one, so the stage reports the DiT's bytes and no
+    peak HBM. One fake for every transformer-stage test."""
 
     class FakePipeline:
         def __init__(self, **kw):
             seen["init"] = kw
             self.dit = SimpleNamespace(phase_seconds={}, module=torch.nn.Linear(2, 2),
                                        dtype=torch.bfloat16, weight_bytes=8, quant=None,
-                                       device=torch.device("cpu"))
+                                       device=device)
             self.guidance_scale = 6.0
 
         def load(self, skip_warmup=False):
@@ -352,17 +354,79 @@ def test_dit_memory_line_names_resident_and_estimated_bytes():
 
 
 def test_peak_hbm_line_only_on_the_device(monkeypatch):
-    """The allocator's peak against one core's HBM, on the device only: the CPU has neither.
-    Both are read when the line is made, so the patched ones are the ones it calls."""
+    """The allocator's peak and the runtime's own HBM (the NEFFs' code, scratchpad and DMA
+    rings, which the allocator never sees) against one core's HBM, on the device only: the CPU
+    has neither. Only "free" counts both; a runtime without the breakdown gets the allocator's
+    headroom, named as such, and a failed read is reported, not raised. Everything is read when
+    the line is made, so the patched ones are the ones it calls."""
     from difflet.backends.neuron import hbm
     from difflet.cli.orchestrators.hunyuan_video_15 import _peak_hbm_line
 
+    neuron = SimpleNamespace(device=SimpleNamespace(type="neuron"))
     assert _peak_hbm_line(SimpleNamespace(device=torch.device("cpu"))) is None
-    monkeypatch.setitem(sys.modules, "torch_neuronx",
-                        SimpleNamespace(max_memory_allocated=lambda: 20 * hbm.GIB))
     monkeypatch.setattr(hbm, "per_core_hbm_bytes", lambda: (36 * hbm.GIB, "test"))
-    assert _peak_hbm_line(SimpleNamespace(device=SimpleNamespace(type="neuron"))) == (
-        "[hv15] peak HBM (rank 0, allocator): 20.00 GiB of 36.0 GiB per core, 16.00 GiB free")
+    stats = {"allocated_bytes.all.peak": 20 * hbm.GIB, "allocated_bytes.all.current": 12 * hbm.GIB}
+    monkeypatch.setitem(sys.modules, "torch_neuronx", SimpleNamespace(memory_stats=lambda: stats))
+    assert _peak_hbm_line(neuron) == (
+        "[hv15] peak HBM (rank 0): 20.00 GiB allocator of 36.0 GiB per core, 16.00 GiB allocator "
+        "headroom (the runtime's code, scratchpad and DMA rings uncounted)")
+    # "tensors" holds the allocator's own segments, which its peak already stands for.
+    stats.update({"usage.tensors": 22 * hbm.GIB, "usage.model code": hbm.GIB,
+                  "usage.scratchpad": 2 * hbm.GIB})
+    assert _peak_hbm_line(neuron) == (
+        "[hv15] peak HBM (rank 0): 20.00 GiB allocator + 3.00 GiB runtime (model code 1.00, "
+        "scratchpad 2.00) of 36.0 GiB per core, 13.00 GiB free")
+
+    def unreadable():
+        raise RuntimeError("no stats")
+
+    monkeypatch.setitem(sys.modules, "torch_neuronx", SimpleNamespace(memory_stats=unreadable))
+    assert _peak_hbm_line(neuron) == "[hv15] peak HBM unavailable: RuntimeError('no stats')"
+
+
+def test_transformer_stage_reports_each_requests_peak_on_the_device(monkeypatch, tmp_path,
+                                                                     capsys):
+    """On the device rank 0 prints a request's peak right after its timing line. The peak
+    starts again from the resident bytes before each request, so neither the load's peak (30 GiB
+    here) nor an earlier request's reaches a later line: requests 0 and 1 (seeds 5 and 9) each
+    add their seed in GiB to the 10 GiB resident."""
+    import difflet.backends.neuron.hunyuan_video15.pipeline as P
+    import difflet.backends.registry as registry
+    from difflet.backends.neuron import hbm
+    from difflet.cli.dp import claims
+
+    GIB = hbm.GIB
+    peak = {"bytes": 30 * GIB}  # the load's
+    monkeypatch.setitem(sys.modules, "torch_neuronx", SimpleNamespace(
+        reset_peak_memory_stats=lambda: peak.update(bytes=10 * GIB),
+        memory_stats=lambda: {"allocated_bytes.all.peak": peak["bytes"],
+                              "usage.tensors": 40 * GIB, "usage.model code": GIB}))
+    monkeypatch.setattr(hbm, "per_core_hbm_bytes", lambda: (36 * GIB, "test"))
+
+    def denoise(generator):
+        peak["bytes"] += generator.initial_seed() * GIB
+        return torch.zeros(1)
+
+    monkeypatch.setattr(registry, "get_backend",
+                        lambda name: SimpleNamespace(prepare_runtime=lambda p: None))
+    monkeypatch.setattr(hv15.HunyuanVideo15Orchestrator, "_root", lambda self, args: "/snap")
+    monkeypatch.setattr(P, "TorchNeuronHunyuanVideo15Pipeline", _fake_pipeline(
+        {}, latents=denoise, device=SimpleNamespace(type="neuron")))
+    rdir = _requests_dir(tmp_path)
+    for index in (0, 1):
+        claims.claim_next(rdir, 0, "round_robin")
+        torch.save({"prompt_embeds": torch.zeros(1)}, tmp_path / f"embeds_req000{index}.pt")
+    args = _args(work_dir=str(tmp_path), requests_dir=rdir, worker_index=0,
+                 dp_schedule="round_robin", tp_degree=2, height=480, width=848, num_frames=121,
+                 steps=50, seed=42)
+    hv15.HunyuanVideo15Orchestrator(args)._run_stage_internal("transformer", args)
+    lines = capsys.readouterr().out.splitlines()
+    for index, gib, free in ((0, 15, 20), (1, 19, 16)):
+        timing = next(i for i, line in enumerate(lines)
+                      if line.startswith(f"[hv15] request {index}: denoise "))
+        assert lines[timing + 1] == (
+            f"[hv15] peak HBM (rank 0): {gib}.00 GiB allocator + 1.00 GiB runtime (model code "
+            f"1.00) of 36.0 GiB per core, {free}.00 GiB free")
 
 
 def test_transformer_stage_builds_the_pipeline_with_the_spec(monkeypatch, tmp_path):
