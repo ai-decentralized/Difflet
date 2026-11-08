@@ -38,7 +38,9 @@ ruff check .            # lint (CI-enforced)
 ```
 
 The gate runs the tests in parallel (`-n logical`, one worker per logical CPU). On a
-shared host, cap it with `scripts/cpu-gate.sh -n 8`; `-n 0` runs serially.
+shared host, cap it with `scripts/cpu-gate.sh -n 8`; `-n 0` runs serially. In parallel each
+test process runs one torch thread (`OMP_NUM_THREADS=1`, unless you set it yourself), since
+the workers already keep every CPU busy.
 
 `cpu-gate.sh` fails on any failing test that is not listed in `scripts/known-red.txt`
 and on any new Neuron-only skip that is not in `scripts/neuron-skips.txt`. If your change
