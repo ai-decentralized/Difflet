@@ -1865,7 +1865,10 @@ def test_retention_sweep_clears_active_item_job_slot_ownership(tmp_path, monkeyp
             # passes during the staging thread hop fails the item without a recovery wait.
             request_timeout_s=0.5,
             recovery_timeout_s=1.0,
-            retention_seconds=1,
+            # expires_at is int(time.time()) + retention_seconds, so with 1 s the failed job
+            # could already be expired when the next create_async sweeps, if the failure
+            # landed at the end of a wall-clock second. The test sweeps at expires_at itself.
+            retention_seconds=60,
             max_jobs=2,
             sweep_interval_s=60.0,
         )
