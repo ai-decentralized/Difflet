@@ -7,13 +7,14 @@ fp32 outputs, for the HunyuanVideo-1.5 MXFP8 tests (not collected by pytest).
 writes what the pipeline reads without the VAE (the fp32 ``transformer/``, as the hub's is, so
 the bf16 copy path runs; ``scheduler/``, ``guider/`` and ``model_index.json``).
 
-The row-parallel targets get a K spread (``ROW_K_SPREAD``). Under diffusers' kaiming-uniform
-init every 32-value block lands on the same E8M0 exponent, and MX rounding of a normal E4M3
-value does not depend on its power-of-two scale, so a whole-K quantization and a per rank K
-range one agree bit for bit and a writer or loader that quantized a row-parallel target whole
-would go unseen. With the first half of K scaled down, the two differ in about 37% of the
-values (those subnormal in one layout, 2.4e-7 at most): too little for any useful forward
-tolerance to see, so the tests compare the weights (``HV15_ROW_TARGETS``).
+Both MLP-downs (row-parallel: the image one a default target, the text one an override's) get
+a K spread (``ROW_K_SPREAD``). Under diffusers' kaiming-uniform init every 32-value block lands
+on the same E8M0 exponent, and MX rounding of a normal E4M3 value does not depend on its
+power-of-two scale, so a whole-K quantization and a per rank K range one agree bit for bit and
+a writer or loader that quantized a row-parallel target whole would go unseen. With the first
+half of K scaled down, the two differ in about 37% of the values (those subnormal in one
+layout, 2.4e-7 at most): too little for any useful forward tolerance to see, so the tests
+compare the weights (``HV15_ROW_TARGETS``).
 
 ``hv15_reference`` is diffusers' forward in fp32 with the empty glyph stream and zero image
 embeddings; with a spec, the weights it targets fake-quantized (a row-parallel one per rank K
@@ -41,14 +42,12 @@ TINY_FP8_HV15 = dict(in_channels=9, out_channels=4, num_attention_heads=4, atten
 TINY_SHAPE_HV15 = dict(height=32, width=48, num_frames=5, text_seq_len=16, text_2_seq_len=8,
                        image_tokens=9)
 _LATENT = (2, 2, 3)
-#: The default targets per dual-stream block.
-TINY_TARGETS_PER_BLOCK = {"attn.to_q", "attn.to_k", "attn.to_v", "attn.add_q_proj",
-                          "attn.add_k_proj", "attn.add_v_proj", "ff.net.0.proj", "ff.net.2",
-                          "ff_context.net.0.proj", "ff_context.net.2"}
-#: The factor on the first half of K of every row-parallel target.
+#: The default targets per dual-stream block: the image stream's q/k/v and MLP.
+TINY_TARGETS_PER_BLOCK = {"attn.to_q", "attn.to_k", "attn.to_v", "ff.net.0.proj", "ff.net.2"}
+#: The factor on the first half of K of both MLP-downs.
 ROW_K_SPREAD = 2.0 ** -14
-#: The two row-parallel targets the tests read back, one per stream.
-HV15_ROW_TARGETS = ("transformer_blocks.0.ff.net.2", "transformer_blocks.1.ff_context.net.2")
+#: The row-parallel target the tests read back: the image MLP-down, the default set's only one.
+HV15_ROW_TARGETS = ("transformer_blocks.0.ff.net.2",)
 _ROW_TARGET = r"transformer_blocks\.\d+\.(ff|ff_context)\.net\.2"
 
 

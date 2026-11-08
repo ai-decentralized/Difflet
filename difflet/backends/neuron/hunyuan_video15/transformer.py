@@ -36,9 +36,9 @@ Numerics depend on two backend workarounds installed by ``prepare_runtime``: the
 (the token refiner's mask) and fp32 LayerNorm for bf16 inputs.
 
 Quantization. ``quant=`` is the base's MXFP8 wiring with ``difflet.quant.targets``'
-``"hunyuan_video_15"`` table: in every dual-stream block the image q/k/v (``attn.to_q/k/v``), the
-text q/k/v (``attn.add_q/k/v_proj``) and both MLPs (``ff`` and ``ff_context``: ``net.0.proj`` and
-``net.2``) become their FP8 twins on the meta module before the load. The swap runs after the TP
+``"hunyuan_video_15"`` table: in every dual-stream block the image q/k/v (``attn.to_q/k/v``) and
+the image MLP (``ff``: ``net.0.proj`` and ``net.2``) become their FP8 twins on the meta module
+before the load; the text stream's stay bf16 (the table says why). The swap runs after the TP
 replacement, so each twin keeps its layer's flags: the column twins ``gather_output=False``, the
 image MLP's row twin SP's ``reduce_output=False`` / ``skip_bias_add=True`` (the caller
 reduce-scatters, then adds the bias once). The patterns are diffusers' names, which are this
