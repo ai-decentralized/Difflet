@@ -402,6 +402,34 @@ def test_run_router_on_cuda_gives_each_worker_its_own_gpu(tmp_path, monkeypatch)
     assert s.done == [0, 1, 2, 3] and not s.failed and not s.unfinished
 
 
+@pytest.mark.parametrize(
+    "replica_cores,expected",
+    [(1, ["0", "1"]), (4, ["0,1,2,3", "4,5,6,7"])],
+)
+def test_run_router_on_cuda_ignores_an_inherited_neuron_core_allocation(
+    tmp_path, monkeypatch, replica_cores, expected
+):
+    # NEURON_RT_VISIBLE_CORES names NeuronCores, not GPUs: a CUDA run that inherited it
+    # still counts its replicas' GPUs from the parent's visible GPUs, not from core 20.
+    monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
+    monkeypatch.setenv("NEURON_RT_VISIBLE_CORES", "20-27")
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    dump = tmp_path / "env"
+    dump.mkdir()
+    args = _args(work_dir=str(tmp_path / "work"), dp=2, tp_degree=None)
+    rc = run_router(
+        args,
+        _requests(2),
+        replica_cores=replica_cores,
+        worker_argv_prefix=_stub_prefix(tmp_path) + ["--env-dump", str(dump)],
+    )
+    assert rc == 0
+    import json
+
+    envs = [json.loads((dump / f"worker_{w}.json").read_text()) for w in (0, 1)]
+    assert envs == [{"CUDA_VISIBLE_DEVICES": gpus} for gpus in expected]
+
+
 def test_run_router_on_cuda_two_gpu_replicas(tmp_path, monkeypatch):
     # dp=2 x cfg=2: each replica is a torchrun world on its own pair of GPUs.
     monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
