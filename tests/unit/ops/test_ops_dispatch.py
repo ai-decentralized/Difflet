@@ -131,9 +131,11 @@ def test_embeddings_module_getattr_dunder_raises():
 
 
 def test_collectives_dispatch_identity():
+    # No reload: collectives resolves the backend on each call, and a reload would replace
+    # ParallelMeshNotInitializedError with a new class, so the tests that imported the old one
+    # (and the TPU mesh that raises it) stop matching what safe_tensor_parallel_size catches.
     import difflet.ops.collectives as col_mod
 
-    importlib.reload(col_mod)
     t = torch.arange(6).reshape(2, 3)
     assert col_mod.gather_tp_dim(t, dim=1) is t
     assert col_mod.reduce_tp(t) is t
