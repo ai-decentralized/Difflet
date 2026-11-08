@@ -1,8 +1,9 @@
 """Phase G's CPU fp32 reference helper (``scripts/fp32_ref/_common.py``) and scorer
 (``scripts/fp32_ref/score.py``): the device-noise law and its md5 against the values the phase G
-research recorded, the device-layout saves (an image and a 4-frame clip, no model), the fps the
-device's video orchestrators encode at, and the scorer's device-file table against this host's
-bench directory."""
+research recorded, the fp32-math guard (and every script's main running it first), the
+device-layout saves (an image and a 4-frame clip, no model), the fps the device's video
+orchestrators encode at, and the scorer's device-file table against this host's bench
+directory."""
 
 from __future__ import annotations
 
@@ -82,6 +83,83 @@ def test_set_threads():
         common.set_threads(0)
 
 
+#: The fp32_precision attributes a test may change, parents first: a parent's setter writes its
+#: children, so restoring in this order puts every one back.
+_PRECISION = {"backends": torch.backends, "mkldnn": torch.backends.mkldnn,
+              "mkldnn.matmul": torch.backends.mkldnn.matmul,
+              "mkldnn.conv": torch.backends.mkldnn.conv,
+              "mkldnn.rnn": torch.backends.mkldnn.rnn, "cuda.matmul": torch.backends.cuda.matmul}
+
+
+@pytest.fixture
+def fp32_state():
+    """This host's fp32 math settings, restored after the test (the legacy setter also writes
+    mkldnn.matmul and cuda.matmul), checked to pass the guard again."""
+    before = {name: target.fp32_precision for name, target in _PRECISION.items()}
+    yield
+    torch.set_float32_matmul_precision("highest")
+    for name, target in _PRECISION.items():
+        target.fp32_precision = before[name]
+    common.require_fp32_math()
+
+
+@pytest.mark.parametrize("name", ["mkldnn", "mkldnn.matmul", "mkldnn.conv", "mkldnn.rnn"])
+def test_require_fp32_math_refuses_a_reduced_onednn_precision(fp32_state, name):
+    common.require_fp32_math()
+    _PRECISION[name].fp32_precision = "bf16"
+    with pytest.raises(RuntimeError, match="reduced precision"):
+        common.require_fp32_math()
+
+
+@pytest.mark.parametrize("precision", ["high", "medium"])
+def test_require_fp32_math_refuses_a_reduced_float32_matmul_precision(fp32_state, precision):
+    """torch's legacy setter, which torch 2.14 writes into mkldnn.matmul ('tf32', 'bf16'): a
+    torch that stopped doing so would fail here instead of running the reference reduced."""
+    torch.set_float32_matmul_precision(precision)
+    with pytest.raises(RuntimeError, match="mkldnn.matmul"):
+        common.require_fp32_math()
+
+
+@pytest.mark.parametrize("name", common.FPMATH_MODE_ENV)
+@pytest.mark.parametrize("value", ["BF16", "tf32"])
+def test_require_fp32_math_refuses_a_reduced_onednn_fpmath_mode(monkeypatch, name, value):
+    monkeypatch.setenv(name, value)
+    with pytest.raises(RuntimeError, match=name):
+        common.require_fp32_math()
+
+
+@pytest.mark.parametrize("value", [None, "STRICT", "strict"])
+def test_require_fp32_math_admits_the_strict_fpmath_mode(monkeypatch, value):
+    for name in common.FPMATH_MODE_ENV:
+        if value is None:
+            monkeypatch.delenv(name, raising=False)
+        else:
+            monkeypatch.setenv(name, value)
+    common.require_fp32_math()
+
+
+@pytest.mark.parametrize("name", sorted(_MODELS))
+def test_every_reference_runs_the_fp32_math_guard_first(monkeypatch, tmp_path, name):
+    """Under a bf16 oneDNN fpmath mode each script's main refuses before it sets threads or
+    loads a pipeline, which both raise here: a guard missing or moved fails in a second instead
+    of loading tens of GB."""
+    import diffusers
+
+    def reached(what: str):
+        def fail(*args, **kwargs):
+            raise AssertionError(f"{name} {what} before the fp32-math guard")
+        return fail
+
+    monkeypatch.setattr(torch, "set_num_threads", reached("set threads"))
+    monkeypatch.setattr(diffusers.DiffusionPipeline, "from_pretrained",
+                        classmethod(reached("loaded a pipeline")))
+    monkeypatch.setenv("ONEDNN_DEFAULT_FPMATH_MODE", "BF16")
+    script = importlib.import_module(f"scripts.fp32_ref.{name}")
+    with pytest.raises(RuntimeError, match="reduced precision"):
+        script.main(["--out-dir", str(tmp_path / "ref")])
+    assert not (tmp_path / "ref").exists()
+
+
 def test_device_fps_is_the_orchestrators():
     from difflet.cli.orchestrators import hunyuan_video, hunyuan_video_15, ltx_2, wan
 
@@ -107,19 +185,29 @@ def test_save_run_image(tmp_path):
     record = _record(ref)
     assert record["settings"] == {"steps": 50} and record["noise_md5"] == "abc"
     assert record["timings"] == {"steps_s": 1.5} and record["output"] == "out.png"
+    assert record["lossless"] is None
 
 
 def test_save_run_video(tmp_path):
+    """The MP4 at the device's fps and the lossless clip, which the scorer's ``.pt`` route reads
+    as these very frames (truncated to uint8 as it reads every clip)."""
     latents = {"video": torch.randn(1, 6, 8), "audio": torch.randn(1, 3, 8)}
     frames = np.linspace(0.0, 1.0, 4 * 32 * 32 * 3, dtype=np.float32).reshape(4, 32, 32, 3)
     common.save_run(tmp_path, latents=latents, output=frames, settings={}, noise_md5="abc",
                     timings={}, fps=16)
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["latents.pt", "out.mp4", "run.json"]
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["latents.pt", "out.mp4", "out.pt",
+                                                          "run.json"]
     saved = torch.load(tmp_path / "latents.pt", weights_only=True)
     assert saved.keys() == latents.keys() and torch.equal(saved["audio"], latents["audio"])
     assert len(list(iio.imiter(tmp_path / "out.mp4"))) == 4
     assert iio.immeta(tmp_path / "out.mp4")["fps"] == 16
-    assert _record(tmp_path)["fps"] == 16 and _record(tmp_path)["output"] == "out.mp4"
+    clip = torch.load(tmp_path / "out.pt", weights_only=True)
+    assert clip.shape == (1, 4, 3, 32, 32) and clip.dtype == torch.float32
+    assert torch.equal(clip[0].permute(0, 2, 3, 1), torch.from_numpy(frames))
+    assert np.array_equal(score._cdr()._read_frames(tmp_path / "out.pt"),
+                          (frames * 255).astype(np.uint8))
+    record = _record(tmp_path)
+    assert (record["fps"], record["output"], record["lossless"]) == (16, "out.mp4", "out.pt")
 
 
 @pytest.mark.parametrize("frames, fps, match", [
