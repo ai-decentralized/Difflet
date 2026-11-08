@@ -49,10 +49,10 @@ from tests.unit.backends._neuron_hv1_toy import (  # noqa: E402
 )
 from tests.unit.backends._neuron_workers import hv1_dit_worker  # noqa: E402
 
-#: Per dual block: both streams' q/k/v and both MLPs' up and down (10); per single block: the
-#: joint q/k/v, ``proj_mlp`` and the two halves of ``proj_out`` (6).
-TINY_TARGETS_HV1 = (10 * TINY_FP8_HV1_TP2["num_layers"]
-                    + 6 * TINY_FP8_HV1_TP2["num_single_layers"])  # 22
+#: Per dual block: the text stream's q/k/v and both MLPs' up and down (7); per single block:
+#: ``proj_mlp`` and the two halves of ``proj_out`` (3). The image q/k/v stay bf16.
+TINY_TARGETS_HV1 = (7 * TINY_FP8_HV1_TP2["num_layers"]
+                    + 3 * TINY_FP8_HV1_TP2["num_single_layers"])
 #: Valid text tokens of the toy call the runs and the references share.
 VALID_TEXT = 9
 

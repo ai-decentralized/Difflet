@@ -267,23 +267,30 @@ WAN_ROW_PARALLEL: tuple[str, ...] = (
 )
 
 # HunyuanVideo 1.0 (diffusers' HunyuanVideoTransformer3DModel names, the checkpoint keys): one
-# pattern per device-bisection group, in this order (the device campaign drops groups by index).
-# The set starts out equal to FLUX's but is HunyuanVideo's own: the bisection may drop a group for
-# HunyuanVideo alone.
+# pattern per device-bisection group, G1-G7 in table order. The default is the leave-one-out arm
+# V15 (trn3, tp4, 320x512x61, 50 steps, seed 42; docs/verification/2026-11-07-mxfp8-video-models.md,
+# the HunyuanVideo section): G1 (dual image q/k/v) and G5 (single joint q/k/v) stay bf16. With
+# every group the step is 606.0 ms against 660.0 in bf16, but the clip is 21.2 dB / SSIM 0.830 /
+# LPIPS 0.170 from bf16 (latents cosine 0.984; two bf16 runs at tp2 and tp4 are 36.6 dB apart).
+# No single group carries the loss (dropping G1, G5, G4 or G6 alone recovers 7-9 dB, G2 nothing),
+# and V15 is the only arm that clears the floor-relative screen: 31.09 dB / 0.938 / 0.050 at
+# 634.9 ms (0.96x). The dual block's device time is 11.29 ms without G1 against 13.02 with it
+# (bf16 11.45); the single block's 9.65 without G5 against 9.56 (bf16 10.31).
 HUNYUAN_VIDEO_TARGETS: tuple[str, ...] = (
-    rf"{_BLOCK}\.attn\.(to_q|to_k|to_v)",  # G1 dual image q/k/v (RMSNorm + rotary)
     rf"{_BLOCK}\.attn\.(add_q_proj|add_k_proj|add_v_proj)",  # G2 dual text q/k/v (256 rows)
     rf"{_BLOCK}\.ff\.net\.(0\.proj|2)",  # G3 dual image MLP
     rf"{_BLOCK}\.ff_context\.net\.(0\.proj|2)",  # G4 dual text MLP (256 rows)
-    rf"{_SINGLE}\.attn\.(to_q|to_k|to_v)",  # G5 single joint q/k/v
     rf"{_SINGLE}\.proj_mlp",  # G6 single joint MLP-up
     rf"{_SINGLE}\.proj_out_(attn|mlp)",  # G7 single proj_out halves (row-parallel)
 )
 
-#: HunyuanVideo modules a reader may expect quantized that are deliberately not: the dual
-#: blocks' output projections, the modulation, the single blocks' fused ``proj_out`` (stored as
-#: its halves, which are targets), the token refiner and the embedders, and the output layer.
+#: HunyuanVideo modules a reader may expect quantized that are deliberately not: the image-stream
+#: q/k/v of both block kinds (G1, G5: quality, measured above), the dual blocks' output
+#: projections, the modulation, the single blocks' fused ``proj_out`` (stored as its halves,
+#: which are targets), the token refiner and the embedders, and the output layer.
 HUNYUAN_VIDEO_KEPT_BF16: tuple[str, ...] = (
+    rf"{_BLOCK}\.attn\.(to_q|to_k|to_v)",
+    rf"{_SINGLE}\.attn\.(to_q|to_k|to_v)",
     rf"{_BLOCK}\.attn\.(to_out\.0|to_add_out)",
     rf"{_BLOCK}\.norm1(_context)?\.linear",
     rf"{_SINGLE}\.norm\.linear",

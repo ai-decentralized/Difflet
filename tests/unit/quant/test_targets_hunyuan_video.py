@@ -41,12 +41,12 @@ from tests.unit.backends._neuron_hv1_toy import (  # noqa: E402
 
 HV1 = "hunyuanvideo-community/HunyuanVideo"
 
-#: Per dual-stream block: both streams' q/k/v and both MLPs.
-PER_DUAL = {"attn.to_q", "attn.to_k", "attn.to_v", "attn.add_q_proj", "attn.add_k_proj",
-            "attn.add_v_proj", "ff.net.0.proj", "ff.net.2", "ff_context.net.0.proj",
-            "ff_context.net.2"}
-#: Per single-stream block: the joint q/k/v, the MLP-up and the halves of the split ``proj_out``.
-PER_SINGLE = {"attn.to_q", "attn.to_k", "attn.to_v", "proj_mlp", "proj_out_attn", "proj_out_mlp"}
+#: Per dual-stream block: the text stream's q/k/v and both MLPs (the image q/k/v stay bf16).
+PER_DUAL = {"attn.add_q_proj", "attn.add_k_proj", "attn.add_v_proj", "ff.net.0.proj", "ff.net.2",
+            "ff_context.net.0.proj", "ff_context.net.2"}
+#: Per single-stream block: the MLP-up and the halves of the split ``proj_out`` (the joint q/k/v
+#: stay bf16).
+PER_SINGLE = {"proj_mlp", "proj_out_attn", "proj_out_mlp"}
 
 
 @pytest.fixture(scope="module")
@@ -74,13 +74,15 @@ def _stored_linears(model, spec) -> dict[str, int]:
     return linears
 
 
-def test_default_targets_cover_the_block_qkv_and_mlps_only(model):
+def test_default_targets_cover_the_text_qkv_the_mlps_and_the_proj_out_halves_only(model):
     spec = default_spec("hunyuan_video")
     names = [n for n in _stored_linears(model, spec) if spec.matches(n)]
     assert {n.split(".", 2)[2] for n in names if n.startswith("transformer_blocks.")} == PER_DUAL
     assert {n.split(".", 2)[2] for n in names if n.startswith("single_")} == PER_SINGLE
-    assert len(names) == (10 * TINY_FP8_HV1["num_layers"]
-                          + 6 * TINY_FP8_HV1["num_single_layers"])
+    assert len(names) == (7 * TINY_FP8_HV1["num_layers"]
+                          + 3 * TINY_FP8_HV1["num_single_layers"])
+    assert not spec.matches("transformer_blocks.0.attn.to_q")
+    assert not spec.matches("single_transformer_blocks.0.attn.to_v")
     assert not any(n.startswith("context_embedder.") for n in names)  # the refiner's own ff/attn
 
 
@@ -138,7 +140,7 @@ def test_targets_and_kept_bf16_cover_every_linear_once(model):
 
 def test_every_default_target_has_an_mx_layout_at_tp_1_2_4_8():
     """On the real geometry (diffusers' defaults are HunyuanVideo's own: 20 + 40 blocks of 24
-    heads x 128) the 440 default targets have a K per rank that is a multiple of the MX layout's
+    heads x 128) the 260 default targets have a K per rank that is a multiple of the MX layout's
     tile at tp 1, 2, 4 and 8, so the default set refuses no tp: the column targets have K 3072,
     the MLP-downs 12288 / tp, and the ``proj_out`` halves 3072 / tp and 12288 / tp (768 at tp 4:
     one 512-wide tile and a partial one of 256)."""
@@ -148,7 +150,7 @@ def test_every_default_target_has_an_mx_layout_at_tp_1_2_4_8():
     for tp in (1, 2, 4, 8):
         spec = default_spec("hunyuan_video", tp_degree=tp)
         targets = {n: k for n, k in _stored_linears(real, spec).items() if spec.matches(n)}
-        assert len(targets) == 440
+        assert len(targets) == 260
         halves = {n: k for n, k in targets.items()
                   if n.endswith(("proj_out_attn", "proj_out_mlp"))}
         assert len(halves) == 80 and set(halves.values()) == {3072, 12288}
