@@ -26,6 +26,7 @@ from difflet.backends.neuron.core.config_checks import (
     resolve_cp_degree,
     truncated_block_prefixes,
 )
+from difflet.backends.neuron.ops_impl.fp8_linear import _FP8LinearBase
 from difflet.backends.neuron.wan.config import NeuronWanConfig
 
 # The module -> checkpoint direction of the FFN renames (copied from
@@ -69,7 +70,9 @@ class NeuronWanTransformerApplication(TorchNeuronApplicationBase):
     No q/k/v fusion: ``WanAttention`` calls ``to_q``/``to_k``/``to_v`` directly. ``ffn.net.2``
     is row-parallel, quantized per rank K range for the launch's tp, so a spec for another tp
     is refused at construction. One spec serves both experts of Wan 2.2 (one block graph).
-    Trainium3 and compile mode only (decision D43, ``require_fp8_supported``).
+    A quantized self-attention q or k puts the module in the half-split rotary layout
+    (``_after_load``). Trainium3 and compile mode only (decision D43,
+    ``require_fp8_supported``).
     """
 
     block_attrs = ("blocks",)
@@ -111,6 +114,26 @@ class NeuronWanTransformerApplication(TorchNeuronApplicationBase):
         from difflet.models.wan.modeling_wan import WanTransformer3DModel
 
         return WanTransformer3DModel(self.config, dtype=self.dtype)
+
+    def _after_load(self, module: torch.nn.Module) -> None:
+        """When any self-attention's q or k is an MXFP8 twin, switch the whole module to the
+        half-split rotary layout (``WanTransformer3DModel.use_half_split_rope_``) before the
+        base prepares the twins, since the kernel path packs each weight in the order it then
+        has. The interleaved rotary's pair swap on q/k from the MXFP8 kernel moves 2-byte
+        elements (the 5x block of ``difflet.quant.targets``' Wan measurement); the half split
+        moves whole rows. bf16 q/k keep the interleaved layout, faster for them. The rule is
+        what is quantized, not the compute path, so ``dequant`` runs the layout the device
+        does; one quantized q or k switches every self-attention, since the rotary tables are
+        the module's. Each expert of Wan 2.2 is an application of its own, so each decides
+        from its own module."""
+        if any(isinstance(linear, _FP8LinearBase)
+               for block in module.blocks for linear in (block.attn1.to_q, block.attn1.to_k)):
+            reordered = module.use_half_split_rope_()
+            if reordered and self.rank == 0:
+                print(f"[wan] self-attention q/k reordered for the half-split rotary "
+                      f"({reordered} attentions): their q/k come from the MXFP8 kernel",
+                      flush=True)
+        super()._after_load(module)
 
     def checkpoint_key(self, name: str) -> str:
         return checkpoint_key(name)
