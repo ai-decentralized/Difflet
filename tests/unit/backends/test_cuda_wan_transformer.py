@@ -11,7 +11,6 @@ import datetime
 import json
 import os
 
-import socket
 from pathlib import Path
 
 import pytest
@@ -161,12 +160,6 @@ def test_cfg_parallel_load_without_a_world_two_group_is_refused_before_the_weigh
 CFG_WORLD = 2
 
 
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
-
-
 def _batch_two_inputs(cfg: WanDiTConfig):
     """[uncond, cond]: two different branches at one timestep, as the orchestrator stacks."""
     torch.manual_seed(2)
@@ -177,16 +170,16 @@ def _batch_two_inputs(cfg: WanDiTConfig):
     )
 
 
-def _cfg_worker(rank: int, port: int, transformer_dir: str, work_dir: str) -> None:
-    os.environ.update(
-        MASTER_ADDR="127.0.0.1",
-        MASTER_PORT=str(port),
-        WORLD_SIZE=str(CFG_WORLD),
-        RANK=str(rank),
-        LOCAL_RANK=str(rank),
-    )
+def _cfg_worker(rank: int, transformer_dir: str, work_dir: str) -> None:
+    os.environ.update(WORLD_SIZE=str(CFG_WORLD), RANK=str(rank), LOCAL_RANK=str(rank))
+    # A file rendezvous, not a port: a port probed free in the parent can be taken by
+    # another pytest-xdist worker's gloo ranks before rank 0 binds it (EADDRINUSE).
     dist.init_process_group(
-        "gloo", rank=rank, world_size=CFG_WORLD, timeout=datetime.timedelta(seconds=30)
+        "gloo",
+        init_method=f"file://{work_dir}/rendezvous",
+        rank=rank,
+        world_size=CFG_WORLD,
+        timeout=datetime.timedelta(seconds=30),
     )
     try:
         from difflet.models.wan import modeling_wan
@@ -256,7 +249,7 @@ def test_cfg_parallel_forward_matches_the_serial_batch(tmp_path, monkeypatch):
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2]))
     mp.spawn(
         _cfg_worker,
-        args=(_free_port(), str(transformer), str(tmp_path)),
+        args=(str(transformer), str(tmp_path)),
         nprocs=CFG_WORLD,
         join=True,
     )
