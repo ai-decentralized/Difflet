@@ -234,13 +234,13 @@ LTX_2_ROW_PARALLEL: tuple[str, ...] = (
 # Wan 2.1 and Wan 2.2-A14B (diffusers' WanTransformer3DModel names, the checkpoint's spelling of
 # the FFN): the text cross-attention's q/k/v and the two FFN linears, in the 917d087 order (the
 # targets key the quantized directory, so its directories are reused). The self-attention's
-# q/k/v stay bf16 for quality, not speed (trn3, tp4, 480x832, 50 steps;
-# docs/verification/2026-11-07-mxfp8-video-models.md section 8, and Task H6 of
-# docs/plans/2026-11-08-mxfp8-wan-half-split-rope.md). Their speed is solved: the interleaved
-# rotary's pair swap on q/k from the MXFP8 kernel moved 2-byte elements (1480 DMA instructions
-# per block, overlapping, their durations summed to 87.8 ms; the block 56.89 ms, the step
-# 2263 ms), where on q/k from a bf16 matmul it moves 256-byte head rows (240, summed to
-# 0.04 ms). So when any self-attention q or k is quantized, the neuron application reorders
+# q/k/v stay bf16 for quality, not speed (trn3, tp4, 480x832, 50 steps; the speed in
+# docs/verification/2026-11-07-mxfp8-video-models.md section 8, the two-expert quality in Task
+# H6 of docs/plans/2026-11-08-mxfp8-wan-half-split-rope.md). Their speed is solved: the
+# interleaved rotary's pair swap on q/k from the MXFP8 kernel moved 2-byte elements (1480 DMA
+# instructions per block, overlapping, their durations summed to 87.8 ms; the block 56.89 ms,
+# the step 2263 ms), where on q/k from a bf16 matmul it moves 256-byte head rows (240, summed
+# to 0.04 ms). So when any self-attention q or k is quantized, the neuron application reorders
 # every self-attention's q/k channels at load and rotates contiguous halves
 # (``WanTransformer3DModel.use_half_split_rope_``): the block runs 8.05 ms against this set's
 # 9.30, the step at 9 frames 0.77x bf16's against this set's 0.90x. Their quality is not: with
@@ -249,8 +249,8 @@ LTX_2_ROW_PARALLEL: tuple[str, ...] = (
 # 3 of the 12 clips, the worst 17.90 against 28.50 dB), past the 1 dB / 0.01 the rule allows,
 # where Wan 2.1 alone loses 0.46 dB / 0.003. One table serves both, so they stay bf16; an
 # override (``DIFFLET_QUANT_TARGETS``) that quantizes a self-attention q or k still gets the
-# half-split layout, and bf16 q/k keep the interleaved one, faster for them (483.6 against
-# 431.9 ms per step in the half split).
+# half-split layout, and bf16 q/k keep the interleaved one, faster for them (bf16 runs 483.6 ms
+# per step in the half split against 431.9 interleaved).
 _WAN_BLOCK = r"blocks\.\d+"
 
 WAN_TARGETS: tuple[str, ...] = (
