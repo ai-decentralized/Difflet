@@ -1477,6 +1477,25 @@ def flux_dit_fp8_worker(rank: int, world_size: int, quantized_dir: str, spec: di
             "attn_twin": [type(attn).__name__, attn.skip_bias_add, attn.reduce_output]}
 
 
+def wan_fp8_worker(rank: int, world_size: int, quantized_dir: str, spec: dict) -> dict:
+    """The MXFP8 Wan DiT application (``TINY_FP8_WAN``) at TP=world_size on CPU, compile mode,
+    on a quantized toy directory: the output and the distinct rotary layouts of the model and
+    its self-attentions (one when they agree)."""
+    from difflet.backends.neuron.wan.transformer import NeuronWanTransformerApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_wan_toy import TINY_FP8_WAN, tiny_wan_config, tiny_wan_inputs
+
+    app = NeuronWanTransformerApplication(
+        model_path=quantized_dir, config=tiny_wan_config(tp_degree=world_size, config=TINY_FP8_WAN),
+        parallel=DiffletParallelConfig(tp_degree=world_size), dtype=torch.float32,
+        exec_mode="compile", device="cpu", quant=spec)
+    app.load()
+    module = app.module
+    layouts = {module.rope_layout, *(block.attn1.rope_layout for block in module.blocks)}
+    out = app(*tiny_wan_inputs(config=TINY_FP8_WAN))
+    return {"out": out.tolist(), "report": app.load_report, "rope_layouts": sorted(layouts)}
+
+
 def flux_t5_worker(rank: int, world_size: int, model_dir: str) -> dict:
     """Flux's T5 encoder application at TP=world_size on CPU (eager), on the tiny checkpoint."""
     from difflet.backends.neuron.flux.text_encoder import NeuronFluxT5Application

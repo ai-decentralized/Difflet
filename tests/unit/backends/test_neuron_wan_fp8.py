@@ -3,14 +3,20 @@ q/k/v and the FFN through ``checkpoint_key`` (the table is written against the c
 ``ffn.net.0.proj`` / ``ffn.net.2``; the module names its FFN ``net_in`` / ``net_out``), loads the
 quantized checkpoint directory and, in dequant mode, matches diffusers' model run with the
 dequantized fp8 weights; every output projection, the modulation tables and the top level stay
-as they were; eager mode and a spec quantized for another tp are refused. The pipeline
-application resolves one quantized directory per expert from the expert's bf16 copy with one
-spec for both of Wan 2.2's experts, refuses ``quant_checkpoint`` with two experts, and counts
-both quantized experts as stored in the HBM check beside the device text encoder.
+as they were; eager mode and a spec quantized for another tp are refused. A quantized
+self-attention q or k puts every self-attention of the module in the half-split rotary layout
+(the q/k rows reordered before the twins are prepared), on either compute path and at tp2, and
+the output is still the interleaved reference's; a set without them keeps the interleaved
+layout. The pipeline application resolves one quantized directory per expert from the expert's
+bf16 copy with one spec for both of Wan 2.2's experts, refuses ``quant_checkpoint`` with two
+experts, and counts both quantized experts as stored in the HBM check beside the device text
+encoder.
 """
 
 from __future__ import annotations
 
+import argparse
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -31,9 +37,12 @@ from difflet.backends.neuron.ops_impl.fp8_linear import (  # noqa: E402
 )
 from difflet.backends.neuron.wan.hbm import device_text_encoder_bytes  # noqa: E402
 from difflet.backends.neuron.wan.transformer import NeuronWanTransformerApplication  # noqa: E402
+from difflet.cli.quant import QUANT_TARGETS_ENV, quant_spec  # noqa: E402
+from difflet.models.wan.modeling_wan import half_split_index  # noqa: E402
 from difflet.pipeline.parallel_config import DiffletParallelConfig  # noqa: E402
 from difflet.quant import mx  # noqa: E402
 from difflet.quant.checkpoint import prepare_quantized_checkpoint, read_manifest  # noqa: E402
+from difflet.quant.spec import QuantSpec  # noqa: E402
 from difflet.quant.targets import default_spec  # noqa: E402
 from tests.unit.backends._neuron_wan_toy import (  # noqa: E402
     TINY_FP8_WAN,
@@ -45,15 +54,20 @@ from tests.unit.backends._neuron_wan_toy import (  # noqa: E402
     write_tiny_wan_model,
 )
 
-#: Per block: the cross-attention's q/k/v and the FFN's up and down; the self-attention's q/k/v,
-#: every to_out.0, the modulation tables, the embedders and proj_out stay bf16.
-TARGETS_PER_BLOCK = 5
+#: Per block: the q/k/v of the self- and the cross-attention and the FFN's up and down; every
+#: to_out.0, the modulation tables, the embedders and proj_out stay bf16.
+TARGETS_PER_BLOCK = 8
 TINY_TARGETS_WAN = TARGETS_PER_BLOCK * TINY_FP8_WAN["num_layers"]
 #: The targets in the module's spelling (``quantized_linears`` addresses the module) ...
-MODULE_TARGETS = {"attn2.to_q", "attn2.to_k", "attn2.to_v", "ffn.net_in", "ffn.net_out"}
+MODULE_TARGETS = {"attn1.to_q", "attn1.to_k", "attn1.to_v", "attn2.to_q", "attn2.to_k",
+                  "attn2.to_v", "ffn.net_in", "ffn.net_out"}
 #: ... and in the checkpoint's (what the table and the quantized directory name).
 CHECKPOINT_TARGETS = (MODULE_TARGETS - {"ffn.net_in", "ffn.net_out"}) | {"ffn.net.0.proj",
                                                                          "ffn.net.2"}
+#: The 917d087 default: the cross-attention's q/k/v and the FFN, the self-attention's in bf16.
+CROSS_ATTENTION_AND_FFN = (r"blocks\.\d+\.attn2\.(to_q|to_k|to_v)",
+                           r"blocks\.\d+\.ffn\.net\.0\.proj", r"blocks\.\d+\.ffn\.net\.2")
+REORDER_LINE = "[wan] self-attention q/k reordered for the half-split rotary"
 
 
 @pytest.fixture(autouse=True)
@@ -64,29 +78,48 @@ def _clean_mesh(monkeypatch):
     parallel_mesh.destroy_parallel_mesh()
 
 
-@pytest.fixture(scope="module")
-def tiny(tmp_path_factory):
+def _reference(transformer_dir, spec: QuantSpec) -> torch.Tensor:
+    """diffusers' own model with every weight ``spec`` targets dequantized from its mxfp8 form
+    (a row-parallel one per rank K range): what dequant mode computes, in the checkpoint's
+    channel order and with the interleaved rotary. Its module names are the checkpoint keys, so
+    the table matches them as it is."""
     from diffusers import WanTransformer3DModel
 
+    model = WanTransformer3DModel.from_pretrained(
+        str(transformer_dir), torch_dtype=torch.float32).eval()
+    with torch.no_grad():
+        for name, module in model.named_modules():
+            if spec.matches(name) and isinstance(module, torch.nn.Linear):
+                module.weight.copy_(mx.fake_quantize_mx_sharded(module.weight,
+                                                                spec.k_shards(name)))
+        return model(*tiny_wan_inputs(config=TINY_FP8_WAN), return_dict=False)[0]
+
+
+def _train_qk_norms(transformer_dir: Path) -> None:
+    """Per-channel self-attention q/k norm weights, as a checkpoint has: the toy writes them as
+    ones, which the half-split reorder leaves as they are, so a reorder that missed them (or a
+    rank that sliced the wrong heads of them) would go unseen."""
+    from safetensors.torch import load_file, save_file
+
+    path = transformer_dir / "diffusion_pytorch_model.safetensors"
+    state = load_file(str(path))
+    gen = torch.Generator().manual_seed(7)
+    for key in sorted(k for k in state if ".attn1.norm_q." in k or ".attn1.norm_k." in k):
+        state[key] = 0.5 + torch.rand(state[key].shape, generator=gen)
+    save_file(state, str(path))
+
+
+@pytest.fixture(scope="module")
+def tiny(tmp_path_factory):
     root = tmp_path_factory.mktemp("tiny_wan_fp8")
     write_tiny_wan_model(root, config=TINY_FP8_WAN)
     transformer_dir = root / "transformer"
+    _train_qk_norms(transformer_dir)
     spec = default_spec("wan", compute="dequant", tp_degree=1)
     quantized = prepare_quantized_checkpoint(transformer_dir, spec, create=True,
                                              cache_root=root / "cache")
-    # diffusers' own model with the dequantized mxfp8 weights: what dequant mode computes. Its
-    # module names are the checkpoint keys, so the table matches them as it is.
-    model = WanTransformer3DModel.from_pretrained(
-        str(transformer_dir), torch_dtype=torch.float32).eval()
-    for name, module in model.named_modules():
-        if spec.matches(name) and isinstance(module, torch.nn.Linear):
-            with torch.no_grad():
-                module.weight.copy_(mx.dequantize_mx(*mx.quantize_mx(module.weight.detach())))
-    latents, timestep, text = tiny_wan_inputs(config=TINY_FP8_WAN)
-    with torch.no_grad():
-        reference = model(latents, timestep, text, return_dict=False)[0]
     return SimpleNamespace(root=root, transformer_dir=transformer_dir, quantized=quantized,
-                           spec=spec, reference=reference)
+                           spec=spec, reference=_reference(transformer_dir, spec))
 
 
 def _app(tiny, **overrides):
@@ -95,6 +128,28 @@ def _app(tiny, **overrides):
                   device="cpu", quant=tiny.spec)
     kwargs.update(overrides)
     return NeuronWanTransformerApplication(**kwargs)
+
+
+def _override(monkeypatch, *targets: str) -> QuantSpec:
+    """The tp1 dequant spec the driver builds with ``targets`` as ``DIFFLET_QUANT_TARGETS``."""
+    monkeypatch.setenv(QUANT_TARGETS_ENV, ";".join(targets))
+    args = argparse.Namespace(quant="mxfp8", quant_compute="dequant", tp_degree=1,
+                              model_id="Wan-AI/Wan2.1-T2V-14B-Diffusers")
+    return quant_spec(args)
+
+
+def _loaded(tiny, spec: QuantSpec, tmp_path):
+    """The application of ``spec`` on the toy's quantized directory for it, loaded."""
+    quantized = prepare_quantized_checkpoint(tiny.transformer_dir, spec, create=True,
+                                             cache_root=tmp_path / "cache")
+    app = _app(tiny, model_path=quantized, quant=spec)
+    app.load()
+    return app
+
+
+def _rope_layouts(module) -> set[str]:
+    """The model's rotary layout and every self-attention's: one value when they agree."""
+    return {module.rope_layout, *(block.attn1.rope_layout for block in module.blocks)}
 
 
 def test_the_quantized_directory_holds_every_target(tiny):
@@ -107,12 +162,14 @@ def test_the_quantized_directory_holds_every_target(tiny):
     assert {n.split(".", 2)[2] for n in names} == CHECKPOINT_TARGETS
 
 
-def test_application_quantizes_through_the_checkpoint_key(tiny):
+def test_application_quantizes_through_the_checkpoint_key(tiny, capsys):
     """The spec's targets are matched by checkpoint key, so the FFN's ``net_in`` / ``net_out``
     (``net.0.proj`` / ``net.2`` on disk) are quantized with the attention q/k/v and loaded
     from the directory cleanly, while the names recorded are the module's own. The module's
     linears are the selected backend's TP layers (the CPU backend's here, ``difflet.ops``), so
-    the twins are the column and the row twin, at tp=1 as on the device at tp4."""
+    the twins are the column and the row twin, at tp=1 as on the device at tp4. The quantized
+    self-attention q/k put the model and every self-attention in the half-split rotary layout,
+    said in one line, and the output is still the interleaved reference's."""
     app = _app(tiny)
     app.load()
     names = app.quantized_linears
@@ -122,8 +179,11 @@ def test_application_quantizes_through_the_checkpoint_key(tiny):
     block = app.module.blocks[0]
     assert isinstance(block.ffn.net_in, FP8ColumnParallelLinear)
     assert isinstance(block.ffn.net_out, FP8RowParallelLinear)
-    assert not isinstance(block.attn1.to_q, _FP8LinearBase)  # self-attention q/k/v stay bf16
+    assert isinstance(block.attn1.to_q, FP8ColumnParallelLinear)
     assert isinstance(block.attn2.to_v, FP8ColumnParallelLinear)
+    assert app.module.rope_layout == "half_split"
+    assert all(b.attn1.rope_layout == "half_split" for b in app.module.blocks)
+    assert capsys.readouterr().out.count(REORDER_LINE) == 1
     assert block.ffn.net_in.weight is None and block.ffn.net_in.weight_bf16 is not None  # prepared
     # Every output projection and the top level are the linears they were; the modulation
     # tables are parameters in the module's dtype.
@@ -134,6 +194,108 @@ def test_application_quantizes_through_the_checkpoint_key(tiny):
     out = app(*tiny_wan_inputs(config=TINY_FP8_WAN))
     # Exact up to fp32 summation order: a dequantized fp8 value is bf16-representable, so the
     # prepared bf16 weight copy is the reference's weight.
+    torch.testing.assert_close(out, tiny.reference, atol=1e-4, rtol=1e-4)
+
+
+def test_a_set_without_self_attention_qk_keeps_the_interleaved_rotary(tiny, monkeypatch,
+                                                                       tmp_path, capsys):
+    """The half split is for q/k from the MXFP8 kernel (bf16 q/k run 12% slower with it): a set
+    whose self-attention q/k stay bf16, the 917d087 default here, keeps the checkpoint's order
+    and the interleaved rotary."""
+    spec = _override(monkeypatch, *CROSS_ATTENTION_AND_FFN)
+    app = _loaded(tiny, spec, tmp_path)
+    assert {n.split(".", 2)[2] for n in app.quantized_linears} == (
+        MODULE_TARGETS - {"attn1.to_q", "attn1.to_k", "attn1.to_v"})
+    assert _rope_layouts(app.module) == {"interleaved"}
+    assert REORDER_LINE not in capsys.readouterr().out
+    torch.testing.assert_close(app(*tiny_wan_inputs(config=TINY_FP8_WAN)),
+                               _reference(tiny.transformer_dir, spec), atol=1e-4, rtol=1e-4)
+
+
+def test_quantizing_one_block_qk_switches_every_self_attention(tiny, monkeypatch, tmp_path):
+    """The rotary tables are the model's, one layout per forward: one quantized q (block 0's)
+    reorders the bf16 q/k of every self-attention with it."""
+    spec = _override(monkeypatch, r"blocks\.0\.attn1\.to_q")
+    app = _loaded(tiny, spec, tmp_path)
+    assert app.quantized_linears == ["blocks.0.attn1.to_q"]
+    assert _rope_layouts(app.module) == {"half_split"}
+    torch.testing.assert_close(app(*tiny_wan_inputs(config=TINY_FP8_WAN)),
+                               _reference(tiny.transformer_dir, spec), atol=1e-4, rtol=1e-4)
+
+
+def test_the_dequant_path_uses_the_same_layout(tiny):
+    """The layout follows what is quantized, not how it multiplies: the dequant path (the
+    fixture's spec) switches as the kernel path (the device's) does, and both prepare the
+    reordered rows. The kernel path's packed q/k are the kernel layout of the directory's fp8
+    rows and block scales in the half-split order, so the reorder ran before the packing; it
+    loads without its warm-up forward, since the kernel needs the Neuron SDK. The dequant
+    path's output is the interleaved reference's."""
+    from safetensors.torch import load_file
+
+    assert tiny.spec.compute == "dequant"
+    dequant = _app(tiny)
+    dequant.load()
+    # One directory serves both paths: the compute path is not in its digest.
+    kernel = _app(tiny, quant=default_spec("wan", compute="nki", tp_degree=1))
+    kernel.load(skip_warmup=True)
+    assert kernel.load_report == {"missing": [], "unexpected": []}
+    assert _rope_layouts(dequant.module) == _rope_layouts(kernel.module) == {"half_split"}
+    stored = {}
+    for path in Path(tiny.quantized).glob("*.safetensors"):
+        stored.update(load_file(str(path)))
+    head_dim = TINY_FP8_WAN["attention_head_dim"]
+    for i, block in enumerate(kernel.module.blocks):
+        for proj in ("to_q", "to_k"):
+            weight = stored[f"blocks.{i}.attn1.{proj}.weight"]
+            perm = half_split_index(weight.shape[0], head_dim)
+            data, scales = mx.kernel_layout(
+                weight.index_select(0, perm),
+                stored[f"blocks.{i}.attn1.{proj}.weight_scale"].index_select(0, perm))
+            twin = getattr(block.attn1, proj)
+            assert torch.equal(twin.weight_packed, data), (i, proj)
+            assert torch.equal(twin.weight_scales_hw, scales), (i, proj)
+    torch.testing.assert_close(dequant(*tiny_wan_inputs(config=TINY_FP8_WAN)), tiny.reference,
+                               atol=1e-4, rtol=1e-4)
+
+
+@pytest.mark.multirank
+def test_tp2_matches_the_reference(tiny, tmp_path):
+    """At tp2 each rank reorders the q/k rows of its own heads (a column shard is whole heads),
+    slices its heads of the reordered q/k norm weights and reads ``ffn.net.2`` per rank K
+    range: every rank is in the half-split layout and its output is the reference's."""
+    from tests.unit.backends._neuron_gloo import run_ranks
+    from tests.unit.backends._neuron_workers import wan_fp8_worker
+
+    spec = default_spec("wan", compute="dequant", tp_degree=2)
+    quantized = prepare_quantized_checkpoint(tiny.transformer_dir, spec, create=True,
+                                             cache_root=tmp_path / "cache")
+    reference = _reference(tiny.transformer_dir, spec)
+    results = run_ranks(wan_fp8_worker, str(quantized), spec.to_dict(), world_size=2)
+    for r in results:
+        assert r["report"] == {"missing": [], "unexpected": []}
+        assert r["rope_layouts"] == ["half_split"]
+        torch.testing.assert_close(torch.tensor(r["out"]), reference, atol=1e-4, rtol=1e-4)
+
+
+def test_a_weight_store_hit_is_reordered_once(tiny, tmp_path, monkeypatch):
+    """The load writes the weight store before the reorder, which replaces the loaded tensors
+    rather than editing them: the store keeps the checkpoint's order, so the next application
+    reading it reorders the rows once, as the first did, and computes the same output; a
+    second ``load()`` of a loaded application changes nothing."""
+    monkeypatch.setenv("DIFFLET_NEURON_WEIGHT_STORE", str(tmp_path / "store"))
+    monkeypatch.setenv("DIFFLET_NEURON_WEIGHT_STORE_ALL", "1")  # an fp32 toy saves nothing
+    inputs = tiny_wan_inputs(config=TINY_FP8_WAN)
+    first = _app(tiny)
+    first.load()
+    assert first.weight_store.status == "written"
+    parallel_mesh.destroy_parallel_mesh()
+    second = _app(tiny)
+    second.load()
+    assert second.weight_store.status == "hit"
+    out = second(*inputs)
+    assert torch.equal(out, first(*inputs))
+    second.load()
+    assert torch.equal(second(*inputs), out)
     torch.testing.assert_close(out, tiny.reference, atol=1e-4, rtol=1e-4)
 
 
