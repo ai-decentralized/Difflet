@@ -22,6 +22,21 @@ from difflet.cli.dp.router import (
 def test_replica_core_ranges():
     assert replica_core_ranges(4, 4) == ["0-3", "4-7", "8-11", "12-15"]
     assert replica_core_ranges(2, 1) == ["0", "1"]
+    assert replica_core_ranges(2, 2, "") == ["0-1", "2-3"]
+
+
+def test_replica_core_ranges_take_the_inherited_visible_cores_in_order():
+    # trn3, 2026-11-08: a DP run on NEURON_RT_VISIBLE_CORES=20-27 gave its workers 0-3 and 4-7
+    # and collided with another job there.
+    assert replica_core_ranges(2, 4, "20-27") == ["20-23", "24-27"]
+    assert replica_core_ranges(2, 2, "0,2,4,6") == ["0,2", "4,6"]
+    assert replica_core_ranges(2, 1, "9,5") == ["9", "5"]
+    assert replica_core_ranges(2, 2, "8-15") == ["8-9", "10-11"]  # the first cores, in order
+
+
+def test_replica_core_ranges_refuse_an_inherited_allocation_that_is_too_small():
+    with pytest.raises(ValueError, match=r"needs 8 NeuronCores.*'20-23'.*4"):
+        replica_core_ranges(2, 4, "20-23")
 
 
 def test_worker_env_overrides_parent_values():
@@ -162,6 +177,13 @@ def _worktree_on_pythonpath(monkeypatch):
     monkeypatch.setenv(
         "PYTHONPATH", repo_root + (os.pathsep + existing if existing else "")
     )
+
+
+@pytest.fixture(autouse=True)
+def _no_inherited_core_allocation(monkeypatch):
+    """The router hands out the inherited NEURON_RT_VISIBLE_CORES; a test host's own
+    allocation must not move the cores these tests expect."""
+    monkeypatch.delenv("NEURON_RT_VISIBLE_CORES", raising=False)
 
 
 def _stub_prefix(tmp_path):
@@ -417,3 +439,43 @@ def test_run_router_on_trainium_keeps_the_neuron_env(tmp_path, monkeypatch):
 
     env0 = json.loads((dump / "worker_0.json").read_text())
     assert env0["NEURON_RT_VISIBLE_CORES"] == "0-3" and "CUDA_VISIBLE_DEVICES" not in env0
+
+
+def test_run_router_on_trainium_pins_workers_inside_the_inherited_cores(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setenv("DIFFLET_BACKEND", "trainium")
+    monkeypatch.setenv("NEURON_RT_VISIBLE_CORES", "20-27")
+    dump = tmp_path / "env"
+    dump.mkdir()
+    args = _args(work_dir=str(tmp_path / "work"), dp=2)
+    rc = run_router(
+        args,
+        _requests(2),
+        replica_cores=4,
+        worker_argv_prefix=_stub_prefix(tmp_path) + ["--env-dump", str(dump)],
+    )
+    assert rc == 0
+    import json
+
+    envs = [json.loads((dump / f"worker_{w}.json").read_text()) for w in (0, 1)]
+    assert [e["NEURON_RT_VISIBLE_CORES"] for e in envs] == ["20-23", "24-27"]
+    out = capsys.readouterr().out
+    assert "[dp-router] worker 0: cores 20-23" in out
+    assert "[dp-router] worker 1: cores 24-27" in out
+
+
+def test_run_router_refuses_too_few_inherited_cores_before_starting_any_worker(
+    tmp_path, monkeypatch
+):
+    from difflet.cli.dp import router as router_mod
+
+    monkeypatch.setenv("DIFFLET_BACKEND", "trainium")
+    monkeypatch.setenv("NEURON_RT_VISIBLE_CORES", "20-23")
+    launched = []
+    monkeypatch.setattr(router_mod.subprocess, "Popen", lambda *a, **k: launched.append(a))
+    args = _args(work_dir=str(tmp_path / "work"), dp=2)
+    with pytest.raises(ValueError, match=r"needs 8 NeuronCores.*only 4"):
+        run_router(args, _requests(2), replica_cores=4, worker_argv_prefix=["unused"])
+    assert launched == []
+    assert not (tmp_path / "work").exists()  # no manifest written for a run that never starts
