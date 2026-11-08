@@ -16,7 +16,7 @@ performance work are all welcome.
 
 Most development does not need accelerator hardware. Difflet ships a torch-native CPU
 reference backend, and the unit suite runs on a plain CPU host. CI uses `ubuntu-latest`
-with Python 3.10–3.12:
+with one job per production stack (Python 3.11, 3.12 and 3.14):
 
 ```bash
 git clone https://github.com/ai-decentralized/Difflet.git
@@ -36,6 +36,11 @@ On a Trainium host, install into the pre-built Neuron venv instead. See the READ
 scripts/cpu-gate.sh     # import guard + tests/unit with DIFFLET_BACKEND=cpu (what CI runs)
 ruff check .            # lint (CI-enforced)
 ```
+
+The gate runs the tests in parallel (`-n logical`, one worker per logical CPU). On a
+shared host, cap it with `scripts/cpu-gate.sh -n 8`; `-n 0` runs serially. In parallel each
+test process runs one torch thread (`OMP_NUM_THREADS=1`, unless you set it yourself), since
+the workers already keep every CPU busy.
 
 `cpu-gate.sh` fails on any failing test that is not listed in `scripts/known-red.txt`
 and on any new Neuron-only skip that is not in `scripts/neuron-skips.txt`. If your change

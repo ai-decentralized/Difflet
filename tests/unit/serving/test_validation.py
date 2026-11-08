@@ -81,7 +81,9 @@ def test_started_validation_keeps_slot_after_http_timeout():
         executor = BoundedValidationExecutor(
             max_workers=1,
             max_waiting=0,
-            timeout_s=0.02,
+            # The pool's first thread starts inside the timed call; it must have entered
+            # block() before the timeout, or the work is cancelled instead of started.
+            timeout_s=0.5,
         )
         await executor.start()
         entered = threading.Event()

@@ -8,30 +8,23 @@ paths that the AST-only ``test_modeling_hunyuan_video.py`` cannot reach.
 
 from __future__ import annotations
 
-import os
-
 import pytest
 import torch
 
 
 @pytest.fixture(autouse=True)
-def _cpu_backend():
-    """Force the CPU op backend for the whole module and restore afterwards."""
-    prev = os.environ.get("DIFFLET_BACKEND")
-    os.environ["DIFFLET_BACKEND"] = "cpu"
-    import importlib
+def _cpu_backend(monkeypatch):
+    """Run on the CPU op backend (difflet.ops resolves the backend on each call).
 
-    import difflet.ops as ops
-
-    importlib.reload(ops)
+    No importlib.reload of the modeling: a reload replaces its classes, so a CUDA
+    HunyuanVideo module built earlier in the same process subclasses the old
+    transformer, its isinstance checks against the old HunyuanVideoAttention fail,
+    and the compact attention is silently not installed.
+    """
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
     import difflet.models.hunyuan_video.modeling_hunyuan_video as modeling
 
-    importlib.reload(modeling)
     yield modeling
-    if prev is None:
-        os.environ.pop("DIFFLET_BACKEND", None)
-    else:
-        os.environ["DIFFLET_BACKEND"] = prev
 
 
 def _rotary(modeling, seq, head_dim):

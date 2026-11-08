@@ -41,12 +41,12 @@ class _FakePipelineRunner:
             ]
             data = ":".join(values).encode()
         elif request.prompt.startswith("sleep:"):
-            remaining = float(request.prompt.split(":", 1)[1])
-            while remaining > 0:
+            # Sleep until a monotonic deadline: subtracting the nominal step instead would
+            # add every wake-up delay to the run, so a busy host stretches 0.4 s to 0.8 s.
+            end = time.monotonic() + float(request.prompt.split(":", 1)[1])
+            while (remaining := end - time.monotonic()) > 0:
                 context.cancellation.throw_if_cancelled()
-                step = min(remaining, 0.01)
-                await asyncio.sleep(step)
-                remaining -= step
+                await asyncio.sleep(min(remaining, 0.01))
             data = f"{request.prompt}:{request.height}x{request.width}".encode()
         elif request.prompt.startswith("ignore-cancel:"):
             await asyncio.sleep(float(request.prompt.split(":", 1)[1]))

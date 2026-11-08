@@ -45,8 +45,8 @@ def test_two_concurrent_requests_run_on_two_replicas():
             assert engine.ready and engine.healthy
             started = time.monotonic()
             outputs = await asyncio.gather(
-                engine.generate(_request("req-1", "sleep:0.4")),
-                engine.generate(_request("req-2", "sleep:0.4")),
+                engine.generate(_request("req-1", "sleep:1.0")),
+                engine.generate(_request("req-2", "sleep:1.0")),
             )
             wall = time.monotonic() - started
         finally:
@@ -54,9 +54,10 @@ def test_two_concurrent_requests_run_on_two_replicas():
         return outputs, wall, engine
 
     outputs, wall, engine = asyncio.run(_run())
-    assert [o.data for o in outputs] == [b"sleep:0.4:64x64", b"sleep:0.4:64x64"]
-    # Serial on one worker would be >= 0.8 s; two workers run them side by side.
-    assert wall < 0.7, wall
+    assert [o.data for o in outputs] == [b"sleep:1.0:64x64", b"sleep:1.0:64x64"]
+    # Serial on one worker would be >= 2.0 s; two workers run them side by side. The
+    # 0.8 s of slack is for IPC and scheduling on a busy CI runner.
+    assert wall < 1.8, wall
     assert not engine.ready and not engine.healthy
 
 

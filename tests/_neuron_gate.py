@@ -123,3 +123,27 @@ def dump_conversions(path) -> None:
     lines = sorted(set(CONVERTED))
     with open(path, "w", encoding="utf-8") as fh:
         fh.write("".join(f"{line}\n" for line in lines))
+
+
+_WORKEROUTPUT_KEY = "neuron_gate_converted"
+
+
+def finish_session(config, path) -> None:
+    """End of a pytest session: write the conversions to ``path`` (when set).
+
+    Under pytest-xdist the tests run, and are converted, in the workers, while the
+    controller records nothing. So a worker (it has ``config.workeroutput``) hands its
+    conversions to the controller instead of writing; the controller collects them in
+    ``collect_worker_conversions`` and writes the union once every worker is done.
+    """
+    workeroutput = getattr(config, "workeroutput", None)
+    if workeroutput is not None:
+        workeroutput[_WORKEROUTPUT_KEY] = sorted(set(CONVERTED))
+        return
+    if path:
+        dump_conversions(path)
+
+
+def collect_worker_conversions(node) -> None:
+    """xdist controller: add one finished worker's conversions (none if it crashed)."""
+    CONVERTED.extend(getattr(node, "workeroutput", {}).get(_WORKEROUTPUT_KEY, ()))

@@ -58,6 +58,11 @@ def pytest_runtest_makereport(item, call):
 def pytest_sessionfinish(session, exitstatus):
     # The CPU gate sets NEURON_GATE_REPORT and diffs the result against its committed
     # neuron-skips.txt; a conversion not in that file is a regression hiding as a skip.
-    path = os.environ.get("NEURON_GATE_REPORT")
-    if path:
-        _gate.dump_conversions(path)
+    # Under pytest-xdist each worker hands its conversions to the controller, which writes.
+    _gate.finish_session(session.config, os.environ.get("NEURON_GATE_REPORT"))
+
+
+@pytest.hookimpl(optionalhook=True)
+def pytest_testnodedown(node, error):
+    # pytest-xdist controller hook: a worker finished; keep its Neuron-gate conversions.
+    _gate.collect_worker_conversions(node)

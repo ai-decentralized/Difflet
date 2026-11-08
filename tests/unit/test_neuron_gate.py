@@ -118,3 +118,42 @@ def test_dump_conversions_writes_sorted_unique_nodeids(tmp_path):
     out = tmp_path / "neuron-skips.txt"
     gate.dump_conversions(out)
     assert out.read_text().splitlines() == ["tests/unit/a.py::t", "tests/unit/b.py::t"]
+
+
+def test_an_xdist_worker_hands_its_conversions_to_the_controller(tmp_path):
+    # Under pytest-xdist the tests run in the workers, so the conversions are recorded there.
+    # A worker that wrote the report itself would be overwritten by the controller's empty list.
+    gate.CONVERTED.clear()
+    gate.CONVERTED.extend(["tests/unit/b.py::t", "tests/unit/a.py::t", "tests/unit/b.py::t"])
+    worker_config = SimpleNamespace(workeroutput={})
+    out = tmp_path / "neuron-skips.txt"
+    gate.finish_session(worker_config, str(out))
+    assert not out.exists()
+    assert worker_config.workeroutput["neuron_gate_converted"] == [
+        "tests/unit/a.py::t",
+        "tests/unit/b.py::t",
+    ]
+
+
+def test_the_xdist_controller_writes_the_union_of_its_workers(tmp_path):
+    gate.CONVERTED.clear()
+    for converted in (["tests/unit/b.py::t", "tests/unit/a.py::t"],
+                      ["tests/unit/c.py::t", "tests/unit/a.py::t"]):
+        gate.collect_worker_conversions(
+            SimpleNamespace(workeroutput={"neuron_gate_converted": converted})
+        )
+    gate.collect_worker_conversions(SimpleNamespace())  # a worker that crashed reports nothing
+    out = tmp_path / "neuron-skips.txt"
+    gate.finish_session(SimpleNamespace(), str(out))  # the controller has no workeroutput
+    assert out.read_text().splitlines() == [
+        "tests/unit/a.py::t",
+        "tests/unit/b.py::t",
+        "tests/unit/c.py::t",
+    ]
+
+
+def test_finish_session_without_a_report_path_writes_nothing(tmp_path):
+    gate.CONVERTED.clear()
+    gate.CONVERTED.append("tests/unit/a.py::t")
+    gate.finish_session(SimpleNamespace(), None)
+    assert list(tmp_path.iterdir()) == []

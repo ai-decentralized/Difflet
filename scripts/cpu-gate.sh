@@ -7,6 +7,19 @@
 #
 # Usage: cpu-gate.sh [--unit-only] [extra pytest args...]
 #
+# The unit suite runs under pytest-xdist with `-n logical --dist loadfile`: one worker
+# per logical CPU (4 on a GitHub runner; `auto` would count physical cores once psutil
+# is installed, and accelerate installs it), and every test file stays in one worker,
+# so module fixtures and the multi-rank gloo tests behave as they do serially. Extra
+# args come after these, so `cpu-gate.sh -n 8` caps the workers (do that on a shared
+# host: the count ignores taskset) and `cpu-gate.sh -n 0` runs serially.
+#
+# In parallel, every test process gets one intra-op thread (OMP_NUM_THREADS=1) unless
+# OMP_NUM_THREADS is already set: the workers already use every CPU, and with torch's
+# default of one thread per CPU in each worker and in each gloo rank they start, the
+# threads mostly wait for each other (on 4 CPUs: trainium-native 18 min -> 8 min,
+# trainium-aot 2.7 min -> 0.8 min). `-n 0` keeps torch's default.
+#
 # Red tests are compared against known-red.txt next to this script: the exact
 # test ids that were red on a non-Neuron host when the branch started (every
 # one a missing Neuron module or a trainium-only model registration). Any red
@@ -48,10 +61,17 @@ unit_log="$LOGDIR/cpu-gate-unit-$ts.log"
 # tests/conftest.py writes the node ids the Neuron gate converted to skips here.
 export NEURON_GATE_REPORT="$LOGDIR/cpu-gate-neuron-skips-$ts.txt"
 : > "$NEURON_GATE_REPORT"
+serial=0 prev=""
+for arg in "$@"; do
+  case "$prev $arg" in "-n 0" | "--numprocesses 0") serial=1 ;; esac
+  case "$arg" in -n0 | --numprocesses=0) serial=1 ;; esac
+  prev=$arg
+done
+[ "$serial" = 1 ] || export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
 # -rfEs: failures and errors must appear in the short summary, or the regression
 # diff below cannot see them (otherwise two failures can still report "regressions=0").
 "$PY" -m pytest tests/unit -q --tb=short -rfEs -p no:cacheprovider -p no:warnings \
-  --continue-on-collection-errors "$@" > "$unit_log" 2>&1
+  --continue-on-collection-errors -n logical --dist loadfile "$@" > "$unit_log" 2>&1
 summary="$(grep -E '^[0-9]+ (passed|failed)' "$unit_log" | tail -n 1 || true)"
 [ -n "$summary" ] || summary="$(tail -n 1 "$unit_log")"
 
