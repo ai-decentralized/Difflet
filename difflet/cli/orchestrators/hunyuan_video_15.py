@@ -262,8 +262,8 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
 
     def _stage_transformer(self, args: argparse.Namespace) -> None:
         """TP x CFG x CP ranks: the denoising loop; rank 0 saves the latents and reports the
-        DiT's resident weight bytes after the load and, on the device, the peak HBM after each
-        request (the memory an MXFP8 run is judged on). With --quant the pipeline gets the spec
+        DiT's resident weight bytes after the load and, on the device, each request's own peak
+        HBM (the memory an MXFP8 run is judged on). With --quant the pipeline gets the spec
         the stage flags describe (the driver's: the line carries --tp-degree) and resolves the
         quantized directory read-only. No stage key would notice a rank that ran the bf16 DiT
         instead."""
@@ -311,6 +311,8 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
                                      "free guidance on or off, which the stage's layout fixes")
                 pipe.guidance_scale = None if scale is None else float(scale)
                 embeds = torch.load(stage_loop.work_file(args, req, "embeds.pt"), weights_only=True)
+                if rank0:
+                    _reset_peak_hbm(pipe.dit)
                 marks = [time.perf_counter()]
                 latents = pipe(**embeds, num_inference_steps=int(stage_loop.effective(req, args, "steps", 50)),
                                generator=torch.Generator().manual_seed(int(stage_loop.effective(req, args, "seed", 42))),
@@ -321,10 +323,10 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
                     print(f"[hv15] request {req.index}: denoise {marks[-1] - marks[0]:.1f} s, {len(steps)} steps, "
                           f"median {steps_sorted[len(steps) // 2] * 1e3:.0f} ms (first {steps[0] * 1e3:.0f} ms)",
                           flush=True)
+                    torch.save(latents, stage_loop.work_file(args, req, "latents.pt"))
                     peak = _peak_hbm_line(pipe.dit)
                     if peak is not None:
                         print(peak, flush=True)
-                    torch.save(latents, stage_loop.work_file(args, req, "latents.pt"))
 
     def _stage_vae(self, args: argparse.Namespace) -> None:
         """One core: tiled bf16 decode, diffusers' post-processing, MP4."""
@@ -737,17 +739,45 @@ def _dit_memory_line(dit) -> str:
             f"({dit.weight_bytes / GIB:.2f} GiB estimated at load), {label}")
 
 
+def _reset_peak_hbm(dit) -> None:
+    """Starts the allocator's peak again from what is resident (the weights), before a request:
+    the line after it is then that request's peak, not the load's or an earlier request's. Off
+    the device there is no peak to reset."""
+    if dit.device.type == "neuron":
+        import torch_neuronx
+
+        torch_neuronx.reset_peak_memory_stats()
+
+
 def _peak_hbm_line(dit) -> str | None:
-    """Rank 0's allocator peak so far against one core's HBM, or None off the device (the CPU
-    has no HBM to report). ``per_core_hbm_bytes`` is imported here, at the call, as is
-    ``torch_neuronx``, which only a neuron rank has."""
+    """Rank 0's peak HBM since ``_reset_peak_hbm`` against one core's HBM, or None off the
+    device (the CPU has no HBM to report). The allocator sees only its own tensors; the
+    runtime's breakdown (``usage.<category>``) adds what it holds outside them, the NEFFs'
+    code, scratchpad and DMA rings, which stay put once the NEFFs are loaded, so the current
+    figures stand for the request's. Its ``tensors`` category is the allocator's segments,
+    which the peak already counts. Only with that breakdown is anything called free; without
+    it the remainder is named the allocator's headroom. A read that fails is reported, not
+    raised: the request has finished and its latents are saved. ``per_core_hbm_bytes`` is
+    imported here, at the call, as is ``torch_neuronx``, which only a neuron rank has."""
     if dit.device.type != "neuron":
         return None
     import torch_neuronx
 
     from difflet.backends.neuron.hbm import GIB, per_core_hbm_bytes
 
-    peak = torch_neuronx.max_memory_allocated()
-    hbm, _ = per_core_hbm_bytes()
-    return (f"[hv15] peak HBM (rank 0, allocator): {peak / GIB:.2f} GiB of {hbm / GIB:.1f} GiB "
-            f"per core, {(hbm - peak) / GIB:.2f} GiB free")
+    try:
+        stats = torch_neuronx.memory_stats()
+        hbm, _ = per_core_hbm_bytes()
+    except Exception as exc:  # a diagnostic must not fail a finished request
+        return f"[hv15] peak HBM unavailable: {exc!r}"
+    peak = stats["allocated_bytes.all.peak"]
+    head = f"[hv15] peak HBM (rank 0): {peak / GIB:.2f} GiB allocator"
+    usage = {k.removeprefix("usage."): v for k, v in stats.items() if k.startswith("usage.")}
+    if not usage:
+        return (f"{head} of {hbm / GIB:.1f} GiB per core, {(hbm - peak) / GIB:.2f} GiB allocator "
+                "headroom (the runtime's code, scratchpad and DMA rings uncounted)")
+    runtime = {k: v for k, v in usage.items() if k != "tensors"}
+    other = sum(runtime.values())
+    parts = ", ".join(f"{k} {v / GIB:.2f}" for k, v in runtime.items())
+    return (f"{head} + {other / GIB:.2f} GiB runtime ({parts}) of {hbm / GIB:.1f} GiB per core, "
+            f"{(hbm - peak - other) / GIB:.2f} GiB free")
