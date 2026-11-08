@@ -1,7 +1,8 @@
 """What phase G's CPU fp32 reference scripts (``scripts/fp32_ref/<model>.py``) share: the
-device's initial-noise law, the md5 each script asserts its noise with, the thread count, and
-saving a run the way the device run saved it, so ``scripts/fp32_ref/score.py`` (through
-``scripts/compare_difflet_runs.py``) reads the reference exactly as it reads a device run.
+device's initial-noise law, the md5 each script asserts its noise with, the thread count, the
+guard that keeps the math fp32, and saving a run the way the device run saved it, so
+``scripts/fp32_ref/score.py`` (through ``scripts/compare_difflet_runs.py``) reads the reference
+exactly as it reads a device run.
 
 The reference differs from the device only in dtype (fp32) and device (the host CPU); a starting
 noise that differed by one bf16 rounding (rel L2 1.7e-3) would be scored as device error after
@@ -12,6 +13,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import diffusers
@@ -56,6 +58,29 @@ def set_threads(n: int) -> None:
     torch.set_num_threads(n)
 
 
+#: The variables oneDNN takes its default fp32 math mode from (either prefix, any case).
+FPMATH_MODE_ENV = ("ONEDNN_DEFAULT_FPMATH_MODE", "DNNL_DEFAULT_FPMATH_MODE")
+
+
+def require_fp32_math() -> None:
+    """Refuse fp32 matmuls or convs allowed to run in reduced precision, which on this AMX-BF16
+    host would make the reference silently not fp32: torch's oneDNN fp32_precision 'bf16' or
+    'tf32' ('none' inherits, 'ieee' is fp32; float32_matmul_precision 'medium' and 'high' set
+    mkldnn.matmul to 'bf16' and 'tf32', so they are refused too), or a oneDNN default fpmath
+    mode other than strict, which torch leaves to every primitive it gives no mode (bf16 takes
+    an fp32 conv here from 2e-7 to 2e-3 rel error: the VAEs' convs). Each script's main calls
+    it first, so a refused run has loaded nothing."""
+    mkldnn = torch.backends.mkldnn
+    found = {"torch.backends": torch.backends.fp32_precision, "mkldnn": mkldnn.fp32_precision,
+             "mkldnn.matmul": mkldnn.matmul.fp32_precision,
+             "mkldnn.conv": mkldnn.conv.fp32_precision, "mkldnn.rnn": mkldnn.rnn.fp32_precision}
+    reduced = {name: value for name, value in found.items() if value not in ("none", "ieee")}
+    reduced |= {name: os.environ[name] for name in FPMATH_MODE_ENV
+                if os.environ.get(name, "strict").lower() != "strict"}
+    if reduced:
+        raise RuntimeError(f"fp32 math runs in reduced precision: {reduced}")
+
+
 def _check_frames(frames: np.ndarray) -> None:
     """Refuse a clip ``export_to_video`` would encode as something else: it multiplies float
     frames by 255 and truncates, so uint8 frames wrap and [-1, 1] frames (a raw VAE decode) clip;
@@ -75,8 +100,12 @@ def save_run(out_dir, *, latents, output, settings: dict, noise_md5: str, timing
     a clip's float [0, 1] frames (F, H, W, 3) to ``out.mp4`` at ``fps`` with diffusers'
     ``export_to_video``, the writer every difflet video orchestrator encodes with, libx264 at
     imageio quality 5) and ``run.json`` (the settings, the injected noise's md5, the timings and
-    the versions and threads that made it)."""
+    the versions and threads that made it). A clip's frames are also kept lossless in
+    ``out.pt``, (1, F, 3, H, W) float [0, 1], the layout ``compare_difflet_runs`` reads a ``.pt``
+    clip in: a codec-free comparison (device latents decoded on the host) then needs no rerun of
+    a reference that took hours."""
     out_dir = Path(out_dir)
+    lossless = None
     if isinstance(output, Image.Image):
         name = "out.png"
     else:
@@ -84,14 +113,17 @@ def save_run(out_dir, *, latents, output, settings: dict, noise_md5: str, timing
             raise ValueError("a video output needs the device's fps (DEVICE_FPS)")
         frames = np.asarray(output)
         _check_frames(frames)
-        name = "out.mp4"
+        name, lossless = "out.mp4", "out.pt"
     out_dir.mkdir(parents=True, exist_ok=True)
     torch.save(latents, out_dir / "latents.pt")
     if name == "out.png":
         output.save(out_dir / name)
     else:
-        export_to_video(list(frames.astype(np.float32, copy=False)), str(out_dir / name), fps=fps)
+        frames = frames.astype(np.float32, copy=False)
+        export_to_video(list(frames), str(out_dir / name), fps=fps)
+        clip = torch.from_numpy(frames).permute(0, 3, 1, 2)[None].contiguous()
+        torch.save(clip, out_dir / lossless)
     record = {"settings": settings, "noise_md5": noise_md5, "timings": timings, "output": name,
-              "fps": fps, "threads": torch.get_num_threads(), "torch": torch.__version__,
-              "diffusers": diffusers.__version__}
+              "lossless": lossless, "fps": fps, "threads": torch.get_num_threads(),
+              "torch": torch.__version__, "diffusers": diffusers.__version__}
     (out_dir / "run.json").write_text(json.dumps(record, indent=1) + "\n")
