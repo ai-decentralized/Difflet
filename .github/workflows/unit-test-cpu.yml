@@ -1,0 +1,122 @@
+name: unit-test-cpu
+
+# CPU-only unit suite with the CPU reference backend selected. No accelerator,
+# no Neuron SDK. GPU and Trainium tests remain manual.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ruff is enforced repo-wide. black/isort run through pre-commit on changed
+  # files only until the one-off repo-wide reformat lands.
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install ruff
+        run: pip install ruff==0.15.1
+
+      - name: Ruff
+        run: ruff check --output-format=github .
+
+  unit-test-cpu:
+    # Shown as e.g. "trainium-aot (py3.12)": the stack (one per backend's lock) and its Python.
+    name: ${{ matrix.stack }} (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        # One job per production stack, on that stack's Python: its lock pins every
+        # version, so a commit always installs the same packages and the CPU suite runs
+        # on what users run, not on whatever was released that day.
+        # The native neuron backend and its FP8 stack need torch >= 2.14
+        # (_functional_collectives.all_gather_single, fp8 CPU indexing) and only ever run on
+        # the trainium-native stack, so the older stacks leave their tests out.
+        include:
+          - stack: trainium-aot
+            python-version: "3.12"
+            lock: requirements-neuron.lock
+            pytest-args: --ignore-glob=tests/unit/backends/test_neuron_* --ignore=tests/unit/quant
+          - stack: cuda
+            python-version: "3.11"
+            lock: requirements-cuda.lock
+            pytest-args: --ignore-glob=tests/unit/backends/test_neuron_* --ignore=tests/unit/quant
+          - stack: trainium-native
+            # The e2e pins compare sha256 hashes keyed to this exact torch build, so this is
+            # the only job where they run, and they are stale: the hashes move with the host's
+            # thread count and vector ISA, and the Qwen-Image ones predate c9f4009 (the
+            # padded-prompt mask). Left out until they compare reference tensors instead;
+            # every other torch build skips them anyway, as main's CI always did.
+            pytest-args: --ignore=tests/unit/backends/test_neuron_e2e_pins.py
+            python-version: "3.14"
+            lock: requirements-neuron-native.lock
+          # The minimum supported Python. No lock installs on 3.10 (all three pin
+          # av==18.1.0, which needs Python >= 3.11), so this job takes the newest
+          # versions that still support 3.10.
+          - stack: min-python
+            python-version: "3.10"
+            lock: ""
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      # The lock is applied as pip constraints: it fixes the version of every package
+      # that gets installed and installs nothing by itself. Direct-URL lines (local
+      # Neuron wheels) are dropped and +cpu/+cuNNN tags stripped, so the CPU build of
+      # the locked torch version satisfies it.
+      - name: Constraints from the stack's lock
+        env:
+          LOCK: ${{ matrix.lock }}
+        run: |
+          if [ -n "$LOCK" ]; then
+            sed -E -e '/ @ /d' -e 's/\+(cpu|cu[0-9]+)$//' "$LOCK" > "$RUNNER_TEMP/constraints.txt"
+          else
+            : > "$RUNNER_TEMP/constraints.txt"
+          fi
+
+      # CPU wheels only: PyPI's torch is the multi-GB CUDA build. PyPI stays as an extra
+      # index for torch's own dependencies at their locked versions.
+      - name: Install torch (CPU)
+        run: >-
+          pip install -c "$RUNNER_TEMP/constraints.txt"
+          --index-url https://download.pytorch.org/whl/cpu
+          --extra-index-url https://pypi.org/simple torch
+
+      - name: Install Difflet with test extras
+        run: pip install -c "$RUNNER_TEMP/constraints.txt" -e ".[test]"
+
+      - name: Installed versions
+        run: pip freeze --exclude-editable
+
+      # The gate runs the import guard and tests/unit with DIFFLET_BACKEND=cpu, and
+      # fails on any red test not in known-red.txt and on any Neuron-only skip not
+      # in neuron-skips.txt (a regression hiding as a skip). Full logs are uploaded.
+      - name: CPU gate (import guard + unit tests)
+        env:
+          PYTHON_BIN: python
+          CPU_GATE_LOGDIR: ${{ runner.temp }}/cpu-gate
+        run: scripts/cpu-gate.sh ${{ matrix.pytest-args }}
+
+      - name: Upload gate logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpu-gate-logs-${{ matrix.stack }}-py${{ matrix.python-version }}
+          path: ${{ runner.temp }}/cpu-gate

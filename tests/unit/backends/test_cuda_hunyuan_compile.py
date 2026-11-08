@@ -2,11 +2,23 @@
 
 from types import SimpleNamespace
 
+import pytest
 import torch
 from torch import nn
 
 from difflet.backends.cuda.hunyuan_video.transformer import (
     CudaHunyuanVideoTransformerApplication,
+)
+
+# These tests stand in for the GPU on CPU, so they need Inductor's C++ backend to honour
+# emulate_precision_casts. Before torch 2.13 it does not: 2.11's dtype-convert CSE cache
+# maps each emulated bf16->fp32 upcast back to the unrounded fp32 value, so the rounding
+# is dead code (2.13+ skip that cache under emulate_precision_casts; the guard's comment
+# cites pytorch#185337), and 2.9 raises in CppVecOverrides.to_dtype. CUDA compiles these
+# ops through Triton, whose 2.11 codegen keeps every bf16 round trip.
+_cpu_inductor_emulates_casts = pytest.mark.skipif(
+    torch.__version__ < (2, 13),
+    reason="Inductor's CPU backend elides emulate_precision_casts before torch 2.13",
 )
 
 
@@ -36,6 +48,7 @@ class _TinyHunyuan(CudaHunyuanVideoTransformerApplication):
         pass
 
 
+@_cpu_inductor_emulates_casts
 def test_compiled_hunyuan_retains_bfloat16_residual_affine_rounding(tmp_path):
     generator = torch.Generator().manual_seed(2)
     inputs = [torch.randn(256, 64, generator=generator, dtype=torch.bfloat16) for _ in range(5)]
@@ -76,6 +89,7 @@ def test_native_compile_boundaries_preserve_state_and_share_wrappers():
     }
 
 
+@_cpu_inductor_emulates_casts
 def test_native_boundaries_keep_real_compiled_pointwise_work():
     from diffusers.models.normalization import RMSNorm
     from difflet.backends.cuda.hunyuan_video import numerics
