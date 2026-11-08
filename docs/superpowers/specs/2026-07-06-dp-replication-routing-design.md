@@ -46,7 +46,9 @@ and gather (collect results).
 
 `difflet generate --model-id M --dp k …` makes the parent process the
 **router**. It spawns k **workers**; worker `w` gets
-`NEURON_RT_VISIBLE_CORES=[w·R, (w+1)·R)` and `NEURON_RT_NUM_CORES=R`,
+`NEURON_RT_VISIBLE_CORES` = entries `[w·R, (w+1)·R)` of the router's own
+`NEURON_RT_VISIBLE_CORES` (of cores 0, 1, … when unset; too few is refused
+before any worker starts) and `NEURON_RT_NUM_CORES=R`,
 where `R = cfg·cp·tp` is the replica core count. Each worker runs the
 model's existing, unmodified stage chain; stage subprocesses inherit the
 pinned range because `run_stage` uses `setdefault`.
