@@ -57,14 +57,26 @@ def _manifest_path(compiled_model_path) -> Path:
     return Path(compiled_model_path) / MANIFEST_FILE_NAME
 
 
-def compile_blocks(block_lists: Iterable[torch.nn.ModuleList], *, dynamic: bool) -> int:
+def compile_blocks(
+    block_lists: Iterable[torch.nn.ModuleList],
+    *,
+    dynamic: bool,
+    options: dict[str, Any] | None = None,
+) -> int:
     """Replace every block in each list with its ``torch.compile`` wrapper, in place; return how
     many were compiled. Per block, so one graph is reused across the stack and the module
     around the blocks stays eager."""
+    # torch.compile accepts either a mode or options. Retain the mode's settings
+    # when a model needs additional options, without changing global compiler state.
+    compiler_kwargs = (
+        {"mode": COMPILE_MODE}
+        if options is None
+        else {"options": {**torch._inductor.list_mode_options(COMPILE_MODE), **options}}
+    )
     count = 0
     for blocks in block_lists:
         for i, block in enumerate(blocks):
-            blocks[i] = torch.compile(block, mode=COMPILE_MODE, dynamic=dynamic, fullgraph=False)
+            blocks[i] = torch.compile(block, dynamic=dynamic, fullgraph=False, **compiler_kwargs)
             count += 1
     return count
 
@@ -75,6 +87,8 @@ class GpuComponent(torch.nn.Module):
 
     #: Compile with dynamic shapes: one graph for every prompt length.
     compile_dynamic: bool = False
+    #: Optional model-specific compiler policy; other models retain COMPILE_MODE.
+    compile_options: dict[str, Any] | None = None
     #: Warm-up passes under compile: a dynamo guard on a ``None`` argument can force a second
     #: compile, which is better taken at load than in the first request.
     warmup_passes_when_compiled: int = 1
@@ -146,7 +160,8 @@ class GpuComponent(torch.nn.Module):
             self.apply_load_time_swaps(module)
             if self.torch_compile:
                 # ``self.module`` stays the eager module around the compiled blocks.
-                compile_blocks(self.repeated_blocks(module), dynamic=self.compile_dynamic)
+                kwargs = {} if self.compile_options is None else {"options": self.compile_options}
+                compile_blocks(self.repeated_blocks(module), dynamic=self.compile_dynamic, **kwargs)
             self.module = module
         return self.module
 

@@ -1180,6 +1180,8 @@ def _validate_dp(args: argparse.Namespace) -> None:
 
 def _dispatch_dp(args: argparse.Namespace) -> None:
     """Route batch/DP generate runs through the router; exits the process."""
+    if args.model_id == "Lightricks/LTX-2" and _platform().name == "cuda":
+        _get_orchestrator(args).refuse_unsupported()
     from difflet.cli.dp import router
     from difflet.cli.dp.requests_io import RequestSpec, load_requests_jsonl
 
@@ -1231,6 +1233,10 @@ def _get_orchestrator(args: argparse.Namespace):
                 f"[difflet] {args.model_id} is not supported on the {platform.display_name} "
                 "backend yet; set DIFFLET_BACKEND=trainium for the staged Neuron path"
             )
+        if spec.model_type == "ltx_2":
+            from difflet.backends.cuda.ltx_2.cli import CudaLtx2Orchestrator
+
+            return CudaLtx2Orchestrator(args, spec)
         return GpuOrchestrator(args, spec)
 
     from difflet.cli.orchestrators.flux import FluxOrchestrator

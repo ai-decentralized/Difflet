@@ -114,7 +114,8 @@ Which features each model supports today. ✅ = supported · ⚠️ = supported 
 ### NVIDIA GPUs
 
 `DIFFLET_BACKEND=cuda`. Each model copy runs on one GPU at tp=1, with no ahead-of-time compile
-step. Verified on RTX PRO 6000 Blackwell (96 GB) and A100 80 GB.
+step. Hardware coverage includes RTX PRO 6000 Blackwell (96 GB), A100 80 GB and B200 180GB;
+see the per-model limits below.
 
 | Model | CLI generation | Serving | `--torch-compile` | TeaCache (fixed cadence) | DP | CFG-parallel | TP / CP / SP | Multi-shape |
 |---|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
@@ -122,6 +123,7 @@ step. Verified on RTX PRO 6000 Blackwell (96 GB) and A100 80 GB.
 | Qwen-Image | ✅ image | ⚠️ image ³ | ✅ | ✅ | ✅ | — ⁴ | ❌ | ❌ |
 | Wan 2.2 | ✅ video | ✅ video | ✅ | ❌ | ⚠️ ⁵ | ✅ ⁶ | ❌ | ❌ |
 | HunyuanVideo (original) | ⚠️ experimental ⁷ | ⚠️ experimental ⁷ | ⚠️ execution observed ⁷ | ❌ | Not measured | — ¹ | ❌ | ❌ |
+| LTX-2 | ⚠️ video, CPU checks ⁸ | ⚠️ video, CPU checks ⁸ | ⚠️ Python qualified ⁸ | ❌ | ❌ | ❌ | ❌ | ❌ |
 
 An option the GPU backend does not support is refused with a message naming it, not ignored.
 TeaCache (adaptive), TAEF1, and `--host-vae` are refused on GPUs for these models.
@@ -141,6 +143,11 @@ TeaCache (adaptive), TAEF1, and `--host-vae` are refused on GPUs for these model
    Eager and compiled Python, CLI and HTTP generation were verified at 320×512×61,
    50 steps on a 96 GB GPU. See the [HunyuanVideo CUDA guide](docs/verification/hunyuanvideo-cuda.md)
    for usage, accuracy and benchmark limits. HunyuanVideo 1.5 is a separate model.
+
+8. LTX-2 single-GPU BF16 Python audiovisual generation passes eager/compiled correctness
+   and performance checks on B200. CLI/HTTP video-only paths have CPU coverage; GPU frontend
+   validation is not claimed. The opt-in profile requires explicit TP=1 and a pre-CUDA startup
+   setting; see the [LTX-2 CUDA guide](docs/verification/ltx2-cuda.md).
 
 Measured timings against stock diffusers, and the full pass/limit matrix, are in
 [docs/verification/gpu-backend-results.md](docs/verification/gpu-backend-results.md).
@@ -301,6 +308,10 @@ image = pipe(
 ).images[0]
 image.save("out.png")
 ```
+
+LTX-2 also has an experimental single-GPU CUDA path with joint audiovisual Python output
+and an opt-in native-compatible BF16 profile. See the [LTX-2 CUDA guide](docs/verification/ltx2-cuda.md)
+for its separate runtime, explicit TP=1/startup requirements and qualified eager/compiled results.
 
 For HunyuanVideo CUDA, pass `parallel=DiffletParallelConfig(tp_degree=1)` explicitly.
 Omitting `parallel` preserves the model-specific registry default, including HunyuanVideo's

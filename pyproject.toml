@@ -64,6 +64,14 @@ cuda = [
     "triton==3.6.0",                              # ships with the torch wheel; pinned for the cache key
     "hf_transfer",                                # fast Hub downloads (54 GB Qwen-Image in ~90 s on the box)
 ]
+# Opt-in LTX-2 official BF16 profile. Install the +cu130 torch wheel first;
+# do not combine with the cuda extra or requirements-cuda.lock.
+ltx2-cuda = [
+    "torch==2.13.0",
+    "triton==3.7.1",
+    "transformers==5.20.1",
+    "hf_transfer",
+]
 dev = [
     "difflet-diffusion[test]",
     "black==26.1.0",

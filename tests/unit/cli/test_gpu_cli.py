@@ -181,6 +181,18 @@ def test_flags_reach_from_pretrained_and_generate(spec, recorder, tmp_path):
 
 
 _REFUSED_VALUES = {
+    "guidance_scale_2": 7.0,
+    "true_cfg_scale": 7.0,
+    "dual_expert": True,
+    "device_vae": True,
+    "vae_in_process": True,
+    "vae_dtype": "fp32",
+    "vae_exec_mode": "compile",
+    "host_text_encoder": True,
+    "text_encoder_dtype": "fp32",
+    "device_text_encoder": True,
+    "exec_mode": "compile",
+    "tp_reduce_dtype": "fp32",
     "shapes": "1024x1024,768x768",
     "teacache_cadence": 2,
     "teacache_speedup": 1.5,

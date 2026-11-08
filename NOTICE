@@ -52,7 +52,7 @@ This product includes software derived from the following third-party projects:
   `scripts/rebase_from_nxdi.py` for the rebase workflow.
 
 ================================================================================
-2. HuggingFace diffusers — extended pattern
+2. HuggingFace diffusers — pipeline extensions and LTX-2 attention
 ================================================================================
 
   Source:  https://github.com/huggingface/diffusers
@@ -61,7 +61,11 @@ This product includes software derived from the following third-party projects:
 
   Difflet subclasses `diffusers.<X>Pipeline` classes (FluxPipeline, WanPipeline,
   HunyuanVideoPipeline, ...) and overrides `__call__` to inject Neuron-compiled
-  backbones. No diffusers source is copied into Difflet.
+  backbones. LTX-2 attention code in
+  difflet/backends/cuda/ltx_2/official_compatibility.py adapts the upstream
+  LTX2VideoTransformer3DModel attention processor under Apache License 2.0.
+  Copyright 2025 The Lightricks team and The HuggingFace Team.
+  The file retains the upstream license header and identifies the adaptation.
 
 ================================================================================
 3. xDiT (xfuser) — design inspiration only, no code
@@ -73,3 +77,16 @@ This product includes software derived from the following third-party projects:
   Difflet's overall positioning (focused DiT inference, Python API + torchrun,
   no scheduler/HTTP) and the registration decorator style are inspired by
   xDiT. No xDiT source code is copied or linked.
+
+================================================================================
+4. vLLM-Omni — LTX one-stage host numerics
+================================================================================
+
+  Source:  https://github.com/vllm-project/vllm-omni
+  License: Apache License 2.0
+  Copyright: Copyright contributors to the vLLM-Omni project.
+
+  difflet/backends/cuda/ltx_2/official.py adapts LTX one-stage schedule,
+  conditioning and BF16 sampler materialization semantics around Difflet's
+  transformer. official_compatibility.py also adapts its BF16 rotary
+  materialization order. These files do not depend on the vLLM-Omni runtime.

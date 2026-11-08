@@ -60,6 +60,20 @@ TINY_CONFIGS = {
         guidance_embeds=True,
         axes_dims_rope=[2, 2, 4],
     ),
+    "ltx_2": dict(
+        in_channels=8,
+        out_channels=8,
+        num_attention_heads=4,
+        attention_head_dim=8,
+        cross_attention_dim=32,
+        audio_in_channels=8,
+        audio_out_channels=8,
+        audio_num_attention_heads=4,
+        audio_attention_head_dim=4,
+        audio_cross_attention_dim=16,
+        caption_channels=24,
+        num_layers=1,
+    ),
     "wan": dict(
         patch_size=[1, 2, 2],
         num_attention_heads=2,
@@ -280,7 +294,10 @@ def test_cfg_parallel_is_refused_without_a_cond_uncond_pair(tmp_path, model):
     if spec.accepts_cfg_parallel:
         assert _build(tmp_path, model, parallel=parallel).parallel is parallel
     else:
-        with pytest.raises(NotImplementedError, match=f"does not apply to {spec.display_name}"):
+        message = (
+            "not implemented" if spec.guidance == "cfg" else f"does not apply to {spec.display_name}"
+        )
+        with pytest.raises(NotImplementedError, match=message):
             _build(tmp_path, model, parallel=parallel)
 
 
