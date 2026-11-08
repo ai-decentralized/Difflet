@@ -261,10 +261,12 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
                       f"(prompt + negative)", flush=True)
 
     def _stage_transformer(self, args: argparse.Namespace) -> None:
-        """TP x CFG x CP ranks: the denoising loop; rank 0 saves the latents. With --quant the
-        pipeline gets the spec the stage flags describe (the driver's: the line carries
-        --tp-degree) and resolves the quantized directory read-only. No stage key would notice
-        a rank that ran the bf16 DiT instead."""
+        """TP x CFG x CP ranks: the denoising loop; rank 0 saves the latents and reports the
+        DiT's resident weight bytes after the load and, on the device, the peak HBM after each
+        request (the memory an MXFP8 run is judged on). With --quant the pipeline gets the spec
+        the stage flags describe (the driver's: the line carries --tp-degree) and resolves the
+        quantized directory read-only. No stage key would notice a rank that ran the bf16 DiT
+        instead."""
         import torch
         import torch.distributed as dist
 
@@ -294,6 +296,7 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
         if rank0:
             print(f"[hv15] transformer load {time.perf_counter() - started:.1f} s "
                   f"{ {k: round(v, 1) for k, v in pipe.dit.phase_seconds.items()} }", flush=True)
+            print(_dit_memory_line(pipe.dit), flush=True)
         if args.stage_mode == "compile":
             return
         from difflet.cli.dp import stage_loop
@@ -318,6 +321,9 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
                     print(f"[hv15] request {req.index}: denoise {marks[-1] - marks[0]:.1f} s, {len(steps)} steps, "
                           f"median {steps_sorted[len(steps) // 2] * 1e3:.0f} ms (first {steps[0] * 1e3:.0f} ms)",
                           flush=True)
+                    peak = _peak_hbm_line(pipe.dit)
+                    if peak is not None:
+                        print(peak, flush=True)
                     torch.save(latents, stage_loop.work_file(args, req, "latents.pt"))
 
     def _stage_vae(self, args: argparse.Namespace) -> None:
@@ -713,3 +719,35 @@ def _aot_write_output(video, out: Path) -> None:
     processor = inspect.getmodule(diffusers.HunyuanVideo15Pipeline).HunyuanVideo15ImageProcessor(vae_scale_factor=16)
     frames = processor.postprocess_video(video, output_type="np")[0]
     export_to_video(list(frames), str(out), fps=_FPS)
+
+
+def _dit_memory_line(dit) -> str:
+    """The transformer stage's report of the DiT's weights on this rank. The bytes are read
+    from the loaded module (every parameter and buffer after ``_after_load``), because an
+    ``nki`` target only gains the kernel's ``[K/4, N]`` scale layout there; the pre-load
+    estimate the HBM check used (``weight_bytes``) omits it, so it is shown beside the
+    resident number, never in its place. The imports stay here: the driver is torch-free at
+    import."""
+    from difflet.backends.neuron.core.application_base import rank_weight_bytes
+    from difflet.backends.neuron.hbm import GIB
+
+    label = "bf16" if dit.quant is None else f"MXFP8 {dit.quant.compute}"
+    resident = rank_weight_bytes(dit.module, dit.dtype)
+    return (f"[hv15] DiT weights per rank: {resident / GIB:.2f} GiB resident "
+            f"({dit.weight_bytes / GIB:.2f} GiB estimated at load), {label}")
+
+
+def _peak_hbm_line(dit) -> str | None:
+    """Rank 0's allocator peak so far against one core's HBM, or None off the device (the CPU
+    has no HBM to report). ``per_core_hbm_bytes`` is imported here, at the call, as is
+    ``torch_neuronx``, which only a neuron rank has."""
+    if dit.device.type != "neuron":
+        return None
+    import torch_neuronx
+
+    from difflet.backends.neuron.hbm import GIB, per_core_hbm_bytes
+
+    peak = torch_neuronx.max_memory_allocated()
+    hbm, _ = per_core_hbm_bytes()
+    return (f"[hv15] peak HBM (rank 0, allocator): {peak / GIB:.2f} GiB of {hbm / GIB:.1f} GiB "
+            f"per core, {(hbm - peak) / GIB:.2f} GiB free")

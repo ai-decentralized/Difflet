@@ -8,10 +8,11 @@ projections, the modulation, the token refiner and the top level stay as they we
 and a spec quantized for another tp are refused. The native path has no stage cache key, so
 what keeps a quantized and a bf16 DiT apart is checked here: their block graphs differ (the
 kernel call per target, which the NEFF cache keys on through the HLO) and so do their
-weight-store entries, by layout as well as by source. The pipeline resolves the quantized
-directory from the bf16 copy (the hub DiT is fp32 and ``difflet compile`` quantizes the copy)
-at the launch's tp, loads the copy without ``quant``, and refuses a launch whose directory
-was never written.
+weight-store entries, by layout as well as by source. The bytes a loaded DiT holds, which the
+transformer stage reports, count the kernel's scale layout that the pre-load estimate omits.
+The pipeline resolves the quantized directory from the bf16 copy (the hub DiT is fp32 and
+``difflet compile`` quantizes the copy) at the launch's tp, loads the copy without ``quant``,
+and refuses a launch whose directory was never written.
 """
 
 from __future__ import annotations
@@ -220,6 +221,42 @@ def test_a_quantized_and_a_bf16_dit_share_no_block_graph_and_no_store_entry(tiny
     assert bf16_app.weight_store.directory != quant_app.weight_store.directory
     bf16_key, quant_key = (_store_key(app) for app in (bf16_app, quant_app))
     assert bf16_key["layout_sha256"] != quant_key["layout_sha256"]
+
+
+def test_resident_bytes_count_the_kernel_layout(snap):
+    """A regression pin on the arithmetic the transformer stage's memory line reports. After
+    ``_after_load`` an ``nki`` target holds its fp8 data packed as int32 ``[K/4, N]`` (N·K
+    bytes), the stored scales (N·K/32) and the kernel's uint8 ``[K/4, N]`` scale layout
+    (N·K/4): 41/32 = 1.28 bytes per weight against bf16's 2. The pre-load estimate
+    (``weight_bytes``) omits the kernel layout, and ``dequant`` keeps a bf16 copy beside the
+    stored scales. ``nk`` is counted on diffusers' own model, not on the application."""
+    from diffusers import HunyuanVideo15Transformer3DModel
+
+    from difflet.backends.neuron.core.application_base import rank_weight_bytes
+
+    def loaded(model_path, quant):
+        app = NeuronHunyuanVideo15TransformerApplication(
+            model_path=model_path, dtype=torch.bfloat16, exec_mode="compile", device="cpu",
+            quant=quant, **TINY_SHAPE_HV15)
+        app.load(skip_warmup=True)
+        return app
+
+    spec = default_spec("hunyuan_video_15", tp_degree=1)
+    with torch.device("meta"):
+        model = HunyuanVideo15Transformer3DModel(**TINY_FP8_HV15)
+    targets = [m for name, m in model.named_modules()
+               if isinstance(m, torch.nn.Linear) and spec.matches(name)]
+    assert len(targets) == N_TARGETS
+    nk = sum(m.weight.numel() for m in targets)
+    bf16 = loaded(snap.copy, None)
+    nki = loaded(snap.quantized[1], spec)
+    dq = loaded(snap.quantized[1], default_spec("hunyuan_video_15", compute="dequant",
+                                                tp_degree=1))
+    bf16_bytes, nki_bytes, dq_bytes = (rank_weight_bytes(app.module, app.dtype)
+                                       for app in (bf16, nki, dq))
+    assert bf16_bytes - nki_bytes == nk * 23 // 32
+    assert nki_bytes - nki.weight_bytes == nk // 4
+    assert dq_bytes - bf16_bytes == nk // 32
 
 
 @pytest.fixture(scope="module")
