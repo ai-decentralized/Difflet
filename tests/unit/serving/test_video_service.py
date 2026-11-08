@@ -193,8 +193,17 @@ class _BlockingFailureRepository(InMemoryVideoJobRepository):
         self.release_failure = threading.Event()
         self._blocked_once = False
 
+    # Takes expires_at like the real repository. Without it, the service calls mark_failed,
+    # gets a TypeError, and calls again without it; a cancellation between the two calls
+    # (the deadline watcher racing the execution task's own timeout) dropped the write.
     def mark_failed(
-        self, video_id, *, error, expected_statuses=("queued", "in_progress"), now=None
+        self,
+        video_id,
+        *,
+        error,
+        expires_at=None,
+        expected_statuses=("queued", "in_progress"),
+        now=None,
     ):
         if error.code == "request_timeout" and not self._blocked_once:
             self._blocked_once = True
@@ -203,6 +212,7 @@ class _BlockingFailureRepository(InMemoryVideoJobRepository):
         return super().mark_failed(
             video_id,
             error=error,
+            expires_at=expires_at,
             expected_statuses=expected_statuses,
             now=now,
         )
@@ -215,11 +225,18 @@ class _BlockAfterFailureRepository(InMemoryVideoJobRepository):
         self.release_failure_return = threading.Event()
 
     def mark_failed(
-        self, video_id, *, error, expected_statuses=("queued", "in_progress"), now=None
+        self,
+        video_id,
+        *,
+        error,
+        expires_at=None,
+        expected_statuses=("queued", "in_progress"),
+        now=None,
     ):
         failed = super().mark_failed(
             video_id,
             error=error,
+            expires_at=expires_at,
             expected_statuses=expected_statuses,
             now=now,
         )
