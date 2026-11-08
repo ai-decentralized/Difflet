@@ -1,9 +1,9 @@
 """The Wan MXFP8 target table against diffusers' own module names, in checkpoint-key spelling
 (``ffn.net.0.proj`` / ``ffn.net.2``, what the neuron application's ``checkpoint_key`` maps its
-``ffn.net_in`` / ``net_out`` to): the attention q/k/v and the FFN are quantized, every output
-projection, the modulation tables, the embedders and the output layer stay bf16, and the
-row-parallel set is what the TP layer shards along K. One table serves Wan 2.1's DiT and both
-experts of Wan 2.2-A14B (one block graph)."""
+``ffn.net_in`` / ``net_out`` to): the cross-attention q/k/v and the FFN are quantized, the
+self-attention q/k/v, every output projection, the modulation tables, the embedders and the
+output layer stay bf16, and the row-parallel set is what the TP layer shards along K. One table
+serves Wan 2.1's DiT and both experts of Wan 2.2-A14B (one block graph)."""
 
 from __future__ import annotations
 
@@ -38,8 +38,9 @@ from tests.unit.backends._neuron_wan_toy import (  # noqa: E402
 #: 128-wide text, so every target's K is a multiple of the MX layout's tile.
 FP8_GEOMETRY = ("attention_head_dim", "ffn_dim", "text_dim")
 
-#: Per block: the q/k/v of the self- and the cross-attention and the two FFN linears.
-TARGETS_PER_BLOCK = 8
+#: Per block: the cross-attention's q/k/v and the two FFN linears (the self-attention's
+#: q/k/v stay bf16 on measurement, difflet/quant/targets.py).
+TARGETS_PER_BLOCK = 5
 
 WAN_IDS = ("Wan-AI/Wan2.1-T2V-14B-Diffusers", "Wan-AI/Wan2.2-T2V-A14B-Diffusers")
 
@@ -55,23 +56,22 @@ def _linears(model):
     return [n for n, m in model.named_modules() if isinstance(m, torch.nn.Linear)]
 
 
-def test_default_targets_cover_every_attention_qkv_and_the_ffn(model):
+def test_default_targets_cover_the_cross_attention_qkv_and_the_ffn_only(model):
     spec = default_spec("wan")
     names = [n for n in _linears(model) if spec.matches(n)]
     per_block = {n.split(".", 2)[2] for n in names}
-    assert per_block == {"attn1.to_q", "attn1.to_k", "attn1.to_v",
-                         "attn2.to_q", "attn2.to_k", "attn2.to_v",
+    assert per_block == {"attn2.to_q", "attn2.to_k", "attn2.to_v",
                          "ffn.net.0.proj", "ffn.net.2"}
     assert len(names) == TARGETS_PER_BLOCK * TINY_FP8_WAN["num_layers"]
     assert all(spec.is_row_parallel(n) == n.endswith(("to_out.0", "ffn.net.2"))
                for n, _ in model.named_modules())
     assert not any(spec.matches(n) for n in (
         "proj_out", "condition_embedder.text_embedder.linear_1", "blocks.0.attn1.to_out.0",
-        "blocks.0.attn2.to_out.0"))
-    # The first default's order: the targets key the quantized directory, so the directories
+        "blocks.0.attn2.to_out.0", "blocks.0.attn1.to_q", "blocks.0.attn1.to_k",
+        "blocks.0.attn1.to_v"))
+    # The 917d087 default's order: the targets key the quantized directory, so the directories
     # written for that set are this one's.
-    assert WAN_TARGETS == (r"blocks\.\d+\.attn1\.(to_q|to_k|to_v)",
-                           r"blocks\.\d+\.attn2\.(to_q|to_k|to_v)",
+    assert WAN_TARGETS == (r"blocks\.\d+\.attn2\.(to_q|to_k|to_v)",
                            r"blocks\.\d+\.ffn\.net\.0\.proj", r"blocks\.\d+\.ffn\.net\.2")
 
 
@@ -102,6 +102,7 @@ def test_every_linear_is_a_target_or_documented_bf16(model):
     kept = default_spec("wan", targets=WAN_KEPT_BF16)
     for name in _linears(model):
         assert target.matches(name) != kept.matches(name), name
+    assert all(kept.matches(f"blocks.0.attn1.{p}") for p in ("to_q", "to_k", "to_v"))
     tables = [n for n, _ in model.named_parameters() if n.endswith("scale_shift_table")]
     assert len(tables) == 1 + TINY_FP8_WAN["num_layers"]
     assert all(kept.matches(n) and not target.matches(n) for n in tables)
