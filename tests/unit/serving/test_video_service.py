@@ -460,14 +460,16 @@ def test_queue_timeout_uses_async_job_and_sync_http_error_channels(
             jobs=jobs,
             artifacts=artifacts,
             max_queued_requests=2,
-            queue_timeout_s=0.02,
+            # The blocker itself must be dispatched within the queue timeout, and the
+            # test process can be starved for tens of ms on a busy CI runner.
+            queue_timeout_s=0.2,
             request_timeout_s=2.0,
             recovery_timeout_s=1.0,
         )
         await service.start()
         try:
             await service.create_async(_request("video_blocker"))
-            await engine.started["video_blocker"].wait()
+            await asyncio.wait_for(engine.started["video_blocker"].wait(), timeout=10.0)
 
             queued = await service.create_async(_request("video_async_queue_timeout"))
             assert queued.status == "queued"
@@ -476,7 +478,7 @@ def test_queue_timeout_uses_async_job_and_sync_http_error_channels(
             )
             await _wait_for_reserved(service, "video_sync_queue_timeout")
 
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.3)  # longer than the queue timeout
             engine.release.set()
 
             failed = await _wait_for_status(
@@ -516,21 +518,24 @@ def test_queued_video_uses_queue_timeout_before_execution_timeout(
             jobs=jobs,
             artifacts=artifacts,
             max_queued_requests=1,
-            queue_timeout_s=0.5,
-            request_timeout_s=0.02,
+            queue_timeout_s=2.0,
+            # The survivor's whole run (staging, a PyAV encode, three thread hops) must
+            # fit in the request timeout once dispatched: about 8 ms idle, far more on a
+            # busy CI runner.
+            request_timeout_s=0.25,
             recovery_timeout_s=1.0,
         )
         await service.start()
         try:
             await service.create_async(
                 _request("video_queue_blocker"),
-                deadline=time.monotonic() + 1.0,
+                deadline=time.monotonic() + 5.0,
             )
-            await engine.started["video_queue_blocker"].wait()
+            await asyncio.wait_for(engine.started["video_queue_blocker"].wait(), timeout=10.0)
 
             queued = await service.create_async(_request("video_queue_survivor"))
             assert queued.status == "queued"
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.3)  # queued for longer than the request timeout
             assert jobs.require("video_queue_survivor").status == "queued"
 
             engine.release.set()
@@ -973,7 +978,9 @@ def test_sync_deadline_expires_while_publication_validation_is_blocked(
             artifacts=artifacts,
             max_queued_requests=1,
             queue_timeout_s=2.0,
-            request_timeout_s=0.1,
+            # Long enough to reach the blocked validation first (an encode and thread
+            # hops), so the deadline expires while validation is blocked.
+            request_timeout_s=1.0,
             recovery_timeout_s=0.02,
         )
         await service.start()
@@ -987,7 +994,7 @@ def test_sync_deadline_expires_while_publication_validation_is_blocked(
             staging_path = item.target.staging_path
 
             with pytest.raises(DiffletServingError) as timed_out:
-                await asyncio.wait_for(generation, timeout=1.0)
+                await asyncio.wait_for(generation, timeout=3.0)
             assert (timed_out.value.status_code, timed_out.value.code) == (
                 504,
                 "request_timeout",
@@ -1079,7 +1086,9 @@ def test_async_deadline_fails_job_while_publication_validation_is_blocked(
             artifacts=artifacts,
             max_queued_requests=1,
             queue_timeout_s=2.0,
-            request_timeout_s=0.1,
+            # Long enough to reach the blocked validation first (an encode and thread
+            # hops), so the deadline expires while validation is blocked.
+            request_timeout_s=1.0,
             recovery_timeout_s=0.02,
         )
         await service.start()
@@ -1093,7 +1102,7 @@ def test_async_deadline_fails_job_while_publication_validation_is_blocked(
 
             failed = await asyncio.wait_for(
                 _wait_for_status(service, "video_async_publish_timeout", "failed"),
-                timeout=1.0,
+                timeout=3.0,
             )
             assert failed.error is not None
             assert (failed.error.code, failed.error.error_type) == (
@@ -1146,7 +1155,8 @@ def test_async_local_publication_claim_survives_s3_past_request_deadline(
             artifacts=artifacts,
             max_queued_requests=1,
             queue_timeout_s=2.0,
-            request_timeout_s=0.2,
+            # Long enough to claim the local MP4 and start the S3 upload first.
+            request_timeout_s=1.0,
             recovery_timeout_s=1.0,
         )
         await service.start()
@@ -1164,7 +1174,7 @@ def test_async_local_publication_claim_survives_s3_past_request_deadline(
             # The original total request deadline expires while S3 is blocked.
             # A valid local MP4 has already won completion and must not be
             # converted to a failed job or removed.
-            await asyncio.sleep(0.25)
+            await asyncio.sleep(1.1)
             in_progress = jobs.require("video_s3_past_deadline")
             assert in_progress.status == "in_progress"
             assert item.deadline_expired is False
@@ -1257,13 +1267,15 @@ def test_deadline_cancels_engine_before_blocking_failure_persistence(
             artifacts=artifacts,
             max_queued_requests=1,
             queue_timeout_s=2.0,
-            request_timeout_s=0.05,
+            # Must expire in the blocked engine, not before it starts: a deadline that
+            # passes during the staging thread hop fails the item without running it.
+            request_timeout_s=0.5,
             recovery_timeout_s=1.0,
         )
         await service.start()
         try:
             await service.create_async(_request(request_id))
-            await engine.started[request_id].wait()
+            await asyncio.wait_for(engine.started[request_id].wait(), timeout=10.0)
             item = service._items[request_id]
             assert await asyncio.to_thread(jobs.failure_entered.wait, 3.0)
 
@@ -1849,7 +1861,9 @@ def test_retention_sweep_clears_active_item_job_slot_ownership(tmp_path, monkeyp
             artifacts=artifacts,
             max_queued_requests=1,
             queue_timeout_s=2.0,
-            request_timeout_s=0.02,
+            # Must expire in the blocked engine, not before it starts: a deadline that
+            # passes during the staging thread hop fails the item without a recovery wait.
+            request_timeout_s=0.5,
             recovery_timeout_s=1.0,
             retention_seconds=1,
             max_jobs=2,
