@@ -50,7 +50,7 @@ from difflet.ops import (
     RMSNorm,
     RowParallelLinear,
     SPMDRank,
-    apply_rotary_emb,
+    apply_rotary_emb_slices,
     attention,
     gather_from_sequence_parallel_region,
     gather_from_tensor_model_parallel_region_with_dim,
@@ -212,7 +212,7 @@ class WanRotaryPosEmbed(nn.Module):
     Mirrors ``diffusers...transformer_wan.WanRotaryPosEmbed`` exactly. The
     forward returns ``(freqs_cos, freqs_sin)``, each shaped
     ``(1, S_tokens, 1, attention_head_dim)``, ready to feed
-    ``difflet.ops.apply_rotary_emb``; with ``layout="half_split"`` the same angles in the
+    ``difflet.ops.apply_rotary_emb_slices``; with ``layout="half_split"`` the same angles in the
     half-split order, for ``apply_rotary_emb_half_split``.
     """
 
@@ -620,9 +620,11 @@ class WanAttention(nn.Module):
 
         if rotary_emb is not None and not self.is_cross_attention:
             cos, sin = rotary_emb
+            # The interleaved law in stride-2 slices on every backend: the neuron backend's
+            # apply_rotary_emb (x @ P) makes two bf16 runs differ on the device.
             rotate = (
                 apply_rotary_emb_half_split if self.rope_layout == "half_split"
-                else apply_rotary_emb
+                else apply_rotary_emb_slices
             )
             q = rotate(q, cos, sin)
             k = rotate(k, cos, sin)

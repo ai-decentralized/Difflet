@@ -45,6 +45,27 @@ def test_neuron_rope_is_bit_identical_to_the_cpu_op(dtype, shape):
     assert torch.equal(ours, ref)
 
 
+def test_the_neuron_backend_slices_op_is_the_cpu_law(monkeypatch):
+    """Wan's interleaved self-attention rotates with the CPU backend's stride-2 law on the device
+    (``x @ P`` made two bf16 Wan runs differ), and ``difflet.ops`` resolves the backend's own op
+    over the fallback; HunyuanVideo's ``apply_rotary_emb`` stays ``x @ P``."""
+    from difflet.backends import registry
+    from difflet.backends.neuron.ops_impl import embeddings as neuron_embeddings
+
+    assert neuron_embeddings.apply_rotary_emb_slices is cpu_rope
+    assert "apply_rotary_emb_slices" in neuron_embeddings.__all__
+    assert neuron_rope is not cpu_rope
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    registry._get_backend_by_name.cache_clear()
+    try:
+        import difflet.ops as ops
+
+        assert ops.apply_rotary_emb_slices is cpu_rope
+        assert ops.apply_rotary_emb is neuron_rope
+    finally:
+        registry._get_backend_by_name.cache_clear()
+
+
 def test_neuron_rope_rotates_each_pair():
     """A hand-checked pair: (x0, x1) -> (x0 c - x1 s, x0 s + x1 c)."""
     x = torch.tensor([[[[1.0, 2.0, 3.0, 4.0]]]])
