@@ -68,10 +68,16 @@ _EXPORTS = {
     "get_tensor_model_parallel_size": ("collectives", "get_tensor_model_parallel_size"),
 }
 
-__all__ = sorted(_EXPORTS)
+# apply_rotary_emb_slices is not in _EXPORTS, the names every backend's ops_impl defines: a backend
+# without it gets its apply_rotary_emb (difflet.ops.embeddings.load_apply_rotary_emb_slices).
+__all__ = sorted([*_EXPORTS, "apply_rotary_emb_slices"])
 
 
 def __getattr__(name: str):
+    if name == "apply_rotary_emb_slices":
+        from difflet.ops.embeddings import load_apply_rotary_emb_slices
+
+        return load_apply_rotary_emb_slices()
     try:
         module_name, attr_name = _EXPORTS[name]
     except KeyError as exc:

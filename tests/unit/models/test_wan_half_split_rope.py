@@ -120,6 +120,48 @@ def test_reordered_model_matches_the_interleaved_model(config):
         assert _max_rel(_output(reordered, inputs), ref) > 1e-3
 
 
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
+def test_slices_op_falls_back_to_the_backends_rotary(monkeypatch, dtype):
+    """A backend without its own stride-2 op (every one but neuron) rotates exactly as before."""
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
+    (cos, sin), _ = _tables(128, (1, 16, 2, 6, 8))
+    gen = torch.Generator().manual_seed(0)
+    x = torch.randn(1, 24, 4, 128, generator=gen).to(dtype)
+    got = ops.apply_rotary_emb_slices(x, cos, sin)
+    assert got.dtype == dtype
+    assert torch.equal(got, ops.apply_rotary_emb(x, cos, sin))
+
+
+def test_wan_interleaved_self_attention_uses_the_slices_op(monkeypatch):
+    """The interleaved self-attention rotates q and k with ``apply_rotary_emb_slices`` (the
+    stride-2 law the neuron backend keeps for it), the half-split one never does, and on the CPU
+    backend the toy is bit for bit what it was with ``apply_rotary_emb``."""
+    from difflet.backends.cpu.ops_impl.embeddings import apply_rotary_emb as cpu_rope
+    from difflet.models.wan import modeling_wan
+
+    slices = modeling_wan.apply_rotary_emb_slices
+    calls = []
+
+    def spy(hidden_states, cos, sin):
+        calls.append(hidden_states.shape)
+        return slices(hidden_states, cos, sin)
+
+    with tp1_mesh():
+        model = tiny_wan_tp1_model()
+        inputs = tiny_wan_inputs()
+        monkeypatch.setattr(modeling_wan, "apply_rotary_emb_slices", cpu_rope)
+        before = _output(model, inputs)
+        monkeypatch.setattr(modeling_wan, "apply_rotary_emb_slices", spy)
+        got = _output(model, inputs)
+        assert len(calls) == 2 * TINY_WAN_TRANSFORMER["num_layers"]
+        assert torch.equal(got, before)
+
+        calls.clear()
+        model.use_half_split_rope_()
+        _output(model, inputs)
+        assert calls == []
+
+
 def test_the_reorder_moves_an_fp8_twins_block_scales_with_its_rows():
     """An MXFP8 twin's q/k carry an fp8 weight and an E8M0 ``weight_scale`` buffer, one row per
     output channel: both move with the rows (each row here holds its own channel's code), and
