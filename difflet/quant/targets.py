@@ -85,21 +85,23 @@ diffusers' class, so its module names are the checkpoint keys and ``checkpoint_k
 identity) runs 54 dual-stream blocks of 2048 (16 heads x 128) with an 8192-wide MLP and no
 single-stream blocks, so no ``proj_out`` to split. A block keeps the image stream (49,290 tokens
 at the default 480x848x121) and the text stream (1,985: the image-embedding, ByT5 and Qwen2.5-VL
-tokens) apart outside the joint attention. The targets are the image q/k/v (``to_q/k/v``, whose
-outputs feed the q/k RMSNorm, the rotary op and the attention kernel), the text q/k/v
-(``add_*_proj``) and both MLPs (``ff``, ``ff_context``): 540 linears, 4.98B of the 8.33B
-parameters (60%). The quantization saves memory, not time: the hub DiT is fp32, so the quantized
-checkpoint is written from the bf16 copy ``compile`` makes, and a target holds 1.28 bytes per
-weight resident against bf16's 2 (fp8, its stored scales and the kernel's scale layout). The
-output projections (``to_out.0``, ``to_add_out``) stay bf16 as above, and so do the per-block
-modulation (``norm1.linear``, ``norm1_context.linear``: 2048 -> 12288, 2.72B parameters, applied
-to one ``[B, D]`` vector), the token refiner (``context_embedder``), the glyph projection
-(``context_embedder_2``), ``image_embedder``, ``time_embed``, ``norm_out`` and ``proj_out``. At
-tp > 1 the MLP-downs (``ff.net.2``, ``ff_context.net.2``, K 8192) are row-parallel with a K per
-rank of 8192 / tp, whole 512-wide kernel tiles at every tp the 16 heads allow (512 at tp 16), so
-the default set refuses no tp. The output projections (K 2048) and the token refiner's
-``attn.to_out.0`` and ``ff.net.2`` are row layers too: the row-parallel set names them for
-overrides, as HunyuanVideo's does (``to_out.0`` has 256 per rank at tp 8, a partial tile).
+tokens) apart outside the joint attention. The table holds one pattern per device-bisection
+group: G1 the image q/k/v (``to_q/k/v``, whose outputs feed the q/k RMSNorm, the rotary op and
+the attention kernel) and G3 the image MLP (``ff``): 270 linears, 2.49B of the 8.33B parameters
+(30%). The text stream's q/k/v (G2, ``add_*_proj``) and MLP (G4, ``ff_context``) stay bf16:
+with them the step ran 2.7x bf16's (the table comment below). The quantization saves memory,
+not time: the hub DiT is fp32, so the quantized checkpoint is written from the bf16 copy
+``compile`` makes, and a target holds 1.28 bytes per weight resident against bf16's 2 (fp8, its
+stored scales and the kernel's scale layout). The output projections (``to_out.0``,
+``to_add_out``) stay bf16 as above, and so do the per-block modulation (``norm1.linear``,
+``norm1_context.linear``: 2048 -> 12288, 2.72B parameters, applied to one ``[B, D]`` vector),
+the token refiner (``context_embedder``), the glyph projection (``context_embedder_2``),
+``image_embedder``, ``time_embed``, ``norm_out`` and ``proj_out``. At tp > 1 the image MLP-down
+(``ff.net.2``, K 8192) is row-parallel with a K per rank of 8192 / tp, whole 512-wide kernel
+tiles at every tp the 16 heads allow (512 at tp 16), so the default set refuses no tp. The text
+MLP-down (``ff_context.net.2``, the same K), the output projections (K 2048) and the token
+refiner's ``attn.to_out.0`` and ``ff.net.2`` are row layers too: the row-parallel set names them
+for overrides, as HunyuanVideo's does (``to_out.0`` has 256 per rank at tp 8, a partial tile).
 
 Patterns are regexes full-matched against diffusers' module names (the ``transformer.`` trace
 prefix is stripped by :meth:`QuantSpec.matches`).
@@ -312,20 +314,35 @@ HUNYUAN_VIDEO_ROW_PARALLEL: tuple[str, ...] = (
     r"context_embedder\.token_refiner\.refiner_blocks\.\d+\.(attn\.to_out\.0|ff\.net\.2)",
 )
 
-# HunyuanVideo-1.5 (diffusers' HunyuanVideo15Transformer3DModel names, the checkpoint keys): the
-# dual-stream blocks' image and text q/k/v and both MLPs. A memory saving by decision (the
-# 480p_t2v DiT is 16.65 GB in bf16, 13.07 GB resident with these quantized); the device default
-# set is chosen by bisection only if this one runs slower than bf16.
+# HunyuanVideo-1.5 (diffusers' HunyuanVideo15Transformer3DModel names, the checkpoint keys): one
+# pattern per device-bisection group in G order, G1 the image q/k/v and G3 the image MLP, the
+# strings F6's arms carried in DIFFLET_QUANT_TARGETS (they key the quantized directory, so the
+# default resolves those arms'). A memory saving by decision (the 480p_t2v DiT is 16.65 GB in
+# bf16, 14.86 GB resident with these quantized). Measured (trn3, tp2 x CFG2, 50 steps, seed 42;
+# docs/plans/2026-11-07-mxfp8-hunyuan-video-15.md, F6 Step 7): at 480x848x9 the step is 557 ms
+# in bf16 and 1528 with both streams' q/k/v and MLPs (G2 the text q/k/v, G4 the text MLP). Each
+# group alone is at or below bf16 (G1 546, G2 554, G3 528, G4 556 ms), but the slowdowns do not
+# add up: G1 + G2 + G3 is 1514 and G1 + G3 511. At 480x848x121 this set runs 10,314 / 10,313 ms
+# against 10,241 in bf16 (1.007x, the two runs bit-identical), 6.97 against 7.80 GiB of DiT
+# weights per rank, peak HBM 9.21 + 8.45 GiB (allocator + runtime) against 10.04 + 7.52. The clip
+# is 12.76 dB / SSIM 0.190 from bf16, against a chaotic bf16 floor of 15.90 / 0.312 (tp4 against
+# tp2; the frames show the same composition): the floor-relative screen fails on SSIM (0.190
+# against 0.212), and quality is pending phase G (diffusers on the CPU in fp32). The plan never
+# makes a set that fails the screen the default; this one is the user's decision (2026-11-08,
+# option A), taken with these numbers.
 HUNYUAN_VIDEO_15_TARGETS: tuple[str, ...] = (
-    rf"{_BLOCK}\.attn\.(to_q|to_k|to_v|add_q_proj|add_k_proj|add_v_proj)",
-    rf"{_BLOCK}\.(ff|ff_context)\.net\.0\.proj",
-    rf"{_BLOCK}\.(ff|ff_context)\.net\.2",
+    rf"{_BLOCK}\.attn\.(to_q|to_k|to_v)",  # G1 image q/k/v
+    rf"{_BLOCK}\.ff\.net\.(0\.proj|2)",  # G3 image MLP
 )
 
-#: HunyuanVideo-1.5 modules a reader may expect quantized that are deliberately not: the
-#: output projections, the modulation, the token refiner and the glyph, image and time
-#: embedders, and the output layer.
+#: HunyuanVideo-1.5 modules a reader may expect quantized that are deliberately not: the text
+#: stream's q/k/v and MLP (G2, G4, for speed: the bisection above dropped G4 when all four
+#: groups ran 1528 ms against bf16's 557, then G2 when G1 + G2 + G3 still ran 1514, 2.7x
+#: bf16's, against 511 without it), the output projections, the modulation, the token refiner
+#: and the glyph, image and time embedders, and the output layer.
 HUNYUAN_VIDEO_15_KEPT_BF16: tuple[str, ...] = (
+    rf"{_BLOCK}\.attn\.(add_q_proj|add_k_proj|add_v_proj)",
+    rf"{_BLOCK}\.ff_context\.net\.(0\.proj|2)",
     rf"{_BLOCK}\.attn\.(to_out\.0|to_add_out)",
     rf"{_BLOCK}\.norm1(_context)?\.linear",
     r"context_embedder\..*",

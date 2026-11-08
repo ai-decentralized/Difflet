@@ -46,8 +46,9 @@ def add_quant_flags(p: argparse.ArgumentParser) -> None:
         "cache dir; the output projections, modulation, embedders and the output layer stay "
         "bf16 (except the single-stream output projection of FLUX and HunyuanVideo, quantized "
         "as its attention and MLP halves; LTX-2: its audio stream too; HunyuanVideo: its image "
-        "q/k/v too). Qwen-Image, FLUX.1-dev, LTX-2, Wan 2.1, Wan 2.2-A14B (both experts), "
-        "HunyuanVideo and HunyuanVideo-1.5 (measured slower than bf16; see the evidence).",
+        "q/k/v too; HunyuanVideo-1.5: its text stream too). Qwen-Image, FLUX.1-dev, LTX-2, "
+        "Wan 2.1, Wan 2.2-A14B (both experts), HunyuanVideo and HunyuanVideo-1.5 (measured "
+        "slower than bf16; see the evidence).",
     )
     p.add_argument(
         "--quant-compute",
