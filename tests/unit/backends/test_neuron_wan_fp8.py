@@ -95,10 +95,13 @@ def _reference(transformer_dir, spec: QuantSpec) -> torch.Tensor:
         return model(*tiny_wan_inputs(config=TINY_FP8_WAN), return_dict=False)[0]
 
 
-def _train_qk_norms(transformer_dir: Path) -> None:
-    """Per-channel self-attention q/k norm weights, as a checkpoint has: the toy writes them as
-    ones, which the half-split reorder leaves as they are, so a reorder that missed them (or a
-    rank that sliced the wrong heads of them) would go unseen."""
+def _train_self_attention_qk(transformer_dir: Path) -> None:
+    """Per-channel self-attention q/k norm weights and q/k rows of unlike magnitude, as a
+    checkpoint has. The toy writes the norm weights as ones and q/k rows of one magnitude (one
+    E8M0 block scale for every row), which the half-split reorder leaves as they are, so a
+    reorder that missed the norms or the block scales (or a rank that sliced the wrong heads of
+    them) would go unseen. A power-of-two factor per row keeps each row's fp8 codes and moves
+    its block scale only."""
     from safetensors.torch import load_file, save_file
 
     path = transformer_dir / "diffusion_pytorch_model.safetensors"
@@ -106,6 +109,9 @@ def _train_qk_norms(transformer_dir: Path) -> None:
     gen = torch.Generator().manual_seed(7)
     for key in sorted(k for k in state if ".attn1.norm_q." in k or ".attn1.norm_k." in k):
         state[key] = 0.5 + torch.rand(state[key].shape, generator=gen)
+    for key in (k for k in state if k.endswith((".attn1.to_q.weight", ".attn1.to_k.weight"))):
+        rows = state[key].shape[0]
+        state[key] = state[key] * (2.0 ** (torch.arange(rows) % 4))[:, None]
     save_file(state, str(path))
 
 
@@ -114,7 +120,7 @@ def tiny(tmp_path_factory):
     root = tmp_path_factory.mktemp("tiny_wan_fp8")
     write_tiny_wan_model(root, config=TINY_FP8_WAN)
     transformer_dir = root / "transformer"
-    _train_qk_norms(transformer_dir)
+    _train_self_attention_qk(transformer_dir)
     spec = default_spec("wan", compute="dequant", tp_degree=1)
     quantized = prepare_quantized_checkpoint(transformer_dir, spec, create=True,
                                              cache_root=root / "cache")
@@ -229,7 +235,9 @@ def test_the_dequant_path_uses_the_same_layout(tiny):
     reordered rows. The kernel path's packed q/k are the kernel layout of the directory's fp8
     rows and block scales in the half-split order, so the reorder ran before the packing; it
     loads without its warm-up forward, since the kernel needs the Neuron SDK. The dequant
-    path's output is the interleaved reference's."""
+    path's output is the interleaved reference's. The fixture's q/k rows differ in block scale
+    within a head, so scales left in the checkpoint's order fail this test, the tp2 case and
+    every reference match whose set quantizes them."""
     from safetensors.torch import load_file
 
     assert tiny.spec.compute == "dequant"
@@ -247,10 +255,11 @@ def test_the_dequant_path_uses_the_same_layout(tiny):
     for i, block in enumerate(kernel.module.blocks):
         for proj in ("to_q", "to_k"):
             weight = stored[f"blocks.{i}.attn1.{proj}.weight"]
+            scale = stored[f"blocks.{i}.attn1.{proj}.weight_scale"]
             perm = half_split_index(weight.shape[0], head_dim)
-            data, scales = mx.kernel_layout(
-                weight.index_select(0, perm),
-                stored[f"blocks.{i}.attn1.{proj}.weight_scale"].index_select(0, perm))
+            assert not torch.equal(scale.index_select(0, perm), scale), (i, proj)
+            data, scales = mx.kernel_layout(weight.index_select(0, perm),
+                                            scale.index_select(0, perm))
             twin = getattr(block.attn1, proj)
             assert torch.equal(twin.weight_packed, data), (i, proj)
             assert torch.equal(twin.weight_scales_hw, scales), (i, proj)
@@ -278,10 +287,11 @@ def test_tp2_matches_the_reference(tiny, tmp_path):
 
 
 def test_a_weight_store_hit_is_reordered_once(tiny, tmp_path, monkeypatch):
-    """The load writes the weight store before the reorder, which replaces the loaded tensors
-    rather than editing them: the store keeps the checkpoint's order, so the next application
-    reading it reorders the rows once, as the first did, and computes the same output; a
-    second ``load()`` of a loaded application changes nothing."""
+    """The weight store is written while the checkpoint loads, before the reorder, so it keeps
+    the checkpoint's order: the next application reading it reorders the rows once, as the
+    first did, and computes the same output (a store written after the reorder would be
+    reordered twice and miss the reference). A second ``load()`` of a loaded application
+    returns at once, and its module, in the half-split layout already, reorders nothing."""
     monkeypatch.setenv("DIFFLET_NEURON_WEIGHT_STORE", str(tmp_path / "store"))
     monkeypatch.setenv("DIFFLET_NEURON_WEIGHT_STORE_ALL", "1")  # an fp32 toy saves nothing
     inputs = tiny_wan_inputs(config=TINY_FP8_WAN)
@@ -295,6 +305,7 @@ def test_a_weight_store_hit_is_reordered_once(tiny, tmp_path, monkeypatch):
     out = second(*inputs)
     assert torch.equal(out, first(*inputs))
     second.load()
+    assert second.module.use_half_split_rope_() == 0
     assert torch.equal(second(*inputs), out)
     torch.testing.assert_close(out, tiny.reference, atol=1e-4, rtol=1e-4)
 

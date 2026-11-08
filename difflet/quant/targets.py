@@ -235,12 +235,12 @@ LTX_2_ROW_PARALLEL: tuple[str, ...] = (
 # docs/plans/2026-11-08-mxfp8-wan-half-split-rope.md): 330.7 ms per step against 431.9 in bf16
 # (0.77x; the block 8.05 ms against 10.67), and 387.3 ms (0.90x) with the self-attention q/k/v
 # in bf16. Only in the half-split rotary layout: the interleaved rotary's pair swap on q/k from
-# the MXFP8 kernel moved 2-byte elements (1480 DMA descriptors, 87.8 ms per block; the step
-# 2263 ms), where on q/k from a bf16 matmul it moves 256-byte head rows (240, 0.04 ms). So
-# when any self-attention q or k is quantized, the neuron application reorders every
-# self-attention's q/k channels at load and rotates contiguous halves
-# (``WanTransformer3DModel.use_half_split_rope_``); bf16 q/k keep the interleaved layout,
-# which is faster for them (483.6 ms in the half split).
+# the MXFP8 kernel moved 2-byte elements (1480 DMA instructions per block, overlapping, their
+# durations summed to 87.8 ms; the block 56.89 ms, the step 2263 ms), where on q/k from a bf16
+# matmul it moves 256-byte head rows (240, summed to 0.04 ms). So when any self-attention q or
+# k is quantized, the neuron application reorders every self-attention's q/k channels at load
+# and rotates contiguous halves (``WanTransformer3DModel.use_half_split_rope_``); bf16 q/k keep
+# the interleaved layout, which is faster for them (483.6 ms in the half split).
 _WAN_BLOCK = r"blocks\.\d+"
 
 WAN_TARGETS: tuple[str, ...] = (
