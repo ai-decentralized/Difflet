@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """HunyuanVideo-1.5's CPU fp32 reference (phase G): diffusers' HunyuanVideo15Pipeline with every
 component in fp32 on the host CPU, at the settings and from the initial noise of the 9-frame
-device runs ``score.py`` scores against it (hv15's bf16_9 and u3, the shipped MXFP8 default).
+device runs ``score.py`` scores against it (hv15's bf16_9 and nod4's mx, the shipped MXFP8
+default on the tree without D4).
 
 Every constant is copied from the phase G research object for HunyuanVideo-1.5
 (``/home/ubuntu/fp8-bench/phase_g_research.json``). What makes this the device's run rather than
@@ -42,8 +43,8 @@ import torch
 from scripts.fp32_ref._common import (DEVICE_FPS, device_noise, require_fp32_math, save_run,
                                       set_threads, tensor_md5)
 
-# research device_settings, from the arms' launch scripts (hv15/run_f6a.sh's bf16_9, run_g.sh's
-# u3) and the transformer stage's defaults for what they leave out.
+# research device_settings, from the arms' launch scripts (hv15/run_f6a.sh's bf16_9,
+# run_nod4.sh's mx) and the transformer stage's defaults for what they leave out.
 MODEL_ID = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
 #: refs/main, the only local snapshot: the runs passed no --revision (gena.log's weight store).
 REVISION = "286be7ce72277246578a3e3cc2487e95ddae5bcf"

@@ -7,6 +7,7 @@ and its latents layout and clip format against the device files. No model is loa
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import inspect
 from pathlib import Path
@@ -63,16 +64,19 @@ def test_settings_are_the_transformer_stages():
     assert ref.NEGATIVE_PROMPT == ""  # _stage_encode: ``req.negative_prompt or ""``
 
 
-@pytest.mark.parametrize("script, arm", [("run_f6a.sh", "gen bf16_9 a 0 --num-frames 9"),
-                                         ("run_g.sh", "--num-frames 9 --quant mxfp8")])
-def test_settings_are_the_device_command_lines(script, arm):
-    """Both arms' launch scripts (bf16_9; u3, the shipped MXFP8 default): the model, steps, seed,
-    prompt and 9 frames, and none of the flags the reference leaves at the stage defaults."""
+@pytest.mark.parametrize("script, markers", [
+    ("run_f6a.sh", ("gen bf16_9 a 0 --num-frames 9",)),
+    ("run_nod4.sh", ("--num-frames 9)", "Q=(--quant mxfp8)", "unset DIFFLET_QUANT_TARGETS")),
+])
+def test_settings_are_the_device_command_lines(script, markers):
+    """Both arms' launch scripts (bf16_9; nod4's mx, the shipped MXFP8 default on the tree without
+    D4, so no target override): the model, steps, seed, prompt and 9 frames, and none of the
+    flags the reference leaves at the stage defaults."""
     path = _RUNS / script
     if not path.is_file():
         pytest.skip(f"no device run script {path} on this host")
     text = path.read_text()
-    assert f"--model-id {ref.MODEL_ID}" in text and arm in text
+    assert f"--model-id {ref.MODEL_ID}" in text and all(m in text for m in markers)
     assert f'--steps {ref.STEPS} --seed {ref.SEED} --prompt "{ref.PROMPT}"' in text
     for flag in ("--height", "--width", "--guidance-scale", "--negative-prompt", "--revision"):
         assert flag not in text
@@ -137,6 +141,21 @@ def test_latents_layout_is_the_device_files(arm):
         pytest.skip(f"no device latents {path} on this host")
     device = torch.load(path, weights_only=True)
     assert type(device) is torch.Tensor and tuple(device.shape) == ref.LATENT_SHAPE
+
+
+#: The 9-frame clips of the tree that ships (F7 reverted D4, ``dd3eed2``; ``nod4/summary.txt``):
+#: bf16 is the same clip with D4 or without (``bf16_9`` = ``nod4/bf16_gena.mp4``), the MXFP8
+#: default is not (``u3``'s ``222a660d…`` is the same set and directory with D4's rotary).
+_SHIPPED_MD5 = {"bf16": "9ab6e81c5613651def4bb391d2f6da01",
+                "mx": "7a9ddae792a5e728b2affc880851d3fa"}
+
+
+@pytest.mark.parametrize("arm", ["bf16", "mx"])
+def test_device_clips_are_the_shipped_trees(arm):
+    path = score.BENCH / score.DEVICE_OUTPUTS["hunyuan_video_15"][arm]["output"]
+    if not path.is_file():
+        pytest.skip(f"no device clip {path} on this host")
+    assert hashlib.md5(path.read_bytes()).hexdigest() == _SHIPPED_MD5[arm]
 
 
 @pytest.mark.parametrize("arm", ["bf16", "mx"])
