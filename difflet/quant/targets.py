@@ -53,12 +53,13 @@ HunyuanVideo 1.0 (diffusers' ``HunyuanVideoTransformer3DModel`` names, which the
 keeps and the checkpoint uses) runs 20 dual-stream and 40 single-stream blocks of 3072 (24 heads
 x 128) with a 12288-wide MLP. A dual block keeps the image stream (10,240 tokens at the default
 320x512x61, 118,800 at 720x1280x129) and the text stream (256 tokens) apart outside the joint
-attention; a single block runs both as one sequence. The targets are FLUX's, one pattern per
-device-bisection group: the dual blocks' image q/k/v (``to_q/k/v``, whose outputs feed the q/k
-RMSNorm, the rotary op and the attention kernel), text q/k/v (``add_*_proj``: 256 rows) and both
-MLPs (``ff`` on the image rows, ``ff_context`` on the 256 text rows), and the single blocks'
-joint q/k/v, MLP-up (``proj_mlp``) and output projection's two halves, each on the image and
-text rows together. Every column target has K 3072. The dual blocks' output projections stay
+attention; a single block runs both as one sequence. The table started as FLUX's, one pattern
+per device-bisection group (G1 the dual blocks' image q/k/v, whose outputs feed the q/k RMSNorm,
+the rotary op and the attention kernel; G2 their text q/k/v, 256 rows; G3 / G4 the image and
+text MLPs; G5 the single blocks' joint q/k/v; G6 their MLP-up ``proj_mlp``; G7 their output
+projection's two halves). The device's leave-one-out kept G1 and G5 bf16 for quality (the table
+comment below), so the default targets are the text q/k/v, both dual MLPs, ``proj_mlp`` and the
+``proj_out`` halves. Every column target has K 3072. The dual blocks' output projections stay
 bf16 as above, and so do the per-block modulation (``norm1.linear``, ``norm1_context.linear``,
 ``norm.linear``: applied to one ``[B, D]`` vector, as Qwen-Image's), the token refiner
 (``context_embedder``: its own attention and MLP on the text, before the blocks), the
