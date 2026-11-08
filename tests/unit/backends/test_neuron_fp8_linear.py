@@ -50,6 +50,11 @@ def _fill(layer, weight: torch.Tensor) -> None:
     with torch.no_grad():
         layer.weight.copy_(q)
         layer.weight_scale.copy_(s)
+        # The layers allocate the bias with torch.empty (a checkpoint fills it). Left as
+        # is, it holds whatever the allocator hands back, NaN included, and NaN != NaN
+        # fails the exact comparisons. A fixed ramp keeps the bias add tested.
+        if layer.bias is not None:
+            layer.bias.copy_(torch.linspace(-0.5, 0.5, layer.bias.numel()))
 
 
 # ------------------------------------------------------------------- construction
