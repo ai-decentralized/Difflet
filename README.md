@@ -208,7 +208,7 @@ Context parallelism (`--cp-degree > 1`) and CFG-parallel both consume the data-p
   - **AWS Trainium2.** Validated on `trn2.3xlarge`: one Trainium2 chip presented as 4
     logical NeuronCores under the default `LNC=2`. Other Trn2 shapes should work; the
     tensor-parallel degree must divide the number of visible cores.
-- Python 3.10 or newer.
+- Python 3.11 or newer.
 - A Hugging Face account with access to the gated FLUX.1-dev repo, if you want Flux.
 - Disk: weights are large (LTX-2 alone is 86 GB). On Trainium, compiled artifacts add tens of
   GB.

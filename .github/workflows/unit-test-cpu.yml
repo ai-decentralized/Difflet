@@ -63,12 +63,6 @@ jobs:
             pytest-args: --ignore=tests/unit/backends/test_neuron_e2e_pins.py
             python-version: "3.14"
             lock: requirements-neuron-native.lock
-          # The minimum supported Python. No lock installs on 3.10 (all three pin
-          # av==18.1.0, which needs Python >= 3.11), so this job takes the newest
-          # versions that still support 3.10.
-          - stack: min-python
-            python-version: "3.10"
-            lock: ""
     steps:
       - uses: actions/checkout@v4
 
@@ -84,12 +78,7 @@ jobs:
       - name: Constraints from the stack's lock
         env:
           LOCK: ${{ matrix.lock }}
-        run: |
-          if [ -n "$LOCK" ]; then
-            sed -E -e '/ @ /d' -e 's/\+(cpu|cu[0-9]+)$//' "$LOCK" > "$RUNNER_TEMP/constraints.txt"
-          else
-            : > "$RUNNER_TEMP/constraints.txt"
-          fi
+        run: sed -E -e '/ @ /d' -e 's/\+(cpu|cu[0-9]+)$//' "$LOCK" > "$RUNNER_TEMP/constraints.txt"
 
       # CPU wheels only: PyPI's torch is the multi-GB CUDA build. PyPI stays as an extra
       # index for torch's own dependencies at their locked versions.

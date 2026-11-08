@@ -16,7 +16,7 @@ performance work are all welcome.
 
 Most development does not need accelerator hardware. Difflet ships a torch-native CPU
 reference backend, and the unit suite runs on a plain CPU host. CI uses `ubuntu-latest`
-with Python 3.10–3.12:
+with one job per production stack (Python 3.11, 3.12 and 3.14):
 
 ```bash
 git clone https://github.com/ai-decentralized/Difflet.git
