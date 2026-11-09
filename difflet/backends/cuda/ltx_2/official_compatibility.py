@@ -1,5 +1,4 @@
 # SPDX-License-Identifier: Apache-2.0
-# SPDX-FileCopyrightText: Copyright contributors to the vLLM-Omni project
 # Copyright 2025 The Lightricks team and The HuggingFace Team.
 # All rights reserved.
 #
@@ -15,12 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Adapted attention and BF16 rotary operations for the opt-in LTX-2 CUDA profile.
+# Adapted attention processor for the opt-in LTX-2 CUDA profile.
 """Opt-in native LTX-2 connector arithmetic and startup BLAS policy.
 
-Attention follows Diffusers' LTX-2 processor; BF16 rotary arithmetic follows
-vLLM-Omni's LTX-2 implementation. Both upstream implementations are Apache-2.0.
-Only the opt-in profile configures this startup policy and replaces its processors.
+The attention processor adapts Diffusers' LTX-2 processor (Apache-2.0); its BF16
+rotary arithmetic is Difflet's own (``rotary.py``). Only the opt-in profile configures
+this startup policy and replaces its processors.
 """
 
 from __future__ import annotations
@@ -32,6 +31,8 @@ from diffusers.models.transformers.transformer_ltx2 import (
     LTX2AudioVideoAttnProcessor,
     dispatch_attention_fn,
 )
+
+from .rotary import apply_official_rotary
 
 _WORKSPACE_CONFIG = ":4096:8"
 
@@ -49,35 +50,6 @@ def prepare_official_runtime() -> None:
             f"ltx_official_bf16 requires CUBLAS_WORKSPACE_CONFIG={_WORKSPACE_CONFIG} exported "
             "before the process starts"
         )
-
-
-def apply_official_rotary(x, freqs, *, rope_type, head_dim):
-    """Retain native BF16 coefficient, multiply and addcmul materialization."""
-    cos, sin = (value.to(x.dtype) for value in freqs)
-    if rope_type == "interleaved":
-        real, imag = x.unflatten(2, (x.shape[2] // 2, 2)).unbind(-1)
-        rotated = torch.stack((-imag, real), dim=-1).flatten(2)
-        return x * cos + rotated * sin
-    if rope_type != "split":
-        raise ValueError(f"Unsupported LTX-2 rotary layout: {rope_type}")
-    reshape = x.ndim != 4 and cos.ndim == 4
-    if reshape:
-        batch = x.shape[0]
-        _, heads, tokens, _ = cos.shape
-        x = x.reshape(batch, tokens, heads, head_dim).swapaxes(1, 2)
-    last = x.shape[-1]
-    if last % 2:
-        raise ValueError("LTX-2 split rotary requires an even head dimension")
-    split = x.reshape(*x.shape[:-1], 2, last // 2)
-    first, second = split[..., :1, :], split[..., 1:, :]
-    cos, sin = cos.unsqueeze(-2), sin.unsqueeze(-2)
-    out = split * cos
-    out[..., :1, :].addcmul_(-sin, second)
-    out[..., 1:, :].addcmul_(sin, first)
-    out = out.reshape(*out.shape[:-2], last)
-    if reshape:
-        out = out.swapaxes(1, 2).reshape(batch, tokens, heads * head_dim)
-    return out
 
 
 class OfficialLtx2AttentionProcessor(LTX2AudioVideoAttnProcessor):

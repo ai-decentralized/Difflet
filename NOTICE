@@ -77,16 +77,3 @@ This product includes software derived from the following third-party projects:
   Difflet's overall positioning (focused DiT inference, Python API + torchrun,
   no scheduler/HTTP) and the registration decorator style are inspired by
   xDiT. No xDiT source code is copied or linked.
-
-================================================================================
-4. vLLM-Omni — LTX one-stage host numerics
-================================================================================
-
-  Source:  https://github.com/vllm-project/vllm-omni
-  License: Apache License 2.0
-  Copyright: Copyright contributors to the vLLM-Omni project.
-
-  difflet/backends/cuda/ltx_2/official.py adapts LTX one-stage schedule,
-  conditioning and BF16 sampler materialization semantics around Difflet's
-  transformer. official_compatibility.py also adapts its BF16 rotary
-  materialization order. These files do not depend on the vLLM-Omni runtime.
