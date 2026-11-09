@@ -31,6 +31,7 @@ import torch
 
 from difflet.quant import mx
 from difflet.quant.spec import QuantSpec
+from difflet.quant.targets import HUNYUAN_VIDEO_15_GROUPS, default_spec
 
 TINY_FP8_HV15 = dict(in_channels=9, out_channels=4, num_attention_heads=4, attention_head_dim=32,
                      num_layers=2, num_refiner_layers=1, mlp_ratio=4.0, patch_size=1,
@@ -42,13 +43,22 @@ TINY_FP8_HV15 = dict(in_channels=9, out_channels=4, num_attention_heads=4, atten
 TINY_SHAPE_HV15 = dict(height=32, width=48, num_frames=5, text_seq_len=16, text_2_seq_len=8,
                        image_tokens=9)
 _LATENT = (2, 2, 3)
-#: The default targets per dual-stream block: the image stream's q/k/v and MLP.
+#: The set the device measured (G1 + G3, the image stream's q/k/v and MLP), the default until
+#: Task F8 and an override since (HunyuanVideo-1.5 has no default set): its strings in table
+#: order, as ``DIFFLET_QUANT_TARGETS`` joins them, so it resolves the device arms' directory.
+HV15_MEASURED_TARGETS = (HUNYUAN_VIDEO_15_GROUPS["G1"], HUNYUAN_VIDEO_15_GROUPS["G3"])
+#: The measured set's targets per dual-stream block.
 TINY_TARGETS_PER_BLOCK = {"attn.to_q", "attn.to_k", "attn.to_v", "ff.net.0.proj", "ff.net.2"}
 #: The factor on the first half of K of both MLP-downs.
 ROW_K_SPREAD = 2.0 ** -14
-#: The row-parallel target the tests read back: the image MLP-down, the default set's only one.
+#: The row-parallel target the tests read back: the image MLP-down, the measured set's only one.
 HV15_ROW_TARGETS = ("transformer_blocks.0.ff.net.2",)
 _ROW_TARGET = r"transformer_blocks\.\d+\.(ff|ff_context)\.net\.2"
+
+
+def hv15_spec(**overrides) -> QuantSpec:
+    """The HunyuanVideo-1.5 spec of the measured set (``HV15_MEASURED_TARGETS``)."""
+    return default_spec("hunyuan_video_15", targets=HV15_MEASURED_TARGETS, **overrides)
 
 
 def tiny_hv15_inputs(*, seed: int = 1, valid_text: int = 6) -> dict[str, torch.Tensor]:
