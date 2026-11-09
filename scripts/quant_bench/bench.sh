@@ -31,6 +31,13 @@ PY=${PY:-$HOME/venvs/native-fp8/bin/python}
 export PATH=/opt/aws_neuronx_venv_torch_neuronx_2_14_0/bin:$PATH
 export HF_HUB_OFFLINE=1
 unset DIFFLET_QUANT_TARGETS
+# A shell's cache locations win over --cache-dir (an exported DIFFLET_COMPILE_CACHE wins,
+# difflet/cli/orchestrators/torchrun.py root_compile_cache_at_cache_dir; set TORCH_NEURONX_*
+# locations are kept verbatim, difflet/backends/neuron/compile.py), so a "fresh" compile would
+# reuse their NEFFs, bf16 copies and quantized directories: every arm's caches root at its own
+# --cache-dir instead, as on a host without them.
+unset DIFFLET_COMPILE_CACHE TORCH_NEURONX_NEFF_CACHE_DIR TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR \
+  TORCH_NEURONX_HLO_CACHE_DIR TORCHINDUCTOR_CACHE_DIR
 
 CORES= CPUS=
 while [ $# -gt 0 ]; do
@@ -143,6 +150,7 @@ for key in "$@"; do
     mark "$key $arm compile"
     if timed "$W/compile.log" env "${QENV[@]}" "$PY" -m difflet.cli.main compile --backend neuron \
         "${M[@]}" "${QF[@]}" --cache-dir "$C"; then
+      if [ ! -d "$C/neuron" ]; then mark "$key $arm WARNING: the compile cache is not under $C"; fi
       for i in 1 2; do
         mark "$key $arm cold_$i"
         keep=(); if [ $i = 1 ]; then keep=("${KEEP[@]}"); fi
