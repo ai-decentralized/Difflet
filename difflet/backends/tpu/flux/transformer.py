@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from pathlib import Path
 
@@ -15,6 +16,15 @@ from difflet.backends.tpu.ops_impl import parallel_mesh
 from difflet.pipeline.parallel_mesh import MeshSpec
 
 logger = logging.getLogger(__name__)
+
+#: ``0`` keeps diffusers' interleaved-pair RoPE; otherwise q/k head channels are
+#: permuted at load for the relayout-free split-halves form (``rope.py``).
+SPLIT_ROPE_ENV = "DIFFLET_TPU_FLUX_SPLIT_ROPE"
+
+
+def _split_rope_enabled() -> bool:
+    return os.environ.get(SPLIT_ROPE_ENV, "1").strip().lower() not in {"0", "false", "no"}
+
 
 _SINGLE_PROJ_OUT = re.compile(r"^(single_transformer_blocks\.\d+\.)proj_out_(attn|mlp)\.(weight|bias)$")
 
@@ -87,6 +97,10 @@ class TpuFluxTransformerApplication(TpuApplicationBase):
             module, self.model_path, tp_size=spec.tp, tp_rank=parallel_mesh.get_tp_rank(),
             dtype=dtype, rename=make_checkpoint_key(self.config.inner_dim), strict=True,
         )
+        if _split_rope_enabled():
+            from difflet.backends.tpu.flux.rope import permute_flux_rope_layout_
+
+            permute_flux_rope_layout_(module)
         module.requires_grad_(False)
         self.module = module.eval()
         return self.module
