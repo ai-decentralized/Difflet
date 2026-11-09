@@ -33,8 +33,13 @@ def _args(**over):
 
 
 @pytest.fixture(autouse=True)
-def _no_quant_targets_override(monkeypatch):
-    monkeypatch.delenv("DIFFLET_QUANT_TARGETS", raising=False)
+def _measured_quant_targets(monkeypatch):
+    """HunyuanVideo-1.5 has no MXFP8 default (Task F8), so a --quant launch names the layers:
+    every test runs with the measured set (G1 + G3) as the override, joined as a user would
+    write it; the refusal test unsets it."""
+    from tests.unit.backends._neuron_hv15_toy import HV15_MEASURED_TARGETS
+
+    monkeypatch.setenv("DIFFLET_QUANT_TARGETS", ";".join(HV15_MEASURED_TARGETS))
 
 
 class _Calls(list):
@@ -192,6 +197,26 @@ def test_quant_generate_before_compile_is_refused_before_any_launch(launches, mo
 
 
 @pytest.mark.parametrize("mode", ["compile", "generate"])
+def test_quant_without_targets_is_refused_before_anything_is_written(launches, monkeypatch,
+                                                                     tmp_path, capsys, mode):
+    """Task F8: HunyuanVideo-1.5 has no MXFP8 default (the user's decision, 2026-11-09), so
+    --quant without DIFFLET_QUANT_TARGETS is refused on the driver (exit 2, as its other
+    refusals) with the weights local, before compile's bf16 copy, the quantized directory, the
+    work dir or any launch, naming the reason and the override."""
+    monkeypatch.delenv("DIFFLET_QUANT_TARGETS", raising=False)
+    _toy_snapshot(monkeypatch, tmp_path)
+    with pytest.raises(SystemExit) as exc:
+        getattr(hv15.HunyuanVideo15Orchestrator(_args(work_dir=str(tmp_path / "w"),
+                                                      quant="mxfp8")), mode)()
+    err = capsys.readouterr().err
+    assert exc.value.code == 2 and launches == []
+    assert err.startswith("Error: --quant: HunyuanVideo-1.5 has no default MXFP8 target set")
+    assert "DIFFLET_QUANT_TARGETS" in err and err.endswith("; nothing was launched.\n")
+    assert not (tmp_path / "cache").exists() and not (tmp_path / "w").exists()
+    assert "DIFFLET_NKI_TRACE_CACHE" not in os.environ
+
+
+@pytest.mark.parametrize("mode", ["compile", "generate"])
 def test_quant_without_local_weights_is_refused_naming_download(launches, monkeypatch, tmp_path,
                                                                 capsys, mode):
     """--quant needs the weights on the driver (compile quantizes them, generate resolves the
@@ -343,13 +368,13 @@ def test_dit_memory_line_names_resident_and_estimated_bytes():
     against an estimate of 1 GiB."""
     from difflet.backends.neuron.hbm import GIB
     from difflet.cli.orchestrators.hunyuan_video_15 import _dit_memory_line
-    from difflet.quant.targets import default_spec
+    from tests.unit.backends._neuron_hv15_toy import hv15_spec
 
     dit = SimpleNamespace(module=torch.nn.Linear(32768, 32768, bias=False, device="meta"),
                           dtype=torch.bfloat16, weight_bytes=GIB, quant=None)
     assert _dit_memory_line(dit) == ("[hv15] DiT weights per rank: 2.00 GiB resident "
                                      "(1.00 GiB estimated at load), bf16")
-    dit.quant = default_spec("hunyuan_video_15", tp_degree=2)
+    dit.quant = hv15_spec(tp_degree=2)
     assert _dit_memory_line(dit).endswith(", MXFP8 nki")
 
 
@@ -435,7 +460,7 @@ def test_transformer_stage_builds_the_pipeline_with_the_spec(monkeypatch, tmp_pa
     spec the stage flags describe, at the line's tp, and with none without --quant."""
     import difflet.backends.neuron.hunyuan_video15.pipeline as P
     import difflet.backends.registry as registry
-    from difflet.quant.targets import default_spec
+    from tests.unit.backends._neuron_hv15_toy import hv15_spec
 
     monkeypatch.setattr(registry, "get_backend",
                         lambda name: SimpleNamespace(prepare_runtime=lambda p: None))
@@ -443,7 +468,7 @@ def test_transformer_stage_builds_the_pipeline_with_the_spec(monkeypatch, tmp_pa
     seen = {}
     monkeypatch.setattr(P, "TorchNeuronHunyuanVideo15Pipeline", _fake_pipeline(seen))
     torch.save({"prompt_embeds": torch.zeros(1)}, tmp_path / "embeds.pt")
-    expected = default_spec("hunyuan_video_15", tp_degree=2).to_dict()
+    expected = hv15_spec(tp_degree=2).to_dict()
     for quant, spec in (("mxfp8", expected), (None, None)):
         args = _args(work_dir=str(tmp_path), model_id=hv15._HF_MODEL_ID, quant=quant,
                      tp_degree=2, cfg_parallel=True, height=480, width=848, num_frames=121,

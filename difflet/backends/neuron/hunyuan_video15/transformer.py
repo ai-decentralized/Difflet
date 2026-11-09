@@ -35,10 +35,12 @@ differ only on padded text queries, whose outputs are never used.
 Numerics depend on two backend workarounds installed by ``prepare_runtime``: the bool bitwise guard
 (the token refiner's mask) and fp32 LayerNorm for bf16 inputs.
 
-Quantization. ``quant=`` is the base's MXFP8 wiring with ``difflet.quant.targets``'
-``"hunyuan_video_15"`` table: in every dual-stream block the image q/k/v (``attn.to_q/k/v``) and
-the image MLP (``ff``: ``net.0.proj`` and ``net.2``) become their FP8 twins on the meta module
-before the load; the text stream's stay bf16 (the table says why). The swap runs after the TP
+Quantization. ``quant=`` is the base's MXFP8 wiring with a spec's targets: the model has no
+default table (``difflet.quant.targets``' ``"hunyuan_video_15"`` entry is empty, the user's
+decision), so the spec names the layers, from ``HUNYUAN_VIDEO_15_GROUPS``. With the measured set,
+in every dual-stream block the image q/k/v (``attn.to_q/k/v``) and the image MLP (``ff``:
+``net.0.proj`` and ``net.2``) become their FP8 twins on the meta module before the load; the
+text stream's stay bf16 (the table says why). The swap runs after the TP
 replacement, so each twin keeps its layer's flags: the column twins ``gather_output=False``, the
 image MLP's row twin SP's ``reduce_output=False`` / ``skip_bias_add=True`` (the caller
 reduce-scatters, then adds the bias once). The patterns are diffusers' names, which are this
