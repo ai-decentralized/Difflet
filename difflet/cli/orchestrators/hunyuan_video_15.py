@@ -113,6 +113,10 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
     #: The DiT's quantized directory (--quant), once ``_prepare_quant`` resolved it.
     _quantized_dit: str | None = None
 
+    def run(self) -> None:
+        refuse(_no_default_quant_targets(self.args))  # before the download, too
+        super().run()
+
     def download(self) -> None:
         from difflet.pipeline.path_resolver import resolve_model_path
         resolve_model_path(_HF_MODEL_ID, local_files_only=False)
