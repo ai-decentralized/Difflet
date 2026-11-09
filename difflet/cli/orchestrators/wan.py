@@ -229,6 +229,16 @@ def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
     return torchrun_unsupported_options(args)
 
 
+def _negative_prompt(req, args: argparse.Namespace) -> dict:
+    """``{"negative_prompt": text}`` for the pipeline call when the request line or
+    --negative-prompt gives one (the line's wins), else nothing: the pipeline encodes "", as it
+    always did. CFG (guidance > 1) is the only reader."""
+    from difflet.cli.dp import stage_loop
+
+    negative = stage_loop.effective(req, args, "negative_prompt", None)
+    return {} if negative is None else {"negative_prompt": negative}
+
+
 def _require_request_shape_in_set(args: argparse.Namespace):
     return require_request_shape_in_set(
         args, default_shape=(480, 832, 9), model_tag="wan"
@@ -691,6 +701,7 @@ class WanOrchestrator(ModelOrchestrator):
                     ),
                     output_type="latent",
                     **low_noise,
+                    **_negative_prompt(req, args),
                 )
                 latents_out = out.latents if hasattr(out, "latents") else out[0]
                 dest = stage_loop.work_file(args, req, "latents.pt")
@@ -729,6 +740,7 @@ class WanOrchestrator(ModelOrchestrator):
                 guidance_scale=float(stage_loop.effective(req, args, "guidance_scale", 1.0)),
                 output_type="latent",
                 **low_noise,
+                **_negative_prompt(req, args),
             )
 
         def save(req, out) -> None:
@@ -964,6 +976,8 @@ class WanOrchestrator(ModelOrchestrator):
             parts += ["--vae-exec-mode", a.vae_exec_mode]
         if getattr(a, "guidance_scale_2", None) is not None:
             parts += ["--guidance-scale-2", str(a.guidance_scale_2)]
+        if getattr(a, "negative_prompt", None) is not None:
+            parts += ["--negative-prompt", a.negative_prompt]
         if getattr(a, "teacache_cadence", None) is not None:
             parts += ["--teacache-cadence", str(a.teacache_cadence)]
         if getattr(a, "teacache_online_delta", None) is not None:
