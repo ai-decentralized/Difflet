@@ -336,6 +336,13 @@ def test_compiled_blocks_execute_and_match_oracle(tmp_path, monkeypatch):
         torch.testing.assert_close(got, want, rtol=1e-6, atol=1e-6)
 
 
+@pytest.mark.skipif(
+    # As for HunyuanVideo (test_cuda_hunyuan_compile.py): Inductor's CPU backend drops
+    # emulate_precision_casts before torch 2.13, so this CPU stand-in for the GPU cannot hold
+    # there. The LTX-2 profile's runtime (requirements-ltx2-cuda.lock) is torch 2.13.
+    torch.__version__ < (2, 13),
+    reason="Inductor's CPU backend elides emulate_precision_casts before torch 2.13",
+)
 def test_inductor_bfloat16_blocks_preserve_eager_rounding(tmp_path):
     # Removing LTX-2's per-compile precision policy must fail this regression.
     # Use real Inductor: a graph.forward backend cannot expose fused bf16 casts.
