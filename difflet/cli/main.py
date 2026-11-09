@@ -469,7 +469,8 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
         dest="negative_prompt",
         default=None,
         help="Qwen-Image on the neuron backend: the negative prompt of --true-cfg-scale "
-        "(default with --true-cfg-scale: ' ', diffusers' empty negative prompt). A --requests "
+        "(default with --true-cfg-scale: ' ', diffusers' empty negative prompt); Wan: the "
+        "negative prompt of its CFG (--guidance-scale above 1; default ''). A --requests "
         "line's negative_prompt wins over it",
     )
     p.add_argument("--seed", type=int, default=42)
