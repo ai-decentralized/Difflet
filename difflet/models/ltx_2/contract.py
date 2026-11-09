@@ -14,10 +14,12 @@ from typing import Any
 
 import torch
 
-LTX_2_DEFAULT_TEXT_SEQ_LEN = 1024
-LTX_2_DEFAULT_HEIGHT = 512
-LTX_2_DEFAULT_WIDTH = 768
-LTX_2_DEFAULT_NUM_FRAMES = 121
+from difflet.models.ltx_2.defaults import (
+    LTX_2_DEFAULT_HEIGHT,
+    LTX_2_DEFAULT_NUM_FRAMES,
+    LTX_2_DEFAULT_TEXT_SEQ_LEN,
+    LTX_2_DEFAULT_WIDTH,
+)
 
 
 @dataclass(frozen=True)

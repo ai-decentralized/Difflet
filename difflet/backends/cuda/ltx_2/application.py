@@ -11,7 +11,10 @@ import torch
 from difflet.backends.cuda.ltx_2.dit_config import Ltx2DiTConfig
 from difflet.backends.gpu.application import GpuApplication
 from difflet.models.ltx_2.contract import LTX2DiTInputBundle
-from difflet.models.ltx_2.spec import SPEC, TEXT_SEQ_LEN
+from difflet.models.ltx_2.defaults import LTX_2_DEFAULT_TEXT_SEQ_LEN
+from difflet.models.ltx_2.spec import SPEC
+
+_PROFILES = ("diffusers", "ltx_official_bf16")
 
 
 @dataclass(frozen=True)
@@ -29,52 +32,34 @@ class Ltx2AudioVideoOutput:
     audio_latents: torch.Tensor | None = None
 
 
-def _positive_integer(value, name):
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
-        raise ValueError(f"LTX-2 {name} must be a positive integer")
-    return value
-
-
 class CudaLtx2Application(GpuApplication):
     spec = SPEC
     input_bundle_type = LTX2DiTInputBundle
 
-    def __init__(self, *, model_path, parallel, dtype, shape, **kwargs):
-        from .policy import validate_request
-
-        resolved = validate_request(shape=shape, parallel=parallel, application_kwargs=kwargs)
-        super().__init__(
-            model_path=model_path, parallel=parallel, dtype=dtype, shape=resolved, **kwargs
-        )
-
     def _configure(self, kwargs: dict[str, Any]) -> None:
+        # The one place the profile, dtype, text length and frame rate are checked.
         self.generation_profile = kwargs.get("generation_profile", "diffusers")
-        if not isinstance(self.generation_profile, str) or self.generation_profile not in {
-            "diffusers",
-            "ltx_official_bf16",
-        }:
-            raise ValueError("LTX-2 generation_profile must be 'diffusers' or 'ltx_official_bf16'")
-        if self.generation_profile == "ltx_official_bf16" and self.dtype is not torch.bfloat16:
-            raise ValueError("LTX-2 ltx_official_bf16 requires bfloat16 model and sampler state")
-        if self.generation_profile == "ltx_official_bf16" and self.device.type == "cuda":
+        if self.generation_profile not in _PROFILES:
+            raise ValueError(f"LTX-2 generation_profile must be one of {_PROFILES}")
+        official = self.generation_profile == "ltx_official_bf16"
+        cpu_diagnostic = self.dtype is torch.float32 and self.device.type == "cpu" and not official
+        if self.dtype is not torch.bfloat16 and not cpu_diagnostic:
+            raise ValueError(
+                "LTX-2 runs in bfloat16; float32 is only for CPU diagnostics of the default profile"
+            )
+        if official and self.device.type == "cuda":
             from .official_compatibility import prepare_official_runtime
 
             prepare_official_runtime()
         self.load_text_encoders = bool(kwargs.get("load_text_encoders", True))
         self.load_vae = bool(kwargs.get("load_vae", True))
         self.local_files_only = bool(kwargs.get("local_files_only", True))
-        self.text_seq_len = _positive_integer(
-            kwargs.get("text_seq_len", TEXT_SEQ_LEN), "text_seq_len"
-        )
-        if self.text_seq_len > TEXT_SEQ_LEN:
-            raise ValueError("LTX-2 text_seq_len cannot exceed 1024")
+        self.text_seq_len = kwargs.get("text_seq_len", LTX_2_DEFAULT_TEXT_SEQ_LEN)
+        if not 1 <= self.text_seq_len <= LTX_2_DEFAULT_TEXT_SEQ_LEN:
+            raise ValueError(f"LTX-2 text_seq_len must be in [1, {LTX_2_DEFAULT_TEXT_SEQ_LEN}]")
         self.frame_rate = kwargs.get("frame_rate", SPEC.default_fps)
-        if isinstance(self.frame_rate, bool) or self.frame_rate != SPEC.default_fps:
-            raise ValueError("LTX-2 GPU inference requires frame_rate=24")
-        if self.dtype not in (torch.bfloat16, torch.float32):
-            raise ValueError("LTX-2 dtype must be bfloat16 or CPU diagnostic float32")
-        if self.dtype is torch.float32 and self.device.type != "cpu":
-            raise ValueError("LTX-2 fp32 is supported only for CPU diagnostics; use bf16 on GPU")
+        if self.frame_rate != SPEC.default_fps:
+            raise ValueError(f"LTX-2 GPU inference requires frame_rate={SPEC.default_fps}")
         self.pipe = None
         self.adapter = None
 
@@ -152,15 +137,8 @@ class CudaLtx2Application(GpuApplication):
             ("latents", latents, video_shapes),
             ("audio_latents", audio_latents, audio_shapes),
         ):
-            if value is not None and (
-                not isinstance(value, torch.Tensor)
-                or tuple(value.shape) not in shapes
-                or not value.is_floating_point()
-                or not torch.isfinite(value).all()
-            ):
-                raise ValueError(
-                    f"LTX-2 {name} must be finite floating noise with shape in {sorted(shapes)}"
-                )
+            if value is not None and tuple(value.shape) not in shapes:
+                raise ValueError(f"LTX-2 {name} must match the resident shape: {sorted(shapes)}")
 
     @torch.no_grad()
     def generate_audio_video(
@@ -194,44 +172,25 @@ class CudaLtx2Application(GpuApplication):
         ``sigmas`` boundaries, including optional terminal zero, with one interval
         per ``num_inference_steps``. Both profiles expose joint CFG only.
         """
+        # Only what diffusers would not refuse itself: the resident shape and batch, this
+        # application's own options, and the components a reduced load leaves out.
         official = self.generation_profile == "ltx_official_bf16"
         if sigmas is not None and not official:
             raise ValueError("LTX-2 final sigmas require generation_profile='ltx_official_bf16'")
         if official and prompt is None and prompt_embeds is None:
             raise ValueError("LTX-2 generation requires a prompt or prompt embeddings")
-        _positive_integer(num_inference_steps, "num_inference_steps")
-        if seed is not None and (
-            isinstance(seed, bool) or not isinstance(seed, int) or seed < 0 or seed >= 2**64
-        ):
-            raise ValueError("LTX-2 seed must be an integer in [0, 2**64)")
-        if (
-            isinstance(guidance_scale, bool)
-            or not isinstance(guidance_scale, (int, float))
-            or not math.isfinite(guidance_scale)
-            or not 0 <= guidance_scale <= SPEC.max_guidance_scale
-        ):
-            raise ValueError(
-                f"LTX-2 guidance_scale must be finite and in [0, {SPEC.max_guidance_scale}]"
-            )
+        if num_inference_steps < 1:
+            raise ValueError("LTX-2 num_inference_steps must be at least 1")
         if output_type not in {"pt", "latent"}:
             raise ValueError("LTX-2 joint output_type must be 'pt' or 'latent'")
         for name, value in (("height", height), ("width", width), ("num_frames", num_frames)):
-            if value is not None and (
-                not isinstance(value, int) or isinstance(value, bool) or value != self.shape[name]
-            ):
+            if value is not None and value != self.shape[name]:
                 raise ValueError(f"LTX-2 {name} must match resident shape {self.shape[name]}")
-        if frame_rate is not None and (
-            isinstance(frame_rate, bool) or frame_rate != self.frame_rate
-        ):
-            raise ValueError("LTX-2 frame_rate must match resident frame_rate=24")
+        if frame_rate is not None and frame_rate != self.frame_rate:
+            raise ValueError(f"LTX-2 frame_rate must match resident frame_rate={self.frame_rate}")
         for name, value in (("prompt", prompt), ("negative_prompt", negative_prompt)):
-            if value is not None and not (
-                isinstance(value, str)
-                or isinstance(value, list)
-                and len(value) == 1
-                and isinstance(value[0], str)
-            ):
-                raise ValueError(f"LTX-2 {name} must contain exactly one string")
+            if isinstance(value, list) and len(value) != 1:
+                raise ValueError(f"LTX-2 generates one {name} per request (batch 1)")
         if self.pipe is None:
             raise RuntimeError("application is not loaded; call load() first")
         # Both normalization buffers are used even by upstream latent output.
@@ -254,26 +213,9 @@ class CudaLtx2Application(GpuApplication):
             ("prompt", prompt_embeds, prompt_attention_mask),
             ("negative_prompt", negative_prompt_embeds, negative_prompt_attention_mask),
         ):
-            if (
-                official
-                and embedding is not None
-                and (
-                    not isinstance(embedding, torch.Tensor)
-                    or not embedding.is_floating_point()
-                    or not torch.isfinite(embedding).all()
-                )
-            ):
-                raise ValueError(f"LTX-2 {name} embeddings must be finite floating tensors")
-            if embedding is not None and (
-                embedding.ndim != 3
-                or embedding.shape[0] != 1
-                or embedding.shape[1] != self.text_seq_len
-                or mask is None
-                or tuple(mask.shape) != tuple(embedding.shape[:2])
-            ):
-                raise ValueError(
-                    f"LTX-2 {name} embeddings require batch 1, resident text length and matching mask"
-                )
+            # The official profile bypasses diffusers' check_inputs, which refuses this.
+            if official and embedding is not None and mask is None:
+                raise ValueError(f"LTX-2 {name} embeddings require their attention mask")
         self._validate_latents(latents, audio_latents)
         generator = None if seed is None else torch.Generator(device=self.device).manual_seed(seed)
         if official:

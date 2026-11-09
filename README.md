@@ -123,7 +123,7 @@ see the per-model limits below.
 | Qwen-Image | ✅ image | ⚠️ image ³ | ✅ | ✅ | ✅ | — ⁴ | ❌ | ❌ |
 | Wan 2.2 | ✅ video | ✅ video | ✅ | ❌ | ⚠️ ⁵ | ✅ ⁶ | ❌ | ❌ |
 | HunyuanVideo (original) | ⚠️ experimental ⁷ | ⚠️ experimental ⁷ | ⚠️ execution observed ⁷ | ❌ | Not measured | — ¹ | ❌ | ❌ |
-| LTX-2 | ⚠️ video, CPU checks ⁸ | ⚠️ video, CPU checks ⁸ | ⚠️ Python qualified ⁸ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| LTX-2 | ⚠️ video, CPU checks ⁸ | ⚠️ video, CPU checks ⁸ | ⚠️ Python qualified ⁸ | ❌ | Not measured | ❌ | ❌ | ❌ |
 
 An option the GPU backend does not support is refused with a message naming it, not ignored.
 TeaCache (adaptive), TAEF1, and `--host-vae` are refused on GPUs for these models.

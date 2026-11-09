@@ -19,7 +19,6 @@ def test_native_norm_preserves_values_parameters_and_fake_contract(affine, nonco
     state = {key: value.clone() for key, value in norm.state_dict().items()}
     weight = norm.weight
     assert preserve_native_rms_norm(norm) == 1
-    assert preserve_native_rms_norm(norm) == 0
     assert norm.weight is weight
     assert torch.equal(norm(x), expected)
     assert torch.equal(x, original)
@@ -52,27 +51,22 @@ def test_ltx_compile_policy_preserves_eager_gemm_selection():
     assert options["max_autotune_gemm"] is False
 
 
-def test_cpu_control_retains_its_existing_compiler_policy():
+def test_one_compiler_policy_on_every_device():
     from difflet.backends.cuda.ltx_2.dit_config import Ltx2DiTConfig
     from difflet.backends.cuda.ltx_2.transformer import CudaLtx2TransformerApplication
 
-    config = Ltx2DiTConfig()
-    app = CudaLtx2TransformerApplication(model_path="unused", config=config, device="cpu")
-    assert app.compile_options == {"emulate_precision_casts": True}
+    app = CudaLtx2TransformerApplication(model_path="unused", config=Ltx2DiTConfig(), device="cpu")
+    assert app.compile_options is CudaLtx2TransformerApplication.compile_options
 
 
-@pytest.mark.parametrize(
-    "compiled,device,expected", [(False, "cuda", 0), (True, "cpu", 0), (True, "cuda", 1)]
-)
-def test_native_norm_policy_is_scoped_to_compiled_cuda(compiled, device, expected):
+@pytest.mark.parametrize("compiled,expected", [(False, 0), (True, 1)])
+def test_native_norm_policy_is_scoped_to_compiled_blocks(compiled, expected):
     from difflet.backends.cuda.ltx_2.dit_config import Ltx2DiTConfig
     from difflet.backends.cuda.ltx_2.transformer import CudaLtx2TransformerApplication
 
     app = CudaLtx2TransformerApplication(
         model_path="unused", config=Ltx2DiTConfig(), device="cpu", torch_compile=compiled
     )
-    # The load-time decision does not allocate; exercise it without requiring CUDA.
-    app.device = torch.device(device)
     norm = torch.nn.RMSNorm(32)
     original = norm.forward
     app.apply_load_time_swaps(norm)
@@ -91,7 +85,6 @@ def test_diffusers_manual_norm_preserves_its_original_arithmetic(affine, bias, w
     state = {key: value.clone() for key, value in norm.state_dict().items()}
     weight, original_bias = norm.weight, norm.bias
     assert preserve_native_rms_norm(norm) == 1
-    assert preserve_native_rms_norm(norm) == 0
     assert norm.weight is weight and norm.bias is original_bias
     actual = norm(x)
     assert actual.dtype == expected.dtype and torch.equal(actual, expected)

@@ -11,31 +11,20 @@ def module():
     return importlib.import_module("difflet.backends.cuda.ltx_2.official_compatibility")
 
 
-def test_workspace_is_configured_before_cuda_initialization(monkeypatch):
-    m = module()
-    monkeypatch.delenv("CUBLAS_WORKSPACE_CONFIG", raising=False)
-    monkeypatch.setattr(torch.cuda, "is_initialized", lambda: False)
-    m.prepare_official_runtime()
+def test_workspace_must_be_exported_and_is_never_written(monkeypatch):
     import os
 
-    assert os.environ["CUBLAS_WORKSPACE_CONFIG"] == ":4096:8"
-    monkeypatch.setattr(torch.cuda, "is_initialized", lambda: True)
-    m.prepare_official_runtime()
-
-
-def test_workspace_refuses_late_initialization_and_explicit_conflict(monkeypatch):
     m = module()
-    monkeypatch.delenv("CUBLAS_WORKSPACE_CONFIG", raising=False)
-    monkeypatch.setattr(torch.cuda, "is_initialized", lambda: True)
-    with pytest.raises(ValueError, match="CUBLAS_WORKSPACE_CONFIG"):
-        m.prepare_official_runtime()
-    monkeypatch.setenv("CUBLAS_WORKSPACE_CONFIG", ":4096:2:16:8")
-    monkeypatch.setattr(torch.cuda, "is_initialized", lambda: False)
-    with pytest.raises(ValueError, match="CUBLAS_WORKSPACE_CONFIG"):
-        m.prepare_official_runtime()
-    import os
-
-    assert os.environ["CUBLAS_WORKSPACE_CONFIG"] == ":4096:2:16:8"
+    monkeypatch.setenv("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
+    m.prepare_official_runtime()
+    for value in (None, ":4096:2:16:8"):
+        if value is None:
+            monkeypatch.delenv("CUBLAS_WORKSPACE_CONFIG", raising=False)
+        else:
+            monkeypatch.setenv("CUBLAS_WORKSPACE_CONFIG", value)
+        with pytest.raises(ValueError, match="CUBLAS_WORKSPACE_CONFIG=:4096:8"):
+            m.prepare_official_runtime()
+        assert os.environ.get("CUBLAS_WORKSPACE_CONFIG") == value
 
 
 @pytest.mark.parametrize(
@@ -153,7 +142,7 @@ def small(registers=2):
     )
 
 
-def test_connector_policy_is_scoped_preserves_weights_and_is_idempotent(monkeypatch):
+def test_connector_policy_is_scoped_and_preserves_weights(monkeypatch):
     m = module()
     import diffusers.models.transformers.transformer_ltx2 as upstream
 
@@ -166,7 +155,6 @@ def test_connector_policy_is_scoped_preserves_weights_and_is_idempotent(monkeypa
     with torch.inference_mode():
         before = stock(x, mask)[:2]
         assert m.configure_official_connectors(candidate) == 2
-        assert m.configure_official_connectors(candidate) == 0
         seen = []
         original_dispatch = m.dispatch_attention_fn
 
@@ -252,19 +240,16 @@ def test_application_installs_connector_policy_only_for_opt_in_profile(
     assert app.pipe.connectors is connector
 
 
-def test_workspace_rejects_explicit_cublaslt_without_mutating_environment(monkeypatch):
+def test_workspace_rejects_explicit_cublaslt(monkeypatch):
     from types import SimpleNamespace
 
     m = module()
-    monkeypatch.delenv("CUBLAS_WORKSPACE_CONFIG", raising=False)
+    monkeypatch.setenv("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
     monkeypatch.setattr(
         torch.backends.cuda, "preferred_blas_library", lambda: SimpleNamespace(name="Cublaslt")
     )
     with pytest.raises(ValueError, match="cuBLAS"):
         m.prepare_official_runtime()
-    import os
-
-    assert "CUBLAS_WORKSPACE_CONFIG" not in os.environ
 
 
 def test_register_free_connector_preserves_active_padding_mask(monkeypatch):
@@ -288,17 +273,15 @@ def test_register_free_connector_preserves_active_padding_mask(monkeypatch):
     )
 
 
-def test_incompatible_audio_processor_is_rejected_without_partial_installation():
+def test_incompatible_audio_processor_is_rejected():
     m = module()
     candidate = small()
-    video = candidate.video_connector.transformer_blocks[0].attn1
     audio = candidate.audio_connector.transformer_blocks[0].attn1
-    original = video.processor
     custom = lambda *args, **kwargs: None
     audio.set_processor(custom)
     with pytest.raises(ValueError, match="stock LTX-2"):
         m.configure_official_connectors(candidate)
-    assert video.processor is original and audio.processor is custom
+    assert audio.processor is custom
 
 
 def tiny_transformer_blocks():
@@ -334,7 +317,6 @@ def test_official_transformer_policy_preserves_state_and_scopes_native_arithmeti
     learned = model.transformer_blocks[0].attn1.norm_q
     result = m.configure_official_transformer(model)
     assert result == {"norms": 16, "processors": 12}
-    assert m.configure_official_transformer(model) == {"norms": 0, "processors": 0}
     assert model.transformer_blocks[0].attn1.norm_q is learned
     assert type(stock.transformer_blocks[0].norm1) is RMSNorm
     for block in model.transformer_blocks:
@@ -346,19 +328,15 @@ def test_official_transformer_policy_preserves_state_and_scopes_native_arithmeti
     assert all(torch.equal(v, model.state_dict()[k]) for k, v in state.items())
 
 
-def test_official_transformer_policy_validates_all_blocks_before_mutation():
-    from diffusers.models.normalization import RMSNorm
-
+def test_official_transformer_policy_refuses_a_non_stock_processor():
     m = module()
     model = tiny_transformer_blocks()
     model.transformer_blocks[1].attn1.set_processor(object())
     with pytest.raises(ValueError, match="stock"):
         m.configure_official_transformer(model)
-    assert type(model.transformer_blocks[0].norm1) is RMSNorm
-    assert type(model.transformer_blocks[0].attn1.processor) is not m.OfficialLtx2AttentionProcessor
 
 
-def test_official_transformer_forward_uses_native_gate_sigmas_and_cleans_up():
+def test_official_forward_uses_native_gate_sigmas_and_cleans_up():
     m = module()
 
     class Gate(torch.nn.Module):
@@ -388,15 +366,15 @@ def test_official_transformer_forward_uses_native_gate_sigmas_and_cleans_up():
             return video, audio
 
     model = Model()
+    m.configure_official_forward(model)
     sigma = torch.tensor([1000.0, 500.0])
     audio_sigma = torch.tensor([800.0, 200.0])
-    video, audio = m.official_transformer_forward(model, sigma=sigma, audio_sigma=audio_sigma)
+    video, audio = model(sigma=sigma, audio_sigma=audio_sigma)
     assert torch.equal(video, audio_sigma * 0.01) and torch.equal(audio, sigma * 0.01)
     with pytest.raises(RuntimeError, match="injected"):
-        m.official_transformer_forward(model, sigma=sigma, audio_sigma=audio_sigma, fail=True)
+        model(sigma=sigma, audio_sigma=audio_sigma, fail=True)
     assert not model.av_cross_attn_video_a2v_gate._forward_pre_hooks
     assert not model.av_cross_attn_audio_v2a_gate._forward_pre_hooks
-    assert model(sigma=sigma, audio_sigma=audio_sigma)[0].numel() == 12
 
 
 @pytest.mark.parametrize("profile", ["diffusers", "ltx_official_bf16"])
@@ -433,7 +411,7 @@ def test_component_load_policy_and_adapter_scope_official_transformer(profile, m
     )
 
 
-def test_owned_forward_policy_is_idempotent_signature_preserving_and_deepcopy_safe():
+def test_owned_forward_policy_is_signature_preserving_and_deepcopy_safe():
     import inspect
 
     m = module()
@@ -467,15 +445,13 @@ def test_owned_forward_policy_is_idempotent_signature_preserving_and_deepcopy_sa
     model = Model()
     signature = inspect.signature(model.forward)
     state = copy.deepcopy(model.state_dict())
-    assert m.configure_official_forward(model) == 1
-    assert m.configure_official_forward(model) == 0
+    m.configure_official_forward(model)
     assert inspect.signature(model.forward) == signature
     clone = copy.deepcopy(model)
     clone.offset.fill_(2.0)
     kwargs = dict(sigma=torch.tensor([1000.0]), audio_sigma=torch.tensor([800.0]))
     assert torch.equal(model(**kwargs), torch.tensor([9.0]))
     assert torch.equal(clone(**kwargs), torch.tensor([10.0]))
-    assert torch.equal(m.official_transformer_forward(model, **kwargs), model(**kwargs))
     for target in [model, clone]:
         with pytest.raises(RuntimeError, match="injected"):
             target(**kwargs, fail=True)

@@ -32,7 +32,7 @@ def is_set(value: Any) -> bool:
 
 def unsupported_parallel(spec: ModelSpec, parallel: Any, platform: Platform) -> list[str]:
     """The parallel modes ``parallel`` asks for that the platform does not implement, plus
-    CFG-parallel for a model with no conditional/unconditional pair to split."""
+    CFG-parallel for a model that does not accept it."""
     modes = platform.unsupported_parallel_modes(parallel)
     if (
         getattr(parallel, "cfg_parallel_enabled", False)
@@ -43,11 +43,15 @@ def unsupported_parallel(spec: ModelSpec, parallel: Any, platform: Platform) -> 
     return modes
 
 
-def cfg_parallel_does_not_apply(spec: ModelSpec) -> str:
+def cfg_parallel_refusal(spec: ModelSpec) -> str:
+    """Why ``--cfg-parallel`` is refused for a model that does not accept it: a true-CFG model
+    has the pair but the split is not implemented yet; any other model has no pair at all."""
+    if spec.guidance == "cfg":
+        return f"--cfg-parallel is not implemented for {spec.display_name} on GPUs yet"
     return (
         f"--cfg-parallel does not apply to {spec.display_name}: it runs one transformer pass per "
         "step, with no conditional/unconditional pair to split"
     )
 
 
-__all__ = ["cfg_parallel_does_not_apply", "gpu_platform", "is_set", "unsupported_parallel"]
+__all__ = ["cfg_parallel_refusal", "gpu_platform", "is_set", "unsupported_parallel"]

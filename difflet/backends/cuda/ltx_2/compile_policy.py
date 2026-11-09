@@ -69,7 +69,7 @@ def preserve_native_rms_norm(module: nn.Module) -> int:
 
     Preserve both learned torch norms and Diffusers' manual normalization.
     Custom classes and multi-dimensional normalized shapes retain their existing
-    implementation. Calling this twice is harmless.
+    implementation. Installed once, at load.
     """
     count = 0
     for norm in module.modules():
@@ -78,8 +78,6 @@ def preserve_native_rms_norm(module: nn.Module) -> int:
         elif type(norm) is DiffusersRMSNorm and len(norm.dim) == 1:
             forward = _diffusers_forward
         else:
-            continue
-        if getattr(norm.forward, "__func__", None) is forward:
             continue
         norm.forward = MethodType(forward, norm)
         count += 1

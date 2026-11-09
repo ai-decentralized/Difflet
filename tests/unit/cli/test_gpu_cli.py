@@ -213,7 +213,11 @@ def _refusals():
             *(({attr: _REFUSED_VALUES[attr]}, label) for attr, label in spec.refused_cli_flags),
         ]
         if not spec.accepts_cfg_parallel:
-            cases.append(({"cfg_parallel": True}, "does not apply"))
+            # A true-CFG model has the pair to split; the split is what is missing.
+            refusal = "not implemented" if spec.guidance == "cfg" else "does not apply"
+            cases.append(({"cfg_parallel": True}, refusal))
+        if not spec.accepts_negative_prompt:
+            cases.append(({"negative_prompt": "blurry"}, "--negative-prompt"))
         for over, expected in cases:
             yield pytest.param(spec, over, expected, id=f"{spec.model_type}-{next(iter(over))}")
 
@@ -224,6 +228,64 @@ def test_unsupported_flags_are_refused_by_name_before_any_load(spec, over, expec
         _orch(spec, **over).generate()
     assert f"[{spec.model_type}/cuda]" in str(exc.value) and expected in str(exc.value)
     assert recorder == []
+
+
+@pytest.mark.parametrize(
+    "spec", [s for s in SPECS if s.accepts_negative_prompt], ids=lambda s: s.model_type
+)
+def test_negative_prompt_flag_reaches_generate_and_a_request_wins(spec, recorder, tmp_path):
+    # The other models refuse the flag by name (test_unsupported_flags_are_refused_...).
+    orch = _orch(spec, negative_prompt="blurry", output=str(tmp_path / f"o{_ext(spec)}"))
+    orch.generate()
+    from difflet.cli.dp.requests_io import RequestSpec
+
+    request = RequestSpec(index=0, prompt="a dog", output="o", negative_prompt="distorted")
+    assert orch.generate_kwargs()["negative_prompt"] == "blurry"
+    assert orch.generate_kwargs(request)["negative_prompt"] == "distorted"
+    assert orch._last_pipe.app.calls[0][1]["negative_prompt"] == "blurry"
+
+
+def test_download_uses_the_registry_subset_when_the_model_declares_one(spec, monkeypatch):
+    from difflet.registry import resolve_model
+
+    seen = {}
+    monkeypatch.setattr(
+        "difflet.pipeline.path_resolver.resolve_model_path",
+        lambda mid, **kw: seen.update(kw) or "/snap",
+    )
+    _orch(spec).download()
+    entry = resolve_model(spec.cli_model_ids[0], model_type=spec.model_type)
+    assert seen["allow_patterns"] == entry.download_patterns
+
+
+@pytest.mark.parametrize("command", ["generate", "run"])
+def test_batch_dispatch_refuses_before_request_or_model_io(spec, command, monkeypatch):
+    # The DP router's workers would otherwise fail every request with the flag.
+    import importlib
+
+    cli = importlib.import_module("difflet.cli.main")
+
+    monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
+    monkeypatch.setattr(
+        "difflet.cli.dp.requests_io.load_requests_jsonl",
+        lambda *a, **kw: pytest.fail("refuse before reading the requests"),
+    )
+    monkeypatch.setattr(
+        "difflet.pipeline.path_resolver.resolve_model_path",
+        lambda *a, **kw: pytest.fail("refuse before resolving the snapshot"),
+    )
+    with pytest.raises(SystemExit, match="--cp-degree"):
+        cli.main(
+            [
+                command,
+                "--model-id",
+                spec.cli_model_ids[0],
+                "--requests",
+                "r.jsonl",
+                "--cp-degree",
+                "2",
+            ]
+        )
 
 
 def test_run_refuses_unsupported_flags_before_any_download(spec, recorder, monkeypatch):

@@ -26,10 +26,10 @@ export DIFFLET_BACKEND=cuda
 export CUBLAS_WORKSPACE_CONFIG=:4096:8
 ```
 
-Set the workspace environment **before CUDA initialization**, including before
-constructing a `DiffletPipeline`. The profile refuses a conflicting workspace or
-an already initialized runtime without the required startup setting. It does not
-change an existing cuBLAS allocation. Python callers explicitly select TP=1;
+Export the workspace setting **before the process starts**, so it is in place
+before CUDA initializes. The profile checks it when the pipeline is constructed and
+refuses to start without it; it never sets or changes the variable itself. Python
+callers explicitly select TP=1;
 the shared registry's Trainium topology remains the default when `parallel` is omitted.
 
 ```python

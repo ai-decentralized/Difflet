@@ -34,18 +34,11 @@ class CudaLtx2TransformerApplication(GpuComponent):
         torch_compile: bool = False,
         generation_profile: str = "diffusers",
     ):
-        config.validate()
-        if generation_profile not in {"diffusers", "ltx_official_bf16"}:
-            raise ValueError("Unknown LTX-2 generation profile")
-        if generation_profile == "ltx_official_bf16" and config.torch_dtype is not torch.bfloat16:
-            raise ValueError("Official LTX-2 requires bf16")
+        # The application validated the profile and dtype; the config validated itself.
         self.generation_profile = generation_profile
         super().__init__(
             config=MeshSpec(), device=device, dtype=config.torch_dtype, torch_compile=torch_compile
         )
-        if self.device.type != "cuda":
-            # CPU oracle/diagnostic controls retain their existing compiler policy.
-            self.compile_options = {"emulate_precision_casts": True}
         self.model_path = model_path
         self.dit_config = config
         self.load_report = None
@@ -83,7 +76,7 @@ class CudaLtx2TransformerApplication(GpuComponent):
 
             configure_official_transformer(module.transformer)
             configure_official_forward(module.transformer)
-        if self.torch_compile and self.device.type == "cuda":
+        if self.torch_compile:
             from .compile_policy import preserve_native_rms_norm
 
             preserve_native_rms_norm(module)
@@ -92,10 +85,10 @@ class CudaLtx2TransformerApplication(GpuComponent):
         return [module.transformer.transformer_blocks]
 
     def get_example_inputs(self) -> tuple[torch.Tensor, ...]:
-        from difflet.models.ltx_2.modeling_ltx_2 import _make_audio_coords, _make_video_coords
+        from difflet.models.ltx_2.coords import make_audio_coords, make_video_coords
 
         cfg = self.dit_config
-        video_coords = _make_video_coords(
+        video_coords = make_video_coords(
             batch_size=1,
             num_frames=cfg.latent_num_frames,
             height=cfg.latent_height,
@@ -106,7 +99,7 @@ class CudaLtx2TransformerApplication(GpuComponent):
             causal_offset=cfg.causal_offset,
             fps=cfg.frame_rate,
         )
-        audio_coords = _make_audio_coords(
+        audio_coords = make_audio_coords(
             batch_size=1,
             audio_num_frames=cfg.audio_num_frames,
             patch_size_t=cfg.audio_patch_size_t,

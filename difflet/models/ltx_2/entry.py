@@ -16,12 +16,6 @@ def create_ltx_2_application(
     backend: str = "trainium",
     **kwargs: Any,
 ) -> Any:
-    if backend == "cuda":
-        from difflet.backends.gpu.application import create_gpu_application
-
-        return create_gpu_application(
-            "ltx_2", model_path=model_path, parallel=parallel, dtype=dtype, shape=shape, **kwargs
-        )
     if backend == "tpu":
         # TPU: the DiT on the chips, Gemma-3/connectors/VAEs on the host; tp only.
         if parallel.cp_degree > 1:

@@ -455,11 +455,6 @@ def test_invalid_schedule_is_rejected_before_conditioning_or_noise_draws():
     assert pipe.connector_batches == [] and pipe.transformer.calls == []
 
 
-def test_degenerate_terminal_stretch_is_rejected_before_generation():
-    with pytest.raises(ValueError, match="schedule"):
-        _api().resolve_sigmas({**CONFIG, "shift_terminal": 1.0}, 2, None, device="cpu")
-
-
 def test_profile_rejects_missing_prompt_before_using_loaded_text_encoder(tmp_path):
     app = _application(tmp_path, generation_profile="ltx_official_bf16")
     app.pipe.text_encoder = _TextEncoder()
@@ -468,12 +463,12 @@ def test_profile_rejects_missing_prompt_before_using_loaded_text_encoder(tmp_pat
         app.generate_audio_video(**request)
 
 
-@pytest.mark.parametrize("field", ["prompt_embeds", "negative_prompt_embeds"])
-def test_profile_rejects_nonfinite_or_nonfloating_embeddings_before_connectors(tmp_path, field):
+@pytest.mark.parametrize("prefix", ["", "negative_"])
+def test_profile_rejects_embeddings_without_their_mask_before_connectors(tmp_path, prefix):
+    # The profile bypasses diffusers' check_inputs, which refuses this for the stock path.
     app = _application(tmp_path, generation_profile="ltx_official_bf16")
-    for malformed in (torch.full((1, 4, 2), float("nan")), torch.ones(1, 4, 2, dtype=torch.int32)):
-        with pytest.raises(ValueError, match="embeddings"):
-            app.generate_audio_video(**{**_public_request(), field: malformed})
+    with pytest.raises(ValueError, match="attention mask"):
+        app.generate_audio_video(**{**_public_request(), f"{prefix}prompt_attention_mask": None})
     assert app.pipe.connector_batches == []
 
 

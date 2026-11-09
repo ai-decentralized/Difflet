@@ -294,8 +294,11 @@ def test_cfg_parallel_is_refused_without_a_cond_uncond_pair(tmp_path, model):
     if spec.accepts_cfg_parallel:
         assert _build(tmp_path, model, parallel=parallel).parallel is parallel
     else:
+        # A true-CFG model has the pair, so its refusal says "not implemented", not "no pair".
         message = (
-            "not implemented" if spec.guidance == "cfg" else f"does not apply to {spec.display_name}"
+            f"not implemented for {spec.display_name}"
+            if spec.guidance == "cfg"
+            else f"does not apply to {spec.display_name}"
         )
         with pytest.raises(NotImplementedError, match=message):
             _build(tmp_path, model, parallel=parallel)

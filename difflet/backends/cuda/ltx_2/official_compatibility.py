@@ -37,22 +37,18 @@ _WORKSPACE_CONFIG = ":4096:8"
 
 
 def prepare_official_runtime() -> None:
-    """Select the qualified 32 MiB BLAS workspace before any CUDA handle exists."""
-    preferred = torch.backends.cuda.preferred_blas_library()
-    if preferred.name not in {"Cublas", "Default"}:
+    """Refuse a process not started with the qualified 32 MiB cuBLAS workspace.
+
+    The variable must be in the environment before CUDA initializes (the guide exports it);
+    this checks it rather than changing process state from a constructor.
+    """
+    if torch.backends.cuda.preferred_blas_library().name not in {"Cublas", "Default"}:
         raise ValueError("ltx_official_bf16 requires the cuBLAS library preference")
-    configured = os.environ.get("CUBLAS_WORKSPACE_CONFIG")
-    if configured is not None and configured != _WORKSPACE_CONFIG:
-        raise ValueError("ltx_official_bf16 requires CUBLAS_WORKSPACE_CONFIG=:4096:8")
-    if configured is None:
-        # Changing this after handle allocation can advertise a larger workspace
-        # than the cached allocation in PyTorch 2.11. Require a fresh startup.
-        if torch.cuda.is_initialized():
-            raise ValueError(
-                "Set CUBLAS_WORKSPACE_CONFIG=:4096:8 before CUDA initialization "
-                "for ltx_official_bf16"
-            )
-        os.environ["CUBLAS_WORKSPACE_CONFIG"] = _WORKSPACE_CONFIG
+    if os.environ.get("CUBLAS_WORKSPACE_CONFIG") != _WORKSPACE_CONFIG:
+        raise ValueError(
+            f"ltx_official_bf16 requires CUBLAS_WORKSPACE_CONFIG={_WORKSPACE_CONFIG} exported "
+            "before the process starts"
+        )
 
 
 def apply_official_rotary(x, freqs, *, rope_type, head_dim):
@@ -149,30 +145,25 @@ class OfficialLtx2AttentionProcessor(LTX2AudioVideoAttnProcessor):
 
 
 def configure_official_connectors(connectors) -> int:
-    """Install only this connector instance's processors; preserve its weights."""
-    pending = []
+    """Install the native processors on this connector instance (once, at load); preserve its
+    weights."""
+    count = 0
     for connector in (connectors.video_connector, connectors.audio_connector):
         learned = connector.learnable_registers is not None
         for block in connector.transformer_blocks:
             attention = block.attn1
-            if isinstance(attention.processor, OfficialLtx2AttentionProcessor):
-                if attention.processor.learned_registers != learned:
-                    raise ValueError("LTX-2 connector register policy changed")
-            elif type(attention.processor) is LTX2AudioVideoAttnProcessor:
-                pending.append((attention, learned))
-            else:
+            if type(attention.processor) is not LTX2AudioVideoAttnProcessor:
                 raise ValueError("ltx_official_bf16 requires the stock LTX-2 connector processor")
-    for attention, learned in pending:
-        attention.set_processor(OfficialLtx2AttentionProcessor(learned_registers=learned))
-    return len(pending)
+            attention.set_processor(OfficialLtx2AttentionProcessor(learned_registers=learned))
+            count += 1
+    return count
 
 
 def configure_official_transformer(transformer) -> dict[str, int]:
-    """Retain native BF16 rotary and unlearned RMSNorm on this DiT instance."""
+    """Retain native BF16 rotary and unlearned RMSNorm on this DiT instance (once, at load)."""
     from diffusers.models.normalization import RMSNorm
 
-    norms = []
-    processors = []
+    counts = {"norms": 0, "processors": 0}
     norm_names = (
         "norm1",
         "audio_norm1",
@@ -191,16 +182,9 @@ def configure_official_transformer(transformer) -> dict[str, int]:
         "audio_to_video_attn",
         "video_to_audio_attn",
     )
-    # Admit the entire instance before applying any replacement.
     for block in transformer.transformer_blocks:
         for name in norm_names:
             norm = getattr(block, name)
-            if type(norm) is torch.nn.RMSNorm:
-                if norm.weight is not None or len(norm.normalized_shape) != 1:
-                    raise ValueError(
-                        "Official LTX-2 requires unlearned one-dimensional block norms"
-                    )
-                continue
             if (
                 type(norm) is not RMSNorm
                 or norm.weight is not None
@@ -210,26 +194,19 @@ def configure_official_transformer(transformer) -> dict[str, int]:
                 raise ValueError("Official LTX-2 requires stock unlearned block norms")
             replacement = torch.nn.RMSNorm(norm.dim, eps=norm.eps, elementwise_affine=False)
             replacement.train(norm.training)
-            norms.append((block, name, replacement))
+            setattr(block, name, replacement)
+            counts["norms"] += 1
         for name in attention_names:
             attention = getattr(block, name)
             processor = attention.processor
-            if (
-                type(processor) is OfficialLtx2AttentionProcessor
-                and not processor.learned_registers
-            ):
-                continue
             if type(processor) is not LTX2AudioVideoAttnProcessor:
                 raise ValueError("Official LTX-2 requires stock attention processors")
             replacement = OfficialLtx2AttentionProcessor(learned_registers=False)
             replacement._attention_backend = processor._attention_backend
             replacement._parallel_config = processor._parallel_config
-            processors.append((attention, replacement))
-    for block, name, norm in norms:
-        setattr(block, name, norm)
-    for attention, processor in processors:
-        attention.set_processor(processor)
-    return {"norms": len(norms), "processors": len(processors)}
+            attention.set_processor(replacement)
+            counts["processors"] += 1
+    return counts
 
 
 def _official_transformer_call(transformer, forward, args, kwargs):
@@ -273,23 +250,14 @@ def _official_transformer_call(transformer, forward, args, kwargs):
             hook.remove()
 
 
-def official_transformer_forward(transformer, *args, **kwargs):
-    """Invoke the native gate policy once, including for an already configured instance."""
-    if getattr(getattr(transformer.forward, "__func__", None), "_ltx_official_policy", False):
-        return transformer(*args, **kwargs)
-    return _official_transformer_call(transformer, transformer, args, kwargs)
-
-
-def configure_official_forward(transformer) -> int:
-    """Install native gate inputs for every entry point on this transformer instance."""
+def configure_official_forward(transformer) -> None:
+    """Install native gate inputs for every entry point on this transformer instance (once, at
+    load)."""
     from functools import wraps
     from types import MethodType
 
-    current = getattr(transformer.forward, "__func__", None)
-    if getattr(current, "_ltx_official_policy", False):
-        return 0
     original = type(transformer).forward
-    if current is not original:
+    if getattr(transformer.forward, "__func__", None) is not original:
         raise ValueError("Official LTX-2 requires the stock transformer forward")
 
     @wraps(original)
@@ -297,6 +265,4 @@ def configure_official_forward(transformer) -> int:
         # Capture only the unbound function; deep copies bind their own instance.
         return _official_transformer_call(self, original.__get__(self, type(self)), args, kwargs)
 
-    forward._ltx_official_policy = True
     transformer.forward = MethodType(forward, transformer)
-    return 1

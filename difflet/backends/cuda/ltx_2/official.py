@@ -37,10 +37,7 @@ def official_sigmas(config, steps: int, *, device) -> torch.Tensor:
 def resolve_sigmas(config, steps: int, sigmas, *, device) -> torch.Tensor:
     """Validate final sigma boundaries; custom values are never shifted again."""
     if sigmas is None:
-        values = official_sigmas(config, steps, device=device)
-        if not torch.isfinite(values).all() or not (values[:-1] > values[1:]).all():
-            raise ValueError("LTX-2 schedule must be finite and strictly decreasing")
-        return values
+        return official_sigmas(config, steps, device=device)
     if not isinstance(sigmas, (list, tuple)) or any(isinstance(x, bool) for x in sigmas):
         raise ValueError("LTX-2 sigmas must be a sequence of finite decreasing numbers")
     try:

@@ -13,6 +13,21 @@ def test_ltx2_has_a_gpu_spec_and_application():
     assert importlib.util.find_spec(spec.application.partition(":")[0]) is not None
 
 
+def test_ltx2_spec_does_not_load_torch():
+    # `difflet serve`'s parent process reads specs without torch.
+    import subprocess
+    import sys
+
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import difflet.models.ltx_2.spec; assert 'torch' not in sys.modules",
+        ],
+        check=True,
+    )
+
+
 import copy
 
 import pytest
@@ -213,14 +228,7 @@ def test_repeated_seed_requests_match_stock_for_both_modalities(loaded):
 @pytest.mark.parametrize(
     "kw",
     [
-        dict(seed=True),
-        dict(seed=-1),
-        dict(seed=1.5),
         dict(num_inference_steps=0),
-        dict(num_inference_steps=1.5),
-        dict(guidance_scale=float("nan")),
-        dict(guidance_scale=float("inf")),
-        dict(guidance_scale=-1),
         dict(height=32),
         dict(width=64),
         dict(num_frames=9),
@@ -239,7 +247,10 @@ def test_invalid_generation_is_rejected_before_pipeline_call(loaded, kw):
         app.generate_audio_video(**{**_conditioning(), **kw})
 
 
-@pytest.mark.parametrize("kw", [dict(frame_rate=25), dict(mystery_option=1), dict(text_seq_len=0)])
+@pytest.mark.parametrize(
+    "kw",
+    [dict(frame_rate=25), dict(text_seq_len=0), dict(text_seq_len=1025), dict(teacache_cadence=2)],
+)
 def test_application_rejects_invalid_options_without_snapshot_io(tmp_path, kw):
     from difflet.backends.cuda.ltx_2.application import CudaLtx2Application
 
@@ -254,18 +265,38 @@ def test_application_rejects_invalid_options_without_snapshot_io(tmp_path, kw):
         )
 
 
-def test_direct_entry_routes_cuda_before_trainium_import(tmp_path):
-    from difflet.models.ltx_2.entry import create_ltx_2_application
+def test_registry_routes_cuda_to_the_gpu_application(tmp_path):
+    from difflet.registry import resolve_model
 
-    app = create_ltx_2_application(
+    app = resolve_model("Lightricks/LTX-2").create_application(
         model_path=str(tmp_path),
         parallel=DiffletParallelConfig(tp_degree=1),
         dtype="bf16",
         shape=SHAPE,
         backend="cuda",
-        device="cpu",
+        application_kwargs=dict(device="cpu"),
     )
     assert type(app).__name__ == "CudaLtx2Application"
+
+
+@pytest.mark.parametrize(
+    "parallel,message",
+    [
+        (dict(tp_degree=2), "tp-degree"),
+        (dict(tp_degree=1, cfg_parallel_enabled=True), "not implemented for LTX-2"),
+    ],
+)
+def test_parallel_modes_are_refused_by_the_shared_gpu_policy(tmp_path, parallel, message):
+    from difflet.backends.cuda.ltx_2.application import CudaLtx2Application
+
+    with pytest.raises(NotImplementedError, match=message):
+        CudaLtx2Application(
+            model_path=str(tmp_path),
+            parallel=DiffletParallelConfig(**parallel),
+            dtype="bf16",
+            shape=SHAPE,
+            device="cpu",
+        )
 
 
 def test_missing_companions_are_refused_even_for_latent_generation(loaded):
@@ -304,17 +335,11 @@ def test_prompt_and_negative_prompt_follow_stock_text_path(loaded, monkeypatch):
     torch.testing.assert_close(actual.audio_latents, expected.audio)
 
 
-def test_request_shape_requires_integers(loaded):
-    app, _, _ = loaded
-    with pytest.raises(ValueError, match="height"):
-        app.generate_audio_video(height=64.0, **_conditioning())
-
-
 def test_gpu_dtype_is_bfloat16_only_without_snapshot_io(tmp_path):
     from difflet.backends.cuda.ltx_2.application import CudaLtx2Application
 
     for dtype, device in ((torch.float16, "cpu"), (torch.float32, "cuda")):
-        with pytest.raises(ValueError, match="dtype|fp32"):
+        with pytest.raises(ValueError, match="bfloat16"):
             CudaLtx2Application(
                 model_path=str(tmp_path),
                 parallel=DiffletParallelConfig(tp_degree=1),

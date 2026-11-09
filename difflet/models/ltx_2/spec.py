@@ -1,8 +1,12 @@
 """LTX-2.0 audiovisual inference on the generic GPU flow."""
 
+from difflet.models.ltx_2.defaults import (
+    LTX_2_DEFAULT_HEIGHT,
+    LTX_2_DEFAULT_NUM_FRAMES,
+    LTX_2_DEFAULT_TEXT_SEQ_LEN,
+    LTX_2_DEFAULT_WIDTH,
+)
 from difflet.models.spec import ModelSpec, PromptBudget
-
-TEXT_SEQ_LEN = 1024
 
 SPEC = ModelSpec(
     model_type="ltx_2",
@@ -11,9 +15,9 @@ SPEC = ModelSpec(
     cli_model_ids=("Lightricks/LTX-2",),
     served_checkpoint_ids=("Lightricks/LTX-2",),
     output="video",
-    default_height=512,
-    default_width=768,
-    default_num_frames=121,
+    default_height=LTX_2_DEFAULT_HEIGHT,
+    default_width=LTX_2_DEFAULT_WIDTH,
+    default_num_frames=LTX_2_DEFAULT_NUM_FRAMES,
     default_steps=40,
     guidance="cfg",
     default_guidance_scale=4.0,
@@ -57,7 +61,7 @@ SPEC = ModelSpec(
     prompt_budgets=(
         PromptBudget(
             tokenizer_subdir="tokenizer",
-            max_tokens=TEXT_SEQ_LEN,
+            max_tokens=LTX_2_DEFAULT_TEXT_SEQ_LEN,
             too_long="LTX-2 {name} exceeds Gemma's 1024 tokens",
             applies_to_negative_prompt=True,
         ),

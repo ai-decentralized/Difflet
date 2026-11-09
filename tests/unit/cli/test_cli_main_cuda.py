@@ -68,6 +68,9 @@ def test_requests_and_dp_dispatch_to_the_router_on_cuda(monkeypatch, tmp_path):
     parent = []
 
     class _Orch:
+        def refuse_unsupported(self):
+            parent.append("refuse")
+
         def download(self):
             parent.append("download")
 
@@ -90,7 +93,8 @@ def test_requests_and_dp_dispatch_to_the_router_on_cuda(monkeypatch, tmp_path):
     with pytest.raises(SystemExit) as exc:
         cli.main(["run", "--model-id", "Qwen/Qwen-Image", "--requests", str(req)])
     assert exc.value.code == 0
-    assert parent == ["download", "compile"]
+    # The GPU flow refuses unsupported options before any request or checkpoint I/O.
+    assert parent == ["refuse", "download", "compile"]
     assert routed == [(None, 1, [("a", "a.png"), ("b", "b.png")])]
     parent.clear()
     routed.clear()
@@ -109,7 +113,7 @@ def test_requests_and_dp_dispatch_to_the_router_on_cuda(monkeypatch, tmp_path):
             ]
         )
     assert exc.value.code == 0
-    assert parent == ["download", "compile"] and routed == [(2, 1, [("a", "a.png")])]
+    assert parent == ["refuse", "download", "compile"] and routed == [(2, 1, [("a", "a.png")])]
 
 
 def test_dp_beyond_the_gpu_count_is_refused_before_any_work(monkeypatch, capsys):

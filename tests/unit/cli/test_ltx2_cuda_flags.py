@@ -1,4 +1,7 @@
-"""Public CLI parsing and dispatch must preserve or refuse LTX-2 generation flags."""
+"""Public CLI parsing and dispatch must preserve or refuse LTX-2 generation flags.
+
+LTX-2 has no orchestrator of its own: these run the shared GPU orchestrator from the parser.
+"""
 
 import importlib
 import json
@@ -135,23 +138,20 @@ def test_batch_dispatch_refuses_flags_before_request_or_model_io(monkeypatch, co
 
 
 @pytest.mark.parametrize(
-    "flag,value",
+    "flags,message",
     [
-        ("--height", "0"),
-        ("--height", "33"),
-        ("--width", "31"),
-        ("--num-frames", "8"),
-        ("--steps", "0"),
-        ("--tp-degree", "2"),
+        (("--tp-degree", "2"), "--tp-degree"),
+        (("--cp-degree", "2"), "--cp-degree"),
+        (("--cfg-parallel",), "not implemented for LTX-2"),
     ],
 )
-def test_invalid_ltx2_request_refuses_before_download(monkeypatch, flag, value):
+def test_parallel_modes_refuse_before_download(monkeypatch, flags, message):
     def unexpected(*args, **kwargs):
-        pytest.fail("invalid LTX-2 request reached a checkpoint download")
+        pytest.fail("an unsupported LTX-2 request reached a checkpoint download")
 
     monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path", unexpected)
-    orch = _orchestrator(flag, value, command="run")
-    with pytest.raises(SystemExit):
+    orch = _orchestrator(*flags, command="run")
+    with pytest.raises(SystemExit, match=message):
         orch.download()
 
 

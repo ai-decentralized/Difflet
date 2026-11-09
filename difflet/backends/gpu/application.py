@@ -38,7 +38,7 @@ from difflet.backends._torch_megatron.weights import load_sharded_state_dict, ma
 from difflet.backends.cuda.ops_impl import parallel_mesh
 from difflet.models.spec import ModelSpec, gpu_model_spec
 from difflet.backends.gpu.policy import (
-    cfg_parallel_does_not_apply,
+    cfg_parallel_refusal,
     gpu_platform,
     unsupported_parallel,
 )
@@ -297,7 +297,7 @@ def _refuse_parallel(spec: ModelSpec, parallel: Any, platform: Platform) -> None
         return
     mode = modes[0]
     if mode == "cfg":
-        raise NotImplementedError(cfg_parallel_does_not_apply(spec))
+        raise NotImplementedError(cfg_parallel_refusal(spec))
     raise NotImplementedError(
         f"{PARALLEL_MODE_FLAGS[mode]} is not supported for {spec.display_name} on the "
         f"{platform.display_name} backend yet"
@@ -487,7 +487,7 @@ __all__ = [
     "MANIFEST_FORMAT",
     "GpuApplication",
     "GpuComponent",
-    "cfg_parallel_does_not_apply",
+    "cfg_parallel_refusal",
     "compile_blocks",
     "create_gpu_application",
     "gpu_platform",
