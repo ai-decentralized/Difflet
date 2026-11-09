@@ -37,7 +37,12 @@ unset DIFFLET_QUANT_TARGETS
 # reuse their NEFFs, bf16 copies and quantized directories: every arm's caches root at its own
 # --cache-dir instead, as on a host without them.
 unset DIFFLET_COMPILE_CACHE TORCH_NEURONX_NEFF_CACHE_DIR TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR \
-  TORCH_NEURONX_HLO_CACHE_DIR TORCHINDUCTOR_CACHE_DIR
+  TORCH_NEURONX_HLO_CACHE_DIR TORCHINDUCTOR_CACHE_DIR DIFFLET_NEURON_WEIGHT_STORE \
+  DIFFLET_SHARED_WEIGHTS_DIR
+# torch's default thread count is the size of the lane's CPU set, and HunyuanVideo-1.5's
+# host-CPU bf16 encode depends on it (evidence 11c: 48 and 96 threads give different clips): an
+# inherited count would change the clip and every host-side time.
+unset OMP_NUM_THREADS MKL_NUM_THREADS
 
 CORES= CPUS=
 while [ $# -gt 0 ]; do
@@ -86,16 +91,21 @@ args_for() {  # args_for <key>: M (model, shape, layout), P (sampling, no prompt
     hunyuan_video_15) M=(--model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v
                          --num-frames 9)
       P=(--seed 42); QT=$HV15_MX_TARGETS ;;
-    # The official settings (D2). CFG runs as two sequential forwards on the tp4 group (D3); the
-    # first cold run keeps its work dir, so the final latents stay for the CPU fp32 scores (Task 8).
-    wan21_official) M=(--model-id Wan-AI/Wan2.1-T2V-14B-Diffusers --height 480 --width 832
-                       --num-frames 81 --tp-degree 4)
-      P=(--seed 42 --guidance-scale 5.0); NEG=$WAN21_NEG; KEEP=(--keep-work-dir) ;;
-    wan22_official) M=(--model-id Wan-AI/Wan2.2-T2V-A14B-Diffusers --dual-expert --height 480
+    # The official settings (D2), each snapshot pinned (a hub whose refs/main points elsewhere
+    # would otherwise run another snapshot). CFG runs as two sequential forwards on the tp4
+    # group (D3); the first cold run keeps its work dir, so the final latents stay for the CPU
+    # fp32 scores (Task 8).
+    wan21_official) M=(--model-id Wan-AI/Wan2.1-T2V-14B-Diffusers
+                       --revision 38ec498cb3208fb688890f8cc7e94ede2cbd7f68 --height 480
                        --width 832 --num-frames 81 --tp-degree 4)
+      P=(--seed 42 --guidance-scale 5.0); NEG=$WAN21_NEG; KEEP=(--keep-work-dir) ;;
+    wan22_official) M=(--model-id Wan-AI/Wan2.2-T2V-A14B-Diffusers
+                       --revision 5be7df9619b54f4e2667b2755bc6a756675b5cd7 --dual-expert
+                       --height 480 --width 832 --num-frames 81 --tp-degree 4)
       P=(--seed 42 --guidance-scale 4.0 --guidance-scale-2 3.0); NEG=$WAN22_NEG; STEPS=40
       KEEP=(--keep-work-dir) ;;
     hv15_official) M=(--model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v
+                      --revision 286be7ce72277246578a3e3cc2487e95ddae5bcf
                       --height 480 --width 848 --num-frames 121)
       P=(--seed 42); QT=$HV15_MX_TARGETS; KEEP=(--keep-work-dir) ;;
     *) echo "bench.sh: unknown key $1" >&2; exit 2 ;;
@@ -135,9 +145,14 @@ mkdir -p "$BENCH_ROOT" "$CACHE_ROOT"
 for key in "$@"; do
   args_for "$key"
   mkdir -p "$BENCH_ROOT/$key"
-  printf 'cores %s\ncpus %s\n' "$CORES" "$CPUS" > "$BENCH_ROOT/$key/lane.txt"
+  printf 'cores %s\ncpus %s\nthreads %s\n' "$CORES" "$CPUS" "$(taskset -c "$CPUS" nproc)" \
+    > "$BENCH_ROOT/$key/lane.txt"
   for arm in bf16 mx; do
     W=$BENCH_ROOT/$key/$arm
+    if [ -d "$W" ] && [ -n "$(ls -A "$W")" ]; then  # a rerun: the earlier run is archived, so
+      mkdir -p "$BENCH_ROOT/discarded"              # no output of it passes for this one's
+      mv "$W" "$BENCH_ROOT/discarded/$key-$arm-$(date +%Y%m%d-%H%M%S)"
+    fi
     mkdir -p "$W"
     warm_hub
     C=$CACHE_ROOT/$key-$arm

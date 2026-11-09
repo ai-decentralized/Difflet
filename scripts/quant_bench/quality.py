@@ -2,7 +2,8 @@
 
 Per key under ROOT:
   * determinism: md5 of the decoded outputs of cold_1, cold_2 and both warm requests, per arm
-    (equal: the four runs produced one sample, so one quality number covers them all);
+    (equal: the four runs produced one sample, so one quality number covers them all); an
+    output whose step's log does not end in ``exit 0`` counts as missing;
   * provenance, for the keys phase G scored: the same md5 against the campaign's scored device
     output (scripts/fp32_ref/score.py DEVICE_OUTPUTS, under its BENCH), where that host has it;
   * MXFP8 against bf16 on the device: scripts/compare_difflet_runs.py on cold_1, bf16 first
@@ -42,6 +43,16 @@ def md5(path: Path | None) -> str | None:
     if path is None or not path.exists():
         return None
     return hashlib.md5(path.read_bytes()).hexdigest()[:8]
+
+
+def step_ok(arm: Path, step: str) -> bool:
+    """True when the step's log (``cold_1.log``; ``warm.log`` for a warm request) ends in
+    ``exit 0``: an output another run left behind, or a failed step's partial one, is not
+    the arm's."""
+    log = arm / f"{'warm' if step.startswith('warm') else step}.log"
+    exits = [ln for ln in log.read_text(errors="replace").splitlines()
+             if ln.startswith("exit ")] if log.exists() else []
+    return bool(exits) and exits[-1].strip() == "exit 0"
 
 
 def decoded(result: dict | None) -> dict:
@@ -87,14 +98,16 @@ def main() -> int:
         ext = "png" if key in IMAGE_KEYS else "mp4"
         for arm in ("bf16", "mx"):
             d = args.root / key / arm
-            hashes = {k: md5(d / f"{k}.{ext}") for k in ("cold_1", "cold_2", "warm_1", "warm_2")}
+            hashes = {k: md5(d / f"{k}.{ext}") if step_ok(d, k) else None
+                      for k in ("cold_1", "cold_2", "warm_1", "warm_2")}
             camp = (score.DEVICE_OUTPUTS.get(key) or {}).get(arm, {}).get("output")
             res[arm] = {"md5": hashes, "campaign_md5": md5(score.BENCH / camp) if camp else None,
                         "deterministic": all(hashes.values()) and len(set(hashes.values())) == 1}
             res[arm]["matches_campaign"] = (res[arm]["campaign_md5"] is not None
                                             and res[arm]["campaign_md5"] == hashes["cold_1"])
         bf16, mx = args.root / key / "bf16" / f"cold_1.{ext}", args.root / key / "mx" / f"cold_1.{ext}"
-        if bf16.exists() and mx.exists():
+        ok = step_ok(bf16.parent, "cold_1") and step_ok(mx.parent, "cold_1")
+        if ok and bf16.exists() and mx.exists():
             res["mx_vs_bf16"] = cdr.compare_runs(None, None, bf16, mx)
         if key in floors and bf16.exists():
             res["floor"] = str(floors[key])
