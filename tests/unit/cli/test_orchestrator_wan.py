@@ -21,7 +21,7 @@ def _wan_args(**overrides) -> argparse.Namespace:
         height=480, width=832, num_frames=9,
         cache_dir=None, force=False, revision=None,
         prompt="a cat walking", output="/tmp/wan.mp4",
-        steps=2, guidance_scale=1.0, seed=42, stage_mode="generate",
+        steps=2, guidance_scale=1.0, negative_prompt=None, seed=42, stage_mode="generate",
         work_dir=None, keep_work_dir=False, host_vae=False,
         device_vae=True,  # these tests exercise the device VAE stage; the host default is tested below
         teacache_cadence=None, teacache_online_delta=None,
@@ -1316,6 +1316,47 @@ def test_single_expert_call_is_unchanged(neuron_stage, tmp_path):
     assert "guidance_scale_2" not in call["pipeline"].app.calls[0]
 
 
+def test_negative_prompt_reaches_the_neuron_application(neuron_stage, tmp_path):
+    args = _wan_args(stage_mode="generate", work_dir=str(tmp_path), guidance_scale=5.0,
+                     negative_prompt="blurry")
+    WanOrchestrator(args)._stage_transformer(args)
+    [call] = neuron_stage.CALLS
+    [request] = call["pipeline"].app.calls
+    assert request["negative_prompt"] == "blurry"
+
+
+def test_no_negative_prompt_leaves_the_call_unchanged(neuron_stage, tmp_path):
+    args = _wan_args(stage_mode="generate", work_dir=str(tmp_path), guidance_scale=5.0)
+    WanOrchestrator(args)._stage_transformer(args)
+    [call] = neuron_stage.CALLS
+    assert "negative_prompt" not in call["pipeline"].app.calls[0]
+
+
+def test_a_request_line_negative_prompt_wins(neuron_stage, tmp_path):
+    """A warm run's request line carries its own negative prompt (the router writes the
+    flag's into lines without one); the line's wins over the stage's flag."""
+    from difflet.cli.dp.requests_io import RequestSpec, write_manifest
+
+    requests = tmp_path / "requests"
+    write_manifest([RequestSpec(index=0, prompt="a fox", output=str(tmp_path / "o0.mp4"),
+                                seed=1, negative_prompt="line", assigned_worker=0)], requests)
+    args = _wan_args(model_id=_WAN21_ID, stage_mode="generate", work_dir=str(tmp_path),
+                     guidance_scale=5.0, negative_prompt="flag", requests_dir=str(requests),
+                     worker_index=0, dp_schedule="round_robin")
+    WanOrchestrator(args)._stage_transformer(args)
+    [call] = neuron_stage.CALLS
+    [request] = call["pipeline"].app.calls
+    assert request["negative_prompt"] == "line"
+
+
+def test_shared_cli_args_forward_the_negative_prompt():
+    plain = WanOrchestrator(_wan_args())._shared_cli_args(stage_mode="generate")
+    assert "--negative-prompt" not in plain
+    parts = WanOrchestrator(_wan_args(negative_prompt="多余的手指"))._shared_cli_args(
+        stage_mode="generate")
+    assert parts[parts.index("--negative-prompt") + 1] == "多余的手指"
+
+
 def test_shared_cli_args_forward_the_dual_expert_flags():
     plain = WanOrchestrator(_wan_args())._shared_cli_args(stage_mode="generate")
     assert "--dual-expert" not in plain and "--guidance-scale-2" not in plain
@@ -1520,6 +1561,14 @@ def test_aot_stage_single_expert_call_is_unchanged(monkeypatch, tmp_path):
     app = _FakeWanApp.instances[-1]
     assert app.kwargs["enable_transformer_2"] is False
     assert "guidance_scale_2" not in app.call_kwargs
+
+
+def test_aot_stage_passes_the_negative_prompt(monkeypatch, tmp_path):
+    _unset(monkeypatch, "DIFFLET_BACKEND")
+    orch, args = _setup_dual_stage(monkeypatch, tmp_path, guidance_scale=5.0,
+                                   negative_prompt="blurry")
+    orch._stage_transformer(args)
+    assert _FakeWanApp.instances[-1].call_kwargs["negative_prompt"] == "blurry"
 
 
 def test_aot_stage_refuses_a_checkpoint_that_cannot_switch(monkeypatch, tmp_path):
