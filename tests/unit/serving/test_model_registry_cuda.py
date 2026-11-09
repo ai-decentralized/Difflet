@@ -86,12 +86,18 @@ def test_video_serving_on_cuda_refuses_replicas_and_image_serving_keeps_them(mon
 
 
 def test_models_without_a_gpu_spec_name_supported_checkpoints(monkeypatch):
+    # Every built-in serving model has a GPU spec, so drop one to reach the refusal.
+    from difflet.models import spec as model_spec
+
+    monkeypatch.delitem(model_spec._GPU_SPEC_MODULES, "ltx_2")
     monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
     with pytest.raises(DiffletServingError) as exc:
         resolve_serving_model(ServeOptions(model_id="Lightricks/LTX-2"))
     assert exc.value.code == "feature_not_supported"
     message = exc.value.message
     assert "black-forest-labs/FLUX.1-dev, Wan-AI/Wan2.2-T2V-A14B-Diffusers" in message
+    assert message.startswith("Lightricks/LTX-2 cannot be served")
+    assert message.count("Lightricks/LTX-2") == 1
     assert "trainium" in message
 
 
