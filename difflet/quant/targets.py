@@ -336,8 +336,9 @@ HUNYUAN_VIDEO_ROW_PARALLEL: tuple[str, ...] = (
 # seven models.
 #
 # The override table: one pattern per device-bisection group in G order, the strings F6's arms
-# carried in DIFFLET_QUANT_TARGETS (the ordered strings key the quantized directory, so G1;G3
-# resolves the former default's, ``mxfp8-afcbee695501d1d2``). At 480x848x9 the step is 557 ms in
+# carried in DIFFLET_QUANT_TARGETS (the ordered strings key the quantized directory, so G1;G3 is
+# the former default's spec: ``mxfp8-afcbee695501d1d2`` on host A, whose bf16 copy built it; a
+# copy-built directory's name is per host, evidence 12c). At 480x848x9 the step is 557 ms in
 # bf16 and 1528 with all four; each group alone is at or below bf16 (G1 546, G2 554, G3 528, G4
 # 556 ms), but the slowdowns do not add up: G1 + G2 + G3 is 1514 and G1 + G3 511 (518 on the
 # tree without phase D's rotary op D4, which F7 reverted; evidence 9b).
