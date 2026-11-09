@@ -216,6 +216,19 @@ def test_quant_without_targets_is_refused_before_anything_is_written(launches, m
     assert "DIFFLET_NKI_TRACE_CACHE" not in os.environ
 
 
+def test_run_with_quant_without_targets_is_refused_before_the_download(launches, monkeypatch,
+                                                                      capsys):
+    """`difflet run` downloads, then compiles: the F8 refusal comes first, so a host without
+    the weights does not fetch the 50 GB snapshot to be refused afterwards."""
+    monkeypatch.delenv("DIFFLET_QUANT_TARGETS", raising=False)
+    monkeypatch.setattr(hv15.HunyuanVideo15Orchestrator, "download",
+                        lambda self: pytest.fail("downloaded before the refusal"))
+    with pytest.raises(SystemExit) as exc:
+        hv15.HunyuanVideo15Orchestrator(_args(quant="mxfp8")).run()
+    assert exc.value.code == 2 and launches == []
+    assert "has no default MXFP8 target set" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize("mode", ["compile", "generate"])
 def test_quant_without_local_weights_is_refused_naming_download(launches, monkeypatch, tmp_path,
                                                                 capsys, mode):
