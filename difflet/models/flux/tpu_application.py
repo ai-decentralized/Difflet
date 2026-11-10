@@ -306,8 +306,16 @@ class TpuPipelinedT5Encoder:
         position_bias = None
         if self.segments[self.rank].start != 0:
             position_bias = self.bias_attention.compute_bias(self.seq_len, self.seq_len, device=self._device)
+        # Keywords, an explicit cache_position and only outputs [0] and [1]: the
+        # call has to hold across transformers releases. 4.57 (the CI pin)
+        # indexes cache_position when it is None and no query_length is given;
+        # 5.x has dropped the argument (it lands in **kwargs). Both return
+        # (hidden, position_bias, ...).
+        cache_position = torch.arange(int(hidden.shape[1]), device=hidden.device)
         for block in self.blocks:
-            hidden, position_bias, _ = block(hidden, None, position_bias)
+            out = block(hidden, attention_mask=None, position_bias=position_bias,
+                        cache_position=cache_position)
+            hidden, position_bias = out[0], out[1]
         if self.final_norm is not None:
             hidden = self.final_norm(hidden)
         return hidden
