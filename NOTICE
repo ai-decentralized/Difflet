@@ -52,7 +52,7 @@ This product includes software derived from the following third-party projects:
   `scripts/rebase_from_nxdi.py` for the rebase workflow.
 
 ================================================================================
-2. HuggingFace diffusers — pipeline extensions and LTX-2 attention
+2. HuggingFace diffusers — pipeline extensions, LTX-2 attention and HunyuanVideo 1.5
 ================================================================================
 
   Source:  https://github.com/huggingface/diffusers
@@ -66,6 +66,12 @@ This product includes software derived from the following third-party projects:
   LTX2VideoTransformer3DModel attention processor under Apache License 2.0.
   Copyright 2025 The Lightricks team and The HuggingFace Team.
   The file retains the upstream license header and identifies the adaptation.
+  The HunyuanVideo 1.5 CUDA transformer,
+  difflet/backends/cuda/hunyuan_video_15/modeling.py, adapts portions of
+  diffusers' models/transformers/transformer_hunyuan_video15.py. That file keeps
+  the upstream copyright (2025 The Hunyuan Team and The HuggingFace Team) and its
+  Apache License 2.0 header; Difflet replaces its projections and attention and
+  keeps the checkpoint layout.
 
 ================================================================================
 3. xDiT (xfuser) — design inspiration only, no code

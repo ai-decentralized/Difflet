@@ -124,6 +124,7 @@ see the per-model limits below.
 | Wan 2.2 | ✅ video | ✅ video | ✅ | ❌ | ⚠️ ⁵ | ✅ ⁶ | ❌ | ❌ |
 | HunyuanVideo (original) | ⚠️ experimental ⁷ | ⚠️ experimental ⁷ | ⚠️ execution observed ⁷ | ❌ | Not measured | — ¹ | ❌ | ❌ |
 | LTX-2 | ⚠️ video, CPU checks ⁸ | ⚠️ video, CPU checks ⁸ | ⚠️ Python qualified ⁸ | ❌ | Not measured | ❌ | ❌ | ❌ |
+| HunyuanVideo 1.5 | ⚠️ experimental ⁹ | ⚠️ experimental ⁹ | ✅ ⁹ | ❌ | Not measured | ❌ | ❌ | ❌ |
 
 An option the GPU backend does not support is refused with a message naming it, not ignored.
 TeaCache (adaptive), TAEF1, and `--host-vae` are refused on GPUs for these models.
@@ -148,6 +149,11 @@ TeaCache (adaptive), TAEF1, and `--host-vae` are refused on GPUs for these model
    and performance checks on B200. CLI/HTTP video-only paths have CPU coverage; GPU frontend
    validation is not claimed. The opt-in profile requires explicit TP=1 and a pre-CUDA startup
    setting; see the [LTX-2 CUDA guide](docs/verification/ltx2-cuda.md).
+9. Experimental single-GPU BF16 text-to-video for
+   `hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v`, separate from the Trainium
+   HunyuanVideo 1.5 path. Classifier-free guidance runs both branches in sequence on one GPU.
+   Eager and compiled output and warm latency match vLLM-Omni on one RTX PRO 6000; see the
+   [HunyuanVideo 1.5 CUDA guide](docs/verification/hunyuanvideo15-cuda.md).
 
 Measured timings against stock diffusers, and the full pass/limit matrix, are in
 [docs/verification/gpu-backend-results.md](docs/verification/gpu-backend-results.md).
@@ -313,9 +319,9 @@ LTX-2 also has an experimental single-GPU CUDA path with joint audiovisual Pytho
 and an opt-in native-compatible BF16 profile. See the [LTX-2 CUDA guide](docs/verification/ltx2-cuda.md)
 for its separate runtime, explicit TP=1/startup requirements and qualified eager/compiled results.
 
-For HunyuanVideo CUDA, pass `parallel=DiffletParallelConfig(tp_degree=1)` explicitly.
-Omitting `parallel` preserves the model-specific registry default, including HunyuanVideo's
-Trainium topology. GPU Python API paths have unit coverage; see the
+For HunyuanVideo and HunyuanVideo 1.5 on CUDA, pass `parallel=DiffletParallelConfig(tp_degree=1)`
+explicitly. Omitting `parallel` preserves the model-specific registry default, including the
+HunyuanVideo models' Trainium topologies. GPU Python API paths have unit coverage; see the
 [per-model results](docs/verification/gpu-backend-results.md) for hardware coverage.
 
 ## Choose a topology

@@ -100,7 +100,8 @@ difflet/
 └── models/          flux/ wan/ hunyuan_video/ qwen_image/ ltx_2/ — each:
                      modeling, pipeline, application, entry, checkpoint
                      (where needed), and spec.py for models on the GPU flow. HunyuanVideo 1.5 is served from
-                     hunyuan_video/ (model_version="1.5").
+                     hunyuan_video/ (model_version="1.5"); on CUDA it has its own path,
+                     hunyuan_video_15/spec.py and backends/cuda/hunyuan_video_15/.
 ```
 
 `difflet/backends/trainium/{core,modules}` follows upstream Neuron coding style so periodic
@@ -251,7 +252,8 @@ mesh `{dp, cfg, cp, tp}` (tp innermost, dp outermost):
   true-CFG models (Wan, LTX-2, HunyuanVideo 1.5) — guidance-distilled models (Flux,
   HunyuanVideo) and Qwen-Image run a single forward pass and reject it. HunyuanVideo 1.5 is
   not guidance-distilled: its guider runs classifier-free guidance at 6.0 on every step, and
-  `--cfg-parallel` (TP2 × CFG2) is its default layout.
+  `--cfg-parallel` (TP2 × CFG2) is its default layout on Trainium. On CUDA it runs both CFG
+  branches in sequence on one GPU, and `--cfg-parallel` is refused.
 - `sp_enabled` — Megatron-style sequence parallelism: shards the otherwise-replicated
   norm/modulation/residual regions along the sequence axis across the *existing*
   tensor-parallel group (reduce-scatter replaces the row-parallel all-reduce). Adds no mesh
