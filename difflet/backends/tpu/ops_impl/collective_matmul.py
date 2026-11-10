@@ -25,6 +25,17 @@ is iterated, giving the output spec ``"tp"`` and a ``KeyError 't'``), and a
 compiled region must not receive a view at a nonzero storage offset (the
 J5ag ring then hangs before compiling; see sp_pair_probe).
 
+**Every rank must compile the same program around the rings.** torch_tpu
+compiles one program per process and inlines these rings into it (their
+``collective-permute``s all carry ``channel_id=1`` and pair by order). Values
+that differ by rank therefore enter the compiled graph as runtime tensors (the
+ring position is ``_STATE["ids"]`` for this reason), never as Python constants
+the compiler can specialize on. LTX-2 broke this by padding its sequence inside
+the graph and slicing each rank's shard at a constant offset: XLA folded the pad
+away on some ranks only, the programs diverged, and a chip halted in the first
+ring hop (v5e-4, torch_tpu 0.2.0, 2026-11-10; ``benchmark/tpu_profile/
+cm_padded_repro.py``). Pad before the graph, or pass the offset as a tensor.
+
 **Shard order.** The model's sequence shard for TP rank ``r`` is rows
 ``[r*S/tp, (r+1)*S/tp)`` (``scatter_tp_dim``). The ring runs in physical
 order, which is not torch rank order (rank 0 may hold TPU_2), so every chunk
