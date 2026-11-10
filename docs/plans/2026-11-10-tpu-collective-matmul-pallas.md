@@ -111,6 +111,37 @@ simpler and matches rule 2.
 Anything the kernel does not support (tp != 4, unsupported arity or shape)
 falls back to the JAX ring with a one-line notice.
 
+## Step 1 result (2026-11-10): the cost is the AG ring's write-back, not the wait
+
+Rank-0 traces of the natural, warm, compiled denoise (main's bench with
+`DIFFLET_BENCH_TRACE_DIR`), split by `benchmark/tpu_profile/exposed_comm.py`
+(reads the xplane directly when the JSON export is truncated):
+
+| 20 steps | Wan TP | Wan SP | LTX-2 TP | LTX-2 SP |
+|---|---|---|---|---|
+| window | 7200.7 ms | 5837.2 ms (-19%) | 4339.8 ms | 3793.5 ms (-12.6%) |
+| ICI wait | 1978.6 (27.5%) | 192.9 (3.3%) | 1275.5 (29.4%) | 258.5 (6.8%) |
+| compute | 4987.8 | 5398.9 (+411) | 2585.4 | 2993.5 (+408) |
+| of which `dynamic-update-slice` | -- | 643.0 (11.0%) | -- | 264.7 (7.0%) |
+| idle | 3.1% | 3.6% | 10.5% | 13.2% |
+
+- The rings already hide 80-90% of the all-reduce (the op-level probe's 55%
+  understated it); what is left waiting is 3-7% of a step.
+- SP adds ~410 ms of compute per 20 steps, mostly the AG ring writing each
+  hop's product into the full output with `dynamic_update_slice` (tp=4: eight
+  writes per AG). The matmuls themselves get *faster* under SP (LTX-2: 82% ->
+  90% of peak).
+- LTX-2 also spends 176 ms in small all-reduces (global qk RMS norm, audio TP)
+  and idles 13% between steps -- separate, cheaper targets.
+
+Revised order: **P0** -- assemble the AG output once (collect the hops,
+concatenate in ring-relative order, one reorder by the runtime ring position)
+instead of eight `dynamic_update_slice`s; same math, so outputs must be
+bit-identical; measure with `sp_pair_probe.py` and a Wan / LTX-2 bench A/B. If
+P0 removes most of the write-back, the kernel's remaining target is the 3-7%
+wait and the kernel is likely not worth it; otherwise continue with the Pallas
+AG kernel below, which writes each tile of the product in place.
+
 ## Steps
 
 | # | Work | Validation | Estimate |
