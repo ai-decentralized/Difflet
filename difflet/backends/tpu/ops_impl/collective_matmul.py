@@ -73,12 +73,19 @@ def _snake(devices):
     return sorted(devices, key=key)
 
 
-def prepare() -> None:
+#: The ops Wan / Qwen-Image / HunyuanVideo use: (kind, arity).
+DEFAULT_OPS = (("rs", 1), ("ag", 1), ("ag", 3))
+
+
+def prepare(ops=DEFAULT_OPS) -> None:
     """Build the mesh, the shard table and the jax_op ops, outside any compiled
     region (traced lazily, Dynamo would graph-break on the registration).
-    Collective: every TP rank must call it, in step."""
+    Collective: every TP rank must call it, in step. ``ops`` lists the
+    ``(kind, arity)`` a model needs; calling again with more builds the rest."""
     global _STATE
     if _STATE is not None:
+        for kind, arity in ops:
+            _op(kind, arity)
         return
     import jax
     import numpy as np
@@ -111,14 +118,16 @@ def prepare() -> None:
         "ids": torch.tensor([pos], dtype=torch.int32, device=dev),
         "ops": {},
     }
-    # Every op the Wan forwards use, built now: built lazily they would be
+    # Every op the model's forwards use, built now: built lazily they would be
     # built inside Dynamo's trace, which cannot run JAX.
-    for kind, n_weights in (("rs", 1), ("ag", 1), ("ag", 3)):
-        _op(kind, n_weights)
+    for kind, arity in ops:
+        _op(kind, arity)
 
 
 def _op(kind: str, n_weights: int):
-    """The jax_op for ``kind`` ('rs' or 'ag') over ``n_weights`` weights, built once."""
+    """The jax_op for ``kind`` built once: 'rs' over ``n_weights`` (input, weight)
+    pairs whose products are summed, 'ag' over ``n_weights`` weights sharing one
+    gathered input."""
     key = (kind, n_weights)
     ops = _STATE["ops"]
     if key in ops:
@@ -138,21 +147,33 @@ def _op(kind: str, n_weights: int):
         __import__("jax.experimental.shard_map", fromlist=["shard_map"]).shard_map
 
     if kind == "rs":
-        # x (B, S, K/tp) @ w (N, K/tp)^T, summed over the group, this rank's rows.
-        def body(x, w, ids):
+        # sum_i x_i (B, S, K_i/tp) @ w_i (N, K_i/tp)^T, summed over the group,
+        # this rank's rows. One pair is the plain row-parallel linear; two are a
+        # row-parallel linear over a concatenation (FLUX's single-block proj_out
+        # over [attn, mlp]) without materialising the concatenation.
+        def body(*args):
+            *pairs, ids = args
+            xs, ws = pairs[0::2], pairs[1::2]
             shard_of = jnp.asarray(shard_table, dtype=jnp.int32)
             j = ids[0]
-            rows = x.shape[1] // n
-            half = w.shape[0] // 2
-            wl, wr = w[:half], w[half:]
+            rows = xs[0].shape[1] // n
+            half = ws[0].shape[0] // 2
 
-            def chunk(pos):
+            def chunk(x, pos):
                 return jax.lax.dynamic_slice_in_dim(x, shard_of[pos % n] * rows, rows, axis=1)
 
+            def partial(pos, sl):
+                out = None
+                for x, w in zip(xs, ws):
+                    term = jnp.einsum("bsk,nk->bsn", chunk(x, pos), w[sl])
+                    out = term if out is None else out + term
+                return out
+
+            lo, hi = slice(None, half), slice(half, None)
             left = right = None
             for step in range(n):
-                pl = jnp.einsum("bsk,nk->bsn", chunk(j - 1 - step), wl)
-                pr = jnp.einsum("bsk,nk->bsn", chunk(j + 1 + step), wr)
+                pl = partial(j - 1 - step, lo)
+                pr = partial(j + 1 + step, hi)
                 # Fence each partial from the add that consumes the received
                 # accumulator: fused, the matmul would wait for the hop instead
                 # of running under it (88 us idle per hop on attn_out).
@@ -164,15 +185,25 @@ def _op(kind: str, n_weights: int):
                     right = jax.lax.ppermute(right, "tp", ccw) + pr
             return jnp.concatenate([left, right], axis=2)
 
-        in_specs = (P(None, None, "tp"), P(None, "tp"), P("tp"))
+        in_specs = (P(None, None, "tp"), P(None, "tp")) * n_weights + (P("tp"),)
         out_specs = (P(None, "tp", None),)
 
-        def fn(x, w, ids):
+        def reduce(*args):
             return shard_map(body, mesh=mesh, in_specs=in_specs, out_specs=out_specs[0],
-                             check_vma=False)(x, w, ids)
+                             check_vma=False)(*args)
 
-        fn.__annotations__ = {"x": jax.Array, "w": jax.Array, "ids": jax.Array,
-                              "return": jax.Array}
+        # Arities spelled out for jax_op, as for 'ag' below.
+        if n_weights == 1:
+            def fn(x, w, ids):
+                return reduce(x, w, ids)
+            names = ["x", "w", "ids"]
+        elif n_weights == 2:
+            def fn(x0, w0, x1, w1, ids):
+                return reduce(x0, w0, x1, w1, ids)
+            names = ["x0", "w0", "x1", "w1", "ids"]
+        else:
+            raise ValueError(f"matmul_reduce_scatter supports 1 or 2 pairs, got {n_weights}")
+        fn.__annotations__ = {**{k: jax.Array for k in names}, "return": jax.Array}
     else:
         # x (B, S/tp, K) gathered, @ each w_i (N_i/tp, K)^T -> (B, S, N_i/tp).
         def body(x, ids, *ws):
@@ -217,11 +248,17 @@ def _op(kind: str, n_weights: int):
         if n_weights == 1:
             def fn(x, ids, w0):
                 return ring(x, ids, w0)
+        elif n_weights == 2:
+            def fn(x, ids, w0, w1):
+                return ring(x, ids, w0, w1)
         elif n_weights == 3:
             def fn(x, ids, w0, w1, w2):
                 return ring(x, ids, w0, w1, w2)
+        elif n_weights == 4:
+            def fn(x, ids, w0, w1, w2, w3):
+                return ring(x, ids, w0, w1, w2, w3)
         else:
-            raise ValueError(f"all_gather_matmul supports 1 or 3 weights, got {n_weights}")
+            raise ValueError(f"all_gather_matmul supports 1 to 4 weights, got {n_weights}")
         names = ["x", "ids"] + [f"w{i}" for i in range(n_weights)]
         fn.__annotations__ = {**{k: jax.Array for k in names},
                               "return": (tuple[(jax.Array,) * n_weights] if n_weights > 1
@@ -247,6 +284,17 @@ def matmul_reduce_scatter(x: torch.Tensor, linear) -> torch.Tensor:
     return out
 
 
+def matmul2_reduce_scatter(x0: torch.Tensor, linear0, x1: torch.Tensor, linear1,
+                           bias: torch.Tensor | None = None) -> torch.Tensor:
+    """``linear0(x0) + linear1(x1)`` for two row-parallel linears with the same
+    output, reduced and scattered as one: (B, S, K_i/tp) -> (B, S/tp, N). The
+    linears' own biases are ignored; ``bias`` is added once after the reduction."""
+    out = _op("rs", 2)(x0, linear0.weight, x1, linear1.weight, _STATE["ids"])
+    if bias is not None:
+        out = out + bias.to(out.dtype)
+    return out
+
+
 def all_gather_matmul(x: torch.Tensor, linears) -> list[torch.Tensor]:
     """``[l(gather(x)) for l in linears]`` for column-parallel ``linears`` sharing
     one input: (B, S/tp, K) -> (B, S, N_i/tp) each, the gather overlapped with
@@ -263,5 +311,6 @@ def supports(seq_len: int, tp: int) -> bool:
     return seq_len % (2 * tp) == 0
 
 
-__all__ = ["SP_ENV", "all_gather_matmul", "matmul_reduce_scatter", "prepare",
+__all__ = ["DEFAULT_OPS", "SP_ENV", "all_gather_matmul", "matmul2_reduce_scatter",
+           "matmul_reduce_scatter", "prepare",
            "require_compiled", "requested", "supports"]

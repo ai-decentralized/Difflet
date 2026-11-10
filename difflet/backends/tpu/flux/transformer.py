@@ -101,9 +101,24 @@ class TpuFluxTransformerApplication(TpuApplicationBase):
             from difflet.backends.tpu.flux.rope import permute_flux_rope_layout_
 
             permute_flux_rope_layout_(module)
+        self._maybe_install_sp(module)
         module.requires_grad_(False)
         self.module = module.eval()
         return self.module
+
+    def _maybe_install_sp(self, module) -> bool:
+        """``DIFFLET_TPU_SP=1``: sequence parallelism with the collectives fused into
+        the matmuls (``flux/sp.py``). Compiled path only: through jax_op, eager
+        re-exports every ring on every call."""
+        from difflet.backends.tpu.ops_impl import collective_matmul
+
+        if not collective_matmul.requested() or int(self._mesh().tp) <= 1:
+            return False
+        from difflet.backends.tpu.flux import sp
+
+        collective_matmul.require_compiled(default=True)  # FLUX compiles by default
+        return sp.install(module, image_seq_len=int(self.config.image_seq_len),
+                          text_seq_len=int(self.config.text_seq_len))
 
     def get_example_inputs(self) -> tuple:
         cfg = self.config
