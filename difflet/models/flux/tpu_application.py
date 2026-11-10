@@ -1,4 +1,4 @@
-"""FLUX.1-dev on the TPU backend: the DiT and the VAE on the chips, the text encoders on the host.
+"""FLUX.1-dev on the TPU backend: the DiT, T5 and the VAE on the chips, CLIP on the host.
 
 Fifth model on the TPU backend, option (b) of
 docs/plans/2026-09-11-tpu-port-hunyuan-ltx2-flux.md: diffusers'
@@ -8,9 +8,12 @@ fork under ``modeling_flux.py``) is not touched.
 
 Placement follows the other ports:
 
-* T5-XXL (4.7B) runs on the host in fp32 on XLA ordinal 0 only and its hidden
-  state is broadcast (``TpuBroadcastT5Encoder``); one fp32 copy is ~19 GB, and
-  bf16 is emulated on the EPYC host (Qwen measured 4.5x slower);
+* T5-XXL (4.7B) runs on the chips in bf16, its blocks split into one segment
+  per rank (``TpuPipelinedT5Encoder``, ~2.4 GB a chip): 0.20 s per request
+  against 3.75 s for the fp32 host encoder (2026-11-09). fp32 on the chips
+  (~4.8 GB) leaves rank 0 too little HBM for the VAE decode.
+  ``DIFFLET_TPU_T5_DEVICE=0`` restores the host path (``TpuBroadcastT5Encoder``:
+  fp32 on rank 0, broadcast; bf16 is emulated on the EPYC host);
 * CLIP-L (123M) runs on the host on every rank — the pooled projection is
   cheaper to recompute than to broadcast in lockstep;
 * the 2D VAE (84M) is resident on the chip of the primary replica
@@ -217,6 +220,138 @@ class TpuBroadcastT5Encoder:
         return payload[0].cpu()
 
 
+#: ``0`` keeps T5 on the host (``TpuBroadcastT5Encoder``); anything else runs it
+#: on the chips, layer-pipelined (``TpuPipelinedT5Encoder``).
+T5_DEVICE_ENV = "DIFFLET_TPU_T5_DEVICE"
+#: dtype of the on-chip T5: ``bf16`` (default) or ``fp32`` — fp32 runs the
+#: encoder but then the 1024x1024 VAE decode on rank 0 runs out of HBM (2026-11-09).
+T5_DEVICE_DTYPE_ENV = "DIFFLET_TPU_T5_DEVICE_DTYPE"
+
+
+def _t5_on_device() -> bool:
+    return os.environ.get(T5_DEVICE_ENV, "1").strip().lower() not in {"0", "false", "no"}
+
+
+def layer_segments(num_layers: int, parts: int) -> list[range]:
+    """Split ``num_layers`` into ``parts`` contiguous ranges, the remainder spread from the front."""
+    base, extra = divmod(int(num_layers), int(parts))
+    out, start = [], 0
+    for index in range(int(parts)):
+        size = base + (1 if index < extra else 0)
+        out.append(range(start, start + size))
+        start += size
+    return out
+
+
+class TpuPipelinedT5Encoder:
+    """T5-XXL on the chips, its 24 blocks split into one contiguous segment per rank.
+
+    The host encoder costs ~3.4 s of a ~8.7 s FLUX request (fp32 on the EPYC
+    host). bf16 T5 is ~9.5 GB: too big for the ~9.7 GB a DiT shard leaves on one
+    chip, ~2.4 GB per chip split four ways. Tensor-parallel T5 would need its own
+    sharded modeling; a layer pipeline needs nothing but the stock HF blocks and
+    ``broadcast``, the one TorchTPU collective every port already relies on
+    (send/recv hangs). Only one chip computes at a time, but the whole encoder is
+    ~5 TFLOP — tens of milliseconds — and each hop moves one (1, 512, 4096) state.
+
+    Rank r runs its segment and broadcasts the hidden state from r; rank 0 also
+    owns the embedding, the last rank the final norm. Every rank keeps the
+    relative-attention-bias table (64x32) so a segment that does not start at
+    block 0 rebuilds the shared position bias locally, as block 0 would. Each hop
+    carries a status flag, so a failing rank never leaves the others blocked in
+    a collective: later segments skip their compute and every rank raises.
+    """
+
+    def __init__(self, model_path: str, *, seq_len: int, dtype: torch.dtype,
+                 encoder_dtype: torch.dtype | None = None) -> None:
+        from difflet.backends.tpu.ops_impl import device_runtime
+        from transformers import AutoTokenizer, T5EncoderModel
+
+        if encoder_dtype is None:
+            encoder_dtype = _normalize_dtype(os.environ.get(T5_DEVICE_DTYPE_ENV, "bf16"))
+        self.seq_len = int(seq_len)
+        self.dtype = dtype
+        self.encoder_dtype = encoder_dtype
+        self.rank = device_runtime.rank()
+        self.world = device_runtime.world_size()
+        self._device = device_runtime.device()
+        self.tokenizer = AutoTokenizer.from_pretrained(os.path.join(model_path, "tokenizer_2"))
+        model = T5EncoderModel.from_pretrained(
+            os.path.join(model_path, "text_encoder_2"), dtype=encoder_dtype
+        ).eval()
+        model.requires_grad_(False)
+        self.hidden_size = int(model.config.d_model)
+        blocks = model.encoder.block
+        self.segments = layer_segments(len(blocks), self.world)
+        mine = self.segments[self.rank]
+        dev = self._device
+        self.blocks = torch.nn.ModuleList([blocks[i] for i in mine]).to(dev)
+        # The bias table lives in block 0's self-attention; only it computes the bias.
+        self.bias_attention = blocks[0].layer[0].SelfAttention
+        if mine.start != 0:
+            self.bias_attention.relative_attention_bias.to(dev)
+        self.embed = model.encoder.embed_tokens.to(dev) if self.rank == 0 else None
+        self.final_norm = model.encoder.final_layer_norm.to(dev) if self.rank == self.world - 1 else None
+        # Drop the host copies of everything this rank does not run.
+        del model, blocks
+        device_runtime.wait()
+
+    @property
+    def model(self):  # parity with TpuBroadcastT5Encoder for the load log line
+        return self.blocks
+
+    def _segment(self, hidden: torch.Tensor | None, ids: torch.Tensor) -> torch.Tensor:
+        if self.rank == 0:
+            hidden = self.embed(ids)
+        position_bias = None
+        if self.segments[self.rank].start != 0:
+            position_bias = self.bias_attention.compute_bias(self.seq_len, self.seq_len, device=self._device)
+        # Keywords, an explicit cache_position and only outputs [0] and [1]: the
+        # call has to hold across transformers releases. 4.57 (the CI pin)
+        # indexes cache_position when it is None and no query_length is given;
+        # 5.x has dropped the argument (it lands in **kwargs). Both return
+        # (hidden, position_bias, ...).
+        cache_position = torch.arange(int(hidden.shape[1]), device=hidden.device)
+        for block in self.blocks:
+            out = block(hidden, attention_mask=None, position_bias=position_bias,
+                        cache_position=cache_position)
+            hidden, position_bias = out[0], out[1]
+        if self.final_norm is not None:
+            hidden = self.final_norm(hidden)
+        return hidden
+
+    def __call__(self, prompt: str) -> torch.Tensor:
+        from difflet.backends.tpu.ops_impl import device_runtime
+
+        ids = self.tokenizer(
+            [prompt], padding="max_length", max_length=self.seq_len, truncation=True,
+            return_overflowing_tokens=False, return_length=False, return_tensors="pt",
+        ).input_ids.to(self._device)
+        hidden = None
+        failed = False
+        for owner in range(self.world):
+            out = None
+            status = _ENCODE_FAILED if failed else _ENCODE_OK  # only the owner's value is sent
+            if self.rank == owner and not failed:
+                try:
+                    with torch.no_grad():
+                        out = self._segment(hidden, ids).to(self.encoder_dtype)
+                except Exception:  # noqa: BLE001 - re-raised below on every rank
+                    logger.exception("flux.tpu_t5_segment_failed")
+                    status = _ENCODE_FAILED
+            if out is None:
+                out = torch.zeros(1, self.seq_len, self.hidden_size, dtype=self.encoder_dtype, device=self._device)
+            payload = [out, torch.tensor([status], dtype=torch.int32).to(self._device)]
+            device_runtime.broadcast(payload, src=owner)
+            # Read the flag on every rank: it also completes the collective
+            # (an unread collective result leaves the other ranks waiting).
+            failed = failed or int(payload[1].cpu()[0]) != _ENCODE_OK
+            hidden = payload[0]
+        if failed:
+            raise RuntimeError("Flux T5 prompt encoding failed on a pipeline rank")
+        return hidden.to(self.dtype).cpu()
+
+
 class HostClipPooler:
     """CLIP-L pooled projection on the host (``_get_clip_prompt_embeds``)."""
 
@@ -361,7 +496,10 @@ class TpuFluxApplication(torch.nn.Module):
 
         if bool(self.kwargs.get("enable_host_pipeline", True)):
             mark = time.monotonic()
-            self.t5 = TpuBroadcastT5Encoder(self.model_path, seq_len=self.text_seq_len, dtype=self.dtype)
+            if _t5_on_device():
+                self.t5 = TpuPipelinedT5Encoder(self.model_path, seq_len=self.text_seq_len, dtype=self.dtype)
+            else:
+                self.t5 = TpuBroadcastT5Encoder(self.model_path, seq_len=self.text_seq_len, dtype=self.dtype)
             self.clip = HostClipPooler(self.model_path, dtype=self.dtype)
             self.scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(
                 os.path.join(self.model_path, "scheduler")
@@ -534,6 +672,8 @@ __all__ = [
     "TpuBroadcastT5Encoder",
     "TpuDeviceImageVae",
     "TpuFluxApplication",
+    "TpuPipelinedT5Encoder",
+    "layer_segments",
     "device_euler_loop",
     "flux_sigmas_and_mu",
     "image_seq_len",

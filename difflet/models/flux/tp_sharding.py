@@ -85,7 +85,14 @@ class FluxTPAttnProcessor:
     the joint sequence, shared RoPE, no mask; only the attention call differs
     (heads folded into the batch axis, ``tp_q/tp_k`` so the op knows the heads
     are already sharded).
+
+    ``rope_unbind_dim`` is diffusers' ``use_real_unbind_dim``: ``-1`` is FLUX's
+    interleaved (re, im) pairs; ``-2`` the split-halves layout, for q/k weights
+    whose head channels were permuted to match (``backends/tpu/flux/rope.py``).
     """
+
+    def __init__(self, rope_unbind_dim: int = -1) -> None:
+        self.rope_unbind_dim = int(rope_unbind_dim)
 
     def __call__(self, attn, hidden_states, encoder_hidden_states=None, attention_mask=None,
                  image_rotary_emb=None):
@@ -108,8 +115,9 @@ class FluxTPAttnProcessor:
             key = torch.cat([ek, key], dim=1)
             value = torch.cat([ev, value], dim=1)
         if image_rotary_emb is not None:
-            query = apply_rotary_emb(query, image_rotary_emb, sequence_dim=1)
-            key = apply_rotary_emb(key, image_rotary_emb, sequence_dim=1)
+            unbind = self.rope_unbind_dim
+            query = apply_rotary_emb(query, image_rotary_emb, sequence_dim=1, use_real_unbind_dim=unbind)
+            key = apply_rotary_emb(key, image_rotary_emb, sequence_dim=1, use_real_unbind_dim=unbind)
 
         bsz, seq, _, head_dim = query.shape
         out_dtype = query.dtype

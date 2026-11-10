@@ -205,3 +205,81 @@ def test_denoise_refuses_a_shape_other_than_the_loaded_one(snapshot):
     app.scheduler = object()
     with pytest.raises(ValueError, match="loaded for 1024x1024"):
         app.denoise({}, num_inference_steps=4, guidance_scale=3.5, generator=None, height=512, width=512)
+
+
+def test_layer_segments_cover_every_layer_once():
+    assert [list(r) for r in mod.layer_segments(24, 4)] == [list(range(6 * i, 6 * i + 6)) for i in range(4)]
+    segs = mod.layer_segments(7, 3)
+    assert [len(r) for r in segs] == [3, 2, 2]
+    assert [i for r in segs for i in r] == list(range(7))
+
+
+def _tiny_t5():
+    from transformers import T5Config, T5EncoderModel
+
+    torch.manual_seed(0)
+    cfg = T5Config(vocab_size=50, d_model=16, d_kv=4, d_ff=32, num_layers=5, num_heads=4,
+                   relative_attention_num_buckets=8, feed_forward_proj="gated-gelu",
+                   dropout_rate=0.0)
+    return T5EncoderModel(cfg).eval()
+
+
+def _pipelined_ranks(monkeypatch, world: int, seq_len: int):
+    """One TpuPipelinedT5Encoder per simulated rank, all built from the same tiny T5."""
+    import transformers
+
+    from difflet.backends.tpu.ops_impl import device_runtime
+
+    reference = _tiny_t5()
+    state = reference.state_dict()
+
+    def load(*args, **kwargs):
+        model = _tiny_t5()
+        model.load_state_dict(state)
+        return model
+
+    monkeypatch.setattr(transformers.T5EncoderModel, "from_pretrained", staticmethod(load))
+    monkeypatch.setattr(transformers.AutoTokenizer, "from_pretrained", staticmethod(lambda *a, **k: None))
+    monkeypatch.setattr(device_runtime, "device", lambda: torch.device("cpu"))
+    monkeypatch.setattr(device_runtime, "world_size", lambda: world)
+    monkeypatch.setattr(device_runtime, "wait", lambda: None)
+    encoders = []
+    for rank in range(world):
+        monkeypatch.setattr(device_runtime, "rank", lambda rank=rank: rank)
+        encoders.append(mod.TpuPipelinedT5Encoder("unused", seq_len=seq_len, dtype=torch.float32,
+                                                  encoder_dtype=torch.float32))
+    return reference, encoders
+
+
+def test_pipelined_t5_segments_reproduce_the_hf_encoder(monkeypatch):
+    seq = 9
+    reference, encoders = _pipelined_ranks(monkeypatch, world=3, seq_len=seq)
+    assert [list(e.segments[e.rank]) for e in encoders] == [[0, 1], [2, 3], [4]]
+    ids = torch.randint(0, 50, (1, seq))
+    hidden = None
+    with torch.no_grad():
+        for enc in encoders:  # each rank's segment, the hidden state handed on as the broadcast would
+            hidden = enc._segment(hidden, ids)
+        want = reference(ids)[0]
+    torch.testing.assert_close(hidden, want, rtol=1e-5, atol=1e-5)
+
+
+def test_pipelined_t5_failure_reaches_every_rank_without_skipping_a_collective(monkeypatch):
+    from difflet.backends.tpu.ops_impl import device_runtime
+
+    _, encoders = _pipelined_ranks(monkeypatch, world=2, seq_len=4)
+    enc = encoders[1]  # the last rank: it receives segment 0, then runs its own
+    enc.tokenizer = lambda *a, **k: SimpleNamespace(input_ids=torch.zeros(1, 4, dtype=torch.long))
+    calls = []
+
+    def broadcast(tensors, src=0):
+        calls.append(src)
+        if src == 0:  # rank 0 reports a failure
+            tensors[1].fill_(mod._ENCODE_FAILED)
+
+    monkeypatch.setattr(device_runtime, "broadcast", broadcast)
+    ran = []
+    monkeypatch.setattr(enc, "_segment", lambda *a: ran.append(1))
+    with pytest.raises(RuntimeError, match="pipeline rank"):
+        enc("a fox")
+    assert calls == [0, 1] and ran == []  # every hop still reached, own segment skipped
