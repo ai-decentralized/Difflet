@@ -1232,6 +1232,30 @@ def ring_worker(rank: int, world_size: int) -> dict:
             "received": shifted.tolist()}
 
 
+def ring_cp4_worker(rank: int, world_size: int) -> dict:
+    """CP4: ring attention over four sequence blocks against plain attention over the full
+    sequence, and one ring shift of a 2-D block (the transport flattens it)."""
+    import torch.nn.functional as F
+
+    from difflet.backends.neuron.ops_impl import attention as A
+    from difflet.backends.neuron.ops_impl import collectives as C
+    from difflet.backends.neuron.ops_impl import parallel_mesh as pm
+    from difflet.pipeline.parallel_mesh import MeshSpec
+
+    C.init_parallel_mesh(MeshSpec(cp=4, tp=1))
+    cp = pm.get_axis_rank("cp")
+    gen = torch.Generator().manual_seed(0)
+    q, k, v = (torch.randn(1, 2, 16, 16, generator=gen) for _ in range(3))  # [B, H, S, d]
+    rows = slice(4 * cp, 4 * cp + 4)
+    local = [t[:, :, rows].contiguous() for t in (q, k, v)]
+    out = A.ring_attention(*local, scale=0.25)
+    ref = F.scaled_dot_product_attention(q, k, v, scale=0.25)[:, :, rows]
+    block = torch.arange(6, dtype=torch.float32).reshape(2, 3) + 10 * cp
+    shifted = C.ring_shift(block, C.get_cp_group(), 4, cp)
+    return {"max_err": (out - ref).abs().max().item(), "shape": list(out.shape),
+            "received": shifted.tolist()}
+
+
 def w1_wan_sp_worker(rank: int, world_size: int, model_dir: str, cfg: bool) -> dict:
     """The composed application with sequence parallelism: TP4 + SP, or TP2 x CFG2 + SP; two
     steps at guidance 5.0 on the fixed inputs."""

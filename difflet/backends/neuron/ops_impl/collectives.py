@@ -289,23 +289,53 @@ def seq_to_heads(tensor, group, parts: int):
     return y.permute(2, 1, 0, 3, 4).reshape(b, h // parts, parts * s, d)
 
 
+#: ``DIFFLET_NEURON_RING_SHIFT=all_to_all`` restores the zero-padded all-to-all ring shift (the
+#: A/B switch behind the ring-transport measurement). Read once at import, so compiled regions see a
+#: constant. Default ``permute``: one block per step.
+RING_SHIFT_ENV = "DIFFLET_NEURON_RING_SHIFT"
+_RING_SHIFT = os.environ.get(RING_SHIFT_ENV, "permute").strip().lower()
+if _RING_SHIFT not in ("permute", "all_to_all"):
+    raise ValueError(f"{RING_SHIFT_ENV} must be 'permute' or 'all_to_all', got {_RING_SHIFT!r}")
+
+
 def ring_shift(tensor, group, parts: int, rank: int):
     """Send ``tensor`` to the next rank of ``group`` and return the previous rank's.
 
-    ``rank`` is this rank's coordinate in ``group``. One ``all_to_all_single``: slot
-    ``(rank + 1) % parts`` of the input carries ``tensor``, the other slots zeros, and slot
-    ``(rank - 1) % parts`` of the output is the received block. ``permute_tensor`` would express
-    this directly but fails on the neuron backend (eager: a shape error; compiled: NEFF setup
-    fails). At ``parts == 2`` only the partner's slot crosses ranks; at larger degrees the zero
-    slots cost bandwidth that point-to-point send/recv would not.
+    ``rank`` is this rank's coordinate in ``group``. ``permute_tensor`` (the default) is one
+    ``all_to_all_single`` whose split sizes route this rank's block to the next rank and nothing
+    to the others, so each step moves one block. Its split sizes count rows of dimension 0, so the
+    block travels flattened (a multi-dimensional block is what made it fail before). Eager calls on
+    a strided group fall back to the all-to-all (``_contiguous_group``). ``all_to_all``
+    stacks ``parts`` slots instead, the next rank's carrying ``tensor`` and the rest zeros:
+    ``parts - 1`` blocks of traffic per step.
     """
     if parts == 1:
         return tensor
-    zeros = torch.zeros_like(tensor)
-    slots = [zeros] * parts
-    slots[(rank + 1) % parts] = tensor
-    out = _wait(fc.all_to_all_single(torch.stack(slots).contiguous(), None, None, group))
-    return out[(rank - 1) % parts]
+    permute = torch.compiler.is_compiling() or _contiguous_group(group, parts)
+    if _RING_SHIFT == "all_to_all" or not permute:
+        zeros = torch.zeros_like(tensor)
+        slots = [zeros] * parts
+        slots[(rank + 1) % parts] = tensor
+        out = _wait(fc.all_to_all_single(torch.stack(slots).contiguous(), None, None, group))
+        return out[(rank - 1) % parts]
+    to_next = [(i + 1) % parts for i in range(parts)]
+    flat = fc.permute_tensor(tensor.contiguous().reshape(-1), to_next, group)
+    return _wait(flat).reshape(tensor.shape)
+
+
+def _contiguous_group(group, parts: int) -> bool:
+    """Whether ``group`` is ``parts`` consecutive ranks starting at a multiple of ``parts``.
+
+    Eager ``permute_tensor`` (an uneven-split all-to-all) accepts only such groups on the neuron
+    backend ("replica group start ranks must be multiples of world size"), so an eager shift on a
+    strided group (CP ranks one TP block apart) takes the all-to-all path. Compiled graphs accept
+    strided groups.
+    """
+    if group is None:
+        ranks = list(range(dist.get_world_size()))
+    else:
+        ranks = dist.get_process_group_ranks(group)
+    return ranks == list(range(ranks[0], ranks[0] + parts)) and ranks[0] % parts == 0
 
 
 def heads_to_seq(tensor, group, parts: int):
