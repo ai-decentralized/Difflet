@@ -152,7 +152,8 @@ TeaCache (adaptive), TAEF1, and `--host-vae` are refused on GPUs for these model
 9. Experimental single-GPU BF16 text-to-video for
    `hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v`, separate from the Trainium
    HunyuanVideo 1.5 path. Classifier-free guidance runs both branches in sequence on one GPU.
-   Eager and compiled output and warm latency match vLLM-Omni on one RTX PRO 6000; see the
+   On one RTX PRO 6000, eager and compiled output meet a relative accuracy bar against
+   vLLM-Omni and warm latency is within 10% of it; see the
    [HunyuanVideo 1.5 CUDA guide](docs/verification/hunyuanvideo15-cuda.md).
 
 Measured timings against stock diffusers, and the full pass/limit matrix, are in
