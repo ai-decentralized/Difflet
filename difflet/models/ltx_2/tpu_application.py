@@ -468,8 +468,15 @@ class TpuLTX2Application(torch.nn.Module):
         transformer = self._require_transformer("forward")
         validate_ltx_2_dit_inputs(bundle, config=transformer.config, dtype=self.dtype)
         device = device_runtime.device()
+        # Contiguous before the copy: the orchestrator's packed latents arrive as a
+        # transposed view (hidden_states stride (2310, 1, 2310) at 480x704x49), the
+        # warmup's example inputs are contiguous, and under DIFFLET_TPU_COMPILE=1
+        # Dynamo's stride guard then recompiled the whole DiT on the first real
+        # request of every process (~60 s, 2026-11-10).
         with torch.no_grad():
-            video, audio = transformer.forward(*[t.to(device) for t in bundle.as_model_inputs()])
+            video, audio = transformer.forward(
+                *[t.contiguous().to(device) for t in bundle.as_model_inputs()]
+            )
         return video.cpu(), audio.cpu()
 
     def __call__(self, *args: Any, **kwargs: Any):
