@@ -24,6 +24,7 @@ def _cli():
         ("black-forest-labs/FLUX.1-schnell", "flux"),
         ("Wan-AI/Wan2.2-T2V-A14B-Diffusers", "wan"),
         ("Wan-AI/Wan2.1-T2V-14B-Diffusers", "wan"),
+        ("hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v", "hunyuan_video_15"),
     ],
 )
 def test_cuda_backend_routes_to_the_gpu_orchestrator(monkeypatch, model_id, model_type):
@@ -44,13 +45,13 @@ def test_other_models_on_cuda_point_at_the_trainium_path(monkeypatch):
     with pytest.raises(SystemExit) as exc:
         _cli()._get_orchestrator(
             argparse.Namespace(
-                model_id="hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
+                model_id="hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_t2v"
             )
         )
     message = str(exc.value)
     assert (
         "DIFFLET_BACKEND=trainium" in message
-        and "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v" in message
+        and "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-720p_t2v" in message
     )
     # Wan runs on the GPU flow: the fallback does not name it.
     assert "Wan" not in message

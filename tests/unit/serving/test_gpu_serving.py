@@ -196,6 +196,7 @@ def test_request_shape_must_equal_the_profile_shape(spec, source):
     assert exc.value.code == "profile_mismatch"
 
 
+@_specs(lambda s: bool(s.prompt_budgets))
 def test_prompt_over_the_text_encoder_budget_is_refused(spec, source):
     (budget,) = spec.prompt_budgets
     limit = budget.drop_prefix_tokens + budget.max_tokens
@@ -204,6 +205,13 @@ def test_prompt_over_the_text_encoder_budget_is_refused(spec, source):
     with pytest.raises(DiffletServingError) as exc:
         _validator(bundle, n_tokens=limit + 1).validate(_request(spec))
     assert exc.value.code == "prompt_too_long"
+
+
+@_specs(lambda s: not s.prompt_budgets)
+def test_a_model_without_prompt_budgets_leaves_long_prompts_to_its_driver(spec, source):
+    # HunyuanVideo 1.5's driver crops its own chat template and glyph text; the serving
+    # validator must not apply a raw-string limit of its own.
+    _validator(_prepare(spec, _profile(spec))).validate(_request(spec, prompt="cat " * 2000))
 
 
 def test_preload_loads_the_tokenizers_from_the_pinned_snapshot(spec, source, monkeypatch):
@@ -607,3 +615,33 @@ def test_videos_sync_serves_a_clip_through_the_gpu_adapter(
             in refused.text
         )
         assert len(adapter.pipe.app.calls) == n
+
+
+def test_gpu_serving_defaults_cfg_parallel_off_under_a_trainium_cfg_layout(monkeypatch, tmp_path):
+    """HunyuanVideo 1.5's registry layout (TP2 x CFG2) is Trainium's. Like the registry tp,
+    GPU serving must not inherit it: CFG-parallel is opt-in, as on the GPU CLI."""
+    from difflet.registry import resolve_model
+    from difflet.serving.model_registry import resolve_serving_model
+    from difflet.serving.options import ServeOptions
+
+    model = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
+    assert resolve_model(model).default_parallel.cfg_parallel_enabled  # the Trainium layout
+    monkeypatch.setenv("DIFFLET_BACKEND", "cuda")
+    resolved = resolve_serving_model(ServeOptions(model_id=model, cache_dir=str(tmp_path)))
+    assert resolved.profile.parallel.cfg_parallel_enabled is False
+    assert resolved.profile.parallel.tp_degree == 1
+    explicit = ServeOptions(model_id=model, cache_dir=str(tmp_path), cfg_parallel=True)
+    with pytest.raises(DiffletServingError, match="cfg-parallel"):
+        resolve_serving_model(explicit)
+
+
+def test_a_model_served_only_on_gpus_is_refused_cleanly_elsewhere(monkeypatch, tmp_path):
+    """HunyuanVideo 1.5 is served on GPUs only. Elsewhere `difflet serve` gets a serving
+    error it prints in one line, not a traceback."""
+    from difflet.serving.model_registry import resolve_serving_model
+    from difflet.serving.options import ServeOptions
+
+    monkeypatch.setenv("DIFFLET_BACKEND", "cpu")
+    model = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
+    with pytest.raises(DiffletServingError, match="not enabled for serving"):
+        resolve_serving_model(ServeOptions(model_id=model, cache_dir=str(tmp_path)))
