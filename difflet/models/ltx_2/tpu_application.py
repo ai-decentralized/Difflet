@@ -394,8 +394,11 @@ class TpuLTX2Application(torch.nn.Module):
         module = transformer._prepare_module().to(device)
         device_runtime.wait()
         _hbm_probe("DiT weights on the chip", next(module.parameters()))
-        # Not yet measured under torch.compile, so off unless DIFFLET_TPU_COMPILE=1.
-        module = device_runtime.maybe_compile(module, default=False)
+        # Compiled by default (DIFFLET_TPU_COMPILE=0 turns it off): measured on a
+        # v5e-4 at 480x704x49, 20 steps, a step is 220 ms against 740 ms eager
+        # (request 8.4 s vs 18.9 s); the first call compiles for ~155 s with a
+        # cold tier-3 cache. Output vs eager: 35.4 dB, differences in fast motion.
+        module = device_runtime.maybe_compile(module, default=True)
         transformer.module = module
         seconds = transformer.warmup_eager(module, device)
         print(f"[ltx_2] tpu warmup (first compile) in {seconds:.1f}s", flush=True)
