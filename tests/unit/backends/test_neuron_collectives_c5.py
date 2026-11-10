@@ -294,6 +294,22 @@ def test_ring_attention_on_four_ranks_matches_full_attention():
         assert r["received"] == [float(partner)] * 2
 
 
+@pytest.mark.parametrize("transport", ["permute", "all_to_all"])
+def test_ring_attention_cp4_matches_full_attention(monkeypatch, transport):
+    """CP4, where the transports differ (one block per step against ``cp - 1``): both are exact
+    attention, and a 2-D block reaches the next rank intact."""
+    from tests.unit.backends._neuron_gloo import run_ranks
+    from tests.unit.backends._neuron_workers import ring_cp4_worker
+
+    monkeypatch.setenv("DIFFLET_NEURON_RING_SHIFT", transport)
+    for rank, r in enumerate(run_ranks(ring_cp4_worker, world_size=4)):
+        assert r["shape"] == [1, 2, 4, 16]
+        assert r["max_err"] < 1e-5
+        prev = (rank - 1) % 4
+        expected = [[10.0 * prev + 3 * row + j for j in range(3)] for row in range(2)]
+        assert r["received"] == expected
+
+
 def test_shard_has_the_strides_of_a_fresh_tensor():
     """A batch-1 sequence shard narrowed behind a size-1 axis counts as contiguous yet keeps the
     parent's stride there; the shard must not, or the first compiled block (fed the shard) and
