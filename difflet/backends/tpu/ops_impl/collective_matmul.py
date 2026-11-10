@@ -30,11 +30,17 @@ compiles one program per process and inlines these rings into it (their
 ``collective-permute``s all carry ``channel_id=1`` and pair by order). Values
 that differ by rank therefore enter the compiled graph as runtime tensors (the
 ring position is ``_STATE["ids"]`` for this reason), never as Python constants
-the compiler can specialize on. LTX-2 broke this by padding its sequence inside
-the graph and slicing each rank's shard at a constant offset: XLA folded the pad
-away on some ranks only, the programs diverged, and a chip halted in the first
-ring hop (v5e-4, torch_tpu 0.2.0, 2026-11-10; ``benchmark/tpu_profile/
-cm_padded_repro.py``). Pad before the graph, or pass the offset as a tensor.
+the compiler can specialize on. A ``collective-permute`` writes into its peer at the
+receive buffer's offset in *its own* program's buffer assignment, so those
+offsets must agree too. LTX-2 broke this by padding its sequence inside the
+graph and slicing each rank's shard at a constant offset: XLA kept the pad only
+on rank 3 (whose shard holds the pad rows), rank 3's program grew a copy and a
+fusion, and its receive buffers moved by +18.9 MB; the peers' writes landed on
+other live buffers, and the run hung, halted a core or produced wrong values
+(v5e-4, torch_tpu 0.2.0, 2026-11-10; ``benchmark/tpu_profile/
+cm_padded_repro.py`` and ``hlo_rank_diff.py``). With the offset passed as a
+tensor all four programs, and their receive-buffer offsets, were identical and
+the result right. Pad before the graph, or pass rank-dependent values as tensors.
 
 **Shard order.** The model's sequence shard for TP rank ``r`` is rows
 ``[r*S/tp, (r+1)*S/tp)`` (``scatter_tp_dim``). The ring runs in physical

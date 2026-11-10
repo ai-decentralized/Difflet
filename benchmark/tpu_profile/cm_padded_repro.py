@@ -119,6 +119,11 @@ def _worker(rank, world, args, reply_q):
             return x
 
         def model(xf, off):
+            if args.salt:
+                # A distinct constant per run: a new graph hash, so every cache
+                # layer misses and the compiler really runs (and dumps). XLA
+                # folds the zero away; the optimized program is unchanged.
+                xf = xf + xf.new_tensor(args.salt) * 0
             if args.pad_mode == "dynamic":
                 # Padded in the graph as in "full", but the shard offset is a
                 # runtime input, so every rank compiles the same program.
@@ -241,6 +246,8 @@ def main() -> int:
     parser.add_argument("--blocks", type=int, default=2)
     parser.add_argument("--pad", type=int, default=1)
     parser.add_argument("--pad-mode", default="full", choices=("full", "shard", "outside", "dynamic"))
+    parser.add_argument("--salt", type=float, default=0.0,
+                        help="nonzero: force a fresh compile (see model())")
     parser.add_argument("--trace", default="", help="jax.profiler trace dir (one subdir per rank)")
     parser.add_argument("--trace-after", type=float, default=90.0,
                         help="seconds after which a timer thread stops the trace (hang case)")
