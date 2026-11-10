@@ -8,6 +8,8 @@ forward exactly. The single-block token order for tp>1 is checked on its own.
 
 from __future__ import annotations
 
+import importlib
+
 import pytest
 import torch
 import torch.nn.functional as F
@@ -24,10 +26,18 @@ from .test_flux_tp_sharding import _TINY, _inputs
 
 @pytest.fixture(autouse=True)
 def _mesh():
-    pm.destroy_parallel_mesh()
-    pm.init_parallel_mesh(MeshSpec(tp=1))
+    # Resolved now, not at collection: sp.install / the SP forward import
+    # parallel_mesh when they run, and another test in the same worker may have
+    # dropped difflet.backends.tpu.* from sys.modules in between
+    # (test_torch_megatron.py::test_weights_and_checkpoint_import_without_tpu),
+    # leaving the module bound above a stale, never-initialized copy.
+    mesh = importlib.import_module("difflet.backends.tpu.ops_impl.parallel_mesh")
+    for module in {mesh, pm}:
+        module.destroy_parallel_mesh()
+        module.init_parallel_mesh(MeshSpec(tp=1))
     yield
-    pm.destroy_parallel_mesh()
+    for module in {mesh, pm}:
+        module.destroy_parallel_mesh()
 
 
 def test_single_order_interleaves_each_ranks_text_then_image():
