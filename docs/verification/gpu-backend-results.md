@@ -75,3 +75,13 @@ supplementary; an official compiled comparison remains unavailable. See the
 5. The Trainium byte-identity of the Flux modeling split on a trn2 host was checked separately
    (HLO and a FLUX.1-dev image identical before and after); TPU has no compile/load lifecycle to
    run.
+
+## LTX-2 CUDA
+
+Experimental single-GPU BF16 audiovisual generation is qualified in eager and compiled
+modes against pinned native Omni, using an explicit native-compatible generation profile.
+The four-way B200 comparison measures Difflet eager/compiled and native eager/corrected-private
+compiled on reduced and larger workloads. Upstream default native compilation failed quality
+and is not a qualified performance baseline. Larger warm medians are 20.795/15.026 seconds
+for Difflet and 20.445/15.204 seconds for native. See the [LTX-2 guide](ltx2-cuda.md) for matched
+settings, cold/compile cost, memory, limitations and frontend versus model coverage.

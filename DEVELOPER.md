@@ -529,3 +529,13 @@ pre-commit run --files <paths>      # run the hooks by hand
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the pull-request checklist.
+
+### LTX-2 CUDA
+
+The LTX-2 spec routes through the existing generic GPU application, CLI and serving flow;
+its refusals are spec data, enforced by the shared GPU policy. Its CUDA directory owns the
+transformer config (and the shape constraints), single-device transformer construction,
+BF16 compile options, native RMS preservation and the opt-in official-compatible sampler.
+The shared compile helper accepts optional per-model options; models without them retain
+its original mode. Trainium/Neuron/TPU modeling and pipeline defaults are unchanged.
+See [the LTX-2 CUDA guide](docs/verification/ltx2-cuda.md) for setup, scope and measurements.

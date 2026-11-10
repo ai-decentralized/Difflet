@@ -29,7 +29,7 @@ from pathlib import Path
 from typing import Any
 
 from difflet.backends.gpu.policy import (
-    cfg_parallel_does_not_apply,
+    cfg_parallel_refusal,
     gpu_platform,
     is_set,
     unsupported_parallel,
@@ -160,7 +160,7 @@ def refuse_unsupported_profile(profile: ServingProfile, spec: ModelSpec) -> None
     parallel = profile.parallel
     for mode in unsupported_parallel(spec, parallel, gpu_platform()):
         if mode == "cfg":
-            raise feature_not_supported(f"{_tag(spec)} {cfg_parallel_does_not_apply(spec)}")
+            raise feature_not_supported(f"{_tag(spec)} {cfg_parallel_refusal(spec)}")
         _refuse(spec, PARALLEL_MODE_FLAGS[mode])
     if parallel.cfg_parallel_enabled:
         _refuse(spec, "--cfg-parallel (one CFG branch per GPU, a `difflet run` feature)")

@@ -26,7 +26,7 @@ from types import SimpleNamespace
 
 from difflet.cli.orchestrators.base import ModelOrchestrator
 from difflet.backends.gpu.policy import (
-    cfg_parallel_does_not_apply,
+    cfg_parallel_refusal,
     is_set,
     unsupported_parallel,
 )
@@ -128,11 +128,13 @@ class GpuOrchestrator(ModelOrchestrator):
             if mode == "cfg":
                 # main._validate_cfg_parallel rejects it first for the distilled models; this
                 # is the backstop for a direct orchestrator caller.
-                raise SystemExit(f"{self.tag} {cfg_parallel_does_not_apply(self.spec)}")
+                raise SystemExit(f"{self.tag} {cfg_parallel_refusal(self.spec)}")
             self._refuse(PARALLEL_MODE_FLAGS[mode])
         for attribute, label in self.spec.refused_cli_flags:
             if is_set(getattr(args, attribute, None)):
                 self._refuse(label)
+        if not self.spec.accepts_negative_prompt and is_set(getattr(args, "negative_prompt", None)):
+            self._refuse("--negative-prompt")
         if self.spec.guidance == "none" and getattr(args, "guidance_scale", None) is not None:
             # The application refuses the value as a silent no-op, and the CLI must not hide
             # that by dropping the flag.
@@ -176,9 +178,10 @@ class GpuOrchestrator(ModelOrchestrator):
     def generate_kwargs(self, request=None) -> dict:
         """``app.generate`` kwargs; a batch ``request`` (``RequestSpec``) overrides the flags.
 
-        A request's steps/guidance win over ``--steps``/``--guidance-scale``, which win over
-        the model defaults (``stage_loop.effective``); its seed replaces ``--seed``. A request
-        field this model cannot honour raises, so that request is failed, not altered.
+        A request's steps/guidance/negative prompt win over ``--steps``/``--guidance-scale``/
+        ``--negative-prompt``, which win over the model defaults (``stage_loop.effective``); its
+        seed replaces ``--seed``. A request field this model cannot honour raises, so that
+        request is failed, not altered.
         """
         from difflet.cli.dp import stage_loop
 
@@ -196,7 +199,7 @@ class GpuOrchestrator(ModelOrchestrator):
             )
         elif request is not None and request.guidance_scale is not None:
             raise ValueError(f"{self.tag} {self.model_id} takes no guidance_scale (request)")
-        negative = None if request is None else request.negative_prompt
+        negative = stage_loop.effective(request, args, "negative_prompt", None)
         if negative is not None:
             if not spec.accepts_negative_prompt:
                 raise ValueError(f"{self.tag} {self.model_id} takes no negative_prompt (request)")
@@ -231,8 +234,16 @@ class GpuOrchestrator(ModelOrchestrator):
         # run() is download → compile → generate: refuse here too, before the snapshot pull.
         self.refuse_unsupported()
         from difflet.pipeline.path_resolver import resolve_model_path
+        from difflet.registry import resolve_model
 
-        resolve_model_path(self.model_id, revision=self.args.revision, local_files_only=False)
+        # The registry's subset when the model declares one; None keeps the diffusers default.
+        entry = resolve_model(self.model_id, model_type=self.spec.model_type)
+        resolve_model_path(
+            self.model_id,
+            revision=self.args.revision,
+            local_files_only=False,
+            allow_patterns=entry.download_patterns,
+        )
         print(f"[difflet] weights ready for {self.model_id}")
 
     def compile(self) -> None:

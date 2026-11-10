@@ -1180,6 +1180,10 @@ def _validate_dp(args: argparse.Namespace) -> None:
 
 def _dispatch_dp(args: argparse.Namespace) -> None:
     """Route batch/DP generate runs through the router; exits the process."""
+    if _platform().capabilities.flow == "gpu":
+        # Refuse an unsupported option before any request or checkpoint I/O; the workers
+        # would otherwise fail every request with it.
+        _get_orchestrator(args).refuse_unsupported()
     from difflet.cli.dp import router
     from difflet.cli.dp.requests_io import RequestSpec, load_requests_jsonl
 

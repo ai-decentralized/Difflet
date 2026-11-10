@@ -504,7 +504,7 @@ def _register_builtin_ltx_2() -> None:
         # the host after the generate launch.
         # TPU: DiT on the chips, Gemma-3/connectors/VAEs on the host
         # (see difflet/models/ltx_2/tpu_application.py).
-        backends=("trainium", "neuron", "tpu"),
+        backends=("trainium", "neuron", "tpu", "cuda"),
         download_patterns=(
             "*.json",
             "*.txt",
