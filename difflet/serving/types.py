@@ -20,7 +20,7 @@ OutputModality = Literal["image", "video"]
 ServingPlacement = Literal["host", "neuron"]
 StageRole = Literal["prompt_encoder", "denoiser", "decoder", "pipeline"]
 StageKind = Literal["extracted", "opaque_pipeline"]
-StagePlacement = Literal["host", "neuron", "hybrid", "tpu", "cuda"]
+StagePlacement = Literal["host", "neuron", "hybrid", "tpu", "cuda", "neuron_native"]
 
 
 @dataclass(frozen=True)
@@ -118,9 +118,10 @@ class StageRuntimeSpec:
                     "allocation, topology, or compiled artifact"
                 )
             return
-        if self.placement in {"tpu", "cuda"}:
+        if self.placement in {"tpu", "cuda", "neuron_native"}:
             # On an accelerator like a neuron stage, but without a compiled
-            # artifact: the TPU and CUDA backends execute the graph eagerly.
+            # artifact: the TPU and CUDA backends execute the graph eagerly, and the
+            # torch-native neuron backend compiles into its own NEFF cache at load.
             # Requiring one here would be requiring a file that is never
             # produced, and loosening the neuron rule instead would drop a
             # real invariant.

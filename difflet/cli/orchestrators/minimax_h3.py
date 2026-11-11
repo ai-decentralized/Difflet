@@ -134,31 +134,9 @@ def _release_neuron_app(app) -> None:
         torch.neuron.empty_cache()
 
 
-class _NeuronH3DiT:
-    """The denoise loop's DiT callable on the neuron backend: the Trainium graph's positional
-    call on host tensors in, the host ``(video, audio)`` velocity pair out. The two bool masks
-    go to the device as int32 (the application's call); every rank must call it."""
-
-    def __init__(self, app) -> None:
-        self.app = app
-        self.seconds: list[float] = []
-
-    def __call__(self, *inputs):
-        import time
-
-        import torch
-
-        device = self.app.device
-        moved = []
-        for tensor in inputs:
-            if tensor.dtype == torch.bool:
-                tensor = tensor.to(torch.int32)
-            moved.append(tensor.contiguous().to(device))
-        start = time.perf_counter()
-        video, audio = self.app(*moved)
-        video, audio = video.cpu(), audio.cpu()
-        self.seconds.append(time.perf_counter() - start)
-        return video, audio
+from difflet.backends.neuron.minimax_h3.resident import (  # noqa: E402
+    NeuronH3DiTCall as _NeuronH3DiT,
+)
 
 
 class MiniMaxH3Orchestrator(ModelOrchestrator):

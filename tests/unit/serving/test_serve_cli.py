@@ -140,8 +140,8 @@ def test_serve_help_exposes_operational_tuning_but_hides_artifact_policy(capsys)
     assert "--teacache-calibration" in out
     assert "Wan-AI/Wan2.2-T2V-A14B-Diffusers" not in out
     assert "hunyuanvideo-community/HunyuanVideo-1.5" not in out
-    assert "Wan-AI/Wan2.1-T2V-14B-Diffusers" in out
-    # Argparse may wrap this long choice between the organization and model.
+    # Argparse may wrap these long choices between the organization and model.
+    assert "AI/Wan2.1-T2V-14B-Diffusers" in out
     assert "community/HunyuanVideo" in out
     assert "Lightricks/LTX-2" in out
     assert "FLUX.1-dev" in out

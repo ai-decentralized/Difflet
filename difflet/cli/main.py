@@ -28,6 +28,7 @@ SERVE_VALID_MODELS = {
     "hunyuanvideo-community/HunyuanVideo",
     "Qwen/Qwen-Image",
     "Lightricks/LTX-2",
+    "MiniMaxAI/MiniMax-H3",
 }
 
 _MODEL_TYPE: dict[str, str] = {
