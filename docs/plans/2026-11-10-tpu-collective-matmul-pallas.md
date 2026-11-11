@@ -142,6 +142,168 @@ P0 removes most of the write-back, the kernel's remaining target is the 3-7%
 wait and the kernel is likely not worth it; otherwise continue with the Pallas
 AG kernel below, which writes each tile of the product in place.
 
+## P0 result (2026-11-10): concat helps Wan, not LTX-2, and is not output-equal
+
+`DIFFLET_TPU_SP_AG_ASSEMBLE=concat` (default `dus`). Same tree (md5 77c0c1ad4ed5),
+back to back, main's bench, rank-0 traces:
+
+| | Wan dus | Wan concat | LTX-2 dus | LTX-2 concat |
+|---|---|---|---|---|
+| step | 292.6 ms | 275.1 ms (-6.0%) | 189.7 ms | 194.2 ms (+2.4%) |
+| window (20 steps) | 5848.5 | 5468.8 | 3814.4 | 3806.6 |
+| compute | 5399.0 | 5022.4 | 2993.6 | 2870.8 |
+| ICI wait | 192.9 | 152.5 | 258.6 | 390.1 |
+
+- `dynamic-update-slice` is gone; the assembly costs instead ~480 ms (Wan:
+  copy +130, reshape +105, a `while` from the runtime-indexed `take` +106,
+  fusion +110) -- net -380 ms.
+- LTX-2 (289-row halves) is ICI-bound: the compute saved (-123 ms) became wait
+  (+131 ms). Less HBM traffic alone does not help it.
+- Op parity at Wan shapes (1170 rows/rank, hidden 5120): ag1/2/3 vs plain
+  gather + linear are 0.0 in **both** modes.
+- End to end the outputs differ: Wan dus vs concat 29.06 dB, while TP vs dus is
+  43.87 dB and TP vs concat 29.43 dB (sha256 TP 8e646ad9b22e, dus e41edd1e23ab,
+  concat 495847095139, each deterministic over 3 runs). LTX-2 dus vs concat
+  43.75 dB (ef75047e8a34 / ec137f0d0fec). The Wan difference follows the
+  content (largest on the subject), with no band at shard boundaries -- a
+  trajectory drift ~5x the TP/SP noise, cause not found (a one-step forward
+  comparison is the next check). Not checked: Qwen, FLUX, HunyuanVideo.
+
+Decision: keep `dus` as default; continue with the Pallas AG kernel, which
+writes each product tile once at its final rows (removing the remaining
+assembly cost on Wan). For LTX-2 the kernel's value is overlap control, not
+HBM traffic.
+
+## Kernel result (2026-11-11): Wan -8.3% per step, LTX-2 flat, outputs within the TP/SP spread
+
+`difflet/backends/tpu/ops_impl/collective_matmul_pallas.py`, behind
+`DIFFLET_TPU_SP_KERNEL=pallas` (default `jax`), AG only. What got it there,
+op-level (plain JAX, v5e-4, `benchmark/tpu_profile/cm_pallas_bench.py`, ms per call):
+
+| version | Wan q/k/v | Wan FFN up | LTX-2 q/k/v | LTX-2 FFN up |
+|---|---|---|---|---|
+| JAX ring (dus) | 1.259 | 1.050 | 0.445 | 0.500 |
+| v1: emit_pipeline per (hop, weight, half) | 1.541 | 1.181 | 0.606 | 0.630 |
+| v3: halves resident in VMEM, VMEM->VMEM remote DMA | 1.241 | 1.074 | 0.464 | 0.540 |
+| v4: one weight-tile stream over every (hop, weight, tile), runtime loop | **1.185** | **1.056** | **0.406** | **0.517** |
+
+- Ablation: communication is fully hidden from v3 on (kernel == kernel without
+  remote copies, within 0.001 ms); what is left is the matmul.
+- Dead ends: pre-transposed weights (no change); wider column tiles (worse:
+  each pipeline's first tile load is exposed); padding the halves to 16 rows and
+  one (2*hrp)-row dot per tile ("v5": +2% on Wan q/k/v, nothing elsewhere, and
+  Mosaic only slices tiled dims in whole tiles, so it needs an XLA pad first).
+- A plain Pallas matmul equals XLA at the same shape
+  (`pallas_matmul_sweep.py`); the kernel's gap to the one-chip XLA einsum is the
+  small M (585 / 289 rows per dot), not the kernel.
+- Fully unrolled, the stream took 225 s to compile at Wan's FFN shape; a
+  `fori_loop` over a hop's tiles: 5-10 s.
+- `has_side_effects=True` breaks torch_tpu (SPMD partitioner: "Side-effect HLO
+  must have sharding"); the kernel does not set it.
+
+Through torch_tpu (`cm_ops_parity.py`, `DIFFLET_TPU_SP_KERNEL=pallas`, Wan and
+LTX-2 shapes, all four ranks): ag1/ag2/ag3 vs plain gather + linear 0.0,
+including two calls in one graph. No fallback.
+
+Full models, main's bench, same tree (md5 011bdf616420), back to back:
+
+| | Wan jax | Wan pallas | LTX-2 jax | LTX-2 pallas |
+|---|---|---|---|---|
+| step | 292.4 ms | **268.0 ms (-8.3%)** | 190.1 ms | 190.5 ms |
+| window (20 steps) | 5832.4 | 5350.9 | 3798.4 | 3735.3 |
+| `dynamic-update-slice` | 643.1 | 0 | 264.7 | 0 |
+| ICI wait | 192.9 | 85.5 | 258.5 | 111.8 |
+
+- Wan pays ~250 ms of relayout copies/reshapes instead: 585-row halves are not
+  a multiple of the (8, 128) HBM tile, so `(B, n, 2, 585, N) -> (B, 4680, N)` and
+  the input split are real copies. Removing them needs rows per rank padded to a
+  multiple of 16 outside the graph (as LTX-2 pads), i.e. a model change.
+- LTX-2 is ICI-bound: the compute saved becomes wait, as with concat.
+
+Output (Wan, `sp_step_drift.py`, PSNR of the decoded frames):
+
+| | TP vs jax | jax vs pallas | TP vs pallas |
+|---|---|---|---|
+| 1 step, seed 42 | 49.88 | 50.47 | 49.88 |
+| 4 steps, seed 42 | 49.04 | 49.47 | 49.40 |
+| 20 steps, seed 42 | 43.87 | 26.09 | 26.23 |
+| 20 steps, seed 7 | 38.87 | 45.85 | 38.38 |
+| 20 steps, seed 1234 | 43.46 | 41.14 | 44.75 |
+
+Per step the three agree at the bf16 noise level; after 20 steps which pair
+drifts apart depends on the seed (each configuration is deterministic over
+three runs). Read: the kernel is another valid rounding, like TP vs SP. Not
+checked: more seeds, a seed-independent quality metric (fp32 reference,
+perceptual), LTX-2's seed spread, a visual review of the seed-42 output, Qwen /
+FLUX / HunyuanVideo. Open risk: consecutive kernels share the barrier semaphore
+(`collective_id=0`); no failure seen, not proven safe.
+
+### The other models (2026-11-11, same tree md5 011bdf616420, main's bench)
+
+| model | step: JAX ring -> kernel | PSNR jax vs kernel | PSNR TP vs jax (floor) | note |
+|---|---|---|---|---|
+| Qwen-Image | 178.0 -> 179.7 ms | inf (bit-identical) | 47.03 | no `dynamic-update-slice` in the jax trace; ICI -140 ms, compute +189 ms |
+| FLUX | 156.1 -> 157.3 ms | 43.90 | 41.52 | single blocks' ag4 (768x3 + 3072) fell back to the ring; dual blocks: dus -253 ms, kernel +545 vs fusion -186 |
+| HunyuanVideo | 517.8 -> 518.1 ms | 42.52 | 45.55 | the step is bound by the dense single blocks' all-reduce (1.0 s / 20 steps) |
+
+The kernel pays only where the ring's `dynamic-update-slice` is expensive (Wan);
+where XLA already fuses the ring's writes (Qwen-Image) or the dus is small,
+its matmul is a little slower than XLA's einsum and it loses 1-2%.
+
+### HunyuanVideo single-stream blocks under SP (`DIFFLET_TPU_SP_SINGLE=1`)
+
+`backends/tpu/hunyuan_video/sp.py`: the 40 single-stream blocks run on a
+contiguous chunk of the joint [latent | text] sequence (10496 = 4 x 2624; a chunk
+may straddle the boundary), ag4 (q|k|v|mlp) + rs2 as FLUX's single blocks; the
+first block cuts, the last gathers. Same tree (md5 3d32d564e9bd), back to back:
+
+| | dual-only SP | dual + single SP |
+|---|---|---|
+| step | 516.1 ms | **502.2 ms (-2.7%; -8.7% vs TP 549.9)** |
+| window (20 steps) | 10322.1 | 10003.7 |
+| ICI wait | 1042.5 (all-reduce 1025.7) | **141.6** |
+| `dynamic-update-slice` | -- | 646.3 (the ag4 rings) |
+| PSNR vs TP | 45.55 | 44.35 (dual-only vs single: 45.68) |
+
+First attempt hung in the first forward: the cut was a Python-constant slice of
+the in-graph concatenation; ranks 0-2's chunks lie inside the latent, rank 3's
+holds the text, so XLA folded the concatenation on 0-2 only and the programs
+diverged (rule 1 again). The cut is now `index_select` with a per-rank row
+buffer.
+
+The ag4's dus, next (all single-stream SP; tree d9e05f83d1aa for jax / pallas,
+the kernel now takes weights of different widths through one common tile,
+q|k|v 768 + mlp 3072 -> 384):
+
+| HunyuanVideo | step | window | `dynamic-update-slice` | PSNR vs TP |
+|---|---|---|---|---|
+| TP | 549.9 ms | | | |
+| dual-only SP | 516.1 | 10322.1 | -- | 45.55 |
+| + single SP, JAX ring | 500.7 | 10023.6 | 646.3 | 44.35 |
+| + single SP, concat assembly | 493.9 | 9846.1 | 0 (copy +142, while +224) | 42.86 |
+| + single SP, **Pallas kernel** | **478.0 (-13.1% vs TP)** | **9525.4** | 0 | 42.86 |
+
+The kernel's video is bit-identical to the concat assembly's (sha256
+f13f00fb7aba both); the JAX ring's is reproducible across trees (03e10d9b7119).
+Each configuration is deterministic over three runs.
+
+### FLUX with the mixed-width kernel (single blocks' ag4 on the kernel)
+
+A first rerun looked identical to the old one -- torch_tpu's compilation cache
+keys a `jax_op` by name and signature, so the unchanged op name reused the
+ring program (num_compilations=0, 18.8 s warm-up, same sha256). Op names now
+carry a hash of the two source files. Fresh compile (78 s, num_compilations=1,
+no fallback), tree 077ab253f18d:
+
+| FLUX (28 steps) | TP | SP, JAX ring | SP, Pallas kernel |
+|---|---|---|---|
+| step | 175.2 ms | 156.5 | **140.6 (-10.2%; -19.7% vs TP)** |
+| window | | 4329.5 | 3890.5 |
+| `dynamic-update-slice` | | 1171.1 | 0 |
+| PSNR vs TP | | 41.52 | 39.52 (jax vs kernel 44.91) |
+
+Not checked: other seeds, a visual review (TP vs kernel max |d| 199/255).
+
 ## Steps
 
 | # | Work | Validation | Estimate |
