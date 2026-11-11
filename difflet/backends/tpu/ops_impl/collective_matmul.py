@@ -56,6 +56,69 @@ import torch
 
 SP_ENV = "DIFFLET_TPU_SP"
 
+#: How the all-gather ring builds its output. ``dus`` (default): each hop's
+#: products are written into the full output with ``dynamic_update_slice``.
+#: ``concat``: every hop's products are kept and the output is built once at
+#: the end (a gather by the runtime ring position). Same values; the profile of
+#: 2026-11-10 put the per-hop writes at 7-11% of an SP step (Wan, LTX-2).
+AG_ASSEMBLE_ENV = "DIFFLET_TPU_SP_AG_ASSEMBLE"
+
+
+def ag_assemble_mode() -> str:
+    mode = os.environ.get(AG_ASSEMBLE_ENV, "dus").strip().lower() or "dus"
+    if mode not in ("dus", "concat"):
+        raise ValueError(f"{AG_ASSEMBLE_ENV} must be 'dus' or 'concat', got {mode!r}")
+    return mode
+
+
+#: What runs the all-gather + matmul (overrides the model's default, see
+#: :func:`set_kernel_default`). ``jax``: the ring below, XLA schedules it.
+#: ``pallas``: ``collective_matmul_pallas``'s kernel (VMEM-resident halves, remote
+#: DMA overlapped with a streamed matmul, each product tile written once at its
+#: final rows); shapes it does not take fall back to the JAX ring with a notice. Op-level, v5e-4, 2026-11-11: Wan q/k/v 1.259 -> 1.185
+#: ms, Wan FFN up 1.050 -> 1.056, LTX-2 q/k/v 0.445 -> 0.406 ms, outputs equal.
+SP_KERNEL_ENV = "DIFFLET_TPU_SP_KERNEL"
+
+
+#: What runs the all-gather + matmul when ``SP_KERNEL_ENV`` is unset; a model's SP
+#: ``install`` sets it (:func:`set_kernel_default`) before :func:`prepare`. The kernel
+#: pays where the ring's ``dynamic_update_slice`` is costly -- Wan -8.3%, FLUX -10.2%,
+#: HunyuanVideo (with single-stream SP) -4.5% per step; Qwen-Image +1%, LTX-2 0%
+#: (v5e-4, 2026-11-11) -- so it is per model.
+_KERNEL_DEFAULT = "jax"
+
+
+def set_kernel_default(mode: str) -> None:
+    """The model's default for :func:`sp_kernel_mode` (``SP_KERNEL_ENV`` still wins)."""
+    global _KERNEL_DEFAULT
+    if mode not in ("jax", "pallas"):
+        raise ValueError(f"kernel default must be 'jax' or 'pallas', got {mode!r}")
+    _KERNEL_DEFAULT = mode
+
+
+def sp_kernel_mode() -> str:
+    mode = os.environ.get(SP_KERNEL_ENV, "").strip().lower() or _KERNEL_DEFAULT
+    if mode not in ("jax", "pallas"):
+        raise ValueError(f"{SP_KERNEL_ENV} must be 'jax' or 'pallas', got {mode!r}")
+    return mode
+
+
+def _source_tag() -> str:
+    """A short hash of this module's and the Pallas kernel's source, put in every
+    op name. torch_tpu's compilation cache keys a ``jax_op`` by its name and
+    signature, not by what it lowers to: after the kernel learned weights of
+    different widths, FLUX's single-block ag4 kept running the cached JAX-ring
+    program under the unchanged name (2026-11-11, num_compilations=0)."""
+    import hashlib
+    from pathlib import Path
+
+    here = Path(__file__).resolve().parent
+    h = hashlib.sha256()
+    for name in ("collective_matmul.py", "collective_matmul_pallas.py"):
+        h.update((here / name).read_bytes())
+    return h.hexdigest()[:8]
+
+
 _STATE: dict | None = None
 
 
@@ -145,7 +208,8 @@ def _op(kind: str, n_weights: int):
     """The jax_op for ``kind`` built once: 'rs' over ``n_weights`` (input, weight)
     pairs whose products are summed, 'ag' over ``n_weights`` weights sharing one
     gathered input."""
-    key = (kind, n_weights)
+    key = (kind, n_weights,
+           (ag_assemble_mode(), sp_kernel_mode()) if kind == "ag" else None)
     ops = _STATE["ops"]
     if key in ops:
         return ops[key]
@@ -158,6 +222,8 @@ def _op(kind: str, n_weights: int):
 
     mesh, n = _STATE["mesh"], _STATE["tp"]
     shard_table = list(_STATE["shard_of_pos"])
+    assemble = ag_assemble_mode()
+    use_kernel = kind == "ag" and sp_kernel_mode() == "pallas"
     cw = [(i, (i + 1) % n) for i in range(n)]
     ccw = [(i, (i - 1) % n) for i in range(n)]
     shard_map = jax.shard_map if hasattr(jax, "shard_map") else \
@@ -226,11 +292,47 @@ def _op(kind: str, n_weights: int):
         def body(x, ids, *ws):
             shard_of = jnp.asarray(shard_table, dtype=jnp.int32)
             j = ids[0]
+            if use_kernel:
+                from difflet.backends.tpu.ops_impl import collective_matmul_pallas as kp
+
+                why = kp.unsupported(x.shape, [w.shape for w in ws], x.dtype.itemsize)
+                if why is None:
+                    # The ring position stays a runtime value (rule above): the
+                    # kernel's owners / neighbours are computed from it.
+                    owners, nbrs = kp.ring_tables(j, shard_table, n)
+                    outs = kp.ag_matmul_body(x, ws, owners, nbrs, n=n, resident=True,
+                                             manual=True)
+                    return outs if len(outs) > 1 else outs[0]
+                print(f"[difflet tpu] {SP_KERNEL_ENV}=pallas: ag x{len(ws)} {tuple(x.shape)} "
+                      f"falls back to the JAX ring ({why})", flush=True)
             rows = x.shape[1]
             hr = rows // 2
             seq = rows * n
-            outs = [jnp.zeros((x.shape[0], seq, w.shape[0]), x.dtype) for w in ws]
             top, bot = x[:, :hr], x[:, hr:]
+            if assemble == "concat":
+                # Keep every hop's products and build each output once at the end
+                # (see AG_ASSEMBLE_ENV): rank r's top half was computed at hop
+                # (j - pos_of[r]) % n, its bottom half at hop (pos_of[r] - j) % n.
+                tops = [[] for _ in ws]
+                bots = [[] for _ in ws]
+                for step in range(n):
+                    if step:
+                        top = jax.lax.ppermute(top, "tp", cw)
+                        bot = jax.lax.ppermute(bot, "tp", ccw)
+                    for i, w in enumerate(ws):
+                        tops[i].append(jnp.einsum("bsk,nk->bsn", top, w))
+                        bots[i].append(jnp.einsum("bsk,nk->bsn", bot, w))
+                pos_of = jnp.asarray([shard_table.index(r) for r in range(n)], dtype=jnp.int32)
+                idx_top, idx_bot = (j - pos_of) % n, (pos_of - j) % n
+                outs = []
+                for i in range(len(ws)):
+                    t = jnp.take(jnp.stack(tops[i]), idx_top, axis=0)  # (n, B, hr, N)
+                    b = jnp.take(jnp.stack(bots[i]), idx_bot, axis=0)
+                    o = jnp.stack([t, b], axis=1)                      # (n, 2, B, hr, N)
+                    outs.append(jnp.transpose(o, (2, 0, 1, 3, 4)).reshape(
+                        x.shape[0], seq, o.shape[-1]))
+                return tuple(outs) if len(outs) > 1 else outs[0]
+            outs = [jnp.zeros((x.shape[0], seq, w.shape[0]), x.dtype) for w in ws]
             for step in range(n):
                 if step:
                     top = jax.lax.ppermute(top, "tp", cw)
@@ -282,7 +384,11 @@ def _op(kind: str, n_weights: int):
                                          else jax.Array)}
 
     op = torch.tpu.pallas.jax_op(
-        f"difflet::sp_{kind}_matmul_{n_weights}", fn, mesh=mesh,
+        f"difflet::sp_{kind}_matmul_{n_weights}"
+        + ("_cat" if kind == "ag" and assemble == "concat" else "")
+        + ("_pk" if use_kernel else "")
+        + "_" + _source_tag(),
+        fn, mesh=mesh,
         input_partition_specs=in_specs,
         # A tuple of specs, one per output: see the module docstring.
         output_partition_specs=tuple(out_specs),
@@ -328,6 +434,7 @@ def supports(seq_len: int, tp: int) -> bool:
     return seq_len % (2 * tp) == 0
 
 
-__all__ = ["DEFAULT_OPS", "SP_ENV", "all_gather_matmul", "matmul2_reduce_scatter",
+__all__ = ["DEFAULT_OPS", "SP_ENV", "SP_KERNEL_ENV", "all_gather_matmul", "matmul2_reduce_scatter",
+           "set_kernel_default",
            "matmul_reduce_scatter", "prepare",
            "require_compiled", "requested", "supports"]
