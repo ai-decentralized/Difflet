@@ -767,8 +767,11 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
             vae_dtype = getattr(torch, component_dtype(getattr(args, "vae_dtype", None)))
             # The DiT's mesh (one per process); the decoder has no TP layers, so every rank
             # holds all of it.
+            # Head-sharded over the DiT's TP group (a quarter of the HBM at tp4, as fast, the
+            # same video to fp32 rounding); the TP groups split the tiles.
             vae_app = NeuronMiniMaxH3VideoVaeApplication(
-                model_path=str(Path(model_dir) / "vae"), parallel=parallel, dtype=vae_dtype)
+                model_path=str(Path(model_dir) / "vae"), parallel=parallel, dtype=vae_dtype,
+                tp_shard=True)
             start = time.perf_counter()
             # Each rank loads the whole decoder; its warm-up (compile only) runs per rank.
             vae_app.load(skip_warmup=not compiling)
@@ -844,16 +847,17 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
                 from difflet.backends.neuron.minimax_h3.vae import decode_video_on_ranks
 
                 start = time.perf_counter()
+                group, groups, writer = vae.app.tile_groups(rank, world)
                 video = decode_video_on_ranks(
-                    vae, output.video_latents, vae.config, rank=rank, world=world,
+                    vae, output.video_latents, vae.config, rank=group, world=groups,
                     scratch_dir=stage_loop.work_file(args, req, "vae_tiles"),
-                    device=self._neuron_device,
+                    device=self._neuron_device, writer=writer,
                 )
                 if rank == 0:
                     destination = stage_loop.work_file(args, req, "video.pt")
                     torch.save(video.to(torch.float16), destination)
-                log(f"[video_vae] (device, tiles over {world} ranks) RGB video "
-                    f"in {time.perf_counter() - start:.1f}s")
+                log(f"[video_vae] (device, tiles over {groups} TP groups, {world} ranks) RGB "
+                    f"video in {time.perf_counter() - start:.1f}s")
                 if rank == 0:
                     self._decode_audio_and_mux(req, output.audio_latents, video, audio_decoder)
 

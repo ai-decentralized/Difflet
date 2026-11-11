@@ -69,3 +69,24 @@ def test_tiles_spread_over_ranks_match_one_process(tmp_path):
     assert r0["equal"] and r0["shape"][:2] == [1, 3] and r0["leftovers"] == []
     assert r1["video_is_none"]
     assert r0["tiles_decoded_here"] > 0 and r1["tiles_decoded_here"] > 0
+
+
+@pytest.mark.parametrize("world, cp", [(2, 1), (4, 2)])
+def test_tp_sharded_decoder_matches_the_whole_one(tmp_path, world, cp):
+    """The decoder head-sharded over TP (the ranks of a TP group decode a tile together,
+    the groups split the tiles) gives the whole decoder's video."""
+    pytest.importorskip("safetensors.torch")
+    pytest.importorskip("accelerate")
+    from tests.unit.backends._neuron_h3_toy import vae_ranks_worker
+
+    vae = _write(tmp_path)
+    results = run_ranks(vae_ranks_worker, str(vae), str(tmp_path / "tiles"), True, cp,
+                        world_size=world)
+    r0 = results[0]
+    assert r0["max_abs"] < 1e-5, r0["max_abs"]
+    assert r0["shape"][:2] == [1, 3] and r0["leftovers"] == []
+    assert r0["groups"] == cp and r0["local_heads"] == TINY_VAE["decoder_num_attention_heads"] // (world // cp)
+    assert r0["report"]["missing"] == [] and r0["report"]["unexpected"] == []
+    assert all(r["video_is_none"] for r in results[1:])
+    # every rank runs its group's tiles
+    assert all(r["tiles_decoded_here"] > 0 for r in results)

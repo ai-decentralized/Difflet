@@ -28,6 +28,7 @@ from typing import Any
 import torch
 
 from difflet.backends.neuron.core.application_base import TorchNeuronApplicationBase
+from difflet.backends.neuron.core.checkpoint import CheckpointSlice
 
 #: The official decode tile: 7 latent frames x 256 px (16 latents at /16).
 TILE_LATENT_SHAPE = (1, 24, 7, 16, 16)
@@ -73,8 +74,49 @@ class _NeuronH3VaeAttnProcessor:
         return attn.to_out[0](out.contiguous())
 
 
+class _NeuronH3VaeTPSwiGLU(torch.nn.Module):
+    """The decoder's SwiGLU (``ff.net.0.proj`` fused ``[hidden; gate]`` rows, both with bias)
+    split into column-parallel ``up_proj``/``gate_proj`` and a row-parallel ``down_proj``."""
+
+    def __init__(self, dim: int, inner: int) -> None:
+        from difflet.ops import ColumnParallelLinear, RowParallelLinear
+
+        super().__init__()
+        self.up_proj = ColumnParallelLinear(dim, inner, bias=True, gather_output=False)
+        self.gate_proj = ColumnParallelLinear(dim, inner, bias=True, gather_output=False)
+        self.down_proj = RowParallelLinear(inner, dim, bias=True, input_is_parallel=True,
+                                           reduce_dtype=torch.float32)
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        return self.down_proj(
+            self.up_proj(hidden_states) * torch.nn.functional.silu(self.gate_proj(hidden_states))
+        )
+
+
+def _shard_decoder_block(block, tp: int) -> None:
+    """Head-shard one ViT block over the TP group: q/k/v column-parallel (the q/k RMS norms
+    are per head and weightless), the output projection row-parallel, the SwiGLU split."""
+    from difflet.ops import ColumnParallelLinear, RowParallelLinear
+
+    attn = block.attn
+    if int(attn.heads) % tp:
+        raise ValueError(f"the H3 video VAE has {attn.heads} heads, not divisible by tp={tp}")
+    attn.heads = int(attn.heads) // tp
+    for name in ("to_q", "to_k", "to_v"):
+        linear = getattr(attn, name)
+        setattr(attn, name, ColumnParallelLinear(linear.in_features, linear.out_features,
+                                                 bias=linear.bias is not None,
+                                                 gather_output=False))
+    out = attn.to_out[0]
+    attn.to_out[0] = RowParallelLinear(out.in_features, out.out_features,
+                                       bias=out.bias is not None, input_is_parallel=True,
+                                       reduce_dtype=torch.float32)
+    up = block.ff.net[0].proj
+    block.ff = _NeuronH3VaeTPSwiGLU(up.in_features, up.out_features // 2)
+
+
 class _NeuronH3VideoDecoder(torch.nn.Module):
-    def __init__(self, cfg: dict[str, Any]) -> None:
+    def __init__(self, cfg: dict[str, Any], *, tp_shard: bool = False) -> None:
         super().__init__()
         from difflet.models.minimax_h3.host_components import _HostVideoDecoder
 
@@ -84,7 +126,10 @@ class _NeuronH3VideoDecoder(torch.nn.Module):
         from difflet.backends.neuron.minimax_h3.transformer import _give_fp32_host_storage
 
         processor = _NeuronH3VaeAttnProcessor()
+        tp = _tp_size() if tp_shard else 1
         for block in self.decoder.transformer_blocks:
+            if tp > 1:
+                _shard_decoder_block(block, tp)
             block.attn.set_processor(processor)
             # The blocks call these norms on fp32 activations (the reference's precision), so
             # their weights stay fp32 whatever the application dtype.
@@ -96,20 +141,29 @@ class _NeuronH3VideoDecoder(torch.nn.Module):
         return self.decoder(self.post_quant_conv(latents)).float()
 
 
+def _tp_size() -> int:
+    from difflet.models.minimax_h3.modeling_minimax_h3_tp import _safe_tp_size
+
+    return _safe_tp_size()
+
+
 class NeuronMiniMaxH3VideoVaeApplication(TorchNeuronApplicationBase):
     """The H3 video decoder, one tile per call. ``model_path`` is ``<model>/vae``.
 
-    It has no tensor-parallel layers: under a TP mesh (the DiT's, in the generate launch; a
-    process holds one mesh) every rank loads the whole decoder and decodes its own tiles
-    (``decode_video_on_ranks``)."""
+    Under the DiT's mesh (a process holds one), by default every rank loads the whole decoder
+    and decodes its own tiles (``decode_video_on_ranks``). ``tp_shard=True`` head-shards the
+    36 ViT blocks over the TP group instead (a quarter of the HBM at tp4): the ranks of a TP
+    group decode the same tile together and the groups split the tiles."""
 
     block_attrs = ("decoder.transformer_blocks",)
     skipped_checkpoint_prefixes = ("encoder.", "quant_conv.")
 
     def __init__(self, *, model_path, parallel=None, dtype=torch.bfloat16,
-                 exec_mode: str | None = None, device="neuron", **kwargs: Any) -> None:
+                 exec_mode: str | None = None, device="neuron", tp_shard: bool = False,
+                 **kwargs: Any) -> None:
         super().__init__(model_path=model_path, parallel=parallel, dtype=dtype,
                          exec_mode=exec_mode, device=device, **kwargs)
+        self.tp_shard = bool(tp_shard) and int(getattr(self.parallel, "tp_degree", 1) or 1) > 1
         if self.dtype not in (torch.bfloat16, torch.float32):
             raise ValueError(f"the H3 video VAE runs in bf16 or fp32, got {self.dtype}")
         # Under the DiT's mesh (TP, or TP x Ulysses CP) every rank holds the whole decoder and
@@ -120,7 +174,35 @@ class NeuronMiniMaxH3VideoVaeApplication(TorchNeuronApplicationBase):
             self.vae_config = json.load(handle)
 
     def build_module(self) -> torch.nn.Module:
-        return _NeuronH3VideoDecoder(self.vae_config)
+        return _NeuronH3VideoDecoder(self.vae_config, tp_shard=self.tp_shard)
+
+    def checkpoint_key(self, name: str) -> str:
+        return name.replace(".ff.down_proj.", ".ff.net.2.")
+
+    def checkpoint_slices(self) -> dict[str, CheckpointSlice]:
+        """With ``tp_shard``: ``up_proj`` = rows ``[0, inner)`` and ``gate_proj`` = rows
+        ``[inner, 2 inner)`` of every fused ``ff.net.0.proj`` weight and bias."""
+        if not self.tp_shard:
+            return {}
+        dim = int(self.vae_config["decoder_num_attention_heads"]) * int(
+            self.vae_config["decoder_attention_head_dim"])
+        inner = dim * int(self.vae_config["decoder_ffn_mult"])
+        slices = {}
+        for i in range(int(self.vae_config["decoder_num_layers"])):
+            prefix = f"decoder.transformer_blocks.{i}.ff"
+            for kind in ("weight", "bias"):
+                source = f"{prefix}.net.0.proj.{kind}"
+                slices[f"{prefix}.up_proj.{kind}"] = CheckpointSlice(source, 0, 0, inner)
+                slices[f"{prefix}.gate_proj.{kind}"] = CheckpointSlice(source, 0, inner, inner)
+        return slices
+
+    def tile_groups(self, rank: int, world: int) -> tuple[int, int, bool]:
+        """``(group, groups, writer)`` for ``decode_video_on_ranks``: each TP group decodes a
+        tile together when sharded (its first rank saves it), every rank alone otherwise."""
+        if not self.tp_shard:
+            return rank, world, True
+        tp = int(self.parallel.tp_degree)
+        return rank // tp, world // tp, rank % tp == 0
 
     def get_example_inputs(self) -> tuple[torch.Tensor, ...]:
         gen = torch.Generator().manual_seed(0)
@@ -143,7 +225,7 @@ class DeviceTileDecoder:
 
 
 def decode_video_on_ranks(decoder, latents: torch.Tensor, cfg: dict, *, rank: int, world: int,
-                          scratch_dir, device) -> torch.Tensor | None:
+                          scratch_dir, device, writer: bool = True) -> torch.Tensor | None:
     """``decode_minimax_h3_video`` with its tiles spread over the ranks, each holding a decoder.
 
     The decode calls its decoder once per tile in a fixed order, so it runs three times: once
@@ -152,6 +234,9 @@ def decode_video_on_ranks(decoder, latents: torch.Tensor, cfg: dict, *, rank: in
     rank 0 replaying the decoded tiles in order, which does the official blending and stitching.
     A collective after the writes makes rank 0 wait for every rank's file. Returns the video on
     rank 0, None elsewhere.
+
+    ``rank``/``world`` are tile groups: with a TP-sharded decoder every rank of a group runs
+    the group's tiles (the TP collectives need them all) and only its ``writer`` saves them.
     """
     import torch.distributed as dist
 
@@ -170,13 +255,14 @@ def decode_video_on_ranks(decoder, latents: torch.Tensor, cfg: dict, *, rank: in
     scratch = Path(scratch_dir)
     scratch.mkdir(parents=True, exist_ok=True)
     mine = {i: decoder(tiles[i]) for i in range(len(tiles)) if i % world == rank}
-    torch.save(mine, scratch / f"vae_tiles_rank{rank}.pt")
-    if world > 1:
+    if writer:
+        torch.save(mine, scratch / f"vae_tiles_rank{rank}.pt")
+    if dist.is_initialized() and dist.get_world_size() > 1:
         done = torch.ones(1, device=device)
         dist.all_reduce(done)
         if device.type == "neuron":
             torch.neuron.synchronize()
-    if rank != 0:
+    if rank != 0 or not writer:
         return None
     decoded: dict[int, torch.Tensor] = {}
     for r in range(world):

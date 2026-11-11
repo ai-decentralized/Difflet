@@ -267,8 +267,10 @@ def te_worker(rank: int, world_size: int, encoder_dir: str, exec_mode: str) -> d
             "layers": len(app.module.layers)}
 
 
-def vae_ranks_worker(rank: int, world_size: int, vae_dir: str, scratch: str) -> dict:
-    """``decode_video_on_ranks`` over the gloo ranks vs one process decoding every tile."""
+def vae_ranks_worker(rank: int, world_size: int, vae_dir: str, scratch: str,
+                     shard: bool = False, cp: int = 1) -> dict:
+    """``decode_video_on_ranks`` over the gloo ranks (mesh tp = world/cp) vs one process
+    decoding every tile with a whole decoder; ``shard`` head-shards the decoder over TP."""
     from difflet.backends.neuron.minimax_h3.vae import (
         DeviceTileDecoder,
         NeuronMiniMaxH3VideoVaeApplication,
@@ -277,24 +279,36 @@ def vae_ranks_worker(rank: int, world_size: int, vae_dir: str, scratch: str) -> 
     from difflet.models.minimax_h3.pipeline import decode_minimax_h3_video
     from difflet.pipeline.parallel_config import DiffletParallelConfig
 
-    app = NeuronMiniMaxH3VideoVaeApplication(
-        model_path=vae_dir, parallel=DiffletParallelConfig(tp_degree=world_size),
-        dtype=torch.float32, exec_mode="eager", device="cpu")
-    app.load(skip_warmup=True)
+    parallel = DiffletParallelConfig(tp_degree=world_size // cp, cp_degree=cp,
+                                     cp_mode="ulysses" if cp > 1 else "gather_kv")
+
+    def build(tp_shard):
+        app = NeuronMiniMaxH3VideoVaeApplication(
+            model_path=vae_dir, parallel=parallel, dtype=torch.float32, exec_mode="eager",
+            device="cpu", tp_shard=tp_shard)
+        app.load(skip_warmup=True)
+        return app
+
+    app = build(shard)
     decoder = DeviceTileDecoder(app)
+    # The reference: a whole decoder (its load has collectives, so every rank builds it).
+    whole = DeviceTileDecoder(build(False)) if shard else decoder
     latents = torch.randn(1, 24, 10, 16, 28, generator=torch.Generator().manual_seed(5))
     cfg = app.vae_config
     calls = []
     counted = lambda tile: (calls.append(1), decoder(tile))[1]  # noqa: E731
-    video = decode_video_on_ranks(counted, latents, cfg, rank=rank, world=world_size,
-                                  scratch_dir=scratch, device=torch.device("cpu"))
-    result = {"tiles_decoded_here": len(calls)}
+    group, groups, writer = app.tile_groups(rank, world_size)
+    video = decode_video_on_ranks(counted, latents, cfg, rank=group, world=groups,
+                                  scratch_dir=scratch, device=torch.device("cpu"), writer=writer)
+    result = {"tiles_decoded_here": len(calls), "groups": groups, "report": app.load_report,
+              "local_heads": int(app.module.decoder.transformer_blocks[0].attn.heads)}
     if rank == 0:
-        ref = decode_minimax_h3_video(decoder, latents, latents_mean=cfg["latents_mean"],
+        ref = decode_minimax_h3_video(whole, latents, latents_mean=cfg["latents_mean"],
                                       latents_std=cfg["latents_std"],
                                       clip_length=int(cfg["clip_length"]),
                                       token_drop=int(cfg["token_drop"]))
-        result.update(equal=bool(torch.equal(video, ref)), shape=list(video.shape),
+        result.update(equal=bool(torch.equal(video, ref)),
+                      max_abs=float((video - ref).abs().max()), shape=list(video.shape),
                       leftovers=sorted(p.name for p in Path(scratch).iterdir()))
     else:
         result["video_is_none"] = video is None
