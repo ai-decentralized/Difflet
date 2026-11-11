@@ -369,3 +369,63 @@ def test_text_stage_saves_fixed_layer_50_embedding_and_live_length(monkeypatch, 
     assert payload["text_encoder_layer"] == 50
     assert payload["encoder_hidden_states"].shape == (1, 1024, 5120)
     assert torch.count_nonzero(payload["encoder_hidden_states"][:, 3:]) == 0
+
+
+# ------------------------------------------------------------- torchrun (neuron) backend
+
+
+def test_neuron_backend_compiles_only_the_dit_and_places_host_stages_on_one_rank(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(h3_mod, "torchrun_backend", lambda: "neuron")
+    monkeypatch.setattr(h3_mod, "root_compile_cache_at_cache_dir", lambda *a, **k: None)
+    calls = []
+    monkeypatch.setattr(
+        h3_mod.runner, "run_stage", lambda model, stage, **kwargs: calls.append((stage, kwargs))
+    )
+    orchestrator = MiniMaxH3Orchestrator(_args(work_dir=str(tmp_path), keep_work_dir=True))
+
+    orchestrator.compile()
+    assert [stage for stage, _ in calls] == ["generate"]
+
+    calls.clear()
+    orchestrator.generate()
+    assert [(stage, kw["num_cores"]) for stage, kw in calls] == [
+        ("text", 1), ("generate", 4), ("video_vae", 1), ("audio_vae", 1)
+    ]
+
+
+def test_neuron_backend_dispatches_to_host_and_torchrun_stage_bodies(monkeypatch):
+    monkeypatch.setattr(h3_mod, "torchrun_backend", lambda: "neuron")
+    orchestrator = MiniMaxH3Orchestrator(_args())
+    seen = []
+    for name in ("_stage_text_host", "_stage_generate_neuron", "_stage_video_vae_host",
+                 "_stage_audio_vae_host"):
+        monkeypatch.setattr(orchestrator, name, lambda args, name=name: seen.append(name))
+    for stage in ("text", "generate", "video_vae", "audio_vae"):
+        orchestrator._run_stage_internal(stage, orchestrator.args)
+    assert seen == ["_stage_text_host", "_stage_generate_neuron", "_stage_video_vae_host",
+                    "_stage_audio_vae_host"]
+
+
+def test_shared_cli_args_forward_model_path():
+    args = MiniMaxH3Orchestrator(_args(model_path="/models/h3"))._shared_cli_args("generate")
+    assert args[args.index("--model-path") + 1] == "/models/h3"
+    assert "--model-path" not in MiniMaxH3Orchestrator(_args())._shared_cli_args("generate")
+
+
+def test_neuron_dit_adapter_sends_masks_as_int32_and_returns_host_tensors():
+    import torch
+
+    class _App:
+        device = torch.device("cpu")
+
+        def __call__(self, *inputs):
+            self.inputs = inputs
+            return torch.ones(1, 2), torch.zeros(1, 3)
+
+    app = _App()
+    dit = h3_mod._NeuronH3DiT(app)
+    video, audio = dit(torch.zeros(2), torch.tensor([True, False]))
+    assert [t.dtype for t in app.inputs] == [torch.float32, torch.int32]
+    assert video.shape == (1, 2) and audio.shape == (1, 3) and len(dit.seconds) == 1

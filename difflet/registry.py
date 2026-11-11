@@ -438,7 +438,9 @@ def _register_builtin_minimax_h3() -> None:
         detector=is_minimax_h3,
         default_parallel=DiffletParallelConfig(tp_degree=4),
         default_shape={"height": 768, "width": 1344, "num_frames": 124},
-        backends=("trainium",),
+        # neuron: the staged CLI only (text and decoders on the host, the DiT on torchrun
+        # ranks, difflet/cli/orchestrators/minimax_h3.py); no resident application yet.
+        backends=("trainium", "neuron"),
         # The repository also contains the Ref2VA transformer and the original
         # FL2VA/Ref2VA checkpoints.  The first Difflet path is the root-level
         # diffusers T2VA partition, so avoid downloading those duplicate weights.

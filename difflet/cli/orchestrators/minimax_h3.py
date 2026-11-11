@@ -8,6 +8,18 @@ Stage 4 (audio_vae): H3 audio VAE decoder and AV mux,   1 core initially.
 Only light tokenization, scheduling, tensor layout, normalization and media
 post-processing remain on the host.  Staging is required by HBM capacity, not
 because the heavy components are intended to execute on the host.
+
+With DIFFLET_BACKEND naming the non-AoT torchrun backend (neuron, TorchNeuron), the same four
+stages and work files run as follows (phase 1 of the port):
+
+* text: Qwen3-VL to hidden_states[50] on the host CPU (``HostQwen3VLTextEncoder``), one rank;
+* generate: the DiT on ``--tp-degree`` torchrun ranks, one NeuronCore each
+  (``NeuronMiniMaxH3TransformerApplication``, per-block compiled, AdaLN precomputed on the
+  host); every rank runs the same host denoise loop, rank 0 writes the latents;
+* video_vae, audio_vae: the two decoders on the host CPU in fp32, one rank.
+
+``compile`` then only warms the DiT up (it fills the NEFF cache); the host stages have nothing
+to compile.
 """
 
 from __future__ import annotations
@@ -23,6 +35,7 @@ from typing import TYPE_CHECKING
 
 from difflet.cli import runner
 from difflet.cli.orchestrators.base import ModelOrchestrator
+from difflet.cli.orchestrators.torchrun import root_compile_cache_at_cache_dir, torchrun_backend
 from difflet.common.orchestrators import minimax_h3 as h3_common
 
 if TYPE_CHECKING:
@@ -95,6 +108,33 @@ def _save_av(
     return True
 
 
+class _NeuronH3DiT:
+    """The denoise loop's DiT callable on the neuron backend: the Trainium graph's positional
+    call on host tensors in, the host ``(video, audio)`` velocity pair out. The two bool masks
+    go to the device as int32 (the application's call); every rank must call it."""
+
+    def __init__(self, app) -> None:
+        self.app = app
+        self.seconds: list[float] = []
+
+    def __call__(self, *inputs):
+        import time
+
+        import torch
+
+        device = self.app.device
+        moved = []
+        for tensor in inputs:
+            if tensor.dtype == torch.bool:
+                tensor = tensor.to(torch.int32)
+            moved.append(tensor.contiguous().to(device))
+        start = time.perf_counter()
+        video, audio = self.app(*moved)
+        video, audio = video.cpu(), audio.cpu()
+        self.seconds.append(time.perf_counter() - start)
+        return video, audio
+
+
 class MiniMaxH3Orchestrator(ModelOrchestrator):
     def download(self) -> None:
         from difflet.pipeline.path_resolver import resolve_model_path
@@ -114,7 +154,11 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
         work_dir = Path.home() / ".cache" / "difflet" / "work" / _CLI_NAME
         work_dir.mkdir(parents=True, exist_ok=True)
         shared = self._shared_cli_args(stage_mode="compile", work_dir=str(work_dir))
-        for stage in _STAGES:
+        stages = _STAGES
+        if torchrun_backend() is not None:
+            root_compile_cache_at_cache_dir(self.args.cache_dir, tag="minimax-h3")
+            stages = ("generate",)  # the host stages have nothing to compile
+        for stage in stages:
             runner.run_stage(
                 _HF_MODEL_ID,
                 stage,
@@ -130,6 +174,8 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
         )
         work_dir.mkdir(parents=True, exist_ok=True)
         shared = self._shared_cli_args(stage_mode="generate", work_dir=str(work_dir))
+        if torchrun_backend() is not None:
+            root_compile_cache_at_cache_dir(self.args.cache_dir, tag="minimax-h3")
         try:
             for stage in _STAGES:
                 runner.run_stage(
@@ -146,12 +192,20 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
             shutil.rmtree(work_dir, ignore_errors=True)
 
     def _run_stage_internal(self, stage: str, args: argparse.Namespace) -> None:
-        handlers = {
-            "text": self._stage_text,
-            "generate": self._stage_generate,
-            "video_vae": self._stage_video_vae,
-            "audio_vae": self._stage_audio_vae,
-        }
+        if torchrun_backend() is not None:
+            handlers = {
+                "text": self._stage_text_host,
+                "generate": self._stage_generate_neuron,
+                "video_vae": self._stage_video_vae_host,
+                "audio_vae": self._stage_audio_vae_host,
+            }
+        else:
+            handlers = {
+                "text": self._stage_text,
+                "generate": self._stage_generate,
+                "video_vae": self._stage_video_vae,
+                "audio_vae": self._stage_audio_vae,
+            }
         try:
             handler = handlers[stage]
         except KeyError as exc:
@@ -488,6 +542,253 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
                     )
                     print(f"[audio_vae] AV tensors saved to {tensor_path}")
 
+    # ------------------------------------------------- torchrun (neuron) backend stages
+
+    def _stage_text_host(self, args: argparse.Namespace) -> None:
+        """Qwen3-VL hidden_states[50] on the host CPU; writes the Trainium stage's text.pt."""
+        import torch
+
+        from difflet.cli.dp import stage_loop
+        from difflet.models.minimax_h3.host_components import (
+            HostQwen3VLTextEncoder,
+            default_threads,
+        )
+        from difflet.pipeline.path_resolver import resolve_model_path
+
+        if args.stage_mode == "compile":
+            return
+        model_dir = self._model_dir(args, resolve_model_path)
+        encoder = HostQwen3VLTextEncoder(model_dir, threads=default_threads()).load()
+        for req in stage_loop.claim_requests(args):
+            with stage_loop.request_scope(args, req, final=False):
+                record = encoder.encode(req.prompt)
+                destination = stage_loop.work_file(args, req, "text.pt")
+                torch.save(record, destination)
+                print(
+                    f"[text] Qwen3-VL hidden_states[{record['text_encoder_layer']}] (host) "
+                    f"{tuple(record['encoder_hidden_states'].shape)} "
+                    f"({record['num_text_tokens']} live tokens) -> {destination}",
+                    flush=True,
+                )
+
+    def _neuron_adaln_table(self, args, model_dir: str, config, num_steps: int):
+        """The precomputed AdaLN table for ``num_steps``, built once on rank 0 into
+        ``<cache-dir>/minimax_h3_neuron/`` and read by every rank."""
+        import torch
+
+        from difflet.backends.neuron.core.distributed import rank0_call
+        from difflet.models.minimax_h3.pipeline import (
+            build_adaln_modulation_table,
+            load_minimax_h3_schedulers,
+        )
+
+        cache_root = Path(args.cache_dir or Path.home() / ".cache" / "difflet")
+        path = cache_root / "minimax_h3_neuron" / f"adaln_table_steps{num_steps}.pt"
+
+        def build() -> None:
+            if path.exists():
+                return
+            video_sched, audio_sched = load_minimax_h3_schedulers(model_dir)
+            video_sched.set_timesteps(num_steps, device="cpu")
+            audio_sched.set_timesteps(num_steps, device="cpu")
+            # Slot order matches the denoise loop: 0 = audio, 1 = video.
+            timesteps = torch.stack(
+                [audio_sched.timesteps.to(torch.float32), video_sched.timesteps.to(torch.float32)],
+                dim=-1,
+            )
+            table = build_adaln_modulation_table(
+                str(Path(model_dir) / "transformer"),
+                timesteps,
+                num_layers=int(config.num_layers),
+                freq_dim=int(config.freq_dim),
+                time_embed_hidden_dim=int(config.time_embed_hidden_dim),
+                time_embed_dim=int(config.time_embed_dim),
+                hidden_size=int(config.hidden_size),
+                dtype=torch.bfloat16,
+            )
+            path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = path.with_suffix(".tmp")
+            torch.save(table, tmp)
+            tmp.replace(path)
+            print(f"[generate] precomputed AdaLN table for {num_steps} steps "
+                  f"({table.numel() * table.element_size() / 2**20:.0f} MiB) -> {path}", flush=True)
+
+        rank0_call(build, device=self._neuron_device, what="AdaLN table")
+        return torch.load(path)
+
+    def _stage_generate_neuron(self, args: argparse.Namespace) -> None:
+        """The DiT on every torchrun rank; each runs the host denoise loop on identical inputs
+        (one CPU generator per request), rank 0 writes the latents."""
+        import time
+
+        import torch
+
+        from difflet.backends import get_backend
+        from difflet.cli.dp import stage_loop
+        from difflet.cli.orchestrators.torchrun import replica_request_scope, torchrun_parallel
+        from difflet.pipeline.path_resolver import resolve_model_path
+
+        parallel = torchrun_parallel(args)
+        get_backend("neuron").prepare_runtime(parallel)
+
+        from difflet.backends.neuron.core.distributed import world_info
+        from difflet.backends.neuron.minimax_h3.transformer import (
+            NeuronMiniMaxH3Config,
+            NeuronMiniMaxH3TransformerApplication,
+        )
+        from difflet.models.minimax_h3.pipeline import (
+            denoise_minimax_h3_t2va,
+            load_minimax_h3_schedulers,
+        )
+
+        model_dir = self._model_dir(args, resolve_model_path)
+        transformer_path = str(Path(model_dir) / "transformer")
+        height = args.height or h3_common.DEFAULT_HEIGHT
+        width = args.width or h3_common.DEFAULT_WIDTH
+        num_frames = args.num_frames or h3_common.DEFAULT_NUM_FRAMES
+        config = NeuronMiniMaxH3Config.from_pretrained(
+            transformer_path, height=height, width=width, num_frames=num_frames,
+            text_seq_len=h3_common.TEXT_SEQ_LEN, tp_degree=parallel.tp_degree,
+            precomputed_adaln=True,
+        )
+        app = NeuronMiniMaxH3TransformerApplication(
+            model_path=transformer_path, config=config, parallel=parallel, dtype=torch.bfloat16,
+        )
+        self._neuron_device = app.device
+        rank = world_info()[0]
+        start = time.perf_counter()
+        app.load()
+        if rank == 0:
+            print(f"[generate] DiT loaded on {app.world_size} ranks in "
+                  f"{time.perf_counter() - start:.1f}s "
+                  f"({ {k: round(v, 1) for k, v in app.phase_seconds.items()} }), "
+                  f"{app.weight_bytes / 2**30:.2f} GiB/rank", flush=True)
+        if args.stage_mode == "compile":
+            return
+
+        dit = _NeuronH3DiT(app)
+        for req in stage_loop.claimed_requests(args):
+            with replica_request_scope(args, req, final=False):
+                text = torch.load(stage_loop.work_file(args, req, "text.pt"))
+                steps = int(stage_loop.effective(req, args, "steps", h3_common.DEFAULT_STEPS))
+                table = self._neuron_adaln_table(args, model_dir, config, steps)
+                video_scheduler, audio_scheduler = load_minimax_h3_schedulers(model_dir)
+                start = time.perf_counter()
+                output = denoise_minimax_h3_t2va(
+                    dit,
+                    encoder_hidden_states=text["encoder_hidden_states"],
+                    encoder_attention_mask=text["attention_mask"],
+                    num_text_tokens=int(text["num_text_tokens"]),
+                    height=height,
+                    width=width,
+                    num_frames=num_frames,
+                    num_inference_steps=steps,
+                    seed=req.seed,
+                    video_scheduler=video_scheduler,
+                    audio_scheduler=audio_scheduler,
+                    model_dtype=torch.bfloat16,
+                    adaln_modulation_table=table,
+                )
+                if rank != 0:
+                    continue
+                elapsed = time.perf_counter() - start
+                destination = stage_loop.work_file(args, req, "latents.pt")
+                torch.save(
+                    {
+                        "video_latents": output.video_latents.cpu(),
+                        "audio_latents": output.audio_latents.cpu(),
+                        "height": height,
+                        "width": width,
+                        "num_frames": num_frames,
+                    },
+                    destination,
+                )
+                print(
+                    f"[generate] {steps} steps in {elapsed:.1f}s "
+                    f"({1000 * sum(dit.seconds) / max(len(dit.seconds), 1):.0f} ms/DiT call); "
+                    f"video latents {tuple(output.video_latents.shape)}, audio latents "
+                    f"{tuple(output.audio_latents.shape)} -> {destination}",
+                    flush=True,
+                )
+
+    def _stage_video_vae_host(self, args: argparse.Namespace) -> None:
+        import time
+
+        import torch
+
+        from difflet.cli.dp import stage_loop
+        from difflet.models.minimax_h3.host_components import (
+            default_threads,
+            load_host_video_decoder,
+        )
+        from difflet.models.minimax_h3.pipeline import decode_minimax_h3_video
+        from difflet.pipeline.path_resolver import resolve_model_path
+
+        if args.stage_mode == "compile":
+            return
+        model_dir = self._model_dir(args, resolve_model_path)
+        decoder = load_host_video_decoder(model_dir, threads=default_threads())
+        cfg = decoder.config
+        for req in stage_loop.claimed_requests(args):
+            with stage_loop.request_scope(args, req, final=False):
+                latents = torch.load(stage_loop.work_file(args, req, "latents.pt"))
+                start = time.perf_counter()
+                video = decode_minimax_h3_video(
+                    decoder,
+                    latents["video_latents"],
+                    latents_mean=cfg["latents_mean"],
+                    latents_std=cfg["latents_std"],
+                    clip_length=int(cfg["clip_length"]),
+                    token_drop=int(cfg["token_drop"]),
+                )
+                destination = stage_loop.work_file(args, req, "video.pt")
+                torch.save(video.to(torch.float16), destination)
+                print(f"[video_vae] (host) RGB video {tuple(video.shape)} in "
+                      f"{time.perf_counter() - start:.1f}s -> {destination}", flush=True)
+
+    def _stage_audio_vae_host(self, args: argparse.Namespace) -> None:
+        import time
+
+        import torch
+
+        from difflet.cli.dp import stage_loop
+        from difflet.models.minimax_h3.host_components import (
+            default_threads,
+            load_host_audio_decoder,
+        )
+        from difflet.models.minimax_h3.pipeline import decode_minimax_h3_audio
+        from difflet.pipeline.path_resolver import resolve_model_path
+
+        if args.stage_mode == "compile":
+            return
+        model_dir = self._model_dir(args, resolve_model_path)
+        decoder = load_host_audio_decoder(model_dir, threads=default_threads())
+        cfg = decoder.config
+        for req in stage_loop.claimed_requests(args):
+            with stage_loop.request_scope(args, req, final=True):
+                latents = torch.load(stage_loop.work_file(args, req, "latents.pt"))
+                video = torch.load(stage_loop.work_file(args, req, "video.pt")).float()
+                start = time.perf_counter()
+                # The whole latent in one decode (the reference); the Trainium graph decodes
+                # fixed 48-frame windows only because its shape is static.
+                audio = decode_minimax_h3_audio(
+                    decoder,
+                    latents["audio_latents"],
+                    latents_mean=cfg["latents_mean"],
+                    latents_std=cfg["latents_std"],
+                    hop_length=800,
+                )
+                print(f"[audio_vae] (host) waveform {tuple(audio.shape)} in "
+                      f"{time.perf_counter() - start:.1f}s", flush=True)
+                output_path = Path(req.output)
+                if not _save_av(video, audio, str(output_path),
+                                sample_rate=int(cfg["sampling_rate"])):
+                    tensor_path = output_path.with_suffix(".pt")
+                    tensor_path.parent.mkdir(parents=True, exist_ok=True)
+                    torch.save({"video": video.to(torch.float16), "audio": audio, "fps": 24,
+                                "sample_rate": int(cfg["sampling_rate"])}, tensor_path)
+                    print(f"[audio_vae] AV tensors saved to {tensor_path}", flush=True)
+
     def _validate_topology(self) -> None:
         if (self.args.tp_degree or 4) != 4:
             raise NotImplementedError("MiniMax-H3's first qualified graph is fixed at TP4.")
@@ -506,6 +807,9 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
             )
 
     def _stage_cores(self, stage: str) -> int:
+        if torchrun_backend() is not None:
+            # Only the DiT is on the device; the host stages run as one rank.
+            return (self.args.tp_degree or 4) if stage == "generate" else 1
         return (self.args.tp_degree or 4) if stage in {"text", "generate"} else 1
 
     @staticmethod
@@ -556,6 +860,7 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
             ("--output", getattr(args, "output", None)),
             ("--cache-dir", getattr(args, "cache_dir", None)),
             ("--revision", getattr(args, "revision", None)),
+            ("--model-path", getattr(args, "model_path", None)),
             ("--work-dir", work_dir),
         ):
             if value:

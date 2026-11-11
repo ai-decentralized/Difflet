@@ -29,7 +29,7 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 FP32_TOL = {"atol": 1e-4, "rtol": 1e-4}
 WAN_ID = "Wan-AI/Wan2.1-T2V-14B-Diffusers"  # registry backends: trainium, tpu, neuron (W5)
 HUNYUAN_ID = "hunyuanvideo-community/HunyuanVideo"  # registry backends: trainium, neuron
-MINIMAX_ID = "MiniMaxAI/MiniMax-H3"  # registry backends: trainium
+MINIMAX_ID = "MiniMaxAI/MiniMax-H3"  # made trainium-only by _trainium_only_minimax below
 
 
 def _isolate_env(monkeypatch, *names):
@@ -42,6 +42,18 @@ def _isolate_env(monkeypatch, *names):
 
 def _pythonpath() -> str:
     return os.pathsep.join(filter(None, [str(REPO_ROOT), os.environ.get("PYTHONPATH")]))
+
+
+def _trainium_only_minimax(monkeypatch) -> None:
+    """Every registered model now lists the neuron backend; the refusal tests restrict
+    MiniMax-H3's entry to trainium to keep a model that does not."""
+    import dataclasses
+
+    from difflet import registry
+
+    entry = registry._REGISTRY["minimax_h3"]
+    monkeypatch.setitem(registry._REGISTRY, "minimax_h3",
+                        dataclasses.replace(entry, backends=("trainium",)))
 
 
 def _cli_main():
@@ -674,6 +686,7 @@ def test_main_rejects_backend_the_model_does_not_support(monkeypatch, capsys, tm
     cli_main = _cli_main()
 
     _isolate_env(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE")
+    _trainium_only_minimax(monkeypatch)
     built = []
     monkeypatch.setattr(cli_main, "_get_orchestrator", lambda args: built.append(args))
     argv = [command, "--model-id", MINIMAX_ID, "--backend", "neuron"]
@@ -728,6 +741,7 @@ def test_main_rejects_ambient_non_aot_backend_the_model_does_not_support(
     cli_main = _cli_main()
     _isolate_env(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE")
     monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    _trainium_only_minimax(monkeypatch)
     built = _recording_orchestrator(monkeypatch, cli_main)
 
     with pytest.raises(SystemExit) as exc:
