@@ -13,7 +13,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
-_ALLOWED_PREFIXES = ("difflet/backends/trainium/minimax_h3/",)
+# MiniMax-H3's TP rewrite (shared by the Trainium and neuron backends since it moved to
+# models/) keeps the fp32 default; its Trainium graph is pinned bit-identical to it.
+_ALLOWED_PREFIXES = (
+    "difflet/backends/trainium/minimax_h3/",
+    "difflet/models/minimax_h3/modeling_minimax_h3_tp.py",
+)
 
 # Sites still on the NxD fp32 default, by file (MiniMax-H3 aside): none.
 EXPECTED_DEFAULT_SITES: dict[str, int] = {}
