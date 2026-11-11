@@ -57,3 +57,15 @@ def test_device_vae_matches_reference_decoder(tmp_path, exec_mode):
     assert r["report"]["missing"] == [] and r["report"]["unexpected"] == []
     assert sorted(r["report"]["skipped"]) == ["encoder.dummy.weight", "quant_conv.weight"]
     assert r["norm_dtype"] == "torch.float32"
+
+
+def test_tiles_spread_over_ranks_match_one_process(tmp_path):
+    pytest.importorskip("safetensors.torch")
+    pytest.importorskip("accelerate")
+    from tests.unit.backends._neuron_h3_toy import vae_ranks_worker
+
+    vae = _write(tmp_path)
+    r0, r1 = run_ranks(vae_ranks_worker, str(vae), str(tmp_path / "tiles"), world_size=2)
+    assert r0["equal"] and r0["shape"][:2] == [1, 3] and r0["leftovers"] == []
+    assert r1["video_is_none"]
+    assert r0["tiles_decoded_here"] > 0 and r1["tiles_decoded_here"] > 0

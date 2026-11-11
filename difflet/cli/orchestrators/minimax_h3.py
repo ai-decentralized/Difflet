@@ -9,20 +9,21 @@ Only light tokenization, scheduling, tensor layout, normalization and media
 post-processing remain on the host.  Staging is required by HBM capacity, not
 because the heavy components are intended to execute on the host.
 
-With DIFFLET_BACKEND naming the non-AoT torchrun backend (neuron, TorchNeuron), the same four
-stages and work files run as follows (phase 1 of the port):
+With DIFFLET_BACKEND naming the non-AoT torchrun backend (neuron, TorchNeuron), the work files
+stay the same and the device work runs in one torchrun launch of ``--tp-degree`` ranks, one
+NeuronCore each (the generate stage):
 
-* text: Qwen3-VL to hidden_states[50] on the host CPU (``HostQwen3VLTextEncoder``), one rank;
-* generate: the DiT on ``--tp-degree`` torchrun ranks, one NeuronCore each
-  (``NeuronMiniMaxH3TransformerApplication``, per-block compiled, AdaLN precomputed on the
-  host); every rank runs the same host denoise loop, rank 0 writes the latents;
-* video_vae: the ViT decoder on one NeuronCore (``NeuronMiniMaxH3VideoVaeApplication``, one
-  256 px tile per call, ``--vae-dtype`` fp32 by default or bf16), or on the host in fp32 with
-  ``--host-vae``;
-* audio_vae: the audio decoder on the host CPU in fp32, one rank.
+1. text: Qwen3-VL to hidden_states[50] TP-sharded on the ranks
+   (``NeuronMiniMaxH3TextEncoderApplication``, ``--text-encoder-dtype`` bf16 by default), then
+   its weights are released; with ``--host-text-encoder`` a host text stage runs it instead;
+2. the DiT on every rank (``NeuronMiniMaxH3TransformerApplication``, per-block compiled, AdaLN
+   precomputed on the host); every rank runs the same host denoise loop;
+3. the video decoder on every rank (``NeuronMiniMaxH3VideoVaeApplication``, ``--vae-dtype``
+   fp32 by default), the 256 px tiles spread over the ranks; with ``--host-vae`` a host
+   video_vae stage decodes instead.
 
-``compile`` then warms up the device stages only (the DiT and, unless ``--host-vae``, the video
-decoder), which fills the NEFF cache; the host stages have nothing to compile.
+The audio decoder and the AV mux stay on the host (audio_vae, one rank). ``compile`` runs the
+generate stage with every device component's warm-up, which fills the NEFF cache.
 """
 
 from __future__ import annotations
@@ -167,8 +168,7 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
         if torchrun_backend() is not None:
             refuse_torchrun_conflicts([c for c in (vae_dtype_conflict(self.args),) if c])
             root_compile_cache_at_cache_dir(self.args.cache_dir, tag="minimax-h3")
-            # The host stages have nothing to compile.
-            stages = ("generate", "video_vae") if self._device_vae() else ("generate",)
+            stages = ("generate",)  # every device component loads in the generate launch
         for stage in stages:
             runner.run_stage(
                 _HF_MODEL_ID,
@@ -188,8 +188,9 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
         if torchrun_backend() is not None:
             refuse_torchrun_conflicts([c for c in (vae_dtype_conflict(self.args),) if c])
             root_compile_cache_at_cache_dir(self.args.cache_dir, tag="minimax-h3")
+        stages = _STAGES if torchrun_backend() is None else self._neuron_stages()
         try:
-            for stage in _STAGES:
+            for stage in stages:
                 runner.run_stage(
                     _HF_MODEL_ID,
                     stage,
@@ -208,8 +209,7 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
             handlers = {
                 "text": self._stage_text_host,
                 "generate": self._stage_generate_neuron,
-                "video_vae": (self._stage_video_vae_neuron if getattr(args, "device_vae", False)
-                              else self._stage_video_vae_host),
+                "video_vae": self._stage_video_vae_host,
                 "audio_vae": self._stage_audio_vae_host,
             }
         else:
@@ -630,15 +630,22 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
         return torch.load(path)
 
     def _stage_generate_neuron(self, args: argparse.Namespace) -> None:
-        """The DiT on every torchrun rank; each runs the host denoise loop on identical inputs
-        (one CPU generator per request), rank 0 writes the latents."""
+        """Every device component on every torchrun rank (see the module docstring): the text
+        encode (``--device-text-encoder``), the DiT denoise and the video decode
+        (``--device-vae``). Every rank runs the same host loops on identical inputs (one CPU
+        generator per request); rank 0 writes the work files."""
         import time
 
         import torch
 
         from difflet.backends import get_backend
         from difflet.cli.dp import stage_loop
-        from difflet.cli.orchestrators.torchrun import replica_request_scope, torchrun_parallel
+        from difflet.cli.orchestrators.torchrun import (
+            component_dtype,
+            replica_request_scope,
+            replica_requests,
+            torchrun_parallel,
+        )
         from difflet.pipeline.path_resolver import resolve_model_path
 
         parallel = torchrun_parallel(args)
@@ -654,7 +661,51 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
             load_minimax_h3_schedulers,
         )
 
+        compiling = args.stage_mode == "compile"
+        device_te = bool(getattr(args, "device_text_encoder", False))
+        device_vae = bool(getattr(args, "device_vae", False))
         model_dir = self._model_dir(args, resolve_model_path)
+        rank, world = world_info()
+
+        def log(message: str) -> None:
+            if rank == 0:
+                print(message, flush=True)
+
+        # 1. Text: encode every request this replica runs, then free the encoder's HBM.
+        requests = None
+        if device_te:
+            from difflet.backends.neuron.minimax_h3.text_encoder import (
+                NeuronMiniMaxH3TextEncoderApplication,
+            )
+
+            te_dtype = getattr(torch, component_dtype(getattr(args, "text_encoder_dtype", None),
+                                                      default="bf16"))
+            encoder = NeuronMiniMaxH3TextEncoderApplication(
+                model_path=str(Path(model_dir) / "text_encoder"), parallel=parallel,
+                dtype=te_dtype)
+            self._neuron_device = encoder.device
+            start = time.perf_counter()
+            encoder.load(skip_warmup=not compiling)
+            log(f"[text] device Qwen3-VL ({te_dtype}, first {encoder.layer} layers) loaded in "
+                f"{time.perf_counter() - start:.1f}s, {encoder.weight_bytes / 2**30:.2f} GiB/rank")
+            if not compiling:
+                requests = list(replica_requests(args, device=encoder.device))
+                for req in requests:
+                    with replica_request_scope(args, req, final=False):
+                        start = time.perf_counter()
+                        record = encoder.encode(req.prompt)
+                        if rank == 0:
+                            destination = stage_loop.work_file(args, req, "text.pt")
+                            torch.save(record, destination)
+                        log(f"[text] (device) hidden_states[{record['text_encoder_layer']}] "
+                            f"({record['num_text_tokens']} live tokens) in "
+                            f"{time.perf_counter() - start:.1f}s")
+            encoder.release()
+            del encoder
+        if requests is None and not compiling:
+            requests = list(stage_loop.claimed_requests(args))
+
+        # 2. The DiT.
         transformer_path = str(Path(model_dir) / "transformer")
         height = args.height or h3_common.DEFAULT_HEIGHT
         width = args.width or h3_common.DEFAULT_WIDTH
@@ -668,24 +719,42 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
             model_path=transformer_path, config=config, parallel=parallel, dtype=torch.bfloat16,
         )
         self._neuron_device = app.device
-        rank = world_info()[0]
         start = time.perf_counter()
         app.load()
-        if rank == 0:
-            print(f"[generate] DiT loaded on {app.world_size} ranks in "
-                  f"{time.perf_counter() - start:.1f}s "
-                  f"({ {k: round(v, 1) for k, v in app.phase_seconds.items()} }), "
-                  f"{app.weight_bytes / 2**30:.2f} GiB/rank", flush=True)
-        if args.stage_mode == "compile":
+        log(f"[generate] DiT loaded on {world} ranks in {time.perf_counter() - start:.1f}s "
+            f"({ {k: round(v, 1) for k, v in app.phase_seconds.items()} }), "
+            f"{app.weight_bytes / 2**30:.2f} GiB/rank")
+
+        # 3. The video decoder, one copy per rank (it is not sharded; the tiles are).
+        vae = None
+        if device_vae:
+            from difflet.backends.neuron.minimax_h3.vae import (
+                DeviceTileDecoder,
+                NeuronMiniMaxH3VideoVaeApplication,
+                decode_video_on_ranks,
+            )
+            vae_dtype = getattr(torch, component_dtype(getattr(args, "vae_dtype", None)))
+            # The DiT's mesh (one per process); the decoder has no TP layers, so every rank
+            # holds all of it.
+            vae_app = NeuronMiniMaxH3VideoVaeApplication(
+                model_path=str(Path(model_dir) / "vae"), parallel=parallel, dtype=vae_dtype)
+            start = time.perf_counter()
+            # Each rank loads the whole decoder; its warm-up (compile only) runs per rank.
+            vae_app.load(skip_warmup=not compiling)
+            vae = DeviceTileDecoder(vae_app)
+            log(f"[video_vae] device decoder ({vae_dtype}) on every rank, loaded in "
+                f"{time.perf_counter() - start:.1f}s")
+        if compiling:
             return
 
         dit = _NeuronH3DiT(app)
-        for req in stage_loop.claimed_requests(args):
+        for req in requests:
             with replica_request_scope(args, req, final=False):
                 text = torch.load(stage_loop.work_file(args, req, "text.pt"))
                 steps = int(stage_loop.effective(req, args, "steps", h3_common.DEFAULT_STEPS))
                 table = self._neuron_adaln_table(args, model_dir, config, steps)
                 video_scheduler, audio_scheduler = load_minimax_h3_schedulers(model_dir)
+                dit.seconds.clear()
                 start = time.perf_counter()
                 output = denoise_minimax_h3_t2va(
                     dit,
@@ -702,27 +771,36 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
                     model_dtype=torch.bfloat16,
                     adaln_modulation_table=table,
                 )
-                if rank != 0:
-                    continue
                 elapsed = time.perf_counter() - start
-                destination = stage_loop.work_file(args, req, "latents.pt")
-                torch.save(
-                    {
-                        "video_latents": output.video_latents.cpu(),
-                        "audio_latents": output.audio_latents.cpu(),
-                        "height": height,
-                        "width": width,
-                        "num_frames": num_frames,
-                    },
-                    destination,
-                )
-                print(
-                    f"[generate] {steps} steps in {elapsed:.1f}s "
+                if rank == 0:
+                    destination = stage_loop.work_file(args, req, "latents.pt")
+                    torch.save(
+                        {
+                            "video_latents": output.video_latents.cpu(),
+                            "audio_latents": output.audio_latents.cpu(),
+                            "height": height,
+                            "width": width,
+                            "num_frames": num_frames,
+                        },
+                        destination,
+                    )
+                log(f"[generate] {steps} steps in {elapsed:.1f}s "
                     f"({1000 * sum(dit.seconds) / max(len(dit.seconds), 1):.0f} ms/DiT call); "
                     f"video latents {tuple(output.video_latents.shape)}, audio latents "
-                    f"{tuple(output.audio_latents.shape)} -> {destination}",
-                    flush=True,
+                    f"{tuple(output.audio_latents.shape)}")
+                if vae is None:
+                    continue
+                start = time.perf_counter()
+                video = decode_video_on_ranks(
+                    vae, output.video_latents, vae.config, rank=rank, world=world,
+                    scratch_dir=stage_loop.work_file(args, req, "vae_tiles"),
+                    device=app.device,
                 )
+                if rank == 0:
+                    destination = stage_loop.work_file(args, req, "video.pt")
+                    torch.save(video.to(torch.float16), destination)
+                log(f"[video_vae] (device, tiles over {world} ranks) RGB video "
+                    f"in {time.perf_counter() - start:.1f}s")
 
     def _stage_video_vae_host(self, args: argparse.Namespace) -> None:
         import time
@@ -760,57 +838,22 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
                       f"{time.perf_counter() - start:.1f}s -> {destination}", flush=True)
 
     def _device_vae(self) -> bool:
-        """The neuron backend decodes the video on a NeuronCore unless --host-vae."""
+        """The neuron backend decodes the video on the NeuronCores unless --host-vae."""
         return decodes_on_device(self.args, default=True)
 
-    def _stage_video_vae_neuron(self, args: argparse.Namespace) -> None:
-        """The video decoder on one NeuronCore, one tile per call; ``compile`` loads it with
-        the warm-up decode (which compiles the tile), ``generate`` skips the warm-up."""
-        import time
+    def _device_text_encoder(self) -> bool:
+        """The neuron backend encodes on the NeuronCores unless --host-text-encoder."""
+        return not getattr(self.args, "host_text_encoder", False)
 
-        import torch
-
-        from difflet.backends import get_backend
-        from difflet.cli.dp import stage_loop
-        from difflet.cli.orchestrators.torchrun import component_dtype
-        from difflet.pipeline.parallel_config import DiffletParallelConfig
-        from difflet.pipeline.path_resolver import resolve_model_path
-
-        get_backend("neuron").prepare_runtime(DiffletParallelConfig(tp_degree=1))
-        from difflet.backends.neuron.minimax_h3.vae import (
-            DeviceTileDecoder,
-            NeuronMiniMaxH3VideoVaeApplication,
+    def _neuron_stages(self) -> tuple[str, ...]:
+        """The stages a neuron ``generate`` runs: the generate launch, the host stages it does
+        not absorb, and the audio decode."""
+        return (
+            *(() if self._device_text_encoder() else ("text",)),
+            "generate",
+            *(() if self._device_vae() else ("video_vae",)),
+            "audio_vae",
         )
-        from difflet.models.minimax_h3.pipeline import decode_minimax_h3_video
-
-        model_dir = self._model_dir(args, resolve_model_path)
-        dtype = getattr(torch, component_dtype(getattr(args, "vae_dtype", None)))
-        app = NeuronMiniMaxH3VideoVaeApplication(model_path=str(Path(model_dir) / "vae"),
-                                                 dtype=dtype)
-        start = time.perf_counter()
-        app.load(skip_warmup=args.stage_mode != "compile")
-        print(f"[video_vae] device decoder ({dtype}) loaded in "
-              f"{time.perf_counter() - start:.1f}s", flush=True)
-        if args.stage_mode == "compile":
-            return
-        decoder = DeviceTileDecoder(app)
-        cfg = app.vae_config
-        for req in stage_loop.claimed_requests(args):
-            with stage_loop.request_scope(args, req, final=False):
-                latents = torch.load(stage_loop.work_file(args, req, "latents.pt"))
-                start = time.perf_counter()
-                video = decode_minimax_h3_video(
-                    decoder,
-                    latents["video_latents"],
-                    latents_mean=cfg["latents_mean"],
-                    latents_std=cfg["latents_std"],
-                    clip_length=int(cfg["clip_length"]),
-                    token_drop=int(cfg["token_drop"]),
-                )
-                destination = stage_loop.work_file(args, req, "video.pt")
-                torch.save(video.to(torch.float16), destination)
-                print(f"[video_vae] (device) RGB video {tuple(video.shape)} in "
-                      f"{time.perf_counter() - start:.1f}s -> {destination}", flush=True)
 
     def _stage_audio_vae_host(self, args: argparse.Namespace) -> None:
         import time
@@ -931,10 +974,15 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
         ):
             if value:
                 parts.extend([flag, str(value)])
-        if torchrun_backend() is not None and self._device_vae():
-            parts.append("--device-vae")
-            if getattr(args, "vae_dtype", None):
-                parts.extend(["--vae-dtype", str(args.vae_dtype)])
+        if torchrun_backend() is not None:
+            if self._device_vae():
+                parts.append("--device-vae")
+                if getattr(args, "vae_dtype", None):
+                    parts.extend(["--vae-dtype", str(args.vae_dtype)])
+            if self._device_text_encoder():
+                parts.append("--device-text-encoder")
+                if getattr(args, "text_encoder_dtype", None):
+                    parts.extend(["--text-encoder-dtype", str(args.text_encoder_dtype)])
         if getattr(args, "requests_dir", None):
             parts.extend(
                 [

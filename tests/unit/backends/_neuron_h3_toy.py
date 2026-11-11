@@ -178,3 +178,113 @@ def vae_worker(rank: int, world_size: int, vae_dir: str, exec_mode: str) -> dict
     return {"max_abs": float((out - ref).abs().max()), "shape": list(out.shape),
             "dtype": str(out.dtype), "report": app.load_report,
             "norm_dtype": str(app.module.decoder.transformer_blocks[0].norm1.weight.dtype)}
+
+
+# --------------------------------------------------------------------------- text encoder
+
+TINY_QWEN3VL_TEXT = dict(
+    vocab_size=128, hidden_size=64, intermediate_size=128, num_hidden_layers=4,
+    num_attention_heads=8, num_key_value_heads=4, head_dim=16, rms_norm_eps=1e-6,
+    rope_theta=5000000.0, max_position_embeddings=64,
+    rope_scaling={"rope_type": "default", "mrope_section": [3, 3, 2], "mrope_interleaved": True},
+    pad_token_id=0,
+)
+TE_LAYER = 3
+TE_SEQ = 16
+TE_LIVE = 11
+
+
+def write_tiny_qwen3vl(root) -> Path:
+    """A tiny Qwen3VLForConditionalGeneration saved by transformers (``model.language_model.*``,
+    ``model.visual.*``, ``lm_head``), as H3's ``text_encoder/``."""
+    from transformers import Qwen3VLConfig, Qwen3VLForConditionalGeneration
+
+    torch.manual_seed(0)
+    config = Qwen3VLConfig(
+        text_config=TINY_QWEN3VL_TEXT,
+        vision_config=dict(depth=1, hidden_size=32, intermediate_size=64, num_heads=2,
+                           out_hidden_size=64, patch_size=4, spatial_merge_size=2,
+                           temporal_patch_size=2, deepstack_visual_indexes=[0],
+                           num_position_embeddings=16),
+    )
+    model = Qwen3VLForConditionalGeneration(config).eval()
+    with torch.no_grad():
+        for p in model.parameters():
+            p.normal_(0.0, 0.1)
+    out = Path(root) / "text_encoder"
+    model.save_pretrained(out, safe_serialization=True)
+    return out
+
+
+def tiny_te_ids() -> torch.Tensor:
+    ids = torch.zeros(1, TE_SEQ, dtype=torch.int64)
+    ids[0, :TE_LIVE] = torch.randint(1, 128, (TE_LIVE,), generator=torch.Generator().manual_seed(2))
+    return ids
+
+
+def te_reference(encoder_dir) -> torch.Tensor:
+    """transformers' model: hidden_states[TE_LAYER] (layer TE_LAYER-1's output), with the mask."""
+    from transformers import Qwen3VLForConditionalGeneration
+
+    model = Qwen3VLForConditionalGeneration.from_pretrained(encoder_dir,
+                                                            torch_dtype=torch.float32).eval()
+    ids = tiny_te_ids()
+    mask = (torch.arange(TE_SEQ) < TE_LIVE).to(torch.int64)[None]
+    with torch.no_grad():
+        out = model.model.language_model(input_ids=ids, attention_mask=mask,
+                                         output_hidden_states=True, use_cache=False)
+    return out.hidden_states[TE_LAYER][:, :TE_LIVE]
+
+
+def te_worker(rank: int, world_size: int, encoder_dir: str, exec_mode: str) -> dict:
+    from difflet.backends.neuron.minimax_h3.text_encoder import (
+        NeuronMiniMaxH3TextEncoderApplication,
+    )
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+
+    app = NeuronMiniMaxH3TextEncoderApplication(
+        model_path=encoder_dir, seq_len=TE_SEQ, layer=TE_LAYER,
+        parallel=DiffletParallelConfig(tp_degree=world_size), dtype=torch.float32,
+        exec_mode=exec_mode, device="cpu",
+    )
+    torch._dynamo.reset()
+    from difflet.backends.neuron.core.application_base import TorchNeuronApplicationBase
+
+    TorchNeuronApplicationBase.load(app)  # no tokenizer in the tiny snapshot
+    hidden = app(tiny_te_ids())
+    return {"hidden": hidden[:, :TE_LIVE].tolist(), "report": app.load_report,
+            "layers": len(app.module.layers)}
+
+
+def vae_ranks_worker(rank: int, world_size: int, vae_dir: str, scratch: str) -> dict:
+    """``decode_video_on_ranks`` over the gloo ranks vs one process decoding every tile."""
+    from difflet.backends.neuron.minimax_h3.vae import (
+        DeviceTileDecoder,
+        NeuronMiniMaxH3VideoVaeApplication,
+        decode_video_on_ranks,
+    )
+    from difflet.models.minimax_h3.pipeline import decode_minimax_h3_video
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+
+    app = NeuronMiniMaxH3VideoVaeApplication(
+        model_path=vae_dir, parallel=DiffletParallelConfig(tp_degree=world_size),
+        dtype=torch.float32, exec_mode="eager", device="cpu")
+    app.load(skip_warmup=True)
+    decoder = DeviceTileDecoder(app)
+    latents = torch.randn(1, 24, 10, 16, 28, generator=torch.Generator().manual_seed(5))
+    cfg = app.vae_config
+    calls = []
+    counted = lambda tile: (calls.append(1), decoder(tile))[1]  # noqa: E731
+    video = decode_video_on_ranks(counted, latents, cfg, rank=rank, world=world_size,
+                                  scratch_dir=scratch, device=torch.device("cpu"))
+    result = {"tiles_decoded_here": len(calls)}
+    if rank == 0:
+        ref = decode_minimax_h3_video(decoder, latents, latents_mean=cfg["latents_mean"],
+                                      latents_std=cfg["latents_std"],
+                                      clip_length=int(cfg["clip_length"]),
+                                      token_drop=int(cfg["token_drop"]))
+        result.update(equal=bool(torch.equal(video, ref)), shape=list(video.shape),
+                      leftovers=sorted(p.name for p in Path(scratch).iterdir()))
+    else:
+        result["video_is_none"] = video is None
+    return result

@@ -386,14 +386,26 @@ def test_neuron_backend_compiles_only_the_dit_and_places_host_stages_on_one_rank
     orchestrator = MiniMaxH3Orchestrator(_args(work_dir=str(tmp_path), keep_work_dir=True))
 
     orchestrator.compile()
-    assert [stage for stage, _ in calls] == ["generate", "video_vae"]
-    assert "--device-vae" in calls[0][1]["cli_args"]
+    assert [stage for stage, _ in calls] == ["generate"]
+    cli = calls[0][1]["cli_args"]
+    assert "--device-vae" in cli and "--device-text-encoder" in cli
 
     calls.clear()
     orchestrator.generate()
+    # text and the video decode run inside the generate launch
+    assert [(stage, kw["num_cores"]) for stage, kw in calls] == [
+        ("generate", 4), ("audio_vae", 1)
+    ]
+
+    calls.clear()
+    host = MiniMaxH3Orchestrator(_args(work_dir=str(tmp_path), keep_work_dir=True,
+                                       host_vae=True, host_text_encoder=True))
+    host.generate()
     assert [(stage, kw["num_cores"]) for stage, kw in calls] == [
         ("text", 1), ("generate", 4), ("video_vae", 1), ("audio_vae", 1)
     ]
+    cli = calls[0][1]["cli_args"]
+    assert "--device-vae" not in cli and "--device-text-encoder" not in cli
 
 
 def test_neuron_backend_host_vae_compiles_only_the_dit_and_rejects_vae_dtype(
@@ -418,13 +430,12 @@ def test_neuron_backend_dispatches_to_host_and_torchrun_stage_bodies(monkeypatch
     orchestrator = MiniMaxH3Orchestrator(_args())
     seen = []
     for name in ("_stage_text_host", "_stage_generate_neuron", "_stage_video_vae_host",
-                 "_stage_video_vae_neuron", "_stage_audio_vae_host"):
+                 "_stage_audio_vae_host"):
         monkeypatch.setattr(orchestrator, name, lambda args, name=name: seen.append(name))
     for stage in ("text", "generate", "video_vae", "audio_vae"):
         orchestrator._run_stage_internal(stage, orchestrator.args)
-    orchestrator._run_stage_internal("video_vae", _args(device_vae=True))
     assert seen == ["_stage_text_host", "_stage_generate_neuron", "_stage_video_vae_host",
-                    "_stage_audio_vae_host", "_stage_video_vae_neuron"]
+                    "_stage_audio_vae_host"]
 
 
 def test_shared_cli_args_forward_model_path():

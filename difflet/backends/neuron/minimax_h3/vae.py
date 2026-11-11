@@ -97,7 +97,11 @@ class _NeuronH3VideoDecoder(torch.nn.Module):
 
 
 class NeuronMiniMaxH3VideoVaeApplication(TorchNeuronApplicationBase):
-    """The H3 video decoder on one rank, one tile per call. ``model_path`` is ``<model>/vae``."""
+    """The H3 video decoder, one tile per call. ``model_path`` is ``<model>/vae``.
+
+    It has no tensor-parallel layers: under a TP mesh (the DiT's, in the generate launch; a
+    process holds one mesh) every rank loads the whole decoder and decodes its own tiles
+    (``decode_video_on_ranks``)."""
 
     block_attrs = ("decoder.transformer_blocks",)
     skipped_checkpoint_prefixes = ("encoder.", "quant_conv.")
@@ -106,10 +110,11 @@ class NeuronMiniMaxH3VideoVaeApplication(TorchNeuronApplicationBase):
                  exec_mode: str | None = None, device="neuron", **kwargs: Any) -> None:
         super().__init__(model_path=model_path, parallel=parallel, dtype=dtype,
                          exec_mode=exec_mode, device=device, **kwargs)
-        if int(self.parallel.world_size) != 1:
-            raise NotImplementedError("the H3 video VAE runs on one rank")
         if self.dtype not in (torch.bfloat16, torch.float32):
             raise ValueError(f"the H3 video VAE runs in bf16 or fp32, got {self.dtype}")
+        for field in ("cp_degree", "dp_degree"):
+            if int(getattr(self.parallel, field, 1) or 1) > 1:
+                raise NotImplementedError(f"the H3 video VAE runs under TP only, got {field}")
         with open(Path(str(self.model_path)) / "config.json", encoding="utf-8") as handle:
             self.vae_config = json.load(handle)
 
@@ -134,8 +139,56 @@ class DeviceTileDecoder:
         return out.cpu()
 
 
+
+
+def decode_video_on_ranks(decoder, latents: torch.Tensor, cfg: dict, *, rank: int, world: int,
+                          scratch_dir, device) -> torch.Tensor | None:
+    """``decode_minimax_h3_video`` with its tiles spread over the ranks, each holding a decoder.
+
+    The decode calls its decoder once per tile in a fixed order, so it runs three times: once
+    with a recorder that keeps every tile (every rank, the latents are the same on all of them),
+    once per rank on the tiles ``i % world == rank`` (written to ``scratch_dir``), and once on
+    rank 0 replaying the decoded tiles in order, which does the official blending and stitching.
+    A collective after the writes makes rank 0 wait for every rank's file. Returns the video on
+    rank 0, None elsewhere.
+    """
+    import torch.distributed as dist
+
+    from difflet.models.minimax_h3.pipeline import decode_minimax_h3_video
+
+    kwargs = dict(latents_mean=cfg["latents_mean"], latents_std=cfg["latents_std"],
+                  clip_length=int(cfg["clip_length"]), token_drop=int(cfg["token_drop"]))
+    tiles: list[torch.Tensor] = []
+
+    def record(tile: torch.Tensor) -> torch.Tensor:
+        tiles.append(tile.clone())
+        b, _, t, h, w = tile.shape
+        return torch.zeros(b, 3, t * 4, h * 16, w * 16)
+
+    decode_minimax_h3_video(record, latents, **kwargs)
+    scratch = Path(scratch_dir)
+    scratch.mkdir(parents=True, exist_ok=True)
+    mine = {i: decoder(tiles[i]) for i in range(len(tiles)) if i % world == rank}
+    torch.save(mine, scratch / f"vae_tiles_rank{rank}.pt")
+    if world > 1:
+        done = torch.ones(1, device=device)
+        dist.all_reduce(done)
+        if device.type == "neuron":
+            torch.neuron.synchronize()
+    if rank != 0:
+        return None
+    decoded: dict[int, torch.Tensor] = {}
+    for r in range(world):
+        path = scratch / f"vae_tiles_rank{r}.pt"
+        decoded.update(torch.load(path))
+        path.unlink()
+    order = iter(range(len(tiles)))
+    return decode_minimax_h3_video(lambda tile: decoded[next(order)], latents, **kwargs)
+
+
 __all__ = [
     "DeviceTileDecoder",
+    "decode_video_on_ranks",
     "NeuronMiniMaxH3VideoVaeApplication",
     "TILE_LATENT_SHAPE",
 ]
