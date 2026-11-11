@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import pytest
 import torch
 
 from difflet.models.minimax_h3.pipeline import (
@@ -112,3 +113,30 @@ def test_h3_t2va_runtime_is_seed_deterministic():
 
     assert torch.equal(first.video_latents, second.video_latents)
     assert torch.equal(first.audio_latents, second.audio_latents)
+
+
+def test_h3_t2va_step_callback_runs_after_every_step_and_can_stop_the_loop():
+    embeddings = torch.zeros(1, 4, 16)
+    text_mask = torch.tensor([[True, True, True, False]])
+    kwargs = dict(encoder_hidden_states=embeddings, encoder_attention_mask=text_mask,
+                  num_text_tokens=3, height=32, width=32, num_frames=124,
+                  num_inference_steps=4, seed=7)
+    seen = []
+    denoise_minimax_h3_t2va(_ZeroTransformer(), video_scheduler=MiniMaxH3Scheduler(shift=12.0),
+                            audio_scheduler=MiniMaxH3Scheduler(shift=3.0),
+                            step_callback=seen.append, **kwargs)
+    steps = len(seen)
+    assert seen == list(range(steps)) and steps >= 1
+
+    class Stop(Exception):
+        pass
+
+    def stop_after_first(index):
+        if index == 0:
+            raise Stop
+
+    transformer = _ZeroTransformer()
+    with pytest.raises(Stop):
+        denoise_minimax_h3_t2va(transformer, video_scheduler=MiniMaxH3Scheduler(shift=12.0),
+                                audio_scheduler=MiniMaxH3Scheduler(shift=3.0),
+                                step_callback=stop_after_first, **kwargs)

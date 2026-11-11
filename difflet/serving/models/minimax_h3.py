@@ -15,6 +15,7 @@ profile compiles the blocks (tens of minutes at 768p) and later starts reuse the
 
 from __future__ import annotations
 
+import asyncio
 import math
 import os
 import shutil
@@ -380,8 +381,20 @@ class MiniMaxH3PipelineRunner:
         with tempfile.TemporaryDirectory(prefix="difflet-h3-tiles-") as scratch:
             # Every rank sees the same scratch name: the tile files cross ranks through it.
             shared = Path(tempfile.gettempdir()) / f"difflet-h3-tiles-{request.request_id}"
-            result = self.resident.generate(request.prompt, steps=request.num_inference_steps,
-                                            seed=request.seed, scratch_dir=shared)
+
+            def should_stop() -> bool:
+                return (context.cancellation.cancelled()
+                        or time.monotonic() > float(context.deadline_monotonic))
+
+            from difflet.backends.neuron.minimax_h3.resident import ResidentRequestCancelled
+
+            try:
+                result = self.resident.generate(
+                    request.prompt, steps=request.num_inference_steps, seed=request.seed,
+                    scratch_dir=shared, should_stop=should_stop)
+            except ResidentRequestCancelled as exc:
+                # Every rank stopped at the same step; report it the way the engine expects.
+                raise asyncio.CancelledError(str(exc)) from exc
             del scratch
         context.cancellation.throw_if_cancelled()
         if not primary:

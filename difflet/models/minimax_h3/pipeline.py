@@ -278,12 +278,16 @@ def denoise_minimax_h3_t2va(
     audio_scheduler: MiniMaxH3Scheduler,
     model_dtype: torch.dtype = torch.bfloat16,
     adaln_modulation_table: torch.Tensor | None = None,
+    step_callback: Callable[[int], None] | None = None,
 ) -> MiniMaxH3LatentOutput:
     """Run H3's guidance-distilled joint video/audio denoising loop.
 
     ``adaln_modulation_table`` is required when the transformer graph was built
     with ``precomputed_adaln=True``: `(num_steps, num_layers, 6, 6, hidden)`,
     step-aligned with the two schedulers' shared timestep sequence.
+
+    ``step_callback(step_index)``, when given, runs after every step (a resident server's
+    cancellation check, which may raise to stop the loop).
     """
 
     if encoder_hidden_states.ndim != 3 or encoder_hidden_states.shape[0] != 1:
@@ -405,6 +409,8 @@ def denoise_minimax_h3_t2va(
             audio_rows,
             return_dict=False,
         )[0]
+        if step_callback is not None:
+            step_callback(step_index)
 
     video_latents = unpatchify_video_latents(
         video_rows,

@@ -331,3 +331,55 @@ def test_auto_falls_back_to_the_host_once_the_device_runs_out_of_hbm(monkeypatch
     assert resident._is_hbm_exhaustion(RuntimeError(
         "NRT Execution error occurred on Neuron for operation=neuron::alloc::lazy"))
     assert not resident._is_hbm_exhaustion(ValueError("alloc"))
+
+
+def test_cancel_check_steps_env(monkeypatch):
+    from difflet.backends.neuron.minimax_h3 import resident
+
+    monkeypatch.delenv(resident.CANCEL_CHECK_STEPS_ENV, raising=False)
+    assert resident.cancel_check_steps() == 5
+    monkeypatch.setenv(resident.CANCEL_CHECK_STEPS_ENV, "2")
+    assert resident.cancel_check_steps() == 2
+    monkeypatch.setenv(resident.CANCEL_CHECK_STEPS_ENV, "0")
+    with pytest.raises(ValueError):
+        resident.cancel_check_steps()
+
+
+@pytest.mark.parametrize("every, stop_at_poll, expected_steps", [
+    (5, 0, 0),     # cancelled before the denoise: no step runs
+    (5, 2, 10),    # polls: encode, step 5, step 10 -> stops after step 10
+    (1, 3, 3),     # every step: encode, 1, 2, 3 -> stops after step 3
+])
+def test_generate_stops_every_rank_at_an_agreed_check(monkeypatch, every, stop_at_poll,
+                                                       expected_steps):
+    from difflet.backends.neuron.minimax_h3 import resident
+    from difflet.models.minimax_h3 import pipeline
+
+    monkeypatch.setenv(resident.CANCEL_CHECK_STEPS_ENV, str(every))
+    res = resident.NeuronMiniMaxH3Resident(
+        model_dir="/m", parallel=_ULYSSES2, height=768, width=1344, num_frames=175,
+        text_bucket=512, cache_dir=None, log=lambda m: None)
+    torch = pytest.importorskip("torch")
+    monkeypatch.setattr(res, "encode", lambda p: {
+        "encoder_hidden_states": torch.zeros(1, 512, 8), "num_text_tokens": 3,
+        "attention_mask": torch.ones(1, 512, dtype=torch.bool)})
+    monkeypatch.setattr(res, "modulation_table", lambda steps: None)
+    monkeypatch.setattr(pipeline, "load_minimax_h3_schedulers", lambda d: (None, None))
+    ran = []
+
+    def fake_denoise(*a, num_inference_steps, step_callback, **kw):
+        for index in range(num_inference_steps):
+            ran.append(index)
+            step_callback(index)
+        raise AssertionError("not cancelled")
+
+    monkeypatch.setattr(pipeline, "denoise_minimax_h3_t2va", fake_denoise)
+    polls = []
+
+    def should_stop():
+        polls.append(1)
+        return len(polls) > stop_at_poll
+
+    with pytest.raises(resident.ResidentRequestCancelled):
+        res.generate("p", steps=30, seed=0, scratch_dir="/tmp/x", should_stop=should_stop)
+    assert len(ran) == expected_steps

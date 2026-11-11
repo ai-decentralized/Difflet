@@ -84,6 +84,23 @@ def text_encoder_mode() -> str:
     return mode
 
 
+#: How many denoise steps run between two cancellation checks (every rank agrees on each).
+CANCEL_CHECK_STEPS_ENV = "DIFFLET_H3_CANCEL_CHECK_STEPS"
+_DEFAULT_CANCEL_CHECK_STEPS = 5
+
+
+def cancel_check_steps() -> int:
+    raw = os.environ.get(CANCEL_CHECK_STEPS_ENV, "").strip()
+    steps = int(raw) if raw else _DEFAULT_CANCEL_CHECK_STEPS
+    if steps < 1:
+        raise ValueError(f"{CANCEL_CHECK_STEPS_ENV} must be a positive integer, got {raw!r}")
+    return steps
+
+
+class ResidentRequestCancelled(Exception):
+    """Every rank agreed to stop the request (raised on all of them at the same step)."""
+
+
 def _is_hbm_exhaustion(exc: BaseException) -> bool:
     """The neuron runtime's out-of-device-memory error (its message names the allocation)."""
     text = str(exc)
@@ -281,8 +298,22 @@ class NeuronMiniMaxH3Resident:
             self._tables[steps] = torch.load(path)
         return self._tables[steps]
 
+    def agree_to_stop(self, stop: bool) -> bool:
+        """Whether any rank wants to stop: one all-reduce(MAX) of a flag, so every rank leaves
+        the loop at the same step and no collective is left waiting for a peer."""
+        import torch.distributed as dist
+
+        if not (dist.is_available() and dist.is_initialized()) or self.world == 1:
+            return bool(stop)
+        flag = torch.tensor([1 if stop else 0], dtype=torch.int32, device=self.dit_app.device)
+        dist.all_reduce(flag, op=dist.ReduceOp.MAX)
+        return bool(int(flag.cpu().item()))
+
     def generate(self, prompt: str, *, steps: int, seed: int,
-                 scratch_dir: str | Path) -> ResidentRequestResult:
+                 scratch_dir: str | Path, should_stop=None) -> ResidentRequestResult:
+        """One request on every rank. ``should_stop()`` (this rank's cancellation/deadline) is
+        polled after the text encode and every ``DIFFLET_H3_CANCEL_CHECK_STEPS`` denoise steps;
+        once any rank says stop, every rank raises ``ResidentRequestCancelled`` together."""
         from difflet.backends.neuron.minimax_h3.vae import decode_video_on_ranks
         from difflet.models.minimax_h3.pipeline import (
             decode_minimax_h3_audio,
@@ -300,6 +331,19 @@ class NeuronMiniMaxH3Resident:
                              f"{self.text_bucket}")
         table = self.modulation_table(steps)
         video_scheduler, audio_scheduler = load_minimax_h3_schedulers(self.model_dir)
+        every = cancel_check_steps()
+        total = int(steps)
+
+        def check(where: str) -> None:
+            if should_stop is not None and self.agree_to_stop(bool(should_stop())):
+                self.log(f"[minimax-h3 resident] request cancelled ({where})")
+                raise ResidentRequestCancelled(where)
+
+        def after_step(index: int) -> None:
+            if (index + 1) % every == 0 and index + 1 < total:
+                check(f"after denoise step {index + 1}/{total}")
+
+        check("after the text encode")
         start = time.perf_counter()
         output = denoise_minimax_h3_t2va(
             NeuronH3DiTCall(self.dit_app),
@@ -309,8 +353,10 @@ class NeuronMiniMaxH3Resident:
             num_frames=self.num_frames, num_inference_steps=int(steps), seed=int(seed),
             video_scheduler=video_scheduler, audio_scheduler=audio_scheduler,
             model_dtype=torch.bfloat16, adaln_modulation_table=table,
+            step_callback=after_step if should_stop is not None else None,
         )
         seconds["denoise"] = time.perf_counter() - start
+        check("after the denoise")
         start = time.perf_counter()
         group, groups, writer = self.vae.app.tile_groups(self.rank, self.world)
         video = decode_video_on_ranks(
@@ -343,9 +389,12 @@ class NeuronMiniMaxH3Resident:
 
 
 __all__ = [
+    "CANCEL_CHECK_STEPS_ENV",
     "NeuronH3DiTCall",
     "NeuronMiniMaxH3Resident",
+    "ResidentRequestCancelled",
     "ResidentRequestResult",
     "TEXT_ENCODER_ENV",
+    "cancel_check_steps",
     "text_encoder_mode",
 ]
