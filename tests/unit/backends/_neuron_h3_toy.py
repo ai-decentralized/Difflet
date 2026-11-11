@@ -123,16 +123,18 @@ def as_neuron_call(inputs, table=None):
 
 
 def l1_h3_worker(rank: int, world_size: int, transformer_dir: str, precomputed: bool,
-                 exec_mode: str) -> dict:
+                 exec_mode: str, cp: int = 1, cp_mode: str = "gather_kv") -> dict:
+    """``world_size = tp * cp``; ``cp > 1`` runs the block stack context-parallel."""
     from difflet.backends.neuron.minimax_h3.transformer import (
         NeuronMiniMaxH3Config,
         NeuronMiniMaxH3TransformerApplication,
     )
     from difflet.pipeline.parallel_config import DiffletParallelConfig
 
-    parallel = DiffletParallelConfig(tp_degree=world_size)
+    tp = world_size // cp
+    parallel = DiffletParallelConfig(tp_degree=tp, cp_degree=cp, cp_mode=cp_mode)
     config = NeuronMiniMaxH3Config.from_pretrained(
-        transformer_dir, **TINY_SHAPE, text_seq_len=TINY_TEXT_SEQ_LEN, tp_degree=world_size,
+        transformer_dir, **TINY_SHAPE, text_seq_len=TINY_TEXT_SEQ_LEN, tp_degree=tp,
         precomputed_adaln=precomputed,
     )
     app = NeuronMiniMaxH3TransformerApplication(
@@ -157,6 +159,7 @@ def l1_h3_worker(rank: int, world_size: int, transformer_dir: str, precomputed: 
         "block_dtype": str(block0.attn.to_q.weight.dtype),
         "local_heads": int(block0.attn.heads),
         "processor": type(block0.attn.processor).__name__,
+        "cp_mode": getattr(block0.attn.processor, "mode", None),
         "has_adaln": block0.adaln_proj is not None,
         "compiled_blocks": list(app.compiled_blocks),
         "params_on_meta": sum(p.is_meta for p in app.module.parameters()),

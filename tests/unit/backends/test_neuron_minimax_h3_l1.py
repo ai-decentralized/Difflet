@@ -54,9 +54,9 @@ def tiny(tmp_path_factory):
     return SimpleNamespace(transformer=str(transformer), video=video, audio=audio)
 
 
-def _run(tiny, *, tp, precomputed=True, exec_mode="eager"):
-    return run_ranks(l1_h3_worker, tiny.transformer, precomputed, exec_mode, world_size=tp,
-                     env=OFFLINE)
+def _run(tiny, *, tp, precomputed=True, exec_mode="eager", cp=1, cp_mode="gather_kv"):
+    return run_ranks(l1_h3_worker, tiny.transformer, precomputed, exec_mode, cp, cp_mode,
+                     world_size=tp * cp, env=OFFLINE)
 
 
 def _assert_close(results, tiny):
@@ -116,6 +116,38 @@ def test_compile_mode_matches_eager(tiny):
     results = _run(tiny, tp=2, exec_mode="compile")
     _assert_close(results, tiny)
     assert results[0]["compiled_blocks"]
+
+
+@pytest.mark.parametrize(
+    "tp, cp, mode",
+    [
+        (2, 2, "ulysses"),  # 4 heads -> 2 per TP rank -> 1 per Ulysses rank
+        (1, 2, "ulysses"),
+        (2, 2, "gather_kv"),
+        (1, 4, "gather_kv"),
+        (1, 3, "gather_kv"),  # 3 does not divide the packed sequence: tail padding path
+    ],
+)
+def test_context_parallel_matches_diffusers(tiny, tp, cp, mode):
+    """The block stack sequence-sharded over the CP group (Ulysses all-to-all, or local
+    queries against all-gathered K/V) gives the cp1 result on every rank."""
+    results = _run(tiny, tp=tp, cp=cp, cp_mode=mode)
+    _assert_close(results, tiny)
+    r = results[0]
+    assert r["processor"] == "_NeuronH3UlyssesAttnProcessor" and r["cp_mode"] == mode
+    assert r["local_heads"] == TINY["num_attention_heads"] // tp
+
+
+def test_context_parallel_compile_mode_matches_eager(tiny):
+    results = _run(tiny, tp=2, cp=2, cp_mode="ulysses", exec_mode="compile")
+    _assert_close(results, tiny)
+    assert results[0]["compiled_blocks"]
+
+
+def test_ulysses_refuses_heads_that_do_not_divide_tp_times_cp(tiny):
+    # 4 heads over tp2 x cp4 = 8: Ulysses cannot shard them (gather_kv can).
+    with pytest.raises(AssertionError, match="divisible by tp\\*cp"):
+        _run(tiny, tp=2, cp=4, cp_mode="ulysses")
 
 
 def test_text_bucket_is_the_smallest_that_holds_the_prompt():

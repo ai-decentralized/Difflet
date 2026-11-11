@@ -121,6 +121,19 @@ def _save_av(
     return True
 
 
+def _release_neuron_app(app) -> None:
+    """Drop a loaded neuron application's module and return its HBM to the runtime."""
+    import gc
+
+    import torch
+
+    app.module = None
+    app.is_loaded = False
+    gc.collect()
+    if getattr(app.device, "type", None) == "neuron":
+        torch.neuron.empty_cache()
+
+
 class _NeuronH3DiT:
     """The denoise loop's DiT callable on the neuron backend: the Trainium graph's positional
     call on host tensors in, the host ``(video, audio)`` velocity pair out. The two bool masks
@@ -742,13 +755,14 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
             f"({ {k: round(v, 1) for k, v in app.phase_seconds.items()} }), "
             f"{app.weight_bytes / 2**30:.2f} GiB/rank")
 
-        # 3. The video decoder, one copy per rank (it is not sharded; the tiles are).
-        vae = None
-        if device_vae:
+        # 3. The video decoder, one copy per rank (it is not sharded; the tiles are). Compile
+        # mode builds it right away; a generate launch loads it at its first decode, after the
+        # DiT of the last request is released (below), so the two never share the HBM: at long
+        # 768p clips the DiT's activations plus an fp32 decoder on every rank do not fit.
+        def load_vae():
             from difflet.backends.neuron.minimax_h3.vae import (
                 DeviceTileDecoder,
                 NeuronMiniMaxH3VideoVaeApplication,
-                decode_video_on_ranks,
             )
             vae_dtype = getattr(torch, component_dtype(getattr(args, "vae_dtype", None)))
             # The DiT's mesh (one per process); the decoder has no TP layers, so every rank
@@ -758,13 +772,17 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
             start = time.perf_counter()
             # Each rank loads the whole decoder; its warm-up (compile only) runs per rank.
             vae_app.load(skip_warmup=not compiling)
-            vae = DeviceTileDecoder(vae_app)
             log(f"[video_vae] device decoder ({vae_dtype}) on every rank, loaded in "
                 f"{time.perf_counter() - start:.1f}s")
+            return DeviceTileDecoder(vae_app)
+
         if compiling:
+            if device_vae:
+                load_vae()
             return
+        vae = None
         audio_decoder = None
-        if vae is not None and rank == 0:
+        if device_vae and rank == 0:
             from difflet.models.minimax_h3.host_components import (
                 default_threads,
                 load_host_audio_decoder,
@@ -773,9 +791,9 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
             audio_decoder = load_host_audio_decoder(model_dir, threads=default_threads())
 
         dit = _NeuronH3DiT(app)
-        for req in requests:
+        for position, req in enumerate(requests):
             # With the device decode, this launch finishes the request (audio + mux included).
-            with replica_request_scope(args, req, final=vae is not None):
+            with replica_request_scope(args, req, final=device_vae):
                 text = texts[req.index]
                 steps = int(stage_loop.effective(req, args, "steps", h3_common.DEFAULT_STEPS))
                 table = self._neuron_adaln_table(args, model_dir, config, steps)
@@ -815,13 +833,21 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
                     f"({1000 * sum(dit.seconds) / max(len(dit.seconds), 1):.0f} ms/DiT call); "
                     f"video latents {tuple(output.video_latents.shape)}, audio latents "
                     f"{tuple(output.audio_latents.shape)}")
-                if vae is None:
+                if not device_vae:
                     continue
+                if vae is None:
+                    if position == len(requests) - 1:
+                        # No denoise follows: free the DiT before the decoder takes its HBM.
+                        _release_neuron_app(app)
+                        log("[generate] DiT released before the video decode")
+                    vae = load_vae()
+                from difflet.backends.neuron.minimax_h3.vae import decode_video_on_ranks
+
                 start = time.perf_counter()
                 video = decode_video_on_ranks(
                     vae, output.video_latents, vae.config, rank=rank, world=world,
                     scratch_dir=stage_loop.work_file(args, req, "vae_tiles"),
-                    device=app.device,
+                    device=self._neuron_device,
                 )
                 if rank == 0:
                     destination = stage_loop.work_file(args, req, "video.pt")
@@ -937,10 +963,19 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
                 self._decode_audio_and_mux(req, latents["audio_latents"], video, decoder)
 
     def _validate_topology(self) -> None:
-        if (self.args.tp_degree or 4) != 4:
+        # The neuron application validates its own degrees (heads divide tp*cp); Trainium's AOT
+        # graph stays fixed at TP4.
+        if (self.args.tp_degree or 4) != 4 and torchrun_backend() != "neuron":
             raise NotImplementedError("MiniMax-H3's first qualified graph is fixed at TP4.")
         if (self.args.cp_degree or 1) != 1:
-            raise NotImplementedError("MiniMax-H3 CP is deferred until full-attention parity.")
+            # Neuron only: CP over the DiT's block stack. Trainium keeps refusing CP.
+            cp_on_neuron = (torchrun_backend() == "neuron"
+                            and getattr(self.args, "cp_mode", None) in ("ulysses", "gather_kv"))
+            if not cp_on_neuron:
+                raise NotImplementedError(
+                    "MiniMax-H3 CP runs only on the neuron backend with --cp-mode ulysses "
+                    "or gather_kv."
+                )
         if getattr(self.args, "cfg_parallel", False):
             raise NotImplementedError("MiniMax-H3 is guidance-distilled and has no CFG branch.")
         if getattr(self.args, "sp_enabled", False):
@@ -956,7 +991,8 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
     def _stage_cores(self, stage: str) -> int:
         if torchrun_backend() is not None:
             # Only the DiT is on the device; the host stages run as one rank.
-            return (self.args.tp_degree or 4) if stage == "generate" else 1
+            cores = (self.args.tp_degree or 4) * (self.args.cp_degree or 1)
+            return cores if stage == "generate" else 1
         return (self.args.tp_degree or 4) if stage in {"text", "generate"} else 1
 
     @staticmethod
@@ -1013,6 +1049,8 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
             if value:
                 parts.extend([flag, str(value)])
         if torchrun_backend() is not None:
+            if (args.cp_degree or 1) > 1 and getattr(args, "cp_mode", None):
+                parts.extend(["--cp-mode", str(args.cp_mode)])
             if self._device_vae():
                 parts.append("--device-vae")
                 if getattr(args, "vae_dtype", None):

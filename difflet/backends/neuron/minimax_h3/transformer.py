@@ -40,6 +40,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import math
 from pathlib import Path
 from typing import Any
 
@@ -126,6 +127,9 @@ class NeuronMiniMaxH3Config:
     tp_degree: int = 4
     precomputed_adaln: bool = True
     checkpoint_num_layers: int | None = None
+    #: The CP strategy of the block stack when the mesh has cp > 1 ("ulysses" or "gather_kv");
+    #: the application fills it from its parallel config.
+    cp_mode: str = "ulysses"
 
     @classmethod
     def from_pretrained(cls, transformer_dir, **overrides: Any) -> "NeuronMiniMaxH3Config":
@@ -215,9 +219,135 @@ def _give_fp32_host_storage(module: torch.nn.Module) -> None:
                 )
 
 
+def _cp_degree() -> int:
+    from difflet.backends.neuron.ops_impl.parallel_mesh import get_axis_size
+
+    return int(get_axis_size("cp"))
+
+
+def _ulysses_processor_class():
+    """The bounded-attention processor with Ulysses context parallelism around the attention.
+
+    Every rank holds ``S / cp`` rows of the packed sequence through the whole block, so q/k/v
+    are ``[B, S/cp, H/tp, d]``. One all-to-all per tensor trades the sequence shard for a head
+    shard (``[B, H/(tp*cp), S, d]``), the bounded flash kernel attends over the full sequence
+    with the prefix key bounds of the full mask, and a fourth all-to-all restores the rows.
+    Exact: one dense softmax over every key, as at cp1."""
+    from difflet.backends.neuron.ops_impl import collectives
+    from difflet.models.minimax_h3.modeling_minimax_h3_tp import (
+        MiniMaxH3TPAttnProcessor,
+        _prefix_bounds,
+    )
+
+    class _NeuronH3UlyssesAttnProcessor(MiniMaxH3TPAttnProcessor):
+        """``mode="ulysses"``: the all-to-all head swap (heads must divide tp*cp).
+        ``mode="gather_kv"``: queries stay local (``S/cp`` rows) and K/V are all-gathered over
+        the CP group to the full sequence; no head constraint, more traffic."""
+
+        def __init__(self, cp: int, mode: str = "ulysses") -> None:
+            super().__init__()
+            self.cp = int(cp)
+            self.mode = str(mode)
+
+        def __call__(self, attn, hidden_states, rotary_emb=None, attention_mask=None):
+            query = attn.norm_q(attn.to_q(hidden_states).unflatten(-1, (attn.heads, -1)))
+            key = attn.norm_k(attn.to_k(hidden_states).unflatten(-1, (attn.heads, -1)))
+            value = attn.to_v(hidden_states).unflatten(-1, (attn.heads, -1))
+            if rotary_emb is not None:
+                query = self._apply_rotary_emb(query, *rotary_emb)
+                key = self._apply_rotary_emb(key, *rotary_emb)
+            group = collectives.get_cp_group()
+            q, k, v = (t.transpose(1, 2) for t in (query, key, value))  # [B, H/tp, S/cp, d]
+            if self.mode == "ulysses":
+                q, k, v = (collectives.seq_to_heads(t, group, self.cp) for t in (q, k, v))
+            else:
+                k, v = (collectives._gather_dim(t, 2, group) for t in (k, v))
+            batch, heads, q_len, head_dim = q.shape
+            k_len = int(k.shape[2])
+            # The key bounds are the full mask's live prefix, for every query row.
+            bound_min, bound_max = _prefix_bounds(attention_mask, num_heads=heads,
+                                                  query_length=q_len)
+            out = self._attention(
+                q.reshape(batch * heads, q_len, head_dim),
+                k.reshape(batch * heads, k_len, head_dim),
+                v.reshape(batch * heads, k_len, head_dim),
+                scale=1.0 / math.sqrt(head_dim), causal=False, tp_q=True, tp_k=True,
+                tp_out=False, bound_min=bound_min, bound_max=bound_max,
+            ).reshape(batch, heads, q_len, head_dim)
+            if self.mode == "ulysses":
+                out = collectives.heads_to_seq(out, group, self.cp)
+            out = out.transpose(1, 2).flatten(2, 3).to(query.dtype)
+            return attn.to_out[1](attn.to_out[0](out.contiguous()))
+
+    return _NeuronH3UlyssesAttnProcessor
+
+
+def _ulysses_transformer_forward(self, hidden_states, audio_hidden_states, encoder_hidden_states,
+                                 timestep, timestep_indices, token_tags, position_ids,
+                                 video_indices, audio_indices, text_indices,
+                                 encoder_attention_mask=None, attention_mask=None,
+                                 block_modulation=None, attention_kwargs=None, return_dict=True):
+    """``MiniMaxH3Transformer3DModel.forward`` (precomputed AdaLN, inference) with the block
+    stack sequence-sharded over the CP group: the packing, the token refiner and the heads run
+    on the full sequence (replicated, as at cp1); rank ``r`` of the CP group then keeps rows
+    ``[r S/cp, (r+1) S/cp)`` with their RoPE angles and AdaLN rows through the 50 blocks, and
+    one all-gather restores the sequence before the output norm. Bound as an instance method
+    by the trace module when cp > 1 (the shared model is untouched)."""
+    from difflet.backends.neuron.ops_impl import collectives
+    from difflet.backends.neuron.ops_impl.parallel_mesh import get_axis_rank
+    from difflet.models.minimax_h3.modeling_minimax_h3 import MINIMAX_H3_MODALITY_NUM
+
+    dtype_of = lambda module: next(module.parameters()).dtype  # noqa: E731
+    cp, cp_rank = _cp_degree(), get_axis_rank("cp")
+    sequence_length = int(position_ids.shape[0])
+    # A cp that does not divide the packed sequence (cp=7 with the 128-row alignment) pads the
+    # block stack's rows with zeros at the tail: they lie past the live prefix, so the key
+    # bounds exclude them, and they are cut off after the gather.
+    padded_length = -(-sequence_length // cp) * cp
+    rows = padded_length // cp
+    lo, hi = cp_rank * rows, (cp_rank + 1) * rows
+
+    rotary_emb = self.rope(position_ids)
+    video_embeds = self.proj_in(hidden_states.to(dtype_of(self.proj_in)))
+    audio_embeds = self.audio_proj_in(audio_hidden_states.to(dtype_of(self.audio_proj_in)))
+    text_embeds = self.context_embedder(encoder_hidden_states.to(dtype_of(self.context_embedder)))
+    text_embeds = self.token_refiner(text_embeds, encoder_attention_mask)
+    packed = text_embeds.new_zeros((text_embeds.shape[0], sequence_length, text_embeds.shape[-1]))
+    packed = packed.index_copy(1, text_indices, text_embeds)
+    packed = packed.index_copy(1, video_indices, video_embeds.to(text_embeds.dtype))
+    packed = packed.index_copy(1, audio_indices, audio_embeds.to(text_embeds.dtype))
+    temb = self.time_proj(timestep)
+    temb = self.time_embedder(temb.to(dtype_of(self.time_embedder)))
+    adaln_indices = timestep_indices * MINIMAX_H3_MODALITY_NUM + token_tags
+    if block_modulation is None:
+        raise ValueError("the neuron Ulysses path runs with precomputed_adaln=True only")
+
+    block_mask = attention_mask
+    pad = padded_length - sequence_length
+    if pad:
+        packed = torch.nn.functional.pad(packed, (0, 0, 0, pad))
+        rotary_emb = tuple(torch.nn.functional.pad(t, (0, 0, 0, pad)) for t in rotary_emb)
+        adaln_indices = torch.nn.functional.pad(adaln_indices, (0, pad))
+        block_mask = torch.nn.functional.pad(attention_mask, (0, pad))
+    shard = packed[:, lo:hi].contiguous()
+    shard_rope = tuple(t[lo:hi].contiguous() for t in rotary_emb)
+    shard_indices = adaln_indices[lo:hi].contiguous()
+    for index, block in enumerate(self.transformer_blocks):
+        shard = block(shard, temb, shard_indices, shard_rope, block_mask,
+                      block_modulation[index])
+    hidden = collectives._gather_dim(shard, 1, collectives.get_cp_group())[:, :sequence_length]
+
+    hidden = self.norm_out(hidden, temb, timestep_indices).to(dtype_of(self.proj_out))
+    video_output = self.proj_out(hidden).index_select(1, video_indices)
+    audio_output = self.audio_proj_out(hidden).index_select(1, audio_indices)
+    return (video_output, audio_output)
+
+
 def _trace_module_class():
     """``_MiniMaxH3TransformerTraceModule`` with the fp32 modules on real host storage. Built
     lazily: importing the TP modeling must wait until the backend's mesh exists."""
+    import types
+
     from difflet.models.minimax_h3.modeling_minimax_h3_tp import (
         MiniMaxH3TPAttnProcessor,
         _MiniMaxH3TransformerTraceModule,
@@ -234,6 +364,15 @@ def _trace_module_class():
                 for block in (*self.transformer.token_refiner.refiner_blocks,
                               *self.transformer.transformer_blocks):
                     block.attn.processor = processor
+            cp = _cp_degree()
+            if cp > 1:
+                # Ulysses: the 50 blocks run sequence-sharded; the token refiner (text only)
+                # stays replicated with the plain processor.
+                ulysses = _ulysses_processor_class()(cp, str(config.cp_mode))
+                for block in self.transformer.transformer_blocks:
+                    block.attn.processor = ulysses
+                self.transformer.forward = types.MethodType(_ulysses_transformer_forward,
+                                                            self.transformer)
             for name in FP32_MODULES:
                 _give_fp32_host_storage(getattr(self.transformer, name))
 
@@ -257,12 +396,26 @@ class NeuronMiniMaxH3TransformerApplication(TorchNeuronApplicationBase):
                          exec_mode=exec_mode, device=device, **kwargs)
         name = "NeuronMiniMaxH3Config"
         check_tp_matches(name, config, self.parallel)
-        for field in ("cp_degree", "dp_degree"):
-            if int(getattr(self.parallel, field, 1) or 1) > 1:
+        if int(getattr(self.parallel, "dp_degree", 1) or 1) > 1:
+            raise NotImplementedError(
+                f"the MiniMax-H3 DiT on the neuron backend has no data parallelism; "
+                f"got dp_degree={self.parallel.dp_degree}"
+            )
+        cp = int(getattr(self.parallel, "cp_degree", 1) or 1)
+        if cp > 1:
+            mode = str(getattr(self.parallel, "cp_mode", ""))
+            if mode not in ("ulysses", "gather_kv"):
                 raise NotImplementedError(
-                    f"the MiniMax-H3 DiT on the neuron backend runs tensor parallelism only; "
-                    f"got {field}={getattr(self.parallel, field)}"
+                    "the MiniMax-H3 DiT on the neuron backend runs context parallelism as "
+                    f"cp_mode 'ulysses' or 'gather_kv'; got {mode!r}"
                 )
+            config.cp_mode = mode
+            heads, tp = int(config.num_attention_heads), int(config.tp_degree)
+            if mode == "ulysses" and heads % (tp * cp):
+                raise ValueError(f"MiniMax-H3 Ulysses needs {heads} heads divisible by "
+                                 f"tp*cp = {tp * cp}")
+            if not config.precomputed_adaln:
+                raise NotImplementedError("MiniMax-H3 Ulysses runs with precomputed_adaln only")
         for flag in ("cfg_parallel_enabled", "sp_enabled"):
             if bool(getattr(self.parallel, flag, False)):
                 raise NotImplementedError(f"the MiniMax-H3 DiT on the neuron backend has no {flag}")

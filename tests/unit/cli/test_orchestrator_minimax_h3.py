@@ -436,6 +436,33 @@ def test_neuron_backend_dispatches_to_host_and_torchrun_stage_bodies(monkeypatch
                     "_stage_audio_vae_host"]
 
 
+@pytest.mark.parametrize("backend", [None, "neuron"])
+def test_topology_refuses_cp_off_neuron_and_modes_neuron_does_not_run(monkeypatch, backend):
+    monkeypatch.setattr(h3_mod, "torchrun_backend", lambda: backend)
+    with pytest.raises(NotImplementedError, match="CP runs only on the neuron backend"):
+        MiniMaxH3Orchestrator(_args(cp_degree=2, cp_mode="ring"))._validate_topology()
+    if backend is None:  # Trainium's AOT path: no CP in any mode, TP fixed at 4
+        for mode in ("ulysses", "gather_kv"):
+            with pytest.raises(NotImplementedError, match="CP runs only on the neuron backend"):
+                MiniMaxH3Orchestrator(_args(cp_degree=2, cp_mode=mode))._validate_topology()
+        with pytest.raises(NotImplementedError, match="fixed at TP4"):
+            MiniMaxH3Orchestrator(_args(tp_degree=2))._validate_topology()
+
+
+def test_neuron_topology_runs_ulysses_and_gather_kv_on_tp_times_cp_cores(monkeypatch):
+    monkeypatch.setattr(h3_mod, "torchrun_backend", lambda: "neuron")
+    for tp, cp, mode in ((4, 2, "ulysses"), (4, 4, "gather_kv"), (2, 4, "ulysses")):
+        orchestrator = MiniMaxH3Orchestrator(_args(tp_degree=tp, cp_degree=cp, cp_mode=mode))
+        orchestrator._validate_topology()
+        assert orchestrator._stage_cores("generate") == tp * cp
+        assert orchestrator._stage_cores("video_vae") == 1
+        cli = orchestrator._shared_cli_args("generate")
+        assert cli[cli.index("--cp-degree") + 1] == str(cp)
+        assert cli[cli.index("--cp-mode") + 1] == mode
+    # cp1 forwards no mode (the stage default stands)
+    assert "--cp-mode" not in MiniMaxH3Orchestrator(_args())._shared_cli_args("generate")
+
+
 def test_shared_cli_args_forward_model_path():
     args = MiniMaxH3Orchestrator(_args(model_path="/models/h3"))._shared_cli_args("generate")
     assert args[args.index("--model-path") + 1] == "/models/h3"

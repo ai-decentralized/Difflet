@@ -112,9 +112,10 @@ class NeuronMiniMaxH3VideoVaeApplication(TorchNeuronApplicationBase):
                          exec_mode=exec_mode, device=device, **kwargs)
         if self.dtype not in (torch.bfloat16, torch.float32):
             raise ValueError(f"the H3 video VAE runs in bf16 or fp32, got {self.dtype}")
-        for field in ("cp_degree", "dp_degree"):
-            if int(getattr(self.parallel, field, 1) or 1) > 1:
-                raise NotImplementedError(f"the H3 video VAE runs under TP only, got {field}")
+        # Under the DiT's mesh (TP, or TP x Ulysses CP) every rank holds the whole decoder and
+        # decodes its own tiles; there is nothing to shard, so only DP is refused.
+        if int(getattr(self.parallel, "dp_degree", 1) or 1) > 1:
+            raise NotImplementedError("the H3 video VAE has no data parallelism")
         with open(Path(str(self.model_path)) / "config.json", encoding="utf-8") as handle:
             self.vae_config = json.load(handle)
 
