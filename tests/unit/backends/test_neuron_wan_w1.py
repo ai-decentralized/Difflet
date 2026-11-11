@@ -423,9 +423,11 @@ def test_adapter_passes_contiguous_inputs():
         sent.append((latents, timestep, text))
     assert len(received) == 2
     for args, originals in zip(received, sent, strict=True):
-        for got, original in zip(args, originals, strict=True):
-            assert got.is_contiguous() and got.dtype is torch.bfloat16
-            assert torch.equal(got, original.to(torch.bfloat16))
+        # The timestep (index 1) arrives in fp32, as diffusers passes it; the rest in bf16.
+        for i, (got, original) in enumerate(zip(args, originals, strict=True)):
+            want = torch.float32 if i == 1 else torch.bfloat16
+            assert got.is_contiguous() and got.dtype is want
+            assert torch.equal(got, original.to(want))
     assert received[1][1].stride() == (1,)  # the batch-2 timestep was materialised
     assert len(seconds) == 2 and all(s >= 0.0 for s in seconds)
 
