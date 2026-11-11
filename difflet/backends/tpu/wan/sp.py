@@ -82,6 +82,9 @@ def install(module: torch.nn.Module, *, seq_len: int) -> bool:
         print(f"[difflet tpu] {cm.SP_ENV}: sequence {seq_len} does not split into "
               f"2 x tp={tp}; using the unfused Megatron-SP path", flush=True)
         return False
+    # The Pallas AG kernel: -8.3% per step at 480x832x9 (v5e-4, 2026-11-11);
+    # DIFFLET_TPU_SP_KERNEL=jax keeps the ring.
+    cm.set_kernel_default("pallas")
     cm.prepare()
     for block in module.blocks:
         for attn in (block.attn1, block.attn2):

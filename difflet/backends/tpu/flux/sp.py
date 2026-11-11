@@ -190,6 +190,9 @@ def install(module: nn.Module, *, image_seq_len: int, text_seq_len: int) -> bool
             return False
     if not all(hasattr(b, "proj_out_attn") for b in module.single_transformer_blocks):
         raise ValueError("install() needs a FLUX transformer sharded by shard_flux_transformer")
+    # The Pallas AG kernel: -10.2% per step at 1024x1024 (v5e-4, 2026-11-11);
+    # DIFFLET_TPU_SP_KERNEL=jax keeps the ring.
+    cm.set_kernel_default("pallas")
     cm.prepare(FLUX_OPS)
     for block in module.transformer_blocks:
         block.forward = types.MethodType(_joint_block_forward, block)
