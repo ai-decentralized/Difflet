@@ -104,7 +104,23 @@ def test_tiny_hv15_matches_diffusers(dtype, valid, monkeypatch):
     assert actual.shape == (1, 4, 3, 2, 2)
     assert torch.isfinite(actual).all()
     # Same matmul/attention math and cast boundaries, including BF16.
-    torch.testing.assert_close(actual, expected, rtol=1e-4, atol=1e-4)
+    if dtype == torch.float32:
+        torch.testing.assert_close(actual, expected, rtol=1e-4, atol=1e-4)
+    else:
+        # Some x86 BF16 GEMM kernels round an element one ulp differently between the two
+        # models; a difference in attention math or cast boundaries moves elements further.
+        ulps = _bf16_ulps(actual, expected)
+        assert ulps.max() <= 1, f"{int((ulps > 1).sum())} elements off by up to {ulps.max()} ulps"
+
+
+def _bf16_ulps(actual, expected):
+    """Elementwise distance in BF16 ulps: adjacent BF16 values, across zero too, are 1 apart."""
+
+    def ordered(x):
+        bits = x.view(torch.int16).to(torch.int32)
+        return torch.where(bits < 0, -(bits & 0x7FFF), bits)
+
+    return (ordered(actual) - ordered(expected)).abs()
 
 
 def test_hv15_masks_and_glyph_ordering():
