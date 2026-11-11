@@ -368,6 +368,36 @@ q/k/v outputs pay this in attention is not checked.
 Not checked: other seeds, FLUX's RoPE permutation (it uses `copy_` on the device
 too, so may pay the same per-forward weight copy), padding for the other models.
 
+### Reproducing the afternoon's numbers
+
+Environment: v5e-4 (us-west1-c), torch 2.14.1+cpu, torch_tpu 0.2.0, libtpu
+0.0.51, jax 0.12.0.1; Wan 2.1 14B T2V at 480x832x9, 20 steps, seed 42 (main's
+`benchmark/models.py` entry `wan_2_1`). Each table row is one
+`benchmark/tpu_profile/bench_case.sh` case; a pair differs only in its
+environment and runs back to back on the same node and tree:
+
+    W="DIFFLET_TPU_COMPILE=1 DIFFLET_TPU_DEVICE_VAE=1 DIFFLET_TPU_SP=1"
+    bench_case.sh wp-pad0 wan_2_1 $W DIFFLET_TPU_WAN_SP_PAD=0 DIFFLET_TPU_WAN_SPLIT_ROPE=0
+    bench_case.sh wp-pad1 wan_2_1 $W DIFFLET_TPU_WAN_SP_PAD=1 DIFFLET_TPU_WAN_SPLIT_ROPE=0
+    bench_case.sh wr-rope1 wan_2_1 $W                       # both defaults on
+    bench_case.sh wp-rs wan_2_1 $W DIFFLET_TPU_SP_RS_KERNEL=pallas
+    # + DIFFLET_BENCH_TRACE_DIR=<dir> for the trace rows, then
+    python -m benchmark.tpu_profile.trace_diff <dir_a> <dir_b> [--by-shape --only copy,reshape]
+    python -m benchmark.tpu_profile.image_psnr <a>/run1_synced_frames_0_4_8.png <b>/...
+    python -m benchmark.tpu_profile.cm_rs_pallas_bench --ablate --column-tile-limits 128,256,512,1024
+    python -m benchmark.tpu_profile.sp_step_drift --model wan_2_1 --steps 1,4 --out <dir> --tag <t>
+
+The 18:42 UTC measurement of "both on" predates the commit only by comments
+(the source hash in the op names differs, so the committed tree compiles anew;
+not re-measured). Run-to-run noise of one configuration on one node: Wan
+267.7-269.2 ms (four runs), FLUX 141.9-144.7 ms with identical outputs.
+
+Not verified: the "vs TP" PSNRs use a TP run from an earlier tree
+(`rp-wan-base`), not one on this tree; split RoPE's 26 dB against the
+interleaved layout after 20 steps is attributed to the RMSNorm's summation order
+by analogy (the RS kernel's 1- and 4-step check), not by its own 1-step run;
+only seed 42; that `S(1)` is VMEM.
+
 ## Steps
 
 | # | Work | Validation | Estimate |
