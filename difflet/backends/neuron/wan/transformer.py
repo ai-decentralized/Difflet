@@ -118,7 +118,8 @@ class NeuronWanTransformerApplication(TorchNeuronApplicationBase):
                                         timestep.to(self.device), self._teacache_text)
 
     def get_example_inputs(self) -> tuple[torch.Tensor, ...]:
-        """``(latents, timestep, text embeddings)`` at the static shape, in ``dtype``.
+        """``(latents, timestep, text embeddings)`` at the static shape, in ``dtype`` except the
+        timestep, which the DiT takes in fp32 as diffusers passes it.
 
         These are exactly the per-step shapes the orchestrator sends (two batch-1 forwards per
         CFG step), so the warm-up compiles the only block graph the run needs. With CFG
@@ -136,7 +137,7 @@ class NeuronWanTransformerApplication(TorchNeuronApplicationBase):
                 cfg.latent_width,
                 dtype=self.dtype,
             ),
-            torch.zeros(batch, dtype=self.dtype),
+            torch.zeros(batch, dtype=torch.float32),
             torch.zeros(batch, int(cfg.text_seq_len), int(cfg.text_dim), dtype=self.dtype),
         )
 
