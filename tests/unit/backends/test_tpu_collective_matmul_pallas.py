@@ -1,8 +1,8 @@
 """The Pallas all-gather + matmul ring kernel, in TPU interpret mode on 4 CPU devices.
 
 Checks values against numpy with a non-identity ring position -> shard table,
-two weights of different widths, and batch 1 and 2, with Pallas' race detector
-on (two communication slots instead of three is caught by it). Needs ``jax``;
+two weights of equal or different widths, and batch 1 and 2, with Pallas' race detector
+on (two ring slots instead of three is caught by it). Needs ``jax``;
 skipped without it (it is not a test dependency).
 """
 
@@ -26,45 +26,54 @@ SCRIPT = textwrap.dedent('''
     from jax.experimental.pallas import tpu as pltpu
     # The pipeline's tiling inference needs a TPU generation: treat the host as a v5e.
     ti.registry["cpu"] = lambda: ti.get_tpu_info_for_chip(ti.ChipVersion.TPU_V5E, 1)
-    from difflet.backends.tpu.ops_impl import collective_matmul_pallas as kp
+    from difflet.backends.tpu.ops_impl import collective_matmul_pallas as kernel
 
-    n, B, rows, K = 4, int(sys.argv[1]), 16, 256
-    kn = "kn" in sys.argv[2]
-    resident = "res" in sys.argv[2]
-    manual = "man" in sys.argv[2]
-    mesh = jax.sharding.Mesh(np.array(jax.devices()[:n]), ("tp",))
-    shard_of_pos = (2, 0, 3, 1)  # ring position -> shard, not the identity
+    ring_size, batch, rows, in_features = 4, int(sys.argv[1]), 16, 256
+    widths = (256, 384) if sys.argv[2] == "mixed" else (256, 256)
+    mesh = jax.sharding.Mesh(np.array(jax.devices()[:ring_size]), ("tp",))
+    shard_of_position = (2, 0, 3, 1)  # ring position -> shard, not the identity
     rng = np.random.default_rng(0)
-    x_by_shard = [rng.standard_normal((B, rows, K)).astype(np.float32) for _ in range(n)]
-    ws = [rng.standard_normal((N * n, K)).astype(np.float32) / K ** 0.5 for N in ((256, 384) if "mixed" in sys.argv[2] else (256, 256) if manual else (256, 384))]
+    x_by_shard = [rng.standard_normal((batch, rows, in_features)).astype(np.float32)
+                  for _ in range(ring_size)]
+    weights = [rng.standard_normal((width * ring_size, in_features)).astype(np.float32)
+               / in_features ** 0.5 for width in widths]
     put = lambda a, spec: jax.device_put(jnp.asarray(a), NamedSharding(mesh, spec))
-    x = put(np.concatenate([x_by_shard[shard_of_pos[p]] for p in range(n)], axis=1),
+    x = put(np.concatenate([x_by_shard[shard_of_position[p]] for p in range(ring_size)], axis=1),
             P(None, "tp", None))
-    ids = put(np.arange(n, dtype=np.int32), P("tp"))
+    ids = put(np.arange(ring_size, dtype=np.int32), P("tp"))
 
-    def body(x, ids, *ws):
-        owners, nbrs = kp.ring_tables(ids[0], shard_of_pos, n)
-        return kp.ag_matmul_body(x, ws, owners, nbrs, n=n, tn=128 if manual else 256,
-                                 weights_kn=kn, resident=resident or manual, manual=manual,
-                                 interpret=pltpu.InterpretParams(detect_races=True))
+    def body(x, ids, *weights):
+        owner_shards, neighbors = kernel.ring_tables(ids[0], shard_of_position, ring_size)
+        return kernel.all_gather_matmul_body(
+            x, weights, owner_shards, neighbors, ring_size=ring_size, column_tile_limit=128,
+            interpret=pltpu.InterpretParams(detect_races=True))
 
     f = jax.jit(jax.shard_map(body, mesh=mesh,
-                              in_specs=(P(None, "tp", None), P("tp"))
-                              + ((P(None, "tp"),) if kn else (P("tp", None),)) * 2,
+                              in_specs=(P(None, "tp", None), P("tp")) + (P("tp", None),) * 2,
                               out_specs=(P(None, None, "tp"),) * 2, check_vma=False))
-    outs = f(x, ids, *[put(w.T, P(None, "tp")) if kn else put(w, P("tp", None)) for w in ws])
+    outputs = f(x, ids, *[put(w, P("tp", None)) for w in weights])
     full = np.concatenate(x_by_shard, axis=1)  # the sequence in shard order
-    for o, w in zip(outs, ws):
-        np.testing.assert_allclose(np.asarray(o), full @ w.T, rtol=2e-5, atol=2e-5)
-    print("OK", B, sys.argv[2])
+    for output, weight in zip(outputs, weights):
+        np.testing.assert_allclose(np.asarray(output), full @ weight.T, rtol=2e-5, atol=2e-5)
+    print("OK", batch, sys.argv[2])
 ''')
 
 
-@pytest.mark.parametrize("batch,layout", [(1, "nk"), (2, "nk"), (2, "kn"), (1, "kn-res"), (2, "nk-res"),
-                                         (1, "kn-man"), (2, "nk-man"),
-                                         (2, "nk-man-mixed")])
+@pytest.mark.parametrize("batch,layout", [(1, "equal"), (2, "equal"), (2, "mixed")])
 def test_pallas_ag_matmul_matches_numpy(batch, layout):
     proc = subprocess.run([sys.executable, "-c", SCRIPT, str(batch), layout], capture_output=True,
                           text=True, timeout=600)
     assert proc.returncode == 0, proc.stdout[-2000:] + proc.stderr[-4000:]
     assert f"OK {batch} {layout}" in proc.stdout
+
+
+def test_unsupported_reason():
+    from difflet.backends.tpu.ops_impl import collective_matmul_pallas as kernel
+
+    # Wan q/k/v and FLUX / HunyuanVideo single blocks (q|k|v 768 + mlp 3072) fit.
+    assert kernel.unsupported_reason((1, 1170, 5120), [(1280, 5120)] * 3, 2) is None
+    assert kernel.unsupported_reason((1, 1024, 3072), [(768, 3072)] * 3 + [(3072, 3072)], 2) is None
+    assert "odd rows" in kernel.unsupported_reason((1, 1171, 5120), [(1280, 5120)], 2)
+    assert "in_features" in kernel.unsupported_reason((1, 1170, 5120), [(1280, 4096)], 2)
+    assert "no column tile" in kernel.unsupported_reason((1, 1170, 5120), [(1000, 5120)], 2)
+    assert "VMEM" in kernel.unsupported_reason((1, 8192, 8192), [(1024, 8192)], 2)

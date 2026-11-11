@@ -293,18 +293,19 @@ def _op(kind: str, n_weights: int):
             shard_of = jnp.asarray(shard_table, dtype=jnp.int32)
             j = ids[0]
             if use_kernel:
-                from difflet.backends.tpu.ops_impl import collective_matmul_pallas as kp
+                from difflet.backends.tpu.ops_impl import collective_matmul_pallas as kernel
 
-                why = kp.unsupported(x.shape, [w.shape for w in ws], x.dtype.itemsize)
-                if why is None:
+                reason = kernel.unsupported_reason(x.shape, [w.shape for w in ws],
+                                                   x.dtype.itemsize)
+                if reason is None:
                     # The ring position stays a runtime value (rule above): the
-                    # kernel's owners / neighbours are computed from it.
-                    owners, nbrs = kp.ring_tables(j, shard_table, n)
-                    outs = kp.ag_matmul_body(x, ws, owners, nbrs, n=n, resident=True,
-                                             manual=True)
-                    return outs if len(outs) > 1 else outs[0]
+                    # kernel's owner shards / neighbours are computed from it.
+                    owner_shards, neighbors = kernel.ring_tables(j, shard_table, n)
+                    outputs = kernel.all_gather_matmul_body(x, ws, owner_shards, neighbors,
+                                                            ring_size=n)
+                    return outputs if len(outputs) > 1 else outputs[0]
                 print(f"[difflet tpu] {SP_KERNEL_ENV}=pallas: ag x{len(ws)} {tuple(x.shape)} "
-                      f"falls back to the JAX ring ({why})", flush=True)
+                      f"falls back to the JAX ring ({reason})", flush=True)
             rows = x.shape[1]
             hr = rows // 2
             seq = rows * n

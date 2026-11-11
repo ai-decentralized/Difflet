@@ -4,10 +4,14 @@
 
 Plain JAX, one process owning the four chips (no torch_tpu): the JAX rings are
 ``collective_matmul._op`` with ``torch.tpu.pallas.jax_op`` stubbed out (as in
-cm_pure_jax), the kernel is ``collective_matmul_pallas.ag_matmul_body``. For
+cm_pure_jax), the kernel is ``collective_matmul_pallas.all_gather_matmul_body``. For
 each shape, prints the time per call and the kernel's difference from the dus
 ring (bf16 inputs, fp32 accumulation in both). Step 2 of
 docs/plans/2026-11-10-tpu-collective-matmul-pallas.md.
+
+The kernel is timed as the models run it: weights (N, K), column tiles up to
+``DEFAULT_COLUMN_TILE_LIMIT``. The plan's op-level version table was taken at
+commit 01d027fe with pre-transposed (K, N) weights and tiles up to 512.
 """
 
 from __future__ import annotations
@@ -31,7 +35,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--iters", type=int, default=50)
     parser.add_argument("--shapes", default=",".join(SHAPES))
-    parser.add_argument("--tn", type=int, default=512)
+    parser.add_argument("--column-tile-limit", type=int, default=None,
+                        help="the kernel's column tile limit (default: the production value)")
     parser.add_argument("--ablate", action="store_true",
                         help="also time the kernel without comm / without compute, and one-chip XLA einsums")
     parser.add_argument("--trace", default="", help="jax.profiler trace dir for the kernel calls")
@@ -44,10 +49,15 @@ def main() -> int:
     from jax.sharding import NamedSharding
     from jax.sharding import PartitionSpec as P
 
-    torch.tpu = types.SimpleNamespace(pallas=types.SimpleNamespace(
-        jax_op=lambda name, fn, **kw: fn))
+    # No torch_tpu here: jax_op returns the JAX function itself. is_initialized is
+    # asked at interpreter exit.
+    torch.tpu = types.SimpleNamespace(is_initialized=lambda: False,
+                                      pallas=types.SimpleNamespace(jax_op=lambda name, fn, **kw: fn))
     from difflet.backends.tpu.ops_impl import collective_matmul as cm
-    from difflet.backends.tpu.ops_impl import collective_matmul_pallas as kp
+    from difflet.backends.tpu.ops_impl import collective_matmul_pallas as kernel
+
+    if args.column_tile_limit is None:
+        args.column_tile_limit = kernel.DEFAULT_COLUMN_TILE_LIMIT
 
     devices = jax.devices()
     n = len(devices)
@@ -69,7 +79,7 @@ def main() -> int:
         jax.block_until_ready(out)
         return out, (time.perf_counter() - t) / args.iters * 1e3
 
-    print(f"jax {jax.__version__} {devices[0].device_kind} x{n}, iters {args.iters}, tn<={args.tn}",
+    print(f"jax {jax.__version__} {devices[0].device_kind} x{n}, iters {args.iters}, column tile <= {args.column_tile_limit}",
           flush=True)
     ids = put(np.arange(n), P("tp"), jnp.int32)
     rng = np.random.default_rng(0)
@@ -85,33 +95,28 @@ def main() -> int:
             out, ms = timed(ring, x, ids, *ws)
             res[mode] = (out if isinstance(out, tuple) else (out,), ms)
 
-        def body(x, ids, *ws):
-            owners, nbrs = kp.ring_tables(ids[0], shard_of_pos, n)
-            return kp.ag_matmul_body(x, ws, owners, nbrs, n=n, tn=args.tn)
+        def kernel_call(ablation=""):
+            def body(x, ids, *ws):
+                owner_shards, neighbors = kernel.ring_tables(ids[0], shard_of_pos, n)
+                return kernel.all_gather_matmul_body(
+                    x, ws, owner_shards, neighbors, ring_size=n,
+                    column_tile_limit=args.column_tile_limit, profile_ablation=ablation)
+            return jax.jit(jax.shard_map(
+                body, mesh=mesh, in_specs=(P(None, "tp", None), P("tp")) + (P("tp", None),) * len(ws),
+                out_specs=(P(None, None, "tp"),) * len(ws), check_vma=False))
 
-        kern = jax.jit(jax.shard_map(
-            body, mesh=mesh, in_specs=(P(None, "tp", None), P("tp")) + (P("tp", None),) * len(ws),
-            out_specs=(P(None, None, "tp"),) * len(ws), check_vma=False))
         try:
-            res["pallas"] = timed(kern, x, ids, *ws)
+            res["pallas"] = timed(kernel_call(), x, ids, *ws)
             if args.trace:
                 with jax.profiler.trace(f"{args.trace}/{name}"):
                     for _ in range(5):
-                        jax.block_until_ready(kern(x, ids, *ws))
+                        jax.block_until_ready(kernel_call()(x, ids, *ws))
         except Exception as exc:  # noqa: BLE001 -- report and go on to the next shape
             print(f"{name}: pallas failed: {type(exc).__name__}: {str(exc)[:600]}", flush=True)
             continue
         if args.ablate:
-            extra = []
-            for ab in ("comm", "compute"):
-                def body_ab(x, ids, *ws, ab=ab):
-                    owners, nbrs = kp.ring_tables(ids[0], shard_of_pos, n)
-                    return kp.ag_matmul_body(x, ws, owners, nbrs, n=n, tn=args.tn, ablate=ab)
-                f = jax.jit(jax.shard_map(
-                    body_ab, mesh=mesh,
-                    in_specs=(P(None, "tp", None), P("tp")) + (P("tp", None),) * len(ws),
-                    out_specs=(P(None, None, "tp"),) * len(ws), check_vma=False))
-                extra.append(f"no-{ab} {timed(f, x, ids, *ws)[1]:.3f}")
+            extra = [f"no-{ablation} {timed(kernel_call(ablation), x, ids, *ws)[1]:.3f}"
+                     for ablation in ("communication", "compute")]
             # The same FLOPs on one chip, plain XLA: the full sequence times each local weight.
             d0 = devices[0]
             xf = jax.device_put(jnp.zeros((1, rows * n, k), jnp.bfloat16), d0)
@@ -119,47 +124,9 @@ def main() -> int:
             ein = jax.jit(lambda x, *ws: tuple(jnp.einsum("bsk,nk->bsn", x, w) for w in ws))
             extra.append(f"xla-1chip {timed(ein, xf, *wl)[1]:.3f}")
             print(f"{name:8s} ablation (ms): " + ", ".join(extra), flush=True)
-        # v2: weights pre-transposed to (K, N) once, outside the timed call.
-        wts = [jax.device_put(w.T, NamedSharding(mesh, P(None, "tp"))) for w in ws]
-
-        def body_kn(x, ids, *ws):
-            owners, nbrs = kp.ring_tables(ids[0], shard_of_pos, n)
-            return kp.ag_matmul_body(x, ws, owners, nbrs, n=n, tn=args.tn, weights_kn=True)
-
-        kern_kn = jax.jit(jax.shard_map(
-            body_kn, mesh=mesh, in_specs=(P(None, "tp", None), P("tp")) + (P(None, "tp"),) * len(ws),
-            out_specs=(P(None, None, "tp"),) * len(ws), check_vma=False))
-        res["pallas-kn"] = timed(kern_kn, x, ids, *wts)
-
-        # v3: halves resident in VMEM, remote DMA VMEM -> VMEM, pipelines stream weights only.
-        def body_res(x, ids, *ws, ab="", manual=False):
-            owners, nbrs = kp.ring_tables(ids[0], shard_of_pos, n)
-            return kp.ag_matmul_body(x, ws, owners, nbrs, n=n, tn=args.tn, weights_kn=True,
-                                     resident=True, manual=manual, ablate=ab)
-
-        def mk(ab="", manual=False):
-            return jax.jit(jax.shard_map(
-                lambda x, ids, *ws: body_res(x, ids, *ws, ab=ab, manual=manual), mesh=mesh,
-                in_specs=(P(None, "tp", None), P("tp")) + (P(None, "tp"),) * len(ws),
-                out_specs=(P(None, None, "tp"),) * len(ws), check_vma=False))
-        try:
-            res["pallas-res"] = timed(mk(), x, ids, *wts)
-            if args.ablate:
-                print(f"{name:8s} resident ablation (ms): no-comm {timed(mk('comm'), x, ids, *wts)[1]:.3f}",
-                      flush=True)
-        except Exception as exc:  # noqa: BLE001
-            print(f"{name}: pallas-res failed: {type(exc).__name__}: {str(exc)[:800]}", flush=True)
-        # v4: one hand-written weight-tile stream over every (hop, weight, tile).
-        try:
-            res["pallas-man"] = timed(mk(manual=True), x, ids, *wts)
-            if args.ablate:
-                print(f"{name:8s} manual ablation (ms): no-comm "
-                      f"{timed(mk('comm', manual=True), x, ids, *wts)[1]:.3f}", flush=True)
-        except Exception as exc:  # noqa: BLE001
-            print(f"{name}: pallas-man failed: {type(exc).__name__}: {str(exc)[:800]}", flush=True)
         ref = [np.asarray(o.astype(jnp.float32)) for o in res["dus"][0]]
         line = [f"{name:8s} rows {rows} K {k} N {cols}:"]
-        for mode in [m for m in ("dus", "concat", "pallas", "pallas-kn", "pallas-res", "pallas-man") if m in res]:
+        for mode in [m for m in ("dus", "concat", "pallas") if m in res]:
             outs, ms = res[mode]
             err = max(float(np.abs(np.asarray(o.astype(jnp.float32)) - r).max() / np.abs(r).max())
                       for o, r in zip(outs, ref))

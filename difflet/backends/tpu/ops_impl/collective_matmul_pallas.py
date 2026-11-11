@@ -1,436 +1,316 @@
 """Pallas TPU kernel for the SP all-gather + column-parallel matmul ring.
 
-Step 2 of docs/plans/2026-11-10-tpu-collective-matmul-pallas.md: the same
-bidirectional ring as ``collective_matmul``'s JAX ``ag`` op, but each hop's
-product tile goes from VMEM straight to its final rows of the output (one HBM
-write), with no temporary product and no ``dynamic_update_slice`` / gather
-assembly afterwards. The remote copy of the next half overlaps the matmul of
-the current one.
+The same bidirectional ring as ``collective_matmul``'s JAX ``ag`` op
+(docs/plans/2026-11-10-tpu-collective-matmul-pallas.md), as one kernel:
 
-``ag_matmul_body`` is the per-device body, called inside ``shard_map`` over a
-1-D mesh axis (default ``"tp"``) whose order is the ring order. Rank-dependent
-values (the ring position, owners, neighbours) are runtime int32 inputs, never
-Python constants -- rule 1 of the plan; every device runs the same program.
+- Each device's sequence shard is split into a top and a bottom half. The top
+  halves travel clockwise, the bottom halves counter-clockwise; after
+  ``ring_size - 1`` hops every device has seen every half.
+- The halves stay in VMEM for the whole call: the local ones are copied in once,
+  the remote ones arrive by VMEM-to-VMEM DMA and never touch HBM. The copy of the
+  next hop's halves overlaps the current hop's matmuls.
+- The weights are streamed through VMEM one column tile at a time, as a single
+  double-buffered stream over every (hop, weight, column tile): the next tile is
+  always in flight, across weights and hops, so only the first load is exposed.
+- Each product tile is written once, asynchronously, at its final rows of the
+  output: no temporary product, no ``dynamic_update_slice`` assembly afterwards.
 
-Layout per device (x is this device's sequence shard, split in two halves that
-travel in opposite directions):
+:func:`all_gather_matmul_body` is the per-device body, called inside ``shard_map``
+over a 1-D mesh axis (default ``"tp"``) whose order is the ring order.
+Rank-dependent values (the ring position, the owner shards, the neighbours) are
+runtime int32 inputs, never Python constants -- rule 1 of the plan: every device
+must run the same program.
 
-    x     (B, R, K)            R = rows per device, even
-    w_i   (N_i, K)             this device's output columns
-    out_i (B, n * R, N_i)      viewed as (B, n, 2, R/2, N_i): [owner shard, half]
+Layout per device:
 
-The ``pallas_call``s are not marked ``has_side_effects``: through torch_tpu's
+    x          (batch, rows, in_features)       rows per device, even
+    weight_i   (out_features_i, in_features)    this device's output columns
+    output_i   (batch, ring_size * rows, out_features_i)
+               written as (batch, ring_size, 2, rows / 2, out_features_i):
+               [owner shard, half]
+
+Communication slots: the halves have three VMEM slots per direction. A
+neighbour is at most one hop behind (each device waits for the previous hop's
+copies before starting the next), so the slot written at hop h + 1 is never the
+one a neighbour still reads; Pallas' race detector catches two slots.
+
+The ``pallas_call`` is not marked ``has_side_effects``: through torch_tpu's
 ``jax_op`` the program goes through XLA's SPMD partitioner, which rejects a
 side-effecting custom call without a sharding ("Side-effect HLO must have
 sharding", 2026-11-11). The outputs are always consumed, so nothing is dropped.
 
-Communication buffers are an extra output (2 directions x 3 slots x the half
-shape) in HBM. Three slots make the reuse race-free: a neighbour is at most one
-hop behind (each device waits for both neighbours' previous hop before going
-on), so the slot written at hop s+1 is never the one a neighbour still reads.
+Earlier variants (one ``emit_pipeline`` per hop and weight, with the halves in
+HBM or in VMEM; pre-transposed weights) were measured and dropped; they are in
+commit 01d027fe and the numbers in the plan.
 """
 
 from __future__ import annotations
 
-SLOTS = 3
+#: Ring slots per direction for the travelling halves (see the module docstring).
+RING_SLOTS = 3
+
+#: VMEM the kernel may plan for (v5e has 128 MiB per core; leave room for Mosaic).
+VMEM_BUDGET_BYTES = 96 * 2**20
+
+#: Upper bound on the column tile width. The end-to-end results in the plan
+#: (Wan, FLUX, HunyuanVideo) were measured with this value.
+DEFAULT_COLUMN_TILE_LIMIT = 256
 
 
-def ag_matmul_body(x, ws, owners, nbrs, *, n: int, axis: str = "tp", tn: int = 256,
-                   vmem_limit_bytes: int = 96 * 2**20, interpret=False, ablate: str = "",
-                   weights_kn: bool = False, resident: bool = False,
-                   manual: bool = False):
-    """Per-device all-gather + matmul with every weight in ``ws``.
+def all_gather_matmul_body(x, weights, owner_shards, neighbors, *, ring_size: int,
+                           axis: str = "tp",
+                           column_tile_limit: int = DEFAULT_COLUMN_TILE_LIMIT,
+                           vmem_limit_bytes: int = VMEM_BUDGET_BYTES,
+                           interpret=False, profile_ablation: str = ""):
+    """Per-device all-gather of ``x`` along the ring + matmul with every weight.
 
-    owners: int32 (2, n) -- owners[0, s] / owners[1, s] is the shard (output row
-        block) whose top / bottom half this device holds after s hops.
-    nbrs:   int32 (2,)   -- mesh index along ``axis`` of the clockwise
-        neighbour (receives the top halves) and the counter-clockwise one.
-    weights_kn: the weights are given transposed, (K, N_i): the kernel then runs a
-        plain (M, K) x (K, N) matmul per tile instead of contracting both
-        operands on their last axis.
-    resident: keep the halves in VMEM for the whole call -- the local ones are
-        copied in once, the remote ones arrive by VMEM-to-VMEM DMA (they never
-        touch HBM), and each matmul pipeline streams only weight tiles. Needs
-        2 x 3 x B x R/2 x K elements of VMEM (Wan: 36 MB).
-    manual: with ``resident``, replace the per-(hop, weight) ``emit_pipeline``s by
-        one hand-written double-buffered stream over every (hop, weight, column
-        tile): the next weight tile is always in flight, across weights and hops,
-        so only the very first tile load is exposed. Output tiles are written back
-        asynchronously, two in flight. The tiles of a hop are a runtime loop, so
-        compile time does not grow with the tile count (a fully unrolled stream
-        took 225 s to compile at Wan's FFN shape). Weights may differ in width;
-        one tile width (a multiple of 128) must divide them all.
-    ablate: profiling only -- ``"comm"`` skips the remote copies (every hop
-        multiplies the local halves; wrong values), ``"compute"`` skips the matmuls.
-    Returns a tuple of (B, n * R, N_i), one per weight.
+    x:            (batch, rows, in_features), this device's sequence shard.
+    weights:      sequence of (out_features_i, in_features); widths may differ, but
+                  one column tile width (a multiple of 128, at most
+                  ``column_tile_limit``) must divide them all.
+    owner_shards: int32 (2, ring_size) -- owner_shards[0, hop] / owner_shards[1, hop]
+                  is the shard (output row block) whose top / bottom half this
+                  device holds after ``hop`` hops. From :func:`ring_tables`.
+    neighbors:    int32 (2,) -- mesh index along ``axis`` of the clockwise neighbour
+                  (receives the top halves) and of the counter-clockwise one.
+    interpret:    False on the chips; ``pltpu.InterpretParams(...)`` for CPU tests.
+    profile_ablation: profiling only, wrong values -- ``"communication"`` skips
+                  the remote copies (every hop multiplies the local halves),
+                  ``"compute"`` skips the matmuls.
+
+    Returns a tuple of (batch, ring_size * rows, out_features_i), one per weight.
     """
     import jax
     import jax.numpy as jnp
     from jax.experimental import pallas as pl
     from jax.experimental.pallas import tpu as pltpu
 
-    b, rows, k = x.shape
+    if profile_ablation not in ("", "communication", "compute"):
+        raise ValueError(f"profile_ablation must be '', 'communication' or 'compute', "
+                         f"got {profile_ablation!r}")
+    batch, rows, in_features = x.shape
     if rows % 2:
         raise ValueError(f"rows per device must be even (two ring halves), got {rows}")
-    hr = rows // 2
-    tns = []
-    kd, nd = (0, 1) if weights_kn else (1, 0)  # weight axis of K / of the columns
-    cols = []
-    for w in ws:
-        if w.shape[kd] != k:
-            raise ValueError(f"weight {w.shape} does not match K={k}")
-        cols.append(w.shape[nd])
-        tns.append(_col_tile(w.shape[nd], tn))
-    nw = len(ws)
-    tm0 = _common_tile(cols, tn)  # the manual stream's one tile width
+    half_rows = rows // 2
+    output_widths = []
+    for weight in weights:
+        if weight.shape[1] != in_features:
+            raise ValueError(f"weight {weight.shape} does not match in_features={in_features}")
+        output_widths.append(weight.shape[0])
+    num_weights = len(weights)
+    tile_width = _common_column_tile(output_widths, column_tile_limit)
+    if tile_width is None:
+        raise ValueError(f"no column tile (a multiple of 128) divides every width {output_widths}")
 
-    def kernel(owners_ref, nbrs_ref, x_ref, *refs):
-        w_refs = refs[:nw]
-        out_refs = refs[nw:2 * nw]
-        buf_ref, send_sem, recv_sem = refs[2 * nw:]
+    # The global tile index runs over every (hop, weight, column tile) in that
+    # order; within a hop, weight i owns tiles [first_tile_of_weight[i],
+    # first_tile_of_weight[i + 1]).
+    first_tile_of_weight = [0]
+    for width in output_widths:
+        first_tile_of_weight.append(first_tile_of_weight[-1] + width // tile_width)
+    tiles_per_hop = first_tile_of_weight[-1]
+    total_tiles = ring_size * tiles_per_hop
+    skip_communication = profile_ablation == "communication"
+    skip_compute = profile_ablation == "compute"
 
-        # Every neighbour must be inside this kernel (its buffers live) before
-        # anything is written into them.
+    def kernel(owner_shards_ref, neighbors_ref, x_ref, *refs):
+        weight_refs = refs[:num_weights]
+        output_refs = refs[num_weights:2 * num_weights]
+        (halves, weight_tiles, output_tiles, load_semaphores, send_semaphores,
+         receive_semaphores, weight_semaphores, output_semaphores) = refs[2 * num_weights:]
+
+        # Both neighbours must be inside this kernel (their VMEM slots belong to
+        # it) before anything is copied into them.
         barrier = pltpu.get_barrier_semaphore()
-        for d in range(2):
-            pl.semaphore_signal(barrier, 1, device_id={axis: nbrs_ref[d]})
+        for direction in range(2):
+            pl.semaphore_signal(barrier, 1, device_id={axis: neighbors_ref[direction]})
         pl.semaphore_wait(barrier, 2)
 
-        def held(d, s):
-            # The half travelling in direction d after s hops.
-            return x_ref.at[:, d] if s == 0 or ablate == "comm" else buf_ref.at[d, s % SLOTS]
+        def columns_of(column_tile):
+            return pl.ds(pl.multiple_of(column_tile * tile_width, tile_width), tile_width)
 
-        def matmul(s, w_ref, out_ref, tn_i):
-            # Both halves held after s hops against one weight tile: each tile
-            # of W is read from HBM once per hop, not once per half.
-            own_top, own_bot = owners_ref[0, s], owners_ref[1, s]
+        def locate_tile(tile):
+            """Global tile index -> (weight index, column tile of that weight)."""
+            tile_in_hop = jnp.asarray(tile, jnp.int32) % tiles_per_hop
+            weight_index = sum(
+                ((tile_in_hop >= first_tile_of_weight[i]).astype(jnp.int32)
+                 for i in range(1, num_weights)), jnp.int32(0))
+            weight_first_tile = sum(
+                (jnp.where(weight_index == i, first_tile_of_weight[i], 0)
+                 for i in range(1, num_weights)), jnp.int32(0))
+            return weight_index, tile_in_hop - weight_first_tile
 
-            def body(xt_blk, xb_blk, w_blk, ot_blk, ob_blk):
-                for x_blk, o_blk in ((xt_blk, ot_blk), (xb_blk, ob_blk)):
-                    o_blk[...] = jax.lax.dot_general(
-                        x_blk[...], w_blk[...], (((1,), (kd,)), ((), ())),
-                        preferred_element_type=jnp.float32).astype(o_blk.dtype)
-
-            x_spec = pl.BlockSpec((pl.Squeezed(), hr, k), lambda bi, j: (bi, 0, 0))
-            o_shape = (pl.Squeezed(), pl.Squeezed(), pl.Squeezed(), hr, tn_i)
-            w_spec = (pl.BlockSpec((k, tn_i), lambda bi, j: (0, j)) if weights_kn
-                      else pl.BlockSpec((tn_i, k), lambda bi, j: (j, 0)))
-            pltpu.emit_pipeline(
-                body,
-                grid=(b, w_ref.shape[nd] // tn_i),
-                in_specs=[x_spec, x_spec, w_spec],
-                out_specs=[pl.BlockSpec(o_shape, lambda bi, j: (bi, own_top, 0, 0, j)),
-                           pl.BlockSpec(o_shape, lambda bi, j: (bi, own_bot, 1, 0, j))],
-            )(held(0, s), held(1, s), w_ref, out_ref, out_ref)
-
-        for s in range(n):
-            copies = []
-            if s + 1 < n and ablate != "comm":
-                slot = (s + 1) % SLOTS
-                for d in range(2):
-                    c = pltpu.make_async_remote_copy(
-                        held(d, s), buf_ref.at[d, slot], send_sem.at[d, slot],
-                        recv_sem.at[d, slot], device_id={axis: nbrs_ref[d]})
-                    c.start()
-                    copies.append(c)
-            for w_ref, out_ref, tn_i in zip(w_refs, out_refs, tns):
-                if ablate != "compute":
-                    matmul(s, w_ref, out_ref, tn_i)
-            for c in copies:
-                c.wait_send()
-                c.wait_recv()
-
-    def kernel_resident(owners_ref, nbrs_ref, x_ref, *refs):
-        w_refs = refs[:nw]
-        out_refs = refs[nw:2 * nw]
-        xbuf, load_sem, send_sem, recv_sem = refs[2 * nw:]
-
-        barrier = pltpu.get_barrier_semaphore()
-        for d in range(2):
-            pl.semaphore_signal(barrier, 1, device_id={axis: nbrs_ref[d]})
-        pl.semaphore_wait(barrier, 2)
-
-        loads = [pltpu.make_async_copy(x_ref.at[:, d], xbuf.at[d, 0], load_sem.at[d])
-                 for d in range(2)]
-        for c in loads:
-            c.start()
-        for c in loads:
-            c.wait()
-
-        def held(d, s):
-            return xbuf.at[d, 0 if ablate == "comm" else s % SLOTS]
-
-        def matmul(s, w_ref, out_ref, tn_i):
-            own_top, own_bot = owners_ref[0, s], owners_ref[1, s]
-            xt, xb = held(0, s), held(1, s)
-
-            def body(w_blk, ot_blk, ob_blk):
-                w = w_blk[...]
-                for x_r, o_blk in ((xt, ot_blk), (xb, ob_blk)):
-                    for bi in range(b):
-                        o_blk[bi] = jax.lax.dot_general(
-                            x_r[bi], w, (((1,), (kd,)), ((), ())),
-                            preferred_element_type=jnp.float32).astype(o_blk.dtype)
-
-            o_shape = (b, pl.Squeezed(), pl.Squeezed(), hr, tn_i)
-            w_spec = (pl.BlockSpec((k, tn_i), lambda j: (0, j)) if weights_kn
-                      else pl.BlockSpec((tn_i, k), lambda j: (j, 0)))
-            pltpu.emit_pipeline(
-                body,
-                grid=(w_ref.shape[nd] // tn_i,),
-                in_specs=[w_spec],
-                out_specs=[pl.BlockSpec(o_shape, lambda j: (0, own_top, 0, 0, j)),
-                           pl.BlockSpec(o_shape, lambda j: (0, own_bot, 1, 0, j))],
-            )(w_ref, out_ref, out_ref)
-
-        for s in range(n):
-            copies = []
-            if s + 1 < n and ablate != "comm":
-                slot = (s + 1) % SLOTS
-                for d in range(2):
-                    c = pltpu.make_async_remote_copy(
-                        held(d, s), xbuf.at[d, slot], send_sem.at[d, slot],
-                        recv_sem.at[d, slot], device_id={axis: nbrs_ref[d]})
-                    c.start()
-                    copies.append(c)
-            for w_ref, out_ref, tn_i in zip(w_refs, out_refs, tns):
-                if ablate != "compute":
-                    matmul(s, w_ref, out_ref, tn_i)
-            for c in copies:
-                c.wait_send()
-                c.wait_recv()
-
-    def kernel_manual(owners_ref, nbrs_ref, x_ref, *refs):
-        w_refs = refs[:nw]
-        out_refs = refs[nw:2 * nw]
-        xbuf, wbuf, obuf, load_sem, send_sem, recv_sem, w_sem, o_sem = refs[2 * nw:]
-        tn0 = tm0                    # one column-tile width for every weight
-        cum = [0]                    # first tile of each weight within a hop
-        for c in cols:
-            cum.append(cum[-1] + c // tn0)
-        tph = cum[-1]                # tiles per hop
-        total = n * tph
-
-        barrier = pltpu.get_barrier_semaphore()
-        for d in range(2):
-            pl.semaphore_signal(barrier, 1, device_id={axis: nbrs_ref[d]})
-        pl.semaphore_wait(barrier, 2)
-
-        def cols_of(j):
-            return pl.ds(pl.multiple_of(j * tn0, tn0), tn0)
-
-        def w_src(ii, j):
-            return w_refs[ii].at[:, cols_of(j)] if weights_kn else w_refs[ii].at[cols_of(j), :]
-
-        def which(t):
-            # Global tile t -> (weight, column tile of that weight). Weights may
-            # differ in width (HunyuanVideo / FLUX single blocks: q|k|v|mlp), so
-            # each has its own run of tiles within a hop.
-            u = jnp.asarray(t, jnp.int32) % tph
-            i = sum(((u >= cum[kk]).astype(jnp.int32) for kk in range(1, nw)), jnp.int32(0))
-            base = sum((jnp.where(i == kk, cum[kk], 0) for kk in range(1, nw)), jnp.int32(0))
-            return i, u - base
-
-        def w_start(t, slot):
-            # The weights are separate refs, so one guarded DMA start per weight.
-            i, j = which(t)
-            for ii in range(nw):
-                @pl.when(i == ii)
+        def start_weight_tile_load(tile, buffer_slot):
+            # The weights are separate refs: one guarded DMA start per weight.
+            weight_index, column_tile = locate_tile(tile)
+            for i in range(num_weights):
+                @pl.when(weight_index == i)
                 def _():
-                    pltpu.make_async_copy(w_src(ii, j), wbuf.at[slot], w_sem.at[slot]).start()
+                    pltpu.make_async_copy(
+                        weight_refs[i].at[columns_of(column_tile), :],
+                        weight_tiles.at[buffer_slot], weight_semaphores.at[buffer_slot]).start()
 
-        def w_wait(slot):
-            pltpu.make_async_copy(w_src(0, 0), wbuf.at[slot], w_sem.at[slot]).wait()
+        def wait_weight_tile_load(buffer_slot):
+            # A wait only needs a descriptor of the same size: any weight's tile 0.
+            pltpu.make_async_copy(weight_refs[0].at[columns_of(0), :],
+                                  weight_tiles.at[buffer_slot],
+                                  weight_semaphores.at[buffer_slot]).wait()
 
-        def o_wait(slot):
-            for d in range(2):
-                pltpu.make_async_copy(obuf.at[slot, d], out_refs[0].at[:, 0, d, :, cols_of(0)],
-                                      o_sem.at[slot, d]).wait()
+        def wait_output_write_back(buffer_slot):
+            for direction in range(2):
+                pltpu.make_async_copy(output_tiles.at[buffer_slot, direction],
+                                      output_refs[0].at[:, 0, direction, :, columns_of(0)],
+                                      output_semaphores.at[buffer_slot, direction]).wait()
 
-        w_start(0, 0)  # the first weight tile overlaps the local loads
-        loads = [pltpu.make_async_copy(x_ref.at[:, d], xbuf.at[d, 0], load_sem.at[d])
-                 for d in range(2)]
-        for c in loads:
-            c.start()
-        for c in loads:
-            c.wait()
+        def ring_slot(hop):
+            return 0 if skip_communication else hop % RING_SLOTS
 
-        def slot_of(s):
-            return 0 if ablate == "comm" else s % SLOTS
+        # The first weight tile load overlaps the local halves' load.
+        start_weight_tile_load(0, 0)
+        local_loads = [pltpu.make_async_copy(x_ref.at[:, direction], halves.at[direction, 0],
+                                             load_semaphores.at[direction])
+                       for direction in range(2)]
+        for copy in local_loads:
+            copy.start()
+        for copy in local_loads:
+            copy.wait()
 
-        copies = []
-        for s in range(n):  # hops: static (n = 4), tiles within a hop: a runtime loop
-            for c in copies:  # hop s's halves have arrived
-                c.wait_send()
-                c.wait_recv()
-            copies = []
-            if s + 1 < n and ablate != "comm":
-                for d in range(2):
-                    c = pltpu.make_async_remote_copy(
-                        xbuf.at[d, slot_of(s)], xbuf.at[d, (s + 1) % SLOTS],
-                        send_sem.at[d, (s + 1) % SLOTS], recv_sem.at[d, (s + 1) % SLOTS],
-                        device_id={axis: nbrs_ref[d]})
-                    c.start()
-                    copies.append(c)
+        remote_copies = []
+        # Hops: a static loop (ring_size = 4). Tiles within a hop: a runtime loop, so
+        # compile time does not grow with the tile count (fully unrolled, Wan's FFN
+        # took 225 s to compile).
+        for hop in range(ring_size):
+            for copy in remote_copies:  # this hop's halves have arrived
+                copy.wait_send()
+                copy.wait_recv()
+            remote_copies = []
+            if hop + 1 < ring_size and not skip_communication:
+                next_slot = (hop + 1) % RING_SLOTS
+                for direction in range(2):
+                    copy = pltpu.make_async_remote_copy(
+                        halves.at[direction, ring_slot(hop)], halves.at[direction, next_slot],
+                        send_semaphores.at[direction, next_slot],
+                        receive_semaphores.at[direction, next_slot],
+                        device_id={axis: neighbors_ref[direction]})
+                    copy.start()
+                    remote_copies.append(copy)
 
-            def tile(u, carry, s=s):
-                t = s * tph + u
-                slot = t % 2
+            def process_tile(tile_in_hop, carry, hop=hop):
+                tile = hop * tiles_per_hop + tile_in_hop
+                buffer_slot = tile % 2
 
-                @pl.when(t + 1 < total)
+                @pl.when(tile + 1 < total_tiles)
                 def _():
-                    w_start(t + 1, 1 - slot)  # always one weight tile in flight
+                    start_weight_tile_load(tile + 1, 1 - buffer_slot)  # always one in flight
 
-                w_wait(slot)
+                wait_weight_tile_load(buffer_slot)
 
-                @pl.when(t >= 2)
+                @pl.when(tile >= 2)
                 def _():
-                    o_wait(slot)  # this output slot's previous write-back is done
+                    wait_output_write_back(buffer_slot)  # this slot's previous tile is out
 
-                if ablate != "compute":
-                    w = wbuf[slot]
-                    for d in range(2):
-                        for bi in range(b):
-                            obuf[slot, d, bi] = jax.lax.dot_general(
-                                xbuf[d, slot_of(s), bi], w, (((1,), (kd,)), ((), ())),
-                                preferred_element_type=jnp.float32).astype(obuf.dtype)
-                i, j = which(t)
-                for ii in range(nw):
-                    @pl.when(i == ii)
+                if not skip_compute:
+                    weight_tile = weight_tiles[buffer_slot]
+                    for direction in range(2):
+                        for batch_index in range(batch):
+                            output_tiles[buffer_slot, direction, batch_index] = jax.lax.dot_general(
+                                halves[direction, ring_slot(hop), batch_index], weight_tile,
+                                (((1,), (1,)), ((), ())),
+                                preferred_element_type=jnp.float32).astype(output_tiles.dtype)
+                weight_index, column_tile = locate_tile(tile)
+                for i in range(num_weights):
+                    @pl.when(weight_index == i)
                     def _():
-                        for d in range(2):
+                        for direction in range(2):
+                            owner = owner_shards_ref[direction, hop]
                             pltpu.make_async_copy(
-                                obuf.at[slot, d],
-                                out_refs[ii].at[:, owners_ref[d, s], d, :, cols_of(j)],
-                                o_sem.at[slot, d]).start()
+                                output_tiles.at[buffer_slot, direction],
+                                output_refs[i].at[:, owner, direction, :, columns_of(column_tile)],
+                                output_semaphores.at[buffer_slot, direction]).start()
                 return carry
 
-            jax.lax.fori_loop(0, tph, tile, 0)
-        for c in copies:
-            c.wait_send()
-            c.wait_recv()
-        for t in range(max(0, total - 2), total):  # the last write-backs
-            o_wait(t % 2)
+            jax.lax.fori_loop(0, tiles_per_hop, process_tile, 0)
+        for copy in remote_copies:
+            copy.wait_send()
+            copy.wait_recv()
+        for tile in range(max(0, total_tiles - 2), total_tiles):  # the last write-backs
+            wait_output_write_back(tile % 2)
 
-    any_spec = pl.BlockSpec(memory_space=pl.ANY)
-    if resident and manual:
-        if tm0 is None:
-            raise ValueError(f"no column tile (a multiple of 128) divides every width {cols}")
-        wshape = (k, tm0) if weights_kn else (tm0, k)
-        outs = pl.pallas_call(
-            kernel_manual,
-            out_shape=[jax.ShapeDtypeStruct((b, n, 2, hr, c), x.dtype) for c in cols],
-            grid_spec=pltpu.PrefetchScalarGridSpec(
-                num_scalar_prefetch=2,
-                in_specs=[any_spec] * (1 + nw),
-                out_specs=[any_spec] * nw,
-                scratch_shapes=[pltpu.VMEM((2, SLOTS, b, hr, k), x.dtype),
-                                pltpu.VMEM((2,) + wshape, x.dtype),
-                                pltpu.VMEM((2, 2, b, hr, tm0), x.dtype),
-                                pltpu.SemaphoreType.DMA((2,)),
-                                pltpu.SemaphoreType.DMA((2, SLOTS)),
-                                pltpu.SemaphoreType.DMA((2, SLOTS)),
-                                pltpu.SemaphoreType.DMA((2,)),
-                                pltpu.SemaphoreType.DMA((2, 2))],
-            ),
-            compiler_params=pltpu.CompilerParams(collective_id=0,
-                                                 vmem_limit_bytes=vmem_limit_bytes),
-            interpret=interpret,
-        )(owners, nbrs, x.reshape(b, 2, hr, k), *ws)
-        return tuple(o.reshape(b, n * rows, o.shape[-1]) for o in outs)
-    if resident:
-        outs = pl.pallas_call(
-            kernel_resident,
-            out_shape=[jax.ShapeDtypeStruct((b, n, 2, hr, c), x.dtype) for c in cols],
-            grid_spec=pltpu.PrefetchScalarGridSpec(
-                num_scalar_prefetch=2,
-                in_specs=[any_spec] * (1 + nw),
-                out_specs=[any_spec] * nw,
-                scratch_shapes=[pltpu.VMEM((2, SLOTS, b, hr, k), x.dtype),
-                                pltpu.SemaphoreType.DMA((2,)),
-                                pltpu.SemaphoreType.DMA((2, SLOTS)),
-                                pltpu.SemaphoreType.DMA((2, SLOTS))],
-            ),
-            compiler_params=pltpu.CompilerParams(collective_id=0,
-                                                 vmem_limit_bytes=vmem_limit_bytes),
-            interpret=interpret,
-        )(owners, nbrs, x.reshape(b, 2, hr, k), *ws)
-        return tuple(o.reshape(b, n * rows, o.shape[-1]) for o in outs)
-
-    out_shape = [jax.ShapeDtypeStruct((b, n, 2, hr, c), x.dtype) for c in cols]
-    out_shape.append(jax.ShapeDtypeStruct((2, SLOTS, b, hr, k), x.dtype))
-    outs = pl.pallas_call(
+    any_memory = pl.BlockSpec(memory_space=pl.ANY)
+    outputs = pl.pallas_call(
         kernel,
-        out_shape=out_shape,
+        out_shape=[jax.ShapeDtypeStruct((batch, ring_size, 2, half_rows, width), x.dtype)
+                   for width in output_widths],
         grid_spec=pltpu.PrefetchScalarGridSpec(
             num_scalar_prefetch=2,
-            in_specs=[any_spec] * (1 + nw),
-            out_specs=[any_spec] * (nw + 1),
-            scratch_shapes=[pltpu.SemaphoreType.DMA((2, SLOTS)),
-                            pltpu.SemaphoreType.DMA((2, SLOTS))],
+            in_specs=[any_memory] * (1 + num_weights),
+            out_specs=[any_memory] * num_weights,
+            scratch_shapes=[
+                pltpu.VMEM((2, RING_SLOTS, batch, half_rows, in_features), x.dtype),  # halves
+                pltpu.VMEM((2, tile_width, in_features), x.dtype),             # weight tiles
+                pltpu.VMEM((2, 2, batch, half_rows, tile_width), x.dtype),     # output tiles
+                pltpu.SemaphoreType.DMA((2,)),               # local loads, per direction
+                pltpu.SemaphoreType.DMA((2, RING_SLOTS)),    # remote sends
+                pltpu.SemaphoreType.DMA((2, RING_SLOTS)),    # remote receives
+                pltpu.SemaphoreType.DMA((2,)),               # weight tile loads
+                pltpu.SemaphoreType.DMA((2, 2)),             # output write-backs
+            ],
         ),
         compiler_params=pltpu.CompilerParams(collective_id=0,
                                              vmem_limit_bytes=vmem_limit_bytes),
         interpret=interpret,
-    )(owners, nbrs, x.reshape(b, 2, hr, k), *ws)
-    return tuple(o.reshape(b, n * rows, o.shape[-1]) for o in outs[:nw])
+    )(owner_shards, neighbors, x.reshape(batch, 2, half_rows, in_features), *weights)
+    return tuple(output.reshape(batch, ring_size * rows, output.shape[-1])
+                 for output in outputs)
 
 
-#: VMEM the kernel may plan for (v5e has 128 MiB per core; leave room for Mosaic).
-VMEM_BUDGET = 96 * 2**20
-
-
-def unsupported(x_shape, w_shapes, itemsize: int, tn: int = 512) -> str | None:
-    """Why the streamed kernel (``resident=True, manual=True``, weights (N, K))
-    cannot take these shapes, or None. Callers fall back to the JAX ring."""
-    b, rows, k = x_shape
+def unsupported_reason(x_shape, weight_shapes, itemsize: int,
+                       column_tile_limit: int = DEFAULT_COLUMN_TILE_LIMIT) -> str | None:
+    """Why :func:`all_gather_matmul_body` cannot take these shapes, or None.
+    Callers fall back to the JAX ring."""
+    batch, rows, in_features = x_shape
     if rows % 2:
         return f"odd rows per device ({rows})"
-    if any(ws[1] != k for ws in w_shapes):
-        return "weight K does not match the input"
-    widths = [ws[0] for ws in w_shapes]
-    t = _common_tile(widths, tn)
-    if t is None:
+    if any(shape[1] != in_features for shape in weight_shapes):
+        return "weight in_features does not match the input"
+    widths = [shape[0] for shape in weight_shapes]
+    tile_width = _common_column_tile(widths, column_tile_limit)
+    if tile_width is None:
         return f"no column tile (a multiple of 128) divides every width {sorted(set(widths))}"
-    hr = rows // 2
-    need = itemsize * (2 * SLOTS * b * hr * k   # resident halves
-                       + 2 * t * k              # weight tiles, double-buffered
-                       + 2 * 2 * b * hr * t)    # output tiles, double-buffered
-    need += 4 * hr * t                          # one fp32 product
-    if need > VMEM_BUDGET:
-        return f"needs {need / 2**20:.0f} MiB of VMEM (budget {VMEM_BUDGET / 2**20:.0f})"
+    half_rows = rows // 2
+    needed = itemsize * (2 * RING_SLOTS * batch * half_rows * in_features  # resident halves
+                         + 2 * tile_width * in_features                    # weight tiles
+                         + 2 * 2 * batch * half_rows * tile_width)         # output tiles
+    needed += 4 * half_rows * tile_width                                   # one fp32 product
+    if needed > VMEM_BUDGET_BYTES:
+        return (f"needs {needed / 2**20:.0f} MiB of VMEM "
+                f"(budget {VMEM_BUDGET_BYTES / 2**20:.0f})")
     return None
 
 
-def _common_tile(widths, limit: int) -> int | None:
-    """The largest multiple of 128 up to ``limit`` that divides every width, or
-    None (q|k|v 768 + mlp 3072 per device: 384)."""
-    for t in range(limit - limit % 128, 0, -128):
-        if all(w % t == 0 for w in widths):
-            return t
+def _common_column_tile(widths, limit: int) -> int | None:
+    """The largest multiple of 128 up to ``limit`` that divides every width, or None
+    (q|k|v 768 + mlp 3072 per device, limit 256: 256)."""
+    for tile_width in range(limit - limit % 128, 0, -128):
+        if all(width % tile_width == 0 for width in widths):
+            return tile_width
     return None
 
 
-def _col_tile(cols: int, limit: int) -> int:
-    """The largest multiple of 128 up to ``limit`` that divides ``cols``, else ``cols``
-    (Wan's FFN has 3456 columns per device: 384)."""
-    for t in range(limit - limit % 128, 0, -128):
-        if cols % t == 0:
-            return t
-    return cols
+def ring_tables(ring_position, shard_of_position, ring_size: int):
+    """Runtime owner shards and neighbours for ``ring_position`` (a traced int32).
 
-
-def ring_tables(j, shard_of_pos, n: int):
-    """Runtime owners / neighbours for ring position ``j`` (a traced int32).
-
-    After s hops a device at position j holds position (j - s)'s top half
-    (sent clockwise) and (j + s)'s bottom half; ``shard_of_pos`` maps a ring
-    position to the shard (output row block) it owns.
+    After h hops the device at position p holds position (p - h)'s top half (sent
+    clockwise) and position (p + h)'s bottom half; ``shard_of_position`` maps a
+    ring position to the shard (output row block) it owns.
+    Returns (owner_shards int32 (2, ring_size), neighbors int32 (2,)).
     """
     import jax.numpy as jnp
 
-    shard_of = jnp.asarray(shard_of_pos, dtype=jnp.int32)
-    s = jnp.arange(n, dtype=jnp.int32)
-    owners = jnp.stack([shard_of[(j - s) % n], shard_of[(j + s) % n]])
-    nbrs = jnp.stack([(j + 1) % n, (j - 1) % n]).astype(jnp.int32)
-    return owners, nbrs
+    shard_of = jnp.asarray(shard_of_position, dtype=jnp.int32)
+    hops = jnp.arange(ring_size, dtype=jnp.int32)
+    owner_shards = jnp.stack([shard_of[(ring_position - hops) % ring_size],
+                              shard_of[(ring_position + hops) % ring_size]])
+    neighbors = jnp.stack([(ring_position + 1) % ring_size,
+                           (ring_position - 1) % ring_size]).astype(jnp.int32)
+    return owner_shards, neighbors
