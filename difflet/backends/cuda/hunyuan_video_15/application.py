@@ -43,7 +43,8 @@ class HunyuanVideo15DiTAdapter(torch.nn.Module):
         attention_kwargs=None,
         return_dict=True,
     ):
-        # The driver owns timestep/latent rounding. Do not import 1.0 precision exceptions.
+        # Every input is cast to the transformer's dtype, as Diffusers' HunyuanVideo 1.5 driver
+        # does. Unlike the original HunyuanVideo adapter, the timestep is not kept in FP32.
         values = (
             hidden_states,
             timestep,
