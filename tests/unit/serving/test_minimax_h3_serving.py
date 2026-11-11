@@ -401,3 +401,17 @@ def test_serve_cp_modes_open_ulysses_for_minimax_h3_only():
     with pytest.raises(DiffletServingError, match="not served for flux"):
         build_serving_profile(entry=flux, model_id="black-forest-labs/FLUX.1-dev", model_type="flux",
                               cp_mode="ulysses", **common)
+
+
+def test_request_should_stop_reads_the_real_cancellation_signal_and_deadline():
+    from difflet.serving.types import CancellationSignal, WorkerRequestContext
+
+    context = WorkerRequestContext.with_timeout("r1", 60.0, cancellation=CancellationSignal())
+    assert minimax_h3.request_should_stop(context) is False
+    context.cancellation.cancel()
+    assert minimax_h3.request_should_stop(context) is True
+    expired = WorkerRequestContext.with_timeout("r2", 0.0, cancellation=CancellationSignal())
+    import time
+
+    time.sleep(0.01)
+    assert minimax_h3.request_should_stop(expired) is True

@@ -349,6 +349,13 @@ def write_av_mp4(video, audio, sample_rate: int, path: str | Path, *, fps: int):
                         require_silent=False)
 
 
+def request_should_stop(context) -> bool:
+    """The request was cancelled (``CancellationSignal.cancelled`` is a property) or its
+    deadline passed."""
+    return bool(context.cancellation.cancelled) or time.monotonic() > float(
+        context.deadline_monotonic)
+
+
 def _empty_output(request: DiffletGenerateRequest) -> FileBackedGenerateOutput:
     video = request.video
     target = video.output_target
@@ -383,8 +390,7 @@ class MiniMaxH3PipelineRunner:
             shared = Path(tempfile.gettempdir()) / f"difflet-h3-tiles-{request.request_id}"
 
             def should_stop() -> bool:
-                return (context.cancellation.cancelled()
-                        or time.monotonic() > float(context.deadline_monotonic))
+                return request_should_stop(context)
 
             from difflet.backends.neuron.minimax_h3.resident import ResidentRequestCancelled
 
