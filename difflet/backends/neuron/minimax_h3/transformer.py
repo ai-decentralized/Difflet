@@ -65,6 +65,21 @@ CHECKPOINT_PREFIX = "transformer."
 #: Top-level modules the checkpoint stores in fp32 (``_keep_in_fp32_modules`` minus the rope,
 #: which is a computed buffer).
 FP32_MODULES = ("proj_in", "audio_proj_in", "time_embedder", "proj_out", "audio_proj_out")
+#: The text buckets the DiT is compiled for: a request runs at the smallest one that holds its
+#: live tokens. The padded text rows are keys masked out by the attention bounds, but every
+#: linear still computes them, so a 27-token prompt in the 1024 bucket spends ~18% of each step
+#: (5632 packed rows at 256x448x124) on padding.
+TEXT_BUCKETS = (128, 256, 512, 1024)
+
+
+def text_bucket(num_text_tokens: int, buckets=TEXT_BUCKETS) -> int:
+    """The smallest bucket holding ``num_text_tokens`` live tokens."""
+    for bucket in sorted(buckets):
+        if int(num_text_tokens) <= bucket:
+            return int(bucket)
+    raise ValueError(f"{num_text_tokens} text tokens exceed the largest bucket {max(buckets)}")
+
+
 #: Distinct timestep slots per call: 0 audio, 1 video/text (the denoise loop's contract).
 NUM_TIMESTEP_SLOTS = 2
 #: The model's fixed frame rate: 40 audio latent rows per second per channel.
@@ -274,6 +289,13 @@ class NeuronMiniMaxH3TransformerApplication(TorchNeuronApplicationBase):
         # At tp1 the TP rewrite is not applied and the SwiGLU keeps diffusers' fused layout.
         return swiglu_slices(self.config) if int(self.config.tp_degree) > 1 else {}
 
+    def warmup_text_buckets(self, buckets) -> None:
+        """Warm up (compile) every text bucket in ``buckets``: one block graph per bucket. The
+        config's ``text_seq_len`` is left at the last one."""
+        for bucket in buckets:
+            self.config.text_seq_len = int(bucket)
+            self.warmup()
+
     def get_example_inputs(self) -> tuple[torch.Tensor, ...]:
         """The call at the static shape with 64 live text tokens (as the Trainium trace)."""
         cfg = self.config
@@ -308,6 +330,8 @@ class NeuronMiniMaxH3TransformerApplication(TorchNeuronApplicationBase):
 
 __all__ = [
     "CHECKPOINT_PREFIX",
+    "TEXT_BUCKETS",
+    "text_bucket",
     "FP32_MODULES",
     "NeuronMiniMaxH3Config",
     "NeuronMiniMaxH3TransformerApplication",

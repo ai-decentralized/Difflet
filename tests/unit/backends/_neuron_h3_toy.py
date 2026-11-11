@@ -53,12 +53,13 @@ def write_tiny_h3_transformer(root) -> Path:
     return out
 
 
-def tiny_inputs(*, scale: float = 1.0):
-    """The DiT call at the tiny shape (bool masks, as the denoise loop builds them)."""
+def tiny_inputs(*, scale: float = 1.0, max_text: int = TINY_TEXT_SEQ_LEN):
+    """The DiT call at the tiny shape (bool masks, as the denoise loop builds them); the text
+    bucket is ``max_text`` rows, the first LIVE_TEXT live (the same values for any bucket)."""
     from difflet.models.minimax_h3.contracts import build_padded_t2va_layout
 
     layout = build_padded_t2va_layout(
-        num_text_tokens=LIVE_TEXT, max_text_tokens=TINY_TEXT_SEQ_LEN, sequence_alignment=128,
+        num_text_tokens=LIVE_TEXT, max_text_tokens=max_text, sequence_alignment=128,
         **TINY_SHAPE,
     )
     gen = torch.Generator().manual_seed(1)
@@ -66,12 +67,16 @@ def tiny_inputs(*, scale: float = 1.0):
     audio_rows = int(layout.audio_indices.numel())
     timestep_indices = torch.ones(layout.sequence_length, dtype=torch.int64)
     timestep_indices[layout.audio_indices] = 0
-    text_mask = torch.zeros(1, TINY_TEXT_SEQ_LEN, dtype=torch.bool)
+    text_mask = torch.zeros(1, max_text, dtype=torch.bool)
     text_mask[:, :LIVE_TEXT] = True
+    video = scale * torch.randn(1, video_rows, 96, generator=gen)
+    audio = scale * torch.randn(1, audio_rows, 32, generator=gen)
+    text = torch.zeros(1, max_text, 16)
+    text[:, :LIVE_TEXT] = scale * torch.randn(1, LIVE_TEXT, 16, generator=gen)
     return (
-        scale * torch.randn(1, video_rows, 96, generator=gen),
-        scale * torch.randn(1, audio_rows, 32, generator=gen),
-        scale * torch.randn(1, TINY_TEXT_SEQ_LEN, 16, generator=gen),
+        video,
+        audio,
+        text,
         torch.tensor(TIMESTEP, dtype=torch.float32),
         timestep_indices,
         layout.token_tags.to(torch.int64),
@@ -139,6 +144,8 @@ def l1_h3_worker(rank: int, world_size: int, transformer_dir: str, precomputed: 
     table = modulation_table(transformer_dir) if precomputed else None
     video, audio = app(*as_neuron_call(tiny_inputs(), table))
     other, _ = app(*as_neuron_call(tiny_inputs(scale=0.5), table))
+    # A wider text bucket (more padding rows) gives the same outputs.
+    wide_v, wide_a = app(*as_neuron_call(tiny_inputs(max_text=2 * TINY_TEXT_SEQ_LEN), table))
     t = app.module.transformer
     block0 = t.transformer_blocks[0]
     return {
@@ -156,6 +163,7 @@ def l1_h3_worker(rank: int, world_size: int, transformer_dir: str, precomputed: 
         "video": video.float().tolist(),
         "audio": audio.float().tolist(),
         "other_differs": not bool(torch.equal(video, other)),
+        "wide_max_abs": max(float((wide_v - video).abs().max()), float((wide_a - audio).abs().max())),
     }
 
 

@@ -19,6 +19,7 @@ from difflet.backends.neuron.minimax_h3.transformer import (  # noqa: E402
     NeuronMiniMaxH3Config,
     checkpoint_key,
     swiglu_slices,
+    text_bucket,
 )
 from difflet.backends.neuron.ops_impl import parallel_mesh  # noqa: E402
 from tests.unit.backends._neuron_gloo import run_ranks  # noqa: E402
@@ -60,6 +61,7 @@ def _run(tiny, *, tp, precomputed=True, exec_mode="eager"):
 
 def _assert_close(results, tiny):
     for r in results:
+        assert r["wide_max_abs"] < 1e-5, r["wide_max_abs"]
         assert torch.equal(torch.tensor(r["video"]), torch.tensor(results[0]["video"]))
         torch.testing.assert_close(torch.tensor(r["video"]), tiny.video, atol=ATOL, rtol=RTOL)
         torch.testing.assert_close(torch.tensor(r["audio"]), tiny.audio, atol=ATOL, rtol=RTOL)
@@ -114,3 +116,10 @@ def test_compile_mode_matches_eager(tiny):
     results = _run(tiny, tp=2, exec_mode="compile")
     _assert_close(results, tiny)
     assert results[0]["compiled_blocks"]
+
+
+def test_text_bucket_is_the_smallest_that_holds_the_prompt():
+    assert [text_bucket(n) for n in (1, 27, 128, 129, 600, 1024)] == [128, 128, 128, 256,
+                                                                       1024, 1024]
+    with pytest.raises(ValueError):
+        text_bucket(1025)

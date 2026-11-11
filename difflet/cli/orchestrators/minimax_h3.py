@@ -22,8 +22,11 @@ NeuronCore each (the generate stage):
    fp32 by default), the 256 px tiles spread over the ranks; with ``--host-vae`` a host
    video_vae stage decodes instead.
 
-The audio decoder and the AV mux stay on the host (audio_vae, one rank). ``compile`` runs the
-generate stage with every device component's warm-up, which fills the NEFF cache.
+The DiT runs at the smallest text bucket (``TEXT_BUCKETS``: 128/256/512/1024) that holds the
+prompt's live tokens instead of the fixed 1024-token bucket. With the device video decoder, rank
+0 also decodes the audio on its host and muxes the MP4 in the same launch; with ``--host-vae``
+the host video_vae and audio_vae stages do. ``compile`` runs the generate stage with every
+device component's warm-up (the DiT at every text bucket), which fills the NEFF cache.
 """
 
 from __future__ import annotations
@@ -673,6 +676,7 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
 
         # 1. Text: encode every request this replica runs, then free the encoder's HBM.
         requests = None
+        texts: dict[int, dict] = {}
         if device_te:
             from difflet.backends.neuron.minimax_h3.text_encoder import (
                 NeuronMiniMaxH3TextEncoderApplication,
@@ -694,6 +698,7 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
                     with replica_request_scope(args, req, final=False):
                         start = time.perf_counter()
                         record = encoder.encode(req.prompt)
+                        texts[req.index] = record
                         if rank == 0:
                             destination = stage_loop.work_file(args, req, "text.pt")
                             torch.save(record, destination)
@@ -704,23 +709,35 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
             del encoder
         if requests is None and not compiling:
             requests = list(stage_loop.claimed_requests(args))
+            for req in requests:
+                texts[req.index] = torch.load(stage_loop.work_file(args, req, "text.pt"))
 
         # 2. The DiT.
         transformer_path = str(Path(model_dir) / "transformer")
         height = args.height or h3_common.DEFAULT_HEIGHT
         width = args.width or h3_common.DEFAULT_WIDTH
         num_frames = args.num_frames or h3_common.DEFAULT_NUM_FRAMES
+        from difflet.backends.neuron.minimax_h3.transformer import TEXT_BUCKETS, text_bucket
+
+        # The smallest text bucket that holds every request of this launch (compile: all).
+        bucket = max((text_bucket(int(t["num_text_tokens"])) for t in texts.values()),
+                     default=max(TEXT_BUCKETS))
         config = NeuronMiniMaxH3Config.from_pretrained(
             transformer_path, height=height, width=width, num_frames=num_frames,
-            text_seq_len=h3_common.TEXT_SEQ_LEN, tp_degree=parallel.tp_degree,
-            precomputed_adaln=True,
+            text_seq_len=bucket, tp_degree=parallel.tp_degree, precomputed_adaln=True,
         )
         app = NeuronMiniMaxH3TransformerApplication(
             model_path=transformer_path, config=config, parallel=parallel, dtype=torch.bfloat16,
         )
         self._neuron_device = app.device
         start = time.perf_counter()
-        app.load()
+        if compiling:
+            app.load(skip_warmup=True)
+            app.warmup_text_buckets(TEXT_BUCKETS)
+        else:
+            app.load()
+            log(f"[generate] text bucket {bucket} (live tokens: "
+                f"{sorted(int(t['num_text_tokens']) for t in texts.values())})")
         log(f"[generate] DiT loaded on {world} ranks in {time.perf_counter() - start:.1f}s "
             f"({ {k: round(v, 1) for k, v in app.phase_seconds.items()} }), "
             f"{app.weight_bytes / 2**30:.2f} GiB/rank")
@@ -746,11 +763,20 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
                 f"{time.perf_counter() - start:.1f}s")
         if compiling:
             return
+        audio_decoder = None
+        if vae is not None and rank == 0:
+            from difflet.models.minimax_h3.host_components import (
+                default_threads,
+                load_host_audio_decoder,
+            )
+
+            audio_decoder = load_host_audio_decoder(model_dir, threads=default_threads())
 
         dit = _NeuronH3DiT(app)
         for req in requests:
-            with replica_request_scope(args, req, final=False):
-                text = torch.load(stage_loop.work_file(args, req, "text.pt"))
+            # With the device decode, this launch finishes the request (audio + mux included).
+            with replica_request_scope(args, req, final=vae is not None):
+                text = texts[req.index]
                 steps = int(stage_loop.effective(req, args, "steps", h3_common.DEFAULT_STEPS))
                 table = self._neuron_adaln_table(args, model_dir, config, steps)
                 video_scheduler, audio_scheduler = load_minimax_h3_schedulers(model_dir)
@@ -758,8 +784,9 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
                 start = time.perf_counter()
                 output = denoise_minimax_h3_t2va(
                     dit,
-                    encoder_hidden_states=text["encoder_hidden_states"],
-                    encoder_attention_mask=text["attention_mask"],
+                    # The live tokens are a prefix; the rows past the bucket are padding.
+                    encoder_hidden_states=text["encoder_hidden_states"][:, :bucket],
+                    encoder_attention_mask=text["attention_mask"][:, :bucket],
                     num_text_tokens=int(text["num_text_tokens"]),
                     height=height,
                     width=width,
@@ -801,6 +828,39 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
                     torch.save(video.to(torch.float16), destination)
                 log(f"[video_vae] (device, tiles over {world} ranks) RGB video "
                     f"in {time.perf_counter() - start:.1f}s")
+                if rank == 0:
+                    self._decode_audio_and_mux(req, output.audio_latents, video, audio_decoder)
+
+    def _decode_audio_and_mux(self, req, audio_latents, video, decoder) -> None:
+        """The audio decode on the host (fp32, the whole latent) and the MP4 mux, or the AV
+        tensors when the mux is unavailable (the audio_vae stage's output)."""
+        import time
+
+        import torch
+
+        from difflet.models.minimax_h3.pipeline import decode_minimax_h3_audio
+
+        cfg = decoder.config
+        start = time.perf_counter()
+        # The whole latent in one decode (the reference); the Trainium graph decodes fixed
+        # 48-frame windows only because its shape is static.
+        audio = decode_minimax_h3_audio(
+            decoder,
+            audio_latents,
+            latents_mean=cfg["latents_mean"],
+            latents_std=cfg["latents_std"],
+            hop_length=800,
+        )
+        print(f"[audio_vae] (host) waveform {tuple(audio.shape)} in "
+              f"{time.perf_counter() - start:.1f}s", flush=True)
+        output_path = Path(req.output)
+        if not _save_av(video.float(), audio, str(output_path),
+                        sample_rate=int(cfg["sampling_rate"])):
+            tensor_path = output_path.with_suffix(".pt")
+            tensor_path.parent.mkdir(parents=True, exist_ok=True)
+            torch.save({"video": video.to(torch.float16), "audio": audio, "fps": 24,
+                        "sample_rate": int(cfg["sampling_rate"])}, tensor_path)
+            print(f"[audio_vae] AV tensors saved to {tensor_path}", flush=True)
 
     def _stage_video_vae_host(self, args: argparse.Namespace) -> None:
         import time
@@ -851,13 +911,12 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
         return (
             *(() if self._device_text_encoder() else ("text",)),
             "generate",
-            *(() if self._device_vae() else ("video_vae",)),
-            "audio_vae",
+            # The device video decode and the audio decode + mux run in the generate launch.
+            *(() if self._device_vae() else ("video_vae", "audio_vae")),
         )
 
     def _stage_audio_vae_host(self, args: argparse.Namespace) -> None:
-        import time
-
+        """The audio decode and the mux after the host video_vae stage (``--host-vae``)."""
         import torch
 
         from difflet.cli.dp import stage_loop
@@ -865,38 +924,17 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
             default_threads,
             load_host_audio_decoder,
         )
-        from difflet.models.minimax_h3.pipeline import decode_minimax_h3_audio
         from difflet.pipeline.path_resolver import resolve_model_path
 
         if args.stage_mode == "compile":
             return
-        model_dir = self._model_dir(args, resolve_model_path)
-        decoder = load_host_audio_decoder(model_dir, threads=default_threads())
-        cfg = decoder.config
+        decoder = load_host_audio_decoder(self._model_dir(args, resolve_model_path),
+                                          threads=default_threads())
         for req in stage_loop.claimed_requests(args):
             with stage_loop.request_scope(args, req, final=True):
                 latents = torch.load(stage_loop.work_file(args, req, "latents.pt"))
                 video = torch.load(stage_loop.work_file(args, req, "video.pt")).float()
-                start = time.perf_counter()
-                # The whole latent in one decode (the reference); the Trainium graph decodes
-                # fixed 48-frame windows only because its shape is static.
-                audio = decode_minimax_h3_audio(
-                    decoder,
-                    latents["audio_latents"],
-                    latents_mean=cfg["latents_mean"],
-                    latents_std=cfg["latents_std"],
-                    hop_length=800,
-                )
-                print(f"[audio_vae] (host) waveform {tuple(audio.shape)} in "
-                      f"{time.perf_counter() - start:.1f}s", flush=True)
-                output_path = Path(req.output)
-                if not _save_av(video, audio, str(output_path),
-                                sample_rate=int(cfg["sampling_rate"])):
-                    tensor_path = output_path.with_suffix(".pt")
-                    tensor_path.parent.mkdir(parents=True, exist_ok=True)
-                    torch.save({"video": video.to(torch.float16), "audio": audio, "fps": 24,
-                                "sample_rate": int(cfg["sampling_rate"])}, tensor_path)
-                    print(f"[audio_vae] AV tensors saved to {tensor_path}", flush=True)
+                self._decode_audio_and_mux(req, latents["audio_latents"], video, decoder)
 
     def _validate_topology(self) -> None:
         if (self.args.tp_degree or 4) != 4:

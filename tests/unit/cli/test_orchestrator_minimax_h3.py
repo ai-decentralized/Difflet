@@ -392,10 +392,8 @@ def test_neuron_backend_compiles_only_the_dit_and_places_host_stages_on_one_rank
 
     calls.clear()
     orchestrator.generate()
-    # text and the video decode run inside the generate launch
-    assert [(stage, kw["num_cores"]) for stage, kw in calls] == [
-        ("generate", 4), ("audio_vae", 1)
-    ]
+    # text, the video decode, the audio decode and the mux run inside the generate launch
+    assert [(stage, kw["num_cores"]) for stage, kw in calls] == [("generate", 4)]
 
     calls.clear()
     host = MiniMaxH3Orchestrator(_args(work_dir=str(tmp_path), keep_work_dir=True,
