@@ -210,6 +210,10 @@ class _OnDeviceHunyuanVideoTransformer(OnDeviceDiT):
     probe's per-step signal: the orchestrator's fused branch.
     """
 
+    # As diffusers passes it: the scheduler's timestep unrounded. bf16 holds only multiples of 4
+    # between 512 and 1024, which shifts the sinusoidal timestep embedding at every step.
+    timestep_dtype = torch.float32
+
     def __init__(self, module, config: NeuronHunyuanVideoConfig, dtype, device,
                  probe: _HunyuanVideoTeaCacheProbe | None = None) -> None:
         super().__init__(module, config, dtype, device)
@@ -223,7 +227,12 @@ class _OnDeviceHunyuanVideoTransformer(OnDeviceDiT):
         if not isinstance(bundle, HunyuanVideoDiTInputBundle):
             raise TypeError(f"expected a HunyuanVideoDiTInputBundle, got {type(bundle).__name__}")
         _check_dit_shapes(self.config, bundle)
-        return self._forward(bundle.as_model_inputs())
+        # The timestep goes to the device in fp32, not through _forward's cast to the model
+        # dtype; the other inputs follow it already on the device, keeping the module's order.
+        hidden_states, timestep, *rest = bundle.as_model_inputs()
+        timestep = timestep.to(self.timestep_dtype).contiguous().to(self.device)
+        return self._forward((hidden_states,),
+                             extra=(timestep, *(self._device_input(t) for t in rest)))
 
     def _device_input(self, tensor: torch.Tensor) -> torch.Tensor:
         if not tensor.is_floating_point():
@@ -233,8 +242,8 @@ class _OnDeviceHunyuanVideoTransformer(OnDeviceDiT):
     def teacache_delta(self, bundle: HunyuanVideoDiTInputBundle) -> torch.Tensor:
         if self.probe is None:
             raise RuntimeError("no TeaCache probe: adaptive TeaCache (teacache_speedup) is off")
-        return self.probe.teacache_delta(
-            *(t.contiguous() for t in (bundle.hidden_states, bundle.timestep,
+        return self.probe.teacache_delta(  # the probe keeps its model-dtype timestep
+            *(t.contiguous() for t in (bundle.hidden_states, bundle.timestep.to(self.dtype),
                                        bundle.pooled_projections, bundle.guidance)))
 
 
@@ -399,7 +408,7 @@ class TorchNeuronHunyuanVideoApplication(TorchNeuronModelApplication):
 
     def dit_input_contract(self) -> dict[str, dict[str, Any]]:
         """The Trainium contract's six tensors at the static shape (``dit_input_shapes``)."""
-        dtypes = {"encoder_attention_mask": torch.int64}
+        dtypes = {"encoder_attention_mask": torch.int64, "timestep": torch.float32}
         return {name: {"shape": shape, "dtype": dtypes.get(name, self.dtype)}
                 for name, shape in dit_input_shapes(self.config).items()}
 

@@ -286,7 +286,7 @@ def test_example_inputs_match_the_contract(tiny):
     )
     assert _shapes_and_dtypes(real.get_example_inputs()) == [
         ((1, 16, 3, 60, 104), torch.bfloat16),
-        ((1,), torch.bfloat16),
+        ((1,), torch.float32),  # the timestep unrounded, as diffusers passes it
         ((1, 512, 4096), torch.bfloat16),
     ]
 

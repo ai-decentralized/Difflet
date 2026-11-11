@@ -190,6 +190,7 @@ def test_application_accepts_the_trainium_cli_kwargs(tiny_pipeline):
     assert app.shape == SHAPE
     contract = app.dit_input_contract()
     assert contract["encoder_attention_mask"] == {"shape": (1, TEXT), "dtype": torch.int64}
+    assert contract["timestep"]["dtype"] == torch.float32
     assert contract["hidden_states"]["shape"] == (1, 4, 5, 8, 8)
 
 

@@ -189,7 +189,9 @@ class NeuronHunyuanVideoTransformerApplication(TorchNeuronApplicationBase):
         pooled_projections, guidance)`` at the static shape: the latents ``[B, C, F', H/8,
         W/8]``, the per-sample timestep, the right-padded Llama embeddings ``[B, text_seq_len,
         text_embed_dim]`` with an int64 mask, the CLIP pooled projection and the guidance
-        (scale x 1000). Exactly the per-step shapes the orchestrator sends, so the warm-up
+        (scale x 1000); the timestep in fp32, as diffusers passes it, the guidance in ``dtype``
+        (diffusers builds it in the transformer's dtype). Exactly the per-step shapes the
+        orchestrator sends, so the warm-up
         compiles the only block graphs the run needs. Under CP or SP every rank receives the
         whole latent and the module scatters it.
         """
@@ -200,7 +202,7 @@ class NeuronHunyuanVideoTransformerApplication(TorchNeuronApplicationBase):
         return (
             torch.zeros(batch, int(cfg.in_channels), cfg.latent_frames, cfg.latent_height,
                         cfg.latent_width, dtype=dt),
-            torch.ones(batch, dtype=dt),
+            torch.ones(batch, dtype=torch.float32),
             torch.zeros(batch, text, int(cfg.text_embed_dim), dtype=dt),
             mask,
             torch.zeros(batch, int(cfg.pooled_projection_dim), dtype=dt),

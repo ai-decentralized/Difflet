@@ -224,13 +224,21 @@ class _OnDeviceTransformer(OnDeviceDiT):
     expert's adapter reports to the high-noise one's, so one hook times every DiT forward).
     """
 
+    # As diffusers passes it: the scheduler's timestep unrounded. bf16 holds only multiples of 4
+    # between 512 and 1024, which shifts the sinusoidal timestep embedding at every step.
+    timestep_dtype = torch.float32
+
     def __init__(self, module, config, dtype, device, hook_from=None):
         super().__init__(module, config, dtype, device)
         self.hook_from = hook_from
 
     def __call__(self, hidden_states, timestep, encoder_hidden_states) -> torch.Tensor:
         _check_dit_shapes(self.config, hidden_states, timestep, encoder_hidden_states)
-        return self._forward((hidden_states, timestep, encoder_hidden_states))
+        # The timestep goes to the device in fp32, not through _forward's cast to the model
+        # dtype; the text states follow it already on the device, keeping the module's order.
+        timestep = timestep.to(self.timestep_dtype).contiguous().to(self.device)
+        return self._forward((hidden_states,),
+                             extra=(timestep, self._device_input(encoder_hidden_states)))
 
     def _forward_hook(self):
         return self.forward_hook if self.hook_from is None else self.hook_from.forward_hook
@@ -529,7 +537,7 @@ class TorchNeuronWanApplication(TorchNeuronModelApplication):
                 ),
                 "dtype": self.dtype,
             },
-            "timestep": {"shape": (batch,), "dtype": self.dtype},
+            "timestep": {"shape": (batch,), "dtype": torch.float32},
             "encoder_hidden_states": {
                 "shape": (batch, int(cfg.text_seq_len), int(cfg.text_dim)),
                 "dtype": self.dtype,
