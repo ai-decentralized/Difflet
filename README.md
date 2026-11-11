@@ -1,7 +1,7 @@
 <div align="center">
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/difflet-logo.svg">
-  <img alt="Yotta Labs" src="docs/assets/difflet-logo.svg" width="260">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/difflet-logo-white.svg">
+  <img alt="Yotta Labs" src="docs/assets/difflet-logo-dark.svg" width="260">
 </picture>
 </div>
 
