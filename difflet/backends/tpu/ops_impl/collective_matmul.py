@@ -103,6 +103,24 @@ def sp_kernel_mode() -> str:
     return mode
 
 
+#: What runs the matmul + reduce-scatter. ``jax`` (default): the ring below.
+#: ``pallas``: ``collective_matmul_pallas.matmul_reduce_scatter_body`` (partial
+#: sums computed while the accumulators travel VMEM to VMEM, no partial product
+#: in HBM); shapes it does not take fall back to the ring with a notice. Off by
+#: default: op-level (v5e-4, 2026-11-11) Wan attention out 0.518 -> 0.504 ms and
+#: LTX-2's 0.214 -> 0.212 (ICI-bound), but Wan FFN down 0.928 -> 1.040 and FLUX's
+#: single-block pair 0.627 -> 0.663 (the kernel's matmul is slower than XLA's);
+#: Wan's step did not move (262.2 -> 262.7 ms).
+SP_RS_KERNEL_ENV = "DIFFLET_TPU_SP_RS_KERNEL"
+
+
+def sp_rs_kernel_mode() -> str:
+    mode = os.environ.get(SP_RS_KERNEL_ENV, "").strip().lower() or "jax"
+    if mode not in ("jax", "pallas"):
+        raise ValueError(f"{SP_RS_KERNEL_ENV} must be 'jax' or 'pallas', got {mode!r}")
+    return mode
+
+
 def _source_tag() -> str:
     """A short hash of this module's and the Pallas kernel's source, put in every
     op name. torch_tpu's compilation cache keys a ``jax_op`` by its name and
@@ -209,7 +227,7 @@ def _op(kind: str, n_weights: int):
     pairs whose products are summed, 'ag' over ``n_weights`` weights sharing one
     gathered input."""
     key = (kind, n_weights,
-           (ag_assemble_mode(), sp_kernel_mode()) if kind == "ag" else None)
+           (ag_assemble_mode(), sp_kernel_mode()) if kind == "ag" else sp_rs_kernel_mode())
     ops = _STATE["ops"]
     if key in ops:
         return ops[key]
@@ -223,7 +241,7 @@ def _op(kind: str, n_weights: int):
     mesh, n = _STATE["mesh"], _STATE["tp"]
     shard_table = list(_STATE["shard_of_pos"])
     assemble = ag_assemble_mode()
-    use_kernel = kind == "ag" and sp_kernel_mode() == "pallas"
+    use_kernel = (sp_kernel_mode() if kind == "ag" else sp_rs_kernel_mode()) == "pallas"
     cw = [(i, (i + 1) % n) for i in range(n)]
     ccw = [(i, (i - 1) % n) for i in range(n)]
     shard_map = jax.shard_map if hasattr(jax, "shard_map") else \
@@ -239,6 +257,18 @@ def _op(kind: str, n_weights: int):
             xs, ws = pairs[0::2], pairs[1::2]
             shard_of = jnp.asarray(shard_table, dtype=jnp.int32)
             j = ids[0]
+            if use_kernel:
+                from difflet.backends.tpu.ops_impl import collective_matmul_pallas as kernel
+
+                reason = kernel.reduce_scatter_unsupported_reason(
+                    [x.shape for x in xs], [w.shape for w in ws], xs[0].dtype.itemsize, n)
+                if reason is None:
+                    # The ring position stays a runtime value (rule above).
+                    chunk_shards, neighbors = kernel.reduce_scatter_tables(j, shard_table, n)
+                    return kernel.matmul_reduce_scatter_body(xs, ws, chunk_shards, neighbors,
+                                                             ring_size=n)
+                print(f"[difflet tpu] {SP_RS_KERNEL_ENV}=pallas: rs x{len(xs)} "
+                      f"{tuple(xs[0].shape)} falls back to the JAX ring ({reason})", flush=True)
             rows = xs[0].shape[1] // n
             half = ws[0].shape[0] // 2
 
@@ -435,7 +465,8 @@ def supports(seq_len: int, tp: int) -> bool:
     return seq_len % (2 * tp) == 0
 
 
-__all__ = ["DEFAULT_OPS", "SP_ENV", "SP_KERNEL_ENV", "all_gather_matmul", "matmul2_reduce_scatter",
+__all__ = ["DEFAULT_OPS", "SP_ENV", "SP_KERNEL_ENV", "SP_RS_KERNEL_ENV", "all_gather_matmul",
+           "matmul2_reduce_scatter",
            "set_kernel_default",
            "matmul_reduce_scatter", "prepare",
            "require_compiled", "requested", "supports"]

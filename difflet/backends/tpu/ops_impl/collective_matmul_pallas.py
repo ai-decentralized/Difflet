@@ -314,3 +314,313 @@ def ring_tables(ring_position, shard_of_position, ring_size: int):
     neighbors = jnp.stack([(ring_position + 1) % ring_size,
                            (ring_position - 1) % ring_size]).astype(jnp.int32)
     return owner_shards, neighbors
+
+
+# ---------------------------------------------------------------------------
+# Row-parallel matmul + reduce-scatter
+# ---------------------------------------------------------------------------
+
+#: Receive slots per direction for the travelling accumulators. Accumulators move
+#: tile by tile, so a neighbour can run up to two hops ahead in one direction: it
+#: writes a slot again only three hops later, after it has received this device's
+#: other-direction tiles of the hop in between, which this device sends only after
+#: it has read the slot. The CPU test's race detector catches two slots.
+REDUCE_SCATTER_SLOTS = 3
+
+#: Row chunks are DMA'd straight from the (batch, sequence, in_features) input when
+#: their first row is a multiple of this (Mosaic only slices tiled dims in whole
+#: tiles); otherwise the input is reshaped to (batch, ring_size, rows, ...) first.
+_ROW_TILE = 8
+
+
+def matmul_reduce_scatter_body(xs, weights, chunk_shards, neighbors, *, ring_size: int,
+                               axis: str = "tp",
+                               column_tile_limit: int = DEFAULT_COLUMN_TILE_LIMIT,
+                               vmem_limit_bytes: int = VMEM_BUDGET_BYTES,
+                               interpret=False, profile_ablation: str = ""):
+    """Per-device row-parallel matmul over the (x_i, weight_i) pairs, summed, then
+    reduce-scattered along the ring by sequence.
+
+    The same bidirectional ring as ``collective_matmul``'s JAX ``rs`` op: the
+    output's left half of the columns accumulates clockwise, the right half
+    counter-clockwise. At each hop a device multiplies one row chunk of its
+    inputs by its weights (the partial sum for the chunk's owner), adds the
+    accumulator that arrived from upstream and sends the sum on; after
+    ``ring_size`` hops each device holds the full sum for its own rows.
+
+    - Tile by tile: each output column tile is multiplied, the upstream
+      accumulator's same tile is added (it was sent about a hop earlier, so it
+      has arrived) and the sum is sent on at once. The add runs in the matmul's
+      epilogue, the transfers overlap the following tiles' matmuls.
+    - Accumulators travel VMEM to VMEM; the last hop writes its sums straight to
+      the output. No partial product, accumulator or concatenation goes to HBM.
+    - The weights stream through VMEM one column tile at a time, one
+      double-buffered stream over every (hop, direction, column tile); the input
+      row chunks of the next hop load while the current hop computes.
+    - Rounding as the JAX ring: each pair's product is rounded to the input
+      dtype, the pairs are summed in the input dtype, then the accumulator.
+
+    xs:           sequence of (batch, ring_size * rows, in_features_i): the full
+                  sequence, this device's slice of the contracted features.
+    weights:      sequence of (out_features, in_features_i), one per x; the same
+                  out_features, even, its half divisible by one column tile (a
+                  multiple of 128, at most ``column_tile_limit``).
+    chunk_shards: int32 (2, ring_size) -- chunk_shards[0, hop] / [1, hop] is the
+                  shard (row chunk) whose left / right half of the columns this
+                  device computes at ``hop``. From :func:`reduce_scatter_tables`.
+    neighbors:    int32 (2,) -- mesh index along ``axis`` of the clockwise
+                  neighbour (receives the left halves) and the counter-clockwise one.
+    profile_ablation: profiling only, wrong values -- ``"communication"`` skips
+                  the transfers and the adds, ``"compute"`` skips the matmuls.
+
+    Returns (batch, rows, out_features): this device's rows of the sum.
+    """
+    import jax
+    import jax.numpy as jnp
+    from jax.experimental import pallas as pl
+    from jax.experimental.pallas import tpu as pltpu
+
+    if profile_ablation not in ("", "communication", "compute"):
+        raise ValueError(f"profile_ablation must be '', 'communication' or 'compute', "
+                         f"got {profile_ablation!r}")
+    num_pairs = len(xs)
+    if num_pairs != len(weights) or num_pairs == 0:
+        raise ValueError(f"need one weight per input, got {num_pairs} inputs and "
+                         f"{len(weights)} weights")
+    if ring_size < 2:
+        raise ValueError(f"ring_size must be at least 2, got {ring_size}")
+    batch, sequence, _ = xs[0].shape
+    if sequence % ring_size:
+        raise ValueError(f"sequence {sequence} does not split into ring_size={ring_size} chunks")
+    rows = sequence // ring_size
+    out_features = weights[0].shape[0]
+    dtype = xs[0].dtype
+    in_features = []
+    for x, weight in zip(xs, weights):
+        if x.shape[:2] != (batch, sequence) or x.dtype != dtype:
+            raise ValueError(f"inputs differ in batch, sequence or dtype: {x.shape} {x.dtype}")
+        if weight.shape != (out_features, x.shape[2]):
+            raise ValueError(f"weight {weight.shape} does not match input {x.shape} "
+                             f"and out_features={out_features}")
+        in_features.append(x.shape[2])
+    if out_features % 2:
+        raise ValueError(f"out_features must be even (two ring halves), got {out_features}")
+    half_columns = out_features // 2
+    tile_width = _common_column_tile([half_columns], column_tile_limit)
+    if tile_width is None:
+        raise ValueError(f"no column tile (a multiple of 128) divides half the columns "
+                         f"({half_columns})")
+    tiles_per_direction = half_columns // tile_width
+    tiles_per_hop = 2 * tiles_per_direction
+    total_tiles = ring_size * tiles_per_hop
+    slots = REDUCE_SCATTER_SLOTS
+    aligned_rows = rows % _ROW_TILE == 0
+    skip_communication = profile_ablation == "communication"
+    skip_compute = profile_ablation == "compute"
+
+    def kernel(chunk_shards_ref, neighbors_ref, *refs):
+        x_refs = refs[:num_pairs]
+        weight_refs = refs[num_pairs:2 * num_pairs]
+        output_ref = refs[2 * num_pairs]
+        scratch = refs[2 * num_pairs + 1:]
+        x_chunks = scratch[:num_pairs]
+        weight_tiles = scratch[num_pairs:2 * num_pairs]
+        (partial_sums, received, chunk_semaphores, weight_semaphores, send_semaphores,
+         receive_semaphores, output_semaphores) = scratch[2 * num_pairs:]
+
+        # Both neighbours must be inside this kernel (their VMEM slots belong to
+        # it) before anything is copied into them.
+        barrier = pltpu.get_barrier_semaphore()
+        for direction in range(2):
+            pl.semaphore_signal(barrier, 1, device_id={axis: neighbors_ref[direction]})
+        pl.semaphore_wait(barrier, 2)
+
+        def columns_of(column_tile):
+            return pl.ds(pl.multiple_of(column_tile * tile_width, tile_width), tile_width)
+
+        def start_chunk_loads(hop, parity):
+            copies = []
+            for pair in range(num_pairs):
+                for direction in range(2):
+                    shard = chunk_shards_ref[direction, hop]
+                    source = (x_refs[pair].at[:, pl.ds(pl.multiple_of(shard * rows, _ROW_TILE),
+                                                       rows)]
+                              if aligned_rows else x_refs[pair].at[:, shard])
+                    copy = pltpu.make_async_copy(source, x_chunks[pair].at[direction, parity],
+                                                 chunk_semaphores.at[pair, direction, parity])
+                    copy.start()
+                    copies.append(copy)
+            return copies
+
+        def start_weight_tile_load(tile, buffer_slot):
+            # Tile u of a hop covers output columns [u * tile_width, (u + 1) * tile_width):
+            # the left half's tiles first, then the right half's.
+            column_tile = jnp.asarray(tile, jnp.int32) % tiles_per_hop
+            for pair in range(num_pairs):
+                pltpu.make_async_copy(weight_refs[pair].at[columns_of(column_tile), :],
+                                      weight_tiles[pair].at[buffer_slot],
+                                      weight_semaphores.at[pair, buffer_slot]).start()
+
+        def wait_weight_tile_load(buffer_slot):
+            for pair in range(num_pairs):
+                pltpu.make_async_copy(weight_refs[pair].at[columns_of(0), :],
+                                      weight_tiles[pair].at[buffer_slot],
+                                      weight_semaphores.at[pair, buffer_slot]).wait()
+
+        def tile_transfer(direction, column_tile, slot):
+            """The descriptor of one accumulator tile into the neighbour's ``slot``
+            (also used to wait for the same tile arriving here)."""
+            columns = columns_of(column_tile)
+            return pltpu.make_async_remote_copy(
+                partial_sums.at[direction, :, :, columns],
+                received.at[direction, slot, :, :, columns],
+                send_semaphores.at[direction, column_tile],
+                receive_semaphores.at[direction, slot, column_tile],
+                device_id={axis: neighbors_ref[direction]})
+
+        def output_write(direction, column_tile):
+            columns = columns_of(column_tile)
+            output_columns = pl.ds(
+                pl.multiple_of(direction * half_columns + column_tile * tile_width, tile_width),
+                tile_width)
+            return pltpu.make_async_copy(partial_sums.at[direction, :, :, columns],
+                                         output_ref.at[:, :, output_columns],
+                                         output_semaphores.at[direction, column_tile])
+
+        chunk_loads = start_chunk_loads(0, 0)
+        start_weight_tile_load(0, 0)
+        for hop in range(ring_size):
+            parity = hop % 2
+            for copy in chunk_loads:
+                copy.wait()
+            chunk_loads = start_chunk_loads(hop + 1, 1 - parity) if hop + 1 < ring_size else []
+
+            def process_tile(tile_in_hop, carry, hop=hop, parity=parity):
+                tile = hop * tiles_per_hop + tile_in_hop
+                buffer_slot = tile % 2
+
+                @pl.when(tile + 1 < total_tiles)
+                def _():
+                    start_weight_tile_load(tile + 1, 1 - buffer_slot)  # always one in flight
+
+                wait_weight_tile_load(buffer_slot)
+                direction = tile_in_hop // tiles_per_direction
+                column_tile = tile_in_hop % tiles_per_direction
+                columns = columns_of(column_tile)
+                sums = []
+                for batch_index in range(batch):
+                    total = None
+                    if not skip_compute:
+                        for pair in range(num_pairs):
+                            product = jax.lax.dot_general(
+                                x_chunks[pair][direction, parity, batch_index],
+                                weight_tiles[pair][buffer_slot],
+                                (((1,), (1,)), ((), ())),
+                                preferred_element_type=jnp.float32).astype(dtype)
+                            total = product if total is None else (
+                                total.astype(jnp.float32)
+                                + product.astype(jnp.float32)).astype(dtype)
+                    sums.append(total)
+                communicate = not skip_communication
+                if hop > 0 and communicate:
+                    # This tile of the upstream accumulator (sent about a hop ago).
+                    tile_transfer(direction, column_tile, hop % slots).wait_recv()
+                    # The previous hop's send of this tile has left partial_sums.
+                    tile_transfer(direction, column_tile, hop % slots).wait_send()
+                for batch_index in range(batch):
+                    total = sums[batch_index]
+                    if hop > 0 and communicate:
+                        upstream = received[direction, hop % slots, batch_index, :, columns]
+                        total = upstream if total is None else (
+                            total.astype(jnp.float32) + upstream.astype(jnp.float32)).astype(dtype)
+                    if total is not None:
+                        partial_sums[direction, batch_index, :, columns] = total
+                if hop + 1 < ring_size:
+                    if communicate:
+                        tile_transfer(direction, column_tile, (hop + 1) % slots).start()
+                else:  # the last hop holds this device's rows of the sum
+                    output_write(direction, column_tile).start()
+                return carry
+
+            jax.lax.fori_loop(0, tiles_per_hop, process_tile, 0)
+
+        def finish(tile_in_hop, carry):
+            direction = tile_in_hop // tiles_per_direction
+            column_tile = tile_in_hop % tiles_per_direction
+            output_write(direction, column_tile).wait()
+            return carry
+
+        jax.lax.fori_loop(0, tiles_per_hop, finish, 0)
+
+    any_memory = pl.BlockSpec(memory_space=pl.ANY)
+    scratch_shapes = (
+        [pltpu.VMEM((2, 2, batch, rows, k), dtype) for k in in_features]        # row chunks
+        + [pltpu.VMEM((2, tile_width, k), dtype) for k in in_features]          # weight tiles
+        + [pltpu.VMEM((2, batch, rows, half_columns), dtype),                   # partial sums
+           pltpu.VMEM((2, slots, batch, rows, half_columns), dtype),            # received
+           pltpu.SemaphoreType.DMA((num_pairs, 2, 2)),                  # row chunk loads
+           pltpu.SemaphoreType.DMA((num_pairs, 2)),                     # weight tile loads
+           pltpu.SemaphoreType.DMA((2, tiles_per_direction)),           # remote sends
+           pltpu.SemaphoreType.DMA((2, slots, tiles_per_direction)),    # remote receives
+           pltpu.SemaphoreType.DMA((2, tiles_per_direction))])          # output writes
+    inputs = (xs if aligned_rows
+              else [x.reshape(batch, ring_size, rows, x.shape[2]) for x in xs])
+    return pl.pallas_call(
+        kernel,
+        out_shape=jax.ShapeDtypeStruct((batch, rows, out_features), dtype),
+        grid_spec=pltpu.PrefetchScalarGridSpec(
+            num_scalar_prefetch=2,
+            in_specs=[any_memory] * (2 * num_pairs),
+            out_specs=any_memory,
+            scratch_shapes=scratch_shapes,
+        ),
+        compiler_params=pltpu.CompilerParams(collective_id=0,
+                                             vmem_limit_bytes=vmem_limit_bytes),
+        interpret=interpret,
+    )(chunk_shards, neighbors, *inputs, *weights)
+
+
+def reduce_scatter_unsupported_reason(x_shapes, weight_shapes, itemsize: int, ring_size: int,
+                                      column_tile_limit: int = DEFAULT_COLUMN_TILE_LIMIT
+                                      ) -> str | None:
+    """Why :func:`matmul_reduce_scatter_body` cannot take these shapes, or None.
+    Callers fall back to the JAX ring."""
+    batch, sequence, _ = x_shapes[0]
+    if sequence % ring_size:
+        return f"sequence {sequence} does not split into {ring_size} chunks"
+    rows = sequence // ring_size
+    out_features = weight_shapes[0][0]
+    if out_features % 2:
+        return f"odd out_features ({out_features})"
+    tile_width = _common_column_tile([out_features // 2], column_tile_limit)
+    if tile_width is None:
+        return f"no column tile (a multiple of 128) divides half the columns ({out_features // 2})"
+    in_features = sum(shape[2] for shape in x_shapes)
+    half_columns = out_features // 2
+    needed = itemsize * (2 * 2 * batch * rows * in_features                  # row chunks
+                         + 2 * tile_width * in_features                      # weight tiles
+                         + (1 + REDUCE_SCATTER_SLOTS) * 2 * batch * rows * half_columns)
+    needed += 4 * rows * tile_width                                          # one fp32 product
+    if needed > VMEM_BUDGET_BYTES:
+        return (f"needs {needed / 2**20:.0f} MiB of VMEM "
+                f"(budget {VMEM_BUDGET_BYTES / 2**20:.0f})")
+    return None
+
+
+def reduce_scatter_tables(ring_position, shard_of_position, ring_size: int):
+    """Runtime chunk shards and neighbours for ``ring_position`` (a traced int32).
+
+    At hop h the device at position p computes the left half of the columns for
+    position (p - 1 - h)'s rows (that accumulator travels clockwise) and the right
+    half for position (p + 1 + h)'s; at the last hop both are its own position.
+    Returns (chunk_shards int32 (2, ring_size), neighbors int32 (2,)).
+    """
+    import jax.numpy as jnp
+
+    shard_of = jnp.asarray(shard_of_position, dtype=jnp.int32)
+    hops = jnp.arange(ring_size, dtype=jnp.int32)
+    chunk_shards = jnp.stack([shard_of[(ring_position - 1 - hops) % ring_size],
+                              shard_of[(ring_position + 1 + hops) % ring_size]])
+    neighbors = jnp.stack([(ring_position + 1) % ring_size,
+                           (ring_position - 1) % ring_size]).astype(jnp.int32)
+    return chunk_shards, neighbors
