@@ -455,7 +455,9 @@ class MiniMaxH3ServingStageAdapter:
             model_dir=runtime.source.pinned_model_path, parallel=profile.parallel,
             height=profile.height, width=profile.width, num_frames=profile.num_frames,
             text_bucket=text_bucket(), cache_dir=profile.cache_dir,
-            log=lambda message: print(message, flush=True))
+            # Worker processes do not inherit the serve logging config; like every serving
+            # adapter, worker-side progress goes to stdout under the [difflet serve] prefix.
+            log=lambda message: print(f"[difflet serve] MiniMax-H3: {message}", flush=True))
         print(f"[difflet serve] loading MiniMax-H3 worker profile {profile}", flush=True)
         resident.load()
         runner = ValidatedStageRunner(MiniMaxH3PipelineRunner(resident, profile),

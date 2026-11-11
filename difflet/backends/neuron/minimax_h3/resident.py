@@ -111,14 +111,14 @@ def _is_hbm_exhaustion(exc: BaseException) -> bool:
 class NeuronMiniMaxH3Resident:
     def __init__(self, *, model_dir: str, parallel, height: int, width: int, num_frames: int,
                  text_bucket: int, cache_dir: str | None, vae_dtype=torch.float32,
-                 log=print) -> None:
+                 log=None) -> None:
         self.model_dir = str(model_dir)
         self.parallel = parallel
         self.height, self.width, self.num_frames = int(height), int(width), int(num_frames)
         self.text_bucket = int(text_bucket)
         self.cache_dir = cache_dir
         self.vae_dtype = vae_dtype
-        self._log = log
+        self._log = log or (lambda message: print(f"[minimax-h3 resident] {message}", flush=True))
         self.dit_app = None
         self.vae = None
         self.audio_decoder = None
@@ -128,6 +128,8 @@ class NeuronMiniMaxH3Resident:
         self._host_encoder = None  # rank 0 only, loaded at the first host encode
 
     def log(self, message: str) -> None:
+        """Rank 0 only. ``log`` (the constructor's) gets the bare message; the default prints it
+        as ``[minimax-h3 resident] ...``, the serving adapter as ``[difflet serve] MiniMax-H3:``."""
         if self.rank == 0:
             self._log(message)
 
@@ -156,7 +158,7 @@ class NeuronMiniMaxH3Resident:
             model_path=str(Path(self.model_dir) / "transformer"), config=config,
             parallel=self.parallel, dtype=torch.bfloat16)
         self.dit_app.load()
-        self.log(f"[minimax-h3 resident] DiT loaded on {self.world} ranks in "
+        self.log(f"DiT loaded on {self.world} ranks in "
                  f"{time.perf_counter() - start:.1f}s, "
                  f"{self.dit_app.weight_bytes / 2**30:.2f} GiB/rank")
         start = time.perf_counter()
@@ -165,7 +167,7 @@ class NeuronMiniMaxH3Resident:
             dtype=self.vae_dtype, tp_shard=True)
         vae_app.load()
         self.vae = DeviceTileDecoder(vae_app)
-        self.log(f"[minimax-h3 resident] video decoder ({self.vae_dtype}, TP-sharded) loaded in "
+        self.log(f"video decoder ({self.vae_dtype}, TP-sharded) loaded in "
                  f"{time.perf_counter() - start:.1f}s, {vae_app.weight_bytes / 2**30:.2f} GiB/rank")
         if self.rank == 0:
             from difflet.models.minimax_h3.host_components import (
@@ -187,7 +189,7 @@ class NeuronMiniMaxH3Resident:
                 return record
             # auto, and some rank ran out of HBM: this request and every later one go to the host.
             self.text_encoder_mode = "host"
-            self.log("[minimax-h3 resident] the text encoder does not fit in HBM beside the DiT; "
+            self.log("the text encoder does not fit in HBM beside the DiT; "
                      "falling back to the host for this and every later request")
         return self._encode_on_host(prompt)
 
@@ -241,7 +243,7 @@ class NeuronMiniMaxH3Resident:
                 start = time.perf_counter()
                 self._host_encoder = HostQwen3VLTextEncoder(
                     self.model_dir, seq_len=self.text_bucket, threads=default_threads()).load()
-                self.log(f"[minimax-h3 resident] host text encoder loaded in "
+                self.log(f"host text encoder loaded in "
                          f"{time.perf_counter() - start:.1f}s")
             return self._host_encoder.encode(prompt)
 
@@ -336,7 +338,7 @@ class NeuronMiniMaxH3Resident:
 
         def check(where: str) -> None:
             if should_stop is not None and self.agree_to_stop(bool(should_stop())):
-                self.log(f"[minimax-h3 resident] request cancelled ({where})")
+                self.log(f"request cancelled ({where})")
                 raise ResidentRequestCancelled(where)
 
         def after_step(index: int) -> None:
@@ -375,7 +377,7 @@ class NeuronMiniMaxH3Resident:
             ).float().clamp(-1, 1)
             seconds["audio_vae"] = time.perf_counter() - start
             video = video.float().clamp(0, 1)
-        self.log("[minimax-h3 resident] request: "
+        self.log("request: "
                  + ", ".join(f"{k} {v:.1f}s" for k, v in seconds.items()))
         return ResidentRequestResult(video=video, audio=audio, sample_rate=sample_rate,
                                      seconds=seconds)
