@@ -11,6 +11,8 @@ from difflet.backends.trainium.minimax_h3.transformer import (
     _prefix_bounds,
 )
 from difflet.backends.trainium.core.config import NeuronConfig
+from difflet.backends.trainium.minimax_h3 import transformer as trainium
+from difflet.models.minimax_h3 import modeling_minimax_h3_tp as neutral
 
 
 def _config(*, text_seq_len=8):
@@ -105,3 +107,15 @@ def test_h3_checkpoint_conversion_splits_swiglu_in_official_order():
         [12, 13, 14, 15],
     ]
     assert f"{prefix}.net.0.proj.weight" not in converted
+
+
+def test_trainium_reexports_the_neutral_tp_objects():
+    for name in (
+        "_H3TensorParallelSwiGLU",
+        "_MiniMaxH3TransformerTraceModule",
+        "_prefix_bounds",
+        "_replace_h3_linears_for_tp",
+        "split_fused_swiglu_keys",
+    ):
+        assert getattr(trainium, name) is getattr(neutral, name)
+    assert trainium._MiniMaxH3TrainiumAttnProcessor is neutral.MiniMaxH3TPAttnProcessor
