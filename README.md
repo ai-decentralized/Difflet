@@ -5,6 +5,7 @@
 </picture>
 </div>
 
+# 
 **Run diffusion transformers on NVIDIA GPUs, AWS Trainium and (experimentally) Cloud TPU: FLUX, Qwen-Image, Wan, HunyuanVideo, LTX-2 etc., from one CLI, one Python API, and one OpenAI-compatible server.**
 
 MiniMax-H3 also supports text-to-video with audio through the staged CLI.
