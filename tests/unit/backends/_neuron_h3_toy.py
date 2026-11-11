@@ -157,3 +157,24 @@ def l1_h3_worker(rank: int, world_size: int, transformer_dir: str, precomputed: 
         "audio": audio.float().tolist(),
         "other_differs": not bool(torch.equal(video, other)),
     }
+
+
+def vae_worker(rank: int, world_size: int, vae_dir: str, exec_mode: str) -> dict:
+    """The tiny H3 video VAE as a neuron application vs the host reference decoder, one tile."""
+    from difflet.backends.neuron.minimax_h3.vae import (
+        TILE_LATENT_SHAPE,
+        DeviceTileDecoder,
+        NeuronMiniMaxH3VideoVaeApplication,
+    )
+    from difflet.models.minimax_h3.host_components import load_host_video_decoder
+
+    app = NeuronMiniMaxH3VideoVaeApplication(model_path=vae_dir, dtype=torch.float32,
+                                             exec_mode=exec_mode, device="cpu")
+    torch._dynamo.reset()
+    app.load()
+    tile = torch.randn(TILE_LATENT_SHAPE, generator=torch.Generator().manual_seed(3))
+    out = DeviceTileDecoder(app)(tile)
+    ref = load_host_video_decoder(str(Path(vae_dir).parent))(tile)
+    return {"max_abs": float((out - ref).abs().max()), "shape": list(out.shape),
+            "dtype": str(out.dtype), "report": app.load_report,
+            "norm_dtype": str(app.module.decoder.transformer_blocks[0].norm1.weight.dtype)}

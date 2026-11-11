@@ -386,7 +386,8 @@ def test_neuron_backend_compiles_only_the_dit_and_places_host_stages_on_one_rank
     orchestrator = MiniMaxH3Orchestrator(_args(work_dir=str(tmp_path), keep_work_dir=True))
 
     orchestrator.compile()
-    assert [stage for stage, _ in calls] == ["generate"]
+    assert [stage for stage, _ in calls] == ["generate", "video_vae"]
+    assert "--device-vae" in calls[0][1]["cli_args"]
 
     calls.clear()
     orchestrator.generate()
@@ -395,17 +396,35 @@ def test_neuron_backend_compiles_only_the_dit_and_places_host_stages_on_one_rank
     ]
 
 
+def test_neuron_backend_host_vae_compiles_only_the_dit_and_rejects_vae_dtype(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(h3_mod, "torchrun_backend", lambda: "neuron")
+    monkeypatch.setattr(h3_mod, "root_compile_cache_at_cache_dir", lambda *a, **k: None)
+    calls = []
+    monkeypatch.setattr(
+        h3_mod.runner, "run_stage", lambda model, stage, **kwargs: calls.append((stage, kwargs))
+    )
+    MiniMaxH3Orchestrator(_args(work_dir=str(tmp_path), host_vae=True)).compile()
+    assert [stage for stage, _ in calls] == ["generate"]
+    assert "--device-vae" not in calls[0][1]["cli_args"]
+    monkeypatch.setattr("difflet.cli.orchestrators.torchrun.torchrun_backend", lambda: "neuron")
+    with pytest.raises(SystemExit):
+        MiniMaxH3Orchestrator(_args(host_vae=True, vae_dtype="bf16")).compile()
+
+
 def test_neuron_backend_dispatches_to_host_and_torchrun_stage_bodies(monkeypatch):
     monkeypatch.setattr(h3_mod, "torchrun_backend", lambda: "neuron")
     orchestrator = MiniMaxH3Orchestrator(_args())
     seen = []
     for name in ("_stage_text_host", "_stage_generate_neuron", "_stage_video_vae_host",
-                 "_stage_audio_vae_host"):
+                 "_stage_video_vae_neuron", "_stage_audio_vae_host"):
         monkeypatch.setattr(orchestrator, name, lambda args, name=name: seen.append(name))
     for stage in ("text", "generate", "video_vae", "audio_vae"):
         orchestrator._run_stage_internal(stage, orchestrator.args)
+    orchestrator._run_stage_internal("video_vae", _args(device_vae=True))
     assert seen == ["_stage_text_host", "_stage_generate_neuron", "_stage_video_vae_host",
-                    "_stage_audio_vae_host"]
+                    "_stage_audio_vae_host", "_stage_video_vae_neuron"]
 
 
 def test_shared_cli_args_forward_model_path():

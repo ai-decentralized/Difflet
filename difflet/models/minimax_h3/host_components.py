@@ -190,7 +190,11 @@ class HostDecoder:
 
 
 class _HostVideoDecoder(nn.Module):
-    def __init__(self, cfg: dict[str, Any]) -> None:
+    """``post_quant_conv`` then the ViT decoder, keys as the checkpoint's. ``sequence_alignment``
+    pads the token sequence (with a key mask) for kernels that need aligned lengths; 1 is the
+    reference."""
+
+    def __init__(self, cfg: dict[str, Any], *, sequence_alignment: int = 1) -> None:
         from difflet.models.minimax_h3.modeling_vae import MiniMaxH3VideoViTDecoder3d
 
         super().__init__()
@@ -211,6 +215,7 @@ class _HostVideoDecoder(nn.Module):
             ffn_mult=int(cfg["decoder_ffn_mult"]), rope_theta=float(cfg["decoder_rope_theta"]),
             rope_dim_ratio=float(cfg["decoder_rope_dim_ratio"]),
             norm_eps=float(cfg["decoder_norm_eps"]),
+            sequence_alignment=int(sequence_alignment),
         )
 
     def forward(self, latents: torch.Tensor) -> torch.Tensor:
