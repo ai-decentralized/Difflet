@@ -383,3 +383,21 @@ def test_generate_stops_every_rank_at_an_agreed_check(monkeypatch, every, stop_a
     with pytest.raises(resident.ResidentRequestCancelled):
         res.generate("p", steps=30, seed=0, scratch_dir="/tmp/x", should_stop=should_stop)
     assert len(ran) == expected_steps
+
+
+def test_serve_cp_modes_open_ulysses_for_minimax_h3_only():
+    from difflet.registry import resolve_model
+    from difflet.serving.options import build_serving_profile, serving_cp_modes
+
+    assert serving_cp_modes("minimax_h3") == {"gather_kv", "ulysses"}
+    for model_type in ("flux", "wan", "hunyuan_video", "qwen_image", "ltx_2"):
+        assert serving_cp_modes(model_type) == {"gather_kv", "ring"}
+    common = dict(output_modality="image", output_mime_type="image/png", default_fps=None,
+                  default_host_vae=False, revision=None, cache_dir=None, tp_degree=None,
+                  cp_degree=2, cfg_parallel=None, sp_enabled=None, height=None, width=None,
+                  num_frames=None, host_vae=False, clip_placement=None, teacache_cadence=None,
+                  teacache_online_delta=None, teacache_speedup=None, teacache_calibration=None)
+    flux = resolve_model("black-forest-labs/FLUX.1-dev")
+    with pytest.raises(DiffletServingError, match="not served for flux"):
+        build_serving_profile(entry=flux, model_id="black-forest-labs/FLUX.1-dev", model_type="flux",
+                              cp_mode="ulysses", **common)

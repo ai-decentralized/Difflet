@@ -289,7 +289,9 @@ def _add_serve_profile_flags(p: argparse.ArgumentParser) -> None:
     )
     p.add_argument(
         "--cp-mode",
-        choices=["gather_kv", "ring"],
+        # Every mode the parallel config knows; each serving adapter refuses the ones its
+        # model does not run (e.g. MiniMax-H3 serves ulysses or gather_kv).
+        choices=list(CP_MODES),
         default=None,
         help="Context-parallel attention strategy (default: registry default)",
     )
