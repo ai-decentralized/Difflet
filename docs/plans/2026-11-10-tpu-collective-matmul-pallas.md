@@ -304,6 +304,70 @@ no fallback), tree 077ab253f18d:
 
 Not checked: other seeds, a visual review (TP vs kernel max |d| 199/255).
 
+## 2026-11-11 afternoon: cleanup, the RS kernel, Wan padding and RoPE, a GELU epilogue
+
+All on v5e-4 with main's `bench.py`, each pair back to back on one node (granted
+16:16 UTC, released 20:19 UTC); traces compared with
+`benchmark/tpu_profile/trace_diff.py` (per op kind, or per opcode and output
+shape with `--by-shape`).
+
+**AG kernel cleanup.** Only the streamed variant is kept, with full names
+(`all_gather_matmul_body`, `unsupported_reason`, `ring_tables`). Against 868401eb:
+Wan / FLUX / HunyuanVideo outputs sha256-identical, steps within noise. The
+version table above used (K, N) weights and column tiles up to 512; the models
+run (N, K) and up to 256 (Wan FFN up then has 128-wide tiles): op-level 1.187 /
+1.066 / 0.411 / 0.519 ms (Wan q/k/v, FFN up, LTX-2 q/k/v, FFN up), bit-exact.
+
+**RS kernel** (`DIFFLET_TPU_SP_RS_KERNEL=pallas`, off by default). Tile by tile:
+multiply, add the upstream accumulator's tile in the epilogue, send it on;
+accumulators VMEM to VMEM; three receive slots per direction. A first version
+that added each hop's accumulator in a separate pass was slower everywhere.
+Op-level, ms per call:
+
+| shape | JAX ring | kernel | note |
+|---|---|---|---|
+| Wan attention out | 0.518 | 0.504 | ICI-bound (no compute 0.462) |
+| LTX-2 attention out | 0.214 | 0.212 | ICI-bound |
+| Wan FFN down, 1170 rows | 0.928 | 1.040 | ~75 us input relayout (rows not a multiple of 8) |
+| Wan FFN down, 1168 rows | 0.917 | 0.964 | compute-bound; column tile 512: 0.945 |
+| FLUX single pair | 0.627 | 0.663 | compute-bound; column tile 512: 0.649 |
+
+Wan end to end (padded) 262.2 -> 262.7 ms. Unlike the AG ring, the RS ring has no
+large assembly cost to remove, and where it is compute-bound the kernel's matmul
+is ~5% slower than XLA's einsum. In the model one step differs from the ring by
+50.4 dB, four by 48.9 dB (seed 42), as the AG kernel did.
+
+**Wan row padding** (`DIFFLET_TPU_WAN_SP_PAD`, default on): 4680 -> 4736 rows, 1184
+per rank, 592-row halves. Step 269.2 -> 262.2 ms, output vs unpadded 44.7 dB.
+Trace (20 steps): the rings' input-split and output-assembly relayouts, 137.8 ms,
+are gone; cutting the pad keys (4680 is not a tile multiple: copy + slice ~33 ms),
+1.2% more data per hop (+13 ms ICI wait) and the final gather over the hidden
+size (+8 ms) take ~54 back. The "~250 ms relayout" estimated above counted
+every reshape / copy; most of them are attention and RoPE layout changes that
+do not depend on the row count.
+
+**Wan split-halves RoPE** (`DIFFLET_TPU_WAN_SPLIT_ROPE`, default on), as FLUX's:
+q/k rows and RMSNorm weights permuted per head once, rotation as two halves.
+The interleave's reshapes / fusions / copies and, unexpectedly, the 66 ms
+relayout of the AG kernel's q/k/v outputs are gone. Permuting the weights on the
+device with `copy_` left them in a layout every forward copied back
+(`copy bf16[1280,5120]`, 80 per step, 50 ms, plus ~120 ms more device idle);
+permuted on the host, step 262.2 -> 249.2 ms. Output vs TP 42.2 dB.
+
+**Wan, the day's net:** 269.2 -> 249.2 ms per step (-7.4%); TP is 360.7.
+
+**Bias + GELU in the AG kernel's epilogue (tried, reverted).** For Wan's FFN
+up-projection it removes the separate 60 ms `[1,4736,3456]` GELU fusion, but the
+FFN-down RS ring's matmuls then read `h` 10% slower (113 -> 125 us per op,
++65 ms): XLA's memory-space assignment had placed the GELU fusion's output in
+`S(1)` (alternate memory, presumably VMEM), while a Pallas output (`pl.ANY`)
+lives in plain HBM. Step 250.4 -> 249.4 ms, within noise. A Pallas kernel's
+outputs forfeit that placement for their consumers; whether the AG kernel's
+q/k/v outputs pay this in attention is not checked.
+
+Not checked: other seeds, FLUX's RoPE permutation (it uses `copy_` on the device
+too, so may pay the same per-forward weight copy), padding for the other models.
+
 ## Steps
 
 | # | Work | Validation | Estimate |
