@@ -243,7 +243,8 @@ class TpuHunyuanVideoApplication(torch.nn.Module):
             from difflet.backends.tpu.ops_impl import collective_matmul
 
             collective_matmul.require_compiled(default=False)  # as maybe_compile below
-            sp.install(module, latent_seq_len=int(self.config.image_seq_len))
+            sp.install(module, latent_seq_len=int(self.config.image_seq_len),
+                       text_seq_len=int(self.config.text_seq_len))
         # Not yet measured under torch.compile, so off unless DIFFLET_TPU_COMPILE=1.
         module = device_runtime.maybe_compile(module, default=False)
         # Compile the request-shaped graph now, a few ranks at a time (see
