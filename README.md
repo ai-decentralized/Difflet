@@ -1,12 +1,11 @@
 <div align="center">
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/yotta-logo-white.svg">
-  <img alt="Yotta Labs" src="docs/assets/yotta-logo-black.svg" width="260">
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/difflet-logo-white.svg">
+  <img alt="Difflet" src="docs/assets/difflet-logo-black.svg" width="260">
 </picture>
 </div>
 
-# Difflet
-
+# 
 **Run diffusion transformers on NVIDIA GPUs, AWS Trainium and (experimentally) Cloud TPU: FLUX, Qwen-Image, Wan, HunyuanVideo, LTX-2 etc., from one CLI, one Python API, and one OpenAI-compatible server.**
 
 MiniMax-H3 also supports text-to-video with audio through the staged CLI.
