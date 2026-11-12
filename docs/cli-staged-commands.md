@@ -198,9 +198,18 @@ kernel); no calibration file. `compile` writes the quantized checkpoint once und
 (`<cache-dir>/quantized/<model>/transformer/mxfp8-<id>/`, 27 GB for 40 GB of bf16) and
 `generate` reads it. Measured on trn3 at tp4, 1024x1024, 50 steps: DiT step 239 ms against
 299 ms in bf16 (0.80x); against the bf16 image, PSNR 26.8–39.2 dB over 4 prompts x 3 seeds
-(mean 32.5), SSIM 0.955–0.990, LPIPS 0.014–0.092. The
+(mean 32.5), SSIM 0.955–0.990, LPIPS 0.014–0.092; against diffusers fp32 on the CPU (one
+image) the mxfp8 image is 37.36 dB / SSIM 0.992, 1.02 dB closer than bf16's 36.34 dB / 0.990
+(`docs/verification/2026-11-07-mxfp8-video-models.md` section 10). The
 flag is refused on the AoT `trainium` backend, on trn2, under `--exec-mode eager`, with
-`--teacache-speedup`, and for models other than Qwen-Image and FLUX.1-dev. `--quant-compute
+`--teacache-speedup`, and for models other than Qwen-Image, FLUX.1-dev, LTX-2, Wan 2.1,
+Wan 2.2-A14B, HunyuanVideo and HunyuanVideo-1.5 (HunyuanVideo-1.5 only with
+`DIFFLET_QUANT_TARGETS`: it has no default set, below). **Do not combine `--quant mxfp8` with
+`--sp`**: measured on HunyuanVideo (tp4, 320x512x61), 1263.8 ms per step against 659.4 ms for
+bf16 with SP (1.92x); SP with MXFP8 has not been measured on the other models. Use the model's
+default layout or CP2 instead, as measured: HunyuanVideo `--tp-degree 4 --cp-degree 2 --cp-mode
+gather_kv`, HunyuanVideo-1.5 `--tp-degree 2 --cfg-parallel --cp-degree 2` (8 cores each; for
+HunyuanVideo-1.5, CP2 with MXFP8 is itself 1.7-1.8x bf16's, below). `--quant-compute
 dequant` stores the fp8 weights and computes in bf16 (memory only, for debugging). MXFP8 is the
 only recipe: a per-tensor static fp8 variant was built and measured first (see the evidence
 doc) and removed, because its kernel path is unusable in the compiled block graph on
@@ -208,10 +217,130 @@ neuronx-cc 2.28 and it needs calibration.
 
 FLUX.1-dev accepts `--quant mxfp8` on the same path (`difflet compile/generate --model-id
 black-forest-labs/FLUX.1-dev --backend neuron --tp-degree 4 --quant mxfp8`): the dual-stream
-blocks' q/k/v and MLPs and the single-stream blocks' q/k/v and `proj_mlp` run in mxfp8, the
-output projections stay bf16. Measured on trn3 (tp4, 1024x1024, 28 steps): PSNR 31.7 dB /
-SSIM 0.972 / LPIPS 0.023 against bf16, deterministic, but the DiT step is 220 ms against bf16's
-222 ms: a memory saving only, until the single blocks' fused `proj_out` is quantized too.
+blocks' q/k/v and MLPs and the single-stream blocks' q/k/v, `proj_mlp` and `proj_out` (stored as
+its attention and MLP halves, each quantized per rank K range) run in mxfp8; the dual blocks'
+output projections stay bf16. Measured on trn3 (tp4, 1024x1024, 50 steps): DiT step 183 ms
+against 222 ms in bf16 (0.82x), deterministic; at 28 steps the image is 34.7 dB / SSIM 0.978
+from bf16; at 50 steps the sample drifts in composition (over 4 prompts x 3 seeds mxfp8 is
+24.7 dB from bf16 on average, two bf16 runs at different TP degrees 29.3 dB); against diffusers
+fp32 on the CPU the one reference image is 21.30 dB from mxfp8 and 23.36 dB from bf16, a 2.06 dB
+gap that one image of this sampler cannot resolve. Evidence:
+`docs/verification/2026-11-07-mxfp8-video-models.md` sections 6 and 10 (the earlier "0.99x"
+predates the kernel's fast-DMA load path).
+
+LTX-2 takes the flag on the same path (`difflet compile/generate --model-id Lightricks/LTX-2
+--backend neuron --tp-degree 4 --height 512 --width 768 --num-frames 121 --quant mxfp8`): the
+video stream's attention q/k/v (self and text cross-attention), the audio-to-video query, the
+video-to-audio keys/values and the video MLP run in mxfp8; the audio stream (126 tokens at that
+shape), every output projection, the modulation and the embedders stay bf16. Measured on trn3
+(tp4, 512x768x121, 50 steps, seed 42): DiT step 966 ms against 1284 ms in bf16 (0.75x),
+deterministic; the quantized DiT is 24 GB for 37.8 GB of bf16; against the bf16 clip PSNR
+22.5 dB / SSIM 0.83 / LPIPS 0.078, where two bf16 runs at different TP degrees are 25.9 dB /
+0.91 / 0.040 apart; against diffusers fp32 on the CPU both clips are far off at 121 frames
+(mxfp8 16.85 dB, bf16 16.55 dB), mxfp8 no further than bf16. `DIFFLET_QUANT_TARGETS` can add the
+audio linears (no step time to gain, measured). Evidence:
+`docs/verification/2026-11-07-mxfp8-video-models.md` (sections 2-3 and 10).
+
+HunyuanVideo takes it as well (`difflet compile/generate --model-id
+hunyuanvideo-community/HunyuanVideo --backend neuron --tp-degree 4 --height 320 --width 512
+--num-frames 61 --quant mxfp8`): the hub DiT is bf16, so `compile` quantizes straight from the
+snapshot (18 GB for 24 GB of bf16; 4.85 GB of DiT weights per rank at tp4 instead of 6.54). The
+dual-stream blocks' text q/k/v (`add_q/k/v_proj`) and both MLPs, and the single-stream blocks'
+`proj_mlp` and `proj_out` (stored as its attention and MLP halves, each quantized per rank K
+range) run in mxfp8; the image-token q/k/v (the dual blocks' `to_q/k/v` and the single blocks'
+joint q/k/v), the dual blocks' output projections, the modulation, the token refiner and the
+embedders stay bf16 (with the image-token q/k/v quantized the clip is 21.2 dB from bf16 instead
+of 31.1, measured). Measured on trn3 (tp4, 50 steps, seed 42, guidance 6.0): 0.96x at 320x512x61
+(635 against 660 ms per step) and 0.97x at 544x960x129 (17968 against 18494 ms), deterministic;
+against the bf16 clip 31.1 dB / SSIM 0.938 / LPIPS 0.050 at 320x512x61, where two bf16 runs at
+different TP degrees are 36.6 dB apart, and 26.5 dB / 0.907 / 0.128 at 544x960x129 (no floor
+measured there); against diffusers fp32 on the CPU at 320x512x61 both clips are far off (mxfp8
+20.59 dB, bf16 20.79 dB), mxfp8 0.20 dB further (544x960x129 not referenced; section 10). CP2 (`--cp-degree 2
+--cp-mode gather_kv`, 403 ms per step on 8 cores) and `--dp 2` run as at tp4 (`--dp 2` when its
+replicas may start at core 0: the router ignores an inherited `NEURON_RT_VISIBLE_CORES`, an open
+item on `main`); with `--sp` the mxfp8 step is 1.92x the bf16 one under SP (1264 against 659 ms:
+the dual block's rotary runs as element-wise DMAs, although in the default its q/k come from the
+bf16 image projections), an open item whose cause is not known: do not combine them (above).
+720x1280x129 does not load at tp4 or tp4 x CP2 on trn3 (HBM), and bf16 at tp2 does not fit in HBM at
+544x960x129, so that shape has no bf16 floor. Same evidence document, section 7.
+
+Wan 2.1 takes the flag too (`difflet compile/generate --model-id Wan-AI/Wan2.1-T2V-14B-Diffusers
+--backend neuron --tp-degree 4 --height 480 --width 832 --num-frames 81 --quant mxfp8`): the hub
+DiT is fp32, so `compile` makes the bf16 copy first and quantizes from it. The text
+cross-attention's q/k/v and the FFN run in mxfp8; the self-attention q/k/v, every output
+projection, the modulation and the embedders stay bf16. Measured on trn3 (tp4, 50 steps,
+seed 42): 0.89x at 480x832x9 (393.1 against 440.0 ms per step) and 0.98x at 480x832x81 (4956
+against 5053 ms, measured before bf16 Wan's rotary went back to the bit-reproducible stride-2
+law); per-rank DiT weights 5.36 GB instead of 7.50; against the bf16 clip 32.1 dB / SSIM 0.934 /
+LPIPS 0.042 on average over 4 prompts x 3 seeds at 9 frames and 28.8 dB on the 81-frame clip,
+where two bf16 runs at different TP degrees are 37 dB apart; against diffusers fp32 on the CPU at
+9 frames the mxfp8 clip is 33.72 dB / SSIM 0.947 where bf16's is 36.08 / 0.952, 2.36 dB further
+(81 frames not referenced; section 10). `--quant` is refused at `--tp-degree 8` (the FFN down projection's
+1728-wide K per rank does not fit the MX layout).
+
+A `DIFFLET_QUANT_TARGETS` override that quantizes the self-attention q/k too (for instance
+`'blocks\.\d+\.attn1\.(to_q|to_k|to_v);blocks\.\d+\.attn2\.(to_q|to_k|to_v);blocks\.\d+\.ffn\.net\.0\.proj;blocks\.\d+\.ffn\.net\.2'`,
+on both `compile` and `generate`) makes the application reorder every self-attention head's q/k
+channels at load (weights, block scales, bias and the q/k norms; the log line
+`[wan] self-attention q/k reordered for the half-split rotary (40 attentions)`), so that the
+rotary turns contiguous halves: in the interleaved layout the pair swap moved the kernel's q/k
+element by element and made the tp4 block 5x slower (measured). Only with that override: 0.77x at
+480x832x9 and 0.94x at 480x832x81 for Wan 2.1, 4.60 GB per rank; but with both Wan 2.2 experts
+it is 1.44 dB / SSIM 0.034 further from bf16 than the default over 12 clips (27.6 against
+29.0 dB), past the default rule, which is why the default leaves the self-attention bf16. Same
+evidence document, sections 4 and 8.
+
+Wan 2.2-A14B the same way, with `--dual-expert`: `compile` makes both experts' bf16 copies and
+one quantized directory per expert with one spec (two `[wan] MXFP8 transformer… (nki)` lines).
+Measured with both experts (tp4, 50 steps): 0.89x at 480x832x9 (391.8 against 439.6 ms) and
+0.98x at 480x832x81 (4985 against 5080 ms, before the rotary change), 29.0 dB / 0.895 / 0.084
+from bf16 over the same 12 clips, both experts resident at 10.7 GB per rank instead of 15.0; at
+81 frames the two experts' hand-off makes the clip very sensitive to any perturbation (two bf16
+runs at different TP degrees are 28.7 dB apart; the mxfp8 clip is 20.0 dB from bf16 with the
+same scene composed differently); against diffusers fp32 on the CPU at 9 frames the mxfp8 clip
+is 33.46 dB / SSIM 0.949 where bf16's is 36.39 / 0.962, 2.93 dB further (81 frames not
+referenced; section 10). With
+the self-attention override above both experts reorder (the log line twice): 0.76x at 9 frames
+and 0.93x at 81. Sections 5 and 8.
+
+HunyuanVideo-1.5 has **no MXFP8 default** (the user's decision, 2026-11-09, on the numbers
+below): on the native path `--quant mxfp8` is refused (exit 2, before anything is written)
+unless `DIFFLET_QUANT_TARGETS` names the layers, from the four measured groups in
+`difflet/quant/targets.py` (`HUNYUAN_VIDEO_15_GROUPS`). The hub DiT is fp32, so `compile` makes
+the bf16 copy first and quantizes from it. The measured set, the former default, is the
+dual-stream blocks' image q/k/v (`attn.to_q/k/v`) and image MLP (`ff`) in mxfp8, at the default
+480x848x121 and tp2 x CFG2:
+
+```bash
+export DIFFLET_QUANT_TARGETS='transformer_blocks\.\d+\.attn\.(to_q|to_k|to_v);transformer_blocks\.\d+\.ff\.net\.(0\.proj|2)'
+DIFFLET_BACKEND=neuron difflet compile --model-id \
+  hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v --quant mxfp8
+DIFFLET_BACKEND=neuron difflet generate --model-id \
+  hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v --quant mxfp8 \
+  --steps 50 --seed 42 --prompt "a cat walking through a garden" --output hv15-mxfp8.mp4
+```
+
+In it the text stream's q/k/v (`attn.add_q/k/v_proj`) and MLP (`ff_context`), the
+output projections, the modulation, the token refiner and the embedders stay bf16 (with the image
+and text q/k/v both quantized the step is 2.7x bf16's at 480x848x9, and 2.10x at 121 frames
+with every group, measured). Measured on trn3 (tp2 x CFG2,
+480x848x121, 50 steps, seed 42, true CFG 6.0): DiT step 10032 against 9924 ms in bf16 (1.011x,
+one generate, on the tree that reverted phase D's HunyuanVideo-1.5 rotary op D4; the set
+was chosen with D4: 10314 against 10241 ms, 1.007x, deterministic); DiT weights per rank
+6.97 GiB resident instead of 7.80, but no lower peak HBM (with D4 17.66 against 17.56 GiB: the
+runtime's scratchpad grows by 0.94 GiB; without it the set peaks at 18.14 GiB, bf16 not
+measured); with `--tp-degree 2 --cfg-parallel --cp-degree 2` (8 cores; `--cp-degree 2` alone
+runs tp1 x CP2 on 2 cores) the step is 1.7-1.8x bf16's under CP2 (with D4: 10198 / 9539
+against 5687 / 5682 ms). Against the bf16 clip 12.65 dB / SSIM 0.183 / LPIPS 0.504 (with D4
+12.76 dB / SSIM 0.190 / LPIPS 0.510), where two bf16 runs at different TP degrees
+are 15.90 dB / 0.312 / 0.363 apart (at 121 frames the clip with every group quantized differs
+from bf16's in composition; the evidence's montage does not show this set's); against
+diffusers fp32 on the CPU at 480x848x9 its clip is 17.41 dB / SSIM 0.446 where bf16's
+is 24.89 / 0.846, 7.47 dB further (the image MLP alone: 20.20 dB, 4.69 dB further; the image
+q/k/v alone: 18.10 dB; section 10). The set misses the device screen's SSIM threshold (0.212)
+and at 121 frames gains neither speed nor peak HBM, hence no default
+([issue #145](https://github.com/ai-decentralized/Difflet/issues/145)). Same evidence document,
+section 9.
 
 ```bash
 DIFFLET_BACKEND=neuron difflet compile --model-id Qwen/Qwen-Image \
@@ -235,7 +364,9 @@ about 45 min at 480×848×121), because the compiled `vae15` decoder does not bu
 2.26; `--device-vae` opts into it, and `compile` then compiles it too. `compile` builds only the
 DiT. HunyuanVideo 1.5 runs true CFG (6.0), and `--tp-degree 2 --cfg-parallel` is its default
 layout. `--cp-mode ring` and a multi-shape `--shapes` are refused before any stage launches.
-Verified layouts and numbers: `docs/verification/hv15-aot-evidence.md`.
+Verified layouts and numbers: `docs/verification/hv15-aot-evidence.md`. On the PyTorch-native
+`neuron` backend (Trainium3), `--quant mxfp8` runs part of the DiT in MXFP8: see the HunyuanVideo-1.5
+paragraph under "Qwen-Image in FP8" above.
 
 ```bash
 # Step 1: Download
