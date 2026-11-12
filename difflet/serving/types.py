@@ -329,6 +329,15 @@ class FileOutputTarget:
 
 
 @dataclass(frozen=True, slots=True)
+class KeyframeInput:
+    """One keyframe a request conditions on (MiniMax-H3 FL2VA): which end of the video it is
+    anchored to and the uploaded image, validated and re-encoded as RGB PNG by the parent."""
+
+    anchor: Literal["first", "last"]
+    png: bytes
+
+
+@dataclass(frozen=True, slots=True)
 class VideoGenerateOptions:
     """Immutable video-only request fields carried through resident-worker IPC."""
 
@@ -342,6 +351,9 @@ class VideoGenerateOptions:
     true_cfg_scale: float | None = None
     requested_seconds: str | None = None
     user: str | None = None
+    #: Keyframes in packed order (first, then last); empty unless the model's metadata declares
+    #: ``input_keyframes``.
+    keyframes: tuple[KeyframeInput, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

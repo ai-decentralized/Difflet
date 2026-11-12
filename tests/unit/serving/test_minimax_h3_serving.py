@@ -415,3 +415,74 @@ def test_request_should_stop_reads_the_real_cancellation_signal_and_deadline():
 
     time.sleep(0.01)
     assert minimax_h3.request_should_stop(expired) is True
+
+
+# --------------------------------------------------------------------------- FL2VA
+
+
+def _keyframe(anchor):
+    import io
+
+    from PIL import Image
+
+    from difflet.serving.types import KeyframeInput
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (64, 64)).save(buffer, format="PNG")
+    return KeyframeInput(anchor=anchor, png=buffer.getvalue())
+
+
+def _fl2va_request(*anchors, prompt="a red fox"):
+    return _request(prompt=prompt, video=VideoGenerateOptions(
+        num_frames=175, fps=24, output_target=FileOutputTarget(staging_path="/tmp/x.part.mp4"),
+        keyframes=tuple(_keyframe(a) for a in anchors)))
+
+
+def test_keyframe_env_switches_to_the_fl2va_buckets(monkeypatch):
+    assert minimax_h3.num_keyframes() == 0
+    monkeypatch.setenv(minimax_h3.KEYFRAMES_ENV, "2")
+    assert minimax_h3.text_bucket() == 3072
+    monkeypatch.setenv(minimax_h3.TEXT_BUCKET_ENV, "512")
+    with pytest.raises(ValueError, match="2048"):
+        minimax_h3.text_bucket()
+    monkeypatch.setenv(minimax_h3.KEYFRAMES_ENV, "3")
+    with pytest.raises(ValueError, match="0, 1 or 2"):
+        minimax_h3.num_keyframes()
+
+
+def test_metadata_takes_keyframes_for_minimax_h3_only():
+    from difflet.common.registry.minimax_h3 import serving_metadata
+
+    assert serving_metadata().input_keyframes is True
+    from difflet.common.registry.base import ServingModelMetadata
+
+    assert ServingModelMetadata.__dataclass_fields__["input_keyframes"].default is False
+
+
+def test_validator_counts_the_keyframe_blocks_and_requires_the_server_s_count(tmp_path,
+                                                                            monkeypatch):
+    with pytest.raises(DiffletServingError, match="text only"):
+        _validator(tmp_path).validate(_fl2va_request("first"))
+    monkeypatch.setenv(minimax_h3.KEYFRAMES_ENV, "2")
+    validator = _validator(tmp_path)
+    validator.validate(_fl2va_request("first", "last"))
+    with pytest.raises(DiffletServingError, match="takes 2 keyframe"):
+        validator.validate(_fl2va_request("first"))
+    # 768x1344: 24 * 42 image tokens + 2 + a 2-word label per keyframe = 2024 rows.
+    assert validator.keyframe_rows(2, 768, 1344) == 2024
+    validator.validate(_fl2va_request("first", "last", prompt="w " * (3072 - 2024)))
+    with pytest.raises(DiffletServingError) as info:
+        validator.validate(_fl2va_request("first", "last", prompt="w " * (3072 - 2024 + 1)))
+    assert info.value.code == "prompt_too_long"
+
+
+def test_runner_hands_the_keyframes_to_the_resident_by_anchor():
+    images = minimax_h3.keyframe_images(_fl2va_request("first", "last"))
+    assert set(images) == {"first", "last"} and images["first"].mode == "RGB"
+    assert minimax_h3.keyframe_images(_request()) == {}
+
+
+def test_fl2va_smoke_brings_the_server_s_keyframes(tmp_path):
+    frames = minimax_h3.smoke_keyframes(2, _profile(tmp_path))
+    assert [f.anchor for f in frames] == ["first", "last"]
+    assert minimax_h3.smoke_keyframes(0, _profile(tmp_path)) == ()

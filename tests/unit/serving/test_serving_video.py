@@ -398,3 +398,137 @@ def test_list_and_delete_mappers_have_stable_empty_and_nonempty_shapes():
     )
     assert (empty.first_id, empty.last_id, empty.data) == (None, None, [])
     assert deleted.deleted is True
+
+
+# ------------------------------------------------------------------ keyframe uploads (FL2VA)
+
+
+def _png(width=64, height=48, fmt="PNG"):
+    import io
+
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    Image.new("RGB", (width, height), (10, 20, 30)).save(buffer, format=fmt)
+    return buffer.getvalue()
+
+
+class _Upload:
+    def __init__(self, data):
+        self.data = data
+
+    async def read(self, size=-1):
+        return self.data if size < 0 else self.data[:size]
+
+
+def _keyframe_model(allowed: bool):
+    model = _resolved_model()
+    model.metadata.input_keyframes = allowed
+    return model
+
+
+def _multipart_request(items):
+    class _Request:
+        headers = {"content-type": "multipart/form-data; boundary=test"}
+
+        async def form(self):
+            return dict(items)
+
+    return _Request()
+
+
+def test_keyframe_uploads_reach_the_request_as_png_in_packed_order():
+    from PIL import Image
+    import io
+
+    request = asyncio.run(normalize_video_multipart_request(
+        _multipart_request([("last_frame", _Upload(_png(fmt="JPEG"))), ("prompt", "a fox"),
+                            ("first_frame", _Upload(_png(80, 40)))]),
+        resolved_model=_keyframe_model(True)))
+    assert [k.anchor for k in request.video.keyframes] == ["first", "last"]
+    for frame, size in zip(request.video.keyframes, ((80, 40), (64, 48))):
+        image = Image.open(io.BytesIO(frame.png))
+        assert image.format == "PNG" and image.mode == "RGB" and image.size == size
+    # Keyframes are inputs, never part of the persisted job fields.
+    assert "keyframes" not in video_request_to_job_fields(request)
+
+
+def test_keyframes_are_refused_for_models_that_do_not_take_them():
+    for value in ("text", _Upload(_png())):
+        with pytest.raises(DiffletServingError) as exc:
+            asyncio.run(normalize_video_multipart_request(
+                _multipart_request([("prompt", "a fox"), ("first_frame", value)]),
+                resolved_model=_keyframe_model(False)))
+        assert exc.value.code == "feature_not_supported"
+
+
+@pytest.mark.parametrize("data, message", [
+    (b"", "empty"),
+    (b"not an image", "readable image"),
+    (None, "at least 32 pixels"),
+    ("gif", "PNG, JPEG or WebP"),
+])
+def test_keyframe_validation(data, message):
+    if data is None:
+        data = _png(16, 64)
+    elif data == "gif":
+        data = _png(fmt="GIF")
+    with pytest.raises(DiffletServingError) as exc:
+        asyncio.run(normalize_video_multipart_request(
+            _multipart_request([("prompt", "a fox"), ("first_frame", _Upload(data))]),
+            resolved_model=_keyframe_model(True)))
+    assert message in exc.value.message
+
+
+def test_a_keyframe_must_be_an_upload():
+    with pytest.raises(DiffletServingError) as exc:
+        asyncio.run(normalize_video_multipart_request(
+            _multipart_request([("prompt", "a fox"), ("first_frame", "first.png")]),
+            resolved_model=_keyframe_model(True)))
+    assert "image file upload" in exc.value.message
+
+
+def _asgi_request(files, data):
+    import httpx
+    from starlette.requests import Request
+
+    built = httpx.Request("POST", "http://x/v1/videos", files=files, data=data)
+    body = built.read()
+    headers = [(k.lower().encode(), v.encode()) for k, v in built.headers.items()]
+    scope = {"type": "http", "method": "POST", "path": "/v1/videos", "headers": headers,
+             "query_string": b""}
+    sent = False
+
+    async def receive():
+        nonlocal sent
+        if sent:
+            return {"type": "http.request", "body": b"", "more_body": False}
+        sent = True
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    return Request(scope, receive)
+
+
+def test_real_multipart_keyframe_upload_over_the_old_1mib_cap():
+    import io
+
+    import numpy as np
+    from PIL import Image
+
+    buffer = io.BytesIO()
+    noise = np.random.default_rng(0).integers(0, 255, (1000, 1000, 3), dtype=np.uint8)
+    Image.fromarray(noise).save(buffer, format="PNG")
+    big = buffer.getvalue()
+    assert 1024 * 1024 < len(big) < 16 * 1024 * 1024
+    request = asyncio.run(normalize_video_multipart_request(
+        _asgi_request({"first_frame": ("a.png", big, "image/png"),
+                       "last_frame": ("b.bin", _png(), "application/octet-stream")},
+                      {"prompt": "a fox"}),
+        resolved_model=_keyframe_model(True)))
+    assert [k.anchor for k in request.video.keyframes] == ["first", "last"]
+    # Other models still refuse any file part.
+    with pytest.raises(DiffletServingError) as exc:
+        asyncio.run(normalize_video_multipart_request(
+            _asgi_request({"first_frame": ("a.png", _png(), "image/png")}, {"prompt": "a fox"}),
+            resolved_model=_keyframe_model(False)))
+    assert exc.value.code == "feature_not_supported"

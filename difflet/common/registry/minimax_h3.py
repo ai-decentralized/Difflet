@@ -45,4 +45,5 @@ def serving_metadata() -> ServingModelMetadata:
         default_fps=24,
         default_host_vae=False,
         output_has_audio=True,
+        input_keyframes=True,
     )

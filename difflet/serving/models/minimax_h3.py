@@ -69,18 +69,36 @@ _FRAMES_PER_CHUNK, _LATENTS_PER_CHUNK = 17, 5
 _MAX_INFERENCE_STEPS = 200
 _MAX_SEED = 2**63 - 1
 _TEXT_BUCKETS = (128, 256, 512, 1024)
+_FL2VA_TEXT_BUCKETS = (2048, 3072, 4096)
 #: The serving profile's one text bucket (prompts up to this many tokens), set at startup.
 TEXT_BUCKET_ENV = "DIFFLET_H3_TEXT_BUCKET"
 _DEFAULT_TEXT_BUCKET = 512
+_DEFAULT_FL2VA_TEXT_BUCKET = 3072
+#: FL2VA servers: how many keyframes every request brings (0 = text-to-video+audio, 1 = a
+#: ``first_frame`` or a ``last_frame``, 2 = both). Fixed at startup: the DiT is compiled for it.
+KEYFRAMES_ENV = "DIFFLET_H3_KEYFRAMES"
 _UNSUPPORTED_VIDEO_FIELDS = ("guidance_scale_2", "boundary_ratio", "flow_shift", "true_cfg_scale",
                              "negative_prompt")
 
 
+def num_keyframes() -> int:
+    raw = os.environ.get(KEYFRAMES_ENV, "").strip()
+    count = int(raw) if raw else 0
+    if count not in (0, 1, 2):
+        raise ValueError(f"{KEYFRAMES_ENV} must be 0, 1 or 2, got {raw!r}")
+    return count
+
+
 def text_bucket() -> int:
+    """The text bucket: prompt tokens for T2VA, the whole presentation (each keyframe's label and
+    vision block included) for FL2VA."""
+    fl2va = num_keyframes() > 0
+    allowed = _FL2VA_TEXT_BUCKETS if fl2va else _TEXT_BUCKETS
     raw = os.environ.get(TEXT_BUCKET_ENV, "").strip()
-    bucket = int(raw) if raw else _DEFAULT_TEXT_BUCKET
-    if bucket not in _TEXT_BUCKETS:
-        raise ValueError(f"{TEXT_BUCKET_ENV} must be one of {_TEXT_BUCKETS}, got {bucket}")
+    bucket = int(raw) if raw else (_DEFAULT_FL2VA_TEXT_BUCKET if fl2va else _DEFAULT_TEXT_BUCKET)
+    if bucket not in allowed:
+        raise ValueError(f"{TEXT_BUCKET_ENV} must be one of {allowed}"
+                         f"{' with ' + KEYFRAMES_ENV + ' > 0' if fl2va else ''}, got {bucket}")
     return bucket
 
 
@@ -253,6 +271,7 @@ class MiniMaxH3ServingRequestValidator:
         self.runtime = runtime
         self.model_id = runtime.profile.model_id
         self.bucket = text_bucket()
+        self.num_keyframes = num_keyframes()
         self._tokenizer = None
 
     def preload(self) -> None:
@@ -289,12 +308,34 @@ class MiniMaxH3ServingRequestValidator:
         for name in _UNSUPPORTED_VIDEO_FIELDS:
             if getattr(video, name, None) is not None:
                 raise invalid_extra_body(f"{name} is not supported by MiniMax-H3 serving")
+        keyframes = tuple(getattr(video, "keyframes", ()) or ())
+        if len(keyframes) != self.num_keyframes:
+            if self.num_keyframes == 0:
+                raise invalid_extra_body("this MiniMax-H3 server generates from text only; "
+                                         "first_frame/last_frame need a keyframe server")
+            raise invalid_extra_body(
+                f"this MiniMax-H3 server takes {self.num_keyframes} keyframe(s) "
+                f"({'first_frame and last_frame' if self.num_keyframes == 2 else 'first_frame or last_frame'}), "
+                f"the request has {len(keyframes)}")
         count = self.prompt_tokens(request.prompt)
         if count < 1:
             raise invalid_extra_body("MiniMax-H3 prompt must produce at least one token")
+        count += self.keyframe_rows(len(keyframes), profile.height, profile.width)
         if count > self.bucket:
-            raise prompt_too_long(f"MiniMax-H3 prompt has {count} tokens; this server's text "
-                                  f"bucket is {self.bucket}")
+            raise prompt_too_long(f"MiniMax-H3 prompt has {count} tokens"
+                                  f"{' with the keyframe blocks' if keyframes else ''}; this "
+                                  f"server's text bucket is {self.bucket}")
+
+    def keyframe_rows(self, count: int, height: int, width: int) -> int:
+        """Presentation rows of ``count`` keyframes on the canvas: per keyframe its
+        ``"<Picture i>: "`` label, ``<|vision_start|>``, one image token per 32x32 pixels (16 px
+        patches merged 2x2) and ``<|vision_end|>``."""
+        tokenizer = self._tokenizer_for_runtime()
+        rows = 0
+        for index in range(count):
+            label = tokenizer(f"<Picture {index + 1}>: ", add_special_tokens=False)["input_ids"]
+            rows += len(label) + 2 + (int(height) // 32) * (int(width) // 32)
+        return rows
 
     def prompt_tokens(self, prompt: str) -> int:
         # The conditioner's tokenization: the raw prompt, no special tokens.
@@ -368,6 +409,16 @@ def _empty_output(request: DiffletGenerateRequest) -> FileBackedGenerateOutput:
 # --------------------------------------------------------------------------- stage
 
 
+def keyframe_images(request: DiffletGenerateRequest) -> dict[str, Any]:
+    """The request's keyframes as PIL images by anchor (the parent validated the PNGs)."""
+    import io
+
+    from PIL import Image
+
+    keyframes = getattr(request.video, "keyframes", ()) or ()
+    return {k.anchor: Image.open(io.BytesIO(k.png)).convert("RGB") for k in keyframes}
+
+
 class MiniMaxH3PipelineRunner:
     """One request end to end on every rank; the primary replica writes the MP4."""
 
@@ -394,10 +445,12 @@ class MiniMaxH3PipelineRunner:
 
             from difflet.backends.neuron.minimax_h3.resident import ResidentRequestCancelled
 
+            images = keyframe_images(request)
             try:
                 result = self.resident.generate(
                     request.prompt, steps=request.num_inference_steps, seed=request.seed,
-                    scratch_dir=shared, should_stop=should_stop)
+                    scratch_dir=shared, should_stop=should_stop,
+                    first_image=images.get("first"), last_image=images.get("last"))
             except ResidentRequestCancelled as exc:
                 # Every rank stopped at the same step; report it the way the engine expects.
                 raise asyncio.CancelledError(str(exc)) from exc
@@ -431,6 +484,29 @@ class MiniMaxH3PipelineRunner:
         self.resident = None
 
 
+def smoke_keyframes(count: int, profile: ServingProfile) -> tuple:
+    """Synthetic keyframes (two colour gradients) for an FL2VA server's startup smoke."""
+    if not count:
+        return ()
+    import io
+
+    import numpy as np
+    from PIL import Image
+
+    from difflet.serving.types import KeyframeInput
+
+    height, width = int(profile.height), int(profile.width)
+    ramp = np.linspace(0, 255, width, dtype=np.float32)[None, :].repeat(height, 0)
+    frames = []
+    for anchor, flip in (("first", False), ("last", True))[:count]:
+        red = ramp[:, ::-1] if flip else ramp
+        pixels = np.stack([red, np.full_like(red, 96.0), 255.0 - red], -1).astype(np.uint8)
+        buffer = io.BytesIO()
+        Image.fromarray(pixels).save(buffer, format="PNG")
+        frames.append(KeyframeInput(anchor=anchor, png=buffer.getvalue()))
+    return tuple(frames)
+
+
 class MiniMaxH3ServingStageAdapter:
     """Bridge the resident MiniMax-H3 model into the generic resident stage engine."""
 
@@ -461,6 +537,7 @@ class MiniMaxH3ServingStageAdapter:
             model_dir=runtime.source.pinned_model_path, parallel=profile.parallel,
             height=profile.height, width=profile.width, num_frames=profile.num_frames,
             text_bucket=text_bucket(), cache_dir=profile.cache_dir,
+            num_keyframes=num_keyframes(),
             # Worker processes do not inherit the serve logging config; like every serving
             # adapter, worker-side progress goes to stdout under the [difflet serve] prefix.
             log=lambda message: print(f"[difflet serve] MiniMax-H3: {message}", flush=True))
@@ -492,7 +569,8 @@ class MiniMaxH3ServingStageAdapter:
             guidance_scale=1.0, seed=0, output_format="mp4",
             video=VideoGenerateOptions(num_frames=int(profile.num_frames),
                                        fps=int(profile.output_fps),
-                                       output_target=self._smoke.file_target()),
+                                       output_target=self._smoke.file_target(),
+                                       keyframes=smoke_keyframes(num_keyframes(), profile)),
         )
 
     def validate_smoke_output(self, output: GenerateOutput) -> None:
