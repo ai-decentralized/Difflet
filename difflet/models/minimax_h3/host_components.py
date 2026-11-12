@@ -9,6 +9,11 @@ Backend-neutral (torch, transformers, safetensors only), used by the neuron back
   ``lm_head`` and the vision tower are never loaded). Tokenization is the Trainium stage's: the
   raw prompt, no special tokens, right-padded to the 1024-token bucket; the padding rows of the
   output are zeroed.
+  With ``vision=True`` the vision tower is loaded too and ``encode_presentation`` encodes an
+  FL2VA presentation (``"<Picture i>: "`` + an image block per keyframe, then the prompt) through
+  the full ``Qwen3VLModel`` (M-RoPE, DeepStack), still read at ``hidden_states[50]``.
+* ``load_host_video_encoder``: the video VAE's encoder + ``quant_conv`` in fp32, spatially tiled
+  like the reference; FL2VA keyframes only.
 * ``load_host_video_decoder`` / ``load_host_audio_decoder``: the two decoder-only VAEs in fp32,
   with the reference attention (no sequence padding) and the audio decoder's weight norm folded
   into plain convolution weights. Their callables plug into ``decode_minimax_h3_video`` /
@@ -20,6 +25,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import types
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -74,6 +80,47 @@ def _read_tensors(weight_map: dict[str, str], keys) -> dict[str, torch.Tensor]:
     return out
 
 
+def _pos_embed_interpolate_fp32_weights(self, grid_thw: torch.Tensor) -> torch.Tensor:
+    """Qwen3-VL's bilinear (align_corners) resampling of the learned vision position table,
+    with fp32 weights and an fp32 tap sum, cast to the table dtype at the end.
+
+    transformers 4.x (``fast_pos_embed_interpolate``) casts the weights to the bf16 table dtype
+    and sums in bf16; 5.x (``get_vision_interpolation_indices_and_weights``, what the official
+    H3 pipeline runs) keeps them in fp32. The ~1-ulp difference is amplified by the vision tower's
+    and the language model's massive activations until it changes which vision rows become
+    attention sinks (measured: 4.x flips one of the top-4 sink rows of a 768x1344 keyframe pair
+    against both the fp32 and the bf16 5.x reference; this matches them).
+    """
+    side = int(self.num_grid_per_side)
+    merge = int(self.config.spatial_merge_size)
+    table = self.pos_embed.weight
+    out = []
+    for t, h, w in grid_thw.tolist():
+        h_idx = torch.linspace(0, side - 1, h)
+        w_idx = torch.linspace(0, side - 1, w)
+        h_floor, w_floor = h_idx.int(), w_idx.int()
+        h_ceil = (h_floor + 1).clip(max=side - 1)
+        w_ceil = (w_floor + 1).clip(max=side - 1)
+        dh, dw = h_idx - h_floor, w_idx - w_floor
+        base_f, base_c = h_floor * side, h_ceil * side
+        indices = torch.stack([
+            (base_f[:, None] + w_floor[None]).flatten(),
+            (base_f[:, None] + w_ceil[None]).flatten(),
+            (base_c[:, None] + w_floor[None]).flatten(),
+            (base_c[:, None] + w_ceil[None]).flatten(),
+        ], dim=1).to(table.device)
+        weights = torch.stack([
+            ((1 - dh)[:, None] * (1 - dw)[None]).flatten(),
+            ((1 - dh)[:, None] * dw[None]).flatten(),
+            (dh[:, None] * (1 - dw)[None]).flatten(),
+            (dh[:, None] * dw[None]).flatten(),
+        ], dim=1).to(table.device, torch.float32)
+        pos = (self.pos_embed(indices) * weights[:, :, None]).sum(1).to(table.dtype)
+        pos = pos.repeat(t, 1).view(t, h // merge, merge, w // merge, merge, -1)
+        out.append(pos.permute(0, 1, 3, 2, 4, 5).flatten(0, 4))
+    return torch.cat(out)
+
+
 # ------------------------------------------------------------------------------ text encoder
 
 
@@ -88,8 +135,13 @@ class HostQwen3VLTextEncoder:
 
     def __init__(self, model_dir, *, layer: int = h3_common.TEXT_ENCODER_LAYER,
                  seq_len: int = h3_common.TEXT_SEQ_LEN, dtype: torch.dtype = torch.bfloat16,
-                 threads: int | None = None) -> None:
+                 threads: int | None = None, vision: bool = False,
+                 vision_dtype: torch.dtype = torch.float32) -> None:
         self.model_dir = Path(model_dir)
+        self.vision = bool(vision)
+        self.vision_dtype = vision_dtype
+        self.full_model = None
+        self.image_processor = None
         self.layer = int(layer)
         self.seq_len = int(seq_len)
         self.dtype = dtype
@@ -131,11 +183,42 @@ class HostQwen3VLTextEncoder:
             raise RuntimeError(f"Qwen3-VL text load: missing {missing[:5]}, unexpected "
                                f"{unexpected[:5]}")
         self.model = model.eval().requires_grad_(False)
+        if self.vision:
+            self._load_vision(encoder_dir, weight_map, text_config)
         tokenizer = AutoTokenizer.from_pretrained(self.model_dir / "tokenizer")
         if tokenizer.pad_token_id is None:
             tokenizer.pad_token = tokenizer.eos_token
         self.tokenizer = tokenizer
         return self
+
+    def _load_vision(self, encoder_dir: Path, weight_map: dict[str, str], text_config) -> None:
+        """The vision tower, wrapped with the already-loaded language model in a
+        ``Qwen3VLModel`` (its forward builds the M-RoPE index and injects DeepStack features)."""
+        from accelerate import init_empty_weights
+        from transformers import AutoConfig, AutoImageProcessor
+        from transformers.models.qwen3_vl.modeling_qwen3_vl import Qwen3VLModel
+
+        config = AutoConfig.from_pretrained(encoder_dir)
+        config.text_config = text_config
+        config._attn_implementation = "sdpa"
+        config.vision_config._attn_implementation = "sdpa"
+        with init_empty_weights(include_buffers=False):
+            full = Qwen3VLModel(config)
+        prefix = "model.visual."
+        tensors = _read_tensors(weight_map, [k for k in weight_map if k.startswith(prefix)])
+        visual_state = {k[len(prefix):]: v.to(self.vision_dtype) for k, v in tensors.items()}
+        # Buffers (the vision rotary inv_freq) were built for real under
+        # include_buffers=False; only the parameters come from the checkpoint.
+        full.visual.load_state_dict(visual_state, strict=True, assign=True)
+        full.language_model = self.model
+        if hasattr(full.visual, "fast_pos_embed_interpolate"):
+            full.visual.fast_pos_embed_interpolate = types.MethodType(
+                _pos_embed_interpolate_fp32_weights, full.visual)
+        self.full_model = full.eval().requires_grad_(False)
+        processor_dir = self.model_dir / "processor"
+        if not processor_dir.is_dir():
+            processor_dir = encoder_dir
+        self.image_processor = AutoImageProcessor.from_pretrained(processor_dir)
 
     def tokenize(self, prompt: str) -> tuple[torch.Tensor, torch.Tensor]:
         tokens = self.tokenizer(
@@ -171,6 +254,132 @@ class HostQwen3VLTextEncoder:
             "num_text_tokens": token_count,
             "text_encoder_layer": self.layer,
         }
+
+
+    @torch.no_grad()
+    def encode_presentation(self, prompt: str, keyframes) -> dict[str, Any]:
+        """Encode an FL2VA presentation; the record of ``encode`` plus ``text_token_tags``
+        (``(num_text_tokens,)``, the vision blocks' rows tagged video)."""
+        from difflet.models.minimax_h3.keyframes import build_fl2va_presentation
+
+        if self.full_model is None:
+            raise RuntimeError("HostQwen3VLTextEncoder(vision=True).load() first")
+        token_ids, token_tags, vision_inputs = build_fl2va_presentation(
+            self.tokenizer, self.image_processor, prompt, keyframes)
+        count = len(token_ids)
+        if count > self.seq_len:
+            raise ValueError(
+                f"the FL2VA presentation has {count} tokens (keyframe vision blocks included), "
+                f"more than the {self.seq_len}-token text bucket")
+        input_ids = torch.tensor([token_ids], dtype=torch.long)
+        vision_kwargs = {
+            name: (value.to(self.vision_dtype) if name.startswith("pixel_") else value)
+            for name, value in vision_inputs.items()
+        }
+        captured: list[torch.Tensor] = []
+        handle = self.model.layers[self.layer - 1].register_forward_hook(
+            lambda module, args, output: captured.append(
+                output[0] if isinstance(output, tuple) else output)
+        )
+        try:
+            with intra_op_threads(self.threads):
+                self.full_model(input_ids=input_ids, attention_mask=torch.ones_like(input_ids),
+                                use_cache=False, **vision_kwargs)
+        finally:
+            handle.remove()
+        hidden = torch.zeros(1, self.seq_len, captured[-1].shape[-1], dtype=torch.bfloat16)
+        hidden[:, :count] = captured[-1].to(torch.bfloat16)
+        attention_mask = torch.zeros(1, self.seq_len, dtype=torch.bool)
+        attention_mask[:, :count] = True
+        return {
+            "encoder_hidden_states": hidden,
+            "attention_mask": attention_mask,
+            "num_text_tokens": count,
+            "text_encoder_layer": self.layer,
+            "text_token_tags": token_tags,
+        }
+
+
+# ------------------------------------------------------------------------------ video encoder
+
+
+class HostVideoEncoder:
+    """The video VAE's ``quant_conv(encoder(x))`` in fp32, spatially tiled as the reference
+    (256-pixel tiles, >= 64-pixel overlaps, 16-aligned, linear blends). Single frames only:
+    ``__call__(pixels)`` takes ``(1, 3, 1, H, W)`` uint8 and returns the normalized conditioning
+    latents of ``keyframes.encode_keyframe_condition``."""
+
+    def __init__(self, module: nn.Module, config: dict[str, Any], threads: int | None = None,
+                 *, tile: int = 256, min_overlap: int = 64) -> None:
+        self.module = module
+        self.config = config
+        self.threads = threads
+        self.tile = int(tile)
+        self.min_overlap = int(min_overlap)
+        spatial = 1
+        for value in config["spatial_downsample_factors"]:
+            spatial *= int(value)
+        self.spatial_compression = spatial
+
+    def moments(self, x: torch.Tensor) -> torch.Tensor:
+        from difflet.models.minimax_h3.pipeline import _split_tiles, _stitch_tiles
+
+        if x.shape[2] != 1:
+            raise ValueError("HostVideoEncoder encodes single keyframes only")
+        height, width = x.shape[-2], x.shape[-1]
+        ys, y_lengths, y_overlaps = _split_tiles(
+            height, tile_size=self.tile, min_overlap=self.min_overlap,
+            alignment=self.spatial_compression)
+        xs, x_lengths, x_overlaps = _split_tiles(
+            width, tile_size=self.tile, min_overlap=self.min_overlap,
+            alignment=self.spatial_compression)
+        rows = []
+        with torch.no_grad(), intra_op_threads(self.threads):
+            for y, y_len in zip(ys, y_lengths):
+                rows.append([
+                    self.module(x[..., y:y + y_len, x0:x0 + x_len].float())
+                    for x0, x_len in zip(xs, x_lengths)
+                ])
+        ratio = self.spatial_compression
+        return _stitch_tiles(rows, [o // ratio for o in y_overlaps],
+                             [o // ratio for o in x_overlaps])
+
+    def __call__(self, pixels: torch.Tensor) -> torch.Tensor:
+        from difflet.models.minimax_h3.keyframes import encode_keyframe_condition
+
+        return encode_keyframe_condition(
+            self.moments, pixels, latents_mean=self.config["latents_mean"],
+            latents_std=self.config["latents_std"])
+
+
+class _HostVideoEncoderModule(nn.Module):
+    def __init__(self, cfg: dict[str, Any]) -> None:
+        from difflet.models.minimax_h3.modeling_vae import MiniMaxH3VideoEncoder3d
+
+        super().__init__()
+        latent = int(cfg["latent_channels"])
+        self.encoder = MiniMaxH3VideoEncoder3d(
+            in_channels=int(cfg["in_channels"]), out_channels=2 * latent,
+            block_out_channels=tuple(int(v) for v in cfg["block_out_channels"]),
+            layers_per_block=int(cfg["layers_per_block"]),
+            spatial_downsample_factors=tuple(int(v) for v in cfg["spatial_downsample_factors"]),
+            temporal_downsample_factors=tuple(int(v) for v in cfg["temporal_downsample_factors"]),
+            norm_num_groups=int(cfg["norm_num_groups"]), norm_eps=float(cfg["norm_eps"]),
+            spatial_padding_mode=str(cfg["spatial_padding_mode"]),
+        )
+        self.quant_conv = nn.Conv3d(2 * latent, 2 * latent, kernel_size=1)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return self.quant_conv(self.encoder(x))
+
+
+def load_host_video_encoder(model_dir, *, threads: int | None = None) -> HostVideoEncoder:
+    directory = Path(model_dir) / "vae"
+    with open(directory / "config.json") as handle:
+        cfg = json.load(handle)
+    module = _HostVideoEncoderModule(cfg)
+    _load_decoder(directory, module, ("encoder.", "quant_conv."), fold_weight_norm=False)
+    return HostVideoEncoder(module.eval().requires_grad_(False), cfg, threads)
 
 
 # ------------------------------------------------------------------------------ decoders
@@ -283,7 +492,9 @@ def default_threads() -> int:
 __all__ = [
     "HostDecoder",
     "HostQwen3VLTextEncoder",
+    "HostVideoEncoder",
     "default_threads",
     "load_host_audio_decoder",
+    "load_host_video_encoder",
     "load_host_video_decoder",
 ]

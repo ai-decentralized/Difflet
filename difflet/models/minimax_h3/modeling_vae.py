@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Decoder-only MiniMax-H3 visual and audio VAE modules."""
+"""MiniMax-H3 visual and audio VAE modules: the video decoder and audio decoder, plus the video
+encoder (``MiniMaxH3VideoEncoder3d``), which only FL2VA keyframes use, on the host."""
 
 from __future__ import annotations
 
@@ -24,6 +25,253 @@ import torch.nn.functional as F
 from diffusers.models.attention import FeedForward
 from diffusers.models.attention_dispatch import dispatch_attention_fn
 from torch.nn.utils import weight_norm
+
+
+# ------------------------------------------------------------------ video encoder (diffusers main)
+
+
+class MiniMaxH3VideoCausalConv3d(nn.Conv3d):
+    r"""
+    3D convolution used throughout the MiniMax-H3 video encoder.
+
+    Spatial padding is symmetric and uses `spatial_padding_mode` (`"reflect"` in the released checkpoint); temporal
+    padding is causal, i.e. `kernel_size_t - 1` zero frames are prepended and nothing is appended.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: int | tuple[int, int, int],
+        stride: int | tuple[int, int, int] = 1,
+        spatial_padding: int = 0,
+        temporal_padding: int = 0,
+        spatial_padding_mode: str = "reflect",
+    ) -> None:
+        super().__init__(in_channels, out_channels, kernel_size=kernel_size, stride=stride, padding=0)
+        self.spatial_padding = spatial_padding
+        self.temporal_padding = temporal_padding
+        self.spatial_padding_mode = spatial_padding_mode
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        if self.spatial_padding > 0:
+            padding = self.spatial_padding
+            hidden_states = F.pad(
+                hidden_states, (padding, padding, padding, padding, 0, 0), mode=self.spatial_padding_mode
+            )
+        if self.temporal_padding > 0:
+            hidden_states = F.pad(hidden_states, (0, 0, 0, 0, self.temporal_padding, 0), mode="constant")
+        return F.conv3d(hidden_states, self.weight, self.bias, stride=self.stride, padding=0, dilation=self.dilation)
+
+
+class MiniMaxH3VideoGroupNorm(nn.GroupNorm):
+    r"""
+    Group normalization applied to each latent frame in isolation (`use_t_isolated_gn` in the original config): the
+    temporal axis is folded into the batch axis so statistics never mix across frames.
+    """
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        batch_size, num_channels, num_frames, height, width = hidden_states.shape
+        hidden_states = hidden_states.permute(0, 2, 1, 3, 4).contiguous()
+        hidden_states = hidden_states.view(batch_size * num_frames, num_channels, 1, height, width)
+        hidden_states = super().forward(hidden_states)
+        hidden_states = hidden_states.view(batch_size, num_frames, num_channels, height, width)
+        return hidden_states.permute(0, 2, 1, 3, 4).contiguous()
+
+
+class MiniMaxH3VideoResnetBlock3d(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        norm_num_groups: int = 32,
+        norm_eps: float = 1e-6,
+        spatial_padding_mode: str = "reflect",
+    ) -> None:
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+
+        self.norm1 = MiniMaxH3VideoGroupNorm(norm_num_groups, in_channels, eps=norm_eps, affine=True)
+        self.conv1 = MiniMaxH3VideoCausalConv3d(
+            in_channels,
+            out_channels,
+            kernel_size=3,
+            spatial_padding=1,
+            temporal_padding=2,
+            spatial_padding_mode=spatial_padding_mode,
+        )
+        self.norm2 = MiniMaxH3VideoGroupNorm(norm_num_groups, out_channels, eps=norm_eps, affine=True)
+        self.conv2 = MiniMaxH3VideoCausalConv3d(
+            out_channels,
+            out_channels,
+            kernel_size=3,
+            spatial_padding=1,
+            temporal_padding=2,
+            spatial_padding_mode=spatial_padding_mode,
+        )
+        self.conv_shortcut = None
+        if in_channels != out_channels:
+            self.conv_shortcut = MiniMaxH3VideoCausalConv3d(in_channels, out_channels, kernel_size=1)
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        residual = hidden_states
+        hidden_states = F.silu(self.norm1(hidden_states))
+        hidden_states = self.conv1(hidden_states)
+        hidden_states = F.silu(self.norm2(hidden_states))
+        hidden_states = self.conv2(hidden_states)
+        if self.conv_shortcut is not None:
+            residual = self.conv_shortcut(residual)
+        return residual + hidden_states
+
+
+class MiniMaxH3VideoDownsample3d(nn.Module):
+    r"""
+    Strided 3x3x3 downsampling convolution. A spatial stride of 2 is preceded by an asymmetric bottom/right pad of 1
+    (the convolution itself carries no spatial padding), so the output is exactly `ceil(size / 2)`.
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        temporal_stride: int = 1,
+        spatial_stride: int = 2,
+        spatial_padding_mode: str = "reflect",
+    ) -> None:
+        super().__init__()
+        self.spatial_stride = spatial_stride
+        self.spatial_padding_mode = spatial_padding_mode
+        self.conv = MiniMaxH3VideoCausalConv3d(
+            in_channels,
+            out_channels,
+            kernel_size=3,
+            stride=(temporal_stride, spatial_stride, spatial_stride),
+            spatial_padding=0,
+            temporal_padding=2,
+            spatial_padding_mode=spatial_padding_mode,
+        )
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        if self.spatial_stride == 2:
+            hidden_states = F.pad(hidden_states, (0, 1, 0, 1, 0, 0), mode=self.spatial_padding_mode)
+        return self.conv(hidden_states)
+
+
+class MiniMaxH3VideoDownBlock3d(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        num_layers: int,
+        temporal_downsample_factor: int,
+        spatial_downsample_factor: int,
+        norm_num_groups: int = 32,
+        norm_eps: float = 1e-6,
+        spatial_padding_mode: str = "reflect",
+    ) -> None:
+        super().__init__()
+        self.resnets = nn.ModuleList(
+            [
+                MiniMaxH3VideoResnetBlock3d(
+                    in_channels=in_channels if i == 0 else out_channels,
+                    out_channels=out_channels,
+                    norm_num_groups=norm_num_groups,
+                    norm_eps=norm_eps,
+                    spatial_padding_mode=spatial_padding_mode,
+                )
+                for i in range(num_layers)
+            ]
+        )
+        self.downsamplers = None
+        if temporal_downsample_factor * spatial_downsample_factor > 1:
+            self.downsamplers = nn.ModuleList(
+                [
+                    MiniMaxH3VideoDownsample3d(
+                        out_channels,
+                        out_channels,
+                        temporal_stride=temporal_downsample_factor,
+                        spatial_stride=spatial_downsample_factor,
+                        spatial_padding_mode=spatial_padding_mode,
+                    )
+                ]
+            )
+
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        for resnet in self.resnets:
+            hidden_states = resnet(hidden_states)
+        if self.downsamplers is not None:
+            for downsampler in self.downsamplers:
+                hidden_states = downsampler(hidden_states)
+        return hidden_states
+
+
+class MiniMaxH3VideoEncoder3d(nn.Module):
+    r"""
+    Causal 3D CNN encoder. `block_out_channels` gives the channel count of every level; the per-level
+    `spatial_downsample_factors` / `temporal_downsample_factors` multiply out to the total compression ratios.
+    """
+
+    def __init__(
+        self,
+        in_channels: int = 3,
+        out_channels: int = 48,
+        block_out_channels: tuple[int, ...] = (128, 256, 256, 512, 512, 1024),
+        layers_per_block: int = 2,
+        spatial_downsample_factors: tuple[int, ...] = (2, 2, 2, 2, 1, 1),
+        temporal_downsample_factors: tuple[int, ...] = (1, 2, 2, 1, 1, 1),
+        norm_num_groups: int = 32,
+        norm_eps: float = 1e-6,
+        spatial_padding_mode: str = "reflect",
+    ) -> None:
+        super().__init__()
+
+        self.conv_in = MiniMaxH3VideoCausalConv3d(
+            in_channels,
+            block_out_channels[0],
+            kernel_size=3,
+            spatial_padding=1,
+            temporal_padding=2,
+            spatial_padding_mode=spatial_padding_mode,
+        )
+
+        block_in_channels = (block_out_channels[0],) + tuple(block_out_channels[:-1])
+        self.down_blocks = nn.ModuleList(
+            [
+                MiniMaxH3VideoDownBlock3d(
+                    in_channels=block_in_channels[i],
+                    out_channels=block_out_channels[i],
+                    num_layers=layers_per_block,
+                    temporal_downsample_factor=temporal_downsample_factors[i],
+                    spatial_downsample_factor=spatial_downsample_factors[i],
+                    norm_num_groups=norm_num_groups,
+                    norm_eps=norm_eps,
+                    spatial_padding_mode=spatial_padding_mode,
+                )
+                for i in range(len(block_out_channels))
+            ]
+        )
+
+        self.norm_out = MiniMaxH3VideoGroupNorm(norm_num_groups, block_out_channels[-1], eps=norm_eps, affine=True)
+        self.conv_out = MiniMaxH3VideoCausalConv3d(
+            block_out_channels[-1],
+            out_channels,
+            kernel_size=3,
+            spatial_padding=1,
+            temporal_padding=2,
+            spatial_padding_mode=spatial_padding_mode,
+        )
+
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
+        hidden_states = self.conv_in(hidden_states)
+        for down_block in self.down_blocks:
+            hidden_states = down_block(hidden_states)
+        hidden_states = F.silu(self.norm_out(hidden_states))
+        return self.conv_out(hidden_states)
+
+
+# ------------------------------------------------------------------ video decoder
 
 
 class MiniMaxH3VideoRotaryPosEmbed(nn.Module):
