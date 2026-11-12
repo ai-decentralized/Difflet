@@ -564,6 +564,11 @@ the `proj_out_attn` / `proj_out_mlp` column ranges) so no bf16 dot is left betwe
 calls — and, as for Qwen, a kernel that overlaps its neighbours. FLUX keeps its default target
 set; `--quant mxfp8` on FLUX is available and documented as memory-only for now.
 
+**Superseded (2026-11-07):** re-measured in `docs/verification/2026-11-07-mxfp8-video-models.md`
+section 6. The 0.99x above predates the kernel's `fast_dma_transpose` load path (6f): the same
+target set is 0.88x at 50 steps on today's tree, and with the single-stream `proj_out` halves
+quantized (phase D's split writer) FLUX's default is 0.82x.
+
 ## Bug ledger
 
 1. **Static-FP8 kernel path pathological inside block graphs** (section 5): compiler
