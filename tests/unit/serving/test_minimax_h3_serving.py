@@ -5,9 +5,7 @@ from __future__ import annotations
 
 import os
 import shutil
-from dataclasses import replace
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -72,6 +70,7 @@ def _neuron_cores(monkeypatch):
     # build_runtime_plan resolves the inherited core list; give it eight.
     monkeypatch.setenv("NEURON_RT_VISIBLE_CORES", "40-47")
     monkeypatch.delenv(minimax_h3.TEXT_BUCKET_ENV, raising=False)
+    monkeypatch.delenv(minimax_h3.KEYFRAMES_ENV, raising=False)
 
 
 def _request(**overrides) -> DiffletGenerateRequest:
@@ -260,9 +259,12 @@ def test_neuron_native_placement_needs_allocation_and_topology_but_no_artifact()
 def _apply_env(monkeypatch, tmp_path, *, native: bool, rank: int, count: int):
     from difflet.serving.engines import resident_worker
 
+    # setenv first: monkeypatch records an undo only for a variable it changes, and the code
+    # under test exports these names, which must not leak into later tests of the worker.
     for name in ("RANK", "LOCAL_RANK", "WORLD_SIZE", "LOCAL_WORLD_SIZE", "NEURON_RT_NUM_CORES",
-                 "NEURON_RT_VISIBLE_CORES"):
-        monkeypatch.delenv(name, raising=False)
+                 "NEURON_RT_VISIBLE_CORES", "MASTER_ADDR", "MASTER_PORT"):
+        monkeypatch.setenv(name, "")
+        monkeypatch.delenv(name)
     monkeypatch.setattr(resident_worker, "_on_native_neuron", lambda: native)
     monkeypatch.setattr(resident_worker, "_on_tpu", lambda: False)
     monkeypatch.setenv("NEURON_RT_VISIBLE_CORES", "40-47")
@@ -290,8 +292,9 @@ def test_other_backends_keep_the_single_process_environment(monkeypatch, tmp_pat
 def test_rendezvous_takes_a_fresh_port_per_start_unless_the_operator_set_one(monkeypatch):
     from difflet.serving.engines import resident_worker
 
-    monkeypatch.delenv("MASTER_ADDR", raising=False)
-    monkeypatch.delenv("MASTER_PORT", raising=False)
+    for name in ("MASTER_ADDR", "MASTER_PORT"):  # setenv first, so the exports are undone
+        monkeypatch.setenv(name, "")
+        monkeypatch.delenv(name)
     monkeypatch.setattr(resident_worker, "_OPERATOR_MASTER_PORT", None)
     resident_worker._export_native_neuron_rendezvous()
     first = os.environ["MASTER_PORT"]
