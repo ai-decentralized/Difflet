@@ -182,13 +182,90 @@ Measured timings against stock diffusers, and the full pass/limit matrix, are in
 runs its attention q/k/v and MLP linears in OCP MXFP8 through nkilib's `matmul_mxfp8` NKI kernel,
 no calibration needed. Measured on trn3.48xlarge at tp4, 1024×1024: DiT step 239 ms against
 299 ms in bf16 (0.80×); against the bf16 image, PSNR 26.8–39.2 dB over 4 prompts × 3 seeds
-(mean 32.5), SSIM 0.955–0.990, LPIPS 0.014–0.092 (bf16-vs-bf16 at another TP degree: 39–46 dB); and
-the DiT weights at 60% of their bf16 bytes. FLUX.1-dev takes the same flag (quality 31.7 dB against bf16) but gains no step time at
-tp4 / 1024×1024 yet: its single-stream blocks' fused output projection stays bf16. Refused on the
-AoT `trainium` backend, on trn2 and for other models;
+(mean 32.5), SSIM 0.955–0.990, LPIPS 0.014–0.092 (bf16-vs-bf16 at another TP degree: 39–46 dB);
+against diffusers fp32 on the CPU the MXFP8 image of the cat is 37.4 dB, 1.0 dB closer than the
+bf16 image's 36.3 (evidence section 10); and the DiT weights at 60% of their bf16 bytes. FLUX.1-dev takes the same flag, its single-stream output projection quantized as its
+attention and MLP halves: 183 ms against 222 ms in bf16 at tp4, 1024×1024, 50 steps (0.82×),
+deterministic (at 28 steps 34.7 dB from bf16; at 50 steps the sample drifts in composition, as
+bf16 at another TP degree does; against diffusers fp32 on the CPU the one reference image is
+21.3 dB from MXFP8 and 23.4 dB from bf16, a 2.1 dB gap that one image of this sampler cannot
+resolve, evidence section 10). LTX-2 (video,
+audio stream kept bf16) takes it as well: at tp4, 512×768×121, 50 steps the DiT step is 966 ms
+against 1284 ms in bf16 (0.75×), deterministic, with the quantized DiT at 64% of its bf16 bytes;
+against the bf16 clip PSNR 22.5 dB / SSIM 0.83 / LPIPS 0.078 (bf16-vs-bf16 at another TP degree:
+25.9 dB / 0.91 / 0.040), and against diffusers fp32 on the CPU both clips are far off at 121
+frames (MXFP8 16.8 dB, bf16 16.6 dB), MXFP8 no further than bf16 (evidence section 10). Wan 2.1 (the text cross-attention's
+q/k/v and the FFN; the self-attention q/k/v stay bf16) is 0.89× at 480×832×9 (393 ms against
+440) and 0.98× at 480×832×81 (4956 ms against 5053, measured before bf16 Wan's rotary went back
+to the bit-reproducible stride-2 law), with per-rank DiT weights of 5.36 GB against 7.50; over
+4 prompts × 3 seeds at 9 frames it is 32.1 dB / SSIM 0.934 / LPIPS 0.042 from the bf16 clip
+(bf16-vs-bf16 at another TP degree: 37 dB on one clip); against diffusers fp32 on the CPU at 9
+frames it is 33.7 dB / SSIM 0.947 where bf16 is 36.1 dB / 0.952, 2.4 dB further (81 frames not
+referenced; evidence section 10). Wan 2.2-A14B takes the same spec with `--dual-expert`, both experts
+quantized: 0.89× at 9 frames (392 ms against 440) and 0.98× at 81, 29.0 dB / SSIM 0.895 / LPIPS
+0.084 over the same 12 clips and, against CPU fp32 at 9 frames, 33.5 dB where bf16 is 36.4 dB
+(2.9 dB further), both experts resident at 10.7 GB per rank instead of 15.0. At the publishers'
+settings (480×832×81 with CFG and the model cards' negative prompts: Wan 2.1 5.0 at 50 steps,
+Wan 2.2 4.0 / 3.0 at 40) both run 0.98× (9.96 s against 10.14–10.15 s per step) with peak HBM per rank
+0.93× / 0.89×; Wan 2.1's clip is 15.1 dB from bf16 against 22.7 dB between two bf16 runs at
+different TP degrees, failing the device screen (Wan 2.2: 14.3 against 14.8 dB, passing). Their
+faster compile and cold start under `--quant` (0.63–0.75×) come from the NKI trace cache the flag
+turns on, not from MXFP8: bf16 Wan 2.1 with `DIFFLET_NKI_TRACE_CACHE=1` compiles in 541 s instead
+of 958 and starts cold in 653 s instead of 997, against which MXFP8 is 1.21× compile and 1.01× cold
+(Wan 2.2 shows the same warmup split; evidence section 12).
+Quantizing the self-attention q/k/v as well (a `DIFFLET_QUANT_TARGETS` override; their q/k are
+then reordered per head at load so that the rotary turns contiguous halves: 8.05 ms per tp4
+block against 10.67 in bf16) makes the step 0.76–0.77× at 9 frames and 0.93–0.94× at 81, but
+with both Wan 2.2 experts it put the 12 clips 1.44 dB / SSIM 0.034 further from bf16 (27.6
+against 29.0 dB), past the default rule, so the default leaves them bf16. HunyuanVideo (the dual-stream text q/k/v and both MLPs, the single-stream `proj_mlp` and
+`proj_out`, the latter quantized as its attention and MLP halves; the image-token q/k/v stay bf16,
+measured too far from bf16 quantized) is 0.96× at tp4, 320×512×61, 50 steps (635 ms against 660)
+and 0.97× at 544×960×129 (17.97 s against 18.49 s per step), deterministic, with the quantized DiT
+at 18 GB for 24 GB of bf16; against the bf16 clip 31.1 dB / SSIM 0.938 / LPIPS 0.050 at
+320×512×61 (bf16-vs-bf16 at another TP degree: 36.6 dB) and 26.5 dB at 544×960×129; against
+diffusers fp32 on the CPU at 320×512×61 both clips are far off (MXFP8 20.6 dB, bf16 20.8 dB),
+MXFP8 0.2 dB further (544×960×129 not referenced; evidence section 10). With `--sp` its MXFP8 step is 1.92× the bf16
+SP step (see below; the dual block's rotary runs as element-wise DMAs, although in the default
+its q/k come from the bf16 image projections; the cause is open); CP2 and `--dp 2` run as at tp4
+(`--dp 2` when its replicas may start at core 0: the router ignores an inherited
+`NEURON_RT_VISIBLE_CORES`, an open item on `main`). HunyuanVideo-1.5 has **no MXFP8 default**
+(the user's decision, 2026-11-09, on the numbers below): `--quant mxfp8` is refused unless
+`DIFFLET_QUANT_TARGETS` names the layers, from the four measured groups in
+`difflet/quant/targets.py` (`HUNYUAN_VIDEO_15_GROUPS`). The former default, the dual-stream
+blocks' image q/k/v and image MLP, is
+`DIFFLET_QUANT_TARGETS='transformer_blocks\.\d+\.attn\.(to_q|to_k|to_v);transformer_blocks\.\d+\.ff\.net\.(0\.proj|2)'`
+(the text stream's q/k/v and MLP stay bf16 in it: with the image and text q/k/v both quantized
+the step is 2.7× bf16's at 480×848×9, and 2.10× at 121 frames with every group):
+at tp2 × CFG2, 480×848×121, 50 steps its step is 1.011× bf16's (10.03 s against 9.92 s, one
+generate on the tree that reverted phase D's HunyuanVideo-1.5 rotary op D4; the set was
+chosen with D4, at 1.007×: 10.31 s against 10.24 s, deterministic), with the DiT weights at
+6.97 GiB per rank against 7.80 but no lower peak HBM (with D4 17.66 against 17.56 GiB: the
+runtime's scratchpad grows by what the weights save; without it the set peaks at 18.14 GiB,
+bf16 not measured), and with CP2 (`--tp-degree 2 --cfg-parallel --cp-degree 2`, 8 cores, with
+D4) it is 1.7–1.8× slower than bf16; against the bf16 clip 12.6 dB / SSIM 0.183 (with D4
+12.8 dB / SSIM 0.190), where two bf16 runs at different TP degrees are 15.9 dB / 0.312 apart (at
+121 frames the clip with every group quantized differs from bf16's in composition; the
+evidence's montage does not show this set's); against diffusers fp32 on the CPU at
+480×848×9 its clip is 17.4 dB / SSIM 0.446 where bf16's is 24.9 dB / 0.846, 7.5 dB
+further (the image MLP alone: 20.2 dB, 4.7 dB further; the image q/k/v alone: 18.1 dB; evidence
+section 10). At 121 frames that set gains neither speed nor peak HBM, hence no default
+([issue #145](https://github.com/ai-decentralized/Difflet/issues/145)); a rerun on a second trn3
+reproduced both clips bit for bit at 1.01× (evidence section 12).
+**Do not combine `--quant mxfp8` with `--sp`.** Measured on HunyuanVideo (tp4, 320×512×61):
+1263.8 ms per step against 659.4 ms for bf16 with SP (1.92×); SP with MXFP8 has not been measured
+on the other models. Use the model's default layout or CP2 instead, as measured: HunyuanVideo
+`--tp-degree 4 --cp-degree 2 --cp-mode gather_kv`, HunyuanVideo-1.5
+`--tp-degree 2 --cfg-parallel --cp-degree 2` (8 cores each; for HunyuanVideo-1.5, CP2 with
+MXFP8 is itself 1.7–1.8× bf16's, above).
+Refused on the AoT `trainium` backend, on
+trn2, for the other models and, for HunyuanVideo-1.5, without `DIFFLET_QUANT_TARGETS`;
 see [docs/cli-staged-commands.md](docs/cli-staged-commands.md#qwen-image-in-fp8-pytorch-native-neuron-backend-trainium3-only)
 and the evidence in
-[docs/verification/2026-10-31-qwen-image-fp8-native-trn3.md](docs/verification/2026-10-31-qwen-image-fp8-native-trn3.md).
+[docs/verification/2026-10-31-qwen-image-fp8-native-trn3.md](docs/verification/2026-10-31-qwen-image-fp8-native-trn3.md)
+(Qwen-Image, FLUX) and
+[docs/verification/2026-11-07-mxfp8-video-models.md](docs/verification/2026-11-07-mxfp8-video-models.md)
+(LTX-2, Wan 2.1, Wan 2.2-A14B, HunyuanVideo, HunyuanVideo-1.5; its section 10 is the CPU fp32
+reference for all seven models).
 
 **Notes**
 
@@ -202,7 +279,7 @@ and the evidence in
 14. The DiT runs on the NeuronCores; the VAE decodes on the host by default (diffusers' tiled decoder in fp32), because the compiled decoder does not build on neuronx-cc 2.26 (`--device-vae` opts into it). The host decode takes about 7 minutes at 320×512×61 and about 45 minutes at 480×848×121. Verified on device: TP2, TP2 × CFG2, TP4, TP4 + SP, TP2 × CP2 (ulysses and gather_kv), DP, JSONL batches and the default shape; see [docs/verification/hv15-aot-evidence.md](docs/verification/hv15-aot-evidence.md).
 15. Available but not recommended for HunyuanVideo 1.5: the calibration signal is weak and the output is visibly degraded, and the probe loads a second copy of the DiT weights, so it does not fit at the default shape. Use `--teacache-cadence 2` (20 of 50 steps skipped, about 40% less denoise time).
 
-Context parallelism (`--cp-degree > 1`) and CFG-parallel both consume the data-parallel lanes, so they are mutually exclusive (and each is mutually exclusive with `--sp`). `world_size = dp × (2 if cfg-parallel else 1) × cp_degree × tp_degree`; `--sp` leaves it unchanged. `difflet plan --model-id <id>` lists the combinations your host can run.
+Context parallelism (`--cp-degree > 1`) and CFG-parallel both consume the data-parallel lanes, so they are mutually exclusive, except for HunyuanVideo-1.5 on the native `--backend neuron` path, which runs `--tp-degree 2 --cfg-parallel --cp-degree 2` on 8 cores; each is mutually exclusive with `--sp`. `world_size = dp × (2 if cfg-parallel else 1) × cp_degree × tp_degree`; `--sp` leaves it unchanged. `difflet plan --model-id <id>` lists the combinations your host can run.
 
 ## Quick start
 
@@ -331,7 +408,9 @@ world_size = dp × (2 if cfg-parallel else 1) × cp_degree × tp_degree
 
 `--sp` reshards within the TP group and leaves `world_size` unchanged. Context parallelism
 and CFG-parallel both consume the data-parallel lanes, so they are mutually exclusive, and
-each is mutually exclusive with `--sp`.
+each is mutually exclusive with `--sp`. The exception is HunyuanVideo-1.5 on the native
+`--backend neuron` path, which composes them: `--tp-degree 2 --cfg-parallel --cp-degree 2` on
+8 cores.
 
 On a 4-core host the useful presets are:
 
