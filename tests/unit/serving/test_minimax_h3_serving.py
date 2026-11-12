@@ -71,6 +71,7 @@ def _neuron_cores(monkeypatch):
     monkeypatch.setenv("NEURON_RT_VISIBLE_CORES", "40-47")
     monkeypatch.delenv(minimax_h3.TEXT_BUCKET_ENV, raising=False)
     monkeypatch.delenv(minimax_h3.KEYFRAMES_ENV, raising=False)
+    monkeypatch.delenv(minimax_h3.FL2VA_TEXT_BUCKET_ENV, raising=False)
 
 
 def _request(**overrides) -> DiffletGenerateRequest:
@@ -169,12 +170,12 @@ def test_preparer_requires_the_native_neuron_backend(tmp_path, monkeypatch):
 
 
 def test_text_bucket_env(monkeypatch):
-    assert minimax_h3.text_bucket() == 512
+    assert minimax_h3.text_buckets() == {0: 512}
     monkeypatch.setenv(minimax_h3.TEXT_BUCKET_ENV, "1024")
-    assert minimax_h3.text_bucket() == 1024
+    assert minimax_h3.text_buckets() == {0: 1024}
     monkeypatch.setenv(minimax_h3.TEXT_BUCKET_ENV, "300")
     with pytest.raises(ValueError):
-        minimax_h3.text_bucket()
+        minimax_h3.text_buckets()
 
 
 # --------------------------------------------------------------------------- requests
@@ -366,7 +367,7 @@ def test_generate_stops_every_rank_at_an_agreed_check(monkeypatch, every, stop_a
     monkeypatch.setattr(res, "encode", lambda p: {
         "encoder_hidden_states": torch.zeros(1, 512, 8), "num_text_tokens": 3,
         "attention_mask": torch.ones(1, 512, dtype=torch.bool)})
-    monkeypatch.setattr(res, "modulation_table", lambda steps: None)
+    monkeypatch.setattr(res, "modulation_table", lambda steps, keyframes=False: None)
     monkeypatch.setattr(pipeline, "load_minimax_h3_schedulers", lambda d: (None, None))
     ran = []
 
@@ -441,16 +442,25 @@ def _fl2va_request(*anchors, prompt="a red fox"):
         keyframes=tuple(_keyframe(a) for a in anchors)))
 
 
-def test_keyframe_env_switches_to_the_fl2va_buckets(monkeypatch):
-    assert minimax_h3.num_keyframes() == 0
+def test_keyframe_env_lists_the_modes_each_at_its_own_bucket(monkeypatch):
+    assert minimax_h3.keyframe_modes() == (0,)
     monkeypatch.setenv(minimax_h3.KEYFRAMES_ENV, "2")
-    assert minimax_h3.text_bucket() == 3072
-    monkeypatch.setenv(minimax_h3.TEXT_BUCKET_ENV, "512")
+    assert minimax_h3.text_buckets() == {2: 3072}
+    # A one-keyframe-mode server's FL2VA value of the old single variable still applies.
+    monkeypatch.setenv(minimax_h3.TEXT_BUCKET_ENV, "4096")
+    assert minimax_h3.text_buckets() == {2: 4096}
+    monkeypatch.setenv(minimax_h3.KEYFRAMES_ENV, " 2, 0 ")
+    monkeypatch.setenv(minimax_h3.TEXT_BUCKET_ENV, "256")
+    monkeypatch.setenv(minimax_h3.FL2VA_TEXT_BUCKET_ENV, "2048")
+    assert minimax_h3.keyframe_modes() == (0, 2)
+    assert minimax_h3.text_buckets() == {0: 256, 2: 2048}
+    monkeypatch.setenv(minimax_h3.FL2VA_TEXT_BUCKET_ENV, "512")
     with pytest.raises(ValueError, match="2048"):
-        minimax_h3.text_bucket()
-    monkeypatch.setenv(minimax_h3.KEYFRAMES_ENV, "3")
-    with pytest.raises(ValueError, match="0, 1 or 2"):
-        minimax_h3.num_keyframes()
+        minimax_h3.text_buckets()
+    for bad in ("3", "0,x", ","):
+        monkeypatch.setenv(minimax_h3.KEYFRAMES_ENV, bad)
+        with pytest.raises(ValueError, match="keyframe counts"):
+            minimax_h3.keyframe_modes()
 
 
 def test_metadata_takes_keyframes_for_minimax_h3_only():
@@ -469,7 +479,7 @@ def test_validator_counts_the_keyframe_blocks_and_requires_the_server_s_count(tm
     monkeypatch.setenv(minimax_h3.KEYFRAMES_ENV, "2")
     validator = _validator(tmp_path)
     validator.validate(_fl2va_request("first", "last"))
-    with pytest.raises(DiffletServingError, match="takes 2 keyframe"):
+    with pytest.raises(DiffletServingError, match="first_frame and last_frame"):
         validator.validate(_fl2va_request("first"))
     # 768x1344: 24 * 42 image tokens + 2 + a 2-word label per keyframe = 2024 rows.
     assert validator.keyframe_rows(2, 768, 1344) == 2024
@@ -489,3 +499,66 @@ def test_fl2va_smoke_brings_the_server_s_keyframes(tmp_path):
     frames = minimax_h3.smoke_keyframes(2, _profile(tmp_path))
     assert [f.anchor for f in frames] == ["first", "last"]
     assert minimax_h3.smoke_keyframes(0, _profile(tmp_path)) == ()
+
+
+def test_a_multi_mode_server_validates_each_request_against_its_own_mode(tmp_path, monkeypatch):
+    monkeypatch.setenv(minimax_h3.KEYFRAMES_ENV, "0,2")
+    validator = _validator(tmp_path)
+    assert validator.buckets == {0: 512, 2: 3072}
+    validator.validate(_request())  # text only, at the 512 bucket
+    validator.validate(_fl2va_request("first", "last"))
+    with pytest.raises(DiffletServingError, match="text only, first_frame and last_frame"):
+        validator.validate(_fl2va_request("last"))
+    # Each mode's own bucket: 600 words fit the keyframe mode, not the text-only one.
+    with pytest.raises(DiffletServingError) as info:
+        validator.validate(_request(prompt="w " * 600))
+    assert info.value.code == "prompt_too_long"
+    validator.validate(_fl2va_request("first", "last", prompt="w " * 600))
+
+
+def _resident(modes):
+    from difflet.backends.neuron.minimax_h3.resident import NeuronMiniMaxH3Resident
+
+    return NeuronMiniMaxH3Resident(model_dir="/m", parallel=None, height=768, width=1344,
+                                   num_frames=124, cache_dir=None, modes=modes)
+
+
+def test_resident_modes_and_the_single_mode_constructor():
+    from difflet.backends.neuron.minimax_h3.resident import NeuronMiniMaxH3Resident
+
+    multi = _resident({2: 3072, 0: 512})
+    assert list(multi.modes) == [0, 2] and multi.fl2va and multi.text_bucket == 3072
+    with pytest.raises(AttributeError):
+        multi.num_keyframes
+    single = NeuronMiniMaxH3Resident(model_dir="/m", parallel=None, height=768, width=1344,
+                                     num_frames=124, cache_dir=None, text_bucket=512)
+    assert single.modes == {0: 512} and single.num_keyframes == 0 and not single.fl2va
+    for bad in ({3: 512}, {0: 0}, {}):
+        with pytest.raises(ValueError):
+            _resident(bad)
+
+
+def test_resident_runs_the_graph_of_the_request_s_keyframe_count(monkeypatch):
+    resident = _resident({0: 512, 2: 3072})
+    seen = {}
+
+    def fake_fl2va(prompt, first, last):
+        seen["fl2va"] = (first, last)
+        raise RuntimeError("stop after the mode pick")
+
+    def fake_encode(prompt):
+        seen["t2va"] = prompt
+        raise RuntimeError("stop after the mode pick")
+
+    monkeypatch.setattr(resident, "encode_fl2va", fake_fl2va)
+    monkeypatch.setattr(resident, "encode", fake_encode)
+    with pytest.raises(RuntimeError, match="mode pick"):
+        resident.generate("p", steps=2, seed=0, scratch_dir="/tmp", first_image="a",
+                          last_image="b")
+    assert seen.pop("fl2va") == ("a", "b")
+    with pytest.raises(RuntimeError, match="mode pick"):
+        resident.generate("p", steps=2, seed=0, scratch_dir="/tmp")
+    assert seen.pop("t2va") == "p"
+    # A rank without the images names the count; one the resident does not serve is refused.
+    with pytest.raises(ValueError, match="1 keyframe"):
+        resident.generate("p", steps=2, seed=0, scratch_dir="/tmp", num_keyframes=1)

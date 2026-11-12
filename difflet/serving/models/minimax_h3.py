@@ -70,36 +70,60 @@ _MAX_INFERENCE_STEPS = 200
 _MAX_SEED = 2**63 - 1
 _TEXT_BUCKETS = (128, 256, 512, 1024)
 _FL2VA_TEXT_BUCKETS = (2048, 3072, 4096)
-#: The serving profile's one text bucket (prompts up to this many tokens), set at startup.
+#: The text-only mode's bucket (prompt tokens); an FL2VA value (2048/3072/4096) is taken as the
+#: keyframe modes' bucket instead, as when a server served one keyframe mode only.
 TEXT_BUCKET_ENV = "DIFFLET_H3_TEXT_BUCKET"
+#: The keyframe modes' bucket (the whole presentation: prompt + each keyframe's block).
+FL2VA_TEXT_BUCKET_ENV = "DIFFLET_H3_FL2VA_TEXT_BUCKET"
 _DEFAULT_TEXT_BUCKET = 512
 _DEFAULT_FL2VA_TEXT_BUCKET = 3072
-#: FL2VA servers: how many keyframes every request brings (0 = text-to-video+audio, 1 = a
-#: ``first_frame`` or a ``last_frame``, 2 = both). Fixed at startup: the DiT is compiled for it.
+#: The request modes a server serves, by keyframe count, comma-separated: 0 text only, 1 a
+#: ``first_frame`` or a ``last_frame``, 2 both (e.g. ``0,2``). Fixed at startup: each mode is a
+#: DiT graph of its own on the one copy of the weights, warmed at startup.
 KEYFRAMES_ENV = "DIFFLET_H3_KEYFRAMES"
 _UNSUPPORTED_VIDEO_FIELDS = ("guidance_scale_2", "boundary_ratio", "flow_shift", "true_cfg_scale",
                              "negative_prompt")
 
 
-def num_keyframes() -> int:
-    raw = os.environ.get(KEYFRAMES_ENV, "").strip()
-    count = int(raw) if raw else 0
-    if count not in (0, 1, 2):
-        raise ValueError(f"{KEYFRAMES_ENV} must be 0, 1 or 2, got {raw!r}")
-    return count
+def keyframe_modes() -> tuple[int, ...]:
+    """The keyframe counts this server serves (``DIFFLET_H3_KEYFRAMES``, default ``0``)."""
+    raw = os.environ.get(KEYFRAMES_ENV, "").strip() or "0"
+    try:
+        modes = tuple(sorted({int(part) for part in raw.split(",") if part.strip()}))
+    except ValueError:
+        modes = ()
+    if not modes or any(m not in (0, 1, 2) for m in modes):
+        raise ValueError(f"{KEYFRAMES_ENV} must list keyframe counts 0, 1, 2 (e.g. '0' or "
+                         f"'0,2'), got {raw!r}")
+    return modes
 
 
-def text_bucket() -> int:
-    """The text bucket: prompt tokens for T2VA, the whole presentation (each keyframe's label and
-    vision block included) for FL2VA."""
-    fl2va = num_keyframes() > 0
-    allowed = _FL2VA_TEXT_BUCKETS if fl2va else _TEXT_BUCKETS
+def text_buckets() -> dict[int, int]:
+    """``{keyframe count: text bucket}`` of every mode: the prompt's bucket for text only, the
+    whole presentation's (each keyframe's label and image block included) for keyframes."""
+    t2va, fl2va = _DEFAULT_TEXT_BUCKET, _DEFAULT_FL2VA_TEXT_BUCKET
     raw = os.environ.get(TEXT_BUCKET_ENV, "").strip()
-    bucket = int(raw) if raw else (_DEFAULT_FL2VA_TEXT_BUCKET if fl2va else _DEFAULT_TEXT_BUCKET)
-    if bucket not in allowed:
-        raise ValueError(f"{TEXT_BUCKET_ENV} must be one of {allowed}"
-                         f"{' with ' + KEYFRAMES_ENV + ' > 0' if fl2va else ''}, got {bucket}")
-    return bucket
+    if raw:
+        bucket = int(raw)
+        if bucket in _TEXT_BUCKETS:
+            t2va = bucket
+        elif bucket in _FL2VA_TEXT_BUCKETS:
+            fl2va = bucket
+        else:
+            raise ValueError(f"{TEXT_BUCKET_ENV} must be one of {_TEXT_BUCKETS} (text only) or "
+                             f"{_FL2VA_TEXT_BUCKETS} (keyframes), got {bucket}")
+    raw = os.environ.get(FL2VA_TEXT_BUCKET_ENV, "").strip()
+    if raw:
+        fl2va = int(raw)
+        if fl2va not in _FL2VA_TEXT_BUCKETS:
+            raise ValueError(f"{FL2VA_TEXT_BUCKET_ENV} must be one of {_FL2VA_TEXT_BUCKETS}, "
+                             f"got {fl2va}")
+    return {mode: (fl2va if mode else t2va) for mode in keyframe_modes()}
+
+
+def describe_modes(modes) -> str:
+    names = {0: "text only", 1: "first_frame or last_frame", 2: "first_frame and last_frame"}
+    return ", ".join(names[m] for m in sorted(modes))
 
 
 def _backend_name() -> str | None:
@@ -240,7 +264,7 @@ class MiniMaxH3ServingArtifactPreparer:
         _require_neuron_backend()
         if profile.revision != self.revision:
             raise ValueError("MiniMax-H3 preparer revision must match the serving profile")
-        text_bucket()  # a bad bucket fails here, before the workers start
+        text_buckets()  # a bad mode or bucket fails here, before the workers start
         entry = resolve_model(self.model_id, model_type=_MODEL_TYPE)
         print(f"[difflet serve] resolving MiniMax-H3 weights for {self.model_id}")
         source = resolve_hf_model_source(self.model_id, revision=self.revision,
@@ -270,8 +294,7 @@ class MiniMaxH3ServingRequestValidator:
         _validate_profile(runtime.profile)
         self.runtime = runtime
         self.model_id = runtime.profile.model_id
-        self.bucket = text_bucket()
-        self.num_keyframes = num_keyframes()
+        self.buckets = text_buckets()
         self._tokenizer = None
 
     def preload(self) -> None:
@@ -309,22 +332,19 @@ class MiniMaxH3ServingRequestValidator:
             if getattr(video, name, None) is not None:
                 raise invalid_extra_body(f"{name} is not supported by MiniMax-H3 serving")
         keyframes = tuple(getattr(video, "keyframes", ()) or ())
-        if len(keyframes) != self.num_keyframes:
-            if self.num_keyframes == 0:
-                raise invalid_extra_body("this MiniMax-H3 server generates from text only; "
-                                         "first_frame/last_frame need a keyframe server")
+        if len(keyframes) not in self.buckets:
             raise invalid_extra_body(
-                f"this MiniMax-H3 server takes {self.num_keyframes} keyframe(s) "
-                f"({'first_frame and last_frame' if self.num_keyframes == 2 else 'first_frame or last_frame'}), "
-                f"the request has {len(keyframes)}")
+                f"this MiniMax-H3 server serves {describe_modes(self.buckets)}; the request has "
+                f"{len(keyframes)} keyframe(s)")
+        bucket = self.buckets[len(keyframes)]
         count = self.prompt_tokens(request.prompt)
         if count < 1:
             raise invalid_extra_body("MiniMax-H3 prompt must produce at least one token")
         count += self.keyframe_rows(len(keyframes), profile.height, profile.width)
-        if count > self.bucket:
+        if count > bucket:
             raise prompt_too_long(f"MiniMax-H3 prompt has {count} tokens"
                                   f"{' with the keyframe blocks' if keyframes else ''}; this "
-                                  f"server's text bucket is {self.bucket}")
+                                  f"mode's text bucket is {bucket}")
 
     def keyframe_rows(self, count: int, height: int, width: int) -> int:
         """Presentation rows of ``count`` keyframes on the canvas: per keyframe its
@@ -536,8 +556,7 @@ class MiniMaxH3ServingStageAdapter:
         resident = NeuronMiniMaxH3Resident(
             model_dir=runtime.source.pinned_model_path, parallel=profile.parallel,
             height=profile.height, width=profile.width, num_frames=profile.num_frames,
-            text_bucket=text_bucket(), cache_dir=profile.cache_dir,
-            num_keyframes=num_keyframes(),
+            modes=text_buckets(), cache_dir=profile.cache_dir,
             # Worker processes do not inherit the serve logging config; like every serving
             # adapter, worker-side progress goes to stdout under the [difflet serve] prefix.
             log=lambda message: print(f"[difflet serve] MiniMax-H3: {message}", flush=True))
@@ -570,7 +589,9 @@ class MiniMaxH3ServingStageAdapter:
             video=VideoGenerateOptions(num_frames=int(profile.num_frames),
                                        fps=int(profile.output_fps),
                                        output_target=self._smoke.file_target(),
-                                       keyframes=smoke_keyframes(num_keyframes(), profile)),
+                                       # The largest mode: the vision path end to end.
+                                       keyframes=smoke_keyframes(max(keyframe_modes()),
+                                                                 profile)),
         )
 
     def validate_smoke_output(self, output: GenerateOutput) -> None:

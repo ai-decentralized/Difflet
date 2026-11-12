@@ -173,15 +173,17 @@ H3 settings are environment variables of the serve process, fixed at startup:
 
 | Variable | Values | Default | Meaning |
 | --- | --- | --- | --- |
-| `DIFFLET_H3_KEYFRAMES` | `0`, `1`, `2` | `0` | Keyframes every request brings: `0` text only, `1` a `first_frame` **or** a `last_frame`, `2` both. The DiT is compiled for the count, so one server serves one mode |
-| `DIFFLET_H3_TEXT_BUCKET` | `128/256/512/1024`; with keyframes `2048/3072/4096` | `512`; `3072` with keyframes | Token budget of the conditioner presentation (prompt, plus each keyframe's label and image block) |
+| `DIFFLET_H3_KEYFRAMES` | comma list of `0`, `1`, `2` | `0` | The request modes the server serves, by keyframe count: `0` text only, `1` a `first_frame` **or** a `last_frame`, `2` both; e.g. `0,2` serves text-only and first+last requests. Each mode is a DiT graph of its own on the one copy of the weights, warmed at startup (~13 min more per extra mode) |
+| `DIFFLET_H3_TEXT_BUCKET` | `128/256/512/1024` | `512` | Prompt token budget of the text-only mode (an FL2VA value is taken as the keyframe modes' bucket, for compatibility) |
+| `DIFFLET_H3_FL2VA_TEXT_BUCKET` | `2048/3072/4096` | `3072` | Token budget of the keyframe modes' presentation (prompt, plus each keyframe's label and image block) |
 | `DIFFLET_H3_TEXT_ENCODER` | `host`, `auto`, `device` | `host` | Where the Qwen3-VL conditioner runs; keyframe servers always use the host (the device conditioner has no vision tower) |
 | `DIFFLET_H3_CANCEL_CHECK_STEPS` | positive integer | `5` | Denoise steps between cancellation checks |
 
-A keyframe server (`DIFFLET_H3_KEYFRAMES=2`, 124 frames, bucket 3072):
+A server for both text-only and first+last-keyframe requests (`DIFFLET_H3_KEYFRAMES=0,2`,
+124 frames; a request picks its mode by the keyframes it uploads):
 
 ```bash
-DIFFLET_BACKEND=neuron DIFFLET_H3_KEYFRAMES=2 difflet serve \
+DIFFLET_BACKEND=neuron DIFFLET_H3_KEYFRAMES=0,2 difflet serve \
   --model-id MiniMaxAI/MiniMax-H3 --cache-dir /mnt/model-cache/difflet \
   --tp-degree 4 --cp-degree 2 --cp-mode ulysses \
   --height 768 --width 1344 --num-frames 124 \
@@ -190,8 +192,13 @@ DIFFLET_BACKEND=neuron DIFFLET_H3_KEYFRAMES=2 difflet serve \
 
 curl -sS http://127.0.0.1:8090/v1/videos/sync \
   -F 'prompt=<prompt.txt' -F first_frame=@first.png -F last_frame=@last.png \
-  -F seed=42 -o out.mp4
+  -F seed=42 -o out.mp4                                   # first+last mode
+curl -sS http://127.0.0.1:8090/v1/videos/sync \
+  -F 'prompt=<prompt.txt' -F seed=42 -o out_text.mp4      # text-only mode
 ```
+
+A request whose keyframe count is not one of the server's modes gets `400`
+`invalid_extra_body` naming the modes it serves.
 
 Keyframes are put onto the server's canvas the way the reference pipeline does:
 the first given keyframe is stretched to the canvas, the second is scaled to

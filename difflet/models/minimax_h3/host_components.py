@@ -220,18 +220,22 @@ class HostQwen3VLTextEncoder:
             processor_dir = encoder_dir
         self.image_processor = AutoImageProcessor.from_pretrained(processor_dir)
 
-    def tokenize(self, prompt: str) -> tuple[torch.Tensor, torch.Tensor]:
+    def tokenize(self, prompt: str, seq_len: int | None = None) -> tuple[torch.Tensor, torch.Tensor]:
         tokens = self.tokenizer(
-            prompt, add_special_tokens=False, max_length=self.seq_len, padding="max_length",
+            prompt, add_special_tokens=False, max_length=int(seq_len or self.seq_len),
+            padding="max_length",
             truncation=True, return_tensors="pt", return_attention_mask=True,
         )
         return tokens.input_ids, tokens.attention_mask
 
     @torch.no_grad()
-    def encode(self, prompt: str) -> dict[str, Any]:
+    def encode(self, prompt: str, seq_len: int | None = None) -> dict[str, Any]:
+        """``seq_len`` (default: the encoder's) pads the record to a smaller bucket, so a
+        conditioner shared by several modes does not run a text-only prompt at the largest."""
         if self.model is None:
             raise RuntimeError("HostQwen3VLTextEncoder.load() first")
-        input_ids, attention_mask = self.tokenize(prompt)
+        seq_len = int(seq_len or self.seq_len)
+        input_ids, attention_mask = self.tokenize(prompt, seq_len)
         token_count = int(attention_mask.sum())
         if token_count < 1:
             raise ValueError("MiniMax-H3 prompt must produce at least one token")
@@ -243,7 +247,7 @@ class HostQwen3VLTextEncoder:
         try:
             with intra_op_threads(self.threads):
                 self.model(input_ids=input_ids, attention_mask=attention_mask,
-                           position_ids=torch.arange(self.seq_len).unsqueeze(0), use_cache=False)
+                           position_ids=torch.arange(seq_len).unsqueeze(0), use_cache=False)
         finally:
             handle.remove()
         hidden = captured[-1].to(torch.bfloat16).clone()
@@ -257,7 +261,8 @@ class HostQwen3VLTextEncoder:
 
 
     @torch.no_grad()
-    def encode_presentation(self, prompt: str, keyframes) -> dict[str, Any]:
+    def encode_presentation(self, prompt: str, keyframes,
+                            seq_len: int | None = None) -> dict[str, Any]:
         """Encode an FL2VA presentation; the record of ``encode`` plus ``text_token_tags``
         (``(num_text_tokens,)``, the vision blocks' rows tagged video)."""
         from difflet.models.minimax_h3.keyframes import build_fl2va_presentation
@@ -267,10 +272,11 @@ class HostQwen3VLTextEncoder:
         token_ids, token_tags, vision_inputs = build_fl2va_presentation(
             self.tokenizer, self.image_processor, prompt, keyframes)
         count = len(token_ids)
-        if count > self.seq_len:
+        seq_len = int(seq_len or self.seq_len)
+        if count > seq_len:
             raise ValueError(
                 f"the FL2VA presentation has {count} tokens (keyframe vision blocks included), "
-                f"more than the {self.seq_len}-token text bucket")
+                f"more than the {seq_len}-token text bucket")
         input_ids = torch.tensor([token_ids], dtype=torch.long)
         vision_kwargs = {
             name: (value.to(self.vision_dtype) if name.startswith("pixel_") else value)
@@ -287,9 +293,9 @@ class HostQwen3VLTextEncoder:
                                 use_cache=False, **vision_kwargs)
         finally:
             handle.remove()
-        hidden = torch.zeros(1, self.seq_len, captured[-1].shape[-1], dtype=torch.bfloat16)
+        hidden = torch.zeros(1, seq_len, captured[-1].shape[-1], dtype=torch.bfloat16)
         hidden[:, :count] = captured[-1].to(torch.bfloat16)
-        attention_mask = torch.zeros(1, self.seq_len, dtype=torch.bool)
+        attention_mask = torch.zeros(1, seq_len, dtype=torch.bool)
         attention_mask[:, :count] = True
         return {
             "encoder_hidden_states": hidden,
