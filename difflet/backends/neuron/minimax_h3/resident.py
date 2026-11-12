@@ -20,6 +20,13 @@ start of a request. ``DIFFLET_H3_TEXT_ENCODER`` picks where:
 
 The audio decoder runs on the host of the primary rank. Every rank must call ``generate`` (the collectives need them all); only rank
 0 gets the media back.
+
+FL2VA (``num_keyframes`` 1 or 2): the DiT is built with that many keyframe condition frames
+ahead of the generated rows and three timestep slots. A request's keyframes are prepared and
+encoded on rank 0's host only (Qwen3-VL with its vision tower, read at ``hidden_states[50]``, and
+the video VAE encoder), whatever ``DIFFLET_H3_TEXT_ENCODER`` says, since the device conditioner
+has no vision tower; the presentation, its row tags, the condition latents and the anchors are
+broadcast to every rank.
 """
 
 from __future__ import annotations
@@ -111,7 +118,7 @@ def _is_hbm_exhaustion(exc: BaseException) -> bool:
 class NeuronMiniMaxH3Resident:
     def __init__(self, *, model_dir: str, parallel, height: int, width: int, num_frames: int,
                  text_bucket: int, cache_dir: str | None, vae_dtype=torch.float32,
-                 log=None) -> None:
+                 log=None, num_keyframes: int = 0) -> None:
         self.model_dir = str(model_dir)
         self.parallel = parallel
         self.height, self.width, self.num_frames = int(height), int(width), int(num_frames)
@@ -126,6 +133,10 @@ class NeuronMiniMaxH3Resident:
         self.rank, self.world = 0, 1
         self.text_encoder_mode = text_encoder_mode()
         self._host_encoder = None  # rank 0 only, loaded at the first host encode
+        self.num_keyframes = int(num_keyframes)
+        if not 0 <= self.num_keyframes <= 2:
+            raise ValueError(f"num_keyframes must be 0, 1 or 2, got {num_keyframes}")
+        self._host_video_encoder = None  # rank 0 only, FL2VA
 
     def log(self, message: str) -> None:
         """Rank 0 only. ``log`` (the constructor's) gets the bare message; the default prints it
@@ -152,6 +163,7 @@ class NeuronMiniMaxH3Resident:
             str(Path(self.model_dir) / "transformer"), height=self.height, width=self.width,
             num_frames=self.num_frames, text_seq_len=self.text_bucket,
             tp_degree=int(self.parallel.tp_degree), precomputed_adaln=True,
+            num_keyframes=self.num_keyframes,
         )
         self.config = config
         self.dit_app = NeuronMiniMaxH3TransformerApplication(
@@ -261,6 +273,73 @@ class NeuronMiniMaxH3Resident:
         return {"encoder_hidden_states": hidden, "attention_mask": mask,
                 "num_text_tokens": int(count.item()), "text_encoder_layer": layer}
 
+    def encode_fl2va(self, prompt: str, first_image=None, last_image=None) -> dict[str, Any]:
+        """The FL2VA presentation and keyframe conditions on every rank. Rank 0 prepares the
+        keyframes onto this resident's canvas and encodes them on its host; the other ranks'
+        images are ignored. Returns the ``encode`` record plus ``text_token_tags``,
+        ``condition_latents`` (one ``(1, 24, 1, h, w)`` per keyframe) and ``keyframe_anchors``."""
+        from difflet.backends.neuron.core.distributed import broadcast_tensor, rank0_call
+
+        device = self.dit_app.device
+
+        def encode() -> dict[str, Any]:
+            from difflet.models.minimax_h3.host_components import (
+                HostQwen3VLTextEncoder,
+                default_threads,
+                load_host_video_encoder,
+            )
+            from difflet.models.minimax_h3.keyframes import keyframe_pixels, prepare_keyframes
+
+            keyframes, anchors, _, _ = prepare_keyframes(
+                first_image, last_image, height=self.height, width=self.width)
+            if len(keyframes) != self.num_keyframes:
+                raise ValueError(f"this resident is built for {self.num_keyframes} keyframe(s), "
+                                 f"the request has {len(keyframes)}")
+            encoder = self._host_encoder
+            if encoder is None or not getattr(encoder, "vision", False):
+                start = time.perf_counter()
+                encoder = HostQwen3VLTextEncoder(
+                    self.model_dir, seq_len=self.text_bucket, threads=default_threads(),
+                    vision=True).load()
+                self._host_encoder = encoder
+                self.log(f"host conditioner (with the vision tower) loaded in "
+                         f"{time.perf_counter() - start:.1f}s")
+            if self._host_video_encoder is None:
+                self._host_video_encoder = load_host_video_encoder(
+                    self.model_dir, threads=default_threads())
+            start = time.perf_counter()
+            record = encoder.encode_presentation(prompt, keyframes)
+            record["condition_latents"] = torch.cat(
+                [self._host_video_encoder(keyframe_pixels(k)) for k in keyframes])
+            record["keyframe_anchors"] = anchors
+            self.log(f"FL2VA presentation ({record['num_text_tokens']} rows, "
+                     f"{', '.join(anchors)} keyframe) and conditions encoded on the host in "
+                     f"{time.perf_counter() - start:.1f}s")
+            return record
+
+        record = rank0_call(encode, device=device, what="host FL2VA encode")
+        have = record is not None
+
+        def bcast(value):
+            return broadcast_tensor(value if have else None, device=device).cpu()
+
+        hidden = bcast(record["encoder_hidden_states"] if have else None)
+        mask = bcast(record["attention_mask"].to(torch.int32) if have else None).to(torch.bool)
+        count = int(bcast(torch.tensor([int(record["num_text_tokens"])], dtype=torch.int32)
+                          if have else None).item())
+        tags = bcast(record["text_token_tags"].to(torch.int32) if have else None).long()
+        conditions = bcast(record["condition_latents"].float() if have else None)
+        anchor_codes = bcast(torch.tensor([("first", "last").index(a)
+                                           for a in record["keyframe_anchors"]],
+                                          dtype=torch.int32) if have else None)
+        return {
+            "encoder_hidden_states": hidden, "attention_mask": mask, "num_text_tokens": count,
+            "text_encoder_layer": record["text_encoder_layer"] if have else None,
+            "text_token_tags": tags,
+            "condition_latents": list(conditions.split(1)),
+            "keyframe_anchors": tuple(("first", "last")[int(c)] for c in anchor_codes.tolist()),
+        }
+
     def modulation_table(self, steps: int) -> torch.Tensor:
         """The precomputed AdaLN table of a ``steps``-step schedule: built once on rank 0 into
         ``<cache_dir>/minimax_h3_neuron/`` (the file the CLI writes too), read by every rank."""
@@ -272,8 +351,12 @@ class NeuronMiniMaxH3Resident:
                 load_minimax_h3_schedulers,
             )
 
+            from difflet.models.minimax_h3.pipeline import step_timestep_slots
+
             root = Path(self.cache_dir or Path.home() / ".cache" / "difflet")
-            path = root / "minimax_h3_neuron" / f"adaln_table_steps{steps}.pt"
+            keyframes = self.num_keyframes > 0
+            suffix = "_fl2va" if keyframes else ""
+            path = root / "minimax_h3_neuron" / f"adaln_table_steps{steps}{suffix}.pt"
             config = self.config
 
             def build() -> None:
@@ -282,9 +365,9 @@ class NeuronMiniMaxH3Resident:
                 video_sched, audio_sched = load_minimax_h3_schedulers(self.model_dir)
                 video_sched.set_timesteps(steps, device="cpu")
                 audio_sched.set_timesteps(steps, device="cpu")
-                # Slot order matches the denoise loop: 0 = audio, 1 = video.
-                timesteps = torch.stack([audio_sched.timesteps.to(torch.float32),
-                                         video_sched.timesteps.to(torch.float32)], dim=-1)
+                # Slot order matches the denoise loop: 0 audio, 1 video, (FL2VA) 2 keyframes.
+                timesteps = step_timestep_slots(video_sched.timesteps, audio_sched.timesteps,
+                                                keyframes=keyframes)
                 table = build_adaln_modulation_table(
                     str(Path(self.model_dir) / "transformer"), timesteps,
                     num_layers=int(config.num_layers), freq_dim=int(config.freq_dim),
@@ -312,10 +395,14 @@ class NeuronMiniMaxH3Resident:
         return bool(int(flag.cpu().item()))
 
     def generate(self, prompt: str, *, steps: int, seed: int,
-                 scratch_dir: str | Path, should_stop=None) -> ResidentRequestResult:
+                 scratch_dir: str | Path, should_stop=None, first_image=None,
+                 last_image=None) -> ResidentRequestResult:
         """One request on every rank. ``should_stop()`` (this rank's cancellation/deadline) is
         polled after the text encode and every ``DIFFLET_H3_CANCEL_CHECK_STEPS`` denoise steps;
-        once any rank says stop, every rank raises ``ResidentRequestCancelled`` together."""
+        once any rank says stop, every rank raises ``ResidentRequestCancelled`` together.
+
+        A resident built with ``num_keyframes`` takes that many of ``first_image`` /
+        ``last_image`` (PIL images, read on rank 0 only)."""
         from difflet.backends.neuron.minimax_h3.vae import decode_video_on_ranks
         from difflet.models.minimax_h3.pipeline import (
             decode_minimax_h3_audio,
@@ -325,7 +412,13 @@ class NeuronMiniMaxH3Resident:
 
         seconds: dict[str, float] = {}
         start = time.perf_counter()
-        text = self.encode(prompt)
+        if self.num_keyframes:
+            text = self.encode_fl2va(prompt, first_image, last_image)
+        else:
+            if self.rank == 0 and (first_image is not None or last_image is not None):
+                raise ValueError("this resident is built for text-to-video+audio; keyframes "
+                                 "need a resident built with num_keyframes")
+            text = self.encode(prompt)
         seconds["text"] = time.perf_counter() - start
         live = int(text["num_text_tokens"])
         if live > self.text_bucket:
@@ -356,6 +449,9 @@ class NeuronMiniMaxH3Resident:
             video_scheduler=video_scheduler, audio_scheduler=audio_scheduler,
             model_dtype=torch.bfloat16, adaln_modulation_table=table,
             step_callback=after_step if should_stop is not None else None,
+            condition_latents=text.get("condition_latents"),
+            keyframe_anchors=tuple(text.get("keyframe_anchors", ())),
+            text_token_tags=text.get("text_token_tags"),
         )
         seconds["denoise"] = time.perf_counter() - start
         check("after the denoise")
@@ -384,6 +480,7 @@ class NeuronMiniMaxH3Resident:
 
     def shutdown(self) -> None:
         self._host_encoder = None
+        self._host_video_encoder = None
         self.dit_app = None
         self.vae = None
         self.audio_decoder = None

@@ -91,6 +91,9 @@ def _build_stage_parser() -> argparse.ArgumentParser:
                    choices=["bf16", "fp32"])
     p.add_argument("--device-text-encoder", dest="device_text_encoder", action="store_true")
     p.add_argument("--seed", type=int, default=42)
+    # MiniMax-H3 FL2VA keyframes (main refuses them for every other model).
+    p.add_argument("--first-frame", dest="first_frame", default=None)
+    p.add_argument("--last-frame", dest="last_frame", default=None)
     p.add_argument("--work-dir", default=None)
     p.add_argument("--cache-dir", default=None)
     p.add_argument("--compiled-dir", default=None)

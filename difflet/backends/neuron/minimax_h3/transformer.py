@@ -71,6 +71,10 @@ FP32_MODULES = ("proj_in", "audio_proj_in", "time_embedder", "proj_out", "audio_
 #: linear still computes them, so a 27-token prompt in the 1024 bucket spends ~18% of each step
 #: (5632 packed rows at 256x448x124) on padding.
 TEXT_BUCKETS = (128, 256, 512, 1024)
+#: FL2VA buckets: a keyframe's presentation is a ``"<Picture i>: "`` label plus its vision block
+#: (~1010 rows at 768x1344), so a 768p request with both keyframes needs ~2050 rows + the prompt.
+#: Never warmed up together with ``TEXT_BUCKETS``.
+FL2VA_TEXT_BUCKETS = (2048, 3072, 4096)
 
 
 def text_bucket(num_text_tokens: int, buckets=TEXT_BUCKETS) -> int:
@@ -81,7 +85,8 @@ def text_bucket(num_text_tokens: int, buckets=TEXT_BUCKETS) -> int:
     raise ValueError(f"{num_text_tokens} text tokens exceed the largest bucket {max(buckets)}")
 
 
-#: Distinct timestep slots per call: 0 audio, 1 video/text (the denoise loop's contract).
+#: Distinct timestep slots per call: 0 audio, 1 video/text (the denoise loop's contract); FL2VA
+#: adds 2, the keyframe condition rows (``NeuronMiniMaxH3Config.num_timestep_slots``).
 NUM_TIMESTEP_SLOTS = 2
 #: The model's fixed frame rate: 40 audio latent rows per second per channel.
 _FPS = 24
@@ -130,6 +135,10 @@ class NeuronMiniMaxH3Config:
     #: The CP strategy of the block stack when the mesh has cp > 1 ("ulysses" or "gather_kv");
     #: the application fills it from its parallel config.
     cp_mode: str = "ulysses"
+    #: FL2VA keyframe condition frames packed ahead of the generated video rows (0 = T2VA, 1 for a
+    #: first- or a last-frame request, 2 for both). Only the shapes depend on it: one graph serves
+    #: "first" and "last" alike, since positions and indices are call inputs.
+    num_keyframes: int = 0
 
     @classmethod
     def from_pretrained(cls, transformer_dir, **overrides: Any) -> "NeuronMiniMaxH3Config":
@@ -153,10 +162,29 @@ class NeuronMiniMaxH3Config:
         return int(self.width) // VAE_SPATIAL_COMPRESSION
 
     @property
+    def rows_per_frame(self) -> int:
+        _, ph, pw = self.patch_size
+        return (self.latent_height // ph) * (self.latent_width // pw)
+
+    @property
+    def num_condition_video_rows(self) -> int:
+        return int(self.num_keyframes) * self.rows_per_frame
+
+    @property
     def video_seq_len(self) -> int:
-        pt, ph, pw = self.patch_size
-        return (video_latent_num_frames(int(self.num_frames)) // pt
-                * (self.latent_height // ph) * (self.latent_width // pw))
+        """Video rows per call: the keyframe condition rows, then the generated rows."""
+        pt = self.patch_size[0]
+        generated = video_latent_num_frames(int(self.num_frames)) // pt * self.rows_per_frame
+        return self.num_condition_video_rows + generated
+
+    @property
+    def num_timestep_slots(self) -> int:
+        return NUM_TIMESTEP_SLOTS + (1 if int(self.num_keyframes) else 0)
+
+    @property
+    def keyframe_anchors(self) -> tuple[str, ...]:
+        """Placeholder anchors for the static shapes (positions are call inputs)."""
+        return ("first", "last")[: int(self.num_keyframes)]
 
     @property
     def video_patch_dim(self) -> int:
@@ -171,10 +199,12 @@ class NeuronMiniMaxH3Config:
         return build_padded_t2va_layout(
             num_text_tokens=int(num_text_tokens), max_text_tokens=int(self.text_seq_len),
             height=int(self.height), width=int(self.width), num_frames=int(self.num_frames),
-            sequence_alignment=128,
+            sequence_alignment=128, keyframe_anchors=self.keyframe_anchors,
         )
 
     def validate(self) -> None:
+        if not 0 <= int(self.num_keyframes) <= 2:
+            raise ValueError(f"MiniMax-H3 num_keyframes must be 0, 1 or 2, got {self.num_keyframes}")
         if tuple(self.patch_size) != tuple(PATCH_SIZE):
             raise NotImplementedError(f"MiniMax-H3 supports patch_size={PATCH_SIZE}")
         if int(self.height) % 32 or int(self.width) % 32:
@@ -457,6 +487,8 @@ class NeuronMiniMaxH3TransformerApplication(TorchNeuronApplicationBase):
         layout = cfg.layout(live)
         timestep_indices = torch.ones(layout.sequence_length, dtype=torch.int64)
         timestep_indices[layout.audio_indices] = 0
+        timestep_indices[layout.video_indices[: layout.num_condition_video_rows]] = 2
+        slots = int(cfg.num_timestep_slots)
         text_mask = torch.zeros(1, int(cfg.text_seq_len), dtype=torch.int32)
         text_mask[:, :live] = 1
         inputs = [
@@ -465,7 +497,7 @@ class NeuronMiniMaxH3TransformerApplication(TorchNeuronApplicationBase):
                         ).to(self.dtype),
             torch.randn(1, int(cfg.text_seq_len), int(cfg.text_dim), generator=gen
                         ).to(self.dtype),
-            torch.tensor([0.3, 0.7], dtype=torch.float32),
+            torch.tensor([0.3, 0.7, 0.999][:slots], dtype=torch.float32),
             timestep_indices,
             layout.token_tags.to(torch.int64),
             layout.position_ids.to(torch.float32),
@@ -476,13 +508,14 @@ class NeuronMiniMaxH3TransformerApplication(TorchNeuronApplicationBase):
             layout.attention_mask.to(torch.int32).unsqueeze(0),
         ]
         if cfg.precomputed_adaln:
-            inputs.append(torch.randn(int(cfg.num_layers), 6, NUM_TIMESTEP_SLOTS * 3,
+            inputs.append(torch.randn(int(cfg.num_layers), 6, slots * 3,
                                       int(cfg.hidden_size), generator=gen).to(self.dtype))
         return tuple(inputs)
 
 
 __all__ = [
     "CHECKPOINT_PREFIX",
+    "FL2VA_TEXT_BUCKETS",
     "TEXT_BUCKETS",
     "text_bucket",
     "FP32_MODULES",

@@ -477,6 +477,22 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
     )
     p.add_argument("--seed", type=int, default=42)
     p.add_argument(
+        "--first-frame",
+        dest="first_frame",
+        default=None,
+        metavar="IMAGE",
+        help="MiniMax-H3 on the neuron backend: the keyframe the video starts from (FL2VA; "
+        "the canvas follows its aspect ratio unless --height/--width are given)",
+    )
+    p.add_argument(
+        "--last-frame",
+        dest="last_frame",
+        default=None,
+        metavar="IMAGE",
+        help="MiniMax-H3 on the neuron backend: the keyframe the video ends on (FL2VA; alone or "
+        "with --first-frame)",
+    )
+    p.add_argument(
         "--torch-compile",
         action="store_true",
         help="CUDA backend only: torch.compile the DiT blocks (opt-in; eager is the default)",
@@ -978,6 +994,28 @@ def _validate_taef1(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+#: Models whose generate path takes --first-frame / --last-frame (first/last keyframe
+#: conditioning). Every other model refuses the flags rather than ignoring them.
+_KEYFRAME_MODELS = frozenset({"MiniMaxAI/MiniMax-H3"})
+
+
+def _validate_keyframes(args: argparse.Namespace) -> None:
+    frames = [f for f in (getattr(args, "first_frame", None), getattr(args, "last_frame", None)) if f]
+    if not frames:
+        return
+    if args.model_id not in _KEYFRAME_MODELS:
+        print(
+            f"Error: {args.model_id} does not support --first-frame/--last-frame "
+            "(keyframe conditioning is wired for MiniMax-H3 only).",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    for frame in frames:
+        if not os.path.isfile(frame):
+            print(f"Error: keyframe image not found: {frame}", file=sys.stderr)
+            raise SystemExit(1)
+
+
 def _validate_cfg_parallel(args: argparse.Namespace) -> None:
     if not getattr(args, "cfg_parallel", False):
         return
@@ -1335,6 +1373,7 @@ def main(argv: list[str] | None = None) -> None:
         _validate_cfg_parallel(args)
         _validate_sp(args)
         _validate_taef1(args)
+        _validate_keyframes(args)
         validate_quant(args)
         from difflet.cli.modes import resolve_mode
 
