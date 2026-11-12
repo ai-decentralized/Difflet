@@ -637,6 +637,10 @@ class TorchNeuronLtx2Application(TorchNeuronModelApplication):
             audio = pipeline.prepare_audio_latents(
                 batch_size=1, channels=int(kwargs.get("audio_channels", _AUDIO_LATENT_CHANNELS)),
                 dtype=pipeline.dtype, generator=generator)
+            if os.environ.get("DIFFLET_LTX2_HOST_FP32") == "1":
+                # probe: the same bf16 draw, carried in fp32 so the host-side x0/velocity/CFG
+                # math and the scheduler state stay fp32 (as diffusers keeps them)
+                video, audio = video.float(), audio.float()
             return video.contiguous(), audio.contiguous()
 
         return self._draw_on_rank0(draw, count=2)
