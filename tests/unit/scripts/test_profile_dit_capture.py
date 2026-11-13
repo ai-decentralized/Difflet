@@ -50,7 +50,8 @@ os.execv(sys.executable, [sys.executable] + sys.argv[1:])
 #: neuron-explorer: `inspect` writes the dump FAKE_DUMP describes (per rank, {model id:
 #: "<marker>[+<KiB>]"}: a NEFF is its marker in a 1024-byte header, then a tar.gz of a debug-info
 #: file naming the marker's source files and 1 MiB (+ KiB) of incompressible bytes) and runs the
-#: userscript; `capture` takes FAKE_CAPTURE_S seconds (its start and end appended to SPANS if
+#: userscript, taking FAKE_DUMP_S seconds (its -o, start and end appended to DUMP_SPANS if set);
+#: `capture` takes FAKE_CAPTURE_S seconds (its start and end appended to SPANS if
 #: set) and writes the two NTFFs; `view` prints a summary, writes a system profile
 #: (each NEFF once in a warm-up and once in the step, on both physical cores as the runtime
 #: records it) or an Instruction table whose rows the NEFF's marker picks.
@@ -94,7 +95,14 @@ if args[0] == "inspect":
         d.mkdir(parents=True)
         for model_id, spec in neffs.items():
             (d / f"neff_{{model_id}}_vnc_0.neff").write_bytes(neff(spec))
-    sys.exit(subprocess.call(args[args.index("-o") + 2:]))
+    import time
+    t0 = time.time()
+    time.sleep(float(os.environ.get("FAKE_DUMP_S", 0)))
+    rc = subprocess.call(args[args.index("-o") + 2:])
+    if os.environ.get("DUMP_SPANS"):
+        with open(os.environ["DUMP_SPANS"], "a") as f:
+            f.write(json.dumps({{"out": str(out), "t0": t0, "t1": time.time()}}) + "\\n")
+    sys.exit(rc)
 if args[0] == "capture":
     import time
     t0 = time.time()
@@ -164,7 +172,8 @@ def _capture(root: Path, key: str, arm: str = "bf16", device: int = 1, dump=None
     logs = {k: root / f"{k}.jsonl" for k in ("PY_LOG", "X_LOG", "FUSER_LOG")}
     full = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "PY": str(bin_dir / "py"),
             "FAKE_DUMP": json.dumps(dump or _dump(key)), **{k: str(v) for k, v in logs.items()},
-            "CAPTURE_LOCK": str(root / "capture.lock"), **env}
+            "CAPTURE_LOCK": str(root / "capture.lock"), "DUMP_SLOT": str(root / "dump-slot"),
+            **env}
     if signatures is not None:
         (root / "signatures.json").write_text(json.dumps(signatures))
         full["SIGNATURES"] = str(root / "signatures.json")
@@ -315,6 +324,40 @@ def test_two_lanes_never_capture_at_the_same_time(tmp_path):
                    for ln in (tmp_path / "spans").read_text().splitlines())
     assert len(spans) == 4
     assert all(b[0] >= a[1] for a, b in zip(spans, spans[1:])), spans
+
+
+def _max_overlap(spans: list[tuple[float, float]]) -> int:
+    edges = sorted([(a, 1) for a, _ in spans] + [(b, -1) for _, b in spans])  # ends first on ties
+    running = top = 0
+    for _, step in edges:
+        running += step
+        top = max(top, running)
+    return top
+
+
+@needs_tools
+def test_at_most_four_heavy_dumps_run_at_once_and_light_ones_never_wait(tmp_path):
+    """Ruling R20: a compile inside a heavy key's dump (HV1 544x960x129, Wan 81f, HV1.5 121f)
+    must not run 13-wide. Seven heavy lanes and two light ones start together, each dump 2 s;
+    the slots are held for the dump only."""
+    heavy = [(k, a) for k in ("hunyuan_video_L", "wan21_official", "wan22_official")
+             for a in ("bf16", "mxfp8")] + [("hv15_official", "bf16")]
+    light = [("qwen_image", "bf16"), ("flux", "bf16")]
+    env = {"DUMP_SLOT": str(tmp_path / "dump-slot"), "DUMP_SPANS": str(tmp_path / "dumps"),
+           "FAKE_DUMP_S": "2"}
+    lanes = heavy + light
+    with ThreadPoolExecutor(len(lanes)) as pool:
+        results = list(pool.map(lambda i: _capture(tmp_path / str(i), *lanes[i], device=i + 1, **env),
+                                range(len(lanes))))
+    for done, arm_dir, *_ in results:
+        assert _status(arm_dir) == "DONE", done.stderr
+    spans = {}
+    for ln in (tmp_path / "dumps").read_text().splitlines():
+        d = json.loads(ln)
+        spans[tuple(Path(d["out"]).parts[-3:-1])] = (d["t0"], d["t1"])
+    assert _max_overlap([spans[lane] for lane in heavy]) == 4
+    first_heavy_end = min(spans[lane][1] for lane in heavy)
+    assert all(spans[lane][0] < first_heavy_end for lane in light)
 
 
 @needs_tools
