@@ -30,10 +30,11 @@ from __future__ import annotations
 
 import torch
 
+from difflet.quant.spec import BLOCK, LAYOUT_K  # the block and sub-tile sizes, torch-free there
+
 FP8_DTYPE = torch.float8_e4m3fn
 #: OCP E4M3FN: the format Trainium3 computes natively.
 FP8_MAX = 448.0
-BLOCK = 32
 #: e4m3fn: the largest exponent (biased 134 = 2^7) the block maximum is scaled into.
 E4M3_MAX_EXP = 7
 E4M3_MAX = 448.0
@@ -43,8 +44,8 @@ E8M0_BIAS = 127
 
 def _tile_sizes(k: int) -> list[int]:
     """nkilib's legacy DGT decomposition of K: 512-wide tiles, then a 256 and/or 128 remainder."""
-    if k % 128:
-        raise ValueError(f"K={k} must be a multiple of 128 for the MX layout")
+    if k % LAYOUT_K:
+        raise ValueError(f"K={k} must be a multiple of {LAYOUT_K} for the MX layout")
     tiles = [TILE_K] * (k // TILE_K)
     rem = k % TILE_K
     if rem >= 256:
@@ -165,6 +166,7 @@ def kernel_layout(q: torch.Tensor, scale_u8: torch.Tensor) -> tuple[torch.Tensor
 __all__ = [
     "BLOCK",
     "E4M3_MAX",
+    "LAYOUT_K",
     "dequantize_mx",
     "dequantize_mx_sharded",
     "fake_quantize_mx",

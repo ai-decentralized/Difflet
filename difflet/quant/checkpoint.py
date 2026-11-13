@@ -123,7 +123,14 @@ def quantize_tensors(model_dir: Path, spec: QuantSpec) -> Iterator[tuple[str, to
     for key, tensor, _ in iter_source_tensors(model_dir):
         prefix = _tensor_key_prefix(key)
         if prefix is not None and spec.matches(prefix) and tensor.dim() == 2:
-            weight_q, weight_scale = mx.quantize_mx_sharded(tensor, spec.k_shards(prefix))
+            k_shards = spec.k_shards(prefix)
+            try:
+                weight_q, weight_scale = mx.quantize_mx_sharded(tensor, k_shards)
+            except ValueError as exc:
+                # The writer runs on the driver before any rank builds a layer, so a K the MX
+                # layout cannot take at this tp is refused here, naming the layer.
+                split = f" (K={tensor.shape[-1]} split over tp={k_shards})" if k_shards > 1 else ""
+                raise ValueError(f"{prefix}{split}: {exc}") from None
             yield key, weight_q, True
             yield f"{prefix}.weight_scale", weight_scale, True
         else:

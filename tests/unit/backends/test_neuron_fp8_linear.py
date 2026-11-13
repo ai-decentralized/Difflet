@@ -14,11 +14,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from difflet.backends._torch_megatron.weights import is_float8, materialize_meta_
-from difflet.backends.neuron.core.application_base import rank_weight_bytes
+from difflet.backends.neuron.core.application_base import (
+    TorchNeuronApplicationBase,
+    rank_weight_bytes,
+)
 from difflet.backends.neuron.ops_impl import fp8_linear as Q
 from difflet.backends.neuron.ops_impl import linear as L
 from difflet.backends.neuron.ops_impl import parallel_mesh as pm
 from difflet.backends.tpu.core.weights import load_sharded_state_dict, shard_dim
+from difflet.pipeline.parallel_config import DiffletParallelConfig
 from difflet.pipeline.parallel_mesh import MeshSpec
 from difflet.quant import mx
 from difflet.quant.fake_linear import FakeQuantMXLinear
@@ -79,8 +83,10 @@ def test_dtype_names_the_bias_not_the_weight():
 def test_unknown_compute_and_odd_k_are_refused():
     with pytest.raises(ValueError, match="fp8 compute"):
         Q.FP8Linear(128, 16, compute="torchao")
-    with pytest.raises(ValueError, match="multiple of 32"):
+    with pytest.raises(ValueError, match="multiple of 128"):
         Q.FP8Linear(40, 16, compute="dequant")
+    with pytest.raises(ValueError, match="multiple of 128"):
+        Q.FP8Linear(64, 8, compute="dequant")  # a multiple of 32 but not of 128
 
 
 # --------------------------------------------------------------- dequant at tp == 1
@@ -147,6 +153,15 @@ def test_row_shards_the_input_and_its_block_scales_and_replicates_the_bias():
     assert layer.weight.shape == (16, 128) and layer.bias.shape == (16,)
     assert layer.weight_scale.shape == (16, 4)
     assert layer._difflet_shard == {"weight": 1, "bias": None, "weight_scale": 1}
+
+
+def test_a_row_layers_per_rank_k_is_checked_at_the_tp_it_is_built_at():
+    """K=256 is whole in a column layer and has a layout; split over tp=4 it is 64 per rank and
+    has none, and the refusal says so with the full K and the tp, not the per-rank K alone."""
+    _spec_only(4)
+    Q.FP8ColumnParallelLinear(256, 16, compute="dequant")
+    with pytest.raises(ValueError, match=r"multiple of 128 .*got 64 \(256 split over tp=4\)"):
+        Q.FP8RowParallelLinear(256, 16, compute="dequant")
 
 
 def test_sharded_layers_load_their_slice_of_the_full_fp8_weights():
@@ -232,6 +247,63 @@ def test_another_backends_parallel_linears_are_recognised_by_name():
 def test_quantize_module_refuses_a_spec_matching_nothing():
     with pytest.raises(ValueError, match="match no linear"):
         Q.quantize_module_(_Model(), QuantSpec(targets=(r"nothing",)))
+
+
+def _wan_ffn_toy() -> nn.Module:
+    """``blocks.0.ffn.net_in``: the module name Wan's application gives the first FFN
+    projection, whose checkpoint key is ``blocks.0.ffn.net.0.proj.weight``."""
+    block = nn.Module()
+    block.ffn = nn.Module()
+    block.ffn.net_in = nn.Linear(128, 16)
+    module = nn.Module()
+    module.blocks = nn.ModuleList([block])
+    return module
+
+
+def test_quantize_module_matches_through_a_key_function():
+    """A model whose module names differ from its checkpoint keys matches the spec through the
+    application's ``checkpoint_key`` (the real Wan one, which renames parameter keys: the
+    module name is mapped through its weight's key, as the writer derives its prefix); the
+    returned names are still the module's. Once the key function is in force a pattern written
+    against the module name matches nothing: the device would otherwise quantize a layer the
+    checkpoint holds in bf16."""
+    from difflet.backends.neuron.wan.transformer import checkpoint_key
+
+    module = _wan_ffn_toy()
+    spec = QuantSpec(targets=(r"blocks\.\d+\.ffn\.net\.0\.proj",), compute="dequant")
+    assert Q.quantize_module_(module, spec, key_fn=checkpoint_key) == ["blocks.0.ffn.net_in"]
+    assert isinstance(module.blocks[0].ffn.net_in, Q.FP8Linear)
+    module = _wan_ffn_toy()
+    by_module_name = QuantSpec(targets=(r"blocks\.\d+\.ffn\.net_in",), compute="dequant")
+    with pytest.raises(ValueError, match=r"match no linear.*net_in"):
+        Q.quantize_module_(module, by_module_name, key_fn=checkpoint_key)
+    assert type(module.blocks[0].ffn.net_in) is nn.Linear
+
+
+def test_quantize_module_names_every_dead_pattern():
+    """One live pattern does not excuse a dead one: the refusal names the patterns that match
+    no linear, and the module is left as it was."""
+    module = nn.Module()
+    module.a = nn.Linear(128, 16)
+    module.b = nn.Linear(128, 16)
+    spec = QuantSpec(targets=("a", "zzz", r"b\.weight"), compute="dequant")
+    with pytest.raises(ValueError, match=r"match no linear.*\['zzz', 'b\\\\.weight'\]"):
+        Q.quantize_module_(module, spec)
+    assert type(module.a) is nn.Linear and type(module.b) is nn.Linear
+
+
+def test_quantize_module_names_the_layer_whose_k_is_wrong():
+    """The refusal carries the layer's name and the layer's own text (a plain linear has no
+    tp to blame; a row layer's text says ``split over tp=``), and no twin is swapped in before
+    every target has been built, so a caller that catches the error holds the module it gave."""
+    module = nn.Module()
+    module.ok = nn.Linear(128, 16)
+    module.proj = nn.Linear(64, 16)
+    spec = QuantSpec(targets=("ok", "proj"), compute="dequant")
+    with pytest.raises(ValueError, match=r"proj: mxfp8 needs in_features a multiple of 128") as e:
+        Q.quantize_module_(module, spec)
+    assert "tp" not in str(e.value)
+    assert type(module.ok) is nn.Linear and type(module.proj) is nn.Linear
 
 
 # ------------------------------------------------ meta materialisation and bytes
@@ -344,3 +416,218 @@ def test_prepare_kernel_lays_the_weight_out_and_drops_the_unpacked_one():
     assert "weight_packed" not in layer.state_dict()
     layer.prepare_kernel_()  # idempotent
     assert Q.prepare_fp8_kernels_(nn.Sequential(layer)) == 1
+
+
+# ------------------------------------------------------------ the application base
+
+
+class _TwoLinears(nn.Module):
+    """``fc1`` (K=128, the spec's target) and ``fc2`` (K=16: no MX layout, stays as it is)."""
+
+    def __init__(self, dim: int, hidden: int):
+        super().__init__()
+        self.fc1 = nn.Linear(dim, hidden)
+        self.fc2 = nn.Linear(hidden, dim)
+
+    def forward(self, x):
+        return self.fc2(F.gelu(self.fc1(x)))
+
+
+class _ToyApp(TorchNeuronApplicationBase):
+    """The base's lifecycle over ``_TwoLinears`` on the CPU at tp=1, no block stack to compile:
+    the subclass declares its target table's key and builds the bf16 module, nothing else."""
+
+    quant_model = "toy"
+    block_attrs = ()
+
+    def build_module(self):
+        return _TwoLinears(128, 16)
+
+    def get_example_inputs(self):
+        return (torch.randn(2, 128),)
+
+
+_SPEC = QuantSpec(targets=("fc1",), compute="dequant")
+
+
+def test_base_refuses_quant_without_a_target_table():
+    """A subclass without ``quant_model`` has no FP8 support: ``quant=`` is refused at
+    construction, not run as the bf16 module against a quantized checkpoint."""
+    class NoQuant(_ToyApp):
+        quant_model = None
+
+    with pytest.raises(NotImplementedError, match="NoQuant has no MXFP8 target layers"):
+        NoQuant(model_path="/x", device="cpu", exec_mode="compile", quant=_SPEC)
+    assert NoQuant(model_path="/x", device="cpu", exec_mode="compile").quant is None
+
+
+def test_base_refuses_eager_with_quant_under_the_models_label():
+    """The D43 refusal names the model by ``quant_label``, or by its target-table key."""
+    class Labelled(_ToyApp):
+        quant_label = "Toy DiT"
+
+    with pytest.raises(ValueError, match="the Toy DiT FP8 DiT needs exec_mode='compile'"):
+        Labelled(model_path="/x", device="cpu", exec_mode="eager", quant=_SPEC)
+    with pytest.raises(ValueError, match="the toy FP8 DiT needs exec_mode='compile'"):
+        _ToyApp(model_path="/x", device="cpu", exec_mode="eager", quant=_SPEC.to_dict())
+
+
+def test_base_refuses_a_spec_quantized_for_another_tp():
+    """A row-parallel weight is quantized per rank K range, so a spec made for one tp holds
+    scales grouped for that tp's shards: at another tp every rank would load a shape-compatible
+    slice with the wrong block membership. Refused at construction, naming both degrees; the
+    pipeline's ``"mxfp8"`` spelling builds its spec at the launch's tp, a spec given directly
+    is the caller's."""
+    with pytest.raises(ValueError, match=r"the toy FP8 DiT spec was quantized for tp_degree=1 "
+                                         r"but this launch has tp_degree=2"):
+        _ToyApp(model_path="/x", device="cpu", exec_mode="compile",
+                parallel=DiffletParallelConfig(tp_degree=2), quant=_SPEC)
+
+
+def test_base_refuses_a_quant_that_is_not_a_spec():
+    """``"mxfp8"`` is the pipeline application's spelling, which resolves it to a spec; the
+    transformer base takes the spec or its dict and refuses anything else at construction,
+    not in ``load``'s collective phase with an AttributeError that names no cause."""
+    with pytest.raises(TypeError, match="_ToyApp: quant must be a QuantSpec or its dict, got str"):
+        _ToyApp(model_path="/x", device="cpu", exec_mode="compile", quant="mxfp8")
+
+
+def test_base_quantizes_after_build_and_prepares_after_load(tmp_path):
+    """``load`` swaps the spec's targets on the meta module ``build_module`` returned, fills
+    them from the quantized directory and prepares them in ``_after_load``, so the forward is
+    the dequant one on the checkpoint's fp8 weight."""
+    from safetensors.torch import save_file
+
+    torch.manual_seed(0)
+    reference = _TwoLinears(128, 16)
+    q, s = mx.quantize_mx(reference.fc1.weight.detach())
+    save_file({"fc1.weight": q, "fc1.weight_scale": s, "fc1.bias": reference.fc1.bias.detach(),
+               "fc2.weight": reference.fc2.weight.detach(),
+               "fc2.bias": reference.fc2.bias.detach()},
+              str(tmp_path / "model.safetensors"))
+    app = _ToyApp(model_path=str(tmp_path), parallel=DiffletParallelConfig(), dtype=torch.float32,
+                  exec_mode="compile", device="cpu", quant=_SPEC.to_dict())
+    assert app.quant == _SPEC and app.quantized_linears == []
+    app.load()
+    assert app.quantized_linears == ["fc1"]
+    assert app.load_report == {"missing": [], "unexpected": []}
+    assert isinstance(app.module.fc1, Q.FP8Linear) and type(app.module.fc2) is nn.Linear
+    assert app.module.fc1.weight is None and app.module.fc1.weight_bf16 is not None  # prepared
+    x = torch.randn(2, 128)
+    with torch.no_grad():
+        reference.fc1.weight.copy_(mx.dequantize_mx(q, s))
+        expect = reference(x)
+    # The prepared bf16 weight copy rounds the dequantized weight once more than the reference.
+    assert torch.allclose(app(x), expect, atol=2e-2, rtol=2e-2)
+
+
+class _Attention(nn.Module):
+    """One attention-shaped module: ``attn.to_q``/``to_k``/``to_v`` over K=128, the group
+    ``fuse_projections_`` reads. No forward: the kernel path runs on the device only."""
+
+    def __init__(self, dim: int, inner: int):
+        super().__init__()
+        self.attn = nn.Module()
+        for name in ("to_q", "to_k", "to_v"):
+            setattr(self.attn, name, nn.Linear(dim, inner))
+
+
+_ATTN_SPEC = QuantSpec(targets=(r"attn\.to_[qkv]",), compute="nki")
+
+
+@pytest.mark.parametrize("fuse", [True, False])
+def test_base_fuses_q_k_v_after_load_only_when_the_model_says_so(tmp_path, fuse):
+    """``_after_load`` prepares the kernel-path twins under ``quant_fuse_qkv``: a model whose
+    attention reads ``fused_qkv`` gets its three projections fused into one kernel call (the
+    members drop their weights), any other keeps three prepared layers. The kernel layout is
+    laid out on the host; the forward needs the device, so the warm-up is skipped."""
+    from safetensors.torch import save_file
+
+    class Fusing(_ToyApp):
+        quant_fuse_qkv = fuse
+
+        def build_module(self):
+            return _Attention(128, 16)
+
+    torch.manual_seed(0)
+    reference = _Attention(128, 16)
+    tensors = {}
+    for name in ("to_q", "to_k", "to_v"):
+        linear = getattr(reference.attn, name)
+        q, s = mx.quantize_mx(linear.weight.detach())
+        tensors[f"attn.{name}.weight"], tensors[f"attn.{name}.weight_scale"] = q, s
+        tensors[f"attn.{name}.bias"] = linear.bias.detach()
+    save_file(tensors, str(tmp_path / "model.safetensors"))
+    app = Fusing(model_path=str(tmp_path), dtype=torch.float32, exec_mode="compile",
+                 device="cpu", quant=_ATTN_SPEC)
+    app.load(skip_warmup=True)
+    assert app.quantized_linears == ["attn.to_q", "attn.to_k", "attn.to_v"]
+    assert app.load_report == {"missing": [], "unexpected": []}
+    members = [getattr(app.module.attn, n) for n in ("to_q", "to_k", "to_v")]
+    assert all(isinstance(l, Q.FP8Linear) and l.compute == "nki" and l.weight is None
+               for l in members)
+    if fuse:
+        assert isinstance(app.module.attn.fused_qkv, Q.FusedFP8Projections)
+        assert app.module.attn.fused_qkv.splits == [16, 16, 16]
+        assert all(l.weight_packed is None for l in members)
+    else:
+        assert not hasattr(app.module.attn, "fused_qkv")
+        assert all(l.weight_packed is not None for l in members)
+
+
+# ------------------------------------------------------ the pipeline side's resolver
+
+
+@pytest.fixture(scope="module")
+def tiny_quantized_toy(tmp_path_factory):
+    """``_TwoLinears`` saved in bf16 as a one-file checkpoint, and its ``fc1`` quantized for a
+    tp2 spec under a cache root: what a pipeline application resolves from ``"mxfp8"``."""
+    from safetensors.torch import save_file
+
+    from difflet.quant.checkpoint import prepare_quantized_checkpoint
+
+    root = tmp_path_factory.mktemp("tiny_quantized")
+    transformer_dir = root / "transformer"
+    transformer_dir.mkdir()
+    torch.manual_seed(0)
+    save_file({k: v.to(torch.bfloat16) for k, v in _TwoLinears(128, 16).state_dict().items()},
+              str(transformer_dir / "model.safetensors"))
+    spec = QuantSpec(targets=("fc1",), tp_degree=2)
+    quantized = prepare_quantized_checkpoint(transformer_dir, spec, create=True,
+                                             cache_root=root / "cache")
+    return {"cache": root / "cache", "transformer_dir": str(transformer_dir), "spec": spec,
+            "quantized": str(quantized)}
+
+
+def test_resolve_quant_default_spec_and_checkpoint(tiny_quantized_toy, monkeypatch):
+    """One resolver for every pipeline application: ``"mxfp8"`` is the model's default spec at
+    the launch's tp and the quantized directory under the compile cache (never written here:
+    every rank resolves, ``difflet compile`` writes on the driver); a spec or its dict is taken
+    as given; an explicit directory is checked against the spec; a directory without a spec,
+    another spelling than ``"mxfp8"`` and a quant of another type are refused by name."""
+    from difflet.backends.neuron.core.quant import resolve_quant
+    from difflet.quant import targets
+
+    toy = tiny_quantized_toy
+    monkeypatch.setitem(targets.TARGETS_BY_MODEL, "toy", ("fc1",))
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(toy["cache"]))
+    spec, path = resolve_quant("toy", "mxfp8", None, toy["transformer_dir"], tp_degree=2)
+    assert spec == targets.default_spec("toy", tp_degree=2) and path == toy["quantized"]
+    resolved = (toy["spec"], toy["quantized"])
+    for given in (toy["spec"], toy["spec"].to_dict()):
+        assert resolve_quant("toy", given, None, toy["transformer_dir"], tp_degree=2) == resolved
+    assert resolve_quant("toy", toy["spec"], toy["quantized"], toy["transformer_dir"],
+                         tp_degree=2) == resolved
+    assert resolve_quant("toy", None, None, toy["transformer_dir"], tp_degree=2) \
+        == (None, toy["transformer_dir"])
+    with pytest.raises(ValueError, match="difflet compile"):  # no tp1 directory was written
+        resolve_quant("toy", "mxfp8", None, toy["transformer_dir"], tp_degree=1)
+    with pytest.raises(ValueError, match="another quantization spec"):
+        resolve_quant("toy", QuantSpec(targets=("fc2",)), toy["quantized"],
+                      toy["transformer_dir"], tp_degree=2)
+    with pytest.raises(ValueError, match="quant_checkpoint needs quant"):
+        resolve_quant("toy", None, "/q", toy["transformer_dir"], tp_degree=1)
+    with pytest.raises(ValueError, match="quant must be 'mxfp8'"):
+        resolve_quant("toy", "fp8", None, toy["transformer_dir"], tp_degree=1)
+    with pytest.raises(TypeError, match="quant must be 'mxfp8'"):
+        resolve_quant("toy", 8, None, toy["transformer_dir"], tp_degree=1)

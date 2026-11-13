@@ -147,6 +147,26 @@ def test_row_parallel_targets_are_quantized_per_rank_k_range(tiny, tmp_path):
     assert not torch.equal(s, mx.quantize_mx(w)[1])  # another block layout than tp1's
 
 
+def test_a_target_whose_per_rank_k_has_no_layout_is_refused_by_name(tmp_path):
+    """The writer runs on the driver before any rank builds a layer, so this is the refusal a
+    ``difflet compile --quant`` user meets first: it names the layer, its K and the tp."""
+    from safetensors.torch import save_file
+
+    src = tmp_path / "src"
+    src.mkdir()
+    save_file({"net.2.weight": torch.randn(16, 384), "proj.weight": torch.randn(16, 192)},
+              str(src / "model.safetensors"))
+    row = QuantSpec(targets=(r"net\.2",), row_parallel=(r"net\.2",), tp_degree=2)
+    with pytest.raises(ValueError, match=r"net\.2 \(K=384 split over tp=2\): K=192 must be a "
+                                         r"multiple of 128"):
+        write_quantized_dir(src, tmp_path / "tp2", row)
+    assert not (tmp_path / "tp2").exists()  # nothing half-written
+    with pytest.raises(ValueError, match=r"proj: K=192 must be a multiple of 128"):
+        write_quantized_dir(src, tmp_path / "plain", QuantSpec(targets=("proj",)))
+    # Whole at tp=1 the same K has a layout.
+    write_quantized_dir(src, tmp_path / "tp1", dataclasses.replace(row, tp_degree=1))
+
+
 def test_check_and_ensure(tiny, tmp_path):
     cache = tmp_path / "cache"
     spec, src = tiny["spec"], tiny["transformer_dir"]

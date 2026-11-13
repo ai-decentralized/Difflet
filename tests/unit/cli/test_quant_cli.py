@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import importlib
 import os
+from pathlib import Path
 
 import pytest
 
@@ -77,6 +78,138 @@ def test_spec_from_args():
     assert Q.quant_spec(_parse("generate", "--model-id", QWEN, "--quant", "mxfp8")).tp_degree == 4
 
 
+def test_the_tp_flag_wins_over_the_drivers_default_tp():
+    """The row-parallel weights are quantized per rank K range, so the spec's tp is the launch's:
+    --tp-degree when given, else the driver's default (4 unless it passes its own). The default
+    is a fallback, never an override: a driver that passed its default constant would quantize
+    for one tp and launch its stage, which reads the flag, for another."""
+    args = _parse("generate", "--model-id", QWEN, "--backend", "neuron", "--quant", "mxfp8")
+    assert Q.quant_spec(args).tp_degree == 4
+    assert Q.quant_spec(args, default_tp_degree=2).tp_degree == 2
+    args = _parse("generate", "--model-id", QWEN, "--backend", "neuron", "--quant", "mxfp8",
+                  "--tp-degree", "8")
+    assert Q.quant_spec(args).tp_degree == 8
+    assert Q.quant_spec(args, default_tp_degree=2).tp_degree == 8
+
+
+@pytest.mark.parametrize("tp_flags", [(), ("--tp-degree", "2")])
+def test_the_stage_line_carries_the_tp_the_driver_quantized_for(monkeypatch, tp_flags):
+    """Every rank rebuilds the spec from the stage flags, so the stage line names the tp the
+    driver's prepare_quant used, flag or default; otherwise generate's ranks would refuse the
+    directory compile just wrote ('built with another quantization spec')."""
+    cli_main = importlib.import_module("difflet.cli.main")
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    monkeypatch.setenv("DIFFLET_EXEC_MODE", "compile")
+    for model, stage_line in ((QWEN, lambda o: o._shared_cli_args("generate", work_dir="/w")),
+                              (FLUX, lambda o: o._stage_cli_args("generate", work_dir="/w"))):
+        args = cli_main._build_parser().parse_args(
+            ["generate", "--model-id", model, "--quant", "mxfp8", *tp_flags])
+        orch = cli_main._get_orchestrator(args)
+        stage_args, _ = _build_stage_parser().parse_known_args(
+            ["--orchestrator", model, "--stage", "generate", *stage_line(orch)])
+        assert Q.quant_spec(stage_args) == Q.quant_spec(args)
+        assert Q.quant_spec(args).tp_degree == (2 if tp_flags else 4)
+
+
+@pytest.fixture(scope="module")
+def tiny_dir(tmp_path_factory):
+    """The tiny diffusers-layout Qwen-Image DiT's transformer directory (4 heads x 32, a
+    512-wide MLP: every target's K per rank is 128 at the driver's default tp4). torch and
+    diffusers load here only; the rest of this module is as torch-free as the driver."""
+    pytest.importorskip("diffusers")
+    from tests.unit.backends._neuron_qwen_toy import write_tiny_qwen_model
+
+    root = tmp_path_factory.mktemp("tiny_qwen_quant")
+    write_tiny_qwen_model(root)
+    return str(root / "transformer")
+
+
+@pytest.fixture
+def _trace_cache_restored(monkeypatch):
+    """Undo the DIFFLET_NKI_TRACE_CACHE the preparer sets with os.environ.setdefault: setenv
+    first records the variable's original state (delenv of an unset variable records
+    nothing, and the value leaked into later tests' compile-cache layout)."""
+    monkeypatch.setenv("DIFFLET_NKI_TRACE_CACHE", "")
+    monkeypatch.delenv("DIFFLET_NKI_TRACE_CACHE")
+
+
+def test_prepare_quant_writes_on_create_and_refuses_when_missing(
+        tmp_path, monkeypatch, capsys, tiny_dir, _trace_cache_restored):
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path))
+    args = _parse("compile", "--model-id", QWEN, "--backend", "neuron", "--quant", "mxfp8")
+    with pytest.raises(SystemExit) as exc:  # generate's resolve-only call before any compile
+        Q.prepare_quant(args, {"transformer": tiny_dir}, create=False, tag="t")
+    assert exc.value.code == 1  # the default refusal; a driver passes its own (below)
+    assert capsys.readouterr().err.startswith("Error: --quant: transformer: ")
+    out = Q.prepare_quant(args, {"transformer": tiny_dir}, create=True, tag="t")
+    assert (Path(out["transformer"]) / "difflet_quant.json").is_file()
+    assert Path(out["transformer"]).is_relative_to(tmp_path)
+    assert capsys.readouterr().out.startswith(f"[t] MXFP8 transformer (nki): {out['transformer']}")
+    assert os.environ["DIFFLET_NKI_TRACE_CACHE"] == "1"
+    # Resolve-only now finds it, and a second component is prepared under its own name.
+    both = Q.prepare_quant(args, {"transformer": tiny_dir, "twin": tiny_dir}, create=False,
+                           tag="t")
+    assert both == {"transformer": out["transformer"], "twin": out["transformer"]}
+
+
+def test_prepare_quant_refuses_a_component_without_weights(tmp_path, monkeypatch, capsys,
+                                                           _trace_cache_restored):
+    """A component directory without safetensors (a partial download) is refused on the driver,
+    naming the component, as a stale directory is: not a traceback from the fingerprint."""
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path))
+    empty = tmp_path / "snapshot" / "transformer"
+    empty.mkdir(parents=True)
+    args = _parse("compile", "--model-id", QWEN, "--backend", "neuron", "--quant", "mxfp8")
+    with pytest.raises(SystemExit) as exc:
+        Q.prepare_quant(args, {"transformer": str(empty)}, create=True, tag="t")
+    assert exc.value.code == 1
+    assert capsys.readouterr().err == f"Error: --quant: transformer: no .safetensors under {empty}\n"
+
+
+def test_each_driver_refuses_quant_the_way_it_refuses_everything_else(
+        monkeypatch, tmp_path, capsys, tiny_dir, _trace_cache_restored):
+    """A refused --quant exits as the driver's other refusals do, so a wrapper that tells a
+    driver refusal from a launch failure keeps telling them apart: Qwen-Image through `refuse`
+    (exit 2, '; nothing was launched.'), FLUX as its own checks (exit 1, no suffix)."""
+    import difflet.pipeline.path_resolver as resolver
+
+    cli_main = importlib.import_module("difflet.cli.main")
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    monkeypatch.setenv("DIFFLET_EXEC_MODE", "compile")
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path))
+    snapshot = str(Path(tiny_dir).parent)
+    monkeypatch.setattr(resolver, "resolve_model_path", lambda *a, **k: snapshot)
+    for model, code, suffix in ((QWEN, 2, "; nothing was launched.\n"), (FLUX, 1, "\n")):
+        args = cli_main._build_parser().parse_args(
+            ["generate", "--model-id", model, "--quant", "mxfp8"])
+        with pytest.raises(SystemExit) as exc:  # generate before any compile wrote the directory
+            cli_main._get_orchestrator(args)._prepare_quant(create=False)
+        err = capsys.readouterr().err
+        assert exc.value.code == code, model
+        assert err.startswith("Error: --quant: transformer: ") and err.endswith(suffix), model
+        assert err.count("nothing was launched") == (1 if code == 2 else 0), model
+
+
+def test_prepare_quant_is_off_without_the_flag_or_the_weights(tmp_path, capsys,
+                                                              _trace_cache_restored):
+    """None and no line when --quant is off, or when the weights are not downloaded yet (the
+    ranks report that); the trace-cache choice is still made for the ranks in the second case,
+    and dequant compute leaves it alone."""
+    missing = {"transformer": str(tmp_path / "not-downloaded" / "transformer")}
+    assert Q.prepare_quant(_parse("compile", "--model-id", QWEN), missing, create=True,
+                           tag="t") is None
+    assert "DIFFLET_NKI_TRACE_CACHE" not in os.environ
+    args = _parse("compile", "--model-id", QWEN, "--backend", "neuron", "--quant", "mxfp8",
+                  "--quant-compute", "dequant")
+    assert Q.prepare_quant(args, missing, create=True, tag="t") is None
+    assert "DIFFLET_NKI_TRACE_CACHE" not in os.environ
+    args = _parse("compile", "--model-id", QWEN, "--backend", "neuron", "--quant", "mxfp8")
+    assert Q.prepare_quant(args, missing, create=True, tag="t") is None
+    assert Q.prepare_quant(args, {}, create=True, tag="t") is None
+    assert os.environ["DIFFLET_NKI_TRACE_CACHE"] == "1"
+    assert capsys.readouterr() == ("", "")
+
+
 def test_flags_are_forwarded_only_when_given_and_consumed_by_the_stage_parser():
     assert Q.quant_cli_args(argparse.Namespace()) == []
     args = _parse("generate", "--model-id", QWEN, "--backend", "neuron", "--quant", "mxfp8",
@@ -135,17 +268,13 @@ def test_application_kwargs_carry_the_spec(monkeypatch):
     assert "quant" not in _torchrun_application_kwargs(_parse("generate", "--model-id", QWEN))
 
 
-def test_the_kernel_path_turns_on_the_nki_trace_cache(monkeypatch, tmp_path):
+def test_the_kernel_path_turns_on_the_nki_trace_cache(monkeypatch, tmp_path,
+                                                      _trace_cache_restored):
     """--quant mxfp8 (kernel compute) sets DIFFLET_NKI_TRACE_CACHE=1 for the ranks before any
     launch unless the user chose; dequant compute and no --quant leave it alone."""
     cli_main = importlib.import_module("difflet.cli.main")
     monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
     monkeypatch.setenv("DIFFLET_EXEC_MODE", "compile")
-    # setenv first records the variable's original state, so the undo restores it even
-    # though the orchestrator sets it with os.environ.setdefault (delenv of an unset variable
-    # records nothing, and the value leaked into later tests' compile-cache layout).
-    monkeypatch.setenv("DIFFLET_NKI_TRACE_CACHE", "")
-    monkeypatch.delenv("DIFFLET_NKI_TRACE_CACHE")
 
     def prepare(*flags):
         args = cli_main._build_parser().parse_args(

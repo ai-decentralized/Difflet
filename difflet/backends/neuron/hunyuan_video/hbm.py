@@ -19,7 +19,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from difflet.backends.neuron.hbm import Component, components_bytes, components_fit
+from difflet.backends.neuron.hbm import (
+    Component,
+    components_bytes,
+    components_fit,
+    quantized_dir_bytes,
+    quantized_dir_fits,
+)
 
 #: The DiT runs in bf16 on the device (decision D42, ``require_bf16_on_device``).
 DIT_DTYPE_BYTES = 2
@@ -27,14 +33,21 @@ DIT = Component("transformer", DIT_DTYPE_BYTES)
 
 
 def dit_bytes(model_dir: str | Path, *, tp_degree: int,
-              dit_dtype_bytes: int = DIT_DTYPE_BYTES) -> int:
-    """Lower bound of one rank's DiT weight bytes: ``<model_dir>/transformer`` over tp."""
+              dit_dtype_bytes: int = DIT_DTYPE_BYTES, dit_dir: str | Path | None = None) -> int:
+    """Lower bound of one rank's DiT weight bytes: ``<model_dir>/transformer`` over tp, or,
+    with ``dit_dir`` (a quantized checkpoint, ``difflet/quant/checkpoint.py``), that directory's
+    bytes as stored over tp (``quantized_dir_bytes``)."""
+    if dit_dir is not None:
+        return quantized_dir_bytes(dit_dir, tp_degree=tp_degree)
     return components_bytes(model_dir, (DIT.in_dtype(dit_dtype_bytes),), tp_degree=tp_degree)
 
 
 def dit_fits(model_dir: str | Path, *, tp_degree: int,
-             dit_dtype_bytes: int = DIT_DTYPE_BYTES) -> tuple[bool, int, int]:
+             dit_dtype_bytes: int = DIT_DTYPE_BYTES,
+             dit_dir: str | Path | None = None) -> tuple[bool, int, int]:
     """``(fits, estimate, limit)``: ``dit_bytes`` against ``FIT_FRACTION`` of one core's HBM."""
+    if dit_dir is not None:
+        return quantized_dir_fits(dit_dir, tp_degree=tp_degree)
     return components_fit(model_dir, (DIT.in_dtype(dit_dtype_bytes),), tp_degree=tp_degree)
 
 
