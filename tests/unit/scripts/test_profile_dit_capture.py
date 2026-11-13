@@ -11,6 +11,7 @@ import os
 import shutil
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
@@ -49,7 +50,8 @@ os.execv(sys.executable, [sys.executable] + sys.argv[1:])
 #: neuron-explorer: `inspect` writes the dump FAKE_DUMP describes (per rank, {model id:
 #: "<marker>[+<KiB>]"}: a NEFF is its marker in a 1024-byte header, then a tar.gz of a debug-info
 #: file naming the marker's source files and 1 MiB (+ KiB) of incompressible bytes) and runs the
-#: userscript; `capture` writes the two NTFFs; `view` prints a summary, writes a system profile
+#: userscript; `capture` takes FAKE_CAPTURE_S seconds (its start and end appended to SPANS if
+#: set) and writes the two NTFFs; `view` prints a summary, writes a system profile
 #: (each NEFF once in a warm-up and once in the step, on both physical cores as the runtime
 #: records it) or an Instruction table whose rows the NEFF's marker picks.
 FAKE_X = """#!{exe}
@@ -94,6 +96,12 @@ if args[0] == "inspect":
             (d / f"neff_{{model_id}}_vnc_0.neff").write_bytes(neff(spec))
     sys.exit(subprocess.call(args[args.index("-o") + 2:]))
 if args[0] == "capture":
+    import time
+    t0 = time.time()
+    time.sleep(float(os.environ.get("FAKE_CAPTURE_S", 0)))
+    if os.environ.get("SPANS"):
+        with open(os.environ["SPANS"], "a") as f:
+            f.write(f"{{t0}} {{time.time()}}\\n")
     for e in (4, 8):
         Path(opt("-s")).with_name(f"profile_rank_0_exec_{{e}}.ntff").write_text("ntff")
     sys.exit(0)
@@ -156,7 +164,7 @@ def _capture(root: Path, key: str, arm: str = "bf16", device: int = 1, dump=None
     logs = {k: root / f"{k}.jsonl" for k in ("PY_LOG", "X_LOG", "FUSER_LOG")}
     full = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "PY": str(bin_dir / "py"),
             "FAKE_DUMP": json.dumps(dump or _dump(key)), **{k: str(v) for k, v in logs.items()},
-            **env}
+            "CAPTURE_LOCK": str(root / "capture.lock"), **env}
     if signatures is not None:
         (root / "signatures.json").write_text(json.dumps(signatures))
         full["SIGNATURES"] = str(root / "signatures.json")
@@ -290,6 +298,22 @@ def test_a_busy_device_writes_busy_and_runs_nothing_more_on_it(tmp_path, busy_at
     assert device == ["inspect"] * (busy_at > 1) + ["capture"] * captures
     assert not (arm_dir / "blk2" / "summary.json").exists()
     assert "4242" in (arm_dir / "lane.log").read_text()
+
+
+@needs_tools
+def test_two_lanes_never_capture_at_the_same_time(tmp_path):
+    """Ruling R17: one `neuron-explorer capture` at a time host-wide among our lanes (a capture
+    lock); two FLUX lanes start together, each capture takes 0.5 s."""
+    env = {"CAPTURE_LOCK": str(tmp_path / "capture.lock"), "SPANS": str(tmp_path / "spans"),
+           "FAKE_CAPTURE_S": "0.5"}
+    with ThreadPoolExecutor(2) as pool:
+        lanes = list(pool.map(lambda d: _capture(tmp_path / d, "flux", device=int(d), **env),
+                              ["1", "2"]))
+    for done, arm_dir, *_ in lanes:
+        assert _status(arm_dir) == "DONE", done.stderr
+    spans = sorted(tuple(map(float, ln.split())) for ln in (tmp_path / "spans").read_text().splitlines())
+    assert len(spans) == 4
+    assert all(b[0] >= a[1] for a, b in zip(spans, spans[1:])), spans
 
 
 @needs_tools
