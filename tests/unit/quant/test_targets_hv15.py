@@ -1,10 +1,12 @@
 """The HunyuanVideo-1.5 MXFP8 target table against diffusers' own module names (the checkpoint
-keys: the neuron module is diffusers' class): the dual-stream blocks' image and text q/k/v and
-both MLPs are quantized; the output projections, the modulation, the token refiner, the
-embedders and the output layer stay bf16; the row-parallel set is every row layer the TP layer
-shards along K, and every default target has an MX layout at tp 1 to 16 on the real geometry.
-The FP8 toy (``_neuron_hv15_toy``) carries the MX geometry to a snapshot whose row-parallel
-weights quantize differently per rank than whole."""
+keys: the neuron module is diffusers' class): the dual-stream blocks' image q/k/v and image MLP
+are quantized, and the default is the very spec the device arms measured through
+``DIFFLET_QUANT_TARGETS`` (so it resolves their quantized directory); the text stream's q/k/v
+and MLP, the output projections, the modulation, the token refiner, the embedders and the
+output layer stay bf16; the row-parallel set is every row layer the TP layer shards along K,
+and every default target has an MX layout at tp 1 to 16 on the real geometry. The FP8 toy
+(``_neuron_hv15_toy``) carries the MX geometry to a snapshot whose row-parallel weights
+quantize differently per rank than whole."""
 
 from __future__ import annotations
 
@@ -38,6 +40,11 @@ from tests.unit.backends._neuron_hv15_toy import (  # noqa: E402
 )
 
 HV15 = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
+#: The set F6's device arms ran as ``DIFFLET_QUANT_TARGETS`` (G1 + G3, mx_final, 2026-11-08),
+#: verbatim: the quantized directory is keyed by the ordered pattern strings, so the default
+#: must be this spec to resolve the directory those arms wrote.
+MEASURED_TARGETS_ENV = (r"transformer_blocks\.\d+\.attn\.(to_q|to_k|to_v);"
+                        r"transformer_blocks\.\d+\.ff\.net\.(0\.proj|2)")
 
 #: The neuron module's row layers (``_install_tensor_parallel`` in
 #: ``difflet/backends/neuron/hunyuan_video15/transformer.py``), by owner: the dual blocks'
@@ -70,16 +77,27 @@ def _is_row_layer(name: str) -> bool:
                for owner, layers in ROW_LAYERS.items())
 
 
-def test_default_targets_cover_the_dual_stream_projections_and_mlps_only(model):
+def test_default_targets_cover_the_image_streams_projections_and_mlp_only(model):
     spec = default_spec("hunyuan_video_15")
     names = [n for n in _linears(model) if spec.matches(n)]
     assert {n.split(".", 2)[2] for n in names} == TINY_TARGETS_PER_BLOCK
-    assert len(names) == len(TINY_TARGETS_PER_BLOCK) * TINY_FP8_HV15["num_layers"]  # 20
+    assert len(names) == len(TINY_TARGETS_PER_BLOCK) * TINY_FP8_HV15["num_layers"]  # 10
     assert all(spec.is_row_parallel(n) == _is_row_layer(n) for n in _linears(model))
     assert not any(spec.matches(n) for n in (
+        "transformer_blocks.0.attn.add_q_proj", "transformer_blocks.1.attn.add_v_proj",
+        "transformer_blocks.0.ff_context.net.0.proj", "transformer_blocks.1.ff_context.net.2",
         "context_embedder.token_refiner.refiner_blocks.0.attn.to_q",
         "context_embedder.token_refiner.refiner_blocks.0.ff.net.0.proj",
         "transformer_blocks.0.norm1.linear", "transformer_blocks.0.attn.to_add_out", "proj_out"))
+
+
+def test_the_default_is_the_spec_the_device_measured(monkeypatch):
+    args = argparse.Namespace(quant="mxfp8", quant_compute=None, model_id=HV15, tp_degree=None)
+    monkeypatch.setenv("DIFFLET_QUANT_TARGETS", MEASURED_TARGETS_ENV)
+    measured = quant_spec(args, default_tp_degree=2)
+    monkeypatch.delenv("DIFFLET_QUANT_TARGETS")
+    assert quant_spec(args, default_tp_degree=2) == measured
+    assert HUNYUAN_VIDEO_15_TARGETS == tuple(MEASURED_TARGETS_ENV.split(";"))
 
 
 def test_every_linear_is_a_target_or_documented_bf16(model):
@@ -123,7 +141,7 @@ def test_every_default_target_has_an_mx_layout_at_every_tp():
     for tp in (1, 2, 4, 8, 16):
         spec = default_spec("hunyuan_video_15", tp_degree=tp)
         targets = [(n, real.get_submodule(n)) for n in _linears(real) if spec.matches(n)]
-        assert len(targets) == 54 * len(TINY_TARGETS_PER_BLOCK), tp  # 540, probed 2026-11-07
+        assert len(targets) == 54 * len(TINY_TARGETS_PER_BLOCK), tp  # 270
         assert all((m.in_features // spec.k_shards(n)) % LAYOUT_K == 0 for n, m in targets), tp
     assert spec.k_shards("context_embedder.token_refiner.refiner_blocks.0.attn.to_out.0") == 16
 
