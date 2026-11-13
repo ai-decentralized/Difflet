@@ -51,20 +51,18 @@ def apply_rotary_emb(hidden_states, freqs_cos, freqs_sin):
 
 def apply_rotary_emb_fp32(hidden_states, freqs_cos, freqs_sin):
     """diffusers' fp32 interleaved law (the reference,
-    ``difflet/backends/_torch_megatron/embeddings.py``) with its
+    ``difflet/backends/_torch_megatron/embeddings.py``: FLUX's call sites) with its
     ``reshape(..., 2).unbind`` / ``stack`` / ``flatten`` replaced by one matmul,
     ``x @ R`` with ``R[2i+1, 2i] = -1`` and ``R[2i, 2i+1] = 1``. That is diffusers' rotated
     operand (``-x[2i+1]``, ``x[2i]``), so the fp32 products and sum that follow are the
-    reference's own, for any table dtype and any table values. Its callers: FLUX's call sites
-    (through ``difflet.ops``) and HunyuanVideo-1.5's ``_joint_qkv`` (which imports it directly).
+    reference's own, for any table dtype and any table values.
 
-    ``x @ R`` has one +-1 term per output column, so it is exact for a bf16 ``x``, which FLUX and
-    HunyuanVideo-1.5 feed (HunyuanVideo-1.5's is diffusers' QK RMSNorm output, cast to the
-    norm's bf16 weight): the tensor engine multiplies bf16 by +-1, accumulates in fp32 and rounds
-    a value that is already bf16. An fp32 ``x`` (a debug run) is exact only if neuronx-cc does
-    not auto-cast the matmul to bf16; the neuron backend passes no ``--auto-cast`` flag, and the
-    compiler's default casts fp32 matmuls, so that case is not claimed exact on the device (on the
-    CPU it is)."""
+    ``x @ R`` has one +-1 term per output column, so it is exact for a bf16 ``x``, which FLUX
+    feeds: the tensor engine multiplies bf16 by +-1, accumulates in fp32 and rounds a value that
+    is already bf16. An fp32 ``x`` (a debug run) is exact only if neuronx-cc does not auto-cast
+    the matmul to bf16; the neuron backend passes no ``--auto-cast`` flag, and the compiler's
+    default casts fp32 matmuls, so that case is not claimed exact on the device (on the CPU it
+    is)."""
     x = hidden_states
     d = x.shape[-1]
     idx = torch.arange(d, device=x.device)

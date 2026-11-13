@@ -337,7 +337,10 @@ HUNYUAN_VIDEO_ROW_PARALLEL: tuple[str, ...] = (
 # tp2; the frames show the same composition): the floor-relative screen fails on SSIM (0.190
 # against 0.212), and quality is pending phase G (diffusers on the CPU in fp32). The plan never
 # makes a set that fails the screen the default; this one is the user's decision (2026-11-08,
-# option A), taken with these numbers.
+# option A), taken with these numbers. They carry phase D's rotary op D4, which F7 reverted. On
+# the tree that ships, without it (evidence doc 9b), the set runs 518 ms at 9 frames and 10,032
+# at 121 against 9,924 in bf16 (D4's parent: 1.011x, F6's gate is 1.01x), peak HBM 9.69 + 8.45
+# GiB, the clip 12.65 dB / SSIM 0.183 from that bf16 (the screen fails on SSIM again).
 HUNYUAN_VIDEO_15_TARGETS: tuple[str, ...] = (
     rf"{_BLOCK}\.attn\.(to_q|to_k|to_v)",  # G1 image q/k/v
     rf"{_BLOCK}\.ff\.net\.(0\.proj|2)",  # G3 image MLP
