@@ -2,11 +2,12 @@
 """Merge the DiT block profile into results.json and the page's datasets (DiT block profile plan,
 Task 5).
 
-usage: collect.py [--assets DIR] [--run DIR] [--out FILE] [--page DIR] [--doc FILE]
+usage: collect.py [--assets DIR] [--out FILE] [--page DIR] [--doc FILE]
 
-Reads the committed breakdowns ``<assets>/<key>/<arm>/blk<i>.json``, each lane's
-``<run>/<key>/<arm>/system_summary.json`` and ``blk<i>/source.json`` (joined on the NEFF name,
-ruling R2), and the DiT step times and linear-MXFP8 quality rows of
+Reads the committed breakdowns ``<assets>/<key>/<arm>/blk<i>.json`` and, beside them, copies of
+each lane's ``system_summary.json`` and ``blk<i>/source.json`` (joined on the NEFF name, ruling
+R2; the lanes themselves are on instance storage, lost on a stop: a breakdown without its lane
+files is refused), and the DiT step times and linear-MXFP8 quality rows of
 ``docs/verification/2026-11-07-mxfp8-video-models.md`` (sections 7f, 10, 11, 12), transcribed
 below with section and host; a unit test finds every value in its section. Runs nothing on a
 device. A block without a breakdown is ``pending``: its numbers stay null, never estimated.
@@ -28,7 +29,6 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 ASSETS = HERE.parents[1] / "docs" / "verification" / "assets" / "2026-11-13-dit-block-profile"
-RUN = Path("/mnt/nvme/difflet-prof/run")
 #: an engine's components over its union above which the page notes the overlap (ruling R28)
 OVERLAP_NOTE = 1.05
 
@@ -157,12 +157,17 @@ def shares(engines: dict, components: dict, detail: dict, block_ms: float, mfu) 
             "rope_share": rope.get(rope_ec, 0.0) / block_ms, "rope_engine": rope_ec}
 
 
-def _block(assets: Path, run: Path, key: str, arm: str, i: int, summary: dict | None) -> dict:
-    source = _json(run / key / arm / f"blk{i}" / "source.json") or {}
+def _block(assets: Path, key: str, arm: str, i: int, summary: dict | None) -> dict:
+    lane = assets / key / arm
+    b = _json(lane / f"blk{i}.json")
+    for need in ("system_summary.json", f"blk{i}/source.json") if b else ():
+        if not (lane / need).exists():  # else results.json would get nulls for its numbers
+            raise SystemExit(f"collect.py: {lane}/blk{i}.json has no {need} beside it: copy the "
+                             f"lane's (<run>/{key}/{arm}/{need}) there")
+    source = _json(lane / f"blk{i}" / "source.json") or {}
     names = (summary or {}).get("blocks", [])
     neff = source.get("neff_name") or (names[i - 1] if len(names) >= i else None)
     system = (summary or {}).get("neffs", {}).get(neff, {})
-    b = _json(assets / key / arm / f"blk{i}.json")
     block = {"blk": i, "kind": source.get("kind"), "neff_name": neff,
              "status": "ok" if b else "pending", "execs_per_step": system.get("execs_per_step"),
              "in_model_median_ms": system.get("in_model_median_ms")}
@@ -172,10 +177,10 @@ def _block(assets: Path, run: Path, key: str, arm: str, i: int, summary: dict | 
     return block
 
 
-def _config(assets: Path, run: Path, key: str, arm: str, spec: tuple, step: tuple | None) -> dict:
+def _config(assets: Path, key: str, arm: str, spec: tuple, step: tuple | None) -> dict:
     model, shape, layout, _, n = spec
-    summary = _json(run / key / arm / "system_summary.json")
-    blocks = [_block(assets, run, key, arm, i, summary) for i in range(1, n + 1)]
+    summary = _json(assets / key / arm / "system_summary.json")
+    blocks = [_block(assets, key, arm, i, summary) for i in range(1, n + 1)]
     known = [b["execs_per_step"] * b["in_model_median_ms"] for b in blocks
              if b["execs_per_step"] is not None]
     blocks_ms = sum(known) if blocks and len(known) == n else None
@@ -207,11 +212,10 @@ def _config(assets: Path, run: Path, key: str, arm: str, spec: tuple, step: tupl
     return out
 
 
-def collect(assets: Path = ASSETS, run: Path = RUN, configs: dict = CONFIGS,
-            steps: dict = STEP_TIMES) -> dict:
+def collect(assets: Path = ASSETS, configs: dict = CONFIGS, steps: dict = STEP_TIMES) -> dict:
     """{"configs": [one per key x arm], "quality": [rows]}; blocks keep their ``timeline``."""
     return {
-        "configs": [_config(assets, run, key, arm, spec, steps.get((key, arm)))
+        "configs": [_config(assets, key, arm, spec, steps.get((key, arm)))
                     for key, spec in configs.items() for arm in spec[3]],
         "quality": [dict(zip(_QUALITY_FIELDS, q)) | {
             "model": CONFIGS[q[0]][0], "profiled_shape": q[3] == CONFIGS[q[0]][1]} for q in QUALITY],
@@ -407,12 +411,11 @@ def markdown(results: dict) -> str:
 def main(argv: list[str] | None = None) -> None:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--assets", type=Path, default=ASSETS)
-    p.add_argument("--run", type=Path, default=RUN)
     p.add_argument("--out", type=Path, default=ASSETS / "results.json")
     p.add_argument("--page", type=Path, help="write the page's datasets, index.html, store.json")
     p.add_argument("--doc", type=Path, help="fill the tables of this evidence doc")
     a = p.parse_args(argv)
-    results = collect(a.assets, a.run)
+    results = collect(a.assets)
     lean = {**results, "configs": [{**c, "blocks": [{k: v for k, v in b.items() if k != "timeline"}
                                                      for b in c["blocks"]]}
                                    for c in results["configs"]]}

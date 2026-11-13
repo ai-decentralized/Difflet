@@ -1,0 +1,23 @@
+{
+ "blocks": [
+  "neff_1090135313063861_vnc_0.neff"
+ ],
+ "step": {
+  "wall_ms": 9848.441736,
+  "steps": 1,
+  "gap_s": 0.2,
+  "dump_steps": 1
+ },
+ "neffs": {
+  "neff_1090135313063861_vnc_0.neff": {
+   "execs_per_step": 54,
+   "in_model_median_ms": 182.3773415
+  }
+ },
+ "non_block_ms": 0.0,
+ "host_gap_ms": 0.121586,
+ "cc_running": {
+  "n": 648.0,
+  "total_ms": 455.014019
+ }
+}

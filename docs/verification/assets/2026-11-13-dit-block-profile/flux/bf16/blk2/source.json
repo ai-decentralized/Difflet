@@ -1,0 +1,11 @@
+{
+ "neff_name": "neff_399558376497803_vnc_0.neff",
+ "sha256": "c8c14523c6e8fc912eb0e8ce51400ad4d22a8bdbc40bd179ef199623a41e05ea",
+ "ranks": [
+  "/mnt/nvme/difflet-prof/run/flux/bf16/dump/i-0882eb59ff5d391e1_pid_3803945/1794592129715493585/neff_399558376497803_vnc_0.neff",
+  "/mnt/nvme/difflet-prof/run/flux/bf16/dump/i-0882eb59ff5d391e1_pid_3803946/1794592129715503948/neff_399558376497803_vnc_0.neff",
+  "/mnt/nvme/difflet-prof/run/flux/bf16/dump/i-0882eb59ff5d391e1_pid_3803947/1794592129715479764/neff_399558376497803_vnc_0.neff",
+  "/mnt/nvme/difflet-prof/run/flux/bf16/dump/i-0882eb59ff5d391e1_pid_3803948/1794592120122176321/neff_399558376497803_vnc_0.neff"
+ ],
+ "kind": "single"
+}
