@@ -121,6 +121,9 @@ def init_parallel_mesh(config) -> None:
     _MESH_SPEC = spec
     _AXIS_GROUPS = groups
     _TP_GROUP = groups.get("tp")
+    from difflet.backends.neuron.ops_impl.attention import prepare_ring_kernel
+
+    prepare_ring_kernel(spec)  # before any compilation: Dynamo cannot trace op registration
 
 
 def is_mesh_initialized() -> bool:

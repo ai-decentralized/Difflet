@@ -339,3 +339,26 @@ def test_bounded_kernel_limit_is_half_attention_cte_s_tested_size():
     # TP4 at 720x1280x129: 6 heads of 119,168 padded joint tokens, one head per call.
     assert neuron_attention._head_chunk(6, 119168, 119168) == 1
     assert neuron_attention._head_chunk(6, 10496, 10496) == 6  # 320x512x61 unchanged
+
+
+def test_ring_kernel_is_never_taken_outside_compilation():
+    """The NKI ring kernel issues its own collective permutes, so only compiled calls take it;
+    eager calls (every CPU test of ring attention) keep the permute loop."""
+    q = torch.randn(1, 2, 128, 64, dtype=torch.bfloat16)
+    assert not neuron_attention._ring_kernel_eligible(q, q, q)
+
+
+def test_ring_kernel_receives_every_cp_ring_in_global_ranks():
+    """TP4 x CP4: the CP rings are strided by the TP size, one rank per TP block, which is what
+    the kernel's replica_groups must list."""
+    from difflet.pipeline.parallel_mesh import MeshSpec
+
+    rings = tuple(tuple(g) for g in MeshSpec(cp=4, tp=4).axis_groups("cp"))
+    assert rings == ((0, 4, 8, 12), (1, 5, 9, 13), (2, 6, 10, 14), (3, 7, 11, 15))
+
+
+def test_no_ring_kernel_is_prepared_without_cp():
+    from difflet.pipeline.parallel_mesh import MeshSpec
+
+    neuron_attention.prepare_ring_kernel(MeshSpec(cp=1, tp=4))
+    assert neuron_attention._RING_KERNEL_OP is None
