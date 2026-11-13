@@ -24,7 +24,7 @@
 # holds the host-wide capture lock (lib.sh's capture_neff, ruling R17). The lane ends
 # in STATUS: DONE, FAILED <reason> (exit 1) or BUSY (exit 0, nothing more run on the device). A
 # rerun skips what is done: the dump once dump.log says "dump exit 0", a block once its
-# summary.json exists (written last).
+# summary.json exists (written last); a dump redone removes the blocks and system profile first.
 #
 # usage: capture.sh --key <key> --arm <bf16|mxfp8> --device <d> --cpus <taskset list> --out <root>
 #        capture.sh --key <key> --arm <bf16|mxfp8> --out <root> --candidates
@@ -157,7 +157,8 @@ view() {  # view <ntff> <args...>: blk $B's NTFF read on the lane's CPUs (no dev
 if ! grep -qx "dump exit 0" "$A/dump.log" 2>/dev/null; then
   if [ -n "$HEAVY" ]; then dump_slot "$A"; fi  # held for the dump only, not the captures
   require_idle "$DEV" "$A" || exit 0
-  rm -rf "$A/dump" "$A/work"
+  # a new dump may compile other NEFFs: the old one's blocks and system profile go with it
+  rm -rf "$A/dump" "$A/work" "$A"/blk* "$A/system.json" "$A/system_summary.json"
   note "$A" "dump start"
   ( cd "$REPO" && export PYTHONPATH="$REPO" NEURON_RT_INSPECT_DEVICE_PROFILE=1 \
       NEURON_RT_INSPECT_DEVICE_PROFILE_NUM_WARMUP=2 && on_device \

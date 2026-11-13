@@ -588,6 +588,21 @@ def test_a_rerun_skips_the_dump_and_the_captures_already_done(tmp_path):
     assert not [ln for ln in x[first:] if ln["argv"][0] in ("inspect", "capture")]
 
 
+@needs_tools
+def test_a_redone_dump_captures_the_blocks_and_the_system_profile_again(tmp_path):
+    """A dump with no "dump exit 0" is redone and its NEFFs may differ: the old dump's blocks and
+    system summary go with it, else source.json would pair the new NEFF with the old profile."""
+    done, arm_dir, _, x, _ = _capture(tmp_path, "qwen_image")
+    assert done.returncode == 0 and _status(arm_dir) == "DONE"
+    first = len(x)
+    (arm_dir / "dump.log").write_text("killed\n")
+    done, arm_dir, _, x, _ = _capture(tmp_path, "qwen_image")
+    assert done.returncode == 0, done.stderr
+    assert _status(arm_dir) == "DONE"
+    again = [ln["argv"][0] + ("-d" if "-d" in ln["argv"] else "") for ln in x[first:]]
+    assert (again.count("inspect"), again.count("capture"), again.count("view-d")) == (1, 1, 1)
+
+
 def test_hv15_mxfp8_is_refused_naming_the_pair(tmp_path):
     done = subprocess.run(["bash", str(PD / "capture.sh"), "--key", "hv15_official", "--arm",
                            "mxfp8", "--device", "1", "--cpus", "0", "--out", str(tmp_path / "out")],
