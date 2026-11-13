@@ -73,4 +73,8 @@ def test_ops_dispatch_to_the_cpu_implementations(monkeypatch):
 
     assert load_backend_attr("embeddings", "apply_rotary_emb") is neuron_embeddings.apply_rotary_emb
     assert neuron_embeddings.apply_rotary_emb is not cpu_embeddings.apply_rotary_emb
+    # So is diffusers' fp32 law (FLUX's call sites), by the same matmul pair swap.
+    fp32_rope = neuron_embeddings.apply_rotary_emb_fp32
+    assert load_backend_attr("embeddings", "apply_rotary_emb_fp32") is fp32_rope
+    assert fp32_rope is not cpu_embeddings.apply_rotary_emb_fp32
     registry._get_backend_by_name.cache_clear()

@@ -11,7 +11,10 @@ projections into one ``proj_out`` (input columns ``[0, inner)`` attention, ``[in
 MLP); the model splits them so each is row-parallel on its own. ``proj_out_attn.weight`` and
 ``proj_out_mlp.weight`` are therefore column ranges of ``proj_out.weight`` (read per TP shard),
 and ``proj_out_attn.bias`` is ``proj_out.bias`` (``proj_out_mlp`` has none). Both mappings are
-``core/checkpoint.py``'s ``single_block_proj_out_*``, shared with HunyuanVideo.
+``core/checkpoint.py``'s ``single_block_proj_out_*``, shared with HunyuanVideo. The quantized
+directory (FLUX's spec splits that ``proj_out``: ``difflet.quant.targets``) has no fused weight:
+it holds ``proj_out_attn.weight`` / ``proj_out_mlp.weight`` as tensors of their own, read by name
+(the base drops the slices), each fp8 with its scales when targeted, else in the source's dtype.
 
 ``forward`` takes the pipeline's call (``img_ids``/``txt_ids``, guidance as a number or tensor) like
 the Trainium wrapper: the rotary table is ``FluxPosEmbed`` over ``[txt_ids; img_ids]``, computed on
@@ -52,9 +55,12 @@ class NeuronFluxTransformerApplication(TorchNeuronApplicationBase):
     ``quant`` (a ``QuantSpec`` or its dict) is the base's MXFP8 wiring: the spec's target
     linears (``difflet.quant.targets``' ``"flux"`` table) become their FP8 twins on the meta
     module before the load, so ``model_path`` must then be the quantized checkpoint directory
-    (``difflet/quant/checkpoint.py``) whose tensors those layers hold. No q/k/v fusion: this
-    attention reads ``to_q``/``to_k``/``to_v`` directly. Trainium3 and compile mode only
-    (decision D43).
+    (``difflet/quant/checkpoint.py``) whose tensors those layers hold. That directory stores
+    each single block's ``proj_out`` as its two halves, which load by name, so a targeted half
+    is an ``FP8RowParallelLinear`` whose rank K range was quantized on its own; the twin keeps
+    the layer's ``reduce_output=False`` / ``skip_bias_add=True``, so the block's one merged
+    all-reduce and its single bias add run as in bf16. No q/k/v fusion: this attention reads
+    ``to_q``/``to_k``/``to_v`` directly. Trainium3 and compile mode only (decision D43).
     """
 
     block_attrs = ("transformer_blocks", "single_transformer_blocks")

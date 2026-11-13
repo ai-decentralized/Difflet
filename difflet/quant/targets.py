@@ -86,11 +86,21 @@ QWEN_IMAGE_ROW_PARALLEL: tuple[str, ...] = (
 # FLUX.1 (diffusers' FluxTransformer2DModel names, which ``difflet/models/flux/modeling_flux.py``
 # keeps): the 19 dual-stream blocks' q/k/v for both streams and both MLPs (``ff``, ``ff_context``),
 # the 38 single-stream blocks' q/k/v and MLP-up (``proj_mlp``). The output projections stay bf16
-# as for Qwen-Image: the dual blocks' ``to_out.0`` / ``to_add_out`` and the single blocks'
-# ``proj_out`` (which the neuron model splits into ``proj_out_attn`` / ``proj_out_mlp``, read as
-# column ranges of the checkpoint's ``proj_out``: a quantized target there would also need the
-# writer to slice the block scales).
+# by default as for Qwen-Image: the dual blocks' ``to_out.0`` / ``to_add_out`` and the single
+# blocks' ``proj_out``. FLUX's spec splits that ``proj_out`` (``SINGLE_BLOCK_SPLIT_LINEARS``),
+# so its quantized checkpoint stores ``proj_out_attn`` / ``proj_out_mlp``, the two row-parallel
+# linears the neuron model runs, as tensors of their own, read by name; untargeted they are the
+# fused weight's column ranges in the source's dtype. The halves can be quantized, each per rank
+# K range of its own, but they are override targets (``FLUX_SPLIT_TARGETS``) until the device
+# picks the default (``docs/plans/2026-11-07-mxfp8-proj-out-rope.md`` D5): Wan's self-attention
+# q/k/v went into its default unmeasured and cost the tp4 block 5x.
 _SINGLE = r"single_transformer_blocks\.\d+"
+
+#: FLUX's and HunyuanVideo's single-stream ``proj_out``: one checkpoint ``Linear(dim + mlp_dim,
+#: dim)`` over ``cat([attn, mlp])`` that the neuron models run as two row-parallel linears, each
+#: on its own input sharding. A spec that splits it stores ``proj_out_attn`` / ``proj_out_mlp``
+#: as tensors of their own (``checkpoint.py``), so each half can be quantized per rank K range.
+SINGLE_BLOCK_SPLIT_LINEARS: tuple[str, ...] = (rf"{_SINGLE}\.proj_out",)
 
 FLUX_TARGETS: tuple[str, ...] = (
     rf"{_BLOCK}\.attn\.(to_q|to_k|to_v|add_q_proj|add_k_proj|add_v_proj)",
@@ -99,6 +109,10 @@ FLUX_TARGETS: tuple[str, ...] = (
     rf"{_SINGLE}\.attn\.(to_q|to_k|to_v)",
     rf"{_SINGLE}\.proj_mlp",
 )
+
+#: The single blocks' ``proj_out`` halves as targets (row-parallel: each quantized per rank K
+#: range of the half), for ``targets=`` / ``DIFFLET_QUANT_TARGETS`` overrides.
+FLUX_SPLIT_TARGETS: tuple[str, ...] = (rf"{_SINGLE}\.proj_out_(attn|mlp)",)
 
 FLUX_KEPT_BF16: tuple[str, ...] = (
     rf"{_BLOCK}\.attn\.(to_out\.0|to_add_out)",
@@ -116,6 +130,7 @@ FLUX_KEPT_BF16: tuple[str, ...] = (
 FLUX_ROW_PARALLEL: tuple[str, ...] = (
     rf"{_BLOCK}\.attn\.(to_out\.0|to_add_out)",  # not default targets; kept for overrides
     rf"{_BLOCK}\.(ff|ff_context)\.net\.2",
+    *FLUX_SPLIT_TARGETS,  # not default targets; kept for overrides
 )
 
 # LTX-2 (diffusers' LTX2VideoTransformer3DModel names, which
@@ -205,6 +220,10 @@ ROW_PARALLEL_BY_MODEL: dict[str, tuple[str, ...]] = {
     "ltx_2": LTX_2_ROW_PARALLEL,
     "wan": WAN_ROW_PARALLEL,
 }
+#: The fused checkpoint linears each model's quantized checkpoint stores as two column ranges
+#: (``QuantSpec.split_linears``). A model without an entry keeps every weight whole, and its
+#: spec and directory digest are what they were before splits existed.
+SPLITS_BY_MODEL: dict[str, tuple[str, ...]] = {"flux": SINGLE_BLOCK_SPLIT_LINEARS}
 
 
 def targets_for(model: str) -> tuple[str, ...]:
@@ -221,17 +240,25 @@ def row_parallel_for(model: str) -> tuple[str, ...]:
     return ROW_PARALLEL_BY_MODEL.get(model, ())
 
 
+def splits_for(model: str) -> tuple[str, ...]:
+    return SPLITS_BY_MODEL.get(model, ())
+
+
 def default_spec(model: str, **overrides) -> QuantSpec:
     """The mxfp8 recipe for ``model``; ``targets=`` replaces the model's default layer set,
-    ``compute=`` and ``tp_degree=`` complete it."""
+    ``compute=`` and ``tp_degree=`` complete it. The model's splits stay under a ``targets=``
+    override: the checkpoint layout does not depend on which layers are quantized, so a set
+    without the halves stores them unquantized and the model reads them by name as ever."""
     overrides.setdefault("row_parallel", row_parallel_for(model))
     overrides.setdefault("targets", targets_for(model))
+    overrides.setdefault("split_linears", splits_for(model))
     return QuantSpec(**overrides)
 
 
 __all__ = [
     "FLUX_KEPT_BF16",
     "FLUX_ROW_PARALLEL",
+    "FLUX_SPLIT_TARGETS",
     "FLUX_TARGETS",
     "LTX_2_KEPT_BF16",
     "LTX_2_ROW_PARALLEL",
@@ -240,11 +267,14 @@ __all__ = [
     "QWEN_IMAGE_ROW_PARALLEL",
     "QWEN_IMAGE_TARGETS",
     "ROW_PARALLEL_BY_MODEL",
+    "SINGLE_BLOCK_SPLIT_LINEARS",
+    "SPLITS_BY_MODEL",
     "TARGETS_BY_MODEL",
     "WAN_KEPT_BF16",
     "WAN_ROW_PARALLEL",
     "WAN_TARGETS",
     "default_spec",
     "row_parallel_for",
+    "splits_for",
     "targets_for",
 ]

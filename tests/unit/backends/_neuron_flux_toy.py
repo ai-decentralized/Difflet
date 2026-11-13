@@ -9,13 +9,37 @@ TINY = dict(patch_size=1, in_channels=8, num_layers=1, num_single_layers=2, atte
             num_attention_heads=4, joint_attention_dim=32, pooled_projection_dim=16,
             guidance_embeds=True, axes_dims_rope=(2, 2, 4))
 TINY_SHAPE = dict(height=64, width=64, text_seq_len=8)  # 4x4 packed image tokens
+#: The toy's dims with a 128-wide inner dimension: the MX block layout wants K in multiples of
+#: 128 (``difflet/quant/mx.swizzle_perm``), the toy's 32 is below that.
+TINY_FP8 = {**TINY, "attention_head_dim": 32, "axes_dims_rope": (8, 12, 12)}
+#: The MXFP8 geometry at tp2: inner 256 and MLP 1024, so the single blocks' ``proj_out_attn``
+#: (K 256) and every other row-parallel target keep a multiple of 128 per rank.
+TINY_FP8_TP2 = {**TINY, "attention_head_dim": 64, "axes_dims_rope": (16, 24, 24)}
 
 
-def write_tiny_flux(root) -> str:
+def mx_toy_weights_(model: torch.nn.Module) -> None:
+    """Re-draw every 2-D weight of ``model`` as a Gaussian of the variance diffusers' default
+    init gives it (kaiming-uniform's bound ``1/sqrt(K)`` is std ``1/sqrt(3K)``), from the
+    current seed. Under the uniform init every MX block's maximum sits just under the bound, so
+    nearly every block gets one E8M0 scale and every shard law (whole K, per rank K range,
+    a slice of the fused weight's quantization) writes the same bytes; a Gaussian block's
+    maximum depends on which 32 values it holds, so a test of the law can fail."""
+    with torch.no_grad():
+        for param in model.parameters():
+            if param.dim() == 2:
+                param.copy_(torch.randn_like(param) * (3 * param.shape[1]) ** -0.5)
+
+
+def write_tiny_flux(root, *, config: dict | None = None) -> str:
+    """The seeded diffusers DiT as ``root/transformer``; ``config`` picks the geometry
+    (``TINY`` by default, ``TINY_FP8`` for the MXFP8 tests), and a model built from one gets
+    :func:`mx_toy_weights_`."""
     from diffusers import FluxTransformer2DModel
 
     torch.manual_seed(0)
-    model = FluxTransformer2DModel(**TINY)
+    model = FluxTransformer2DModel(**(config or TINY))
+    if config is not None:
+        mx_toy_weights_(model)
     path = f"{root}/transformer"
     model.save_pretrained(path, safe_serialization=True)
     return path

@@ -50,7 +50,9 @@ def _tile_sizes(k: int) -> list[int]:
     sub-tiles instead, and its golden (``matmul_mxfp8_torch._swizzle``) notes the two agree for
     every remainder except 384, where the block membership differs and a weight laid out the
     other way gives a ~100% error: Wan's ``ffn.net_out`` at tp4 (13824/4 = 6 x 512 + 384) hit
-    it (2026-11-07). Qwen-Image, FLUX and LTX-2 have no remainder."""
+    it (2026-11-07). Qwen-Image's and LTX-2's default targets have no remainder. FLUX's
+    ``proj_out_attn`` has K 768 = 512 + 256 at tp4 (a remainder the two loaders agree on) and
+    384 at tp8 (this law)."""
     if k % LAYOUT_K:
         raise ValueError(f"K={k} must be a multiple of {LAYOUT_K} for the MX layout")
     tiles = [TILE_K] * (k // TILE_K)
