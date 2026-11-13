@@ -1,8 +1,53 @@
 # DiT block profile (`scripts/profile_dit`)
 
 Where one DiT block spends its time on trn3, per engine and per component, bf16 against linear
-MXFP8 (plan: `docs/plans/2026-11-13-dit-block-profile.md`). This directory holds Task 1, the
-capture of one configuration's block NEFFs; the analysis and the page build on its outputs.
+MXFP8 (plan: `docs/plans/2026-11-13-dit-block-profile.md`). `capture.sh` captures one
+configuration's block NEFFs (Task 1), `analyze.py` breaks one block down (Task 3), `run_all.sh`
+runs every configuration on the idle devices (Task 4).
+
+## `run_all.sh`
+
+```
+.claude/skills/difflet-device-verify/scripts/supervise.sh scripts/profile_dit/run_all.sh \
+  /mnt/nvme/difflet-prof/run/RUN_DONE <name>          # the 13 lanes, supervised
+scripts/profile_dit/run_all.sh baseline <device> <name>   # one lone capture of the baseline NEFF
+```
+
+The table's 13 (key, arm) lanes, `capture.sh` each, into `/mnt/nvme/difflet-prof/run/<key>/<arm>/`,
+then `analyze.py <blk> --model <key>` on every block of a `DONE` lane (`blk<i>/analyze.log` ends
+`analyze exit <rc>`). The script's header has the rules; in short:
+
+- **Devices.** Before each lane start a fresh `fuser` scan of devices 0-15; a lane gets a device
+  no process holds, none of our jobs holds, never 0 or 6 (another session's, 2026-11-13), never
+  one it was `BUSY` on in this run. The rest queue behind the first to finish. The run ends
+  (`RUN_DONE`: every lane's `STATUS` and analyses, the baselines) when nothing of ours runs and no
+  pending lane could start.
+- **CPU slices.** 13 lanes at once with no shared CPU leave 12 threads per device: device `d`'s
+  6 cores and their SMT siblings on its NUMA node, `lo-(lo+5),(lo+96)-(lo+101)` with
+  `lo = (d < 8 ? 48 : 0) + 6 (d mod 8)` (device 1: `54-59,150-155`; device 15: `42-47,138-143`).
+  The plan's 48-thread sets fit four lanes at once (two per node).
+- **Hub per lane** (`hub_of`, checked 2026-11-13 by resolving each cache key both ways): the NVMe
+  copy `/mnt/nvme/difflet-quant-bench-hub` except `qwen_image mxfp8` (its quantized digest takes
+  the root hub's blob names; the NVMe copy's plain files give `mxfp8-d1231d8e...`, which does not
+  exist: a 29 GB re-quantization on `/`), both `wan22_official` arms (the bf16 copies' manifests
+  name the root source; NVMe would give `mxfp8-31f68724...` / `mxfp8-6cb36bdf...`, absent), and
+  `ltx_2`, `wan21_official` (root only). FLUX, HV1 and HV1.5 resolve to the same entries from
+  either hub; HV1.5's tp2 weight-store entry was written from the NVMe hub (Task 1 smoke).
+- **Prewarm** (`lane_files`): once per lane, serially, before its first start, its root-disk files
+  are read to `/dev/null`: the root hub's components no cache entry replaces, its quantized
+  transformer, bf16 copies and weight-store entries (as the 2026-11-13 warm-up and smoke logs
+  name them). A missing entry ends the lane `FAILED cache miss <path>` before it loads: it would
+  be rebuilt on the root disk.
+- **Disk gate.** Below 60 GB free on `/` every lane that still has to capture ends `FAILED disk`;
+  lanes already running finish. A restart retries `BUSY` and never-started lanes, skips `DONE`
+  (once analyzed) and `FAILED` ones (remove a `STATUS` to rerun it) and never starts a lane whose
+  lock (`<lane>/.lock`, held by its job and all it starts) an earlier `run_all.sh` still holds.
+- **Wan bf16** dumps run with `DIFFLET_NKI_TRACE_CACHE=1` (not in the compile-cache key, Task 1).
+- **Baseline (ruling R17).** Once at least four lanes are dumping, the Qwen-Image smoke block
+  (`t1-smoke/qwen_image/bf16/blk1/block.neff`) is captured once with the lanes' command
+  (`capture_neff`) on a free idle device: `baseline/inrun/result.json` = `{device, lanes_dumping,
+  exec4: {total_time_ms, avg_util_limit}, exec8: {...}}`, against the lone captures in
+  `baseline/<name>/`.
 
 ## `capture.sh`
 
