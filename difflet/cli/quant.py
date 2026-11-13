@@ -27,6 +27,8 @@ QUANT_MODELS: dict[str, str] = {
     "Qwen/Qwen-Image": "qwen_image",
     "black-forest-labs/FLUX.1-dev": "flux",
     "Lightricks/LTX-2": "ltx_2",
+    "Wan-AI/Wan2.1-T2V-14B-Diffusers": "wan",
+    "Wan-AI/Wan2.2-T2V-A14B-Diffusers": "wan",
 }
 
 
@@ -40,7 +42,8 @@ def add_quant_flags(p: argparse.ArgumentParser) -> None:
         "OCP MXFP8 (32-value block scales for weights, offline, and for activations, in the "
         "kernel; no calibration) from a quantized checkpoint that `compile` writes under the "
         "cache dir; the output projections, modulation, embedders and the output layer stay "
-        "bf16 (LTX-2: its audio stream too). Qwen-Image, FLUX.1-dev and LTX-2.",
+        "bf16 (LTX-2: its audio stream too). Qwen-Image, FLUX.1-dev, LTX-2, Wan 2.1 and "
+        "Wan 2.2-A14B (both experts).",
     )
     p.add_argument(
         "--quant-compute",

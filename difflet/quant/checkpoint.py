@@ -14,8 +14,11 @@ Layout of ``<cache>/quantized/<source label>/<component>/mxfp8-<digest>/``:
   its uint8 E8M0 block scales ``<prefix>.weight_scale`` ``[N, K/32]`` beside it (a row-parallel
   target quantized per rank K range, ``mx.py``); everything else (biases, the bf16 modulation
   and embedder weights, norms) is copied byte for byte.
-* ``config.json`` and the other non-tensor files of the source, copied.
-* ``difflet_quant.json``: the spec, the source fingerprint and per-tensor counts.
+* ``config.json`` and the other non-tensor files of the source, copied; a bf16 copy's own
+  manifest excepted, since the quantized directory is no bf16 copy of anything.
+* ``difflet_quant.json``: the spec, the source fingerprint and per-tensor counts, and for a
+  source that is a bf16 copy the fp32 directory it was made from (``source.bf16_copy_of``), so
+  the manifest on device says which hub snapshot the directory came from.
   :func:`check_quantized_dir` refuses a directory whose manifest does not match what the caller
   asks for.
 
@@ -25,7 +28,9 @@ the spec claims.
 
 The digest hashes the spec's weights identity and the source fingerprint (file names, sizes and
 Hugging Face blob names, which are content hashes), so another checkpoint, another target set
-or another TP degree is another directory.
+or another TP degree is another directory. A source that is a bf16 copy (Wan's fp32 hub DiTs)
+adds its copy manifest's sha256: the copy's files carry no blob name, and the manifest is what
+names the fp32 snapshot the copy, and so the quantized directory, were built from.
 """
 
 from __future__ import annotations
@@ -46,6 +51,10 @@ from difflet.quant import mx
 from difflet.quant.spec import QuantSpec, strip_prefix
 
 MANIFEST = "difflet_quant.json"
+#: The manifest a bf16 copy (``core/weights_bf16.py``, which takes the name from here) writes
+#: beside its files. Named here, torch-free, so that fingerprinting a copy on every rank and on
+#: the driver imports no backend package (the neuron package's ``__init__`` loads the runtime).
+BF16_MANIFEST = "difflet-bf16-manifest.json"
 #: Shard size of the written safetensors files (diffusers' default is 10 GB; smaller shards keep
 #: the writer's host memory and the loader's per-file reads bounded).
 SHARD_BYTES = 4 * 1024**3
@@ -60,7 +69,17 @@ _SAFE = re.compile(r"[^A-Za-z0-9._-]+")
 def source_fingerprint(model_dir: str | Path) -> list[list[Any]]:
     """The source's identity without reading its data: every safetensors file's name, size and
     resolved blob name (a Hugging Face blob is named by its content hash), and every index
-    file's sha256. No mtime: a copied checkpoint is the same checkpoint."""
+    file's sha256. No mtime of the files themselves: a copied checkpoint is the same checkpoint.
+
+    A bf16 copy (``core/weights_bf16.py``) ends with its manifest's sha256: the copy writes its
+    own safetensors, so their names say nothing about the hub snapshot, and the manifest (the
+    fp32 source's resolved path and its files' names, sizes and mtimes) is the copy's own tie to
+    it. A remade copy is another manifest, so the quantized directory built from the old one is
+    another checkpoint's; this is where mtimes do enter: a source moved or re-stamped (an rsync
+    without ``-t``) remakes the copy at the next compile and the quantized directory with it,
+    and the old one stays on disk at its old digest. A directory without a manifest (every hub
+    checkpoint) keeps the fingerprint it had, so every digest written before the entry existed
+    still resolves."""
     model_dir = Path(model_dir)
     entries: list[list[Any]] = []
     for path in sorted(model_dir.glob("*.safetensors")):
@@ -70,6 +89,9 @@ def source_fingerprint(model_dir: str | Path) -> list[list[Any]]:
         entries.append([path.name, hashlib.sha256(path.read_bytes()).hexdigest()])
     if not entries:
         raise FileNotFoundError(f"no .safetensors under {model_dir}")
+    manifest = model_dir / BF16_MANIFEST
+    if manifest.is_file():
+        entries.append([manifest.name, hashlib.sha256(manifest.read_bytes()).hexdigest()])
     return entries
 
 
@@ -87,8 +109,21 @@ def quantized_dir(cache_root: str | Path, model_dir: str | Path, spec: QuantSpec
     return Path(cache_root).expanduser() / "quantized" / label / model_dir.name / f"{spec.format}-{digest}"
 
 
+def _bf16_copy_source(model_dir: Path) -> Path | None:
+    """The fp32 directory a bf16 copy (``core/weights_bf16.py``) was made from, from its
+    manifest; None for anything else (every hub checkpoint)."""
+    manifest = model_dir / BF16_MANIFEST
+    if not manifest.is_file():
+        return None
+    return Path(json.loads(manifest.read_text())["source"])
+
+
 def _source_label(model_dir: Path) -> str:
-    """``<repo>__<snapshot8>`` for a Hugging Face cache path, else the parent directory's name."""
+    """``<repo>__<snapshot8>`` for a Hugging Face cache path, else the parent directory's name.
+    A bf16 copy is labelled by its fp32 source: the copy's own path,
+    ``weights-bf16/<snapshot>/<component>``, names no repo, and the label is what the driver's
+    ``[<tag>] MXFP8 <component> (<compute>): <dir>`` lines and the cache layout show."""
+    model_dir = _bf16_copy_source(model_dir) or model_dir
     parts = model_dir.resolve().parts
     for i, part in enumerate(parts):
         if part.startswith("models--") and i + 2 < len(parts) and parts[i + 1] == "snapshots":
@@ -258,14 +293,21 @@ def write_quantized_dir(model_dir: str | Path, out_dir: str | Path, spec: QuantS
                 kept += 1
         weight_map, total = writer.finish()
         for path in sorted(model_dir.iterdir()):
-            if path.is_file() and not path.name.endswith(".safetensors") \
+            if path.is_file() and path.name != BF16_MANIFEST \
+                    and not path.name.endswith(".safetensors") \
                     and not path.name.endswith(".safetensors.index.json"):
                 shutil.copy2(path, tmp / path.name)
+        source = {"path": str(model_dir), "fingerprint": source_fingerprint(model_dir),
+                  "bytes": source_bytes(model_dir)}
+        fp32_source = _bf16_copy_source(model_dir)
+        if fp32_source is not None:
+            # The copy's manifest is not carried over (it would mark this directory as a bf16
+            # copy of the fp32 source, which it is not); the snapshot it names is kept here.
+            source["bf16_copy_of"] = str(fp32_source)
         manifest = {
             "schema": spec.schema,
             "spec": spec.to_dict(),
-            "source": {"path": str(model_dir), "fingerprint": source_fingerprint(model_dir),
-                       "bytes": source_bytes(model_dir)},
+            "source": source,
             "quantized_linears": quantized,
             "tensors": {"quantized": len(quantized), "kept": kept, "total": len(weight_map)},
             "bytes": total,
@@ -354,6 +396,7 @@ def is_fp8(tensor: torch.Tensor) -> bool:
 
 
 __all__ = [
+    "BF16_MANIFEST",
     "MANIFEST",
     "SHARD_BYTES",
     "check_quantized_dir",

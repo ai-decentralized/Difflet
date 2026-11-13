@@ -34,6 +34,21 @@ row-parallel, quantized per rank K range: the default row-parallel target, ``ff.
 a K per rank that is a multiple of 128 at every tp its 32 heads divide; an override that
 quantizes a 2048-wide ``to_out.0`` has one up to tp 16.
 
+Wan 2.1-T2V-14B and Wan 2.2-T2V-A14B (diffusers' ``WanTransformer3DModel`` names) run 40 blocks
+of 5120 (40 heads x 128), each a self-attention, a text cross-attention (4096-wide text at 512
+tokens) and a 13824-wide FFN; Wan 2.2's two experts share that block graph, so one table serves
+both (one spec, two quantized directories). The targets are the text cross-attention's q/k/v
+and the FFN (the self-attention's q/k/v stay bf16 on measurement, see ``WAN_TARGETS``),
+written in **checkpoint-key spelling**: the neuron module
+(``difflet/models/wan/modeling_wan.py``) names its FFN ``ffn.net_in`` / ``net_out`` where the
+checkpoint has ``ffn.net.0.proj`` / ``net.2``, and the application applies the spec through its
+``checkpoint_key`` (``quantize_module_(key_fn=...)``), so the patterns match the weights the
+writer quantizes and the modules the loader swaps alike. Every ``to_out.0`` stays bf16 as
+above; the per-block modulation is ``scale_shift_table``, a parameter, not a linear; the
+``condition_embedder`` and ``proj_out`` are bf16 top-level layers. At tp > 1 ``to_out.0``
+(K 5120) and ``ffn.net.2`` (K 13824) are row-parallel: ``net.2``'s K per rank is a multiple of
+128 at tp 1, 2 and 4 (3456) but not at tp 8 (1728), which the writer refuses naming the layer.
+
 Patterns are regexes full-matched against diffusers' module names (the ``transformer.`` trace
 prefix is stripped by :meth:`QuantSpec.matches`).
 """
@@ -145,15 +160,50 @@ LTX_2_ROW_PARALLEL: tuple[str, ...] = (
     rf"{_BLOCK}\.audio_ff\.net\.2",  # not a default target; kept for overrides
 )
 
+# Wan 2.1 and Wan 2.2-A14B (diffusers' WanTransformer3DModel names, the checkpoint's spelling of
+# the FFN): the text cross-attention's q/k/v and the two FFN linears. The self-attention's q/k/v
+# stay bf16 on measurement (trn3, tp4, 480x832x9, 50 steps; docs/verification/
+# 2026-11-07-mxfp8-video-models.md section 4): with them quantized the block NEFF ran 56 ms
+# against 10.5 in bf16 (the step 2.26 s against 0.43), a compiler effect around those custom-op
+# outputs (they feed the global q/k norm, the rotary embedding and the attention kernel) that a
+# one-core block does not reproduce; without them the step is 385 ms against 432 (0.89x).
+_WAN_BLOCK = r"blocks\.\d+"
+
+WAN_TARGETS: tuple[str, ...] = (
+    rf"{_WAN_BLOCK}\.attn2\.(to_q|to_k|to_v)",
+    rf"{_WAN_BLOCK}\.ffn\.net\.0\.proj",
+    rf"{_WAN_BLOCK}\.ffn\.net\.2",
+)
+
+#: Wan modules a reader may expect quantized that are deliberately not: the self-attention's
+#: q/k/v (measured above), the output projections, the modulation tables (parameters, not
+#: linears: they match no module, named so the table reads complete), the embedders and the
+#: output layer.
+WAN_KEPT_BF16: tuple[str, ...] = (
+    rf"{_WAN_BLOCK}\.attn1\.(to_q|to_k|to_v)",
+    rf"{_WAN_BLOCK}\.(attn1|attn2)\.to_out\.0",
+    rf"{_WAN_BLOCK}\.scale_shift_table",
+    r"condition_embedder\..*",
+    r"scale_shift_table",
+    r"proj_out",
+)
+
+WAN_ROW_PARALLEL: tuple[str, ...] = (
+    rf"{_WAN_BLOCK}\.(attn1|attn2)\.to_out\.0",  # not default targets; kept for overrides
+    rf"{_WAN_BLOCK}\.ffn\.net\.2",
+)
+
 TARGETS_BY_MODEL: dict[str, tuple[str, ...]] = {
     "qwen_image": QWEN_IMAGE_TARGETS,
     "flux": FLUX_TARGETS,
     "ltx_2": LTX_2_TARGETS,
+    "wan": WAN_TARGETS,
 }
 ROW_PARALLEL_BY_MODEL: dict[str, tuple[str, ...]] = {
     "qwen_image": QWEN_IMAGE_ROW_PARALLEL,
     "flux": FLUX_ROW_PARALLEL,
     "ltx_2": LTX_2_ROW_PARALLEL,
+    "wan": WAN_ROW_PARALLEL,
 }
 
 
@@ -191,6 +241,9 @@ __all__ = [
     "QWEN_IMAGE_TARGETS",
     "ROW_PARALLEL_BY_MODEL",
     "TARGETS_BY_MODEL",
+    "WAN_KEPT_BF16",
+    "WAN_ROW_PARALLEL",
+    "WAN_TARGETS",
     "default_spec",
     "row_parallel_for",
     "targets_for",

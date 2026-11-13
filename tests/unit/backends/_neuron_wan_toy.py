@@ -4,9 +4,10 @@
 at toy size, and returns the TP1 fp32 reference output on the fixed inputs:
 
 * ``transformer/config.json`` + ``diffusion_pytorch_model.safetensors``: a seeded TP1
-  ``WanTransformer3DModel`` (4 heads x 16, 2 blocks) whose state_dict is saved under the
-  diffusers keys, so the FFN appears as ``net.0.proj``/``net.2`` and the loader's
-  module -> checkpoint rename is exercised;
+  ``WanTransformer3DModel`` (4 heads x 16, 2 blocks; ``config=TINY_FP8_WAN`` for the MXFP8
+  geometry, carried through to the weights, the saved config, the text encoder's width and
+  ``tiny_wan_config``) whose state_dict is saved under the diffusers keys, so the FFN appears
+  as ``net.0.proj``/``net.2`` and the loader's module -> checkpoint rename is exercised;
 * ``scheduler/scheduler_config.json``: Wan2.1's UniPC config (flow_shift 3.0, flow sigmas);
 * ``model_index.json`` without ``boundary_ratio`` (Wan2.1: one expert for every step);
   ``write_tiny_wan22_model`` adds ``transformer_2/`` (same architecture, its own weights) and a
@@ -45,6 +46,12 @@ TINY_WAN_TRANSFORMER: dict = {
     "rope_max_seq_len": 1024,
     "eps": 1e-6,
 }
+#: The MXFP8 geometry: 4 heads x 32 = 128 inner, a 512-wide FFN and 128-wide text, so every
+#: quantized weight's K is 128 (q/k/v, ``net.0.proj``) or 512 (``net.2``: 512 / tp per rank),
+#: the smallest K the MX layout tiles (``difflet.quant.spec.LAYOUT_K``); the 16-wide heads of
+#: ``TINY_WAN_TRANSFORMER`` would give K=64.
+TINY_FP8_WAN: dict = {**TINY_WAN_TRANSFORMER, "num_attention_heads": 4, "attention_head_dim": 32,
+                      "ffn_dim": 512, "text_dim": 128}
 #: 32x48x5 -> latent (1, 4, 2, 4, 6) -> 2 x 2 x 3 = 12 DiT tokens; text (1, 8, 24).
 TINY_SHAPE = {"height": 32, "width": 48, "num_frames": 5}
 TINY_TEXT_SEQ_LEN = 8
@@ -106,9 +113,9 @@ WAN21_SCHEDULER: dict = {
 
 #: Word-level vocabulary of the tiny tokenizer; ids 0-2 are T5's pad, eos and unk.
 _TOKENS = ["<pad>", "</s>", "<unk>", "a", "cat", "on", "the", "moon"]
+#: The tiny umT5 without its ``d_model``: that is the DiT's ``text_dim``, which the writer passes.
 _UMT5_CONFIG = {
     "vocab_size": len(_TOKENS),
-    "d_model": TINY_WAN_TRANSFORMER["text_dim"],
     "d_kv": 8,
     "d_ff": 32,
     "num_heads": 4,  # divisible by TP4: the device umT5 shards heads and relative biases
@@ -125,11 +132,13 @@ _UMT5_CONFIG = {
 _DIFFUSERS_FFN_KEYS = ((".ffn.net_in.", ".ffn.net.0.proj."), (".ffn.net_out.", ".ffn.net.2."))
 
 
-def tiny_wan_inputs(*, dtype: torch.dtype = torch.float32):
-    """The fixed DiT inputs ``(latents, timestep, text)``, identical in every process."""
+def tiny_wan_inputs(*, dtype: torch.dtype = torch.float32, config: dict | None = None):
+    """The fixed DiT inputs ``(latents, timestep, text)``, identical in every process; the text
+    is as wide as ``config``'s ``text_dim`` (the W1 toy's by default: ``TINY_TEXT_SHAPE``)."""
     gen = torch.Generator().manual_seed(TINY_INPUT_SEED)
     latents = torch.randn(TINY_LATENT_SHAPE, generator=gen)
-    text = torch.randn(TINY_TEXT_SHAPE, generator=gen)
+    text_dim = (config or TINY_WAN_TRANSFORMER)["text_dim"]
+    text = torch.randn((1, TINY_TEXT_SEQ_LEN, text_dim), generator=gen)
     timestep = torch.tensor([TINY_TIMESTEP])
     return latents.to(dtype), timestep.to(dtype), text.to(dtype)
 
@@ -142,12 +151,15 @@ def tiny_wan_pipeline_inputs():
     return prompt_embeds, latents
 
 
-def tiny_wan_config(*, tp_degree: int = 1, dtype: torch.dtype = torch.float32):
-    """``NeuronWanConfig`` of the tiny model at ``TINY_SHAPE``."""
+def tiny_wan_config(*, tp_degree: int = 1, dtype: torch.dtype = torch.float32,
+                    config: dict | None = None):
+    """``NeuronWanConfig`` of the tiny model at ``TINY_SHAPE``; ``config`` picks the geometry
+    (the W1 toy's by default)."""
     from difflet.backends.neuron.wan.config import NeuronWanConfig
 
+    geometry = config or TINY_WAN_TRANSFORMER
     return NeuronWanConfig(
-        **{**TINY_WAN_TRANSFORMER, "patch_size": tuple(TINY_WAN_TRANSFORMER["patch_size"])},
+        **{**geometry, "patch_size": tuple(geometry["patch_size"])},
         **TINY_SHAPE,
         text_seq_len=TINY_TEXT_SEQ_LEN,
         tp_degree=tp_degree,
@@ -155,11 +167,12 @@ def tiny_wan_config(*, tp_degree: int = 1, dtype: torch.dtype = torch.float32):
     )
 
 
-def tiny_wan_tp1_model(seed: int = TINY_WEIGHT_SEED):
-    """The seeded unsharded DiT; call inside ``tp1_mesh()``."""
+def tiny_wan_tp1_model(seed: int = TINY_WEIGHT_SEED, config: dict | None = None):
+    """The seeded unsharded DiT of ``config``'s geometry (the W1 toy's by default); call inside
+    ``tp1_mesh()``."""
     from difflet.models.wan.modeling_wan import WanTransformer3DModel, WanTransformerConfig
 
-    config = WanTransformerConfig.from_diffusers_dict(TINY_WAN_TRANSFORMER)
+    config = WanTransformerConfig.from_diffusers_dict(config or TINY_WAN_TRANSFORMER)
     with torch.random.fork_rng(devices=[]):
         torch.manual_seed(seed)
         model = WanTransformer3DModel(config, dtype=torch.float32)
@@ -177,13 +190,13 @@ def _write_json(path: Path, payload: dict) -> None:
     path.write_text(json.dumps(payload, indent=2) + "\n")
 
 
-def _write_text_encoder(root: Path) -> None:
+def _write_text_encoder(root: Path, *, text_dim: int) -> None:
     from tokenizers import Tokenizer, models, pre_tokenizers, processors
     from transformers import UMT5Config, UMT5EncoderModel
 
     with torch.random.fork_rng(devices=[]):
         torch.manual_seed(TINY_ENCODER_SEED)
-        encoder = UMT5EncoderModel(UMT5Config(**_UMT5_CONFIG)).eval()
+        encoder = UMT5EncoderModel(UMT5Config(**_UMT5_CONFIG, d_model=text_dim)).eval()
     encoder.save_pretrained(str(root / "text_encoder"))
 
     tokenizer = Tokenizer(
@@ -208,17 +221,18 @@ def _write_text_encoder(root: Path) -> None:
 
 
 def _write_expert(root: Path, subdir: str, seed: int, config: dict) -> torch.Tensor:
-    """One seeded expert under ``root/subdir``; returns its TP1 output on ``tiny_wan_inputs()``."""
+    """One seeded expert of ``config``'s geometry under ``root/subdir``; returns its TP1 output
+    on ``tiny_wan_inputs(config=config)``."""
     from safetensors.torch import save_file
 
     with tp1_mesh():
-        model = tiny_wan_tp1_model(seed)
+        model = tiny_wan_tp1_model(seed, config)
         state = {
             _diffusers_key(name): tensor.detach().contiguous().clone()
             for name, tensor in model.state_dict().items()
         }
         with torch.no_grad():
-            reference = model(*tiny_wan_inputs())
+            reference = model(*tiny_wan_inputs(config=config))
     if not any(".ffn.net.0.proj." in key for key in state):
         raise AssertionError("the tiny checkpoint must carry the diffusers FFN keys")
     _write_json(root / subdir / "config.json", config)
@@ -226,13 +240,16 @@ def _write_expert(root: Path, subdir: str, seed: int, config: dict) -> torch.Ten
     return reference
 
 
-def write_tiny_wan_model(root) -> torch.Tensor:
-    """Write the tiny model under ``root``; return the TP1 fp32 output on ``tiny_wan_inputs()``."""
+def write_tiny_wan_model(root, *, config: dict | None = None) -> torch.Tensor:
+    """Write the tiny model under ``root`` in the geometry of ``config`` (the W1 toy's by
+    default; ``TINY_FP8_WAN`` for the MXFP8 tests); return the TP1 fp32 output on
+    ``tiny_wan_inputs(config=config)``."""
     root = Path(root)
-    reference = _write_expert(root, "transformer", TINY_WEIGHT_SEED, TINY_WAN_TRANSFORMER)
+    config = config or TINY_WAN_TRANSFORMER
+    reference = _write_expert(root, "transformer", TINY_WEIGHT_SEED, config)
     _write_json(root / "scheduler" / "scheduler_config.json", WAN21_SCHEDULER)
     _write_json(root / "model_index.json", {"_class_name": "WanPipeline"})
-    _write_text_encoder(root)
+    _write_text_encoder(root, text_dim=config["text_dim"])
     _write_vae(root)
     return reference
 
@@ -258,12 +275,15 @@ def tiny_wan_host_decode(root, latents: torch.Tensor) -> torch.Tensor:
         return vae.eval().decode(latents.float() * std + mean, return_dict=False)[0]
 
 
-def write_tiny_wan22_model(root, *, transformer_2_config: dict | None = None) -> None:
-    """The tiny model in the Wan 2.2 A14B layout: ``transformer_2/`` with its own weights (or the
-    given config, to test a mismatch) and ``boundary_ratio`` in ``model_index.json``."""
+def write_tiny_wan22_model(root, *, transformer_2_config: dict | None = None,
+                           config: dict | None = None) -> None:
+    """The tiny model in the Wan 2.2 A14B layout: ``transformer_2/`` with its own weights in the
+    geometry of ``config`` (or the given ``transformer_2_config``, to test a mismatch) and
+    ``boundary_ratio`` in ``model_index.json``."""
     root = Path(root)
-    write_tiny_wan_model(root)
-    _write_expert(root, "transformer_2", TINY_WEIGHT_SEED_2, TINY_WAN_TRANSFORMER)
+    config = config or TINY_WAN_TRANSFORMER
+    write_tiny_wan_model(root, config=config)
+    _write_expert(root, "transformer_2", TINY_WEIGHT_SEED_2, config)
     if transformer_2_config is not None:
         _write_json(root / "transformer_2" / "config.json", transformer_2_config)
     _write_json(
