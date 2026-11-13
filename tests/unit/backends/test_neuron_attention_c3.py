@@ -339,3 +339,25 @@ def test_bounded_kernel_limit_is_half_attention_cte_s_tested_size():
     # TP4 at 720x1280x129: 6 heads of 119,168 padded joint tokens, one head per call.
     assert neuron_attention._head_chunk(6, 119168, 119168) == 1
     assert neuron_attention._head_chunk(6, 10496, 10496) == 6  # 320x512x61 unchanged
+
+
+def test_vector_exp_false_routes_the_bounded_call_to_the_scalar_exp_op(fake_bounded_op, monkeypatch):
+    """Default calls keep the original op (unchanged graphs for every other model); vector_exp=False
+    takes the Scalar-exp variant, with the same arguments and the same result."""
+    scalar_calls = _Calls()
+    default_op = neuron_attention._FLASH_BOUNDED_OP
+
+    def scalar_op(q, k, v, lo, hi, scale):
+        scalar_calls.append(tuple(q.shape))
+        return default_op(q, k, v, lo, hi, scale)
+
+    monkeypatch.setattr(neuron_attention, "_FLASH_BOUNDED_SCALAR_EXP_OP", scalar_op)
+    q, k, v, lo, hi, ref = _bounded_case()
+    with torch.no_grad():
+        plain = neuron_attention.attention(q, k, v, scale=0.2, bound_min=lo, bound_max=hi,
+                                           tp_q=True, tp_k=True)
+        assert len(fake_bounded_op) == 1 and not scalar_calls
+        scalar = neuron_attention.attention(q, k, v, scale=0.2, bound_min=lo, bound_max=hi,
+                                            tp_q=True, tp_k=True, vector_exp=False)
+    assert len(scalar_calls) == 1
+    assert torch.equal(plain, scalar)

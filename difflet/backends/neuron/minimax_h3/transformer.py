@@ -39,6 +39,7 @@ int32 here (bool tensors cannot be broadcast for the warm-up); the processor rea
 from __future__ import annotations
 
 import dataclasses
+import functools
 import json
 import math
 from pathlib import Path
@@ -132,6 +133,11 @@ class NeuronMiniMaxH3Config:
     tp_degree: int = 4
     precomputed_adaln: bool = True
     checkpoint_num_layers: int | None = None
+    #: The softmax exp of the bounded flash attention on the Scalar engine (False) or trn3's Vector
+    #: engine (True, the kernel default). H3's tail bounds route every score tile's PSUM read
+    #: through a Vector range_select; with the exp there too the Vector engine bounds attention.
+    #: trn3, 768p per-rank shape: 66.4 -> 54.0 ms per attention call (Scalar).
+    attention_vector_exp: bool = False
     #: The CP strategy of the block stack when the mesh has cp > 1 ("ulysses" or "gather_kv");
     #: the application fills it from its parallel config.
     cp_mode: str = "ulysses"
@@ -403,6 +409,17 @@ def _trace_module_class():
                     block.attn.processor = ulysses
                 self.transformer.forward = types.MethodType(_ulysses_transformer_forward,
                                                             self.transformer)
+            if not config.attention_vector_exp:
+                # Neuron only (the shared TP processor keeps the plain difflet.ops.attention):
+                # every block's processor attends with the softmax exp on the Scalar engine.
+                seen = set()
+                for block in (*self.transformer.token_refiner.refiner_blocks,
+                              *self.transformer.transformer_blocks):
+                    processor = block.attn.processor
+                    if isinstance(processor, MiniMaxH3TPAttnProcessor) and id(processor) not in seen:
+                        seen.add(id(processor))  # processors may be shared between blocks
+                        processor._attention = functools.partial(processor._attention,
+                                                                 vector_exp=False)
             for name in FP32_MODULES:
                 _give_fp32_host_storage(getattr(self.transformer, name))
 

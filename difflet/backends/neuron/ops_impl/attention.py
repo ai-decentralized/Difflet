@@ -72,8 +72,15 @@ def attention(
     tp_q: bool = False,
     tp_k: bool = False,
     tp_out: bool = False,
+    vector_exp: bool = True,
     **kwargs,
 ):
+    """``vector_exp`` (bounded flash path only): False runs the softmax exp on the Scalar engine
+    instead of trn3's Vector exp (attention_cte ``allow_vector_exp``). The sequence-packing path
+    reads every score tile out of PSUM with a Vector ``range_select``, so with the exp there too
+    the Vector engine bounds the kernel while the Scalar engine idles; on trn3 at H3's 768p
+    per-rank shape (7 x 38272 x 128) False takes the kernel from 66.4 to 54.0 ms. No effect off
+    trn3 (the kernel only uses the Vector exp there)."""
     if kwargs:
         raise NotImplementedError(
             "neuron attention does not support attention_cte-only kwargs: "
@@ -91,7 +98,8 @@ def attention(
             # attention_cte's sequence packing: per-query key range [bound_min, bound_max), read per
             # query tile inside the kernel (O(L) memory) instead of an L x L mask and masked SDPA.
             out = _flash_attention_bounded(q, k, v, bound_min, bound_max,
-                                           scale=1.0 if scale is None else float(scale))
+                                           scale=1.0 if scale is None else float(scale),
+                                           vector_exp=vector_exp)
             return out.transpose(-1, -2) if tp_out else out
         key_idx = torch.arange(k.shape[-2], device=k.device).view(1, 1, -1)
         attention_mask = (key_idx >= bound_min.to(key_idx.device)) & (
@@ -142,14 +150,15 @@ def _flash_attention(q, k, v, *, scale: float, causal: bool):
     return out.squeeze(0) if squeeze else out
 
 
-def _load_flash_bounded_op():
+def _load_flash_bounded_op(vector_exp: bool = True):
     """attention_cte with per-query key bounds (its "sequence packing"): ``(q, k, v, bound_min,
     bound_max, scale) -> out`` on ``[B*H, L, d]``, bounds int32 ``[B*H, L_q, 1]``, query ``i``
     attending to keys ``bound_min[i] <= j < bound_max[i]``. torch-neuronx's own SDPA wrapper does
     not forward bounds, so the kernel is called as its decomposition calls it (``tp_q``/``tp_k``
     layout, an LNC-wide grid), registered with ``nki_op`` like the logsumexp op."""
+    name = "flash_attention_bounded" if vector_exp else "flash_attention_bounded_scalar_exp"
     try:
-        return torch.ops.difflet_neuron.flash_attention_bounded  # already registered (module reload)
+        return getattr(torch.ops.difflet_neuron, name)  # already registered (module reload)
     except (AttributeError, RuntimeError):
         pass
     try:
@@ -161,18 +170,24 @@ def _load_flash_bounded_op():
     except ImportError:
         return None
 
-    @nki_op("difflet_neuron::flash_attention_bounded", mutates_args={})
+    # The default op passes no allow_vector_exp (the kernel's own default), so its compiled graph
+    # is unchanged; the Scalar-exp variant is a separate op.
+    extra = {} if vector_exp else {"allow_vector_exp": False}
+
+    @nki_op(f"difflet_neuron::{name}", mutates_args={})
     def flash_attention_bounded(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
                                 bound_min: torch.Tensor, bound_max: torch.Tensor,
                                 scale: float) -> torch.Tensor:
         grid = (int(get_logical_neuron_cores()),)
         return wrapped_flash_fwd[grid](q, k, v, tp_q=True, tp_k=True, scale=scale, causal_mask=False,
-                                       cache_softmax=False, bound_min=bound_min, bound_max=bound_max)
+                                       cache_softmax=False, bound_min=bound_min, bound_max=bound_max,
+                                       **extra)
 
     return flash_attention_bounded
 
 
-def _flash_attention_bounded(q, k, v, bound_min, bound_max, *, scale: float):
+def _flash_attention_bounded(q, k, v, bound_min, bound_max, *, scale: float,
+                             vector_exp: bool = True):
     """``[B, H, S, d]`` or ``[B*H, S, d]`` through the bounded kernel; bounds of ``[B*H, S_q, 1]``
     (or anything that reshapes to it)."""
     shape = q.shape
@@ -196,16 +211,17 @@ def _flash_attention_bounded(q, k, v, bound_min, bound_max, *, scale: float):
         q3 = F.pad(q3, (0, 0, 0, pad_q))
         lo = F.pad(lo, (0, 0, 0, pad_q))
         hi = F.pad(hi, (0, 0, 0, pad_q), value=1)
+    op = _FLASH_BOUNDED_OP if vector_exp else (_FLASH_BOUNDED_SCALAR_EXP_OP or _FLASH_BOUNDED_OP)
     chunk = _head_chunk(bh, q3.shape[1], k3.shape[1])
     if chunk == bh:  # one call on the whole tensors: the graph compiled before the split existed
-        out = _FLASH_BOUNDED_OP(q3.contiguous(), k3.contiguous(), v3.contiguous(),
-                                lo.contiguous(), hi.contiguous(), 1.0)
+        out = op(q3.contiguous(), k3.contiguous(), v3.contiguous(),
+                 lo.contiguous(), hi.contiguous(), 1.0)
     else:
-        out = torch.cat([_FLASH_BOUNDED_OP(q3[i:i + chunk].contiguous(),
-                                           k3[i:i + chunk].contiguous(),
-                                           v3[i:i + chunk].contiguous(),
-                                           lo[i:i + chunk].contiguous(),
-                                           hi[i:i + chunk].contiguous(), 1.0)
+        out = torch.cat([op(q3[i:i + chunk].contiguous(),
+                            k3[i:i + chunk].contiguous(),
+                            v3[i:i + chunk].contiguous(),
+                            lo[i:i + chunk].contiguous(),
+                            hi[i:i + chunk].contiguous(), 1.0)
                          for i in range(0, bh, chunk)], dim=0)
     return out[:, :s_q].reshape(*shape[:-1], v.shape[-1])
 
@@ -231,6 +247,7 @@ def _load_flash_kernel():
 # Resolved once at import: no import or cache lookup inside traced (compiled) code.
 _FLASH_KERNEL = _load_flash_kernel()
 _FLASH_BOUNDED_OP = _load_flash_bounded_op()
+_FLASH_BOUNDED_SCALAR_EXP_OP = _load_flash_bounded_op(vector_exp=False)
 
 
 def _load_flash_lse_op():

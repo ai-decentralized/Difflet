@@ -155,3 +155,31 @@ def test_text_bucket_is_the_smallest_that_holds_the_prompt():
                                                                        1024, 1024]
     with pytest.raises(ValueError):
         text_bucket(1025)
+
+
+def test_neuron_h3_attends_with_the_scalar_engine_exp_unless_configured():
+    """The neuron trace module binds vector_exp=False into every block's attention processor
+    (config.attention_vector_exp=False, the default); True keeps the plain difflet.ops.attention."""
+    import functools
+
+    from difflet.backends.neuron.minimax_h3.transformer import (
+        NeuronMiniMaxH3Config,
+        _trace_module_class,
+    )
+
+    def processors(module):
+        tr = module.transformer
+        return [b.attn.processor for b in (*tr.token_refiner.refiner_blocks, *tr.transformer_blocks)]
+
+    tiny = dict(num_attention_heads=2, attention_head_dim=96, hidden_size=192, num_layers=2,
+                num_refiner_layers=1, ffn_dim=256, text_dim=64, time_embed_hidden_dim=64,
+                time_embed_dim=32, height=64, width=64, num_frames=124, text_seq_len=16,
+                tp_degree=1, precomputed_adaln=False)
+    with torch.device("meta"):
+        scalar = _trace_module_class()(NeuronMiniMaxH3Config(**tiny))
+        vector = _trace_module_class()(NeuronMiniMaxH3Config(**tiny, attention_vector_exp=True))
+    for p in processors(scalar):
+        assert isinstance(p._attention, functools.partial)
+        assert p._attention.keywords == {"vector_exp": False}
+    for p in processors(vector):
+        assert not isinstance(p._attention, functools.partial)
