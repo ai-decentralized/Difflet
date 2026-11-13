@@ -13,10 +13,11 @@ def test_original_hunyuan_is_a_gpu_spec_but_15_remains_separate():
     assert gpu_model_spec("hunyuan_video") is SPEC
     assert gpu_spec_for_cli_model_id(SPEC.cli_model_ids[0]) is SPEC
     assert "cuda" in resolve_model(SPEC.cli_model_ids[0]).backends
-    assert gpu_model_spec("hunyuan_video_15") is None
+    assert gpu_model_spec("hunyuan_video_15").model_type == "hunyuan_video_15"
+    assert gpu_model_spec("hunyuan_video_15") is not SPEC
     assert (
         "cuda"
-        not in resolve_model("hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v").backends
+        in resolve_model("hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v").backends
     )
 
 
