@@ -118,15 +118,20 @@ def _rows(trace: Path, model: str) -> pd.DataFrame:
 
 def _timeline(rows: pd.DataFrame, cc: pd.DataFrame, block_ms: float) -> list[dict]:
     """Physical core 0's runs per (component, engine_class), by start; a run's gaps under
-    max(5 us, block / 4000) are merged, so no key has more than ~4000 runs."""
+    max(5 us, block / 4000) are merged, so no key has more than ~4000 runs. ``busy_us`` is the
+    busy time inside a segment (the union of its rows; ruling R16), so a merged one shows its
+    density."""
     gap = max(_TIMELINE_GAP_NS, block_ms * 1e6 / _TIMELINE_SEGMENTS)
     core0 = rows[rows.pcore_idx == 0].groupby(["component", "engine_class"])
     parts = [(c, ec, g) for (c, ec), g in core0]
     segments = []
     for c, ec, g in [*parts, ("collective", "collective", cc)]:
-        s, e = _runs(g.start_ts.to_numpy(), g.end_ts.to_numpy(), gap)
-        segments += [{"component": c, "engine_class": ec, "start_us": a / 1e3, "end_us": b / 1e3}
-                     for a, b in zip(s, e)]
+        busy_s, busy_e = _runs(g.start_ts.to_numpy(), g.end_ts.to_numpy())
+        s, e = _runs(busy_s, busy_e, gap)
+        busy = np.bincount(np.searchsorted(s, busy_s, side="right") - 1,
+                           weights=busy_e - busy_s, minlength=len(s))
+        segments += [{"component": c, "engine_class": ec, "start_us": a / 1e3, "end_us": b / 1e3,
+                      "busy_us": u / 1e3} for a, b, u in zip(s, e, busy)]
     return sorted(segments, key=lambda r: (r["start_us"], r["engine_class"]))
 
 
@@ -176,7 +181,9 @@ def analyze(block_dir: Path, model: str) -> dict:
                          f"{sorted(unmapped.nki_source_location.unique())[:5]}")
 
     psum = rows[rows.psum_read_bytes.fillna(0) > 0]
-    psum = _busy_ms(psum.assign(copy=psum.opcode.isin(["COPY", "CAST"])), ["copy"], n)
+    psum = psum.assign(copy=psum.opcode.isin(["COPY", "CAST"]))
+    psum_by_engine = _busy_ms(psum, ["copy", "engine_class"], n)
+    psum = _busy_ms(psum, ["copy"], n)
     active = pd.read_parquet(trace / "ActiveTime.parquet", columns=["engine", "duration_ns"])
     memory = ("hbm_read", "hbm_write", "sbuf_read", "sbuf_write", "psum_read", "psum_write",
               "spill_save", "spill_reload")
@@ -198,6 +205,10 @@ def analyze(block_dir: Path, model: str) -> dict:
                          "psum_to_sbuf": summary.get("psum_read_sbuf_write_bytes")},
         "psum_readout_copy_ms": psum.get(True, 0.0),
         "psum_readout_fused_ms": psum.get(False, 0.0),
+        # per engine (ruling R16): the part of each VectorE / ScalarE bar that reads PSUM out
+        "psum_readout_copy_ms_by_engine": {ec: ms for (c, ec), ms in psum_by_engine.items() if c},
+        "psum_readout_fused_ms_by_engine": {ec: ms for (c, ec), ms in psum_by_engine.items()
+                                            if not c},
         "mfu": summary.get("mfu_estimated_percent"),
         "mbu": summary.get("mbu_estimated_percent"),
         "throttle": {"avg_util_limit": _mean(summary, r"throttle_avg_util_limit_nc\d+_percent"),
