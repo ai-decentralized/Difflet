@@ -3,8 +3,8 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Run the DiTs' self- and joint-attention core, softmax(QK^T)V, with both matmuls in
-MXFP8 on trn3 (`nc_matmul_mx`), switchable per launch, and measure it alone and together with
-the linear MXFP8 of `--quant mxfp8`: DiT step time, block profile and quality against the
+MXFP8 on trn3 (`nc_matmul_mx`), switchable per launch, and measure it together with the linear
+MXFP8 of `--quant mxfp8` against bf16: DiT step time, block profile and quality against the
 device's bf16 output.
 
 **Architecture:** A fork of nkilib's `attention_cte` (the kernel every Difflet model calls today)
@@ -66,9 +66,12 @@ gate's numbers go to the evidence doc and the page, with the decision taken.
   head dim (128 = 32 partitions x4 in MX), a quarter of the PE rows unless four matmuls share the
   array by row tiling. Not faster -> the kernel ships PV-only, QK in bf16.
 - **G3 (after Task 6):** per model, MXFP8 attention becomes part of `--quant mxfp8` when `both`
-  is faster than `linear` (Task 8); HunyuanVideo-1.5 (no linear default) keeps it behind
-  `DIFFLET_ATTN_QUANT` when `attn` is faster than `bf16`. A model where it is not faster keeps
-  bf16 attention.
+  is faster than linear MXFP8 alone (Task 8). Task 6 runs only `bf16` and `both` (user,
+  2026-11-13), so the linear-alone step time is the evidence doc's (sections 7f, 11, 12, same
+  shape and layout); only when `both` and that number are within `2J` of each other is one
+  linear-alone run made for that model to settle it. HunyuanVideo-1.5 (no linear default) keeps
+  it behind `DIFFLET_ATTN_QUANT` when `attn` is faster than `bf16`. A model where it is not
+  faster keeps bf16 attention.
 
 ## Review Focus
 
@@ -207,27 +210,29 @@ gate's numbers go to the evidence doc and the page, with the decision taken.
   `7737239be780a7877cd8b2ebe32bfb2f`.
 - [ ] **Step 6: Commit and push** — `feat(neuron): DIFFLET_ATTN_QUANT=mxfp8 routes self/joint attention to the MXFP8 kernel`.
 
-### Task 6: Model runs, 2x2 arms
+### Task 6: Model runs, bf16 vs both
 
 **Files:**
 - Create: `scripts/mx_attention/run_arms.sh`
 - Modify: `docs/verification/2026-11-13-dit-block-profile.md` (new section) and the artifact page
 
-- [ ] **Step 1:** Per model at its Plan-A shape and layout, four arms — `bf16`, `linear`
-  (`--quant mxfp8`), `attn` (`DIFFLET_ATTN_QUANT=mxfp8`), `both` — HunyuanVideo-1.5 `bf16` and
-  `attn` only. Order: `wan21`, `hunyuan_video`, `ltx_2`, `qwen_image`, `flux`, `wan22`,
+- [ ] **Step 1:** Per model at its Plan-A shape and layout, two arms (user, 2026-11-13) —
+  `bf16` and `both` (`--quant mxfp8` with `DIFFLET_ATTN_QUANT=mxfp8`); HunyuanVideo-1.5 `bf16`
+  and `attn` (`DIFFLET_ATTN_QUANT=mxfp8` alone: it has no linear default). A `bf16` output
+  already on this host for the same config, whose md5 matches the evidence doc, is reused instead
+  of rerun. Order: `wan21`, `hunyuan_video`, `ltx_2`, `qwen_image`, `flux`, `wan22`,
   `hunyuan_video_15` (the order a reader gets results in; the arms themselves run one per idle
   device in parallel, as the profile plan's lanes do). Each arm: one 50-step generate (step
   median from the log, output saved),
-  a second generate for the `attn` and `both` arms (determinism: md5 equal), and a Plan-A block
-  capture.
-- [ ] **Step 2:** Quality: `compare_difflet_runs.py` of `linear`, `attn`, `both` against `bf16`
+  a second generate for the quantized arm (determinism: md5 equal), and a Plan-A block capture
+  of the quantized arm (the bf16 block profile is Plan A's).
+- [ ] **Step 2:** Quality: `compare_difflet_runs.py` of the quantized arm against `bf16`
   (PSNR / SSIM / LPIPS; latents for HunyuanVideo-1.5 if its 45-minute host decode is the
   bottleneck, said so in the table), next to the evidence doc's bf16 floor for the shape.
 - [ ] **Step 3:** After each model: commit its numbers, push, update the page (step time per
   arm, block breakdown with the attention component, quality).
 - [ ] **Step 4: Gate G3** — apply the rule per model; the table and the decisions go to the page.
-- [ ] **Step 5: Commit and push** — `docs(mx-attention): 2x2 arms per model — step time, block profile, quality`.
+- [ ] **Step 5: Commit and push** — `docs(mx-attention): bf16 vs both per model — step time, block profile, quality`.
 
 ### Task 8: G3's decisions as the default
 
