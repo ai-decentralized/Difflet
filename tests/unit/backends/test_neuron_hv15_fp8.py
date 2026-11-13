@@ -1,6 +1,7 @@
 """The MXFP8 HunyuanVideo-1.5 DiT on the neuron backend, on CPU: the application quantizes the
-dual-stream blocks' image q/k/v and image MLP (diffusers' module names are the checkpoint keys,
-so the table matches them as they are), loads the quantized directory and, in dequant mode,
+set the device measured, the dual-stream blocks' image q/k/v and image MLP (an override since
+Task F8: the model has no default set; diffusers' module names are the checkpoint keys, so the
+patterns match them as they are), loads the quantized directory and, in dequant mode,
 matches diffusers' model run with the weights the directory holds dequantized, at tp1,
 tp2 x CFG2, tp2 with SP and tp2 x CP2. Each rank's row-parallel weights are its own K range
 quantized as such, compared exactly, since the outputs cannot tell. The text stream's q/k/v
@@ -12,8 +13,9 @@ do their weight-store entries, by layout as well as by source. The bytes a loade
 which the transformer stage reports, count the kernel's scale layout that the pre-load estimate
 omits.
 The pipeline resolves the quantized directory from the bf16 copy (the hub DiT is fp32 and
-``difflet compile`` quantizes the copy) at the launch's tp, loads the copy without ``quant``,
-and refuses a launch whose directory was never written.
+``difflet compile`` quantizes the copy) at the spec's tp, loads the copy without ``quant``,
+refuses a launch whose directory was never written, and refuses ``quant="mxfp8"``, which names
+no layers for this model.
 """
 
 from __future__ import annotations
@@ -40,7 +42,6 @@ from difflet.backends.neuron.ops_impl.fp8_linear import FP8Linear, _FP8LinearBas
 from difflet.pipeline.parallel_config import DiffletParallelConfig  # noqa: E402
 from difflet.quant import mx  # noqa: E402
 from difflet.quant.checkpoint import prepare_quantized_checkpoint, read_manifest  # noqa: E402
-from difflet.quant.targets import default_spec  # noqa: E402
 from tests.unit.backends._neuron_gloo import run_ranks  # noqa: E402
 from tests.unit.backends._neuron_hv15_toy import (  # noqa: E402
     HV15_ROW_TARGETS,
@@ -48,6 +49,7 @@ from tests.unit.backends._neuron_hv15_toy import (  # noqa: E402
     TINY_SHAPE_HV15,
     TINY_TARGETS_PER_BLOCK,
     hv15_reference,
+    hv15_spec,
     tiny_hv15_inputs,
     write_tiny_hv15_snapshot,
 )
@@ -90,12 +92,12 @@ def _reset_mesh():
 
 @pytest.fixture(scope="module")
 def tiny(tmp_path_factory):
-    """The FP8 toy snapshot, the default dequant spec at tp1, its quantized directory under
+    """The FP8 toy snapshot, the measured set's dequant spec at tp1, its quantized directory under
     the root's cache (written from the fp32 ``transformer/``: dequant mode computes in the
     application's dtype, fp32 here) and the reference that spec computes."""
     root = write_tiny_hv15_snapshot(tmp_path_factory.mktemp("tiny_hv15_fp8"))
     transformer_dir = root / "transformer"
-    spec = default_spec("hunyuan_video_15", compute="dequant", tp_degree=1)
+    spec = hv15_spec(compute="dequant", tp_degree=1)
     quantized = prepare_quantized_checkpoint(transformer_dir, spec, create=True,
                                              cache_root=root / "cache")
     reference = hv15_reference(transformer_dir, tiny_hv15_inputs(), spec=spec)
@@ -151,7 +153,7 @@ def test_a_spec_for_another_tp_is_refused(tiny):
     tp2's K halves, which a tp1 launch would read as the wrong blocks."""
     with pytest.raises(ValueError,
                        match=r"the HunyuanVideo-1.5 FP8 DiT spec .*tp_degree=2 .*tp_degree=1"):
-        _app(tiny, quant=default_spec("hunyuan_video_15", compute="dequant", tp_degree=2))
+        _app(tiny, quant=hv15_spec(compute="dequant", tp_degree=2))
 
 
 @pytest.mark.parametrize(("tp", "cfg", "sp", "cp", "world"),
@@ -166,7 +168,7 @@ def test_quantized_layouts_match_the_dequantized_reference(tiny, tmp_path, tp, c
     such. A whole-K quantization, dequantized and sliced, puts other values in rank 0's range
     (the toy's scaled-down half of K) while the outputs move only 6e-7, far inside the
     tolerance: only the weight check sees it."""
-    spec = default_spec("hunyuan_video_15", compute="dequant", tp_degree=tp)
+    spec = hv15_spec(compute="dequant", tp_degree=tp)
     quantized = prepare_quantized_checkpoint(tiny.transformer_dir, spec, create=True,
                                              cache_root=tmp_path / "cache")
     branches = ([tiny_hv15_inputs(seed=2, valid_text=3), tiny_hv15_inputs()] if cfg
@@ -203,7 +205,7 @@ def test_a_quantized_and_a_bf16_dit_share_no_block_graph_and_no_store_entry(tiny
     monkeypatch.setenv("DIFFLET_NEURON_WEIGHT_STORE_ALL", "1")  # a bf16 source saves nothing
     cache = tmp_path / "cache"
     copy = ensure_bf16_copy(tiny.transformer_dir, cache)
-    spec = default_spec("hunyuan_video_15", tp_degree=1)
+    spec = hv15_spec(tp_degree=1)
     quantized = prepare_quantized_checkpoint(copy, spec, create=True, cache_root=cache)
 
     def loaded(model_path, quant):
@@ -245,7 +247,7 @@ def test_resident_bytes_count_the_kernel_layout(snap):
         app.load(skip_warmup=True)
         return app
 
-    spec = default_spec("hunyuan_video_15", tp_degree=1)
+    spec = hv15_spec(tp_degree=1)
     with torch.device("meta"):
         model = HunyuanVideo15Transformer3DModel(**TINY_FP8_HV15)
     targets = [m for name, m in model.named_modules()
@@ -254,7 +256,7 @@ def test_resident_bytes_count_the_kernel_layout(snap):
     nk = sum(m.weight.numel() for m in targets)
     bf16 = loaded(snap.copy, None)
     nki = loaded(snap.quantized[1], spec)
-    dq = loaded(snap.quantized[1], default_spec("hunyuan_video_15", compute="dequant",
+    dq = loaded(snap.quantized[1], hv15_spec(compute="dequant",
                                                 tp_degree=1))
     bf16_bytes, nki_bytes, dq_bytes = (rank_weight_bytes(app.module, app.dtype)
                                        for app in (bf16, nki, dq))
@@ -266,14 +268,14 @@ def test_resident_bytes_count_the_kernel_layout(snap):
 @pytest.fixture(scope="module")
 def snap(tmp_path_factory):
     """The toy with what ``difflet compile`` leaves under one cache root for a ``--quant``
-    launch: the bf16 copy of the fp32 DiT and, built from that copy, the default quantized
-    directory at tp1 and at tp2. The tests point ``DIFFLET_COMPILE_CACHE`` at the cache, where
-    the pipeline looks for both."""
+    launch: the bf16 copy of the fp32 DiT and, built from that copy, the measured set's
+    quantized directory at tp1 and at tp2. The tests point ``DIFFLET_COMPILE_CACHE`` at the
+    cache, where the pipeline looks for both."""
     root = write_tiny_hv15_snapshot(tmp_path_factory.mktemp("tiny_hv15_pipe_fp8"))
     cache = root / "cache"
     copy = ensure_bf16_copy(root / "transformer", cache)
     quantized = {tp: prepare_quantized_checkpoint(
-        copy, default_spec("hunyuan_video_15", tp_degree=tp), create=True, cache_root=cache)
+        copy, hv15_spec(tp_degree=tp), create=True, cache_root=cache)
         for tp in (1, 2)}
     return SimpleNamespace(root=root, cache=cache, copy=copy, quantized=quantized)
 
@@ -291,21 +293,29 @@ def test_pipeline_resolves_the_quantized_directory_from_the_bf16_copy(snap, monk
     """The directory is resolved from what the DiT would load in bf16, the copy, so the writer
     read bf16 tensors and never the hub's fp32 files; the stage passes the spec as a dict."""
     monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(snap.cache))
-    spec = default_spec("hunyuan_video_15", tp_degree=1)
-    pipe = _pipe(snap.root, quant="mxfp8")
+    spec = hv15_spec(tp_degree=1)
+    pipe = _pipe(snap.root, quant=spec.to_dict())
     assert pipe.dit.model_path == pipe.quantized_dit == str(snap.quantized[1])
     assert pipe.quant == pipe.dit.quant == spec
-    assert _pipe(snap.root, quant=spec.to_dict()).quant == spec
+    assert _pipe(snap.root, quant=spec).quant == spec
 
 
-def test_the_pipeline_spec_takes_the_launch_tp(snap, monkeypatch):
-    """``net.2`` is quantized per rank K range, so ``"mxfp8"`` means the table at the launch's
-    tp, and the directory is that tp's."""
+def test_the_pipeline_refuses_mxfp8_without_a_target_set(snap, monkeypatch):
+    """Task F8: HunyuanVideo-1.5 has no default table, so ``quant="mxfp8"`` names no layers and
+    is refused, naming the override; a spec (or its dict, as the stage passes it) still runs."""
     monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(snap.cache))
-    pipe = _pipe(snap.root, quant="mxfp8",
+    with pytest.raises(ValueError, match="no default MXFP8 target set"):
+        _pipe(snap.root, quant="mxfp8")
+
+
+def test_the_pipeline_resolves_the_directory_of_the_spec_tp(snap, monkeypatch):
+    """``net.2`` is quantized per rank K range, so the directory is the spec's tp's: the stage
+    passes the driver's spec, built at the launch's tp."""
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(snap.cache))
+    pipe = _pipe(snap.root, quant=hv15_spec(tp_degree=2).to_dict(),
                  parallel=DiffletParallelConfig(tp_degree=2, cfg_parallel_enabled=True))
     assert pipe.quant.tp_degree == 2
-    assert pipe.quant == pipe.dit.quant == default_spec("hunyuan_video_15", tp_degree=2)
+    assert pipe.quant == pipe.dit.quant == hv15_spec(tp_degree=2)
     assert pipe.dit.model_path == pipe.quantized_dit == str(snap.quantized[2])
 
 
@@ -326,7 +336,7 @@ def test_without_the_copy_the_quantized_directory_is_missing(snap, monkeypatch, 
     written = lambda: (sorted(snap.cache.rglob("*")), sorted(bare.rglob("*")))  # noqa: E731
     before = written()
     with pytest.raises(ValueError, match="run `difflet compile`"):
-        _pipe(bare, quant="mxfp8")
+        _pipe(bare, quant=hv15_spec(tp_degree=1).to_dict())
     assert written() == before
     with pytest.raises(ValueError, match="quant_checkpoint needs quant"):
         _pipe(snap.root, quant_checkpoint="/q")

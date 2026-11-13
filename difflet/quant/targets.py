@@ -85,11 +85,14 @@ diffusers' class, so its module names are the checkpoint keys and ``checkpoint_k
 identity) runs 54 dual-stream blocks of 2048 (16 heads x 128) with an 8192-wide MLP and no
 single-stream blocks, so no ``proj_out`` to split. A block keeps the image stream (49,290 tokens
 at the default 480x848x121) and the text stream (1,985: the image-embedding, ByT5 and Qwen2.5-VL
-tokens) apart outside the joint attention. The table holds one pattern per device-bisection
+tokens) apart outside the joint attention. It has **no default set** (the user's decision,
+2026-11-09): ``--quant mxfp8`` needs ``DIFFLET_QUANT_TARGETS``, since every measured set costs
+4.7-7.5 dB against the CPU fp32 reference beyond bf16 and buys neither speed nor peak HBM at
+121 frames (the table comment below). The override table holds one pattern per device-bisection
 group: G1 the image q/k/v (``to_q/k/v``, whose outputs feed the q/k RMSNorm, the rotary op and
-the attention kernel) and G3 the image MLP (``ff``): 270 linears, 2.49B of the 8.33B parameters
-(30%). The text stream's q/k/v (G2, ``add_*_proj``) and MLP (G4, ``ff_context``) stay bf16:
-with them the step ran 2.7x bf16's (the table comment below). The quantization saves memory,
+the attention kernel) and G3 the image MLP (``ff``), the former default (270 linears, 2.49B of
+the 8.33B parameters, 30%), and G2 / G4 the text stream's q/k/v (``add_*_proj``) and MLP
+(``ff_context``): with them the step ran 2.7x bf16's. The quantization saves memory,
 not time: the hub DiT is fp32, so the quantized checkpoint is written from the bf16 copy
 ``compile`` makes, and a target holds 1.28 bytes per weight resident against bf16's 2 (fp8, its
 stored scales and the kernel's scale layout). The output projections (``to_out.0``,
@@ -322,38 +325,34 @@ HUNYUAN_VIDEO_ROW_PARALLEL: tuple[str, ...] = (
     r"context_embedder\.token_refiner\.refiner_blocks\.\d+\.(attn\.to_out\.0|ff\.net\.2)",
 )
 
-# HunyuanVideo-1.5 (diffusers' HunyuanVideo15Transformer3DModel names, the checkpoint keys): one
-# pattern per device-bisection group in G order, G1 the image q/k/v and G3 the image MLP, the
-# strings F6's arms carried in DIFFLET_QUANT_TARGETS (they key the quantized directory, so the
-# default resolves those arms'). A memory saving by decision (the 480p_t2v DiT is 16.65 GB in
-# bf16, 14.86 GB resident with these quantized). Measured (trn3, tp2 x CFG2, 50 steps, seed 42;
-# docs/plans/2026-11-07-mxfp8-hunyuan-video-15.md, F6 Step 7): at 480x848x9 the step is 557 ms
-# in bf16 and 1528 with both streams' q/k/v and MLPs (G2 the text q/k/v, G4 the text MLP). Each
-# group alone is at or below bf16 (G1 546, G2 554, G3 528, G4 556 ms), but the slowdowns do not
-# add up: G1 + G2 + G3 is 1514 and G1 + G3 511. At 480x848x121 this set runs 10,314 / 10,313 ms
-# against 10,241 in bf16 (1.007x, the two runs bit-identical), 6.97 against 7.80 GiB of DiT
-# weights per rank, peak HBM 9.21 + 8.45 GiB (allocator + runtime) against 10.04 + 7.52. The clip
-# is 12.76 dB / SSIM 0.190 from bf16, against a chaotic bf16 floor of 15.90 / 0.312 (tp4 against
-# tp2; the frames show the same composition): the floor-relative screen fails on SSIM (0.190
-# against 0.212), and quality is pending phase G (diffusers on the CPU in fp32). The plan never
-# makes a set that fails the screen the default; this one is the user's decision (2026-11-08,
-# option A), taken with these numbers. They carry phase D's rotary op D4, which F7 reverted. On
-# the tree that ships, without it (evidence doc 9b), the set runs 518 ms at 9 frames and 10,032
-# at 121 against 9,924 in bf16 (D4's parent: 1.011x, F6's gate is 1.01x), peak HBM 9.69 + 8.45
-# GiB, the clip 12.65 dB / SSIM 0.183 from that bf16 (the screen fails on SSIM again).
-HUNYUAN_VIDEO_15_TARGETS: tuple[str, ...] = (
-    rf"{_BLOCK}\.attn\.(to_q|to_k|to_v)",  # G1 image q/k/v
-    rf"{_BLOCK}\.ff\.net\.(0\.proj|2)",  # G3 image MLP
-)
+# HunyuanVideo-1.5 (diffusers' HunyuanVideo15Transformer3DModel names, the checkpoint keys) has
+# no default MXFP8 set: ``--quant mxfp8`` needs DIFFLET_QUANT_TARGETS (the user's decision,
+# 2026-11-09, docs/plans/2026-11-07-mxfp8-hunyuan-video-15.md Task F8, which supersedes F6 Step
+# 7's option A, G1 + G3 as the default). Grounds (trn3, tp2 x CFG2, 50 steps, seed 42; evidence
+# docs/verification/2026-11-07-mxfp8-video-models.md 9 and 10): at 480x848x121 G1 + G3 runs
+# 10,032 ms against 9,924 in bf16 (1.011x) at the same peak HBM (only the resident DiT drops,
+# 7.80 -> 6.97 GiB per rank), and against diffusers fp32 on the CPU (480x848x9) it is 7.47 dB /
+# SSIM 0.399 further than bf16 (G3 alone 4.69 dB, G1 alone 6.79 dB), the largest drop of the
+# seven models.
+#
+# The override table: one pattern per device-bisection group in G order, the strings F6's arms
+# carried in DIFFLET_QUANT_TARGETS (the ordered strings key the quantized directory, so G1;G3
+# resolves the former default's, ``mxfp8-afcbee695501d1d2``). At 480x848x9 the step is 557 ms in
+# bf16 and 1528 with all four; each group alone is at or below bf16 (G1 546, G2 554, G3 528, G4
+# 556 ms), but the slowdowns do not add up: G1 + G2 + G3 is 1514 and G1 + G3 511 (518 on the
+# tree without phase D's rotary op D4, which F7 reverted; evidence 9b).
+HUNYUAN_VIDEO_15_GROUPS: dict[str, str] = {
+    "G1": rf"{_BLOCK}\.attn\.(to_q|to_k|to_v)",  # image q/k/v
+    "G2": rf"{_BLOCK}\.attn\.(add_q_proj|add_k_proj|add_v_proj)",  # text q/k/v
+    "G3": rf"{_BLOCK}\.ff\.net\.(0\.proj|2)",  # image MLP
+    "G4": rf"{_BLOCK}\.ff_context\.net\.(0\.proj|2)",  # text MLP
+}
+HUNYUAN_VIDEO_15_TARGETS: tuple[str, ...] = ()  # no default (above)
 
-#: HunyuanVideo-1.5 modules a reader may expect quantized that are deliberately not: the text
-#: stream's q/k/v and MLP (G2, G4, for speed: the bisection above dropped G4 when all four
-#: groups ran 1528 ms against bf16's 557, then G2 when G1 + G2 + G3 still ran 1514, 2.7x
-#: bf16's, against 511 without it), the output projections, the modulation, the token refiner
-#: and the glyph, image and time embedders, and the output layer.
+#: HunyuanVideo-1.5 linears no group covers, bf16 under any override: the output projections,
+#: the modulation, the token refiner and the glyph, image and time embedders, and the output
+#: layer.
 HUNYUAN_VIDEO_15_KEPT_BF16: tuple[str, ...] = (
-    rf"{_BLOCK}\.attn\.(add_q_proj|add_k_proj|add_v_proj)",
-    rf"{_BLOCK}\.ff_context\.net\.(0\.proj|2)",
     rf"{_BLOCK}\.attn\.(to_out\.0|to_add_out)",
     rf"{_BLOCK}\.norm1(_context)?\.linear",
     r"context_embedder\..*",
@@ -421,9 +420,14 @@ def default_spec(model: str, **overrides) -> QuantSpec:
     """The mxfp8 recipe for ``model``; ``targets=`` replaces the model's default layer set,
     ``compute=`` and ``tp_degree=`` complete it. The model's splits stay under a ``targets=``
     override: the checkpoint layout does not depend on which layers are quantized, so a set
-    without the halves stores them unquantized and the model reads them by name as ever."""
+    without the halves stores them unquantized and the model reads them by name as ever. A
+    model whose table is empty (HunyuanVideo-1.5) has no default: it needs ``targets=``."""
     overrides.setdefault("row_parallel", row_parallel_for(model))
-    overrides.setdefault("targets", targets_for(model))
+    if "targets" not in overrides:
+        overrides["targets"] = targets_for(model)
+        if not overrides["targets"]:
+            raise ValueError(f"{model!r} has no default MXFP8 target set; name the layers to "
+                             f"quantize with targets= (DIFFLET_QUANT_TARGETS on the CLI)")
     overrides.setdefault("split_linears", splits_for(model))
     return QuantSpec(**overrides)
 
@@ -433,6 +437,7 @@ __all__ = [
     "FLUX_ROW_PARALLEL",
     "FLUX_SPLIT_TARGETS",
     "FLUX_TARGETS",
+    "HUNYUAN_VIDEO_15_GROUPS",
     "HUNYUAN_VIDEO_15_KEPT_BF16",
     "HUNYUAN_VIDEO_15_ROW_PARALLEL",
     "HUNYUAN_VIDEO_15_TARGETS",

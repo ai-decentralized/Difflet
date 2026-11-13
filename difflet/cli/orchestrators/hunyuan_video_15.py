@@ -17,7 +17,9 @@ request done. A DP replica is ``tp x cp (x2 with CFG)`` cores: on 4 cores, ``--d
 runs two TP2 replicas with classifier-free guidance's two passes in sequence (the 8.3B DiT does not
 fit one core beside 121 frames' activations, so DP4 is not an option).
 
---quant mxfp8 (``difflet/cli/quant.py``) on the neuron backend: ``compile`` writes the DiT's
+--quant mxfp8 (``difflet/cli/quant.py``) on the neuron backend needs DIFFLET_QUANT_TARGETS: the
+model has no default set (the user's decision, 2026-11-09), so without it the launch is refused
+before anything is written (``_no_default_quant_targets``). With it, ``compile`` writes the DiT's
 quantized directory under the compile cache from the bf16 copy it has just made (the hub DiT is
 fp32, so the writer reads bf16 tensors, never the fp32 files), and ``generate`` only resolves it
 (``_prepare_quant``). A host where compile never ran has no copy, so the directory is looked for
@@ -66,7 +68,8 @@ from difflet.cli.orchestrators.torchrun import (
     torchrun_backend,
     torchrun_unsupported_options,
 )
-from difflet.cli.quant import prepare_quant, quant_cli_args, quant_spec
+from difflet.cli.quant import QUANT_TARGETS_ENV, prepare_quant, quant_cli_args, quant_spec
+from difflet.quant.targets import targets_for
 
 _HF_MODEL_ID = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
 _MODEL_TYPE = "hunyuan_video_15"
@@ -82,6 +85,20 @@ def _unsupported(args: argparse.Namespace) -> list[str]:
     return [f for f in torchrun_unsupported_options(args) if not f.startswith("--teacache")]
 
 
+def _no_default_quant_targets(args: argparse.Namespace) -> str | None:
+    """The refusal of --quant without DIFFLET_QUANT_TARGETS, or None: HunyuanVideo-1.5 has no
+    MXFP8 default (the user's decision, 2026-11-09; ``difflet/quant/targets.py``), so a launch
+    must name the layers. Checked before compile's bf16 copy, so a refusal writes nothing."""
+    if (getattr(args, "quant", None) is None or os.environ.get(QUANT_TARGETS_ENV)
+            or targets_for(_MODEL_TYPE)):
+        return None
+    return ("--quant: HunyuanVideo-1.5 has no default MXFP8 target set (every measured set is "
+            "4.7-7.5 dB further from the CPU fp32 reference than bf16 and buys neither speed nor "
+            "peak HBM at 121 frames; docs/verification/2026-11-07-mxfp8-video-models.md 10e); "
+            f"name the layers to quantize in {QUANT_TARGETS_ENV} (the measured groups: "
+            "HUNYUAN_VIDEO_15_GROUPS in difflet/quant/targets.py)")
+
+
 def _layout(args: argparse.Namespace) -> tuple[int, bool, int]:
     """(tp, cfg_parallel, cp): TP2 x CFG2 unless the user chose a layout."""
     tp, cfg = getattr(args, "tp_degree", None), bool(getattr(args, "cfg_parallel", False))
@@ -95,6 +112,10 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
 
     #: The DiT's quantized directory (--quant), once ``_prepare_quant`` resolved it.
     _quantized_dit: str | None = None
+
+    def run(self) -> None:
+        refuse(_no_default_quant_targets(self.args))  # before the download, too
+        super().run()
 
     def download(self) -> None:
         from difflet.pipeline.path_resolver import resolve_model_path
@@ -113,6 +134,7 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
         if torchrun_backend() != "neuron":
             return self._run_aot(mode)
         reject_unsupported_torchrun_options(_unsupported(self.args), runs=_RUNS)
+        refuse(_no_default_quant_targets(self.args))
         root_compile_cache_at_cache_dir(getattr(self.args, "cache_dir", None), tag="hunyuan_video_15")
         if mode == "compile":  # once, as the Trainium path's pre-shards: the fp32 DiT stored in bf16
             from difflet.backends.neuron.core.weights_bf16 import ensure_bf16_copy
