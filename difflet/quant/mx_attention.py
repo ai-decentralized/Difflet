@@ -58,7 +58,13 @@ def mx_attention_reference(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, *,
     """``softmax(scale * q k^T) v`` on ``[BH, S, D]``, query ``i`` attending keys
     ``bound_min[i] <= j < bound_max[i]`` (bounds reshapeable to ``[BH, S_q, 1]``), as the kernel
     computes it (module docstring). ``section_len=None`` sections as the kernel does; a given one
-    must be a multiple of 512, as the kernel's are. Returns ``[BH, S_q, D_v]`` in q's dtype."""
+    must be a multiple of 512, as the kernel's are. Bounds come in pairs and take ``scale``
+    1.0, as the kernel asserts. Returns ``[BH, S_q, D_v]`` in q's dtype."""
+    if (bound_min is None) != (bound_max is None):
+        raise ValueError("bound_min and bound_max must both be given or both be None")
+    if bound_min is not None and scale != 1.0:
+        raise ValueError(f"the bounded path takes scale 1.0 (attention_cte asserts it), got "
+                         f"{scale}: pre-scale q in fp32")
     bh, s_q, _ = q.shape
     s_k = k.shape[1]
     if section_len is None:
