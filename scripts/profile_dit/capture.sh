@@ -57,8 +57,9 @@ WAN22_NEG='色调艳丽，过曝，静态，细节模糊不清，字幕，风格
 
 key_for() {  # key_for <key>: M, P, PROMPT, NEG and EXT as bench.sh's args_for (hunyuan_video_L:
              # hunyuan_video at evidence 7f's shape), with --steps STEPS; CACHE (ruling R7),
-             # BLOCKS (block NEFFs per arm), TP (ranks per TP group)
-  NEG= EXT=mp4 PROMPT="a cat walking through a garden" TP=4 BLOCKS=1 STEPS=1
+             # BLOCKS (block NEFFs per arm), TP (ranks per TP group), DGE (captures with
+             # --enable-dge-notifs)
+  NEG= EXT=mp4 PROMPT="a cat walking through a garden" TP=4 BLOCKS=1 STEPS=1 DGE=1
   CACHE=$HOME/difflet-cache-video
   case $1 in
     flux) M=(--model-id black-forest-labs/FLUX.1-dev --height 1024 --width 1024 --tp-degree 4)
@@ -83,6 +84,9 @@ key_for() {  # key_for <key>: M, P, PROMPT, NEG and EXT as bench.sh's args_for (
                         --revision e8c2aaa66fe3742a32c11a6766aecbf07c56e773
                         --height 544 --width 960 --num-frames 129 --tp-degree 4)
       P=(--seed 42 --guidance-scale 6.0); BLOCKS=2
+      # its 225-235 MB blocks overflow the notification queue with DGE notifications (pass 1,
+      # both arms): captured without them from the start (ruling R23)
+      DGE=
       PROMPT="a cinematic shot of a red fox running through a snowy forest" ;;
     hv15_official) M=(--model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v
                       --revision 286be7ce72277246578a3e3cc2487e95ddae5bcf
@@ -291,6 +295,7 @@ for c in "${SEL[@]}"; do
       r=0
       for p in $paths; do cp "$p" "$B/rank$r.neff"; r=$((r + 1)); done
     fi
+    if [ -z "$DGE" ]; then touch "$B/no_dge"; fi  # capture_neff leaves the flag out
     note "$A" "blk$i capture start (waits for the capture lock)"
     capture_neff "$DEV" "$A" "$B" "$CPUS" || exit 0  # require_idle wrote BUSY
     rc=$CAPTURE_RC
