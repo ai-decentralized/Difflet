@@ -1,0 +1,7823 @@
+{
+ "block_ms": 3.629678496,
+ "replay_spread_ms": 0.1171964840000002,
+ "block_neff_sha256": "d70b4db2e5a1916489ecd069441530254b4ca274f459310657eca510559a728e",
+ "engines_ms": {
+  "vector": 2.0199865,
+  "tensor": 2.00596,
+  "gpsimd": 0.049466,
+  "scalar": 0.82309,
+  "sync": 0.047221,
+  "hbm_dma": 0.7371845,
+  "collective": 0.69155
+ },
+ "components": {
+  "unattributed": {
+   "vector": 0.0818755,
+   "tensor": 0.535646,
+   "gpsimd": 0.0076905,
+   "scalar": 0.2397895,
+   "sync": 0.0044925,
+   "hbm_dma": 0.176725
+  },
+  "qk_norm": {
+   "vector": 0.0430695,
+   "hbm_dma": 0.0032095,
+   "scalar": 0.0542625,
+   "tensor": 0.057094,
+   "gpsimd": 0.000239,
+   "sync": 3.9e-05
+  },
+  "rope": {
+   "vector": 0.0809315,
+   "gpsimd": 0.0093545,
+   "scalar": 0.0168185,
+   "hbm_dma": 0.017102,
+   "tensor": 0.049216
+  },
+  "modulation": {
+   "scalar": 0.0851525,
+   "tensor": 0.184757,
+   "vector": 0.1792345,
+   "hbm_dma": 0.041506,
+   "gpsimd": 0.000235,
+   "sync": 0.000312
+  },
+  "qkv_proj": {
+   "hbm_dma": 0.181175,
+   "sync": 0.0018115,
+   "vector": 0.1545235,
+   "tensor": 0.1519515,
+   "scalar": 0.000655
+  },
+  "norm": {
+   "hbm_dma": 0.0557895,
+   "tensor": 0.0347645,
+   "scalar": 0.112854,
+   "vector": 0.308364,
+   "gpsimd": 0.0055835,
+   "sync": 0.000273
+  },
+  "collective": {
+   "gpsimd": 0.0022325,
+   "vector": 0.004835,
+   "tensor": 0.0056425,
+   "sync": 0.000117,
+   "collective": 0.69155
+  },
+  "attention": {
+   "tensor": 0.5684505,
+   "sync": 0.039942,
+   "gpsimd": 0.023901,
+   "vector": 0.768059,
+   "hbm_dma": 0.1169995
+  },
+  "out_proj": {
+   "hbm_dma": 0.0045665,
+   "tensor": 0.147185,
+   "vector": 0.003701,
+   "sync": 0.000117,
+   "scalar": 0.063581
+  },
+  "mlp_act": {
+   "scalar": 0.2541515,
+   "vector": 0.0630925,
+   "sync": 0.000117,
+   "tensor": 0.061068,
+   "hbm_dma": 0.0031625
+  },
+  "mlp_up": {
+   "hbm_dma": 0.0836225,
+   "vector": 0.2373625,
+   "tensor": 0.156741,
+   "gpsimd": 0.0002405,
+   "scalar": 0.000381
+  },
+  "mlp_down": {
+   "tensor": 0.1575255,
+   "hbm_dma": 0.0752515,
+   "vector": 0.1387385,
+   "scalar": 0.0001785
+  }
+ },
+ "engines_check": {
+  "summary_ms": {
+   "cc_cores_instruction_active_time": 0.008939981999999999,
+   "cc_op_active_time": 0.691549752,
+   "dma_active_time": 2.63489421,
+   "gpsimd_engine_active_time": 0.819921286,
+   "hardware_dynamic_dma_active_time": 1.310429047,
+   "host_device_dma_active_time": 0.316867833,
+   "scalar_engine_active_time": 1.124421023,
+   "software_dynamic_dma_active_time": 0.902855498,
+   "static_dma_active_time": 1.072537903,
+   "sync_engine_active_time": 0.414421174,
+   "tensor_engine_active_time": 2.334010076,
+   "total_active_time": 3.597180048,
+   "vector_engine_active_time": 2.287996443
+  },
+  "active_time_ms": {
+   "cc_instruction": 0.0045,
+   "gpsimd": 0.5451365,
+   "scalar": 0.8586795,
+   "sync": 0.281654,
+   "tensor": 2.006178,
+   "vector": 2.020311
+  },
+  "union_ms": {
+   "vector": 2.0199865,
+   "tensor": 2.00596,
+   "gpsimd": 0.5447585,
+   "scalar": 0.858392,
+   "sync": 0.281551
+  }
+ },
+ "attention_detail": {
+  "attn": {
+   "other": {
+    "tensor": 0.0036175,
+    "sync": 0.039903,
+    "vector": 0.0061205,
+    "hbm_dma": 0.1169995,
+    "gpsimd": 0.012807
+   },
+   "mask_softmax": {
+    "gpsimd": 0.0123105,
+    "vector": 0.7582515
+   },
+   "qk_matmul": {
+    "tensor": 0.325414
+   },
+   "pv_matmul": {
+    "tensor": 0.3380805,
+    "vector": 0.0234235
+   }
+  },
+  "": {
+   "qk_matmul": {
+    "tensor": 0.001955
+   },
+   "mask_softmax": {
+    "vector": 0.0022325,
+    "gpsimd": 0.0001165
+   },
+   "pv_matmul": {
+    "tensor": 0.004288
+   },
+   "other": {
+    "sync": 3.9e-05
+   }
+  }
+ },
+ "memory_bytes": {
+  "hbm_read": 616905728,
+  "hbm_write": 370239488,
+  "sbuf_read": 4756473352,
+  "sbuf_write": 3146084868,
+  "psum_read": 1345995776,
+  "psum_write": 2791924736,
+  "spill_save": 259745792,
+  "spill_reload": 192892928,
+  "psum_to_sbuf": 1275803648
+ },
+ "psum_readout_copy_ms": 0.663874,
+ "psum_readout_fused_ms": 0.726633,
+ "psum_readout_copy_ms_by_engine": {
+  "scalar": 0.4078035,
+  "vector": 0.3166605
+ },
+ "psum_readout_fused_ms_by_engine": {
+  "scalar": 0.028552,
+  "vector": 0.7059995
+ },
+ "mfu": 0.2603536376682989,
+ "mbu": 0.23087004957955698,
+ "throttle": {
+  "avg_util_limit": 0.6930788721646616,
+  "limited_time_share": 0.5566194605208064
+ },
+ "other_share": {
+  "vector": 0.0,
+  "scalar": 0.0,
+  "tensor": 0.0,
+  "hbm_dma": 0.0,
+  "sync": 0.0,
+  "gpsimd": 0.0
+ },
+ "unattributed_share": {
+  "vector": 0.04053269662940817,
+  "tensor": 0.26702725876886874,
+  "gpsimd": 0.15547042412970524,
+  "scalar": 0.29132840880098165,
+  "sync": 0.095137756506639,
+  "hbm_dma": 0.2397296741860416
+ },
+ "warnings": [
+  "Current NEFF is missing compiler metrics. Please re-compile using latest version of the compiler"
+ ],
+ "timeline": [
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 0.084,
+   "end_us": 3.657,
+   "busy_us": 0.107
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 2.426,
+   "end_us": 3.473,
+   "busy_us": 0.738
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 5.416,
+   "end_us": 17.885,
+   "busy_us": 3.181
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 7.912,
+   "end_us": 14.844,
+   "busy_us": 1.857
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "sync",
+   "start_us": 7.995,
+   "end_us": 14.528,
+   "busy_us": 2.323
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 10.391,
+   "end_us": 14.96,
+   "busy_us": 1.162
+  },
+  {
+   "component": "collective",
+   "engine_class": "collective",
+   "start_us": 10.722,
+   "end_us": 253.266,
+   "busy_us": 242.544
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 11.045,
+   "end_us": 14.903,
+   "busy_us": 1.569
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 14.577,
+   "end_us": 46.917,
+   "busy_us": 28.036
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "vector",
+   "start_us": 14.851,
+   "end_us": 14.961,
+   "busy_us": 0.11
+  },
+  {
+   "component": "rope",
+   "engine_class": "vector",
+   "start_us": 14.859,
+   "end_us": 15.068,
+   "busy_us": 0.209
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 14.997,
+   "end_us": 21.058,
+   "busy_us": 1.505
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 20.515,
+   "end_us": 88.746,
+   "busy_us": 56.19
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 23.701,
+   "end_us": 89.171,
+   "busy_us": 23.262
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 24.193,
+   "end_us": 88.694,
+   "busy_us": 13.536
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 28.207,
+   "end_us": 29.967,
+   "busy_us": 1.76
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 28.808,
+   "end_us": 30.222,
+   "busy_us": 0.676
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 35.42,
+   "end_us": 37.18,
+   "busy_us": 1.76
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 36.022,
+   "end_us": 37.391,
+   "busy_us": 0.676
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 42.633,
+   "end_us": 44.393,
+   "busy_us": 1.76
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 43.235,
+   "end_us": 44.664,
+   "busy_us": 0.677
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 46.912,
+   "end_us": 53.196,
+   "busy_us": 6.284
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 49.847,
+   "end_us": 51.607,
+   "busy_us": 1.76
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 50.448,
+   "end_us": 51.817,
+   "busy_us": 0.676
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 57.06,
+   "end_us": 58.82,
+   "busy_us": 1.76
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 57.662,
+   "end_us": 59.031,
+   "busy_us": 0.676
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "sync",
+   "start_us": 62.03,
+   "end_us": 62.361,
+   "busy_us": 0.267
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "hbm_dma",
+   "start_us": 62.364,
+   "end_us": 63.06,
+   "busy_us": 0.696
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 63.056,
+   "end_us": 65.16,
+   "busy_us": 2.104
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 64.273,
+   "end_us": 66.033,
+   "busy_us": 1.76
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 64.875,
+   "end_us": 66.244,
+   "busy_us": 0.676
+  },
+  {
+   "component": "norm",
+   "engine_class": "hbm_dma",
+   "start_us": 69.257,
+   "end_us": 87.424,
+   "busy_us": 8.329
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 71.487,
+   "end_us": 73.247,
+   "busy_us": 1.76
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 72.088,
+   "end_us": 73.457,
+   "busy_us": 0.676
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 78.297,
+   "end_us": 86.873,
+   "busy_us": 3.606
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 78.895,
+   "end_us": 80.4,
+   "busy_us": 0.676
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 86.149,
+   "end_us": 87.084,
+   "busy_us": 0.463
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 87.124,
+   "end_us": 87.351,
+   "busy_us": 0.227
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "sync",
+   "start_us": 87.613,
+   "end_us": 87.663,
+   "busy_us": 0.05
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 93.197,
+   "end_us": 95.976,
+   "busy_us": 0.084
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 93.517,
+   "end_us": 93.735,
+   "busy_us": 0.218
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 93.79,
+   "end_us": 94.089,
+   "busy_us": 0.299
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 93.803,
+   "end_us": 102.833,
+   "busy_us": 4.378
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 94.13,
+   "end_us": 94.345,
+   "busy_us": 0.215
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 94.382,
+   "end_us": 95.316,
+   "busy_us": 0.934
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 95.357,
+   "end_us": 102.978,
+   "busy_us": 1.791
+  },
+  {
+   "component": "collective",
+   "engine_class": "gpsimd",
+   "start_us": 96.907,
+   "end_us": 97.131,
+   "busy_us": 0.224
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 96.908,
+   "end_us": 103.495,
+   "busy_us": 1.495
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 101.433,
+   "end_us": 103.252,
+   "busy_us": 0.758
+  },
+  {
+   "component": "norm",
+   "engine_class": "tensor",
+   "start_us": 103.031,
+   "end_us": 111.479,
+   "busy_us": 5.105
+  },
+  {
+   "component": "norm",
+   "engine_class": "hbm_dma",
+   "start_us": 103.203,
+   "end_us": 103.899,
+   "busy_us": 0.696
+  },
+  {
+   "component": "norm",
+   "engine_class": "scalar",
+   "start_us": 106.952,
+   "end_us": 118.087,
+   "busy_us": 7.053
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 107.579,
+   "end_us": 109.196,
+   "busy_us": 0.269
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "sync",
+   "start_us": 108.066,
+   "end_us": 108.188,
+   "busy_us": 0.093
+  },
+  {
+   "component": "norm",
+   "engine_class": "vector",
+   "start_us": 111.52,
+   "end_us": 116.961,
+   "busy_us": 5.441
+  },
+  {
+   "component": "collective",
+   "engine_class": "collective",
+   "start_us": 261.204,
+   "end_us": 330.79,
+   "busy_us": 69.586
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 331.197,
+   "end_us": 331.256,
+   "busy_us": 0.059
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 331.284,
+   "end_us": 332.248,
+   "busy_us": 0.908
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "sync",
+   "start_us": 332.272,
+   "end_us": 332.893,
+   "busy_us": 0.621
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 333.891,
+   "end_us": 334.167,
+   "busy_us": 0.276
+  },
+  {
+   "component": "norm",
+   "engine_class": "tensor",
+   "start_us": 333.894,
+   "end_us": 340.105,
+   "busy_us": 6.211
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 338.23,
+   "end_us": 340.147,
+   "busy_us": 0.827
+  },
+  {
+   "component": "norm",
+   "engine_class": "scalar",
+   "start_us": 340.146,
+   "end_us": 347.811,
+   "busy_us": 1.905
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 340.221,
+   "end_us": 340.417,
+   "busy_us": 0.196
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 340.457,
+   "end_us": 340.545,
+   "busy_us": 0.088
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 340.634,
+   "end_us": 340.822,
+   "busy_us": 0.188
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 340.772,
+   "end_us": 342.516,
+   "busy_us": 0.084
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "sync",
+   "start_us": 341.378,
+   "end_us": 341.519,
+   "busy_us": 0.107
+  },
+  {
+   "component": "norm",
+   "engine_class": "gpsimd",
+   "start_us": 343.63,
+   "end_us": 345.889,
+   "busy_us": 2.259
+  },
+  {
+   "component": "norm",
+   "engine_class": "tensor",
+   "start_us": 345.947,
+   "end_us": 347.172,
+   "busy_us": 1.225
+  },
+  {
+   "component": "norm",
+   "engine_class": "vector",
+   "start_us": 347.848,
+   "end_us": 353.533,
+   "busy_us": 5.545
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 350.569,
+   "end_us": 359.966,
+   "busy_us": 4.341
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 350.961,
+   "end_us": 359.546,
+   "busy_us": 6.435
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 355.88,
+   "end_us": 359.691,
+   "busy_us": 2.631
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 357.338,
+   "end_us": 360.193,
+   "busy_us": 0.352
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 358.599,
+   "end_us": 358.877,
+   "busy_us": 0.278
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "scalar",
+   "start_us": 359.713,
+   "end_us": 360.996,
+   "busy_us": 1.283
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 361.936,
+   "end_us": 361.975,
+   "busy_us": 0.039
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 362.27,
+   "end_us": 364.57,
+   "busy_us": 2.107
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 364.37,
+   "end_us": 370.575,
+   "busy_us": 4.309
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "tensor",
+   "start_us": 364.743,
+   "end_us": 370.057,
+   "busy_us": 5.314
+  },
+  {
+   "component": "norm",
+   "engine_class": "hbm_dma",
+   "start_us": 366.385,
+   "end_us": 419.334,
+   "busy_us": 29.191
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "scalar",
+   "start_us": 370.099,
+   "end_us": 370.271,
+   "busy_us": 0.172
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 370.111,
+   "end_us": 370.702,
+   "busy_us": 0.176
+  },
+  {
+   "component": "norm",
+   "engine_class": "vector",
+   "start_us": 370.479,
+   "end_us": 416.176,
+   "busy_us": 42.744
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 374.157,
+   "end_us": 374.196,
+   "busy_us": 0.039
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 374.466,
+   "end_us": 374.589,
+   "busy_us": 0.123
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 376.69,
+   "end_us": 378.391,
+   "busy_us": 1.701
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 377.714,
+   "end_us": 378.924,
+   "busy_us": 0.982
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 379.702,
+   "end_us": 381.167,
+   "busy_us": 1.465
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "scalar",
+   "start_us": 380.327,
+   "end_us": 384.378,
+   "busy_us": 3.44
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "tensor",
+   "start_us": 381.02,
+   "end_us": 384.807,
+   "busy_us": 3.489
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "vector",
+   "start_us": 384.587,
+   "end_us": 386.943,
+   "busy_us": 2.008
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 418.416,
+   "end_us": 418.455,
+   "busy_us": 0.039
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "sync",
+   "start_us": 428.199,
+   "end_us": 428.25,
+   "busy_us": 0.051
+  },
+  {
+   "component": "norm",
+   "engine_class": "hbm_dma",
+   "start_us": 428.891,
+   "end_us": 432.98,
+   "busy_us": 3.966
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 430.14,
+   "end_us": 430.179,
+   "busy_us": 0.039
+  },
+  {
+   "component": "norm",
+   "engine_class": "scalar",
+   "start_us": 430.456,
+   "end_us": 505.282,
+   "busy_us": 48.978
+  },
+  {
+   "component": "norm",
+   "engine_class": "vector",
+   "start_us": 430.741,
+   "end_us": 506.135,
+   "busy_us": 69.575
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 432.977,
+   "end_us": 436.981,
+   "busy_us": 4.004
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 436.818,
+   "end_us": 441.612,
+   "busy_us": 4.348
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 443.672,
+   "end_us": 445.798,
+   "busy_us": 2.088
+  },
+  {
+   "component": "norm",
+   "engine_class": "hbm_dma",
+   "start_us": 447.208,
+   "end_us": 493.462,
+   "busy_us": 5.249
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 452.187,
+   "end_us": 457.398,
+   "busy_us": 1.875
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 463.425,
+   "end_us": 464.813,
+   "busy_us": 1.388
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 466.718,
+   "end_us": 467.432,
+   "busy_us": 0.714
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 481.889,
+   "end_us": 485.434,
+   "busy_us": 2.088
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 491.846,
+   "end_us": 538.138,
+   "busy_us": 15.354
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 492.492,
+   "end_us": 492.812,
+   "busy_us": 0.32
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 494.688,
+   "end_us": 496.392,
+   "busy_us": 1.704
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 499.267,
+   "end_us": 560.164,
+   "busy_us": 21.85
+  },
+  {
+   "component": "norm",
+   "engine_class": "hbm_dma",
+   "start_us": 499.386,
+   "end_us": 499.628,
+   "busy_us": 0.186
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 500.128,
+   "end_us": 500.94,
+   "busy_us": 0.812
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 500.286,
+   "end_us": 511.419,
+   "busy_us": 3.99
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 501.652,
+   "end_us": 560.793,
+   "busy_us": 48.334
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 505.173,
+   "end_us": 511.63,
+   "busy_us": 0.958
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 506.038,
+   "end_us": 508.279,
+   "busy_us": 0.272
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 506.177,
+   "end_us": 506.222,
+   "busy_us": 0.045
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 507.713,
+   "end_us": 558.193,
+   "busy_us": 11.333
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "sync",
+   "start_us": 510.414,
+   "end_us": 510.465,
+   "busy_us": 0.051
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 513.684,
+   "end_us": 513.723,
+   "busy_us": 0.039
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 516.873,
+   "end_us": 518.633,
+   "busy_us": 1.76
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 517.413,
+   "end_us": 523.725,
+   "busy_us": 4.927
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 517.474,
+   "end_us": 518.843,
+   "busy_us": 0.679
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 524.086,
+   "end_us": 525.846,
+   "busy_us": 1.76
+  },
+  {
+   "component": "norm",
+   "engine_class": "hbm_dma",
+   "start_us": 524.249,
+   "end_us": 524.378,
+   "busy_us": 0.129
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 524.688,
+   "end_us": 526.129,
+   "busy_us": 0.591
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 531.386,
+   "end_us": 539.699,
+   "busy_us": 3.517
+  },
+  {
+   "component": "norm",
+   "engine_class": "hbm_dma",
+   "start_us": 531.683,
+   "end_us": 532.293,
+   "busy_us": 0.508
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 531.988,
+   "end_us": 539.91,
+   "busy_us": 1.311
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 543.856,
+   "end_us": 558.474,
+   "busy_us": 4.9
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 545.152,
+   "end_us": 546.912,
+   "busy_us": 1.76
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 545.754,
+   "end_us": 547.123,
+   "busy_us": 0.676
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 552.366,
+   "end_us": 560.799,
+   "busy_us": 3.52
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 552.967,
+   "end_us": 554.336,
+   "busy_us": 0.676
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 553.587,
+   "end_us": 557.777,
+   "busy_us": 4.19
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 560.055,
+   "end_us": 561.01,
+   "busy_us": 0.505
+  },
+  {
+   "component": "norm",
+   "engine_class": "scalar",
+   "start_us": 560.062,
+   "end_us": 560.216,
+   "busy_us": 0.154
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 561.05,
+   "end_us": 561.089,
+   "busy_us": 0.039
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "sync",
+   "start_us": 566.302,
+   "end_us": 566.346,
+   "busy_us": 0.044
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 567.488,
+   "end_us": 571.428,
+   "busy_us": 0.078
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 567.867,
+   "end_us": 568.085,
+   "busy_us": 0.218
+  },
+  {
+   "component": "norm",
+   "engine_class": "gpsimd",
+   "start_us": 567.927,
+   "end_us": 568.284,
+   "busy_us": 0.357
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 568.141,
+   "end_us": 568.438,
+   "busy_us": 0.297
+  },
+  {
+   "component": "norm",
+   "engine_class": "vector",
+   "start_us": 568.327,
+   "end_us": 574.382,
+   "busy_us": 5.521
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 568.48,
+   "end_us": 568.692,
+   "busy_us": 0.212
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 568.729,
+   "end_us": 569.341,
+   "busy_us": 0.612
+  },
+  {
+   "component": "norm",
+   "engine_class": "hbm_dma",
+   "start_us": 569.01,
+   "end_us": 574.655,
+   "busy_us": 0.586
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 569.102,
+   "end_us": 573.745,
+   "busy_us": 4.052
+  },
+  {
+   "component": "collective",
+   "engine_class": "gpsimd",
+   "start_us": 571.733,
+   "end_us": 571.957,
+   "busy_us": 0.224
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 572.782,
+   "end_us": 576.627,
+   "busy_us": 3.84
+  },
+  {
+   "component": "collective",
+   "engine_class": "collective",
+   "start_us": 573.197,
+   "end_us": 583.558,
+   "busy_us": 10.361
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 583.966,
+   "end_us": 587.271,
+   "busy_us": 0.139
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 584.04,
+   "end_us": 584.868,
+   "busy_us": 0.761
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 586.137,
+   "end_us": 657.642,
+   "busy_us": 39.841
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 586.757,
+   "end_us": 604.231,
+   "busy_us": 12.15
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 586.941,
+   "end_us": 587.141,
+   "busy_us": 0.2
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 587.074,
+   "end_us": 661.638,
+   "busy_us": 34.535
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 587.312,
+   "end_us": 593.743,
+   "busy_us": 2.634
+  },
+  {
+   "component": "norm",
+   "engine_class": "vector",
+   "start_us": 588.558,
+   "end_us": 591.442,
+   "busy_us": 1.118
+  },
+  {
+   "component": "norm",
+   "engine_class": "hbm_dma",
+   "start_us": 589.404,
+   "end_us": 589.507,
+   "busy_us": 0.103
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 592.341,
+   "end_us": 593.869,
+   "busy_us": 0.181
+  },
+  {
+   "component": "norm",
+   "engine_class": "vector",
+   "start_us": 596.604,
+   "end_us": 634.509,
+   "busy_us": 14.212
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 599.987,
+   "end_us": 604.657,
+   "busy_us": 2.827
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 600.407,
+   "end_us": 605.004,
+   "busy_us": 0.527
+  },
+  {
+   "component": "norm",
+   "engine_class": "hbm_dma",
+   "start_us": 603.987,
+   "end_us": 604.608,
+   "busy_us": 0.406
+  },
+  {
+   "component": "norm",
+   "engine_class": "hbm_dma",
+   "start_us": 609.762,
+   "end_us": 612.067,
+   "busy_us": 0.323
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 610.577,
+   "end_us": 661.218,
+   "busy_us": 31.129
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 612.213,
+   "end_us": 638.37,
+   "busy_us": 8.6
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 613.533,
+   "end_us": 639.153,
+   "busy_us": 0.966
+  },
+  {
+   "component": "norm",
+   "engine_class": "hbm_dma",
+   "start_us": 617.416,
+   "end_us": 618.022,
+   "busy_us": 0.398
+  },
+  {
+   "component": "norm",
+   "engine_class": "vector",
+   "start_us": 642.581,
+   "end_us": 654.758,
+   "busy_us": 6.287
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 644.753,
+   "end_us": 661.673,
+   "busy_us": 7.878
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 645.174,
+   "end_us": 661.826,
+   "busy_us": 1.143
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 645.401,
+   "end_us": 647.512,
+   "busy_us": 2.111
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 664.098,
+   "end_us": 664.328,
+   "busy_us": 0.23
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 679.08,
+   "end_us": 731.332,
+   "busy_us": 49.953
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 683.02,
+   "end_us": 745.176,
+   "busy_us": 40.059
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "tensor",
+   "start_us": 683.391,
+   "end_us": 743.851,
+   "busy_us": 44.282
+  },
+  {
+   "component": "collective",
+   "engine_class": "vector",
+   "start_us": 695.961,
+   "end_us": 696.296,
+   "busy_us": 0.335
+  },
+  {
+   "component": "collective",
+   "engine_class": "tensor",
+   "start_us": 709.706,
+   "end_us": 710.104,
+   "busy_us": 0.398
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 718.541,
+   "end_us": 719.246,
+   "busy_us": 0.705
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 727.591,
+   "end_us": 727.765,
+   "busy_us": 0.174
+  },
+  {
+   "component": "attention",
+   "engine_class": "tensor",
+   "start_us": 728.306,
+   "end_us": 728.717,
+   "busy_us": 0.411
+  },
+  {
+   "component": "collective",
+   "engine_class": "tensor",
+   "start_us": 730.041,
+   "end_us": 730.389,
+   "busy_us": 0.348
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "hbm_dma",
+   "start_us": 730.669,
+   "end_us": 731.387,
+   "busy_us": 0.718
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "sync",
+   "start_us": 731.378,
+   "end_us": 731.652,
+   "busy_us": 0.152
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 739.184,
+   "end_us": 759.688,
+   "busy_us": 13.055
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 740.041,
+   "end_us": 740.19,
+   "busy_us": 0.149
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 748.744,
+   "end_us": 748.789,
+   "busy_us": 0.045
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 750.579,
+   "end_us": 752.04,
+   "busy_us": 1.023
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "sync",
+   "start_us": 752.071,
+   "end_us": 752.954,
+   "busy_us": 0.611
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 752.654,
+   "end_us": 755.797,
+   "busy_us": 3.143
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 753.68,
+   "end_us": 754.204,
+   "busy_us": 0.524
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 759.684,
+   "end_us": 768.058,
+   "busy_us": 8.374
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 760.545,
+   "end_us": 761.073,
+   "busy_us": 0.528
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 769.119,
+   "end_us": 769.972,
+   "busy_us": 0.853
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 770.01,
+   "end_us": 770.972,
+   "busy_us": 0.962
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "scalar",
+   "start_us": 770.374,
+   "end_us": 809.961,
+   "busy_us": 22.787
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "tensor",
+   "start_us": 771.074,
+   "end_us": 811.225,
+   "busy_us": 23.598
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 772.132,
+   "end_us": 773.476,
+   "busy_us": 0.326
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "vector",
+   "start_us": 774.836,
+   "end_us": 814.185,
+   "busy_us": 17.497
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 775.981,
+   "end_us": 779.357,
+   "busy_us": 3.326
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 777.24,
+   "end_us": 779.913,
+   "busy_us": 2.055
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 778.41,
+   "end_us": 779.811,
+   "busy_us": 1.401
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 780.27,
+   "end_us": 781.613,
+   "busy_us": 1.018
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 782.32,
+   "end_us": 805.023,
+   "busy_us": 4.968
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 785.305,
+   "end_us": 788.302,
+   "busy_us": 2.235
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 787.541,
+   "end_us": 789.01,
+   "busy_us": 1.469
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 789.049,
+   "end_us": 790.463,
+   "busy_us": 1.078
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 794.864,
+   "end_us": 806.476,
+   "busy_us": 4.234
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 795.02,
+   "end_us": 798.437,
+   "busy_us": 3.355
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 795.112,
+   "end_us": 800.404,
+   "busy_us": 4.46
+  },
+  {
+   "component": "rope",
+   "engine_class": "gpsimd",
+   "start_us": 795.712,
+   "end_us": 796.074,
+   "busy_us": 0.362
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 799.426,
+   "end_us": 801.73,
+   "busy_us": 1.426
+  },
+  {
+   "component": "rope",
+   "engine_class": "vector",
+   "start_us": 801.758,
+   "end_us": 806.417,
+   "busy_us": 2.16
+  },
+  {
+   "component": "rope",
+   "engine_class": "gpsimd",
+   "start_us": 802.079,
+   "end_us": 810.441,
+   "busy_us": 7.442
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 804.807,
+   "end_us": 804.948,
+   "busy_us": 0.141
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 805.731,
+   "end_us": 816.104,
+   "busy_us": 5.765
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 808.122,
+   "end_us": 818.291,
+   "busy_us": 5.566
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "tensor",
+   "start_us": 809.087,
+   "end_us": 817.957,
+   "busy_us": 7.146
+  },
+  {
+   "component": "rope",
+   "engine_class": "scalar",
+   "start_us": 810.484,
+   "end_us": 814.535,
+   "busy_us": 0.615
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 811.736,
+   "end_us": 819.349,
+   "busy_us": 1.306
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 812.768,
+   "end_us": 833.374,
+   "busy_us": 8.428
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "hbm_dma",
+   "start_us": 813.974,
+   "end_us": 814.68,
+   "busy_us": 0.706
+  },
+  {
+   "component": "rope",
+   "engine_class": "vector",
+   "start_us": 814.086,
+   "end_us": 814.94,
+   "busy_us": 0.579
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 816.588,
+   "end_us": 817.976,
+   "busy_us": 0.617
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "scalar",
+   "start_us": 817.999,
+   "end_us": 818.171,
+   "busy_us": 0.172
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 822.962,
+   "end_us": 823.007,
+   "busy_us": 0.045
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 850.161,
+   "end_us": 850.254,
+   "busy_us": 0.093
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 851.463,
+   "end_us": 855.367,
+   "busy_us": 0.386
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 852.981,
+   "end_us": 854.684,
+   "busy_us": 1.703
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 854.006,
+   "end_us": 855.216,
+   "busy_us": 0.981
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 855.254,
+   "end_us": 856.753,
+   "busy_us": 1.499
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "scalar",
+   "start_us": 855.918,
+   "end_us": 859.415,
+   "busy_us": 3.248
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "tensor",
+   "start_us": 856.611,
+   "end_us": 859.847,
+   "busy_us": 2.934
+  },
+  {
+   "component": "rope",
+   "engine_class": "hbm_dma",
+   "start_us": 858.774,
+   "end_us": 859.17,
+   "busy_us": 0.187
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 858.926,
+   "end_us": 867.169,
+   "busy_us": 1.84
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "vector",
+   "start_us": 859.455,
+   "end_us": 861.65,
+   "busy_us": 2.154
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 883.374,
+   "end_us": 919.177,
+   "busy_us": 28.512
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 883.384,
+   "end_us": 890.975,
+   "busy_us": 7.336
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "tensor",
+   "start_us": 895.346,
+   "end_us": 922.392,
+   "busy_us": 25.301
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 898.829,
+   "end_us": 916.563,
+   "busy_us": 12.993
+  },
+  {
+   "component": "collective",
+   "engine_class": "vector",
+   "start_us": 899.912,
+   "end_us": 900.291,
+   "busy_us": 0.379
+  },
+  {
+   "component": "collective",
+   "engine_class": "tensor",
+   "start_us": 913.607,
+   "end_us": 914.011,
+   "busy_us": 0.404
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 924.039,
+   "end_us": 926.658,
+   "busy_us": 2.619
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 924.687,
+   "end_us": 927.41,
+   "busy_us": 0.592
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 950.999,
+   "end_us": 951.819,
+   "busy_us": 0.346
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 977.038,
+   "end_us": 977.743,
+   "busy_us": 0.383
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 980.122,
+   "end_us": 1009.745,
+   "busy_us": 17.704
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 984.256,
+   "end_us": 988.67,
+   "busy_us": 0.786
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "tensor",
+   "start_us": 990.509,
+   "end_us": 1009.533,
+   "busy_us": 13.586
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 991.688,
+   "end_us": 991.858,
+   "busy_us": 0.17
+  },
+  {
+   "component": "attention",
+   "engine_class": "tensor",
+   "start_us": 996.116,
+   "end_us": 996.512,
+   "busy_us": 0.396
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "hbm_dma",
+   "start_us": 999.507,
+   "end_us": 1000.367,
+   "busy_us": 0.86
+  },
+  {
+   "component": "collective",
+   "engine_class": "tensor",
+   "start_us": 1001.03,
+   "end_us": 1001.565,
+   "busy_us": 0.535
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 1004.186,
+   "end_us": 1025.346,
+   "busy_us": 12.904
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 1004.657,
+   "end_us": 1004.801,
+   "busy_us": 0.144
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "sync",
+   "start_us": 1007.933,
+   "end_us": 1008.19,
+   "busy_us": 0.191
+  },
+  {
+   "component": "rope",
+   "engine_class": "hbm_dma",
+   "start_us": 1008.238,
+   "end_us": 1009.033,
+   "busy_us": 0.783
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 1009.485,
+   "end_us": 1009.524,
+   "busy_us": 0.039
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 1016.083,
+   "end_us": 1033.891,
+   "busy_us": 12.073
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 1017.393,
+   "end_us": 1017.432,
+   "busy_us": 0.039
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 1018.053,
+   "end_us": 1021.197,
+   "busy_us": 3.144
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 1019.079,
+   "end_us": 1019.57,
+   "busy_us": 0.491
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 1025.295,
+   "end_us": 1034.435,
+   "busy_us": 1.472
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 1034.473,
+   "end_us": 1035.422,
+   "busy_us": 0.949
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "scalar",
+   "start_us": 1034.828,
+   "end_us": 1069.476,
+   "busy_us": 23.101
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "tensor",
+   "start_us": 1035.52,
+   "end_us": 1070.366,
+   "busy_us": 23.012
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 1036.578,
+   "end_us": 1036.783,
+   "busy_us": 0.205
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "vector",
+   "start_us": 1038.893,
+   "end_us": 1071.996,
+   "busy_us": 17.385
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 1039.978,
+   "end_us": 1042.63,
+   "busy_us": 2.652
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 1040.626,
+   "end_us": 1043.163,
+   "busy_us": 1.96
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 1041.222,
+   "end_us": 1041.742,
+   "busy_us": 0.424
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 1043.201,
+   "end_us": 1044.154,
+   "busy_us": 0.953
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 1045.975,
+   "end_us": 1047.059,
+   "busy_us": 0.313
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 1049.101,
+   "end_us": 1051.229,
+   "busy_us": 2.008
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 1050.266,
+   "end_us": 1051.762,
+   "busy_us": 1.496
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 1051.26,
+   "end_us": 1051.581,
+   "busy_us": 0.28
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 1051.8,
+   "end_us": 1052.75,
+   "busy_us": 0.95
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 1054.798,
+   "end_us": 1055.003,
+   "busy_us": 0.205
+  },
+  {
+   "component": "rope",
+   "engine_class": "gpsimd",
+   "start_us": 1055.293,
+   "end_us": 1056.83,
+   "busy_us": 1.426
+  },
+  {
+   "component": "rope",
+   "engine_class": "vector",
+   "start_us": 1059.299,
+   "end_us": 1060.831,
+   "busy_us": 0.541
+  },
+  {
+   "component": "rope",
+   "engine_class": "scalar",
+   "start_us": 1059.773,
+   "end_us": 1061.179,
+   "busy_us": 0.524
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 1059.924,
+   "end_us": 1062.137,
+   "busy_us": 2.213
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 1060.07,
+   "end_us": 1060.212,
+   "busy_us": 0.142
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 1061.078,
+   "end_us": 1062.67,
+   "busy_us": 1.572
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 1063.048,
+   "end_us": 1064.381,
+   "busy_us": 1.0
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 1067.567,
+   "end_us": 1084.432,
+   "busy_us": 4.315
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 1068.887,
+   "end_us": 1069.028,
+   "busy_us": 0.141
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 1069.377,
+   "end_us": 1076.622,
+   "busy_us": 1.851
+  },
+  {
+   "component": "rope",
+   "engine_class": "tensor",
+   "start_us": 1069.991,
+   "end_us": 1157.408,
+   "busy_us": 50.156
+  },
+  {
+   "component": "rope",
+   "engine_class": "vector",
+   "start_us": 1070.566,
+   "end_us": 1157.024,
+   "busy_us": 77.342
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 1077.307,
+   "end_us": 1080.091,
+   "busy_us": 1.583
+  },
+  {
+   "component": "rope",
+   "engine_class": "scalar",
+   "start_us": 1078.347,
+   "end_us": 1081.089,
+   "busy_us": 1.791
+  },
+  {
+   "component": "rope",
+   "engine_class": "hbm_dma",
+   "start_us": 1078.982,
+   "end_us": 1133.859,
+   "busy_us": 7.767
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "vector",
+   "start_us": 1079.401,
+   "end_us": 1079.924,
+   "busy_us": 0.523
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 1082.023,
+   "end_us": 1084.857,
+   "busy_us": 1.151
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 1085.684,
+   "end_us": 1100.3,
+   "busy_us": 6.355
+  },
+  {
+   "component": "rope",
+   "engine_class": "scalar",
+   "start_us": 1086.986,
+   "end_us": 1089.47,
+   "busy_us": 1.792
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 1090.622,
+   "end_us": 1091.067,
+   "busy_us": 0.445
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 1091.054,
+   "end_us": 1091.473,
+   "busy_us": 0.419
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "sync",
+   "start_us": 1091.942,
+   "end_us": 1092.115,
+   "busy_us": 0.14
+  },
+  {
+   "component": "rope",
+   "engine_class": "scalar",
+   "start_us": 1094.486,
+   "end_us": 1116.803,
+   "busy_us": 5.331
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 1107.477,
+   "end_us": 1108.178,
+   "busy_us": 0.701
+  },
+  {
+   "component": "rope",
+   "engine_class": "scalar",
+   "start_us": 1122.83,
+   "end_us": 1132.896,
+   "busy_us": 3.378
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 1134.677,
+   "end_us": 1163.216,
+   "busy_us": 15.677
+  },
+  {
+   "component": "rope",
+   "engine_class": "scalar",
+   "start_us": 1139.306,
+   "end_us": 1157.837,
+   "busy_us": 4.141
+  },
+  {
+   "component": "rope",
+   "engine_class": "hbm_dma",
+   "start_us": 1139.317,
+   "end_us": 1144.021,
+   "busy_us": 1.001
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 1139.622,
+   "end_us": 1139.769,
+   "busy_us": 0.147
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "tensor",
+   "start_us": 1144.797,
+   "end_us": 1158.202,
+   "busy_us": 8.347
+  },
+  {
+   "component": "rope",
+   "engine_class": "hbm_dma",
+   "start_us": 1149.285,
+   "end_us": 1160.271,
+   "busy_us": 1.456
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 1149.563,
+   "end_us": 1149.701,
+   "busy_us": 0.138
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 1156.831,
+   "end_us": 1166.852,
+   "busy_us": 5.289
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 1160.427,
+   "end_us": 1165.125,
+   "busy_us": 0.084
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 1161.087,
+   "end_us": 1162.257,
+   "busy_us": 1.028
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 1162.47,
+   "end_us": 1168.784,
+   "busy_us": 1.936
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 1163.506,
+   "end_us": 1169.437,
+   "busy_us": 0.983
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "tensor",
+   "start_us": 1167.394,
+   "end_us": 1217.515,
+   "busy_us": 41.667
+  },
+  {
+   "component": "rope",
+   "engine_class": "hbm_dma",
+   "start_us": 1168.957,
+   "end_us": 1172.67,
+   "busy_us": 1.976
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 1169.475,
+   "end_us": 1170.046,
+   "busy_us": 0.571
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 1176.796,
+   "end_us": 1217.935,
+   "busy_us": 29.3
+  },
+  {
+   "component": "collective",
+   "engine_class": "vector",
+   "start_us": 1178.721,
+   "end_us": 1179.04,
+   "busy_us": 0.319
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 1179.708,
+   "end_us": 1202.56,
+   "busy_us": 22.041
+  },
+  {
+   "component": "collective",
+   "engine_class": "tensor",
+   "start_us": 1191.295,
+   "end_us": 1191.686,
+   "busy_us": 0.391
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 1199.221,
+   "end_us": 1201.074,
+   "busy_us": 1.853
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "sync",
+   "start_us": 1201.511,
+   "end_us": 1201.675,
+   "busy_us": 0.132
+  },
+  {
+   "component": "attention",
+   "engine_class": "tensor",
+   "start_us": 1210.556,
+   "end_us": 1210.954,
+   "busy_us": 0.398
+  },
+  {
+   "component": "collective",
+   "engine_class": "tensor",
+   "start_us": 1212.099,
+   "end_us": 1212.492,
+   "busy_us": 0.393
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 1215.989,
+   "end_us": 1219.299,
+   "busy_us": 1.509
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 1221.251,
+   "end_us": 1223.262,
+   "busy_us": 0.078
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 1222.33,
+   "end_us": 1242.201,
+   "busy_us": 14.086
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 1223.809,
+   "end_us": 1257.886,
+   "busy_us": 21.588
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 1224.792,
+   "end_us": 1227.973,
+   "busy_us": 0.982
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "tensor",
+   "start_us": 1225.565,
+   "end_us": 1225.832,
+   "busy_us": 0.267
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "scalar",
+   "start_us": 1233.541,
+   "end_us": 1233.712,
+   "busy_us": 0.171
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 1235.581,
+   "end_us": 1258.328,
+   "busy_us": 10.91
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 1236.109,
+   "end_us": 1236.677,
+   "busy_us": 0.568
+  },
+  {
+   "component": "attention",
+   "engine_class": "sync",
+   "start_us": 1242.203,
+   "end_us": 1243.221,
+   "busy_us": 1.003
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 1243.806,
+   "end_us": 1254.187,
+   "busy_us": 3.705
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 1249.718,
+   "end_us": 1258.307,
+   "busy_us": 2.809
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1250.664,
+   "end_us": 1250.831,
+   "busy_us": 0.167
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 1251.003,
+   "end_us": 1268.204,
+   "busy_us": 5.628
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 1251.859,
+   "end_us": 1252.571,
+   "busy_us": 0.712
+  },
+  {
+   "component": "attention",
+   "engine_class": "vector",
+   "start_us": 1258.217,
+   "end_us": 1258.341,
+   "busy_us": 0.124
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "scalar",
+   "start_us": 1258.35,
+   "end_us": 1259.633,
+   "busy_us": 1.283
+  },
+  {
+   "component": "attention",
+   "engine_class": "sync",
+   "start_us": 1263.757,
+   "end_us": 1267.165,
+   "busy_us": 0.324
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 1267.216,
+   "end_us": 1267.266,
+   "busy_us": 0.05
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 1267.285,
+   "end_us": 1267.324,
+   "busy_us": 0.039
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1268.322,
+   "end_us": 1269.212,
+   "busy_us": 0.543
+  },
+  {
+   "component": "attention",
+   "engine_class": "tensor",
+   "start_us": 1268.431,
+   "end_us": 2085.104,
+   "busy_us": 567.233
+  },
+  {
+   "component": "attention",
+   "engine_class": "vector",
+   "start_us": 1269.091,
+   "end_us": 1564.819,
+   "busy_us": 290.089
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1273.621,
+   "end_us": 1273.742,
+   "busy_us": 0.121
+  },
+  {
+   "component": "attention",
+   "engine_class": "sync",
+   "start_us": 1274.263,
+   "end_us": 1276.173,
+   "busy_us": 0.385
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1276.221,
+   "end_us": 1277.345,
+   "busy_us": 0.837
+  },
+  {
+   "component": "collective",
+   "engine_class": "tensor",
+   "start_us": 1277.693,
+   "end_us": 1278.023,
+   "busy_us": 0.33
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1280.381,
+   "end_us": 1280.648,
+   "busy_us": 0.236
+  },
+  {
+   "component": "attention",
+   "engine_class": "sync",
+   "start_us": 1281.18,
+   "end_us": 1283.089,
+   "busy_us": 0.38
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1283.137,
+   "end_us": 1293.04,
+   "busy_us": 8.47
+  },
+  {
+   "component": "collective",
+   "engine_class": "vector",
+   "start_us": 1287.051,
+   "end_us": 1287.218,
+   "busy_us": 0.167
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1287.286,
+   "end_us": 1287.563,
+   "busy_us": 0.238
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "sync",
+   "start_us": 1293.56,
+   "end_us": 1293.572,
+   "busy_us": 0.012
+  },
+  {
+   "component": "attention",
+   "engine_class": "sync",
+   "start_us": 1294.086,
+   "end_us": 1555.423,
+   "busy_us": 13.557
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1294.19,
+   "end_us": 1294.465,
+   "busy_us": 0.238
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "hbm_dma",
+   "start_us": 1294.652,
+   "end_us": 1298.386,
+   "busy_us": 3.731
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 1296.736,
+   "end_us": 1296.837,
+   "busy_us": 0.101
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 1299.845,
+   "end_us": 1299.888,
+   "busy_us": 0.043
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 1299.916,
+   "end_us": 1300.769,
+   "busy_us": 0.788
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1301.265,
+   "end_us": 1301.517,
+   "busy_us": 0.252
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1301.964,
+   "end_us": 1303.716,
+   "busy_us": 1.752
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1308.373,
+   "end_us": 1308.633,
+   "busy_us": 0.26
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1309.075,
+   "end_us": 1318.018,
+   "busy_us": 3.987
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "tensor",
+   "start_us": 1312.42,
+   "end_us": 1313.157,
+   "busy_us": 0.737
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 1312.633,
+   "end_us": 1313.211,
+   "busy_us": 0.578
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1315.327,
+   "end_us": 1315.586,
+   "busy_us": 0.259
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "sync",
+   "start_us": 1316.369,
+   "end_us": 1316.408,
+   "busy_us": 0.039
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "tensor",
+   "start_us": 1320.645,
+   "end_us": 1320.917,
+   "busy_us": 0.272
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "tensor",
+   "start_us": 1321.482,
+   "end_us": 1321.913,
+   "busy_us": 0.431
+  },
+  {
+   "component": "collective",
+   "engine_class": "tensor",
+   "start_us": 1322.041,
+   "end_us": 1322.417,
+   "busy_us": 0.376
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1322.127,
+   "end_us": 1322.403,
+   "busy_us": 0.241
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "vector",
+   "start_us": 1323.506,
+   "end_us": 1323.839,
+   "busy_us": 0.333
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1325.043,
+   "end_us": 1325.752,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1329.737,
+   "end_us": 1330.017,
+   "busy_us": 0.239
+  },
+  {
+   "component": "collective",
+   "engine_class": "tensor",
+   "start_us": 1332.097,
+   "end_us": 1332.369,
+   "busy_us": 0.272
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1332.522,
+   "end_us": 1333.231,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1336.85,
+   "end_us": 1337.128,
+   "busy_us": 0.239
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1339.64,
+   "end_us": 1340.349,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1343.96,
+   "end_us": 1344.233,
+   "busy_us": 0.237
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1347.436,
+   "end_us": 1348.145,
+   "busy_us": 0.709
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "tensor",
+   "start_us": 1349.82,
+   "end_us": 1350.093,
+   "busy_us": 0.273
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1351.875,
+   "end_us": 1352.15,
+   "busy_us": 0.24
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "hbm_dma",
+   "start_us": 1354.668,
+   "end_us": 1355.377,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1358.98,
+   "end_us": 1359.256,
+   "busy_us": 0.236
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1361.778,
+   "end_us": 1362.487,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1366.092,
+   "end_us": 1366.369,
+   "busy_us": 0.239
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1368.895,
+   "end_us": 1369.604,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1373.206,
+   "end_us": 1373.483,
+   "busy_us": 0.236
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1376.011,
+   "end_us": 1376.72,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1380.308,
+   "end_us": 1380.586,
+   "busy_us": 0.239
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1383.119,
+   "end_us": 1383.828,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1387.649,
+   "end_us": 1387.926,
+   "busy_us": 0.24
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1390.999,
+   "end_us": 1391.708,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1395.445,
+   "end_us": 1395.722,
+   "busy_us": 0.238
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1398.207,
+   "end_us": 1398.916,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1402.546,
+   "end_us": 1402.822,
+   "busy_us": 0.24
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1405.306,
+   "end_us": 1406.015,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1409.641,
+   "end_us": 1409.919,
+   "busy_us": 0.239
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1412.421,
+   "end_us": 1413.13,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1416.751,
+   "end_us": 1417.027,
+   "busy_us": 0.24
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1419.517,
+   "end_us": 1420.226,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1423.849,
+   "end_us": 1424.127,
+   "busy_us": 0.239
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1426.625,
+   "end_us": 1427.334,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1430.954,
+   "end_us": 1431.231,
+   "busy_us": 0.24
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1434.661,
+   "end_us": 1435.37,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1439.216,
+   "end_us": 1439.49,
+   "busy_us": 0.24
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1441.994,
+   "end_us": 1442.703,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1446.317,
+   "end_us": 1446.596,
+   "busy_us": 0.239
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1449.099,
+   "end_us": 1449.808,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1453.427,
+   "end_us": 1453.704,
+   "busy_us": 0.237
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1456.216,
+   "end_us": 1456.925,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1460.542,
+   "end_us": 1460.821,
+   "busy_us": 0.239
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1463.331,
+   "end_us": 1464.04,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1467.654,
+   "end_us": 1467.931,
+   "busy_us": 0.237
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1470.45,
+   "end_us": 1471.159,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1474.759,
+   "end_us": 1475.037,
+   "busy_us": 0.238
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1478.565,
+   "end_us": 1479.274,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1483.012,
+   "end_us": 1483.289,
+   "busy_us": 0.237
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1485.814,
+   "end_us": 1486.527,
+   "busy_us": 0.713
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1490.115,
+   "end_us": 1490.394,
+   "busy_us": 0.239
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1492.918,
+   "end_us": 1493.644,
+   "busy_us": 0.726
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1497.211,
+   "end_us": 1497.49,
+   "busy_us": 0.238
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1500.022,
+   "end_us": 1500.731,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1504.498,
+   "end_us": 1504.776,
+   "busy_us": 0.239
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1507.307,
+   "end_us": 1508.016,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1511.608,
+   "end_us": 1511.883,
+   "busy_us": 0.242
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1514.367,
+   "end_us": 1515.076,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1518.715,
+   "end_us": 1518.832,
+   "busy_us": 0.117
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1521.481,
+   "end_us": 1522.19,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1526.651,
+   "end_us": 1526.774,
+   "busy_us": 0.123
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1529.883,
+   "end_us": 1530.592,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1534.526,
+   "end_us": 1534.805,
+   "busy_us": 0.239
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1537.295,
+   "end_us": 1538.004,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1541.883,
+   "end_us": 1542.162,
+   "busy_us": 0.238
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1544.658,
+   "end_us": 1545.367,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1549.24,
+   "end_us": 1549.517,
+   "busy_us": 0.237
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1551.619,
+   "end_us": 1573.9,
+   "busy_us": 14.353
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1556.343,
+   "end_us": 1556.622,
+   "busy_us": 0.238
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1564.51,
+   "end_us": 1564.783,
+   "busy_us": 0.235
+  },
+  {
+   "component": "attention",
+   "engine_class": "sync",
+   "start_us": 1570.234,
+   "end_us": 1828.384,
+   "busy_us": 12.065
+  },
+  {
+   "component": "attention",
+   "engine_class": "vector",
+   "start_us": 1572.049,
+   "end_us": 1837.305,
+   "busy_us": 246.676
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1580.683,
+   "end_us": 1580.935,
+   "busy_us": 0.252
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1581.378,
+   "end_us": 1590.32,
+   "busy_us": 3.968
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1587.633,
+   "end_us": 1587.885,
+   "busy_us": 0.252
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1594.426,
+   "end_us": 1594.7,
+   "busy_us": 0.238
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1597.961,
+   "end_us": 1598.67,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1602.405,
+   "end_us": 1602.681,
+   "busy_us": 0.238
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1605.202,
+   "end_us": 1605.911,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1609.519,
+   "end_us": 1609.641,
+   "busy_us": 0.122
+  },
+  {
+   "component": "modulation",
+   "engine_class": "gpsimd",
+   "start_us": 1609.673,
+   "end_us": 1609.79,
+   "busy_us": 0.117
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1612.315,
+   "end_us": 1613.024,
+   "busy_us": 0.709
+  },
+  {
+   "component": "norm",
+   "engine_class": "tensor",
+   "start_us": 1615.595,
+   "end_us": 1622.448,
+   "busy_us": 1.163
+  },
+  {
+   "component": "norm",
+   "engine_class": "vector",
+   "start_us": 1616.378,
+   "end_us": 1626.14,
+   "busy_us": 2.385
+  },
+  {
+   "component": "norm",
+   "engine_class": "gpsimd",
+   "start_us": 1616.616,
+   "end_us": 1616.732,
+   "busy_us": 0.116
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1616.772,
+   "end_us": 1616.892,
+   "busy_us": 0.12
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 1619.947,
+   "end_us": 1620.633,
+   "busy_us": 0.44
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1620.484,
+   "end_us": 1621.193,
+   "busy_us": 0.709
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "tensor",
+   "start_us": 1621.175,
+   "end_us": 1624.694,
+   "busy_us": 1.163
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "vector",
+   "start_us": 1623.717,
+   "end_us": 1628.666,
+   "busy_us": 1.566
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1624.892,
+   "end_us": 1625.014,
+   "busy_us": 0.122
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "gpsimd",
+   "start_us": 1625.049,
+   "end_us": 1625.166,
+   "busy_us": 0.117
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 1626.27,
+   "end_us": 1627.735,
+   "busy_us": 0.433
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1627.701,
+   "end_us": 1628.41,
+   "busy_us": 0.709
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "tensor",
+   "start_us": 1630.976,
+   "end_us": 1631.798,
+   "busy_us": 0.769
+  },
+  {
+   "component": "modulation",
+   "engine_class": "sync",
+   "start_us": 1630.983,
+   "end_us": 1631.022,
+   "busy_us": 0.039
+  },
+  {
+   "component": "norm",
+   "engine_class": "vector",
+   "start_us": 1631.991,
+   "end_us": 1632.16,
+   "busy_us": 0.169
+  },
+  {
+   "component": "norm",
+   "engine_class": "gpsimd",
+   "start_us": 1631.997,
+   "end_us": 1632.115,
+   "busy_us": 0.118
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "gpsimd",
+   "start_us": 1632.153,
+   "end_us": 1632.274,
+   "busy_us": 0.121
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "tensor",
+   "start_us": 1632.555,
+   "end_us": 1632.932,
+   "busy_us": 0.377
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 1633.961,
+   "end_us": 1634.303,
+   "busy_us": 0.342
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 1634.242,
+   "end_us": 1643.771,
+   "busy_us": 1.628
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "vector",
+   "start_us": 1634.268,
+   "end_us": 1635.325,
+   "busy_us": 0.914
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1634.806,
+   "end_us": 1635.519,
+   "busy_us": 0.713
+  },
+  {
+   "component": "norm",
+   "engine_class": "sync",
+   "start_us": 1634.874,
+   "end_us": 1638.23,
+   "busy_us": 0.078
+  },
+  {
+   "component": "norm",
+   "engine_class": "tensor",
+   "start_us": 1636.277,
+   "end_us": 1643.408,
+   "busy_us": 2.435
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "vector",
+   "start_us": 1636.561,
+   "end_us": 1642.878,
+   "busy_us": 1.558
+  },
+  {
+   "component": "modulation",
+   "engine_class": "sync",
+   "start_us": 1637.074,
+   "end_us": 1637.783,
+   "busy_us": 0.117
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "tensor",
+   "start_us": 1637.553,
+   "end_us": 1643.193,
+   "busy_us": 0.675
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "tensor",
+   "start_us": 1637.665,
+   "end_us": 1637.993,
+   "busy_us": 0.328
+  },
+  {
+   "component": "norm",
+   "engine_class": "vector",
+   "start_us": 1638.38,
+   "end_us": 1645.136,
+   "busy_us": 1.987
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "tensor",
+   "start_us": 1638.53,
+   "end_us": 1639.395,
+   "busy_us": 0.753
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "gpsimd",
+   "start_us": 1639.106,
+   "end_us": 1639.228,
+   "busy_us": 0.122
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1639.263,
+   "end_us": 1639.379,
+   "busy_us": 0.116
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 1640.249,
+   "end_us": 1648.52,
+   "busy_us": 1.568
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "vector",
+   "start_us": 1641.847,
+   "end_us": 1646.99,
+   "busy_us": 0.525
+  },
+  {
+   "component": "norm",
+   "engine_class": "hbm_dma",
+   "start_us": 1641.867,
+   "end_us": 1642.576,
+   "busy_us": 0.709
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "tensor",
+   "start_us": 1643.248,
+   "end_us": 1651.098,
+   "busy_us": 1.516
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "vector",
+   "start_us": 1646.108,
+   "end_us": 1647.459,
+   "busy_us": 0.949
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1646.212,
+   "end_us": 1646.488,
+   "busy_us": 0.236
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "tensor",
+   "start_us": 1648.684,
+   "end_us": 1651.824,
+   "busy_us": 0.767
+  },
+  {
+   "component": "norm",
+   "engine_class": "sync",
+   "start_us": 1648.763,
+   "end_us": 1651.082,
+   "busy_us": 0.078
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1648.977,
+   "end_us": 1649.686,
+   "busy_us": 0.709
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 1651.887,
+   "end_us": 1652.214,
+   "busy_us": 0.327
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "sync",
+   "start_us": 1652.301,
+   "end_us": 1658.346,
+   "busy_us": 0.117
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "vector",
+   "start_us": 1653.307,
+   "end_us": 1653.479,
+   "busy_us": 0.172
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "gpsimd",
+   "start_us": 1653.315,
+   "end_us": 1653.437,
+   "busy_us": 0.122
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1653.469,
+   "end_us": 1653.587,
+   "busy_us": 0.118
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "tensor",
+   "start_us": 1655.431,
+   "end_us": 1656.0,
+   "busy_us": 0.569
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "tensor",
+   "start_us": 1655.446,
+   "end_us": 1655.721,
+   "busy_us": 0.275
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1656.092,
+   "end_us": 1656.801,
+   "busy_us": 0.709
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 1658.116,
+   "end_us": 1658.835,
+   "busy_us": 0.655
+  },
+  {
+   "component": "norm",
+   "engine_class": "vector",
+   "start_us": 1658.602,
+   "end_us": 1661.682,
+   "busy_us": 0.879
+  },
+  {
+   "component": "norm",
+   "engine_class": "tensor",
+   "start_us": 1658.73,
+   "end_us": 1659.449,
+   "busy_us": 0.719
+  },
+  {
+   "component": "modulation",
+   "engine_class": "sync",
+   "start_us": 1659.2,
+   "end_us": 1659.239,
+   "busy_us": 0.039
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 1660.663,
+   "end_us": 1660.836,
+   "busy_us": 0.173
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1660.671,
+   "end_us": 1660.944,
+   "busy_us": 0.237
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "hbm_dma",
+   "start_us": 1664.274,
+   "end_us": 1664.983,
+   "busy_us": 0.709
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 1665.877,
+   "end_us": 1666.27,
+   "busy_us": 0.393
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "sync",
+   "start_us": 1667.473,
+   "end_us": 1667.512,
+   "busy_us": 0.039
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 1668.707,
+   "end_us": 1680.481,
+   "busy_us": 1.246
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1668.71,
+   "end_us": 1668.987,
+   "busy_us": 0.238
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1671.485,
+   "end_us": 1672.194,
+   "busy_us": 0.709
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "tensor",
+   "start_us": 1672.538,
+   "end_us": 1676.111,
+   "busy_us": 1.146
+  },
+  {
+   "component": "norm",
+   "engine_class": "sync",
+   "start_us": 1673.682,
+   "end_us": 1673.721,
+   "busy_us": 0.039
+  },
+  {
+   "component": "norm",
+   "engine_class": "tensor",
+   "start_us": 1674.05,
+   "end_us": 1674.322,
+   "busy_us": 0.272
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "tensor",
+   "start_us": 1674.329,
+   "end_us": 1674.601,
+   "busy_us": 0.272
+  },
+  {
+   "component": "modulation",
+   "engine_class": "gpsimd",
+   "start_us": 1675.823,
+   "end_us": 1675.941,
+   "busy_us": 0.118
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1675.98,
+   "end_us": 1676.1,
+   "busy_us": 0.12
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "vector",
+   "start_us": 1677.667,
+   "end_us": 1677.884,
+   "busy_us": 0.217
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1678.599,
+   "end_us": 1679.308,
+   "busy_us": 0.709
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "sync",
+   "start_us": 1680.795,
+   "end_us": 1680.834,
+   "busy_us": 0.039
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 1681.609,
+   "end_us": 1681.881,
+   "busy_us": 0.272
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1682.925,
+   "end_us": 1683.199,
+   "busy_us": 0.238
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "vector",
+   "start_us": 1683.597,
+   "end_us": 1684.169,
+   "busy_us": 0.572
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 1684.3,
+   "end_us": 1684.867,
+   "busy_us": 0.567
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1685.703,
+   "end_us": 1686.412,
+   "busy_us": 0.709
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 1686.985,
+   "end_us": 1690.964,
+   "busy_us": 1.087
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "tensor",
+   "start_us": 1687.985,
+   "end_us": 1688.982,
+   "busy_us": 0.934
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1690.03,
+   "end_us": 1690.307,
+   "busy_us": 0.238
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 1690.158,
+   "end_us": 1691.274,
+   "busy_us": 0.521
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "vector",
+   "start_us": 1691.64,
+   "end_us": 1691.973,
+   "busy_us": 0.333
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 1691.874,
+   "end_us": 1692.092,
+   "busy_us": 0.218
+  },
+  {
+   "component": "modulation",
+   "engine_class": "sync",
+   "start_us": 1692.579,
+   "end_us": 1699.882,
+   "busy_us": 0.117
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "vector",
+   "start_us": 1692.778,
+   "end_us": 1694.244,
+   "busy_us": 1.12
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1692.812,
+   "end_us": 1693.521,
+   "busy_us": 0.709
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "vector",
+   "start_us": 1695.074,
+   "end_us": 1696.052,
+   "busy_us": 0.978
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "tensor",
+   "start_us": 1695.081,
+   "end_us": 1695.632,
+   "busy_us": 0.551
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "sync",
+   "start_us": 1695.104,
+   "end_us": 1695.143,
+   "busy_us": 0.039
+  },
+  {
+   "component": "norm",
+   "engine_class": "vector",
+   "start_us": 1697.125,
+   "end_us": 1697.295,
+   "busy_us": 0.17
+  },
+  {
+   "component": "norm",
+   "engine_class": "gpsimd",
+   "start_us": 1697.128,
+   "end_us": 1697.249,
+   "busy_us": 0.121
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1697.288,
+   "end_us": 1697.406,
+   "busy_us": 0.118
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "vector",
+   "start_us": 1699.096,
+   "end_us": 1699.97,
+   "busy_us": 0.675
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "tensor",
+   "start_us": 1699.322,
+   "end_us": 1701.488,
+   "busy_us": 1.12
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 1699.917,
+   "end_us": 1700.626,
+   "busy_us": 0.709
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "sync",
+   "start_us": 1701.882,
+   "end_us": 1702.145,
+   "busy_us": 0.078
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 1701.971,
+   "end_us": 1710.584,
+   "busy_us": 1.489
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "tensor",
+   "start_us": 1702.306,
+   "end_us": 1702.856,
+   "busy_us": 0.55
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1704.24,
+   "end_us": 1704.516,
+   "busy_us": 0.24
+  },
+  {
+   "component": "norm",
+   "engine_class": "sync",
+   "start_us": 1707.236,
+   "end_us": 1709.536,
+   "busy_us": 0.078
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1707.411,
+   "end_us": 1708.124,
+   "busy_us": 0.713
+  },
+  {
+   "component": "norm",
+   "engine_class": "vector",
+   "start_us": 1708.863,
+   "end_us": 1709.406,
+   "busy_us": 0.543
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "tensor",
+   "start_us": 1709.474,
+   "end_us": 1709.745,
+   "busy_us": 0.271
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "tensor",
+   "start_us": 1710.367,
+   "end_us": 1710.638,
+   "busy_us": 0.271
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1711.851,
+   "end_us": 1712.127,
+   "busy_us": 0.236
+  },
+  {
+   "component": "qk_norm",
+   "engine_class": "tensor",
+   "start_us": 1713.974,
+   "end_us": 1714.43,
+   "busy_us": 0.456
+  },
+  {
+   "component": "norm",
+   "engine_class": "tensor",
+   "start_us": 1714.27,
+   "end_us": 1724.495,
+   "busy_us": 2.29
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1714.648,
+   "end_us": 1715.357,
+   "busy_us": 0.709
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "sync",
+   "start_us": 1716.605,
+   "end_us": 1716.644,
+   "busy_us": 0.039
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1718.969,
+   "end_us": 1719.248,
+   "busy_us": 0.239
+  },
+  {
+   "component": "norm",
+   "engine_class": "vector",
+   "start_us": 1720.812,
+   "end_us": 1721.029,
+   "busy_us": 0.217
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "tensor",
+   "start_us": 1721.101,
+   "end_us": 1721.373,
+   "busy_us": 0.272
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1721.765,
+   "end_us": 1722.474,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1726.069,
+   "end_us": 1726.343,
+   "busy_us": 0.237
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1728.868,
+   "end_us": 1729.577,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1733.171,
+   "end_us": 1733.45,
+   "busy_us": 0.239
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1735.974,
+   "end_us": 1736.683,
+   "busy_us": 0.709
+  },
+  {
+   "component": "norm",
+   "engine_class": "tensor",
+   "start_us": 1738.679,
+   "end_us": 1738.951,
+   "busy_us": 0.272
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1740.273,
+   "end_us": 1740.547,
+   "busy_us": 0.237
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1743.079,
+   "end_us": 1743.788,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1747.382,
+   "end_us": 1747.661,
+   "busy_us": 0.239
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1750.93,
+   "end_us": 1751.639,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1755.318,
+   "end_us": 1755.595,
+   "busy_us": 0.237
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1758.081,
+   "end_us": 1758.79,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1762.435,
+   "end_us": 1762.713,
+   "busy_us": 0.239
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1765.198,
+   "end_us": 1765.907,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1769.531,
+   "end_us": 1769.81,
+   "busy_us": 0.238
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1772.371,
+   "end_us": 1773.08,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1777.01,
+   "end_us": 1777.288,
+   "busy_us": 0.239
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1779.779,
+   "end_us": 1780.488,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1784.11,
+   "end_us": 1784.391,
+   "busy_us": 0.237
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1786.891,
+   "end_us": 1787.6,
+   "busy_us": 0.709
+  },
+  {
+   "component": "norm",
+   "engine_class": "tensor",
+   "start_us": 1790.196,
+   "end_us": 1790.59,
+   "busy_us": 0.394
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1791.216,
+   "end_us": 1791.333,
+   "busy_us": 0.117
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1794.826,
+   "end_us": 1795.535,
+   "busy_us": 0.709
+  },
+  {
+   "component": "norm",
+   "engine_class": "vector",
+   "start_us": 1795.41,
+   "end_us": 1795.948,
+   "busy_us": 0.538
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1799.277,
+   "end_us": 1799.396,
+   "busy_us": 0.119
+  },
+  {
+   "component": "collective",
+   "engine_class": "vector",
+   "start_us": 1801.091,
+   "end_us": 1802.562,
+   "busy_us": 1.19
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1803.036,
+   "end_us": 1803.745,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1807.493,
+   "end_us": 1807.767,
+   "busy_us": 0.238
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1810.271,
+   "end_us": 1810.98,
+   "busy_us": 0.709
+  },
+  {
+   "component": "collective",
+   "engine_class": "sync",
+   "start_us": 1812.926,
+   "end_us": 1813.412,
+   "busy_us": 0.117
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1814.835,
+   "end_us": 1815.109,
+   "busy_us": 0.237
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1817.62,
+   "end_us": 1818.329,
+   "busy_us": 0.709
+  },
+  {
+   "component": "norm",
+   "engine_class": "tensor",
+   "start_us": 1820.416,
+   "end_us": 1820.688,
+   "busy_us": 0.272
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1822.176,
+   "end_us": 1822.453,
+   "busy_us": 0.237
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1824.556,
+   "end_us": 1846.894,
+   "busy_us": 13.399
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1829.285,
+   "end_us": 1829.563,
+   "busy_us": 0.241
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1836.995,
+   "end_us": 1837.27,
+   "busy_us": 0.237
+  },
+  {
+   "component": "attention",
+   "engine_class": "sync",
+   "start_us": 1842.7,
+   "end_us": 1888.196,
+   "busy_us": 2.862
+  },
+  {
+   "component": "attention",
+   "engine_class": "vector",
+   "start_us": 1844.987,
+   "end_us": 2085.731,
+   "busy_us": 229.23
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1853.589,
+   "end_us": 1853.845,
+   "busy_us": 0.256
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1854.297,
+   "end_us": 1863.232,
+   "busy_us": 3.948
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1860.545,
+   "end_us": 1860.8,
+   "busy_us": 0.255
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1867.347,
+   "end_us": 1867.621,
+   "busy_us": 0.235
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1870.159,
+   "end_us": 1870.868,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1874.775,
+   "end_us": 1875.051,
+   "busy_us": 0.239
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1877.585,
+   "end_us": 1878.294,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1882.069,
+   "end_us": 1882.343,
+   "busy_us": 0.239
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1884.827,
+   "end_us": 1885.536,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1889.18,
+   "end_us": 1889.457,
+   "busy_us": 0.236
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1893.58,
+   "end_us": 1894.289,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "sync",
+   "start_us": 1893.59,
+   "end_us": 2079.871,
+   "busy_us": 9.559
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1898.028,
+   "end_us": 1898.302,
+   "busy_us": 0.239
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1900.807,
+   "end_us": 1901.516,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1905.133,
+   "end_us": 1905.41,
+   "busy_us": 0.236
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1907.905,
+   "end_us": 1908.614,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1912.235,
+   "end_us": 1912.513,
+   "busy_us": 0.239
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1915.01,
+   "end_us": 1915.719,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1919.341,
+   "end_us": 1919.619,
+   "busy_us": 0.239
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1922.117,
+   "end_us": 1922.826,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1926.436,
+   "end_us": 1926.714,
+   "busy_us": 0.239
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1929.22,
+   "end_us": 1929.929,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1933.711,
+   "end_us": 1933.988,
+   "busy_us": 0.237
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1937.469,
+   "end_us": 1938.178,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1941.904,
+   "end_us": 1942.181,
+   "busy_us": 0.238
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1944.692,
+   "end_us": 1945.401,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1949.019,
+   "end_us": 1949.295,
+   "busy_us": 0.24
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1951.804,
+   "end_us": 1952.513,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1956.113,
+   "end_us": 1956.388,
+   "busy_us": 0.236
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1958.909,
+   "end_us": 1959.618,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1963.229,
+   "end_us": 1963.505,
+   "busy_us": 0.24
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1966.021,
+   "end_us": 1966.73,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1970.332,
+   "end_us": 1970.605,
+   "busy_us": 0.237
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1973.133,
+   "end_us": 1973.842,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1977.442,
+   "end_us": 1977.722,
+   "busy_us": 0.238
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1980.897,
+   "end_us": 1981.606,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1985.313,
+   "end_us": 1985.59,
+   "busy_us": 0.237
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1988.122,
+   "end_us": 1988.831,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 1992.416,
+   "end_us": 1992.694,
+   "busy_us": 0.238
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 1995.748,
+   "end_us": 1996.457,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 2000.16,
+   "end_us": 2000.437,
+   "busy_us": 0.237
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 2002.923,
+   "end_us": 2003.632,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 2007.262,
+   "end_us": 2007.541,
+   "busy_us": 0.239
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 2010.025,
+   "end_us": 2010.734,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 2014.374,
+   "end_us": 2014.647,
+   "busy_us": 0.237
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 2017.15,
+   "end_us": 2017.859,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 2021.473,
+   "end_us": 2021.751,
+   "busy_us": 0.239
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 2025.264,
+   "end_us": 2025.973,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 2029.686,
+   "end_us": 2029.959,
+   "busy_us": 0.239
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 2032.456,
+   "end_us": 2033.165,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 2036.798,
+   "end_us": 2037.074,
+   "busy_us": 0.239
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 2039.571,
+   "end_us": 2040.28,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 2043.894,
+   "end_us": 2044.169,
+   "busy_us": 0.237
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 2046.675,
+   "end_us": 2047.384,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 2051.008,
+   "end_us": 2051.284,
+   "busy_us": 0.236
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 2053.79,
+   "end_us": 2054.499,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 2058.116,
+   "end_us": 2058.395,
+   "busy_us": 0.238
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 2060.905,
+   "end_us": 2061.614,
+   "busy_us": 0.709
+  },
+  {
+   "component": "attention",
+   "engine_class": "gpsimd",
+   "start_us": 2065.233,
+   "end_us": 2065.35,
+   "busy_us": 0.117
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 2067.903,
+   "end_us": 2068.836,
+   "busy_us": 0.34
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 2068.809,
+   "end_us": 2088.758,
+   "busy_us": 5.991
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 2074.516,
+   "end_us": 2082.432,
+   "busy_us": 1.342
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "hbm_dma",
+   "start_us": 2079.064,
+   "end_us": 2088.039,
+   "busy_us": 7.049
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 2079.885,
+   "end_us": 2082.967,
+   "busy_us": 0.989
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 2089.953,
+   "end_us": 2089.998,
+   "busy_us": 0.045
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 2097.62,
+   "end_us": 2101.736,
+   "busy_us": 3.305
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 2099.218,
+   "end_us": 2112.574,
+   "busy_us": 12.118
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 2100.451,
+   "end_us": 2113.197,
+   "busy_us": 6.634
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "hbm_dma",
+   "start_us": 2104.386,
+   "end_us": 2113.689,
+   "busy_us": 3.491
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 2106.877,
+   "end_us": 2107.363,
+   "busy_us": 0.486
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "tensor",
+   "start_us": 2108.51,
+   "end_us": 2130.717,
+   "busy_us": 17.298
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "hbm_dma",
+   "start_us": 2110.088,
+   "end_us": 2110.768,
+   "busy_us": 0.68
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "scalar",
+   "start_us": 2111.293,
+   "end_us": 2131.356,
+   "busy_us": 6.567
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 2116.234,
+   "end_us": 2119.564,
+   "busy_us": 0.186
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "vector",
+   "start_us": 2117.541,
+   "end_us": 2118.133,
+   "busy_us": 0.592
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 2117.774,
+   "end_us": 2124.279,
+   "busy_us": 5.632
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 2118.973,
+   "end_us": 2119.459,
+   "busy_us": 0.486
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 2119.604,
+   "end_us": 2124.902,
+   "busy_us": 4.041
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "hbm_dma",
+   "start_us": 2121.435,
+   "end_us": 2125.34,
+   "busy_us": 2.084
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 2130.098,
+   "end_us": 2131.481,
+   "busy_us": 0.176
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 2133.308,
+   "end_us": 2133.347,
+   "busy_us": 0.039
+  },
+  {
+   "component": "collective",
+   "engine_class": "gpsimd",
+   "start_us": 2133.646,
+   "end_us": 2133.87,
+   "busy_us": 0.224
+  },
+  {
+   "component": "collective",
+   "engine_class": "collective",
+   "start_us": 2135.125,
+   "end_us": 2154.288,
+   "busy_us": 19.163
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 2154.696,
+   "end_us": 2155.287,
+   "busy_us": 0.446
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 2156.697,
+   "end_us": 2162.889,
+   "busy_us": 6.192
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 2157.944,
+   "end_us": 2163.314,
+   "busy_us": 3.154
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 2158.437,
+   "end_us": 2162.362,
+   "busy_us": 0.759
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 2159.037,
+   "end_us": 2162.438,
+   "busy_us": 0.516
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 2159.417,
+   "end_us": 2169.388,
+   "busy_us": 7.162
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "tensor",
+   "start_us": 2160.157,
+   "end_us": 2160.43,
+   "busy_us": 0.273
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "vector",
+   "start_us": 2160.497,
+   "end_us": 2160.671,
+   "busy_us": 0.174
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "hbm_dma",
+   "start_us": 2162.321,
+   "end_us": 2163.956,
+   "busy_us": 1.621
+  },
+  {
+   "component": "norm",
+   "engine_class": "tensor",
+   "start_us": 2165.161,
+   "end_us": 2183.571,
+   "busy_us": 13.371
+  },
+  {
+   "component": "norm",
+   "engine_class": "scalar",
+   "start_us": 2171.406,
+   "end_us": 2191.841,
+   "busy_us": 8.761
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 2172.032,
+   "end_us": 2173.957,
+   "busy_us": 0.275
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "sync",
+   "start_us": 2172.837,
+   "end_us": 2172.977,
+   "busy_us": 0.108
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 2176.283,
+   "end_us": 2176.453,
+   "busy_us": 0.17
+  },
+  {
+   "component": "norm",
+   "engine_class": "vector",
+   "start_us": 2176.344,
+   "end_us": 2181.727,
+   "busy_us": 5.383
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 2181.632,
+   "end_us": 2181.8,
+   "busy_us": 0.168
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 2181.693,
+   "end_us": 2181.809,
+   "busy_us": 0.116
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 2182.381,
+   "end_us": 2182.509,
+   "busy_us": 0.128
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "hbm_dma",
+   "start_us": 2182.879,
+   "end_us": 2183.575,
+   "busy_us": 0.696
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 2184.238,
+   "end_us": 2186.531,
+   "busy_us": 0.084
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "sync",
+   "start_us": 2184.702,
+   "end_us": 2184.809,
+   "busy_us": 0.078
+  },
+  {
+   "component": "norm",
+   "engine_class": "gpsimd",
+   "start_us": 2187.657,
+   "end_us": 2189.916,
+   "busy_us": 2.259
+  },
+  {
+   "component": "norm",
+   "engine_class": "tensor",
+   "start_us": 2189.973,
+   "end_us": 2191.202,
+   "busy_us": 1.229
+  },
+  {
+   "component": "norm",
+   "engine_class": "vector",
+   "start_us": 2191.878,
+   "end_us": 2200.183,
+   "busy_us": 5.951
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 2193.283,
+   "end_us": 2202.869,
+   "busy_us": 4.667
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 2193.673,
+   "end_us": 2202.449,
+   "busy_us": 6.666
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 2199.684,
+   "end_us": 2202.641,
+   "busy_us": 2.37
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 2201.107,
+   "end_us": 2203.057,
+   "busy_us": 0.351
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 2205.196,
+   "end_us": 2205.235,
+   "busy_us": 0.039
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "hbm_dma",
+   "start_us": 2205.684,
+   "end_us": 2226.755,
+   "busy_us": 5.303
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "vector",
+   "start_us": 2207.674,
+   "end_us": 2226.626,
+   "busy_us": 10.758
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "tensor",
+   "start_us": 2208.047,
+   "end_us": 2226.086,
+   "busy_us": 17.939
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "hbm_dma",
+   "start_us": 2211.044,
+   "end_us": 2240.291,
+   "busy_us": 16.413
+  },
+  {
+   "component": "collective",
+   "engine_class": "tensor",
+   "start_us": 2223.049,
+   "end_us": 2223.75,
+   "busy_us": 0.584
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "scalar",
+   "start_us": 2226.127,
+   "end_us": 2226.318,
+   "busy_us": 0.191
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 2230.724,
+   "end_us": 2230.763,
+   "busy_us": 0.039
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 2231.273,
+   "end_us": 2231.873,
+   "busy_us": 0.444
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 2231.917,
+   "end_us": 2231.96,
+   "busy_us": 0.043
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 2236.342,
+   "end_us": 2244.116,
+   "busy_us": 3.822
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "vector",
+   "start_us": 2238.442,
+   "end_us": 2258.983,
+   "busy_us": 12.305
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "scalar",
+   "start_us": 2238.897,
+   "end_us": 2268.067,
+   "busy_us": 27.712
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "vector",
+   "start_us": 2248.044,
+   "end_us": 2254.7,
+   "busy_us": 3.81
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "tensor",
+   "start_us": 2248.509,
+   "end_us": 2253.996,
+   "busy_us": 4.06
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 2251.197,
+   "end_us": 2253.918,
+   "busy_us": 1.543
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 2254.459,
+   "end_us": 2260.436,
+   "busy_us": 5.977
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "hbm_dma",
+   "start_us": 2261.263,
+   "end_us": 2261.351,
+   "busy_us": 0.088
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "vector",
+   "start_us": 2262.141,
+   "end_us": 2268.309,
+   "busy_us": 3.647
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "tensor",
+   "start_us": 2262.606,
+   "end_us": 2267.889,
+   "busy_us": 4.052
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "hbm_dma",
+   "start_us": 2267.696,
+   "end_us": 2268.437,
+   "busy_us": 0.264
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 2270.91,
+   "end_us": 2270.949,
+   "busy_us": 0.039
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "hbm_dma",
+   "start_us": 2272.677,
+   "end_us": 2284.976,
+   "busy_us": 5.865
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "vector",
+   "start_us": 2274.664,
+   "end_us": 2294.47,
+   "busy_us": 10.738
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "tensor",
+   "start_us": 2275.034,
+   "end_us": 2293.837,
+   "busy_us": 17.79
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 2283.84,
+   "end_us": 2309.37,
+   "busy_us": 18.215
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "hbm_dma",
+   "start_us": 2290.166,
+   "end_us": 2294.594,
+   "busy_us": 0.19
+  },
+  {
+   "component": "collective",
+   "engine_class": "tensor",
+   "start_us": 2290.776,
+   "end_us": 2291.485,
+   "busy_us": 0.591
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 2296.5,
+   "end_us": 2296.539,
+   "busy_us": 0.039
+  },
+  {
+   "component": "collective",
+   "engine_class": "gpsimd",
+   "start_us": 2297.893,
+   "end_us": 2298.117,
+   "busy_us": 0.224
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 2298.954,
+   "end_us": 2298.997,
+   "busy_us": 0.043
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 2298.976,
+   "end_us": 2299.662,
+   "busy_us": 0.686
+  },
+  {
+   "component": "collective",
+   "engine_class": "collective",
+   "start_us": 2299.377,
+   "end_us": 2330.312,
+   "busy_us": 30.935
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 2330.72,
+   "end_us": 2331.28,
+   "busy_us": 0.418
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 2332.805,
+   "end_us": 2339.003,
+   "busy_us": 6.198
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 2334.057,
+   "end_us": 2339.427,
+   "busy_us": 3.154
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 2334.55,
+   "end_us": 2338.475,
+   "busy_us": 0.758
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 2335.15,
+   "end_us": 2346.409,
+   "busy_us": 7.077
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 2335.531,
+   "end_us": 2346.831,
+   "busy_us": 8.402
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "tensor",
+   "start_us": 2336.27,
+   "end_us": 2336.544,
+   "busy_us": 0.274
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "vector",
+   "start_us": 2336.611,
+   "end_us": 2336.785,
+   "busy_us": 0.174
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 2338.446,
+   "end_us": 2340.595,
+   "busy_us": 2.088
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 2344.977,
+   "end_us": 2346.94,
+   "busy_us": 1.963
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 2346.101,
+   "end_us": 2361.656,
+   "busy_us": 14.789
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 2347.284,
+   "end_us": 2362.053,
+   "busy_us": 9.263
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 2347.383,
+   "end_us": 2350.28,
+   "busy_us": 2.891
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 2351.81,
+   "end_us": 2353.249,
+   "busy_us": 1.414
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 2356.87,
+   "end_us": 2361.915,
+   "busy_us": 1.53
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "tensor",
+   "start_us": 2361.286,
+   "end_us": 2430.455,
+   "busy_us": 64.87
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "scalar",
+   "start_us": 2363.795,
+   "end_us": 2394.681,
+   "busy_us": 14.328
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 2367.02,
+   "end_us": 2367.108,
+   "busy_us": 0.088
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 2372.2,
+   "end_us": 2374.878,
+   "busy_us": 0.176
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 2379.97,
+   "end_us": 2382.648,
+   "busy_us": 0.176
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 2387.74,
+   "end_us": 2394.806,
+   "busy_us": 0.264
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 2390.36,
+   "end_us": 2397.782,
+   "busy_us": 5.106
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 2391.91,
+   "end_us": 2398.127,
+   "busy_us": 2.86
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 2394.117,
+   "end_us": 2397.929,
+   "busy_us": 1.618
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "scalar",
+   "start_us": 2399.722,
+   "end_us": 2431.094,
+   "busy_us": 14.328
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 2404.241,
+   "end_us": 2410.803,
+   "busy_us": 0.263
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 2415.896,
+   "end_us": 2418.574,
+   "busy_us": 0.175
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 2424.991,
+   "end_us": 2437.867,
+   "busy_us": 9.468
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 2426.425,
+   "end_us": 2427.121,
+   "busy_us": 0.696
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 2426.542,
+   "end_us": 2436.647,
+   "busy_us": 6.641
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 2427.153,
+   "end_us": 2438.923,
+   "busy_us": 2.193
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 2427.651,
+   "end_us": 2431.219,
+   "busy_us": 0.264
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 2432.66,
+   "end_us": 2440.406,
+   "busy_us": 6.28
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "tensor",
+   "start_us": 2435.791,
+   "end_us": 2501.444,
+   "busy_us": 63.479
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "scalar",
+   "start_us": 2437.305,
+   "end_us": 2502.083,
+   "busy_us": 28.059
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 2444.415,
+   "end_us": 2449.683,
+   "busy_us": 0.264
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 2456.069,
+   "end_us": 2458.747,
+   "busy_us": 0.176
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 2460.848,
+   "end_us": 2471.366,
+   "busy_us": 5.724
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 2461.977,
+   "end_us": 2462.397,
+   "busy_us": 0.42
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 2462.438,
+   "end_us": 2471.811,
+   "busy_us": 3.628
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "vector",
+   "start_us": 2465.709,
+   "end_us": 2466.301,
+   "busy_us": 0.592
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 2466.129,
+   "end_us": 2469.181,
+   "busy_us": 0.264
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 2467.689,
+   "end_us": 2471.243,
+   "busy_us": 1.281
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 2468.852,
+   "end_us": 2470.277,
+   "busy_us": 1.392
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 2474.925,
+   "end_us": 2482.783,
+   "busy_us": 0.264
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 2484.377,
+   "end_us": 2484.601,
+   "busy_us": 0.224
+  },
+  {
+   "component": "collective",
+   "engine_class": "gpsimd",
+   "start_us": 2484.902,
+   "end_us": 2485.13,
+   "busy_us": 0.228
+  },
+  {
+   "component": "collective",
+   "engine_class": "collective",
+   "start_us": 2486.356,
+   "end_us": 2641.437,
+   "busy_us": 150.872
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 2490.465,
+   "end_us": 2494.439,
+   "busy_us": 0.264
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 2496.539,
+   "end_us": 2496.761,
+   "busy_us": 0.222
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 2497.634,
+   "end_us": 2497.809,
+   "busy_us": 0.175
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 2499.962,
+   "end_us": 2502.208,
+   "busy_us": 0.175
+  },
+  {
+   "component": "out_proj",
+   "engine_class": "vector",
+   "start_us": 2501.519,
+   "end_us": 2501.693,
+   "busy_us": 0.174
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 2503.906,
+   "end_us": 2509.164,
+   "busy_us": 0.446
+  },
+  {
+   "component": "collective",
+   "engine_class": "gpsimd",
+   "start_us": 2504.43,
+   "end_us": 2504.652,
+   "busy_us": 0.222
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 2532.523,
+   "end_us": 2544.646,
+   "busy_us": 1.669
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 2534.557,
+   "end_us": 2574.035,
+   "busy_us": 37.612
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 2535.804,
+   "end_us": 2571.268,
+   "busy_us": 19.887
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 2537.216,
+   "end_us": 2548.191,
+   "busy_us": 1.815
+  },
+  {
+   "component": "collective",
+   "engine_class": "gpsimd",
+   "start_us": 2539.221,
+   "end_us": 2539.44,
+   "busy_us": 0.219
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 2539.986,
+   "end_us": 2547.924,
+   "busy_us": 4.662
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 2545.905,
+   "end_us": 2548.862,
+   "busy_us": 0.289
+  },
+  {
+   "component": "norm",
+   "engine_class": "vector",
+   "start_us": 2548.099,
+   "end_us": 2554.283,
+   "busy_us": 5.89
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 2556.007,
+   "end_us": 2565.386,
+   "busy_us": 4.911
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 2559.549,
+   "end_us": 2566.1,
+   "busy_us": 1.394
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 2562.355,
+   "end_us": 2565.519,
+   "busy_us": 0.279
+  },
+  {
+   "component": "norm",
+   "engine_class": "vector",
+   "start_us": 2565.291,
+   "end_us": 2571.339,
+   "busy_us": 5.811
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 2571.245,
+   "end_us": 2571.78,
+   "busy_us": 0.535
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 2578.58,
+   "end_us": 2580.27,
+   "busy_us": 1.69
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 2578.587,
+   "end_us": 2578.966,
+   "busy_us": 0.379
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 2588.315,
+   "end_us": 2590.107,
+   "busy_us": 1.058
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 2590.346,
+   "end_us": 2690.449,
+   "busy_us": 89.208
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 2591.597,
+   "end_us": 2639.747,
+   "busy_us": 28.011
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 2594.718,
+   "end_us": 2599.394,
+   "busy_us": 4.55
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 2595.83,
+   "end_us": 2596.15,
+   "busy_us": 0.32
+  },
+  {
+   "component": "norm",
+   "engine_class": "vector",
+   "start_us": 2599.303,
+   "end_us": 2605.388,
+   "busy_us": 5.849
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 2602.21,
+   "end_us": 2604.476,
+   "busy_us": 0.279
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 2602.907,
+   "end_us": 2616.102,
+   "busy_us": 1.822
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 2607.613,
+   "end_us": 2615.832,
+   "busy_us": 4.76
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 2613.824,
+   "end_us": 2616.776,
+   "busy_us": 0.278
+  },
+  {
+   "component": "norm",
+   "engine_class": "vector",
+   "start_us": 2616.013,
+   "end_us": 2621.979,
+   "busy_us": 5.888
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 2624.153,
+   "end_us": 2632.027,
+   "busy_us": 4.842
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 2627.649,
+   "end_us": 2632.747,
+   "busy_us": 1.391
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 2628.99,
+   "end_us": 2632.161,
+   "busy_us": 0.279
+  },
+  {
+   "component": "norm",
+   "engine_class": "vector",
+   "start_us": 2631.937,
+   "end_us": 2638.065,
+   "busy_us": 5.892
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 2638.163,
+   "end_us": 2640.022,
+   "busy_us": 0.758
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 2641.844,
+   "end_us": 2643.955,
+   "busy_us": 1.268
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 2645.11,
+   "end_us": 2690.873,
+   "busy_us": 27.366
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 2647.658,
+   "end_us": 2671.978,
+   "busy_us": 3.345
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 2648.693,
+   "end_us": 2654.642,
+   "busy_us": 4.541
+  },
+  {
+   "component": "norm",
+   "engine_class": "vector",
+   "start_us": 2654.547,
+   "end_us": 2660.594,
+   "busy_us": 5.81
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 2655.115,
+   "end_us": 2658.069,
+   "busy_us": 0.279
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 2663.346,
+   "end_us": 2671.26,
+   "busy_us": 4.836
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 2668.229,
+   "end_us": 2671.394,
+   "busy_us": 0.278
+  },
+  {
+   "component": "norm",
+   "engine_class": "vector",
+   "start_us": 2671.168,
+   "end_us": 2677.215,
+   "busy_us": 5.812
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 2679.602,
+   "end_us": 2686.756,
+   "busy_us": 1.398
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 2679.892,
+   "end_us": 2686.531,
+   "busy_us": 4.775
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 2684.523,
+   "end_us": 2687.222,
+   "busy_us": 0.279
+  },
+  {
+   "component": "norm",
+   "engine_class": "vector",
+   "start_us": 2686.664,
+   "end_us": 2806.532,
+   "busy_us": 91.07
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 2692.473,
+   "end_us": 2695.254,
+   "busy_us": 0.268
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "sync",
+   "start_us": 2692.96,
+   "end_us": 2693.022,
+   "busy_us": 0.062
+  },
+  {
+   "component": "norm",
+   "engine_class": "scalar",
+   "start_us": 2695.531,
+   "end_us": 2707.288,
+   "busy_us": 8.747
+  },
+  {
+   "component": "norm",
+   "engine_class": "hbm_dma",
+   "start_us": 2698.138,
+   "end_us": 2704.102,
+   "busy_us": 0.464
+  },
+  {
+   "component": "norm",
+   "engine_class": "scalar",
+   "start_us": 2712.401,
+   "end_us": 2727.563,
+   "busy_us": 14.652
+  },
+  {
+   "component": "norm",
+   "engine_class": "hbm_dma",
+   "start_us": 2712.413,
+   "end_us": 2717.837,
+   "busy_us": 0.567
+  },
+  {
+   "component": "norm",
+   "engine_class": "hbm_dma",
+   "start_us": 2724.924,
+   "end_us": 2725.017,
+   "busy_us": 0.093
+  },
+  {
+   "component": "norm",
+   "engine_class": "hbm_dma",
+   "start_us": 2730.902,
+   "end_us": 2750.126,
+   "busy_us": 3.294
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 2732.307,
+   "end_us": 2732.35,
+   "busy_us": 0.043
+  },
+  {
+   "component": "norm",
+   "engine_class": "scalar",
+   "start_us": 2732.972,
+   "end_us": 2758.051,
+   "busy_us": 22.175
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 2734.255,
+   "end_us": 2734.53,
+   "busy_us": 0.275
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "hbm_dma",
+   "start_us": 2738.33,
+   "end_us": 2739.242,
+   "busy_us": 0.912
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 2742.921,
+   "end_us": 2743.031,
+   "busy_us": 0.11
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "hbm_dma",
+   "start_us": 2745.882,
+   "end_us": 2747.992,
+   "busy_us": 2.11
+  },
+  {
+   "component": "norm",
+   "engine_class": "hbm_dma",
+   "start_us": 2756.696,
+   "end_us": 2756.789,
+   "busy_us": 0.093
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 2757.952,
+   "end_us": 2758.095,
+   "busy_us": 0.143
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 2761.757,
+   "end_us": 2764.515,
+   "busy_us": 0.084
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "sync",
+   "start_us": 2762.067,
+   "end_us": 2762.135,
+   "busy_us": 0.068
+  },
+  {
+   "component": "norm",
+   "engine_class": "hbm_dma",
+   "start_us": 2762.18,
+   "end_us": 2762.576,
+   "busy_us": 0.304
+  },
+  {
+   "component": "norm",
+   "engine_class": "scalar",
+   "start_us": 2764.794,
+   "end_us": 2765.032,
+   "busy_us": 0.238
+  },
+  {
+   "component": "norm",
+   "engine_class": "gpsimd",
+   "start_us": 2765.147,
+   "end_us": 2765.506,
+   "busy_us": 0.359
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "hbm_dma",
+   "start_us": 2765.537,
+   "end_us": 2770.792,
+   "busy_us": 5.253
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 2766.027,
+   "end_us": 2778.586,
+   "busy_us": 9.088
+  },
+  {
+   "component": "norm",
+   "engine_class": "hbm_dma",
+   "start_us": 2767.637,
+   "end_us": 2767.74,
+   "busy_us": 0.103
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 2768.445,
+   "end_us": 2841.688,
+   "busy_us": 34.496
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 2771.362,
+   "end_us": 2784.322,
+   "busy_us": 9.486
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 2772.583,
+   "end_us": 2784.747,
+   "busy_us": 5.002
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 2773.791,
+   "end_us": 2785.061,
+   "busy_us": 0.713
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "hbm_dma",
+   "start_us": 2778.718,
+   "end_us": 2791.192,
+   "busy_us": 6.154
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 2783.622,
+   "end_us": 2835.155,
+   "busy_us": 28.362
+  },
+  {
+   "component": "norm",
+   "engine_class": "hbm_dma",
+   "start_us": 2783.815,
+   "end_us": 2784.117,
+   "busy_us": 0.196
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 2789.496,
+   "end_us": 2819.675,
+   "busy_us": 17.144
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 2790.743,
+   "end_us": 2805.491,
+   "busy_us": 5.621
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 2791.718,
+   "end_us": 2794.843,
+   "busy_us": 0.262
+  },
+  {
+   "component": "norm",
+   "engine_class": "hbm_dma",
+   "start_us": 2794.153,
+   "end_us": 2794.25,
+   "busy_us": 0.097
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 2801.964,
+   "end_us": 2821.246,
+   "busy_us": 1.143
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 2810.77,
+   "end_us": 2821.12,
+   "busy_us": 5.048
+  },
+  {
+   "component": "norm",
+   "engine_class": "vector",
+   "start_us": 2812.72,
+   "end_us": 2829.977,
+   "busy_us": 8.108
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 2825.054,
+   "end_us": 2841.269,
+   "busy_us": 11.274
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 2826.463,
+   "end_us": 2830.006,
+   "busy_us": 2.807
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 2828.511,
+   "end_us": 2830.132,
+   "busy_us": 0.263
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 2835.556,
+   "end_us": 2841.413,
+   "busy_us": 2.771
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 2835.977,
+   "end_us": 2841.876,
+   "busy_us": 0.439
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 2844.03,
+   "end_us": 2844.069,
+   "busy_us": 0.039
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "hbm_dma",
+   "start_us": 2844.334,
+   "end_us": 2853.969,
+   "busy_us": 9.249
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "vector",
+   "start_us": 2848.316,
+   "end_us": 2992.14,
+   "busy_us": 125.347
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "tensor",
+   "start_us": 2848.687,
+   "end_us": 2991.583,
+   "busy_us": 137.624
+  },
+  {
+   "component": "collective",
+   "engine_class": "tensor",
+   "start_us": 2862.568,
+   "end_us": 2863.19,
+   "busy_us": 0.535
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "hbm_dma",
+   "start_us": 2862.952,
+   "end_us": 2870.647,
+   "busy_us": 2.985
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 2868.47,
+   "end_us": 2869.17,
+   "busy_us": 0.7
+  },
+  {
+   "component": "collective",
+   "engine_class": "vector",
+   "start_us": 2868.483,
+   "end_us": 2868.806,
+   "busy_us": 0.323
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "tensor",
+   "start_us": 2873.208,
+   "end_us": 2873.83,
+   "busy_us": 0.533
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "hbm_dma",
+   "start_us": 2879.603,
+   "end_us": 2928.128,
+   "busy_us": 14.933
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 2885.935,
+   "end_us": 2886.161,
+   "busy_us": 0.226
+  },
+  {
+   "component": "collective",
+   "engine_class": "vector",
+   "start_us": 2900.9,
+   "end_us": 2901.223,
+   "busy_us": 0.323
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "tensor",
+   "start_us": 2906.406,
+   "end_us": 2907.062,
+   "busy_us": 0.541
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 2908.715,
+   "end_us": 2909.432,
+   "busy_us": 0.717
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "tensor",
+   "start_us": 2912.745,
+   "end_us": 2913.351,
+   "busy_us": 0.524
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 2921.915,
+   "end_us": 2922.527,
+   "busy_us": 0.612
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "hbm_dma",
+   "start_us": 2928.124,
+   "end_us": 2930.256,
+   "busy_us": 2.132
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "vector",
+   "start_us": 2933.756,
+   "end_us": 2934.351,
+   "busy_us": 0.595
+  },
+  {
+   "component": "collective",
+   "engine_class": "vector",
+   "start_us": 2935.791,
+   "end_us": 2936.386,
+   "busy_us": 0.595
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "hbm_dma",
+   "start_us": 2952.865,
+   "end_us": 2993.257,
+   "busy_us": 12.566
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "vector",
+   "start_us": 2958.144,
+   "end_us": 2958.677,
+   "busy_us": 0.533
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "scalar",
+   "start_us": 2991.624,
+   "end_us": 2991.815,
+   "busy_us": 0.191
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "hbm_dma",
+   "start_us": 2991.667,
+   "end_us": 2999.622,
+   "busy_us": 2.115
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 2997.894,
+   "end_us": 2997.939,
+   "busy_us": 0.045
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 2998.199,
+   "end_us": 3012.892,
+   "busy_us": 4.959
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 3000.25,
+   "end_us": 3007.315,
+   "busy_us": 6.382
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 3001.503,
+   "end_us": 3002.1,
+   "busy_us": 0.597
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 3009.004,
+   "end_us": 3012.868,
+   "busy_us": 1.847
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 3009.519,
+   "end_us": 3013.729,
+   "busy_us": 1.079
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "hbm_dma",
+   "start_us": 3009.88,
+   "end_us": 3010.55,
+   "busy_us": 0.67
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "vector",
+   "start_us": 3012.687,
+   "end_us": 3028.636,
+   "busy_us": 11.015
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "scalar",
+   "start_us": 3013.048,
+   "end_us": 3265.504,
+   "busy_us": 225.059
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 3013.392,
+   "end_us": 3013.395,
+   "busy_us": 0.003
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "vector",
+   "start_us": 3033.132,
+   "end_us": 3043.997,
+   "busy_us": 7.046
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "tensor",
+   "start_us": 3033.596,
+   "end_us": 3043.255,
+   "busy_us": 6.478
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 3037.274,
+   "end_us": 3044.517,
+   "busy_us": 5.976
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 3040.127,
+   "end_us": 3041.866,
+   "busy_us": 1.131
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 3040.353,
+   "end_us": 3045.282,
+   "busy_us": 2.256
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "hbm_dma",
+   "start_us": 3042.41,
+   "end_us": 3044.295,
+   "busy_us": 0.263
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "vector",
+   "start_us": 3042.464,
+   "end_us": 3056.235,
+   "busy_us": 10.517
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "hbm_dma",
+   "start_us": 3050.029,
+   "end_us": 3050.117,
+   "busy_us": 0.088
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "vector",
+   "start_us": 3060.519,
+   "end_us": 3072.837,
+   "busy_us": 6.771
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "tensor",
+   "start_us": 3060.984,
+   "end_us": 3073.815,
+   "busy_us": 8.092
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 3067.747,
+   "end_us": 3075.228,
+   "busy_us": 6.823
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 3071.535,
+   "end_us": 3076.456,
+   "busy_us": 2.384
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 3071.709,
+   "end_us": 3072.684,
+   "busy_us": 0.975
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "hbm_dma",
+   "start_us": 3072.648,
+   "end_us": 3077.097,
+   "busy_us": 0.352
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "vector",
+   "start_us": 3074.104,
+   "end_us": 3087.707,
+   "busy_us": 10.385
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "vector",
+   "start_us": 3093.094,
+   "end_us": 3103.288,
+   "busy_us": 6.816
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "tensor",
+   "start_us": 3093.559,
+   "end_us": 3102.981,
+   "busy_us": 6.964
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 3098.54,
+   "end_us": 3106.641,
+   "busy_us": 6.882
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 3101.861,
+   "end_us": 3106.263,
+   "busy_us": 2.114
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 3103.198,
+   "end_us": 3107.395,
+   "busy_us": 1.553
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "hbm_dma",
+   "start_us": 3103.393,
+   "end_us": 3105.029,
+   "busy_us": 0.262
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "vector",
+   "start_us": 3105.712,
+   "end_us": 3121.904,
+   "busy_us": 10.964
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "vector",
+   "start_us": 3126.4,
+   "end_us": 3135.261,
+   "busy_us": 7.016
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "tensor",
+   "start_us": 3126.864,
+   "end_us": 3134.841,
+   "busy_us": 6.328
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 3130.54,
+   "end_us": 3138.035,
+   "busy_us": 6.105
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "hbm_dma",
+   "start_us": 3131.763,
+   "end_us": 3136.858,
+   "busy_us": 0.352
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 3133.855,
+   "end_us": 3139.13,
+   "busy_us": 2.091
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 3135.716,
+   "end_us": 3138.016,
+   "busy_us": 1.581
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "vector",
+   "start_us": 3137.445,
+   "end_us": 3152.748,
+   "busy_us": 10.967
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "vector",
+   "start_us": 3159.919,
+   "end_us": 3167.383,
+   "busy_us": 6.504
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "tensor",
+   "start_us": 3160.383,
+   "end_us": 3166.921,
+   "busy_us": 6.355
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "hbm_dma",
+   "start_us": 3164.648,
+   "end_us": 3167.486,
+   "busy_us": 0.264
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 3165.123,
+   "end_us": 3172.021,
+   "busy_us": 6.53
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 3167.455,
+   "end_us": 3172.821,
+   "busy_us": 1.609
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "hbm_dma",
+   "start_us": 3167.585,
+   "end_us": 3172.98,
+   "busy_us": 2.826
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 3168.403,
+   "end_us": 3171.643,
+   "busy_us": 2.178
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "vector",
+   "start_us": 3171.092,
+   "end_us": 3187.332,
+   "busy_us": 10.65
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "hbm_dma",
+   "start_us": 3174.676,
+   "end_us": 3174.764,
+   "busy_us": 0.088
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "vector",
+   "start_us": 3191.828,
+   "end_us": 3200.871,
+   "busy_us": 6.87
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "tensor",
+   "start_us": 3192.293,
+   "end_us": 3200.221,
+   "busy_us": 5.835
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 3197.035,
+   "end_us": 3202.715,
+   "busy_us": 5.27
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "hbm_dma",
+   "start_us": 3197.191,
+   "end_us": 3200.999,
+   "busy_us": 0.176
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "hbm_dma",
+   "start_us": 3198.385,
+   "end_us": 3204.986,
+   "busy_us": 3.956
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 3199.283,
+   "end_us": 3204.209,
+   "busy_us": 1.56
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 3200.644,
+   "end_us": 3202.71,
+   "busy_us": 2.03
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "vector",
+   "start_us": 3202.45,
+   "end_us": 3218.72,
+   "busy_us": 11.045
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "vector",
+   "start_us": 3223.216,
+   "end_us": 3232.664,
+   "busy_us": 7.224
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "tensor",
+   "start_us": 3223.68,
+   "end_us": 3231.801,
+   "busy_us": 6.036
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 3227.36,
+   "end_us": 3235.714,
+   "busy_us": 6.562
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "hbm_dma",
+   "start_us": 3228.58,
+   "end_us": 3233.242,
+   "busy_us": 0.351
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 3230.663,
+   "end_us": 3235.794,
+   "busy_us": 1.674
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 3231.956,
+   "end_us": 3236.14,
+   "busy_us": 2.175
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "vector",
+   "start_us": 3235.705,
+   "end_us": 3250.632,
+   "busy_us": 11.012
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "hbm_dma",
+   "start_us": 3256.926,
+   "end_us": 3257.014,
+   "busy_us": 0.088
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "vector",
+   "start_us": 3257.803,
+   "end_us": 3265.57,
+   "busy_us": 6.401
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "tensor",
+   "start_us": 3258.267,
+   "end_us": 3264.921,
+   "busy_us": 6.225
+  },
+  {
+   "component": "mlp_act",
+   "engine_class": "hbm_dma",
+   "start_us": 3264.635,
+   "end_us": 3265.902,
+   "busy_us": 0.528
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 3269.827,
+   "end_us": 3269.866,
+   "busy_us": 0.039
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "hbm_dma",
+   "start_us": 3270.211,
+   "end_us": 3280.028,
+   "busy_us": 9.433
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "vector",
+   "start_us": 3274.293,
+   "end_us": 3418.353,
+   "busy_us": 124.855
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "tensor",
+   "start_us": 3274.662,
+   "end_us": 3417.791,
+   "busy_us": 137.776
+  },
+  {
+   "component": "collective",
+   "engine_class": "tensor",
+   "start_us": 3288.057,
+   "end_us": 3288.683,
+   "busy_us": 0.534
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "hbm_dma",
+   "start_us": 3288.451,
+   "end_us": 3296.096,
+   "busy_us": 2.958
+  },
+  {
+   "component": "collective",
+   "engine_class": "vector",
+   "start_us": 3293.954,
+   "end_us": 3294.256,
+   "busy_us": 0.302
+  },
+  {
+   "component": "attention",
+   "engine_class": "hbm_dma",
+   "start_us": 3293.966,
+   "end_us": 3294.662,
+   "busy_us": 0.696
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "tensor",
+   "start_us": 3298.635,
+   "end_us": 3299.26,
+   "busy_us": 0.534
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "hbm_dma",
+   "start_us": 3305.089,
+   "end_us": 3354.081,
+   "busy_us": 15.793
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 3313.661,
+   "end_us": 3313.888,
+   "busy_us": 0.227
+  },
+  {
+   "component": "collective",
+   "engine_class": "vector",
+   "start_us": 3326.157,
+   "end_us": 3326.45,
+   "busy_us": 0.293
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "tensor",
+   "start_us": 3331.469,
+   "end_us": 3332.08,
+   "busy_us": 0.527
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "hbm_dma",
+   "start_us": 3333.682,
+   "end_us": 3334.399,
+   "busy_us": 0.717
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "tensor",
+   "start_us": 3337.983,
+   "end_us": 3338.603,
+   "busy_us": 0.535
+  },
+  {
+   "component": "qkv_proj",
+   "engine_class": "vector",
+   "start_us": 3347.166,
+   "end_us": 3347.781,
+   "busy_us": 0.615
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "vector",
+   "start_us": 3355.085,
+   "end_us": 3355.639,
+   "busy_us": 0.554
+  },
+  {
+   "component": "collective",
+   "engine_class": "vector",
+   "start_us": 3360.825,
+   "end_us": 3361.424,
+   "busy_us": 0.599
+  },
+  {
+   "component": "mlp_up",
+   "engine_class": "vector",
+   "start_us": 3375.311,
+   "end_us": 3375.903,
+   "busy_us": 0.592
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 3375.529,
+   "end_us": 3383.759,
+   "busy_us": 0.457
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "hbm_dma",
+   "start_us": 3378.246,
+   "end_us": 3383.434,
+   "busy_us": 0.423
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "hbm_dma",
+   "start_us": 3389.467,
+   "end_us": 3419.433,
+   "busy_us": 11.984
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 3400.746,
+   "end_us": 3401.308,
+   "busy_us": 0.298
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 3413.07,
+   "end_us": 3413.109,
+   "busy_us": 0.039
+  },
+  {
+   "component": "collective",
+   "engine_class": "gpsimd",
+   "start_us": 3413.408,
+   "end_us": 3413.632,
+   "busy_us": 0.224
+  },
+  {
+   "component": "collective",
+   "engine_class": "collective",
+   "start_us": 3414.88,
+   "end_us": 3587.171,
+   "busy_us": 168.089
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 3416.727,
+   "end_us": 3416.95,
+   "busy_us": 0.223
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 3416.991,
+   "end_us": 3417.17,
+   "busy_us": 0.179
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 3417.295,
+   "end_us": 3417.832,
+   "busy_us": 0.294
+  },
+  {
+   "component": "mlp_down",
+   "engine_class": "scalar",
+   "start_us": 3417.832,
+   "end_us": 3418.01,
+   "busy_us": 0.178
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 3435.605,
+   "end_us": 3435.994,
+   "busy_us": 0.293
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 3435.618,
+   "end_us": 3436.725,
+   "busy_us": 0.55
+  },
+  {
+   "component": "collective",
+   "engine_class": "gpsimd",
+   "start_us": 3436.149,
+   "end_us": 3436.371,
+   "busy_us": 0.222
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 3466.131,
+   "end_us": 3467.57,
+   "busy_us": 1.027
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 3467.615,
+   "end_us": 3467.873,
+   "busy_us": 0.215
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 3468.135,
+   "end_us": 3473.967,
+   "busy_us": 5.832
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 3469.382,
+   "end_us": 3474.394,
+   "busy_us": 2.612
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 3472.412,
+   "end_us": 3473.421,
+   "busy_us": 0.76
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 3473.882,
+   "end_us": 3490.402,
+   "busy_us": 10.649
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 3475.883,
+   "end_us": 3490.921,
+   "busy_us": 10.693
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 3477.889,
+   "end_us": 3481.446,
+   "busy_us": 2.851
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 3480.755,
+   "end_us": 3483.89,
+   "busy_us": 3.135
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 3481.217,
+   "end_us": 3493.996,
+   "busy_us": 5.865
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 3481.677,
+   "end_us": 3484.433,
+   "busy_us": 2.756
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 3483.408,
+   "end_us": 3483.787,
+   "busy_us": 0.379
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 3487.882,
+   "end_us": 3491.347,
+   "busy_us": 2.669
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 3490.61,
+   "end_us": 3492.445,
+   "busy_us": 1.835
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 3492.095,
+   "end_us": 3493.345,
+   "busy_us": 1.25
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 3492.486,
+   "end_us": 3492.866,
+   "busy_us": 0.38
+  },
+  {
+   "component": "collective",
+   "engine_class": "gpsimd",
+   "start_us": 3493.098,
+   "end_us": 3493.317,
+   "busy_us": 0.219
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 3522.646,
+   "end_us": 3524.068,
+   "busy_us": 1.007
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 3524.719,
+   "end_us": 3527.834,
+   "busy_us": 3.115
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 3525.969,
+   "end_us": 3528.706,
+   "busy_us": 1.414
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 3527.923,
+   "end_us": 3528.303,
+   "busy_us": 0.38
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 3528.525,
+   "end_us": 3535.413,
+   "busy_us": 5.321
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 3530.525,
+   "end_us": 3535.914,
+   "busy_us": 5.389
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 3532.535,
+   "end_us": 3536.558,
+   "busy_us": 2.777
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 3535.603,
+   "end_us": 3540.994,
+   "busy_us": 5.391
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 3536.164,
+   "end_us": 3539.036,
+   "busy_us": 2.872
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 3536.922,
+   "end_us": 3541.638,
+   "busy_us": 3.375
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 3540.134,
+   "end_us": 3540.514,
+   "busy_us": 0.38
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 3540.424,
+   "end_us": 3547.193,
+   "busy_us": 4.928
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 3541.834,
+   "end_us": 3547.301,
+   "busy_us": 5.467
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 3543.969,
+   "end_us": 3547.978,
+   "busy_us": 3.048
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 3547.034,
+   "end_us": 3552.407,
+   "busy_us": 5.373
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 3547.94,
+   "end_us": 3555.405,
+   "busy_us": 3.171
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 3548.402,
+   "end_us": 3548.495,
+   "busy_us": 0.093
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 3549.816,
+   "end_us": 3554.274,
+   "busy_us": 2.724
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 3552.734,
+   "end_us": 3553.115,
+   "busy_us": 0.381
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 3553.653,
+   "end_us": 3560.173,
+   "busy_us": 5.256
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 3555.14,
+   "end_us": 3560.694,
+   "busy_us": 5.554
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 3557.655,
+   "end_us": 3561.119,
+   "busy_us": 2.668
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 3560.384,
+   "end_us": 3561.827,
+   "busy_us": 1.443
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 3560.881,
+   "end_us": 3563.749,
+   "busy_us": 2.868
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 3561.59,
+   "end_us": 3562.187,
+   "busy_us": 0.597
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 3561.869,
+   "end_us": 3562.25,
+   "busy_us": 0.381
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "hbm_dma",
+   "start_us": 3587.579,
+   "end_us": 3589.332,
+   "busy_us": 1.089
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 3588.956,
+   "end_us": 3589.059,
+   "busy_us": 0.103
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 3589.64,
+   "end_us": 3594.041,
+   "busy_us": 4.401
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 3590.889,
+   "end_us": 3595.088,
+   "busy_us": 1.848
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 3593.87,
+   "end_us": 3594.48,
+   "busy_us": 0.61
+  },
+  {
+   "component": "modulation",
+   "engine_class": "vector",
+   "start_us": 3594.907,
+   "end_us": 3622.884,
+   "busy_us": 16.39
+  },
+  {
+   "component": "modulation",
+   "engine_class": "tensor",
+   "start_us": 3596.907,
+   "end_us": 3622.463,
+   "busy_us": 16.862
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 3598.909,
+   "end_us": 3602.842,
+   "busy_us": 2.849
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 3602.154,
+   "end_us": 3605.179,
+   "busy_us": 3.025
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 3602.594,
+   "end_us": 3606.509,
+   "busy_us": 3.3
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 3602.967,
+   "end_us": 3605.724,
+   "busy_us": 2.757
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 3603.259,
+   "end_us": 3603.484,
+   "busy_us": 0.225
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 3604.698,
+   "end_us": 3605.077,
+   "busy_us": 0.379
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 3609.149,
+   "end_us": 3612.612,
+   "busy_us": 2.668
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 3611.877,
+   "end_us": 3615.143,
+   "busy_us": 3.266
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 3612.407,
+   "end_us": 3615.274,
+   "busy_us": 2.867
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 3612.954,
+   "end_us": 3615.77,
+   "busy_us": 2.816
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 3614.707,
+   "end_us": 3615.086,
+   "busy_us": 0.379
+  },
+  {
+   "component": "modulation",
+   "engine_class": "scalar",
+   "start_us": 3619.149,
+   "end_us": 3622.612,
+   "busy_us": 2.557
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "tensor",
+   "start_us": 3620.817,
+   "end_us": 3627.706,
+   "busy_us": 1.748
+  },
+  {
+   "component": "modulation",
+   "engine_class": "hbm_dma",
+   "start_us": 3620.833,
+   "end_us": 3624.305,
+   "busy_us": 2.88
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "scalar",
+   "start_us": 3622.021,
+   "end_us": 3627.64,
+   "busy_us": 0.666
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "vector",
+   "start_us": 3622.514,
+   "end_us": 3627.57,
+   "busy_us": 0.468
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "gpsimd",
+   "start_us": 3623.563,
+   "end_us": 3627.715,
+   "busy_us": 0.987
+  },
+  {
+   "component": "unattributed",
+   "engine_class": "sync",
+   "start_us": 3625.944,
+   "end_us": 3629.638,
+   "busy_us": 1.866
+  }
+ ],
+ "dge_notifs": true
+}
