@@ -56,8 +56,8 @@ in one DiT block, how long HBM, TensorE, VectorE, PSUM take." Reviewed by a Fabl
   `/mnt/nvme/difflet-prof/<key>/<arm>/`; NTFF, parquet and NEFF stay there. `run_all.sh` checks
   `df --output=avail -BG /` before every lane; below 60 GB it writes `FAILED disk` and stops
   starting lanes. Never delete a cache without the user's approval.
-- Compile caches: `/home/ubuntu/difflet-cache-fp8` (Qwen-Image, FLUX), `/home/ubuntu/difflet-cache-video`
-  (video models). Wan bf16 dumps set `DIFFLET_NKI_TRACE_CACHE=1` once Task 1 has confirmed it is
+- Compile caches: `/home/ubuntu/difflet-cache-fp8` (Qwen-Image), `/home/ubuntu/difflet-cache-video`
+  (FLUX and the video models; ruling R7). Wan bf16 dumps set `DIFFLET_NKI_TRACE_CACHE=1` once Task 1 has confirmed it is
   not part of the compile-cache key; otherwise budget ~10 min per Wan bf16 dump.
 - Supervision: `.claude/skills/difflet-device-verify/scripts/supervise.sh` in a Monitor (not the
   repo-root `scripts/supervise.sh`, which does not restart). Each lane ends in one terminal file
