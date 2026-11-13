@@ -58,7 +58,7 @@ the denoise loop by the step count. The compile cache is per key (ruling R7): `q
   kind}`; `neff_name` is the file name the dump gives it (`neff_<model id>_vnc_0.neff`), the key
   `system_summary.json` uses (ruling R2).
 - `system_summary.json` (`system_profile.py`), all per step: `{blocks, step: {wall_ms, steps,
-  gap_s}, neffs: {<neff_name>: {execs_per_step, in_model_median_ms}}, non_block_ms, host_gap_ms,
+  gap_s, dump_steps}, neffs: {<neff_name>: {execs_per_step, in_model_median_ms}}, non_block_ms, host_gap_ms,
   cc_running: {n, total_ms}}`. The denoise loop is the last burst of block executions, none more
   than 200 ms apart (measured: within a loop at most 12.5 ms, Qwen-Image's step boundary; from
   the load's warm-up forward to the loop at least 1003 ms, Qwen-Image's prompt encoding), from
@@ -69,6 +69,14 @@ the denoise loop by the step count. The compile cache is per key (ruling R7): `q
   checks the pid order. If the dump log shows rank 0's process dropping system-profile events
   (full ring buffer), the lane fails: rerun the dump (remove `dump.log`) with
   `NEURON_RT_INSPECT_SYS_TRACE_MAX_EVENTS_PER_NC` raised.
+- **The dump's own step lines check the window (ruling R9).** HunyuanVideo-1.5's orchestrator
+  prints `denoise <s> s, <N> steps`; the torchrun and FLUX orchestrators print `step median <ms>
+  ms (n=<N - 1>, ...)` for two steps or more (Qwen-Image's, LTX-2's) and no step line at one
+  step (FLUX, HV1, Wan: `dump_steps` null, unchecked). The lane fails `FAILED system profile:
+  ...` when the dump ran another step count than the lane divides by, or when the window is
+  shorter than the dump's N - 1 step intervals (a host gap over 200 ms inside the loop would
+  leave a step outside it). The Task 1 smokes pass: Qwen-Image 2 steps, window 598.1 ms against
+  one 305.1 ms interval; HV1.5 1 step; FLUX unchecked.
 
 ## `signatures.json`
 
@@ -132,6 +140,8 @@ was then killed (below) and the lane rerun warm.
   as long per execution (HunyuanVideo at 544x960x129) would likely exceed it, and a view that
   times out fails the lane and its rerun captures again (`summary.json` is the block's
   done-marker), so each block view now runs under `timeout 2700` (ruling R8; the capture keeps
-  1200 s, rank 0's system-profile view 900 s: it took 2-21 s).
+  1200 s, rank 0's system-profile view 900 s: it took 2-21 s). Each of the three is killed 60 s
+  after its TERM if it ignores it (`timeout -k 60`, ruling R9): a hung capture never holds the
+  device past 21 min.
 - **Do not edit `capture.sh` while a lane runs it.** bash reads a script as it goes, at byte
   offsets: an edit under a running lane makes it parse the new file from the old offset.

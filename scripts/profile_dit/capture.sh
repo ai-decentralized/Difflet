@@ -130,7 +130,8 @@ on_device() {  # on_device <cmd...>: the lane's tag, its CPU set
 view() {  # view <ntff> <args...>: blk $B's NTFF read on the lane's CPUs (no device: no require_idle);
           # 2700 s (ruling R8): HV1.5's 2.17 GB NTFFs took 481-555 s per view, longer blocks more
   local ntff=$1; shift
-  ( cd "$B" && taskset -c "$CPUS" timeout 2700 neuron-explorer view -n block.neff -s "$ntff" "$@" ) \
+  ( cd "$B" && taskset -c "$CPUS" timeout -k 60 2700 neuron-explorer view -n block.neff -s "$ntff" \
+      "$@" ) \
     2>> "$B/view.err"
 }
 
@@ -209,12 +210,15 @@ if [ ! -s "$A/system_summary.json" ]; then
     fail "system profile: rank 0 dropped events (dump.log)"
   fi
   note "$A" "system profile start"
-  taskset -c "$CPUS" timeout 900 neuron-explorer view -d "$R0" --output-format json \
+  taskset -c "$CPUS" timeout -k 60 900 neuron-explorer view -d "$R0" --output-format json \
     --output-file "$A/system.json" > "$A/system_view.log" 2>&1 || fail "system view exit $?"
   names=()
   for c in "${SEL[@]:0:$GROUP0}"; do names+=("$(basename "$(cut -d' ' -f3 <<< "$c")")"); done
-  "$PY" "$HERE/system_profile.py" "$A/system.json" "$R0" "$STEPS" "${names[@]}" \
-    > "$A/system_summary.json.tmp" 2>> "$A/lane.log" || fail "system_profile.py exit $?"
+  # the dump's own step count and step intervals check the loop window (ruling R9)
+  if ! "$PY" "$HERE/system_profile.py" "$A/system.json" "$R0" "$STEPS" "$A/dump.log" "${names[@]}" \
+      > "$A/system_summary.json.tmp" 2> "$A/system_profile.err"; then
+    fail "system profile: $(tail -1 "$A/system_profile.err")"
+  fi
   mv "$A/system_summary.json.tmp" "$A/system_summary.json"
   note "$A" "system profile end"
 fi
@@ -233,7 +237,7 @@ for c in "${SEL[@]}"; do
     note "$A" "blk$i capture start"
     # --enable-dge-notifs: the dynamic DMAs traced (without it the profile warns its DMA values
     # may be inaccurate); same total_time, no slower (README, Task 1 smokes)
-    ( cd "$B" && on_device timeout 1200 neuron-explorer capture -n block.neff \
+    ( cd "$B" && on_device timeout -k 60 1200 neuron-explorer capture -n block.neff \
         -s "$B/profile.ntff" --collectives-worker-count=$WORLD \
         --collectives-workers-per-node=$WORLD --collectives-worker-start-id=0 \
         --collectives-profile-id=0 --num-exec=8 --profile-nth-exec=4 --enable-dge-notifs \
