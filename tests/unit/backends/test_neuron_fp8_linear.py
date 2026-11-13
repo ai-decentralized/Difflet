@@ -18,6 +18,7 @@ from difflet.backends.neuron.core.application_base import (
     TorchNeuronApplicationBase,
     rank_weight_bytes,
 )
+from difflet.backends.neuron.ops_impl import fp8_kernels
 from difflet.backends.neuron.ops_impl import fp8_linear as Q
 from difflet.backends.neuron.ops_impl import linear as L
 from difflet.backends.neuron.ops_impl import parallel_mesh as pm
@@ -416,6 +417,47 @@ def test_prepare_kernel_lays_the_weight_out_and_drops_the_unpacked_one():
     assert "weight_packed" not in layer.state_dict()
     layer.prepare_kernel_()  # idempotent
     assert Q.prepare_fp8_kernels_(nn.Sequential(layer)) == 1
+
+
+def test_padded_rows_is_the_next_multiple_of_8():
+    assert fp8_kernels.M_MULTIPLE == 8
+    assert fp8_kernels.padded_rows(126) == 128  # LTX-2's audio tokens at the default shape
+    assert fp8_kernels.padded_rows(2 * 126) == 256
+    assert fp8_kernels.padded_rows(6144) == 6144  # its video tokens: already a multiple
+    assert fp8_kernels.padded_rows(1) == 8
+    assert fp8_kernels.padded_rows(8) == 8  # the smallest count the kernel takes
+    # HunyuanVideo-1.5's text and Wan+CP2's token counts: the padded M is sharded M // 2 per
+    # physical core under LNC2 (996 and 1172, not multiples of 8), probed correct on the device
+    # (fp8-bench/ltx2_probe/probe_mx_shapes_lnc2.json), so 8 is the whole rule.
+    assert fp8_kernels.padded_rows(1985) == 1992
+    assert fp8_kernels.padded_rows(2340) == 2344
+
+
+def test_mx_linear_pads_the_rows_to_a_multiple_of_8(monkeypatch):
+    # The kernel refuses a row count that is not a multiple of 8 (its F-dim rule); the op is
+    # faked with any row-wise function of the activation so the slice-back is checked exactly.
+    seen = []
+
+    def fake_op(x2, packed, scales):
+        seen.append(tuple(x2.shape))
+        assert x2.shape[0] % 8 == 0
+        return x2[:, :packed.shape[1]]
+
+    monkeypatch.setattr(fp8_kernels, "_MX_OP", fake_op)
+    packed = torch.zeros(64, 32, dtype=torch.int32)
+    scales = torch.zeros(64, 32, dtype=torch.uint8)
+    x = torch.randn(2, 126, 256).to(torch.bfloat16)
+    out = fp8_kernels.mx_linear(x, packed, scales)
+    assert out.shape == (2, 126, 32) and seen == [(256, 256)]  # 252 rows -> 256
+    assert torch.equal(out.reshape(-1, 32), x.reshape(-1, 256)[:, :32])
+    fp8_kernels.mx_linear(torch.randn(8, 256).to(torch.bfloat16), packed, scales)
+    assert seen[-1] == (8, 256)  # already a multiple: no pad
+    # A float32 activation is cast to bf16 before the pad and the output back after it: the
+    # padded kernel call is bf16 and the sliced result carries the activation's dtype.
+    x32 = torch.randn(126, 256)
+    out32 = fp8_kernels.mx_linear(x32, packed, scales)
+    assert out32.dtype == torch.float32 and seen[-1] == (128, 256)
+    assert torch.equal(out32, x32.to(torch.bfloat16)[:, :32].float())
 
 
 # ------------------------------------------------------------ the application base
