@@ -73,7 +73,9 @@ finished() {  # finished <lane dir>: FAILED, or DONE with every kept block analy
   esac
 }
 
-dumping() { running "$1" && ! grep -qx "dump exit 0" "$1/dump.log" 2>/dev/null; }
+# dumping <lane dir>: its dump is under way (capture.sh truncates dump.log as the dump starts, after
+# any wait for a dump slot, and ends it "dump exit <rc>")
+dumping() { running "$1" && [ -f "$1/dump.log" ] && ! grep -q "^dump exit " "$1/dump.log"; }
 
 cpus_of() {  # cpus_of <device>: its 12-thread slice (header)
   local lo=$(( ($1 < 8 ? 48 : 0) + 6 * ($1 % 8) ))

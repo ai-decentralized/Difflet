@@ -7,6 +7,9 @@ WORLD=4  # capture workers = world size = tp x cfg x cp, every key
 # One `neuron-explorer capture` at a time among our lanes, host-wide (ruling R17): a capture is a
 # measurement, so no other lane's replay runs beside it; dumps and views stay parallel.
 CAPTURE_LOCK=${CAPTURE_LOCK:-/mnt/nvme/difflet-prof/.capture.lock}
+# A heavy key's dump (HV1 544x960x129, Wan 81f, HV1.5 121f: 11-42 min if it compiles cold) holds
+# one of 4 slot locks <DUMP_SLOT>.1-4 (ruling R20): at most 4 such compiles at once host-wide.
+DUMP_SLOT=${DUMP_SLOT:-/mnt/nvme/difflet-prof/.dump-slot}
 
 note() {  # note <lane dir> <text...>: a timestamped line in the lane log
   local dir=$1; shift
@@ -38,6 +41,20 @@ require_idle() {  # require_idle <device> <lane dir>: kills the lane's leftover 
 
 cores_busy() {  # cores_busy <log>: the runtime refused the cores (failed_laneB's line)
   grep -qF 'Logical Neuron Core(s) not available' "$1"
+}
+
+dump_slot() {  # dump_slot <lane dir>: waits until it holds one of the 4 dump slots, on fd 7
+               # (give it back with `flock -u 7`)
+  local i
+  note "$1" "dump slot wait"
+  while :; do
+    for i in 1 2 3 4; do
+      exec 7>> "$DUMP_SLOT.$i"
+      if flock -n 7; then note "$1" "dump slot $i taken"; return 0; fi
+      exec 7>&-
+    done
+    sleep 2
+  done
 }
 
 capture_neff() {  # capture_neff <device> <lane dir> <blk dir> <cpus>: <blk dir>/block.neff replayed

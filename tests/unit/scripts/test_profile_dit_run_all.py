@@ -32,7 +32,8 @@ NVME_HUB = "/mnt/nvme/difflet-quant-bench-hub"
 #: capture.sh: one JSON line per run to CAPTURE_LOG (lane, device, cpus, the hub and trace-cache
 #: environment, the dump's start and end); the lane's n-th run ends as FAKE_OUTCOMES {"<key>
 #: <arm>": [outcome, ...]} says (default DONE), after FAKE_LANE_S seconds of "dump"; outcome
-#: "EXIT<rc>" exits rc with no STATUS written. The DISK_DROP_LANE lane's start creates DF_LOW_FILE.
+#: "EXIT<rc>" exits rc with no STATUS written; "WAIT" spends FAKE_LANE_S with no dump.log (a lane
+#: waiting for a dump slot) and ends DONE. The DISK_DROP_LANE lane's start creates DF_LOW_FILE.
 FAKE_CAPTURE = """#!{exe}
 import json, os, sys, time
 from pathlib import Path
@@ -51,8 +52,11 @@ if outcome.startswith("EXIT"):
     with open(log, "a") as f:
         f.write(json.dumps({{"lane": lane_id, "device": int(a["--device"]), "t0": t0}}) + "\\n")
     sys.exit(int(outcome[4:]))
+wait = outcome == "WAIT"  # FAKE_LANE_S waiting for a dump slot (no dump.log), a dump at once
+outcome = "DONE" if wait else outcome
 if outcome != "BUSY":
-    (lane / "dump.log").write_text("loading\\n")
+    if not wait:
+        (lane / "dump.log").write_text("loading\\n")
     time.sleep(float(os.environ.get("FAKE_LANE_S", "0")))
     (lane / "dump.log").write_text("loading\\ndump exit 0\\n")
     for i in range(1, {blocks!r}.get(a["--key"], 1) + 1):
@@ -404,6 +408,19 @@ def test_the_in_run_baseline_capture_runs_once_while_four_lanes_dump(tmp_path):
                                pytest.approx(0.7)}
     assert result["exec8"]["total_time_ms"] == pytest.approx(5.08)
     assert "baseline inrun: DONE" in (root / "RUN_DONE").read_text()
+
+
+@needs_tools
+def test_lanes_waiting_for_a_dump_slot_do_not_count_as_dumping(tmp_path):
+    """Ruling R20: a heavy lane waiting for a dump slot runs but has no dump.log yet; the in-run
+    baseline must wait for lanes that really dump."""
+    neff = tmp_path / "smoke.neff"
+    neff.write_bytes(b"neff")
+    done, root = _run_all(tmp_path, FAKE_LANE_S="1", BASELINE_NEFF=str(neff),
+                          FAKE_OUTCOMES=json.dumps({f"{k} {a}": ["WAIT"] for k, a in LANES}))
+    assert done.returncode == 0, done.stderr
+    assert not [x for x in _jsonl(tmp_path / "x_log") if x["argv"][0] == "capture"]
+    assert "baseline inrun: not run" in (root / "RUN_DONE").read_text()
 
 
 @needs_tools

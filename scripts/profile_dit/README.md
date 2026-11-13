@@ -97,6 +97,13 @@ the denoise loop by the step count. The compile cache is per key (ruling R7): `q
   capture's end, so no lane's replay runs beside another's; dumps and views stay parallel.
   `lane.log` shows the wait: `blk<i> capture start (waits for the capture lock)`, then `capture
   lock taken`.
+- **At most four heavy dumps at once, host-wide (ruling R20).** A `hunyuan_video_L`,
+  `wan21_official`, `wan22_official` or `hv15_official` dump (11-42 min should it compile cold)
+  first takes one of four slot locks `DUMP_SLOT.1-4` (`lib.sh`'s `dump_slot`, default
+  `/mnt/nvme/difflet-prof/.dump-slot`, polled every 2 s) and gives it back as the dump ends,
+  before its captures and views; `qwen_image`, `flux` and `ltx_2` dumps take none. `lane.log`
+  shows `dump slot wait`, then `dump slot <i> taken`; run_all counts a lane as dumping only once
+  its `dump.log` exists.
 - **Reruns** skip the dump once `dump.log` has `dump exit 0` and a block once its `summary.json`
   exists (written last). The signature check runs every time.
 - **HV1.5 (tp2 x CFG2):** ranks 2-3 are the second TP group; their candidates are compared by

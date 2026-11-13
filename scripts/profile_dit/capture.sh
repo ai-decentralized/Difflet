@@ -87,6 +87,8 @@ key_for() {  # key_for <key>: M, P, PROMPT, NEG and EXT as bench.sh's args_for (
   esac
   P=(--steps "$STEPS" "${P[@]}")
   if [ -n "$NEG" ]; then P+=(--negative-prompt "$NEG"); fi
+  # HEAVY: a cold compile of this shape takes 11-42 min; its dump holds a dump slot (ruling R20)
+  case $1 in wan21_official|wan22_official|hunyuan_video_L|hv15_official) HEAVY=1 ;; *) HEAVY= ;; esac
 }
 
 KEY= ARM= DEV= CPUS= OUT=
@@ -137,6 +139,7 @@ view() {  # view <ntff> <args...>: blk $B's NTFF read on the lane's CPUs (no dev
 
 # 1. dump
 if ! grep -qx "dump exit 0" "$A/dump.log" 2>/dev/null; then
+  if [ -n "$HEAVY" ]; then dump_slot "$A"; fi  # held for the dump only, not the captures
   require_idle "$DEV" "$A" || exit 0
   rm -rf "$A/dump" "$A/work"
   note "$A" "dump start"
@@ -146,6 +149,7 @@ if ! grep -qx "dump exit 0" "$A/dump.log" 2>/dev/null; then
       "$PY" -m difflet.cli.main generate --backend neuron "${M[@]}" "${QF[@]}" --cache-dir "$CACHE" \
       "${P[@]}" --prompt "$PROMPT" --output "$A/out.$EXT" --work-dir "$A/work" ) > "$A/dump.log" 2>&1
   rc=$?
+  if [ -n "$HEAVY" ]; then flock -u 7; exec 7>&-; fi  # a leftover child must not keep the slot
   echo "dump exit $rc" >> "$A/dump.log"
   note "$A" "dump end, exit $rc"
   if cores_busy "$A/dump.log"; then busy; fi
