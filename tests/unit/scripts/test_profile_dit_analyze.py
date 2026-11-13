@@ -178,12 +178,16 @@ def test_replay_spread_and_neff_hash_come_from_what_the_block_directory_has(tmp_
     out = run(tmp_path / "t1", [row("Tensor", 0, 1000)], total_time=1e-3, exec8=1.2e-3)
     assert (out["block_ms"], out["replay_spread_ms"], out["block_neff_sha256"]) == (
         pytest.approx(1.0), pytest.approx(0.2), "abc")
+    assert out["dge_notifs"] is True  # captured with --enable-dge-notifs unless source.json says not
     out = run(tmp_path / "hv1", [row("Tensor", 0, 1000)], source=False)  # last campaign's layout
-    assert out["replay_spread_ms"] is None
+    assert out["replay_spread_ms"] is None and out["dge_notifs"] is None
     assert out["block_neff_sha256"] == hashlib.sha256(b"neff").hexdigest()
     assert out["warnings"] == ["Missing additional dynamic DMA metadata"]
     (tmp_path / "hv1" / "block.neff").unlink()
     assert analyze.analyze(tmp_path / "hv1", "qwen_image")["block_neff_sha256"] is None
+    # ruling R22: captured again without --enable-dge-notifs after a notification queue overflow
+    (tmp_path / "t1" / "source.json").write_text(json.dumps({"sha256": "abc", "dge_notifs": False}))
+    assert analyze.analyze(tmp_path / "t1", "qwen_image")["dge_notifs"] is False
 
 
 def test_the_timeline_is_physical_core_0_in_execution_order_with_gaps_under_5_us_merged(tmp_path):
@@ -229,7 +233,7 @@ def test_the_cli_writes_breakdown_json_with_the_fields_the_page_reads(tmp_path):
         "engines_check", "attention_detail", "memory_bytes", "psum_readout_copy_ms",
         "psum_readout_fused_ms", "psum_readout_copy_ms_by_engine",
         "psum_readout_fused_ms_by_engine", "mfu", "mbu", "throttle", "other_share",
-        "unattributed_share", "warnings", "timeline"}
+        "unattributed_share", "warnings", "timeline", "dge_notifs"}
     summary_ms = out["engines_check"]["summary_ms"]
     assert summary_ms["dma_active_time"] == pytest.approx(0.3)
     assert {"static_dma_active_time", "hardware_dynamic_dma_active_time",

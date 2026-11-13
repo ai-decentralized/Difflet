@@ -219,6 +219,10 @@ def analyze(block_dir: Path, model: str) -> dict:
         "unattributed_share": unattributed_share,
         "warnings": pd.read_parquet(trace / "Warning.parquet").message.tolist(),
         "timeline": _timeline(rows, cc, block_ms),
+        # False: captured without --enable-dge-notifs after a notification queue overflow
+        # (ruling R22): the profile's own warning says its DMA values may be inaccurate
+        "dge_notifs": json.loads(source.read_text()).get("dge_notifs", True) if source.exists()
+        else None,
     }
 
 
