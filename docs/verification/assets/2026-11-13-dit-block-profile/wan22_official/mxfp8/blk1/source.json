@@ -1,0 +1,19 @@
+{
+ "neff_name": "neff_552416686560438_vnc_0.neff",
+ "sha256": "d14f25e0073d3b7a59ec0bd4c49df5defbffa6294519023385888e2ed45975cd",
+ "ranks": [
+  "/mnt/nvme/difflet-prof/run/wan22_official/mxfp8/dump/i-0882eb59ff5d391e1_pid_3821690/1794592668836336896/neff_552416686560438_vnc_0.neff",
+  "/mnt/nvme/difflet-prof/run/wan22_official/mxfp8/dump/i-0882eb59ff5d391e1_pid_3821691/1794592668836312068/neff_734447592529997_vnc_0.neff",
+  "/mnt/nvme/difflet-prof/run/wan22_official/mxfp8/dump/i-0882eb59ff5d391e1_pid_3821692/1794592676517459249/neff_401477521637228_vnc_0.neff",
+  "/mnt/nvme/difflet-prof/run/wan22_official/mxfp8/dump/i-0882eb59ff5d391e1_pid_3821693/1794592668837255498/neff_1109682061896477_vnc_0.neff"
+ ],
+ "kind": "block",
+ "per_rank": true,
+ "dge_notifs": true,
+ "sha256_by_rank": [
+  "d14f25e0073d3b7a59ec0bd4c49df5defbffa6294519023385888e2ed45975cd",
+  "d24f4eee45eb7ee5cea00b28719893f754ae2e160b343f6541692771230677f7",
+  "ba0b9ee2d47fb384b4fc37cc91f18b6872734158c8c55a68db6a9170ef659c59",
+  "11be39f76165a4a2a66ef90e3d0b70f68cecef6860ecda664f39f0ff7ca37c1d"
+ ]
+}

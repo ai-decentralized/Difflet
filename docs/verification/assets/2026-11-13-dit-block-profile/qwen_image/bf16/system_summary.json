@@ -1,0 +1,191 @@
+{
+ "blocks": [
+  "neff_850809986019497_vnc_0.neff"
+ ],
+ "step": {
+  "wall_ms": 300.316907,
+  "steps": 2,
+  "gap_s": 0.2,
+  "dump_steps": 2
+ },
+ "neffs": {
+  "neff_850809986019497_vnc_0.neff": {
+   "execs_per_step": 60,
+   "in_model_median_ms": 4.900332
+  },
+  "neff_727875142227667_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.290231
+  },
+  "neff_438129151030772_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.227902
+  },
+  "neff_247861059476268_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.185613
+  },
+  "neff_902078747326926_vnc_0.neff": {
+   "execs_per_step": 1,
+   "in_model_median_ms": 0.085061
+  },
+  "neff_428167640129497_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.160673
+  },
+  "neff_214596610739156_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.128719
+  },
+  "neff_338209659888850_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.122979
+  },
+  "neff_33209829825330_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.113444
+  },
+  "neff_900448187052890_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.100298
+  },
+  "neff_994553916799194_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.098758
+  },
+  "neff_892153797877804_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.088097
+  },
+  "neff_986121517443355_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.08588
+  },
+  "neff_36080212028632_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.085418
+  },
+  "neff_585162021710858_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.081918
+  },
+  "neff_691179499359818_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.064173
+  },
+  "neff_686885614014980_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.060685
+  },
+  "neff_889086051808209_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.049805
+  },
+  "neff_965406228466448_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.046325
+  },
+  "neff_646094107132420_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.041982
+  },
+  "neff_411492240828828_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.041343
+  },
+  "neff_804493859750729_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.041088
+  },
+  "neff_1034946652730193_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.038222
+  },
+  "neff_459192888240614_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.038127
+  },
+  "neff_660088065060724_vnc_0.neff": {
+   "execs_per_step": 1,
+   "in_model_median_ms": 0.017194
+  },
+  "neff_666666642290747_vnc_0.neff": {
+   "execs_per_step": 1,
+   "in_model_median_ms": 0.015816
+  },
+  "neff_34769094605230_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.029936
+  },
+  "neff_362986822734830_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.029587
+  },
+  "neff_237018839645817_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.029292
+  },
+  "neff_733450145340175_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.027558
+  },
+  "neff_509207902476975_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.02641
+  },
+  "neff_1056300455095951_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.024539
+  },
+  "neff_227256175984745_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.024336
+  },
+  "neff_741274325431765_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.024153
+  },
+  "neff_585640977904507_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.023882
+  },
+  "neff_916241414678683_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.021429
+  },
+  "neff_684960390412778_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.021191
+  },
+  "neff_642635760970768_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.019957
+  },
+  "neff_818957112714884_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.019922
+  },
+  "neff_259115466161447_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.0188
+  },
+  "neff_798320444151909_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.017503
+  },
+  "neff_1115493828085573_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.015032
+  },
+  "neff_1109154717781281_vnc_0.neff": {
+   "execs_per_step": 0.5,
+   "in_model_median_ms": 0.012099
+  }
+ },
+ "non_block_ms": 1.406724,
+ "host_gap_ms": 6.1682895,
+ "cc_running": {
+  "n": 602.5,
+  "total_ms": 28.4560405
+ }
+}

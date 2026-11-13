@@ -1,0 +1,13 @@
+{
+ "neff_name": "neff_32529684954229_vnc_0.neff",
+ "sha256": "035ff5221ca54504e141a1de3e587cbdfbc91362fa66973a4191e13c54fef52e",
+ "ranks": [
+  "/mnt/nvme/difflet-prof/run/hunyuan_video_L/bf16/dump/i-0882eb59ff5d391e1_pid_3839286/1794592972937462681/neff_32529684954229_vnc_0.neff",
+  "/mnt/nvme/difflet-prof/run/hunyuan_video_L/bf16/dump/i-0882eb59ff5d391e1_pid_3839287/1794592972937462158/neff_32529684954229_vnc_0.neff",
+  "/mnt/nvme/difflet-prof/run/hunyuan_video_L/bf16/dump/i-0882eb59ff5d391e1_pid_3839288/1794592983032840934/neff_32529684954229_vnc_0.neff",
+  "/mnt/nvme/difflet-prof/run/hunyuan_video_L/bf16/dump/i-0882eb59ff5d391e1_pid_3839289/1794592983033961365/neff_32529684954229_vnc_0.neff"
+ ],
+ "kind": "single",
+ "per_rank": false,
+ "dge_notifs": false
+}

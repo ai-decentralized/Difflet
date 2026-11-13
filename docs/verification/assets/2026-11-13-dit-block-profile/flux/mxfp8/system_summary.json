@@ -1,0 +1,32 @@
+{
+ "blocks": [
+  "neff_772708753084014_vnc_0.neff",
+  "neff_229201383020995_vnc_0.neff"
+ ],
+ "step": {
+  "wall_ms": 172.106548,
+  "steps": 1,
+  "gap_s": 0.2,
+  "dump_steps": null
+ },
+ "neffs": {
+  "neff_229201383020995_vnc_0.neff": {
+   "execs_per_step": 38,
+   "in_model_median_ms": 2.8278795
+  },
+  "neff_772708753084014_vnc_0.neff": {
+   "execs_per_step": 19,
+   "in_model_median_ms": 3.377078
+  },
+  "neff_977523454175573_vnc_0.neff": {
+   "execs_per_step": 1,
+   "in_model_median_ms": 0.099562
+  }
+ },
+ "non_block_ms": 0.099562,
+ "host_gap_ms": 0.303368,
+ "cc_running": {
+  "n": 380.0,
+  "total_ms": 16.033699
+ }
+}

@@ -1,0 +1,11 @@
+{
+ "neff_name": "neff_850809986019497_vnc_0.neff",
+ "sha256": "832130eb9550bf55405e2ccf020e1a9a6d13c57895da9d2176ddc93895169221",
+ "ranks": [
+  "/mnt/nvme/difflet-prof/run/qwen_image/bf16/dump/i-0882eb59ff5d391e1_pid_3800238/1794591875095550642/neff_850809986019497_vnc_0.neff",
+  "/mnt/nvme/difflet-prof/run/qwen_image/bf16/dump/i-0882eb59ff5d391e1_pid_3800239/1794591875095497462/neff_850809986019497_vnc_0.neff",
+  "/mnt/nvme/difflet-prof/run/qwen_image/bf16/dump/i-0882eb59ff5d391e1_pid_3800240/1794591875094153852/neff_850809986019497_vnc_0.neff",
+  "/mnt/nvme/difflet-prof/run/qwen_image/bf16/dump/i-0882eb59ff5d391e1_pid_3800241/1794591875098749320/neff_850809986019497_vnc_0.neff"
+ ],
+ "kind": "block"
+}
