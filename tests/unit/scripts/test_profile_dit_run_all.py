@@ -258,6 +258,17 @@ def test_a_device_fuser_fails_on_is_never_scanned_idle(tmp_path):
     assert {r["device"] for r in _jsonl(tmp_path / "capture_log")} == {3, 12}
 
 
+@needs_tools
+@pytest.mark.parametrize("not_ours, idle, used", [(None, (0, 6), {0, 6}), ("9", (3, 9, 12), {3, 12})])
+def test_only_the_devices_not_ours_names_are_kept_off(tmp_path, not_ours, idle, used):
+    """NOT_OURS (env, default none) keeps devices off whatever fuser says; else fuser rules."""
+    busy = " ".join(str(d) for d in range(16) if d not in idle)
+    env = {"FUSER_BUSY": busy, **({"NOT_OURS": not_ours} if not_ours else {})}
+    done, root = _run_all(tmp_path, **env)
+    assert done.returncode == 0, done.stderr
+    assert {r["device"] for r in _jsonl(tmp_path / "capture_log")} == used
+
+
 @pytest.mark.parametrize("script", ["run_all.sh", "capture.sh"])
 def test_no_fuser_on_path_stops_before_anything_runs(tmp_path, script):
     """lib.sh, sourced by both: a device check that cannot run must not read as idle."""
@@ -431,6 +442,17 @@ def test_the_in_run_baseline_capture_runs_once_while_four_lanes_dump(tmp_path):
                                pytest.approx(0.7)}
     assert result["exec8"]["total_time_ms"] == pytest.approx(5.08)
     assert "baseline inrun: DONE" in (root / "RUN_DONE").read_text()
+
+
+@needs_tools
+def test_a_baseline_neff_not_on_disk_skips_the_in_run_baseline(tmp_path):
+    """BASELINE_NEFF's default is on instance storage, gone after a stop: no lock, no device."""
+    done, root = _run_all(tmp_path, FAKE_LANE_S="3", BASELINE_NEFF=str(tmp_path / "gone.neff"))
+    assert done.returncode == 0, done.stderr
+    assert not [x for x in _jsonl(tmp_path / "x_log") if x["argv"][0] == "capture"]
+    assert not (tmp_path / "capture.lock").exists()
+    assert not (root / "baseline" / "inrun" / "lane.log").exists()
+    assert "baseline inrun: not run" in (root / "RUN_DONE").read_text()
 
 
 @needs_tools

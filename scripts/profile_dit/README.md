@@ -18,8 +18,8 @@ then `analyze.py <blk> --model <key>` on every block of a `DONE` lane (`blk<i>/a
 `analyze exit <rc>`). The script's header has the rules; in short:
 
 - **Devices.** Before each lane start a fresh `fuser` scan of devices 0-15; a lane gets a device
-  no process holds, none of our jobs holds, never 0 or 6 (another session's, 2026-11-13), never
-  one it was `BUSY` on in this run. The rest queue behind the first to finish. The run ends
+  no process holds, none of our jobs holds, none named in `NOT_OURS` (env, default none; the
+  2026-11-13 run kept off 0 and 6, another session's), never one it was `BUSY` on in this run. The rest queue behind the first to finish. The run ends
   (`RUN_DONE`: every lane's `STATUS` and analyses, the baselines) when nothing of ours runs and no
   pending lane could start.
 - **CPU slices.** 13 lanes at once with no shared CPU leave 12 threads per device: device `d`'s
@@ -48,7 +48,8 @@ then `analyze.py <blk> --model <key>` on every block of a `DONE` lane (`blk<i>/a
   lock (`<lane>/.lock`, held by its job and all it starts) an earlier `run_all.sh` still holds.
 - **Wan bf16** dumps run with `DIFFLET_NKI_TRACE_CACHE=1` (not in the compile-cache key, Task 1).
 - **Baseline (ruling R17).** Once at least four lanes are dumping, the Qwen-Image smoke block
-  (`t1-smoke/qwen_image/bf16/blk1/block.neff`) is captured once with the lanes' command
+  (`BASELINE_NEFF`, default `t1-smoke/qwen_image/bf16/blk1/block.neff`; skipped when the file is
+  not there) is captured once with the lanes' command
   (`capture_neff`) on a free idle device: `baseline/inrun/result.json` = `{device, lanes_dumping,
   exec4: {total_time_ms, avg_util_limit}, exec8: {...}}`, against the lone captures in
   `baseline/<name>/`.

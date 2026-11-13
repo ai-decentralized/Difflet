@@ -16,8 +16,9 @@
 #     through serially (bench.sh's warm_hub); a missing cache entry ends it FAILED cache miss, as
 #     the lane would rebuild it on the root disk.
 #   - then a fresh `fuser /dev/neuron<d>` scan of d = 0..15: a device no process holds, none of
-#     ours, not 0 or 6 and not one the lane was BUSY on in this run (capture.sh's require_idle
-#     checks again before each device command); none: the lane queues behind the first to finish.
+#     ours, none in NOT_OURS and not one the lane was BUSY on in this run (capture.sh's
+#     require_idle checks again before each device command); none: the lane queues behind the
+#     first to finish.
 #   - the lane's job runs whole under its CPU slice (taskset); capture.sh ending with no DONE,
 #     BUSY or FAILED STATUS ends it FAILED capture.sh exit <rc> (else it would requeue forever).
 #   - the run ends, RUN_DONE written (each lane's STATUS and analyses, the baselines), when
@@ -32,8 +33,9 @@
 # <ROOT>/baseline/inrun/result.json; `run_all.sh baseline <device> <name>` captures it alone into
 # <ROOT>/baseline/<name>/.
 #
-# env: ROOT (/mnt/nvme/difflet-prof/run), PY, CAPTURE (capture.sh here), BASELINE_NEFF (empty: no
-#      in-run baseline), POLL (10 s), CAPTURE_LOCK (lib.sh); HOME locates the root-disk caches.
+# env: ROOT (/mnt/nvme/difflet-prof/run), PY, CAPTURE (capture.sh here), BASELINE_NEFF (empty or
+#      no such file: no in-run baseline), NOT_OURS (devices never used, e.g. "0 6"; default
+#      none), POLL (10 s), CAPTURE_LOCK (lib.sh); HOME locates the root-disk caches.
 set -u
 shopt -s nullglob
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -47,7 +49,8 @@ export PATH=$PATH:/opt/aws/neuron/bin  # neuron-explorer for the baseline, the S
 LANES=(qwen_image:bf16 qwen_image:mxfp8 flux:bf16 flux:mxfp8 ltx_2:bf16 ltx_2:mxfp8
        wan21_official:bf16 wan21_official:mxfp8 wan22_official:bf16 wan22_official:mxfp8
        hunyuan_video_L:bf16 hunyuan_video_L:mxfp8 hv15_official:bf16)
-NOT_OURS=" 0 6 "  # held by another session on 2026-11-13: never used
+# devices kept off whatever fuser says (2026-11-13's run: "0 6", another session's); fuser rules
+NOT_OURS=" ${NOT_OURS:-} "
 HUB=$HOME/.cache/huggingface/hub
 NVME_HUB=/mnt/nvme/difflet-quant-bench-hub
 
@@ -158,7 +161,7 @@ prewarm() {  # prewarm <lane dir> <key> <arm>: the lane's root-disk files read t
   log "prewarm $2 $3: $((SECONDS - t0)) s"
 }
 
-scan() {  # scan: the devices no process holds and none of ours holds (a running job's), but 0 and 6
+scan() {  # scan: the devices no process holds, none of ours (a running job's), none in NOT_OURS
   local d x ours=" "
   for x in "$ROOT"/*/*/; do
     if [ -f "$x/device" ] && running "$x"; then ours+="$(< "$x/device") "; fi
@@ -258,7 +261,7 @@ EOF
 maybe_baseline() {  # the in-run baseline (ruling R17): once, on a free idle device, while >= 4
                     # lanes are dumping
   local B=$ROOT/baseline/inrun n=0 lane d
-  [ -n "$BASELINE_NEFF" ] || return 0
+  [ -f "$BASELINE_NEFF" ] || return 0  # the default is on instance storage, lost on a stop
   case $(status "$B") in DONE|FAILED*) return 0 ;; esac
   running "$B" && return 0
   for lane in "${LANES[@]}"; do dumping "$ROOT/${lane/://}" && n=$((n + 1)); done
