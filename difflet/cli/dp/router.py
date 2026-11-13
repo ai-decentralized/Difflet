@@ -3,8 +3,9 @@
 Spec: docs/superpowers/specs/2026-07-06-dp-replication-routing-design.md §Router.
 Workers are full difflet CLI invocations with dp=1 semantics; NEURON_RT_* are
 plain-assigned (run_stage's setdefault must see the worker's range, not the
-parent's). On a GPU platform a replica's range is GPUs, pinned through the platform's
-visible-devices variable, and no Neuron variable reaches the worker.
+parent's), and a replica's cores come from the router's own NEURON_RT_VISIBLE_CORES. On a GPU
+platform a replica's range is GPUs, pinned through the platform's visible-devices variable,
+and no Neuron variable reaches the worker.
 """
 
 from __future__ import annotations
@@ -18,18 +19,37 @@ import sys
 from pathlib import Path
 from typing import Mapping
 
+from difflet.backends.neuron.runtime import VISIBLE_CORES_ENV, parse_core_list
 from difflet.cli.dp.claims import mark_failed, summarize
 from difflet.cli.dp.requests_io import RequestSpec, write_manifest
 from difflet.cli.parent_death import die_with_parent
 
 
-def replica_core_ranges(dp: int, replica_cores: int) -> list[str]:
-    ranges = []
-    for w in range(dp):
-        lo = w * replica_cores
-        hi = lo + replica_cores - 1
-        ranges.append(str(lo) if replica_cores == 1 else f"{lo}-{hi}")
-    return ranges
+def replica_core_ranges(dp: int, replica_cores: int, visible_cores: str | None = None) -> list[str]:
+    """Each replica's cores, taken in order from ``visible_cores`` (the router's inherited
+    NEURON_RT_VISIBLE_CORES), or from cores 0..dp*replica_cores-1 when it is unset.
+
+    Counting from core 0 regardless escaped the allocation the router was launched in: a DP run
+    on NEURON_RT_VISIBLE_CORES=20-27 gave its workers 0-3 and 4-7, collided with another job
+    there, and both failed (trn3, 2026-11-08). An allocation too small for every replica is
+    refused here, before any worker starts.
+    """
+    needed = dp * replica_cores
+    cores = parse_core_list(visible_cores) or list(range(needed))
+    if len(cores) < needed:
+        raise ValueError(
+            f"[dp-router] dp={dp} x {replica_cores} cores per replica needs {needed} "
+            f"NeuronCores, but {VISIBLE_CORES_ENV}={visible_cores!r} gives this process "
+            f"only {len(cores)}"
+        )
+    return [_core_list(cores[w * replica_cores : (w + 1) * replica_cores]) for w in range(dp)]
+
+
+def _core_list(cores: list[int]) -> str:
+    """A NEURON_RT_VISIBLE_CORES value for exactly ``cores``: a range when they are contiguous."""
+    if cores != list(range(cores[0], cores[0] + len(cores))):
+        return ",".join(str(core) for core in cores)
+    return str(cores[0]) if len(cores) == 1 else f"{cores[0]}-{cores[-1]}"
 
 
 _ROOT_COMM_PORTS_HANDED_OUT: set[int] = set()
@@ -62,9 +82,9 @@ def worker_env(
     if platform.capabilities.flow == "gpu":
         # The range counts from this process's visible GPUs; a replica with more than one
         # GPU (cfg/cp) re-execs under torchrun inside it.
-        return platform.worker_env(base_env, _expand_range(core_range))
+        return platform.worker_env(base_env, parse_core_list(core_range))
     env = dict(base_env)
-    env["NEURON_RT_VISIBLE_CORES"] = core_range
+    env[VISIBLE_CORES_ENV] = core_range
     env["NEURON_RT_NUM_CORES"] = str(replica_cores)
     # Each replica is its own Neuron world and bootstraps its collectives
     # through a root socket at NEURON_RT_ROOT_COMM_ID. Left unset, torch_neuronx
@@ -76,11 +96,6 @@ def worker_env(
     # value inherited from the parent is just as shared, so it is replaced too.
     env["NEURON_RT_ROOT_COMM_ID"] = root_comm_id or f"localhost:{_free_localhost_port()}"
     return env
-
-
-def _expand_range(core_range: str) -> list[int]:
-    lo, _, hi = core_range.partition("-")
-    return list(range(int(lo), int(hi or lo) + 1))
 
 
 #: ``preexec_fn`` for worker processes: SIGKILL the worker when the router dies. The
@@ -172,6 +187,16 @@ def run_router(
     schedule = args.dp_schedule
     work_dir = Path(args.work_dir or Path.home() / ".cache" / "difflet" / "work" / "dp")
     requests_dir = work_dir / "requests"
+    from difflet.platforms import current_platform
+
+    platform = current_platform()
+    backend = platform.name
+    gpu = platform.capabilities.flow == "gpu"
+    unit = "GPUs" if gpu else "cores"
+    # GPU ranges count from the parent's visible GPUs inside worker_env; NeuronCores are mapped
+    # here, so the ranges below are the real cores and a too-small allocation fails first.
+    visible_cores = None if gpu else os.environ.get(VISIBLE_CORES_ENV)
+    core_ranges = replica_core_ranges(dp, replica_cores, visible_cores)
 
     if schedule == "round_robin":
         requests = [
@@ -185,14 +210,8 @@ def run_router(
     _check_hbm(args)
 
     prefix = worker_argv_prefix or [sys.executable, "-m", "difflet.cli.main"]
-    from difflet.platforms import current_platform
-
-    platform = current_platform()
-    backend = platform.name
-    unit = "GPUs" if platform.capabilities.flow == "gpu" else "cores"
-
     procs = []
-    for w, core_range in enumerate(replica_core_ranges(dp, replica_cores)):
+    for w, core_range in enumerate(core_ranges):
         argv = prefix + ["generate"] + worker_cli_args(args) + [
             "--requests-dir", str(requests_dir),
             "--worker-index", str(w),
