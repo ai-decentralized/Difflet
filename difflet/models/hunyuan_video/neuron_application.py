@@ -30,6 +30,14 @@ registry factory signature, ``compile``/``has_compiled_artifacts``/``load``, ``.
   part of this application: the CLI decodes after the generate launch has exited, in a one-core
   vae launch or on the host, and ``output_type="latent"`` is the generate stage's output.
 
+``quant`` (``"mxfp8"``, a ``QuantSpec`` or its dict) and ``quant_checkpoint`` are the MXFP8
+DiT options (``difflet/backends/neuron/core/quant.py``): the spec is resolved at the launch's
+tp, and the transformer loads the quantized directory in place of ``<model>/transformer``. That
+directory is resolved from ``<model>/transformer`` itself: the hub DiT is already bf16, so there
+is no bf16 copy (unlike Wan's fp32 experts), and the directory's fingerprint is the hub files'.
+The text encoder never runs on the device, so no HBM check stands beside the DiT to count the
+quantized directory (LTX-2's ``quantized_dit``, Wan's ``quantized_dits``).
+
 Parallelism: tensor parallelism, with or without sequence parallelism, and context parallelism
 in every ``cp_mode`` (gather_kv, ulysses, ring). CFG parallelism does not apply (the entry and
 the config refuse it); data parallelism is separate replicas. Each rank starts from rank 0's
@@ -67,6 +75,7 @@ from difflet.backends.neuron.core.model_application import (
     TorchNeuronModelApplication,
     broadcast_from_rank0,
 )
+from difflet.backends.neuron.core.quant import resolve_quant
 from difflet.backends.neuron.core.teacache import NeuronTeaCacheProbe
 from difflet.backends.neuron.hunyuan_video.config import NeuronHunyuanVideoConfig
 from difflet.backends.neuron.hunyuan_video.transformer import (
@@ -76,8 +85,8 @@ from difflet.models.hunyuan_video.application import HunyuanVideoDiTInputBundle
 
 #: The keyword arguments the application accepts, with their defaults: the ones the HunyuanVideo
 #: CLI stage passes the Trainium application (difflet/cli/orchestrators/hunyuan_video.py) plus
-#: exec_mode, device, batch_size, text_encoder_device and encoder_threads. Anything else is a
-#: TypeError rather than silently ignored.
+#: exec_mode, device, batch_size, text_encoder_device, encoder_threads and the MXFP8 options.
+#: Anything else is a TypeError rather than silently ignored.
 _KWARG_DEFAULTS: dict[str, Any] = {
     "text_seq_len": 256,
     "batch_size": 1,
@@ -99,6 +108,11 @@ _KWARG_DEFAULTS: dict[str, Any] = {
     "teacache_calibration_path": None,
     "teacache_cadence": None,
     "teacache_online_delta_alpha": None,
+    # MXFP8 DiT linears (difflet/quant): the spec (a QuantSpec, its dict, or "mxfp8" for the
+    # default recipe) and, optionally, the quantized checkpoint directory; without one it is
+    # resolved under the compile cache (it must already exist: `difflet compile` writes it).
+    "quant": None,
+    "quant_checkpoint": None,
 }
 #: The registry's default shape.
 _DEFAULT_SHAPE = {"height": 320, "width": 512, "num_frames": 61}
@@ -314,9 +328,12 @@ class TorchNeuronHunyuanVideoApplication(TorchNeuronModelApplication):
             sp_enabled=bool(getattr(parallel, "sp_enabled", False)),
             cfg_parallel_enabled=bool(getattr(parallel, "cfg_parallel_enabled", False)),
         )
+        self.quant, dit_path = resolve_quant(
+            "hunyuan_video", options["quant"], options["quant_checkpoint"], transformer_path,
+            tp_degree=int(parallel.tp_degree))
         self.transformer = NeuronHunyuanVideoTransformerApplication(
-            model_path=transformer_path, config=config, parallel=parallel, dtype=self.dtype,
-            exec_mode=options["exec_mode"], device=self.device,
+            model_path=dit_path, config=config, parallel=parallel, dtype=self.dtype,
+            exec_mode=options["exec_mode"], device=self.device, quant=self.quant,
         )
         self.config = self.transformer.config  # cp_degree filled from the parallel config
         self.text_encoder = _HostHunyuanVideoTextEncoder(

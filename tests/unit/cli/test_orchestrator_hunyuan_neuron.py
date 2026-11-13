@@ -15,6 +15,7 @@ import importlib
 import json
 import os
 import struct
+from pathlib import Path
 
 import pytest
 
@@ -40,7 +41,7 @@ def _args(**overrides) -> argparse.Namespace:
         device_vae=False, vae_in_process=False, vae_dtype=None, vae_exec_mode=None,
         teacache_cadence=None, teacache_online_delta=None,
         teacache_speedup=None, teacache_calibration=None, requests_dir=None,
-        stage_mode="generate",
+        stage_mode="generate", quant=None, quant_compute=None,
     )
     base.update(overrides)
     return argparse.Namespace(**base)
@@ -368,6 +369,212 @@ def test_tp1_is_refused_before_any_stage_runs(monkeypatch, tmp_path, capsys, mod
     assert stages == ["generate"]
 
 
+# ----------------------------------------------------------------- --quant mxfp8
+
+
+@pytest.fixture(scope="module")
+def tiny_fp8_snapshot(tmp_path_factory):
+    """The tiny diffusers-layout HunyuanVideo DiT in the quantized fixtures' geometry
+    (``TINY_FP8_HV1_TP2``: every target's K per rank a multiple of 128 at tp2) as
+    ``<root>/transformer``, which the driver quantizes straight from, as it does the hub's.
+    torch and diffusers load here only, so this module stays as torch-free at import as the
+    driver."""
+    pytest.importorskip("diffusers")
+    from tests.unit.backends._neuron_hv1_toy import TINY_FP8_HV1_TP2, write_tiny_hv1
+
+    root = tmp_path_factory.mktemp("tiny_hv1_quant")
+    write_tiny_hv1(root, config=TINY_FP8_HV1_TP2)
+    return str(root)
+
+
+def _quant_cache(monkeypatch, tmp_path, snapshot: str) -> Path:
+    """Set up a test that runs ``prepare_quant``: a fresh compile cache (``tmp_path / "cache"``
+    as DIFFLET_COMPILE_CACHE), DIFFLET_NKI_TRACE_CACHE restored afterwards (the preparer sets
+    it with ``os.environ.setdefault``) and the resolver pointed at ``snapshot`` (after
+    ``launches``, which points it at a fake path)."""
+    _unset(monkeypatch, "DIFFLET_NKI_TRACE_CACHE")
+    cache = tmp_path / "cache"
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(cache))
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path",
+                        lambda *a, **k: snapshot)
+    return cache
+
+
+@pytest.mark.parametrize("mode", ["compile", "generate"])
+def test_prepare_quant_runs_after_the_cache_root_and_before_the_fit_check(launches, monkeypatch,
+                                                                          tmp_path, mode):
+    """The quantized directory is written (``compile``) or only resolved (``generate``) after
+    the compile cache is rooted at --cache-dir, so it lands where the ranks, which inherit
+    that root, resolve it, and before the DiT fit check, which counts it as stored; all of it
+    before any rank starts."""
+    stages, _ = launches
+    calls = []
+    monkeypatch.setattr(hv_mod, "root_compile_cache_at_cache_dir",
+                        lambda cache_dir, *, tag: calls.append("root"))
+    monkeypatch.setattr(HunyuanVideoOrchestrator, "_prepare_quant",
+                        lambda self, *, create: calls.append(("quant", create)))
+    monkeypatch.setattr(HunyuanVideoOrchestrator, "_check_dit_fits",
+                        lambda self: calls.append("fits"))
+    getattr(HunyuanVideoOrchestrator(_args(quant="mxfp8", work_dir=str(tmp_path / "w"))), mode)()
+    assert calls == ["root", ("quant", mode == "compile"), "fits"]
+    assert _plan(stages) == [("generate", 2)]
+
+
+def test_the_stage_and_dp_worker_lines_carry_quant_only_when_given(launches, monkeypatch,
+                                                                   tmp_path):
+    """A stage launch or a DP worker that dropped --quant would run the bf16 DiT against the
+    fp8 stage key: the generate launch's line and a worker's carry --quant and
+    --quant-compute, and only when given (a bf16 line keeps its words)."""
+    from difflet.cli.dp.router import worker_cli_args
+
+    stages, _ = launches
+    monkeypatch.setattr(HunyuanVideoOrchestrator, "_prepare_quant", lambda self, *, create: None)
+    args = _args(quant="mxfp8", quant_compute="dequant", work_dir=str(tmp_path / "w"))
+    HunyuanVideoOrchestrator(args).generate()
+    [(stage, kw)] = stages
+    assert stage == "generate"
+    for line in (kw["cli_args"], worker_cli_args(args)):
+        assert line[line.index("--quant") + 1] == "mxfp8"
+        assert line[line.index("--quant-compute") + 1] == "dequant"
+    stages.clear()
+    plain = _args(work_dir=str(tmp_path / "w"))
+    HunyuanVideoOrchestrator(plain).generate()
+    [(_, kw)] = stages
+    for line in (kw["cli_args"], worker_cli_args(plain)):
+        assert "--quant" not in line and "--quant-compute" not in line
+
+
+def test_generate_before_compile_is_refused_naming_difflet_compile(launches, monkeypatch,
+                                                                   tmp_path, capsys,
+                                                                   tiny_fp8_snapshot):
+    """``generate --quant`` with no quantized directory yet (``compile`` never ran) is refused
+    on the driver naming ``difflet compile`` (exit 2, as this driver's other refusals), before
+    torchrun starts any rank, and nothing is written."""
+    stages, _ = launches
+    cache = _quant_cache(monkeypatch, tmp_path, tiny_fp8_snapshot)
+    with pytest.raises(SystemExit) as exc:
+        HunyuanVideoOrchestrator(_args(quant="mxfp8", work_dir=str(tmp_path / "w"))).generate()
+    assert exc.value.code == 2 and stages == []
+    err = capsys.readouterr().err
+    assert err.startswith("Error: --quant: transformer: ")
+    assert "`difflet compile`" in err and err.endswith("; nothing was launched.\n")
+    assert not (cache / "quantized").exists()
+
+
+def test_compile_writes_the_directory_and_generate_resolves_it(launches, monkeypatch, tmp_path,
+                                                               capsys, tiny_fp8_snapshot):
+    """``compile --quant mxfp8`` writes the quantized directory under the compile cache
+    straight from the snapshot's ``transformer`` (the hub DiT is bf16: no copy), prints its
+    line, leaves the NKI trace cache on for the kernel path and launches the stage with the
+    flag; ``generate`` resolves the same directory and launches the same way."""
+    from difflet.quant.checkpoint import read_manifest
+
+    stages, _ = launches
+    cache = _quant_cache(monkeypatch, tmp_path, tiny_fp8_snapshot)
+    compiling = HunyuanVideoOrchestrator(_args(quant="mxfp8"))
+    assert compiling._quantized_dit is None
+    compiling.compile()
+    quantized = Path(compiling._quantized_dit)
+    assert (quantized / "difflet_quant.json").is_file() and quantized.is_relative_to(cache)
+    source = read_manifest(quantized)["source"]
+    assert source["path"] == str(Path(tiny_fp8_snapshot) / "transformer")
+    assert "bf16_copy_of" not in source
+    assert f"[hunyuan_video] MXFP8 transformer (nki): {quantized}\n" in capsys.readouterr().out
+    assert os.environ["DIFFLET_NKI_TRACE_CACHE"] == "1"
+    [(stage, kw)] = stages
+    cli = kw["cli_args"]
+    assert stage == "generate" and cli[cli.index("--quant") + 1] == "mxfp8"
+    stages.clear()
+    generating = HunyuanVideoOrchestrator(_args(quant="mxfp8", work_dir=str(tmp_path / "w")))
+    generating.generate()
+    assert generating._quantized_dit == str(quantized)
+    assert _plan(stages) == [("generate", 2)]
+
+
+def test_a_target_on_the_fused_proj_out_is_refused_before_the_writer(launches, monkeypatch,
+                                                                     tmp_path, capsys,
+                                                                     tiny_fp8_snapshot):
+    """A spec naming a single block's fused ``proj_out`` (a hand-written DIFFLET_QUANT_TARGETS
+    from before the split) is refused on the driver by the split writer, as a pattern matching
+    no weight it stores (it stores the halves), naming the halves, before anything is
+    quantized and before any rank starts."""
+    from difflet.cli.quant import QUANT_TARGETS_ENV
+
+    stages, _ = launches
+    cache = _quant_cache(monkeypatch, tmp_path, tiny_fp8_snapshot)
+    fused = r"single_transformer_blocks\.\d+\.proj_out"
+    monkeypatch.setenv(QUANT_TARGETS_ENV, fused)
+    with pytest.raises(SystemExit) as exc:
+        HunyuanVideoOrchestrator(_args(quant="mxfp8")).compile()
+    out, err = capsys.readouterr()
+    assert exc.value.code == 2
+    assert err.startswith("Error: --quant: transformer: target patterns match no linear weight")
+    assert ("(single_transformer_blocks.0.proj_out is split by split_linears: name "
+            "single_transformer_blocks.0.proj_out_attn / single_transformer_blocks.0.proj_out_mlp)"
+            in err)
+    assert err.endswith(f": {fused}; nothing was launched.\n")
+    assert "MXFP8" not in out and stages == []
+    assert not (cache / "quantized").exists()
+
+
+@pytest.mark.parametrize("mode", ["compile", "generate"])
+def test_quant_without_local_weights_is_refused_naming_the_download(launches, monkeypatch,
+                                                                    tmp_path, capsys, mode):
+    """--quant needs the weights on the driver (``compile`` writes the quantized directory
+    from them, ``generate`` resolves it and counts its bytes), so a launch before
+    `difflet download` is refused here, naming the fix, instead of starting tp x cp ranks that
+    each report the missing weights. The bf16 path leaves them to the ranks."""
+    stages, _ = launches
+
+    def not_local(*args, **kwargs):
+        raise OSError("not local")
+
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path", not_local)
+    with pytest.raises(SystemExit) as exc:
+        getattr(HunyuanVideoOrchestrator(_args(quant="mxfp8", work_dir=str(tmp_path / "w"))),
+                mode)()
+    assert exc.value.code == 2 and stages == []
+    assert capsys.readouterr().err == (
+        f"Error: --quant: the {_HV} weights are not local; run `difflet download --model-id "
+        f"{_HV}` first; nothing was launched.\n")
+    getattr(HunyuanVideoOrchestrator(_args(work_dir=str(tmp_path / "w"))), mode)()
+    assert _plan(stages) == [("generate", 2)]
+
+
+def _header_only_quantized_dir(directory, nbytes: int) -> str:
+    """A quantized directory whose one fp8 tensor spans ``nbytes`` stored bytes in its header
+    (no data is written: the fit check reads the headers' ``data_offsets``)."""
+    directory.mkdir(parents=True)
+    header = json.dumps({"w": {"dtype": "F8_E4M3", "shape": [nbytes],
+                               "data_offsets": [0, nbytes]}})
+    (directory / "model.safetensors").write_bytes(
+        struct.pack("<Q", len(header)) + header.encode())
+    return str(directory)
+
+
+def test_the_dit_fit_check_counts_the_quantized_directory_as_stored(monkeypatch, tmp_path,
+                                                                    capsys):
+    """With --quant the DiT is counted as its quantized directory stores it (fp8 weights,
+    block scales, the bf16 rest), not as the bf16 source, which refuses tp1 (23.9 GiB on a
+    24 GiB core): 17 GiB as stored fits tp1, and 23 GiB is refused naming MXFP8 weights."""
+    snapshot = _header_only_snapshot(tmp_path / "snap", _HV_DIT_PARAMS)
+    monkeypatch.setenv("DIFFLET_NEURON_HBM_GIB", "24")
+    monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path",
+                        lambda *a, **k: snapshot)
+    orch = HunyuanVideoOrchestrator(_args(tp_degree=1, quant="mxfp8"))
+    with pytest.raises(SystemExit) as exc:
+        orch._check_dit_fits()
+    assert exc.value.code == 2
+    assert "GiB of bf16 weights per core at tp=1" in capsys.readouterr().err
+    orch._quantized_dit = _header_only_quantized_dir(tmp_path / "q17", 17 * 2**30)
+    orch._check_dit_fits()
+    orch._quantized_dit = _header_only_quantized_dir(tmp_path / "q23", 23 * 2**30)
+    with pytest.raises(SystemExit) as exc:
+        orch._check_dit_fits()
+    assert exc.value.code == 2
+    assert "GiB of MXFP8 weights per core at tp=1" in capsys.readouterr().err
+
+
 # ----------------------------------------------------------------- the AoT path is unchanged
 
 
@@ -505,6 +712,28 @@ def test_generate_stage_hands_the_teacache_flags_to_the_application(neuron_stage
     assert opts == {**_NEURON_APP_KWARGS, "teacache_cadence": 2,
                     "teacache_online_delta_alpha": 0.6, "teacache_speedup": 1.6,
                     "teacache_calibration_path": "/c.json"}
+
+
+def test_generate_stage_times_the_steps_and_hands_the_spec_to_the_application(neuron_stage,
+                                                                              monkeypatch,
+                                                                              tmp_path):
+    """The stage asks ``run_generate_stage`` for rank 0's step timing (the
+    ``[hunyuan_video] request: ... step median`` line the device campaign reads: one
+    ``scheduler.step`` per denoising step) and, with --quant, hands the ranks' application the
+    spec the stage flags describe, at the launch's tp; a bf16 stage hands it none."""
+    from difflet.cli import quant as Q
+
+    seen = {}
+    monkeypatch.setattr(hv_mod, "run_generate_stage", lambda args, backend, **kw: seen.update(kw))
+    args = _args(work_dir=str(tmp_path), quant="mxfp8")
+    HunyuanVideoOrchestrator(args)._run_stage_internal("generate", args)
+    assert seen["timing"] is True
+    assert seen["application_kwargs"]["quant"] == Q.quant_spec(args).to_dict()
+    assert seen["application_kwargs"]["quant"]["tp_degree"] == 2
+    seen.clear()
+    args = _args(work_dir=str(tmp_path))
+    HunyuanVideoOrchestrator(args)._run_stage_internal("generate", args)
+    assert seen["timing"] is True and "quant" not in seen["application_kwargs"]
 
 
 def test_generate_stage_compile_warms_up_and_writes_the_manifest(neuron_stage, tmp_path):
