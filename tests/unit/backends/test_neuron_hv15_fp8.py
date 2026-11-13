@@ -1,15 +1,16 @@
 """The MXFP8 HunyuanVideo-1.5 DiT on the neuron backend, on CPU: the application quantizes the
-dual-stream blocks' image and text q/k/v and both MLPs (diffusers' module names are the
-checkpoint keys, so the table matches them as they are), loads the quantized directory and, in
-dequant mode, matches diffusers' model run with the weights the directory holds dequantized, at
-tp1, tp2 x CFG2, tp2 with SP and tp2 x CP2. Each rank's row-parallel weights are its own K
-range quantized as such, compared exactly, since the outputs cannot tell. The output
-projections, the modulation, the token refiner and the top level stay as they were; eager mode
-and a spec quantized for another tp are refused. The native path has no stage cache key, so
-what keeps a quantized and a bf16 DiT apart is checked here: their block graphs differ (the
-kernel call per target, which the NEFF cache keys on through the HLO) and so do their
-weight-store entries, by layout as well as by source. The bytes a loaded DiT holds, which the
-transformer stage reports, count the kernel's scale layout that the pre-load estimate omits.
+dual-stream blocks' image q/k/v and image MLP (diffusers' module names are the checkpoint keys,
+so the table matches them as they are), loads the quantized directory and, in dequant mode,
+matches diffusers' model run with the weights the directory holds dequantized, at tp1,
+tp2 x CFG2, tp2 with SP and tp2 x CP2. Each rank's row-parallel weights are its own K range
+quantized as such, compared exactly, since the outputs cannot tell. The text stream's q/k/v
+and MLP, the output projections, the modulation, the token refiner and the top level stay as
+they were; eager mode and a spec quantized for another tp are refused. The native path has no
+stage cache key, so what keeps a quantized and a bf16 DiT apart is checked here: their block
+graphs differ (the kernel call per target, which the NEFF cache keys on through the HLO) and so
+do their weight-store entries, by layout as well as by source. The bytes a loaded DiT holds,
+which the transformer stage reports, count the kernel's scale layout that the pre-load estimate
+omits.
 The pipeline resolves the quantized directory from the bf16 copy (the hub DiT is fp32 and
 ``difflet compile`` quantizes the copy) at the launch's tp, loads the copy without ``quant``,
 and refuses a launch whose directory was never written.
@@ -52,8 +53,8 @@ from tests.unit.backends._neuron_hv15_toy import (  # noqa: E402
 )
 from tests.unit.backends._neuron_workers import _recording_backend, hv15_fp8_worker  # noqa: E402
 
-#: The toy's default targets: ten per dual-stream block.
-N_TARGETS = len(TINY_TARGETS_PER_BLOCK) * TINY_FP8_HV15["num_layers"]  # 20
+#: The toy's default targets: five per dual-stream block.
+N_TARGETS = len(TINY_TARGETS_PER_BLOCK) * TINY_FP8_HV15["num_layers"]  # 10
 
 
 @torch.library.custom_op("difflet_hv15_test::mx_linear_stub", mutates_args=())
@@ -115,9 +116,10 @@ def test_the_quantized_directory_holds_every_target(tiny):
     assert {n.split(".", 2)[2] for n in manifest["quantized_linears"]} == TINY_TARGETS_PER_BLOCK
 
 
-def test_application_quantizes_the_dual_stream_projections(tiny):
-    """At tp1 the module's linears are diffusers' own, so every twin is the plain one; the
-    output projections, the modulation, the token refiner and ``proj_out`` stay as they were."""
+def test_application_quantizes_the_image_streams_projections_and_mlp(tiny):
+    """At tp1 the module's linears are diffusers' own, so every twin is the plain one; the text
+    stream's q/k/v and MLP, the output projections, the modulation, the token refiner and
+    ``proj_out`` stay as they were."""
     app = _app(tiny)
     app.load()
     assert len(app.quantized_linears) == N_TARGETS
@@ -127,7 +129,9 @@ def test_application_quantizes_the_dual_stream_projections(tiny):
     assert {n.split(".", 2)[2] for n in fp8} == TINY_TARGETS_PER_BLOCK
     assert all(type(m) is FP8Linear for m in fp8.values())
     for block in app.module.transformer_blocks:
-        for linear in (block.attn.to_out[0], block.attn.to_add_out, block.norm1.linear,
+        for linear in (block.attn.add_q_proj, block.attn.add_k_proj, block.attn.add_v_proj,
+                       block.ff_context.net[0].proj, block.ff_context.net[2],
+                       block.attn.to_out[0], block.attn.to_add_out, block.norm1.linear,
                        block.norm1_context.linear):
             assert type(linear) is torch.nn.Linear
     assert type(app.module.proj_out) is torch.nn.Linear
