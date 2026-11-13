@@ -126,9 +126,10 @@ busy() { write_status "$A" BUSY; exit 0; }
 on_device() {  # on_device <cmd...>: the lane's tag, its CPU set
   env DIFFLET_PROF_LANE="$A" taskset -c "$CPUS" "$@"
 }
-view() {  # view <ntff> <args...>: blk $B's NTFF read on the lane's CPUs (no device: no require_idle)
+view() {  # view <ntff> <args...>: blk $B's NTFF read on the lane's CPUs (no device: no require_idle);
+          # 2700 s (ruling R8): HV1.5's 2.17 GB NTFFs took 481-555 s per view, longer blocks more
   local ntff=$1; shift
-  ( cd "$B" && taskset -c "$CPUS" timeout 900 neuron-explorer view -n block.neff -s "$ntff" "$@" ) \
+  ( cd "$B" && taskset -c "$CPUS" timeout 2700 neuron-explorer view -n block.neff -s "$ntff" "$@" ) \
     2>> "$B/view.err"
 }
 

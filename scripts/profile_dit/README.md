@@ -128,8 +128,10 @@ was then killed (below) and the lane rerun warm.
   a 182.4 ms in-model median in the real run, 54 per step.
 - **Views of a large block take minutes, not seconds.** HV1.5's NTFFs are 2.17 GB each (7.5 M
   events, 5.9 M instruction rows); each view took 8-9 min (486 s, 555 s, 481 s above) at about
-  3-4 cores and 37-67 GB RSS each, against the 900 s limit per view. A block twice as long per
-  execution (HunyuanVideo at 544x960x129) would likely exceed it; a view that times out fails the
-  lane and its rerun captures again (`summary.json` is the block's done-marker).
+  3-4 cores and 37-67 GB RSS each, against the 900 s limit per view the plan set. A block twice
+  as long per execution (HunyuanVideo at 544x960x129) would likely exceed it, and a view that
+  times out fails the lane and its rerun captures again (`summary.json` is the block's
+  done-marker), so each block view now runs under `timeout 2700` (ruling R8; the capture keeps
+  1200 s, rank 0's system-profile view 900 s: it took 2-21 s).
 - **Do not edit `capture.sh` while a lane runs it.** bash reads a script as it goes, at byte
   offsets: an edit under a running lane makes it parse the new file from the old offset.
