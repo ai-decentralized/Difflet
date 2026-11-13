@@ -67,8 +67,9 @@ def lane(tmp_path, key, arm, blocks, kinds=None):
     return assets
 
 
-def one(assets, key="m", n=1, steps=None):
-    configs = {key: ("Model", "8x8", "tp4", ("bf16",), n)}
+def one(assets, key="m", execs=None, steps=None):
+    """``execs``: the configuration's {kind: executions per step} (default {"block": 60})."""
+    configs = {key: ("Model", "8x8", "tp4", ("bf16",), execs or {"block": 60})}
     steps = {(key, "bf16"): (221, "11b", "A", 50)} if steps is None else steps
     return collect.collect(assets, configs, steps)["configs"][0]
 
@@ -106,14 +107,14 @@ def test_no_evidence_step_time_is_not_measured(tmp_path):
 def test_outside_blocks_is_the_step_less_executions_times_in_model_medians(tmp_path):
     assets = lane(tmp_path, "m", "bf16", [(breakdown(), 19, 4.0), (breakdown(), 38, 3.0)],
                        kinds=["dual", "single"])
-    c = one(assets, n=2)
+    c = one(assets, execs={"dual": 19, "single": 38})
     assert c["step_source"] == {"section": "11b", "host": "A", "steps": 50}
     assert c["blocks_ms"] == pytest.approx(19 * 4.0 + 38 * 3.0)
     assert c["outside_blocks_ms"] == pytest.approx(221 - 190.0)
     assert (c["non_block_ms"], c["host_gap_ms"], c["profile_step_ms"]) == (1.5, 0.5, 200.0)
     assert [(b["kind"], b["execs_per_step"]) for b in c["blocks"]] == [("dual", 19), ("single", 38)]
     # the evidence step and the profiled run's own step are two runs: the doc states the gap
-    md = collect.markdown(collect.collect(assets, {"m": ("Model", "8x8", "tp4", ("bf16",), 2)},
+    md = collect.markdown(collect.collect(assets, {"m": ("Model", "8x8", "tp4", ("bf16",), {"dual": 19, "single": 38})},
                                           {("m", "bf16"): (221, "11b", "A", 50)}))
     assert "| 221 (11b, A, 50) | 200.0 (-9.5%) |" in md
 
@@ -121,7 +122,8 @@ def test_outside_blocks_is_the_step_less_executions_times_in_model_medians(tmp_p
 def test_a_config_weighs_its_blocks_by_executions(tmp_path):
     tensor = breakdown(block_ms=4.0, engines={"tensor": 3.0, "vector": 1.0}, mfu=0.5)
     vector = breakdown(block_ms=2.0, engines={"tensor": 0.5, "vector": 1.5}, mfu=0.2)
-    c = one(lane(tmp_path, "m", "bf16", [(tensor, 1, 4.0), (vector, 10, 2.0)]), n=2)
+    c = one(lane(tmp_path, "m", "bf16", [(tensor, 1, 4.0), (vector, 10, 2.0)], kinds=["a", "b"]),
+            execs={"a": 1, "b": 10})
     # tensor 3 + 10 x 0.5 = 8 < vector 1 + 10 x 1.5 = 16, of 4 + 10 x 2 = 24 ms
     assert c["bottleneck"]["engine_class"] == "vector"
     assert c["bottleneck"]["share"] == pytest.approx(16 / 24)
@@ -131,15 +133,15 @@ def test_a_config_weighs_its_blocks_by_executions(tmp_path):
 def test_a_missing_breakdown_is_pending_and_never_estimated(tmp_path):
     assets = lane(tmp_path, "m", "bf16", [(breakdown(), 20, 450.0), (None, 40, 230.0)],
                        kinds=["dual", "single"])
-    c = one(assets, n=2)
+    c = one(assets, execs={"dual": 20, "single": 40})
     pending = c["blocks"][1]
     assert pending["status"] == "pending" and "block_ms" not in pending
     assert (pending["kind"], pending["execs_per_step"]) == ("single", 40)
     assert c["status"] == "pending"
     assert c["bottleneck"] is None and c["attention_share"] is None
     assert c["outside_blocks_ms"] == pytest.approx(221 - (20 * 450.0 + 40 * 230.0))
-    data = collect.datasets(collect.collect(assets, {"m": ("Model", "8x8", "tp4", ("bf16",), 2)},
-                                            {}))
+    data = collect.datasets(collect.collect(
+        assets, {"m": ("Model", "8x8", "tp4", ("bf16",), {"dual": 20, "single": 40})}, {}))
     assert "timeline_m_bf16_blk1" in data and "timeline_m_bf16_blk2" not in data
     row = [r for r in data["blocks"] if r["blk"] == "blk2"][0]
     assert row["status"] == "pending" and row["block_ms"] is None
@@ -147,7 +149,7 @@ def test_a_missing_breakdown_is_pending_and_never_estimated(tmp_path):
 
 
 def test_a_lane_with_nothing_on_disk_is_pending(tmp_path):
-    configs = {"m": ("Model", "8x8", "tp4", ("bf16", "mxfp8"), 2)}
+    configs = {"m": ("Model", "8x8", "tp4", ("bf16", "mxfp8"), {"dual": 19, "single": 38})}
     c = collect.collect(tmp_path / "a", configs, {})["configs"]
     assert [x["arm"] for x in c] == ["bf16", "mxfp8"]
     assert all(x["status"] == "pending" and x["blocks_ms"] is None for x in c)
@@ -156,7 +158,7 @@ def test_a_lane_with_nothing_on_disk_is_pending(tmp_path):
 
 def test_datasets_are_rows_and_one_time_line_per_block(tmp_path):
     assets = lane(tmp_path, "m", "bf16", [(breakdown(), 60, 4.0)])
-    data = collect.datasets(collect.collect(assets, {"m": ("Model", "8x8", "tp4", ("bf16",), 1)},
+    data = collect.datasets(collect.collect(assets, {"m": ("Model", "8x8", "tp4", ("bf16",), {"block": 60})},
                                             {("m", "bf16"): (221, "11b", "A", 50)}))
     assert set(data) == {"overview", "blocks", "engines", "components", "attention_phases",
                          "memory", "unattributed", "quality", "timeline_m_bf16_blk1"}
@@ -177,7 +179,7 @@ def test_component_overlap_is_noted_per_engine_over_1_05(tmp_path):
     """Ruling R28: an engine whose components' unions sum over 1.05 x its union (interleaved
     branches, HV1's single block TensorE 1.16) gets a note; every engine row carries its ratio."""
     assets = lane(tmp_path, "m", "bf16", [(breakdown(), 60, 4.0)])
-    data = collect.datasets(collect.collect(assets, {"m": ("Model", "8x8", "tp4", ("bf16",), 1)},
+    data = collect.datasets(collect.collect(assets, {"m": ("Model", "8x8", "tp4", ("bf16",), {"block": 60})},
                                             {("m", "bf16"): (221, "11b", "A", 50)}))
     assert data["blocks"][0]["component_overlap"] == "tensor 1.162x"
     overlap = {r["engine_class"]: r["component_overlap"] for r in data["engines"]}
@@ -189,8 +191,10 @@ def test_component_overlap_is_noted_per_engine_over_1_05(tmp_path):
 
 
 def test_store_and_doc_tables(tmp_path):
-    assets = lane(tmp_path, "m", "bf16", [(breakdown(), 60, 4.0), (None, 2, 1.0)])
-    results = collect.collect(assets, {"m": ("Model", "8x8", "tp4", ("bf16",), 2)}, {})
+    assets = lane(tmp_path, "m", "bf16", [(breakdown(), 60, 4.0), (None, 2, 1.0)],
+                  kinds=["block", "tail"])
+    results = collect.collect(assets, {"m": ("Model", "8x8", "tp4", ("bf16",),
+                                             {"block": 60, "tail": 2})}, {})
     data = collect.datasets(results)
     docs = collect.store(results, data, "<meta>", "now")
     assert set(docs) == {"dash/meta", "files/index.html", *(f"datasets/{i}" for i in data)}
@@ -198,7 +202,7 @@ def test_store_and_doc_tables(tmp_path):
     assert docs["datasets/timeline_m_bf16_blk1"]["title"] == "Time line, Model bf16 blk1 (block)"
     assert all(d["fixed"] for k, d in docs.items() if k.startswith("datasets/"))
     md = collect.markdown(results)
-    assert "| Model | bf16 | blk2 (block) | pending |" in md  # never a number for a pending block
+    assert "| Model | bf16 | blk2 (tail) | pending |" in md  # never a number for a pending block
     assert "not measured" in md
 
 
@@ -229,6 +233,17 @@ def test_step_times_are_the_evidence_docs():
         text = _section(section)
         assert str(ms) in text or f"{ms:,}" in text, (key, arm)
         assert host == ("B" if section.startswith("12") else "A")
+
+
+def test_executions_per_step_must_be_the_tables(tmp_path):
+    """Ruling R18: a 1-step lane prints no step line, so nothing else checks its loop window; a
+    block kind runs as often per step as the table says (layers x sequential CFG forwards)."""
+    assets = lane(tmp_path, "m", "bf16", [(breakdown(), 19, 4.0), (breakdown(), 38, 3.0)],
+                  kinds=["dual", "single"])
+    assert one(assets, execs={"dual": 19, "single": 38})["status"] == "ok"
+    with pytest.raises(SystemExit, match=r"m bf16 blk2 \(single\) ran 38 times per step, the "
+                                         r"table says 37"):
+        one(assets, execs={"dual": 19, "single": 37})
 
 
 def test_a_breakdown_without_its_lane_files_is_refused(tmp_path):
