@@ -254,7 +254,10 @@ import json, re, sys
 from pathlib import Path
 import pandas as pd
 blk, key, signatures, not_a_block, sha, *ranks = sys.argv[1:]
-rows = pd.read_parquet(Path(blk, "pq/trace/Instruction.parquet"), columns=["layer", "nki_source_location"])
+# use_threads=False: pyarrow's thread pool aborts ~3% of interpreter exits ("terminate called
+# without an active exception", 4 of 150 runs; 0 of 400 without it), a block rejected for nothing
+rows = pd.read_parquet(Path(blk, "pq/trace/Instruction.parquet"),
+                       columns=["layer", "nki_source_location"], use_threads=False)
 src = rows.nki_source_location.dropna().str.rsplit(":", n=1).str[0]
 src = src[src != ""]
 top = src.value_counts().idxmax() if len(src) else ""
