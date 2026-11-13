@@ -311,7 +311,8 @@ def test_two_lanes_never_capture_at_the_same_time(tmp_path):
                               ["1", "2"]))
     for done, arm_dir, *_ in lanes:
         assert _status(arm_dir) == "DONE", done.stderr
-    spans = sorted(tuple(map(float, ln.split())) for ln in (tmp_path / "spans").read_text().splitlines())
+    spans = sorted(tuple(map(float, ln.split()))
+                   for ln in (tmp_path / "spans").read_text().splitlines())
     assert len(spans) == 4
     assert all(b[0] >= a[1] for a, b in zip(spans, spans[1:])), spans
 
