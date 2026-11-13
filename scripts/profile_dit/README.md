@@ -5,6 +5,11 @@ MXFP8 (plan: `docs/plans/2026-11-13-dit-block-profile.md`). `capture.sh` capture
 configuration's block NEFFs (Task 1), `analyze.py` breaks one block down (Task 3), `run_all.sh`
 runs every configuration on the idle devices (Task 4).
 
+Run the analysis on the checkout and the Neuron SDK that produced the capture: `components.py`
+maps attention rows to phases by the line numbers of nkilib 2.14's `attention_cte.py`, and its
+source rules and `unattributed_by_source` read the checkout's model files as they are now, so
+another nkilib or a moved line misreads the rows without an error.
+
 ## `run_all.sh`
 
 ```
