@@ -62,7 +62,9 @@ args = sys.argv[1:]
 parent = open(f"/proc/{{os.getppid()}}/cmdline", "rb").read().split(b"\\0")[:4]  # its timeout
 with open(os.environ["X_LOG"], "a") as f:
     f.write(json.dumps({{"argv": args, "cwd": os.getcwd(),
-                        "parent": [p.decode() for p in parent]}}) + "\\n")
+                        "parent": [p.decode() for p in parent],
+                        "cores": os.environ.get("NEURON_RT_VISIBLE_CORES"),
+                        "comm": os.environ.get("NEURON_RT_ROOT_COMM_ID")}}) + "\\n")
 def opt(name):
     return args[args.index(name) + 1] if name in args else None
 ATTN = "/venv/site-packages/nkilib/core/attention/attention_cte.py"
@@ -105,6 +107,18 @@ if args[0] == "inspect":
     sys.exit(rc)
 if args[0] == "capture":
     import time
+    ntffs = [Path(opt("-s")).with_name(f"profile_rank_0_exec_{{e}}.ntff") for e in (4, 8)]
+    if os.environ.get("FAKE_NQ_OVERFLOW"):  # HV1's dual block with --enable-dge-notifs, 2026-11-13
+        if "--enable-dge-notifs" in args:
+            for n in ntffs:
+                n.write_text("partial")
+            print("ERROR  TDRV:exec_request_process_errors [ND 12][NC 7] notification queue overflow"
+                  " on model module.neff. Too many notifications generated during execution.")
+            print("ERROR  NMGR:tpb_xu_step Failed to progress exec state, Execution Unit[3101]"
+                  " encountered fatal error [NRT_EXEC_SW_NQ_OVERFLOW].")
+            sys.exit(1)
+        if any(n.exists() for n in ntffs):
+            sys.exit(3)  # the failed capture's partial NTFFs are still there
     t0 = time.time()
     time.sleep(float(os.environ.get("FAKE_CAPTURE_S", 0)))
     if os.environ.get("SPANS"):
@@ -159,10 +173,11 @@ def _dump(key: str) -> list[dict[str, str]]:
 
 
 def _capture(root: Path, key: str, arm: str = "bf16", device: int = 1, dump=None,
-             signatures: dict | None = TEST_SIGNATURES, out: str | None = None, **env: str):
+             signatures: dict | None = TEST_SIGNATURES, out: str | None = None,
+             extra: tuple[str, ...] = (), **env: str):
     """Run capture.sh with the fakes under ``root`` (its working directory; ``--out`` defaults
-    to ``root/out``, absolute); returns (process, arm dir, PY lines, neuron-explorer lines,
-    fuser lines)."""
+    to ``root/out``, absolute; ``extra`` arguments appended); returns (process, arm dir, PY
+    lines, neuron-explorer lines, fuser lines)."""
     bin_dir = root / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
     for name, text in (("neuron-explorer", FAKE_X.format(exe=sys.executable)),
@@ -179,7 +194,8 @@ def _capture(root: Path, key: str, arm: str = "bf16", device: int = 1, dump=None
         full["SIGNATURES"] = str(root / "signatures.json")
     cpu = str(min(os.sched_getaffinity(0)))
     done = subprocess.run(["bash", str(PD / "capture.sh"), "--key", key, "--arm", arm,
-                           "--device", str(device), "--cpus", cpu, "--out", out or str(root / "out")],
+                           "--device", str(device), "--cpus", cpu, "--out", out or str(root / "out"),
+                           *extra],
                           env=full, cwd=root, capture_output=True, text=True, timeout=300)
 
     def lines(k):
@@ -242,6 +258,7 @@ def test_each_key_dumps_one_step_at_its_shape_and_captures_its_blocks_as_four_wo
             source = json.loads((blk / "source.json").read_text())
             assert len(source["ranks"]) == (2 if key == "hv15_official" else 4)
             assert source["neff_name"] == Path(source["ranks"][0]).name
+            assert (source["per_rank"], source["dge_notifs"]) == (False, True)
         summary = json.loads((arm_dir / "system_summary.json").read_text())
         assert summary["step"]["steps"] == int(steps)
         assert sorted(summary["blocks"]) == sorted(
@@ -397,6 +414,105 @@ def test_a_dump_that_ran_another_step_count_than_the_lane_fails_before_any_captu
     else:
         assert "2 steps" in _status(arm_dir)
         assert not [ln for ln in x if ln["argv"][0] == "capture"]
+
+
+@needs_tools
+def test_a_notification_queue_overflow_is_captured_again_without_dge_notifs(tmp_path):
+    """Ruling R22: HV1's 235 MB dual block overflowed the runtime's notification queue with
+    --enable-dge-notifs (NRT_EXEC_SW_NQ_OVERFLOW, 2026-11-13); no runtime setting raises that
+    queue (NEURON_RT_PROFILE_BUF_DMA_MB=1024 overflowed the same), so the block is captured again
+    without the flag, its partial NTFFs deleted first, and source.json says so."""
+    done, arm_dir, _, x, _ = _capture(tmp_path, "hunyuan_video_L", FAKE_NQ_OVERFLOW="1")
+    assert done.returncode == 0, done.stderr
+    assert _status(arm_dir) == "DONE"
+    dge = ["--enable-dge-notifs" in ln["argv"] for ln in x if ln["argv"][0] == "capture"]
+    assert dge == [True, False, True, False]
+    for i in (1, 2):
+        blk = arm_dir / f"blk{i}"
+        assert json.loads((blk / "source.json").read_text())["dge_notifs"] is False
+        assert "NRT_EXEC_SW_NQ_OVERFLOW" in (blk / "capture_dge.log").read_text()
+        assert (blk / "profile_rank_0_exec_4.ntff").read_text() == "ntff"
+
+
+def _opts(argv: list[str]) -> dict[str, str]:
+    return dict(a.split("=", 1) for a in argv if a.startswith("--") and "=" in a)
+
+
+@needs_tools
+def test_neffs_that_differ_per_rank_are_replayed_one_worker_per_rank(tmp_path):
+    """Ruling R21: LTX-2 and Wan compile another block NEFF on every rank (2026-11-13 run, ltx_2
+    bf16: 6,105,602 / 6,103,355 / 6,103,814 / 6,103,754 B, four sha256). The replay runs one
+    process per worker, worker r on rank r's NEFF and logical core 4d+r, one root communicator;
+    worker 0 is profiled and analyzed."""
+    dump = [{str(100 + r): f"block{r}"} for r in range(4)]
+    done, arm_dir, _, x, _ = _capture(tmp_path, "ltx_2", device=3, dump=dump)
+    assert done.returncode == 0, done.stderr
+    assert _status(arm_dir) == "DONE"
+    captures = sorted((ln for ln in x if ln["argv"][0] == "capture"),
+                      key=lambda ln: int(_opts(ln["argv"])["--collectives-worker-start-id"]))
+    assert len(captures) == 4
+    assert len({c["comm"] for c in captures}) == 1 and captures[0]["comm"]
+    for r, c in enumerate(captures):
+        assert _opts(c["argv"]) | {"--enable-dge-notifs": None} == {
+            "--collectives-worker-count": "4", "--collectives-workers-per-node": "1",
+            "--collectives-worker-start-id": str(r), "--collectives-profile-id": "0",
+            "--num-exec": "8", "--profile-nth-exec": "4", "--enable-dge-notifs": None}
+        assert _flag(c["argv"], "-n") == f"rank{r}.neff" and c["cores"] == str(12 + r)
+        assert tuple(c["parent"]) == ("timeout", "-k", "60", "1200")
+    blk = arm_dir / "blk1"
+    for r in range(4):
+        assert (blk / f"rank{r}.neff").read_bytes()[:6] == f"block{r}".encode()
+    assert (blk / "block.neff").read_bytes() == (blk / "rank0.neff").read_bytes()
+    source = json.loads((blk / "source.json").read_text())
+    assert [Path(p).parts[-3] for p in source["ranks"]] == [f"i-0test_pid_{1000 + r}" for r in range(4)]
+    assert source["per_rank"] is True and len(set(source["sha256_by_rank"])) == 4
+    assert source["sha256"] == source["sha256_by_rank"][0]
+    summary = json.loads((arm_dir / "system_summary.json").read_text())
+    assert summary["blocks"] == [source["neff_name"]] == ["neff_100_vnc_0.neff"]
+
+
+@needs_tools
+def test_per_rank_roles_are_matched_by_size(tmp_path):
+    """Two block kinds per rank, every NEFF its own: the larger of each rank is one role."""
+    dump = [{str(100 + r): f"block{r}+512", str(200 + r): f"block{4 + r}"} for r in range(4)]
+    done, arm_dir, _, x, _ = _capture(tmp_path, "flux", dump=dump)
+    assert done.returncode == 0, done.stderr
+    assert _status(arm_dir) == "DONE"
+    assert len([ln for ln in x if ln["argv"][0] == "capture"]) == 8
+    for i, first in ((1, 0), (2, 4)):
+        for r in range(4):
+            assert (arm_dir / f"blk{i}" / f"rank{r}.neff").read_bytes()[:6] == f"block{first + r}".encode()
+
+
+@needs_tools
+@pytest.mark.parametrize("change, reason", [
+    ({2: {"999": "block9"}}, "rank 2"),       # a rank with another count
+    ({1: {"101": "block1+512"}}, "sizes"),    # one role's sizes 50% apart
+])
+def test_per_rank_candidates_that_do_not_line_up_fail_before_any_capture(tmp_path, change, reason):
+    dump = [{str(100 + r): f"block{r}"} for r in range(4)]
+    for r, neffs in change.items():
+        dump[r] = {**({} if "101" in neffs else dump[r]), **neffs}
+    done, arm_dir, _, x, _ = _capture(tmp_path, "ltx_2", dump=dump)
+    assert _status(arm_dir).startswith("FAILED candidates") and reason in _status(arm_dir)
+    assert not [ln for ln in x if ln["argv"][0] == "capture"]
+
+
+@needs_tools
+def test_candidates_mode_prints_the_selection_of_a_kept_dump_and_runs_nothing(tmp_path):
+    """The device-free check of a lane's kept dump (`--candidates`): no device, no STATUS."""
+    dump = [{str(100 + r): f"block{r}"} for r in range(4)]
+    done, arm_dir, py, x, fuser = _capture(tmp_path, "ltx_2", dump=dump)
+    assert _status(arm_dir) == "DONE"
+    lane_log = (arm_dir / "lane.log").read_text()
+    done, _, py2, x2, fuser2 = _capture(tmp_path, "ltx_2", dump=dump, extra=("--candidates",))
+    assert done.returncode == 0, done.stderr
+    [line] = done.stdout.splitlines()
+    size, sha, mode, *paths = line.split()
+    assert mode == "rank" and [Path(p).parts[-3] for p in paths] == [
+        f"i-0test_pid_{1000 + r}" for r in range(4)]
+    assert (py2, x2, fuser2) == (py, x, fuser)  # nothing run
+    assert _status(arm_dir) == "DONE" and (arm_dir / "lane.log").read_text() == lane_log
 
 
 @needs_tools

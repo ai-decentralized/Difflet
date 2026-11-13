@@ -75,7 +75,7 @@ the denoise loop by the step count. The compile cache is per key (ruling R7): `q
 | step | command | output |
 |---|---|---|
 | dump | `timeout -s INT -k 90 5400 neuron-explorer inspect -o dump <PY> -m difflet.cli.main generate ...` under `NEURON_RT_INSPECT_DEVICE_PROFILE=1`; the run exits by itself | `dump/`, `dump.log` (ends `dump exit <rc>`), `out.*`, `work/` |
-| candidates | NEFFs over 1 MB whose sha256 is on every rank of rank 0's TP group and whose debug info names model code (below), count = the table's; ranks are the dump's processes in pid order | `lane.log` |
+| candidates | NEFFs over 1 MB whose sha256 is on every rank of rank 0's TP group and whose debug info names model code (below); the roles still missing matched per rank (below); count = the table's; ranks are the dump's processes in pid order | `lane.log` |
 | system profile | `view -d <rank 0's dump> --output-format json`, then `system_profile.py` | `system.json`, `system_summary.json` |
 | per block | `capture --collectives-worker-count=4 --collectives-workers-per-node=4 ... --num-exec=8 --profile-nth-exec=4 --enable-dge-notifs`, then `view --output-format summary-json` (executions 4 and 8) and `--output-format parquet --ingest-only` (execution 4) | `blk<i>/{block.neff, capture.log, profile_rank_0_exec_{4,8}.ntff, summary.json, summary_exec8.json, pq/trace/*.parquet, source.json}` |
 | end | | `STATUS`: `DONE`, `FAILED <reason>` or `BUSY` |
@@ -109,6 +109,31 @@ the denoise loop by the step count. The compile cache is per key (ruling R7): `q
 - **HV1.5 (tp2 x CFG2):** ranks 2-3 are the second TP group; their candidates are compared by
   sha256 and captured as further `blk<i>` when they differ (ruling R3). `system_summary.json`
   covers rank 0 only.
+- **Every rank its own NEFF (ruling R21).** LTX-2 and Wan compile another block NEFF on every
+  rank (2026-11-13 run, ltx_2 bf16: 6,105,602 / 6,103,355 / 6,103,814 / 6,103,754 B, four
+  sha256; Wan 2.1 / 2.2 bf16 89.56-89.61 MB), so none is on every rank and pass 1 ended them
+  `FAILED candidates`. The roles that no shared NEFF fills are matched per rank: on each rank its
+  NEFFs over 1 MB of model code not shared, largest first, the i-th of every rank one role, the
+  count per rank the table's and each role's sizes within 5% of rank 0's, else `FAILED
+  candidates: rank <r> holds ...` / `... role <i> sizes ...`. Such a block is replayed one
+  capture process per worker (`capture_neff` sees `blk<i>/rank<r>.neff`): worker r on rank r's
+  NEFF and logical core 4d+r, `--collectives-workers-per-node=1 --collectives-worker-start-id=r
+  --collectives-profile-id=0`, one `NEURON_RT_ROOT_COMM_ID=localhost:<port>`; every process
+  profiles its own worker (`profile_rank_<r>_exec_{4,8}.ntff`), the analysis reads rank 0's.
+  Checked on ltx_2 bf16, device 14: executions 4 / 8 13.52 / 13.57 ms against 13.44 / 13.60 ms
+  with rank 0's NEFF on all four workers in one process. `source.json` gets `per_rank: true` and
+  `sha256_by_rank`; layouts with one NEFF on every rank keep the one-process replay.
+- **Notification queue overflow (ruling R22).** HV1's 235 MB dual block overflowed the runtime's
+  notification queue with `--enable-dge-notifs` (`NRT_EXEC_SW_NQ_OVERFLOW`, both arms, pass 1).
+  No runtime setting raises that queue: the only documented knobs, `NEURON_RT_PROFILE_BUF_<type>_MB`
+  (EVENT, DMA, H2D_DMA, THROTTLE, CC_CORE_INSTRUCTION, CC_CORE_EVENT), size the profile buffers,
+  and `NEURON_RT_PROFILE_BUF_DMA_MB=1024` overflowed the same (libnrt 2.35.30 has no other queue
+  size variable). On an overflow (`nq_overflow`) the block's partial NTFFs are deleted, its log
+  kept as `capture_dge.log`, and it is captured again without the flag (`blk<i>/no_dge`);
+  `source.json` and `breakdown.json` say `dge_notifs: false` (the profile then warns its DMA
+  values may be inaccurate).
+- **`--candidates`** prints the selection of a kept dump (`<size> <sha256> same|rank <path on each
+  rank>`) and exits: no device, no file written (the device-free check of a lane).
 - `lane.log` has a timestamped line at each phase's start and end (the wall times below).
 - Parquet export: `view --output-format parquet` starts the UI server and never returns unless
   given `--ingest-only`; the tables land directly in `--output-file`.
@@ -116,8 +141,9 @@ the denoise loop by the step count. The compile cache is per key (ruling R7): `q
 ### `source.json`, `system_summary.json`
 
 - `blk<i>/source.json` = `{neff_name, sha256, ranks: [the NEFF's path in each rank's dump],
-  kind}`; `neff_name` is the file name the dump gives it (`neff_<model id>_vnc_0.neff`), the key
-  `system_summary.json` uses (ruling R2).
+  kind, per_rank, dge_notifs}` (+ `sha256_by_rank` when `per_rank`); `neff_name` and `sha256`
+  are rank 0's, `neff_name` the file name the dump gives it (`neff_<model id>_vnc_0.neff`), the
+  key `system_summary.json` uses (ruling R2).
 - `system_summary.json` (`system_profile.py`), all per step: `{blocks, step: {wall_ms, steps,
   gap_s, dump_steps}, neffs: {<neff_name>: {execs_per_step, in_model_median_ms}}, non_block_ms, host_gap_ms,
   cc_running: {n, total_ms}}`. The denoise loop is the last burst of block executions, none more
