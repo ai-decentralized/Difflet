@@ -25,7 +25,8 @@ then `analyze.py <blk> --model <key>` on every block of a `DONE` lane (`blk<i>/a
 - **CPU slices.** 13 lanes at once with no shared CPU leave 12 threads per device: device `d`'s
   6 cores and their SMT siblings on its NUMA node, `lo-(lo+5),(lo+96)-(lo+101)` with
   `lo = (d < 8 ? 48 : 0) + 6 (d mod 8)` (device 1: `54-59,150-155`; device 15: `42-47,138-143`).
-  The plan's 48-thread sets fit four lanes at once (two per node).
+  The plan's 48-thread sets fit four lanes at once (two per node). The whole lane runs under its
+  slice (`taskset` around `capture.sh`: the signature check and `system_profile.py` too).
 - **Hub per lane** (`hub_of`, checked 2026-11-13 by resolving each cache key both ways): the NVMe
   copy `/mnt/nvme/difflet-quant-bench-hub` except `qwen_image mxfp8` (its quantized digest takes
   the root hub's blob names; the NVMe copy's plain files give `mxfp8-d1231d8e...`, which does not
@@ -38,8 +39,11 @@ then `analyze.py <blk> --model <key>` on every block of a `DONE` lane (`blk<i>/a
   transformer, bf16 copies and weight-store entries (as the 2026-11-13 warm-up and smoke logs
   name them). A missing entry ends the lane `FAILED cache miss <path>` before it loads: it would
   be rebuilt on the root disk.
-- **Disk gate.** Below 60 GB free on `/` every lane that still has to capture ends `FAILED disk`;
-  lanes already running finish. A restart retries `BUSY` and never-started lanes, skips `DONE`
+- **Disk gate**, every poll and right before a lane that captures starts (ruling R19): below
+  60 GB free on `/` every lane that still has to capture ends `FAILED disk`, lanes already running
+  finish, and `run_all.log` gets one `DISK LOW: <n> GB free on /...` line per drop.
+- **No silent requeue.** A `capture.sh` that exits with no `DONE`, `BUSY` or `FAILED` `STATUS`
+  ends the lane `FAILED capture.sh exit <rc>` (ruling R19). A restart retries `BUSY` and never-started lanes, skips `DONE`
   (once analyzed) and `FAILED` ones (remove a `STATUS` to rerun it) and never starts a lane whose
   lock (`<lane>/.lock`, held by its job and all it starts) an earlier `run_all.sh` still holds.
 - **Wan bf16** dumps run with `DIFFLET_NKI_TRACE_CACHE=1` (not in the compile-cache key, Task 1).
