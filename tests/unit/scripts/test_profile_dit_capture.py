@@ -53,8 +53,10 @@ FAKE_X = """#!{exe}
 import gzip, io, json, os, random, subprocess, sys, tarfile
 from pathlib import Path
 args = sys.argv[1:]
+parent = open(f"/proc/{{os.getppid()}}/cmdline", "rb").read().split(b"\\0")[:2]  # its timeout
 with open(os.environ["X_LOG"], "a") as f:
-    f.write(json.dumps({{"argv": args, "cwd": os.getcwd()}}) + "\\n")
+    f.write(json.dumps({{"argv": args, "cwd": os.getcwd(),
+                        "parent": [p.decode() for p in parent]}}) + "\\n")
 def opt(name):
     return args[args.index(name) + 1] if name in args else None
 ATTN = "/venv/site-packages/nkilib/core/attention/attention_cte.py"
@@ -198,6 +200,12 @@ def test_each_key_dumps_one_step_at_its_shape_and_captures_its_blocks_as_four_wo
                               "NEURON_RT_INSPECT_DEVICE_PROFILE": "1"}
         captures = [ln["argv"] for ln in x if ln["argv"][0] == "capture"]
         assert len(captures) == blocks
+        # capture 1200 s; each block view 2700 s (ruling R8: HV1.5's took 481-555 s)
+        assert {tuple(ln["parent"]) for ln in x if ln["argv"][0] == "capture"} == {
+            ("timeout", "1200")}
+        block_views = [ln for ln in x if ln["argv"][0] == "view" and "-n" in ln["argv"]]
+        assert len(block_views) == 3 * blocks
+        assert {tuple(ln["parent"]) for ln in block_views} == {("timeout", "2700")}
         for c in captures:
             assert {"--collectives-worker-count=4", "--collectives-workers-per-node=4",
                     "--num-exec=8", "--profile-nth-exec=4", "--enable-dge-notifs"} <= set(c)
