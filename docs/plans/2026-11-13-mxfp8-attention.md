@@ -51,14 +51,24 @@ quality metrics; test together with linear quantization. Background:
 - One commit per task, pushed to `origin/feat/mxfp8-sage-attention`; the artifact page updated
   per model.
 
-## Decision gates (reported to the user, not decided alone)
+## Decision gates (decided by this rule, user 2026-11-13: "只要有速度提升就可以有")
 
-- **G1 (after Task 3):** PV-only MXFP8 kernel time vs `attention_cte` bf16 at Wan 2.1's per-rank
-  shape. Report the ratio, the accuracy and the engine profile.
-- **G2 (after Task 4):** QK+PV kernel time vs PV-only and vs bf16, same shape. QK's contraction
-  is the head dim (128 = 32 partitions x4 in MX), a quarter of the PE rows unless four matmuls
-  share the array by row tiling; if QK in MXFP8 is not faster than QK in bf16, report and ask.
-- **G3 (after Task 6):** per model, whether the attention switch should become a default.
+**Faster** = the candidate's median time is below the comparison's by more than
+`J = max(2%, the comparison's own run-to-run spread)` at the same shape. Quality is measured and
+reported every time but does not veto; an output that is broken (cosine < 0.9 against its
+reference, or noise on screen) is a bug to fix before the gate is read, not a trade-off. Each
+gate's numbers go to the evidence doc and the page, with the decision taken.
+
+- **G1 (after Task 3):** keep MXFP8 PV if PV-only is faster than `attention_cte` bf16 at Wan 2.1's
+  per-rank shape (the largest attention share); the p mode kept is the faster one. Not faster ->
+  stop the plan and report why from the engine profile.
+- **G2 (after Task 4):** keep MXFP8 QK if QK+PV is faster than PV-only. QK's contraction is the
+  head dim (128 = 32 partitions x4 in MX), a quarter of the PE rows unless four matmuls share the
+  array by row tiling. Not faster -> the kernel ships PV-only, QK in bf16.
+- **G3 (after Task 6):** per model, MXFP8 attention becomes part of `--quant mxfp8` when `both`
+  is faster than `linear` (Task 8); HunyuanVideo-1.5 (no linear default) keeps it behind
+  `DIFFLET_ATTN_QUANT` when `attn` is faster than `bf16`. A model where it is not faster keeps
+  bf16 attention.
 
 ## Review Focus
 
@@ -149,8 +159,9 @@ quality metrics; test together with linear quantization. Background:
 - [ ] **Step 3: Probe** both p modes at every shape: rel L2 vs the Task 1 reference with
   `quantize_qk=False` below 3e-3 (the bf16-output rounding level of `mx_linear`, evidence
   section 1a); device time per call.
-- [ ] **Step 4: Gate G1** — report to the user: ratio to bf16 per shape and p mode, accuracy,
-  and the engine split of one capture (Plan-A `analyze.py` on the probe NEFF).
+- [ ] **Step 4: Gate G1** — apply the rule; record the ratio to bf16 per shape and p mode, the
+  accuracy, the engine split of one capture (Plan-A `analyze.py` on the probe NEFF) and the
+  decision.
 - [ ] **Step 5: Commit and push** — `feat(neuron): MXFP8 attention kernel v0, a reduced attention_cte fork with PV on nc_matmul_mx`.
 
 ### Task 4: Kernel v1 — QK in MXFP8
@@ -163,7 +174,8 @@ quality metrics; test together with linear quantization. Background:
   matmuls per 128x128 PE array with `tile_position` row tiling (four query tiles or four key
   tiles at once); scores stay fp32 in PSUM, so the softmax path is unchanged.
 - [ ] **Step 2: Probe** at every shape: rel L2 vs the full Task 1 reference below 3e-3; time.
-- [ ] **Step 3: Gate G2** — report QK+PV vs PV-only vs bf16 per shape, with the engine split.
+- [ ] **Step 3: Gate G2** — apply the rule; record QK+PV vs PV-only vs bf16 per shape, the
+  engine split and the decision (a QK path that loses is removed, not left behind a flag).
 - [ ] **Step 4: Commit and push** — `feat(neuron): MXFP8 attention kernel v1, QK^T on nc_matmul_mx with row tiling`.
 
 ### Task 5: The op, the pre-pass and the switch
@@ -214,8 +226,25 @@ quality metrics; test together with linear quantization. Background:
   bottleneck, said so in the table), next to the evidence doc's bf16 floor for the shape.
 - [ ] **Step 3:** After each model: commit its numbers, push, update the page (step time per
   arm, block breakdown with the attention component, quality).
-- [ ] **Step 4: Gate G3** — the table to the user.
+- [ ] **Step 4: Gate G3** — apply the rule per model; the table and the decisions go to the page.
 - [ ] **Step 5: Commit and push** — `docs(mx-attention): 2x2 arms per model — step time, block profile, quality`.
+
+### Task 8: G3's decisions as the default
+
+**Files:**
+- Modify: `difflet/quant/targets.py` (`ATTN_QUANT_MODELS: frozenset[str]`, the models G3 kept)
+- Modify: `difflet/backends/neuron/ops_impl/attention.py` (the switch resolves to on when the
+  launch's spec is `--quant mxfp8` for a model in `ATTN_QUANT_MODELS`, unless
+  `DIFFLET_ATTN_QUANT=off`; `"off"` joins the allowed values)
+- Test: `tests/unit/backends/test_neuron_mx_attention.py`, `tests/unit/quant/test_targets_*.py`
+
+- [ ] **Step 1: Failing tests** — a model in the set with `--quant mxfp8` routes to the op; the
+  same with `DIFFLET_ATTN_QUANT=off` does not; a model outside the set does not; no `--quant`
+  does not (bf16 graphs unchanged).
+- [ ] **Step 2-4:** run (FAIL), implement, run (PASS).
+- [ ] **Step 5: Device identity** — one kept model's `--quant mxfp8` run equals its Task 6
+  `both` arm's md5.
+- [ ] **Step 6: Commit and push** — `feat(quant): --quant mxfp8 runs attention in MXFP8 on the models where it is faster`.
 
 ### Task 7 (only if Task 6's profile asks for it): V from the linear as MXFP8
 
