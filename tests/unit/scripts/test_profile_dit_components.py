@@ -172,6 +172,23 @@ CASES = [
      "%scatter.313 = scatter(%scatter.306, %constant.133, %add.309)",
      f"{WT}/{LTX}:{line_of(LTX, 'second_out.addcmul_(sin_u, first_x)')}",
      attrs(f"{WT}/{LTX}", line_of(LTX, "second_out.addcmul_(sin_u, first_x)")), "ltx_2", "rope"),
+    # HunyuanVideo at 544x960x129 (2026-11-13 run): the dual block's attention un-padding (a slice
+    # of the padded kernel output, ops_impl/attention.py; 139 ms of HBM DMA) is attention glue;
+    # the single block's MLP activation, its MX down projection and the adaLN modulate
+    ("HunyuanVideoAttention[attn][0]_slice.409", "%slice.409 = slice(%pad.406)", "",
+     attrs(f"{WT}/difflet/backends/neuron/ops_impl/attention.py", 204), "hunyuan_video_L",
+     "attn_glue"),
+    ("GELU[act_mlp][0]_multiply.127", "%multiply.127 = multiply(%multiply.7, %broadcast.53)",
+     f"{WT}/difflet/models/hunyuan_video/modeling_hunyuan_video.py:749",
+     attrs(f"{WT}/difflet/models/hunyuan_video/modeling_hunyuan_video.py", 749),
+     "hunyuan_video_L", "mlp_act"),
+    ("FP8RowParallelLinear[proj_out_mlp][0]_custom-call.316",
+     "%custom-call.316 = custom-call(%reshape.315, %p9, %p10)",
+     f"{SP}/nkilib/experimental/mxfp_utils/mxfp8_utils/mxfp8_wrappers.py:139",
+     attrs(f"{WT}/difflet/backends/neuron/ops_impl/fp8_kernels.py", 122), "hunyuan_video_L",
+     "mlp_down"),
+    ("AdaLayerNormZeroSingle[norm][0]_add.118", "%add.118 = add(%multiply.113, %broadcast.117)", "",
+     attrs(f"{DIFFUSERS}/normalization.py", 201), "hunyuan_video_L", "modulation"),
     ("LTX2Attention[attn2][0]/FP8ColumnParallelLinear[to_q][0]_custom-call.571",
      "%custom-call.571 = custom-call(%reshape.570, %Arg_35.36, %Arg_36.37)",
      f"{SP}/nkilib/experimental/mxfp_utils/mxfp8_utils/mxfp8_wrappers.py:139",

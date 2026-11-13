@@ -71,12 +71,19 @@ ATTN = "/venv/site-packages/nkilib/core/attention/attention_cte.py"
 LINEAR = "/repo/difflet/backends/neuron/ops_impl/linear.py"
 HV = "/repo/difflet/models/hunyuan_video/modeling_hunyuan_video.py"
 VAE = "/repo/difflet/models/hunyuan_video/vae/modeling_vae.py"
-DUAL = [("HunyuanVideoAttention[attn][0]_custom-call.411", ATTN)] * 3 + [
-    ("HunyuanVideoFeedForward[ff][0]/FP8RowParallelLinear[2][0]_custom-call.552", LINEAR)]
+NORM = "/venv/site-packages/diffusers/models/normalization.py"
+# HV1's dual and single blocks as the 2026-11-13 bf16 parquets have them (the dual block's FFN
+# rows carry no module path in bf16)
+DUAL = [("HunyuanVideoAttention[attn][0]_custom-call.414", ATTN)] * 3 + [
+    ("AdaLayerNormZero[norm1][0]/LayerNorm[norm][0]_reduce.134", NORM),
+    ("AdaLayerNormZero[norm1_context][0]/LayerNorm[norm][0]_reduce.185", NORM)]
+SINGLE = [("HunyuanVideoAttention[attn][0]_custom-call.293", ATTN)] * 3 + [
+    ("AdaLayerNormZeroSingle[norm][0]/LayerNorm[norm][0]_reduce.95", NORM),
+    ("ColumnParallelLinear[proj_mlp][0]_dot.5", LINEAR)]
 #: marker -> (the source files its debug info names, its Instruction rows)
 MARKERS = {{"block": (["/repo/difflet/models/toy/modeling_toy.py", ATTN, LINEAR],
                      [("Attn[attn][0]_custom-call.1", ATTN), ("Mlp[ff][0]_dot.2", LINEAR)]),
-           "dual": ([HV, ATTN, LINEAR], DUAL),
+           "dual": ([HV, ATTN, LINEAR], DUAL), "hvsingle": ([HV, ATTN, LINEAR], SINGLE),
            "vaerows": ([HV, ATTN], DUAL + [("Unknown", VAE)] * 9),
            "vae": ([VAE], None), "bare": ([], None)}}
 def neff(spec):
@@ -314,6 +321,19 @@ def test_a_candidate_whose_rows_come_from_the_vae_is_rejected(tmp_path):
     assert status.startswith("FAILED signature blk2") and "vae/modeling_vae.py" in status
     assert json.loads((arm_dir / "blk1" / "source.json").read_text())["kind"] == "dual"
     assert not (arm_dir / "blk2" / "source.json").exists()
+
+
+@needs_tools
+def test_hv1_dual_and_single_blocks_match_the_real_signatures(tmp_path):
+    """Against the real signatures.json, with the 2026-11-13 bf16 blocks' roots: the dual entry
+    may not need the FFN (its bf16 rows carry no module path, which failed pass 2's bf16 lane)
+    and the single-stream block has its own entry."""
+    dump = [{"100": "dual+64", "200": "hvsingle"} for _ in range(4)]
+    done, arm_dir, *_ = _capture(tmp_path, "hunyuan_video_L", dump=dump, signatures=None)
+    assert done.returncode == 0, done.stderr
+    assert _status(arm_dir) == "DONE"
+    kinds = [json.loads((arm_dir / f"blk{i}" / "source.json").read_text())["kind"] for i in (1, 2)]
+    assert kinds == ["dual", "single"]
 
 
 @needs_tools

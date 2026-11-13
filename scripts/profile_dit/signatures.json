@@ -1,6 +1,7 @@
 {
   "hunyuan_video_L": {
-    "dual": {"require": ["HunyuanVideoAttention[attn]", "HunyuanVideoFeedForward[ff]"], "attention_kernel": true}
+    "dual": {"require": ["HunyuanVideoAttention[attn]", "AdaLayerNormZero[norm1]", "AdaLayerNormZero[norm1_context]"], "attention_kernel": true},
+    "single": {"require": ["HunyuanVideoAttention[attn]", "AdaLayerNormZeroSingle[norm]"], "attention_kernel": true}
   },
   "qwen_image": {
     "block": {"require": ["Attention[attn]", "FeedForward[img_mlp]", "FeedForward[txt_mlp]"], "attention_kernel": true}
