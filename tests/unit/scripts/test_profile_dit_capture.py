@@ -140,9 +140,10 @@ def _dump(key: str) -> list[dict[str, str]]:
 
 
 def _capture(root: Path, key: str, arm: str = "bf16", device: int = 1, dump=None,
-             signatures: dict | None = TEST_SIGNATURES, **env: str):
-    """Run capture.sh with the fakes under ``root``; returns (process, arm dir, PY lines,
-    neuron-explorer lines, fuser lines)."""
+             signatures: dict | None = TEST_SIGNATURES, out: str | None = None, **env: str):
+    """Run capture.sh with the fakes under ``root`` (its working directory; ``--out`` defaults
+    to ``root/out``, absolute); returns (process, arm dir, PY lines, neuron-explorer lines,
+    fuser lines)."""
     bin_dir = root / "bin"
     bin_dir.mkdir(parents=True, exist_ok=True)
     for name, text in (("neuron-explorer", FAKE_X.format(exe=sys.executable)),
@@ -158,8 +159,8 @@ def _capture(root: Path, key: str, arm: str = "bf16", device: int = 1, dump=None
         full["SIGNATURES"] = str(root / "signatures.json")
     cpu = str(min(os.sched_getaffinity(0)))
     done = subprocess.run(["bash", str(PD / "capture.sh"), "--key", key, "--arm", arm,
-                           "--device", str(device), "--cpus", cpu, "--out", str(root / "out")],
-                          env=full, capture_output=True, text=True, timeout=300)
+                           "--device", str(device), "--cpus", cpu, "--out", out or str(root / "out")],
+                          env=full, cwd=root, capture_output=True, text=True, timeout=300)
 
     def lines(k):
         p = logs[k]
@@ -320,6 +321,17 @@ def test_hv15_profiles_the_second_cfg_half_when_its_neff_differs(tmp_path):
     # system_summary covers rank 0, which runs only its own group's NEFF
     summary = json.loads((arm_dir / "system_summary.json").read_text())
     assert summary["blocks"] == ["neff_100_vnc_0.neff"]
+
+
+@needs_tools
+def test_a_relative_out_is_the_callers_not_the_repos(tmp_path):
+    """The dump runs from the checkout: a relative --out taken as given would put the dump, the
+    work dir and the NTFFs in the repo, on the root disk, and leave the lane no rank dumps."""
+    done, arm_dir, py, _, _ = _capture(tmp_path, "qwen_image", out="out")
+    assert done.returncode == 0, done.stderr
+    assert _status(arm_dir) == "DONE"
+    assert Path(_flag(py[0]["argv"], "--work-dir")) == arm_dir / "work"
+    assert not (REPO / "out").exists()
 
 
 @needs_tools
