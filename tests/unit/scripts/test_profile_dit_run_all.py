@@ -99,9 +99,11 @@ if sys.argv[1:2] and sys.argv[1].endswith("analyze.py"):
 os.execv(sys.executable, [sys.executable] + sys.argv[1:])
 """
 
+#: fuser: busy on the FUSER_BUSY devices, fails (exit 3) on the FUSER_FAIL ones, else idle
 FAKE_FUSER = """#!/usr/bin/env bash
 echo "$*" >> "$FUSER_LOG"
 case " $FUSER_BUSY " in *" ${1#/dev/neuron} "*) echo " 4242"; exit 0 ;; esac
+case " ${FUSER_FAIL:-} " in *" ${1#/dev/neuron} "*) exit 3 ;; esac
 exit 1
 """
 #: df: DF_AVAIL GB free on / (default 500), 59 once DF_LOW_FILE exists
@@ -202,7 +204,7 @@ def _status(root: Path, key: str, arm: str) -> str:
 
 @needs_tools
 def test_every_lane_runs_once_on_its_own_idle_device_cpu_slice_and_hub(tmp_path):
-    done, root = _run_all(tmp_path, FAKE_LANE_S="0.5")
+    done, root = _run_all(tmp_path, FAKE_LANE_S="2")  # all 13 start before the first ends
     assert done.returncode == 0, done.stderr
     runs = _jsonl(tmp_path / "capture_log")
     assert sorted(r["lane"] for r in runs) == sorted(f"{k} {a}" for k, a in LANES)
@@ -246,6 +248,27 @@ def test_lanes_queue_behind_the_first_to_finish_when_few_devices_are_idle(tmp_pa
     running = [sum(e for _, e in edges[:i + 1]) for i in range(len(edges))]
     assert max(running) == 3
     assert all(_status(root, k, a) == "DONE" for k, a in LANES)
+
+
+@needs_tools
+def test_a_device_fuser_fails_on_is_never_scanned_idle(tmp_path):
+    busy = " ".join(str(d) for d in range(16) if d not in (3, 9, 12))
+    done, root = _run_all(tmp_path, FUSER_BUSY=busy, FUSER_FAIL="9")
+    assert done.returncode == 0, done.stderr
+    assert {r["device"] for r in _jsonl(tmp_path / "capture_log")} == {3, 12}
+
+
+@pytest.mark.parametrize("script", ["run_all.sh", "capture.sh"])
+def test_no_fuser_on_path_stops_before_anything_runs(tmp_path, script):
+    """lib.sh, sourced by both: a device check that cannot run must not read as idle."""
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    (bin_dir / "dirname").symlink_to(shutil.which("dirname"))
+    done = subprocess.run([shutil.which("bash"), str(PD / script)], cwd=tmp_path, timeout=60,
+                          env={"PATH": str(bin_dir), "HOME": str(tmp_path),
+                               "ROOT": str(tmp_path / "run")}, capture_output=True, text=True)
+    assert done.returncode == 2 and "fuser not found" in done.stderr, done.stderr
+    assert not (tmp_path / "run").exists()
 
 
 @needs_tools

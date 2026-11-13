@@ -4,6 +4,8 @@
 # restarted lane finds its own leftovers by environment, never by a pid that may have been reused.
 
 WORLD=4  # capture workers = world size = tp x cfg x cp, every key
+# fuser decides whether a device is idle: one that cannot run must never read as idle
+command -v fuser > /dev/null || { echo "fuser not found" >&2; exit 2; }
 # One `neuron-explorer capture` at a time among our lanes, host-wide (ruling R17): a capture is a
 # measurement, so no other lane's replay runs beside it; dumps and views stay parallel.
 CAPTURE_LOCK=${CAPTURE_LOCK:-/mnt/nvme/difflet-prof/.capture.lock}
@@ -24,7 +26,7 @@ write_status() {  # write_status <lane dir> <DONE | FAILED <reason> | BUSY>
 
 require_idle() {  # require_idle <device> <lane dir>: kills the lane's leftover processes, then
                   # returns 0 if no process holds /dev/neuron<device>; else writes BUSY, returns 1
-  local d=$1 dir=$2 left _
+  local d=$1 dir=$2 left rc _
   left=$(grep -lszxF "DIFFLET_PROF_LANE=$dir" /proc/[0-9]*/environ | cut -d/ -f3)
   if [ -n "$left" ]; then
     note "$dir" "killing the lane's leftover processes" $left
@@ -32,7 +34,10 @@ require_idle() {  # require_idle <device> <lane dir>: kills the lane's leftover 
     for _ in $(seq 60); do kill -0 $left 2>/dev/null || break; sleep 1; done
   fi
   note "$dir" "fuser /dev/neuron$d:"
-  if fuser "/dev/neuron$d" >> "$dir/lane.log" 2>&1; then  # exit 0: some process holds it
+  fuser "/dev/neuron$d" >> "$dir/lane.log" 2>&1
+  rc=$?
+  if [ "$rc" -ne 1 ]; then  # 1: no process holds it; 0: one does; over 1: fuser failed
+    note "$dir" "fuser exit $rc"
     write_status "$dir" BUSY
     return 1
   fi

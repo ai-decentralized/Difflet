@@ -165,7 +165,8 @@ scan() {  # scan: the devices no process holds and none of ours holds (a running
   done
   for d in $(seq 0 15); do
     case "$NOT_OURS$ours" in *" $d "*) continue ;; esac
-    fuser "/dev/neuron$d" > /dev/null 2>&1 || printf ' %s' "$d"
+    fuser "/dev/neuron$d" > /dev/null 2>&1
+    if [ $? -eq 1 ]; then printf ' %s' "$d"; fi  # 1: nothing holds it; 0: held; over 1: failed
   done
 }
 
