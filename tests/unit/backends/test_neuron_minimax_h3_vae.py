@@ -90,3 +90,31 @@ def test_tp_sharded_decoder_matches_the_whole_one(tmp_path, world, cp):
     assert all(r["video_is_none"] for r in results[1:])
     # every rank runs its group's tiles
     assert all(r["tiles_decoded_here"] > 0 for r in results)
+
+
+@pytest.mark.parametrize("frames,height,width", [(124, 768, 1344), (124, 256, 448), (61, 512, 512),
+                                                 (17, 256, 256), (30, 384, 640)])
+def test_video_tiles_are_the_decodes_tiles(frames, height, width):
+    """``video_tiles`` lists exactly the tiles ``decode_minimax_h3_video`` hands its decoder,
+    bit for bit and in its call order, so the ranks can split them without a recording pass."""
+    from difflet.backends.neuron.minimax_h3.vae import video_tiles
+    from difflet.models.minimax_h3.pipeline import decode_minimax_h3_video
+
+    latent_frames = (frames - 1) // 4 + 1
+    gen = torch.Generator().manual_seed(frames + height + width)
+    latents = torch.randn(1, 24, latent_frames, height // 16, width // 16, generator=gen)
+    kwargs = dict(latents_mean=[0.1 * i for i in range(24)],
+                  latents_std=[1.0 + 0.05 * i for i in range(24)], clip_length=17, token_drop=3)
+    seen = []
+
+    def record(tile):
+        seen.append(tile.clone())
+        b, _, t, h, w = tile.shape
+        return torch.zeros(b, 3, t * 4, h * 16, w * 16)
+
+    decode_minimax_h3_video(record, latents, **kwargs)
+    tiles = video_tiles(latents, **kwargs)
+    assert len(tiles) == len(seen) > 0
+    for listed, decoded in zip(tiles, seen):
+        assert listed.shape == decoded.shape
+        assert torch.equal(listed, decoded)

@@ -921,29 +921,38 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
                         _release_neuron_app(app)
                         log("[generate] DiT released before the video decode")
                     vae = load_vae()
+                from concurrent.futures import ThreadPoolExecutor
+
                 from difflet.backends.neuron.minimax_h3.vae import decode_video_on_ranks
 
                 start = time.perf_counter()
-                group, groups, writer = vae.app.tile_groups(rank, world)
-                video = decode_video_on_ranks(
-                    vae, output.video_latents, vae.config, rank=group, world=groups,
-                    scratch_dir=stage_loop.work_file(args, req, "vae_tiles"),
-                    device=self._neuron_device, writer=writer,
-                )
+                # Rank 0 decodes the audio on the host while the ranks decode the video tiles
+                # on the device: the two decodes share nothing but the denoise output.
+                with ThreadPoolExecutor(max_workers=1,
+                                        thread_name_prefix="h3-audio-vae") as pool:
+                    audio_job = (pool.submit(self._decode_audio, output.audio_latents,
+                                             audio_decoder, " overlapped with the video")
+                                 if rank == 0 else None)
+                    group, groups, writer = vae.app.tile_groups(rank, world)
+                    video = decode_video_on_ranks(
+                        vae, output.video_latents, vae.config, rank=group, world=groups,
+                        scratch_dir=stage_loop.work_file(args, req, "vae_tiles"),
+                        device=self._neuron_device, writer=writer,
+                    )
+                    if rank == 0:
+                        destination = stage_loop.work_file(args, req, "video.pt")
+                        torch.save(video.to(torch.float16), destination)
+                    log(f"[video_vae] (device, tiles over {groups} TP groups, {world} ranks) "
+                        f"RGB video in {time.perf_counter() - start:.1f}s")
+                    audio = audio_job.result() if audio_job is not None else None
                 if rank == 0:
-                    destination = stage_loop.work_file(args, req, "video.pt")
-                    torch.save(video.to(torch.float16), destination)
-                log(f"[video_vae] (device, tiles over {groups} TP groups, {world} ranks) RGB "
-                    f"video in {time.perf_counter() - start:.1f}s")
-                if rank == 0:
-                    self._decode_audio_and_mux(req, output.audio_latents, video, audio_decoder)
+                    log(f"[video_vae+audio_vae] both decoded in "
+                        f"{time.perf_counter() - start:.1f}s")
+                    self._mux(req, video, audio, audio_decoder.config)
 
-    def _decode_audio_and_mux(self, req, audio_latents, video, decoder) -> None:
-        """The audio decode on the host (fp32, the whole latent) and the MP4 mux, or the AV
-        tensors when the mux is unavailable (the audio_vae stage's output)."""
+    def _decode_audio(self, audio_latents, decoder, note: str = ""):
+        """The audio decode on the host (fp32, the whole latent)."""
         import time
-
-        import torch
 
         from difflet.models.minimax_h3.pipeline import decode_minimax_h3_audio
 
@@ -958,8 +967,18 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
             latents_std=cfg["latents_std"],
             hop_length=800,
         )
-        print(f"[audio_vae] (host) waveform {tuple(audio.shape)} in "
+        print(f"[audio_vae] (host{note}) waveform {tuple(audio.shape)} in "
               f"{time.perf_counter() - start:.1f}s", flush=True)
+        return audio
+
+    def _decode_audio_and_mux(self, req, audio_latents, video, decoder) -> None:
+        """The audio decode on the host and the mux (the audio_vae stage's output)."""
+        self._mux(req, video, self._decode_audio(audio_latents, decoder), decoder.config)
+
+    def _mux(self, req, video, audio, cfg) -> None:
+        """The MP4 mux, or the AV tensors when the mux is unavailable."""
+        import torch
+
         output_path = Path(req.output)
         if not _save_av(video.float(), audio, str(output_path),
                         sample_rate=int(cfg["sampling_rate"])):

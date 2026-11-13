@@ -224,16 +224,53 @@ class DeviceTileDecoder:
 
 
 
+def video_tiles(normalized_latents: torch.Tensor, *, latents_mean, latents_std,
+                clip_length: int = 17, token_drop: int = 3,
+                temporal_compression_ratio: int = 4, spatial_compression_ratio: int = 16,
+                tile_sample_size: int = 256, tile_min_overlap: int = 64) -> list[torch.Tensor]:
+    """The latent tiles ``decode_minimax_h3_video`` (same arguments, without the decoder)
+    hands its decoder, in its call order, without decoding or stitching anything.
+
+    Its chunking and tiling arithmetic, repeated here so the decode it shares with the
+    Trainium video_vae stage stays as it is; ``test_video_tiles_are_the_decodes_tiles`` pins
+    the two equal.
+    """
+    from difflet.models.minimax_h3.pipeline import _split_tiles
+
+    mean = torch.tensor(latents_mean, dtype=torch.float32).view(1, -1, 1, 1, 1)
+    std = torch.tensor(latents_std, dtype=torch.float32).view(1, -1, 1, 1, 1)
+    latents = normalized_latents.float() * std + mean
+    chunk = math.ceil(clip_length / temporal_compression_ratio)
+    overlap = (-token_drop) % chunk
+    s = spatial_compression_ratio
+    ys, y_lengths, _ = _split_tiles(latents.shape[-2] * s, tile_size=tile_sample_size,
+                                    min_overlap=tile_min_overlap, alignment=s)
+    xs, x_lengths, _ = _split_tiles(latents.shape[-1] * s, tile_size=tile_sample_size,
+                                    min_overlap=tile_min_overlap, alignment=s)
+    num_tokens = latents.shape[2] + token_drop
+    pad = (-num_tokens) % chunk
+    num_chunks = (num_tokens + pad) // chunk - int(token_drop > 0)
+    if pad:
+        latents = torch.cat([latents, latents[:, :, -1:].repeat(1, 1, pad, 1, 1)], dim=2)
+    tiles = []
+    for index in range(num_chunks):
+        clip = latents[:, :, index * chunk : index * chunk + chunk + overlap]
+        for y, height in zip(ys, y_lengths):
+            for x, width in zip(xs, x_lengths):
+                tiles.append(clip[..., y // s : y // s + height // s, x // s : x // s + width // s])
+    return tiles
+
+
 def decode_video_on_ranks(decoder, latents: torch.Tensor, cfg: dict, *, rank: int, world: int,
                           scratch_dir, device, writer: bool = True) -> torch.Tensor | None:
     """``decode_minimax_h3_video`` with its tiles spread over the ranks, each holding a decoder.
 
-    The decode calls its decoder once per tile in a fixed order, so it runs three times: once
-    with a recorder that keeps every tile (every rank, the latents are the same on all of them),
-    once per rank on the tiles ``i % world == rank`` (written to ``scratch_dir``), and once on
-    rank 0 replaying the decoded tiles in order, which does the official blending and stitching.
-    A collective after the writes makes rank 0 wait for every rank's file. Returns the video on
-    rank 0, None elsewhere.
+    The decode calls its decoder once per tile in a fixed order (``video_tiles``,
+    the same on every rank: the latents are), so each rank decodes the tiles
+    ``i % world == rank`` (written to ``scratch_dir``) and rank 0 then runs the decode with a
+    decoder that replays the decoded tiles in order, which does the official blending and
+    stitching. A collective after the writes makes rank 0 wait for every rank's file. Returns
+    the video on rank 0, None elsewhere.
 
     ``rank``/``world`` are tile groups: with a TP-sharded decoder every rank of a group runs
     the group's tiles (the TP collectives need them all) and only its ``writer`` saves them.
@@ -244,14 +281,7 @@ def decode_video_on_ranks(decoder, latents: torch.Tensor, cfg: dict, *, rank: in
 
     kwargs = dict(latents_mean=cfg["latents_mean"], latents_std=cfg["latents_std"],
                   clip_length=int(cfg["clip_length"]), token_drop=int(cfg["token_drop"]))
-    tiles: list[torch.Tensor] = []
-
-    def record(tile: torch.Tensor) -> torch.Tensor:
-        tiles.append(tile.clone())
-        b, _, t, h, w = tile.shape
-        return torch.zeros(b, 3, t * 4, h * 16, w * 16)
-
-    decode_minimax_h3_video(record, latents, **kwargs)
+    tiles = video_tiles(latents, **kwargs)
     scratch = Path(scratch_dir)
     scratch.mkdir(parents=True, exist_ok=True)
     mine = {i: decoder(tiles[i]) for i in range(len(tiles)) if i % world == rank}
@@ -276,6 +306,7 @@ def decode_video_on_ranks(decoder, latents: torch.Tensor, cfg: dict, *, rank: in
 __all__ = [
     "DeviceTileDecoder",
     "decode_video_on_ranks",
+    "video_tiles",
     "NeuronMiniMaxH3VideoVaeApplication",
     "TILE_LATENT_SHAPE",
 ]

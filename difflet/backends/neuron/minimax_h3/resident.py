@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -517,23 +518,32 @@ class NeuronMiniMaxH3Resident:
         )
         seconds["denoise"] = time.perf_counter() - start
         check("after the denoise")
-        start = time.perf_counter()
-        group, groups, writer = self.vae.app.tile_groups(self.rank, self.world)
-        video = decode_video_on_ranks(
-            self.vae, output.video_latents, self.vae.config, rank=group, world=groups,
-            scratch_dir=scratch_dir, device=self.dit_app.device, writer=writer)
-        seconds["video_vae"] = time.perf_counter() - start
-        sample_rate = 0
-        audio = None
-        if self.rank == 0:
-            start = time.perf_counter()
+
+        def decode_audio() -> tuple[torch.Tensor, float]:
+            began = time.perf_counter()
             cfg = self.audio_decoder.config
-            sample_rate = int(cfg["sampling_rate"])
-            audio = decode_minimax_h3_audio(
+            waveform = decode_minimax_h3_audio(
                 self.audio_decoder, output.audio_latents, latents_mean=cfg["latents_mean"],
                 latents_std=cfg["latents_std"], hop_length=800,
             ).float().clamp(-1, 1)
-            seconds["audio_vae"] = time.perf_counter() - start
+            return waveform, time.perf_counter() - began
+
+        # Rank 0 decodes the audio on the host while the ranks decode the video tiles on the
+        # device: the two decodes share nothing but the denoise output.
+        start = time.perf_counter()
+        with ThreadPoolExecutor(max_workers=1, thread_name_prefix="h3-audio-vae") as pool:
+            audio_job = pool.submit(decode_audio) if self.rank == 0 else None
+            group, groups, writer = self.vae.app.tile_groups(self.rank, self.world)
+            video = decode_video_on_ranks(
+                self.vae, output.video_latents, self.vae.config, rank=group, world=groups,
+                scratch_dir=scratch_dir, device=self.dit_app.device, writer=writer)
+            seconds["video_vae"] = time.perf_counter() - start
+            audio, audio_seconds = audio_job.result() if audio_job is not None else (None, 0.0)
+        sample_rate = 0
+        if self.rank == 0:
+            sample_rate = int(self.audio_decoder.config["sampling_rate"])
+            seconds["audio_vae (overlapped)"] = audio_seconds
+            seconds["video+audio"] = time.perf_counter() - start
             video = video.float().clamp(0, 1)
         self.log("request: "
                  + ", ".join(f"{k} {v:.1f}s" for k, v in seconds.items()))
