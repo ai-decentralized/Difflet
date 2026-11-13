@@ -192,6 +192,21 @@ def test_the_timeline_is_physical_core_0_in_execution_order_with_gaps_under_5_us
         {"component": "mlp_up", "engine_class": "tensor", "start_us": 10.0, "end_us": 11.0}]
 
 
+def test_a_long_blocks_timeline_is_bounded_and_keeps_each_engine_classs_span(tmp_path):
+    # ruling R15: 20,000 short rows, 26 us apart per engine, over a 200 ms block -> gaps under
+    # 200 ms / 4000 = 50 us merge
+    kinds = [("Tensor", MLP_UP, "MATMUL"), ("Vector", MLP_ACT, "TENSOR_TENSOR"),
+             ("Scalar", MLP_ACT, "DMA_DIRECT2D")]
+    rows = [row(eng, i * 10_000, i * 10_000 + 4_000, layer, opcode=op)
+            for i in range(20_000) for eng, layer, op in [kinds[i % 3]]]
+    timeline = run(tmp_path, rows, total_time=0.2)["timeline"]
+    assert len(timeline) <= 4000
+    for ec, first, last in [("tensor", 0, 199_984), ("vector", 10, 199_994),
+                            ("hbm_dma", 20, 199_974)]:
+        spans = [(s["start_us"], s["end_us"]) for s in timeline if s["engine_class"] == ec]
+        assert (min(spans)[0], max(e for _, e in spans)) == (first, last), ec
+
+
 def test_the_cli_writes_breakdown_json_with_the_fields_the_page_reads(tmp_path):
     analyze.main([str(block(tmp_path, [row("Tensor", 0, 1000)])), "--model", "qwen_image"])
     out = json.loads((tmp_path / "breakdown.json").read_text())

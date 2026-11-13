@@ -45,7 +45,9 @@ _CTE = "/nkilib/core/attention/attention_cte.py"
 #: 3420; previous-output load 3667; output write-back 3772. Every other "other" line is unmapped.
 _OTHER_LINES = {1251, 1908, 1931, 1935, 1939, 2616, 2789, 3008, 3103, 3420, 3489, 3516, 3667, 3772}
 _LIMIT = 0.10
-_TIMELINE_GAP_NS = 5_000
+#: Time line runs merge across gaps under max(5 us, block / 4000) (ruling R15: HV1.5's 182 ms
+#: block had 51,226 segments at 5 us; breakdown.json is committed and the page has 16 MB).
+_TIMELINE_GAP_NS, _TIMELINE_SEGMENTS = 5_000, 4000
 
 
 def _runs(start: np.ndarray, end: np.ndarray, min_gap: int = 1) -> tuple[np.ndarray, np.ndarray]:
@@ -114,13 +116,15 @@ def _rows(trace: Path, model: str) -> pd.DataFrame:
     return rows
 
 
-def _timeline(rows: pd.DataFrame, cc: pd.DataFrame) -> list[dict]:
-    """Physical core 0's runs per (component, engine_class), gaps under 5 us merged, by start."""
+def _timeline(rows: pd.DataFrame, cc: pd.DataFrame, block_ms: float) -> list[dict]:
+    """Physical core 0's runs per (component, engine_class), by start; a run's gaps under
+    max(5 us, block / 4000) are merged, so no key has more than ~4000 runs."""
+    gap = max(_TIMELINE_GAP_NS, block_ms * 1e6 / _TIMELINE_SEGMENTS)
     core0 = rows[rows.pcore_idx == 0].groupby(["component", "engine_class"])
     parts = [(c, ec, g) for (c, ec), g in core0]
     segments = []
     for c, ec, g in [*parts, ("collective", "collective", cc)]:
-        s, e = _runs(g.start_ts.to_numpy(), g.end_ts.to_numpy(), _TIMELINE_GAP_NS)
+        s, e = _runs(g.start_ts.to_numpy(), g.end_ts.to_numpy(), gap)
         segments += [{"component": c, "engine_class": ec, "start_us": a / 1e3, "end_us": b / 1e3}
                      for a, b in zip(s, e)]
     return sorted(segments, key=lambda r: (r["start_us"], r["engine_class"]))
@@ -202,7 +206,7 @@ def analyze(block_dir: Path, model: str) -> dict:
         "other_share": other_share,
         "unattributed_share": unattributed_share,
         "warnings": pd.read_parquet(trace / "Warning.parquet").message.tolist(),
-        "timeline": _timeline(rows, cc),
+        "timeline": _timeline(rows, cc, block_ms),
     }
 
 
