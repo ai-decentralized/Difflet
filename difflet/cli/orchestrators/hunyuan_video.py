@@ -30,11 +30,20 @@ option with --host-vae, and a TP degree
 whose DiT shard cannot fit one core (tp1: 23.9 GiB of bf16 DiT on a 24 GiB core). DP replicas
 (--dp, --requests) are separate torchrun launches whose rank 0 claims the requests. Unset,
 trainium and tpu keep the AoT path unchanged.
+--quant mxfp8 (``difflet/cli/quant.py``): ``compile`` writes the quantized DiT directory under
+the compile cache straight from the hub's ``transformer``, which is already bf16, and
+``generate`` only resolves it (``_prepare_quant``), before the DiT fit check, which counts that
+directory as stored, and before any rank starts; weights not yet downloaded and a target
+pattern matching no linear weight (one naming a single block's fused ``proj_out``, which the
+directory stores as its halves, among them) are refused there, on the driver, while the stage
+line, the DP workers and the generate stage's key carry the spec to the ranks, which build the
+application with it (``_torchrun_application_kwargs``).
 """
 from __future__ import annotations
 
 import argparse
 import contextlib
+import functools
 import os
 import shutil
 import sys
@@ -52,6 +61,8 @@ from difflet.cli.orchestrators.base import (
     write_stage_manifest,
 )
 from difflet.cli.orchestrators.torchrun import (
+    _local_snapshot,
+    refuse,
     refuse_dit_overflow,
     refuse_torchrun_conflicts,
     reject_unsupported_torchrun_options,
@@ -63,8 +74,12 @@ from difflet.cli.orchestrators.torchrun import (
     torchrun_stage_keys,
     torchrun_unsupported_options,
 )
+from difflet.cli.quant import prepare_quant, quant_cli_args, quant_spec
+from difflet.quant.spec import quant_cache_fields
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import torch
 
 _HF_MODEL_ID = "hunyuanvideo-community/HunyuanVideo"
@@ -190,13 +205,17 @@ def _shape(args: argparse.Namespace) -> tuple[int, int, int]:
 
 def _torchrun_application_kwargs(args: argparse.Namespace) -> dict:
     """The application kwargs, plus any TeaCache flag the user gave (the application builds the
-    controller and, for adaptive TeaCache, the probe on the DiT's own modules) and, when the
+    controller and, for adaptive TeaCache, the probe on the DiT's own modules), when the
     decode runs in the generate launch (``_vae_placement``), the rank-0 decoder and its
-    options."""
+    options, and the MXFP8 spec with --quant (the application resolves the quantized directory
+    the driver's ``compile`` wrote; it never writes one)."""
     kwargs = dict(_TORCHRUN_APPLICATION_KWARGS)
     if _vae_placement(args) == "generate":
         dtype, exec_mode = _vae_decoder(args)
         kwargs.update(enable_vae_decoder=True, vae_dtype=dtype, vae_exec_mode=exec_mode)
+    spec = quant_spec(args)
+    if spec is not None:
+        kwargs["quant"] = spec.to_dict()
     for app_key, arg_key in (("teacache_speedup", "teacache_speedup"),
                              ("teacache_cadence", "teacache_cadence"),
                              ("teacache_online_delta_alpha", "teacache_online_delta"),
@@ -414,26 +433,68 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
         return resolve_model_path(_HF_MODEL_ID, revision=getattr(self.args, "revision", None),
                                   local_files_only=True)
 
+    #: The quantized DiT directory (--quant), once ``_prepare_quant`` resolved it.
+    _quantized_dit: str | None = None
+
+    def _prepare_quant(self, *, create: bool) -> None:
+        """With --quant, resolve the quantized DiT directory under the compile cache
+        (``prepare_quant``), writing it when ``create`` (``compile``; ``generate`` only resolves
+        and refuses with the fix when it is missing, through ``refuse`` as this driver's other
+        refusals; a target pattern matching no linear weight is refused by the writer, naming
+        it, before anything is quantized, a single block's fused ``proj_out`` among them: the
+        spec stores it as its halves, which the writer names). The source is the snapshot's
+        ``transformer`` itself: the hub DiT is bf16, so there is no bf16 copy to make first.
+        Before ``_check_dit_fits`` so the HBM estimate counts fp8 bytes, and before any rank
+        starts so none writes; ``_prepare_torchrun`` roots the compile cache at --cache-dir
+        first so the directory lands under it. Weights that are not local yet are refused here,
+        naming ``difflet download``: the bf16 path leaves them to the ranks, but this step needs
+        them on the driver (to write the directory, or to resolve it and count its bytes), and
+        torchrun would otherwise start tp x cp ranks that each report the missing weights."""
+        if getattr(self.args, "quant", None) is None:
+            return
+        model_dir = _local_snapshot(self._model_dir)
+        if model_dir is None:
+            refuse(f"--quant: the {_HF_MODEL_ID} weights are not local; run `difflet download "
+                   f"--model-id {_HF_MODEL_ID}` first")
+        transformer = Path(model_dir) / "transformer"
+        prepared = prepare_quant(self.args, {"transformer": str(transformer)}, create=create,
+                                 tag="hunyuan_video", fail=refuse)
+        if prepared is not None:
+            self._quantized_dit = prepared["transformer"]
+
+    def _fits_as_stored(self, fits: Callable[..., tuple[bool, int, int]]
+                        ) -> Callable[..., tuple[bool, int, int]]:
+        """``fits`` (``hunyuan_video/hbm.py``'s estimate) reading the quantized DiT directory as
+        stored (fp8 weights and block scales) once ``_prepare_quant`` resolved one: the bf16
+        source's count would refuse a tp the quantized DiT fits."""
+        if self._quantized_dit is None:
+            return fits
+        return functools.partial(fits, dit_dir=self._quantized_dit)
+
     def _check_dit_fits(self) -> None:
         """Refuse a TP degree whose DiT shard clearly cannot fit one core
-        (``difflet/backends/neuron/hunyuan_video/hbm.py``; tp1) before any rank starts: print
-        one message and exit 2. Weights that are not local yet leave the decision to the
-        application's own check. Torch-free."""
+        (``difflet/backends/neuron/hunyuan_video/hbm.py``; tp1 in bf16) before any rank starts:
+        print one message and exit 2. With --quant the quantized directory is counted as
+        stored, and the message names MXFP8 weights. Weights that are not local yet leave the
+        decision to the application's own check. Torch-free."""
         from difflet.backends.neuron.hunyuan_video.hbm import dit_fits
 
-        refuse_dit_overflow("HunyuanVideo", self._model_dir, dit_fits, self.args.tp_degree or 4)
+        refuse_dit_overflow("HunyuanVideo", self._model_dir, self._fits_as_stored(dit_fits),
+                            self.args.tp_degree or 4,
+                            stored="bf16" if self._quantized_dit is None else "MXFP8")
 
-    def _prepare_torchrun(self) -> None:
+    def _prepare_torchrun(self, *, generating: bool) -> None:
         self._reject_unsupported_torchrun_options()
-        self._check_dit_fits()
         root_compile_cache_at_cache_dir(getattr(self.args, "cache_dir", None),
                                         tag="hunyuan_video")
+        self._prepare_quant(create=not generating)
+        self._check_dit_fits()
 
     def _compile_torchrun(self) -> None:
         """``compile`` on a torchrun backend: the generate stage's load + warm-up (it fills the
         NEFF cache; with the decode in process, the rank-0 decoder's warm-up too) and its stage
         manifest; with the vae launch, the vae stage's warm-up decode."""
-        self._prepare_torchrun()
+        self._prepare_torchrun(generating=False)
         shared = self._shared_cli_args(stage_mode="compile")
         with _nki_trace_cache():
             runner.run_stage(_HF_MODEL_ID, "generate", num_cores=replica_cores(self.args),
@@ -447,7 +508,7 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
         host, denoise, rank 0 writes latents.pt and, with the decode in process, decodes and
         writes the video), then, for the other placements, the decode of every request it
         finished, after torchrun has exited: in a one-core vae stage or on the host."""
-        self._prepare_torchrun()
+        self._prepare_torchrun(generating=True)
         _require_request_shape_in_set(self.args)  # fail fast before any stage runs
         work_dir = Path(getattr(self.args, "work_dir", None)
                         or Path.home() / ".cache" / "difflet" / "work" / _CLI_NAME)
@@ -747,7 +808,9 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
         latents written by rank 0 to the request's ``latents.pt``. With the decode in process
         (``_vae_placement`` "generate") the application decodes on rank 0 after the denoise
         (``output_type="pt"``) and rank 0 also writes the video (``_write_video``), so this
-        stage finishes the request (a DP worker marks it done).
+        stage finishes the request (a DP worker marks it done). With ``timing`` rank 0 reports
+        the start-up split and the DiT step median per request: the scheduler steps once per
+        denoising step, after that step's forward.
         """
         import torch
 
@@ -784,6 +847,7 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
             save=save,
             finish_compile=lambda: self._finish_stage_compile(
                 "generate", args, self._stage_compiled_dir("generate", args)),
+            timing=True,
             final=in_process,
         )
 
@@ -877,8 +941,9 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
         """The neuron stages' identities: the generate stage under a component of its own (it
         holds the text encode too, and never matches an AoT DiT artifact) with the backend and
         the exec mode (``torchrun_stage_keys``) and, with the decode in process, the rank-0
-        decoder's dtype and exec mode; and the vae stage with the decoder's (``_vae_decoder``,
-        whatever --exec-mode says). There is no clip or llama stage."""
+        decoder's dtype and exec mode, and with --quant the spec's fields; and the vae stage
+        with the decoder's (``_vae_decoder``, whatever --exec-mode says and whatever the DiT's
+        precision). There is no clip or llama stage."""
         shapes = canonical_shapes_list(args, _DEFAULT_SHAPE)
         dtype, exec_mode = _vae_decoder(args)
         if stage == "generate":
@@ -896,6 +961,9 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
                 "shapes": shapes,
                 "toolchain": stage_toolchain_versions(),
                 **vae,
+                # Additive: the MXFP8 DiT names its layer set, tp and compute path
+                # (difflet/quant/spec.py); a bf16 DiT adds nothing.
+                **quant_cache_fields(quant_spec(args)),
             })
         if stage == "vae":
             return {
@@ -954,6 +1022,7 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
             parts += ["--teacache-speedup", str(a.teacache_speedup)]
         if getattr(a, "teacache_calibration", None):
             parts += ["--teacache-calibration", str(a.teacache_calibration)]
+        parts += quant_cli_args(a)  # only when given
         if getattr(a, "prompt", None):
             parts += ["--prompt", a.prompt]
         if getattr(a, "output", None):
