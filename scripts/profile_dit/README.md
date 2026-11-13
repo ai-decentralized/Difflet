@@ -89,8 +89,9 @@ the denoise loop by the step count. The compile cache is per key (ruling R7): `q
   the VAE pieces name no source file, `transpose.py` or only `attention_cte.py`.
 - **Busy devices are never used.** `require_idle` (`lib.sh`) runs before the dump and before
   every capture: it kills the lane's own leftovers (found by their `DIFFLET_PROF_LANE`
-  environment variable, not by a pid), then requires `fuser /dev/neuron<d>` to be empty; its
-  output goes to `lane.log`. A busy device, or the runtime's `Logical Neuron Core(s) not
+  environment variable, not by a pid), then requires `fuser /dev/neuron<d>` to exit 1 (no
+  process holds it); its output goes to `lane.log`. Any other exit is busy, fuser's own failures
+  too, in run_all's scan as well; with no `fuser` on `PATH` both scripts stop at once (exit 2). A busy device, or the runtime's `Logical Neuron Core(s) not
   available` in a log, writes `BUSY` and exits 0 with nothing more run on the device.
 - **One capture at a time, host-wide (ruling R17).** `capture_neff` (`lib.sh`) holds a `flock` on
   `CAPTURE_LOCK` (default `/mnt/nvme/difflet-prof/.capture.lock`) from its `require_idle` to the

@@ -157,12 +157,13 @@ elif fmt == "parquet":
     pd.DataFrame(rows, columns=["layer", "nki_source_location"]).to_parquet(out / "Instruction.parquet")
 """
 
-#: fuser: busy (exit 0, a pid printed) on its FUSER_BUSY_AT-th call, idle (exit 1) otherwise.
+#: fuser: busy (exit 0, a pid printed) on its FUSER_BUSY_AT-th call, idle (exit 1) otherwise, or
+#: exit FUSER_RC (fuser itself failing) when set.
 FAKE_FUSER = """#!/usr/bin/env bash
 echo "$*" >> "$FUSER_LOG"
 n=$(wc -l < "$FUSER_LOG")
 if [ "$n" = "${FUSER_BUSY_AT:-0}" ]; then echo " 4242"; exit 0; fi
-exit 1
+exit "${FUSER_RC:-1}"
 """
 
 #: One kind per key whose rows the "block" marker gives (the real file's entries come from
@@ -348,6 +349,16 @@ def test_a_busy_device_writes_busy_and_runs_nothing_more_on_it(tmp_path, busy_at
     assert device == ["inspect"] * (busy_at > 1) + ["capture"] * captures
     assert not (arm_dir / "blk2" / "summary.json").exists()
     assert "4242" in (arm_dir / "lane.log").read_text()
+
+
+@needs_tools
+def test_a_failing_fuser_reads_as_busy_never_idle(tmp_path):
+    """fuser exits 1 when no process holds the device; over 1 it failed and knows nothing."""
+    done, arm_dir, py, x, _ = _capture(tmp_path, "flux", FUSER_RC="3")
+    assert done.returncode == 0, done.stderr
+    assert _status(arm_dir) == "BUSY"
+    assert not py and not x  # no dump, nothing on the device
+    assert "fuser exit 3" in (arm_dir / "lane.log").read_text()
 
 
 @needs_tools
