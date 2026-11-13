@@ -1,0 +1,15 @@
+{
+  "hunyuan_video_L": {
+    "dual": {"require": ["HunyuanVideoAttention[attn]", "HunyuanVideoFeedForward[ff]"], "attention_kernel": true}
+  },
+  "qwen_image": {
+    "block": {"require": ["Attention[attn]", "FeedForward[img_mlp]", "FeedForward[txt_mlp]"], "attention_kernel": true}
+  },
+  "hv15_official": {
+    "block": {"require": ["Attention[attn]", "AdaLayerNormZero[norm1]", "AdaLayerNormZero[norm1_context]"], "attention_kernel": true}
+  },
+  "flux": {
+    "dual": {"require": ["NeuronFluxAttention[attn]", "NeuronFeedForward[ff]", "NeuronFeedForward[ff_context]"], "attention_kernel": true},
+    "single": {"require": ["NeuronFluxAttention[attn]", "NeuronAdaLayerNormZeroSingle[norm]"], "attention_kernel": true}
+  }
+}
