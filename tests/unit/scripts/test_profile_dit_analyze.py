@@ -109,10 +109,15 @@ def test_a_semaphore_wait_adds_nothing(tmp_path):
 def test_psum_read_out_splits_into_pure_copies_and_fused_compute(tmp_path):
     out = run(tmp_path, [row("Vector", 0, 1000, MLP_ACT, opcode="RANGE_SELECT", psum=64.0),
                          row("Vector", 2000, 2500, MLP_ACT, opcode="COPY", psum=64.0),
+                         row("Scalar", 2200, 2400, MLP_ACT, opcode="COPY", psum=32.0),
                          row("Scalar", 3000, 3300, MLP_ACT, opcode="CAST", psum=32.0),
                          row("Scalar", 4000, 9000, MLP_ACT, opcode="COPY")])  # reads no PSUM
     assert out["psum_readout_fused_ms"] == pytest.approx(1e-3)
-    assert out["psum_readout_copy_ms"] == pytest.approx(8e-4)
+    assert out["psum_readout_copy_ms"] == pytest.approx(8e-4)  # across engines: 2200-2400 once
+    # ruling R16: per engine, so each sits inside its VectorE / ScalarE bar
+    assert out["psum_readout_copy_ms_by_engine"] == {"vector": pytest.approx(5e-4),
+                                                     "scalar": pytest.approx(5e-4)}
+    assert out["psum_readout_fused_ms_by_engine"] == {"vector": pytest.approx(1e-3)}
     assert out["memory_bytes"] == {
         "hbm_read": 10, "hbm_write": 11, "sbuf_read": 12, "sbuf_write": 13, "psum_read": 14,
         "psum_write": 15, "psum_to_sbuf": 16, "spill_save": 17, "spill_reload": 18}
@@ -183,13 +188,19 @@ def test_replay_spread_and_neff_hash_come_from_what_the_block_directory_has(tmp_
 
 def test_the_timeline_is_physical_core_0_in_execution_order_with_gaps_under_5_us_merged(tmp_path):
     out = run(tmp_path, [row("Tensor", 0, 1000), row("Tensor", 3000, 4000),
-                         row("Tensor", 10_000, 11_000), row("Vector", 500, 800, MLP_ACT),
-                         row("Tensor", 20_000, 30_000, pcore=1)], cc=[(1500, 2500)])
+                         row("Tensor", 3500, 3800), row("Tensor", 10_000, 11_000),
+                         row("Vector", 500, 800, MLP_ACT), row("Tensor", 20_000, 30_000, pcore=1)],
+              cc=[(1500, 2500)])
+    # busy_us (ruling R16): the busy runs inside a segment, overlaps once (0-1 and 3-4 us)
     assert out["timeline"] == [
-        {"component": "mlp_up", "engine_class": "tensor", "start_us": 0.0, "end_us": 4.0},
-        {"component": "mlp_act", "engine_class": "vector", "start_us": 0.5, "end_us": 0.8},
-        {"component": "collective", "engine_class": "collective", "start_us": 1.5, "end_us": 2.5},
-        {"component": "mlp_up", "engine_class": "tensor", "start_us": 10.0, "end_us": 11.0}]
+        {"component": "mlp_up", "engine_class": "tensor", "start_us": 0.0, "end_us": 4.0,
+         "busy_us": 2.0},
+        {"component": "mlp_act", "engine_class": "vector", "start_us": 0.5, "end_us": 0.8,
+         "busy_us": pytest.approx(0.3)},
+        {"component": "collective", "engine_class": "collective", "start_us": 1.5, "end_us": 2.5,
+         "busy_us": 1.0},
+        {"component": "mlp_up", "engine_class": "tensor", "start_us": 10.0, "end_us": 11.0,
+         "busy_us": 1.0}]
 
 
 def test_a_long_blocks_timeline_is_bounded_and_keeps_each_engine_classs_span(tmp_path):
@@ -201,10 +212,13 @@ def test_a_long_blocks_timeline_is_bounded_and_keeps_each_engine_classs_span(tmp
             for i in range(20_000) for eng, layer, op in [kinds[i % 3]]]
     timeline = run(tmp_path, rows, total_time=0.2)["timeline"]
     assert len(timeline) <= 4000
-    for ec, first, last in [("tensor", 0, 199_984), ("vector", 10, 199_994),
-                            ("hbm_dma", 20, 199_974)]:
+    for ec, first, last, rows_ in [("tensor", 0, 199_984, 6667), ("vector", 10, 199_994, 6667),
+                                   ("hbm_dma", 20, 199_974, 6666)]:
         spans = [(s["start_us"], s["end_us"]) for s in timeline if s["engine_class"] == ec]
         assert (min(spans)[0], max(e for _, e in spans)) == (first, last), ec
+        # the merged segments still carry every row's 4 us of busy time (ruling R16)
+        assert sum(s["busy_us"] for s in timeline if s["engine_class"] == ec) == pytest.approx(
+            4.0 * rows_), ec
 
 
 def test_the_cli_writes_breakdown_json_with_the_fields_the_page_reads(tmp_path):
@@ -213,8 +227,9 @@ def test_the_cli_writes_breakdown_json_with_the_fields_the_page_reads(tmp_path):
     assert set(out) == {
         "block_ms", "replay_spread_ms", "block_neff_sha256", "engines_ms", "components",
         "engines_check", "attention_detail", "memory_bytes", "psum_readout_copy_ms",
-        "psum_readout_fused_ms", "mfu", "mbu", "throttle", "other_share", "unattributed_share",
-        "warnings", "timeline"}
+        "psum_readout_fused_ms", "psum_readout_copy_ms_by_engine",
+        "psum_readout_fused_ms_by_engine", "mfu", "mbu", "throttle", "other_share",
+        "unattributed_share", "warnings", "timeline"}
     summary_ms = out["engines_check"]["summary_ms"]
     assert summary_ms["dma_active_time"] == pytest.approx(0.3)
     assert {"static_dma_active_time", "hardware_dynamic_dma_active_time",
