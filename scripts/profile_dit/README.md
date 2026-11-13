@@ -43,6 +43,11 @@ the denoise loop by the step count. The compile cache is per key (ruling R7): `q
   environment variable, not by a pid), then requires `fuser /dev/neuron<d>` to be empty; its
   output goes to `lane.log`. A busy device, or the runtime's `Logical Neuron Core(s) not
   available` in a log, writes `BUSY` and exits 0 with nothing more run on the device.
+- **One capture at a time, host-wide (ruling R17).** `capture_neff` (`lib.sh`) holds a `flock` on
+  `CAPTURE_LOCK` (default `/mnt/nvme/difflet-prof/.capture.lock`) from its `require_idle` to the
+  capture's end, so no lane's replay runs beside another's; dumps and views stay parallel.
+  `lane.log` shows the wait: `blk<i> capture start (waits for the capture lock)`, then `capture
+  lock taken`.
 - **Reruns** skip the dump once `dump.log` has `dump exit 0` and a block once its `summary.json`
   exists (written last). The signature check runs every time.
 - **HV1.5 (tp2 x CFG2):** ranks 2-3 are the second TP group; their candidates are compared by

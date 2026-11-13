@@ -17,7 +17,8 @@
 #      text encoder, or that matches none of the key's block kinds, fails the lane once every
 #      candidate is captured and checked;
 #      source.json = {neff_name, sha256, ranks: [the NEFF's path in each rank's dump], kind}.
-# require_idle (lib.sh) runs before every device command (the dump, each capture). The lane ends
+# require_idle (lib.sh) runs before every device command (the dump, each capture); a capture also
+# holds the host-wide capture lock (lib.sh's capture_neff, ruling R17). The lane ends
 # in STATUS: DONE, FAILED <reason> (exit 1) or BUSY (exit 0, nothing more run on the device). A
 # rerun skips what is done: the dump once dump.log says "dump exit 0", a block once its
 # summary.json exists (written last).
@@ -25,7 +26,7 @@
 # usage: capture.sh --key <key> --arm <bf16|mxfp8> --device <d> --cpus <taskset list> --out <root>
 #   keys: the plan's configuration table, flags from scripts/quant_bench/bench.sh's args_for.
 # env: PY (the native-fp8 venv's python), SIGNATURES (default: signatures.json here); inherited
-#      as given: HF_HUB_CACHE, DIFFLET_NKI_TRACE_CACHE.
+#      as given: HF_HUB_CACHE, DIFFLET_NKI_TRACE_CACHE; CAPTURE_LOCK (lib.sh).
 set -u
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)
@@ -41,7 +42,6 @@ export HF_HUB_OFFLINE=1
 unset DIFFLET_COMPILE_CACHE TORCH_NEURONX_NEFF_CACHE_DIR TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR \
   TORCH_NEURONX_HLO_CACHE_DIR TORCHINDUCTOR_CACHE_DIR DIFFLET_NEURON_WEIGHT_STORE \
   DIFFLET_SHARED_WEIGHTS_DIR OMP_NUM_THREADS MKL_NUM_THREADS DIFFLET_QUANT_TARGETS
-WORLD=4         # capture workers = world size = tp x cfg x cp, every key
 DUMP_LIMIT=5400 # s; a cold compile inside the dump (HV1 544x960x129: ~42 min) fits
 # source files of a VAE or a text encoder; of a DiT (difflet's model code, diffusers' transformers)
 NOT_A_BLOCK='/vae/|/autoencoders/|text_encoder|/(u?mt5|t5|clip)/|/transformers/models/'
@@ -230,20 +230,12 @@ for c in "${SEL[@]}"; do
   B=$A/blk$i
   read -r _ sha paths <<< "$c"
   if [ ! -f "$B/summary.json" ]; then
-    require_idle "$DEV" "$A" || exit 0
     rm -rf "$B"
     mkdir -p "$B"
     cp "${paths%% *}" "$B/block.neff"
-    note "$A" "blk$i capture start"
-    # --enable-dge-notifs: the dynamic DMAs traced (without it the profile warns its DMA values
-    # may be inaccurate); same total_time, no slower (README, Task 1 smokes)
-    ( cd "$B" && on_device timeout -k 60 1200 neuron-explorer capture -n block.neff \
-        -s "$B/profile.ntff" --collectives-worker-count=$WORLD \
-        --collectives-workers-per-node=$WORLD --collectives-worker-start-id=0 \
-        --collectives-profile-id=0 --num-exec=8 --profile-nth-exec=4 --enable-dge-notifs \
-      ) > "$B/capture.log" 2>&1
-    rc=$?
-    echo "capture exit $rc" >> "$B/capture.log"
+    note "$A" "blk$i capture start (waits for the capture lock)"
+    capture_neff "$DEV" "$A" "$B" "$CPUS" || exit 0  # require_idle wrote BUSY
+    rc=$CAPTURE_RC
     note "$A" "blk$i capture end, exit $rc"
     if cores_busy "$B/capture.log"; then busy; fi
     if [ $rc -ne 0 ]; then fail "capture blk$i exit $rc"; fi
