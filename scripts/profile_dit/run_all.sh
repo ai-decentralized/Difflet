@@ -9,13 +9,17 @@
 #   - finished: STATUS FAILED <reason>, or DONE with every kept block analyzed; running: its lock
 #     (<lane>/.lock, held by its job and all it starts) is held, also by an earlier run_all's
 #     job, so a lane never runs twice; else pending (no STATUS, BUSY, or DONE not analyzed).
-#   - a pending lane that has to capture first passes the disk gate (60 GB free on /, else every
-#     such lane ends FAILED disk and none starts) and, once per run_all, its prewarm: its root-disk
-#     files read through serially (bench.sh's warm_hub); a missing cache entry ends it FAILED
-#     cache miss, as the lane would rebuild it on the root disk.
+#   - the disk gate, every poll and again right before a lane that has to capture starts: under
+#     60 GB free on / every pending lane that has to capture ends FAILED disk (lanes running go
+#     on), and run_all.log gets one "DISK LOW" line per drop.
+#   - a pending lane that has to capture is prewarmed once per run_all: its root-disk files read
+#     through serially (bench.sh's warm_hub); a missing cache entry ends it FAILED cache miss, as
+#     the lane would rebuild it on the root disk.
 #   - then a fresh `fuser /dev/neuron<d>` scan of d = 0..15: a device no process holds, none of
 #     ours, not 0 or 6 and not one the lane was BUSY on in this run (capture.sh's require_idle
 #     checks again before each device command); none: the lane queues behind the first to finish.
+#   - the lane's job runs whole under its CPU slice (taskset); capture.sh ending with no DONE,
+#     BUSY or FAILED STATUS ends it FAILED capture.sh exit <rc> (else it would requeue forever).
 #   - the run ends, RUN_DONE written (each lane's STATUS and analyses, the baselines), when
 #     nothing of ours runs and no pending lane could start: every lane finished, or the rest
 #     have no idle device left to try (a lane BUSY on every one ends BUSY, one never started
@@ -184,13 +188,20 @@ start() {  # start <dir> <device> <job...>: the job in the background, holding <
 
 lane_job() {  # lane_job <key> <arm> <device>: capture.sh unless DONE, then analyze.py on each kept
               # block of a DONE lane, on the device's CPU slice
-  local key=$1 arm=$2 d=$3 A=$ROOT/$1/$2 cpus blk trace=()
+  local key=$1 arm=$2 d=$3 A=$ROOT/$1/$2 cpus blk rc trace=()
   cpus=$(cpus_of "$d")
   if [ "$(status "$A")" != DONE ]; then
     # Task 1: not part of the compile-cache key; saves Wan bf16 ~10 min of NKI tracing
     case "$key $arm" in wan2[12]_official\ bf16) trace=(DIFFLET_NKI_TRACE_CACHE=1) ;; esac
-    env HF_HUB_CACHE="$(hub_of "$key" "$arm")" "${trace[@]}" "$CAPTURE" --key "$key" --arm "$arm" \
-      --device "$d" --cpus "$cpus" --out "$ROOT" >> "$A/run.log" 2>&1
+    rm -f "$A/STATUS"  # the last run's BUSY is not this run's outcome
+    # the whole lane on its slice: the signature check and system_profile.py too (ruling R19)
+    taskset -c "$cpus" env HF_HUB_CACHE="$(hub_of "$key" "$arm")" "${trace[@]}" "$CAPTURE" \
+      --key "$key" --arm "$arm" --device "$d" --cpus "$cpus" --out "$ROOT" >> "$A/run.log" 2>&1
+    rc=$?
+    case $(status "$A") in
+      DONE|BUSY|FAILED*) ;;
+      *) write_status "$A" "FAILED capture.sh exit $rc" ;;  # else requeued forever (ruling R19)
+    esac
     log "$key $arm on device $d: $(status "$A")"
     if [ "$(status "$A")" = BUSY ]; then echo "$d" >> "$A/busy_devices"; fi
   fi
@@ -255,11 +266,17 @@ maybe_baseline() {  # the in-run baseline (ruling R17): once, on a free idle dev
   start "$B" "$d" baseline_job "$d" "$B" "$n"
 }
 
-disk_ok() {  # disk_ok: 60 GB or more free on / (the plan's gate)
-  local gb
+disk_gate() {  # disk_gate: 0 with 60 GB or more free on / (the plan's gate); else every pending
+               # lane that still has to capture ends FAILED disk, one DISK LOW line per drop, 1
+  local gb l
   gb=$(df --output=avail -BG / | tail -1 | tr -dc 0-9)
-  [ "${gb:-0}" -ge 60 ] && return 0
-  log "disk gate: ${gb:-?} GB free on /, under 60: no lane starts"
+  if [ "${gb:-0}" -ge 60 ]; then DISK_LOW=; return 0; fi
+  [ -n "$DISK_LOW" ] || log "DISK LOW: ${gb:-?} GB free on /, under 60: no lane starts to capture"
+  DISK_LOW=1
+  for l in "${LANES[@]}"; do
+    l=$ROOT/${l/://}
+    running "$l" || finished "$l" || [ "$(status "$l")" = DONE ] || write_status "$l" "FAILED disk"
+  done
   return 1
 }
 
@@ -291,28 +308,21 @@ for lane in "${LANES[@]}"; do mkdir -p "$ROOT/${lane/://}"; done
 rm -f "$ROOT/RUN_DONE" "$ROOT"/*/*/busy_devices  # a new run tries every device again
 log "run_all start, pid $$"
 declare -A WARM=()
+DISK_LOW=
 while :; do
   SCAN= started=
+  disk_gate  # every poll (ruling R19), not only when a lane is about to start
   for lane in "${LANES[@]}"; do
     key=${lane%:*} arm=${lane#*:} A=$ROOT/${lane/://}
     if running "$A" || finished "$A"; then continue; fi
-    if [ "$(status "$A")" != DONE ]; then  # it captures: the gate, its files
-      if ! disk_ok; then
-        for l in "${LANES[@]}"; do
-          l=$ROOT/${l/://}
-          running "$l" || finished "$l" || [ "$(status "$l")" = DONE ] ||
-            write_status "$l" "FAILED disk"
-        done
-        started=1  # not an end yet: a DONE lane may still need its analyses
-        break
-      fi
-      if [ -z "${WARM[$lane]:-}" ]; then
-        prewarm "$A" "$key" "$arm" || continue
-        WARM[$lane]=1 SCAN=
-      fi
+    if [ "$(status "$A")" != DONE ] && [ -z "${WARM[$lane]:-}" ]; then  # it captures: its files
+      prewarm "$A" "$key" "$arm" || continue
+      WARM[$lane]=1 SCAN=
     fi
     [ -n "$SCAN" ] || SCAN="$(scan) "
     d=$(pick "$A") || continue
+    # the gate again right before a lane that captures starts (a DONE lane only analyzes)
+    if [ "$(status "$A")" != DONE ] && ! disk_gate; then continue; fi
     log "start $key $arm on device $d, cpus $(cpus_of "$d"); idle:$SCAN"
     start "$A" "$d" lane_job "$key" "$arm" "$d" && started=1
     maybe_baseline

@@ -31,7 +31,8 @@ NVME_HUB = "/mnt/nvme/difflet-quant-bench-hub"
 
 #: capture.sh: one JSON line per run to CAPTURE_LOG (lane, device, cpus, the hub and trace-cache
 #: environment, the dump's start and end); the lane's n-th run ends as FAKE_OUTCOMES {"<key>
-#: <arm>": [outcome, ...]} says (default DONE), after FAKE_LANE_S seconds of "dump".
+#: <arm>": [outcome, ...]} says (default DONE), after FAKE_LANE_S seconds of "dump"; outcome
+#: "EXIT<rc>" exits rc with no STATUS written. The DISK_DROP_LANE lane's start creates DF_LOW_FILE.
 FAKE_CAPTURE = """#!{exe}
 import json, os, sys, time
 from pathlib import Path
@@ -44,6 +45,12 @@ runs = log.read_text().splitlines() if log.exists() else []
 n = sum(json.loads(ln)["lane"] == lane_id for ln in runs)
 outcome = (json.loads(os.environ.get("FAKE_OUTCOMES", "{{}}")).get(lane_id, [])[n:] or ["DONE"])[0]
 t0 = time.time()
+if os.environ.get("DISK_DROP_LANE") == lane_id:
+    Path(os.environ["DF_LOW_FILE"]).touch()
+if outcome.startswith("EXIT"):
+    with open(log, "a") as f:
+        f.write(json.dumps({{"lane": lane_id, "device": int(a["--device"]), "t0": t0}}) + "\\n")
+    sys.exit(int(outcome[4:]))
 if outcome != "BUSY":
     (lane / "dump.log").write_text("loading\\n")
     time.sleep(float(os.environ.get("FAKE_LANE_S", "0")))
@@ -93,9 +100,10 @@ echo "$*" >> "$FUSER_LOG"
 case " $FUSER_BUSY " in *" ${1#/dev/neuron} "*) echo " 4242"; exit 0 ;; esac
 exit 1
 """
+#: df: DF_AVAIL GB free on / (default 500), 59 once DF_LOW_FILE exists
 FAKE_DF = """#!/usr/bin/env bash
 echo " Avail"
-echo "${DF_AVAIL:-500}G"
+if [ -n "${DF_LOW_FILE:-}" ] && [ -e "$DF_LOW_FILE" ]; then echo 59G; else echo "${DF_AVAIL:-500}G"; fi
 """
 #: taskset: the CPU list and command to TASKSET_LOG, then runs the command (no affinity)
 FAKE_TASKSET = """#!/usr/bin/env bash
@@ -258,6 +266,54 @@ def test_a_lane_busy_once_ends_done_on_the_next_idle_device(tmp_path):
     assert len(ltx) == 2 and ltx[0] != ltx[1]
     assert _status(root, "ltx_2", "mxfp8") == "DONE"
     assert (root / "ltx_2" / "mxfp8" / "busy_devices").read_text().split() == [str(ltx[0])]
+
+
+@needs_tools
+@pytest.mark.parametrize("outcomes", [["EXIT3"], ["BUSY", "EXIT3"]])
+def test_a_capture_that_exits_without_a_terminal_status_fails_the_lane(tmp_path, outcomes):
+    """Ruling R19 (M3): capture.sh dying before its STATUS (none, or the BUSY of the run before)
+    would requeue the lane forever."""
+    done, root = _run_all(tmp_path, FAKE_OUTCOMES=json.dumps({"flux bf16": outcomes}))
+    assert done.returncode == 0, done.stderr
+    assert _status(root, "flux", "bf16") == "FAILED capture.sh exit 3"
+    runs = [r for r in _jsonl(tmp_path / "capture_log") if r["lane"] == "flux bf16"]
+    assert len(runs) == len(outcomes)
+    assert "flux bf16: FAILED capture.sh exit 3" in (root / "RUN_DONE").read_text()
+
+
+@needs_tools
+def test_each_lane_runs_whole_under_its_cpu_slice(tmp_path):
+    """Ruling R19 (M5): capture.sh and all it runs (the signature check, system_profile.py)
+    inherit the lane's CPU slice."""
+    done, root = _run_all(tmp_path)
+    assert done.returncode == 0, done.stderr
+    taskset = (tmp_path / "taskset_log").read_text().splitlines()
+    for r in _jsonl(tmp_path / "capture_log"):
+        key, arm = r["lane"].split()
+        assert [ln for ln in taskset if ln.startswith(f"-c {r['cpus']} ")
+                and str(tmp_path / "bin" / "capture.sh") in ln
+                and f"--key {key} --arm {arm} " in ln], r["lane"]
+
+
+@needs_tools
+def test_the_disk_is_checked_every_poll_and_a_drop_stops_new_lanes(tmp_path):
+    """Ruling R19 (M8): / falls under 60 GB as flux bf16, the third lane on the three idle devices,
+    starts; the rest still queue: none of them starts, one DISK LOW line, the run still ends."""
+    low = tmp_path / "df_low"
+    busy = " ".join(str(d) for d in range(16) if d not in (3, 9, 12))
+    done, root = _run_all(tmp_path, FUSER_BUSY=busy, FAKE_LANE_S="0.3", DF_LOW_FILE=str(low),
+                          DISK_DROP_LANE="flux bf16")
+    assert done.returncode == 0, done.stderr
+    dropped = low.stat().st_mtime
+    runs = _jsonl(tmp_path / "capture_log")
+    assert sorted(r["lane"] for r in runs) == ["flux bf16", "qwen_image bf16", "qwen_image mxfp8"]
+    # mtime is the kernel's coarse clock: a few ms behind time.time(); a later lane would start
+    # 0.3 s after the drop at the earliest (when a device frees)
+    assert all(r["t0"] <= dropped + 0.05 for r in runs)
+    assert {_status(root, k, a) for k, a in LANES} == {"DONE", "FAILED disk"}
+    log = (root / "run_all.log").read_text()
+    assert len([ln for ln in log.splitlines() if "DISK LOW" in ln]) == 1
+    assert (root / "RUN_DONE").exists()
 
 
 @needs_tools
