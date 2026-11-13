@@ -38,9 +38,8 @@ from tests.unit.backends._neuron_wan_toy import (  # noqa: E402
 #: 128-wide text, so every target's K is a multiple of the MX layout's tile.
 FP8_GEOMETRY = ("attention_head_dim", "ffn_dim", "text_dim")
 
-#: Per block: the cross-attention's q/k/v and the two FFN linears (the self-attention's
-#: q/k/v stay bf16 on measurement, difflet/quant/targets.py).
-TARGETS_PER_BLOCK = 5
+#: Per block: the q/k/v of the self- and the cross-attention and the two FFN linears.
+TARGETS_PER_BLOCK = 8
 
 WAN_IDS = ("Wan-AI/Wan2.1-T2V-14B-Diffusers", "Wan-AI/Wan2.2-T2V-A14B-Diffusers")
 
@@ -56,18 +55,24 @@ def _linears(model):
     return [n for n, m in model.named_modules() if isinstance(m, torch.nn.Linear)]
 
 
-def test_default_targets_cover_the_cross_attention_qkv_and_the_ffn_only(model):
+def test_default_targets_cover_every_attention_qkv_and_the_ffn(model):
     spec = default_spec("wan")
     names = [n for n in _linears(model) if spec.matches(n)]
     per_block = {n.split(".", 2)[2] for n in names}
-    assert per_block == {"attn2.to_q", "attn2.to_k", "attn2.to_v",
+    assert per_block == {"attn1.to_q", "attn1.to_k", "attn1.to_v",
+                         "attn2.to_q", "attn2.to_k", "attn2.to_v",
                          "ffn.net.0.proj", "ffn.net.2"}
     assert len(names) == TARGETS_PER_BLOCK * TINY_FP8_WAN["num_layers"]
     assert all(spec.is_row_parallel(n) == n.endswith(("to_out.0", "ffn.net.2"))
                for n, _ in model.named_modules())
     assert not any(spec.matches(n) for n in (
         "proj_out", "condition_embedder.text_embedder.linear_1", "blocks.0.attn1.to_out.0",
-        "blocks.0.attn1.to_q", "blocks.0.attn1.to_k", "blocks.0.attn1.to_v"))
+        "blocks.0.attn2.to_out.0"))
+    # The first default's order: the targets key the quantized directory, so the directories
+    # written for that set are this one's.
+    assert WAN_TARGETS == (r"blocks\.\d+\.attn1\.(to_q|to_k|to_v)",
+                           r"blocks\.\d+\.attn2\.(to_q|to_k|to_v)",
+                           r"blocks\.\d+\.ffn\.net\.0\.proj", r"blocks\.\d+\.ffn\.net\.2")
 
 
 def test_the_targets_are_spelled_as_the_checkpoint_keys():
