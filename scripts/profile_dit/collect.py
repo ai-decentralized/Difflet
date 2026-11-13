@@ -32,17 +32,21 @@ ASSETS = HERE.parents[1] / "docs" / "verification" / "assets" / "2026-11-13-dit-
 #: an engine's components over its union above which the page notes the overlap (ruling R28)
 OVERLAP_NOTE = 1.05
 
-#: key: (model, profiled shape, layout, arms, block NEFFs per arm) — the plan's configurations
+#: key: (model, profiled shape, layout, arms, {block kind: executions per step}) — the plan's
+#: configurations; one block NEFF per kind. Executions = layers x sequential CFG forwards (LTX-2
+#: 48 x 2, Wan 40 x 2; Qwen-Image 60 as measured); collect() fails on another count: a 1-step
+#: lane prints no step line, so nothing else checks its loop window (ruling R18).
 CONFIGS = {
-    "qwen_image": ("Qwen-Image", "1024x1024", "tp4", ("bf16", "mxfp8"), 1),
-    "flux": ("FLUX.1-dev", "1024x1024", "tp4", ("bf16", "mxfp8"), 2),
-    "ltx_2": ("LTX-2", "512x768x121", "tp4, CFG sequential", ("bf16", "mxfp8"), 1),
+    "qwen_image": ("Qwen-Image", "1024x1024", "tp4", ("bf16", "mxfp8"), {"block": 60}),
+    "flux": ("FLUX.1-dev", "1024x1024", "tp4", ("bf16", "mxfp8"), {"dual": 19, "single": 38}),
+    "ltx_2": ("LTX-2", "512x768x121", "tp4, CFG sequential", ("bf16", "mxfp8"), {"block": 96}),
     "wan21_official": ("Wan 2.1 T2V 14B", "480x832x81", "tp4, CFG 5.0 sequential",
-                       ("bf16", "mxfp8"), 1),
+                       ("bf16", "mxfp8"), {"block": 80}),
     "wan22_official": ("Wan 2.2 T2V A14B", "480x832x81", "tp4, CFG 4.0/3.0 sequential",
-                       ("bf16", "mxfp8"), 1),
-    "hunyuan_video_L": ("HunyuanVideo", "544x960x129", "tp4", ("bf16", "mxfp8"), 2),
-    "hv15_official": ("HunyuanVideo-1.5", "480x848x121", "tp2 x CFG2", ("bf16",), 1),
+                       ("bf16", "mxfp8"), {"block": 80}),
+    "hunyuan_video_L": ("HunyuanVideo", "544x960x129", "tp4", ("bf16", "mxfp8"),
+                        {"dual": 20, "single": 40}),
+    "hv15_official": ("HunyuanVideo-1.5", "480x848x121", "tp2 x CFG2", ("bf16",), {"block": 54}),
 }
 
 #: (key, arm): (DiT step median ms, evidence section, host, steps of the run). Host A is the trn3
@@ -157,7 +161,7 @@ def shares(engines: dict, components: dict, detail: dict, block_ms: float, mfu) 
             "rope_share": rope.get(rope_ec, 0.0) / block_ms, "rope_engine": rope_ec}
 
 
-def _block(assets: Path, key: str, arm: str, i: int, summary: dict | None) -> dict:
+def _block(assets: Path, key: str, arm: str, i: int, summary: dict | None, execs: dict) -> dict:
     lane = assets / key / arm
     b = _json(lane / f"blk{i}.json")
     for need in ("system_summary.json", f"blk{i}/source.json") if b else ():
@@ -171,6 +175,10 @@ def _block(assets: Path, key: str, arm: str, i: int, summary: dict | None) -> di
     block = {"blk": i, "kind": source.get("kind"), "neff_name": neff,
              "status": "ok" if b else "pending", "execs_per_step": system.get("execs_per_step"),
              "in_model_median_ms": system.get("in_model_median_ms")}
+    kind, ran = block["kind"], block["execs_per_step"]
+    if None not in (kind, ran) and execs.get(kind) != ran:
+        raise SystemExit(f"collect.py: {key} {arm} blk{i} ({kind}) ran {ran} times per step, the "
+                         f"table says {execs.get(kind)}: check the lane's loop window (R18)")
     if b:
         block |= b | shares(b["engines_ms"], b["components"], b["attention_detail"], b["block_ms"],
                             b["mfu"])
@@ -178,9 +186,10 @@ def _block(assets: Path, key: str, arm: str, i: int, summary: dict | None) -> di
 
 
 def _config(assets: Path, key: str, arm: str, spec: tuple, step: tuple | None) -> dict:
-    model, shape, layout, _, n = spec
+    model, shape, layout, _, execs = spec
+    n = len(execs)
     summary = _json(assets / key / arm / "system_summary.json")
-    blocks = [_block(assets, key, arm, i, summary) for i in range(1, n + 1)]
+    blocks = [_block(assets, key, arm, i, summary, execs) for i in range(1, n + 1)]
     known = [b["execs_per_step"] * b["in_model_median_ms"] for b in blocks
              if b["execs_per_step"] is not None]
     blocks_ms = sum(known) if blocks and len(known) == n else None
