@@ -154,6 +154,28 @@ CASES = [
      "", "", "ltx_2", "out_proj"),
     ("FeedForward[audio_ff][0]/GELU[0][0]/ColumnParallelLinear[proj][0]_dot.60",
      "%dot.60 = dot(%reshape.59, %transpose.58)", "", "", "ltx_2", "mlp_up"),
+    # Real rows of the 2026-11-13 run (ruling R14). Wan 2.1 / 2.2 block, mxfp8: attention-kernel
+    # instructions the profiler files under the all-reduce after the kernel (attention_cte.py
+    # lines, the collective's hlo_attrs: 1.4% of the block's summed durations) are the kernel's
+    ("WanAttention[attn1][0]_all-reduce.164", "%all-reduce.164 = all-reduce(%reshape.159)",
+     f"{CTE}:4472", attrs(f"{SP}/torch/distributed/_functional_collectives.py", 179),
+     "wan21_official", "attention"),
+    # ... and a compiler region of an attention module with its source only in
+    # nki_source_location: RoPE (bf16) and the q/k RMSNorm (mxfp8), not "other"
+    ("WanAttention[attn2][0]/computation_154", "region_11.260.clone.clone.1",
+     f"{WT}/difflet/backends/cpu/ops_impl/embeddings.py:12", "[]", "wan21_official", "rope"),
+    ("WanAttention[attn2][0]/computation_147", "main.447",
+     f"{WT}/{WAN}:{line_of(WAN, 'x_normed = x_normed * weight.float()')}", "[]",
+     "wan22_official", "qk_norm"),
+    # LTX-2 block: RoPE's in-place rotation (bf16), an MX q projection's kernel row (mxfp8)
+    ("LTX2Attention[attn1][0]_scatter.313",
+     "%scatter.313 = scatter(%scatter.306, %constant.133, %add.309)",
+     f"{WT}/{LTX}:{line_of(LTX, 'second_out.addcmul_(sin_u, first_x)')}",
+     attrs(f"{WT}/{LTX}", line_of(LTX, "second_out.addcmul_(sin_u, first_x)")), "ltx_2", "rope"),
+    ("LTX2Attention[attn2][0]/FP8ColumnParallelLinear[to_q][0]_custom-call.571",
+     "%custom-call.571 = custom-call(%reshape.570, %Arg_35.36, %Arg_36.37)",
+     f"{SP}/nkilib/experimental/mxfp_utils/mxfp8_utils/mxfp8_wrappers.py:139",
+     attrs(f"{WT}/difflet/backends/neuron/ops_impl/fp8_kernels.py", 122), "ltx_2", "qkv_proj"),
 ]
 
 
