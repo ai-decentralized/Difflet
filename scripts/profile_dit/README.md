@@ -106,7 +106,9 @@ the denoise loop by the step count. The compile cache is per key (ruling R7): `q
   shows `dump slot wait`, then `dump slot <i> taken`; run_all counts a lane as dumping only once
   its `dump.log` exists.
 - **Reruns** skip the dump once `dump.log` has `dump exit 0` and a block once its `summary.json`
-  exists (written last). The signature check runs every time.
+  exists (written last). The signature check runs every time. A dump that is redone (no `dump exit
+  0`) removes the lane's `blk<i>/`, `system.json` and `system_summary.json` first: its NEFFs may
+  differ. To re-measure after a code change, use a new ROOT (`--out`): a finished lane is kept.
 - **HV1.5 (tp2 x CFG2):** ranks 2-3 are the second TP group; their candidates are compared by
   sha256 and captured as further `blk<i>` when they differ (ruling R3). `system_summary.json`
   covers rank 0 only.
