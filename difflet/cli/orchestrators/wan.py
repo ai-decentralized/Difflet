@@ -27,11 +27,25 @@ checkpoint's boundary timestep with --guidance-scale-2. The driver refuses it on
 checkpoint that cannot switch (models/wan/experts.py) and, on trainium, at a TP degree both
 experts cannot fit (_aot_dual_expert_hbm_misuse). On trainium transformer_2 is a compiled
 component of its own, so the transformer stage key gains "dual_expert" (_dual_expert_keys).
+
+--quant mxfp8 (difflet/cli/quant.py) on the neuron backend: compile writes one quantized
+directory per resident expert under the compile cache, each from the bf16 copy it has just made
+(the hub DiTs are fp32: the writer reads bf16 tensors, never the fp32 files, and the directory's
+fingerprint carries the copy's manifest), and generate only resolves them (_prepare_quant): a
+host where compile never ran has no copy, so the directory is looked for from the fp32 source,
+found missing too and refused naming `difflet compile`; nothing is written. Both experts take
+one spec. The step runs before umT5's placement, which counts each quantized expert as its
+directory stores it, and before any rank starts; weights not yet downloaded, a target pattern
+matching no linear weight and a per-rank K the MX layout cannot take (tp8) are refused there,
+on the driver. The stage line and the DP workers carry the flags beside --dual-expert, the
+transformer stage's key names the spec, and the ranks build the application with it
+(_torchrun_application_kwargs), each resolving the directories read-only.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import sys
@@ -68,6 +82,8 @@ from difflet.cli.orchestrators.torchrun import (
     vae_exec_mode_conflict,
     vae_exec_mode_key,
 )
+from difflet.cli.quant import prepare_quant, quant_cli_args, quant_spec
+from difflet.quant.spec import quant_cache_fields
 
 if TYPE_CHECKING:
     import torch
@@ -286,11 +302,22 @@ def _dual_expert_keys(stage: str, args: argparse.Namespace) -> dict:
     return {}
 
 
+def _experts(args: argparse.Namespace) -> tuple[str, ...]:
+    """The DiT experts a launch holds resident, as the checkpoint names their directories:
+    ``transformer``, plus Wan 2.2's low-noise ``transformer_2`` with --dual-expert. Torch-free."""
+    if getattr(args, "dual_expert", False):
+        return ("transformer", "transformer_2")
+    return ("transformer",)
+
+
 def _torchrun_application_kwargs(args: argparse.Namespace) -> dict:
     """The application kwargs, plus any TeaCache flag the user gave (the application builds the
     controller and, for a calibrated signal, one probe per expert). --dual-expert
     loads Wan 2.2 A14B's low-noise expert (``transformer_2``). --text-encoder-dtype, only when
-    given, sets umT5's precision (``text_encoder_dtype``; the application's default is bf16)."""
+    given, sets umT5's precision (``text_encoder_dtype``; the application's default is bf16).
+    --quant hands the MXFP8 spec over: the application resolves each resident expert's
+    quantized directory itself, read-only (the driver's ``compile`` wrote them), so no
+    directory is named; ``quant_checkpoint`` could serve one expert only."""
     kwargs = dict(_TORCHRUN_APPLICATION_KWARGS)
     if getattr(args, "dual_expert", False):
         kwargs["enable_transformer_2"] = True
@@ -298,6 +325,9 @@ def _torchrun_application_kwargs(args: argparse.Namespace) -> dict:
         kwargs["text_encoder_device"] = "host"
     if getattr(args, "text_encoder_dtype", None):
         kwargs["text_encoder_dtype"] = component_dtype(args.text_encoder_dtype)
+    spec = quant_spec(args)
+    if spec is not None:
+        kwargs["quant"] = spec.to_dict()
     for app_key, arg_key in (
         ("teacache_cadence", "teacache_cadence"),
         ("teacache_online_delta_alpha", "teacache_online_delta"),
@@ -350,6 +380,52 @@ def _component_dtype_keys(stage: str, args: argparse.Namespace) -> dict:
 
 
 class WanOrchestrator(ModelOrchestrator):
+
+    def __init__(self, args: argparse.Namespace) -> None:
+        super().__init__(args)
+        #: The quantized directory of each resident expert (--quant), once ``_prepare_quant``
+        #: resolved them: ``{"transformer": dir[, "transformer_2": dir]}``; empty without it.
+        self._quantized_dits: dict[str, str] = {}
+
+    def _model_dir(self) -> str:
+        """The local snapshot; raises when the weights are not local (never a download)."""
+        from difflet.pipeline.path_resolver import resolve_model_path
+
+        return resolve_model_path(self.args.model_id, revision=self.args.revision,
+                                  local_files_only=True)
+
+    def _prepare_quant(self, *, create: bool) -> None:
+        """With --quant, resolve each resident expert's quantized directory under the compile
+        cache (``prepare_quant``), writing it when ``create`` (``compile``; ``generate`` only
+        resolves and refuses with the fix when it is missing, through ``refuse`` as this
+        driver's other refusals; a target pattern matching no linear weight, or a per-rank K
+        the MX layout cannot take at this tp (tp8: ``ffn.net.2``), is refused by the writer,
+        naming it, before anything is quantized). Each expert's source is the directory it
+        loads in bf16 (``resolve_component_dir``): the bf16 copy ``compile`` has just made, so
+        the writer reads bf16 tensors and the fp32 hub files never, and a ``generate`` on a
+        host where compile never ran, with no copy, looks from the fp32 source, finds no
+        directory either and is refused naming ``difflet compile``. Both experts of Wan 2.2
+        take the one spec, so a launch that quantizes one and not the other cannot be built.
+        After the compile cache is rooted at --cache-dir so the directories land under it,
+        before ``_place_text_encoder`` so umT5's estimate counts fp8 bytes, and before any
+        rank starts so none writes. Weights that are not local yet are refused here, naming
+        ``difflet download``: the bf16 path leaves them to the ranks, but this step needs
+        them on the driver, and torchrun would otherwise start tp x cp ranks that each report
+        the missing weights."""
+        if getattr(self.args, "quant", None) is None:
+            return
+        root = _local_snapshot(self._model_dir)
+        if root is None:
+            refuse(f"--quant: the {self.args.model_id} weights are not local; run `difflet "
+                   f"download --model-id {self.args.model_id}` first")
+        import torch
+
+        from difflet.backends.neuron.core.weights_bf16 import resolve_component_dir
+
+        sources = {name: resolve_component_dir(os.path.join(root, name), torch.bfloat16)
+                   for name in _experts(self.args)}
+        self._quantized_dits = prepare_quant(self.args, sources, create=create, tag="wan",
+                                             fail=refuse) or {}
 
     def download(self) -> None:
         from difflet.pipeline.path_resolver import resolve_model_path
@@ -409,9 +485,11 @@ class WanOrchestrator(ModelOrchestrator):
         tp2 does not fit either. Before this check the application refused it only after
         torchrun had started every rank. The estimate
         (``difflet/backends/neuron/wan/hbm.py``) depends on the tp the transformer stage runs,
-        the local checkpoint's sizes and umT5's precision. Weights that are not local yet
-        (``compile`` before any download) leave the flag alone, and the application's own check
-        still refuses. The
+        the local checkpoint's sizes and umT5's precision; with --quant each resident expert is
+        counted as its quantized directory stores it (``_prepare_quant`` ran first), not as
+        the bf16 source, which would move umT5 to the host beside experts it fits. Weights
+        that are not local yet (``compile`` before any download) leave the flag alone, and the
+        application's own check still refuses. The
         setting lands on ``self.args``, so ``_shared_cli_args`` hands it to the stages, and a
         ``run`` that dispatches DP workers after ``compile`` forwards it to them
         (``worker_cli_args``). Torch-free, like every driver check.
@@ -420,17 +498,13 @@ class WanOrchestrator(ModelOrchestrator):
         if _torchrun_backend() is None or getattr(args, "host_text_encoder", False):
             return
         from difflet.backends.neuron.wan.hbm import device_text_encoder_fits
-        from difflet.pipeline.path_resolver import resolve_model_path
 
-        experts = (("transformer", "transformer_2") if getattr(args, "dual_expert", False)
-                   else ("transformer",))
         encoder_bytes = 4 if getattr(args, "text_encoder_dtype", None) == "fp32" else 2
         overflow = device_encoder_overflow(
-            lambda: resolve_model_path(args.model_id, revision=args.revision,
-                                       local_files_only=True),
+            self._model_dir,
             lambda model_dir, tp_degree: device_text_encoder_fits(
-                model_dir, tp_degree=tp_degree, experts=experts,
-                encoder_dtype_bytes=encoder_bytes),
+                model_dir, tp_degree=tp_degree, experts=_experts(args),
+                encoder_dtype_bytes=encoder_bytes, dit_dirs=self._quantized_dits),
             args.tp_degree or 4,
         )
         if overflow is None:
@@ -452,10 +526,11 @@ class WanOrchestrator(ModelOrchestrator):
     def compile(self) -> None:
         self._reject_unsupported_torchrun_options()
         self._reject_dual_expert_misuse()
-        self._place_text_encoder()
         self._root_compile_cache_at_cache_dir()
         if _torchrun_backend() == "neuron":
             self._make_bf16_dit_copies()
+        self._prepare_quant(create=True)  # from the copies, before the fit check and any rank
+        self._place_text_encoder()
         full_cores = replica_cores(self.args)
         shared = self._shared_cli_args(stage_mode="compile")
         runner.run_stage(self.args.model_id, "transformer",
@@ -470,21 +545,18 @@ class WanOrchestrator(ModelOrchestrator):
 
     def _make_bf16_dit_copies(self) -> None:
         """Once, at compile time (as the Trainium path's pre-shards): bf16 copies of the fp32
-        experts the stages will load, so a cold start reads half the bytes."""
-        import os
+        experts the stages will load, so a cold start reads half the bytes; with --quant,
+        what ``_prepare_quant`` quantizes next."""
         import time
 
         from difflet.backends.neuron.core.weights_bf16 import ensure_bf16_copy
-        from difflet.pipeline.path_resolver import resolve_model_path
 
         try:
-            root = resolve_model_path(self.args.model_id, revision=getattr(self.args, "revision", None),
-                                      local_files_only=True)
+            root = self._model_dir()
         except Exception as exc:  # no local snapshot: the stages report it themselves
             print(f"[wan] bf16 copies skipped: snapshot not resolvable ({exc})", flush=True)
             return
-        experts = ["transformer"] + (["transformer_2"] if getattr(self.args, "dual_expert", False) else [])
-        for name in experts:
+        for name in _experts(self.args):
             started = time.perf_counter()
             copy = ensure_bf16_copy(os.path.join(root, name))
             print(f"[wan] bf16 copy of {name}: {copy or 'not needed (no fp32 tensors)'} "
@@ -493,8 +565,9 @@ class WanOrchestrator(ModelOrchestrator):
     def generate(self) -> None:
         self._reject_unsupported_torchrun_options()
         self._reject_dual_expert_misuse()
-        self._place_text_encoder()
         self._root_compile_cache_at_cache_dir()
+        self._prepare_quant(create=False)  # resolve only: compile wrote the directories
+        self._place_text_encoder()
         _require_request_shape_in_set(self.args)  # fail fast before any stage runs
         work_dir = Path(self.args.work_dir or
                         Path.home() / ".cache" / "difflet" / "work" / _CLI_NAME)
@@ -824,6 +897,9 @@ class WanOrchestrator(ModelOrchestrator):
                 **tp_reduce_cache_fields(
                     parse_tp_reduce_dtype(getattr(args, "tp_reduce_dtype", None)), legacy=None
                 ),
+                # Additive, neuron only: the MXFP8 DiT names its layer set, tp and compute path
+                # (difflet/quant/spec.py; one spec for both experts); a bf16 DiT adds nothing.
+                **quant_cache_fields(quant_spec(args)),
             }
         if stage == "vae":
             return {
@@ -878,6 +954,7 @@ class WanOrchestrator(ModelOrchestrator):
             parts.append("--dual-expert")
         if getattr(a, "host_text_encoder", False):
             parts.append("--host-text-encoder")
+        parts += quant_cli_args(a)  # only when given
         # Only when given, so a default command line stays byte-identical.
         if getattr(a, "text_encoder_dtype", None):
             parts += ["--text-encoder-dtype", a.text_encoder_dtype]
