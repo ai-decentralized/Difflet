@@ -13,6 +13,7 @@ Phase 2b of docs/plans/2026-08-16-tpu-backend-support.md.
 # the TPU backend and its tests keep their import paths.
 from difflet.backends._torch_megatron.embeddings import (  # noqa: F401
     apply_rotary_emb,
+    apply_rotary_emb_fp32,
 )
 
-__all__ = ["apply_rotary_emb"]
+__all__ = ["apply_rotary_emb", "apply_rotary_emb_fp32"]

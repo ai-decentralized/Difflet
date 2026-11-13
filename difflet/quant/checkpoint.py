@@ -13,7 +13,12 @@ Layout of ``<cache>/quantized/<source label>/<component>/mxfp8-<digest>/``:
   source component. A target ``<prefix>.weight`` is stored as ``float8_e4m3fn`` ``[N, K]`` with
   its uint8 E8M0 block scales ``<prefix>.weight_scale`` ``[N, K/32]`` beside it (a row-parallel
   target quantized per rank K range, ``mx.py``); everything else (biases, the bf16 modulation
-  and embedder weights, norms) is copied byte for byte.
+  and embedder weights, norms) is copied byte for byte. A linear the spec splits
+  (``QuantSpec.split_linears``: the single-stream ``proj_out`` ``[N, K]`` over
+  ``cat([attn, mlp])``) is not stored fused: ``<prefix>_attn.weight`` holds its input columns
+  ``[0, N)`` and ``<prefix>_mlp.weight`` the rest, the parameters the neuron model runs, and
+  each half is a target of its own (quantized per rank K range of the half when row-parallel)
+  or the source's column range in the source's dtype. ``<prefix>.bias`` is copied as is.
 * ``config.json`` and the other non-tensor files of the source, copied; a bf16 copy's own
   manifest excepted, since the quantized directory is no bf16 copy of anything.
 * ``difflet_quant.json``: the spec, the source fingerprint and per-tensor counts, and for a
@@ -22,9 +27,11 @@ Layout of ``<cache>/quantized/<source label>/<component>/mxfp8-<digest>/``:
   :func:`check_quantized_dir` refuses a directory whose manifest does not match what the caller
   asks for.
 
-A spec with a target pattern that matches no 2-D weight of the source is refused before anything
-is written, naming the patterns (:func:`write_quantized_dir`): the directory would hold less than
-the spec claims.
+A spec with a target pattern that matches no 2-D weight of the source (a split one counting as
+its two halves), a split pattern that matches none, or a row-parallel pattern on a split
+linear's fused name is refused before anything is written, naming the patterns
+(:func:`write_quantized_dir`): the directory would hold less than the spec claims, or a half
+quantized over another K range than its ranks read.
 
 The digest hashes the spec's weights identity and the source fingerprint (file names, sizes and
 Hugging Face blob names, which are content hashes), so another checkpoint, another target set
@@ -41,7 +48,7 @@ import os
 import re
 import shutil
 import time
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -161,39 +168,94 @@ def iter_source_tensors(model_dir: Path) -> Iterator[tuple[str, torch.Tensor, st
                 yield key, handle.get_tensor(key), Path(path).name
 
 
-def _quantizable_prefixes(model_dir: Path) -> list[str]:
-    """The key prefixes ``quantize_tensors`` can quantize: every 2-D ``<prefix>.weight`` of the
-    component, from the safetensors headers alone (no tensor data is read)."""
+def _weight_shapes(model_dir: Path) -> dict[str, list[int]]:
+    """The shape of every 2-D ``<prefix>.weight`` of the component by its prefix, from the
+    safetensors headers alone (no tensor data is read)."""
     from safetensors import safe_open
 
     by_file = _keys_by_file(model_dir)
-    prefixes: list[str] = []
+    shapes: dict[str, list[int]] = {}
     for path in sorted(by_file):
         with safe_open(path, framework="pt") as handle:
             for key in sorted(by_file[path]):
                 prefix = _tensor_key_prefix(key)
-                if prefix is not None and len(handle.get_slice(key).get_shape()) == 2:
-                    prefixes.append(prefix)
+                shape = handle.get_slice(key).get_shape()
+                if prefix is not None and len(shape) == 2:
+                    shapes[prefix] = list(shape)
+    return shapes
+
+
+def _split_parts(prefix: str, shape) -> list[tuple[str, int, int]]:
+    """``(name, first input column, width)`` of the two halves of the split linear ``prefix``
+    ``[N, K]``: the attention half reads the first N input columns, the MLP half the rest."""
+    n, k = (int(d) for d in shape)
+    if k <= n:
+        raise ValueError(f"{prefix}: a split linear needs K > N (its first N input columns are "
+                         f"the attention half), got [{n}, {k}]")
+    return [(f"{prefix}_attn", 0, n), (f"{prefix}_mlp", n, k - n)]
+
+
+def _quantizable_prefixes(shapes: dict[str, list[int]], spec: QuantSpec) -> list[str]:
+    """The key prefixes ``quantize_tensors`` can quantize under ``spec``: every 2-D weight, a
+    split one as its two halves (the fused name is not written, so no target can match it)."""
+    prefixes: list[str] = []
+    for prefix, shape in shapes.items():
+        if spec.is_split(prefix):
+            prefixes.extend(part for part, _, _ in _split_parts(prefix, shape))
+        else:
+            prefixes.append(prefix)
     return prefixes
+
+
+def _on_fused_names(patterns: Iterable[str], shapes: dict[str, list[int]], spec: QuantSpec
+                    ) -> tuple[list[str], str]:
+    """The ``patterns`` that name a split linear's fused weight, which the directory does not
+    hold (it stores the halves), and a note naming the halves of the first such linear (``""``
+    when there is none): a spec written before the split names the fused linear."""
+    split = [prefix for prefix in shapes if spec.is_split(prefix)]
+    hits, first = [], None
+    for pattern in patterns:
+        named = [prefix for prefix in split if re.fullmatch(pattern, strip_prefix(prefix))]
+        if named:
+            hits.append(pattern)
+            first = first or named[0]
+    if first is None:
+        return hits, ""
+    attn, mlp = (part for part, _, _ in _split_parts(first, shapes[first]))
+    return hits, f" ({first} is split by split_linears: name {attn} / {mlp})"
+
+
+def _quantize_weight(prefix: str, weight: torch.Tensor, spec: QuantSpec
+                     ) -> Iterator[tuple[str, torch.Tensor, bool]]:
+    k_shards = spec.k_shards(prefix)
+    try:
+        weight_q, weight_scale = mx.quantize_mx_sharded(weight, k_shards)
+    except ValueError as exc:
+        # The writer runs on the driver before any rank builds a layer, so a K the MX layout
+        # cannot take at this tp is refused here, naming the layer.
+        split = f" (K={weight.shape[-1]} split over tp={k_shards})" if k_shards > 1 else ""
+        raise ValueError(f"{prefix}{split}: {exc}") from None
+    yield f"{prefix}.weight", weight_q, True
+    yield f"{prefix}.weight_scale", weight_scale, True
 
 
 def quantize_tensors(model_dir: Path, spec: QuantSpec) -> Iterator[tuple[str, torch.Tensor, bool]]:
     """Every tensor of the quantized component in write order: ``(key, tensor, quantized)``.
     A target weight yields ``.weight`` (fp8) and ``.weight_scale`` (uint8 E8M0 ``[N, K/32]``, a
-    row-parallel target quantized per rank K range)."""
+    row-parallel target quantized per rank K range). A split linear yields its halves in its
+    place, each quantized on its own (per rank K range of the half: its own shard count) when a
+    target names it, else the source's column range, uncast."""
     for key, tensor, _ in iter_source_tensors(model_dir):
         prefix = _tensor_key_prefix(key)
-        if prefix is not None and spec.matches(prefix) and tensor.dim() == 2:
-            k_shards = spec.k_shards(prefix)
-            try:
-                weight_q, weight_scale = mx.quantize_mx_sharded(tensor, k_shards)
-            except ValueError as exc:
-                # The writer runs on the driver before any rank builds a layer, so a K the MX
-                # layout cannot take at this tp is refused here, naming the layer.
-                split = f" (K={tensor.shape[-1]} split over tp={k_shards})" if k_shards > 1 else ""
-                raise ValueError(f"{prefix}{split}: {exc}") from None
-            yield key, weight_q, True
-            yield f"{prefix}.weight_scale", weight_scale, True
+        if prefix is not None and tensor.dim() == 2 and spec.is_split(prefix):
+            for part, start, width in _split_parts(prefix, tensor.shape):
+                half = tensor[:, start:start + width]
+                if spec.matches(part):
+                    yield from _quantize_weight(part, half, spec)
+                else:
+                    yield f"{part}.weight", half, False
+        elif prefix is not None and tensor.dim() == 2 and spec.matches(prefix):
+            yield from _quantize_weight(prefix, tensor, spec)
         else:
             yield key, tensor, False
 
@@ -269,14 +331,29 @@ def write_quantized_dir(model_dir: str | Path, out_dir: str | Path, spec: QuantS
     model_dir, out_dir = Path(model_dir), Path(out_dir)
     if (out_dir / MANIFEST).exists():
         raise FileExistsError(f"{out_dir} already holds a quantized checkpoint")
-    dead = spec.unmatched_targets(_quantizable_prefixes(model_dir))
+    shapes = _weight_shapes(model_dir)
+    dead = spec.unmatched_splits(shapes)
+    if dead:
+        # Before the target check: a dead split also leaves every target on its halves dead,
+        # and the split is the pattern to name.
+        raise ValueError(f"split patterns match no linear weight in {model_dir}: "
+                         f"{'; '.join(dead)}")
+    dead = spec.unmatched_targets(_quantizable_prefixes(shapes, spec))
     if dead:
         # Refused here, on the driver, before anything is quantized: the directory would hold
         # less than the spec claims, and every rank would refuse it (``quantize_module_``) only
-        # after the driver spent minutes writing it. The patterns verbatim, separated as
+        # after the driver spent minutes writing it. The patterns verbatim, last, separated as
         # ``DIFFLET_QUANT_TARGETS`` separates them.
-        raise ValueError(f"target patterns match no linear weight in {model_dir}: "
+        _, note = _on_fused_names(dead, shapes, spec)
+        raise ValueError(f"target patterns match no linear weight in {model_dir}{note}: "
                          f"{'; '.join(dead)}")
+    fused, note = _on_fused_names(spec.row_parallel, shapes, spec)
+    if fused:
+        # A half takes its shard count from its own name: under a pattern on the fused name a
+        # row-parallel half would be quantized over its whole K, with scales over a block
+        # membership no rank reads. Refused at every tp, so a tp-1 run catches the spec.
+        raise ValueError(f"row-parallel patterns name the fused weight of a split linear in "
+                         f"{model_dir}{note}: {'; '.join(fused)}")
     tmp = out_dir.with_name(f".{out_dir.name}.tmp-{os.getpid()}")
     if tmp.exists():
         shutil.rmtree(tmp)

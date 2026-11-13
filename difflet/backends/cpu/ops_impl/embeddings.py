@@ -14,4 +14,8 @@ def apply_rotary_emb(hidden_states, freqs_cos, freqs_sin):
     return out.to(original_dtype)
 
 
-__all__ = ["apply_rotary_emb"]
+# The reference (diffusers' fp32 interleaved law, FLUX's call sites), shared with every backend
+# but neuron; the neuron op is checked bit for bit against it.
+from difflet.backends._torch_megatron.embeddings import apply_rotary_emb_fp32  # noqa: E402,F401
+
+__all__ = ["apply_rotary_emb", "apply_rotary_emb_fp32"]

@@ -69,6 +69,71 @@ def test_matches_diffusers(tiny):
     torch.testing.assert_close(app(**_inputs())[0], _reference(tiny), atol=1e-4, rtol=1e-4)
 
 
+def test_the_processors_rotate_with_the_neuron_op(tiny, monkeypatch):
+    """The neuron op rotates q and k in every block, each call bit-identical to diffusers'
+    ``apply_rotary_emb(..., sequence_dim=1)`` on the same operands; diffusers' function, patched
+    to fail once the reference has run, is never called. A numeric check of the output alone
+    cannot tell the op from another exact law (the stride-2 reference), hence the spy."""
+    import diffusers.models.embeddings as E
+
+    from difflet.backends.neuron.ops_impl import embeddings as neuron_embeddings
+
+    reference = _reference(tiny)  # diffusers' own forward, before the patch
+    diffusers_rotary, op, calls = E.apply_rotary_emb, neuron_embeddings.apply_rotary_emb_fp32, []
+
+    def spy(x, cos, sin):
+        out = op(x, cos, sin)
+        assert torch.equal(out, diffusers_rotary(x, (cos[0, :, 0], sin[0, :, 0]), sequence_dim=1))
+        calls.append(tuple(x.shape))
+        return out
+
+    monkeypatch.setattr(neuron_embeddings, "apply_rotary_emb_fp32", spy)
+    monkeypatch.setattr(E, "apply_rotary_emb",
+                        lambda *a, **k: pytest.fail("diffusers' rotary on the neuron path"))
+    app = NeuronHunyuanVideo15TransformerApplication(model_path=tiny, dtype=torch.float32,
+                                                     exec_mode="eager", device="cpu", **SHAPE)
+    app.load()
+    calls.clear()  # the warm-up's forward
+    out = app(**_inputs())[0]
+    assert len(calls) == 2 * TINY["num_layers"]  # q and k, every block
+    torch.testing.assert_close(out, reference, atol=1e-4, rtol=1e-4)
+
+
+@pytest.mark.parametrize("pairs", ["pair_equal", "random"])
+@pytest.mark.parametrize("table_dtype", [torch.float32, torch.bfloat16],
+                         ids=["fp32_tab", "bf16_tab"])
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16], ids=["fp32", "bf16"])
+def test_joint_qkv_rotates_as_diffusers_processor(monkeypatch, dtype, table_dtype, pairs):
+    """``_joint_qkv``'s q/k are, bit for bit, the q/k diffusers' processor hands its attention:
+    the production head dim (128), bf16 activations (a bf16 RMSNorm weight casts its output, what
+    the device feeds) and fp32 ones, either table dtype, and tables whose pairs differ (the law
+    holds for any values, not only diffusers' repeat-interleaved ones)."""
+    from diffusers.models.transformers import transformer_hunyuan_video15 as hv15
+
+    from difflet.backends.neuron.hunyuan_video15.transformer import _joint_qkv
+
+    torch.manual_seed(0)
+    attn = hv15.HunyuanVideo15TransformerBlock(2, 128, 1.0).attn.to(dtype).eval()
+    n, t = 12, 5
+    x, ctx = torch.randn(1, n, 256, dtype=dtype), torch.randn(1, t, 256, dtype=dtype)
+    angles = (torch.randn(n, 64).repeat_interleave(2, -1) if pairs == "pair_equal"
+              else torch.randn(n, 128))
+    tables = (angles.cos().to(table_dtype), angles.sin().to(table_dtype))
+    mask = torch.ones(1, t, dtype=torch.bool)
+    seen = {}
+
+    def attention(query, key, value, **kwargs):  # the image rows of diffusers' joint q/k
+        seen["q"], seen["k"] = query[:, :n], key[:, :n]
+        return torch.zeros_like(query)
+
+    monkeypatch.setattr(hv15, "dispatch_attention_fn", attention)
+    with torch.no_grad():
+        hv15.HunyuanVideo15AttnProcessor2_0()(attn, x, ctx, mask, tables)
+        q, k = _joint_qkv(attn, x, ctx, tables)[:2]
+    assert q.dtype == dtype and torch.equal(q, seen["q"].transpose(1, 2))
+    assert torch.equal(k, seen["k"].transpose(1, 2))
+
+
 @pytest.mark.parametrize("cp", [2, 4])
 def test_ulysses_context_parallel_matches_diffusers(tiny, cp):
     """12 image tokens split over cp ranks, text replicated, joint Ulysses with key_valid_len:
