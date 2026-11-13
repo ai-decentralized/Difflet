@@ -4963,5 +4963,13 @@
   "_functional_collectives.py:all_reduce": {
    "gpsimd": 0.0011265
   }
+ },
+ "component_overlap": {
+  "vector": 1.0022059635075409,
+  "tensor": 1.007648833477437,
+  "gpsimd": 1.0000080718376998,
+  "sync": 1.0,
+  "scalar": 1.004742755817713,
+  "hbm_dma": 1.0009743432350926
  }
 }

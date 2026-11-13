@@ -7839,5 +7839,13 @@
   "load_apis.py:load_tile_dgt": {
    "sync": 2.25e-05
   }
+ },
+ "component_overlap": {
+  "vector": 1.0216835607564705,
+  "tensor": 1.051886129334583,
+  "gpsimd": 1.0002122670116846,
+  "scalar": 1.005751497406116,
+  "sync": 1.0,
+  "hbm_dma": 1.0297415368879839
  }
 }
