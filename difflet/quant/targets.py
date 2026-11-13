@@ -79,6 +79,27 @@ set says, and a weight the writer laid out as one K range is read in other block
 than it was scaled in wherever a rank's range is not whole tiles (``attn.to_out.0`` at tp 4
 and 8).
 
+HunyuanVideo-1.5 (diffusers' ``HunyuanVideo15Transformer3DModel``: the neuron module is
+diffusers' class, so its module names are the checkpoint keys and ``checkpoint_key`` is the
+identity) runs 54 dual-stream blocks of 2048 (16 heads x 128) with an 8192-wide MLP and no
+single-stream blocks, so no ``proj_out`` to split. A block keeps the image stream (49,290 tokens
+at the default 480x848x121) and the text stream (1,985: the image-embedding, ByT5 and Qwen2.5-VL
+tokens) apart outside the joint attention. The targets are the image q/k/v (``to_q/k/v``, whose
+outputs feed the q/k RMSNorm, the rotary op and the attention kernel), the text q/k/v
+(``add_*_proj``) and both MLPs (``ff``, ``ff_context``): 540 linears, 4.98B of the 8.33B
+parameters (60%). The quantization saves memory, not time: the hub DiT is fp32, so the quantized
+checkpoint is written from the bf16 copy ``compile`` makes, and a target holds 1.28 bytes per
+weight resident against bf16's 2 (fp8, its stored scales and the kernel's scale layout). The
+output projections (``to_out.0``, ``to_add_out``) stay bf16 as above, and so do the per-block
+modulation (``norm1.linear``, ``norm1_context.linear``: 2048 -> 12288, 2.72B parameters, applied
+to one ``[B, D]`` vector), the token refiner (``context_embedder``), the glyph projection
+(``context_embedder_2``), ``image_embedder``, ``time_embed``, ``norm_out`` and ``proj_out``. At
+tp > 1 the MLP-downs (``ff.net.2``, ``ff_context.net.2``, K 8192) are row-parallel with a K per
+rank of 8192 / tp, whole 512-wide kernel tiles at every tp the 16 heads allow (512 at tp 16), so
+the default set refuses no tp. The output projections (K 2048) and the token refiner's
+``attn.to_out.0`` and ``ff.net.2`` are row layers too: the row-parallel set names them for
+overrides, as HunyuanVideo's does (``to_out.0`` has 256 per rank at tp 8, a partial tile).
+
 Patterns are regexes full-matched against diffusers' module names (the ``transformer.`` trace
 prefix is stripped by :meth:`QuantSpec.matches`).
 """
@@ -278,6 +299,39 @@ HUNYUAN_VIDEO_ROW_PARALLEL: tuple[str, ...] = (
     r"context_embedder\.token_refiner\.refiner_blocks\.\d+\.(attn\.to_out\.0|ff\.net\.2)",
 )
 
+# HunyuanVideo-1.5 (diffusers' HunyuanVideo15Transformer3DModel names, the checkpoint keys): the
+# dual-stream blocks' image and text q/k/v and both MLPs. A memory saving by decision (the
+# 480p_t2v DiT is 16.65 GB in bf16, 13.07 GB resident with these quantized); the device default
+# set is chosen by bisection only if this one runs slower than bf16.
+HUNYUAN_VIDEO_15_TARGETS: tuple[str, ...] = (
+    rf"{_BLOCK}\.attn\.(to_q|to_k|to_v|add_q_proj|add_k_proj|add_v_proj)",
+    rf"{_BLOCK}\.(ff|ff_context)\.net\.0\.proj",
+    rf"{_BLOCK}\.(ff|ff_context)\.net\.2",
+)
+
+#: HunyuanVideo-1.5 modules a reader may expect quantized that are deliberately not: the
+#: output projections, the modulation, the token refiner and the glyph, image and time
+#: embedders, and the output layer.
+HUNYUAN_VIDEO_15_KEPT_BF16: tuple[str, ...] = (
+    rf"{_BLOCK}\.attn\.(to_out\.0|to_add_out)",
+    rf"{_BLOCK}\.norm1(_context)?\.linear",
+    r"context_embedder\..*",
+    r"context_embedder_2\..*",
+    r"image_embedder\..*",
+    r"time_embed\..*",
+    r"norm_out\.linear",
+    r"proj_out",
+)
+
+#: Every row layer of the neuron module (``_install_tensor_parallel``), the token refiner's
+#: included: the FP8 twin of a row layer shards its weight along K whatever this set says.
+HUNYUAN_VIDEO_15_ROW_PARALLEL: tuple[str, ...] = (
+    rf"{_BLOCK}\.attn\.(to_out\.0|to_add_out)",  # not default targets; kept for overrides
+    rf"{_BLOCK}\.(ff|ff_context)\.net\.2",
+    # not default targets; kept for overrides
+    r"context_embedder\.token_refiner\.refiner_blocks\.\d+\.(attn\.to_out\.0|ff\.net\.2)",
+)
+
 
 TARGETS_BY_MODEL: dict[str, tuple[str, ...]] = {
     "qwen_image": QWEN_IMAGE_TARGETS,
@@ -285,6 +339,7 @@ TARGETS_BY_MODEL: dict[str, tuple[str, ...]] = {
     "ltx_2": LTX_2_TARGETS,
     "wan": WAN_TARGETS,
     "hunyuan_video": HUNYUAN_VIDEO_TARGETS,
+    "hunyuan_video_15": HUNYUAN_VIDEO_15_TARGETS,
 }
 ROW_PARALLEL_BY_MODEL: dict[str, tuple[str, ...]] = {
     "qwen_image": QWEN_IMAGE_ROW_PARALLEL,
@@ -292,6 +347,7 @@ ROW_PARALLEL_BY_MODEL: dict[str, tuple[str, ...]] = {
     "ltx_2": LTX_2_ROW_PARALLEL,
     "wan": WAN_ROW_PARALLEL,
     "hunyuan_video": HUNYUAN_VIDEO_ROW_PARALLEL,
+    "hunyuan_video_15": HUNYUAN_VIDEO_15_ROW_PARALLEL,
 }
 #: The fused checkpoint linears each model's quantized checkpoint stores as two column ranges
 #: (``QuantSpec.split_linears``). A model without an entry keeps every weight whole, and its
@@ -336,6 +392,9 @@ __all__ = [
     "FLUX_ROW_PARALLEL",
     "FLUX_SPLIT_TARGETS",
     "FLUX_TARGETS",
+    "HUNYUAN_VIDEO_15_KEPT_BF16",
+    "HUNYUAN_VIDEO_15_ROW_PARALLEL",
+    "HUNYUAN_VIDEO_15_TARGETS",
     "HUNYUAN_VIDEO_KEPT_BF16",
     "HUNYUAN_VIDEO_ROW_PARALLEL",
     "HUNYUAN_VIDEO_TARGETS",

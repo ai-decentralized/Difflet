@@ -30,6 +30,7 @@ QUANT_MODELS: dict[str, str] = {
     "Wan-AI/Wan2.1-T2V-14B-Diffusers": "wan",
     "Wan-AI/Wan2.2-T2V-A14B-Diffusers": "wan",
     "hunyuanvideo-community/HunyuanVideo": "hunyuan_video",
+    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v": "hunyuan_video_15",
 }
 
 
@@ -45,7 +46,8 @@ def add_quant_flags(p: argparse.ArgumentParser) -> None:
         "cache dir; the output projections, modulation, embedders and the output layer stay "
         "bf16 (except the single-stream output projection of FLUX and HunyuanVideo, quantized "
         "as its attention and MLP halves; LTX-2: its audio stream too). Qwen-Image, FLUX.1-dev, "
-        "LTX-2, Wan 2.1, Wan 2.2-A14B (both experts) and HunyuanVideo.",
+        "LTX-2, Wan 2.1, Wan 2.2-A14B (both experts), HunyuanVideo and HunyuanVideo-1.5 (a "
+        "memory saving).",
     )
     p.add_argument(
         "--quant-compute",
