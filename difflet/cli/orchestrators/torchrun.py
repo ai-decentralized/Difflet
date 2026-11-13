@@ -23,6 +23,8 @@ import argparse
 import contextlib
 import os
 import sys
+import time
+import types
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -185,9 +187,12 @@ def _local_snapshot(resolve_model_dir: Callable[[], str]) -> str | None:
 
 
 def refuse_dit_overflow(model: str, resolve_model_dir: Callable[[], str],
-                        dit_fits: Callable[..., tuple[bool, int, int]], tp: int) -> None:
+                        dit_fits: Callable[..., tuple[bool, int, int]], tp: int, *,
+                        stored: str = "bf16") -> None:
     """Refuse a TP degree whose DiT shard clearly cannot fit one core (``dit_fits``, the model's
-    ``hbm.py``) before any rank starts: print one message and exit 2.
+    ``hbm.py``) before any rank starts: print one message and exit 2. ``stored`` names what
+    ``dit_fits`` counted, so the line says what it measured: the bf16 source checkpoint, or
+    ``"MXFP8"`` for a quantized directory read as stored (a ``--quant`` launch).
 
     The application base refuses it too, but only once torchrun has started every rank and each
     has built the model on meta; a DP router would start every replica for it. The per-rank
@@ -202,10 +207,11 @@ def refuse_dit_overflow(model: str, resolve_model_dir: Callable[[], str],
         return
     from difflet.backends.neuron.hbm import GIB, suggested_tp
 
-    print(f"Error: the {model} DiT needs at least {estimate / GIB:.1f} GiB of bf16 weights per "
-          f"core at tp={tp}, over the {limit / GIB:.1f} GiB budget of one NeuronCore (every DP "
-          f"replica is its own TP group); use --tp-degree {suggested_tp(estimate, tp, limit)} "
-          "or more; nothing was launched.", file=sys.stderr, flush=True)
+    print(f"Error: the {model} DiT needs at least {estimate / GIB:.1f} GiB of {stored} weights "
+          f"per core at tp={tp}, over the {limit / GIB:.1f} GiB budget of one NeuronCore "
+          f"(every DP replica is its own TP group); use --tp-degree "
+          f"{suggested_tp(estimate, tp, limit)} or more; nothing was launched.",
+          file=sys.stderr, flush=True)
     raise SystemExit(2)
 
 
@@ -341,6 +347,36 @@ def torchrun_parallel(args: argparse.Namespace):
     )
 
 
+def _time_scheduler_steps(pipe, marks: list[float]) -> None:
+    """Step timing without touching the shared orchestrator: append ``time.perf_counter()``
+    to ``marks`` after each ``step`` of the pipeline's scheduler (one per denoising step, after
+    that step's DiT forwards). Timing is evidence, never the stage's failure: a pipeline without
+    a scheduler, or a scheduler whose ``step`` is not a method of its class (one set on the
+    instance, which the rebinding below cannot wrap), is left alone and un-timed.
+
+    The hook is a ``types.MethodType`` bound to the scheduler, not a closure over its bound
+    ``step``: ``LTX2Orchestrator`` deep-copies the video scheduler into its audio scheduler on
+    every generate, after this hook is installed, and ``copy`` treats a plain function as atomic
+    (the copy's ``step`` would still call the original's, driving the video scheduler's step
+    index twice per iteration and past its last sigma) but rebinds a method to the copied
+    instance (``copy._deepcopy_method``). The copy then steps itself, and only the original's
+    steps are marked, so the marks count one video step per iteration; a model with one
+    scheduler (Wan, Qwen-Image) sees no difference.
+    """
+    scheduler = getattr(getattr(pipe.app, "pipeline", None), "scheduler", None)
+    step_fn = getattr(type(scheduler), "step", None)
+    if step_fn is None:
+        return
+
+    def timed_step(self_, *a, **k):
+        result = step_fn(self_, *a, **k)
+        if self_ is scheduler:
+            marks.append(time.perf_counter())
+        return result
+
+    scheduler.step = types.MethodType(timed_step, scheduler)
+
+
 def run_generate_stage(args: argparse.Namespace, backend: str, *, tag: str, model_id: str,
                        pipeline_kwargs: dict[str, Any], application_kwargs: dict[str, Any],
                        request_kwargs: Callable[[Any], dict[str, Any]],
@@ -367,13 +403,12 @@ def run_generate_stage(args: argparse.Namespace, backend: str, *, tag: str, mode
     seconds. The process group is destroyed after a successful stage only: a failing rank exits
     with its exception and torchrun stops its peers, which may be blocked in a collective.
 
-    With ``timing`` (Wan), rank 0 also prints the start-up split (``from_pretrained`` against
-    ``load``, with the application's ``phase_seconds`` by component) and, per request, the
-    wall time, the time to the first step's end and the median step, read from the scheduler's
-    ``step`` calls (one per denoising step, after that step's DiT forwards).
+    With ``timing`` (Wan, Qwen-Image, LTX-2), rank 0 also prints the start-up split
+    (``from_pretrained`` against ``load``, with the application's ``phase_seconds`` by
+    component) and, per request, the wall time, the time to the first step's end and the median
+    step, read from the scheduler's ``step`` calls (``_time_scheduler_steps``: one per denoising
+    step, after that step's DiT forwards).
     """
-    import time
-
     import torch
     import torch.distributed as dist
 
@@ -408,19 +443,9 @@ def run_generate_stage(args: argparse.Namespace, backend: str, *, tag: str, mode
         if distributed.is_rank0():
             finish_compile()
     else:
-        # Step timing without touching the shared orchestrator: the scheduler steps once per
-        # denoising step, after that step's DiT forward(s).
         marks: list[float] = []
-        scheduler = getattr(getattr(pipe.app, "pipeline", None), "scheduler", None)
-        if timing and scheduler is not None:
-            original_step = scheduler.step
-
-            def timed_step(*a, **k):
-                result = original_step(*a, **k)
-                marks.append(time.perf_counter())
-                return result
-
-            scheduler.step = timed_step
+        if timing:
+            _time_scheduler_steps(pipe, marks)
         for req in replica_requests(args, device=getattr(pipe.app, "device", None)):
             with replica_request_scope(args, req, final=final):
                 marks.clear()

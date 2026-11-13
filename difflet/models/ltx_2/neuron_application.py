@@ -26,6 +26,11 @@ decoder never shares a core or a host process with the DiT. ``enable_decode_comp
 loads them on rank 0's host in the application dtype (the Trainium CLI's placement) for
 ``output_type="pt"``.
 
+``quant`` (``"mxfp8"``, a ``QuantSpec`` or its dict) and ``quant_checkpoint`` are the MXFP8
+DiT options (``difflet/backends/neuron/core/quant.py``): the spec is resolved at the launch's
+tp, the transformer loads the quantized directory in place of ``<model>/transformer``, and the
+HBM check beside the device text encoder counts that directory as stored (``quantized_dit``).
+
 Guidance: CFG when ``guidance_scale`` > 1 (the orchestrator's, diffusers' formula on x0): two
 DiT forwards per step, or with CFG parallelism (``cfg_parallel_enabled``) one batch-2 call
 whose branches run on the two CFG groups. STG and modality guidance need extra transformer
@@ -62,6 +67,7 @@ from difflet.backends.neuron.core.model_application import (
     broadcast_from_rank0,
     intra_op_threads,
 )
+from difflet.backends.neuron.core.quant import resolve_quant
 from difflet.backends.neuron.ltx_2.config import LTX_2_TEXT_SEQ_LEN, NeuronLtx2Config
 from difflet.backends.neuron.ltx_2.transformer import NeuronLtx2TransformerApplication
 from difflet.models.ltx_2.contract import (
@@ -95,6 +101,11 @@ _KWARG_DEFAULTS: dict[str, Any] = {
     "teacache_calibration_path": None,
     "teacache_cadence": None,
     "teacache_online_delta_alpha": None,
+    # MXFP8 DiT linears (difflet/quant): the spec (a QuantSpec, its dict, or "mxfp8" for the
+    # default recipe) and, optionally, the quantized checkpoint directory; without one it is
+    # resolved under the compile cache (it must already exist: `difflet compile` writes it).
+    "quant": None,
+    "quant_checkpoint": None,
 }
 _TEACACHE_KWARGS = (
     "teacache_speedup",
@@ -416,10 +427,17 @@ class TorchNeuronLtx2Application(TorchNeuronModelApplication):
             overrides["num_layers"] = int(options["num_layers"])
         self.config = NeuronLtx2Config.from_pretrained(transformer_path, **overrides)
         self.cfg_parallel_enabled = bool(self.config.cfg_parallel_enabled)
+        self.quant, dit_path = resolve_quant(
+            "ltx_2", options["quant"], options["quant_checkpoint"], transformer_path,
+            tp_degree=int(parallel.tp_degree))
+        #: The quantized DiT directory (``quant``), which the HBM estimates count as stored
+        #: (``_check_device_text_encoder_fits``); None for the bf16 source.
+        self.quantized_dit: str | None = dit_path if self.quant is not None else None
         if options["enable_transformer"]:
             self.transformer = NeuronLtx2TransformerApplication(
-                model_path=transformer_path, config=self.config, parallel=parallel,
+                model_path=dit_path, config=self.config, parallel=parallel,
                 dtype=self.dtype, exec_mode=options["exec_mode"], device=self.device,
+                quant=self.quant,
             )
             self.config = self.transformer.config  # cp_degree filled from the parallel config
         enable_text = options["enable_text_encoder"]
@@ -475,11 +493,14 @@ class TorchNeuronLtx2Application(TorchNeuronModelApplication):
         anything loads when the two clearly cannot fit together
         (``difflet/backends/neuron/ltx_2/hbm.py``, ``_check_components_fit``): at tp4 about
         5.5 GiB of bf16 Gemma-3 beside 8.8 GiB of DiT; at tp2 (CFG2 on four cores, dp2tp2) twice
-        both, over a 24 GiB core."""
+        both, over a 24 GiB core. With ``quant`` the DiT is counted as its quantized directory
+        stores it (fp8 weights and block scales), not as the bf16 source, which would refuse a
+        tp the quantized DiT fits."""
         from difflet.backends.neuron.ltx_2.hbm import device_text_encoder_components
 
         self._check_components_fit(
-            device_text_encoder_components(encoder_dtype.itemsize, self.dtype.itemsize),
+            device_text_encoder_components(encoder_dtype.itemsize, self.dtype.itemsize,
+                                           dit_dir=self.quantized_dit),
             what=f"Gemma-3 ({encoder_dtype}) beside the LTX-2 DiT on one core",
             advice="encode on the host (text_encoder_device='host', no --device-text-encoder), "
             "or give the TP group more cores (tp_degree={tp} or more)",

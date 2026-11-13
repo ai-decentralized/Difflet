@@ -24,11 +24,18 @@ torchrun starts. --cp-degree > 1 (gather_kv or ulysses) shards the video tokens 
 Gemma-3's language model runs on the device by default, TP-sharded beside the DiT, with the
 connectors on rank 0's host (``--host-text-encoder`` keeps it on rank 0's host); the driver moves
 it to the host itself when it cannot fit, at tp2 (``_place_text_encoder``).
+--quant mxfp8 (``difflet/cli/quant.py``): ``compile`` writes the quantized DiT directory under
+the compile cache and ``generate`` only resolves it (``_prepare_quant``), before the fit checks,
+which count that directory as stored, and before any rank starts; weights not yet downloaded
+and a target pattern matching no linear weight are refused there, on the driver. The stage
+line and the DP workers carry the flags, the generate stage's key names the spec, and the ranks
+build the application with it (``_torchrun_application_kwargs``).
 """
 
 from __future__ import annotations
 
 import argparse
+import functools
 import shutil
 import sys
 from pathlib import Path
@@ -44,9 +51,11 @@ from difflet.cli.orchestrators.base import (
     write_stage_manifest,
 )
 from difflet.cli.orchestrators.torchrun import (
+    _local_snapshot,
     cfg_cp_conflict,
     decodes_on_device,
     device_encoder_overflow,
+    refuse,
     refuse_dit_overflow,
     refuse_torchrun_conflicts,
     reject_unsupported_torchrun_options,
@@ -59,8 +68,12 @@ from difflet.cli.orchestrators.torchrun import (
     torchrun_unsupported_options,
     vae_placement_conflict,
 )
+from difflet.cli.quant import prepare_quant, quant_cli_args, quant_spec
+from difflet.quant.spec import quant_cache_fields
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     import torch
 
 _HF_MODEL_ID = "Lightricks/LTX-2"
@@ -122,10 +135,15 @@ def _guidance(args: argparse.Namespace) -> float:
 def _torchrun_application_kwargs(args: argparse.Namespace) -> dict:
     """The application kwargs, plus any TeaCache flag the user gave (the application refuses it
     in phase 1 instead of the stage dropping it): Gemma-3 on the device when the driver left
-    ``device_text_encoder`` on (``LTX2Orchestrator._place_text_encoder``)."""
+    ``device_text_encoder`` on (``LTX2Orchestrator._place_text_encoder``), and the MXFP8 spec
+    with --quant (the application resolves the quantized directory the driver's ``compile``
+    wrote; it never writes one)."""
     kwargs = dict(_TORCHRUN_APPLICATION_KWARGS)
     if getattr(args, "device_text_encoder", False):
         kwargs["text_encoder_device"] = "neuron"
+    spec = quant_spec(args)
+    if spec is not None:
+        kwargs["quant"] = spec.to_dict()
     for app_key, arg_key in (("teacache_speedup", "teacache_speedup"),
                              ("teacache_cadence", "teacache_cadence"),
                              ("teacache_online_delta_alpha", "teacache_online_delta"),
@@ -416,6 +434,41 @@ class LTX2Orchestrator(ModelOrchestrator):
         return resolve_model_path(_HF_MODEL_ID, revision=self.args.revision,
                                   local_files_only=True)
 
+    #: The quantized DiT directory (--quant), once ``_prepare_quant`` resolved it.
+    _quantized_dit: str | None = None
+
+    def _prepare_quant(self, *, create: bool) -> None:
+        """With --quant, resolve the quantized DiT directory under the compile cache
+        (``prepare_quant``), writing it when ``create`` (``compile``; ``generate`` only resolves
+        and refuses with the fix when it is missing, through ``refuse`` as this driver's other
+        refusals; a target pattern matching no linear weight is refused by the writer, naming
+        it, before anything is quantized). Before ``_check_dit_fits`` and
+        ``_place_text_encoder`` so the HBM estimates count fp8 bytes, and before any rank
+        starts so none writes; ``_prepare_torchrun`` roots the compile cache at --cache-dir
+        first so the directory lands under it. Weights that are not local yet are refused here,
+        naming ``difflet download``: the bf16 path leaves them to the ranks, but this step needs
+        them on the driver (to write the directory, or to resolve it and count its bytes), and
+        torchrun would otherwise start tp x cp ranks that each report the missing weights."""
+        if getattr(self.args, "quant", None) is None:
+            return
+        model_dir = _local_snapshot(self._model_dir)
+        if model_dir is None:
+            refuse(f"--quant: the {_HF_MODEL_ID} weights are not local; run `difflet download "
+                   f"--model-id {_HF_MODEL_ID}` first")
+        sources = {"transformer": str(Path(model_dir) / "transformer")}
+        prepared = prepare_quant(self.args, sources, create=create, tag="ltx_2", fail=refuse)
+        if prepared is not None:
+            self._quantized_dit = prepared["transformer"]
+
+    def _fits_as_stored(self, fits: Callable[..., tuple[bool, int, int]]
+                        ) -> Callable[..., tuple[bool, int, int]]:
+        """``fits`` (an ``ltx_2/hbm.py`` estimate) reading the quantized DiT directory as stored
+        (fp8 weights and block scales) once ``_prepare_quant`` resolved one: the bf16 source's
+        count would refuse a tp the quantized DiT fits."""
+        if self._quantized_dit is None:
+            return fits
+        return functools.partial(fits, dit_dir=self._quantized_dit)
+
     def _check_dit_fits(self) -> None:
         """Refuse a TP degree whose DiT shard clearly cannot fit one core
         (``difflet/backends/neuron/ltx_2/hbm.py``) before any rank starts: print one message and
@@ -423,7 +476,9 @@ class LTX2Orchestrator(ModelOrchestrator):
         check. Torch-free."""
         from difflet.backends.neuron.ltx_2.hbm import dit_fits
 
-        refuse_dit_overflow("LTX-2", self._model_dir, dit_fits, self.args.tp_degree or 4)
+        refuse_dit_overflow("LTX-2", self._model_dir, self._fits_as_stored(dit_fits),
+                            self.args.tp_degree or 4,
+                            stored="bf16" if self._quantized_dit is None else "MXFP8")
 
     def _place_text_encoder(self) -> None:
         """Put the Gemma-3 encode on the device (``_DEVICE_TEXT_ENCODER_DEFAULT``) unless
@@ -444,7 +499,8 @@ class LTX2Orchestrator(ModelOrchestrator):
         args.device_text_encoder = True
         from difflet.backends.neuron.ltx_2.hbm import device_text_encoder_fits
 
-        overflow = device_encoder_overflow(self._model_dir, device_text_encoder_fits,
+        overflow = device_encoder_overflow(self._model_dir,
+                                           self._fits_as_stored(device_text_encoder_fits),
                                            args.tp_degree or 4)
         if overflow is None:
             return
@@ -454,9 +510,10 @@ class LTX2Orchestrator(ModelOrchestrator):
 
     def _prepare_torchrun(self, *, generating: bool) -> None:
         self._reject_unsupported_torchrun_options(generating=generating)
+        root_compile_cache_at_cache_dir(getattr(self.args, "cache_dir", None), tag="ltx_2")
+        self._prepare_quant(create=not generating)
         self._check_dit_fits()
         self._place_text_encoder()
-        root_compile_cache_at_cache_dir(getattr(self.args, "cache_dir", None), tag="ltx_2")
 
     def _compile_torchrun(self) -> None:
         """``compile`` on a torchrun backend: the generate stage's load + warm-up (it fills the
@@ -592,7 +649,9 @@ class LTX2Orchestrator(ModelOrchestrator):
         stage manifest) and runs the replica's requests. LTX-2's part: the request's negative
         prompt (its manifest line's, else --negative-prompt), the Trainium CLI's step and
         guidance defaults, and the packed video and audio latents written by rank 0 to one
-        ``latents.pt``.
+        ``latents.pt``. With ``timing`` rank 0 reports the start-up split and the DiT step
+        median per request: the video scheduler's steps, one per denoising iteration (the audio
+        scheduler is its deep copy and is not counted).
         """
         import torch
 
@@ -626,6 +685,7 @@ class LTX2Orchestrator(ModelOrchestrator):
             save=save,
             finish_compile=lambda: write_stage_manifest(self._stage_compiled_dir(args),
                                                         self._stage_cache_inputs(args)),
+            timing=True,
         )
 
     def _stage_cache_inputs(self, args: argparse.Namespace) -> dict:
@@ -655,6 +715,9 @@ class LTX2Orchestrator(ModelOrchestrator):
             # Additive: only a device-encoder stage carries the key.
             **({"text_encoder_device": "neuron"}
                if getattr(args, "device_text_encoder", False) else {}),
+            # Additive, neuron only: the MXFP8 DiT names its layer set, tp and compute path
+            # (difflet/quant/spec.py); a bf16 DiT adds nothing.
+            **quant_cache_fields(quant_spec(args)),
         })
 
     def _stage_compiled_dir(self, args: argparse.Namespace) -> Path:
@@ -686,6 +749,7 @@ class LTX2Orchestrator(ModelOrchestrator):
             parts.append("--sp")
         if getattr(a, "device_text_encoder", False):
             parts.append("--device-text-encoder")
+        parts += quant_cli_args(a)  # only when given
         for flag, name in (("--teacache-cadence", "teacache_cadence"),
                            ("--teacache-online-delta", "teacache_online_delta"),
                            ("--teacache-speedup", "teacache_speedup"),
