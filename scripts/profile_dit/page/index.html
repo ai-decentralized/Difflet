@@ -1,0 +1,687 @@
+<meta name="dash-one-writer">
+<style>
+  #dbp { display: grid; gap: var(--cds-gap-xl); max-width: 1180px; }
+  #dbp h1 { font-family: var(--font-anthropic-serif); font-weight: 400; font-size: var(--cds-font-size-title); margin: 0; }
+  #dbp h2 { font-size: var(--cds-font-size-heading); font-weight: var(--cds-font-weight-medium); margin: 0 0 var(--cds-gap-xs); }
+  #dbp h3 { font-size: var(--cds-font-size-body); font-weight: var(--cds-font-weight-medium); margin: var(--cds-gap-lg) 0 var(--cds-gap-xs); }
+  #dbp p { margin: 0 0 var(--cds-gap-sm); max-width: 80ch; }
+  #dbp .lede { font-size: var(--cds-font-size-body); margin-top: var(--cds-gap-sm); }
+  #dbp .muted, #dbp .caption { color: var(--color-fg-muted); font-size: var(--cds-font-size-caption); }
+  #dbp .card { background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); padding: var(--cds-pad-lg); min-width: 0; }
+  #dbp .scroll { overflow-x: auto; }
+  #dbp table { border-collapse: collapse; font-size: var(--cds-font-size-caption); font-variant-numeric: tabular-nums; }
+  #dbp th, #dbp td { text-align: left; padding: var(--cds-pad-xs) var(--cds-pad-sm); border-bottom: 1px solid var(--color-border-line); white-space: nowrap; vertical-align: top; }
+  #dbp th { color: var(--color-fg-muted); font-weight: var(--cds-font-weight-medium); }
+  #dbp .num { text-align: right; }
+  #dbp td.wrap { white-space: normal; min-width: 18ch; }
+  #dbp tbody tr[data-key] { cursor: pointer; }
+  #dbp tbody tr.picked td { background: var(--color-bg); }
+  #dbp .controls { position: sticky; top: 0; z-index: 3; background: var(--color-bg); display: flex; flex-wrap: wrap; gap: var(--cds-gap-md); align-items: end; padding: var(--cds-pad-sm) 0; border-bottom: 1px solid var(--color-border-line); }
+  #dbp .controls label { display: grid; gap: var(--cds-gap-xs); font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); }
+  #dbp .legend { display: flex; flex-wrap: wrap; gap: var(--cds-gap-sm) var(--cds-gap-md); font-size: var(--cds-font-size-caption); color: var(--color-fg-muted); margin: var(--cds-gap-xs) 0; }
+  #dbp .sw { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; background: var(--cds-chart-muted); }
+  #dbp .sw.light { opacity: .45; }
+  #dbp .row { display: flex; flex-wrap: wrap; gap: var(--cds-gap-sm); align-items: end; margin-bottom: var(--cds-gap-xs); }
+  #dbp button { font: inherit; font-size: var(--cds-font-size-caption); color: var(--color-fg); background: var(--color-panel); border: 1px solid var(--color-border-line); border-radius: var(--cds-radius); padding: var(--cds-pad-xs) var(--cds-pad-sm); cursor: pointer; }
+  #dbp .chart { position: relative; min-height: 140px; }
+  #dbp .chart.tall { min-height: 260px; }
+  #dbp .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+  #dbp .chart .tick text, #dbp .chart .lbl { fill: var(--cds-text-secondary); font-size: var(--cds-font-size-caption); }
+  #dbp .chart .head { fill: var(--color-fg); font-size: var(--cds-font-size-caption); font-weight: var(--cds-font-weight-medium); }
+  #dbp .chart .domain, #dbp .chart .tick line { stroke: var(--cds-chart-axis); }
+  #dbp .chart .grid line { stroke: var(--cds-chart-grid); }
+  #dbp .chart .grid .domain { display: none; }
+  #dbp .chart .ref { stroke: var(--cds-chart-reference); stroke-width: 1.5; }
+  #dbp .chart .seg-label { fill: var(--color-fg); font-size: var(--cds-font-size-caption); paint-order: stroke; stroke: var(--color-bg); stroke-width: 3px; pointer-events: none; }
+  #dbp .chart .dim { opacity: .12; }
+  #dbp .chart rect.mark:hover, #dbp .chart rect.mark:focus { stroke: var(--color-fg); stroke-width: 1; outline: none; }
+  #dbp .chart .brush .selection { fill: var(--cds-chart-muted); fill-opacity: .3; stroke: none; }
+  #dbp .tip { position: absolute; pointer-events: none; background: var(--cds-surface-popover); border: 1px solid var(--cds-border); box-shadow: var(--cds-shadow-popover); border-radius: var(--cds-radius); padding: var(--cds-pad-xs) var(--cds-pad-sm); font-size: var(--cds-font-size-caption); z-index: 4; max-width: 300px; white-space: nowrap; }
+  #dbp .tip span { color: var(--cds-text-secondary); }
+  #dbp .note { border-left: 2px solid var(--color-warn); padding-left: var(--cds-pad-sm); }
+  #dbp ul.verdicts { margin: 0; padding-left: 1.2em; display: grid; gap: var(--cds-gap-sm); max-width: 90ch; }
+  #dbp details summary { cursor: pointer; font-weight: var(--cds-font-weight-medium); }
+  #dbp details ul { padding-left: 1.2em; max-width: 90ch; }
+  #dbp code { font-size: var(--cds-font-size-caption); }
+  #dbp [data-dash-source-state=refreshing] { opacity: .5; }
+</style>
+
+<div id="dbp">
+  <header>
+    <h1>DiT Block Profile</h1>
+    <p class="lede">Linear MXFP8 shortens the blocks' device time per step in <b data-draw="lede" data-part="n" data-source="overview" data-field="blocks_ms">—</b> of the <b data-draw="lede" data-part="m" data-source="overview" data-field="status">—</b> models profiled in both arms, to <b data-draw="lede" data-part="range" data-source="overview" data-field="blocks_ms">—</b> of bf16's, and moves their bottleneck from TensorE to VectorE in <b data-draw="lede" data-part="moved" data-source="overview" data-field="bottleneck">—</b> of them.</p>
+    <p class="muted">One DiT block of each of seven models on trn3 (LNC=2), replayed on the device with its collectives and profiled per instruction, in PyTorch-native bf16 and with linear MXFP8 (HunyuanVideo-1.5 in bf16 only). Times are busy times: engines run in parallel, so their bars overlap and are not meant to add up (Method, at the foot).</p>
+  </header>
+
+  <section id="overview" class="card">
+    <h2>Every model, bf16 and MXFP8</h2>
+    <p class="caption">DiT step: the evidence doc's median (section, host, steps; host B is a second trn3). Blocks per step: block NEFF executions in one step of the profiled run, times their in-model median, so "outside the blocks" is the rest of the step. Bottleneck: the engine with the most busy time in the blocks, weighted by executions. Attention, Plan B (the self/joint attention at head dim 128 that the MXFP8-attention plan routes) and cross-attention are shares of block time on that engine; RoPE is on its own busiest engine. Click a row to pick it below.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr>
+          <th>Model</th><th>Shape</th><th>Layout</th><th>Arm</th><th class="num">DiT step (ms)</th><th>Step source</th>
+          <th>Blocks per step</th><th class="num">Blocks (ms)</th><th class="num">Outside the blocks (ms)</th>
+          <th>Bottleneck</th><th class="num">MFU</th><th class="num">Attention</th><th class="num">Plan B addressable</th>
+          <th class="num">Cross-attention</th><th class="num">RoPE</th>
+        </tr></thead>
+        <tbody data-draw="overview" data-source="overview"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section id="verdicts" class="card">
+    <h2>Bottleneck per model</h2>
+    <ul class="verdicts">
+      <li>
+        <span class="when-ok"><b>Qwen-Image.</b> In bf16 the blocks are <b data-draw="verdict" data-key="qwen_image" data-arm="bf16" data-part="engine" data-source="overview" data-field="bottleneck">—</b>-bound (<span data-draw="verdict" data-key="qwen_image" data-arm="bf16" data-part="share" data-source="overview" data-field="bottleneck_share">—</span> of block time, MFU <span data-draw="verdict" data-key="qwen_image" data-arm="bf16" data-part="mfu" data-source="overview" data-field="mfu">—</span>); with linear MXFP8 they take <b data-draw="verdict" data-key="qwen_image" data-arm="mxfp8" data-part="ratio" data-source="overview" data-field="blocks_ms">—</b> of bf16's device time per step and are <b data-draw="verdict" data-key="qwen_image" data-arm="mxfp8" data-part="engine" data-source="overview" data-field="bottleneck">—</b>-bound (<span data-draw="verdict" data-key="qwen_image" data-arm="mxfp8" data-part="share" data-source="overview" data-field="bottleneck_share">—</span>, MFU <span data-draw="verdict" data-key="qwen_image" data-arm="mxfp8" data-part="mfu" data-source="overview" data-field="mfu">—</span>). Attention holds <span data-draw="verdict" data-key="qwen_image" data-arm="bf16" data-part="attention" data-source="overview" data-field="attention_share">—</span> (bf16) and <span data-draw="verdict" data-key="qwen_image" data-arm="mxfp8" data-part="attention" data-source="overview" data-field="attention_share">—</span> (MXFP8) of block time on the bottleneck engine, of which Plan B's MXFP8 attention can reach <span data-draw="verdict" data-key="qwen_image" data-arm="bf16" data-part="addressable" data-source="overview" data-field="addressable_attention_share">—</span> and <span data-draw="verdict" data-key="qwen_image" data-arm="mxfp8" data-part="addressable" data-source="overview" data-field="addressable_attention_share">—</span>.</span>
+        <span class="when-pending" hidden><b>Qwen-Image.</b> Pending: its blocks are still being captured.</span>
+        <span data-draw="verdict-state" data-key="qwen_image"></span>
+      </li>
+      <li>
+        <span class="when-ok"><b>FLUX.1-dev</b> (dual- and single-stream blocks)<b>.</b> In bf16 the blocks are <b data-draw="verdict" data-key="flux" data-arm="bf16" data-part="engine" data-source="overview" data-field="bottleneck">—</b>-bound (<span data-draw="verdict" data-key="flux" data-arm="bf16" data-part="share" data-source="overview" data-field="bottleneck_share">—</span> of block time, MFU <span data-draw="verdict" data-key="flux" data-arm="bf16" data-part="mfu" data-source="overview" data-field="mfu">—</span>); with linear MXFP8 they take <b data-draw="verdict" data-key="flux" data-arm="mxfp8" data-part="ratio" data-source="overview" data-field="blocks_ms">—</b> of bf16's device time per step and are <b data-draw="verdict" data-key="flux" data-arm="mxfp8" data-part="engine" data-source="overview" data-field="bottleneck">—</b>-bound (<span data-draw="verdict" data-key="flux" data-arm="mxfp8" data-part="share" data-source="overview" data-field="bottleneck_share">—</span>, MFU <span data-draw="verdict" data-key="flux" data-arm="mxfp8" data-part="mfu" data-source="overview" data-field="mfu">—</span>). Attention holds <span data-draw="verdict" data-key="flux" data-arm="bf16" data-part="attention" data-source="overview" data-field="attention_share">—</span> (bf16) and <span data-draw="verdict" data-key="flux" data-arm="mxfp8" data-part="attention" data-source="overview" data-field="attention_share">—</span> (MXFP8) of block time on the bottleneck engine, of which Plan B's MXFP8 attention can reach <span data-draw="verdict" data-key="flux" data-arm="bf16" data-part="addressable" data-source="overview" data-field="addressable_attention_share">—</span> and <span data-draw="verdict" data-key="flux" data-arm="mxfp8" data-part="addressable" data-source="overview" data-field="addressable_attention_share">—</span>.</span>
+        <span class="when-pending" hidden><b>FLUX.1-dev.</b> Pending: its blocks are still being captured.</span>
+        <span data-draw="verdict-state" data-key="flux"></span>
+      </li>
+      <li>
+        <span class="when-ok"><b>LTX-2.</b> In bf16 the blocks are <b data-draw="verdict" data-key="ltx_2" data-arm="bf16" data-part="engine" data-source="overview" data-field="bottleneck">—</b>-bound (<span data-draw="verdict" data-key="ltx_2" data-arm="bf16" data-part="share" data-source="overview" data-field="bottleneck_share">—</span> of block time, MFU <span data-draw="verdict" data-key="ltx_2" data-arm="bf16" data-part="mfu" data-source="overview" data-field="mfu">—</span>); with linear MXFP8 they take <b data-draw="verdict" data-key="ltx_2" data-arm="mxfp8" data-part="ratio" data-source="overview" data-field="blocks_ms">—</b> of bf16's device time per step and are <b data-draw="verdict" data-key="ltx_2" data-arm="mxfp8" data-part="engine" data-source="overview" data-field="bottleneck">—</b>-bound (<span data-draw="verdict" data-key="ltx_2" data-arm="mxfp8" data-part="share" data-source="overview" data-field="bottleneck_share">—</span>, MFU <span data-draw="verdict" data-key="ltx_2" data-arm="mxfp8" data-part="mfu" data-source="overview" data-field="mfu">—</span>). Attention holds <span data-draw="verdict" data-key="ltx_2" data-arm="bf16" data-part="attention" data-source="overview" data-field="attention_share">—</span> (bf16) and <span data-draw="verdict" data-key="ltx_2" data-arm="mxfp8" data-part="attention" data-source="overview" data-field="attention_share">—</span> (MXFP8) of block time on the bottleneck engine, of which Plan B's MXFP8 attention (the video self-attention) can reach <span data-draw="verdict" data-key="ltx_2" data-arm="bf16" data-part="addressable" data-source="overview" data-field="addressable_attention_share">—</span> and <span data-draw="verdict" data-key="ltx_2" data-arm="mxfp8" data-part="addressable" data-source="overview" data-field="addressable_attention_share">—</span>.</span>
+        <span class="when-pending" hidden><b>LTX-2.</b> Pending: its blocks are still being captured.</span>
+        <span data-draw="verdict-state" data-key="ltx_2"></span>
+      </li>
+      <li>
+        <span class="when-ok"><b>HunyuanVideo</b> (dual- and single-stream blocks)<b>.</b> In bf16 the blocks are <b data-draw="verdict" data-key="hunyuan_video_L" data-arm="bf16" data-part="engine" data-source="overview" data-field="bottleneck">—</b>-bound (<span data-draw="verdict" data-key="hunyuan_video_L" data-arm="bf16" data-part="share" data-source="overview" data-field="bottleneck_share">—</span> of block time, MFU <span data-draw="verdict" data-key="hunyuan_video_L" data-arm="bf16" data-part="mfu" data-source="overview" data-field="mfu">—</span>); with linear MXFP8 they take <b data-draw="verdict" data-key="hunyuan_video_L" data-arm="mxfp8" data-part="ratio" data-source="overview" data-field="blocks_ms">—</b> of bf16's device time per step and are <b data-draw="verdict" data-key="hunyuan_video_L" data-arm="mxfp8" data-part="engine" data-source="overview" data-field="bottleneck">—</b>-bound (<span data-draw="verdict" data-key="hunyuan_video_L" data-arm="mxfp8" data-part="share" data-source="overview" data-field="bottleneck_share">—</span>, MFU <span data-draw="verdict" data-key="hunyuan_video_L" data-arm="mxfp8" data-part="mfu" data-source="overview" data-field="mfu">—</span>). Attention holds <span data-draw="verdict" data-key="hunyuan_video_L" data-arm="bf16" data-part="attention" data-source="overview" data-field="attention_share">—</span> (bf16) and <span data-draw="verdict" data-key="hunyuan_video_L" data-arm="mxfp8" data-part="attention" data-source="overview" data-field="attention_share">—</span> (MXFP8) of block time on the bottleneck engine, of which Plan B's MXFP8 attention can reach <span data-draw="verdict" data-key="hunyuan_video_L" data-arm="bf16" data-part="addressable" data-source="overview" data-field="addressable_attention_share">—</span> and <span data-draw="verdict" data-key="hunyuan_video_L" data-arm="mxfp8" data-part="addressable" data-source="overview" data-field="addressable_attention_share">—</span>.</span>
+        <span class="when-pending" hidden><b>HunyuanVideo.</b> Pending: its 544x960x129 blocks are still being captured, so no engine numbers yet; its step and in-model block times are in the table above.</span>
+        <span data-draw="verdict-state" data-key="hunyuan_video_L"></span>
+      </li>
+      <li>
+        <span class="when-ok"><b>HunyuanVideo-1.5.</b> In bf16 the blocks are <b data-draw="verdict" data-key="hv15_official" data-arm="bf16" data-part="engine" data-source="overview" data-field="bottleneck">—</b>-bound (<span data-draw="verdict" data-key="hv15_official" data-arm="bf16" data-part="share" data-source="overview" data-field="bottleneck_share">—</span> of block time, MFU <span data-draw="verdict" data-key="hv15_official" data-arm="bf16" data-part="mfu" data-source="overview" data-field="mfu">—</span>); it was profiled in bf16 only, as it has no MXFP8 default. Attention holds <span data-draw="verdict" data-key="hv15_official" data-arm="bf16" data-part="attention" data-source="overview" data-field="attention_share">—</span> of block time on the bottleneck engine, of which Plan B's MXFP8 attention can reach <span data-draw="verdict" data-key="hv15_official" data-arm="bf16" data-part="addressable" data-source="overview" data-field="addressable_attention_share">—</span>.</span>
+        <span class="when-pending" hidden><b>HunyuanVideo-1.5.</b> Pending: its block is still being captured.</span>
+        <span data-draw="verdict-state" data-key="hv15_official"></span>
+      </li>
+      <li>
+        <span class="when-ok"><b>Wan 2.1 T2V 14B.</b> In bf16 the blocks are <b data-draw="verdict" data-key="wan21_official" data-arm="bf16" data-part="engine" data-source="overview" data-field="bottleneck">—</b>-bound (<span data-draw="verdict" data-key="wan21_official" data-arm="bf16" data-part="share" data-source="overview" data-field="bottleneck_share">—</span> of block time, MFU <span data-draw="verdict" data-key="wan21_official" data-arm="bf16" data-part="mfu" data-source="overview" data-field="mfu">—</span>); with linear MXFP8 they take <b data-draw="verdict" data-key="wan21_official" data-arm="mxfp8" data-part="ratio" data-source="overview" data-field="blocks_ms">—</b> of bf16's device time per step and are <b data-draw="verdict" data-key="wan21_official" data-arm="mxfp8" data-part="engine" data-source="overview" data-field="bottleneck">—</b>-bound (<span data-draw="verdict" data-key="wan21_official" data-arm="mxfp8" data-part="share" data-source="overview" data-field="bottleneck_share">—</span>, MFU <span data-draw="verdict" data-key="wan21_official" data-arm="mxfp8" data-part="mfu" data-source="overview" data-field="mfu">—</span>). Attention holds <span data-draw="verdict" data-key="wan21_official" data-arm="bf16" data-part="attention" data-source="overview" data-field="attention_share">—</span> (bf16) and <span data-draw="verdict" data-key="wan21_official" data-arm="mxfp8" data-part="attention" data-source="overview" data-field="attention_share">—</span> (MXFP8) of block time on the bottleneck engine, of which Plan B's MXFP8 attention (the self-attention <code>attn1</code>) can reach <span data-draw="verdict" data-key="wan21_official" data-arm="bf16" data-part="addressable" data-source="overview" data-field="addressable_attention_share">—</span> and <span data-draw="verdict" data-key="wan21_official" data-arm="mxfp8" data-part="addressable" data-source="overview" data-field="addressable_attention_share">—</span>.</span>
+        <span class="when-pending" hidden><b>Wan 2.1 T2V 14B.</b> Pending: its blocks are still being captured.</span>
+        <span data-draw="verdict-state" data-key="wan21_official"></span>
+      </li>
+      <li>
+        <span class="when-ok"><b>Wan 2.2 T2V A14B</b> (its block NEFF is Wan 2.1's, byte for byte)<b>.</b> In bf16 the blocks are <b data-draw="verdict" data-key="wan22_official" data-arm="bf16" data-part="engine" data-source="overview" data-field="bottleneck">—</b>-bound (<span data-draw="verdict" data-key="wan22_official" data-arm="bf16" data-part="share" data-source="overview" data-field="bottleneck_share">—</span> of block time, MFU <span data-draw="verdict" data-key="wan22_official" data-arm="bf16" data-part="mfu" data-source="overview" data-field="mfu">—</span>); with linear MXFP8 they take <b data-draw="verdict" data-key="wan22_official" data-arm="mxfp8" data-part="ratio" data-source="overview" data-field="blocks_ms">—</b> of bf16's device time per step and are <b data-draw="verdict" data-key="wan22_official" data-arm="mxfp8" data-part="engine" data-source="overview" data-field="bottleneck">—</b>-bound (<span data-draw="verdict" data-key="wan22_official" data-arm="mxfp8" data-part="share" data-source="overview" data-field="bottleneck_share">—</span>, MFU <span data-draw="verdict" data-key="wan22_official" data-arm="mxfp8" data-part="mfu" data-source="overview" data-field="mfu">—</span>). Attention holds <span data-draw="verdict" data-key="wan22_official" data-arm="bf16" data-part="attention" data-source="overview" data-field="attention_share">—</span> (bf16) and <span data-draw="verdict" data-key="wan22_official" data-arm="mxfp8" data-part="attention" data-source="overview" data-field="attention_share">—</span> (MXFP8) of block time on the bottleneck engine, of which Plan B's MXFP8 attention can reach <span data-draw="verdict" data-key="wan22_official" data-arm="bf16" data-part="addressable" data-source="overview" data-field="addressable_attention_share">—</span> and <span data-draw="verdict" data-key="wan22_official" data-arm="mxfp8" data-part="addressable" data-source="overview" data-field="addressable_attention_share">—</span>.</span>
+        <span class="when-pending" hidden><b>Wan 2.2 T2V A14B.</b> Pending: its blocks are still being captured.</span>
+        <span data-draw="verdict-state" data-key="wan22_official"></span>
+      </li>
+    </ul>
+  </section>
+
+  <div class="controls" role="group" aria-label="Pick a model, arm and block">
+    <label>Model <select class="dash-select" data-draw="pick-model" data-source="overview" aria-label="Model"></select></label>
+    <label>Arm <select class="dash-select" data-draw="pick-arm" data-source="overview" aria-label="Arm"></select></label>
+    <label>Block <select class="dash-select" data-draw="pick-blk" data-source="blocks" aria-label="Block"></select></label>
+    <div class="legend" aria-label="Engine colors">
+      <span><i class="sw" data-engine="tensor"></i>TensorE</span><span><i class="sw" data-engine="vector"></i>VectorE</span><span><i class="sw" data-engine="scalar"></i>ScalarE</span><span><i class="sw" data-engine="gpsimd"></i>GpSimd</span><span><i class="sw" data-engine="sync"></i>Sync</span><span><i class="sw" data-engine="hbm_dma"></i>HBM DMA</span><span><i class="sw" data-engine="collective"></i>Collectives</span>
+    </div>
+    <span data-draw="block-state" data-source="blocks"></span>
+  </div>
+  <p class="note when-pending" hidden>This block is pending: it is still being captured, and its charts appear once its breakdown is committed.</p>
+  <p class="note when-nodge" hidden>This block was captured without DGE notifications (the profiler's notification queue overflows on it): the profiler warns that its DMA values may be inaccurate, and its HBM DMA time lacks the DGE metadata.</p>
+
+  <section id="timeline" class="card">
+    <h2>One block in execution order</h2>
+    <p class="caption"><span data-draw="picked" data-part="model" data-source="overview" data-field="model">—</span> · <span data-draw="picked" data-part="arm" data-source="overview" data-field="arm">—</span> · <span data-draw="picked" data-part="blk" data-source="blocks" data-field="kind">—</span>, wall time <b data-draw="picked" data-part="block_ms" data-source="blocks" data-field="block_ms">—</b>.</p>
+    <p class="caption">Each lane is one engine of physical core 0; each segment is a run of one block component on it, labelled where it fits, and the top row names the component with the most busy time in each stretch. A segment's shade is how busy the engine is inside it (darker = busier; nearby runs under max(5 µs, block/4000) apart are merged). HBM DMA has its own lane: DMA instructions are counted there, not on the engine that queued them.</p>
+    <div class="row">
+      <label class="muted">Highlight <select class="dash-select" data-draw="pick-comp" aria-label="Highlight a component"></select></label>
+      <button type="button" class="tl-reset">Reset zoom</button>
+      <span class="muted">Drag along the time axis to zoom in; double-click the chart to zoom out.</span>
+    </div>
+    <div class="chart" data-draw="timeline"></div>
+  </section>
+
+  <section id="engines" class="card">
+    <h2>Engine busy time, bf16 against MXFP8</h2>
+    <p class="caption">Busy time of each engine in one execution of the picked block, against the block's wall time (lines). Above each pair: MXFP8 / bf16, or "no difference" where the gap is smaller than the replay spread (execution 4 against execution 8).</p>
+    <div class="legend"><span><i class="sw light"></i>bf16 (lighter)</span><span><i class="sw"></i>MXFP8</span><span>bar color = engine</span></div>
+    <div class="chart tall" data-draw="engines" data-source="engines"></div>
+    <p class="caption">Wall time <span data-draw="throttle" data-arm="bf16" data-part="block_ms" data-source="blocks" data-field="block_ms">—</span> (bf16) and <span data-draw="throttle" data-arm="mxfp8" data-part="block_ms" data-source="blocks" data-field="block_ms">—</span> (MXFP8), replay spread <span data-draw="throttle" data-arm="bf16" data-part="replay_spread_ms" data-source="blocks" data-field="replay_spread_ms">—</span> and <span data-draw="throttle" data-arm="mxfp8" data-part="replay_spread_ms" data-source="blocks" data-field="replay_spread_ms">—</span>. Throttle during the replay: average utilisation limit <span data-draw="throttle" data-arm="bf16" data-part="avg_util_limit" data-source="blocks" data-field="avg_util_limit">—</span> and <span data-draw="throttle" data-arm="mxfp8" data-part="avg_util_limit" data-source="blocks" data-field="avg_util_limit">—</span>, time spent under a limit <span data-draw="throttle" data-arm="bf16" data-part="limited_time_share" data-source="blocks" data-field="limited_time_share">—</span> and <span data-draw="throttle" data-arm="mxfp8" data-part="limited_time_share" data-source="blocks" data-field="limited_time_share">—</span>; MBU <span data-draw="throttle" data-arm="bf16" data-part="mbu" data-source="blocks" data-field="mbu">—</span> and <span data-draw="throttle" data-arm="mxfp8" data-part="mbu" data-source="blocks" data-field="mbu">—</span>.</p>
+  </section>
+
+  <section id="components" class="card">
+    <h2>Where each engine's time goes, by block component</h2>
+    <p class="caption">One bar per component of the picked block and arm, split by engine. A bar adds busy times of engines that run at the same time, so it can be longer than the component's wall time; the label at its end is its time on its busiest engine.</p>
+    <div class="chart tall" data-draw="components" data-source="components"></div>
+    <h3>Unattributed time, by the source it names</h3>
+    <p class="caption">Instructions with no module path (layer "Unknown"), kept apart from every component; each is listed under the source file and function it names, if any. "(none)" names no source: compiler-generated code.</p>
+    <div class="chart" data-draw="unattributed" data-source="unattributed"></div>
+  </section>
+
+  <section id="attention" class="card">
+    <h2>Attention phases per module</h2>
+    <p class="caption">The attention kernel's time per module of the picked block, split into QK matmul, mask and softmax, PV matmul and other (loads, transposes, write-back), each by engine.</p>
+    <div class="chart" data-draw="attention" data-source="attention_phases"></div>
+  </section>
+
+  <section id="memory" class="card">
+    <h2>Memory traffic and PSUM</h2>
+    <p>PSUM is the accumulator memory TensorE writes matmul results into; it is not an engine and has no time of its own. VectorE and ScalarE read it out, so that read-out time is already inside their bars above. Pure copies out of PSUM could be saved by fusing them into the next operation; fused read-outs already do compute.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Bytes per block execution</th><th class="num">bf16</th><th class="num">MXFP8</th><th class="num">MXFP8 / bf16</th></tr></thead>
+        <tbody data-draw="memory" data-source="memory"></tbody>
+      </table>
+    </div>
+    <h3>PSUM read-out inside the VectorE and ScalarE bars</h3>
+    <div class="legend"><span><i class="sw"></i>pure copy out of PSUM</span><span><i class="sw light"></i>fused with compute</span><span>faint: the engine's other work</span></div>
+    <div class="chart" data-draw="psum" data-source="memory"></div>
+  </section>
+
+  <section id="quality" class="card">
+    <h2>Quality of linear MXFP8</h2>
+    <p class="caption">How far the linear-MXFP8 output is from device bf16, or from the diffusers CPU fp32 reference (where bf16's own distance is beside it), from the evidence doc's sections. Higher PSNR and SSIM and lower LPIPS are closer; the floor is bf16 against bf16 at another layout, the scale one sample can resolve. Rows not at the profiled shape ran at a shorter one.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr>
+          <th>Model</th><th>Shape</th><th>Profiled shape</th><th>Section · host</th><th>Against</th>
+          <th class="num">PSNR dB (worst frame)</th><th class="num">SSIM</th><th class="num">LPIPS</th><th class="num">Latents cos</th>
+          <th class="num">bf16 vs fp32 PSNR</th><th class="num">MXFP8 − bf16 dB</th><th>Floor</th><th>Reading</th>
+        </tr></thead>
+        <tbody data-draw="quality" data-source="quality"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <details id="method">
+    <summary>Method, commands, paths and what was not measured</summary>
+    <ul>
+      <li><b>Time.</b> An engine's time is the busy time of one physical core: the union of its instruction intervals (pipelined instructions overlap, so overlaps count once), semaphore waits excluded, then the mean over the two physical cores of the logical core (LNC=2: a logical core is two physical cores). Engines run in parallel, so their bars overlap and do not add up to the block. Collectives are the union of the profile's collective operations.</li>
+      <li><b>HBM time</b> is the time of DMA instructions, whichever engine queued them (DMA queued on ScalarE or Sync is counted as HBM DMA, not as their compute). DMA values carry the profiler's own warning where it gave one. HunyuanVideo was captured without DGE notifications (its blocks overflow the profiler's notification queue), so its DMA attribution lacks the DGE metadata.</li>
+      <li><b>Blocks.</b> A block NEFF is a compiled DiT block present on every rank and confirmed by a per-model signature (VAE, text encoder and embedder NEFFs rejected). It is replayed 8 times with its collectives on 4 workers; execution 4 is profiled per instruction and execution 8 gives the replay spread. Executions per step and the in-model median come from a system profile of a 1- or 2-step run (Qwen-Image and LTX-2 run 2 steps); LTX-2 and Wan run CFG as two sequential forwards, so 96 and 80 executions per step. Wan 2.2's high-noise block NEFF is Wan 2.1's, byte for byte, on every rank.</li>
+      <li><b>Components</b> come from each instruction's torch module path; rows with none stay "unattributed" and are never folded into another component. Attention phases come from the attention kernel's source lines. The bottleneck of a model with two block kinds weighs each by its executions per step.</li>
+      <li><b>Commands.</b> <code>scripts/profile_dit/run_all.sh</code> (13 lanes, one idle device each; <code>capture.sh</code> dumps, picks the block NEFFs, captures and exports them), <code>scripts/profile_dit/analyze.py &lt;blk&gt; --model &lt;key&gt;</code> (breakdown.json), <code>scripts/profile_dit/collect.py --page /mnt/nvme/difflet-prof/page</code> (results.json and this page's datasets).</li>
+      <li><b>Paths.</b> Lanes: <code>/mnt/nvme/difflet-prof/run/&lt;key&gt;/&lt;arm&gt;/</code> (dump, <code>system_summary.json</code>, <code>blk&lt;i&gt;/</code> with the NEFF, NTFFs, summaries, parquet, <code>source.json</code>, <code>breakdown.json</code>). Committed: <code>docs/verification/assets/2026-11-13-dit-block-profile/&lt;key&gt;/&lt;arm&gt;/blk&lt;i&gt;.json</code> and <code>results.json</code>; write-up <code>docs/verification/2026-11-13-dit-block-profile.md</code>. Step times and quality: <code>docs/verification/2026-11-07-mxfp8-video-models.md</code> sections 7f, 10, 11, 12.</li>
+      <li><b>Not measured.</b> The step times were not rerun here (host B for Wan and HunyuanVideo-1.5 is another trn3). No MXFP8 arm for HunyuanVideo-1.5 (no MXFP8 default). Only the high-noise expert of Wan 2.2. Quality at the profiled shape only where the evidence doc has it (no CPU fp32 reference at Wan 81 frames, HunyuanVideo 544x960x129 or HunyuanVideo-1.5 121 frames). The work outside the block NEFFs (embedders, final layer, host gaps) is the "outside the blocks" remainder, not broken down. Every NEFF carries the profiler's warning that it lacks compiler metrics.</li>
+    </ul>
+  </details>
+</div>
+
+<script>
+(() => {
+  const ENGINES = ['tensor', 'vector', 'scalar', 'gpsimd', 'sync', 'hbm_dma', 'collective'];
+  const ENGINE_LABEL = {tensor: 'TensorE', vector: 'VectorE', scalar: 'ScalarE', gpsimd: 'GpSimd', sync: 'Sync', hbm_dma: 'HBM DMA', collective: 'Collectives'};
+  const ENGINE_SHORT = {tensor: 'Tensor', vector: 'Vector', scalar: 'Scalar', gpsimd: 'GpSimd', sync: 'Sync', hbm_dma: 'DMA', collective: 'CC'};
+  const COMPONENTS = ['modulation', 'norm', 'qkv_proj', 'qk_norm', 'rope', 'attn_glue', 'attention', 'out_proj', 'mlp_up', 'mlp_act', 'mlp_down', 'collective', 'other', 'unattributed'];
+  const COMPONENT_LABEL = {modulation: 'modulation', norm: 'norm', qkv_proj: 'q/k/v proj', qk_norm: 'qk-norm', rope: 'RoPE', attn_glue: 'attention glue', attention: 'attention', out_proj: 'out proj', mlp_up: 'MLP up', mlp_act: 'MLP act', mlp_down: 'MLP down', collective: 'collective', other: 'other', unattributed: 'unattributed'};
+  const PHASES = ['qk_matmul', 'mask_softmax', 'pv_matmul', 'other'];
+  const PHASE_LABEL = {qk_matmul: 'QK matmul', mask_softmax: 'mask / softmax', pv_matmul: 'PV matmul', other: 'other'};
+  const ARM_LABEL = {bf16: 'bf16', mxfp8: 'MXFP8'};
+  const MEMORY = [['hbm_read', 'HBM read'], ['hbm_write', 'HBM write'], ['sbuf_read', 'SBUF read'], ['sbuf_write', 'SBUF write'], ['psum_write', 'PSUM write (matmul results)'], ['psum_read', 'PSUM read'], ['psum_to_sbuf', 'PSUM to SBUF'], ['spill_save', 'spill save'], ['spill_reload', 'spill reload']];
+  const COLORS = (window.dash && dash.colors) || [];
+  const color = (e) => COLORS[ENGINES.indexOf(e)] || 'var(--cds-chart-muted)';
+  const BF16_OPACITY = 0.45;
+
+  const f2 = d3.format(',.2f'), f1 = d3.format(',.1f'), f3 = d3.format(',.3f');
+  const fmtMs = (v) => v == null ? '—' : (v >= 100 ? f1 : v >= 1 ? f2 : f3)(v);
+  const fmtUs = (v) => v < 1000 ? `${f1(v)} µs` : `${d3.format(',.3~f')(v / 1000)} ms`;
+  const pct = (v) => v == null ? '—' : d3.format(v > 0 && v < 0.1 ? '.1%' : '.0%')(v);
+  const ratio = (v) => v == null || !isFinite(v) ? '—' : `${d3.format('.2f')(v)}x`;
+  const gb = (v) => v == null ? '—' : `${d3.format(',.2f')(v / 1e9)} GB`;
+
+  // engine swatches of the static legends (style is the one write allowed outside a drawing)
+  document.querySelectorAll('#dbp .sw[data-engine]').forEach((s) => { s.style.background = color(s.dataset.engine); });
+
+  const rows = (id) => { const g = dash.data(id); return g.status === 'ok' ? g.data : null; };
+  /** true while a source is not ready: the element shows the dash (words), nothing (boxes) or "Failed to load" (charts) */
+  function waiting(el, ...ids) {
+    const st = ids.map((i) => dash.data(i).status);
+    el.classList.toggle('dash-skeleton', st.includes('loading'));
+    if (st.every((s) => s === 'ok')) return false;
+    const box = /^(DIV|TBODY|SELECT)$/.test(el.tagName);
+    el.replaceChildren(...(!box ? ['—'] : el.tagName === 'DIV' && st.includes('error') ? ['Failed to load'] : []));
+    return true;
+  }
+  /** the picked model, arm and block, each falling back to one the data has */
+  function pick() {
+    const p = dash.params() || {};
+    const ov = rows('overview') || [], bl = rows('blocks') || [];
+    const keys = [...new Set(ov.map((r) => r.key))];
+    const model = keys.includes(p.model) ? p.model : keys[0];
+    const arms = ov.filter((r) => r.key === model).map((r) => r.arm);
+    const arm = arms.includes(p.arm) ? p.arm : arms[0];
+    const blocks = bl.filter((r) => r.key === model && r.arm === arm);
+    const blk = blocks.some((r) => r.blk === p.blk) ? p.blk : blocks[0] && blocks[0].blk;
+    return {model, arm, arms, blk, blocks, block: blocks.find((r) => r.blk === blk)};
+  }
+  const blockOf = (s, arm) => (rows('blocks') || []).find((r) => r.key === s.model && r.arm === arm && r.blk === s.blk);
+
+  function tooltip(el) {
+    const tip = document.createElement('div');
+    tip.className = 'tip';
+    tip.hidden = true;
+    el.append(tip);
+    return {
+      show(ev, lines) {
+        tip.replaceChildren(...lines.map(([value, label]) => {
+          const line = document.createElement('div'), b = document.createElement('strong'), s = document.createElement('span');
+          b.textContent = value;
+          s.textContent = label ? ` ${label}` : '';
+          line.append(b, s);
+          return line;
+        }));
+        tip.hidden = false;
+        const box = el.getBoundingClientRect();
+        const at = ev.clientX == null ? ev.target.getBoundingClientRect() : {left: ev.clientX, bottom: ev.clientY};
+        const x = Math.max(0, Math.min(at.left - box.left + 12, box.width - tip.offsetWidth - 4));
+        tip.style.left = `${x}px`;
+        tip.style.top = `${at.bottom - box.top + 10}px`;
+      },
+      hide() { tip.hidden = true; },
+    };
+  }
+  /** the widest of these strings in the caption font, measured in svg */
+  function widest(svg, texts, cls = 'lbl') {
+    const t = svg.append('text').attr('class', cls);
+    const w = d3.max(texts, (s) => { t.text(s); return t.node().getComputedTextLength(); }) || 0;
+    t.remove();
+    return w;
+  }
+  function svgIn(el, w, h, label, role = 'img') {  // 'group' where the marks take the focus
+    el.replaceChildren();
+    return d3.select(el).append('svg').attr('viewBox', `0 0 ${w} ${h}`).attr('role', role).attr('aria-label', label);
+  }
+
+  /** horizontal stacked bars: items [{label, header?, parts: [{name, ms, fill, opacity}], end}] */
+  function stackRows(el, items, aria, axisLabel) {
+    const W = Math.max(320, el.clientWidth), rowH = 26, barH = 14, axisH = 40;
+    const H = items.length * rowH + axisH;
+    const svg = svgIn(el, W, H, aria, 'group');
+    const tip = tooltip(el);
+    const left = widest(svg, items.filter((i) => !i.header).map((i) => i.label)) + 12;
+    let right = widest(svg, items.map((i) => i.end || '')) + 12;
+    const showEnd = W - left - right >= 120;  // narrow: the end labels go, the tooltips keep them
+    if (!showEnd) right = 12;
+    const total = (i) => d3.sum(i.parts || [], (p) => p.ms);
+    const x = d3.scaleLinear().domain([0, d3.max(items, total) || 1]).nice().range([left, Math.max(left + 40, W - right)]);
+    svg.append('g').attr('class', 'grid').attr('transform', `translate(0,${H - axisH})`)
+      .call(d3.axisBottom(x).ticks(Math.max(2, Math.floor((W - left - right) / 80))).tickSize(-(H - axisH)).tickFormat(''));
+    items.forEach((item, i) => {
+      const y = i * rowH;
+      if (item.header) {
+        svg.append('text').attr('class', 'head').attr('x', 0).attr('y', y + rowH / 2).attr('dy', '0.35em').text(item.header);
+        return;
+      }
+      svg.append('text').attr('class', 'lbl').attr('x', left - 8).attr('y', y + rowH / 2).attr('dy', '0.35em').attr('text-anchor', 'end').text(item.label);
+      let at = 0;
+      item.parts.filter((p) => p.ms > 0).forEach((p, j) => {
+        const x0 = x(at) + (j ? 1 : 0), x1 = x(at + p.ms) - 1;  // a 2px surface gap between segments
+        at += p.ms;
+        svg.append('rect').attr('class', 'mark').attr('tabindex', 0).attr('x', x0).attr('y', y + (rowH - barH) / 2)
+          .attr('width', Math.max(1, x1 - x0)).attr('height', barH).attr('rx', 2)
+          .style('fill', p.fill).style('fill-opacity', p.opacity == null ? 1 : p.opacity)
+          .attr('aria-label', `${item.label}, ${p.name}: ${fmtMs(p.ms)} ms`)
+          .on('pointermove focus', (ev) => tip.show(ev, [[`${fmtMs(p.ms)} ms`, `${p.name}`], [item.label, '']]))
+          .on('pointerleave blur', tip.hide);
+      });
+      if (item.end && showEnd) svg.append('text').attr('class', 'lbl').attr('x', x(at) + 6).attr('y', y + rowH / 2).attr('dy', '0.35em').text(item.end);
+    });
+    svg.append('g').attr('transform', `translate(0,${H - axisH})`).call(d3.axisBottom(x).ticks(Math.max(2, Math.floor((W - left - right) / 80))));
+    svg.append('text').attr('class', 'lbl').attr('x', W - right).attr('y', H - 4).attr('text-anchor', 'end').text(axisLabel);
+  }
+  const engineParts = (byEngine) => ENGINES.filter((e) => byEngine[e] > 0).map((e) => ({name: ENGINE_LABEL[e], ms: byEngine[e], fill: color(e)}));
+  const busiest = (byEngine) => {
+    const e = ENGINES.filter((k) => byEngine[k] > 0).sort((a, b) => byEngine[b] - byEngine[a])[0];
+    return e ? `${fmtMs(byEngine[e])} ms on ${ENGINE_LABEL[e]}` : '';
+  };
+  const byEngine = (list) => list.reduce((o, r) => { o[r.engine_class] = (o[r.engine_class] || 0) + r.ms; return o; }, {});
+
+  // ---- header and overview ----
+  dash.draw('lede', (el) => {
+    if (waiting(el, 'overview')) return;
+    const ov = rows('overview');
+    const pairs = [...new Set(ov.map((r) => r.key))]
+      .map((k) => [ov.find((r) => r.key === k && r.arm === 'bf16'), ov.find((r) => r.key === k && r.arm === 'mxfp8')])
+      .filter(([a, b]) => a && b && a.status === 'ok' && b.status === 'ok' && a.blocks_ms && b.blocks_ms);
+    const r = pairs.map(([a, b]) => b.blocks_ms / a.blocks_ms);
+    const v = {
+      m: pairs.length, n: r.filter((x) => x < 1).length,
+      range: r.length ? `${ratio(d3.min(r))}–${ratio(d3.max(r))}` : '—',
+      moved: pairs.filter(([a, b]) => a.bottleneck === 'tensor' && b.bottleneck === 'vector').length,
+    }[el.dataset.part];
+    el.replaceChildren(String(v ?? '—'));
+  });
+
+  dash.draw('overview', (tb) => {
+    if (waiting(tb, 'overview')) return;
+    const s = pick();
+    tb.replaceChildren(...rows('overview').map((r) => {
+      const ok = r.status === 'ok';
+      const cells = [
+        [r.model], [r.shape], [r.layout], [ARM_LABEL[r.arm]], [fmtMs(r.step_ms), 'num'],
+        [r.step_section ? `§${r.step_section} · host ${r.step_host} · ${r.step_steps} steps` : 'not measured'],
+        [r.blocks], [fmtMs(r.blocks_ms), 'num'],
+        [r.outside_blocks_ms == null ? '—' : `${fmtMs(r.outside_blocks_ms)} (${pct(r.outside_blocks_ms / r.step_ms)})`, 'num'],
+        [ok ? `${ENGINE_LABEL[r.bottleneck]} ${pct(r.bottleneck_share)}` : 'pending'],
+        [ok ? pct(r.mfu) + (r.bottleneck !== 'tensor' ? ' (not TensorE-bound)' : '') : 'pending', 'num'],
+        [ok ? pct(r.attention_share) : 'pending', 'num'], [ok ? pct(r.addressable_attention_share) : 'pending', 'num'],
+        [ok ? pct(r.cross_attention_share) : 'pending', 'num'],
+        [ok ? `${pct(r.rope_share)}${r.rope_engine ? ` ${ENGINE_LABEL[r.rope_engine]}` : ''}` : 'pending', 'num'],
+      ];
+      const tr = document.createElement('tr');
+      tr.dataset.key = r.key;
+      tr.tabIndex = 0;
+      tr.className = r.key === s.model && r.arm === s.arm ? 'picked' : '';
+      tr.append(...cells.map(([text, cls]) => { const td = document.createElement('td'); td.textContent = text; if (cls) td.className = cls; return td; }));
+      tr.onclick = () => dash.setParams({model: r.key, arm: r.arm});
+      tr.onkeydown = (ev) => { if (ev.key === 'Enter') dash.setParams({model: r.key, arm: r.arm}); };
+      return tr;
+    }));
+  });
+
+  dash.draw('verdict', (el) => {
+    if (waiting(el, 'overview')) return;
+    const {key, arm, part} = el.dataset;
+    const ov = rows('overview');
+    const r = ov.find((x) => x.key === key && x.arm === arm), bf = ov.find((x) => x.key === key && x.arm === 'bf16');
+    const v = !r || r.status !== 'ok' ? null : {
+      engine: ENGINE_LABEL[r.bottleneck], share: pct(r.bottleneck_share), mfu: pct(r.mfu),
+      ratio: bf && bf.blocks_ms ? ratio(r.blocks_ms / bf.blocks_ms) : null,
+      attention: pct(r.attention_share), addressable: pct(r.addressable_attention_share),
+    }[part];
+    el.replaceChildren(v ?? '—');
+  });
+
+  dash.draw('verdict-state', (el) => {
+    const li = el.closest('li');
+    if (!li || dash.data('overview').status !== 'ok') return;
+    const pending = rows('overview').some((r) => r.key === el.dataset.key && r.status !== 'ok');
+    li.querySelectorAll('.when-ok').forEach((n) => { n.hidden = pending; });
+    li.querySelectorAll('.when-pending').forEach((n) => { n.hidden = !pending; });
+  });
+
+  // ---- the picker ----
+  dash.draw('pick-model', (sel) => {
+    if (waiting(sel, 'overview', 'blocks')) return;
+    const s = pick();
+    const models = new Map(rows('overview').map((r) => [r.key, r.model]));
+    sel.replaceChildren(...[...models].map(([k, m]) => new Option(m, k)));
+    sel.value = s.model;
+    sel.onchange = () => dash.setParams({model: sel.value});
+  });
+  dash.draw('pick-arm', (sel) => {
+    if (waiting(sel, 'overview', 'blocks')) return;
+    const s = pick();
+    sel.replaceChildren(...s.arms.map((a) => new Option(ARM_LABEL[a], a)));
+    sel.value = s.arm;
+    sel.onchange = () => dash.setParams({arm: sel.value});
+  });
+  dash.draw('pick-blk', (sel) => {
+    if (waiting(sel, 'overview', 'blocks')) return;
+    const s = pick();
+    sel.replaceChildren(...s.blocks.map((b) => new Option(
+      `${b.blk} · ${b.kind || 'block'}${b.execs_per_step != null ? ` · ${b.execs_per_step} per step` : ''}${b.status !== 'ok' ? ' · pending' : ''}`, b.blk)));
+    sel.value = s.blk;
+    sel.onchange = () => dash.setParams({blk: sel.value});
+  });
+  dash.draw('block-state', (el) => {
+    if (dash.data('overview').status !== 'ok' || dash.data('blocks').status !== 'ok') return;
+    const b = pick().block;
+    document.querySelectorAll('#dbp p.when-pending').forEach((n) => { n.hidden = !b || b.status === 'ok'; });
+    document.querySelectorAll('#dbp p.when-nodge').forEach((n) => { n.hidden = !b || b.status !== 'ok' || b.dge_notifs !== false; });
+  });
+  dash.draw('picked', (el) => {
+    if (waiting(el, 'overview', 'blocks')) return;
+    const s = pick(), b = s.block || {};
+    const ov = rows('overview').find((r) => r.key === s.model && r.arm === s.arm) || {};
+    const v = {
+      model: ov.model, arm: ARM_LABEL[s.arm],
+      blk: s.blk && `${s.blk} (${b.kind || 'block'}${b.execs_per_step != null ? `, ${b.execs_per_step} per step` : ''})`,
+      block_ms: b.status === 'ok' ? `${fmtMs(b.block_ms)} ms` : b.status,
+    }[el.dataset.part];
+    el.replaceChildren(v || '—');
+  });
+
+  // ---- the time line ----
+  let zoom = null;  // {id, domain: [us, us]} of the drawn time line
+  document.querySelectorAll('#dbp .tl-reset').forEach((b) => b.addEventListener('click', () => { zoom = null; dash.draw('timeline'); }));
+  const timelineId = (s) => `timeline_${s.model}_${s.arm}_${s.blk}`;
+
+  dash.draw('pick-comp', (sel) => {
+    if (waiting(sel, 'overview', 'blocks')) return;
+    const s = pick();
+    const segs = s.block && s.block.status === 'ok' ? rows(timelineId(s)) : null;
+    const present = new Set((segs || []).map((d) => d.component));
+    sel.replaceChildren(new Option('All components', ''), ...COMPONENTS.filter((c) => present.has(c)).map((c) => new Option(COMPONENT_LABEL[c], c)));
+    sel.value = present.has(dash.params().comp) ? dash.params().comp : '';
+    sel.onchange = () => dash.setParams({comp: sel.value || null});
+  });
+
+  dash.draw('timeline', (el) => {
+    if (waiting(el, 'overview', 'blocks')) return;
+    const s = pick(), b = s.block;
+    if (!b || b.status !== 'ok') { el.replaceChildren(); return; }
+    const id = timelineId(s);
+    if (waiting(el, id)) return;
+    const segs = rows(id), comp = dash.params().comp || '';
+    const lanes = ENGINES.filter((e) => segs.some((d) => d.engine_class === e));
+    const W = Math.max(320, el.clientWidth), laneH = 28, top = 30, axisH = 40;
+    const H = top + lanes.length * laneH + axisH;
+    const svg = svgIn(el, W, H, `Time line of ${s.model} ${s.arm} ${s.blk}: ${segs.length} busy segments on ${lanes.length} engine lanes over ${fmtMs(b.block_ms)} ms`);
+    svg.attr('data-source', id);
+    const tip = tooltip(el);
+    const left = widest(svg, [...lanes.map((e) => ENGINE_LABEL[e]), 'Mostly']) + 22;
+    svg.append('text').attr('class', 'head').attr('x', 14).attr('y', top / 2).attr('dy', '0.35em').text('Mostly');
+    lanes.forEach((e, i) => {
+      const y = top + i * laneH + laneH / 2;
+      svg.append('rect').attr('x', 2).attr('y', y - 4).attr('width', 8).attr('height', 8).attr('rx', 2).style('fill', color(e));
+      svg.append('text').attr('class', 'lbl').attr('x', 14).attr('y', y).attr('dy', '0.35em').text(ENGINE_LABEL[e]);
+    });
+    const full = [0, b.block_ms * 1000];
+    const dom = zoom && zoom.id === id ? zoom.domain : full;
+    const x = d3.scaleLinear().domain(dom).range([left, W - 8]);
+    const clip = `tl-clip-${Math.round(W)}`;
+    svg.append('clipPath').attr('id', clip).append('rect').attr('x', left).attr('y', 0).attr('width', W - 8 - left).attr('height', H);
+    const ticks = Math.max(2, Math.floor((W - left) / 90));
+    svg.append('g').attr('class', 'grid').attr('transform', `translate(0,${H - axisH})`).call(d3.axisBottom(x).ticks(ticks).tickSize(-(H - axisH)).tickFormat(''));
+    const g = svg.append('g').attr('clip-path', `url(#${clip})`);
+    const y = (e) => top + lanes.indexOf(e) * laneH + 4;
+    const visible = segs.filter((d) => d.end_us >= dom[0] && d.start_us <= dom[1]);
+    const density = (d) => Math.min(1, d.busy_us / Math.max(1e-6, d.end_us - d.start_us));
+    g.selectAll('rect').data(visible).join('rect')
+      .attr('x', (d) => x(d.start_us)).attr('width', (d) => Math.max(1, x(d.end_us) - x(d.start_us)))
+      .attr('y', (d) => y(d.engine_class)).attr('height', laneH - 8)
+      .style('fill', (d) => color(d.engine_class)).style('fill-opacity', (d) => 0.2 + 0.8 * density(d))
+      .attr('class', (d) => comp && d.component !== comp ? 'dim' : null)
+      .on('pointermove', (ev, d) => tip.show(ev, [
+        [COMPONENT_LABEL[d.component] || d.component, `on ${ENGINE_LABEL[d.engine_class]}`],
+        [`${fmtUs(d.start_us)} – ${fmtUs(d.end_us)}`, 'from the block start'],
+        [fmtUs(d.busy_us), `busy, ${pct(density(d))} of the segment`]]))
+      .on('pointerleave', tip.hide);
+    const labelW = {};
+    COMPONENTS.forEach((c) => { labelW[c] = widest(svg, [COMPONENT_LABEL[c]], 'seg-label'); });
+    g.selectAll('text').data(visible.filter((d) => (!comp || d.component === comp) && x(d.end_us) - x(d.start_us) >= (labelW[d.component] || 60) + 8)).join('text')
+      .attr('class', 'seg-label').attr('x', (d) => Math.max(left, x(d.start_us)) + 4).attr('y', (d) => y(d.engine_class) + (laneH - 8) / 2).attr('dy', '0.35em')
+      .text((d) => COMPONENT_LABEL[d.component] || d.component);
+    // "Mostly": in each ~80 px stretch of the window, the component with the most busy time on all engines but the collectives
+    const nb = Math.max(3, Math.floor((W - 8 - left) / 80)), step = (dom[1] - dom[0]) / nb, spans = [];
+    d3.range(nb).forEach((i) => {
+      const a = dom[0] + i * step, e = a + step, acc = new Map();
+      visible.forEach((d) => {
+        const ov = Math.min(e, d.end_us) - Math.max(a, d.start_us);
+        if (ov > 0 && d.component !== 'collective') acc.set(d.component, (acc.get(d.component) || 0) + d.busy_us * ov / Math.max(1e-6, d.end_us - d.start_us));
+      });
+      const [c, v] = [...acc].sort((p, q) => q[1] - p[1])[0] || [null, 0];
+      const last = spans[spans.length - 1];
+      if (last && last.c === c) { last.e = e; last.v += v; last.all += d3.sum(acc.values()); } else spans.push({c, a, e, v, all: d3.sum(acc.values())});
+    });
+    spans.filter((sp) => sp.c).forEach((sp) => {
+      const x0 = x(sp.a), x1 = x(sp.e), name = COMPONENT_LABEL[sp.c] || sp.c;
+      svg.append('line').attr('x1', x0).attr('x2', x0).attr('y1', 4).attr('y2', top - 4).style('stroke', 'var(--cds-chart-grid)');
+      svg.append('rect').attr('x', x0).attr('y', 2).attr('width', Math.max(1, x1 - x0)).attr('height', top - 6).style('fill', 'transparent')
+        .on('pointermove', (ev) => tip.show(ev, [[name, 'has the most busy time here'], [pct(sp.v / (sp.all || 1)), `of the busy time from ${fmtUs(sp.a)} to ${fmtUs(sp.e)}`]]))
+        .on('pointerleave', tip.hide);
+      if (x1 - x0 >= labelW[sp.c] + 8) svg.append('text').attr('class', 'lbl').attr('x', (x0 + x1) / 2).attr('y', top / 2).attr('dy', '0.35em').attr('text-anchor', 'middle').style('pointer-events', 'none').text(name);
+    });
+    svg.append('g').attr('transform', `translate(0,${H - axisH})`).call(d3.axisBottom(x).ticks(ticks).tickFormat((v) => d3.format(',~g')(v / 1000)));
+    svg.append('text').attr('class', 'lbl').attr('x', W - 8).attr('y', H - 4).attr('text-anchor', 'end').text('ms from the block start');
+    const brush = d3.brushX().extent([[left, H - axisH], [W - 8, H - 14]]).on('end', (ev) => {
+      if (!ev.selection) return;
+      const [a, c] = ev.selection.map(x.invert);
+      if (c - a > 0.5) { zoom = {id, domain: [Math.max(0, a), Math.min(full[1], c)]}; dash.draw('timeline'); }
+    });
+    svg.append('g').attr('class', 'brush').call(brush);
+    svg.on('dblclick', () => { zoom = null; dash.draw('timeline'); });
+  });
+
+  // ---- engines, bf16 against MXFP8 ----
+  dash.draw('engines', (el) => {
+    if (waiting(el, 'overview', 'blocks', 'engines')) return;
+    const s = pick();
+    const blocks = s.arms.map((a) => blockOf(s, a)).filter((b) => b && b.status === 'ok');
+    if (!blocks.length) { el.replaceChildren(); return; }
+    const arms = blocks.map((b) => b.arm);
+    const data = rows('engines').filter((r) => r.key === s.model && r.blk === s.blk && arms.includes(r.arm));
+    const engines = ENGINES.filter((e) => data.some((d) => d.engine_class === e));
+    const ms = (e, a) => (data.find((d) => d.engine_class === e && d.arm === a) || {}).ms;
+    const W = Math.max(320, el.clientWidth), H = 280, top = 26, axisH = 30;
+    const svg = svgIn(el, W, H, `Busy time per engine of ${s.model} ${s.blk}, ${arms.map((a) => ARM_LABEL[a]).join(' and ')}, against the block wall time`, 'group');
+    const tip = tooltip(el);
+    const y = d3.scaleLinear().domain([0, d3.max([...data.map((d) => d.ms), ...blocks.map((b) => b.block_ms)])]).nice().range([H - axisH, top]);
+    const left = widest(svg, y.ticks(5).map((v) => d3.format(',~g')(v))) + 14;
+    const refLabels = blocks.map((b) => `${ARM_LABEL[b.arm]} block ${fmtMs(b.block_ms)} ms`);
+    const right = widest(svg, refLabels) + 10;
+    const x0 = d3.scaleBand().domain(engines).range([left, W - right]).paddingInner(0.25).paddingOuter(0.1);
+    const x1 = d3.scaleBand().domain(arms).range([0, x0.bandwidth()]).padding(0.08);
+    const bw = Math.min(24, x1.bandwidth());
+    svg.append('g').attr('class', 'grid').attr('transform', `translate(${left},0)`).call(d3.axisLeft(y).ticks(5).tickSize(-(W - right - left)).tickFormat(''));
+    engines.forEach((e) => arms.forEach((a) => {
+      const v = ms(e, a), b = blocks.find((k) => k.arm === a);
+      if (v == null) return;
+      svg.append('rect').attr('class', 'mark').attr('tabindex', 0)
+        .attr('x', x0(e) + x1(a) + (x1.bandwidth() - bw) / 2).attr('width', bw).attr('y', y(v)).attr('height', Math.max(0.5, y(0) - y(v))).attr('rx', 2)
+        .style('fill', color(e)).style('fill-opacity', a === 'bf16' ? BF16_OPACITY : 1)
+        .attr('aria-label', `${ENGINE_LABEL[e]}, ${ARM_LABEL[a]}: ${fmtMs(v)} ms`)
+        .on('pointermove focus', (ev) => tip.show(ev, [[`${fmtMs(v)} ms`, `${ENGINE_LABEL[e]} · ${ARM_LABEL[a]}`], [pct(v / b.block_ms), 'of the block wall time']]))
+        .on('pointerleave blur', tip.hide);
+    }));
+    if (arms.length === 2) {
+      const spread = d3.max(blocks, (b) => b.replay_spread_ms || 0);
+      engines.forEach((e) => {
+        const a = ms(e, 'bf16'), m = ms(e, 'mxfp8');
+        if (a == null || m == null) return;
+        svg.append('text').attr('class', 'lbl').attr('x', x0(e) + x0.bandwidth() / 2).attr('y', y(Math.max(a, m)) - 6).attr('text-anchor', 'middle')
+          .text(Math.abs(m - a) < spread ? 'no difference' : ratio(m / a));
+      });
+    }
+    const refY = blocks.map((b) => y(b.block_ms));
+    if (refY.length === 2 && Math.abs(refY[0] - refY[1]) < 14) refY[refY[0] < refY[1] ? 0 : 1] -= 14 - Math.abs(refY[0] - refY[1]);
+    blocks.forEach((b, i) => {
+      svg.append('line').attr('class', 'ref').attr('x1', left).attr('x2', W - right).attr('y1', y(b.block_ms)).attr('y2', y(b.block_ms))
+        .style('stroke-opacity', b.arm === 'bf16' ? BF16_OPACITY + 0.2 : 1);
+      svg.append('text').attr('class', 'lbl').attr('x', W - right + 6).attr('y', refY[i]).attr('dy', '0.35em').text(refLabels[i]);
+    });
+    const narrow = x0.bandwidth() / 0.75 < 70;
+    svg.append('g').attr('transform', `translate(0,${H - axisH})`).call(d3.axisBottom(x0).tickFormat((e) => (narrow ? ENGINE_SHORT : ENGINE_LABEL)[e]));
+    svg.append('g').attr('transform', `translate(${left},0)`).call(d3.axisLeft(y).ticks(5).tickFormat((v) => d3.format(',~g')(v)));
+    svg.append('text').attr('class', 'lbl').attr('x', left).attr('y', 12).text('ms');
+  });
+
+  dash.draw('throttle', (el) => {
+    if (waiting(el, 'overview', 'blocks')) return;
+    const b = blockOf(pick(), el.dataset.arm), part = el.dataset.part;
+    const v = !b || b.status !== 'ok' ? null : /ms$/.test(part) ? `${fmtMs(b[part])} ms` : pct(b[part]);
+    el.replaceChildren(v ?? '—');
+  });
+
+  // ---- components and unattributed time ----
+  dash.draw('components', (el) => {
+    if (waiting(el, 'overview', 'blocks', 'components')) return;
+    const s = pick();
+    if (!s.block || s.block.status !== 'ok') { el.replaceChildren(); return; }
+    const data = rows('components').filter((r) => r.key === s.model && r.arm === s.arm && r.blk === s.blk && r.component !== 'unattributed');
+    const items = COMPONENTS.map((c) => {
+      const e = byEngine(data.filter((r) => r.component === c));
+      return {label: COMPONENT_LABEL[c], parts: engineParts(e), end: busiest(e)};
+    }).filter((i) => i.parts.length);
+    stackRows(el, items, `Busy time per component and engine of ${s.model} ${s.arm} ${s.blk}`, 'ms of busy time, engines added');
+  });
+
+  dash.draw('unattributed', (el) => {
+    if (waiting(el, 'overview', 'blocks', 'unattributed')) return;
+    const s = pick();
+    if (!s.block || s.block.status !== 'ok') { el.replaceChildren(); return; }
+    const data = rows('unattributed').filter((r) => r.key === s.model && r.arm === s.arm && r.blk === s.blk);
+    const sources = d3.rollups(data, (v) => d3.sum(v, (r) => r.ms), (r) => r.source).sort((a, b) => b[1] - a[1]).map(([k]) => k);
+    const top = sources.slice(0, 8), rest = sources.slice(8);
+    const item = (label, list) => { const e = byEngine(list); return {label, parts: engineParts(e), end: busiest(e)}; };
+    const items = [item('all unattributed', data), ...top.map((src) => item(src, data.filter((r) => r.source === src)))];
+    if (rest.length) items.push(item(`${rest.length} other sources`, data.filter((r) => rest.includes(r.source))));
+    stackRows(el, items.filter((i) => i.parts.length), `Unattributed busy time of ${s.model} ${s.arm} ${s.blk} by source`, 'ms of busy time, engines added');
+  });
+
+  // ---- attention phases ----
+  dash.draw('attention', (el) => {
+    if (waiting(el, 'overview', 'blocks', 'attention_phases')) return;
+    const s = pick();
+    if (!s.block || s.block.status !== 'ok') { el.replaceChildren(); return; }
+    const data = rows('attention_phases').filter((r) => r.key === s.model && r.arm === s.arm && r.blk === s.blk);
+    const modules = d3.rollups(data, (v) => d3.sum(v, (r) => r.ms), (r) => r.module).sort((a, b) => b[1] - a[1]).map(([m]) => m);
+    const kind = (m) => (data.find((r) => r.module === m) || {}).routed ? 'routed to MXFP8 attention by Plan B'
+      : m === 'audio_attn1' ? 'audio self-attention, head dim 64, not routed'
+        : m === '(no module path)' ? 'kernel rows with no module path' : 'cross-attention, not routed';
+    const items = modules.flatMap((m) => [{header: `${m} · ${kind(m)}`}, ...PHASES.map((p) => {
+      const e = byEngine(data.filter((r) => r.module === m && r.phase === p));
+      return {label: PHASE_LABEL[p], parts: engineParts(e), end: busiest(e)};
+    }).filter((i) => i.parts.length)]);
+    stackRows(el, items, `Attention phases per module of ${s.model} ${s.arm} ${s.blk}`, 'ms of busy time, engines added');
+  });
+
+  // ---- memory and PSUM ----
+  dash.draw('memory', (tb) => {
+    if (waiting(tb, 'overview', 'blocks', 'memory')) return;
+    const s = pick();
+    const data = rows('memory').filter((r) => r.key === s.model && r.blk === s.blk && r.unit === 'bytes');
+    const v = (m, a) => (data.find((r) => r.metric === m && r.arm === a) || {}).value;
+    tb.replaceChildren(...MEMORY.filter(([m]) => data.some((r) => r.metric === m)).map(([m, label]) => {
+      const tr = document.createElement('tr');
+      const a = v(m, 'bf16'), b = v(m, 'mxfp8');
+      [[label], [gb(a), 'num'], [gb(b), 'num'], [a && b != null ? ratio(b / a) : '—', 'num']].forEach(([text, cls]) => {
+        const td = document.createElement('td'); td.textContent = text; if (cls) td.className = cls; tr.append(td);
+      });
+      return tr;
+    }));
+  });
+
+  dash.draw('psum', (el) => {
+    if (waiting(el, 'overview', 'blocks', 'memory', 'engines')) return;
+    const s = pick();
+    const arms = s.arms.filter((a) => (blockOf(s, a) || {}).status === 'ok');
+    if (!arms.length) { el.replaceChildren(); return; }
+    const mem = rows('memory').filter((r) => r.key === s.model && r.blk === s.blk && r.unit === 'ms');
+    const eng = rows('engines').filter((r) => r.key === s.model && r.blk === s.blk);
+    const get = (list, f) => (list.find(f) || {});
+    const items = ['vector', 'scalar'].flatMap((e) => arms.map((a) => {
+      const copy = get(mem, (r) => r.arm === a && r.engine_class === e && r.metric === 'psum_readout_copy').value || 0;
+      const fused = get(mem, (r) => r.arm === a && r.engine_class === e && r.metric === 'psum_readout_fused').value || 0;
+      const busy = get(eng, (r) => r.arm === a && r.engine_class === e).ms || 0;
+      return {label: `${ENGINE_LABEL[e]} · ${ARM_LABEL[a]}`, end: `copy ${fmtMs(copy)} + fused ${fmtMs(fused)} of ${fmtMs(busy)} ms`, parts: [
+        {name: 'PSUM read-out, pure copy', ms: copy, fill: color(e)},
+        {name: 'PSUM read-out, fused', ms: fused, fill: color(e), opacity: BF16_OPACITY},
+        {name: 'other work', ms: Math.max(0, busy - copy - fused), fill: color(e), opacity: 0.15}]};
+    }));
+    stackRows(el, items, `PSUM read-out inside the VectorE and ScalarE busy time of ${s.model} ${s.blk}`, 'ms of busy time');
+  });
+
+  // ---- quality ----
+  dash.draw('quality', (tb) => {
+    if (waiting(tb, 'quality', 'overview')) return;
+    const order = [...new Set(rows('overview').map((r) => r.key))];
+    const q = [...rows('quality')].sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key) || (b.profiled_shape - a.profiled_shape) || a.section.localeCompare(b.section, 'en', {numeric: true}));
+    const n2 = (v) => v == null ? '—' : f2(v), n3 = (v) => v == null ? '—' : d3.format('.3f')(v);
+    tb.replaceChildren(...q.map((r) => {
+      const tr = document.createElement('tr');
+      const delta = r.delta_psnr == null ? '—' : d3.format('+.2f')(r.delta_psnr);
+      const cos = r.latents_cos == null ? '—' : [r.latents_cos.toFixed(4), String(r.latents_cos)].sort((a, b) => b.length - a.length)[0];
+      [[r.model], [r.shape], [r.profiled_shape ? 'yes' : 'no'], [`§${r.section} · host ${r.host}`], [r.against],
+        [r.psnr_worst == null ? n2(r.psnr) : `${n2(r.psnr)} (${n2(r.psnr_worst)})`, 'num'], [n3(r.ssim), 'num'], [n3(r.lpips), 'num'],
+        [cos, 'num'], [n2(r.bf16_psnr), 'num'], [delta, 'num'], [r.floor], [r.note, 'wrap']]
+        .forEach(([text, cls]) => { const td = document.createElement('td'); td.textContent = text; if (cls) td.className = cls; tr.append(td); });
+      return tr;
+    }));
+  });
+})();
+</script>
