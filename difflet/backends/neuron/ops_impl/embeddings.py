@@ -16,11 +16,20 @@ add per element, so the result is bit-identical to the CPU op: ``+-x`` pass thro
 matmul's fp32 accumulation exactly, ``a - b*s`` equals ``a + b*(-s)``, and the addition is
 commutative. The constants are built from ``arange`` inside the op (no module-level cache:
 Dynamo traces one graph per block class, and the compiler folds them).
+
+``apply_rotary_emb_slices`` is the CPU op itself, for Wan's interleaved self-attention, whose q/k
+come out of a bf16 matmul (a quantized q/k rotates in the half-split layout,
+``difflet/models/wan/modeling_wan.py``): with ``x @ P`` two bf16 Wan 2.1 runs at tp4 480x832x9
+gave two different clips (433 ms per step), with the stride-2 law the two are bit-identical and
+the clip from before ``x @ P`` (438 ms). HunyuanVideo keeps ``apply_rotary_emb``: its bf16 runs
+are reproducible with it, and its measured numbers are this op's.
 """
 
 from __future__ import annotations
 
 import torch
+
+from difflet.backends.cpu.ops_impl.embeddings import apply_rotary_emb as apply_rotary_emb_slices
 
 
 def apply_rotary_emb(hidden_states, freqs_cos, freqs_sin):
@@ -64,4 +73,4 @@ def apply_rotary_emb_fp32(hidden_states, freqs_cos, freqs_sin):
     return (x.float() * freqs_cos + (x @ rot).float() * freqs_sin).to(x.dtype)
 
 
-__all__ = ["apply_rotary_emb", "apply_rotary_emb_fp32"]
+__all__ = ["apply_rotary_emb", "apply_rotary_emb_fp32", "apply_rotary_emb_slices"]

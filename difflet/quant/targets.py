@@ -37,9 +37,9 @@ quantizes a 2048-wide ``to_out.0`` has one up to tp 16.
 Wan 2.1-T2V-14B and Wan 2.2-T2V-A14B (diffusers' ``WanTransformer3DModel`` names) run 40 blocks
 of 5120 (40 heads x 128), each a self-attention, a text cross-attention (4096-wide text at 512
 tokens) and a 13824-wide FFN; Wan 2.2's two experts share that block graph, so one table serves
-both (one spec, two quantized directories). The targets are the q/k/v of both attentions and
-the FFN (the self-attention's quantized q/k in the half-split rotary layout, see
-``WAN_TARGETS``), written in **checkpoint-key spelling**: the neuron module
+both (one spec, two quantized directories). The targets are the text cross-attention's q/k/v
+and the FFN (the self-attention's q/k/v stay bf16 for quality, an override's in the half-split
+rotary layout, see ``WAN_TARGETS``), written in **checkpoint-key spelling**: the neuron module
 (``difflet/models/wan/modeling_wan.py``) names its FFN ``ffn.net_in`` / ``net_out`` where the
 checkpoint has ``ffn.net.0.proj`` / ``net.2``, and the application applies the spec through its
 ``checkpoint_key`` (``quantize_module_(key_fn=...)``), so the patterns match the weights the
@@ -232,31 +232,39 @@ LTX_2_ROW_PARALLEL: tuple[str, ...] = (
 )
 
 # Wan 2.1 and Wan 2.2-A14B (diffusers' WanTransformer3DModel names, the checkpoint's spelling of
-# the FFN): the q/k/v of the self- and the text cross-attention and the two FFN linears, in the
-# first default's order (the targets key the quantized directory, so its directories are
-# reused). Measured (trn3, tp4, 480x832x9, 50 steps, one session;
-# docs/plans/2026-11-08-mxfp8-wan-half-split-rope.md): 330.7 ms per step against 431.9 in bf16
-# (0.77x; the block 8.05 ms against 10.67), and 387.3 ms (0.90x) with the self-attention q/k/v
-# in bf16. Only in the half-split rotary layout: the interleaved rotary's pair swap on q/k from
-# the MXFP8 kernel moved 2-byte elements (1480 DMA instructions per block, overlapping, their
-# durations summed to 87.8 ms; the block 56.89 ms, the step 2263 ms), where on q/k from a bf16
-# matmul it moves 256-byte head rows (240, summed to 0.04 ms). So when any self-attention q or
-# k is quantized, the neuron application reorders every self-attention's q/k channels at load
-# and rotates contiguous halves (``WanTransformer3DModel.use_half_split_rope_``); bf16 q/k keep
-# the interleaved layout, which is faster for them (483.6 ms in the half split).
+# the FFN): the text cross-attention's q/k/v and the two FFN linears, in the 917d087 order (the
+# targets key the quantized directory, so its directories are reused). The self-attention's
+# q/k/v stay bf16 for quality, not speed (trn3, tp4, 480x832, 50 steps; the speed in
+# docs/verification/2026-11-07-mxfp8-video-models.md section 8, the two-expert quality in Task
+# H6 of docs/plans/2026-11-08-mxfp8-wan-half-split-rope.md). Their speed is solved: the
+# interleaved rotary's pair swap on q/k from the MXFP8 kernel moved 2-byte elements (1480 DMA
+# instructions per block, overlapping, their durations summed to 87.8 ms; the block 56.89 ms,
+# the step 2263 ms), where on q/k from a bf16 matmul it moves 256-byte head rows (240, summed
+# to 0.04 ms). So when any self-attention q or k is quantized, the neuron application reorders
+# every self-attention's q/k channels at load and rotates contiguous halves
+# (``WanTransformer3DModel.use_half_split_rope_``): the block runs 8.05 ms against this set's
+# 9.30, the step at 9 frames 0.77x bf16's against this set's 0.90x. Their quality is not: with
+# both Wan 2.2 experts quantized, the mean over 4 prompts x 3 seeds at 9 frames is 27.60 dB /
+# SSIM 0.860 from bf16 with them and 29.04 / 0.895 with this set (-1.44 dB, -0.034; better on
+# 3 of the 12 clips, the worst 17.90 against 28.50 dB), past the 1 dB / 0.01 the rule allows,
+# where Wan 2.1 alone loses 0.46 dB / 0.003. One table serves both, so they stay bf16; an
+# override (``DIFFLET_QUANT_TARGETS``) that quantizes a self-attention q or k still gets the
+# half-split layout, and bf16 q/k keep the interleaved one, faster for them (bf16 runs 483.6 ms
+# per step in the half split against 431.9 interleaved).
 _WAN_BLOCK = r"blocks\.\d+"
 
 WAN_TARGETS: tuple[str, ...] = (
-    rf"{_WAN_BLOCK}\.attn1\.(to_q|to_k|to_v)",
     rf"{_WAN_BLOCK}\.attn2\.(to_q|to_k|to_v)",
     rf"{_WAN_BLOCK}\.ffn\.net\.0\.proj",
     rf"{_WAN_BLOCK}\.ffn\.net\.2",
 )
 
-#: Wan modules a reader may expect quantized that are deliberately not: the output
-#: projections, the modulation tables (parameters, not linears: they match no module, named so
-#: the table reads complete), the embedders and the output layer.
+#: Wan modules a reader may expect quantized that are deliberately not: the self-attention's
+#: q/k/v (measured above), the output projections, the modulation tables (parameters, not
+#: linears: they match no module, named so the table reads complete), the embedders and the
+#: output layer.
 WAN_KEPT_BF16: tuple[str, ...] = (
+    rf"{_WAN_BLOCK}\.attn1\.(to_q|to_k|to_v)",
     rf"{_WAN_BLOCK}\.(attn1|attn2)\.to_out\.0",
     rf"{_WAN_BLOCK}\.scale_shift_table",
     r"condition_embedder\..*",
