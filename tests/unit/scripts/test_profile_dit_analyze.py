@@ -36,10 +36,10 @@ OTHER = "Mystery[x][0]_add.1"  # no rule names it
 ACTIVE_TIME_TOLERANCE = 0.005
 
 
-def row(engine, start, end, layer=MLP_UP, opcode="MATMUL", pcore=0, src="", psum=0.0):
+def row(engine, start, end, layer=MLP_UP, opcode="MATMUL", pcore=0, src="", psum=0.0, attrs=None):
     return {"start_ts": start, "end_ts": end, "duration_ns": end - start, "engine": engine,
             "pcore_idx": pcore, "opcode": opcode, "layer": layer, "hlo_name": None,
-            "nki_source_location": src or None, "hlo_attrs": None, "psum_read_bytes": psum}
+            "nki_source_location": src or None, "hlo_attrs": attrs, "psum_read_bytes": psum}
 
 
 def block(tmp_path, rows, cc=(), total_time=1e-3, exec8=None, source=True, **summary):
@@ -151,6 +151,29 @@ def test_rows_with_no_module_path_are_unattributed_not_other(tmp_path):
     assert out["other_share"]["vector"] == pytest.approx(0.05)
 
 
+def test_unattributed_time_is_split_by_its_source_file_and_function(tmp_path):
+    """Ruling R25: Unknown rows stay unattributed; unattributed_by_source says which source file
+    (and function, where the file can be read and parsed) their busy time came from, on the
+    same per-physical-core union basis, with "(none)" for rows that name no source."""
+    mod = tmp_path / "mod.py"
+    mod.write_text("import os\n\n\nclass A:\n    def f(self):\n        return os.sep\n")
+    lin = '[{"op_type":"","source_file":"/elsewhere/lin.py","source_line":"7"}]'
+    out = run(tmp_path / "blk", [
+        row("Tensor", 0, 1000, "Unknown", src=f"{mod}:6"),
+        row("Tensor", 500, 1500, "Unknown", src=f"{mod}:6"),  # overlaps the first: once
+        row("Tensor", 2000, 3000, "Unknown", pcore=1, src=f"{mod}:6"),
+        row("Vector", 0, 300, "Unknown", src="/gone/elsewhere/thing.py:10"),  # no such file
+        row("Vector", 400, 500, "Unknown", attrs=lin),  # its source only in hlo_attrs
+        row("Scalar", 0, 200, "Unknown"),
+        row("Tensor", 5000, 6000)])  # attributed (mlp_up): not in it
+    assert out["unattributed_by_source"] == {
+        "mod.py:A.f": {"tensor": pytest.approx((1500 + 1000) / 2 / 1e6)},
+        "thing.py": {"vector": pytest.approx(300 / 2 / 1e6)},
+        "lin.py": {"vector": pytest.approx(100 / 2 / 1e6)},
+        "(none)": {"scalar": pytest.approx(200 / 2 / 1e6)}}
+    assert out["components"]["unattributed"]["tensor"] == pytest.approx(2500 / 2 / 1e6)
+
+
 def test_unmapped_attention_lines_over_10_percent_of_attention_are_refused(tmp_path):
     rows = [row("Tensor", 0, 1000, ATTN, src=f"{CTE}:4128"),
             row("Vector", 1000, 1200, ATTN, src=f"{CTE}:9999")]
@@ -233,7 +256,7 @@ def test_the_cli_writes_breakdown_json_with_the_fields_the_page_reads(tmp_path):
         "engines_check", "attention_detail", "memory_bytes", "psum_readout_copy_ms",
         "psum_readout_fused_ms", "psum_readout_copy_ms_by_engine",
         "psum_readout_fused_ms_by_engine", "mfu", "mbu", "throttle", "other_share",
-        "unattributed_share", "warnings", "timeline", "dge_notifs"}
+        "unattributed_share", "warnings", "timeline", "dge_notifs", "unattributed_by_source"}
     summary_ms = out["engines_check"]["summary_ms"]
     assert summary_ms["dma_active_time"] == pytest.approx(0.3)
     assert {"static_dma_active_time", "hardware_dynamic_dma_active_time",

@@ -16331,5 +16331,69 @@
    "busy_us": 0.457
   }
  ],
- "dge_notifs": true
+ "dge_notifs": true,
+ "unattributed_by_source": {
+  "(none)": {
+   "vector": 1.219015,
+   "tensor": 8.1998825,
+   "gpsimd": 0.012856,
+   "scalar": 2.460322,
+   "sync": 0.026787,
+   "hbm_dma": 5.8220015
+  },
+  "transpose.py:_dve_transpose_small_i_impl": {
+   "hbm_dma": 0.2201065,
+   "sync": 0.001804
+  },
+  "transpose.py:_copy_with_engine": {
+   "scalar": 0.075012
+  },
+  "normalization.py:FP32LayerNorm.forward": {
+   "scalar": 1.2695025,
+   "hbm_dma": 0.020072,
+   "tensor": 1.0513235,
+   "vector": 2.764284,
+   "gpsimd": 0.14353
+  },
+  "modeling_wan.py:WanTransformerBlock.forward": {
+   "hbm_dma": 0.1441255,
+   "tensor": 0.0383035,
+   "scalar": 0.0156165,
+   "vector": 2.551946,
+   "gpsimd": 0.0008895
+  },
+  "linear.py:ColumnParallelLinear.forward": {
+   "hbm_dma": 0.0079475,
+   "tensor": 2.6086925,
+   "scalar": 0.0159025,
+   "vector": 1.444119,
+   "sync": 0.000172,
+   "gpsimd": 0.0008885
+  },
+  "modeling_wan.py:WanFeedForward.forward": {
+   "scalar": 2.2910885,
+   "tensor": 0.0443915,
+   "hbm_dma": 0.001517,
+   "vector": 0.357389,
+   "gpsimd": 0.0002235
+  },
+  "linear.py:RowParallelLinear.forward": {
+   "tensor": 0.3028245,
+   "scalar": 0.7033235,
+   "hbm_dma": 0.3188615,
+   "vector": 1.095684,
+   "sync": 0.000737
+  },
+  "modeling_wan.py:WanAttention._global_rms_norm": {
+   "scalar": 0.1842335,
+   "vector": 0.4071695,
+   "tensor": 0.00628,
+   "sync": 0.0058325,
+   "hbm_dma": 0.002801,
+   "gpsimd": 0.0080105
+  },
+  "_functional_collectives.py:all_reduce": {
+   "gpsimd": 0.0017875
+  }
+ }
 }

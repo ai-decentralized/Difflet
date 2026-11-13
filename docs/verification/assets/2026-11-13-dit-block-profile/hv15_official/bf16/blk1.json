@@ -4926,5 +4926,42 @@
    "busy_us": 0.458
   }
  ],
- "dge_notifs": true
+ "dge_notifs": true,
+ "unattributed_by_source": {
+  "(none)": {
+   "vector": 0.8627155,
+   "tensor": 3.1924155,
+   "gpsimd": 0.0142905,
+   "sync": 0.0178435,
+   "scalar": 2.0877165,
+   "hbm_dma": 2.577756
+  },
+  "normalization.py:AdaLayerNormZero.forward": {
+   "hbm_dma": 0.000595
+  },
+  "transformer_hunyuan_video15.py:HunyuanVideo15TransformerBlock.forward": {
+   "scalar": 0.3889975,
+   "vector": 1.195009,
+   "gpsimd": 0.095212,
+   "hbm_dma": 0.066583
+  },
+  "linear.py:ColumnParallelLinear.forward": {
+   "scalar": 0.0001975,
+   "vector": 1.8026125,
+   "hbm_dma": 0.000667
+  },
+  "activations.py:GELU.gelu": {
+   "scalar": 4.103908,
+   "vector": 0.539055
+  },
+  "linear.py:RowParallelLinear.forward": {
+   "scalar": 0.446942,
+   "hbm_dma": 0.0170495,
+   "vector": 0.755128,
+   "sync": 0.000246
+  },
+  "_functional_collectives.py:all_reduce": {
+   "gpsimd": 0.0011265
+  }
+ }
 }
