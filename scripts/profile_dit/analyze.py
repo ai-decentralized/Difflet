@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -233,3 +234,7 @@ def main(argv: list[str] | None = None) -> None:
 
 if __name__ == "__main__":
     main()
+    sys.stdout.flush()
+    # breakdown.json is written: skip the teardown, where pyarrow's thread pool aborts ~3% of
+    # exits ("terminate called without an active exception", exit 134)
+    os._exit(0)
