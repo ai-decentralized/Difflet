@@ -8,11 +8,14 @@ device instruction with ``layer`` (the torch module path, ``<Class>[<attr>][<i>]
 a row in one of ``COMPONENTS`` by the first rule that holds:
 
 1. ``layer`` is ``Unknown``, or empty with no source: ``unattributed`` (never ``other``).
-2. The HLO op (``hlo_name``'s, or the one ``layer`` ends with) is a collective: ``collective``.
-3. An attention module's own ops (``<...>Attention[<attr>][<i>]_<op>``): the attention
-   custom-call (by HLO op or kernel source) is ``attention``; the rest is ``rope`` or ``qk_norm`` when ``hlo_attrs`` names the
-   model's source for it, else ``attn_glue`` (q pre-scale, bounds, concatenations).
-4. Any other row whose ``nki_source_location`` is the attention kernel: ``attention``.
+2. A row whose ``nki_source_location`` is the attention kernel: ``attention``, whatever HLO
+   op the profiler files it under (Wan's mxfp8 block: kernel rows under the all-reduce after
+   the kernel, ruling R14).
+3. The HLO op (``hlo_name``'s, or the one ``layer`` ends with) is a collective: ``collective``.
+4. An attention module's own ops (``<...>Attention[<attr>][<i>]_<op>``) and its compiler
+   regions (``.../computation_<n>``): the attention custom-call is ``attention``; the rest is
+   ``rope`` or ``qk_norm`` when ``hlo_attrs`` or ``nki_source_location`` names the model's source
+   for it, else ``attn_glue`` (q pre-scale, bounds, concatenations).
 5. The module path, by the model's ordered table below. An MX linear's kernel rows
    (``matmul_mxfp8`` sources) carry the linear's path and so take its component.
 6. Anything else: ``other``.
@@ -36,7 +39,8 @@ _REPO = Path(__file__).resolve().parents[2]
 _COLLECTIVES = ("all-gather", "all-reduce", "reduce-scatter", "all-to-all", "collective-permute")
 _ATTENTION_KERNEL = re.compile(r"/nkilib/core/attention/")
 _ATTENTION = re.compile(r"(?:^|/)\w*Attention\[(\w+)\]\[\d+\]")
-_BARE_ATTENTION = re.compile(r"(?:^|/)\w*Attention\[\w+\]\[\d+\]_[^/]*$")
+#: an attention module's own ops, and its compiler regions (``.../computation_154``)
+_BARE_ATTENTION = re.compile(r"(?:^|/)\w*Attention\[\w+\]\[\d+\](?:_[^/]*|/computation_\d+)$")
 
 
 def _source(path: str, qualname: str) -> str:
@@ -106,16 +110,21 @@ def classify(layer: str, hlo_name: str, nki_source: str, hlo_attrs: str, model: 
     rules, sources = _MODELS[model]
     if layer == "Unknown" or not (layer or nki_source):
         return "unattributed"
+    # whatever HLO the profiler files it under: Wan's mxfp8 block puts kernel rows under the
+    # all-reduce after the kernel (2026-11-13, ruling R14)
+    if _ATTENTION_KERNEL.search(nki_source):
+        return "attention"
     hlo_op = hlo_name.partition("= ")[2].partition("(")[0]
     layer_op = layer.rpartition("_")[2]
     if hlo_op.startswith(_COLLECTIVES) or layer_op.startswith(_COLLECTIVES):
         return "collective"
     if _BARE_ATTENTION.search(layer):
-        if "custom-call" in (hlo_op, layer_op.split(".")[0]) or _ATTENTION_KERNEL.search(nki_source):
+        if "custom-call" in (hlo_op, layer_op.split(".")[0]):
             return "attention"
-        return next((c for p, c in sources if re.search(p, hlo_attrs)), "attn_glue")
-    if _ATTENTION_KERNEL.search(nki_source):
-        return "attention"
+        # a compiler region's rows name their source only in nki_source_location
+        path, _, line = nki_source.rpartition(":")
+        probe = f'{hlo_attrs} "source_file":"{path}","source_line":"{line}"'
+        return next((c for p, c in sources if re.search(p, probe)), "attn_glue")
     return next((c for p, c in rules if re.search(p, layer)), "other")
 
 
