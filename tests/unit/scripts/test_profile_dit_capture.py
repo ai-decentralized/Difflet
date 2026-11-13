@@ -25,8 +25,9 @@ TABLE = {"qwen_image": ("1024", "1024", None, 1), "flux": ("1024", "1024", None,
 ENV = ("NEURON_RT_VISIBLE_CORES", "NEURON_RT_INSPECT_DEVICE_PROFILE")
 
 #: The lane's PY: a `-m difflet.cli.main` command is recorded (argv and ENV), prints the
-#: runtime's dropped-events warning for process FAKE_DROPPED_PID if set, and writes its
-#: --output; anything else (system_profile.py, the signature check) runs on python.
+#: runtime's dropped-events warning for process FAKE_DROPPED_PID and the line FAKE_STEP_LINE if
+#: set, and writes its --output; anything else (system_profile.py, the signature check) runs on
+#: python.
 FAKE_PY = """#!{exe}
 import json, os, sys
 if sys.argv[1:3] == ["-m", "difflet.cli.main"]:
@@ -38,6 +39,8 @@ if sys.argv[1:3] == ["-m", "difflet.cli.main"]:
         print(f"2026-Nov-13 14:31:13.844683 {{pid}}:{{pid}}  WARN   NRT:dump_trace_info"
               "    System profile events were dropped due to full ring buffers (max 6403834"
               " dropped on a single NC).")
+    if os.environ.get("FAKE_STEP_LINE"):
+        print(os.environ["FAKE_STEP_LINE"])
     open(args[args.index("--output") + 1], "w").write("out")
     sys.exit(0)
 os.execv(sys.executable, [sys.executable] + sys.argv[1:])
@@ -53,7 +56,7 @@ FAKE_X = """#!{exe}
 import gzip, io, json, os, random, subprocess, sys, tarfile
 from pathlib import Path
 args = sys.argv[1:]
-parent = open(f"/proc/{{os.getppid()}}/cmdline", "rb").read().split(b"\\0")[:2]  # its timeout
+parent = open(f"/proc/{{os.getppid()}}/cmdline", "rb").read().split(b"\\0")[:4]  # its timeout
 with open(os.environ["X_LOG"], "a") as f:
     f.write(json.dumps({{"argv": args, "cwd": os.getcwd(),
                         "parent": [p.decode() for p in parent]}}) + "\\n")
@@ -201,12 +204,15 @@ def test_each_key_dumps_one_step_at_its_shape_and_captures_its_blocks_as_four_wo
                               "NEURON_RT_INSPECT_DEVICE_PROFILE": "1"}
         captures = [ln["argv"] for ln in x if ln["argv"][0] == "capture"]
         assert len(captures) == blocks
-        # capture 1200 s; each block view 2700 s (ruling R8: HV1.5's took 481-555 s)
+        # capture 1200 s; each block view 2700 s (ruling R8: HV1.5's took 481-555 s); rank 0's
+        # system view 900 s; each killed 60 s after its signal if it ignores it (ruling R9)
         assert {tuple(ln["parent"]) for ln in x if ln["argv"][0] == "capture"} == {
-            ("timeout", "1200")}
+            ("timeout", "-k", "60", "1200")}
         block_views = [ln for ln in x if ln["argv"][0] == "view" and "-n" in ln["argv"]]
         assert len(block_views) == 3 * blocks
-        assert {tuple(ln["parent"]) for ln in block_views} == {("timeout", "2700")}
+        assert {tuple(ln["parent"]) for ln in block_views} == {("timeout", "-k", "60", "2700")}
+        [system_view] = [ln for ln in x if ln["argv"][0] == "view" and "-d" in ln["argv"]]
+        assert tuple(system_view["parent"]) == ("timeout", "-k", "60", "900")
         for c in captures:
             assert {"--collectives-worker-count=4", "--collectives-workers-per-node=4",
                     "--num-exec=8", "--profile-nth-exec=4", "--enable-dge-notifs"} <= set(c)
@@ -309,6 +315,23 @@ def test_dropped_system_events_fail_the_lane_only_on_rank_0(tmp_path, pid, statu
 
 
 @needs_tools
+@pytest.mark.parametrize("steps, status", [(1, "DONE"), (2, "FAILED system profile: ")])
+def test_a_dump_that_ran_another_step_count_than_the_lane_fails_before_any_capture(
+        tmp_path, steps, status):
+    """Ruling R9: the per-step numbers divide by the lane's step count; HunyuanVideo-1.5's
+    orchestrator prints the steps it ran (line format of the 2026-11-13 smoke's dump.log)."""
+    line = f"[hv15] request 0: denoise 162.5 s, {steps} steps, median 162527 ms (first 162527 ms)"
+    done, arm_dir, _, x, _ = _capture(tmp_path, "hv15_official", FAKE_STEP_LINE=line)
+    assert _status(arm_dir).startswith(status), done.stderr
+    if status == "DONE":
+        summary = json.loads((arm_dir / "system_summary.json").read_text())
+        assert summary["step"]["dump_steps"] == 1
+    else:
+        assert "2 steps" in _status(arm_dir)
+        assert not [ln for ln in x if ln["argv"][0] == "capture"]
+
+
+@needs_tools
 def test_hv15_profiles_the_second_cfg_half_when_its_neff_differs(tmp_path):
     dump = [{"100": "block0"}, {"100": "block0"}, {"300": "block1"}, {"300": "block1"}]
     done, arm_dir, _, x, _ = _capture(tmp_path, "hv15_official", dump=dump)
@@ -354,11 +377,11 @@ def test_hv15_mxfp8_is_refused_naming_the_pair(tmp_path):
     assert not (tmp_path / "out").exists()
 
 
-@pytest.mark.parametrize("steps", [1, 2])
-def test_system_profile_counts_the_step_not_the_warmup(tmp_path, steps):
+def _loop_profile(tmp_path: Path) -> tuple[Path, Path]:
     """A warm-up forward, 1 s of prompt encoding, then two forwards 12 ms apart (one step's CFG
     pair, or two steps), as Qwen-Image's 2-step dump; every execution recorded on both physical
-    cores of the logical core, the run's first without an exec_id (as in HV1's profile)."""
+    cores of the logical core, the run's first without an exec_id (as in HV1's profile). The
+    loop's blocks: 2032-2067.001 and 2082-2117.001 ms. Returns (system.json, rank 0's dump)."""
     events, exec_id = [], 0
 
     def run(model_id, start_ms, dur_ms):
@@ -384,7 +407,6 @@ def test_system_profile_counts_the_step_not_the_warmup(tmp_path, steps):
             run(11, t, dur)
             t += dur + 1
         t += 12
-    # the loop's blocks: 2032-2067.001 and 2082-2117.001
     events.append({"name": "cc_running", "timestamp": int(2040e6), "duration": 500000})
     events.append({"name": "cc_running", "timestamp": int(1005e6), "duration": 500000})  # warm-up
     profile = tmp_path / "system.json"
@@ -394,9 +416,21 @@ def test_system_profile_counts_the_step_not_the_warmup(tmp_path, steps):
     rank0.mkdir(parents=True)
     for mid in (11, 22):
         (rank0 / f"neff_{mid}_vnc_0.neff").write_bytes(b"x")
-    done = subprocess.run([sys.executable, str(PD / "system_profile.py"), str(profile),
-                           str(tmp_path / "rank0"), str(steps), "neff_11_vnc_0.neff"],
+    return profile, tmp_path / "rank0"
+
+
+def _system_profile(profile: Path, rank0: Path, steps: int, log: str = ""):
+    """system_profile.py on ``profile`` with a dump.log holding ``log``."""
+    dump_log = profile.with_name("dump.log")
+    dump_log.write_text(log + "\ndump exit 0\n")
+    return subprocess.run([sys.executable, str(PD / "system_profile.py"), str(profile), str(rank0),
+                           str(steps), str(dump_log), "neff_11_vnc_0.neff"],
                           capture_output=True, text=True, timeout=60)
+
+
+@pytest.mark.parametrize("steps", [1, 2])
+def test_system_profile_counts_the_step_not_the_warmup(tmp_path, steps):
+    done = _system_profile(*_loop_profile(tmp_path), steps)
     assert done.returncode == 0, done.stderr
     s = json.loads(done.stdout)
     block, prefix = s["neffs"]["neff_11_vnc_0.neff"], s["neffs"]["neff_22_vnc_0.neff"]
@@ -408,11 +442,36 @@ def test_system_profile_counts_the_step_not_the_warmup(tmp_path, steps):
     # 0.999 ms after each block but a forward's last and after the prefix; 12.999 ms between
     # the forwards
     assert s["host_gap_ms"] == pytest.approx((5 * 0.999 + 12.999) / steps)
-    # the loop: the first block's start to the last one's end
+    # the loop: the first block's start to the last one's end; the dump printed no step count
     assert s["step"] == {"wall_ms": pytest.approx((2117.001 - 2032) / steps), "steps": steps,
-                         "gap_s": 0.2}
+                         "gap_s": 0.2, "dump_steps": None}
     assert s["cc_running"] == {"n": 1 / steps, "total_ms": pytest.approx(0.5 / steps)}
     assert s["blocks"] == ["neff_11_vnc_0.neff"]
+
+
+#: The dump's own step lines (ruling R9): HunyuanVideo-1.5's orchestrator prints the steps it ran;
+#: the torchrun and FLUX orchestrators print the median of the step intervals and their count
+#: (steps - 1), only when there are two steps or more (Qwen-Image's 2-step smoke, 2026-11-13).
+HV15_LINE = "[hv15] request 0: denoise 162.5 s, {n} steps, median 162527 ms (first 162527 ms)"
+MEDIAN_LINE = ("[qwen_image] request: 0.84 s; to the first step's end 0.53 s (prompt encode + "
+               "step 1); step median {ms} ms (n={k}, max {ms}); after the last step 0.00 s")
+
+
+@pytest.mark.parametrize("steps, log, error", [
+    (2, HV15_LINE.format(n=2), None),
+    (1, HV15_LINE.format(n=2), "the dump ran 2 steps"),
+    (2, MEDIAN_LINE.format(ms=50.0, k=1), None),
+    (1, MEDIAN_LINE.format(ms=50.0, k=1), "the dump ran 2 steps"),
+    # 1 x 90 ms between the two steps' ends, the window 85 ms: a step lies outside it
+    (2, MEDIAN_LINE.format(ms=90.0, k=1), "outside the loop window"),
+])
+def test_system_profile_cross_checks_the_dumps_own_step_count(tmp_path, steps, log, error):
+    done = _system_profile(*_loop_profile(tmp_path), steps, log)
+    if error is None:
+        assert done.returncode == 0, done.stderr
+        assert json.loads(done.stdout)["step"]["dump_steps"] == 2
+    else:
+        assert done.returncode != 0 and error in done.stderr, done.stderr
 
 
 def test_system_profile_refuses_a_profile_that_is_not_rank_0s(tmp_path):
@@ -421,7 +480,5 @@ def test_system_profile_refuses_a_profile_that_is_not_rank_0s(tmp_path):
         {"name": "nc_exec_running", "model_id": 11, "exec_id": 1, "timestamp": 0,
          "duration": 1, "device_core_idx": 6, "worker_gid": 1}]}))
     (tmp_path / "rank0").mkdir()
-    done = subprocess.run([sys.executable, str(PD / "system_profile.py"), str(profile),
-                           str(tmp_path / "rank0"), "1", "neff_11_vnc_0.neff"],
-                          capture_output=True, text=True, timeout=60)
+    done = _system_profile(profile, tmp_path / "rank0", 1)
     assert done.returncode != 0 and "worker_gid" in done.stderr
