@@ -53,6 +53,20 @@ _RING_KERNEL = os.environ.get(RING_KERNEL_ENV, "1").strip() != "0"
 #: The longest per-rank sequence the NKI Library documents its ring kernel as tested at.
 _RING_KERNEL_MAX_SEQ = 16384
 
+#: Which engine runs the flash kernel's softmax exp on trn3 (attention_cte ``allow_vector_exp``):
+#: ``scalar`` (default) or ``vector`` (the kernel's own default). The kernel's Vector engine also
+#: does the row max, the rescale and the bounded path's range_select, so with the exp there too it
+#: bounds the kernel while the Scalar engine idles. Measured on trn3 (one LNC=2 core, bf16, d=128,
+#: the kernel alone): Scalar is 11-19% faster from 1k to 16k tokens (H3 768p per-rank shape:
+#: 66.4 -> 54.0 ms), with the same error against fp64. No effect off trn3, where the kernel only
+#: has the Scalar exp. The NKI Library ring kernel (``_ring_kernel_op``) does not take the flag
+#: and keeps its Vector exp. Read once at import, so compiled regions see a constant.
+ATTENTION_EXP_ENV = "DIFFLET_NEURON_ATTENTION_EXP"
+_ATTENTION_EXP = os.environ.get(ATTENTION_EXP_ENV, "scalar").strip().lower()
+if _ATTENTION_EXP not in ("scalar", "vector"):
+    raise ValueError(f"{ATTENTION_EXP_ENV} must be 'scalar' or 'vector', got {_ATTENTION_EXP!r}")
+_VECTOR_EXP = _ATTENTION_EXP == "vector"
+
 # Kernel limits stated by torch-neuronx's SDPA gate, other than its 512-multiple lengths.
 _KERNEL_DTYPES = (torch.bfloat16, torch.float16)
 _KERNEL_MAX_HEAD_DIM = 128
@@ -80,8 +94,15 @@ def attention(
     tp_q: bool = False,
     tp_k: bool = False,
     tp_out: bool = False,
+    vector_exp: bool | None = None,
     **kwargs,
 ):
+    """``vector_exp``: which engine runs the flash kernel's softmax exp on trn3 (attention_cte
+    ``allow_vector_exp``); None takes ``DIFFLET_NEURON_ATTENTION_EXP`` (default: Scalar, see
+    ``ATTENTION_EXP_ENV``). Applies to the plain and the bounded flash calls; SDPA fallbacks
+    ignore it. No effect off trn3."""
+    if vector_exp is None:
+        vector_exp = _VECTOR_EXP
     if kwargs:
         raise NotImplementedError(
             "neuron attention does not support attention_cte-only kwargs: "
@@ -99,7 +120,8 @@ def attention(
             # attention_cte's sequence packing: per-query key range [bound_min, bound_max), read per
             # query tile inside the kernel (O(L) memory) instead of an L x L mask and masked SDPA.
             out = _flash_attention_bounded(q, k, v, bound_min, bound_max,
-                                           scale=1.0 if scale is None else float(scale))
+                                           scale=1.0 if scale is None else float(scale),
+                                           vector_exp=vector_exp)
             return out.transpose(-1, -2) if tp_out else out
         key_idx = torch.arange(k.shape[-2], device=k.device).view(1, 1, -1)
         attention_mask = (key_idx >= bound_min.to(key_idx.device)) & (
@@ -112,7 +134,7 @@ def attention(
 
     scale = 1.0 if scale is None else float(scale)
     if _can_use_flash_kernel(q, k, v, attention_mask):
-        out = _flash_attention(q, k, v, scale=scale, causal=causal)
+        out = _flash_attention(q, k, v, scale=scale, causal=causal, vector_exp=vector_exp)
     else:
         # Pass SDPA's default scale when it matches, keeping the call on its plain path.
         sdpa_scale = None if math.isclose(scale, 1.0 / math.sqrt(q.shape[-1])) else scale
@@ -141,23 +163,26 @@ def _on_neuron(t) -> bool:
     return t.device.type == "neuron"
 
 
-def _flash_attention(q, k, v, *, scale: float, causal: bool):
-    """Run the kernel on [B, H, S, d] (3D [B*H, S, d] gets a unit batch axis)."""
+def _flash_attention(q, k, v, *, scale: float, causal: bool, vector_exp: bool = True):
+    """Run the kernel on [B, H, S, d] (3D [B*H, S, d] gets a unit batch axis): torch-neuronx's
+    SDPA kernel op, or with ``vector_exp=False`` the same attention_cte call with the Scalar exp."""
     squeeze = q.dim() == 3
     if squeeze:
         q, k, v = q.unsqueeze(0), k.unsqueeze(0), v.unsqueeze(0)
-    out = _flash_kernel()(q, k, v, is_causal=causal, scale=scale, training=False)
+    if not vector_exp and _FLASH_SCALAR_EXP_OP is not None:
+        out = _FLASH_SCALAR_EXP_OP(q.contiguous(), k.contiguous(), v.contiguous(), causal, scale)
+    else:
+        out = _flash_kernel()(q, k, v, is_causal=causal, scale=scale, training=False)
     return out.squeeze(0) if squeeze else out
 
 
-def _load_flash_bounded_op():
-    """attention_cte with per-query key bounds (its "sequence packing"): ``(q, k, v, bound_min,
-    bound_max, scale) -> out`` on ``[B*H, L, d]``, bounds int32 ``[B*H, L_q, 1]``, query ``i``
-    attending to keys ``bound_min[i] <= j < bound_max[i]``. torch-neuronx's own SDPA wrapper does
-    not forward bounds, so the kernel is called as its decomposition calls it (``tp_q``/``tp_k``
-    layout, an LNC-wide grid), registered with ``nki_op`` like the logsumexp op."""
+def _load_flash_scalar_exp_op():
+    """torch-neuronx's SDPA kernel op (``_compute_attention_nki``'s forward: heads folded into the
+    batch, ``tp_q``/``tp_k`` layout, an LNC-wide grid) with ``allow_vector_exp=False``, which its
+    wrapper does not forward: ``(q, k, v, is_causal, scale) -> out`` on ``[B, H, L, d]``."""
+    name = "flash_attention_scalar_exp"
     try:
-        return torch.ops.difflet_neuron.flash_attention_bounded  # already registered (module reload)
+        return getattr(torch.ops.difflet_neuron, name)  # already registered (module reload)
     except (AttributeError, RuntimeError):
         pass
     try:
@@ -169,18 +194,59 @@ def _load_flash_bounded_op():
     except ImportError:
         return None
 
-    @nki_op("difflet_neuron::flash_attention_bounded", mutates_args={})
+    @nki_op(f"difflet_neuron::{name}", mutates_args={})
+    def flash_attention_scalar_exp(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
+                                   is_causal: bool, scale: float) -> torch.Tensor:
+        b, h, length, d = q.shape
+        h_kv, s = k.shape[1], k.shape[2]
+        grid = (int(get_logical_neuron_cores()),)
+        out = wrapped_flash_fwd[grid](q.reshape(b * h, length, d), k.reshape(b * h_kv, s, d),
+                                      v.reshape(b * h_kv, s, v.shape[-1]), tp_q=True, tp_k=True,
+                                      scale=scale, causal_mask=is_causal, cache_softmax=False,
+                                      allow_vector_exp=False)
+        return out.reshape(b, h, length, v.shape[-1])
+
+    return flash_attention_scalar_exp
+
+
+def _load_flash_bounded_op(vector_exp: bool = True):
+    """attention_cte with per-query key bounds (its "sequence packing"): ``(q, k, v, bound_min,
+    bound_max, scale) -> out`` on ``[B*H, L, d]``, bounds int32 ``[B*H, L_q, 1]``, query ``i``
+    attending to keys ``bound_min[i] <= j < bound_max[i]``. torch-neuronx's own SDPA wrapper does
+    not forward bounds, so the kernel is called as its decomposition calls it (``tp_q``/``tp_k``
+    layout, an LNC-wide grid), registered with ``nki_op`` like the logsumexp op."""
+    name = "flash_attention_bounded" if vector_exp else "flash_attention_bounded_scalar_exp"
+    try:
+        return getattr(torch.ops.difflet_neuron, name)  # already registered (module reload)
+    except (AttributeError, RuntimeError):
+        pass
+    try:
+        from torch_neuronx.neuron_dynamo_backend.decompositions import (
+            get_logical_neuron_cores,
+            wrapped_flash_fwd,
+        )
+        from torch_neuronx.nki_hop import nki_op
+    except ImportError:
+        return None
+
+    # The default op passes no allow_vector_exp (the kernel's own default), so its compiled graph
+    # is unchanged; the Scalar-exp variant is a separate op.
+    extra = {} if vector_exp else {"allow_vector_exp": False}
+
+    @nki_op(f"difflet_neuron::{name}", mutates_args={})
     def flash_attention_bounded(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
                                 bound_min: torch.Tensor, bound_max: torch.Tensor,
                                 scale: float) -> torch.Tensor:
         grid = (int(get_logical_neuron_cores()),)
         return wrapped_flash_fwd[grid](q, k, v, tp_q=True, tp_k=True, scale=scale, causal_mask=False,
-                                       cache_softmax=False, bound_min=bound_min, bound_max=bound_max)
+                                       cache_softmax=False, bound_min=bound_min, bound_max=bound_max,
+                                       **extra)
 
     return flash_attention_bounded
 
 
-def _flash_attention_bounded(q, k, v, bound_min, bound_max, *, scale: float):
+def _flash_attention_bounded(q, k, v, bound_min, bound_max, *, scale: float,
+                             vector_exp: bool = True):
     """``[B, H, S, d]`` or ``[B*H, S, d]`` through the bounded kernel; bounds of ``[B*H, S_q, 1]``
     (or anything that reshapes to it)."""
     shape = q.shape
@@ -204,16 +270,17 @@ def _flash_attention_bounded(q, k, v, bound_min, bound_max, *, scale: float):
         q3 = F.pad(q3, (0, 0, 0, pad_q))
         lo = F.pad(lo, (0, 0, 0, pad_q))
         hi = F.pad(hi, (0, 0, 0, pad_q), value=1)
+    op = _FLASH_BOUNDED_OP if vector_exp else (_FLASH_BOUNDED_SCALAR_EXP_OP or _FLASH_BOUNDED_OP)
     chunk = _head_chunk(bh, q3.shape[1], k3.shape[1])
     if chunk == bh:  # one call on the whole tensors: the graph compiled before the split existed
-        out = _FLASH_BOUNDED_OP(q3.contiguous(), k3.contiguous(), v3.contiguous(),
-                                lo.contiguous(), hi.contiguous(), 1.0)
+        out = op(q3.contiguous(), k3.contiguous(), v3.contiguous(),
+                 lo.contiguous(), hi.contiguous(), 1.0)
     else:
-        out = torch.cat([_FLASH_BOUNDED_OP(q3[i:i + chunk].contiguous(),
-                                           k3[i:i + chunk].contiguous(),
-                                           v3[i:i + chunk].contiguous(),
-                                           lo[i:i + chunk].contiguous(),
-                                           hi[i:i + chunk].contiguous(), 1.0)
+        out = torch.cat([op(q3[i:i + chunk].contiguous(),
+                            k3[i:i + chunk].contiguous(),
+                            v3[i:i + chunk].contiguous(),
+                            lo[i:i + chunk].contiguous(),
+                            hi[i:i + chunk].contiguous(), 1.0)
                          for i in range(0, bh, chunk)], dim=0)
     return out[:, :s_q].reshape(*shape[:-1], v.shape[-1])
 
@@ -238,10 +305,12 @@ def _load_flash_kernel():
 
 # Resolved once at import: no import or cache lookup inside traced (compiled) code.
 _FLASH_KERNEL = _load_flash_kernel()
+_FLASH_SCALAR_EXP_OP = _load_flash_scalar_exp_op()
 _FLASH_BOUNDED_OP = _load_flash_bounded_op()
+_FLASH_BOUNDED_SCALAR_EXP_OP = _load_flash_bounded_op(vector_exp=False)
 
 
-def _load_flash_lse_op():
+def _load_flash_lse_op(vector_exp: bool = True):
     """torch-neuronx's flash kernel returning ``(out, lse)``: unmasked attention on
     ``[B, H, L, d]`` and the natural-log logsumexp of its scaled scores, ``[B, H, L]`` fp32.
 
@@ -252,38 +321,66 @@ def _load_flash_lse_op():
     requires the query length to be a multiple of 128 (kernel validation NCC_INKI016) where the
     plain forward does not, so the query is zero-padded and the padded rows are dropped; without
     a mask every query row is independent, so this is exact.
+
+    ``vector_exp=False``: the same kernel call with ``allow_vector_exp=False``, which
+    ``_compute_attention_nki`` does not forward, so its training branch is restated here.
     """
+    name = "flash_attention_lse" if vector_exp else "flash_attention_lse_scalar_exp"
     try:
-        return torch.ops.difflet_neuron.flash_attention_lse  # already registered (module reload)
+        return getattr(torch.ops.difflet_neuron, name)  # already registered (module reload)
     except (AttributeError, RuntimeError):
         pass
     try:
-        from torch_neuronx.neuron_dynamo_backend.decompositions import _compute_attention_nki
+        from torch_neuronx.neuron_dynamo_backend.decompositions import (
+            _compute_attention_nki,
+            get_logical_neuron_cores,
+            wrapped_flash_fwd,
+        )
         from torch_neuronx.nki_hop import nki_op
     except ImportError:
         return None
 
-    @nki_op("difflet_neuron::flash_attention_lse", mutates_args={})
+    def scalar_exp_attention_lse(q, k, v, scale):
+        # _compute_attention_nki(q, k, v, is_causal=False, scale, training=True), Scalar exp.
+        b, h, length, d = q.shape
+        h_kv, s = k.shape[1], k.shape[2]
+        grid = (int(get_logical_neuron_cores()),)
+        out, neg_max, sum_recip = wrapped_flash_fwd[grid](
+            q.reshape(b * h, length, d), k.reshape(b * h_kv, s, d),
+            v.reshape(b * h_kv, s, v.shape[-1]), tp_q=True, tp_k=True, scale=scale,
+            causal_mask=False, cache_softmax=True, allow_vector_exp=False)
+        # The kernel's statistics are tiled [B*H, 128, L / 128]: position t * 128 + p at [p, t].
+        lse = -(neg_max + torch.log(sum_recip))
+        lse = lse.to(torch.float32).reshape(b, h, *lse.shape[-2:]).transpose(-2, -1).reshape(b, h, -1)
+        return out.reshape(b, h, length, v.shape[-1]), lse
+
+    @nki_op(f"difflet_neuron::{name}", mutates_args={})
     def flash_attention_lse(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor,
                             scale: float) -> tuple[torch.Tensor, torch.Tensor]:
         length = q.shape[2]
         padded = -(-length // 128) * 128
         if padded != length:
             q = F.pad(q, (0, 0, 0, padded - length))
-        out, lse = _compute_attention_nki(q, k, v, False, scale, True)
+        if vector_exp:
+            out, lse = _compute_attention_nki(q, k, v, False, scale, True)
+        else:
+            out, lse = scalar_exp_attention_lse(q, k, v, scale)
         return out[:, :, :length].contiguous(), lse[..., :length].contiguous()
 
     return flash_attention_lse
 
 
 _FLASH_LSE_OP = _load_flash_lse_op()
+_FLASH_LSE_SCALAR_EXP_OP = _load_flash_lse_op(vector_exp=False)
 
 
 def _attention_with_lse(q, k, v, *, scale: float):
     """Unmasked attention on ``[B, H, L, d]`` and its logsumexp ``[B, H, L]`` (fp32): the flash
-    kernel where it applies, else fp32 math (CPU, fp32 inputs)."""
-    if _FLASH_LSE_OP is not None and _can_use_flash_kernel(q, k, v, None):
-        return _FLASH_LSE_OP(q, k, v, scale)
+    kernel where it applies (its exp on the engine ``DIFFLET_NEURON_ATTENTION_EXP`` names), else
+    fp32 math (CPU, fp32 inputs)."""
+    op = _FLASH_LSE_OP if _VECTOR_EXP else (_FLASH_LSE_SCALAR_EXP_OP or _FLASH_LSE_OP)
+    if op is not None and _can_use_flash_kernel(q, k, v, None):
+        return op(q, k, v, scale)
     scores = torch.matmul(q.float(), k.float().transpose(-1, -2)) * scale
     lse = torch.logsumexp(scores, dim=-1)
     out = torch.matmul(torch.softmax(scores, dim=-1), v.float()).to(q.dtype)

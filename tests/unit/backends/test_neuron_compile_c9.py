@@ -796,6 +796,7 @@ def test_kernel_attention_path_traces_as_one_graph(monkeypatch):
     the gating, the cached kernel getter and the kernel call, the kernel as one custom-op node."""
     monkeypatch.setattr(neuron_attention, "_on_neuron", lambda t: True)
     monkeypatch.setattr(neuron_attention, "_flash_kernel", _stub_kernel_getter)
+    monkeypatch.setattr(neuron_attention, "_FLASH_SCALAR_EXP_OP", None)  # the stub stands in
     model, x = _toy(dtype=torch.bfloat16), _input(torch.bfloat16)
     _STUB_CALLS.clear()
     with torch.no_grad():

@@ -180,6 +180,7 @@ def fake_kernel(monkeypatch):
 
     monkeypatch.setattr(neuron_attention, "_on_neuron", lambda t: True)
     monkeypatch.setattr(neuron_attention, "_flash_kernel", lambda: kernel)
+    monkeypatch.setattr(neuron_attention, "_FLASH_SCALAR_EXP_OP", None)  # the fake stands in for both
     return calls
 
 
@@ -276,6 +277,7 @@ def fake_bounded_op(monkeypatch):
     monkeypatch.setattr(neuron_attention, "_on_neuron", lambda t: True)
     monkeypatch.setattr(neuron_attention, "_flash_kernel", lambda: object())
     monkeypatch.setattr(neuron_attention, "_FLASH_BOUNDED_OP", op)
+    monkeypatch.setattr(neuron_attention, "_FLASH_BOUNDED_SCALAR_EXP_OP", None)  # falls back to op
     calls_q = []
     calls.q = calls_q  # the q each call received
     return calls
@@ -362,3 +364,51 @@ def test_no_ring_kernel_is_prepared_without_cp():
 
     neuron_attention.prepare_ring_kernel(MeshSpec(cp=1, tp=4))
     assert neuron_attention._RING_KERNEL_OP is None
+
+
+def test_the_bounded_call_takes_the_scalar_exp_op_unless_vector_exp(fake_bounded_op, monkeypatch):
+    """By default (DIFFLET_NEURON_ATTENTION_EXP unset: scalar) the bounded call takes the
+    Scalar-exp op; vector_exp=True takes the kernel's own default op, with the same arguments."""
+    scalar_calls = _Calls()
+    default_op = neuron_attention._FLASH_BOUNDED_OP
+
+    def scalar_op(q, k, v, lo, hi, scale):
+        scalar_calls.append(tuple(q.shape))
+        return default_op(q, k, v, lo, hi, scale)
+
+    monkeypatch.setattr(neuron_attention, "_FLASH_BOUNDED_SCALAR_EXP_OP", scalar_op)
+    monkeypatch.setattr(neuron_attention, "_VECTOR_EXP", False)
+    q, k, v, lo, hi, ref = _bounded_case()
+    with torch.no_grad():
+        scalar = neuron_attention.attention(q, k, v, scale=0.2, bound_min=lo, bound_max=hi,
+                                            tp_q=True, tp_k=True)
+        assert len(scalar_calls) == 1 and len(fake_bounded_op) == 1  # scalar_op delegates
+        vector = neuron_attention.attention(q, k, v, scale=0.2, bound_min=lo, bound_max=hi,
+                                            tp_q=True, tp_k=True, vector_exp=True)
+    assert len(scalar_calls) == 1 and len(fake_bounded_op) == 2
+    assert torch.equal(vector, scalar)
+
+
+@pytest.mark.parametrize("env_vector, arg, expect_scalar", [
+    (False, None, True), (False, True, False), (True, None, False), (True, False, True)])
+def test_the_plain_kernel_call_follows_the_exp_engine(fake_kernel, monkeypatch, env_vector, arg,
+                                                      expect_scalar):
+    """The unmasked kernel call: the Scalar-exp op (attention_cte with allow_vector_exp=False)
+    when vector_exp resolves False (the argument, else DIFFLET_NEURON_ATTENTION_EXP), else
+    torch-neuronx's SDPA kernel. Both get [B, H, S, d], the causal flag and the scale."""
+    scalar_calls = []
+
+    def scalar_op(q, k, v, is_causal, scale):
+        scalar_calls.append(dict(shape=tuple(q.shape), is_causal=is_causal, scale=scale))
+        return torch.nn.functional.scaled_dot_product_attention(q, k, v, is_causal=is_causal,
+                                                                scale=scale)
+
+    monkeypatch.setattr(neuron_attention, "_FLASH_SCALAR_EXP_OP", scalar_op)
+    monkeypatch.setattr(neuron_attention, "_VECTOR_EXP", env_vector)
+    q, k, v = _bf16(*_inputs())
+    with torch.no_grad():
+        out = neuron_attention.attention(q, k, v, scale=0.2, tp_q=True, tp_k=True, vector_exp=arg)
+    call = dict(shape=(1, BH, SQ, D), is_causal=False, scale=0.2)
+    assert scalar_calls == ([call] if expect_scalar else [])
+    assert fake_kernel == ([] if expect_scalar else [dict(call, training=False)])
+    _close_bf16(out, _reference(q, k, v, scale=0.2, tp_q=True, tp_k=True))
