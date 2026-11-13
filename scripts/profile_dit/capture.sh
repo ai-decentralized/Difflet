@@ -115,6 +115,7 @@ if [ "$KEY $ARM" = "hv15_official mxfp8" ]; then
   exit 2
 fi
 key_for "$KEY"
+OUT=$(realpath -m -- "$OUT")  # the dump runs from the checkout; the lane tag needs one spelling
 A=$OUT/$KEY/$ARM
 mkdir -p "$A"
 rm -f "$A/STATUS"
