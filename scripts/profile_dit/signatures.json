@@ -11,5 +11,14 @@
   "flux": {
     "dual": {"require": ["NeuronFluxAttention[attn]", "NeuronFeedForward[ff]", "NeuronFeedForward[ff_context]"], "attention_kernel": true},
     "single": {"require": ["NeuronFluxAttention[attn]", "NeuronAdaLayerNormZeroSingle[norm]"], "attention_kernel": true}
+  },
+  "ltx_2": {
+    "block": {"require": ["LTX2Attention[attn1]", "LTX2Attention[audio_to_video_attn]", "FeedForward[ff]"], "attention_kernel": true}
+  },
+  "wan21_official": {
+    "block": {"require": ["WanAttention[attn1]", "WanAttention[attn2]", "FP32LayerNorm[norm1]"], "attention_kernel": true}
+  },
+  "wan22_official": {
+    "block": {"require": ["WanAttention[attn1]", "WanAttention[attn2]", "FP32LayerNorm[norm1]"], "attention_kernel": true}
   }
 }
