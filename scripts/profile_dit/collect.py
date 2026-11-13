@@ -255,8 +255,10 @@ def datasets(results: dict) -> dict[str, list[dict]]:
                     if v and v > OVERLAP_NOTE) or None})
             if b["status"] != "ok":
                 continue
+            overlap = b.get("component_overlap") or {}
             out["engines"] += [kb | {"engine_class": e, "ms": ms, "block_ms": b["block_ms"],
-                                     "component_overlap": (b.get("component_overlap") or {}).get(e)}
+                                     "component_overlap": overlap.get(e),
+                                     "overlap_noted": (overlap.get(e) or 0) > OVERLAP_NOTE}
                                for e, ms in b["engines_ms"].items()]
             out["components"] += [kb | {"component": comp, "engine_class": e, "ms": ms}
                                   for comp, d in b["components"].items() for e, ms in d.items()]
@@ -294,7 +296,8 @@ DESCRIBED = {
     "engines": ("Engine busy time per block",
                 "Union of instruction intervals per physical core (semaphore waits excluded), mean "
                 "over the two physical cores; DMA instructions as hbm_dma; collectives from CcOp; "
-                "component_overlap = the engine's component busy times summed, over its own."),
+                "component_overlap = the engine's component busy times summed, over its own; "
+                "overlap_noted = that ratio is over 1.05 (the page notes it)."),
     "components": ("Component time per engine",
                    "Busy time of each block component on each engine class; unattributed = rows "
                    "with no module path."),
@@ -350,6 +353,9 @@ def markdown(results: dict) -> str:
         over.append([c["model"], c["shape"], c["layout"], c["arm"],
                      f"{n(c['step_ms'], 1)} ({src['section']}, {src['host']}, {src['steps']})"
                      if isinstance(src, dict) else "not measured",
+                     "-" if c["profile_step_ms"] is None else n(c["profile_step_ms"], 1) + (
+                         f" ({100 * (c['profile_step_ms'] / c['step_ms'] - 1):+.1f}%)"
+                         if c["step_ms"] else ""),
                      _blocks_text(c),
                      n(c["blocks_ms"], 1), n(c["outside_blocks_ms"], 1),
                      f"{bn['engine_class']} {pc(bn['share'])}" if bn else "pending",
@@ -383,6 +389,7 @@ def markdown(results: dict) -> str:
         "**Overview** (shares of block time on the bottleneck engine; RoPE on its own busiest "
         "engine):",
         table(["model", "shape", "layout", "arm", "DiT step ms (section, host, steps)",
+               "profiled run's step ms (vs DiT step)",
                "blocks per step", "blocks ms", "outside ms", "bottleneck", "MFU", "attention",
                "Plan B addressable", "cross-attention", "RoPE"], over),
         "**Engine busy time per block execution** (ms; union per physical core, mean of the two):",

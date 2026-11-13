@@ -112,6 +112,10 @@ def test_outside_blocks_is_the_step_less_executions_times_in_model_medians(tmp_p
     assert c["outside_blocks_ms"] == pytest.approx(221 - 190.0)
     assert (c["non_block_ms"], c["host_gap_ms"], c["profile_step_ms"]) == (1.5, 0.5, 200.0)
     assert [(b["kind"], b["execs_per_step"]) for b in c["blocks"]] == [("dual", 19), ("single", 38)]
+    # the evidence step and the profiled run's own step are two runs: the doc states the gap
+    md = collect.markdown(collect.collect(assets, run, {"m": ("Model", "8x8", "tp4", ("bf16",), 2)},
+                                          {("m", "bf16"): (221, "11b", "A", 50)}))
+    assert "| 221 (11b, A, 50) | 200.0 (-9.5%) |" in md
 
 
 def test_a_config_weighs_its_blocks_by_executions(tmp_path):
@@ -178,6 +182,10 @@ def test_component_overlap_is_noted_per_engine_over_1_05(tmp_path):
     assert data["blocks"][0]["component_overlap"] == "tensor 1.162x"
     overlap = {r["engine_class"]: r["component_overlap"] for r in data["engines"]}
     assert (overlap["tensor"], overlap["vector"], overlap["collective"]) == (1.162, 1.04, None)
+    # the page names the noted engines from these rows, not by parsing the blocks text
+    noted = {r["engine_class"]: r["overlap_noted"] for r in data["engines"]}
+    assert noted == {"tensor": True, "vector": False, "scalar": False, "hbm_dma": False,
+                     "collective": False}
 
 
 def test_store_and_doc_tables(tmp_path):
