@@ -29,6 +29,8 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 ASSETS = HERE.parents[1] / "docs" / "verification" / "assets" / "2026-11-13-dit-block-profile"
 RUN = Path("/mnt/nvme/difflet-prof/run")
+#: an engine's components over its union above which the page notes the overlap (ruling R28)
+OVERLAP_NOTE = 1.05
 
 #: key: (model, profiled shape, layout, arms, block NEFFs per arm) — the plan's configurations
 CONFIGS = {
@@ -246,10 +248,15 @@ def datasets(results: dict) -> dict[str, list[dict]]:
                 "bottleneck": bn.get("engine_class"), "bottleneck_share": bn.get("share"),
                 "avg_util_limit": th.get("avg_util_limit"),
                 "limited_time_share": th.get("limited_time_share"),
-                "warnings": "; ".join(b.get("warnings", []))})
+                "warnings": "; ".join(b.get("warnings", [])),
+                # engines whose components' unions sum over their union (ruling R28)
+                "component_overlap": ", ".join(
+                    f"{e} {v:.3f}x" for e, v in (b.get("component_overlap") or {}).items()
+                    if v and v > OVERLAP_NOTE) or None})
             if b["status"] != "ok":
                 continue
-            out["engines"] += [kb | {"engine_class": e, "ms": ms, "block_ms": b["block_ms"]}
+            out["engines"] += [kb | {"engine_class": e, "ms": ms, "block_ms": b["block_ms"],
+                                     "component_overlap": (b.get("component_overlap") or {}).get(e)}
                                for e, ms in b["engines_ms"].items()]
             out["components"] += [kb | {"component": comp, "engine_class": e, "ms": ms}
                                   for comp, d in b["components"].items() for e, ms in d.items()]
@@ -282,11 +289,12 @@ DESCRIBED = {
                  "(blocks weighted by executions)."),
     "blocks": ("Blocks, one row per block NEFF",
                "Replayed block wall time and spread (exec 4 vs exec 8), executions per step, "
-               "in-model median, bottleneck, MFU/MBU, throttle, DGE notifications; pending = not "
-               "yet captured."),
+               "in-model median, bottleneck, MFU/MBU, throttle, DGE notifications, engines whose "
+               "components overlap over 1.05x (interleaved branches); pending = not yet captured."),
     "engines": ("Engine busy time per block",
                 "Union of instruction intervals per physical core (semaphore waits excluded), mean "
-                "over the two physical cores; DMA instructions as hbm_dma; collectives from CcOp."),
+                "over the two physical cores; DMA instructions as hbm_dma; collectives from CcOp; "
+                "component_overlap = the engine's component busy times summed, over its own."),
     "components": ("Component time per engine",
                    "Busy time of each block component on each engine class; unattributed = rows "
                    "with no module path."),

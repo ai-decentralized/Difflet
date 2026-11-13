@@ -145,6 +145,7 @@
   <section id="components" class="card">
     <h2>Where each engine's time goes, by block component</h2>
     <p class="caption">One bar per component of the picked block and arm, split by engine. A bar adds busy times of engines that run at the same time, so it can be longer than the component's wall time; the label at its end is its time on its busiest engine.</p>
+    <p class="note when-overlap" hidden>Components overlap on <span class="overlap-engines">—</span> (the components' busy times on that engine, over the engine's own): the compiler interleaves branches that run at the same time, such as attention and the MLP of HunyuanVideo's single-stream block, so that engine's component bars add up to more than its bar.</p>
     <div class="chart tall" data-draw="components" data-source="components"></div>
     <h3>Unattributed time, by the source it names</h3>
     <p class="caption">Instructions with no module path (layer "Unknown"), kept apart from every component; each is listed under the source file and function it names, if any. "(none)" names no source: compiler-generated code.</p>
@@ -422,6 +423,10 @@
     const b = pick().block;
     document.querySelectorAll('#dbp p.when-pending').forEach((n) => { n.hidden = !b || b.status === 'ok'; });
     document.querySelectorAll('#dbp p.when-nodge').forEach((n) => { n.hidden = !b || b.status !== 'ok' || b.dge_notifs !== false; });
+    document.querySelectorAll('#dbp p.when-overlap').forEach((n) => {
+      n.hidden = !b || b.status !== 'ok' || !b.component_overlap;
+      n.querySelector('.overlap-engines').textContent = (b && b.component_overlap) || '';
+    });
   });
   dash.draw('picked', (el) => {
     if (waiting(el, 'overview', 'blocks')) return;

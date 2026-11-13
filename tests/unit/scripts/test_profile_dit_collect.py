@@ -42,6 +42,7 @@ def breakdown(block_ms=10.0, engines=None, attention=None, detail=None, mfu=0.4)
         "mfu": mfu, "mbu": 0.1, "throttle": {"avg_util_limit": 0.8, "limited_time_share": 0.3},
         "other_share": {}, "unattributed_share": {}, "warnings": ["w"], "dge_notifs": True,
         "unattributed_by_source": {"(none)": {"tensor": 1.0}},
+        "component_overlap": {"tensor": 1.162, "vector": 1.04, "scalar": 1.0, "hbm_dma": 1.0},
         "timeline": [{"component": "attention", "engine_class": "tensor", "start_us": 0.0,
                       "end_us": 5.0, "busy_us": 4.0}],
     }
@@ -166,6 +167,17 @@ def test_datasets_are_rows_and_one_time_line_per_block(tmp_path):
     psum = {(r["metric"], r["engine_class"]): r["value"] for r in data["memory"]}
     assert psum[("psum_readout_copy", "scalar")] == 0.2 and psum[("hbm_read", "")] == 10
     assert data["timeline_m_bf16_blk1"] == breakdown()["timeline"]
+
+
+def test_component_overlap_is_noted_per_engine_over_1_05(tmp_path):
+    """Ruling R28: an engine whose components' unions sum over 1.05 x its union (interleaved
+    branches, HV1's single block TensorE 1.16) gets a note; every engine row carries its ratio."""
+    assets, run = lane(tmp_path, "m", "bf16", [(breakdown(), 60, 4.0)])
+    data = collect.datasets(collect.collect(assets, run, {"m": ("Model", "8x8", "tp4", ("bf16",), 1)},
+                                            {("m", "bf16"): (221, "11b", "A", 50)}))
+    assert data["blocks"][0]["component_overlap"] == "tensor 1.162x"
+    overlap = {r["engine_class"]: r["component_overlap"] for r in data["engines"]}
+    assert (overlap["tensor"], overlap["vector"], overlap["collective"]) == (1.162, 1.04, None)
 
 
 def test_store_and_doc_tables(tmp_path):

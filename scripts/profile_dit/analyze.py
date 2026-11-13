@@ -20,7 +20,8 @@ file (and function) the rows name (ruling R25).
 
 Refused with ``ValueError``: ``other`` over 10% of an engine_class's attributed (not
 ``unattributed``) time; attention lines no phase rule names over 10% of attention time (ruling
-R11); an engine_class's components summing to over 1.10 x its union or over the block.
+R11); an engine_class's components summing to over 1.5 x its union (``component_overlap``
+reports the ratio: interleaved branches overlap, ruling R28) or over the block.
 """
 
 from __future__ import annotations
@@ -49,6 +50,7 @@ _CTE = "/nkilib/core/attention/attention_cte.py"
 #: 3420; previous-output load 3667; output write-back 3772. Every other "other" line is unmapped.
 _OTHER_LINES = {1251, 1908, 1931, 1935, 1939, 2616, 2789, 3008, 3103, 3420, 3489, 3516, 3667, 3772}
 _LIMIT = 0.10
+_OVERLAP_LIMIT = 1.5  # an engine's components over its union (ruling R28)
 #: Time line runs merge across gaps under max(5 us, block / 4000) (ruling R15: HV1.5's 182 ms
 #: block had 51,226 segments at 5 us; breakdown.json is committed and the page has 16 MB).
 _TIMELINE_GAP_NS, _TIMELINE_SEGMENTS = 5_000, 4000
@@ -172,11 +174,15 @@ def analyze(block_dir: Path, model: str) -> dict:
     engines = _busy_ms(rows, ["engine_class"], n)
     components = _nest(_busy_ms(rows, ["component", "engine_class"], n))
     components.setdefault("collective", {})["collective"] = cc_ms
+    # ruling R28: branches the compiler interleaves on one engine overlap (HV1's single-stream
+    # block: attention and the MLP, TensorE 1.16x): reported; over 1.5x it is a counting bug
+    component_overlap = {}
     for ec, ms in engines.items():
         total = sum(c.get(ec, 0) for c in components.values())
-        if total > min((1 + _LIMIT) * ms, block_ms):
-            raise ValueError(f"{ec}: components sum to {total:.4f} ms, over 1.10 x its {ms:.4f} ms "
-                             f"union or the {block_ms:.4f} ms block")
+        component_overlap[ec] = total / ms if ms else None
+        if total > min(_OVERLAP_LIMIT * ms, block_ms):
+            raise ValueError(f"{ec}: components sum to {total:.4f} ms, over {_OVERLAP_LIMIT} x its "
+                             f"{ms:.4f} ms union or the {block_ms:.4f} ms block")
 
     attributed = _busy_ms(rows[rows.component != "unattributed"], ["engine_class"], n)
     other = components.get("other", {})
@@ -243,6 +249,7 @@ def analyze(block_dir: Path, model: str) -> dict:
         "dge_notifs": json.loads(source.read_text()).get("dge_notifs", True) if source.exists()
         else None,
         "unattributed_by_source": _by_source(rows[rows.component == "unattributed"], n),
+        "component_overlap": component_overlap,
     }
 
 

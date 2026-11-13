@@ -98,6 +98,19 @@ def test_components_sum_to_no_more_than_their_engine_and_the_block(tmp_path):
         run(tmp_path / "b", [row("Tensor", 0, 1000), row("Tensor", 0, 1000, MOD)])
 
 
+def test_components_overlapping_on_an_engine_are_reported_up_to_1_5x(tmp_path):
+    """Ruling R28: branches the compiler interleaves on one engine (HV1's single-stream block:
+    attention and the MLP, TensorE 1.16x) overlap; up to 1.5x it is reported, above it is a
+    counting bug; no engine's components may exceed the block."""
+    out = run(tmp_path / "a", [row("Tensor", 0, 1000), row("Tensor", 800, 1000, MOD)])
+    assert out["component_overlap"]["tensor"] == pytest.approx(1.2)
+    with pytest.raises(ValueError, match="tensor"):
+        run(tmp_path / "b", [row("Tensor", 0, 1000), row("Tensor", 400, 1000, MOD)])
+    with pytest.raises(ValueError, match="block"):  # 1.2x, but over the 1.1 us block
+        run(tmp_path / "c", [row("Tensor", 0, 1000), row("Tensor", 800, 1000, MOD)],
+            total_time=1.1e-6)
+
+
 def test_a_semaphore_wait_adds_nothing(tmp_path):
     out = run(tmp_path, [row("Tensor", 0, 1000),
                          row("Tensor", 1000, 9000, opcode="EVENT_SEMAPHORE"),
@@ -256,7 +269,8 @@ def test_the_cli_writes_breakdown_json_with_the_fields_the_page_reads(tmp_path):
         "engines_check", "attention_detail", "memory_bytes", "psum_readout_copy_ms",
         "psum_readout_fused_ms", "psum_readout_copy_ms_by_engine",
         "psum_readout_fused_ms_by_engine", "mfu", "mbu", "throttle", "other_share",
-        "unattributed_share", "warnings", "timeline", "dge_notifs", "unattributed_by_source"}
+        "unattributed_share", "warnings", "timeline", "dge_notifs", "unattributed_by_source",
+        "component_overlap"}
     summary_ms = out["engines_check"]["summary_ms"]
     assert summary_ms["dma_active_time"] == pytest.approx(0.3)
     assert {"static_dma_active_time", "hardware_dynamic_dma_active_time",
