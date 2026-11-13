@@ -9,14 +9,17 @@ NEFF cache, ``difflet/backends/neuron/compile.py``), so ``compile()`` is a no-op
    with ``get_backend("neuron").prepare_runtime(parallel)``, initialise the TP mesh. The mesh
    must exist before the module is built: TP layers size their shards in ``__init__`` and Wan's
    ``_safe_tp_size`` silently falls back to tp=1 (``difflet/models/wan/modeling_wan.py:71-82``);
-2. build on meta (``build_on_meta``): nothing allocated, computed buffers stay real;
+2. build on meta (``build_on_meta``): nothing allocated, computed buffers stay real; with a
+   ``quant`` spec, its target linears are then swapped for their MXFP8 twins, still on meta
+   (``ops_impl/fp8_linear.quantize_module_``, matched by checkpoint key);
 3. check that this rank's weights fit one core's HBM (``rank_weight_bytes`` of the meta module
    against ``difflet/backends/neuron/hbm.py``'s budget, before anything is materialised), then
    load this rank's shards straight onto the device: from the pre-sharded weight store when it
    holds them, else from the checkpoint (``load_sharded_checkpoint``) while writing the store
    (``core/weight_store.py``; ``weight_store`` records which, one ``[weight store]`` line per
    rank says so on stderr);
-4. ``eval()`` and ``requires_grad_(False)``;
+4. ``eval()``, ``requires_grad_(False)`` and ``_after_load`` (the fp8 twins prepare for their
+   compute path);
 5. in compile mode, per-block ``torch.compile`` (``compile_blocks``; on the neuron device the
    ``"neuron"`` backend with ``NEURON_COMPILE_OPTIONS``, so a block that fails to lower raises
    instead of running op by op);
@@ -58,6 +61,7 @@ from difflet.backends.neuron.core.checkpoint import (
     build_on_meta,
     load_sharded_checkpoint,
 )
+from difflet.backends.neuron.core.config_checks import require_fp8_supported
 from difflet.backends.neuron.core.distributed import (
     broadcast_tensor,
     collective_phase,
@@ -71,8 +75,10 @@ from difflet.backends.neuron.core.weight_store import (
 )
 from difflet.backends.neuron.hbm import budget_enforced, check_fits
 from difflet.backends.neuron.ops_impl import parallel_mesh
+from difflet.backends.neuron.ops_impl.fp8_linear import prepare_fp8_kernels_, quantize_module_
 from difflet.backends.neuron.runtime import check_parallel_supported
 from difflet.pipeline.parallel_config import DiffletParallelConfig
+from difflet.quant.spec import QuantSpec
 
 logger = logging.getLogger(__name__)
 
@@ -127,10 +133,28 @@ class TorchNeuronApplicationBase(torch.nn.Module):
 
     Subclasses implement ``build_module`` and ``get_example_inputs``; ``checkpoint_dir`` and
     ``checkpoint_key`` default to ``model_path`` and the identity.
+
+    ``quant`` (a ``QuantSpec`` or its dict, ``difflet/quant``) swaps the spec's target linears
+    for their MXFP8 twins on the meta module before the load, so ``model_path`` must then be
+    the quantized checkpoint directory (``difflet/quant/checkpoint.py``) whose tensors those
+    layers hold, and prepares them after it (``_after_load``). A model opts in by declaring
+    ``quant_model``; one without is refused a spec at construction rather than run as the
+    bf16 module against an fp8 checkpoint, as is a spec quantized for another tp than the
+    launch's (its row-parallel weights are grouped for that tp's shards). Trainium3 and
+    compile mode only (decision D43, ``require_fp8_supported``); the activations stay bf16
+    (D42).
     """
 
     #: Attributes of the built module whose children are compiled one region each.
     block_attrs: tuple[str, ...] = ("blocks",)
+    #: The model's key in ``difflet.quant.targets`` (its MXFP8 target table); None means the
+    #: model has no FP8 support and ``quant=`` is refused.
+    quant_model: str | None = None
+    #: The model's name in the FP8 refusals (``"Qwen-Image"``); ``quant_model`` when empty.
+    quant_label: str = ""
+    #: Whether ``_after_load`` fuses each attention's q/k/v twins into one kernel call: only
+    #: for a model whose attention processor reads ``fused_qkv`` (Qwen-Image's).
+    quant_fuse_qkv: bool = False
     #: ``torch.compile`` backend in compile mode; None -> "neuron" on the neuron device (which
     #: gets ``NEURON_COMPILE_OPTIONS``), "aot_eager" elsewhere (CPU and gloo tests). Set a
     #: callable on the instance or as a ``staticmethod``; it is passed no options.
@@ -147,6 +171,7 @@ class TorchNeuronApplicationBase(torch.nn.Module):
         dtype: Any = torch.bfloat16,
         exec_mode: str | None = None,
         device: str | torch.device = "neuron",
+        quant: QuantSpec | dict | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__()
@@ -155,6 +180,32 @@ class TorchNeuronApplicationBase(torch.nn.Module):
         self.dtype = _normalize_dtype(dtype)
         self.exec_mode = resolve_exec_mode(exec_mode)
         self.device = _resolve_device(device)
+        if isinstance(quant, dict):
+            quant = QuantSpec.from_dict(quant)
+        if quant is not None and not isinstance(quant, QuantSpec):
+            # The pipeline application's "mxfp8" spelling is resolved to a spec there; anything
+            # else stored here would fail only in load's collective phase, naming no cause.
+            raise TypeError(
+                f"{type(self).__name__}: quant must be a QuantSpec or its dict, got "
+                f"{type(quant).__name__} (the pipeline application resolves 'mxfp8' to a spec)"
+            )
+        #: The MXFP8 spec ``load`` applies, or None.
+        self.quant: QuantSpec | None = quant
+        if quant is not None:
+            if self.quant_model is None:
+                raise NotImplementedError(f"{type(self).__name__} has no MXFP8 target layers")
+            label = self.quant_label or self.quant_model
+            require_fp8_supported(label, self.device.type, self.exec_mode)
+            if int(quant.tp_degree) != int(self.parallel.tp_degree):
+                # A row-parallel weight is quantized per rank K range: another tp's directory
+                # holds shape-compatible slices whose scales group the wrong K blocks.
+                raise ValueError(
+                    f"the {label} FP8 DiT spec was quantized for tp_degree={quant.tp_degree} "
+                    f"but this launch has tp_degree={self.parallel.tp_degree} (row-parallel "
+                    "weights are quantized per rank K range)"
+                )
+        #: The module names ``load`` quantized (empty without ``quant``).
+        self.quantized_linears: list[str] = []
         self.kwargs = dict(kwargs)
         self.module: torch.nn.Module | None = None
         self.is_loaded = False
@@ -202,8 +253,14 @@ class TorchNeuronApplicationBase(torch.nn.Module):
 
     def _after_load(self, module: torch.nn.Module) -> None:
         """Hook after the weights are on the device and before the blocks compile: load-time
-        swaps that need the loaded tensors (the fp8 linears pack their weights for the kernel).
-        Nothing by default."""
+        swaps that need the loaded tensors. By default the fp8 twins prepare for their compute
+        path (``prepare_fp8_kernels_``: the kernel path packs its weight; the dequant path
+        dequantizes once here rather than in the compiled graph, where a block-scale
+        dequantization traced into the block graph ran at 6.9 s per block), each attention's
+        q/k/v fused first when ``quant_fuse_qkv`` says so. An override keeps that by calling
+        ``super()._after_load(module)``."""
+        if self.quant is not None:
+            prepare_fp8_kernels_(module, fuse=self.quant_fuse_qkv)
 
     # ---------------------------------------------------- DiffletPipeline API
 
@@ -234,6 +291,14 @@ class TorchNeuronApplicationBase(torch.nn.Module):
             self._init_runtime()
         with self._phase("build on meta"):
             module = build_on_meta(self.build_module)
+            if self.quant is not None:
+                # After the subclass's TP replacement, still on meta (a twin takes its
+                # linear's device) and before the HBM check counts the fp8 weights at one
+                # byte. Matched by checkpoint key: the spec's patterns name the keys the
+                # quantized directory holds, which need not be this module's names.
+                self.quantized_linears = quantize_module_(
+                    module, self.quant, key_fn=self.checkpoint_key
+                )
         with self._phase("load checkpoint"):
             model_dir = self.checkpoint_dir()
             if model_dir is None:

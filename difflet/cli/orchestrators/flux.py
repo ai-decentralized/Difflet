@@ -9,8 +9,9 @@ from typing import Any
 
 from difflet.cli import runner
 from difflet.cli.orchestrators.base import ModelOrchestrator, require_request_shape_in_set
-from difflet.cli.quant import quant_cli_args, quant_spec
+from difflet.cli.quant import prepare_quant, quant_cli_args, quant_spec
 from difflet.cli.orchestrators.torchrun import (
+    _local_snapshot,
     reject_unsupported_torchrun_options,
     replica_request_scope,
     replica_requests,
@@ -140,30 +141,18 @@ class FluxOrchestrator(ModelOrchestrator):
         return int(self.args.tp_degree or 4) * int(getattr(self.args, "cp_degree", None) or 1)
 
     def _prepare_quant(self, *, create: bool) -> None:
-        """With --quant, resolve the quantized DiT directory under the compile cache, writing it
-        when ``create`` (``compile``; ``generate`` only resolves and refuses with the fix when it
-        is missing), before any rank starts so none writes. The ranks resolve it again (read
-        only) from the spec the stage flags carry."""
-        spec = quant_spec(self.args)
-        if spec is None:
+        """With --quant, resolve the quantized DiT directory under the compile cache
+        (``prepare_quant``), writing it when ``create`` (``compile``; ``generate`` only resolves
+        and refuses with the fix when it is missing: exit 1, as this driver's other checks),
+        before any rank starts so none writes."""
+        if getattr(self.args, "quant", None) is None:
             return
-        if spec.compute == "nki":
-            os.environ.setdefault("DIFFLET_NKI_TRACE_CACHE", "1")  # as Qwen-Image's driver
         from difflet.pipeline.path_resolver import resolve_model_path
-        from difflet.quant.checkpoint import prepare_quantized_checkpoint
 
-        try:
-            model_dir = resolve_model_path(_HF_MODEL_ID, revision=getattr(self.args, "revision", None),
-                                           local_files_only=True)
-        except Exception:  # not downloaded yet: the ranks report it
-            return
-        try:
-            quantized = prepare_quantized_checkpoint(
-                str(Path(model_dir) / "transformer"), spec, create=create)
-        except ValueError as exc:
-            print(f"Error: --quant: {exc}", file=sys.stderr)
-            raise SystemExit(1) from None
-        print(f"[flux] MXFP8 DiT ({spec.compute}): {quantized}", flush=True)
+        model_dir = _local_snapshot(lambda: resolve_model_path(
+            _HF_MODEL_ID, revision=getattr(self.args, "revision", None), local_files_only=True))
+        sources = {"transformer": str(Path(model_dir) / "transformer")} if model_dir else {}
+        prepare_quant(self.args, sources, create=create, tag="flux")
 
     def _stage_cli_args(self, mode: str, *, work_dir: str) -> list[str]:
         a = self.args

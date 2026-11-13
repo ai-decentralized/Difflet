@@ -15,6 +15,7 @@ import dataclasses
 import hashlib
 import json
 import re
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,12 @@ FORMAT = "mxfp8"
 #: ``dequant``: fp8 weights, bf16 matmul (memory only). ``nki``: the MXFP8 tensor-engine kernel.
 COMPUTE_MODES = ("nki", "dequant")
 DEFAULT_COMPUTE = "nki"
+#: One E8M0 scale per ``BLOCK`` values along K, and the smallest K the swizzle lays out (one
+#: 128-element sub-tile, ``mx._tile_sizes``): a weight's K per rank must be a multiple of
+#: ``LAYOUT_K``, not merely of ``BLOCK``, or it has no MX layout at all. Defined here, torch-free,
+#: so the driver can hold a spec against a checkpoint's shapes without importing ``mx``.
+BLOCK = 32
+LAYOUT_K = 128
 #: The trace-module prefix the neuron Qwen-Image and LTX-2 applications put before diffusers'
 #: own module names; target patterns are written against the diffusers names.
 STRIPPED_PREFIXES = ("transformer.",)
@@ -71,6 +78,16 @@ class QuantSpec:
         wrappers around it."""
         bare = strip_prefix(name)
         return any(re.fullmatch(p, bare) for p in self.targets)
+
+    def unmatched_targets(self, names: Iterable[str]) -> list[str]:
+        """The target patterns that match none of ``names`` (as :meth:`matches`, prefix
+        stripped). A pattern that matches nothing would silently quantize less than the spec
+        claims, and the layers it missed would surface only at the load, as a dtype mismatch
+        that names no pattern; so every site that applies a spec refuses when this is
+        non-empty, naming the patterns. Torch-free, so the driver can hold a spec against a
+        checkpoint's key names before any rank builds a module."""
+        bare = [strip_prefix(name) for name in names]
+        return [p for p in self.targets if not any(re.fullmatch(p, name) for name in bare)]
 
     def is_row_parallel(self, name: str) -> bool:
         bare = strip_prefix(name)
@@ -149,9 +166,11 @@ def file_sha256(path: str | Path) -> str:
 
 
 __all__ = [
+    "BLOCK",
     "COMPUTE_MODES",
     "DEFAULT_COMPUTE",
     "FORMAT",
+    "LAYOUT_K",
     "QUANT_SCHEMA",
     "QuantSpec",
     "file_sha256",

@@ -20,13 +20,16 @@ Two compute paths, chosen by ``compute``:
 Decision D42 (``core/config_checks.require_bf16_on_device``) is untouched: activations between
 layers and the row-parallel all-reduce stay bf16; fp8 exists only inside the matmul.
 
-Why the fp8 weight is a ``Parameter`` and the scales are buffers: the module is built on
-``meta`` and ``materialize_meta_`` (``_torch_megatron/weights.py``) gives every meta parameter
-storage in the application dtype, except float8 parameters, which keep theirs; a meta buffer
-would keep its dtype but ``build_on_meta`` makes buffers real anyway (they are small).
+Why the fp8 weight is a ``Parameter`` and the scales are buffers: the twins are created on
+their linear's device, ``meta`` under ``build_on_meta`` (which leaves buffers as they are made),
+and ``materialize_meta_`` (``_torch_megatron/weights.py``) gives a meta parameter storage in
+the application dtype unless it is float8, which keeps its own; a meta buffer keeps its dtype,
+so the uint8 scales get their storage at the load as they are.
 """
 
 from __future__ import annotations
+
+from collections.abc import Callable
 
 import torch
 import torch.nn as nn
@@ -44,7 +47,7 @@ from difflet.backends.neuron.ops_impl.linear import (
     _reject_sequence_parallel,
     _split_evenly,
 )
-from difflet.quant.mx import BLOCK, FP8_DTYPE
+from difflet.quant.mx import BLOCK, FP8_DTYPE, LAYOUT_K
 from difflet.quant.spec import COMPUTE_MODES, QuantSpec
 
 
@@ -59,10 +62,14 @@ class _FP8LinearBase(nn.Module):
     the sharding and the collectives."""
 
     def _init_tensors(self, out_local: int, in_local: int, bias: bool, *, dtype, device,
-                      compute: str) -> None:
+                      compute: str, split: str = "") -> None:
         self.compute = _check_compute(compute)
-        if in_local % BLOCK:
-            raise ValueError(f"mxfp8 needs in_features a multiple of {BLOCK}, got {in_local}")
+        # The per-rank K, checked at this process's tp (the launch's inside a rank; 1 on a bare
+        # host, where a row layer's K is whole). ``split`` is how a row layer's K got here, so
+        # the refusal names the full K and the tp, not the per-rank number alone.
+        if in_local % LAYOUT_K:
+            raise ValueError(f"mxfp8 needs in_features a multiple of {LAYOUT_K} (the MX layout), "
+                             f"got {in_local}" + (f" ({split})" if split else ""))
         # Never requires_grad: autograd has no float8 kernels, and this is inference.
         self.weight = nn.Parameter(
             torch.empty(out_local, in_local, dtype=FP8_DTYPE, device=device), requires_grad=False
@@ -206,7 +213,8 @@ class FP8RowParallelLinear(_FP8LinearBase):
         self.skip_bias_add = skip_bias_add
         self.input_size_per_partition = _split_evenly(input_size, "input_size")
         self._init_tensors(output_size, self.input_size_per_partition, bias, dtype=dtype,
-                           device=device, compute=compute)
+                           device=device, compute=compute,
+                           split=f"{input_size} split over tp={get_tp_size()}")
         self._difflet_shard = {"weight": 1, "bias": None, "weight_scale": 1}
 
     def forward(self, x: torch.Tensor):
@@ -277,22 +285,49 @@ def fp8_twin(linear: nn.Module, *, compute: str) -> _FP8LinearBase:
     raise TypeError(f"cannot quantize a {type(linear).__name__}")
 
 
-def quantize_module_(module: nn.Module, spec: QuantSpec) -> list[str]:
+def quantize_module_(module: nn.Module, spec: QuantSpec, *,
+                     key_fn: Callable[[str], str] | None = None) -> list[str]:
     """Replace every linear the ``spec`` targets with its mxfp8 twin, in place (on the meta
-    module, before the checkpoint is loaded). Returns the replaced module names. A target that
-    matches no linear is an error: the spec would silently quantize less than it claims."""
-    targets = [
+    module, before the checkpoint is loaded). Returns the replaced module names. A target
+    pattern that matches no linear is an error naming the pattern
+    (``QuantSpec.unmatched_targets``): the spec would silently quantize less than it claims,
+    and the device would then run bf16 layers against a checkpoint holding their fp8 weights.
+
+    ``key_fn`` is the application's ``checkpoint_key`` (a parameter name to its checkpoint
+    key): target patterns are written against the checkpoint's key names (the quantized
+    checkpoint writer matches those), and a model whose module names differ from its keys
+    (Wan's ``ffn.net_in`` is ``ffn.net.0.proj`` on disk, ``wan/transformer.checkpoint_key``)
+    would otherwise quantize a different set of layers on the device than in the checkpoint.
+    The module name is mapped through its weight's key, the way the writer derives the prefix
+    it matches (``checkpoint._tensor_key_prefix``), since the key functions rename parameter
+    keys and leave a bare module name as it is. The returned names stay module names: they
+    address this module.
+
+    A twin that refuses its geometry (``_init_tensors``: a per-rank K with no MX layout) is
+    re-raised with the layer's name, since the bare message cannot say which of a model's
+    hundreds of linears it is about; a row layer's own text says how its K was split. Every
+    twin is built before any is swapped in, so a caller that catches the refusal (the driver
+    holding a spec against the meta module) still holds the module it gave."""
+    key = ((lambda name: key_fn(f"{name}.weight").removesuffix(".weight"))
+           if key_fn is not None else (lambda name: name))
+    linears = [
         (name, child) for name, child in module.named_modules()
-        if spec.matches(name)
-        and isinstance(child, (nn.Linear, ColumnParallelLinear, RowParallelLinear))
+        if isinstance(child, (nn.Linear, ColumnParallelLinear, RowParallelLinear))
         and not isinstance(child, _FP8LinearBase)
     ]
-    if not targets:
-        raise ValueError("the quantization spec's target patterns match no linear in the module")
+    dead = spec.unmatched_targets(key(name) for name, _ in linears)
+    if dead:
+        raise ValueError(f"quantization target patterns match no linear in the module: {dead}")
+    targets = [(name, child) for name, child in linears if spec.matches(key(name))]
+    twins = []
     for name, child in targets:
+        try:
+            twins.append((name, fp8_twin(child, compute=spec.compute)))
+        except ValueError as exc:
+            raise ValueError(f"{name}: {exc}") from exc
+    for name, twin in twins:
         parent_path, _, leaf = name.rpartition(".")
         parent = module.get_submodule(parent_path) if parent_path else module
-        twin = fp8_twin(child, compute=spec.compute)
         if isinstance(parent, (nn.ModuleList, nn.Sequential)):
             parent[int(leaf)] = twin
         else:
