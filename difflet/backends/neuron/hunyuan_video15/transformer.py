@@ -34,6 +34,19 @@ which on the device runs attention_cte's key-bounded flash kernel in O(L) memory
 differ only on padded text queries, whose outputs are never used.
 Numerics depend on two backend workarounds installed by ``prepare_runtime``: the bool bitwise guard
 (the token refiner's mask) and fp32 LayerNorm for bf16 inputs.
+
+Quantization. ``quant=`` is the base's MXFP8 wiring with ``difflet.quant.targets``'
+``"hunyuan_video_15"`` table: in every dual-stream block the image q/k/v (``attn.to_q/k/v``), the
+text q/k/v (``attn.add_q/k/v_proj``) and both MLPs (``ff`` and ``ff_context``: ``net.0.proj`` and
+``net.2``) become their FP8 twins on the meta module before the load. The swap runs after the TP
+replacement, so each twin keeps its layer's flags: the column twins ``gather_output=False``, the
+image MLP's row twin SP's ``reduce_output=False`` / ``skip_bias_add=True`` (the caller
+reduce-scatters, then adds the bias once). The patterns are diffusers' names, which are this
+module's and the checkpoint's (``checkpoint_key`` is the identity), and ``model_path`` is then the
+quantized directory. The processors call each projection on its own, so there is no q/k/v fusion.
+The attention output projections (``to_out.0``, ``to_add_out``), the modulation
+(``norm1(_context).linear``) and the eager top level (the token refiner and the other embedders,
+``norm_out``, ``proj_out``) stay in the application dtype.
 """
 
 from __future__ import annotations
@@ -51,9 +64,19 @@ VAE_SPATIAL, VAE_TEMPORAL = 16, 4
 
 
 class NeuronHunyuanVideo15TransformerApplication(TorchNeuronApplicationBase):
-    """HunyuanVideo 1.5's DiT at one static shape (TP1)."""
+    """HunyuanVideo 1.5's DiT at one static shape, at the layout ``parallel`` names (TP, CP, SP,
+    CFG: the module docstring says how each runs).
+
+    ``quant`` (a ``QuantSpec`` or its dict, passed on to the base) is the MXFP8 wiring (the
+    module docstring's "Quantization." says which linears), and ``model_path`` is then the
+    quantized directory. The MLPs' ``net.2`` are row-parallel, quantized per rank K range for
+    the launch's tp, so a spec for another tp is refused at construction, as is eager mode
+    (decision D43).
+    """
 
     block_attrs = ("transformer_blocks",)
+    quant_model = "hunyuan_video_15"
+    quant_label = "HunyuanVideo-1.5"
 
     def __init__(self, *, model_path, height: int = 480, width: int = 848, num_frames: int = 121,
                  text_seq_len: int = 1000, text_2_seq_len: int = 256, image_tokens: int = 729,

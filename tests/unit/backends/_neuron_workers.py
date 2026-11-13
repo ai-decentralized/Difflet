@@ -1619,6 +1619,43 @@ def hv15_sp_worker(rank: int, world_size: int, model_dir: str, shape: dict, inpu
     return app(**inputs)[0].tolist()
 
 
+def hv15_fp8_worker(rank: int, world_size: int, model_dir: str, shape: dict, inputs: dict,
+                    spec: dict, tp: int, cfg: bool, sp: bool, cp: int = 1) -> dict:
+    """HunyuanVideo-1.5's MXFP8 DiT (``_neuron_hv15_toy``) on CPU, fp32, compile mode, from the
+    quantized directory ``model_dir`` at tp (x CFG2 with ``cfg``, SP with ``sp``, x CP=cp in the
+    driver's default Ulysses mode): the output, this rank's TP rank (a TP rank's CP replicas load
+    the same weights) and, per ``HV15_ROW_TARGETS``, the rank's ``[N, K/tp]`` weight as loaded
+    (``weight_bf16``, which ``_after_load`` dequantizes in dequant mode; an E4M3 value times its
+    power-of-two scale is exact in bf16). The weights are what tell a per rank K range
+    quantization from a slice of a whole-K one, which moves the outputs only 6e-7."""
+    from difflet.backends.neuron.hunyuan_video15.transformer import (
+        NeuronHunyuanVideo15TransformerApplication,
+    )
+    from difflet.backends.neuron.ops_impl.collectives import get_tp_rank
+    from difflet.backends.neuron.ops_impl.fp8_linear import FP8RowParallelLinear
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_hv15_toy import HV15_ROW_TARGETS
+
+    parallel = DiffletParallelConfig(tp_degree=tp, cp_degree=cp,
+                                     cp_mode="ulysses" if cp > 1 else "gather_kv",
+                                     cfg_parallel_enabled=cfg, sp_enabled=sp)
+    app = NeuronHunyuanVideo15TransformerApplication(
+        model_path=model_dir, parallel=parallel, dtype=torch.float32, exec_mode="compile",
+        device="cpu", quant=spec, **shape)
+    app.load()
+    assert app.load_report == {"missing": [], "unexpected": []}
+    down = app.module.transformer_blocks[0].ff.net[2]
+    assert isinstance(down, FP8RowParallelLinear), type(down).__name__
+    if sp:  # the image MLP's twin keeps the layer's SP flags: the caller reduce-scatters
+        assert down.reduce_output is False and down.skip_bias_add is True
+    return {
+        "out": app(**inputs)[0].tolist(),
+        "tp_rank": get_tp_rank(),
+        "row_weights": {n: app.module.get_submodule(n).weight_bf16.float().tolist()
+                        for n in HV15_ROW_TARGETS},
+    }
+
+
 def hv1_dit_worker(rank: int, world_size: int, model_dir: str, parallel: dict, exec_mode: str,
                    valid_text: int = 16, overrides: dict | None = None, quant: dict | None = None,
                    quantized_dir: str | None = None) -> dict:
