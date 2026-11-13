@@ -131,7 +131,9 @@ the denoise loop by the step count. The compile cache is per key (ruling R7): `q
   size variable). On an overflow (`nq_overflow`) the block's partial NTFFs are deleted, its log
   kept as `capture_dge.log`, and it is captured again without the flag (`blk<i>/no_dge`);
   `source.json` and `breakdown.json` say `dge_notifs: false` (the profile then warns its DMA
-  values may be inaccurate).
+  values may be inaccurate). `hunyuan_video_L` captures without the flag from the start (`DGE=`
+  in `key_for`, ruling R23), so no doomed first try holds the capture lock; the retry stays for
+  any other key.
 - **`--candidates`** prints the selection of a kept dump (`<size> <sha256> same|rank <path on each
   rank>`) and exits: no device, no file written (the device-free check of a lane).
 - `lane.log` has a timestamped line at each phase's start and end (the wall times below).

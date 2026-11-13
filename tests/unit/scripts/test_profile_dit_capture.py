@@ -246,9 +246,13 @@ def test_each_key_dumps_one_step_at_its_shape_and_captures_its_blocks_as_four_wo
         assert {tuple(ln["parent"]) for ln in block_views} == {("timeout", "-k", "60", "2700")}
         [system_view] = [ln for ln in x if ln["argv"][0] == "view" and "-d" in ln["argv"]]
         assert tuple(system_view["parent"]) == ("timeout", "-k", "60", "900")
+        # HV1 without the DGE notifications from the start (ruling R23: its 225-235 MB blocks
+        # overflow the notification queue with them); every other key with them
+        dge = key != "hunyuan_video_L"
         for c in captures:
             assert {"--collectives-worker-count=4", "--collectives-workers-per-node=4",
-                    "--num-exec=8", "--profile-nth-exec=4", "--enable-dge-notifs"} <= set(c)
+                    "--num-exec=8", "--profile-nth-exec=4"} <= set(c)
+            assert ("--enable-dge-notifs" in c) == dge
         assert fuser == ["/dev/neuron3"] * (1 + blocks)  # before the dump and each capture
         for i in range(1, blocks + 1):
             blk = arm_dir / f"blk{i}"
@@ -258,7 +262,7 @@ def test_each_key_dumps_one_step_at_its_shape_and_captures_its_blocks_as_four_wo
             source = json.loads((blk / "source.json").read_text())
             assert len(source["ranks"]) == (2 if key == "hv15_official" else 4)
             assert source["neff_name"] == Path(source["ranks"][0]).name
-            assert (source["per_rank"], source["dge_notifs"]) == (False, True)
+            assert (source["per_rank"], source["dge_notifs"]) == (False, dge)
         summary = json.loads((arm_dir / "system_summary.json").read_text())
         assert summary["step"]["steps"] == int(steps)
         assert sorted(summary["blocks"]) == sorted(
@@ -421,8 +425,9 @@ def test_a_notification_queue_overflow_is_captured_again_without_dge_notifs(tmp_
     """Ruling R22: HV1's 235 MB dual block overflowed the runtime's notification queue with
     --enable-dge-notifs (NRT_EXEC_SW_NQ_OVERFLOW, 2026-11-13); no runtime setting raises that
     queue (NEURON_RT_PROFILE_BUF_DMA_MB=1024 overflowed the same), so the block is captured again
-    without the flag, its partial NTFFs deleted first, and source.json says so."""
-    done, arm_dir, _, x, _ = _capture(tmp_path, "hunyuan_video_L", FAKE_NQ_OVERFLOW="1")
+    without the flag, its partial NTFFs deleted first, and source.json says so. HV1 now starts
+    without it (ruling R23); the retry stays for any other key, here FLUX's two blocks."""
+    done, arm_dir, _, x, _ = _capture(tmp_path, "flux", FAKE_NQ_OVERFLOW="1")
     assert done.returncode == 0, done.stderr
     assert _status(arm_dir) == "DONE"
     dge = ["--enable-dge-notifs" in ln["argv"] for ln in x if ln["argv"][0] == "capture"]
