@@ -35,7 +35,11 @@ from difflet.backends.tpu.ops_impl import collective_matmul as cm
 
 
 def _attention_forward(self, hidden_states, encoder_hidden_states=None, rotary_emb=None):
-    from difflet.models.wan.modeling_wan import _attn_kernel, apply_rotary_emb
+    from difflet.models.wan.modeling_wan import (
+        _attn_kernel,
+        apply_rotary_emb,
+        apply_rotary_emb_half_split,
+    )
 
     if encoder_hidden_states is None:
         q, k, v = cm.all_gather_matmul(hidden_states, (self.to_q, self.to_k, self.to_v))
@@ -53,8 +57,12 @@ def _attention_forward(self, hidden_states, encoder_hidden_states=None, rotary_e
 
     if rotary_emb is not None and not self.is_cross_attention:
         cos, sin = rotary_emb
-        q = apply_rotary_emb(q, cos, sin)
-        k = apply_rotary_emb(k, cos, sin)
+        # The model's rope emits tables in its rope_layout, and a module whose q/k rows were
+        # reordered (use_half_split_rope_) must rotate in that layout too, as WanAttention does.
+        half_split = getattr(self, "rope_layout", "interleaved") == "half_split"
+        rotate = apply_rotary_emb_half_split if half_split else apply_rotary_emb
+        q = rotate(q, cos, sin)
+        k = rotate(k, cos, sin)
 
     out = _attn_kernel(q.transpose(1, 2), k.transpose(1, 2), v.transpose(1, 2),
                        head_dim=self.head_dim)

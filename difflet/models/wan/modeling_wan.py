@@ -175,6 +175,36 @@ class WanTransformerConfig:
 # ---------------------------------------------------------------------------
 # 3D rotary positional embedding
 
+#: How a self-attention head's q/k channels pair up for the rotation. ``interleaved`` (the
+#: checkpoint's): pair ``i`` is ``(x[2i], x[2i + 1])``. ``half_split``: pair ``i`` is
+#: ``(x[i], x[i + d/2])``, the same channels after ``half_split_index``. The half split rotates
+#: contiguous halves, which the neuron compiler moves in whole rows when q/k come from the MXFP8
+#: kernel (the interleaved pair swap on those q/k moves 2-byte elements: 5x the block time).
+ROPE_LAYOUTS = ("interleaved", "half_split")
+
+
+def half_split_index(n: int, head_dim: int) -> torch.Tensor:
+    """The rows of ``n`` = heads x ``head_dim`` channels in the half-split order: per head
+    ``(0, 2, 4, ..., 1, 3, 5, ...)``, so each interleaved pair ``(2i, 2i + 1)`` lands on
+    ``(i, i + head_dim/2)``. Whole heads only: a reorder across a head boundary would mix
+    heads."""
+    if n % head_dim:
+        raise ValueError(f"the half-split reorder needs whole heads: {n} channels is not a "
+                         f"multiple of head_dim={head_dim}")
+    per_head = torch.cat([torch.arange(0, head_dim, 2), torch.arange(1, head_dim, 2)])
+    return (torch.arange(0, n, head_dim)[:, None] + per_head).flatten()
+
+
+def apply_rotary_emb_half_split(
+    hidden_states: torch.Tensor, cos: torch.Tensor, sin: torch.Tensor
+) -> torch.Tensor:
+    """The rotation in the half-split layout, with the tables ``cat(c, c)`` / ``cat(-s, s)`` of
+    ``WanRotaryPosEmbed(layout="half_split")``: ``x * cos + cat(x[d/2:], x[:d/2]) * sin``.
+    Plain tensor code, no backend op: two contiguous halves and element-wise math."""
+    half = hidden_states.shape[-1] // 2
+    swapped = torch.cat([hidden_states[..., half:], hidden_states[..., :half]], dim=-1)
+    return (hidden_states * cos + swapped * sin).to(hidden_states.dtype)
+
 
 class WanRotaryPosEmbed(nn.Module):
     """3D RoPE: independent T/H/W frequency grids concatenated per token.
@@ -182,7 +212,8 @@ class WanRotaryPosEmbed(nn.Module):
     Mirrors ``diffusers...transformer_wan.WanRotaryPosEmbed`` exactly. The
     forward returns ``(freqs_cos, freqs_sin)``, each shaped
     ``(1, S_tokens, 1, attention_head_dim)``, ready to feed
-    ``difflet.ops.apply_rotary_emb``.
+    ``difflet.ops.apply_rotary_emb``; with ``layout="half_split"`` the same angles in the
+    half-split order, for ``apply_rotary_emb_half_split``.
     """
 
     def __init__(
@@ -221,13 +252,28 @@ class WanRotaryPosEmbed(nn.Module):
 
         self.register_buffer("freqs_cos", torch.cat(freqs_cos, dim=1), persistent=False)
         self.register_buffer("freqs_sin", torch.cat(freqs_sin, dim=1), persistent=False)
+        # Each pair's angle once (an interleaved table holds it on both of the pair's
+        # positions): the half-split tables' base, sliced here on the CPU so the forward takes
+        # no stride-2 slice.
+        self.register_buffer(
+            "freqs_cos_half", torch.cat([c[:, 0::2] for c in freqs_cos], dim=1), persistent=False
+        )
+        self.register_buffer(
+            "freqs_sin_half", torch.cat([s[:, 1::2] for s in freqs_sin], dim=1), persistent=False
+        )
 
-    def forward(self, hidden_states: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    def forward(
+        self, hidden_states: torch.Tensor, layout: str = "interleaved"
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        if layout not in ROPE_LAYOUTS:
+            raise ValueError(f"rope layout must be one of {ROPE_LAYOUTS}, got {layout!r}")
         _, _, num_frames, height, width = hidden_states.shape
         p_t, p_h, p_w = self.patch_size
         ppf = num_frames // p_t
         pph = height // p_h
         ppw = width // p_w
+        if layout == "half_split":
+            return self._half_split_tables(ppf, pph, ppw)
 
         # NOTE: use direct column slices, NOT torch.split(sizes_list, dim=1). neuronxcc
         # 2.25 miscompiles aten::split_with_sizes on a non-outermost dim (scrambled chunks,
@@ -248,6 +294,27 @@ class WanRotaryPosEmbed(nn.Module):
         freqs_cos = torch.cat([cos_f, cos_y, cos_x], dim=-1).reshape(1, ppf * pph * ppw, 1, -1)
         freqs_sin = torch.cat([sin_f, sin_y, sin_x], dim=-1).reshape(1, ppf * pph * ppw, 1, -1)
         return freqs_cos, freqs_sin
+
+    def _half_split_tables(
+        self, ppf: int, pph: int, ppw: int
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Per token the base angles ``B`` (the interleaved builder's column slices, expands and
+        cat, on the half buffers), as ``(cat(Bc, Bc), cat(-Bs, Bs))``: pair ``i``'s angle on
+        both ``i`` and ``i + d/2``, and the sign of the rotation's ``-x[i + d/2] * s`` term on
+        the first half."""
+        _t, _th = self.t_dim // 2, (self.t_dim + self.h_dim) // 2
+        base = []
+        for table in (self.freqs_cos_half, self.freqs_sin_half):
+            t, h, w = table[:, :_t], table[:, _t:_th], table[:, _th:]
+            f = t[:ppf].view(ppf, 1, 1, -1).expand(ppf, pph, ppw, -1)
+            y = h[:pph].view(1, pph, 1, -1).expand(ppf, pph, ppw, -1)
+            x = w[:ppw].view(1, 1, ppw, -1).expand(ppf, pph, ppw, -1)
+            base.append(torch.cat([f, y, x], dim=-1).reshape(1, ppf * pph * ppw, 1, -1))
+        base_cos, base_sin = base
+        return (
+            torch.cat([base_cos, base_cos], dim=-1),
+            torch.cat([-base_sin, base_sin], dim=-1),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -455,6 +522,9 @@ class WanAttention(nn.Module):
             )
         self.local_heads = heads // self.tp_degree
         self._rank_util = None
+        # The self-attention's q/k channel order (ROPE_LAYOUTS); set by the model's
+        # use_half_split_rope_, which reorders the q/k rows to match.
+        self.rope_layout = "interleaved"
 
         self.to_q = ColumnParallelLinear(
             dim, inner_dim, bias=True, gather_output=False, dtype=dtype, reduce_dtype=dtype
@@ -550,8 +620,12 @@ class WanAttention(nn.Module):
 
         if rotary_emb is not None and not self.is_cross_attention:
             cos, sin = rotary_emb
-            q = apply_rotary_emb(q, cos, sin)
-            k = apply_rotary_emb(k, cos, sin)
+            rotate = (
+                apply_rotary_emb_half_split if self.rope_layout == "half_split"
+                else apply_rotary_emb
+            )
+            q = rotate(q, cos, sin)
+            k = rotate(k, cos, sin)
 
         # (B, S, heads, dim) → (B, heads, S, dim) for the kernel.
         q = q.transpose(1, 2)
@@ -742,6 +816,8 @@ class WanTransformer3DModel(nn.Module):
 
         inner_dim = config.inner_dim
 
+        # The rotary tables' layout, the self-attentions' own (use_half_split_rope_).
+        self.rope_layout = "interleaved"
         self.rope = WanRotaryPosEmbed(
             attention_head_dim=config.attention_head_dim,
             patch_size=config.patch_size,
@@ -800,6 +876,41 @@ class WanTransformer3DModel(nn.Module):
         )
         self.scale_shift_table = nn.Parameter(torch.randn(1, 2, inner_dim) / inner_dim**0.5)
 
+    def use_half_split_rope_(self) -> int:
+        """Switch every self-attention to the half-split rotary layout (``ROPE_LAYOUTS``):
+        reorder each ``attn1``'s ``to_q`` / ``to_k`` output rows (the weight, an MXFP8 twin's
+        block scales, the bias) and its q/k RMSNorm weights by ``half_split_index``, and rotate
+        with the half-split tables from then on. q and k move alike, so ``q . k`` is the same
+        up to summation order and nothing after the attention changes (v and the output
+        projection keep their order). The norms scale per channel, so their weights move with
+        the rows; their RMS is over all of the channels, which the reorder keeps.
+
+        Every self-attention switches together: the tables are the model's, one per forward.
+        The tensors are replaced, never edited in place, so storage the loaded tensors share
+        (a weight store) keeps the checkpoint's order. Returns the number of attentions
+        reordered: 0 when the model is in the layout already, so a second call cannot reorder
+        the rows twice."""
+        if self.rope_layout == "half_split":
+            return 0
+
+        def reordered(tensor: torch.Tensor, head_dim: int) -> torch.Tensor:
+            index = half_split_index(tensor.shape[0], head_dim).to(tensor.device)
+            return tensor.index_select(0, index)
+
+        for block in self.blocks:
+            attn = block.attn1
+            for linear in (attn.to_q, attn.to_k):
+                linear.weight.data = reordered(linear.weight.data, attn.head_dim)
+                if getattr(linear, "weight_scale", None) is not None:
+                    linear.weight_scale = reordered(linear.weight_scale, attn.head_dim)
+                if linear.bias is not None:
+                    linear.bias.data = reordered(linear.bias.data, attn.head_dim)
+            for norm in (attn.norm_q, attn.norm_k):
+                norm.weight.data = reordered(norm.weight.data, attn.head_dim)
+            attn.rope_layout = "half_split"
+        self.rope_layout = "half_split"
+        return len(self.blocks)
+
     def _sp_seq_scatter(self, tensor: torch.Tensor, *, dim: int) -> torch.Tensor:
         """Megatron-SP forward-entry sequence scatter across the TP group.
 
@@ -855,7 +966,8 @@ class WanTransformer3DModel(nn.Module):
         pph = height // p_h
         ppw = width // p_w
 
-        rotary_emb = self.rope(hidden_states)  # (cos, sin) each (1, S, 1, head_dim)
+        # (cos, sin) each (1, S, 1, head_dim)
+        rotary_emb = self.rope(hidden_states, self.rope_layout)
 
         hidden_states = self.patch_embedding(hidden_states)
         # (B, S, inner_dim). Contiguous, so block 0 sees the strides every later block sees
