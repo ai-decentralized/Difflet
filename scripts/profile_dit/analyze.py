@@ -14,7 +14,9 @@ left out, then the mean over the physical cores. That union reproduces ``ActiveT
 (``engines_check``). A ``DMA_*`` row is HBM traffic, ``hbm_dma``, whatever engine queued it (in
 HV1's dual block 48.3 of ScalarE's 53.7 ms of durations are DMA). Collectives are the union of
 ``CcOp.parquet``'s operations (one logical core, so not averaged), as engine_class and component
-``collective``. ``mfu``, ``mbu`` and ``throttle`` are the summary's fractions (0..1).
+``collective``. ``mfu``, ``mbu`` and ``throttle`` are the summary's fractions (0..1). Rows with
+no module path stay ``unattributed``; ``unattributed_by_source`` splits that time by the source
+file (and function) the rows name (ruling R25).
 
 Refused with ``ValueError``: ``other`` over 10% of an engine_class's attributed (not
 ``unattributed``) time; attention lines no phase rule names over 10% of attention time (ruling
@@ -37,7 +39,8 @@ import pandas as pd
 SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
-from components import attention_module, attention_phase, classify  # noqa: E402
+from components import (  # noqa: E402
+    attention_module, attention_phase, classify, enclosing_function)
 
 _KEYS = ["layer", "hlo_name", "nki_source_location", "hlo_attrs"]
 _CTE = "/nkilib/core/attention/attention_cte.py"
@@ -101,6 +104,22 @@ def _unmapped(nki_source: str) -> bool:
     path, _, line = nki_source.rpartition(":")
     known = path.endswith(_CTE) and line.isdigit() and int(line) in _OTHER_LINES
     return attention_phase(nki_source) == "other" and not known
+
+
+def _source_label(nki_source: str, hlo_attrs: str) -> str:
+    """Where an unattributed row came from (ruling R25): the file of its nki_source_location, else
+    of its hlo_attrs, with ``:<function>`` when the file can be parsed; "(none)" without either."""
+    path, _, line = nki_source.rpartition(":")
+    if not path:
+        try:
+            first = json.loads(hlo_attrs)[0]
+            path, line = first.get("source_file", ""), str(first.get("source_line", ""))
+        except (ValueError, IndexError, TypeError, AttributeError):
+            path = ""
+    if not path:
+        return "(none)"
+    function = enclosing_function(path, int(line)) if line.isdigit() else None
+    return f"{Path(path).name}:{function}" if function else Path(path).name
 
 
 def _rows(trace: Path, model: str) -> pd.DataFrame:
@@ -223,7 +242,16 @@ def analyze(block_dir: Path, model: str) -> dict:
         # (ruling R22): the profile's own warning says its DMA values may be inaccurate
         "dge_notifs": json.loads(source.read_text()).get("dge_notifs", True) if source.exists()
         else None,
+        "unattributed_by_source": _by_source(rows[rows.component == "unattributed"], n),
     }
+
+
+def _by_source(rows: pd.DataFrame, n_pcores: int) -> dict:
+    """{source: {engine_class: ms}} of unattributed rows (ruling R25), unions as everywhere."""
+    sources = rows[["nki_source_location", "hlo_attrs"]].drop_duplicates()
+    sources["source"] = [_source_label(*r) for r in sources.itertuples(index=False)]
+    rows = rows.merge(sources, on=["nki_source_location", "hlo_attrs"], how="left")
+    return _nest(_busy_ms(rows, ["source", "engine_class"], n_pcores))
 
 
 def main(argv: list[str] | None = None) -> None:

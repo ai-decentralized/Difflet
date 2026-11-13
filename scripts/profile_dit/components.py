@@ -29,6 +29,7 @@ and the residual adds) are ``modulation`` too, since that is where Wan and LTX-2
 from __future__ import annotations
 
 import ast
+import functools
 import re
 from pathlib import Path
 
@@ -158,3 +159,33 @@ def attention_module(layer: str) -> str:
     ``audio_attn1``, ...), or "" outside one."""
     m = _ATTENTION.search(layer)
     return m.group(1) if m else ""
+
+
+@functools.lru_cache(maxsize=None)
+def _functions(path: str) -> tuple[tuple[int, int, str], ...]:
+    """(first line, last line, qualname) of every function in the Python file ``path``: as given,
+    or a difflet file of another checkout at its place in this one; () when it cannot be read."""
+    p = Path(path)
+    if not p.is_file() and "/difflet/" in path:
+        p = _REPO / path[path.rindex("/difflet/") + 1:]
+    try:
+        tree = ast.parse(p.read_text())
+    except (OSError, SyntaxError, ValueError):
+        return ()
+    found = []
+
+    def walk(node: ast.AST, prefix: str) -> None:
+        for n in ast.iter_child_nodes(node):
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                if not isinstance(n, ast.ClassDef):
+                    found.append((n.lineno, n.end_lineno, prefix + n.name))
+                walk(n, f"{prefix}{n.name}.")
+    walk(tree, "")
+    return tuple(found)
+
+
+def enclosing_function(path: str, line: int) -> str | None:
+    """The qualname of the innermost function of ``path`` that holds ``line`` (the inverse of the
+    source rules above), or None (no such function, or the file cannot be read)."""
+    inside = [(first, name) for first, last, name in _functions(path) if first <= line <= last]
+    return max(inside)[1] if inside else None

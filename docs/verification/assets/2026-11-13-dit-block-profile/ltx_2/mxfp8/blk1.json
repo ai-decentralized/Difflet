@@ -21148,5 +21148,15 @@
    "busy_us": 1.949
   }
  ],
- "dge_notifs": true
+ "dge_notifs": true,
+ "unattributed_by_source": {
+  "(none)": {
+   "vector": 0.197536,
+   "tensor": 0.861533,
+   "gpsimd": 0.0156945,
+   "scalar": 0.344185,
+   "sync": 0.008433,
+   "hbm_dma": 0.272038
+  }
+ }
 }

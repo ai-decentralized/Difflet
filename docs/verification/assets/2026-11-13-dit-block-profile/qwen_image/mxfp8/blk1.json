@@ -7810,5 +7810,22 @@
    "busy_us": 1.762
   }
  ],
- "dge_notifs": true
+ "dge_notifs": true,
+ "unattributed_by_source": {
+  "(none)": {
+   "tensor": 0.471784,
+   "vector": 0.072587,
+   "gpsimd": 0.008074,
+   "scalar": 0.20477,
+   "sync": 0.003993,
+   "hbm_dma": 0.121995
+  },
+  "transpose.py:_dve_transpose_small_i_impl": {
+   "hbm_dma": 0.218175
+  },
+  "transpose.py:_copy_with_engine": {
+   "scalar": 0.1036925,
+   "vector": 0.043514
+  }
+ }
 }
