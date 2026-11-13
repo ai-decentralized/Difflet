@@ -3777,15 +3777,284 @@
    "blocks": [
     {
      "blk": 1,
-     "kind": null,
+     "kind": "dual",
      "neff_name": "neff_494151078019236_vnc_0.neff",
-     "status": "pending",
+     "status": "ok",
      "execs_per_step": 20,
-     "in_model_median_ms": 457.9968865
+     "in_model_median_ms": 457.9968865,
+     "block_ms": 458.225019856,
+     "replay_spread_ms": 0.0957640159999773,
+     "block_neff_sha256": "241677c392afb6e06c558499db18715c0404dae9dbe6cc4ceb066250bf648e22",
+     "engines_ms": {
+      "vector": 193.5269445,
+      "tensor": 168.1405515,
+      "gpsimd": 7.5455915,
+      "sync": 8.42317,
+      "scalar": 24.967584,
+      "hbm_dma": 244.9429615,
+      "collective": 4.94192
+     },
+     "components": {
+      "unattributed": {
+       "vector": 7.580322,
+       "tensor": 5.5463785,
+       "gpsimd": 0.361407,
+       "sync": 0.184006,
+       "scalar": 9.4991385,
+       "hbm_dma": 4.7065305
+      },
+      "modulation": {
+       "scalar": 0.533678,
+       "tensor": 1.1284905,
+       "vector": 0.9708185,
+       "hbm_dma": 0.4911995,
+       "sync": 0.000509,
+       "gpsimd": 0.000267
+      },
+      "norm": {
+       "hbm_dma": 0.6287665,
+       "vector": 3.8992775,
+       "tensor": 2.7101225,
+       "scalar": 1.761302,
+       "gpsimd": 0.3992965,
+       "sync": 0.000624
+      },
+      "collective": {
+       "gpsimd": 0.0015855,
+       "hbm_dma": 0.00603,
+       "vector": 0.00197,
+       "sync": 9.95e-05,
+       "tensor": 0.002255,
+       "collective": 4.94192
+      },
+      "qkv_proj": {
+       "hbm_dma": 4.8417605,
+       "tensor": 23.8523825,
+       "vector": 1.340915,
+       "scalar": 0.67821,
+       "gpsimd": 0.000335,
+       "sync": 7.8e-05
+      },
+      "qk_norm": {
+       "hbm_dma": 1.761831,
+       "scalar": 2.861045,
+       "tensor": 4.021085,
+       "vector": 2.408857,
+       "gpsimd": 3.6139185,
+       "sync": 0.000702
+      },
+      "attention": {
+       "hbm_dma": 50.779022,
+       "scalar": 5.751372,
+       "vector": 173.013862,
+       "gpsimd": 3.114625,
+       "sync": 8.2341285,
+       "tensor": 127.0553605
+      },
+      "rope": {
+       "vector": 3.661638,
+       "hbm_dma": 3.0667965,
+       "gpsimd": 0.0033955,
+       "scalar": 1.013197,
+       "tensor": 2.620383
+      },
+      "attn_glue": {
+       "scalar": 0.8596865,
+       "tensor": 2.432959,
+       "vector": 0.193989,
+       "hbm_dma": 179.660623,
+       "sync": 0.002711,
+       "gpsimd": 0.0900145
+      },
+      "out_proj": {
+       "vector": 1.1188525,
+       "sync": 0.000312,
+       "tensor": 0.005962,
+       "scalar": 2.065309,
+       "hbm_dma": 0.44114
+      }
+     },
+     "engines_check": {
+      "summary_ms": {
+       "cc_cores_instruction_active_time": 0.022959134000000003,
+       "cc_op_active_time": 4.941919779,
+       "dma_active_time": 428.487369218,
+       "gpsimd_engine_active_time": 102.749967653,
+       "hardware_dynamic_dma_active_time": 264.545322827,
+       "host_device_dma_active_time": 20.774083414,
+       "scalar_engine_active_time": 150.193286069,
+       "software_dynamic_dma_active_time": 51.970326214,
+       "static_dma_active_time": 168.637339765,
+       "sync_engine_active_time": 186.34085762499998,
+       "tensor_engine_active_time": 219.674772639,
+       "total_active_time": 457.682475066,
+       "vector_engine_active_time": 209.741320736
+      },
+      "active_time_ms": {
+       "cc_instruction": 0.0115185,
+       "gpsimd": 61.5771095,
+       "scalar": 112.524028,
+       "sync": 161.909084,
+       "tensor": 168.1232415,
+       "vector": 193.5253275
+      },
+      "union_ms": {
+       "vector": 193.5269445,
+       "tensor": 168.1405515,
+       "gpsimd": 61.577398,
+       "sync": 161.908783,
+       "scalar": 112.5233155
+      }
+     },
+     "attention_detail": {
+      "attn": {
+       "other": {
+        "hbm_dma": 50.779022,
+        "scalar": 0.4014775,
+        "vector": 2.110002,
+        "sync": 8.233736,
+        "gpsimd": 2.006613,
+        "tensor": 0.724053
+       },
+       "mask_softmax": {
+        "gpsimd": 1.8517465,
+        "scalar": 5.3498945,
+        "vector": 169.6113975
+       },
+       "qk_matmul": {
+        "tensor": 57.655828
+       },
+       "pv_matmul": {
+        "tensor": 106.769732,
+        "vector": 3.247734
+       }
+      },
+      "": {
+       "mask_softmax": {
+        "vector": 0.0077295
+       },
+       "pv_matmul": {
+        "vector": 0.000444,
+        "tensor": 0.009731
+       },
+       "other": {
+        "gpsimd": 0.000332,
+        "sync": 0.0003925
+       },
+       "qk_matmul": {
+        "tensor": 0.00283
+       }
+      }
+     },
+     "memory_bytes": {
+      "hbm_read": 30055749816,
+      "hbm_write": 11012227552,
+      "sbuf_read": 436908357528,
+      "sbuf_write": 280349952088,
+      "psum_read": 125236277848,
+      "psum_write": 272814459960,
+      "spill_save": 9731186256,
+      "spill_reload": 25490221568,
+      "psum_to_sbuf": 122236227544
+     },
+     "psum_readout_copy_ms": 11.474683,
+     "psum_readout_fused_ms": 115.3747225,
+     "psum_readout_copy_ms_by_engine": {
+      "scalar": 6.563399,
+      "vector": 6.347805
+     },
+     "psum_readout_fused_ms_by_engine": {
+      "scalar": 0.1674445,
+      "vector": 115.2197595
+     },
+     "mfu": 0.2486995145656008,
+     "mbu": 0.07608152775315667,
+     "throttle": {
+      "avg_util_limit": 0.6818874195929733,
+      "limited_time_share": 0.630947158755742
+     },
+     "other_share": {
+      "scalar": 0.0,
+      "hbm_dma": 0.0,
+      "tensor": 0.0,
+      "vector": 0.0,
+      "gpsimd": 0.0,
+      "sync": 0.0
+     },
+     "unattributed_share": {
+      "vector": 0.03916933644348423,
+      "tensor": 0.0329865606513132,
+      "gpsimd": 0.047896443903701916,
+      "sync": 0.021845219792548408,
+      "scalar": 0.3804588581738626,
+      "hbm_dma": 0.019214801973397387
+     },
+     "warnings": [
+      "Notifications were dropped from buffer types EVENT. This can cause corresponding data to be incorrect. To avoid dropped notifications, increase the affected buffer size by setting NEURON_RT_PROFILE_BUF_<type>_MB (e.g. NEURON_RT_PROFILE_BUF_EVENT_MB). See https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-runtime/explore/device-memory.html#profile-buffers for details.",
+      "Missing additional dynamic DMA metadata, reported DMA values may be inaccurate. To enable more accurate DMA data, re-capture with --enable-dge-notifs flag or set NEURON_RT_ENABLE_DGE_NOTIFICATIONS=1 before running. Note: DGE notifications are disabled by default as they can cause execution timeouts on some models.",
+      "Current NEFF is missing compiler metrics. Please re-compile using latest version of the compiler",
+      "Schema validation: Unexpected key 'subgraph' cannot be saved to table 'TimelineAnnotation' because no schema.yaml entry exists or no key name remapping. This key and value will be dropped and not found in parquet output."
+     ],
+     "dge_notifs": false,
+     "unattributed_by_source": {
+      "(none)": {
+       "vector": 1.277399,
+       "tensor": 5.5463785,
+       "gpsimd": 0.259546,
+       "sync": 0.183291,
+       "scalar": 3.116874,
+       "hbm_dma": 3.092061
+      },
+      "transpose.py:_dve_transpose_small_i_impl": {
+       "hbm_dma": 1.02078,
+       "sync": 0.000474
+      },
+      "transpose.py:_copy_with_engine": {
+       "scalar": 0.2997115,
+       "vector": 0.1004945
+      },
+      "normalization.py:RMSNorm.forward": {
+       "hbm_dma": 0.190326
+      },
+      "linear.py:RowParallelLinear.forward": {
+       "hbm_dma": 0.152592,
+       "scalar": 0.8348035,
+       "vector": 1.5240905,
+       "sync": 0.000241
+      },
+      "modeling_hunyuan_video.py:HunyuanVideoTransformerBlock.forward": {
+       "scalar": 0.6415755,
+       "hbm_dma": 0.2419115,
+       "vector": 2.0321825,
+       "gpsimd": 0.100742
+      },
+      "linear.py:ColumnParallelLinear.forward": {
+       "hbm_dma": 0.0347545,
+       "scalar": 0.0070835,
+       "vector": 2.125471
+      },
+      "modeling_hunyuan_video.py:HunyuanVideoGELU.forward": {
+       "scalar": 4.6116425,
+       "vector": 0.6007845
+      },
+      "_functional_collectives.py:all_reduce": {
+       "gpsimd": 0.001119
+      }
+     },
+     "bottleneck": {
+      "engine_class": "hbm_dma",
+      "share": 0.5345473313023693,
+      "mfu": 0.2486995145656008
+     },
+     "attention_share": 0.11081678171121606,
+     "addressable_attention_share": 0.11081678171121606,
+     "cross_attention_share": 0.0,
+     "rope_share": 0.007990916779600319,
+     "rope_engine": "vector"
     },
     {
      "blk": 2,
-     "kind": null,
+     "kind": "single",
      "neff_name": "neff_32529684954229_vnc_0.neff",
      "status": "pending",
      "execs_per_step": 40,
@@ -3809,7 +4078,7 @@
    "arm": "mxfp8",
    "shape": "544x960x129",
    "layout": "tp4",
-   "status": "pending",
+   "status": "ok",
    "step_ms": 17967.6,
    "step_source": {
     "section": "7f",
@@ -3822,29 +4091,601 @@
      "blk": 1,
      "kind": "dual",
      "neff_name": "neff_333245064260899_vnc_0.neff",
-     "status": "pending",
+     "status": "ok",
      "execs_per_step": 20,
-     "in_model_median_ms": 450.7973485
+     "in_model_median_ms": 450.7973485,
+     "block_ms": 451.030446931,
+     "replay_spread_ms": 0.31940450199996473,
+     "block_neff_sha256": "dad2e6e52c75a92b473a2b1c94c4fe7f067c0a5e27f6f33c731b039ff5bda2ba",
+     "engines_ms": {
+      "vector": 196.9305845,
+      "tensor": 156.911977,
+      "gpsimd": 7.408004,
+      "sync": 8.422779,
+      "scalar": 25.36087,
+      "hbm_dma": 257.0772045,
+      "collective": 7.407178
+     },
+     "components": {
+      "unattributed": {
+       "vector": 6.5853815,
+       "tensor": 5.3596155,
+       "gpsimd": 0.262563,
+       "sync": 0.185712,
+       "scalar": 9.8549665,
+       "hbm_dma": 4.3222975
+      },
+      "rope": {
+       "vector": 3.563255,
+       "hbm_dma": 3.222654,
+       "gpsimd": 0.003095,
+       "scalar": 1.011618,
+       "tensor": 2.421024
+      },
+      "modulation": {
+       "scalar": 0.513268,
+       "tensor": 1.144059,
+       "vector": 1.1634405,
+       "hbm_dma": 0.6247895,
+       "sync": 0.0006275,
+       "gpsimd": 0.0003315
+      },
+      "norm": {
+       "hbm_dma": 0.6233325,
+       "vector": 3.979992,
+       "tensor": 2.706553,
+       "scalar": 1.733573,
+       "gpsimd": 0.401263,
+       "sync": 0.000546
+      },
+      "collective": {
+       "gpsimd": 0.00158,
+       "hbm_dma": 0.0054755,
+       "tensor": 0.002196,
+       "vector": 0.0047135,
+       "sync": 7.8e-05,
+       "collective": 7.407178
+      },
+      "qkv_proj": {
+       "hbm_dma": 11.01634,
+       "scalar": 0.727908,
+       "tensor": 24.653095,
+       "vector": 1.3521785,
+       "sync": 0.0002335,
+       "gpsimd": 0.0002635
+      },
+      "other": {
+       "hbm_dma": 0.013885,
+       "vector": 0.006153,
+       "scalar": 0.000823,
+       "tensor": 0.0102145
+      },
+      "attention": {
+       "hbm_dma": 50.4490265,
+       "scalar": 5.7404925,
+       "vector": 173.2907415,
+       "gpsimd": 3.069549,
+       "sync": 8.2308065,
+       "tensor": 115.920863
+      },
+      "qk_norm": {
+       "hbm_dma": 0.670142,
+       "scalar": 2.859867,
+       "tensor": 3.9816595,
+       "vector": 2.405559,
+       "gpsimd": 3.6137885,
+       "sync": 0.0005485
+      },
+      "attn_glue": {
+       "scalar": 0.8662455,
+       "tensor": 2.154252,
+       "vector": 0.164591,
+       "hbm_dma": 192.058004,
+       "sync": 0.0026475,
+       "gpsimd": 0.0896925
+      },
+      "out_proj": {
+       "vector": 1.123928,
+       "sync": 0.00039,
+       "tensor": 0.0014,
+       "scalar": 2.07458,
+       "hbm_dma": 0.4484005
+      },
+      "mlp_up": {
+       "hbm_dma": 0.7328605,
+       "vector": 2.0379695,
+       "sync": 0.000602
+      },
+      "mlp_down": {
+       "hbm_dma": 0.7350475,
+       "vector": 2.0416955,
+       "sync": 0.0005875
+      }
+     },
+     "engines_check": {
+      "summary_ms": {
+       "cc_cores_instruction_active_time": 0.019259139,
+       "cc_op_active_time": 7.407176756999999,
+       "dma_active_time": 417.681159042,
+       "gpsimd_engine_active_time": 102.003829803,
+       "hardware_dynamic_dma_active_time": 255.706588523,
+       "host_device_dma_active_time": 20.313857397,
+       "scalar_engine_active_time": 145.77092381100002,
+       "software_dynamic_dma_active_time": 53.686033162,
+       "static_dma_active_time": 165.682673229,
+       "sync_engine_active_time": 206.332194551,
+       "tensor_engine_active_time": 205.89095290699998,
+       "total_active_time": 450.55333484799996,
+       "vector_engine_active_time": 212.72173057400002
+      },
+      "active_time_ms": {
+       "cc_instruction": 0.00967,
+       "gpsimd": 62.6903335,
+       "scalar": 127.10809,
+       "sync": 169.930317,
+       "tensor": 156.894588,
+       "vector": 196.930635
+      },
+      "union_ms": {
+       "vector": 196.9305845,
+       "tensor": 156.911977,
+       "gpsimd": 62.690693,
+       "sync": 169.930016,
+       "scalar": 127.1074605
+      }
+     },
+     "attention_detail": {
+      "attn": {
+       "other": {
+        "hbm_dma": 50.4490265,
+        "scalar": 0.3852075,
+        "vector": 2.596442,
+        "gpsimd": 1.9605395,
+        "sync": 8.230256,
+        "tensor": 0.723257
+       },
+       "mask_softmax": {
+        "gpsimd": 1.8533905,
+        "scalar": 5.355285,
+        "vector": 169.4036935
+       },
+       "qk_matmul": {
+        "tensor": 54.4084805
+       },
+       "pv_matmul": {
+        "tensor": 95.9682045,
+        "vector": 3.240431
+       }
+      },
+      "": {
+       "qk_matmul": {
+        "tensor": 0.0062475
+       },
+       "other": {
+        "sync": 0.0005505,
+        "gpsimd": 0.0003315
+       },
+       "mask_softmax": {
+        "vector": 0.0082735
+       },
+       "pv_matmul": {
+        "tensor": 0.0084555
+       }
+      }
+     },
+     "memory_bytes": {
+      "hbm_read": 25204767480,
+      "hbm_write": 11740024096,
+      "sbuf_read": 434198750372,
+      "sbuf_write": 279088523032,
+      "psum_read": 127183290904,
+      "psum_write": 263960935096,
+      "spill_save": 10265371024,
+      "spill_reload": 19288792000,
+      "psum_to_sbuf": 125418276376
+     },
+     "psum_readout_copy_ms": 14.2077405,
+     "psum_readout_fused_ms": 115.169037,
+     "psum_readout_copy_ms_by_engine": {
+      "scalar": 7.249075,
+      "vector": 8.298899
+     },
+     "psum_readout_fused_ms_by_engine": {
+      "scalar": 0.083922,
+      "vector": 115.085115
+     },
+     "mfu": 0.22565966597720735,
+     "mbu": 0.06953477766434811,
+     "throttle": {
+      "avg_util_limit": 0.6704138409579122,
+      "limited_time_share": 0.6541667800744202
+     },
+     "other_share": {
+      "vector": 3.2256938737247635e-05,
+      "scalar": 5.300240597434361e-05,
+      "hbm_dma": 5.491679064044811e-05,
+      "tensor": 6.713486352010347e-05,
+      "gpsimd": 0.0,
+      "sync": 0.0
+     },
+     "unattributed_share": {
+      "vector": 0.03344011554487617,
+      "tensor": 0.03415682857657195,
+      "gpsimd": 0.03544315040866609,
+      "sync": 0.02204877986232335,
+      "scalar": 0.3885894490212678,
+      "hbm_dma": 0.016813227405388254
+     },
+     "warnings": [
+      "Notifications were dropped from buffer types EVENT. This can cause corresponding data to be incorrect. To avoid dropped notifications, increase the affected buffer size by setting NEURON_RT_PROFILE_BUF_<type>_MB (e.g. NEURON_RT_PROFILE_BUF_EVENT_MB). See https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-runtime/explore/device-memory.html#profile-buffers for details.",
+      "Missing additional dynamic DMA metadata, reported DMA values may be inaccurate. To enable more accurate DMA data, re-capture with --enable-dge-notifs flag or set NEURON_RT_ENABLE_DGE_NOTIFICATIONS=1 before running. Note: DGE notifications are disabled by default as they can cause execution timeouts on some models.",
+      "Current NEFF is missing compiler metrics. Please re-compile using latest version of the compiler",
+      "Schema validation: Unexpected key 'subgraph' cannot be saved to table 'TimelineAnnotation' because no schema.yaml entry exists or no key name remapping. This key and value will be dropped and not found in parquet output."
+     ],
+     "dge_notifs": false,
+     "unattributed_by_source": {
+      "(none)": {
+       "vector": 1.5856715,
+       "tensor": 5.3596155,
+       "gpsimd": 0.259654,
+       "sync": 0.1852435,
+       "scalar": 4.6456115,
+       "hbm_dma": 3.182043
+      },
+      "transpose.py:_dve_transpose_small_i_impl": {
+       "hbm_dma": 0.6726635,
+       "sync": 0.0004685
+      },
+      "transpose.py:_copy_with_engine": {
+       "scalar": 0.2962165,
+       "vector": 0.1022775
+      },
+      "normalization.py:RMSNorm.forward": {
+       "hbm_dma": 0.190945
+      },
+      "linear.py:RowParallelLinear.forward": {
+       "hbm_dma": 0.11877
+      },
+      "modeling_hunyuan_video.py:HunyuanVideoTransformerBlock.forward": {
+       "vector": 2.1280655,
+       "scalar": 0.4220975,
+       "hbm_dma": 0.180415,
+       "gpsimd": 0.0017825
+      },
+      "fp8_linear.py:_FP8LinearBase._matmul": {
+       "hbm_dma": 0.001394,
+       "scalar": 0.0003825,
+       "vector": 1.4163465
+      },
+      "modeling_hunyuan_video.py:HunyuanVideoGELU.forward": {
+       "scalar": 4.508369,
+       "vector": 0.548231
+      },
+      "fp8_linear.py:FP8RowParallelLinear.forward": {
+       "hbm_dma": 0.001331,
+       "scalar": 0.000179,
+       "vector": 0.999377
+      },
+      "_functional_collectives.py:all_reduce": {
+       "gpsimd": 0.0011265
+      }
+     },
+     "bottleneck": {
+      "engine_class": "hbm_dma",
+      "share": 0.5699774954202337,
+      "mfu": 0.22565966597720735
+     },
+     "attention_share": 0.11185281801544952,
+     "addressable_attention_share": 0.11185281801544952,
+     "cross_attention_share": 0.0,
+     "rope_share": 0.00790025379493974,
+     "rope_engine": "vector"
     },
     {
      "blk": 2,
-     "kind": null,
+     "kind": "single",
      "neff_name": "neff_591853695999675_vnc_0.neff",
-     "status": "pending",
+     "status": "ok",
      "execs_per_step": 40,
-     "in_model_median_ms": 221.6816
+     "in_model_median_ms": 221.6816,
+     "block_ms": 221.901273279,
+     "replay_spread_ms": 0.1675980720000081,
+     "block_neff_sha256": "31e23dd711cef6d0ecc06872ebefbe641f75d61eef2265592c2fbdecc8377d41",
+     "engines_ms": {
+      "vector": 187.1685305,
+      "tensor": 144.1329425,
+      "gpsimd": 5.6155465,
+      "scalar": 17.462951,
+      "sync": 8.265483,
+      "hbm_dma": 57.8556395,
+      "collective": 3.843051
+     },
+     "components": {
+      "unattributed": {
+       "vector": 5.7001685,
+       "tensor": 27.821426,
+       "gpsimd": 1.9015335,
+       "scalar": 5.9477525,
+       "sync": 0.0313445,
+       "hbm_dma": 4.0472735
+      },
+      "attention": {
+       "vector": 172.764974,
+       "hbm_dma": 51.214653,
+       "tensor": 105.786411,
+       "gpsimd": 3.5142115,
+       "scalar": 5.633274,
+       "sync": 8.232367
+      },
+      "modulation": {
+       "scalar": 0.8699545,
+       "hbm_dma": 0.419201,
+       "vector": 0.7091625,
+       "tensor": 2.7851665,
+       "sync": 0.000395
+      },
+      "attn_glue": {
+       "tensor": 1.970508,
+       "scalar": 0.479462,
+       "vector": 0.288212,
+       "hbm_dma": 0.105918,
+       "gpsimd": 0.0004985
+      },
+      "norm": {
+       "tensor": 1.7273735,
+       "scalar": 0.8621285,
+       "vector": 1.138547,
+       "hbm_dma": 0.132563,
+       "gpsimd": 0.199094,
+       "sync": 0.000234
+      },
+      "collective": {
+       "gpsimd": 0.00023,
+       "tensor": 0.001496,
+       "hbm_dma": 0.001541,
+       "vector": 0.000534,
+       "collective": 3.843051
+      },
+      "mlp_up": {
+       "hbm_dma": 0.987197,
+       "vector": 3.1617715,
+       "tensor": 4.486942,
+       "sync": 0.000308,
+       "scalar": 0.0005605
+      },
+      "mlp_down": {
+       "tensor": 4.4794845,
+       "hbm_dma": 0.775531,
+       "vector": 2.044314,
+       "sync": 0.000462
+      },
+      "mlp_act": {
+       "hbm_dma": 0.0416055,
+       "tensor": 2.0291915,
+       "vector": 0.790451,
+       "scalar": 3.691101,
+       "sync": 0.000178
+      },
+      "out_proj": {
+       "vector": 1.0177255,
+       "hbm_dma": 0.1670005,
+       "sync": 0.0001945
+      }
+     },
+     "engines_check": {
+      "summary_ms": {
+       "cc_cores_instruction_active_time": 0.020045802999999997,
+       "cc_op_active_time": 3.8430506610000004,
+       "dma_active_time": 189.365382993,
+       "gpsimd_engine_active_time": 99.856031859,
+       "hardware_dynamic_dma_active_time": 32.778562142,
+       "host_device_dma_active_time": 19.506046988999998,
+       "scalar_engine_active_time": 28.325011061999998,
+       "software_dynamic_dma_active_time": 52.732299163,
+       "static_dma_active_time": 150.468745269,
+       "sync_engine_active_time": 19.720336495,
+       "tensor_engine_active_time": 185.487029316,
+       "total_active_time": 221.468668512,
+       "vector_engine_active_time": 199.676796396
+      },
+      "active_time_ms": {
+       "cc_instruction": 0.010041,
+       "gpsimd": 61.207941,
+       "scalar": 17.7082215,
+       "sync": 10.293489,
+       "tensor": 144.1164455,
+       "vector": 187.1685205
+      },
+      "union_ms": {
+       "vector": 187.1685305,
+       "tensor": 144.1329425,
+       "gpsimd": 61.2069605,
+       "scalar": 17.707539,
+       "sync": 10.293185
+      }
+     },
+     "attention_detail": {
+      "attn": {
+       "other": {
+        "vector": 2.0714405,
+        "hbm_dma": 51.213229,
+        "tensor": 8.6760575,
+        "gpsimd": 1.93293,
+        "scalar": 0.276711,
+        "sync": 8.232289
+       },
+       "mask_softmax": {
+        "gpsimd": 1.7278355,
+        "vector": 169.402796,
+        "scalar": 5.356563
+       },
+       "qk_matmul": {
+        "tensor": 44.986327
+       },
+       "pv_matmul": {
+        "tensor": 80.4051695,
+        "vector": 3.23888
+       }
+      },
+      "": {
+       "other": {
+        "gpsimd": 0.000276,
+        "sync": 7.8e-05,
+        "hbm_dma": 0.001424
+       },
+       "qk_matmul": {
+        "tensor": 0.0017875
+       },
+       "mask_softmax": {
+        "vector": 0.0027105
+       },
+       "pv_matmul": {
+        "tensor": 0.0034535
+       }
+      }
+     },
+     "memory_bytes": {
+      "hbm_read": 14735524088,
+      "hbm_write": 9216014432,
+      "sbuf_read": 395678047840,
+      "sbuf_write": 260091064088,
+      "psum_read": 126403155160,
+      "psum_write": 272263037496,
+      "spill_save": 6828067024,
+      "spill_reload": 9757966208,
+      "psum_to_sbuf": 124638643672
+     },
+     "psum_readout_copy_ms": 12.6111645,
+     "psum_readout_fused_ms": 113.7225275,
+     "psum_readout_copy_ms_by_engine": {
+      "scalar": 5.360537,
+      "vector": 8.494719
+     },
+     "psum_readout_fused_ms_by_engine": {
+      "vector": 113.2618985,
+      "scalar": 0.4890155
+     },
+     "mfu": 0.45265567211824453,
+     "mbu": 0.09162802607304571,
+     "throttle": {
+      "avg_util_limit": 0.8319905653371691,
+      "limited_time_share": 0.33573291538536265
+     },
+     "other_share": {
+      "vector": 0.0,
+      "hbm_dma": 0.0,
+      "tensor": 0.0,
+      "scalar": 0.0,
+      "gpsimd": 0.0,
+      "sync": 0.0
+     },
+     "unattributed_share": {
+      "vector": 0.03045473768893003,
+      "tensor": 0.1930261432080317,
+      "gpsimd": 0.33861949144219533,
+      "scalar": 0.3405926352310099,
+      "sync": 0.0037922163774337203,
+      "hbm_dma": 0.06995469300793054
+     },
+     "warnings": [
+      "Notifications were dropped from buffer types EVENT. This can cause corresponding data to be incorrect. To avoid dropped notifications, increase the affected buffer size by setting NEURON_RT_PROFILE_BUF_<type>_MB (e.g. NEURON_RT_PROFILE_BUF_EVENT_MB). See https://awsdocs-neuron.readthedocs-hosted.com/en/latest/neuron-runtime/explore/device-memory.html#profile-buffers for details.",
+      "Missing additional dynamic DMA metadata, reported DMA values may be inaccurate. To enable more accurate DMA data, re-capture with --enable-dge-notifs flag or set NEURON_RT_ENABLE_DGE_NOTIFICATIONS=1 before running. Note: DGE notifications are disabled by default as they can cause execution timeouts on some models.",
+      "Current NEFF is missing compiler metrics. Please re-compile using latest version of the compiler"
+     ],
+     "dge_notifs": false,
+     "unattributed_by_source": {
+      "(none)": {
+       "vector": 1.458113,
+       "tensor": 12.769632,
+       "gpsimd": 0.019536,
+       "scalar": 3.5195205,
+       "sync": 0.0298325,
+       "hbm_dma": 2.7222065
+      },
+      "embeddings.py:apply_rotary_emb": {
+       "vector": 1.392621,
+       "gpsimd": 0.002907,
+       "hbm_dma": 0.067888,
+       "tensor": 1.367618,
+       "scalar": 0.653175
+      },
+      "transpose.py:_copy_with_engine": {
+       "scalar": 0.1419135
+      },
+      "transpose.py:_dve_transpose_small_i_impl": {
+       "hbm_dma": 0.3649825,
+       "sync": 0.00043
+      },
+      "linear.py:ColumnParallelLinear.forward": {
+       "hbm_dma": 0.006231,
+       "tensor": 13.644267,
+       "vector": 0.723141,
+       "scalar": 0.470445,
+       "sync": 0.000192
+      },
+      "normalization.py:RMSNorm.forward": {
+       "hbm_dma": 0.060922,
+       "scalar": 0.977939,
+       "tensor": 1.964379,
+       "gpsimd": 1.787433,
+       "vector": 0.914104
+      },
+      "attention.py:_flash_attention_bounded": {
+       "scalar": 0.1980405,
+       "hbm_dma": 0.383113
+      },
+      "modeling_hunyuan_video.py:dual_stream_attention": {
+       "scalar": 0.000581,
+       "vector": 0.0001305,
+       "hbm_dma": 0.0004365
+      },
+      "modeling_hunyuan_video.py:HunyuanVideoSingleTransformerBlock.forward": {
+       "hbm_dma": 0.46023,
+       "vector": 1.426518,
+       "sync": 0.00089,
+       "tensor": 0.0016715,
+       "scalar": 0.000604
+      },
+      "functional.py:pad": {
+       "vector": 0.0007085,
+       "scalar": 0.003088
+      },
+      "modeling_hunyuan_video.py:_keypad_bounds_from_mask": {
+       "vector": 0.002182,
+       "tensor": 0.000786,
+       "scalar": 0.0006095,
+       "gpsimd": 0.090837
+      },
+      "_functional_collectives.py:all_reduce": {
+       "gpsimd": 0.0008985
+      }
+     },
+     "bottleneck": {
+      "engine_class": "vector",
+      "share": 0.8434765953986665,
+      "mfu": 0.45265567211824453
+     },
+     "attention_share": 0.7785668439260366,
+     "addressable_attention_share": 0.7785547654242391,
+     "cross_attention_share": 0.0,
+     "rope_share": 0.0,
+     "rope_engine": null
     }
    ],
    "blocks_ms": 17883.21097,
    "non_block_ms": 0.0,
    "host_gap_ms": 0.106395,
    "outside_blocks_ms": 84.38902999999846,
-   "bottleneck": null,
-   "attention_share": null,
-   "addressable_attention_share": null,
-   "cross_attention_share": null,
-   "rope_share": null,
-   "rope_engine": null
+   "bottleneck": {
+    "engine_class": "vector",
+    "share": 0.6384069984641468,
+    "mfu": 0.33824090327724454
+   },
+   "attention_share": 0.5797961108665555,
+   "addressable_attention_share": 0.5797809778133334,
+   "cross_attention_share": 0.0,
+   "rope_share": 0.0039820335480777085,
+   "rope_engine": "vector"
   },
   {
    "key": "hv15_official",
