@@ -360,3 +360,113 @@ bit-identical to the unpruned kernel's.
 Outputs: `/mnt/nvme/difflet-mxattn/probe/3b/` (`pv/`, `pv_peak/`, `calls20/`, `calls40/`, `cap/`,
 `membership/`, `identity/`, `prune_off/`, `prune_pv/`, `g1.json`, `runs.log` per directory with
 `uptime` and `fuser` at each run's start and end).
+
+## 9. attention_cte bf16 with the exp on ScalarE (`allow_vector_exp=False`)
+
+Plan `docs/plans/2026-11-13-mxfp8-attention.md`, Task 4-pre (rulings BR18, BR19; 2026-11-14). At
+wan_81f, shipped attention_cte is VectorE-bound (section 8: VectorE busy 62.0 of 63.5 ms, mostly the
+MM1 PSUM evict and `exponential`) while ScalarE is nearly idle (1.6 ms). This section measures
+nkilib's own switch for that, with no kernel edit.
+
+**What the knob does** (`nkilib/core/attention/attention_cte.py` in
+`/opt/aws_neuronx_venv_torch_neuronx_2_14_0/lib/python3.12/site-packages/`):
+
+- `allow_vector_exp` (`:238`, docstring `:339`, default True) is one compile-time switch for the
+  whole call. With it True on trn3 B1 (`is_trn3_b1()`), `:1361-1365` allocates
+  `mm1_running_max_pos` (the un-negated row max that the VectorE `nisa.exponential` subtracts).
+  With it False the buffer is never allocated.
+- `_exp_impl` picks the engine per Q group (`:3323`): VectorE `nisa.exponential` when that buffer
+  exists, unless some exp tile of the group has an odd element count (`:3353-3356`; the Vector and
+  Scalar accumulators cannot be mixed within one chain). Otherwise it uses ScalarE
+  `nisa.activation(op=exp, bias=-max, reduce add)` (`:3389`). So False puts the exp of every Q
+  group on ScalarE; the row sum, P and everything after are the same.
+- It does not move the MM1 evict (scale + row max, `TENSOR_SCALAR_CACHE_REDUCE`). That choice is
+  hard-coded `use_scalar_row_max = False` (`:4075`), and its comment says `activate2` costs far more
+  per element than `tensor_scalar_reduce`. The ScalarE placement code (`_row_max_on_scalar` `:3949`,
+  `_emit_row_max_evict` `:3962`) is still there but switched off. It is not an argument, and
+  nothing else in attention_cte's signature moves work between engines. It is not tried here.
+
+**How it is called.** `scripts/mx_attention/probe.py --impl cte --cte-no-vector-exp`: the region of
+section 7 (`ops_impl.attention.attention` as the models call it), with only the kernel call
+changed. torch-neuronx's SDPA wrapper (`scaled_dot_product_attention_kernel` ->
+`_compute_attention_nki`) does not forward `allow_vector_exp`. So on the unbounded path the probe
+calls the same `wrapped_flash_fwd[(lnc,)]` directly, with `_compute_attention_nki`'s arguments
+(`tp_q`, `tp_k`, `scale`, `causal_mask=False`, `cache_softmax=False`; the unit test compares them
+with `_compute_attention_nki`'s own call) plus the knob, and does the `[B, H] -> [B*H]` reshape
+outside the custom op. On the bounded path it uses `_load_flash_bounded_op`'s call plus the knob;
+the fp32 q pre-scale, padding to 128 and `_head_chunk` are unchanged. Each new NEFF has a ScalarE
+instruction stream that the shipped one lacks (flux: 76 KB ScalarE / 166 KB VectorE, against
+none / 214 KB), and its outputs are not bit-identical to shipped, so the trace cache did not serve
+the shipped kernel.
+
+**Timing.** Section 8's method: 3 processes, median and (max - min) / median, flux_1024 and
+qwen_1024 at 40 calls per process, the rest at 20. Per shape, the rebalanced arm and then shipped
+cte (`--impl cte`) ran on the same device and CPU set in the same session, with `fuser` idle before
+every process. Rule: faster = ratio below 1 - J, with J = max(2%, shipped spread). Accuracy:
+rel L2 against fp32 attention per head (section 7).
+
+| shape | device (CPUs) | shipped ms (spread) | rebalanced ms (spread) | ratio | J | faster | rel L2 shipped / rebalanced (max head) |
+|---|---|---|---|---|---|---|---|
+| `flux_1024` | 4 (72-79,168-175) | 0.9155 (1.16%) | 0.8216 (0.80%) | 0.897 | 2% | **yes** | 2.307e-3 / 2.307e-3 (2.316e-3 / 2.316e-3) |
+| `qwen_1024` | 5 (80-87,176-183) | 1.1743 (0.24%) | 1.0858 (0.25%) | 0.925 | 2% | **yes** | 2.880e-3 / 2.880e-3 (2.949e-3 / 2.950e-3) |
+| `ltx2_video` | 7 (88-95,184-191) | 2.0604 (0.90%) | 1.7652 (0.95%) | 0.857 | 2% | **yes** | 2.307e-3 / 2.306e-3 (2.327e-3 / 2.326e-3) |
+| `wan_81f` | 1 (48-55,144-151) | 63.72 (0.54%) | 51.97 (0.04%) | 0.816 | 2% | **yes** | 3.106e-3 / 3.106e-3 (3.214e-3 / 3.214e-3) |
+| `hv15_121f` | 2 (56-63,152-159) | 143.63 (0.11%) | 113.03 (0.01%) | 0.787 | 2% | **yes** | 4.183e-3 / 4.183e-3 (4.212e-3 / 4.211e-3) |
+| `hv1_L` | 3 (64-71,160-167) | 183.46 (0.01%) | 144.68 (0.01%) | 0.789 | 2% | **yes** | 4.509e-3 / 4.509e-3 (4.623e-3 / 4.623e-3) |
+
+At 40 calls the small rows still carry section 8's fixed ~1 ms per-measurement overhead, which
+pulls their ratios toward 1. The captured spans below (kernel only) give flux 0.883.
+
+**Engine split**, one call. The rebalanced NEFFs were captured with 3b's `capture.sh` on the
+devices and CPUs of section 8's shipped captures (wan: device 11, CPUs 24-31,120-127; flux:
+device 12, 32-39,128-135). Busy = union of instruction intervals per physical core, over the two
+cores (3b's `engines.py`). DMA instr = the `DMA_DIRECT2D` rows; the DMA queues come from
+`DmaPacketAggregated` (`qSyncSpillReload0` carries the bf16 P transposes, in transpose mode).
+
+| shape | arm | span ms | TensorE | VectorE | ScalarE | GpSimd | DMA instr | DMA qSyncSpillReload0 | qGpSimdDynamic | qSyncIO0 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| flux | shipped | 0.893 | 0.587 | 0.793 | 0.000 | 0.029 | 0.169 | 0.544 | 0.099 | 0.027 |
+| flux | rebalanced | 0.788 | 0.528 | 0.576 | 0.521 | 0.027 | 0.151 | 0.564 | 0.124 | 0.028 |
+| wan | shipped | 63.523 | 44.234 | 61.996 | 1.632 | 5.562 | 16.248 | 43.698 | 6.473 | 0.779 |
+| wan | rebalanced | 51.900 | 45.259 | 42.621 | 39.565 | 1.290 | 7.193 | 43.841 | 6.394 | 0.801 |
+
+Per phase, ms (instructions). Phases come from `nki_source_location` (3b's `phases.py`); the
+shipped flux NEFF has no source locations, so its rows are by opcode, with MM1 / MM2 matmuls told
+apart by free size 512 / 128:
+
+| row | flux shipped | flux rebalanced | wan shipped | wan rebalanced |
+|---|---|---|---|---|
+| MM1 evict, VectorE `TENSOR_SCALAR_CACHE_REDUCE` | 0.455 (1,944) | 0.516 (1,944) | 37.64 (163,840) | 39.43 (163,790) |
+| exp, VectorE `EXPONENTIAL` | 0.289 (1,944) | - | 20.32 (163,824) | - |
+| exp, ScalarE `ACTIVATE` | - | 0.517 (1,944) | - | 38.58 (163,760) |
+| MM1, TensorE `MATMUL` | 0.334 (1,944) | 0.333 (1,944) | 29.07 (163,840) | 26.91 (163,791) |
+| MM2, TensorE `MATMUL` | 0.328 (7,772) | 0.348 (7,748) | 29.53 (655,276) | 28.73 (655,021) |
+| TensorE `LDWEIGHTS` (all) | 0.281 | 0.300 | 25.69 | 23.61 |
+| P transposes, DMA `qSyncSpillReload0` | 0.544 | 0.564 | 43.70 | 43.84 |
+
+Which engine binds. Shipped wan is VectorE-bound (busy 97.6% of the span). Rebalanced wan has no
+saturated engine: TensorE 87% of the span, the P-transpose DMA queue 84%, VectorE 82%, ScalarE 76%.
+On a 50 ns grid, every engine is the only busy one for at most 0.40 ms (shipped: VectorE alone
+1.11 ms). TensorE is now the busiest engine, with the DMA transposes 3 points of the span behind it
+and VectorE 5 points behind. At flux, rebalanced, VectorE (73%), the DMA queue (72%), TensorE (67%) and ScalarE
+(66%) are all close; VectorE is the busiest only by a hair, and ~0.2 ms of the span is fill and
+drain. ScalarE's `ACTIVATE` exp costs 1.9x VectorE's `EXPONENTIAL` per instruction (38.6 against
+20.3 ms at wan). The knob gains only because ScalarE was idle. The MM1 evict stays on VectorE and
+gets 5-13% slower once ScalarE runs beside it.
+
+**Decision (ruling BR19).** attention_cte with the exp on ScalarE is faster than shipped
+attention_cte on all six shapes, by more than J: by 7.5-14% at the short shapes (flux_1024,
+qwen_1024, ltx2_video) and by 18-21% at the long ones (wan_81f, hv15_121f, hv1_L). Accuracy is
+unchanged. So on every shape, the
+"bf16" baseline that MXFP8 must beat in G2/G3 is this rebalanced kernel (rebalanced medians above,
+J = 2%), and the bf16 speedup itself is a separate finding. Shipped Difflet does not use it yet:
+the unbounded path would need the direct kernel call above, because torch-neuronx's SDPA wrapper
+cannot pass the knob. Note that the fork (`mx_attention_kernel.py`) refuses `allow_vector_exp`
+(pruned in Task 3 Step 6) and always runs the VectorE exp on trn3 B1, so a fork variant compared
+against this baseline still carries shipped's VectorE bottleneck.
+
+Outputs: `/mnt/nvme/difflet-mxattn/probe/rebalance/` (`scalar_exp/` and `shipped/`: per shape the
+probe JSON, `out.pt`, per-process `run<i>.{json,log}` and `runs.log` with `uptime` and `fuser` at
+each run's start and end; `cap/` captures with `engines.json`, `phases.json`, `dmaq.json`,
+`*.overlap.json`; `table.json`; the scratch tools `queue.sh`, `table.py`, `dmaq.py`,
+`overlap.py`, `neffshape.py`).

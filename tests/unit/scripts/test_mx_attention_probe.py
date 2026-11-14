@@ -36,13 +36,14 @@ def test_the_shape_table_has_the_seven_rows():
 
 @pytest.mark.parametrize("bad", [["--shape", "sd3_1024", "--impl", "cte"],
                                  ["--shape", "wan_81f", "--impl", "sdpa"],
-                                 ["--shape", "wan_81f", "--impl", "cte", "--pv-mx"]])
+                                 ["--shape", "wan_81f", "--impl", "cte", "--pv-mx"],
+                                 ["--shape", "wan_81f", "--impl", "fork", "--cte-no-vector-exp"]])
 def test_the_cli_rejects_what_it_cannot_run(bad, tmp_path, capsys):
     with pytest.raises(SystemExit) as exc:
         probe.main([*bad, "--out", str(tmp_path / "o.json")])
     assert exc.value.code == 2
     err = capsys.readouterr().err
-    assert "invalid choice" in err or "need --impl fork" in err
+    assert "invalid choice" in err or "need --impl fork" in err or "needs --impl cte" in err
 
 
 @pytest.mark.parametrize("core, rc", [("13", 1), ("4", 0), ("31", 2), ("4,5", None), ("", None)])
@@ -192,13 +193,15 @@ def test_the_peaked_case_doubles_q_and_k_exactly():
 
 def test_main_passes_peak_and_calls_to_the_workers(tmp_path, monkeypatch):
     """--peak reaches the workers' inputs and the host reference; --calls sets the calls per
-    process (ruling BR13: 20 vs 40 shows whether host dispatch is hidden)."""
+    process (ruling BR13: 20 vs 40 shows whether host dispatch is hidden); --cte-no-vector-exp
+    reaches the workers and the result."""
     monkeypatch.setattr(probe, "load_shapes", lambda: {"tiny_u": dict(TINY["tiny_u"])})
     row = {"name": "tiny_u", **TINY["tiny_u"]}
     q, k, v, bounds = probe.make_inputs(row, peak=2.0)
 
     def fake_worker(argv, log):
         assert argv[argv.index("--peak") + 1] == "2" and argv[argv.index("--calls") + 1] == "40"
+        assert "--cte-no-vector-exp" in argv
         if "--save-output" in argv:
             out = torch.stack([probe.reference(row, q, k, v, bounds, h) for h in range(row["bh"])])
             torch.save(out, probe.output_path(Path(argv[argv.index("--out") + 1])))
@@ -208,6 +211,41 @@ def test_main_passes_peak_and_calls_to_the_workers(tmp_path, monkeypatch):
     monkeypatch.setattr(probe, "run_worker", fake_worker)
     out = tmp_path / "p.json"
     assert probe.main(["--shape", "tiny_u", "--impl", "cte", "--peak", "2", "--calls", "40",
-                       "--runs", "1", "--out", str(out)]) == 0
+                       "--cte-no-vector-exp", "--runs", "1", "--out", str(out)]) == 0
     result = json.loads(out.read_text())
     assert result["calls"] == 40 and result["peak"] == 2.0 and result["rel_l2"] < 1e-6
+    assert result["cte_no_vector_exp"] is True
+
+
+def test_cte_no_vector_exp_calls_attention_cte_as_difflet_does_plus_the_knob(monkeypatch):
+    """Both paths of ops_impl.attention reach nkilib attention_cte with Difflet's arguments plus
+    allow_vector_exp=False: unbounded exactly as torch-neuronx's _compute_attention_nki calls it
+    (its SDPA wrapper cannot forward the knob), bounded as _load_flash_bounded_op does."""
+    hop = pytest.importorskip("torch_neuronx.nki_hop")
+    dec = pytest.importorskip("torch_neuronx.neuron_dynamo_backend.decompositions")
+    from difflet.backends.neuron.ops_impl import attention as attn
+    from difflet.backends.neuron.ops_impl.fp8_kernels import logical_cores
+
+    calls = []
+
+    class FakeKernel:  # wrap_nki(attention_cte)[grid](q, k, v, **kw)
+        def __getitem__(self, grid):
+            return lambda q, k, v, **kw: calls.append((grid, q.shape, kw)) or q + 1
+
+    monkeypatch.setattr(hop, "nki_op", lambda name, mutates_args: lambda f: f)
+    monkeypatch.setattr(dec, "wrapped_flash_fwd", FakeKernel())
+    for name in ("_FLASH_KERNEL", "_FLASH_BOUNDED_OP"):
+        monkeypatch.setattr(attn, name, getattr(attn, name))  # restored after the test
+    q = torch.zeros(1, 2, 640, 128)
+    dec._compute_attention_nki(q, q, q, False, 0.5, False)  # shipped unbounded call
+    probe.use_cte_no_vector_exp()
+    out = attn._FLASH_KERNEL(q, q, q, is_causal=False, scale=0.5, training=False)
+    assert out.shape == q.shape and bool((out == 1).all())
+    lo = torch.zeros(2, 640, 1, dtype=torch.int32)
+    attn._FLASH_BOUNDED_OP(q[0], q[0], q[0], lo, lo + 613, 1.0)
+    (g0, s0, shipped), (g1, s1, unbounded), (g2, s2, bounded) = calls
+    assert g0 == g1 == g2 == (logical_cores(),) and s0 == s1 == s2 == (2, 640, 128)
+    assert unbounded == {**shipped, "allow_vector_exp": False}
+    assert bounded.pop("bound_min") is lo and torch.equal(bounded.pop("bound_max"), lo + 613)
+    assert bounded == dict(tp_q=True, tp_k=True, scale=1.0, causal_mask=False,
+                           cache_softmax=False, allow_vector_exp=False)
