@@ -99,6 +99,7 @@ def test_example_inputs_are_the_static_shape():
     assert latents.shape == (1, 16, 16, 40, 64) and latents.dtype == torch.bfloat16
     assert text.shape == (1, 256, 4096) and pooled.shape == (1, 768)
     assert timestep.shape == guidance.shape == (1,)
+    assert timestep.dtype == torch.float32  # unrounded, as diffusers passes it
     assert torch.equal(guidance, torch.tensor([6000.0], dtype=torch.bfloat16))  # 6016 in bf16
     assert mask.dtype == torch.int64 and mask.shape == (1, 256) and int(mask.sum()) == 64
 

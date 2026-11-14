@@ -41,27 +41,18 @@ def resolve_serving_model(options: ServeOptions) -> ResolvedServingModel:
     # TPU only: every other backend keeps the path it had.
     if current_backend() == "tpu":
         entry.require_backend("tpu")
-    try:
-        metadata = _SERVING_METADATA[entry.name]
-    except KeyError as exc:
-        raise ValueError(f"model type {entry.name!r} is not enabled for serving") from exc
-    normalized = options.model_id.rstrip("/")
-    if normalized not in metadata.checkpoint_ids:
-        allowed = ", ".join(metadata.checkpoint_ids)
-        raise ValueError(
-            f"checkpoint {options.model_id!r} is not enabled for P0 serving; "
-            f"allowed for {entry.name}: {allowed}"
-        )
     from difflet.platforms import current_platform
 
     tp_degree = options.tp_degree
     platform = current_platform()
     on_gpu = platform.capabilities.flow == "gpu"
-    if on_gpu:
-        # The GPU flow's refusals are DiffletServingErrors, so `difflet serve` exits with the
-        # message.
-        from difflet.serving.errors import feature_not_supported
+    normalized = options.model_id.rstrip("/")
+    # The GPU flow's refusals are DiffletServingErrors, so `difflet serve` exits with the
+    # message.
+    from difflet.serving.errors import feature_not_supported
 
+    if on_gpu:
+        # A GPU-flow model's serving metadata comes from its GPU spec.
         metadata = _gpu_serving_metadata(entry.name, options.model_id, platform)
         if normalized not in metadata.checkpoint_ids:
             allowed = ", ".join(metadata.checkpoint_ids)
@@ -79,11 +70,32 @@ def resolve_serving_model(options: ServeOptions) -> ResolvedServingModel:
                 f"serving; on the {platform.display_name} backend TeaCache is a `difflet run` "
                 "option (Qwen-Image's fixed cadence) and not served — drop the flag"
             )
+    else:
+        try:
+            metadata = _SERVING_METADATA[entry.name]
+        except KeyError as exc:
+            # A model served only on GPUs (HunyuanVideo 1.5) is refused here, not with a
+            # traceback.
+            raise feature_not_supported(
+                f"model type {entry.name!r} is not enabled for serving on the "
+                f"{platform.display_name} backend"
+            ) from exc
+        if normalized not in metadata.checkpoint_ids:
+            allowed = ", ".join(metadata.checkpoint_ids)
+            raise ValueError(
+                f"checkpoint {options.model_id!r} is not enabled for P0 serving; "
+                f"allowed for {entry.name}: {allowed}"
+            )
     _refuse_unsupported_replicas(int(options.replicas), platform)
+    cfg_parallel = options.cfg_parallel
     if on_gpu and tp_degree is None:
         # The registry default (tp=4) is a Trainium topology; the GPU CLI uses
         # `args.tp_degree or 1`.
         tp_degree = platform.default_tp_degree()
+    if on_gpu and cfg_parallel is None:
+        # Likewise a registry CFG-parallel layout is Trainium's; `--cfg-parallel` is opt-in on
+        # the GPU CLI, so it defaults off here too.
+        cfg_parallel = False
     profile = build_serving_profile(
         model_id=options.model_id,
         model_type=metadata.model_type,
@@ -97,7 +109,7 @@ def resolve_serving_model(options: ServeOptions) -> ResolvedServingModel:
         tp_degree=tp_degree,
         cp_degree=options.cp_degree,
         cp_mode=options.cp_mode,
-        cfg_parallel=options.cfg_parallel,
+        cfg_parallel=cfg_parallel,
         sp_enabled=options.sp_enabled,
         height=options.height,
         width=options.width,

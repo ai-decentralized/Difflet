@@ -26,6 +26,7 @@ SERVE_VALID_MODELS = {
     "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
     "Wan-AI/Wan2.1-T2V-14B-Diffusers",
     "hunyuanvideo-community/HunyuanVideo",
+    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
     "Qwen/Qwen-Image",
     "Lightricks/LTX-2",
     "MiniMaxAI/MiniMax-H3",

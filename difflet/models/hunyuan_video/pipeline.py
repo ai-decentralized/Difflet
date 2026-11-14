@@ -233,11 +233,11 @@ class HunyuanVideoOrchestrator:
         prev_mod_handle: torch.Tensor | None = None
         for step_index, timestep in enumerate(timesteps):
             model_dtype = _component_dtype(self.transformer, self.dtype)
-            timestep_batch = _batch_timestep(
+            timestep_batch = _batch_timestep(  # the DiT's own timestep dtype, if it declares one
                 timestep,
                 batch_size=latents.shape[0],
                 device=latents.device,
-                dtype=model_dtype,
+                dtype=getattr(self.transformer, "timestep_dtype", model_dtype),
             )
             model_bundle = HunyuanVideoDiTInputBundle(
                 hidden_states=latents.to(dtype=model_dtype),

@@ -45,6 +45,14 @@ _ATTENTION_PATH = os.environ.get(ATTENTION_PATH_ENV, "auto").strip().lower()
 if _ATTENTION_PATH not in ("auto", "sdpa"):
     raise ValueError(f"{ATTENTION_PATH_ENV} must be 'auto' or 'sdpa', got {_ATTENTION_PATH!r}")
 
+#: ``DIFFLET_NEURON_RING_KERNEL=0`` keeps ring CP on the permute loop (the A/B switch behind the
+#: ring-kernel measurement). Read once at import. Default ``1``: compiled, eligible ring
+#: attention runs the NKI Library's ring kernel (``_ring_kernel_op``).
+RING_KERNEL_ENV = "DIFFLET_NEURON_RING_KERNEL"
+_RING_KERNEL = os.environ.get(RING_KERNEL_ENV, "1").strip() != "0"
+#: The longest per-rank sequence the NKI Library documents its ring kernel as tested at.
+_RING_KERNEL_MAX_SEQ = 16384
+
 # Kernel limits stated by torch-neuronx's SDPA gate, other than its 512-multiple lengths.
 _KERNEL_DTYPES = (torch.bfloat16, torch.float16)
 _KERNEL_MAX_HEAD_DIM = 128
@@ -356,9 +364,70 @@ def ring_attention(q, k, v, *, scale: float, causal: bool = False):
     cp = get_axis_size("cp")
     if cp == 1:
         return _dense_bhsd(q, k, v, scale=scale)
+    if _RING_KERNEL_OP is not None and _ring_kernel_eligible(q, k, v):
+        return _RING_KERNEL_OP(q, k, v, scale).reshape(q.shape)
     out, _ = _ring_partials(q, k, v, scale=scale, cp=cp,
                             group=collectives.get_cp_group(), rank=get_axis_rank("cp"))
     return out.to(q.dtype)
+
+
+def _ring_kernel_eligible(q, k, v) -> bool:
+    """Whether the NKI Library ring kernel takes this call: compiled (the kernel issues its own
+    collective permutes), plain multi-head self-attention ``[B, H, S/cp, d]`` with equal Q, K and
+    V shapes, a kernel dtype, ``d <= 128`` and a per-rank length the kernel is documented at."""
+    return (_RING_KERNEL and torch.compiler.is_compiling() and q.dim() == 4
+            and q.shape == k.shape == v.shape and q.dtype in _KERNEL_DTYPES
+            and q.shape[-1] <= _KERNEL_MAX_HEAD_DIM and q.shape[2] <= _RING_KERNEL_MAX_SEQ)
+
+
+_RING_KERNEL_OPS: dict = {}
+#: The ring kernel op for the current mesh's CP rings, set by ``prepare_ring_kernel``.
+_RING_KERNEL_OP = None
+
+
+def prepare_ring_kernel(spec) -> None:
+    """Register the ring kernel op for ``spec``'s CP rings, eagerly: Dynamo cannot trace the op's
+    registration, so it happens at mesh initialization, before any compilation, and
+    ``ring_attention`` only reads the result. ``None`` without CP, when switched off, or when
+    the kernel is unavailable."""
+    global _RING_KERNEL_OP
+    if not _RING_KERNEL or spec.axis_size("cp") == 1:
+        _RING_KERNEL_OP = None
+        return
+    _RING_KERNEL_OP = _ring_kernel_op(tuple(tuple(g) for g in spec.axis_groups("cp")))
+
+
+def _ring_kernel_op(rings: tuple):
+    """``(q, k, v, scale) -> out`` on ``[B, H, S/cp, d]``: the NKI Library's
+    ``ring_attention_spmd_fwd``, which overlaps each step's K/V ``collective_permute`` with the
+    previous step's softmax correction, so the whole ring is one kernel. ``rings`` are the CP
+    groups in global ranks (its ``replica_groups``); a custom-op schema cannot carry them, so one
+    op is registered per ring set. ``None`` when the kernel or ``nki_op`` is unavailable."""
+    if rings in _RING_KERNEL_OPS:
+        return _RING_KERNEL_OPS[rings]
+    import hashlib
+
+    name = "ring_attention_" + hashlib.sha1(repr(rings).encode()).hexdigest()[:12]
+    try:
+        op = getattr(torch.ops.difflet_neuron, name)  # already registered (module reload)
+    except (AttributeError, RuntimeError):
+        try:
+            from nkilib.experimental.attention.ring_attention_fwd import ring_attention_spmd_fwd
+            from torch_neuronx.neuron_dynamo_backend.decompositions import get_logical_neuron_cores
+            from torch_neuronx.nki_hop import nki_op
+        except ImportError:
+            _RING_KERNEL_OPS[rings] = None
+            return None
+        num_workers = len(rings[0])
+
+        @nki_op(f"difflet_neuron::{name}", mutates_args={})
+        def op(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, scale: float) -> torch.Tensor:
+            lnc = int(get_logical_neuron_cores())  # this kernel takes the LNC, not a grid tuple
+            return ring_attention_spmd_fwd[lnc](q, k, v, replica_groups=rings,
+                                                num_workers=num_workers, softmax_scale=scale,
+                                                tp_q=True, tp_k=True)
+    _RING_KERNEL_OPS[rings] = op
+    return op
 
 
 def _ring_partials(q, k, v, *, scale: float, cp: int, group, rank: int, out=None, lse=None):
