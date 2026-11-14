@@ -78,6 +78,24 @@ def test_difflet_subset_passes():
     fork._check_difflet_subset(q=Q, tp_q=True, tp_k=True, causal_mask=False, refused={})
 
 
+def test_allow_vector_exp_is_accepted_and_defaults_to_the_scalar_exp(monkeypatch):
+    """Ruling BR20 (0): the fork takes attention_cte's ``allow_vector_exp`` again, False (exp on
+    ScalarE, the rebalanced bf16 baseline of BR19) by default at both entries, and
+    ``mx_attention_fwd`` passes it through."""
+    import inspect
+
+    assert "allow_vector_exp" not in fork._REFUSED
+    assert "``allow_vector_exp``" not in fork._check_difflet_subset.__doc__
+    for entry in (fork.mx_attention_fwd.func, fork._attention_cte):
+        assert inspect.signature(entry).parameters["allow_vector_exp"].default is False
+    assert fork.AttnConfig().allow_vector_exp is False
+    seen = []
+    monkeypatch.setattr(fork, "_attention_cte", lambda **kw: seen.append(kw["allow_vector_exp"]))
+    fork.mx_attention_fwd.func(Q, K, V, scale=1.0, pv_mx=False, qk_mx=False)
+    fork.mx_attention_fwd.func(Q, K, V, scale=1.0, pv_mx=False, qk_mx=False, allow_vector_exp=True)
+    assert seen == [False, True]
+
+
 @pytest.mark.parametrize("pv_mx", [False, True])
 def test_qk_mx_is_refused_until_mm1_lands(pv_mx):
     with pytest.raises(AssertionError, match="qk_mx: MM1 on nc_matmul_mx"):
@@ -173,18 +191,36 @@ def test_pv_mx_simulated_matches_the_mirror(case):
 
 @pytest.mark.parametrize("case, lnc", [("partial", 1), ("bounded", 1), ("sections", 1),
                                        ("lnc2_odd", 2), ("lnc2_odd_bounded", 2)])
-def test_both_flags_off_simulates_bit_identical_to_attention_cte(case, lnc):
+@pytest.mark.parametrize("vector_exp", [False, True])
+def test_both_flags_off_simulates_bit_identical_to_attention_cte(case, lnc, vector_exp, monkeypatch):
     """The pv_mx edits and the prune leave the flags-off path alone: bit for bit nkilib's
-    attention_cte, the LNC2 split of an odd batch (HV1's 3-head calls) included."""
+    attention_cte at the same ``allow_vector_exp`` (the fork's default False = ScalarE exp, the
+    rebalanced cte of ruling BR19; True = shipped attention_cte's VectorE exp), the LNC2 split of
+    an odd batch (HV1's 3-head calls) included. The simulator computes both exps to the same bits,
+    so the engine is checked by the exp instructions issued."""
+    import nki.isa as nisa
     import torch
     from nkilib.core.attention.attention_cte import attention_cte
+
+    issued = {"exponential": 0, "activation": 0}
+    for name in issued:
+        def counted(*a, _name=name, _isa=getattr(nisa, name), **kw):
+            issued[_name] += 1
+            return _isa(*a, **kw)
+        monkeypatch.setattr(nisa, name, counted)
+
+    def run(kernel, **kw):
+        issued.update(exponential=0, activation=0)
+        return _simulate(kernel, q, k, v, bounds, lnc, scale=scale, **kw), dict(issued)
 
     bh, s_q, s_k, valid = {**SIM_SHAPES, "lnc2_odd": (3, 1152, 1152, None),
                            "lnc2_odd_bounded": (3, 1152, 1152, 1001)}[case]
     q, k, v, bounds = _inputs(bh, s_q, s_k, valid)
     scale = 1.0 if bounds else 128 ** -0.5
-    out = _simulate(fork.mx_attention_fwd, q, k, v, bounds, lnc, scale=scale, pv_mx=False,
-                    qk_mx=False)
-    cte = _simulate(attention_cte, q, k, v, bounds, lnc, scale=scale, causal_mask=False,
-                    tp_q=True, tp_k=True)
+    fork_exp = {"allow_vector_exp": True} if vector_exp else {}  # the fork's default is False
+    out, fork_issued = run(fork.mx_attention_fwd, pv_mx=False, qk_mx=False, **fork_exp)
+    cte, cte_issued = run(attention_cte, causal_mask=False, tp_q=True, tp_k=True,
+                          allow_vector_exp=vector_exp)
     assert torch.equal(out, cte)
+    assert fork_issued == cte_issued
+    assert (fork_issued["exponential"] > 0) == vector_exp, fork_issued
