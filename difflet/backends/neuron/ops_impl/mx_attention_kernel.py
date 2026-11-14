@@ -477,10 +477,10 @@ def mx_attention_fwd(q, k, v, *, scale, bound_min=None, bound_max=None, pv_mx: b
     ``[batch, seqlen, d]`` bf16), optionally key-bounded, as ``ops_impl/attention.py`` calls
     attention_cte on both paths. ``pv_mx`` / ``qk_mx``: MM2 / MM1 on ``nc_matmul_mx``; both False
     is attention_cte unchanged."""
-    kernel_assert(not (pv_mx or qk_mx), "pv_mx / qk_mx: MM2 / MM1 on nc_matmul_mx are not "
-                  "implemented yet (MXFP8 attention plan, Tasks 3-4)")
+    kernel_assert(not qk_mx, "qk_mx: MM1 on nc_matmul_mx is not implemented yet (MXFP8 attention "
+                  "plan, Task 4)")
     return _attention_cte(q=q, k=k, v=v, scale=scale, causal_mask=False, tp_q=True, tp_k=True,
-                          bound_min=bound_min, bound_max=bound_max)
+                          bound_min=bound_min, bound_max=bound_max, pv_mx=pv_mx)
 
 
 if _psum_num_banks() == 7:
@@ -491,8 +491,8 @@ if _psum_num_banks() == 7:
 # indices, then block 1's, ...), for the CPU reference. Both operands of each matmul reach
 # ``nc_matmul_mx`` in the group-of-4 layout (nkilib's ``swizzle_quantize_mx``: partition g, byte j
 # of the x4 operand holds contraction index 4g + j), and ``quantize_mx`` blocks 8 partitions x 4
-# bytes, so block b is indices 32b..32b+31. Locked on one tile by
-# scripts/mx_attention/membership.py.
+# bytes, so block b is indices 32b..32b+31. Locked on the device by
+# scripts/mx_attention/membership.py (rerun on MM2's own loaders, ruling BR16).
 def qk_perm(d: int):
     """MM1's blocks along the head dim (Q and K)."""
     import torch
@@ -505,6 +505,54 @@ def pv_perm(tile: int):
     import torch
 
     return torch.arange(tile)
+
+
+# Why MM2's loaders take the routes below (neuronx-cc 2.28, on the device, 3b micro-probes): a DMA
+# transpose cannot write the group-of-4 order (its output steps must be 32-byte aligned,
+# NCC_IBIR155, and its transposing dimensions contiguous, BIR verifier checkDMATranspose), and
+# ``quantize_mx`` takes no strided source (NCC_IBIR164), so each group of 4 must sit contiguous in
+# SBUF before it is quantized.
+def _mx_load_v(v, data, scale, stage, packed, row_offset, num_keys):
+    """V's MM2 operand for one 512-key tile (``pv_mx``): rows ``[row_offset, row_offset +
+    num_keys)`` of the HBM ``v`` (flat ``[rows, d]``) -> ``data`` ``[128, d]`` float8_e4m3fn_x4 +
+    ``scale`` ``[128, d]`` uint8, partition g byte j = key 4g + j, keys at or past ``num_keys``
+    zero. One contiguous DMA puts four rows on each partition (``stage[g, j*d + n] = v[4g + j,
+    n]``), GpSimd regroups them (``packed[g, 4n + j]``), then ``quantize_mx``. Once per tile and
+    section, shared by every query group."""
+    d = data.shape[1]
+    full, rest = num_keys // 4, num_keys % 4
+    if num_keys < 4 * stage.shape[0]:
+        nisa.memset(stage, value=0.0, engine=nisa.gpsimd_engine)
+    if full > 0:
+        nisa.dma_copy(dst=stage.ap(pattern=[[4 * d, full], [1, 4 * d]], offset=0),
+                      src=v.ap(pattern=[[4 * d, full], [1, 4 * d]], offset=row_offset * d))
+    if rest > 0:
+        nisa.dma_copy(dst=stage.ap(pattern=[[4 * d, 1], [1, rest * d]], offset=full * 4 * d),
+                      src=v.ap(pattern=[[4 * d, 1], [1, rest * d]], offset=(row_offset + 4 * full) * d))
+    nisa.tensor_copy(dst=packed.ap(pattern=[[4 * d, 128], [4, d], [1, 4]], offset=0),
+                     src=stage.ap(pattern=[[4 * d, 128], [1, d], [d, 4]], offset=0),
+                     engine=nisa.gpsimd_engine)
+    nisa.quantize_mx(dst=data, src=packed, dst_scale=scale)
+
+
+def _mx_quantize_p(data, scale, psum, stage, src, src_offset, num_q, num_keys):
+    """P's MM2 operand for one 512-key tile (``pv_mx``): the bf16 exp tile ``src[:num_q,
+    src_offset : src_offset + 512]`` (queries on partitions) -> ``data`` ``[128, 128]``
+    float8_e4m3fn_x4 + ``scale`` ``[128, 128]`` uint8, partition g byte j = key 4g + j. Keys at or
+    past ``num_keys`` (never written by the exp) are zeroed first, so a partial tile is a 512-key
+    tile padded with zeros. nkilib's ``swizzle_quantize_mx`` path on explicit buffers: the tile
+    viewed as fp32 pairs, two stride-2 TensorE transposes into ``psum`` (``[128, 256]`` fp32), a
+    ScalarE copy to ``stage`` (``[128, 256]`` fp32), ``quantize_mx`` of it viewed as bf16."""
+    if num_keys < 512:
+        nisa.memset(src[:num_q, nl.ds(src_offset + num_keys, 512 - num_keys)], value=0.0,
+                    engine=nisa.gpsimd_engine)
+    src32 = src.view(nl.float32)
+    o = src_offset // 2
+    for h in range(2):
+        nisa.nc_transpose(dst=psum.slice(dim=1, start=h, end=2 * num_q, step=2),
+                          data=src32[:num_q, :].slice(dim=1, start=o + h, end=o + 256, step=2))
+    nisa.tensor_copy(dst=stage, src=psum, engine=nisa.scalar_engine)
+    nisa.quantize_mx(dst=data, src=stage.view(nl.bfloat16), dst_scale=scale)
 
 
 def _check_difflet_subset(q, tp_q, causal_mask, k_prior, v_prior, prior_used_len, sink,
@@ -577,6 +625,7 @@ def _attention_cte(
     kvp_k_threshold_sb=None,
     kvp_seg_block_offset_int: int = 0,
     allow_vector_exp: bool = True,
+    pv_mx: bool = False,
 ):
     """Internal attention implementation with full parameter set including SBUF I/O.
 
@@ -609,6 +658,7 @@ def _attention_cte(
       kvp_cp_offset_int: int: Compile-time Q global offset for tile_fully_visible check.
       kvp_k_threshold_sb: Optional SBUF tensor with pre-generated static K-position threshold pattern.
       kvp_seg_block_offset_int: int: Compile-time seg_block_offset for tile_fully_visible check.
+      pv_mx: bool: (Difflet) MM2 on nc_matmul_mx: P and V MX-quantized per 512-key tile.
     """
     _check_difflet_subset(q, tp_q, causal_mask, k_prior, v_prior, prior_used_len, sink, sliding_window,
                           cache_softmax, cp_offset, global_cp_deg, cp_strided_q_slicing, cp_striped_input,
@@ -1002,7 +1052,12 @@ def _attention_cte(
         kvp_seg_block_offset_int=kvp_seg_block_offset_int,
         kvp_k_threshold_sb=kvp_k_threshold_sb,
         allow_vector_exp=allow_vector_exp,
+        pv_mx=pv_mx,
     )
+    if pv_mx:
+        kernel_assert(not tp_out and d_v == _D_TILE_SZ and not use_sbuf_kv,
+                      f"pv_mx takes tp_out=False, d_v {_D_TILE_SZ} and HBM k/v, got {tp_out=}, {d_v=}")
+        kernel_assert(_psum_num_banks() == 8, "pv_mx transposes P through PSUM bank 7")
 
     # skip_output_normalization requires cache_softmax so the caller gets the raw sum
     # for normalization. Without cache_softmax, the sum is not returned and the caller
@@ -1220,6 +1275,7 @@ class AttnConfig(nl.NKIObject):
     kvp_k_threshold_sb: Any = None  # Pre-generated static k_threshold pattern in SBUF
     kvp_all_tiles_visible: bool = False  # Compile-time: all tiles in this segment are fully visible
     allow_vector_exp: bool = True
+    pv_mx: bool = False  # Difflet: MM2 on nc_matmul_mx, P and V MX-quantized per 512-key tile
 
 
 def _attention_cte_impl(
@@ -1488,17 +1544,20 @@ def _attention_cte_impl(
                 sbuf_addr,
                 load_offset_active=bufs.k_offset_sb_u32,
             )
-            sbuf_addr = _load_v_tile(
-                v_active,
-                v_prior,
-                bufs.v_sb,
-                batch_id_kv,
-                sp,
-                nl.bfloat16,
-                atp.num_v_tiles_per_section,
-                sbuf_addr,
-                load_offset_active=bufs.k_offset_sb_u32,
-            )
+            if ac.pv_mx:
+                _load_v_tile_mx(v_active, bufs, batch_id_kv, sp, atp)
+            else:
+                sbuf_addr = _load_v_tile(
+                    v_active,
+                    v_prior,
+                    bufs.v_sb,
+                    batch_id_kv,
+                    sp,
+                    nl.bfloat16,
+                    atp.num_v_tiles_per_section,
+                    sbuf_addr,
+                    load_offset_active=bufs.k_offset_sb_u32,
+                )
 
         # Start with Q load and actual compute
         if shard_seqlen_q_length <= 1:
@@ -1636,6 +1695,14 @@ class AttnInternalBuffers(nl.NKIObject):
     range_sel_ubs_prior = None  # upper bound for range_select for Prefix caching
     k_offset_sb_u32 = None  # used for dynamic load for only required k/v for CP+SWA
     k_threshold_sb = None  # static interleaved K-position threshold for masking
+
+    # MM2 on nc_matmul_mx (ac.pv_mx); v_sb then holds V's x4 data per 512-key tile
+    v_scale_sb = None  # V's MX scales per 512-key tile
+    v_stage = None  # V rows as loaded, four per partition
+    v_packed = None  # V regrouped into the group-of-4 layout, quantize_mx's source
+    p_mx = None  # P's x4 data per (Q group, large tile, 512-key tile); exp_tp_sb is its fp32 stage
+    p_scale = None  # P's MX scales, same indexing
+    p_psum = None  # two [128, 256] fp32 halves of PSUM bank 7 for P's transposes
 
     # Position bias
     position_bias_sb = None  # SBUF tile used to stage [sb_p, _K_TILE_SZ] bias slices before PSUM preload
@@ -1880,7 +1947,8 @@ def _compute_tile_parameters(
     # Tile counts per section
     atp.num_large_tiles_per_section = div_ceil(atp.section_len, _LARGE_TILE_SZ)
     atp.num_k_tiles_per_section = div_ceil(atp.section_len, _K_TILE_SZ)
-    atp.num_v_tiles_per_section = div_ceil(atp.section_len, _V_TILE_SZ)
+    # pv_mx: V is loaded and quantized per 512-key tile, MM2's contraction on nc_matmul_mx
+    atp.num_v_tiles_per_section = div_ceil(atp.section_len, _K_TILE_SZ if ac.pv_mx else _V_TILE_SZ)
 
     # K/V tile sizes for exp and transpose/MM2
     atp.exp_inst_elems = _EXP_TILE_SZ
@@ -2196,7 +2264,21 @@ def _allocate_attention_buffers(
             align_to=32,  # align for dma transpose
         )
 
-    if v_cache_sbuf is not None and len(v_cache_sbuf) > 0:
+    if ac.pv_mx:
+        v_tiles = atp.num_v_tiles_per_section
+        bufs.v_sb = allocator.alloc_sbuf_tensor(
+            shape=(atp.sb_p, ac.d_v), dtype=nl.float8_e4m3fn_x4, block_dim=[v_tiles], num_free_tiles=[v_tiles]
+        )
+        bufs.v_scale_sb = allocator.alloc_sbuf_tensor(
+            shape=(atp.sb_p, ac.d_v), dtype=nl.uint8, block_dim=[v_tiles], num_free_tiles=[v_tiles]
+        )
+        bufs.v_stage = allocator.alloc_sbuf_tensor(
+            shape=(atp.sb_p, 4 * ac.d_v), dtype=nl.bfloat16, block_dim=[v_tiles], num_free_tiles=[2]
+        )
+        bufs.v_packed = allocator.alloc_sbuf_tensor(
+            shape=(atp.sb_p, 4 * ac.d_v), dtype=nl.bfloat16, block_dim=[v_tiles], num_free_tiles=[2]
+        )
+    elif v_cache_sbuf is not None and len(v_cache_sbuf) > 0:
         bufs.v_sb = v_cache_sbuf
     else:
         if ac.tp_out:
@@ -2459,6 +2541,26 @@ def _allocate_attention_buffers(
         num_free_tiles=[2, atp.num_large_tiles_per_section, atp.num_tps_in_mm2_grp],
         align_to=32,  # align for dma transpose
     )
+
+    if ac.pv_mx:
+        # exp_tp_sb ([128, 512] bf16 = [128, 256] fp32) is P's stage between PSUM and quantize_mx
+        p_blocks = [atp.num_grps, atp.num_large_tiles_per_section, atp.num_tps_in_mm2_grp]
+        p_free = [2, atp.num_large_tiles_per_section, atp.num_tps_in_mm2_grp]
+        bufs.p_mx = allocator.alloc_sbuf_tensor(
+            shape=(atp.sb_p, atp.sb_p), dtype=nl.float8_e4m3fn_x4, block_dim=p_blocks, num_free_tiles=p_free
+        )
+        bufs.p_scale = allocator.alloc_sbuf_tensor(
+            shape=(atp.sb_p, atp.sb_p), dtype=nl.uint8, block_dim=p_blocks, num_free_tiles=p_free
+        )
+        bufs.p_psum = [
+            nl.ndarray(
+                (atp.sb_p, 2 * atp.sb_p),
+                dtype=nl.float32,
+                buffer=nl.psum,
+                address=(0, 7 * PSUM_BANK_SIZE + half * PSUM_BANK_SIZE // 2),
+            )
+            for half in range(2)
+        ]
 
     # mm2_psum allocation. MM2 uses banks 4.. (MM1 owns 0..3 above).
     #
@@ -3081,6 +3183,24 @@ def _load_v_tile(
     return local_allocator.get_current_address()
 
 
+def _load_v_tile_mx(v, bufs, batch_id, sp: SectionParams, atp: AttnTileParams):
+    """pv_mx: the section's V, quantized per 512-key tile on load (``_mx_load_v``); the last
+    tile's missing keys are zero."""
+    _, seqlen, _ = v.shape
+    for tile in range(atp.num_v_tiles_per_section):
+        start = sp.section_offset + tile * _K_TILE_SZ
+        if start < seqlen:
+            _mx_load_v(
+                v,
+                bufs.v_sb[tile],
+                bufs.v_scale_sb[tile],
+                bufs.v_stage[tile],
+                bufs.v_packed[tile],
+                row_offset=batch_id * seqlen + start,
+                num_keys=min(seqlen - start, _K_TILE_SZ),
+            )
+
+
 def _compute_section_offset_active(k_section_offset, is_prefix_caching, seqlen_k_prior_padded) -> tuple:
     """Compute active K offset and determine if section contains prefix data for proper masking."""
     section_contains_prefix = False
@@ -3468,6 +3588,19 @@ def _exp_impl(
                     reduce_res=exp_reduce_res,
                     bias=bufs.mm1_running_max[:num_p, grp_i],
                 )
+
+            if ac.pv_mx:  # Step 2 (pv_mx): P's MX operand for this 512-key tile
+                _mx_quantize_p(
+                    bufs.p_mx[grp_i][large_tile_idx][exp_tile_idx],
+                    bufs.p_scale[grp_i][large_tile_idx][exp_tile_idx],
+                    bufs.p_psum[exp_tile_idx % 2],
+                    bufs.exp_tp_sb[grp_i][large_tile_idx][exp_tile_idx].view(nl.float32),
+                    bufs.exp_sb[grp_i][large_tile_idx],
+                    src_offset=exp_tile_idx * atp.exp_inst_elems,
+                    num_q=num_p,
+                    num_keys=num_f,
+                )
+                continue
 
             # Step 2: Perform DMA transpose
             num_f_outer = num_f // atp.sb_p
@@ -4428,7 +4561,9 @@ def _pv_mm2_tile_selection(pv_grp, large_tile_idx, ac: AttnConfig, atp: AttnTile
     """
     q_seqlen_offset = pv_grp * atp.sb_p
     num_mm2_grps_in_large_tile = _LARGE_TILE_SZ // atp.mm2_grp_sz
-    num_mm2_per_grp = atp.mm2_grp_sz // _V_TILE_SZ
+    # pv_mx: one nc_matmul_mx contracts the whole 512-key group (128 partitions x 4 packed keys)
+    v_tile_sz = atp.mm2_grp_sz if ac.pv_mx else _V_TILE_SZ
+    num_mm2_per_grp = atp.mm2_grp_sz // v_tile_sz
     num_mm2_per_large_tile = num_mm2_per_grp * num_mm2_grps_in_large_tile
 
     is_prior_tile_first, seqlen_k_first, k_start_pos_first, _ = _get_kv_tile_apc(
@@ -4463,16 +4598,16 @@ def _pv_mm2_tile_selection(pv_grp, large_tile_idx, ac: AttnConfig, atp: AttnTile
 
         for mm2_i in range(num_mm2_per_grp):
             v_tile_idx = large_tile_idx * num_mm2_per_large_tile + mm2_grp_i * num_mm2_per_grp + mm2_i
-            k_start_pos = k_start_pos_512_tile + mm2_i * _V_TILE_SZ
+            k_start_pos = k_start_pos_512_tile + mm2_i * v_tile_sz
 
-            num_p = min(seqlen_k - k_start_pos, _V_TILE_SZ)
+            num_p = min(seqlen_k - k_start_pos, v_tile_sz)
             num_f = min(ac.seqlen_q - q_seqlen_offset, _Q_GRP_SZ)
 
             mm2_sel_mask = (
                 _has_any_compute_causal(pv_grp, k_start_pos, ac) if (atp.is_causal and not is_prior_tile) else True
             )
             if ac.use_swa and atp.is_causal and not is_prior_tile:
-                mm2_sel_mask = mm2_sel_mask and _has_any_compute_swa(pv_grp, k_start_pos, _V_TILE_SZ, ac)
+                mm2_sel_mask = mm2_sel_mask and _has_any_compute_swa(pv_grp, k_start_pos, v_tile_sz, ac)
 
             if mm2_sel_mask and v_tile_idx < atp.num_v_tiles_per_section and num_p > 0 and num_f > 0:
                 tiles.append(
@@ -4524,6 +4659,17 @@ def _pv_large_tile_impl(
     for d_tile in range(num_d_tiles_iter):
         # Step 1: Perform matmul and accumulate in PSUM for each K-seqlen group
         for tile in mm2_tiles:
+            if ac.pv_mx:
+                # One matmul per 512 keys, zero-padded past the last key (num_p is not needed).
+                # All 128 stationary columns: rows past num_f are never evicted.
+                nisa.nc_matmul_mx(
+                    dst=mm2_psum_tile[d_tile][:, : atp.d_tile_size_free_dim],
+                    stationary=bufs.p_mx[pv_grp][large_tile_idx][tile.mm2_grp_i],
+                    moving=bufs.v_sb[tile.v_tile_idx],
+                    stationary_scale=bufs.p_scale[pv_grp][large_tile_idx][tile.mm2_grp_i],
+                    moving_scale=bufs.v_scale_sb[tile.v_tile_idx],
+                )
+                continue
             exp_tp_sb_tile = bufs.exp_tp_sb[pv_grp][large_tile_idx][tile.mm2_grp_i]
 
             if tile.is_prior and bufs.v_sb_prior is not None:

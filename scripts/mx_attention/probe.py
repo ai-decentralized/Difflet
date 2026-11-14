@@ -3,6 +3,7 @@
 (MXFP8 attention plan, ``docs/plans/2026-11-13-mxfp8-attention.md``, Task 2).
 
 usage: probe.py --shape NAME --impl {cte,fork} [--qk-mx] [--pv-mx] --out FILE [--runs N]
+                [--calls N] [--peak F]
 
 ``--impl cte`` is Difflet's attention as the models call it today, ``ops_impl.attention.attention``
 in the ``tp_q``/``tp_k`` layout: nkilib's ``attention_cte`` in bf16, bounded rows through its
@@ -13,15 +14,17 @@ variant), scored against fp32 attention with both flags off and against the Task
 (``mx_attention_reference`` on the bf16 inputs, the kernel's block membership) otherwise.
 
 Time: the compiled region from bf16 q, k, v (and the int32 bounds) to the bf16 output, measured
-as evidence section 4c timed kernels: one warm call, then ``CALLS`` calls and one sync, in each of
-``--runs`` worker processes (a fresh runtime each). The JSON has every run's ms per call, their
+as evidence section 4c timed kernels: one warm call, then ``--calls`` (default 20) calls and one
+sync, in each of ``--runs`` worker processes (a fresh runtime each); 20 vs 40 calls shows whether
+the host's dispatch is hidden at the ~1 ms rows (ruling BR13). The JSON has every run's ms per call, their
 median and the spread (max - min) / median: the denominators of the plan's gates G1/G2.
 
 Accuracy: the first worker saves the device output (``<out>.out.pt``); the host evaluates the
 reference one head at a time (ruling BR8: a head of ``wan_81f`` is ~6 section-sized fp32
 temporaries, ~6.4 GB) and reports rel L2 and cosine (float64) per head and overall.
 
-Inputs: q, k, v ~ N(0, 1) in bf16 from seed 0, scale ``d ** -0.5``. A bounded row attends keys
+Inputs: q, k, v ~ N(0, 1) in bf16 from seed 0, scale ``d ** -0.5`` (the flat case: scores std ~1);
+``--peak F`` multiplies q and k by F (2: scores std ~4, the peaked case of ruling BR11). A bounded row attends keys
 ``[0, valid_k)`` from every query, the models' key-padding bounds; ``valid_k`` (shapes.json) is
 the image tokens plus half the text plus one, never a multiple of 32. attention_cte masks with
 range-select, never skipping a tile, so the bound values do not change its time.
@@ -62,10 +65,12 @@ def output_path(out: Path) -> Path:
     return out.with_suffix(".out.pt")
 
 
-def make_inputs(row: dict):
-    """bf16 q, k, v ``[bh, s, d]`` and, for a bounded row, the int32 bounds ``[bh, s, 1]``."""
+def make_inputs(row: dict, peak: float = 1.0):
+    """bf16 q, k, v ``[bh, s, d]`` (q and k times ``peak``) and, for a bounded row, the int32
+    bounds ``[bh, s, 1]``."""
     g = torch.Generator().manual_seed(SEED)
     q, k, v = (torch.randn(row["bh"], row["s"], row["d"], generator=g).bfloat16() for _ in range(3))
+    q, k = q * peak, k * peak
     if row["path"] != "bounded":
         return q, k, v, ()
     hi = torch.full((row["bh"], row["s"], 1), row["valid_k"], dtype=torch.int32)
@@ -183,7 +188,7 @@ def worker(args, row: dict) -> None:
                              tp_k=True)
 
     region = compile_region(Region(), backend="neuron")
-    q, k, v, bounds = make_inputs(row)
+    q, k, v, bounds = make_inputs(row, args.peak)
     fuser = require_idle_core()  # the first transfer opens the device
     dev = [t.to("neuron") for t in (q, k, v, *bounds)]
     t0 = time.perf_counter()
@@ -193,10 +198,10 @@ def worker(args, row: dict) -> None:
         torch.save(out, output_path(args.out))
     region(*dev)[0, 0, 0].item()  # warm
     t0 = time.perf_counter()
-    for _ in range(CALLS):
+    for _ in range(args.calls):
         out = region(*dev)
     out[0, 0, 0].item()  # one sync, no host copy of the whole output
-    ms = 1000 * (time.perf_counter() - t0) / CALLS
+    ms = 1000 * (time.perf_counter() - t0) / args.calls
     args.worker.write_text(json.dumps({"ms": ms, "first_call_s": first, "fuser": fuser}))
 
 
@@ -209,6 +214,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--pv-mx", action="store_true")
     p.add_argument("--out", required=True, type=Path)
     p.add_argument("--runs", type=int, default=3)
+    p.add_argument("--calls", type=int, default=CALLS, help="timed calls per process")
+    p.add_argument("--peak", type=float, default=1.0, help="q and k times this (BR11: 2)")
     p.add_argument("--worker", type=Path, help=argparse.SUPPRESS)
     p.add_argument("--save-output", action="store_true", help=argparse.SUPPRESS)
     args = p.parse_args(argv)
@@ -230,17 +237,17 @@ def main(argv: list[str] | None = None) -> int:
         runs.append(json.loads(run.read_text()))
 
     torch.set_num_threads(len(os.sched_getaffinity(0)))
-    q, k, v, bounds = make_inputs(row)
+    q, k, v, bounds = make_inputs(row, args.peak)
     device = torch.load(output_path(args.out)).float()
     flags = dict(qk_mx=args.qk_mx, pv_mx=args.pv_mx)
     overall, heads = compare(device, lambda h: reference(row, q, k, v, bounds, h, **flags),
                              row["bh"])
     ms = [r["ms"] for r in runs]
     result = {"shape": row, "impl": args.impl, **flags,
-              "calls": CALLS, "runs_ms": ms, "first_call_s": [r["first_call_s"] for r in runs],
+              "calls": args.calls, "peak": args.peak, "runs_ms": ms, "first_call_s": [r["first_call_s"] for r in runs],
               **summarize(ms), "reference": "mirror" if any(flags.values()) else "fp32",
               **overall, "per_head": heads,
-              "inputs": f"q, k, v ~ N(0, 1) bf16, seed {SEED}, scale d^-0.5",
+              "inputs": f"q, k, v ~ N(0, 1) bf16, seed {SEED}, q and k x {args.peak}, scale d^-0.5",
               "cpus": sorted(os.sched_getaffinity(0)), "fuser": [r["fuser"] for r in runs]}
     args.out.write_text(json.dumps(result, indent=1) + "\n")
     print(json.dumps({k: result[k] for k in ("impl", "median_ms", "spread", "rel_l2", "cosine")}))

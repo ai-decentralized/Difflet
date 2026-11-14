@@ -56,11 +56,10 @@ def test_difflet_subset_passes(q, tp_q, sliding_window):
                                position_bias=None)
 
 
-@pytest.mark.parametrize("flags", [{"pv_mx": True, "qk_mx": False},
-                                   {"pv_mx": False, "qk_mx": True}])
-def test_mx_flags_are_refused_until_the_mx_matmuls_land(flags):
-    with pytest.raises(AssertionError, match="nc_matmul_mx"):
-        fork.mx_attention_fwd.func(Q, K, V, scale=1.0, **flags)
+@pytest.mark.parametrize("pv_mx", [False, True])
+def test_qk_mx_is_refused_until_mm1_lands(pv_mx):
+    with pytest.raises(AssertionError, match="qk_mx: MM1 on nc_matmul_mx"):
+        fork.mx_attention_fwd.func(Q, K, V, scale=1.0, pv_mx=pv_mx, qk_mx=True)
 
 
 def test_entry_point_keeps_attention_cte_compile_options():
@@ -71,8 +70,9 @@ def test_entry_point_keeps_attention_cte_compile_options():
 
 
 def test_the_reference_defaults_to_the_kernels_block_membership():
-    """Ruling BR1: the perms the kernel exports (contiguous blocks of 32, locked on the device by
-    scripts/mx_attention/membership.py) are the CPU reference's defaults."""
+    """Rulings BR1 / BR16: the perms the kernel exports (contiguous blocks of 32, locked on the
+    device on MM2's own loaders by scripts/mx_attention/membership.py) are the CPU reference's
+    defaults."""
     import torch
 
     from difflet.quant.mx import swizzle_perm
@@ -86,3 +86,77 @@ def test_the_reference_defaults_to_the_kernels_block_membership():
                                                        pv_perm=fork.pv_perm))
     assert not torch.equal(default, mx_attention_reference(q, k, v, **mx, qk_perm=swizzle_perm,
                                                            pv_perm=swizzle_perm))
+
+
+# --- the kernel itself on the NKI simulator (CPU), small shapes ---------------------------------
+
+def _simulate(kernel, q, k, v, bounds=(), **kwargs):
+    import ml_dtypes
+    import numpy as np
+    import torch
+    from nki._simulator import simulate_kernel
+
+    def bf16(t):
+        return t.float().numpy().astype(ml_dtypes.bfloat16)
+
+    if bounds:
+        kwargs.update(bound_min=bounds[0].numpy(), bound_max=bounds[1].numpy())
+    out = simulate_kernel(kernel, (bf16(q), bf16(k), bf16(v)), kwargs)
+    return torch.from_numpy(np.asarray(out).astype(np.float32))
+
+
+def _inputs(bh, s_q, s_k, valid_k=None):
+    import torch
+
+    g = torch.Generator().manual_seed(0)
+    q = torch.randn(bh, s_q, 128, generator=g).bfloat16()
+    k, v = (torch.randn(bh, s_k, 128, generator=g).bfloat16() for _ in range(2))
+    if valid_k is None:
+        return q, k, v, ()
+    q = (q.float() * 128 ** -0.5).bfloat16()  # the bounded path takes scale 1.0
+    hi = torch.full((bh, s_q, 1), valid_k, dtype=torch.int32)
+    return q, k, v, (torch.zeros_like(hi), hi)
+
+
+def _rel(a, b):
+    return ((a - b).norm() / b.norm()).item()
+
+
+#: (bh, s_q, s_k, valid_k): a partial query group and a partial key tile whose length is not a
+#: multiple of 4; bounded with bound_max % 32 != 0; two flash sections (10,752 keys).
+SIM_SHAPES = {"partial": (1, 602, 602, None), "bounded": (2, 640, 640, 600),
+              "sections": (1, 128, 10752, None)}
+
+
+@pytest.mark.parametrize("case", sorted(SIM_SHAPES))
+def test_pv_mx_simulated_matches_the_mirror(case):
+    """MM2 on nc_matmul_mx (Step 3): the simulated kernel equals the Task 1 mirror (P and V
+    MX-quantized per 512-key tile by ``pv_perm``, the last tile zero-padded) to summation order,
+    and is not the bf16 kernel."""
+    from difflet.quant.mx_attention import mx_attention_reference
+
+    bh, s_q, s_k, valid = SIM_SHAPES[case]
+    q, k, v, bounds = _inputs(bh, s_q, s_k, valid)
+    scale = 1.0 if bounds else 128 ** -0.5
+    out = _simulate(fork.mx_attention_fwd, q, k, v, bounds, scale=scale, pv_mx=True, qk_mx=False)
+    kw = dict(bound_min=bounds[0], bound_max=bounds[1]) if bounds else {}
+    mirror = mx_attention_reference(q, k, v, scale=scale, qk_mx=False, pv_mx=True,
+                                    pv_perm=fork.pv_perm, **kw).float()
+    bf16 = mx_attention_reference(q, k, v, scale=scale, qk_mx=False, pv_mx=False, **kw).float()
+    assert _rel(out, mirror) < 2e-3, _rel(out, mirror)
+    assert _rel(out, bf16) > 4 * _rel(out, mirror)
+
+
+@pytest.mark.parametrize("case", ["partial", "bounded"])
+def test_both_flags_off_simulates_bit_identical_to_attention_cte(case):
+    """The pv_mx edits leave the flags-off path alone: bit for bit nkilib's attention_cte."""
+    import torch
+    from nkilib.core.attention.attention_cte import attention_cte
+
+    bh, s_q, s_k, valid = SIM_SHAPES[case]
+    q, k, v, bounds = _inputs(bh, s_q, s_k, valid)
+    scale = 1.0 if bounds else 128 ** -0.5
+    out = _simulate(fork.mx_attention_fwd, q, k, v, bounds, scale=scale, pv_mx=False, qk_mx=False)
+    cte = _simulate(attention_cte, q, k, v, bounds, scale=scale, causal_mask=False, tp_q=True,
+                    tp_k=True)
+    assert torch.equal(out, cte)

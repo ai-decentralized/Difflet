@@ -178,3 +178,36 @@ def test_main_scores_a_fork_run_against_the_mirror(tmp_path, monkeypatch):
     result = json.loads(out.read_text())
     assert result["reference"] == "mirror" and result["pv_mx"] and not result["qk_mx"]
     assert result["rel_l2"] == 0.0
+
+
+def test_the_peaked_case_doubles_q_and_k_exactly():
+    """Ruling BR11: --peak 2 multiplies q and k by 2 (exact in bf16), so the scores' std goes
+    from ~1 to ~4; v and the bounds are unchanged."""
+    row = {"name": "tiny", **TINY["tiny"]}
+    q, k, v, bounds = probe.make_inputs(row)
+    q2, k2, v2, bounds2 = probe.make_inputs(row, peak=2.0)
+    assert torch.equal(q2, q * 2) and torch.equal(k2, k * 2) and torch.equal(v2, v)
+    assert all(torch.equal(a, b) for a, b in zip(bounds, bounds2))
+
+
+def test_main_passes_peak_and_calls_to_the_workers(tmp_path, monkeypatch):
+    """--peak reaches the workers' inputs and the host reference; --calls sets the calls per
+    process (ruling BR13: 20 vs 40 shows whether host dispatch is hidden)."""
+    monkeypatch.setattr(probe, "load_shapes", lambda: {"tiny_u": dict(TINY["tiny_u"])})
+    row = {"name": "tiny_u", **TINY["tiny_u"]}
+    q, k, v, bounds = probe.make_inputs(row, peak=2.0)
+
+    def fake_worker(argv, log):
+        assert argv[argv.index("--peak") + 1] == "2" and argv[argv.index("--calls") + 1] == "40"
+        if "--save-output" in argv:
+            out = torch.stack([probe.reference(row, q, k, v, bounds, h) for h in range(row["bh"])])
+            torch.save(out, probe.output_path(Path(argv[argv.index("--out") + 1])))
+        Path(argv[argv.index("--worker") + 1]).write_text(
+            json.dumps({"ms": 1.0, "first_call_s": 1.0, "fuser": {}}))
+
+    monkeypatch.setattr(probe, "run_worker", fake_worker)
+    out = tmp_path / "p.json"
+    assert probe.main(["--shape", "tiny_u", "--impl", "cte", "--peak", "2", "--calls", "40",
+                       "--runs", "1", "--out", str(out)]) == 0
+    result = json.loads(out.read_text())
+    assert result["calls"] == 40 and result["peak"] == 2.0 and result["rel_l2"] < 1e-6
