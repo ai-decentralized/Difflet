@@ -1,6 +1,7 @@
 """The CPU reference of MXFP8 attention: exact attention with MX off, bounds and the 512-key
-padding leave no trace in P's MX blocks, and the perms decide the block membership. The perms are
-``swizzle_perm`` until the kernel exports its own (ruling BR1)."""
+padding leave no trace in P's MX blocks, and the perms decide the block membership. The tests pass
+``swizzle_perm``, a membership other than the default (the kernel's contiguous blocks, ruling
+BR1), so the perms are exercised as parameters."""
 
 from __future__ import annotations
 

@@ -7,8 +7,10 @@ usage: probe.py --shape NAME --impl {cte,fork} [--qk-mx] [--pv-mx] --out FILE [-
 ``--impl cte`` is Difflet's attention as the models call it today, ``ops_impl.attention.attention``
 in the ``tp_q``/``tp_k`` layout: nkilib's ``attention_cte`` in bf16, bounded rows through its
 range-select op (q pre-scaled in fp32, lengths padded to 128, HV1 split over heads), scored
-against fp32 attention. ``--impl fork`` is the MXFP8 fork of plan Task 3 (``--qk-mx`` /
-``--pv-mx`` select its variant); until Task 3 lands it stops with a message (ruling BR6).
+against fp32 attention. ``--impl fork`` is the same call with the kernel swapped for Difflet's
+fork (``ops_impl/mx_attention_kernel.py``, plan Task 3; ``--qk-mx`` / ``--pv-mx`` select its
+variant), scored against fp32 attention with both flags off and against the Task 1 mirror
+(``mx_attention_reference`` on the bf16 inputs, the kernel's block membership) otherwise.
 
 Time: the compiled region from bf16 q, k, v (and the int32 bounds) to the bf16 output, measured
 as evidence section 4c timed kernels: one warm call, then ``CALLS`` calls and one sync, in each of
@@ -24,16 +26,15 @@ Inputs: q, k, v ~ N(0, 1) in bf16 from seed 0, scale ``d ** -0.5``. A bounded ro
 the image tokens plus half the text plus one, never a multiple of 32. attention_cte masks with
 range-select, never skipping a tile, so the bound values do not change its time.
 
-Device rule (ruling BR4): ``NEURON_RT_VISIBLE_CORES`` must name one logical core; before each
-worker its device (core // 4) must be idle by ``fuser``, else the probe stops. Pin the CPU set
-with ``taskset`` around the whole command.
+Device rule (ruling BR4): ``NEURON_RT_VISIBLE_CORES`` must name one logical core; each worker
+checks its device (core // 4) is idle by ``fuser`` just before opening it, else stops. Pin the
+CPU set with ``taskset`` around the whole command.
 """
 
 from __future__ import annotations
 
 import argparse
 import datetime
-import importlib
 import json
 import os
 import statistics
@@ -49,7 +50,6 @@ import torch  # noqa: E402
 
 from difflet.quant.mx_attention import mx_attention_reference  # noqa: E402
 
-FORK_MODULE = "difflet.backends.neuron.ops_impl.mx_attention_kernel"
 CALLS = 20
 SEED = 0
 
@@ -72,16 +72,23 @@ def make_inputs(row: dict):
     return q, k, v, (torch.zeros_like(hi), hi)
 
 
-def reference(row: dict, q, k, v, bounds, h: int) -> torch.Tensor:
-    """fp32 attention of head ``h``, ``[s, d]``; the bounded path takes scale 1.0, so q is scaled
-    in fp32 first."""
+def reference(row: dict, q, k, v, bounds, h: int, *, qk_mx: bool = False,
+              pv_mx: bool = False) -> torch.Tensor:
+    """Head ``h``'s attention, ``[s, d]``: fp32 with both flags off, else the Task 1 mirror of the
+    fork (bf16 inputs as the kernel loads them, its MX block membership). The bounded path takes
+    scale 1.0, so q is scaled in fp32 first (and, mirroring, rounded to bf16 as
+    ``_flash_attention_bounded`` does)."""
     scale = row["d"] ** -0.5
-    qh, kh, vh = q[h:h + 1].float(), k[h:h + 1].float(), v[h:h + 1].float()
+    mirror = qk_mx or pv_mx
+    qh, kh, vh = (t[h:h + 1] if mirror else t[h:h + 1].float() for t in (q, k, v))
     kw = dict(scale=scale)
     if bounds:
-        qh, kw = qh * scale, dict(scale=1.0, bound_min=bounds[0][h:h + 1],
-                                  bound_max=bounds[1][h:h + 1])
-    return mx_attention_reference(qh, kh, vh, qk_mx=False, pv_mx=False, **kw)[0]
+        qh = (qh.float() * scale).to(qh.dtype)
+        kw = dict(scale=1.0, bound_min=bounds[0][h:h + 1], bound_max=bounds[1][h:h + 1])
+    if mirror:
+        from difflet.backends.neuron.ops_impl.mx_attention_kernel import pv_perm, qk_perm
+        kw.update(qk_perm=qk_perm, pv_perm=pv_perm)
+    return mx_attention_reference(qh, kh, vh, qk_mx=qk_mx, pv_mx=pv_mx, **kw)[0]
 
 
 def _metrics(s: torch.Tensor) -> dict:
@@ -124,17 +131,48 @@ def run_worker(argv: list[str], log: Path) -> None:
                        check=True)
 
 
+def use_fork(*, qk_mx: bool, pv_mx: bool) -> None:
+    """Swap the kernel under ``ops_impl.attention``'s two attention_cte calls for the fork's
+    ``mx_attention_fwd``: the layout, bounded pre-scale, padding and head chunking stay theirs."""
+    from torch_neuronx import wrap_nki
+    from torch_neuronx.nki_hop import nki_op
+
+    from difflet.backends.neuron.ops_impl import attention as attn
+    from difflet.backends.neuron.ops_impl.fp8_kernels import logical_cores
+    from difflet.backends.neuron.ops_impl.mx_attention_kernel import mx_attention_fwd
+
+    kernel = wrap_nki(mx_attention_fwd)
+
+    @nki_op("difflet_probe::mx_attention_fork", mutates_args={})
+    def fork(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, bound_min: torch.Tensor | None,
+             bound_max: torch.Tensor | None, scale: float) -> torch.Tensor:
+        bounds = {} if bound_min is None else {"bound_min": bound_min, "bound_max": bound_max}
+        return kernel[(logical_cores(),)](q, k, v, scale=scale, pv_mx=pv_mx, qk_mx=qk_mx, **bounds)
+
+    def unbounded(q, k, v, *, is_causal, scale, training):  # torch-neuronx's SDPA kernel
+        assert not is_causal and not training
+        return fork(q.flatten(0, 1), k.flatten(0, 1), v.flatten(0, 1), None, None,
+                    scale).unflatten(0, q.shape[:2])
+
+    attn._FLASH_KERNEL, attn._FLASH_BOUNDED_OP = unbounded, fork
+
+
 def worker(args, row: dict) -> None:
     """Device side: compile, save the first output if asked, time CALLS calls with one sync."""
     os.environ.setdefault("DIFFLET_COMPILE_CACHE", "/mnt/nvme/difflet-mxattn/probe/cache")
-    # every kernel input is a call argument, so the NKI trace cache is safe (compile.py)
-    os.environ.setdefault("DIFFLET_NKI_TRACE_CACHE", "1")
+    # every kernel input is a call argument, so the NKI trace cache is safe for nkilib's kernel
+    # (compile.py); the fork compiles uncached unless DIFFLET_NKI_TRACE_CACHE=1 (ruling BR12;
+    # the cache does retrace after an edit to the fork's file: task-3a report)
+    os.environ.setdefault("DIFFLET_NKI_TRACE_CACHE", "1" if args.impl == "cte" else "0")
     from difflet.backends import get_backend
     from difflet.pipeline.parallel_config import DiffletParallelConfig
 
     get_backend("neuron").prepare_runtime(DiffletParallelConfig())
     from difflet.backends.neuron.compile import compile_region
     from difflet.backends.neuron.ops_impl.attention import attention
+
+    if args.impl == "fork":
+        use_fork(qk_mx=args.qk_mx, pv_mx=args.pv_mx)
 
     scale = row["d"] ** -0.5
 
@@ -146,6 +184,7 @@ def worker(args, row: dict) -> None:
 
     region = compile_region(Region(), backend="neuron")
     q, k, v, bounds = make_inputs(row)
+    fuser = require_idle_core()  # the first transfer opens the device
     dev = [t.to("neuron") for t in (q, k, v, *bounds)]
     t0 = time.perf_counter()
     out = region(*dev).cpu()
@@ -158,7 +197,7 @@ def worker(args, row: dict) -> None:
         out = region(*dev)
     out[0, 0, 0].item()  # one sync, no host copy of the whole output
     ms = 1000 * (time.perf_counter() - t0) / CALLS
-    args.worker.write_text(json.dumps({"ms": ms, "first_call_s": first}))
+    args.worker.write_text(json.dumps({"ms": ms, "first_call_s": first, "fuser": fuser}))
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -176,16 +215,6 @@ def main(argv: list[str] | None = None) -> int:
     if (args.qk_mx or args.pv_mx) and args.impl != "fork":
         p.error("--qk-mx and --pv-mx need --impl fork")
     row = {"name": args.shape, **shapes[args.shape]}
-    if args.impl == "fork":
-        try:
-            importlib.import_module(FORK_MODULE)
-        except ModuleNotFoundError as exc:
-            if exc.name != FORK_MODULE:
-                raise
-            raise SystemExit(f"--impl fork needs {FORK_MODULE}, the attention_cte fork of plan "
-                             "Task 3, which does not exist yet") from None
-        raise SystemExit(f"--impl fork: {FORK_MODULE} exists; its device call and Task 1 mirror "
-                         "reference are wired into this probe by plan Task 3")
     if args.worker:
         worker(args, row)
         return 0
@@ -193,9 +222,8 @@ def main(argv: list[str] | None = None) -> int:
     args.out.parent.mkdir(parents=True, exist_ok=True)
     stem = args.out.with_suffix("")
     passed = list(argv if argv is not None else sys.argv[1:])
-    runs, fuser = [], []
+    runs = []
     for i in range(args.runs):
-        fuser.append(require_idle_core())
         run = Path(f"{stem}.run{i}.json")
         run_worker([*passed, "--worker", str(run), *(["--save-output"] if i == 0 else [])],
                    Path(f"{stem}.run{i}.log"))
@@ -204,13 +232,16 @@ def main(argv: list[str] | None = None) -> int:
     torch.set_num_threads(len(os.sched_getaffinity(0)))
     q, k, v, bounds = make_inputs(row)
     device = torch.load(output_path(args.out)).float()
-    overall, heads = compare(device, lambda h: reference(row, q, k, v, bounds, h), row["bh"])
+    flags = dict(qk_mx=args.qk_mx, pv_mx=args.pv_mx)
+    overall, heads = compare(device, lambda h: reference(row, q, k, v, bounds, h, **flags),
+                             row["bh"])
     ms = [r["ms"] for r in runs]
-    result = {"shape": row, "impl": args.impl, "qk_mx": args.qk_mx, "pv_mx": args.pv_mx,
+    result = {"shape": row, "impl": args.impl, **flags,
               "calls": CALLS, "runs_ms": ms, "first_call_s": [r["first_call_s"] for r in runs],
-              **summarize(ms), "reference": "fp32", **overall, "per_head": heads,
+              **summarize(ms), "reference": "mirror" if any(flags.values()) else "fp32",
+              **overall, "per_head": heads,
               "inputs": f"q, k, v ~ N(0, 1) bf16, seed {SEED}, scale d^-0.5",
-              "cpus": sorted(os.sched_getaffinity(0)), "fuser": fuser}
+              "cpus": sorted(os.sched_getaffinity(0)), "fuser": [r["fuser"] for r in runs]}
     args.out.write_text(json.dumps(result, indent=1) + "\n")
     print(json.dumps({k: result[k] for k in ("impl", "median_ms", "spread", "rel_l2", "cosine")}))
     return 0
