@@ -37,13 +37,15 @@ def test_the_shape_table_has_the_seven_rows():
 @pytest.mark.parametrize("bad", [["--shape", "sd3_1024", "--impl", "cte"],
                                  ["--shape", "wan_81f", "--impl", "sdpa"],
                                  ["--shape", "wan_81f", "--impl", "cte", "--pv-mx"],
-                                 ["--shape", "wan_81f", "--impl", "fork", "--cte-no-vector-exp"]])
+                                 ["--shape", "wan_81f", "--impl", "fork", "--cte-no-vector-exp"],
+                                 ["--shape", "qwen_1024", "--impl", "constmax"]])
 def test_the_cli_rejects_what_it_cannot_run(bad, tmp_path, capsys):
     with pytest.raises(SystemExit) as exc:
         probe.main([*bad, "--out", str(tmp_path / "o.json")])
     assert exc.value.code == 2
     err = capsys.readouterr().err
-    assert "invalid choice" in err or "need --impl fork" in err or "needs --impl cte" in err
+    assert ("invalid choice" in err or "need --impl fork" in err or "needs --impl cte" in err
+            or "unbounded attention only" in err)
 
 
 @pytest.mark.parametrize("core, rc", [("13", 1), ("4", 0), ("31", 2), ("4,5", None), ("", None)])
@@ -290,3 +292,72 @@ def test_cte_no_vector_exp_calls_attention_cte_as_difflet_does_plus_the_knob(mon
     assert bounded.pop("bound_min") is lo and torch.equal(bounded.pop("bound_max"), lo + 613)
     assert bounded == dict(tp_q=True, tp_k=True, scale=1.0, causal_mask=False,
                            cache_softmax=False, allow_vector_exp=False)
+
+
+def test_softmax_max_is_the_docstrings_gumbel_estimate_at_score_std_one():
+    """attention_const_max's docstring: softmax_max ~ 0.88 sigma sqrt(2 ln Sk); the probe's flat
+    inputs have sigma = 1 (q, k ~ N(0, 1), scale d^-0.5), and --peak keeps the same value."""
+    assert probe.softmax_max_for({"s": 32760}) == pytest.approx(4.0128, abs=1e-4)
+    assert probe.softmax_max_for({"s": 4608}) == pytest.approx(3.6146, abs=1e-4)
+
+
+def test_use_const_max_calls_the_shipped_kernel_on_the_unbounded_path(monkeypatch):
+    """ops_impl.attention's unbounded path reaches nkilib's experimental attention_const_max
+    (unmodified) on the LNC grid with q, k, v [bh, s, d] as given (SEQ_MAJOR q and k: the kernel
+    transposes them itself, no layout op outside it), the call's scale as softmax_scale and the
+    given softmax_max."""
+    hop = pytest.importorskip("torch_neuronx.nki_hop")
+    import torch_neuronx
+    from nkilib.core.utils.common_types import AttentionLayout
+    from nkilib.experimental.attention import attention_const_max as acm
+
+    from difflet.backends.neuron.ops_impl import attention as attn
+    from difflet.backends.neuron.ops_impl.fp8_kernels import logical_cores
+
+    calls, wrapped = [], []
+
+    class FakeKernel:
+        def __getitem__(self, grid):
+            return lambda q, k, v, **kw: calls.append((grid, q, k, v, kw)) or q + 1
+
+    monkeypatch.setattr(hop, "nki_op", lambda name, mutates_args: lambda f: f)
+    monkeypatch.setattr(torch_neuronx, "wrap_nki", lambda kernel: wrapped.append(kernel) or FakeKernel())
+    for name in ("_FLASH_KERNEL", "_FLASH_BOUNDED_OP"):
+        monkeypatch.setattr(attn, name, getattr(attn, name))  # restored after the test
+    probe.use_const_max(4.25)
+    g = torch.Generator().manual_seed(0)
+    q, k, v = (torch.randn(1, 2, 640, 128, generator=g).bfloat16() for _ in range(3))
+    out = attn._FLASH_KERNEL(q, k, v, is_causal=False, scale=0.5, training=False)
+    assert wrapped == [acm.attention_const_max]
+    ((grid, q1, k1, v1, kw),) = calls
+    assert grid == (logical_cores(),)
+    assert all(torch.equal(a, b.flatten(0, 1)) for a, b in ((q1, q), (k1, k), (v1, v)))
+    assert kw == dict(softmax_scale=0.5, softmax_max=4.25, q_layout=AttentionLayout.SEQ_MAJOR,
+                      k_layout=AttentionLayout.SEQ_MAJOR)
+    assert torch.equal(out, q + 1)
+
+
+def test_main_records_softmax_max_and_nonfinite_outputs_for_constmax(tmp_path, monkeypatch):
+    """--impl constmax: scored against fp32 attention, its softmax_max in the result, and the
+    device output's inf/NaN count (a too-low softmax_max overflows exp)."""
+    monkeypatch.setattr(probe, "load_shapes", lambda: {"tiny_u": dict(TINY["tiny_u"])})
+    row = {"name": "tiny_u", **TINY["tiny_u"]}
+    q, k, v, bounds = probe.make_inputs(row)
+
+    def fake_worker(argv, log):
+        assert argv[argv.index("--impl") + 1] == "constmax"
+        if "--save-output" in argv:
+            out = torch.stack([probe.reference(row, q, k, v, bounds, h) for h in range(row["bh"])])
+            out[1, 3, :2] = torch.tensor([float("inf"), float("nan")])
+            torch.save(out, probe.output_path(Path(argv[argv.index("--out") + 1])))
+        Path(argv[argv.index("--worker") + 1]).write_text(
+            json.dumps({"ms": 1.0, "first_call_s": 1.0, "fuser": {}}))
+
+    monkeypatch.setattr(probe, "run_worker", fake_worker)
+    out = tmp_path / "c.json"
+    assert probe.main(["--shape", "tiny_u", "--impl", "constmax", "--runs", "1",
+                       "--out", str(out)]) == 0
+    result = json.loads(out.read_text())
+    assert result["impl"] == "constmax" and result["reference"] == "fp32"
+    assert result["softmax_max"] == pytest.approx(probe.softmax_max_for({"s": 640}))
+    assert result["nonfinite"] == 2 and result["per_head"][0]["rel_l2"] < 1e-6

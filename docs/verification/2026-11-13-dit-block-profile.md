@@ -956,3 +956,148 @@ Outputs: `/mnt/nvme/difflet-mxattn/probe/4b/`:
   (`trio_sched*.sh`, `small_dev9.sh`, `inv_tail*.sh`, `cap_dev*.sh`), `g2.py`, `acc_table.py`,
   `inv_check.py`, `throttle.py`, `mx_overlap.py`, `phases4b.py`, `assemble_section11.py` and
   `section11_*.{md,py}`.
+
+## 12. nkilib `attention_const_max` (bf16) against the rebalanced attention_cte
+
+Ruling BR24 (2026-11-14). One bounded measurement before FP8 attention closes: nkilib's
+experimental `attention_const_max`, shipped and unmodified, in bf16, against the rebalanced
+attention_cte (section 9, the BR19 bf16) on the three unbounded routed shapes, plus one engine
+capture at wan_81f. No kernel code.
+
+**The kernel** (`nkilib/experimental/attention/attention_const_max.py`, same site-packages):
+
+- It computes `softmax(Q K^T * scale - softmax_max) V` with one constant max per call (a Python
+  scalar or a `[128, 1]` HBM tensor holding one value, `:88-95`). There is no mask or bounds
+  argument, so it serves unbounded attention only (`_validate_inputs` `:200-214`: d = 128, bf16
+  q/k/v, Sv = Sk; any lengths).
+- MM1 is transposed: K is the stationary operand, Q (up to 768 queries) the moving one, and the
+  scores `[128 keys, Sq block]` are bf16 in PSUM on trn3 (`:370`, `:411`). The exp reads them straight
+  from PSUM with the constant max (`:418-432`): on trn3 B1 that is VectorE `nisa.exponential`, with
+  the scale folded into Q at load (bf16); ScalarE `activation(exp)` is used only on parts without
+  the VectorE exp, and no argument chooses. MM2 takes P as the stationary operand and `[V | 1]` as
+  the moving one, so the row sum comes out of MM2's column 129 (`:441-452`). There is no MM1 evict,
+  no running max and no P transpose.
+- Sharding (`_shard_inputs` `:216-247`): heads over the LNC cores when they divide (here 5 / 4 / 3
+  heads per core), else the query axis.
+- Its docstring (`:104-124`) requires std(Q), std(K) <= 1 "for bf16 accuracy with
+  softmax_max=4-5", warns that too low a max overflows exp (inf/NaN), and gives the rule: from the
+  QK-RMSNorm weights, sigma = sqrt(sum(gq^2 gk^2) / d), softmax_max ~ 0.88 sigma sqrt(2 ln Sk),
+  hard_bound = sqrt(d) max|gq| max|gk|; if hard_bound - softmax_max > ~80, use online softmax.
+
+**How it is called.** `scripts/mx_attention/probe.py --impl constmax` (unbounded shapes only)
+replaces the kernel under `ops_impl.attention`'s unbounded path, as `--cte-no-vector-exp` does:
+`attention_const_max[(lnc,)](q, k, v, softmax_scale=scale, softmax_max=..., q_layout=SEQ_MAJOR,
+k_layout=SEQ_MAJOR)`. q and k go in as the models hand them over (`[bh, s, d]`), so no layout op
+runs outside the kernel. The kernel itself DMA-transposes Q once per Q block and all of K for
+every Q block, inside the timed region (3.49 GB in transpose mode at wan_81f, below). softmax_max is
+the docstring's Gumbel estimate at the probe's flat score std (sigma = 1: q, k ~ N(0, 1), scale
+d^-0.5): 0.88 sqrt(2 ln Sk) = 3.615 (flux_1024), 3.676 (ltx2_video), 4.013 (wan_81f). The peaked
+case (q and k x 2, score std ~4) keeps the same value.
+
+**Timing.** Section 11's method (`constmax/duo.sh`). Per shape, both arms ran on one device and CPU
+set in one window, three processes per arm, the order alternated: (cte, cm), (cm, cte), (cte, cm).
+Each process is the probe's worker (cache hit, one warm call, the timed calls, one sync), from a
+frozen tree, with `fuser` idle and `uptime` logged at every process's start and end. flux_1024 ran
+40 calls per process, the others 20. No compile of mine was running on NUMA node 0 during the
+window. Rule: faster = ratio below 1 - J, with J = max(2%, the rebalanced arm's spread).
+
+| shape | device (CPUs) | rebalanced cte ms (spread) | const-max ms (spread) | const-max / cte | J | faster |
+|---|---|---|---|---|---|---|
+| `flux_1024` (40 calls) | 12 (16-23,112-119) | 0.8217 (0.77%) | 0.5069 (1.95%) | 0.617 | 2% | **yes** |
+| `ltx2_video` | 11 (8-15,104-111) | 1.7645 (0.10%) | 1.1495 (1.72%) | 0.651 | 2% | **yes** |
+| `wan_81f` | 10 (0-7,96-103) | 52.301 (0.00%) | 36.651 (0.03%) | 0.701 | 2% | **yes** |
+
+attention_const_max in bf16 is 30-38% faster than the rebalanced attention_cte on all three
+unbounded shapes, which makes it the fastest bf16 attention Difflet has measured. The small rows
+still carry section 8's ~1 ms fixed overhead per measurement, so their kernel ratios are, if
+anything, lower. Each timed output is bit-identical to its accuracy run (const max) or to section
+9's rebalanced output (cte).
+
+**Engine split at wan_81f**, one call. Both NEFFs were captured with 3b's `capture.sh` on device 13
+(CPUs 24-31,120-127): the const-max one, then section 9's rebalanced NEFF as a same-device control
+(it reproduces section 11's device-7 capture within 0.06%). Busy is the union of instruction
+intervals per physical core over the two cores (`engines.py`), and DMA queues come from
+`DmaPacketAggregated` (`dmaq.py`). The throttle is the `activity_1` windows of `Throttle.parquet`
+(the PE under its 50% utilization limit), as a share of the span.
+
+| arm | span ms | TensorE | VectorE | ScalarE | GpSimd | DMA instr | DMA queues | PE throttle (activity_1) |
+|---|---|---|---|---|---|---|---|---|
+| rebalanced cte | 51.91 | 45.28 (87.2%) | 42.64 (82.1%) | 39.57 (76.2%) | 1.29 (2.5%) | 7.19 (13.8%) | `qSyncSpillReload0` 43.84 (84.5%, P transposes); `qGpSimdDynamic` 6.38; `qSyncIO0` 0.80 | 7.45% |
+| const max | 36.58 | 36.38 (99.4%) | 26.95 (73.7%) | 13.95 (38.1%) | 0.00 | 5.71 (15.6%) | `qSyncIO0` 5.51 (15.1%, transpose mode: Q and K); `qGpSimdDynamic` 5.36 (14.6%, copies: V) | 0.03% |
+
+Const max per step, ms (instructions), from `nki_source_location` (`constmax/phases_cm.py`):
+
+| step | engine / opcode | ms (instructions) |
+|---|---|---|
+| MM1 | TensorE `MATMUL` + `LDWEIGHTS` | 26.28 (110,080) + 5.26 |
+| MM2 over `[V \| 1]` | TensorE `MATMUL` + `LDWEIGHTS` | 27.34 (655,360) + 22.79 |
+| exp from bf16 PSUM | VectorE `EXPONENTIAL` | 26.66 (110,080) |
+| V into `[V \| 1]`, per Q block | ScalarE `COPY` | 13.82 (110,080) |
+| normalize | VectorE `TENSOR_SCALAR` + `RECIPROCAL` | 0.35 |
+| K/V/Q loads, O store | DMA | 5.71 |
+
+Both of attention_cte's non-TensorE floors are gone: there is no MM1 evict on VectorE (39.44 ms in
+the rebalanced kernel) and no P-transpose DMA queue (43.84 ms). **TensorE binds**: 99.4% busy, the
+only busy engine for 1.23 ms of the span on a 50 ns grid, with 0.02 ms when nothing is busy. The PE
+is not throttled (activity_1 0.03% of the span). VectorE, doing all the exp, is the next floor at
+73.7% (26.95 ms), and ScalarE carries only the V copy.
+
+**Decision rule (ruling BR24).** It asks for TensorE >= 90% of the span with VectorE <= 60%.
+TensorE is 99.4%, which passes. VectorE is 73.7% (26.95 / 36.58 ms), which fails. So by the rule,
+FP8 attention on trn3 closes. For the record: below VectorE's 26.95 ms, a faster TensorE could
+shorten this kernel's span by at most ~26%. The rule does not count that headroom.
+
+**Accuracy** against fp32 attention per head (rel L2 overall, max head in brackets; one process
+each; the cte flat values are section 9's). inf/NaN = non-finite elements of the output.
+
+| shape | cte flat | const max flat | cte peaked (x2) | const max peaked (x2) | const max inf/NaN, flat / peaked |
+|---|---|---|---|---|---|
+| `flux_1024` | 2.307e-3 (2.316e-3) | 4.736e-3 (4.789e-3) | 1.784e-3 (1.788e-3) | 1.349e-2 (1.376e-2) | 0 / 0 |
+| `ltx2_video` | 2.306e-3 (2.326e-3) | 4.707e-3 (4.817e-3) | 1.784e-3 (1.789e-3) | 1.425e-2 (1.454e-2) | 0 / 0 |
+| `wan_81f` | 3.106e-3 (3.214e-3) | 4.745e-3 (4.954e-3) | 2.677e-3 (2.688e-3) | 2.018e-2 (2.033e-2) | 0 / 0 |
+
+- **Flat**: const max is 1.5-2.1x attention_cte's error, with no inf/NaN.
+- **Peaked x2** (score std 4 under a max set for std 1): no overflow, but the error is 7.5-8x
+  attention_cte's (whose error falls when peaked) and 2.8-4.3x its own flat value. A CPU emulation of the kernel's roundings on flux head 0 (`constmax/emulate.py`:
+  bf16 Q x scale, bf16 MM1 scores, bf16 P, fp32 MM2) gives 4.48e-3 flat and 1.348e-2 peaked (device:
+  4.78e-3 / 1.359e-2). The bf16 scores in PSUM are most of it: with fp32 scores the same emulation
+  gives 2.39e-3 / 3.99e-3. Their rounding error grows with the score's size, and exp turns it into
+  a relative error of P.
+- **x4 at flux_1024** (one extra process, device 1: score std 16, same max 3.615): exp overflows.
+  285 output elements are non-finite (256 NaN, 29 inf), in 3 of 27,648 rows (heads 1, 3, 4). The
+  finite heads are 2.26-2.29e-2. This is the docstring's too-low-max failure.
+
+**Real-model bounds** (CPU, local HF snapshots, only the QK-RMSNorm tensors read;
+`constmax/bounds.py`, `bounds.json`). Per layer and head these are the docstring's numbers at the
+probe shape's Sk. The worst head's numbers are given per model. One softmax_max per call covers
+every head, so the per-call gap is the max over heads of hard_bound minus the max over heads of
+softmax_max; it gives the same layer counts.
+
+| model (shape) | QK norm | Sk | layers | worst layer (head) | sigma | softmax_max | hard_bound | gap | per-call gap, worst layer | layers with gap > 80 | softmax_max over layers | sigma max |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Wan 2.1 T2V 14B attn1 (`wan_81f`) | across 40 heads | 32,760 | 40 | `blocks.38` (34) | 3.23 | 12.97 | 205.5 | 192.5 | 191.5 | 4 (blocks 33, 34, 38, 39) | 5.16-14.00 | 3.49 |
+| FLUX.1-dev (`flux_1024`) | per head; dual blocks add `norm_added_q/k` (all 4 pairs) | 4,608 | 57 | `single_transformer_blocks.36` | 1.11 | 4.01 | 46.7 | 42.7 | 42.7 | 0 | 1.11-7.56 | 2.09 |
+| LTX-2 video attn1 (`ltx2_video`) | across 32 heads | 6,144 | 48 | `transformer_blocks.45` (9) | 3.66 | 13.45 | 149.1 | 135.6 | 134.8 | 3 (blocks 44, 45, 47) | 1.06-14.45 | 3.93 |
+
+- **FLUX** passes the ~80 rule on every layer (worst gap 42.7).
+- **Wan and LTX-2** fail it on 4 of 40 and 3 of 48 layers. Those layers would need online softmax,
+  or a per-layer kernel choice.
+- **The per-head bound is optimistic for Wan and LTX-2.** Their RMSNorm spans all heads, so the
+  docstring's per-head unit-RMS assumption does not hold. One head's ||x_h||^2 can reach H d, which
+  makes the strict Cauchy-Schwarz bound H x hard_bound (Wan up to 8,219, LTX-2 up to 4,770). Under
+  that bound no layer of either model is within 80 (smallest gap 857 / 342).
+- **sigma is above the docstring's std <= 1 precondition in most layers** (Wan 40 of 40, LTX-2 29
+  of 48, FLUX 53 of 57; max 3.49 / 3.93 / 2.09). The peaked probe (score std 4) is the error regime
+  this suggests for Wan and LTX-2: 1.3-2.0e-2. This is estimated from gamma alone, not measured on
+  real activations; RoPE and the activations' own statistics are not modelled.
+
+Outputs: `/mnt/nvme/difflet-mxattn/probe/constmax/`:
+- `tree/` is the frozen tree the device runs used.
+- `acc/` holds the accuracy runs (const max flat / x2 / x4, rebalanced cte x2) and `lane.log`.
+- `duo/` holds the timing processes, `runs.log` with `fuser` and `uptime` at every process's start
+  and end, and `table.json`.
+- `cap/` holds `wan_cm` and `wan_cte` (device 13), with `engines.json`, `dmaq.json`,
+  `throttle.json` and `phases.json`, plus the `*.overlap.txt` files.
+- `bounds.json` holds the real-model bounds.
+- The tools are `acc_lane.sh`, `duo.sh`, `cap.sh`, `table.py`, `phases_cm.py`, `neffs_cm.py`,
+  `bounds.py` and `emulate.py`.

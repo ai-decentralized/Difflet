@@ -2,7 +2,7 @@
 """One attention call on one NeuronCore (LNC=2) at a model's per-rank shape: accuracy and time
 (MXFP8 attention plan, ``docs/plans/2026-11-13-mxfp8-attention.md``, Task 2).
 
-usage: probe.py --shape NAME --impl {cte,fork} [--qk-mx] [--pv-mx] [--cte-no-vector-exp]
+usage: probe.py --shape NAME --impl {cte,fork,constmax} [--qk-mx] [--pv-mx] [--cte-no-vector-exp]
                 --out FILE [--runs N] [--calls N] [--peak F]
 
 ``--impl cte`` is Difflet's attention as the models call it today, ``ops_impl.attention.attention``
@@ -14,6 +14,11 @@ variant), scored against fp32 attention with both flags off and against the Task
 (``mx_attention_reference`` on the bf16 inputs, the kernel's block membership) otherwise.
 ``--cte-no-vector-exp`` is ``--impl cte`` with attention_cte's ``allow_vector_exp=False`` (the
 exp on ScalarE, not VectorE), scored against fp32 attention (plan Task 4-pre, ruling BR18).
+``--impl constmax`` (unbounded shapes only) is the unbounded call on nkilib's experimental
+``attention_const_max``, shipped and unmodified, bf16: exp straight from MM1's PSUM with a constant
+max (``softmax_max_for``: its docstring's Gumbel estimate at score std 1, kept under ``--peak``),
+row sums from MM2 over [V | 1]; scored against fp32 attention, with the output's inf/NaN count
+(ruling BR24).
 
 Time: the compiled region from bf16 q, k, v (and the int32 bounds) to the bf16 output, measured
 as evidence section 4c timed kernels: one warm call, then ``--calls`` (default 20) calls and one
@@ -41,6 +46,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import math
 import os
 import statistics
 import subprocess
@@ -140,10 +146,11 @@ def run_worker(argv: list[str], log: Path) -> None:
                        check=True)
 
 
-def use_kernel(name: str, kernel, **kw) -> None:
+def use_kernel(name: str, kernel, scale_kw: str = "scale", **kw) -> None:
     """Swap the kernel under ``ops_impl.attention``'s two attention_cte calls for ``kernel`` (a
     wrapped NKI kernel taking attention_cte's q, k, v, scale and bounds) called with ``kw``: the
-    layout, bounded pre-scale, padding and head chunking stay theirs."""
+    layout, bounded pre-scale, padding and head chunking stay theirs. ``scale_kw`` names the
+    kernel's scale argument."""
     from torch_neuronx.nki_hop import nki_op
 
     from difflet.backends.neuron.ops_impl import attention as attn
@@ -153,7 +160,7 @@ def use_kernel(name: str, kernel, **kw) -> None:
     def op(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, bound_min: torch.Tensor | None,
            bound_max: torch.Tensor | None, scale: float) -> torch.Tensor:
         bounds = {} if bound_min is None else {"bound_min": bound_min, "bound_max": bound_max}
-        return kernel[(logical_cores(),)](q, k, v, scale=scale, **kw, **bounds)
+        return kernel[(logical_cores(),)](q, k, v, **{scale_kw: scale}, **kw, **bounds)
 
     def unbounded(q, k, v, *, is_causal, scale, training):  # torch-neuronx's SDPA kernel
         assert not is_causal and not training
@@ -193,13 +200,33 @@ def use_cte_no_vector_exp() -> None:
                causal_mask=False, cache_softmax=False, allow_vector_exp=False)
 
 
+def softmax_max_for(row: dict) -> float:
+    """attention_const_max's softmax_max for the probe's inputs: its docstring's Gumbel estimate of
+    the expected row max, 0.88 sigma sqrt(2 ln Sk), at the flat inputs' score std sigma = 1."""
+    return 0.88 * math.sqrt(2 * math.log(row["s"]))
+
+
+def use_const_max(softmax_max: float) -> None:
+    """``ops_impl.attention``'s unbounded path on nkilib's experimental ``attention_const_max``
+    (shipped, unmodified): q and k ``[bh, s, d]`` as given (SEQ_MAJOR: the kernel DMA-transposes Q
+    once per Q block and K per KV block, inside the timed region; no layout op outside it), the
+    call's scale as its ``softmax_scale``."""
+    from nkilib.core.utils.common_types import AttentionLayout
+    from nkilib.experimental.attention.attention_const_max import attention_const_max
+    from torch_neuronx import wrap_nki
+
+    use_kernel("attention_const_max", wrap_nki(attention_const_max), scale_kw="softmax_scale",
+               softmax_max=softmax_max, q_layout=AttentionLayout.SEQ_MAJOR,
+               k_layout=AttentionLayout.SEQ_MAJOR)
+
+
 def worker(args, row: dict) -> None:
     """Device side: compile, save the first output if asked, time CALLS calls with one sync."""
     os.environ.setdefault("DIFFLET_COMPILE_CACHE", "/mnt/nvme/difflet-mxattn/probe/cache")
     # every kernel input is a call argument, so the NKI trace cache is safe for nkilib's kernel
     # (compile.py); the fork compiles uncached unless DIFFLET_NKI_TRACE_CACHE=1 (ruling BR12;
     # the cache does retrace after an edit to the fork's file: task-3a report)
-    os.environ.setdefault("DIFFLET_NKI_TRACE_CACHE", "1" if args.impl == "cte" else "0")
+    os.environ.setdefault("DIFFLET_NKI_TRACE_CACHE", "0" if args.impl == "fork" else "1")
     from difflet.backends import get_backend
     from difflet.pipeline.parallel_config import DiffletParallelConfig
 
@@ -211,6 +238,8 @@ def worker(args, row: dict) -> None:
         use_fork(qk_mx=args.qk_mx, pv_mx=args.pv_mx)
     elif args.cte_no_vector_exp:
         use_cte_no_vector_exp()
+    elif args.impl == "constmax":
+        use_const_max(softmax_max_for(row))
 
     scale = row["d"] ** -0.5
 
@@ -242,7 +271,7 @@ def main(argv: list[str] | None = None) -> int:
     shapes = load_shapes()
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--shape", required=True, choices=sorted(shapes))
-    p.add_argument("--impl", required=True, choices=("cte", "fork"))
+    p.add_argument("--impl", required=True, choices=("cte", "fork", "constmax"))
     p.add_argument("--qk-mx", action="store_true")
     p.add_argument("--pv-mx", action="store_true")
     p.add_argument("--cte-no-vector-exp", action="store_true",
@@ -259,6 +288,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.cte_no_vector_exp and args.impl != "cte":
         p.error("--cte-no-vector-exp needs --impl cte")
     row = {"name": args.shape, **shapes[args.shape]}
+    if args.impl == "constmax" and row["path"] != "unbounded":
+        p.error("--impl constmax is unbounded attention only")
     if args.worker:
         worker(args, row)
         return 0
@@ -283,7 +314,8 @@ def main(argv: list[str] | None = None) -> int:
     result = {"shape": row, "impl": args.impl, **flags, "cte_no_vector_exp": args.cte_no_vector_exp,
               "calls": args.calls, "peak": args.peak, "runs_ms": ms, "first_call_s": [r["first_call_s"] for r in runs],
               **summarize(ms), "reference": "mirror" if any(flags.values()) else "fp32",
-              **overall, "per_head": heads,
+              **overall, "per_head": heads, "nonfinite": int((~device.isfinite()).sum()),
+              "softmax_max": softmax_max_for(row) if args.impl == "constmax" else None,
               "inputs": f"q, k, v ~ N(0, 1) bf16, seed {SEED}, q and k x {args.peak}, scale d^-0.5",
               "cpus": sorted(os.sched_getaffinity(0)), "fuser": [r["fuser"] for r in runs]}
     args.out.write_text(json.dumps(result, indent=1) + "\n")
