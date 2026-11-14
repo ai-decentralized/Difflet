@@ -47,7 +47,7 @@ def _tiny():
 
 
 def _fake_rings(monkeypatch, cm):
-    def ag(x, linears):
+    def ag(x, linears, head_dims=None):  # the real signature: a fake that leaks still fits
         return [F.linear(x, lin.weight, lin.bias) for lin in linears]
 
     def rs(x, linear):

@@ -46,8 +46,14 @@ def test_single_order_interleaves_each_ranks_text_then_image():
 
 
 def _fake_rings(monkeypatch):
-    def ag(x, linears):
-        return [F.linear(x, l.weight, l.bias) for l in linears]
+    def ag(x, linears, head_dims=None):
+        # A nonzero head dim d returns that output heads first, (B, N/d, S, d), as
+        # cm.all_gather_matmul does.
+        outs = []
+        for l, d in zip(linears, head_dims or (0,) * len(linears)):
+            o = F.linear(x, l.weight, l.bias)
+            outs.append(o.unflatten(-1, (-1, d)).transpose(1, 2) if d else o)
+        return outs
 
     def rs(x, linear):
         return F.linear(x, linear.weight, linear.bias)
@@ -56,11 +62,16 @@ def _fake_rings(monkeypatch):
         out = F.linear(x0, l0.weight) + F.linear(x1, l1.weight)
         return out if bias is None else out + bias
 
-    monkeypatch.setattr(cm, "all_gather_matmul", ag)
-    monkeypatch.setattr(cm, "matmul_reduce_scatter", rs)
-    monkeypatch.setattr(cm, "matmul2_reduce_scatter", rs2)
-    monkeypatch.setattr(cm, "prepare", lambda ops=None: None)
-    monkeypatch.setattr(cm, "supports", lambda seq, tp: True)
+    # Every live copy: the one sp's forwards call (sp.cm) and the one imported now,
+    # which differ once another test in the worker dropped difflet.backends.tpu.*
+    # from sys.modules (test_torch_megatron.py).
+    fresh = importlib.import_module("difflet.backends.tpu.ops_impl.collective_matmul")
+    for module in {id(m): m for m in (cm, sp.cm, fresh)}.values():
+        monkeypatch.setattr(module, "all_gather_matmul", ag)
+        monkeypatch.setattr(module, "matmul_reduce_scatter", rs)
+        monkeypatch.setattr(module, "matmul2_reduce_scatter", rs2)
+        monkeypatch.setattr(module, "prepare", lambda ops=None: None)
+        monkeypatch.setattr(module, "supports", lambda seq, tp: True)
 
 
 @pytest.mark.parametrize("split_rope", [False, True])
