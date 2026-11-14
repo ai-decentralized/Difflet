@@ -498,3 +498,186 @@ each run's start and end; `cap/` captures with `engines.json`, `phases.json`, `d
 `*.overlap.json`; `table.json`; `ctl/` the call-path control's three arms, `table.json`,
 `cpuload.log`; `tree_ctl/` and `tree_ctl.diff`; the scratch tools `queue.sh`, `table.py`,
 `dmaq.py`, `overlap.py`, `neffshape.py`, `ctl_queue.sh`, `ctl_table.py`, `cpuload.py`).
+
+## 10. MXFP8 attention: the fork with the exp on ScalarE, G1 re-read, QK^T row tiling
+
+Plan `docs/plans/2026-11-13-mxfp8-attention.md`, Task 4a (rulings BR19, BR20; 2026-11-14).
+
+**The fork takes `allow_vector_exp` again, default False** (commit `29570ed3`). Restored exactly the
+attention_cte code it controls: the argument (on `_attention_cte`, and on `mx_attention_fwd`, which
+passes it through), the `AttnConfig` field, and the condition `ac.allow_vector_exp and
+is_trn3_b1()` under which `mm1_running_max_pos` is allocated. `_exp_impl`'s engine choice was never
+pruned. The default is False at all three (attention_cte's is True), so the fork runs the exp on
+ScalarE like section 9's rebalanced kernel; `allow_vector_exp` left `_REFUSED`. Both MX flags off,
+the fork's device outputs against section 9's rebalanced attention_cte outputs (one process each,
+`fuser` idle before each):
+
+| shape | device | == rebalanced cte, bits | max abs diff vs shipped cte | ms |
+|---|---|---|---|---|
+| `flux_1024` | 7 | identical | 4.9e-4 | 0.811 |
+| `qwen_1024` | 7 | identical | 4.9e-4 | 1.084 |
+| `ltx2_video` | 7 | identical | 4.9e-4 | 1.750 |
+| `wan_81f` | 1 | identical | 3.7e-4 | 51.98 |
+| `hv15_121f` | 9 | identical | 3.7e-4 | 112.37 |
+| `hv1_L` | 7 | identical | 2.4e-4 | 145.32 |
+
+On the NKI simulator, which computes both exps to the same bits, the flags-off tests now compare
+the fork with attention_cte at the same `allow_vector_exp` (both values) and check the engine by
+the exp instructions issued (`nisa.exponential` vs `nisa.activation`).
+
+**G1 re-read** (ruling BR19: the "bf16" is section 9's rebalanced attention_cte). The existing
+`pv_mx` path, unchanged except that it now runs on the rebalanced fork (exp on ScalarE), against
+`--impl cte --cte-no-vector-exp`. Method of sections 8 and 9: 3 processes per arm, median and
+(max - min) / median, flux_1024 and qwen_1024 at 40 calls per process, the rest at 20. The two arms
+of a shape ran on one device and CPU set in one window, alternated per process pair, (fork, cte),
+(cte, fork), (fork, cte) (`4a/pair.sh`; each process is `probe.py`'s worker, `fuser` idle before
+each). Rule (plan, G1): faster = the fork's median below the cte median by more than J = max(2%,
+cte spread). Accuracy against the Task 1 mirror; the threshold is Task 3's, 2.6e-3 on the flat
+case, not widened; peaked = q and k x 2 (BR11), one process.
+
+| shape | path | device (CPUs) | calls | rebalanced cte ms (spread) | fork pv_mx ms (spread) | ratio | J | faster | rel L2 vs mirror, flat (max head) | peaked (max head) | section 8 ratio (vs shipped cte) | pv_mx now / section 8 pv_mx |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `flux_1024` | unbounded | 12 (32-39,128-135) | 40 | 0.824 (0.99%) | 0.8979 (0.45%) | 1.090 | 2% | **no** | 1.01e-3 (1.04e-3) | 4.93e-4 (5.13e-4) | 1.069 | 0.919 |
+| `qwen_1024` | bounded | 12 (32-39,128-135) | 40 | 1.094 (0.49%) | 1.187 (0.61%) | 1.084 | 2% | **no** | 1.00e-3 (1.02e-3) | 4.90e-4 (5.16e-4) | 1.128 | 0.894 |
+| `ltx2_video` | unbounded | 12 (32-39,128-135) | 20 | 1.769 (0.38%) | 2.093 (1.66%) | 1.183 | 2% | **no** | 9.91e-4 (1.01e-3) | 4.74e-4 (5.21e-4) | 1.047 | 0.973 |
+| `wan_81f` | unbounded | 11 (24-31,120-127) | 20 | 51.97 (0.06%) | 75.01 (0.03%) | 1.443 | 2% | **no** | 1.50e-3 (1.55e-3) | 5.16e-4 (5.54e-4) | 1.178 | 1.002 |
+| `hv15_121f` | bounded | 1 (48-55,144-151) | 20 | 112.4 (0.02%) | 162.3 (0.01%) | 1.444 | 2% | **no** | 1.76e-3 (1.78e-3) | 5.38e-4 (5.52e-4) | 1.165 | 0.973 |
+| `hv1_L` | bounded | 10 (16-23,112-119) | 20 | 145.5 (0.02%) | 219.4 (0.01%) | 1.508 | 2% | **no** | 1.90e-3 (1.98e-3) | 5.44e-4 (5.62e-4) | 1.198 | 0.999 |
+
+The cte arm reproduces section 9 (0.824 / 1.094 / 1.769 / 51.97 / 112.4 / 145.5 ms against 0.822 /
+1.086 / 1.765 / 51.97 / 113.0 / 144.7), and each shape's cte output is bit-identical to section 9's
+rebalanced output. Per-process ms, first calls and `fuser` records are in `4a/g1/` (the cte
+processes each re-trace for 2-186 s before the warm call; the fork's hit the trace cache). Flat
+accuracy is better than section 8's on every shape (e.g. wan 1.50e-3 vs 1.93e-3), consistent with
+the ScalarE exp being closer to the mirror's exact exp. The pv_mx kernel itself got 3-11% faster
+at the three short shapes and stayed within 3% at the long ones, while the cte it is compared
+against got 8-21% faster (section 9).
+
+**Decision, G1 (plan rule as written, bf16 = rebalanced cte): PV-only MXFP8 is faster on no shape
+(ratios 1.084-1.508, every row and both paths); G1 fails again, by more than against shipped cte.**
+No row is Broken (all flat rel L2 below 2.6e-3; the largest, hv1_L's max head, is 1.98e-3). The
+plan's rule for this case is unchanged: Task 4's QK-only variant (`qk_mx=True`, PV bf16) before
+stopping (4b). The PV design is not changed here.
+
+**Engine split at wan_81f**, one call. The rebalanced fork's pv_mx NEFF was captured with 3b's
+`capture.sh` on device 11, CPUs 24-31,120-127: the device and CPUs of section 9's rebalanced cte
+capture, which is the comparison. Busy = union of instruction intervals per physical core, over the
+two cores (`engines.py`); "alone" = ms in which it is the only busy engine, on a 50 ns grid
+(section 9's `overlap.py`):
+
+| arm | span ms | TensorE | VectorE | ScalarE | DMA instr | P-transpose DMA queue | busy / span, top three | alone ms |
+|---|---|---|---|---|---|---|---|---|
+| rebalanced cte (section 9) | 51.90 | 45.26 | 42.62 | 39.56 | 7.19 | 43.84 | TensorE 87%, queue 84%, VectorE 82% | queue 0.40, TensorE 0.36 |
+| rebalanced fork, pv_mx | 74.95 | 55.22 | 58.29 | 59.65 | 6.59 | unused | ScalarE 80%, VectorE 78%, TensorE 74% | ScalarE 3.85, TensorE 1.09 |
+
+Per phase, ms (instructions), from `nki_source_location` (3b's `phases.py`):
+
+| row | rebalanced cte | rebalanced fork, pv_mx |
+|---|---|---|
+| MM1 evict, VectorE `TENSOR_SCALAR_CACHE_REDUCE` | 39.42 (163,790) | 40.88 (163,840) |
+| exp, ScalarE `ACTIVATE` | 38.58 (163,760) | 40.08 (163,840) |
+| MM1, TensorE `MATMUL` + `LDWEIGHTS` | 26.91 + 4.50 | 24.23 + 3.59 |
+| MM2, TensorE bf16 `MATMUL` + `LDWEIGHTS` | 28.73 (655,021) + 22.13 | - |
+| MM2, TensorE `MATMUL_MX` + `LDWEIGHTS_MX` | - | 11.11 (163,840) + 7.52 |
+| P transposes, DMA queue `qSyncSpillReload0` | 43.84 | - |
+| P to MX, TensorE fp32 transposes `MATMUL` + `LDWEIGHTS` | - | 31.81 (327,680) + 22.17 |
+| P to MX, ScalarE PSUM `COPY` | - | 24.12 (163,840) |
+| P to MX, VectorE `QUANTIZE_MX` | - | 18.58 (163,840; V adds 640) |
+
+Restoring the ScalarE exp gave shipped attention_cte 18% at wan but gives the pv_mx path nothing
+(75.01 ms here, 74.84 ms with the VectorE exp in section 8). The exp moved to ScalarE, where P's
+PSUM copies already ran, and every engine is now busier than in the rebalanced cte: ScalarE
++20 ms, VectorE +16 ms, TensorE +10 ms. MX's saving on MM2 (bf16 51 ms of TensorE -> 19 ms) and
+the removed P transposes ran on TensorE and the DMA queue. P's re-layout and quantization
+(TensorE 54 ms, ScalarE 24 ms, VectorE 19 ms) cost more than that, and no engine has room left to
+absorb them.
+
+**QK^T row tiling, feasibility (Task 4 Step 1).** At head dim 128 an x4 MX operand of MM1 spans
+32 partitions (128 d / 4 per packed element), so one `nc_matmul_mx` uses a quarter of the PE rows;
+row tiling runs four in the four row quadrants. `scripts/mx_attention/row_tiling.py` is a minimal
+kernel with the brief's ISA constraints applied verbatim: `tile_size=(32, 128)` (the stationary's 32
+partitions set the row tile), stationary, moving and both scales at SBUF partition `start_row` =
+0/32/64/96 with `tile_position=(start_row, 0)` (a quadrant's scales are its first 4 partitions),
+stationary free size 128 (> 64), no `.indirect()`, and the four `[128, 512]` fp32 score tiles in
+PSUM banks 0-3 (one bank each). Operands reach SBUF in the group-of-4 layout of the fork's `qk_perm`
+(partition g byte j = head-dim index 4g + j; bf16 laid out on the host, `quantize_mx` on chip), and
+each matmul group is issued 16 times, accumulating. Variants, each the same 33.5 M MACs per group:
+
+- **keys**: one 128-query tile (stationary, the same in all four quadrants) x four 512-key tiles
+  (moving, tile t in quadrant t): one of the fork's 2048-key large tiles.
+- **queries**: four 128-query tiles (stationary, tile t in quadrant t) x one 512-key tile.
+- **bf16**: the fork's MM1 today on the keys problem, four `nc_matmul`
+  `[128 d, 128 q] x [128 d, 512 k]`; **bf16_one** (`4a/rowtile/bf16_one.py`, not in the repo): one
+  `nc_matmul` over all 2048 keys (moving free 2048, four PSUM banks; it compiles).
+- **untiled** (control): the keys operands' bytes in one full-array `nc_matmul_mx` (contraction over
+  all 128 partitions: the four tiles summed).
+- `--reload`: two copies of the stationary alternated per group, so it is loaded again every group
+  (without it the compiler loads it once: 4 `LDWEIGHTS_MX` for 64 `MATMUL_MX`). The fork's bf16 MM1
+  at wan_81f issues ~0.6 `LDWEIGHTS` per `MATMUL` (96,894 / 163,791, section 9's capture), between
+  the two.
+
+Accuracy: rel L2 against 16 x the fp64 product of the CPU-quantized operands
+(`difflet.quant.mx.fake_quantize_mx` along d, `qk_perm`), overall and per score tile:
+
+| variant | Python simulator | neuronx-cc + BIRSim | device | per tile, device | vs exact product, device |
+|---|---|---|---|---|---|
+| keys | 9.87e-8 | 9.87e-8 | 1.988e-4 | 1.978e-4 .. 1.992e-4 | 3.79e-2 |
+| queries | 9.72e-8 | 9.72e-8 | 1.974e-4 | 1.964e-4 .. 1.980e-4 | 3.76e-2 |
+| untiled | 1.31e-7 | 1.31e-7 | 1.986e-4 | (one tile) | 3.78e-2 |
+| bf16 | 1.44e-7 | 1.43e-7 | 1.34e-7 | 1.34e-7 | 1.34e-7 |
+
+(`--reload` gives the same values. Device: torch-neuronx `wrap_nki` on device 8 (core 32), and
+again on device 9 (core 36) after the script's last edit, identical.) All variants compile with
+neuronx-cc 2.28 for trn3 at LNC=2 and match their reference in BIRSim to fp32 summation order. On
+the device the MX variants sit 2.0e-4 from the CPU reference, the same for the full-array control
+and in every quadrant, so this gap is how `nc_matmul_mx` computes on the device (BIRSim models it
+exactly), not the tiling. It is 190x below the MX quantization error itself (3.8e-2 against the
+exact product); for scale, Task 3's threshold on the attention output is 2.6e-3. The device trace
+confirms the placement: each group's four `MATMUL_MX` carry `row_grp=q0/q32/q64/q96`, a `32*128`
+tile, SBUF operands at partitions 0/32/64/96 (address >> 18), and PSUM banks 0/1/2/3.
+
+TensorE time (neuron-explorer capture of each BIRSim compile's NEFF on device 8, 3b's
+`capture.sh`; per physical core of the LNC=2 pair; steady-state period = (start of the 16th group -
+start of the 1st) / 15; first group = first TensorE instruction to the end of the group's last
+matmul):
+
+| variant | period per group, ns (core 0 / 1) | / bf16 | first group, ns | `MATMUL*` median ns (count) | overlap of the group's matmuls |
+|---|---|---|---|---|---|
+| keys | 293.5 / 290.3 | 0.32 | 704 / 703 | 393 (64) | 5.85 |
+| keys `--reload` | 310.5 / 272.0 | 0.32 | 703 / 704 | 387 (64) | 5.94 |
+| queries | 309.5 / 268.9 | 0.32 | 705 / 703 | 418 (64) | 5.71 |
+| queries `--reload` | 276.9 / 295.1 | 0.31 | 704 / 705 | 386 (64) | 6.12 |
+| untiled (control) | 286.5 / 279.4 | 0.31 | 698 / 700 | 381 (16) | 1.55 |
+| untiled `--reload` | 439.5 / 451.5 | 0.49 | 697 / 700 | 631 (16) | 1.43 |
+| bf16 (4 x 512 keys) | 899.1 / 925.5 | 1 | 1593 / 1908 | 377 (64) | 1.70 |
+| bf16 `--reload` | 901.6 / 917.9 | 1.00 | 1631 / 1875 | 378 (64) | 1.71 |
+| bf16_one (1 x 2048 keys) | - (one group) | - | 1571 / 1875 | 1538 / 1843 (1) | - |
+
+The four quadrant matmuls run concurrently: they start within ~10 ns of each other and overlap
+~6x. One row-tiled MX group computes the bf16 group's MACs in 0.32x its TensorE time in steady
+state (3.1x the throughput), the same as the full-array MX control (0.31x), with or without a
+stationary reload every group; on first issue it takes 704 ns against 1,571-1,875 ns for one bf16
+`nc_matmul` of the same logical size (0.37-0.45x). So the MX rate is not 4x per MAC here: a group
+of four 512-column MX matmuls takes ~290 ns, where one 512-column bf16 matmul takes ~228 ns (912 / 4).
+
+PSUM. The fork's MM1 score tiles rotate through `_MM1_PSUM_BANKS_WIDE` (0, 1, 2, 3, 5, 6) (or
+0-3), bank `(large_tile * 4 + k_tile) % len(banks)`, with no query group in the address; MM2 owns
+bank 4 and pv_mx's P transposes bank 7. **Four key tiles** are exactly one group's large tile: its
+four score tiles always land in four distinct banks, clear of 4 and 7 (`check_psum`, both
+policies). **Four query tiles** at one key tile land in one bank under that policy, so they would
+need a new allocation (four groups' score tiles in flight at once, 16 per large tile against six
+banks) and four query groups' row max / exp in lockstep, against the fork's per-group pipeline.
+
+**Verdict, Step 1: row tiling is feasible** (compile, BIRSim and device). Four key tiles sharing the
+array fit the fork as it is (one large tile, its PSUM banks); four query tiles compile and run as
+fast but do not fit the fork's PSUM bank policy or its per-group pipeline. The TensorE gain on MM1
+is ~3.1x, not 4x.
+
+Outputs: `/mnt/nvme/difflet-mxattn/probe/4a/` (`ident/` flags-off identity runs and
+`identity.json`; `pv_peak/` the peaked pv_mx runs, which were also the cold compiles; `g1/` the
+pairs, `runs.log` with `uptime` and `fuser` at every process's start and end, `acc_<shape>.json`,
+`g1.json`; `cap/wan_pv/` the capture with `engines.json`, `phases.json`, `dmaq.json` and
+`cap/wan_pv.overlap.json`; `rowtile/` the micro-kernel's sim / BIRSim / device JSONs and logs,
+compile artifacts, `cap/<variant>/` captures, `cap/tensore.json`, `bf16_one.py`; the scratch tools
+`queue.sh`, `pair.sh`, `identity.py`, `g1.py`, `rowtile/{birsim_all,device_all,capture_all}.sh`,
+`rowtile/tensore.py`, `sim/count_exp.py`).
