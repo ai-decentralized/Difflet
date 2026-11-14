@@ -102,4 +102,13 @@ def mx_attention_reference(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, *,
     return (acc * row_sum.reciprocal()).to(q.dtype)
 
 
-__all__ = ["mx_attention_reference"]
+def smooth_keys(k: torch.Tensor) -> torch.Tensor:
+    """K minus its mean over the keys (dim -2), in fp32, rounded once to k's dtype: the torch side
+    of ``qk_mx`` (SageAttention's K smoothing). Each query's scores shift by one constant, so
+    softmax is unchanged, while a channel bias shared by all keys stops inflating their MX block
+    scales. Give it the real keys only (smooth before any zero padding)."""
+    kf = k.float()
+    return (kf - kf.mean(dim=-2, keepdim=True)).to(k.dtype)
+
+
+__all__ = ["mx_attention_reference", "smooth_keys"]

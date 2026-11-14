@@ -10,7 +10,7 @@ import torch
 import torch.nn.functional as F
 
 from difflet.quant.mx import swizzle_perm
-from difflet.quant.mx_attention import mx_attention_reference
+from difflet.quant.mx_attention import mx_attention_reference, smooth_keys
 
 BH, S, D = 2, 1024, 128
 SCALE = D ** -0.5
@@ -54,6 +54,28 @@ def test_k_smoothing_alone_changes_nothing():
     base = mx_attention_reference(q, k, v, scale=SCALE, **MX_OFF)
     smoothed = mx_attention_reference(q, k - k.mean(dim=1, keepdim=True), v, scale=SCALE, **MX_OFF)
     torch.testing.assert_close(smoothed, base, atol=1e-5, rtol=1e-5)
+    torch.testing.assert_close(mx_attention_reference(q, smooth_keys(k), v, scale=SCALE, **MX_OFF),
+                               base, atol=1e-5, rtol=1e-5)
+
+
+def test_smooth_keys_subtracts_the_key_mean_in_fp32_and_rounds_once():
+    """What the qk_mx call path hands the kernel (plan Task 4 Step 2): K minus its mean over the
+    keys (dim -2), computed in fp32 and rounded once to k's dtype; with a large channel bias it
+    shrinks the MX error of the scores."""
+    g = torch.Generator().manual_seed(3)
+    k = (torch.randn(2, 3, 640, D, generator=g) + 4 * torch.randn(1, 1, 1, D, generator=g)).bfloat16()
+    kf = k.float()
+    got = smooth_keys(k)
+    assert got.dtype == torch.bfloat16 and got.shape == k.shape
+    assert torch.equal(got, (kf - kf.mean(dim=-2, keepdim=True)).bfloat16())
+    q, v = (torch.randn(6, 640, D, generator=g).bfloat16() for _ in range(2))
+    err = {}
+    for name, kk in (("raw", k), ("smoothed", got)):
+        kk = kk.flatten(0, 1)
+        exact = mx_attention_reference(q, kk, v, scale=SCALE, **MX_OFF).float()
+        mx = mx_attention_reference(q, kk, v, scale=SCALE, qk_mx=True, pv_mx=False).float()
+        err[name] = ((mx - exact).norm() / exact.norm()).item()
+    assert err["smoothed"] < err["raw"] / 2, err
 
 
 @pytest.mark.parametrize("section_len", [None, 512])

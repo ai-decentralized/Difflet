@@ -18,7 +18,8 @@
 # Pruned to the subset Difflet calls (Step 6): every branch of a feature ``_check_difflet_subset``
 # refuses is gone, the subset's instruction stream unchanged. Added: Difflet's entry point
 # ``mx_attention_fwd``, the MX block membership ``qk_perm`` / ``pv_perm``, MM2 on ``nc_matmul_mx``
-# (``pv_mx``: ``_mx_load_v``, ``_mx_quantize_p``).
+# (``pv_mx``: ``_mx_load_v``, ``_mx_quantize_p``), MM1 on ``nc_matmul_mx`` with row tiling
+# (``qk_mx``: ``_mx_load_q``, ``_mx_load_k``, ``_mx_swizzle_quantize``).
 
 """
 Attention Kernel For Context Encoding (Prefill), Difflet's subset of nkilib's attention_cte
@@ -42,6 +43,8 @@ THE SUBSET:
   ``bound_min[i] <= j < bound_max[i]``, masked with range_select; that path takes scale 1.0.
 - ``pv_mx``: MM2 on ``nc_matmul_mx``, P and V MX-quantized per 512-key tile (MXFP8 attention
   plan, Task 3).
+- ``qk_mx``: MM1 on ``nc_matmul_mx``, Q and K MX-quantized on load along the head dim, each large
+  tile's four 512-key tiles in the four row quadrants of the PE array (plan Task 4).
 - ``allow_vector_exp`` as attention_cte has it, but default False: the exp on the Scalar Engine
   (rulings BR19 / BR20).
 
@@ -148,10 +151,8 @@ def mx_attention_fwd(q, k, v, *, scale, bound_min=None, bound_max=None, pv_mx: b
     is attention_cte unchanged at the same ``allow_vector_exp``. That is attention_cte's switch,
     default False here: the exp on the Scalar Engine, off the Vector Engine that binds shipped
     attention_cte (MXFP8 attention plan, rulings BR19 / BR20)."""
-    kernel_assert(not qk_mx, "qk_mx: MM1 on nc_matmul_mx is not implemented yet (MXFP8 attention "
-                  "plan, Task 4)")
     return _attention_cte(q=q, k=k, v=v, scale=scale, causal_mask=False, tp_q=True, tp_k=True,
-                          bound_min=bound_min, bound_max=bound_max, pv_mx=pv_mx,
+                          bound_min=bound_min, bound_max=bound_max, pv_mx=pv_mx, qk_mx=qk_mx,
                           allow_vector_exp=allow_vector_exp)
 
 
@@ -166,7 +167,7 @@ if _psum_num_banks() == 7:
 # ``nc_matmul_mx`` in the group-of-4 layout (nkilib's ``swizzle_quantize_mx``: partition g, byte j
 # of the x4 operand holds contraction index 4g + j), and ``quantize_mx`` blocks 8 partitions x 4
 # bytes, so block b is indices 32b..32b+31. Locked on the device by
-# scripts/mx_attention/membership.py (rerun on MM2's own loaders, ruling BR16).
+# scripts/mx_attention/membership.py (rerun on MM2's own loaders, ruling BR16, and on MM1's, Task 4).
 def qk_perm(d: int):
     """MM1's blocks along the head dim (Q and K)."""
     import torch
@@ -229,6 +230,74 @@ def _mx_quantize_p(data, scale, psum, stage, src, src_offset, num_q, num_keys):
     nisa.quantize_mx(dst=data, src=stage.view(nl.bfloat16), dst_scale=scale)
 
 
+# MM1 (``qk_mx``) contracts over the head dim: at d = 128 an x4 operand spans 32 partitions, so one
+# nc_matmul_mx fills a quarter of the PE rows, and four run at once in the row quadrants
+# (tile_size (32, 128), tile_position (32 t, 0); operands and scales at partition 32 t). The four
+# share one query group (the stationary, repeated in every quadrant) and take a large tile's four
+# 512-key tiles (the moving operands, tile t in quadrant t): their score tiles are the large
+# tile's, in its four PSUM banks (scripts/mx_attention/row_tiling.py, plan Task 4 Step 1).
+_QUADRANT = 32  # PE rows per row tile, = the x4 operand's partitions at d = 128
+_SCALE_ROWS = _QUADRANT // 8  # a quadrant's MX scales sit in its first 4 partitions
+
+
+def _mx_swizzle_quantize(data, scale, psum, stage, src):
+    """Four quadrants of MM1's x4 operand at once (``qk_mx``): ``src`` ``[128 rows, 4 * 128]``
+    bf16, block t in columns ``128 t ..`` -> ``data`` x4 + ``scale`` uint8, ``[128, 128]`` each
+    (``data``/``scale`` may be a 128-column slice of a wider tile), partition ``32 t + g`` element
+    ``r`` = block t's row ``r``, head-dim indices ``4g .. 4g + 3``. nkilib's ``swizzle_quantize_mx``
+    on explicit buffers, the four blocks in the same two stride-2 TensorE transposes of the fp32
+    view (into ``psum``, ``[128, 256]`` fp32), one ScalarE copy to ``stage`` (``[128, 256]``
+    fp32) and one ``quantize_mx``."""
+    src32 = src.view(nl.float32)
+    for h in range(2):
+        nisa.nc_transpose(dst=psum.slice(dim=1, start=h, end=256, step=2),
+                          data=src32.slice(dim=1, start=h, end=256, step=2))
+    nisa.tensor_copy(dst=stage, src=psum, engine=nisa.scalar_engine)
+    nisa.quantize_mx(dst=data, src=stage.view(nl.bfloat16), dst_scale=scale)
+
+
+def _mx_load_q(q, data, scale, psum, stage, nat, row_offset, num_rows):
+    """MM1's stationary for one query group (``qk_mx``): rows ``[row_offset, row_offset +
+    num_rows)`` of the HBM ``q`` (flat ``[rows, d]``) -> ``data`` ``[128, 128]`` x4 + ``scale``,
+    quantized along the head dim and repeated in the four quadrants (quadrant t's partition ``32 t
+    + g``, element r = query r's indices ``4g .. 4g + 3``). One DMA reads the rows four times into
+    ``nat`` ``[128, 4 d]`` (queries on partitions; rows past ``num_rows`` zero, so a partial group
+    still gives the stationary all 128 columns the row tiling needs), then
+    ``_mx_swizzle_quantize``."""
+    d = q.shape[-1]
+    if num_rows < nat.shape[0]:
+        nisa.memset(nat, value=0.0, engine=nisa.gpsimd_engine)
+    nisa.dma_copy(dst=nat.ap(pattern=[[4 * d, num_rows], [d, 4], [1, d]], offset=0),
+                  src=q.ap(pattern=[[d, num_rows], [0, 4], [1, d]], offset=row_offset * d))
+    _mx_swizzle_quantize(data, scale, psum, stage, nat)
+
+
+def _mx_load_k(k, data, scale, psum, stage, nat, row_offset, num_keys):
+    """MM1's moving operands for one 2048-key large tile (``qk_mx``): keys ``[row_offset,
+    row_offset + num_keys)`` of the HBM ``k`` (flat ``[rows, d]``) -> ``data`` ``[128, 512]`` x4 +
+    ``scale``, the large tile's 512-key tile t in quadrant t (partition ``32 t + g``, element n =
+    key ``512 t + n``'s indices ``4g .. 4g + 3``), keys at or past ``num_keys`` zero. Per 128-key
+    chunk c (``nat[c]``, ``stage[c]``, ``psum[c % 2]``): one DMA brings rows ``128 c ..`` of the
+    four tiles (``nat`` ``[128, 4 d]``, tile t in columns ``d t ..``), then
+    ``_mx_swizzle_quantize`` into columns ``128 c ..``."""
+    d = k.shape[-1]
+    for c in range(4):
+        rows = [min(max(num_keys - (_K_TILE_SZ * t + 128 * c), 0), 128) for t in range(4)]
+        if min(rows) == 128:
+            nisa.dma_copy(dst=nat[c].ap(pattern=[[4 * d, 128], [d, 4], [1, d]], offset=0),
+                          src=k.ap(pattern=[[d, 128], [_K_TILE_SZ * d, 4], [1, d]],
+                                   offset=(row_offset + 128 * c) * d))
+        else:
+            nisa.memset(nat[c], value=0.0, engine=nisa.gpsimd_engine)
+            for t in range(4):
+                if rows[t] > 0:
+                    nisa.dma_copy(dst=nat[c].ap(pattern=[[4 * d, rows[t]], [1, d]], offset=t * d),
+                                  src=k.ap(pattern=[[d, rows[t]], [1, d]],
+                                           offset=(row_offset + _K_TILE_SZ * t + 128 * c) * d))
+        _mx_swizzle_quantize(data[:, nl.ds(128 * c, 128)], scale[:, nl.ds(128 * c, 128)],
+                             psum[c % 2], stage[c], nat[c])
+
+
 #: attention_cte's arguments outside the subset, refused by name whatever their value.
 _REFUSED = (
     "k_prior", "v_prior", "prior_used_len",  # prefix caching
@@ -282,6 +351,7 @@ def _attention_cte(
     bound_min=None,
     bound_max=None,
     pv_mx: bool = False,
+    qk_mx: bool = False,
     allow_vector_exp: bool = False,
     **refused,
 ):
@@ -292,6 +362,7 @@ def _attention_cte(
       bound_min, bound_max: optional int32 ``[batch, seqlen_q, 1]``: query i attends keys
         ``bound_min[i] <= j < bound_max[i]``.
       pv_mx: MM2 on nc_matmul_mx: P and V MX-quantized per 512-key tile.
+      qk_mx: MM1 on nc_matmul_mx: Q and K MX-quantized on load along the head dim, row-tiled.
       allow_vector_exp: attention_cte's switch: allow the Vector Engine exp on trn3. False (the
         fork's default; attention_cte's is True) uses the Scalar Engine.
       causal_mask, tp_q, tp_k, **refused: accepted only at the subset's values (``False``, ``True``,
@@ -338,10 +409,15 @@ def _attention_cte(
         is_sequence_packed=is_sequence_packed,
         allow_vector_exp=allow_vector_exp,
         pv_mx=pv_mx,
+        qk_mx=qk_mx,
     )
     if pv_mx:
         kernel_assert(d_v == _D_TILE_SZ, f"pv_mx takes d_v {_D_TILE_SZ}, got {d_v=}")
         kernel_assert(_psum_num_banks() == 8, "pv_mx transposes P through PSUM bank 7")
+    if qk_mx:
+        kernel_assert(_psum_num_banks() == 8 and d_v <= _V_D_TILE_SZ,
+                      "qk_mx transposes Q and K through PSUM bank 7 (6 with pv_mx): eight banks, "
+                      "MM2 in bank 4 alone")
 
     grid_ndim, num_shard, shard_id = get_verified_program_sharding_info("attention_cte", max_sharding=2)
 
@@ -401,6 +477,7 @@ class AttnConfig(nl.NKIObject):
 
     allow_vector_exp: bool = False  # Difflet: default False (attention_cte's is True)
     pv_mx: bool = False  # Difflet: MM2 on nc_matmul_mx, P and V MX-quantized per 512-key tile
+    qk_mx: bool = False  # Difflet: MM1 on nc_matmul_mx, Q and K MX-quantized along d, row-tiled
 
 
 def _attention_cte_impl(
@@ -503,7 +580,10 @@ def _attention_cte_impl(
         sbuf_addr = allocator.get_current_address()
 
         # Load K and V for the section from HBM
-        _load_k_tile(k_active, bufs.k_sb, batch_id, sp, atp.num_k_tiles_per_section)
+        if ac.qk_mx:
+            _load_k_tile_mx(k_active, bufs, batch_id, sp, atp)
+        else:
+            _load_k_tile(k_active, bufs.k_sb, batch_id, sp, atp.num_k_tiles_per_section)
         if ac.pv_mx:
             _load_v_tile_mx(v_active, bufs, batch_id, sp, atp)
         else:
@@ -605,6 +685,17 @@ class AttnInternalBuffers(nl.NKIObject):
     p_scale = None  # P's MX scales, same indexing
     p_psum = None  # two [128, 256] fp32 halves of PSUM bank 7 for P's transposes
 
+    # MM1 on nc_matmul_mx (ac.qk_mx); k_sb and q_sb are not allocated
+    k_mx = None  # K's x4 data per large tile, its 512-key tile t in quadrant t
+    k_scale = None  # K's MX scales, same indexing
+    k_nat = None  # K rows as loaded per (large tile, 128-key chunk): the four tiles side by side
+    k_stage = None  # K's swizzled fp32 stage between PSUM and quantize_mx, per chunk
+    q_mx = None  # Q's x4 data per query group, repeated in the four quadrants
+    q_scale = None  # Q's MX scales, same indexing
+    q_nat = None  # Q rows as loaded, four copies side by side
+    q_stage = None  # Q's swizzled fp32 stage
+    qk_psum = None  # two [128, 256] fp32 halves of one PSUM bank for Q's and K's transposes
+
 
 @dataclass
 class SectionParams(nl.NKIObject):
@@ -652,6 +743,7 @@ class AttnTileParams(nl.NKIObject):
     # PSUM banks MM1 rotates its score tiles through. (0, 1, 2, 3) is the original
     # behaviour; six banks let MM1 run further ahead of the Vector evict.
     mm1_psum_banks: tuple = None
+    qk_tp_bank: int = None  # qk_mx: the PSUM bank of Q's and K's transposes, outside MM1's
 
     # Section
     section_len: int = None  # Length of section, typically 8k if multiple sections, else same as k seqlen
@@ -758,6 +850,13 @@ def _compute_tile_parameters(
         if (atp.mm2_accum_in_psum and num_mm2_d_tiles == 1 and _psum_num_banks() == 8)
         else tuple(range(_NUM_K_TILES_IN_LARGE_TILE))
     )
+    if ac.qk_mx:
+        # Q's and K's transposes take bank 7, or with pv_mx (P's transposes hold 7) bank 6 from MM1,
+        # which keeps five: any four consecutive tiles of the rotation still land on distinct banks.
+        atp.qk_tp_bank = 6 if ac.pv_mx else 7
+        atp.mm1_psum_banks = tuple(b for b in atp.mm1_psum_banks if b != atp.qk_tp_bank)
+        kernel_assert(len(atp.mm1_psum_banks) >= _NUM_K_TILES_IN_LARGE_TILE and 4 not in atp.mm1_psum_banks,
+                      f"qk_mx: a large tile's four score tiles need four MM1 banks, got {atp.mm1_psum_banks}")
 
     return atp
 
@@ -819,13 +918,30 @@ def _allocate_attention_buffers(
     mm2_p, mm2_n = atp.sb_p, atp.d_tile_size_free_dim
 
     p_k, n_k = atp.d_tile_size_par_dim, _K_TILE_SZ  # d is reduction dim for MM1
-    bufs.k_sb = allocator.alloc_sbuf_tensor(
-        shape=(p_k, n_k),
-        dtype=nl.bfloat16,
-        block_dim=[atp.num_k_tiles_per_section, atp.num_d_tiles],
-        num_free_tiles=[atp.num_k_tiles_per_section, atp.num_d_tiles],
-        align_to=32,  # align for dma transpose
-    )
+    if ac.qk_mx:
+        # the section's K, quantized once per large tile and shared by every query group
+        nlt = atp.num_large_tiles_per_section
+        k_free = _LARGE_TILE_SZ // 4  # x4 elements: a 512-key tile per quadrant
+        bufs.k_mx = allocator.alloc_sbuf_tensor(
+            shape=(atp.sb_p, k_free), dtype=nl.float8_e4m3fn_x4, block_dim=[nlt], num_free_tiles=[nlt]
+        )
+        bufs.k_scale = allocator.alloc_sbuf_tensor(
+            shape=(atp.sb_p, k_free), dtype=nl.uint8, block_dim=[nlt], num_free_tiles=[nlt]
+        )
+        bufs.k_nat = allocator.alloc_sbuf_tensor(
+            shape=(atp.sb_p, 4 * ac.d), dtype=nl.bfloat16, block_dim=[nlt, 4], num_free_tiles=[1, 2]
+        )
+        bufs.k_stage = allocator.alloc_sbuf_tensor(
+            shape=(atp.sb_p, 2 * atp.sb_p), dtype=nl.float32, block_dim=[nlt, 4], num_free_tiles=[1, 2]
+        )
+    else:
+        bufs.k_sb = allocator.alloc_sbuf_tensor(
+            shape=(p_k, n_k),
+            dtype=nl.bfloat16,
+            block_dim=[atp.num_k_tiles_per_section, atp.num_d_tiles],
+            num_free_tiles=[atp.num_k_tiles_per_section, atp.num_d_tiles],
+            align_to=32,  # align for dma transpose
+        )
 
     if ac.pv_mx:
         v_tiles = atp.num_v_tiles_per_section
@@ -850,13 +966,38 @@ def _allocate_attention_buffers(
             num_free_tiles=[atp.num_v_tiles_per_section, atp.num_d_tiles_free_dim],
         )
 
-    bufs.q_sb = allocator.alloc_sbuf_tensor(
-        shape=(atp.d_tile_size_par_dim, atp.sb_p * atp.num_q_grps_per_load),
-        dtype=nl.bfloat16,
-        block_dim=[div_ceil(atp.num_grps, atp.num_q_grps_per_load), atp.num_d_tiles],
-        num_free_tiles=[2, atp.num_d_tiles],
-        align_to=32,  # align for dma transpose
-    )
+    if ac.qk_mx:
+        # one query group at a time; its stationary keeps all 128 columns (row tiling needs > 64)
+        q_blocks, q_free = [atp.num_grps], [2]
+        bufs.q_nat = allocator.alloc_sbuf_tensor(
+            shape=(atp.sb_p, 4 * ac.d), dtype=nl.bfloat16, block_dim=q_blocks, num_free_tiles=q_free
+        )
+        bufs.q_stage = allocator.alloc_sbuf_tensor(
+            shape=(atp.sb_p, 2 * atp.sb_p), dtype=nl.float32, block_dim=q_blocks, num_free_tiles=q_free
+        )
+        bufs.q_mx = allocator.alloc_sbuf_tensor(
+            shape=(atp.sb_p, _Q_GRP_SZ), dtype=nl.float8_e4m3fn_x4, block_dim=q_blocks, num_free_tiles=q_free
+        )
+        bufs.q_scale = allocator.alloc_sbuf_tensor(
+            shape=(atp.sb_p, _Q_GRP_SZ), dtype=nl.uint8, block_dim=q_blocks, num_free_tiles=q_free
+        )
+        bufs.qk_psum = [
+            nl.ndarray(
+                (atp.sb_p, 2 * atp.sb_p),
+                dtype=nl.float32,
+                buffer=nl.psum,
+                address=(0, atp.qk_tp_bank * PSUM_BANK_SIZE + half * PSUM_BANK_SIZE // 2),
+            )
+            for half in range(2)
+        ]
+    else:
+        bufs.q_sb = allocator.alloc_sbuf_tensor(
+            shape=(atp.d_tile_size_par_dim, atp.sb_p * atp.num_q_grps_per_load),
+            dtype=nl.bfloat16,
+            block_dim=[div_ceil(atp.num_grps, atp.num_q_grps_per_load), atp.num_d_tiles],
+            num_free_tiles=[2, atp.num_d_tiles],
+            align_to=32,  # align for dma transpose
+        )
 
     bufs.flash_attn_correction_factor = allocator.alloc_sbuf_tensor(
         shape=(atp.sb_p, 1),
@@ -1203,8 +1344,35 @@ def _load_v_tile_mx(v, bufs, batch_id, sp: SectionParams, atp: AttnTileParams):
             )
 
 
+def _load_k_tile_mx(k, bufs, batch_id, sp: SectionParams, atp: AttnTileParams):
+    """qk_mx: the section's K, quantized per large tile on load (``_mx_load_k``); the last tile's
+    missing keys are zero."""
+    _, seqlen, _ = k.shape
+    for large_tile_idx in range(atp.num_large_tiles_per_section):
+        start = sp.section_offset + large_tile_idx * _LARGE_TILE_SZ
+        if start < seqlen:
+            _mx_load_k(
+                k,
+                bufs.k_mx[large_tile_idx],
+                bufs.k_scale[large_tile_idx],
+                bufs.qk_psum,
+                bufs.k_stage[large_tile_idx],
+                bufs.k_nat[large_tile_idx],
+                row_offset=batch_id * seqlen + start,
+                num_keys=min(seqlen - start, _LARGE_TILE_SZ),
+            )
+
+
 def _load_q_impl(grp_i, atp: AttnTileParams, bufs: AttnInternalBuffers, q, batch_id, sbuf_addr):
-    """Load Q group from HBM to SBUF, every num_q_grps_per_load groups."""
+    """Load Q group from HBM to SBUF, every num_q_grps_per_load groups; with qk_mx, quantize
+    every group on its own (``_mx_load_q``)."""
+    if bufs.q_mx is not None:
+        _, seqlen, _ = q.shape
+        start = grp_i * _Q_GRP_SZ
+        _mx_load_q(q, bufs.q_mx[grp_i], bufs.q_scale[grp_i], bufs.qk_psum[grp_i % 2], bufs.q_stage[grp_i],
+                   bufs.q_nat[grp_i], row_offset=batch_id * seqlen + start,
+                   num_rows=min(seqlen - start, _Q_GRP_SZ))
+        return
     if grp_i % atp.num_q_grps_per_load == 0:
         _load_q_tile(q, bufs.q_sb, batch_id, grp_i, grp_i * _Q_GRP_SZ, sbuf_addr,
                      grps_per_load=atp.num_q_grps_per_load)
@@ -1747,17 +1915,31 @@ def _qk_and_max_large_tile_impl(
         num_f = min(tile.num_valid_k, _K_TILE_SZ)
 
         # Step 1: MM1 matmul
-        k_tile_to_use = bufs.k_sb[k_tile_idx_in_section]
-        for d_tile in range(atp.num_d_tiles):
-            d_chunk = min(atp.d_tile_size_par_dim, ac.d - d_tile * atp.d_tile_size_par_dim)
-            nisa.nc_matmul(
-                mm1_psum_tile[:num_p, :num_f],
-                bufs.q_sb[qkmax_grp // atp.num_q_grps_per_load][d_tile][
-                    :d_chunk,
-                    nl.ds((qkmax_grp % atp.num_q_grps_per_load) * _Q_GRP_SZ, num_p),
-                ],
-                k_tile_to_use[d_tile][:d_chunk, :num_f],
+        if ac.qk_mx:
+            # row tiling: tile k_tile_idx of the large tile in quadrant k_tile_idx, the group's Q
+            # (all 128 columns; rows past num_p are never evicted) as its stationary
+            row = k_tile_idx * _QUADRANT
+            nisa.nc_matmul_mx(
+                dst=mm1_psum_tile[:, :num_f],
+                stationary=bufs.q_mx[qkmax_grp][nl.ds(row, _QUADRANT), :],
+                moving=bufs.k_mx[large_tile_idx][nl.ds(row, _QUADRANT), nl.ds(0, num_f)],
+                stationary_scale=bufs.q_scale[qkmax_grp][nl.ds(row, _SCALE_ROWS), :],
+                moving_scale=bufs.k_scale[large_tile_idx][nl.ds(row, _SCALE_ROWS), nl.ds(0, num_f)],
+                tile_position=(row, 0),
+                tile_size=(_QUADRANT, _Q_GRP_SZ),
             )
+        else:
+            k_tile_to_use = bufs.k_sb[k_tile_idx_in_section]
+            for d_tile in range(atp.num_d_tiles):
+                d_chunk = min(atp.d_tile_size_par_dim, ac.d - d_tile * atp.d_tile_size_par_dim)
+                nisa.nc_matmul(
+                    mm1_psum_tile[:num_p, :num_f],
+                    bufs.q_sb[qkmax_grp // atp.num_q_grps_per_load][d_tile][
+                        :d_chunk,
+                        nl.ds((qkmax_grp % atp.num_q_grps_per_load) * _Q_GRP_SZ, num_p),
+                    ],
+                    k_tile_to_use[d_tile][:d_chunk, :num_f],
+                )
 
         # Step 2: Masking + scale + max reduce
         # Row-max chain: reset on the first chained tile, accumulate (reduce) on the rest, and read out

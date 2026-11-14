@@ -97,9 +97,12 @@ def test_allow_vector_exp_is_accepted_and_defaults_to_the_scalar_exp(monkeypatch
 
 
 @pytest.mark.parametrize("pv_mx", [False, True])
-def test_qk_mx_is_refused_until_mm1_lands(pv_mx):
-    with pytest.raises(AssertionError, match="qk_mx: MM1 on nc_matmul_mx"):
-        fork.mx_attention_fwd.func(Q, K, V, scale=1.0, pv_mx=pv_mx, qk_mx=True)
+def test_qk_mx_is_passed_through_with_pv_mx(pv_mx, monkeypatch):
+    """Task 4 Step 2: ``qk_mx`` is no longer refused; QK-only and QK+PV reach the kernel."""
+    seen = []
+    monkeypatch.setattr(fork, "_attention_cte", lambda **kw: seen.append((kw["qk_mx"], kw["pv_mx"])))
+    fork.mx_attention_fwd.func(Q, K, V, scale=1.0, pv_mx=pv_mx, qk_mx=True)
+    assert seen == [(True, pv_mx)]
 
 
 def test_entry_point_keeps_attention_cte_compile_options():
@@ -187,6 +190,83 @@ def test_pv_mx_simulated_matches_the_mirror(case):
     bf16 = mx_attention_reference(q, k, v, scale=scale, qk_mx=False, pv_mx=False, **kw).float()
     assert _rel(out, mirror) < 2e-3, _rel(out, mirror)
     assert _rel(out, bf16) > 4 * _rel(out, mirror)
+
+
+@pytest.mark.parametrize("pv_mx", [False, True])
+@pytest.mark.parametrize("case, lnc", [("partial", 1), ("bounded", 1), ("sections", 1),
+                                       ("lnc2_odd_bounded", 2)])
+def test_qk_mx_simulated_matches_the_mirror(case, lnc, pv_mx):
+    """MM1 on nc_matmul_mx (Task 4 Step 2): Q and K MX-quantized on load along the head dim by
+    ``qk_perm``, QK-only and QK+PV, equal the Task 1 mirror to summation order, and are not the
+    kernel without ``qk_mx``. Covers a partial query group (602 = 4 x 128 + 90 rows) and a partial
+    key tile, bounds with ``bound_max % 32 != 0``, two flash sections, and the LNC2 split of an odd
+    batch (per-group Q loads on the seqlen-sharded path)."""
+    from difflet.quant.mx_attention import mx_attention_reference
+
+    bh, s_q, s_k, valid = {**SIM_SHAPES, "lnc2_odd_bounded": (3, 1152, 1152, 1001)}[case]
+    q, k, v, bounds = _inputs(bh, s_q, s_k, valid)
+    scale = 1.0 if bounds else 128 ** -0.5
+    out = _simulate(fork.mx_attention_fwd, q, k, v, bounds, lnc, scale=scale, pv_mx=pv_mx, qk_mx=True)
+    kw = dict(bound_min=bounds[0], bound_max=bounds[1]) if bounds else {}
+    perms = dict(qk_perm=fork.qk_perm, pv_perm=fork.pv_perm)
+    mirror = mx_attention_reference(q, k, v, scale=scale, qk_mx=True, pv_mx=pv_mx, **perms, **kw)
+    no_qk = mx_attention_reference(q, k, v, scale=scale, qk_mx=False, pv_mx=pv_mx, **perms, **kw)
+    assert _rel(out, mirror.float()) < 2e-3, _rel(out, mirror.float())
+    assert _rel(out, no_qk.float()) > 4 * _rel(out, mirror.float())
+
+
+def _psum_bank(t):
+    from nkilib.core.utils.kernel_helpers import PSUM_BANK_SIZE
+
+    return t._address[1] // PSUM_BANK_SIZE
+
+
+def _partition(t):
+    return t.offset // t.get_pattern()[0][0]
+
+
+@pytest.mark.parametrize("pv_mx", [False, True])
+def test_qk_mx_four_key_tiles_share_the_pe_array_in_distinct_psum_banks(pv_mx, monkeypatch):
+    """Ruling BR21 and the brief's ISA constraints, on the kernel's real allocation (replaces
+    row_tiling.py's check_psum): each large tile's MM1 is four ``nc_matmul_mx`` in the four row
+    quadrants (``tile_position`` (32 t, 0), ``tile_size`` (32, 128), stationary, moving and both
+    scales at partition 32 t, the stationary's free size 128 > 64), the score tiles in four
+    distinct MM1 PSUM banks, never MM2's (4) nor the bank Q's and K's transposes use (7, or 6 with
+    pv_mx, where P's transposes hold 7)."""
+    import nki.isa as nisa
+
+    mm1, mm2, transposes = [], [], []
+    real_mx, real_tp = nisa.nc_matmul_mx, nisa.nc_transpose
+
+    def matmul_mx(**kw):
+        (mm1 if kw.get("tile_size") else mm2).append(kw)
+        return real_mx(**kw)
+
+    def transpose(*a, **kw):
+        transposes.append(kw.get("dst", a[0] if a else None))
+        return real_tp(*a, **kw)
+
+    monkeypatch.setattr(nisa, "nc_matmul_mx", matmul_mx)
+    monkeypatch.setattr(nisa, "nc_transpose", transpose)
+    q, k, v, _ = _inputs(*SIM_SHAPES["sections"][:3])  # 2 sections: 4 + 2 large tiles
+    _simulate(fork.mx_attention_fwd, q, k, v, scale=128 ** -0.5, pv_mx=pv_mx, qk_mx=True)
+    tp_bank = 6 if pv_mx else 7
+    large_tiles, banks = [], set()
+    for kw in mm1:
+        t = kw["tile_position"][0] // 32
+        assert kw["tile_position"] == (32 * t, 0) and kw["tile_size"] == (32, 128)
+        for name in ("stationary", "moving", "stationary_scale", "moving_scale"):
+            assert _partition(kw[name]) == 32 * t, name
+        assert kw["stationary"].shape == (32, 128) and kw["moving"].shape[0] == 32
+        if t == 0:
+            large_tiles.append([])
+        large_tiles[-1].append(_psum_bank(kw["dst"]))
+        banks.add(_psum_bank(kw["dst"]))
+    assert [len(b) for b in large_tiles] == [4, 4, 4, 4, 4, 1]  # 10,752 keys = 16 + 5 x 512
+    assert all(len(set(b)) == len(b) for b in large_tiles)
+    assert not banks & {4, tp_bank, 7}
+    assert {_psum_bank(d) for d in transposes} == ({tp_bank, 7} if pv_mx else {tp_bank})
+    assert len(mm2) == (21 if pv_mx else 0)
 
 
 @pytest.mark.parametrize("case, lnc", [("partial", 1), ("bounded", 1), ("sections", 1),
