@@ -20,7 +20,7 @@ OutputModality = Literal["image", "video"]
 ServingPlacement = Literal["host", "neuron"]
 StageRole = Literal["prompt_encoder", "denoiser", "decoder", "pipeline"]
 StageKind = Literal["extracted", "opaque_pipeline"]
-StagePlacement = Literal["host", "neuron", "hybrid", "tpu", "cuda"]
+StagePlacement = Literal["host", "neuron", "hybrid", "tpu", "cuda", "neuron_native"]
 
 
 @dataclass(frozen=True)
@@ -118,9 +118,10 @@ class StageRuntimeSpec:
                     "allocation, topology, or compiled artifact"
                 )
             return
-        if self.placement in {"tpu", "cuda"}:
+        if self.placement in {"tpu", "cuda", "neuron_native"}:
             # On an accelerator like a neuron stage, but without a compiled
-            # artifact: the TPU and CUDA backends execute the graph eagerly.
+            # artifact: the TPU and CUDA backends execute the graph eagerly, and the
+            # torch-native neuron backend compiles into its own NEFF cache at load.
             # Requiring one here would be requiring a file that is never
             # produced, and loosening the neuron rule instead would drop a
             # real invariant.
@@ -328,6 +329,15 @@ class FileOutputTarget:
 
 
 @dataclass(frozen=True, slots=True)
+class KeyframeInput:
+    """One keyframe a request conditions on (MiniMax-H3 FL2VA): which end of the video it is
+    anchored to and the uploaded image, validated and re-encoded as RGB PNG by the parent."""
+
+    anchor: Literal["first", "last"]
+    png: bytes
+
+
+@dataclass(frozen=True, slots=True)
 class VideoGenerateOptions:
     """Immutable video-only request fields carried through resident-worker IPC."""
 
@@ -341,6 +351,9 @@ class VideoGenerateOptions:
     true_cfg_scale: float | None = None
     requested_seconds: str | None = None
     user: str | None = None
+    #: Keyframes in packed order (first, then last); empty unless the model's metadata declares
+    #: ``input_keyframes``.
+    keyframes: tuple[KeyframeInput, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

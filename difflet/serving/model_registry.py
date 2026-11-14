@@ -192,16 +192,27 @@ def _gpu_serving_metadata(entry_name: str, model_id: str, platform) -> ServingMo
     return gpu_serving_metadata(spec)
 
 
+def model_accepts_keyframes(model_id: str) -> bool:
+    """Whether a built-in model takes first/last keyframes: its ``ServingModelMetadata``
+    declares ``input_keyframes``. The one flag behind both the Videos API's keyframe uploads
+    and the CLI's ``--first-frame`` / ``--last-frame``."""
+    _ensure_builtin_serving_models_registered()
+    normalized = model_id.rstrip("/")
+    return any(normalized in metadata.checkpoint_ids and metadata.input_keyframes
+               for metadata in _SERVING_METADATA.values())
+
+
 def _ensure_builtin_serving_models_registered() -> None:
     global _BUILTINS_LOADED
     if _BUILTINS_LOADED:
         return
     _BUILTINS_LOADED = True
-    from difflet.common.registry import flux, hunyuan_video, ltx_2, qwen_image, wan
+    from difflet.common.registry import flux, hunyuan_video, ltx_2, minimax_h3, qwen_image, wan
 
     register_serving_model(flux.serving_metadata())
     register_serving_model(hunyuan_video.serving_metadata())
     register_serving_model(ltx_2.serving_metadata())
+    register_serving_model(minimax_h3.serving_metadata())
     register_serving_model(qwen_image.serving_metadata())
     register_serving_model(wan.serving_metadata())
 

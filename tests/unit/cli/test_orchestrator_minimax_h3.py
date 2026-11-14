@@ -369,3 +369,181 @@ def test_text_stage_saves_fixed_layer_50_embedding_and_live_length(monkeypatch, 
     assert payload["text_encoder_layer"] == 50
     assert payload["encoder_hidden_states"].shape == (1, 1024, 5120)
     assert torch.count_nonzero(payload["encoder_hidden_states"][:, 3:]) == 0
+
+
+# ------------------------------------------------------------- torchrun (neuron) backend
+
+
+def test_neuron_backend_compiles_only_the_dit_and_places_host_stages_on_one_rank(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(h3_mod, "torchrun_backend", lambda: "neuron")
+    monkeypatch.setattr(h3_mod, "root_compile_cache_at_cache_dir", lambda *a, **k: None)
+    calls = []
+    monkeypatch.setattr(
+        h3_mod.runner, "run_stage", lambda model, stage, **kwargs: calls.append((stage, kwargs))
+    )
+    orchestrator = MiniMaxH3Orchestrator(_args(work_dir=str(tmp_path), keep_work_dir=True))
+
+    orchestrator.compile()
+    assert [stage for stage, _ in calls] == ["generate"]
+    cli = calls[0][1]["cli_args"]
+    assert "--device-vae" in cli and "--device-text-encoder" in cli
+
+    calls.clear()
+    orchestrator.generate()
+    # text, the video decode, the audio decode and the mux run inside the generate launch
+    assert [(stage, kw["num_cores"]) for stage, kw in calls] == [("generate", 4)]
+
+    calls.clear()
+    host = MiniMaxH3Orchestrator(_args(work_dir=str(tmp_path), keep_work_dir=True,
+                                       host_vae=True, host_text_encoder=True))
+    host.generate()
+    assert [(stage, kw["num_cores"]) for stage, kw in calls] == [
+        ("text", 1), ("generate", 4), ("video_vae", 1), ("audio_vae", 1)
+    ]
+    cli = calls[0][1]["cli_args"]
+    assert "--device-vae" not in cli and "--device-text-encoder" not in cli
+
+
+def test_neuron_backend_host_vae_compiles_only_the_dit_and_rejects_vae_dtype(
+    monkeypatch, tmp_path
+):
+    monkeypatch.setattr(h3_mod, "torchrun_backend", lambda: "neuron")
+    monkeypatch.setattr(h3_mod, "root_compile_cache_at_cache_dir", lambda *a, **k: None)
+    calls = []
+    monkeypatch.setattr(
+        h3_mod.runner, "run_stage", lambda model, stage, **kwargs: calls.append((stage, kwargs))
+    )
+    MiniMaxH3Orchestrator(_args(work_dir=str(tmp_path), host_vae=True)).compile()
+    assert [stage for stage, _ in calls] == ["generate"]
+    assert "--device-vae" not in calls[0][1]["cli_args"]
+    monkeypatch.setattr("difflet.cli.orchestrators.torchrun.torchrun_backend", lambda: "neuron")
+    with pytest.raises(SystemExit):
+        MiniMaxH3Orchestrator(_args(host_vae=True, vae_dtype="bf16")).compile()
+
+
+def test_neuron_backend_dispatches_to_host_and_torchrun_stage_bodies(monkeypatch):
+    monkeypatch.setattr(h3_mod, "torchrun_backend", lambda: "neuron")
+    orchestrator = MiniMaxH3Orchestrator(_args())
+    seen = []
+    for name in ("_stage_text_host", "_stage_generate_neuron", "_stage_video_vae_host",
+                 "_stage_audio_vae_host"):
+        monkeypatch.setattr(orchestrator, name, lambda args, name=name: seen.append(name))
+    for stage in ("text", "generate", "video_vae", "audio_vae"):
+        orchestrator._run_stage_internal(stage, orchestrator.args)
+    assert seen == ["_stage_text_host", "_stage_generate_neuron", "_stage_video_vae_host",
+                    "_stage_audio_vae_host"]
+
+
+@pytest.mark.parametrize("backend", [None, "neuron"])
+def test_topology_refuses_cp_off_neuron_and_modes_neuron_does_not_run(monkeypatch, backend):
+    monkeypatch.setattr(h3_mod, "torchrun_backend", lambda: backend)
+    with pytest.raises(NotImplementedError, match="CP runs only on the neuron backend"):
+        MiniMaxH3Orchestrator(_args(cp_degree=2, cp_mode="ring"))._validate_topology()
+    if backend is None:  # Trainium's AOT path: no CP in any mode, TP fixed at 4
+        for mode in ("ulysses", "gather_kv"):
+            with pytest.raises(NotImplementedError, match="CP runs only on the neuron backend"):
+                MiniMaxH3Orchestrator(_args(cp_degree=2, cp_mode=mode))._validate_topology()
+        with pytest.raises(NotImplementedError, match="fixed at TP4"):
+            MiniMaxH3Orchestrator(_args(tp_degree=2))._validate_topology()
+
+
+def test_neuron_topology_runs_ulysses_and_gather_kv_on_tp_times_cp_cores(monkeypatch):
+    monkeypatch.setattr(h3_mod, "torchrun_backend", lambda: "neuron")
+    for tp, cp, mode in ((4, 2, "ulysses"), (4, 4, "gather_kv"), (2, 4, "ulysses")):
+        orchestrator = MiniMaxH3Orchestrator(_args(tp_degree=tp, cp_degree=cp, cp_mode=mode))
+        orchestrator._validate_topology()
+        assert orchestrator._stage_cores("generate") == tp * cp
+        assert orchestrator._stage_cores("video_vae") == 1
+        cli = orchestrator._shared_cli_args("generate")
+        assert cli[cli.index("--cp-degree") + 1] == str(cp)
+        assert cli[cli.index("--cp-mode") + 1] == mode
+    # cp1 forwards no mode (the stage default stands)
+    assert "--cp-mode" not in MiniMaxH3Orchestrator(_args())._shared_cli_args("generate")
+
+
+def test_shared_cli_args_forward_model_path():
+    args = MiniMaxH3Orchestrator(_args(model_path="/models/h3"))._shared_cli_args("generate")
+    assert args[args.index("--model-path") + 1] == "/models/h3"
+    assert "--model-path" not in MiniMaxH3Orchestrator(_args())._shared_cli_args("generate")
+
+
+def test_neuron_dit_adapter_sends_masks_as_int32_and_returns_host_tensors():
+    import torch
+
+    class _App:
+        device = torch.device("cpu")
+
+        def __call__(self, *inputs):
+            self.inputs = inputs
+            return torch.ones(1, 2), torch.zeros(1, 3)
+
+    app = _App()
+    dit = h3_mod._NeuronH3DiT(app)
+    video, audio = dit(torch.zeros(2), torch.tensor([True, False]))
+    assert [t.dtype for t in app.inputs] == [torch.float32, torch.int32]
+    assert video.shape == (1, 2) and audio.shape == (1, 3) and len(dit.seconds) == 1
+
+
+def test_fl2va_resolves_the_canvas_runs_the_host_text_stage_and_forwards_the_keyframes(
+    monkeypatch, tmp_path
+):
+    from PIL import Image
+
+    monkeypatch.setattr(h3_mod, "torchrun_backend", lambda: "neuron")
+    monkeypatch.setattr(h3_mod, "root_compile_cache_at_cache_dir", lambda *a, **k: None)
+    calls = []
+    monkeypatch.setattr(
+        h3_mod.runner, "run_stage", lambda model, stage, **kwargs: calls.append((stage, kwargs))
+    )
+    first = tmp_path / "first.png"
+    Image.new("RGB", (720, 1280)).save(first)  # portrait
+    monkeypatch.chdir(tmp_path)
+    orchestrator = MiniMaxH3Orchestrator(_args(
+        work_dir=str(tmp_path), keep_work_dir=True, height=None, width=None,
+        first_frame="first.png", last_frame=None))
+    orchestrator.generate()
+    # The device conditioner has no vision tower: the host text stage always runs.
+    assert [stage for stage, _ in calls] == ["text", "generate"]
+    cli = calls[1][1]["cli_args"]
+    assert "--device-text-encoder" not in cli
+    assert cli[cli.index("--first-frame") + 1] == str(first)  # absolute for the stages
+    assert "--last-frame" not in cli
+    assert cli[cli.index("--height") + 1] == "1344" and cli[cli.index("--width") + 1] == "768"
+
+
+def test_fl2va_keeps_an_explicit_canvas_and_refuses_trainium(monkeypatch, tmp_path):
+    from PIL import Image
+
+    last = tmp_path / "last.png"
+    Image.new("RGB", (64, 64)).save(last)
+    monkeypatch.setattr(h3_mod, "torchrun_backend", lambda: "neuron")
+    orchestrator = MiniMaxH3Orchestrator(_args(last_frame=str(last), height=256, width=448))
+    orchestrator._resolve_keyframe_canvas()
+    assert (orchestrator.args.height, orchestrator.args.width) == (256, 448)
+    monkeypatch.setattr(h3_mod, "torchrun_backend", lambda: None)
+    with pytest.raises(NotImplementedError, match="neuron backend only"):
+        MiniMaxH3Orchestrator(_args(last_frame=str(last)))._validate_topology()
+
+
+def test_keyframe_flags_reach_the_stage_and_are_refused_for_other_models(tmp_path, capsys):
+    import importlib
+
+    cli_main = importlib.import_module("difflet.cli.main")
+    from difflet.cli.stage import _build_stage_parser
+
+    args, _ = _build_stage_parser().parse_known_args(
+        ["--orchestrator", "x", "--stage", "text", "--first-frame", "/a.png", "--last-frame", "/b.png"])
+    assert (args.first_frame, args.last_frame) == ("/a.png", "/b.png")
+    image = tmp_path / "k.png"
+    image.write_bytes(b"x")
+    ok = argparse.Namespace(model_id="MiniMaxAI/MiniMax-H3", first_frame=str(image), last_frame=None)
+    cli_main._validate_keyframes(ok)
+    for bad in (argparse.Namespace(model_id="Wan-AI/Wan2.2-T2V-A14B-Diffusers", first_frame=str(image),
+                                   last_frame=None),
+                argparse.Namespace(model_id="MiniMaxAI/MiniMax-H3", first_frame=None,
+                                   last_frame=str(tmp_path / "missing.png"))):
+        with pytest.raises(SystemExit):
+            cli_main._validate_keyframes(bad)
+    cli_main._validate_keyframes(argparse.Namespace(model_id="any", first_frame=None, last_frame=None))

@@ -155,6 +155,20 @@ _PROBE_FREE_TEACACHE_SERVING_MODELS = frozenset(
 )
 
 
+# The --cp-mode values `difflet serve` accepts. Every model keeps the two modes serving has
+# always accepted; a model listed here has qualified others for serving (MiniMax-H3's DiT
+# runs Ulysses on the native neuron backend). The parallel config knows more modes than
+# serving has qualified for a given model, so the CLI's choice list alone is not the gate.
+_DEFAULT_SERVING_CP_MODES = frozenset({"gather_kv", "ring"})
+_SERVING_CP_MODES: dict[str, frozenset[str]] = {
+    "minimax_h3": frozenset({"gather_kv", "ulysses"}),
+}
+
+
+def serving_cp_modes(model_type: str) -> frozenset[str]:
+    return _SERVING_CP_MODES.get(model_type, _DEFAULT_SERVING_CP_MODES)
+
+
 # (model_type, output_modality) pairs whose serving adapters route a compiled
 # shape SET on one resident worker. HunyuanVideo 1.5 and LTX-2 are excluded:
 # their applications do not accept K>1 bucket sets.
@@ -283,6 +297,11 @@ def build_serving_profile(
         except (OSError, TypeError, ValueError, OverflowError, KeyError) as exc:
             raise invalid_extra_body(f"invalid TeaCache calibration: {exc}") from exc
 
+    if cp_mode is not None and cp_mode not in serving_cp_modes(model_type):
+        allowed = ", ".join(sorted(serving_cp_modes(model_type)))
+        raise invalid_extra_body(
+            f"--cp-mode {cp_mode} is not served for {model_type}; served modes: {allowed}"
+        )
     default_parallel = entry.default_parallel
     resolved_cfg_parallel = (
         default_parallel.cfg_parallel_enabled if cfg_parallel is None else cfg_parallel

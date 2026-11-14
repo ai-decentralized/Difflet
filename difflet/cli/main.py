@@ -29,6 +29,7 @@ SERVE_VALID_MODELS = {
     "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
     "Qwen/Qwen-Image",
     "Lightricks/LTX-2",
+    "MiniMaxAI/MiniMax-H3",
 }
 
 _MODEL_TYPE: dict[str, str] = {
@@ -289,7 +290,9 @@ def _add_serve_profile_flags(p: argparse.ArgumentParser) -> None:
     )
     p.add_argument(
         "--cp-mode",
-        choices=["gather_kv", "ring"],
+        # Every mode the parallel config knows; each serving adapter refuses the ones its
+        # model does not run (e.g. MiniMax-H3 serves ulysses or gather_kv).
+        choices=list(CP_MODES),
         default=None,
         help="Context-parallel attention strategy (default: registry default)",
     )
@@ -474,6 +477,22 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
         "line's negative_prompt wins over it",
     )
     p.add_argument("--seed", type=int, default=42)
+    p.add_argument(
+        "--first-frame",
+        dest="first_frame",
+        default=None,
+        metavar="IMAGE",
+        help="MiniMax-H3 on the neuron backend: the keyframe the video starts from (FL2VA; "
+        "the canvas follows its aspect ratio unless --height/--width are given)",
+    )
+    p.add_argument(
+        "--last-frame",
+        dest="last_frame",
+        default=None,
+        metavar="IMAGE",
+        help="MiniMax-H3 on the neuron backend: the keyframe the video ends on (FL2VA; alone or "
+        "with --first-frame)",
+    )
     p.add_argument(
         "--torch-compile",
         action="store_true",
@@ -976,6 +995,28 @@ def _validate_taef1(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
+def _validate_keyframes(args: argparse.Namespace) -> None:
+    """--first-frame / --last-frame only for models whose serving metadata declares
+    ``input_keyframes`` (the flag the Videos API reads too); every other model refuses the
+    flags rather than ignoring them."""
+    frames = [f for f in (getattr(args, "first_frame", None), getattr(args, "last_frame", None)) if f]
+    if not frames:
+        return
+    from difflet.serving.model_registry import model_accepts_keyframes
+
+    if not model_accepts_keyframes(args.model_id):
+        print(
+            f"Error: {args.model_id} does not support --first-frame/--last-frame "
+            "(no keyframe conditioning for this model).",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+    for frame in frames:
+        if not os.path.isfile(frame):
+            print(f"Error: keyframe image not found: {frame}", file=sys.stderr)
+            raise SystemExit(1)
+
+
 def _validate_cfg_parallel(args: argparse.Namespace) -> None:
     if not getattr(args, "cfg_parallel", False):
         return
@@ -1333,6 +1374,7 @@ def main(argv: list[str] | None = None) -> None:
         _validate_cfg_parallel(args)
         _validate_sp(args)
         _validate_taef1(args)
+        _validate_keyframes(args)
         validate_quant(args)
         from difflet.cli.modes import resolve_mode
 

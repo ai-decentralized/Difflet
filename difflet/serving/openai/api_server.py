@@ -180,6 +180,7 @@ def create_app(
             retention_seconds=options.video_retention_seconds,
             max_jobs=options.video_max_jobs,
             sweep_interval_s=options.video_sweep_interval_seconds,
+            allow_audio=resolved_model.metadata.output_has_audio,
         )
 
     @asynccontextmanager

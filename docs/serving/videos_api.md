@@ -14,7 +14,11 @@ tradeoffs, and Trn2 acceptance evidence live separately under
 - Requests may use only the server's compiled width, height, frame count, FPS,
   dtype, and parallel topology. HTTP requests never trigger dynamic compilation.
 - The current MVP is text-to-video. Image, video, and audio reference uploads,
-  I2V, V2V, S2V, LoRA, interpolation, and generated audio are rejected.
+  I2V, V2V, S2V, LoRA, interpolation, and generated audio are rejected. The one
+  exception is MiniMax-H3 on the native neuron backend (see
+  [MiniMax-H3](#minimax-h3-native-neuron-backend)): its MP4s carry a generated
+  stereo audio track, and a server started for keyframes takes `first_frame` /
+  `last_frame` image uploads (first/last-frame conditioning).
 - Synchronous and asynchronous generation share one bounded FIFO and one
   resident worker. The MVP runs one generation at a time.
 - Async job metadata is in memory. Restarting the server removes all job IDs and
@@ -25,7 +29,9 @@ tradeoffs, and Trn2 acceptance evidence live separately under
   Placement is fixed at startup and is not selected by an HTTP request field.
 
 Validated Trn2 serving evidence currently exists for Wan 2.1, HunyuanVideo 1.0,
-and LTX-2 at their recorded fixed profiles. The Wan 2.2 checkpoint can be
+and LTX-2 at their recorded fixed profiles; MiniMax-H3 was accepted on Trn3
+(native neuron backend) at `1344x768`, text-only at 175 frames and with both
+keyframes at 124 frames. The Wan 2.2 checkpoint can be
 started explicitly for experiments, but it is not MVP-qualified because its
 dual-transformer path still needs correctness and resident-serving acceptance.
 HunyuanVideo 1.5 is not registered for serving.
@@ -136,6 +142,72 @@ curl -sS http://127.0.0.1:8092/ready
 curl -sS http://127.0.0.1:8092/v1/models
 ```
 
+### MiniMax-H3 (native neuron backend)
+
+MiniMax-H3 generates video **with a stereo audio track** (AAC in the MP4). It is
+guidance-distilled: `guidance_scale` is accepted and ignored, and there is no
+negative prompt. It serves only on the native neuron backend
+(`DIFFLET_BACKEND=neuron`), one resident worker of `tp x cp` ranks; the
+validated mesh is TP4 x Ulysses2 on two Trn3 chips:
+
+```bash
+DIFFLET_BACKEND=neuron difflet serve \
+  --model-id MiniMaxAI/MiniMax-H3 \
+  --cache-dir /mnt/model-cache/difflet \
+  --tp-degree 4 --cp-degree 2 --cp-mode ulysses \
+  --height 768 --width 1344 --num-frames 175 \
+  --host 127.0.0.1 --port 8090 --max-queued-requests 1 \
+  --worker-restart-timeout 7200 --request-timeout 3600 --worker-cancel-timeout 180
+```
+
+The three timeout flags are **required**; the defaults (900 / 300 / 10 seconds)
+fail with H3:
+
+| Flag | H3 value | Why |
+| --- | --- | --- |
+| `--worker-restart-timeout` | `7200` | Worker startup (load, per-block compile/warm-up, 2-step smoke) takes ~14-20 min with a warm compile cache, longer for a new shape |
+| `--request-timeout` | `3600` | One 768p request takes ~5-8 min; the 300 s default returns `504 request_timeout` |
+| `--worker-cancel-timeout` | `180` | A cancel is honored at the next agreed check (every `DIFFLET_H3_CANCEL_CHECK_STEPS` denoise steps, default 5); a 10 s grace kills the worker first |
+
+H3 settings are environment variables of the serve process, fixed at startup:
+
+| Variable | Values | Default | Meaning |
+| --- | --- | --- | --- |
+| `DIFFLET_H3_KEYFRAMES` | comma list of `0`, `1`, `2` | `0` | The request modes the server serves, by keyframe count: `0` text only, `1` a `first_frame` **or** a `last_frame`, `2` both; e.g. `0,2` serves text-only and first+last requests. Each mode is a DiT graph of its own on the one copy of the weights, warmed at startup (~13 min more per extra mode) |
+| `DIFFLET_H3_TEXT_BUCKET` | `128/256/512/1024` | `512` | Prompt token budget of the text-only mode (an FL2VA value is taken as the keyframe modes' bucket, for compatibility) |
+| `DIFFLET_H3_FL2VA_TEXT_BUCKET` | `2048/3072/4096` | `3072` | Token budget of the keyframe modes' presentation (prompt, plus each keyframe's label and image block) |
+| `DIFFLET_H3_TEXT_ENCODER` | `host`, `auto`, `device` | `host` | Where the Qwen3-VL conditioner runs; keyframe servers always use the host (the device conditioner has no vision tower) |
+| `DIFFLET_H3_CANCEL_CHECK_STEPS` | positive integer | `5` | Denoise steps between cancellation checks |
+
+A server for both text-only and first+last-keyframe requests (`DIFFLET_H3_KEYFRAMES=0,2`,
+124 frames; a request picks its mode by the keyframes it uploads):
+
+```bash
+DIFFLET_BACKEND=neuron DIFFLET_H3_KEYFRAMES=0,2 difflet serve \
+  --model-id MiniMaxAI/MiniMax-H3 --cache-dir /mnt/model-cache/difflet \
+  --tp-degree 4 --cp-degree 2 --cp-mode ulysses \
+  --height 768 --width 1344 --num-frames 124 \
+  --host 127.0.0.1 --port 8090 --max-queued-requests 1 \
+  --worker-restart-timeout 7200 --request-timeout 3600 --worker-cancel-timeout 180
+
+curl -sS http://127.0.0.1:8090/v1/videos/sync \
+  -F 'prompt=<prompt.txt' -F first_frame=@first.png -F last_frame=@last.png \
+  -F seed=42 -o out.mp4                                   # first+last mode
+curl -sS http://127.0.0.1:8090/v1/videos/sync \
+  -F 'prompt=<prompt.txt' -F seed=42 -o out_text.mp4      # text-only mode
+```
+
+A request whose keyframe count is not one of the server's modes gets `400`
+`invalid_extra_body` naming the modes it serves.
+
+Keyframes are put onto the server's canvas the way the reference pipeline does:
+the first given keyframe is stretched to the canvas, the second is scaled to
+cover it and centre-cropped, so pass images with the profile's aspect ratio.
+Measured on Trn3 (two chips, 30 steps): a 768p text-only request at 175 frames
+takes ~6.5 min; a two-keyframe request at 124 frames ~4.6 min, its first and
+last frames within 34-35 dB PSNR of the keyframes. Prompt token counts include
+each keyframe's ~1,010-row image block at `1344x768`.
+
 ### Create an asynchronous job
 
 ```bash
@@ -223,6 +295,8 @@ model, or any currently qualified model, accepts it.
 | `negative_prompt` | string | null | Trimmed text at most 32,768 characters; empty text becomes null | Wan and LTX-2; HunyuanVideo 1.0 rejects non-empty values |
 | `seed` | integer | `42` | From 0 through `2^63 - 1` | All |
 | `user` | string | null | Optional trimmed opaque value, at most 256 characters; retained only in async process-local metadata and not returned | All; a sync request creates no lasting job metadata |
+| `first_frame` | image file | null | PNG, JPEG, or WebP upload, at most 16 MiB and 4096x4096, at least 32 px a side; re-encoded as RGB PNG | MiniMax-H3 keyframe servers only; every other model returns `feature_not_supported` |
+| `last_frame` | image file | null | Same as `first_frame` | MiniMax-H3 keyframe servers only |
 
 The current adapter matrix is:
 
@@ -237,6 +311,12 @@ The current adapter matrix is:
 | `flow_shift` | Rejected | Rejected | Rejected | Rejected |
 | `seconds` | Omit | Omit | Omit | Omit |
 
+MiniMax-H3 accepts the fixed shape and FPS fields (must match), 2-200
+`num_inference_steps`, any finite `guidance_scale` (ignored), `seed`, `user`,
+and on keyframe servers exactly `DIFFLET_H3_KEYFRAMES` of `first_frame` /
+`last_frame`; it rejects `negative_prompt`, `guidance_scale_2`,
+`boundary_ratio`, and `flow_shift`.
+
 Wan 2.2 uses the current experimental single-transformer Wan adapter, so the
 dual-transformer fields remain rejected. The registered default profiles are:
 
@@ -245,6 +325,7 @@ dual-transformer fields remain rejected. The registered default profiles are:
 | Wan 2.1 and experimental Wan 2.2 | `832x480` | `9 / 16` | 2 | 1.0 |
 | HunyuanVideo 1.0 | `512x320` | `61 / 24` | 4 | 6.0 |
 | LTX-2 | `768x512` | `121 / 24` | 40 | 3.5 |
+| MiniMax-H3 | `1344x768` | `124 / 24` (17n+5, 120-360) | 30 | 1.0 (ignored) |
 
 Character limits are transport bounds, not a promise that every prompt fits the
 compiled token bucket. Wan validates prompt and negative prompt at 512 tokens;
@@ -271,7 +352,9 @@ conversion when they exceed 19 digits, including the two components of `size`;
 this prevents oversized numeric strings from blocking request handling or
 surfacing as internal errors. File parts and reference fields such as
 `input_reference`, `image_reference`, `video_reference`, and `audio_reference`
-return `feature_not_supported` in the T2V MVP.
+return `feature_not_supported` in the T2V MVP. A model whose metadata declares
+keyframe input (MiniMax-H3) also accepts the two `first_frame` / `last_frame`
+file parts, and its complete body may be up to 40 MiB.
 
 ### Async job response
 
@@ -479,7 +562,7 @@ delete HTTP request:
 | `400` | `invalid_prompt` / `prompt_too_long` | Prompt is empty, too large, or exceeds the model token bucket |
 | `400` | `model_not_served` | Request `model` does not match the server model |
 | `400` | `profile_mismatch` | Shape, frame count, FPS, or duration differs from the compiled profile |
-| `400` | `feature_not_supported` | File/reference or model feature is outside the T2V MVP |
+| `400` | `feature_not_supported` | File/reference or model feature is outside the T2V MVP (including `first_frame` / `last_frame` for a model without keyframe input) |
 | `404` | `video_not_found` | Job ID does not exist in this serve process |
 | `409` | `video_in_progress` | DELETE targeted a running generation |
 | `409` | `video_not_ready` | Content was requested before generation completed |

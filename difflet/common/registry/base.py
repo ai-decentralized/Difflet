@@ -23,6 +23,12 @@ class ServingModelMetadata:
     pipeline_definition: PipelineDefinition | None = None
     default_fps: int | None = None
     default_host_vae: bool = False
+    #: The model's MP4 carries a generated audio track (MiniMax-H3); every other video model
+    #: produces silent MP4s and the service keeps rejecting an audio stream for them.
+    output_has_audio: bool = False
+    #: The Videos API accepts ``first_frame`` / ``last_frame`` image uploads for this model
+    #: (MiniMax-H3 FL2VA). Every other model keeps refusing file uploads.
+    input_keyframes: bool = False
 
     def __post_init__(self) -> None:
         if self.output_modality not in {"image", "video"}:
@@ -40,5 +46,6 @@ class ServingModelMetadata:
                 raise ValueError("video serving metadata must use video/mp4")
             if self.default_fps is None or self.default_fps <= 0:
                 raise ValueError("video serving metadata requires a positive default_fps")
-        elif self.default_fps is not None or self.default_host_vae:
+        elif (self.default_fps is not None or self.default_host_vae or self.output_has_audio
+              or self.input_keyframes):
             raise ValueError("image serving metadata cannot define video placement defaults")

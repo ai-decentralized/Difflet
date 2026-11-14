@@ -16,6 +16,7 @@ import torch
 
 from difflet.models.minimax_h3.contracts import (
     AUDIO_CHANNELS,
+    KEYFRAME_NOISE_AUG,
     PATCH_SIZE,
     VAE_SPATIAL_COMPRESSION,
     build_padded_t2va_layout,
@@ -262,6 +263,29 @@ def load_minimax_h3_schedulers(
     )
 
 
+#: Timestep slots per transformer call: 0 audio, 1 video/text, and for FL2VA 2 the keyframe
+#: condition rows. Slots are kept even when two values coincide, so the graph shape is static.
+T2VA_TIMESTEP_SLOTS = 2
+FL2VA_TIMESTEP_SLOTS = 3
+
+
+def step_timestep_slots(
+    video_timesteps: torch.Tensor,
+    audio_timesteps: torch.Tensor,
+    *,
+    keyframes: bool = False,
+) -> torch.Tensor:
+    """``(num_steps, slots)`` float32 timesteps per step: ``[audio, video]``, plus the keyframe
+    condition slot ``max(video, 0.999)`` for FL2VA (the reference's
+    ``max(float(timestep), keyframe_noise_aug)``)."""
+
+    video = video_timesteps.to(torch.float32)
+    columns = [audio_timesteps.to(torch.float32), video]
+    if keyframes:
+        columns.append(video.clamp(min=KEYFRAME_NOISE_AUG))
+    return torch.stack(columns, dim=-1)
+
+
 @torch.no_grad()
 def denoise_minimax_h3_t2va(
     transformer: Callable[..., Any],
@@ -278,12 +302,25 @@ def denoise_minimax_h3_t2va(
     audio_scheduler: MiniMaxH3Scheduler,
     model_dtype: torch.dtype = torch.bfloat16,
     adaln_modulation_table: torch.Tensor | None = None,
+    step_callback: Callable[[int], None] | None = None,
+    condition_latents: list[torch.Tensor] | None = None,
+    keyframe_anchors: tuple[str, ...] = (),
+    text_token_tags: torch.Tensor | None = None,
 ) -> MiniMaxH3LatentOutput:
     """Run H3's guidance-distilled joint video/audio denoising loop.
+
+    FL2VA: ``condition_latents`` (one normalized ``(1, 24, 1, h, w)`` latent per keyframe, from
+    ``keyframes.encode_keyframe_condition``) with their ``keyframe_anchors``, and the
+    presentation's ``text_token_tags``. The condition rows lead the video rows, are noised to
+    ``t = 0.999`` from the request generator before any other draw, sit in their own timestep slot
+    and are never stepped.
 
     ``adaln_modulation_table`` is required when the transformer graph was built
     with ``precomputed_adaln=True``: `(num_steps, num_layers, 6, 6, hidden)`,
     step-aligned with the two schedulers' shared timestep sequence.
+
+    ``step_callback(step_index)``, when given, runs after every step (a resident server's
+    cancellation check, which may raise to stop the loop).
     """
 
     if encoder_hidden_states.ndim != 3 or encoder_hidden_states.shape[0] != 1:
@@ -308,6 +345,15 @@ def denoise_minimax_h3_t2va(
     if num_inference_steps < 2:
         raise ValueError("MiniMax-H3 requires at least two scheduler grid points")
 
+    condition_latents = list(condition_latents or [])
+    keyframe_anchors = tuple(keyframe_anchors)
+    if len(condition_latents) != len(keyframe_anchors):
+        raise ValueError(
+            f"{len(condition_latents)} condition latents for {len(keyframe_anchors)} keyframe anchors"
+        )
+    keyframes = bool(condition_latents)
+    if text_token_tags is not None:
+        text_token_tags = text_token_tags[: int(num_text_tokens)]
     layout = build_padded_t2va_layout(
         num_text_tokens=int(num_text_tokens),
         max_text_tokens=max_text_tokens,
@@ -315,15 +361,29 @@ def denoise_minimax_h3_t2va(
         width=width,
         num_frames=num_frames,
         sequence_alignment=128,
+        text_token_tags=text_token_tags,
+        keyframe_anchors=keyframe_anchors,
     )
+    num_condition_rows = layout.num_condition_video_rows
     latent_height = height // VAE_SPATIAL_COMPRESSION
     latent_width = width // VAE_SPATIAL_COMPRESSION
     latent_channels = 24
     audio_latent_channels = 32
 
-    # The draw order is an official reproducibility contract: video first,
-    # then audio, from one request-local CPU generator.
+    # The draw order is an official reproducibility contract: keyframe conditions first (one
+    # draw each), then video, then audio, from one request-local CPU generator.
     generator = torch.Generator(device="cpu").manual_seed(int(seed))
+    if keyframes:
+        from difflet.models.minimax_h3.keyframes import noise_condition_rows
+
+        condition_rows = noise_condition_rows(
+            condition_latents, generator, video_scheduler.scale_noise, patchify_video_latents
+        )
+        if int(condition_rows.shape[1]) != num_condition_rows:
+            raise ValueError(
+                f"the layout reserves {num_condition_rows} condition rows but the keyframe latents "
+                f"pack into {int(condition_rows.shape[1])}; were they encoded at {height}x{width}?"
+            )
     video_latents = torch.randn(
         1,
         latent_channels,
@@ -347,11 +407,16 @@ def denoise_minimax_h3_t2va(
     if len(video_scheduler.timesteps) != len(audio_scheduler.timesteps):
         raise RuntimeError("MiniMax-H3 video and audio schedules produced different step counts")
 
-    # Static Neuron graphs always receive exactly two timestep embeddings.
-    # Audio rows select slot 0 and video/text rows select slot 1.  Keeping both
-    # slots when their values happen to be equal avoids a first-step shape fork.
+    # Static Neuron graphs always receive the same number of timestep embeddings.
+    # Audio rows select slot 0, video/text rows slot 1, keyframe condition rows slot 2.
+    # Keeping every slot when values happen to coincide avoids a shape fork.
     timestep_indices = torch.ones(layout.sequence_length, dtype=torch.int64)
     timestep_indices[layout.audio_indices] = 0
+    if keyframes:
+        timestep_indices[layout.video_indices[:num_condition_rows]] = 2
+    slot_timesteps = step_timestep_slots(
+        video_scheduler.timesteps, audio_scheduler.timesteps, keyframes=keyframes
+    )
     fixed_inputs = (
         layout.token_tags.to(torch.int64),
         layout.position_ids.to(torch.float32),
@@ -369,20 +434,30 @@ def denoise_minimax_h3_t2va(
             f"adaln_modulation_table covers {int(adaln_modulation_table.shape[0])} steps, "
             f"but the schedule has {len(video_scheduler.timesteps)}"
         )
+    if adaln_modulation_table is not None and int(adaln_modulation_table.shape[3]) != (
+        3 * int(slot_timesteps.shape[1])
+    ):
+        raise ValueError(
+            f"adaln_modulation_table has {int(adaln_modulation_table.shape[3])} modulation rows, "
+            f"but this request uses {int(slot_timesteps.shape[1])} timestep slots x 3 modalities"
+        )
     for step_index, (video_timestep, audio_timestep) in enumerate(
         zip(
             video_scheduler.timesteps,
             audio_scheduler.timesteps,
         )
     ):
-        timestep = torch.stack([audio_timestep, video_timestep]).to(torch.float32)
+        timestep = slot_timesteps[step_index]
         modulation_inputs = (
             ()
             if adaln_modulation_table is None
             else (adaln_modulation_table[step_index].to(model_dtype),)
         )
+        packed_video = (
+            torch.cat([condition_rows, video_rows], dim=1) if keyframes else video_rows
+        )
         output = transformer(
-            video_rows.to(model_dtype),
+            packed_video.to(model_dtype),
             audio_rows.to(model_dtype),
             encoder_hidden_states.to(model_dtype),
             timestep,
@@ -394,7 +469,7 @@ def denoise_minimax_h3_t2va(
             raise RuntimeError("MiniMax-H3 Transformer must return video and audio predictions")
         video_prediction, audio_prediction = output
         video_rows = video_scheduler.step(
-            video_prediction.float(),
+            video_prediction[:, num_condition_rows:].float(),
             video_timestep,
             video_rows,
             return_dict=False,
@@ -405,6 +480,8 @@ def denoise_minimax_h3_t2va(
             audio_rows,
             return_dict=False,
         )[0]
+        if step_callback is not None:
+            step_callback(step_index)
 
     video_latents = unpatchify_video_latents(
         video_rows,

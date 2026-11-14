@@ -33,7 +33,7 @@ from difflet.serving.openai.protocol.videos import (
     VideoListResponse,
     VideoResponse,
 )
-from difflet.serving.types import DiffletGenerateRequest, VideoGenerateOptions
+from difflet.serving.types import DiffletGenerateRequest, KeyframeInput, VideoGenerateOptions
 
 if TYPE_CHECKING:
     from difflet.serving.model_registry import ResolvedServingModel
@@ -47,6 +47,12 @@ _MAX_SIZE_CHARACTERS = 2 * _MAX_INTEGER_DIGITS + 1
 MAX_VIDEO_FORM_FIELDS = 32
 MAX_VIDEO_FORM_PART_BYTES = 256 * 1024
 MAX_VIDEO_FORM_BODY_BYTES = 1024 * 1024
+#: Keyframe uploads (models whose metadata declares ``input_keyframes`` only).
+KEYFRAME_FIELDS = ("first_frame", "last_frame")
+MAX_KEYFRAME_BYTES = 16 * 1024 * 1024
+MAX_KEYFRAME_FORM_BODY_BYTES = 40 * 1024 * 1024
+MAX_KEYFRAME_PIXELS = 4096 * 4096
+_KEYFRAME_FORMATS = frozenset({"PNG", "JPEG", "WEBP"})
 _INTEGER_RE = re.compile(r"^\d+$")
 _POSITIVE_INTEGER_RE = re.compile(r"^[1-9]\d*$")
 _SIZE_RE = re.compile(r"^([1-9]\d*)x([1-9]\d*)$")
@@ -119,6 +125,8 @@ async def normalize_video_multipart_request(
     duplicate fields and file uploads before Pydantic coercion.
     """
 
+    keyframes_allowed = bool(getattr(resolved_model.metadata, "input_keyframes", False))
+    body_limit = MAX_KEYFRAME_FORM_BODY_BYTES if keyframes_allowed else MAX_VIDEO_FORM_BODY_BYTES
     content_type = str(getattr(raw_request, "headers", {}).get("content-type", ""))
     media_type = content_type.split(";", 1)[0].strip().lower()
     if media_type != "multipart/form-data":
@@ -128,12 +136,12 @@ async def normalize_video_multipart_request(
             "video generation requires multipart/form-data",
         )
     try:
-        form_request = await _bounded_form_request(raw_request)
+        form_request = await _bounded_form_request(raw_request, max_body_bytes=body_limit)
         if getattr(form_request, "scope", None) is None:
             form = await form_request.form()
         else:
             form = await form_request.form(
-                max_files=0,
+                max_files=len(KEYFRAME_FIELDS) if keyframes_allowed else 0,
                 max_fields=MAX_VIDEO_FORM_FIELDS,
                 max_part_size=MAX_VIDEO_FORM_PART_BYTES,
             )
@@ -146,14 +154,93 @@ async def normalize_video_multipart_request(
         if any(marker in message for marker in ("too many fields", "part exceeded maximum size")):
             raise _request_too_large("video multipart form exceeds its configured limits") from exc
         raise DiffletServingError(400, "invalid_request", "request form is not valid") from exc
+    keyframes: tuple[KeyframeInput, ...] = ()
+    if keyframes_allowed:
+        form, keyframes = await _split_keyframe_uploads(form)
     return normalize_video_request(
         form,
         resolved_model=resolved_model,
         request_id=request_id,
+        keyframes=keyframes,
     )
 
 
-async def _bounded_form_request(raw_request: Any) -> Any:
+async def _split_keyframe_uploads(form: Any) -> tuple[Any, tuple[KeyframeInput, ...]]:
+    """Take the ``first_frame`` / ``last_frame`` uploads out of the form (validated and
+    re-encoded as PNG, first before last); the remaining items are the text fields."""
+
+    if hasattr(form, "multi_items"):
+        items = list(form.multi_items())
+    elif isinstance(form, Mapping):
+        items = list(form.items())
+    else:
+        raise DiffletServingError(400, "invalid_request", "request form must be a mapping")
+    rest: list[tuple[str, Any]] = []  # kept as items so form_to_mapping still sees repeats
+    found: dict[str, bytes] = {}
+    for key, value in items:
+        name = key.strip() if isinstance(key, str) else key
+        if name not in KEYFRAME_FIELDS:
+            rest.append((key, value))
+            continue
+        if name in found:
+            raise DiffletServingError(400, "invalid_request", f"form field {name!r} is repeated")
+        if isinstance(value, (bytes, bytearray)):
+            data = bytes(value)
+        elif hasattr(value, "read"):
+            data = await value.read(MAX_KEYFRAME_BYTES + 1)
+        else:
+            raise invalid_extra_body(f"{name} must be an image file upload")
+        if len(data) > MAX_KEYFRAME_BYTES:
+            raise _request_too_large(f"{name} exceeds {MAX_KEYFRAME_BYTES // 2**20} MiB")
+        found[name] = keyframe_png(data, name)
+    keyframes = tuple(KeyframeInput(anchor=name.removesuffix("_frame"), png=found[name])
+                      for name in KEYFRAME_FIELDS if name in found)
+    return _ItemsForm(rest), keyframes
+
+
+class _ItemsForm:
+    """The text fields left after the keyframe uploads, repeats kept for form_to_mapping."""
+
+    def __init__(self, items: list[tuple[str, Any]]) -> None:
+        self._items = items
+
+    def multi_items(self) -> list[tuple[str, Any]]:
+        return list(self._items)
+
+
+def keyframe_png(data: bytes, field: str) -> bytes:
+    """Validate one uploaded keyframe (PNG/JPEG/WebP, at most 4096x4096, at least 32 px a side)
+    and re-encode it as an RGB PNG: the worker never sees the client's container."""
+
+    import io
+    import warnings
+
+    from PIL import Image
+
+    if not data:
+        raise invalid_extra_body(f"{field} is empty")
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", Image.DecompressionBombWarning)
+            with Image.open(io.BytesIO(data)) as probe:
+                if probe.format not in _KEYFRAME_FORMATS:
+                    raise invalid_extra_body(f"{field} must be a PNG, JPEG or WebP image")
+                width, height = probe.size
+                if width * height > MAX_KEYFRAME_PIXELS:
+                    raise invalid_extra_body(f"{field} exceeds {MAX_KEYFRAME_PIXELS} pixels")
+                if min(width, height) < 32:
+                    raise invalid_extra_body(f"{field} must be at least 32 pixels on each side")
+                image = probe.convert("RGB")
+    except DiffletServingError:
+        raise
+    except Exception as exc:  # noqa: BLE001 - any decoder failure is a client error
+        raise invalid_extra_body(f"{field} is not a readable image") from exc
+    out = io.BytesIO()
+    image.save(out, format="PNG")
+    return out.getvalue()
+
+
+async def _bounded_form_request(raw_request: Any, *, max_body_bytes: int = MAX_VIDEO_FORM_BODY_BYTES) -> Any:
     """Return a Request-like object whose body was read under the hard total cap."""
 
     headers = getattr(raw_request, "headers", {})
@@ -167,8 +254,9 @@ async def _bounded_form_request(raw_request: Any) -> Any:
             ) from exc
         if content_length < 0:
             raise DiffletServingError(400, "invalid_request", "content-length must be nonnegative")
-        if content_length > MAX_VIDEO_FORM_BODY_BYTES:
-            raise _request_too_large("video multipart body exceeds 1 MiB")
+        if content_length > max_body_bytes:
+            raise _request_too_large(
+                f"video multipart body exceeds {max_body_bytes // 2**20} MiB")
 
     stream = getattr(raw_request, "stream", None)
     scope = getattr(raw_request, "scope", None)
@@ -180,8 +268,9 @@ async def _bounded_form_request(raw_request: Any) -> Any:
     body = bytearray()
     async for chunk in stream():
         body.extend(chunk)
-        if len(body) > MAX_VIDEO_FORM_BODY_BYTES:
-            raise _request_too_large("video multipart body exceeds 1 MiB")
+        if len(body) > max_body_bytes:
+            raise _request_too_large(
+                f"video multipart body exceeds {max_body_bytes // 2**20} MiB")
 
     from starlette.requests import Request
 
@@ -206,6 +295,7 @@ def normalize_video_request(
     *,
     resolved_model: "ResolvedServingModel",
     request_id: str | None = None,
+    keyframes: tuple[KeyframeInput, ...] = (),
 ) -> DiffletGenerateRequest:
     """Normalize one strict multipart form against an immutable video profile."""
 
@@ -388,6 +478,7 @@ def normalize_video_request(
             flow_shift=flow_shift,
             requested_seconds=requested_seconds,
             user=user,
+            keyframes=tuple(keyframes),
         ),
     )
 
@@ -632,6 +723,8 @@ def form_to_mapping(form: Any) -> dict[str, str]:
             raise DiffletServingError(400, "invalid_request", f"form field {key!r} is repeated")
         if key in UNSUPPORTED_VIDEO_FORM_FIELDS:
             raise feature_not_supported(f"video form field {key!r} is not supported")
+        if key in KEYFRAME_FIELDS:
+            raise feature_not_supported(f"the served model does not take {key!r} keyframes")
         if key not in ALLOWED_VIDEO_FORM_FIELDS:
             raise DiffletServingError(
                 400,

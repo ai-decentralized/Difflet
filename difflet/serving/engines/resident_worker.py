@@ -613,6 +613,11 @@ class _ResidentWorkerProcess:
             from difflet.backends.tpu.ops_impl import device_runtime
 
             device_runtime.prepare_launch(replicas)
+        if replicas > 1 and _on_native_neuron():
+            # The replicas are one torch.distributed job (one process per NeuronCore, as
+            # torchrun launches them for `difflet generate`): give them a rendezvous. Spawned
+            # children inherit the parent's environment at start().
+            _export_native_neuron_rendezvous()
         self._cmd_qs = [self._ctx.Queue() for _ in range(replicas)]
         self._cancel_qs = [self._ctx.Queue() for _ in range(replicas)]
         self._reply_q = self._ctx.Queue()
@@ -1002,6 +1007,36 @@ def _on_tpu() -> bool:
         return False
 
 
+def _on_native_neuron() -> bool:
+    """The torch-native neuron backend (``DIFFLET_BACKEND=neuron``): one process per core, a
+    torch.distributed job, no torch_xla. Trainium's AoT backend is not this."""
+    try:
+        from difflet.backends.registry import current_backend
+
+        return current_backend() == "neuron"
+    except Exception:  # noqa: BLE001 - never fail startup on backend lookup
+        return False
+
+
+#: A MASTER_PORT the operator exported before the first worker start; kept across restarts.
+_OPERATOR_MASTER_PORT = os.environ.get("MASTER_PORT") or None
+
+
+def _export_native_neuron_rendezvous() -> None:
+    """MASTER_ADDR/MASTER_PORT for the replicas' process group. Without an operator-exported
+    port every (re)start takes a fresh free one, so a restart never meets the previous group's
+    lingering listener."""
+    import socket
+
+    os.environ.setdefault("MASTER_ADDR", "127.0.0.1")
+    if _OPERATOR_MASTER_PORT:
+        os.environ["MASTER_PORT"] = _OPERATOR_MASTER_PORT
+        return
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.bind(("127.0.0.1", 0))
+        os.environ["MASTER_PORT"] = str(probe.getsockname()[1])
+
+
 def _initialize_replica_runtime(replica_rank: int, replica_count: int) -> None:
     """Give this process its own accelerator before anything else touches it.
 
@@ -1024,6 +1059,13 @@ def _initialize_replica_runtime(replica_rank: int, replica_count: int) -> None:
         from difflet.backends.tpu.ops_impl import device_runtime
 
         device_runtime.initialize_replica(replica_rank, replica_count)
+    elif _on_native_neuron():
+        # What torchrun exports: the neuron backend's prepare_runtime binds this process to
+        # core LOCAL_RANK of NEURON_RT_VISIBLE_CORES and opens the WORLD_SIZE process group.
+        os.environ["RANK"] = str(replica_rank)
+        os.environ["LOCAL_RANK"] = str(replica_rank)
+        os.environ["WORLD_SIZE"] = str(replica_count)
+        os.environ["LOCAL_WORLD_SIZE"] = str(replica_count)
     else:
         from torch_xla._internal import pjrt
 
@@ -1230,6 +1272,17 @@ def _apply_worker_runtime_environment(runtime: ResolvedRuntimeBundle) -> None:
     child = plan.environment.child_distributed
     if (child.world_size, child.local_world_size, child.rank, child.local_rank) != (1, 1, 0, 0):
         raise ValueError("P0 resident worker child distributed environment must be 1/1/0/0")
+
+    if _on_native_neuron():
+        # Every replica sees the allocation's cores; the backend keeps core LOCAL_RANK of them.
+        # RANK/WORLD_SIZE stay as _initialize_replica_runtime set them (one replica: 1/0), and
+        # NEURON_RT_NUM_CORES is not set: it would contradict the one-core binding.
+        os.environ["NEURON_RT_VISIBLE_CORES"] = ",".join(str(c) for c in visible_core_ids)
+        os.environ.pop("NEURON_RT_NUM_CORES", None)
+        for name, value in (("WORLD_SIZE", "1"), ("LOCAL_WORLD_SIZE", "1"), ("RANK", "0"),
+                            ("LOCAL_RANK", "0")):
+            os.environ.setdefault(name, value)
+        return
 
     os.environ["NEURON_RT_VISIBLE_CORES"] = ",".join(str(core_id) for core_id in visible_core_ids)
     os.environ["NEURON_RT_NUM_CORES"] = str(num_cores)

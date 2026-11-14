@@ -1,8 +1,10 @@
-"""Static T2VA geometry shared by the H3 host controller and Neuron graphs.
+"""Static T2VA / FL2VA geometry shared by the H3 host controller and Neuron graphs.
 
 MiniMax-H3 executes full self-attention over one packed sequence ordered as
-``[text | target audio | target video]`` for T2VA.  These helpers reproduce the
-official layout without importing the unreleased-in-0.38 diffusers pipeline.
+``[text | keyframe conditions | target audio | target video]``; T2VA has no
+keyframe conditions.  These helpers reproduce the official layout (diffusers
+``modular_pipelines/minimax_h3``) without importing the unreleased-in-0.38
+diffusers pipeline.
 """
 
 from __future__ import annotations
@@ -22,6 +24,20 @@ VAE_SPATIAL_COMPRESSION = 16
 PATCH_SIZE = (1, 2, 2)
 FRAMES_PER_CHUNK = 17
 LATENTS_PER_CHUNK = 5
+
+MIN_ASPECT_RATIO = 1 / 4
+MAX_ASPECT_RATIO = 4
+CANVAS_MULTIPLE = 32
+CANVAS_SHORT_EDGE = 768
+CANVAS_MAX_PIXELS = 768 * 1344
+#: The ``t`` a keyframe anchor is noised to and held at (``t = 1`` is clean).
+KEYFRAME_NOISE_AUG = 0.999
+#: The seed every keyframe's VAE posterior is sampled under, independent of the request seed.
+KEYFRAME_ENCODE_SEED = 42
+#: ImageNet pixel normalization of the video VAE's input.
+PIXEL_MEAN = (0.485, 0.456, 0.406)
+PIXEL_STD = (0.229, 0.224, 0.225)
+KEYFRAME_ANCHORS = ("first", "last")
 
 _ROPE_FRAME_RESCALE = 5.0 / 3.0
 _ROPE_FRAMES_PER_LATENT = (1, 4, 4, 4, 4)
@@ -43,10 +59,63 @@ class MiniMaxH3T2VALayout:
     attention_mask: torch.Tensor
     num_text_tokens: int
     max_text_tokens: int
+    #: Leading video rows that are keyframe conditions (``len(keyframe_anchors) * rows_per_frame``).
+    num_condition_video_rows: int = 0
+    keyframe_anchors: tuple[str, ...] = ()
 
     @property
     def sequence_length(self) -> int:
         return int(self.position_ids.shape[0])
+
+
+def resolve_canvas_size(
+    aspect_width: float,
+    aspect_height: float,
+    *,
+    canvas_multiple: int = CANVAS_MULTIPLE,
+    short_edge: int = CANVAS_SHORT_EDGE,
+    max_pixels: int = CANVAS_MAX_PIXELS,
+) -> tuple[int, int]:
+    """``(height, width)`` of H3's canvas for an aspect ratio (the official ``resolve_canvas_size``)."""
+
+    if aspect_width <= 0 or aspect_height <= 0:
+        raise ValueError(f"The aspect ratio must be positive, got {aspect_width}:{aspect_height}.")
+    ratio = aspect_width / aspect_height
+    if not MIN_ASPECT_RATIO <= ratio <= MAX_ASPECT_RATIO:
+        raise ValueError(
+            f"MiniMax-H3 supports aspect ratios from 1:{1 / MIN_ASPECT_RATIO:g} to "
+            f"{MAX_ASPECT_RATIO:g}:1, got {aspect_width}:{aspect_height} ({ratio:g})."
+        )
+    if ratio >= 1.0:
+        width, height = short_edge * ratio, float(short_edge)
+    else:
+        width, height = float(short_edge), short_edge / ratio
+    area = width * height
+    if area > max_pixels:
+        scale = (max_pixels / area) ** 0.5
+        width, height = width * scale, height * scale
+    multiple = canvas_multiple
+    return (
+        max(multiple, round(height / multiple) * multiple),
+        max(multiple, round(width / multiple) * multiple),
+    )
+
+
+def keyframe_anchor_time(anchor: str, *, num_text_tokens: int, num_latent_frames: int) -> float:
+    """The rotary time a keyframe block sits at: the first or the last generated latent frame.
+
+    ``"last"`` sums the frame spans with numpy's pairwise summation, as the reference does; the
+    order matters in the last ulp from 16 latent frames on.
+    """
+
+    if anchor == "first":
+        return float(num_text_tokens)
+    if anchor == "last":
+        spans = np.ones(num_latent_frames, dtype=np.float64) * _ROPE_FRAME_RESCALE
+        for offset in range(len(_ROPE_FRAMES_PER_LATENT)):
+            spans[offset :: len(_ROPE_FRAMES_PER_LATENT)] *= _ROPE_FRAMES_PER_LATENT[offset]
+        return float(num_text_tokens) + float(spans.sum()) - _ROPE_FRAME_RESCALE
+    raise ValueError(f"A keyframe anchor must be 'first' or 'last', got {anchor!r}.")
 
 
 def align_num_frames(num_frames: int) -> int:
@@ -104,8 +173,15 @@ def build_t2va_layout(
     height: int,
     width: int,
     num_frames: int,
+    text_token_tags: torch.Tensor | None = None,
+    keyframe_anchors: tuple[str, ...] = (),
 ) -> MiniMaxH3T2VALayout:
-    """Build the exact official H3 T2VA packed-row and MM-RoPE contract."""
+    """Build the exact official H3 T2VA / FL2VA packed-row and MM-RoPE contract.
+
+    ``text_token_tags`` (``(num_text_tokens,)``) tags the text rows; an FL2VA presentation tags
+    the rows of a keyframe's vision block as video.  Default: all text.  ``keyframe_anchors`` adds
+    one condition frame block per keyframe (``"first"``/``"last"``) between text and audio.
+    """
 
     if num_text_tokens < 1:
         raise ValueError("MiniMax-H3 requires at least one text token")
@@ -126,13 +202,28 @@ def build_t2va_layout(
     num_audio_latents = audio_latent_num_frames(num_frames)
     num_audio_rows = num_audio_latents * AUDIO_CHANNELS
     num_video_rows = num_latent_frames * rows_per_frame
-    sequence_length = num_text_tokens + num_audio_rows + num_video_rows
-    audio_start = num_text_tokens
+    keyframe_anchors = tuple(keyframe_anchors)
+    if len(keyframe_anchors) > len(KEYFRAME_ANCHORS) or len(set(keyframe_anchors)) != len(
+        keyframe_anchors
+    ):
+        raise ValueError(f"at most one 'first' and one 'last' keyframe, got {keyframe_anchors}")
+    num_condition_rows = len(keyframe_anchors) * rows_per_frame
+    sequence_length = num_text_tokens + num_condition_rows + num_audio_rows + num_video_rows
+    condition_start = num_text_tokens
+    audio_start = condition_start + num_condition_rows
     video_start = audio_start + num_audio_rows
 
     position_ids = torch.zeros(sequence_length, 3, dtype=torch.float64)
     position_ids[:num_text_tokens, 0] = torch.arange(num_text_tokens, dtype=torch.float64)
     frame_grid, width_grid = _frame_position_grid(latent_height, latent_width, patch_h, patch_w)
+    for index, anchor in enumerate(keyframe_anchors):
+        rows = slice(
+            condition_start + index * rows_per_frame, condition_start + (index + 1) * rows_per_frame
+        )
+        position_ids[rows, 0] = keyframe_anchor_time(
+            anchor, num_text_tokens=num_text_tokens, num_latent_frames=num_latent_frames
+        )
+        position_ids[rows, 1:] = frame_grid
 
     audio_time = float(num_text_tokens) + torch.arange(num_audio_latents, dtype=torch.float64)
     position_ids[audio_start:video_start, 0] = audio_time.repeat(AUDIO_CHANNELS)
@@ -152,9 +243,18 @@ def build_t2va_layout(
 
     text_indices = torch.arange(num_text_tokens)
     audio_indices = torch.arange(audio_start, video_start)
-    video_indices = torch.arange(video_start, sequence_length)
+    video_indices = torch.cat(
+        [torch.arange(condition_start, audio_start), torch.arange(video_start, sequence_length)]
+    )
     token_tags = torch.empty(sequence_length, dtype=torch.long)
-    token_tags[text_indices] = TEXT_TAG
+    if text_token_tags is None:
+        token_tags[text_indices] = TEXT_TAG
+    else:
+        if tuple(text_token_tags.shape) != (num_text_tokens,):
+            raise ValueError(
+                f"text_token_tags must be ({num_text_tokens},), got {tuple(text_token_tags.shape)}"
+            )
+        token_tags[text_indices] = text_token_tags.to(torch.long)
     token_tags[audio_indices] = AUDIO_TAG
     token_tags[video_indices] = VIDEO_TAG
 
@@ -172,6 +272,8 @@ def build_t2va_layout(
         attention_mask=torch.ones(sequence_length, dtype=torch.bool),
         num_text_tokens=num_text_tokens,
         max_text_tokens=num_text_tokens,
+        num_condition_video_rows=num_condition_rows,
+        keyframe_anchors=keyframe_anchors,
     )
 
 
@@ -183,6 +285,8 @@ def build_padded_t2va_layout(
     width: int,
     num_frames: int,
     sequence_alignment: int = 1,
+    text_token_tags: torch.Tensor | None = None,
+    keyframe_anchors: tuple[str, ...] = (),
 ) -> MiniMaxH3T2VALayout:
     """Move fixed-bucket text padding to the packed sequence tail.
 
@@ -205,6 +309,8 @@ def build_padded_t2va_layout(
         height=height,
         width=width,
         num_frames=num_frames,
+        text_token_tags=text_token_tags,
+        keyframe_anchors=keyframe_anchors,
     )
     text_padding = max_text_tokens - num_text_tokens
     unaligned_length = live.sequence_length + text_padding
@@ -242,4 +348,6 @@ def build_padded_t2va_layout(
         attention_mask=attention_mask,
         num_text_tokens=num_text_tokens,
         max_text_tokens=max_text_tokens,
+        num_condition_video_rows=live.num_condition_video_rows,
+        keyframe_anchors=live.keyframe_anchors,
     )

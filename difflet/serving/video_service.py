@@ -183,6 +183,7 @@ class VideoGenerationService:
         retention_seconds: int = 25 * 60 * 60,
         max_jobs: int = 4096,
         sweep_interval_s: float = 5 * 60.0,
+        allow_audio: bool = False,
     ) -> None:
         if isinstance(max_queued_requests, bool) or max_queued_requests < 0:
             raise ValueError("max_queued_requests must be a nonnegative integer")
@@ -207,6 +208,8 @@ class VideoGenerationService:
         ):
             raise ValueError("video retention, job cap, and sweep interval must be positive")
         self.engine = engine
+        # Whether the model's MP4 may carry an audio track (ServingModelMetadata.output_has_audio).
+        self.allow_audio = bool(allow_audio)
         self.jobs = jobs
         self.artifacts = artifacts
         self.capacity = 1 + int(max_queued_requests)
@@ -919,6 +922,7 @@ class VideoGenerationService:
                 _validate_media,
                 Path(output.path),
                 item.request,
+                allow_audio=self.allow_audio,
             )
             _compare_worker_media(output, media)
 
@@ -1419,7 +1423,7 @@ def _job_request_metadata(request: DiffletGenerateRequest) -> dict[str, Any]:
     }
 
 
-def _validate_media(path: Path, request: DiffletGenerateRequest):
+def _validate_media(path: Path, request: DiffletGenerateRequest, *, allow_audio: bool = False):
     from difflet.serving.video_media import validate_mp4
 
     assert request.video is not None
@@ -1429,6 +1433,7 @@ def _validate_media(path: Path, request: DiffletGenerateRequest):
         expected_height=request.height,
         expected_num_frames=request.video.num_frames,
         expected_fps=request.video.fps,
+        require_silent=not allow_audio,
     )
 
 
