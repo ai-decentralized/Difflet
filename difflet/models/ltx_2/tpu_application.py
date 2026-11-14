@@ -11,6 +11,10 @@ ordinal 0 only (fp32, ~48 GB; bf16 is emulated and ~4x slower on the EPYC
 host) and its packed hidden states are broadcast to the other ranks, the
 same trick Wan uses for umT5 and HunyuanVideo for Llama. Four copies would
 not fit beside four DiT ranks on a 188 GB box.
+
+By default (``DIFFLET_TPU_LTX2_TRIM_TEXT``, on) rank 0 runs Gemma and the
+connectors over the prompt's real tokens only and broadcasts the connectors'
+output instead (``backends/tpu/ltx_2/text_encode.py``).
 """
 
 from __future__ import annotations
@@ -32,6 +36,15 @@ from difflet.models.ltx_2.contract import (
 )
 
 logger = logging.getLogger(__name__)
+
+#: ``DIFFLET_TPU_LTX2_SKIP_GUARDS`` (default on; ``0`` keeps Dynamo's guards): see
+#: ``TpuLTX2Application._dit_call``.
+SKIP_GUARDS_ENV = "DIFFLET_TPU_LTX2_SKIP_GUARDS"
+
+
+def _env_off(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"0", "false", "no", "off"}
+
 
 _ENCODE_OK = 0
 _ENCODE_FAILED = 1
@@ -85,11 +98,94 @@ def load_tpu_host_pipeline(model_path: str, *, dtype: torch.dtype, encoder_dtype
     )
     pipe.to("cpu")
     pipe.set_progress_bar_config(disable=True)
+    if _trim_text_enabled():
+        _install_rank0_text_conditioning(pipe, is_encoder=is_encoder)
+        return pipe
     # The wire/return dtype follows the host pipeline (fp32), not the DiT.
     _install_broadcast_prompt_encoder(
         pipe, is_encoder=is_encoder, dtype=torch.float32, packed_width=packed_text_dim(model_path)
     )
     return pipe
+
+
+#: ``0`` restores the padded path: Gemma over all ``max_sequence_length`` tokens
+#: on rank 0, its packed states broadcast, the connectors on every rank.
+TRIM_TEXT_ENV = "DIFFLET_TPU_LTX2_TRIM_TEXT"
+
+
+def _trim_text_enabled() -> bool:
+    return os.environ.get(TRIM_TEXT_ENV, "1") != "0"
+
+
+def _install_rank0_text_conditioning(pipe, *, is_encoder: bool) -> None:
+    """Gemma and the connectors on rank 0 over the real tokens; the connector output broadcast.
+
+    ``backends/tpu/ltx_2/text_encode.py`` explains why only the real tokens are
+    computed. Rank 0 runs both halves; the other ranks skip Gemma (their
+    ``_get_gemma_prompt_embeds`` returns a zero-width placeholder of the right
+    batch and length) and receive the connectors' output -- two
+    (B, L, 3840) tensors and the mask, instead of the (B, L, 3840*49) packed
+    states the padded path broadcasts.
+
+    A failure on rank 0 (Gemma or the connectors) is held until the broadcast,
+    where every rank learns of it and raises: a rank that raised alone would
+    leave the others waiting in the collective.
+    """
+    from difflet.backends.tpu.ltx_2 import text_encode as te
+
+    failed: list[BaseException] = []
+    connectors = pipe.connectors
+    caption = int(connectors.config.caption_channels)
+
+    def _encode(prompt, num_videos_per_prompt=1, max_sequence_length=1024, scale_factor=8,
+                device=None, dtype=None):
+        prompts = [prompt] if isinstance(prompt, str) else list(prompt)
+        repeat = int(num_videos_per_prompt)
+        batch, length = len(prompts) * repeat, int(max_sequence_length)
+        if is_encoder and not failed:
+            try:
+                ids, mask = te.tokenize_like_diffusers(pipe.tokenizer, prompts, length)
+                embeds = te.gemma_prompt_embeds(pipe.text_encoder, ids, mask, dtype=torch.float32)
+                embeds = embeds.repeat_interleave(repeat, dim=0)
+                return embeds, mask.repeat_interleave(repeat, dim=0)
+            except Exception as exc:  # noqa: BLE001 - raised on every rank at the broadcast
+                logger.exception("ltx_2.tpu_prompt_encode_failed")
+                failed.append(exc)
+        del device, dtype, scale_factor
+        return torch.zeros(batch, length, 0), torch.zeros(batch, length, dtype=torch.int64)
+
+    def _connectors(text_encoder_hidden_states, attention_mask, padding_side="left", scale_factor=8):
+        from difflet.backends.tpu.ops_impl import device_runtime
+
+        batch, length = int(attention_mask.shape[0]), int(attention_mask.shape[1])
+        video = torch.zeros(batch, length, caption)
+        audio = torch.zeros(batch, length, caption)
+        mask = torch.zeros(batch, length, dtype=torch.int32)
+        status = _ENCODE_FAILED if failed else _ENCODE_OK
+        if is_encoder and not failed:
+            try:
+                video, audio, mask = te.connectors_forward(
+                    connectors, text_encoder_hidden_states, attention_mask,
+                    padding_side=padding_side, scale_factor=scale_factor)
+                video, audio, mask = video.float(), audio.float(), mask.to(torch.int32)
+            except Exception as exc:  # noqa: BLE001 - raised on every rank below
+                logger.exception("ltx_2.tpu_connectors_failed")
+                failed.append(exc)
+                status = _ENCODE_FAILED
+        xla = device_runtime.device()
+        payload = [video.to(xla), audio.to(xla), mask.to(xla),
+                   torch.tensor([status], dtype=torch.int32).to(xla)]
+        device_runtime.broadcast(payload)
+        ok = int(payload[3].cpu()[0]) == _ENCODE_OK
+        error = failed[0] if failed else None
+        failed.clear()
+        if not ok:
+            raise RuntimeError("LTX-2 prompt encoding failed on the encoder rank") from error
+        return payload[0].cpu(), payload[1].cpu(), payload[2].cpu().to(torch.int64)
+
+    pipe._get_gemma_prompt_embeds = _encode
+    # An instance attribute: nn.Module.__call__ looks ``forward`` up on the instance.
+    connectors.forward = _connectors
 
 
 def _install_broadcast_prompt_encoder(
@@ -307,8 +403,11 @@ class TpuLTX2Application(torch.nn.Module):
         module = transformer._prepare_module().to(device)
         device_runtime.wait()
         _hbm_probe("DiT weights on the chip", next(module.parameters()))
-        # Not yet measured under torch.compile, so off unless DIFFLET_TPU_COMPILE=1.
-        module = device_runtime.maybe_compile(module, default=False)
+        # Compiled by default (DIFFLET_TPU_COMPILE=0 turns it off): measured on a
+        # v5e-4 at 480x704x49, 20 steps, a step is 220 ms against 740 ms eager
+        # (request 8.4 s vs 18.9 s); the first call compiles for ~155 s with a
+        # cold tier-3 cache. Output vs eager: 35.4 dB, differences in fast motion.
+        module = device_runtime.maybe_compile(module, default=True)
         transformer.module = module
         seconds = transformer.warmup_eager(module, device)
         print(f"[ltx_2] tpu warmup (first compile) in {seconds:.1f}s", flush=True)
@@ -381,9 +480,45 @@ class TpuLTX2Application(torch.nn.Module):
         transformer = self._require_transformer("forward")
         validate_ltx_2_dit_inputs(bundle, config=transformer.config, dtype=self.dtype)
         device = device_runtime.device()
+        # Contiguous before the copy: the orchestrator's packed latents arrive as a
+        # transposed view (hidden_states stride (2310, 1, 2310) at 480x704x49), the
+        # warmup's example inputs are contiguous, and under DIFFLET_TPU_COMPILE=1
+        # Dynamo's stride guard then recompiled the whole DiT on the first real
+        # request of every process (~60 s, 2026-11-10).
+        inputs = [t.contiguous().to(device) for t in bundle.as_model_inputs()]
         with torch.no_grad():
-            video, audio = transformer.forward(*[t.to(device) for t in bundle.as_model_inputs()])
+            video, audio = self._dit_call(transformer, inputs)
         return video.cpu(), audio.cpu()
+
+    def _dit_call(self, transformer, inputs):
+        """``transformer.forward(*inputs)``, skipping Dynamo's guard evaluation when
+        the inputs match a signature (shapes, dtypes) that already ran.
+
+        Under ``torch.compile`` every call first evaluates the compiled frame's
+        guards -- each input's and each parameter's dtype/shape/stride, the
+        modules' attributes, globals read while tracing -- in case the cached
+        program no longer applies: ~8 ms of host time before every LTX-2 step
+        (48 blocks of parameters), while the chips idle (trace 2026-11-13;
+        skipped: window 181.1 -> 173.7 ms/step, bit-identical). This checks the
+        one thing that changes between requests -- the inputs, made contiguous
+        above -- and lets Dynamo check everything only for a signature it has not
+        run with: a new shape compiles as before. What it cannot see is a change
+        to the model itself (weights, LoRA, attributes) after a signature ran:
+        call :meth:`reset_guard_skip` after one, or set ``SKIP_GUARDS_ENV=0``.
+        """
+        signature = tuple((tuple(t.shape), t.dtype, t.device) for t in inputs)
+        seen = self.__dict__.setdefault("_ran_signatures", set())
+        if signature in seen and not _env_off(SKIP_GUARDS_ENV):
+            with torch.compiler.set_stance("default", skip_guard_eval_unsafe=True):
+                return transformer.forward(*inputs)
+        out = transformer.forward(*inputs)
+        seen.add(signature)
+        return out
+
+    def reset_guard_skip(self) -> None:
+        """Evaluate Dynamo's guards again on the next call of every signature (after
+        changing the model: weights, LoRA, attributes)."""
+        self.__dict__.pop("_ran_signatures", None)
 
     def __call__(self, *args: Any, **kwargs: Any):
         if len(args) == 1 and isinstance(args[0], LTX2DiTInputBundle):

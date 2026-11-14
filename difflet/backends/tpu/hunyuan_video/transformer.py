@@ -61,6 +61,9 @@ def make_checkpoint_key(inner_dim: int):
     return checkpoint_key
 
 
+
+SHARD_MODULATION_ENV = "DIFFLET_TPU_HV_SHARD_MODULATION"
+
 class TpuHunyuanVideoTransformerApplication(TpuApplicationBase):
     """The HunyuanVideo DiT, sharded across the TP group."""
 
@@ -89,11 +92,27 @@ class TpuHunyuanVideoTransformerApplication(TpuApplicationBase):
             init_empty_weights = None
 
         if init_empty_weights is None:
-            return HunyuanVideoTransformer3DModel(self.config)
+            return self._shard_modulation(HunyuanVideoTransformer3DModel(self.config))
         # include_buffers=False: the RoPE frequency tables are computed for
         # real in __init__ (same reason as Qwen-Image and Wan).
         with init_empty_weights(include_buffers=False):
-            return HunyuanVideoTransformer3DModel(self.config)
+            return self._shard_modulation(HunyuanVideoTransformer3DModel(self.config))
+
+    @staticmethod
+    def _shard_modulation(module):
+        """``DIFFLET_TPU_HV_SHARD_MODULATION`` (default on): the AdaLN modulation
+        linears column-parallel with the output gathered, as the neuron and trainium
+        backends build them (``shard_modulation_linears``). Left replicated, every rank
+        held all 80 (6.8 GB) and read them each step: three GEMV fusions, ~6 ms of a
+        476 ms step at HBM bandwidth (trace 2026-11-13). Each rank loads its rows of
+        the unchanged checkpoint keys (``_difflet_shard``)."""
+        import os
+
+        from difflet.models.hunyuan_video.modeling_hunyuan_video import shard_modulation_linears
+
+        if os.environ.get(SHARD_MODULATION_ENV, "1").strip().lower() not in {"0", "false", "no"}:
+            shard_modulation_linears(module)
+        return module
 
     def _prepare_module(self) -> torch.nn.Module:
         if self.module is not None:

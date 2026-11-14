@@ -109,3 +109,33 @@ def test_device_vae_wrapper_exposes_the_normalization_buffers(monkeypatch):
     z = torch.ones(1, 2, 1, 1, 1)
     out = _denormalize_ltx_2_video_latents(z, wrapper)
     assert out[0, :, 0, 0, 0].tolist() == [4.0, 6.0]  # z * std + mean, not z
+
+
+def test_forward_dit_hands_the_dit_contiguous_inputs(snapshot, monkeypatch):
+    """The packed latents arrive as a transposed view; under torch.compile a stride
+    guard on them recompiled the whole DiT on every process's first request."""
+    from difflet.backends.tpu.ops_impl import device_runtime
+    from difflet.models.ltx_2 import tpu_application as mod
+    from difflet.models.ltx_2.contract import LTX2DiTInputBundle
+
+    monkeypatch.setattr(device_runtime, "device", lambda: torch.device("cpu"))
+    monkeypatch.setattr(mod, "validate_ltx_2_dit_inputs", lambda *a, **k: None)
+    app = create_ltx_2_application(
+        model_path=str(snapshot), parallel=DiffletParallelConfig(tp_degree=4), dtype="bf16",
+        shape={"height": 512, "width": 768, "num_frames": 121}, backend="tpu",
+    )
+    seen = []
+
+    def forward(*tensors):
+        seen.extend(t.is_contiguous() for t in tensors)
+        return tensors[0], tensors[1]
+
+    monkeypatch.setattr(app.transformer, "forward", forward)
+    inputs = [torch.zeros(1, 4, 8) for _ in range(10)]
+    inputs[0] = torch.zeros(1, 8, 4).transpose(1, 2)  # a view, like the packed latents
+    assert not inputs[0].is_contiguous()
+    keys = ("hidden_states", "audio_hidden_states", "encoder_hidden_states",
+            "audio_encoder_hidden_states", "timestep", "sigma", "encoder_attention_mask",
+            "audio_encoder_attention_mask", "video_coords", "audio_coords")
+    app.forward_dit(LTX2DiTInputBundle(**dict(zip(keys, inputs))))
+    assert seen and all(seen)
