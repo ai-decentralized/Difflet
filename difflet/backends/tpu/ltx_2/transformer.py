@@ -134,9 +134,26 @@ class TpuLTX2TransformerApplication(TpuApplicationBase):
             dtype=dtype,
             strict=True,
         )
+        self._maybe_install_sp(module)
         module.requires_grad_(False)
         self.module = module.eval()
         return self.module
+
+    def _maybe_install_sp(self, module) -> bool:
+        """``DIFFLET_TPU_SP=1``: sequence parallelism with the collectives fused into
+        the matmuls (``ltx_2/sp.py``). Compiled path only: through jax_op, eager
+        re-exports every ring on every call."""
+        from difflet.backends.tpu.ops_impl import collective_matmul
+
+        if not collective_matmul.requested() or int(self._mesh().tp) <= 1:
+            return False
+        from difflet.backends.tpu.ltx_2 import sp
+
+        collective_matmul.require_compiled(default=True)  # LTX-2 compiles by default
+        installed = sp.install(module, video_seq_len=int(self.config.video_seq_len))
+        if installed:
+            self._sp_rows = module._difflet_sp_rows  # (real, padded) video rows
+        return installed
 
     def get_example_inputs(self) -> tuple:
         """Fixed-shape inputs matching ``LTX2DiTInputBundle`` (10 tensors)."""
@@ -177,6 +194,27 @@ class TpuLTX2TransformerApplication(TpuApplicationBase):
         if self.module is None:
             self._init_runtime()
             self._prepare_module()
+        cfg = self.config
+        rows = getattr(self, "_sp_rows", None)
+        if rows is not None and rows[1] != rows[0]:
+            # SP pads the video stream here, eagerly, never inside the compiled
+            # graph (see ltx_2/sp.py), and cuts the output back below.
+            from difflet.backends.tpu.ltx_2 import sp
+
+            hidden_states, video_coords = sp.pad_video_inputs(hidden_states, video_coords, rows[1])
+            video, audio = self._call_module(
+                hidden_states, audio_hidden_states, encoder_hidden_states,
+                audio_encoder_hidden_states, timestep, sigma, encoder_attention_mask,
+                audio_encoder_attention_mask, video_coords, audio_coords)
+            return sp.unpad_video_output(video, rows[0]), audio
+        return self._call_module(
+            hidden_states, audio_hidden_states, encoder_hidden_states,
+            audio_encoder_hidden_states, timestep, sigma, encoder_attention_mask,
+            audio_encoder_attention_mask, video_coords, audio_coords)
+
+    def _call_module(self, hidden_states, audio_hidden_states, encoder_hidden_states,
+                     audio_encoder_hidden_states, timestep, sigma, encoder_attention_mask,
+                     audio_encoder_attention_mask, video_coords, audio_coords):
         cfg = self.config
         return self.module(
             hidden_states=hidden_states,

@@ -125,3 +125,28 @@ def test_flux_1_dev_geometry():
     assert cfg.inner_dim == 3072 and cfg.image_seq_len == 4096
     with pytest.raises(ValueError, match="divisible by 16"):
         TpuFluxConfig(FLUX_1_DEV_CONFIG, height=1000, tp_degree=4).validate()
+
+
+def test_split_rope_permutation_reproduces_the_stock_forward():
+    """q/k head channels permuted at load + split-halves RoPE == diffusers' interleaved RoPE."""
+    from difflet.backends.tpu.flux.rope import pair_split_permutation, permute_flux_rope_layout_
+    from difflet.models.flux import tp_sharding as S
+
+    assert pair_split_permutation(8).tolist() == [0, 2, 4, 6, 1, 3, 5, 7]
+    cfg = TpuFluxConfig(_TINY, height=32, width=48, tp_degree=1, torch_dtype=torch.float32)
+    ref = build_flux_transformer(cfg).eval()
+    for module in ref.modules():  # non-trivial norm weights, so a missed permutation shows
+        if type(module).__name__ == "RMSNorm" and getattr(module, "weight", None) is not None:
+            module.weight.data.uniform_(0.5, 1.5)
+    permuted = build_flux_transformer(cfg).eval()
+    permuted.load_state_dict(ref.state_dict())
+    for block in list(ref.transformer_blocks) + list(ref.single_transformer_blocks):
+        block.attn.processor = S.FluxTPAttnProcessor()
+    assert permute_flux_rope_layout_(permuted) == 2
+    with pytest.raises(RuntimeError, match="already permuted"):
+        permute_flux_rope_layout_(permuted)
+    inputs = _inputs(cfg)
+    with torch.no_grad():
+        expected = ref(*inputs, return_dict=False)[0]
+        actual = permuted(*inputs, return_dict=False)[0]
+    torch.testing.assert_close(actual, expected, atol=1e-5, rtol=1e-4)
