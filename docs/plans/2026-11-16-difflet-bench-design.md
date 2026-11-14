@@ -1,7 +1,7 @@
 # `difflet bench`：统一 benchmark 入口 — 设计
 
 **日期：** 2026-11-16
-**状态：** 草稿，待审。没有实现任何代码。第 16 节的"未决"需要先定。
+**状态：** 草稿，待用户审阅通过。没有实现任何代码。讨论中提出的问题都已有答复，见第 16 节。
 **事实核对基线：** main `d70faffc`。标注"已核实"的条目都对着代码或真实 parser 跑过。
 **审阅：** 已由一个独立的审阅者以实施者视角读过一遍。它指出的 5 处与代码矛盾的地方已改正，见第 3 节表格的后七行和第 7 节。
 
@@ -25,9 +25,9 @@
 **目标**
 
 1. 唯一入口 `difflet bench`【用户定】，所有人和所有脚本都从这里进。
-2. 用参数选 metric 和模型【用户定】。第一版 8 个 metric：`compile`、`e2e_cold`、`e2e_warm`、`e2e_resident`、`dit_step`、`throughput`、`memory`、`quality`。
+2. 用参数选 metric 和模型【用户定】。第一版 6 个 metric：`compile`、`e2e_cold`、`e2e_warm`、`dit_step`、`memory`、`quality`。
 3. 功能 flag 自动继承自 `difflet compile` / `difflet generate`【用户定】。引擎加新 flag，bench 不改代码。
-4. parallelism 包括 DP【用户定】，因此有 `throughput`。
+4. parallelism 包括 DP【用户定】。DP 的指标是 `throughput`，离线批量和在线压测两种都要做，但排在最后，现在只登记不实施【用户定】，见第 7 节末尾。
 5. 有内存指标【用户定】，能替代 quant_bench。
 6. 每条结果自带复现所需的全部信息，并能用一条命令原样重跑。
 7. 第一版只支持 PyTorch-native 的 neuron backend【用户定】。
@@ -35,7 +35,8 @@
 **非目标（第一版不做）**
 
 - trainium 的 AOT backend【用户定】，以及 H100、B300、TPU、CPU 作为被测目标和 stock diffusers 参考引擎。旧的 `benchmark/` harness 原样冻结，继续给它们用。
-- 在线服务压测，即对 `difflet serve` 持续发请求（见未决 1）。
+- `throughput` 不在第一版的实施步骤里。它是登记在案的后置阶段。
+- `e2e_resident`，即模型已加载时单个请求的处理时间【用户定：不要】。
 - 看板、结果上传、带绝对基线的 CI 性能门禁。
 - 任何脚本的删除。清理清单只登记，见第 14 节【用户定】。
 
@@ -53,11 +54,11 @@
 | `compile` 有 37 个 flag，全部包含在 `generate` 的 53 个里，没有 compile 独有的 flag | flag 路由可以完全从 parser 推出 |
 | 同一个 flag 出现两次时后者生效 | 覆盖 = 把参数接在后面，不需要合并逻辑 |
 | generate 的 12 个布尔开关都没有 `--no-` 形式 | 命令行只能打开开关，不能关掉 |
-| TeaCache 的 flag 与 `--requests`、`--dp` 互斥，CLI 直接拒绝 | 带 TeaCache 的 recipe 测不了 `e2e_resident` 和 `throughput` |
-| DP 路由器永远从 core 0 开始给副本分核，并覆盖传入的 `NEURON_RT_VISIBLE_CORES`。修复已存在但未合并，在分支 `fix/dp-router-visible-cores` 上 | 不合并就无法把带 `--requests` 的运行绑到指定设备 |
-| 只要带 `--requests`，哪怕 dp=1，也会经过 DP 路由器和 worker | `e2e_resident`、`dit_step`、`memory` 都依赖路由器，上一行的修复是它们的前置条件 |
-| 批量请求是按阶段处理的：一个阶段把所有请求处理完，下一个阶段才开始，每个阶段是一个独立进程 | 一个请求的各段时间不连续，"同一进程里第二个请求的延迟"这个定义不成立，见第 7 节 |
-| 路由器转发给 worker 的 flag 是一份手写名单，漏了 `--shapes`、`--taef1`、`--taef1-path`、`--vae-in-process`、`--first-frame`、`--last-frame` | 用到这些 flag 的 recipe 在批量模式下跑的是另一个配置，需要修，见第 8 节 |
+| TeaCache 的 flag 与 `--requests`、`--dp` 互斥，CLI 直接拒绝 | 只影响后置的 `throughput`：带 TeaCache 的 recipe 测不了离线吞吐 |
+| DP 路由器永远从 core 0 开始给副本分核，并覆盖传入的 `NEURON_RT_VISIBLE_CORES`。修复已存在但未合并，在分支 `fix/dp-router-visible-cores` 上 | 只影响后置的 `throughput`：做它之前先合并这个修复 |
+| 只要带 `--requests`，哪怕 dp=1，也会经过 DP 路由器和 worker | 第一版的 metric 都是单请求运行，不带 `--requests`，不经过路由器 |
+| 批量请求是按阶段处理的：一个阶段把所有请求处理完，下一个阶段才开始，每个阶段是一个独立进程 | 只影响后置的 `throughput`，决定了它的算法，见第 7 节末尾 |
+| 路由器转发给 worker 的 flag 是一份手写名单，漏了 `--shapes`、`--taef1`、`--taef1-path`、`--vae-in-process`、`--first-frame`、`--last-frame` | 只影响后置的 `throughput`：用到这些 flag 的 recipe 在批量模式下跑的是另一个配置，做它之前要修 |
 | 不显式给 `--backend neuron` 时，CLI 走 AOT 路径；自动检测不会切到 neuron | recipe 必须显式写 backend |
 | `--quant` 只在 neuron backend 上可用，且 main 上只有 Qwen-Image 和 FLUX 支持 | 量化 recipe 必须带 `backend: neuron`；视频模型的量化在 mxfp8 分支上 |
 | repo 里已有 neuron 的依赖锁文件 `requirements-neuron-native.lock`，torch 同为 2.14.0，但锁的是 CPython 3.14 | 实施时把锁文件更新为第 10 节的基准环境 |
@@ -88,7 +89,7 @@ difflet bench report [<结果目录>]
 | 参数 | 含义 |
 |---|---|
 | `--recipe NAME[,NAME]` 或 `all` | 选 recipe，也接受一个 YAML 文件路径 |
-| `--metrics LIST` | 缺省为 `compile,e2e_cold,e2e_warm,e2e_resident,dit_step,memory`。`throughput` 和 `quality` 要显式选 |
+| `--metrics LIST` | 缺省为 `compile,e2e_cold,e2e_warm,dit_step,memory`。`quality` 要显式选 |
 | `--suite NAME` 或路径 | 跑一组运行，见第 6 节 |
 | `--devices LIST` | Neuron device 编号。bench 翻译成 `NEURON_RT_VISIBLE_CORES` |
 | `--cpus LIST` | 主机 CPU 集合。给了 `--devices` 就必须同时给，bench 不替用户猜 |
@@ -164,7 +165,7 @@ wan21_official:
 
 初始内容有两个来源：`MATRIX` 里唯一的 neuron 条目 `wan_2_1_neuron`，以及 quant_bench 的 `bench.sh` 里已有的 10 组 neuron 配置，即 7 个模型的基础配置和 3 组官方设置。`MATRIX` 里另外 7 条是 AOT recipe，不迁移。【我的选择】文件随包放在 `difflet/bench/` 下，用 YAML；PyYAML 是 transformers 和 huggingface_hub 的硬依赖，已在所有 venv 里，只需在 pyproject 里声明。
 
-`dp` 大于 1 的 recipe 只适用 `compile`、`throughput`、`memory`、`dit_step`、`quality`。它的 `e2e_cold`、`e2e_warm`、`e2e_resident` 记为不适用，这三项用 dp=1 的基础 recipe 去测。
+`dp` 大于 1 的 recipe 属于后置的 `throughput`，第一版不收。TP、CP、SP、CFG 并行都是普通的 flag，第一版的 metric 直接覆盖。
 
 ## 6. Suite
 
@@ -173,7 +174,7 @@ suite 是一份有名字的运行清单【用户感兴趣，我的形状】。re
 ```yaml
 # difflet/bench/suites/quant_ab.yaml
 description: bf16 对 MXFP8
-metrics: [compile, e2e_cold, e2e_warm, e2e_resident, dit_step, memory, quality]
+metrics: [compile, e2e_cold, e2e_warm, dit_step, memory, quality]
 recipes: [qwen_image, flux]
 variants:
   bf16: {}
@@ -205,10 +206,8 @@ repeats: 2
 | `compile` | 新进程 `compile`，编译缓存根指向一个新建的空目录 | 子进程启动到退出 | 1 |
 | `e2e_cold` | 新进程 `generate`；启动前逐文件驱逐 recipe 涉及的权重和编译产物的 page cache | 子进程启动到退出 | 2 |
 | `e2e_warm` | 新进程 `generate`；启动前显式预读同一批文件 | 子进程启动到退出 | 3 |
-| `e2e_resident` | 一次批量运行，用 `--requests` 发 3 个相同请求 | 非首个请求在各阶段的处理时间之和 | 取第 2、3 个 |
-| `dit_step` | 取自 `e2e_resident` 那次运行的第 2 个请求；不适用时取 `e2e_warm` | 相邻两步时间戳之差 | 全部步 |
-| `throughput` | recipe 自带 `dp: N`；`generate --requests`，每个副本至少 3 个请求 | 各副本"非首个请求的平均处理时间"的倒数之和 | 1 |
-| `memory` | 与 `e2e_resident` 同一次运行 | 每秒采样，按阶段归属 | — |
+| `dit_step` | 取自 `e2e_warm` 的各次运行，不另起进程 | 相邻两步时间戳之差 | 全部步 |
+| `memory` | 与 `e2e_warm` 的运行同时采样 | 每秒采样，按阶段归属 | — |
 | `quality` | 单独一次 `generate`，打开 dump | 不计时 | 1 |
 
 通用规则：
@@ -224,13 +223,9 @@ repeats: 2
 
 **`e2e_cold`。** "冷"只指 page cache；编译缓存是热的。用 `posix_fadvise` 逐文件驱逐，不需要 root，也不影响同机其他人。驱逐前后各量一次文件的驻留比例，并记录子进程实际从磁盘读入的字节数。达不到就把这次样本标为"驱逐未验证"，不冒充冷启动。结果里把 page cache、编译缓存、是否新进程分成三个字段记录。
 
-**`e2e_warm` 和 `e2e_resident`。** 这两类运行不得发生编译。引擎报告的缓存未命中数或新编译块数不为零时，该样本无效。
+**`e2e_warm`。** 这类运行不得发生编译。引擎报告的缓存未命中数、新编译块数或未预热形状不为零时，该样本无效。结果里同时给出阶段分解：各组件的加载、文本编码、去噪、解码各占多少，这样不需要 `e2e_resident` 也能看出纯计算部分的时间。
 
-**`e2e_resident` 的定义。**【我的选择】引擎的批量模式是按阶段处理的：文本编码阶段处理完所有请求，才轮到去噪阶段，然后是解码阶段，每个阶段是一个独立进程。所以一个请求的时间由几段不连续的片段组成。`e2e_resident` 定义为：一个非首个请求在各阶段的处理时间之和，不含模型加载。这与 quant_bench 现在报的"warm 的第 2 个请求"是同一个量。它回答的是"模型已加载时多处理一个请求要多久"，不等于在线服务的常驻延迟，后者属于以后的 serve 压测。只有一个阶段的组合，比如 neuron 上的 FLUX，各段是连续的。
-
-**`dit_step`。** neuron backend 的生产路径本来每次 forward 都同步，bench 不再加同步，结果里记录同步方式。同时报"每个调度步"和"每次真实 DiT forward"两组时间，TeaCache 跳步或 CFG 时两者数量不同。每个编译图的首次执行剔除。多 rank 时各 rank 分别记录，主数字取 rank 0，另报跨 rank 的最大和最小，不混合平均。自检：各步之和与引擎报告的去噪阶段总时间相差超过 2% 时，`dit_step` 无效【我的选择，初值待真机校准】。
-
-**`throughput`。**【未决 1，暂按离线批量】副本数来自 recipe 的 `dp`。请求文件由 bench 生成，所有请求同 prompt 同 seed。因为批量是按阶段处理的，不能用"某个时间窗内完成了几个请求"来算。定义为：对每个副本，取它非首个请求的平均处理时间，各副本的倒数相加，单位是每秒图片数或视频数。只有各副本的同一阶段在时间上确实重叠时才有效，重叠比例写进结果。同时报：整批的墙钟时间（含加载）、相对 dp=1 的扩展效率。所有副本输出的哈希必须一致，否则无效。
+**`dit_step`。** 每次 `e2e_warm` 运行只有一个请求，取它的全部去噪步，各次运行的样本合并统计。neuron backend 的生产路径本来每次 forward 都同步，bench 不再加同步，结果里记录同步方式。同时报"每个调度步"和"每次真实 DiT forward"两组时间，TeaCache 跳步或 CFG 时两者数量不同。每个编译图的首次执行剔除。多 rank 时各 rank 分别记录，主数字取 rank 0，另报跨 rank 的最大和最小，不混合平均。自检：各步之和与引擎报告的去噪阶段总时间相差超过 2% 时，`dit_step` 无效【我的选择，初值待真机校准】。
 
 **`memory`。** 主数字是每个 rank 的 HBM 峰值。用 `neuron-monitor` 每秒采样并只保留绑定的核，这是 quant_bench 现有的测法。各阶段是不同的进程，采样按计时文件里的阶段起止归属到阶段，报每个阶段的峰值和总的最大值。另记进程内的 `torch_neuronx.max_memory_allocated()` 作为核对，两者差异过大时标记。顺带记录：每个 rank 的 DiT 权重大小、主机内存峰值、读盘字节数。
 
@@ -244,8 +239,30 @@ repeats: 2
 - CPU fp32 参考从设备运行 dump 出的初始 latent 起步，不依赖 seed。它由 `difflet bench reference --from <result.json>` 生成，输入是一次带 dump 的设备运行。
 - 【我的选择】参考存放在 `$DIFFLET_BENCH_ROOT/references/<参考 id>/`，不进 git。参考 id 由模型 revision、shape、步数、prompt、guidance、初始 latent 的哈希、参考实现版本算出。目录带校验清单：每个文件的 sha256 和大小；带版本前缀，不原地覆盖。主机之间靠拷贝目录共享，清单保证拿到的是同一份。每条 quality 结果记录参考 id 和清单的哈希。
 - 缺参考或缺工具时报错，不跳过。
-- 【我的选择】第一版范围：`control` 模式对所有模型可用；`cpu_fp32` 模式只对现在已有参考生成脚本的 Qwen-Image 和 LTX-2 可用。其余模型的 CPU fp32 参考生成不在第一版。
+- 【用户定】latent 和编码前帧都 dump，第一版给所有模型加上。
+- 【我的选择】`control` 模式因此对所有模型可用。`cpu_fp32` 模式还需要每个模型各自的 CPU fp32 参考生成脚本，现在只有 Qwen-Image 和 LTX-2 有；其余模型的生成脚本逐个补，不阻塞第一版。
 - 门限：先测量并落盘，再判定。门限是 suite 里的可选字段，第一版不内置任何门限数值。
+
+### 后置阶段：`throughput`（只登记，暂不实施）【用户定】
+
+离线和在线两种都要做，排在第一版所有步骤之后。先做离线，再做在线。
+
+**离线批量**
+
+- 怎么跑：recipe 带 `dp: N`；bench 生成请求文件，每个副本至少 3 个请求，同 prompt 同 seed；用 `generate --requests` 一次跑完。
+- 算法：引擎的批量模式按阶段处理，文本编码阶段处理完所有请求才轮到去噪，再到解码，每个阶段是一个独立进程。所以不能用"某个时间窗内完成了几个请求"来算。定义为：对每个副本取它非首个请求的平均处理时间，各副本的倒数相加，单位是每秒图片数或视频数。
+- 有效性：只有各副本的同一阶段在时间上确实重叠时才有效，重叠比例写进结果；所有副本输出的哈希必须一致。
+- 同时报：整批的墙钟时间（含加载）、相对 dp=1 的扩展效率、单个请求的处理时间。最后一项就是被去掉的 `e2e_resident` 所指的量，在这里作为副产品给出。
+- 前置条件：合并 DP 分核的修复；路由器改为按 parser 转发 flag；引擎的计时输出支持每个请求的起止。
+- 限制：带 TeaCache 的 recipe 测不了，CLI 会拒绝。
+
+**在线压测**
+
+- 怎么跑：bench 启动一个 `difflet serve`，等它就绪，由压测客户端按设定的请求速率或并发数持续发请求，结束后关闭服务。
+- 测什么：每个负载水平下延迟的中位数、p90、p99；实际完成的每秒请求数；在给定延迟上限下能承受的最大请求速率。
+- 它走的是服务栈的代码路径，模型常驻，与 `generate` 不是同一条路径。它的数字不能和第一版的 e2e 指标直接比较。
+- 需要新写：压测客户端、服务的启停和就绪检测、请求到达的模型、预热段丢弃的规则。recipe 还要能表达 `serve` 的参数。
+- 可借鉴 vLLM 的 `bench serve` 和 SGLang 扩散部分的 `bench_serving`：请求速率和并发两条扫描轴、达标率、对客户端自身开销的检查。
 
 ## 8. 引擎侧的改动
 
@@ -259,9 +276,9 @@ repeats: 2
    - 每个请求完成后就落盘，进程被杀也留下已完成的记录。
 
    开关通过环境变量传递，因为 neuron backend 的各阶段运行在 torchrun 之下，环境变量会自动继承。名字和文件格式留给实施者。
-2. **DP 路由器从已绑定的核池里给副本分核**，不再固定从 core 0 开始。这个修复已经写好，在分支 `fix/dp-router-visible-cores` 上，带测试，尚未合并。这里要做的是把它合进来。
-3. **DP 路由器按 parser 推导要转发的 flag**，取代现在的手写名单。原则是：除了路由器自己消费的那几个，其余全部转发。在修好之前，第 9 节"请求的参数与生效的参数不一致则无效"这条规则是兜底，会把被丢掉的 flag 暴露出来。
-4. **dump。** 增加编码前帧的 dump，沿用现有 latent dump 的环境变量机制；给其余 pipeline 补上初始和最终 latent 的 dump。
+2. **dump。**【用户定：都 dump】增加编码前帧的 dump，沿用现有 latent dump 的环境变量机制；给其余五个 pipeline 补上初始和最终 latent 的 dump。两者默认关闭，只在测 `quality` 的那次运行打开。
+3. **后置，随 `throughput` 一起做：DP 路由器从已绑定的核池里给副本分核。** 这个修复已经写好，在分支 `fix/dp-router-visible-cores` 上，带测试，尚未合并。
+4. **后置，随 `throughput` 一起做：DP 路由器按 parser 推导要转发的 flag**，取代现在的手写名单。原则是除了路由器自己消费的那几个，其余全部转发。
 5. **把 `main()` 里的参数校验段提成一个函数**，bench 在启动任何子进程之前调用，使错误组合在一秒内失败。
 6. **注册 `bench` 子命令。**
 
@@ -344,14 +361,14 @@ $DIFFLET_BENCH_ROOT/<run_id>/                                     # 日志、输
 |---|---|---|
 | 0 | `difflet/bench/` 骨架、子命令、`recipes.yaml`、翻译与路由、`list`、`--dry-run` | 否 |
 | 1 | 结果记录、出处采集、`--repro` | 否 |
-| 2 | 环境：清洗、主机配置、`--check-env`、设备和 CPU 绑定、占用检查；合并 DP 分核修复的分支 | 是 |
-| 3 | 引擎的结构化计时输出；校验函数提取；路由器按 parser 转发 flag | 是 |
-| 4 | `compile`、`e2e_cold`、`e2e_warm`、`e2e_resident`、`dit_step`、`memory` | 是 |
-| 5 | `throughput` | 是 |
-| 6 | `quality`，含 dump、`bench reference` 和冻结参考 | 是 |
-| 7 | `report` 和 `compare` | 否 |
-| 8 | suite | 是 |
-| 9 | 清理和文档更新。只有用户明确说执行才做 | 否 |
+| 2 | 环境：清洗、主机配置、`--check-env`、设备和 CPU 绑定、占用检查 | 是 |
+| 3 | 引擎的结构化计时输出；校验函数提取 | 是 |
+| 4 | `compile`、`e2e_cold`、`e2e_warm`、`dit_step`、`memory` | 是 |
+| 5 | `quality`，含全部模型的 latent 和编码前帧 dump、`bench reference`、冻结参考 | 是 |
+| 6 | `report` 和 `compare` | 否 |
+| 7 | suite | 是 |
+| 8 | 清理和文档更新。只有用户明确说执行才做 | 否 |
+| 后置 | `throughput`：先离线批量，再在线压测。现在只登记，用户说开始才做 | 是 |
 
 第 3 步完成后做一次对照验证：同一配置打开和关闭计时输出交错各跑至少 5 轮，差异落在轮次间自然抖动之内才算通过。
 
@@ -393,6 +410,7 @@ $DIFFLET_BENCH_ROOT/<run_id>/                                     # 日志、输
 - 旧 `bench.py` 里的 neuron 分支随 neuron adapter 一起去掉。
 - `neuron_cold_warm.py` 独有的检查先搬成 bench 的有效性规则。
 - 过渡期 `MATRIX` 和 `recipes.yaml` 并存。`MATRIX` 里的 `wan_2_1_neuron` 迁走后删除，其余 7 条 AOT 条目留给旧 harness。
+- quant_bench 的报告里有一行"warm 的第 2 个请求"，这就是被去掉的 `e2e_resident`。第一版没有对应的数字，替换 quant_bench 之后这一行会消失，直到后置的离线 `throughput` 把它作为副产品带回来。
 
 ## 15. 文档引用更新【用户定：改成新命令】
 
@@ -418,31 +436,35 @@ $DIFFLET_BENCH_ROOT/<run_id>/                                     # 日志、输
 7. 文档引用改成新命令。
 8. 待删脚本只登记，暂不删除。13 个 TeaCache 实验脚本也只登记。
 9. neuron 的基准环境用 PyTorch 2.14。
+10. recipe 用 YAML 配置。
+11. suite 保留。
+12. 不要 `e2e_resident`。
+13. `throughput` 离线和在线两种都实现，但放在最后，现在只登记不做。
+14. latent 和编码前帧都 dump。
 
 **我的选择，可以推翻**
 
-1. 在用户列的四个 metric 之外增加 `compile`、`e2e_resident`。
+1. 在用户列的四个 metric 之外增加 `compile`。
 2. 允许命令行覆盖 recipe，覆盖的运行单独标记。
-3. recipe 和 suite 用 YAML，随包存放。
-4. `dit_step` 与 e2e 取自同一次运行。
-5. `quality` 在编码前帧上算；`cpu_fp32` 参考第一版只覆盖 Qwen-Image 和 LTX-2。
+3. recipe 和 suite 的文件随包存放在 `difflet/bench/` 下。
+4. `dit_step` 取自 `e2e_warm` 的运行，不另起进程；`memory` 也在这些运行里采样。
+5. `quality` 在编码前帧上算；`cpu_fp32` 参考的生成脚本先只有 Qwen-Image 和 LTX-2，其余逐个补。
 6. `e2e_cold` 用逐文件驱逐代替全局清缓存。
 7. bench 不自动挑设备。
 8. AOT、H100、TPU 的文档命令暂时保留，只改指向已被替代命令的 3 份文档。
 9. 第一版不内置任何性能或质量门限。
-10. `e2e_resident` 定义为非首个请求在各阶段处理时间之和，与 quant_bench 现有口径一致。
-11. `throughput` 定义为各副本单请求处理时间的倒数之和，副本数来自 recipe 的 `dp`。
-12. backend 是 recipe 的必填项；`dp` 大于 1 的 recipe 不测三个 e2e 指标。
-13. suite 的续跑以命名的实验为单位；`order: ABBA` 作用于计时类进程的启动顺序，每臂只编译一次。
-14. 报告主表显示每个 recipe 最新的一份有效结果。
-15. `--cpus` 必须显式给；`--quality-ref` 必须显式给或由 suite 提供；CPU fp32 参考存在 bench 根目录下，靠拷贝共享。
-16. 基准环境的 Python 取 3.12.3，即 AWS SDK 自带环境的版本。
-17. 线程数默认等于 `--cpus` 的大小；输出依赖线程数的 recipe 用 `threads` 固定，比如 HunyuanVideo-1.5。
+10. backend 是 recipe 的必填项；`dp` 大于 1 的 recipe 留给后置的 `throughput`。
+11. suite 的续跑以命名的实验为单位；`order: ABBA` 作用于计时类进程的启动顺序，每臂只编译一次。
+12. 报告主表显示每个 recipe 最新的一份有效结果。
+13. `--cpus` 必须显式给；`--quality-ref` 必须显式给或由 suite 提供；CPU fp32 参考存在 bench 根目录下，靠拷贝共享。
+14. 基准环境的 Python 取 3.12.3，即 AWS SDK 自带环境的版本。
+15. 线程数默认等于 `--cpus` 的大小；输出依赖线程数的 recipe 用 `threads` 固定，比如 HunyuanVideo-1.5。
+16. 后置的 `throughput` 先做离线、再做在线；离线的算法见第 7 节末尾。
 
-**未决，需要用户回答**
+**未决**
 
-1. `throughput` 测离线批量还是在线服务？本文按离线批量写，这也是我的建议：第一版要测的是 DP 这个并行特性，离线批量直接复用 CLI 路径；对 `difflet serve` 的在线压测走的是另一条代码路径，需要另写压测客户端，建议作为下一期。
-2. 编码前帧的 dump 和另外五个 pipeline 的 latent dump 放不放进第一版？我的建议：编码前帧的 dump 第一版就给所有模型加上，因为任何质量数字都要用它；latent dump 等到给对应模型做 CPU fp32 参考时再补。
+没有。讨论中提出的问题都已答复。
+
 ## 17. 留给实施者的
 
 - `difflet/bench/` 内部的模块划分。
@@ -455,7 +477,8 @@ $DIFFLET_BENCH_ROOT/<run_id>/                                     # 日志、输
 ## 18. 风险
 
 - **引擎计时输出动的是产品 CLI。** 需要确认默认关闭时没有任何行为变化，并通过第 13 节的对照验证。
-- **DP 分核的修复动的是路由器。** 需要在真机上验证多副本启动不回归。
+- **后置的 `throughput` 要动 DP 路由器。** 分核修复和 flag 转发都需要在真机上验证多副本启动不回归。
+- **补 dump 要改五个 pipeline。** 这是第一版里对产品代码改动面最大的一项，需要确认 dump 关闭时没有任何行为和性能变化。
 - **共享主机上的冷启动经常无法验证。** 别的会话映射着同一份权重时驱逐会部分失败，样本会被标为"驱逐未验证"。
 - **`neuron_cold_warm.py` 是 Wan 在 neuron 上唯一有 68 个单元测试保护的测量路径。** 删它之前，bench 必须在同一份 recipe 上跑出一致的数字。
 - **每秒采样会漏掉短于一秒的内存尖峰。** 靠进程内峰值核对来发现。
