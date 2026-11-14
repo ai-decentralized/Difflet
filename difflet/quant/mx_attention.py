@@ -24,8 +24,10 @@ by summation order. It forms P exactly as the kernel does (nkilib 2.14
 
 MX operands are quantized along their contraction axis: Q and K along the head dim by
 ``qk_perm(D)``, P and V along keys per 512-key tile by ``pv_perm(512)`` (:mod:`difflet.quant.mx`
-for the law). The perms default to ``swizzle_perm`` until the kernel exports its loaders' own
-(ruling BR1). Inputs are taken as given: bf16, as the kernel loads them (:2122-2150), gives the
+for the law). The perms default to the kernel's (``mx_attention_kernel.qk_perm`` / ``pv_perm``,
+ruling BR1): contiguous blocks of 32, the group-of-4 layout's, locked on the device by
+``scripts/mx_attention/membership.py`` (not imported here: that module needs the Neuron SDK).
+Inputs are taken as given: bf16, as the kernel loads them (:2122-2150), gives the
 kernel's numbers; fp32 with MX off is exact attention (PV then takes E in v's dtype), which is how
 the tests check the softmax bookkeeping against SDPA.
 """
@@ -37,7 +39,7 @@ from collections.abc import Callable
 import torch
 import torch.nn.functional as F
 
-from difflet.quant.mx import TILE_K, fake_quantize_mx, swizzle_perm
+from difflet.quant.mx import TILE_K, fake_quantize_mx
 
 _MASKED = torch.finfo(torch.float32).min  # attention_cte's _FLOAT32_MIN
 _SECTION_ABOVE, _SECTION_LEN = 10 * 1024, 8 * 1024
@@ -73,10 +75,10 @@ def mx_attention_reference(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, *,
         raise ValueError(f"section_len={section_len} must be a multiple of {TILE_K}")
     qf, kf, vf = q.float(), k.float(), v.float()
     if qk_mx:
-        perm = (qk_perm or swizzle_perm)(q.shape[-1])
+        perm = (qk_perm or torch.arange)(q.shape[-1])
         qf, kf = fake_quantize_mx(qf, perm), fake_quantize_mx(kf, perm)
     if pv_mx:
-        tile_perm = (pv_perm or swizzle_perm)(TILE_K)
+        tile_perm = (pv_perm or torch.arange)(TILE_K)
         vf = _fake_quantize_keys(vf.transpose(1, 2), tile_perm).transpose(1, 2)
     row_max = torch.full((bh, s_q, 1), -torch.inf)
     row_sum = torch.zeros(bh, s_q, 1)
