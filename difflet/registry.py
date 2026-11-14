@@ -438,8 +438,9 @@ def _register_builtin_minimax_h3() -> None:
         detector=is_minimax_h3,
         default_parallel=DiffletParallelConfig(tp_degree=4),
         default_shape={"height": 768, "width": 1344, "num_frames": 124},
-        # neuron: the staged CLI only (text and decoders on the host, the DiT on torchrun
-        # ranks, difflet/cli/orchestrators/minimax_h3.py); no resident application yet.
+        # neuron: the staged CLI (difflet/cli/orchestrators/minimax_h3.py) and resident serving
+        # (difflet/serving/models/minimax_h3.py over backends/neuron/minimax_h3/resident.py);
+        # neither goes through application_factory, which builds the Trainium application.
         backends=("trainium", "neuron"),
         # The repository also contains the Ref2VA transformer and the original
         # FL2VA/Ref2VA checkpoints.  The first Difflet path is the root-level

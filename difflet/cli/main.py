@@ -995,19 +995,19 @@ def _validate_taef1(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
 
-#: Models whose generate path takes --first-frame / --last-frame (first/last keyframe
-#: conditioning). Every other model refuses the flags rather than ignoring them.
-_KEYFRAME_MODELS = frozenset({"MiniMaxAI/MiniMax-H3"})
-
-
 def _validate_keyframes(args: argparse.Namespace) -> None:
+    """--first-frame / --last-frame only for models whose serving metadata declares
+    ``input_keyframes`` (the flag the Videos API reads too); every other model refuses the
+    flags rather than ignoring them."""
     frames = [f for f in (getattr(args, "first_frame", None), getattr(args, "last_frame", None)) if f]
     if not frames:
         return
-    if args.model_id not in _KEYFRAME_MODELS:
+    from difflet.serving.model_registry import model_accepts_keyframes
+
+    if not model_accepts_keyframes(args.model_id):
         print(
             f"Error: {args.model_id} does not support --first-frame/--last-frame "
-            "(keyframe conditioning is wired for MiniMax-H3 only).",
+            "(no keyframe conditioning for this model).",
             file=sys.stderr,
         )
         raise SystemExit(1)

@@ -3,6 +3,7 @@ audio+video MP4, and the native-neuron pieces of the resident worker and the vid
 
 from __future__ import annotations
 
+import dataclasses
 import os
 import shutil
 from pathlib import Path
@@ -470,6 +471,33 @@ def test_metadata_takes_keyframes_for_minimax_h3_only():
     from difflet.common.registry.base import ServingModelMetadata
 
     assert ServingModelMetadata.__dataclass_fields__["input_keyframes"].default is False
+
+
+def test_the_cli_keyframe_flags_follow_the_metadata_flag(tmp_path, monkeypatch, capsys):
+    """--first-frame/--last-frame are gated by the same input_keyframes flag as the Videos API's
+    uploads, not by a list of their own."""
+    import argparse
+
+    from difflet.cli.main import _validate_keyframes
+    from difflet.serving import model_registry
+
+    assert model_registry.model_accepts_keyframes("MiniMaxAI/MiniMax-H3")
+    assert model_registry.model_accepts_keyframes("MiniMaxAI/MiniMax-H3/")
+    for other in ("black-forest-labs/FLUX.1-dev", "Wan-AI/Wan2.2-T2V-A14B-Diffusers", "x/unknown"):
+        assert not model_registry.model_accepts_keyframes(other)
+
+    frame = tmp_path / "first.png"
+    frame.write_bytes(b"png")
+    _validate_keyframes(argparse.Namespace(model_id="MiniMaxAI/MiniMax-H3",
+                                           first_frame=str(frame), last_frame=None))
+    with pytest.raises(SystemExit):
+        _validate_keyframes(argparse.Namespace(model_id="black-forest-labs/FLUX.1-dev",
+                                               first_frame=str(frame), last_frame=None))
+    assert "does not support --first-frame/--last-frame" in capsys.readouterr().err
+    # A second keyframe model needs only its metadata flag.
+    monkeypatch.setitem(model_registry._SERVING_METADATA, "flux_kf", dataclasses.replace(
+        model_registry._SERVING_METADATA["minimax_h3"], checkpoint_ids=("y/keyframes",)))
+    assert model_registry.model_accepts_keyframes("y/keyframes")
 
 
 def test_validator_counts_the_keyframe_blocks_and_requires_the_server_s_count(tmp_path,

@@ -192,6 +192,16 @@ def _gpu_serving_metadata(entry_name: str, model_id: str, platform) -> ServingMo
     return gpu_serving_metadata(spec)
 
 
+def model_accepts_keyframes(model_id: str) -> bool:
+    """Whether a built-in model takes first/last keyframes: its ``ServingModelMetadata``
+    declares ``input_keyframes``. The one flag behind both the Videos API's keyframe uploads
+    and the CLI's ``--first-frame`` / ``--last-frame``."""
+    _ensure_builtin_serving_models_registered()
+    normalized = model_id.rstrip("/")
+    return any(normalized in metadata.checkpoint_ids and metadata.input_keyframes
+               for metadata in _SERVING_METADATA.values())
+
+
 def _ensure_builtin_serving_models_registered() -> None:
     global _BUILTINS_LOADED
     if _BUILTINS_LOADED:
