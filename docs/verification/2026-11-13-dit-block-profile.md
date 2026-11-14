@@ -417,6 +417,33 @@ rel L2 against fp32 attention per head (section 7).
 At 40 calls the small rows still carry section 8's fixed ~1 ms per-measurement overhead, which
 pulls their ratios toward 1. The captured spans below (kernel only) give flux 0.883.
 
+**Call-path control** (unbounded shapes, which time the knob through a direct kernel call instead
+of torch-neuronx's SDPA op). There are three arms:
+
+- **SDPA-shipped**: `--impl cte`.
+- **Direct-default**: the rebalanced arm's direct `wrapped_flash_fwd` call with `allow_vector_exp`
+  left at its default. It ran from a git-archive copy of the commit with only that argument
+  removed (`rebalance/tree_ctl.diff`; its JSONs still carry the flag).
+- **Direct-knob**: `--cte-no-vector-exp`.
+
+The three arms were timed back to back on one device and CPU set (05:00-05:11), by the same method.
+They were re-timed together rather than compared with the table above for two reasons. Device 4
+(flux's) was held by another session, so flux moved to device 7. And another session's workers were
+loading NUMA node 1: before launch, with no probe running, the device 1 / device 7 CPU slices were
+44% / 21% busy, and the host load average was 134 just before launch and 26-105 at the arms' starts and ends. The spreads show it (SDPA-shipped
+ltx2 2.31%). Ratios use J = max(2%, the denominator's spread).
+
+| shape | device (CPUs) | SDPA-shipped ms (spread) | direct-default ms (spread) | direct-knob ms (spread) | direct-default / SDPA-shipped | direct-knob / direct-default | direct-knob / SDPA-shipped | direct-default == SDPA-shipped, bits |
+|---|---|---|---|---|---|---|---|---|
+| `flux_1024` (40 calls) | 7 (88-95,184-191) | 0.9197 (1.79%) | 0.9165 (0.93%) | 0.8180 (1.19%) | 0.997 | 0.893 | 0.889 | identical |
+| `ltx2_video` | 7 (88-95,184-191) | 2.0579 (2.31%) | 2.0571 (0.34%) | 1.7623 (1.08%) | 1.000 | 0.857 | 0.856 | identical |
+| `wan_81f` | 1 (48-55,144-151) | 63.715 (0.61%) | 63.563 (0.29%) | 51.961 (0.03%) | 0.998 | 0.818 | 0.816 | identical |
+
+The direct call computes exactly what torch-neuronx's SDPA op computes (bit-identical outputs), in
+the same time: within 0.4%, inside J on every shape. So the whole gain is the knob's. Against the
+decision table's arms, timed an hour earlier (flux on device 4), direct-default / shipped is
+1.001 / 0.998 / 0.998, and each direct-knob output is bit-identical between the two sessions.
+
 **Engine split**, one call. The rebalanced NEFFs were captured with 3b's `capture.sh` on the
 devices and CPUs of section 8's shipped captures (wan: device 11, CPUs 24-31,120-127; flux:
 device 12, 32-39,128-135). Busy = union of instruction intervals per physical core, over the two
@@ -468,5 +495,6 @@ against this baseline still carries shipped's VectorE bottleneck.
 Outputs: `/mnt/nvme/difflet-mxattn/probe/rebalance/` (`scalar_exp/` and `shipped/`: per shape the
 probe JSON, `out.pt`, per-process `run<i>.{json,log}` and `runs.log` with `uptime` and `fuser` at
 each run's start and end; `cap/` captures with `engines.json`, `phases.json`, `dmaq.json`,
-`*.overlap.json`; `table.json`; the scratch tools `queue.sh`, `table.py`, `dmaq.py`,
-`overlap.py`, `neffshape.py`).
+`*.overlap.json`; `table.json`; `ctl/` the call-path control's three arms, `table.json`,
+`cpuload.log`; `tree_ctl/` and `tree_ctl.diff`; the scratch tools `queue.sh`, `table.py`,
+`dmaq.py`, `overlap.py`, `neffshape.py`, `ctl_queue.sh`, `ctl_table.py`, `cpuload.py`).
