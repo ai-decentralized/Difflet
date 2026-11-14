@@ -357,3 +357,11 @@ every variant and offered only on request:
   reported, not applied.
 - Task 6 runs as written for all its models after the option lands; the variant its `both` arm
   uses is chosen by the user (no variant won G2).
+
+Two Global Constraints are superseded by the implementation (Tasks 5 and 5b, reviewed):
+- The switch values are now `off`, `qk`, `pv` and `qk+pv`. `mxfp8` is rejected.
+- Unbounded calls are not padded, because the fork zeroes the K/V rows and P's tail of a partial
+  512-key tile. Bounded calls are padded once and sliced once.
+
+K smoothing averages over all keys of the call, including any out-of-bounds padding. This is
+softmax-invariant, and the CPU mirror computes it the same way (ruling BR36).
