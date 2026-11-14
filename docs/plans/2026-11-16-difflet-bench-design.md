@@ -60,14 +60,14 @@
 | 路由器转发给 worker 的 flag 是一份手写名单，漏了 `--shapes`、`--taef1`、`--taef1-path`、`--vae-in-process`、`--first-frame`、`--last-frame` | 用到这些 flag 的 recipe 在批量模式下跑的是另一个配置，需要修，见第 8 节 |
 | 不显式给 `--backend neuron` 时，CLI 走 AOT 路径；自动检测不会切到 neuron | recipe 必须显式写 backend |
 | `--quant` 只在 neuron backend 上可用，且 main 上只有 Qwen-Image 和 FLUX 支持 | 量化 recipe 必须带 `backend: neuron`；视频模型的量化在 mxfp8 分支上 |
-| repo 里已有 neuron 的依赖锁文件 `requirements-neuron-native.lock`，锁的是 CPython 3.14 | 与这台主机上实际跑数的 venv 不一致，见未决 3 |
+| repo 里已有 neuron 的依赖锁文件 `requirements-neuron-native.lock`，torch 同为 2.14.0，但锁的是 CPython 3.14 | 实施时把锁文件更新为第 10 节的基准环境 |
 | neuron backend 每次 DiT forward 后都 `torch.neuron.synchronize()` 并把输出拷回主机 | `dit_step` 和 e2e 可以取自同一次运行 |
 | neuron backend 已有 `step_hook`、`forward_hook`，以及编译块数、未预热形状、回退算子这些证据，目前只打在日志里 | 结构化计时主要是把现有 hook 接到一个文件上 |
 | `benchmark*` 被 pyproject 排除在安装包外；native-fp8 venv 里没有 `difflet` 命令，靠 `python -m difflet.cli.main` 运行 | bench 代码要进包；子进程必须用当前解释器启动 |
 | `difflet` CLI 的 import 耗时 22 ms，不加载 torch | 新子命令必须延迟 import，不能改变这一点 |
 | 初始和最终 latent 的 dump 只有 Qwen-Image 和 LTX-2 两个 pipeline 有 | `quality` 要覆盖全部模型需要补 dump |
 | 当前 trn3.48xlarge 主机上没有任何 venv 装了 NxD，AOT backend 在这里跑不了 | 第一版不做 AOT，这一条不再是阻碍 |
-| 这台主机上能跑 neuron 的三个 venv 都是 Python 3.12.3、torch 2.14.0、torch-neuronx 2.14.3.0.1；torch 的 wheel 只有 cp312 的构建 | 基准环境的版本见未决 3 |
+| 这台主机上能跑 neuron 的三个 venv 都是 Python 3.12.3、torch 2.14.0、torch-neuronx 2.14.3.0.1；torch 的 wheel 只有 cp312 的构建 | 基准环境就取它，见第 10 节 |
 | 冷编译一次要几十分钟 | 需要续跑，以及"warm 运行不得编译"的保护 |
 
 ## 4. 命令接口
@@ -299,7 +299,8 @@ $DIFFLET_BENCH_ROOT/<run_id>/                                     # 日志、输
 ## 10. 环境与设备
 
 - **主机配置只有三个环境变量，只在一处读取并有默认值**：`DIFFLET_BENCH_ROOT`、`HF_HUB_CACHE`、`DIFFLET_COMPILE_CACHE`。其余文件不许再写路径。解释器就是启动 bench 的那个。
-- **依赖锁定。** 用 repo 里的 neuron 锁文件，并在基准环境确定后更新它。完整的包列表随每条结果保存。基准环境用哪个版本见未决 3。
+- **基准环境。**【用户定】PyTorch 2.14。【我的选择】具体取 AWS SDK 自带的 torch-neuronx 2.14 环境：Python 3.12.3、torch 2.14.0、torch-neuronx 2.14.3.0.1、neuronx-cc 2.28.7631。它是这台主机上实际跑数的环境，同一 AMI 的每台 trn3 上都有，而且主机上的 torch 只有给 Python 3.12 的构建。
+- **依赖锁定。** 把 repo 里的 neuron 锁文件更新为上面的基准环境。完整的包列表随每条结果保存，`--check-env` 以它为参照。
 - **CPU 和线程数。** `--cpus` 必须显式给出并记录。线程数默认等于 CPU 集合的大小，recipe 可以用 `threads` 固定它。这是测量定义的一部分：quant_bench 的记录显示 48 线程和 96 线程会让 HunyuanVideo-1.5 生成出不同的片段，主机侧的时间也不同。线程数不同的两份结果，`compare` 要标出来，输出哈希相等的规则也只在线程数相同时适用。
 - **`--check-env`。** 对比本机与参考结果的包版本、SDK 版本、实例型号，列出差异。
 - **环境清洗。** 启动器丢掉继承来的引擎相关变量：`DIFFLET_*`、`TORCH_NEURONX_*`、编译缓存位置、线程数。开关只能从 recipe 进。这是把现有 neuron adapter 的做法提到公共层。
@@ -416,6 +417,7 @@ $DIFFLET_BENCH_ROOT/<run_id>/                                     # 日志、输
 6. 加内存指标。
 7. 文档引用改成新命令。
 8. 待删脚本只登记，暂不删除。13 个 TeaCache 实验脚本也只登记。
+9. neuron 的基准环境用 PyTorch 2.14。
 
 **我的选择，可以推翻**
 
@@ -434,13 +436,13 @@ $DIFFLET_BENCH_ROOT/<run_id>/                                     # 日志、输
 13. suite 的续跑以命名的实验为单位；`order: ABBA` 作用于计时类进程的启动顺序，每臂只编译一次。
 14. 报告主表显示每个 recipe 最新的一份有效结果。
 15. `--cpus` 必须显式给；`--quality-ref` 必须显式给或由 suite 提供；CPU fp32 参考存在 bench 根目录下，靠拷贝共享。
+16. 基准环境的 Python 取 3.12.3，即 AWS SDK 自带环境的版本。
+17. 线程数默认等于 `--cpus` 的大小；输出依赖线程数的 recipe 用 `threads` 固定，比如 HunyuanVideo-1.5。
 
 **未决，需要用户回答**
 
 1. `throughput` 测离线批量还是在线服务？本文按离线批量写，这也是我的建议：第一版要测的是 DP 这个并行特性，离线批量直接复用 CLI 路径；对 `difflet serve` 的在线压测走的是另一条代码路径，需要另写压测客户端，建议作为下一期。
 2. 编码前帧的 dump 和另外五个 pipeline 的 latent dump 放不放进第一版？我的建议：编码前帧的 dump 第一版就给所有模型加上，因为任何质量数字都要用它；latent dump 等到给对应模型做 CPU fp32 参考时再补。
-3. neuron 的基准环境用哪个版本？用户说的是"PyTorch 3.15"，需要确认所指：这台主机上能跑 neuron 的 venv 都是 Python 3.12.3 加 torch 2.14.0，torch 的 wheel 只有 cp312 的构建，主机上没有 Python 3.15；repo 的锁文件锁的是 CPython 3.14。另外，团队是否约定一个统一的线程数写进 recipe，比如 quant_bench 用过的 48？
-
 ## 17. 留给实施者的
 
 - `difflet/bench/` 内部的模块划分。
