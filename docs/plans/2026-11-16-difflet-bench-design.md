@@ -30,11 +30,11 @@
 4. parallelism 包括 DP【用户定】，因此有 `throughput`。
 5. 有内存指标【用户定】，能替代 quant_bench。
 6. 每条结果自带复现所需的全部信息，并能用一条命令原样重跑。
-7. 第一版只支持 trainium 和 neuron 两个 backend【用户定】。
+7. 第一版只支持 PyTorch-native 的 neuron backend【用户定】。
 
 **非目标（第一版不做）**
 
-- H100、B300、TPU、CPU 作为被测目标，以及 stock diffusers 参考引擎。旧的 `benchmark/` harness 原样冻结，继续给它们用。
+- trainium 的 AOT backend【用户定】，以及 H100、B300、TPU、CPU 作为被测目标和 stock diffusers 参考引擎。旧的 `benchmark/` harness 原样冻结，继续给它们用。
 - 在线服务压测，即对 `difflet serve` 持续发请求（见未决 1）。
 - 看板、结果上传、带绝对基线的 CI 性能门禁。
 - 任何脚本的删除。清理清单只登记，见第 14 节【用户定】。
@@ -60,13 +60,14 @@
 | 路由器转发给 worker 的 flag 是一份手写名单，漏了 `--shapes`、`--taef1`、`--taef1-path`、`--vae-in-process`、`--first-frame`、`--last-frame` | 用到这些 flag 的 recipe 在批量模式下跑的是另一个配置，需要修，见第 8 节 |
 | 不显式给 `--backend neuron` 时，CLI 走 AOT 路径；自动检测不会切到 neuron | recipe 必须显式写 backend |
 | `--quant` 只在 neuron backend 上可用，且 main 上只有 Qwen-Image 和 FLUX 支持 | 量化 recipe 必须带 `backend: neuron`；视频模型的量化在 mxfp8 分支上 |
-| repo 里已有四份依赖锁文件，trainium 和 neuron 各一份 | 不需要新建锁文件，但 neuron 的锁与实际跑数的 venv 不一致，见未决 5 |
-| neuron backend 每次 DiT forward 后都 `torch.neuron.synchronize()` 并把输出拷回主机；trainium 路径没有模型开启 async 模式 | `dit_step` 和 e2e 可以取自同一次运行 |
+| repo 里已有 neuron 的依赖锁文件 `requirements-neuron-native.lock`，锁的是 CPython 3.14 | 与这台主机上实际跑数的 venv 不一致，见未决 3 |
+| neuron backend 每次 DiT forward 后都 `torch.neuron.synchronize()` 并把输出拷回主机 | `dit_step` 和 e2e 可以取自同一次运行 |
 | neuron backend 已有 `step_hook`、`forward_hook`，以及编译块数、未预热形状、回退算子这些证据，目前只打在日志里 | 结构化计时主要是把现有 hook 接到一个文件上 |
 | `benchmark*` 被 pyproject 排除在安装包外；native-fp8 venv 里没有 `difflet` 命令，靠 `python -m difflet.cli.main` 运行 | bench 代码要进包；子进程必须用当前解释器启动 |
 | `difflet` CLI 的 import 耗时 22 ms，不加载 torch | 新子命令必须延迟 import，不能改变这一点 |
 | 初始和最终 latent 的 dump 只有 Qwen-Image 和 LTX-2 两个 pipeline 有 | `quality` 要覆盖全部模型需要补 dump |
-| 当前 trn3.48xlarge 主机上没有任何 venv 装了 NxD | trainium 的 AOT backend 在这台机器上无法验证（见未决 4） |
+| 当前 trn3.48xlarge 主机上没有任何 venv 装了 NxD，AOT backend 在这里跑不了 | 第一版不做 AOT，这一条不再是阻碍 |
+| 这台主机上能跑 neuron 的三个 venv 都是 Python 3.12.3、torch 2.14.0、torch-neuronx 2.14.3.0.1；torch 的 wheel 只有 cp312 的构建 | 基准环境的版本见未决 3 |
 | 冷编译一次要几十分钟 | 需要续跑，以及"warm 运行不得编译"的保护 |
 
 ## 4. 命令接口
@@ -113,34 +114,47 @@ recipe 是一组有名字、进版本库的引擎 flag，加少量 bench 自己�
 # difflet/bench/recipes.yaml
 qwen_image:
   args:                       # key 就是 difflet generate 的 flag 名
+    backend: neuron           # 必填。不写的话 CLI 会走 AOT 路径
     model-id: Qwen/Qwen-Image
     revision: 75e0b4be04f60ec59a75f475837eced720f823b6
     tp-degree: 4
     height: 1024
     width: 1024
-    steps: 20
-    guidance-scale: 4.0
+    steps: 50
+    guidance-scale: 7.5
     seed: 42
-    prompt: a cinematic shot of a red fox running through a snowy forest
-    backend: trainium         # 必填。这一条是 AOT 路径的 recipe
+    prompt: a cat sitting on a bench
 
-qwen_image_neuron:
+qwen_image_mxfp8:             # 只写与基础 recipe 的差异
   extends: qwen_image
-  args: {backend: neuron, exec-mode: compile}
-
-qwen_image_neuron_mxfp8:
-  extends: qwen_image_neuron
   args: {quant: mxfp8}
+
+wan21_official:
+  args:
+    backend: neuron
+    model-id: Wan-AI/Wan2.1-T2V-14B-Diffusers
+    revision: 38ec498cb3208fb688890f8cc7e94ede2cbd7f68
+    tp-degree: 4
+    height: 480
+    width: 832
+    num-frames: 81
+    steps: 50
+    guidance-scale: 5.0
+    seed: 42
+    prompt: a cat walking through a garden
+    negative-prompt: "Bright tones, overexposed, static, blurred details, ..."
   threads: 48                 # 可选；固定主机线程数
   env:
     force: {}                 # 属于被测配置，覆盖用户环境
     default: {}               # 只在用户没设置时生效
 ```
 
+上面的取值来自 quant_bench 现在实际在用的配置。
+
 规则：
 
 1. **机械翻译。** `k: v` 变成 `--k v`；`true` 变成 `--k`；`false` 表示不出现。bench 不为任何引擎 flag 建字段。
-2. **用真实 parser 校验。** `args` 的每个 key 必须是 `difflet generate` 认识的 flag。未知的 key、未知的顶层字段一律报错。`revision` 和 `backend` 必填。backend 因此是 recipe 身份的一部分，同一个模型在两个 backend 上是两条 recipe，用 `extends` 派生。
+2. **用真实 parser 校验。** `args` 的每个 key 必须是 `difflet generate` 认识的 flag。未知的 key、未知的顶层字段一律报错。`revision` 和 `backend` 必填。第一版所有 recipe 的 backend 都是 neuron，但仍要显式写，因为 CLI 不写时走的是 AOT 路径。
 3. **路由从 parser 推出。** 全部参数给 generate；`difflet compile` 的 parser 认识的那部分同时给 compile。这个子集也就是"会改变编译产物"的参数集合，不需要人工分块。
 4. **优先级：recipe < suite 变体 < 命令行 `--`。** YAML 各层的合并发生在翻译成 flag 之前，所以变体可以把开关设回 `false`。命令行做不到，因此基础 recipe 保持开关全关，由变体去打开。
 5. **bench 自管的 flag** 不允许出现在 recipe 或透传里：`output`、`cache-dir`、`work-dir`、`keep-work-dir`、`requests`、`requests-dir`、`worker-index`、`force`。
@@ -148,7 +162,7 @@ qwen_image_neuron_mxfp8:
 7. **环境变量是 recipe 的一部分。** 启动器先清掉继承来的引擎相关变量，再应用 recipe 的 `env`，最终生效值写进结果。
 8. **主机相关的内容不进 recipe**：解释器、缓存根目录、模型目录、设备编号。
 
-初始内容由 `MATRIX` 的 8 个条目迁移而来，其中 7 条是 trainium 的 AOT recipe，1 条是 neuron。其余模型在 neuron 上的 recipe，在替换 quant_bench 的那一步从它的 `bench.sh` 里迁移。【我的选择】文件随包放在 `difflet/bench/` 下，用 YAML；PyYAML 是 transformers 和 huggingface_hub 的硬依赖，已在所有 venv 里，只需在 pyproject 里声明。
+初始内容有两个来源：`MATRIX` 里唯一的 neuron 条目 `wan_2_1_neuron`，以及 quant_bench 的 `bench.sh` 里已有的 10 组 neuron 配置，即 7 个模型的基础配置和 3 组官方设置。`MATRIX` 里另外 7 条是 AOT recipe，不迁移。【我的选择】文件随包放在 `difflet/bench/` 下，用 YAML；PyYAML 是 transformers 和 huggingface_hub 的硬依赖，已在所有 venv 里，只需在 pyproject 里声明。
 
 `dp` 大于 1 的 recipe 只适用 `compile`、`throughput`、`memory`、`dit_step`、`quality`。它的 `e2e_cold`、`e2e_warm`、`e2e_resident` 记为不适用，这三项用 dp=1 的基础 recipe 去测。
 
@@ -160,7 +174,7 @@ suite 是一份有名字的运行清单【用户感兴趣，我的形状】。re
 # difflet/bench/suites/quant_ab.yaml
 description: bf16 对 MXFP8
 metrics: [compile, e2e_cold, e2e_warm, e2e_resident, dit_step, memory, quality]
-recipes: [qwen_image_neuron, flux_1_dev_neuron]
+recipes: [qwen_image, flux]
 variants:
   bf16: {}
   mxfp8: {args: {quant: mxfp8}}
@@ -214,11 +228,11 @@ repeats: 2
 
 **`e2e_resident` 的定义。**【我的选择】引擎的批量模式是按阶段处理的：文本编码阶段处理完所有请求，才轮到去噪阶段，然后是解码阶段，每个阶段是一个独立进程。所以一个请求的时间由几段不连续的片段组成。`e2e_resident` 定义为：一个非首个请求在各阶段的处理时间之和，不含模型加载。这与 quant_bench 现在报的"warm 的第 2 个请求"是同一个量。它回答的是"模型已加载时多处理一个请求要多久"，不等于在线服务的常驻延迟，后者属于以后的 serve 压测。只有一个阶段的组合，比如 neuron 上的 FLUX，各段是连续的。
 
-**`dit_step`。** 两个 backend 的生产路径本来每次 forward 都同步，bench 不再加同步，结果里记录同步方式。同时报"每个调度步"和"每次真实 DiT forward"两组时间，TeaCache 跳步或 CFG 时两者数量不同。每个编译图的首次执行剔除。多 rank 时各 rank 分别记录，主数字取 rank 0，另报跨 rank 的最大和最小，不混合平均。自检：各步之和与引擎报告的去噪阶段总时间相差超过 2% 时，`dit_step` 无效【我的选择，初值待真机校准】。
+**`dit_step`。** neuron backend 的生产路径本来每次 forward 都同步，bench 不再加同步，结果里记录同步方式。同时报"每个调度步"和"每次真实 DiT forward"两组时间，TeaCache 跳步或 CFG 时两者数量不同。每个编译图的首次执行剔除。多 rank 时各 rank 分别记录，主数字取 rank 0，另报跨 rank 的最大和最小，不混合平均。自检：各步之和与引擎报告的去噪阶段总时间相差超过 2% 时，`dit_step` 无效【我的选择，初值待真机校准】。
 
 **`throughput`。**【未决 1，暂按离线批量】副本数来自 recipe 的 `dp`。请求文件由 bench 生成，所有请求同 prompt 同 seed。因为批量是按阶段处理的，不能用"某个时间窗内完成了几个请求"来算。定义为：对每个副本，取它非首个请求的平均处理时间，各副本的倒数相加，单位是每秒图片数或视频数。只有各副本的同一阶段在时间上确实重叠时才有效，重叠比例写进结果。同时报：整批的墙钟时间（含加载）、相对 dp=1 的扩展效率。所有副本输出的哈希必须一致，否则无效。
 
-**`memory`。** 主数字是每个 rank 的 HBM 峰值。两个 backend 都用 `neuron-monitor` 每秒采样并只保留绑定的核，这是 quant_bench 现有的测法。各阶段是不同的进程，采样按计时文件里的阶段起止归属到阶段，报每个阶段的峰值和总的最大值。neuron backend 另记进程内的 `torch_neuronx.max_memory_allocated()` 作为核对，两者差异过大时标记。顺带记录：每个 rank 的 DiT 权重大小、主机内存峰值、读盘字节数。
+**`memory`。** 主数字是每个 rank 的 HBM 峰值。用 `neuron-monitor` 每秒采样并只保留绑定的核，这是 quant_bench 现有的测法。各阶段是不同的进程，采样按计时文件里的阶段起止归属到阶段，报每个阶段的峰值和总的最大值。另记进程内的 `torch_neuronx.max_memory_allocated()` 作为核对，两者差异过大时标记。顺带记录：每个 rank 的 DiT 权重大小、主机内存峰值、读盘字节数。
 
 **`quality`。**
 
@@ -285,7 +299,7 @@ $DIFFLET_BENCH_ROOT/<run_id>/                                     # 日志、输
 ## 10. 环境与设备
 
 - **主机配置只有三个环境变量，只在一处读取并有默认值**：`DIFFLET_BENCH_ROOT`、`HF_HUB_CACHE`、`DIFFLET_COMPILE_CACHE`。其余文件不许再写路径。解释器就是启动 bench 的那个。
-- **依赖锁定。** repo 里已有 `requirements-neuron.lock`（trainium 的 AOT 环境）和 `requirements-neuron-native.lock`（neuron 环境），直接用。完整的包列表随每条结果保存。哪个 venv 算 neuron 的基准环境见未决 5。
+- **依赖锁定。** 用 repo 里的 neuron 锁文件，并在基准环境确定后更新它。完整的包列表随每条结果保存。基准环境用哪个版本见未决 3。
 - **CPU 和线程数。** `--cpus` 必须显式给出并记录。线程数默认等于 CPU 集合的大小，recipe 可以用 `threads` 固定它。这是测量定义的一部分：quant_bench 的记录显示 48 线程和 96 线程会让 HunyuanVideo-1.5 生成出不同的片段，主机侧的时间也不同。线程数不同的两份结果，`compare` 要标出来，输出哈希相等的规则也只在线程数相同时适用。
 - **`--check-env`。** 对比本机与参考结果的包版本、SDK 版本、实例型号，列出差异。
 - **环境清洗。** 启动器丢掉继承来的引擎相关变量：`DIFFLET_*`、`TORCH_NEURONX_*`、编译缓存位置、线程数。开关只能从 recipe 进。这是把现有 neuron adapter 的做法提到公共层。
@@ -351,13 +365,17 @@ $DIFFLET_BENCH_ROOT/<run_id>/                                     # 日志、输
 
 | 落地的能力 | 可删的文件 |
 |---|---|
-| 结构化计时 | `benchmark/parse_compile.py`、`parse_generate.py`、`adapters/trainium.py` |
-| `dit_step` | `benchmark/step_latency.py`、`step_realloop.py`、`scripts/flux_parallel_sweep.py` |
-| `e2e_cold`、`e2e_warm` | `benchmark/cold_warm_e2e.py`、`scripts/flux_baseline_28.sh` |
-| `compile` 加 suite | `scripts/parallel_phase_sweep.py` |
-| `quality` 加 `compare` | `scripts/bench_taef1_compare.py` |
 | neuron 上全部 metric 对齐 | `benchmark/neuron_cold_warm.py`、`neuron_wan_bench.py`、`neuron_report.py`、`adapters/neuron.py`、`tests/unit/benchmark/` 下三个 neuron 测试文件 |
 | suite 加 `compare` 加 `quality` 加 `memory` | mxfp8 分支上的 `scripts/quant_bench/`，保留其依赖锁文件 |
+| `quality` 加 `compare`，并确认 TAEF1 在 neuron 上可用 | `scripts/bench_taef1_compare.py` |
+
+**AOT 专用，第一版不替代，等 AOT 纳入 bench 之后再删**
+
+`benchmark/cold_warm_e2e.py`、`step_latency.py`、`step_realloop.py`、`parse_compile.py`、`parse_generate.py`、`adapters/trainium.py`，以及 `scripts/flux_parallel_sweep.py`、`parallel_phase_sweep.py`、`flux_baseline_28.sh`。
+
+**候选，只登记**【用户定】
+
+13 个一次性的 TeaCache 实验脚本：`scripts/run_*teacache*.py`、`run_fused_e2e_ab.py`、`run_qwen_online_delta_e2e.py`、`run_qwen_fixed_cadence_ab.py`、`verify_teacache_speedup.py`。它们的端到端 A/B 部分 bench 能替代，校准和信号门限部分不能。
 
 **逻辑搬进 `difflet/bench/`，脚本文件消失**
 
@@ -365,27 +383,26 @@ $DIFFLET_BENCH_ROOT/<run_id>/                                     # 日志、输
 
 **必须保留**
 
-- H100、B300、TPU 还在用的：`benchmark/{bench,harness,models,report,warm_e2e}.py`、diffusers 和 TPU 的 adapter、两份 `drive_all.sh`、`benchmark/tpu_profile/`。
+- AOT、H100、B300、TPU 还在用的：`benchmark/{bench,harness,models,report,warm_e2e}.py`、trainium、diffusers 和 TPU 的 adapter、两份 `drive_all.sh`、`benchmark/tpu_profile/`。
 - 不是 benchmark 的：`scripts/verify_cli.py`、各种 smoke 和 parity 脚本、`profile_*.py`、`tests/numerical/neuron_benchmark.py`。
 - `scripts/seed_planner_measurements.py` 是结果的下游读取者，改读取路径，不删。
 
 **删之前要先做的**
 
-- `bench.py` 的默认 backend 是 trainium，两个 adapter 删掉后要改。
+- 旧 `bench.py` 里的 neuron 分支随 neuron adapter 一起去掉。
 - `neuron_cold_warm.py` 独有的检查先搬成 bench 的有效性规则。
-- 过渡期 `MATRIX` 和 `recipes.yaml` 并存，H100 和 TPU 迁移前可能漂移。
+- 过渡期 `MATRIX` 和 `recipes.yaml` 并存。`MATRIX` 里的 `wan_2_1_neuron` 迁走后删除，其余 7 条 AOT 条目留给旧 harness。
 
 ## 15. 文档引用更新【用户定：改成新命令】
 
-共 54 份文档引用旧命令。
+共 54 份文档引用旧命令。第一版只做 neuron 之后，其中绝大多数引用的是 AOT、H100、TPU 的命令，这些命令继续有效，不能改。
 
 | 文档 | 数量 | 做法 |
 |---|---|---|
-| 每模型结果报告，与模板重新生成的结果逐字节相同 | 26 | 改一处模板，重新生成 |
-| 手写的汇总页、A/B 页、README 等 | 约 12 | 逐个手改 |
-| 只含 TPU 或 CUDA 命令的 | 11 | 第一版不动 |
+| 引用 neuron 路径旧命令的：`benchmark/trn2/wan_2_1_neuron.md`、`ltx_2_neuron.md`、device-verify skill 的功能目录 | 3 | 对应脚本删除时改成 `difflet bench` |
+| 只引用 AOT、H100、TPU 命令的 | 51 | 第一版不动，等各自的 backend 纳入 bench 时再改 |
 
-【我的选择】文档里 trainium 和 neuron 路径的 58 处命令改成 `difflet bench`。H100 和 TPU 的 41 处命令保持原样，直到那两个 backend 迁移，否则文档会指向跑不通的命令。
+【我的选择】只改指向已被替代的命令的文档，否则文档会指向跑不通的命令。
 
 ## 16. 决定记录
 
@@ -395,10 +412,10 @@ $DIFFLET_BENCH_ROOT/<run_id>/                                     # 日志、输
 2. 用参数选 metric 和模型。
 3. 功能 flag 从 compile / generate 的 CLI 自动继承。
 4. parallelism 包括 DP。
-5. 第一版只做 trainium 和 neuron。
+5. 第一版只做 PyTorch-native 的 neuron backend，AOT 先不做。
 6. 加内存指标。
 7. 文档引用改成新命令。
-8. 待删脚本只登记，暂不删除。
+8. 待删脚本只登记，暂不删除。13 个 TeaCache 实验脚本也只登记。
 
 **我的选择，可以推翻**
 
@@ -409,7 +426,7 @@ $DIFFLET_BENCH_ROOT/<run_id>/                                     # 日志、输
 5. `quality` 在编码前帧上算；`cpu_fp32` 参考第一版只覆盖 Qwen-Image 和 LTX-2。
 6. `e2e_cold` 用逐文件驱逐代替全局清缓存。
 7. bench 不自动挑设备。
-8. H100 和 TPU 的文档命令暂时保留。
+8. AOT、H100、TPU 的文档命令暂时保留，只改指向已被替代命令的 3 份文档。
 9. 第一版不内置任何性能或质量门限。
 10. `e2e_resident` 定义为非首个请求在各阶段处理时间之和，与 quant_bench 现有口径一致。
 11. `throughput` 定义为各副本单请求处理时间的倒数之和，副本数来自 recipe 的 `dp`。
@@ -420,11 +437,9 @@ $DIFFLET_BENCH_ROOT/<run_id>/                                     # 日志、输
 
 **未决，需要用户回答**
 
-1. `throughput` 测离线批量（一批请求交给 `generate --dp` 跑完）还是在线服务（对 `difflet serve` 持续发请求）？本文暂按离线批量。
-2. 13 个一次性的 TeaCache 实验脚本要不要加入清理清单？它们的端到端 A/B 部分 bench 能替代，校准和信号门限部分不能。
-3. 补齐另外五个 pipeline 的 latent dump 和编码前帧 dump，是放在第一版，还是 `quality` 先只支持已有 dump 的两个模型？
-4. trainium 的 AOT backend 在哪台机器上验证？当前这台 trn3 上没有 NxD 环境，只能验证 neuron backend。
-5. neuron 的基准环境以哪个为准？`requirements-neuron-native.lock` 锁的是一个 CPython 3.14 的 venv，而最近的 quant_bench 是在 Python 3.12 的 native-fp8 venv 里跑的，两者的 torch-neuronx 也不是同一个构建。另外，团队是否约定一个统一的线程数写进 recipe，比如 quant_bench 用过的 48？
+1. `throughput` 测离线批量还是在线服务？本文按离线批量写，这也是我的建议：第一版要测的是 DP 这个并行特性，离线批量直接复用 CLI 路径；对 `difflet serve` 的在线压测走的是另一条代码路径，需要另写压测客户端，建议作为下一期。
+2. 编码前帧的 dump 和另外五个 pipeline 的 latent dump 放不放进第一版？我的建议：编码前帧的 dump 第一版就给所有模型加上，因为任何质量数字都要用它；latent dump 等到给对应模型做 CPU fp32 参考时再补。
+3. neuron 的基准环境用哪个版本？用户说的是"PyTorch 3.15"，需要确认所指：这台主机上能跑 neuron 的 venv 都是 Python 3.12.3 加 torch 2.14.0，torch 的 wheel 只有 cp312 的构建，主机上没有 Python 3.15；repo 的锁文件锁的是 CPython 3.14。另外，团队是否约定一个统一的线程数写进 recipe，比如 quant_bench 用过的 48？
 
 ## 17. 留给实施者的
 
@@ -441,7 +456,7 @@ $DIFFLET_BENCH_ROOT/<run_id>/                                     # 日志、输
 - **DP 分核的修复动的是路由器。** 需要在真机上验证多副本启动不回归。
 - **共享主机上的冷启动经常无法验证。** 别的会话映射着同一份权重时驱逐会部分失败，样本会被标为"驱逐未验证"。
 - **`neuron_cold_warm.py` 是 Wan 在 neuron 上唯一有 68 个单元测试保护的测量路径。** 删它之前，bench 必须在同一份 recipe 上跑出一致的数字。
-- **每秒采样会漏掉短于一秒的内存尖峰。** trainium 路径没有进程内峰值可以核对。
+- **每秒采样会漏掉短于一秒的内存尖峰。** 靠进程内峰值核对来发现。
 - **CPU 与设备即使都是 fp32，位置编码的初始化也可能有细微差别。** `quality` 的门限要先测参考自身的重复性再定。
 - **过渡期两套 harness 并存。** 旧 harness 冻结期间不再接受新功能。
 
