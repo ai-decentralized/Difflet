@@ -229,6 +229,15 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
         "later frame). Not with --host-vae.",
     )
     p.add_argument(
+        "--vae-cores",
+        dest="vae_cores",
+        type=int,
+        default=None,
+        help="--backend neuron, HunyuanVideo 1.5: NeuronCores for the vae stage, which decodes "
+        "diffusers' tiles across them (bit-identical to one core). Default: the transformer "
+        "stage's core count; 1 decodes on one core.",
+    )
+    p.add_argument(
         "--host-text-encoder",
         dest="host_text_encoder",
         action="store_true",

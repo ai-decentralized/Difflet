@@ -1872,3 +1872,27 @@ def ws_concurrent_launch(model_dir, root, barrier, results):
     for t in app.module.state_dict().values():
         digest.update(t.contiguous().reshape(-1).view(torch.uint8).numpy().tobytes())
     results.put((app.weight_store.status, digest.hexdigest()))
+
+
+def hv15_parallel_vae_worker(rank: int, world_size: int) -> dict:
+    """A tiny HunyuanVideo 1.5 VAE: tiles decoded across the ranks against diffusers' own
+    single-process tiled decode, on the same latents (rank 0 holds the result)."""
+    import torch.distributed as dist
+    from diffusers import AutoencoderKLHunyuanVideo15
+
+    from difflet.backends.neuron.hunyuan_video15.vae import parallel_tiled_decode
+
+    torch.set_num_threads(1)  # deterministic CPU kernels across the processes
+    torch.manual_seed(0)
+    vae = AutoencoderKLHunyuanVideo15(latent_channels=4, block_out_channels=(32,) * 5,
+                                      layers_per_block=1).eval()
+    vae.enable_tiling()
+    vae.tile_sample_min_height = vae.tile_sample_min_width = 32
+    vae.tile_latent_min_height = vae.tile_latent_min_width = 2
+    z = torch.randn(1, 4, 2, 5, 6, generator=torch.Generator().manual_seed(1))
+    with torch.no_grad():
+        out = parallel_tiled_decode(vae, z, dist.group.WORLD)
+        if rank != 0:
+            return {"none": out is None}
+        ref = vae.tiled_decode(z)
+    return {"shape": list(out.shape), "equal": bool(torch.equal(out, ref))}

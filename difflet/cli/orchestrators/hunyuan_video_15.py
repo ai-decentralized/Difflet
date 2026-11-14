@@ -121,7 +121,11 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
                 runner.run_stage(_HF_MODEL_ID, "encode", num_cores=1, virtual_core_size=None, cli_args=cli)
             runner.run_stage(_HF_MODEL_ID, "transformer", num_cores=tp * (2 if cfg else 1) * cp,
                              virtual_core_size=None, cli_args=cli)
-            runner.run_stage(_HF_MODEL_ID, "vae", num_cores=1, virtual_core_size=None, cli_args=cli)
+            # The tiles decode across the transformer stage's cores (free by then) unless
+            # --vae-cores says otherwise; each rank decodes tiles of the same size as one core.
+            vae_cores = getattr(self.args, "vae_cores", None) or tp * (2 if cfg else 1) * cp
+            runner.run_stage(_HF_MODEL_ID, "vae", num_cores=int(vae_cores), virtual_core_size=None,
+                             cli_args=cli)
         except Exception:
             print(f"[difflet] work dir preserved at {work_dir} for inspection", file=sys.stderr)
             raise
@@ -258,7 +262,8 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
                     torch.save(latents, stage_loop.work_file(args, req, "latents.pt"))
 
     def _stage_vae(self, args: argparse.Namespace) -> None:
-        """One core: tiled bf16 decode, diffusers' post-processing, MP4."""
+        """Tiled bf16 decode, on one core or across the stage's ranks (diffusers' tiles split over
+        them, bit-identical), diffusers' post-processing and the MP4 on rank 0."""
         import inspect
 
         import diffusers
@@ -269,11 +274,20 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
         from difflet.backends.registry import get_backend
         from difflet.pipeline.parallel_config import DiffletParallelConfig
 
-        get_backend("neuron").prepare_runtime(DiffletParallelConfig(tp_degree=1))
+        world = int(os.environ.get("WORLD_SIZE", "1"))
+        # Several ranks share no TP layout: no parallel config to check, only the cores to bind.
+        parallel = DiffletParallelConfig(tp_degree=1) if world == 1 else None
+        get_backend("neuron").prepare_runtime(parallel)
+        group = None
+        if world > 1:  # the tiles travel through the host: a CPU group beside the neuron one
+            import torch.distributed as dist
+
+            group = dist.new_group(backend="gloo")
+        lead = world == 1 or torch.distributed.get_rank() == 0
         started = time.perf_counter()
         app = NeuronHunyuanVideo15VaeDecoderApplication(
             model_path=os.path.join(self._root(args), "vae"), height=int(args.height), width=int(args.width),
-            num_frames=int(args.num_frames))
+            num_frames=int(args.num_frames), group=group)
         app.load(skip_warmup=args.stage_mode != "compile")
         print(f"[hv15] vae load {time.perf_counter() - started:.1f} s "
               f"{ {k: round(v, 1) for k, v in app.phase_seconds.items()} }", flush=True)
@@ -287,7 +301,10 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
             with stage_loop.request_scope(args, req, final=True):
                 latents = torch.load(stage_loop.work_file(args, req, "latents.pt"), weights_only=True)
                 started = time.perf_counter()
-                video = app.decode(latents).float().cpu()
+                video = app.decode(latents)
+                if not lead:  # a helper rank: its tiles went to rank 0
+                    continue
+                video = video.float().cpu()
                 decoded = time.perf_counter()
                 out = Path(req.output or args.output or "hunyuan_video_15.mp4")
                 out.parent.mkdir(parents=True, exist_ok=True)
