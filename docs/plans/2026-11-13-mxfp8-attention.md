@@ -323,3 +323,21 @@ bf16 and two quantized timed runs per model: ~1.5-2 h of device time without rew
   after a one-tile probe shows a dtype `exponential` writes that `nc_matmul_mx` accepts beside V's
   `e4m3fn_x4`, and a 1-byte transpose or a layout needing none; scaling 2**7; it reports rel L2
   against fp32 at real S_k beside its speed.
+
+## Addendum 2026-11-14: where execution stands and what runs next
+
+Results (evidence doc `docs/verification/2026-11-13-dit-block-profile.md` sections 7-12): G1 fails
+on all six shapes (PV-only 1.05-1.20x attention_cte bf16) and G2 fails (QK-only 1.03-1.21x, QK+PV
+1.17-1.54x, measured against attention_cte with `allow_vector_exp=False`). By the G1/G2 rule the
+plan stopped after Task 4. The user then asked to run the model-level arms anyway, with these
+decisions (ledger rulings BR28, BR31, BR32):
+
+- Models: Qwen-Image and Wan 2.1 only. Variant: `{qk}` (QK-only, PV bf16).
+- Task 5 as written; its device identity uses the md5s above. The routed op runs the fork with the
+  exp on VectorE (`allow_vector_exp=True`), as shipped attention_cte does, so `both` differs from
+  `bf16` only by quantization.
+- Task 6 as written for those two models: `bf16` vs `both`, linear-alone from the evidence doc per
+  G3. Task 7 per G3.
+- Not part of this plan: attention_cte with the exp on ScalarE (`allow_vector_exp=False`, 7.5-21%
+  faster bf16 attention, section 9) is a bf16 change; it is done later on `main` with its own
+  benchmark. nkilib `attention_const_max` (section 12) is a separate, undecided bf16 option.
