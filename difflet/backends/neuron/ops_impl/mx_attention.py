@@ -1,11 +1,12 @@
 """The MXFP8 attention op of the neuron backend (MXFP8 attention plan, Task 5): Difflet's fork of
 nkilib's ``attention_cte`` (``mx_attention_kernel.mx_attention_fwd``) registered as the torch op
 ``difflet_neuron::mx_attention`` (as ``fp8_kernels`` registers ``mx_linear``), and the count of the
-calls ``ops_impl/attention.py`` routes to it under ``DIFFLET_ATTN_QUANT=mxfp8``.
+calls ``ops_impl/attention.py`` routes to it under ``DIFFLET_ATTN_QUANT`` (``--attn-quant``).
 
 The op runs the fork with the exp on the Vector Engine (``allow_vector_exp=True``), as shipped
 attention_cte runs Difflet's bf16 attention, so the routed call differs from bf16 only by the
-quantization (ruling BR32). Which matmuls are MXFP8 is the caller's ``qk_mx`` / ``pv_mx``.
+quantization (ruling BR32). Which matmuls are MXFP8 is the caller's ``qk_mx`` / ``pv_mx`` (the
+switch's variant).
 
 The count is the evidence that a call site is quantized (plan Review Focus 5): calls bucketed by
 ``(s_q, s_k, bounded)``, counted when Dynamo traces them (once per compiled graph, through
@@ -20,6 +21,8 @@ from collections import Counter
 
 import torch
 from torch._dynamo.comptime import comptime
+
+from difflet.quant.spec import ATTN_QUANT_VARIANTS
 
 
 def load_op():
@@ -77,14 +80,17 @@ def mx_attention_calls() -> dict[tuple[int, int, bool], int]:
     return dict(_CALLS)
 
 
-def log_routed_calls() -> None:
-    """One stderr line per process with the routed calls so far (a DiT's warm-up calls it)."""
+def log_routed_calls(variant: str) -> None:
+    """One stderr line per process with the switch's ``variant`` and the routed calls so far (a
+    DiT's warm-up calls it)."""
     global _LOGGED
     if _LOGGED:
         return
     _LOGGED = True
-    print(f"[attention] DIFFLET_ATTN_QUANT=mxfp8: calls routed to the MXFP8 kernel by "
-          f"(s_q, s_k, bounded): {dict(sorted(_CALLS.items()))}", file=sys.stderr, flush=True)
+    qk_mx, pv_mx = ATTN_QUANT_VARIANTS[variant]
+    print(f"[attention] DIFFLET_ATTN_QUANT={variant} (qk_mx={qk_mx}, pv_mx={pv_mx}): calls routed "
+          f"to the MXFP8 kernel by (s_q, s_k, bounded): {dict(sorted(_CALLS.items()))}",
+          file=sys.stderr, flush=True)
 
 
 __all__ = ["load_op", "log_routed_calls", "mx_attention_calls", "record_call"]

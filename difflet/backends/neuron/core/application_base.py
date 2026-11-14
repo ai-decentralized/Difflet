@@ -207,8 +207,8 @@ class TorchNeuronApplicationBase(torch.nn.Module):
         elif self._attn_quant():
             # The attention's nc_matmul_mx needs what --quant's does (plan Global Constraints).
             label = self.quant_label or self.quant_model
-            require_fp8_supported(f"{label} (DIFFLET_ATTN_QUANT=mxfp8)", self.device.type,
-                                  self.exec_mode)
+            require_fp8_supported(f"{label} (DIFFLET_ATTN_QUANT={attention.ATTN_QUANT})",
+                                  self.device.type, self.exec_mode)
         #: The module names ``load`` quantized (empty without ``quant``).
         self.quantized_linears: list[str] = []
         self.kwargs = dict(kwargs)
@@ -386,7 +386,8 @@ class TorchNeuronApplicationBase(torch.nn.Module):
         self.phase_seconds["warmup forward"] = time.perf_counter() - start
         self.warmup_shapes = [tuple(arg.shape) for arg in args]
         if self._attn_quant() and self.rank == 0:
-            mx_attention.log_routed_calls()  # the warm-up traced them (plan Review Focus 5)
+            # the warm-up traced them (plan Review Focus 5)
+            mx_attention.log_routed_calls(attention.ATTN_QUANT)
         if self.exec_mode == "compile":
             self._compiled_shapes.add(_shape_key(args, {}))
 
@@ -403,9 +404,10 @@ class TorchNeuronApplicationBase(torch.nn.Module):
     # -------------------------------------------------------------- internals
 
     def _attn_quant(self) -> bool:
-        """``DIFFLET_ATTN_QUANT=mxfp8`` on a DiT (an application with MXFP8 target layers): the
-        other applications (text encoders, VAEs) route no attention."""
-        return attention.ATTN_QUANT == "mxfp8" and self.quant_model is not None
+        """``DIFFLET_ATTN_QUANT`` set to a variant on a DiT (an application with MXFP8 target
+        layers), with or without ``quant``: the other applications (text encoders, VAEs) route
+        no attention."""
+        return attention.ATTN_QUANT != "off" and self.quant_model is not None
 
     def _init_runtime(self) -> None:
         # MeshSpec drops sp_enabled, so the runtime's own check runs first.

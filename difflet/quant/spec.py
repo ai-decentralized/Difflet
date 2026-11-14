@@ -14,6 +14,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import os
 import re
 from collections.abc import Iterable
 from pathlib import Path
@@ -183,10 +184,35 @@ def strip_prefix(name: str) -> str:
     return name
 
 
+#: ``--attn-quant`` (``difflet/cli/quant.py``), which the CLI exports as ``DIFFLET_ATTN_QUANT``:
+#: the attention matmuls the neuron backend's self/joint attention runs in MXFP8, as the kernel's
+#: ``(qk_mx, pv_mx)`` (``ops_impl/attention.py``). Unset or ``off``: bf16 attention, every graph
+#: unchanged. Independent of ``--quant``.
+ATTN_QUANT_ENV = "DIFFLET_ATTN_QUANT"
+ATTN_QUANT_VARIANTS: dict[str, tuple[bool, bool]] = {
+    "qk": (True, False), "pv": (False, True), "qk+pv": (True, True)}
+
+
+def attn_quant_variant() -> str:
+    """``DIFFLET_ATTN_QUANT`` as ``"off"`` (unset or ``off``) or a variant name; anything else
+    raises, naming the variable and its values."""
+    value = os.environ.get(ATTN_QUANT_ENV, "off").strip().lower()
+    if value != "off" and value not in ATTN_QUANT_VARIANTS:
+        hint = " ('mxfp8' is no longer a value: its QK-only is 'qk')" if value == "mxfp8" else ""
+        raise ValueError(f"{ATTN_QUANT_ENV} must be unset, 'off', 'qk', 'pv' or 'qk+pv', got "
+                         f"{value!r}{hint}")
+    return value
+
+
 def quant_cache_fields(spec: QuantSpec | None) -> dict[str, Any]:
-    """``{}`` when quantization is off, else :meth:`QuantSpec.cache_fields`. The one helper every
-    key site calls, so a bf16 artifact's key never gains a field."""
-    return {} if spec is None else spec.cache_fields()
+    """``{}`` when quantization is off, else :meth:`QuantSpec.cache_fields`, plus ``attn_quant``
+    when ``DIFFLET_ATTN_QUANT`` names a variant (it changes the DiT's attention graph). The one
+    helper every DiT key site calls, so a bf16 artifact's key never gains a field."""
+    fields = {} if spec is None else spec.cache_fields()
+    variant = attn_quant_variant()
+    if variant != "off":
+        fields["attn_quant"] = variant
+    return fields
 
 
 def file_sha256(path: str | Path) -> str:
@@ -198,6 +224,8 @@ def file_sha256(path: str | Path) -> str:
 
 
 __all__ = [
+    "ATTN_QUANT_ENV",
+    "ATTN_QUANT_VARIANTS",
     "BLOCK",
     "COMPUTE_MODES",
     "DEFAULT_COMPUTE",
@@ -205,6 +233,7 @@ __all__ = [
     "LAYOUT_K",
     "QUANT_SCHEMA",
     "QuantSpec",
+    "attn_quant_variant",
     "file_sha256",
     "quant_cache_fields",
     "strip_prefix",

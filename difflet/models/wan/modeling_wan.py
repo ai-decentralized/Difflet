@@ -447,7 +447,7 @@ def _attn_kernel(
     constmax_sigma: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """Run attention on (B, heads, S, head_dim) tensors via ``difflet.ops.attention``.
-    ``mx=False`` (cross-attention) keeps it bf16 under ``DIFFLET_ATTN_QUANT=mxfp8``.
+    ``mx=False`` (cross-attention) keeps it bf16 under ``DIFFLET_ATTN_QUANT``.
 
     Routes to the nkilib flash kernel (``attention_cte``) on Trainium — measured
     ~4x faster than the prior PyTorch-SDPA fallback (cclog 90: SDPA 15.33 ms vs

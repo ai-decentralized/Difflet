@@ -48,6 +48,7 @@ import torch.nn.functional as F
 
 from difflet.backends.neuron.ops_impl.mx_attention import load_op, record_call
 from difflet.quant.mx_attention import smooth_keys
+from difflet.quant.spec import ATTN_QUANT_VARIANTS, attn_quant_variant
 
 #: ``DIFFLET_NEURON_ATTENTION=sdpa`` sends every call through ``F.scaled_dot_product_attention``
 #: (never the direct kernel call): the A/B switch behind the SDPA-gate measurement. Read once at
@@ -87,14 +88,12 @@ _JOINT_RING_TEXT_SPLIT = os.environ.get(JOINT_RING_TEXT_SPLIT_ENV, "1").strip() 
 #: Difflet's bounded fork of it (``attention_const_max_kernel.py``). Read once at import.
 _CONSTMAX = os.environ.get("DIFFLET_EXP_ATTN_CONSTMAX") == "1"
 
-#: ``DIFFLET_ATTN_QUANT=mxfp8`` sends the self/joint attention calls (non-causal, unmasked or
-#: key-bounded, bf16, head dim 128, ``mx=True``) to ``difflet_neuron::mx_attention``: QK^T in
-#: MXFP8, PV in bf16 (MXFP8 attention plan, Task 5; ruling BR28). Unset or ``off``: every graph is
-#: unchanged. Read once at import, as above; trn3 and compile mode only (``application_base``).
-ATTN_QUANT_ENV = "DIFFLET_ATTN_QUANT"
-ATTN_QUANT = os.environ.get(ATTN_QUANT_ENV, "off").strip().lower()
-if ATTN_QUANT not in ("off", "mxfp8"):
-    raise ValueError(f"{ATTN_QUANT_ENV} must be unset, 'off' or 'mxfp8', got {ATTN_QUANT!r}")
+#: ``DIFFLET_ATTN_QUANT`` (``--attn-quant``) ``qk``, ``pv`` or ``qk+pv`` sends the self/joint
+#: attention calls (non-causal, unmasked or key-bounded, bf16, head dim 128, ``mx=True``) to
+#: ``difflet_neuron::mx_attention`` with QK^T, PV or both in MXFP8 (``ATTN_QUANT_VARIANTS``; MXFP8
+#: attention plan, Tasks 5 and 5b). Unset or ``off``: every graph is unchanged. Read once at
+#: import, as above (any other value raises); trn3 and compile mode only (``application_base``).
+ATTN_QUANT = attn_quant_variant()
 
 # Kernel limits stated by torch-neuronx's SDPA gate, other than its 512-multiple lengths.
 _KERNEL_DTYPES = (torch.bfloat16, torch.float16)
@@ -138,8 +137,8 @@ def attention(
     but different sample. No effect off
     trn3 B1: trn2 has no Vector exp and always uses the Scalar engine.
 
-    ``mx=False`` keeps the call in bf16 under ``DIFFLET_ATTN_QUANT=mxfp8``: the cross-attention
-    call sites pass it (plan Global Constraints: only self/joint attention is routed)."""
+    ``mx=False`` keeps the call in bf16 under ``DIFFLET_ATTN_QUANT``: the cross-attention call
+    sites pass it (plan Global Constraints: only self/joint attention is routed)."""
     if kwargs:
         raise NotImplementedError(
             "neuron attention does not support attention_cte-only kwargs: "
@@ -155,7 +154,7 @@ def attention(
         if attention_mask is not None:
             raise ValueError("attention_mask and bounds are mutually exclusive")
 
-    if mx and ATTN_QUANT == "mxfp8" and _routes_to_mx(q, k, v, causal, attention_mask):
+    if mx and ATTN_QUANT != "off" and _routes_to_mx(q, k, v, causal, attention_mask):
         out = _mx_attention(q, k, v, bound_min, bound_max,
                             scale=1.0 if scale is None else float(scale))
         return out.transpose(-1, -2) if tp_out else out
@@ -275,21 +274,24 @@ def _routes_to_mx(q, k, v, causal: bool, attention_mask) -> bool:
 
 
 def _mx_op(q, k, v, bound_min, bound_max, scale: float):
-    """The MXFP8 op in the routed variant, QK^T MXFP8 and PV bf16 (ruling BR28), called as
+    """The MXFP8 op in the switch's variant (its ``qk_mx``, ``pv_mx``), called as
     ``_FLASH_BOUNDED_OP`` is."""
-    return _MX_ATTENTION_OP(q, k, v, bound_min, bound_max, scale, False, True)
+    qk_mx, pv_mx = ATTN_QUANT_VARIANTS[ATTN_QUANT]
+    return _MX_ATTENTION_OP(q, k, v, bound_min, bound_max, scale, pv_mx, qk_mx)
 
 
 def _mx_attention(q, k, v, bound_min, bound_max, *, scale: float):
-    """``[B, H, S, d]`` or ``[B*H, S, d]`` through the MXFP8 op. K is smoothed (minus its mean
-    over the call's keys, ``smooth_keys``) before any padding. A bounded call then takes
+    """``[B, H, S, d]`` or ``[B*H, S, d]`` through the MXFP8 op. With QK^T in MXFP8, K is
+    smoothed (minus its mean over the call's keys, ``smooth_keys``, for K's block scales) before
+    any padding; ``pv`` alone hands the op K as the bf16 path does. A bounded call then takes
     ``_flash_attention_bounded``'s q pre-scale, 128 padding, head chunks and one slice; an
     unbounded one is not padded: the fork takes partial 512-key and 128-query tiles itself
     (ruling BR3: one pad/slice round trip at most)."""
     shape = q.shape
     bh, s_q, d = math.prod(shape[:-2]), shape[-2], shape[-1]
     q3, k3, v3 = (t.reshape(bh, t.shape[-2], t.shape[-1]) for t in (q, k, v))
-    k3 = smooth_keys(k3)
+    if ATTN_QUANT_VARIANTS[ATTN_QUANT][0]:  # qk_mx
+        k3 = smooth_keys(k3)
     record_call(s_q, k3.shape[1], bound_min is not None)
     if bound_min is not None:
         out = _flash_attention_bounded(q3, k3, v3, bound_min, bound_max, scale=scale, op=_mx_op)
@@ -425,7 +427,7 @@ _EXP_KNOB = _attention_cte_has_exp_knob()
 _FLASH_SCALAR_EXP_OP = _load_flash_scalar_exp_op()
 _FLASH_BOUNDED_OP = _load_flash_bounded_op()
 _FLASH_BOUNDED_SCALAR_EXP_OP = _load_flash_bounded_op(vector_exp=False)
-_MX_ATTENTION_OP = load_op() if ATTN_QUANT == "mxfp8" else None  # unset / off: nothing loaded
+_MX_ATTENTION_OP = load_op() if ATTN_QUANT != "off" else None  # unset / off: nothing loaded
 
 
 def _load_flash_lse_op():

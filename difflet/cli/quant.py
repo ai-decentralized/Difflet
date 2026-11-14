@@ -1,6 +1,6 @@
-"""The MXFP8 quantization flags of the CLI (``--quant``, ``--quant-compute``): their parser,
-their validation, the spec they describe, their cache-key fields, their forwarding to stage
-and DP-worker launches, and the driver's quantized-checkpoint step (``prepare_quant``).
+"""The MXFP8 quantization flags of the CLI (``--quant``, ``--quant-compute``, ``--attn-quant``):
+their parser, their validation, the spec they describe, their cache-key fields, their forwarding
+to stage and DP-worker launches, and the driver's quantized-checkpoint step (``prepare_quant``).
 Torch-free at import, so the driver validates before torchrun starts a rank; only
 ``prepare_quant`` loads the checkpoint writer, and torch with it, when it runs.
 
@@ -10,6 +10,12 @@ MXFP8 from a quantized checkpoint directory that ``compile`` writes under the ca
 block scales are computed offline, the activations' inside the kernel. ``--quant-compute``
 picks the matmul path (``nki``, the MXFP8 kernel, the default; ``dequant``, fp8 weights in HBM
 with bf16 matmuls, memory only).
+
+``--attn-quant {qk,pv,qk+pv}``, independent of ``--quant``, runs the DiT's self/joint attention
+with QK^T, PV or both on the MXFP8 attention kernel (absent: bf16 attention). It travels as
+``DIFFLET_ATTN_QUANT``, which ``ops_impl/attention.py`` reads once at import, so the entry points
+export it (``export_attn_quant``) before anything imports a backend; the DiT stage keys name it
+(``quant_cache_fields``).
 """
 
 from __future__ import annotations
@@ -19,7 +25,14 @@ import os
 import sys
 from typing import Callable
 
-from difflet.quant.spec import COMPUTE_MODES, DEFAULT_COMPUTE, FORMAT, QuantSpec
+from difflet.quant.spec import (
+    ATTN_QUANT_ENV,
+    ATTN_QUANT_VARIANTS,
+    COMPUTE_MODES,
+    DEFAULT_COMPUTE,
+    FORMAT,
+    QuantSpec,
+)
 from difflet.quant.targets import TARGETS_BY_MODEL, default_spec
 
 #: CLI model ids with MXFP8 target layers, by their ``difflet.quant.targets`` key.
@@ -60,6 +73,16 @@ def add_quant_flags(p: argparse.ArgumentParser) -> None:
         "tensor-engine kernel; 'dequant', fp8 weights in HBM with bf16 matmuls (memory only, "
         "for debugging).",
     )
+    p.add_argument(
+        "--attn-quant",
+        dest="attn_quant",
+        choices=list(ATTN_QUANT_VARIANTS),
+        default=None,
+        help="--backend neuron on Trainium3, with or without --quant: run the DiT's self/joint "
+        "attention (head dim 128; cross-attention stays bf16) with QK^T ('qk'), PV ('pv') or "
+        "both ('qk+pv') in MXFP8 (default: bf16 attention). Sets DIFFLET_ATTN_QUANT for the "
+        "launch, over any exported value.",
+    )
 
 
 def _fail(message: str) -> None:
@@ -68,30 +91,43 @@ def _fail(message: str) -> None:
 
 
 def validate_quant(args: argparse.Namespace) -> None:
-    """The driver's refusals, before anything is downloaded or launched."""
+    """The driver's refusals, before anything is downloaded or launched. ``--quant`` and
+    ``--attn-quant`` each need the neuron backend, a model with MXFP8 target layers, the compiled
+    DiT and no UNSAFE_FP8FNCAST; neither needs the other."""
     quant = getattr(args, "quant", None)
-    compute = getattr(args, "quant_compute", None)
-    if quant is None:
-        if compute is not None:
-            _fail("--quant-compute needs --quant mxfp8.")
-        return
+    if quant is None and getattr(args, "quant_compute", None) is not None:
+        _fail("--quant-compute needs --quant mxfp8.")
+    for flag, given in (("--quant", quant), ("--attn-quant", getattr(args, "attn_quant", None))):
+        if given is not None:
+            _validate_mxfp8_launch(args, flag)
+    if quant is not None and getattr(args, "teacache_speedup", None) is not None:
+        _fail("--quant and adaptive TeaCache (--teacache-speedup) are mutually exclusive; use "
+              "--teacache-cadence instead.")
+
+
+def _validate_mxfp8_launch(args: argparse.Namespace, flag: str) -> None:
     backend = getattr(args, "backend", None) or os.environ.get("DIFFLET_BACKEND")
     if backend != "neuron":
-        _fail("--quant runs on the PyTorch-native neuron backend only (pass --backend neuron).")
+        _fail(f"{flag} runs on the PyTorch-native neuron backend only (pass --backend neuron).")
     model_id = getattr(args, "model_id", None)
     if model_id not in QUANT_MODELS:
-        _fail(f"--quant is not available for {model_id!r}; models with MXFP8 target layers: "
+        _fail(f"{flag} is not available for {model_id!r}; models with MXFP8 target layers: "
               f"{', '.join(sorted(QUANT_MODELS))}.")
     exec_mode = getattr(args, "exec_mode", None) or os.environ.get("DIFFLET_EXEC_MODE")
     if exec_mode == "eager":
-        _fail("--quant needs the compiled DiT (--exec-mode compile, the default): eager "
+        _fail(f"{flag} needs the compiled DiT (--exec-mode compile, the default): eager "
               "quantizes every activation op by op.")
-    if getattr(args, "teacache_speedup", None) is not None:
-        _fail("--quant and adaptive TeaCache (--teacache-speedup) are mutually exclusive; use "
-              "--teacache-cadence instead.")
     if os.environ.get("UNSAFE_FP8FNCAST"):
-        _fail("--quant: unset UNSAFE_FP8FNCAST; it makes neuronx-cc mix the legacy fp8 type "
+        _fail(f"{flag}: unset UNSAFE_FP8FNCAST; it makes neuronx-cc mix the legacy fp8 type "
               "with OCP float8_e4m3fn (NCC_EOCP001).")
+
+
+def export_attn_quant(args: argparse.Namespace) -> None:
+    """``--attn-quant``, when given, as ``DIFFLET_ATTN_QUANT`` (over an exported value) for this
+    process and every one it launches; absent, the environment is left as is. Called right after
+    parsing: ``ops_impl/attention.py`` resolves the switch once, at its import."""
+    if getattr(args, "attn_quant", None):
+        os.environ[ATTN_QUANT_ENV] = args.attn_quant
 
 
 #: Semicolon-separated regexes replacing the model's default target layers (experiments on
@@ -171,8 +207,10 @@ def quant_cli_args(args: argparse.Namespace) -> list[str]:
         parts += ["--quant", args.quant]
     if getattr(args, "quant_compute", None):
         parts += ["--quant-compute", args.quant_compute]
+    if getattr(args, "attn_quant", None):
+        parts += ["--attn-quant", args.attn_quant]
     return parts
 
 
-__all__ = ["QUANT_MODELS", "QUANT_TARGETS_ENV", "add_quant_flags", "prepare_quant",
-           "quant_cli_args", "quant_spec", "validate_quant"]
+__all__ = ["QUANT_MODELS", "QUANT_TARGETS_ENV", "add_quant_flags", "export_attn_quant",
+           "prepare_quant", "quant_cli_args", "quant_spec", "validate_quant"]

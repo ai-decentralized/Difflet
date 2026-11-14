@@ -1,8 +1,9 @@
-"""``DIFFLET_ATTN_QUANT=mxfp8`` (MXFP8 attention plan, Task 5), on CPU tensors: which calls reach
-``difflet_neuron::mx_attention``, what the torch side hands it, the routed-call count and the
-application's checks. The op is a CPU custom op computing the Task 1 reference
-(``mx_attention_reference``, as the kernel computes), the bf16 kernels are recorders, and the
-tensors pretend to be on the device (as ``test_neuron_attention_c3.py`` does)."""
+"""``DIFFLET_ATTN_QUANT`` ``qk`` / ``pv`` / ``qk+pv`` (MXFP8 attention plan, Tasks 5 and 5b), on
+CPU tensors: which calls reach ``difflet_neuron::mx_attention`` and with which flags, what the
+torch side hands it, the routed-call count and the application's checks. The op is a CPU custom
+op computing the Task 1 reference (``mx_attention_reference``, as the kernel computes), the bf16
+kernels are recorders, and the tensors pretend to be on the device (as
+``test_neuron_attention_c3.py`` does)."""
 
 from __future__ import annotations
 
@@ -53,7 +54,7 @@ def _bounded(q, k, v, lo, hi, scale):  # the bounded attention_cte op, exactly
 
 @pytest.fixture
 def routed(monkeypatch):
-    """The switch on, the tensors "on the device", the MX op the reference above; the bf16
+    """The switch on (``qk``), the tensors "on the device", the MX op the reference above; the bf16
     kernels record their calls in ``bf16``."""
     bf16 = []
 
@@ -65,7 +66,7 @@ def routed(monkeypatch):
         bf16.append("bounded")
         return _bounded(*args)
 
-    monkeypatch.setattr(attn, "ATTN_QUANT", "mxfp8")
+    monkeypatch.setattr(attn, "ATTN_QUANT", "qk")
     monkeypatch.setattr(attn, "_MX_ATTENTION_OP", _mx_op)
     monkeypatch.setattr(attn, "_on_neuron", lambda t: True)
     monkeypatch.setattr(attn, "_FLASH_KERNEL", flash)
@@ -105,6 +106,28 @@ def test_unbounded_and_bounded_non_causal_head_dim_128_calls_reach_the_op(routed
     ref = mx_attention_reference(q, smooth_keys(k), v, scale=SCALE, qk_mx=True, pv_mx=False)
     torch.testing.assert_close(out, ref, rtol=2 ** -7, atol=2 ** -7)  # CPU matmul: one bf16 ulp
     assert routed.mx[1]["bound_min"] is not None and out_b.shape == (BH, S, D)
+
+
+@pytest.mark.parametrize("variant, qk_mx, pv_mx", [("qk", True, False), ("pv", False, True),
+                                                   ("qk+pv", True, True)])
+def test_each_variant_reaches_the_op_with_its_flags(routed, monkeypatch, variant, qk_mx, pv_mx):
+    """Ruling BR34: the variant picks the op's (qk_mx, pv_mx); K is smoothed only when QK^T is
+    MXFP8 (the smoothing is for K's block scales; the Task 1 mirror and the probe's fork arm
+    smooth only then), so ``pv`` hands the op the bf16 path's K."""
+    monkeypatch.setattr(attn, "ATTN_QUANT", variant)
+    q, k, v = _qkv(offset=3.0)
+    lo, hi = _bounds()
+    with torch.no_grad():
+        out = attn.attention(q, k, v, scale=SCALE, tp_q=True, tp_k=True)
+        attn.attention(q, k, v, scale=SCALE, bound_min=lo, bound_max=hi, tp_q=True, tp_k=True)
+    assert routed.bf16 == [] and len(routed.mx) == 2
+    for call in routed.mx:
+        assert (call["qk_mx"], call["pv_mx"]) == (qk_mx, pv_mx)
+    k_in = smooth_keys(k) if qk_mx else k
+    assert torch.equal(routed.mx[0]["k"], k_in)
+    assert torch.equal(routed.mx[1]["k"][:, :S], k_in)
+    ref = mx_attention_reference(q, k_in, v, scale=SCALE, qk_mx=qk_mx, pv_mx=pv_mx)
+    torch.testing.assert_close(out, ref, rtol=2 ** -7, atol=2 ** -7)
 
 
 @pytest.mark.parametrize("case", ["causal", "head_dim_64", "mx_false", "fp16", "cross_attention",
@@ -210,14 +233,14 @@ def _both_paths(q, k, v, lo, hi):
                            tp_k=True))
 
 
-@pytest.mark.parametrize("value", ["off", "mxfp8"])
-def test_only_mxfp8_puts_mx_attention_nodes_in_the_graph(routed, monkeypatch, value):
+@pytest.mark.parametrize("value", ["off", "qk", "pv", "qk+pv"])
+def test_only_a_variant_puts_mx_attention_nodes_in_the_graph(routed, monkeypatch, value):
     monkeypatch.setattr(attn, "ATTN_QUANT", value)
     for name, fn in (("_FLASH_KERNEL", _flash), ("_FLASH_BOUNDED_OP", _bounded)):
         monkeypatch.setattr(attn, name, fn)  # no recorder: its list would be a Dynamo guard
     targets = _graph_targets(_both_paths, *_qkv(), *_bounds())
     nodes = [t for t in targets if "mx_attention" in t]
-    assert len(nodes) == (2 if value == "mxfp8" else 0)
+    assert len(nodes) == (0 if value == "off" else 2)
 
 
 def test_routed_calls_are_counted_per_trace_and_logged_once(routed, capsys):
@@ -230,22 +253,25 @@ def test_routed_calls_are_counted_per_trace_and_logged_once(routed, capsys):
     mx_attention._CALLS.clear()
     _graph_targets(_both_paths, q, k, v, lo, hi, calls=3)  # compiled: each traced call once
     assert mx_attention.mx_attention_calls() == {(S, S, False): 1, (S, S, True): 1}
-    mx_attention.log_routed_calls()
-    mx_attention.log_routed_calls()
+    mx_attention.log_routed_calls("qk")
+    mx_attention.log_routed_calls("qk")
     lines = [line for line in capsys.readouterr().err.splitlines() if "DIFFLET_ATTN_QUANT" in line]
     assert len(lines) == 1 and "(40, 40, False): 1" in lines[0] and "(40, 40, True): 1" in lines[0]
 
 
-def test_an_invalid_switch_value_raises_naming_the_variable_and_its_values():
+@pytest.mark.parametrize("value", ["fp8", "mxfp8"])
+def test_an_invalid_switch_value_raises_naming_the_variable_and_its_values(value):
     code = "import difflet.backends.neuron.ops_impl.attention"
-    env = {**os.environ, "DIFFLET_ATTN_QUANT": "fp8"}
+    env = {**os.environ, "DIFFLET_ATTN_QUANT": value}
     proc = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
     assert proc.returncode != 0 and "DIFFLET_ATTN_QUANT" in proc.stderr
-    assert all(word in proc.stderr for word in ("unset", "'off'", "'mxfp8'", "'fp8'"))
+    assert all(word in proc.stderr for word in ("unset", "'off'", "'qk'", "'pv'", "'qk+pv'",
+                                                repr(value)))
+    assert ("no longer a value" in proc.stderr) == (value == "mxfp8")  # Task 5's spelling
 
 
 @pytest.mark.parametrize("value, expect", [(None, "off None"), ("off", "off None"),
-                                           ("mxfp8", "mxfp8 difflet_neuron::mx_attention")])
+                                           ("qk+pv", "qk+pv difflet_neuron::mx_attention")])
 def test_the_switch_resolves_once_at_import_and_registers_the_op_only_when_set(value, expect):
     pytest.importorskip("nki")
     code = ("from difflet.backends.neuron.ops_impl import attention as a; "
@@ -353,6 +379,18 @@ def test_ltx2_cp_processor_passes_mx_false_for_cross_attention(monkeypatch):
     assert seen_attention == [True, False]
 
 
+def test_the_trainium_backend_drops_mx_before_attention_cte(monkeypatch):
+    """Wan's and LTX-2's shared model code passes ``mx`` on every backend; Trainium's
+    ``attention()`` forwards its other kwargs to attention_cte, which has no ``mx``."""
+    trn = pytest.importorskip("difflet.backends.trainium.ops_impl.attention")
+    seen = []
+    monkeypatch.setattr(trn, "attention_cte", lambda q, k, v, **kw: seen.append(kw) or q)
+    q = torch.zeros(2, 8, 128)
+    trn.attention(q, q, q, scale=0.5, tp_q=True, tp_k=True, mx=False)
+    trn.attention(q, q, q, scale=0.5, tp_q=True, tp_k=True, mx=True)
+    assert len(seen) == 2 and not any("mx" in kw for kw in seen)
+
+
 # ------------------------------------------------------------------------- the application
 
 def _dit_application():
@@ -369,8 +407,8 @@ def test_the_switch_needs_trn3_and_compile_mode_on_a_dit(monkeypatch):
     from tests.unit.backends._neuron_toy import ToyApplication
 
     Dit = _dit_application()
-    monkeypatch.setattr(attn, "ATTN_QUANT", "mxfp8")
-    with pytest.raises(ValueError, match="compile"):
+    monkeypatch.setattr(attn, "ATTN_QUANT", "pv")  # no --quant (quant=None): checked all the same
+    with pytest.raises(ValueError, match=r"DIFFLET_ATTN_QUANT=pv.*compile"):
         Dit(device="cpu", exec_mode="eager")
     platform.get_platform_target.cache_clear()
     monkeypatch.setenv("NEURON_PLATFORM_TARGET_OVERRIDE", "trn2")
@@ -391,10 +429,11 @@ def test_a_dit_warmup_logs_the_routed_calls_once(monkeypatch, capsys):
     Dit = _dit_application()
     monkeypatch.setattr(mx_attention, "_CALLS", Counter({(S, S, False): 3}))
     monkeypatch.setattr(mx_attention, "_LOGGED", False)
-    monkeypatch.setattr(attn, "ATTN_QUANT", "mxfp8")
+    monkeypatch.setattr(attn, "ATTN_QUANT", "qk+pv")
     app = Dit(device="cpu", exec_mode="compile")
     app.module = torch.nn.Identity()
     app.warmup()
     app.warmup()
     lines = [line for line in capsys.readouterr().err.splitlines() if "DIFFLET_ATTN_QUANT" in line]
     assert len(lines) == 1 and "(40, 40, False): 3" in lines[0]
+    assert "DIFFLET_ATTN_QUANT=qk+pv (qk_mx=True, pv_mx=True)" in lines[0]  # names the variant
