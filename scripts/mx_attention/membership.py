@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Lock the MX block membership of the attention fork on one tile, on the device (MXFP8 attention
-plan, ``docs/plans/2026-11-13-mxfp8-attention.md``, Task 3 Step 2).
+plan, ``docs/plans/2026-11-13-mxfp8-attention.md``, Task 3 Step 2; ruling BR16 (1): rerun on the
+loaders MM2 really uses).
 
 usage: membership.py --out FILE      (NEURON_RT_VISIBLE_CORES = one idle core; taskset around it)
 
@@ -8,17 +9,21 @@ usage: membership.py --out FILE      (NEURON_RT_VISIBLE_CORES = one idle core; t
 group-of-4 layout of ``nc_matmul_mx``, partition ``g`` byte ``j`` of the x4 operand holding
 contraction index ``4g + j``:
 
-- P ``[128 queries, 512 keys]`` along keys, through nkilib's ``swizzle_quantize_mx`` (stride-2
-  ``nc_transpose`` of the fp32 view, MM2's stationary operand, plan Task 3 Step 3(b));
-- V ``[512 keys, 128 d]`` along keys, loaded by one DMA access pattern straight into the layout
-  (MM2's moving operand);
-- Q ``[128 rows, 128 d]`` along the head dim, through ``swizzle_quantize_mx`` (MM1's, as K).
+- P ``[128 queries, 512 keys]`` along keys by the fork's own ``_mx_quantize_p`` (stride-2 TensorE
+  transposes of the fp32 view out of a wider exp tile, at a 512 offset as the kernel's later tiles
+  are, then ``quantize_mx``), as ``_exp_impl`` does for MM2's stationary operand; ``p_tail``: only
+  500 keys valid, the tail zeroed by the helper, as on the last tile of an unmasked call;
+- V ``[512 keys, 128 d]`` along keys by the fork's ``_mx_load_v`` (one contiguous DMA, a GpSimd
+  regroup, ``quantize_mx``), MM2's moving operand; ``v_tail``: 500 rows loaded, the rest zero;
+- Q ``[128 rows, 128 d]`` along the head dim, through nkilib's ``swizzle_quantize_mx`` (MM1's, as
+  K; Task 4).
 
 Each one's scales and fp8 bytes are compared element by element with
-``difflet.quant.mx.quantize_mx`` of the logical operand (rows x contraction) under the kernel
-module's ``pv_perm`` / ``qk_perm``, and under ``swizzle_perm`` to show the comparison tells the two
-memberships apart. The scale tile is zeroed first, so the rows ``quantize_mx`` writes show.
-Inputs are bf16 with magnitudes ``2^U{-16..15} * U[1, 2)``: block maxima depend on membership.
+``difflet.quant.mx.quantize_mx`` of the logical operand (rows x contraction, keys past the valid
+count zero) under the kernel module's ``pv_perm`` / ``qk_perm``, and under ``swizzle_perm`` to
+show the comparison tells the two memberships apart. The scale tiles are zeroed first, so the rows
+``quantize_mx`` writes show. Inputs are bf16 with magnitudes ``2^U{-16..15} * U[1, 2)``: block
+maxima depend on membership.
 """
 
 from __future__ import annotations
@@ -36,7 +41,11 @@ import torch  # noqa: E402
 from difflet.quant.mx import BLOCK, quantize_mx, swizzle_perm  # noqa: E402
 
 SEED = 0
-SHAPES = {"p": (128, 512), "v": (512, 128), "q": (128, 128)}  # as the kernel reads them
+SHAPES = {"p": (128, 512), "v": (512, 128), "q": (128, 128)}  # inputs, as the kernel reads them
+VALID = 500  # keys of the partial tiles, not a multiple of 32
+#: operand -> (input, valid contraction indices); the order of the kernel's outputs
+OPERANDS = {"p": ("p", 512), "p_tail": ("p", VALID), "v": ("v", 512), "v_tail": ("v", VALID),
+            "q": ("q", 128)}
 
 
 def make_inputs() -> dict[str, torch.Tensor]:
@@ -49,9 +58,14 @@ def make_inputs() -> dict[str, torch.Tensor]:
     return out
 
 
-def logical(name: str, x: torch.Tensor) -> torch.Tensor:
-    """``[rows, contraction]``: V contracts over its keys, its first axis."""
-    return x.t() if name == "v" else x
+def logical(name: str, inputs: dict[str, torch.Tensor]) -> torch.Tensor:
+    """``[rows, contraction]`` (V contracts over its keys, its first axis), indices past the
+    operand's valid count zero."""
+    src, valid = OPERANDS[name]
+    x = inputs[src].t() if src == "v" else inputs[src]
+    x = x.clone()
+    x[:, valid:] = 0
+    return x
 
 
 def scale_rows(k: int) -> torch.Tensor:
@@ -62,19 +76,22 @@ def scale_rows(k: int) -> torch.Tensor:
     return (a // 4) * 32 + a % 4
 
 
-def decode(data_i32: torch.Tensor, scales_u8: torch.Tensor):
+def decode(data_i32: torch.Tensor, scales_u8: torch.Tensor, perm: torch.Tensor):
     """The device's ``[K/4, M]`` x4 data and scale tiles -> fp8 ``[M, K]`` in logical order (byte
-    ``j`` of row ``g`` is index ``4g + j``) and scales ``[M, K/32]`` in block order."""
+    ``j`` of row ``r`` is index ``perm[4r + j]``) and scales ``[M, K/32]`` in block order."""
     k4, m = data_i32.shape
-    fp8 = data_i32.contiguous().view(torch.uint8).view(k4, m, 4).permute(1, 0, 2).reshape(m, 4 * k4)
+    fp8_sw = data_i32.contiguous().view(torch.uint8).view(k4, m, 4).permute(1, 0, 2).reshape(m, 4 * k4)
+    fp8 = torch.empty_like(fp8_sw)
+    fp8[:, perm] = fp8_sw
     return fp8.view(torch.float8_e4m3fn), scales_u8[scale_rows(4 * k4)].t()
 
 
 def compare(x: torch.Tensor, data_i32: torch.Tensor, scales_u8: torch.Tensor,
             perm: torch.Tensor) -> dict:
-    """Mismatches of the device's fp8 and scales with ``quantize_mx(x, perm)``, element by element,
-    and the scale tile's rows outside :func:`scale_rows` that are not zero."""
-    fp8, scales = decode(data_i32, scales_u8)
+    """Mismatches of the device's fp8 and scales with ``quantize_mx(x, perm)``, element by element
+    (the device bytes placed by the same ``perm``), and the scale tile's rows outside
+    :func:`scale_rows` that are not zero."""
+    fp8, scales = decode(data_i32, scales_u8, perm)
     ref_fp8, ref_scales = quantize_mx(x, perm)
     other = torch.ones(scales_u8.shape[0], dtype=torch.bool)
     other[scale_rows(x.shape[1])] = False
@@ -85,40 +102,52 @@ def compare(x: torch.Tensor, data_i32: torch.Tensor, scales_u8: torch.Tensor,
             "nonzero_scale_rows_outside": int((scales_u8[other] != 0).any(1).sum())}
 
 
-def device_quantize(inputs: dict[str, torch.Tensor]) -> dict[str, tuple[torch.Tensor, ...]]:
+def to_numpy(t: torch.Tensor):
+    import ml_dtypes
+
+    return t.float().numpy().astype(ml_dtypes.bfloat16)
+
+
+def unpack(outs) -> dict[str, tuple[torch.Tensor, torch.Tensor]]:
+    """The kernel's flat outputs -> ``{operand: (data int32, scales uint8)}``."""
+    return {n: (outs[2 * i], outs[2 * i + 1]) for i, n in enumerate(OPERANDS)}
+
+
+def _build_kernel():
     import nki
     import nki.isa as nisa
     import nki.language as nl
     from nkilib.core.utils.allocator import create_auto_alloc_manager
     from nkilib.experimental.attention_mxfp8.attention_mxfp8_tkg_utils import swizzle_quantize_mx
-    from torch_neuronx import wrap_nki
 
-    from difflet.backends import get_backend
-    from difflet.backends.neuron.ops_impl.fp8_kernels import logical_cores
-    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from difflet.backends.neuron.ops_impl.mx_attention_kernel import _mx_load_v, _mx_quantize_p
 
     @nki.jit
     def quantize_operands(p, v, q):
         sbm = create_auto_alloc_manager()
         sbm.open_scope(name="membership")
         outs = []
-        for name, x in (("p", p), ("v", v), ("q", q)):
-            if name == "v":
-                k, m = x.shape
-                src = sbm.alloc_stack((k // 4, 4 * m), dtype=nl.bfloat16)
-                # src[g, 4n + j] = v[4g + j, n]
-                nisa.dma_copy(dst=src.ap(pattern=[[4 * m, k // 4], [4, m], [1, 4]], offset=0),
-                              src=x.ap(pattern=[[4 * m, k // 4], [1, m], [m, 4]], offset=0))
-            else:
-                m, k = x.shape
-                src = sbm.alloc_stack((m, k), dtype=nl.bfloat16)
-                nisa.dma_copy(dst=src, src=x)
+        for name, (src_name, valid) in OPERANDS.items():
+            x = {"p": p, "v": v, "q": q}[src_name]
+            m, k = (x.shape[1], x.shape[0]) if src_name == "v" else x.shape
             data = sbm.alloc_stack((k // 4, m), dtype=nl.float8_e4m3fn_x4)
             scale = sbm.alloc_stack((k // 4, m), dtype=nl.uint8)
             nisa.memset(scale, value=0)
-            if name == "v":
-                nisa.quantize_mx(dst=data, src=src, dst_scale=scale)
+            if src_name == "v":
+                stage = sbm.alloc_stack((k // 4, 4 * m), dtype=nl.bfloat16)
+                packed = sbm.alloc_stack((k // 4, 4 * m), dtype=nl.bfloat16)
+                _mx_load_v(x, data, scale, stage, packed, row_offset=0, num_keys=valid)
+            elif src_name == "p":
+                wide = sbm.alloc_stack((m, 2 * k), dtype=nl.bfloat16)  # the tile at offset k
+                nisa.memset(wide, value=1.0e30)  # stale exp: must not reach the tail
+                nisa.dma_copy(dst=wide[:, k:2 * k], src=x)
+                psum = nl.ndarray((k // 4, 2 * m), dtype=nl.float32, buffer=nl.psum)
+                stage = sbm.alloc_stack((k // 4, 2 * m), dtype=nl.float32)
+                _mx_quantize_p(data, scale, psum, stage, wide, src_offset=k, num_q=m,
+                               num_keys=valid)
             else:
+                src = sbm.alloc_stack((m, k), dtype=nl.bfloat16)
+                nisa.dma_copy(dst=src, src=x)
                 swizzle_quantize_mx(src, data, scale, sbm)
             data_out = nl.ndarray((k // 4, m), dtype=nl.int32, buffer=nl.shared_hbm)
             scale_out = nl.ndarray((k // 4, m), dtype=nl.uint8, buffer=nl.shared_hbm)
@@ -128,12 +157,27 @@ def device_quantize(inputs: dict[str, torch.Tensor]) -> dict[str, tuple[torch.Te
         sbm.close_scope()
         return tuple(outs)
 
+    return quantize_operands
+
+
+def __getattr__(name):  # the kernel needs the Neuron SDK; built on first use
+    if name == "quantize_operands":
+        return _build_kernel()
+    raise AttributeError(name)
+
+
+def device_quantize(inputs: dict[str, torch.Tensor]) -> dict[str, tuple[torch.Tensor, ...]]:
+    from torch_neuronx import wrap_nki
+
+    from difflet.backends import get_backend
+    from difflet.backends.neuron.ops_impl.fp8_kernels import logical_cores
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+
     get_backend("neuron").prepare_runtime(DiffletParallelConfig())
     # the compiler runs at LNC=2, so the grid must name both cores; each writes the same tiles
     grid = (logical_cores(),)
-    outs = wrap_nki(quantize_operands)[grid](*(inputs[n].to("neuron") for n in SHAPES))
-    outs = [t.cpu() for t in outs]
-    return {n: (outs[2 * i], outs[2 * i + 1]) for i, n in enumerate(SHAPES)}
+    outs = wrap_nki(_build_kernel())[grid](*(inputs[n].to("neuron") for n in SHAPES))
+    return unpack([t.cpu() for t in outs])
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -150,15 +194,15 @@ def main(argv: list[str] | None = None) -> int:
     got = device_quantize(inputs)
     result = {"inputs": f"bf16, sign * U[1, 2) * 2^U{{-16..15}}, seed {SEED}", "fuser": fuser}
     for name, (data, scales) in got.items():
-        x = logical(name, inputs[name])
+        x = logical(name, inputs)
         kernel_perm = (qk_perm if name == "q" else pv_perm)(x.shape[1])
-        result[name] = {"logical": list(x.shape),
+        result[name] = {"logical": list(x.shape), "valid": OPERANDS[name][1],
                         "kernel_perm": compare(x, data, scales, kernel_perm),
                         "swizzle_perm": compare(x, data, scales, swizzle_perm(x.shape[1]))}
     args.out.parent.mkdir(parents=True, exist_ok=True)
     args.out.write_text(json.dumps(result, indent=1) + "\n")
     torch.save(got, args.out.with_suffix(".pt"))
-    print(json.dumps({n: result[n]["kernel_perm"] for n in SHAPES}))
+    print(json.dumps({n: result[n]["kernel_perm"] for n in OPERANDS}))
     return 0
 
 
