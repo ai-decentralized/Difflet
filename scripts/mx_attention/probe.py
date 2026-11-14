@@ -2,8 +2,9 @@
 """One attention call on one NeuronCore (LNC=2) at a model's per-rank shape: accuracy and time
 (MXFP8 attention plan, ``docs/plans/2026-11-13-mxfp8-attention.md``, Task 2).
 
-usage: probe.py --shape NAME --impl {cte,fork,constmax} [--qk-mx] [--pv-mx] [--cte-no-vector-exp]
-                --out FILE [--runs N] [--calls N] [--peak F]
+usage: probe.py --shape NAME --impl {cte,fork,constmax,routed} [--qk-mx] [--pv-mx]
+                [--fork-vector-exp] [--cte-no-vector-exp] --out FILE [--runs N] [--calls N]
+                [--peak F]
 
 ``--impl cte`` is Difflet's attention as the models call it today, ``ops_impl.attention.attention``
 in the ``tp_q``/``tp_k`` layout: nkilib's ``attention_cte`` in bf16, bounded rows through its
@@ -11,7 +12,11 @@ range-select op (q pre-scaled in fp32, lengths padded to 128, HV1 split over hea
 against fp32 attention. ``--impl fork`` is the same call with the kernel swapped for Difflet's
 fork (``ops_impl/mx_attention_kernel.py``, plan Task 3; ``--qk-mx`` / ``--pv-mx`` select its
 variant), scored against fp32 attention with both flags off and against the Task 1 mirror
-(``mx_attention_reference`` on the bf16 inputs, the kernel's block membership) otherwise.
+(``mx_attention_reference`` on the bf16 inputs, the kernel's block membership) otherwise;
+``--fork-vector-exp`` runs the fork's exp on the Vector Engine, as shipped attention_cte does
+(``allow_vector_exp=True``; the fork's default is the Scalar Engine). ``--impl routed`` is
+``ops_impl.attention.attention`` itself under ``DIFFLET_ATTN_QUANT=mxfp8`` (plan Task 5: the op
+the models call, QK^T MXFP8 with the VectorE exp), scored against the QK-only mirror.
 ``--cte-no-vector-exp`` is ``--impl cte`` with attention_cte's ``allow_vector_exp=False`` (the
 exp on ScalarE, not VectorE), scored against fp32 attention (plan Task 4-pre, ruling BR18).
 ``--impl constmax`` (unbounded shapes only) is the unbounded call on nkilib's experimental
@@ -170,19 +175,20 @@ def use_kernel(name: str, kernel, scale_kw: str = "scale", **kw) -> None:
     attn._FLASH_KERNEL, attn._FLASH_BOUNDED_OP = unbounded, op
 
 
-def use_fork(*, qk_mx: bool, pv_mx: bool) -> None:
-    """``ops_impl.attention`` on the fork's ``mx_attention_fwd`` with these flags. With ``qk_mx``
-    the torch side smooths K first (``smooth_keys``, inside the compiled region, so its time
-    counts): on the unbounded path right before the kernel, on the bounded path before
-    ``_flash_attention_bounded`` pads K with zeros, so the mean is over the call's real keys. That
-    is where Task 5's op will do it (plan: "the torch side: K smoothing over real keys, q
-    pre-scaled in fp32 when bounded, padding")."""
+def use_fork(*, qk_mx: bool, pv_mx: bool, vector_exp: bool = False) -> None:
+    """``ops_impl.attention`` on the fork's ``mx_attention_fwd`` with these flags (``vector_exp``:
+    ``allow_vector_exp=True``, passed only then, so the other arms' calls are unchanged). With
+    ``qk_mx`` the torch side smooths K first (``smooth_keys``, inside the compiled region, so its
+    time counts): on the unbounded path right before the kernel, on the bounded path before
+    ``_flash_attention_bounded`` pads K with zeros, so the mean is over the call's real keys, as
+    Task 5's op (``--impl routed``) does it."""
     from torch_neuronx import wrap_nki
 
     from difflet.backends.neuron.ops_impl import attention as attn
     from difflet.backends.neuron.ops_impl.mx_attention_kernel import mx_attention_fwd
 
-    use_kernel("mx_attention_fork", wrap_nki(mx_attention_fwd), pv_mx=pv_mx, qk_mx=qk_mx)
+    use_kernel("mx_attention_fork", wrap_nki(mx_attention_fwd), pv_mx=pv_mx, qk_mx=qk_mx,
+               **({"allow_vector_exp": True} if vector_exp else {}))
     if qk_mx:
         unbounded, bounded = attn._FLASH_KERNEL, attn._flash_attention_bounded
         attn._FLASH_KERNEL = lambda q, k, v, **kw: unbounded(q, smooth_keys(k), v, **kw)
@@ -222,6 +228,8 @@ def use_const_max(softmax_max: float) -> None:
 
 def worker(args, row: dict) -> None:
     """Device side: compile, save the first output if asked, time CALLS calls with one sync."""
+    switch = "mxfp8" if args.impl == "routed" else "off"
+    os.environ["DIFFLET_ATTN_QUANT"] = switch  # read once, at ops_impl.attention's import
     os.environ.setdefault("DIFFLET_COMPILE_CACHE", "/mnt/nvme/difflet-mxattn/probe/cache")
     # every kernel input is a call argument, so the NKI trace cache is safe for nkilib's kernel
     # (compile.py); the fork compiles uncached unless DIFFLET_NKI_TRACE_CACHE=1 (ruling BR12;
@@ -232,10 +240,14 @@ def worker(args, row: dict) -> None:
 
     get_backend("neuron").prepare_runtime(DiffletParallelConfig())
     from difflet.backends.neuron.compile import compile_region
+    from difflet.backends.neuron.ops_impl import attention as attn
     from difflet.backends.neuron.ops_impl.attention import attention
 
+    if attn.ATTN_QUANT != switch:
+        raise SystemExit(f"ops_impl.attention was imported with DIFFLET_ATTN_QUANT="
+                         f"{attn.ATTN_QUANT}")
     if args.impl == "fork":
-        use_fork(qk_mx=args.qk_mx, pv_mx=args.pv_mx)
+        use_fork(qk_mx=args.qk_mx, pv_mx=args.pv_mx, vector_exp=args.fork_vector_exp)
     elif args.cte_no_vector_exp:
         use_cte_no_vector_exp()
     elif args.impl == "constmax":
@@ -271,9 +283,11 @@ def main(argv: list[str] | None = None) -> int:
     shapes = load_shapes()
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--shape", required=True, choices=sorted(shapes))
-    p.add_argument("--impl", required=True, choices=("cte", "fork", "constmax"))
+    p.add_argument("--impl", required=True, choices=("cte", "fork", "constmax", "routed"))
     p.add_argument("--qk-mx", action="store_true")
     p.add_argument("--pv-mx", action="store_true")
+    p.add_argument("--fork-vector-exp", action="store_true",
+                   help="the fork with allow_vector_exp=True (the exp on VectorE, as shipped cte)")
     p.add_argument("--cte-no-vector-exp", action="store_true",
                    help="attention_cte with allow_vector_exp=False (the exp on ScalarE)")
     p.add_argument("--out", required=True, type=Path)
@@ -287,6 +301,8 @@ def main(argv: list[str] | None = None) -> int:
         p.error("--qk-mx and --pv-mx need --impl fork")
     if args.cte_no_vector_exp and args.impl != "cte":
         p.error("--cte-no-vector-exp needs --impl cte")
+    if args.fork_vector_exp and args.impl != "fork":
+        p.error("--fork-vector-exp needs --impl fork")
     row = {"name": args.shape, **shapes[args.shape]}
     if args.impl == "constmax" and row["path"] != "unbounded":
         p.error("--impl constmax is unbounded attention only")
@@ -307,11 +323,12 @@ def main(argv: list[str] | None = None) -> int:
     torch.set_num_threads(len(os.sched_getaffinity(0)))
     q, k, v, bounds = make_inputs(row, args.peak)
     device = torch.load(output_path(args.out)).float()
-    flags = dict(qk_mx=args.qk_mx, pv_mx=args.pv_mx)
+    flags = dict(qk_mx=args.qk_mx or args.impl == "routed", pv_mx=args.pv_mx)  # routed: QK-only
     overall, heads = compare(device, lambda h: reference(row, q, k, v, bounds, h, **flags),
                              row["bh"])
     ms = [r["ms"] for r in runs]
     result = {"shape": row, "impl": args.impl, **flags, "cte_no_vector_exp": args.cte_no_vector_exp,
+              "fork_vector_exp": args.fork_vector_exp,
               "calls": args.calls, "peak": args.peak, "runs_ms": ms, "first_call_s": [r["first_call_s"] for r in runs],
               **summarize(ms), "reference": "mirror" if any(flags.values()) else "fp32",
               **overall, "per_head": heads, "nonfinite": int((~device.isfinite()).sum()),

@@ -37,6 +37,9 @@ import os
 import torch
 import torch.nn.functional as F
 
+from difflet.backends.neuron.ops_impl.mx_attention import load_op, record_call
+from difflet.quant.mx_attention import smooth_keys
+
 #: ``DIFFLET_NEURON_ATTENTION=sdpa`` sends every call through ``F.scaled_dot_product_attention``
 #: (never the direct kernel call): the A/B switch behind the SDPA-gate measurement. Read once at
 #: import, so compiled regions see a constant. Default ``auto``: the direct kernel when eligible.
@@ -52,6 +55,15 @@ RING_KERNEL_ENV = "DIFFLET_NEURON_RING_KERNEL"
 _RING_KERNEL = os.environ.get(RING_KERNEL_ENV, "1").strip() != "0"
 #: The longest per-rank sequence the NKI Library documents its ring kernel as tested at.
 _RING_KERNEL_MAX_SEQ = 16384
+
+#: ``DIFFLET_ATTN_QUANT=mxfp8`` sends the self/joint attention calls (non-causal, unmasked or
+#: key-bounded, bf16, head dim 128, ``mx=True``) to ``difflet_neuron::mx_attention``: QK^T in
+#: MXFP8, PV in bf16 (MXFP8 attention plan, Task 5; ruling BR28). Unset or ``off``: every graph is
+#: unchanged. Read once at import, as above; trn3 and compile mode only (``application_base``).
+ATTN_QUANT_ENV = "DIFFLET_ATTN_QUANT"
+ATTN_QUANT = os.environ.get(ATTN_QUANT_ENV, "off").strip().lower()
+if ATTN_QUANT not in ("off", "mxfp8"):
+    raise ValueError(f"{ATTN_QUANT_ENV} must be unset, 'off' or 'mxfp8', got {ATTN_QUANT!r}")
 
 # Kernel limits stated by torch-neuronx's SDPA gate, other than its 512-multiple lengths.
 _KERNEL_DTYPES = (torch.bfloat16, torch.float16)
@@ -81,6 +93,7 @@ def attention(
     tp_k: bool = False,
     tp_out: bool = False,
     vector_exp: bool = True,
+    mx: bool = True,
     **kwargs,
 ):
     """``vector_exp`` (bounded flash path only): False runs the softmax exp on the Scalar engine
@@ -88,7 +101,10 @@ def attention(
     reads every score tile out of PSUM with a Vector ``range_select``, so with the exp there too
     the Vector engine bounds the kernel while the Scalar engine idles; on trn3 at H3's 768p
     per-rank shape (7 x 38272 x 128) False takes the kernel from 66.4 to 54.0 ms. No effect off
-    trn3 (the kernel only uses the Vector exp there)."""
+    trn3 (the kernel only uses the Vector exp there).
+
+    ``mx=False`` keeps the call in bf16 under ``DIFFLET_ATTN_QUANT=mxfp8``: the cross-attention
+    call sites pass it (plan Global Constraints: only self/joint attention is routed)."""
     if kwargs:
         raise NotImplementedError(
             "neuron attention does not support attention_cte-only kwargs: "
@@ -97,11 +113,18 @@ def attention(
     q = q if tp_q else q.transpose(-1, -2)
     k = k if tp_k else k.transpose(-1, -2)
 
-    if bound_min is not None or bound_max is not None:
+    bounded = bound_min is not None or bound_max is not None
+    if bounded:
         if bound_min is None or bound_max is None:
             raise ValueError("bound_min and bound_max must both be provided")
         if attention_mask is not None:
             raise ValueError("attention_mask and bounds are mutually exclusive")
+    if mx and ATTN_QUANT == "mxfp8" and _routes_to_mx(q, k, v, causal, attention_mask):
+        out = _mx_attention(q, k, v, bound_min, bound_max,
+                            scale=1.0 if scale is None else float(scale))
+        return out.transpose(-1, -2) if tp_out else out
+
+    if bounded:
         if not causal and _can_use_flash_kernel(q, k, v, None) and _FLASH_BOUNDED_OP is not None:
             # attention_cte's sequence packing: per-query key range [bound_min, bound_max), read per
             # query tile inside the kernel (O(L) memory) instead of an L x L mask and masked SDPA.
@@ -194,10 +217,43 @@ def _load_flash_bounded_op(vector_exp: bool = True):
     return flash_attention_bounded
 
 
+def _routes_to_mx(q, k, v, causal: bool, attention_mask) -> bool:
+    """The calls the MXFP8 fork takes: non-causal, unmasked (bounds aside), bf16, head dim 128,
+    within the flash kernel's limits (``_can_use_flash_kernel``)."""
+    return (_MX_ATTENTION_OP is not None and not causal and attention_mask is None
+            and q.shape[-1] == 128 and all(t.dtype == torch.bfloat16 for t in (q, k, v))
+            and _can_use_flash_kernel(q, k, v, None))
+
+
+def _mx_op(q, k, v, bound_min, bound_max, scale: float):
+    """The MXFP8 op in the routed variant, QK^T MXFP8 and PV bf16 (ruling BR28), called as
+    ``_FLASH_BOUNDED_OP`` is."""
+    return _MX_ATTENTION_OP(q, k, v, bound_min, bound_max, scale, False, True)
+
+
+def _mx_attention(q, k, v, bound_min, bound_max, *, scale: float):
+    """``[B, H, S, d]`` or ``[B*H, S, d]`` through the MXFP8 op. K is smoothed (minus its mean
+    over the call's keys, ``smooth_keys``) before any padding. A bounded call then takes
+    ``_flash_attention_bounded``'s q pre-scale, 128 padding, head chunks and one slice; an
+    unbounded one is not padded: the fork takes partial 512-key and 128-query tiles itself
+    (ruling BR3: one pad/slice round trip at most)."""
+    shape = q.shape
+    bh, s_q, d = math.prod(shape[:-2]), shape[-2], shape[-1]
+    q3, k3, v3 = (t.reshape(bh, t.shape[-2], t.shape[-1]) for t in (q, k, v))
+    k3 = smooth_keys(k3)
+    record_call(s_q, k3.shape[1], bound_min is not None)
+    if bound_min is not None:
+        out = _flash_attention_bounded(q3, k3, v3, bound_min, bound_max, scale=scale, op=_mx_op)
+    else:
+        out = _mx_op(q3.contiguous(), k3.contiguous(), v3.contiguous(), None, None, scale)
+    return out.reshape(*shape[:-1], v.shape[-1])
+
+
 def _flash_attention_bounded(q, k, v, bound_min, bound_max, *, scale: float,
-                             vector_exp: bool = True):
-    """``[B, H, S, d]`` or ``[B*H, S, d]`` through the bounded kernel; bounds of ``[B*H, S_q, 1]``
-    (or anything that reshapes to it)."""
+                             vector_exp: bool = True, op=None):
+    """``[B, H, S, d]`` or ``[B*H, S, d]`` through the bounded kernel (``op``, default
+    ``_FLASH_BOUNDED_OP``, its Scalar-exp variant with ``vector_exp=False``); bounds of
+    ``[B*H, S_q, 1]`` (or anything that reshapes to it)."""
     shape = q.shape
     bh, s_q, d = math.prod(shape[:-2]), shape[-2], shape[-1]
     q3, k3, v3 = (t.reshape(bh, t.shape[-2], d) for t in (q, k, v))
@@ -219,7 +275,9 @@ def _flash_attention_bounded(q, k, v, bound_min, bound_max, *, scale: float,
         q3 = F.pad(q3, (0, 0, 0, pad_q))
         lo = F.pad(lo, (0, 0, 0, pad_q))
         hi = F.pad(hi, (0, 0, 0, pad_q), value=1)
-    op = _FLASH_BOUNDED_OP if vector_exp else (_FLASH_BOUNDED_SCALAR_EXP_OP or _FLASH_BOUNDED_OP)
+    if op is None:  # the MXFP8 path passes its own op
+        op = (_FLASH_BOUNDED_OP if vector_exp
+              else (_FLASH_BOUNDED_SCALAR_EXP_OP or _FLASH_BOUNDED_OP))
     chunk = _head_chunk(bh, q3.shape[1], k3.shape[1])
     if chunk == bh:  # one call on the whole tensors: the graph compiled before the split existed
         out = op(q3.contiguous(), k3.contiguous(), v3.contiguous(),
@@ -256,6 +314,7 @@ def _load_flash_kernel():
 _FLASH_KERNEL = _load_flash_kernel()
 _FLASH_BOUNDED_OP = _load_flash_bounded_op()
 _FLASH_BOUNDED_SCALAR_EXP_OP = _load_flash_bounded_op(vector_exp=False)
+_MX_ATTENTION_OP = load_op() if ATTN_QUANT == "mxfp8" else None  # unset / off: nothing loaded
 
 
 def _load_flash_lse_op():
@@ -322,6 +381,7 @@ def cross_attention(q, k, v, *, scale: float | None = None, attention_mask=None,
         tp_q=False,
         tp_k=False,
         tp_out=False,
+        mx=False,
         **kwargs,
     )
 
@@ -339,11 +399,11 @@ def _merge_causal_mask(q, k, attention_mask):
 def _dense_bhsd(q, k, v, *, scale: float):
     """Unmasked attention on ``[B, H, S, d]`` in the standard layout, through ``attention``'s
     ``attention_cte`` convention (heads folded into the batch, ``tp_q``/``tp_k`` set), as Wan's
-    own attention path calls it."""
+    own attention path calls it. Its callers, the CP variants, stay bf16 (``mx=False``)."""
     b, h, s_q, d = q.shape
     s_k = k.shape[2]
     out = attention(q.reshape(b * h, s_q, d), k.reshape(b * h, s_k, d), v.reshape(b * h, s_k, d),
-                    scale=scale, causal=False, tp_q=True, tp_k=True, tp_out=False)
+                    scale=scale, causal=False, tp_q=True, tp_k=True, tp_out=False, mx=False)
     return out.reshape(b, h, s_q, d)
 
 
@@ -617,7 +677,7 @@ def joint_ulysses_attention(q_img, q_txt, image_k, image_v, text_k, text_v, *, s
         bound_max = count.expand(b, h, s, 1).reshape(b * h, s, 1)
         out = attention(q.reshape(b * h, s, d), k.reshape(b * h, s, d), v.reshape(b * h, s, d),
                         scale=scale, causal=False, bound_min=torch.zeros_like(bound_max),
-                        bound_max=bound_max, tp_q=True, tp_k=True, tp_out=False)
+                        bound_max=bound_max, tp_q=True, tp_k=True, tp_out=False, mx=False)
         out = out.reshape(b, h, s, d)
     s_img = q_img.shape[2]
     img_out, txt_out = out[:, :, :s_img], out[:, :, s_img:]

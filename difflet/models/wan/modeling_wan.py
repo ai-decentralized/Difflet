@@ -440,8 +440,10 @@ def _attn_kernel(
     v: torch.Tensor,
     *,
     head_dim: int,
+    mx: bool = True,
 ) -> torch.Tensor:
     """Run attention on (B, heads, S, head_dim) tensors via ``difflet.ops.attention``.
+    ``mx=False`` (cross-attention) keeps it bf16 under ``DIFFLET_ATTN_QUANT=mxfp8``.
 
     Routes to the nkilib flash kernel (``attention_cte``) on Trainium — measured
     ~4x faster than the prior PyTorch-SDPA fallback (cclog 90: SDPA 15.33 ms vs
@@ -466,6 +468,7 @@ def _attn_kernel(
         tp_q=True,
         tp_k=True,
         tp_out=False,
+        mx=mx,
     )
     return out.reshape(batch, heads, seq_q, dim)
 
@@ -649,7 +652,7 @@ class WanAttention(nn.Module):
                     stacked_kv, gather_dim=3, process_group=self.cp_group
                 )  # [2, B, heads, S, head_dim]
                 k, v = torch.unbind(stacked_kv, dim=0)
-            out = _attn_kernel(q, k, v, head_dim=self.head_dim)
+            out = _attn_kernel(q, k, v, head_dim=self.head_dim, mx=not self.is_cross_attention)
 
         # (B, local_heads, S, dim) → (B, S, local_heads * dim); RowParallelLinear then
         # all-reduces each rank's partial output projection back to the full model dim.

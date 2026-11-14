@@ -309,6 +309,7 @@ def _ulysses_processor_class():
                 v.reshape(batch * heads, k_len, head_dim),
                 scale=1.0 / math.sqrt(head_dim), causal=False, tp_q=True, tp_k=True,
                 tp_out=False, bound_min=bound_min, bound_max=bound_max,
+                mx=self.mode != "ulysses",  # Ulysses CP stays bf16 under DIFFLET_ATTN_QUANT
             ).reshape(batch, heads, q_len, head_dim)
             if self.mode == "ulysses":
                 out = collectives.heads_to_seq(out, group, self.cp)

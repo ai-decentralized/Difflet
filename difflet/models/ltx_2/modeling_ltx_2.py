@@ -203,6 +203,9 @@ class _LTX2TPAttnProcessor:
             attention_mask = attn.prepare_attention_mask(attention_mask, sequence_length, batch_size)
             attention_mask = attention_mask.view(batch_size, attn.heads, -1, attention_mask.shape[-1])
 
+        # Self-attention only (attn1; audio_attn1 is head dim 64) may run in MXFP8 under
+        # DIFFLET_ATTN_QUANT: the text and audio/video cross-attentions pass mx=False.
+        is_self_attention = encoder_hidden_states is None
         if encoder_hidden_states is None:
             encoder_hidden_states = hidden_states
 
@@ -247,7 +250,7 @@ class _LTX2TPAttnProcessor:
                 q3, k3, v3,
                 scale=1.0 / math.sqrt(head_dim),
                 causal=False,
-                tp_q=True, tp_k=True, tp_out=False,
+                tp_q=True, tp_k=True, tp_out=False, mx=is_self_attention,
             )
             hidden_states = out3.reshape(bsz, n_heads, q_len, head_dim).permute(0, 2, 1, 3).reshape(
                 bsz, q_len, inner
@@ -277,7 +280,7 @@ class _LTX2TPAttnProcessor:
                 q3, k3, v3,
                 scale=1.0 / math.sqrt(head_dim),
                 causal=False,
-                tp_q=True, tp_k=True, tp_out=False,
+                tp_q=True, tp_k=True, tp_out=False, mx=False,
             )
             hidden_states = out3.reshape(bsz, n_heads, qx_len, head_dim).permute(0, 2, 1, 3).reshape(
                 bsz, qx_len, inner

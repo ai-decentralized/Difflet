@@ -74,7 +74,7 @@ from difflet.backends.neuron.core.weight_store import (
     print_result,
 )
 from difflet.backends.neuron.hbm import budget_enforced, check_fits
-from difflet.backends.neuron.ops_impl import parallel_mesh
+from difflet.backends.neuron.ops_impl import attention, mx_attention, parallel_mesh
 from difflet.backends.neuron.ops_impl.fp8_linear import prepare_fp8_kernels_, quantize_module_
 from difflet.backends.neuron.runtime import check_parallel_supported
 from difflet.pipeline.parallel_config import DiffletParallelConfig
@@ -204,6 +204,11 @@ class TorchNeuronApplicationBase(torch.nn.Module):
                     f"but this launch has tp_degree={self.parallel.tp_degree} (row-parallel "
                     "weights are quantized per rank K range)"
                 )
+        elif self._attn_quant():
+            # The attention's nc_matmul_mx needs what --quant's does (plan Global Constraints).
+            label = self.quant_label or self.quant_model
+            require_fp8_supported(f"{label} (DIFFLET_ATTN_QUANT=mxfp8)", self.device.type,
+                                  self.exec_mode)
         #: The module names ``load`` quantized (empty without ``quant``).
         self.quantized_linears: list[str] = []
         self.kwargs = dict(kwargs)
@@ -380,6 +385,8 @@ class TorchNeuronApplicationBase(torch.nn.Module):
                 torch.neuron.synchronize()
         self.phase_seconds["warmup forward"] = time.perf_counter() - start
         self.warmup_shapes = [tuple(arg.shape) for arg in args]
+        if self._attn_quant() and self.rank == 0:
+            mx_attention.log_routed_calls()  # the warm-up traced them (plan Review Focus 5)
         if self.exec_mode == "compile":
             self._compiled_shapes.add(_shape_key(args, {}))
 
@@ -394,6 +401,11 @@ class TorchNeuronApplicationBase(torch.nn.Module):
             return self.module(*args, **kwargs)
 
     # -------------------------------------------------------------- internals
+
+    def _attn_quant(self) -> bool:
+        """``DIFFLET_ATTN_QUANT=mxfp8`` on a DiT (an application with MXFP8 target layers): the
+        other applications (text encoders, VAEs) route no attention."""
+        return attention.ATTN_QUANT == "mxfp8" and self.quant_model is not None
 
     def _init_runtime(self) -> None:
         # MeshSpec drops sp_enabled, so the runtime's own check runs first.

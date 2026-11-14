@@ -1101,3 +1101,93 @@ Outputs: `/mnt/nvme/difflet-mxattn/probe/constmax/`:
 - `bounds.json` holds the real-model bounds.
 - The tools are `acc_lane.sh`, `duo.sh`, `cap.sh`, `table.py`, `phases_cm.py`, `neffs_cm.py`,
   `bounds.py` and `emulate.py`.
+
+## 13. MXFP8 attention: the routed op and `DIFFLET_ATTN_QUANT` (Task 5)
+
+Rulings BR28, BR31 and BR32 (2026-11-14). `DIFFLET_ATTN_QUANT=mxfp8` (read once at import; unset or
+`off`: nothing changes) sends the self/joint attention calls to `difflet_neuron::mx_attention`
+(`ops_impl/mx_attention.py`). Those are the non-causal, unmasked or key-bounded, bf16, head-dim-128
+calls with `mx=True`. The op is the fork in the user's variant, QK-only (`qk_mx=True`,
+`pv_mx=False`), with the exp on VectorE (`allow_vector_exp=True`, as shipped attention_cte runs the
+bf16 arm).
+
+The torch side (`ops_impl/attention.py::_mx_attention`) does three things:
+- K is smoothed over the call's own keys.
+- A bounded call takes `_flash_attention_bounded`'s fp32 q pre-scale, scale 1.0, 128 padding, head
+  chunks and one slice.
+- An unbounded call is not padded, because the fork takes partial 512-key and 128-query tiles itself.
+
+These stay bf16: the cross-attention sites (`mx=False`), `cross_attention()`, `_dense_bhsd`,
+ring / Ulysses, causal calls and head dim != 128. The device runs used a frozen copy of the
+commit's files (`/mnt/nvme/difflet-mxattn/task5/tree`), and every device was idle by `fuser`
+before each process.
+
+**(a) Switch unset**, with the 2026-11-07 evidence doc's commands (tp4, 50 steps, seed 42).
+
+| model | device | output md5 | reference | step median |
+|---|---|---|---|---|
+| Qwen-Image 1024x1024 `--quant mxfp8` | 1 | `7737239be780a7877cd8b2ebe32bfb2f` | same (section 0) | 239.0 ms |
+| Wan 2.1 bf16 480x832x9 | 2 | `39bac22961848b51b3bdbac4d7db819a` (latents `bd098527`) | `450d04ef` (sections 4a, 8h) | 438.8 ms |
+
+Wan's md5 differs from the reference, and Task 5 is not the cause. Three control runs show it:
+
+| control run | device | clip md5 | latents md5 |
+|---|---|---|---|
+| this commit's parent `336b8785` (no Task 5 code) | 10 | `39bac229` | `bd098527` |
+| the H5 snapshot (`/home/ubuntu/fp8-bench/wan_h3/src-h5`), cached NEFFs | 10 | `450d04ef` | `bf61d6d7` |
+| the same snapshot copied to a new path, freshly compiled | 11 | `450d04ef` | `bf61d6d7` |
+
+The parent gives this commit's output bit for bit, while the H5 snapshot reproduces the reference
+both from the cache and from a fresh compile. The difference is commit `c13fda35` (#156,
+2026-11-11), which every commit on this branch descends from: Wan's DiT now takes the scheduler
+timestep in fp32, not bf16 (`backends/neuron/wan/transformer.py::get_example_inputs`,
+`models/wan/neuron_application.py` `timestep_dtype`). So `450d04ef` cannot be reached on this
+branch, and its Wan switch-unset reference is `39bac229`.
+
+At kernel level, the probe's `--impl cte` through the new `attention.py` (switch off) gives
+section 7's outputs bit for bit at `qwen_1024` and `wan_81f`.
+
+**(b) Switch set, kernel level.** Two arms ran on the probe's inputs:
+- `probe.py --impl routed`: Difflet's `attention()` itself with `DIFFLET_ATTN_QUANT=mxfp8`.
+- `probe.py --impl fork --qk-mx --fork-vector-exp`: the fork with `allow_vector_exp=True`, a new
+  option.
+
+Their outputs are bit-identical (int16 views) at `qwen_1024` (bounded) and `wan_81f` (unbounded),
+both in the accuracy processes and in the timed run 0 of each arm.
+
+**(c) QK-only with the VectorE exp against shipped attention_cte (BR32).** Section 11's method
+(`ktrio.sh`): per shape, the three arms ran on one device and CPU set in one window, three
+processes each, in the rotated order (cte, fork, routed), (fork, routed, cte), (routed, cte, fork).
+No compile of mine was running on NUMA node 1 during the window. J = max(2%, the cte spread).
+The rel L2 column is against the Task 1 mirror, flat / peaked (q and k x 2). The last column is
+section 11's QK-only with the ScalarE exp against the rebalanced cte.
+
+| shape | dev (CPUs) | calls | shipped cte ms (spread) | fork QK-only, VectorE exp | / cte | routed `attention()` | / cte | faster | rel L2 flat / peaked | section 11 |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `qwen_1024` | 3 (72-83,168-179) | 40 | 1.1792 (0.22%) | 1.2836 (0.55%) | 1.089 | 1.2811 (0.76%) | 1.086 | no | 2.08e-3 / 1.81e-3 | 1.118 / 1.083 |
+| `wan_81f` | 4 (84-95,180-191) | 20 | 63.751 (0.02%) | 84.016 (0.04%) | 1.318 | 84.005 (0.05%) | 1.318 | no | 2.95e-3 / 2.26e-3 | 63.08 / 51.97 |
+
+- With the exp on VectorE, QK-only is 9% slower than shipped cte at `qwen_1024` and 32% slower at
+  `wan_81f`. The routed op costs the same as the probe's fork arm.
+- Section 11's ScalarE-exp QK-only (63.08 ms) was on par with shipped cte at wan (63.75 ms here,
+  63.54 in section 7). VectorE already carries the MM1 evict and the `quantize_mx`; the exp there
+  adds about 21 ms.
+- The accuracy equals section 11's QK-only values.
+
+**(d) Switch set, model smoke** on device 9: Qwen-Image 1024x1024 tp4, `--quant mxfp8` with
+`DIFFLET_ATTN_QUANT=mxfp8`, 10 steps.
+- 60 compiled blocks, no fallbacks, `unwarmed_shapes=[]`.
+- Finite latents. The image shows the prompt's cat on a bench, in the same composition as the
+  linear-only arm at 10 steps. The two images are 28.5 dB apart; latents cosine 0.979.
+- The routed-call line printed once: `calls routed to the MXFP8 kernel by (s_q, s_k, bounded):
+  {(5120, 5120, True): 1}`. That is one Dynamo trace shared by the 60 identical blocks: the bounded
+  joint attention over 4,096 image and 1,024 text tokens.
+
+Outputs: `/mnt/nvme/difflet-mxattn/task5/`:
+- `identity/` holds (a) and its controls (`wan_base`, `wan_h5src`, `wan_h5copy`), each with
+  `runs.log` (`fuser`, `uptime`) and `md5.txt`.
+- `kernel/acc/` and `kernel/trio/` hold (b) and (c); `kernel/summary.json` has the bit checks,
+  timings and accuracies.
+- `smoke/{both,linear}/` holds (d).
+- The NEFF/HLO caches are NVMe copies (`cache_fp8`, `cache_video`, `cache_smoke`, `probe_cache`).
+- The tools are `identity.sh`, `kacc.sh`, `ktrio.sh`, `smoke.sh` and `summ.py`.

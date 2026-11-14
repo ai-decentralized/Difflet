@@ -38,6 +38,8 @@ def test_the_shape_table_has_the_seven_rows():
                                  ["--shape", "wan_81f", "--impl", "sdpa"],
                                  ["--shape", "wan_81f", "--impl", "cte", "--pv-mx"],
                                  ["--shape", "wan_81f", "--impl", "fork", "--cte-no-vector-exp"],
+                                 ["--shape", "wan_81f", "--impl", "cte", "--fork-vector-exp"],
+                                 ["--shape", "wan_81f", "--impl", "routed", "--qk-mx"],
                                  ["--shape", "qwen_1024", "--impl", "constmax"]])
 def test_the_cli_rejects_what_it_cannot_run(bad, tmp_path, capsys):
     with pytest.raises(SystemExit) as exc:
@@ -45,7 +47,7 @@ def test_the_cli_rejects_what_it_cannot_run(bad, tmp_path, capsys):
     assert exc.value.code == 2
     err = capsys.readouterr().err
     assert ("invalid choice" in err or "need --impl fork" in err or "needs --impl cte" in err
-            or "unbounded attention only" in err)
+            or "needs --impl fork" in err or "unbounded attention only" in err)
 
 
 @pytest.mark.parametrize("core, rc", [("13", 1), ("4", 0), ("31", 2), ("4,5", None), ("", None)])
@@ -198,6 +200,63 @@ def test_use_fork_smooths_k_before_the_kernel_and_the_padding_with_qk_mx(qk_mx, 
     assert k_bounded.shape == (2, 640, 128)  # padded to 128 after smoothing
     assert torch.equal(k_bounded[:, :600], expect[0]) and not k_bounded[:, 600:].any()
     assert kw_u["qk_mx"] is qk_mx and kw_u["pv_mx"] is True and kw_b["qk_mx"] is qk_mx
+
+
+def test_fork_vector_exp_reaches_the_kernel_and_only_then(monkeypatch):
+    """Ruling BR32: --fork-vector-exp calls the fork with allow_vector_exp=True (the exp on
+    VectorE, as shipped attention_cte); without it the call is the one 4a/4b timed (no kwarg, the
+    fork's ScalarE default)."""
+    pytest.importorskip("difflet.backends.neuron.ops_impl.mx_attention_kernel")
+    hop = pytest.importorskip("torch_neuronx.nki_hop")
+    import torch_neuronx
+
+    from difflet.backends.neuron.ops_impl import attention as attn
+    from difflet.backends.neuron.ops_impl import fp8_kernels  # noqa: F401  (imported before nki_op is faked)
+
+    calls = []
+
+    class FakeKernel:
+        def __getitem__(self, grid):
+            return lambda q, k, v, **kw: calls.append(kw) or q
+
+    monkeypatch.setattr(hop, "nki_op", lambda name, mutates_args: lambda f: f)
+    monkeypatch.setattr(torch_neuronx, "wrap_nki", lambda kernel: FakeKernel())
+    q = torch.zeros(1, 2, 256, 128, dtype=torch.bfloat16)
+    for vector_exp in (True, False):
+        for name in ("_FLASH_KERNEL", "_FLASH_BOUNDED_OP", "_flash_attention_bounded"):
+            monkeypatch.setattr(attn, name, getattr(attn, name))  # restored after the test
+        probe.use_fork(qk_mx=True, pv_mx=False, vector_exp=vector_exp)
+        attn._FLASH_KERNEL(q, q, q, is_causal=False, scale=0.5, training=False)
+    assert calls == [dict(scale=0.5, pv_mx=False, qk_mx=True, allow_vector_exp=True),
+                     dict(scale=0.5, pv_mx=False, qk_mx=True)]
+
+
+@pytest.mark.parametrize("impl", [["--impl", "routed"], ["--impl", "fork", "--qk-mx",
+                                                        "--fork-vector-exp"]])
+def test_main_scores_the_routed_op_and_the_vector_exp_fork_against_the_qk_mirror(
+        impl, tmp_path, monkeypatch):
+    """--impl routed is Difflet's attention with DIFFLET_ATTN_QUANT=mxfp8, QK-only: scored
+    against the QK-only mirror, as the fork with --qk-mx --fork-vector-exp is."""
+    pytest.importorskip("difflet.backends.neuron.ops_impl.mx_attention_kernel")
+    tiny = {"name": "tiny_u", **TINY["tiny_u"], "d": 128}
+    monkeypatch.setattr(probe, "load_shapes", lambda: {"tiny_u": dict(TINY["tiny_u"], d=128)})
+    q, k, v, bounds = probe.make_inputs(tiny)
+
+    def fake_worker(argv, log):
+        assert ("--fork-vector-exp" in argv) == ("fork" in impl)
+        if "--save-output" in argv:
+            out = torch.stack([probe.reference(tiny, q, k, v, bounds, h, qk_mx=True)
+                               for h in range(tiny["bh"])])
+            torch.save(out, probe.output_path(Path(argv[argv.index("--out") + 1])))
+        Path(argv[argv.index("--worker") + 1]).write_text(
+            json.dumps({"ms": 1.0, "first_call_s": 1.0, "fuser": {}}))
+
+    monkeypatch.setattr(probe, "run_worker", fake_worker)
+    out = tmp_path / "r.json"
+    assert probe.main(["--shape", "tiny_u", *impl, "--runs", "1", "--out", str(out)]) == 0
+    result = json.loads(out.read_text())
+    assert result["reference"] == "mirror" and result["qk_mx"] and not result["pv_mx"]
+    assert result["rel_l2"] == 0.0 and result["fork_vector_exp"] is ("fork" in impl)
 
 
 def test_main_scores_a_fork_run_against_the_mirror(tmp_path, monkeypatch):
