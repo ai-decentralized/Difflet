@@ -488,9 +488,10 @@ unchanged. So on every shape, the
 "bf16" baseline that MXFP8 must beat in G2/G3 is this rebalanced kernel (rebalanced medians above,
 J = 2%), and the bf16 speedup itself is a separate finding. Shipped Difflet does not use it yet:
 the unbounded path would need the direct kernel call above, because torch-neuronx's SDPA wrapper
-cannot pass the knob. Note that the fork (`mx_attention_kernel.py`) refuses `allow_vector_exp`
-(pruned in Task 3 Step 6) and always runs the VectorE exp on trn3 B1, so a fork variant compared
-against this baseline still carries shipped's VectorE bottleneck.
+cannot pass the knob. The fork (`mx_attention_kernel.py`) refused `allow_vector_exp` when this
+was measured (pruned in Task 3 Step 6, so it ran the VectorE exp on trn3 B1); since Task 4a
+(section 10, commit `29570ed3`) it takes the knob again, default False, and runs the exp on
+ScalarE like this baseline.
 
 Outputs: `/mnt/nvme/difflet-mxattn/probe/rebalance/` (`scalar_exp/` and `shipped/`: per shape the
 probe JSON, `out.pt`, per-process `run<i>.{json,log}` and `runs.log` with `uptime` and `fuser` at
@@ -681,3 +682,277 @@ pairs, `runs.log` with `uptime` and `fuser` at every process's start and end, `a
 compile artifacts, `cap/<variant>/` captures, `cap/tensore.json`, `bf16_one.py`; the scratch tools
 `queue.sh`, `pair.sh`, `identity.py`, `g1.py`, `rowtile/{birsim_all,device_all,capture_all}.sh`,
 `rowtile/tensore.py`, `sim/count_exp.py`).
+
+## 11. MXFP8 attention: gate G2, QK^T on `nc_matmul_mx` with row tiling
+
+Plan `docs/plans/2026-11-13-mxfp8-attention.md`, Task 4b (brief Steps 2-5; rulings BR4, BR11, BR13,
+BR15, BR19, BR20, BR21; 2026-11-14).
+
+**The kernel** (commit `3d41b154`). `mx_attention_fwd(..., qk_mx=True)` puts MM1 on `nc_matmul_mx`,
+with or without `pv_mx` (QK-only and QK+PV). Everything sits behind `ac.qk_mx`, and both flags off
+stay attention_cte (bit for bit, below).
+
+- **Q**, quantized per section and query group (`_mx_load_q`). One DMA reads the group's 128 rows
+  four times into a `[128, 4 x 128]` bf16 tile, queries on partitions. Two stride-2 TensorE
+  transposes of its fp32 view lay the four copies out in the four row quadrants: partition `32 t + g`,
+  element `r` = query `r`'s head-dim indices `4g .. 4g + 3`, the `qk_perm` membership. A ScalarE copy
+  takes them out of PSUM, and one `quantize_mx` writes the x4 data and scales. This is nkilib's
+  `swizzle_quantize_mx` on explicit buffers, with all four quadrants in the same two transposes.
+  A partial last group is zero-padded, so the stationary always has 128 columns (more than 64, the
+  row-tiling rule). The kernel therefore needs no `S_q % 128` assertion, and wan_81f runs at
+  32,760 queries on both arms. The PSUM test checks the `(32, 128)` stationary of every MM1 matmul.
+- **K**, quantized once per section and 2048-key large tile (`_mx_load_k`), shared by every query
+  group. Per 128-key chunk, one DMA brings rows `128 c ..` of the large tile's four 512-key tiles side
+  by side, the same two transposes put tile t in quadrant t, then a copy and a `quantize_mx` into
+  columns `128 c ..`. Keys past the end are zero.
+- **MM1**, per (group, large tile): four `nc_matmul_mx` with `tile_position (32 t, 0)` and
+  `tile_size (32, 128)`. The stationary is the group's Q in quadrant t (128 columns), the moving
+  operand is tile t's K, and both scales sit at partition `32 t` (four key tiles share the PE array,
+  ruling BR21). The scores stay fp32 in the large tile's four MM1 PSUM banks, and the evict
+  (VectorE scale + row max) is unchanged.
+- **PSUM.** Q's and K's transposes use bank 7, or bank 6 with `pv_mx` (P's transposes hold bank 7).
+  MM1 then keeps five banks (0, 1, 2, 3, 5), and any four consecutive score tiles still land in
+  distinct banks.
+- **SBUF.** K's and Q's bf16 buffers give way to the MX ones. On all six shapes and every flag set,
+  `exp_sb` keeps its two stages (checked at trace time, `4b/sim/sbuf_stages.json`).
+- **Refused by neuronx-cc.** Replicating Q inside the transpose with a step-0 access pattern fails
+  the BIR verifier: "RHS AP can only have one free dimension" (`NCC_INLA001`); the Python simulator
+  accepts it (`4b/sim/q_step0/`). So the four copies come from the DMA, as four reads of the rows.
+  A GpSimd copy of quadrant 0's quantized bytes to quadrants 1-3 compiles and is exact in BIRSim
+  (`4b/sim/q_copy/`). It was not used, because it saves DMA only, and DMA does not bind (below).
+- **K smoothing, on the torch side.** `smooth_keys` (`difflet/quant/mx_attention.py`) takes the
+  mean over the keys in fp32 and rounds once. The probe's `use_fork(qk_mx=True)` applies it inside
+  the compiled region. On the unbounded path that is right before the kernel; on the bounded path
+  it comes before `_flash_attention_bounded` pads K with zeros, so the mean is over the call's real
+  keys. That is where Task 5's op will do it. On the device, smoothing matches the CPU's (at flux, 1
+  of 3.5 M elements differs, by 7e-9). Without smoothing the flux rel L2 is unchanged (2.06e-3).
+  Its cost at flux is 32 µs of a 0.895 ms span (captures with and without it).
+- **The quantizers' VectorE time** (`QUANTIZE_MX`, from the captures below). At wan_81f: 1.45 ms of
+  46.2 ms VectorE busy, 10,880 instructions (Q 10,240, one per section and group; K 640, four per
+  section and large tile). At flux_1024: 0.046 ms of 0.63 ms. The rest of the loaders' cost at wan:
+  TensorE transposes 2.84 + 1.76 ms (`MATMUL` + `LDWEIGHTS`), ScalarE copies 1.84 ms, and Q's DMA
+  5.09 ms (10,240 transfers of 128 KB).
+
+**Membership on MM1's real loaders**, checked on device 10 (core 40, CPUs 16-23,112-119, `fuser`
+idle) before any rel L2 was read. `scripts/mx_attention/membership.py` now runs `_mx_load_q` and
+`_mx_load_k` themselves: one query group (`q_mm1`), 100 valid rows (`q_mm1_tail`), one large tile
+(`k_mm1`), and 1,500 valid keys (`k_mm1_tail`: tiles of 512, 512, 476 and 0 keys). Each row
+quadrant, the tile one `nc_matmul_mx` reads, is compared with `difflet.quant.mx.quantize_mx` under
+`qk_perm`. The input pairs +0, -0 and bf16 subnormals with normal values at odd head-dim indices,
+so the fp32 words the loaders transpose and copy include subnormal ones.
+
+| operand | quadrants | fp8 mismatches | scale mismatches (all in all-zero blocks) | under `swizzle_perm`: scale mismatches |
+|---|---|---|---|---|
+| `q_mm1` | 4 | 0 of 16,384 each | 0 | 318 each |
+| `q_mm1_tail` | 4 | 0 | 112 each (112) | 367 each |
+| `k_mm1` | 4 | 0 of 65,536 each | 0 | 1,220-1,280 |
+| `k_mm1_tail` | 4 | 0 | 0, 0, 144 (144), 2,048 (2,048) | 1,235-2,048 |
+| P, V, Q (3b's loaders, rerun) | - | 0 | 0 | 237-1,110 |
+
+The membership holds in every quadrant, and the transposes and the ScalarE copy pass subnormal fp32
+words bit for bit. The only difference is the scale of an all-zero block. The device writes byte 1
+(2^-126) there, while the CPU quantizer (and the simulator) writes 0 (2^-127). The block's data bytes
+are zero, so the scale multiplies nothing. `compare()` now counts these mismatches apart
+(`zero_block_scale_mismatches`).
+
+**Accuracy against the Task 1 mirror.** The mirror is `mx_attention_reference` with the arm's
+flags, the kernel's `qk_perm` / `pv_perm`, and K smoothed as the call path smooths it. Inputs are
+flat (q, k, v ~ N(0, 1)) and peaked (q and k x 2, ruling BR11), one process each (`4b/acc/`). The
+threshold is Task 3's, 2.6e-3 on the flat case, and it was not widened.
+
+| shape | QK-only flat (max head) | QK-only peaked (max head) | QK+PV flat (max head) | QK+PV peaked (max head) | below 2.6e-3, flat: QK-only / QK+PV |
+|---|---|---|---|---|---|
+| `flux_1024` | 2.06e-03 (2.08e-03) | 1.79e-03 (1.82e-03) | 5.24e-03 (5.35e-03) | 4.44e-03 (4.78e-03) | yes / no |
+| `qwen_1024` | 2.08e-03 (2.13e-03) | 1.81e-03 (1.82e-03) | 5.25e-03 (5.40e-03) | 4.36e-03 (4.60e-03) | yes / no |
+| `ltx2_video` | 2.06e-03 (2.09e-03) | 1.81e-03 (1.83e-03) | 5.24e-03 (5.34e-03) | 4.50e-03 (4.91e-03) | yes / no |
+| `wan_81f` | 2.95e-03 (3.07e-03) | 2.26e-03 (2.28e-03) | 6.01e-03 (6.28e-03) | 4.22e-03 (4.36e-03) | no / no |
+| `hv15_121f` | 3.51e-03 (3.54e-03) | 2.57e-03 (2.58e-03) | 6.52e-03 (6.61e-03) | 4.35e-03 (4.43e-03) | no / no |
+| `hv1_L` | 3.75e-03 (3.88e-03) | 2.64e-03 (2.65e-03) | 6.80e-03 (7.10e-03) | 4.38e-03 (4.45e-03) | no / no |
+
+QK-only is below the threshold at the three short shapes (2.06-2.08e-3 flat, max head <= 2.13e-3)
+and misses it at the three long ones (wan_81f 2.95e-3, hv15_121f 3.51e-3, hv1_L 3.75e-3). QK+PV
+misses it on all six (5.24-6.80e-3). Every peaked value is lower than its flat one. Over query
+groups and heads the errors are uniform, with no tile pattern: flux QK+PV groups 4.6-6.5e-3, hv1_L
+QK-only groups 3.6-3.9e-3, heads 3.65-3.88e-3.
+
+**The misses are the device's MX matmul, not the kernel (in situ).** A debug copy of the kernel
+(`4b/tree_dbg/`, made by `4b/diag/make_tree_dbg.py`, not committed) also returns, for head 0's
+query group 0:
+- Q's and K's x4 bytes and scales exactly as MM1 read them (large tile 0 of section 0);
+- MM1's evicted fp32 scores, every section.
+
+From those, `4b/diag/in_situ.py` measures three things:
+- the bytes against the CPU quantizer;
+- the scores against the exact (fp64) product of the dequantized device bytes, which is MM1's
+  arithmetic alone;
+- group 0's output against the mirror's own P / PV formation (its section loop), fed (a) the
+  device's scores and (b) the exact scores.
+
+Two heads (one per core), flat unless marked:
+
+| run | Q/K bytes vs CPU quantizer (non-zero blocks) | MM1 scores vs exact product of the device bytes | group 0 output: device vs P from the device's scores (downstream of MM1) | P from the device's scores vs P from exact scores (MM1's share) | device vs P from exact scores (total) |
+|---|---|---|---|---|---|
+| flux-size QK-only, flat (S 4608, one section) | 0 mismatches | 1.98e-04 | 3.51e-04 | 2.06e-03 | 2.06e-03 |
+| flux-size QK-only, peaked | 0 mismatches | 1.98e-04 | 1.97e-04 | 1.68e-03 | 1.69e-03 |
+| flux-size QK+PV, flat | 0 mismatches | 1.98e-04 | 1.10e-03 | 4.85e-03 | 4.86e-03 |
+| flux-size QK+PV, peaked | 0 mismatches | 1.98e-04 | 4.08e-04 | 4.11e-03 | 4.11e-03 |
+| wan-size QK-only, flat (S 32760, four sections) | 0 mismatches | 1.98e-04 | 6.87e-04 | 2.98e-03 | 2.98e-03 |
+| hv1_L-size QK-only, flat, bounded (S 67584, nine sections) | 0 mismatches | 1.98e-04 | 6.13e-04 | 3.71e-03 | 3.70e-03 |
+
+In every run:
+- **The bytes are exact.** Every quadrant equals the CPU quantizer, apart from the inert scale of
+  all-zero blocks.
+- **MM1's arithmetic is 1.98e-4** from the exact product of the bytes it read. 4a's micro-kernel
+  gives the same, 1.99e-4, also at a single rep (`4b/rowtile/`).
+- **Downstream of MM1 the kernel is at its path's floor.** QK-only is 3.5e-4 at one section (the
+  bf16 kernel against a bf16-P mirror: 3.4e-4) and 6.9e-4 at wan's four sections. QK+PV is 1.1e-3,
+  which is pv_mx's own figure in section 10.
+- **The whole gap to the mirror is what the 2e-4 score error does to P's rounding.** With bf16 P
+  (QK-only), slightly different scores flip bf16 roundings: 2.1e-3 at one section, 3.0e-3 at wan.
+  With fp8 P (QK+PV) the steps are ~16x coarser: 4.9e-3.
+
+So no miss is a kernel bug. Each is the device's MX arithmetic, which neither the CPU mirror nor
+BIRSim models (BIRSim gives 3e-8 here). The rule does not exempt it: by the plan's definition a
+device output that misses the threshold against the mirror is "Broken". The misses are reported
+as found, with the threshold unchanged. This also settles 4a's open attribution point: from the
+device's own bytes, the 2e-4 is the matmul, not `quantize_mx`.
+
+**G2, speed** (ruling BR21: on every shape QK-only is compared with the rebalanced bf16 kernel, and
+QK+PV is reported beside it). Each shape's three arms ran on one device and CPU set in one window:
+rebalanced cte (`--impl cte --cte-no-vector-exp`, the BR19 bf16), QK-only (`--impl fork --qk-mx`)
+and QK+PV (`--qk-mx --pv-mx`). There were three processes per arm, and the order rotated per round:
+(cte, qk, qkpv), (qk, qkpv, cte), (qkpv, cte, qk) (`4b/trio.sh`). Each process is `probe.py`'s
+worker (cache hit, one warm call, then the timed calls and one sync), from the frozen tree, with
+`fuser` and `uptime` logged at every process's start and end. flux_1024 and qwen_1024 ran 40 calls
+per process, the rest 20. The long shapes were timed as soon as their arms were compiled; the
+short ones only once no compile of mine was running on their NUMA node (node 0). Rule (plan, G2):
+faster means the median is below the rebalanced cte's by more than J = max(2%, cte spread). A shape
+keeps QK+PV only if QK+PV itself beats the rebalanced cte by more than J (BR21).
+
+| shape | path | device (CPUs) | calls | rebalanced cte ms (spread) | QK-only ms (spread) | QK-only / cte | QK+PV ms (spread) | QK+PV / cte | J | QK-only faster | QK+PV faster | variant |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `flux_1024` | unbounded | 9 (8-15,104-111) | 40 | 0.813 (0.60%) | 0.9129 (1.81%) | 1.123 | 1.096 (1.30%) | 1.348 | 2% | **no** | no | none |
+| `qwen_1024` | bounded | 9 (8-15,104-111) | 40 | 1.083 (1.63%) | 1.118 (0.30%) | 1.032 | 1.265 (0.97%) | 1.168 | 2% | **no** | no | none |
+| `ltx2_video` | unbounded | 9 (8-15,104-111) | 20 | 1.756 (0.93%) | 1.884 (0.54%) | 1.073 | 2.37 (0.47%) | 1.350 | 2% | **no** | no | none |
+| `wan_81f` | unbounded | 5 (80-87,176-183) | 20 | 51.97 (0.03%) | 63.08 (0.07%) | 1.214 | 77.31 (0.02%) | 1.487 | 2% | **no** | no | none |
+| `hv15_121f` | bounded | 3 (64-71,160-167) | 20 | 112.4 (0.02%) | 134.1 (0.02%) | 1.193 | 169.4 (0.01%) | 1.507 | 2% | **no** | no | none |
+| `hv1_L` | bounded | 4 (72-79,168-175) | 20 | 145.4 (0.01%) | 172.8 (0.18%) | 1.188 | 223.8 (0.01%) | 1.539 | 2% | **no** | no | none |
+
+QK-only is slower than the rebalanced bf16 kernel on every shape (ratios 1.032-1.214), and QK+PV
+more so (1.168-1.539). The timed outputs are bit-identical to the accuracy runs' outputs, and each
+cte arm's output to Task 4-pre's rebalanced output.
+
+**Why QK loses: the engine split at wan_81f**, one call. The NEFFs were captured with 3b's
+`capture.sh` on device 7, CPUs 88-95,184-191: the QK-only one, and Task 4-pre's rebalanced cte NEFF
+again on the same device and CPUs. A first QK-only capture on device 8 (CPUs 0-7,96-103) is the
+cross-check. Busy is the union of instruction intervals per physical core over
+the two cores (`engines.py`). The throttle columns come from neuron-explorer's summary: the share of
+the span the PE ran under its 50% utilization limit, and the average limit.
+
+| arm | span ms | TensorE | VectorE | ScalarE | DMA instr | P-transpose DMA queue | PE under its 50% limit (share of span) | average PE limit | TensorE active |
+|---|---|---|---|---|---|---|---|---|---|
+| rebalanced cte | 51.88 | 45.27 | 42.63 | 39.57 | 7.19 | 43.84 | 7.4% | 96.3% | 97.9% |
+| QK-only | 63.03 | 59.75 | 46.22 | 41.28 | 12.60 | 45.52 | 44.6% | 77.2% | 99.1% |
+| QK-only, device 8 (cross-check) | 63.24 | 59.83 | 46.22 | 41.25 | 12.61 | - | 44.9% | 77.1% | 99.1% |
+| 4a's pv_mx (section 10, device 11) | 74.95 | 55.22 | 58.29 | 59.65 | 6.59 | unused | 5.2% | 97.4% | 92.2% |
+
+Per phase, ms (instructions), from `nki_source_location` (`4b/phases4b.py`, 3b's `phases.py` with
+the MM1 loaders named):
+
+| row | rebalanced cte | QK-only |
+|---|---|---|
+| MM1, TensorE | `MATMUL` 26.92 (163,840) + `LDWEIGHTS` 4.50 (96,922) | `MATMUL_MX` 30.79 (163,840) + `LDWEIGHTS_MX` 8.27 (148,172) |
+| MM1 evict, VectorE `TENSOR_SCALAR_CACHE_REDUCE` | 39.44 (163,840) | 41.44 (163,838) |
+| exp, ScalarE `ACTIVATE` | 38.59 (163,818) | 38.90 (163,840) |
+| MM2 bf16, TensorE `MATMUL` + `LDWEIGHTS` | 28.74 (655,243) + 22.13 | 32.22 (655,360) + 22.89 |
+| Q / K transposes, TensorE `MATMUL` + `LDWEIGHTS` | - | 2.85 (21,760) + 1.76 |
+| Q / K PSUM copies, ScalarE `COPY` | - | 1.84 (10,880) |
+| Q / K `QUANTIZE_MX`, VectorE | - | 1.45 (10,878) |
+| Q's DMA, four reads per group (`DMA_DIRECT2D`) | (Q by DMA transpose, in the P-transpose queue) | 5.08 (10,240) |
+| copy-mode DMA, all queues | 6.37 | 10.79 |
+
+Three things cancel MX's TensorE saving on MM1, and then exceed it:
+
+1. **The four quadrant matmuls rarely run together inside the kernel.** Measured from the trace
+   (`4b/mx_overlap.py`), their concurrency is 1.42 at wan and 2.2 at flux, against 5.9 in 4a's
+   micro-kernel. One quadrant matmul takes 482 ns (median), longer than a full bf16 MM1 matmul (378
+   ns, concurrency 1.18): its 512 moving columns set its time, not its 32 rows. So a large tile's
+   MM1 costs 1,505 ns of TensorE (union), against 1,314 ns in bf16. The cause is PSUM: a large
+   tile's four score tiles need four free banks at once, and with six MM1 banks rotating (five with
+   `pv_mx`), the next large tile's matmuls wait for VectorE's evicts, 506 ns each. 4a's 0.32x came
+   from four matmuls issued back to back into empty banks.
+2. **Power throttling.** The PE runs under its 50% utilization limit for 45% of the QK-only span
+   (average limit 77%). The rebalanced cte does so for 7% (96%), and 4a's pv_mx for 5% (97%). At flux
+   the figures are 34% for QK-only against 18% for cte. Everything on the PE slows: bf16 MM2 alone
+   goes from 28.7 to 32.3 ms of `MATMUL`.
+3. **The layout's own cost.** Per (section, group) and (section, large tile): TensorE transposes
+   4.6 ms, ScalarE copies 1.8 ms, VectorE `QUANTIZE_MX` 1.45 ms, and Q's DMA 5.1 ms.
+
+TensorE becomes the binding engine (59.7 of 63.0 ms, 95% of the span), where the rebalanced cte was
+balanced (TensorE 87%, P-transpose queue 84%, VectorE 82%; section 9). At the short shapes, MM1 is
+a smaller share and VectorE, ScalarE and TensorE all sit near the span, so the added work and the
+throttle cost 3-11%.
+
+**Decision, G2 (plan rule as written, bf16 = the rebalanced cte, BR19 / BR21).**
+QK-only MXFP8 is faster on no shape, either path, so G2 fails on all six shapes. QK+PV beats the
+rebalanced bf16 nowhere either, so no shape keeps it (BR21). No row passes the accuracy threshold
+for QK+PV, and the long rows do not pass it for QK-only. The device's MX matmul explains every miss
+(above).
+
+**Variant per model.** `ATTN_QUANT_MODELS` does not exist yet (Task 7 creates it in
+`difflet/quant/targets.py`), so the assignment is recorded here, as the plan's G2 allows:
+
+| model | shape | variant |
+|---|---|---|
+| FLUX | `flux_1024` | none |
+| Qwen-Image | `qwen_1024` | none |
+| LTX-2 (video `attn1`) | `ltx2_video` | none |
+| Wan (`attn1`) | `wan_81f` | none |
+| HunyuanVideo-1.5 | `hv15_121f` | none |
+| HunyuanVideo | `hv1_L` | none |
+
+Under the plan, a model with no winning variant gets no quantized-attention arm in Task 6. The plan
+also says "QK code is removed only if it wins on no shape". It wins on no shape, but the code is
+kept here, and the controller decides what follows (the brief: "If QK-only wins nowhere, still
+finish Step 5 and report it plainly").
+
+**Invariants** (both on the device, one process each, `4b/inv/`, `inv.json`). The fork with both
+flags off is bit-identical to Task 4-pre's rebalanced attention_cte. With pv_mx alone, it is
+bit-identical to 4a's pv_mx outputs (`4a/g1/fork/`).
+
+| shape | flags off == rebalanced cte | pv_mx only == 4a's pv_mx | devices (off, pv) |
+|---|---|---|---|
+| `flux_1024` | identical | identical | 2, 2 |
+| `qwen_1024` | identical | identical | 2, 2 |
+| `ltx2_video` | identical | identical | 2, 2 |
+| `wan_81f` | identical | identical | 2, 2 |
+| `hv15_121f` | identical | identical | 8, 2 |
+| `hv1_L` | identical | identical | 8, 5 |
+
+**Carried over from 4a.** Section 9's sentence that the fork refuses `allow_vector_exp` now says it
+did at the time and takes the knob since 4a. `row_tiling.py`'s `check_psum` re-implemented the
+fork's bank formula, so it is deleted together with its test. The kernel test
+`test_qk_mx_four_key_tiles_share_the_pe_array_in_distinct_psum_banks` now checks the fork's real
+MM1 allocation in a simulated run. The script's remaining nki test already had `importorskip`.
+
+Outputs: `/mnt/nvme/difflet-mxattn/probe/4b/`:
+- `tree1/` is the frozen tree the probes ran from.
+- `membership/` holds the device membership (`tile.json`, `tile.pt`, `zero_blocks.py`).
+- `first/` and `acc/` hold the accuracy runs (flat and peaked, one process each; the first of them
+  were the cold compiles), with `acc.json`.
+- `inv/` holds the invariants and `inv.json`.
+- `g2/` holds the trios: per-process JSON and logs, and `runs.log` with `uptime` and `fuser` at
+  every process's start and end, plus `g2.json`.
+- `cap/` holds the captures: `wan_qk_dev7` and `wan_cte` (device 7), `wan_qk` (device 8), and
+  `flux_qk`, `flux_qk_nosmooth`, `flux_cte` (device 2), each with `engines.json` and `throttle.json`,
+  plus the phase splits and the DMA queue splits (`*.dmaq.json`).
+- `diag/` holds the in-situ attribution (`make_tree_dbg.py`, `in_situ.py`, `in_situ2_*.json`), the
+  smoothing check (`smooth_device.json`), the device MX score dumps (`mx_scores.pt`,
+  `mx_error_model*.py`) and `err_groups.py`.
+- `rowtile/` holds the micro-kernel at one rep.
+- `sim/` holds the simulator / BIRSim checks (`qk_rel.py`, `sbuf_stages.json`, `q_step0/`,
+  `q_copy/`, `floor_bf16_mirror.py`).
+- The scratch tools are `dev.sh`, `queue.sh`, `queue2.sh`, `trio.sh`, the schedulers
+  (`trio_sched*.sh`, `small_dev9.sh`, `inv_tail*.sh`, `cap_dev*.sh`), `g2.py`, `acc_table.py`,
+  `inv_check.py`, `throttle.py`, `mx_overlap.py`, `phases4b.py`, `assemble_section11.py` and
+  `section11_*.{md,py}`.
