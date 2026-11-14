@@ -341,3 +341,19 @@ decisions (ledger rulings BR28, BR31, BR32):
 - Not part of this plan: attention_cte with the exp on ScalarE (`allow_vector_exp=False`, 7.5-21%
   faster bf16 attention, section 9) is a bf16 change; it is done later on `main` with its own
   benchmark. nkilib `attention_const_max` (section 12) is a separate, undecided bf16 option.
+
+### Addendum 2, 2026-11-14 (user): attention quantization as a CLI option, never a default
+
+The user's decision replaces the QK-only scope above. Attention quantization is implemented for
+every variant and offered only on request:
+
+- `--attn-quant {qk,pv,qk+pv}` on every command that takes `--quant`; absent means off (bf16
+  attention, unchanged). It is independent of `--quant`: either, both or neither may be given.
+  Internally `DIFFLET_ATTN_QUANT` is `off`, `qk`, `pv` or `qk+pv` (the flag overrides the
+  environment; subprocesses inherit it, as they inherit `--quant`). `qk` puts QK^T on
+  `nc_matmul_mx`, `pv` puts PV on it, `qk+pv` both; the exp stays on VectorE as in bf16.
+- Compile and stage cache keys tell `off` and each variant apart.
+- Task 7 is dropped: no model gets attention quantization by default. G3 is computed and
+  reported, not applied.
+- Task 6 runs as written for all its models after the option lands; the variant its `both` arm
+  uses is chosen by the user (no variant won G2).
