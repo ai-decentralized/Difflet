@@ -7,7 +7,7 @@ import sys
 
 from difflet import envs
 from difflet.cli.quant import add_quant_flags as _add_quant_flags
-from difflet.cli.quant import validate_quant
+from difflet.cli.quant import export_attn_quant, validate_quant
 from difflet.pipeline.parallel_config import CP_MODES
 
 VALID_MODELS = {
@@ -1364,6 +1364,7 @@ def _torchrun_backend_selected() -> bool:
 def main(argv: list[str] | None = None) -> None:
     parser = _build_parser()
     args = parser.parse_args(argv)
+    export_attn_quant(args)  # before anything imports a backend (ATTN_QUANT is read at import)
 
     if args.command == "clean":
         from difflet.cli.clean import run as run_clean

@@ -15,8 +15,9 @@ variant), scored against fp32 attention with both flags off and against the Task
 (``mx_attention_reference`` on the bf16 inputs, the kernel's block membership) otherwise;
 ``--fork-vector-exp`` runs the fork's exp on the Vector Engine, as shipped attention_cte does
 (``allow_vector_exp=True``; the fork's default is the Scalar Engine). ``--impl routed`` is
-``ops_impl.attention.attention`` itself under ``DIFFLET_ATTN_QUANT=mxfp8`` (plan Task 5: the op
-the models call, QK^T MXFP8 with the VectorE exp), scored against the QK-only mirror.
+``ops_impl.attention.attention`` itself under ``DIFFLET_ATTN_QUANT`` set to the variant its
+``--qk-mx`` / ``--pv-mx`` name (``qk``, ``pv``, ``qk+pv``; neither: ``qk``; plan Tasks 5 and 5b:
+the op the models call, with the VectorE exp), scored against that variant's mirror.
 ``--cte-no-vector-exp`` is ``--impl cte`` with attention_cte's ``allow_vector_exp=False`` (the
 exp on ScalarE, not VectorE), scored against fp32 attention (plan Task 4-pre, ruling BR18).
 ``--impl constmax`` (unbounded shapes only) is the unbounded call on nkilib's experimental
@@ -226,9 +227,18 @@ def use_const_max(softmax_max: float) -> None:
                k_layout=AttentionLayout.SEQ_MAJOR)
 
 
+def attn_switch(args) -> str:
+    """The worker's ``DIFFLET_ATTN_QUANT``: the routed arm's variant (``--qk-mx`` / ``--pv-mx``,
+    neither: ``qk``), ``off`` for every other arm."""
+    if args.impl != "routed":
+        return "off"
+    qk_mx = args.qk_mx or not args.pv_mx
+    return {(True, False): "qk", (False, True): "pv", (True, True): "qk+pv"}[(qk_mx, args.pv_mx)]
+
+
 def worker(args, row: dict) -> None:
     """Device side: compile, save the first output if asked, time CALLS calls with one sync."""
-    switch = "mxfp8" if args.impl == "routed" else "off"
+    switch = attn_switch(args)
     os.environ["DIFFLET_ATTN_QUANT"] = switch  # read once, at ops_impl.attention's import
     os.environ.setdefault("DIFFLET_COMPILE_CACHE", "/mnt/nvme/difflet-mxattn/probe/cache")
     # every kernel input is a call argument, so the NKI trace cache is safe for nkilib's kernel
@@ -297,8 +307,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--worker", type=Path, help=argparse.SUPPRESS)
     p.add_argument("--save-output", action="store_true", help=argparse.SUPPRESS)
     args = p.parse_args(argv)
-    if (args.qk_mx or args.pv_mx) and args.impl != "fork":
-        p.error("--qk-mx and --pv-mx need --impl fork")
+    if (args.qk_mx or args.pv_mx) and args.impl not in ("fork", "routed"):
+        p.error("--qk-mx and --pv-mx need --impl fork or routed")
     if args.cte_no_vector_exp and args.impl != "cte":
         p.error("--cte-no-vector-exp needs --impl cte")
     if args.fork_vector_exp and args.impl != "fork":
@@ -323,7 +333,8 @@ def main(argv: list[str] | None = None) -> int:
     torch.set_num_threads(len(os.sched_getaffinity(0)))
     q, k, v, bounds = make_inputs(row, args.peak)
     device = torch.load(output_path(args.out)).float()
-    flags = dict(qk_mx=args.qk_mx or args.impl == "routed", pv_mx=args.pv_mx)  # routed: QK-only
+    # routed without a flag: qk (Task 5's arm)
+    flags = dict(qk_mx=args.qk_mx or (args.impl == "routed" and not args.pv_mx), pv_mx=args.pv_mx)
     overall, heads = compare(device, lambda h: reference(row, q, k, v, bounds, h, **flags),
                              row["bh"])
     ms = [r["ms"] for r in runs]

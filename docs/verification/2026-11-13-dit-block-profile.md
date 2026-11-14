@@ -1191,3 +1191,106 @@ Outputs: `/mnt/nvme/difflet-mxattn/task5/`:
 - `smoke/{both,linear}/` holds (d).
 - The NEFF/HLO caches are NVMe copies (`cache_fp8`, `cache_video`, `cache_smoke`, `probe_cache`).
 - The tools are `identity.sh`, `kacc.sh`, `ktrio.sh`, `smoke.sh` and `summ.py`.
+
+## 14. MXFP8 attention as an opt-in `--attn-quant {qk,pv,qk+pv}` (Task 5b)
+
+Ruling BR34 (user, 2026-11-14). `compile`, `generate` and `run` (and the stage line) take
+`--attn-quant {qk,pv,qk+pv}`. Absent, attention stays bf16 and nothing changes. The option is
+independent of `--quant`: either, both or neither may be given.
+
+How it works:
+- The flag is exported as `DIFFLET_ATTN_QUANT` right after parsing, by `cli/main.py` and
+  `cli/stage.py`, before anything imports a backend. It overrides an exported value; without the
+  flag, an exported value is kept.
+- It is forwarded to stage lines (`quant_cli_args`) and DP workers (`worker_cli_args`).
+- `ops_impl/attention.py` reads the variable once, at import. `off`, `qk`, `pv` and `qk+pv` are
+  its values; anything else raises, and `mxfp8` raises with a note that it is no longer a value.
+- The variant sets the op's `(qk_mx, pv_mx)`: `qk` is (T, F), `pv` is (F, T) and `qk+pv` is (T, T).
+  The exp stays on VectorE (BR32), and the routing set is section 13's.
+- K is smoothed only when QK^T is MXFP8, as the Task 1 mirror and the probe's fork arm do it.
+- The DiT stage keys gain `attn_quant: <variant>` through `quant_cache_fields`, so off, qk, pv
+  and qk+pv are four artifacts, and off keeps today's key.
+
+The device runs used a frozen copy of the commit's files (`/mnt/nvme/difflet-mxattn/task5b/tree`,
+`attention.py` `3ec9f730`, kernel `6a9378fd` as in Task 5). Every device was idle by `fuser`
+before each process.
+
+**(a) Off** (no flag, `DIFFLET_ATTN_QUANT` unset), with section 13's commands (tp4, 50 steps,
+seed 42).
+
+| model | device | output md5 | latents md5 | reference | step median |
+|---|---|---|---|---|---|
+| Qwen-Image 1024x1024 `--quant mxfp8` | 1 | `7737239be780a7877cd8b2ebe32bfb2f` | `a170a7c1` | same (sections 0, 13) | 238.9 ms |
+| Wan 2.1 bf16 480x832x9 | 2 | `39bac22961848b51b3bdbac4d7db819a` | `bd098527` | same (section 13, BR33) | 438.2 ms |
+
+Neither log has a routed-call line.
+
+**(b) Per variant, kernel level.** Two arms ran on the probe's inputs, one process each:
+- `probe.py --impl routed` (Difflet's `attention()` under `DIFFLET_ATTN_QUANT=<variant>`);
+- `--impl fork` with the same `--qk-mx` / `--pv-mx` and `--fork-vector-exp`.
+
+Both arms are scored against the variant's Task 1 mirror.
+
+| shape | variant | dev | routed vs fork, int16 | rel L2 vs mirror (both arms) |
+|---|---|---|---|---|
+| `qwen_1024` (bounded) | qk | 3 | bit-identical | 2.078e-3 |
+| `qwen_1024` | pv | 4 | bit-identical | 1.313e-3 |
+| `qwen_1024` | qk+pv | 5 | bit-identical | 5.247e-3 |
+| `wan_81f` (unbounded, 32,760 keys) | qk | 7 | bit-identical | 2.954e-3 |
+| `wan_81f` | pv | 3 | bit-identical | 1.929e-3 |
+| `wan_81f` | qk+pv | 4 | bit-identical | 6.009e-3 |
+
+- Every pair has 0 differing elements and no non-finite outputs.
+- The qk rows equal section 13's QK-only accuracy.
+- The `wan_81f` pv and qk+pv pairs ran after a pause, from the same frozen tree (verified equal to
+  the sources). Their first attempts on devices 13 and 14 were killed mid-compile at the pause;
+  the logs are in `kernel/killed_at_pause/`.
+
+**(c) Per variant, model smoke.** Qwen-Image 1024x1024 tp4, 10 steps, seed 42, the section-0
+prompt, run through the CLI flag. `DIFFLET_ATTN_QUANT` was unset in the shell.
+
+| arm | dev | image md5 | latents | routed-call line (once) | step median |
+|---|---|---|---|---|---|
+| `--quant mxfp8 --attn-quant qk` | 9 | `a02efe81` | finite, std 0.316 | `DIFFLET_ATTN_QUANT=qk (qk_mx=True, pv_mx=False) ... {(5120, 5120, True): 1}` | 247.2 ms |
+| `--quant mxfp8 --attn-quant pv` | 10 | `1e61516c` | finite, std 0.317 | `pv (qk_mx=False, pv_mx=True)`, same bucket | 251.2 ms |
+| `--quant mxfp8 --attn-quant qk+pv` | 11 | `9ae31a5b` | finite, std 0.316 | `qk+pv (qk_mx=True, pv_mx=True)`, same bucket | 260.9 ms |
+| `--attn-quant pv`, no `--quant` | 12 | `26e14284` | finite, std 0.318 | `pv (qk_mx=False, pv_mx=True)`, same bucket | 312.7 ms |
+
+- Every run compiled 60 blocks, with no fallbacks and `unwarmed_shapes=[]`. Every image shows the
+  prompt's cat on a bench, with no noise.
+- `--attn-quant qk` reproduces section 13's `DIFFLET_ATTN_QUANT=mxfp8` smoke bit for bit (image
+  `a02efe81`, latents `b6a3ce43`).
+- Against section 13's linear-only 10-step image, the three `--quant` arms are 28.5 / 28.8 /
+  28.6 dB (latents cosine 0.979 / 0.978 / 0.978).
+- The step medians were taken with twelve device lanes running at once and are not
+  timing-grade.
+
+**(d) Two variants in one cache root.** On device 12, Qwen-Image tp4 bf16 linears ran three
+commands with `--cache-dir R` (`DIFFLET_COMPILE_CACHE` unset, so the NEFF/HLO caches go under
+`R/neuron`):
+1. `difflet compile --attn-quant pv`;
+2. `difflet compile --attn-quant qk`;
+3. `difflet generate --attn-quant pv`, the no-`--quant` row of (c).
+
+| after | stage dirs under `R/qwen_image_dit` | `.neff` files |
+|---|---|---|
+| (empty root) | none | 0 |
+| compile pv | `95dcb4b8` (manifest `attn_quant: pv`) | 164 |
+| compile qk | `95dcb4b8`, `fe8f4bee` (`attn_quant: qk`) | 165 |
+| generate pv | the same two | 165 |
+
+- The two manifests differ only in `attn_quant`.
+- The qk compile wrote its own DiT block NEFF, `8de173f3` (2.6 MB), beside pv's `cf704506`
+  (2.5 MB, written during pv's warm-up). Every other NEFF (the VAE's eager kernels) is
+  variant-independent and was shared.
+- The pv generate added nothing: it reused pv's artifacts. So the variants never share an
+  artifact, and one variant hits its own.
+
+Outputs: `/mnt/nvme/difflet-mxattn/task5b/`:
+- `identity/{qwen,wan}/` (a);
+- `kernel/` (b), with `summary.json`;
+- `smoke/quant_{qk,pv,qk+pv}/` (c);
+- `droot/` (d and the no-`--quant` row of (c)), with `runs.log` snapshots and `neffs.*.txt`.
+
+Each run directory has `runs.log` (`fuser`, `uptime`) and `md5.txt`. The tools are
+`identity.sh`, `kacc.sh`, `smoke.sh`, `droot.sh`, `summ.py` and `smoke_stats.py`.

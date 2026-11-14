@@ -39,14 +39,14 @@ def test_the_shape_table_has_the_seven_rows():
                                  ["--shape", "wan_81f", "--impl", "cte", "--pv-mx"],
                                  ["--shape", "wan_81f", "--impl", "fork", "--cte-no-vector-exp"],
                                  ["--shape", "wan_81f", "--impl", "cte", "--fork-vector-exp"],
-                                 ["--shape", "wan_81f", "--impl", "routed", "--qk-mx"],
                                  ["--shape", "qwen_1024", "--impl", "constmax"]])
 def test_the_cli_rejects_what_it_cannot_run(bad, tmp_path, capsys):
     with pytest.raises(SystemExit) as exc:
         probe.main([*bad, "--out", str(tmp_path / "o.json")])
     assert exc.value.code == 2
     err = capsys.readouterr().err
-    assert ("invalid choice" in err or "need --impl fork" in err or "needs --impl cte" in err
+    assert ("invalid choice" in err or "need --impl fork or routed" in err
+            or "needs --impl cte" in err
             or "needs --impl fork" in err or "unbounded attention only" in err)
 
 
@@ -231,12 +231,18 @@ def test_fork_vector_exp_reaches_the_kernel_and_only_then(monkeypatch):
                      dict(scale=0.5, pv_mx=False, qk_mx=True)]
 
 
-@pytest.mark.parametrize("impl", [["--impl", "routed"], ["--impl", "fork", "--qk-mx",
-                                                        "--fork-vector-exp"]])
-def test_main_scores_the_routed_op_and_the_vector_exp_fork_against_the_qk_mirror(
-        impl, tmp_path, monkeypatch):
-    """--impl routed is Difflet's attention with DIFFLET_ATTN_QUANT=mxfp8, QK-only: scored
-    against the QK-only mirror, as the fork with --qk-mx --fork-vector-exp is."""
+@pytest.mark.parametrize("impl, flags", [
+    (["--impl", "routed"], (True, False)),  # no flag: qk, Task 5's routed arm
+    (["--impl", "routed", "--qk-mx"], (True, False)),
+    (["--impl", "routed", "--pv-mx"], (False, True)),
+    (["--impl", "routed", "--qk-mx", "--pv-mx"], (True, True)),
+    (["--impl", "fork", "--qk-mx", "--fork-vector-exp"], (True, False)),
+    (["--impl", "fork", "--pv-mx", "--fork-vector-exp"], (False, True))])
+def test_main_scores_the_routed_op_and_the_vector_exp_fork_against_their_mirror(
+        impl, flags, tmp_path, monkeypatch):
+    """--impl routed is Difflet's attention under DIFFLET_ATTN_QUANT set to the variant its
+    --qk-mx / --pv-mx name (neither: qk): scored against that variant's mirror, as the fork with
+    the same flags and --fork-vector-exp is."""
     pytest.importorskip("difflet.backends.neuron.ops_impl.mx_attention_kernel")
     tiny = {"name": "tiny_u", **TINY["tiny_u"], "d": 128}
     monkeypatch.setattr(probe, "load_shapes", lambda: {"tiny_u": dict(TINY["tiny_u"], d=128)})
@@ -245,7 +251,8 @@ def test_main_scores_the_routed_op_and_the_vector_exp_fork_against_the_qk_mirror
     def fake_worker(argv, log):
         assert ("--fork-vector-exp" in argv) == ("fork" in impl)
         if "--save-output" in argv:
-            out = torch.stack([probe.reference(tiny, q, k, v, bounds, h, qk_mx=True)
+            out = torch.stack([probe.reference(tiny, q, k, v, bounds, h, qk_mx=flags[0],
+                                               pv_mx=flags[1])
                                for h in range(tiny["bh"])])
             torch.save(out, probe.output_path(Path(argv[argv.index("--out") + 1])))
         Path(argv[argv.index("--worker") + 1]).write_text(
@@ -255,7 +262,7 @@ def test_main_scores_the_routed_op_and_the_vector_exp_fork_against_the_qk_mirror
     out = tmp_path / "r.json"
     assert probe.main(["--shape", "tiny_u", *impl, "--runs", "1", "--out", str(out)]) == 0
     result = json.loads(out.read_text())
-    assert result["reference"] == "mirror" and result["qk_mx"] and not result["pv_mx"]
+    assert result["reference"] == "mirror" and (result["qk_mx"], result["pv_mx"]) == flags
     assert result["rel_l2"] == 0.0 and result["fork_vector_exp"] is ("fork" in impl)
 
 
@@ -420,3 +427,12 @@ def test_main_records_softmax_max_and_nonfinite_outputs_for_constmax(tmp_path, m
     assert result["impl"] == "constmax" and result["reference"] == "fp32"
     assert result["softmax_max"] == pytest.approx(probe.softmax_max_for({"s": 640}))
     assert result["nonfinite"] == 2 and result["per_head"][0]["rel_l2"] < 1e-6
+
+
+@pytest.mark.parametrize("impl, qk_mx, pv_mx, switch", [
+    ("routed", False, False, "qk"), ("routed", True, False, "qk"), ("routed", False, True, "pv"),
+    ("routed", True, True, "qk+pv"), ("fork", True, True, "off"), ("cte", False, False, "off")])
+def test_the_worker_sets_the_switch_to_the_routed_variant(impl, qk_mx, pv_mx, switch):
+    """The worker exports DIFFLET_ATTN_QUANT before ops_impl.attention is imported: the routed
+    arm's variant, ``off`` for every other arm (a shell value never turns cte or fork into MX)."""
+    assert probe.attn_switch(SimpleNamespace(impl=impl, qk_mx=qk_mx, pv_mx=pv_mx)) == switch
