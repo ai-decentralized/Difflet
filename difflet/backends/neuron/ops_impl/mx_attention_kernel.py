@@ -42,6 +42,8 @@ THE SUBSET:
   ``bound_min[i] <= j < bound_max[i]``, masked with range_select; that path takes scale 1.0.
 - ``pv_mx``: MM2 on ``nc_matmul_mx``, P and V MX-quantized per 512-key tile (MXFP8 attention
   plan, Task 3).
+- ``allow_vector_exp`` as attention_cte has it, but default False: the exp on the Scalar Engine
+  (rulings BR19 / BR20).
 
 Everything else attention_cte offers is refused (``_check_difflet_subset``).
 
@@ -138,15 +140,19 @@ def _sbuf_scratch_budget() -> int:
 
 
 @nki.jit
-def mx_attention_fwd(q, k, v, *, scale, bound_min=None, bound_max=None, pv_mx: bool, qk_mx: bool):
+def mx_attention_fwd(q, k, v, *, scale, bound_min=None, bound_max=None, pv_mx: bool, qk_mx: bool,
+                     allow_vector_exp: bool = False):
     """Difflet's entry: non-causal attention in the ``tp_q=True, tp_k=True`` layout (q, k, v
     ``[batch, seqlen, d]`` bf16), optionally key-bounded, as ``ops_impl/attention.py`` calls
     attention_cte on both paths. ``pv_mx`` / ``qk_mx``: MM2 / MM1 on ``nc_matmul_mx``; both False
-    is attention_cte unchanged."""
+    is attention_cte unchanged at the same ``allow_vector_exp``. That is attention_cte's switch,
+    default False here: the exp on the Scalar Engine, off the Vector Engine that binds shipped
+    attention_cte (MXFP8 attention plan, rulings BR19 / BR20)."""
     kernel_assert(not qk_mx, "qk_mx: MM1 on nc_matmul_mx is not implemented yet (MXFP8 attention "
                   "plan, Task 4)")
     return _attention_cte(q=q, k=k, v=v, scale=scale, causal_mask=False, tp_q=True, tp_k=True,
-                          bound_min=bound_min, bound_max=bound_max, pv_mx=pv_mx)
+                          bound_min=bound_min, bound_max=bound_max, pv_mx=pv_mx,
+                          allow_vector_exp=allow_vector_exp)
 
 
 # DMA-to-PE lowering uses shared transpose scratch. Allow the compiler to
@@ -239,7 +245,6 @@ _REFUSED = (
     "kv_used_len",  # dynamic active-KV length
     "block_size", "kvp_rank_id", "kvp_group_size", "kvp_seg_block_offset", "kvp_cp_offset_int",
     "kvp_k_threshold_sb", "kvp_seg_block_offset_int",  # round-robin KV parallel
-    "allow_vector_exp",
 )
 
 
@@ -256,9 +261,9 @@ def _check_difflet_subset(q, tp_q, tp_k, causal_mask, refused):
     ``cp_striped_input``), position bias (``position_bias``, ``bias_layout``,
     ``bias_band_params``), SBUF inputs (``k_cache_sbuf``, ``v_cache_sbuf``, ``k_prior_sbuf``,
     ``v_prior_sbuf``, ``init_sbuf_addr``), delayed fp8 K dequantization (``k_scale_sb``), a dynamic
-    KV length (``kv_used_len``), round-robin KV parallelism (``block_size``, ``kvp_*``) and the
-    Scalar-Engine exp switch (``allow_vector_exp``). ``_attention_cte`` also refuses non-bf16
-    q / k and grouped-query k/v (a k/v batch other than q's)."""
+    KV length (``kv_used_len``) and round-robin KV parallelism (``block_size``, ``kvp_*``).
+    ``_attention_cte`` also refuses non-bf16 q / k and grouped-query k/v (a k/v batch other than
+    q's)."""
     kernel_assert(not causal_mask, "Difflet's attention_cte fork refuses causal_mask")
     kernel_assert(tp_q and tp_k, f"Difflet's attention_cte fork refuses tp_q / tp_k False, got {tp_q=}, {tp_k=}")
     kernel_assert(not refused, f"Difflet's attention_cte fork refuses {', '.join(sorted(refused))}")
@@ -277,6 +282,7 @@ def _attention_cte(
     bound_min=None,
     bound_max=None,
     pv_mx: bool = False,
+    allow_vector_exp: bool = False,
     **refused,
 ):
     """Attention on one call's batch: validation, the batch loop and the LNC sharding.
@@ -286,6 +292,8 @@ def _attention_cte(
       bound_min, bound_max: optional int32 ``[batch, seqlen_q, 1]``: query i attends keys
         ``bound_min[i] <= j < bound_max[i]``.
       pv_mx: MM2 on nc_matmul_mx: P and V MX-quantized per 512-key tile.
+      allow_vector_exp: attention_cte's switch: allow the Vector Engine exp on trn3. False (the
+        fork's default; attention_cte's is True) uses the Scalar Engine.
       causal_mask, tp_q, tp_k, **refused: accepted only at the subset's values (``False``, ``True``,
         ``True``, nothing); see ``_check_difflet_subset``.
     """
@@ -328,6 +336,7 @@ def _attention_cte(
         scale=scale,
         dtype=q.dtype,
         is_sequence_packed=is_sequence_packed,
+        allow_vector_exp=allow_vector_exp,
         pv_mx=pv_mx,
     )
     if pv_mx:
@@ -390,6 +399,7 @@ class AttnConfig(nl.NKIObject):
     # sequence packing
     is_sequence_packed: bool = None
 
+    allow_vector_exp: bool = False  # Difflet: default False (attention_cte's is True)
     pv_mx: bool = False  # Difflet: MM2 on nc_matmul_mx, P and V MX-quantized per 512-key tile
 
 
@@ -473,7 +483,9 @@ def _attention_cte_impl(
     # running max it mirrors, because it must be indexed per Q group and persist across sections: a
     # local nl.ndarray inside _exp_impl aliases across software-pipeline stages.
     bufs.mm1_running_max_pos = (
-        allocator.alloc_sbuf_tensor(shape=(atp.sb_p, atp.num_grps), dtype=nl.float32) if is_trn3_b1() else None
+        allocator.alloc_sbuf_tensor(shape=(atp.sb_p, atp.num_grps), dtype=nl.float32)
+        if (ac.allow_vector_exp and is_trn3_b1())
+        else None
     )
     bufs.exp_running_sum = allocator.alloc_sbuf_tensor(shape=(atp.sb_p, atp.num_grps), dtype=nl.float32)
     bufs.exp_sum_reciprocal = allocator.alloc_sbuf_tensor(shape=(atp.sb_p, atp.num_grps), dtype=nl.float32)
