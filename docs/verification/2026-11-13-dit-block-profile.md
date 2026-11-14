@@ -279,3 +279,84 @@ busy time (all attention calls of the block), for scale only.
 Every spread is below 2%, so J = 2% on every shape. Outputs:
 `/mnt/nvme/difflet-mxattn/probe/cte/<shape>.{json,out.pt,run<i>.{json,log}}` and `timed.log`
 (`uptime` and `fuser` at each shape's start and end).
+
+## 8. MXFP8 attention: gate G1, PV on `nc_matmul_mx`
+
+Plan `docs/plans/2026-11-13-mxfp8-attention.md`, Task 3 (2026-11-14). The fork
+(`difflet/backends/neuron/ops_impl/mx_attention_kernel.py`, `mx_attention_fwd(pv_mx=True)`) runs
+MM2 as one `nc_matmul_mx` per (128-query group, 512-key tile), P and V MX-quantized along the keys
+(OCP e4m3 + E8M0, a block = 32 contiguous keys, locked on the device on MM2's own loaders):
+
+- V, once per 512-key tile and section (shared by every query group): one contiguous DMA (four
+  rows per partition), a GpSimd regroup into `nc_matmul_mx`'s group-of-4 order, `quantize_mx`.
+- P, per (query group, 512-key tile), after the `exponential` to bf16: the tail past the last key
+  zeroed, two stride-2 fp32 TensorE transposes into PSUM bank 7, a ScalarE copy to SBUF,
+  `quantize_mx` (nkilib's `swizzle_quantize_mx` path). A DMA transpose into the group-of-4 order
+  does not compile (neuronx-cc: output steps must be 32-byte aligned, NCC_IBIR155; transposing
+  dimensions contiguous, BIR verifier `checkDMATranspose`), nor does `quantize_mx` on a strided
+  source (NCC_IBIR164), so the transposes stay on TensorE.
+- The row sum is the unquantized fused fp32 sum of `exponential`, as in bf16.
+
+Probe: `scripts/mx_attention/probe.py --impl fork --pv-mx` on one core (LNC=2), the region as the
+models call it (section 7); accuracy against the Task 1 mirror (`mx_attention_reference`, P/V
+quantized as the kernel does), per head. Threshold, fixed on the first probe (flux_1024, flat)
+before any other pv_mx result was read: rel L2 < 2.6e-3 (2 x 1.297e-3). The device's floor
+without MX (attention_cte bf16 against the mirror with both flags off) is 6.6e-4 at the small
+shapes, 1.05e-3 / 1.24e-3 / 1.34e-3 at wan_81f / hv15_121f / hv1_L. Inputs: flat = q, k, v ~
+N(0, 1) (scores std ~1); peaked = q and k x 2 (scores std ~4). Gate rule: faster = median below
+the cte bf16 median by more than J = max(2%, the cte runs' spread).
+
+| shape | path | cte bf16 ms (spread) | fork pv_mx ms (spread) | ratio | J | faster | rel L2 vs mirror, flat (max head) | peaked |
+|---|---|---|---|---|---|---|---|---|
+| `flux_1024` | unbounded | 0.9139 (1.15%) | 0.977 (1.20%) | 1.069 | 2% | **no** | 1.30e-03 (1.33e-03) | 5.72e-04 |
+| `qwen_1024` | bounded | 1.177 (0.04%) | 1.328 (0.47%) | 1.128 | 2% | **no** | 1.31e-03 (1.34e-03) | 6.23e-04 |
+| `ltx2_video` | unbounded | 2.054 (0.56%) | 2.15 (0.99%) | 1.047 | 2% | **no** | 1.31e-03 (1.34e-03) | 5.24e-04 |
+| `wan_81f` | unbounded | 63.54 (0.04%) | 74.84 (0.01%) | 1.178 | 2% | **no** | 1.93e-03 (2.00e-03) | 5.60e-04 |
+| `hv15_121f` | bounded | 143.2 (0.00%) | 166.8 (0.28%) | 1.165 | 2% | **no** | 2.25e-03 (2.27e-03) | 5.52e-04 |
+| `hv1_L` | bounded | 183.4 (0.02%) | 219.7 (0.00%) | 1.198 | 2% | **no** | 2.42e-03 (2.52e-03) | 5.56e-04 |
+
+Timing basis. flux_1024 / qwen_1024: 40 calls per process, cte and fork both timed on device 4
+(CPUs 72-79,168-175). Ruling BR13's check: 20 vs 40 calls per process on that device gave cte
+0.940 / 0.914 ms (flux, 2.8% apart) and 1.197 / 1.177 ms (qwen), fork 0.998 / 0.977 and 1.339 /
+1.328 ms: a fixed per-measurement overhead (~0.8-1.0 ms), not per-call dispatch (at 40 calls the
+two kernels still differ by 6-13%). With it removed (2 t40 - t20) the ratios are 1.077 (flux) and
+1.137 (qwen); at 20 calls 1.062 and 1.119. The decision is the same on every basis. Other shapes:
+Task 2's cte baseline (section 7, device 1) against the fork's three processes (ltx2_video device 5,
+wan_81f 7, hv15_121f 1, hv1_L 5). First calls (cold trace + neuronx-cc) of the pv_mx kernel: 42 min
+at hv1_L, 65 min at hv15_121f (bf16: 21 min).
+
+Engine split, one call (neuron-explorer capture of the probe region's NEFF on one core, the third of
+four executions; busy = union of instruction intervals per physical core, over the two cores;
+DMA = the DMA_* instruction rows):
+
+| shape | arm | span ms | TensorE | VectorE | ScalarE | DMA | GpSimd | `quantize_mx` VectorE ms (instr) | `MATMUL_MX` ms (instr) | `exponential` ms |
+|---|---|---|---|---|---|---|---|---|---|---|
+| flux | bf16 | 0.893 | 0.587 | 0.793 | 0.000 | 0.169 | 0.029 | - | - | 0.289 |
+| flux | pv_mx | 0.953 | 0.663 | 0.909 | 0.309 | 0.105 | 0.051 | 0.215 (1,998) | 0.199 (1,944) | 0.289 |
+| qwen | bf16 | 1.156 | 0.740 | 1.020 | 0.017 | 0.219 | 0.034 | - | - | 0.342 |
+| qwen | pv_mx | 1.295 | 0.862 | 1.187 | 0.392 | 0.154 | 0.060 | 0.272 (2,460) | 0.309 (2,400) | 0.334 |
+| ltx2 | bf16 | 2.005 | 1.311 | 1.816 | 0.000 | 0.298 | 0.048 | - | - | 0.667 |
+| ltx2 | pv_mx | 2.091 | 1.550 | 2.042 | 0.734 | 0.195 | 0.091 | 0.470 (4,704) | 0.518 (4,608) | 0.620 |
+| wan | bf16 | 63.523 | 44.234 | 61.996 | 1.632 | 16.248 | 5.562 | - | - | 20.322 |
+| wan | pv_mx | 74.779 | 56.598 | 73.140 | 26.415 | 19.505 | 2.034 | 16.709 (164,480) | 10.649 (163,840) | 19.798 |
+
+At wan_81f: bf16 MM2 is 29.5 ms of TensorE `MATMUL` (655,276 instructions) + 23.8 ms `LDWEIGHTS`;
+MX MM2 is 10.6 ms `MATMUL_MX` (163,840) + 7.5 ms `LDWEIGHTS_MX`. P's operand costs more than that
+saves: 31.5 ms of TensorE fp32 transposes (327,680), 25.2 ms of ScalarE PSUM copies (163,840) and
+16.6 ms of VectorE `QUANTIZE_MX` (163,840; V's adds 640). `exponential` is 20.3 ms (bf16) / 19.8 ms
+(pv). VectorE was already the binding engine (62.0 of 63.5 ms) and gains 11.1 ms, the span 11.3 ms.
+No `RANGE_SELECT` on either Wan arm (qwen_1024, bounded: 2,400 in both). For comparison, the plan
+quotes MM2 13.2 ms / 80,730 instructions and `exponential` 3.65 ms from an earlier capture whose
+source is not in this doc; the figures here are this probe's.
+
+**G1: PV-only MXFP8 is faster than attention_cte bf16 on no shape (ratios 1.047-1.198 on all six
+rows, both paths); G1 fails.** Every row is within the accuracy threshold. The plan's rule for this
+case: run Task 4's QK-only variant (`qk_mx=True`, PV bf16) before stopping.
+
+The fork is pruned to Difflet's subset (Task 3 Step 6, everything else refused by name): with both
+flags off it is still bit-identical to attention_cte on all six shapes, and its pv_mx outputs are
+bit-identical to the unpruned kernel's.
+
+Outputs: `/mnt/nvme/difflet-mxattn/probe/3b/` (`pv/`, `pv_peak/`, `calls20/`, `calls40/`, `cap/`,
+`membership/`, `identity/`, `prune_off/`, `prune_pv/`, `g1.json`, `runs.log` per directory with
+`uptime` and `fuser` at each run's start and end).
