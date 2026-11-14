@@ -2,8 +2,8 @@
 """One attention call on one NeuronCore (LNC=2) at a model's per-rank shape: accuracy and time
 (MXFP8 attention plan, ``docs/plans/2026-11-13-mxfp8-attention.md``, Task 2).
 
-usage: probe.py --shape NAME --impl {cte,fork} [--qk-mx] [--pv-mx] --out FILE [--runs N]
-                [--calls N] [--peak F]
+usage: probe.py --shape NAME --impl {cte,fork} [--qk-mx] [--pv-mx] [--cte-no-vector-exp]
+                --out FILE [--runs N] [--calls N] [--peak F]
 
 ``--impl cte`` is Difflet's attention as the models call it today, ``ops_impl.attention.attention``
 in the ``tp_q``/``tp_k`` layout: nkilib's ``attention_cte`` in bf16, bounded rows through its
@@ -12,6 +12,8 @@ against fp32 attention. ``--impl fork`` is the same call with the kernel swapped
 fork (``ops_impl/mx_attention_kernel.py``, plan Task 3; ``--qk-mx`` / ``--pv-mx`` select its
 variant), scored against fp32 attention with both flags off and against the Task 1 mirror
 (``mx_attention_reference`` on the bf16 inputs, the kernel's block membership) otherwise.
+``--cte-no-vector-exp`` is ``--impl cte`` with attention_cte's ``allow_vector_exp=False`` (the
+exp on ScalarE, not VectorE), scored against fp32 attention (plan Task 4-pre, ruling BR18).
 
 Time: the compiled region from bf16 q, k, v (and the int32 bounds) to the bf16 output, measured
 as evidence section 4c timed kernels: one warm call, then ``--calls`` (default 20) calls and one
@@ -136,30 +138,46 @@ def run_worker(argv: list[str], log: Path) -> None:
                        check=True)
 
 
-def use_fork(*, qk_mx: bool, pv_mx: bool) -> None:
-    """Swap the kernel under ``ops_impl.attention``'s two attention_cte calls for the fork's
-    ``mx_attention_fwd``: the layout, bounded pre-scale, padding and head chunking stay theirs."""
-    from torch_neuronx import wrap_nki
+def use_kernel(name: str, kernel, **kw) -> None:
+    """Swap the kernel under ``ops_impl.attention``'s two attention_cte calls for ``kernel`` (a
+    wrapped NKI kernel taking attention_cte's q, k, v, scale and bounds) called with ``kw``: the
+    layout, bounded pre-scale, padding and head chunking stay theirs."""
     from torch_neuronx.nki_hop import nki_op
 
     from difflet.backends.neuron.ops_impl import attention as attn
     from difflet.backends.neuron.ops_impl.fp8_kernels import logical_cores
-    from difflet.backends.neuron.ops_impl.mx_attention_kernel import mx_attention_fwd
 
-    kernel = wrap_nki(mx_attention_fwd)
-
-    @nki_op("difflet_probe::mx_attention_fork", mutates_args={})
-    def fork(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, bound_min: torch.Tensor | None,
-             bound_max: torch.Tensor | None, scale: float) -> torch.Tensor:
+    @nki_op(f"difflet_probe::{name}", mutates_args={})
+    def op(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, bound_min: torch.Tensor | None,
+           bound_max: torch.Tensor | None, scale: float) -> torch.Tensor:
         bounds = {} if bound_min is None else {"bound_min": bound_min, "bound_max": bound_max}
-        return kernel[(logical_cores(),)](q, k, v, scale=scale, pv_mx=pv_mx, qk_mx=qk_mx, **bounds)
+        return kernel[(logical_cores(),)](q, k, v, scale=scale, **kw, **bounds)
 
     def unbounded(q, k, v, *, is_causal, scale, training):  # torch-neuronx's SDPA kernel
         assert not is_causal and not training
-        return fork(q.flatten(0, 1), k.flatten(0, 1), v.flatten(0, 1), None, None,
-                    scale).unflatten(0, q.shape[:2])
+        return op(q.flatten(0, 1), k.flatten(0, 1), v.flatten(0, 1), None, None,
+                  scale).unflatten(0, q.shape[:2])
 
-    attn._FLASH_KERNEL, attn._FLASH_BOUNDED_OP = unbounded, fork
+    attn._FLASH_KERNEL, attn._FLASH_BOUNDED_OP = unbounded, op
+
+
+def use_fork(*, qk_mx: bool, pv_mx: bool) -> None:
+    """``ops_impl.attention`` on the fork's ``mx_attention_fwd`` with these flags."""
+    from torch_neuronx import wrap_nki
+
+    from difflet.backends.neuron.ops_impl.mx_attention_kernel import mx_attention_fwd
+
+    use_kernel("mx_attention_fork", wrap_nki(mx_attention_fwd), pv_mx=pv_mx, qk_mx=qk_mx)
+
+
+def use_cte_no_vector_exp() -> None:
+    """``ops_impl.attention`` on attention_cte called as Difflet calls it (unbounded: as
+    torch-neuronx's ``_compute_attention_nki``, whose SDPA wrapper cannot forward the knob;
+    bounded: as ``_load_flash_bounded_op``) plus ``allow_vector_exp=False``."""
+    from torch_neuronx.neuron_dynamo_backend.decompositions import wrapped_flash_fwd
+
+    use_kernel("attention_cte_scalar_exp", wrapped_flash_fwd, tp_q=True, tp_k=True,
+               causal_mask=False, cache_softmax=False, allow_vector_exp=False)
 
 
 def worker(args, row: dict) -> None:
@@ -178,6 +196,8 @@ def worker(args, row: dict) -> None:
 
     if args.impl == "fork":
         use_fork(qk_mx=args.qk_mx, pv_mx=args.pv_mx)
+    elif args.cte_no_vector_exp:
+        use_cte_no_vector_exp()
 
     scale = row["d"] ** -0.5
 
@@ -212,6 +232,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--impl", required=True, choices=("cte", "fork"))
     p.add_argument("--qk-mx", action="store_true")
     p.add_argument("--pv-mx", action="store_true")
+    p.add_argument("--cte-no-vector-exp", action="store_true",
+                   help="attention_cte with allow_vector_exp=False (the exp on ScalarE)")
     p.add_argument("--out", required=True, type=Path)
     p.add_argument("--runs", type=int, default=3)
     p.add_argument("--calls", type=int, default=CALLS, help="timed calls per process")
@@ -221,6 +243,8 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
     if (args.qk_mx or args.pv_mx) and args.impl != "fork":
         p.error("--qk-mx and --pv-mx need --impl fork")
+    if args.cte_no_vector_exp and args.impl != "cte":
+        p.error("--cte-no-vector-exp needs --impl cte")
     row = {"name": args.shape, **shapes[args.shape]}
     if args.worker:
         worker(args, row)
@@ -243,7 +267,7 @@ def main(argv: list[str] | None = None) -> int:
     overall, heads = compare(device, lambda h: reference(row, q, k, v, bounds, h, **flags),
                              row["bh"])
     ms = [r["ms"] for r in runs]
-    result = {"shape": row, "impl": args.impl, **flags,
+    result = {"shape": row, "impl": args.impl, **flags, "cte_no_vector_exp": args.cte_no_vector_exp,
               "calls": args.calls, "peak": args.peak, "runs_ms": ms, "first_call_s": [r["first_call_s"] for r in runs],
               **summarize(ms), "reference": "mirror" if any(flags.values()) else "fp32",
               **overall, "per_head": heads,
