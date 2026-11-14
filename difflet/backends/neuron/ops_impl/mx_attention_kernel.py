@@ -16,7 +16,8 @@
 # torch-neuronx 2.14.3, nki 0.7.0, neuronx-cc 2.28.7631), core/attention/attention_cte.py, sha256
 # 608f0c0320564df85ef3f038bc749591279e7fe5c22480d1dcdb6b3361a2c734. Verbatim but for: its relative
 # imports made absolute (``nkilib.core.utils``); after ``attention_cte``, Difflet's entry point
-# ``mx_attention_fwd`` and ``_check_difflet_subset``, which ``_attention_cte`` calls first.
+# ``mx_attention_fwd``, the MX block membership ``qk_perm`` / ``pv_perm`` and
+# ``_check_difflet_subset``, which ``_attention_cte`` calls first.
 
 """
 Attention Kernel For Context Encoding (Prefill)
@@ -484,6 +485,26 @@ def mx_attention_fwd(q, k, v, *, scale, bound_min=None, bound_max=None, pv_mx: b
 
 if _psum_num_banks() == 7:
     mx_attention_fwd = mx_attention_fwd.enable_address_rotation().enable_non_ssa_legalization()
+
+
+# The MX block membership of the two matmuls, as ``difflet.quant.mx`` perms (block 0's logical
+# indices, then block 1's, ...), for the CPU reference. Both operands of each matmul reach
+# ``nc_matmul_mx`` in the group-of-4 layout (nkilib's ``swizzle_quantize_mx``: partition g, byte j
+# of the x4 operand holds contraction index 4g + j), and ``quantize_mx`` blocks 8 partitions x 4
+# bytes, so block b is indices 32b..32b+31. Locked on one tile by
+# scripts/mx_attention/membership.py.
+def qk_perm(d: int):
+    """MM1's blocks along the head dim (Q and K)."""
+    import torch
+
+    return torch.arange(d)
+
+
+def pv_perm(tile: int):
+    """MM2's blocks along a 512-key tile (P and V)."""
+    import torch
+
+    return torch.arange(tile)
 
 
 def _check_difflet_subset(q, tp_q, causal_mask, k_prior, v_prior, prior_used_len, sink,

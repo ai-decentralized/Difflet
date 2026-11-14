@@ -69,3 +69,20 @@ def test_entry_point_keeps_attention_cte_compile_options():
     for option in ("address_rotation", "non_ssa_legalization"):
         assert getattr(fork.mx_attention_fwd, option) == getattr(fork.attention_cte, option)
 
+
+def test_the_reference_defaults_to_the_kernels_block_membership():
+    """Ruling BR1: the perms the kernel exports (contiguous blocks of 32, locked on the device by
+    scripts/mx_attention/membership.py) are the CPU reference's defaults."""
+    import torch
+
+    from difflet.quant.mx import swizzle_perm
+    from difflet.quant.mx_attention import mx_attention_reference
+
+    g = torch.Generator().manual_seed(0)
+    q, k, v = (torch.randn(2, 1024, 128, generator=g).bfloat16() for _ in range(3))
+    mx = dict(scale=128 ** -0.5, qk_mx=True, pv_mx=True)
+    default = mx_attention_reference(q, k, v, **mx)
+    assert torch.equal(default, mx_attention_reference(q, k, v, **mx, qk_perm=fork.qk_perm,
+                                                       pv_perm=fork.pv_perm))
+    assert not torch.equal(default, mx_attention_reference(q, k, v, **mx, qk_perm=swizzle_perm,
+                                                           pv_perm=swizzle_perm))
