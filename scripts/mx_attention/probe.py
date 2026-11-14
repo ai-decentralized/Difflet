@@ -53,7 +53,7 @@ sys.path.insert(0, str(HERE.parents[1]))  # the checkout, for difflet
 
 import torch  # noqa: E402
 
-from difflet.quant.mx_attention import mx_attention_reference  # noqa: E402
+from difflet.quant.mx_attention import mx_attention_reference, smooth_keys  # noqa: E402
 
 CALLS = 20
 SEED = 0
@@ -95,6 +95,8 @@ def reference(row: dict, q, k, v, bounds, h: int, *, qk_mx: bool = False,
     if mirror:
         from difflet.backends.neuron.ops_impl.mx_attention_kernel import pv_perm, qk_perm
         kw.update(qk_perm=qk_perm, pv_perm=pv_perm)
+    if qk_mx:  # as use_fork's call path hands the kernel K
+        kh = smooth_keys(kh)
     return mx_attention_reference(qh, kh, vh, qk_mx=qk_mx, pv_mx=pv_mx, **kw)[0]
 
 
@@ -162,12 +164,23 @@ def use_kernel(name: str, kernel, **kw) -> None:
 
 
 def use_fork(*, qk_mx: bool, pv_mx: bool) -> None:
-    """``ops_impl.attention`` on the fork's ``mx_attention_fwd`` with these flags."""
+    """``ops_impl.attention`` on the fork's ``mx_attention_fwd`` with these flags. With ``qk_mx``
+    the torch side smooths K first (``smooth_keys``, inside the compiled region, so its time
+    counts): on the unbounded path right before the kernel, on the bounded path before
+    ``_flash_attention_bounded`` pads K with zeros, so the mean is over the call's real keys. That
+    is where Task 5's op will do it (plan: "the torch side: K smoothing over real keys, q
+    pre-scaled in fp32 when bounded, padding")."""
     from torch_neuronx import wrap_nki
 
+    from difflet.backends.neuron.ops_impl import attention as attn
     from difflet.backends.neuron.ops_impl.mx_attention_kernel import mx_attention_fwd
 
     use_kernel("mx_attention_fork", wrap_nki(mx_attention_fwd), pv_mx=pv_mx, qk_mx=qk_mx)
+    if qk_mx:
+        unbounded, bounded = attn._FLASH_KERNEL, attn._flash_attention_bounded
+        attn._FLASH_KERNEL = lambda q, k, v, **kw: unbounded(q, smooth_keys(k), v, **kw)
+        attn._flash_attention_bounded = (lambda q, k, v, lo, hi, *, scale:
+                                         bounded(q, smooth_keys(k), v, lo, hi, scale=scale))
 
 
 def use_cte_no_vector_exp() -> None:

@@ -19,8 +19,9 @@ ISA constraints applied as the plan's brief states them: ``tile_size=(32, 128)``
 32 partitions set the row tile); stationary, moving and both scales at SBUF partition
 ``start_row = 32 t``, ``tile_position=(32 t, 0)``; the stationary free size is 128 (> 64); no
 ``.indirect()``; each score tile ``[128, 512]`` fp32 fills one PSUM bank, and the four sit in
-four of the fork's MM1 banks (``check_psum``). Operands reach SBUF in the group-of-4 layout the
-fork's ``qk_perm`` describes (partition g byte j = head-dim index 4g + j; the host lays the bf16
+four of the fork's MM1 banks (checked on the fork's own allocation by
+``tests/unit/backends/test_neuron_mx_attention_kernel.py``, Task 4b). Operands reach SBUF in
+the group-of-4 layout the fork's ``qk_perm`` describes (partition g byte j = head-dim index 4g + j; the host lays the bf16
 out, ``quantize_mx`` quantizes on chip). Each matmul group is issued ``--reps`` times,
 accumulating, so the output is ``reps`` x the scores and the TensorE time is matmul-dominated.
 
@@ -57,31 +58,6 @@ D, Q_TILE, K_TILE, QUADRANT = 128, 128, 512, 32
 SHAPES = {"keys": (Q_TILE, 4 * K_TILE), "queries": (4 * Q_TILE, K_TILE), "bf16": (Q_TILE, 4 * K_TILE),
           "untiled": (Q_TILE, K_TILE)}
 SEED = 0
-
-
-def check_psum() -> dict:
-    """The four concurrent score tiles against the fork's PSUM bank policy
-    (``mx_attention_kernel``: MM1 rotates its ``[128, 512]`` fp32 score tiles through
-    ``_MM1_PSUM_BANKS_WIDE`` (or banks 0-3), bank ``(large_tile * 4 + k_tile) % len(banks)``, the
-    same bank for every query group; MM2 owns bank 4 (accumulating in PSUM, one d-tile); pv_mx's P
-    transposes bank 7)."""
-    from difflet.backends.neuron.ops_impl import mx_attention_kernel as fork
-
-    def bank(banks, grp, lt, kt):  # the fork's mm1_psum address: the group is not in it
-        return banks[(lt * 4 + kt) % len(banks)]
-
-    out = {}
-    for name, banks in (("wide", fork._MM1_PSUM_BANKS_WIDE), ("narrow", (0, 1, 2, 3))):
-        lts = range(2 * len(banks))
-        keys = [{bank(banks, 0, lt, kt) for kt in range(4)} for lt in lts]  # one group, 4 k-tiles
-        queries = [{bank(banks, g, lt, kt) for g in range(4)} for lt in lts for kt in range(4)]
-        out[name] = {
-            "keys_distinct": all(len(b) == 4 for b in keys),
-            "keys_clear_of_mm2_and_p": all(not {4, 7} & b for b in keys),
-            "queries_distinct": all(len(b) == 4 for b in queries),
-            "banks_by_large_tile": [sorted(b) for b in keys],
-        }
-    return out
 
 
 def make_inputs():
@@ -260,7 +236,7 @@ def main(argv: list[str] | None = None) -> int:
               "rel_l2_vs_reference": rel(got, ref), "max_abs_vs_reference": (got - ref).abs().max().item(),
               "rel_l2_per_tile": [rel(a, b) for a, b in zip(tiles(args.variant, got), tiles(args.variant, ref))],
               "rel_l2_vs_bf16_exact": rel(got, exact), "finite": bool(torch.isfinite(got).all()),
-              "psum": check_psum(), "fuser": fuser, "artifacts": str(art)}
+              "fuser": fuser, "artifacts": str(art)}
     (args.out / f"{name}.json").write_text(json.dumps(result, indent=1) + "\n")
     print(json.dumps({k: result[k] for k in ("mode", "variant", "reload", "rel_l2_vs_reference",
                                              "rel_l2_per_tile", "rel_l2_vs_bf16_exact")}))

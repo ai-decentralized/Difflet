@@ -138,9 +138,12 @@ def test_main_runs_the_workers_and_scores_the_first_ones_output(tmp_path, monkey
 @pytest.mark.parametrize("flags", [{"qk_mx": False, "pv_mx": True}, {"qk_mx": True, "pv_mx": True}])
 @pytest.mark.parametrize("name", sorted(TINY))
 def test_with_an_mx_flag_the_reference_is_the_task1_mirror(name, flags):
-    """bf16 inputs as the kernel loads them, the kernel's block membership, and on the bounded
-    path q scaled in fp32 then rounded to bf16 as _flash_attention_bounded does."""
+    """bf16 inputs as the kernel loads them, the kernel's block membership, on the bounded
+    path q scaled in fp32 then rounded to bf16 as _flash_attention_bounded does, and with qk_mx
+    K smoothed per head as the call path smooths it (``smooth_keys``)."""
     fork = pytest.importorskip("difflet.backends.neuron.ops_impl.mx_attention_kernel")
+    from difflet.quant.mx_attention import smooth_keys
+
     row = {"name": name, **TINY[name], "d": 128}
     q, k, v, bounds = probe.make_inputs(row)
     kw = dict(scale=128 ** -0.5)
@@ -148,13 +151,51 @@ def test_with_an_mx_flag_the_reference_is_the_task1_mirror(name, flags):
     if bounds:
         qs = (q.float() * kw["scale"]).bfloat16()
         kw = dict(scale=1.0, bound_min=bounds[0], bound_max=bounds[1])
-    expected = probe.mx_attention_reference(qs, k, v, **flags, **kw, qk_perm=fork.qk_perm,
+    ks = torch.cat([smooth_keys(k[h:h + 1]) for h in range(row["bh"])]) if flags["qk_mx"] else k
+    expected = probe.mx_attention_reference(qs, ks, v, **flags, **kw, qk_perm=fork.qk_perm,
                                             pv_perm=fork.pv_perm)
     exact = probe.reference(row, q, k, v, bounds, 1)
     got = probe.reference(row, q, k, v, bounds, 1, **flags)
     assert got.dtype == torch.bfloat16
     torch.testing.assert_close(got, expected[1], atol=0, rtol=0)
     assert 1e-2 < (got.float() - exact).norm() / exact.norm() < 1e-1  # MX, not bf16, rounding
+
+
+@pytest.mark.parametrize("qk_mx", [False, True])
+def test_use_fork_smooths_k_before_the_kernel_and_the_padding_with_qk_mx(qk_mx, monkeypatch):
+    """Plan Task 4 Step 2 / Global Constraints: with qk_mx the torch side hands the kernel
+    ``smooth_keys(k)``, the mean taken over the call's real keys, before the bounded path pads K
+    with zeros (padded keys stay zero); without it, K unchanged. Both flags reach the kernel."""
+    pytest.importorskip("difflet.backends.neuron.ops_impl.mx_attention_kernel")
+    hop = pytest.importorskip("torch_neuronx.nki_hop")
+    import torch_neuronx
+
+    from difflet.backends.neuron.ops_impl import attention as attn
+    from difflet.backends.neuron.ops_impl import fp8_kernels  # noqa: F401  (imported before nki_op is faked)
+    from difflet.quant.mx_attention import smooth_keys
+
+    calls = []
+
+    class FakeKernel:  # wrap_nki(mx_attention_fwd)[grid](q, k, v, **kw)
+        def __getitem__(self, grid):
+            return lambda q, k, v, **kw: calls.append((k, kw)) or q
+
+    monkeypatch.setattr(hop, "nki_op", lambda name, mutates_args: lambda f: f)
+    monkeypatch.setattr(torch_neuronx, "wrap_nki", lambda kernel: FakeKernel())
+    for name in ("_FLASH_KERNEL", "_FLASH_BOUNDED_OP", "_flash_attention_bounded"):
+        monkeypatch.setattr(attn, name, getattr(attn, name))  # restored after the test
+    probe.use_fork(qk_mx=qk_mx, pv_mx=True)
+    g = torch.Generator().manual_seed(0)
+    q, k, v = (torch.randn(1, 2, 600, 128, generator=g).bfloat16() + 3 for _ in range(3))
+    attn._FLASH_KERNEL(q, k, v, is_causal=False, scale=0.5, training=False)
+    lo = torch.zeros(2, 600, 1, dtype=torch.int32)
+    attn._flash_attention_bounded(q, k, v, lo, lo + 513, scale=0.5)
+    (k_unbounded, kw_u), (k_bounded, kw_b) = calls
+    expect = smooth_keys(k) if qk_mx else k
+    assert torch.equal(k_unbounded, expect.flatten(0, 1))
+    assert k_bounded.shape == (2, 640, 128)  # padded to 128 after smoothing
+    assert torch.equal(k_bounded[:, :600], expect[0]) and not k_bounded[:, 600:].any()
+    assert kw_u["qk_mx"] is qk_mx and kw_u["pv_mx"] is True and kw_b["qk_mx"] is qk_mx
 
 
 def test_main_scores_a_fork_run_against_the_mirror(tmp_path, monkeypatch):

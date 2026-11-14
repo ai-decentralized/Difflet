@@ -1,5 +1,5 @@
 """scripts/mx_attention/row_tiling.py (plan Task 4 Step 1): the micro-kernel's operand layouts, its
-reference, the PSUM check, and the kernel itself on the NKI simulator (CPU; the device and BIRSim
+reference and the kernel itself on the NKI simulator (CPU; the device and BIRSim
 runs are evidence, not tests)."""
 
 from __future__ import annotations
@@ -28,12 +28,6 @@ def test_tile_t_sits_in_quadrant_t_in_the_group_of_4_layout():
     qs, ks = rt.operands("queries", q, k)
     assert qs[32 * t + g, 4 * n + j] == q[128 * t + n, 4 * g + j]
     assert ks[32 * t + g, 4 * n + j] == k[n, 4 * g + j]
-
-
-def test_the_psum_check_fits_four_key_tiles_not_four_query_tiles():
-    for policy in rt.check_psum().values():
-        assert policy["keys_distinct"] and policy["keys_clear_of_mm2_and_p"]
-        assert not policy["queries_distinct"]
 
 
 @pytest.mark.parametrize("variant", sorted(rt.SHAPES))
