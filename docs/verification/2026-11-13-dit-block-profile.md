@@ -1342,6 +1342,7 @@ than 1% from the evidence's).
 | model | bf16 ms (spread) | quantized ms (spread) | quantized / bf16 | linear / bf16 | J | G3 (reported) | bf16 vs evidence |
 |---|---|---|---|---|---|---|---|
 | Qwen-Image | 304.0 (0.10%) | 257.9 (0.12%) | 0.848 | 0.791 (11b, host A) | 2.0% | both / bf16 < linear / bf16 - J: 0.771 -> not faster | +0.38% |
+| FLUX.1-dev | 221.4 (0.09%) | 194.4 (0.10%) | 0.878 | 0.827 (11b, host A) | 2.0% | both / bf16 < linear / bf16 - J: 0.807 -> not faster | +0.00% |
 <!-- 15a rows -->
 
 ### 15b. Block profile
@@ -1354,6 +1355,10 @@ committed breakdown, the quantized arm this run's capture
 |---|---|---|---|---|---|---|---|---|---|---|
 | Qwen-Image | bf16 | blk1 (block) x60 | 5.05 | 3.55 | 2.05 | 1.15 | 0.20 | 0.62 | 0.60 / 1.07 | tensor 70.3% |
 | Qwen-Image | both | blk1 (block) x60 | 4.43 | 2.41 | 2.66 | 1.42 | 0.11 | 1.00 | 1.06 / 0.97 | vector 60.0% |
+| FLUX.1-dev | bf16 | blk1 (dual) x19 | 4.44 | 3.15 | 1.67 | 0.98 | 0.06 | 0.56 | 0.58 / 0.87 | tensor 70.9% |
+| FLUX.1-dev | bf16 | blk2 (single) x38 | 3.56 | 2.74 | 1.48 | 0.72 | 0.05 | 0.41 | 0.35 / 0.83 | tensor 76.8% |
+| FLUX.1-dev | both | blk1 (dual) x19 | 3.63 | 2.22 | 2.18 | 1.18 | 0.13 | 0.72 | 1.02 / 0.74 | tensor 61.2% |
+| FLUX.1-dev | both | blk2 (single) x38 | 3.10 | 1.84 | 2.02 | 0.93 | 0.12 | 0.74 | 0.84 / 0.70 | vector 65.4% |
 <!-- 15b rows -->
 
 Routed attention (`attn` / `attn1`) per step, by phase and engine (T TensorE, V VectorE, S
@@ -1364,6 +1369,8 @@ component's engine time per step (summed over engines) and V's quantization shar
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | Qwen-Image | bf16 | T 27.6 | V 41.2, G 0.8 | V 20.1 | T 26.4, V 1.6 | - | - | - | T 0.4, V 0.4, G 0.9, H 9.2 | 117.4 | - |
 | Qwen-Image | both | T 21.7 | V 41.2, G 2.1 | V 20.2 | T 12.5, V 1.6 | T 6.9, V 2.5, S 3.3, G 0.4, H 1.0 | V 0.6, G 1.4, H 0.2 | T 29.3, V 13.4, S 21.6 | T 0.6, V 0.6, S 0.1, G 1.0, H 8.3 | 167.1 | 1.3% |
+| FLUX.1-dev | bf16 | T 18.9 | V 29.5, G 0.7 | V 15.6 | T 19.2, V 1.4 | - | - | - | T 0.2, V 0.3, G 0.7, H 6.6 | 86.8 | - |
+| FLUX.1-dev | both | T 16.3 | V 30.6, G 3.8 | V 15.7 | T 8.8, V 1.3 | T 5.1, V 2.1, S 3.0, G 0.4, H 0.9 | V 0.6, G 1.1, H 0.2 | T 22.7, V 11.5, S 17.4 | T 0.4, V 0.4, S 0.1, G 0.8, H 5.5 | 129.8 | 1.4% |
 <!-- 15b phase rows -->
 
 ### 15c. Quality
@@ -1373,6 +1380,7 @@ PSNR dB (worst frame) / SSIM / LPIPS, then latents cosine and rel L2 where the r
 | model | quantized vs bf16 | linear vs bf16 (evidence) | bf16 floor (evidence) | quantized vs CPU fp32; bf16 vs fp32 here and in the evidence, linear vs fp32 (evidence) | notes |
 |---|---|---|---|---|---|
 | Qwen-Image | 29.14 / 0.964 / 0.060 / cos 0.9865, rel L2 0.164 | 38.26 / 0.992 / 0.008 (11c, A) | 39-46 dB | 29.08 / 0.965 / 0.061 / cos 0.9868, rel L2 0.162; bf16 here 36.34, evidence bf16 36.34 / linear 37.36 | bounded calls: K smoothing averages over all keys, padding included (BR36) |
+| FLUX.1-dev | 26.58 / 0.947 / 0.034 | 22.59 / 0.908 / 0.098 (11c, A) | 29.4 dB on this image (6a) | 24.41 / 0.916 / 0.077; bf16 here 23.36, evidence bf16 23.36 / linear 21.30 | - |
 <!-- 15c rows -->
 
 ### 15d. Determinism and provenance
@@ -1383,4 +1391,5 @@ bytes hold its own name): its second request and its `gen2` process against its 
 | model | bf16 output | quantized output | quantized latents | quantized latents finite |
 |---|---|---|---|---|
 | Qwen-Image | `5478687f` (= evidence `5478687f`, 11c, A); two requests equal | `583e3fce`; timed 2 and gen2 equal | bit-identical | finite |
+| FLUX.1-dev | `67da9e98` (= evidence `67da9e98`, 11c, A); two requests equal | `c18e7bc5`; timed 2 and gen2 equal | no latents | no latents kept |
 <!-- 15d rows -->

@@ -1,0 +1,13 @@
+{
+ "neff_name": "neff_293243121649768_vnc_0.neff",
+ "sha256": "574d63fccef71f7fb71800b8f17c91902a1d476c7d4f925b70292a30ec10edb1",
+ "ranks": [
+  "/mnt/nvme/difflet-mxattn/task6/prof/flux/both/dump/i-0882eb59ff5d391e1_pid_1756502/1794694709939777391/neff_293243121649768_vnc_0.neff",
+  "/mnt/nvme/difflet-mxattn/task6/prof/flux/both/dump/i-0882eb59ff5d391e1_pid_1756503/1794694699929370898/neff_293243121649768_vnc_0.neff",
+  "/mnt/nvme/difflet-mxattn/task6/prof/flux/both/dump/i-0882eb59ff5d391e1_pid_1756504/1794694709941754056/neff_293243121649768_vnc_0.neff",
+  "/mnt/nvme/difflet-mxattn/task6/prof/flux/both/dump/i-0882eb59ff5d391e1_pid_1756505/1794694709941088524/neff_293243121649768_vnc_0.neff"
+ ],
+ "kind": "dual",
+ "per_rank": false,
+ "dge_notifs": true
+}
