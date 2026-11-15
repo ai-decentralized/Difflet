@@ -75,9 +75,10 @@ def g3(key: str, bf16: dict, arm: dict, linear: dict | None = None) -> dict:
     lin = ev_linear / ev_bf16
     out["linear_over_bf16_evidence"] = lin
     out["linear_run_needed"] = abs(ratio - lin) < 2 * j or abs(out["bf16_vs_evidence"]) > 0.01
-    if linear is not None:
+    if linear is not None:  # linear_run_needed above is the decision made before this run
         lin = linear["step_ms"] / bf16["step_ms"]
-        out.update(linear_ms=linear["step_ms"], linear_over_bf16_session=lin)
+        j = max(j, linear["spread"])  # the plan's J spans every run the comparison takes
+        out.update(linear_ms=linear["step_ms"], linear_over_bf16_session=lin, J=j)
     out.update(rule="both / bf16 < linear / bf16 - J", threshold=lin - j, faster=ratio < lin - j)
     return out
 

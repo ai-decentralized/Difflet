@@ -168,3 +168,15 @@ def test_steps_take_the_median_of_the_requests_and_refuse_a_failed_log(tmp_path)
     log.write_text(log.read_text().replace("exit 0", "exit 1"))
     with pytest.raises(ValueError, match="did not exit 0"):
         steps.steps(log)
+
+
+def test_with_this_sessions_linear_run_j_spans_its_spread_too():
+    """LTX-2's lane: the threshold is this session's linear / bf16 - J, J over all three runs;
+    linear_run_needed stays the decision made on bf16 and the arm."""
+    bf16 = {"step_ms": 1000.0, "spread": 0.001}
+    both = {"step_ms": 770.0, "spread": 0.001}
+    linear = {"step_ms": 750.0, "spread": 0.03}
+    row = steps.g3("ltx_2", bf16, both, linear)
+    assert row["J"] == pytest.approx(0.03) and row["linear_over_bf16_session"] == 0.75
+    assert row["threshold"] == pytest.approx(0.75 - 0.03) and not row["faster"]
+    assert row["linear_run_needed"] == steps.g3("ltx_2", bf16, both)["linear_run_needed"]

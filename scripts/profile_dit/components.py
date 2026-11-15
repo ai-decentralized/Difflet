@@ -172,10 +172,13 @@ _FORK_PHASES = {  # function: (its phase, {nisa call: phase of that statement})
 }
 
 
-@functools.lru_cache(maxsize=1)
-def _fork_lines() -> dict[int, str]:
-    """{line: phase} of the fork's lines in a function of ``_FORK_PHASES``, as the file is now."""
-    tree = ast.parse((_REPO / FORK).read_text())
+@functools.lru_cache(maxsize=None)
+def _fork_lines(path: str = "") -> dict[int, str]:
+    """{line: phase} of the fork's lines in a function of ``_FORK_PHASES``: of the file the
+    profile names when it is still there (a frozen tree keeps the captured lines), else of this
+    checkout's file as it is now (re-analysing a capture after the fork changed needs its tree)."""
+    src = Path(path) if path and Path(path).is_file() else _REPO / FORK
+    tree = ast.parse(src.read_text())
     found, lines = set(), {}
     for fn in ast.walk(tree):
         if not isinstance(fn, ast.FunctionDef) or fn.name not in _FORK_PHASES:
@@ -200,7 +203,7 @@ def attention_phase(nki_source: str) -> str:
     if not line.isdigit():
         return "other"
     if path.endswith("/" + FORK):
-        return _fork_lines().get(int(line), "other")
+        return _fork_lines(path).get(int(line), "other")
     if not path.endswith("/nkilib/core/attention/attention_cte.py"):
         return "other"
     return next((p for first, last, p in _ATTENTION_PHASES if first <= int(line) <= last), "other")

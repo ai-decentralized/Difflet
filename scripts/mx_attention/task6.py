@@ -102,8 +102,10 @@ def quality(key: str, arm: str) -> dict:
            "latents_md5": {str(p.relative_to(ROOT)): _md5(p) for p in (lat_b, lat_a) if p},
            "arm_latents_finite": {"timed": _finite(lat_a), "gen2": _finite(_latents(a / "work_gen2"))}}
     m = out["md5"]
-    out["deterministic"] = {"bf16": m.get("bf16/timed_1") == m.get("bf16/timed_2"),
-                            arm: len({m.get(f"{arm}/{n}") for n in ("timed_1", "timed_2", "gen2")}) == 1}
+    runs = {d: [m.get(f"{d}/{n}") for n in names]
+            for d, names in (("bf16", ("timed_1", "timed_2")), (arm, ("timed_1", "timed_2", "gen2")))}
+    # a missing output is no evidence of determinism
+    out["deterministic"] = {d: None not in md5s and len(set(md5s)) == 1 for d, md5s in runs.items()}
     # a latents file's bytes hold its own name (torch.save's archive root): compare the tensors
     lats = [p for p in (lat_a, lat_a and lat_a.with_name(lat_a.name.replace("0000", "0001")),
                         _latents(a / "work_gen2")) if p and p.exists()]
@@ -287,9 +289,9 @@ def _identical(d: dict) -> bool:
 
 
 def _finite_text(f: dict | None) -> str:
-    vals = list((f or {}).values())
-    return ("no latents kept" if all(v is None for v in vals) else "finite" if all(vals)
-            else "NON-FINITE")
+    vals = [v for v in (f or {}).values() if v is not None]  # None: that run kept no latents
+    return ("no latents kept" if not vals else "NON-FINITE" if not all(vals)
+            else "finite" if len(vals) == len(f) else "finite (partly kept)")
 
 
 def main(argv: list[str] | None = None) -> int:

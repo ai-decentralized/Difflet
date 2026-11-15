@@ -39,4 +39,15 @@ def test_quality_reads_the_first_requests_latents_and_checks_determinism(tmp_pat
     assert (lat_b.name, lat_a.name, out_a.name) == ("latents_req0000.pt",) * 2 + ("timed_1.mp4",)
     assert "/bf16/" in str(lat_b) and "/both/" in str(lat_a)
     assert q["deterministic"] == {"bf16": True, "both": False}  # gen2 differs
+    (tmp_path / "wan21_official" / "both" / "gen2.mp4").unlink()
+    _arm(tmp_path, "both2", ("d", "d", "d"), torch.zeros(2, 3))
+    (tmp_path / "wan21_official" / "both2" / "gen2.mp4").unlink()
+    assert task6.quality("wan21_official", "both2")["deterministic"]["both2"] is False  # missing
     assert q["arm_latents_finite"] == {"timed": False, "gen2": False}
+
+
+def test_the_finite_cell_says_when_a_run_kept_no_latents():
+    assert task6._finite_text({"timed": True, "gen2": True}) == "finite"
+    assert task6._finite_text({"timed": True, "gen2": None}) == "finite (partly kept)"
+    assert task6._finite_text({"timed": None, "gen2": None}) == "no latents kept"
+    assert task6._finite_text({"timed": True, "gen2": False}) == "NON-FINITE"

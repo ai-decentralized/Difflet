@@ -274,6 +274,25 @@ def test_attention_phase_of_the_mxfp8_fork(function, statement, phase):
                                "qwen_image") == "attention"
 
 
+def test_the_fork_phases_come_from_the_captured_file_when_it_is_still_there(tmp_path):
+    """A frozen tree's fork (the file a profile names) maps by its own lines, not by this
+    checkout's: here a copy with three lines more above every function."""
+    path = REPO / components.FORK
+    text = path.read_text()
+    line = next(i for i, s in enumerate(text.splitlines(), 1)
+                if s.strip() == "nisa.exponential(" and
+                components.enclosing_function(str(path), i) == "_exp_impl")
+    frozen = tmp_path / "tree" / components.FORK
+    frozen.parent.mkdir(parents=True)
+    frozen.write_text("\n\n\n" + text)
+    gone = f"/gone/{components.FORK}"  # no such file: this checkout's lines
+    assert components.attention_phase(f"{frozen}:{line + 3}") == "exp"
+    assert components.attention_phase(f"{gone}:{line}") == "exp"
+    for n in (line - 2, line, line + 2):  # every frozen line maps as this file's line 3 above
+        assert components.attention_phase(f"{frozen}:{n}") == components.attention_phase(
+            f"{gone}:{n - 3}")
+
+
 def test_attention_phase_of_a_source_outside_the_kernel_is_other():
     assert components.attention_phase(f"{DIFFUSERS}/normalization.py:3420") == "other"
     assert components.attention_phase("") == "other"

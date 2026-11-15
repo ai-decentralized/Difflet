@@ -86,7 +86,11 @@ attention_cte (`ops_impl/mx_attention_kernel.py`), which counts as the attention
 signature and the components; `components.py` maps the fork's rows to phases by function
 (`_FORK_PHASES`), with its own `qk_quantize` (Q and K share one helper, so they are not split),
 `v_quantize` and `p_quantize`. Both kernels' exp statements are phase `exp` (since Task 6; Plan
-A's committed breakdowns count them in `mask_softmax`).
+A's committed breakdowns count them in `mask_softmax`). `run_all.sh` has no attention lanes, and
+`capture.sh` takes `HF_HUB_CACHE` from the caller: give an attention arm its linear arm's hub
+(`qwen_image both` the root hub, as `qwen_image mxfp8`; the other keys as in **Hub per lane**
+above), as `scripts/mx_attention/run_arms.sh`'s `hub()` does. An exported `DIFFLET_ATTN_QUANT` is
+unset, so only these two arms quantize attention, through their flag.
 
 | step | command | output |
 |---|---|---|
