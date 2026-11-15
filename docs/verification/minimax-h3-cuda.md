@@ -172,24 +172,26 @@ of three.
 
 | I2VA, 1x B200 | SSIM | PSNR | Warm request | vs vLLM-Omni |
 |---|---|---|---|---|
-| Difflet eager | 0.9770 | 35.02 dB | 305.4 s | 0.994x |
-| Difflet compiled | 0.9770 | 35.02 dB | 304.9 s | 0.993x |
-| vLLM-Omni eager | 0.9756 | 36.03 dB | 307.1 s | |
-| vLLM-Omni compiled | 0.9755 | 35.49 dB | 307.1 s | |
+| Difflet eager | 0.9770 | 35.02 dB | 301.2 s | 0.984x |
+| Difflet compiled | 0.9770 | 35.02 dB | 300.8 s | 0.985x |
+| vLLM-Omni eager | 0.9756 | 36.03 dB | 306.0 s | |
+| vLLM-Omni compiled | 0.9755 | 35.49 dB | 305.6 s | |
 
 All nine Difflet I2VA clips pass: four from each server and one from `difflet run`. Compiled
-output agrees with eager to within 2e-5 SSIM. An eager request spends 5.74 s per denoising
+output agrees with eager to within 2e-5 SSIM. An eager request spends 5.66 s per denoising
 step, 9.0 s decoding video, and under a second on the prompt, keyframe and audio.
 
 | | Ready | First request | Peak GPU memory |
 |---|---|---|---|
-| Difflet eager | 100 s | 311 s | 141.6 GiB |
-| Difflet compiled | 105 s | 310 s | 141.7 GiB |
-| vLLM-Omni eager | 105 s | 365 s | 130.6 GiB |
-| vLLM-Omni compiled | 90 s | 316 s | 131.1 GiB |
+| Difflet eager | 85 s | 307 s | 141.6 GiB |
+| Difflet compiled | 95 s | 306 s | 141.7 GiB |
+| vLLM-Omni eager | 95 s | 364 s | 130.6 GiB |
+| vLLM-Omni compiled | 75 s | 313 s | 131.1 GiB |
 
 Difflet's server loads every component and runs a short generation before it reports ready,
 which also compiles its blocks. Peak memory is the device's used memory, sampled every second.
+Difflet's peaks were sampled in an earlier session with the same checkpoint and precision;
+vLLM-Omni's peaks were the same to the MiB in both sessions.
 
 T2VA requests through both servers, and a compiled 10 s `difflet run`, returned H.264
 1344x768 at 24 fps with AAC 32 kHz stereo. T2VA is not part of the acceptance test; for
