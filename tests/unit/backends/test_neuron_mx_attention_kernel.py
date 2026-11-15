@@ -159,6 +159,13 @@ def test_the_reference_defaults_to_the_kernels_block_membership():
 
 # --- the kernel itself on the NKI simulator (CPU), small shapes ---------------------------------
 
+@pytest.fixture(autouse=True)
+def _trn3_b1_target(monkeypatch):
+    """Simulate as trn3 (B1): VectorE exp and the MX ops are trn3-only, and some flux test modules
+    set NEURON_PLATFORM_TARGET_OVERRIDE=trn2 at import, which a full-suite run would leak in."""
+    monkeypatch.setenv("NEURON_PLATFORM_TARGET_OVERRIDE", "trn3")
+
+
 def _simulate(kernel, q, k, v, bounds=(), lnc=1, **kwargs):
     import ml_dtypes
     import numpy as np
