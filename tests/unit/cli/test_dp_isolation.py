@@ -97,26 +97,3 @@ def test_mesh_dp1_builds_no_dp_group():
     spec = MeshSpec(dp=1, cfg=2, cp=1, tp=4)
     # dp axis groups are all singletons at dp=1 — nothing to communicate over.
     assert all(len(g) == 1 for g in spec.axis_groups("dp"))
-
-
-def test_worker_cli_args_forward_the_keyframes():
-    from difflet.cli.dp.router import worker_cli_args
-
-    args = argparse.Namespace(
-        model_id="m",
-        tp_degree=None,
-        cp_degree=None,
-        cp_mode=None,
-        height=None,
-        width=None,
-        num_frames=None,
-        steps=None,
-        guidance_scale=None,
-        seed=0,
-        cache_dir=None,
-        first_frame="first.png",
-        last_frame="last.png",
-    )
-    argv = worker_cli_args(args)
-    assert argv[argv.index("--first-frame") + 1] == "first.png"
-    assert argv[argv.index("--last-frame") + 1] == "last.png"

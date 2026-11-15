@@ -482,9 +482,8 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
         dest="first_frame",
         default=None,
         metavar="IMAGE",
-        help="MiniMax-H3: the keyframe the video starts from (FL2VA on the neuron backend: "
-        "the canvas follows its aspect ratio unless --height/--width are given; CUDA: I2VA, "
-        "resized to the output size)",
+        help="MiniMax-H3 on the neuron backend: the keyframe the video starts from (FL2VA; "
+        "the canvas follows its aspect ratio unless --height/--width are given)",
     )
     p.add_argument(
         "--last-frame",
@@ -492,7 +491,7 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
         default=None,
         metavar="IMAGE",
         help="MiniMax-H3 on the neuron backend: the keyframe the video ends on (FL2VA; alone or "
-        "with --first-frame). CUDA refuses it",
+        "with --first-frame)",
     )
     p.add_argument(
         "--torch-compile",

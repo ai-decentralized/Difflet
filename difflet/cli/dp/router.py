@@ -124,9 +124,6 @@ def worker_cli_args(args) -> list[str]:
         ("--true-cfg-scale", getattr(args, "true_cfg_scale", None)),
         # The default for requests without one of their own (a manifest line's wins).
         ("--negative-prompt", getattr(args, "negative_prompt", None)),
-        # Keyframes: a worker that lost them would run text-to-video instead.
-        ("--first-frame", getattr(args, "first_frame", None)),
-        ("--last-frame", getattr(args, "last_frame", None)),
     ):
         if value is not None:
             argv += [flag, str(value)]
