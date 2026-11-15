@@ -265,7 +265,6 @@ class FluxOrchestrator(ModelOrchestrator):
         import torch_neuronx  # noqa: F401  (registers the device; does not start the runtime)
 
         startup["import torch_neuronx"] = round(time.perf_counter() - mark, 2)
-        bench_timing.enable_compile_counters()  # before prepare_runtime, so every compile counts
         with bench_timing.span("load", stage="flux"):
             mark = time.perf_counter()
             from difflet.backends.registry import get_backend
@@ -386,7 +385,6 @@ class FluxOrchestrator(ModelOrchestrator):
 
         h, w = int(args.height or 1024), int(args.width or 1024)
         parallel = DiffletParallelConfig(tp_degree=1)
-        bench_timing.enable_compile_counters()  # before prepare_runtime, so every compile counts
         with bench_timing.span("load", stage="vae"):
             get_backend("neuron").prepare_runtime(parallel)
             root = resolve_model_path(_HF_MODEL_ID, revision=getattr(args, "revision", None),

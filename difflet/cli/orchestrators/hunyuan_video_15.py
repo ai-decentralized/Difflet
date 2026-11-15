@@ -223,7 +223,6 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
                                          cfg_parallel_enabled=bool(getattr(args, "cfg_parallel", False)),
                                          sp_enabled=bool(getattr(args, "sp_enabled", False)),
                                          cp_mode=(getattr(args, "cp_mode", None) or "ulysses") if cp > 1 else "gather_kv")
-        bench_timing.enable_compile_counters()  # before prepare_runtime, so every compile counts
         with bench_timing.span("load", stage="transformer"):
             get_backend("neuron").prepare_runtime(parallel)
             rank0 = not dist.is_initialized() or dist.get_rank() == 0
@@ -295,7 +294,6 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
         from difflet.backends.registry import get_backend
         from difflet.pipeline.parallel_config import DiffletParallelConfig
 
-        bench_timing.enable_compile_counters()  # before prepare_runtime, so every compile counts
         with bench_timing.span("load", stage="vae"):
             get_backend("neuron").prepare_runtime(DiffletParallelConfig(tp_degree=1))
             started = time.perf_counter()

@@ -271,7 +271,7 @@ def test_transformer_stage_records_bench_timing(monkeypatch, tmp_path):
     from difflet.utils import bench_timing as T
 
     for name, value in (("_handle", None), ("_handle_pid", None), ("_failed", False),
-                        ("enable_compile_counters", lambda: None), ("compile_counters", lambda: None),
+                        ("compile_counters", lambda: None),
                         ("device_memory", lambda: None)):  # no torch-neuronx probe in a unit test
         monkeypatch.setattr(T, name, value)
     monkeypatch.setenv(T.TIMING_ENV, str(tmp_path / "timing"))

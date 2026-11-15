@@ -740,7 +740,6 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
         from difflet.utils import bench_timing
 
         parallel = torchrun_parallel(args)
-        bench_timing.enable_compile_counters()  # before prepare_runtime, so every compile counts
         with bench_timing.span("load", stage="generate", component="runtime"):
             get_backend("neuron").prepare_runtime(parallel)
 

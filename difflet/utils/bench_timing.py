@@ -150,28 +150,22 @@ def new_request() -> None:
     _step_index = 0
 
 
-def enable_compile_counters() -> None:
-    """Turn on torch-neuronx's compilation-cache counters for this process (before the runtime
-    is prepared, so the first compile is counted). A no-op when timing is off."""
-    if not enabled():
-        return
-    try:
-        from torch_neuronx import metrics
-
-        metrics.set_enabled(True)
-    except Exception:  # noqa: BLE001 - not every torch-neuronx build ships metrics
-        pass
-
-
 _COUNTERS = ("TotalCompilations", "PersistentHits", "PersistentMisses", "InMemoryHits",
              "InMemoryMisses")
 
 
 def compile_counters() -> dict[str, int] | None:
-    """``CompilationCache.*`` counters (None when unavailable or never enabled)."""
+    """``CompilationCache.*`` counters, or None unless torch-neuronx metrics are already on.
+
+    bench does not turn them on: they come with the process-wide metrics (timers on every
+    recorded section), which cost a Qwen-Image generate about 2 s of load (2026-11-15). It tells
+    a compile by the NEFF files a launch adds to the cache instead; zeros reported while metrics
+    are off would read as "no rank compiled"."""
     try:
         from torch_neuronx import metrics
 
+        if not metrics.is_enabled():
+            return None
         return {name: int(metrics.get_counter_value(f"CompilationCache.{name}") or 0)
                 for name in _COUNTERS}
     except Exception:  # noqa: BLE001

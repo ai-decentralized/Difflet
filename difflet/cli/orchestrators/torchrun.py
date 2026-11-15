@@ -383,7 +383,6 @@ def run_generate_stage(args: argparse.Namespace, backend: str, *, tag: str, mode
     from difflet.utils import bench_timing
 
     parallel = torchrun_parallel(args)
-    bench_timing.enable_compile_counters()  # before prepare_runtime, so every compile counts
     start = time.perf_counter()
     with bench_timing.span("load", stage=tag):
         pipe = DiffletPipeline.from_pretrained(
@@ -502,7 +501,6 @@ def run_vae_stage(args: argparse.Namespace, *, build: Callable[[Any], Any],
     from difflet.utils import bench_timing
 
     parallel = DiffletParallelConfig(tp_degree=1)
-    bench_timing.enable_compile_counters()
     with bench_timing.span("load", stage="vae"):
         get_backend("neuron").prepare_runtime(parallel)
         decoder = build(parallel)
