@@ -273,8 +273,13 @@ def _rows(d: dict) -> None:
           f"two requests {'equal' if (q['deterministic'] or {}).get('bf16') else 'DIFFER'} | "
           f"`{(md5.get(f'{arm}/timed_1') or '-')[:8]}`; timed 2 and gen2 "
           f"{'equal' if (q['deterministic'] or {}).get(arm) else 'DIFFER'} | "
-          f"{'bit-identical' if lat and all(v.get('bit_identical') for v in lat.values()) else 'no latents' if not lat else 'DIFFER'}"
+          f"{'bit-identical' if lat and _identical(lat) else 'no latents' if not lat else 'DIFFER'}"
           f" | {_finite_text(q['arm_latents_finite'])} |")
+
+
+def _identical(d: dict) -> bool:
+    """Every ``bit_identical`` in compare_runs' latent blocks, nested per tensor (LTX-2)."""
+    return d["bit_identical"] if "bit_identical" in d else all(_identical(v) for v in d.values())
 
 
 def _finite_text(f: dict | None) -> str:
