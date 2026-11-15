@@ -28,7 +28,8 @@ from difflet.quant.spec import ATTN_QUANT_VARIANTS
 def load_op():
     """``difflet_neuron::mx_attention(q, k, v, bound_min, bound_max, scale, pv_mx, qk_mx) -> bf16``
     on ``[BH, S, d]`` (attention_cte's ``tp_q``/``tp_k`` layout), bounds int32 ``[BH, S_q, 1]`` or
-    None for an unbounded call; registered once, or None without the Neuron SDK."""
+    None for an unbounded call; registered once. Called only with the switch on, so an SDK that
+    cannot import the fork raises here: the run must not go on in bf16 under a quantized key."""
     try:
         return torch.ops.difflet_neuron.mx_attention  # already registered (module reload)
     except (AttributeError, RuntimeError):
@@ -38,8 +39,9 @@ def load_op():
         from torch_neuronx.nki_hop import nki_op
 
         from difflet.backends.neuron.ops_impl.mx_attention_kernel import mx_attention_fwd
-    except ImportError:
-        return None
+    except ImportError as exc:
+        raise ImportError(f"--attn-quant (DIFFLET_ATTN_QUANT) needs the MXFP8 attention kernel, "
+                          f"which needs torch-neuronx and nki: {exc}") from exc
     from difflet.backends.neuron.ops_impl.fp8_kernels import logical_cores
 
     kernel = wrap_nki(mx_attention_fwd)

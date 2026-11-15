@@ -32,6 +32,7 @@ from difflet.quant.spec import (
     DEFAULT_COMPUTE,
     FORMAT,
     QuantSpec,
+    attn_quant_variant,
 )
 from difflet.quant.targets import TARGETS_BY_MODEL, default_spec
 
@@ -97,6 +98,10 @@ def validate_quant(args: argparse.Namespace) -> None:
     quant = getattr(args, "quant", None)
     if quant is None and getattr(args, "quant_compute", None) is not None:
         _fail("--quant-compute needs --quant mxfp8.")
+    try:  # an exported DIFFLET_ATTN_QUANT (the flag, when given, has been exported over it)
+        attn_quant_variant()
+    except ValueError as exc:
+        _fail(str(exc))
     for flag, given in (("--quant", quant), ("--attn-quant", getattr(args, "attn_quant", None))):
         if given is not None:
             _validate_mxfp8_launch(args, flag)
@@ -120,6 +125,12 @@ def _validate_mxfp8_launch(args: argparse.Namespace, flag: str) -> None:
     if os.environ.get("UNSAFE_FP8FNCAST"):
         _fail(f"{flag}: unset UNSAFE_FP8FNCAST; it makes neuronx-cc mix the legacy fp8 type "
               "with OCP float8_e4m3fn (NCC_EOCP001).")
+    cp_mode = getattr(args, "cp_mode", None)
+    if flag == "--attn-quant" and (getattr(args, "cp_degree", None) or 1) > 1 and cp_mode in (
+            "ring", "ulysses"):
+        _fail(f"--attn-quant with --cp-mode {cp_mode}: ring and Ulysses context parallelism keep "
+              "every attention call bf16, so nothing would be quantized; use --cp-mode gather_kv "
+              "or no context parallelism.")
 
 
 def export_attn_quant(args: argparse.Namespace) -> None:

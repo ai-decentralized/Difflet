@@ -599,6 +599,42 @@ def test_attn_quant_is_independent_of_quant_and_refused_where_it_cannot_run(caps
     _refused(argparse.Namespace(**base), "UNSAFE_FP8FNCAST", capsys)
 
 
+@pytest.mark.parametrize("cp_mode, cp_degree, refused", [
+    ("ring", 2, True), ("ulysses", 2, True), ("gather_kv", 2, False), ("ring", 1, False),
+    ("ulysses", None, False)])
+def test_attn_quant_is_refused_where_context_parallelism_keeps_attention_bf16(
+        capsys, monkeypatch, cp_mode, cp_degree, refused):
+    """Ring and Ulysses send every self/joint attention call through their bf16 paths: the
+    flag would quantize nothing (and still fork the stage key)."""
+    for name in ("DIFFLET_BACKEND", "DIFFLET_EXEC_MODE", "UNSAFE_FP8FNCAST", "DIFFLET_ATTN_QUANT"):
+        monkeypatch.delenv(name, raising=False)
+    args = argparse.Namespace(model_id=QWEN, backend="neuron", quant=None, quant_compute=None,
+                              attn_quant="qk", exec_mode=None, teacache_speedup=None,
+                              cp_mode=cp_mode, cp_degree=cp_degree)
+    if refused:
+        _refused(args, f"--attn-quant with --cp-mode {cp_mode}", capsys)
+    else:
+        Q.validate_quant(args)
+    Q.validate_quant(argparse.Namespace(**{**vars(args), "attn_quant": None, "quant": "mxfp8"}))
+
+
+@pytest.mark.parametrize("value, refused", [("mxfp8", "no longer a value"), ("both", "'both'"),
+                                            ("", None), ("off", None), ("pv", None)])
+def test_the_driver_checks_an_exported_switch_before_anything_launches(
+        capsys, monkeypatch, value, refused):
+    """Without the flag an exported value is kept (BR34): the driver refuses a bad one in one
+    line, as its other refusals, not as a traceback from a cache key or a rank's import."""
+    for name in ("DIFFLET_BACKEND", "DIFFLET_EXEC_MODE", "UNSAFE_FP8FNCAST"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("DIFFLET_ATTN_QUANT", value)
+    args = argparse.Namespace(model_id=QWEN, backend="neuron", quant=None, quant_compute=None,
+                              attn_quant=None, exec_mode=None, teacache_speedup=None)
+    if refused:
+        _refused(args, refused, capsys)
+    else:
+        Q.validate_quant(args)
+
+
 def test_attn_quant_is_forwarded_only_when_given_to_stages_and_dp_workers():
     plain = _parse("generate", "--model-id", QWEN, "--backend", "neuron")
     assert "--attn-quant" not in Q.quant_cli_args(plain)
@@ -682,7 +718,8 @@ def test_the_attention_switch_values(monkeypatch):
 
     monkeypatch.delenv("DIFFLET_ATTN_QUANT", raising=False)
     assert S.attn_quant_variant() == "off"
-    for value, expect in (("off", "off"), (" QK ", "qk"), ("pv", "pv"), ("qk+pv", "qk+pv")):
+    for value, expect in (("off", "off"), ("", "off"), ("  ", "off"), (" QK ", "qk"), ("pv", "pv"),
+                          ("qk+pv", "qk+pv")):  # empty: `VAR= cmd` clears the switch
         monkeypatch.setenv("DIFFLET_ATTN_QUANT", value)
         assert S.attn_quant_variant() == expect
     assert S.ATTN_QUANT_VARIANTS == {"qk": (True, False), "pv": (False, True),
@@ -738,8 +775,9 @@ def test_quant_cache_fields_adds_the_variant_beside_the_spec(monkeypatch):
     spec = Q.quant_spec(_parse("generate", "--model-id", QWEN, "--quant", "mxfp8"))
     linear = quant_cache_fields(spec)
     assert quant_cache_fields(None) == {} and "attn_quant" not in linear
-    monkeypatch.setenv("DIFFLET_ATTN_QUANT", "off")
-    assert quant_cache_fields(None) == {} and quant_cache_fields(spec) == linear
+    for off in ("off", ""):  # empty is off: the keys stay today's
+        monkeypatch.setenv("DIFFLET_ATTN_QUANT", off)
+        assert quant_cache_fields(None) == {} and quant_cache_fields(spec) == linear
     monkeypatch.setenv("DIFFLET_ATTN_QUANT", "pv")
     assert quant_cache_fields(None) == {"attn_quant": "pv"}
     assert quant_cache_fields(spec) == {**linear, "attn_quant": "pv"}
