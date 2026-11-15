@@ -134,6 +134,19 @@ def test_a_neff_from_another_session_is_only_a_note_when_no_rank_compiled(tmp_pa
     assert "no rank of this run compiled" in run.launches[-1]["notes"][0]
 
 
+@pytest.mark.parametrize("compiled, primed", [(3, True), (0, False)])
+def test_prepare_primes_the_cache_only_when_it_compiled(tmp_path, host, compiled, primed):
+    host.evidence = [{"event": "evidence", "t_ns": 0, "rank": 0, "stage": "dit",
+                      "compile_counters": {"TotalCompilations": compiled}}]
+    run = _run(tmp_path, ["e2e_warm"])
+    run.start()
+    run.prepare()
+    names = [launch["name"] for launch in run.launches]
+    assert names == (["prepare", "prime"] if primed else ["prepare"])
+    if primed:  # the prime compiled too (same fake evidence): noted, not a failure
+        assert "first generate to compile" in run.launches[-1]["notes"][0]
+
+
 def test_quality_without_a_reference_is_invalid(tmp_path, host):
     record = RN.run_recipe(_run(tmp_path, ["quality"], quality_ref=None))
     quality = record["metrics"]["quality"]

@@ -341,7 +341,12 @@ class RecipeRun:
             shutil.rmtree(temp, ignore_errors=True)  # a full cache: never leave it behind
 
     def prepare(self) -> None:
-        """Compile into the persistent cache (a no-op on a warm cache); not a metric."""
+        """Compile into the persistent cache (a no-op on a warm cache); not a metric.
+
+        When that compile did compile something, one untimed generate (``prime``) follows:
+        ``difflet compile`` does not produce every graph a generate uses (FLUX at 1024: 24 more,
+        compiled by the first generate, 2026-11-15), and no sample may pay for them. What the
+        prime still had to compile is noted in its launch record."""
         record = self._launch("prepare", "compile", self.plan.compile_argv, cache_root=self.cache)
         failed = self._failed(record)
         if failed:
@@ -349,6 +354,18 @@ class RecipeRun:
         if self.provenance is not None:
             self.provenance["cache_manifests"] = provenance.cache_manifests(
                 self.cache, str(self.plan.recipe.args["model-id"]))
+        if not self._compiled(record):
+            return
+        argv, _ = self._generate_argv("prime")
+        prime = self._launch("prime", "generate", argv, cache_root=self.cache)
+        failed = self._failed(prime)
+        if failed:
+            raise RunAborted(f"the priming generate failed: {failed}")
+        compiled = self._compiled(prime)
+        if compiled:
+            prime.setdefault("notes", []).append(
+                "difflet compile left graphs for the first generate to compile: "
+                + "; ".join(compiled))
 
     def sample(self, metric: str) -> None:
         """One launch of ``e2e_cold`` or ``e2e_warm`` (which also carries dit_step and memory)."""
