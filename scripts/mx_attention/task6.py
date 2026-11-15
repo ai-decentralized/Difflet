@@ -27,7 +27,11 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import torch
+
+# CPU only: importing torch would autoload torch-neuronx, open /dev/neuron0 and make device 0
+# look busy to every fuser check on the host
+os.environ.setdefault("TORCH_DEVICE_BACKEND_AUTOLOAD", "0")
+import torch  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
 sys.path[:0] = [str(REPO / "scripts" / "profile_dit"), str(REPO / "scripts"), str(Path(__file__).parent)]

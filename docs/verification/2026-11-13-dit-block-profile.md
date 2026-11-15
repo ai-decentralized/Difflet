@@ -1306,9 +1306,17 @@ change under `difflet/`). G3 is reported, never applied, and nothing becomes a d
 **What ran** (`scripts/mx_attention/run_arms.sh`, one lane per key: one idle device, one CPU set):
 1. *Warm, untimed:* one 2-step `generate` per arm (the quantized arm's cold compile), all seven
    lanes at once on devices 1-7, CPUs 48-95,144-191 (NUMA node 1).
-2. *Timed:* once no compile of mine was left, bf16 then the quantized arm, back to back on the
-   lane's device and 48-thread CPU slice (`48-71,144-167` or `72-95,168-191`), two lanes at once
-   on node 1, one per slice. Each arm is one `generate` process with two identical requests
+2. *Timed:* bf16 then the quantized arm, back to back on one device and one 48-thread CPU
+   slice.
+   - Five of the seven pairs ran on node 0 from 00:53: devices 8 and 9, CPUs `0-23,96-119` and
+     `24-47,120-143`.
+   - Node 1 meanwhile still ran HunyuanVideo-1.5's bf16 cold compile (00:51-01:01) and the
+     HunyuanVideo / HunyuanVideo-1.5 captures (until 01:22).
+   - Wan 2.2 and HunyuanVideo-1.5 ran on node 1 from 01:22: devices 3 and 4, CPUs
+     `48-71,144-167` and `72-95,168-191`.
+   - NUMA separation held: no job of mine ran on a node while a pair there was timed (15e).
+
+   Each arm is one `generate` process with two identical requests
    (`--requests`); its step time is the median of the two requests' step medians, its spread
    (max - min) / median. `uptime` and every device's `fuser` are logged at each run's start and
    end (`<key>/runs.log`).
@@ -1355,6 +1363,11 @@ than 1% from the evidence's).
 Per block execution, ms; the binding engine and its share of the block. bf16 is Plan A's
 committed breakdown, the quantized arm this run's capture
 (`docs/verification/assets/2026-11-13-dit-block-profile/<key>/<arm>/`).
+
+Wan, HunyuanVideo and HunyuanVideo-1.5 compiled their bf16 blocks again in this session (new
+NEFF keys, 15e). For them, Plan A's bf16 capture stands in for this session's bf16 only on
+indirect evidence: this session's bf16 steps are within 0.03-0.30% of the evidence's, and
+section 14's switch-off identity holds.
 
 | model | arm | block | wall | TensorE | VectorE | ScalarE | GpSimd | HBM DMA | PSUM read-out copy / fused | binding |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -1410,7 +1423,7 @@ PSNR dB (worst frame) / SSIM / LPIPS, then latents cosine and rel L2 where the r
 | FLUX.1-dev | 26.58 / 0.947 / 0.034 | 22.59 / 0.908 / 0.098 (11c, A) | 29.4 dB on this image (6a) | 24.41 / 0.916 / 0.077; bf16 here 23.36, evidence bf16 23.36 / linear 21.30 | - |
 | LTX-2 | 21.76 (20.00) / 0.805 / 0.094 / cos 0.9886, rel L2 0.151 | 22.47 / 0.830 / 0.078 (11c, A) | 25.9 dB / 0.909 (3a) | 17.01 (15.51) / 0.494 / 0.193 / cos 0.9432, rel L2 0.344; bf16 here 16.55, evidence bf16 16.55 / linear 16.85 | LTX-2's routed call (video attn1) is unbounded: BR36 does not apply |
 | Wan 2.2 T2V A14B | 11.83 (10.88) / 0.215 / 0.439 / cos 0.8775, rel L2 0.496 | 14.29 (13.27) / 0.398 / 0.275 (12c, B) | 14.83 (13.74) / 0.439 / 0.254, tp8 | - | below the bf16 floor's resolution, not a quality reading |
-| HunyuanVideo-1.5 | 12.99 (12.51) / 0.213 / 0.499 / cos 0.7876, rel L2 0.665 | 12.65 (12.20) / 0.183 / 0.504 (12c, B) | 16.94 (15.94) / 0.362 / 0.326, tp4 x CFG2 | - | below the bf16 floor's resolution, not a quality reading; bounded calls: K smoothing averages over all keys, padding included (BR36) |
+| HunyuanVideo-1.5 | 12.99 (12.51) / 0.213 / 0.499 / cos 0.7876, rel L2 0.665 | not linear alone: 12c's former-default G1+G3 MXFP8 arm, 12.65 (12.20) / 0.183 / 0.504 (12c, B) | 16.94 (15.94) / 0.362 / 0.326, tp4 x CFG2 | - | below the bf16 floor's resolution, not a quality reading; bounded calls: K smoothing averages over all keys, padding included (BR36) |
 | Wan 2.1 T2V 14B | 15.82 (14.36) / 0.457 / 0.337 / cos 0.8728, rel L2 0.516 | 15.08 (12.96) / 0.391 / 0.351 (12c, B) | 22.75 (18.31) / 0.784 / 0.098, tp8 | - | - |
 | HunyuanVideo | 20.50 (13.34) / 0.818 / 0.243 / cos 0.9588, rel L2 0.288 | 26.46 (20.07) / 0.907 / 0.128 (7f, A) | none at this shape (320x512x61: 36.64 dB) | - | bounded calls: K smoothing averages over all keys, padding included (BR36) |
 <!-- 15c rows -->
@@ -1447,18 +1460,26 @@ bf16 above the quantized arm): each shows the prompt's subject with no noise.
   - devices 3 and 4 (node 1, `48-71,144-167` and `72-95,168-191`): Wan 2.2 and HunyuanVideo-1.5,
     from 01:22, once no compile or capture of mine was left on node 1.
 
-  Captures and quality scoring ran only on a node with no timed pair of mine.
+  NUMA separation held. The five node-0 pairs started at 00:53, while node 1 still ran
+  HunyuanVideo-1.5's bf16 cold compile (00:51-01:01) and the HunyuanVideo / HunyuanVideo-1.5
+  captures (until 01:22). Captures and quality scoring ran only on a node with no timed pair of
+  mine.
 - **Every timed process** ran with `DIFFLET_NEURON_PG_TIMEOUT_S=10800` and
-  `TORCH_NEURONX_NEFF_CACHE_LOCK_TIMEOUT=10800`, in both arms (no timed process compiled).
-  HunyuanVideo-1.5's `attn` cold compile needed them:
-  - its first warm lost rank 2's `neuronx-cc` to the kernel's OOM killer (F137) while six
-    lanes compiled;
-  - its second ran into the 1800 s collective watchdog: the block compiled for over 30 min
-    inside the first allgather;
-  - the third ran with the two timeouts raised and hit the cached NEFF.
+  `TORCH_NEURONX_NEFF_CACHE_LOCK_TIMEOUT=10800`, in both arms of every pair.
+- **One timed process compiled.** LTX-2's linear-alone (`mx`) process had no warm run of its
+  own, and Plan A's LTX-2 MXFP8 NEFFs missed. During its load-time warm-up forward
+  (01:29:20-01:29:48), before request 1, it compiled 4 NEFFs: one block per rank, 5.6 MB each.
+  The step times come from the requests, so no number changed.
+- **HunyuanVideo-1.5's `attn` warm took four attempts:**
+  1. `failed1`: rank 2's `neuronx-cc` was killed by the kernel's OOM killer (F137) while six
+     lanes compiled.
+  2. `stopped2`: relaunched, then stopped by me after 4 min to raise the NEFF-cache lock timeout.
+  3. `watchdog3`: lock timeout raised. The block compiled for over 30 min inside the first
+     allgather and ran into the 1800 s collective watchdog; the compile finished and was cached.
+  4. Final: both timeouts raised; it hit the NEFF that attempt 3 had cached.
 
-  HunyuanVideo's first `both` warm was restarted the same way: after 30 min its ranks broke the
-  NEFF-cache lock and compiled the same NEFF again.
+  HunyuanVideo's first `both` warm was restarted with the lock timeout raised. After 30 min its
+  ranks had broken the NEFF-cache lock and were compiling the same NEFF again.
 - **bf16 compiled again** for Wan, HunyuanVideo and HunyuanVideo-1.5: their bf16 blocks missed
   Plan A's NEFFs in the copied cache (Qwen-Image's and FLUX's hit). The cause was not looked
   into; the branch's code since Plan A is Task 5 / 5b's, whose switch-off identity (section 14)
@@ -1506,25 +1527,72 @@ bf16 above the quantized arm): each shows the prompt's subject with no noise.
   (HunyuanVideo) and 2,808 -> 2,875 ms (HunyuanVideo-1.5) per step, against 14-35% less on the
   other five. This fits section 11's quadrant concurrency and PE throttle findings.
 - **HunyuanVideo's dual-stream block grows 458 -> 704 ms, mostly outside the kernel.** Its
-  `attn_glue` time (almost all HBM DMA) doubles, 183 -> 387 ms per execution: four ~95 ms slices of two padded
-  tensors (`slice.429/435` of `pad.426`, `slice.430/436` of `pad.424`), against bf16's two (of
-  `pad.406`, section 4). The rows name `ops_impl/attention.py`'s bounded path. A likely cause is
-  that K, now smoothed before the padding, materializes a second padded tensor; this is not
-  verified here.
-- **Quality.**
-  - **Qwen-Image** loses most: 29.1 dB against bf16 (linear 38.3), and 29.1 dB against CPU fp32
-    where bf16 is 36.3 and linear 37.4. Its routed call is bounded, and K smoothing averages
-    over all keys, padding included (BR36).
-  - **FLUX** (26.6 dB against bf16, linear 22.6) and **LTX-2** (21.8, linear 22.5) are at or
-    above linear, and closer to fp32 than bf16 is (FLUX +1.1 dB, LTX-2 +0.5 dB; one FLUX image
-    of a chaotic sampler, section 6b). Both are unbounded.
-  - **HunyuanVideo** (bounded) drops to 20.5 dB against bf16 (linear 26.5; no floor at this
-    shape).
-  - **Wan 2.1** is at linear's level (15.8 against 15.1 dB); both arms are far below its 22.75 dB
-    floor.
+  `attn_glue` time (almost all HBM DMA) doubles, 183 -> 387 ms per execution: four ~95 ms slices
+  of two padded tensors (`slice.429/435` of `pad.426`, `slice.430/436` of `pad.424`), against
+  bf16's two (of `pad.406`, section 4).
+
+  Attention-module slice cost (BR3), ms per block execution, bf16 / quantized:
+
+  | Qwen-Image | FLUX | LTX-2 | Wan | HunyuanVideo dual | HunyuanVideo single | HunyuanVideo-1.5 |
+  |---|---|---|---|---|---|---|
+  | 0 / 0 | 0 / 0 | 0 / 0 | 0 / ~1.5 | 183.2 / 386.6 | 4.6 / 3.4 | 0.9 / 1.9 |
+
+  The review's read-only investigation of the captures attributes the dual block's extra cost:
+  - It is **not a second pad/slice round trip**.
+  - **Torch-side K smoothing** makes the compiler write K's per-chunk operand in 2-byte DMA
+    elements. This happens in the HunyuanVideo dual block only: +185 ms per dual execution,
+    3.71 s per step.
+  - **The kernel itself** adds +2.84 s per step.
+  - Without the K-glue cost, HunyuanVideo's both / bf16 would be about 1.15-1.17, and G3 would
+    still be not faster.
+
+  Already in bf16, the fp32 pre-scale of q on the bounded path costs 178 ms per dual block
+  (3.56 s per step). That is outside this plan.
+- **Quality, as measured on the device.**
+  - **Qwen-Image** loses most: 29.1 dB against bf16 (linear 38.3), and 29.1 dB against CPU fp32,
+    where bf16 is 36.3 and linear 37.4.
+  - **FLUX**: 26.6 dB against bf16 (linear 22.6); one image of a chaotic sampler (section 6b).
+  - **LTX-2**: 21.8 dB against bf16 (linear 22.5).
+  - FLUX and LTX-2 end closer to fp32 than bf16 does: FLUX +1.1 dB, LTX-2 +0.5 dB.
+  - **HunyuanVideo** drops to 20.5 dB against bf16 (linear 26.5; no floor at this shape).
+  - **Wan 2.1** is at linear's level (15.8 against 15.1 dB). Both arms are far below its
+    22.75 dB floor.
   - **Wan 2.2 and HunyuanVideo-1.5** are below the bf16 floor's resolution, not a quality
     reading.
+- **Where the error comes from: CPU-proxy evidence, not device measurements.** These findings
+  come from the review's read-only investigation on the CPU mirror, run on activations captured
+  from the models (scratch: `/home/ubuntu/.claude/jobs/3bceca85/tmp/review6/`).
+  - **No bounded-vs-unbounded split.** The data does not support one. FLUX's and LTX-2's floors
+    cannot resolve a loss of Qwen-Image's size. LTX-2's observed 21.76 dB matches the 21.72 dB
+    predicted from Qwen-Image's attention MSE.
+  - **QK^T on K-channel outliers.** The error follows QK^T in MXFP8 on K-channel outliers in
+    specific blocks:
+    - Qwen-Image blocks 0 and 58, where K channels 76/77 carry 55x the mean energy;
+    - HunyuanVideo dual block 1.
+  - **PV is minor.** On the Qwen-Image velocity proxy, PV's error is about 10x smaller.
+  - **BR36 is small**: about 0.2-0.3 dB, in Qwen-Image block 0 only. K smoothing over the
+    padded keys is not the cause of Qwen-Image's loss.
+  - **The probes' rel L2 measures fidelity, not quantization error.** Sections 13-14's ~2e-3 /
+    5e-3 is device against mirror. Against exact attention on N(0, 1) inputs, qk+pv is about
+    5.4%.
 
-  BR36's condition for a revisit (the bounded models clearly worse than the unbounded ones) is
-  met by Qwen-Image's 7.3 dB against fp32. It does not say that the padding in K's mean is the
-  cause: QK^T in MXFP8 is in the same arm.
+### 15h. The fork without MX flags against shipped attention_cte (ruling BR37)
+
+The routed op runs the fork with `allow_vector_exp=True`. With both MX flags off, that
+configuration must be shipped attention_cte (VectorE exp) bit for bit. Sections 11 and 14
+checked the fork with flags off against the rebalanced (ScalarE-exp) cte, and the routed variants
+against the fork; this pair had never been checked since Tasks 4a/4b.
+
+Method: `scripts/mx_attention/probe.py`, one process per arm on one logical core, `--runs 1`,
+the first output saved. The arms were `--impl fork --fork-vector-exp` (no `--qk-mx`/`--pv-mx`)
+and `--impl cte`, run on devices 1-6 (one arm each, all idle by `fuser`, 2026-11-15 04:47-05:12)
+from the tree at `4b223da0`. Outputs were compared as int16 views.
+
+| shape | output | differing elements | non-finite | rel L2 vs fp32 attention (both arms) |
+|---|---|---|---|---|
+| `qwen_1024` (bounded) | [6, 5120, 128] | 0: bit-identical | 0 | 2.880e-3 |
+| `wan_81f` (unbounded, 32,760 keys) | [10, 32760, 128] | 0: bit-identical | 0 | 3.106e-3 |
+| `hv1_L` (bounded, head chunks) | [6, 67576, 128] | 0: bit-identical | 0 | 4.509e-3 |
+
+Outputs: `/mnt/nvme/difflet-mxattn/task6/ident/` (`ident.sh`, `cmp.py`, `ident.json`,
+`runs.log`).
