@@ -59,8 +59,6 @@ class Sampler:
     """``neuron-monitor`` in the background for the duration of a ``with`` block."""
 
     cores: set[int]
-    #: CPUs to run neuron-monitor on: off the lane's, so sampling does not load the measurement.
-    cpus: list[int] = field(default_factory=list)
     samples: list[Sample] = field(default_factory=list)
     error: str = ""
     _proc: subprocess.Popen | None = None
@@ -72,14 +70,10 @@ class Sampler:
         json.dump(CONFIG, handle)
         handle.close()
         self._config = Path(handle.name)
-        command = ["neuron-monitor", "-c", str(self._config)]
-        if self.cpus:
-            from difflet.bench.host import format_cpu_list
-
-            command = ["taskset", "-c", format_cpu_list(self.cpus), *command]
         try:
-            self._proc = subprocess.Popen(command, stdout=subprocess.PIPE,
-                                          stderr=subprocess.DEVNULL, text=True, bufsize=1)
+            self._proc = subprocess.Popen(["neuron-monitor", "-c", str(self._config)],
+                                          stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                                          text=True, bufsize=1)
         except OSError as exc:
             self.error = f"neuron-monitor could not start: {exc}"
             return self

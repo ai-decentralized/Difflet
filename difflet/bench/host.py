@@ -383,11 +383,19 @@ def device_holders(devices: Iterable[int]) -> dict[int, list[dict[str, object]]]
         opened = _open_neuron_devices(pid)
         if not opened & wanted:
             continue
+        who = _who(pid)
+        if who["comm"] in MONITOR_TOOLS:
+            continue
         cores = _environ_value(pid, "NEURON_RT_VISIBLE_CORES")
         for d in opened & wanted:
             if uses_device(d, opened, cores, device0):
-                out[d].append({**_who(pid), "NEURON_RT_VISIBLE_CORES": cores})
+                out[d].append({**who, "NEURON_RT_VISIBLE_CORES": cores})
     return out
+
+
+#: Neuron tools that open every /dev/neuronN to read counters and run nothing on a device (another
+#: lane's memory sampler is a neuron-monitor).
+MONITOR_TOOLS = frozenset({"neuron-monitor", "neuron-top", "neuron-ls"})
 
 
 # --------------------------------------------------------------------------------------- CPUs

@@ -100,6 +100,20 @@ def test_uses_device_neuron0_rule(device, opened, cores, expect):
     assert H.uses_device(device, opened, cores, device0_cores=(0, 1, 2, 3)) is expect
 
 
+def test_device_holders_ignore_neuron_monitor(monkeypatch):
+    table = {"instance_type": "trn3.48xlarge",
+             "devices": {0: H.Device(0, (0, 1, 2, 3), 1, "48-95"),
+                         8: H.Device(8, (32, 33, 34, 35), 0, "0-47")}}
+    monkeypatch.setattr(H, "topology", lambda: table)
+    monkeypatch.setattr(H, "_proc_ids", lambda: [10, 11])
+    monkeypatch.setattr(H, "_open_neuron_devices", lambda pid: {0, 8})
+    monkeypatch.setattr(H, "_environ_value", lambda pid, name: "32-35" if pid == 11 else None)
+    monkeypatch.setattr(H, "_who", lambda pid: {"pid": pid, "uid": 1000,
+                                                "comm": "neuron-monitor" if pid == 10 else "python"})
+    holders = H.device_holders([8])
+    assert [h["pid"] for h in holders[8]] == [11]  # the sampler of another lane is not a holder
+
+
 def test_busy_fraction():
     before = {0: (100, 1000), 1: (100, 1000)}
     after = {0: (150, 1100), 1: (100, 1100)}

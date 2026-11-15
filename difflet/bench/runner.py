@@ -236,8 +236,9 @@ class RecipeRun:
         before = provenance.host_state(cache_root, lane.devices)
         sampler = None
         if sample_memory:
-            others = sorted(set(H.online_cpus()) - set(lane.cpus))
-            sampler = M.Sampler(lane.core_ids, cpus=others)  # off the lane's CPUs
+            # Unpinned: "every CPU but this lane's" would be another lane's CPUs, and a process
+            # pinned onto them fails that lane's idle check. Unpinned, it is not a pin conflict.
+            sampler = M.Sampler(lane.core_ids)
         if sampler is not None:
             sampler.__enter__()
         try:
@@ -371,10 +372,10 @@ class RecipeRun:
         """One launch of ``e2e_cold`` or ``e2e_warm`` (which also carries dit_step and memory)."""
         self._counter += 1
         name = f"{metric}_{self._counter}"
+        idle = self._check_idle(name)  # before touching anyone's page cache
         self.ran.add(metric)
         if metric == "e2e_warm":
             self.ran.update(WARM_CARRIED & set(self.config.metrics))
-        idle = self._check_idle(name)  # before touching anyone's page cache
         files = self.weight_files()
         argv, out = self._generate_argv(name)
         before_resident, total = pagecache.residency(files)
