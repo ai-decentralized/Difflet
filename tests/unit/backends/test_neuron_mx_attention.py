@@ -131,19 +131,43 @@ def test_each_variant_reaches_the_op_with_its_flags(routed, monkeypatch, variant
 
 
 @pytest.mark.parametrize("case", ["causal", "head_dim_64", "mx_false", "fp16", "cross_attention",
-                                  "dense_bhsd"])
-def test_calls_outside_the_routed_set_stay_bf16(routed, case):
+                                  "dense_bhsd", "masked", "public_cross_attention"])
+def test_calls_outside_the_routed_set_stay_bf16(routed, monkeypatch, case):
+    """The MX op takes no mask: a masked call (HunyuanVideo's refiner, Qwen's masked joint path)
+    must stay off it, as must the public ``difflet.ops.cross_attention``."""
     q, k, v = _qkv(d=64 if case == "head_dim_64" else D,
                    dtype=torch.float16 if case == "fp16" else torch.bfloat16)
+    sdpa = []
+    if case == "masked":  # a masked call goes through SDPA, never a kernel
+        real = attn.F.scaled_dot_product_attention
+        monkeypatch.setattr(attn.F, "scaled_dot_product_attention",
+                            lambda *a, **kw: sdpa.append(kw["attn_mask"]) or real(*a, **kw))
     with torch.no_grad():
         if case == "cross_attention":  # its [.., d, S] layout
             attn.cross_attention(q.transpose(1, 2), k.transpose(1, 2), v, scale=SCALE)
+        elif case == "public_cross_attention":  # difflet/ops/attention.py's own function
+            import importlib.util  # a private copy: importing the submodule would shadow the
+            from pathlib import Path  # lazily resolved difflet.ops.attention for other tests
+
+            import difflet
+
+            spec = importlib.util.spec_from_file_location(
+                "_public_attention", Path(difflet.__file__).parent / "ops" / "attention.py")
+            public = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(public)
+            monkeypatch.setattr(public, "_load", lambda name: getattr(attn, name))
+            public.cross_attention(q.transpose(1, 2), k.transpose(1, 2), v, scale=SCALE)
         elif case == "dense_bhsd":
             attn._dense_bhsd(q[None], k[None], v[None], scale=SCALE)
+        elif case == "masked":
+            mask = torch.ones(1, S, S, dtype=torch.bool)
+            attn.attention(q, k, v, scale=SCALE, attention_mask=mask, tp_q=True, tp_k=True)
         else:
             attn.attention(q, k, v, scale=SCALE, causal=case == "causal", tp_q=True, tp_k=True,
                            mx=case != "mx_false")
-    assert routed.mx == [] and routed.bf16 == ["unbounded"]
+    assert routed.mx == []
+    assert routed.bf16 == ([] if case == "masked" else ["unbounded"])
+    assert len(sdpa) == (case == "masked")
 
 
 @pytest.fixture
@@ -423,6 +447,37 @@ def test_the_switch_needs_trn3_and_compile_mode_on_a_dit(monkeypatch):
     ToyApplication(device="cpu", exec_mode="eager")  # no MXFP8 layers (a VAE, an encoder): no check
     monkeypatch.setattr(attn, "ATTN_QUANT", "off")
     Dit(device="cpu", exec_mode="eager")
+
+
+@pytest.mark.parametrize("path, cause", [("auto", "no self/joint attention call qualified"),
+                                         ("sdpa", "DIFFLET_NEURON_ATTENTION=sdpa")])
+def test_a_dit_warmup_that_routes_nothing_raises_naming_the_cause(monkeypatch, path, cause):
+    """An explicit --attn-quant that quantizes nothing (ring / Ulysses CP, the sdpa switch, no
+    eligible call) must not run on as bf16 under the quantized cache key."""
+    Dit = _dit_application()
+    monkeypatch.setattr(mx_attention, "_CALLS", Counter())
+    monkeypatch.setattr(mx_attention, "_LOGGED", False)
+    monkeypatch.setattr(attn, "ATTN_QUANT", "qk")
+    monkeypatch.setattr(attn, "_ATTENTION_PATH", path)
+    app = Dit(device="cpu", exec_mode="compile")
+    app.module = torch.nn.Identity()
+    with pytest.raises(RuntimeError, match=r"DIFFLET_ATTN_QUANT=qk .*routed no attention call") as e:
+        app.warmup()
+    assert cause in str(e.value)
+    monkeypatch.setattr(attn, "ATTN_QUANT", "off")
+    app.warmup()  # off: nothing is checked
+
+
+def test_the_op_loader_raises_when_the_kernel_cannot_import(monkeypatch):
+    """load_op runs only with the switch on: a missing kernel is an error, not bf16."""
+    try:
+        torch.ops.difflet_neuron.mx_attention
+        pytest.skip("the op is registered in this process")
+    except (AttributeError, RuntimeError):
+        pass
+    monkeypatch.setitem(sys.modules, "difflet.backends.neuron.ops_impl.mx_attention_kernel", None)
+    with pytest.raises(ImportError, match="--attn-quant"):
+        mx_attention.load_op()
 
 
 def test_a_dit_warmup_logs_the_routed_calls_once(monkeypatch, capsys):

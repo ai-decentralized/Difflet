@@ -216,6 +216,16 @@ def _load_flash_bounded_op(vector_exp: bool = True):
     return flash_attention_bounded
 
 
+def mx_unrouted_reason() -> str:
+    """Why a DiT under ``DIFFLET_ATTN_QUANT`` routed no call to the MXFP8 op (the warm-up's
+    check, ``application_base``)."""
+    if _ATTENTION_PATH == "sdpa":
+        return f"{ATTENTION_PATH_ENV}=sdpa sends every attention call through SDPA"
+    return ("no self/joint attention call qualified: ring and Ulysses context parallelism keep "
+            "attention bf16, as do causal, masked, non-bf16 and head-dim != 128 calls and a DiT "
+            "off the NeuronCores")
+
+
 def _routes_to_mx(q, k, v, causal: bool, attention_mask) -> bool:
     """The calls the MXFP8 fork takes: non-causal, unmasked (bounds aside), bf16, head dim 128,
     within the flash kernel's limits (``_can_use_flash_kernel``)."""

@@ -385,9 +385,15 @@ class TorchNeuronApplicationBase(torch.nn.Module):
                 torch.neuron.synchronize()
         self.phase_seconds["warmup forward"] = time.perf_counter() - start
         self.warmup_shapes = [tuple(arg.shape) for arg in args]
-        if self._attn_quant() and self.rank == 0:
-            # the warm-up traced them (plan Review Focus 5)
-            mx_attention.log_routed_calls(attention.ATTN_QUANT)
+        if self._attn_quant():
+            if self.rank == 0:  # the warm-up traced them (plan Review Focus 5)
+                mx_attention.log_routed_calls(attention.ATTN_QUANT)
+            if not mx_attention.mx_attention_calls():  # every rank traced the same graph
+                raise RuntimeError(
+                    f"DIFFLET_ATTN_QUANT={attention.ATTN_QUANT} (--attn-quant): "
+                    f"{type(self).__name__}'s warm-up routed no attention call to the MXFP8 "
+                    "kernel, so it would run bf16 attention under the quantized cache key: "
+                    f"{attention.mx_unrouted_reason()}.")
         if self.exec_mode == "compile":
             self._compiled_shapes.add(_shape_key(args, {}))
 

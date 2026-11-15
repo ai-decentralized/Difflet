@@ -194,9 +194,9 @@ ATTN_QUANT_VARIANTS: dict[str, tuple[bool, bool]] = {
 
 
 def attn_quant_variant() -> str:
-    """``DIFFLET_ATTN_QUANT`` as ``"off"`` (unset or ``off``) or a variant name; anything else
-    raises, naming the variable and its values."""
-    value = os.environ.get(ATTN_QUANT_ENV, "off").strip().lower()
+    """``DIFFLET_ATTN_QUANT`` as ``"off"`` (unset, empty or ``off``) or a variant name; anything
+    else raises, naming the variable and its values."""
+    value = os.environ.get(ATTN_QUANT_ENV, "").strip().lower() or "off"  # VAR= cmd clears it
     if value != "off" and value not in ATTN_QUANT_VARIANTS:
         hint = " ('mxfp8' is no longer a value: its QK-only is 'qk')" if value == "mxfp8" else ""
         raise ValueError(f"{ATTN_QUANT_ENV} must be unset, 'off', 'qk', 'pv' or 'qk+pv', got "
