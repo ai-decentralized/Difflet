@@ -1345,6 +1345,7 @@ than 1% from the evidence's).
 | FLUX.1-dev | 221.4 (0.09%) | 194.4 (0.10%) | 0.878 | 0.827 (11b, host A) | 2.0% | both / bf16 < linear / bf16 - J: 0.807 -> not faster | +0.00% |
 | LTX-2 | 1,286.0 (0.23%) | 991.2 (0.03%) | 0.771 | 0.752 (this session) | 2.0% | both / bf16 < linear / bf16 - J: 0.732 -> not faster | -0.34% |
 | Wan 2.2 T2V A14B | 10,120.5 (0.03%) | 11,270.0 (0.01%) | 1.114 | 0.981 (12b, host B) | 2.0% | both / bf16 < linear / bf16 - J: 0.961 -> not faster | -0.30% |
+| HunyuanVideo-1.5 | 9,918.5 (0.01%) | 12,092.0 (0.00%) | 1.219 | - | 2.0% | attn / bf16 < 1 - J: 0.980 -> not faster | +0.03% |
 <!-- 15a rows -->
 
 ### 15b. Block profile
@@ -1365,6 +1366,8 @@ committed breakdown, the quantized arm this run's capture
 | LTX-2 | both | blk1 (block) x96 | 10.40 | 6.28 | 5.58 | 2.53 | 0.32 | 2.50 | 2.37 / 2.28 | tensor 60.4% |
 | Wan 2.2 T2V A14B | bf16 | blk1 (block) x80 | 126.25 | 91.37 | 80.54 | 17.03 | 5.99 | 25.17 | 9.56 / 46.61 | tensor 72.4% |
 | Wan 2.2 T2V A14B | both | blk1 (block) x80 | 140.18 | 91.02 | 102.34 | 41.54 | 2.03 | 30.91 | 35.78 / 47.98 | vector 73.0% |
+| HunyuanVideo-1.5 | bf16 | blk1 (block) x54 | 182.56 | 117.43 | 142.90 | 15.50 | 4.83 | 41.30 | 6.80 / 87.75 | vector 78.3% |
+| HunyuanVideo-1.5 | attn | blk1 (block) x54 | 222.96 | 158.11 | 171.02 | 68.96 | 5.49 | 41.79 | 59.76 / 88.28 | vector 76.7% |
 <!-- 15b rows -->
 
 Routed attention (`attn` / `attn1`) per step, by phase and engine (T TensorE, V VectorE, S
@@ -1381,6 +1384,8 @@ component's engine time per step (summed over engines) and V's quantization shar
 | LTX-2 | both | T 57.1 | V 115.3, G 5.9 | V 59.6 | T 35.6, V 4.0 | T 12.9, V 5.9, S 8.4, H 2.4 | V 1.4, G 3.2, H 0.5 | T 87.6, V 39.6, S 66.3 | T 1.3, V 1.0, S 0.2, G 2.4, H 13.8 | 613.3 | 0.8% |
 | Wan 2.2 T2V A14B | bf16 | T 2726.6 | V 3360.7, S 130.2, G 394.1 | V 1614.7 | T 3649.6, V 90.6 | - | - | - | T 2.1, V 34.0, S 185.1, G 393.9, H 1246.0 | 12218.9 | - |
 | Wan 2.2 T2V A14B | both | T 1769.5 | V 3413.7, S 129.8, G 63.9 | V 1642.4 | T 915.5, V 108.1 | T 346.2, V 103.4, S 168.1, G 2.6, H 44.5 | V 8.6, G 18.3, H 2.7 | T 2611.1, V 1114.6, S 1948.0, G 14.3 | T 3.3, V 3.8, S 0.2, G 69.8, H 1270.9 | 14699.9 | 0.2% |
+| HunyuanVideo-1.5 | bf16 | T 2807.7 | V 5039.0, S 220.0, G 73.5 | V 2123.1 | T 4523.7, V 138.9 | - | - | - | T 0.5, V 36.0, S 17.7, G 78.9, H 2015.1 | 15549.4 | - |
+| HunyuanVideo-1.5 | attn | T 2875.4 | V 5028.8, S 219.9, G 99.3 | V 2166.2 | T 1757.3, V 164.8 | T 452.5, V 153.6, S 240.7, G 0.5, H 63.9 | V 6.9, G 15.5, H 2.3 | T 4250.3, V 1685.3, S 2699.0, G 37.2 | T 0.8, V 1.5, S 0.1, G 97.6, H 1998.5 | 21637.6 | 0.1% |
 <!-- 15b phase rows -->
 
 ### 15c. Quality
@@ -1393,6 +1398,7 @@ PSNR dB (worst frame) / SSIM / LPIPS, then latents cosine and rel L2 where the r
 | FLUX.1-dev | 26.58 / 0.947 / 0.034 | 22.59 / 0.908 / 0.098 (11c, A) | 29.4 dB on this image (6a) | 24.41 / 0.916 / 0.077; bf16 here 23.36, evidence bf16 23.36 / linear 21.30 | - |
 | LTX-2 | 21.76 (20.00) / 0.805 / 0.094 / cos 0.9886, rel L2 0.151 | 22.47 / 0.830 / 0.078 (11c, A) | 25.9 dB / 0.909 (3a) | 17.01 (15.51) / 0.494 / 0.193 / cos 0.9432, rel L2 0.344; bf16 here 16.55, evidence bf16 16.55 / linear 16.85 | LTX-2's routed call (video attn1) is unbounded: BR36 does not apply |
 | Wan 2.2 T2V A14B | 11.83 (10.88) / 0.215 / 0.439 / cos 0.8775, rel L2 0.496 | 14.29 (13.27) / 0.398 / 0.275 (12c, B) | 14.83 (13.74) / 0.439 / 0.254, tp8 | - | below the bf16 floor's resolution, not a quality reading |
+| HunyuanVideo-1.5 | 12.99 (12.51) / 0.213 / 0.499 / cos 0.7876, rel L2 0.665 | 12.65 (12.20) / 0.183 / 0.504 (12c, B) | 16.94 (15.94) / 0.362 / 0.326, tp4 x CFG2 | - | below the bf16 floor's resolution, not a quality reading; bounded calls: K smoothing averages over all keys, padding included (BR36) |
 <!-- 15c rows -->
 
 ### 15d. Determinism and provenance
@@ -1406,4 +1412,5 @@ bytes hold its own name): its second request and its `gen2` process against its 
 | FLUX.1-dev | `67da9e98` (= evidence `67da9e98`, 11c, A); two requests equal | `c18e7bc5`; timed 2 and gen2 equal | no latents | no latents kept |
 | LTX-2 | `0702ffd2` (= evidence `0702ffd2`, 11c, A); two requests equal | `da882704`; timed 2 and gen2 equal | bit-identical | finite |
 | Wan 2.2 T2V A14B | `5b443ec6` (!= evidence `ee61e12e`, 12c, B); two requests equal | `3192daae`; timed 2 and gen2 equal | bit-identical | finite |
+| HunyuanVideo-1.5 | `30903b0f` (!= evidence `d3ef0f1c`, 12c, B, 96 threads); two requests equal | `ec701ae5`; timed 2 and gen2 equal | bit-identical | finite |
 <!-- 15d rows -->

@@ -1,0 +1,11 @@
+{
+ "neff_name": "neff_845698011371000_vnc_0.neff",
+ "sha256": "21fc98a353ecc317072c118406f2c1d14f4a87fa8319c29fd7c9df99273d6283",
+ "ranks": [
+  "/mnt/nvme/difflet-mxattn/task6/prof/hv15_official/attn/dump/i-0882eb59ff5d391e1_pid_1966561/1794704659665996766/neff_845698011371000_vnc_0.neff",
+  "/mnt/nvme/difflet-mxattn/task6/prof/hv15_official/attn/dump/i-0882eb59ff5d391e1_pid_1966562/1794704668089907938/neff_845698011371000_vnc_0.neff"
+ ],
+ "kind": "block",
+ "per_rank": false,
+ "dge_notifs": true
+}
