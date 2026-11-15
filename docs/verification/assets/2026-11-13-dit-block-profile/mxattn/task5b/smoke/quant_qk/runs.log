@@ -1,0 +1,10 @@
+2026-11-14 19:41:33 start --attn-quant qk --quant mxfp8 steps=10 dev=9 cores=36-39 cpus=0-7,96-103 shell DIFFLET_ATTN_QUANT=unset attention.py=3ec9f73099f5d799 uptime:  19:41:33 up 8 days,  5:05,  8 users,  load average: 0.13, 2.19, 19.17
+2026-11-14 19:41:34 fuser /dev/neuron9 exit 1
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/root       1.9T  1.9T   62G  97% /
+/dev/md0        7.0T  6.4T  561G  93% /mnt/nvme
+2026-11-14 19:43:24 exit 0 uptime:  19:43:24 up 8 days,  5:06,  8 users,  load average: 40.77, 16.57, 22.48
+2026-11-14 19:43:25 fuser after: exit 1
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/root       1.9T  1.9T   62G  97% /
+/dev/md0        7.0T  6.4T  561G  93% /mnt/nvme

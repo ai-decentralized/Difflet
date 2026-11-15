@@ -1,0 +1,61 @@
+2026-11-15 01:34:48.6 <frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+2026-11-15 01:34:48.8 [dp-router] worker 0: cores 36-39
+2026-11-15 01:34:48.8 <frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+2026-11-15 01:34:48.9 [wan] backend 'neuron' compiles into --cache-dir: DIFFLET_COMPILE_CACHE=/mnt/nvme/difflet-mxattn/task6/cache/video (NEFF and HLO caches under /mnt/nvme/difflet-mxattn/task6/cache/video/neuron)
+2026-11-15 01:34:51.3 
+2026-11-15 01:34:51.3 *****************************************
+2026-11-15 01:34:51.3 Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+2026-11-15 01:34:51.3 *****************************************
+2026-11-15 01:35:01.6 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-15 01:35:01.6   _warn_trace_cache_once()
+2026-11-15 01:35:11.8 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-15 01:35:11.8   _warn_trace_cache_once()
+2026-11-15 01:35:11.8 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-15 01:35:11.8   _warn_trace_cache_once()
+2026-11-15 01:35:11.8 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-15 01:35:11.8   _warn_trace_cache_once()
+2026-11-15 01:38:50.8 [weight store] rank 2/4 NeuronWanTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (7.50 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/38ec498cb3208fb688890f8cc7e94ede2cbd7f68__transformer__bfloat16__tp4__0f5b3d9197b5ec5a)
+2026-11-15 01:38:50.8 [weight store] rank 1/4 NeuronWanTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (7.50 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/38ec498cb3208fb688890f8cc7e94ede2cbd7f68__transformer__bfloat16__tp4__0f5b3d9197b5ec5a)
+2026-11-15 01:38:50.8 [weight store] rank 0/4 NeuronWanTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (7.50 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/38ec498cb3208fb688890f8cc7e94ede2cbd7f68__transformer__bfloat16__tp4__0f5b3d9197b5ec5a)
+2026-11-15 01:38:50.8 [weight store] rank 3/4 NeuronWanTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (7.50 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/38ec498cb3208fb688890f8cc7e94ede2cbd7f68__transformer__bfloat16__tp4__0f5b3d9197b5ec5a)
+2026-11-15 01:40:05.2 [weight store] rank 2/4 NeuronWanTextEncoderApplication: hit 2.84 GB in 0.9 s (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/Wan-AI--Wan2.1-T2V-14B-Diffusers__text_encoder__38ec498c__bfloat16__tp4__91b0beceaabd499e)
+2026-11-15 01:40:05.3 [weight store] rank 3/4 NeuronWanTextEncoderApplication: hit 2.84 GB in 1.0 s (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/Wan-AI--Wan2.1-T2V-14B-Diffusers__text_encoder__38ec498c__bfloat16__tp4__91b0beceaabd499e)
+2026-11-15 01:40:05.5 [weight store] rank 0/4 NeuronWanTextEncoderApplication: hit 2.84 GB in 1.2 s (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/Wan-AI--Wan2.1-T2V-14B-Diffusers__text_encoder__38ec498c__bfloat16__tp4__91b0beceaabd499e)
+2026-11-15 01:40:05.6 [weight store] rank 1/4 NeuronWanTextEncoderApplication: hit 2.84 GB in 1.3 s (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/Wan-AI--Wan2.1-T2V-14B-Diffusers__text_encoder__38ec498c__bfloat16__tp4__91b0beceaabd499e)
+2026-11-15 01:40:07.8 [wan] start-up: from_pretrained (prepare_runtime + build) 19.73 s; load 294.4 s by component {'runtime init': 0.10783401294611394, 'build on meta': 0.15272191807162017, 'load checkpoint': 217.08806938794442, 'eval': 0.007782959961332381, 'compile': 0.5028867470100522, 'warmup forward': 72.78527099394705, 'text_encoder runtime init': 0.002162447082810104, 'text_encoder build on meta': 0.02902383403852582, 'text_encoder load checkpoint': 1.2728680790169165, 'text_encoder eval': 0.004393444978632033, 'text_encoder compile': 0.007334774010814726, 'text_encoder warmup forward': 1.761104021104984}
+2026-11-15 01:48:34.8 [wan] request: 507.03 s; to the first step's end 11.31 s (prompt encode + step 1); step median 10114.8 ms (n=49, max 10149.2); after the last step 0.00 s
+2026-11-15 01:48:34.8 [wan] latents saved to /mnt/nvme/difflet-mxattn/task6/wan21_official/bf16/work_timed/worker_0/latents_req0000.pt
+2026-11-15 01:57:01.3 [wan] request: 506.46 s; to the first step's end 10.21 s (prompt encode + step 1); step median 10126.8 ms (n=49, max 10156.5); after the last step 0.00 s
+2026-11-15 01:57:01.3 [wan] latents saved to /mnt/nvme/difflet-mxattn/task6/wan21_official/bf16/work_timed/worker_0/latents_req0001.pt
+2026-11-15 01:57:01.3 [wan] neuron rank 1/4: exec_mode=compile compiled_blocks=64 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 314.1s, stage 1327.6s
+2026-11-15 01:57:01.3 [wan] neuron rank 2/4: exec_mode=compile compiled_blocks=64 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 314.1s, stage 1327.6s
+2026-11-15 01:57:01.3 [wan] neuron rank 3/4: exec_mode=compile compiled_blocks=64 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 314.1s, stage 1327.6s
+2026-11-15 01:57:01.3 [wan] neuron rank 0/4: exec_mode=compile compiled_blocks=64 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 314.1s, stage 1327.6s
+2026-11-15 01:57:20.0 [weight store] rank 0/1 NeuronWanVaeDecoderApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (0.29 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/Wan-AI--Wan2.1-T2V-14B-Diffusers__vae__38ec498c__float32__tp1__9735280170de60e7)
+2026-11-15 01:57:44.5 [wan] video saved to /mnt/nvme/difflet-mxattn/task6/wan21_official/bf16/timed_1.mp4
+2026-11-15 01:58:04.9 [wan] video saved to /mnt/nvme/difflet-mxattn/task6/wan21_official/bf16/timed_2.mp4
+2026-11-15 01:58:06.9 [dp-router] done=2 failed=0 unfinished=0
+2026-11-15 01:58:06.9 	Command being timed: "taskset -c 24-47,120-143 env /home/ubuntu/venvs/native-fp8/bin/python -m difflet.cli.main generate --backend neuron --model-id Wan-AI/Wan2.1-T2V-14B-Diffusers --revision 38ec498cb3208fb688890f8cc7e94ede2cbd7f68 --height 480 --width 832 --num-frames 81 --tp-degree 4 --cache-dir /mnt/nvme/difflet-mxattn/task6/cache/video --steps 50 --seed 42 --guidance-scale 5.0 --negative-prompt Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards --requests /mnt/nvme/difflet-mxattn/task6/wan21_official/bf16/requests.jsonl --work-dir /mnt/nvme/difflet-mxattn/task6/wan21_official/bf16/work_timed --keep-work-dir"
+2026-11-15 01:58:06.9 	User time (seconds): 3557.43
+2026-11-15 01:58:06.9 	System time (seconds): 1218.01
+2026-11-15 01:58:06.9 	Percent of CPU this job got: 341%
+2026-11-15 01:58:06.9 	Elapsed (wall clock) time (h:mm:ss or m:ss): 23:18.34
+2026-11-15 01:58:06.9 	Average shared text size (kbytes): 0
+2026-11-15 01:58:06.9 	Average unshared data size (kbytes): 0
+2026-11-15 01:58:06.9 	Average stack size (kbytes): 0
+2026-11-15 01:58:06.9 	Average total size (kbytes): 0
+2026-11-15 01:58:06.9 	Maximum resident set size (kbytes): 10603108
+2026-11-15 01:58:06.9 	Average resident set size (kbytes): 0
+2026-11-15 01:58:06.9 	Major (requiring I/O) page faults: 86327
+2026-11-15 01:58:06.9 	Minor (reclaiming a frame) page faults: 28030921
+2026-11-15 01:58:06.9 	Voluntary context switches: 728539
+2026-11-15 01:58:06.9 	Involuntary context switches: 11236
+2026-11-15 01:58:06.9 	Swaps: 0
+2026-11-15 01:58:06.9 	File system inputs: 55334592
+2026-11-15 01:58:06.9 	File system outputs: 37960
+2026-11-15 01:58:06.9 	Socket messages sent: 0
+2026-11-15 01:58:06.9 	Socket messages received: 0
+2026-11-15 01:58:06.9 	Signals delivered: 0
+2026-11-15 01:58:06.9 	Page size (bytes): 4096
+2026-11-15 01:58:06.9 	Exit status: 0
+exit 0

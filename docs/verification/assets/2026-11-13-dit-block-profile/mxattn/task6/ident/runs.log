@@ -1,0 +1,18 @@
+2026-11-15 04:47:35 qwen_1024 fvexp start dev=2 core=8 cpus=56-63,152-159 uptime:  04:47:35 up 8 days, 14:11,  6 users,  load average: 0.10, 17.25, 38.67
+2026-11-15 04:47:35 wan_81f fvexp start dev=4 core=16 cpus=72-79,168-175 uptime:  04:47:35 up 8 days, 14:11,  6 users,  load average: 0.10, 17.25, 38.67
+2026-11-15 04:47:35 qwen_1024 cte start dev=1 core=4 cpus=48-55,144-151 uptime:  04:47:35 up 8 days, 14:11,  6 users,  load average: 0.10, 17.25, 38.67
+2026-11-15 04:47:35 hv1_L fvexp start dev=6 core=24 cpus=88-95,184-191 uptime:  04:47:35 up 8 days, 14:11,  6 users,  load average: 0.10, 17.25, 38.67
+2026-11-15 04:47:35 wan_81f cte start dev=3 core=12 cpus=64-71,160-167 uptime:  04:47:35 up 8 days, 14:11,  6 users,  load average: 0.10, 17.25, 38.67
+2026-11-15 04:47:35 hv1_L cte start dev=5 core=20 cpus=80-87,176-183 uptime:  04:47:35 up 8 days, 14:11,  6 users,  load average: 0.10, 17.25, 38.67
+fuser /dev/neuron2 exit 1
+fuser /dev/neuron4 exit 1
+fuser /dev/neuron1 exit 1
+fuser /dev/neuron6 exit 1
+fuser /dev/neuron3 exit 1
+fuser /dev/neuron5 exit 1
+2026-11-15 04:47:56 qwen_1024 cte end exit=0 uptime:  04:47:56 up 8 days, 14:11,  6 users,  load average: 2.09, 16.59, 38.00
+2026-11-15 04:48:03 qwen_1024 fvexp end exit=0 uptime:  04:48:03 up 8 days, 14:11,  6 users,  load average: 3.07, 16.32, 37.68
+2026-11-15 04:52:16 wan_81f cte end exit=0 uptime:  04:52:16 up 8 days, 14:15,  6 users,  load average: 11.93, 12.49, 30.95
+2026-11-15 04:58:25 wan_81f fvexp end exit=0 uptime:  04:58:25 up 8 days, 14:22,  6 users,  load average: 11.61, 9.92, 23.54
+2026-11-15 05:03:36 hv1_L cte end exit=0 uptime:  05:03:36 up 8 days, 14:27,  6 users,  load average: 14.65, 10.05, 19.51
+2026-11-15 05:11:52 hv1_L fvexp end exit=0 uptime:  05:11:52 up 8 days, 14:35,  6 users,  load average: 11.56, 6.61, 13.38

@@ -1,0 +1,60 @@
+2026-11-15 00:55:09.6 <frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+2026-11-15 00:55:09.7 [dp-router] worker 0: cores 36-39
+2026-11-15 00:55:09.8 <frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+2026-11-15 00:55:09.8 [qwen_image] backend 'neuron' compiles into --cache-dir: DIFFLET_COMPILE_CACHE=/mnt/nvme/difflet-mxattn/task6/cache/fp8 (NEFF and HLO caches under /mnt/nvme/difflet-mxattn/task6/cache/fp8/neuron)
+2026-11-15 00:55:12.1 [qwen_image] MXFP8 transformer (nki): /mnt/nvme/difflet-mxattn/task6/cache/fp8/quantized/Qwen--Qwen-Image__75e0b4be/transformer/mxfp8-65db3df4b2e34023
+2026-11-15 00:55:14.5 
+2026-11-15 00:55:14.5 *****************************************
+2026-11-15 00:55:14.5 Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+2026-11-15 00:55:14.5 *****************************************
+2026-11-15 00:55:25.9 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-15 00:55:25.9   _warn_trace_cache_once()
+2026-11-15 00:55:25.9 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-15 00:55:25.9   _warn_trace_cache_once()
+2026-11-15 00:55:37.0 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-15 00:55:37.0   _warn_trace_cache_once()
+2026-11-15 00:55:37.0 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-15 00:55:37.0   _warn_trace_cache_once()
+2026-11-15 00:59:19.3 [weight store] rank 1/4 NeuronQwenImageTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (7.20 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task6/cache/fp8/neuron/weights/transformer__mxfp8-65db3df4b2e34023__bfloat16__tp4__a0ce5dc0a224ccde)
+2026-11-15 00:59:19.3 [weight store] rank 2/4 NeuronQwenImageTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (7.20 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task6/cache/fp8/neuron/weights/transformer__mxfp8-65db3df4b2e34023__bfloat16__tp4__a0ce5dc0a224ccde)
+2026-11-15 00:59:19.3 [weight store] rank 3/4 NeuronQwenImageTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (7.20 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task6/cache/fp8/neuron/weights/transformer__mxfp8-65db3df4b2e34023__bfloat16__tp4__a0ce5dc0a224ccde)
+2026-11-15 00:59:19.3 [weight store] rank 0/4 NeuronQwenImageTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (7.20 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task6/cache/fp8/neuron/weights/transformer__mxfp8-65db3df4b2e34023__bfloat16__tp4__a0ce5dc0a224ccde)
+2026-11-15 00:59:42.0 [attention] DIFFLET_ATTN_QUANT=qk+pv (qk_mx=True, pv_mx=True): calls routed to the MXFP8 kernel by (s_q, s_k, bounded): {(5120, 5120, True): 1}
+2026-11-15 00:59:42.9 Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards:  25%|██▌       | 1/4 [00:00<00:00,  3.29it/s]Loading checkpoint shards:  50%|█████     | 2/4 [00:00<00:00,  5.22it/s]Loading checkpoint shards:  75%|███████▌  | 3/4 [00:00<00:00,  6.55it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:00<00:00,  7.47it/s]
+2026-11-15 01:01:21.3 [qwen_image] start-up: from_pretrained (prepare_runtime + build) 20.40 s; load 344.0 s by component {'runtime init': 0.036413077963516116, 'build on meta': 3.093884338042699, 'load checkpoint': 218.8261571159819, 'eval': 19.935500969993882, 'compile': 0.23866386793088168, 'warmup forward': 2.2636916359188035, 'text encoder load': 99.29837123095058}
+2026-11-15 01:01:34.6 [qwen_image] request: 13.27 s; to the first step's end 0.63 s (prompt encode + step 1); step median 258.0 ms (n=49, max 259.5); after the last step 0.00 s
+2026-11-15 01:01:34.6 [generate] packed latents (1, 4096, 64) -> /mnt/nvme/difflet-mxattn/task6/qwen_image/both/work_timed/worker_0/latents_req0000.pt
+2026-11-15 01:01:47.7 [qwen_image] request: 13.10 s; to the first step's end 0.47 s (prompt encode + step 1); step median 257.7 ms (n=49, max 259.0); after the last step 0.00 s
+2026-11-15 01:01:47.7 [generate] packed latents (1, 4096, 64) -> /mnt/nvme/difflet-mxattn/task6/qwen_image/both/work_timed/worker_0/latents_req0001.pt
+2026-11-15 01:01:47.7 [qwen_image] neuron rank 2/4: exec_mode=compile compiled_blocks=60 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 364.4s, stage 390.7s
+2026-11-15 01:01:47.7 [qwen_image] neuron rank 0/4: exec_mode=compile compiled_blocks=60 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 364.4s, stage 390.7s
+2026-11-15 01:01:47.7 [qwen_image] neuron rank 1/4: exec_mode=compile compiled_blocks=60 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 364.3s, stage 390.7s
+2026-11-15 01:01:47.7 [qwen_image] neuron rank 3/4: exec_mode=compile compiled_blocks=60 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 364.3s, stage 390.7s
+2026-11-15 01:02:06.4 [weight store] rank 0/1 NeuronWanVaeDecoderApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (0.15 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task6/cache/fp8/neuron/weights/Qwen--Qwen-Image__vae__75e0b4be__bfloat16__tp1__a639fb1bdb157871)
+2026-11-15 01:02:08.2 [vae] image saved to /mnt/nvme/difflet-mxattn/task6/qwen_image/both/timed_1.png
+2026-11-15 01:02:08.9 [vae] image saved to /mnt/nvme/difflet-mxattn/task6/qwen_image/both/timed_2.png
+2026-11-15 01:02:11.1 [dp-router] done=2 failed=0 unfinished=0
+2026-11-15 01:02:11.1 	Command being timed: "taskset -c 24-47,120-143 env /home/ubuntu/venvs/native-fp8/bin/python -m difflet.cli.main generate --backend neuron --model-id Qwen/Qwen-Image --height 1024 --width 1024 --tp-degree 4 --quant mxfp8 --attn-quant qk+pv --cache-dir /mnt/nvme/difflet-mxattn/task6/cache/fp8 --steps 50 --seed 42 --guidance-scale 7.5 --requests /mnt/nvme/difflet-mxattn/task6/qwen_image/both/requests.jsonl --work-dir /mnt/nvme/difflet-mxattn/task6/qwen_image/both/work_timed --keep-work-dir"
+2026-11-15 01:02:11.1 	User time (seconds): 251.24
+2026-11-15 01:02:11.1 	System time (seconds): 131.65
+2026-11-15 01:02:11.1 	Percent of CPU this job got: 90%
+2026-11-15 01:02:11.1 	Elapsed (wall clock) time (h:mm:ss or m:ss): 7:01.57
+2026-11-15 01:02:11.1 	Average shared text size (kbytes): 0
+2026-11-15 01:02:11.1 	Average unshared data size (kbytes): 0
+2026-11-15 01:02:11.1 	Average stack size (kbytes): 0
+2026-11-15 01:02:11.1 	Average total size (kbytes): 0
+2026-11-15 01:02:11.1 	Maximum resident set size (kbytes): 14650964
+2026-11-15 01:02:11.1 	Average resident set size (kbytes): 0
+2026-11-15 01:02:11.1 	Major (requiring I/O) page faults: 139271
+2026-11-15 01:02:11.1 	Minor (reclaiming a frame) page faults: 4133824
+2026-11-15 01:02:11.1 	Voluntary context switches: 724840
+2026-11-15 01:02:11.1 	Involuntary context switches: 2124
+2026-11-15 01:02:11.1 	Swaps: 0
+2026-11-15 01:02:11.1 	File system inputs: 82133304
+2026-11-15 01:02:11.1 	File system outputs: 9248
+2026-11-15 01:02:11.1 	Socket messages sent: 0
+2026-11-15 01:02:11.1 	Socket messages received: 0
+2026-11-15 01:02:11.1 	Signals delivered: 0
+2026-11-15 01:02:11.1 	Page size (bytes): 4096
+2026-11-15 01:02:11.1 	Exit status: 0
+exit 0

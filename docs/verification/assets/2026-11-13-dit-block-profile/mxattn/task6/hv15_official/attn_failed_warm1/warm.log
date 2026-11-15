@@ -1,0 +1,111 @@
+2026-11-14 22:02:41.4 <frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+2026-11-14 22:02:41.5 [hunyuan_video_15] backend 'neuron' compiles into --cache-dir: DIFFLET_COMPILE_CACHE=/mnt/nvme/difflet-mxattn/task6/cache/video (NEFF and HLO caches under /mnt/nvme/difflet-mxattn/task6/cache/video/neuron)
+2026-11-14 22:02:49.8 Loading pipeline components...:   0%|          | 0/7 [00:00<?, ?it/s]Loading pipeline components...:  14%|█▍        | 1/7 [00:00<00:01,  4.08it/s]Guiders are currently an experimental feature under active development. The API is subject to breaking changes in future releases.
+2026-11-14 22:02:50.7 Loading pipeline components...:  57%|█████▋    | 4/7 [00:01<00:00,  3.38it/s]
+2026-11-14 22:02:50.9 Loading checkpoint shards:   0%|          | 0/3 [00:00<?, ?it/s][A
+2026-11-14 22:02:51.0 Loading checkpoint shards:  33%|███▎      | 1/3 [00:00<00:00,  8.51it/s][A
+2026-11-14 22:02:51.1 Loading checkpoint shards:  67%|██████▋   | 2/3 [00:00<00:00,  7.49it/s][A
+2026-11-14 22:02:51.1 Loading checkpoint shards: 100%|██████████| 3/3 [00:00<00:00,  7.73it/s][ALoading checkpoint shards: 100%|██████████| 3/3 [00:00<00:00,  7.76it/s]
+2026-11-14 22:02:51.1 Loading pipeline components...:  71%|███████▏  | 5/7 [00:01<00:00,  3.05it/s]
+2026-11-14 22:02:52.9 Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s][A
+2026-11-14 22:02:53.0 Loading checkpoint shards:  50%|█████     | 1/2 [00:01<00:01,  1.80s/it][ALoading checkpoint shards: 100%|██████████| 2/2 [00:01<00:00,  1.09it/s]
+2026-11-14 22:02:53.0 Loading pipeline components...: 100%|██████████| 7/7 [00:03<00:00,  1.69it/s]Loading pipeline components...: 100%|██████████| 7/7 [00:03<00:00,  2.05it/s]
+2026-11-14 22:02:53.0 [hv15] encode: load 3.4 s
+2026-11-14 22:03:17.5 [hv15] encode request 0: 24.5 s (prompt + negative)
+2026-11-14 22:03:21.9 
+2026-11-14 22:03:21.9 *****************************************
+2026-11-14 22:03:21.9 Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+2026-11-14 22:03:21.9 *****************************************
+2026-11-14 22:03:34.0 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-14 22:03:34.0   _warn_trace_cache_once()
+2026-11-14 22:03:34.0 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-14 22:03:34.0   _warn_trace_cache_once()
+2026-11-14 22:03:34.0 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-14 22:03:34.0   _warn_trace_cache_once()
+2026-11-14 22:03:34.0 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-14 22:03:34.0   _warn_trace_cache_once()
+2026-11-14 22:16:54.7 [weight store] rank 0/4 NeuronHunyuanVideo15TransformerApplication: hit 8.38 GB in 797.5 s (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/hunyuanvideo-community--HunyuanVideo-1.5-Diffusers-480p_t2v__transformer__286be7ce__bfloat16__tp2__f620128f4bf3c6b4)
+2026-11-14 22:16:54.7 [weight store] rank 2/4 NeuronHunyuanVideo15TransformerApplication: hit 8.38 GB in 797.5 s (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/hunyuanvideo-community--HunyuanVideo-1.5-Diffusers-480p_t2v__transformer__286be7ce__bfloat16__tp2__f620128f4bf3c6b4)
+2026-11-14 22:16:54.9 [weight store] rank 3/4 NeuronHunyuanVideo15TransformerApplication: hit 8.38 GB in 797.6 s (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/hunyuanvideo-community--HunyuanVideo-1.5-Diffusers-480p_t2v__transformer__286be7ce__bfloat16__tp2__f620128f4bf3c6b4)
+2026-11-14 22:16:54.9 [weight store] rank 1/4 NeuronHunyuanVideo15TransformerApplication: hit 8.38 GB in 797.6 s (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/hunyuanvideo-community--HunyuanVideo-1.5-Diffusers-480p_t2v__transformer__286be7ce__bfloat16__tp2__f620128f4bf3c6b4)
+2026-11-14 22:16:55.2 [hv15] transformer load 800.9 s {'runtime init': 0.0, 'build on meta': 1.5, 'load checkpoint': 797.7, 'eval': 0.0, 'compile': 0.3}
+2026-11-14 22:16:55.2 [hv15] DiT weights per rank: 7.80 GiB resident (7.80 GiB estimated at load), bf16
+2026-11-14 22:51:00.7 [rank0]:[W1114 22:51:00.589470526 NeuronLogging.h:103] Warning: [Neuron] [WARNING] [torch_neuronx/csrc/core/cache/FileLock.cpp:182] Lock acquisition timed out, breaking stale lock path= /mnt/nvme/difflet-mxattn/task6/cache/video/neuron/neff_local/locks/c4961518761cd3d5f48184f9e55ef118.lock elapsed_seconds= 1200 timeout_seconds= 1200  (function log)
+2026-11-14 22:51:02.3 [rank1]:[W1114 22:51:02.218820564 NeuronLogging.h:103] Warning: [Neuron] [WARNING] [torch_neuronx/csrc/core/cache/FileLock.cpp:182] Lock acquisition timed out, breaking stale lock path= /mnt/nvme/difflet-mxattn/task6/cache/video/neuron/neff_local/locks/c4961518761cd3d5f48184f9e55ef118.lock elapsed_seconds= 1200 timeout_seconds= 1200  (function log)
+2026-11-14 22:51:03.4 [rank3]:[W1114 22:51:03.267115468 NeuronLogging.h:103] Warning: [Neuron] [WARNING] [torch_neuronx/csrc/core/cache/FileLock.cpp:182] Lock acquisition timed out, breaking stale lock path= /mnt/nvme/difflet-mxattn/task6/cache/video/neuron/neff_local/locks/c4961518761cd3d5f48184f9e55ef118.lock elapsed_seconds= 1200 timeout_seconds= 1200  (function log)
+2026-11-14 23:00:57.2 [rank2]:[E1114 23:00:57.078608781 NeuronWork.cpp:159] [Rank 1] [PG undefined] [allgather Seq 0] Watchdog caught collective operation timeout: allgather (seq=0) ran for 1800022 milliseconds before timing out.
+2026-11-14 23:00:57.2 [rank2]:[E1114 23:00:57.078716146 NeuronWatchdog.cpp:210] Work timed out: op=allgather, seq=0
+2026-11-14 23:00:57.2 [rank2]:[W1114 23:00:57.078878223 NeuronWork.cpp:274] [Rank 1] [PG undefined] [allgather Seq 0] Aborting work due to timeout
+2026-11-14 23:01:01.8 [rank0]:[E1114 23:01:01.657955100 NeuronWork.cpp:159] [Rank 0] [PG undefined] [allgather Seq 0] Watchdog caught collective operation timeout: allgather (seq=0) ran for 1800036 milliseconds before timing out.
+2026-11-14 23:01:01.8 [rank0]:[E1114 23:01:01.658075072 NeuronWatchdog.cpp:210] Work timed out: op=allgather, seq=0
+2026-11-14 23:01:01.8 [rank0]:[W1114 23:01:01.658197334 NeuronWork.cpp:274] [Rank 0] [PG undefined] [allgather Seq 0] Aborting work due to timeout
+2026-11-14 23:01:03.3 [rank1]:[E1114 23:01:03.213791846 NeuronWork.cpp:159] [Rank 0] [PG undefined] [allgather Seq 0] Watchdog caught collective operation timeout: allgather (seq=0) ran for 1800012 milliseconds before timing out.
+2026-11-14 23:01:03.3 [rank1]:[E1114 23:01:03.214109514 NeuronWatchdog.cpp:210] Work timed out: op=allgather, seq=0
+2026-11-14 23:01:03.3 [rank1]:[W1114 23:01:03.214241228 NeuronWork.cpp:274] [Rank 0] [PG undefined] [allgather Seq 0] Aborting work due to timeout
+2026-11-14 23:01:04.4 [rank3]:[E1114 23:01:04.292193750 NeuronWork.cpp:159] [Rank 1] [PG undefined] [allgather Seq 0] Watchdog caught collective operation timeout: allgather (seq=0) ran for 1800040 milliseconds before timing out.
+2026-11-14 23:01:04.4 [rank3]:[E1114 23:01:04.292282845 NeuronWatchdog.cpp:210] Work timed out: op=allgather, seq=0
+2026-11-14 23:01:04.4 [rank3]:[W1114 23:01:04.292399463 NeuronWork.cpp:274] [Rank 1] [PG undefined] [allgather Seq 0] Aborting work due to timeout
+2026-11-14 23:04:44.2 [rank2]:[W1114 23:04:44.136693433 NeuronLogging.h:103] Warning: [Neuron] [ERROR] [torch_neuronx/csrc/core/compilation/CompilationCache.cpp:962] Compilation error CompilationCacheKey= {key=51a5cb5b3516b7d2f9642d905fe6a074d6741c13d291217d5aefb3bc14286356, platform=trn3, lnc=2, compiler_args=--model-type transformer --auto-cast=none, optimization_level=-O2, source=TORCH_COMPILE, persistent_key=c4961518761cd3d5f48184f9e55ef118} error= Command failed (neuronx-cc compilation) with exit code 70: 2026-11-14T23:04:44Z [F137] neuronx-cc was forcibly killed - This most commonly occurs due to insufficient system memory. Using a smaller data type, dimensions, batch size, or a larger instance type may help.
+2026-11-14 23:04:44.2   (function log)
+2026-11-14 23:08:44.5 2026-Nov-14 23:08:44.0570 1674322:1675429 [18] nccl/lib/src/include/socket.h:668 CCOM WARN Timeout waiting for RX (waited 240 sec) - retrying, [rx_validation_result//0]
+2026-11-14 23:12:44.6 2026-Nov-14 23:12:44.0670 1674322:1675429 [18] nccl/lib/src/include/socket.h:668 CCOM WARN Timeout waiting for RX (waited 480 sec) - retrying, [rx_validation_result//0]
+2026-11-14 23:20:44.8 2026-Nov-14 23:20:44.0812 1674322:1675429 [18] nccl/lib/src/include/socket.h:668 CCOM WARN Timeout waiting for RX (waited 960 sec) - retrying, [rx_validation_result//0]
+2026-11-14 23:36:45.0 2026-Nov-14 23:36:45.0082 1674322:1675429 [18] nccl/lib/src/include/socket.h:668 CCOM WARN Timeout waiting for RX (waited 1920 sec) - retrying, [rx_validation_result//0]
+2026-11-14 23:49:36.8 W1114 23:49:36.883000 1674232 torch/distributed/elastic/agent/server/api.py:753] Received 15 death signal, shutting down workers
+2026-11-14 23:49:36.8 W1114 23:49:36.885000 1674232 torch/distributed/elastic/multiprocessing/api.py:1028] Sending process 1674320 closing signal SIGTERM
+2026-11-14 23:49:36.8 W1114 23:49:36.886000 1674232 torch/distributed/elastic/multiprocessing/api.py:1028] Sending process 1674321 closing signal SIGTERM
+2026-11-14 23:49:36.8 W1114 23:49:36.886000 1674232 torch/distributed/elastic/multiprocessing/api.py:1028] Sending process 1674322 closing signal SIGTERM
+2026-11-14 23:49:36.8 W1114 23:49:36.886000 1674232 torch/distributed/elastic/multiprocessing/api.py:1028] Sending process 1674323 closing signal SIGTERM
+2026-11-14 23:49:36.8 Command terminated by signal 15
+2026-11-14 23:49:36.8 	Command being timed: "taskset -c 48-95,144-191 env /home/ubuntu/venvs/native-fp8/bin/python -m difflet.cli.main generate --backend neuron --model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v --revision 286be7ce72277246578a3e3cc2487e95ddae5bcf --height 480 --width 848 --num-frames 121 --attn-quant qk+pv --cache-dir /mnt/nvme/difflet-mxattn/task6/cache/video --steps 2 --seed 42 --prompt a cat walking through a garden --output /mnt/nvme/difflet-mxattn/task6/hv15_official/attn/warm.mp4 --work-dir /mnt/nvme/difflet-mxattn/task6/hv15_official/attn/work_warm --keep-work-dir"
+2026-11-14 23:49:36.8 	User time (seconds): 1736.59
+2026-11-14 23:49:36.8 	System time (seconds): 375.66
+2026-11-14 23:49:36.8 	Percent of CPU this job got: 32%
+2026-11-14 23:49:36.8 	Elapsed (wall clock) time (h:mm:ss or m:ss): 1:46:55
+2026-11-14 23:49:36.8 	Average shared text size (kbytes): 0
+2026-11-14 23:49:36.8 	Average unshared data size (kbytes): 0
+2026-11-14 23:49:36.8 	Average stack size (kbytes): 0
+2026-11-14 23:49:36.8 	Average total size (kbytes): 0
+2026-11-14 23:49:36.8 	Maximum resident set size (kbytes): 17395540
+2026-11-14 23:49:36.8 	Average resident set size (kbytes): 0
+2026-11-14 23:49:36.8 	Major (requiring I/O) page faults: 21617
+2026-11-14 23:49:36.8 	Minor (reclaiming a frame) page faults: 14547906
+2026-11-14 23:49:36.8 	Voluntary context switches: 85411
+2026-11-14 23:49:36.8 	Involuntary context switches: 128067
+2026-11-14 23:49:36.8 	Swaps: 0
+2026-11-14 23:49:36.8 	File system inputs: 37315200
+2026-11-14 23:49:36.8 	File system outputs: 30976
+2026-11-14 23:49:36.8 	Socket messages sent: 0
+2026-11-14 23:49:36.8 	Socket messages received: 0
+2026-11-14 23:49:36.8 	Signals delivered: 0
+2026-11-14 23:49:36.8 	Page size (bytes): 4096
+2026-11-14 23:49:36.8 	Exit status: 0
+2026-11-14 23:49:37.9 Traceback (most recent call last):
+2026-11-14 23:49:37.9   File "<frozen runpy>", line 198, in _run_module_as_main
+2026-11-14 23:49:37.9   File "<frozen runpy>", line 88, in _run_code
+2026-11-14 23:49:37.9   File "/opt/aws_neuronx_venv_torch_neuronx_2_14_0/lib/python3.12/site-packages/torch/distributed/run.py", line 1142, in <module>
+2026-11-14 23:49:37.9     main()
+2026-11-14 23:49:37.9   File "/opt/aws_neuronx_venv_torch_neuronx_2_14_0/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/errors/__init__.py", line 380, in wrapper
+2026-11-14 23:49:37.9     return f(*args, **kwargs)
+2026-11-14 23:49:37.9            ^^^^^^^^^^^^^^^^^^
+2026-11-14 23:49:37.9   File "/opt/aws_neuronx_venv_torch_neuronx_2_14_0/lib/python3.12/site-packages/torch/distributed/run.py", line 1138, in main
+2026-11-14 23:49:37.9     run(args)
+2026-11-14 23:49:37.9   File "/opt/aws_neuronx_venv_torch_neuronx_2_14_0/lib/python3.12/site-packages/torch/distributed/run.py", line 1129, in run
+2026-11-14 23:49:37.9     elastic_launch(
+2026-11-14 23:49:37.9   File "/opt/aws_neuronx_venv_torch_neuronx_2_14_0/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 197, in __call__
+2026-11-14 23:49:37.9     return launch_agent(
+2026-11-14 23:49:37.9            ^^^^^^^^^^^^^
+2026-11-14 23:49:37.9   File "/opt/aws_neuronx_venv_torch_neuronx_2_14_0/lib/python3.12/site-packages/torch/distributed/launcher/api.py", line 377, in launch_agent
+2026-11-14 23:49:37.9     result = agent.run()
+2026-11-14 23:49:37.9              ^^^^^^^^^^^
+2026-11-14 23:49:37.9   File "/opt/aws_neuronx_venv_torch_neuronx_2_14_0/lib/python3.12/site-packages/torch/distributed/elastic/metrics/api.py", line 134, in wrapper
+2026-11-14 23:49:37.9     result = f(*args, **kwargs)
+2026-11-14 23:49:37.9              ^^^^^^^^^^^^^^^^^^
+2026-11-14 23:49:37.9   File "/opt/aws_neuronx_venv_torch_neuronx_2_14_0/lib/python3.12/site-packages/torch/distributed/elastic/agent/server/api.py", line 745, in run
+2026-11-14 23:49:37.9     result = self._invoke_run(role)
+2026-11-14 23:49:37.9              ^^^^^^^^^^^^^^^^^^^^^^
+2026-11-14 23:49:37.9   File "/opt/aws_neuronx_venv_torch_neuronx_2_14_0/lib/python3.12/site-packages/torch/distributed/elastic/agent/server/api.py", line 923, in _invoke_run
+2026-11-14 23:49:37.9     time.sleep(monitor_interval)
+2026-11-14 23:49:37.9   File "/opt/aws_neuronx_venv_torch_neuronx_2_14_0/lib/python3.12/site-packages/torch/distributed/elastic/multiprocessing/api.py", line 86, in _terminate_process_handler
+2026-11-14 23:49:37.9     raise SignalException(f"Process {os.getpid()} got signal: {sigval}", sigval=sigval)
+2026-11-14 23:49:37.9 torch.distributed.elastic.multiprocessing.api.SignalException: Process 1674232 got signal: 15

@@ -1,0 +1,95 @@
+{
+ "qwen_1024": {
+  "shape": [
+   6,
+   5120,
+   128
+  ],
+  "dtype": "torch.bfloat16",
+  "same_shape": true,
+  "differing": 0,
+  "bit_identical": true,
+  "nonfinite": [
+   0,
+   0
+  ],
+  "cte": {
+   "impl": "cte",
+   "qk_mx": false,
+   "pv_mx": false,
+   "fork_vector_exp": false,
+   "rel_l2": 0.002880010158546721,
+   "cosine": 0.9999958527698409
+  },
+  "fvexp": {
+   "impl": "fork",
+   "qk_mx": false,
+   "pv_mx": false,
+   "fork_vector_exp": true,
+   "rel_l2": 0.002880010158546721,
+   "cosine": 0.9999958527698409
+  }
+ },
+ "wan_81f": {
+  "shape": [
+   10,
+   32760,
+   128
+  ],
+  "dtype": "torch.bfloat16",
+  "same_shape": true,
+  "differing": 0,
+  "bit_identical": true,
+  "nonfinite": [
+   0,
+   0
+  ],
+  "cte": {
+   "impl": "cte",
+   "qk_mx": false,
+   "pv_mx": false,
+   "fork_vector_exp": false,
+   "rel_l2": 0.003106154217208093,
+   "cosine": 0.999995175891359
+  },
+  "fvexp": {
+   "impl": "fork",
+   "qk_mx": false,
+   "pv_mx": false,
+   "fork_vector_exp": true,
+   "rel_l2": 0.003106154217208093,
+   "cosine": 0.999995175891359
+  }
+ },
+ "hv1_L": {
+  "shape": [
+   6,
+   67576,
+   128
+  ],
+  "dtype": "torch.bfloat16",
+  "same_shape": true,
+  "differing": 0,
+  "bit_identical": true,
+  "nonfinite": [
+   0,
+   0
+  ],
+  "cte": {
+   "impl": "cte",
+   "qk_mx": false,
+   "pv_mx": false,
+   "fork_vector_exp": false,
+   "rel_l2": 0.0045089859164231545,
+   "cosine": 0.9999898344888579
+  },
+  "fvexp": {
+   "impl": "fork",
+   "qk_mx": false,
+   "pv_mx": false,
+   "fork_vector_exp": true,
+   "rel_l2": 0.0045089859164231545,
+   "cosine": 0.9999898344888579
+  }
+ }
+}

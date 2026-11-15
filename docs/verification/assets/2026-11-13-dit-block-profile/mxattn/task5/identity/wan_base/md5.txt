@@ -1,0 +1,2 @@
+39bac22961848b51b3bdbac4d7db819a  /mnt/nvme/difflet-mxattn/task5/identity/wan_base/gen50a.mp4
+bd0985270646e356772049183e45bde7  /mnt/nvme/difflet-mxattn/task5/identity/wan_base/work_a/latents.pt

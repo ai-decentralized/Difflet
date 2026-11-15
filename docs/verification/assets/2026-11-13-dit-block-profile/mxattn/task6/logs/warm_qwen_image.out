@@ -1,0 +1,4 @@
+2026-11-14 22:02:40 warm_lane qwen_image both dev 6 start
+2026-11-14 22:04:22 qwen_image both warm exit 0
+2026-11-14 22:05:46 qwen_image bf16 warm exit 0
+WARM_LANE_DONE

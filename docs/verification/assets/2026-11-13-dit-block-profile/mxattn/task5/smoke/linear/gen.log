@@ -1,0 +1,29 @@
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+[qwen_image] backend 'neuron' compiles into --cache-dir: DIFFLET_COMPILE_CACHE=/home/ubuntu/difflet-cache-fp8 (NEFF and HLO caches under /home/ubuntu/difflet-cache-fp8/neuron)
+[qwen_image] MXFP8 transformer (nki): /home/ubuntu/difflet-cache-fp8/quantized/Qwen--Qwen-Image__75e0b4be/transformer/mxfp8-65db3df4b2e34023
+
+*****************************************
+Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+*****************************************
+/source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+  _warn_trace_cache_once()
+/source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+  _warn_trace_cache_once()
+/source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+  _warn_trace_cache_once()
+/source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+  _warn_trace_cache_once()
+[weight store] rank 2/4 NeuronQwenImageTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (7.20 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/home/ubuntu/difflet-cache-fp8/neuron/weights/transformer__mxfp8-65db3df4b2e34023__bfloat16__tp4__a0ce5dc0a224ccde)
+[weight store] rank 3/4 NeuronQwenImageTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (7.20 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/home/ubuntu/difflet-cache-fp8/neuron/weights/transformer__mxfp8-65db3df4b2e34023__bfloat16__tp4__a0ce5dc0a224ccde)
+[weight store] rank 1/4 NeuronQwenImageTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (7.20 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/home/ubuntu/difflet-cache-fp8/neuron/weights/transformer__mxfp8-65db3df4b2e34023__bfloat16__tp4__a0ce5dc0a224ccde)
+[weight store] rank 0/4 NeuronQwenImageTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (7.20 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/home/ubuntu/difflet-cache-fp8/neuron/weights/transformer__mxfp8-65db3df4b2e34023__bfloat16__tp4__a0ce5dc0a224ccde)
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:00<00:00, 39.74it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:00<00:00, 39.55it/s]
+[qwen_image] start-up: from_pretrained (prepare_runtime + build) 18.05 s; load 49.2 s by component {'runtime init': 0.03507035307120532, 'build on meta': 3.0184856430860236, 'load checkpoint': 4.393501148093492, 'eval': 19.694531338987872, 'compile': 0.23867547395639122, 'warmup forward': 20.004454859066755, 'text encoder load': 1.590336911031045}
+[qwen_image] request: 2.75 s; to the first step's end 0.48 s (prompt encode + step 1); step median 242.6 ms (n=9, max 295.0); after the last step 0.00 s
+[qwen_image] neuron rank 2/4: exec_mode=compile compiled_blocks=60 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 67.3s, stage 70.1s
+[qwen_image] neuron rank 1/4: exec_mode=compile compiled_blocks=60 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 67.3s, stage 70.0s
+[qwen_image] neuron rank 3/4: exec_mode=compile compiled_blocks=60 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 67.3s, stage 70.1s
+[generate] packed latents (1, 4096, 64) -> /mnt/nvme/difflet-mxattn/task5/smoke/linear/work/latents.pt
+[qwen_image] neuron rank 0/4: exec_mode=compile compiled_blocks=60 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 67.3s, stage 70.0s
+[weight store] rank 0/1 NeuronWanVaeDecoderApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (0.15 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/home/ubuntu/difflet-cache-fp8/neuron/weights/Qwen--Qwen-Image__vae__75e0b4be__bfloat16__tp1__a639fb1bdb157871)
+[vae] image saved to /mnt/nvme/difflet-mxattn/task5/smoke/linear/gen.png

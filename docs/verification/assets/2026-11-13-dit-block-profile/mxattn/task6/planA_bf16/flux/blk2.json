@@ -1,0 +1,245 @@
+{
+ "block_ms": 3.560998603,
+ "replay_spread_ms": 0.051819919000000055,
+ "block_neff_sha256": "c8c14523c6e8fc912eb0e8ce51400ad4d22a8bdbc40bd179ef199623a41e05ea",
+ "engines_ms": {
+  "vector": 1.477625,
+  "tensor": 2.735164,
+  "gpsimd": 0.0496745,
+  "sync": 0.045346,
+  "scalar": 0.721179,
+  "hbm_dma": 0.4065635,
+  "collective": 0.478138
+ },
+ "components": {
+  "unattributed": {
+   "vector": 0.0887635,
+   "tensor": 0.2743705,
+   "gpsimd": 0.0044835,
+   "sync": 0.0030705,
+   "scalar": 0.148543,
+   "hbm_dma": 0.2307745
+  },
+  "qkv_proj": {
+   "sync": 0.0007385,
+   "tensor": 0.4609815,
+   "scalar": 0.0070265,
+   "vector": 0.0530945,
+   "hbm_dma": 0.011451
+  },
+  "rope": {
+   "vector": 0.0955185,
+   "gpsimd": 0.0089425,
+   "scalar": 0.012736,
+   "tensor": 0.051301,
+   "hbm_dma": 0.00546
+  },
+  "modulation": {
+   "scalar": 0.0477855,
+   "tensor": 0.0886785,
+   "vector": 0.0688085,
+   "hbm_dma": 0.030335,
+   "gpsimd": 0.0001165,
+   "sync": 0.000117
+  },
+  "qk_norm": {
+   "vector": 0.0469715,
+   "hbm_dma": 0.0013995,
+   "scalar": 0.067451,
+   "tensor": 0.057162
+  },
+  "collective": {
+   "scalar": 0.000265,
+   "gpsimd": 0.001115,
+   "vector": 0.0010335,
+   "sync": 7.8e-05,
+   "collective": 0.478138
+  },
+  "norm": {
+   "tensor": 0.0906235,
+   "scalar": 0.05785,
+   "vector": 0.098786,
+   "gpsimd": 0.010274,
+   "sync": 7.8e-05
+  },
+  "mlp_up": {
+   "hbm_dma": 0.008897,
+   "vector": 0.1593615,
+   "gpsimd": 0.000116,
+   "tensor": 0.573336,
+   "scalar": 9.6e-05
+  },
+  "attention": {
+   "sync": 0.041147,
+   "gpsimd": 0.024731,
+   "vector": 0.773976,
+   "tensor": 0.570942,
+   "hbm_dma": 0.1164315
+  },
+  "mlp_act": {
+   "scalar": 0.326492,
+   "vector": 0.0456935,
+   "sync": 7.8e-05
+  },
+  "mlp_down": {
+   "vector": 0.0053395,
+   "tensor": 0.5710185,
+   "scalar": 0.06098,
+   "hbm_dma": 0.00475
+  },
+  "out_proj": {
+   "vector": 0.0668865,
+   "sync": 3.9e-05,
+   "tensor": 0.143055
+  }
+ },
+ "engines_check": {
+  "summary_ms": {
+   "cc_cores_instruction_active_time": 0.008263319,
+   "cc_op_active_time": 0.47813842,
+   "dma_active_time": 2.448255912,
+   "gpsimd_engine_active_time": 0.561939535,
+   "hardware_dynamic_dma_active_time": 1.493332269,
+   "host_device_dma_active_time": 0.30180120099999996,
+   "scalar_engine_active_time": 1.21643855,
+   "software_dynamic_dma_active_time": 0.567885447,
+   "static_dma_active_time": 0.893655438,
+   "sync_engine_active_time": 0.280623314,
+   "tensor_engine_active_time": 3.081054409,
+   "total_active_time": 3.5469144569999997,
+   "vector_engine_active_time": 2.005006607
+  },
+  "active_time_ms": {
+   "cc_instruction": 0.0041475,
+   "gpsimd": 0.326541,
+   "scalar": 0.744135,
+   "sync": 0.1545265,
+   "tensor": 2.7352415,
+   "vector": 1.477778
+  },
+  "union_ms": {
+   "vector": 1.477625,
+   "tensor": 2.735164,
+   "gpsimd": 0.326358,
+   "sync": 0.154475,
+   "scalar": 0.7440145
+  }
+ },
+ "attention_detail": {
+  "attn": {
+   "other": {
+    "sync": 0.041108,
+    "vector": 0.005158,
+    "gpsimd": 0.0129775,
+    "hbm_dma": 0.1164315,
+    "tensor": 0.003625
+   },
+   "mask_softmax": {
+    "gpsimd": 0.012987,
+    "vector": 0.5199195
+   },
+   "qk_matmul": {
+    "tensor": 0.3325245
+   },
+   "exp": {
+    "vector": 0.2731115
+   },
+   "pv_matmul": {
+    "tensor": 0.3365005,
+    "vector": 0.0241865
+   }
+  },
+  "": {
+   "mask_softmax": {
+    "vector": 0.000908
+   },
+   "exp": {
+    "vector": 0.0011025
+   },
+   "qk_matmul": {
+    "tensor": 0.0007715
+   },
+   "other": {
+    "sync": 3.9e-05
+   }
+  }
+ },
+ "memory_bytes": {
+  "hbm_read": 616896000,
+  "hbm_write": 247206400,
+  "sbuf_read": 5867960184,
+  "sbuf_write": 2652058628,
+  "psum_read": 1169786880,
+  "psum_write": 5422845952,
+  "spill_save": 197661184,
+  "spill_reload": 429187072,
+  "psum_to_sbuf": 1049410560
+ },
+ "psum_readout_copy_ms": 0.3456425,
+ "psum_readout_fused_ms": 0.8274425,
+ "psum_readout_copy_ms_by_engine": {
+  "scalar": 0.2654715,
+  "vector": 0.12767
+ },
+ "psum_readout_fused_ms_by_engine": {
+  "scalar": 0.0386745,
+  "vector": 0.795112
+ },
+ "mfu": 0.580898812811769,
+ "mbu": 0.20434810318429178,
+ "throttle": {
+  "avg_util_limit": 0.8598305031364134,
+  "limited_time_share": 0.18120078887112145
+ },
+ "other_share": {
+  "sync": 0.0,
+  "vector": 0.0,
+  "scalar": 0.0,
+  "tensor": 0.0,
+  "hbm_dma": 0.0,
+  "gpsimd": 0.0
+ },
+ "unattributed_share": {
+  "vector": 0.06007173673970053,
+  "tensor": 0.1003122664673855,
+  "gpsimd": 0.0902575768251316,
+  "sync": 0.06771269792263926,
+  "scalar": 0.2059724423478776,
+  "hbm_dma": 0.5676222779467414
+ },
+ "warnings": [
+  "Current NEFF is missing compiler metrics. Please re-compile using latest version of the compiler"
+ ],
+ "dge_notifs": true,
+ "unattributed_by_source": {
+  "(none)": {
+   "vector": 0.085314,
+   "tensor": 0.2743705,
+   "gpsimd": 0.0044835,
+   "sync": 0.0030705,
+   "scalar": 0.144797,
+   "hbm_dma": 0.204598
+  },
+  "transpose.py:_dve_transpose_small_i_impl": {
+   "hbm_dma": 0.0298755
+  },
+  "transpose.py:_copy_with_engine": {
+   "scalar": 0.004606,
+   "vector": 0.0037315
+  }
+ },
+ "component_overlap": {
+  "vector": 1.0180072751882243,
+  "tensor": 1.0534902111902613,
+  "gpsimd": 1.0020936295282288,
+  "sync": 1.0000000000000002,
+  "scalar": 1.0111567308532279,
+  "hbm_dma": 1.007219044503503
+ },
+ "check_against_committed": {
+  "engines_equal": true,
+  "attention_equal": true,
+  "attn_mask_softmax_plus_exp_minus_old_ms": 0.026925499999999936,
+  "_mask_softmax_plus_exp_minus_old_ms": 0.0
+ }
+}

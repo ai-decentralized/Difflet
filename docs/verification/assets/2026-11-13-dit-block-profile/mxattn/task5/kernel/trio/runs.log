@@ -1,0 +1,92 @@
+2026-11-14 18:48:27 qwen_1024 cte run0 start dev=3 core=12 cpus=72-83,168-179 calls=40 attention.py=4b1b7058ef0a2960 kernel=6a9378fdeb7162f9
+uptime:  18:48:27 up 8 days,  4:12,  8 users,  load average: 20.38, 18.30, 18.17
+fuser /dev/neuron3 exit 1
+2026-11-14 18:48:42 qwen_1024 cte run0 end exit=0 uptime:  18:48:42 up 8 days,  4:12,  8 users,  load average: 19.27, 18.12, 18.11
+{"ms": 1.1789669486461207, "first_call_s": 2.0283072059974074, "fuser": {"device": 3, "core": 12, "idle": true, "at": "2026-11-14T18:48:30"}}
+2026-11-14 18:48:42 qwen_1024 fvexp run0 start dev=3 core=12 cpus=72-83,168-179 calls=40 attention.py=4b1b7058ef0a2960 kernel=6a9378fdeb7162f9
+uptime:  18:48:42 up 8 days,  4:12,  8 users,  load average: 19.27, 18.12, 18.11
+fuser /dev/neuron3 exit 1
+2026-11-14 18:48:55 qwen_1024 fvexp run0 end exit=0 uptime:  18:48:55 up 8 days,  4:12,  8 users,  load average: 18.53, 18.01, 18.08
+{"ms": 1.2836477253586054, "first_call_s": 1.984742862987332, "fuser": {"device": 3, "core": 12, "idle": true, "at": "2026-11-14T18:48:45"}}
+2026-11-14 18:48:55 qwen_1024 routed run0 start dev=3 core=12 cpus=72-83,168-179 calls=40 attention.py=4b1b7058ef0a2960 kernel=6a9378fdeb7162f9
+uptime:  18:48:55 up 8 days,  4:12,  8 users,  load average: 18.53, 18.01, 18.08
+fuser /dev/neuron3 exit 1
+2026-11-14 18:49:11 qwen_1024 routed run0 end exit=0 uptime:  18:49:11 up 8 days,  4:12,  8 users,  load average: 14.50, 17.12, 17.78
+{"ms": 1.2890349986264482, "first_call_s": 2.006327840965241, "fuser": {"device": 3, "core": 12, "idle": true, "at": "2026-11-14T18:48:58"}}
+2026-11-14 18:49:11 qwen_1024 fvexp run1 start dev=3 core=12 cpus=72-83,168-179 calls=40 attention.py=4b1b7058ef0a2960 kernel=6a9378fdeb7162f9
+uptime:  18:49:11 up 8 days,  4:12,  8 users,  load average: 14.50, 17.12, 17.78
+fuser /dev/neuron3 exit 1
+2026-11-14 18:49:27 qwen_1024 fvexp run1 end exit=0 uptime:  18:49:27 up 8 days,  4:13,  8 users,  load average: 12.90, 16.64, 17.61
+{"ms": 1.2811271008104086, "first_call_s": 2.010376084013842, "fuser": {"device": 3, "core": 12, "idle": true, "at": "2026-11-14T18:49:14"}}
+2026-11-14 18:49:27 qwen_1024 routed run1 start dev=3 core=12 cpus=72-83,168-179 calls=40 attention.py=4b1b7058ef0a2960 kernel=6a9378fdeb7162f9
+uptime:  18:49:27 up 8 days,  4:13,  8 users,  load average: 12.90, 16.64, 17.61
+fuser /dev/neuron3 exit 1
+2026-11-14 18:49:40 qwen_1024 routed run1 end exit=0 uptime:  18:49:40 up 8 days,  4:13,  8 users,  load average: 11.69, 16.25, 17.48
+{"ms": 1.2793411762686446, "first_call_s": 2.022410460980609, "fuser": {"device": 3, "core": 12, "idle": true, "at": "2026-11-14T18:49:30"}}
+2026-11-14 18:49:40 qwen_1024 cte run1 start dev=3 core=12 cpus=72-83,168-179 calls=40 attention.py=4b1b7058ef0a2960 kernel=6a9378fdeb7162f9
+uptime:  18:49:40 up 8 days,  4:13,  8 users,  load average: 11.69, 16.25, 17.48
+fuser /dev/neuron3 exit 1
+2026-11-14 18:49:53 qwen_1024 cte run1 end exit=0 uptime:  18:49:53 up 8 days,  4:13,  8 users,  load average: 17.98, 17.31, 17.80
+{"ms": 1.1792321485700086, "first_call_s": 2.036613447009586, "fuser": {"device": 3, "core": 12, "idle": true, "at": "2026-11-14T18:49:43"}}
+2026-11-14 18:49:53 qwen_1024 routed run2 start dev=3 core=12 cpus=72-83,168-179 calls=40 attention.py=4b1b7058ef0a2960 kernel=6a9378fdeb7162f9
+uptime:  18:49:53 up 8 days,  4:13,  8 users,  load average: 17.98, 17.31, 17.80
+fuser /dev/neuron3 exit 1
+2026-11-14 18:50:06 qwen_1024 routed run2 end exit=0 uptime:  18:50:06 up 8 days,  4:13,  8 users,  load average: 24.96, 18.75, 18.25
+{"ms": 1.2811287975637242, "first_call_s": 2.0195026820292696, "fuser": {"device": 3, "core": 12, "idle": true, "at": "2026-11-14T18:49:55"}}
+2026-11-14 18:50:06 qwen_1024 cte run2 start dev=3 core=12 cpus=72-83,168-179 calls=40 attention.py=4b1b7058ef0a2960 kernel=6a9378fdeb7162f9
+uptime:  18:50:06 up 8 days,  4:13,  8 users,  load average: 24.96, 18.75, 18.25
+fuser /dev/neuron3 exit 1
+2026-11-14 18:50:20 qwen_1024 cte run2 end exit=0 uptime:  18:50:20 up 8 days,  4:13,  8 users,  load average: 31.02, 20.32, 18.78
+{"ms": 1.1816129728686064, "first_call_s": 2.0363550800830126, "fuser": {"device": 3, "core": 12, "idle": true, "at": "2026-11-14T18:50:09"}}
+2026-11-14 18:50:20 qwen_1024 fvexp run2 start dev=3 core=12 cpus=72-83,168-179 calls=40 attention.py=4b1b7058ef0a2960 kernel=6a9378fdeb7162f9
+uptime:  18:50:20 up 8 days,  4:13,  8 users,  load average: 31.02, 20.32, 18.78
+fuser /dev/neuron3 exit 1
+2026-11-14 18:50:35 qwen_1024 fvexp run2 end exit=0 uptime:  18:50:35 up 8 days,  4:14,  8 users,  load average: 34.16, 21.42, 19.15
+{"ms": 1.2881945993285626, "first_call_s": 1.9883447180036455, "fuser": {"device": 3, "core": 12, "idle": true, "at": "2026-11-14T18:50:23"}}
+2026-11-14 18:50:35 qwen_1024 trio done dev=3
+2026-11-14 18:50:35 wan_81f cte run0 start dev=4 core=16 cpus=84-95,180-191 calls=20 attention.py=4b1b7058ef0a2960 kernel=6a9378fdeb7162f9
+uptime:  18:50:35 up 8 days,  4:14,  8 users,  load average: 34.16, 21.42, 19.15
+fuser /dev/neuron4 exit 1
+2026-11-14 18:51:50 wan_81f cte run0 end exit=0 uptime:  18:51:50 up 8 days,  4:15,  8 users,  load average: 27.61, 21.82, 19.45
+{"ms": 63.756251154700294, "first_call_s": 62.5558065820951, "fuser": {"device": 4, "core": 16, "idle": true, "at": "2026-11-14T18:50:38"}}
+2026-11-14 18:51:50 wan_81f fvexp run0 start dev=4 core=16 cpus=84-95,180-191 calls=20 attention.py=4b1b7058ef0a2960 kernel=6a9378fdeb7162f9
+uptime:  18:51:50 up 8 days,  4:15,  8 users,  load average: 27.61, 21.82, 19.45
+fuser /dev/neuron4 exit 1
+2026-11-14 18:53:05 wan_81f fvexp run0 end exit=0 uptime:  18:53:05 up 8 days,  4:16,  8 users,  load average: 14.59, 18.74, 18.53
+{"ms": 84.00096429977566, "first_call_s": 61.555053093936294, "fuser": {"device": 4, "core": 16, "idle": true, "at": "2026-11-14T18:51:53"}}
+2026-11-14 18:53:05 wan_81f routed run0 start dev=4 core=16 cpus=84-95,180-191 calls=20 attention.py=4b1b7058ef0a2960 kernel=6a9378fdeb7162f9
+uptime:  18:53:05 up 8 days,  4:16,  8 users,  load average: 14.59, 18.74, 18.53
+fuser /dev/neuron4 exit 1
+2026-11-14 18:54:21 wan_81f routed run0 end exit=0 uptime:  18:54:21 up 8 days,  4:17,  8 users,  load average: 6.39, 15.24, 17.33
+{"ms": 84.00517894770019, "first_call_s": 61.6430654990254, "fuser": {"device": 4, "core": 16, "idle": true, "at": "2026-11-14T18:53:08"}}
+2026-11-14 18:54:21 wan_81f fvexp run1 start dev=4 core=16 cpus=84-95,180-191 calls=20 attention.py=4b1b7058ef0a2960 kernel=6a9378fdeb7162f9
+uptime:  18:54:21 up 8 days,  4:17,  8 users,  load average: 6.39, 15.24, 17.33
+fuser /dev/neuron4 exit 1
+2026-11-14 18:55:36 wan_81f fvexp run1 end exit=0 uptime:  18:55:36 up 8 days,  4:19,  8 users,  load average: 5.08, 12.93, 16.36
+{"ms": 84.01624940452166, "first_call_s": 61.611278167925775, "fuser": {"device": 4, "core": 16, "idle": true, "at": "2026-11-14T18:54:24"}}
+2026-11-14 18:55:36 wan_81f routed run1 start dev=4 core=16 cpus=84-95,180-191 calls=20 attention.py=4b1b7058ef0a2960 kernel=6a9378fdeb7162f9
+uptime:  18:55:36 up 8 days,  4:19,  8 users,  load average: 5.08, 12.93, 16.36
+fuser /dev/neuron4 exit 1
+2026-11-14 18:56:52 wan_81f routed run1 end exit=0 uptime:  18:56:52 up 8 days,  4:20,  8 users,  load average: 2.90, 10.48, 15.23
+{"ms": 84.02004690142348, "first_call_s": 61.684173204004765, "fuser": {"device": 4, "core": 16, "idle": true, "at": "2026-11-14T18:55:39"}}
+2026-11-14 18:56:52 wan_81f cte run1 start dev=4 core=16 cpus=84-95,180-191 calls=20 attention.py=4b1b7058ef0a2960 kernel=6a9378fdeb7162f9
+uptime:  18:56:52 up 8 days,  4:20,  8 users,  load average: 2.90, 10.48, 15.23
+fuser /dev/neuron4 exit 1
+2026-11-14 18:58:08 wan_81f cte run1 end exit=0 uptime:  18:58:08 up 8 days,  4:21,  8 users,  load average: 2.11, 8.52, 14.18
+{"ms": 63.74591304920614, "first_call_s": 62.50194767501671, "fuser": {"device": 4, "core": 16, "idle": true, "at": "2026-11-14T18:56:55"}}
+2026-11-14 18:58:08 wan_81f routed run2 start dev=4 core=16 cpus=84-95,180-191 calls=20 attention.py=4b1b7058ef0a2960 kernel=6a9378fdeb7162f9
+uptime:  18:58:08 up 8 days,  4:21,  8 users,  load average: 2.11, 8.52, 14.18
+fuser /dev/neuron4 exit 1
+2026-11-14 18:59:23 wan_81f routed run2 end exit=0 uptime:  18:59:23 up 8 days,  4:22,  8 users,  load average: 1.94, 7.02, 13.21
+{"ms": 83.97962439921685, "first_call_s": 61.54877002700232, "fuser": {"device": 4, "core": 16, "idle": true, "at": "2026-11-14T18:58:11"}}
+2026-11-14 18:59:23 wan_81f cte run2 start dev=4 core=16 cpus=84-95,180-191 calls=20 attention.py=4b1b7058ef0a2960 kernel=6a9378fdeb7162f9
+uptime:  18:59:23 up 8 days,  4:22,  8 users,  load average: 1.94, 7.02, 13.21
+fuser /dev/neuron4 exit 1
+2026-11-14 19:00:39 wan_81f cte run2 end exit=0 uptime:  19:00:39 up 8 days,  4:24,  8 users,  load average: 1.79, 5.82, 12.30
+{"ms": 63.75046244938858, "first_call_s": 62.41350526502356, "fuser": {"device": 4, "core": 16, "idle": true, "at": "2026-11-14T18:59:26"}}
+2026-11-14 19:00:39 wan_81f fvexp run2 start dev=4 core=16 cpus=84-95,180-191 calls=20 attention.py=4b1b7058ef0a2960 kernel=6a9378fdeb7162f9
+uptime:  19:00:39 up 8 days,  4:24,  8 users,  load average: 1.79, 5.82, 12.30
+fuser /dev/neuron4 exit 1
+2026-11-14 19:01:56 wan_81f fvexp run2 end exit=0 uptime:  19:01:56 up 8 days,  4:25,  8 users,  load average: 57.12, 22.66, 17.69
+{"ms": 84.0384631534107, "first_call_s": 61.57129837293178, "fuser": {"device": 4, "core": 16, "idle": true, "at": "2026-11-14T19:00:42"}}
+2026-11-14 19:01:56 wan_81f trio done dev=4

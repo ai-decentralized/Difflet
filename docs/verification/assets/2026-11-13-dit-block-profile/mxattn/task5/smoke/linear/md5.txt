@@ -1,0 +1,2 @@
+58b88bb0355e789e0c991f0c983747b7  /mnt/nvme/difflet-mxattn/task5/smoke/linear/gen.png
+bdff5cc9cbe814b732a0a42ab3191335  /mnt/nvme/difflet-mxattn/task5/smoke/linear/work/latents.pt

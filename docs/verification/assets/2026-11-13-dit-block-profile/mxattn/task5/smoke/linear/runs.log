@@ -1,0 +1,10 @@
+2026-11-14 18:32:05 start linear steps=10 dev=9 cores=36-39 cpus=32-47,128-143 DIFFLET_ATTN_QUANT=unset attention.py=4b1b7058ef0a2960 uptime:  18:32:05 up 8 days,  3:55,  9 users,  load average: 58.85, 34.85, 16.44
+2026-11-14 18:32:05 fuser /dev/neuron9 exit 1
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/root       1.9T  1.9T   62G  97% /
+/dev/md0        7.0T  6.4T  562G  93% /mnt/nvme
+2026-11-14 18:33:46 exit 0 uptime:  18:33:46 up 8 days,  3:57,  9 users,  load average: 47.59, 36.80, 18.93
+2026-11-14 18:33:46 fuser after: exit 1
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/root       1.9T  1.9T   62G  97% /
+/dev/md0        7.0T  6.4T  562G  93% /mnt/nvme

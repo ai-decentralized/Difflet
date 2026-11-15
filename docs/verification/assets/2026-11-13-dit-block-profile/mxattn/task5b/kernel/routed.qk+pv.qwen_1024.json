@@ -1,0 +1,85 @@
+{
+ "shape": {
+  "name": "qwen_1024",
+  "bh": 6,
+  "s": 5120,
+  "valid_k": 4609,
+  "d": 128,
+  "path": "bounded",
+  "routed": true,
+  "source": "qwen_image/bf16/blk1 Attention[attn] %custom-call.391: q, k, v 7,864,320 B = 6 x 5,120 x 128 bf16 = 4,096 image + 1,024 text, CFG batch 1 (block inputs [1, 4096, 3072] and [1, 1024, 3072]); bound_max 122,880 B = 6 x 5,120 x 4"
+ },
+ "impl": "routed",
+ "qk_mx": true,
+ "pv_mx": true,
+ "cte_no_vector_exp": false,
+ "fork_vector_exp": false,
+ "calls": 20,
+ "peak": 1.0,
+ "runs_ms": [
+  1.4225399994757026
+ ],
+ "first_call_s": [
+  12.501661585993133
+ ],
+ "median_ms": 1.4225399994757026,
+ "spread": 0.0,
+ "reference": "mirror",
+ "rel_l2": 0.005246756025797205,
+ "cosine": 0.9999862357086425,
+ "per_head": [
+  {
+   "rel_l2": 0.00539126986244387,
+   "cosine": 0.9999854669992132
+  },
+  {
+   "rel_l2": 0.005340798250978404,
+   "cosine": 0.9999857379087654
+  },
+  {
+   "rel_l2": 0.005122990738094164,
+   "cosine": 0.9999868774231214
+  },
+  {
+   "rel_l2": 0.005410610500608415,
+   "cosine": 0.9999853625785513
+  },
+  {
+   "rel_l2": 0.005159050915858728,
+   "cosine": 0.9999866921905539
+  },
+  {
+   "rel_l2": 0.005085027553304851,
+   "cosine": 0.99998707122544
+  }
+ ],
+ "nonfinite": 0,
+ "softmax_max": null,
+ "inputs": "q, k, v ~ N(0, 1) bf16, seed 0, q and k x 1.0, scale d^-0.5",
+ "cpus": [
+  80,
+  81,
+  82,
+  83,
+  84,
+  85,
+  86,
+  87,
+  176,
+  177,
+  178,
+  179,
+  180,
+  181,
+  182,
+  183
+ ],
+ "fuser": [
+  {
+   "device": 5,
+   "core": 20,
+   "idle": true,
+   "at": "2026-11-14T19:41:39"
+  }
+ ]
+}

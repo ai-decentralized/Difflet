@@ -1,0 +1,5 @@
+2026-11-14 22:18:05 capture flux both dev 7 cpus 48-71,144-167 hub /mnt/nvme/difflet-quant-bench-hub cache /mnt/nvme/difflet-mxattn/task6/cache/video df:  59G 545G 
+2026-11-14 22:20:24 capture.sh exit 0 STATUS DONE
+2026-11-14 22:20:24 analyze blk1 exit 0: /mnt/nvme/difflet-mxattn/task6/prof/flux/both/blk1/breakdown.json
+2026-11-14 22:20:25 analyze blk2 exit 0: /mnt/nvme/difflet-mxattn/task6/prof/flux/both/blk2/breakdown.json
+CAPTURE_LANE_DONE

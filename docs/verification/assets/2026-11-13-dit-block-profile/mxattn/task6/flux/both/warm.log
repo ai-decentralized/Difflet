@@ -1,0 +1,64 @@
+2026-11-14 22:02:41.4 <frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+2026-11-14 22:02:41.5 [flux] backend 'neuron' compiles into --cache-dir: DIFFLET_COMPILE_CACHE=/mnt/nvme/difflet-mxattn/task6/cache/video (NEFF and HLO caches under /mnt/nvme/difflet-mxattn/task6/cache/video/neuron)
+2026-11-14 22:02:43.9 [flux] MXFP8 transformer (nki): /mnt/nvme/difflet-mxattn/task6/cache/video/quantized/black-forest-labs--FLUX.1-dev__3de623fc/transformer/mxfp8-809df193b011ba1f
+2026-11-14 22:02:46.3 
+2026-11-14 22:02:46.3 *****************************************
+2026-11-14 22:02:46.3 Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+2026-11-14 22:02:46.3 *****************************************
+2026-11-14 22:02:55.8 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-14 22:02:55.8   _warn_trace_cache_once()
+2026-11-14 22:03:05.0 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-14 22:03:05.0   _warn_trace_cache_once()
+2026-11-14 22:03:05.0 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-14 22:03:05.0   _warn_trace_cache_once()
+2026-11-14 22:03:05.0 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-14 22:03:05.0   _warn_trace_cache_once()
+2026-11-14 22:03:09.9 [weight store] rank 1/4 NeuronFluxVaeDecoderApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (0.10 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/black-forest-labs--FLUX.1-dev__vae__3de623fc__bfloat16__tp4__d49afc6eb6874300)
+2026-11-14 22:03:10.0 [weight store] rank 2/4 NeuronFluxVaeDecoderApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (0.10 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/black-forest-labs--FLUX.1-dev__vae__3de623fc__bfloat16__tp4__d49afc6eb6874300)
+2026-11-14 22:03:10.0 [weight store] rank 0/4 NeuronFluxVaeDecoderApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (0.10 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/black-forest-labs--FLUX.1-dev__vae__3de623fc__bfloat16__tp4__d49afc6eb6874300)
+2026-11-14 22:03:10.0 [weight store] rank 3/4 NeuronFluxVaeDecoderApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (0.10 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/black-forest-labs--FLUX.1-dev__vae__3de623fc__bfloat16__tp4__d49afc6eb6874300)
+2026-11-14 22:15:22.8 [weight store] rank 3/4 NeuronFluxTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (3.95 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/transformer__mxfp8-809df193b011ba1f__bfloat16__tp4__de9a080b6ff64293)
+2026-11-14 22:15:22.9 [weight store] rank 2/4 NeuronFluxTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (3.95 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/transformer__mxfp8-809df193b011ba1f__bfloat16__tp4__de9a080b6ff64293)
+2026-11-14 22:15:22.9 [weight store] rank 1/4 NeuronFluxTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (3.95 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/transformer__mxfp8-809df193b011ba1f__bfloat16__tp4__de9a080b6ff64293)
+2026-11-14 22:15:22.9 [weight store] rank 0/4 NeuronFluxTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (3.95 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/transformer__mxfp8-809df193b011ba1f__bfloat16__tp4__de9a080b6ff64293)
+2026-11-14 22:16:32.0 [attention] DIFFLET_ATTN_QUANT=qk+pv (qk_mx=True, pv_mx=True): calls routed to the MXFP8 kernel by (s_q, s_k, bounded): {(4608, 4608, False): 2}
+2026-11-14 22:16:34.0 [weight store] rank 2/4 NeuronFluxT5Application: not written: no gain: the checkpoint holds these tensors in the load dtype (2.38 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/black-forest-labs--FLUX.1-dev__text_encoder_2__3de623fc__bfloat16__tp4__f7ddb22c38580c18)
+2026-11-14 22:16:34.0 [weight store] rank 3/4 NeuronFluxT5Application: not written: no gain: the checkpoint holds these tensors in the load dtype (2.38 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/black-forest-labs--FLUX.1-dev__text_encoder_2__3de623fc__bfloat16__tp4__f7ddb22c38580c18)
+2026-11-14 22:16:34.0 [weight store] rank 1/4 NeuronFluxT5Application: not written: no gain: the checkpoint holds these tensors in the load dtype (2.38 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/black-forest-labs--FLUX.1-dev__text_encoder_2__3de623fc__bfloat16__tp4__f7ddb22c38580c18)
+2026-11-14 22:16:34.0 [weight store] rank 0/4 NeuronFluxT5Application: not written: no gain: the checkpoint holds these tensors in the load dtype (2.38 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/black-forest-labs--FLUX.1-dev__text_encoder_2__3de623fc__bfloat16__tp4__f7ddb22c38580c18)
+2026-11-14 22:16:36.6 You set `add_prefix_space`. The tokenizer needs to be converted from the slow tokenizers
+2026-11-14 22:16:36.6 You set `add_prefix_space`. The tokenizer needs to be converted from the slow tokenizers
+2026-11-14 22:16:36.6 You set `add_prefix_space`. The tokenizer needs to be converted from the slow tokenizers
+2026-11-14 22:16:36.6 You set `add_prefix_space`. The tokenizer needs to be converted from the slow tokenizers
+2026-11-14 22:16:36.8 [flux] start-up {'import torch_neuronx': 0.0, 'prepare_runtime': 16.42, 'imports': 1.73, 'from_pretrained outside the components': 2.48}
+2026-11-14 22:16:36.8 [flux] load 809.8 s by component {'vae': 6.11, 'dit': 796.39, 't5': 4.11, 'clip+tokenizers': 0.66, 'scheduler+pipeline': 0.0}
+2026-11-14 22:16:36.8 [flux]   dit phases {'runtime init': 0.38, 'build on meta': 0.26, 'load checkpoint': 726.65, 'eval': 9.41, 'compile': 0.21, 'warmup forward': 59.29}
+2026-11-14 22:16:36.8 [flux]   t5 phases {'runtime init': 0.0, 'build on meta': 0.02, 'load checkpoint': 1.98, 'eval': 0.0, 'compile': 0.01, 'warmup forward': 2.09}
+2026-11-14 22:16:36.8 [flux]   vae phases {'runtime init': 0.09, 'build on meta': 0.03, 'load checkpoint': 0.45, 'eval': 0.01, 'compile': 0.01, 'warmup forward': 5.33}
+2026-11-14 22:16:37.4   0%|          | 0/2 [00:00<?, ?it/s] 50%|█████     | 1/2 [00:00<00:00,  4.91it/s]100%|██████████| 2/2 [00:00<00:00,  5.03it/s]100%|██████████| 2/2 [00:00<00:00,  5.01it/s]
+2026-11-14 22:16:37.7 [flux] request: 0.99 s; to the first step's end 0.46 s (prompt encode + step 1); step median 195.0 ms (n=1, max 195.0); after the last step 0.33 s
+2026-11-14 22:16:38.0 [difflet] image saved to /mnt/nvme/difflet-mxattn/task6/flux/both/warm.png
+2026-11-14 22:16:41.0 	Command being timed: "taskset -c 48-95,144-191 env /home/ubuntu/venvs/native-fp8/bin/python -m difflet.cli.main generate --backend neuron --model-id black-forest-labs/FLUX.1-dev --height 1024 --width 1024 --tp-degree 4 --quant mxfp8 --attn-quant qk+pv --cache-dir /mnt/nvme/difflet-mxattn/task6/cache/video --steps 2 --seed 42 --prompt a cat sitting on a bench --output /mnt/nvme/difflet-mxattn/task6/flux/both/warm.png --work-dir /mnt/nvme/difflet-mxattn/task6/flux/both/work_warm --keep-work-dir"
+2026-11-14 22:16:41.0 	User time (seconds): 243.98
+2026-11-14 22:16:41.0 	System time (seconds): 95.94
+2026-11-14 22:16:41.0 	Percent of CPU this job got: 40%
+2026-11-14 22:16:41.0 	Elapsed (wall clock) time (h:mm:ss or m:ss): 13:59.58
+2026-11-14 22:16:41.0 	Average shared text size (kbytes): 0
+2026-11-14 22:16:41.0 	Average unshared data size (kbytes): 0
+2026-11-14 22:16:41.0 	Average stack size (kbytes): 0
+2026-11-14 22:16:41.0 	Average total size (kbytes): 0
+2026-11-14 22:16:41.0 	Maximum resident set size (kbytes): 3387000
+2026-11-14 22:16:41.0 	Average resident set size (kbytes): 0
+2026-11-14 22:16:41.0 	Major (requiring I/O) page faults: 55954
+2026-11-14 22:16:41.0 	Minor (reclaiming a frame) page faults: 7413793
+2026-11-14 22:16:41.0 	Voluntary context switches: 393725
+2026-11-14 22:16:41.0 	Involuntary context switches: 666065
+2026-11-14 22:16:41.0 	Swaps: 0
+2026-11-14 22:16:41.0 	File system inputs: 50179640
+2026-11-14 22:16:41.0 	File system outputs: 106240
+2026-11-14 22:16:41.0 	Socket messages sent: 0
+2026-11-14 22:16:41.0 	Socket messages received: 0
+2026-11-14 22:16:41.0 	Signals delivered: 0
+2026-11-14 22:16:41.0 	Page size (bytes): 4096
+2026-11-14 22:16:41.0 	Exit status: 0
+exit 0

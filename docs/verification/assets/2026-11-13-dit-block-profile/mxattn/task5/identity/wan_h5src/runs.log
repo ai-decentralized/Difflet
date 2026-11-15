@@ -1,0 +1,10 @@
+2026-11-14 18:39:26 start wan dev=10 cores=40-43 cpus=0-23,96-119 attention.py=269321dbf3ba6173 uptime:  18:39:26 up 8 days,  4:03,  9 users,  load average: 16.89, 24.07, 18.62
+2026-11-14 18:39:26 fuser /dev/neuron10 exit 1
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/root       1.9T  1.9T   62G  97% /
+/dev/md0        7.0T  6.4T  562G  93% /mnt/nvme
+2026-11-14 18:41:00 exit 0 uptime:  18:41:00 up 8 days,  4:04,  9 users,  load average: 24.02, 25.22, 19.58
+2026-11-14 18:41:00 fuser after: exit 1
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/root       1.9T  1.9T   62G  97% /
+/dev/md0        7.0T  6.4T  562G  93% /mnt/nvme

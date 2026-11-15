@@ -1,0 +1,360 @@
+{
+ "block_ms": 13.546893833,
+ "replay_spread_ms": 0.08045820799999943,
+ "block_neff_sha256": "778226b5b87bdea9555d1f8f74bb1d70dd275eabd20cfb266678fa4b2735597a",
+ "engines_ms": {
+  "vector": 4.2110645,
+  "tensor": 8.843459,
+  "gpsimd": 0.1985205,
+  "scalar": 1.7818475,
+  "sync": 0.140353,
+  "hbm_dma": 1.751588,
+  "collective": 1.722891
+ },
+ "components": {
+  "unattributed": {
+   "vector": 0.2455425,
+   "tensor": 1.2160075,
+   "gpsimd": 0.0130885,
+   "scalar": 0.5466905,
+   "sync": 0.007248,
+   "hbm_dma": 0.5047435
+  },
+  "qkv_proj": {
+   "hbm_dma": 0.085227,
+   "tensor": 2.092614,
+   "vector": 0.192019,
+   "scalar": 0.017568,
+   "sync": 0.002053,
+   "gpsimd": 0.0003545
+  },
+  "modulation": {
+   "vector": 0.431206,
+   "scalar": 0.0526715,
+   "hbm_dma": 0.0768575,
+   "tensor": 0.105593,
+   "sync": 0.000156
+  },
+  "norm": {
+   "scalar": 0.3863925,
+   "tensor": 0.4012005,
+   "gpsimd": 0.0572585,
+   "vector": 0.3769575,
+   "sync": 0.000163,
+   "hbm_dma": 0.000292
+  },
+  "qk_norm": {
+   "scalar": 0.1893615,
+   "vector": 0.326148,
+   "hbm_dma": 0.0260515,
+   "tensor": 0.0377785,
+   "gpsimd": 0.002655,
+   "sync": 0.0002465
+  },
+  "rope": {
+   "hbm_dma": 0.559099,
+   "scalar": 0.084328,
+   "vector": 0.1532495,
+   "gpsimd": 0.0007395
+  },
+  "collective": {
+   "gpsimd": 0.007825,
+   "tensor": 0.0068665,
+   "vector": 0.007778,
+   "sync": 0.000351,
+   "hbm_dma": 0.000734,
+   "collective": 1.722891
+  },
+  "attention": {
+   "sync": 0.1299405,
+   "vector": 2.452355,
+   "gpsimd": 0.11812,
+   "tensor": 1.710241,
+   "hbm_dma": 0.5321865
+  },
+  "out_proj": {
+   "tensor": 0.8853895,
+   "vector": 0.122549,
+   "sync": 0.000117,
+   "hbm_dma": 0.0197665,
+   "scalar": 0.2995995
+  },
+  "mlp_up": {
+   "vector": 0.0010195,
+   "tensor": 1.3521835,
+   "hbm_dma": 0.002039,
+   "scalar": 0.0037045
+  },
+  "mlp_down": {
+   "vector": 0.0118615,
+   "tensor": 1.340915,
+   "sync": 3.9e-05,
+   "scalar": 0.1018415,
+   "hbm_dma": 0.0064175
+  },
+  "mlp_act": {
+   "tensor": 0.000272,
+   "sync": 3.9e-05,
+   "scalar": 0.124049
+  }
+ },
+ "engines_check": {
+  "summary_ms": {
+   "cc_cores_instruction_active_time": 0.015503291,
+   "cc_op_active_time": 1.7228914770000001,
+   "dma_active_time": 8.759516002,
+   "gpsimd_engine_active_time": 2.312655449,
+   "hardware_dynamic_dma_active_time": 5.192958426000001,
+   "host_device_dma_active_time": 0.904375257,
+   "scalar_engine_active_time": 3.442973399,
+   "software_dynamic_dma_active_time": 2.341399459,
+   "static_dma_active_time": 3.552414728,
+   "sync_engine_active_time": 0.81969622,
+   "tensor_engine_active_time": 11.227300876000001,
+   "total_active_time": 13.449766846,
+   "vector_engine_active_time": 5.484519210999999
+  },
+  "active_time_ms": {
+   "cc_instruction": 0.007847,
+   "gpsimd": 1.4158255,
+   "scalar": 2.094457,
+   "sync": 0.4624535,
+   "tensor": 8.843644,
+   "vector": 4.2113355
+  },
+  "union_ms": {
+   "vector": 4.2110645,
+   "tensor": 8.843459,
+   "gpsimd": 1.415508,
+   "scalar": 2.094188,
+   "sync": 0.4623505
+  }
+ },
+ "attention_detail": {
+  "attn1": {
+   "other": {
+    "sync": 0.093132,
+    "vector": 0.009366,
+    "hbm_dma": 0.2066925,
+    "gpsimd": 0.0233,
+    "tensor": 0.0053965
+   },
+   "mask_softmax": {
+    "gpsimd": 0.021603,
+    "vector": 1.163386
+   },
+   "qk_matmul": {
+    "tensor": 0.777643
+   },
+   "exp": {
+    "vector": 0.632684
+   },
+   "pv_matmul": {
+    "tensor": 0.880347,
+    "vector": 0.041723
+   }
+  },
+  "attn2": {
+   "other": {
+    "vector": 0.005604,
+    "sync": 0.017096,
+    "tensor": 0.0033125,
+    "hbm_dma": 0.1425965,
+    "gpsimd": 0.019833
+   },
+   "exp": {
+    "vector": 0.126638
+   },
+   "pv_matmul": {
+    "tensor": 0.1429035,
+    "vector": 0.042876
+   },
+   "mask_softmax": {
+    "gpsimd": 0.0205155,
+    "vector": 0.2941355
+   },
+   "qk_matmul": {
+    "tensor": 0.1536135
+   }
+  },
+  "audio_attn1": {
+   "other": {
+    "vector": 0.011472,
+    "tensor": 0.0094255,
+    "gpsimd": 0.000782,
+    "sync": 0.000981,
+    "hbm_dma": 0.0040645
+   },
+   "mask_softmax": {
+    "gpsimd": 0.0004495,
+    "vector": 0.004795
+   },
+   "qk_matmul": {
+    "tensor": 0.001479
+   },
+   "exp": {
+    "vector": 0.001129
+   },
+   "pv_matmul": {
+    "tensor": 0.001285,
+    "vector": 0.0008365
+   }
+  },
+  "audio_to_video_attn": {
+   "other": {
+    "vector": 0.008331,
+    "gpsimd": 0.0226605,
+    "tensor": 0.003703,
+    "sync": 0.009535,
+    "hbm_dma": 0.137041
+   },
+   "mask_softmax": {
+    "gpsimd": 0.0239455,
+    "vector": 0.1759845
+   },
+   "qk_matmul": {
+    "tensor": 0.0556805
+   },
+   "exp": {
+    "vector": 0.0531485
+   },
+   "pv_matmul": {
+    "tensor": 0.047144,
+    "vector": 0.032062
+   }
+  },
+  "audio_attn2": {
+   "other": {
+    "tensor": 0.0048635,
+    "vector": 0.006006,
+    "sync": 0.001046,
+    "gpsimd": 0.000321,
+    "hbm_dma": 0.008207
+   },
+   "mask_softmax": {
+    "vector": 0.009805,
+    "gpsimd": 0.0004525
+   },
+   "pv_matmul": {
+    "tensor": 0.007841,
+    "vector": 0.0009095
+   },
+   "qk_matmul": {
+    "tensor": 0.003708
+   },
+   "exp": {
+    "vector": 0.003255
+   }
+  },
+  "video_to_audio_attn": {
+   "other": {
+    "tensor": 0.0068435,
+    "vector": 0.0086635,
+    "sync": 0.0081505,
+    "hbm_dma": 0.0336645,
+    "gpsimd": 0.0003195
+   },
+   "mask_softmax": {
+    "gpsimd": 0.000494,
+    "vector": 0.0262435
+   },
+   "qk_matmul": {
+    "tensor": 0.0203815
+   },
+   "exp": {
+    "vector": 0.0146365
+   },
+   "pv_matmul": {
+    "tensor": 0.0386735,
+    "vector": 0.0009065
+   }
+  },
+  "": {
+   "mask_softmax": {
+    "vector": 0.00054
+   },
+   "qk_matmul": {
+    "tensor": 0.000565
+   },
+   "pv_matmul": {
+    "tensor": 0.001292
+   }
+  }
+ },
+ "memory_bytes": {
+  "hbm_read": 2023720344,
+  "hbm_write": 911503320,
+  "sbuf_read": 17987678448,
+  "sbuf_write": 8182699936,
+  "psum_read": 3572816448,
+  "psum_write": 17113380480,
+  "spill_save": 730583000,
+  "spill_reload": 1368229592,
+  "psum_to_sbuf": 3112743488
+ },
+ "psum_readout_copy_ms": 1.3363805,
+ "psum_readout_fused_ms": 2.1918265,
+ "psum_readout_copy_ms_by_engine": {
+  "scalar": 1.0176275,
+  "vector": 0.424114
+ },
+ "psum_readout_fused_ms_by_engine": {
+  "vector": 2.053419,
+  "scalar": 0.1384075
+ },
+ "mfu": 0.48563827334220855,
+ "mbu": 0.183931529540452,
+ "throttle": {
+  "avg_util_limit": 0.8019749945034287,
+  "limited_time_share": 0.3901958120268022
+ },
+ "other_share": {
+  "hbm_dma": 0.0,
+  "tensor": 0.0,
+  "vector": 0.0,
+  "scalar": 0.0,
+  "gpsimd": 0.0,
+  "sync": 0.0
+ },
+ "unattributed_share": {
+  "vector": 0.058308890780466555,
+  "tensor": 0.13750360577235674,
+  "gpsimd": 0.0659302187935251,
+  "scalar": 0.3068110486447353,
+  "sync": 0.05164121892656373,
+  "hbm_dma": 0.2881633694681626
+ },
+ "warnings": [
+  "Current NEFF is missing compiler metrics. Please re-compile using latest version of the compiler"
+ ],
+ "dge_notifs": true,
+ "unattributed_by_source": {
+  "(none)": {
+   "vector": 0.2455425,
+   "tensor": 1.2160075,
+   "gpsimd": 0.0130885,
+   "scalar": 0.5466905,
+   "sync": 0.007248,
+   "hbm_dma": 0.5047435
+  }
+ },
+ "component_overlap": {
+  "vector": 1.026031660165737,
+  "tensor": 1.0345568402589982,
+  "gpsimd": 1.0076591586259354,
+  "scalar": 1.0136706424090727,
+  "sync": 0.9999999999999998,
+  "hbm_dma": 1.0352971132480926
+ },
+ "check_against_committed": {
+  "engines_equal": true,
+  "attention_equal": true,
+  "attn1_mask_softmax_plus_exp_minus_old_ms": 0.048116999999999965,
+  "attn2_mask_softmax_plus_exp_minus_old_ms": 0.018569500000000017,
+  "audio_attn1_mask_softmax_plus_exp_minus_old_ms": 0.0,
+  "audio_to_video_attn_mask_softmax_plus_exp_minus_old_ms": 0.03333549999999996,
+  "audio_attn2_mask_softmax_plus_exp_minus_old_ms": 0.00019550000000000123,
+  "video_to_audio_attn_mask_softmax_plus_exp_minus_old_ms": 0.0007199999999999984,
+  "_mask_softmax_plus_exp_minus_old_ms": 0.0
+ }
+}

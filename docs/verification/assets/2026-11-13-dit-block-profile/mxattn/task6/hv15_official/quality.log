@@ -1,0 +1,59 @@
+/home/ubuntu/venvs/native-fp8/lib/python3.12/site-packages/torchvision/models/_utils.py:207: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/home/ubuntu/venvs/native-fp8/lib/python3.12/site-packages/torchvision/models/_utils.py:222: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=AlexNet_Weights.IMAGENET1K_V1`. You can also use `weights=AlexNet_Weights.DEFAULT` to get the most up-to-date weights.
+  warnings.warn(msg)
+{
+ "key": "hv15_official",
+ "arm": "attn",
+ "md5": {
+  "bf16/timed_1": "30903b0fb7c6c88235692a6407bb7477",
+  "bf16/timed_2": "30903b0fb7c6c88235692a6407bb7477",
+  "attn/timed_1": "ec701ae51d92d66dc7d6fb2d314a5488",
+  "attn/timed_2": "ec701ae51d92d66dc7d6fb2d314a5488",
+  "attn/gen2": "ec701ae51d92d66dc7d6fb2d314a5488"
+ },
+ "latents_md5": {
+  "hv15_official/bf16/work_timed/worker_0/latents_req0000.pt": "8a848f635019d37f8901f19d0f1eb7df",
+  "hv15_official/attn/work_timed/worker_0/latents_req0000.pt": "bce6a47d499b9c350006bb73d8838435"
+ },
+ "arm_latents_finite": {
+  "timed": true,
+  "gen2": true
+ },
+ "deterministic": {
+  "bf16": true,
+  "attn": true
+ },
+ "arm_latents_bit_identical": {
+  "hv15_official/attn/work_timed/worker_0/latents_req0001.pt": {
+   "rel_l2": 0.0,
+   "cosine": 1.0,
+   "bit_identical": true
+  },
+  "hv15_official/attn/work_gen2/latents.pt": {
+   "rel_l2": 0.0,
+   "cosine": 1.0,
+   "bit_identical": true
+  }
+ },
+ "arm_vs_bf16": {
+  "ref_latents": "/mnt/nvme/difflet-mxattn/task6/hv15_official/bf16/work_timed/worker_0/latents_req0000.pt",
+  "cand_latents": "/mnt/nvme/difflet-mxattn/task6/hv15_official/attn/work_timed/worker_0/latents_req0000.pt",
+  "latents": {
+   "rel_l2": 0.6653136160629234,
+   "cosine": 0.7875582420611943,
+   "bit_identical": false
+  },
+  "video": {
+   "psnr": 12.9861079947306,
+   "ssim": 0.21334113605510124,
+   "lpips": 0.4988713185649273,
+   "ref": "/mnt/nvme/difflet-mxattn/task6/hv15_official/bf16/timed_1.mp4",
+   "cand": "/mnt/nvme/difflet-mxattn/task6/hv15_official/attn/timed_1.mp4",
+   "frames": 121,
+   "identical_frames": 0,
+   "psnr_worst": 12.510860113755097,
+   "min_psnr_frame": 52
+  }
+ }
+}

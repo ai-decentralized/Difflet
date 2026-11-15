@@ -1,0 +1,4 @@
+2026-11-14 23:29:41 capture wan22_official both dev 3 cpus 48-71,144-167 hub /home/ubuntu/.cache/huggingface/hub cache /mnt/nvme/difflet-mxattn/task6/cache/video df:  56G 533G 
+2026-11-14 23:49:05 capture.sh exit 0 STATUS DONE
+2026-11-14 23:49:14 analyze blk1 exit 0: /mnt/nvme/difflet-mxattn/task6/prof/wan22_official/both/blk1/breakdown.json
+CAPTURE_LANE_DONE

@@ -1,0 +1,288 @@
+{
+ "qwen_1024": {
+  "accuracy": {
+   "fvexp_flat": {
+    "reference": "mirror",
+    "rel_l2": 0.0020781021481795095,
+    "cosine": 0.9999978407481931,
+    "nonfinite": 0
+   },
+   "routed_flat": {
+    "reference": "mirror",
+    "rel_l2": 0.0020781021481795095,
+    "cosine": 0.9999978407481931,
+    "nonfinite": 0
+   },
+   "fvexp_peak": {
+    "reference": "mirror",
+    "rel_l2": 0.0018059925468861752,
+    "cosine": 0.9999983691998127,
+    "nonfinite": 0
+   },
+   "cte_flat": {
+    "reference": "fp32",
+    "rel_l2": 0.002880010158546721,
+    "cosine": 0.9999958527698412,
+    "nonfinite": 0
+   }
+  },
+  "bits": {
+   "acc routed vs fvexp": {
+    "a": "/mnt/nvme/difflet-mxattn/task5/kernel/acc/routed_flat.qwen_1024.out.pt",
+    "b": "/mnt/nvme/difflet-mxattn/task5/kernel/acc/fvexp_flat.qwen_1024.out.pt",
+    "bit_identical": true,
+    "differing": 0
+   },
+   "trio routed vs fvexp": {
+    "a": "/mnt/nvme/difflet-mxattn/task5/kernel/trio/routed/qwen_1024.out.pt",
+    "b": "/mnt/nvme/difflet-mxattn/task5/kernel/trio/fvexp/qwen_1024.out.pt",
+    "bit_identical": true,
+    "differing": 0
+   },
+   "trio fvexp vs acc fvexp": {
+    "a": "/mnt/nvme/difflet-mxattn/task5/kernel/trio/fvexp/qwen_1024.out.pt",
+    "b": "/mnt/nvme/difflet-mxattn/task5/kernel/acc/fvexp_flat.qwen_1024.out.pt",
+    "bit_identical": true,
+    "differing": 0
+   }
+  },
+  "timing": {
+   "cte": {
+    "runs_ms": [
+     1.1789669486461207,
+     1.1792321485700086,
+     1.1816129728686064
+    ],
+    "median_ms": 1.1792321485700086,
+    "spread": 0.002243853532736885,
+    "fuser": [
+     {
+      "device": 3,
+      "core": 12,
+      "idle": true,
+      "at": "2026-11-14T18:48:30"
+     },
+     {
+      "device": 3,
+      "core": 12,
+      "idle": true,
+      "at": "2026-11-14T18:49:43"
+     },
+     {
+      "device": 3,
+      "core": 12,
+      "idle": true,
+      "at": "2026-11-14T18:50:09"
+     }
+    ]
+   },
+   "fvexp": {
+    "runs_ms": [
+     1.2836477253586054,
+     1.2811271008104086,
+     1.2881945993285626
+    ],
+    "median_ms": 1.2836477253586054,
+    "spread": 0.005505792888917104,
+    "fuser": [
+     {
+      "device": 3,
+      "core": 12,
+      "idle": true,
+      "at": "2026-11-14T18:48:45"
+     },
+     {
+      "device": 3,
+      "core": 12,
+      "idle": true,
+      "at": "2026-11-14T18:49:14"
+     },
+     {
+      "device": 3,
+      "core": 12,
+      "idle": true,
+      "at": "2026-11-14T18:50:23"
+     }
+    ],
+    "ratio_vs_cte": 1.0885453953364619,
+    "J": 0.02,
+    "faster": false
+   },
+   "routed": {
+    "runs_ms": [
+     1.2890349986264482,
+     1.2793411762686446,
+     1.2811287975637242
+    ],
+    "median_ms": 1.2811287975637242,
+    "spread": 0.0075666259132087035,
+    "fuser": [
+     {
+      "device": 3,
+      "core": 12,
+      "idle": true,
+      "at": "2026-11-14T18:48:58"
+     },
+     {
+      "device": 3,
+      "core": 12,
+      "idle": true,
+      "at": "2026-11-14T18:49:30"
+     },
+     {
+      "device": 3,
+      "core": 12,
+      "idle": true,
+      "at": "2026-11-14T18:49:55"
+     }
+    ],
+    "ratio_vs_cte": 1.0864093207747771,
+    "J": 0.02,
+    "faster": false
+   }
+  }
+ },
+ "wan_81f": {
+  "accuracy": {
+   "fvexp_flat": {
+    "reference": "mirror",
+    "rel_l2": 0.002954261649234407,
+    "cosine": 0.9999956361669912,
+    "nonfinite": 0
+   },
+   "routed_flat": {
+    "reference": "mirror",
+    "rel_l2": 0.002954261649234407,
+    "cosine": 0.9999956361669912,
+    "nonfinite": 0
+   },
+   "fvexp_peak": {
+    "reference": "mirror",
+    "rel_l2": 0.002260119546471076,
+    "cosine": 0.99999744595773,
+    "nonfinite": 0
+   },
+   "cte_flat": {
+    "reference": "fp32",
+    "rel_l2": 0.003106154217208093,
+    "cosine": 0.9999951758913589,
+    "nonfinite": 0
+   }
+  },
+  "bits": {
+   "acc routed vs fvexp": {
+    "a": "/mnt/nvme/difflet-mxattn/task5/kernel/acc/routed_flat.wan_81f.out.pt",
+    "b": "/mnt/nvme/difflet-mxattn/task5/kernel/acc/fvexp_flat.wan_81f.out.pt",
+    "bit_identical": true,
+    "differing": 0
+   },
+   "trio routed vs fvexp": {
+    "a": "/mnt/nvme/difflet-mxattn/task5/kernel/trio/routed/wan_81f.out.pt",
+    "b": "/mnt/nvme/difflet-mxattn/task5/kernel/trio/fvexp/wan_81f.out.pt",
+    "bit_identical": true,
+    "differing": 0
+   },
+   "trio fvexp vs acc fvexp": {
+    "a": "/mnt/nvme/difflet-mxattn/task5/kernel/trio/fvexp/wan_81f.out.pt",
+    "b": "/mnt/nvme/difflet-mxattn/task5/kernel/acc/fvexp_flat.wan_81f.out.pt",
+    "bit_identical": true,
+    "differing": 0
+   }
+  },
+  "timing": {
+   "cte": {
+    "runs_ms": [
+     63.756251154700294,
+     63.74591304920614,
+     63.75046244938858
+    ],
+    "median_ms": 63.75046244938858,
+    "spread": 0.0001621651843288806,
+    "fuser": [
+     {
+      "device": 4,
+      "core": 16,
+      "idle": true,
+      "at": "2026-11-14T18:50:38"
+     },
+     {
+      "device": 4,
+      "core": 16,
+      "idle": true,
+      "at": "2026-11-14T18:56:55"
+     },
+     {
+      "device": 4,
+      "core": 16,
+      "idle": true,
+      "at": "2026-11-14T18:59:26"
+     }
+    ]
+   },
+   "fvexp": {
+    "runs_ms": [
+     84.00096429977566,
+     84.01624940452166,
+     84.0384631534107
+    ],
+    "median_ms": 84.01624940452166,
+    "spread": 0.00044632858406346286,
+    "fuser": [
+     {
+      "device": 4,
+      "core": 16,
+      "idle": true,
+      "at": "2026-11-14T18:51:53"
+     },
+     {
+      "device": 4,
+      "core": 16,
+      "idle": true,
+      "at": "2026-11-14T18:54:24"
+     },
+     {
+      "device": 4,
+      "core": 16,
+      "idle": true,
+      "at": "2026-11-14T19:00:42"
+     }
+    ],
+    "ratio_vs_cte": 1.317892391309664,
+    "J": 0.02,
+    "faster": false
+   },
+   "routed": {
+    "runs_ms": [
+     84.00517894770019,
+     84.02004690142348,
+     83.97962439921685
+    ],
+    "median_ms": 84.00517894770019,
+    "spread": 0.0004811905969726537,
+    "fuser": [
+     {
+      "device": 4,
+      "core": 16,
+      "idle": true,
+      "at": "2026-11-14T18:53:08"
+     },
+     {
+      "device": 4,
+      "core": 16,
+      "idle": true,
+      "at": "2026-11-14T18:55:39"
+     },
+     {
+      "device": 4,
+      "core": 16,
+      "idle": true,
+      "at": "2026-11-14T18:58:11"
+     }
+    ],
+    "ratio_vs_cte": 1.3177187383447109,
+    "J": 0.02,
+    "faster": false
+   }
+  }
+ }
+}

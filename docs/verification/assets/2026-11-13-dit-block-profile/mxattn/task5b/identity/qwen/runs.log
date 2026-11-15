@@ -1,0 +1,10 @@
+2026-11-14 19:41:33 start qwen dev=1 cores=4-7 cpus=48-55,144-151 attention.py=3ec9f73099f5d799 DIFFLET_ATTN_QUANT=unset uptime:  19:41:33 up 8 days,  5:05,  8 users,  load average: 0.13, 2.19, 19.17
+2026-11-14 19:41:34 fuser /dev/neuron1 exit 1
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/root       1.9T  1.9T   62G  97% /
+/dev/md0        7.0T  6.4T  561G  93% /mnt/nvme
+2026-11-14 19:43:32 exit 0 uptime:  19:43:32 up 8 days,  5:07,  8 users,  load average: 41.51, 17.56, 22.74
+2026-11-14 19:43:32 fuser after: exit 1
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/root       1.9T  1.9T   62G  97% /
+/dev/md0        7.0T  6.4T  561G  93% /mnt/nvme

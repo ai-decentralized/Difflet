@@ -1,0 +1,23 @@
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+[wan] backend 'neuron' compiles into --cache-dir: DIFFLET_COMPILE_CACHE=/home/ubuntu/difflet-cache-video (NEFF and HLO caches under /home/ubuntu/difflet-cache-video/neuron)
+
+*****************************************
+Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+*****************************************
+[weight store] rank 3/4 NeuronWanTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (7.50 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/home/ubuntu/difflet-cache-video/neuron/weights/38ec498cb3208fb688890f8cc7e94ede2cbd7f68__transformer__bfloat16__tp4__0f5b3d9197b5ec5a)
+[weight store] rank 2/4 NeuronWanTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (7.50 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/home/ubuntu/difflet-cache-video/neuron/weights/38ec498cb3208fb688890f8cc7e94ede2cbd7f68__transformer__bfloat16__tp4__0f5b3d9197b5ec5a)
+[weight store] rank 1/4 NeuronWanTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (7.50 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/home/ubuntu/difflet-cache-video/neuron/weights/38ec498cb3208fb688890f8cc7e94ede2cbd7f68__transformer__bfloat16__tp4__0f5b3d9197b5ec5a)
+[weight store] rank 0/4 NeuronWanTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (7.50 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/home/ubuntu/difflet-cache-video/neuron/weights/38ec498cb3208fb688890f8cc7e94ede2cbd7f68__transformer__bfloat16__tp4__0f5b3d9197b5ec5a)
+[weight store] rank 1/4 NeuronWanTextEncoderApplication: hit 2.84 GB in 1.1 s (/home/ubuntu/difflet-cache-video/neuron/weights/Wan-AI--Wan2.1-T2V-14B-Diffusers__text_encoder__38ec498c__bfloat16__tp4__91b0beceaabd499e)
+[weight store] rank 3/4 NeuronWanTextEncoderApplication: hit 2.84 GB in 1.1 s (/home/ubuntu/difflet-cache-video/neuron/weights/Wan-AI--Wan2.1-T2V-14B-Diffusers__text_encoder__38ec498c__bfloat16__tp4__91b0beceaabd499e)
+[weight store] rank 2/4 NeuronWanTextEncoderApplication: hit 2.84 GB in 1.2 s (/home/ubuntu/difflet-cache-video/neuron/weights/Wan-AI--Wan2.1-T2V-14B-Diffusers__text_encoder__38ec498c__bfloat16__tp4__91b0beceaabd499e)
+[weight store] rank 0/4 NeuronWanTextEncoderApplication: hit 2.84 GB in 1.6 s (/home/ubuntu/difflet-cache-video/neuron/weights/Wan-AI--Wan2.1-T2V-14B-Diffusers__text_encoder__38ec498c__bfloat16__tp4__91b0beceaabd499e)
+[wan] start-up: from_pretrained (prepare_runtime + build) 18.01 s; load 59.7 s by component {'runtime init': 0.1555217650020495, 'build on meta': 0.3823996209539473, 'load checkpoint': 3.0461095169885084, 'eval': 0.009839592035859823, 'compile': 0.32458559004589915, 'warmup forward': 46.02575953898486, 'text_encoder runtime init': 0.001110758981667459, 'text_encoder build on meta': 0.030482908012345433, 'text_encoder load checkpoint': 1.6015374730341136, 'text_encoder eval': 0.0046545249642804265, 'text_encoder compile': 0.007862073020078242, 'text_encoder warmup forward': 7.346369378035888}
+[wan] neuron rank 1/4: exec_mode=compile compiled_blocks=64 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 77.7s, stage 100.7s
+[wan] neuron rank 3/4: exec_mode=compile compiled_blocks=64 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 77.6s, stage 100.6s
+[wan] neuron rank 2/4: exec_mode=compile compiled_blocks=64 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 77.6s, stage 100.6s
+[wan] request: 22.97 s; to the first step's end 1.47 s (prompt encode + step 1); step median 438.2 ms (n=49, max 442.7); after the last step 0.00 s
+[wan] latents saved to /mnt/nvme/difflet-mxattn/task5b/identity/wan/work/latents.pt
+[wan] neuron rank 0/4: exec_mode=compile compiled_blocks=64 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 77.7s, stage 100.7s
+[weight store] rank 0/1 NeuronWanVaeDecoderApplication: hit 0.15 GB in 11.3 s (/home/ubuntu/difflet-cache-video/neuron/weights/Wan-AI--Wan2.1-T2V-14B-Diffusers__vae__38ec498c__bfloat16__tp1__fa7540f14397355b)
+[wan] video saved to /mnt/nvme/difflet-mxattn/task5b/identity/wan/gen50.mp4

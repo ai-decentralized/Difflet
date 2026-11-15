@@ -1,0 +1,59 @@
+/home/ubuntu/venvs/native-fp8/lib/python3.12/site-packages/torchvision/models/_utils.py:207: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/home/ubuntu/venvs/native-fp8/lib/python3.12/site-packages/torchvision/models/_utils.py:222: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=AlexNet_Weights.IMAGENET1K_V1`. You can also use `weights=AlexNet_Weights.DEFAULT` to get the most up-to-date weights.
+  warnings.warn(msg)
+{
+ "key": "wan22_official",
+ "arm": "both",
+ "md5": {
+  "bf16/timed_1": "5b443ec6f785813e79b67fd4bc24deac",
+  "bf16/timed_2": "5b443ec6f785813e79b67fd4bc24deac",
+  "both/timed_1": "3192daae5c3cd7296fe0fe4a717ee255",
+  "both/timed_2": "3192daae5c3cd7296fe0fe4a717ee255",
+  "both/gen2": "3192daae5c3cd7296fe0fe4a717ee255"
+ },
+ "latents_md5": {
+  "wan22_official/bf16/work_timed/worker_0/latents_req0000.pt": "dfda3897fe1982481a01f05f00e3155e",
+  "wan22_official/both/work_timed/worker_0/latents_req0000.pt": "f840ff08dc502ec506d51e91c885713f"
+ },
+ "arm_latents_finite": {
+  "timed": true,
+  "gen2": true
+ },
+ "deterministic": {
+  "bf16": true,
+  "both": true
+ },
+ "arm_latents_bit_identical": {
+  "wan22_official/both/work_timed/worker_0/latents_req0001.pt": {
+   "rel_l2": 0.0,
+   "cosine": 0.9999999999998022,
+   "bit_identical": true
+  },
+  "wan22_official/both/work_gen2/latents.pt": {
+   "rel_l2": 0.0,
+   "cosine": 0.9999999999998022,
+   "bit_identical": true
+  }
+ },
+ "arm_vs_bf16": {
+  "ref_latents": "/mnt/nvme/difflet-mxattn/task6/wan22_official/bf16/work_timed/worker_0/latents_req0000.pt",
+  "cand_latents": "/mnt/nvme/difflet-mxattn/task6/wan22_official/both/work_timed/worker_0/latents_req0000.pt",
+  "latents": {
+   "rel_l2": 0.4956323333686679,
+   "cosine": 0.8775389924907369,
+   "bit_identical": false
+  },
+  "video": {
+   "psnr": 11.834721272508435,
+   "ssim": 0.21456176959822204,
+   "lpips": 0.43893966373102167,
+   "ref": "/mnt/nvme/difflet-mxattn/task6/wan22_official/bf16/timed_1.mp4",
+   "cand": "/mnt/nvme/difflet-mxattn/task6/wan22_official/both/timed_1.mp4",
+   "frames": 81,
+   "identical_frames": 0,
+   "psnr_worst": 10.878990599401616,
+   "min_psnr_frame": 46
+  }
+ }
+}

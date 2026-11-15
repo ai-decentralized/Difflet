@@ -1,0 +1,8 @@
+ec701ae51d92d66dc7d6fb2d314a5488  ./gen2.mp4
+ec701ae51d92d66dc7d6fb2d314a5488  ./timed_1.mp4
+ec701ae51d92d66dc7d6fb2d314a5488  ./timed_2.mp4
+99f94040e5421e0f8d1591ffccf529fa  ./warm.mp4
+2b44eefc09afb9eaccfcf70257fca55f  ./work_warm/latents.pt
+bce6a47d499b9c350006bb73d8838435  ./work_timed/worker_0/latents_req0000.pt
+6ca0539028cb4262e7db8c6c6f6b240c  ./work_timed/worker_0/latents_req0001.pt
+07b20889fa39e97b15cecd506f2a7210  ./work_gen2/latents.pt

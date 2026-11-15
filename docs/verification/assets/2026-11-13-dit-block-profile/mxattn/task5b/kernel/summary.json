@@ -1,0 +1,224 @@
+{
+ "qwen_1024 qk": {
+  "bits routed vs fvexp": {
+   "bit_identical": true,
+   "shape": [
+    6,
+    5120,
+    128
+   ],
+   "differing": 0
+  },
+  "routed": {
+   "impl": "routed",
+   "qk_mx": true,
+   "pv_mx": false,
+   "fork_vector_exp": false,
+   "reference": "mirror",
+   "rel_l2": 0.0020781021481795095,
+   "cosine": 0.9999978407481931,
+   "nonfinite": 0,
+   "first_call_s": [
+    12.182056403020397
+   ]
+  },
+  "fvexp": {
+   "impl": "fork",
+   "qk_mx": true,
+   "pv_mx": false,
+   "fork_vector_exp": true,
+   "reference": "mirror",
+   "rel_l2": 0.0020781021481795095,
+   "cosine": 0.9999978407481931,
+   "nonfinite": 0,
+   "first_call_s": [
+    7.07449925201945
+   ]
+  }
+ },
+ "qwen_1024 pv": {
+  "bits routed vs fvexp": {
+   "bit_identical": true,
+   "shape": [
+    6,
+    5120,
+    128
+   ],
+   "differing": 0
+  },
+  "routed": {
+   "impl": "routed",
+   "qk_mx": false,
+   "pv_mx": true,
+   "fork_vector_exp": false,
+   "reference": "mirror",
+   "rel_l2": 0.0013125215929433898,
+   "cosine": 0.9999991386478435,
+   "nonfinite": 0,
+   "first_call_s": [
+    11.561915957950987
+   ]
+  },
+  "fvexp": {
+   "impl": "fork",
+   "qk_mx": false,
+   "pv_mx": true,
+   "fork_vector_exp": true,
+   "reference": "mirror",
+   "rel_l2": 0.0013125215929433898,
+   "cosine": 0.9999991386478435,
+   "nonfinite": 0,
+   "first_call_s": [
+    6.677096693078056
+   ]
+  }
+ },
+ "qwen_1024 qk+pv": {
+  "bits routed vs fvexp": {
+   "bit_identical": true,
+   "shape": [
+    6,
+    5120,
+    128
+   ],
+   "differing": 0
+  },
+  "routed": {
+   "impl": "routed",
+   "qk_mx": true,
+   "pv_mx": true,
+   "fork_vector_exp": false,
+   "reference": "mirror",
+   "rel_l2": 0.005246756025797205,
+   "cosine": 0.9999862357086425,
+   "nonfinite": 0,
+   "first_call_s": [
+    12.501661585993133
+   ]
+  },
+  "fvexp": {
+   "impl": "fork",
+   "qk_mx": true,
+   "pv_mx": true,
+   "fork_vector_exp": true,
+   "reference": "mirror",
+   "rel_l2": 0.005246756025797205,
+   "cosine": 0.9999862357086425,
+   "nonfinite": 0,
+   "first_call_s": [
+    7.1537807929562405
+   ]
+  }
+ },
+ "wan_81f qk": {
+  "bits routed vs fvexp": {
+   "bit_identical": true,
+   "shape": [
+    10,
+    32760,
+    128
+   ],
+   "differing": 0
+  },
+  "routed": {
+   "impl": "routed",
+   "qk_mx": true,
+   "pv_mx": false,
+   "fork_vector_exp": false,
+   "reference": "mirror",
+   "rel_l2": 0.002954261649234407,
+   "cosine": 0.9999956361669913,
+   "nonfinite": 0,
+   "first_call_s": [
+    590.9386056030635
+   ]
+  },
+  "fvexp": {
+   "impl": "fork",
+   "qk_mx": true,
+   "pv_mx": false,
+   "fork_vector_exp": true,
+   "reference": "mirror",
+   "rel_l2": 0.002954261649234407,
+   "cosine": 0.9999956361669913,
+   "nonfinite": 0,
+   "first_call_s": [
+    242.43166732101236
+   ]
+  }
+ },
+ "wan_81f pv": {
+  "bits routed vs fvexp": {
+   "bit_identical": true,
+   "shape": [
+    10,
+    32760,
+    128
+   ],
+   "differing": 0
+  },
+  "routed": {
+   "impl": "routed",
+   "qk_mx": false,
+   "pv_mx": true,
+   "fork_vector_exp": false,
+   "reference": "mirror",
+   "rel_l2": 0.0019289296810730998,
+   "cosine": 0.9999981396180998,
+   "nonfinite": 0,
+   "first_call_s": [
+    958.0217831779737
+   ]
+  },
+  "fvexp": {
+   "impl": "fork",
+   "qk_mx": false,
+   "pv_mx": true,
+   "fork_vector_exp": true,
+   "reference": "mirror",
+   "rel_l2": 0.0019289296810730998,
+   "cosine": 0.9999981396180998,
+   "nonfinite": 0,
+   "first_call_s": [
+    955.0149738050532
+   ]
+  }
+ },
+ "wan_81f qk+pv": {
+  "bits routed vs fvexp": {
+   "bit_identical": true,
+   "shape": [
+    10,
+    32760,
+    128
+   ],
+   "differing": 0
+  },
+  "routed": {
+   "impl": "routed",
+   "qk_mx": true,
+   "pv_mx": true,
+   "fork_vector_exp": false,
+   "reference": "mirror",
+   "rel_l2": 0.00600851360304713,
+   "cosine": 0.9999819489074226,
+   "nonfinite": 0,
+   "first_call_s": [
+    1013.1985660500359
+   ]
+  },
+  "fvexp": {
+   "impl": "fork",
+   "qk_mx": true,
+   "pv_mx": true,
+   "fork_vector_exp": true,
+   "reference": "mirror",
+   "rel_l2": 0.00600851360304713,
+   "cosine": 0.9999819489074226,
+   "nonfinite": 0,
+   "first_call_s": [
+    1018.8841765529942
+   ]
+  }
+ }
+}

@@ -1,0 +1,1416 @@
+{
+ "key": "wan22_official",
+ "model": "Wan 2.2 T2V A14B",
+ "shape": "480x832x81",
+ "layout": "tp4, CFG 4.0/3.0 sequential",
+ "arm": "both",
+ "steps": {
+  "bf16": {
+   "log": "/mnt/nvme/difflet-mxattn/task6/wan22_official/bf16/timed.log",
+   "requests": [
+    10121.9,
+    10119.0
+   ],
+   "step_ms": 10120.45,
+   "spread": 0.0002865485230399474
+  },
+  "both": {
+   "log": "/mnt/nvme/difflet-mxattn/task6/wan22_official/both/timed.log",
+   "requests": [
+    11269.2,
+    11270.7
+   ],
+   "step_ms": 11269.95,
+   "spread": 0.00013309730744147044
+  }
+ },
+ "g3": {
+  "key": "wan22_official",
+  "bf16_ms": 10120.45,
+  "arm_ms": 11269.95,
+  "arm_over_bf16": 1.1135819059429175,
+  "J": 0.02,
+  "evidence": {
+   "bf16_ms": 10151.0,
+   "linear_ms": 9963.0,
+   "source": "12b, host B"
+  },
+  "bf16_vs_evidence": -0.003009555708797129,
+  "linear_over_bf16_evidence": 0.9814796571766329,
+  "linear_run_needed": false,
+  "rule": "both / bf16 < linear / bf16 - J",
+  "threshold": 0.9614796571766329,
+  "faster": false
+ },
+ "blocks": [
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "execs_per_step": 80,
+   "in_model_median_ms": 125.261969,
+   "block_ms": 126.25036940000001,
+   "replay_spread_ms": 0.04288826600001849,
+   "mfu": 0.5282265897539096,
+   "bottleneck": "tensor",
+   "bottleneck_share": 0.7237194190736363,
+   "psum_readout_copy_ms": 9.564903,
+   "psum_readout_fused_ms": 46.6072595
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "execs_per_step": 80,
+   "in_model_median_ms": 139.664444,
+   "block_ms": 140.177360973,
+   "replay_spread_ms": 0.03624327699999763,
+   "mfu": 0.2637937853159406,
+   "bottleneck": "vector",
+   "bottleneck_share": 0.7301019957117951,
+   "psum_readout_copy_ms": 35.780566,
+   "psum_readout_fused_ms": 47.9806405
+  }
+ ],
+ "engines": [
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "engine_class": "vector",
+   "ms": 80.5443905
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "engine_class": "tensor",
+   "ms": 91.369844
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "engine_class": "gpsimd",
+   "ms": 5.9864525
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "engine_class": "scalar",
+   "ms": 17.033014
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "engine_class": "sync",
+   "ms": 3.4068845
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "engine_class": "hbm_dma",
+   "ms": 25.1666295
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "engine_class": "collective",
+   "ms": 5.803902
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "engine_class": "vector",
+   "ms": 102.343771
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "engine_class": "tensor",
+   "ms": 91.016599
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "engine_class": "gpsimd",
+   "ms": 2.032838
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "engine_class": "scalar",
+   "ms": 41.540553
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "engine_class": "sync",
+   "ms": 0.0986645
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "engine_class": "hbm_dma",
+   "ms": 30.9105225
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "engine_class": "collective",
+   "ms": 6.232006
+  }
+ ],
+ "step_engines": [
+  {
+   "arm": "bf16",
+   "engine_class": "vector",
+   "ms_per_step": 6443.551240000001
+  },
+  {
+   "arm": "bf16",
+   "engine_class": "tensor",
+   "ms_per_step": 7309.58752
+  },
+  {
+   "arm": "bf16",
+   "engine_class": "gpsimd",
+   "ms_per_step": 478.9162
+  },
+  {
+   "arm": "bf16",
+   "engine_class": "scalar",
+   "ms_per_step": 1362.6411200000002
+  },
+  {
+   "arm": "bf16",
+   "engine_class": "sync",
+   "ms_per_step": 272.55075999999997
+  },
+  {
+   "arm": "bf16",
+   "engine_class": "hbm_dma",
+   "ms_per_step": 2013.33036
+  },
+  {
+   "arm": "bf16",
+   "engine_class": "collective",
+   "ms_per_step": 464.31216
+  },
+  {
+   "arm": "both",
+   "engine_class": "vector",
+   "ms_per_step": 8187.50168
+  },
+  {
+   "arm": "both",
+   "engine_class": "tensor",
+   "ms_per_step": 7281.32792
+  },
+  {
+   "arm": "both",
+   "engine_class": "gpsimd",
+   "ms_per_step": 162.62704
+  },
+  {
+   "arm": "both",
+   "engine_class": "scalar",
+   "ms_per_step": 3323.24424
+  },
+  {
+   "arm": "both",
+   "engine_class": "sync",
+   "ms_per_step": 7.89316
+  },
+  {
+   "arm": "both",
+   "engine_class": "hbm_dma",
+   "ms_per_step": 2472.8418
+  },
+  {
+   "arm": "both",
+   "engine_class": "collective",
+   "ms_per_step": 498.56048
+  }
+ ],
+ "components": [
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "group": "attention",
+   "engine_class": "tensor",
+   "ms": 59.12054
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "group": "attn glue",
+   "engine_class": "tensor",
+   "ms": 0.0
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "group": "MLP",
+   "engine_class": "tensor",
+   "ms": 0.0
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "group": "norms + modulation",
+   "engine_class": "tensor",
+   "ms": 2.6369575
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "group": "projections",
+   "engine_class": "tensor",
+   "ms": 18.6544145
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "group": "attention",
+   "engine_class": "vector",
+   "ms": 76.705007
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "group": "attn glue",
+   "engine_class": "vector",
+   "ms": 0.81591
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "group": "MLP",
+   "engine_class": "vector",
+   "ms": 4.4957555
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "group": "norms + modulation",
+   "engine_class": "vector",
+   "ms": 1.7986214999999999
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "group": "projections",
+   "engine_class": "vector",
+   "ms": 1.611686
+  }
+ ],
+ "attention_phases": [
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "other",
+   "engine_class": "scalar",
+   "ms": 2.31354
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "other",
+   "engine_class": "vector",
+   "ms": 0.425528
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "other",
+   "engine_class": "sync",
+   "ms": 3.2985765
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "other",
+   "engine_class": "hbm_dma",
+   "ms": 15.5752475
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "other",
+   "engine_class": "gpsimd",
+   "ms": 4.9238975
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "other",
+   "engine_class": "tensor",
+   "ms": 0.025845
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "mask_softmax",
+   "engine_class": "gpsimd",
+   "ms": 4.9259425
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "mask_softmax",
+   "engine_class": "vector",
+   "ms": 42.0085055
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "mask_softmax",
+   "engine_class": "scalar",
+   "ms": 1.627343
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "qk_matmul",
+   "engine_class": "tensor",
+   "ms": 34.082491
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "exp",
+   "engine_class": "vector",
+   "ms": 20.1842815
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "pv_matmul",
+   "engine_class": "tensor",
+   "ms": 45.6205715
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "pv_matmul",
+   "engine_class": "vector",
+   "ms": 1.1324445
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "(none)",
+   "routed": false,
+   "phase": "pv_matmul",
+   "engine_class": "tensor",
+   "ms": 0.00259
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "(none)",
+   "routed": false,
+   "phase": "pv_matmul",
+   "engine_class": "vector",
+   "ms": 0.00066
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "(none)",
+   "routed": false,
+   "phase": "mask_softmax",
+   "engine_class": "vector",
+   "ms": 0.0013175
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "(none)",
+   "routed": false,
+   "phase": "mask_softmax",
+   "engine_class": "gpsimd",
+   "ms": 0.000237
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "(none)",
+   "routed": false,
+   "phase": "exp",
+   "engine_class": "vector",
+   "ms": 0.000336
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "(none)",
+   "routed": false,
+   "phase": "qk_matmul",
+   "engine_class": "tensor",
+   "ms": 0.000771
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "(none)",
+   "routed": false,
+   "phase": "other",
+   "engine_class": "sync",
+   "ms": 7.8e-05
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "(none)",
+   "routed": false,
+   "phase": "other",
+   "engine_class": "gpsimd",
+   "ms": 0.0001065
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "other",
+   "engine_class": "vector",
+   "ms": 0.0039175
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "other",
+   "engine_class": "tensor",
+   "ms": 0.000743
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "other",
+   "engine_class": "sync",
+   "ms": 0.0563345
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "other",
+   "engine_class": "gpsimd",
+   "ms": 0.13342
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "other",
+   "engine_class": "hbm_dma",
+   "ms": 0.894908
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "other",
+   "engine_class": "scalar",
+   "ms": 0.005382
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "mask_softmax",
+   "engine_class": "gpsimd",
+   "ms": 0.1463805
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "mask_softmax",
+   "engine_class": "vector",
+   "ms": 1.375858
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "mask_softmax",
+   "engine_class": "hbm_dma",
+   "ms": 0.0100235
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "mask_softmax",
+   "engine_class": "scalar",
+   "ms": 0.0203275
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "exp",
+   "engine_class": "vector",
+   "ms": 0.5345495
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "exp",
+   "engine_class": "scalar",
+   "ms": 0.006753
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "exp",
+   "engine_class": "hbm_dma",
+   "ms": 0.0036835
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "pv_matmul",
+   "engine_class": "vector",
+   "ms": 0.274689
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "pv_matmul",
+   "engine_class": "hbm_dma",
+   "ms": 0.000795
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "pv_matmul",
+   "engine_class": "scalar",
+   "ms": 0.0035575
+  },
+  {
+   "arm": "bf16",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "pv_matmul",
+   "engine_class": "gpsimd",
+   "ms": 0.002258
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "other",
+   "engine_class": "scalar",
+   "ms": 0.002065
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "other",
+   "engine_class": "vector",
+   "ms": 0.047501
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "other",
+   "engine_class": "gpsimd",
+   "ms": 0.872145
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "other",
+   "engine_class": "hbm_dma",
+   "ms": 15.885746
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "other",
+   "engine_class": "tensor",
+   "ms": 0.0412735
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "other",
+   "engine_class": "sync",
+   "ms": 0.000195
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "qk_quantize",
+   "engine_class": "hbm_dma",
+   "ms": 0.5557215
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "qk_quantize",
+   "engine_class": "gpsimd",
+   "ms": 0.032294
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "qk_quantize",
+   "engine_class": "vector",
+   "ms": 1.2921635
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "qk_quantize",
+   "engine_class": "tensor",
+   "ms": 4.327548
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "qk_quantize",
+   "engine_class": "scalar",
+   "ms": 2.101198
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "mask_softmax",
+   "engine_class": "gpsimd",
+   "ms": 0.7986325
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "mask_softmax",
+   "engine_class": "vector",
+   "ms": 42.670864
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "mask_softmax",
+   "engine_class": "scalar",
+   "ms": 1.622024
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "mask_softmax",
+   "engine_class": "tensor",
+   "ms": 0.000285
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "v_quantize",
+   "engine_class": "hbm_dma",
+   "ms": 0.034297
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "v_quantize",
+   "engine_class": "gpsimd",
+   "ms": 0.2289785
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "v_quantize",
+   "engine_class": "vector",
+   "ms": 0.107288
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "qk_matmul",
+   "engine_class": "tensor",
+   "ms": 22.119033
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "exp",
+   "engine_class": "vector",
+   "ms": 20.530317
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "exp",
+   "engine_class": "tensor",
+   "ms": 0.000287
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "p_quantize",
+   "engine_class": "tensor",
+   "ms": 32.63814
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "p_quantize",
+   "engine_class": "scalar",
+   "ms": 24.350116
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "p_quantize",
+   "engine_class": "vector",
+   "ms": 13.933048
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "p_quantize",
+   "engine_class": "gpsimd",
+   "ms": 0.1792205
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "pv_matmul",
+   "engine_class": "tensor",
+   "ms": 11.4436495
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn1",
+   "routed": true,
+   "phase": "pv_matmul",
+   "engine_class": "vector",
+   "ms": 1.3512175
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "(none)",
+   "routed": false,
+   "phase": "pv_matmul",
+   "engine_class": "tensor",
+   "ms": 0.0002795
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "(none)",
+   "routed": false,
+   "phase": "pv_matmul",
+   "engine_class": "vector",
+   "ms": 0.000218
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "(none)",
+   "routed": false,
+   "phase": "exp",
+   "engine_class": "vector",
+   "ms": 0.000857
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "(none)",
+   "routed": false,
+   "phase": "p_quantize",
+   "engine_class": "tensor",
+   "ms": 0.0021045
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "(none)",
+   "routed": false,
+   "phase": "p_quantize",
+   "engine_class": "scalar",
+   "ms": 0.000328
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "(none)",
+   "routed": false,
+   "phase": "p_quantize",
+   "engine_class": "vector",
+   "ms": 0.000454
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "(none)",
+   "routed": false,
+   "phase": "other",
+   "engine_class": "sync",
+   "ms": 3.9e-05
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "(none)",
+   "routed": false,
+   "phase": "other",
+   "engine_class": "gpsimd",
+   "ms": 0.000212
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "(none)",
+   "routed": false,
+   "phase": "other",
+   "engine_class": "hbm_dma",
+   "ms": 0.0007085
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "(none)",
+   "routed": false,
+   "phase": "other",
+   "engine_class": "tensor",
+   "ms": 0.000464
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "(none)",
+   "routed": false,
+   "phase": "mask_softmax",
+   "engine_class": "vector",
+   "ms": 0.0003505
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "other",
+   "engine_class": "tensor",
+   "ms": 0.093995
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "other",
+   "engine_class": "vector",
+   "ms": 0.0048025
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "other",
+   "engine_class": "scalar",
+   "ms": 0.000383
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "other",
+   "engine_class": "sync",
+   "ms": 0.056352
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "other",
+   "engine_class": "gpsimd",
+   "ms": 0.1278105
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "other",
+   "engine_class": "hbm_dma",
+   "ms": 0.858029
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "mask_softmax",
+   "engine_class": "gpsimd",
+   "ms": 0.1382955
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "mask_softmax",
+   "engine_class": "vector",
+   "ms": 1.3336295
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "mask_softmax",
+   "engine_class": "tensor",
+   "ms": 0.2605225
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "mask_softmax",
+   "engine_class": "hbm_dma",
+   "ms": 0.0286635
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "qk_matmul",
+   "engine_class": "tensor",
+   "ms": 0.454985
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "exp",
+   "engine_class": "vector",
+   "ms": 0.5148915
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "exp",
+   "engine_class": "hbm_dma",
+   "ms": 0.0089665
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "exp",
+   "engine_class": "tensor",
+   "ms": 0.10521
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "pv_matmul",
+   "engine_class": "tensor",
+   "ms": 0.62121
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "pv_matmul",
+   "engine_class": "vector",
+   "ms": 0.266965
+  },
+  {
+   "arm": "both",
+   "blk": "blk1",
+   "kind": "block",
+   "module": "attn2",
+   "routed": false,
+   "phase": "pv_matmul",
+   "engine_class": "hbm_dma",
+   "ms": 0.004944
+  }
+ ],
+ "attention_summary": [
+  {
+   "arm": "bf16",
+   "phases_ms_per_step": {
+    "other": {
+     "scalar": 185.0832,
+     "vector": 34.04224,
+     "sync": 263.88612,
+     "hbm_dma": 1246.0198,
+     "gpsimd": 393.91179999999997,
+     "tensor": 2.0676
+    },
+    "mask_softmax": {
+     "gpsimd": 394.07539999999995,
+     "vector": 3360.68044,
+     "scalar": 130.18744
+    },
+    "qk_matmul": {
+     "tensor": 2726.59928
+    },
+    "exp": {
+     "vector": 1614.74252
+    },
+    "pv_matmul": {
+     "tensor": 3649.6457199999995,
+     "vector": 90.59556
+    }
+   },
+   "attention_engine_ms_per_step": 12218.88124,
+   "v_quantize_share": 0.0,
+   "bottleneck": {
+    "engine_class": "tensor",
+    "share": 0.7237194190736363,
+    "mfu": 0.5282265897539096
+   }
+  },
+  {
+   "arm": "both",
+   "phases_ms_per_step": {
+    "other": {
+     "scalar": 0.1652,
+     "vector": 3.8000800000000003,
+     "gpsimd": 69.77159999999999,
+     "hbm_dma": 1270.85968,
+     "tensor": 3.3018799999999997,
+     "sync": 0.0156
+    },
+    "qk_quantize": {
+     "hbm_dma": 44.457719999999995,
+     "gpsimd": 2.58352,
+     "vector": 103.37308,
+     "tensor": 346.20384,
+     "scalar": 168.09584
+    },
+    "mask_softmax": {
+     "gpsimd": 63.8906,
+     "vector": 3413.66912,
+     "scalar": 129.76192,
+     "tensor": 0.0228
+    },
+    "v_quantize": {
+     "hbm_dma": 2.74376,
+     "gpsimd": 18.31828,
+     "vector": 8.58304
+    },
+    "qk_matmul": {
+     "tensor": 1769.5226400000001
+    },
+    "exp": {
+     "vector": 1642.42536,
+     "tensor": 0.022959999999999998
+    },
+    "p_quantize": {
+     "tensor": 2611.0512,
+     "scalar": 1948.00928,
+     "vector": 1114.64384,
+     "gpsimd": 14.33764
+    },
+    "pv_matmul": {
+     "tensor": 915.49196,
+     "vector": 108.0974
+    }
+   },
+   "attention_engine_ms_per_step": 14699.86732,
+   "v_quantize_share": 0.002016690311188469,
+   "bottleneck": {
+    "engine_class": "vector",
+    "share": 0.7301019957117951,
+    "mfu": 0.2637937853159406
+   }
+  }
+ ],
+ "quality": {
+  "arm_vs_bf16": {
+   "psnr": 11.834721272508435,
+   "psnr_worst": 10.878990599401616,
+   "ssim": 0.21456176959822204,
+   "lpips": 0.43893966373102167,
+   "latents_cos": 0.8775389924907369,
+   "latents_rel_l2": 0.4956323333686679
+  },
+  "arm_vs_fp32": null,
+  "bf16_vs_fp32_here": null,
+  "linear_vs_bf16_evidence": {
+   "key": "wan22_official",
+   "section": "12c",
+   "host": "B",
+   "shape": "480x832x81",
+   "against": "device bf16",
+   "psnr": 14.29,
+   "psnr_worst": 13.27,
+   "ssim": 0.398,
+   "lpips": 0.275,
+   "latents_cos": null,
+   "bf16_psnr": null,
+   "delta_psnr": null,
+   "floor": "14.83 (13.74) / 0.439 / 0.254, tp8",
+   "note": "passes the screen, but its two bf16 runs are themselves 14.8 dB apart"
+  },
+  "floor_evidence": "14.83 (13.74) / 0.439 / 0.254, tp8",
+  "fp32_evidence": null,
+  "md5": {
+   "bf16/timed_1": "5b443ec6f785813e79b67fd4bc24deac",
+   "bf16/timed_2": "5b443ec6f785813e79b67fd4bc24deac",
+   "both/timed_1": "3192daae5c3cd7296fe0fe4a717ee255",
+   "both/timed_2": "3192daae5c3cd7296fe0fe4a717ee255",
+   "both/gen2": "3192daae5c3cd7296fe0fe4a717ee255"
+  },
+  "deterministic": {
+   "bf16": true,
+   "both": true
+  },
+  "arm_latents_finite": {
+   "timed": true,
+   "gen2": true
+  },
+  "arm_latents_bit_identical": {
+   "wan22_official/both/work_timed/worker_0/latents_req0001.pt": {
+    "rel_l2": 0.0,
+    "cosine": 0.9999999999998022,
+    "bit_identical": true
+   },
+   "wan22_official/both/work_gen2/latents.pt": {
+    "rel_l2": 0.0,
+    "cosine": 0.9999999999998022,
+    "bit_identical": true
+   }
+  },
+  "bf16_md5_evidence": [
+   "ee61e12e",
+   "12c, B"
+  ],
+  "caveat": "below the bf16 floor's resolution, not a quality reading",
+  "k_smoothing": null
+ }
+}

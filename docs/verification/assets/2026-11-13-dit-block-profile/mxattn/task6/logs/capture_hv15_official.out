@@ -1,0 +1,4 @@
+2026-11-15 01:03:49 capture hv15_official attn dev 4 cpus 72-95,168-191 hub /mnt/nvme/difflet-quant-bench-hub cache /mnt/nvme/difflet-mxattn/task6/cache/video df:  56G 511G 
+2026-11-15 01:22:15 capture.sh exit 0 STATUS DONE
+2026-11-15 01:22:32 analyze blk1 exit 0: /mnt/nvme/difflet-mxattn/task6/prof/hv15_official/attn/blk1/breakdown.json
+CAPTURE_LANE_DONE

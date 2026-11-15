@@ -1192,6 +1192,10 @@ Outputs: `/mnt/nvme/difflet-mxattn/task5/`:
 - The NEFF/HLO caches are NVMe copies (`cache_fp8`, `cache_video`, `cache_smoke`, `probe_cache`).
 - The tools are `identity.sh`, `kacc.sh`, `ktrio.sh`, `smoke.sh` and `summ.py`.
 
+`/mnt/nvme` is instance storage, lost on a stop. Every small file above (md5s, `runs.log`, the
+generate logs, the probe JSONs, `summary.json`, the tools; no tensor, NEFF or cache) is committed
+under `docs/verification/assets/2026-11-13-dit-block-profile/mxattn/task5/`.
+
 ## 14. MXFP8 attention as an opt-in `--attn-quant {qk,pv,qk+pv}` (Task 5b)
 
 Ruling BR34 (user, 2026-11-14). `compile`, `generate` and `run` (and the stage line) take
@@ -1293,7 +1297,8 @@ Outputs: `/mnt/nvme/difflet-mxattn/task5b/`:
 - `droot/` (d and the no-`--quant` row of (c)), with `runs.log` snapshots and `neffs.*.txt`.
 
 Each run directory has `runs.log` (`fuser`, `uptime`) and `md5.txt`. The tools are
-`identity.sh`, `kacc.sh`, `smoke.sh`, `droot.sh`, `summ.py` and `smoke_stats.py`.
+`identity.sh`, `kacc.sh`, `smoke.sh`, `droot.sh`, `summ.py` and `smoke_stats.py`. The small files
+(no tensor, NEFF or cache) are committed under `docs/verification/assets/2026-11-13-dit-block-profile/mxattn/task5b/`.
 
 ## 15. bf16 against both per model at the profile shapes (Task 6)
 
@@ -1302,6 +1307,18 @@ Plan: `docs/plans/2026-11-14-attn-quant-model-runs.md`, Task 6. `both` = `--quan
 ran at its Plan A profile shape (section 1's table), with `scripts/quant_bench/bench.sh`'s steps,
 flags and prompts, seed 42, LNC=2, from the branch at `d9312a36` plus this section's scripts (no
 change under `difflet/`). G3 is reported, never applied, and nothing becomes a default (BR34).
+
+**Run directory** `ROOT` = `/mnt/nvme/difflet-mxattn/task6/` (instance storage, lost on a stop;
+the paths below are relative to it). Its small files are committed under
+`docs/verification/assets/2026-11-13-dit-block-profile/mxattn/task6/` (Tasks 5, 5b and 6 together: 371 files, 1.0 MB):
+per key `runs.log`, `quality.json`, `quality.log` and `rows.md`; per arm `timed.log` (the step
+times and G3's inputs), `warm.log`, `gen2.log`, `md5.txt` and `requests.jsonl`; `page/<key>.json`
+(the page datasets as built); `planA_bf16/<key>/blk<i>.json` (15b's bf16 attention phases, Plan A's
+captures analysed again); `ident/` (15h, without the output tensors); `logs/` (the lane, timing
+and capture launchers and their output). `ROOT=<that directory> scripts/mx_attention/task6.py
+dataset <key> <arm>` rebuilds every page dataset from them, equal to the published ones except the
+`log` paths (checked 2026-11-15); `task6.py quality` needs the outputs and latents, which are not
+committed (nor are `frames.png`, the captures' parquets and the caches).
 
 **What ran** (`scripts/mx_attention/run_arms.sh`, one lane per key: one idle device, one CPU set):
 1. *Warm, untimed:* one 2-step `generate` per arm (the quantized arm's cold compile), all seven
@@ -1561,7 +1578,9 @@ bf16 above the quantized arm): each shows the prompt's subject with no noise.
     reading.
 - **Where the error comes from: CPU-proxy evidence, not device measurements.** These findings
   come from the review's read-only investigation on the CPU mirror, run on activations captured
-  from the models (scratch: `/home/ubuntu/.claude/jobs/3bceca85/tmp/review6/`).
+  from the models (`/home/ubuntu/.claude/jobs/3bceca85/tmp/review6/`: session scratch, ad-hoc
+  scripts over 6.8 GB of captured activations; not in the repository and not reproducible from
+  it).
   - **No bounded-vs-unbounded split.** The data does not support one. FLUX's and LTX-2's floors
     cannot resolve a loss of Qwen-Image's size. LTX-2's observed 21.76 dB matches the 21.72 dB
     predicted from Qwen-Image's attention MSE.
@@ -1595,4 +1614,4 @@ from the tree at `4b223da0`. Outputs were compared as int16 views.
 | `hv1_L` (bounded, head chunks) | [6, 67576, 128] | 0: bit-identical | 0 | 4.509e-3 |
 
 Outputs: `/mnt/nvme/difflet-mxattn/task6/ident/` (`ident.sh`, `cmp.py`, `ident.json`,
-`runs.log`).
+`runs.log`); committed without the output tensors under `docs/verification/assets/2026-11-13-dit-block-profile/mxattn/task6/ident/`.

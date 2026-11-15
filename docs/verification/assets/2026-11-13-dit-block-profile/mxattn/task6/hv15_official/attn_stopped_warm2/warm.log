@@ -1,0 +1,32 @@
+2026-11-14 23:50:13.4 <frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+2026-11-14 23:50:13.5 [hunyuan_video_15] backend 'neuron' compiles into --cache-dir: DIFFLET_COMPILE_CACHE=/mnt/nvme/difflet-mxattn/task6/cache/video (NEFF and HLO caches under /mnt/nvme/difflet-mxattn/task6/cache/video/neuron)
+2026-11-14 23:50:22.5 Loading pipeline components...:   0%|          | 0/7 [00:00<?, ?it/s]Loading pipeline components...:  14%|█▍        | 1/7 [00:00<00:05,  1.06it/s]
+2026-11-14 23:50:24.5 Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s][A
+2026-11-14 23:50:24.5 Loading checkpoint shards:  50%|█████     | 1/2 [00:01<00:01,  1.97s/it][ALoading checkpoint shards: 100%|██████████| 2/2 [00:02<00:00,  1.00s/it]
+2026-11-14 23:50:24.8 Loading pipeline components...:  57%|█████▋    | 4/7 [00:02<00:02,  1.38it/s]Loading pipeline components...:  71%|███████▏  | 5/7 [00:03<00:01,  1.66it/s]Guiders are currently an experimental feature under active development. The API is subject to breaking changes in future releases.
+2026-11-14 23:50:24.8 
+2026-11-14 23:50:25.0 Loading checkpoint shards:   0%|          | 0/3 [00:00<?, ?it/s][A
+2026-11-14 23:50:25.1 Loading checkpoint shards:  33%|███▎      | 1/3 [00:00<00:00,  7.54it/s][A
+2026-11-14 23:50:25.3 Loading checkpoint shards:  67%|██████▋   | 2/3 [00:00<00:00,  6.88it/s][A
+2026-11-14 23:50:25.3 Loading checkpoint shards: 100%|██████████| 3/3 [00:00<00:00,  6.97it/s][ALoading checkpoint shards: 100%|██████████| 3/3 [00:00<00:00,  7.00it/s]
+2026-11-14 23:50:25.3 Loading pipeline components...: 100%|██████████| 7/7 [00:03<00:00,  2.29it/s]Loading pipeline components...: 100%|██████████| 7/7 [00:03<00:00,  1.89it/s]
+2026-11-14 23:50:25.3 [hv15] encode: load 3.7 s
+2026-11-14 23:50:48.7 [hv15] encode request 0: 23.4 s (prompt + negative)
+2026-11-14 23:50:53.0 
+2026-11-14 23:50:53.0 *****************************************
+2026-11-14 23:50:53.0 Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+2026-11-14 23:50:53.0 *****************************************
+2026-11-14 23:51:05.9 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-14 23:51:05.9   _warn_trace_cache_once()
+2026-11-14 23:51:05.9 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-14 23:51:05.9   _warn_trace_cache_once()
+2026-11-14 23:51:05.9 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-14 23:51:05.9   _warn_trace_cache_once()
+2026-11-14 23:51:05.9 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-14 23:51:05.9   _warn_trace_cache_once()
+2026-11-14 23:53:15.0 [weight store] rank 1/4 NeuronHunyuanVideo15TransformerApplication: hit 8.38 GB in 126.0 s (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/hunyuanvideo-community--HunyuanVideo-1.5-Diffusers-480p_t2v__transformer__286be7ce__bfloat16__tp2__f620128f4bf3c6b4)
+2026-11-14 23:53:15.0 [weight store] rank 3/4 NeuronHunyuanVideo15TransformerApplication: hit 8.38 GB in 126.0 s (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/hunyuanvideo-community--HunyuanVideo-1.5-Diffusers-480p_t2v__transformer__286be7ce__bfloat16__tp2__f620128f4bf3c6b4)
+2026-11-14 23:53:15.1 [weight store] rank 2/4 NeuronHunyuanVideo15TransformerApplication: hit 8.38 GB in 126.1 s (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/hunyuanvideo-community--HunyuanVideo-1.5-Diffusers-480p_t2v__transformer__286be7ce__bfloat16__tp2__f620128f4bf3c6b4)
+2026-11-14 23:53:15.1 [weight store] rank 0/4 NeuronHunyuanVideo15TransformerApplication: hit 8.38 GB in 126.1 s (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/hunyuanvideo-community--HunyuanVideo-1.5-Diffusers-480p_t2v__transformer__286be7ce__bfloat16__tp2__f620128f4bf3c6b4)
+2026-11-14 23:53:15.3 [hv15] transformer load 129.2 s {'runtime init': 0.0, 'build on meta': 1.5, 'load checkpoint': 126.2, 'eval': 0.0, 'compile': 0.2}
+2026-11-14 23:53:15.3 [hv15] DiT weights per rank: 7.80 GiB resident (7.80 GiB estimated at load), bf16

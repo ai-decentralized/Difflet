@@ -1,0 +1,134 @@
+/home/ubuntu/venvs/native-fp8/lib/python3.12/site-packages/torchvision/models/_utils.py:207: UserWarning: The parameter 'pretrained' is deprecated since 0.13 and may be removed in the future, please use 'weights' instead.
+  warnings.warn(
+/home/ubuntu/venvs/native-fp8/lib/python3.12/site-packages/torchvision/models/_utils.py:222: UserWarning: Arguments other than a weight enum or `None` for 'weights' are deprecated since 0.13 and may be removed in the future. The current behavior is equivalent to passing `weights=AlexNet_Weights.IMAGENET1K_V1`. You can also use `weights=AlexNet_Weights.DEFAULT` to get the most up-to-date weights.
+  warnings.warn(msg)
+{
+ "key": "ltx_2",
+ "arm": "both",
+ "md5": {
+  "bf16/timed_1": "0702ffd2bfaa79f922dbf5d33f4dcd6b",
+  "bf16/timed_2": "0702ffd2bfaa79f922dbf5d33f4dcd6b",
+  "both/timed_1": "da882704537f0803fa723b790f01bf53",
+  "both/timed_2": "da882704537f0803fa723b790f01bf53",
+  "both/gen2": "da882704537f0803fa723b790f01bf53"
+ },
+ "latents_md5": {
+  "ltx_2/bf16/work_timed/worker_0/latents_req0000.pt": "39e640ab3c931d59002b047f0beb54e3",
+  "ltx_2/both/work_timed/worker_0/latents_req0000.pt": "e201128d8ac44e7913e1afdc35868e66"
+ },
+ "arm_latents_finite": {
+  "timed": true,
+  "gen2": true
+ },
+ "deterministic": {
+  "bf16": true,
+  "both": true
+ },
+ "arm_latents_bit_identical": {
+  "ltx_2/both/work_timed/worker_0/latents_req0001.pt": {
+   "video": {
+    "rel_l2": 0.0,
+    "cosine": 1.0000000000000002,
+    "bit_identical": true
+   },
+   "audio": {
+    "rel_l2": 0.0,
+    "cosine": 0.9999999999999999,
+    "bit_identical": true
+   }
+  },
+  "ltx_2/both/work_gen2/latents.pt": {
+   "video": {
+    "rel_l2": 0.0,
+    "cosine": 1.0000000000000002,
+    "bit_identical": true
+   },
+   "audio": {
+    "rel_l2": 0.0,
+    "cosine": 0.9999999999999999,
+    "bit_identical": true
+   }
+  }
+ },
+ "arm_vs_bf16": {
+  "ref_latents": "/mnt/nvme/difflet-mxattn/task6/ltx_2/bf16/work_timed/worker_0/latents_req0000.pt",
+  "cand_latents": "/mnt/nvme/difflet-mxattn/task6/ltx_2/both/work_timed/worker_0/latents_req0000.pt",
+  "latents": {
+   "video": {
+    "rel_l2": 0.15073361978932956,
+    "cosine": 0.9886287969536625,
+    "bit_identical": false
+   },
+   "audio": {
+    "rel_l2": 0.01695855468498995,
+    "cosine": 0.9998610092271087,
+    "bit_identical": false
+   }
+  },
+  "video": {
+   "psnr": 21.755158308013595,
+   "ssim": 0.8049145703989523,
+   "lpips": 0.09427679028392823,
+   "ref": "/mnt/nvme/difflet-mxattn/task6/ltx_2/bf16/timed_1.mp4",
+   "cand": "/mnt/nvme/difflet-mxattn/task6/ltx_2/both/timed_1.mp4",
+   "frames": 121,
+   "identical_frames": 0,
+   "psnr_worst": 20.001597703032186,
+   "min_psnr_frame": 92
+  }
+ },
+ "arm_vs_fp32": {
+  "ref_latents": "/home/ubuntu/fp8-bench/fp32_ref/ltx_2/latents.pt",
+  "cand_latents": "/mnt/nvme/difflet-mxattn/task6/ltx_2/both/work_timed/worker_0/latents_req0000.pt",
+  "latents": {
+   "video": {
+    "rel_l2": 0.3441998983730515,
+    "cosine": 0.9432079193774743,
+    "bit_identical": false
+   },
+   "audio": {
+    "rel_l2": 0.22154181647451676,
+    "cosine": 0.9833984783495382,
+    "bit_identical": false
+   }
+  },
+  "video": {
+   "psnr": 17.014526131500467,
+   "ssim": 0.4944662834985026,
+   "lpips": 0.192650057313856,
+   "ref": "/home/ubuntu/fp8-bench/fp32_ref/ltx_2/out.mp4",
+   "cand": "/mnt/nvme/difflet-mxattn/task6/ltx_2/both/timed_1.mp4",
+   "frames": 121,
+   "identical_frames": 0,
+   "psnr_worst": 15.514686580493269,
+   "min_psnr_frame": 118
+  }
+ },
+ "bf16_vs_fp32": {
+  "ref_latents": "/home/ubuntu/fp8-bench/fp32_ref/ltx_2/latents.pt",
+  "cand_latents": "/mnt/nvme/difflet-mxattn/task6/ltx_2/bf16/work_timed/worker_0/latents_req0000.pt",
+  "latents": {
+   "video": {
+    "rel_l2": 0.37412474571424903,
+    "cosine": 0.9352404898747066,
+    "bit_identical": false
+   },
+   "audio": {
+    "rel_l2": 0.21513989202789155,
+    "cosine": 0.9842890455794867,
+    "bit_identical": false
+   }
+  },
+  "video": {
+   "psnr": 16.5542987393842,
+   "ssim": 0.47163227089308846,
+   "lpips": 0.19480434343341954,
+   "ref": "/home/ubuntu/fp8-bench/fp32_ref/ltx_2/out.mp4",
+   "cand": "/mnt/nvme/difflet-mxattn/task6/ltx_2/bf16/timed_1.mp4",
+   "frames": 121,
+   "identical_frames": 0,
+   "psnr_worst": 15.129120010410377,
+   "min_psnr_frame": 118
+  }
+ }
+}

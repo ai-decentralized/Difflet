@@ -1,0 +1,41 @@
+2026-11-14 23:55:09.7 <frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+2026-11-14 23:55:09.8 [hunyuan_video_15] backend 'neuron' compiles into --cache-dir: DIFFLET_COMPILE_CACHE=/mnt/nvme/difflet-mxattn/task6/cache/video (NEFF and HLO caches under /mnt/nvme/difflet-mxattn/task6/cache/video/neuron)
+2026-11-14 23:55:17.3 Loading pipeline components...:   0%|          | 0/7 [00:00<?, ?it/s]
+2026-11-14 23:55:17.3 Loading checkpoint shards:   0%|          | 0/3 [00:00<?, ?it/s][ALoading checkpoint shards: 100%|██████████| 3/3 [00:00<00:00, 197.67it/s]
+2026-11-14 23:55:17.5 Loading pipeline components...:  43%|████▎     | 3/7 [00:00<00:00, 10.00it/s]
+2026-11-14 23:55:18.2 Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s][A
+2026-11-14 23:55:18.2 Loading checkpoint shards:  50%|█████     | 1/2 [00:00<00:00,  1.56it/s][ALoading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00,  3.06it/s]
+2026-11-14 23:55:18.2 Loading pipeline components...:  71%|███████▏  | 5/7 [00:00<00:00,  4.69it/s]Guiders are currently an experimental feature under active development. The API is subject to breaking changes in future releases.
+2026-11-14 23:55:18.7 Loading pipeline components...: 100%|██████████| 7/7 [00:01<00:00,  4.23it/s]Loading pipeline components...: 100%|██████████| 7/7 [00:01<00:00,  4.65it/s]
+2026-11-14 23:55:18.7 [hv15] encode: load 1.5 s
+2026-11-14 23:55:38.6 [hv15] encode request 0: 19.9 s (prompt + negative)
+2026-11-14 23:55:42.8 
+2026-11-14 23:55:42.8 *****************************************
+2026-11-14 23:55:42.8 Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+2026-11-14 23:55:42.8 *****************************************
+2026-11-14 23:55:55.3 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-14 23:55:55.3   _warn_trace_cache_once()
+2026-11-14 23:55:55.3 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-14 23:55:55.3   _warn_trace_cache_once()
+2026-11-14 23:55:55.3 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-14 23:55:55.3   _warn_trace_cache_once()
+2026-11-14 23:56:04.4 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-14 23:56:04.4   _warn_trace_cache_once()
+2026-11-14 23:56:10.2 [weight store] rank 3/4 NeuronHunyuanVideo15TransformerApplication: hit 8.38 GB in 2.7 s (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/hunyuanvideo-community--HunyuanVideo-1.5-Diffusers-480p_t2v__transformer__286be7ce__bfloat16__tp2__f620128f4bf3c6b4)
+2026-11-14 23:56:10.4 [weight store] rank 2/4 NeuronHunyuanVideo15TransformerApplication: hit 8.38 GB in 3.0 s (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/hunyuanvideo-community--HunyuanVideo-1.5-Diffusers-480p_t2v__transformer__286be7ce__bfloat16__tp2__f620128f4bf3c6b4)
+2026-11-14 23:56:10.4 [weight store] rank 0/4 NeuronHunyuanVideo15TransformerApplication: hit 8.38 GB in 3.0 s (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/hunyuanvideo-community--HunyuanVideo-1.5-Diffusers-480p_t2v__transformer__286be7ce__bfloat16__tp2__f620128f4bf3c6b4)
+2026-11-14 23:56:10.6 [weight store] rank 1/4 NeuronHunyuanVideo15TransformerApplication: hit 8.38 GB in 3.1 s (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/hunyuanvideo-community--HunyuanVideo-1.5-Diffusers-480p_t2v__transformer__286be7ce__bfloat16__tp2__f620128f4bf3c6b4)
+2026-11-14 23:56:10.8 [hv15] transformer load 6.3 s {'runtime init': 0.0, 'build on meta': 1.5, 'load checkpoint': 3.2, 'eval': 0.0, 'compile': 0.2}
+2026-11-14 23:56:10.8 [hv15] DiT weights per rank: 7.80 GiB resident (7.80 GiB estimated at load), bf16
+2026-11-15 00:26:14.3 [rank0]:[E1115 00:26:14.211387015 NeuronWork.cpp:159] [Rank 0] [PG undefined] [allgather Seq 0] Watchdog caught collective operation timeout: allgather (seq=0) ran for 1800025 milliseconds before timing out.
+2026-11-15 00:26:14.3 [rank0]:[E1115 00:26:14.211418050 NeuronWatchdog.cpp:210] Work timed out: op=allgather, seq=0
+2026-11-15 00:26:14.3 [rank0]:[W1115 00:26:14.211443613 NeuronWork.cpp:274] [Rank 0] [PG undefined] [allgather Seq 0] Aborting work due to timeout
+2026-11-15 00:26:14.3 [rank3]:[E1115 00:26:14.220569900 NeuronWork.cpp:159] [Rank 1] [PG undefined] [allgather Seq 0] Watchdog caught collective operation timeout: allgather (seq=0) ran for 1800067 milliseconds before timing out.
+2026-11-15 00:26:14.3 [rank3]:[E1115 00:26:14.220599541 NeuronWatchdog.cpp:210] Work timed out: op=allgather, seq=0
+2026-11-15 00:26:14.3 [rank3]:[W1115 00:26:14.220630061 NeuronWork.cpp:274] [Rank 1] [PG undefined] [allgather Seq 0] Aborting work due to timeout
+2026-11-15 00:26:14.3 [rank2]:[E1115 00:26:14.223829153 NeuronWork.cpp:159] [Rank 1] [PG undefined] [allgather Seq 0] Watchdog caught collective operation timeout: allgather (seq=0) ran for 1800022 milliseconds before timing out.
+2026-11-15 00:26:14.3 [rank2]:[E1115 00:26:14.223859313 NeuronWatchdog.cpp:210] Work timed out: op=allgather, seq=0
+2026-11-15 00:26:14.3 [rank2]:[W1115 00:26:14.223891806 NeuronWork.cpp:274] [Rank 1] [PG undefined] [allgather Seq 0] Aborting work due to timeout
+2026-11-15 00:26:14.4 [rank1]:[E1115 00:26:14.243829181 NeuronWork.cpp:159] [Rank 0] [PG undefined] [allgather Seq 0] Watchdog caught collective operation timeout: allgather (seq=0) ran for 1800077 milliseconds before timing out.
+2026-11-15 00:26:14.4 [rank1]:[E1115 00:26:14.243859509 NeuronWatchdog.cpp:210] Work timed out: op=allgather, seq=0
+2026-11-15 00:26:14.4 [rank1]:[W1115 00:26:14.243891512 NeuronWork.cpp:274] [Rank 0] [PG undefined] [allgather Seq 0] Aborting work due to timeout

@@ -1,0 +1,59 @@
+2026-11-14 23:59:25.0 <frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+2026-11-14 23:59:25.0 [hunyuan_video] backend 'neuron' compiles into --cache-dir: DIFFLET_COMPILE_CACHE=/mnt/nvme/difflet-mxattn/task6/cache/video (NEFF and HLO caches under /mnt/nvme/difflet-mxattn/task6/cache/video/neuron)
+2026-11-14 23:59:27.3 [hunyuan_video] MXFP8 transformer (nki): /mnt/nvme/difflet-mxattn/task6/cache/video/quantized/hunyuanvideo-community--HunyuanVideo__e8c2aaa6/transformer/mxfp8-46e0952c1c5a9f74
+2026-11-14 23:59:29.6 
+2026-11-14 23:59:29.6 *****************************************
+2026-11-14 23:59:29.6 Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+2026-11-14 23:59:29.6 *****************************************
+2026-11-14 23:59:42.0 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-14 23:59:42.0   _warn_trace_cache_once()
+2026-11-14 23:59:42.1 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-14 23:59:42.1   _warn_trace_cache_once()
+2026-11-14 23:59:42.1 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-14 23:59:42.1   _warn_trace_cache_once()
+2026-11-14 23:59:42.3 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-14 23:59:42.3   _warn_trace_cache_once()
+2026-11-15 00:02:07.1 [weight store] rank 3/4 NeuronHunyuanVideoTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (4.85 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/transformer__mxfp8-46e0952c1c5a9f74__bfloat16__tp4__109a6622954ea4a7)
+2026-11-15 00:02:07.1 [weight store] rank 2/4 NeuronHunyuanVideoTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (4.85 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/transformer__mxfp8-46e0952c1c5a9f74__bfloat16__tp4__109a6622954ea4a7)
+2026-11-15 00:02:07.1 [weight store] rank 1/4 NeuronHunyuanVideoTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (4.85 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/transformer__mxfp8-46e0952c1c5a9f74__bfloat16__tp4__109a6622954ea4a7)
+2026-11-15 00:02:07.1 [weight store] rank 0/4 NeuronHunyuanVideoTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (4.85 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/transformer__mxfp8-46e0952c1c5a9f74__bfloat16__tp4__109a6622954ea4a7)
+2026-11-15 00:03:02.4 [attention] DIFFLET_ATTN_QUANT=qk+pv (qk_mx=True, pv_mx=True): calls routed to the MXFP8 kernel by (s_q, s_k, bounded): {(67576, 67576, True): 3}
+2026-11-15 00:03:04.6 Loading pipeline components...:   0%|          | 0/5 [00:00<?, ?it/s]Loading pipeline components...:  20%|██        | 1/5 [00:00<00:00,  4.18it/s]Loading pipeline components...:  40%|████      | 2/5 [00:00<00:00,  3.32it/s]
+2026-11-15 00:03:08.8 Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s][A
+2026-11-15 00:03:13.1 Loading checkpoint shards:  25%|██▌       | 1/4 [00:04<00:12,  4.19s/it][A
+2026-11-15 00:03:17.2 Loading checkpoint shards:  50%|█████     | 2/4 [00:08<00:08,  4.22s/it][A
+2026-11-15 00:03:17.3 Loading checkpoint shards:  75%|███████▌  | 3/4 [00:12<00:04,  4.19s/it][A
+2026-11-15 00:03:17.3 Loading checkpoint shards: 100%|██████████| 4/4 [00:12<00:00,  2.58s/it][ALoading checkpoint shards: 100%|██████████| 4/4 [00:12<00:00,  3.17s/it]
+2026-11-15 00:03:17.4 Loading pipeline components...:  60%|██████    | 3/5 [00:13<00:11,  5.97s/it]Loading pipeline components...: 100%|██████████| 5/5 [00:13<00:00,  2.67s/it]
+2026-11-15 00:03:25.8 [hunyuan_video] start-up: from_pretrained (prepare_runtime + build) 10.38 s; load 223.2 s by component {'runtime init': 0.0336306260433048, 'build on meta': 1.1249183099716902, 'load checkpoint': 143.43200434208848, 'eval': 7.902220748947002, 'compile': 0.22165858198422939, 'warmup forward': 46.74892904201988, 'text encoder load': 15.76361052901484, 'vae load': 1.3422611589776352, 'vae warmup decode': 6.281017894973047}
+2026-11-15 00:05:34.1 [hunyuan_video] request: 128.34 s; to the first step's end 26.05 s (prompt encode + step 1); step median 25278.4 ms (n=1, max 25278.4); after the last step 77.00 s
+2026-11-15 00:05:34.1 [hunyuan_video] neuron rank 2/4: exec_mode=compile compiled_blocks=60 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 234.0s, stage 361.9s
+2026-11-15 00:05:34.1 [hunyuan_video] neuron rank 1/4: exec_mode=compile compiled_blocks=60 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 234.0s, stage 361.9s
+2026-11-15 00:05:34.1 [hunyuan_video] neuron rank 3/4: exec_mode=compile compiled_blocks=60 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 234.1s, stage 361.9s
+2026-11-15 00:05:34.1 [hunyuan_video] latents saved to /mnt/nvme/difflet-mxattn/task6/hunyuan_video_L/both/work_warm/latents.pt
+2026-11-15 00:05:37.7 [hunyuan_video] video saved to /mnt/nvme/difflet-mxattn/task6/hunyuan_video_L/both/warm.mp4 (129 frames; to uint8 2.27 s, encode 1.29 s)
+2026-11-15 00:05:37.7 [hunyuan_video] neuron rank 0/4: exec_mode=compile compiled_blocks=60 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 233.6s, stage 365.5s
+2026-11-15 00:05:41.3 	Command being timed: "taskset -c 48-95,144-191 env /home/ubuntu/venvs/native-fp8/bin/python -m difflet.cli.main generate --backend neuron --model-id hunyuanvideo-community/HunyuanVideo --revision e8c2aaa66fe3742a32c11a6766aecbf07c56e773 --height 544 --width 960 --num-frames 129 --tp-degree 4 --quant mxfp8 --attn-quant qk+pv --cache-dir /mnt/nvme/difflet-mxattn/task6/cache/video --steps 2 --seed 42 --guidance-scale 6.0 --prompt a cinematic shot of a red fox running through a snowy forest --output /mnt/nvme/difflet-mxattn/task6/hunyuan_video_L/both/warm.mp4 --work-dir /mnt/nvme/difflet-mxattn/task6/hunyuan_video_L/both/work_warm --keep-work-dir"
+2026-11-15 00:05:41.3 	User time (seconds): 481.53
+2026-11-15 00:05:41.3 	System time (seconds): 213.48
+2026-11-15 00:05:41.3 	Percent of CPU this job got: 184%
+2026-11-15 00:05:41.3 	Elapsed (wall clock) time (h:mm:ss or m:ss): 6:16.35
+2026-11-15 00:05:41.3 	Average shared text size (kbytes): 0
+2026-11-15 00:05:41.3 	Average unshared data size (kbytes): 0
+2026-11-15 00:05:41.3 	Average stack size (kbytes): 0
+2026-11-15 00:05:41.3 	Average total size (kbytes): 0
+2026-11-15 00:05:41.3 	Maximum resident set size (kbytes): 23571016
+2026-11-15 00:05:41.3 	Average resident set size (kbytes): 0
+2026-11-15 00:05:41.3 	Major (requiring I/O) page faults: 66121
+2026-11-15 00:05:41.3 	Minor (reclaiming a frame) page faults: 39023561
+2026-11-15 00:05:41.3 	Voluntary context switches: 310245
+2026-11-15 00:05:41.3 	Involuntary context switches: 2515
+2026-11-15 00:05:41.3 	Swaps: 0
+2026-11-15 00:05:41.3 	File system inputs: 68766488
+2026-11-15 00:05:41.3 	File system outputs: 48184
+2026-11-15 00:05:41.3 	Socket messages sent: 0
+2026-11-15 00:05:41.3 	Socket messages received: 0
+2026-11-15 00:05:41.3 	Signals delivered: 0
+2026-11-15 00:05:41.3 	Page size (bytes): 4096
+2026-11-15 00:05:41.3 	Exit status: 0
+exit 0

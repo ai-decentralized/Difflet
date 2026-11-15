@@ -1,0 +1,10 @@
+2026-11-14 19:41:33 start wan dev=2 cores=8-11 cpus=56-63,152-159 attention.py=3ec9f73099f5d799 DIFFLET_ATTN_QUANT=unset uptime:  19:41:33 up 8 days,  5:05,  8 users,  load average: 0.13, 2.19, 19.17
+2026-11-14 19:41:34 fuser /dev/neuron2 exit 1
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/root       1.9T  1.9T   62G  97% /
+/dev/md0        7.0T  6.4T  561G  93% /mnt/nvme
+2026-11-14 19:43:46 exit 0 uptime:  19:43:46 up 8 days,  5:07,  8 users,  load average: 40.55, 18.12, 22.87
+2026-11-14 19:43:46 fuser after: exit 1
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/root       1.9T  1.9T   62G  97% /
+/dev/md0        7.0T  6.4T  561G  93% /mnt/nvme

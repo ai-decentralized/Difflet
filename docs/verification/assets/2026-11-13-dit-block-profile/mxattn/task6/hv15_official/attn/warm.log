@@ -1,0 +1,58 @@
+2026-11-15 00:47:30.2 <frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+2026-11-15 00:47:30.3 [hunyuan_video_15] backend 'neuron' compiles into --cache-dir: DIFFLET_COMPILE_CACHE=/mnt/nvme/difflet-mxattn/task6/cache/video (NEFF and HLO caches under /mnt/nvme/difflet-mxattn/task6/cache/video/neuron)
+2026-11-15 00:47:37.7 Loading pipeline components...:   0%|          | 0/7 [00:00<?, ?it/s]
+2026-11-15 00:47:38.3 Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s][A
+2026-11-15 00:47:38.3 Loading checkpoint shards:  50%|█████     | 1/2 [00:00<00:00,  1.54it/s][ALoading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00,  3.04it/s]
+2026-11-15 00:47:38.6 Loading pipeline components...:  29%|██▊       | 2/7 [00:00<00:01,  2.98it/s]Loading pipeline components...:  43%|████▎     | 3/7 [00:00<00:01,  3.32it/s]
+2026-11-15 00:47:38.6 Loading checkpoint shards:   0%|          | 0/3 [00:00<?, ?it/s][ALoading checkpoint shards: 100%|██████████| 3/3 [00:00<00:00, 192.41it/s]
+2026-11-15 00:47:39.2 Loading pipeline components...:  86%|████████▌ | 6/7 [00:01<00:00,  4.27it/s]Guiders are currently an experimental feature under active development. The API is subject to breaking changes in future releases.
+2026-11-15 00:47:39.2 Loading pipeline components...: 100%|██████████| 7/7 [00:01<00:00,  4.62it/s]
+2026-11-15 00:47:39.2 [hv15] encode: load 1.5 s
+2026-11-15 00:47:58.0 [hv15] encode request 0: 18.9 s (prompt + negative)
+2026-11-15 00:48:02.2 
+2026-11-15 00:48:02.2 *****************************************
+2026-11-15 00:48:02.2 Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+2026-11-15 00:48:02.2 *****************************************
+2026-11-15 00:48:15.0 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-15 00:48:15.0   _warn_trace_cache_once()
+2026-11-15 00:48:15.1 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-15 00:48:15.1   _warn_trace_cache_once()
+2026-11-15 00:48:15.1 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-15 00:48:15.1   _warn_trace_cache_once()
+2026-11-15 00:48:15.1 /source-repos/aws_neuronx_venv_torch_neuronx_2_14_0/torch-neuronx/torch_neuronx/nki_kernel.py:85: UserWarning: NKI_ENABLE_TRACE_CACHE=1: the NKI kernel compile cache is persisted across processes. The caching process may not capture all kernel environment dependencies or non-argument values and can yield stale cache hits; see the torch-neuronx environment variables documentation for details. Set NKI_ENABLE_TRACE_CACHE=0 to disable.
+2026-11-15 00:48:15.1   _warn_trace_cache_once()
+2026-11-15 00:48:21.0 [weight store] rank 3/4 NeuronHunyuanVideo15TransformerApplication: hit 8.38 GB in 2.8 s (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/hunyuanvideo-community--HunyuanVideo-1.5-Diffusers-480p_t2v__transformer__286be7ce__bfloat16__tp2__f620128f4bf3c6b4)
+2026-11-15 00:48:21.2 [weight store] rank 2/4 NeuronHunyuanVideo15TransformerApplication: hit 8.38 GB in 2.9 s (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/hunyuanvideo-community--HunyuanVideo-1.5-Diffusers-480p_t2v__transformer__286be7ce__bfloat16__tp2__f620128f4bf3c6b4)
+2026-11-15 00:48:21.4 [weight store] rank 1/4 NeuronHunyuanVideo15TransformerApplication: hit 8.38 GB in 3.1 s (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/hunyuanvideo-community--HunyuanVideo-1.5-Diffusers-480p_t2v__transformer__286be7ce__bfloat16__tp2__f620128f4bf3c6b4)
+2026-11-15 00:48:21.4 [weight store] rank 0/4 NeuronHunyuanVideo15TransformerApplication: hit 8.38 GB in 3.2 s (/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights/hunyuanvideo-community--HunyuanVideo-1.5-Diffusers-480p_t2v__transformer__286be7ce__bfloat16__tp2__f620128f4bf3c6b4)
+2026-11-15 00:48:21.6 [hv15] transformer load 6.3 s {'runtime init': 0.0, 'build on meta': 1.5, 'load checkpoint': 3.3, 'eval': 0.0, 'compile': 0.2}
+2026-11-15 00:48:21.6 [hv15] DiT weights per rank: 7.80 GiB resident (7.80 GiB estimated at load), bf16
+2026-11-15 00:48:58.0 [hv15] request 0: denoise 36.4 s, 2 steps, median 24280 ms (first 24280 ms)
+2026-11-15 00:48:58.1 [hv15] peak HBM (rank 0): 10.04 GiB allocator + 2.30 GiB runtime (code 0.34, constants 0.01, scratchpad 1.88, misc 0.03, collectives 0.03, scratchpad_nonshared 0.00, dma_rings 0.02) of 36.0 GiB per core, 23.66 GiB free
+2026-11-15 00:49:08.6 Loading checkpoint shards:   0%|          | 0/2 [00:00<?, ?it/s]Loading checkpoint shards:  50%|█████     | 1/2 [00:00<00:00,  1.55it/s]Loading checkpoint shards: 100%|██████████| 2/2 [00:00<00:00,  3.05it/s]
+2026-11-15 00:49:18.8 [hv15] vae load 12.6 s {'load': 10.9}
+2026-11-15 00:50:37.0 [hv15] request 0: decode 76.4 s; [difflet] video saved to /mnt/nvme/difflet-mxattn/task6/hv15_official/attn/warm.mp4
+2026-11-15 00:50:39.5 	Command being timed: "taskset -c 48-95,144-191 env /home/ubuntu/venvs/native-fp8/bin/python -m difflet.cli.main generate --backend neuron --model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v --revision 286be7ce72277246578a3e3cc2487e95ddae5bcf --height 480 --width 848 --num-frames 121 --attn-quant qk+pv --cache-dir /mnt/nvme/difflet-mxattn/task6/cache/video --steps 2 --seed 42 --prompt a cat walking through a garden --output /mnt/nvme/difflet-mxattn/task6/hv15_official/attn/warm.mp4 --work-dir /mnt/nvme/difflet-mxattn/task6/hv15_official/attn/work_warm --keep-work-dir"
+2026-11-15 00:50:39.5 	User time (seconds): 1893.54
+2026-11-15 00:50:39.5 	System time (seconds): 272.44
+2026-11-15 00:50:39.5 	Percent of CPU this job got: 1144%
+2026-11-15 00:50:39.5 	Elapsed (wall clock) time (h:mm:ss or m:ss): 3:09.30
+2026-11-15 00:50:39.5 	Average shared text size (kbytes): 0
+2026-11-15 00:50:39.5 	Average unshared data size (kbytes): 0
+2026-11-15 00:50:39.5 	Average stack size (kbytes): 0
+2026-11-15 00:50:39.5 	Average total size (kbytes): 0
+2026-11-15 00:50:39.5 	Maximum resident set size (kbytes): 17358780
+2026-11-15 00:50:39.5 	Average resident set size (kbytes): 0
+2026-11-15 00:50:39.5 	Major (requiring I/O) page faults: 515
+2026-11-15 00:50:39.5 	Minor (reclaiming a frame) page faults: 34911504
+2026-11-15 00:50:39.5 	Voluntary context switches: 723929
+2026-11-15 00:50:39.5 	Involuntary context switches: 19782
+2026-11-15 00:50:39.5 	Swaps: 0
+2026-11-15 00:50:39.5 	File system inputs: 466880
+2026-11-15 00:50:39.5 	File system outputs: 52464
+2026-11-15 00:50:39.5 	Socket messages sent: 0
+2026-11-15 00:50:39.5 	Socket messages received: 0
+2026-11-15 00:50:39.5 	Signals delivered: 0
+2026-11-15 00:50:39.5 	Page size (bytes): 4096
+2026-11-15 00:50:39.5 	Exit status: 0
+exit 0

@@ -1,0 +1,26 @@
+2026-11-14 18:27:05 wan_81f fvexp_flat start dev=4 core=16 cpus=84-95,180-191 uptime:  18:27:05 up 8 days,  3:50,  9 users,  load average: 17.86, 9.41, 4.30
+2026-11-14 18:27:05 qwen_1024 fvexp_flat start dev=3 core=12 cpus=72-83,168-179 uptime:  18:27:05 up 8 days,  3:50,  9 users,  load average: 17.86, 9.41, 4.30
+fuser /dev/neuron3 exit 1
+fuser /dev/neuron4 exit 1
+2026-11-14 18:27:32 qwen_1024 fvexp_flat end exit=0 uptime:  18:27:32 up 8 days,  3:51,  9 users,  load average: 25.89, 11.74, 5.19
+2026-11-14 18:27:32 qwen_1024 routed_flat start dev=3 core=12 cpus=72-83,168-179 uptime:  18:27:32 up 8 days,  3:51,  9 users,  load average: 25.89, 11.74, 5.19
+fuser /dev/neuron3 exit 1
+2026-11-14 18:27:53 qwen_1024 routed_flat end exit=0 uptime:  18:27:53 up 8 days,  3:51,  9 users,  load average: 31.05, 13.92, 6.05
+2026-11-14 18:27:53 qwen_1024 fvexp_peak start dev=3 core=12 cpus=72-83,168-179 uptime:  18:27:53 up 8 days,  3:51,  9 users,  load average: 31.05, 13.92, 6.05
+fuser /dev/neuron3 exit 1
+2026-11-14 18:28:10 qwen_1024 fvexp_peak end exit=0 uptime:  18:28:10 up 8 days,  3:51,  9 users,  load average: 34.17, 15.55, 6.72
+2026-11-14 18:28:10 qwen_1024 cte_flat start dev=3 core=12 cpus=72-83,168-179 uptime:  18:28:10 up 8 days,  3:51,  9 users,  load average: 34.17, 15.55, 6.72
+fuser /dev/neuron3 exit 1
+2026-11-14 18:28:31 qwen_1024 cte_flat end exit=0 uptime:  18:28:31 up 8 days,  3:52,  9 users,  load average: 38.62, 17.84, 7.70
+2026-11-14 18:28:31 qwen_1024 acc done dev=3
+2026-11-14 18:37:42 wan_81f fvexp_flat end exit=0 uptime:  18:37:42 up 8 days,  4:01,  9 users,  load average: 27.79, 28.10, 19.12
+2026-11-14 18:37:42 wan_81f routed_flat start dev=4 core=16 cpus=84-95,180-191 uptime:  18:37:42 up 8 days,  4:01,  9 users,  load average: 27.79, 28.10, 19.12
+fuser /dev/neuron4 exit 1
+2026-11-14 18:42:26 wan_81f routed_flat end exit=0 uptime:  18:42:26 up 8 days,  4:06,  8 users,  load average: 12.60, 21.13, 18.62
+2026-11-14 18:42:26 wan_81f fvexp_peak start dev=4 core=16 cpus=84-95,180-191 uptime:  18:42:26 up 8 days,  4:06,  8 users,  load average: 12.60, 21.13, 18.62
+fuser /dev/neuron4 exit 1
+2026-11-14 18:44:12 wan_81f fvexp_peak end exit=0 uptime:  18:44:12 up 8 days,  4:07,  8 users,  load average: 26.05, 22.54, 19.35
+2026-11-14 18:44:12 wan_81f cte_flat start dev=4 core=16 cpus=84-95,180-191 uptime:  18:44:12 up 8 days,  4:07,  8 users,  load average: 26.05, 22.54, 19.35
+fuser /dev/neuron4 exit 1
+2026-11-14 18:48:22 wan_81f cte_flat end exit=0 uptime:  18:48:22 up 8 days,  4:11,  8 users,  load average: 22.06, 18.59, 18.27
+2026-11-14 18:48:22 wan_81f acc done dev=4

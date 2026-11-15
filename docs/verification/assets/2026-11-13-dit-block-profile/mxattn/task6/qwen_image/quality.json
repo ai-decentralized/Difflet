@@ -1,0 +1,83 @@
+{
+ "key": "qwen_image",
+ "arm": "both",
+ "md5": {
+  "bf16/timed_1": "5478687f25718aa92a77278c68808f8d",
+  "bf16/timed_2": "5478687f25718aa92a77278c68808f8d",
+  "both/timed_1": "583e3fce0298699ee8655e2e0f17c44b",
+  "both/timed_2": "583e3fce0298699ee8655e2e0f17c44b",
+  "both/gen2": "583e3fce0298699ee8655e2e0f17c44b"
+ },
+ "latents_md5": {
+  "qwen_image/bf16/work_timed/worker_0/latents_req0000.pt": "c3bf140410bccb0401b6a2bc6ffe2410",
+  "qwen_image/both/work_timed/worker_0/latents_req0000.pt": "35a5d5c6b6a81b64d33bbe68f1928ab6"
+ },
+ "arm_latents_finite": {
+  "timed": true,
+  "gen2": true
+ },
+ "deterministic": {
+  "bf16": true,
+  "both": true
+ },
+ "arm_latents_bit_identical": {
+  "qwen_image/both/work_timed/worker_0/latents_req0001.pt": {
+   "rel_l2": 0.0,
+   "cosine": 1.0,
+   "bit_identical": true
+  },
+  "qwen_image/both/work_gen2/latents.pt": {
+   "rel_l2": 0.0,
+   "cosine": 1.0,
+   "bit_identical": true
+  }
+ },
+ "arm_vs_bf16": {
+  "ref_latents": "/mnt/nvme/difflet-mxattn/task6/qwen_image/bf16/work_timed/worker_0/latents_req0000.pt",
+  "cand_latents": "/mnt/nvme/difflet-mxattn/task6/qwen_image/both/work_timed/worker_0/latents_req0000.pt",
+  "latents": {
+   "rel_l2": 0.16411857295642868,
+   "cosine": 0.9864649517444926,
+   "bit_identical": false
+  },
+  "image": {
+   "psnr": 29.13562917707005,
+   "ssim": 0.9642430348324448,
+   "lpips": 0.059795085340738297,
+   "ref": "/mnt/nvme/difflet-mxattn/task6/qwen_image/bf16/timed_1.png",
+   "cand": "/mnt/nvme/difflet-mxattn/task6/qwen_image/both/timed_1.png"
+  }
+ },
+ "arm_vs_fp32": {
+  "ref_latents": "/home/ubuntu/fp8-bench/fp32_ref/qwen_image/latents.pt",
+  "cand_latents": "/mnt/nvme/difflet-mxattn/task6/qwen_image/both/work_timed/worker_0/latents_req0000.pt",
+  "latents": {
+   "rel_l2": 0.16197028406403513,
+   "cosine": 0.9867981673089751,
+   "bit_identical": false
+  },
+  "image": {
+   "psnr": 29.08113543428023,
+   "ssim": 0.9651724985812055,
+   "lpips": 0.06052708998322487,
+   "ref": "/home/ubuntu/fp8-bench/fp32_ref/qwen_image/out.png",
+   "cand": "/mnt/nvme/difflet-mxattn/task6/qwen_image/both/timed_1.png"
+  }
+ },
+ "bf16_vs_fp32": {
+  "ref_latents": "/home/ubuntu/fp8-bench/fp32_ref/qwen_image/latents.pt",
+  "cand_latents": "/mnt/nvme/difflet-mxattn/task6/qwen_image/bf16/work_timed/worker_0/latents_req0000.pt",
+  "latents": {
+   "rel_l2": 0.07410373158751327,
+   "cosine": 0.9972814371616866,
+   "bit_identical": false
+  },
+  "image": {
+   "psnr": 36.34375902170791,
+   "ssim": 0.9904906677139704,
+   "lpips": 0.013752198778092861,
+   "ref": "/home/ubuntu/fp8-bench/fp32_ref/qwen_image/out.png",
+   "cand": "/mnt/nvme/difflet-mxattn/task6/qwen_image/bf16/timed_1.png"
+  }
+ }
+}

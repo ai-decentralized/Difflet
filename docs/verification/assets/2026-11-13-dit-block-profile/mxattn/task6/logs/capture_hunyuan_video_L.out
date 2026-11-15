@@ -1,0 +1,5 @@
+2026-11-15 00:37:55 capture hunyuan_video_L both dev 1 cpus 48-71,144-167 hub /mnt/nvme/difflet-quant-bench-hub cache /mnt/nvme/difflet-mxattn/task6/cache/video df:  56G 522G 
+2026-11-15 01:19:22 capture.sh exit 0 STATUS DONE
+2026-11-15 01:19:45 analyze blk1 exit 0: /mnt/nvme/difflet-mxattn/task6/prof/hunyuan_video_L/both/blk1/breakdown.json
+2026-11-15 01:20:06 analyze blk2 exit 0: /mnt/nvme/difflet-mxattn/task6/prof/hunyuan_video_L/both/blk2/breakdown.json
+CAPTURE_LANE_DONE

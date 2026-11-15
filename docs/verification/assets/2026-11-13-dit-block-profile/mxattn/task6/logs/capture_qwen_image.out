@@ -1,0 +1,4 @@
+2026-11-14 22:17:09 capture qwen_image both dev 6 cpus 72-95,168-191 hub /home/ubuntu/.cache/huggingface/hub cache /mnt/nvme/difflet-mxattn/task6/cache/fp8 df:  59G 545G 
+2026-11-14 22:19:47 capture.sh exit 0 STATUS DONE
+2026-11-14 22:19:48 analyze blk1 exit 0: /mnt/nvme/difflet-mxattn/task6/prof/qwen_image/both/blk1/breakdown.json
+CAPTURE_LANE_DONE

@@ -1,0 +1,2 @@
+9ae31a5b50e1e28c9452a80932fe5883  /mnt/nvme/difflet-mxattn/task5b/smoke/quant_qk+pv/gen.png
+7b13167a5954de5b397c090baba35345  /mnt/nvme/difflet-mxattn/task5b/smoke/quant_qk+pv/work/latents.pt

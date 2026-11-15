@@ -1,0 +1,12 @@
+Sat Nov 14 21:57:09 UTC 2026
+cp: warning: behavior of -n is non-portable and may change in future; use --update=none instead
+cp: warning: behavior of -n is non-portable and may change in future; use --update=none instead
+26M	/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/hlo
+11G	/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/neff
+304K	/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/neff_local
+0	/mnt/nvme/difflet-mxattn/task6/cache/video/neuron/weights
+5.4M	/mnt/nvme/difflet-mxattn/task6/cache/fp8/neuron/hlo
+428M	/mnt/nvme/difflet-mxattn/task6/cache/fp8/neuron/neff
+32K	/mnt/nvme/difflet-mxattn/task6/cache/fp8/neuron/neff_local
+Sat Nov 14 21:57:13 UTC 2026
+MIRROR_DONE

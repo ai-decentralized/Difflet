@@ -1,0 +1,85 @@
+{
+ "shape": {
+  "name": "hv1_L",
+  "bh": 6,
+  "s": 67576,
+  "valid_k": 67449,
+  "d": 128,
+  "path": "bounded",
+  "routed": true,
+  "source": "hunyuan_video_L/bf16/blk1 (dual) and blk2 (single) HunyuanVideoAttention[attn]: two calls of 3 heads each (_head_chunk), q, k, v 51,904,512 B = 3 x 67,584 x 128 bf16 = 67,320 image + 256 text padded to 128; bound_max 811,008 B = 3 x 67,584 x 4"
+ },
+ "impl": "cte",
+ "qk_mx": false,
+ "pv_mx": false,
+ "cte_no_vector_exp": false,
+ "fork_vector_exp": false,
+ "calls": 20,
+ "peak": 1.0,
+ "runs_ms": [
+  183.44300194876269
+ ],
+ "first_call_s": [
+  854.237671831972
+ ],
+ "median_ms": 183.44300194876269,
+ "spread": 0.0,
+ "reference": "fp32",
+ "rel_l2": 0.0045089859164231545,
+ "cosine": 0.9999898344888579,
+ "per_head": [
+  {
+   "rel_l2": 0.004513797429753391,
+   "cosine": 0.9999898127655241
+  },
+  {
+   "rel_l2": 0.004545132479145711,
+   "cosine": 0.9999896708570101
+  },
+  {
+   "rel_l2": 0.004622976004985242,
+   "cosine": 0.999989314043515
+  },
+  {
+   "rel_l2": 0.0045217647437892135,
+   "cosine": 0.999989776793194
+  },
+  {
+   "rel_l2": 0.004457789809463197,
+   "cosine": 0.9999900640179015
+  },
+  {
+   "rel_l2": 0.004416428483418925,
+   "cosine": 0.9999902475469838
+  }
+ ],
+ "nonfinite": 0,
+ "softmax_max": null,
+ "inputs": "q, k, v ~ N(0, 1) bf16, seed 0, q and k x 1.0, scale d^-0.5",
+ "cpus": [
+  80,
+  81,
+  82,
+  83,
+  84,
+  85,
+  86,
+  87,
+  176,
+  177,
+  178,
+  179,
+  180,
+  181,
+  182,
+  183
+ ],
+ "fuser": [
+  {
+   "device": 5,
+   "core": 20,
+   "idle": true,
+   "at": "2026-11-15T04:47:41"
+  }
+ ]
+}

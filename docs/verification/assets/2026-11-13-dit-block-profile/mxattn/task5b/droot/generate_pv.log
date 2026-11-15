@@ -1,0 +1,21 @@
+<frozen runpy>:128: RuntimeWarning: 'difflet.cli.main' found in sys.modules after import of package 'difflet.cli', but prior to execution of 'difflet.cli.main'; this may result in unpredictable behaviour
+[qwen_image] backend 'neuron' compiles into --cache-dir: DIFFLET_COMPILE_CACHE=/mnt/nvme/difflet-mxattn/task5b/droot/root (NEFF and HLO caches under /mnt/nvme/difflet-mxattn/task5b/droot/root/neuron)
+
+*****************************************
+Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+*****************************************
+[weight store] rank 3/4 NeuronQwenImageTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (10.22 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task5b/droot/root/neuron/weights/Qwen--Qwen-Image__transformer__75e0b4be__bfloat16__tp4__7adb1949400f81d3)
+[weight store] rank 2/4 NeuronQwenImageTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (10.22 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task5b/droot/root/neuron/weights/Qwen--Qwen-Image__transformer__75e0b4be__bfloat16__tp4__7adb1949400f81d3)
+[weight store] rank 1/4 NeuronQwenImageTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (10.22 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task5b/droot/root/neuron/weights/Qwen--Qwen-Image__transformer__75e0b4be__bfloat16__tp4__7adb1949400f81d3)
+[weight store] rank 0/4 NeuronQwenImageTransformerApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (10.22 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task5b/droot/root/neuron/weights/Qwen--Qwen-Image__transformer__75e0b4be__bfloat16__tp4__7adb1949400f81d3)
+[attention] DIFFLET_ATTN_QUANT=pv (qk_mx=False, pv_mx=True): calls routed to the MXFP8 kernel by (s_q, s_k, bounded): {(5120, 5120, True): 1}
+Loading checkpoint shards:   0%|          | 0/4 [00:00<?, ?it/s]Loading checkpoint shards: 100%|██████████| 4/4 [00:00<00:00, 108.02it/s]
+[qwen_image] start-up: from_pretrained (prepare_runtime + build) 18.46 s; load 15.8 s by component {'runtime init': 0.03558646410237998, 'build on meta': 2.949408893007785, 'load checkpoint': 4.541276367031969, 'eval': 0.01062780397478491, 'compile': 0.22076283802744, 'warmup forward': 7.082159411977045, 'text encoder load': 0.6416064370423555}
+[qwen_image] request: 3.35 s; to the first step's end 0.53 s (prompt encode + step 1); step median 312.7 ms (n=9, max 314.7); after the last step 0.00 s
+[qwen_image] neuron rank 1/4: exec_mode=compile compiled_blocks=60 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 34.2s, stage 37.5s
+[qwen_image] neuron rank 2/4: exec_mode=compile compiled_blocks=60 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 34.5s, stage 37.8s
+[qwen_image] neuron rank 3/4: exec_mode=compile compiled_blocks=60 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 34.2s, stage 37.5s
+[generate] packed latents (1, 4096, 64) -> /mnt/nvme/difflet-mxattn/task5b/droot/work_pv/latents.pt
+[qwen_image] neuron rank 0/4: exec_mode=compile compiled_blocks=60 unwarmed_shapes=[] fallbacks: load=[] generate=[] load+warmup 34.2s, stage 37.6s
+[weight store] rank 0/1 NeuronWanVaeDecoderApplication: not written: no gain: the checkpoint holds these tensors in the load dtype (0.15 GB either way; DIFFLET_NEURON_WEIGHT_STORE_ALL=1 writes it anyway) (/mnt/nvme/difflet-mxattn/task5b/droot/root/neuron/weights/Qwen--Qwen-Image__vae__75e0b4be__bfloat16__tp1__a639fb1bdb157871)
+[vae] image saved to /mnt/nvme/difflet-mxattn/task5b/droot/gen_pv.png

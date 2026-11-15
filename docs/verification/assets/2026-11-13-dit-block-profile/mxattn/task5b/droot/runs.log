@@ -1,0 +1,38 @@
+2026-11-14 19:41:33 attention.py=3ec9f73099f5d799
+2026-11-14 19:41:33 snapshot 0_empty: stage dirs: 
+2026-11-14 19:41:33   neff files: 0
+2026-11-14 19:41:33 start compile_pv dev=12 cores=48-51 cpus=24-31,120-127 shell DIFFLET_ATTN_QUANT=unset uptime:  19:41:33 up 8 days,  5:05,  8 users,  load average: 0.13, 2.19, 19.17
+2026-11-14 19:41:34 fuser /dev/neuron12 exit 1
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/root       1.9T  1.9T   62G  97% /
+/dev/md0        7.0T  6.4T  561G  93% /mnt/nvme
+2026-11-14 19:44:00 end compile_pv exit 0 uptime:  19:44:00 up 8 days,  5:07,  8 users,  load average: 44.04, 20.09, 23.44
+2026-11-14 19:44:00 fuser after: exit 1
+2026-11-14 19:44:00 snapshot 1_after_pv: stage dirs: qwen_image_dit/95dcb4b8887803e3 
+2026-11-14 19:44:00   /mnt/nvme/difflet-mxattn/task5b/droot/root/qwen_image_dit/95dcb4b8887803e3/manifest.json attn_quant=pv
+2026-11-14 19:44:00   neff files: 164
+2026-11-14 19:44:00 start compile_qk dev=12 cores=48-51 cpus=24-31,120-127 shell DIFFLET_ATTN_QUANT=unset uptime:  19:44:00 up 8 days,  5:07,  8 users,  load average: 44.04, 20.09, 23.44
+2026-11-14 19:44:00 fuser /dev/neuron12 exit 1
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/root       1.9T  1.9T   62G  97% /
+/dev/md0        7.0T  6.4T  561G  93% /mnt/nvme
+2026-11-14 19:45:19 end compile_qk exit 0 uptime:  19:45:19 up 8 days,  5:08,  8 users,  load average: 80.07, 34.90, 28.21
+2026-11-14 19:45:19 fuser after: exit 1
+2026-11-14 19:45:19 snapshot 2_after_qk: stage dirs: qwen_image_dit/95dcb4b8887803e3 qwen_image_dit/fe8f4bee1a403a58 
+2026-11-14 19:45:19   /mnt/nvme/difflet-mxattn/task5b/droot/root/qwen_image_dit/95dcb4b8887803e3/manifest.json attn_quant=pv
+2026-11-14 19:45:19   /mnt/nvme/difflet-mxattn/task5b/droot/root/qwen_image_dit/fe8f4bee1a403a58/manifest.json attn_quant=qk
+2026-11-14 19:45:19   neff files: 165
+2026-11-14 19:45:19 start generate_pv dev=12 cores=48-51 cpus=24-31,120-127 shell DIFFLET_ATTN_QUANT=unset uptime:  19:45:19 up 8 days,  5:08,  8 users,  load average: 80.07, 34.90, 28.21
+2026-11-14 19:45:19 fuser /dev/neuron12 exit 1
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/root       1.9T  1.9T   62G  97% /
+/dev/md0        7.0T  6.4T  561G  93% /mnt/nvme
+2026-11-14 19:46:27 end generate_pv exit 0 uptime:  19:46:27 up 8 days,  5:10,  8 users,  load average: 61.06, 38.43, 29.90
+2026-11-14 19:46:27 fuser after: exit 1
+2026-11-14 19:46:27 snapshot 3_after_generate_pv: stage dirs: qwen_image_dit/95dcb4b8887803e3 qwen_image_dit/fe8f4bee1a403a58 
+2026-11-14 19:46:27   /mnt/nvme/difflet-mxattn/task5b/droot/root/qwen_image_dit/95dcb4b8887803e3/manifest.json attn_quant=pv
+2026-11-14 19:46:27   /mnt/nvme/difflet-mxattn/task5b/droot/root/qwen_image_dit/fe8f4bee1a403a58/manifest.json attn_quant=qk
+2026-11-14 19:46:27   neff files: 165
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/root       1.9T  1.9T   62G  97% /
+/dev/md0        7.0T  6.4T  561G  93% /mnt/nvme

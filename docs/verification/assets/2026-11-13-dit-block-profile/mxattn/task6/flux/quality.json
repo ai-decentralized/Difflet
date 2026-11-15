@@ -1,0 +1,48 @@
+{
+ "key": "flux",
+ "arm": "both",
+ "md5": {
+  "bf16/timed_1": "67da9e98383261f2c83ef68478e865e9",
+  "bf16/timed_2": "67da9e98383261f2c83ef68478e865e9",
+  "both/timed_1": "c18e7bc513a5544252db49e23836d531",
+  "both/timed_2": "c18e7bc513a5544252db49e23836d531",
+  "both/gen2": "c18e7bc513a5544252db49e23836d531"
+ },
+ "latents_md5": {},
+ "arm_latents_finite": {
+  "timed": null,
+  "gen2": null
+ },
+ "deterministic": {
+  "bf16": true,
+  "both": true
+ },
+ "arm_latents_bit_identical": {},
+ "arm_vs_bf16": {
+  "image": {
+   "psnr": 26.582731505477973,
+   "ssim": 0.9466867893452436,
+   "lpips": 0.03358578681945801,
+   "ref": "/mnt/nvme/difflet-mxattn/task6/flux/bf16/timed_1.png",
+   "cand": "/mnt/nvme/difflet-mxattn/task6/flux/both/timed_1.png"
+  }
+ },
+ "arm_vs_fp32": {
+  "image": {
+   "psnr": 24.406261120451667,
+   "ssim": 0.91619461378777,
+   "lpips": 0.07686865329742432,
+   "ref": "/home/ubuntu/fp8-bench/fp32_ref/flux/out.png",
+   "cand": "/mnt/nvme/difflet-mxattn/task6/flux/both/timed_1.png"
+  }
+ },
+ "bf16_vs_fp32": {
+  "image": {
+   "psnr": 23.35901336190971,
+   "ssim": 0.9170108947118484,
+   "lpips": 0.07483277469873428,
+   "ref": "/home/ubuntu/fp8-bench/fp32_ref/flux/out.png",
+   "cand": "/mnt/nvme/difflet-mxattn/task6/flux/bf16/timed_1.png"
+  }
+ }
+}

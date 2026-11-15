@@ -1,0 +1,55 @@
+{
+ "key": "wan21_official",
+ "arm": "both",
+ "md5": {
+  "bf16/timed_1": "963566ba636c21de17042fd6e35ff07b",
+  "bf16/timed_2": "963566ba636c21de17042fd6e35ff07b",
+  "both/timed_1": "ecd18db4104386037498734bc91f5385",
+  "both/timed_2": "ecd18db4104386037498734bc91f5385",
+  "both/gen2": "ecd18db4104386037498734bc91f5385"
+ },
+ "latents_md5": {
+  "wan21_official/bf16/work_timed/worker_0/latents_req0000.pt": "cb3e28cd06434349dae80e346dca1dd0",
+  "wan21_official/both/work_timed/worker_0/latents_req0000.pt": "a6c4dcb71466857cd6d99c83bff2835f"
+ },
+ "arm_latents_finite": {
+  "timed": true,
+  "gen2": true
+ },
+ "deterministic": {
+  "bf16": true,
+  "both": true
+ },
+ "arm_latents_bit_identical": {
+  "wan21_official/both/work_timed/worker_0/latents_req0001.pt": {
+   "rel_l2": 0.0,
+   "cosine": 0.9999999999997957,
+   "bit_identical": true
+  },
+  "wan21_official/both/work_gen2/latents.pt": {
+   "rel_l2": 0.0,
+   "cosine": 0.9999999999997957,
+   "bit_identical": true
+  }
+ },
+ "arm_vs_bf16": {
+  "ref_latents": "/mnt/nvme/difflet-mxattn/task6/wan21_official/bf16/work_timed/worker_0/latents_req0000.pt",
+  "cand_latents": "/mnt/nvme/difflet-mxattn/task6/wan21_official/both/work_timed/worker_0/latents_req0000.pt",
+  "latents": {
+   "rel_l2": 0.5162077248514466,
+   "cosine": 0.8728247787989705,
+   "bit_identical": false
+  },
+  "video": {
+   "psnr": 15.82197123061853,
+   "ssim": 0.45688526692834647,
+   "lpips": 0.3371674157219169,
+   "ref": "/mnt/nvme/difflet-mxattn/task6/wan21_official/bf16/timed_1.mp4",
+   "cand": "/mnt/nvme/difflet-mxattn/task6/wan21_official/both/timed_1.mp4",
+   "frames": 81,
+   "identical_frames": 0,
+   "psnr_worst": 14.364675956417951,
+   "min_psnr_frame": 0
+  }
+ }
+}
