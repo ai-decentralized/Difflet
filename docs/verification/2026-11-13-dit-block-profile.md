@@ -1,4 +1,4 @@
-# DiT block profile: seven models on trn3, bf16 against linear MXFP8
+# DiT block profile: seven models on trn3, bf16 against linear MXFP8, and MXFP8 attention
 
 The user's request (2026-11-13): profile Qwen-Image, FLUX.1-dev, LTX-2, HunyuanVideo,
 HunyuanVideo-1.5, Wan 2.1 and Wan 2.2 in PyTorch-native bf16 and with linear MXFP8 (HunyuanVideo-1.5
@@ -11,6 +11,15 @@ and `scripts/profile_dit/page/index.html`).
 
 **Status:** all 13 configurations measured (2026-11-13); HunyuanVideo at 544x960x129 (both arms,
 dual and single blocks) was captured without DGE notifications (section 6).
+
+**Sections 7-15: MXFP8 attention** (plan `docs/plans/2026-11-13-mxfp8-attention.md` with its two
+addenda, and `docs/plans/2026-11-14-attn-quant-model-runs.md`; complete 2026-11-15). Outcome: no
+MXFP8 attention variant beat bf16 attention at kernel level (gates G1 and G2 failed on every
+shape, sections 8-11), and none made a model faster than linear MXFP8 alone (G3, section 15f).
+At the user's request it ships as the opt-in `--attn-quant {qk,pv,qk+pv}`, never a default: slower
+than linear MXFP8 alone on every model, slower than bf16 on the long video models, and with a
+quality cost on some (Qwen-Image about 7 dB further from fp32; sections 15a, 15c, 15g). Section 12
+is a separate bf16 finding (nkilib `attention_const_max`, 30-38% faster kernel), not adopted.
 
 ## 1. What ran
 
@@ -426,11 +435,12 @@ of torch-neuronx's SDPA op). There are three arms:
   removed (`rebalance/tree_ctl.diff`; its JSONs still carry the flag).
 - **Direct-knob**: `--cte-no-vector-exp`.
 
-The three arms were timed back to back on one device and CPU set (05:00-05:11), by the same method.
+The three arms were timed back to back on one device and CPU set (04:54:55-05:11:24), by the same
+method.
 They were re-timed together rather than compared with the table above for two reasons. Device 4
 (flux's) was held by another session, so flux moved to device 7. And another session's workers were
 loading NUMA node 1: before launch, with no probe running, the device 1 / device 7 CPU slices were
-44% / 21% busy, and the host load average was 134 just before launch and 26-105 at the arms' starts and ends. The spreads show it (SDPA-shipped
+44% / 21% busy (a sample the logs do not keep; `ctl/cpuload.log`, from 04:55:36, has the run's), and the host load average was 134 just before launch and 26-105 at the arms' starts and ends. The spreads show it (SDPA-shipped
 ltx2 2.31%). Ratios use J = max(2%, the denominator's spread).
 
 | shape | device (CPUs) | SDPA-shipped ms (spread) | direct-default ms (spread) | direct-knob ms (spread) | direct-default / SDPA-shipped | direct-knob / direct-default | direct-knob / SDPA-shipped | direct-default == SDPA-shipped, bits |
@@ -484,9 +494,11 @@ gets 5-13% slower once ScalarE runs beside it.
 **Decision (ruling BR19).** attention_cte with the exp on ScalarE is faster than shipped
 attention_cte on all six shapes, by more than J: by 7.5-14% at the short shapes (flux_1024,
 qwen_1024, ltx2_video) and by 18-21% at the long ones (wan_81f, hv15_121f, hv1_L). Accuracy is
-unchanged. So on every shape, the
+unchanged on flat inputs (the peaked case was not run for this pair). So on every shape, the
 "bf16" baseline that MXFP8 must beat in G2/G3 is this rebalanced kernel (rebalanced medians above,
-J = 2%), and the bf16 speedup itself is a separate finding. Shipped Difflet does not use it yet:
+J = 2%), and the bf16 speedup itself is a separate finding. (Superseded for G3 by ruling BR32,
+section 13: the routed op runs the fork with the VectorE exp, so section 15's bf16 and G3 are
+against shipped attention_cte. G2, section 11, stands as read here.) Shipped Difflet does not use it yet:
 the unbounded path would need the direct kernel call above, because torch-neuronx's SDPA wrapper
 cannot pass the knob. The fork (`mx_attention_kernel.py`) refused `allow_vector_exp` when this
 was measured (pruned in Task 3 Step 6, so it ran the VectorE exp on trn3 B1); since Task 4a
@@ -812,7 +824,7 @@ In every run:
   With fp8 P (QK+PV) the steps are ~16x coarser: 4.9e-3.
 
 So no miss is a kernel bug. Each is the device's MX arithmetic, which neither the CPU mirror nor
-BIRSim models (BIRSim gives 3e-8 here). The rule does not exempt it: by the plan's definition a
+the simulators model (the Python NKI simulator gives 3e-8 here). The rule does not exempt it: by the plan's definition a
 device output that misses the threshold against the mirror is "Broken". The misses are reported
 as found, with the threshold unchanged. This also settles 4a's open attribution point: from the
 device's own bytes, the 2e-4 is the matmul, not `quantize_mx`.
@@ -899,8 +911,10 @@ rebalanced bf16 nowhere either, so no shape keeps it (BR21). No row passes the a
 for QK+PV, and the long rows do not pass it for QK-only. The device's MX matmul explains every miss
 (above).
 
-**Variant per model.** `ATTN_QUANT_MODELS` does not exist yet (Task 7 creates it in
-`difflet/quant/targets.py`), so the assignment is recorded here, as the plan's G2 allows:
+**Variant per model.** `ATTN_QUANT_MODELS` does not exist (Task 7 would have created it in
+`difflet/quant/targets.py`; Task 7 was later dropped, ruling BR34 and plan addendum 2: no model
+gets attention quantization by default), so the assignment is recorded here, as the plan's G2
+allows:
 
 | model | shape | variant |
 |---|---|---|
@@ -959,6 +973,23 @@ Outputs: `/mnt/nvme/difflet-mxattn/probe/4b/`:
 
 ## 12. nkilib `attention_const_max` (bf16) against the rebalanced attention_cte
 
+**Review.** The const-max review (2026-11-14) reproduced the timing ratios, arm parity,
+`softmax_max` and the BR24 arithmetic, then paused. The final fix wave (2026-11-15) finished it,
+read-only and on the CPU, from the raw files (`/mnt/nvme/difflet-mxattn/probe/constmax/`):
+- reproduced: the engine split (`cap/*/engines.json`, `dmaq.json`, `throttle.json`, the overlap
+  file; the control NEFF is section 11's device-7 one by sha256, and its span is within 0.055%
+  of that capture);
+- reproduced: the per-step table (`phases.json`), the accuracy table and the x4 overflow count
+  (the device output itself);
+- reproduced: `emulate.py`, run again (4.480e-3 / 1.348e-2; fp32 scores 2.391e-3 / 3.990e-3);
+- reproduced: every timed output's bit identity, and the `fuser` lines of the device runs;
+- reproduced: the bound table, recomputed from the snapshots' norm tensors by an independent
+  script (layers 40 / 57 / 48, Sk from `shapes.json`, d 128, every column).
+
+Corrected below: the per-step rows overlap; the overhead line; the sigma reading. Not verifiable
+from the files: that no compile of ours ran on NUMA node 0 during the window. Adoption is the
+user's call (end of section).
+
 Ruling BR24 (2026-11-14). One bounded measurement before FP8 attention closes: nkilib's
 experimental `attention_const_max`, shipped and unmodified, in bf16, against the rebalanced
 attention_cte (section 9, the BR19 bf16) on the three unbounded routed shapes, plus one engine
@@ -977,8 +1008,9 @@ capture at wan_81f. No kernel code.
   the VectorE exp, and no argument chooses. MM2 takes P as the stationary operand and `[V | 1]` as
   the moving one, so the row sum comes out of MM2's column 129 (`:441-452`). There is no MM1 evict,
   no running max and no P transpose.
-- Sharding (`_shard_inputs` `:216-247`): heads over the LNC cores when they divide (here 5 / 4 / 3
-  heads per core), else the query axis.
+- Sharding (`_shard_inputs` `:216-247`): heads over the LNC cores when they divide (here
+  `wan_81f` 10 heads, 5 per core; `ltx2_video` 8, 4 per core; `flux_1024` 6, 3 per core), else the
+  query axis.
 - Its docstring (`:104-124`) requires std(Q), std(K) <= 1 "for bf16 accuracy with
   softmax_max=4-5", warns that too low a max overflows exp (inf/NaN), and gives the rule: from the
   QK-RMSNorm weights, sigma = sqrt(sum(gq^2 gk^2) / d), softmax_max ~ 0.88 sigma sqrt(2 ln Sk),
@@ -992,7 +1024,9 @@ runs outside the kernel. The kernel itself DMA-transposes Q once per Q block and
 every Q block, inside the timed region (3.49 GB in transpose mode at wan_81f, below). softmax_max is
 the docstring's Gumbel estimate at the probe's flat score std (sigma = 1: q, k ~ N(0, 1), scale
 d^-0.5): 0.88 sqrt(2 ln Sk) = 3.615 (flux_1024), 3.676 (ltx2_video), 4.013 (wan_81f). The peaked
-case (q and k x 2, score std ~4) keeps the same value.
+case (q and k x 2, score std ~4) keeps the same value: the sigma-1 max, not the max the
+docstring's rule (and the bound table below) prescribes for scores of std 4, about 4x higher. So
+the peaked rows show a max set for the wrong std, not the rule applied to peaked scores.
 
 **Timing.** Section 11's method (`constmax/duo.sh`). Per shape, both arms ran on one device and CPU
 set in one window, three processes per arm, the order alternated: (cte, cm), (cm, cte), (cte, cm).
@@ -1009,8 +1043,10 @@ window. Rule: faster = ratio below 1 - J, with J = max(2%, the rebalanced arm's 
 
 attention_const_max in bf16 is 30-38% faster than the rebalanced attention_cte on all three
 unbounded shapes, which makes it the fastest bf16 attention Difflet has measured. The small rows
-still carry section 8's ~1 ms fixed overhead per measurement, so their kernel ratios are, if
-anything, lower. Each timed output is bit-identical to its accuracy run (const max) or to section
+still carry section 8's fixed overhead per measurement: ~0.8-1.0 ms per timed loop, the same in
+both arms, so ~0.025 ms per call at flux's 40 calls and ~0.05 ms at ltx2's 20. Removed, the
+ratios would be, if anything, lower (with 1 ms removed: flux 0.605, ltx2_video 0.641, an
+estimate); wan's are unchanged. Each timed output is bit-identical to its accuracy run (const max) or to section
 9's rebalanced output (cte).
 
 **Engine split at wan_81f**, one call. Both NEFFs were captured with 3b's `capture.sh` on device 13
@@ -1025,7 +1061,10 @@ intervals per physical core over the two cores (`engines.py`), and DMA queues co
 | rebalanced cte | 51.91 | 45.28 (87.2%) | 42.64 (82.1%) | 39.57 (76.2%) | 1.29 (2.5%) | 7.19 (13.8%) | `qSyncSpillReload0` 43.84 (84.5%, P transposes); `qGpSimdDynamic` 6.38; `qSyncIO0` 0.80 | 7.45% |
 | const max | 36.58 | 36.38 (99.4%) | 26.95 (73.7%) | 13.95 (38.1%) | 0.00 | 5.71 (15.6%) | `qSyncIO0` 5.51 (15.1%, transpose mode: Q and K); `qGpSimdDynamic` 5.36 (14.6%, copies: V) | 0.03% |
 
-Const max per step, ms (instructions), from `nki_source_location` (`constmax/phases_cm.py`):
+Const max per step, ms (instructions), from `nki_source_location` (`constmax/phases_cm.py`).
+Each row is that step's busy time on its engine. MM1's and MM2's rows overlap in time on the PE
+(26.28 + 27.34 ms of `MATMUL` within TensorE's 36.38 ms), so the rows do not add up to the
+engine split above:
 
 | step | engine / opcode | ms (instructions) |
 |---|---|---|
@@ -1086,10 +1125,20 @@ softmax_max; it gives the same layer counts.
   docstring's per-head unit-RMS assumption does not hold. One head's ||x_h||^2 can reach H d, which
   makes the strict Cauchy-Schwarz bound H x hard_bound (Wan up to 8,219, LTX-2 up to 4,770). Under
   that bound no layer of either model is within 80 (smallest gap 857 / 342).
-- **sigma is above the docstring's std <= 1 precondition in most layers** (Wan 40 of 40, LTX-2 29
-  of 48, FLUX 53 of 57; max 3.49 / 3.93 / 2.09). The peaked probe (score std 4) is the error regime
-  this suggests for Wan and LTX-2: 1.3-2.0e-2. This is estimated from gamma alone, not measured on
-  real activations; RoPE and the activations' own statistics are not modelled.
+- **sigma > 1 in most layers** (counting a layer's largest head: Wan 40 of 40, LTX-2 29 of 48,
+  FLUX 53 of 57; max 3.49 / 3.93 / 2.09). sigma is the gamma-derived score scale of the
+  softmax_max rule. It is not the docstring's precondition, which is std(Q), std(K) <= 1 on the
+  activations, so these counts overstate that precondition's failures. They point to scores wider
+  than the probe's flat case: for Wan and LTX-2, the peaked probe's error regime, 1.3-2.0e-2. This
+  is estimated from gamma alone, not measured on real activations; RoPE and the activations' own
+  statistics are not modelled.
+
+**Adoption** (ruling BR26). BR24's rule reads as written: FP8 attention on trn3 closes, with the
+~26% TensorE headroom reported beside it. bf16 attention_const_max is a separate bf16 finding, and
+nothing in this section ships. Adopting it is the user's decision, and it needs model-level
+quality evidence first: its kernel error is 1.5-2.1x attention_cte's on flat inputs and 7.5-8x
+peaked, with overflow possible. A plan would start with FLUX, whose 57 layers all pass the bound
+rule, and fall back to attention_cte per layer on Wan and LTX-2.
 
 Outputs: `/mnt/nvme/difflet-mxattn/probe/constmax/`:
 - `tree/` is the frozen tree the device runs used.
@@ -1101,8 +1150,16 @@ Outputs: `/mnt/nvme/difflet-mxattn/probe/constmax/`:
 - `bounds.json` holds the real-model bounds.
 - The tools are `acc_lane.sh`, `duo.sh`, `cap.sh`, `table.py`, `phases_cm.py`, `neffs_cm.py`,
   `bounds.py` and `emulate.py`.
+- Every small file here is also in the 2026-11-14 EBS evidence tarball (handover doc section 5).
 
 ## 13. MXFP8 attention: the routed op and `DIFFLET_ATTN_QUANT` (Task 5)
+
+By the gate rule the plan stopped after section 11 (G1 and G2 failed everywhere; ruling BR23), and
+section 12's probe did not reopen it. The user then asked for the model-level arms anyway (plan
+addendum 1) and, after this section, for an opt-in option that is never a default (addendum 2,
+section 14). The BR numbers are the execution ledger's rulings; the plan's addenda state the ones
+that changed the plan. The switch value `mxfp8` used in this section was replaced by `qk` in
+section 14, where `mxfp8` raises.
 
 Rulings BR28, BR31 and BR32 (2026-11-14). `DIFFLET_ATTN_QUANT=mxfp8` (read once at import; unset or
 `off`: nothing changes) sends the self/joint attention calls to `difflet_neuron::mx_attention`
@@ -1246,6 +1303,11 @@ Both arms are scored against the variant's Task 1 mirror.
 
 - Every pair has 0 differing elements and no non-finite outputs.
 - The qk rows equal section 13's QK-only accuracy.
+- `qk` at `wan_81f` and `qk+pv` at both shapes exceed Task 3's 2.6e-3 threshold against the
+  mirror, which by the plan's wording makes them "Broken". Section 11 attributes such misses to
+  the device's `nc_matmul_mx` arithmetic (~2e-4 of the score RMS, amplified by P's rounding).
+  Ruling BR23 accepted them as hardware arithmetic, not a kernel bug, before the option shipped;
+  the shipped variants carry the same misses.
 - The `wan_81f` pv and qk+pv pairs ran after a pause, from the same frozen tree (verified equal to
   the sources). Their first attempts on devices 13 and 14 were killed mid-compile at the pause;
   the logs are in `kernel/killed_at_pause/`.
@@ -1265,7 +1327,7 @@ prompt, run through the CLI flag. `DIFFLET_ATTN_QUANT` was unset in the shell.
 - `--attn-quant qk` reproduces section 13's `DIFFLET_ATTN_QUANT=mxfp8` smoke bit for bit (image
   `a02efe81`, latents `b6a3ce43`).
 - Against section 13's linear-only 10-step image, the three `--quant` arms are 28.5 / 28.8 /
-  28.6 dB (latents cosine 0.979 / 0.978 / 0.978).
+  28.6 dB (latents cosine 0.979 / 0.978 / 0.978). `pv` is as far as `qk`: an open question (15g).
 - The step medians were taken with twelve device lanes running at once and are not
   timing-grade.
 
@@ -1307,6 +1369,8 @@ Plan: `docs/plans/2026-11-14-attn-quant-model-runs.md`, Task 6. `both` = `--quan
 ran at its Plan A profile shape (section 1's table), with `scripts/quant_bench/bench.sh`'s steps,
 flags and prompts, seed 42, LNC=2, from the branch at `d9312a36` plus this section's scripts (no
 change under `difflet/`). G3 is reported, never applied, and nothing becomes a default (BR34).
+bf16 here is shipped attention_cte, with the exp on VectorE (BR32), and the routed op runs the fork
+with the same exp, so `both` differs from bf16 only by quantization.
 
 **Run directory** `ROOT` = `/mnt/nvme/difflet-mxattn/task6/` (instance storage, lost on a stop;
 the paths below are relative to it). Its small files are committed under
@@ -1376,6 +1440,10 @@ than 1% from the evidence's).
 <!-- 15a rows -->
 
 ### 15b. Block profile
+
+The plan's per-component split (attention, MLP, norms and modulation, projections, ms per block)
+is in each committed breakdown's `components` and in the page datasets' `components` rows, not
+repeated here.
 
 Per block execution, ms; the binding engine and its share of the block. bf16 is Plan A's
 committed breakdown, the quantized arm this run's capture
@@ -1526,7 +1594,9 @@ bf16 above the quantized arm): each shows the prompt's subject with no noise.
   - `both` is slower than linear alone everywhere.
   - On the long-sequence video models it is slower than bf16 too: Wan 1.11x, HunyuanVideo-1.5
     1.22x, HunyuanVideo 1.37x.
-  - This matches the kernel-level 1.17-1.54x of QK+PV against bf16 (sections 10-11). Linear
+  - This is consistent in direction with the kernel-level 1.17-1.54x of QK+PV in section 11,
+    which was measured against the rebalanced cte with the ScalarE exp; QK+PV with the VectorE
+    exp against shipped cte, the model runs' pair, was not timed at kernel level. Linear
     MXFP8's gain stays on the image models and LTX-2, where attention is a small part of the
     block, but shrinks: Qwen-Image 0.848 against 0.791, FLUX 0.878 against 0.827, LTX-2 0.771
     against 0.752.
@@ -1588,14 +1658,31 @@ bf16 above the quantized arm): each shows the prompt's subject with no noise.
     specific blocks:
     - Qwen-Image blocks 0 and 58, where K channels 76/77 carry 55x the mean energy;
     - HunyuanVideo dual block 1.
-  - **PV is minor.** On the Qwen-Image velocity proxy, PV's error is about 10x smaller.
+  - **PV is minor on the CPU proxy.** On the Qwen-Image velocity proxy, PV's error is about 10x
+    smaller. The device smokes do not show that (the open item below).
   - **BR36 is small**: about 0.2-0.3 dB, in Qwen-Image block 0 only. K smoothing over the
     padded keys is not the cause of Qwen-Image's loss.
   - **The probes' rel L2 measures fidelity, not quantization error.** Sections 13-14's ~2e-3 /
     5e-3 is device against mirror. Against exact attention on N(0, 1) inputs, qk+pv is about
     5.4%.
+- **Open: the device smokes disagree with the CPU proxy on PV.**
+  - Section 14(c)'s 10-step Qwen-Image smokes put `qk`, `pv` and `qk+pv` 28.5 / 28.8 / 28.6 dB
+    from linear alone. About 81% of their deviations from linear alone are shared across the three
+    variants (the review's CPU analysis of the smoke outputs).
+  - The CPU proxy instead predicts PV's error about 10x smaller than QK^T's. The two are not
+    reconciled.
+  - 15h rules out the fork kernel: with no MX flag it equals shipped attention_cte bit for bit.
+  - The remaining candidates are the recompiled graph's rounding, and a device PV error above the
+    mirror's prediction.
+  - At model level `qk` and `pv` alone have only those 10-step smokes (not timing-grade); this
+    section's full-step runs, step times and quality are `qk+pv` only. So the claim that `pv` is
+    the safer variant rests on the CPU proxy alone.
 
 ### 15h. The fork without MX flags against shipped attention_cte (ruling BR37)
+
+Why: the open smoke anomaly (15g), three variants equally far from linear alone, could have been
+the fork itself rather than quantization. This check rules the kernel out; the anomaly stays
+open.
 
 The routed op runs the fork with `allow_vector_exp=True`. With both MX flags off, that
 configuration must be shipped attention_cte (VectorE exp) bit for bit. Sections 11 and 14

@@ -15,7 +15,8 @@ quality.
   page update after each model.
 
 Parent plan: `docs/plans/2026-11-13-mxfp8-attention.md`. Its Global Constraints still apply:
-routing set, padding, switch-off identity, seed 42, LNC=2, steps and flags from `bench.sh`.
+routing set, padding as amended by the parent's addendum 2, switch-off identity, seed 42, LNC=2,
+steps and flags from `bench.sh`.
 
 ## Task 5b: finish `--attn-quant`
 

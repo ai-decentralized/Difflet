@@ -1,5 +1,12 @@
 # MXFP8 Attention (SageAttention-style QK and PV) Implementation Plan
 
+> **Status 2026-11-15:** executed through Task 6. G1 and G2 failed on every shape, and G3 on
+> every model. Attention quantization ships only as the opt-in `--attn-quant {qk,pv,qk+pv}`,
+> never a default; Task 7 is dropped. The two addenda at the end supersede this body's switch
+> values, padding rule, K-smoothing rule, model scope and Task 7. Evidence:
+> `docs/verification/2026-11-13-dit-block-profile.md` sections 7-15. Model runs:
+> `docs/plans/2026-11-14-attn-quant-model-runs.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Run the DiTs' self- and joint-attention core, softmax(QK^T)V, with its matmuls in
@@ -294,7 +301,7 @@ already 0.911 / 0.897 apart, evidence 9d).
 Budget: one cold compile per quantized arm (HV1 ~40 min, Wan 11-16 min, HV1.5 ~24 min) plus one
 bf16 and two quantized timed runs per model: ~1.5-2 h of device time without rework.
 
-### Task 7: G3's decisions as the default
+### Task 7: G3's decisions as the default (dropped, addendum 2)
 
 **Files:**
 - Modify: `difflet/quant/targets.py` (`ATTN_QUANT_MODELS: dict[str, frozenset[str]]`, model -> its

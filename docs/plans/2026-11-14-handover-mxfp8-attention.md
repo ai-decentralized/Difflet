@@ -1,5 +1,23 @@
 # Handover: DiT block profile + MXFP8 attention (paused 2026-11-14)
 
+> **Superseded 2026-11-15: do not resume from the steps below.** Work resumed after this pause.
+> - **VEXP is off this branch.** The user moved it to `main`, to be done later with its own
+>   benchmark (ruling BR31). Section 3's VEXP line and section 4 item 1 no longer apply here.
+> - **Plan B continued** as an opt-in option (the plan's addenda 1 and 2). Tasks 5 and 5b (the
+>   routed op, `--attn-quant {qk,pv,qk+pv}`) and Task 6 (seven models, bf16 against `both`) are
+>   done: evidence sections 13-15 and the page's attention section
+>   (`scripts/profile_dit/page/`). Task 7 (a default) is dropped.
+> - **Section 4 item 2** (the const-max review) was finished in the final fix wave: evidence
+>   section 12's review note.
+> - **Section 4 item 3:** the whole-branch final review ran on 2026-11-15; its findings were fixed
+>   in one wave, and a scoped re-review follows. Then comes branch finishing with the user.
+> - **Still the user's decisions:** section 3's open items 1-4 (const-max adoption, FP8 on
+>   const-max, branch finishing including whether the fork stays, the carried items); the open
+>   smoke anomaly (evidence 15g); VEXP on `main`.
+> - **Since this document:** rulings run to BR37 (ledger `rulings.md`). Tasks 5-6's instance-storage
+>   files, which postdate the 2026-11-14 tarball, are committed under
+>   `docs/verification/assets/2026-11-13-dit-block-profile/mxattn/`.
+
 All work on `feat/mxfp8-sage-attention` was paused at the user's request
 ("所有Task暂停下，并写好交接文档，这台机器需要关闭维护下，晚点我们再重新跑。") because the host is being
 shut down for maintenance. This document is what a resumed session needs. Everything below is
@@ -53,7 +71,8 @@ spends only 5-9% of its time in throttle windows.
 - Gates are decided on speed alone ("只要有速度提升就可以有").
 - Runs compare bf16 vs both only; HunyuanVideo-1.5 compares bf16 vs attn.
 - **2026-11-14: make `allow_vector_exp=False` Difflet's bf16 attention default ("好的").**
-  This is Task VEXP. It is not started (section 4).
+  This is Task VEXP. It is not started (section 4). *Later the same day the user moved it to
+  `main` (BR31): it is not done on this branch.*
 
 **Open, the user's call:**
 1. Adopt bf16 `attention_const_max` (30-38% faster kernel) for unbounded models? Recommendation:
@@ -70,7 +89,8 @@ spends only 5-9% of its time in throttle windows.
 
 ## 4. Paused work and how to resume, in order
 
-1. **Task VEXP: `allow_vector_exp=False` by default.**
+1. **Task VEXP: `allow_vector_exp=False` by default.** *Moved off this branch (BR31, banner
+   above): kept for the later work on `main`; do not do it here.*
    - Brief: `.superpowers/sdd/2026-11-13-mxfp8-attention/task-vexp-brief.md`. Nothing was changed:
      the implementer was stopped while reading.
    - Its call-site map is in `task-vexp-report.md`:
