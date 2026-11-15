@@ -210,3 +210,101 @@ def test_batch_transformer_replays_the_claims_with_each_seed(monkeypatch, tmp_pa
     hv15.HunyuanVideo15Orchestrator(args)._run_stage_internal("transformer", args)
     assert seeds == [5, 9]
     assert torch.load(tmp_path / "latents_req0001.pt").flatten()[0].item() == 9.0
+
+
+def test_vae_stage_dumps_the_uint8_frames_it_encodes(monkeypatch, tmp_path):
+    """With DIFFLET_DUMP_LATENTS_DIR set, the frames export_to_video receives, quantized as it does
+    ((x * 255).astype(uint8)), are written as frames.npy [F, H, W, 3], and the encoder gets the same
+    frames as without the dump; unset, nothing is written."""
+    import json
+
+    import diffusers.utils
+    import numpy as np
+
+    import difflet.backends.neuron.hunyuan_video15.vae as V
+    import difflet.backends.registry as registry
+
+    video = torch.rand(1, 3, 5, 16, 32, generator=torch.Generator().manual_seed(7)) * 2 - 1
+
+    class FakeVae:
+        def __init__(self, **kw):
+            self.phase_seconds = {}
+
+        def load(self, skip_warmup=False):
+            pass
+
+        def decode(self, latents):
+            return video
+
+    encoded = []
+    monkeypatch.setattr(registry, "get_backend", lambda name: SimpleNamespace(prepare_runtime=lambda p: None))
+    monkeypatch.setattr(hv15.HunyuanVideo15Orchestrator, "_root", lambda self, args: "/snap")
+    monkeypatch.setattr(V, "NeuronHunyuanVideo15VaeDecoderApplication", FakeVae)
+    monkeypatch.setattr(diffusers.utils, "export_to_video",  # export_to_video's own float -> uint8
+                        lambda frames, path, fps: encoded.append(np.stack([(f * 255).astype(np.uint8)
+                                                                           for f in frames])))
+    monkeypatch.delenv("RANK", raising=False)
+    work, dump = tmp_path / "work", tmp_path / "dump"
+    work.mkdir()
+    torch.save(torch.zeros(1, 4, 2, 1, 2), work / "latents.pt")
+    args = _args(work_dir=str(work), output=str(tmp_path / "o.mp4"), height=16, width=32, num_frames=5)
+    monkeypatch.delenv("DIFFLET_DUMP_LATENTS_DIR", raising=False)
+    hv15.HunyuanVideo15Orchestrator(args)._run_stage_internal("vae", args)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["work"]
+
+    monkeypatch.setenv("DIFFLET_DUMP_LATENTS_DIR", str(dump))
+    hv15.HunyuanVideo15Orchestrator(args)._run_stage_internal("vae", args)
+    frames = np.load(dump / "frames.npy")
+    assert frames.dtype == np.uint8 and frames.shape == (5, 16, 32, 3)
+    assert np.array_equal(frames, encoded[1]) and np.array_equal(encoded[0], encoded[1])
+    meta = json.loads((dump / "frames.json").read_text())
+    assert (meta["rule"], meta["layout"], meta["shape"]) == ("truncate", "FHWC", [5, 16, 32, 3])
+
+
+def test_transformer_stage_records_bench_timing(monkeypatch, tmp_path):
+    """With DIFFLET_BENCH_TIMING_DIR set: the load, request and denoise spans, one step event per
+    denoise callback (from 0), and the DiT's evidence with how its output is synchronised."""
+    import json
+
+    import difflet.backends.neuron.hunyuan_video15.pipeline as P
+    import difflet.backends.registry as registry
+    from difflet.utils import bench_timing as T
+
+    for name, value in (("_handle", None), ("_handle_pid", None), ("_failed", False),
+                        ("enable_compile_counters", lambda: None), ("compile_counters", lambda: None),
+                        ("device_memory", lambda: None)):  # no torch-neuronx probe in a unit test
+        monkeypatch.setattr(T, name, value)
+    monkeypatch.setenv(T.TIMING_ENV, str(tmp_path / "timing"))
+    monkeypatch.delenv("LOCAL_RANK", raising=False)
+    monkeypatch.setattr(registry, "get_backend", lambda name: SimpleNamespace(prepare_runtime=lambda p: None))
+    monkeypatch.setattr(hv15.HunyuanVideo15Orchestrator, "_root", lambda self, args: "/snap")
+
+    class FakePipeline:
+        def __init__(self, **kw):
+            self.dit = SimpleNamespace(phase_seconds={"load": 1.5}, compiled_blocks=["block0"],
+                                       unwarmed_shapes=[], exec_mode="compile")
+            self.guidance_scale = 6.0
+
+        def load(self, skip_warmup=False):
+            pass
+
+        def __call__(self, num_inference_steps, generator, callback, **embeds):
+            for i in range(num_inference_steps):
+                callback(i, None, None)
+            return torch.zeros(1, 4, 2, 2, 3)
+
+    monkeypatch.setattr(P, "TorchNeuronHunyuanVideo15Pipeline", FakePipeline)
+    torch.save({"prompt_embeds": torch.zeros(1)}, tmp_path / "embeds.pt")
+    args = _args(work_dir=str(tmp_path), tp_degree=2, cfg_parallel=True, height=480, width=848,
+                 num_frames=121, steps=3, seed=3)
+    hv15.HunyuanVideo15Orchestrator(args)._run_stage_internal("transformer", args)
+    events = [json.loads(line) for path in sorted((tmp_path / "timing").glob("*.jsonl"))
+              for line in path.read_text().splitlines()]
+    spans = [(e["name"], e["phase"], e.get("request")) for e in events if e["event"] == "span"]
+    assert spans == [("load", "begin", None), ("load", "end", None), ("request", "begin", 0),
+                     ("denoise", "begin", 0), ("denoise", "end", 0), ("request", "end", 0)]
+    assert {e["stage"] for e in events if e["event"] == "span"} == {"transformer"}
+    assert [e["index"] for e in events if e["event"] == "step"] == [0, 1, 2]
+    (evidence,) = [e for e in events if e["event"] == "evidence"]
+    assert evidence["compiled_blocks"] == ["block0"] and evidence["phase_seconds"] == {"load": 1.5}
+    assert evidence["sync"].startswith("implicit")

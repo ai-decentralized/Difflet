@@ -486,6 +486,44 @@ def test_neuron_dit_adapter_sends_masks_as_int32_and_returns_host_tensors():
     assert video.shape == (1, 2) and audio.shape == (1, 3) and len(dit.seconds) == 1
 
 
+def test_save_av_dumps_the_uint8_frames_export_to_video_encodes(monkeypatch, tmp_path):
+    import json
+
+    import numpy as np
+    import torch
+
+    encoded = {}
+
+    def fake_export(frames, path, fps):
+        # export_to_video's own conversion of ndarray frames before its writer sees them.
+        encoded["frames"] = np.stack([(frame * 255).astype(np.uint8) for frame in frames])
+
+    monkeypatch.setattr("diffusers.utils.export_to_video", fake_export)
+    monkeypatch.setattr(h3_mod.subprocess, "run", lambda *a, **k: None)  # no ffmpeg mux
+    dump = tmp_path / "dump"
+    monkeypatch.setenv("DIFFLET_DUMP_LATENTS_DIR", str(dump))
+    monkeypatch.delenv("RANK", raising=False)
+    # (1, C, F, H, W), partly outside [0, 1] (the writer clamps) and off the 1/255 grid.
+    video = torch.rand(1, 3, 2, 4, 5, generator=torch.Generator().manual_seed(0)) * 1.2 - 0.1
+    assert h3_mod._save_av(video, torch.zeros(1, 2, 160), str(tmp_path / "out.mp4")) is True
+    frames = np.load(dump / "frames.npy")
+    assert frames.shape == (2, 4, 5, 3) and frames.dtype == np.uint8
+    assert np.array_equal(frames, encoded["frames"])
+    assert json.loads((dump / "frames.json").read_text())["rule"] == "truncate"
+
+
+def test_save_av_writes_no_frames_without_the_dump_dir(monkeypatch, tmp_path):
+    import torch
+
+    monkeypatch.setattr("diffusers.utils.export_to_video", lambda *a, **k: None)
+    monkeypatch.setattr(h3_mod.subprocess, "run", lambda *a, **k: None)
+    monkeypatch.delenv("DIFFLET_DUMP_LATENTS_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)
+    assert h3_mod._save_av(torch.rand(1, 3, 2, 4, 5), torch.zeros(1, 2, 160),
+                           str(tmp_path / "out.mp4")) is True
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_fl2va_resolves_the_canvas_runs_the_host_text_stage_and_forwards_the_keyframes(
     monkeypatch, tmp_path
 ):

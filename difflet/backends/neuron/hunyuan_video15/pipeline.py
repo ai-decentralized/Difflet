@@ -32,6 +32,7 @@ import numpy as np
 import torch
 
 from difflet.backends.neuron.core.weights_bf16 import resolve_component_dir
+from difflet.utils.latent_dump import dump_latents
 
 from difflet.backends.neuron.hunyuan_video15.transformer import (
     VAE_SPATIAL,
@@ -138,6 +139,7 @@ class TorchNeuronHunyuanVideo15Pipeline:
                  self.height // VAE_SPATIAL, self.width // VAE_SPATIAL)
         latents = (randn_tensor(shape, generator=generator, device=torch.device("cpu"), dtype=dt)
                    if latents is None else latents.to("cpu", dt))
+        dump_latents("initial", latents)
         cond = torch.zeros(shape, dtype=dt)
         mask = torch.zeros(shape[:1] + (1,) + shape[2:], dtype=dt)
         image_embeds = torch.zeros(1, self.dit.image_tokens, int(self.dit.model_config["image_embed_dim"]), dtype=dt)
@@ -181,6 +183,7 @@ class TorchNeuronHunyuanVideo15Pipeline:
                 callback(i, t, latents)
         if ctrl is not None:
             print(f"[teacache] stats: {ctrl.stats()}", flush=True)
+        dump_latents("final", latents)
         return latents
 
 

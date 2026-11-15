@@ -135,6 +135,27 @@ def test_call_default_timesteps_and_scalar_timestep(tmp_path):
     assert len(transformer.calls) == 1
 
 
+def test_denoise_dumps_initial_and_final_latents_of_both_streams(tmp_path, monkeypatch):
+    """With DIFFLET_DUMP_LATENTS_DIR set, _denoise writes the video and audio latents it starts
+    from and ends with (difflet bench quality); unset, nothing is written."""
+    monkeypatch.delenv("RANK", raising=False)
+    dump = tmp_path / "dump"
+    pipe = _orch(tmp_path, transformer=FakeDualStreamTransformer())
+    video, audio = torch.randn(1, 6, 128), torch.randn(1, 4, 128)
+    monkeypatch.delenv("DIFFLET_DUMP_LATENTS_DIR", raising=False)
+    pipe(bundle=_bundle(video.clone(), audio.clone()), num_inference_steps=2)
+    assert not dump.exists()
+
+    monkeypatch.setenv("DIFFLET_DUMP_LATENTS_DIR", str(dump))
+    out = pipe(bundle=_bundle(video.clone(), audio.clone()), num_inference_steps=2)
+    assert sorted(p.name for p in dump.iterdir()) == [
+        "final_audio.pt", "final_video.pt", "initial_audio.pt", "initial_video.pt"]
+    assert torch.equal(torch.load(dump / "initial_video.pt"), video)
+    assert torch.equal(torch.load(dump / "initial_audio.pt"), audio)
+    assert torch.equal(torch.load(dump / "final_video.pt"), out.latents)
+    assert torch.equal(torch.load(dump / "final_audio.pt"), out.audio_latents)
+
+
 # --------------------------------------------------------------------------- #
 # prepare_conditioning error branches
 # --------------------------------------------------------------------------- #

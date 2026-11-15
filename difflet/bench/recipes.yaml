@@ -1,0 +1,139 @@
+# difflet bench recipes (design: docs/plans/2026-11-16-difflet-bench-design.md, section 5).
+#
+# Each recipe is a named set of `difflet generate` flags: an `args` key is the flag name without the
+# leading dashes, `true` is a bare switch, `false` leaves the switch out. The flags `difflet compile`
+# accepts are passed to compile as well. bench owns --output, --cache-dir, --work-dir,
+# --keep-work-dir, --requests, --requests-dir, --worker-index and --force; a recipe may not set them.
+#
+# Keys besides `args`: `extends` (inherit another recipe, then override), `env.force` (set in the
+# engine's environment whatever the caller has), `env.default` (set only when the caller has not),
+# `threads` (pin the host thread count; default: the size of --cpus), `description`.
+# Names starting with `_` are abstract and only exist to be extended.
+#
+# Settings: scripts/quant_bench/bench.sh (args_for) on feat/mxfp8-video-models, the neuron
+# configuration the MXFP8 campaign measured; revisions: benchmark/models.py::MATRIX. Revisions must
+# be quoted strings. Negative prompts are the model cards' text byte for byte.
+
+_neuron:
+  args:
+    backend: neuron
+    steps: 50
+    seed: 42
+    prompt: a cat walking through a garden
+
+flux:
+  extends: _neuron
+  args:
+    model-id: black-forest-labs/FLUX.1-dev
+    revision: "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21"
+    height: 1024
+    width: 1024
+    tp-degree: 4
+    prompt: a cat sitting on a bench
+
+flux_mxfp8:
+  extends: flux
+  args:
+    quant: mxfp8
+
+qwen_image:
+  extends: _neuron
+  args:
+    model-id: Qwen/Qwen-Image
+    revision: "75e0b4be04f60ec59a75f475837eced720f823b6"
+    height: 1024
+    width: 1024
+    tp-degree: 4
+    guidance-scale: 7.5
+    prompt: a cat sitting on a bench
+
+qwen_image_mxfp8:
+  extends: qwen_image
+  args:
+    quant: mxfp8
+
+ltx_2:
+  extends: _neuron
+  args:
+    model-id: Lightricks/LTX-2
+    revision: "47da56e2ad66ce4125a9922b4a8826bf407f9d0a"
+    height: 512
+    width: 768
+    num-frames: 121
+    tp-degree: 4
+
+wan21:
+  extends: _neuron
+  args:
+    model-id: Wan-AI/Wan2.1-T2V-14B-Diffusers
+    revision: "38ec498cb3208fb688890f8cc7e94ede2cbd7f68"
+    height: 480
+    width: 832
+    num-frames: 9
+    tp-degree: 4
+
+wan_2_1_neuron:
+  description: benchmark/models.py::MATRIX wan_2_1_neuron (what benchmark/neuron_cold_warm.py measures)
+  extends: wan21
+  args:
+    guidance-scale: 1.0
+    host-vae: true
+    exec-mode: compile
+    prompt: a cinematic shot of a red fox running through a snowy forest
+
+wan22:
+  extends: _neuron
+  args:
+    model-id: Wan-AI/Wan2.2-T2V-A14B-Diffusers
+    revision: "5be7df9619b54f4e2667b2755bc6a756675b5cd7"
+    dual-expert: true
+    height: 480
+    width: 832
+    num-frames: 9
+    tp-degree: 4
+
+hunyuan_video:
+  extends: _neuron
+  args:
+    model-id: hunyuanvideo-community/HunyuanVideo
+    revision: "e8c2aaa66fe3742a32c11a6766aecbf07c56e773"
+    height: 320
+    width: 512
+    num-frames: 61
+    tp-degree: 4
+    guidance-scale: 6.0
+    prompt: a cinematic shot of a red fox running through a snowy forest
+
+hunyuan_video_15:
+  description: the host-CPU bf16 encode depends on the thread count (48 and 96 give different clips)
+  extends: _neuron
+  threads: 48
+  args:
+    model-id: hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v
+    revision: "286be7ce72277246578a3e3cc2487e95ddae5bcf"
+    num-frames: 9
+
+# The publishers' settings (docs/plans/2026-11-08-mxfp8-official-settings-rerun.md, D2).
+
+wan21_official:
+  extends: wan21
+  args:
+    num-frames: 81
+    guidance-scale: 5.0
+    negative-prompt: "Bright tones, overexposed, static, blurred details, subtitles, style, works, paintings, images, static, overall gray, worst quality, low quality, JPEG compression residue, ugly, incomplete, extra fingers, poorly drawn hands, poorly drawn faces, deformed, disfigured, misshapen limbs, fused fingers, still picture, messy background, three legs, many people in the background, walking backwards"
+
+wan22_official:
+  extends: wan22
+  args:
+    num-frames: 81
+    steps: 40
+    guidance-scale: 4.0
+    guidance-scale-2: 3.0
+    negative-prompt: "色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走"
+
+hv15_official:
+  extends: hunyuan_video_15
+  args:
+    height: 480
+    width: 848
+    num-frames: 121

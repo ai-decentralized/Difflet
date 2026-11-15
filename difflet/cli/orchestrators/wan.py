@@ -136,6 +136,9 @@ def _save_video(tensor: "torch.Tensor", output_path: str, *, fps: int = 16) -> b
     # export_to_video multiplies ndarray frames by 255 itself; pass float [0, 1]
     # (uint8 input wraps to 256-v: color inversion).
     frames = frames[0].permute(1, 2, 3, 0).cpu().numpy().astype("float32")
+    from difflet.utils.latent_dump import dump_frames
+
+    dump_frames(frames, rule="truncate", layout="FHWC")  # as export_to_video quantizes
     try:
         export_to_video(list(frames), output_path, fps=fps)
     except Exception as exc:
@@ -172,23 +175,27 @@ def _decode_latents_host(latents_path: str, model_id: str, output_path: str,
     from diffusers import AutoencoderKLWan
 
     from difflet.pipeline.path_resolver import resolve_model_path
+    from difflet.utils import bench_timing
 
-    model_dir = resolve_model_path(model_id, revision=revision, local_files_only=True)
-    vae = AutoencoderKLWan.from_pretrained(
-        str(Path(model_dir) / "vae"), torch_dtype=torch.float32
-    ).eval()
-    z = torch.load(latents_path, map_location="cpu").to(torch.float32)
-    mean = torch.tensor(vae.config.latents_mean).view(1, vae.config.z_dim, 1, 1, 1)
-    std = 1.0 / torch.tensor(vae.config.latents_std).view(1, vae.config.z_dim, 1, 1, 1)
-    z = z / std + mean
-    with torch.no_grad():
-        frames = vae.decode(z, return_dict=False)[0]
-    out = Path(output_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    if out.suffix == ".mp4" and _save_video(frames.cpu(), str(out)):
-        return
-    torch.save(frames.cpu(), out.with_suffix(".pt"))
-    print(f"[wan] video tensor saved to {out.with_suffix('.pt')}", flush=True)
+    # Spans as the device vae stage's (run_vae_stage): load, then decode including the write.
+    with bench_timing.span("load", stage="host_vae"):
+        model_dir = resolve_model_path(model_id, revision=revision, local_files_only=True)
+        vae = AutoencoderKLWan.from_pretrained(
+            str(Path(model_dir) / "vae"), torch_dtype=torch.float32
+        ).eval()
+    with bench_timing.span("decode", stage="host_vae"):
+        z = torch.load(latents_path, map_location="cpu").to(torch.float32)
+        mean = torch.tensor(vae.config.latents_mean).view(1, vae.config.z_dim, 1, 1, 1)
+        std = 1.0 / torch.tensor(vae.config.latents_std).view(1, vae.config.z_dim, 1, 1, 1)
+        z = z / std + mean
+        with torch.no_grad():
+            frames = vae.decode(z, return_dict=False)[0]
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        if out.suffix == ".mp4" and _save_video(frames.cpu(), str(out)):
+            return
+        torch.save(frames.cpu(), out.with_suffix(".pt"))
+        print(f"[wan] video tensor saved to {out.with_suffix('.pt')}", flush=True)
 
 
 def _write_frames(frames, output: str) -> None:

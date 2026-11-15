@@ -31,6 +31,9 @@ if TYPE_CHECKING:
     DIFFLET_NEURON_HBM_GIB: str | None = None
     DIFFLET_NEURON_WEIGHT_STORE: str | None = None
     DIFFLET_NEURON_WEIGHT_STORE_ALL: str | None = None
+    DIFFLET_BENCH_ROOT: str = "~/.cache/difflet/bench"
+    DIFFLET_BENCH_TIMING_DIR: str | None = None
+    DIFFLET_DUMP_LATENTS_DIR: str | None = None
 
     # ----- Distributed framework (set by torchrun / launcher / tests) -----
     RANK: int = 0
@@ -127,6 +130,23 @@ environment_variables: dict[str, Callable[[], Any]] = {
     # Set this when the compiled artifacts live on a different mount.
     "DIFFLET_SHARED_WEIGHTS_DIR":
     lambda: os.environ.get("DIFFLET_SHARED_WEIGHTS_DIR"),
+
+    # ``difflet bench``'s working root on this host: per-run logs, outputs, dumps, temporary
+    # compile caches and frozen quality references. Host-specific, never recorded in a recipe.
+    "DIFFLET_BENCH_ROOT":
+    lambda: os.path.expanduser(
+        os.environ.get("DIFFLET_BENCH_ROOT", "~/.cache/difflet/bench")),
+
+    # Set by ``difflet bench`` for the processes it launches: every process appends structured
+    # timing events to ``<dir>/<role>-<pid>.jsonl`` (``difflet/utils/bench_timing.py``). Unset:
+    # no event is written and the engine runs its usual code path.
+    "DIFFLET_BENCH_TIMING_DIR":
+    lambda: os.environ.get("DIFFLET_BENCH_TIMING_DIR"),
+
+    # Opt-in dump of the initial and final denoise latents and the pre-encode frames, for
+    # offline quality comparison (``difflet/utils/latent_dump.py``). Rank 0 writes.
+    "DIFFLET_DUMP_LATENTS_DIR":
+    lambda: os.environ.get("DIFFLET_DUMP_LATENTS_DIR"),
 
     # ================== Distributed framework ==================
     # These are typically set by torchrun / launcher / test fixtures. Difflet

@@ -45,6 +45,7 @@ dependencies = [
     "python-multipart>=0.0.20",                   # Starlette request.form() — serving_video.py:133
     "boto3>=1.34",                                # S3 artifact store — artifact_store.py:156
     "python-dotenv>=1.0",                         # .env loading — serve.py:248
+    "PyYAML",                                     # difflet bench recipes and suites
 ]
 
 [project.optional-dependencies]
@@ -97,7 +98,7 @@ include = ["difflet*"]
 exclude = ["tests*", "examples*", "benchmark*", "scripts*", "docs*"]
 
 [tool.setuptools.package-data]
-difflet = ["py.typed"]
+difflet = ["py.typed", "bench/*.yaml", "bench/suites/*.yaml"]
 
 [tool.black]
 line-length = 100

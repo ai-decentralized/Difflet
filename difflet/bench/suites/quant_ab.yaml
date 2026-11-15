@@ -1,0 +1,15 @@
+# bf16 against MXFP8 on the neuron backend (what scripts/quant_bench measured, design §6).
+# On main only Qwen-Image and FLUX accept --quant mxfp8.
+description: bf16 against MXFP8
+metrics: [compile, e2e_cold, e2e_warm, dit_step, memory, quality]
+recipes: [qwen_image, flux]
+variants:
+  bf16: {}
+  mxfp8:
+    args:
+      quant: mxfp8
+compare:
+  control: bf16
+  candidate: mxfp8
+order: ABBA
+repeats: 2

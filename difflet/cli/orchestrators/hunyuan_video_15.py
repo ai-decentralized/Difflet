@@ -50,6 +50,7 @@ from difflet.cli.orchestrators.torchrun import (
     torchrun_backend,
     torchrun_unsupported_options,
 )
+from difflet.utils import bench_timing
 
 _HF_MODEL_ID = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
 _MODEL_TYPE = "hunyuan_video_15"
@@ -188,19 +189,25 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
         from difflet.cli.dp import stage_loop
 
         started = time.perf_counter()
-        pipe = HunyuanVideo15Pipeline.from_pretrained(self._root(args), transformer=None, torch_dtype=torch.bfloat16)
+        with bench_timing.span("load", stage="encode"):
+            pipe = HunyuanVideo15Pipeline.from_pretrained(self._root(args), transformer=None,
+                                                          torch_dtype=torch.bfloat16)
         print(f"[hv15] encode: load {time.perf_counter() - started:.1f} s", flush=True)
         names = ("prompt_embeds", "prompt_embeds_mask", "prompt_embeds_2", "prompt_embeds_mask_2")
         for req in stage_loop.claim_requests(args):
-            with stage_loop.request_scope(args, req, final=False):
+            bench_timing.new_request()
+            with stage_loop.request_scope(args, req, final=False), \
+                    bench_timing.span("request", stage="encode", request=req.index):
                 started = time.perf_counter()
-                with torch.no_grad():
+                with torch.no_grad(), bench_timing.span("encode", stage="encode", request=req.index):
                     pos = pipe.encode_prompt(prompt=req.prompt, device="cpu", dtype=torch.bfloat16)
                     neg = pipe.encode_prompt(prompt=req.negative_prompt or "", device="cpu", dtype=torch.bfloat16)
                 embeds = dict(zip(names, pos)) | {f"negative_{n}": t for n, t in zip(names, neg)}
                 torch.save(embeds, stage_loop.work_file(args, req, "embeds.pt"))
                 print(f"[hv15] encode request {req.index}: {time.perf_counter() - started:.1f} s "
                       f"(prompt + negative)", flush=True)
+        # event(), not evidence(): its device-memory probe would open a NeuronCore in this host stage.
+        bench_timing.event("evidence", stage="encode", sync="none: diffusers' text encoders on the host CPU")
 
     def _stage_transformer(self, args: argparse.Namespace) -> None:
         """TP x CFG x CP ranks: the denoising loop; rank 0 saves the latents."""
@@ -216,29 +223,45 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
                                          cfg_parallel_enabled=bool(getattr(args, "cfg_parallel", False)),
                                          sp_enabled=bool(getattr(args, "sp_enabled", False)),
                                          cp_mode=(getattr(args, "cp_mode", None) or "ulysses") if cp > 1 else "gather_kv")
-        get_backend("neuron").prepare_runtime(parallel)
-        rank0 = not dist.is_initialized() or dist.get_rank() == 0
-        started = time.perf_counter()
-        pipe = TorchNeuronHunyuanVideo15Pipeline(
-            model_path=self._root(args), parallel=parallel, height=int(args.height), width=int(args.width),
-            num_frames=int(args.num_frames), exec_mode=getattr(args, "exec_mode", None),
-            guidance_scale=getattr(args, "guidance_scale", None),
-            teacache_cadence=getattr(args, "teacache_cadence", None),
-            teacache_online_delta_alpha=getattr(args, "teacache_online_delta", None),
-            teacache_speedup=getattr(args, "teacache_speedup", None),
-            teacache_calibration_path=getattr(args, "teacache_calibration", None))
-        pipe.load(skip_warmup=args.stage_mode != "compile")
+        bench_timing.enable_compile_counters()  # before prepare_runtime, so every compile counts
+        with bench_timing.span("load", stage="transformer"):
+            get_backend("neuron").prepare_runtime(parallel)
+            rank0 = not dist.is_initialized() or dist.get_rank() == 0
+            started = time.perf_counter()
+            pipe = TorchNeuronHunyuanVideo15Pipeline(
+                model_path=self._root(args), parallel=parallel, height=int(args.height), width=int(args.width),
+                num_frames=int(args.num_frames), exec_mode=getattr(args, "exec_mode", None),
+                guidance_scale=getattr(args, "guidance_scale", None),
+                teacache_cadence=getattr(args, "teacache_cadence", None),
+                teacache_online_delta_alpha=getattr(args, "teacache_online_delta", None),
+                teacache_speedup=getattr(args, "teacache_speedup", None),
+                teacache_calibration_path=getattr(args, "teacache_calibration", None))
+            pipe.load(skip_warmup=args.stage_mode != "compile")
         if rank0:
             print(f"[hv15] transformer load {time.perf_counter() - started:.1f} s "
                   f"{ {k: round(v, 1) for k, v in pipe.dit.phase_seconds.items()} }", flush=True)
+
+        def evidence() -> None:
+            dit = pipe.dit
+            bench_timing.evidence(
+                stage="transformer", backend="neuron", exec_mode=getattr(dit, "exec_mode", None),
+                compiled_blocks=list(getattr(dit, "compiled_blocks", [])),
+                unwarmed_shapes=list(getattr(dit, "unwarmed_shapes", [])),
+                phase_seconds=dict(getattr(dit, "phase_seconds", {})),
+                sync="implicit: each DiT output is copied to the host with .to('cpu') "
+                     "(TorchNeuronHunyuanVideo15Pipeline._dit); no explicit synchronize")
+
         if args.stage_mode == "compile":
+            evidence()
             return
         from difflet.cli.dp import stage_loop
         from difflet.cli.orchestrators.torchrun import replica_request_scope
 
         default_scale = pipe.guidance_scale
         for req in stage_loop.claimed_requests(args):
-            with replica_request_scope(args, req, final=False):
+            bench_timing.new_request()
+            with replica_request_scope(args, req, final=False), \
+                    bench_timing.span("request", stage="transformer", request=req.index):
                 scale = stage_loop.effective(req, args, "guidance_scale", default_scale)
                 if (scale is None) != (default_scale is None) or (scale is not None and float(scale) <= 1.0):
                     raise ValueError(f"request {req.index}: guidance_scale={scale} would switch classifier-"
@@ -246,9 +269,11 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
                 pipe.guidance_scale = None if scale is None else float(scale)
                 embeds = torch.load(stage_loop.work_file(args, req, "embeds.pt"), weights_only=True)
                 marks = [time.perf_counter()]
-                latents = pipe(**embeds, num_inference_steps=int(stage_loop.effective(req, args, "steps", 50)),
-                               generator=torch.Generator().manual_seed(int(stage_loop.effective(req, args, "seed", 42))),
-                               callback=lambda i, t, x: marks.append(time.perf_counter()))
+                step = bench_timing.step_hook(lambda: marks.append(time.perf_counter()))
+                with bench_timing.span("denoise", stage="transformer", request=req.index):
+                    latents = pipe(**embeds, num_inference_steps=int(stage_loop.effective(req, args, "steps", 50)),
+                                   generator=torch.Generator().manual_seed(int(stage_loop.effective(req, args, "seed", 42))),
+                                   callback=lambda i, t, x: step())
                 if rank0:
                     steps = [b - a for a, b in zip(marks, marks[1:])]
                     steps_sorted = sorted(steps)
@@ -256,6 +281,7 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
                           f"median {steps_sorted[len(steps) // 2] * 1e3:.0f} ms (first {steps[0] * 1e3:.0f} ms)",
                           flush=True)
                     torch.save(latents, stage_loop.work_file(args, req, "latents.pt"))
+        evidence()
 
     def _stage_vae(self, args: argparse.Namespace) -> None:
         """One core: tiled bf16 decode, diffusers' post-processing, MP4."""
@@ -269,35 +295,45 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
         from difflet.backends.registry import get_backend
         from difflet.pipeline.parallel_config import DiffletParallelConfig
 
-        get_backend("neuron").prepare_runtime(DiffletParallelConfig(tp_degree=1))
-        started = time.perf_counter()
-        app = NeuronHunyuanVideo15VaeDecoderApplication(
-            model_path=os.path.join(self._root(args), "vae"), height=int(args.height), width=int(args.width),
-            num_frames=int(args.num_frames))
-        app.load(skip_warmup=args.stage_mode != "compile")
+        bench_timing.enable_compile_counters()  # before prepare_runtime, so every compile counts
+        with bench_timing.span("load", stage="vae"):
+            get_backend("neuron").prepare_runtime(DiffletParallelConfig(tp_degree=1))
+            started = time.perf_counter()
+            app = NeuronHunyuanVideo15VaeDecoderApplication(
+                model_path=os.path.join(self._root(args), "vae"), height=int(args.height), width=int(args.width),
+                num_frames=int(args.num_frames))
+            app.load(skip_warmup=args.stage_mode != "compile")
         print(f"[hv15] vae load {time.perf_counter() - started:.1f} s "
               f"{ {k: round(v, 1) for k, v in app.phase_seconds.items()} }", flush=True)
+        sync = "implicit: the decoded video is copied to the host with .cpu()"
         if args.stage_mode == "compile":
+            bench_timing.evidence(stage="vae", phase_seconds=dict(app.phase_seconds), sync=sync)
             return
         from difflet.cli.dp import stage_loop
+        from difflet.utils.latent_dump import dump_frames
 
         processor_cls = inspect.getmodule(diffusers.HunyuanVideo15Pipeline).HunyuanVideo15ImageProcessor
         processor = processor_cls(vae_scale_factor=16)
         for req in stage_loop.claimed_requests(args):
-            with stage_loop.request_scope(args, req, final=True):
+            bench_timing.new_request()
+            with stage_loop.request_scope(args, req, final=True), \
+                    bench_timing.span("request", stage="vae", request=req.index):
                 latents = torch.load(stage_loop.work_file(args, req, "latents.pt"), weights_only=True)
                 started = time.perf_counter()
-                video = app.decode(latents).float().cpu()
+                with bench_timing.span("decode", stage="vae", request=req.index):
+                    video = app.decode(latents).float().cpu()
                 decoded = time.perf_counter()
                 out = Path(req.output or args.output or "hunyuan_video_15.mp4")
                 out.parent.mkdir(parents=True, exist_ok=True)
                 if out.suffix == ".pt":  # the decoded frames, free of video-encoding loss
                     torch.save(video, str(out))
                 else:
-                    frames = processor.postprocess_video(video, output_type="np")[0]
+                    frames = processor.postprocess_video(video, output_type="np")[0]  # [F, H, W, C] in [0, 1]
+                    dump_frames(frames, rule="truncate", layout="FHWC")  # export_to_video's (x * 255).astype(uint8)
                     export_to_video(list(frames), str(out), fps=_FPS)
                 print(f"[hv15] request {req.index}: decode {decoded - started:.1f} s; "
                       f"[difflet] video saved to {out}", flush=True)
+        bench_timing.evidence(stage="vae", phase_seconds=dict(app.phase_seconds), sync=sync)
 
     # ------------------------------------------------------------ Trainium (AoT) path
 

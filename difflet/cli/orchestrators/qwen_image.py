@@ -260,13 +260,15 @@ def _save_image_pil(image, path: Path) -> None:
 
 def _write_image(img, output: str, save=_save_image_torchvision) -> None:
     """Decoded images ``[B, 3, H, W]`` in [-1, 1]: the first written by ``save`` as an image
-    file at ``output``, or, when that fails, the tensor next to it with a .pt suffix."""
+    file at ``output``, or, when that fails, the tensor next to it with a .pt suffix. With
+    DIFFLET_DUMP_LATENTS_DIR set, the written image's uint8 pixels are dumped as well."""
     import torch
 
     out_path = Path(output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        save((img[0] * 0.5 + 0.5).clamp(0, 1), out_path)
+        image = (img[0] * 0.5 + 0.5).clamp(0, 1)
+        save(image, out_path)
         print(f"[vae] image saved to {out_path}")
     except Exception as exc:
         torch.save(img, out_path.with_suffix(".pt"))
@@ -274,6 +276,11 @@ def _write_image(img, output: str, save=_save_image_torchvision) -> None:
             f"[vae] tensor saved to {out_path.with_suffix('.pt')} "
             f"(png skipped: {exc})"
         )
+    else:
+        from difflet.utils.latent_dump import dump_frames
+
+        # Both savers (torchvision's save_image, _save_image_pil) quantize x * 255 + 0.5, truncated.
+        dump_frames(image, rule="round_half_up", layout="CHW")
 
 
 #: Where the neuron backend decodes when neither --host-vae nor --device-vae is given: the vae
@@ -572,17 +579,19 @@ class QwenImageOrchestrator(ModelOrchestrator):
         request whose decode fails is marked failed and the next one decodes, as the AoT vae
         stage's ``request_scope`` does."""
         from difflet.cli.dp import stage_loop
+        from difflet.utils import bench_timing
 
         args = argparse.Namespace(**{**vars(self.args), "work_dir": str(work_dir)})
         for req in stage_loop.claimed_requests(args):
             with stage_loop.request_scope(args, req, final=True):
-                _decode_latents_host(
-                    str(stage_loop.work_file(args, req, "latents.pt")),
-                    model_dir,
-                    req.output,
-                    height=self.args.height or 1024,
-                    width=self.args.width or 1024,
-                )
+                with bench_timing.span("decode", stage="host_vae", request=req.index):
+                    _decode_latents_host(
+                        str(stage_loop.work_file(args, req, "latents.pt")),
+                        model_dir,
+                        req.output,
+                        height=self.args.height or 1024,
+                        width=self.args.width or 1024,
+                    )
 
     def _run_stage_internal(self, stage: str, args: argparse.Namespace) -> None:
         if stage == "text":

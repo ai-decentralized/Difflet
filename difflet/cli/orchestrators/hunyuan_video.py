@@ -312,12 +312,15 @@ def _write_video(video, output: str) -> None:
 
     import torch
 
+    from difflet.utils.latent_dump import dump_frames
+
     out = Path(output)
     out.parent.mkdir(parents=True, exist_ok=True)
     if out.suffix == ".mp4":
         start = time.perf_counter()
         frames = _video_frames_uint8(video)
         converted = time.perf_counter()
+        dump_frames(frames, rule="truncate", layout="FHWC")  # outside the try: no .pt fallback
         try:
             _encode_mp4(frames, str(out), _FPS)
             print(f"[hunyuan_video] video saved to {out} ({len(frames)} frames; to uint8 "
@@ -474,15 +477,20 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
         plain launch, or, in a DP worker, each request this worker's replica claimed and did
         not fail, marked done after its video is written."""
         from difflet.cli.dp import stage_loop
+        from difflet.utils import bench_timing
 
         args = argparse.Namespace(**{**vars(self.args), "work_dir": str(work_dir)})
         height, width, num_frames = _shape(args)
         model_dir = self._model_dir()
         for req in stage_loop.claimed_requests(args):
             with stage_loop.request_scope(args, req, final=True):
-                _decode_latents_host(str(stage_loop.work_file(args, req, "latents.pt")),
-                                     model_dir, req.output, height=height, width=width,
-                                     num_frames=num_frames)
+                with bench_timing.span("decode", stage="host_vae", request=req.index):
+                    _decode_latents_host(str(stage_loop.work_file(args, req, "latents.pt")),
+                                         model_dir, req.output, height=height, width=width,
+                                         num_frames=num_frames)
+        # event(), not evidence(): its device-memory probe would open a NeuronCore in the driver.
+        bench_timing.event("evidence", stage="host_vae",
+                           sync="none: diffusers fp32 decode on the host CPU, no device work")
 
     def _run_stage_internal(self, stage: str, args: argparse.Namespace) -> None:
         backend = torchrun_backend()

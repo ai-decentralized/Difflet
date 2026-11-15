@@ -276,6 +276,36 @@ def test_orchestrator_decodes_pt_output_with_vae_latent_stats(tmp_path):
     assert torch.allclose(vae.inputs[0], torch.full_like(latents, 2.5))
 
 
+def test_dumps_initial_and_final_latents_around_the_denoise_loop(monkeypatch, tmp_path):
+    dump = tmp_path / "dump"
+    monkeypatch.setenv("DIFFLET_DUMP_LATENTS_DIR", str(dump))
+    monkeypatch.delenv("RANK", raising=False)
+    pipeline = WanOrchestrator(model_path=str(tmp_path), transformer=FakeTransformer(bias=0.25),
+                               dtype=torch.float32)
+    latents = torch.rand((1, 16, 3, 4, 4), dtype=torch.float32)
+    output = pipeline(prompt_embeds=torch.ones((1, 5, 8)), latents=latents.clone(), height=32,
+                      width=32, num_frames=9, num_inference_steps=2, output_type="latent")
+    assert sorted(p.name for p in dump.iterdir()) == ["final.pt", "initial.pt"]
+    assert torch.equal(torch.load(dump / "initial.pt"), latents)
+    final = torch.load(dump / "final.pt")
+    assert final.dtype == torch.float32 and torch.equal(final, output.latents)
+
+    # A decode-only call (the AoT vae stage) leaves the denoise stage's dumps alone.
+    WanOrchestrator(model_path=str(tmp_path), vae_decoder=FakeVAE(), dtype=torch.float32)(
+        latents=torch.zeros_like(latents), height=32, width=32, num_frames=9, output_type="pt")
+    assert torch.equal(torch.load(dump / "initial.pt"), latents)
+
+
+def test_writes_no_latents_without_the_dump_dir(monkeypatch, tmp_path):
+    monkeypatch.delenv("DIFFLET_DUMP_LATENTS_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)
+    pipeline = WanOrchestrator(model_path=str(tmp_path), transformer=FakeTransformer(bias=0.25),
+                               dtype=torch.float32)
+    pipeline(prompt_embeds=torch.ones((1, 5, 8)), latents=torch.zeros((1, 16, 3, 4, 4)),
+             height=32, width=32, num_frames=9, num_inference_steps=2, output_type="latent")
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_prompt_string_without_text_encoder_raises(tmp_path):
     pipeline = WanOrchestrator(model_path=str(tmp_path), dtype=torch.float32)
 

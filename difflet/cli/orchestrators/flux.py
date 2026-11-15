@@ -47,6 +47,26 @@ def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
     return found
 
 
+def _bench_evidence(stage: str, apps: dict[str, Any], phase_seconds: dict | None = None,
+                    **fields: Any) -> None:
+    """With ``difflet bench`` timing on, a neuron stage's evidence event: what its applications
+    (``apps``, by name; None skipped) compiled (``<name>.<block>``), the shapes their warm-up did
+    not compile, and their load phases (``<name> <phase>``) after ``phase_seconds``."""
+    from difflet.utils import bench_timing
+
+    if not bench_timing.enabled():
+        return
+    apps = {name: a for name, a in apps.items() if a is not None}
+    phases = dict(phase_seconds or {})
+    blocks, unwarmed = [], []
+    for name, a in apps.items():
+        phases.update({f"{name} {k}": v for k, v in (getattr(a, "phase_seconds", None) or {}).items()})
+        blocks += [f"{name}.{b}" for b in getattr(a, "compiled_blocks", [])]
+        unwarmed += list(getattr(a, "unwarmed_shapes", []))
+    bench_timing.evidence(stage=stage, backend="neuron", phase_seconds=phases,
+                          compiled_blocks=blocks, unwarmed_shapes=unwarmed, **fields)
+
+
 class FluxOrchestrator(ModelOrchestrator):
 
     def download(self) -> None:
@@ -213,6 +233,7 @@ class FluxOrchestrator(ModelOrchestrator):
         from difflet.cli.dp import stage_loop
         from difflet.pipeline.difflet_pipeline import DiffletPipeline
         from difflet.pipeline.parallel_config import DiffletParallelConfig
+        from difflet.utils import bench_timing, latent_dump
 
         import statistics
         import time
@@ -244,24 +265,26 @@ class FluxOrchestrator(ModelOrchestrator):
         import torch_neuronx  # noqa: F401  (registers the device; does not start the runtime)
 
         startup["import torch_neuronx"] = round(time.perf_counter() - mark, 2)
-        mark = time.perf_counter()
-        from difflet.backends.registry import get_backend
+        bench_timing.enable_compile_counters()  # before prepare_runtime, so every compile counts
+        with bench_timing.span("load", stage="flux"):
+            mark = time.perf_counter()
+            from difflet.backends.registry import get_backend
 
-        get_backend("neuron").prepare_runtime(parallel)  # binds the core; rendezvous of all ranks
-        startup["prepare_runtime"] = round(time.perf_counter() - mark, 2)
-        mark = time.perf_counter()
-        import diffusers  # noqa: F401
-        import transformers  # noqa: F401
+            get_backend("neuron").prepare_runtime(parallel)  # binds the core; rendezvous of all ranks
+            startup["prepare_runtime"] = round(time.perf_counter() - mark, 2)
+            mark = time.perf_counter()
+            import diffusers  # noqa: F401
+            import transformers  # noqa: F401
 
-        import difflet.models.flux.neuron_application  # noqa: F401
-        startup["imports"] = round(time.perf_counter() - mark, 2)
-        started = time.perf_counter()
-        pipe = DiffletPipeline.from_pretrained(
-            _HF_MODEL_ID, model_type=_MODEL_TYPE,
-            parallel=parallel,
-            dtype=torch.bfloat16, height=h, width=w, revision=getattr(args, "revision", None),
-            compile_cache_dir=getattr(args, "cache_dir", None), local_files_only=True,
-            application_kwargs=app_kwargs)
+            import difflet.models.flux.neuron_application  # noqa: F401
+            startup["imports"] = round(time.perf_counter() - mark, 2)
+            started = time.perf_counter()
+            pipe = DiffletPipeline.from_pretrained(
+                _HF_MODEL_ID, model_type=_MODEL_TYPE,
+                parallel=parallel,
+                dtype=torch.bfloat16, height=h, width=w, revision=getattr(args, "revision", None),
+                compile_cache_dir=getattr(args, "cache_dir", None), local_files_only=True,
+                application_kwargs=app_kwargs)
         rank = dist.get_rank() if dist.is_available() and dist.is_initialized() else 0
         app = pipe.app
         if rank == 0:
@@ -275,27 +298,52 @@ class FluxOrchestrator(ModelOrchestrator):
                 if phases:
                     print(f"[flux]   {name} phases { {k: round(v, 2) for k, v in phases.items()} }",
                           flush=True)
+        evidence = dict(apps={n: getattr(app, n, None) for n in ("dit", "t5", "vae")},
+                        phase_seconds=getattr(app, "phase_seconds", None),
+                        exec_mode=getattr(app.dit, "exec_mode", None),
+                        sync="implicit: the DiT adapter (_Transformer) copies each output to the "
+                             "host with .to('cpu'); the scheduler steps on the host",
+                        forward_seconds="per-forward times unavailable: the FLUX DiT adapter "
+                                        "has no forward hook")
         if args.stage_mode == "compile":
             if rank == 0:
                 print("[flux] neuron: every component loaded and warmed up", flush=True)
+            _bench_evidence("flux", **evidence)
             return
+        dumping = bool(os.environ.get(latent_dump.DUMP_LATENTS_ENV))
+        if dumping:  # "initial": prepare_latents' packed noise [B, (H/16)*(W/16), 64]
+            flux_pipe = app.pipeline
+            prepare = flux_pipe.prepare_latents
+
+            def prepare_and_dump(*a, **k):
+                prepared = prepare(*a, **k)
+                latent_dump.dump_latents("initial", prepared[0])
+                return prepared
+
+            flux_pipe.prepare_latents = prepare_and_dump
+        step = bench_timing.step_hook()
         for req in replica_requests(args, device=pipe.app.dit.device):
             with replica_request_scope(args, req, final=in_process):
                 marks: list[float] = []
+                bench_timing.new_request()
 
                 def on_step_end(_pipe, _i, _t, callback_kwargs):
                     marks.append(time.perf_counter())
+                    step()
+                    if dumping and _i == _pipe.num_timesteps - 1:  # packed, what the decode gets
+                        latent_dump.dump_latents("final", callback_kwargs["latents"])
                     return callback_kwargs
 
                 called = time.perf_counter()
-                output = pipe(
-                    prompt=req.prompt, height=h, width=w,
-                    num_inference_steps=int(stage_loop.effective(req, args, "steps", 28)),
-                    guidance_scale=float(stage_loop.effective(req, args, "guidance_scale", 3.5)),
-                    generator=torch.Generator().manual_seed(req.seed),
-                    callback_on_step_end=on_step_end,
-                    output_type="pil" if in_process else "latent",
-                )
+                with bench_timing.span("request", stage="flux", request=req.index):
+                    output = pipe(
+                        prompt=req.prompt, height=h, width=w,
+                        num_inference_steps=int(stage_loop.effective(req, args, "steps", 28)),
+                        guidance_scale=float(stage_loop.effective(req, args, "guidance_scale", 3.5)),
+                        generator=torch.Generator().manual_seed(req.seed),
+                        callback_on_step_end=on_step_end,
+                        output_type="pil" if in_process else "latent",
+                    )
                 done = time.perf_counter()
                 if rank == 0 and len(marks) > 1:
                     deltas = sorted(b - a for a, b in zip(marks, marks[1:]))
@@ -307,12 +355,15 @@ class FluxOrchestrator(ModelOrchestrator):
                 if rank == 0 and in_process:
                     out = Path(req.output)
                     out.parent.mkdir(parents=True, exist_ok=True)
+                    # The PIL uint8 diffusers' numpy_to_pil rounded; read with np.asarray if dumping
+                    latent_dump.dump_frames(output.images[0], rule="round", layout="HWC")
                     output.images[0].save(str(out))
                     print(f"[difflet] image saved to {out}", flush=True)
                 elif rank == 0:
                     path = stage_loop.work_file(args, req, "latents.pt")
                     torch.save(output.images.cpu(), path)
                     print(f"[flux] latents saved to {path}", flush=True)
+        _bench_evidence("flux", **evidence)
 
     def _stage_vae_neuron(self, args: argparse.Namespace) -> None:
         """The vae stage, one process on one core, after the transformer stage has exited: each
@@ -331,28 +382,33 @@ class FluxOrchestrator(ModelOrchestrator):
         from difflet.cli.dp import stage_loop
         from difflet.pipeline.parallel_config import DiffletParallelConfig
         from difflet.pipeline.path_resolver import resolve_model_path
+        from difflet.utils import bench_timing, latent_dump
 
         h, w = int(args.height or 1024), int(args.width or 1024)
         parallel = DiffletParallelConfig(tp_degree=1)
-        get_backend("neuron").prepare_runtime(parallel)
-        root = resolve_model_path(_HF_MODEL_ID, revision=getattr(args, "revision", None),
-                                  local_files_only=True)
-        started = time.perf_counter()
-        from difflet.models.flux.neuron_application import _KWARG_DEFAULTS
+        bench_timing.enable_compile_counters()  # before prepare_runtime, so every compile counts
+        with bench_timing.span("load", stage="vae"):
+            get_backend("neuron").prepare_runtime(parallel)
+            root = resolve_model_path(_HF_MODEL_ID, revision=getattr(args, "revision", None),
+                                      local_files_only=True)
+            started = time.perf_counter()
+            from difflet.models.flux.neuron_application import _KWARG_DEFAULTS
 
-        app = NeuronFluxVaeDecoderApplication(model_path=os.path.join(root, "vae"), height=h, width=w,
-                                              parallel=parallel, dtype=_KWARG_DEFAULTS["vae_dtype"],
-                                              device="neuron")
-        app.load(skip_warmup=args.stage_mode != "compile")
+            app = NeuronFluxVaeDecoderApplication(model_path=os.path.join(root, "vae"), height=h,
+                                                  width=w, parallel=parallel,
+                                                  dtype=_KWARG_DEFAULTS["vae_dtype"], device="neuron")
+            app.load(skip_warmup=args.stage_mode != "compile")
         print(f"[flux] vae load {time.perf_counter() - started:.1f} s "
               f"{ {k: round(v, 2) for k, v in app.phase_seconds.items()} }", flush=True)
         if args.stage_mode == "compile":
+            _bench_evidence("vae", {"vae": app}, exec_mode=getattr(app, "exec_mode", None))
             return
         cfg = app.vae_config
         scaling, shift = cfg.get("scaling_factor", 0.3611), cfg.get("shift_factor", 0.1159)
         processor = VaeImageProcessor(vae_scale_factor=app.scale_factor * 2)
         for req in stage_loop.claimed_requests(args):
-            with stage_loop.request_scope(args, req, final=True):
+            with stage_loop.request_scope(args, req, final=True), \
+                    bench_timing.span("decode", stage="vae", request=req.index):
                 started = time.perf_counter()
                 packed = torch.load(stage_loop.work_file(args, req, "latents.pt"), weights_only=True)
                 latents = FluxPipeline._unpack_latents(packed, h, w, app.scale_factor)
@@ -360,9 +416,12 @@ class FluxOrchestrator(ModelOrchestrator):
                 image = processor.postprocess(app.decode(latents).cpu(), output_type="pil")[0]
                 out = Path(req.output)
                 out.parent.mkdir(parents=True, exist_ok=True)
+                # The PIL uint8 diffusers' numpy_to_pil rounded; read with np.asarray if dumping
+                latent_dump.dump_frames(image, rule="round", layout="HWC")
                 image.save(str(out))
                 print(f"[flux] decode {time.perf_counter() - started:.2f} s; [difflet] image saved "
                       f"to {out}", flush=True)
+        _bench_evidence("vae", {"vae": app}, exec_mode=getattr(app, "exec_mode", None))
 
     def _load_pipeline(self):
         from difflet.pipeline.compile_cache import CacheSpec, cache_path, has_valid_manifest

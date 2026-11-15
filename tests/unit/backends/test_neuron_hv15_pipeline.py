@@ -96,6 +96,32 @@ def test_loop_matches_diffusers_with_cfg(snapshot):
     torch.testing.assert_close(ours, diffusers_latents(snapshot), atol=1e-4, rtol=1e-4)
 
 
+def test_latent_dumps_are_the_loops_start_and_result(snapshot, monkeypatch, tmp_path):
+    """DIFFLET_DUMP_LATENTS_DIR set: ``initial`` is the seeded noise the loop starts from and
+    ``final`` the latents it returns, which the dump leaves unchanged; unset, nothing is written."""
+    from diffusers.utils.torch_utils import randn_tensor
+
+    pipe = TorchNeuronHunyuanVideo15Pipeline(model_path=snapshot, dtype=torch.float32, exec_mode="eager",
+                                             device="cpu", text_seq_len=T1, text_2_seq_len=T2, **SHAPE)
+    pipe.load()
+    monkeypatch.delenv("RANK", raising=False)
+    monkeypatch.delenv("DIFFLET_DUMP_LATENTS_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)
+    off = pipe(**embeds(), num_inference_steps=STEPS, generator=torch.Generator().manual_seed(0))
+    assert list(tmp_path.iterdir()) == []
+
+    dump = tmp_path / "dump"
+    monkeypatch.setenv("DIFFLET_DUMP_LATENTS_DIR", str(dump))
+    out = pipe(**embeds(), num_inference_steps=STEPS, generator=torch.Generator().manual_seed(0))
+    assert sorted(p.name for p in dump.iterdir()) == ["final.pt", "initial.pt"]
+    assert torch.equal(out, off)
+    final, initial = torch.load(dump / "final.pt"), torch.load(dump / "initial.pt")
+    assert final.dtype == torch.float32 and torch.equal(final, out)
+    assert torch.equal(initial, randn_tensor(tuple(initial.shape), generator=torch.Generator().manual_seed(0),
+                                             device=torch.device("cpu"), dtype=torch.float32))
+    assert initial.shape == out.shape == (1, 4, 2, 2, 3)
+
+
 def test_cfg_parallel_loop_matches_diffusers(snapshot):
     from tests.unit.backends._neuron_gloo import run_ranks
     from tests.unit.backends._neuron_workers import hv15_pipeline_cfg_worker
