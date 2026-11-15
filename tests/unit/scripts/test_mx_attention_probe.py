@@ -50,19 +50,25 @@ def test_the_cli_rejects_what_it_cannot_run(bad, tmp_path, capsys):
             or "needs --impl fork" in err or "unbounded attention only" in err)
 
 
-@pytest.mark.parametrize("core, rc", [("13", 1), ("4", 0), ("31", 2), ("4,5", None), ("", None)])
-def test_require_idle_core_checks_the_one_cores_device(core, rc, monkeypatch):
-    """Device = core // 4 (four logical cores per device at LNC=2); fuser exit 1 (no process)
-    is idle, 0 (held) and anything else stop the probe, as does not naming exactly one core."""
+MISSING = b"Specified filename /dev/neuron24 does not exist."
+
+
+@pytest.mark.parametrize("core, rc, said", [("13", 1, b""), ("4", 0, b" 4242"), ("31", 2, b""),
+                                            ("99", 1, MISSING), ("4,5", None, b""),
+                                            ("", None, b"")])
+def test_require_idle_core_checks_the_one_cores_device(core, rc, said, monkeypatch):
+    """Device = core // 4 (four logical cores per device at LNC=2); fuser exit 1 with no output
+    (no process) is idle; 0 (held), anything else and exit 1 with fuser's message for a device
+    that does not exist stop the probe, as does not naming exactly one core."""
     seen = []
 
     def fake_run(cmd, **kw):
         seen.append(cmd)
-        return SimpleNamespace(returncode=rc)
+        return SimpleNamespace(returncode=rc, stdout=b"" if rc else said, stderr=said if rc else b"")
 
     monkeypatch.setattr(probe.subprocess, "run", fake_run)
     monkeypatch.setenv("NEURON_RT_VISIBLE_CORES", core)
-    if rc == 1:
+    if rc == 1 and not said:
         got = probe.require_idle_core()
         assert seen == [["fuser", "/dev/neuron3"]]
         assert got["device"] == 3 and got["core"] == 13 and got["idle"] is True

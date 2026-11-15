@@ -45,12 +45,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))  # the checkout, for difflet
 
+# sim and birsim run on the CPU: an autoloaded torch-neuronx would hold /dev/neuron0 (device 0
+# reads busy to every fuser on the host); device mode needs it
+_ARGV = " ".join(sys.argv)
+if "--mode device" not in _ARGV and "--mode=device" not in _ARGV:
+    os.environ.setdefault("TORCH_DEVICE_BACKEND_AUTOLOAD", "0")
 import numpy as np  # noqa: E402
 import torch  # noqa: E402
 

@@ -12,11 +12,14 @@
 #          asks for the plan's one linear-alone run, then gen2 of <arm>
 # Into $ROOT/<key>/<arm>/: <step>.log (bench.sh's timed: stamped lines, /usr/bin/time -v, "exit
 # <rc>"), the outputs (warm, timed_1, timed_2, gen2 .<ext>), work_<step>/ kept (latents), md5.txt;
-# $ROOT/<key>/runs.log: each step's start and end with uptime and every device's fuser. Before
-# each step `fuser /dev/neuron<device>` must find no process (BR4), else nothing runs (exit 3).
+# $ROOT/<key>/runs.log: each step's start (with the checkout, its HEAD and "dirty") and end with
+# uptime and every device's fuser. Before each step `fuser /dev/neuron<device>` must find the
+# device and no process on it (BR4), else nothing runs (exit 3); a step first removes its own
+# earlier outputs.
 # env: ROOT (/mnt/nvme/difflet-mxattn/task6), PY. --cache-dir: the NVMe mirror $ROOT/cache/<fp8|
 #      video> of Plan A's per-key root cache (ruling R7; NEFF/HLO copied, quantized dirs, bf16
-#      copies and weight stores symlinked, read by hits); hubs as run_all.sh's hub_of.
+#      copies and weight stores symlinked, read by hits); hubs: hub() below (run_all.sh's
+#      hub_of, plus `qwen_image both`, which run_all.sh has no lane for).
 set -u
 MINE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 . "$MINE/../quant_bench/bench.sh"  # args_for, arm_flags, timed, request_line; its env hygiene
@@ -28,6 +31,9 @@ if [ -z "$CPUS" ]; then
   echo "usage: run_arms.sh <warm|timed|gen2|lane> <key> <arm> <device> <cpus>" >&2
   exit 2
 fi
+case $STEP in warm|timed|gen2|lane) ;; *) echo "run_arms.sh: unknown step $STEP" >&2; exit 2 ;; esac
+case $DEV in ''|*[!0-9]*) echo "run_arms.sh: device must be a number, got $DEV" >&2; exit 2 ;; esac
+DEV=$((10#$DEV))  # 08 is device 8, not an octal error
 QT=; args_for "$KEY"; arm_flags "$ARM"
 L=$ROOT/$KEY
 W=$L/$ARM
@@ -75,18 +81,23 @@ case $STEP in
          for i in 1 2; do request_line "$W/timed_$i.$EXT" >> "$W/requests.jsonl"; done
          GEN+=("${P[@]}" --requests "$W/requests.jsonl") ;;
   gen2) GEN+=("${P[@]}" --prompt "$PROMPT" --output "$W/gen2.$EXT") ;;
-  *) echo "run_arms.sh: unknown step $STEP" >&2; exit 2 ;;
 esac
 GEN+=(--work-dir "$W/work_$STEP" --keep-work-dir)
 
-fuser "/dev/neuron$DEV" > /dev/null 2>&1
+held=$(fuser "/dev/neuron$DEV" 2>&1)
 rc=$?
-if [ $rc -ne 1 ]; then log "$KEY $ARM $STEP: /dev/neuron$DEV fuser exit $rc: BUSY, not run"; exit 3; fi
+# idle: exit 1 and no output; fuser also exits 1 for a device that does not exist, with a message
+if [ $rc -ne 1 ] || [ -n "$held" ]; then
+  log "$KEY $ARM $STEP: /dev/neuron$DEV fuser exit $rc${held:+ ($held)}: BUSY or missing, not run"
+  exit 3
+fi
+dirty=$(git -C "$REPO" status --porcelain 2>/dev/null)
 log "$KEY $ARM $STEP start: device $DEV cores $NEURON_RT_VISIBLE_CORES cpus $CPUS" \
+  "tree $REPO $(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo no-git)${dirty:+ dirty}" \
   "($(taskset -c "$CPUS" nproc) threads) hub $HF_HUB_CACHE cache $CACHE;" \
   "df: $(df --output=avail -BG / /mnt/nvme | tail -2 | tr -s ' \n' ' ');" \
   "uptime:$(uptime | sed 's/.*load/ load/'); fuser:$(fusers)"
-rm -rf "$W/work_$STEP"
+rm -rf "$W/work_$STEP" "$W/$STEP"*."$EXT"  # no earlier output of this step passes for this run's
 timed "$W/$STEP.log" "${GEN[@]}"
 rc=$?
 log "$KEY $ARM $STEP end: exit $rc; uptime:$(uptime | sed 's/.*load/ load/'); fuser:$(fusers)"

@@ -21,11 +21,13 @@ PINS = {"wan21_official": "38ec498cb3208fb688890f8cc7e94ede2cbd7f68",
         "hv15_official": "286be7ce72277246578a3e3cc2487e95ddae5bcf"}
 #: Shell variables that would make an arm's compile, threads or quantized set something other
 #: than the bench's: cache locations that win over --cache-dir, thread counts that change
-#: HunyuanVideo-1.5's host-CPU encode, and a leaked override.
+#: HunyuanVideo-1.5's host-CPU encode, and leaked overrides: the MXFP8 targets, and the attention
+#: switch, which would turn the bf16 and mx arms into attention-quant runs (the CLI keeps an
+#: exported value when --attn-quant is absent; the attention arms pass the flag).
 LEAKS = ("DIFFLET_COMPILE_CACHE", "TORCH_NEURONX_NEFF_CACHE_DIR",
          "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR", "TORCH_NEURONX_HLO_CACHE_DIR",
          "TORCHINDUCTOR_CACHE_DIR", "DIFFLET_NEURON_WEIGHT_STORE", "DIFFLET_SHARED_WEIGHTS_DIR",
-         "OMP_NUM_THREADS", "MKL_NUM_THREADS", "DIFFLET_QUANT_TARGETS")
+         "OMP_NUM_THREADS", "MKL_NUM_THREADS", "DIFFLET_QUANT_TARGETS", "DIFFLET_ATTN_QUANT")
 
 #: The bench's PY: a `-m difflet.cli.main` command is recorded (its argv and the LEAKS it
 #: sees) and writes "<DRY_RUN>" to its --output, or fails without writing when the output

@@ -46,10 +46,12 @@ SIGNATURES=${SIGNATURES:-$HERE/signatures.json}
 export PATH=/opt/aws_neuronx_venv_torch_neuronx_2_14_0/bin:$PATH:/opt/aws/neuron/bin
 export HF_HUB_OFFLINE=1
 # bench.sh's: shell cache locations would win over --cache-dir, thread counts change
-# HunyuanVideo-1.5's host encode, and no arm here overrides the MXFP8 targets
+# HunyuanVideo-1.5's host encode, no arm here overrides the MXFP8 targets, and only the
+# attention arms quantize attention (by their --attn-quant, never an exported switch)
 unset DIFFLET_COMPILE_CACHE TORCH_NEURONX_NEFF_CACHE_DIR TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR \
   TORCH_NEURONX_HLO_CACHE_DIR TORCHINDUCTOR_CACHE_DIR DIFFLET_NEURON_WEIGHT_STORE \
-  DIFFLET_SHARED_WEIGHTS_DIR OMP_NUM_THREADS MKL_NUM_THREADS DIFFLET_QUANT_TARGETS
+  DIFFLET_SHARED_WEIGHTS_DIR OMP_NUM_THREADS MKL_NUM_THREADS DIFFLET_QUANT_TARGETS \
+  DIFFLET_ATTN_QUANT
 DUMP_LIMIT=5400 # s; a cold compile inside the dump (HV1 544x960x129: ~42 min) fits
 # source files of a VAE or a text encoder; of a DiT (difflet's model code, diffusers' transformers)
 NOT_A_BLOCK='/vae/|/autoencoders/|text_encoder|/(u?mt5|t5|clip)/|/transformers/models/'

@@ -38,6 +38,8 @@ os.execv(sys.executable, [sys.executable] + sys.argv[1:])
 """
 FAKE_FUSER = """#!/usr/bin/env bash
 case " $FUSER_BUSY " in *" ${1#/dev/neuron} "*) echo " 4242"; exit 0 ;; esac
+case " $FUSER_MISSING " in *" ${1#/dev/neuron} "*) echo "Specified filename $1 does not exist." >&2
+                                                    exit 1 ;; esac
 exit 1
 """
 needs_tools = pytest.mark.skipif(
@@ -53,10 +55,11 @@ def _run(tmp_path: Path, *args: str, **env: str):
         (bin_dir / name).chmod(0o755)
     log = tmp_path / "py.jsonl"
     full = {**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", "PY": str(bin_dir / "py"),
-            "ROOT": str(tmp_path / "root"), "PY_LOG": str(log), "FUSER_BUSY": "", **env}
+            "ROOT": str(tmp_path / "root"), "PY_LOG": str(log), "FUSER_BUSY": "",
+            "FUSER_MISSING": "", **env}
     cpu = str(min(os.sched_getaffinity(0)))
-    done = subprocess.run(["bash", str(MX / "run_arms.sh"), *args[:4], cpu], env=full,
-                          capture_output=True, text=True, timeout=300)
+    done = subprocess.run(["bash", str(MX / "run_arms.sh"), *args[:4], *(args[4:] or [cpu])],
+                          env=full, capture_output=True, text=True, timeout=300)
     lines = [json.loads(ln) for ln in log.read_text().splitlines()] if log.exists() else []
     return done, lines
 
@@ -97,7 +100,40 @@ def test_each_step_runs_benchs_command_for_the_arm_on_the_lanes_device(tmp_path)
 def test_a_busy_device_runs_nothing(tmp_path):
     done, lines = _run(tmp_path, "timed", "qwen_image", "bf16", "4", FUSER_BUSY="4")
     assert done.returncode == 3 and lines == []
-    assert "BUSY, not run" in (tmp_path / "root" / "qwen_image" / "runs.log").read_text()
+    assert "BUSY or missing, not run" in (tmp_path / "root" / "qwen_image" / "runs.log").read_text()
+
+
+@needs_tools
+def test_a_device_that_does_not_exist_runs_nothing(tmp_path):
+    """fuser exits 1 for a missing device too (with a message): that is not idle."""
+    done, lines = _run(tmp_path, "timed", "qwen_image", "bf16", "9", FUSER_MISSING="9")
+    assert done.returncode == 3 and lines == []
+    assert "does not exist" in (tmp_path / "root" / "qwen_image" / "runs.log").read_text()
+
+
+@needs_tools
+@pytest.mark.parametrize("step, dev, message", [("warmup", "3", "unknown step warmup"),
+                                                ("timed", "x", "device must be a number"),
+                                                ("timed", "", "device must be a number")])
+def test_a_bad_step_or_device_is_refused_before_anything_is_written(tmp_path, step, dev, message):
+    done, lines = _run(tmp_path, step, "qwen_image", "bf16", dev, "0")
+    assert done.returncode == 2 and message in done.stderr and lines == []
+    assert not (tmp_path / "root").exists()
+
+
+@needs_tools
+def test_a_rerun_removes_the_steps_earlier_outputs_and_logs_the_tree(tmp_path):
+    """A failed rerun must not leave an earlier run's timed_2 / gen2 to pass for its own; the
+    start line names the checkout and its HEAD."""
+    arm = tmp_path / "root" / "qwen_image" / "both"
+    arm.mkdir(parents=True)
+    for name in ("timed_1.png", "timed_2.png", "gen2.png"):
+        (arm / name).write_text("stale")
+    done, _ = _run(tmp_path, "timed", "qwen_image", "both", "2")
+    assert done.returncode == 0, done.stderr
+    assert sorted(p.name for p in arm.glob("*.png")) == ["gen2.png"]  # the fake writes none
+    runs = (tmp_path / "root" / "qwen_image" / "runs.log").read_text()
+    assert f" tree {REPO} " in runs
 
 
 @needs_tools
@@ -106,9 +142,11 @@ def test_a_busy_device_runs_nothing(tmp_path):
 def test_the_lane_runs_linear_alone_only_when_the_plan_asks(tmp_path, bf16, both, linear):
     """Qwen-Image: evidence 302.9 / 239.6 ms (linear / bf16 0.791). Both at 0.66 is far from
     it; at 0.79 within 2J; a bf16 2.3% off the evidence's asks for it too."""
-    done, lines = _run(tmp_path, "lane", "qwen_image", "both", "2",
+    done, lines = _run(tmp_path, "lane", "qwen_image", "both", "2", DIFFLET_ATTN_QUANT="qk+pv",
                        STEP_MS=json.dumps({"bf16": bf16, "both": both, "mx": 239.0}))
     assert done.returncode == 0, done.stderr
+    # an exported switch reaches no arm: the bf16 and mx arms stay bf16 attention, both has its flag
+    assert [ln["env"]["DIFFLET_ATTN_QUANT"] for ln in lines] == [None] * len(lines)
     arms = [(_flag(ln["argv"], "--quant"), _flag(ln["argv"], "--attn-quant")) for ln in lines]
     timed = [(None, None), ("mxfp8", "qk+pv")] + [("mxfp8", None)] * linear
     assert arms == timed + [("mxfp8", "qk+pv")]  # then gen2

@@ -23,7 +23,7 @@ TABLE = {"qwen_image": ("1024", "1024", None, 1), "flux": ("1024", "1024", None,
          "ltx_2": ("512", "768", "121", 1), "wan21_official": ("480", "832", "81", 1),
          "wan22_official": ("480", "832", "81", 1), "hunyuan_video_L": ("544", "960", "129", 2),
          "hv15_official": ("480", "848", "121", 1)}
-ENV = ("NEURON_RT_VISIBLE_CORES", "NEURON_RT_INSPECT_DEVICE_PROFILE")
+ENV = ("NEURON_RT_VISIBLE_CORES", "NEURON_RT_INSPECT_DEVICE_PROFILE", "DIFFLET_ATTN_QUANT")
 
 #: The lane's PY: a `-m difflet.cli.main` command is recorded (argv and ENV), prints the
 #: runtime's dropped-events warning for process FAKE_DROPPED_PID and the line FAKE_STEP_LINE if
@@ -232,8 +232,9 @@ def test_each_key_dumps_one_step_at_its_shape_and_captures_its_blocks_as_four_wo
     # one step's sigma is NaN for the schedulers with a shift_terminal (capture.sh's key_for)
     steps = "2" if key in ("qwen_image", "ltx_2") else "1"
     arms = ("bf16",) if key == "hv15_official" else ("bf16", "mxfp8")
-    for arm in arms:
-        done, arm_dir, py, x, fuser = _capture(tmp_path / arm, key, arm, device=3)
+    for arm in arms:  # an exported attention switch never reaches the bf16 / mxfp8 arms
+        done, arm_dir, py, x, fuser = _capture(tmp_path / arm, key, arm, device=3,
+                                               DIFFLET_ATTN_QUANT="qk+pv")
         assert done.returncode == 0, done.stderr
         assert _status(arm_dir) == "DONE"
         [gen] = py
@@ -245,7 +246,7 @@ def test_each_key_dumps_one_step_at_its_shape_and_captures_its_blocks_as_four_wo
         cache = "difflet-cache-fp8" if key == "qwen_image" else "difflet-cache-video"  # R7
         assert Path(_flag(argv, "--cache-dir")).name == cache
         assert gen["env"] == {"NEURON_RT_VISIBLE_CORES": "12-15",
-                              "NEURON_RT_INSPECT_DEVICE_PROFILE": "1"}
+                              "NEURON_RT_INSPECT_DEVICE_PROFILE": "1", "DIFFLET_ATTN_QUANT": None}
         captures = [ln["argv"] for ln in x if ln["argv"][0] == "capture"]
         assert len(captures) == blocks
         # capture 1200 s; each block view 2700 s (ruling R8: HV1.5's took 481-555 s); rank 0's
@@ -627,11 +628,13 @@ def test_the_attention_arms_dump_with_attn_quant_and_keep_the_forks_blocks(tmp_p
     blocks = TABLE[key][3]
     dump = [{str(100 + i): f"mxblock{i}" for i in range(blocks)} for _ in range(4)]
     done, arm_dir, py, x, _ = _capture(tmp_path, key, arm, dump=dump,
-                                       CAPTURE_CACHE=str(tmp_path / "mirror"))
+                                       CAPTURE_CACHE=str(tmp_path / "mirror"),
+                                       DIFFLET_ATTN_QUANT="qk")
     assert done.returncode == 0, done.stderr
     assert _status(arm_dir) == "DONE" and arm_dir.name == arm
     [gen] = py
     assert (_flag(gen["argv"], "--quant"), _flag(gen["argv"], "--attn-quant")) == flags
+    assert gen["env"]["DIFFLET_ATTN_QUANT"] is None  # the flag alone sets the variant
     assert _flag(gen["argv"], "--cache-dir") == str(tmp_path / "mirror")
     assert len([ln for ln in x if ln["argv"][0] == "capture"]) == blocks
 

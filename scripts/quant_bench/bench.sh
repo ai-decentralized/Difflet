@@ -32,7 +32,9 @@ PY=${PY:-$HOME/venvs/native-fp8/bin/python}
 # with "posix_spawn failed".
 export PATH=/opt/aws_neuronx_venv_torch_neuronx_2_14_0/bin:$PATH
 export HF_HUB_OFFLINE=1
-unset DIFFLET_QUANT_TARGETS
+# An exported attention switch would make the bf16 and mx arms attention-quant runs (the CLI
+# keeps it when --attn-quant is absent): only the attention arms set it, by their flag.
+unset DIFFLET_QUANT_TARGETS DIFFLET_ATTN_QUANT
 # A shell's cache locations win over --cache-dir (an exported DIFFLET_COMPILE_CACHE wins,
 # difflet/cli/orchestrators/torchrun.py root_compile_cache_at_cache_dir; set TORCH_NEURONX_*
 # locations are kept verbatim, difflet/backends/neuron/compile.py), so a "fresh" compile would

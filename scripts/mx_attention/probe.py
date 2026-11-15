@@ -63,6 +63,13 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parents[1]))  # the checkout, for difflet
 
+# The parent only spawns the workers and scores on the CPU: with torch-neuronx autoloaded it would
+# hold /dev/neuron0 for minutes and make device 0 read busy to every fuser on the host. The
+# workers get the environment as it came.
+_PARENT_AUTOLOAD_OFF = ("--worker" not in sys.argv
+                        and "TORCH_DEVICE_BACKEND_AUTOLOAD" not in os.environ)
+if _PARENT_AUTOLOAD_OFF:
+    os.environ["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
 import torch  # noqa: E402
 
 from difflet.quant.mx_attention import mx_attention_reference, smooth_keys  # noqa: E402
@@ -134,22 +141,39 @@ def summarize(ms: list[float]) -> dict:
 
 
 def require_idle_core() -> dict:
-    """The one visible logical core's device must be held by no process (``fuser`` exit 1)."""
+    """The one visible logical core's device must exist and be held by no process (``fuser``
+    exit 1 with no output; for a device that does not exist it exits 1 with a message)."""
     cores = os.environ.get("NEURON_RT_VISIBLE_CORES", "")
     if not cores.isdigit():
         raise SystemExit(f"NEURON_RT_VISIBLE_CORES must name one logical core, got {cores!r}")
     device = int(cores) // 4
-    rc = subprocess.run(["fuser", f"/dev/neuron{device}"], capture_output=True).returncode
-    if rc != 1:
-        raise SystemExit(f"/dev/neuron{device} is not idle (fuser exit {rc}); pick another device")
+    done = subprocess.run(["fuser", f"/dev/neuron{device}"], capture_output=True)
+    said = (done.stdout + done.stderr).decode(errors="replace").strip()
+    if done.returncode != 1 or said:
+        raise SystemExit(f"/dev/neuron{device} is not idle or does not exist (fuser exit "
+                         f"{done.returncode}{': ' + said if said else ''}); pick another device")
     return {"device": device, "core": int(cores), "idle": True,
             "at": datetime.datetime.now().isoformat(timespec="seconds")}
 
 
 def run_worker(argv: list[str], log: Path) -> None:
+    env = {k: v for k, v in os.environ.items()
+           if not (_PARENT_AUTOLOAD_OFF and k == "TORCH_DEVICE_BACKEND_AUTOLOAD")}
     with log.open("w") as f:
         subprocess.run([sys.executable, __file__, *argv], stdout=f, stderr=subprocess.STDOUT,
-                       check=True)
+                       check=True, env=env)
+
+
+def checkout() -> dict:
+    """The tree that ran: its path, HEAD and whether it differs from HEAD (None outside a git
+    checkout, as in a frozen copy)."""
+    def vcs(*a):
+        return subprocess.run(["git", "-C", str(HERE.parents[1]), *a], capture_output=True,
+                              text=True)
+    head = vcs("rev-parse", "--short", "HEAD")
+    ok = head.returncode == 0
+    return {"path": str(HERE.parents[1]), "head": head.stdout.strip() if ok else None,
+            "dirty": bool(vcs("status", "--porcelain").stdout.strip()) if ok else None}
 
 
 def use_kernel(name: str, kernel, scale_kw: str = "scale", **kw) -> None:
@@ -345,7 +369,8 @@ def main(argv: list[str] | None = None) -> int:
               **overall, "per_head": heads, "nonfinite": int((~device.isfinite()).sum()),
               "softmax_max": softmax_max_for(row) if args.impl == "constmax" else None,
               "inputs": f"q, k, v ~ N(0, 1) bf16, seed {SEED}, q and k x {args.peak}, scale d^-0.5",
-              "cpus": sorted(os.sched_getaffinity(0)), "fuser": [r["fuser"] for r in runs]}
+              "cpus": sorted(os.sched_getaffinity(0)), "fuser": [r["fuser"] for r in runs],
+              "tree": checkout()}
     args.out.write_text(json.dumps(result, indent=1) + "\n")
     print(json.dumps({k: result[k] for k in ("impl", "median_ms", "spread", "rel_l2", "cosine")}))
     return 0
