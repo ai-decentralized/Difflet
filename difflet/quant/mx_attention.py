@@ -1,6 +1,9 @@
 """CPU reference of MXFP8 attention: what the fork of nkilib's ``attention_cte`` computes with
-MM1 (QK^T) and/or MM2 (PV) on ``nc_matmul_mx``, so the device probe's output differs from it only
-by summation order. It forms P exactly as the kernel does (nkilib 2.14
+MM1 (QK^T) and/or MM2 (PV) on ``nc_matmul_mx``. On the NKI simulator the kernel differs from it
+by summation order and the bf16 / e4m3 rounding flips that order causes (up to ~1e-2 on single
+rows); the device adds its exp and reciprocal approximations and ``nc_matmul_mx``'s own
+arithmetic (~2e-4 of the score RMS), so use it as a device oracle with a tolerance of that size,
+not bit for bit. It forms P exactly as the kernel does (nkilib 2.14
 ``core/attention/attention_cte.py``, lines cited as ``:N``):
 
 - Scores: MM1 accumulates in fp32 PSUM (``mm_out_dtype`` fp32, :227) and the evict multiplies by
@@ -19,7 +22,8 @@ by summation order. It forms P exactly as the kernel does (nkilib 2.14
 - E is written to the bf16 ``exp_sb`` (:2442-2447): that bf16 E is what the fork MX-quantizes per
   512-key tile along keys. The row sum is the fused accumulator of ``exponential``: the fp32 sum
   of the unrounded exp (``exp_partial_sum`` fp32, :2194-2198; the simulator reduces the fp32
-  result before the dst cast, ``nki/_backends/simulator/misc.py`` ``exponential``), so it never
+  result before the dst cast, ``nki/_backends/simulator/misc.py`` ``exponential``, and likewise
+  ``activation.py`` for the Scalar Engine exp, the fork's default), so it never
   sees P's bf16 or MX rounding. The output is the accumulator times its reciprocal (:3587-3594).
 
 MX operands are quantized along their contraction axis: Q and K along the head dim by
@@ -83,8 +87,9 @@ def mx_attention_reference(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, *,
     row_max = torch.full((bh, s_q, 1), -torch.inf)
     row_sum = torch.zeros(bh, s_q, 1)
     acc = torch.zeros(bh, s_q, v.shape[-1])
-    # shortcut: one section's scores for all of q at once (BH x S_q x 8192 fp32, 10 GB on
-    # wan_81f); slice heads or queries in the caller if that is too much.
+    # shortcut: one section's scores for all of q at once: BH x S_q x 8192 fp32 is 10.7 GB on
+    # wan_81f, and the section's ~5-6 fp32 temporaries peak near 60 GB; slice heads or queries in
+    # the caller (the probe evaluates one head at a time, ruling BR8).
     for start in range(0, s_k, section_len):
         stop = min(start + section_len, s_k)
         section = (qf @ kf[:, start:stop].transpose(1, 2)) * scale

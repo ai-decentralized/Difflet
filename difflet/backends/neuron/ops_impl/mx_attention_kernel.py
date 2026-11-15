@@ -37,8 +37,8 @@ Breaking this down into steps:
 
 THE SUBSET:
 
-- Non-causal attention on q, k, v ``[batch, seqlen, d]`` bf16 (attention_cte's ``tp_q=True,
-  tp_k=True`` layout), head dim 128, one k/v batch per q batch, output ``[batch, seqlen_q, d]``.
+- Non-causal attention in attention_cte's ``tp_q=True, tp_k=True`` layout: q, k ``[batch, seqlen,
+  128]`` bf16, v ``[batch, seqlen_k, d_v]`` (d_v <= 512; 128 with pv_mx), one k/v batch per q batch.
 - Sequence packing (bound_min/bound_max provided): query i attends keys
   ``bound_min[i] <= j < bound_max[i]``, masked with range_select; that path takes scale 1.0.
 - ``pv_mx``: MM2 on ``nc_matmul_mx``, P and V MX-quantized per 512-key tile (MXFP8 attention
@@ -148,9 +148,9 @@ def mx_attention_fwd(q, k, v, *, scale, bound_min=None, bound_max=None, pv_mx: b
     """Difflet's entry: non-causal attention in the ``tp_q=True, tp_k=True`` layout (q, k, v
     ``[batch, seqlen, d]`` bf16), optionally key-bounded, as ``ops_impl/attention.py`` calls
     attention_cte on both paths. ``pv_mx`` / ``qk_mx``: MM2 / MM1 on ``nc_matmul_mx``; both False
-    is attention_cte unchanged at the same ``allow_vector_exp``. That is attention_cte's switch,
-    default False here: the exp on the Scalar Engine, off the Vector Engine that binds shipped
-    attention_cte (MXFP8 attention plan, rulings BR19 / BR20)."""
+    is attention_cte unchanged at the same ``allow_vector_exp`` (default False here: ScalarE exp,
+    rulings BR19 / BR20). Difflet's one production caller, the torch op in
+    ``ops_impl/mx_attention.py``, passes True: the VectorE exp of shipped attention_cte (BR32)."""
     return _attention_cte(q=q, k=k, v=v, scale=scale, causal_mask=False, tp_q=True, tp_k=True,
                           bound_min=bound_min, bound_max=bound_max, pv_mx=pv_mx, qk_mx=qk_mx,
                           allow_vector_exp=allow_vector_exp)
@@ -357,7 +357,7 @@ def _attention_cte(
 ):
     """Attention on one call's batch: validation, the batch loop and the LNC sharding.
 
-      q, k, v: ``[batch, seqlen, d]`` bf16 in HBM, head dim 128.
+      q, k, v: in HBM; q, k ``[batch, seqlen, 128]`` bf16, v ``[batch, seqlen_k, d_v]``, d_v <= 512.
       scale: softmax scale; must be 1.0 with bounds (pre-scale q, the range_select path has no scale).
       bound_min, bound_max: optional int32 ``[batch, seqlen_q, 1]``: query i attends keys
         ``bound_min[i] <= j < bound_max[i]``.
@@ -387,6 +387,7 @@ def _attention_cte(
             bound_max.shape == (batch_size, seqlen_q, 1),
             f"bound_max shape must be (batch, seqlen_q, 1)=({batch_size}, {seqlen_q}, 1), got {bound_max.shape}",
         )
+        kernel_assert(seqlen_q % _Q_GRP_SZ == 0, f"the bounded path reads its bounds in {_Q_GRP_SZ}-query groups: pad q and the bounds to a multiple of {_Q_GRP_SZ}, got seqlen_q {seqlen_q}")
 
     bs = q.shape[0]
     kernel_assert(bs > 0, f"Batch size must be positive, got {bs}")
@@ -415,9 +416,8 @@ def _attention_cte(
         kernel_assert(d_v == _D_TILE_SZ, f"pv_mx takes d_v {_D_TILE_SZ}, got {d_v=}")
         kernel_assert(_psum_num_banks() == 8, "pv_mx transposes P through PSUM bank 7")
     if qk_mx:
-        kernel_assert(_psum_num_banks() == 8 and d_v <= _V_D_TILE_SZ,
-                      "qk_mx transposes Q and K through PSUM bank 7 (6 with pv_mx): eight banks, "
-                      "MM2 in bank 4 alone")
+        kernel_assert(_psum_num_banks() == 8, "qk_mx transposes Q and K through PSUM bank 7 (6 with "
+                      "pv_mx): eight banks, MM2 in bank 4 alone")
 
     grid_ndim, num_shard, shard_id = get_verified_program_sharding_info("attention_cte", max_sharding=2)
 
