@@ -63,6 +63,30 @@ def _bf16(*shape):
     return SimpleNamespace(shape=shape, dtype="bfloat16")
 
 
+def test_the_bounded_path_refuses_a_query_length_off_the_128_grid():
+    """Its bounds are read in 128-query groups: 200 queries would read past [batch, 200, 1] (the
+    caller pads q and the bounds to 128, ops_impl/attention.py)."""
+    q, kv = _bf16(2, 200, 128), _bf16(2, 256, 128)
+    with pytest.raises(AssertionError, match="pad q and the bounds to a multiple of 128"):
+        fork._attention_cte(q=q, k=kv, v=kv, bound_min=_t(2, 200, 1), bound_max=_t(2, 200, 1))
+
+
+def test_the_fork_header_names_the_installed_attention_cte():
+    """The fork imports nkilib's helpers from the installed package: when that package's
+    attention_cte.py is no longer the one the fork was cut from, say so before the bit-identity
+    test fails without telling upstream's move from a fork regression."""
+    import hashlib
+    import re
+    from pathlib import Path
+
+    cte = pytest.importorskip("nkilib.core.attention.attention_cte")
+    header = Path(fork.__file__).read_text()[:2000]
+    pinned = re.search(r"sha256\s*#?\s*([0-9a-f]{64})", header.replace("\n#", "")).group(1)
+    installed = hashlib.sha256(Path(cte.__file__).read_bytes()).hexdigest()
+    assert installed == pinned, ("nkilib changed: re-diff the fork against upstream before trusting "
+                                 "the bit-identity test")
+
+
 def test_attention_cte_refuses_grouped_query_kv_and_other_dtypes():
     kv = _bf16(1, 256, 128)
     with pytest.raises(AssertionError, match="refuses grouped-query k/v"):
@@ -168,22 +192,25 @@ def _rel(a, b):
 
 
 #: (bh, s_q, s_k, valid_k): a partial query group and a partial key tile whose length is not a
-#: multiple of 4; bounded with bound_max % 32 != 0; two flash sections (10,752 keys).
+#: multiple of 4; bounded with bound_max % 32 != 0; two flash sections (11,053 keys = 8,192 +
+#: 5 x 512 + 301: the second section ends in a partial tile, over the first section's data).
 SIM_SHAPES = {"partial": (1, 602, 602, None), "bounded": (2, 640, 640, 600),
-              "sections": (1, 128, 10752, None)}
+              "sections": (1, 128, 11053, None)}
 
 
+@pytest.mark.parametrize("vector_exp", [False, True])
 @pytest.mark.parametrize("case", sorted(SIM_SHAPES))
-def test_pv_mx_simulated_matches_the_mirror(case):
+def test_pv_mx_simulated_matches_the_mirror(case, vector_exp):
     """MM2 on nc_matmul_mx (Step 3): the simulated kernel equals the Task 1 mirror (P and V
     MX-quantized per 512-key tile by ``pv_perm``, the last tile zero-padded) to summation order,
-    and is not the bf16 kernel."""
+    and is not the bf16 kernel; with either exp engine (True: the torch op's, ruling BR32)."""
     from difflet.quant.mx_attention import mx_attention_reference
 
     bh, s_q, s_k, valid = SIM_SHAPES[case]
     q, k, v, bounds = _inputs(bh, s_q, s_k, valid)
     scale = 1.0 if bounds else 128 ** -0.5
-    out = _simulate(fork.mx_attention_fwd, q, k, v, bounds, scale=scale, pv_mx=True, qk_mx=False)
+    out = _simulate(fork.mx_attention_fwd, q, k, v, bounds, scale=scale, pv_mx=True, qk_mx=False,
+                    allow_vector_exp=vector_exp)
     kw = dict(bound_min=bounds[0], bound_max=bounds[1]) if bounds else {}
     mirror = mx_attention_reference(q, k, v, scale=scale, qk_mx=False, pv_mx=True,
                                     pv_perm=fork.pv_perm, **kw).float()
@@ -192,21 +219,24 @@ def test_pv_mx_simulated_matches_the_mirror(case):
     assert _rel(out, bf16) > 4 * _rel(out, mirror)
 
 
+@pytest.mark.parametrize("vector_exp", [False, True])
 @pytest.mark.parametrize("pv_mx", [False, True])
 @pytest.mark.parametrize("case, lnc", [("partial", 1), ("bounded", 1), ("sections", 1),
                                        ("lnc2_odd_bounded", 2)])
-def test_qk_mx_simulated_matches_the_mirror(case, lnc, pv_mx):
+def test_qk_mx_simulated_matches_the_mirror(case, lnc, pv_mx, vector_exp):
     """MM1 on nc_matmul_mx (Task 4 Step 2): Q and K MX-quantized on load along the head dim by
     ``qk_perm``, QK-only and QK+PV, equal the Task 1 mirror to summation order, and are not the
     kernel without ``qk_mx``. Covers a partial query group (602 = 4 x 128 + 90 rows) and a partial
     key tile, bounds with ``bound_max % 32 != 0``, two flash sections, and the LNC2 split of an odd
-    batch (per-group Q loads on the seqlen-sharded path)."""
+    batch (per-group Q loads on the seqlen-sharded path); with either exp engine (True: the shipped
+    configuration, the torch op's, ruling BR32)."""
     from difflet.quant.mx_attention import mx_attention_reference
 
     bh, s_q, s_k, valid = {**SIM_SHAPES, "lnc2_odd_bounded": (3, 1152, 1152, 1001)}[case]
     q, k, v, bounds = _inputs(bh, s_q, s_k, valid)
     scale = 1.0 if bounds else 128 ** -0.5
-    out = _simulate(fork.mx_attention_fwd, q, k, v, bounds, lnc, scale=scale, pv_mx=pv_mx, qk_mx=True)
+    out = _simulate(fork.mx_attention_fwd, q, k, v, bounds, lnc, scale=scale, pv_mx=pv_mx, qk_mx=True,
+                    allow_vector_exp=vector_exp)
     kw = dict(bound_min=bounds[0], bound_max=bounds[1]) if bounds else {}
     perms = dict(qk_perm=fork.qk_perm, pv_perm=fork.pv_perm)
     mirror = mx_attention_reference(q, k, v, scale=scale, qk_mx=True, pv_mx=pv_mx, **perms, **kw)
@@ -262,11 +292,11 @@ def test_qk_mx_four_key_tiles_share_the_pe_array_in_distinct_psum_banks(pv_mx, m
             large_tiles.append([])
         large_tiles[-1].append(_psum_bank(kw["dst"]))
         banks.add(_psum_bank(kw["dst"]))
-    assert [len(b) for b in large_tiles] == [4, 4, 4, 4, 4, 1]  # 10,752 keys = 16 + 5 x 512
+    assert [len(b) for b in large_tiles] == [4, 4, 4, 4, 4, 2]  # 11,053 keys = 16 + 5 x 512 + 301
     assert all(len(set(b)) == len(b) for b in large_tiles)
     assert not banks & {4, tp_bank, 7}
     assert {_psum_bank(d) for d in transposes} == ({tp_bank, 7} if pv_mx else {tp_bank})
-    assert len(mm2) == (21 if pv_mx else 0)
+    assert len(mm2) == (22 if pv_mx else 0)
 
 
 @pytest.mark.parametrize("case, lnc", [("partial", 1), ("bounded", 1), ("sections", 1),
