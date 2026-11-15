@@ -30,6 +30,7 @@ def test_child_env_prepends_neuronx_cc_when_path_lacks_it(monkeypatch, tmp_path)
                         cores="0-3", cpus=[0], threads=None)
     assert child.env["PATH"] == "/opt/sdk/bin:/usr/bin"
     assert child.env["HF_HUB_OFFLINE"] == "1"
+    assert child.env["NEURON_NUMA_PIN"] == "0"  # the lane's taskset, not torch-neuronx, pins
 
 
 def test_child_env_scrubs_engine_knobs_and_records_sources(monkeypatch, tmp_path):

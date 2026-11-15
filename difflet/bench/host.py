@@ -29,8 +29,12 @@ SCRUB_NAMES = frozenset({"OMP_NUM_THREADS", "MKL_NUM_THREADS", "LD_PRELOAD", "TO
                          # torchrun owns these; an inherited one would misplace the ranks
                          "WORLD_SIZE", "RANK", "LOCAL_RANK", "LOCAL_WORLD_SIZE", "MASTER_ADDR",
                          "MASTER_PORT"})
-#: Set in every launch: bench never downloads, so a missing snapshot fails instead of fetching.
-FORCED_ENV = {"HF_HUB_OFFLINE": "1"}
+#: Set in every launch. HF_HUB_OFFLINE: bench never downloads, so a missing snapshot fails instead
+#: of fetching. NEURON_NUMA_PIN=0: torch-neuronx 2.14's process-group init calls
+#: pin_to_numa(local_rank), which reads the local rank as a core id, so every multi-rank stage is
+#: pinned to device 0's NUMA node whatever device it runs on, overriding the lane's taskset (seen
+#: 2026-11-15: device 8's ranks on CPUs 48-95,144-191). The lane's --cpus decide instead.
+FORCED_ENV = {"HF_HUB_OFFLINE": "1", "NEURON_NUMA_PIN": "0"}
 #: Variables recorded in a result's environment snapshot (secrets excluded, see is_secret).
 RECORD_PREFIXES = ("DIFFLET_", "TORCH", "NEURON_", "XLA_", "HF_", "HUGGINGFACE_", "OMP_",
                    "MKL_", "PYTORCH_", "LD_PRELOAD", "PYTHONPATH", "TRANSFORMERS_", "DIFFUSERS_")
