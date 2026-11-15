@@ -1430,3 +1430,101 @@ bytes hold its own name): its second request and its `gen2` process against its 
 | Wan 2.1 T2V 14B | `963566ba` (!= evidence `295dcb67`, 12c, B); two requests equal | `ecd18db4`; timed 2 and gen2 equal | bit-identical | finite |
 | HunyuanVideo | `6336311a` (!= evidence `258cd73e`, 7f, A); two requests equal | `05948f8e`; timed 2 and gen2 equal | bit-identical | finite |
 <!-- 15d rows -->
+
+The bf16 outputs that differ from the evidence's come from other trees or settings, not from
+this run: Wan's from host B and #156's fp32 timestep (section 13), HunyuanVideo's from 7f's tree,
+HunyuanVideo-1.5's from 96 encode threads (here 48, as both of its arms; evidence 11c). Every
+quantized output is the same over its two requests and its second process, and every latent is
+finite. Every decoded output was looked at (`<key>/frames.png`: first, middle and last frame,
+bf16 above the quantized arm): each shows the prompt's subject with no noise.
+
+### 15e. As run
+
+- **Lanes.** Warm: devices 1-7 (one key each), 2026-11-14 22:02 to 2026-11-15 00:51. Timed pairs:
+  - devices 8 and 9 (node 0, CPUs `0-23,96-119` and `24-47,120-143`; allowed by the controller
+    at 00:52 once `fuser` showed 8-15 idle): HunyuanVideo on 8; Qwen-Image, FLUX, LTX-2 and Wan
+    2.1 one after the other on 9;
+  - devices 3 and 4 (node 1, `48-71,144-167` and `72-95,168-191`): Wan 2.2 and HunyuanVideo-1.5,
+    from 01:22, once no compile or capture of mine was left on node 1.
+
+  Captures and quality scoring ran only on a node with no timed pair of mine.
+- **Every timed process** ran with `DIFFLET_NEURON_PG_TIMEOUT_S=10800` and
+  `TORCH_NEURONX_NEFF_CACHE_LOCK_TIMEOUT=10800`, in both arms (no timed process compiled).
+  HunyuanVideo-1.5's `attn` cold compile needed them:
+  - its first warm lost rank 2's `neuronx-cc` to the kernel's OOM killer (F137) while six
+    lanes compiled;
+  - its second ran into the 1800 s collective watchdog: the block compiled for over 30 min
+    inside the first allgather;
+  - the third ran with the two timeouts raised and hit the cached NEFF.
+
+  HunyuanVideo's first `both` warm was restarted the same way: after 30 min its ranks broke the
+  NEFF-cache lock and compiled the same NEFF again.
+- **bf16 compiled again** for Wan, HunyuanVideo and HunyuanVideo-1.5: their bf16 blocks missed
+  Plan A's NEFFs in the copied cache (Qwen-Image's and FLUX's hit). The cause was not looked
+  into; the branch's code since Plan A is Task 5 / 5b's, whose switch-off identity (section 14)
+  covers it.
+- **Linear alone** ran once, for LTX-2: `both` (0.771) landed within 2J of the evidence's linear
+  / bf16 (0.751). This session's bf16 was within 1% of the evidence's for every model (-0.34% to
+  +0.38%).
+- **HunyuanVideo-1.5 logs no routed-call line.** Its orchestrator has no load-time warm-up
+  forward, and `log_routed_calls` is called from there (Task 5). The routing shows in its block
+  capture instead: every attention row comes from the fork.
+
+### 15f. G3 (reported only)
+
+| model | arm | arm / bf16 | linear / bf16 | J | rule: arm / bf16 below | G3 |
+|---|---|---|---|---|---|---|
+| Qwen-Image | both | 0.848 | 0.791 (11b, host A) | 2.0% | 0.771 | not faster |
+| FLUX.1-dev | both | 0.878 | 0.827 (11b, host A) | 2.0% | 0.807 | not faster |
+| LTX-2 | both | 0.771 | 0.752 (this session; evidence 0.751, 11b, host A) | 2.0% | 0.732 | not faster |
+| Wan 2.1 T2V 14B | both | 1.112 | 0.982 (12b, host B) | 2.0% | 0.962 | not faster |
+| Wan 2.2 T2V A14B | both | 1.114 | 0.981 (12b, host B) | 2.0% | 0.961 | not faster |
+| HunyuanVideo | both | 1.366 | 0.972 (7f, host A) | 2.0% | 0.952 | not faster |
+| HunyuanVideo-1.5 | attn | 1.219 | - (rule: attn / bf16 < 1 - J) | 2.0% | 0.980 | not faster |
+
+### 15g. Reading
+
+- **No model gains from MXFP8 attention at its profile shape.**
+  - `both` is slower than linear alone everywhere.
+  - On the long-sequence video models it is slower than bf16 too: Wan 1.11x, HunyuanVideo-1.5
+    1.22x, HunyuanVideo 1.37x.
+  - This matches the kernel-level 1.17-1.54x of QK+PV against bf16 (sections 10-11). Linear
+    MXFP8's gain stays on the image models and LTX-2, where attention is a small part of the
+    block, but shrinks: Qwen-Image 0.848 against 0.791, FLUX 0.878 against 0.827, LTX-2 0.771
+    against 0.752.
+- **P's quantization costs more than the two MX matmuls save.** Per step, at Wan 2.1:
+  - MM2 drops from 3,649 to 916 ms of TensorE, and MM1 from 2,728 to 1,761 ms;
+  - P's operand (`p_quantize`: two TensorE transposes, a ScalarE copy and a VectorE
+    `quantize_mx` per 512-key tile) adds 2,610 ms of TensorE, 1,948 of ScalarE and 1,115 of
+    VectorE.
+
+  Per block, VectorE (already the binding engine after linear quantization) gains 22 ms and
+  ScalarE 24 ms, while TensorE stays where it was (90.9 against 91.4 ms). Every model shows the
+  same shape. Q and K's quantization is small (Wan: TensorE 346, ScalarE 168, VectorE 103 ms
+  per step), and V's is under 1.5% of the attention engine time.
+- **MM1 on `nc_matmul_mx` does not save TensorE time on both HunyuanVideos**: 2,656 -> 3,389 ms
+  (HunyuanVideo) and 2,808 -> 2,875 ms (HunyuanVideo-1.5) per step, against 14-35% less on the
+  other five. This fits section 11's quadrant concurrency and PE throttle findings.
+- **HunyuanVideo's dual-stream block grows 458 -> 704 ms, mostly outside the kernel.** Its
+  `attn_glue` time (almost all HBM DMA) doubles, 183 -> 387 ms per execution: four ~95 ms slices of two padded
+  tensors (`slice.429/435` of `pad.426`, `slice.430/436` of `pad.424`), against bf16's two (of
+  `pad.406`, section 4). The rows name `ops_impl/attention.py`'s bounded path. A likely cause is
+  that K, now smoothed before the padding, materializes a second padded tensor; this is not
+  verified here.
+- **Quality.**
+  - **Qwen-Image** loses most: 29.1 dB against bf16 (linear 38.3), and 29.1 dB against CPU fp32
+    where bf16 is 36.3 and linear 37.4. Its routed call is bounded, and K smoothing averages
+    over all keys, padding included (BR36).
+  - **FLUX** (26.6 dB against bf16, linear 22.6) and **LTX-2** (21.8, linear 22.5) are at or
+    above linear, and closer to fp32 than bf16 is (FLUX +1.1 dB, LTX-2 +0.5 dB; one FLUX image
+    of a chaotic sampler, section 6b). Both are unbounded.
+  - **HunyuanVideo** (bounded) drops to 20.5 dB against bf16 (linear 26.5; no floor at this
+    shape).
+  - **Wan 2.1** is at linear's level (15.8 against 15.1 dB); both arms are far below its 22.75 dB
+    floor.
+  - **Wan 2.2 and HunyuanVideo-1.5** are below the bf16 floor's resolution, not a quality
+    reading.
+
+  BR36's condition for a revisit (the bounded models clearly worse than the unbounded ones) is
+  met by Qwen-Image's 7.3 dB against fp32. It does not say that the padding in K's mean is the
+  cause: QK^T in MXFP8 is in the same arm.
