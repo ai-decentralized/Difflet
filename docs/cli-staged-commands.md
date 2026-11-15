@@ -352,6 +352,54 @@ DIFFLET_BACKEND=neuron difflet generate --model-id Qwen/Qwen-Image \
   2>&1 | tee /tmp/logs/qwen-generate-mxfp8.log
 ```
 
+### MXFP8 attention (`--attn-quant`, Trainium3 only, experimental)
+
+`--attn-quant {qk,pv,qk+pv}` runs the DiT's self/joint attention matmuls on `nc_matmul_mx`
+through Difflet's fork of nkilib's `attention_cte`:
+- `qk`: QK^T in MXFP8 (Q and K quantized along the head dim, K centred first);
+- `pv`: PV in MXFP8 (P and V quantized per 512-key tile);
+- `qk+pv`: both.
+
+The softmax, its exp (on VectorE, as in bf16), the cross-attention and causal, masked or
+head-dim != 128 calls stay bf16. The option is opt-in and never a default. It is independent of
+`--quant`, on `compile`, `generate`, `run` and the stage lines, forwarded like `--quant`.
+`DIFFLET_ATTN_QUANT` is the same switch: the flag overrides it; unset, empty or `off` is off.
+It is refused on every backend but `neuron`, on trn2, under `--exec-mode eager`, for models
+without MXFP8 target layers, and with `--cp-mode ring|ulysses` at `--cp-degree` > 1 (their
+attention stays bf16). A DiT whose warm-up routes no call to the kernel stops with the cause.
+Each variant is a separate DiT stage artifact and NEFF set, compiled cold on first use (over
+30 min for HunyuanVideo-1.5 at 480x848x121).
+
+```bash
+DIFFLET_BACKEND=neuron difflet generate --model-id Qwen/Qwen-Image \
+  --tp-degree 4 --height 1024 --width 1024 --quant mxfp8 --attn-quant pv \
+  --steps 50 --seed 42 --prompt "a cat sitting on a bench" --output qwen-mxfp8-attn.png
+```
+
+**Measured: slower, with a quality cost on some models.** Each model ran at its DiT profile shape
+with `--quant mxfp8 --attn-quant qk+pv` (HunyuanVideo-1.5: `--attn-quant qk+pv` alone). The DiT
+step against bf16, linear MXFP8 alone in brackets:
+
+| model | step / bf16 | linear alone / bf16 |
+|---|---|---|
+| Qwen-Image 1024x1024 | 0.848 | 0.791 |
+| FLUX.1-dev 1024x1024 | 0.878 | 0.827 |
+| LTX-2 512x768x121 | 0.771 | 0.752 |
+| Wan 2.1 480x832x81 | 1.112 | 0.982 |
+| Wan 2.2-A14B 480x832x81 | 1.114 | 0.981 |
+| HunyuanVideo 544x960x129 | 1.366 | 0.972 |
+| HunyuanVideo-1.5 480x848x121 (attention alone) | 1.219 | - |
+
+- **Speed.** It is slower than `--quant mxfp8` alone on every model, and slower than bf16 on
+  the long video models. Quantizing P for PV costs more than the two MX matmuls save.
+- **Quality.** QK^T in MXFP8 suffers from K-channel outliers: against diffusers fp32 on the CPU,
+  Qwen-Image's image is 29.08 dB, where bf16's is 36.34 dB and linear MXFP8's 37.36 dB.
+- **`pv`.** It is expected to be safer: a CPU proxy on real activations puts its error about 10x
+  lower than QK^T's. This is not yet measured on the device. Only `qk+pv` ran at full steps, and
+  10-step smokes put `qk`, `pv` and `qk+pv` equally far from linear alone, which is open.
+
+Evidence: `docs/verification/2026-11-13-dit-block-profile.md`, sections 13-15 (section 15: step times, block profiles, quality).
+
 ---
 
 ## HunyuanVideo 1.5 (3-stage: encode → aot_transformer → aot_vae)

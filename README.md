@@ -274,6 +274,32 @@ and the evidence in
 (LTX-2, Wan 2.1, Wan 2.2-A14B, HunyuanVideo, HunyuanVideo-1.5; its section 10 is the CPU fp32
 reference for all seven models).
 
+**MXFP8 attention on Trainium3** (`--attn-quant {qk,pv,qk+pv}`, experimental, opt-in): the DiT's
+self/joint attention runs its matmuls on `nc_matmul_mx` through Difflet's fork of nkilib's
+`attention_cte`. `qk` puts QK^T in MXFP8, `pv` puts PV in MXFP8 (P and V quantized per 512-key
+tile), `qk+pv` both; the softmax, its exp and every cross-attention stay bf16. It is never a
+default and is independent of `--quant` (either, both or neither). It needs `--backend neuron`
+on trn3 and `--exec-mode compile`, takes the models `--quant` takes, and is refused with
+`--cp-mode ring|ulysses` (their attention stays bf16). Each variant is its own compiled DiT, so
+its first use compiles cold (over 30 min for HunyuanVideo-1.5 at 480×848×121).
+`DIFFLET_ATTN_QUANT` is the same switch: the flag overrides it; empty or `off` is off.
+
+**It is slower, not faster.** Each model ran at its profile shape with `--quant mxfp8
+--attn-quant qk+pv` (HunyuanVideo-1.5: `--attn-quant qk+pv` alone). DiT step against bf16, with
+linear MXFP8 alone in brackets: Qwen-Image 0.848× (0.791×), FLUX.1-dev 0.878× (0.827×), LTX-2
+0.771× (0.752×), Wan 2.1 1.112× (0.982×), Wan 2.2 1.114× (0.981×), HunyuanVideo 1.366× (0.972×),
+HunyuanVideo-1.5 1.219×. So it is slower than `--quant mxfp8` alone on every model, and slower
+than bf16 on Wan, HunyuanVideo and HunyuanVideo-1.5: quantizing P for PV costs more than the two
+MX matmuls save.
+
+**It costs quality on some models.** QK^T in MXFP8 suffers from K-channel outliers. Against
+diffusers fp32 on the CPU, Qwen-Image's image is 29.1 dB with `qk+pv`, where bf16 is 36.3 dB and
+linear MXFP8 37.4 dB: about 7 dB lost to attention quantization. `pv` alone is expected to be
+safer, since a CPU proxy on real activations puts its error about 10× lower, but this is not yet
+measured on the device. Only `qk+pv` ran at full steps; 10-step smokes put `qk`, `pv` and
+`qk+pv` equally far from linear alone, an open question. Evidence:
+[docs/verification/2026-11-13-dit-block-profile.md](docs/verification/2026-11-13-dit-block-profile.md) sections 13-15.
+
 **Notes**
 
 9. Guidance-distilled model (single forward pass with the guidance scale baked into the timestep embedding) — there is no second CFG branch to split.
@@ -631,6 +657,7 @@ paths, and stage core counts are in [docs/cli-staged-commands.md](docs/cli-stage
 | `--total-cores N` | compile, generate, run | Core budget for validation (default: `NEURON_RT_NUM_CORES`) |
 | `--height/--width/--num-frames` | compile, generate, run, serve | Output shape (default: the model's registry shape) |
 | `--shapes HxWxF[,...]` | compile, generate, run, serve | Compile or serve several shapes from one bucketed artifact |
+| `--quant mxfp8`, `--attn-quant {qk,pv,qk+pv}` | compile, generate, run | Trainium3 MXFP8 linears; MXFP8 attention, experimental and slower (see [Trainium](#trainium)) |
 | `--teacache-cadence N` | generate, run | Skip every N-th denoise step |
 | `--teacache-speedup F`, `--teacache-calibration PATH` | generate, run, serve | Adaptive TeaCache target and calibration file |
 | `--teacache-online-delta ALPHA` | generate, run | Probe-free online-delta TeaCache |

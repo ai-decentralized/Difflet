@@ -79,10 +79,14 @@ def add_quant_flags(p: argparse.ArgumentParser) -> None:
         dest="attn_quant",
         choices=list(ATTN_QUANT_VARIANTS),
         default=None,
-        help="--backend neuron on Trainium3, with or without --quant: run the DiT's self/joint "
-        "attention (head dim 128; cross-attention stays bf16) with QK^T ('qk'), PV ('pv') or "
-        "both ('qk+pv') in MXFP8 (default: bf16 attention). Sets DIFFLET_ATTN_QUANT for the "
-        "launch, over any exported value.",
+        help="--backend neuron on Trainium3, compiled DiT, with or without --quant: run the "
+        "DiT's self/joint attention (head dim 128; cross-attention stays bf16) with QK^T ('qk'), "
+        "PV ('pv') or both ('qk+pv') in MXFP8 (default: bf16 attention). Sets DIFFLET_ATTN_QUANT "
+        "for the launch, over any exported value. Experimental, opt-in, never a default: "
+        "measured slower than --quant mxfp8 alone on every model and slower than bf16 on Wan, "
+        "HunyuanVideo and HunyuanVideo-1.5, with a quality cost on some (Qwen-Image: about 7 dB "
+        "further from fp32 with qk+pv); see docs/verification/2026-11-13-dit-block-profile.md "
+        "section 15.",
     )
 
 
