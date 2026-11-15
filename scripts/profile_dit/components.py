@@ -38,7 +38,8 @@ COMPONENTS = ("modulation", "norm", "qkv_proj", "qk_norm", "rope", "attn_glue", 
 
 _REPO = Path(__file__).resolve().parents[2]
 _COLLECTIVES = ("all-gather", "all-reduce", "reduce-scatter", "all-to-all", "collective-permute")
-_ATTENTION_KERNEL = re.compile(r"/nkilib/core/attention/")
+#: nkilib's attention kernels, and Difflet's MXFP8 fork of attention_cte
+_ATTENTION_KERNEL = re.compile(r"/nkilib/core/attention/|/ops_impl/mx_attention_kernel\.py:")
 _ATTENTION = re.compile(r"(?:^|/)\w*Attention\[(\w+)\]\[\d+\]")
 #: an attention module's own ops, and its compiler regions (``.../computation_154``)
 _BARE_ATTENTION = re.compile(r"(?:^|/)\w*Attention\[\w+\]\[\d+\](?:_[^/]*|/computation_\d+)$")
@@ -129,11 +130,14 @@ def classify(layer: str, hlo_name: str, nki_source: str, hlo_attrs: str, model: 
     return next((c for p, c in rules if re.search(p, layer)), "other")
 
 
-# nkilib 2.14 attention_cte.py: (first, last line, phase); an instruction names its statement's
-# first line. Loads, the P transpose, output write-back and buffer setup are "other".
+# nkilib 2.14 attention_cte.py: (first, last line, phase), the first range holding the line wins;
+# an instruction names its statement's first line. Loads, the P transpose, output write-back and
+# buffer setup are "other".
 _ATTENTION_PHASES = (
+    (3381, 3381, "exp"),  # _exp_impl step 1: exp(s - max) with the row sum, VectorE
+    (3389, 3389, "exp"),  # the same on ScalarE (allow_vector_exp off, or an odd tile)
     (3112, 3169, "mask_softmax"),  # _update_max_impl: section / running max, flash correction
-    (3299, 3399, "mask_softmax"),  # _exp_impl steps up to 1: -max, exp(s - max) with the row sum
+    (3299, 3399, "mask_softmax"),  # _exp_impl steps up to 1: -max and the row-sum setup
     (3558, 3594, "mask_softmax"),  # _write_back_impl step 1: row sum and its reciprocal
     (3639, 3660, "mask_softmax"),  # _write_back_impl: flash correction of the earlier output (tp_out)
     (3668, 3675, "mask_softmax"),  # _write_back_impl: flash correction of the earlier output
@@ -145,11 +149,59 @@ _ATTENTION_PHASES = (
 )
 
 
+#: Difflet's fork of attention_cte (the MXFP8 attention plan's routed op): phase by the enclosing
+#: function, then by the nisa call a statement makes; the fork's own MX work in three phases of
+#: its own: Q and K (one helper, ``_mx_swizzle_quantize``, serves both, so they are not split),
+#: V, and P, each with its loads, regroups, transposes, copies and ``quantize_mx``. Functions not
+#: named here (loads, setup, output write-back, the dispatchers) are "other".
+FORK = "difflet/backends/neuron/ops_impl/mx_attention_kernel.py"
+_FORK_PHASES = {  # function: (its phase, {nisa call: phase of that statement})
+    "_qk_and_max_large_tile_impl": ("mask_softmax", {"nc_matmul": "qk_matmul",
+                                                     "nc_matmul_mx": "qk_matmul"}),
+    "_emit_row_max_evict": ("mask_softmax", {}),
+    "_update_max_impl": ("mask_softmax", {}),
+    "_exp_impl": ("mask_softmax", {"exponential": "exp", "activation": "exp",
+                                   "dma_transpose": "other"}),  # the bf16 path's P transpose
+    "_write_back_impl": ("mask_softmax", {"dma_copy": "other"}),  # the earlier output's load
+    "_scale_reciprocal_write_back_impl": ("mask_softmax", {}),
+    "_pv_large_tile_impl": ("pv_matmul", {}),
+    "_mx_load_q": ("qk_quantize", {}), "_mx_load_k": ("qk_quantize", {}),
+    "_mx_swizzle_quantize": ("qk_quantize", {}),
+    "_mx_load_v": ("v_quantize", {}),
+    "_mx_quantize_p": ("p_quantize", {}),
+}
+
+
+@functools.lru_cache(maxsize=1)
+def _fork_lines() -> dict[int, str]:
+    """{line: phase} of the fork's lines in a function of ``_FORK_PHASES``, as the file is now."""
+    tree = ast.parse((_REPO / FORK).read_text())
+    found, lines = set(), {}
+    for fn in ast.walk(tree):
+        if not isinstance(fn, ast.FunctionDef) or fn.name not in _FORK_PHASES:
+            continue
+        found.add(fn.name)
+        phase, calls = _FORK_PHASES[fn.name]
+        lines.update(dict.fromkeys(range(fn.lineno, fn.end_lineno + 1), phase))
+        for node in ast.walk(fn):
+            call = node.value if isinstance(node, ast.Expr) else None
+            if (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                    and call.func.attr in calls):
+                lines[node.lineno] = calls[call.func.attr]
+    if missing := set(_FORK_PHASES) - found:
+        raise LookupError(f"{sorted(missing)} are not in {FORK}: update _FORK_PHASES")
+    return lines
+
+
 def attention_phase(nki_source: str) -> str:
-    """``qk_matmul``, ``mask_softmax``, ``pv_matmul`` or ``other`` for an attention row's
-    ``nki_source_location``."""
+    """``qk_matmul``, ``mask_softmax``, ``exp``, ``pv_matmul``, the fork's ``qk_quantize``,
+    ``v_quantize``, ``p_quantize``, or ``other`` for an attention row's ``nki_source_location``."""
     path, _, line = nki_source.rpartition(":")
-    if not path.endswith("/nkilib/core/attention/attention_cte.py") or not line.isdigit():
+    if not line.isdigit():
+        return "other"
+    if path.endswith("/" + FORK):
+        return _fork_lines().get(int(line), "other")
+    if not path.endswith("/nkilib/core/attention/attention_cte.py"):
         return "other"
     return next((p for first, last, p in _ATTENTION_PHASES if first <= int(line) <= last), "other")
 

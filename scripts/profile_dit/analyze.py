@@ -41,7 +41,7 @@ SCRIPTS_DIR = Path(__file__).resolve().parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 from components import (  # noqa: E402
-    attention_module, attention_phase, classify, enclosing_function)
+    FORK, attention_module, attention_phase, classify, enclosing_function)
 
 _KEYS = ["layer", "hlo_name", "nki_source_location", "hlo_attrs"]
 _CTE = "/nkilib/core/attention/attention_cte.py"
@@ -102,9 +102,11 @@ def _mean(summary: dict, pattern: str) -> float | None:
 
 
 def _unmapped(nki_source: str) -> bool:
-    """An attention row's source that no phase rule and no known "other" line names (ruling R11)."""
+    """An attention row's source that no phase rule and no known "other" line names (ruling R11);
+    the MXFP8 fork's "other" is every line of its functions outside ``_FORK_PHASES``."""
     path, _, line = nki_source.rpartition(":")
-    known = path.endswith(_CTE) and line.isdigit() and int(line) in _OTHER_LINES
+    known = line.isdigit() and (int(line) in _OTHER_LINES if path.endswith(_CTE) else
+                                path.endswith("/" + FORK) and enclosing_function(path, int(line)))
     return attention_phase(nki_source) == "other" and not known
 
 

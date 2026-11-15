@@ -80,9 +80,12 @@ DUAL = [("HunyuanVideoAttention[attn][0]_custom-call.414", ATTN)] * 3 + [
 SINGLE = [("HunyuanVideoAttention[attn][0]_custom-call.293", ATTN)] * 3 + [
     ("AdaLayerNormZeroSingle[norm][0]/LayerNorm[norm][0]_reduce.95", NORM),
     ("ColumnParallelLinear[proj_mlp][0]_dot.5", LINEAR)]
+MX = "/repo/difflet/backends/neuron/ops_impl/mx_attention_kernel.py"  # --attn-quant's kernel
 #: marker -> (the source files its debug info names, its Instruction rows)
 MARKERS = {{"block": (["/repo/difflet/models/toy/modeling_toy.py", ATTN, LINEAR],
                      [("Attn[attn][0]_custom-call.1", ATTN), ("Mlp[ff][0]_dot.2", LINEAR)]),
+           "mxblock": (["/repo/difflet/models/toy/modeling_toy.py", MX, LINEAR],
+                       [("Attn[attn][0]_custom-call.1", MX), ("Mlp[ff][0]_dot.2", LINEAR)]),
            "dual": ([HV, ATTN, LINEAR], DUAL), "hvsingle": ([HV, ATTN, LINEAR], SINGLE),
            "vaerows": ([HV, ATTN], DUAL + [("Unknown", VAE)] * 9),
            "vae": ([VAE], None), "bare": ([], None)}}
@@ -609,6 +612,36 @@ def test_hv15_mxfp8_is_refused_naming_the_pair(tmp_path):
                           capture_output=True, text=True, timeout=60)
     assert done.returncode == 2
     assert "hv15_official mxfp8" in done.stderr
+    assert not (tmp_path / "out").exists()
+
+
+@needs_tools
+@pytest.mark.parametrize("key, arm, flags", [("qwen_image", "both", ("mxfp8", "qk+pv")),
+                                             ("hunyuan_video_L", "both", ("mxfp8", "qk+pv")),
+                                             ("hv15_official", "attn", (None, "qk+pv"))])
+def test_the_attention_arms_dump_with_attn_quant_and_keep_the_forks_blocks(tmp_path, key, arm,
+                                                                         flags):
+    """The MXFP8 attention plan's Task 6: `both` = --quant mxfp8 --attn-quant qk+pv, `attn` =
+    --attn-quant qk+pv alone; every attention row then comes from Difflet's fork, which counts as
+    the attention kernel; CAPTURE_CACHE replaces the key's root cache."""
+    blocks = TABLE[key][3]
+    dump = [{str(100 + i): f"mxblock{i}" for i in range(blocks)} for _ in range(4)]
+    done, arm_dir, py, x, _ = _capture(tmp_path, key, arm, dump=dump,
+                                       CAPTURE_CACHE=str(tmp_path / "mirror"))
+    assert done.returncode == 0, done.stderr
+    assert _status(arm_dir) == "DONE" and arm_dir.name == arm
+    [gen] = py
+    assert (_flag(gen["argv"], "--quant"), _flag(gen["argv"], "--attn-quant")) == flags
+    assert _flag(gen["argv"], "--cache-dir") == str(tmp_path / "mirror")
+    assert len([ln for ln in x if ln["argv"][0] == "capture"]) == blocks
+
+
+@pytest.mark.parametrize("key, arm", [("hv15_official", "both"), ("qwen_image", "attn")])
+def test_an_attention_arm_outside_the_table_is_refused_naming_the_pair(tmp_path, key, arm):
+    done = subprocess.run(["bash", str(PD / "capture.sh"), "--key", key, "--arm", arm,
+                           "--device", "1", "--cpus", "0", "--out", str(tmp_path / "out")],
+                          capture_output=True, text=True, timeout=60)
+    assert done.returncode == 2 and f"{key} {arm}" in done.stderr
     assert not (tmp_path / "out").exists()
 
 

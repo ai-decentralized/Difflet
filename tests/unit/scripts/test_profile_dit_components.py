@@ -221,7 +221,9 @@ def test_an_unknown_model_is_refused():
 
 @pytest.mark.parametrize("line, phase", [
     (4128, "qk_matmul"),     # MM1 nc_matmul
-    (3381, "mask_softmax"),  # exp(s - max) with the fused row sum
+    (3381, "exp"),           # exp(s - max) with the fused row sum, VectorE
+    (3389, "exp"),           # the same on ScalarE
+    (3327, "mask_softmax"),  # -max for the VectorE exp
     (3984, "mask_softmax"),  # scale + row max on the MM1 evict
     (4287, "mask_softmax"),  # range_select: the bounds mask with the row max
     (3137, "mask_softmax"),  # section / running max
@@ -236,6 +238,40 @@ def test_an_unknown_model_is_refused():
 ])
 def test_attention_phase(line, phase):
     assert components.attention_phase(f"{CTE}:{line}") == phase
+
+
+#: the MXFP8 fork's statements (the plan's Task 6 phases); found by text, so a moved line moves
+#: the test with it
+_FORK_STATEMENTS = [
+    ("_qk_and_max_large_tile_impl", "nisa.nc_matmul_mx(", "qk_matmul"),
+    ("_qk_and_max_large_tile_impl", "nisa.nc_matmul(", "qk_matmul"),
+    ("_qk_and_max_large_tile_impl", "nisa.range_select(", "mask_softmax"),
+    ("_emit_row_max_evict", "nisa.tensor_scalar_reduce(", "mask_softmax"),
+    ("_exp_impl", "nisa.exponential(", "exp"),
+    ("_exp_impl", "nisa.activation(", "exp"),
+    ("_exp_impl", "nisa.dma_transpose(", "other"),  # bf16 MM2's P transpose, as attention_cte's
+    ("_exp_impl", "nisa.tensor_scalar(", "mask_softmax"),
+    ("_mx_quantize_p", "nisa.quantize_mx(dst=data, src=stage.view(nl.bfloat16), dst_scale=scale)",
+     "p_quantize"),
+    ("_mx_swizzle_quantize", "nisa.quantize_mx(dst=data, src=stage.view(nl.bfloat16), dst_scale=scale)",
+     "qk_quantize"),
+    ("_mx_load_k", "nisa.memset(nat[c], value=0.0, engine=nisa.gpsimd_engine)", "qk_quantize"),
+    ("_mx_load_v", "nisa.quantize_mx(dst=data, src=packed, dst_scale=scale)", "v_quantize"),
+    ("_pv_large_tile_impl", "nisa.nc_matmul_mx(", "pv_matmul"),
+    ("_write_back_impl", "nisa.dma_copy(dst=prev_dst_pat, src=o_src_pat)", "other"),
+    ("_load_v_tile", "nisa.dma_copy(dst=out_dst_pat, src=v_src_pat)", "other"),
+]
+
+
+@pytest.mark.parametrize("function, statement, phase", _FORK_STATEMENTS)
+def test_attention_phase_of_the_mxfp8_fork(function, statement, phase):
+    path = REPO / components.FORK
+    text = path.read_text().splitlines()
+    line = next(i for i, s in enumerate(text, 1) if s.strip() == statement
+              and components.enclosing_function(str(path), i) == function)
+    assert components.attention_phase(f"/any/checkout/{components.FORK}:{line}") == phase
+    assert components.classify("Unknown-free", "", f"/x/{components.FORK}:{line}", "",
+                               "qwen_image") == "attention"
 
 
 def test_attention_phase_of_a_source_outside_the_kernel_is_other():

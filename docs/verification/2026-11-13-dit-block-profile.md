@@ -1294,3 +1294,93 @@ Outputs: `/mnt/nvme/difflet-mxattn/task5b/`:
 
 Each run directory has `runs.log` (`fuser`, `uptime`) and `md5.txt`. The tools are
 `identity.sh`, `kacc.sh`, `smoke.sh`, `droot.sh`, `summ.py` and `smoke_stats.py`.
+
+## 15. bf16 against both per model at the profile shapes (Task 6)
+
+Plan: `docs/plans/2026-11-14-attn-quant-model-runs.md`, Task 6. `both` = `--quant mxfp8
+--attn-quant qk+pv`; HunyuanVideo-1.5's arm is `attn` = `--attn-quant qk+pv` alone. Every model
+ran at its Plan A profile shape (section 1's table), with `scripts/quant_bench/bench.sh`'s steps,
+flags and prompts, seed 42, LNC=2, from the branch at `d9312a36` plus this section's scripts (no
+change under `difflet/`). G3 is reported, never applied, and nothing becomes a default (BR34).
+
+**What ran** (`scripts/mx_attention/run_arms.sh`, one lane per key: one idle device, one CPU set):
+1. *Warm, untimed:* one 2-step `generate` per arm (the quantized arm's cold compile), all seven
+   lanes at once on devices 1-7, CPUs 48-95,144-191 (NUMA node 1).
+2. *Timed:* once no compile of mine was left, bf16 then the quantized arm, back to back on the
+   lane's device and 48-thread CPU slice (`48-71,144-167` or `72-95,168-191`), two lanes at once
+   on node 1, one per slice. Each arm is one `generate` process with two identical requests
+   (`--requests`); its step time is the median of the two requests' step medians, its spread
+   (max - min) / median. `uptime` and every device's `fuser` are logged at each run's start and
+   end (`<key>/runs.log`).
+3. *Determinism:* one more `generate` of the quantized arm in a new process (`gen2`); its output
+   md5 must equal both timed requests'.
+4. *Block profile:* Plan A's capture of the quantized arm (`capture.sh --arm both|attn`), analysed
+   with Plan A's `analyze.py` next to Plan A's committed bf16 breakdown. Plan A's bf16 captures
+   were analysed again only for the attention phases: `exp` is now its own phase (it was inside
+   `mask_softmax`), and the MXFP8 fork's rows have `qk_quantize`, `v_quantize` and `p_quantize`
+   (scripts/profile_dit/README.md). Splitting a phase in two counts the rows the two overlap on
+   once in each: bf16 `mask_softmax` + `exp` exceed Plan A's `mask_softmax` by 0.03 ms (Qwen-Image)
+   to 2.7 ms (HunyuanVideo) per block; engines and the attention component are unchanged.
+5. *Quality* (`scripts/mx_attention/task6.py quality`): `compare_difflet_runs.py` on the first
+   timed request of each arm (videos through the .mp4, mean over frames and the worst frame;
+   latents rel L2 / cosine), and for Qwen-Image, FLUX and LTX-2 against the CPU fp32 reference
+   (`/home/ubuntu/fp8-bench/fp32_ref/<key>`, score.py's comparison, written to this run's
+   directory). The evidence doc's linear-alone, floor and fp32 columns stand beside them.
+
+**Caches.** `--cache-dir` was an NVMe mirror of Plan A's per-key root cache (ruling R7):
+`/mnt/nvme/difflet-mxattn/task6/cache/{fp8,video}`, NEFF/HLO caches and stage manifests copied,
+the quantized directories, bf16 copies and weight stores symlinked to the root ones and read by
+hits only (no file under `~/difflet-cache-*` was written). Task 5b's Qwen-Image `qk+pv` NEFFs were
+merged into the fp8 mirror. Hubs as `run_all.sh`'s `hub_of`.
+
+### 15a. Step time and G3
+
+J = max(2%, the larger of the two arms' spreads). Linear alone is the evidence's (section, host)
+unless this session ran it under the plan's rule (within 2J of `both`, or this session's bf16 more
+than 1% from the evidence's).
+
+| model | bf16 ms (spread) | quantized ms (spread) | quantized / bf16 | linear / bf16 | J | G3 (reported) | bf16 vs evidence |
+|---|---|---|---|---|---|---|---|
+| Qwen-Image | 304.0 (0.10%) | 257.9 (0.12%) | 0.848 | 0.791 (11b, host A) | 2.0% | both / bf16 < linear / bf16 - J: 0.771 -> not faster | +0.38% |
+<!-- 15a rows -->
+
+### 15b. Block profile
+
+Per block execution, ms; the binding engine and its share of the block. bf16 is Plan A's
+committed breakdown, the quantized arm this run's capture
+(`docs/verification/assets/2026-11-13-dit-block-profile/<key>/<arm>/`).
+
+| model | arm | block | wall | TensorE | VectorE | ScalarE | GpSimd | HBM DMA | PSUM read-out copy / fused | binding |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Qwen-Image | bf16 | blk1 (block) x60 | 5.05 | 3.55 | 2.05 | 1.15 | 0.20 | 0.62 | 0.60 / 1.07 | tensor 70.3% |
+| Qwen-Image | both | blk1 (block) x60 | 4.43 | 2.41 | 2.66 | 1.42 | 0.11 | 1.00 | 1.06 / 0.97 | vector 60.0% |
+<!-- 15b rows -->
+
+Routed attention (`attn` / `attn1`) per step, by phase and engine (T TensorE, V VectorE, S
+ScalarE, G GpSimd, H HBM DMA; ms per step, each block x its executions per step), the attention
+component's engine time per step (summed over engines) and V's quantization share of it:
+
+| model | arm | MM1 (QK^T) | mask / softmax | exp | MM2 (PV) | Q+K quantize | V quantize | P quantize | other | attention engine ms | V share |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| Qwen-Image | bf16 | T 27.6 | V 41.2, G 0.8 | V 20.1 | T 26.4, V 1.6 | - | - | - | T 0.4, V 0.4, G 0.9, H 9.2 | 117.4 | - |
+| Qwen-Image | both | T 21.7 | V 41.2, G 2.1 | V 20.2 | T 12.5, V 1.6 | T 6.9, V 2.5, S 3.3, G 0.4, H 1.0 | V 0.6, G 1.4, H 0.2 | T 29.3, V 13.4, S 21.6 | T 0.6, V 0.6, S 0.1, G 1.0, H 8.3 | 167.1 | 1.3% |
+<!-- 15b phase rows -->
+
+### 15c. Quality
+
+PSNR dB (worst frame) / SSIM / LPIPS, then latents cosine and rel L2 where the run kept latents.
+
+| model | quantized vs bf16 | linear vs bf16 (evidence) | bf16 floor (evidence) | quantized vs CPU fp32; bf16 vs fp32 here and in the evidence, linear vs fp32 (evidence) | notes |
+|---|---|---|---|---|---|
+| Qwen-Image | 29.14 / 0.964 / 0.060 / cos 0.9865, rel L2 0.164 | 38.26 / 0.992 / 0.008 (11c, A) | 39-46 dB | 29.08 / 0.965 / 0.061 / cos 0.9868, rel L2 0.162; bf16 here 36.34, evidence bf16 36.34 / linear 37.36 | bounded calls: K smoothing averages over all keys, padding included (BR36) |
+<!-- 15c rows -->
+
+### 15d. Determinism and provenance
+
+Output md5s (first 8 hex digits). The quantized arm's latents are compared as tensors (a file's
+bytes hold its own name): its second request and its `gen2` process against its first request.
+
+| model | bf16 output | quantized output | quantized latents | quantized latents finite |
+|---|---|---|---|---|
+| Qwen-Image | `5478687f` (= evidence `5478687f`, 11c, A); two requests equal | `583e3fce`; timed 2 and gen2 equal | bit-identical | finite |
+<!-- 15d rows -->

@@ -26,12 +26,15 @@
 # rerun skips what is done: the dump once dump.log says "dump exit 0", a block once its
 # summary.json exists (written last); a dump redone removes the blocks and system profile first.
 #
-# usage: capture.sh --key <key> --arm <bf16|mxfp8> --device <d> --cpus <taskset list> --out <root>
-#        capture.sh --key <key> --arm <bf16|mxfp8> --out <root> --candidates
+# usage: capture.sh --key <key> --arm <arm> --device <d> --cpus <taskset list> --out <root>
+#        capture.sh --key <key> --arm <arm> --out <root> --candidates
 #   keys: the plan's configuration table, flags from scripts/quant_bench/bench.sh's args_for.
+#   arms: bf16, mxfp8 (--quant mxfp8); the MXFP8 attention plan's Task 6: both (--quant mxfp8
+#   --attn-quant qk+pv) and, for hv15_official only, attn (--attn-quant qk+pv alone).
 #   --candidates: step 2 alone on a kept dump, its selection on stdout; no device, no file.
 # env: PY (the native-fp8 venv's python), SIGNATURES (default: signatures.json here); inherited
-#      as given: HF_HUB_CACHE, DIFFLET_NKI_TRACE_CACHE; CAPTURE_LOCK (lib.sh).
+#      as given: HF_HUB_CACHE, DIFFLET_NKI_TRACE_CACHE; CAPTURE_LOCK (lib.sh); CAPTURE_CACHE (the
+#      --cache-dir in place of the key's root cache, e.g. an NVMe mirror of it).
 set -u
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 REPO=$(cd "$HERE/../.." && pwd)
@@ -115,19 +118,26 @@ done
 case $ARM in
   bf16) QF=() ;;
   mxfp8) QF=(--quant mxfp8) ;;
+  both) QF=(--quant mxfp8 --attn-quant qk+pv) ;;
+  attn) QF=(--attn-quant qk+pv) ;;
   *) ARM= ;;
 esac
 if [ -z "$KEY" ] || [ -z "$ARM" ] || [ -z "$OUT" ] || { [ -z "$ONLY" ] && { [ -z "$DEV" ] || [ -z "$CPUS" ]; }; }; then
-  echo "usage: capture.sh --key <key> --arm <bf16|mxfp8> --device <d> --cpus <list> --out <root>" >&2
-  echo "       capture.sh --key <key> --arm <bf16|mxfp8> --out <root> --candidates" >&2
+  echo "usage: capture.sh --key <key> --arm <bf16|mxfp8|both|attn> --device <d> --cpus <list> --out <root>" >&2
+  echo "       capture.sh --key <key> --arm <bf16|mxfp8|both|attn> --out <root> --candidates" >&2
   exit 2
 fi
-if [ "$KEY $ARM" = "hv15_official mxfp8" ]; then
-  echo "capture.sh: hv15_official mxfp8 is not a configuration: HunyuanVideo-1.5 has no MXFP8" \
-       "default (the plan's table runs it in bf16 only)" >&2
-  exit 2
-fi
+case "$KEY $ARM" in
+  "hv15_official mxfp8"|"hv15_official both")
+    echo "capture.sh: hv15_official $ARM is not a configuration: HunyuanVideo-1.5 has no MXFP8" \
+         "default (the plan's table runs it in bf16 only; its attention arm is attn)" >&2
+    exit 2 ;;
+  "hv15_official attn") ;;
+  *" attn") echo "capture.sh: $KEY attn is not a configuration: attn is hv15_official's arm" >&2
+            exit 2 ;;
+esac
 key_for "$KEY"
+CACHE=${CAPTURE_CACHE:-$CACHE}
 OUT=$(realpath -m -- "$OUT")  # the dump runs from the checkout; the lane tag needs one spelling
 A=$OUT/$KEY/$ARM
 if [ -n "$ONLY" ]; then  # --candidates: the kept dump's block NEFFs on stdout; no device, no file
@@ -340,7 +350,8 @@ top = src.value_counts().idxmax() if len(src) else ""
 if re.search(not_a_block, top):  # a VAE's or text encoder's rows come from its own code
     sys.exit(f"dominant source location {top}")
 layers = rows.layer.dropna()
-attention = rows.nki_source_location.str.contains("attention_cte", na=False).any()
+# nkilib's attention_cte, or Difflet's MXFP8 fork of it (--attn-quant)
+attention = rows.nki_source_location.str.contains("attention_cte|mx_attention_kernel", na=False).any()
 kinds = json.loads(Path(signatures).read_text()).get(key, {})
 match = [k for k, s in kinds.items() if all(layers.str.startswith(r).any() for r in s["require"])
          and (attention or not s.get("attention_kernel"))]

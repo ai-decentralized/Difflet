@@ -201,7 +201,26 @@ def test_attention_loads_and_write_back_are_phase_other_not_unmapped(tmp_path):
                          row("Vector", 1000, 1300, ATTN, src=f"{CTE}:3381")])
     assert out["attention_detail"] == {"attn": {"qk_matmul": {"tensor": pytest.approx(1e-3)},
                                                 "other": {"hbm_dma": pytest.approx(2e-3)},
-                                                "mask_softmax": {"vector": pytest.approx(3e-4)}}}
+                                                "exp": {"vector": pytest.approx(3e-4)}}}
+
+
+def test_the_mxfp8_forks_rows_are_attention_in_its_own_phases_none_unmapped(tmp_path):
+    """The MXFP8 attention plan's routed op (Difflet's fork of attention_cte): its rows are the
+    attention component whatever HLO op they sit under, its loads are phase "other" by design."""
+    fork = REPO / "difflet/backends/neuron/ops_impl/mx_attention_kernel.py"
+    text = fork.read_text().splitlines()
+
+    def at(statement: str) -> str:  # the fork's line of a statement
+        return f"{fork}:{next(i for i, s in enumerate(text, 1) if s.strip() == statement)}"
+    out = run(tmp_path, [
+        row("Tensor", 0, 1000, ATTN, src=at("nisa.nc_matmul_mx(")),  # MM1, qk_mx
+        row("Vector", 0, 400, "Attention[attn][0]_all-reduce.1",  # under a collective (R14)
+            src=at("nisa.quantize_mx(dst=data, src=packed, dst_scale=scale)")),  # V's
+        row("Sync", 1000, 3000, ATTN, opcode="DMA_DIRECT2D",
+            src=at("nisa.dma_copy(dst=out_dst_pat, src=v_src_pat)"))])  # the bf16 V load
+    assert out["attention_detail"] == {"attn": {"qk_matmul": {"tensor": pytest.approx(1e-3)},
+                                                "v_quantize": {"vector": pytest.approx(4e-4)},
+                                                "other": {"hbm_dma": pytest.approx(2e-3)}}}
 
 
 def test_collectives_take_their_time_from_the_cc_ops(tmp_path):

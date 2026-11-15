@@ -15,7 +15,9 @@
 #   keys: section 11's flux qwen_image ltx_2 wan21 wan22 hunyuan_video hunyuan_video_15 (their
 #   phase G shapes and settings) and the official settings wan21_official wan22_official
 #   hv15_official (docs/plans/2026-11-08-mxfp8-official-settings-rerun.md, D2).
-# env: BENCH_ROOT (results: <key>/<arm>/{compile,cold_1,cold_2,warm}.log, outputs, cache_size.txt;
+# Sourced (scripts/mx_attention/run_arms.sh), it defines args_for, arm_flags, timed and
+# request_line and runs nothing.
+# env: ARMS (the arms in order, default "bf16 mx"; arm_flags has the others), BENCH_ROOT (results: <key>/<arm>/{compile,cold_1,cold_2,warm}.log, outputs, cache_size.txt;
 #      <key>/lane.txt; progress.txt), CACHE_ROOT (the per-arm compile caches, removed after each
 #      arm), HF_HUB_CACHE (the hub snapshots), PY (the native-fp8 venv's python). Keep all three
 #      directories on the local NVMe RAID: on the 125 MB/s EBS root compiles wait on I/O.
@@ -43,21 +45,6 @@ unset DIFFLET_COMPILE_CACHE TORCH_NEURONX_NEFF_CACHE_DIR TORCH_NEURONX_NEFF_LOCA
 # host-CPU bf16 encode depends on it (evidence 11c: 48 and 96 threads give different clips): an
 # inherited count would change the clip and every host-side time.
 unset OMP_NUM_THREADS MKL_NUM_THREADS
-
-CORES= CPUS=
-while [ $# -gt 0 ]; do
-  case $1 in
-    --cores) CORES=$2; shift 2 ;;
-    --cpus) CPUS=$2; shift 2 ;;
-    -*) echo "bench.sh: unknown option $1" >&2; exit 2 ;;
-    *) break ;;
-  esac
-done
-if [ -z "$CORES" ] || [ -z "$CPUS" ] || [ $# -eq 0 ]; then
-  echo "usage: bench.sh --cores <list> --cpus <list> <key>..." >&2
-  exit 2
-fi
-export NEURON_RT_VISIBLE_CORES=$CORES
 
 # The model cards' negative prompts (D2), byte for byte: Wan 2.1's (README.md:176 of 38ec498c) and
 # Wan 2.2's (README.md:185 of 5be7df96, the same bytes as both Wan repos' sample_neg_prompt).
@@ -87,6 +74,12 @@ args_for() {  # args_for <key>: M (model, shape, layout), P (sampling, no prompt
     hunyuan_video) M=(--model-id hunyuanvideo-community/HunyuanVideo
                       --revision e8c2aaa66fe3742a32c11a6766aecbf07c56e773
                       --height 320 --width 512 --num-frames 61 --tp-degree 4)
+      P=(--seed 42 --guidance-scale 6.0)
+      PROMPT="a cinematic shot of a red fox running through a snowy forest" ;;
+    # HunyuanVideo at evidence 7f's long shape (the DiT block profile's key, capture.sh)
+    hunyuan_video_L) M=(--model-id hunyuanvideo-community/HunyuanVideo
+                        --revision e8c2aaa66fe3742a32c11a6766aecbf07c56e773
+                        --height 544 --width 960 --num-frames 129 --tp-degree 4)
       P=(--seed 42 --guidance-scale 6.0)
       PROMPT="a cinematic shot of a red fox running through a snowy forest" ;;
     hunyuan_video_15) M=(--model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v
@@ -141,6 +134,42 @@ if sys.argv[4]:
 print(json.dumps(line, ensure_ascii=False))' "$PROMPT" "$STEPS" "$1" "$NEG"
 }
 
+arm_flags() {  # arm_flags <arm>: QF (the arm's flags) and QENV (its environment): bf16; mx
+               # (--quant mxfp8, with the key's QT); both (mx plus MXFP8 QK^T and PV in
+               # attention, the MXFP8 attention plan's Task 6); attn (that attention alone)
+  QF=() QENV=()
+  case $1 in
+    bf16) ;;
+    mx) QF=(--quant mxfp8) ;;
+    both) QF=(--quant mxfp8 --attn-quant qk+pv) ;;
+    attn) QF=(--attn-quant qk+pv) ;;
+    *) echo "bench.sh: unknown arm $1" >&2; exit 2 ;;
+  esac
+  if [ -n "$QT" ] && [ ${#QF[@]} -gt 0 ] && [ "${QF[0]}" = --quant ]; then
+    QENV=(DIFFLET_QUANT_TARGETS="$QT")  # its three commands only
+  fi
+}
+
+[ "${BASH_SOURCE[0]}" = "$0" ] || return 0  # sourced: the functions only
+
+CORES= CPUS=
+while [ $# -gt 0 ]; do
+  case $1 in
+    --cores) CORES=$2; shift 2 ;;
+    --cpus) CPUS=$2; shift 2 ;;
+    -*) echo "bench.sh: unknown option $1" >&2; exit 2 ;;
+    *) break ;;
+  esac
+done
+if [ -z "$CORES" ] || [ -z "$CPUS" ] || [ $# -eq 0 ]; then
+  echo "usage: bench.sh --cores <list> --cpus <list> <key>..." >&2
+  exit 2
+fi
+export NEURON_RT_VISIBLE_CORES=$CORES
+
+ARMS=${ARMS:-bf16 mx}
+for arm in $ARMS; do QT= arm_flags "$arm"; done  # every arm known before anything is written
+
 for key in "$@"; do args_for "$key"; done  # every key known before anything is written
 mkdir -p "$BENCH_ROOT" "$CACHE_ROOT"
 for key in "$@"; do
@@ -148,7 +177,7 @@ for key in "$@"; do
   mkdir -p "$BENCH_ROOT/$key"
   printf 'cores %s\ncpus %s\nthreads %s\n' "$CORES" "$CPUS" "$(taskset -c "$CPUS" nproc)" \
     > "$BENCH_ROOT/$key/lane.txt"
-  for arm in bf16 mx; do
+  for arm in $ARMS; do
     W=$BENCH_ROOT/$key/$arm
     if [ -d "$W" ] && [ -n "$(ls -A "$W")" ]; then  # a rerun: the earlier run is archived, so
       mkdir -p "$BENCH_ROOT/discarded"              # no output of it passes for this one's
@@ -158,11 +187,7 @@ for key in "$@"; do
     warm_hub
     C=$CACHE_ROOT/$key-$arm
     rm -rf "$C"; mkdir -p "$C"
-    QF=() QENV=()
-    if [ $arm = mx ]; then
-      QF=(--quant mxfp8)
-      if [ -n "$QT" ]; then QENV=(DIFFLET_QUANT_TARGETS="$QT"); fi  # its three commands only
-    fi
+    arm_flags "$arm"
     mark "$key $arm compile"
     if timed "$W/compile.log" env "${QENV[@]}" "$PY" -m difflet.cli.main compile --backend neuron \
         "${M[@]}" "${QF[@]}" --cache-dir "$C"; then

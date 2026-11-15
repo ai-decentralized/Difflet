@@ -138,3 +138,33 @@ def test_quality_reads_no_output_of_a_failed_step(tmp_path):
     assert done.returncode == 0, done.stderr
     md5 = json.loads((tmp_path / "quality.json").read_text())["wan21_official"]["bf16"]["md5"]
     assert md5["cold_1"] is None and md5["cold_2"] is not None
+
+
+@needs_tools
+def test_the_attention_arms_add_attn_quant_beside_the_quant_flags(tmp_path):
+    """ARMS (the MXFP8 attention plan's Task 6): `both` is the mx arm plus --attn-quant qk+pv,
+    `attn` is --attn-quant qk+pv alone; the former default's targets follow --quant only."""
+    from tests.unit.backends._neuron_hv15_toy import HV15_MEASURED_TARGETS
+
+    root, lines = _bench(tmp_path, "qwen_image", "hv15_official", ARMS="bf16 both attn")
+    assert len(lines) == 2 * 3 * 4  # two keys, three arms, four commands each
+    for line in lines:
+        argv = line["argv"]
+        arm = Path(_flag(argv, "--cache-dir")).name.rpartition("-")[2]  # CACHE_ROOT/<key>-<arm>
+        quant, attn = _flag(argv, "--quant"), _flag(argv, "--attn-quant")
+        assert (quant, attn) == {"bf16": (None, None), "both": ("mxfp8", "qk+pv"),
+                                 "attn": (None, "qk+pv")}[arm], argv
+        hv15 = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v" in argv
+        want = ";".join(HV15_MEASURED_TARGETS) if hv15 and quant else None
+        assert line["env"]["DIFFLET_QUANT_TARGETS"] == want, argv
+    for key in ("qwen_image", "hv15_official"):
+        assert sorted(p.name for p in (root / key).iterdir() if p.is_dir()) == ["attn", "bf16",
+                                                                                 "both"]
+
+
+def test_an_unknown_arm_fails_before_anything_runs(tmp_path):
+    done = subprocess.run(["bash", str(QB / "bench.sh"), "--cores", "0-3", "--cpus", "0", "flux"],
+                          env={**os.environ, "ARMS": "bf16 qk", "BENCH_ROOT": str(tmp_path / "r")},
+                          capture_output=True, text=True, timeout=60)
+    assert done.returncode == 2 and "unknown arm qk" in done.stderr
+    assert not (tmp_path / "r").exists()

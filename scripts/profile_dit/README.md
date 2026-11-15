@@ -62,7 +62,7 @@ then `analyze.py <blk> --model <key>` on every block of a `DONE` lane (`blk<i>/a
 ## `capture.sh`
 
 ```
-capture.sh --key <key> --arm <bf16|mxfp8> --device <d> --cpus <taskset list> --out <root>
+capture.sh --key <key> --arm <bf16|mxfp8|both|attn> --device <d> --cpus <taskset list> --out <root>
 ```
 
 One lane: device `d` (`NEURON_RT_VISIBLE_CORES=4d..4d+3`), one CPU set, one directory
@@ -74,9 +74,19 @@ single sigma divides 0 by 0 in diffusers' `FlowMatchEulerDiscreteScheduler`, so 
 NaN and the scheduler's step fails after the DiT forward (`qwen_image` dump, 2026-11-13: `IndexError`
 in `index_for_timestep`; LTX-2's config gives the same NaN on CPU). `system_profile.py` divides
 the denoise loop by the step count. The compile cache is per key (ruling R7): `qwen_image` uses
-`~/difflet-cache-fp8`, every other key `~/difflet-cache-video`. `hv15_official mxfp8` is refused
-(exit 2). `HF_HUB_CACHE` and `DIFFLET_NKI_TRACE_CACHE` are taken from the caller's environment;
-`PY` defaults to `~/venvs/native-fp8/bin/python`.
+`~/difflet-cache-fp8`, every other key `~/difflet-cache-video`; `CAPTURE_CACHE` replaces it (an
+NVMe mirror, the MXFP8 attention plan's Task 6). `hv15_official mxfp8` is refused (exit 2).
+`HF_HUB_CACHE` and `DIFFLET_NKI_TRACE_CACHE` are taken from the caller's environment; `PY`
+defaults to `~/venvs/native-fp8/bin/python`.
+
+**Attention arms** (the MXFP8 attention plan's Task 6): `both` = `--quant mxfp8 --attn-quant
+qk+pv`, and `attn` = `--attn-quant qk+pv` alone, for `hv15_official` only (`hv15_official both`
+and `<other key> attn` are refused). Their routed attention runs Difflet's fork of
+attention_cte (`ops_impl/mx_attention_kernel.py`), which counts as the attention kernel for the
+signature and the components; `components.py` maps the fork's rows to phases by function
+(`_FORK_PHASES`), with its own `qk_quantize` (Q and K share one helper, so they are not split),
+`v_quantize` and `p_quantize`. Both kernels' exp statements are phase `exp` (since Task 6; Plan
+A's committed breakdowns count them in `mask_softmax`).
 
 | step | command | output |
 |---|---|---|
