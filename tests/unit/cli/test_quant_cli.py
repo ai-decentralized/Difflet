@@ -48,6 +48,17 @@ def test_the_help_names_the_attention_qkv_a_default_keeps_bf16():
     assert "Wan: its self-attention q/k/v too" in help_text
 
 
+def test_the_attn_quant_help_carries_its_cost_and_its_evidence():
+    """A user who finds --attn-quant in --help learns it is opt-in, slower and where the numbers
+    are, not only what it does."""
+    parser = argparse.ArgumentParser()
+    Q.add_quant_flags(parser)
+    help_text = " ".join(next(a.help for a in parser._actions if a.dest == "attn_quant").split())
+    for words in ("never a default", "slower than --quant mxfp8 alone on every model",
+                  "quality cost", "docs/verification/2026-11-13-dit-block-profile.md"):
+        assert words in help_text, words
+
+
 def _refused(args, match, capsys):
     with pytest.raises(SystemExit):
         Q.validate_quant(args)
