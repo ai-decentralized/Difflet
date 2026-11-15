@@ -64,8 +64,10 @@ difflet run --model-id MiniMaxAI/MiniMax-H3 --revision 0919fb684102ef115126612f3
 Add `--torch-compile` to compile the transformer blocks.
 
 The image is converted to RGB and stretched to the output size with LANCZOS, without
-cropping, as the neuron backend places a first keyframe. Prompts take up to 1024 tokens.
-`--last-frame` (a closing keyframe) is the neuron backend's only and is refused on CUDA.
+cropping, as the neuron backend does when `--height`/`--width` are given. On CUDA the output
+size never follows the image: without `--height`/`--width` it is the 1344x768 default,
+whatever the image's aspect ratio. Prompts take up to 1024 tokens. `--last-frame` (a closing
+keyframe) is refused on CUDA.
 
 ## Serve
 
@@ -125,15 +127,17 @@ compiled execution.
 
 ## How it runs
 
-The code is in `difflet/backends/cuda/minimax_h3/`; the Trainium path is separate.
+The code is in `difflet/backends/cuda/minimax_h3/`. The transformer, the two VAEs and their
+tiling are CUDA's own modules, separate from the ones the neuron and Trainium backends run
+(`difflet/models/minimax_h3/`), so a change on either side leaves the other's output alone.
 
 - **Residency.** `load` puts every component on the GPU: the transformer, the Qwen3-VL text
   encoder with its vision tower, and the visual VAE's encoder and decoder and the audio
   VAE's decoder in FP32.
 - **First-frame conditioning.** The canvas, the presentation to the text encoder (the image
-  as image tokens in front of the prompt), the tiled VAE encode and the packed layout are the
-  shared FL2VA code in `difflet/models/minimax_h3/` that the neuron backend also runs. The
-  image's latent frame is mixed with a little seeded noise and placed in the packed sequence
+  as image tokens in front of the prompt) and the packed layout are the shared FL2VA code in
+  `difflet/models/minimax_h3/` that the neuron backend also runs; CUDA's encoder encodes the
+  image over the reference's 256-pixel tiles. The image's latent frame is mixed with a little seeded noise and placed in the packed sequence
   as extra rows at frame 0's position. Those rows stay fixed during denoising; every output
   frame, frame 0 included, is generated.
 - **Noise.** CUDA draws its noise the way MiniMax's published samples were made: the video

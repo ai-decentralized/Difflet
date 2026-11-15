@@ -1,5 +1,5 @@
-"""MiniMax-H3 first-frame conditioning on CUDA: the keyframe encode through the shared tiled
-encoder and CUDA's noise-augmented anchor rows. CPU-only."""
+"""MiniMax-H3 first-frame conditioning on CUDA: the keyframe encode through CUDA's tiled VAE
+encoder and its noise-augmented anchor rows. CPU-only."""
 
 from __future__ import annotations
 
@@ -7,9 +7,9 @@ import torch
 from PIL import Image
 
 from difflet.backends.cuda.minimax_h3.keyframe import encode_keyframe, keyframe_anchor_rows
+from difflet.backends.cuda.minimax_h3.vae import VideoEncoder
 from difflet.models.minimax_h3.contracts import KEYFRAME_NOISE_AUG
-from difflet.models.minimax_h3.host_components import HostVideoEncoder, _HostVideoEncoderModule
-from difflet.models.minimax_h3.keyframes import keyframe_pixels
+from difflet.models.minimax_h3.keyframes import encode_keyframe_condition, keyframe_pixels
 from difflet.models.minimax_h3.pipeline import patchify_video_latents
 
 
@@ -26,7 +26,7 @@ def test_anchor_mixes_clean_rows_with_frame_zero_of_the_full_seeded_noise():
     assert not torch.equal(noise, single)
 
 
-def _encoder() -> HostVideoEncoder:
+def _encoder() -> VideoEncoder:
     config = dict(
         in_channels=3,
         latent_channels=24,
@@ -41,13 +41,16 @@ def _encoder() -> HostVideoEncoder:
         latents_std=[1.3] * 24,
     )
     torch.manual_seed(0)
-    return HostVideoEncoder(_HostVideoEncoderModule(config).eval(), config)
+    return VideoEncoder(config).eval()
 
 
-def test_the_keyframe_encode_is_the_shared_tiled_encode():
+def test_the_keyframe_encode_samples_and_normalizes_the_tiled_moments():
     """Over 256 pixels on a side, so the encode is tiled and stitched."""
     encoder = _encoder()
     image = Image.fromarray((torch.rand(320, 448, 3) * 255).to(torch.uint8).numpy())
-    latent = encode_keyframe(encoder, image, device=torch.device("cpu"))
+    latent = encode_keyframe(encoder, image)
     assert latent.shape == (1, 24, 1, 20, 28) and latent.device.type == "cpu"
-    assert torch.equal(latent, encoder(keyframe_pixels(image)))
+    want = encode_keyframe_condition(
+        encoder.moments, keyframe_pixels(image), latents_mean=[0.1] * 24, latents_std=[1.3] * 24
+    )
+    assert torch.equal(latent, want)

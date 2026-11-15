@@ -205,10 +205,11 @@ Design points worth knowing:
   the CPU reference within bf16 rounding, not bit for bit.
 - **MiniMax-H3** is the GPU flow's model with joint audio/video output and keyframe input
   (`ModelSpec.output_has_audio`, `keyframe_anchors`; the serving interface is the neuron
-  backend's FL2VA one). It keeps every component on one GPU, installs its FP32 per-row
-  arithmetic and fused Triton custom ops after loading (`minimax_h3/numerics.py`) and compiles
-  in Inductor's default mode with `emulate_precision_casts` (`compile_options`); see
-  `docs/verification/minimax-h3-cuda.md`.
+  backend's FL2VA one). It keeps every component on one GPU and runs its own transformer and
+  VAE modules (`difflet/backends/cuda/minimax_h3/`), not the neuron/Trainium ones in
+  `difflet/models/minimax_h3/`, with the FP32 per-row arithmetic and fused Triton custom ops
+  built in, and compiles in Inductor's default mode with `emulate_precision_casts`
+  (`compile_options`); see `docs/verification/minimax-h3-cuda.md`.
 
 ## Compile cache
 

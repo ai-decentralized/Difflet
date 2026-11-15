@@ -1,5 +1,10 @@
-"""MiniMax-H3 on the generic GPU flow: text-to-video and first-frame image-to-video, each
-with a stereo audio track."""
+"""MiniMax-H3 on CUDA, through the generic GPU flow: text-to-video and first-frame
+image-to-video, each with a stereo audio track.
+
+This spec is the CUDA backend's alone. The neuron backend declares the model separately: its
+serving metadata in ``difflet/common/registry/minimax_h3.py`` (keyframes as one flag, first
+and last), its defaults in ``difflet/common/orchestrators/minimax_h3.py``.
+"""
 
 from difflet.models.spec import ModelSpec, PromptBudget
 
@@ -23,7 +28,7 @@ SPEC = ModelSpec(
     # One pass per step: a served request may only carry CFG's no-op scale.
     serving_noop_guidance_scale=1.0,
     no_guidance_reason=_DISTILLED,
-    # First-frame conditioning (I2VA); a last keyframe is the neuron backend's only.
+    # First-frame conditioning (I2VA) only.
     keyframe_anchors=("first",),
     default_fps=24,
     output_has_audio=True,
@@ -61,4 +66,18 @@ SPEC = ModelSpec(
         ),
     ),
     application="difflet.backends.cuda.minimax_h3.application:CudaMiniMaxH3Application",
+    # The files the CUDA application loads: the repository's root diffusers partition, without
+    # the Ref2VA transformer and the original FL2VA/Ref2VA checkpoints beside it.
+    download_patterns=(
+        "*.json",
+        "*.txt",
+        "*.md",
+        "LICENSE",
+        "transformer/diffusion_pytorch_model*.safetensors",
+        "text_encoder/model*.safetensors",
+        "tokenizer/*",
+        "processor/*",
+        "vae/diffusion_pytorch_model*.safetensors",
+        "audio_vae/diffusion_pytorch_model*.safetensors",
+    ),
 )

@@ -15,9 +15,9 @@ from PIL import Image
 
 from difflet.backends.cuda.minimax_h3 import application as mod
 from difflet.backends.cuda.minimax_h3.application import CudaMiniMaxH3Application
+from difflet.backends.cuda.minimax_h3.spec import SPEC
 from difflet.models.minimax_h3.contracts import TEXT_TAG, VIDEO_TAG
 from difflet.models.minimax_h3.pipeline import MiniMaxH3LatentOutput
-from difflet.models.minimax_h3.spec import SPEC
 from difflet.pipeline.parallel_config import DiffletParallelConfig
 from difflet.serving.errors import DiffletServingError
 
@@ -76,20 +76,8 @@ def app(tmp_path, monkeypatch):
     app.transformer = SimpleNamespace(is_loaded=True)
     app.tokenizer, app.image_processor = _Tokenizer(), _ImageProcessor()
     app.text_encoder = _TextEncoder()
-    app.video_encoder = SimpleNamespace(config={"latents_mean": [0.0], "latents_std": [1.0]})
-    app.video_decoder = SimpleNamespace(
-        config=SimpleNamespace(
-            latents_mean=[0.0],
-            latents_std=[1.0],
-            clip_length=17,
-            token_drop=3,
-            temporal_compression_ratio=4,
-            spatial_compression_ratio=16,
-        )
-    )
-    app.audio_decoder = SimpleNamespace(
-        config=SimpleNamespace(latents_mean=[0.0], latents_std=[1.0], sampling_rate=32000)
-    )
+    app.video_encoder, app.video_decoder = "video-encoder", "video-decoder"
+    app.audio_decoder = SimpleNamespace(config=SimpleNamespace(sampling_rate=32000))
     app.video_scheduler, app.audio_scheduler = "video-scheduler", "audio-scheduler"
     app.calls = []
 
@@ -107,14 +95,13 @@ def app(tmp_path, monkeypatch):
     )
     monkeypatch.setattr(
         mod,
-        "decode_minimax_h3_video",
-        lambda decoder, latents, **kw: app.calls.append(("video", kw))
-        or torch.zeros(1, 3, 5, 8, 8),
+        "decode_video",
+        lambda decoder, latents: app.calls.append(("video", decoder)) or torch.zeros(1, 3, 5, 8, 8),
     )
     monkeypatch.setattr(
         mod,
-        "decode_minimax_h3_audio",
-        lambda decoder, latents, **kw: app.calls.append(("audio", kw)) or torch.zeros(1, 2, 9),
+        "decode_audio",
+        lambda decoder, latents: app.calls.append(("audio", decoder)) or torch.zeros(1, 2, 9),
     )
     return app
 
@@ -129,7 +116,7 @@ def test_text_to_video_encodes_the_prompt_alone_and_decodes_both_streams(app):
     assert denoise["keyframe_rows"] is None
     assert denoise["text_token_tags"].tolist() == [TEXT_TAG] * len("a cat")
     assert (denoise["height"], denoise["width"], denoise["num_frames"]) == (256, 256, 124)
-    assert app.calls[1][1]["clip_length"] == 17 and app.calls[1][1]["token_drop"] == 3
+    assert app.calls[1][1] == "video-decoder" and app.calls[2][1] is app.audio_decoder
     assert out.video.shape == (1, 3, 5, 8, 8) and out.audio.shape == (1, 2, 9)
     assert out.sample_rate == 32000
 
@@ -191,19 +178,9 @@ def test_only_bf16_is_supported(tmp_path):
 def test_load_companions_keeps_every_component_on_the_device(tmp_path, monkeypatch):
     app = _app(tmp_path)
     loaded = []
-    encoder = SimpleNamespace(
-        module=SimpleNamespace(
-            to=lambda device: loaded.append(("load_host_video_encoder", None, device))
-        )
-    )
-    monkeypatch.setattr(
-        "difflet.models.minimax_h3.host_components.load_host_video_encoder",
-        lambda root: encoder,
-    )
-    for name in ("load_video_decoder", "load_audio_decoder"):
+    for name in ("load_video_encoder", "load_video_decoder", "load_audio_decoder"):
         monkeypatch.setattr(
-            f"difflet.backends.cuda.minimax_h3.decoders.{name}",
-            lambda path, device, _n=name: loaded.append((_n, path, device)) or _n,
+            mod, name, lambda path, device, _n=name: loaded.append((_n, path, device)) or _n
         )
     monkeypatch.setattr(
         "difflet.backends.cuda.minimax_h3.text_encoder.load_text_encoder",
@@ -217,13 +194,13 @@ def test_load_companions_keeps_every_component_on_the_device(tmp_path, monkeypat
     )
     monkeypatch.setattr(mod, "load_minimax_h3_schedulers", lambda root: ("v", "a"))
     app.load_companions()
-    assert {entry[0] for entry in loaded} == {
-        "text",
-        "load_video_decoder",
-        "load_audio_decoder",
-        "load_host_video_encoder",
+    assert {entry[:2] for entry in loaded} == {
+        ("text", str(tmp_path / "text_encoder")),
+        ("load_video_encoder", tmp_path / "vae"),
+        ("load_video_decoder", tmp_path / "vae"),
+        ("load_audio_decoder", tmp_path / "audio_vae"),
     }
-    assert app.video_encoder is encoder
+    assert app.video_encoder == "load_video_encoder"
     assert all(str(entry[2]) == "cpu" for entry in loaded)
     assert (app.video_scheduler, app.audio_scheduler) == ("v", "a")
     assert app.image_processor == ("processor", tmp_path / "processor")
@@ -232,14 +209,15 @@ def test_load_companions_keeps_every_component_on_the_device(tmp_path, monkeypat
 # ----------------------------------------------------------- spec, CLI and serving
 
 
-def test_the_spec_imports_without_torch_or_the_trainium_path():
+def test_the_spec_imports_without_torch_or_any_application():
     subprocess.run(
         [
             sys.executable,
             "-c",
-            "import sys; import difflet.models.minimax_h3.spec; "
+            "import sys; import difflet.backends.cuda.minimax_h3.spec; "
             "assert 'torch' not in sys.modules; "
-            "assert 'difflet.models.minimax_h3.application' not in sys.modules",
+            "assert 'difflet.backends.cuda.minimax_h3.application' not in sys.modules; "
+            "assert 'difflet.models.minimax_h3' not in sys.modules",
         ],
         check=True,
     )
@@ -255,18 +233,26 @@ def test_h3_is_a_cuda_model_with_audio_and_a_first_frame():
     assert SPEC.default_fps == 24
 
 
-def test_download_pulls_only_the_registry_subset(monkeypatch):
-    from difflet.registry import resolve_model
-    from tests.unit.cli.test_gpu_cli import _orch
+def test_the_download_list_covers_what_cuda_loads_and_leaves_other_weights_out():
+    from huggingface_hub.utils import filter_repo_objects
 
-    seen = {}
-    monkeypatch.setattr(
-        "difflet.pipeline.path_resolver.resolve_model_path",
-        lambda model_id, **kw: seen.update(kw),
-    )
-    _orch(SPEC).download()
-    patterns = resolve_model(H3).download_patterns
-    assert patterns and seen["allow_patterns"] == patterns
+    loaded = [
+        "model_index.json",
+        "transformer/config.json",
+        "transformer/diffusion_pytorch_model-00001-of-00009.safetensors",
+        "transformer/diffusion_pytorch_model.safetensors.index.json",
+        "text_encoder/model-00001-of-00004.safetensors",
+        "tokenizer/tokenizer.json",
+        "processor/preprocessor_config.json",
+        "vae/diffusion_pytorch_model.safetensors",
+        "audio_vae/config.json",
+        "audio_vae/diffusion_pytorch_model.safetensors",
+        "scheduler/scheduler_config.json",
+        "audio_scheduler/scheduler_config.json",
+    ]
+    other = ["ref2va/transformer/diffusion_pytorch_model.safetensors", "original/model.pt"]
+    kept = list(filter_repo_objects(loaded + other, allow_patterns=SPEC.download_patterns))
+    assert kept == loaded
 
 
 def test_serving_on_cuda_resolves_the_gpu_metadata(monkeypatch, tmp_path):

@@ -7,8 +7,10 @@ visual VAE's encoder (for the keyframe) and decoder, and the audio VAE's decoder
 encodes the prompt (and the keyframe), denoises (``denoise.denoise``) and decodes both
 streams; the media are returned on the CPU.
 
-The keyframe's canvas, its presentation to the text encoder and its VAE encode are the
-shared FL2VA helpers (``difflet.models.minimax_h3.keyframes``), as on the neuron backend.
+The modules are CUDA's own (``modeling``, ``vae``, ``audio_vae``; the text encoder is
+Transformers' Qwen3-VL). The keyframe's canvas and its presentation to the text encoder, the
+packed layout and the schedules are the shared FL2VA helpers in ``difflet.models.minimax_h3``,
+as on the neuron backend.
 """
 
 from __future__ import annotations
@@ -18,16 +20,18 @@ from pathlib import Path
 
 import torch
 
+from difflet.backends.cuda.minimax_h3.audio_vae import decode_audio, load_audio_decoder
 from difflet.backends.cuda.minimax_h3.denoise import denoise
+from difflet.backends.cuda.minimax_h3.spec import SPEC
+from difflet.backends.cuda.minimax_h3.vae import (
+    decode_video,
+    load_video_decoder,
+    load_video_encoder,
+)
 from difflet.backends.gpu.application import GpuApplication
 from difflet.models.minimax_h3.contracts import build_t2va_layout
 from difflet.models.minimax_h3.keyframes import build_fl2va_presentation, prepare_keyframes
-from difflet.models.minimax_h3.pipeline import (
-    decode_minimax_h3_audio,
-    decode_minimax_h3_video,
-    load_minimax_h3_schedulers,
-)
-from difflet.models.minimax_h3.spec import SPEC
+from difflet.models.minimax_h3.pipeline import load_minimax_h3_schedulers
 
 # The visual VAE decodes 256-pixel tiles.
 _MIN_SIDE = 256
@@ -66,12 +70,7 @@ class CudaMiniMaxH3Application(GpuApplication):
     def load_companions(self) -> None:
         from transformers import AutoImageProcessor, AutoTokenizer
 
-        from difflet.backends.cuda.minimax_h3.decoders import (
-            load_audio_decoder,
-            load_video_decoder,
-        )
         from difflet.backends.cuda.minimax_h3.text_encoder import load_text_encoder
-        from difflet.models.minimax_h3.host_components import load_host_video_encoder
 
         root = Path(self.model_path)
         self.tokenizer = AutoTokenizer.from_pretrained(root / "tokenizer", local_files_only=True)
@@ -83,11 +82,9 @@ class CudaMiniMaxH3Application(GpuApplication):
         self.text_encoder = load_text_encoder(
             root / "text_encoder", dtype=self.dtype, device=self.device
         )
-        # The shared tiled keyframe encoder, its FP32 module moved to the device.
-        self.video_encoder = load_host_video_encoder(root)
-        self.video_encoder.module.to(self.device)
-        self.video_decoder = load_video_decoder(str(root / "vae"), device=self.device)
-        self.audio_decoder = load_audio_decoder(str(root / "audio_vae"), device=self.device)
+        self.video_encoder = load_video_encoder(root / "vae", device=self.device)
+        self.video_decoder = load_video_decoder(root / "vae", device=self.device)
+        self.audio_decoder = load_audio_decoder(root / "audio_vae", device=self.device)
         self.video_scheduler, self.audio_scheduler = load_minimax_h3_schedulers(root)
 
     # ------------------------------------------------------------ encoders
@@ -126,7 +123,7 @@ class CudaMiniMaxH3Application(GpuApplication):
         """The keyframe's fixed, noise-augmented anchor rows ``(1, rows_per_frame, 96)``."""
         from difflet.backends.cuda.minimax_h3.keyframe import encode_keyframe, keyframe_anchor_rows
 
-        latent = encode_keyframe(self.video_encoder, image, device=self.device)
+        latent = encode_keyframe(self.video_encoder, image)
         return keyframe_anchor_rows(
             latent, seed=seed, num_target_latent_frames=self.num_latent_frames
         )
@@ -175,27 +172,10 @@ class CudaMiniMaxH3Application(GpuApplication):
             text_token_tags=text_tags,
             keyframe_rows=keyframe_rows,
         )
-        config = self.video_decoder.config
-        # The video is decoded and stitched on the device; the small audio latents are
-        # denormalized on the host, as the shared audio decode does.
-        video = decode_minimax_h3_video(
-            self.video_decoder,
-            latents.video_latents,
-            latents_mean=config.latents_mean,
-            latents_std=config.latents_std,
-            clip_length=config.clip_length,
-            token_drop=config.token_drop,
-            temporal_compression_ratio=config.temporal_compression_ratio,
-            spatial_compression_ratio=config.spatial_compression_ratio,
-        ).cpu()
-        config = self.audio_decoder.config
-        audio = decode_minimax_h3_audio(
-            self.audio_decoder,
-            latents.audio_latents.cpu(),
-            latents_mean=config.latents_mean,
-            latents_std=config.latents_std,
-        ).cpu()
-        return MiniMaxH3Output(video=video, audio=audio, sample_rate=int(config.sampling_rate))
+        video = decode_video(self.video_decoder, latents.video_latents).cpu()
+        audio = decode_audio(self.audio_decoder, latents.audio_latents).cpu()
+        sample_rate = int(self.audio_decoder.config.sampling_rate)
+        return MiniMaxH3Output(video=video, audio=audio, sample_rate=sample_rate)
 
 
 __all__ = ["CudaMiniMaxH3Application", "MiniMaxH3Output"]

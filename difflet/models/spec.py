@@ -83,6 +83,10 @@ class ModelSpec:
     smoke_prompt: str = "a small red square"
     #: The application class, as ``module:attribute``; imported only where torch is loaded.
     application: str = ""
+    #: The checkpoint files ``difflet run`` and ``difflet serve`` download (Hugging Face allow
+    #: patterns). ``None`` keeps their defaults: the registry entry's subset for ``run``, the
+    #: diffusers component folders (``DEFAULT_DIFFUSERS_PATTERNS``) for ``serve``.
+    download_patterns: tuple[str, ...] | None = None
 
 
 #: Models with a GPU spec, by registry entry name.
@@ -93,7 +97,8 @@ _GPU_SPEC_MODULES = {
     "hunyuan_video": "difflet.models.hunyuan_video.spec",
     "ltx_2": "difflet.models.ltx_2.spec",
     "hunyuan_video_15": "difflet.models.hunyuan_video_15.spec",
-    "minimax_h3": "difflet.models.minimax_h3.spec",
+    # The neuron and Trainium backends own difflet/models/minimax_h3/; CUDA's spec is its own.
+    "minimax_h3": "difflet.backends.cuda.minimax_h3.spec",
 }
 
 

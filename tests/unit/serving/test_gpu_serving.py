@@ -99,17 +99,10 @@ def _prepare(spec, profile, policy=CompilePolicy.AUTO):
 
 
 def test_prepare_runtime_resolves_the_snapshot_and_builds_an_eager_bundle(spec, source):
-    from difflet.registry import resolve_model
-
     bundle = _prepare(spec, _profile(spec))
-    # The registry's download subset, the one the worker's load reads (None: diffusers').
-    patterns = resolve_model(_model(spec), model_type=spec.model_type).download_patterns
-    assert source == [
-        (
-            (_model(spec),),
-            {"revision": None, "download_policy": DownloadPolicy.AUTO, "allow_patterns": patterns},
-        )
-    ]
+    # The spec's files (None: the diffusers default).
+    policy = {"revision": None, "download_policy": DownloadPolicy.AUTO}
+    assert source == [((_model(spec),), {**policy, "allow_patterns": spec.download_patterns})]
     assert bundle.compile_specs == () and bundle.artifacts.bindings == ()
     assert [s.stage_id for s in bundle.pipeline_definition.stages] == ["pipeline"]
     (stage,) = bundle.runtime_plan.stages

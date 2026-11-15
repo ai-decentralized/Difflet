@@ -1,8 +1,8 @@
 """MiniMax-H3 first-frame conditioning on CUDA: the keyframe's latent and its anchor rows.
 
-The keyframe is put on the canvas, presented to the text encoder and encoded by the visual
-VAE's encoder with the shared FL2VA helpers (``difflet.models.minimax_h3.keyframes`` and
-``host_components``' tiled encoder), here on the GPU.
+The keyframe is put on the canvas and presented to the text encoder with the shared FL2VA
+helpers (``difflet.models.minimax_h3.keyframes``), and encoded on the GPU by CUDA's own tiled
+VAE encoder (``vae.VideoEncoder``).
 
 The anchor rows mix that latent with a little noise, ``0.999 * clean + 0.001 * noise``. CUDA
 draws the noise the way the deployment behind MiniMax's published samples does, so its output
@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import torch
 
+from difflet.backends.cuda.minimax_h3.vae import VideoEncoder
 from difflet.models.minimax_h3.contracts import KEYFRAME_NOISE_AUG
 from difflet.models.minimax_h3.keyframes import encode_keyframe_condition, keyframe_pixels
 from difflet.models.minimax_h3.pipeline import patchify_video_latents
@@ -24,18 +25,15 @@ LATENT_CHANNELS = 24
 
 
 @torch.no_grad()
-def encode_keyframe(encoder, image, *, device: torch.device) -> torch.Tensor:
-    """The normalized ``(1, 24, 1, h, w)`` CPU latent of one keyframe already on the canvas.
-
-    ``encoder`` is ``host_components.load_host_video_encoder``'s, with its module on ``device``.
-    """
+def encode_keyframe(encoder: VideoEncoder, image) -> torch.Tensor:
+    """The normalized ``(1, 24, 1, h, w)`` CPU latent of one keyframe already on the canvas."""
     # Deterministic cuDNN algorithms without autotuning: one image always gives one latent.
     with torch.backends.cudnn.flags(enabled=True, benchmark=False, deterministic=True):
         return encode_keyframe_condition(
-            lambda pixels: encoder.moments(pixels.to(device)),
+            lambda pixels: encoder.moments(pixels.to(encoder.quant_conv.weight.device)),
             keyframe_pixels(image),
-            latents_mean=encoder.config["latents_mean"],
-            latents_std=encoder.config["latents_std"],
+            latents_mean=encoder.config.latents_mean,
+            latents_std=encoder.config.latents_std,
         )
 
 

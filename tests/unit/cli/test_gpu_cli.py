@@ -257,7 +257,7 @@ def test_negative_prompt_flag_reaches_generate_and_a_request_wins(spec, recorder
     assert orch._last_pipe.app.calls[0][1]["negative_prompt"] == "blurry"
 
 
-def test_download_uses_the_registry_subset_when_the_model_declares_one(spec, monkeypatch):
+def test_download_uses_the_spec_files_else_the_registry_subset(spec, monkeypatch):
     from difflet.registry import resolve_model
 
     seen = {}
@@ -267,7 +267,8 @@ def test_download_uses_the_registry_subset_when_the_model_declares_one(spec, mon
     )
     _orch(spec).download()
     entry = resolve_model(spec.cli_model_ids[0], model_type=spec.model_type)
-    assert seen["allow_patterns"] == entry.download_patterns
+    expected = spec.download_patterns
+    assert seen["allow_patterns"] == (entry.download_patterns if expected is None else expected)
 
 
 @pytest.mark.parametrize("command", ["generate", "run"])

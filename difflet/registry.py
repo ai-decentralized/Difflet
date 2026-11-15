@@ -441,7 +441,7 @@ def _register_builtin_minimax_h3() -> None:
         # neuron: the staged CLI (difflet/cli/orchestrators/minimax_h3.py) and resident serving
         # (difflet/serving/models/minimax_h3.py over backends/neuron/minimax_h3/resident.py);
         # neither goes through application_factory, which builds the Trainium application.
-        # cuda: the generic GPU flow (difflet/models/minimax_h3/spec.py).
+        # cuda: the generic GPU flow (difflet/backends/cuda/minimax_h3/spec.py).
         backends=("trainium", "neuron", "cuda"),
         # The repository also contains the Ref2VA transformer and the original
         # FL2VA/Ref2VA checkpoints.  The first Difflet path is the root-level

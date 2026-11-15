@@ -287,13 +287,16 @@ class GpuOrchestrator(ModelOrchestrator):
         from difflet.pipeline.path_resolver import resolve_model_path
         from difflet.registry import resolve_model
 
-        # The registry's subset when the model declares one; None keeps the diffusers default.
-        entry = resolve_model(self.model_id, model_type=self.spec.model_type)
+        # The spec's files, else the registry's subset; None keeps the diffusers default.
+        patterns = self.spec.download_patterns
+        if patterns is None:
+            entry = resolve_model(self.model_id, model_type=self.spec.model_type)
+            patterns = entry.download_patterns
         resolve_model_path(
             self.model_id,
             revision=self.args.revision,
             local_files_only=False,
-            allow_patterns=entry.download_patterns,
+            allow_patterns=patterns,
         )
         print(f"[difflet] weights ready for {self.model_id}")
 

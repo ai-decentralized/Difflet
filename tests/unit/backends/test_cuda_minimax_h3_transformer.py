@@ -1,6 +1,7 @@
-"""MiniMax-H3's CUDA transformer on CPU: the checkpoint lifecycle, the CUDA arithmetic it
-installs after loading (``numerics``) and its compile policy. The fused ops run their plain
-formulas as CPU kernels (``minimax_h3_reference_ops``)."""
+"""MiniMax-H3's CUDA transformer on CPU: CUDA's own module (``modeling``), its checkpoint
+lifecycle and its compile policy. The fused ops run their plain formulas as CPU kernels
+(``minimax_h3_reference_ops``). The neuron/Trainium port (``modeling_minimax_h3``) writes the
+test checkpoints and is the FP32 reference the CUDA arithmetic is checked against."""
 
 from __future__ import annotations
 
@@ -8,10 +9,7 @@ import pytest
 import torch
 from torch import nn
 
-from difflet.backends.cuda.minimax_h3.numerics import (
-    CudaMiniMaxH3AttnProcessor,
-    install_cuda_numerics,
-)
+from difflet.backends.cuda.minimax_h3.modeling import CudaMiniMaxH3Transformer, RMSNorm
 from difflet.backends.cuda.ops_impl import parallel_mesh
 from difflet.models.minimax_h3.modeling_minimax_h3 import MiniMaxH3Transformer3DModel
 from tests.unit.backends import minimax_h3_reference_ops as reference
@@ -43,9 +41,7 @@ def _cpu_ops_and_mesh():
     parallel_mesh.destroy_parallel_mesh()
 
 
-def _model(seed=0):
-    torch.manual_seed(seed)
-    model = MiniMaxH3Transformer3DModel(**TINY).eval()
+def _mixed_precision(model):
     frequencies = model.rope.inv_freq.clone()
     model.to(torch.bfloat16)
     for name in FP32_MODULES:
@@ -54,8 +50,24 @@ def _model(seed=0):
     return model
 
 
+def _reference(seed=0):
+    torch.manual_seed(seed)
+    model = MiniMaxH3Transformer3DModel(**TINY).eval()
+    for norm in (m for m in model.modules() if isinstance(m, nn.RMSNorm)):
+        nn.init.normal_(norm.weight, 1.0, 0.2)
+    return _mixed_precision(model)
+
+
+def _model(seed=0):
+    """The CUDA module with the reference's random weights."""
+    reference_model = _reference(seed)
+    model = _mixed_precision(CudaMiniMaxH3Transformer(**TINY).eval())
+    model.load_state_dict(reference_model.state_dict(), strict=True)
+    return model
+
+
 def _checkpoint(path):
-    model = _model()
+    model = _reference()
     model.save_pretrained(path, max_shard_size="4KB")
     return model
 
@@ -73,8 +85,6 @@ def _inputs():
         torch.tensor([3, 4]),
         torch.tensor([1, 2]),
         torch.tensor([0, 5]),
-        None,
-        None,
     )
 
 
@@ -114,16 +124,10 @@ def test_a_missing_checkpoint_tensor_fails_the_load(tmp_path):
         _loaded(tmp_path)
 
 
-def test_the_cuda_arithmetic_is_installed_after_loading(tmp_path):
-    _checkpoint(tmp_path)
-    module = _loaded(tmp_path).module
-    attentions = [b.attn for b in module.token_refiner.refiner_blocks]
-    attentions += [b.attn for b in module.transformer_blocks]
-    assert all(isinstance(a.processor, CudaMiniMaxH3AttnProcessor) for a in attentions)
-    norms = [m for m in module.modules() if isinstance(m, nn.RMSNorm)]
-    assert norms and all("forward" in vars(m) for m in norms)
-    assert all("forward" in vars(b) for b in module.transformer_blocks)
-    assert "forward" in vars(module.norm_out)
+def test_the_config_s_unused_keys_are_ignored():
+    config = dict(TINY, _class_name="MiniMaxH3Transformer3DModel", precomputed_adaln=False)
+    model = CudaMiniMaxH3Transformer.from_config(config)
+    assert len(model.transformer_blocks) == TINY["num_layers"]
 
 
 def _counting(monkeypatch):
@@ -141,10 +145,9 @@ def _counting(monkeypatch):
 
 def test_each_main_block_runs_the_fused_ops(monkeypatch):
     model = _model()
-    install_cuda_numerics(model)
     counts = _counting(monkeypatch)
     with torch.no_grad():
-        model(*_inputs(), return_dict=False)
+        model(*_inputs())
     blocks = TINY["num_layers"]
     assert counts == {
         "rms_norm_modulate": 2 * blocks,
@@ -155,27 +158,23 @@ def test_each_main_block_runs_the_fused_ops(monkeypatch):
 
 
 def test_the_cuda_arithmetic_tracks_an_fp32_forward():
-    """Not bit-exact (BF16 stores), but the same function: wiring errors such as swapped
-    shift/scale or a dropped gate would be far outside this tolerance."""
+    """Not bit-exact (BF16 stores), but the reference port's function: wiring errors such as
+    swapped shift/scale or a dropped gate would be far outside this tolerance."""
     model = _model()
     exact = MiniMaxH3Transformer3DModel(**TINY).eval()
     exact.load_state_dict({k: v.float() for k, v in model.state_dict().items()})
     exact.rope.inv_freq = model.rope.inv_freq
-    install_cuda_numerics(model)
     inputs = _inputs()
     with torch.no_grad():
-        got = model(*inputs, return_dict=False)
+        got = model(*inputs)
         want = exact(*(t.float() if t is inputs[2] else t for t in inputs), return_dict=False)
     for g, w in zip(got, want):
         torch.testing.assert_close(g.float(), w.float(), atol=0.05, rtol=0.05)
 
 
 def test_fp32_rms_norm_multiplies_the_weight_before_one_cast():
-    norm = nn.RMSNorm(8, eps=1e-6).to(torch.bfloat16)
+    norm = RMSNorm(8, eps=1e-6).to(torch.bfloat16)
     nn.init.normal_(norm.weight)
-    model = _model()
-    model.norm_out.norm = norm
-    install_cuda_numerics(model)
     x = torch.randn(5, 8, dtype=torch.bfloat16)
     value = x.float()
     want = norm.weight.float() * (value * torch.rsqrt(value.pow(2).mean(-1, keepdim=True) + 1e-6))
@@ -184,7 +183,6 @@ def test_fp32_rms_norm_multiplies_the_weight_before_one_cast():
 
 def test_the_refiner_blocks_compile_whole_with_the_norm_op():
     model = _model()
-    install_cuda_numerics(model)
     block = model.token_refiner.refiner_blocks[0]
     compiled = torch.compile(block, backend="aot_eager", fullgraph=True, dynamic=True)
     hidden = torch.randn(1, 5, TINY["hidden_size"], dtype=torch.bfloat16)
@@ -194,7 +192,6 @@ def test_the_refiner_blocks_compile_whole_with_the_norm_op():
 
 def test_the_blocks_compile_whole_with_the_custom_ops():
     model = _model()
-    install_cuda_numerics(model)
     block = model.transformer_blocks[0]
     compiled = torch.compile(block, backend="aot_eager", fullgraph=True, dynamic=True)
     hidden = torch.randn(1, 6, TINY["hidden_size"], dtype=torch.bfloat16)

@@ -13,8 +13,7 @@ from difflet.pipeline.parallel_mesh import MeshSpec
 
 
 class CudaMiniMaxH3TransformerApplication(GpuComponent):
-    """The released transformer with its checkpoint precision, and the CUDA arithmetic
-    (``numerics``) installed after loading."""
+    """CUDA's transformer module (``modeling``) with the released checkpoint's precision."""
 
     # One graph per block for every sequence length (the token refiner and the main blocks),
     # in Inductor's default mode without autotuning, and rounding to BF16 where eager does:
@@ -36,13 +35,13 @@ class CudaMiniMaxH3TransformerApplication(GpuComponent):
     def build_module(self):
         from accelerate import init_empty_weights
 
-        from difflet.models.minimax_h3.modeling_minimax_h3 import MiniMaxH3Transformer3DModel
+        from difflet.backends.cuda.minimax_h3.modeling import CudaMiniMaxH3Transformer
 
         self._init_runtime()
         # Keep the computed RoPE frequencies real and FP32. The shared lifecycle
         # materializes only meta parameters, directly in BF16.
         with init_empty_weights(include_buffers=False):
-            return MiniMaxH3Transformer3DModel.from_config(self._model_config)
+            return CudaMiniMaxH3Transformer.from_config(self._model_config)
 
     def load_weights(self, module):
         # The checkpoint stores the patch projections, timestep embedding and output heads in
@@ -51,11 +50,6 @@ class CudaMiniMaxH3TransformerApplication(GpuComponent):
         for name in ("proj_in", "audio_proj_in", "time_embedder", "proj_out", "audio_proj_out"):
             module.get_submodule(name).float()
         load_checkpoint_into(module, self.model_path, tp_size=1, tp_rank=0, strict=True)
-
-    def apply_load_time_swaps(self, module):
-        from difflet.backends.cuda.minimax_h3.numerics import install_cuda_numerics
-
-        install_cuda_numerics(module)
 
     def repeated_blocks(self, module):
         return [module.token_refiner.refiner_blocks, module.transformer_blocks]

@@ -137,15 +137,7 @@ def denoise(
             video_rows if keyframe_rows is None else torch.cat([keyframe_rows, video_rows], dim=1)
         )
         video_prediction, audio_prediction = transformer(
-            model_video_rows,
-            audio_rows,
-            text,
-            table,
-            row_index,
-            *fixed,
-            None,  # encoder_attention_mask: every text row is live
-            None,  # attention_mask: no padding rows
-            return_dict=False,
+            model_video_rows, audio_rows, text, table, row_index, *fixed
         )
         video_rows = video_scheduler.step(
             video_prediction[:, num_keyframe_rows:].float(), video_t, video_rows, return_dict=False

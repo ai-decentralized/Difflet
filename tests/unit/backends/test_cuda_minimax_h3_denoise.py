@@ -58,8 +58,7 @@ class _Recorder:
     def __init__(self):
         self.calls = []
 
-    def __call__(self, video, audio, text, table, row_index, *rest, return_dict):
-        assert return_dict is False
+    def __call__(self, video, audio, text, table, row_index, *rest):
         self.calls.append(
             dict(
                 video=video.clone(),
@@ -87,14 +86,15 @@ def _denoise(transformer, **over):
     return denoise(transformer, **kwargs)
 
 
-def test_steps_count_transformer_evaluations_with_no_masks_and_fp32_latents():
+def test_steps_count_transformer_evaluations_with_fp32_latents():
     recorder = _Recorder()
     result = _denoise(recorder)
     assert len(recorder.calls) == 4
     for call in recorder.calls:
         assert call["video"].dtype == call["audio"].dtype == torch.float32
         assert call["text"].dtype == torch.bfloat16
-        assert call["rest"][-2:] == (None, None)  # no attention masks
+        # The layout's tags, positions and row indices; the transformer takes no masks.
+        assert len(call["rest"]) == 5
     layout = build_t2va_layout(num_text_tokens=3, **_SHAPE)
     assert result.video_latents.shape == (1, 24, layout.num_latent_frames, 2, 2)
     assert result.audio_latents.shape == (2, 32, layout.num_audio_latents)

@@ -519,17 +519,12 @@ def decode_minimax_h3_video(
     tile_sample_size: int = 256,
     tile_min_overlap: int = 64,
 ) -> torch.Tensor:
-    """Run official H3 temporal chunking and 256px spatial tiling.
-
-    Tiles are stitched on the latents' device: the host for the neuron and Trainium paths,
-    whose latents are host tensors, and the GPU for CUDA.
-    """
+    """Run official H3 temporal chunking and 256px spatial tiling on Neuron."""
 
     if normalized_latents.ndim != 5 or normalized_latents.shape[0] != 1:
         raise ValueError("MiniMax-H3 video latents must have shape (1, C, T, H, W)")
-    device = normalized_latents.device
-    mean = torch.tensor(latents_mean, dtype=torch.float32, device=device).view(1, -1, 1, 1, 1)
-    std = torch.tensor(latents_std, dtype=torch.float32, device=device).view(1, -1, 1, 1, 1)
+    mean = torch.tensor(latents_mean, dtype=torch.float32).view(1, -1, 1, 1, 1)
+    std = torch.tensor(latents_std, dtype=torch.float32).view(1, -1, 1, 1, 1)
     latents = normalized_latents.float() * std + mean
     tokens_chunk_size = math.ceil(clip_length / temporal_compression_ratio)
     token_overlap = (-token_drop) % tokens_chunk_size
@@ -576,7 +571,7 @@ def decode_minimax_h3_video(
                         "MiniMax-H3 visual VAE fixed graph received an incompatible latent tile, "
                         f"got {tuple(tile.shape[2:])}"
                     )
-                row.append(_first_tensor(decoder(tile)).float().to(device))
+                row.append(_first_tensor(decoder(tile)).float().cpu())
             rows.append(row)
         return _stitch_tiles(rows, y_overlaps, x_overlaps)
 
@@ -621,8 +616,8 @@ def decode_minimax_h3_video(
         )
         video = video[:, :, :-pad_frames]
 
-    pixel_mean = torch.tensor((0.485, 0.456, 0.406), device=device).view(1, -1, 1, 1, 1)
-    pixel_std = torch.tensor((0.229, 0.224, 0.225), device=device).view(1, -1, 1, 1, 1)
+    pixel_mean = torch.tensor((0.485, 0.456, 0.406)).view(1, -1, 1, 1, 1)
+    pixel_std = torch.tensor((0.229, 0.224, 0.225)).view(1, -1, 1, 1, 1)
     return (video * pixel_std + pixel_mean).clamp(0, 1)
 
 

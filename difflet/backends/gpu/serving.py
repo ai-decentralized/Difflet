@@ -244,15 +244,11 @@ class GpuServingArtifactPreparer:
         spec = self.spec
         refuse_unsupported_profile(profile, spec)
         print(f"[difflet serve] resolving {spec.display_name} weights for {self.model_id}")
-        from difflet.registry import resolve_model
-
-        # The registry's subset when the model declares one, as the worker's load reads it.
-        patterns = resolve_model(self.model_id, model_type=self.model_type).download_patterns
         source = resolve_hf_model_source(
             self.model_id,
             revision=self.revision,
             download_policy=download_policy,
-            allow_patterns=patterns,
+            allow_patterns=spec.download_patterns,
         )
         # No compile phase: the flow is eager, and DiffletPipeline writes its manifest-only
         # artifact inside the worker at load. An empty spec/binding pair keeps
