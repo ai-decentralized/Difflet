@@ -17,6 +17,7 @@ is killed. Nothing is ever matched by name or port.
 from __future__ import annotations
 
 import os
+import shlex
 import signal
 import subprocess
 import sys
@@ -71,7 +72,7 @@ def run(command: str, argv: Sequence[str], *, env: Mapping[str, str], cpus: Sequ
     child_env[LAUNCH_ID_ENV] = launch_id
     timed_out = threading.Event()
     with open(log, "w", encoding="utf-8") as out:
-        out.write("$ " + " ".join(full) + "\n")
+        out.write("$ " + shlex.join(full) + "\n")
         out.flush()
         started = time.monotonic_ns()
         t0 = time.perf_counter()

@@ -92,7 +92,7 @@ def _write(kind: str, fields: dict[str, Any]) -> None:
     _handle.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
-def event(kind: str, **fields: Any) -> None:
+def event(kind: str, /, **fields: Any) -> None:
     """Append one event; a no-op when timing is off."""
     global _failed
     if _failed or not enabled():

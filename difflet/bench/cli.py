@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import shlex
 import signal
 import sys
 import threading
@@ -314,9 +315,9 @@ def _print_plan(p, metrics: list[str], lane, args) -> None:
     cpus = lane.cpus if lane else [0]
     print(f"recipe {p.recipe.name}" + (f" (+ pass-through {p.passthrough})" if p.passthrough
                                        else ""))
-    print("  compile:  " + " ".join(command_line("compile", [*p.compile_argv, "--cache-dir",
+    print("  compile:  " + shlex.join(command_line("compile", [*p.compile_argv, "--cache-dir",
                                                              "<cache>"], cpus)))
-    print("  generate: " + " ".join(command_line("generate", [*p.generate_argv, "--output",
+    print("  generate: " + shlex.join(command_line("generate", [*p.generate_argv, "--output",
                                                               "<out>", "--work-dir", "<work>",
                                                               "--cache-dir", "<cache>"], cpus)))
     print(f"  metrics:  {', '.join(metrics)}; repeats: {args.repeats or 'defaults'}")

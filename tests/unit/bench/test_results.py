@@ -40,8 +40,9 @@ def test_write_json_is_append_only_and_atomic(tmp_path):
     with pytest.raises(FileExistsError):
         R.write_json(path, {"a": 2})
     assert not [p for p in path.parent.iterdir() if p.name.startswith(".")]
-    with pytest.raises(ValueError):
-        R.write_json(tmp_path / "nan.json", {"x": float("nan")})
+    # Strict JSON has no NaN/inf; they are written as strings so a result is never lost.
+    R.write_json(tmp_path / "nan.json", {"x": float("nan"), "y": [float("-inf")]})
+    assert json.loads((tmp_path / "nan.json").read_text()) == {"x": "nan", "y": ["-inf"]}
 
 
 def test_iter_results_skips_input_records(tmp_path):
