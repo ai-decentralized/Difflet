@@ -7,7 +7,10 @@ in bf16 only), find each one's bottleneck, and record where one DiT block spends
 `docs/plans/2026-11-13-dit-block-profile.md`. Scripts: `scripts/profile_dit/` (README there).
 
 **Page:** https://claude.ai/artifact/Em8C2DS8wBHcEPHAfk6rzy (a Data artifact: the datasets below
-and `scripts/profile_dit/page/index.html`).
+and `scripts/profile_dit/page/index.html`). Its section "MXFP8 attention: bf16 vs both" (section 15)
+reads the dataset `attn_runs`, committed as
+`docs/verification/assets/2026-11-13-dit-block-profile/attn_runs.json` and built by
+`scripts/profile_dit/page/build_attn.py` (`scripts/profile_dit/README.md`, "The page").
 
 **Status:** all 13 configurations measured (2026-11-13); HunyuanVideo at 544x960x129 (both arms,
 dual and single blocks) was captured without DGE notifications (section 6).

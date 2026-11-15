@@ -1,0 +1,24 @@
+  <section id="mxattn" class="card">
+    <h2>MXFP8 attention: bf16 vs both</h2>
+    <p class="lede"><b data-draw="mx-sum" data-part="n" data-source="attn_runs" data-field="key">—</b> of <b data-draw="mx-sum" data-part="m">—</b> models measured. The quantized arm takes <b data-draw="mx-sum" data-part="arm" data-source="attn_runs" data-field="arm_over_bf16">—</b> of bf16's DiT step, against <b data-draw="mx-sum" data-part="linear" data-source="attn_runs" data-field="linear_over_bf16">—</b> for linear MXFP8 alone; G3 holds on <b data-draw="mx-sum" data-part="g3" data-source="attn_runs" data-field="g3_faster">—</b> of them.</p>
+    <p class="caption">Each model at its Plan A profile shape (seed 42, LNC=2), bf16 against <code>both</code> = <code>--quant mxfp8 --attn-quant qk+pv</code> (linear and attention MXFP8); HunyuanVideo-1.5, which has no linear MXFP8 default, against <code>attn</code> = <code>--attn-quant qk+pv</code> alone. Step time: the median of two requests' per-step medians, bf16 then the quantized arm back to back on one device; spread = (max − min) / median. G3, reported only and never a default: quantized / bf16 &lt; linear / bf16 − J, with J = max(2%, either arm's spread) and linear alone from the evidence doc (section, host) unless the table says this session; for HunyuanVideo-1.5, attn / bf16 &lt; 1 − J. Quality: PSNR dB (worst frame) / SSIM / LPIPS of the decoded output against this session's bf16 and, for Qwen-Image, FLUX and LTX-2, against the diffusers CPU fp32 reference, beside the evidence doc's linear-alone, floor and fp32 numbers.</p>
+    <div class="scroll">
+      <table>
+        <thead><tr>
+          <th>Model</th><th>Shape</th><th>Arm</th><th class="num">bf16 ms/step (spread)</th><th class="num">Quantized ms/step (spread)</th><th class="num">Quantized / bf16</th><th class="num">Linear / bf16 (source)</th><th>G3 (reported only)</th>
+          <th class="num">vs bf16: PSNR dB (worst) / SSIM / LPIPS</th><th class="num">Latents cos vs bf16</th><th class="num">Linear vs bf16 (evidence)</th><th>bf16 floor (evidence)</th>
+          <th class="num">vs CPU fp32</th><th class="num">bf16 vs fp32 PSNR, here · evidence</th><th class="num">Linear vs fp32 PSNR / SSIM (evidence)</th><th>Notes</th>
+        </tr></thead>
+        <tbody data-draw="mx-table" data-source="attn_runs"></tbody>
+      </table>
+    </div>
+    <h3>DiT step over bf16</h3>
+    <div class="legend"><span><i class="sw" data-color="0"></i>quantized arm / bf16</span><span><i class="sw"></i>linear MXFP8 alone / bf16</span><span>vertical line: bf16</span></div>
+    <div class="chart" data-draw="mx-ratio" data-source="attn_runs"></div>
+    <h3>Routed attention per step, by phase</h3>
+    <p class="caption">The routed self/joint attention (<code>attn</code> / <code>attn1</code>) of every block, times its executions per step, with the busy times of all engines added, so a bar can be longer than the attention's wall time. MM1 is QK^T and MM2 is PV; the quantize phases are the fork's MXFP8 preparation of Q and K, V and P (transposes, copies and <code>quantize_mx</code>). exp is its own phase here (in Plan A it was inside mask / softmax), and rows the two share count in both.</p>
+    <div class="legend" aria-label="Phase colors"><span><i class="sw" data-phase="qk_matmul"></i>MM1 (QK^T)</span><span><i class="sw" data-phase="mask_softmax"></i>mask / softmax</span><span><i class="sw" data-phase="exp"></i>exp</span><span><i class="sw" data-phase="pv_matmul"></i>MM2 (PV)</span><span><i class="sw" data-phase="qk_quantize"></i>Q+K quantize</span><span><i class="sw" data-phase="v_quantize"></i>V quantize</span><span><i class="sw" data-phase="p_quantize"></i>P quantize</span><span><i class="sw" data-phase="other"></i>other</span></div>
+    <div class="chart tall" data-draw="mx-phases" data-source="attn_runs"></div>
+    <p class="caption">Notes. The Wan 2.2 (81 frames) and HunyuanVideo-1.5 (121 frames) quality rows are below the bf16 floor's resolution, not a quality reading (greyed in the table); long-shape latent cosine is reported only. Bounded routed calls (Qwen-Image, HunyuanVideo, HunyuanVideo-1.5) smooth K over all keys, padding included (ruling BR36); LTX-2's routed call is unbounded. Nothing here becomes a default. Per-model numbers: <code>docs/verification/2026-11-13-dit-block-profile.md</code>, section 15.</p>
+  </section>
+

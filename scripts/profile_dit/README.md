@@ -206,6 +206,27 @@ Signature roots are module containers that MXFP8 does not replace (an attention 
 feed-forward container, a norm): a quantized linear changes its class (`ColumnParallelLinear` to
 `FP8ColumnParallelLinear` in HV1's capture), so linear classes stay out of `require`.
 
+## The page
+
+`page/index.html` is the page as published (files/index.html v5, 2026-11-15): Plan A's page plus
+the MXFP8 attention plan's section "MXFP8 attention: bf16 vs both", whose sources are
+`page/attn_section.html` and `page/attn_section.js`. Its dataset `attn_runs` (v4, seven rows) is
+`docs/verification/assets/2026-11-13-dit-block-profile/attn_runs.json`, beside Plan A's
+`results.json`. To update the attention section:
+
+1. Per model, `ROOT=<run dir> scripts/mx_attention/task6.py dataset <key> <arm>` writes
+   `<run dir>/page/<key>.json`; the committed copies are under
+   `docs/verification/assets/2026-11-13-dit-block-profile/mxattn/task6/page/`.
+2. `python3 scripts/profile_dit/page/build_attn.py --src <run dir>/page --out <dir>` builds
+   `<dir>/attn_runs.json` and rewrites `page/index.html` with the current section (idempotent).
+3. Upload `<dir>/attn_runs.json` as an asset of the page artifact (the controller does the
+   uploads); its result names `/_blob/<id>`.
+4. Run step 2 again with `--url /_blob/<id> --runs-version <datasets/attn_runs' current
+   version>`, and `--page-version <files/index.html's version>` only when the section changed.
+5. Write the store docs `<dir>/writes.json` lists, in its order (the dataset first, then the
+   page), with ArtifactData, each pinned to its version.
+6. Commit `page/index.html` and copy `<dir>/attn_runs.json` over the committed dataset.
+
 ## Measured (Task 1 Step 5, device smokes, 2026-11-13)
 
 Devices 1-3 (cores 4-15), 16-thread CPU sets on NUMA node 1, `HF_HUB_CACHE=
