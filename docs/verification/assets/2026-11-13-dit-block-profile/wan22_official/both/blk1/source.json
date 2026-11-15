@@ -1,0 +1,19 @@
+{
+ "neff_name": "neff_724552055875930_vnc_0.neff",
+ "sha256": "865f3585aaf8d897e09ce7392c72b3e10a58b6e3ac6fb9ae9842df946dfa09d2",
+ "ranks": [
+  "/mnt/nvme/difflet-mxattn/task6/prof/wan22_official/both/dump/i-0882eb59ff5d391e1_pid_1854222/1794699014757435422/neff_724552055875930_vnc_0.neff",
+  "/mnt/nvme/difflet-mxattn/task6/prof/wan22_official/both/dump/i-0882eb59ff5d391e1_pid_1854223/1794699014900875919/neff_1053439956274756_vnc_0.neff",
+  "/mnt/nvme/difflet-mxattn/task6/prof/wan22_official/both/dump/i-0882eb59ff5d391e1_pid_1854224/1794699001556080036/neff_930484476159712_vnc_0.neff",
+  "/mnt/nvme/difflet-mxattn/task6/prof/wan22_official/both/dump/i-0882eb59ff5d391e1_pid_1854225/1794699014789651259/neff_98573008593055_vnc_0.neff"
+ ],
+ "kind": "block",
+ "per_rank": true,
+ "dge_notifs": true,
+ "sha256_by_rank": [
+  "865f3585aaf8d897e09ce7392c72b3e10a58b6e3ac6fb9ae9842df946dfa09d2",
+  "a6357fa1ec621d4d399990b3e31147cabadda7a6ef1b39821566f59965dd4901",
+  "ad11019b790f3616f1cca39889c08ce2290b0dec192b8331709b2d38cbcf3833",
+  "2c780f5c16d29afb69d2fde48b4b43eb8d35c71086354d2e0463105b28dc240c"
+ ]
+}
