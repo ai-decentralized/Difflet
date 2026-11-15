@@ -1347,6 +1347,7 @@ than 1% from the evidence's).
 | Wan 2.2 T2V A14B | 10,120.5 (0.03%) | 11,270.0 (0.01%) | 1.114 | 0.981 (12b, host B) | 2.0% | both / bf16 < linear / bf16 - J: 0.961 -> not faster | -0.30% |
 | HunyuanVideo-1.5 | 9,918.5 (0.01%) | 12,092.0 (0.00%) | 1.219 | - | 2.0% | attn / bf16 < 1 - J: 0.980 -> not faster | +0.03% |
 | Wan 2.1 T2V 14B | 10,120.8 (0.12%) | 11,252.0 (0.00%) | 1.112 | 0.982 (12b, host B) | 2.0% | both / bf16 < linear / bf16 - J: 0.962 -> not faster | -0.22% |
+| HunyuanVideo | 18,488.3 (0.03%) | 25,259.8 (0.00%) | 1.366 | 0.972 (7f, host A) | 2.0% | both / bf16 < linear / bf16 - J: 0.952 -> not faster | -0.03% |
 <!-- 15a rows -->
 
 ### 15b. Block profile
@@ -1371,6 +1372,10 @@ committed breakdown, the quantized arm this run's capture
 | HunyuanVideo-1.5 | attn | blk1 (block) x54 | 222.96 | 158.11 | 171.02 | 68.96 | 5.49 | 41.79 | 59.76 / 88.28 | vector 76.7% |
 | Wan 2.1 T2V 14B | bf16 | blk1 (block) x80 | 126.36 | 91.40 | 80.56 | 17.04 | 5.97 | 25.17 | 9.58 / 46.61 | tensor 72.3% |
 | Wan 2.1 T2V 14B | both | blk1 (block) x80 | 140.03 | 90.94 | 102.48 | 41.54 | 2.03 | 30.97 | 35.79 / 48.02 | vector 73.2% |
+| HunyuanVideo | bf16 | blk1 (dual) x20 | 458.23 | 168.14 | 193.53 | 24.97 | 7.55 | 244.94 | 11.47 / 115.37 | hbm_dma 53.5% |
+| HunyuanVideo | bf16 | blk2 (single) x40 | 231.37 | 157.27 | 182.84 | 20.04 | 5.74 | 57.21 | 12.72 / 112.98 | vector 79.0% |
+| HunyuanVideo | both | blk1 (dual) x20 | 703.58 | 218.00 | 232.14 | 93.56 | 7.53 | 448.79 | 82.55 / 116.79 | hbm_dma 63.8% |
+| HunyuanVideo | both | blk2 (single) x40 | 278.21 | 204.47 | 222.66 | 85.72 | 5.63 | 58.57 | 81.70 / 114.71 | vector 80.0% |
 <!-- 15b rows -->
 
 Routed attention (`attn` / `attn1`) per step, by phase and engine (T TensorE, V VectorE, S
@@ -1391,6 +1396,8 @@ component's engine time per step (summed over engines) and V's quantization shar
 | HunyuanVideo-1.5 | attn | T 2875.4 | V 5028.8, S 219.9, G 99.3 | V 2166.2 | T 1757.3, V 164.8 | T 452.5, V 153.6, S 240.7, G 0.5, H 63.9 | V 6.9, G 15.5, H 2.3 | T 4250.3, V 1685.3, S 2699.0, G 37.2 | T 0.8, V 1.5, S 0.1, G 97.6, H 1998.5 | 21637.6 | 0.1% |
 | Wan 2.1 T2V 14B | bf16 | T 2728.0 | V 3360.9, S 130.2, G 393.2 | V 1615.5 | T 3648.6, V 90.6 | - | - | - | T 2.1, V 34.0, S 185.3, G 393.0, H 1245.9 | 12218.4 | - |
 | Wan 2.1 T2V 14B | both | T 1760.8 | V 3416.4, S 129.7, G 64.1 | V 1645.9 | T 916.3, V 108.4 | T 346.5, V 103.5, S 168.1, G 2.6, H 44.5 | V 8.6, G 18.3, H 2.7 | T 2610.1, V 1115.0, S 1948.0, G 14.3 | T 3.3, V 3.8, S 0.2, G 69.7, H 1273.1 | 14701.7 | 0.2% |
+| HunyuanVideo | bf16 | T 2655.9 | V 7272.5, S 321.0, G 106.2 | V 3067.5 | T 4954.4, V 194.8 | - | - | - | T 1125.8, V 130.7, S 52.9, G 117.4, H 3076.9 | 21571.4 | - |
+| HunyuanVideo | both | T 3388.6 | V 7252.4, S 285.5, G 134.5 | V 3087.2 | T 2391.3, V 232.2 | T 569.8, V 210.8, S 344.6, H 68.9 | V 11.2, G 22.5, H 5.8 | T 6070.0, V 2347.0, S 3888.5 | T 0.9, V 2.5, S 0.2, G 135.1, H 3001.6 | 30091.3 | 0.1% |
 <!-- 15b phase rows -->
 
 ### 15c. Quality
@@ -1405,6 +1412,7 @@ PSNR dB (worst frame) / SSIM / LPIPS, then latents cosine and rel L2 where the r
 | Wan 2.2 T2V A14B | 11.83 (10.88) / 0.215 / 0.439 / cos 0.8775, rel L2 0.496 | 14.29 (13.27) / 0.398 / 0.275 (12c, B) | 14.83 (13.74) / 0.439 / 0.254, tp8 | - | below the bf16 floor's resolution, not a quality reading |
 | HunyuanVideo-1.5 | 12.99 (12.51) / 0.213 / 0.499 / cos 0.7876, rel L2 0.665 | 12.65 (12.20) / 0.183 / 0.504 (12c, B) | 16.94 (15.94) / 0.362 / 0.326, tp4 x CFG2 | - | below the bf16 floor's resolution, not a quality reading; bounded calls: K smoothing averages over all keys, padding included (BR36) |
 | Wan 2.1 T2V 14B | 15.82 (14.36) / 0.457 / 0.337 / cos 0.8728, rel L2 0.516 | 15.08 (12.96) / 0.391 / 0.351 (12c, B) | 22.75 (18.31) / 0.784 / 0.098, tp8 | - | - |
+| HunyuanVideo | 20.50 (13.34) / 0.818 / 0.243 / cos 0.9588, rel L2 0.288 | 26.46 (20.07) / 0.907 / 0.128 (7f, A) | none at this shape (320x512x61: 36.64 dB) | - | bounded calls: K smoothing averages over all keys, padding included (BR36) |
 <!-- 15c rows -->
 
 ### 15d. Determinism and provenance
@@ -1420,4 +1428,5 @@ bytes hold its own name): its second request and its `gen2` process against its 
 | Wan 2.2 T2V A14B | `5b443ec6` (!= evidence `ee61e12e`, 12c, B); two requests equal | `3192daae`; timed 2 and gen2 equal | bit-identical | finite |
 | HunyuanVideo-1.5 | `30903b0f` (!= evidence `d3ef0f1c`, 12c, B, 96 threads); two requests equal | `ec701ae5`; timed 2 and gen2 equal | bit-identical | finite |
 | Wan 2.1 T2V 14B | `963566ba` (!= evidence `295dcb67`, 12c, B); two requests equal | `ecd18db4`; timed 2 and gen2 equal | bit-identical | finite |
+| HunyuanVideo | `6336311a` (!= evidence `258cd73e`, 7f, A); two requests equal | `05948f8e`; timed 2 and gen2 equal | bit-identical | finite |
 <!-- 15d rows -->
