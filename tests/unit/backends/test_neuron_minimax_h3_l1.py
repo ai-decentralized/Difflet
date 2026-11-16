@@ -181,3 +181,28 @@ def test_neuron_h3_processors_use_the_plain_attention():
         assert not isinstance(p._attention, functools.partial)
     with pytest.raises(TypeError, match="attention_vector_exp"):
         NeuronMiniMaxH3Config(**tiny, attention_vector_exp=True)
+
+
+def test_neuron_h3_refuses_the_attn_quant_switch(monkeypatch):
+    """H3 has no --attn-quant: with no quant_model the base runs none of the switch's checks, yet
+    its bounded attention would route to the MX op, so an exported DIFFLET_ATTN_QUANT is refused
+    at construction. Off, the same construction runs."""
+    from difflet.backends.neuron.minimax_h3.transformer import NeuronMiniMaxH3TransformerApplication
+    from difflet.backends.neuron.ops_impl import attention as attn
+
+    def build():
+        config = NeuronMiniMaxH3Config(  # the vector_exp test's config: no checkpoint needed
+            num_attention_heads=2, attention_head_dim=96, hidden_size=192, num_layers=2,
+            num_refiner_layers=1, ffn_dim=256, text_dim=64, time_embed_hidden_dim=64,
+            time_embed_dim=32, height=64, width=64, num_frames=124, text_seq_len=16,
+            tp_degree=1, precomputed_adaln=False)
+        return NeuronMiniMaxH3TransformerApplication(model_path=None, config=config,
+                                                     dtype=torch.float32, device="cpu",
+                                                     exec_mode="eager")
+
+    monkeypatch.setattr(attn, "ATTN_QUANT", "qk")
+    with pytest.raises(NotImplementedError, match=r"DIFFLET_ATTN_QUANT=qk: MiniMax-H3 has no "
+                                                  r"--attn-quant"):
+        build()
+    monkeypatch.setattr(attn, "ATTN_QUANT", "off")
+    build()

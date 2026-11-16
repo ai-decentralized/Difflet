@@ -103,9 +103,12 @@ def validate_quant(args: argparse.Namespace) -> None:
     if quant is None and getattr(args, "quant_compute", None) is not None:
         _fail("--quant-compute needs --quant mxfp8.")
     try:  # an exported DIFFLET_ATTN_QUANT (the flag, when given, has been exported over it)
-        attn_quant_variant()
+        exported = attn_quant_variant()
     except ValueError as exc:
         _fail(str(exc))
+    if exported != "off" and getattr(args, "model_id", None) == "MiniMaxAI/MiniMax-H3":
+        _fail(f"{ATTN_QUANT_ENV}={exported} (--attn-quant) is not available for "
+              "'MiniMaxAI/MiniMax-H3': it has no MXFP8 target layers; unset it.")
     for flag, given in (("--quant", quant), ("--attn-quant", getattr(args, "attn_quant", None))):
         if given is not None:
             _validate_mxfp8_launch(args, flag)

@@ -54,6 +54,7 @@ from difflet.backends.neuron.core.config_checks import (
     check_tp_matches,
     require_bf16_on_device,
 )
+from difflet.backends.neuron.ops_impl import attention
 from difflet.models.minimax_h3.contracts import (
     PATCH_SIZE,
     VAE_SPATIAL_COMPRESSION,
@@ -303,7 +304,6 @@ def _ulysses_processor_class():
                 v.reshape(batch * heads, k_len, head_dim),
                 scale=1.0 / math.sqrt(head_dim), causal=False, tp_q=True, tp_k=True,
                 tp_out=False, bound_min=bound_min, bound_max=bound_max,
-                mx=self.mode != "ulysses",  # Ulysses CP stays bf16 under DIFFLET_ATTN_QUANT
             ).reshape(batch, heads, q_len, head_dim)
             if self.mode == "ulysses":
                 out = collectives.heads_to_seq(out, group, self.cp)
@@ -423,6 +423,13 @@ class NeuronMiniMaxH3TransformerApplication(TorchNeuronApplicationBase):
     def __init__(self, *, model_path, config: NeuronMiniMaxH3Config, parallel=None,
                  dtype=torch.bfloat16, exec_mode: str | None = None, device="neuron",
                  **kwargs: Any) -> None:
+        if attention.ATTN_QUANT != "off":
+            # No quant_model, so the base skips the switch's checks; its MX op would still route
+            # every bounded call (and drop the tuned vector_exp=False).
+            raise NotImplementedError(
+                f"DIFFLET_ATTN_QUANT={attention.ATTN_QUANT}: MiniMax-H3 has no --attn-quant (no "
+                "MXFP8 target layers); unset DIFFLET_ATTN_QUANT"
+            )
         super().__init__(model_path=model_path, parallel=parallel, dtype=dtype,
                          exec_mode=exec_mode, device=device, **kwargs)
         name = "NeuronMiniMaxH3Config"

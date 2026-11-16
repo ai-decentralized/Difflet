@@ -604,6 +604,10 @@ def test_attn_quant_is_independent_of_quant_and_refused_where_it_cannot_run(caps
              "--attn-quant runs on the PyTorch-native neuron backend only", capsys)
     _refused(argparse.Namespace(**{**base, "model_id": "MiniMaxAI/MiniMax-H3"}),
              "--attn-quant is not available for", capsys)
+    monkeypatch.setenv("DIFFLET_ATTN_QUANT", "qk")  # exported, no flag: H3 refuses it all the same
+    _refused(argparse.Namespace(**{**base, "model_id": "MiniMaxAI/MiniMax-H3", "attn_quant": None}),
+             "DIFFLET_ATTN_QUANT=qk (--attn-quant) is not available for", capsys)
+    monkeypatch.delenv("DIFFLET_ATTN_QUANT")
     _refused(argparse.Namespace(**{**base, "exec_mode": "eager"}),
              "--attn-quant needs the compiled DiT", capsys)
     monkeypatch.setenv("UNSAFE_FP8FNCAST", "1")

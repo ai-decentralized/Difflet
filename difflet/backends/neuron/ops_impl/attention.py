@@ -135,7 +135,8 @@ def attention(
     (Wan 81f 63.7 -> 52.0 ms, H3 768p bounded 66.4 -> 54.0 ms) with the same rel L2 against fp32
     attention; the outputs differ in their low bits, so a denoising trajectory lands on a nearby
     but different sample. No effect off
-    trn3 B1: trn2 has no Vector exp and always uses the Scalar engine.
+    trn3 B1: trn2 has no Vector exp and always uses the Scalar engine. No effect on the MX route
+    either, which always uses the Vector exp.
 
     ``mx=False`` keeps the call in bf16 under ``DIFFLET_ATTN_QUANT``: the cross-attention call
     sites pass it (plan Global Constraints: only self/joint attention is routed)."""
