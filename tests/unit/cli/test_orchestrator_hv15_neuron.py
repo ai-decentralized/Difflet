@@ -54,11 +54,17 @@ def test_default_layout_is_tp2_x_cfg2(launches, tmp_path):
     hv15.HunyuanVideo15Orchestrator(_args(work_dir=str(tmp_path / "w"))).generate()
     assert launches.env_seen == ["1", "1", "1"]  # every stage keeps the attention kernel's trace
     assert "DIFFLET_NKI_TRACE_CACHE" not in os.environ  # restored after the launches
-    assert [(s, n) for s, n, _ in launches] == [("encode", 1), ("transformer", 4), ("vae", 1)]
+    # The vae stage decodes its tiles on the transformer stage's cores (--vae-cores default).
+    assert [(s, n) for s, n, _ in launches] == [("encode", 1), ("transformer", 4), ("vae", 4)]
     cli = launches[1][2]
     assert _flag(cli, "--tp-degree") == "2" and "--cfg-parallel" in cli
     assert _flag(cli, "--steps") == "50" and _flag(cli, "--num-frames") == "121"
     assert not (tmp_path / "w").exists()
+
+
+def test_vae_cores_1_keeps_the_single_core_decode(launches, tmp_path):
+    hv15.HunyuanVideo15Orchestrator(_args(work_dir=str(tmp_path / "w"), vae_cores=1)).generate()
+    assert launches[2][:2] == ("vae", 1)
 
 
 def test_explicit_tp4_runs_cfg_sequentially(launches, tmp_path):

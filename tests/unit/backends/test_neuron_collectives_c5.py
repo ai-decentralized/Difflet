@@ -337,3 +337,15 @@ def test_the_missing_group_message_names_the_modes_the_runtime_names(monkeypatch
     modes = "the neuron backend supports tensor, sequence, context and CFG parallelism"
     assert str(collectives_error.value) == f"{modes}; no cfg group exists (cfg=2)"
     assert str(runtime_error.value).startswith(modes)
+
+
+def test_hv15_vae_tiles_decode_across_ranks_bit_identically():
+    """Two ranks split diffusers' 30 tiles; rank 0's blended video equals diffusers' own
+    single-process tiled decode exactly, and the helper rank returns nothing."""
+    pytest.importorskip("diffusers")
+    from tests.unit.backends._neuron_gloo import run_ranks
+    from tests.unit.backends._neuron_workers import hv15_parallel_vae_worker
+
+    lead, helper = run_ranks(hv15_parallel_vae_worker, world_size=2)
+    assert lead["equal"] and lead["shape"][:3] == [1, 3, 5]
+    assert helper == {"none": True}
