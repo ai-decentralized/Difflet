@@ -361,7 +361,8 @@ def test_native_branch_unchanged(monkeypatch, tmp_path):
                         calls.append((stage, num_cores, virtual_core_size)))
     assert torchrun_helpers.torchrun_backend() == "neuron"
     hv15.HunyuanVideo15Orchestrator(_driver_args(work_dir=str(tmp_path / "w"))).generate()
-    assert calls == [("encode", 1, None), ("transformer", 4, None), ("vae", 1, None)]
+    # The vae stage decodes its tiles on the transformer stage's cores (--vae-cores default).
+    assert calls == [("encode", 1, None), ("transformer", 4, None), ("vae", 4, None)]
 
 
 def test_aot_stage_dispatch_rejects_unknown_stage(tmp_path):
