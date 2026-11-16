@@ -77,7 +77,8 @@ from tests.unit.backends._neuron_toy import ToyBlocksModel
 
 N_BLOCKS, DIM, HIDDEN, HEADS, SEQ = 6, 1024, 2048, 8, 512
 PARITY_TOL = 2e-2
-NKI_ATTENTION_OP = "nki_kernels.scaled_dot_product_attention_kernel"
+# The unmasked flash op the default (Scalar exp) path emits; str(node.target) of the nki_op.
+NKI_ATTENTION_OP = "difflet_neuron.flash_attention_scalar_exp"
 NEFF_COUNTERS = (
     "CompilationCache.TotalCompilations",
     "CompilationCache.PersistentHits",

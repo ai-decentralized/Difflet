@@ -180,6 +180,7 @@ def fake_kernel(monkeypatch):
 
     monkeypatch.setattr(neuron_attention, "_on_neuron", lambda t: True)
     monkeypatch.setattr(neuron_attention, "_flash_kernel", lambda: kernel)
+    monkeypatch.setattr(neuron_attention, "_flash_scalar_exp_kernel", lambda: kernel)
     return calls
 
 
@@ -276,6 +277,7 @@ def fake_bounded_op(monkeypatch):
     monkeypatch.setattr(neuron_attention, "_on_neuron", lambda t: True)
     monkeypatch.setattr(neuron_attention, "_flash_kernel", lambda: object())
     monkeypatch.setattr(neuron_attention, "_FLASH_BOUNDED_OP", op)
+    monkeypatch.setattr(neuron_attention, "_FLASH_BOUNDED_SCALAR_EXP_OP", op)
     calls_q = []
     calls.q = calls_q  # the q each call received
     return calls
@@ -364,23 +366,101 @@ def test_no_ring_kernel_is_prepared_without_cp():
     assert neuron_attention._RING_KERNEL_OP is None
 
 
-def test_vector_exp_false_routes_the_bounded_call_to_the_scalar_exp_op(fake_bounded_op, monkeypatch):
-    """Default calls keep the original op (unchanged graphs for every other model); vector_exp=False
-    takes the Scalar-exp variant, with the same arguments and the same result."""
+def test_bounded_default_takes_the_scalar_exp_op(fake_bounded_op, monkeypatch):
+    """Without vector_exp the bounded call runs the Scalar-exp op; vector_exp=True keeps the
+    kernel-default op (trn3's Vector exp). Same arguments, same result."""
     scalar_calls = _Calls()
-    default_op = neuron_attention._FLASH_BOUNDED_OP
+    vector_op = neuron_attention._FLASH_BOUNDED_OP
 
     def scalar_op(q, k, v, lo, hi, scale):
         scalar_calls.append(tuple(q.shape))
-        return default_op(q, k, v, lo, hi, scale)
+        return vector_op(q, k, v, lo, hi, scale)
 
     monkeypatch.setattr(neuron_attention, "_FLASH_BOUNDED_SCALAR_EXP_OP", scalar_op)
     q, k, v, lo, hi, ref = _bounded_case()
     with torch.no_grad():
-        plain = neuron_attention.attention(q, k, v, scale=0.2, bound_min=lo, bound_max=hi,
-                                           tp_q=True, tp_k=True)
-        assert len(fake_bounded_op) == 1 and not scalar_calls
         scalar = neuron_attention.attention(q, k, v, scale=0.2, bound_min=lo, bound_max=hi,
-                                            tp_q=True, tp_k=True, vector_exp=False)
-    assert len(scalar_calls) == 1
-    assert torch.equal(plain, scalar)
+                                            tp_q=True, tp_k=True)
+        assert len(scalar_calls) == 1 and len(fake_bounded_op) == 1  # scalar_op delegates
+        vector = neuron_attention.attention(q, k, v, scale=0.2, bound_min=lo, bound_max=hi,
+                                            tp_q=True, tp_k=True, vector_exp=True)
+    assert len(scalar_calls) == 1 and len(fake_bounded_op) == 2
+    assert torch.equal(scalar, vector)
+
+
+def _tagged_kernel(calls, tag):
+    def kernel(q, k, v, *, is_causal, scale, training):
+        calls.append(tag)
+        return torch.nn.functional.scaled_dot_product_attention(q, k, v, is_causal=is_causal, scale=scale)
+    return kernel
+
+
+def test_unbounded_default_takes_the_scalar_exp_kernel(fake_kernel, monkeypatch):
+    """Without vector_exp the unbounded call runs the Scalar-exp kernel; vector_exp=True keeps
+    torch-neuronx's SDPA kernel (trn3's Vector exp). Same arguments, same result."""
+    calls = []
+    monkeypatch.setattr(neuron_attention, "_flash_kernel", lambda: _tagged_kernel(calls, "vector"))
+    monkeypatch.setattr(neuron_attention, "_flash_scalar_exp_kernel",
+                        lambda: _tagged_kernel(calls, "scalar"))
+    q, k, v = _bf16(*_inputs())
+    with torch.no_grad():
+        scalar = neuron_attention.attention(q, k, v, scale=0.2, tp_q=True, tp_k=True)
+        assert calls == ["scalar"]
+        vector = neuron_attention.attention(q, k, v, scale=0.2, tp_q=True, tp_k=True, vector_exp=True)
+    assert calls == ["scalar", "vector"]
+    assert torch.equal(scalar, vector)
+
+
+def test_unbounded_falls_back_to_the_default_kernel_without_the_knob(fake_kernel, monkeypatch):
+    """No Scalar-exp kernel (no torch-neuronx, or an nkilib whose attention_cte has no
+    allow_vector_exp): the default call runs torch-neuronx's kernel instead of failing."""
+    monkeypatch.setattr(neuron_attention, "_flash_scalar_exp_kernel", lambda: None)
+    q, k, v = _bf16(*_inputs())
+    with torch.no_grad():
+        neuron_attention.attention(q, k, v, scale=0.2, tp_q=True, tp_k=True)
+    assert fake_kernel == [dict(shape=(1, BH, SQ, D), is_causal=False, scale=0.2, training=False)]
+
+
+class _RecordingFlashFwd:
+    """Stands in for torch-neuronx's ``wrapped_flash_fwd``: ``[grid](*args, **kwargs)`` records the
+    call and returns fixed outputs (with ``cache_softmax``, attention_cte's tiled softmax stats)."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __getitem__(self, grid):
+        def call(q, k, v, **kwargs):
+            self.calls.append((grid, (q, k, v), kwargs))
+            g = torch.Generator().manual_seed(7)
+            out = torch.randn(q.shape[0], q.shape[1], v.shape[-1], generator=g)
+            if not kwargs.get("cache_softmax"):
+                return out
+            stats = (q.shape[0], 128, q.shape[1] // 128)
+            return out, torch.randn(*stats, generator=g), torch.rand(*stats, generator=g) + 0.5
+        return call
+
+
+@pytest.mark.parametrize("cache_softmax", [False, True])
+@pytest.mark.parametrize("heads,kv_heads", [(4, 4), (4, 2)])
+def test_flash_fwd_mirrors_compute_attention_nki(monkeypatch, cache_softmax, heads, kv_heads):
+    """The direct kernel call is torch-neuronx's own (``_compute_attention_nki``: grid, reshapes,
+    arguments, logsumexp layout) plus ``allow_vector_exp=False``."""
+    dec = pytest.importorskip("torch_neuronx.neuron_dynamo_backend.decompositions")
+    fake = _RecordingFlashFwd()
+    monkeypatch.setattr(dec, "wrapped_flash_fwd", fake)
+    monkeypatch.setattr(dec, "get_logical_neuron_cores", lambda: 2)
+    g = torch.Generator().manual_seed(3)
+    q = torch.randn(1, heads, 256, 16, generator=g)
+    k, v = (torch.randn(1, kv_heads, 384, 16, generator=g) for _ in range(2))
+
+    theirs = dec._compute_attention_nki(q, k, v, False, 0.2, cache_softmax)
+    ours = neuron_attention._flash_fwd(q, k, v, is_causal=False, scale=0.2, cache_softmax=cache_softmax)
+
+    (grid_t, args_t, kw_t), (grid_o, args_o, kw_o) = fake.calls
+    assert grid_o == grid_t == (2,)
+    assert all(torch.equal(a, b) for a, b in zip(args_o, args_t))
+    assert kw_o == {**kw_t, "allow_vector_exp": False}
+    if cache_softmax:
+        assert all(torch.equal(a, b) for a, b in zip(ours, theirs))
+    else:
+        assert torch.equal(ours, theirs)
