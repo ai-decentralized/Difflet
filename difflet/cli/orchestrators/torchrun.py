@@ -380,24 +380,27 @@ def run_generate_stage(args: argparse.Namespace, backend: str, *, tag: str, mode
     from difflet.backends.neuron.compile import resolve_exec_mode
     from difflet.backends.neuron.core import distributed
     from difflet.pipeline.difflet_pipeline import DiffletPipeline
+    from difflet.utils import bench_timing
 
     parallel = torchrun_parallel(args)
     start = time.perf_counter()
-    pipe = DiffletPipeline.from_pretrained(
-        model_id,
-        local_files_only=True,
-        parallel=parallel,
-        dtype=torch.bfloat16,
-        compile_cache_dir=args.cache_dir,
-        backend=backend,
-        application_kwargs=application_kwargs,
-        load=False,
-        **pipeline_kwargs,
-    )
-    built_s = time.perf_counter() - start  # prepare_runtime (the process group) and the build
-    with fallback_tracker(pipe) as load_fallbacks:
-        pipe.load(skip_warmup=False)
+    with bench_timing.span("load", stage=tag):
+        pipe = DiffletPipeline.from_pretrained(
+            model_id,
+            local_files_only=True,
+            parallel=parallel,
+            dtype=torch.bfloat16,
+            compile_cache_dir=args.cache_dir,
+            backend=backend,
+            application_kwargs=application_kwargs,
+            load=False,
+            **pipeline_kwargs,
+        )
+        built_s = time.perf_counter() - start  # prepare_runtime (the process group) and the build
+        with fallback_tracker(pipe) as load_fallbacks:
+            pipe.load(skip_warmup=False)
     load_s = time.perf_counter() - start
+    _install_bench_hooks(pipe.app, tag=tag)
     if timing and distributed.is_rank0():
         components = getattr(pipe.app, "phase_seconds", {}) or {}
         print(f"[{tag}] start-up: from_pretrained (prepare_runtime + build) {built_s:.2f} s; "
@@ -424,9 +427,11 @@ def run_generate_stage(args: argparse.Namespace, backend: str, *, tag: str, mode
         for req in replica_requests(args, device=getattr(pipe.app, "device", None)):
             with replica_request_scope(args, req, final=final):
                 marks.clear()
+                bench_timing.new_request()
                 called = time.perf_counter()
-                with fallback_tracker(pipe) as fallbacks:
-                    out = pipe(**request_kwargs(req))
+                with bench_timing.span("request", stage=tag, request=getattr(req, "index", None)):
+                    with fallback_tracker(pipe) as fallbacks:
+                        out = pipe(**request_kwargs(req))
                 generate_fallbacks.extend(fallbacks)
                 done = time.perf_counter()
                 if distributed.is_rank0() and len(marks) > 1:
@@ -439,10 +444,21 @@ def run_generate_stage(args: argparse.Namespace, backend: str, *, tag: str, mode
                           f"{deltas[-1] * 1e3:.1f}); after the last step {done - marks[-1]:.2f} s",
                           flush=True)
                 if distributed.is_rank0():
-                    save(req, out)
+                    with bench_timing.span("save", stage=tag, request=getattr(req, "index", None)):
+                        save(req, out)
 
     app = pipe.app
     rank, world = distributed.world_info()
+    bench_timing.evidence(
+        stage=tag, backend=backend, exec_mode=resolve_exec_mode(envs.DIFFLET_EXEC_MODE),
+        compiled_blocks=list(getattr(app, "compiled_blocks", [])),
+        unwarmed_shapes=list(getattr(app, "unwarmed_shapes", [])),
+        fallbacks={"load": list(load_fallbacks), "generate": list(generate_fallbacks)},
+        phase_seconds=dict(getattr(app, "phase_seconds", {}) or {}),
+        weight_bytes=getattr(app, "weight_bytes", None),  # this rank's DiT weights (estimate)
+        load_s=load_s, stage_s=time.perf_counter() - start,
+        sync="torch.neuron.synchronize + .cpu() after every DiT forward (OnDeviceDiT)",
+    )
     print(
         f"[{tag}] {backend} rank {rank}/{world}: "
         f"exec_mode={resolve_exec_mode(envs.DIFFLET_EXEC_MODE)} "
@@ -482,16 +498,53 @@ def run_vae_stage(args: argparse.Namespace, *, build: Callable[[Any], Any],
     from difflet.backends.neuron.core import distributed
     from difflet.cli.dp import stage_loop
     from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from difflet.utils import bench_timing
 
     parallel = DiffletParallelConfig(tp_degree=1)
-    get_backend("neuron").prepare_runtime(parallel)
-    decoder = build(parallel)
-    decoder.load(skip_warmup=args.stage_mode != "compile")
+    with bench_timing.span("load", stage="vae"):
+        get_backend("neuron").prepare_runtime(parallel)
+        decoder = build(parallel)
+        decoder.load(skip_warmup=args.stage_mode != "compile")
     if args.stage_mode == "compile":
         if distributed.is_rank0():
             finish_compile()
+        bench_timing.evidence(stage="vae", phase_seconds=_phase_seconds(decoder))
         return
     decode = prepare_decode(decoder)
     for req in stage_loop.claimed_requests(args):
         with stage_loop.request_scope(args, req, final=True):
-            decode(req)
+            with bench_timing.span("decode", stage="vae", request=getattr(req, "index", None)):
+                decode(req)
+    bench_timing.evidence(stage="vae", phase_seconds=_phase_seconds(decoder))
+
+
+def _phase_seconds(obj) -> dict:
+    """An application's (or an adapter's application's) ``phase_seconds``, or {}."""
+    for candidate in (obj, getattr(obj, "app", None), getattr(obj, "application", None)):
+        seconds = getattr(candidate, "phase_seconds", None)
+        if isinstance(seconds, dict):
+            return dict(seconds)
+    return {}
+
+
+def _install_bench_hooks(app, *, tag: str) -> None:
+    """With ``difflet bench`` timing on, record every denoise iteration (``step_hook``), every DiT
+    forward (``transformer_adapter.forward_hook``) and the denoise loop's span (the
+    orchestrator's ``_denoise``). Off, nothing is installed. Existing hooks keep running."""
+    from difflet.utils import bench_timing
+
+    if not bench_timing.enabled():
+        return
+    if hasattr(app, "step_hook"):
+        app.step_hook = bench_timing.step_hook(app.step_hook)
+    adapter = getattr(app, "transformer_adapter", None)
+    if adapter is not None and hasattr(adapter, "forward_hook"):
+        adapter.forward_hook = bench_timing.forward_hook(adapter.forward_hook)
+    orchestrator = getattr(app, "pipeline", None)
+    denoise = getattr(orchestrator, "_denoise", None)
+    if callable(denoise):
+        def timed_denoise(*a, **k):
+            with bench_timing.span("denoise", stage=tag):
+                return denoise(*a, **k)
+
+        orchestrator._denoise = timed_denoise

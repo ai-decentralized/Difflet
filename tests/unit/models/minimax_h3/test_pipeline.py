@@ -140,3 +140,35 @@ def test_h3_t2va_step_callback_runs_after_every_step_and_can_stop_the_loop():
         denoise_minimax_h3_t2va(transformer, video_scheduler=MiniMaxH3Scheduler(shift=12.0),
                                 audio_scheduler=MiniMaxH3Scheduler(shift=3.0),
                                 step_callback=stop_after_first, **kwargs)
+
+
+def test_h3_t2va_dumps_initial_and_final_latents_only_with_the_dump_dir(monkeypatch, tmp_path):
+    kwargs = dict(encoder_hidden_states=torch.zeros(1, 4, 16),
+                  encoder_attention_mask=torch.tensor([[True, True, True, False]]),
+                  num_text_tokens=3, height=32, width=32, num_frames=124,
+                  num_inference_steps=3, seed=7)
+
+    def run():
+        return denoise_minimax_h3_t2va(_ZeroTransformer(),
+                                       video_scheduler=MiniMaxH3Scheduler(shift=12.0),
+                                       audio_scheduler=MiniMaxH3Scheduler(shift=3.0), **kwargs)
+
+    monkeypatch.delenv("DIFFLET_DUMP_LATENTS_DIR", raising=False)
+    monkeypatch.delenv("RANK", raising=False)
+    monkeypatch.chdir(tmp_path)
+    plain = run()
+    assert list(tmp_path.iterdir()) == []
+
+    dump = tmp_path / "dump"
+    monkeypatch.setenv("DIFFLET_DUMP_LATENTS_DIR", str(dump))
+    dumped = run()
+    assert sorted(p.name for p in dump.iterdir()) == [
+        "final_audio.pt", "final_video.pt", "initial_audio.pt", "initial_video.pt"]
+    # The dump only copies: the returned latents are the ones a run without it returns.
+    assert torch.equal(dumped.video_latents, plain.video_latents)
+    assert torch.equal(dumped.audio_latents, plain.audio_latents)
+    assert torch.equal(torch.load(dump / "final_video.pt"), plain.video_latents)
+    assert torch.equal(torch.load(dump / "final_audio.pt"), plain.audio_latents)
+    initial_video = torch.load(dump / "initial_video.pt")
+    assert initial_video.shape == (1, 24, 37, 2, 2) and initial_video.dtype == torch.float32
+    assert torch.load(dump / "initial_audio.pt").shape == (1, 414, 32)  # stereo-as-rows

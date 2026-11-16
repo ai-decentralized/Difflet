@@ -1187,6 +1187,82 @@ def test_host_decode_rejects_a_latent_of_another_shape(tmp_path):
                                       str(tmp_path / "x.png"), height=96, width=96)
 
 
+# ----------------------------------------------------------------- difflet bench dumps
+
+
+def _toy_denoise(model_dir: Path, latents):
+    """Two steps of the denoise loop the neuron ranks run (the backend-neutral orchestrator of
+    difflet.models.qwen_image.pipeline) with a constant-velocity DiT; the final latents."""
+    import torch
+
+    from difflet.models.qwen_image.pipeline import QwenImageOrchestrator as DenoiseLoop
+
+    with pytest.warns(RuntimeWarning, match="scheduler_config.json"):
+        loop = DenoiseLoop(model_path=str(model_dir), dtype=torch.float32, height=64, width=64,
+                           transformer=lambda bundle: torch.full_like(bundle.hidden_states, 0.5))
+    return loop(latents=latents, timesteps=torch.tensor([1.0, 0.5]),
+                encoder_hidden_states=torch.ones(1, 4, 8)).latents
+
+
+def test_write_image_dumps_the_pixels_the_png_holds(monkeypatch, tmp_path):
+    """With DIFFLET_DUMP_LATENTS_DIR set, the writer dumps the uint8 image PIL encodes
+    (frames.npy [1, H, W, 3], ``x * 255 + 0.5`` truncated) and leaves the tensor alone; a writer
+    that fails (the .pt fallback) encoded nothing and dumps nothing."""
+    import json
+
+    import numpy as np
+    import torch
+    from PIL import Image
+
+    dump = tmp_path / "dump"
+    monkeypatch.setenv("DIFFLET_DUMP_LATENTS_DIR", str(dump))
+    monkeypatch.delenv("RANK", raising=False)
+    img = torch.rand(1, 3, 5, 7, generator=torch.Generator().manual_seed(7)) * 2.4 - 1.2
+    img[0, 0, 0, :3] = torch.tensor([-1.0, 1.0, 1.0 / 255 - 1.0])  # 0, 255 and a half level
+    before = img.clone()
+
+    qwen_mod._write_image(img, str(tmp_path / "img.png"), save=qwen_mod._save_image_pil)
+
+    with Image.open(tmp_path / "img.png") as png:
+        pixels = np.asarray(png)
+    frames = np.load(dump / "frames.npy")
+    assert frames.shape == (1, 5, 7, 3) and frames.dtype == np.uint8
+    assert np.array_equal(frames[0], pixels)  # PNG is lossless: the bytes PIL was given
+    assert json.loads((dump / "frames.json").read_text())["rule"] == "round_half_up"
+    assert torch.equal(img, before)
+    (dump / "frames.npy").unlink()
+    qwen_mod._write_image(img, str(tmp_path / "bad.png"),
+                          save=lambda image, path: (_ for _ in ()).throw(RuntimeError("no")))
+    assert (tmp_path / "bad.pt").exists() and not (dump / "frames.npy").exists()
+
+
+def test_denoise_dumps_the_initial_and_final_latents(monkeypatch, tmp_path):
+    import torch
+
+    dump = tmp_path / "dump"
+    monkeypatch.setenv("DIFFLET_DUMP_LATENTS_DIR", str(dump))
+    monkeypatch.delenv("RANK", raising=False)
+    latents = torch.randn(1, 16, 64, generator=torch.Generator().manual_seed(1))
+
+    final = _toy_denoise(tmp_path / "model", latents.clone())
+
+    assert sorted(p.name for p in dump.iterdir()) == ["final.pt", "initial.pt"]
+    assert torch.equal(torch.load(dump / "initial.pt"), latents)
+    assert torch.equal(torch.load(dump / "final.pt"), final)
+    assert not torch.equal(final, latents)
+
+
+def test_nothing_is_dumped_without_the_env(monkeypatch, tmp_path):
+    import torch
+
+    _unset(monkeypatch, "DIFFLET_DUMP_LATENTS_DIR")
+    monkeypatch.chdir(tmp_path)
+    _toy_denoise(tmp_path / "model", torch.zeros(1, 16, 64))
+    qwen_mod._write_image(torch.zeros(1, 3, 4, 4), str(tmp_path / "img.png"),
+                          save=qwen_mod._save_image_pil)
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["img.png"]
+
+
 # ----------------------------------------------------------------- CPU torchrun (2 ranks, gloo)
 # The real run_stage -> torchrun -> difflet.cli.stage -> QwenImageOrchestrator, with
 # from_pretrained replaced in every rank (FAKE_PIPELINE_ENV).

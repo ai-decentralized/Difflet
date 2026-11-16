@@ -17,6 +17,7 @@ from typing import Any
 import torch
 
 from difflet.models.wan.experts import HIGH_NOISE, LOW_NOISE, read_boundary_ratio
+from difflet.utils.latent_dump import dump_latents
 
 
 @dataclass
@@ -300,6 +301,9 @@ class WanOrchestrator:
                 raise ValueError(
                     "Wan denoising requires prompt_embeds or input_ids when transformer is active."
                 )
+            # Here, not before the branch: a decode-only call (the AoT vae stage) must not
+            # overwrite the denoise stage's dumps.
+            dump_latents("initial", latents)
             latents = self._denoise(
                 latents=latents,
                 prompt_embeds=prompt_embeds,
@@ -308,6 +312,7 @@ class WanOrchestrator:
                 guidance_scale=float(guidance_scale),
                 guidance_scale_2=guidance_scale_2,
             )
+            dump_latents("final", latents)
 
         frames = latents
         if output_type == "pt":

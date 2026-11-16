@@ -17,6 +17,7 @@ import numpy as np
 import torch
 
 from difflet.models.hunyuan_video.application import HunyuanVideoDiTInputBundle
+from difflet.utils.latent_dump import dump_latents
 
 
 @dataclass
@@ -203,6 +204,7 @@ class HunyuanVideoOrchestrator:
         trajectory: list[torch.Tensor] | None,
     ) -> torch.Tensor:
         latents = bundle.hidden_states
+        dump_latents("initial", latents)
         controller = self.teacache_controller
         # Probe-free modes (fixed cadence / online-delta) never touch a probe:
         # the skip decision is index-based or uses the noise_pred trajectory.
@@ -306,6 +308,7 @@ class HunyuanVideoOrchestrator:
                 trajectory.append(latents.detach().cpu())
         if controller is not None:
             print(f"[teacache] stats: {controller.stats()}", flush=True)
+        dump_latents("final", latents)
         return latents
 
     def _scheduler_step(

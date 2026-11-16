@@ -133,6 +133,39 @@ def test_save_video_export_failure_returns_false(monkeypatch, tmp_path):
     assert ok is False
 
 
+def test_save_video_dumps_the_uint8_frames_export_to_video_encodes(monkeypatch, tmp_path):
+    """With DIFFLET_DUMP_LATENTS_DIR set, the frames export_to_video receives, quantized its own
+    way ((x * 255).astype(uint8)), are written as frames.npy [F, H, W, C] (rule truncate), and the
+    encoder gets the same frames as without the dump; unset, nothing is written."""
+    import json
+
+    import numpy as np
+    import torch
+
+    from difflet.cli.orchestrators import ltx_2 as ltx_mod
+
+    exported = []
+    monkeypatch.setattr("diffusers.utils.export_to_video",
+                        lambda frames, path, fps: exported.append(np.stack(frames)))
+    monkeypatch.delenv("RANK", raising=False)
+    # (B, F, C, H, W), partly outside [0, 1]: the clamp happens before the encoder sees it
+    frames = torch.rand(1, 3, 3, 8, 12, generator=torch.Generator().manual_seed(7)) * 1.2 - 0.1
+    dump = tmp_path / "dump"
+    monkeypatch.delenv("DIFFLET_DUMP_LATENTS_DIR", raising=False)
+    assert ltx_mod._save_video(frames, str(tmp_path / "off.mp4")) is True
+    assert not dump.exists()
+
+    monkeypatch.setenv("DIFFLET_DUMP_LATENTS_DIR", str(dump))
+    assert ltx_mod._save_video(frames, str(tmp_path / "on.mp4")) is True
+
+    dumped = np.load(dump / "frames.npy")
+    assert dumped.dtype == np.uint8 and dumped.shape == (3, 8, 12, 3)
+    assert np.array_equal(dumped, (exported[1] * 255).astype(np.uint8))
+    assert np.array_equal(exported[0], exported[1])
+    meta = json.loads((dump / "frames.json").read_text())
+    assert (meta["rule"], meta["layout"], meta["shape"]) == ("truncate", "FHWC", [3, 8, 12, 3])
+
+
 def _generate_with_fake_pipe(monkeypatch, tmp_path, output_name):
     import torch
 

@@ -770,3 +770,30 @@ def test_write_video_falls_back_to_the_decoded_tensor(monkeypatch, tmp_path):
     hv_mod._write_video(video, str(tmp_path / "w.pt"))
     assert torch.equal(torch.load(tmp_path / "w.pt"), video)
 
+
+def test_write_video_dumps_the_uint8_frames_it_encodes(monkeypatch, tmp_path):
+    """With DIFFLET_DUMP_LATENTS_DIR set, the uint8 frames [F, H, W, 3] ``_encode_mp4`` receives
+    are written as frames.npy (rule truncate, export_to_video's), and the encoder gets the same
+    frames as without the dump; unset, nothing is written."""
+    import numpy as np
+    import torch
+
+    encoded = []
+    monkeypatch.setattr(hv_mod, "_encode_mp4", lambda frames, path, fps: encoded.append(frames))
+    monkeypatch.delenv("RANK", raising=False)
+    video = torch.rand(1, 3, 5, 16, 24, generator=torch.Generator().manual_seed(7)) * 2 - 1
+    dump = tmp_path / "dump"
+    monkeypatch.delenv("DIFFLET_DUMP_LATENTS_DIR", raising=False)
+    hv_mod._write_video(video, str(tmp_path / "off.mp4"))
+    assert not dump.exists()
+
+    monkeypatch.setenv("DIFFLET_DUMP_LATENTS_DIR", str(dump))
+    hv_mod._write_video(video, str(tmp_path / "on.mp4"))
+
+    frames = np.load(dump / "frames.npy")
+    assert frames.dtype == np.uint8 and frames.shape == (5, 16, 24, 3)
+    assert np.array_equal(frames, encoded[1])
+    assert np.array_equal(encoded[0], encoded[1])
+    meta = json.loads((dump / "frames.json").read_text())
+    assert (meta["rule"], meta["layout"], meta["shape"]) == ("truncate", "FHWC", [5, 16, 24, 3])
+

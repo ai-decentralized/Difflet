@@ -81,10 +81,14 @@ def _save_video(frames: "torch.Tensor", output_path: str) -> bool:
         from diffusers.utils import export_to_video
     except ImportError:
         return False
+    from difflet.utils.latent_dump import dump_frames
+
     clip = frames.detach().float().clamp(0.0, 1.0)[0].permute(0, 2, 3, 1)  # (F, H, W, C)
     # export_to_video multiplies ndarray frames by 255 itself; pass float [0, 1]
     # (uint8 input wraps to 256-v: color inversion).
     clip = clip.cpu().numpy().astype("float32")
+    # export_to_video's (x * 255).astype(uint8); outside the try: a dump error is no .pt fallback
+    dump_frames(clip, rule="truncate", layout="FHWC")
     try:
         export_to_video(list(clip), output_path, fps=_FPS)
     except Exception as exc:
@@ -181,31 +185,35 @@ def _decodes_on_device(args: argparse.Namespace) -> bool:
 
 
 def _decode_latents_host(latents_path: str, model_dir: str, output_path: str, *, height: int,
-                         width: int, num_frames: int) -> None:
+                         width: int, num_frames: int, request: int | None = None) -> None:
     """Decode the generate stage's packed latents on the host CPU, as the Trainium generate does
     in its own process: diffusers' video VAE, audio VAE and vocoder in bf16
     (``LTX2Orchestrator._decode_latents``, the same un-normalisation and post-processing), then
     the video frames to ``output_path`` (``_save_video``; the audio is decoded and not written,
-    as on Trainium)."""
+    as on Trainium). ``request`` (the request's index) only labels the bench timing spans, which
+    split as the vae stage's do: ``load`` (the decoder build) and ``decode`` (latents to file)."""
     import torch
 
     from difflet.models.ltx_2.neuron_application import _host_ltx2_pipeline
     from difflet.models.ltx_2.pipeline import LTX2Orchestrator
+    from difflet.utils import bench_timing
 
-    pipe = _host_ltx2_pipeline(model_dir, dtype=torch.bfloat16, text=False, decode=True)
-    orchestrator = LTX2Orchestrator(
-        model_path=model_dir, vae=pipe.vae, audio_vae=pipe.audio_vae, vocoder=pipe.vocoder,
-        video_processor=pipe.video_processor, host_pipeline=pipe, dtype=torch.bfloat16,
-        height=height, width=width, num_frames=num_frames,
-    )
-    latents = torch.load(latents_path, map_location="cpu")
-    with torch.no_grad():
-        frames, _audio = orchestrator._decode_latents(latents["video"], latents["audio"])
-    out = Path(output_path)
-    out.parent.mkdir(parents=True, exist_ok=True)
-    if not (out.suffix == ".mp4" and _save_video(frames, str(out))):
-        torch.save(frames.cpu(), out.with_suffix(".pt"))
-        print(f"[difflet] video tensor saved to {out.with_suffix('.pt')}", flush=True)
+    with bench_timing.span("load", stage="host_vae", request=request):
+        pipe = _host_ltx2_pipeline(model_dir, dtype=torch.bfloat16, text=False, decode=True)
+        orchestrator = LTX2Orchestrator(
+            model_path=model_dir, vae=pipe.vae, audio_vae=pipe.audio_vae, vocoder=pipe.vocoder,
+            video_processor=pipe.video_processor, host_pipeline=pipe, dtype=torch.bfloat16,
+            height=height, width=width, num_frames=num_frames,
+        )
+    with bench_timing.span("decode", stage="host_vae", request=request):
+        latents = torch.load(latents_path, map_location="cpu")
+        with torch.no_grad():
+            frames, _audio = orchestrator._decode_latents(latents["video"], latents["audio"])
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        if not (out.suffix == ".mp4" and _save_video(frames, str(out))):
+            torch.save(frames.cpu(), out.with_suffix(".pt"))
+            print(f"[difflet] video tensor saved to {out.with_suffix('.pt')}", flush=True)
 
 
 class LTX2Orchestrator(ModelOrchestrator):
@@ -502,6 +510,7 @@ class LTX2Orchestrator(ModelOrchestrator):
         plain launch, or, in a DP worker, each request this worker's replica claimed and did
         not fail, marked done after its video is written."""
         from difflet.cli.dp import stage_loop
+        from difflet.utils import bench_timing
 
         args = argparse.Namespace(**{**vars(self.args), "work_dir": str(work_dir)})
         height, width, num_frames = self._shape()
@@ -510,7 +519,10 @@ class LTX2Orchestrator(ModelOrchestrator):
             with stage_loop.request_scope(args, req, final=True):
                 _decode_latents_host(str(stage_loop.work_file(args, req, "latents.pt")),
                                      model_dir, req.output, height=height, width=width,
-                                     num_frames=num_frames)
+                                     num_frames=num_frames, request=req.index)
+        # event(), not evidence(): its device-memory probe would open a NeuronCore in the driver.
+        bench_timing.event("evidence", stage="host_vae",
+                           sync="none: diffusers bf16 decode on the host CPU, no device work")
 
     def _run_stage_internal(self, stage: str, args: argparse.Namespace) -> None:
         backend = torchrun_backend()

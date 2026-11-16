@@ -22,6 +22,7 @@ from difflet.models.minimax_h3.contracts import (
     build_padded_t2va_layout,
 )
 from difflet.models.minimax_h3.scheduling_minimax_h3 import MiniMaxH3Scheduler
+from difflet.utils.latent_dump import dump_latents
 
 
 def build_adaln_modulation_table(
@@ -401,6 +402,8 @@ def denoise_minimax_h3_t2va(
         generator=generator,
         dtype=torch.float32,
     )
+    dump_latents("initial_video", video_latents)
+    dump_latents("initial_audio", audio_rows)
 
     video_scheduler.set_timesteps(num_inference_steps, device="cpu")
     audio_scheduler.set_timesteps(num_inference_steps, device="cpu")
@@ -495,6 +498,8 @@ def denoise_minimax_h3_t2va(
         layout.num_audio_latents,
         audio_latent_channels,
     ).permute(0, 2, 1)
+    dump_latents("final_video", video_latents)
+    dump_latents("final_audio", audio_latents)
     return MiniMaxH3LatentOutput(
         video_latents=video_latents.contiguous(),
         audio_latents=audio_latents.contiguous(),

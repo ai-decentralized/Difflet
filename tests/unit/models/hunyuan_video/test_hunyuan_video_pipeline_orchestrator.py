@@ -124,6 +124,31 @@ def test_hunyuan_orchestrator_uses_diffusers_style_scheduler(tmp_path):
     assert scheduler.steps[0][1].item() == pytest.approx(1000.0)
 
 
+def test_hunyuan_orchestrator_dumps_the_initial_and_final_latents(tmp_path, monkeypatch):
+    """With DIFFLET_DUMP_LATENTS_DIR set, _denoise writes the latents it starts from and the ones
+    it returns as initial.pt and final.pt, and returns the same latents; unset, nothing."""
+    monkeypatch.delenv("RANK", raising=False)
+    pipeline = HunyuanVideoOrchestrator(
+        model_path=str(tmp_path),
+        transformer=FakeTransformer(value=0.5),
+        scheduler=FakeScheduler(),
+        dtype=torch.float32,
+    )
+    latents = torch.randn((1, 16, 2, 2, 2), generator=torch.Generator().manual_seed(0))
+    dump = tmp_path / "dump"
+    monkeypatch.delenv("DIFFLET_DUMP_LATENTS_DIR", raising=False)
+    off = pipeline(bundle=_bundle(latents.clone()), num_inference_steps=2)
+    assert not dump.exists()
+
+    monkeypatch.setenv("DIFFLET_DUMP_LATENTS_DIR", str(dump))
+    output = pipeline(bundle=_bundle(latents.clone()), num_inference_steps=2)
+
+    assert sorted(p.name for p in dump.iterdir()) == ["final.pt", "initial.pt"]
+    assert torch.equal(torch.load(dump / "initial.pt"), latents)
+    assert torch.equal(torch.load(dump / "final.pt"), output.latents)
+    assert torch.equal(output.latents, off.latents)
+
+
 def test_hunyuan_orchestrator_teacache_requires_calibration(tmp_path):
     transformer = FakeTransformer(value=1.0)
 

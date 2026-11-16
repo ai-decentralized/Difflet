@@ -818,7 +818,9 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_backend_flags(gen)
     _add_quant_flags(gen)
 
-    run_cmd = sub.add_parser("run", help="Download + compile + generate in one shot")
+    run_cmd = sub.add_parser(
+        "run", help="Download + compile + generate in one shot (benchmarks: `difflet bench run`)"
+    )
     _add_model_flag(run_cmd)
     run_cmd.add_argument("--revision", default=None)
     _add_parallel_flags(run_cmd)
@@ -914,6 +916,14 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Compiled artifact cache root (default: ~/.cache/difflet/)",
     )
     cache.add_argument("--json", action="store_true", help="Emit JSON instead of a table")
+
+    # Listed for `difflet --help` only: main() hands `difflet bench ...` to difflet.bench.cli
+    # before this parser runs (see `difflet bench --help`).
+    sub.add_parser(
+        "bench",
+        help="Benchmark named recipes and record results with provenance (not `difflet run`)",
+        add_help=False,
+    )
 
     return root
 
@@ -1342,21 +1352,15 @@ def _torchrun_backend_selected() -> bool:
     return runner._torchrun_mpmd_selected()
 
 
-def main(argv: list[str] | None = None) -> None:
-    parser = _build_parser()
-    args = parser.parse_args(argv)
+def check_command_args(args: argparse.Namespace) -> None:
+    """Every argument check ``main`` runs before it dispatches a command; exits like ``main``.
 
-    if args.command == "clean":
-        from difflet.cli.clean import run as run_clean
-
-        run_clean(args)
-        return
-
-    if args.command == "cache":
-        from difflet.cli.cache_cmd import run_cache_command
-
-        raise SystemExit(run_cache_command(args))
-
+    It has ``main``'s side effects too: ``_apply_backend_flags`` exports DIFFLET_BACKEND and
+    DIFFLET_EXEC_MODE (later checks read them back), ``--taef1-path`` sets ``args.taef1`` and
+    ``--mode`` rewrites ``args.dp``/``cfg_parallel``/``cp_degree``. ``difflet bench`` calls it on a
+    throwaway Namespace with ``os.environ`` restored afterwards, to refuse a bad combination before
+    any compile starts.
+    """
     valid_models = SERVE_VALID_MODELS if args.command == "serve" else VALID_MODELS
     if args.command == "plan" and getattr(args, "serving", False):
         valid_models = SERVE_VALID_MODELS
@@ -1402,6 +1406,37 @@ def main(argv: list[str] | None = None) -> None:
     if args.command in ("generate", "run"):
         _validate_teacache(args)
         _validate_dp(args)
+
+
+def main(argv: list[str] | None = None) -> None:
+    raw = sys.argv[1:] if argv is None else list(argv)
+    if raw[:1] == ["bench"]:
+        # Before parsing: bench has its own parser (and a ``--`` pass-through to compile and
+        # generate), and none of the checks below apply to it.
+        from difflet.bench.cli import main as bench_main
+
+        raise SystemExit(bench_main(raw[1:]))
+
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+
+    if args.command == "clean":
+        from difflet.cli.clean import run as run_clean
+
+        run_clean(args)
+        return
+
+    if args.command == "cache":
+        from difflet.cli.cache_cmd import run_cache_command
+
+        raise SystemExit(run_cache_command(args))
+
+    check_command_args(args)
+    from difflet.utils import bench_timing
+
+    bench_timing.event("args", command=args.command, args=vars(args))
+
+    if args.command in ("generate", "run"):
         if args.requests_dir is None and (args.requests is not None or (args.dp or 1) > 1):
             # Both backends: on CUDA each replica is a single-GPU (or cfg-pair torchrun)
             # worker pinned through CUDA_VISIBLE_DEVICES.

@@ -92,6 +92,10 @@ def _save_av(
         audio_path = Path(temp_dir) / "audio.wav"
         frames = video.detach().float().clamp(0, 1)[0].permute(1, 2, 3, 0).cpu().numpy()
         samples = audio.detach().float().clamp(-1, 1)[0].transpose(0, 1).cpu().numpy()
+        from difflet.utils.latent_dump import dump_frames
+
+        # export_to_video quantizes ndarray frames as (frame * 255).astype(uint8).
+        dump_frames(frames, rule="truncate", layout="FHWC")
         try:
             export_to_video(list(frames.astype("float32")), str(silent_path), fps=fps)
             pcm = np.rint(samples * 32767.0).astype("<i2")
@@ -599,6 +603,7 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
             default_threads,
         )
         from difflet.pipeline.path_resolver import resolve_model_path
+        from difflet.utils import bench_timing
 
         if args.stage_mode == "compile":
             return
@@ -606,10 +611,12 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
         if any(self._keyframe_paths(args)):
             self._stage_text_host_fl2va(args, model_dir)
             return
-        encoder = HostQwen3VLTextEncoder(model_dir, threads=default_threads()).load()
+        with bench_timing.span("load", stage="host_encode", component="text_encoder"):
+            encoder = HostQwen3VLTextEncoder(model_dir, threads=default_threads()).load()
         for req in stage_loop.claim_requests(args):
             with stage_loop.request_scope(args, req, final=False):
-                record = encoder.encode(req.prompt)
+                with bench_timing.span("encode", stage="host_encode", request=req.index):
+                    record = encoder.encode(req.prompt)
                 destination = stage_loop.work_file(args, req, "text.pt")
                 torch.save(record, destination)
                 print(
@@ -682,6 +689,7 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
             load_host_video_encoder,
         )
         from difflet.models.minimax_h3.keyframes import keyframe_pixels, prepare_keyframes
+        from difflet.utils import bench_timing
 
         first, last = (Image.open(p) if p else None for p in self._keyframe_paths(args))
         keyframes, anchors, height, width = prepare_keyframes(
@@ -695,12 +703,14 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
         print(f"[text] FL2VA {'+'.join(anchors)} keyframe(s) on the {height}x{width} canvas, "
               f"conditions {tuple(conditions.shape)} encoded in "
               f"{time.perf_counter() - start:.1f}s (host VAE encoder)", flush=True)
-        encoder = HostQwen3VLTextEncoder(model_dir, seq_len=max(FL2VA_TEXT_BUCKETS),
-                                         threads=threads, vision=True).load()
+        with bench_timing.span("load", stage="host_encode", component="text_encoder"):
+            encoder = HostQwen3VLTextEncoder(model_dir, seq_len=max(FL2VA_TEXT_BUCKETS),
+                                             threads=threads, vision=True).load()
         for req in stage_loop.claim_requests(args):
             with stage_loop.request_scope(args, req, final=False):
                 start = time.perf_counter()
-                record = encoder.encode_presentation(req.prompt, keyframes)
+                with bench_timing.span("encode", stage="host_encode", request=req.index):
+                    record = encoder.encode_presentation(req.prompt, keyframes)
                 record["condition_latents"] = conditions
                 record["keyframe_anchors"] = anchors
                 destination = stage_loop.work_file(args, req, "text.pt")
@@ -727,9 +737,11 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
             torchrun_parallel,
         )
         from difflet.pipeline.path_resolver import resolve_model_path
+        from difflet.utils import bench_timing
 
         parallel = torchrun_parallel(args)
-        get_backend("neuron").prepare_runtime(parallel)
+        with bench_timing.span("load", stage="generate", component="runtime"):
+            get_backend("neuron").prepare_runtime(parallel)
 
         from difflet.backends.neuron.core.distributed import world_info
         from difflet.backends.neuron.minimax_h3.transformer import (
@@ -761,12 +773,13 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
 
             te_dtype = getattr(torch, component_dtype(getattr(args, "text_encoder_dtype", None),
                                                       default="bf16"))
-            encoder = NeuronMiniMaxH3TextEncoderApplication(
-                model_path=str(Path(model_dir) / "text_encoder"), parallel=parallel,
-                dtype=te_dtype)
-            self._neuron_device = encoder.device
-            start = time.perf_counter()
-            encoder.load(skip_warmup=not compiling)
+            with bench_timing.span("load", stage="generate", component="text_encoder"):
+                encoder = NeuronMiniMaxH3TextEncoderApplication(
+                    model_path=str(Path(model_dir) / "text_encoder"), parallel=parallel,
+                    dtype=te_dtype)
+                self._neuron_device = encoder.device
+                start = time.perf_counter()
+                encoder.load(skip_warmup=not compiling)
             log(f"[text] device Qwen3-VL ({te_dtype}, first {encoder.layer} layers) loaded in "
                 f"{time.perf_counter() - start:.1f}s, {encoder.weight_bytes / 2**30:.2f} GiB/rank")
             if not compiling:
@@ -774,7 +787,8 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
                 for req in requests:
                     with replica_request_scope(args, req, final=False):
                         start = time.perf_counter()
-                        record = encoder.encode(req.prompt)
+                        with bench_timing.span("encode", stage="generate", request=req.index):
+                            record = encoder.encode(req.prompt)
                         texts[req.index] = record
                         if rank == 0:
                             destination = stage_loop.work_file(args, req, "text.pt")
@@ -817,16 +831,33 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
         )
         self._neuron_device = app.device
         start = time.perf_counter()
-        if compiling:
-            app.load(skip_warmup=True)
-            app.warmup_text_buckets(TEXT_BUCKETS)
-        else:
-            app.load()
-            log(f"[generate] text bucket {bucket} (live tokens: "
-                f"{sorted(int(t['num_text_tokens']) for t in texts.values())})")
+        with bench_timing.span("load", stage="generate", component="dit"):
+            if compiling:
+                app.load(skip_warmup=True)
+                app.warmup_text_buckets(TEXT_BUCKETS)
+            else:
+                app.load()
+                log(f"[generate] text bucket {bucket} (live tokens: "
+                    f"{sorted(int(t['num_text_tokens']) for t in texts.values())})")
         log(f"[generate] DiT loaded on {world} ranks in {time.perf_counter() - start:.1f}s "
             f"({ {k: round(v, 1) for k, v in app.phase_seconds.items()} }), "
             f"{app.weight_bytes / 2**30:.2f} GiB/rank")
+
+        def evidence(vae_app=None) -> None:
+            """The bench ``evidence`` event: the DiT's, then the device decoder's ("vae")."""
+            if not bench_timing.enabled():
+                return
+            apps = [("", app)] + ([("vae", vae_app)] if vae_app is not None else [])
+            bench_timing.evidence(
+                stage="generate", backend="neuron", exec_mode=app.exec_mode,
+                compiled_blocks=[f"{p}.{n}" if p else n for p, a in apps
+                                 for n in a.compiled_blocks],
+                unwarmed_shapes=[s for _, a in apps for s in a.unwarmed_shapes],
+                phase_seconds={f"{p} {k}" if p else k: v for p, a in apps
+                               for k, v in a.phase_seconds.items()},
+                sync="implicit: NeuronH3DiTCall copies the DiT's video and audio output to the "
+                     "host with .cpu() after every forward (no torch.neuron.synchronize)",
+            )
 
         # 3. The video decoder, one copy per rank (it is not sharded; the tiles are). Compile
         # mode builds it right away; a generate launch loads it at its first decode, after the
@@ -842,19 +873,19 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
             # holds all of it.
             # Head-sharded over the DiT's TP group (a quarter of the HBM at tp4, as fast, the
             # same video to fp32 rounding); the TP groups split the tiles.
-            vae_app = NeuronMiniMaxH3VideoVaeApplication(
-                model_path=str(Path(model_dir) / "vae"), parallel=parallel, dtype=vae_dtype,
-                tp_shard=True)
-            start = time.perf_counter()
-            # Each rank loads the whole decoder; its warm-up (compile only) runs per rank.
-            vae_app.load(skip_warmup=not compiling)
+            with bench_timing.span("load", stage="generate", component="vae"):
+                vae_app = NeuronMiniMaxH3VideoVaeApplication(
+                    model_path=str(Path(model_dir) / "vae"), parallel=parallel,
+                    dtype=vae_dtype, tp_shard=True)
+                start = time.perf_counter()
+                # Each rank loads the whole decoder; its warm-up (compile only) runs per rank.
+                vae_app.load(skip_warmup=not compiling)
             log(f"[video_vae] device decoder ({vae_dtype}) on every rank, loaded in "
                 f"{time.perf_counter() - start:.1f}s")
             return DeviceTileDecoder(vae_app)
 
         if compiling:
-            if device_vae:
-                load_vae()
+            evidence(load_vae().app if device_vae else None)
             return
         vae = None
         audio_decoder = None
@@ -864,39 +895,54 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
                 load_host_audio_decoder,
             )
 
-            audio_decoder = load_host_audio_decoder(model_dir, threads=default_threads())
+            with bench_timing.span("load", stage="generate", component="audio_decoder"):
+                audio_decoder = load_host_audio_decoder(model_dir, threads=default_threads())
 
         dit = _NeuronH3DiT(app)
+        # Timing on: a step event after every denoise step. Off: the call is unchanged.
+        step_event = bench_timing.step_hook()
+        bench_kwargs = ({"step_callback": lambda _index: step_event()}
+                        if bench_timing.enabled() else {})
+        forward_event = bench_timing.forward_hook()
         for position, req in enumerate(requests):
+            bench_timing.new_request()
             # With the device decode, this launch finishes the request (audio + mux included).
-            with replica_request_scope(args, req, final=device_vae):
+            with (replica_request_scope(args, req, final=device_vae),
+                  bench_timing.span("request", stage="generate", request=req.index)):
                 text = texts[req.index]
                 steps = int(stage_loop.effective(req, args, "steps", h3_common.DEFAULT_STEPS))
                 table = self._neuron_adaln_table(args, model_dir, config, steps)
                 video_scheduler, audio_scheduler = load_minimax_h3_schedulers(model_dir)
                 dit.seconds.clear()
                 start = time.perf_counter()
-                output = denoise_minimax_h3_t2va(
-                    dit,
-                    # The live tokens are a prefix; the rows past the bucket are padding.
-                    encoder_hidden_states=text["encoder_hidden_states"][:, :bucket],
-                    encoder_attention_mask=text["attention_mask"][:, :bucket],
-                    num_text_tokens=int(text["num_text_tokens"]),
-                    height=height,
-                    width=width,
-                    num_frames=num_frames,
-                    num_inference_steps=steps,
-                    seed=req.seed,
-                    video_scheduler=video_scheduler,
-                    audio_scheduler=audio_scheduler,
-                    model_dtype=torch.bfloat16,
-                    adaln_modulation_table=table,
-                    condition_latents=(list(text["condition_latents"].split(1))
-                                       if "condition_latents" in text else None),
-                    keyframe_anchors=tuple(text.get("keyframe_anchors", ())),
-                    text_token_tags=text.get("text_token_tags"),
-                )
+                with bench_timing.span("denoise", stage="generate", request=req.index):
+                    output = denoise_minimax_h3_t2va(
+                        dit,
+                        # The live tokens are a prefix; the rows past the bucket are padding.
+                        encoder_hidden_states=text["encoder_hidden_states"][:, :bucket],
+                        encoder_attention_mask=text["attention_mask"][:, :bucket],
+                        num_text_tokens=int(text["num_text_tokens"]),
+                        height=height,
+                        width=width,
+                        num_frames=num_frames,
+                        num_inference_steps=steps,
+                        seed=req.seed,
+                        video_scheduler=video_scheduler,
+                        audio_scheduler=audio_scheduler,
+                        model_dtype=torch.bfloat16,
+                        adaln_modulation_table=table,
+                        condition_latents=(list(text["condition_latents"].split(1))
+                                           if "condition_latents" in text else None),
+                        keyframe_anchors=tuple(text.get("keyframe_anchors", ())),
+                        text_token_tags=text.get("text_token_tags"),
+                        **bench_kwargs,
+                    )
                 elapsed = time.perf_counter() - start
+                # The forwards' own seconds, written after the loop so no event write lands
+                # inside a step; they stay inside this request's span.
+                if bench_timing.enabled():
+                    for seconds in dit.seconds:
+                        forward_event(seconds)
                 if rank == 0:
                     destination = stage_loop.work_file(args, req, "latents.pt")
                     torch.save(
@@ -928,8 +974,8 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
                 start = time.perf_counter()
                 # Rank 0 decodes the audio on the host while the ranks decode the video tiles
                 # on the device: the two decodes share nothing but the denoise output.
-                with ThreadPoolExecutor(max_workers=1,
-                                        thread_name_prefix="h3-audio-vae") as pool:
+                with (bench_timing.span("decode", stage="generate", request=req.index),
+                      ThreadPoolExecutor(max_workers=1, thread_name_prefix="h3-audio-vae") as pool):
                     audio_job = (pool.submit(self._decode_audio, output.audio_latents,
                                              audio_decoder, " overlapped with the video")
                                  if rank == 0 else None)
@@ -948,7 +994,9 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
                 if rank == 0:
                     log(f"[video_vae+audio_vae] both decoded in "
                         f"{time.perf_counter() - start:.1f}s")
-                    self._mux(req, video, audio, audio_decoder.config)
+                    with bench_timing.span("save", stage="generate", request=req.index):
+                        self._mux(req, video, audio, audio_decoder.config)
+        evidence(vae.app if vae is not None else None)
 
     def _decode_audio(self, audio_latents, decoder, note: str = ""):
         """The audio decode on the host (fp32, the whole latent)."""
@@ -970,10 +1018,6 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
         print(f"[audio_vae] (host{note}) waveform {tuple(audio.shape)} in "
               f"{time.perf_counter() - start:.1f}s", flush=True)
         return audio
-
-    def _decode_audio_and_mux(self, req, audio_latents, video, decoder) -> None:
-        """The audio decode on the host and the mux (the audio_vae stage's output)."""
-        self._mux(req, video, self._decode_audio(audio_latents, decoder), decoder.config)
 
     def _mux(self, req, video, audio, cfg) -> None:
         """The MP4 mux, or the AV tensors when the mux is unavailable."""
@@ -1000,24 +1044,27 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
         )
         from difflet.models.minimax_h3.pipeline import decode_minimax_h3_video
         from difflet.pipeline.path_resolver import resolve_model_path
+        from difflet.utils import bench_timing
 
         if args.stage_mode == "compile":
             return
         model_dir = self._model_dir(args, resolve_model_path)
-        decoder = load_host_video_decoder(model_dir, threads=default_threads())
+        with bench_timing.span("load", stage="host_vae", component="video_decoder"):
+            decoder = load_host_video_decoder(model_dir, threads=default_threads())
         cfg = decoder.config
         for req in stage_loop.claimed_requests(args):
             with stage_loop.request_scope(args, req, final=False):
                 latents = torch.load(stage_loop.work_file(args, req, "latents.pt"))
                 start = time.perf_counter()
-                video = decode_minimax_h3_video(
-                    decoder,
-                    latents["video_latents"],
-                    latents_mean=cfg["latents_mean"],
-                    latents_std=cfg["latents_std"],
-                    clip_length=int(cfg["clip_length"]),
-                    token_drop=int(cfg["token_drop"]),
-                )
+                with bench_timing.span("decode", stage="host_vae", request=req.index):
+                    video = decode_minimax_h3_video(
+                        decoder,
+                        latents["video_latents"],
+                        latents_mean=cfg["latents_mean"],
+                        latents_std=cfg["latents_std"],
+                        clip_length=int(cfg["clip_length"]),
+                        token_drop=int(cfg["token_drop"]),
+                    )
                 destination = stage_loop.work_file(args, req, "video.pt")
                 torch.save(video.to(torch.float16), destination)
                 print(f"[video_vae] (host) RGB video {tuple(video.shape)} in "
@@ -1054,16 +1101,21 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
             load_host_audio_decoder,
         )
         from difflet.pipeline.path_resolver import resolve_model_path
+        from difflet.utils import bench_timing
 
         if args.stage_mode == "compile":
             return
-        decoder = load_host_audio_decoder(self._model_dir(args, resolve_model_path),
-                                          threads=default_threads())
+        with bench_timing.span("load", stage="host_vae", component="audio_decoder"):
+            decoder = load_host_audio_decoder(self._model_dir(args, resolve_model_path),
+                                              threads=default_threads())
         for req in stage_loop.claimed_requests(args):
             with stage_loop.request_scope(args, req, final=True):
                 latents = torch.load(stage_loop.work_file(args, req, "latents.pt"))
                 video = torch.load(stage_loop.work_file(args, req, "video.pt")).float()
-                self._decode_audio_and_mux(req, latents["audio_latents"], video, decoder)
+                with bench_timing.span("decode", stage="host_vae", request=req.index):
+                    audio = self._decode_audio(latents["audio_latents"], decoder)
+                with bench_timing.span("save", stage="host_vae", request=req.index):
+                    self._mux(req, video, audio, decoder.config)
 
     def _validate_topology(self) -> None:
         # The neuron application validates its own degrees (heads divide tp*cp); Trainium's AOT

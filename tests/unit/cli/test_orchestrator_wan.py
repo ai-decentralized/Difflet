@@ -327,6 +327,38 @@ def test_save_video_export_failure_returns_false(monkeypatch, tmp_path):
     assert ok is False
 
 
+def test_save_video_dumps_the_uint8_frames_export_to_video_encodes(monkeypatch, tmp_path):
+    # The quality metric hashes the frames the encoder was given, quantized as it does.
+    import json
+
+    import numpy as np
+    import torch
+
+    dump = tmp_path / "dump"
+    monkeypatch.setenv("DIFFLET_DUMP_LATENTS_DIR", str(dump))
+    monkeypatch.delenv("RANK", raising=False)
+    exported = {}
+    monkeypatch.setattr("diffusers.utils.export_to_video",
+                        lambda frames, path, fps: exported.update(frames=frames))
+    video = torch.linspace(-1.5, 1.5, 3 * 2 * 4 * 4).reshape(1, 3, 2, 4, 4)  # past [-1, 1] too
+    assert wan_mod._save_video(video, str(tmp_path / "v.mp4")) is True
+    encoded = np.stack([(f * 255).astype(np.uint8) for f in exported["frames"]])  # diffusers' rule
+    frames = np.load(dump / "frames.npy")
+    assert frames.shape == (2, 4, 4, 3) and np.array_equal(frames, encoded)
+    meta = json.loads((dump / "frames.json").read_text())
+    assert meta["rule"] == "truncate" and meta["shape"] == [2, 4, 4, 3]
+
+
+def test_save_video_writes_no_frames_without_the_dump_dir(monkeypatch, tmp_path):
+    import torch
+
+    monkeypatch.delenv("DIFFLET_DUMP_LATENTS_DIR", raising=False)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("diffusers.utils.export_to_video", lambda *a, **kw: None)
+    assert wan_mod._save_video(torch.zeros(1, 3, 2, 4, 4), str(tmp_path / "v.mp4")) is True
+    assert list(tmp_path.iterdir()) == []
+
+
 # ----------------------------------------------------------------- stage internals
 
 def _setup_wan_fakes(monkeypatch):

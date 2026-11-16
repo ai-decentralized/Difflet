@@ -100,3 +100,14 @@ def test_nxd_inference_capture_snapshot_truthiness(
 def test_module_reimport_is_idempotent() -> None:
     reloaded = importlib.reload(envs)
     assert dir(reloaded) == dir(envs)
+
+
+def test_bench_variables_are_declared(monkeypatch: pytest.MonkeyPatch) -> None:
+    _unset(monkeypatch, "DIFFLET_BENCH_ROOT", "DIFFLET_BENCH_TIMING_DIR",
+           "DIFFLET_DUMP_LATENTS_DIR")
+    assert envs.DIFFLET_BENCH_ROOT.endswith("/.cache/difflet/bench")
+    assert not envs.DIFFLET_BENCH_ROOT.startswith("~")
+    assert envs.DIFFLET_BENCH_TIMING_DIR is None
+    assert envs.DIFFLET_DUMP_LATENTS_DIR is None
+    monkeypatch.setenv("DIFFLET_BENCH_TIMING_DIR", "/tmp/t")
+    assert envs.DIFFLET_BENCH_TIMING_DIR == "/tmp/t"
