@@ -21,6 +21,10 @@ REV = "0123456789abcdef0123456789abcdef01234567"
 def host(tmp_path, monkeypatch):
     """A fake host: every call is logged in ``calls``; each launch returns ``next_evidence``."""
     state = SimpleNamespace(calls=[], idle=True, evidence=[], new_neffs=[], raise_in_run=None)
+    # No neuron-ls on a CI runner: the lane's cores come from this table, not from the host.
+    table = {"instance_type": "trn3.48xlarge",
+             "devices": {8: H.Device(8, (32, 33, 34, 35), 0, "0-47")}}
+    monkeypatch.setattr(H, "topology", lambda: table)
     monkeypatch.setattr(H, "bench_root", lambda: tmp_path / "bench")
     monkeypatch.setattr(H, "compile_cache_root", lambda: tmp_path / "cache")
     monkeypatch.setattr(H, "child_env", lambda **kw: H.ChildEnv(env={}, applied={}, dropped=[],
