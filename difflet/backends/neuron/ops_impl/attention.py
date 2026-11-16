@@ -8,11 +8,13 @@ The kernel computes in bf16 internally, so only bf16/fp16 inputs take it; fp32 k
 fp32 precision through SDPA. Masked or autograd calls, and shapes outside the
 kernel's limits, also use SDPA.
 
-Every flash path (unmasked, key-bounded, logsumexp) runs attention_cte with
-``allow_vector_exp=False``: the softmax exp on the Scalar engine, which on trn3 takes
-it off the saturated Vector engine (see ``attention``'s ``vector_exp``). The unmasked
+The attention_cte flash paths (unmasked, key-bounded, logsumexp) run it with
+``allow_vector_exp=False`` by default: the softmax exp on the Scalar engine, which on trn3
+takes it off the saturated Vector engine (see ``attention``'s ``vector_exp``). The unmasked
 and logsumexp paths therefore call the kernel themselves (``_flash_fwd``), as
-torch-neuronx's SDPA op would, since that op cannot pass the argument.
+torch-neuronx's SDPA op would, since that op cannot pass the argument. Not covered:
+``vector_exp=True`` calls, an nkilib without the argument (the previous kernels run), and
+the NKI Library ring kernel (``_ring_kernel_op``, which has no such argument).
 
 The entry points keep the attention_cte calling contract that model code is
 written against:
@@ -95,8 +97,10 @@ def attention(
     Vector engine's ``exponential``. On trn3 the Vector engine already evicts every score tile from
     PSUM (scale and row max; the bounded path adds a ``range_select``), so with the exp there too
     it bounds the kernel while the Scalar engine idles: the Scalar exp is 7.5-21% faster per call
-    (Wan 81f 63.7 -> 52.0 ms, H3 768p bounded 66.4 -> 54.0 ms), same accuracy. No effect off trn3
-    B1: trn2 has no Vector exp and always uses the Scalar engine."""
+    (Wan 81f 63.7 -> 52.0 ms, H3 768p bounded 66.4 -> 54.0 ms) with the same rel L2 against fp32
+    attention; the outputs differ in their low bits, so a denoising trajectory lands on a nearby
+    but different sample (docs/verification/2026-11-16-attention-scalar-exp.md). No effect off
+    trn3 B1: trn2 has no Vector exp and always uses the Scalar engine."""
     if kwargs:
         raise NotImplementedError(
             "neuron attention does not support attention_cte-only kwargs: "

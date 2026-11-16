@@ -52,7 +52,9 @@ SHAPES = {  # section 9's shapes.json, plus the logsumexp partials of the joint 
     "hv1_L": dict(bh=6, s=67576, d=128, valid_k=67449),
     # Qwen-Image tp2 cp2 image hop: 12 heads, 1024 text + 2048 image queries, 2048 image keys.
     "lse_qwen_cp2": dict(bh=12, s=3072, s_k=2048, d=128, lse=True),
-    # Wan 81f cp2 hop above the ring kernel's 16384 limit's half: 10 heads, 16380 x 16380.
+    # A long logsumexp partial at a Wan 81f cp2 hop's size (10 heads, 16380 x 16380). Compiled
+    # Wan cp2 itself takes the NKI ring kernel here (16380 <= _RING_KERNEL_MAX_SEQ); the op runs
+    # at this size for the permute-loop ring (DIFFLET_NEURON_RING_KERNEL=0) and longer shards.
     "lse_wan_cp2": dict(bh=10, s=16380, s_k=16380, d=128, lse=True),
 }
 

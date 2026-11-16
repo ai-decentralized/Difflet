@@ -440,12 +440,15 @@ class _RecordingFlashFwd:
         return call
 
 
+@pytest.mark.parametrize("knob", [True, False])
 @pytest.mark.parametrize("cache_softmax", [False, True])
 @pytest.mark.parametrize("heads,kv_heads", [(4, 4), (4, 2)])
-def test_flash_fwd_mirrors_compute_attention_nki(monkeypatch, cache_softmax, heads, kv_heads):
+def test_flash_fwd_mirrors_compute_attention_nki(monkeypatch, cache_softmax, heads, kv_heads, knob):
     """The direct kernel call is torch-neuronx's own (``_compute_attention_nki``: grid, reshapes,
-    arguments, logsumexp layout) plus ``allow_vector_exp=False``."""
+    arguments, logsumexp layout) plus ``allow_vector_exp=False``; an nkilib without that argument
+    (``_EXP_KNOB`` False) gets exactly torch-neuronx's call."""
     dec = pytest.importorskip("torch_neuronx.neuron_dynamo_backend.decompositions")
+    monkeypatch.setattr(neuron_attention, "_EXP_KNOB", knob)
     fake = _RecordingFlashFwd()
     monkeypatch.setattr(dec, "wrapped_flash_fwd", fake)
     monkeypatch.setattr(dec, "get_logical_neuron_cores", lambda: 2)
@@ -459,8 +462,28 @@ def test_flash_fwd_mirrors_compute_attention_nki(monkeypatch, cache_softmax, hea
     (grid_t, args_t, kw_t), (grid_o, args_o, kw_o) = fake.calls
     assert grid_o == grid_t == (2,)
     assert all(torch.equal(a, b) for a, b in zip(args_o, args_t))
-    assert kw_o == {**kw_t, "allow_vector_exp": False}
+    assert kw_o == ({**kw_t, "allow_vector_exp": False} if knob else kw_t)
     if cache_softmax:
         assert all(torch.equal(a, b) for a, b in zip(ours, theirs))
     else:
         assert torch.equal(ours, theirs)
+
+
+def test_bounded_falls_back_to_the_default_op_without_the_knob(fake_bounded_op, monkeypatch):
+    """No Scalar-exp bounded op (an nkilib whose attention_cte has no allow_vector_exp): the
+    default bounded call runs the kernel-default op instead of failing."""
+    monkeypatch.setattr(neuron_attention, "_FLASH_BOUNDED_SCALAR_EXP_OP", None)
+    q, k, v, lo, hi, ref = _bounded_case()
+    with torch.no_grad():
+        out = neuron_attention.attention(q, k, v, scale=0.2, bound_min=lo, bound_max=hi,
+                                         tp_q=True, tp_k=True)
+    assert len(fake_bounded_op) == 1
+    _close_bf16(out, ref)
+
+
+def test_scalar_exp_loaders_return_none_without_the_knob(monkeypatch):
+    """Without the kernel argument neither Scalar-exp op is built, so every call keeps the
+    kernel-default ops rather than passing an argument the kernel would reject at trace time."""
+    monkeypatch.setattr(neuron_attention, "_EXP_KNOB", False)
+    assert neuron_attention._load_flash_scalar_exp_op() is None
+    assert neuron_attention._load_flash_bounded_op(vector_exp=False) is None
