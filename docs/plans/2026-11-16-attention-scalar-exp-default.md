@@ -17,6 +17,14 @@ venv `/home/ubuntu/venvs/native-fp8`, trn3.48xlarge (16 devices, LNC=2).
 section 9 on branch `feat/mxfp8-sage-attention` (commit 5d5b83c5): kernel 7.5-21% faster on six shapes, rel L2 vs
 fp32 unchanged, direct call bit-identical to torch-neuronx's SDPA op at the default knob.
 
+## User decisions (2026-11-16)
+
+- Model level runs every tier (A, B and C) of Task 4.
+- Quality is reported, never a gate, except: stop and ask if any model's after-vs-CPU-fp32 PSNR is more
+  than 0.5 dB below its before-vs-fp32 PSNR.
+- MiniMax-H3's `attention_vector_exp` knob is deleted (Task 2).
+- Execution: inline (superpowers:executing-plans), one whole-branch review at the end.
+
 ## Global Constraints
 
 - Base: `main` at d70faffc. Branch `feat/attn-scalar-exp-default`; one commit per task, each pushed.
