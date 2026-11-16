@@ -500,10 +500,21 @@ def run_vae_stage(args: argparse.Namespace, *, build: Callable[[Any], Any],
     from difflet.pipeline.parallel_config import DiffletParallelConfig
     from difflet.utils import bench_timing
 
+    import os
+
+    world = int(os.environ.get("WORLD_SIZE", "1"))
     parallel = DiffletParallelConfig(tp_degree=1)
     with bench_timing.span("load", stage="vae"):
-        get_backend("neuron").prepare_runtime(parallel)
+        # Several ranks decode tiles: no TP layout to check against them, only cores to bind.
+        get_backend("neuron").prepare_runtime(parallel if world == 1 else None)
         decoder = build(parallel)
+        if world > 1:  # the tiles travel through the host: a CPU group beside the neuron one
+            import torch.distributed as dist
+
+            if not hasattr(decoder, "set_tile_group"):
+                raise ValueError(f"{type(decoder).__name__} decodes on one core; launch the vae "
+                                 "stage on one core (--vae-cores 1)")
+            decoder.set_tile_group(dist.new_group(backend="gloo"))
         decoder.load(skip_warmup=args.stage_mode != "compile")
     if args.stage_mode == "compile":
         if distributed.is_rank0():

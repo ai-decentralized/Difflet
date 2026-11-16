@@ -1896,3 +1896,39 @@ def hv15_parallel_vae_worker(rank: int, world_size: int) -> dict:
             return {"none": out is None}
         ref = vae.tiled_decode(z)
     return {"shape": list(out.shape), "equal": bool(torch.equal(out, ref))}
+
+
+def wan_tile_parallel_worker(rank: int, world_size: int) -> dict:
+    """The tiny Wan VAE decoder's tiled decode with its tiles split across the ranks, against
+    the same model's single-process tiled decode (rank 0 holds the result)."""
+    import torch.distributed as dist
+
+    from difflet.backends.neuron.core.tile_parallel import decode_tiles_across_ranks
+    from tests.unit.models.wan.test_wan_vae_regions import _diffusers_vae, _latents, _model_from
+
+    torch.set_num_threads(1)  # deterministic CPU kernels across the processes
+    model = _model_from(_diffusers_vae(0))
+    model.enable_tiling(16, 8)  # 24 overlapping tiles on the 4 x 6 latent
+    z = _latents(3)
+    with torch.no_grad():
+        out = decode_tiles_across_ranks(model, z, dist.group.WORLD)
+        if rank != 0:
+            return {"none": out is None}
+        ref = model.tiled_decode(z)
+    return {"shape": list(out.shape), "equal": bool(torch.equal(out, ref))}
+
+
+def replicated_mesh_worker(rank: int, world_size: int) -> dict:
+    """A one-rank layout on a two-rank job: refused by init_parallel_mesh, recorded by
+    init_replicated_mesh, which answers every query as on one core."""
+    from difflet.backends.neuron.ops_impl import parallel_mesh as pm
+    from difflet.pipeline.parallel_mesh import MeshSpec
+
+    try:
+        pm.init_parallel_mesh(MeshSpec(tp=1))
+        refused = False
+    except ValueError:
+        refused = True
+    pm.init_replicated_mesh(MeshSpec(tp=1))
+    return {"refused": refused, "tp_size": pm.get_tp_size(), "tp_rank": pm.get_tp_rank(),
+            "tp_group": pm.get_tp_group() is None}

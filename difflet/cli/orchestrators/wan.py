@@ -356,6 +356,12 @@ def _component_dtype_keys(stage: str, args: argparse.Namespace) -> dict:
     return {**keys, flag: component_dtype(value)}
 
 
+
+def _vae_cores(args) -> int:
+    """The vae stage's cores: ``--vae-cores`` (diffusers' tiles decoded across them), else one
+    core and the untiled decode."""
+    return int(getattr(args, "vae_cores", None) or 1)
+
 class WanOrchestrator(ModelOrchestrator):
 
     def download(self) -> None:
@@ -472,7 +478,7 @@ class WanOrchestrator(ModelOrchestrator):
         if not _decode_on_device(self.args):
             return
         runner.run_stage(self.args.model_id, "vae",
-                         num_cores=1, virtual_core_size=_VIRTUAL_CORE_SIZE,
+                         num_cores=_vae_cores(self.args), virtual_core_size=_VIRTUAL_CORE_SIZE,
                          cli_args=shared)
 
     def _make_bf16_dit_copies(self) -> None:
@@ -517,8 +523,8 @@ class WanOrchestrator(ModelOrchestrator):
                 _decode_latents_host(str(work_dir / "latents.pt"), self.args.model_id,
                                      self.args.output, revision=self.args.revision)
             else:
-                runner.run_stage(self.args.model_id, "vae",
-                                 num_cores=1, virtual_core_size=_VIRTUAL_CORE_SIZE,
+                runner.run_stage(self.args.model_id, "vae", num_cores=_vae_cores(self.args),
+                                 virtual_core_size=_VIRTUAL_CORE_SIZE,
                                  cli_args=shared)
         except Exception:
             print(f"[difflet] work dir preserved at {work_dir} for inspection", file=sys.stderr)

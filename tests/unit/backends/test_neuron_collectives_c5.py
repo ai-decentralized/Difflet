@@ -349,3 +349,23 @@ def test_hv15_vae_tiles_decode_across_ranks_bit_identically():
     lead, helper = run_ranks(hv15_parallel_vae_worker, world_size=2)
     assert lead["equal"] and lead["shape"][:3] == [1, 3, 5]
     assert helper == {"none": True}
+
+
+def test_wan_vae_tiles_decode_across_ranks_bit_identically():
+    """Three ranks split the tiny Wan decoder's 24 tiles; rank 0's frames equal the model's
+    single-process tiled decode exactly, and the other ranks return nothing."""
+    pytest.importorskip("diffusers")
+    from tests.unit.backends._neuron_gloo import run_ranks
+    from tests.unit.backends._neuron_workers import wan_tile_parallel_worker
+
+    lead, *helpers = run_ranks(wan_tile_parallel_worker, world_size=3)
+    assert lead["equal"] and lead["shape"] == [1, 3, 9, 32, 48]
+    assert helpers == [{"none": True}, {"none": True}]
+
+
+def test_replicated_mesh_records_one_ranks_layout_on_a_larger_job():
+    from tests.unit.backends._neuron_gloo import run_ranks
+    from tests.unit.backends._neuron_workers import replicated_mesh_worker
+
+    for r in run_ranks(replicated_mesh_worker, world_size=2):
+        assert r == {"refused": True, "tp_size": 1, "tp_rank": 0, "tp_group": True}

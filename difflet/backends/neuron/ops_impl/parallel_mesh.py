@@ -126,6 +126,26 @@ def init_parallel_mesh(config) -> None:
     prepare_ring_kernel(spec)  # before any compilation: Dynamo cannot trace op registration
 
 
+def init_replicated_mesh(config) -> None:
+    """Record a world-size-1 layout on a rank of a larger job whose ranks each run the whole model
+    on their own core (a VAE decoder splitting its tiles across ranks). No axis spans ranks, so no
+    group is bound and every query answers as on one core; ``init_parallel_mesh`` refuses this on
+    purpose, since for a model meant to be sharded it is a misconfiguration."""
+    global _MESH_SPEC, _TP_GROUP, _AXIS_GROUPS
+    spec = mesh_spec_from_config(config)
+    _check_supported(spec)
+    if spec.world_size != 1:
+        raise ValueError(f"a replicated mesh is one rank's layout; got {spec}")
+    if _MESH_SPEC is not None:
+        if spec != _MESH_SPEC:
+            raise RuntimeError(
+                f"neuron parallel mesh already initialized with {_MESH_SPEC}; "
+                f"cannot re-initialize with {spec}"
+            )
+        return
+    _MESH_SPEC, _AXIS_GROUPS, _TP_GROUP = spec, {}, None
+
+
 def is_mesh_initialized() -> bool:
     return _MESH_SPEC is not None
 

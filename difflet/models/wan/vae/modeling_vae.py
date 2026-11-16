@@ -3,7 +3,10 @@
 This module is hardware-neutral: it imports only torch, stdlib, and pure
 diffusers utilities. W3c intentionally implements decoder-only inference:
 ``post_quant_conv`` followed by ``WanDecoder3d`` with causal-conv feature
-cache. Encoder, KL sampling, and tiled decode remain outside the spike.
+cache. Encoder and KL sampling remain outside the spike. Tiled decode is diffusers'
+``AutoencoderKLWan.tiled_decode`` (off by default; ``enable_tiling``), split into ``tile_latents``,
+``decode_tile`` per tile and ``blend_tiles``, so the tiles can be decoded elsewhere and assembled
+by the same code.
 
 Reduced precision (bf16 or fp16 weights and activations): the RMS norms normalise in fp32
 (``WanRMSNorm``) and the nearest upsampling runs in fp32 (``WanUpsample``), as before. With
@@ -530,14 +533,38 @@ class WanVAEDecoderModel(nn.Module):
             fp32_output_head=fp32_output_head,
         )
         self._conv_count = sum(isinstance(m, WanCausalConv3d) for m in self.decoder.modules())
+        self.use_tiling = False  # enable_tiling; diffusers' default tile sizes until then
+        self.tile_sample_min = self.TILE_SAMPLE_MIN
+        self.tile_sample_stride = self.TILE_SAMPLE_STRIDE
+
+    #: diffusers' ``AutoencoderKLWan`` tile defaults, in sample pixels.
+    TILE_SAMPLE_MIN = 256
+    TILE_SAMPLE_STRIDE = 192
 
     def _clear_cache(self) -> list[Optional[torch.Tensor] | str]:
         return [None] * self._conv_count
 
-    def forward(self, z: torch.Tensor) -> torch.Tensor:
+    @property
+    def spatial_compression_ratio(self) -> int:
+        return 2 ** (len(self.config.dim_mult) - 1)
+
+    def enable_tiling(self, tile_sample_min: int | None = None,
+                      tile_sample_stride: int | None = None) -> None:
+        """Decode in overlapping spatial tiles, as diffusers' ``AutoencoderKLWan.enable_tiling``
+        (square tiles: one size and one stride for height and width, in sample pixels)."""
+        self.use_tiling = True
+        self.tile_sample_min = int(tile_sample_min or self.TILE_SAMPLE_MIN)
+        self.tile_sample_stride = int(tile_sample_stride or self.TILE_SAMPLE_STRIDE)
+
+    def disable_tiling(self) -> None:
+        self.use_tiling = False
+
+    def decode_tile(self, z: torch.Tensor) -> torch.Tensor:
+        """``z`` (one spatial region, all its latent frames) through the decoder frame by frame
+        with its own causal cache; unclamped. The untiled decode is one such region."""
         _, _, num_frames, _, _ = z.shape
         feat_cache = self._clear_cache()
-        z = self.post_quant_conv(z)
+        z = self.post_quant_conv(z)  # 1x1x1: per tile or per frame, the same values
         chunks = []
         for i in range(num_frames):
             conv_idx = [0]
@@ -548,7 +575,81 @@ class WanVAEDecoderModel(nn.Module):
                 first_chunk=i == 0,
             )
             chunks.append(chunk)
-        return torch.clamp(torch.cat(chunks, dim=2), min=-1.0, max=1.0)
+        return torch.cat(chunks, dim=2)
+
+    def _tile_latent(self) -> tuple[int, int]:
+        r = self.spatial_compression_ratio
+        return self.tile_sample_min // r, self.tile_sample_stride // r
+
+    def _tiles_needed(self, z: torch.Tensor) -> bool:
+        if not self.use_tiling:
+            return False
+        tile = self._tile_latent()[0]
+        return z.shape[-1] > tile or z.shape[-2] > tile
+
+    def tile_origins(self, z: torch.Tensor) -> list[tuple[int, int]]:
+        """The latent tiles' origins (row, column), in diffusers' ``tiled_decode`` loop order."""
+        _, stride = self._tile_latent()
+        return [(i, j) for i in range(0, z.shape[-2], stride)
+                for j in range(0, z.shape[-1], stride)]
+
+    def tile_latents(self, z: torch.Tensor) -> list[torch.Tensor]:
+        """The latent tiles ``decode_tile`` takes, in ``tile_origins`` order."""
+        tile, _ = self._tile_latent()
+        return [z[:, :, :, i : i + tile, j : j + tile] for i, j in self.tile_origins(z)]
+
+    def blend_tiles(self, z: torch.Tensor, tiles: list[torch.Tensor]) -> torch.Tensor:
+        """diffusers' ``tiled_decode`` assembly on decoded ``tiles`` (in ``tile_origins`` order):
+        each tile blended in place with its upper then left neighbour over the overlap, cropped
+        to the stride, concatenated, cropped to the frame and clamped."""
+        r = self.spatial_compression_ratio
+        _, stride = self._tile_latent()
+        blend = self.tile_sample_min - self.tile_sample_stride
+        rows_n = len(range(0, z.shape[-2], stride))
+        cols_n = len(range(0, z.shape[-1], stride))
+        rows = [tiles[i * cols_n:(i + 1) * cols_n] for i in range(rows_n)]
+        result_rows = []
+        for i, row in enumerate(rows):
+            result_row = []
+            for j, tile in enumerate(row):
+                if i > 0:
+                    tile = _blend_v(rows[i - 1][j], tile, blend)
+                if j > 0:
+                    tile = _blend_h(row[j - 1], tile, blend)
+                stride_px = self.tile_sample_stride
+                result_row.append(tile[:, :, :, :stride_px, :stride_px])
+            result_rows.append(torch.cat(result_row, dim=-1))
+        dec = torch.cat(result_rows, dim=3)[:, :, :, : z.shape[-2] * r, : z.shape[-1] * r]
+        return torch.clamp(dec, min=-1.0, max=1.0)
+
+    def tiled_decode(self, z: torch.Tensor) -> torch.Tensor:
+        """diffusers' ``AutoencoderKLWan.tiled_decode``: the tiles decoded one after another."""
+        return self.blend_tiles(z, [self.decode_tile(t) for t in self.tile_latents(z)])
+
+    def forward(self, z: torch.Tensor) -> torch.Tensor:
+        if self._tiles_needed(z):
+            return self.tiled_decode(z)
+        return torch.clamp(self.decode_tile(z), min=-1.0, max=1.0)
+
+
+def _blend_v(a: torch.Tensor, b: torch.Tensor, blend_extent: int) -> torch.Tensor:
+    """diffusers' ``AutoencoderKLWan.blend_v``: ``b``'s top rows ramped in from ``a``'s bottom
+    rows, in place."""
+    blend_extent = min(a.shape[-2], b.shape[-2], blend_extent)
+    for y in range(blend_extent):
+        b[:, :, :, y, :] = (a[:, :, :, -blend_extent + y, :] * (1 - y / blend_extent)
+                            + b[:, :, :, y, :] * (y / blend_extent))
+    return b
+
+
+def _blend_h(a: torch.Tensor, b: torch.Tensor, blend_extent: int) -> torch.Tensor:
+    """diffusers' ``AutoencoderKLWan.blend_h``: ``b``'s left columns ramped in from ``a``'s right
+    columns, in place."""
+    blend_extent = min(a.shape[-1], b.shape[-1], blend_extent)
+    for x in range(blend_extent):
+        b[:, :, :, :, x] = (a[:, :, :, :, -blend_extent + x] * (1 - x / blend_extent)
+                            + b[:, :, :, :, x] * (x / blend_extent))
+    return b
 
 
 __all__ = [

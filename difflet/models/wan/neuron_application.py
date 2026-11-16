@@ -209,8 +209,9 @@ class _DeviceVaeDecoder(DeviceComponent):
         self.dtype = torch.float32
         self.config = app.vae_config
 
-    def __call__(self, latents: torch.Tensor) -> torch.Tensor:
-        return self.app(latents.to(self.device, self.app.dtype)).cpu()
+    def __call__(self, latents: torch.Tensor) -> torch.Tensor | None:
+        frames = self.app(latents.to(self.device, self.app.dtype))
+        return None if frames is None else frames.cpu()  # None: a tile rank other than rank 0
 
 
 class _OnDeviceTransformer(OnDeviceDiT):

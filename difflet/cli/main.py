@@ -234,9 +234,10 @@ def _add_cache_flags(p: argparse.ArgumentParser) -> None:
         dest="vae_cores",
         type=int,
         default=None,
-        help="--backend neuron, HunyuanVideo 1.5: NeuronCores for the vae stage, which decodes "
-        "diffusers' tiles across them (bit-identical to one core). Default: the transformer "
-        "stage's core count; 1 decodes on one core.",
+        help="--backend neuron: NeuronCores for the vae stage, which decodes diffusers' tiles "
+        "across them (bit-identical to a one-core tiled decode). HunyuanVideo 1.5: default, the "
+        "transformer stage's core count. Wan: default 1, the untiled decode; above 1 the decode "
+        "tiles (256-pixel tiles, 64-pixel blends).",
     )
     p.add_argument(
         "--host-text-encoder",

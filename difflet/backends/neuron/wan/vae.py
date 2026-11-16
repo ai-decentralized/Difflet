@@ -90,12 +90,20 @@ class NeuronWanVaeDecoderApplication(TorchNeuronApplicationBase):
         exec_mode: str | None = "eager",
         device="neuron",
         compile_backend=None,
+        tiling: bool = False,
         **kwargs,
     ) -> None:
         exec_mode = "eager" if exec_mode is None else exec_mode
         if exec_mode not in self.EXEC_MODES:
             raise ValueError(
                 f"the Wan VAE decoder runs eager or compile, got exec_mode={exec_mode!r}")
+        if tiling and exec_mode == "compile":
+            raise ValueError("the Wan VAE decoder tiles in eager mode only; the compiled regions "
+                             "decode the whole frame")
+        #: diffusers' tiled decode (256-pixel tiles, stride 192), eager only; off by default.
+        self.tiling = bool(tiling)
+        #: A CPU process group to decode the tiles across (``set_tile_group``); None: one core.
+        self.tile_group = None
         super().__init__(
             model_path=model_path,
             parallel=parallel,
@@ -127,7 +135,35 @@ class NeuronWanVaeDecoderApplication(TorchNeuronApplicationBase):
         from difflet.models.wan.vae.modeling_vae import WanVAEDecoderModel
 
         # The fp32 output head is a no-op in fp32 (the fp32 decode is unchanged).
-        return WanVAEDecoderModel(self.vae_config, fp32_output_head=True)
+        model = WanVAEDecoderModel(self.vae_config, fp32_output_head=True)
+        if self.tiling:
+            model.enable_tiling()
+        return model
+
+    def set_tile_group(self, group) -> None:
+        """Decode tiled, with the tiles split across ``group``'s ranks (a CPU group; frames on
+        group rank 0, ``None`` on the others), bit-identical to the single-core tiled decode.
+        Before ``load``. Each rank holds the whole decoder: no parallel mesh is involved."""
+        if self.exec_mode == "compile":
+            raise ValueError("the Wan VAE decoder tiles in eager mode only")
+        self.tiling, self.tile_group = True, group
+
+    def _init_runtime(self) -> None:
+        if self.tile_group is None:
+            super()._init_runtime()
+            return
+        # Tile ranks each hold the whole decoder (no TP layers): one rank's layout, no groups.
+        from difflet.backends.neuron.ops_impl import parallel_mesh
+
+        parallel_mesh.init_replicated_mesh(self.parallel.mesh_spec)
+
+    def forward(self, z):
+        if self.tile_group is not None and self.is_loaded and self.module._tiles_needed(z):
+            from difflet.backends.neuron.core.tile_parallel import decode_tiles_across_ranks
+
+            with torch.no_grad():
+                return decode_tiles_across_ranks(self.module, z, self.tile_group)
+        return super().forward(z)
 
     def checkpoint_key(self, name: str) -> str:
         return name  # diffusers' decoder layout, key for key
