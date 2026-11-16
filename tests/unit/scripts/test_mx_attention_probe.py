@@ -199,7 +199,8 @@ def test_use_fork_smooths_k_before_the_kernel_and_the_padding_with_qk_mx(qk_mx, 
     q, k, v = (torch.randn(1, 2, 600, 128, generator=g).bfloat16() + 3 for _ in range(3))
     attn._FLASH_KERNEL(q, k, v, is_causal=False, scale=0.5, training=False)
     lo = torch.zeros(2, 600, 1, dtype=torch.int32)
-    attn._flash_attention_bounded(q, k, v, lo, lo + 513, scale=0.5)
+    # Called as attention()'s bounded path calls it (with vector_exp), not just scale.
+    attn._flash_attention_bounded(q, k, v, lo, lo + 513, scale=0.5, vector_exp=True)
     (k_unbounded, kw_u), (k_bounded, kw_b) = calls
     expect = smooth_keys(k) if qk_mx else k
     assert torch.equal(k_unbounded, expect.flatten(0, 1))

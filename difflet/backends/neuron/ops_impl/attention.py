@@ -100,7 +100,8 @@ def attention(
     reads every score tile out of PSUM with a Vector ``range_select``, so with the exp there too
     the Vector engine bounds the kernel while the Scalar engine idles; on trn3 at H3's 768p
     per-rank shape (7 x 38272 x 128) False takes the kernel from 66.4 to 54.0 ms. No effect off
-    trn3 (the kernel only uses the Vector exp there).
+    trn3 (the kernel only uses the Vector exp there). No effect on the MX route either, which
+    always uses the Vector exp.
 
     ``mx=False`` keeps the call in bf16 under ``DIFFLET_ATTN_QUANT``: the cross-attention call
     sites pass it (plan Global Constraints: only self/joint attention is routed)."""

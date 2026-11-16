@@ -217,8 +217,8 @@ def use_fork(*, qk_mx: bool, pv_mx: bool, vector_exp: bool = False) -> None:
     if qk_mx:
         unbounded, bounded = attn._FLASH_KERNEL, attn._flash_attention_bounded
         attn._FLASH_KERNEL = lambda q, k, v, **kw: unbounded(q, smooth_keys(k), v, **kw)
-        attn._flash_attention_bounded = (lambda q, k, v, lo, hi, *, scale:
-                                         bounded(q, smooth_keys(k), v, lo, hi, scale=scale))
+        attn._flash_attention_bounded = (lambda q, k, v, lo, hi, **kw:
+                                         bounded(q, smooth_keys(k), v, lo, hi, **kw))
 
 
 def use_cte_no_vector_exp() -> None:
