@@ -99,7 +99,7 @@ def attention(
     it bounds the kernel while the Scalar engine idles: the Scalar exp is 7.5-21% faster per call
     (Wan 81f 63.7 -> 52.0 ms, H3 768p bounded 66.4 -> 54.0 ms) with the same rel L2 against fp32
     attention; the outputs differ in their low bits, so a denoising trajectory lands on a nearby
-    but different sample (docs/verification/2026-11-16-attention-scalar-exp.md). No effect off
+    but different sample. No effect off
     trn3 B1: trn2 has no Vector exp and always uses the Scalar engine."""
     if kwargs:
         raise NotImplementedError(
