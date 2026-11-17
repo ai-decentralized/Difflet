@@ -13,8 +13,9 @@ embedding and AdaLN projections run on the slots' sorted unique values. Those ta
 rows' indices into them are built on the host before the loop, from one copy of the
 schedules, and both schedulers start at index 0, so the loop never waits on the device.
 
-``num_inference_steps`` counts denoising steps (transformer evaluations), as the reference
-does: the schedulers get one more grid point than that.
+``num_inference_steps`` is the schedule's grid points, the terminal zero included, as in
+Diffusers' MiniMax-H3 pipeline and the neuron backend: a request runs
+``num_inference_steps - 1`` transformer evaluations.
 """
 
 from __future__ import annotations
@@ -109,7 +110,7 @@ def denoise(
     audio_rows = torch.randn(audio_shape, generator=generator, dtype=torch.float32).to(device)
 
     for scheduler in (video_scheduler, audio_scheduler):
-        scheduler.set_timesteps(num_inference_steps + 1, device=device)
+        scheduler.set_timesteps(num_inference_steps, device=device)
         # Otherwise the first step looks its timestep up on the device.
         scheduler.set_begin_index(0)
     # One host copy of each schedule: the tables below are built without device syncs.

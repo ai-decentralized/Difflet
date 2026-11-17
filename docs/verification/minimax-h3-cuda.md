@@ -41,8 +41,10 @@ Hugging Face cache.
 
 Frame counts have the form 17n + 5, from 120 to 360: at 24 fps, 192 frames is 8 s and 243
 frames is 10 s. Height and width are multiples of 32 and at least 256. The default is
-1344x768 with 124 frames. `--steps` counts denoising steps (transformer evaluations), as the
-reference does; the default is 50.
+1344x768 with 124 frames. `--steps` is the schedule's grid points, as in Diffusers' MiniMax-H3
+pipeline and the neuron backend, so `--steps 50` runs 49 transformer evaluations; vLLM-Omni
+counts evaluations instead (50 for `steps=50`). The default is 50, the setting of vLLM-Omni's
+acceptance test below; the neuron backend defaults to 30.
 
 ```bash
 export DIFFLET_BACKEND=cuda

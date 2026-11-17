@@ -143,6 +143,12 @@ def test_a_last_keyframe_is_refused(app):
     assert app.calls == [] and app.text_encoder.calls == []
 
 
+def test_fewer_than_two_steps_are_refused_before_the_prompt_is_encoded(app):
+    with pytest.raises(ValueError, match="at least 2 steps"):
+        app.generate("a cat", num_inference_steps=1)
+    assert app.calls == [] and app.text_encoder.calls == []
+
+
 def test_prompts_take_one_to_1024_tokens(app):
     with pytest.raises(ValueError, match="1-1024 tokens"):
         app.generate("")

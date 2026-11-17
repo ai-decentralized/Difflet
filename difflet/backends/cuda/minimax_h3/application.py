@@ -142,8 +142,9 @@ class CudaMiniMaxH3Application(GpuApplication):
         last_image=None,
         output_type: str = "pt",
     ) -> MiniMaxH3Output:
-        """One clip with its audio. ``num_inference_steps`` counts denoising steps (the
-        reference's convention); ``first_image`` (a PIL image) conditions the first frame."""
+        """One clip with its audio. ``num_inference_steps`` is the schedule's grid points, so
+        ``num_inference_steps - 1`` transformer evaluations; ``first_image`` (a PIL image)
+        conditions the first frame."""
         if self.transformer is None or not self.transformer.is_loaded:
             raise RuntimeError("MiniMax-H3 is not loaded; call load() first")
         if output_type != "pt":
@@ -152,6 +153,8 @@ class CudaMiniMaxH3Application(GpuApplication):
             raise ValueError(f"MiniMax-H3 was loaded for {self.shape['num_frames']} frames")
         if last_image is not None:
             raise ValueError("MiniMax-H3 on CUDA conditions on a first frame only")
+        if num_inference_steps < 2:
+            raise ValueError("MiniMax-H3 needs at least 2 steps (N steps run N - 1 evaluations)")
         keyframes, keyframe_rows = [], None
         if first_image is not None:
             keyframes, _, _, _ = prepare_keyframes(

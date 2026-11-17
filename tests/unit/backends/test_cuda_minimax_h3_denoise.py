@@ -86,10 +86,10 @@ def _denoise(transformer, **over):
     return denoise(transformer, **kwargs)
 
 
-def test_steps_count_transformer_evaluations_with_fp32_latents():
+def test_the_transformer_gets_fp32_latents_and_no_masks():
     recorder = _Recorder()
     result = _denoise(recorder)
-    assert len(recorder.calls) == 4
+    assert len(recorder.calls) == 3
     for call in recorder.calls:
         assert call["video"].dtype == call["audio"].dtype == torch.float32
         assert call["text"].dtype == torch.bfloat16
@@ -117,7 +117,7 @@ def test_the_anchor_is_fed_first_and_unchanged_while_only_targets_advance():
 
 def test_video_and_audio_noise_each_restart_the_request_seed():
     recorder = _Recorder()
-    _denoise(recorder, num_inference_steps=1, seed=5)
+    _denoise(recorder, num_inference_steps=2, seed=5)
     video, audio = recorder.calls[0]["video"], recorder.calls[0]["audio"]
     layout = build_t2va_layout(num_text_tokens=3, **_SHAPE)
     shape = (1, 24, layout.num_latent_frames, 2, 2)
@@ -128,8 +128,8 @@ def test_video_and_audio_noise_each_restart_the_request_seed():
     assert torch.equal(audio, expected)
 
 
-@pytest.mark.parametrize("steps", [1, 50])
-def test_the_schedulers_take_one_more_grid_point_than_steps(steps):
+@pytest.mark.parametrize("steps", [2, 50])
+def test_steps_are_grid_points_so_n_steps_run_n_minus_one_evaluations(steps):
     recorder = _Recorder()
     _denoise(recorder, num_inference_steps=steps)
-    assert len(recorder.calls) == steps
+    assert len(recorder.calls) == steps - 1
