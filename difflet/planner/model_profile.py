@@ -140,7 +140,7 @@ WEIGHTS: dict[str, WeightFootprint] = {
     "qwen_image": WeightFootprint(total_bytes=57_700_000_000, staged=True),
     "wan": WeightFootprint(total_bytes=68_800_000_000, staged=True),
     "hunyuan_video": WeightFootprint(total_bytes=41_400_000_000, staged=True),
-    "hunyuan_video_15": WeightFootprint(total_bytes=0, staged=True),  # scaffold, no weights
+    "hunyuan_video_15": WeightFootprint(total_bytes=33_800_000_000, staged=True),
     "ltx_2": WeightFootprint(total_bytes=67_700_000_000, staged=False),
 }
 
