@@ -271,9 +271,11 @@ class FluxOrchestrator(ModelOrchestrator):
         for req in replica_requests(args, device=pipe.app.dit.device):
             with replica_request_scope(args, req, final=in_process):
                 marks: list[float] = []
+                last: dict[str, Any] = {}
 
                 def on_step_end(_pipe, _i, _t, callback_kwargs):
                     marks.append(time.perf_counter())
+                    last["latents"] = callback_kwargs.get("latents")
                     return callback_kwargs
 
                 called = time.perf_counter()
@@ -298,6 +300,8 @@ class FluxOrchestrator(ModelOrchestrator):
                     out.parent.mkdir(parents=True, exist_ok=True)
                     output.images[0].save(str(out))
                     print(f"[difflet] image saved to {out}", flush=True)
+                    if last.get("latents") is not None:  # packed, as the vae stage gets them
+                        torch.save(last["latents"].cpu(), stage_loop.work_file(args, req, "latents.pt"))
                 elif rank == 0:
                     path = stage_loop.work_file(args, req, "latents.pt")
                     torch.save(output.images.cpu(), path)
