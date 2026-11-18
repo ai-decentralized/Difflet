@@ -146,6 +146,6 @@ def test_registry_and_entry_route_neuron_to_the_application(tiny):
                                    text_seq_len=TINY_TEXT_SEQ_LEN, enable_text_encoder=False,
                                    device="cpu")
     assert isinstance(app, TorchNeuronLtx2Application)
-    with pytest.raises(NotImplementedError, match="trainium and neuron"):
+    with pytest.raises(NotImplementedError, match="trainium, tpu and neuron"):
         create_ltx_2_application(model_path=tiny.dir, parallel=DiffletParallelConfig(),
                                  dtype=torch.float32, shape=dict(TINY_SHAPE), backend="rocm")
