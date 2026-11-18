@@ -423,10 +423,6 @@ class NeuronApplicationBase(torch.nn.Module):
         # model.pt + neuron_config.json is what counts as "compiled" (has_compiled_artifacts), so
         # the old config goes first and the new one is written last: a compile killed midway
         # leaves no config and the next run compiles again instead of loading a partial artifact.
-        os.makedirs(compiled_model_path, exist_ok=True)
-        with contextlib.suppress(FileNotFoundError):
-            os.unlink(os.path.join(compiled_model_path, CONFIG_FILE))
-
         trace_kwargs = dict(initialize_model_weights=False, dry_run=dry_run)
         if disable_fail_fast:
             trace_kwargs["disable_fail_fast"] = True
@@ -438,6 +434,9 @@ class NeuronApplicationBase(torch.nn.Module):
         if dry_run:
             return
 
+        os.makedirs(compiled_model_path, exist_ok=True)
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(os.path.join(compiled_model_path, CONFIG_FILE))
         with atomic_path(compiled_model_path + COMPILED_MODEL_FILE_NAME) as tmp:
             torch.jit.save(traced_model, str(tmp))
         del traced_model

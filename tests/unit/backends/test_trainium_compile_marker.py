@@ -134,6 +134,12 @@ _SCRIPT = textwrap.dedent(r'''
     vae_app().compile(d)
     out["vae_ok"] = listing(d)
 
+    # 6. A dry run over a finished artifact leaves it as it is (still compiled).
+    app = base_app(); app.shard_weights = lambda *a, **k: None
+    app.compile(os.path.join(root, "ok") + "/", dry_run=True)
+    vae_app().compile(os.path.join(root, "vae_ok"), dry_run=True)
+    out["dry_run"] = [listing(os.path.join(root, "ok")), listing(os.path.join(root, "vae_ok"))]
+
     # 5. The config file itself is written atomically.
     p = os.path.join(root, "cfg", CONFIG_FILE)
     os.makedirs(os.path.dirname(p))
@@ -167,5 +173,7 @@ def test_compile_killed_midway_leaves_nothing_that_counts_as_compiled(tmp_path):
     # The HV1.5 VAE decoder's compile follows the same order.
     assert out["vae_killed"] == []
     assert out["vae_ok"] == ["model.pt", "neuron_config.json"]
+    # A dry run (trace only) does not unmark a finished artifact.
+    assert out["dry_run"] == [["model.pt", "neuron_config.json"]] * 2
     # neuron_config.json is replaced in one step: no temp file left beside it.
     assert out["cfg"] == [["neuron_config.json"], '{"tp_degree": 4}\n']
