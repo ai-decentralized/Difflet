@@ -75,7 +75,7 @@ from difflet.cli.orchestrators.torchrun import (
     torchrun_stage_keys,
     torchrun_unsupported_options,
 )
-from difflet.cli.quant import prepare_quant, quant_cli_args, quant_spec
+from difflet.cli.quant import prepare_quant, quant_spec
 from difflet.quant.spec import quant_cache_fields
 
 if TYPE_CHECKING:
@@ -1005,56 +1005,16 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
             )
 
     def _shared_cli_args(self, stage_mode: str, work_dir: str | None = None) -> list[str]:
-        a = self.args
-        parts = [
-            "--model-id", _HF_MODEL_ID,
-            "--tp-degree", str(a.tp_degree or 4),
-            "--cp-degree", str(a.cp_degree or 1),
-            "--cp-mode", str(getattr(a, "cp_mode", "gather_kv")),
-            "--height", str(a.height or 320),
-            "--width", str(a.width or 512),
-            "--num-frames", str(a.num_frames or 61),
-            "--steps", str(getattr(a, "steps", None) or 4),
-            "--guidance-scale", str(getattr(a, "guidance_scale", None) or 6.0),
-            "--seed", str(getattr(a, "seed", 42)),
-            "--stage-mode", stage_mode,
-        ]
-        if getattr(a, "shapes", None):
-            parts += ["--shapes", str(a.shapes)]
-        if getattr(a, "sp_enabled", False):
-            parts.append("--sp")
-        if getattr(a, "tp_reduce_dtype", None):
-            parts += ["--tp-reduce-dtype", a.tp_reduce_dtype]
-        if getattr(a, "teacache_cadence", None) is not None:
-            parts += ["--teacache-cadence", str(a.teacache_cadence)]
-        if getattr(a, "teacache_online_delta", None) is not None:
-            parts += ["--teacache-online-delta", str(a.teacache_online_delta)]
-        if getattr(a, "teacache_speedup", None) is not None:
-            parts += ["--teacache-speedup", str(a.teacache_speedup)]
-        if getattr(a, "teacache_calibration", None):
-            parts += ["--teacache-calibration", str(a.teacache_calibration)]
-        parts += quant_cli_args(a)  # only when given
-        if getattr(a, "prompt", None):
-            parts += ["--prompt", a.prompt]
-        if getattr(a, "output", None):
-            parts += ["--output", a.output]
-        if a.cache_dir:
-            parts += ["--cache-dir", a.cache_dir]
-        # Only when given (--exec-mode exists on the torchrun backends only), so an AoT command
-        # line stays byte-identical.
-        if getattr(a, "exec_mode", None):
-            parts += ["--exec-mode", a.exec_mode]
-        if torchrun_backend() is not None:  # the driver's resolved decode, for every stage
-            dtype, exec_mode = _vae_decoder(a)
-            parts += ["--vae-placement", _vae_placement(a),
-                      "--vae-dtype", {v: k for k, v in _VAE_DTYPES.items()}[dtype],
-                      "--vae-exec-mode", exec_mode]
-        if getattr(a, "revision", None):
-            parts += ["--revision", a.revision]
-        if work_dir:
-            parts += ["--work-dir", work_dir]
-        if getattr(a, "requests_dir", None):
-            parts += ["--requests-dir", str(a.requests_dir),
-                      "--worker-index", str(a.worker_index),
-                      "--dp-schedule", str(getattr(a, "dp_schedule", "round_robin"))]
-        return parts
+        """Every stage's command line (``stage_argv``), with this model's defaults and, on a
+        torchrun backend, the decode the driver resolved (``_vae_placement``, ``_vae_decoder``)."""
+        resolved = {}
+        if torchrun_backend() is not None:
+            dtype, exec_mode = _vae_decoder(self.args)
+            resolved = dict(vae_placement=_vae_placement(self.args),
+                            vae_dtype={v: k for k, v in _VAE_DTYPES.items()}[dtype],
+                            vae_exec_mode=exec_mode)
+        height, width, num_frames = _DEFAULT_SHAPE
+        return self.stage_argv(
+            defaults=dict(tp_degree=4, height=height, width=width, num_frames=num_frames,
+                          steps=_DEFAULT_STEPS, guidance_scale=_DEFAULT_GUIDANCE),
+            model_id=_HF_MODEL_ID, stage_mode=stage_mode, work_dir=work_dir, **resolved)

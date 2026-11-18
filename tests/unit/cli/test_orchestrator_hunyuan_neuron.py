@@ -178,9 +178,9 @@ def test_stage_parser_consumes_the_forwarded_vae_flags(monkeypatch):
     assert extra == []
     assert (parsed.vae_placement, parsed.vae_dtype, parsed.vae_exec_mode) == (
         "generate", "bf16", "compile")
-    _backend(monkeypatch, None)  # the AoT command line is unchanged
+    _backend(monkeypatch, None)  # the driver resolves no decode for the AoT stages
     aot = HunyuanVideoOrchestrator(_args(vae_in_process=True))._shared_cli_args("generate")
-    assert not any(flag.startswith("--vae-") for flag in aot)
+    assert not {"--vae-placement", "--vae-dtype", "--vae-exec-mode"} & set(aot)
 
 
 @pytest.mark.parametrize("vae_flag", [{}, {"host_vae": True}])

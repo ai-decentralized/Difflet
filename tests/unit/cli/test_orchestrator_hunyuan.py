@@ -191,6 +191,17 @@ def test_shared_cli_args_optionals():
     assert "--prompt" not in bare and "--cache-dir" not in bare
 
 
+def test_shared_cli_args_forward_force_to_the_compile_stages():
+    """`difflet compile --force` rebuilds the stage artifacts: _compile_stage reads args.force in
+    the stage process, which the hand-written argv never forwarded."""
+    from difflet.cli import stage
+
+    parts = HunyuanVideoOrchestrator(_hv_args(force=True))._shared_cli_args("compile", work_dir="/w")
+    parsed = stage._build_stage_parser().parse_args(
+        ["--orchestrator", "hunyuan_video", "--stage", "clip", *parts])
+    assert parsed.force and parsed.stage_mode == "compile"
+
+
 def test_save_video_passes_float_unit_range_frames(monkeypatch, tmp_path):
     # export_to_video multiplies ndarray frames by 255 itself — passing uint8
     # wraps pixels to 256-v (color inversion). Contract: float32 [0, 1].
