@@ -9,7 +9,10 @@ from types import SimpleNamespace
 
 import pytest
 
+import diffusers.pipelines.flux.pipeline_flux  # noqa: F401 - imported before tests stub torch/numpy
+
 from difflet.common.orchestrators import qwen_image
+from difflet.pipeline import flow_match  # noqa: F401 - same
 from difflet.pipeline.parallel_config import DiffletParallelConfig
 from difflet.pipeline.teacache import TeaCacheCalibration
 from difflet.serving.errors import DiffletServingError
