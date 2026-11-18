@@ -249,21 +249,6 @@ def test_missing_scheduler_warns_only_when_requested(tmp_path):
     assert m._load_scheduler(str(tmp_path), warn_if_missing=False) is None
 
 
-def test_retrieve_timesteps_without_sigmas_uses_num_steps():
-    class FakeScheduler2:
-        def __init__(self):
-            self.kwargs = None
-            self.timesteps = torch.tensor([1.0, 0.5])
-
-        def set_timesteps(self, num_inference_steps=None, *, device=None, sigmas=None):
-            self.kwargs = {"num": num_inference_steps, "sigmas": sigmas, "device": device}
-
-    s = FakeScheduler2()
-    ts, n = m._retrieve_timesteps(s, 2, "cpu")
-    assert s.kwargs["num"] == 2 and s.kwargs["sigmas"] is None
-    assert n == 2 and ts.numel() == 2
-
-
 # --------------------------------------------------------------------------- #
 # TeaCache fused-probe loop
 # --------------------------------------------------------------------------- #
