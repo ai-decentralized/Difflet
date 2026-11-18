@@ -11,6 +11,9 @@ import os
 import subprocess
 import sys
 import textwrap
+from pathlib import Path
+
+REPO = Path(__file__).resolve().parents[3]  # the difflet the subprocess imports
 
 _SCRIPT = textwrap.dedent(r'''
     import importlib.abc, importlib.machinery, json, os, sys, types
@@ -144,7 +147,7 @@ def _run(tmp_path):
     proc = subprocess.run(
         [sys.executable, "-c", _SCRIPT, str(tmp_path)],
         capture_output=True, text=True, timeout=300,
-        env={**os.environ, "PYTHONPATH": os.getcwd(), "DIFFLET_BACKEND": "cpu"},
+        env={**os.environ, "PYTHONPATH": str(REPO), "DIFFLET_BACKEND": "cpu"},
     )
     line = [ln for ln in proc.stdout.splitlines() if ln.startswith("RESULT ")]
     assert line, proc.stdout + proc.stderr
