@@ -364,6 +364,7 @@ def test_qwen_serving_selects_teacache_per_request_steps(monkeypatch, tmp_path, 
             base_shift=0.0,
             max_image_seq_len=4096,
             base_image_seq_len=1,
+            use_dynamic_shifting=True,  # as Qwen-Image's real config
         )
         timesteps = []
 
@@ -434,7 +435,8 @@ def test_qwen_serving_leaves_probe_free_controller_to_the_pipeline(monkeypatch, 
 
     class _Scheduler:
         config = SimpleNamespace(
-            max_shift=1.0, base_shift=0.0, max_image_seq_len=4096, base_image_seq_len=1
+            max_shift=1.0, base_shift=0.0, max_image_seq_len=4096, base_image_seq_len=1,
+            use_dynamic_shifting=True,
         )
         timesteps = []
 

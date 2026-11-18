@@ -16,27 +16,7 @@ from difflet.backends.gpu.application import GpuApplication
 from difflet.models.qwen_image.contract import QwenImageDiTInputBundle
 from difflet.models.qwen_image.dit_config import QwenImageDiTConfig
 from difflet.models.qwen_image.spec import SPEC
-
-
-def dynamic_shift_mu(scheduler_config, image_seq_len: int) -> float:
-    """``mu`` for a ``use_dynamic_shifting`` FlowMatch scheduler — the formula
-    difflet/cli/orchestrators/qwen_image.py and diffusers' ``calculate_shift`` share."""
-    sc = scheduler_config
-    slope = (sc.max_shift - sc.base_shift) / (sc.max_image_seq_len - sc.base_image_seq_len)
-    return float(image_seq_len * slope + (sc.base_shift - slope * sc.base_image_seq_len))
-
-
-def qwen_image_timesteps(scheduler, *, num_inference_steps: int, image_seq_len: int):
-    """Timesteps the way the Trainium CLI builds them: linear sigmas plus the dynamic
-    shift ``mu`` (the model's scheduler config has ``use_dynamic_shifting=True``, and
-    ``set_timesteps`` refuses to run without ``mu``)."""
-    import numpy as np
-
-    steps = max(int(num_inference_steps), 1)
-    sigmas = np.linspace(1.0, 1.0 / steps, steps).tolist()
-    mu = dynamic_shift_mu(scheduler.config, image_seq_len)
-    scheduler.set_timesteps(sigmas=sigmas, mu=mu, device="cpu")
-    return scheduler.timesteps
+from difflet.pipeline import flow_match
 
 
 class CudaQwenImageApplication(GpuApplication):
@@ -181,10 +161,8 @@ class CudaQwenImageApplication(GpuApplication):
         )
         timesteps = None
         if self.pipeline.scheduler is not None:
-            timesteps = qwen_image_timesteps(
-                self.pipeline.scheduler,
-                num_inference_steps=int(num_inference_steps),
-                image_seq_len=int(latents.shape[1]),
+            timesteps = flow_match.set_timesteps(
+                self.pipeline.scheduler, int(num_inference_steps), int(latents.shape[1])
             ).to(self.device)
         # The Trainium CLI fills the ignored guidance tensor with this value; mirrored so the
         # DiT inputs are identical, not because it changes the image.
@@ -217,4 +195,4 @@ class CudaQwenImageApplication(GpuApplication):
         return processor.postprocess(images.float(), output_type=output_type)
 
 
-__all__ = ["CudaQwenImageApplication", "dynamic_shift_mu", "qwen_image_timesteps"]
+__all__ = ["CudaQwenImageApplication"]

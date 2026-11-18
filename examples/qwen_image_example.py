@@ -186,17 +186,11 @@ def stage_generate(args: argparse.Namespace) -> None:
     app.load(args.dit_compiled, skip_warmup=True)
     print(f"[generate] DiT load = {time.time() - t0:.1f}s", flush=True)
 
-    # Qwen scheduler uses dynamic shifting -> set_timesteps needs mu(image_seq_len).
-    import numpy as np
+    # Qwen scheduler uses dynamic shifting -> the schedule needs mu(image_seq_len).
+    from difflet.pipeline import flow_match
 
-    sched = app.pipeline.scheduler
-    sc = sched.config
     image_seq_len = (args.height // 16) * (args.width // 16)
-    slope = (sc.max_shift - sc.base_shift) / (sc.max_image_seq_len - sc.base_image_seq_len)
-    mu = image_seq_len * slope + (sc.base_shift - slope * sc.base_image_seq_len)
-    sigmas = np.linspace(1.0, 1.0 / args.num_inference_steps, args.num_inference_steps).tolist()
-    sched.set_timesteps(sigmas=sigmas, mu=mu, device="cpu")
-    timesteps = sched.timesteps
+    timesteps = flow_match.set_timesteps(app.pipeline.scheduler, args.num_inference_steps, image_seq_len)
 
     torch.manual_seed(args.seed)
     out = app.pipeline(

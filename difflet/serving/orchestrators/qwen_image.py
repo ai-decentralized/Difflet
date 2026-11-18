@@ -669,7 +669,7 @@ class QwenImageServingStageAdapter:
         return int(body["joint_attention_dim"])
 
     def _denoise_tpu(self, text: dict[str, object], request: DiffletGenerateRequest):
-        import numpy as np
+        from difflet.pipeline import flow_match
         import torch
         from difflet.backends.tpu.ops_impl import device_runtime
         from diffusers import FlowMatchEulerDiscreteScheduler
@@ -683,14 +683,9 @@ class QwenImageServingStageAdapter:
         scheduler = FlowMatchEulerDiscreteScheduler.from_pretrained(
             str(Path(self.model_dir) / "scheduler")
         )
-        sc = scheduler.config
         image_seq_len = (profile.height // 16) * (profile.width // 16)
-        slope = (sc.max_shift - sc.base_shift) / (sc.max_image_seq_len - sc.base_image_seq_len)
-        mu = image_seq_len * slope + (sc.base_shift - slope * sc.base_image_seq_len)
         steps = int(request.num_inference_steps)
-        scheduler.set_timesteps(
-            sigmas=np.linspace(1.0, 1.0 / steps, steps).tolist(), mu=mu, device="cpu"
-        )
+        flow_match.set_timesteps(scheduler, steps, image_seq_len)
 
         generator = torch.Generator("cpu").manual_seed(int(request.seed))
         latents = torch.randn(
@@ -810,7 +805,7 @@ class QwenImageServingStageAdapter:
         return {"encoder_hidden_states": ehs, "encoder_hidden_states_mask": mask}
 
     def _denoise(self, text: dict[str, object], request: DiffletGenerateRequest):
-        import numpy as np
+        from difflet.pipeline import flow_match
         import torch
 
         if self._tpu:
@@ -820,13 +815,10 @@ class QwenImageServingStageAdapter:
         profile = self.active_profile
         guidance = torch.full([1], float(request.guidance_scale), dtype=torch.bfloat16)
         sched = self.denoise_app.pipeline.scheduler
-        sc = sched.config
         # The resident pipeline is pinned to the profile's largest shape, so
         # the request shape drives the schedule and latents explicitly; the
         # runtime router picks the matching compiled bucket by signature.
         image_seq_len = (request.height // 16) * (request.width // 16)
-        slope = (sc.max_shift - sc.base_shift) / (sc.max_image_seq_len - sc.base_image_seq_len)
-        mu = image_seq_len * slope + (sc.base_shift - slope * sc.base_image_seq_len)
         num_steps = request.num_inference_steps
         use_teacache = request_uses_teacache(profile, num_steps)
         if profile.teacache_speedup is not None and not use_teacache:
@@ -843,8 +835,7 @@ class QwenImageServingStageAdapter:
         teacache_enabled: bool | None = (
             use_teacache if profile.teacache_speedup is not None else None
         )
-        sigmas = np.linspace(1.0, 1.0 / num_steps, num_steps).tolist()
-        sched.set_timesteps(sigmas=sigmas, mu=mu, device="cpu")
+        flow_match.set_timesteps(sched, num_steps, image_seq_len)
         torch.manual_seed(request.seed)
         latents = torch.randn(
             (1, 1, 16, request.height // 8, request.width // 8),

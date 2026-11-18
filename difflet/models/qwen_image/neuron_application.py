@@ -450,17 +450,6 @@ def _runs_true_cfg(kwargs: dict[str, Any]) -> bool:
             and kwargs.get("negative_encoder_hidden_states") is not None)
 
 
-def _flow_match_mu(scheduler_config, image_seq_len: int) -> float:
-    """The dynamic-shift ``mu`` the CLI generate stage and diffusers (``calculate_shift``) set
-    the FlowMatch schedule with: linear in the packed image sequence length."""
-    slope = (scheduler_config.max_shift - scheduler_config.base_shift) / (
-        scheduler_config.max_image_seq_len - scheduler_config.base_image_seq_len
-    )
-    return image_seq_len * slope + (
-        scheduler_config.base_shift - slope * scheduler_config.base_image_seq_len
-    )
-
-
 class TorchNeuronQwenImageApplication(TorchNeuronModelApplication):
     """Host Qwen2.5-VL on rank 0 + the DiT on each rank's core + ``QwenImageOrchestrator``, on
     every rank.
@@ -681,9 +670,8 @@ class TorchNeuronQwenImageApplication(TorchNeuronModelApplication):
           parallelism a call without true CFG is refused: the DiT then takes only the batch-2
           ``[negative, conditional]`` pair;
         * the schedule: without ``timesteps``, the FlowMatch schedule is set as the CLI generate
-          stage sets it (``sigmas = linspace(1, 1/N, N)`` shifted by ``_flow_match_mu`` at this
-          shape) and passed as ``timesteps``; the orchestrator alone would set it without
-          ``mu``, which Qwen-Image's dynamic-shifting scheduler rejects.
+          stage sets it (``flow_match.set_timesteps`` at this shape: linear sigmas, dynamic
+          shift ``mu``) and passed as ``timesteps``.
 
         The initial noise is drawn on rank 0 (from ``generator``, or the global RNG as the CLI's
         ``torch.manual_seed`` leaves it) and broadcast, so the ranks of a TP/CP group denoise
@@ -713,17 +701,12 @@ class TorchNeuronQwenImageApplication(TorchNeuronModelApplication):
             kwargs["latents"] = self._initial_latents(kwargs)
         scheduler = self.pipeline.scheduler
         if kwargs.get("timesteps") is None and scheduler is not None:
-            import numpy as np
+            from difflet.pipeline import flow_match
 
             steps = max(int(kwargs.get("num_inference_steps") or _DEFAULT_STEPS), 1)
             kwargs["num_inference_steps"] = steps
-            sigmas = np.linspace(1.0, 1.0 / steps, steps).tolist()
-            scheduler.set_timesteps(
-                sigmas=sigmas,
-                mu=_flow_match_mu(scheduler.config, int(self.config.image_seq_len)),
-                device="cpu",
-            )
-            kwargs["timesteps"] = scheduler.timesteps
+            kwargs["timesteps"] = flow_match.set_timesteps(
+                scheduler, steps, int(self.config.image_seq_len))
         return self.pipeline(**kwargs)
 
     def _initial_latents(self, kwargs: dict[str, Any]) -> torch.Tensor:
