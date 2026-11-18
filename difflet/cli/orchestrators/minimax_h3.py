@@ -1181,59 +1181,17 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
         )
 
     def _shared_cli_args(self, stage_mode: str, work_dir: str | None = None) -> list[str]:
-        args = self.args
-        parts = [
-            "--model-id",
-            _HF_MODEL_ID,
-            "--tp-degree",
-            str(args.tp_degree or 4),
-            "--cp-degree",
-            str(args.cp_degree or 1),
-            "--height",
-            str(args.height or h3_common.DEFAULT_HEIGHT),
-            "--width",
-            str(args.width or h3_common.DEFAULT_WIDTH),
-            "--num-frames",
-            str(args.num_frames or h3_common.DEFAULT_NUM_FRAMES),
-            "--steps",
-            str(getattr(args, "steps", None) or h3_common.DEFAULT_STEPS),
-            "--seed",
-            str(getattr(args, "seed", 42)),
-            "--stage-mode",
-            stage_mode,
-        ]
-        for flag, value in (
-            ("--prompt", getattr(args, "prompt", None)),
-            ("--output", getattr(args, "output", None)),
-            ("--cache-dir", getattr(args, "cache_dir", None)),
-            ("--revision", getattr(args, "revision", None)),
-            ("--model-path", getattr(args, "model_path", None)),
-            ("--work-dir", work_dir),
-            ("--first-frame", getattr(args, "first_frame", None)),
-            ("--last-frame", getattr(args, "last_frame", None)),
-        ):
-            if value:
-                parts.extend([flag, str(value)])
-        if torchrun_backend() is not None:
-            if (args.cp_degree or 1) > 1 and getattr(args, "cp_mode", None):
-                parts.extend(["--cp-mode", str(args.cp_mode)])
-            if self._device_vae():
-                parts.append("--device-vae")
-                if getattr(args, "vae_dtype", None):
-                    parts.extend(["--vae-dtype", str(args.vae_dtype)])
-            if self._device_text_encoder():
-                parts.append("--device-text-encoder")
-                if getattr(args, "text_encoder_dtype", None):
-                    parts.extend(["--text-encoder-dtype", str(args.text_encoder_dtype)])
-        if getattr(args, "requests_dir", None):
-            parts.extend(
-                [
-                    "--requests-dir",
-                    str(args.requests_dir),
-                    "--worker-index",
-                    str(args.worker_index),
-                    "--dp-schedule",
-                    str(getattr(args, "dp_schedule", "round_robin")),
-                ]
-            )
-        return parts
+        on_torchrun = torchrun_backend() is not None
+        return self.stage_argv(
+            defaults=dict(tp_degree=4, cp_degree=1, height=h3_common.DEFAULT_HEIGHT,
+                          width=h3_common.DEFAULT_WIDTH, num_frames=h3_common.DEFAULT_NUM_FRAMES,
+                          steps=h3_common.DEFAULT_STEPS),
+            model_id=_HF_MODEL_ID,
+            stage_mode=stage_mode,
+            work_dir=work_dir,
+            # Without CP the mode stays the stage default: DiffletParallelConfig refuses another.
+            cp_mode=self.args.cp_mode if (self.args.cp_degree or 1) > 1 else None,
+            # The placements the driver resolved; the neuron generate stage reads these raw.
+            device_vae=on_torchrun and self._device_vae(),
+            device_text_encoder=on_torchrun and self._device_text_encoder(),
+        )

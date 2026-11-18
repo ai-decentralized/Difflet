@@ -459,8 +459,11 @@ def test_neuron_topology_runs_ulysses_and_gather_kv_on_tp_times_cp_cores(monkeyp
         cli = orchestrator._shared_cli_args("generate")
         assert cli[cli.index("--cp-degree") + 1] == str(cp)
         assert cli[cli.index("--cp-mode") + 1] == mode
-    # cp1 forwards no mode (the stage default stands)
-    assert "--cp-mode" not in MiniMaxH3Orchestrator(_args())._shared_cli_args("generate")
+    # cp1 forwards no mode, even a typed one: the stage's DiffletParallelConfig refuses a
+    # non-default mode without CP, so the stage default stands
+    for mode in ("gather_kv", "ulysses", "ring"):
+        cli = MiniMaxH3Orchestrator(_args(cp_mode=mode))._shared_cli_args("generate")
+        assert "--cp-mode" not in cli
 
 
 def test_shared_cli_args_forward_model_path():
