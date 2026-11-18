@@ -16,11 +16,20 @@ SIGMA = 1.5
 @pytest.fixture
 def faked(monkeypatch):
     """Tensors read as on neuron, the env on, and both kernels recording their calls."""
-    calls = {"constmax": [], "cte": []}
+    calls = {"constmax": [], "cte": [], "bounded": [], "cte_bounded": []}
 
     def const_max(q, k, v, scale, softmax_max):
         calls["constmax"].append(dict(shape=tuple(q.shape), scale=scale, softmax_max=softmax_max))
         return torch.nn.functional.scaled_dot_product_attention(q, k, v, scale=scale)
+
+    def const_max_bounded(q, k, v, scale, softmax_max, hi):
+        calls["bounded"].append(dict(shape=tuple(q.shape), scale=scale, softmax_max=softmax_max, hi=hi))
+        mask = torch.arange(k.shape[1]).view(1, 1, -1) < hi
+        return torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=mask, scale=scale)
+
+    def cte_bounded(q, k, v, lo, hi, scale):
+        calls["cte_bounded"].append(tuple(q.shape))
+        return q.clone()
 
     def cte(q, k, v, *, is_causal, scale, training):
         calls["cte"].append(tuple(q.shape))
@@ -29,6 +38,8 @@ def faked(monkeypatch):
     monkeypatch.setattr(neuron_attention, "_on_neuron", lambda t: True)
     monkeypatch.setattr(neuron_attention, "_flash_kernel", lambda: cte)
     monkeypatch.setattr(neuron_attention, "_CONST_MAX_OP", const_max)
+    monkeypatch.setattr(neuron_attention, "_CONST_MAX_BOUNDED_OP", const_max_bounded)
+    monkeypatch.setattr(neuron_attention, "_FLASH_BOUNDED_OP", cte_bounded)
     monkeypatch.setattr(neuron_attention, "_CONSTMAX", True)
     return calls
 
@@ -90,9 +101,77 @@ def test_every_other_call_stays_off_the_route(faked, monkeypatch, case):
     elif case == "autograd":
         q.requires_grad_(True)
     out = neuron_attention.attention(q, k, v, **kw)
-    assert faked["constmax"] == [] and out.shape == q.shape
+    assert faked["constmax"] == [] and faked["bounded"] == [] and out.shape == q.shape
     # the shipped path: cte for the eligible calls, SDPA for the rest
     assert len(faked["cte"]) == (1 if case in ("no_sigma", "causal", "fp16", "d64", "env_off") else 0)
+
+
+# The key-bounded route (Qwen-Image, HunyuanVideo, HV1.5): >= 128 queries, a key-prefix bound.
+SQB, SKB, HI = 160, 200, 150
+
+
+def _bounded_kw(hi=HI, s_q=SQB, bh=BH):
+    bound_max = torch.full((bh, s_q, 1), hi, dtype=torch.int32)
+    return dict(scale=D ** -0.5, bound_min=torch.zeros_like(bound_max), bound_max=bound_max,
+                constmax_sigma=_sigma())
+
+
+def _bounded_qkv(d=D, dtype=torch.bfloat16, s_q=SQB):
+    g = torch.Generator().manual_seed(1)
+    return (torch.randn(BH, s_q, d, generator=g).to(dtype), torch.randn(BH, SKB, d, generator=g).to(dtype),
+            torch.randn(BH, SKB, d, generator=g).to(dtype))
+
+
+def _masked_ref(q, k, v, hi=HI):
+    mask = torch.arange(k.shape[-2]) < hi
+    return torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=mask, scale=D ** -0.5)
+
+
+@pytest.mark.parametrize("layout", ["tp", "transposed", "4d"])
+def test_routes_key_bounded_calls_with_a_sigma(faked, layout):
+    """The models' calls (tp_q / tp_k True, [B*H, S, d], bounds [B*H, S_q, 1]) and the other layouts
+    attention() takes: q / k as [.., d, S] (tp False), out as [.., d, S_q] (tp_out), 4D heads."""
+    q, k, v = _bounded_qkv()
+    want = _masked_ref(q, k, v)
+    kw = _bounded_kw()
+    if layout == "tp":
+        args, kw = (q, k, v), {**kw, "tp_q": True, "tp_k": True}
+    elif layout == "transposed":
+        args, kw = (q.transpose(-1, -2), k.transpose(-1, -2), v), {**kw, "tp_out": True}
+        want = want.transpose(-1, -2)
+    else:
+        args = tuple(t.reshape(2, BH // 2, *t.shape[1:]) for t in (q, k, v))
+        kw = {**kw, "tp_q": True, "tp_k": True}
+        want = want.reshape(2, BH // 2, SQB, D)
+    with torch.no_grad():
+        out = neuron_attention.attention(*args, **kw)
+    assert faked["constmax"] == faked["cte_bounded"] == faked["cte"] == [] and len(faked["bounded"]) == 1
+    call = faked["bounded"][0]
+    assert call["shape"] == (BH, SQB, D) and call["scale"] == D ** -0.5
+    assert call["hi"].shape == (BH, SQB, 1) and call["hi"].dtype == torch.int32 and call["hi"].is_contiguous()
+    expected = 0.88 * SIGMA * math.sqrt(2 * math.log(SKB))  # the padded key length, not hi
+    torch.testing.assert_close(call["softmax_max"], torch.full((128, 1), expected))
+    torch.testing.assert_close(out, want)
+
+
+@pytest.mark.parametrize("case", ["no_sigma", "causal", "fp16", "d64", "env_off", "short_q", "autograd"])
+def test_other_key_bounded_calls_keep_the_shipped_path(faked, monkeypatch, case):
+    s_q = 64 if case == "short_q" else SQB  # the kernel reads the bound from query rows 0..127
+    q, k, v = _bounded_qkv(dtype=torch.float16 if case == "fp16" else torch.bfloat16,
+                           d=64 if case == "d64" else D, s_q=s_q)
+    kw = {**_bounded_kw(s_q=s_q), "tp_q": True, "tp_k": True}
+    if case == "no_sigma":
+        kw.pop("constmax_sigma")
+    elif case == "causal":
+        kw["causal"] = True
+    elif case == "env_off":
+        monkeypatch.setattr(neuron_attention, "_CONSTMAX", False)
+    elif case == "autograd":
+        q.requires_grad_(True)
+    neuron_attention.attention(q, k, v, **kw)
+    assert faked["bounded"] == [] and faked["constmax"] == []
+    # attention_cte's bounded op where it applies; causal and autograd go to masked SDPA
+    assert len(faked["cte_bounded"]) == (0 if case in ("causal", "autograd") else 1)
 
 
 def test_env_unset_loads_no_op_and_keeps_the_module_constant():
@@ -101,9 +180,9 @@ def test_env_unset_loads_no_op_and_keeps_the_module_constant():
     import sys
 
     code = ("import difflet.backends.neuron.ops_impl.attention as a; "
-            "print(a._CONSTMAX, a._CONST_MAX_OP)")
+            "print(a._CONSTMAX, a._CONST_MAX_OP, a._CONST_MAX_BOUNDED_OP)")
     env = {k: v for k, v in os.environ.items() if k != "DIFFLET_EXP_ATTN_CONSTMAX"}
     env["TORCH_DEVICE_BACKEND_AUTOLOAD"] = "0"
     proc = subprocess.run([sys.executable, "-c", code], env=env, capture_output=True, text=True)
     assert proc.returncode == 0, proc.stderr
-    assert proc.stdout.split() == ["False", "None"]
+    assert proc.stdout.split() == ["False", "None", "None"]

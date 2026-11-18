@@ -48,7 +48,9 @@ if _ATTENTION_PATH not in ("auto", "sdpa"):
 #: Experiment E1 (docs/plans/2026-11-18-attn-constmax-sparse-experiments.md), opt-in:
 #: ``DIFFLET_EXP_ATTN_CONSTMAX=1`` sends unbounded, non-causal, bf16, d = 128 kernel calls that
 #: carry their layer's score sigma (``constmax_sigma``, a [128, 1] tensor from the model's
-#: committed table) to nkilib's experimental ``attention_const_max``. Read once at import.
+#: committed table) to nkilib's experimental ``attention_const_max``; such calls with key-prefix
+#: bounds (bound_min 0, bound_max equal along queries: Qwen-Image, HunyuanVideo, HV1.5) go to
+#: Difflet's bounded fork of it (``attention_const_max_kernel.py``). Read once at import.
 _CONSTMAX = os.environ.get("DIFFLET_EXP_ATTN_CONSTMAX") == "1"
 
 # Kernel limits stated by torch-neuronx's SDPA gate, other than its 512-multiple lengths.
@@ -94,6 +96,13 @@ def attention(
             raise ValueError("bound_min and bound_max must both be provided")
         if attention_mask is not None:
             raise ValueError("attention_mask and bounds are mutually exclusive")
+        if (_CONSTMAX and constmax_sigma is not None and not causal and _CONST_MAX_BOUNDED_OP is not None
+                and _const_max_shape_ok(q, k, v, None) and q.shape[-2] >= 128):
+            # The key-bounded fork: callers' key-prefix contract (bound_min 0, bound_max equal along
+            # queries; the kernel reads query rows 0..127 of bound_max).
+            out = _const_max_attention(q, k, v, constmax_sigma, scale=1.0 if scale is None else float(scale),
+                                       bound_max=bound_max)
+            return out.transpose(-1, -2) if tp_out else out
         if not causal and _can_use_flash_kernel(q, k, v, None) and _FLASH_BOUNDED_OP is not None:
             # attention_cte's sequence packing: per-query key range [bound_min, bound_max), read per
             # query tile inside the kernel (O(L) memory) instead of an L x L mask and masked SDPA.
@@ -111,8 +120,7 @@ def attention(
 
     scale = 1.0 if scale is None else float(scale)
     if (_CONSTMAX and constmax_sigma is not None and not causal and _CONST_MAX_OP is not None
-            and _can_use_flash_kernel(q, k, v, attention_mask) and q.shape[-1] == 128
-            and q.dtype == k.dtype == v.dtype == torch.bfloat16):
+            and _const_max_shape_ok(q, k, v, attention_mask)):
         out = _const_max_attention(q, k, v, constmax_sigma, scale=scale)
     elif _can_use_flash_kernel(q, k, v, attention_mask):
         out = _flash_attention(q, k, v, scale=scale, causal=causal)
@@ -313,17 +321,58 @@ def _load_const_max_op():
     return attention_const_max_op
 
 
+def _load_const_max_bounded_op():
+    """Difflet's fork of ``attention_const_max`` with a key-prefix bound
+    (``ops_impl/attention_const_max_kernel.py``): ``(q, k, v, scale, softmax_max, hi) -> out``,
+    E1's op plus ``hi``, int32 ``[B*H, S_q, 1]`` (attention_cte's ``bound_max``; keys
+    ``[0, hi)`` attended, the same for every query)."""
+    try:
+        return torch.ops.difflet_neuron.attention_const_max_bounded  # already registered (module reload)
+    except (AttributeError, RuntimeError):
+        pass
+    try:
+        from nkilib.core.utils.common_types import AttentionLayout
+        from torch_neuronx import wrap_nki
+        from torch_neuronx.neuron_dynamo_backend.decompositions import get_logical_neuron_cores
+        from torch_neuronx.nki_hop import nki_op
+
+        from difflet.backends.neuron.ops_impl.attention_const_max_kernel import attention_const_max
+    except ImportError:
+        return None
+    kernel = wrap_nki(attention_const_max)
+
+    @nki_op("difflet_neuron::attention_const_max_bounded", mutates_args={})
+    def attention_const_max_bounded_op(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, scale: float,
+                                       softmax_max: torch.Tensor, hi: torch.Tensor) -> torch.Tensor:
+        grid = (int(get_logical_neuron_cores()),)
+        return kernel[grid](q, k, v, softmax_max=softmax_max, softmax_scale=scale, key_bound=hi,
+                            q_layout=AttentionLayout.SEQ_MAJOR, k_layout=AttentionLayout.SEQ_MAJOR)
+
+    return attention_const_max_bounded_op
+
+
 _CONST_MAX_OP = _load_const_max_op() if _CONSTMAX else None
+_CONST_MAX_BOUNDED_OP = _load_const_max_bounded_op() if _CONSTMAX else None
 
 
-def _const_max_attention(q, k, v, sigma, *, scale: float):
+def _const_max_shape_ok(q, k, v, attention_mask) -> bool:
+    return (_can_use_flash_kernel(q, k, v, attention_mask) and q.shape[-1] == 128
+            and q.dtype == k.dtype == v.dtype == torch.bfloat16)
+
+
+def _const_max_attention(q, k, v, sigma, *, scale: float, bound_max=None):
     """``[B, H, S, d]`` or ``[B*H, S, d]`` through the const-max op, softmax_max by the kernel
     docstring's rule at this call's key length: 0.88 sigma sqrt(2 ln Sk) (``sigma``: the layer's
-    ``[128, 1]`` score sigma)."""
+    ``[128, 1]`` score sigma). With ``bound_max`` (anything that reshapes to ``[B*H, S_q, 1]``),
+    the key-bounded op; Sk stays the padded key length (static, a slightly higher max)."""
     shape = q.shape
     softmax_max = sigma.float() * (0.88 * math.sqrt(2 * math.log(k.shape[-2])))
     q3, k3, v3 = (t.reshape(-1, t.shape[-2], t.shape[-1]).contiguous() for t in (q, k, v))
-    out = _CONST_MAX_OP(q3, k3, v3, scale, softmax_max.contiguous())
+    if bound_max is None:
+        out = _CONST_MAX_OP(q3, k3, v3, scale, softmax_max.contiguous())
+    else:
+        hi = bound_max.to(q.device, torch.int32).reshape(q3.shape[0], q3.shape[1], 1).contiguous()
+        out = _CONST_MAX_BOUNDED_OP(q3, k3, v3, scale, softmax_max.contiguous(), hi)
     return out.reshape(*shape[:-1], v.shape[-1])
 
 
