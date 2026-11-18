@@ -19,7 +19,7 @@ state() {
   echo "fuser=$? idle%=$(mpstat -P "$CPUS" 1 1 | awk '/^Average/ && $2 ~ /^[0-9]+$/ {s += $NF; n++} END {printf "%.0f", s / n}')"
 }
 for m in "$@"; do
-  name=${m//[:,]/_}
+  name=${m//[:,]/_}${SUFFIX:-}  # SUFFIX: keep two lanes' arms of one mask apart (full_dev8)
   echo "$(date '+%F %T') start dev=$DEV cpus=$CPUS $EXP $m $(state)" >> "$ROOT/lanes.log"
   taskset -c "$CPUS" "$PY" "$HERE/probe.py" --mask "$m" $FLAG --out "$ROOT/$EXP/$name.json" \
     > "$ROOT/$EXP/$name.log" 2>&1
