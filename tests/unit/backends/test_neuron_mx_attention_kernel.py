@@ -341,3 +341,88 @@ def test_both_flags_off_simulates_bit_identical_to_attention_cte(case, lnc, vect
     assert torch.equal(out, cte)
     assert fork_issued == cte_issued
     assert (fork_issued["exponential"] > 0) == vector_exp, fork_issued
+
+
+# --- the static K/V-tile mask (kv_tiles, E2 of 2026-11-18-attn-constmax-sparse-experiments) ----
+
+#: (bh, s_q, s_k): a partial query group and key tile in one section; two flash sections (11,053
+#: keys = 16 + 5 x 512 + 301-key tiles) under five groups; the LNC2 split of an odd batch over them.
+MASK_SHAPES = {"partial": (1, 602, 602), "sections": (1, 602, 11053), "lnc2_odd": (3, 1152, 11053)}
+
+
+def _ceil(a, b):
+    return -(-a // b)
+
+
+def _full_mask(s_q, s_k):
+    return (tuple(range(_ceil(s_k, 512))),) * _ceil(s_q, 128)
+
+
+def _random_mask(s_q, s_k, seed=1):
+    import random
+
+    rng, n = random.Random(seed), _ceil(s_k, 512)
+    return tuple(tuple(t for t in range(n) if rng.random() < 0.5) or (rng.randrange(n),)
+                 for _ in range(_ceil(s_q, 128)))
+
+
+def _structured_mask(s_q, s_k):
+    """Rows cycled over the groups: the first tile alone; the last (partial) tile alone, so the
+    first section is empty; section 0 only, so the last is empty; tiles straddling the sections
+    with gaps; a run to the end."""
+    n = _ceil(s_k, 512)
+    rows = [(0,), (n - 1,), (3, 4, 5, 6), (1, 15, 16, n - 2), tuple(range(8, n))]
+    return tuple(rows[g % len(rows)] for g in range(_ceil(s_q, 128)))
+
+
+@pytest.mark.parametrize("vector_exp", [False, True])
+@pytest.mark.parametrize("case", sorted(MASK_SHAPES))
+def test_kv_tiles_at_full_density_is_bit_identical_to_no_mask(case, vector_exp):
+    import torch
+
+    bh, s_q, s_k = MASK_SHAPES[case]
+    q, k, v, _ = _inputs(bh, s_q, s_k)
+    lnc = 2 if bh % 2 else 1
+    kw = dict(scale=128 ** -0.5, pv_mx=False, qk_mx=False, allow_vector_exp=vector_exp)
+    out = _simulate(fork.mx_attention_fwd, q, k, v, lnc=lnc, kv_tiles=_full_mask(s_q, s_k), **kw)
+    assert torch.equal(out, _simulate(fork.mx_attention_fwd, q, k, v, lnc=lnc, **kw))
+
+
+@pytest.mark.parametrize("vector_exp", [False, True])
+@pytest.mark.parametrize("mask", ["random", "structured"])
+@pytest.mark.parametrize("case", ["sections", "lnc2_odd"])
+def test_kv_tiles_matches_the_masked_fp32_reference(case, mask, vector_exp):
+    """Skipped tiles contribute nothing, across tiles, large tiles and sections: the kernel equals
+    fp32 attention with the skipped scores at -inf to the unmasked kernel's own distance from fp32
+    attention, and is far from dense attention."""
+    from difflet.backends.neuron.ops_impl.attn_tile_masks import masked_attention_reference
+
+    bh, s_q, s_k = MASK_SHAPES[case]
+    q, k, v, _ = _inputs(bh, s_q, s_k)
+    scale = 128 ** -0.5
+    tiles = {"random": _random_mask, "structured": _structured_mask}[mask](s_q, s_k)
+    kw = dict(scale=scale, pv_mx=False, qk_mx=False, allow_vector_exp=vector_exp)
+    out = _simulate(fork.mx_attention_fwd, q, k, v, lnc=2 if bh % 2 else 1, kv_tiles=tiles, **kw)
+    ref = masked_attention_reference(q, k, v, scale=scale, kv_tiles=tiles)
+    assert out.isfinite().all()
+    assert _rel(out, ref) < 4e-3, _rel(out, ref)
+    assert _rel(out, masked_attention_reference(q, k, v, scale=scale)) > 0.1
+
+
+@pytest.mark.parametrize("tiles, match", [
+    (((0,), ()), "Q group 1 computes no key tile"),
+    (((0,),), "one tile set per 128-query group, 2, got 1"),
+    (((0,), (0, 2)), r"Q group 1 names a tile outside 0\.\.1"),
+])
+def test_kv_tiles_refuses_an_empty_row_and_a_malformed_mask(tiles, match):
+    q, kv = _bf16(1, 256, 128), _bf16(1, 1024, 128)
+    with pytest.raises(AssertionError, match=match):
+        fork._attention_cte(q=q, k=kv, v=kv, kv_tiles=tiles)
+
+
+@pytest.mark.parametrize("flags", [{"pv_mx": True}, {"qk_mx": True},
+                                   {"bound_min": _t(1, 256, 1), "bound_max": _t(1, 256, 1)}])
+def test_kv_tiles_refuses_the_mx_and_bounded_paths(flags):
+    q, kv = _bf16(1, 256, 128), _bf16(1, 1024, 128)
+    with pytest.raises(AssertionError, match="bf16 unbounded path only"):
+        fork._attention_cte(q=q, k=kv, v=kv, kv_tiles=((0,), (1,)), **flags)

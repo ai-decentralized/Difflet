@@ -19,7 +19,9 @@
 # refuses is gone, the subset's instruction stream unchanged. Added: Difflet's entry point
 # ``mx_attention_fwd``, the MX block membership ``qk_perm`` / ``pv_perm``, MM2 on ``nc_matmul_mx``
 # (``pv_mx``: ``_mx_load_v``, ``_mx_quantize_p``), MM1 on ``nc_matmul_mx`` with row tiling
-# (``qk_mx``: ``_mx_load_q``, ``_mx_load_k``, ``_mx_swizzle_quantize``).
+# (``qk_mx``: ``_mx_load_q``, ``_mx_load_k``, ``_mx_swizzle_quantize``). Copied verbatim from
+# feat/mxfp8-sage-attention 5d5b83c5, then (E2 of docs/plans/2026-11-18-attn-constmax-sparse-
+# experiments.md) the static K/V-tile mask ``kv_tiles`` (``_tile_kept``, ``_section_has_tiles``).
 
 """
 Attention Kernel For Context Encoding (Prefill), Difflet's subset of nkilib's attention_cte
@@ -47,6 +49,15 @@ THE SUBSET:
   tile's four 512-key tiles in the four row quadrants of the PE array (plan Task 4).
 - ``allow_vector_exp`` as attention_cte has it, but default False: the exp on the Scalar Engine
   (rulings BR19 / BR20).
+- ``kv_tiles`` (bf16, unbounded only): a static block-sparse mask, per 128-query group the
+  512-key tiles it computes. A tile outside its group's set gets no MM1, evict, exp, transpose or
+  MM2: it contributes nothing, as if its scores were -inf. The running max / sum / correction are
+  unchanged code (a skipped tile leaves its partial max at ``_FLOAT32_MIN`` and its exp sum 0). A
+  section where the group keeps no tile leaves the running max as it was (correction 1) and adds a
+  zero output (``mm2_sb`` zeroed); before the group's first kept tile the running max is
+  ``_FLOAT32_MIN``, so the first kept section's correction exp(_FLOAT32_MIN - max) = 0 drops the
+  zeros before it. Trace-time constant: a hashable tuple, no runtime indirection. All tiles kept
+  is the unmasked kernel, instruction for instruction.
 
 Everything else attention_cte offers is refused (``_check_difflet_subset``).
 
@@ -144,16 +155,17 @@ def _sbuf_scratch_budget() -> int:
 
 @nki.jit
 def mx_attention_fwd(q, k, v, *, scale, bound_min=None, bound_max=None, pv_mx: bool, qk_mx: bool,
-                     allow_vector_exp: bool = False):
+                     allow_vector_exp: bool = False, kv_tiles: tuple | None = None):
     """Difflet's entry: non-causal attention in the ``tp_q=True, tp_k=True`` layout (q, k, v
     ``[batch, seqlen, d]`` bf16), optionally key-bounded, as ``ops_impl/attention.py`` calls
     attention_cte on both paths. ``pv_mx`` / ``qk_mx``: MM2 / MM1 on ``nc_matmul_mx``; both False
     is attention_cte unchanged at the same ``allow_vector_exp`` (default False here: ScalarE exp,
     rulings BR19 / BR20). Difflet's one production caller, the torch op in
-    ``ops_impl/mx_attention.py``, passes True: the VectorE exp of shipped attention_cte (BR32)."""
+    ``ops_impl/mx_attention.py``, passes True: the VectorE exp of shipped attention_cte (BR32).
+    ``kv_tiles``: the static block-sparse mask (module docstring), None = every tile."""
     return _attention_cte(q=q, k=k, v=v, scale=scale, causal_mask=False, tp_q=True, tp_k=True,
                           bound_min=bound_min, bound_max=bound_max, pv_mx=pv_mx, qk_mx=qk_mx,
-                          allow_vector_exp=allow_vector_exp)
+                          allow_vector_exp=allow_vector_exp, kv_tiles=kv_tiles)
 
 
 # DMA-to-PE lowering uses shared transpose scratch. Allow the compiler to
@@ -353,6 +365,7 @@ def _attention_cte(
     pv_mx: bool = False,
     qk_mx: bool = False,
     allow_vector_exp: bool = False,
+    kv_tiles: tuple | None = None,
     **refused,
 ):
     """Attention on one call's batch: validation, the batch loop and the LNC sharding.
@@ -365,6 +378,9 @@ def _attention_cte(
       qk_mx: MM1 on nc_matmul_mx: Q and K MX-quantized on load along the head dim, row-tiled.
       allow_vector_exp: attention_cte's switch: allow the Vector Engine exp on trn3. False (the
         fork's default; attention_cte's is True) uses the Scalar Engine.
+      kv_tiles: optional static mask, one tuple per 128-query group (``ceil(seqlen_q / 128)``) of
+        the 512-key tiles (``0 .. ceil(seqlen_k / 512) - 1``) it computes; never empty. bf16 and
+        unbounded only (module docstring).
       causal_mask, tp_q, tp_k, **refused: accepted only at the subset's values (``False``, ``True``,
         ``True``, nothing); see ``_check_difflet_subset``.
     """
@@ -398,6 +414,11 @@ def _attention_cte(
     kernel_assert(k.shape[0] == bs, f"Difflet's attention_cte fork refuses grouped-query k/v, got "
                   f"q batch {bs}, k/v batch {k.shape[0]}")
 
+    if kv_tiles is not None:
+        _check_kv_tiles(kv_tiles, seqlen_q, seqlen_k)
+        kernel_assert(not (pv_mx or qk_mx or is_sequence_packed),
+                      "kv_tiles is validated on the bf16 unbounded path only (pv_mx, qk_mx off, no bounds)")
+
     result = nl.ndarray(shape=out_shape, dtype=q.dtype, buffer=nl.shared_hbm)
 
     ac = AttnConfig(
@@ -411,6 +432,7 @@ def _attention_cte(
         allow_vector_exp=allow_vector_exp,
         pv_mx=pv_mx,
         qk_mx=qk_mx,
+        kv_tiles=kv_tiles,
     )
     if pv_mx:
         kernel_assert(d_v == _D_TILE_SZ, f"pv_mx takes d_v {_D_TILE_SZ}, got {d_v=}")
@@ -478,6 +500,30 @@ class AttnConfig(nl.NKIObject):
     allow_vector_exp: bool = False  # Difflet: default False (attention_cte's is True)
     pv_mx: bool = False  # Difflet: MM2 on nc_matmul_mx, P and V MX-quantized per 512-key tile
     qk_mx: bool = False  # Difflet: MM1 on nc_matmul_mx, Q and K MX-quantized along d, row-tiled
+    kv_tiles: tuple = None  # Difflet: per Q group, the 512-key tiles it computes (None: all)
+
+
+def _check_kv_tiles(kv_tiles, seqlen_q, seqlen_k):
+    """``kv_tiles`` has one tile set per 128-query group, each non-empty (a row with no key would
+    be 0 / 0) and within the keys' 512-key tiles."""
+    num_grps, num_k_tiles = div_ceil(seqlen_q, _Q_GRP_SZ), div_ceil(seqlen_k, _K_TILE_SZ)
+    kernel_assert(len(kv_tiles) == num_grps,
+                  f"kv_tiles needs one tile set per {_Q_GRP_SZ}-query group, {num_grps}, got {len(kv_tiles)}")
+    for grp_i, tiles in enumerate(kv_tiles):
+        kernel_assert(len(tiles) > 0, f"kv_tiles: Q group {grp_i} computes no key tile (its rows would be 0 / 0)")
+        kernel_assert(all(0 <= t < num_k_tiles for t in tiles),
+                      f"kv_tiles: Q group {grp_i} names a tile outside 0..{num_k_tiles - 1}: {tiles}")
+
+
+def _tile_kept(ac, grp_i, k_tile_idx_global):
+    """Does Q group ``grp_i`` compute global 512-key tile ``k_tile_idx_global`` (``kv_tiles``)?"""
+    return ac.kv_tiles is None or k_tile_idx_global in ac.kv_tiles[grp_i]
+
+
+def _section_has_tiles(ac, atp, grp_i, sp):
+    """Does Q group ``grp_i`` keep any tile of this section?"""
+    first = atp.num_k_tiles_per_section * sp.section_idx
+    return any(_tile_kept(ac, grp_i, t) for t in range(first, first + atp.num_k_tiles_per_section))
 
 
 def _attention_cte_impl(
@@ -1453,17 +1499,20 @@ def _classify_tile(seqlen_offset, atp: AttnTileParams):
     return KTileInfo(atp.seqlen_k, seqlen_offset, seqlen_offset < atp.seqlen_k)
 
 
-def _exp_tile_selection(large_tile_idx, exp_tile_idx, atp: AttnTileParams, sp: SectionParams):
+def _exp_tile_selection(grp_i, large_tile_idx, exp_tile_idx, ac: AttnConfig, atp: AttnTileParams,
+                        sp: SectionParams):
     """Decide whether one exp tile is processed, and how many valid keys it has.
 
     Returns (should_process_tile, num_valid_k_remaining):
-      - should_process_tile: False when the tile starts past the end of the keys, True otherwise.
+      - should_process_tile: False when the tile starts past the end of the keys or Q group
+        ``grp_i`` does not keep it (``kv_tiles``), True otherwise.
       - num_valid_k_remaining: seqlen_k - k_start_pos, the count of valid keys from the tile start
         to the end. The caller caps it to the exp tile width for num_f.
     """
     seqlen_offset = sp.section_offset + large_tile_idx * _LARGE_TILE_SZ + exp_tile_idx * atp.exp_inst_elems
     tile_info = _classify_tile(seqlen_offset, atp)
-    return tile_info.unmasked, tile_info.num_valid_k
+    kept = _tile_kept(ac, grp_i, seqlen_offset // _K_TILE_SZ)
+    return tile_info.unmasked and kept, tile_info.num_valid_k
 
 
 def _exp_impl(
@@ -1516,7 +1565,7 @@ def _exp_impl(
     exp_last_tile = None
     for large_tile_idx in range(atp.num_large_tiles_per_section):
         for exp_tile_idx in range(atp.num_exp_insts_per_large_tile):
-            should_process_tile, num_valid_k_remaining = _exp_tile_selection(large_tile_idx, exp_tile_idx, atp, sp)
+            should_process_tile, num_valid_k_remaining = _exp_tile_selection(grp_i, large_tile_idx, exp_tile_idx, ac, atp, sp)
             exp_selections.append((should_process_tile, num_valid_k_remaining))
             if should_process_tile:
                 current_exp_tile = (large_tile_idx, exp_tile_idx)
@@ -1696,6 +1745,11 @@ def _write_back_impl(
     batch_id,
 ):
     """Finalize output using flash attention: accumulate across sections, apply softmax normalization, write to HBM."""
+    if not _section_has_tiles(ac, atp, grp_i, sp):
+        # kv_tiles: no MM2 evicted into mm2_sb this section (it holds an earlier group's), so the
+        # section's contribution is zero
+        for d_tile in range(atp.num_d_tiles_free_dim):
+            nisa.memset(bufs.mm2_sb[grp_i][d_tile][...], value=0.0)
     # Step 1: Compute/update exp-sum and its reciprocal
     q_seqlen_offset = grp_i * atp.sb_p
     # Same aliasing as the running max above: on the first section exp_section_sum and
@@ -1823,7 +1877,8 @@ def _k_tile_selection(qkmax_grp, large_tile_idx, k_tile_idx, ac: AttnConfig, atp
     Returns ``(tile_info, should_process)``:
       - tile_info (KTileInfo): seqlen_k, k_start_pos and num_valid_k, from ``_classify_tile``.
       - should_process: True if the tile has work; False when it is beyond the section's K tiles,
-        or out of range (Q group past seqlen_q, or k_start past the end of the keys).
+        out of range (Q group past seqlen_q, or k_start past the end of the keys), or not in the
+        group's ``kv_tiles``.
     """
     q_seqlen_offset = qkmax_grp * atp.sb_p
     # Resolve the tile's absolute key position: index within the large tile -> within the section ->
@@ -1831,9 +1886,10 @@ def _k_tile_selection(qkmax_grp, large_tile_idx, k_tile_idx, ac: AttnConfig, atp
     k_tile_idx_in_section = large_tile_idx * _NUM_K_TILES_IN_LARGE_TILE + k_tile_idx
     k_tile_idx_global = atp.num_k_tiles_per_section * sp.section_idx + k_tile_idx_in_section
     tile_info = _classify_tile(k_tile_idx_global * _K_TILE_SZ, atp)
-    # Process only if the tile is in-section, has keys, and the Q group is in range.
+    # Process only if the tile is in-section, has keys, the Q group is in range and keeps it.
     in_section = k_tile_idx_in_section < atp.num_k_tiles_per_section
-    should_process_tile = in_section and tile_info.unmasked and q_seqlen_offset < ac.seqlen_q
+    should_process_tile = (in_section and tile_info.unmasked and q_seqlen_offset < ac.seqlen_q
+                           and _tile_kept(ac, qkmax_grp, k_tile_idx_global))
     return tile_info, should_process_tile
 
 
@@ -2026,7 +2082,8 @@ def _pv_mm2_tile_selection(pv_grp, large_tile_idx, ac: AttnConfig, atp: AttnTile
             num_p = min(seqlen_k - k_start_pos, v_tile_sz)
             num_f = min(ac.seqlen_q - q_seqlen_offset, _Q_GRP_SZ)
 
-            if v_tile_idx < atp.num_v_tiles_per_section and num_p > 0 and num_f > 0:
+            kept = _tile_kept(ac, pv_grp, k_start_pos_512_tile // _K_TILE_SZ)
+            if v_tile_idx < atp.num_v_tiles_per_section and num_p > 0 and num_f > 0 and kept:
                 tiles.append(
                     Mm2TileInfo(
                         mm2_grp_i=mm2_grp_i,
