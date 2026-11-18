@@ -30,6 +30,7 @@ from difflet.serving.orchestrators.qwen_image import (
     _runtime_plan,
     _packed_latent_grid,
     _tpu_denoise_loop,
+    _validate_profile_shapes,
 )
 
 
@@ -742,6 +743,16 @@ def test_qwen_compile_forwards_shape_set_to_the_cli_stage(monkeypatch, tmp_path)
 def test_qwen_namespace_from_profile_omits_shapes_for_single_shape(tmp_path):
     namespace = qwen_image.namespace_from_profile(_profile(tmp_path), stage_mode="compile")
     assert namespace.shapes is None
+
+
+def test_tpu_serving_refuses_a_shape_set(tmp_path):
+    # The TPU denoiser is one module built for the profile's shape: a smaller request would be
+    # denoised on the largest shape's RoPE grid and latent length.
+    with pytest.raises(ValueError, match="TPU serves one shape"):
+        _validate_profile_shapes(_multi_shape_profile(tmp_path), tpu=True)
+    _validate_profile_shapes(_multi_shape_profile(tmp_path), tpu=False)  # Trainium buckets them
+    _validate_profile_shapes(replace(_profile(tmp_path), shapes=((1024, 1024, None),)), tpu=True)
+    _validate_profile_shapes(_profile(tmp_path), tpu=True)
 
 
 def test_qwen_request_validator_enforces_shape_set_membership(tmp_path):
