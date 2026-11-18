@@ -686,8 +686,10 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
         app = NeuronHunyuanVideo15VAEDecoderApplication(model_path=os.path.join(root, "vae"), config=config)
         started = time.perf_counter()
         if args.stage_mode == "compile":
+            # Rebuilt on every compile, as before: its cache key has no graph version or compiler
+            # args, so a valid manifest would keep an outdated decoder graph.
             self._compile_stage("vae", args, compiled_dir, lambda force: app.compile(str(compiled_dir)),
-                                skip_if_valid=True, cache_inputs=self._aot_stage_cache_inputs(args, "vae"))
+                                skip_if_valid=False, cache_inputs=self._aot_stage_cache_inputs(args, "vae"))
             print(f"[hv15] aot vae compiled into {compiled_dir} ({time.perf_counter() - started:.1f} s)", flush=True)
             return
         from difflet.cli.dp import stage_loop
