@@ -225,6 +225,19 @@ class ModelOrchestrator(ABC):
         self.compile()
         self.generate()
 
+    #: Options only the driver acts on: a stage never sees them.
+    DRIVER_ONLY = frozenset({"dp", "mode", "requests", "total_cores"})
+
+    def stage_argv(self, *, defaults: dict | None = None, **overrides) -> list[str]:
+        """A stage's command line, generated from the stage parser: every option it declares that
+        ``self.args`` holds a non-default value for; ``defaults`` (the model's) where it holds
+        None, so an explicit 0 stays 0; ``overrides`` (values the driver resolved) always."""
+        from difflet.cli.argv import forward_argv
+        from difflet.cli.stage import _build_stage_parser
+
+        return forward_argv(self.args, _build_stage_parser(), exclude=self.DRIVER_ONLY,
+                            defaults=defaults, overrides=overrides)
+
     def _run_stage_internal(self, stage: str, args: argparse.Namespace) -> None:
         raise NotImplementedError(
             f"{type(self).__name__} does not implement _run_stage_internal"
