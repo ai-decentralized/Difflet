@@ -32,9 +32,15 @@ def set_timesteps(scheduler: Any, num_inference_steps: int, seq_len: int, *, dev
     """Give ``scheduler`` the pipeline's schedule for ``seq_len`` tokens; return its timesteps.
 
     ``mu`` is passed only to a scheduler that shifts dynamically (``use_dynamic_shifting``), the
-    way diffusers' ``retrieve_timesteps`` forwards it."""
+    way diffusers' ``retrieve_timesteps`` forwards it. A scheduler with ``shift_terminal``
+    (Qwen-Image) needs at least 2 steps: with one, its stretch divides 0 by 0 and the whole
+    schedule is NaN, in diffusers too."""
+    get = _config_get(getattr(scheduler, "config", {}))
+    minimum = 2 if get("shift_terminal", None) else 1
+    if int(num_inference_steps) < minimum:
+        raise ValueError(f"this model needs at least {minimum} inference steps, got {num_inference_steps}")
     sigmas, mu = sigmas_and_mu(getattr(scheduler, "config", {}), num_inference_steps, seq_len)
-    if _config_get(getattr(scheduler, "config", {}))("use_dynamic_shifting", False):
+    if get("use_dynamic_shifting", False):
         scheduler.set_timesteps(sigmas=sigmas, mu=mu, device=device)
     else:
         scheduler.set_timesteps(sigmas=sigmas, device=device)

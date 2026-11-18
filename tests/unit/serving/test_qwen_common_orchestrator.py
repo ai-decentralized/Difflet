@@ -30,6 +30,21 @@ from difflet.serving.orchestrators.qwen_image import (
 )
 
 
+def test_qwen_request_validator_rejects_a_single_step_before_tokenization():
+    # Qwen-Image's scheduler (shift_terminal) gives a NaN schedule for one step.
+    validator = object.__new__(QwenImageServingRequestValidator)
+    validator._tokenizer = lambda *args, **kwargs: (_ for _ in ()).throw(
+        AssertionError("a single step must be rejected before tokenization")
+    )
+    request = DiffletGenerateRequest("request", "Qwen/Qwen-Image", "prompt", 1024, 1024, 1, 4.0, 0)
+
+    with pytest.raises(DiffletServingError) as exc:
+        validator.validate(request)
+
+    assert exc.value.status_code == 400 and exc.value.code == "invalid_extra_body"
+    assert "at least 2" in exc.value.message
+
+
 @pytest.mark.parametrize("guidance", [-1.0, 20.0001, 1e308])
 def test_qwen_request_validator_rejects_guidance_before_tokenization(guidance):
     validator = object.__new__(QwenImageServingRequestValidator)

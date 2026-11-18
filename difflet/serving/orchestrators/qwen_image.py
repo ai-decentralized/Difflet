@@ -17,7 +17,7 @@ from difflet.serving.engines.stage_pipeline import (
     require_exact_payload,
     stage_result,
 )
-from difflet.serving.errors import profile_mismatch, prompt_too_long
+from difflet.serving.errors import invalid_extra_body, profile_mismatch, prompt_too_long
 from difflet.serving.options import CompilePolicy, DownloadPolicy
 from difflet.serving.orchestrators.base import (
     request_uses_teacache,
@@ -215,6 +215,8 @@ class QwenImageServingRequestValidator:
 
     def validate(self, request: DiffletGenerateRequest) -> None:
         validate_guidance_scale(request, maximum=_MAX_GUIDANCE_SCALE)
+        if int(request.num_inference_steps) < 2:  # shift_terminal: one step is a NaN schedule
+            raise invalid_extra_body("num_inference_steps must be at least 2 for Qwen-Image")
         profile = self.runtime.profile
         # Strict membership in the compiled bucket set: the NxD router only
         # accepts exactly-compiled shapes, so anything else is rejected here
