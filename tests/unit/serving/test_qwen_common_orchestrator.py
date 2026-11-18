@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+import torch
 
 import diffusers.pipelines.flux.pipeline_flux  # noqa: F401 - imported before tests stub torch/numpy
 
@@ -753,6 +754,48 @@ def test_tpu_serving_refuses_a_shape_set(tmp_path):
     _validate_profile_shapes(_multi_shape_profile(tmp_path), tpu=False)  # Trainium buckets them
     _validate_profile_shapes(replace(_profile(tmp_path), shapes=((1024, 1024, None),)), tpu=True)
     _validate_profile_shapes(_profile(tmp_path), tpu=True)
+
+
+def test_tpu_serving_load_refuses_a_shape_set_before_building_anything(monkeypatch, tmp_path):
+    import asyncio
+
+    from difflet.serving.orchestrators import qwen_image as serving_qwen
+
+    monkeypatch.setattr(serving_qwen, "_backend_is_tpu", lambda: True)
+    adapter = object.__new__(QwenImageServingStageAdapter)  # no apps: building one would fail
+    with pytest.raises(ValueError, match="TPU serves one shape"):
+        asyncio.run(adapter.create_loaded_runners(SimpleNamespace(profile=_multi_shape_profile(tmp_path))))
+
+
+def test_qwen_serving_schedules_for_the_request_shape_not_the_pinned_profile(tmp_path):
+    # The resident trainium pipeline is pinned to the profile's largest shape (1024x1024); a
+    # 512x512 request must get the schedule for its own 1024 packed tokens, as diffusers does.
+    import numpy as np
+    from diffusers import FlowMatchEulerDiscreteScheduler
+    from diffusers.pipelines.qwenimage.pipeline_qwenimage import calculate_shift, retrieve_timesteps
+
+    from tests.unit.backends._neuron_qwen_app_toy import QWEN_SCHEDULER_CONFIG
+
+    captured = {}
+
+    class _Pipeline:
+        scheduler = FlowMatchEulerDiscreteScheduler.from_config(QWEN_SCHEDULER_CONFIG)
+
+        def __call__(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(latents=SimpleNamespace(cpu=lambda: None))
+
+    adapter = QwenImageServingStageAdapter()
+    adapter.active_profile = _multi_shape_profile(tmp_path)
+    adapter.denoise_app = SimpleNamespace(pipeline=_Pipeline())
+    request = DiffletGenerateRequest("request", "Qwen/Qwen-Image", "prompt", 512, 512, 6, 1.0, 0)
+    adapter._denoise({"encoder_hidden_states": "hidden", "encoder_hidden_states_mask": "mask"}, request)
+
+    ref = FlowMatchEulerDiscreteScheduler.from_config(QWEN_SCHEDULER_CONFIG)
+    expected, _ = retrieve_timesteps(ref, 6, "cpu", sigmas=np.linspace(1.0, 1 / 6, 6),
+                                     mu=calculate_shift(1024, 256, 8192, 0.5, 0.9))
+    assert torch.equal(captured["timesteps"], expected)
+    assert tuple(captured["latents"].shape) == (1, 1, 16, 64, 64)  # the request's own shape
 
 
 def test_qwen_request_validator_enforces_shape_set_membership(tmp_path):
