@@ -25,6 +25,7 @@ import torch
 # One name for the copy's manifest: the quantized checkpoint (``difflet/quant/checkpoint.py``)
 # fingerprints a copy by it and labels the directory it writes by the source the manifest names.
 from difflet.quant.checkpoint import BF16_MANIFEST as MANIFEST
+from difflet.utils.atomic_io import file_lock
 
 
 def _cache_root() -> Path:
@@ -83,27 +84,35 @@ def ensure_bf16_copy(component_dir: str | os.PathLike, cache_root=None) -> Path 
     if not _has_fp32(src):
         return None
     dst = copy_dir(src, cache_root)
-    tmp = dst.with_name(dst.name + ".tmp")
-    shutil.rmtree(tmp, ignore_errors=True)
-    tmp.mkdir(parents=True)
-    for path in sorted(src.iterdir()):
-        if not path.is_file():
-            continue
-        if path.suffix == ".safetensors":
-            tensors = {}
-            with safe_open(str(path), framework="pt") as f:
-                metadata = f.metadata()
-                for key in f.keys():
-                    t = f.get_tensor(key)
-                    tensors[key] = t.to(torch.bfloat16) if t.dtype == torch.float32 else t
-            save_file(tensors, str(tmp / path.name), metadata=metadata)
-            del tensors
-        else:  # config.json, the shard index (same file names, so its weight map still holds)
-            shutil.copy2(path, tmp / path.name)
-    (tmp / MANIFEST).write_text(json.dumps(_source_manifest(src)))
-    shutil.rmtree(dst, ignore_errors=True)
-    tmp.rename(dst)
-    return dst
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    # One process converts; a concurrent compile waits, then finds the copy valid and reuses it.
+    with file_lock(dst.with_name(dst.name + ".lock"), what=f"the bf16 copy of {src}"):
+        existing = valid_copy(src, cache_root)
+        if existing is not None:
+            return existing
+        # Under the lock nobody else writes a temp copy: anything left is from a killed run.
+        for stale in dst.parent.glob(dst.name + ".tmp*"):
+            shutil.rmtree(stale, ignore_errors=True)
+        tmp = dst.with_name(dst.name + ".tmp")
+        tmp.mkdir()
+        for path in sorted(src.iterdir()):
+            if not path.is_file():
+                continue
+            if path.suffix == ".safetensors":
+                tensors = {}
+                with safe_open(str(path), framework="pt") as f:
+                    metadata = f.metadata()
+                    for key in f.keys():
+                        t = f.get_tensor(key)
+                        tensors[key] = t.to(torch.bfloat16) if t.dtype == torch.float32 else t
+                save_file(tensors, str(tmp / path.name), metadata=metadata)
+                del tensors
+            else:  # config.json, the shard index (same file names, so its weight map still holds)
+                shutil.copy2(path, tmp / path.name)
+        (tmp / MANIFEST).write_text(json.dumps(_source_manifest(src)))
+        shutil.rmtree(dst, ignore_errors=True)
+        tmp.rename(dst)
+        return dst
 
 
 def resolve_component_dir(component_dir: str | os.PathLike, dtype, cache_root=None) -> str:
