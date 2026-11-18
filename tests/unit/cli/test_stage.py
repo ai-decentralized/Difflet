@@ -144,3 +144,34 @@ def test_stage_parser_consumes_every_forwarded_flag(orch_module, orch_cls, model
         ["--orchestrator", model_id, "--stage", "transformer", *forwarded]
     )
     assert extra == [], f"stage parser silently drops forwarded flags: {extra}"
+
+
+def test_the_stage_parser_declares_every_generate_option_the_same_way():
+    """One declaration (main.add_generate_options): a generate option a driver forwards is one
+    the stage accepts, under the same flag, dest, choices and type."""
+    import argparse
+
+    from difflet.cli.argv import generate_parser
+
+    stage_actions = {a.dest: a for a in stage._build_stage_parser()._actions}
+    for action in generate_parser()._actions:
+        if not action.option_strings or isinstance(action, argparse._HelpAction):
+            continue
+        twin = stage_actions[action.dest]
+        assert (twin.option_strings, twin.choices, twin.type) == (
+            action.option_strings, action.choices, action.type), action.dest
+
+
+def test_the_stage_parser_refuses_an_option_it_does_not_declare(capsys):
+    # It parsed leniently before: an unknown option was silently dropped.
+    with pytest.raises(SystemExit):
+        stage.main(["--orchestrator", "X", "--stage", "s", "--bogus"])
+    assert "unrecognized arguments: --bogus" in capsys.readouterr().err
+
+
+def test_the_stage_parser_never_expands_an_option_into_another():
+    # allow_abbrev used to read --dp as --dp-schedule and --requests as --requests-dir.
+    args = stage._build_stage_parser().parse_args(
+        ["--orchestrator", "X", "--stage", "s", "--dp", "2", "--requests", "batch.jsonl"])
+    assert (args.dp, args.requests) == (2, "batch.jsonl")
+    assert (args.dp_schedule, args.requests_dir) == ("round_robin", None)

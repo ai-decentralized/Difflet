@@ -519,12 +519,15 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
     _add_teacache_flags(p)
 
 
+# Execution modes of non-AoT backends: difflet.backends.neuron.compile.EXEC_MODES, repeated so
+# the CLI parsers import no backend module (test_neuron_launch_c10.py pins the two together).
+# Here and not in difflet.cli.stage: main must not import the stage module, which
+# `python -m difflet.cli.stage` would then load twice.
+EXEC_MODE_CHOICES: tuple[str, ...] = ("eager", "compile")
+
+
 def _add_backend_flags(p: argparse.ArgumentParser) -> None:
-    # Imported here, not at module top: `python -m difflet.cli.stage` imports the
-    # difflet.cli package (and so this module) before running the stage module as
-    # __main__, and a top-level import would make runpy load it twice.
     from difflet.backends.registry import available_backends
-    from difflet.cli.stage import EXEC_MODE_CHOICES
 
     p.add_argument(
         "--backend",
@@ -797,6 +800,18 @@ def _positive_finite_float(value: str) -> float:
     return parsed
 
 
+def add_generate_options(p: argparse.ArgumentParser) -> None:
+    """Every option of ``generate`` and ``run`` but --model-id. The stage parser
+    (``difflet.cli.stage``) takes the same set, so an option added here is one a stage accepts."""
+    p.add_argument("--revision", default=None)
+    _add_parallel_flags(p)
+    _add_shape_flags(p)
+    _add_cache_flags(p)
+    _add_generate_flags(p)
+    _add_backend_flags(p)
+    _add_quant_flags(p)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(
         prog="difflet", description="Difflet — diffusion inference on Trainium"
@@ -820,25 +835,13 @@ def _build_parser() -> argparse.ArgumentParser:
 
     gen = sub.add_parser("generate", help="Run inference (requires prior compile)")
     _add_model_flag(gen)
-    gen.add_argument("--revision", default=None)
-    _add_parallel_flags(gen)
-    _add_shape_flags(gen)
-    _add_cache_flags(gen)
-    _add_generate_flags(gen)
-    _add_backend_flags(gen)
-    _add_quant_flags(gen)
+    add_generate_options(gen)
 
     run_cmd = sub.add_parser(
         "run", help="Download + compile + generate in one shot (benchmarks: `difflet bench run`)"
     )
     _add_model_flag(run_cmd)
-    run_cmd.add_argument("--revision", default=None)
-    _add_parallel_flags(run_cmd)
-    _add_shape_flags(run_cmd)
-    _add_cache_flags(run_cmd)
-    _add_generate_flags(run_cmd)
-    _add_backend_flags(run_cmd)
-    _add_quant_flags(run_cmd)
+    add_generate_options(run_cmd)
 
     plan_cmd = sub.add_parser(
         "plan",
