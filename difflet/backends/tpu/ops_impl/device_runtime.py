@@ -450,7 +450,7 @@ def maybe_compile(module, *, default: bool = False):
 
     ``default`` is the call site's choice for its model; ``DIFFLET_TPU_COMPILE``
     overrides it either way (``1`` forces on, ``0`` forces off). On by default
-    only where it has been measured — Qwen-Image, Wan and FLUX.1-dev — and off
+    only where it has been measured — Qwen-Image, Wan, FLUX.1-dev and LTX-2 — and off
     for anything that has not run under it.
 
     Why compile: DeferAndFuse fuses heuristically and left torch_tpu 21% behind
