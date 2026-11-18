@@ -9,7 +9,7 @@ from typing import Any
 
 from difflet.cli import runner
 from difflet.cli.orchestrators.base import ModelOrchestrator, require_request_shape_in_set
-from difflet.cli.quant import prepare_quant, quant_cli_args, quant_spec
+from difflet.cli.quant import prepare_quant, quant_spec
 from difflet.cli.orchestrators.torchrun import (
     _local_snapshot,
     reject_unsupported_torchrun_options,
@@ -175,33 +175,8 @@ class FluxOrchestrator(ModelOrchestrator):
         prepare_quant(self.args, sources, create=create, tag="flux")
 
     def _stage_cli_args(self, mode: str, *, work_dir: str) -> list[str]:
-        a = self.args
-        parts = ["--model-id", _HF_MODEL_ID, "--tp-degree", str(a.tp_degree or 4),
-                 "--height", str(a.height or 1024), "--width", str(a.width or 1024),
-                 "--stage-mode", mode, "--work-dir", work_dir]
-        for flag, name in (("--revision", "revision"), ("--prompt", "prompt"), ("--output", "output"),
-                           ("--steps", "steps"), ("--guidance-scale", "guidance_scale"),
-                           ("--seed", "seed"), ("--cache-dir", "cache_dir"),
-                           ("--requests-dir", "requests_dir"), ("--worker-index", "worker_index"),
-                           ("--dp-schedule", "dp_schedule"), ("--exec-mode", "exec_mode")):
-            value = getattr(a, name, None)
-            if value is not None:
-                parts += [flag, str(value)]
-        if (getattr(a, "cp_degree", None) or 1) > 1:
-            parts += ["--cp-degree", str(a.cp_degree), "--cp-mode", str(a.cp_mode or "gather_kv")]
-        if getattr(a, "sp_enabled", False):
-            parts.append("--sp")
-        for flag, name in (("--teacache-cadence", "teacache_cadence"),
-                           ("--teacache-online-delta", "teacache_online_delta"),
-                           ("--teacache-speedup", "teacache_speedup"),
-                           ("--teacache-calibration", "teacache_calibration")):
-            value = getattr(a, name, None)
-            if value is not None:
-                parts += [flag, str(value)]
-        if getattr(a, "keep_work_dir", False):
-            parts.append("--keep-work-dir")
-        parts += quant_cli_args(a)
-        return parts
+        return self.stage_argv(defaults=dict(tp_degree=4, height=1024, width=1024),
+                               model_id=_HF_MODEL_ID, stage_mode=mode, work_dir=work_dir)
 
     def _run_stage_internal(self, stage: str, args: argparse.Namespace) -> None:
         if stage == "transformer":
