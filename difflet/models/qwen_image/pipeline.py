@@ -578,14 +578,6 @@ def _load_scheduler(model_path: str, *, warn_if_missing: bool = True):
     return FlowMatchEulerDiscreteScheduler.from_pretrained(scheduler_path)
 
 
-def _retrieve_timesteps(scheduler: Any, num_inference_steps: int, device: str, **kwargs: Any):
-    if "sigmas" in kwargs:
-        scheduler.set_timesteps(sigmas=kwargs["sigmas"], device=device)
-    else:
-        scheduler.set_timesteps(num_inference_steps, device=device)
-    return scheduler.timesteps, num_inference_steps
-
-
 def _missing_scheduler_message(model_path: str) -> str:
     return (
         f"Qwen-Image scheduler_config.json was not found under {model_path!r}; "
