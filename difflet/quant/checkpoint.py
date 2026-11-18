@@ -13,15 +13,31 @@ Layout of ``<cache>/quantized/<source label>/<component>/mxfp8-<digest>/``:
   source component. A target ``<prefix>.weight`` is stored as ``float8_e4m3fn`` ``[N, K]`` with
   its uint8 E8M0 block scales ``<prefix>.weight_scale`` ``[N, K/32]`` beside it (a row-parallel
   target quantized per rank K range, ``mx.py``); everything else (biases, the bf16 modulation
-  and embedder weights, norms) is copied byte for byte.
-* ``config.json`` and the other non-tensor files of the source, copied.
-* ``difflet_quant.json``: the spec, the source fingerprint and per-tensor counts.
+  and embedder weights, norms) is copied byte for byte. A linear the spec splits
+  (``QuantSpec.split_linears``: the single-stream ``proj_out`` ``[N, K]`` over
+  ``cat([attn, mlp])``) is not stored fused: ``<prefix>_attn.weight`` holds its input columns
+  ``[0, N)`` and ``<prefix>_mlp.weight`` the rest, the parameters the neuron model runs, and
+  each half is a target of its own (quantized per rank K range of the half when row-parallel)
+  or the source's column range in the source's dtype. ``<prefix>.bias`` is copied as is.
+* ``config.json`` and the other non-tensor files of the source, copied; a bf16 copy's own
+  manifest excepted, since the quantized directory is no bf16 copy of anything.
+* ``difflet_quant.json``: the spec, the source fingerprint and per-tensor counts, and for a
+  source that is a bf16 copy the fp32 directory it was made from (``source.bf16_copy_of``), so
+  the manifest on device says which hub snapshot the directory came from.
   :func:`check_quantized_dir` refuses a directory whose manifest does not match what the caller
   asks for.
 
+A spec with a target pattern that matches no 2-D weight of the source (a split one counting as
+its two halves), a split pattern that matches none, or a row-parallel pattern on a split
+linear's fused name is refused before anything is written, naming the patterns
+(:func:`write_quantized_dir`): the directory would hold less than the spec claims, or a half
+quantized over another K range than its ranks read.
+
 The digest hashes the spec's weights identity and the source fingerprint (file names, sizes and
 Hugging Face blob names, which are content hashes), so another checkpoint, another target set
-or another TP degree is another directory.
+or another TP degree is another directory. A source that is a bf16 copy (Wan's fp32 hub DiTs)
+adds its copy manifest's sha256: the copy's files carry no blob name, and the manifest is what
+names the fp32 snapshot the copy, and so the quantized directory, were built from.
 """
 
 from __future__ import annotations
@@ -32,7 +48,7 @@ import os
 import re
 import shutil
 import time
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -42,6 +58,10 @@ from difflet.quant import mx
 from difflet.quant.spec import QuantSpec, strip_prefix
 
 MANIFEST = "difflet_quant.json"
+#: The manifest a bf16 copy (``core/weights_bf16.py``, which takes the name from here) writes
+#: beside its files. Named here, torch-free, so that fingerprinting a copy on every rank and on
+#: the driver imports no backend package (the neuron package's ``__init__`` loads the runtime).
+BF16_MANIFEST = "difflet-bf16-manifest.json"
 #: Shard size of the written safetensors files (diffusers' default is 10 GB; smaller shards keep
 #: the writer's host memory and the loader's per-file reads bounded).
 SHARD_BYTES = 4 * 1024**3
@@ -56,7 +76,17 @@ _SAFE = re.compile(r"[^A-Za-z0-9._-]+")
 def source_fingerprint(model_dir: str | Path) -> list[list[Any]]:
     """The source's identity without reading its data: every safetensors file's name, size and
     resolved blob name (a Hugging Face blob is named by its content hash), and every index
-    file's sha256. No mtime: a copied checkpoint is the same checkpoint."""
+    file's sha256. No mtime of the files themselves: a copied checkpoint is the same checkpoint.
+
+    A bf16 copy (``core/weights_bf16.py``) ends with its manifest's sha256: the copy writes its
+    own safetensors, so their names say nothing about the hub snapshot, and the manifest (the
+    fp32 source's resolved path and its files' names, sizes and mtimes) is the copy's own tie to
+    it. A remade copy is another manifest, so the quantized directory built from the old one is
+    another checkpoint's; this is where mtimes do enter: a source moved or re-stamped (an rsync
+    without ``-t``) remakes the copy at the next compile and the quantized directory with it,
+    and the old one stays on disk at its old digest. A directory without a manifest (every hub
+    checkpoint) keeps the fingerprint it had, so every digest written before the entry existed
+    still resolves."""
     model_dir = Path(model_dir)
     entries: list[list[Any]] = []
     for path in sorted(model_dir.glob("*.safetensors")):
@@ -66,6 +96,9 @@ def source_fingerprint(model_dir: str | Path) -> list[list[Any]]:
         entries.append([path.name, hashlib.sha256(path.read_bytes()).hexdigest()])
     if not entries:
         raise FileNotFoundError(f"no .safetensors under {model_dir}")
+    manifest = model_dir / BF16_MANIFEST
+    if manifest.is_file():
+        entries.append([manifest.name, hashlib.sha256(manifest.read_bytes()).hexdigest()])
     return entries
 
 
@@ -83,8 +116,21 @@ def quantized_dir(cache_root: str | Path, model_dir: str | Path, spec: QuantSpec
     return Path(cache_root).expanduser() / "quantized" / label / model_dir.name / f"{spec.format}-{digest}"
 
 
+def _bf16_copy_source(model_dir: Path) -> Path | None:
+    """The fp32 directory a bf16 copy (``core/weights_bf16.py``) was made from, from its
+    manifest; None for anything else (every hub checkpoint)."""
+    manifest = model_dir / BF16_MANIFEST
+    if not manifest.is_file():
+        return None
+    return Path(json.loads(manifest.read_text())["source"])
+
+
 def _source_label(model_dir: Path) -> str:
-    """``<repo>__<snapshot8>`` for a Hugging Face cache path, else the parent directory's name."""
+    """``<repo>__<snapshot8>`` for a Hugging Face cache path, else the parent directory's name.
+    A bf16 copy is labelled by its fp32 source: the copy's own path,
+    ``weights-bf16/<snapshot>/<component>``, names no repo, and the label is what the driver's
+    ``[<tag>] MXFP8 <component> (<compute>): <dir>`` lines and the cache layout show."""
+    model_dir = _bf16_copy_source(model_dir) or model_dir
     parts = model_dir.resolve().parts
     for i, part in enumerate(parts):
         if part.startswith("models--") and i + 2 < len(parts) and parts[i + 1] == "snapshots":
@@ -99,33 +145,117 @@ def _tensor_key_prefix(key: str) -> str | None:
     return key[: -len(".weight")] if key.endswith(".weight") else None
 
 
+def _keys_by_file(model_dir: Path) -> dict[str, list[str]]:
+    """The component's tensor keys by the safetensors file holding them (the index's, when
+    there is one)."""
+    from difflet.backends._torch_megatron.checkpoint import build_weight_map
+
+    by_file: dict[str, list[str]] = {}
+    for key, path in build_weight_map(model_dir).items():
+        by_file.setdefault(path, []).append(key)
+    return by_file
+
+
 def iter_source_tensors(model_dir: Path) -> Iterator[tuple[str, torch.Tensor, str]]:
     """``(key, tensor, file name)`` for every tensor of the component, file by file, in the
     index's order when there is one."""
     from safetensors import safe_open
 
-    from difflet.backends._torch_megatron.checkpoint import build_weight_map
-
-    weight_map = build_weight_map(model_dir)
-    by_file: dict[str, list[str]] = {}
-    for key, path in weight_map.items():
-        by_file.setdefault(path, []).append(key)
+    by_file = _keys_by_file(model_dir)
     for path in sorted(by_file):
         with safe_open(path, framework="pt") as handle:
             for key in sorted(by_file[path]):
                 yield key, handle.get_tensor(key), Path(path).name
 
 
+def _weight_shapes(model_dir: Path) -> dict[str, list[int]]:
+    """The shape of every 2-D ``<prefix>.weight`` of the component by its prefix, from the
+    safetensors headers alone (no tensor data is read)."""
+    from safetensors import safe_open
+
+    by_file = _keys_by_file(model_dir)
+    shapes: dict[str, list[int]] = {}
+    for path in sorted(by_file):
+        with safe_open(path, framework="pt") as handle:
+            for key in sorted(by_file[path]):
+                prefix = _tensor_key_prefix(key)
+                shape = handle.get_slice(key).get_shape()
+                if prefix is not None and len(shape) == 2:
+                    shapes[prefix] = list(shape)
+    return shapes
+
+
+def _split_parts(prefix: str, shape) -> list[tuple[str, int, int]]:
+    """``(name, first input column, width)`` of the two halves of the split linear ``prefix``
+    ``[N, K]``: the attention half reads the first N input columns, the MLP half the rest."""
+    n, k = (int(d) for d in shape)
+    if k <= n:
+        raise ValueError(f"{prefix}: a split linear needs K > N (its first N input columns are "
+                         f"the attention half), got [{n}, {k}]")
+    return [(f"{prefix}_attn", 0, n), (f"{prefix}_mlp", n, k - n)]
+
+
+def _quantizable_prefixes(shapes: dict[str, list[int]], spec: QuantSpec) -> list[str]:
+    """The key prefixes ``quantize_tensors`` can quantize under ``spec``: every 2-D weight, a
+    split one as its two halves (the fused name is not written, so no target can match it)."""
+    prefixes: list[str] = []
+    for prefix, shape in shapes.items():
+        if spec.is_split(prefix):
+            prefixes.extend(part for part, _, _ in _split_parts(prefix, shape))
+        else:
+            prefixes.append(prefix)
+    return prefixes
+
+
+def _on_fused_names(patterns: Iterable[str], shapes: dict[str, list[int]], spec: QuantSpec
+                    ) -> tuple[list[str], str]:
+    """The ``patterns`` that name a split linear's fused weight, which the directory does not
+    hold (it stores the halves), and a note naming the halves of the first such linear (``""``
+    when there is none): a spec written before the split names the fused linear."""
+    split = [prefix for prefix in shapes if spec.is_split(prefix)]
+    hits, first = [], None
+    for pattern in patterns:
+        named = [prefix for prefix in split if re.fullmatch(pattern, strip_prefix(prefix))]
+        if named:
+            hits.append(pattern)
+            first = first or named[0]
+    if first is None:
+        return hits, ""
+    attn, mlp = (part for part, _, _ in _split_parts(first, shapes[first]))
+    return hits, f" ({first} is split by split_linears: name {attn} / {mlp})"
+
+
+def _quantize_weight(prefix: str, weight: torch.Tensor, spec: QuantSpec
+                     ) -> Iterator[tuple[str, torch.Tensor, bool]]:
+    k_shards = spec.k_shards(prefix)
+    try:
+        weight_q, weight_scale = mx.quantize_mx_sharded(weight, k_shards)
+    except ValueError as exc:
+        # The writer runs on the driver before any rank builds a layer, so a K the MX layout
+        # cannot take at this tp is refused here, naming the layer.
+        split = f" (K={weight.shape[-1]} split over tp={k_shards})" if k_shards > 1 else ""
+        raise ValueError(f"{prefix}{split}: {exc}") from None
+    yield f"{prefix}.weight", weight_q, True
+    yield f"{prefix}.weight_scale", weight_scale, True
+
+
 def quantize_tensors(model_dir: Path, spec: QuantSpec) -> Iterator[tuple[str, torch.Tensor, bool]]:
     """Every tensor of the quantized component in write order: ``(key, tensor, quantized)``.
     A target weight yields ``.weight`` (fp8) and ``.weight_scale`` (uint8 E8M0 ``[N, K/32]``, a
-    row-parallel target quantized per rank K range)."""
+    row-parallel target quantized per rank K range). A split linear yields its halves in its
+    place, each quantized on its own (per rank K range of the half: its own shard count) when a
+    target names it, else the source's column range, uncast."""
     for key, tensor, _ in iter_source_tensors(model_dir):
         prefix = _tensor_key_prefix(key)
-        if prefix is not None and spec.matches(prefix) and tensor.dim() == 2:
-            weight_q, weight_scale = mx.quantize_mx_sharded(tensor, spec.k_shards(prefix))
-            yield key, weight_q, True
-            yield f"{prefix}.weight_scale", weight_scale, True
+        if prefix is not None and tensor.dim() == 2 and spec.is_split(prefix):
+            for part, start, width in _split_parts(prefix, tensor.shape):
+                half = tensor[:, start:start + width]
+                if spec.matches(part):
+                    yield from _quantize_weight(part, half, spec)
+                else:
+                    yield f"{part}.weight", half, False
+        elif prefix is not None and tensor.dim() == 2 and spec.matches(prefix):
+            yield from _quantize_weight(prefix, tensor, spec)
         else:
             yield key, tensor, False
 
@@ -201,6 +331,29 @@ def write_quantized_dir(model_dir: str | Path, out_dir: str | Path, spec: QuantS
     model_dir, out_dir = Path(model_dir), Path(out_dir)
     if (out_dir / MANIFEST).exists():
         raise FileExistsError(f"{out_dir} already holds a quantized checkpoint")
+    shapes = _weight_shapes(model_dir)
+    dead = spec.unmatched_splits(shapes)
+    if dead:
+        # Before the target check: a dead split also leaves every target on its halves dead,
+        # and the split is the pattern to name.
+        raise ValueError(f"split patterns match no linear weight in {model_dir}: "
+                         f"{'; '.join(dead)}")
+    dead = spec.unmatched_targets(_quantizable_prefixes(shapes, spec))
+    if dead:
+        # Refused here, on the driver, before anything is quantized: the directory would hold
+        # less than the spec claims, and every rank would refuse it (``quantize_module_``) only
+        # after the driver spent minutes writing it. The patterns verbatim, last, separated as
+        # ``DIFFLET_QUANT_TARGETS`` separates them.
+        _, note = _on_fused_names(dead, shapes, spec)
+        raise ValueError(f"target patterns match no linear weight in {model_dir}{note}: "
+                         f"{'; '.join(dead)}")
+    fused, note = _on_fused_names(spec.row_parallel, shapes, spec)
+    if fused:
+        # A half takes its shard count from its own name: under a pattern on the fused name a
+        # row-parallel half would be quantized over its whole K, with scales over a block
+        # membership no rank reads. Refused at every tp, so a tp-1 run catches the spec.
+        raise ValueError(f"row-parallel patterns name the fused weight of a split linear in "
+                         f"{model_dir}{note}: {'; '.join(fused)}")
     tmp = out_dir.with_name(f".{out_dir.name}.tmp-{os.getpid()}")
     if tmp.exists():
         shutil.rmtree(tmp)
@@ -217,14 +370,21 @@ def write_quantized_dir(model_dir: str | Path, out_dir: str | Path, spec: QuantS
                 kept += 1
         weight_map, total = writer.finish()
         for path in sorted(model_dir.iterdir()):
-            if path.is_file() and not path.name.endswith(".safetensors") \
+            if path.is_file() and path.name != BF16_MANIFEST \
+                    and not path.name.endswith(".safetensors") \
                     and not path.name.endswith(".safetensors.index.json"):
                 shutil.copy2(path, tmp / path.name)
+        source = {"path": str(model_dir), "fingerprint": source_fingerprint(model_dir),
+                  "bytes": source_bytes(model_dir)}
+        fp32_source = _bf16_copy_source(model_dir)
+        if fp32_source is not None:
+            # The copy's manifest is not carried over (it would mark this directory as a bf16
+            # copy of the fp32 source, which it is not); the snapshot it names is kept here.
+            source["bf16_copy_of"] = str(fp32_source)
         manifest = {
             "schema": spec.schema,
             "spec": spec.to_dict(),
-            "source": {"path": str(model_dir), "fingerprint": source_fingerprint(model_dir),
-                       "bytes": source_bytes(model_dir)},
+            "source": source,
             "quantized_linears": quantized,
             "tensors": {"quantized": len(quantized), "kept": kept, "total": len(weight_map)},
             "bytes": total,
@@ -313,6 +473,7 @@ def is_fp8(tensor: torch.Tensor) -> bool:
 
 
 __all__ = [
+    "BF16_MANIFEST",
     "MANIFEST",
     "SHARD_BYTES",
     "check_quantized_dir",

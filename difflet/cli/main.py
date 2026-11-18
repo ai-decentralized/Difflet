@@ -482,7 +482,8 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
         dest="negative_prompt",
         default=None,
         help="Qwen-Image on the neuron backend: the negative prompt of --true-cfg-scale "
-        "(default with --true-cfg-scale: ' ', diffusers' empty negative prompt). A --requests "
+        "(default with --true-cfg-scale: ' ', diffusers' empty negative prompt); Wan: the "
+        "negative prompt of its CFG (--guidance-scale above 1; default ''). A --requests "
         "line's negative_prompt wins over it",
     )
     p.add_argument("--seed", type=int, default=42)
@@ -1158,6 +1159,19 @@ def _resolve_total_cores(args: argparse.Namespace) -> tuple[int | None, str]:
             return count, f"torch.{platform.device_type}.device_count()"
         return None, "undetected"
 
+    # The inherited allocation first, as planner/hardware._resolve_allocated_cores counts it:
+    # the DP router hands out exactly these cores, so a budget read from NEURON_RT_NUM_CORES (or
+    # from neuron-ls, when it is reachable) would let a too-small allocation through to the router.
+    from difflet.backends.neuron.runtime import VISIBLE_CORES_ENV, parse_core_list
+
+    visible = os.environ.get(VISIBLE_CORES_ENV, "").strip()
+    try:
+        visible_count = len(parse_core_list(visible))
+    except ValueError:
+        visible_count = 0  # malformed: the runtime path rejects it with its own message
+    if visible_count:
+        return visible_count, f"{VISIBLE_CORES_ENV}={visible}"
+
     env_value = os.environ.get("NEURON_RT_NUM_CORES", "").strip()
     if env_value:
         try:
@@ -1275,7 +1289,12 @@ def _dispatch_dp(args: argparse.Namespace) -> None:
         # own defaults. Both are read before either is written: _registry_layout drops to
         # tp 1 once cfg is set. Other models' workers keep their own defaults, as before.
         args.tp_degree, args.cfg_parallel = _registry_layout(args)
-    raise SystemExit(router.run_router(args, requests, replica_cores=replica))
+    try:
+        rc = router.run_router(args, requests, replica_cores=replica)
+    except ValueError as exc:  # e.g. an inherited core allocation too small for every replica
+        print(f"Error: {exc}", file=sys.stderr)
+        raise SystemExit(1) from None
+    raise SystemExit(rc)
 
 
 def _get_orchestrator(args: argparse.Namespace):

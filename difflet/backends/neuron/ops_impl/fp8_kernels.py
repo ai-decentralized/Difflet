@@ -79,11 +79,32 @@ def mx_available() -> bool:
     return _MX_OP is not None
 
 
+#: The kernel block-quantizes the activation along its row (free) dim and refuses a row count
+#: that is not a multiple of 8 (``NCC_INKI016 ... F dim must be divisible by 8``, one-core
+#: probe, 2026-11-07). Every token count of Qwen-Image, FLUX and LTX-2's video and text streams
+#: is one; LTX-2's audio stream (126 tokens at the default shape, 51 at 480x704x49),
+#: HunyuanVideo-1.5 (49,290 image and 1,985 text tokens) and Wan under CP2 (2,340) are not.
+#: Under LNC2 the kernel gives each physical core ``M // 2`` rows (a pre-quantized weight
+#: shards the activation, ``resolve_lnc2_sharding``) and asserts the rule on the full ``M``
+#: only; that half need not be a multiple of 8: 996 and 1172 rows per core (1,985 -> 1,992 and
+#: 2,340 -> 2,344, a partial last 128-row tile) came back correct on the device
+#: (``probe_mx_shapes_lnc2.json``), so 8 is the whole rule, not 16.
+M_MULTIPLE = 8
+
+
+def padded_rows(m: int) -> int:
+    """The row count the kernel is called with for ``m`` activation rows: ``m`` rounded up to
+    a multiple of :data:`M_MULTIPLE` (``m`` itself when it already is one)."""
+    return -(-m // M_MULTIPLE) * M_MULTIPLE
+
+
 def mx_linear(x: torch.Tensor, weight_packed: torch.Tensor, weight_scales: torch.Tensor
               ) -> torch.Tensor:
     """``x @ W^T`` on the MX path: ``x`` ``[..., K]`` bf16 (quantized in the kernel),
     ``weight_packed`` int32 ``[K/4, N]`` and ``weight_scales`` uint8 ``[K/4, N]`` from
-    ``prepare_mx_weight``; returns ``[..., N]`` in ``x``'s dtype."""
+    ``prepare_mx_weight``; returns ``[..., N]`` in ``x``'s dtype. The rows are zero-padded to
+    :func:`padded_rows` for the kernel and the padding's outputs dropped; a count that already
+    is a multiple adds no op (the compiled graph of every current model is unchanged)."""
     if _MX_OP is None:
         raise RuntimeError("the mxfp8 kernel needs torch_neuronx and nkilib (the Neuron SDK); "
                            "use compute='dequant' elsewhere")
@@ -92,7 +113,15 @@ def mx_linear(x: torch.Tensor, weight_packed: torch.Tensor, weight_scales: torch
     x2 = x.reshape(-1, k)
     if x2.dtype != torch.bfloat16:
         x2 = x2.to(torch.bfloat16)
+    m = x2.shape[0]
+    pad = padded_rows(m) - m
+    if pad:
+        # Zero rows: each row's block scales are its own, so the padding changes no real row's
+        # quantization, and its rows of the product are sliced off below.
+        x2 = torch.nn.functional.pad(x2, (0, 0, 0, pad))
     out = _MX_OP(x2.contiguous(), weight_packed, weight_scales)
+    if pad:
+        out = out[:m]
     return out.reshape(*x.shape[:-1], n).to(x.dtype)
 
 
@@ -114,8 +143,10 @@ def prepare_mx_weight(weight_q: torch.Tensor, weight_scale: torch.Tensor
 
 __all__ = [
     "FP8_DTYPE",
+    "M_MULTIPLE",
     "logical_cores",
     "mx_available",
     "mx_linear",
+    "padded_rows",
     "prepare_mx_weight",
 ]

@@ -1,6 +1,8 @@
 """The MXFP8 quantization flags of the CLI (``--quant``, ``--quant-compute``): their parser,
-their validation, the spec they describe, their cache-key fields and their forwarding to stage
-and DP-worker launches. Torch-free, so the driver validates before torchrun starts a rank.
+their validation, the spec they describe, their cache-key fields, their forwarding to stage
+and DP-worker launches, and the driver's quantized-checkpoint step (``prepare_quant``).
+Torch-free at import, so the driver validates before torchrun starts a rank; only
+``prepare_quant`` loads the checkpoint writer, and torch with it, when it runs.
 
 ``--quant mxfp8`` quantizes the DiT's target linears (``difflet/quant/targets.py``) to OCP
 MXFP8 from a quantized checkpoint directory that ``compile`` writes under the cache dir
@@ -15,6 +17,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+from typing import Callable
 
 from difflet.quant.spec import COMPUTE_MODES, DEFAULT_COMPUTE, FORMAT, QuantSpec
 from difflet.quant.targets import TARGETS_BY_MODEL, default_spec
@@ -23,6 +26,11 @@ from difflet.quant.targets import TARGETS_BY_MODEL, default_spec
 QUANT_MODELS: dict[str, str] = {
     "Qwen/Qwen-Image": "qwen_image",
     "black-forest-labs/FLUX.1-dev": "flux",
+    "Lightricks/LTX-2": "ltx_2",
+    "Wan-AI/Wan2.1-T2V-14B-Diffusers": "wan",
+    "Wan-AI/Wan2.2-T2V-A14B-Diffusers": "wan",
+    "hunyuanvideo-community/HunyuanVideo": "hunyuan_video",
+    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v": "hunyuan_video_15",
 }
 
 
@@ -36,7 +44,12 @@ def add_quant_flags(p: argparse.ArgumentParser) -> None:
         "OCP MXFP8 (32-value block scales for weights, offline, and for activations, in the "
         "kernel; no calibration) from a quantized checkpoint that `compile` writes under the "
         "cache dir; the output projections, modulation, embedders and the output layer stay "
-        "bf16. Qwen-Image and FLUX.1-dev.",
+        "bf16 (except the single-stream output projection of FLUX and HunyuanVideo, quantized "
+        "as its attention and MLP halves; LTX-2: its audio stream too; Wan: its self-attention "
+        "q/k/v too; HunyuanVideo: its image q/k/v too). "
+        "Qwen-Image, FLUX.1-dev, LTX-2, Wan 2.1, Wan 2.2-A14B (both experts), HunyuanVideo and "
+        "HunyuanVideo-1.5, which has no default set: it needs DIFFLET_QUANT_TARGETS (see the "
+        "evidence).",
     )
     p.add_argument(
         "--quant-compute",
@@ -86,8 +99,12 @@ def validate_quant(args: argparse.Namespace) -> None:
 QUANT_TARGETS_ENV = "DIFFLET_QUANT_TARGETS"
 
 
-def quant_spec(args: argparse.Namespace) -> QuantSpec | None:
-    """The spec the flags describe, or None when off."""
+def quant_spec(args: argparse.Namespace, *, default_tp_degree: int = 4) -> QuantSpec | None:
+    """The spec the flags describe, or None when off. The row-parallel weights are quantized
+    per rank K range, so the spec carries the tp the launch uses: ``--tp-degree``, else
+    ``default_tp_degree`` (a driver whose default tp is not 4 passes its own). The default is a
+    fallback, never an override: the flag wins on the driver as it does on the stage line the
+    driver launches, so both sides build the same spec."""
     quant = getattr(args, "quant", None)
     if quant is None:
         return None
@@ -95,9 +112,7 @@ def quant_spec(args: argparse.Namespace) -> QuantSpec | None:
     if model not in TARGETS_BY_MODEL:
         raise ValueError(f"no MXFP8 targets for {model}")
     compute = getattr(args, "quant_compute", None) or DEFAULT_COMPUTE
-    # The row-parallel weights are quantized per rank K range: the tp the launch uses (the
-    # Qwen-Image and FLUX drivers' default is 4).
-    tp = int(getattr(args, "tp_degree", None) or 4)
+    tp = int(getattr(args, "tp_degree", None) or default_tp_degree)
     overrides = {}
     targets = os.environ.get(QUANT_TARGETS_ENV)
     if targets:
@@ -106,6 +121,52 @@ def quant_spec(args: argparse.Namespace) -> QuantSpec | None:
         # never share an artifact.
         overrides["targets"] = tuple(t for t in targets.split(";") if t)
     return default_spec(model, compute=compute, tp_degree=tp, **overrides)
+
+
+def prepare_quant(args: argparse.Namespace, component_dirs: dict[str, str], *, create: bool,
+                  tag: str, default_tp_degree: int = 4,
+                  fail: Callable[[str], None] = _fail) -> dict[str, str] | None:
+    """The driver's ``--quant`` step, before any rank starts: for every ``name -> source_dir``
+    (a diffusers component directory, ``transformer``), the quantized directory under the
+    compile cache as ``name -> path``, written when ``create`` (``compile``) and only resolved
+    otherwise (``generate``: a missing or stale one is refused with the fix, so no rank writes).
+    Every rank resolves it again, read only, from the spec the stage flags carry, so the stage
+    line names the tp this step quantized for (``--tp-degree``, flag or default, as every
+    driver's does). One line per component, ``[tag] MXFP8 name (compute): path``.
+
+    A refusal (a stale or, on ``generate``, missing directory; a component without safetensors,
+    a partial download; a target pattern matching no linear weight of the component, which the
+    writer names before quantizing anything) names the component and goes through ``fail``:
+    ``_fail`` (exit 1)
+    unless the driver passes the helper its other refusals use (``refuse``, exit 2), so a
+    refused ``--quant`` exits the way the rest of that driver's refusals do.
+
+    None when ``--quant`` is off, and None without a line when no source directory is there
+    (none given, or one missing: the weights are not downloaded yet, and the ranks report
+    that). The trace-cache choice is made before that, so the ranks inherit it either way.
+    """
+    spec = quant_spec(args, default_tp_degree=default_tp_degree)
+    if spec is None:
+        return None
+    if spec.compute == "nki":
+        # The mxfp8 kernel path traces nkilib's matmul_mxfp8 once per launch per rank unless
+        # the trace cache keeps it: 191 s of start-up measured without it (trn3, 2026-10-31).
+        # Its inputs are all call arguments, so a cached trace cannot go stale. An explicit
+        # choice is kept; the ranks inherit the variable.
+        os.environ.setdefault("DIFFLET_NKI_TRACE_CACHE", "1")
+    if not component_dirs or not all(os.path.isdir(d) for d in component_dirs.values()):
+        return None
+    from difflet.quant.checkpoint import prepare_quantized_checkpoint
+
+    prepared: dict[str, str] = {}
+    for name, source_dir in component_dirs.items():
+        try:
+            quantized = prepare_quantized_checkpoint(source_dir, spec, create=create)
+        except (ValueError, FileNotFoundError) as exc:
+            fail(f"--quant: {name}: {exc}")
+        prepared[name] = str(quantized)
+        print(f"[{tag}] MXFP8 {name} ({spec.compute}): {quantized}", flush=True)
+    return prepared
 
 
 def quant_cli_args(args: argparse.Namespace) -> list[str]:
@@ -119,5 +180,5 @@ def quant_cli_args(args: argparse.Namespace) -> list[str]:
     return parts
 
 
-__all__ = ["QUANT_MODELS", "QUANT_TARGETS_ENV", "add_quant_flags", "quant_cli_args",
-           "quant_spec", "validate_quant"]
+__all__ = ["QUANT_MODELS", "QUANT_TARGETS_ENV", "add_quant_flags", "prepare_quant",
+           "quant_cli_args", "quant_spec", "validate_quant"]

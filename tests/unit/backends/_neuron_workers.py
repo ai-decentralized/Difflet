@@ -1456,6 +1456,46 @@ def flux_dit_worker(rank: int, world_size: int, model_dir: str) -> dict:
     return {"out": out.tolist(), "report": app.load_report}
 
 
+def flux_dit_fp8_worker(rank: int, world_size: int, quantized_dir: str, spec: dict) -> dict:
+    """The MXFP8 Flux DiT application at TP=world_size on CPU (compile mode, dequant compute)
+    on a quantized toy directory, with the flags of the first single block's
+    ``proj_out_attn`` twin: it must keep the merged all-reduce and the bias out of the shard."""
+    from difflet.backends.neuron.flux.config import NeuronFluxConfig
+    from difflet.backends.neuron.flux.transformer import NeuronFluxTransformerApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_flux_toy import TINY_SHAPE, first, tiny_inputs
+
+    config = NeuronFluxConfig.from_pretrained(quantized_dir, tp_degree=world_size, **TINY_SHAPE)
+    app = NeuronFluxTransformerApplication(model_path=quantized_dir, config=config,
+                                           parallel=DiffletParallelConfig(tp_degree=world_size),
+                                           dtype=torch.float32, exec_mode="compile", device="cpu",
+                                           quant=spec)
+    app.load()
+    attn = app.module.single_transformer_blocks[0].proj_out_attn
+    out = first(app(**tiny_inputs(config)))
+    return {"out": out.tolist(), "report": app.load_report,
+            "attn_twin": [type(attn).__name__, attn.skip_bias_add, attn.reduce_output]}
+
+
+def wan_fp8_worker(rank: int, world_size: int, quantized_dir: str, spec: dict) -> dict:
+    """The MXFP8 Wan DiT application (``TINY_FP8_WAN``) at TP=world_size on CPU, compile mode,
+    on a quantized toy directory: the output and the distinct rotary layouts of the model and
+    its self-attentions (one when they agree)."""
+    from difflet.backends.neuron.wan.transformer import NeuronWanTransformerApplication
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_wan_toy import TINY_FP8_WAN, tiny_wan_config, tiny_wan_inputs
+
+    app = NeuronWanTransformerApplication(
+        model_path=quantized_dir, config=tiny_wan_config(tp_degree=world_size, config=TINY_FP8_WAN),
+        parallel=DiffletParallelConfig(tp_degree=world_size), dtype=torch.float32,
+        exec_mode="compile", device="cpu", quant=spec)
+    app.load()
+    module = app.module
+    layouts = {module.rope_layout, *(block.attn1.rope_layout for block in module.blocks)}
+    out = app(*tiny_wan_inputs(config=TINY_FP8_WAN))
+    return {"out": out.tolist(), "report": app.load_report, "rope_layouts": sorted(layouts)}
+
+
 def flux_t5_worker(rank: int, world_size: int, model_dir: str) -> dict:
     """Flux's T5 encoder application at TP=world_size on CPU (eager), on the tiny checkpoint."""
     from difflet.backends.neuron.flux.text_encoder import NeuronFluxT5Application
@@ -1598,16 +1638,60 @@ def hv15_sp_worker(rank: int, world_size: int, model_dir: str, shape: dict, inpu
     return app(**inputs)[0].tolist()
 
 
+def hv15_fp8_worker(rank: int, world_size: int, model_dir: str, shape: dict, inputs: dict,
+                    spec: dict, tp: int, cfg: bool, sp: bool, cp: int = 1) -> dict:
+    """HunyuanVideo-1.5's MXFP8 DiT (``_neuron_hv15_toy``) on CPU, fp32, compile mode, from the
+    quantized directory ``model_dir`` at tp (x CFG2 with ``cfg``, SP with ``sp``, x CP=cp in the
+    driver's default Ulysses mode): the output, this rank's TP rank (a TP rank's CP replicas load
+    the same weights) and, per ``HV15_ROW_TARGETS``, the rank's ``[N, K/tp]`` weight as loaded
+    (``weight_bf16``, which ``_after_load`` dequantizes in dequant mode; an E4M3 value times its
+    power-of-two scale is exact in bf16). The weights are what tell a per rank K range
+    quantization from a slice of a whole-K one, which moves the outputs only 6e-7."""
+    from difflet.backends.neuron.hunyuan_video15.transformer import (
+        NeuronHunyuanVideo15TransformerApplication,
+    )
+    from difflet.backends.neuron.ops_impl.collectives import get_tp_rank
+    from difflet.backends.neuron.ops_impl.fp8_linear import FP8RowParallelLinear
+    from difflet.pipeline.parallel_config import DiffletParallelConfig
+    from tests.unit.backends._neuron_hv15_toy import HV15_ROW_TARGETS
+
+    parallel = DiffletParallelConfig(tp_degree=tp, cp_degree=cp,
+                                     cp_mode="ulysses" if cp > 1 else "gather_kv",
+                                     cfg_parallel_enabled=cfg, sp_enabled=sp)
+    app = NeuronHunyuanVideo15TransformerApplication(
+        model_path=model_dir, parallel=parallel, dtype=torch.float32, exec_mode="compile",
+        device="cpu", quant=spec, **shape)
+    app.load()
+    assert app.load_report == {"missing": [], "unexpected": []}
+    down = app.module.transformer_blocks[0].ff.net[2]
+    assert isinstance(down, FP8RowParallelLinear), type(down).__name__
+    if sp:  # the image MLP's twin keeps the layer's SP flags: the caller reduce-scatters
+        assert down.reduce_output is False and down.skip_bias_add is True
+    return {
+        "out": app(**inputs)[0].tolist(),
+        "tp_rank": get_tp_rank(),
+        "row_weights": {n: app.module.get_submodule(n).weight_bf16.float().tolist()
+                        for n in HV15_ROW_TARGETS},
+    }
+
+
 def hv1_dit_worker(rank: int, world_size: int, model_dir: str, parallel: dict, exec_mode: str,
-                   valid_text: int = 16, overrides: dict | None = None) -> dict:
+                   valid_text: int = 16, overrides: dict | None = None, quant: dict | None = None,
+                   quantized_dir: str | None = None) -> dict:
     """HunyuanVideo's DiT application (tests/unit/backends/_neuron_hv1_toy.py) on CPU, fp32, at
     the layout ``parallel`` names (``DiffletParallelConfig`` keywords; world = tp x cp), on the
     toy's inputs with ``valid_text`` valid text tokens: the output and the TeaCache signal.
-    ``overrides`` go to the config (``num_single_layers=1`` cuts the depth)."""
+    ``overrides`` go to the config (``num_single_layers=1`` cuts the depth). ``quant`` (a
+    ``QuantSpec`` dict) runs the MXFP8 DiT from ``quantized_dir``, the quantized directory of
+    ``model_dir``, which the config is still read from; the result names the linears the
+    application quantized and each FP8 twin's class, and gives the first single block's
+    ``proj_out_attn`` as loaded: its class and flags (the twin must keep the merged all-reduce
+    and the bias out of the shard) and, for a plain row layer, its weight."""
     from difflet.backends.neuron.hunyuan_video.config import NeuronHunyuanVideoConfig
     from difflet.backends.neuron.hunyuan_video.transformer import (
         NeuronHunyuanVideoTransformerApplication,
     )
+    from difflet.backends.neuron.ops_impl.fp8_linear import _FP8LinearBase
     from difflet.pipeline.parallel_config import DiffletParallelConfig
     from tests.unit.backends._neuron_hv1_toy import TINY_SHAPE, tiny_inputs
 
@@ -1617,19 +1701,27 @@ def hv1_dit_worker(rank: int, world_size: int, model_dir: str, parallel: dict, e
         context_parallel_enabled=cp > 1, cp_mode=parallel.get("cp_mode", "gather_kv"),
         sp_enabled=bool(parallel.get("sp_enabled", False)), **TINY_SHAPE, **(overrides or {}))
     app = NeuronHunyuanVideoTransformerApplication(
-        model_path=model_dir, config=config, parallel=DiffletParallelConfig(**parallel),
-        dtype=torch.float32, exec_mode=exec_mode, device="cpu")
+        model_path=quantized_dir or model_dir, config=config,
+        parallel=DiffletParallelConfig(**parallel), dtype=torch.float32, exec_mode=exec_mode,
+        device="cpu", quant=quant)
     app.load()
     inputs = tiny_inputs(valid_text)
     out = app(*inputs.values())
     teacache = app.teacache_mod_input(inputs["hidden_states"], inputs["timestep"],
                                       inputs["pooled_projections"], inputs["guidance"])
+    attn = app.module.single_transformer_blocks[0].proj_out_attn
     return {
         "out": out.tolist(),
         "teacache": teacache.tolist(),
         "report": app.load_report,
         "compiled_blocks": list(app.compiled_blocks),
         "unwarmed_shapes": list(app.unwarmed_shapes),
+        "quantized_linears": list(app.quantized_linears),
+        "fp8": {name: type(m).__name__ for name, m in app.module.named_modules()
+                if isinstance(m, _FP8LinearBase)},
+        "attn_twin": [type(attn).__name__, attn.skip_bias_add, attn.reduce_output],
+        # None for an FP8 twin: it drops its fp8 weight once the load has laid it out.
+        "attn_weight": None if attn.weight is None else attn.weight.detach().float().tolist(),
     }
 
 

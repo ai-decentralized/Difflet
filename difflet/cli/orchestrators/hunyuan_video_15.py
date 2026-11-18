@@ -17,6 +17,22 @@ request done. A DP replica is ``tp x cp (x2 with CFG)`` cores: on 4 cores, ``--d
 runs two TP2 replicas with classifier-free guidance's two passes in sequence (the 8.3B DiT does not
 fit one core beside 121 frames' activations, so DP4 is not an option).
 
+--quant mxfp8 (``difflet/cli/quant.py``) on the neuron backend needs DIFFLET_QUANT_TARGETS: the
+model has no default set (the user's decision, 2026-11-09), so without it the launch is refused
+before anything is written (``_no_default_quant_targets``). With it, ``compile`` writes the DiT's
+quantized directory under the compile cache from the bf16 copy it has just made (the hub DiT is
+fp32, so the writer reads bf16 tensors, never the fp32 files), and ``generate`` only resolves it
+(``_prepare_quant``). A host where compile never ran has no copy, so the directory is looked for
+from the fp32 source, found missing and refused naming `difflet compile`, before any launch and
+with nothing written; weights not yet downloaded are refused there too, naming `difflet
+download`. The spec's tp is the layout's (``_layout``: tp1 when --cfg-parallel or --cp-degree
+comes without --tp-degree), which the stage line carries as --tp-degree beside --quant, so the
+ranks rebuild the driver's spec and resolve the same directory read-only (the pipeline's
+``resolve_quant``). No stage cache key is added: the native path keeps no args-keyed artifact
+(the NEFFs are keyed by the HLO, which differs once the targets call the MX kernel, and the
+weight store by content and layout), so a quantized and a bf16 DiT share neither. The AoT path
+never sees the flags: ``validate_quant`` refuses --quant off --backend neuron.
+
 On the Trainium (AoT) backend (``_run_aot``: any backend but neuron), the same layout runs three
 stages: the same host ``encode``; ``aot_transformer``, one process whose NxD application drives
 all ``tp x cp (x2 with CFG)`` cores (``aot15.build_aot_denoiser``: the compiled DiT, plus the
@@ -45,11 +61,15 @@ from pathlib import Path
 from difflet.cli import runner
 from difflet.cli.orchestrators.base import ModelOrchestrator
 from difflet.cli.orchestrators.torchrun import (
+    _local_snapshot,
+    refuse,
     reject_unsupported_torchrun_options,
     root_compile_cache_at_cache_dir,
     torchrun_backend,
     torchrun_unsupported_options,
 )
+from difflet.cli.quant import QUANT_TARGETS_ENV, prepare_quant, quant_cli_args, quant_spec
+from difflet.quant.targets import targets_for
 from difflet.utils import bench_timing
 
 _HF_MODEL_ID = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
@@ -62,7 +82,22 @@ _NKI_TRACE_OPT_IN = "DIFFLET_NKI_TRACE_CACHE"
 
 
 def _unsupported(args: argparse.Namespace) -> list[str]:
-    return [f for f in torchrun_unsupported_options(args) if not f.startswith("--teacache")]  # all run
+    """The torchrun options refused before a launch; every TeaCache flag runs on this path."""
+    return [f for f in torchrun_unsupported_options(args) if not f.startswith("--teacache")]
+
+
+def _no_default_quant_targets(args: argparse.Namespace) -> str | None:
+    """The refusal of --quant without DIFFLET_QUANT_TARGETS, or None: HunyuanVideo-1.5 has no
+    MXFP8 default (the user's decision, 2026-11-09; ``difflet/quant/targets.py``), so a launch
+    must name the layers. Checked before compile's bf16 copy, so a refusal writes nothing."""
+    if (getattr(args, "quant", None) is None or os.environ.get(QUANT_TARGETS_ENV)
+            or targets_for(_MODEL_TYPE)):
+        return None
+    return ("--quant: HunyuanVideo-1.5 has no default MXFP8 target set (every measured set is "
+            "4.7-7.5 dB further from the CPU fp32 reference than bf16 and buys neither speed nor "
+            "peak HBM at 121 frames; docs/verification/2026-11-07-mxfp8-video-models.md 10e); "
+            f"name the layers to quantize in {QUANT_TARGETS_ENV} (the measured groups: "
+            "HUNYUAN_VIDEO_15_GROUPS in difflet/quant/targets.py)")
 
 
 def _layout(args: argparse.Namespace) -> tuple[int, bool, int]:
@@ -75,6 +110,13 @@ def _layout(args: argparse.Namespace) -> tuple[int, bool, int]:
 
 
 class HunyuanVideo15Orchestrator(ModelOrchestrator):
+
+    #: The DiT's quantized directory (--quant), once ``_prepare_quant`` resolved it.
+    _quantized_dit: str | None = None
+
+    def run(self) -> None:
+        refuse(_no_default_quant_targets(self.args))  # before the download, too
+        super().run()
 
     def download(self) -> None:
         from difflet.pipeline.path_resolver import resolve_model_path
@@ -93,6 +135,7 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
         if torchrun_backend() != "neuron":
             return self._run_aot(mode)
         reject_unsupported_torchrun_options(_unsupported(self.args), runs=_RUNS)
+        refuse(_no_default_quant_targets(self.args))
         root_compile_cache_at_cache_dir(getattr(self.args, "cache_dir", None), tag="hunyuan_video_15")
         if mode == "compile":  # once, as the Trainium path's pre-shards: the fp32 DiT stored in bf16
             from difflet.backends.neuron.core.weights_bf16 import ensure_bf16_copy
@@ -108,33 +151,68 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
             except FileNotFoundError as exc:  # no local snapshot: the stages report it themselves
                 print(f"[hv15] bf16 copy skipped: {exc}", flush=True)
         tp, cfg, cp = _layout(self.args)
-        work_dir = Path(getattr(self.args, "work_dir", None) or Path.home() / ".cache" / "difflet" / "work" / "hv15")
-        work_dir.mkdir(parents=True, exist_ok=True)
-        cli = self._stage_cli_args(mode, str(work_dir), tp, cfg, cp)
         # The key-bounded attention kernel at 121 frames (~51k joint tokens) takes ~10 min to trace
         # in every process unless torch-neuronx's NKI trace cache keeps it; its inputs are all call
         # arguments, so the stages opt in (a per-stack-version cache, see neuron.compile). Set only
-        # around the launches (the stages inherit the environment), then restored.
+        # around the launches (the stages inherit the environment), then restored. The user's
+        # setting is read before _prepare_quant, which opts in for the MX kernel before it can
+        # refuse, so the restore also covers a refused --quant.
         previous = os.environ.get(_NKI_TRACE_OPT_IN)
-        os.environ[_NKI_TRACE_OPT_IN] = previous if previous is not None else "1"
         try:
-            if mode == "generate":
-                runner.run_stage(_HF_MODEL_ID, "encode", num_cores=1, virtual_core_size=None, cli_args=cli)
-            runner.run_stage(_HF_MODEL_ID, "transformer", num_cores=tp * (2 if cfg else 1) * cp,
-                             virtual_core_size=None, cli_args=cli)
-            # The tiles decode across the transformer stage's cores (free by then) unless
-            # --vae-cores says otherwise; each rank decodes tiles of the same size as one core.
-            vae_cores = getattr(self.args, "vae_cores", None) or tp * (2 if cfg else 1) * cp
-            runner.run_stage(_HF_MODEL_ID, "vae", num_cores=int(vae_cores), virtual_core_size=None,
-                             cli_args=cli)
-        except Exception:
-            print(f"[difflet] work dir preserved at {work_dir} for inspection", file=sys.stderr)
-            raise
+            self._prepare_quant(create=mode == "compile", tp=tp)
+            work_dir = Path(getattr(self.args, "work_dir", None)
+                            or Path.home() / ".cache" / "difflet" / "work" / "hv15")
+            work_dir.mkdir(parents=True, exist_ok=True)
+            cli = self._stage_cli_args(mode, str(work_dir), tp, cfg, cp)
+            os.environ[_NKI_TRACE_OPT_IN] = previous if previous is not None else "1"
+            try:
+                if mode == "generate":
+                    runner.run_stage(_HF_MODEL_ID, "encode", num_cores=1, virtual_core_size=None,
+                                     cli_args=cli)
+                runner.run_stage(_HF_MODEL_ID, "transformer", num_cores=tp * (2 if cfg else 1) * cp,
+                                 virtual_core_size=None, cli_args=cli)
+                # The tiles decode across the transformer stage's cores (free by then) unless
+                # --vae-cores says otherwise; each rank decodes tiles of the same size as one core.
+                vae_cores = getattr(self.args, "vae_cores", None) or tp * (2 if cfg else 1) * cp
+                runner.run_stage(_HF_MODEL_ID, "vae", num_cores=int(vae_cores), virtual_core_size=None,
+                                 cli_args=cli)
+            except Exception:
+                print(f"[difflet] work dir preserved at {work_dir} for inspection",
+                      file=sys.stderr)
+                raise
         finally:
             if previous is None:
                 os.environ.pop(_NKI_TRACE_OPT_IN, None)
         if not getattr(self.args, "keep_work_dir", False):
             shutil.rmtree(work_dir, ignore_errors=True)
+
+    def _prepare_quant(self, *, create: bool, tp: int) -> None:
+        """With --quant, the DiT's quantized directory under the compile cache (``prepare_quant``):
+        written when ``create`` (``compile``), only resolved otherwise, and refused with the fix
+        through ``refuse`` like this driver's other refusals, before any rank starts so none
+        writes. The source is what the DiT loads in bf16 (``resolve_component_dir``): the copy
+        ``compile`` has just made, so the writer never reads the fp32 hub files. A host where
+        compile never ran has no copy and resolves from the fp32 directory, which nothing
+        quantized, so ``generate`` is refused naming `difflet compile`. ``tp`` is the layout's,
+        never a constant, because every rank rebuilds the spec from the stage line's
+        --tp-degree. The bf16 path leaves missing weights to the ranks; this step needs them on
+        the driver, so it refuses naming `difflet download` instead of letting torchrun start
+        ranks that each report them."""
+        if getattr(self.args, "quant", None) is None:
+            return
+        root = _local_snapshot(lambda: self._root(self.args))
+        if root is None:
+            refuse(f"--quant: the {_HF_MODEL_ID} weights are not local; run `difflet download "
+                   f"--model-id {_HF_MODEL_ID}` first")
+        import torch
+
+        from difflet.backends.neuron.core.weights_bf16 import resolve_component_dir
+
+        sources = {"transformer": resolve_component_dir(os.path.join(root, "transformer"),
+                                                        torch.bfloat16)}
+        prepared = prepare_quant(self.args, sources, create=create, tag="hv15",
+                                 default_tp_degree=tp, fail=refuse)
+        self._quantized_dit = (prepared or {}).get("transformer")
 
     def _stage_cli_args(self, mode: str, work_dir: str, tp: int, cfg: bool, cp: int) -> list[str]:
         a = self.args
@@ -161,6 +239,7 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
             value = getattr(a, name, None)
             if value is not None:
                 parts += [flag, str(value)]
+        parts += quant_cli_args(a)  # only when given: a bf16 line keeps its words
         return parts
 
     # ------------------------------------------------------------ stages
@@ -214,7 +293,12 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
         bench_timing.event("evidence", stage="encode", sync="none: diffusers' text encoders on the host CPU")
 
     def _stage_transformer(self, args: argparse.Namespace) -> None:
-        """TP x CFG x CP ranks: the denoising loop; rank 0 saves the latents."""
+        """TP x CFG x CP ranks: the denoising loop; rank 0 saves the latents and reports the
+        DiT's resident weight bytes after the load and, on the device, each request's own peak
+        HBM (the memory an MXFP8 run is judged on). With --quant the pipeline gets the spec
+        the stage flags describe (the driver's: the line carries --tp-degree) and resolves the
+        quantized directory read-only. No stage key would notice a rank that ran the bf16 DiT
+        instead."""
         import torch
         import torch.distributed as dist
 
@@ -230,6 +314,7 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
         with bench_timing.span("load", stage="transformer"):
             get_backend("neuron").prepare_runtime(parallel)
             rank0 = not dist.is_initialized() or dist.get_rank() == 0
+            spec = quant_spec(args, default_tp_degree=int(args.tp_degree or 1))
             started = time.perf_counter()
             pipe = TorchNeuronHunyuanVideo15Pipeline(
                 model_path=self._root(args), parallel=parallel, height=int(args.height), width=int(args.width),
@@ -238,11 +323,13 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
                 teacache_cadence=getattr(args, "teacache_cadence", None),
                 teacache_online_delta_alpha=getattr(args, "teacache_online_delta", None),
                 teacache_speedup=getattr(args, "teacache_speedup", None),
-                teacache_calibration_path=getattr(args, "teacache_calibration", None))
+                teacache_calibration_path=getattr(args, "teacache_calibration", None),
+                quant=None if spec is None else spec.to_dict())
             pipe.load(skip_warmup=args.stage_mode != "compile")
         if rank0:
             print(f"[hv15] transformer load {time.perf_counter() - started:.1f} s "
                   f"{ {k: round(v, 1) for k, v in pipe.dit.phase_seconds.items()} }", flush=True)
+            print(_dit_memory_line(pipe.dit), flush=True)
 
         def evidence() -> None:
             dit = pipe.dit
@@ -271,6 +358,8 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
                                      "free guidance on or off, which the stage's layout fixes")
                 pipe.guidance_scale = None if scale is None else float(scale)
                 embeds = torch.load(stage_loop.work_file(args, req, "embeds.pt"), weights_only=True)
+                if rank0:
+                    _reset_peak_hbm(pipe.dit)
                 marks = [time.perf_counter()]
                 step = bench_timing.step_hook(lambda: marks.append(time.perf_counter()))
                 with bench_timing.span("denoise", stage="transformer", request=req.index):
@@ -284,6 +373,9 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
                           f"median {steps_sorted[len(steps) // 2] * 1e3:.0f} ms (first {steps[0] * 1e3:.0f} ms)",
                           flush=True)
                     torch.save(latents, stage_loop.work_file(args, req, "latents.pt"))
+                    peak = _peak_hbm_line(pipe.dit)
+                    if peak is not None:
+                        print(peak, flush=True)
         evidence()
 
     def _stage_vae(self, args: argparse.Namespace) -> None:
@@ -702,3 +794,63 @@ def _aot_write_output(video, out: Path) -> None:
     processor = inspect.getmodule(diffusers.HunyuanVideo15Pipeline).HunyuanVideo15ImageProcessor(vae_scale_factor=16)
     frames = processor.postprocess_video(video, output_type="np")[0]
     export_to_video(list(frames), str(out), fps=_FPS)
+
+
+def _dit_memory_line(dit) -> str:
+    """The transformer stage's report of the DiT's weights on this rank. The bytes are read
+    from the loaded module (every parameter and buffer after ``_after_load``), because an
+    ``nki`` target only gains the kernel's ``[K/4, N]`` scale layout there; the pre-load
+    estimate the HBM check used (``weight_bytes``) omits it, so it is shown beside the
+    resident number, never in its place. The imports stay here: the driver is torch-free at
+    import."""
+    from difflet.backends.neuron.core.application_base import rank_weight_bytes
+    from difflet.backends.neuron.hbm import GIB
+
+    label = "bf16" if dit.quant is None else f"MXFP8 {dit.quant.compute}"
+    resident = rank_weight_bytes(dit.module, dit.dtype)
+    return (f"[hv15] DiT weights per rank: {resident / GIB:.2f} GiB resident "
+            f"({dit.weight_bytes / GIB:.2f} GiB estimated at load), {label}")
+
+
+def _reset_peak_hbm(dit) -> None:
+    """Starts the allocator's peak again from what is resident (the weights), before a request:
+    the line after it is then that request's peak, not the load's or an earlier request's. Off
+    the device there is no peak to reset."""
+    if dit.device.type == "neuron":
+        import torch_neuronx
+
+        torch_neuronx.reset_peak_memory_stats()
+
+
+def _peak_hbm_line(dit) -> str | None:
+    """Rank 0's peak HBM since ``_reset_peak_hbm`` against one core's HBM, or None off the
+    device (the CPU has no HBM to report). The allocator sees only its own tensors; the
+    runtime's breakdown (``usage.<category>``) adds what it holds outside them, the NEFFs'
+    code, scratchpad and DMA rings, which stay put once the NEFFs are loaded, so the current
+    figures stand for the request's. Its ``tensors`` category is the allocator's segments,
+    which the peak already counts. Only with that breakdown is anything called free; without
+    it the remainder is named the allocator's headroom. A read that fails is reported, not
+    raised: the request has finished and its latents are saved. ``per_core_hbm_bytes`` is
+    imported here, at the call, as is ``torch_neuronx``, which only a neuron rank has."""
+    if dit.device.type != "neuron":
+        return None
+    import torch_neuronx
+
+    from difflet.backends.neuron.hbm import GIB, per_core_hbm_bytes
+
+    try:
+        stats = torch_neuronx.memory_stats()
+        hbm, _ = per_core_hbm_bytes()
+    except Exception as exc:  # a diagnostic must not fail a finished request
+        return f"[hv15] peak HBM unavailable: {exc!r}"
+    peak = stats["allocated_bytes.all.peak"]
+    head = f"[hv15] peak HBM (rank 0): {peak / GIB:.2f} GiB allocator"
+    usage = {k.removeprefix("usage."): v for k, v in stats.items() if k.startswith("usage.")}
+    if not usage:
+        return (f"{head} of {hbm / GIB:.1f} GiB per core, {(hbm - peak) / GIB:.2f} GiB allocator "
+                "headroom (the runtime's code, scratchpad and DMA rings uncounted)")
+    runtime = {k: v for k, v in usage.items() if k != "tensors"}
+    other = sum(runtime.values())
+    parts = ", ".join(f"{k} {v / GIB:.2f}" for k, v in runtime.items())
+    return (f"{head} + {other / GIB:.2f} GiB runtime ({parts}) of {hbm / GIB:.1f} GiB per core, "
+            f"{(hbm - peak - other) / GIB:.2f} GiB free")

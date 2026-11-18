@@ -17,8 +17,9 @@ value is ``clip(x / scale, -448, 448)`` rounded to ``float8_e4m3fn``.
 Which 32 values form a block: the tensor engine contracts over SBUF partitions and the four
 bytes packed into each int32, and a block is 8 partitions x 4 bytes of the *swizzled* operand
 (``[K/4, F*4]``, nkilib's ``_swizzle``: 512-wide K tiles, each spread over 128 partitions with
-the tile's four 128-element quarters interleaved as the four bytes; a K remainder is laid out as
-256- and 128-element sub-tiles). So along the logical K axis a block is a fixed, non-contiguous
+the tile's four 128-element quarters interleaved as the four bytes; a K remainder is one
+partial tile with quarters of a quarter of its width, the fast-DMA loader's layout, see
+:func:`_tile_sizes`). So along the logical K axis a block is a fixed, non-contiguous
 set of 32 indices. :func:`swizzle_perm` is that order; :func:`quantize_mx` quantizes contiguous
 groups of 32 in it and stores the fp8 data back in logical order, so a quantized weight is
 ``[N, K]`` fp8 plus ``[N, K/32]`` uint8 scales, shardable along N, and along K in units of a
@@ -30,10 +31,11 @@ from __future__ import annotations
 
 import torch
 
+from difflet.quant.spec import BLOCK, LAYOUT_K  # the block and sub-tile sizes, torch-free there
+
 FP8_DTYPE = torch.float8_e4m3fn
 #: OCP E4M3FN: the format Trainium3 computes natively.
 FP8_MAX = 448.0
-BLOCK = 32
 #: e4m3fn: the largest exponent (biased 134 = 2^7) the block maximum is scaled into.
 E4M3_MAX_EXP = 7
 E4M3_MAX = 448.0
@@ -42,16 +44,21 @@ E8M0_BIAS = 127
 
 
 def _tile_sizes(k: int) -> list[int]:
-    """nkilib's legacy DGT decomposition of K: 512-wide tiles, then a 256 and/or 128 remainder."""
-    if k % 128:
-        raise ValueError(f"K={k} must be a multiple of 128 for the MX layout")
+    """The fast-DMA loader's decomposition of K (``fast_dma_transpose=True``, what
+    ``fp8_kernels.py`` calls the kernel with): 512-wide tiles, then the whole remainder as one
+    partial tile. nkilib's legacy DGT loader splits the remainder into 256 and/or 128
+    sub-tiles instead, and its golden (``matmul_mxfp8_torch._swizzle``) notes the two agree for
+    every remainder except 384, where the block membership differs and a weight laid out the
+    other way gives a ~100% error: Wan's ``ffn.net_out`` at tp4 (13824/4 = 6 x 512 + 384) hit
+    it (2026-11-07). Qwen-Image's and LTX-2's default targets have no remainder. FLUX's
+    ``proj_out_attn`` has K 768 = 512 + 256 at tp4 (a remainder the two loaders agree on) and
+    384 at tp8 (this law)."""
+    if k % LAYOUT_K:
+        raise ValueError(f"K={k} must be a multiple of {LAYOUT_K} for the MX layout")
     tiles = [TILE_K] * (k // TILE_K)
     rem = k % TILE_K
-    if rem >= 256:
-        tiles.append(256)
-        rem -= 256
-    if rem >= 128:
-        tiles.append(128)
+    if rem:
+        tiles.append(rem)
     return tiles
 
 
@@ -165,6 +172,7 @@ def kernel_layout(q: torch.Tensor, scale_u8: torch.Tensor) -> tuple[torch.Tensor
 __all__ = [
     "BLOCK",
     "E4M3_MAX",
+    "LAYOUT_K",
     "dequantize_mx",
     "dequantize_mx_sharded",
     "fake_quantize_mx",

@@ -69,6 +69,65 @@ def test_matches_diffusers(tiny):
     torch.testing.assert_close(app(**_inputs())[0], _reference(tiny), atol=1e-4, rtol=1e-4)
 
 
+def test_the_processors_rotate_with_diffusers_rotary(tiny, monkeypatch):
+    """Every block rotates q and k with diffusers' own ``apply_rotary_emb(..., sequence_dim=1)``,
+    not the neuron op: with the op (phase D's D4) the 480x848x121 step was 1.031x slower in bf16
+    and 1.028x in the MXFP8 default (F7). The output alone cannot tell two exact laws apart,
+    hence the spy."""
+    import diffusers.models.embeddings as E
+
+    reference = _reference(tiny)  # diffusers' own forward, before the spy counts
+    rotary, calls = E.apply_rotary_emb, []
+
+    def spy(x, freqs_cis, **kwargs):
+        calls.append(kwargs)
+        return rotary(x, freqs_cis, **kwargs)
+
+    monkeypatch.setattr(E, "apply_rotary_emb", spy)
+    app = NeuronHunyuanVideo15TransformerApplication(model_path=tiny, dtype=torch.float32,
+                                                     exec_mode="eager", device="cpu", **SHAPE)
+    app.load()
+    calls.clear()  # the warm-up's forward
+    out = app(**_inputs())[0]
+    assert calls == [{"sequence_dim": 1}] * (2 * TINY["num_layers"])  # q and k, every block
+    torch.testing.assert_close(out, reference, atol=1e-4, rtol=1e-4)
+
+
+@pytest.mark.parametrize("pairs", ["pair_equal", "random"])
+@pytest.mark.parametrize("table_dtype", [torch.float32, torch.bfloat16],
+                         ids=["fp32_tab", "bf16_tab"])
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16], ids=["fp32", "bf16"])
+def test_joint_qkv_rotates_as_diffusers_processor(monkeypatch, dtype, table_dtype, pairs):
+    """``_joint_qkv``'s q/k are, bit for bit, the q/k diffusers' processor hands its attention:
+    the production head dim (128), bf16 activations (a bf16 RMSNorm weight casts its output, what
+    the device feeds) and fp32 ones, either table dtype, and tables whose pairs differ: the copy
+    of the processor up to the attention changes nothing diffusers computes."""
+    from diffusers.models.transformers import transformer_hunyuan_video15 as hv15
+
+    from difflet.backends.neuron.hunyuan_video15.transformer import _joint_qkv
+
+    torch.manual_seed(0)
+    attn = hv15.HunyuanVideo15TransformerBlock(2, 128, 1.0).attn.to(dtype).eval()
+    n, t = 12, 5
+    x, ctx = torch.randn(1, n, 256, dtype=dtype), torch.randn(1, t, 256, dtype=dtype)
+    angles = (torch.randn(n, 64).repeat_interleave(2, -1) if pairs == "pair_equal"
+              else torch.randn(n, 128))
+    tables = (angles.cos().to(table_dtype), angles.sin().to(table_dtype))
+    mask = torch.ones(1, t, dtype=torch.bool)
+    seen = {}
+
+    def attention(query, key, value, **kwargs):  # the image rows of diffusers' joint q/k
+        seen["q"], seen["k"] = query[:, :n], key[:, :n]
+        return torch.zeros_like(query)
+
+    monkeypatch.setattr(hv15, "dispatch_attention_fn", attention)
+    with torch.no_grad():
+        hv15.HunyuanVideo15AttnProcessor2_0()(attn, x, ctx, mask, tables)
+        q, k = _joint_qkv(attn, x, ctx, tables)[:2]
+    assert q.dtype == dtype and torch.equal(q, seen["q"].transpose(1, 2))
+    assert torch.equal(k, seen["k"].transpose(1, 2))
+
+
 @pytest.mark.parametrize("cp", [2, 4])
 def test_ulysses_context_parallel_matches_diffusers(tiny, cp):
     """12 image tokens split over cp ranks, text replicated, joint Ulysses with key_valid_len:

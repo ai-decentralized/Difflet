@@ -91,7 +91,10 @@ def single_block_proj_out_slices(num_single_layers: int, inner_dim: int,
     mlp_dim)`` MLP); Flux's and HunyuanVideo's ports split them so each is row-parallel on its
     own input sharding. ``proj_out_attn.weight`` and ``proj_out_mlp.weight`` are therefore
     column ranges of ``single_transformer_blocks.{i}.proj_out.weight``; the bias is
-    ``single_block_proj_out_key``'s rename."""
+    ``single_block_proj_out_key``'s rename. A quantized directory whose spec splits that
+    linear (``QuantSpec.split_linears``, ``difflet/quant/checkpoint.py``) has no fused weight:
+    it holds exactly these column ranges under these parameter names, each half quantized on
+    its own or kept in the source's dtype."""
     slices = {}
     for i in range(int(num_single_layers)):
         block = f"single_transformer_blocks.{i}"

@@ -66,5 +66,15 @@ def test_ops_dispatch_to_the_cpu_implementations(monkeypatch):
     assert load_backend_attr("norm", "RMSNorm") is cpu_norm.RMSNorm
     assert load_backend_attr("norm", "LayerNorm") is cpu_norm.LayerNorm
     assert load_backend_attr("norm", "CustomRMSNorm") is cpu_norm.CustomRMSNorm
-    assert load_backend_attr("embeddings", "apply_rotary_emb") is cpu_embeddings.apply_rotary_emb
+    # The rotary op is the neuron backend's own since the MXFP8 work: the same law as the CPU
+    # op (tests/unit/backends/test_neuron_rotary.py pins bit-identity) with the pair swap as
+    # a matmul, which a custom-op output can feed without a strided gather.
+    from difflet.backends.neuron.ops_impl import embeddings as neuron_embeddings
+
+    assert load_backend_attr("embeddings", "apply_rotary_emb") is neuron_embeddings.apply_rotary_emb
+    assert neuron_embeddings.apply_rotary_emb is not cpu_embeddings.apply_rotary_emb
+    # So is diffusers' fp32 law (FLUX's call sites), by the same matmul pair swap.
+    fp32_rope = neuron_embeddings.apply_rotary_emb_fp32
+    assert load_backend_attr("embeddings", "apply_rotary_emb_fp32") is fp32_rope
+    assert fp32_rope is not cpu_embeddings.apply_rotary_emb_fp32
     registry._get_backend_by_name.cache_clear()

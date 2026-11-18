@@ -4,10 +4,11 @@ collected by pytest).
 ``write_tiny_ltx2_model(root)`` writes ``root/transformer``: the ``config.json`` and a sharded
 safetensors checkpoint (with its ``.safetensors.index.json``, the real snapshot's layout) of a
 seeded diffusers ``LTX2VideoTransformer3DModel`` (2 blocks; 4 video heads x 8 and 4 audio heads
-x 4, split RoPE as in the real checkpoint), and returns diffusers' own fp32 outputs on
-``tiny_ltx2_inputs()``: the model reloaded from those files and called without text masks, the
-unmasked text attention every Difflet LTX-2 backend runs. The reference never touches
-``difflet.ops``.
+x 4, split RoPE as in the real checkpoint; ``config=TINY_FP8_LTX2`` for the MXFP8 geometry,
+carried through to the saved config and to ``tiny_ltx2_config``), and returns diffusers' own
+fp32 outputs on ``tiny_ltx2_inputs()``: the model reloaded from those files and called without
+text masks, the unmasked text attention every Difflet LTX-2 backend runs. The reference never
+touches ``difflet.ops``.
 
 Every run goes through ``_neuron_gloo.run_ranks`` in a fresh process with
 ``DIFFLET_BACKEND=neuron``, which binds ``difflet.ops`` (resolved when the LTX-2 modeling is
@@ -63,6 +64,13 @@ TINY_LTX2_TRANSFORMER: dict = {
     "timestep_scale_multiplier": 1000,
     "vae_scale_factors": [8, 32, 32],
 }
+#: The MXFP8 geometry: 4 heads x 32 = 128 inner for both streams and 128-wide text, so every
+#: quantized weight's K is 128 (q/k/v, MLP-up) or 512 (MLP-down), the smallest K the MX
+#: layout tiles (``difflet.quant.spec.LAYOUT_K``); the 8- and 4-wide heads of
+#: ``TINY_LTX2_TRANSFORMER`` would give K=32.
+TINY_FP8_LTX2: dict = {**TINY_LTX2_TRANSFORMER, "attention_head_dim": 32,
+                       "audio_attention_head_dim": 32, "cross_attention_dim": 128,
+                       "audio_cross_attention_dim": 128}
 #: 64x96x17 -> latent 3 frames x 2 x 3 = 18 video tokens; round(17/24 * 25) = 18 audio frames.
 TINY_SHAPE = {"height": 64, "width": 96, "num_frames": 17}
 TINY_VIDEO_SEQ_LEN = 18
@@ -80,11 +88,18 @@ LTX2_SNAPSHOT = Path(
 )
 
 
-def tiny_ltx2_config(**overrides):
-    """``NeuronLtx2Config`` of the tiny model at ``TINY_SHAPE``, fp32."""
+def _geometry(config: dict | None) -> dict:
+    """The diffusers config keys of ``config`` (the L1 toy by default): what builds the model
+    and what ``NeuronLtx2Config`` takes."""
+    return {k: v for k, v in (config or TINY_LTX2_TRANSFORMER).items() if not k.startswith("_")}
+
+
+def tiny_ltx2_config(config: dict | None = None, **overrides):
+    """``NeuronLtx2Config`` of the tiny model at ``TINY_SHAPE``, fp32; ``config`` picks the
+    geometry the checkpoint was written with (``TINY_FP8_LTX2`` for the MXFP8 tests)."""
     from difflet.backends.neuron.ltx_2.config import NeuronLtx2Config
 
-    geometry = {k: v for k, v in TINY_LTX2_TRANSFORMER.items() if not k.startswith("_")}
+    geometry = _geometry(config)
     geometry["vae_scale_factors"] = tuple(geometry["vae_scale_factors"])
     kwargs = {**geometry, **TINY_SHAPE, "text_seq_len": TINY_TEXT_SEQ_LEN,
               "torch_dtype": torch.float32}
@@ -109,13 +124,12 @@ def tiny_ltx2_inputs(*, batch: int = 1, dtype: torch.dtype = torch.float32, scal
     return (*tensors, video_coords, audio_coords)
 
 
-def _diffusers_model(num_layers: int, seed: int):
+def _diffusers_model(num_layers: int, seed: int, config: dict | None):
     """A seeded diffusers model whose every parameter is perturbed off its init, so a weight
     that fails to load (or loads into the wrong slot) moves the output."""
     from diffusers.models.transformers.transformer_ltx2 import LTX2VideoTransformer3DModel
 
-    config = {k: v for k, v in TINY_LTX2_TRANSFORMER.items() if not k.startswith("_")}
-    config["num_layers"] = num_layers
+    config = {**_geometry(config), "num_layers": num_layers}
     with torch.random.fork_rng(devices=[]):
         torch.manual_seed(seed)
         model = LTX2VideoTransformer3DModel(**config)
@@ -138,6 +152,20 @@ def _round_rope_to_bf16(model) -> None:
         rope.forward = wrapped
 
 
+def diffusers_forward(model, *, batch: int = 1, scale: float = 1.0):
+    """diffusers' ``(video, audio)`` of ``model`` (an ``LTX2VideoTransformer3DModel``, however
+    its weights were prepared) on ``tiny_ltx2_inputs()``, without text masks; ``sigma`` is the
+    timestep, as the orchestrator passes it."""
+    hidden, audio, text, audio_text, timestep, vcoords, acoords = tiny_ltx2_inputs(
+        batch=batch, scale=scale)
+    with torch.no_grad():
+        return model(
+            hidden_states=hidden, audio_hidden_states=audio, encoder_hidden_states=text,
+            audio_encoder_hidden_states=audio_text, timestep=timestep, sigma=timestep,
+            video_coords=vcoords, audio_coords=acoords, return_dict=False,
+        )
+
+
 def diffusers_reference(transformer_dir, *, num_layers: int | None = None, batch: int = 1,
                         scale: float = 1.0, bf16_rope: bool = False):
     """diffusers' fp32 ``(video, audio)`` on ``tiny_ltx2_inputs()`` from the saved files, without
@@ -152,31 +180,25 @@ def diffusers_reference(transformer_dir, *, num_layers: int | None = None, batch
         model.transformer_blocks = model.transformer_blocks[:num_layers]
     if bf16_rope:
         _round_rope_to_bf16(model)
-    hidden, audio, text, audio_text, timestep, vcoords, acoords = tiny_ltx2_inputs(
-        batch=batch, scale=scale)
-    with torch.no_grad():
-        video_out, audio_out = model(
-            hidden_states=hidden, audio_hidden_states=audio, encoder_hidden_states=text,
-            audio_encoder_hidden_states=audio_text, timestep=timestep, sigma=timestep,
-            video_coords=vcoords, audio_coords=acoords, return_dict=False,
-        )
-    return video_out, audio_out
+    return diffusers_forward(model, batch=batch, scale=scale)
 
 
-def write_tiny_ltx2_model(root, *, num_layers: int = 2):
-    """Write ``root/transformer`` (sharded safetensors + index); return diffusers' fp32
-    ``(video, audio)`` on ``tiny_ltx2_inputs()``."""
+def write_tiny_ltx2_model(root, *, num_layers: int = 2, config: dict | None = None):
+    """Write ``root/transformer`` (sharded safetensors + index) with the geometry of ``config``
+    (the L1 toy by default); return diffusers' fp32 ``(video, audio)`` on
+    ``tiny_ltx2_inputs()``."""
     transformer_dir = Path(root) / "transformer"
-    model = _diffusers_model(num_layers, TINY_WEIGHT_SEED)
+    model = _diffusers_model(num_layers, TINY_WEIGHT_SEED, config)
     model.save_pretrained(
         str(transformer_dir), safe_serialization=True, max_shard_size=TINY_MAX_SHARD_SIZE
     )
     if not list(transformer_dir.glob("*.safetensors.index.json")):
         raise AssertionError("the tiny checkpoint must be sharded with an index, as the real one")
-    config = json.loads((transformer_dir / "config.json").read_text())
-    config.update({k: v for k, v in TINY_LTX2_TRANSFORMER.items() if k != "num_layers"})
-    config["num_layers"] = num_layers
-    (transformer_dir / "config.json").write_text(json.dumps(config, indent=2) + "\n")
+    saved = json.loads((transformer_dir / "config.json").read_text())
+    saved.update({k: v for k, v in (config or TINY_LTX2_TRANSFORMER).items()
+                  if k != "num_layers"})
+    saved["num_layers"] = num_layers
+    (transformer_dir / "config.json").write_text(json.dumps(saved, indent=2) + "\n")
     return diffusers_reference(transformer_dir)
 
 
