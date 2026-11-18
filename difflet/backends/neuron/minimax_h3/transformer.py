@@ -69,8 +69,9 @@ FP32_MODULES = ("proj_in", "audio_proj_in", "time_embedder", "proj_out", "audio_
 #: The text buckets the DiT is compiled for: a request runs at the smallest one that holds its
 #: live tokens. The padded text rows are keys masked out by the attention bounds, but every
 #: linear still computes them, so a 27-token prompt in the 1024 bucket spends ~18% of each step
-#: (5632 packed rows at 256x448x124) on padding.
-TEXT_BUCKETS = (128, 256, 512, 1024)
+#: (5632 packed rows at 256x448x124) on padding. 640 holds the model card's reproducible 768p
+#: T2VA prompt (537 tokens), which the 1024 bucket pads by 487 of 38784 packed rows (~1.3%).
+TEXT_BUCKETS = (128, 256, 512, 640, 1024)
 #: FL2VA buckets: a keyframe's presentation is a ``"<Picture i>: "`` label plus its vision block
 #: (~1010 rows at 768x1344), so a 768p request with both keyframes needs ~2050 rows + the prompt.
 #: Never warmed up together with ``TEXT_BUCKETS``.

@@ -210,8 +210,11 @@ class NeuronMiniMaxH3VideoVaeApplication(TorchNeuronApplicationBase):
 
 
 class DeviceTileDecoder:
-    """``decode_minimax_h3_video``'s decoder callable on the device: a host tile in, host fp32
-    frames out."""
+    """``decode_minimax_h3_video``'s decoder callable on the device: a host tile in, host
+    frames out, in the decoder's dtype (the decode takes them up to fp32).
+
+    The graph returns the decoder's output cast up to fp32, so a bf16 decoder's frames go back
+    to bf16 exactly and cross to the host (and between ranks) at half the size."""
 
     def __init__(self, app: NeuronMiniMaxH3VideoVaeApplication) -> None:
         self.app = app
@@ -219,7 +222,7 @@ class DeviceTileDecoder:
 
     def __call__(self, tile: torch.Tensor) -> torch.Tensor:
         out = self.app(tile.float().contiguous().to(self.app.device))
-        return out.cpu()
+        return out.to(self.app.dtype).cpu()
 
 
 
@@ -235,6 +238,17 @@ def video_tiles(normalized_latents: torch.Tensor, *, latents_mean, latents_std,
     Trainium video_vae stage stays as it is; ``test_video_tiles_are_the_decodes_tiles`` pins
     the two equal.
     """
+    return _clip_tiles(normalized_latents, latents_mean=latents_mean, latents_std=latents_std,
+                       clip_length=clip_length, token_drop=token_drop,
+                       temporal_compression_ratio=temporal_compression_ratio,
+                       spatial_compression_ratio=spatial_compression_ratio,
+                       tile_sample_size=tile_sample_size, tile_min_overlap=tile_min_overlap)[0]
+
+
+def _clip_tiles(normalized_latents, *, latents_mean, latents_std, clip_length,
+                token_drop, temporal_compression_ratio, spatial_compression_ratio,
+                tile_sample_size, tile_min_overlap) -> tuple[list[torch.Tensor], int]:
+    """``video_tiles`` and the tiles per temporal clip (the decode stitches clip by clip)."""
     from difflet.models.minimax_h3.pipeline import _split_tiles
 
     mean = torch.tensor(latents_mean, dtype=torch.float32).view(1, -1, 1, 1, 1)
@@ -258,49 +272,138 @@ def video_tiles(normalized_latents: torch.Tensor, *, latents_mean, latents_std,
         for y, height in zip(ys, y_lengths):
             for x, width in zip(xs, x_lengths):
                 tiles.append(clip[..., y // s : y // s + height // s, x // s : x // s + width // s])
-    return tiles
+    return tiles, len(ys) * len(xs)
+
+
+#: How long rank 0's stitching waits for a tile before it gives up (the ranks decode a
+#: 768x1344x124 video in ~5 s; a rank that dies leaves the collective to fail first).
+TILE_WAIT_SECONDS = 600.0
+
+
+def _clip_file(scratch: Path, rank: int, clip: int) -> Path:
+    return scratch / f"vae_tiles_rank{rank}_clip{clip}.pt"
 
 
 def decode_video_on_ranks(decoder, latents: torch.Tensor, cfg: dict, *, rank: int, world: int,
-                          scratch_dir, device, writer: bool = True) -> torch.Tensor | None:
+                          scratch_dir, device, writer: bool = True,
+                          threads: int | None = None,
+                          wait_seconds: float = TILE_WAIT_SECONDS) -> torch.Tensor | None:
     """``decode_minimax_h3_video`` with its tiles spread over the ranks, each holding a decoder.
 
     The decode calls its decoder once per tile in a fixed order (``video_tiles``,
     the same on every rank: the latents are), so each rank decodes the tiles
-    ``i % world == rank`` (written to ``scratch_dir``) and rank 0 then runs the decode with a
-    decoder that replays the decoded tiles in order, which does the official blending and
-    stitching. A collective after the writes makes rank 0 wait for every rank's file. Returns
-    the video on rank 0, None elsewhere.
+    ``i % world == rank``, and rank 0 runs the decode with a decoder that hands it the decoded
+    tiles in order, which does the official blending and stitching.
+
+    The stitching is pipelined with the device: rank 0 runs it on a thread while its own
+    device keeps decoding, taking rank 0's tiles as they come off the device and every other
+    rank's from ``scratch_dir``, where each writes its tiles one temporal clip at a time (a
+    background save, renamed into place when whole), so only the last clip's stitching is
+    left after the device. A collective after the writes makes every rank wait for the others.
+    Returns the video on rank 0, None elsewhere.
 
     ``rank``/``world`` are tile groups: with a TP-sharded decoder every rank of a group runs
     the group's tiles (the TP collectives need them all) and only its ``writer`` saves them.
+
+    ``threads``: rank 0's intra-op threads for the stitching (a launcher's ranks run with one;
+    single-threaded, it takes ~8 s of a 768x1344x124 decode on trn3).
     """
+    import os
+    import threading
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
     import torch.distributed as dist
 
+    from difflet.models.minimax_h3.host_components import intra_op_threads
     from difflet.models.minimax_h3.pipeline import decode_minimax_h3_video
 
     kwargs = dict(latents_mean=cfg["latents_mean"], latents_std=cfg["latents_std"],
                   clip_length=int(cfg["clip_length"]), token_drop=int(cfg["token_drop"]))
-    tiles = video_tiles(latents, **kwargs)
+    tiles, per_clip = _clip_tiles(latents, temporal_compression_ratio=4,
+                                  spatial_compression_ratio=16, tile_sample_size=256,
+                                  tile_min_overlap=64, **kwargs)
     scratch = Path(scratch_dir)
     scratch.mkdir(parents=True, exist_ok=True)
-    mine = {i: decoder(tiles[i]) for i in range(len(tiles)) if i % world == rank}
-    if writer:
-        torch.save(mine, scratch / f"vae_tiles_rank{rank}.pt")
-    if dist.is_initialized() and dist.get_world_size() > 1:
-        done = torch.ones(1, device=device)
-        dist.all_reduce(done)
-        if device.type == "neuron":
-            torch.neuron.synchronize()
-    if rank != 0 or not writer:
-        return None
-    decoded: dict[int, torch.Tensor] = {}
-    for r in range(world):
-        path = scratch / f"vae_tiles_rank{r}.pt"
-        decoded.update(torch.load(path))
-        path.unlink()
-    order = iter(range(len(tiles)))
-    return decode_minimax_h3_video(lambda tile: decoded[next(order)], latents, **kwargs)
+    stitcher = rank == 0 and writer
+    mine = [i for i in range(len(tiles)) if i % world == rank]
+
+    own: dict[int, torch.Tensor] = {}
+    ready = threading.Condition()
+    failed = threading.Event()
+
+    def own_tile(index: int) -> torch.Tensor:
+        deadline = time.monotonic() + wait_seconds
+        with ready:
+            while index not in own:
+                if failed.is_set():
+                    raise RuntimeError("the device decode of rank 0's video tiles failed")
+                if not ready.wait(timeout=max(0.0, deadline - time.monotonic())):
+                    raise TimeoutError(f"video tile {index} was not decoded in {wait_seconds:.0f}s")
+            return own.pop(index)
+
+    loaded: dict[int, torch.Tensor] = {}
+
+    def other_tile(index: int) -> torch.Tensor:
+        if index not in loaded:
+            path = _clip_file(scratch, index % world, index // per_clip)
+            deadline = time.monotonic() + wait_seconds
+            while not path.exists():
+                if failed.is_set():
+                    raise RuntimeError("the device decode of rank 0's video tiles failed")
+                if time.monotonic() > deadline:
+                    raise TimeoutError(f"{path.name} was not written in {wait_seconds:.0f}s")
+                time.sleep(0.005)
+            loaded.update(torch.load(path))
+            path.unlink()
+        return loaded.pop(index)
+
+    def stitch() -> torch.Tensor:
+        order = iter(range(len(tiles)))
+
+        def replay(_tile: torch.Tensor) -> torch.Tensor:
+            index = next(order)
+            return own_tile(index) if index % world == rank else other_tile(index)
+
+        with intra_op_threads(threads):
+            return decode_minimax_h3_video(replay, latents, **kwargs)
+
+    def save(batch: dict[int, torch.Tensor], clip: int) -> None:
+        final = _clip_file(scratch, rank, clip)
+        partial = final.with_suffix(".partial")
+        torch.save(batch, partial)
+        os.replace(partial, final)
+
+    with ThreadPoolExecutor(max_workers=1, thread_name_prefix="h3-vae-host") as host:
+        stitching = host.submit(stitch) if stitcher else None
+        saves = []
+        try:
+            batch: dict[int, torch.Tensor] = {}
+            for position, index in enumerate(mine):
+                out = decoder(tiles[index])
+                if stitcher:
+                    with ready:
+                        own[index] = out
+                        ready.notify_all()
+                elif writer:
+                    batch[index] = out
+                    last = position + 1 == len(mine) or mine[position + 1] // per_clip != index // per_clip
+                    if last:
+                        saves.append(host.submit(save, batch, index // per_clip))
+                        batch = {}
+        except BaseException:
+            failed.set()
+            with ready:
+                ready.notify_all()
+            raise
+        for job in saves:
+            job.result()
+        if dist.is_initialized() and dist.get_world_size() > 1:
+            done = torch.ones(1, device=device)
+            dist.all_reduce(done)
+            if device.type == "neuron":
+                torch.neuron.synchronize()
+        return stitching.result() if stitching is not None else None
 
 
 __all__ = [

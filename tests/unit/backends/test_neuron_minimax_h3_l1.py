@@ -151,8 +151,8 @@ def test_ulysses_refuses_heads_that_do_not_divide_tp_times_cp(tiny):
 
 
 def test_text_bucket_is_the_smallest_that_holds_the_prompt():
-    assert [text_bucket(n) for n in (1, 27, 128, 129, 600, 1024)] == [128, 128, 128, 256,
-                                                                       1024, 1024]
+    assert [text_bucket(n) for n in (1, 27, 128, 129, 537, 640, 641, 1024)] == [
+        128, 128, 128, 256, 640, 640, 1024, 1024]
     with pytest.raises(ValueError):
         text_bucket(1025)
 

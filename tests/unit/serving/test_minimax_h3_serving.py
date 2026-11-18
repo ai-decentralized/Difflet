@@ -73,6 +73,7 @@ def _neuron_cores(monkeypatch):
     monkeypatch.delenv(minimax_h3.TEXT_BUCKET_ENV, raising=False)
     monkeypatch.delenv(minimax_h3.KEYFRAMES_ENV, raising=False)
     monkeypatch.delenv(minimax_h3.FL2VA_TEXT_BUCKET_ENV, raising=False)
+    monkeypatch.delenv(minimax_h3.VAE_DTYPE_ENV, raising=False)
 
 
 def _request(**overrides) -> DiffletGenerateRequest:
@@ -179,6 +180,15 @@ def test_text_bucket_env(monkeypatch):
         minimax_h3.text_buckets()
 
 
+def test_vae_dtype_env(monkeypatch):
+    assert minimax_h3.vae_dtype() == "float32"
+    monkeypatch.setenv(minimax_h3.VAE_DTYPE_ENV, "BF16")
+    assert minimax_h3.vae_dtype() == "bfloat16"
+    monkeypatch.setenv(minimax_h3.VAE_DTYPE_ENV, "fp16")
+    with pytest.raises(ValueError, match=minimax_h3.VAE_DTYPE_ENV):
+        minimax_h3.vae_dtype()
+
+
 # --------------------------------------------------------------------------- requests
 
 
@@ -232,6 +242,36 @@ def test_write_av_mp4_muxes_a_stereo_track_into_the_parent_target(tmp_path):
     with pytest.raises(VideoMediaValidationError, match="audio stream"):
         validate_mp4(target, expected_width=width, expected_height=height,
                      expected_num_frames=frames, expected_fps=24)
+
+
+def test_video_frames_uint8_are_the_encoders_zero_to_one_frames():
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("numpy")
+    from difflet.serving.video_media import VideoMediaEncodingError, normalize_video_tensor
+
+    video = torch.rand(1, 3, 5, 6, 8)
+    # Exact halves (k + 0.5) / 255 round to even in both, and the tolerated overshoot clips.
+    video[0, 0, 0, 0, :4] = torch.tensor([0.5, 1.5, 2.5, 254.5]) / 255
+    video[0, 1, 0, 0, :2] = torch.tensor([-5e-5, 1 + 5e-5])
+    expected = normalize_video_tensor(video, layout="BCTHW", value_range="zero_to_one")
+    frames = minimax_h3.video_frames_uint8(video, threads=2)
+    assert frames.dtype == torch.uint8 and frames.is_contiguous()
+    assert (frames.numpy() == expected).all()
+    for bad in (float("nan"), 1.01):
+        broken = video.clone()
+        broken[0, 2, 1, 1, 1] = bad
+        with pytest.raises(VideoMediaEncodingError):
+            minimax_h3.video_frames_uint8(broken)
+
+
+def test_tile_scratch_dir_is_one_per_server(monkeypatch):
+    monkeypatch.setenv("MASTER_PORT", "29511")
+    a = minimax_h3.tile_scratch_dir("startup-smoke")
+    monkeypatch.setenv("MASTER_PORT", "29512")
+    b = minimax_h3.tile_scratch_dir("startup-smoke")
+    assert a != b and a.name == "difflet-h3-tiles-29511-startup-smoke"
+    monkeypatch.delenv("MASTER_PORT")
+    assert minimax_h3.tile_scratch_dir("r1").name == "difflet-h3-tiles-r1"
 
 
 def test_service_media_check_allows_audio_only_when_told(monkeypatch, tmp_path):
@@ -319,6 +359,56 @@ def test_text_encoder_mode(monkeypatch):
     monkeypatch.setenv(resident.TEXT_ENCODER_ENV, "gpu")
     with pytest.raises(ValueError):
         resident.text_encoder_mode()
+
+
+def test_host_threads_env(monkeypatch):
+    from difflet.backends.neuron.minimax_h3 import resident
+
+    monkeypatch.delenv(resident.HOST_THREADS_ENV, raising=False)
+    assert resident.host_threads() == 24
+    monkeypatch.setenv(resident.HOST_THREADS_ENV, " 8 ")
+    assert resident.host_threads() == 8
+    for bad in ("0", "-3", "many"):
+        monkeypatch.setenv(resident.HOST_THREADS_ENV, bad)
+        with pytest.raises(ValueError, match=resident.HOST_THREADS_ENV):
+            resident.host_threads()
+
+
+def test_host_encode_runs_the_live_tokens_and_pads_the_record_to_the_bucket():
+    torch = pytest.importorskip("torch")
+    from difflet.backends.neuron.minimax_h3 import resident
+
+    class Conditioner:
+        """A causal toy: row i's state is the sum of the first i+1 token ids."""
+
+        seen: list[int] = []
+
+        def tokenize(self, prompt, seq_len):
+            ids = torch.tensor([[int(w) for w in prompt.split()][:seq_len]])
+            live = ids.shape[1]
+            ids = torch.nn.functional.pad(ids, (0, seq_len - live))
+            return ids, (torch.arange(seq_len) < live).long()[None]
+
+        def encode(self, prompt, seq_len=None):
+            self.seen.append(seq_len)
+            ids, mask = self.tokenize(prompt, seq_len)
+            hidden = ids.cumsum(1)[..., None].float().expand(-1, -1, 4).clone()
+            hidden[:, int(mask.sum()):] = 0
+            return {"encoder_hidden_states": hidden, "attention_mask": mask.bool(),
+                    "num_text_tokens": int(mask.sum()), "text_encoder_layer": 50}
+
+    conditioner = Conditioner()
+    record = resident.encode_live_tokens(conditioner, "1 2 3", 8)
+    full = conditioner.encode("1 2 3", seq_len=8)
+    assert conditioner.seen == [3, 8]
+    assert record["num_text_tokens"] == 3 and record["text_encoder_layer"] == 50
+    for key in ("encoder_hidden_states", "attention_mask"):
+        assert record[key].shape == full[key].shape and record[key].dtype == full[key].dtype
+        assert torch.equal(record[key], full[key])
+    # A prompt as long as the bucket runs as it is.
+    conditioner.seen.clear()
+    record = resident.encode_live_tokens(conditioner, " ".join("1" * 9), 8)
+    assert conditioner.seen == [8] and record["encoder_hidden_states"].shape[1] == 8
 
 
 def test_auto_falls_back_to_the_host_once_the_device_runs_out_of_hbm(monkeypatch):

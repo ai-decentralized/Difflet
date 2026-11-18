@@ -118,3 +118,63 @@ def test_video_tiles_are_the_decodes_tiles(frames, height, width):
     for listed, decoded in zip(tiles, seen):
         assert listed.shape == decoded.shape
         assert torch.equal(listed, decoded)
+
+
+def _fake_frames(tile):
+    b, _, t, h, w = tile.shape
+    return torch.full((b, 3, t * 4, h * 16, w * 16), float(tile.mean()))
+
+
+def test_each_rank_writes_one_file_per_clip(tmp_path):
+    """A rank that is not rank 0 saves its tiles one temporal clip at a time, so rank 0 can
+    stitch a clip while the ranks decode the next."""
+    from difflet.backends.neuron.minimax_h3.vae import _clip_tiles, decode_video_on_ranks
+
+    latents = torch.randn(1, 24, 10, 16, 28, generator=torch.Generator().manual_seed(1))
+    kwargs = dict(latents_mean=[0.0] * 24, latents_std=[1.0] * 24, clip_length=17, token_drop=3)
+
+    tiles, per_clip = _clip_tiles(latents, temporal_compression_ratio=4,
+                                  spatial_compression_ratio=16, tile_sample_size=256,
+                                  tile_min_overlap=64, **kwargs)
+    assert per_clip == 2 and len(tiles) % per_clip == 0
+    out = decode_video_on_ranks(_fake_frames, latents, kwargs, rank=1, world=3,
+                                scratch_dir=tmp_path, device=torch.device("cpu"))
+    assert out is None
+    files = {p.name: sorted(torch.load(p)) for p in tmp_path.iterdir()}
+    expected = {}
+    for index in range(1, len(tiles), 3):
+        expected.setdefault(f"vae_tiles_rank1_clip{index // per_clip}.pt", []).append(index)
+    assert files == expected
+
+
+def test_a_failed_device_decode_does_not_leave_the_stitching_waiting(tmp_path):
+    from difflet.backends.neuron.minimax_h3.vae import decode_video_on_ranks
+
+    latents = torch.randn(1, 24, 10, 16, 28, generator=torch.Generator().manual_seed(2))
+    kwargs = dict(latents_mean=[0.0] * 24, latents_std=[1.0] * 24, clip_length=17, token_drop=3)
+    calls = []
+
+    def flaky(tile):
+        calls.append(1)
+        if len(calls) == 3:
+            raise RuntimeError("device fault")
+        return _fake_frames(tile)
+
+    with pytest.raises(RuntimeError, match="device fault"):
+        decode_video_on_ranks(flaky, latents, kwargs, rank=0, world=1, scratch_dir=tmp_path,
+                              device=torch.device("cpu"), wait_seconds=30)
+    with pytest.raises(TimeoutError):  # a rank that never writes its clip
+        decode_video_on_ranks(_fake_frames, latents, kwargs, rank=0, world=2,
+                              scratch_dir=tmp_path, device=torch.device("cpu"), wait_seconds=0.2)
+
+
+def test_one_rank_decode_is_the_decode(tmp_path):
+    from difflet.backends.neuron.minimax_h3.vae import decode_video_on_ranks
+    from difflet.models.minimax_h3.pipeline import decode_minimax_h3_video
+
+    latents = torch.randn(1, 24, 10, 16, 28, generator=torch.Generator().manual_seed(3))
+    kwargs = dict(latents_mean=[0.0] * 24, latents_std=[1.0] * 24, clip_length=17, token_drop=3)
+    video = decode_video_on_ranks(_fake_frames, latents, kwargs, rank=0, world=1,
+                                  scratch_dir=tmp_path, device=torch.device("cpu"), threads=2)
+    assert torch.equal(video, decode_minimax_h3_video(_fake_frames, latents, **kwargs))
+    assert not list(tmp_path.iterdir())
