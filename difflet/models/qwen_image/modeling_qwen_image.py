@@ -19,8 +19,10 @@ Phase 4 of docs/plans/2026-08-16-tpu-backend-support.md.
 
 from __future__ import annotations
 
+import json
 import math
 import os
+from pathlib import Path
 
 import torch
 from torch import nn
@@ -335,6 +337,10 @@ class _QwenImageTrainiumAttnProcessor:
             raise ValueError("Qwen-Image Trainium attention requires encoder_hidden_states.")
 
         seq_txt = encoder_hidden_states.shape[1]
+        # Experiment E1 (DIFFLET_EXP_ATTN_CONSTMAX): the layer's score sigma, set only on the
+        # layers the table routes; passed to the non-CP joint attention calls below.
+        sigma = getattr(attn, "constmax_sigma", None)
+        cm = {} if sigma is None else {"constmax_sigma": sigma}
 
         # The neuron backend's FP8 path fuses each stream's three projections into one kernel
         # call (``ops_impl/fp8_linear.FusedFP8Projections``); other backends have no such attr.
@@ -389,7 +395,7 @@ class _QwenImageTrainiumAttnProcessor:
                 raise ValueError("pass text_valid_len or attention_mask, not both")
             joint_hidden_states = self._masked_joint_attention(
                 img_query, img_key, img_value, txt_query, txt_key, txt_value,
-                text_valid_len=text_valid_len, image_seq_len=image_seq_len,
+                text_valid_len=text_valid_len, image_seq_len=image_seq_len, cm=cm,
             )
         elif self.context_parallel_enabled and self.cp_mode == "ring":
             if attention_mask is not None:
@@ -458,6 +464,7 @@ class _QwenImageTrainiumAttnProcessor:
                     tp_q=True,
                     tp_k=True,
                     tp_out=False,
+                    **cm,
                 )
                 joint_hidden_states = attn_out.reshape(b, h, s_q, d).transpose(1, 2)
             else:
@@ -492,7 +499,7 @@ class _QwenImageTrainiumAttnProcessor:
 
     def _masked_joint_attention(
         self, img_query, img_key, img_value, txt_query, txt_key, txt_value, *,
-        text_valid_len: torch.Tensor, image_seq_len: int | None,
+        text_valid_len: torch.Tensor, image_seq_len: int | None, cm: dict | None = None,
     ) -> torch.Tensor:
         """Joint attention with the text padding masked out of the keys, as diffusers masks it
         (``[text_mask | ones(image)]`` on the key axis, every query). In ``[B, S, H, d]``, out
@@ -546,7 +553,7 @@ class _QwenImageTrainiumAttnProcessor:
         out = attention(
             q.reshape(b * h, s_q, d), k.reshape(b * h, s_k, d), v.reshape(b * h, s_k, d),
             scale=scale, causal=False, bound_min=torch.zeros_like(bound_max),
-            bound_max=bound_max, tp_q=True, tp_k=True, tp_out=False,
+            bound_max=bound_max, tp_q=True, tp_k=True, tp_out=False, **(cm or {}),
         ).reshape(b, h, s_q, d)
         n_img = img_query.shape[1]
         return bhsd(torch.cat([out[:, :, n_img:], out[:, :, :n_img]], dim=2))
@@ -690,6 +697,18 @@ class _QwenImageTransformerTraceModule(nn.Module):
                 cp_group=self.cp_group,
                 cp_mode=self.cp_mode,
             )
+        # Experiment E1 (docs/plans/2026-11-18-attn-constmax-sparse-experiments.md): each joint
+        # attention whose layer passes the table's gap rule carries its score sigma as a [128, 1]
+        # buffer (a graph input, so the routed blocks share one graph) for the neuron backend's
+        # const-max route; the layers that fail it stay on attention_cte. Table:
+        # scripts/attn_constmax/table.py.
+        if os.environ.get("DIFFLET_EXP_ATTN_CONSTMAX") == "1":
+            table = json.loads(Path(__file__).with_name("attn_constmax.json").read_text())["layers"]
+            for i, block in enumerate(self.transformer.transformer_blocks):
+                row = table[f"transformer_blocks.{i}.attn"]
+                if row["ok"]:
+                    block.attn.register_buffer("constmax_sigma", torch.full((128, 1), row["sigma"]),
+                                               persistent=False)
 
     def forward(
         self,

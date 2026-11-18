@@ -18,7 +18,7 @@ Cross-check: with BOUNDS_JSON given (bounds.json of the run above), every layer 
 one pair must have bounds.json's per-call numbers (sigma_max_over_heads, softmax_max_max_over_heads,
 call_gap) to 1e-4.
 
-usage: table.py {flux,ltx_2} OUT_JSON [BOUNDS_JSON]
+usage: table.py {flux,ltx_2,qwen_image} OUT_JSON [BOUNDS_JSON]
 """
 import json
 import math
@@ -37,6 +37,9 @@ MODELS = {  # key: (bounds.json name, snapshot dir, attention module regex, refe
              r"(?:single_)?transformer_blocks\.\d+\.attn\.", 4608),
     "ltx_2": ("LTX-2 (video attn1, ltx2_video)", "models--Lightricks--LTX-2",
               r"transformer_blocks\.\d+\.attn1\.", 6144),
+    # joint keys at 1024x1024: 4,096 image + text_seq_len 1,024 (the padded prompt; bounded calls)
+    "qwen_image": ("Qwen-Image (joint, 1024x1024)", "models--Qwen--Qwen-Image",
+                   r"transformer_blocks\.\d+\.attn\.", 5120),
 }
 
 
