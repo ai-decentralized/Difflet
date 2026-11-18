@@ -243,13 +243,13 @@ class NeuronHunyuanVideo15VAEDecoderApplication(NeuronApplicationBase):
         disable_fail_fast=False,
     ):
         del debug, pre_shard_weights_hook, disable_fail_fast
+        if dry_run:
+            return
         compiled_path = Path(compiled_model_path)
         compiled_path.mkdir(parents=True, exist_ok=True)
         # As NeuronApplicationBase.compile: the config marks the stage compiled, so it goes
         # first and is written last.
         (compiled_path / CONFIG_FILE).unlink(missing_ok=True)
-        if dry_run:
-            return
 
         import torch_neuronx
 
