@@ -236,12 +236,21 @@ def test_shared_cli_args_omits_optionals_when_absent():
     assert "--revision" not in parts
 
 
-def test_shared_cli_args_without_revision_is_byte_identical_to_before():
-    # Trainium/TPU stage command lines must not change when --revision is not
-    # given (the stage cache identity and every recorded command stay valid).
-    parts = WanOrchestrator(_wan_args(cache_dir="/c"))._shared_cli_args(
+def _stage_ns(parts):
+    from difflet.cli import stage
+
+    return stage._build_stage_parser().parse_args(
+        ["--orchestrator", "wan", "--stage", "transformer", *parts])
+
+
+def test_shared_cli_args_without_revision_parses_as_before():
+    # Without --revision the stage parses exactly what the hand-written line gave it (the
+    # stage cache identity and every recorded command stay valid); the line itself now
+    # leaves out values equal to the stage parser's defaults (--cp-degree 1, --seed 42, ...).
+    # device_vae=False: the old line never carried --device-vae (the Wan stage does not read it).
+    parts = WanOrchestrator(_wan_args(cache_dir="/c", device_vae=False))._shared_cli_args(
         "generate", work_dir="/w")
-    assert parts == [
+    before = [
         "--model-id", "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
         "--tp-degree", "4", "--cp-degree", "1", "--cp-mode", "gather_kv",
         "--height", "480", "--width", "832", "--num-frames", "9",
@@ -250,6 +259,16 @@ def test_shared_cli_args_without_revision_is_byte_identical_to_before():
         "--prompt", "a cat walking", "--output", "/tmp/wan.mp4",
         "--cache-dir", "/c", "--work-dir", "/w",
     ]
+    assert vars(_stage_ns(parts)) == vars(_stage_ns(before))
+    assert "--revision" not in parts
+
+
+def test_shared_cli_args_forward_force_to_the_compile_stage():
+    # The hand-written line dropped --force, so `difflet compile --force` never rebuilt an AoT
+    # stage artifact (_compile_stage reads args.force in the stage process).
+    parts = WanOrchestrator(_wan_args(force=True))._shared_cli_args("compile")
+    assert _stage_ns(parts).force is True
+    assert _stage_ns(WanOrchestrator(_wan_args())._shared_cli_args("compile")).force is False
 
 
 def test_shared_cli_args_forwards_revision_only_when_set():
