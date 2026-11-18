@@ -350,11 +350,11 @@ def captured_run(monkeypatch):
     ``subprocess.run(cmd, env=env, check=True)``, "popen" for the torchrun branch."""
     captured: dict = {}
 
-    def fake_run(cmd, env, check):
+    def fake_run(cmd, env, check, **kw):
         captured.update(api="run", cmd=cmd, env=env, check=check)
 
     class FakePopen:
-        def __init__(self, cmd, env):
+        def __init__(self, cmd, env, **kw):
             captured.update(api="popen", cmd=cmd, env=env)
 
         def wait(self, timeout=None):
@@ -487,7 +487,7 @@ class _ScriptedTorchrun:
         self.calls: list[tuple] = []
         self.pid = 4242
 
-    def __call__(self, cmd, env):  # used as the Popen class: "constructs" itself
+    def __call__(self, cmd, env, **kw):  # used as the Popen class: "constructs" itself
         self.cmd = cmd
         return self
 
