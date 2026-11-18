@@ -514,7 +514,8 @@ def test_a_target_on_the_fused_proj_out_is_refused_before_the_writer(launches, m
             in err)
     assert err.endswith(f": {fused}; nothing was launched.\n")
     assert "MXFP8" not in out and stages == []
-    assert not (cache / "quantized").exists()
+    # Nothing written but the (empty) lock file ensure_quantized_dir takes before the writer.
+    assert [p for p in cache.glob("quantized/**/*") if p.is_file() and p.suffix != ".lock"] == []
 
 
 @pytest.mark.parametrize("mode", ["compile", "generate"])
