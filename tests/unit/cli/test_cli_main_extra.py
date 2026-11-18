@@ -48,8 +48,9 @@ def test_get_orchestrator_returns_correct_type(model_id, module, clsname):
     assert orch.args.model_id == model_id
 
 
-def test_get_orchestrator_unknown_raises_keyerror():
-    with pytest.raises(KeyError):
+def test_get_orchestrator_unknown_exits_naming_the_model():
+    # check_command_args refuses an unknown id first; one that gets past it names itself.
+    with pytest.raises(SystemExit, match="unknown orchestrator: 'nope'"):
         cli_main._get_orchestrator(_ns(model_id="nope"))
 
 

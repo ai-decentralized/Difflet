@@ -195,7 +195,7 @@ def test_device_text_encoder_is_the_default_and_host_opts_out(monkeypatch, tmp_p
 def test_stage_dispatch_knows_ltx_2():
     from difflet.cli import stage
 
-    assert stage._ORCHESTRATOR_MAP["Lightricks/LTX-2"].endswith("ltx_2.LTX2Orchestrator")
+    assert stage.orchestrator_ref("Lightricks/LTX-2").endswith("ltx_2:LTX2Orchestrator")
 
 
 def test_stage_line_parses_back_to_what_the_driver_resolved():

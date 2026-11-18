@@ -296,7 +296,7 @@ class ToyApplication(TorchNeuronApplicationBase):
 # process-global registry at runtime (difflet/registry.py is not edited); it resolves by
 # model_type only, and difflet.cli.stage reaches it through
 # `--orchestrator tests.unit.backends._neuron_toy:ToyOrchestrator` (it is not in
-# _ORCHESTRATOR_MAP, VALID_MODELS or difflet.cli.main._get_orchestrator).
+# the registry's cli_model_ids, so the CLI does not offer it).
 
 import contextlib  # noqa: E402
 import json  # noqa: E402
