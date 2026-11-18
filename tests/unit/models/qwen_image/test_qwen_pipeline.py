@@ -166,10 +166,10 @@ def test_call_rejects_unknown_output_type(tmp_path):
 
 def test_timesteps_fallback_linspace(tmp_path):
     pipe = m.QwenImageOrchestrator(model_path=str(tmp_path), dtype=torch.float32, scheduler=None)
-    ts = pipe._timesteps(4, device=torch.device("cpu"))
+    ts = pipe._timesteps(4, seq_len=16, device=torch.device("cpu"))
     assert torch.allclose(ts, torch.tensor([1.0, 0.75, 0.5, 0.25]))
     # num_inference_steps is clamped to >= 1
-    assert pipe._timesteps(0, device=torch.device("cpu")).numel() == 1
+    assert pipe._timesteps(0, seq_len=16, device=torch.device("cpu")).numel() == 1
 
 
 def test_timesteps_with_scheduler(tmp_path):
@@ -177,7 +177,7 @@ def test_timesteps_with_scheduler(tmp_path):
     pipe = m.QwenImageOrchestrator(
         model_path=str(tmp_path), dtype=torch.float32, scheduler=scheduler
     )
-    ts = pipe._timesteps(3, device=torch.device("cpu"))
+    ts = pipe._timesteps(3, seq_len=16, device=torch.device("cpu"))
     assert ts.numel() == 3
     assert scheduler.calls[0]["sigmas"].tolist() == pytest.approx(
         list(np.linspace(1.0, 1.0 / 3, 3))
@@ -369,7 +369,7 @@ def test_timesteps_match_diffusers_with_the_real_dynamic_shift_scheduler(tmp_pat
         model_path=str(tmp_path), dtype=torch.float32, height=height, width=width,
         scheduler=FlowMatchEulerDiscreteScheduler.from_config(QWEN_SCHEDULER_CONFIG),
     )
-    ts = pipe._timesteps(steps, device=torch.device("cpu"))
+    ts = pipe._timesteps(steps, seq_len=pipe.packed_seq_len, device=torch.device("cpu"))
 
     # What QwenImagePipeline.__call__ does (image_seq_len = its packed latents' length).
     ref = FlowMatchEulerDiscreteScheduler.from_config(QWEN_SCHEDULER_CONFIG)
@@ -394,4 +394,25 @@ def test_a_schedule_too_short_for_shift_terminal_is_refused(tmp_path, steps):
         scheduler=FlowMatchEulerDiscreteScheduler.from_config(QWEN_SCHEDULER_CONFIG),
     )
     with pytest.raises(ValueError, match="at least 2 inference steps"):
-        pipe._timesteps(steps, device=torch.device("cpu"))
+        pipe._timesteps(steps, seq_len=4096, device=torch.device("cpu"))
+
+
+def test_the_schedule_follows_the_latents_not_the_shape_the_orchestrator_was_built_for(tmp_path):
+    # A multi-bucket trainium app pins its orchestrator to the largest shape (1024x1024 here) and
+    # may denoise a smaller bucket's latents (512x512: 1024 packed tokens).
+    from diffusers import FlowMatchEulerDiscreteScheduler
+    from diffusers.pipelines.qwenimage.pipeline_qwenimage import calculate_shift, retrieve_timesteps
+
+    from tests.unit.backends._neuron_qwen_app_toy import QWEN_SCHEDULER_CONFIG
+
+    pipe = m.QwenImageOrchestrator(
+        model_path=str(tmp_path), transformer=FakeTransformer(value=0.0), dtype=torch.float32,
+        height=1024, width=1024,
+        scheduler=FlowMatchEulerDiscreteScheduler.from_config(QWEN_SCHEDULER_CONFIG),
+    )
+    pipe(bundle=_bundle(torch.zeros((1, 1024, 64))), num_inference_steps=4)
+
+    ref = FlowMatchEulerDiscreteScheduler.from_config(QWEN_SCHEDULER_CONFIG)
+    mu = calculate_shift(1024, 256, 8192, 0.5, 0.9)  # the config's values
+    expected, _ = retrieve_timesteps(ref, 4, "cpu", sigmas=np.linspace(1.0, 0.25, 4), mu=mu)
+    assert torch.equal(pipe.scheduler.timesteps, expected)
