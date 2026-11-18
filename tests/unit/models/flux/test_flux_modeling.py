@@ -294,6 +294,40 @@ def test_full_model_forward_with_guidance(patched_markers):
     assert out.shape == (1, 4, 4)
 
 
+@pytest.mark.parametrize("env", [None, "1"])
+def test_constmax_env_threads_the_table_sigma(patched_markers, monkeypatch, env):
+    """Experiment E1: DIFFLET_EXP_ATTN_CONSTMAX=1 gives each attention its layer's table sigma as
+    a [128, 1] buffer and passes it to the backend's attention; unset, neither."""
+    import json
+    from pathlib import Path
+
+    if env:
+        monkeypatch.setenv("DIFFLET_EXP_ATTN_CONSTMAX", env)
+    else:
+        monkeypatch.delenv("DIFFLET_EXP_ATTN_CONSTMAX", raising=False)
+    seen, real = [], mf.attention
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs.get("constmax_sigma", "absent"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(mf, "attention", spy)
+    config = _backbone_config(num_layers=1, num_single_layers=1)
+    model = mf.NeuronFluxTransformer2DModel(config)
+    attns = [model.transformer_blocks[0].attn, model.single_transformer_blocks[0].attn]
+    _run_full_model(config)
+    assert len(seen) == 2
+    if not env:
+        assert not any(hasattr(a, "constmax_sigma") for a in attns) and seen == ["absent"] * 2
+        return
+    table = json.loads(Path(mf.__file__).with_name("attn_constmax.json").read_text())["layers"]
+    for attn, name in zip(attns, ("transformer_blocks.0.attn", "single_transformer_blocks.0.attn")):
+        assert attn.constmax_sigma.shape == (128, 1)
+        assert torch.all(attn.constmax_sigma == torch.tensor(table[name]["sigma"]))
+        assert "constmax_sigma" not in attn.state_dict()  # not a checkpoint entry
+    assert all(isinstance(s, torch.Tensor) for s in seen)
+
+
 def test_full_model_out_channels_defaults_to_in_channels():
     config = _backbone_config()
     delattr(config, "out_channels")

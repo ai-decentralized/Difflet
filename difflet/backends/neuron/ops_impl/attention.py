@@ -45,6 +45,12 @@ _ATTENTION_PATH = os.environ.get(ATTENTION_PATH_ENV, "auto").strip().lower()
 if _ATTENTION_PATH not in ("auto", "sdpa"):
     raise ValueError(f"{ATTENTION_PATH_ENV} must be 'auto' or 'sdpa', got {_ATTENTION_PATH!r}")
 
+#: Experiment E1 (docs/plans/2026-11-18-attn-constmax-sparse-experiments.md), opt-in:
+#: ``DIFFLET_EXP_ATTN_CONSTMAX=1`` sends unbounded, non-causal, bf16, d = 128 kernel calls that
+#: carry their layer's score sigma (``constmax_sigma``, a [128, 1] tensor from the model's
+#: committed table) to nkilib's experimental ``attention_const_max``. Read once at import.
+_CONSTMAX = os.environ.get("DIFFLET_EXP_ATTN_CONSTMAX") == "1"
+
 # Kernel limits stated by torch-neuronx's SDPA gate, other than its 512-multiple lengths.
 _KERNEL_DTYPES = (torch.bfloat16, torch.float16)
 _KERNEL_MAX_HEAD_DIM = 128
@@ -72,6 +78,7 @@ def attention(
     tp_q: bool = False,
     tp_k: bool = False,
     tp_out: bool = False,
+    constmax_sigma=None,
     **kwargs,
 ):
     if kwargs:
@@ -103,7 +110,11 @@ def attention(
         causal = False
 
     scale = 1.0 if scale is None else float(scale)
-    if _can_use_flash_kernel(q, k, v, attention_mask):
+    if (_CONSTMAX and constmax_sigma is not None and not causal and _CONST_MAX_OP is not None
+            and _can_use_flash_kernel(q, k, v, attention_mask) and q.shape[-1] == 128
+            and q.dtype == k.dtype == v.dtype == torch.bfloat16):
+        out = _const_max_attention(q, k, v, constmax_sigma, scale=scale)
+    elif _can_use_flash_kernel(q, k, v, attention_mask):
         out = _flash_attention(q, k, v, scale=scale, causal=causal)
     else:
         # Pass SDPA's default scale when it matches, keeping the call on its plain path.
@@ -269,6 +280,51 @@ def _load_flash_lse_op():
 
 
 _FLASH_LSE_OP = _load_flash_lse_op()
+
+
+def _load_const_max_op():
+    """nkilib's experimental ``attention_const_max`` (bf16, shipped unmodified, experiment E1):
+    ``(q, k, v, scale, softmax_max) -> out`` on ``[B*H, S, d]``, q and k SEQ_MAJOR (the kernel
+    DMA-transposes them), heads sharded over the LNC cores. ``softmax_max`` is the kernel's
+    ``[128, 1]`` fp32 tensor form: a per-layer value as a graph input, so the blocks of one class
+    keep one shared graph (a Python scalar would be baked in per layer). Registered with
+    ``nki_op`` like the bounded op."""
+    try:
+        return torch.ops.difflet_neuron.attention_const_max  # already registered (module reload)
+    except (AttributeError, RuntimeError):
+        pass
+    try:
+        from nkilib.core.utils.common_types import AttentionLayout
+        from nkilib.experimental.attention.attention_const_max import attention_const_max
+        from torch_neuronx import wrap_nki
+        from torch_neuronx.neuron_dynamo_backend.decompositions import get_logical_neuron_cores
+        from torch_neuronx.nki_hop import nki_op
+    except ImportError:
+        return None
+    kernel = wrap_nki(attention_const_max)
+
+    @nki_op("difflet_neuron::attention_const_max", mutates_args={})
+    def attention_const_max_op(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, scale: float,
+                               softmax_max: torch.Tensor) -> torch.Tensor:
+        grid = (int(get_logical_neuron_cores()),)
+        return kernel[grid](q, k, v, softmax_max=softmax_max, softmax_scale=scale,
+                            q_layout=AttentionLayout.SEQ_MAJOR, k_layout=AttentionLayout.SEQ_MAJOR)
+
+    return attention_const_max_op
+
+
+_CONST_MAX_OP = _load_const_max_op() if _CONSTMAX else None
+
+
+def _const_max_attention(q, k, v, sigma, *, scale: float):
+    """``[B, H, S, d]`` or ``[B*H, S, d]`` through the const-max op, softmax_max by the kernel
+    docstring's rule at this call's key length: 0.88 sigma sqrt(2 ln Sk) (``sigma``: the layer's
+    ``[128, 1]`` score sigma)."""
+    shape = q.shape
+    softmax_max = sigma.float() * (0.88 * math.sqrt(2 * math.log(k.shape[-2])))
+    q3, k3, v3 = (t.reshape(-1, t.shape[-2], t.shape[-1]).contiguous() for t in (q, k, v))
+    out = _CONST_MAX_OP(q3, k3, v3, scale, softmax_max.contiguous())
+    return out.reshape(*shape[:-1], v.shape[-1])
 
 
 def _attention_with_lse(q, k, v, *, scale: float):
