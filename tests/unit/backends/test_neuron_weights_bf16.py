@@ -64,3 +64,46 @@ def test_a_checkpoint_without_fp32_needs_no_copy(tmp_path):
     comp, _ = _checkpoint(tmp_path, dtype=torch.bfloat16)
     assert wb.ensure_bf16_copy(comp, cache_root=tmp_path / "cache") is None
     assert wb.resolve_component_dir(comp, torch.bfloat16, tmp_path / "cache") == str(comp)
+
+
+def test_two_concurrent_compiles_convert_once_and_both_get_the_copy(tmp_path, monkeypatch):
+    import threading
+    import time
+
+    import safetensors.torch
+
+    comp, _ = _checkpoint(tmp_path)
+    real_save, saves = safetensors.torch.save_file, []
+
+    def slow_save(*args, **kwargs):
+        saves.append(args[1])
+        time.sleep(0.2)  # the other compile arrives mid-conversion
+        return real_save(*args, **kwargs)
+
+    monkeypatch.setattr(safetensors.torch, "save_file", slow_save)
+    got, errors = [], []
+
+    def ensure():
+        try:
+            got.append(wb.ensure_bf16_copy(comp, cache_root=tmp_path / "cache"))
+        except Exception as exc:  # surfaced by the assert below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=ensure) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+    assert errors == []
+    assert len(got) == 2 and got[0] == got[1] == wb.valid_copy(comp, tmp_path / "cache")
+    assert len(saves) == 2  # two shards converted once, not twice
+
+
+def test_a_temp_copy_left_by_a_killed_run_is_removed(tmp_path):
+    comp, _ = _checkpoint(tmp_path)
+    dst = wb.copy_dir(comp, tmp_path / "cache")
+    leftover = dst.with_name(dst.name + ".tmp")
+    leftover.mkdir(parents=True)
+    (leftover / "model-00001-of-00002.safetensors").write_bytes(b"half")
+    assert wb.ensure_bf16_copy(comp, cache_root=tmp_path / "cache") == dst
+    assert not leftover.exists()
