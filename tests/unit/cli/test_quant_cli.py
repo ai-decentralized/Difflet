@@ -560,4 +560,5 @@ def test_ltx2_driver_refuses_a_dead_target_pattern_before_writing(
     assert err.startswith("Error: --quant: transformer: ") and "match no linear weight" in err
     assert err.endswith(f": {dead}; nothing was launched.\n")
     assert orch._quantized_dit is None
-    assert not (tmp_path / "quantized").exists()
+    # Nothing written but the (empty) lock file ensure_quantized_dir takes before the writer.
+    assert [p for p in tmp_path.glob("quantized/**/*") if p.is_file() and p.suffix != ".lock"] == []
