@@ -20,6 +20,7 @@ from typing import Any
 
 from difflet import envs
 from difflet.pipeline.parallel_config import CandidateConfig, DiffletParallelConfig
+from difflet.utils.atomic_io import atomic_write_text
 
 
 def _default_cache_dir() -> Path:
@@ -322,6 +323,5 @@ def write_manifest(path: Path, spec: CacheSpec) -> None:
         "metadata": spec.manifest_metadata(),
         "precision_schedule": spec.manifest_precision_schedule(),
     }
-    with manifest_path(path).open("w", encoding="utf-8") as handle:
-        json.dump(data, handle, indent=2, sort_keys=True)
-        handle.write("\n")
+    # Atomic: a reader (another process's cache check) must never see half a manifest.
+    atomic_write_text(manifest_path(path), json.dumps(data, indent=2, sort_keys=True) + "\n")

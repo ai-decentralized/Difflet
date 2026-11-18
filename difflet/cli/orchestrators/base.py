@@ -6,6 +6,8 @@ import json
 from abc import ABC, abstractmethod
 from pathlib import Path
 
+from difflet.utils.atomic_io import atomic_write_text
+
 STAGE_MANIFEST_FILENAME = "manifest.json"
 # Kept in lockstep with difflet.pipeline.compile_cache.MANIFEST_SCHEMA_VERSION
 # semantics: v5 = canonical "shapes" list identity.
@@ -34,9 +36,8 @@ def write_stage_manifest(path: Path, cache_inputs: dict) -> None:
         "cache_key": stage_cache_key(cache_inputs),
         "cache_inputs": cache_inputs,
     }
-    with (path / STAGE_MANIFEST_FILENAME).open("w", encoding="utf-8") as handle:
-        json.dump(data, handle, indent=2, sort_keys=True)
-        handle.write("\n")
+    # Atomic: a reader (another process's stage check) must never see half a manifest.
+    atomic_write_text(path / STAGE_MANIFEST_FILENAME, json.dumps(data, indent=2, sort_keys=True) + "\n")
 
 
 def has_valid_stage_manifest(path: Path, cache_inputs: dict) -> bool:

@@ -112,6 +112,17 @@ def test_write_and_validate_manifest(tmp_path):
     assert has_valid_manifest(tmp_path, spec) is True
 
 
+def test_manifest_is_replaced_not_rewritten_in_place(tmp_path):
+    # A rewrite in place (open "w" truncates first) lets another process's cache check read an
+    # empty or half-written manifest; a rename never does. The rename gives the file a new inode.
+    write_manifest(tmp_path, _spec(height=512))
+    before = manifest_path(tmp_path).stat().st_ino
+    write_manifest(tmp_path, _spec(height=1024))
+    assert manifest_path(tmp_path).stat().st_ino != before
+    assert has_valid_manifest(tmp_path, _spec(height=1024))
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["manifest.json"]
+
+
 def test_has_valid_manifest_false_when_missing(tmp_path):
     assert read_manifest(tmp_path) is None
     assert has_valid_manifest(tmp_path, _spec()) is False

@@ -93,6 +93,17 @@ class TestStageManifests:
         manifest.write_text("{corrupt", encoding="utf-8")
         assert not has_valid_stage_manifest(path, self.INPUTS)
 
+    def test_manifest_is_replaced_not_rewritten_in_place(self, tmp_path):
+        # Rewriting in place lets another process's stage check read a half-written manifest;
+        # a rename never does, and gives the file a new inode.
+        path = hashed_stage_dir(tmp_path, "x_dit", self.INPUTS)
+        write_stage_manifest(path, self.INPUTS)
+        before = (path / "manifest.json").stat().st_ino
+        write_stage_manifest(path, self.INPUTS)
+        assert (path / "manifest.json").stat().st_ino != before
+        assert has_valid_stage_manifest(path, self.INPUTS)
+        assert sorted(p.name for p in path.iterdir()) == ["manifest.json"]
+
     def test_canonical_shapes_list_defaults_and_flag(self):
         args = argparse.Namespace(height=None, width=None, num_frames=None, shapes=None)
         assert canonical_shapes_list(args, (480, 832, 9)) == [[480, 832, 9]]
