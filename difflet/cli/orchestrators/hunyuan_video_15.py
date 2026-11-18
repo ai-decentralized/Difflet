@@ -68,7 +68,7 @@ from difflet.cli.orchestrators.torchrun import (
     torchrun_backend,
     torchrun_unsupported_options,
 )
-from difflet.cli.quant import QUANT_TARGETS_ENV, prepare_quant, quant_cli_args, quant_spec
+from difflet.cli.quant import QUANT_TARGETS_ENV, prepare_quant, quant_spec
 from difflet.quant.targets import targets_for
 from difflet.utils import bench_timing
 
@@ -242,32 +242,13 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
         marker.touch()
 
     def _stage_cli_args(self, mode: str, work_dir: str, tp: int, cfg: bool, cp: int) -> list[str]:
-        a = self.args
-        parts = ["--model-id", _HF_MODEL_ID, "--stage-mode", mode, "--work-dir", work_dir,
-                 "--tp-degree", str(tp), "--cp-degree", str(cp),
-                 "--height", str(a.height or 480), "--width", str(a.width or 848),
-                 "--num-frames", str(getattr(a, "num_frames", None) or 121),
-                 "--steps", str(getattr(a, "steps", None) or _DEFAULT_STEPS),
-                 "--seed", str(42 if getattr(a, "seed", None) is None else a.seed)]
-        if cfg:
-            parts.append("--cfg-parallel")
-        if getattr(a, "sp_enabled", False):
-            parts.append("--sp")
-        if cp > 1:
-            parts += ["--cp-mode", str(getattr(a, "cp_mode", None) or "ulysses")]
-        for flag, name in (("--prompt", "prompt"), ("--output", "output"), ("--guidance-scale", "guidance_scale"),
-                           ("--teacache-cadence", "teacache_cadence"),
-                           ("--teacache-online-delta", "teacache_online_delta"),
-                           ("--teacache-speedup", "teacache_speedup"),
-                           ("--teacache-calibration", "teacache_calibration"),
-                           ("--cache-dir", "cache_dir"), ("--revision", "revision"), ("--exec-mode", "exec_mode"),
-                           ("--requests-dir", "requests_dir"), ("--worker-index", "worker_index"),
-                           ("--dp-schedule", "dp_schedule")):
-            value = getattr(a, name, None)
-            if value is not None:
-                parts += [flag, str(value)]
-        parts += quant_cli_args(a)  # only when given: a bf16 line keeps its words
-        return parts
+        # Overrides: what the driver resolved, which a stage would otherwise re-read raw
+        # (the layout, the CP mode the stage falls back to, the --device-vae/--host-vae decision).
+        cp_mode = (getattr(self.args, "cp_mode", None) or "ulysses") if cp > 1 else None
+        return self.stage_argv(
+            defaults=dict(height=480, width=848, num_frames=121, steps=_DEFAULT_STEPS, seed=42),
+            model_id=_HF_MODEL_ID, stage_mode=mode, work_dir=work_dir, tp_degree=tp, cp_degree=cp,
+            cfg_parallel=cfg, cp_mode=cp_mode, device_vae=_aot_device_vae(self.args))
 
     # ------------------------------------------------------------ stages
 
@@ -486,8 +467,6 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
         work_dir = Path(getattr(self.args, "work_dir", None) or Path.home() / ".cache" / "difflet" / "work" / "hv15")
         work_dir.mkdir(parents=True, exist_ok=True)
         cli = self._stage_cli_args(mode, str(work_dir), tp, cfg, cp)
-        if getattr(self.args, "negative_prompt", None) is not None:  # _stage_cli_args drops it
-            cli += ["--negative-prompt", str(self.args.negative_prompt)]
         try:
             if mode == "generate":
                 runner.run_stage(_HF_MODEL_ID, "encode", num_cores=1, virtual_core_size=None, cli_args=cli)
@@ -495,7 +474,7 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
                              virtual_core_size=_AOT_VIRTUAL_CORE_SIZE, cli_args=cli)
             if device_vae:
                 runner.run_stage(_HF_MODEL_ID, "aot_vae", num_cores=1, virtual_core_size=_AOT_VIRTUAL_CORE_SIZE,
-                                 cli_args=cli + ["--device-vae"])
+                                 cli_args=cli)
             elif mode == "generate":  # a host stage, launched as the encoder is
                 runner.run_stage(_HF_MODEL_ID, "aot_vae", num_cores=1, virtual_core_size=None, cli_args=cli)
         except Exception:
