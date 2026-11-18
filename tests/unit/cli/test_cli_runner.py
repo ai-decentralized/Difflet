@@ -15,7 +15,7 @@ NEURON_CACHE_VARS = (
 
 def test_one_core_stage_sets_neuron_rt_num_cores(monkeypatch):
     captured = {}
-    monkeypatch.setattr("subprocess.run", lambda cmd, env, check: captured.update({"env": env}))
+    monkeypatch.setattr("subprocess.run", lambda cmd, env, check, **kw: captured.update({"env": env}))
     monkeypatch.delenv("NEURON_RT_NUM_CORES", raising=False)
     monkeypatch.delenv("NEURON_RT_VISIBLE_CORES", raising=False)
     # host-size probing is patched: this suite also runs on dev boxes and CI containers
@@ -40,7 +40,7 @@ def test_partial_multi_core_stage_names_its_cores(monkeypatch, host, inherited, 
     (2026-10-30, trn2.3xlarge) the hv15 AOT TP2 transformer stage died in nrt_init with
     "`NEURON_RT_NUM_CORES` must request one core, or the whole device (multiple of 8)"."""
     captured = {}
-    monkeypatch.setattr("subprocess.run", lambda cmd, env, check: captured.update({"env": env}))
+    monkeypatch.setattr("subprocess.run", lambda cmd, env, check, **kw: captured.update({"env": env}))
     monkeypatch.delenv("NEURON_RT_NUM_CORES", raising=False)
     if inherited is None:
         monkeypatch.delenv("NEURON_RT_VISIBLE_CORES", raising=False)
@@ -59,7 +59,7 @@ def test_partial_multi_core_stage_names_its_cores(monkeypatch, host, inherited, 
 
 def test_partial_multiple_of_8_stage_keeps_num_cores(monkeypatch):
     captured = {}
-    monkeypatch.setattr("subprocess.run", lambda cmd, env, check: captured.update({"env": env}))
+    monkeypatch.setattr("subprocess.run", lambda cmd, env, check, **kw: captured.update({"env": env}))
     monkeypatch.delenv("NEURON_RT_NUM_CORES", raising=False)
     monkeypatch.delenv("NEURON_RT_VISIBLE_CORES", raising=False)
     monkeypatch.setattr("difflet.common.neuron_cores.default_neuron_core_ids", lambda: tuple(range(32)))
@@ -72,7 +72,7 @@ def test_partial_multiple_of_8_stage_keeps_num_cores(monkeypatch):
 
 def test_partial_stage_falls_back_when_core_detection_fails(monkeypatch):
     captured = {}
-    monkeypatch.setattr("subprocess.run", lambda cmd, env, check: captured.update({"env": env}))
+    monkeypatch.setattr("subprocess.run", lambda cmd, env, check, **kw: captured.update({"env": env}))
     monkeypatch.delenv("NEURON_RT_NUM_CORES", raising=False)
     monkeypatch.delenv("NEURON_RT_VISIBLE_CORES", raising=False)
 
@@ -90,7 +90,7 @@ def test_partial_stage_falls_back_when_core_detection_fails(monkeypatch):
 
 def test_whole_device_stage_leaves_num_cores_unset(monkeypatch):
     captured = {}
-    monkeypatch.setattr("subprocess.run", lambda cmd, env, check: captured.update({"env": env}))
+    monkeypatch.setattr("subprocess.run", lambda cmd, env, check, **kw: captured.update({"env": env}))
     monkeypatch.delenv("NEURON_RT_NUM_CORES", raising=False)
     monkeypatch.setattr(
         "difflet.cli.runner.resolve_available_neuron_core_ids",
@@ -106,7 +106,7 @@ def test_whole_device_stage_leaves_num_cores_unset(monkeypatch):
 
 def test_respects_existing_neuron_rt_num_cores(monkeypatch):
     captured = {}
-    monkeypatch.setattr("subprocess.run", lambda cmd, env, check: captured.update({"env": env}))
+    monkeypatch.setattr("subprocess.run", lambda cmd, env, check, **kw: captured.update({"env": env}))
     monkeypatch.setenv("NEURON_RT_NUM_CORES", "16")
     from difflet.cli.runner import run_stage
 
@@ -116,7 +116,7 @@ def test_respects_existing_neuron_rt_num_cores(monkeypatch):
 
 def test_sets_virtual_core_size_when_provided(monkeypatch):
     captured = {}
-    monkeypatch.setattr("subprocess.run", lambda cmd, env, check: captured.update({"env": env}))
+    monkeypatch.setattr("subprocess.run", lambda cmd, env, check, **kw: captured.update({"env": env}))
     from difflet.cli.runner import run_stage
 
     run_stage("hunyuan_video", "clip", num_cores=1, virtual_core_size=2, cli_args=[])
@@ -125,7 +125,7 @@ def test_sets_virtual_core_size_when_provided(monkeypatch):
 
 def test_does_not_set_virtual_core_size_when_none(monkeypatch):
     captured = {}
-    monkeypatch.setattr("subprocess.run", lambda cmd, env, check: captured.update({"env": env}))
+    monkeypatch.setattr("subprocess.run", lambda cmd, env, check, **kw: captured.update({"env": env}))
     from difflet.cli.runner import run_stage
 
     run_stage("wan", "transformer", num_cores=4, virtual_core_size=None, cli_args=[])
@@ -134,7 +134,7 @@ def test_does_not_set_virtual_core_size_when_none(monkeypatch):
 
 def test_builds_correct_command(monkeypatch):
     captured = {}
-    monkeypatch.setattr("subprocess.run", lambda cmd, env, check: captured.update({"cmd": cmd}))
+    monkeypatch.setattr("subprocess.run", lambda cmd, env, check, **kw: captured.update({"cmd": cmd}))
     from difflet.cli.runner import run_stage
 
     run_stage(
@@ -157,7 +157,7 @@ def test_builds_correct_command(monkeypatch):
 
 def test_passes_check_true(monkeypatch):
     captured = {}
-    monkeypatch.setattr("subprocess.run", lambda cmd, env, check: captured.update({"check": check}))
+    monkeypatch.setattr("subprocess.run", lambda cmd, env, check, **kw: captured.update({"check": check}))
     from difflet.cli.runner import run_stage
 
     run_stage("wan", "vae", num_cores=1, virtual_core_size=None, cli_args=[])
@@ -166,7 +166,7 @@ def test_passes_check_true(monkeypatch):
 
 def test_strict_environment_preserves_inherited_visible_cores(monkeypatch):
     captured = {}
-    monkeypatch.setattr("subprocess.run", lambda cmd, env, check: captured.update({"env": env}))
+    monkeypatch.setattr("subprocess.run", lambda cmd, env, check, **kw: captured.update({"env": env}))
     monkeypatch.setenv("NEURON_RT_VISIBLE_CORES", "4-7")
     monkeypatch.setenv("NEURON_RT_NUM_CORES", "8")
     monkeypatch.setenv("NEURON_RT_VIRTUAL_CORE_SIZE", "1")
@@ -203,11 +203,11 @@ def captured_launch(monkeypatch, tmp_path):
     ``tmp_path``."""
     captured = {}
 
-    def fake_run(cmd, env, check):
+    def fake_run(cmd, env, check, **kw):
         captured.update(api="run", cmd=cmd, env=env)
 
     class FakePopen:
-        def __init__(self, cmd, env):
+        def __init__(self, cmd, env, **kw):
             captured.update(api="popen", cmd=cmd, env=env)
 
         def wait(self, timeout=None):

@@ -138,6 +138,13 @@ def _torchrun_stop_timeout(env: Mapping[str, str]) -> float:
     return float(max(shutdown_s, 0) + _TORCHRUN_STOP_MARGIN_S)
 
 
+def _stage_dies_with_parent():
+    """``preexec_fn``: SIGTERM the stage (or its torchrun, which then stops its ranks) when this
+    process dies, so a killed `difflet compile` does not leave a compile running behind it that
+    holds NeuronCores and races the next run over the same cache directory."""
+    return die_with_parent(signal.SIGTERM) if sys.platform.startswith("linux") else None
+
+
 def _run_torchrun(cmd: list[str], env: dict[str, str]) -> None:
     """``subprocess.run(cmd, env=env, check=True)`` for a torchrun launch, except that torchrun
     is never killed before it has stopped its ranks.
@@ -152,7 +159,7 @@ def _run_torchrun(cmd: list[str], env: dict[str, str]) -> None:
     ``_torchrun_stop_timeout``, and re-raises. Any other exception first sends torchrun
     SIGTERM, which it handles like SIGINT. A non-zero exit raises CalledProcessError.
     """
-    proc = subprocess.Popen(cmd, env=env)
+    proc = subprocess.Popen(cmd, env=env, preexec_fn=_stage_dies_with_parent())
     try:
         returncode = proc.wait()
     except BaseException as exc:
@@ -255,7 +262,7 @@ def run_stage(
     cmd = build_stage_command(orchestrator, stage, cli_args, nproc=nproc)
     try:
         if nproc is None:
-            subprocess.run(cmd, env=env, check=True)
+            subprocess.run(cmd, env=env, check=True, preexec_fn=_stage_dies_with_parent())
         else:
             _run_torchrun(cmd, env)
     except BaseException:
