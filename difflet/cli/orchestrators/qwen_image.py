@@ -64,6 +64,7 @@ from difflet.cli.orchestrators.base import (
     ModelOrchestrator,
     canonical_shapes_list,
     has_valid_stage_manifest,
+    stage_lock,
     hashed_stage_dir,
     require_request_shape_in_set,
     stage_toolchain_versions,
@@ -655,9 +656,8 @@ class QwenImageOrchestrator(ModelOrchestrator):
         )
         app = NeuronQwen2VLTextForCausalLM(enc_path, config)
         if args.stage_mode == "compile":
-            if not self._stage_is_compiled("text", args, compiled_dir):
-                app.compile(str(compiled_dir))
-                self._finish_stage_compile("text", args, compiled_dir)
+            self._compile_stage("text", args, compiled_dir,
+                                lambda force: app.compile(str(compiled_dir)), skip_if_valid=True)
             return
 
         from difflet.cli.dp import stage_loop
@@ -735,8 +735,9 @@ class QwenImageOrchestrator(ModelOrchestrator):
             tp_reduce_dtype=getattr(args, "tp_reduce_dtype", None),
         )
         if args.stage_mode == "compile":
-            app.compile(str(compiled_dir))
-            self._finish_stage_compile("generate", args, compiled_dir)
+            self._compile_stage("generate", args, compiled_dir,
+                                lambda force: app.compile(str(compiled_dir), force=force),
+                                skip_if_valid=False)
             return
 
         from difflet.cli.dp import stage_loop
@@ -748,12 +749,15 @@ class QwenImageOrchestrator(ModelOrchestrator):
             # component of the DiT stage artifact (identity unchanged; the DiT
             # NEFF is reused). `difflet compile --teacache-speedup` builds it;
             # a generate against an artifact compiled without it builds it here.
-            print(
-                f"[qwen_image] compiling the TeaCache probe NEFF into {compiled_dir} "
-                "(first adaptive run; the DiT artifact is reused)",
-                flush=True,
-            )
-            app.compile(str(compiled_dir), select=["teacache_probe"])
+            # Under the stage lock, re-checked: a concurrent generate may have built it.
+            with stage_lock(compiled_dir):
+                if not app.has_compiled_artifacts(str(compiled_dir), select=["teacache_probe"]):
+                    print(
+                        f"[qwen_image] compiling the TeaCache probe NEFF into {compiled_dir} "
+                        "(first adaptive run; the DiT artifact is reused)",
+                        flush=True,
+                    )
+                    app.compile(str(compiled_dir), select=["teacache_probe"])
         app.load(str(compiled_dir), skip_warmup=True)
         sched = app.pipeline.scheduler
         sc = sched.config
@@ -890,9 +894,8 @@ class QwenImageOrchestrator(ModelOrchestrator):
         )
         app = NeuronWanVAEDecoderApplication(model_path=vae_path, config=config)
         if args.stage_mode == "compile":
-            if not self._stage_is_compiled("vae", args, compiled_dir):
-                app.compile(str(compiled_dir))
-                self._finish_stage_compile("vae", args, compiled_dir)
+            self._compile_stage("vae", args, compiled_dir,
+                                lambda force: app.compile(str(compiled_dir)), skip_if_valid=True)
             return
 
         from difflet.cli.dp import stage_loop

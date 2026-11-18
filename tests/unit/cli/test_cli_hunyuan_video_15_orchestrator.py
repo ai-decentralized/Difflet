@@ -488,7 +488,7 @@ class _FakeApp:
         self.has_probe = has_probe
         self.events = []
 
-    def compile(self, path, select=None):
+    def compile(self, path, select=None, force=False):
         self.events.append(("compile", path, select))
 
     def has_compiled_artifacts(self, path, select=None):

@@ -51,7 +51,7 @@ class _FakeWanApp:
             "{'transformer': 2}; step median by expert {}")
         _FakeWanApp.instances.append(self)
 
-    def compile(self, path):
+    def compile(self, path, force=False):
         self.compiled = path
 
     def load(self, path, **kw):

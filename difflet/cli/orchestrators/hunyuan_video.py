@@ -55,6 +55,7 @@ from difflet.cli.orchestrators.base import (
     ModelOrchestrator,
     canonical_shapes_list,
     has_valid_stage_manifest,
+    stage_lock,
     hashed_stage_dir,
     require_request_shape_in_set,
     stage_toolchain_versions,
@@ -603,9 +604,8 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
 
         app = NeuronClipApplication(model_path=clip_path, config=config)
         if args.stage_mode == "compile":
-            if not self._stage_is_compiled("clip", args, compiled_dir):
-                app.compile(str(compiled_dir))
-                self._finish_stage_compile("clip", args, compiled_dir)
+            self._compile_stage("clip", args, compiled_dir,
+                                lambda force: app.compile(str(compiled_dir)), skip_if_valid=True)
             return
 
         from difflet.cli.dp import stage_loop
@@ -667,9 +667,8 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
         )
         app = NeuronLlamaForCausalLM(enc_path, config)
         if args.stage_mode == "compile":
-            if not self._stage_is_compiled("llama", args, compiled_dir):
-                app.compile(str(compiled_dir))
-                self._finish_stage_compile("llama", args, compiled_dir)
+            self._compile_stage("llama", args, compiled_dir,
+                                lambda force: app.compile(str(compiled_dir)), skip_if_valid=True)
             return
 
         from difflet.cli.dp import stage_loop
@@ -746,8 +745,9 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
         )
 
         if args.stage_mode == "compile":
-            app.compile(str(compiled_dir))
-            self._finish_stage_compile("generate", args, compiled_dir)
+            self._compile_stage("generate", args, compiled_dir,
+                                lambda force: app.compile(str(compiled_dir), force=force),
+                                skip_if_valid=False)
             return
 
         from difflet.cli.dp import stage_loop
@@ -757,12 +757,15 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
             # The probe is an additive component of the DiT stage artifact
             # (<compiled_dir>/teacache_probe/): its identity is the DiT's, the
             # DiT/VAE NEFFs are reused untouched, and it is built on first use.
-            print(
-                f"[hunyuan_video] compiling the TeaCache probe NEFF into {compiled_dir} "
-                "(first adaptive run; the DiT artifact is reused)",
-                flush=True,
-            )
-            app.compile(str(compiled_dir), select=["teacache_probe"])
+            # Under the stage lock, re-checked: a concurrent generate may have built it.
+            with stage_lock(compiled_dir):
+                if not app.has_compiled_artifacts(str(compiled_dir), select=["teacache_probe"]):
+                    print(
+                        f"[hunyuan_video] compiling the TeaCache probe NEFF into {compiled_dir} "
+                        "(first adaptive run; the DiT artifact is reused)",
+                        flush=True,
+                    )
+                    app.compile(str(compiled_dir), select=["teacache_probe"])
         app.load(str(compiled_dir), skip_warmup=True)
         for req in stage_loop.claimed_requests(args):
             with stage_loop.request_scope(args, req, final=True):

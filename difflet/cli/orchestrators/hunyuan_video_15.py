@@ -59,7 +59,7 @@ import time
 from pathlib import Path
 
 from difflet.cli import runner
-from difflet.cli.orchestrators.base import ModelOrchestrator
+from difflet.cli.orchestrators.base import ModelOrchestrator, stage_lock
 from difflet.cli.orchestrators.torchrun import (
     _local_snapshot,
     refuse,
@@ -606,7 +606,6 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
         adaptive TeaCache), or load it once and denoise each claimed request into its latents."""
         import torch
 
-        from difflet.cli.orchestrators.base import write_stage_manifest
         from difflet.models.hunyuan_video import aot15
 
         root, parallel = self._root(args), self._aot_parallel(args)
@@ -616,8 +615,10 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
         started = time.perf_counter()
         if args.stage_mode == "compile":
             app = aot15.build_aot_application(model_path=root, parallel=parallel, teacache_fused=adaptive, **shape)
-            app.compile(str(compiled_dir))
-            write_stage_manifest(compiled_dir, self._aot_stage_cache_inputs(args, "transformer"))
+            self._compile_stage("transformer", args, compiled_dir,
+                                lambda force: app.compile(str(compiled_dir), force=force),
+                                skip_if_valid=False,
+                                cache_inputs=self._aot_stage_cache_inputs(args, "transformer"))
             print(f"[hv15] aot transformer compiled into {compiled_dir} ({time.perf_counter() - started:.1f} s)",
                   flush=True)
             return
@@ -635,9 +636,12 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
         app = denoiser.dit.app
         if adaptive and not app.has_compiled_artifacts(str(compiled_dir), select=["teacache_probe"]):
             # The probe is an additive component of the DiT artifact, built on first adaptive use.
-            print(f"[hv15] compiling the TeaCache probe into {compiled_dir} (first adaptive run; "
-                  "the DiT artifact is reused)", flush=True)
-            app.compile(str(compiled_dir), select=["teacache_probe"])
+            # Under the stage lock, re-checked: a concurrent generate may have built it.
+            with stage_lock(compiled_dir):
+                if not app.has_compiled_artifacts(str(compiled_dir), select=["teacache_probe"]):
+                    print(f"[hv15] compiling the TeaCache probe into {compiled_dir} (first adaptive "
+                          "run; the DiT artifact is reused)", flush=True)
+                    app.compile(str(compiled_dir), select=["teacache_probe"])
         denoiser.load(skip_warmup=True)
         print(f"[hv15] aot transformer load {time.perf_counter() - started:.1f} s", flush=True)
         default_on = cfg_on(denoiser.guidance_scale)
@@ -702,7 +706,6 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
         import torch
 
         from difflet.backends.trainium.hunyuan_video.vae15 import NeuronHunyuanVideo15VAEDecoderApplication
-        from difflet.cli.orchestrators.base import write_stage_manifest
         from difflet.models.hunyuan_video.application import create_hunyuan_video15_vae_decoder_config
 
         root = self._root(args)
@@ -713,8 +716,8 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
         app = NeuronHunyuanVideo15VAEDecoderApplication(model_path=os.path.join(root, "vae"), config=config)
         started = time.perf_counter()
         if args.stage_mode == "compile":
-            app.compile(str(compiled_dir))
-            write_stage_manifest(compiled_dir, self._aot_stage_cache_inputs(args, "vae"))
+            self._compile_stage("vae", args, compiled_dir, lambda force: app.compile(str(compiled_dir)),
+                                skip_if_valid=True, cache_inputs=self._aot_stage_cache_inputs(args, "vae"))
             print(f"[hv15] aot vae compiled into {compiled_dir} ({time.perf_counter() - started:.1f} s)", flush=True)
             return
         from difflet.cli.dp import stage_loop

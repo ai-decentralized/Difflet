@@ -681,8 +681,9 @@ class WanOrchestrator(ModelOrchestrator):
             tp_reduce_dtype=getattr(args, "tp_reduce_dtype", None),
         )
         if args.stage_mode == "compile":
-            app.compile(str(compiled_dir))
-            self._finish_stage_compile("transformer", args, compiled_dir)
+            self._compile_stage("transformer", args, compiled_dir,
+                                lambda force: app.compile(str(compiled_dir), force=force),
+                                skip_if_valid=False)
             return
 
         from difflet.cli.dp import stage_loop
@@ -802,8 +803,9 @@ class WanOrchestrator(ModelOrchestrator):
             enable_vae_decoder=True,
         )
         if args.stage_mode == "compile":
-            app.compile(str(compiled_dir))
-            self._finish_stage_compile("vae", args, compiled_dir)
+            self._compile_stage("vae", args, compiled_dir,
+                                lambda force: app.compile(str(compiled_dir), force=force),
+                                skip_if_valid=False)
             return
 
         from difflet.cli.dp import stage_loop
