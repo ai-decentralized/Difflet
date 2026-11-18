@@ -70,3 +70,14 @@ def test_force_rebuilds_a_valid_stage_without_its_manifest_in_place(tmp_path):
     orch._compile_stage("text", orch.args, tmp_path / "text", compile_fn, skip_if_valid=True)
     assert seen == [(True, False)]  # rebuilt, with no manifest while it ran
     assert has_valid_stage_manifest(tmp_path / "text", INPUTS)
+
+
+def test_a_valid_stage_in_a_read_only_cache_is_skipped_without_a_lock(tmp_path):
+    orch = _Orchestrator(argparse.Namespace())
+    write_stage_manifest(tmp_path / "text", INPUTS)
+    tmp_path.chmod(0o555)  # a prebuilt cache the user cannot write (no room for the .lock file)
+    try:
+        orch._compile_stage("text", orch.args, tmp_path / "text", lambda force: 1 / 0, skip_if_valid=True)
+    finally:
+        tmp_path.chmod(0o755)
+    assert not (tmp_path / "text.lock").exists()
