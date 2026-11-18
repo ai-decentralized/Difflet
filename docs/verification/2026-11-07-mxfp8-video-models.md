@@ -1497,13 +1497,15 @@ distance from fp32.
 - **Noise.** The device's initial noise, bit for bit. FLUX, Qwen-Image, LTX-2 (video and audio)
   and HunyuanVideo-1.5 draw it in bf16 on a CPU generator, which is diffusers' fp32 seed-42 draw
   rounded to bf16 (FLUX's: rel L2 1.7e-3 from the unrounded draw; the research checked the law for
-  each of the four), so
-  the reference injects that bf16 draw upcast, which is exact. Wan 2.1, Wan 2.2 and HunyuanVideo
-  draw it in fp32 exactly as diffusers does. FLUX, LTX-2, HunyuanVideo and HunyuanVideo-1.5
-  assert the md5 of what they inject against the research's (LTX-2 also asserts `torch.equal`
-  against difflet's own draw); Qwen-Image and the two Wan scripts assert `torch.equal` against
-  difflet's own draw (the orchestrator's `prepare_latents`) and record its md5 in `run.json`
-  without checking it.
+  each of the four, under the device venv's torch 2.14), so
+  the reference injects the fp32 draw rounded to bf16 and upcast, which is exact. It rounds the
+  fp32 draw itself rather than drawing in bf16: torch before 2.13 draws bf16 on the CPU by
+  another law (torch 2.9 gives FLUX's packed draw md5 `ffd5172d…`, not the device's `be1ad0a6…`),
+  so a bf16 draw would match the device only on a new enough host torch. Wan 2.1, Wan 2.2 and
+  HunyuanVideo draw it in fp32 exactly as diffusers does. FLUX, Qwen-Image, LTX-2, HunyuanVideo
+  and HunyuanVideo-1.5 assert the md5 of what they inject against the device's; the two Wan
+  scripts assert `torch.equal` against difflet's own fp32 draw (the orchestrator's
+  `prepare_latents`) and record its md5 in `run.json` without checking it.
 - **Shapes.** The short ones: the device shape for FLUX, Qwen-Image and LTX-2, HunyuanVideo's
   320x512x61, Wan 2.1 and Wan 2.2 at 9 frames, HunyuanVideo-1.5 at 9 frames (its default is 121).
   The long shapes take 5-16 h each on this CPU and are out of the plan's scope (10f).

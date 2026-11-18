@@ -24,24 +24,24 @@ def test_settings_are_the_device_runs():
                                        "3de623fc3c33e44ffbe2bad470d0f45bccf2eb21")
 
 
-def _device_draw(dtype: torch.dtype) -> torch.Tensor:
-    """diffusers' FluxPipeline.prepare_latents at ``dtype`` from a CPU generator seeded 42: the
-    device's path to its noise at its bf16 application dtype, a plain fp32 pipeline's at fp32."""
+def _fp32_draw() -> torch.Tensor:
+    """diffusers' FluxPipeline.prepare_latents in fp32 from a CPU generator seeded 42, packed."""
     pipe = FluxPipeline.__new__(FluxPipeline)
     pipe.vae_scale_factor = 8
-    latents, _ = pipe.prepare_latents(1, 16, 1024, 1024, dtype, torch.device("cpu"),
+    latents, _ = pipe.prepare_latents(1, 16, 1024, 1024, torch.float32, torch.device("cpu"),
                                       torch.Generator().manual_seed(42))
     return latents
 
 
 def test_initial_noise_is_the_devices():
-    """The research's md5 of the device's packed bf16 draw, equal to the device's own draw
-    upcast and not to the fp32 draw diffusers would make (rel L2 1.7e-3 away)."""
+    """The research's md5 of the device's packed bf16 draw, which is diffusers' fp32 draw rounded
+    to bf16 (under the device's torch) and not the fp32 draw itself (rel L2 1.7e-3 away)."""
     latents, md5 = ref.initial_latents()
     assert latents.dtype == torch.float32 and latents.shape == (1, 4096, 64)
     assert md5 == ref.NOISE_MD5 == "be1ad0a63781cbc9b93ec9007d44b4ad"
-    assert torch.equal(latents, _device_draw(torch.bfloat16).float())
-    assert not torch.equal(latents, _device_draw(torch.float32))
+    fp32 = _fp32_draw()
+    assert torch.equal(latents, fp32.to(torch.bfloat16).float())
+    assert not torch.equal(latents, fp32)
 
 
 def test_refuses_a_component_not_in_fp32():

@@ -34,7 +34,6 @@ from diffusers import QwenImagePipeline
 from PIL import Image
 
 from difflet.cli.orchestrators.qwen_image import _decode_latents_host
-from difflet.models.qwen_image.pipeline import QwenImageOrchestrator
 from scripts.fp32_ref._common import (device_noise, require_fp32_math, save_run,
                                       set_threads, tensor_md5)
 
@@ -65,24 +64,23 @@ CALL = {
 TEXT_ROWS = 11
 #: diffusers' and difflet's unpacked draw (1, 1, 16, H/8, W/8).
 NOISE_SHAPE = (1, 1, 16, 128, 128)
+#: The md5 of difflet's packed bf16 draw at seed 42 under the device venv's torch: FLUX's
+#: research md5 (the same draw, shape and packing).
+NOISE_MD5 = "be1ad0a63781cbc9b93ec9007d44b4ad"
 
 
 def initial_latents() -> tuple[torch.Tensor, str]:
     """The device's initial noise as fp32, packed (1, 4096, 64), and the md5 of its bf16 draw:
-    ``device_noise``'s bf16 law, refused unless torch.equal to difflet's own draw (the
-    orchestrator's ``prepare_latents`` at the bf16 pipeline dtype from a CPU generator, which the
-    device ran on rank 0's host). diffusers returns supplied latents unchanged."""
+    ``device_noise``'s bf16 law, refused unless its md5 is the device's (difflet's orchestrator
+    ``prepare_latents`` at the bf16 pipeline dtype from a CPU generator, the same draw and packing
+    as FLUX's). diffusers returns supplied latents unchanged."""
     _, _, channels, height, width = NOISE_SHAPE
     noise = device_noise(NOISE_SHAPE, SEED, bf16_draw=True)
     latents = QwenImagePipeline._pack_latents(noise, 1, channels, height, width)
-    device = QwenImageOrchestrator(
-        model_path=str(SNAPSHOT), transformer=None, dtype=torch.bfloat16,
-        height=CALL["height"], width=CALL["width"],
-    ).prepare_latents(batch_size=1, channels=channels, dtype=torch.bfloat16,
-                      generator=torch.Generator().manual_seed(SEED))
-    if not torch.equal(latents, device.float()):
-        raise RuntimeError("the injected noise is not difflet's bf16 seed draw")
-    return latents, tensor_md5(device)
+    md5 = tensor_md5(latents.to(torch.bfloat16))
+    if md5 != NOISE_MD5:
+        raise RuntimeError(f"initial noise md5 {md5} is not the device's {NOISE_MD5}")
+    return latents, md5
 
 
 def encode(pipe) -> tuple[torch.Tensor, torch.Tensor | None]:

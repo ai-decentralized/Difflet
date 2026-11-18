@@ -1,6 +1,6 @@
 """Phase G's LTX-2 CPU fp32 reference (``scripts/fp32_ref/ltx_2.py``) without a model: its
 settings against the device code that ran ltx2_tp4/{bf16,mx}_gen50a, the injected noise against
-the device's own draw at the device shape, the schedule against the device's, the fp32 guard,
+the device draw's md5 at the device shape, the schedule against the device's, the fp32 guard,
 the frames handed to the mp4 writer against the device's, and the step callback's latents."""
 
 from __future__ import annotations
@@ -84,14 +84,14 @@ def test_diffusers_default_schedule_is_the_devices():
 
 
 def test_noise_is_the_devices_draw_at_the_device_shape():
+    """The injected noise's bf16 bytes hash to the device draw's md5 (difflet's orchestrator
+    draws, video then audio, under the device's torch)."""
     noise = ref.reference_noise()
-    device = ref.device_initial_latents()
-    assert noise.keys() == device.keys() == {"video", "audio"}
+    assert noise.keys() == {"video", "audio"}
     assert noise["video"].shape == (1, 6144, 128) and noise["audio"].shape == (1, 126, 128)
     for key in noise:
-        assert device[key].dtype == torch.bfloat16 and noise[key].dtype == torch.float32
-        assert torch.equal(noise[key], device[key].float())
-        assert common.tensor_md5(device[key]) == ref.NOISE_MD5[key]
+        assert noise[key].dtype == torch.float32
+        assert common.tensor_md5(noise[key].to(torch.bfloat16)) == ref.NOISE_MD5[key]
     # The video is the generator's first draw: the shared helper's law, packed.
     video = common.device_noise(ref.VIDEO_NOISE_SHAPE, ref.SEED, bf16_draw=True)
     assert torch.equal(noise["video"], LTX2Pipeline._pack_latents(video))

@@ -33,12 +33,12 @@ def _fp32_draw() -> torch.Tensor:
 
 
 def test_initial_noise_is_the_devices():
-    """initial_latents asserts its draw against difflet's own (the orchestrator's
-    prepare_latents in bf16 from a CPU generator); its md5 is FLUX's research md5, the same
-    draw at the same shape and packing, and it is not the fp32 draw diffusers would make."""
+    """initial_latents asserts its draw's md5 against the device's: FLUX's research md5, the
+    same draw at the same shape and packing. It is diffusers' fp32 draw rounded to bf16, not the
+    fp32 draw itself."""
     latents, md5 = ref.initial_latents()
     assert latents.dtype == torch.float32 and latents.shape == (1, 4096, 64)
-    assert md5 == "be1ad0a63781cbc9b93ec9007d44b4ad"
+    assert md5 == ref.NOISE_MD5 == "be1ad0a63781cbc9b93ec9007d44b4ad"
     fp32 = _fp32_draw()
     assert torch.equal(latents, fp32.to(torch.bfloat16).float())
     assert not torch.equal(latents, fp32)

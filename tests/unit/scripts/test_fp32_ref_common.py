@@ -40,12 +40,15 @@ def _gen(seed: int = 42) -> torch.Generator:
     return torch.Generator().manual_seed(seed)
 
 
-def test_device_noise_bf16_draw_is_the_bf16_randn_upcast():
+def test_device_noise_bf16_draw_is_the_fp32_randn_rounded():
+    """The fp32 draw rounded, not a bf16 draw: torch < 2.13 draws bf16 by another law, and the
+    device's (torch 2.14) is the rounded one."""
     shape = (1, 16, 3, 8, 8)
     noise = common.device_noise(shape, 42, bf16_draw=True)
+    fp32 = torch.randn(shape, generator=_gen(), dtype=torch.float32)
     assert noise.dtype == torch.float32
-    assert torch.equal(noise, torch.randn(shape, generator=_gen(), dtype=torch.bfloat16).float())
-    assert not torch.equal(noise, torch.randn(shape, generator=_gen(), dtype=torch.float32))
+    assert torch.equal(noise, fp32.to(torch.bfloat16).float())
+    assert not torch.equal(noise, fp32)
 
 
 def test_device_noise_fp32_draw_is_the_fp32_randn():

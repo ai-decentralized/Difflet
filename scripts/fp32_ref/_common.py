@@ -33,14 +33,16 @@ DEVICE_FPS = {"ltx_2": 24, "wan21": 16, "wan22": 16, "hunyuan_video": 24,
 
 def device_noise(shape, seed: int, *, bf16_draw: bool, generator_device="cpu") -> torch.Tensor:
     """The device run's initial noise as fp32: diffusers' ``randn_tensor`` from a generator on
-    ``generator_device`` seeded ``seed``, in bf16 when ``bf16_draw``. FLUX, Qwen-Image, LTX-2 and
-    HunyuanVideo-1.5 draw in their bf16 application dtype on the host (the fp32 draw rounded
-    to bf16, the research checked), so the reference upcasts that draw, which is exact; Wan and
-    HunyuanVideo draw in fp32, as diffusers' fp32 pipeline does."""
+    ``generator_device`` seeded ``seed``, rounded to bf16 when ``bf16_draw``. FLUX, Qwen-Image,
+    LTX-2 and HunyuanVideo-1.5 draw in their bf16 application dtype on the host, which under the
+    device venv's torch (>= 2.13) is the fp32 draw rounded to bf16; older torch draws bf16 by
+    another law, so the fp32 draw is rounded here and the reference matches the device on any
+    host torch. The upcast is exact. Wan and HunyuanVideo draw in fp32, as diffusers' fp32
+    pipeline does."""
     generator = torch.Generator(device=generator_device).manual_seed(seed)
-    dtype = torch.bfloat16 if bf16_draw else torch.float32
-    draw = randn_tensor(tuple(shape), generator=generator, device=torch.device("cpu"), dtype=dtype)
-    return draw.float()
+    draw = randn_tensor(tuple(shape), generator=generator, device=torch.device("cpu"),
+                        dtype=torch.float32)
+    return draw.to(torch.bfloat16).float() if bf16_draw else draw
 
 
 def tensor_md5(t: torch.Tensor) -> str:

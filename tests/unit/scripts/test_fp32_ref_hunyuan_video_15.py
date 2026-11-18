@@ -102,28 +102,24 @@ def test_vae_tile_is_the_device_decoders():
 
 
 def test_noise_is_the_device_bf16_draw():
-    """The research's checks: difflet's draw (``randn_tensor`` in bf16, CPU generator, seed 42)
-    is diffusers' ``prepare_latents`` in bf16 (A) and its fp32 draw rounded to bf16 (B), not the
-    fp32 draw itself (C, rel L2 1.66e-3), with the first values the research printed."""
+    """The research's checks: difflet's draw (``randn_tensor`` in bf16, CPU generator, seed 42,
+    under the device's torch; its md5 ``initial_noise`` asserts) is diffusers' fp32 draw rounded
+    to bf16, not the fp32 draw itself (rel L2 1.66e-3), with the first values the research
+    printed."""
     from diffusers import HunyuanVideo15Pipeline
-    from diffusers.utils.torch_utils import randn_tensor
 
     noise = ref.initial_noise()
     assert noise.dtype == torch.float32 and tuple(noise.shape) == ref.LATENT_SHAPE
+    assert common.tensor_md5(noise.to(torch.bfloat16)) == ref.NOISE_MD5
     pipe = HunyuanVideo15Pipeline.__new__(HunyuanVideo15Pipeline)
     pipe.vae_scale_factor_temporal, pipe.vae_scale_factor_spatial = 4, ref.VAE_SPATIAL
     args = (1, 32, ref.HEIGHT, ref.WIDTH, ref.NUM_FRAMES)
-    cpu = torch.device("cpu")
-    assert torch.equal(noise, pipe.prepare_latents(*args, torch.bfloat16, cpu, _gen()).float())
-    fp32 = pipe.prepare_latents(*args, torch.float32, cpu, _gen())
+    fp32 = pipe.prepare_latents(*args, torch.float32, torch.device("cpu"), _gen())
     assert torch.equal(noise, fp32.to(torch.bfloat16).float())
     assert not torch.equal(noise, fp32)
     assert float((noise - fp32).norm() / fp32.norm()) == pytest.approx(1.663e-3, rel=1e-3)
     assert noise.flatten()[:4].tolist() == pytest.approx([1.9297, 1.4844, 0.9023, -2.1094],
                                                          abs=1e-4)
-    device_law = randn_tensor(ref.LATENT_SHAPE, generator=_gen(), device=cpu,
-                              dtype=torch.bfloat16)
-    assert common.tensor_md5(device_law) == ref.NOISE_MD5
 
 
 def test_initial_noise_refuses_another_law(monkeypatch):

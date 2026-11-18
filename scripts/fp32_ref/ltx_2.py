@@ -32,7 +32,6 @@ from diffusers import LTX2Pipeline
 from diffusers.utils.torch_utils import randn_tensor
 from huggingface_hub.constants import HF_HUB_CACHE
 
-from difflet.models.ltx_2.pipeline import LTX2Orchestrator
 from scripts.fp32_ref._common import (DEVICE_FPS, require_fp32_math, save_run, set_threads,
                                       tensor_md5)
 
@@ -70,8 +69,8 @@ FRAME_RATE = 24.0
 VIDEO_NOISE_SHAPE = (1, 128, 16, 16, 24)
 AUDIO_NOISE_SHAPE = (1, 8, 126, 16)
 #: ``tensor_md5`` of the packed bf16 device draw the research saved with the device runs' venv
-#: and torch (/tmp/ltx2_phase_g_check/difflet_initial_seed42.pt): a torch whose generator drew
-#: otherwise would pass the law check on both sides.
+#: and torch (/tmp/ltx2_phase_g_check/difflet_initial_seed42.pt); the injected noise is refused
+#: unless its bf16 bytes hash to it.
 NOISE_MD5 = {"video": "d4d7266802e324f4553c3ea547e1ddfc",
              "audio": "acdb384e9f3763669471623ec320e9b2"}
 
@@ -87,22 +86,6 @@ def reference_noise(seed: int = SEED) -> dict[str, torch.Tensor]:
     audio = randn_tensor(AUDIO_NOISE_SHAPE, generator=generator, dtype=torch.float32)
     return {"video": LTX2Pipeline._pack_latents(video).to(torch.bfloat16).float(),
             "audio": LTX2Pipeline._pack_audio_latents(audio).to(torch.bfloat16).float()}
-
-
-def device_initial_latents(model_path=SNAPSHOT, seed: int = SEED) -> dict[str, torch.Tensor]:
-    """The device's own initial noise, by its own code: ``LTX2Orchestrator``'s draws as
-    ``TorchNeuronLtx2Application._initial_latents`` makes them on rank 0 (video then audio in the
-    bf16 application dtype, packed; the request's CPU generator seeded by ltx_2.py's
-    ``request_kwargs``). The orchestrator reads no weights, only the scheduler config."""
-    orchestrator = LTX2Orchestrator(
-        model_path=str(model_path), dtype=torch.bfloat16, height=HEIGHT, width=WIDTH,
-        num_frames=NUM_FRAMES, text_seq_len=MAX_SEQUENCE_LENGTH, frame_rate=FRAME_RATE)
-    generator = torch.Generator().manual_seed(seed)
-    video = orchestrator.prepare_latents(batch_size=1, channels=128, dtype=torch.bfloat16,
-                                         generator=generator)
-    audio = orchestrator.prepare_audio_latents(batch_size=1, channels=8, dtype=torch.bfloat16,
-                                               generator=generator)
-    return {"video": video, "audio": audio}
 
 
 def call_kwargs(steps: int) -> dict:
@@ -186,13 +169,9 @@ def main(argv=None) -> int:
     start = time.perf_counter()
 
     noise = reference_noise()
-    device = device_initial_latents(args.model_path)
-    for key, tensor in device.items():
-        if not torch.equal(noise[key], tensor.float()):
-            raise RuntimeError(f"the injected {key} noise is not the device's draw")
-    md5 = {key: tensor_md5(tensor) for key, tensor in device.items()}
+    md5 = {key: tensor_md5(tensor.to(torch.bfloat16)) for key, tensor in noise.items()}
     if md5 != NOISE_MD5:
-        raise RuntimeError(f"the device draw hashes to {md5}, not the research's {NOISE_MD5}")
+        raise RuntimeError(f"the injected noise hashes to {md5}, not the device's {NOISE_MD5}")
     noise_md5 = ",".join(f"{key}={value}" for key, value in md5.items())
 
     load_start = time.perf_counter()
