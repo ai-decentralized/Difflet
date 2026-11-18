@@ -105,59 +105,19 @@ def worker_env(
 _die_with_parent = die_with_parent(signal.SIGKILL)
 
 
+#: What the router sets for each worker itself, or must never hand one: a worker is dp=1, reads
+#: its requests from the manifest, and neither re-checks capacity nor force-rebuilds.
+ROUTER_OWNED = frozenset({"dp", "mode", "prompt", "output", "requests", "requests_dir",
+                          "worker_index", "dp_schedule", "work_dir", "total_cores", "force"})
+
+
 def worker_cli_args(args) -> list[str]:
-    """Flags forwarded to worker CLI processes. NEVER --dp/--mode/--prompt/--output/--requests."""
-    argv = ["--model-id", args.model_id]
-    for flag, value in (
-        ("--tp-degree", args.tp_degree),
-        ("--cp-degree", args.cp_degree),
-        ("--cp-mode", args.cp_mode),
-        ("--height", args.height),
-        ("--width", args.width),
-        ("--num-frames", args.num_frames),
-        ("--steps", args.steps),
-        ("--guidance-scale", args.guidance_scale),
-        ("--seed", args.seed),
-        ("--cache-dir", args.cache_dir),
-        ("--revision", getattr(args, "revision", None)),
-        # The torchrun backends' options: a worker that lost them would, e.g., load the text
-        # encoder on the device beside a narrower TP shard than its HBM allows.
-        ("--exec-mode", getattr(args, "exec_mode", None)),
-        # Component precisions (a worker that lost them would decode or encode in the default).
-        ("--vae-dtype", getattr(args, "vae_dtype", None)),
-        ("--vae-exec-mode", getattr(args, "vae_exec_mode", None)),
-        ("--text-encoder-dtype", getattr(args, "text_encoder_dtype", None)),
-        # FP8 DiT: a worker that lost these would run the bf16 DiT against the fp8 stage key.
-        ("--quant", getattr(args, "quant", None)),
-        ("--quant-compute", getattr(args, "quant_compute", None)),
-        ("--guidance-scale-2", getattr(args, "guidance_scale_2", None)),
-        # TeaCache: a worker that lost these would silently run without it.
-        ("--teacache-cadence", getattr(args, "teacache_cadence", None)),
-        ("--teacache-online-delta", getattr(args, "teacache_online_delta", None)),
-        ("--teacache-speedup", getattr(args, "teacache_speedup", None)),
-        ("--teacache-calibration", getattr(args, "teacache_calibration", None)),
-        ("--true-cfg-scale", getattr(args, "true_cfg_scale", None)),
-        # The default for requests without one of their own (a manifest line's wins).
-        ("--negative-prompt", getattr(args, "negative_prompt", None)),
-    ):
-        if value is not None:
-            argv += [flag, str(value)]
-    for flag, name in (
-        ("--cfg-parallel", "cfg_parallel"),
-        ("--sp", "sp_enabled"),
-        ("--keep-work-dir", "keep_work_dir"),
-        ("--torch-compile", "torch_compile"),
-        ("--host-text-encoder", "host_text_encoder"),
-        ("--device-text-encoder", "device_text_encoder"),
-        ("--host-vae", "host_vae"),
-        ("--device-vae", "device_vae"),
-        ("--dual-expert", "dual_expert"),
-    ):
-        if getattr(args, name, False):
-            argv.append(flag)
-    if getattr(args, "tp_reduce_dtype", None):
-        argv += ["--tp-reduce-dtype", args.tp_reduce_dtype]
-    return argv
+    """Every ``difflet generate`` option the parent holds a non-default value for, except
+    ROUTER_OWNED; generated from the parser, so a new option reaches the workers without an edit
+    here. The namespace is the checked one (--mode and --taef1-path already resolved)."""
+    from difflet.cli.argv import forward_argv, generate_parser
+
+    return forward_argv(args, generate_parser(), exclude=ROUTER_OWNED)
 
 
 def _check_hbm(args) -> None:
