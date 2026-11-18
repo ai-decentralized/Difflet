@@ -48,7 +48,7 @@ def test_create_application15_sets_model_version():
 
 def test_create_application_rejects_backends_other_than_trainium_and_neuron():
     # The neuron backend is accepted (tests/unit/backends/test_neuron_hv1_app.py builds it).
-    with pytest.raises(NotImplementedError, match="trainium and neuron"):
+    with pytest.raises(NotImplementedError, match="trainium, tpu and neuron"):
         entry.create_hunyuan_video_application(
             model_path="x", parallel=_parallel(), dtype="bf16", shape={}, backend="cpu"
         )

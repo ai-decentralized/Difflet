@@ -29,7 +29,7 @@ def create_hunyuan_video_application(
         )
     if backend not in {"trainium", "neuron"}:
         raise NotImplementedError(
-            f"HunyuanVideo supports the trainium and neuron backends, got {backend!r}"
+            f"HunyuanVideo supports the trainium, tpu and neuron backends, got {backend!r}"
         )
     if parallel.cfg_parallel_enabled:
         raise NotImplementedError(

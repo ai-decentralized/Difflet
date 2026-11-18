@@ -27,7 +27,7 @@ def create_ltx_2_application(
         )
     if backend not in {"trainium", "neuron"}:
         raise NotImplementedError(
-            f"LTX-2 supports the trainium and neuron backends, got {backend!r}"
+            f"LTX-2 supports the trainium, tpu and neuron backends, got {backend!r}"
         )
     if parallel.cp_degree > 1 and backend != "neuron":
         raise NotImplementedError("LTX-2 CP is deferred until the M4c transformer spike.")
