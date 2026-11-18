@@ -292,11 +292,11 @@ class QwenImageServingStageAdapter:
         profile = runtime.profile
         if profile.parallel.cp_degree != 1:
             raise RuntimeError("Qwen-Image P0 shared-worker serving requires cp_degree=1")
-        _validate_profile_shapes(profile)
+        self._tpu = _backend_is_tpu()
+        _validate_profile_shapes(profile, tpu=self._tpu)
         self.active_runtime = runtime
         self.active_profile = profile
         self.model_dir = runtime.source.pinned_model_path
-        self._tpu = _backend_is_tpu()
         # The TPU path runs the graph eagerly, so there are no compiled
         # artifacts to validate. Direction A (torch.export -> StableHLO) is
         # implemented but has never been exercised on the real 60-layer model,
@@ -882,7 +882,7 @@ class QwenImageServingStageAdapter:
         return _tensor_to_png_bytes((img[0] * 0.5 + 0.5).clamp(0, 1))
 
 
-def _validate_profile_shapes(profile: ServingProfile) -> None:
+def _validate_profile_shapes(profile: ServingProfile, *, tpu: bool) -> None:
     for height, width, _frames in profile.canonical_shapes():
         for value, name in ((height, "height"), (width, "width")):
             if type(value) is not int or value <= 0 or value % 16:
@@ -896,6 +896,11 @@ def _validate_profile_shapes(profile: ServingProfile) -> None:
                 "Qwen-Image serving profile height/width must equal the largest "
                 "shape of the compiled shape set"
             )
+        if tpu and len(profile.canonical_shapes()) > 1:
+            # One eager module, built for the profile's shape: a smaller request would be
+            # denoised on the largest shape's RoPE grid and latent length.
+            raise ValueError("Qwen-Image TPU serves one shape: pass --height/--width, not --shapes "
+                             "with several shapes")
 
 
 def _probe_free_teacache(profile: Any) -> tuple[int | None, float | None]:
