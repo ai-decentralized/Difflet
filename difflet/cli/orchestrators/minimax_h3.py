@@ -48,6 +48,7 @@ from typing import TYPE_CHECKING
 
 from difflet.cli import runner
 from difflet.cli.orchestrators.base import ModelOrchestrator, stage_lock
+from difflet.utils.atomic_io import atomic_path
 from difflet.cli.orchestrators.torchrun import (
     decodes_on_device,
     refuse_torchrun_conflicts,
@@ -439,7 +440,9 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
                         hidden_size=int(config.hidden_size),
                         dtype=torch.bfloat16,
                     )
-                    torch.save(table, cache_path)
+                    # Atomic: only the file's existence is checked before torch.load.
+                    with atomic_path(cache_path) as tmp:
+                        torch.save(table, str(tmp))
                     adaln_tables[num_steps] = table
                     print(
                         f"[generate] precomputed AdaLN table for {num_steps} steps "
@@ -667,9 +670,8 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
                 dtype=torch.bfloat16,
             )
             path.parent.mkdir(parents=True, exist_ok=True)
-            tmp = path.with_suffix(".tmp")
-            torch.save(table, tmp)
-            tmp.replace(path)
+            with atomic_path(path) as tmp:  # a temp name per process: replicas build at once
+                torch.save(table, str(tmp))
             print(f"[generate] precomputed AdaLN table for {num_steps} steps "
                   f"({table.numel() * table.element_size() / 2**20:.0f} MiB) -> {path}", flush=True)
 
