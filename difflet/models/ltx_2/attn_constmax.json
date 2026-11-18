@@ -1,0 +1,395 @@
+{
+ "model": "ltx_2",
+ "snapshot": "/home/ubuntu/.cache/huggingface/hub/models--Lightricks--LTX-2/snapshots/64f65d09e0b76c96202b5bc09997673184cf9b5d",
+ "reference_sk": 6144,
+ "d": 128,
+ "gap_limit": 80.0,
+ "generator": "scripts/attn_constmax/table.py",
+ "rule": "softmax_max = 0.88 * sigma * sqrt(2 ln Sk); per call: max over heads and (q norm, k norm) pairs",
+ "layers": {
+  "transformer_blocks.0.attn1": {
+   "pairs": 1,
+   "sigma": 0.2882513999938965,
+   "softmax_max": 1.0595166567776533,
+   "hard_bound": 10.746434211730957,
+   "gap": 9.686917554953304,
+   "ok": true
+  },
+  "transformer_blocks.1.attn1": {
+   "pairs": 1,
+   "sigma": 0.4165938198566437,
+   "softmax_max": 1.5312608759509552,
+   "hard_bound": 30.005081176757812,
+   "gap": 28.473820300806857,
+   "ok": true
+  },
+  "transformer_blocks.2.attn1": {
+   "pairs": 1,
+   "sigma": 0.7665507197380066,
+   "softmax_max": 2.8175865090144017,
+   "hard_bound": 20.862411499023438,
+   "gap": 18.044824990009037,
+   "ok": true
+  },
+  "transformer_blocks.3.attn1": {
+   "pairs": 1,
+   "sigma": 0.8528860211372375,
+   "softmax_max": 3.1349264764953615,
+   "hard_bound": 23.740558624267578,
+   "gap": 20.605632147772216,
+   "ok": true
+  },
+  "transformer_blocks.4.attn1": {
+   "pairs": 1,
+   "sigma": 0.7191241383552551,
+   "softmax_max": 2.643262106946935,
+   "hard_bound": 24.27088737487793,
+   "gap": 21.627625267930995,
+   "ok": true
+  },
+  "transformer_blocks.5.attn1": {
+   "pairs": 1,
+   "sigma": 0.7941102385520935,
+   "softmax_max": 2.9188861704797766,
+   "hard_bound": 23.622474670410156,
+   "gap": 20.70358849993038,
+   "ok": true
+  },
+  "transformer_blocks.6.attn1": {
+   "pairs": 1,
+   "sigma": 0.6925332546234131,
+   "softmax_max": 2.5455228271622707,
+   "hard_bound": 25.430986404418945,
+   "gap": 22.885463577256676,
+   "ok": true
+  },
+  "transformer_blocks.7.attn1": {
+   "pairs": 1,
+   "sigma": 0.6171681880950928,
+   "softmax_max": 2.2685058089358123,
+   "hard_bound": 15.329854011535645,
+   "gap": 13.061348202599833,
+   "ok": true
+  },
+  "transformer_blocks.8.attn1": {
+   "pairs": 1,
+   "sigma": 0.7056257724761963,
+   "softmax_max": 2.5936465856053394,
+   "hard_bound": 19.486867904663086,
+   "gap": 16.893221319057748,
+   "ok": true
+  },
+  "transformer_blocks.9.attn1": {
+   "pairs": 1,
+   "sigma": 0.9589869976043701,
+   "softmax_max": 3.5249185177124414,
+   "hard_bound": 16.804834365844727,
+   "gap": 13.279915848132285,
+   "ok": true
+  },
+  "transformer_blocks.10.attn1": {
+   "pairs": 1,
+   "sigma": 0.6513074040412903,
+   "softmax_max": 2.393990257389806,
+   "hard_bound": 18.122373580932617,
+   "gap": 15.728383323542811,
+   "ok": true
+  },
+  "transformer_blocks.11.attn1": {
+   "pairs": 1,
+   "sigma": 0.7597001791000366,
+   "softmax_max": 2.7924061910210973,
+   "hard_bound": 16.697111129760742,
+   "gap": 13.904704938739645,
+   "ok": true
+  },
+  "transformer_blocks.12.attn1": {
+   "pairs": 1,
+   "sigma": 0.7998033165931702,
+   "softmax_max": 2.9398120394017786,
+   "hard_bound": 17.129384994506836,
+   "gap": 14.189572955105056,
+   "ok": true
+  },
+  "transformer_blocks.13.attn1": {
+   "pairs": 1,
+   "sigma": 0.7475005984306335,
+   "softmax_max": 2.7475645738591026,
+   "hard_bound": 17.129384994506836,
+   "gap": 14.381820420647733,
+   "ok": true
+  },
+  "transformer_blocks.14.attn1": {
+   "pairs": 1,
+   "sigma": 0.7690874338150024,
+   "softmax_max": 2.82691062961925,
+   "hard_bound": 17.232275009155273,
+   "gap": 14.405364379536024,
+   "ok": true
+  },
+  "transformer_blocks.15.attn1": {
+   "pairs": 1,
+   "sigma": 0.7638980746269226,
+   "softmax_max": 2.8078362643329435,
+   "hard_bound": 22.733760833740234,
+   "gap": 19.92592456940729,
+   "ok": true
+  },
+  "transformer_blocks.16.attn1": {
+   "pairs": 1,
+   "sigma": 0.8841314911842346,
+   "softmax_max": 3.2497744736407057,
+   "hard_bound": 22.7738094329834,
+   "gap": 19.524034959342693,
+   "ok": true
+  },
+  "transformer_blocks.17.attn1": {
+   "pairs": 1,
+   "sigma": 0.9917803406715393,
+   "softmax_max": 3.6454559833130435,
+   "hard_bound": 20.42806625366211,
+   "gap": 16.782610270349068,
+   "ok": true
+  },
+  "transformer_blocks.18.attn1": {
+   "pairs": 1,
+   "sigma": 0.921673595905304,
+   "softmax_max": 3.387766813949569,
+   "hard_bound": 22.125398635864258,
+   "gap": 18.73763182191469,
+   "ok": true
+  },
+  "transformer_blocks.19.attn1": {
+   "pairs": 1,
+   "sigma": 1.071078896522522,
+   "softmax_max": 3.9369312052349774,
+   "hard_bound": 33.82925796508789,
+   "gap": 29.892326759852914,
+   "ok": true
+  },
+  "transformer_blocks.20.attn1": {
+   "pairs": 1,
+   "sigma": 2.1430366039276123,
+   "softmax_max": 7.877092628148893,
+   "hard_bound": 53.364463806152344,
+   "gap": 45.48737117800345,
+   "ok": true
+  },
+  "transformer_blocks.21.attn1": {
+   "pairs": 1,
+   "sigma": 1.7229702472686768,
+   "softmax_max": 6.333067857266709,
+   "hard_bound": 39.94048309326172,
+   "gap": 33.607415235995006,
+   "ok": true
+  },
+  "transformer_blocks.22.attn1": {
+   "pairs": 1,
+   "sigma": 3.1991524696350098,
+   "softmax_max": 11.75902468893969,
+   "hard_bound": 75.19915008544922,
+   "gap": 63.44012539650953,
+   "ok": true
+  },
+  "transformer_blocks.23.attn1": {
+   "pairs": 1,
+   "sigma": 1.634716510772705,
+   "softmax_max": 6.008676357893843,
+   "hard_bound": 38.66023254394531,
+   "gap": 32.65155618605147,
+   "ok": true
+  },
+  "transformer_blocks.24.attn1": {
+   "pairs": 1,
+   "sigma": 2.7827346324920654,
+   "softmax_max": 10.228410667146159,
+   "hard_bound": 68.9539566040039,
+   "gap": 58.72554593685775,
+   "ok": true
+  },
+  "transformer_blocks.25.attn1": {
+   "pairs": 1,
+   "sigma": 1.601570725440979,
+   "softmax_max": 5.886843431282961,
+   "hard_bound": 46.456363677978516,
+   "gap": 40.569520246695554,
+   "ok": true
+  },
+  "transformer_blocks.26.attn1": {
+   "pairs": 1,
+   "sigma": 2.271637201309204,
+   "softmax_max": 8.3497858223545,
+   "hard_bound": 82.15696716308594,
+   "gap": 73.80718134073143,
+   "ok": true
+  },
+  "transformer_blocks.27.attn1": {
+   "pairs": 1,
+   "sigma": 1.6448216438293457,
+   "softmax_max": 6.045819479463042,
+   "hard_bound": 73.83740997314453,
+   "gap": 67.79159049368148,
+   "ok": true
+  },
+  "transformer_blocks.28.attn1": {
+   "pairs": 1,
+   "sigma": 1.6061551570892334,
+   "softmax_max": 5.903694283328387,
+   "hard_bound": 34.31401443481445,
+   "gap": 28.410320151486065,
+   "ok": true
+  },
+  "transformer_blocks.29.attn1": {
+   "pairs": 1,
+   "sigma": 1.6382070779800415,
+   "softmax_max": 6.021506526621048,
+   "hard_bound": 36.68392562866211,
+   "gap": 30.662419102041063,
+   "ok": true
+  },
+  "transformer_blocks.30.attn1": {
+   "pairs": 1,
+   "sigma": 1.773224949836731,
+   "softmax_max": 6.517787495934162,
+   "hard_bound": 33.87069320678711,
+   "gap": 27.352905710852948,
+   "ok": true
+  },
+  "transformer_blocks.31.attn1": {
+   "pairs": 1,
+   "sigma": 2.014420509338379,
+   "softmax_max": 7.404342471341785,
+   "hard_bound": 41.542518615722656,
+   "gap": 34.13817614438087,
+   "ok": true
+  },
+  "transformer_blocks.32.attn1": {
+   "pairs": 1,
+   "sigma": 1.8262559175491333,
+   "softmax_max": 6.712711765573505,
+   "hard_bound": 42.2938232421875,
+   "gap": 35.581111476614,
+   "ok": true
+  },
+  "transformer_blocks.33.attn1": {
+   "pairs": 1,
+   "sigma": 2.128782033920288,
+   "softmax_max": 7.824697550941001,
+   "hard_bound": 47.79047393798828,
+   "gap": 39.96577638704728,
+   "ok": true
+  },
+  "transformer_blocks.34.attn1": {
+   "pairs": 1,
+   "sigma": 2.397334337234497,
+   "softmax_max": 8.811806854082056,
+   "hard_bound": 48.922950744628906,
+   "gap": 40.11114389054685,
+   "ok": true
+  },
+  "transformer_blocks.35.attn1": {
+   "pairs": 1,
+   "sigma": 2.085578680038452,
+   "softmax_max": 7.6658963341301405,
+   "hard_bound": 53.745635986328125,
+   "gap": 46.079739652197986,
+   "ok": true
+  },
+  "transformer_blocks.36.attn1": {
+   "pairs": 1,
+   "sigma": 2.032863140106201,
+   "softmax_max": 7.472131472518263,
+   "hard_bound": 49.8303108215332,
+   "gap": 42.35817934901494,
+   "ok": true
+  },
+  "transformer_blocks.37.attn1": {
+   "pairs": 1,
+   "sigma": 2.0988075733184814,
+   "softmax_max": 7.714521363466414,
+   "hard_bound": 72.90381622314453,
+   "gap": 65.18929485967811,
+   "ok": true
+  },
+  "transformer_blocks.38.attn1": {
+   "pairs": 1,
+   "sigma": 2.4891159534454346,
+   "softmax_max": 9.149165670599587,
+   "hard_bound": 65.43775939941406,
+   "gap": 56.288593728814476,
+   "ok": true
+  },
+  "transformer_blocks.39.attn1": {
+   "pairs": 1,
+   "sigma": 2.9838674068450928,
+   "softmax_max": 10.967708116023928,
+   "hard_bound": 68.9291000366211,
+   "gap": 57.961391920597165,
+   "ok": true
+  },
+  "transformer_blocks.40.attn1": {
+   "pairs": 1,
+   "sigma": 2.858041286468506,
+   "softmax_max": 10.505212980182346,
+   "hard_bound": 69.78536224365234,
+   "gap": 59.280149263469994,
+   "ok": true
+  },
+  "transformer_blocks.41.attn1": {
+   "pairs": 1,
+   "sigma": 2.479072332382202,
+   "softmax_max": 9.11224864674096,
+   "hard_bound": 69.36275482177734,
+   "gap": 60.250506175036385,
+   "ok": true
+  },
+  "transformer_blocks.42.attn1": {
+   "pairs": 1,
+   "sigma": 2.8684544563293457,
+   "softmax_max": 10.543488342999831,
+   "hard_bound": 58.07390594482422,
+   "gap": 47.53041760182439,
+   "ok": true
+  },
+  "transformer_blocks.43.attn1": {
+   "pairs": 1,
+   "sigma": 3.1717233657836914,
+   "softmax_max": 11.658204389674633,
+   "hard_bound": 85.04064178466797,
+   "gap": 73.38243739499333,
+   "ok": true
+  },
+  "transformer_blocks.44.attn1": {
+   "pairs": 1,
+   "sigma": 3.696537733078003,
+   "softmax_max": 13.587248147575973,
+   "hard_bound": 109.78385162353516,
+   "gap": 96.19660347595918,
+   "ok": false
+  },
+  "transformer_blocks.45.attn1": {
+   "pairs": 1,
+   "sigma": 3.8817999362945557,
+   "softmax_max": 14.268210634430922,
+   "hard_bound": 149.0780029296875,
+   "gap": 134.80979229525659,
+   "ok": false
+  },
+  "transformer_blocks.46.attn1": {
+   "pairs": 1,
+   "sigma": 3.7875616550445557,
+   "softmax_max": 13.921821931053987,
+   "hard_bound": 82.44422912597656,
+   "gap": 68.52240719492258,
+   "ok": true
+  },
+  "transformer_blocks.47.attn1": {
+   "pairs": 1,
+   "sigma": 3.931074857711792,
+   "softmax_max": 14.44932892216197,
+   "hard_bound": 126.8372802734375,
+   "gap": 112.38795135127553,
+   "ok": false
+  }
+ }
+}
