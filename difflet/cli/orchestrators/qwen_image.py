@@ -59,7 +59,7 @@ import sys
 from pathlib import Path
 
 from difflet.common.orchestrators import qwen_image as qwen_common
-from difflet.cli.quant import prepare_quant, quant_cli_args, quant_spec
+from difflet.cli.quant import prepare_quant, quant_spec
 from difflet.cli.orchestrators.base import (
     ModelOrchestrator,
     canonical_shapes_list,
@@ -1078,73 +1078,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
             )
 
     def _shared_cli_args(self, stage_mode: str, work_dir: str | None = None) -> list[str]:
-        a = self.args
-        parts = [
-            "--model-id",
-            _HF_MODEL_ID,
-            "--tp-degree",
-            str(a.tp_degree or 4),
-            "--cp-degree",
-            str(a.cp_degree or 1),
-            "--cp-mode",
-            str(getattr(a, "cp_mode", "gather_kv")),
-            "--height",
-            str(a.height or 1024),
-            "--width",
-            str(a.width or 1024),
-            "--steps",
-            str(getattr(a, "steps", None) or 4),
-            "--guidance-scale",
-            str(getattr(a, "guidance_scale", None) or 4.0),
-            "--seed",
-            str(getattr(a, "seed", 42)),
-            "--stage-mode",
-            stage_mode,
-        ]
-        if getattr(a, "shapes", None):
-            parts += ["--shapes", str(a.shapes)]
-        if getattr(a, "prompt", None):
-            parts += ["--prompt", a.prompt]
-        if getattr(a, "output", None):
-            parts += ["--output", a.output]
-        if a.cache_dir:
-            parts += ["--cache-dir", a.cache_dir]
-        if getattr(a, "revision", None):
-            parts += ["--revision", a.revision]
-        if getattr(a, "sp_enabled", None):
-            parts += ["--sp"]
-        if getattr(a, "cfg_parallel", False):
-            parts += ["--cfg-parallel"]
-        if getattr(a, "true_cfg_scale", None) is not None:
-            parts += ["--true-cfg-scale", str(a.true_cfg_scale)]
-        if getattr(a, "negative_prompt", None) is not None:
-            parts += ["--negative-prompt", a.negative_prompt]
-        if getattr(a, "device_text_encoder", False):
-            parts += ["--device-text-encoder"]
-        if getattr(a, "vae_dtype", None):  # only when given: a default line stays byte-identical
-            parts += ["--vae-dtype", a.vae_dtype]
-        if getattr(a, "vae_exec_mode", None):
-            parts += ["--vae-exec-mode", a.vae_exec_mode]
-        if getattr(a, "tp_reduce_dtype", None):
-            parts += ["--tp-reduce-dtype", a.tp_reduce_dtype]
-        parts += quant_cli_args(a)  # only when given
-        if getattr(a, "teacache_speedup", None) is not None:
-            parts += ["--teacache-speedup", str(a.teacache_speedup)]
-        if getattr(a, "teacache_calibration", None):
-            parts += ["--teacache-calibration", a.teacache_calibration]
-        if getattr(a, "teacache_cadence", None) is not None:
-            parts += ["--teacache-cadence", str(a.teacache_cadence)]
-        if getattr(a, "teacache_online_delta", None) is not None:
-            parts += ["--teacache-online-delta", str(a.teacache_online_delta)]
-        if work_dir:
-            parts += ["--work-dir", work_dir]
-        if getattr(a, "requests_dir", None):
-            parts += [
-                "--requests-dir",
-                str(a.requests_dir),
-                "--worker-index",
-                str(a.worker_index),
-                "--dp-schedule",
-                str(getattr(a, "dp_schedule", "round_robin")),
-            ]
-        return parts
+        return self.stage_argv(
+            defaults=dict(tp_degree=4, height=1024, width=1024, steps=4, guidance_scale=4.0),
+            model_id=_HF_MODEL_ID, stage_mode=stage_mode, work_dir=work_dir,
+        )
