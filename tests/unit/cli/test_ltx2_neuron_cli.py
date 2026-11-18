@@ -198,6 +198,28 @@ def test_stage_dispatch_knows_ltx_2():
     assert stage._ORCHESTRATOR_MAP["Lightricks/LTX-2"].endswith("ltx_2.LTX2Orchestrator")
 
 
+def test_stage_line_parses_back_to_what_the_driver_resolved():
+    """The stage parser reads the line strictly: a value starting with '-' (the hand-written line
+    sent ``--negative-prompt -blurry``, which the stage refused) arrives intact, and the
+    driver's defaults and resolved shape are spelled out."""
+    from difflet.cli.stage import _build_stage_parser
+
+    args = _args(negative_prompt="-blurry", steps=None, guidance_scale=None, tp_degree=None,
+                 height=0, num_frames=None, requests_dir="/rq", worker_index=1,
+                 dp_schedule="least_loaded")
+    line = cli.LTX2Orchestrator(args)._shared_cli_args("generate", work_dir="/w")
+    stage = _build_stage_parser().parse_args(
+        ["--orchestrator", "Lightricks/LTX-2", "--stage", "generate", *line])
+    assert stage.negative_prompt == "-blurry" and stage.prompt == "a fox"
+    assert (stage.model_id, stage.stage_mode, stage.work_dir) == ("Lightricks/LTX-2", "generate",
+                                                                 "/w")
+    assert (stage.tp_degree, stage.steps, stage.guidance_scale) == (4, 40, 3.5)
+    assert (stage.height, stage.width, stage.num_frames) == (512, 704, 121)
+    assert (stage.requests_dir, stage.worker_index, stage.dp_schedule) == ("/rq", 1,
+                                                                          "least_loaded")
+    assert (stage.revision, stage.cache_dir, stage.seed) == ("47da56e2", "/tmp/c", 42)
+
+
 def test_stage_and_dp_worker_lines_carry_quant():
     """A stage launch or a DP worker that dropped --quant would run the bf16 DiT against the
     fp8 stage key: both lines carry the flags, and only when given (a bf16 line is unchanged)."""

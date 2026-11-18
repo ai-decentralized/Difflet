@@ -68,7 +68,7 @@ from difflet.cli.orchestrators.torchrun import (
     torchrun_unsupported_options,
     vae_placement_conflict,
 )
-from difflet.cli.quant import prepare_quant, quant_cli_args, quant_spec
+from difflet.cli.quant import prepare_quant, quant_spec
 from difflet.quant.spec import quant_cache_fields
 
 if TYPE_CHECKING:
@@ -738,46 +738,9 @@ class LTX2Orchestrator(ModelOrchestrator):
         return hashed_stage_dir(base, str(inputs["component"]), inputs)
 
     def _shared_cli_args(self, stage_mode: str, work_dir: str | None = None) -> list[str]:
-        a = self.args
+        # The shape the driver resolved (0 or None is the default), as the stage's _shape reads it.
         height, width, num_frames = self._shape()
-        parts = [
-            "--model-id", _HF_MODEL_ID,
-            "--tp-degree", str(a.tp_degree or 4),
-            "--cp-degree", str(a.cp_degree or 1),
-            "--cp-mode", str(getattr(a, "cp_mode", "gather_kv") or "gather_kv"),
-            "--height", str(height),
-            "--width", str(width),
-            "--num-frames", str(num_frames),
-            "--steps", str(getattr(a, "steps", None) or _DEFAULT_STEPS),
-            "--guidance-scale", str(_guidance(a)),
-            "--seed", str(getattr(a, "seed", 42)),
-            "--stage-mode", stage_mode,
-        ]
-        if getattr(a, "shapes", None):
-            parts += ["--shapes", str(a.shapes)]
-        if getattr(a, "cfg_parallel", False):
-            parts.append("--cfg-parallel")
-        if getattr(a, "sp_enabled", False):
-            parts.append("--sp")
-        if getattr(a, "device_text_encoder", False):
-            parts.append("--device-text-encoder")
-        parts += quant_cli_args(a)  # only when given
-        for flag, name in (("--teacache-cadence", "teacache_cadence"),
-                           ("--teacache-online-delta", "teacache_online_delta"),
-                           ("--teacache-speedup", "teacache_speedup"),
-                           ("--teacache-calibration", "teacache_calibration"),
-                           ("--prompt", "prompt"),
-                           ("--negative-prompt", "negative_prompt"),
-                           ("--output", "output"),
-                           ("--cache-dir", "cache_dir"),
-                           ("--revision", "revision")):
-            value = getattr(a, name, None)
-            if value is not None and value != "":
-                parts += [flag, str(value)]
-        if work_dir:
-            parts += ["--work-dir", work_dir]
-        if getattr(a, "requests_dir", None):
-            parts += ["--requests-dir", str(a.requests_dir),
-                      "--worker-index", str(a.worker_index),
-                      "--dp-schedule", str(getattr(a, "dp_schedule", "round_robin"))]
-        return parts
+        return self.stage_argv(
+            defaults=dict(tp_degree=4, steps=_DEFAULT_STEPS, guidance_scale=_DEFAULT_GUIDANCE),
+            model_id=_HF_MODEL_ID, height=height, width=width, num_frames=num_frames,
+            stage_mode=stage_mode, work_dir=work_dir)
