@@ -16,10 +16,18 @@ from difflet.planner.planner import Plan, plan as build_plan
 
 def run(args: argparse.Namespace) -> None:
     from difflet.cli.main import cli_model_types
+    from difflet.planner.model_profile import DIMENSIONS
 
+    model_type = cli_model_types()[args.model_id]
+    if model_type not in DIMENSIONS:
+        # MiniMax-H3: its attention width (56 x 128) is not its hidden size (5376), which the
+        # planner's ModelDimensions derives from the heads, so it has no profile yet.
+        print(f"Error: difflet plan has no geometry for {args.model_id} yet; choose a layout "
+              "with --tp-degree/--cp-degree directly.", file=sys.stderr)
+        raise SystemExit(1)
     result = build_plan(
         args.model_id,
-        model_type=cli_model_types()[args.model_id],
+        model_type=model_type,
         height=getattr(args, "height", None),
         width=getattr(args, "width", None),
         num_frames=getattr(args, "num_frames", None),

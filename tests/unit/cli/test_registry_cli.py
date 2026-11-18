@@ -93,3 +93,12 @@ def test_a_flag_the_model_never_reads_is_refused_up_front(model_id, monkeypatch,
     with pytest.raises(SystemExit):
         main.check_command_args(args)
     assert f"{model_id} does not take --tp-reduce-dtype" in capsys.readouterr().err
+
+
+def test_plan_refuses_a_model_without_planner_geometry_instead_of_a_traceback(capsys):
+    # MiniMax-H3 ended in "ValueError: no planner dimensions registered for model 'minimax_h3'".
+    from difflet.cli import plan
+
+    with pytest.raises(SystemExit):
+        plan.run(argparse.Namespace(model_id="MiniMaxAI/MiniMax-H3"))
+    assert "difflet plan has no geometry for MiniMaxAI/MiniMax-H3" in capsys.readouterr().err
