@@ -29,8 +29,8 @@ def forward_argv(args: argparse.Namespace, parser: argparse.ArgumentParser, *,
         dest = action.dest
         if not action.option_strings or isinstance(action, argparse._HelpAction):
             continue
-        if dest in exclude or values.get(dest) is None:
-            continue
+        if dest in exclude or values.get(dest) is None or values[dest] == "":
+            continue  # "" is unset, as the hand-written lists had it (--revision '' is not a ref)
         value, flag = values[dest], action.option_strings[0]
         if isinstance(action, argparse._StoreTrueAction):
             if not isinstance(value, bool):

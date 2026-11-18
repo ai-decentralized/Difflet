@@ -63,15 +63,17 @@ def _add_serve_model_flag(p: argparse.ArgumentParser) -> None:
 
 
 def _add_parallel_flags(p: argparse.ArgumentParser) -> None:
+    # Positive: a stage used to replace an explicit 0 with the model default (`tp or 4`), and
+    # the generated stage argv forwards what the user typed.
     p.add_argument(
         "--tp-degree",
-        type=int,
+        type=_positive_int,
         default=None,
         help="Tensor-parallel degree (default: registry default)",
     )
     p.add_argument(
         "--cp-degree",
-        type=int,
+        type=_positive_int,
         default=None,
         help="Context-parallel degree (default: 1)",
     )
@@ -146,9 +148,9 @@ def _add_parallel_flags(p: argparse.ArgumentParser) -> None:
 
 
 def _add_shape_flags(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--height", type=int, default=None)
-    p.add_argument("--width", type=int, default=None)
-    p.add_argument("--num-frames", type=int, default=None)
+    p.add_argument("--height", type=_positive_int, default=None)
+    p.add_argument("--width", type=_positive_int, default=None)
+    p.add_argument("--num-frames", type=_positive_int, default=None)
     p.add_argument(
         "--shapes",
         default=None,
@@ -456,7 +458,7 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
     )
     p.add_argument("--requests-dir", default=None, help=argparse.SUPPRESS)  # worker mode
     p.add_argument("--worker-index", type=int, default=None, help=argparse.SUPPRESS)
-    p.add_argument("--steps", type=int, default=None)
+    p.add_argument("--steps", type=_positive_int, default=None)
     p.add_argument("--guidance-scale", type=float, default=None)
     p.add_argument(
         "--guidance-scale-2",

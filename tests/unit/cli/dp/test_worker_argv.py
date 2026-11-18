@@ -24,10 +24,8 @@ def _sample(action):
         return True
     if action.choices:
         return next(c for c in reversed(list(action.choices)) if c != action.default)
-    if action.type is int:
-        return 3
-    if action.type is float:
-        return 0.5
+    if action.type is not None:  # int, float, and the CLI's positive-number types
+        return action.type("3")
     return "-blurry"  # argparse reads "-word" as an option unless sent as --flag=-word
 
 
@@ -55,3 +53,20 @@ def test_what_the_router_owns_never_reaches_the_worker(dest):
     setattr(args, dest, _sample(action))
 
     assert getattr(parser.parse_args(worker_cli_args(args)), dest) == parser.get_default(dest)
+
+
+def test_an_empty_string_is_unset_and_never_forwarded():
+    # The hand-written lists skipped "" (`if value`): --revision '' is not a git ref, and
+    # --cache-dir '' would root a child's cache at its working directory.
+    parser = generate_parser()
+    args = parser.parse_args(["--model-id", "org/model", "--revision", "", "--cache-dir", ""])
+    back = parser.parse_args(worker_cli_args(args))
+    assert (back.revision, back.cache_dir) == (None, None)
+
+
+@pytest.mark.parametrize("flag", ["--steps", "--height", "--width", "--num-frames", "--tp-degree", "--cp-degree"])
+def test_a_non_positive_count_or_size_is_refused_up_front(flag):
+    # A stage used to replace an explicit 0 with the model default; the forwarded value is now
+    # what the user typed, so 0 is refused where it is typed.
+    with pytest.raises(SystemExit):
+        generate_parser().parse_args(["--model-id", "org/model", flag, "0"])
