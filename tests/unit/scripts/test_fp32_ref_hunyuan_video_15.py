@@ -11,7 +11,6 @@ import hashlib
 import importlib.util
 import inspect
 from pathlib import Path
-from types import SimpleNamespace
 
 import imageio.v3 as iio
 import numpy as np
@@ -48,17 +47,14 @@ def test_settings_are_the_transformer_stages():
 
     args = argparse.Namespace(height=None, width=None, num_frames=9, steps=50, seed=42,
                               prompt=ref.PROMPT)
-    parts = orch.HunyuanVideo15Orchestrator._stage_cli_args(
-        SimpleNamespace(args=args), "generate", "/work", 2, True, 1)
-    def value(flag: str) -> str:
-        return parts[parts.index(flag) + 1]
+    parts = orch.HunyuanVideo15Orchestrator(args)._stage_cli_args("generate", "/work", 2, True, 1)
+    from difflet.cli.stage import _build_stage_parser
 
-    assert value("--model-id") == ref.MODEL_ID
-    assert (value("--height"), value("--width"), value("--num-frames")) == (
-        str(ref.HEIGHT), str(ref.WIDTH), str(ref.NUM_FRAMES))
-    assert (value("--steps"), value("--seed"), value("--prompt")) == (
-        str(ref.STEPS), str(ref.SEED), ref.PROMPT)
-    assert "--guidance-scale" not in parts and "--negative-prompt" not in parts
+    stage = _build_stage_parser().parse_args(["--orchestrator", ref.MODEL_ID, "--stage", "s", *parts])
+    assert stage.model_id == ref.MODEL_ID
+    assert (stage.height, stage.width, stage.num_frames) == (ref.HEIGHT, ref.WIDTH, ref.NUM_FRAMES)
+    assert (stage.steps, stage.seed, stage.prompt) == (ref.STEPS, ref.SEED, ref.PROMPT)
+    assert stage.guidance_scale is None and stage.negative_prompt is None
     assert ref.STEPS == orch._DEFAULT_STEPS
     assert ref.FPS == orch._FPS == common.DEVICE_FPS["hunyuan_video_15"]
     assert ref.NEGATIVE_PROMPT == ""  # _stage_encode: ``req.negative_prompt or ""``
