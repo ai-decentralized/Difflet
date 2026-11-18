@@ -336,7 +336,9 @@ def test_unit_tests_never_quantize_a_real_snapshot(tiny, tmp_path, monkeypatch):
     with pytest.raises(AssertionError, match="quantized directory of a real snapshot"):
         prepare_quantized_checkpoint(src, tiny["spec"], create=True,
                                      cache_root=tmp_path / "cache")
-    assert not (tmp_path / "cache" / "quantized").exists()
+    # Nothing written but the (empty) lock file taken before the refused write.
+    written = [p for p in (tmp_path / "cache").rglob("*") if p.is_file() and p.suffix != ".lock"]
+    assert written == []
 
 
 def test_the_copy_s_manifest_name_is_one_constant():
@@ -362,3 +364,38 @@ def test_a_copy_built_directory_sits_under_its_fp32_source_s_label(tiny, tmp_pat
     assert of_copy.parent.parent.name == "Wan-AI--Wan2.1-T2V-14B-Diffusers__01234567"
     assert of_copy.parent == of_fp32.parent and of_copy != of_fp32
     assert of_copy.parent.parent.parent == cache / "quantized"
+
+
+def test_two_concurrent_compiles_write_the_quantized_dir_once(tiny, tmp_path, monkeypatch):
+    import threading
+    import time
+
+    from difflet.quant import checkpoint
+
+    cache = tmp_path / "cache"
+    spec, src = tiny["spec"], tiny["transformer_dir"]
+    real_write, writes = checkpoint.write_quantized_dir, []
+
+    def slow_write(*args, **kwargs):
+        writes.append(1)
+        time.sleep(0.3)  # the other compile arrives mid-write
+        return real_write(*args, **kwargs)
+
+    monkeypatch.setattr(checkpoint, "write_quantized_dir", slow_write)
+    got, errors = [], []
+
+    def ensure():
+        try:
+            got.append(ensure_quantized_dir(cache, src, spec, create=True))
+        except Exception as exc:  # surfaced by the assert below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=ensure) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=60)
+    assert errors == []
+    assert len(got) == 2 and got[0] == got[1]
+    assert writes == [1]  # the second one waited and found the directory valid
+    check_quantized_dir(got[0], src, spec)
