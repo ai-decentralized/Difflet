@@ -1,4 +1,4 @@
-# Static block-sparse attention on trn3: kernel level at `wan_81f` (E2)
+# Static block-sparse attention on trn3: kernel level at `wan_81f`, and Wan 2.1 (E2)
 
 Plan: `docs/plans/2026-11-18-attn-constmax-sparse-experiments.md`, section E2. Branch
 `exp/attn-constmax-sparse`. Run on 2026-11-18, devices 8-13. Kernel at `098dca20`, probe at
@@ -37,8 +37,30 @@ branch during the runs, which is why the JSONs record later heads; every JSON ha
     through HBM between sections.
   - Every (group, section) pair runs it, even the 57% of pairs that `temporal:2` leaves empty.
 - With iid N(0,1) inputs, the rel L2 against dense fp32 (0.59 to 1.86) is set by density alone.
-  It follows sqrt(1/density - 1). It says nothing about real-model quality, which needs a model
-  run. That run is not part of this dispatch.
+  It follows sqrt(1/density - 1). It says nothing about real-model quality; section 9 measures
+  that.
+
+**Model level, Wan 2.1 480x832x81 (section 9)**
+
+- **Measured.**
+  - **Gate.** The routing gate passed: at full density the new route gives the shipped bf16
+    clip bit for bit (`35177856`, 10 steps).
+  - **Speed.** `temporal:6` (density 0.534) runs the DiT step at 8,119 ms against bf16's
+    10,121 ms: 0.802. Warm e2e is 0.802. `temporal:10` (0.756) gives 0.896. The model got 98%
+    and 96% of the saving the kernel numbers predict.
+  - **Quality fails the floor by far.**
+    - `temporal:6`: 11.08 dB PSNR against bf16, worst frame 10.35. SSIM 0.273, LPIPS 0.597.
+    - `temporal:10`: 12.70 dB, worst frame 10.88. SSIM 0.326, LPIPS 0.478.
+    - For comparison: the floor is 22.75 dB, and MXFP8 scored 15.08 dB.
+  - **What the `temporal:6` clip shows.**
+    - It drifts to another scene and another cat without a cut.
+    - It has broken motion around frame 12: a ghosted, doubled body.
+    - Its last frames are oversaturated.
+  - **What the `temporal:10` clip shows.** It keeps one cat and smooth motion, but in another
+    composition from bf16, and its last frame is posterized.
+- **Inferred.** A fixed temporal window, applied at every step and every layer, cuts the
+  long-range attention Wan uses for global consistency. The speed is real; this mask family is
+  not usable as is.
 
 ## 1. The kernel change
 
@@ -327,14 +349,13 @@ taken over all 10 heads, in float64.
     sqrt(1/p - 1), and the measured values sit 2 to 8% above it.
   - On these inputs the number is therefore set by density alone. It says nothing about Wan,
     whose attention has the spatio-temporal locality these windows assume.
-  - **Real-model quality needs a model run** (plan E2's follow-up: Wan 2.1 480x832x81 with a
-    temporal mask, PSNR against bf16 and its 22.75 dB floor). That run is not part of this
-    dispatch.
+  - **Real-model quality needs a model run.** Section 9 has it: Wan 2.1 480x832x81 with
+    temporal masks, scored against bf16 and its 22.75 dB floor.
 
 ## 7. Caveats
 
-- **Kernel level only.** One attention call at the per-rank shape. Step time and quality of a
-  Wan run are not measured.
+- **Kernel level (sections 1-8).** One attention call at the per-rank shape. Section 9 is the
+  Wan run, with its own caveats.
 - **Inputs.** Synthetic N(0,1) (section 6). Timing does not depend on the values: the masks are
   static, and full density is bit-identical to no mask.
 - **STA-like family.** It is defined on Wan's native token order, so it windows frames and rows
@@ -374,3 +395,242 @@ taken over all 10 heads, in float64.
   ```
 
   Or use `ROOT=<dir> scripts/block_sparse/lane.sh <device> <cpus> <scalar|vector> <masks...>`.
+## 9. Model level: Wan 2.1 480x832x81
+
+The plan's conditional step: time scaled close to density (section 4), so one Wan 2.1 run with the
+temporal mask. Run on 2026-11-18 from `7631c73a`, devices 8-10.
+
+### 9a. The hook
+
+`DIFFLET_EXP_ATTN_SPARSE` is opt-in, for example `temporal:6` or `sta:8,6`. It routes Wan's
+self-attention (`attn1`) of every block to the fork with the `kv_tiles` mask. Cross-attention
+(`attn2`) is unchanged, and with the variable unset nothing changes.
+
+- **Spec.** `WanTransformer3DModel.forward` stamps each `attn1` with the spec plus the call's
+  patch grid, for example `temporal:6@21x30x52`.
+- **Call path.** `_attn_kernel` then calls the backend's `block_sparse_attention`. It is resolved
+  through `difflet.ops` dispatch at model construction, so `modeling_wan` stays backend-neutral.
+- **Neuron op.** `ops_impl/block_sparse_attention.py` registers the torch op
+  `difflet_neuron::block_sparse_attention`, using the pattern of feat/mxfp8-sage-attention's
+  `ops_impl/mx_attention.py`.
+  - It runs the fork with `allow_vector_exp=True`, shipped attention_cte's exp, so the mask is
+    the only difference from shipped bf16.
+  - It builds `kv_tiles` from the spec when the kernel is traced
+    (`attn_tile_masks.kv_tiles_for`).
+  - E1's `ops_impl/attention.py` is not touched.
+- **CPU.** The CPU backend's op is the masked fp32 reference, used by the routing tests.
+
+**Shapes.**
+
+- **CFG.** CFG runs as two sequential batch-1 forwards on the tp4 group (bench.sh D3).
+- **Heads.** Each rank holds 40 / 4 = 10 heads, so the kernel gets `[10, 32760, 128]`. That is
+  exactly the probe's `wan_81f`. Any batch row or head takes the one mask.
+- **No padding.** The kernel takes 32,760 tokens as 255 full query groups plus one of 120, and
+  63 full key tiles plus one of 504, so nothing is padded.
+- **Refused inputs.** A spec whose grid holds a different token count from the call, and context
+  parallelism (it shards the sequence the mask indexes).
+
+**Tests.**
+
+- `tests/unit/models/wan/test_wan_attn_sparse.py` (5 CPU tests):
+  - unset routes nothing;
+  - set, only `attn1` of each block is routed, with the call's grid;
+  - a window over every frame equals dense attention;
+  - context parallelism is refused;
+  - a grid mismatch is refused.
+- `test_attn_tile_masks.py`: the spec parser.
+
+**Device check of the op.** At `wan_81f`, `difflet_neuron::block_sparse_attention` with
+`temporal:6@21x30x52` equals the kernel probe's VectorE `temporal:6` output in all 41,932,800
+elements (`/mnt/nvme/difflet-exp/sparse/op_check.{py,json}`).
+
+### 9b. Routing gate
+
+**Method.** `scripts/block_sparse/wan_arms.sh` runs bench.sh's `wan21_official` flags, read from
+`scripts/quant_bench/bench.sh`:
+
+- revision `38ec498c`, 480x832x81, tp4;
+- seed 42, CFG 5.0, the model card's negative prompt;
+- prompt "a cat walking through a garden";
+- bench.sh's environment hygiene, and `DIFFLET_NKI_TRACE_CACHE=1`.
+
+Each arm compiles into its own `--cache-dir`. The other arms link bf16's `weights-bf16` copy
+once it is complete; the copies are byte-identical, and this saves disk.
+
+| arm | spec |
+|---|---|
+| bf16 | unset (shipped attention_cte) |
+| full | `temporal:20`: every tile, the gate |
+| t6 | `temporal:6`, density 0.534 |
+| t10 | `temporal:10`, density 0.756 |
+
+**Result (measured).** 10-step generates of bf16 (device 8) and full (device 9), in parallel:
+
+| arm | clip md5 | latents md5 | step median (n=9) |
+|---|---|---|---|
+| bf16 | `35177856` | `a56b064c` | 10,113.6 ms |
+| full | `35177856` | `a56b064c` | 10,113.2 ms |
+
+**The route was taken.** The full arm's four DiT-block NEFFs (one per rank, ~89.6 MB) sit under
+cache keys that bf16's cache does not have. The custom call is the new op. The other 291 NEFFs
+match by key. The t6 arm's block NEFFs are 62.4 MB.
+
+### 9c. Timed arms
+
+**Method.**
+
+- One generate process per arm, with two identical 50-step requests (`--requests`).
+- The arms ran back to back on device 8 (cores 32-35) and CPUs 0-15,96-111: bf16, then t6, then
+  t10 (2026-11-18 09:53-10:4x). `fuser` was idle and the CPU set idle at each start (`runs.log`).
+- The step median is the `[wan]` request line's: n=49, per request.
+- The arm's spread is (max - min) / median of its two request medians.
+- e2e is the request time: prompt encode, 50 steps and decode. "Warm" is the second request.
+- **Overlap.** t10's compile ran on device 9 and CPUs 16-31,112-127 from 09:53 to 10:06. That
+  overlapped bf16's first request (09:55-10:04), which is 1.1 ms slower than its second. The
+  second requests saw no other job of this experiment.
+
+| arm | spec | density | step median ms (request 1 / 2) | spread | step / bf16 | warm e2e s (request 2) | e2e / bf16 | process wall | clip md5 (both requests) |
+|---|---|---|---|---|---|---|---|---|---|
+| A: bf16 | unset | 1 | 10,122.0 / 10,120.9 | 0.01% | 1.000 | 506.23 | 1.000 | 19:32 | `963566ba` |
+| B: t6 | `temporal:6` | 0.534 | 8,116.8 / 8,119.1 | 0.03% | **0.802** | 406.22 | **0.802** | 15:51 | `c7a85ea1` |
+| t10 | `temporal:10` | 0.756 | 9,066.5 / 9,068.2 | 0.02% | **0.896** | 453.59 | **0.896** | 17:43 | `0cb275d2` |
+
+- **Ratios** are the second requests'. Each step's worst iteration is within 0.6% of its median
+  (A 10,179.0 / 10,149.7, B 8,141.9 / 8,153.3, t10 9,103.1 / 9,095.4 ms).
+- **Baseline reproduced.** A's clip `963566ba` and first latents `cb3e28cd` are bit-identical to
+  the shipped bf16 `wan21_official` run of feat/mxfp8-sage-attention (2026-11-15, its task6
+  `bf16/timed`, step median 10,114.8 / 10,126.8 ms there).
+- **Deterministic.** Each arm's two requests give one clip md5.
+- **Against the kernel numbers.** Section 4's VectorE lane on device 10 gives per call, against
+  63.73 ms at full density: `temporal:6` 38.30 ms and `temporal:10` 50.03 ms. With 80 `attn1`
+  calls per step (40 blocks x 2 sequential CFG forwards), that predicts:
+  - **t6.** A saving of 2,034 ms per step (8,087 ms). Measured: 2,003 ms (98.5%).
+  - **t10.** A saving of 1,096 ms (9,025 ms). Measured: 1,054 ms (96%).
+  - **Inferred.** The rest of the step does not change, and `attn1` is 80 x 63.7 = 5.1 s, about
+    50% of the shipped step.
+
+### 9d. Quality
+
+**Method.** `scripts/compare_difflet_runs.py`, each arm's first clip and latents against A's:
+
+- latent rel L2 and cosine, in float64;
+- PSNR, SSIM and LPIPS (AlexNet) per frame on the decoded `.mp4`, then the mean, the worst frame
+  and its index.
+
+The floor and the screen are the 2026-11-07 evidence, section 12c (`quality.py`, the same
+per-frame mp4 metrics):
+
+- the floor is bf16 at tp8 against bf16 at tp4;
+- the screen is PSNR >= min(30, floor - 4), SSIM >= min(0.97, floor - 0.10) and
+  LPIPS <= max(0.05, 2 x floor).
+
+`frames.py` adds the per-frame PSNR and each clip's mean absolute frame-to-frame difference (a
+flicker or motion signal). The frames are kept under
+`/mnt/nvme/difflet-exp/sparse/model/frames/`: a montage of frames 0 / 40 / 80 against bf16, a
+strip of frames 38-42, and strips around each arm's frame-difference peaks.
+
+| clip against bf16 | PSNR mean (worst frame) | SSIM | LPIPS | latent cosine / rel L2 | frame-to-frame difference / bf16's (mean, max) |
+|---|---|---|---|---|---|
+| t6 (0.534) | **11.08** (10.35, frame 0) | 0.273 | 0.597 | 0.596 / 0.919 | 2.29x, 2.97x |
+| t10 (0.756) | **12.70** (10.88, frame 80) | 0.326 | 0.478 | 0.747 / 0.723 | 1.58x, 1.82x |
+| floor: bf16 tp8 (12c) | 22.75 (18.31) | 0.784 | 0.098 | | |
+| screen thresholds | 18.75 | 0.684 | 0.197 | | |
+| MXFP8, for scale (12c) | 15.08 (12.96) | 0.391 | 0.351 | | |
+
+**Measured.** Both masks are far below the floor and fail all three screens. They are further
+from bf16 than MXFP8, which itself fails. More density helps only a little: +1.6 dB from 0.534
+to 0.756.
+
+**What the frames show** (looked at; descriptive):
+
+- **bf16.** One shot: a grey-and-white cat on a brick path beside a rock, yellow flowers and a
+  water bowl. The cat stands, then turns toward the camera. Little motion; frame differences
+  2-7.
+- **t6.**
+  - **A different sample from frame 0.** A wide low shot of a lawn and a white porch, a small
+    cat far off.
+  - **Drift.** The clip then moves, without a hard cut, to a close-up of a black-and-white cat
+    at a wooden fence (frame 40). It ends on an oversaturated, high-contrast close-up of a face
+    (frame 80).
+  - **Broken motion.** Around frames 12-13 (the frame-difference peak, 21.5 against bf16's
+    maximum 7.2) the cat's body ghosts: two overlapping bodies, and the coat pattern shifts. A
+    second peak at frames 44-48 is a fast head turn.
+  - **No flicker.** Within a segment the motion is smooth frame to frame (frames 38-42 are
+    coherent).
+  - **Reading.** The failure is temporal consistency at long range, plus late colour blow-out.
+    It is not frame-to-frame flicker.
+- **t10.**
+  - **Coherent.** One brown-and-white cat throughout, in profile then turning to the camera, in
+    a scene with leafy plants and a stone edge. That is not bf16's composition, but the motion
+    arc is similar.
+  - **No ghosting.** Its frame-difference peak (frames 48-52, 13.2) is the cat walking.
+  - **Late degradation.** The last frames degrade: posterized, oversaturated fur, blur and dark
+    streaks at the bottom right. Frame 80 is its worst PSNR.
+
+**Inferred.**
+
+- PSNR against bf16 punishes any other valid sample, which is why the floor itself is only
+  22.75 dB. Still, t6 shows real artifacts (ghosting, identity drift, colour blow-out), and t10
+  shows late blow-out.
+- A fixed +-W-frame window at every step and every layer removes the long-range temporal
+  attention Wan uses for global layout and identity. The early, layout-forming steps are the
+  likely place it matters; this run cannot separate them.
+
+### 9e. Estimates (inferred, not measured)
+
+- **ScalarE exp at model level.** Section 4's ScalarE lane on device 8 is faster per call than
+  its VectorE lane on device 10:
+  - dense: 52.33 against 63.73 ms;
+  - `temporal:6`: 32.76 against 38.30 ms;
+  - `temporal:10`: 41.74 against 50.03 ms.
+
+  With 80 calls per step, that would give, against the measured shipped 10,121 ms:
+  - bf16 with the ScalarE exp: ~9.21 s (0.91);
+  - t6: ~7.68 s (0.76);
+  - t10: ~8.40 s (0.83).
+
+  The VectorE exp was used here, so the mask is the only difference from shipped.
+- **Removing the fixed cost** (section 5; not tried in this round, kept as a follow-up). The
+  VectorE temporal fit's fixed part is 9.85 ms per call, and it is spread over the 1,024
+  (group, section) pairs per head.
+  - **Skipping empty pairs** (the bookkeeping and the output round trip; the last section still
+    normalizes):
+    - t6, 30.7% of pairs empty: ~3.0 ms per call, ~0.24 s per step, step ~7.88 s (0.78).
+    - t10, 11.8% empty: ~1.2 ms per call, ~0.09 s per step.
+  - **The whole fixed cost**, for example one section per sparse group and no HBM round trip:
+    at most ~9.85 ms per call, ~0.79 s per step. At t6 that is a step of ~7.33 s (0.72); with
+    the ScalarE exp as well (whose fit's fixed part is 10.75 ms), ~6.8 s (0.67).
+  - Neither changes the quality verdict above.
+
+### 9f. Caveats
+
+- **One prompt, one seed, one resolution.** The quality is measured against bf16 at the same
+  seed, not against a reference sample (no CPU fp32 reference at this shape).
+- **Masks tried.** Only the temporal family reached the model: `temporal:6` and `temporal:10`,
+  at every step and every layer. Untested:
+  - the STA-like masks;
+  - step schedules (dense early, sparse late) and per-layer choices;
+  - token reordering into 3D cubes.
+- **Timing set.** The timed arms ran back to back on one device and CPU set. t10's compile on
+  another device and CPU set overlapped bf16's first request only. The ratios use second
+  requests, which nothing of this experiment overlapped.
+- **Disk.** The host's NVMe was at 98% (170 GB free) during the runs. Most of that is other
+  jobs. This experiment's caches total ~70 GB, with the bf16 copy shared.
+
+### 9g. Paths
+
+- **Code.**
+  - `difflet/models/wan/modeling_wan.py` (`DIFFLET_EXP_ATTN_SPARSE`, `_attn_kernel`)
+  - `difflet/backends/neuron/ops_impl/block_sparse_attention.py`
+  - `difflet/backends/cpu/ops_impl/block_sparse_attention.py`
+  - `attn_tile_masks.kv_tiles_for`
+  - `tests/unit/models/wan/test_wan_attn_sparse.py`
+  - `scripts/block_sparse/wan_arms.sh`
+- **Evidence, on the host** under `/mnt/nvme/difflet-exp/sparse/model/`:
+  - `runs.log`, `gate_md5.txt`;
+  - `<arm>/{compile,gate,timed}.log`, `md5.txt`, the clips, `work_*` (latents);
+  - `quality/<arm>.{json,log}`;
+  - `frames/` (montages, strips, `*_temporal.json`);
+  - `cache/<arm>/`.
+  - In `/mnt/nvme/difflet-exp/sparse/`: `op_check.{py,json}`, `compile_all.sh`, `gate.sh`,
+    `timed.sh`, `score.sh`, `frames.py`.
