@@ -68,8 +68,6 @@ NEURON_COLLECT_IGNORE = [
     "unit/models/minimax_h3/test_vae.py",
     "unit/models/qwen_image/test_qwen_application.py",
     "unit/models/qwen_image/test_qwen_entry.py",
-    "unit/models/qwen_image/test_qwen_image_pipeline_orchestrator.py",
-    "unit/models/qwen_image/test_qwen_pipeline.py",
     "unit/models/qwen_image/test_qwen_teacache_probe_free.py",
     "unit/models/qwen_image/test_qwen_teacache_probe_keys.py",
     "unit/models/qwen_image/test_qwen_tp_reduce_dtype.py",

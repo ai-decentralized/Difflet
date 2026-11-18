@@ -13,7 +13,7 @@ import numpy as np
 import pytest
 import torch
 
-from difflet.models.qwen_image.application import QwenImageDiTInputBundle
+from difflet.models.qwen_image.contract import QwenImageDiTInputBundle
 from difflet.models.qwen_image import pipeline as m
 
 torch.manual_seed(0)
