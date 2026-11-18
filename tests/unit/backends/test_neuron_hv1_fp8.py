@@ -213,7 +213,8 @@ def test_a_target_on_the_fused_proj_out_is_a_dead_pattern_for_the_split_writer(t
     assert str(exc.value).endswith(f": {fused}")
     assert ("name single_transformer_blocks.0.proj_out_attn / "
             "single_transformer_blocks.0.proj_out_mlp") in str(exc.value)
-    assert not (tmp_path / "cache").exists()
+    # Nothing written but the (empty) lock file ensure_quantized_dir takes before the writer.
+    assert [p for p in tmp_path.glob("cache/**/*") if p.is_file() and p.suffix != ".lock"] == []
 
 
 def test_a_target_set_without_the_halves_loads_them_in_bf16_by_name(tiny, tmp_path):
