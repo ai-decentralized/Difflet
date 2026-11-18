@@ -26,6 +26,7 @@ from torch_neuronx.utils import get_platform_target
 LoraServingConfig = None  # type: ignore[assignment]
 # Original: from neuronx_distributed_inference.modules.lora_serving import LoraServingConfig
 from neuronx_distributed.utils.tensor_replacement.registry import RuntimeRegister
+from difflet.utils.atomic_io import atomic_write_text
 from difflet.utils.tensor_replacement.registry import TensorReplacementRegister
 
 CONFIG_FILE = "neuron_config.json"
@@ -942,10 +943,11 @@ class InferenceConfig:
         self.to_json_file(config_file)
 
     def to_json_file(self, json_file: Union[str, os.PathLike]):
-        with open(json_file, "w", encoding="utf-8") as writer:
-            config_json = self.to_json_string()
-            logging.debug(f"Saving config: {config_json}")
-            writer.write(config_json + "\n")
+        config_json = self.to_json_string()
+        logging.debug(f"Saving config: {config_json}")
+        # Atomic: neuron_config.json marks a component as compiled, so a reader must never see
+        # half of it.
+        atomic_write_text(json_file, config_json + "\n")
 
     def to_json_string(self) -> str:
         config_dict = to_dict(self)

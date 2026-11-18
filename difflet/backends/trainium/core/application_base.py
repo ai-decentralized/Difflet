@@ -9,6 +9,7 @@
 #     * pass local device offset 0 into ``nxd_model.initialize`` for
 #       one-rank-per-process PJRT MPMD experiments
 # <<< NxDI fork banner <<<
+import contextlib
 import logging
 import os
 import re
@@ -34,7 +35,7 @@ from neuronx_distributed.utils.model_utils import init_on_device
 from safetensors.torch import load_file
 
 from difflet.backends.trainium.core import shared_weights, world_check
-from difflet.backends.trainium.core.config import InferenceConfig, NeuronConfig
+from difflet.backends.trainium.core.config import CONFIG_FILE, InferenceConfig, NeuronConfig
 from difflet.backends.trainium.core.model_wrapper import (
     CONTEXT_ENCODING_MODEL_TAG,
     ModelWrapper,
@@ -53,6 +54,7 @@ from difflet.backends.trainium.utils.runtime_env import set_env_vars
 from difflet.backends.trainium.utils.compile_env import set_compile_env_vars
 from difflet.backends.trainium.utils.compile_allocator import without_allocator_preload
 from difflet.backends.trainium.utils.compile_retry import retrying_cached_failures
+from difflet.utils.atomic_io import atomic_path
 from difflet.backends.trainium.utils.snapshot import (
     ScriptModuleWrapper,
     SnapshotOutputFormat,
@@ -418,9 +420,12 @@ class NeuronApplicationBase(torch.nn.Module):
 
         """Compiles this model and saves it to the given path."""
         compiled_model_path = normalize_path(compiled_model_path)
-
-        self.config.save(compiled_model_path)
-        logger.info(f"Saving the neuron_config to {compiled_model_path}")
+        # model.pt + neuron_config.json is what counts as "compiled" (has_compiled_artifacts), so
+        # the old config goes first and the new one is written last: a compile killed midway
+        # leaves no config and the next run compiles again instead of loading a partial artifact.
+        os.makedirs(compiled_model_path, exist_ok=True)
+        with contextlib.suppress(FileNotFoundError):
+            os.unlink(os.path.join(compiled_model_path, CONFIG_FILE))
 
         trace_kwargs = dict(initialize_model_weights=False, dry_run=dry_run)
         if disable_fail_fast:
@@ -433,10 +438,13 @@ class NeuronApplicationBase(torch.nn.Module):
         if dry_run:
             return
 
-        torch.jit.save(traced_model, compiled_model_path + COMPILED_MODEL_FILE_NAME)
+        with atomic_path(compiled_model_path + COMPILED_MODEL_FILE_NAME) as tmp:
+            torch.jit.save(traced_model, str(tmp))
         del traced_model
 
         self.shard_weights(compiled_model_path, debug, pre_shard_weights_hook)
+        self.config.save(compiled_model_path)
+        logger.info(f"Saved the neuron_config to {compiled_model_path}")
         self.is_compiled = True
 
     def load(
