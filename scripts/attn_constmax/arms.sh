@@ -5,9 +5,10 @@
 # scripts/quant_bench/bench.sh's flags per model. Unlike bench.sh, each arm keeps its own cache
 # (ROOT/cache/<model>-<arm>): nothing is removed.
 #
-# usage: arms.sh <flux|ltx_2> <bf16|cm|mxcm> <compile|smoke|timed> <cores> <cpus>
-#   bf16: shipped attention_cte; cm: DIFFLET_EXP_ATTN_CONSTMAX=1; mxcm: cm + --quant mxfp8
-# env: ROOT (default /mnt/nvme/difflet-exp/constmax), PY
+# usage: arms.sh <flux|ltx_2> <bf16|cm|mx|mxcm> <compile|smoke|timed> <cores> <cpus>
+#   bf16: shipped attention_cte; cm: DIFFLET_EXP_ATTN_CONSTMAX=1; mx: --quant mxfp8 alone;
+#   mxcm: cm + --quant mxfp8
+# env: ROOT (default /mnt/nvme/difflet-exp/constmax), CACHE (default ROOT/cache), PY
 set -u
 MODEL=$1 ARM=$2 MODE=$3 CORES=$4 CPUS=$5
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
@@ -31,13 +32,15 @@ Q=()
 case $ARM in
   bf16) ;;
   cm) export DIFFLET_EXP_ATTN_CONSTMAX=1 ;;
+  mx) Q=(--quant mxfp8) ;;
   mxcm) export DIFFLET_EXP_ATTN_CONSTMAX=1; Q=(--quant mxfp8) ;;
   *) echo "unknown arm $ARM" >&2; exit 2 ;;
 esac
-C=$ROOT/cache/$MODEL-$ARM W=$ROOT/$MODEL/$ARM
+C=${CACHE:-$ROOT/cache}/$MODEL-$ARM W=$ROOT/$MODEL/$ARM
 mkdir -p "$C" "$W"
 d=$(( ${CORES%%-*} / 4 ))
 { date '+%F %T'; echo "head $(git -C "$REPO" rev-parse --short HEAD) dirty=$(git -C "$REPO" status --porcelain -- difflet | wc -l)"
+  git -C "$REPO" status --porcelain -- difflet
   echo "cores $CORES cpus $CPUS"; fuser "/dev/neuron$d" 2>&1; echo "fuser /dev/neuron$d exit $?"
   mpstat -P "$CPUS" 1 1 | tail -n +4; } > "$W/$MODE.env.txt" 2>&1
 cd "$REPO"
