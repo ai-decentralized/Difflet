@@ -155,6 +155,17 @@ def test_shared_cli_args_forwards_revision():
     assert parts[parts.index("--revision") + 1] == "refs/pr/1"
 
 
+def test_shared_cli_args_forwards_force():
+    # `difflet compile --force` reaches the stage's _compile_stage, which reads args.force: the
+    # hand-written list dropped it, so a forced compile reused the cached artifact.
+    from difflet.cli.stage import _build_stage_parser
+
+    parts = QwenImageOrchestrator(_qwen_args(force=True))._shared_cli_args("compile", "/w")
+    stage_args = _build_stage_parser().parse_args(
+        ["--orchestrator", "Qwen/Qwen-Image", "--stage", "generate", *parts])
+    assert stage_args.force is True and stage_args.stage_mode == "compile"
+
+
 # ----------------------------------------------------------------- stage: text
 
 def _setup_text(monkeypatch, app_cls):
