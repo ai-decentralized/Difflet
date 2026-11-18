@@ -1410,6 +1410,19 @@ def _torchrun_backend_selected() -> bool:
     return runner._torchrun_mpmd_selected()
 
 
+def _refuse_model_flags(args: argparse.Namespace) -> None:
+    """Refuse an option the model accepts in the parser but never acts on (its registry
+    record's refused_cli_flags), instead of running without it."""
+    from difflet.registry import resolve_model
+
+    entry = resolve_model(args.model_id, model_type=cli_model_types()[args.model_id])
+    for dest, why in entry.refused_cli_flags:
+        if getattr(args, dest, None) not in (None, False, ""):
+            flag = "--" + dest.replace("_", "-")
+            print(f"Error: {args.model_id} does not take {flag}: {why}.", file=sys.stderr)
+            raise SystemExit(1)
+
+
 def check_command_args(args: argparse.Namespace) -> None:
     """Every argument check ``main`` runs before it dispatches a command; exits like ``main``.
 
@@ -1429,6 +1442,7 @@ def check_command_args(args: argparse.Namespace) -> None:
         raise SystemExit(1)
 
     if args.command in ("compile", "generate", "run"):
+        _refuse_model_flags(args)
         _apply_backend_flags(args)
         _refuse_tpu_cli(args)
         _validate_cfg_parallel(args)
