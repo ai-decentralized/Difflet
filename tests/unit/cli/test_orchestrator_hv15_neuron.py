@@ -132,12 +132,40 @@ def test_default_layout_is_tp2_x_cfg2(launches, tmp_path):
     cli = launches[1][2]
     assert _flag(cli, "--tp-degree") == "2" and "--cfg-parallel" in cli
     assert _flag(cli, "--steps") == "50" and _flag(cli, "--num-frames") == "121"
-    # A bf16 command line keeps its words: --quant adds its flags only when given.
-    assert cli == ["--model-id", hv15._HF_MODEL_ID, "--stage-mode", "generate", "--work-dir",
-                   str(tmp_path / "w"), "--tp-degree", "2", "--cp-degree", "1", "--height", "480",
-                   "--width", "848", "--num-frames", "121", "--steps", "50", "--seed", "42",
-                   "--cfg-parallel", "--prompt", "a cat", "--output", "/tmp/o.mp4"]
+    # A bf16 command line keeps its words: --quant adds its flags only when given. The seed is
+    # the stage parser's default (42), so the line leaves it out.
+    assert cli == ["--stage-mode", "generate", "--model-id", hv15._HF_MODEL_ID, "--tp-degree", "2",
+                   "--cp-degree", "1", "--cfg-parallel", "--height", "480", "--width", "848",
+                   "--num-frames", "121", "--prompt", "a cat", "--output", "/tmp/o.mp4", "--steps", "50",
+                   "--work-dir", str(tmp_path / "w")]
     assert not (tmp_path / "w").exists()
+
+
+def test_the_negative_prompt_reaches_the_encode_stage(launches, monkeypatch, tmp_path):
+    """--negative-prompt outside --requests: the neuron path's hand-written stage line dropped it,
+    so the encode stage encoded "" instead. One starting with '-' must parse too."""
+    import diffusers
+
+    from difflet.cli.stage import _build_stage_parser
+
+    hv15.HunyuanVideo15Orchestrator(_args(work_dir=str(tmp_path / "w"),
+                                          negative_prompt="-blurry, low quality")).generate()
+    encode_cli = launches[0][2]
+    parsed = _build_stage_parser().parse_args(
+        ["--orchestrator", hv15._HF_MODEL_ID, "--stage", "encode", *encode_cli])
+    prompts = []
+
+    class FakePipe:
+        def encode_prompt(self, prompt, device, dtype):
+            prompts.append(prompt)
+            return (torch.ones(1, 4, 8), torch.ones(1, 4), torch.zeros(1, 2, 3), torch.zeros(1, 2))
+
+    monkeypatch.setattr(diffusers.HunyuanVideo15Pipeline, "from_pretrained",
+                        classmethod(lambda cls, *a, **k: FakePipe()))
+    monkeypatch.setattr(hv15.HunyuanVideo15Orchestrator, "_root", lambda self, args: "/snap")
+    os.makedirs(parsed.work_dir, exist_ok=True)
+    hv15.HunyuanVideo15Orchestrator(parsed)._run_stage_internal("encode", parsed)
+    assert prompts == ["a cat", "-blurry, low quality"]
 
 
 def test_vae_cores_1_keeps_the_single_core_decode(launches, tmp_path):

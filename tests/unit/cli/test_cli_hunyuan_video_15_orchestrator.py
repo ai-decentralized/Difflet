@@ -128,8 +128,8 @@ def test_aot_generate_runs_three_stages(aot_launches, tmp_path):
 
 
 def test_aot_generate_forwards_the_negative_prompt(aot_launches, monkeypatch, tmp_path):
-    """--negative-prompt outside --requests: it reached no stage (``_stage_cli_args`` does not
-    forward it and the single request had none), so the encode stage encoded "" instead."""
+    """--negative-prompt outside --requests reaches every stage line, so the encode stage encodes
+    it (the single request has none of its own) instead of ""."""
     import diffusers
 
     from difflet.cli import stage as stage_mod
@@ -180,8 +180,9 @@ def test_aot_compile_includes_vae_when_opted_in(aot_launches, tmp_path):
         orch = hv15.HunyuanVideo15Orchestrator(_driver_args(work_dir=str(tmp_path / "w"), device_vae=True))
         getattr(orch, mode)()
         (vae,) = [launch for launch in aot_launches if launch[0] == "aot_vae"]
-        assert vae[1:3] == (1, 2) and "--device-vae" in vae[3]
-        assert all("--device-vae" not in cli for s, _, _, cli in aot_launches if s != "aot_vae")
+        assert vae[1:3] == (1, 2)
+        # The driver's decode decision rides on every stage line; only aot_vae reads it.
+        assert all("--device-vae" in cli for _, _, _, cli in aot_launches)
         parsed, _ = stage_mod._build_stage_parser().parse_known_args(
             ["--orchestrator", hv15._HF_MODEL_ID, "--stage", "aot_vae", *vae[3]])
         assert parsed.device_vae is True  # the stage parser keeps the flag (not silently dropped)
