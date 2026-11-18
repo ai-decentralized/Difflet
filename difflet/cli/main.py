@@ -36,6 +36,15 @@ def _add_serve_model_flag(p: argparse.ArgumentParser) -> None:
     )
 
 
+def _cli_models_where(capable) -> str:
+    """The CLI's model types whose registry capabilities satisfy ``capable``, for help and errors
+    (a hand-kept list there went stale: --sp help omitted Qwen-Image and HunyuanVideo 1.5)."""
+    from difflet.registry import registered_models
+
+    return ", ".join(sorted(e.name for e in registered_models()
+                            if e.cli_model_ids and e.capabilities and capable(e.capabilities)))
+
+
 def _add_parallel_flags(p: argparse.ArgumentParser) -> None:
     # Positive: a stage used to replace an explicit 0 with the model default (`tp or 4`), and
     # the generated stage argv forwards what the user typed.
@@ -78,7 +87,8 @@ def _add_parallel_flags(p: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Split the uncond/cond CFG passes across 2 data-parallel "
         "ranks (doubles world_size). Mutually exclusive with "
-        "--cp-degree>1. Only for true-CFG models (Flux, Wan, LTX-2).",
+        "--cp-degree>1. Only for true-CFG models: "
+        + _cli_models_where(lambda c: not c.is_distilled or bool(c.true_cfg_backends)) + ".",
     )
     p.add_argument(
         "--sp",
@@ -88,8 +98,8 @@ def _add_parallel_flags(p: argparse.ArgumentParser) -> None:
         "norm/modulation/residual regions along the sequence axis "
         "across the tensor-parallel group (reduce-scatter replaces "
         "the row-parallel all-reduce; world_size unchanged). "
-        "Mutually exclusive with --cp-degree>1. Supported: Flux, "
-        "Wan, HunyuanVideo.",
+        "Mutually exclusive with --cp-degree>1. Supported: "
+        + _cli_models_where(lambda c: c.supports_sp) + ".",
     )
     p.add_argument(
         "--dp",
@@ -1035,7 +1045,7 @@ def _validate_sp(args: argparse.Namespace) -> None:
     if not _capabilities(args.model_id).supports_sp:
         print(
             f"Error: {args.model_id} does not support --sp. Sequence parallelism "
-            "is available for Flux, Wan, HunyuanVideo, and Qwen-Image.",
+            f"is available for {_cli_models_where(lambda c: c.supports_sp)}.",
             file=sys.stderr,
         )
         raise SystemExit(1)
