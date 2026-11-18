@@ -238,7 +238,8 @@ class QwenImageOrchestrator:
 
         if self.transformer is not None:
             if timesteps is None:
-                timesteps = self._timesteps(num_inference_steps, device=packed_latents.device)
+                timesteps = self._timesteps(num_inference_steps, seq_len=int(packed_latents.shape[1]),
+                                            device=packed_latents.device)
             else:
                 timesteps = torch.as_tensor(timesteps, device=packed_latents.device)
                 if timesteps.ndim == 0:
@@ -284,7 +285,9 @@ class QwenImageOrchestrator:
             )
         return (images,)
 
-    def _timesteps(self, num_inference_steps: int, *, device: torch.device) -> torch.Tensor:
+    def _timesteps(self, num_inference_steps: int, *, seq_len: int, device: torch.device) -> torch.Tensor:
+        """The schedule for ``seq_len`` packed latent tokens: those being denoised, which in a
+        multi-bucket app may be fewer than the shape this orchestrator was built for."""
         num_inference_steps = max(int(num_inference_steps), 1)
         if self.scheduler is None:
             return torch.linspace(
@@ -296,7 +299,7 @@ class QwenImageOrchestrator:
             )
         from difflet.pipeline.flow_match import set_timesteps
 
-        return set_timesteps(self.scheduler, num_inference_steps, self.packed_seq_len).to(device=device)
+        return set_timesteps(self.scheduler, num_inference_steps, seq_len).to(device=device)
 
     def _denoise(
         self,
