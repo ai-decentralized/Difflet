@@ -17,13 +17,7 @@ import importlib
 import os
 import sys
 
-from difflet.backends.registry import available_backends
-from difflet.pipeline.parallel_config import CP_MODES
-
-# Execution modes of non-AoT backends: the same values as
-# difflet.backends.neuron.compile.EXEC_MODES, repeated so the CLI parsers never
-# import a backend module (or torch). test_neuron_launch_c10.py pins the two together.
-EXEC_MODE_CHOICES: tuple[str, ...] = ("eager", "compile")
+from difflet.cli.main import EXEC_MODE_CHOICES  # noqa: F401 - re-exported
 
 _ORCHESTRATOR_MAP: dict[str, str] = {
     "Wan-AI/Wan2.2-T2V-A14B-Diffusers": "difflet.cli.orchestrators.wan.WanOrchestrator",
@@ -61,74 +55,26 @@ def _load_orchestrator_class(name: str):
 
 
 def _build_stage_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(prog="difflet.cli.stage", add_help=False)
+    from difflet.cli.main import add_generate_options
+
+    # allow_abbrev=False and parse_args (main): an option the stage does not declare is an
+    # error, never read as another ("--dp" as "--dp-schedule") or silently dropped.
+    p = argparse.ArgumentParser(prog="difflet.cli.stage", add_help=False, allow_abbrev=False)
     p.add_argument("--orchestrator", required=True)
     p.add_argument("--stage", required=True)
     p.add_argument("--stage-mode", default="generate", choices=["compile", "generate"])
     p.add_argument("--model-id", dest="model_id", default=None)
+    # The generate options, declared once (difflet.cli.main.add_generate_options).
+    add_generate_options(p)
+    p.set_defaults(cp_degree=1)  # the driver resolved CP; a stage launched without it runs CP 1
+    # Stage-only: values the driver resolves, never typed by a user.
     p.add_argument("--model-path", dest="model_path", default=None)
-    p.add_argument("--revision", default=None)
-    p.add_argument("--tp-degree", type=int, default=None)
-    p.add_argument("--cp-degree", type=int, default=1)
-    p.add_argument("--cp-mode", choices=list(CP_MODES), default="gather_kv")
-    p.add_argument("--tp-reduce-dtype", dest="tp_reduce_dtype", choices=["bf16", "fp32"], default=None)
-    p.add_argument("--cfg-parallel", dest="cfg_parallel", action="store_true")
-    p.add_argument("--sp", dest="sp_enabled", action="store_true")
-    p.add_argument("--height", type=int, default=None)
-    p.add_argument("--width", type=int, default=None)
-    p.add_argument("--num-frames", type=int, default=None)
-    p.add_argument("--shapes", default=None)
-    p.add_argument("--prompt", default=None)
-    p.add_argument("--output", default=None)
-    p.add_argument("--steps", type=int, default=None)
-    p.add_argument("--guidance-scale", type=float, default=None)
-    p.add_argument("--true-cfg-scale", dest="true_cfg_scale", type=float, default=None)
-    p.add_argument("--negative-prompt", dest="negative_prompt", default=None)
-    p.add_argument("--guidance-scale-2", dest="guidance_scale_2", type=float, default=None)
-    p.add_argument("--dual-expert", dest="dual_expert", action="store_true")
-    p.add_argument("--host-text-encoder", dest="host_text_encoder", action="store_true")
-    p.add_argument("--text-encoder-dtype", dest="text_encoder_dtype", default=None,
-                   choices=["bf16", "fp32"])
-    p.add_argument("--device-text-encoder", dest="device_text_encoder", action="store_true")
-    p.add_argument("--seed", type=int, default=42)
-    # MiniMax-H3 FL2VA keyframes (main refuses them for every other model).
-    p.add_argument("--first-frame", dest="first_frame", default=None)
-    p.add_argument("--last-frame", dest="last_frame", default=None)
-    p.add_argument("--work-dir", default=None)
-    p.add_argument("--cache-dir", default=None)
     p.add_argument("--compiled-dir", default=None)
     p.add_argument("--vae-tp-degree", type=int, default=None)
     p.add_argument("--adaln-precompute", dest="adaln_precompute", action="store_true")
-    p.add_argument("--teacache-cadence", type=int, default=None)
-    p.add_argument("--teacache-online-delta", type=float, default=None)
-    p.add_argument("--teacache-speedup", type=float, default=None)
-    p.add_argument("--teacache-calibration", default=None)
-    # The decode the driver resolved (HunyuanVideo on a torchrun backend): where it runs and the
-    # device decoder's precision and execution. Wan and Qwen-Image read --vae-dtype and
-    # --vae-exec-mode (their vae stage's decoder).
+    # The decode the driver resolved (HunyuanVideo on a torchrun backend).
     p.add_argument("--vae-placement", dest="vae_placement", default=None,
                    choices=["generate", "launch", "host"])
-    # HunyuanVideo 1.5 on Trainium (AoT): the aot_vae stage runs the compiled decoder instead of
-    # the default host decode.
-    p.add_argument("--device-vae", dest="device_vae", action="store_true")
-    p.add_argument("--vae-dtype", dest="vae_dtype", default=None, choices=["bf16", "fp32"])
-    p.add_argument("--vae-exec-mode", dest="vae_exec_mode", default=None,
-                   choices=list(EXEC_MODE_CHOICES))
-    # FP8 DiT linears on the neuron backend (difflet/cli/quant.py); forwarded only when given.
-    from difflet.cli.quant import add_quant_flags
-
-    add_quant_flags(p)
-    # DP worker-mode flags (parse_known_args silently drops what isn't declared
-    # here — the --sp bug class; keep in sync with main._add_generate_flags).
-    p.add_argument("--requests-dir", default=None)
-    p.add_argument("--worker-index", type=int, default=None)
-    p.add_argument("--dp-schedule", default="round_robin")
-    p.add_argument("--keep-work-dir", action="store_true")
-    # Backend selection. main() exports both to the environment before the
-    # orchestrator loads, so difflet.ops, DiffletPipeline and the application
-    # resolve the same backend and execution mode in every rank.
-    p.add_argument("--backend", choices=available_backends(), default=None)
-    p.add_argument("--exec-mode", dest="exec_mode", choices=EXEC_MODE_CHOICES, default=None)
     return p
 
 
@@ -141,7 +87,7 @@ def _export_backend_selection(args: argparse.Namespace) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = _build_stage_parser()
-    args, _ = parser.parse_known_args(argv)
+    args = parser.parse_args(argv)
     _export_backend_selection(args)
     cls = _load_orchestrator_class(args.orchestrator)
     orchestrator = cls(args)
