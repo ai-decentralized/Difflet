@@ -22,7 +22,7 @@ NeuronCore each (the generate stage):
    fp32 by default), the 256 px tiles spread over the ranks; with ``--host-vae`` a host
    video_vae stage decodes instead.
 
-The DiT runs at the smallest text bucket (``TEXT_BUCKETS``: 128/256/512/1024) that holds the
+The DiT runs at the smallest text bucket (``TEXT_BUCKETS``: 128/256/512/640/1024) that holds the
 prompt's live tokens instead of the fixed 1024-token bucket. With the device video decoder, rank
 0 also decodes the audio on its host and muxes the MP4 in the same launch; with ``--host-vae``
 the host video_vae and audio_vae stages do. ``compile`` runs the generate stage with every
@@ -890,13 +890,12 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
         vae = None
         audio_decoder = None
         if device_vae and rank == 0:
-            from difflet.models.minimax_h3.host_components import (
-                default_threads,
-                load_host_audio_decoder,
-            )
+            from difflet.backends.neuron.minimax_h3.resident import host_threads
+            from difflet.models.minimax_h3.host_components import load_host_audio_decoder
 
+            # Beside the device decode, on the host CPUs every rank shares (see host_threads).
             with bench_timing.span("load", stage="generate", component="audio_decoder"):
-                audio_decoder = load_host_audio_decoder(model_dir, threads=default_threads())
+                audio_decoder = load_host_audio_decoder(model_dir, threads=host_threads())
 
         dit = _NeuronH3DiT(app)
         # Timing on: a step event after every denoise step. Off: the call is unchanged.
@@ -969,6 +968,7 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
                     vae = load_vae()
                 from concurrent.futures import ThreadPoolExecutor
 
+                from difflet.backends.neuron.minimax_h3.resident import host_threads
                 from difflet.backends.neuron.minimax_h3.vae import decode_video_on_ranks
 
                 start = time.perf_counter()
@@ -983,7 +983,7 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
                     video = decode_video_on_ranks(
                         vae, output.video_latents, vae.config, rank=group, world=groups,
                         scratch_dir=stage_loop.work_file(args, req, "vae_tiles"),
-                        device=self._neuron_device, writer=writer,
+                        device=self._neuron_device, writer=writer, threads=host_threads(),
                     )
                     if rank == 0:
                         destination = stage_loop.work_file(args, req, "video.pt")

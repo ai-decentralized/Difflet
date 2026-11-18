@@ -12,8 +12,9 @@ start of a request. ``DIFFLET_H3_TEXT_ENCODER`` picks where:
 
 * ``device``: loaded, used and released on the device inside every request (~11 s load +
   ~3.4 s encode); it needs that HBM free beside the resident DiT;
-* ``host`` (default): resident in host memory on rank 0 and run on its CPU (~7 s at a 512-token bucket on
-  trn3, 96 threads), the embeddings broadcast to every rank; no HBM at all;
+* ``host`` (default): resident in host memory on rank 0 and run on its CPU over the prompt's
+  live tokens only (~3 s for the 537-token 768p prompt on trn3, ``DIFFLET_H3_HOST_THREADS``
+  threads), the embeddings broadcast to every rank; no HBM at all;
 * ``auto``: the device first; when any rank runs out of HBM loading it, every rank
   drops it and the request (and every later one) falls back to the host. At a 7 s 768p clip
   the device attempt does not fit beside the DiT (measured on trn3).
@@ -100,6 +101,26 @@ def text_encoder_mode() -> str:
     return mode
 
 
+#: Intra-op threads of rank 0's host work: the conditioner, the audio decoder and the video
+#: stitching. Every rank of the mesh shares the host CPUs rank 0 runs on (96 on trn3), so a
+#: wide thread pool there oversubscribes them. Measured at 768x1344x124 on TP4 x U2: at 96
+#: threads the conditioner took 10-21 s and the audio decode 12-20 s (2 s alone), and the device
+#: video decode, whose launch thread they starve, 9 s; at 24 threads 3 s, 1 s and 4.7 s.
+HOST_THREADS_ENV = "DIFFLET_H3_HOST_THREADS"
+_DEFAULT_HOST_THREADS = 24
+
+
+def host_threads() -> int:
+    raw = os.environ.get(HOST_THREADS_ENV, "").strip()
+    try:
+        threads = int(raw) if raw else _DEFAULT_HOST_THREADS
+    except ValueError:
+        threads = 0
+    if threads < 1:
+        raise ValueError(f"{HOST_THREADS_ENV} must be a positive integer, got {raw!r}")
+    return threads
+
+
 #: How many denoise steps run between two cancellation checks (every rank agrees on each).
 CANCEL_CHECK_STEPS_ENV = "DIFFLET_H3_CANCEL_CHECK_STEPS"
 _DEFAULT_CANCEL_CHECK_STEPS = 5
@@ -111,6 +132,24 @@ def cancel_check_steps() -> int:
     if steps < 1:
         raise ValueError(f"{CANCEL_CHECK_STEPS_ENV} must be a positive integer, got {raw!r}")
     return steps
+
+
+def encode_live_tokens(conditioner, prompt: str, bucket: int) -> dict[str, Any]:
+    """The host conditioner's record for ``prompt`` at ``bucket``, running only its live tokens.
+
+    Qwen3-VL is causal and the padding trails the prompt, so the live tokens' states do not
+    depend on it: only they run (537 of a 1024 bucket for the 768p prompt; 2.7 s against 5 s on
+    trn3), and the states and mask are padded back to ``bucket`` with zeros, the rows
+    ``encode`` itself zeroes."""
+    live = int(conditioner.tokenize(prompt, bucket)[1].sum())
+    record = conditioner.encode(prompt, seq_len=live or bucket)  # no live token: encode raises
+    pad = bucket - live
+    if pad:
+        hidden, mask = record["encoder_hidden_states"], record["attention_mask"]
+        record["encoder_hidden_states"] = torch.cat(
+            [hidden, hidden.new_zeros(hidden.shape[0], pad, *hidden.shape[2:])], dim=1)
+        record["attention_mask"] = torch.cat([mask, mask.new_zeros(mask.shape[0], pad)], dim=1)
+    return record
 
 
 class ResidentRequestCancelled(Exception):
@@ -225,13 +264,9 @@ class NeuronMiniMaxH3Resident:
         self.log(f"video decoder ({self.vae_dtype}, TP-sharded) loaded in "
                  f"{time.perf_counter() - start:.1f}s, {vae_app.weight_bytes / 2**30:.2f} GiB/rank")
         if self.rank == 0:
-            from difflet.models.minimax_h3.host_components import (
-                default_threads,
-                load_host_audio_decoder,
-            )
+            from difflet.models.minimax_h3.host_components import load_host_audio_decoder
 
-            self.audio_decoder = load_host_audio_decoder(self.model_dir,
-                                                         threads=default_threads())
+            self.audio_decoder = load_host_audio_decoder(self.model_dir, threads=host_threads())
 
     # ------------------------------------------------------------------ per request
 
@@ -289,7 +324,7 @@ class NeuronMiniMaxH3Resident:
         device = self.dit_app.device
 
         def encode() -> dict[str, Any]:
-            return self._conditioner().encode(prompt, seq_len=self.modes[0])
+            return encode_live_tokens(self._conditioner(), prompt, self.modes[0])
 
         record = rank0_call(encode, device=device, what="host text encode")
         hidden = broadcast_tensor(None if record is None else record["encoder_hidden_states"],
@@ -309,14 +344,11 @@ class NeuronMiniMaxH3Resident:
         """Rank 0's host Qwen3-VL, one copy for every mode: with its vision tower when any mode
         takes keyframes, padded per call to the request's bucket."""
         if self._host_encoder is None:
-            from difflet.models.minimax_h3.host_components import (
-                HostQwen3VLTextEncoder,
-                default_threads,
-            )
+            from difflet.models.minimax_h3.host_components import HostQwen3VLTextEncoder
 
             start = time.perf_counter()
             self._host_encoder = HostQwen3VLTextEncoder(
-                self.model_dir, seq_len=self.text_bucket, threads=default_threads(),
+                self.model_dir, seq_len=self.text_bucket, threads=host_threads(),
                 vision=self.fl2va).load()
             self.log(f"host conditioner{' (with the vision tower)' if self.fl2va else ''} "
                      f"loaded in {time.perf_counter() - start:.1f}s")
@@ -332,10 +364,7 @@ class NeuronMiniMaxH3Resident:
         device = self.dit_app.device
 
         def encode() -> dict[str, Any]:
-            from difflet.models.minimax_h3.host_components import (
-                default_threads,
-                load_host_video_encoder,
-            )
+            from difflet.models.minimax_h3.host_components import load_host_video_encoder
             from difflet.models.minimax_h3.keyframes import keyframe_pixels, prepare_keyframes
 
             keyframes, anchors, _, _ = prepare_keyframes(
@@ -346,7 +375,7 @@ class NeuronMiniMaxH3Resident:
             encoder = self._conditioner()
             if self._host_video_encoder is None:
                 self._host_video_encoder = load_host_video_encoder(
-                    self.model_dir, threads=default_threads())
+                    self.model_dir, threads=host_threads())
             start = time.perf_counter()
             record = encoder.encode_presentation(prompt, keyframes,
                                                  seq_len=self.modes[len(keyframes)])
@@ -536,7 +565,8 @@ class NeuronMiniMaxH3Resident:
             group, groups, writer = self.vae.app.tile_groups(self.rank, self.world)
             video = decode_video_on_ranks(
                 self.vae, output.video_latents, self.vae.config, rank=group, world=groups,
-                scratch_dir=scratch_dir, device=self.dit_app.device, writer=writer)
+                scratch_dir=scratch_dir, device=self.dit_app.device, writer=writer,
+                threads=host_threads())
             seconds["video_vae"] = time.perf_counter() - start
             audio, audio_seconds = audio_job.result() if audio_job is not None else (None, 0.0)
         sample_rate = 0
@@ -544,7 +574,6 @@ class NeuronMiniMaxH3Resident:
             sample_rate = int(self.audio_decoder.config["sampling_rate"])
             seconds["audio_vae (overlapped)"] = audio_seconds
             seconds["video+audio"] = time.perf_counter() - start
-            video = video.float().clamp(0, 1)
         self.log("request: "
                  + ", ".join(f"{k} {v:.1f}s" for k, v in seconds.items()))
         return ResidentRequestResult(video=video, audio=audio, sample_rate=sample_rate,
@@ -561,11 +590,14 @@ class NeuronMiniMaxH3Resident:
 
 __all__ = [
     "CANCEL_CHECK_STEPS_ENV",
+    "HOST_THREADS_ENV",
     "NeuronH3DiTCall",
     "NeuronMiniMaxH3Resident",
     "ResidentRequestCancelled",
     "ResidentRequestResult",
     "TEXT_ENCODER_ENV",
     "cancel_check_steps",
+    "encode_live_tokens",
+    "host_threads",
     "text_encoder_mode",
 ]

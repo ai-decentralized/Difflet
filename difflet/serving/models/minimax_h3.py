@@ -68,7 +68,7 @@ _MIN_FRAMES, _MAX_FRAMES = 120, 360
 _FRAMES_PER_CHUNK, _LATENTS_PER_CHUNK = 17, 5
 _MAX_INFERENCE_STEPS = 200
 _MAX_SEED = 2**63 - 1
-_TEXT_BUCKETS = (128, 256, 512, 1024)
+_TEXT_BUCKETS = (128, 256, 512, 640, 1024)
 _FL2VA_TEXT_BUCKETS = (2048, 3072, 4096)
 #: The text-only mode's bucket (prompt tokens); an FL2VA value (2048/3072/4096) is taken as the
 #: keyframe modes' bucket instead, as when a server served one keyframe mode only.
@@ -81,6 +81,10 @@ _DEFAULT_FL2VA_TEXT_BUCKET = 3072
 #: ``first_frame`` or a ``last_frame``, 2 both (e.g. ``0,2``). Fixed at startup: each mode is a
 #: DiT graph of its own on the one copy of the weights, warmed at startup.
 KEYFRAMES_ENV = "DIFFLET_H3_KEYFRAMES"
+#: The resident video decoder's dtype, ``fp32`` (default, as ``difflet generate``'s
+#: ``--vae-dtype``) or ``bf16``: at 768x1344x124 on TP4 x U2 (trn3) the decode takes 9.1 s in
+#: bf16 against 24.6 s in fp32, 42 dB PSNR apart (the audio is the same).
+VAE_DTYPE_ENV = "DIFFLET_H3_VAE_DTYPE"
 _UNSUPPORTED_VIDEO_FIELDS = ("guidance_scale_2", "boundary_ratio", "flow_shift", "true_cfg_scale",
                              "negative_prompt")
 
@@ -96,6 +100,17 @@ def keyframe_modes() -> tuple[int, ...]:
         raise ValueError(f"{KEYFRAMES_ENV} must list keyframe counts 0, 1, 2 (e.g. '0' or "
                          f"'0,2'), got {raw!r}")
     return modes
+
+
+def vae_dtype() -> str:
+    """The video decoder's dtype as the neuron applications take it (``"float32"`` or
+    ``"bfloat16"``), from ``DIFFLET_H3_VAE_DTYPE``. Torch-free."""
+    from difflet.cli.orchestrators.torchrun import COMPONENT_DTYPES
+
+    raw = os.environ.get(VAE_DTYPE_ENV, "").strip().lower() or "fp32"
+    if raw not in COMPONENT_DTYPES:
+        raise ValueError(f"{VAE_DTYPE_ENV} must be one of {tuple(COMPONENT_DTYPES)}, got {raw!r}")
+    return COMPONENT_DTYPES[raw]
 
 
 def text_buckets() -> dict[int, int]:
@@ -265,6 +280,7 @@ class MiniMaxH3ServingArtifactPreparer:
         if profile.revision != self.revision:
             raise ValueError("MiniMax-H3 preparer revision must match the serving profile")
         text_buckets()  # a bad mode or bucket fails here, before the workers start
+        vae_dtype()  # and a bad decoder dtype
         entry = resolve_model(self.model_id, model_type=_MODEL_TYPE)
         print(f"[difflet serve] resolving MiniMax-H3 weights for {self.model_id}")
         source = resolve_hf_model_source(self.model_id, revision=self.revision,
@@ -374,18 +390,42 @@ class MiniMaxH3ServingRequestValidator:
 # --------------------------------------------------------------------------- media
 
 
-def write_av_mp4(video, audio, sample_rate: int, path: str | Path, *, fps: int):
+def video_frames_uint8(video, *, threads: int | None = None):
+    """``video`` ``(1, 3, F, H, W)`` in ``[0, 1]`` as the encoder's ``(F, H, W, 3)`` uint8
+    frames, the values ``encode_tensor_to_mp4``'s ``zero_to_one`` range gives (clip, x255,
+    round half to even) on ``threads`` intra-op threads: its single-threaded NumPy pass takes
+    1.7 s of a 768x1344x124 clip."""
+    import torch
+
+    from difflet.models.minimax_h3.host_components import intra_op_threads
+    from difflet.serving.video_media import VideoMediaEncodingError
+
+    with intra_op_threads(threads):
+        value = video.detach().to("cpu", torch.float32)[0]
+        if not bool(torch.isfinite(value).all()):
+            raise VideoMediaEncodingError("video tensor contains NaN or infinity")
+        low, high = (float(v) for v in torch.aminmax(value))
+        if low < -1e-4 or high > 1.0 + 1e-4:
+            raise VideoMediaEncodingError(f"zero_to_one video tensor range is [{low}, {high}]")
+        frames = value.clamp(0.0, 1.0).mul_(255.0).round_().to(torch.uint8)
+        return frames.permute(1, 2, 3, 0).contiguous()
+
+
+def write_av_mp4(video, audio, sample_rate: int, path: str | Path, *, fps: int,
+                 threads: int | None = None):
     """Encode ``video`` ``(1, 3, F, H, W)`` in ``[0, 1]`` (H.264) and mux ``audio``
-    ``(1, C, S)`` in ``[-1, 1]`` (AAC) into ``path``; returns the MP4's validated metadata."""
+    ``(1, C, S)`` in ``[-1, 1]`` (AAC) into ``path``; returns the MP4's validated metadata.
+    ``threads``: intra-op threads for the frames' uint8 conversion (``video_frames_uint8``)."""
     import numpy as np
 
     from difflet.serving.video_media import encode_tensor_to_mp4, validate_mp4
 
     destination = Path(path)
+    frames = video_frames_uint8(video, threads=threads)
     with tempfile.TemporaryDirectory(prefix="difflet-h3-av-") as temp:
         silent = Path(temp) / "video.mp4"
         wav_path = Path(temp) / "audio.wav"
-        encode_tensor_to_mp4(video, silent, fps=fps, layout="BCTHW", value_range="zero_to_one")
+        encode_tensor_to_mp4(frames, silent, fps=fps, layout="FHWC", value_range="uint8")
         pcm = np.rint(audio[0].transpose(0, 1).float().clamp(-1, 1).cpu().numpy()
                       * 32767.0).astype("<i2")
         with wave.open(str(wav_path), "wb") as handle:
@@ -408,6 +448,15 @@ def write_av_mp4(video, audio, sample_rate: int, path: str | Path, *, fps: int):
                         expected_height=int(video.shape[-2]),
                         expected_num_frames=int(video.shape[2]), expected_fps=fps,
                         require_silent=False)
+
+
+def tile_scratch_dir(request_id: str) -> Path:
+    """The request's tile directory, one name on every rank of a server. The launch's
+    ``MASTER_PORT`` keeps two servers on one host apart: both run a ``startup-smoke`` request,
+    and one's rank 0 would otherwise delete the other's tile files."""
+    port = os.environ.get("MASTER_PORT", "").strip()
+    suffix = f"-{port}" if port else ""
+    return Path(tempfile.gettempdir()) / f"difflet-h3-tiles{suffix}-{request_id}"
 
 
 def request_should_stop(context) -> bool:
@@ -458,7 +507,7 @@ class MiniMaxH3PipelineRunner:
         target = require_video_target(request) if primary else request.video.output_target
         with tempfile.TemporaryDirectory(prefix="difflet-h3-tiles-") as scratch:
             # Every rank sees the same scratch name: the tile files cross ranks through it.
-            shared = Path(tempfile.gettempdir()) / f"difflet-h3-tiles-{request.request_id}"
+            shared = tile_scratch_dir(request.request_id)
 
             def should_stop() -> bool:
                 return request_should_stop(context)
@@ -479,10 +528,12 @@ class MiniMaxH3PipelineRunner:
         if not primary:
             return stage_result(MiniMaxH3FinalPayload(_empty_output(request)),
                                 started_monotonic=started)
-        shutil.rmtree(Path(tempfile.gettempdir()) / f"difflet-h3-tiles-{request.request_id}",
-                      ignore_errors=True)
+        shutil.rmtree(tile_scratch_dir(request.request_id), ignore_errors=True)
+        from difflet.backends.neuron.minimax_h3.resident import host_threads
+
         media = write_av_mp4(result.video, result.audio, result.sample_rate,
-                             target.staging_path, fps=int(request.video.fps))
+                             target.staging_path, fps=int(request.video.fps),
+                             threads=host_threads())
         expected = (self.profile.width, self.profile.height, self.profile.num_frames,
                     float(self.profile.output_fps))
         actual = (media.width, media.height, media.num_frames, float(media.fps))
@@ -553,10 +604,13 @@ class MiniMaxH3ServingStageAdapter:
             os.environ["DIFFLET_COMPILE_CACHE"] = str(Path(profile.cache_dir).expanduser()
                                                       .resolve())
         get_backend("neuron").prepare_runtime(profile.parallel)
+        import torch
+
         resident = NeuronMiniMaxH3Resident(
             model_dir=runtime.source.pinned_model_path, parallel=profile.parallel,
             height=profile.height, width=profile.width, num_frames=profile.num_frames,
             modes=text_buckets(), cache_dir=profile.cache_dir,
+            vae_dtype=getattr(torch, vae_dtype()),
             # Worker processes do not inherit the serve logging config; like every serving
             # adapter, worker-side progress goes to stdout under the [difflet serve] prefix.
             log=lambda message: print(f"[difflet serve] MiniMax-H3: {message}", flush=True))

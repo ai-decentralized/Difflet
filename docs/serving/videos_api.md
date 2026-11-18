@@ -174,9 +174,11 @@ H3 settings are environment variables of the serve process, fixed at startup:
 | Variable | Values | Default | Meaning |
 | --- | --- | --- | --- |
 | `DIFFLET_H3_KEYFRAMES` | comma list of `0`, `1`, `2` | `0` | The request modes the server serves, by keyframe count: `0` text only, `1` a `first_frame` **or** a `last_frame`, `2` both; e.g. `0,2` serves text-only and first+last requests. Each mode is a DiT graph of its own on the one copy of the weights, warmed at startup (~13 min more per extra mode) |
-| `DIFFLET_H3_TEXT_BUCKET` | `128/256/512/1024` | `512` | Prompt token budget of the text-only mode (an FL2VA value is taken as the keyframe modes' bucket, for compatibility) |
+| `DIFFLET_H3_TEXT_BUCKET` | `128/256/512/640/1024` | `512` | Prompt token budget of the text-only mode (an FL2VA value is taken as the keyframe modes' bucket, for compatibility) |
 | `DIFFLET_H3_FL2VA_TEXT_BUCKET` | `2048/3072/4096` | `3072` | Token budget of the keyframe modes' presentation (prompt, plus each keyframe's label and image block) |
 | `DIFFLET_H3_TEXT_ENCODER` | `host`, `auto`, `device` | `host` | Where the Qwen3-VL conditioner runs; keyframe servers always use the host (the device conditioner has no vision tower) |
+| `DIFFLET_H3_VAE_DTYPE` | `fp32`, `bf16` | `fp32` | The device video decoder's dtype; `bf16` decodes 768x1344x124 in 9.1 s instead of 24.6 s on TP4 x U2 (Trn3; 42 dB PSNR against fp32) |
+| `DIFFLET_H3_HOST_THREADS` | positive integer | `24` | Intra-op threads of rank 0's host work (the host conditioner, the audio decoder, the video stitching and the MP4's frame conversion); every rank shares those CPUs, and a wider pool oversubscribes them (at 96 the host conditioner and the audio decode ran 3-12x slower and stalled the device video decode) |
 | `DIFFLET_H3_CANCEL_CHECK_STEPS` | positive integer | `5` | Denoise steps between cancellation checks |
 
 A server for both text-only and first+last-keyframe requests (`DIFFLET_H3_KEYFRAMES=0,2`,
