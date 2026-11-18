@@ -69,9 +69,12 @@ def _toy_snapshot(monkeypatch, tmp_path) -> Path:
 
 
 @pytest.fixture
-def launches(monkeypatch):
+def launches(monkeypatch, tmp_path):
     calls = _Calls()
     import difflet.cli.orchestrators.torchrun as torchrun_helpers
+
+    # The vae warm-up marker lives in the NEFF cache: the test's own, never the user's.
+    monkeypatch.setenv("TORCH_NEURONX_NEFF_CACHE_DIR", str(tmp_path / "neff"))
 
     # The driver and prepare_quant set it: setenv first records the original state (a delenv
     # of an unset variable records nothing to undo), so a leak cannot reach the next test.
@@ -125,10 +128,14 @@ def _fake_pipeline(seen: dict, latents=lambda generator: torch.full((1, 4, 2, 2,
 
 def test_default_layout_is_tp2_x_cfg2(launches, tmp_path):
     hv15.HunyuanVideo15Orchestrator(_args(work_dir=str(tmp_path / "w"))).generate()
-    assert launches.env_seen == ["1", "1", "1"]  # every stage keeps the attention kernel's trace
+    # Every stage keeps the attention kernel's trace.
+    assert launches.env_seen == ["1", "1", "1", "1"]
     assert "DIFFLET_NKI_TRACE_CACHE" not in os.environ  # restored after the launches
-    # The vae stage decodes its tiles on the transformer stage's cores (--vae-cores default).
-    assert [(s, n) for s, n, _ in launches] == [("encode", 1), ("transformer", 4), ("vae", 4)]
+    # The vae stage decodes its tiles on the transformer stage's cores (--vae-cores default); on a
+    # cold cache one core builds its kernels first, in compile mode.
+    assert [(s, n) for s, n, _ in launches] == [("encode", 1), ("transformer", 4), ("vae", 1),
+                                                ("vae", 4)]
+    assert _flag(launches[2][2], "--stage-mode") == "compile"
     cli = launches[1][2]
     assert _flag(cli, "--tp-degree") == "2" and "--cfg-parallel" in cli
     assert _flag(cli, "--steps") == "50" and _flag(cli, "--num-frames") == "121"
@@ -140,9 +147,23 @@ def test_default_layout_is_tp2_x_cfg2(launches, tmp_path):
     assert not (tmp_path / "w").exists()
 
 
+def test_the_vae_warm_up_runs_once_per_compile_cache(launches, tmp_path):
+    hv15.HunyuanVideo15Orchestrator(_args(work_dir=str(tmp_path / "w"))).generate()
+    launches.clear()
+    hv15.HunyuanVideo15Orchestrator(_args(work_dir=str(tmp_path / "w"))).generate()
+    assert [(s, n) for s, n, _ in launches] == [("encode", 1), ("transformer", 4), ("vae", 4)]
+
+
+def test_a_one_core_vae_needs_no_warm_up(launches, tmp_path):
+    hv15.HunyuanVideo15Orchestrator(_args(work_dir=str(tmp_path / "w"), vae_cores=1)).generate()
+    assert [(s, n) for s, n, _ in launches] == [("encode", 1), ("transformer", 4), ("vae", 1)]
+
+
 def test_vae_cores_1_keeps_the_single_core_decode(launches, tmp_path):
     hv15.HunyuanVideo15Orchestrator(_args(work_dir=str(tmp_path / "w"), vae_cores=1)).generate()
     assert launches[2][:2] == ("vae", 1)
+
+
 @pytest.mark.parametrize("over, tp, cores", [({}, 2, 4), ({"cfg_parallel": True}, 1, 2),
                                              ({"cp_degree": 2}, 1, 2), ({"tp_degree": 4}, 4, 4)])
 def test_quant_reaches_the_transformer_stage_at_the_layout_tp(launches, monkeypatch, tmp_path,
@@ -271,7 +292,9 @@ def test_the_native_path_keeps_no_args_keyed_artifact(launches, monkeypatch, tmp
     for mode in ("compile", "generate"):
         getattr(hv15.HunyuanVideo15Orchestrator(_args(work_dir=str(tmp_path / "w"),
                                                       quant="mxfp8")), mode)()
-    assert [s for s, _, _ in launches] == ["transformer", "vae", "encode", "transformer", "vae"]
+    # compile on a cold cache builds the vae kernels on one core first; generate then skips that.
+    assert [s for s, _, _ in launches] == ["transformer", "vae", "vae",
+                                          "encode", "transformer", "vae"]
     monkeypatch.setattr(registry, "get_backend",
                         lambda name: SimpleNamespace(prepare_runtime=lambda p: None))
     seen = {}
@@ -325,7 +348,8 @@ def test_explicit_tp4_runs_cfg_sequentially(launches, tmp_path):
 
 def test_compile_skips_the_encoder(launches, tmp_path):
     hv15.HunyuanVideo15Orchestrator(_args(work_dir=str(tmp_path / "w"))).compile()
-    assert [s for s, _, _ in launches] == ["transformer", "vae"]
+    # On a cold cache: the vae kernels on one core, then the multi-core vae stage.
+    assert [s for s, _, _ in launches] == ["transformer", "vae", "vae"]
 
 
 def test_sp_and_cp_mode_reach_the_transformer_stage(launches, tmp_path):
