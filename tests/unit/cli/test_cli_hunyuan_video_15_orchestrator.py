@@ -353,6 +353,7 @@ def test_native_branch_unchanged(monkeypatch, tmp_path):
 
     calls = []
     monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    monkeypatch.setenv("TORCH_NEURONX_NEFF_CACHE_DIR", str(tmp_path / "neff"))  # the warm-up marker
     monkeypatch.delenv("DIFFLET_NKI_TRACE_CACHE", raising=False)
     monkeypatch.setattr(hv15.HunyuanVideo15Orchestrator, "_run_aot",
                         lambda self, mode: pytest.fail("the neuron backend must not take the AOT path"))
@@ -361,8 +362,10 @@ def test_native_branch_unchanged(monkeypatch, tmp_path):
                         calls.append((stage, num_cores, virtual_core_size)))
     assert torchrun_helpers.torchrun_backend() == "neuron"
     hv15.HunyuanVideo15Orchestrator(_driver_args(work_dir=str(tmp_path / "w"))).generate()
-    # The vae stage decodes its tiles on the transformer stage's cores (--vae-cores default).
-    assert calls == [("encode", 1, None), ("transformer", 4, None), ("vae", 4, None)]
+    # The vae stage decodes its tiles on the transformer stage's cores (--vae-cores default), after
+    # a one-core build of its kernels on this cold cache.
+    assert calls == [("encode", 1, None), ("transformer", 4, None), ("vae", 1, None),
+                     ("vae", 4, None)]
 
 
 def test_aot_stage_dispatch_rejects_unknown_stage(tmp_path):

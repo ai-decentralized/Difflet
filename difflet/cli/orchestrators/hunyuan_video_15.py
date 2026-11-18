@@ -173,8 +173,11 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
                                  virtual_core_size=None, cli_args=cli)
                 # The tiles decode across the transformer stage's cores (free by then) unless
                 # --vae-cores says otherwise; each rank decodes tiles of the same size as one core.
-                vae_cores = getattr(self.args, "vae_cores", None) or tp * (2 if cfg else 1) * cp
-                runner.run_stage(_HF_MODEL_ID, "vae", num_cores=int(vae_cores), virtual_core_size=None,
+                vae_cores = int(getattr(self.args, "vae_cores", None)
+                                or tp * (2 if cfg else 1) * cp)
+                if vae_cores > 1:
+                    self._warm_vae_kernels(work_dir, tp, cfg, cp)
+                runner.run_stage(_HF_MODEL_ID, "vae", num_cores=vae_cores, virtual_core_size=None,
                                  cli_args=cli)
             except Exception:
                 print(f"[difflet] work dir preserved at {work_dir} for inspection",
@@ -213,6 +216,30 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
         prepared = prepare_quant(self.args, sources, create=create, tag="hv15",
                                  default_tp_degree=tp, fail=refuse)
         self._quantized_dit = (prepared or {}).get("transformer")
+
+    def _vae_kernels_marker(self) -> Path:
+        """Marks this shape's vae kernels as built, inside the NEFF cache the stages use (so a
+        cleared cache clears it too)."""
+        from difflet.backends.neuron.compile import NEFF_CACHE_ENV, neuron_cache_env
+
+        a = self.args
+        shape = f"{a.height or 480}x{a.width or 848}x{getattr(a, 'num_frames', None) or 121}"
+        return Path(neuron_cache_env()[NEFF_CACHE_ENV]) / f".difflet-hv15-vae-{shape}.built"
+
+    def _warm_vae_kernels(self, work_dir: Path, tp: int, cfg: bool, cp: int) -> None:
+        """Build the vae's kernels for this shape on one core, once per compile cache: a
+        multi-rank eager vae stage launched after the DiT stage finds no torch-neuronx
+        compilation service, so on a cold cache it cannot compile them. One core compiles them
+        in-process; the multi-core decode then only loads them."""
+        marker = self._vae_kernels_marker()
+        if marker.exists():
+            return
+        print(f"[hv15] vae kernels for {marker.name[len('.difflet-hv15-vae-'):-len('.built')]} not "
+              "in the compile cache: building them on one core first", flush=True)
+        runner.run_stage(_HF_MODEL_ID, "vae", num_cores=1, virtual_core_size=None,
+                         cli_args=self._stage_cli_args("compile", str(work_dir), tp, cfg, cp))
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.touch()
 
     def _stage_cli_args(self, mode: str, work_dir: str, tp: int, cfg: bool, cp: int) -> list[str]:
         a = self.args
