@@ -31,18 +31,16 @@ def t(line):
 
 
 def requests_of(steps):
-    """step_times.jsonl lines -> one list of step_s per request (a request restarts at step 0).
-    Several ranks may append the same steps: only the first rank's run of each request is kept."""
-    runs, cur = [], None
+    """step_times.jsonl lines -> one list of step_s per request. Every tp rank appends each step
+    (lines interleave: 0,0,0,0,1,1,...); a request starts where the step index drops back to 0.
+    Per step, the median over the ranks (they finish together: the step ends in a collective)."""
+    runs, prev = [], None
     for r in steps:
-        if r["step"] == 0:
-            cur = []
-            runs.append(cur)
-        if cur is not None:
-            cur.append(r["step_s"])
-    full = [r for r in runs if len(r) == 50]
-    per_rank = max(1, len(full) // 2)
-    return full[::per_rank][:2]
+        if prev is None or r["step"] < prev:
+            runs.append({})
+        runs[-1].setdefault(r["step"], []).append(r["step_s"])
+        prev = r["step"]
+    return [[statistics.median(run[k]) for k in sorted(run)] for run in runs if len(run) == 50]
 
 
 def arm(a):
@@ -78,8 +76,25 @@ def arm(a):
     return out
 
 
+def gate(a):
+    """The 10-step generate's final latents (ROOT/<arm>/work_smoke/latents.pt): finite, stats."""
+    p = ROOT / a / "work_smoke" / "latents.pt"
+    if not p.exists():
+        return None
+    import torch
+
+    x = torch.load(p, map_location="cpu").float()
+    return {"shape": list(x.shape), "finite": bool(torch.isfinite(x).all()),
+            "mean": round(float(x.mean()), 4), "std": round(float(x.std()), 4),
+            "absmax": round(float(x.abs().max()), 3),
+            "png_md5": hashlib.md5((ROOT / a / "smoke.png").read_bytes()).hexdigest()}
+
+
 def main():
-    res = {"root": str(ROOT), "arms": {}, "quality": {}}
+    res = {"root": str(ROOT), "model": "Qwen-Image", "shape": "1024x1024, tp4, 50 steps, seed 42, "
+           "guidance 7.5, 'a cat sitting on a bench'", "evidence_md5": {
+               "bf16": "5478687f25718aa92a77278c68808f8d", "mxfp8": "7737239be780a7877cd8b2ebe32bfb2f"},
+           "gate": {a: g for a in "BD" if (g := gate(a)) is not None}, "arms": {}, "quality": {}}
     for a in "ABCD":
         r = arm(a)
         if r is not None:
