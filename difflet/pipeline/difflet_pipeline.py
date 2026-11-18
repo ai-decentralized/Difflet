@@ -157,7 +157,7 @@ class DiffletPipeline:
             )
             if not skip_compile and (force_compile or not cache_ready):
                 compiled_path.mkdir(parents=True, exist_ok=True)
-                _compile_app(app, compiled_path, debug=debug_compile)
+                _compile_app(app, compiled_path, debug=debug_compile, force=force_compile)
                 write_manifest(compiled_path, spec)
 
         if load:
@@ -199,7 +199,7 @@ class DiffletPipeline:
         ) and _compiled_artifacts_ready(self.app, self.compiled_path)
         if force or not cache_ready:
             self.compiled_path.mkdir(parents=True, exist_ok=True)
-            _compile_app(self.app, self.compiled_path, debug=debug)
+            _compile_app(self.app, self.compiled_path, debug=debug, force=force)
             write_manifest(self.compiled_path, self.cache_spec)
 
     def load(
@@ -323,12 +323,14 @@ def _cache_application_kwargs(
     return cache_kwargs or None
 
 
-def _compile_app(app: Any, compiled_path: Path, *, debug: bool) -> None:
-    signature = inspect.signature(app.compile)
-    if "debug" in signature.parameters:
-        app.compile(str(compiled_path), debug=debug)
-    else:
-        app.compile(str(compiled_path))
+def _compile_app(app: Any, compiled_path: Path, *, debug: bool, force: bool = False) -> None:
+    params = inspect.signature(app.compile).parameters
+    kwargs: dict[str, Any] = {}
+    if "debug" in params:
+        kwargs["debug"] = debug
+    if force and "force" in params:
+        kwargs["force"] = True  # rebuild components that look compiled too
+    app.compile(str(compiled_path), **kwargs)
 
 
 def _compiled_artifacts_ready(app: Any, compiled_path: Path) -> bool:

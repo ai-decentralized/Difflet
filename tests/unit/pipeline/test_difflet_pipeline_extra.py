@@ -70,6 +70,23 @@ def test_compile_app_omits_debug_when_unsupported():
     assert calls == {"path": "/out"}
 
 
+def test_compile_app_passes_force_only_to_apps_that_take_it():
+    calls = []
+
+    class ForceApp:
+        def compile(self, path, debug=False, force=False):
+            calls.append(("force-app", force))
+
+    class PlainApp:
+        def compile(self, path, debug=False):
+            calls.append(("plain-app", None))
+
+    dp._compile_app(ForceApp(), Path("/out"), debug=False, force=True)
+    dp._compile_app(ForceApp(), Path("/out"), debug=False)
+    dp._compile_app(PlainApp(), Path("/out"), debug=False, force=True)
+    assert calls == [("force-app", True), ("force-app", False), ("plain-app", None)]
+
+
 def test_compiled_artifacts_ready_defaults_true_without_checker():
     assert dp._compiled_artifacts_ready(SimpleNamespace(), Path("/x")) is True
 

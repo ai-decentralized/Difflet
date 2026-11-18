@@ -57,6 +57,7 @@ class MultiComponentApplication(nn.Module, ABC):
         compiled_model_path: str,
         debug: bool = False,
         select: Collection[str] | None = None,
+        force: bool = False,
     ) -> None:
         specs = self._selected_components(select)
         if not specs:
@@ -66,7 +67,9 @@ class MultiComponentApplication(nn.Module, ABC):
         try:
             with without_allocator_preload(), retrying_cached_failures():
                 for spec in specs:
-                    self._compile_one(spec, compiled_model_path, compiler_workdir, debug)
+                    self._compile_one(
+                        spec, compiled_model_path, compiler_workdir, debug, force=force
+                    )
         finally:
             os.environ["BASE_COMPILE_WORK_DIR"] = compiler_workdir
 
@@ -149,10 +152,16 @@ class MultiComponentApplication(nn.Module, ABC):
         compiled_model_path: str,
         compiler_workdir: str,
         debug: bool,
+        force: bool = False,
     ) -> None:
         component_path = self._component_path(compiled_model_path, spec)
         compiled_marker = component_path / COMPILED_MODEL_FILE_NAME
 
+        if force and self._should_compile_component(spec):
+            # --force rebuilds even a component that looks compiled (a cache broken before
+            # compile wrote its config last). Only the owner drops the marker, before the
+            # barrier, so the other ranks wait for the rebuild instead of loading the old one.
+            (component_path / NEURON_CONFIG_FILE_NAME).unlink(missing_ok=True)
         _spmd_barrier()
         if compiled_marker.exists() and self._compiled_config_matches(spec, component_path):
             logger.info(
