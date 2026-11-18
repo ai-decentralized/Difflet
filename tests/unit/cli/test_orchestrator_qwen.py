@@ -252,7 +252,7 @@ def test_stage_generate_runs_and_saves_latents(monkeypatch, tmp_path):
     sched = types.SimpleNamespace(
         config=types.SimpleNamespace(
             max_shift=1.15, base_shift=0.5,
-            max_image_seq_len=4096, base_image_seq_len=256),
+            max_image_seq_len=4096, base_image_seq_len=256, use_dynamic_shifting=True),
         timesteps=torch.zeros(4),
         set_timesteps=lambda **kw: None,
     )
@@ -441,7 +441,7 @@ def test_stage_generate_compiles_the_probe_additively_for_adaptive_teacache(monk
     sched = types.SimpleNamespace(
         config=types.SimpleNamespace(
             max_shift=1.15, base_shift=0.5,
-            max_image_seq_len=4096, base_image_seq_len=256),
+            max_image_seq_len=4096, base_image_seq_len=256, use_dynamic_shifting=True),
         timesteps=torch.zeros(4),
         set_timesteps=lambda **kw: None,
     )

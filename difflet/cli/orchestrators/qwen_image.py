@@ -701,7 +701,7 @@ class QwenImageOrchestrator(ModelOrchestrator):
             self._stage_generate_neuron(args, backend)
             return
 
-        import numpy as np
+        from difflet.pipeline import flow_match
         import torch
         from difflet.models.qwen_image.application import NeuronQwenImageApplication
         from difflet.pipeline.parallel_config import DiffletParallelConfig
@@ -760,16 +760,12 @@ class QwenImageOrchestrator(ModelOrchestrator):
                     app.compile(str(compiled_dir), select=["teacache_probe"])
         app.load(str(compiled_dir), skip_warmup=True)
         sched = app.pipeline.scheduler
-        sc = sched.config
         image_seq_len = (h // 16) * (w // 16)
-        slope = (sc.max_shift - sc.base_shift) / (sc.max_image_seq_len - sc.base_image_seq_len)
-        mu = image_seq_len * slope + (sc.base_shift - slope * sc.base_image_seq_len)
         for req in stage_loop.claimed_requests(args):
             with stage_loop.request_scope(args, req, final=False):
                 text = torch.load(stage_loop.work_file(args, req, "text.pt"))
                 num_steps = int(stage_loop.effective(req, args, "steps", 4))
-                sigmas = np.linspace(1.0, 1.0 / num_steps, num_steps).tolist()
-                sched.set_timesteps(sigmas=sigmas, mu=mu, device="cpu")
+                flow_match.set_timesteps(sched, num_steps, image_seq_len)
                 guidance = torch.full(
                     [1],
                     float(stage_loop.effective(req, args, "guidance_scale", 4.0)),
