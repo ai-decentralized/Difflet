@@ -12,8 +12,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from difflet.backends.trainium.core.application_base import NeuronApplicationBase
-from difflet.backends.trainium.core.config import InferenceConfig
+from difflet.backends.trainium.core.config import CONFIG_FILE, InferenceConfig
 from difflet.backends.trainium.core.model_wrapper import BaseModelInstance, ModelWrapper
+from difflet.utils.atomic_io import atomic_path
 
 
 class HunyuanVideo15VAEDecoderInferenceConfig(InferenceConfig):
@@ -244,7 +245,9 @@ class NeuronHunyuanVideo15VAEDecoderApplication(NeuronApplicationBase):
         del debug, pre_shard_weights_hook, disable_fail_fast
         compiled_path = Path(compiled_model_path)
         compiled_path.mkdir(parents=True, exist_ok=True)
-        self.config.save(compiled_path)
+        # As NeuronApplicationBase.compile: the config marks the stage compiled, so it goes
+        # first and is written last.
+        (compiled_path / CONFIG_FILE).unlink(missing_ok=True)
         if dry_run:
             return
 
@@ -260,7 +263,9 @@ class NeuronHunyuanVideo15VAEDecoderApplication(NeuronApplicationBase):
                 example,
                 compiler_args=self.get_compiler_args(),
             )
-        torch.jit.save(traced, compiled_path / "model.pt")
+        with atomic_path(compiled_path / "model.pt") as tmp:
+            torch.jit.save(traced, str(tmp))
+        self.config.save(compiled_path)
 
     def load(
         self,
