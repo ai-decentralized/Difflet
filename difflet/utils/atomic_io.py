@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
+import glob
 import logging
 import os
 import uuid
@@ -29,12 +30,36 @@ def fsync_dir(directory: str | os.PathLike) -> None:
             os.close(fd)
 
 
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:  # another user's live process
+        return True
+    return True
+
+
+def _remove_dead_writers_temps(path: Path) -> None:
+    """Remove ``path``'s temp files whose writer is gone (killed before its ``finally`` ran)."""
+    # shortcut: the pid is checked on this host only; fine for host-local caches, a cache shared
+    # across hosts may lose another host's in-flight temp (its write then fails, never corrupts).
+    for tmp in path.parent.glob(f".{glob.escape(path.name)}.tmp-*"):
+        pid = tmp.name.rpartition(".tmp-")[2].partition("-")[0]
+        if pid.isdigit() and not _pid_alive(int(pid)):
+            with contextlib.suppress(FileNotFoundError):
+                tmp.unlink()
+
+
 @contextlib.contextmanager
 def atomic_path(path: str | os.PathLike) -> Iterator[Path]:
     """Yield a temp path next to ``path``; when the block succeeds, move it over ``path``.
 
-    On any error the temp file is removed and ``path`` keeps its previous content."""
+    On any error the temp file is removed and ``path`` keeps its previous content. A writer
+    killed outright (SIGKILL, or SIGTERM with no handler) cannot remove its temp file; the next
+    write to ``path`` does."""
     path = Path(path)
+    _remove_dead_writers_temps(path)
     tmp = path.with_name(f".{path.name}.tmp-{os.getpid()}-{uuid.uuid4().hex[:8]}")
     try:
         yield tmp

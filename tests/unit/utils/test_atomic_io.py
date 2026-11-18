@@ -87,3 +87,16 @@ def test_no_flock_support_means_no_lock_not_a_crash(tmp_path, monkeypatch, caplo
             ran.append(True)
     assert ran == [True]
     assert "continuing without a lock" in caplog.text
+
+
+def test_a_write_removes_the_temp_files_left_by_killed_writers_only(tmp_path):
+    dead = subprocess.run([sys.executable, "-c", "import os; print(os.getpid())"],
+                          capture_output=True, text=True, check=True).stdout.strip()
+    left = tmp_path / f".model.pt.tmp-{dead}-0badc0de"  # a writer killed mid-write
+    busy = tmp_path / f".model.pt.tmp-{os.getpid()}-feedf00d"  # a writer still running
+    other = tmp_path / f".config.json.tmp-{dead}-0badc0de"  # another target's: not ours to judge
+    for p in (left, busy, other):
+        p.write_text("partial")
+    atomic_write_text(tmp_path / "model.pt", "full")
+    assert (tmp_path / "model.pt").read_text() == "full"
+    assert not left.exists() and busy.exists() and other.exists()
