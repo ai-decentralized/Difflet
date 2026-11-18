@@ -2,15 +2,24 @@
 
 from __future__ import annotations
 
+import contextlib
 import inspect
+import os
 from pathlib import Path
 from typing import Any
 
 from difflet.backends import BackendRuntime, get_backend
-from difflet.pipeline.compile_cache import CacheSpec, cache_path, has_valid_manifest, write_manifest
+from difflet.pipeline.compile_cache import (
+    CacheSpec,
+    cache_path,
+    has_valid_manifest,
+    manifest_path,
+    write_manifest,
+)
 from difflet.pipeline.parallel_config import DiffletParallelConfig
 from difflet.pipeline.path_resolver import resolve_model_path
 from difflet.registry import ModelEntry, resolve_model
+from difflet.utils.atomic_io import file_lock
 
 
 class DiffletPipeline:
@@ -152,13 +161,11 @@ class DiffletPipeline:
         # AoT backends build executable artifacts; GPU backends prepare the
         # manifest their load() validates. Neuron's in-process path needs neither.
         if _requires_compile_setup(backend_runtime):
-            cache_ready = has_valid_manifest(compiled_path, spec) and _compiled_artifacts_ready(
-                app, compiled_path
-            )
-            if not skip_compile and (force_compile or not cache_ready):
-                compiled_path.mkdir(parents=True, exist_ok=True)
-                _compile_app(app, compiled_path, debug=debug_compile, force=force_compile)
-                write_manifest(compiled_path, spec)
+            if not skip_compile and (force_compile or not _cache_ready(app, compiled_path, spec)):
+                with _compile_lock(compiled_path, shared=not bound_mode):
+                    # Re-check under the lock: another process may have just built it.
+                    if force_compile or not _cache_ready(app, compiled_path, spec):
+                        _build(app, compiled_path, spec, debug=debug_compile, force=force_compile)
 
         if load:
             _load_app(
@@ -194,13 +201,10 @@ class DiffletPipeline:
         # Use the same cache-validity check as `from_pretrained` so a stale or
         # missing manifest still triggers recompile even when the artifact dir
         # already exists.
-        cache_ready = has_valid_manifest(
-            self.compiled_path, self.cache_spec
-        ) and _compiled_artifacts_ready(self.app, self.compiled_path)
-        if force or not cache_ready:
-            self.compiled_path.mkdir(parents=True, exist_ok=True)
-            _compile_app(self.app, self.compiled_path, debug=debug, force=force)
-            write_manifest(self.compiled_path, self.cache_spec)
+        if force or not _cache_ready(self.app, self.compiled_path, self.cache_spec):
+            with _compile_lock(self.compiled_path):
+                if force or not _cache_ready(self.app, self.compiled_path, self.cache_spec):
+                    _build(self.app, self.compiled_path, self.cache_spec, debug=debug, force=force)
 
     def load(
         self,
@@ -321,6 +325,32 @@ def _cache_application_kwargs(
         if model_name == "hunyuan_video":
             cache_kwargs["teacache_probe_layout"] = "teacache-prefix-v1"
     return cache_kwargs or None
+
+
+def _cache_ready(app: Any, compiled_path: Path, spec: CacheSpec) -> bool:
+    return has_valid_manifest(compiled_path, spec) and _compiled_artifacts_ready(app, compiled_path)
+
+
+def _build(app: Any, compiled_path: Path, spec: CacheSpec, *, debug: bool, force: bool) -> None:
+    compiled_path.mkdir(parents=True, exist_ok=True)
+    # No manifest while the artifact is being rebuilt: a reader must not load half of it.
+    manifest_path(compiled_path).unlink(missing_ok=True)
+    _compile_app(app, compiled_path, debug=debug, force=force)
+    write_manifest(compiled_path, spec)
+
+
+def _compile_lock(compiled_path: Path, *, shared: bool = True):
+    """One process at a time builds a given cache entry; the others wait, then reuse it."""
+    # shortcut: no lock for a multi-rank launch (WORLD_SIZE > 1): every rank comes here and the
+    # compile runs collectives, so a rank waiting on the lock would stall the others. Nor for a
+    # caller-chosen path (serving's private staging dir). Revisit if separate multi-rank jobs
+    # start sharing one cache entry.
+    if not shared or int(os.environ.get("WORLD_SIZE", "1")) > 1:
+        return contextlib.nullcontext()
+    return file_lock(
+        compiled_path.with_name(compiled_path.name + ".lock"),
+        what=f"the compiled artifact {compiled_path}",
+    )
 
 
 def _compile_app(app: Any, compiled_path: Path, *, debug: bool, force: bool = False) -> None:

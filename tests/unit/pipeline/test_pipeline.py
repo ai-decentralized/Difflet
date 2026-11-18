@@ -384,6 +384,60 @@ def test_force_compile_overrides_cache_hit(tmp_path):
     )
 
 
+_SLOW_COMPILES: list[str] = []
+
+
+class _SlowCompileApplication(DummyApplication):
+    def compile(self, compiled_model_path, debug=False):
+        import time
+
+        _SLOW_COMPILES.append(compiled_model_path)
+        time.sleep(0.5)  # long enough for the other caller to arrive mid-compile
+        super().compile(compiled_model_path, debug=debug)
+
+
+@register_model(
+    name="unit_slow_dummy",
+    application_factory=lambda **kwargs: _SlowCompileApplication(**kwargs),
+    detector=lambda model_id: model_id.endswith("unit-slow-dummy-model"),
+    default_parallel=DiffletParallelConfig(tp_degree=2),
+    default_shape={"height": 64, "width": 64, "num_frames": None},
+)
+class _SlowDummyRegistration:
+    pass
+
+
+def test_two_callers_compiling_one_cache_entry_build_it_once(tmp_path, monkeypatch):
+    """The second caller waits for the first one's compile and reuses it."""
+    import threading
+
+    _select_backend(monkeypatch, "trainium")  # an AoT backend: from_pretrained compiles
+    monkeypatch.delenv("WORLD_SIZE", raising=False)
+    model_dir = tmp_path / "unit-slow-dummy-model"
+    model_dir.mkdir()
+    _SLOW_COMPILES.clear()
+    pipes, errors = [], []
+
+    def build():
+        try:
+            pipes.append(DiffletPipeline.from_pretrained(
+                str(model_dir), model_type="unit_slow_dummy", dtype="bf16",
+                compile_cache_dir=str(tmp_path / "cache"), load=False,
+            ))
+        except Exception as exc:  # surfaced by the assert below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=build) for _ in range(2)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+    assert errors == []
+    assert len(pipes) == 2 and pipes[0].compiled_path == pipes[1].compiled_path
+    assert len(_SLOW_COMPILES) == 1
+    assert (pipes[0].compiled_path / "manifest.json").exists()
+
+
 def _select_backend(monkeypatch, name):
     from difflet.backends import registry
 
