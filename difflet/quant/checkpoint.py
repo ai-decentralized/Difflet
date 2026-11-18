@@ -56,6 +56,7 @@ import torch
 
 from difflet.quant import mx
 from difflet.quant.spec import QuantSpec, strip_prefix
+from difflet.utils.atomic_io import file_lock
 
 MANIFEST = "difflet_quant.json"
 #: The manifest a bf16 copy (``core/weights_bf16.py``, which takes the name from here) writes
@@ -438,9 +439,19 @@ def ensure_quantized_dir(cache_root: str | Path, model_dir: str | Path, spec: Qu
         if not create:
             raise ValueError(f"{exc}; run `difflet compile` with the same --quant flags first"
                              ) from None
+    # One process writes it; a concurrent compile waits, then finds it valid and reuses it.
+    with file_lock(target.with_name(target.name + ".lock"), what=f"the quantized checkpoint {target}"):
+        try:
+            check_quantized_dir(target, model_dir, spec)
+            return target
+        except ValueError:
+            pass
+        # Under the lock nobody else writes: temp dirs left here are from killed runs.
+        for stale in target.parent.glob(f".{target.name}.tmp-*"):
+            shutil.rmtree(stale, ignore_errors=True)
         if target.exists():
             shutil.rmtree(target)
-    write_quantized_dir(model_dir, target, spec)
+        write_quantized_dir(model_dir, target, spec)
     return target
 
 
