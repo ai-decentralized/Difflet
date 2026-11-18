@@ -32,6 +32,8 @@ from typing import Any
 
 import torch
 
+from difflet.pipeline.flow_match import sigmas_and_mu
+
 logger = logging.getLogger(__name__)
 
 FLUX_DEFAULT_HEIGHT = 1024
@@ -81,21 +83,7 @@ def image_seq_len(height: int, width: int) -> int:
     return (lh // 2) * (lw // 2)
 
 
-def flux_sigmas_and_mu(scheduler_config, num_inference_steps: int, seq_len: int):
-    """``(sigmas, mu)`` exactly as ``FluxPipeline.__call__`` derives them."""
-    import numpy as np
-    from diffusers.pipelines.flux.pipeline_flux import calculate_shift
-
-    sigmas = np.linspace(1.0, 1.0 / int(num_inference_steps), int(num_inference_steps))
-    get = scheduler_config.get if hasattr(scheduler_config, "get") else lambda k, d: getattr(scheduler_config, k, d)
-    mu = calculate_shift(
-        int(seq_len),
-        get("base_image_seq_len", 256),
-        get("max_image_seq_len", 4096),
-        get("base_shift", 0.5),
-        get("max_shift", 1.15),
-    )
-    return sigmas, float(mu)
+flux_sigmas_and_mu = sigmas_and_mu  # FLUX's name for the shared helper
 
 
 def prepare_packed_latents(height: int, width: int, *, in_channels_latent: int, generator):

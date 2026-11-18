@@ -356,3 +356,27 @@ def test_teacache_step_mismatch_uses_baseline_without_probe(tmp_path):
     assert transformer.delta_calls == 0
     assert len(transformer.calls) == 2
     assert pipe.teacache_controller.stats()["full_steps"] == 0
+
+
+@pytest.mark.parametrize("height,width,steps", [(1024, 1024, 4), (512, 512, 4), (1328, 1328, 50), (512, 1024, 20)])
+def test_timesteps_match_diffusers_with_the_real_dynamic_shift_scheduler(tmp_path, height, width, steps):
+    from diffusers import FlowMatchEulerDiscreteScheduler
+    from diffusers.pipelines.qwenimage.pipeline_qwenimage import calculate_shift, retrieve_timesteps
+
+    from tests.unit.backends._neuron_qwen_app_toy import QWEN_SCHEDULER_CONFIG
+
+    pipe = m.QwenImageOrchestrator(
+        model_path=str(tmp_path), dtype=torch.float32, height=height, width=width,
+        scheduler=FlowMatchEulerDiscreteScheduler.from_config(QWEN_SCHEDULER_CONFIG),
+    )
+    ts = pipe._timesteps(steps, device=torch.device("cpu"))
+
+    # What QwenImagePipeline.__call__ does (image_seq_len = its packed latents' length).
+    ref = FlowMatchEulerDiscreteScheduler.from_config(QWEN_SCHEDULER_CONFIG)
+    cfg = ref.config
+    mu = calculate_shift((height // 16) * (width // 16), cfg.get("base_image_seq_len", 256),
+                         cfg.get("max_image_seq_len", 4096), cfg.get("base_shift", 0.5),
+                         cfg.get("max_shift", 1.15))
+    expected, _ = retrieve_timesteps(ref, steps, "cpu", sigmas=np.linspace(1.0, 1 / steps, steps), mu=mu)
+    assert torch.equal(ts, expected)
+    assert torch.equal(pipe.scheduler.sigmas, ref.sigmas)  # the step sizes the denoise loop uses
