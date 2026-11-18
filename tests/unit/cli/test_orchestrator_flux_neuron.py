@@ -346,3 +346,18 @@ def test_quant_reaches_the_stage_application(monkeypatch, tmp_path):
     quant = built[0]["application_kwargs"]["quant"]
     assert quant["format"] == "mxfp8" and quant["tp_degree"] == 4
     assert any("single_transformer_blocks" in t for t in quant["targets"])
+
+
+def test_stage_parses_values_that_start_with_a_dash():
+    """A prompt (or cache dir, revision, calibration path) starting with '-' reaches the stage as
+    typed: the hand-written argv sent ``--prompt -dark`` and the stage parser exited 2."""
+    from difflet.cli.stage import _build_stage_parser
+
+    args = _args(prompt="-dark scene", cache_dir="-c", teacache_calibration="-cal.json")
+    argv = flux_cli.FluxOrchestrator(args)._stage_cli_args("generate", work_dir="/w")
+    staged = _build_stage_parser().parse_args(
+        ["--orchestrator", flux_cli._HF_MODEL_ID, "--stage", "transformer", *argv])
+    assert (staged.prompt, staged.cache_dir, staged.teacache_calibration) == \
+        ("-dark scene", "-c", "-cal.json")
+    assert (staged.tp_degree, staged.height, staged.width, staged.stage_mode, staged.work_dir) == \
+        (4, 1024, 1024, "generate", "/w")
