@@ -30,6 +30,7 @@ Key Trainium-aware decisions:
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass
 from typing import Optional
 
@@ -434,12 +435,19 @@ class WanFeedForward(nn.Module):
 # Attention (self / cross)
 
 
+#: Experiment E2 (docs/plans/2026-11-18-attn-constmax-sparse-experiments.md): the backend's
+#: ``block_sparse_attention``, resolved by ``WanTransformer3DModel`` when ``DIFFLET_EXP_ATTN_SPARSE``
+#: is set (``ops_impl/block_sparse_attention.py``); None otherwise.
+_block_sparse_attention = None
+
+
 def _attn_kernel(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
     *,
     head_dim: int,
+    kv_mask: Optional[str] = None,
 ) -> torch.Tensor:
     """Run attention on (B, heads, S, head_dim) tensors via ``difflet.ops.attention``.
 
@@ -456,6 +464,10 @@ def _attn_kernel(
     q_flat = q.reshape(batch * heads, seq_q, dim)
     k_flat = k.reshape(batch * heads, seq_k, dim)
     v_flat = v.reshape(batch * heads, seq_k, dim)
+    if kv_mask is not None:  # experiment E2: every batch row and head takes the one tile mask
+        out = _block_sparse_attention(q_flat, k_flat, v_flat, scale=1.0 / math.sqrt(head_dim),
+                                      kv_mask=kv_mask)
+        return out.reshape(batch, heads, seq_q, dim)
     out = attention(
         q_flat,
         k_flat,
@@ -522,6 +534,9 @@ class WanAttention(nn.Module):
             )
         self.local_heads = heads // self.tp_degree
         self._rank_util = None
+        # Experiment E2: the self-attention's static tile-mask spec (kv_tiles_for), stamped by
+        # WanTransformer3DModel.forward under DIFFLET_EXP_ATTN_SPARSE; None = attention_cte.
+        self.kv_mask: Optional[str] = None
         # The self-attention's q/k channel order (ROPE_LAYOUTS); set by the model's
         # use_half_split_rope_, which reorders the q/k rows to match.
         self.rope_layout = "interleaved"
@@ -649,7 +664,8 @@ class WanAttention(nn.Module):
                     stacked_kv, gather_dim=3, process_group=self.cp_group
                 )  # [2, B, heads, S, head_dim]
                 k, v = torch.unbind(stacked_kv, dim=0)
-            out = _attn_kernel(q, k, v, head_dim=self.head_dim)
+            out = _attn_kernel(q, k, v, head_dim=self.head_dim,
+                               kv_mask=None if self.is_cross_attention else self.kv_mask)
 
         # (B, local_heads, S, dim) → (B, S, local_heads * dim); RowParallelLinear then
         # all-reduces each rank's partial output projection back to the full model dim.
@@ -794,6 +810,18 @@ class WanTransformer3DModel(nn.Module):
                 "sp_enabled and context_parallel_enabled are mutually exclusive "
                 "(both shard the sequence dimension)."
             )
+        # Experiment E2: self-attention (attn1) on the fork with a static K/V-tile mask, e.g.
+        # DIFFLET_EXP_ATTN_SPARSE=temporal:6 (attn_tile_masks.kv_tiles_for); unset, nothing changes.
+        self.attn_sparse = os.environ.get("DIFFLET_EXP_ATTN_SPARSE") or None
+        if self.attn_sparse is not None:
+            if self.context_parallel_enabled:
+                raise ValueError("DIFFLET_EXP_ATTN_SPARSE needs the whole sequence in one call; "
+                                 "context parallelism shards it")
+            from difflet.ops._dispatch import load_backend_attr
+
+            global _block_sparse_attention
+            _block_sparse_attention = load_backend_attr("block_sparse_attention",
+                                                        "block_sparse_attention")
         if self.cfg_parallel_enabled and self.context_parallel_enabled:
             from difflet.pipeline.parallel_config import cfg_cp_composable
 
@@ -967,6 +995,10 @@ class WanTransformer3DModel(nn.Module):
         ppf = num_frames // p_t
         pph = height // p_h
         ppw = width // p_w
+
+        if self.attn_sparse is not None:  # experiment E2: the mask spec with this call's grid
+            for block in self.blocks:
+                block.attn1.kv_mask = f"{self.attn_sparse}@{ppf}x{pph}x{ppw}"
 
         # (cos, sin) each (1, S, 1, head_dim)
         rotary_emb = self.rope(hidden_states, self.rope_layout)

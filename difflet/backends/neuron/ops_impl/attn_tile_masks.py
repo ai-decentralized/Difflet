@@ -10,6 +10,8 @@ has no column extent: ``wt`` frames and, for the STA-like family, ``wh`` rows.
 
 from __future__ import annotations
 
+import functools
+
 Q_GROUP, K_TILE = 128, 512  # the kernel's query group and key tile
 
 
@@ -34,6 +36,26 @@ def window_tiles(frames: int, rows: int, cols: int, *, wt: int, wh: int | None =
     keys = blocks(k_block)
     return tuple(tuple(t for t, kc in enumerate(keys) if any(near(a, b) for a in qc for b in kc))
                  for qc in blocks(q_block))
+
+
+@functools.lru_cache(maxsize=8)
+def kv_tiles_for(spec: str, seq_len: int) -> tuple[tuple[int, ...], ...]:
+    """``kv_tiles`` for a model-level spec ``<window>@<frames>x<rows>x<cols>``, the window
+    ``temporal:W`` or ``sta:WT,WH`` (``DIFFLET_EXP_ATTN_SPARSE`` plus the call's patch grid).
+    A grid whose token count is not the call's ``seq_len`` is refused."""
+    window, _, grid = spec.partition("@")
+    kind, _, arg = window.partition(":")
+    try:
+        frames, rows, cols = (int(x) for x in grid.split("x"))
+        wt, wh = {"temporal": lambda: (int(arg), None),
+                  "sta": lambda: tuple(int(x) for x in arg.split(","))}[kind]()
+    except (KeyError, ValueError) as exc:
+        raise ValueError(f"block-sparse spec {spec!r}: want temporal:W or sta:WT,WH, then "
+                         f"@FxRxC") from exc
+    if frames * rows * cols != seq_len:
+        raise ValueError(f"block-sparse spec {spec!r}: its grid has {frames * rows * cols} tokens, "
+                         f"the attention call {seq_len}")
+    return window_tiles(frames, rows, cols, wt=wt, wh=wh)
 
 
 def density(kv_tiles, num_k_tiles: int) -> float:

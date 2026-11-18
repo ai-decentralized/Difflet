@@ -74,3 +74,15 @@ def test_the_reference_masks_skipped_tiles_and_equals_attention_unmasked():
     out2 = masked_attention_reference(q, k, v2, scale=128 ** -0.5, kv_tiles=tiles, chunk=256)
     assert torch.equal(out[:, :128], out2[:, :128]) and torch.equal(out[:, 512:], out2[:, 512:])
     assert not torch.allclose(out[:, 128:512], out2[:, 128:512])
+
+
+def test_the_model_spec_parses_both_families_and_refuses_the_rest():
+    from difflet.backends.neuron.ops_impl.attn_tile_masks import kv_tiles_for
+
+    assert kv_tiles_for("temporal:6@21x30x52", 32760) == window_tiles(*WAN_81F, wt=6)
+    assert kv_tiles_for("sta:8,6@21x30x52", 32760) == window_tiles(*WAN_81F, wt=8, wh=6)
+    for bad in ("temporal@21x30x52", "box:3@21x30x52", "sta:3@21x30x52", "temporal:6"):
+        with pytest.raises(ValueError, match="want temporal:W or sta:WT,WH"):
+            kv_tiles_for(bad, 32760)
+    with pytest.raises(ValueError, match="32760 tokens, the attention call 32768"):
+        kv_tiles_for("temporal:6@21x30x52", 32768)
