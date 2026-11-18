@@ -5,8 +5,9 @@ import hashlib
 import json
 from abc import ABC, abstractmethod
 from pathlib import Path
+from typing import Any
 
-from difflet.utils.atomic_io import atomic_write_text
+from difflet.utils.atomic_io import atomic_write_text, file_lock
 
 STAGE_MANIFEST_FILENAME = "manifest.json"
 # Kept in lockstep with difflet.pipeline.compile_cache.MANIFEST_SCHEMA_VERSION
@@ -38,6 +39,18 @@ def write_stage_manifest(path: Path, cache_inputs: dict) -> None:
     }
     # Atomic: a reader (another process's stage check) must never see half a manifest.
     atomic_write_text(path / STAGE_MANIFEST_FILENAME, json.dumps(data, indent=2, sort_keys=True) + "\n")
+
+
+def stage_lock(compiled_dir) -> Any:
+    """Exclusive lock for building ``compiled_dir`` (a sibling ``<dir>.lock`` file).
+
+    For the single-process AoT stages only: never around torchrun rank code, where a rank
+    waiting here would stall the others in their collectives."""
+    compiled_dir = Path(compiled_dir)
+    return file_lock(
+        compiled_dir.with_name(compiled_dir.name + ".lock"),
+        what=f"the stage artifact {compiled_dir}",
+    )
 
 
 def has_valid_stage_manifest(path: Path, cache_inputs: dict) -> bool:
@@ -217,20 +230,37 @@ class ModelOrchestrator(ABC):
             f"{type(self).__name__} does not implement _run_stage_internal"
         )
 
-    def _stage_is_compiled(self, stage: str, args: argparse.Namespace, compiled_dir) -> bool:
-        """True when ``compiled_dir`` already holds this stage's artifact.
+    def _compile_stage(
+        self,
+        stage: str,
+        args: argparse.Namespace,
+        compiled_dir,
+        compile_fn,
+        *,
+        skip_if_valid: bool,
+        cache_inputs: dict | None = None,
+    ) -> None:
+        """Build one stage artifact, one process at a time, and write its manifest last.
 
-        The stage manifest is written only after a successful compile
-        (``_finish_stage_compile``), so a manifest whose cache inputs match the
-        current ones means the artifact is complete and current. Single-component
-        stages (NxDI text encoders, the standalone VAE decoders) recompiled
-        unconditionally in compile mode -- unlike the multi-component DiT
-        stages, whose per-component skip made ``difflet compile`` idempotent --
-        so a repeated ``difflet compile`` cost Qwen-Image ~9 min and
-        HunyuanVideo ~5 min of rebuilt NEFFs it then overwrote byte-for-byte.
+        ``compile_fn(force)`` builds it. ``skip_if_valid`` is for single-component stages
+        (NxDI text encoders, standalone VAE decoders), which rebuild every time they are
+        compiled: with a valid manifest they are skipped, including when a concurrent
+        ``difflet compile`` has just finished them (Qwen-Image ~9 min, HunyuanVideo ~5 min
+        saved). Multi-component stages always call ``compile_fn``: their compile skips the
+        finished components itself and adds new ones (the TeaCache probe) to the artifact.
         """
-        if not has_valid_stage_manifest(compiled_dir, self._stage_cache_inputs(stage, args)):
-            return False
-        print(f"[difflet] stage {stage!r} already compiled at {compiled_dir} "
-              "(manifest matches); skipping", flush=True)
-        return True
+        compiled_dir = Path(compiled_dir)
+        if cache_inputs is None:
+            cache_inputs = self._stage_cache_inputs(stage, args)
+        force = bool(getattr(args, "force", False))
+        with stage_lock(compiled_dir):
+            valid = has_valid_stage_manifest(compiled_dir, cache_inputs)
+            if valid and skip_if_valid and not force:
+                print(f"[difflet] stage {stage!r} already compiled at {compiled_dir} "
+                      "(manifest matches); skipping", flush=True)
+                return
+            if force or not valid:
+                # No manifest while it is rebuilt: a generate run must not load half of it.
+                (compiled_dir / STAGE_MANIFEST_FILENAME).unlink(missing_ok=True)
+            compile_fn(force)
+            write_stage_manifest(compiled_dir, cache_inputs)

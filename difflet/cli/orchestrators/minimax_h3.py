@@ -47,7 +47,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from difflet.cli import runner
-from difflet.cli.orchestrators.base import ModelOrchestrator
+from difflet.cli.orchestrators.base import ModelOrchestrator, stage_lock
 from difflet.cli.orchestrators.torchrun import (
     decodes_on_device,
     refuse_torchrun_conflicts,
@@ -309,7 +309,8 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
         )
         app = NeuronQwen3VLTextForCausalLM(encoder_path, config)
         if args.stage_mode == "compile":
-            app.compile(str(compiled_dir))
+            with stage_lock(compiled_dir):
+                app.compile(str(compiled_dir))
             return
 
         from difflet.cli.dp import stage_loop
@@ -390,7 +391,8 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
             config=config,
         )
         if args.stage_mode == "compile":
-            app.compile(str(compiled_dir))
+            with stage_lock(compiled_dir):
+                app.compile(str(compiled_dir))
             return
 
         from difflet.cli.dp import stage_loop
@@ -506,7 +508,8 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
             config=config,
         )
         if args.stage_mode == "compile":
-            app.compile(str(compiled_dir))
+            with stage_lock(compiled_dir):
+                app.compile(str(compiled_dir))
             return
 
         from difflet.cli.dp import stage_loop
@@ -551,7 +554,8 @@ class MiniMaxH3Orchestrator(ModelOrchestrator):
             config=config,
         )
         if args.stage_mode == "compile":
-            app.compile(str(compiled_dir))
+            with stage_lock(compiled_dir):
+                app.compile(str(compiled_dir))
             return
 
         from difflet.cli.dp import stage_loop

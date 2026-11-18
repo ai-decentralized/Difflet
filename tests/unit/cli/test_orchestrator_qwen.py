@@ -49,7 +49,7 @@ class _Recorder:
         self.compiled = None
         self.loaded = None
 
-    def compile(self, path):
+    def compile(self, path, force=False):
         self.compiled = path
 
     def load(self, path, **kw):
