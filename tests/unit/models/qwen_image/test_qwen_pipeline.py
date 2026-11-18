@@ -380,3 +380,18 @@ def test_timesteps_match_diffusers_with_the_real_dynamic_shift_scheduler(tmp_pat
     expected, _ = retrieve_timesteps(ref, steps, "cpu", sigmas=np.linspace(1.0, 1 / steps, steps), mu=mu)
     assert torch.equal(ts, expected)
     assert torch.equal(pipe.scheduler.sigmas, ref.sigmas)  # the step sizes the denoise loop uses
+
+
+@pytest.mark.parametrize("steps", [0, 1])
+def test_a_schedule_too_short_for_shift_terminal_is_refused(tmp_path, steps):
+    from diffusers import FlowMatchEulerDiscreteScheduler
+
+    from tests.unit.backends._neuron_qwen_app_toy import QWEN_SCHEDULER_CONFIG
+
+    # One step with shift_terminal set stretches 0/0: diffusers' schedule is NaN.
+    pipe = m.QwenImageOrchestrator(
+        model_path=str(tmp_path), dtype=torch.float32,
+        scheduler=FlowMatchEulerDiscreteScheduler.from_config(QWEN_SCHEDULER_CONFIG),
+    )
+    with pytest.raises(ValueError, match="at least 2 inference steps"):
+        pipe._timesteps(steps, device=torch.device("cpu"))
