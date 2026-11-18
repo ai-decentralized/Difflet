@@ -29,9 +29,11 @@ Key Trainium-aware decisions:
 
 from __future__ import annotations
 
+import json
 import math
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 import torch
@@ -448,6 +450,7 @@ def _attn_kernel(
     *,
     head_dim: int,
     kv_mask: Optional[str] = None,
+    constmax_sigma: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """Run attention on (B, heads, S, head_dim) tensors via ``difflet.ops.attention``.
 
@@ -478,8 +481,41 @@ def _attn_kernel(
         tp_q=True,
         tp_k=True,
         tp_out=False,
+        # Experiment E1: the layer's score sigma (add_constmax_sigma_), only when it has one.
+        **({} if constmax_sigma is None else {"constmax_sigma": constmax_sigma}),
     )
     return out.reshape(batch, heads, seq_q, dim)
+
+
+def add_constmax_sigma_(model: nn.Module, model_path) -> int:
+    """Experiment E1 (docs/plans/2026-11-18-attn-constmax-sparse-experiments.md), opt-in with
+    ``DIFFLET_EXP_ATTN_CONSTMAX=1``: each self-attention (``attn1``) whose layer passes the gap
+    rule of its expert's table (``attn_constmax.json``, scripts/attn_constmax/table_wan.py) carries
+    its score sigma as a non-persistent [128, 1] buffer, which ``_attn_kernel`` hands the neuron
+    backend's const-max route; the other layers (the allowlist) and every cross-attention stay on
+    attention_cte. The table is the one whose "<revision>/<expert dir>" key ``model_path`` (hub
+    snapshot, bf16 copy or quantized directory of one expert) matches; none is an error. Returns
+    the number of attentions routed (0 with the env unset)."""
+    if os.environ.get("DIFFLET_EXP_ATTN_CONSTMAX") != "1":
+        return 0
+    tables = json.loads(Path(__file__).with_name("attn_constmax.json").read_text())["tables"]
+    parts = Path(model_path).parts
+    keys = [k for k in tables
+            if k.split("/")[0] in str(model_path) and k.split("/")[1] in parts]
+    if len(keys) != 1:
+        raise ValueError(f"DIFFLET_EXP_ATTN_CONSTMAX: no single const-max table for {model_path} "
+                         f"(tables: {sorted(tables)})")
+    layers = tables[keys[0]]["layers"]
+    routed = 0
+    for i, block in enumerate(model.blocks):
+        row = layers[f"blocks.{i}.attn1"]
+        if row["ok"]:
+            block.attn1.register_buffer("constmax_sigma", torch.full((128, 1), row["sigma"]),
+                                        persistent=False)
+            routed += 1
+    print(f"[wan] const-max (experiment E1): {routed} of {len(model.blocks)} self-attentions "
+          f"routed, table {keys[0]}", flush=True)
+    return routed
 
 
 class WanAttention(nn.Module):
@@ -665,7 +701,8 @@ class WanAttention(nn.Module):
                 )  # [2, B, heads, S, head_dim]
                 k, v = torch.unbind(stacked_kv, dim=0)
             out = _attn_kernel(q, k, v, head_dim=self.head_dim,
-                               kv_mask=None if self.is_cross_attention else self.kv_mask)
+                               kv_mask=None if self.is_cross_attention else self.kv_mask,
+                               constmax_sigma=getattr(self, "constmax_sigma", None))
 
         # (B, local_heads, S, dim) → (B, S, local_heads * dim); RowParallelLinear then
         # all-reduces each rank's partial output projection back to the full model dim.

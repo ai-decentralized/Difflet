@@ -112,9 +112,11 @@ class NeuronWanTransformerApplication(TorchNeuronApplicationBase):
             self.skipped_checkpoint_prefixes = skipped
 
     def build_module(self) -> torch.nn.Module:
-        from difflet.models.wan.modeling_wan import WanTransformer3DModel
+        from difflet.models.wan.modeling_wan import WanTransformer3DModel, add_constmax_sigma_
 
-        return WanTransformer3DModel(self.config, dtype=self.dtype)
+        module = WanTransformer3DModel(self.config, dtype=self.dtype)
+        add_constmax_sigma_(module, self.model_path)  # experiment E1; a no-op with its env unset
+        return module
 
     def _after_load(self, module: torch.nn.Module) -> None:
         """When any self-attention's q or k is an MXFP8 twin, switch the whole module to the
