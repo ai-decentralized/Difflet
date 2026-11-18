@@ -79,6 +79,7 @@ import torch
 import torch.nn as nn
 
 from difflet import envs
+from difflet.utils.atomic_io import atomic_write_text, fsync_dir
 
 logger = logging.getLogger(__name__)
 
@@ -288,27 +289,11 @@ def _pwrite_all(fd: int, data: memoryview, offset: int) -> None:
         data, offset = data[written:], offset + written
 
 
-def _fsync_dir(directory: Path) -> None:
-    with contextlib.suppress(OSError):
-        fd = os.open(directory, os.O_RDONLY)
-        try:
-            os.fsync(fd)
-        finally:
-            os.close(fd)
+_fsync_dir = fsync_dir
 
 
 def _write_json_atomic(path: Path, body: dict[str, Any]) -> None:
-    tmp = path.with_name(f".{path.name}.tmp-{os.getpid()}-{uuid.uuid4().hex[:8]}")
-    try:
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(body, f, indent=1)
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, path)
-    finally:
-        with contextlib.suppress(FileNotFoundError):
-            tmp.unlink()
-    _fsync_dir(path.parent)
+    atomic_write_text(path, json.dumps(body, indent=1))
 
 
 # -------------------------------------------------------------------------------- one file
