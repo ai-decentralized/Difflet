@@ -253,12 +253,20 @@ class ModelOrchestrator(ABC):
         if cache_inputs is None:
             cache_inputs = self._stage_cache_inputs(stage, args)
         force = bool(getattr(args, "force", False))
-        with stage_lock(compiled_dir):
-            valid = has_valid_stage_manifest(compiled_dir, cache_inputs)
-            if valid and skip_if_valid and not force:
+
+        def skip() -> bool:
+            if skip_if_valid and not force and has_valid_stage_manifest(compiled_dir, cache_inputs):
                 print(f"[difflet] stage {stage!r} already compiled at {compiled_dir} "
                       "(manifest matches); skipping", flush=True)
+                return True
+            return False
+
+        if skip():  # before the lock: a prebuilt cache may be read-only
+            return
+        with stage_lock(compiled_dir):
+            if skip():  # a concurrent compile finished it while this one waited
                 return
+            valid = has_valid_stage_manifest(compiled_dir, cache_inputs)
             if force or not valid:
                 # No manifest while it is rebuilt: a generate run must not load half of it.
                 (compiled_dir / STAGE_MANIFEST_FILENAME).unlink(missing_ok=True)
