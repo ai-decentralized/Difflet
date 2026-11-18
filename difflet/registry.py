@@ -471,6 +471,16 @@ def _register_builtin_minimax_h3() -> None:
         detector=is_minimax_h3,
         default_parallel=DiffletParallelConfig(tp_degree=4),
         default_shape={"height": 768, "width": 1344, "num_frames": 124},
+        capabilities=ModelCapabilities(
+            num_attention_heads=56,  # transformer/config.json
+            # Guidance-distilled: no CFG branch to split (the orchestrator refuses --cfg-parallel).
+            is_distilled=True,
+            # CP over the DiT's block stack, on the neuron backend only (Trainium refuses it in
+            # MiniMaxH3Orchestrator._validate_topology); no ring kernel.
+            supports_cp=True,
+            cp_modes=frozenset({"ulysses", "gather_kv"}),
+            supports_sp=False,  # deferred until the dense TP4 graph is qualified
+        ),
         # neuron: the staged CLI (difflet/cli/orchestrators/minimax_h3.py) and resident serving
         # (difflet/serving/models/minimax_h3.py over backends/neuron/minimax_h3/resident.py);
         # neither goes through application_factory, which builds the Trainium application.

@@ -67,3 +67,16 @@ def test_the_cli_offers_exactly_what_it_did_before_the_tables_moved():
         "MiniMaxAI/MiniMax-H3": "minimax_h3",
         "Lightricks/LTX-2": "ltx_2",
     }
+
+
+@pytest.mark.parametrize("flag, says", [(["--sp"], "does not support --sp"),
+                                         (["--cfg-parallel"], "is guidance-distilled")])
+def test_minimax_parallel_flags_are_refused_with_a_message_not_a_traceback(flag, says, monkeypatch, capsys):
+    # MiniMax-H3 declared no capabilities: these ended in "ValueError: model 'minimax_h3'
+    # declares no capabilities".
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    args = main._build_parser().parse_args(
+        ["generate", "--model-id", "MiniMaxAI/MiniMax-H3", "--prompt", "p", "--output", "o.mp4", *flag])
+    with pytest.raises(SystemExit):
+        main.check_command_args(args)
+    assert says in capsys.readouterr().err
