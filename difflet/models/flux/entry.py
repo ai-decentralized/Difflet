@@ -34,7 +34,7 @@ def create_flux_application(
                                           shape=shape, **kwargs)
     if backend != "trainium":
         raise NotImplementedError(
-            f"Flux supports the trainium and neuron backends, got {backend!r}"
+            f"Flux supports the trainium, tpu and neuron backends, got {backend!r}"
         )
 
     from difflet.common.tp_reduce import parse_tp_reduce_dtype
