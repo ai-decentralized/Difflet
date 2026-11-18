@@ -11,8 +11,11 @@ import subprocess
 import sys
 import textwrap
 import time
+from pathlib import Path
 
 import pytest
+
+REPO = Path(__file__).resolve().parents[3]  # the difflet the subprocess imports
 
 _PARENT = textwrap.dedent("""
     import sys
@@ -48,7 +51,7 @@ def test_a_stage_dies_with_the_cli_that_launched_it(tmp_path, backend):
     pidfile = tmp_path / "stage.pid"
     parent = subprocess.Popen(
         [sys.executable, "-c", _PARENT, str(pidfile)],
-        env={**os.environ, "PYTHONPATH": os.getcwd(), "DIFFLET_BACKEND": backend,
+        env={**os.environ, "PYTHONPATH": str(REPO), "DIFFLET_BACKEND": backend,
              "BASE_COMPILE_WORK_DIR": str(tmp_path / "work")},
     )
     deadline = time.monotonic() + 60

@@ -9,11 +9,14 @@ import subprocess
 import sys
 import textwrap
 import time
+from pathlib import Path
 
 import pytest
 
 from difflet.utils import atomic_io
 from difflet.utils.atomic_io import atomic_path, atomic_write_text, file_lock
+
+REPO = Path(__file__).resolve().parents[3]  # the difflet the subprocess imports
 
 
 def test_atomic_write_replaces_the_file(tmp_path):
@@ -47,7 +50,7 @@ _HOLDER = textwrap.dedent("""
 def _start_holder(lock, seconds):
     proc = subprocess.Popen([sys.executable, "-c", _HOLDER, str(lock), str(seconds)],
                             stdout=subprocess.PIPE, text=True,
-                            env={**os.environ, "PYTHONPATH": os.getcwd()})
+                            env={**os.environ, "PYTHONPATH": str(REPO)})
     assert proc.stdout.readline().strip() == "locked"
     return proc
 
