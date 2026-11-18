@@ -234,3 +234,21 @@ def test_has_compiled_artifacts_checks_neuron_config(tmp_path):
     )
 
     assert not app.has_compiled_artifacts(str(tmp_path / "compiled"))
+
+
+def test_force_rebuilds_a_component_that_only_looks_compiled(tmp_path):
+    # A cache broken before compile wrote its config last: model.pt is truncated but
+    # model.pt + a matching neuron_config.json still pass the "compiled" check.
+    component = DummyComponent(name="component", tp_degree=4, world_size=4)
+    app = DummyMultiComponentApplication([ComponentSpec("component", component)])
+    compiled = tmp_path / "compiled"
+    app.compile(str(compiled))
+    (compiled / "component" / "model.pt").write_text("trunc", encoding="utf-8")
+
+    app.compile(str(compiled))
+    assert len(component.compile_calls) == 1  # without force it is skipped, as before
+
+    app.compile(str(compiled), force=True)
+    assert len(component.compile_calls) == 2
+    assert (compiled / "component" / "model.pt").read_text(encoding="utf-8") == "compiled\n"
+    assert app.has_compiled_artifacts(str(compiled))
