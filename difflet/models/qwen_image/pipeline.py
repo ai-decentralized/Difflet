@@ -22,7 +22,6 @@ import warnings
 from dataclasses import dataclass
 from typing import Any
 
-import numpy as np
 import torch
 
 # From the NxD-free contract module (application.py re-exports the same class): the neuron and
@@ -295,11 +294,9 @@ class QwenImageOrchestrator:
                 device=device,
                 dtype=torch.float32,
             )
-        sigmas = np.linspace(1.0, 1.0 / num_inference_steps, num_inference_steps)
-        timesteps, _ = _retrieve_timesteps(
-            self.scheduler, num_inference_steps, "cpu", sigmas=sigmas
-        )
-        return timesteps.to(device=device)
+        from difflet.pipeline.flow_match import set_timesteps
+
+        return set_timesteps(self.scheduler, num_inference_steps, self.packed_seq_len).to(device=device)
 
     def _denoise(
         self,
