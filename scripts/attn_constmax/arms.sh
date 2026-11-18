@@ -5,7 +5,7 @@
 # scripts/quant_bench/bench.sh's flags per model. Unlike bench.sh, each arm keeps its own cache
 # (ROOT/cache/<model>-<arm>): nothing is removed.
 #
-# usage: arms.sh <flux|ltx_2> <bf16|cm|mxcm> <compile|timed> <cores> <cpus>
+# usage: arms.sh <flux|ltx_2> <bf16|cm|mxcm> <compile|smoke|timed> <cores> <cpus>
 #   bf16: shipped attention_cte; cm: DIFFLET_EXP_ATTN_CONSTMAX=1; mxcm: cm + --quant mxfp8
 # env: ROOT (default /mnt/nvme/difflet-exp/constmax), PY
 set -u
@@ -44,6 +44,10 @@ cd "$REPO"
 if [ "$MODE" = compile ]; then
   /usr/bin/time -v taskset -c "$CPUS" "$PY" -m difflet.cli.main compile --backend neuron "${M[@]}" "${Q[@]}" \
     --cache-dir "$C" > "$W/compile.log" 2>&1
+elif [ "$MODE" = smoke ]; then  # the gate's 10-step generate, latents kept
+  /usr/bin/time -v taskset -c "$CPUS" "$PY" -m difflet.cli.main generate --backend neuron "${M[@]}" "${Q[@]}" \
+    --cache-dir "$C" --steps 10 --seed 42 --prompt "$PROMPT" --output "$W/smoke.$EXT" \
+    --work-dir "$W/work_smoke" --keep-work-dir > "$W/smoke.log" 2>&1
 else
   : > "$W/requests.jsonl"
   for i in 1 2; do
