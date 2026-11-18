@@ -44,6 +44,8 @@ from typing import Any
 
 import torch
 
+from difflet.utils.atomic_io import atomic_path
+
 
 def _mode_name(keyframes: int) -> str:
     return {0: "text-only", 1: "one-keyframe", 2: "first+last-keyframe"}[int(keyframes)]
@@ -420,9 +422,8 @@ class NeuronMiniMaxH3Resident:
                     time_embed_dim=int(config.time_embed_dim),
                     hidden_size=int(config.hidden_size), dtype=torch.bfloat16)
                 path.parent.mkdir(parents=True, exist_ok=True)
-                partial = path.with_suffix(".pt.partial")
-                torch.save(table, partial)
-                partial.replace(path)
+                with atomic_path(path) as tmp:  # a temp name per process: replicas build at once
+                    torch.save(table, str(tmp))
 
             rank0_call(build, device=self.dit_app.device, what="AdaLN modulation table")
             self._tables[key] = torch.load(path)
