@@ -10,38 +10,12 @@ from difflet.cli.quant import add_quant_flags as _add_quant_flags
 from difflet.cli.quant import validate_quant
 from difflet.pipeline.parallel_config import CP_MODES
 
-VALID_MODELS = {
-    "black-forest-labs/FLUX.1-dev",
-    "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
-    "Wan-AI/Wan2.1-T2V-14B-Diffusers",
-    "hunyuanvideo-community/HunyuanVideo",
-    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
-    "Qwen/Qwen-Image",
-    "MiniMaxAI/MiniMax-H3",
-    "Lightricks/LTX-2",
-}
+def cli_model_types() -> dict[str, str]:
+    """Every model id `difflet` accepts -> its registry model type: each entry's cli_model_ids
+    (difflet/registry.py). Adding a model to the CLI is that one record."""
+    from difflet.registry import registered_models
 
-SERVE_VALID_MODELS = {
-    "black-forest-labs/FLUX.1-dev",
-    "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
-    "Wan-AI/Wan2.1-T2V-14B-Diffusers",
-    "hunyuanvideo-community/HunyuanVideo",
-    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
-    "Qwen/Qwen-Image",
-    "Lightricks/LTX-2",
-    "MiniMaxAI/MiniMax-H3",
-}
-
-_MODEL_TYPE: dict[str, str] = {
-    "black-forest-labs/FLUX.1-dev": "flux",
-    "Wan-AI/Wan2.2-T2V-A14B-Diffusers": "wan",
-    "Wan-AI/Wan2.1-T2V-14B-Diffusers": "wan",
-    "hunyuanvideo-community/HunyuanVideo": "hunyuan_video",
-    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v": "hunyuan_video_15",
-    "Qwen/Qwen-Image": "qwen_image",
-    "MiniMaxAI/MiniMax-H3": "minimax_h3",
-    "Lightricks/LTX-2": "ltx_2",
-}
+    return {model_id: entry.name for entry in registered_models() for model_id in entry.cli_model_ids}
 
 
 def _add_model_flag(p: argparse.ArgumentParser) -> None:
@@ -49,7 +23,7 @@ def _add_model_flag(p: argparse.ArgumentParser) -> None:
         "--model-id",
         required=True,
         dest="model_id",
-        help="HuggingFace model ID. One of:\n  " + "\n  ".join(sorted(VALID_MODELS)),
+        help="HuggingFace model ID. One of:\n  " + "\n  ".join(sorted(cli_model_types())),
     )
 
 
@@ -58,7 +32,7 @@ def _add_serve_model_flag(p: argparse.ArgumentParser) -> None:
         "--model-id",
         required=True,
         dest="model_id",
-        help="HuggingFace model ID. One of:\n  " + "\n  ".join(sorted(SERVE_VALID_MODELS)),
+        help="HuggingFace model ID. One of:\n  " + "\n  ".join(sorted(cli_model_types())),
     )
 
 
@@ -682,7 +656,7 @@ def _require_model_backend(model_id: str, backend: str, *, source: str | None = 
     """
     from difflet.registry import resolve_model
 
-    entry = resolve_model(model_id, model_type=_MODEL_TYPE.get(model_id))
+    entry = resolve_model(model_id, model_type=cli_model_types().get(model_id))
     try:
         entry.require_backend(backend)
     except ValueError as exc:
@@ -1044,7 +1018,7 @@ def _capabilities(model_id: str):
 
     from difflet.registry import resolve_model
 
-    return resolve_model(model_id, model_type=_MODEL_TYPE[model_id]).require_capabilities()
+    return resolve_model(model_id, model_type=cli_model_types()[model_id]).require_capabilities()
 
 
 def _validate_sp(args: argparse.Namespace) -> None:
@@ -1170,7 +1144,7 @@ def _registry_layout(args: argparse.Namespace) -> tuple[int, bool]:
     """
     from difflet.registry import resolve_model
 
-    default = resolve_model(args.model_id, model_type=_MODEL_TYPE[args.model_id]).default_parallel
+    default = resolve_model(args.model_id, model_type=cli_model_types()[args.model_id]).default_parallel
     cfg = bool(getattr(args, "cfg_parallel", False))
     if default.cfg_parallel_enabled and not (args.tp_degree or cfg or (args.cp_degree or 1) > 1):
         return default.tp_degree, True
@@ -1183,7 +1157,7 @@ def _registry_layout_is_cfg_parallel(args: argparse.Namespace) -> bool:
     """Whether the model's registry default declares a CFG-parallel layout (hv15)."""
     from difflet.registry import resolve_model
 
-    entry = resolve_model(args.model_id, model_type=_MODEL_TYPE[args.model_id])
+    entry = resolve_model(args.model_id, model_type=cli_model_types()[args.model_id])
     return bool(entry.default_parallel.cfg_parallel_enabled)
 
 
@@ -1284,7 +1258,7 @@ def _validate_capacity(args: argparse.Namespace) -> None:
     else:
         from difflet.registry import resolve_model
 
-        entry = resolve_model(args.model_id, model_type=_MODEL_TYPE[args.model_id])
+        entry = resolve_model(args.model_id, model_type=cli_model_types()[args.model_id])
         unit = "NeuronCores"
         tp_note = "" if args.tp_degree else f" (registry default for {entry.name})"
     print(
@@ -1389,25 +1363,9 @@ def _get_orchestrator(args: argparse.Namespace):
             )
         return GpuOrchestrator(args, spec)
 
-    from difflet.cli.orchestrators.flux import FluxOrchestrator
-    from difflet.cli.orchestrators.hunyuan_video import HunyuanVideoOrchestrator
-    from difflet.cli.orchestrators.hunyuan_video_15 import HunyuanVideo15Orchestrator
-    from difflet.cli.orchestrators.ltx_2 import LTX2Orchestrator
-    from difflet.cli.orchestrators.minimax_h3 import MiniMaxH3Orchestrator
-    from difflet.cli.orchestrators.qwen_image import QwenImageOrchestrator
-    from difflet.cli.orchestrators.wan import WanOrchestrator
+    from difflet.cli.stage import _load_orchestrator_class
 
-    mapping = {
-        "black-forest-labs/FLUX.1-dev": FluxOrchestrator,
-        "Lightricks/LTX-2": LTX2Orchestrator,
-        "MiniMaxAI/MiniMax-H3": MiniMaxH3Orchestrator,
-        "Wan-AI/Wan2.2-T2V-A14B-Diffusers": WanOrchestrator,
-        "Wan-AI/Wan2.1-T2V-14B-Diffusers": WanOrchestrator,
-        "hunyuanvideo-community/HunyuanVideo": HunyuanVideoOrchestrator,
-        "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v": HunyuanVideo15Orchestrator,
-        "Qwen/Qwen-Image": QwenImageOrchestrator,
-    }
-    return mapping[args.model_id](args)
+    return _load_orchestrator_class(args.model_id)(args)
 
 
 def _ensure_jemalloc() -> None:
@@ -1461,9 +1419,7 @@ def check_command_args(args: argparse.Namespace) -> None:
     throwaway Namespace with ``os.environ`` restored afterwards, to refuse a bad combination before
     any compile starts.
     """
-    valid_models = SERVE_VALID_MODELS if args.command == "serve" else VALID_MODELS
-    if args.command == "plan" and getattr(args, "serving", False):
-        valid_models = SERVE_VALID_MODELS
+    valid_models = cli_model_types()
     if args.model_id not in valid_models:
         print(
             f"Error: Unknown model-id '{args.model_id}'. Valid model IDs:\n"

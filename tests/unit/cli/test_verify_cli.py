@@ -106,8 +106,8 @@ def test_sp_supported_set_matches_documented_matrix():
 
 
 def test_all_model_ids_valid_in_cli():
-    from difflet.cli.main import VALID_MODELS
-    assert {m.model_id for m in MODELS.values()} <= VALID_MODELS
+    from difflet.cli.main import cli_model_types
+    assert {m.model_id for m in MODELS.values()} <= set(cli_model_types())
 
 
 def test_cp_unsupported_models():

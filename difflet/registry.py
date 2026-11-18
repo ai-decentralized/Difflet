@@ -87,6 +87,10 @@ class ModelEntry:
     # when a model needs files outside the standard diffusers layout (e.g. a
     # model that ships custom code in a non-standard directory).
     download_patterns: tuple[str, ...] | None = None
+    # The CLI: the model ids `difflet` accepts for this model, and the staged orchestrator
+    # ("pkg.module:Class") its Neuron backends run. No ids: not offered on the CLI.
+    cli_model_ids: tuple[str, ...] = ()
+    cli_orchestrator: str | None = None
 
     def matches(self, model_id: str) -> bool:
         normalized = model_id.rstrip("/")
@@ -171,6 +175,8 @@ def register_model(
     capabilities: ModelCapabilities | None = None,
     backends: list[str] | tuple[str, ...] = ("trainium",),
     download_patterns: list[str] | tuple[str, ...] | None = None,
+    cli_model_ids: list[str] | tuple[str, ...] = (),
+    cli_orchestrator: str | None = None,
 ) -> Callable[[type], type]:
     """Register a model entry.
 
@@ -192,6 +198,8 @@ def register_model(
             capabilities=capabilities,
             backends=tuple(backends),
             download_patterns=tuple(download_patterns) if download_patterns is not None else None,
+            cli_model_ids=tuple(cli_model_ids),
+            cli_orchestrator=cli_orchestrator,
         )
         return cls
 
@@ -255,6 +263,10 @@ def _register_builtin_flux() -> None:
 
     @register_model(
         name="flux",
+        cli_model_ids=(
+            "black-forest-labs/FLUX.1-dev",
+        ),
+        cli_orchestrator="difflet.cli.orchestrators.flux:FluxOrchestrator",
         application_factory="difflet.models.flux.entry:create_flux_application",
         # trainium (AoT); the neuron backend (TorchNeuron, torchrun ranks; the DiT and T5 TP-sharded
         # on the device, CLIP and the VAE on the device, all bf16); CUDA: tp=1, one GPU,
@@ -289,6 +301,11 @@ def _register_builtin_wan() -> None:
 
     @register_model(
         name="wan",
+        cli_model_ids=(
+            "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+            "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+        ),
+        cli_orchestrator="difflet.cli.orchestrators.wan:WanOrchestrator",
         application_factory="difflet.models.wan.entry:create_wan_application",
         hf_paths=(
             "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
@@ -324,6 +341,10 @@ def _register_builtin_hunyuan_video() -> None:
 
     @register_model(
         name="hunyuan_video",
+        cli_model_ids=(
+            "hunyuanvideo-community/HunyuanVideo",
+        ),
+        cli_orchestrator="difflet.cli.orchestrators.hunyuan_video:HunyuanVideoOrchestrator",
         application_factory="difflet.models.hunyuan_video.entry:create_hunyuan_video_application",
         hf_paths=(
             "hunyuanvideo-community/HunyuanVideo",
@@ -352,6 +373,10 @@ def _register_builtin_hunyuan_video_15() -> None:
 
     @register_model(
         name="hunyuan_video_15",
+        cli_model_ids=(
+            "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+        ),
+        cli_orchestrator="difflet.cli.orchestrators.hunyuan_video_15:HunyuanVideo15Orchestrator",
         application_factory="difflet.models.hunyuan_video.entry:create_hunyuan_video15_application",
         hf_paths=(
             "tencent/HunyuanVideo-1.5",
@@ -396,6 +421,10 @@ def _register_builtin_qwen_image() -> None:
 
     @register_model(
         name="qwen_image",
+        cli_model_ids=(
+            "Qwen/Qwen-Image",
+        ),
+        cli_orchestrator="difflet.cli.orchestrators.qwen_image:QwenImageOrchestrator",
         application_factory="difflet.models.qwen_image.entry:create_qwen_image_application",
         hf_paths=(
             "Qwen/Qwen-Image",
@@ -433,6 +462,10 @@ def _register_builtin_minimax_h3() -> None:
 
     @register_model(
         name="minimax_h3",
+        cli_model_ids=(
+            "MiniMaxAI/MiniMax-H3",
+        ),
+        cli_orchestrator="difflet.cli.orchestrators.minimax_h3:MiniMaxH3Orchestrator",
         application_factory="difflet.models.minimax_h3.entry:create_minimax_h3_application",
         hf_paths=("MiniMaxAI/MiniMax-H3",),
         detector=is_minimax_h3,
@@ -487,6 +520,10 @@ def _register_builtin_ltx_2() -> None:
 
     @register_model(
         name="ltx_2",
+        cli_model_ids=(
+            "Lightricks/LTX-2",
+        ),
+        cli_orchestrator="difflet.cli.orchestrators.ltx_2:LTX2Orchestrator",
         application_factory="difflet.models.ltx_2.entry:create_ltx_2_application",
         hf_paths=(
             "Lightricks/LTX-2",

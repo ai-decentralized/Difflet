@@ -19,39 +19,27 @@ import sys
 
 from difflet.cli.main import EXEC_MODE_CHOICES  # noqa: F401 - re-exported
 
-_ORCHESTRATOR_MAP: dict[str, str] = {
-    "Wan-AI/Wan2.2-T2V-A14B-Diffusers": "difflet.cli.orchestrators.wan.WanOrchestrator",
-    "Wan-AI/Wan2.1-T2V-14B-Diffusers": "difflet.cli.orchestrators.wan.WanOrchestrator",
-    "hunyuanvideo-community/HunyuanVideo": (
-        "difflet.cli.orchestrators.hunyuan_video.HunyuanVideoOrchestrator"
-    ),
-    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v": (
-        "difflet.cli.orchestrators.hunyuan_video_15.HunyuanVideo15Orchestrator"
-    ),
-    "Qwen/Qwen-Image": "difflet.cli.orchestrators.qwen_image.QwenImageOrchestrator",
-    "black-forest-labs/FLUX.1-dev": "difflet.cli.orchestrators.flux.FluxOrchestrator",
-    "Lightricks/LTX-2": "difflet.cli.orchestrators.ltx_2.LTX2Orchestrator",
-    "MiniMaxAI/MiniMax-H3": "difflet.cli.orchestrators.minimax_h3.MiniMaxH3Orchestrator",
-}
+def orchestrator_ref(model_id: str) -> str | None:
+    """The staged orchestrator ("pkg.module:Class") the registry records for ``model_id``."""
+    from difflet.registry import registered_models
+
+    for entry in registered_models():
+        if model_id in entry.cli_model_ids:
+            return entry.cli_orchestrator
+    return None
 
 
 def _load_orchestrator_class(name: str):
-    if ":" in name:
-        # "pkg.module:Class" names an orchestrator outside the model map, such as
-        # the test-only toy application (tests/unit/backends/_neuron_toy.py).
-        module_path, _, cls_name = name.partition(":")
-        if not module_path or not cls_name:
-            sys.exit(
-                f"[difflet.cli.stage] invalid orchestrator reference: {name!r} "
-                "(expected 'pkg.module:Class')"
-            )
-        return getattr(importlib.import_module(module_path), cls_name)
-    if name not in _ORCHESTRATOR_MAP:
+    """``name`` is a CLI model id (its registry entry's cli_orchestrator) or "pkg.module:Class"
+    (an orchestrator outside the registry, such as tests/unit/backends/_neuron_toy.py's)."""
+    ref = name if ":" in name else orchestrator_ref(name)
+    if ref is None:
         sys.exit(f"[difflet.cli.stage] unknown orchestrator: {name!r}")
-    cls_path = _ORCHESTRATOR_MAP[name]
-    module_path, cls_name = cls_path.rsplit(".", 1)
-    module = importlib.import_module(module_path)
-    return getattr(module, cls_name)
+    module_path, _, cls_name = ref.partition(":")
+    if not module_path or not cls_name:
+        sys.exit(f"[difflet.cli.stage] invalid orchestrator reference: {ref!r} "
+                 "(expected 'pkg.module:Class')")
+    return getattr(importlib.import_module(module_path), cls_name)
 
 
 def _build_stage_parser() -> argparse.ArgumentParser:

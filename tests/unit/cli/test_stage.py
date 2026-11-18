@@ -19,12 +19,18 @@ def test_load_known_orchestrator_returns_class():
     assert cls is QwenImageOrchestrator
 
 
-@pytest.mark.parametrize("model_id", list(stage._ORCHESTRATOR_MAP))
+def _cli_model_ids():
+    from difflet.cli.main import cli_model_types
+
+    return sorted(cli_model_types())
+
+
+@pytest.mark.parametrize("model_id", _cli_model_ids())
 def test_load_every_mapped_orchestrator(model_id):
     cls = stage._load_orchestrator_class(model_id)
     assert isinstance(cls, type)
-    # The dotted path's final component matches the class name.
-    assert cls.__name__ == stage._ORCHESTRATOR_MAP[model_id].rsplit(".", 1)[1]
+    # The registry's "pkg.module:Class" names the class it loads.
+    assert cls.__name__ == stage.orchestrator_ref(model_id).rpartition(":")[2]
 
 
 # ----------------------------------------------------------- _build_stage_parser

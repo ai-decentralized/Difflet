@@ -15,11 +15,11 @@ from difflet.planner.planner import Plan, plan as build_plan
 
 
 def run(args: argparse.Namespace) -> None:
-    from difflet.cli.main import _MODEL_TYPE
+    from difflet.cli.main import cli_model_types
 
     result = build_plan(
         args.model_id,
-        model_type=_MODEL_TYPE[args.model_id],
+        model_type=cli_model_types()[args.model_id],
         height=getattr(args, "height", None),
         width=getattr(args, "width", None),
         num_frames=getattr(args, "num_frames", None),
