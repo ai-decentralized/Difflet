@@ -91,6 +91,9 @@ class ModelEntry:
     # ("pkg.module:Class") its Neuron backends run. No ids: not offered on the CLI.
     cli_model_ids: tuple[str, ...] = ()
     cli_orchestrator: str | None = None
+    # CLI options the model accepts in the parser but never acts on: (dest, why). The CLI refuses
+    # them by name instead of running without them (difflet.cli.main._refuse_model_flags).
+    refused_cli_flags: tuple[tuple[str, str], ...] = ()
 
     def matches(self, model_id: str) -> bool:
         normalized = model_id.rstrip("/")
@@ -177,6 +180,7 @@ def register_model(
     download_patterns: list[str] | tuple[str, ...] | None = None,
     cli_model_ids: list[str] | tuple[str, ...] = (),
     cli_orchestrator: str | None = None,
+    refused_cli_flags: tuple[tuple[str, str], ...] = (),
 ) -> Callable[[type], type]:
     """Register a model entry.
 
@@ -200,6 +204,7 @@ def register_model(
             download_patterns=tuple(download_patterns) if download_patterns is not None else None,
             cli_model_ids=tuple(cli_model_ids),
             cli_orchestrator=cli_orchestrator,
+            refused_cli_flags=tuple(refused_cli_flags),
         )
         return cls
 
@@ -377,6 +382,7 @@ def _register_builtin_hunyuan_video_15() -> None:
             "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
         ),
         cli_orchestrator="difflet.cli.orchestrators.hunyuan_video_15:HunyuanVideo15Orchestrator",
+        refused_cli_flags=(("tp_reduce_dtype", "nothing on its path reads it (bf16 all-reduces)"),),
         application_factory="difflet.models.hunyuan_video.entry:create_hunyuan_video15_application",
         hf_paths=(
             "tencent/HunyuanVideo-1.5",
@@ -466,6 +472,7 @@ def _register_builtin_minimax_h3() -> None:
             "MiniMaxAI/MiniMax-H3",
         ),
         cli_orchestrator="difflet.cli.orchestrators.minimax_h3:MiniMaxH3Orchestrator",
+        refused_cli_flags=(("tp_reduce_dtype", "its all-reduces keep the NxD fp32 default"),),
         application_factory="difflet.models.minimax_h3.entry:create_minimax_h3_application",
         hf_paths=("MiniMaxAI/MiniMax-H3",),
         detector=is_minimax_h3,

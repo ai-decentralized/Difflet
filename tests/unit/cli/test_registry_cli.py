@@ -80,3 +80,16 @@ def test_minimax_parallel_flags_are_refused_with_a_message_not_a_traceback(flag,
     with pytest.raises(SystemExit):
         main.check_command_args(args)
     assert says in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("model_id", ["hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+                                      "MiniMaxAI/MiniMax-H3"])
+def test_a_flag_the_model_never_reads_is_refused_up_front(model_id, monkeypatch, capsys):
+    # HV1.5 never read --tp-reduce-dtype (the run stayed bf16 with no warning); MiniMax-H3
+    # refused it only after dispatch, from inside its orchestrator.
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    args = main._build_parser().parse_args(
+        ["generate", "--model-id", model_id, "--prompt", "p", "--output", "o.mp4", "--tp-reduce-dtype", "fp32"])
+    with pytest.raises(SystemExit):
+        main.check_command_args(args)
+    assert f"{model_id} does not take --tp-reduce-dtype" in capsys.readouterr().err
