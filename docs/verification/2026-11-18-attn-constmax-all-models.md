@@ -3,8 +3,10 @@
 Summary of the run "const-max bf16 attention on all models" (branch `exp/attn-constmax-models`).
 It collects the six model lanes, the KERNEL lane and an independent auditor's verdict per lane.
 Every auditor correction is applied below; section 6 lists each one and where it went.
-HunyuanVideo (HV1) ran a second attempt after the first version of this summary. It timed no
-arm either; its row, note and auditor issues are updated below.
+HunyuanVideo (HV1) was pending in the first two versions of this summary (two attempts, no arm
+timed). A third attempt timed all four arms on 2026-11-19 (lane doc `e9361d0f`). Its auditor
+returned CORRECTED with two corrections; both are applied here (section 6). The lane doc itself
+is not edited by this update, so it still carries the two uncorrected statements.
 
 Sources, not re-measured here:
 
@@ -13,7 +15,7 @@ Sources, not re-measured here:
   - `docs/verification/2026-11-18-attn-constmax-flux.md`
   - `docs/verification/2026-11-18-attn-constmax-ltx2.md`
   - `docs/verification/2026-11-18-attn-constmax-wan.md` (Wan 2.1 and Wan 2.2)
-  - `docs/verification/2026-11-18-attn-constmax-hv1.md` (draft, results pending after two attempts)
+  - `docs/verification/2026-11-18-attn-constmax-hv1.md` (`e9361d0f`, four arms timed on the third attempt)
   - `docs/verification/2026-11-18-attn-constmax-hv15.md`
   - `docs/verification/2026-11-18-attn-constmax-kernel.md` (KERNEL lane)
 - E1: `docs/verification/2026-11-18-attn-constmax.md`.
@@ -45,16 +47,17 @@ template, `2026-11-18-attn-constmax.md` line 160, uses request 2's DiT step medi
 | LTX-2 | 512x768x121, tp4, 50 steps; 8 x 6,144 x 128 (video attn1), unbounded | 45 of 48 video attn1; audio and cross-attn stay on cte | 1,287.1 | **0.948** | 0.757 | **0.695** | 0.919 | 27.63 dB, 0.99947 (25.33) | 16.54 (16.55) dB | tp2 vs tp4 25.9 dB (worst 23.6) | CORRECTED | DONE |
 | Wan 2.1 T2V 14B | 480x832x81, tp4, 50 steps, CFG 5.0 (2 forwards); 10 x 32,760 x 128, unbounded | 36 of 40 attn1, 72 calls per step; attn2 stays on cte | 10,107.5 | **0.813** | 0.981 | **0.793** | 0.809 | 22.21 dB, 0.96906 (21.87) | n/a: no fp32 reference at 81 frames | tp8 vs tp4 22.75 dB (worst 18.31), from host B | CONFIRMED | DONE |
 | Wan 2.2 T2V A14B | 480x832x81, tp4, 40 steps, CFG 4.0 / 3.0, two experts; 10 x 32,760 x 128, unbounded | 36 of 40 attn1 per expert, 72 calls per step | 10,115.2 | **0.813** | 0.981 | **0.793** | 0.808 | 12.31 dB, 0.89913 (11.77); fails the SSIM screen | n/a: no fp32 reference at 81 frames | tp8 vs tp4 14.83 dB (worst 13.74), host B, weak | CONFIRMED | DONE |
-| HunyuanVideo | 544x960x129, tp4, 50 steps; 6 x 67,576 x 128, key-bounded | 55 of 60 joint (table recomputed by the auditor; code and CPU test only, not checked on device) | not timed: A compiled, then no arm ran (*evidence* 7f: 18,493.6) | not timed: B's compile was killed (*inferred* ~0.73-0.74) | not timed: C's compile was killed (*evidence* 7f: 0.97) | not timed (*inferred* ~0.70-0.72) | not timed (*inferred* ~0.72-0.74) | not scored: no arm timed | n/a: no arm timed, and no fp32 reference at this shape | none at this shape (bf16 tp2 runs out of HBM); 36.64 dB at 320x512x61 | NOTHING_TO_CHECK on both attempts (one note corrected; 5 issues carried) | PARTIAL, 2nd attempt: A compiled (1:12:03, exit 0); B, C, D and an A recheck were still compiling and were all killed (SIGTERM 13:24:12). No arm timed |
+| HunyuanVideo | 544x960x129, tp4, 50 steps, guidance 6.0; 6 x 67,576 x 128, key-bounded (hi 67,449) | 55 of 60 joint (19 of 20 dual, 36 of 40 single); on device, B's and D's routed NEFFs hold `attention_const_max` (auditor) | 18,485.6 | **0.4975** | 0.971 | **0.468** | 0.482 | 17.28 dB, 0.93291 (11.60) | n/a: no fp32 reference at this shape | none at this shape (bf16 tp2 runs out of HBM); 36.64 dB at 320x512x61 cannot resolve it | CORRECTED (3rd attempt) | DONE (3rd attempt; the first two timed no arm) |
 | HunyuanVideo-1.5 | 480x848x121, tp2 x CFG2, 50 steps, CFG 6.0; 8 x 51,275 x 128, key-bounded | 52 of 54 joint | 9,917.5 | **0.632** | 1.011 | **0.631** | 0.624 | 14.76 dB, 0.8744 (14.04) | n/a: no fp32 reference at this shape | 15.90 (worst 15.31) / 16.94 / 18.41 dB | CORRECTED | DONE |
 
 Notes on the table:
 
-- All timings are **measured**, except HV1's cells marked *evidence* or *inferred*.
+- All timings are **measured**.
 - Every C/A agrees with the MXFP8 evidence, which ran in other sessions:
   - Qwen 0.79 and FLUX 0.83 (11b);
   - LTX-2 0.75 (11b);
   - Wan 2.1 and 2.2 0.98 at 81 frames with CFG (12b);
+  - HV1 0.97 (7f);
   - HV1.5 1.01 (12b).
 - Bit-identical reproductions of the evidence:
   - A's output md5 equals the evidence's bf16 for Qwen, FLUX and LTX-2.
@@ -63,15 +66,18 @@ Notes on the table:
 - Where A does not reproduce the evidence:
   - Wan 2.1 / 2.2: A equals this host's own earlier bf16 runs, not host B's.
   - HV1.5: A's host text encode ran on 12 threads, the evidence's on 96.
+  - HV1: A (`6336311a`) is deterministic (both requests and an earlier A run, `A/timed_pre`,
+    give one md5 and equal latents). It differs from 7f's `258cd73e` because of `c13fda35`
+    (2026-11-11, fp32 timestep), and equals the block-profile doc's section-15 bf16 run (15d).
   - A's step times still match the evidence within 0.4%.
 - Warm end-to-end follows the step (**measured**, request 2; each lane defines e2e its own way,
   see its doc):
 
-  | | Qwen | FLUX | LTX-2 (no host decode) | Wan 2.1 | Wan 2.2 | HV1.5 |
-  |---|---|---|---|---|---|---|
-  | A warm e2e | 16.23 s | 11.55 s | 74.81 s | 526.24 s | 425.49 s | 564.2 s |
-  | B / A | 0.903 | 0.906 | 0.973 | 0.821 | 0.822 | 0.679 |
-  | D / A | 0.733 | 0.749 | 0.741 | 0.802 | 0.802 | 0.680 |
+  | | Qwen | FLUX | LTX-2 (no host decode) | Wan 2.1 | Wan 2.2 | HV1 | HV1.5 |
+  |---|---|---|---|---|---|---|---|
+  | A warm e2e | 16.23 s | 11.55 s | 74.81 s | 526.24 s | 425.49 s | 1,003.0 s | 564.2 s |
+  | B / A | 0.903 | 0.906 | 0.973 | 0.821 | 0.822 | 0.537 | 0.679 |
+  | D / A | 0.733 | 0.749 | 0.741 | 0.802 | 0.802 | 0.510 | 0.680 |
 
 ## 2. Per model
 
@@ -92,19 +98,24 @@ Table 2 (*inferred* throughout):
 | LTX-2 | 0.558 (2.0604 -> 1.1495) | section 9 vs 12, cross-session | 45 x 0.911 = 41.0 ms | 67.55 ms | 165% | ~8% (48 video attn1 x 2.06 ms) |
 | Wan 2.1 | 0.575 (63.72 -> 36.65) | section 9 vs 12, cross-session | 72 x 27.07 = 1,949 ms | 1,885.6 ms | 97% (approx.) | ~50% (80 x 63.72 ms) |
 | Wan 2.2 | same shape | same | 1,949 ms | 1,896.1 ms | 97% (approx.) | ~50% |
-| HunyuanVideo | 0.507 (183.80 -> 93.17) | KERNEL lane, bounded; the cte arm includes HV1's 2-call head split | 55 x 90.6 = 4,985 ms | not timed (no arm ran) | n/a | ~60% of the *evidence* 18,494 ms step |
+| HunyuanVideo | 0.507 (183.80 -> 93.17) | KERNEL lane, bounded; the cte arm includes HV1's 2-call head split | 55 x 90.6 = 4,985 ms | 9,288.1 ms | 186% | ~60% kernel only (60 x 183.8 ms); ~79% with the dual-block glue (+20 x ~180 ms) |
 | HunyuanVideo-1.5 | 0.501 (143.26 -> 71.74) | KERNEL lane, bounded, this exact call | 52 x 71.5 = 3,719 ms | 3,645 ms | 98% | ~78% (54 x 143.26 ms) |
 
 The per-call const-max / cte ratio is 0.50-0.58 for every model, so the kernel is not what
 separates them. **The attention's share of the step is**, and it grows with the sequence length.
+Two models keep more than the kernel predicts: LTX-2 (165%, cause not measured) and HV1 (186%).
+At HV1, const-max also skips the shipped bounded route's dual-block glue (fp32 q pre-scale, pad,
+head-chunk slices; ~180 ms per dual block in the 11-13 profile, *evidence*), which the kernel
+probe ran on contiguous inputs and so did not see. That glue explains 3.4-3.6 s of HV1's 4.3 s
+excess (*inferred*; see HV1 below).
 The unrouted layers cost little: 0.2-2.5% of the step at most. The 3-5 unrouted layers per model
-would save, *inferred*:
+would save, *inferred* from the kernel times only:
 
 - Qwen: 1.8 ms;
 - LTX-2: 2.7 ms;
 - Wan: 217 ms;
 - HV1.5: 143 ms;
-- HV1: 453 ms.
+- HV1: 453 ms (plus ~180 ms of glue in the one unrouted dual block, `transformer_blocks.1`).
 
 - **Qwen-Image (B/A 0.896, D/A 0.712).**
   - *Limit.* At 5,120 tokens the joint attention is about a quarter of the step (*inferred*).
@@ -155,47 +166,63 @@ would save, *inferred*:
     floor screen on SSIM** (0.252 < 0.339), as the shipped MXFP8 arm C does (11.14 dB). B is still
     the arm closest to A, keeps A's composition and shows no noise. Acceptability is open.
 
-- **HunyuanVideo (not measured after two attempts).**
-  - *Status.* First attempt: the lane committed the table (55 of 60 routed), the wiring, the CPU
-    test and the arm runner (`ec3856c1`, `69908bf9`), then stopped before any arm was timed.
-    Second attempt, at `189094ac`: arm A compiled. B (device 2), C (device 1), D (device 3) and a
-    recheck of A's cache (device 5) were still compiling when the lane returned. All four logs end
-    with SIGTERM at 13:24:12. No arm was timed, the gate did not run and nothing was scored.
-    **Pending, not "no gain".**
-  - *Measured (A's compile only).* 1:12:03 wall, exit 0, 60 blocks, no fallbacks, peak host RSS
-    69 GB (`A/compile_1.log`). The warm-up forward alone took 4,156 s, against 2,397 s for the
-    whole bf16 compile in *evidence* 7f, so the seeded cache was mostly missed at this tree. That
-    agrees with the first attempt's correction: A's compile was a NEFF cache miss (neuronx-cc ran
-    34 s after start), not cache hits. The lane also reports a 1,200 s wait on a stale
-    `neff_local` lock. The auditor found the lock break (10:13:55, ranks 0-2) in the log, but the
-    log does not show how long the wait was.
-  - *Prediction (inferred, unchanged).* The kernel ratio (0.507) and the attention share (~60%)
-    give B/A ~0.73-0.74, using the 95-98% kept at Qwen, Wan and HV1.5 (0.730 with all of it kept).
-    On top of the *evidence* MXFP8 step (17,967.6 ms) that is D/C ~0.72-0.74 and D/A ~0.70-0.72.
-  - *Risk.* The bounded const-max route does not split heads. 6 x 67,576^2 = 2.74e10 is above
-    `_BOUNDED_KERNEL_MAX_BH_SQ_SK` (2.17e10), which the shipped cte splits for. The KERNEL lane
-    compiled and ran this call at kernel level (1,235 s NKI trace). At model level, B and D were
-    still in warm-up with no compile or HBM error when they were killed. Model-level compile and
-    HBM therefore remain unchecked.
-  - *Routing (auditor issue).* It is checked at code level only. The `constmax_sigma` buffer is
-    registered only under env=1 and only for the 55 passing layers, and the CPU test passes
-    (2 passed, re-run by the auditor). Once B and D compile, check that their block NEFF and HLO
-    cache keys differ from A's and C's and that the bounded const-max op appears. A routed graph
-    identical to bf16 would give a false result.
-  - *Expect new md5s (auditor issue).* `c13fda35` (2026-11-11: the HV1 DiT gets the scheduler
-    timestep in fp32) sits between the evidence tree and HEAD. A and C need not reproduce the
-    *evidence* md5s `258cd73e` / `00c19154`, and a mismatch is not a const-max finding.
-  - *Next (auditor issue).* All four compiles must re-run, **A included**. The killed recheck
-    overwrote `A/compile.env.txt`, which now has no `exit 0` line; only `A/compile_1.env.txt` has
-    one. `timed_chain.sh` greps `compile.env.txt`, so it would skip A along with B, C and D. The
-    lane's resume steps follow: the B smoke gate, then `timed_chain.sh` (A-D back to back on
-    device 5, about 3 h), then `hv1_collect.py`. Its warm step is the mean of the two request
-    medians, as in every row here, not E1's request-2 median. The lane worried that
-    `hv1_collect.py` reads the latents from the wrong path (`work/worker_0/`). The auditor thinks
-    this is probably unfounded: the HV1.5 and Wan 2.1 timed arms wrote there through the same
-    path. Confirm it after the first timed HV1 arm.
+- **HunyuanVideo (B/A 0.4975, D/A 0.468): the largest gain of the campaign.**
+  - *Status.* The first two attempts timed no arm (the second compiled A in 1:12:03, then was
+    killed at 13:24:12). The third re-ran all four compiles on 2026-11-18 (A 8:45 from cache,
+    B 1:14:30, C 42:38, D 50:50; exit 0, 60 blocks, no fallbacks), passed the 10-step gate
+    (15:03, all latents finite, frames clean) and timed A, B, C, D back to back on device 5 on
+    2026-11-19, 03:20-06:17. The second attempt's open issues are closed: every compile re-ran,
+    and the `work/worker_0` latents are the timed ones (the auditor checked their mtimes).
+  - *Measured.* Const-max halves the step: 9,288 ms off bf16 and 9,303 ms off MXFP8. The warm
+    129-frame request falls from 1,003 to 538 s. Each arm's two request medians agree within
+    0.016%.
+  - *Why B/A is below the kernel ratio (inferred).* B/A 0.4975 is below the routed call's
+    kernel-level 0.507, and A - B is 186% of the kernel prediction. Const-max also skips the
+    shipped bounded route's dual-block glue: the fp32 q pre-scale, the pad to 67,584 and the two
+    3-head chunk slices of the padded tensor. That costs ~180 ms per dual block in the 11-13
+    profile (*evidence*), 3,414-3,481 ms per step at 19 routed dual blocks. Kernel saving plus
+    glue give 8,400-8,630 ms of the 9,288 ms; 7-10% is unattributed, and B was not profiled.
+    With the glue, attention is ~79% of A's step, not the ~60% behind the old prediction
+    (~0.73-0.74, now superseded by the measurement).
+  - *Recoverable without const-max (inferred).* The pre-scale and the head split are torch-side
+    choices of the bounded cte route, so ~3.4 s per step at bf16 looks recoverable with no
+    const-max error. No arm tested it.
+  - *MXFP8 arms.* C/A 0.971 matches 7f's 0.97. The two gains add in ms (MXFP8 saves 533.5 ms
+    without const-max, 548.6 ms with it), so D/A 0.468 is below B/A x C/A 0.483. The same glue
+    sum on MXFP8 gives 8,635-8,801 ms against 9,303 ms measured (auditor issue: the lane doc's
+    "about 8,635 ms" leaves out the single-block term).
+  - *Quality.* B vs A is 17.28 dB (worst 11.60, frame 84), SSIM 0.765, LPIPS 0.336, latent cos
+    0.933: **further from A than MXFP8 moved it** (C vs A 21.33 dB, cos 0.964). On top of MXFP8
+    the const-max step is the smallest of the three changes: D vs C 30.29 dB (worst 21.01),
+    SSIM 0.944, LPIPS 0.071, cos 0.997. B is the outlier: its latent cos to A, C and D is
+    0.928-0.933, while A, C and D sit within 0.964-0.997 of each other. Per latent frame, B vs A
+    dips to 0.82-0.91 in frames 12-22 (pixel ~45-88); at frame 84 B shows a pale background where
+    A has dark trunks. All four clips are the same clean, coherent shot.
+  - *Floor.* None at this shape (bf16 tp2 runs out of HBM; no fp32 reference). The only floor,
+    7a's 320x512x61 bf16 tp2 vs tp4 (36.64 dB / SSIM 0.957 / LPIPS 0.031; screen 30 dB / 0.857 /
+    0.062, *evidence*), cannot resolve this shape. B, C and D vs A fail all three screens; D vs C
+    passes PSNR and SSIM and fails LPIPS (0.071 > 0.062). One seed and one prompt cannot separate
+    const-max error from a trajectory split. B also drops A's fp32 q pre-scale, which changes q's
+    rounding.
+  - *Routing (auditor correction).* **Shown directly on device**, not only indirectly as the lane
+    doc says. Each NEFF is a 1 KiB header and a gzip stream: B's `d190`/`dfa4` and D's
+    `81d5`/`a8c6` contain `attention_const_max`, `attention_const_max_kernel` and
+    `attention_const_max_lnc` and no `attention_cte`. A's `03c8`/`df55` and C's `35a3`/`4b3b`
+    contain only `attention_cte` (24 against 12 hits: two head-chunk calls against one call).
+    The NEFF keys agree: B opens A's 148 keys plus those 2, D opens C's 148 plus 2.
+  - *No-head-split risk: did not fire.* B and D compiled and ran the 6 x 67,576 call in one piece
+    at model level, with no compile or allocation error. HBM use was not recorded. Compile peak
+    host RSS (auditor correction): A 34.4 GB, B 57.3 GB, C 69.4 GB, D 57.3 GB.
+  - *md5.* A differs from 7f because of `c13fda35`, as the second attempt's auditor expected; it
+    is not a const-max finding (section 1 notes).
+  - *Timing caveats (auditor issues).* A and B ran before `corenode.lock` was added to the arm
+    runner; C and D ran under it (D waited 7 min 45 s for it). The 5-minute load averages at B's
+    and C's starts were 22 and 39. A matches `A/timed_pre` within 0.05% and the block-profile
+    15a within 0.02%, and B's spread is 0.001%, so no effect shows; contention could only have
+    slowed A or B. The arms are not interleaved, so a drift over the 3 h chain is not excluded.
+    The step values are per-request medians (n = 49) and maxes; raw per-step times are not kept.
 
-- **HunyuanVideo-1.5 (B/A 0.632, D/A 0.631): the largest measured gain.**
+- **HunyuanVideo-1.5 (B/A 0.632, D/A 0.631): the second-largest gain, after HV1.**
   - *Limit.* At 51,275 tokens the joint attention is about 78% of the step (*inferred*). The
     model keeps 98% of the KERNEL lane's per-call saving at this exact call (52 x 71.5 = 3,719 ms
     predicted vs 3,645 ms measured). The auditor flagged that as the strongest evidence for the
@@ -217,7 +244,7 @@ Quality detail (**measured**; D vs C is the const-max step on top of MXFP8):
 | LTX-2 | 0.9307 / 0.0292 | 25.15 (23.28) dB, 0.99723 | 16.85 / 16.68 dB | n/a (inside the 25.9 dB floor) |
 | Wan 2.1 | 0.7403 / 0.1467 | 25.61 (23.91) dB, 0.9885 | n/a | passes all three |
 | Wan 2.2 | 0.2515 / 0.3671 | 13.56 (13.04) dB, 0.9347 | n/a | fails SSIM |
-| HunyuanVideo | not scored: no arm timed | not scored: no arm timed | n/a | not run |
+| HunyuanVideo | 0.7648 / 0.3358 | 30.29 (21.01) dB, 0.99655 | n/a | fails all three (the only floor, 320x512x61, cannot resolve this shape) |
 | HunyuanVideo-1.5 | 0.2684 / 0.4221 | 13.66 (13.13) dB, 0.8623 | n/a | passes (barely on 12c SSIM) |
 
 ## 3. The KERNEL lane (key-bounded const-max)
@@ -264,7 +291,9 @@ family, the largest-sigma layer.
 
 **Caveats.**
 
-- The cte arm includes its route's q pre-scale, the pad to 128 and HV1's 2-call head split. The
+- The cte arm includes its route's q pre-scale, the pad to 128 and HV1's 2-call head split, on
+  contiguous inputs. At model level HV1's dual-block inputs are not contiguous, and that glue
+  costs ~180 ms per dual block more (section 2, HV1). The
   Qwen ratio carries about 0.01 ms per call of loop overhead in both arms (*inferred* from E1
   section 12).
 - The const-max error is the kernel's own, from bf16 scores and the fixed max; the bound adds no
@@ -276,42 +305,46 @@ family, the largest-sigma layer.
   `DIFFLET_NKI_TRACE_CACHE=1`, later processes start in 26-35 s.
 - The KERNEL lane had no auditor of its own. The Qwen auditor matched its gate quote against
   `KERNEL.json`. The HV1.5 auditor matched its per-call saving against the model-level step.
+  The HV1 auditor matched its 0.507 (183.80 / 93.17 ms) against the KERNEL doc.
 
 ## 4. What it means
 
 **Ranking.**
 
-Every value in both rankings is **measured** except HV1's, which is *inferred*. HV1 timed no arm
-in either attempt, so its place is a prediction.
+Every value in both rankings is **measured** (HV1 included, from its third attempt).
 
 - By B/A (bf16 + const-max vs shipped bf16):
-  1. HV1.5 0.632;
-  2. HV1 ~0.73-0.74 (*inferred*);
+  1. HV1 0.4975;
+  2. HV1.5 0.632;
   3. Wan 2.1 0.813 and Wan 2.2 0.813;
   4. Qwen-Image 0.896;
   5. FLUX 0.903;
   6. LTX-2 0.948.
 - By D/A (MXFP8 + const-max vs shipped bf16):
-  1. HV1.5 0.631;
-  2. LTX-2 0.695;
-  3. HV1 ~0.70-0.72 (*inferred*), level with Qwen-Image 0.712;
-  4. FLUX 0.742;
-  5. Wan 2.1 and Wan 2.2 0.793.
+  1. HV1 0.468;
+  2. HV1.5 0.631;
+  3. LTX-2 0.695;
+  4. Qwen-Image 0.712;
+  5. FLUX 0.742;
+  6. Wan 2.1 and Wan 2.2 0.793.
   The order changes because MXFP8 linears help the short-sequence models (C/A 0.76-0.83) and
-  barely help Wan, HV1.5 (0.98-1.01) or HV1 (*evidence* 0.97). There, const-max is the only one
-  of the two that pays.
+  barely help Wan, HV1 or HV1.5 (C/A 0.97-1.01). There, const-max is the only one of the two
+  that pays.
 - **The gain tracks the attention's share of the step**, which tracks sequence length:
   - about 8% (LTX-2's video attn1 at 6.1k tokens, the only part routed) gives 5%;
   - about 23-24% at 4.6-5.1k tokens gives 10%;
   - about 50% at 32.8k tokens gives 19%;
-  - about 78% at 51.3k tokens gives 37% (shares *inferred*).
-  - HV1, *inferred* only: about 60% at 67.6k tokens (60 x 183.8 ms over the *evidence*
-    18,494 ms step) predicts 26-27%. Its share is below HV1.5's despite the longer sequence, so
-    across model families the share, not the length, is the predictor. Why HV1's share is lower
-    is not measured.
+  - about 78% at 51.3k tokens gives 37%;
+  - about 79% at 67.6k tokens (HV1: ~60% kernel plus ~19% dual-block glue) gives 50% (shares
+    *inferred*, gains **measured**).
+  - HV1 gains more than HV1.5 at about the same share because const-max halves the kernel and
+    removes the glue outright. Counting the kernel alone, the earlier prediction put HV1's share
+    at ~60% and its B/A at ~0.73-0.74; the measured 0.4975 supersedes it. The share predicts the
+    gain only when it counts the route's glue (*inferred*).
 - The two gains compose. On top of MXFP8, const-max saves about the same ms as on bf16 for FLUX,
-  Wan and HV1.5 (within 5%), less for Qwen (23.8 vs 31.8 ms) and more for LTX-2 (78.9 vs
-  67.6 ms). D/A is within 0.012 of B/A x C/A for every model except LTX-2 (0.695 vs 0.717).
+  Wan, HV1.5 and HV1 (within 5%), less for Qwen (23.8 vs 31.8 ms) and more for LTX-2 (78.9 vs
+  67.6 ms). D/A is within 0.012 of B/A x C/A for every model except LTX-2 (0.695 vs 0.717) and
+  HV1 (0.468 vs 0.483, because there the two savings add in ms rather than in proportion).
 
 **Where const-max is worth adopting, and where not.** This is a reading for the user, who makes
 the default call. Every verdict rests on one seed and one prompt.
@@ -326,15 +359,16 @@ the default call. Every verdict rests on one seed and one prompt.
   - B is about at the floor and passes the screen on one clip.
   - It is the strongest candidate among the big gains. It needs the twelve-clip set before it
     becomes a default.
-- **Large gain, quality not established: HV1.5 (0.632), Wan 2.2 (0.813).**
-  - B is past every bf16 floor pair (HV1.5) or fails the SSIM screen (Wan 2.2).
+- **Large gain, quality not established: HV1 (0.4975), HV1.5 (0.632), Wan 2.2 (0.813).**
+  - B is past every bf16 floor pair (HV1.5), fails the SSIM screen (Wan 2.2), or moved further
+    from A than MXFP8 did with no floor at its shape (HV1: 17.28 vs 21.33 dB).
   - The clips are coherent, but one clip with no fp32 reference cannot separate const-max error
-    from trajectory drift. Neither should become a default on this evidence.
-  - They can stay opt-in, for users who trade fidelity to A for 19-37% of the step.
-- **HV1: still unmeasured after two attempts; run it first.** The kernel probe predicts the
-  second-largest B/A gain (*inferred*). All four compiles must re-run, A included. A's alone
-  took 1:12:03 at this tree (**measured**), and the timed chain adds about 3 h. The
-  no-head-split compile, its HBM and device-level routing are unchecked at model level.
+    from trajectory drift. None should become a default on this evidence.
+  - They can stay opt-in, for users who trade fidelity to A for 19-50% of the step.
+- **HV1: part of the gain may come without const-max.** About 3.4 s of HV1's 9.3 s saving per step is
+  the shipped bounded cte route's dual-block glue (fp32 q pre-scale and head split, torch-side
+  choices), not the kernel (*inferred*). Removing it from the shipped route would carry no
+  const-max error. No arm tested it; it is the cheapest next experiment for HV1.
 
 **Open risks.**
 
@@ -366,7 +400,7 @@ the default call. Every verdict rests on one seed and one prompt.
   with per-row hi, other resolutions, LoRAs.
 - **Cost:**
   - first-compile NKI trace of 15-20 min at the video shapes (use `DIFFLET_NKI_TRACE_CACHE=1`);
-  - +1.08 GiB runtime HBM per rank on HV1.5.
+  - +1.08 GiB runtime HBM per rank on HV1.5; HV1's HBM use was not recorded.
 
 ## 5. Measured vs inferred
 
@@ -375,24 +409,25 @@ the default call. Every verdict rests on one seed and one prompt.
 - every A/B/C/D step, ratio, spread and warm e2e in sections 1 and 2;
 - every md5;
 - every quality number in section 1 and in section 2's quality table;
-- the routed-layer tables, recomputed from the checkpoint gains (HV1's on both attempts);
+- the routed-layer tables, recomputed from the checkpoint gains (HV1's on every attempt);
 - the KERNEL lane's simulator, gate and probe numbers;
-- HV1's arm-A compile (wall time, exit code, block count, peak RSS, warm-up forward). This is
-  HV1's only device number; none of its arms was timed.
+- HV1's compiles, gate, NEFF keys and NEFF contents (the contents checked by its auditor).
 
 *Inferred* (arithmetic on measured numbers, not measured itself):
 
 1. Per-call savings at model level: Qwen 0.56 / 0.42 ms, FLUX 0.38 ms, LTX-2 1.50 / 1.75 ms,
-   Wan 26.2 / 26.3 ms, HV1.5 ~70 ms. Each is A - B over the routed calls.
+   Wan 26.2 / 26.3 ms, HV1.5 ~70 ms, HV1 168.9 ms. Each is A - B over the routed calls.
 2. Table 2: the predicted savings, the "kept" fraction and the attention share of the step.
    - FLUX's, LTX-2's and Wan's per-call cte and const-max times come from two sessions and
      devices (section 9's shipped cte, section 12's const-max), so their "kept" values are
      approximate.
    - The shares use one-core kernel times on synthetic inputs, not a model profile. No model run
      was profiled.
-3. HV1's B/A ~0.73-0.74, D/C ~0.72-0.74 and D/A ~0.70-0.72, and so its places in section 4's
-   rankings. They come from the KERNEL lane's probe and the *evidence* 7f step times (another
-   session and tree, before `c13fda35`).
+3. HV1's glue breakdown (section 2): kernel saving plus the *evidence* dual-block glue explain
+   8,400-8,630 of the 9,288 ms (7-10% unattributed), and 8,635-8,801 of the 9,303 ms on MXFP8;
+   the ~79% attention share; and that the shipped route could recover the glue without
+   const-max. The earlier prediction (B/A ~0.73-0.74, D/A ~0.70-0.72) is superseded by the
+   measured 0.4975 / 0.468.
 4. LTX-2's model-level saving exceeds the kernel prediction (165%). The cause is not measured; E1
    suggested less serialization with the collectives.
 5. "The two gains compose": B/A x C/A against D/A, from measured ratios. Why Qwen saves less on
@@ -427,10 +462,20 @@ the default call. Every verdict rests on one seed and one prompt.
 | | - `hv1_collect.py`'s warm step is the mean of the two request medians, not E1's request-2 median; | Header (Arms); section 2, HV1 |
 | | - the `work/worker_0` latents-path concern is probably unfounded (the HV1.5 and Wan 2.1 timed arms wrote there); unconfirmed for HV1; | Section 2, HV1 |
 | | - device-level routing is open: B's and D's NEFF and HLO keys must differ from A's and C's. | Section 1, HV1 routed cell; section 2, HV1; section 4 |
-| | Check note: the 1,200 s `neff_local` wait is the lane's figure. The log shows the stale-lock break, not the wait length. | Section 2, HV1 |
+| | Check note: the 1,200 s `neff_local` wait is the lane's figure. The log shows the stale-lock break, not the wait length. | Superseded by the 3rd attempt |
+| HV1, 3rd attempt | Corrected: device routing is shown directly, not only indirectly (the lane doc, sections 4 and 9). Decompressing each NEFF (gzip from byte 1024) finds `attention_const_max` / `_kernel` / `_lnc` and no `attention_cte` in B's `d190`/`dfa4` and D's `81d5`/`a8c6`; A's `03c8`/`df55` and C's `35a3`/`4b3b` hold only `attention_cte` (24 against 12 hits). | Section 1, HV1 routed cell; section 2, HV1 (Routing) |
+| HV1, 3rd attempt | Corrected: compile peak host RSS is A 34.4 GB, B 57.3 GB, C 69.4 GB, D 57.3 GB. `/usr/bin/time -v` reports KiB; the lane doc's 33.6 / 55.9 / 67.8 / 55.9 divided by 1e6. Cosmetic; no JSON number changes. | Section 2, HV1 (No-head-split risk) |
+| | Issues carried: | |
+| | - step values are per-request medians (n = 49) and maxes; raw per-step times are not kept (each max is within 0.3% of its median); | Section 2, HV1 (Timing caveats) |
+| | - the lane doc's MXFP8 glue sum (~8,635 ms) leaves out the single-block term: 8,635-8,801 ms against 9,303 ms measured; | Section 2, HV1 (MXFP8 arms); section 5 item 3 |
+| | - this summary listed HV1 as not timed (*inferred* ~0.73-0.74) and HV1.5 as the largest measured gain; HV1's measured 0.4975 supersedes both; | Header; sections 1, 2 and 4 |
+| | - B's quality question is beyond this protocol (one seed, no fp32 reference, no floor at this shape); | Section 2, HV1 (Floor); section 4 |
+| | - A and B ran without `corenode.lock` (load averages 22 and 39 at B's and C's starts); no effect shows, but the arms are not interleaved; | Section 2, HV1 (Timing caveats) |
+| | - not verified by the auditor: that the coordinator held `neuron5.lock`, HBM use, SSIM / LPIPS (PSNR and the latent metrics were recomputed), the CPU unit test (not run). | Here |
+| | The 2nd attempt's issues are closed, and its HV1 notes are replaced by the measured results: all four compiles re-ran; A's md5 differs from 7f as expected; the `work/worker_0` latents are the timed ones; B's and D's NEFF keys differ from A's and C's. | Section 2, HV1 (Status, md5) |
 | HV1.5 | The const-max route does not pad: the call is 8 x 51,275 and softmax_max is taken at 51,275, not at 51,328. | Section 1, shape; section 2, HV1.5 |
 | HV1.5 | Issues carried: | |
-| | - "largest of the campaign" holds among the measured models only; | Section 2 header; section 4 |
+| | - "largest of the campaign" held among the measured models only; HV1 (0.4975) now supersedes it; | Section 2 header; section 4 |
 | | - the KERNEL lane's exact-call probe is the stronger routing evidence; | Section 2, HV1.5 |
 | | - "differs only in encode thread count" is an inference (the trees differ too). | Section 1 notes |
 
@@ -445,8 +490,7 @@ the default call. Every verdict rests on one seed and one prompt.
   - FLUX: `3a570e2f`, `b05c71d6`;
   - LTX-2: `0c3b0792`;
   - Wan: `7c41de7d`, `d166e799`;
-  - HV1: `ec3856c1`, `69908bf9` (the 2nd attempt committed nothing; its A compile log is
-    `hunyuan_video/A/compile_1.log`);
+  - HV1: `ec3856c1`, `69908bf9`, `e9361d0f` (the 3rd attempt's timed arms and lane doc);
   - HV1.5: `0a098276`, `306cdaa0`.
 - Floors and references:
   - CPU fp32 references: `/home/ubuntu/fp8-bench/fp32_ref/{qwen_image,flux,ltx_2}`;
