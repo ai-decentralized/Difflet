@@ -14,6 +14,12 @@
 # NEURON_NUMA_PIN=0. <mode>.env.txt logs the tree, fuser and mpstat.
 # env: ROOT (default /mnt/nvme/difflet-exp/constmax-models/hunyuan_video), PY, BORROW
 set -u
+# Shared host: the HY4 kernel campaign takes corenode.lock for its whole-node runs; every arm's
+# device run takes it too, so the two workloads wait for each other instead of colliding.
+if [ -z "${CORENODE_LOCKED:-}" ]; then
+  export CORENODE_LOCKED=1
+  exec flock /home/ubuntu/ws/trainium-kernel-agent/locks/corenode.lock "$0" "$@"
+fi
 ARM=$1 MODE=$2 DEV=$3
 LOCK=/home/ubuntu/.claude/jobs/3bceca85/tmp/devlocks/neuron$DEV.lock
 if [ -z "${HV1_LOCKED:-}" ]; then

@@ -5,7 +5,10 @@ from the orchestrator's "request:" line (median over steps 2-50, n=49), the arm'
 mean of its two request medians, spread = |r1 - r2| / mean, warm e2e = request 2's wall time, the
 mp4 and latents md5s; the ratios B/A, C/A, D/A, D/C; quality (scripts/compare_difflet_runs.py on
 request 2's mp4 and latents) of B, C and D against A and of D against C; whether A reproduces the
-evidence's bf16 clip (docs/verification/2026-11-07-mxfp8-video-models.md 7f).
+evidence's bf16 clip (docs/verification/2026-11-07-mxfp8-video-models.md 7f); A's determinism: its
+two requests and A/timed_pre (an earlier run of A) give one mp4 md5 and equal latents (the latents
+files' md5s differ by request because torch.save names the archive after the file).
+A pair whose ROOT/scores/<pair>.json exists is not re-scored, so the four pairs can run in parts.
 
 usage: hv1_collect.py [ROOT] [CPUS]   (CPU only; TORCH_DEVICE_BACKEND_AUTOLOAD=0 is set for the
 compare subprocesses)
@@ -58,6 +61,8 @@ def compare(name: str, ref: str, cand: str) -> dict | None:
     if not ((r / "warm_2.mp4").exists() and (c / "warm_2.mp4").exists()):
         return None
     out = ROOT / "scores" / f"{name}.json"
+    if out.exists():  # shortcut: trusts an earlier score of the same files; delete it to re-score
+        return json.loads(out.read_text())
     out.parent.mkdir(exist_ok=True)
     cmd = ["taskset", "-c", CPUS, sys.executable, str(REPO / "scripts/compare_difflet_runs.py"),
            "--ref-image", str(r / "warm_2.mp4"), "--cand-image", str(c / "warm_2.mp4"), "--out", str(out)]
@@ -69,8 +74,19 @@ def compare(name: str, ref: str, cand: str) -> dict | None:
     return json.loads(out.read_text())
 
 
+def a_deterministic() -> dict:
+    import torch
+    runs = [ROOT / "A", ROOT / "A" / "timed_pre"]
+    mp4 = {md5(w / f"warm_{i}.mp4") for w in runs for i in (1, 2)}
+    lat = [torch.load(w / "work" / "worker_0" / f"latents_req000{i}.pt", map_location="cpu",
+                      weights_only=True) for w in runs for i in (0, 1)]
+    return {"mp4_md5s": sorted(m for m in mp4 if m), "one_mp4_md5": len(mp4) == 1 and None not in mp4,
+            "latents_equal": all(torch.equal(lat[0], t) for t in lat[1:])}
+
+
 def main() -> None:
     arms = {a: arm(a) for a in "ABCD"}
+    arms["A_pre"] = arm("A/timed_pre")
     step = {a: r.get("step_ms") for a, r in arms.items()}
     ratio = lambda x, y: step[x] / step[y] if step[x] and step[y] else None  # noqa: E731
     quality = {f"{c}_vs_{r}": compare(f"{c}_vs_{r}", r, c)
@@ -79,6 +95,7 @@ def main() -> None:
            "shape": "544x960x129, tp4, 50 steps, seed 42, guidance 6.0", "arms": arms,
            "b_over_a": ratio("B", "A"), "c_over_a": ratio("C", "A"), "d_over_a": ratio("D", "A"),
            "d_over_c": ratio("D", "C"), "quality": quality,
+           "a_deterministic": a_deterministic(),
            "a_md5_matches_evidence": (arms["A"].get("mp4_md5") or [None])[-1] == EVIDENCE_BF16_MD5,
            "c_md5_matches_evidence": (arms["C"].get("mp4_md5") or [None])[-1] == EVIDENCE_MX_MD5,
            "evidence_md5": {"bf16": EVIDENCE_BF16_MD5, "mxfp8": EVIDENCE_MX_MD5}}
