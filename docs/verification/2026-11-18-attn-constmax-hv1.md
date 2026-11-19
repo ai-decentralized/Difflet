@@ -146,10 +146,10 @@ What the contention means for timing:
 
 | arm | device | wall (`/usr/bin/time`) | load + warm-up (ranks 1-3) | peak host RSS | exit | blocks, fallbacks |
 |---|---|---|---|---|---|---|
-| A | 5 | 8:45 | 515.5 s | 33.6 GB | 0 | 60, none |
-| B | 2 | 1:14:30 | 4,460.0 s | 55.9 GB | 0 | 60, none |
-| C | 1 | 42:38 | 2,545.4 s | 67.8 GB | 0 | 60, none |
-| D | 3 | 50:50 | 3,036.5 s | 55.9 GB | 0 | 60, none |
+| A | 5 | 8:45 | 515.5 s | 34.4 GB (32.0 GiB) | 0 | 60, none |
+| B | 2 | 1:14:30 | 4,460.0 s | 57.3 GB (53.3 GiB) | 0 | 60, none |
+| C | 1 | 42:38 | 2,545.4 s | 69.4 GB (64.7 GiB) | 0 | 60, none |
+| D | 3 | 50:50 | 3,036.5 s | 57.3 GB (53.3 GiB) | 0 | 60, none |
 
 - **A hit the cache.** Its two block NEFFs (`03c8…`, `df55…`) were written at 09:53 and 10:40 on
   11-18 by the second attempt's compile.
@@ -196,9 +196,11 @@ identical.
 
 What this check cannot show:
 
-- **The op inside the routed graphs.** The NEFFs are compressed, and the HLO cache entries name
-  no op. So the presence of `attention_const_max_bounded` inside the routed graphs is not shown
-  directly.
+- **The op inside the routed graphs: shown directly by the audit (correction).** A NEFF is a gzip
+  stream from byte 1024. Decompressed, B's `d190`/`dfa4` and D's `81d5`/`a8c6` contain
+  `attention_const_max`, `attention_const_max_kernel` and `attention_const_max_lnc` and no
+  `attention_cte`. A's `03c8`/`df55` and C's `35a3`/`4b3b` contain only `attention_cte` (24 hits
+  against const-max's 12: the cte route's two 3-head chunk calls against one 6-head call).
 - **What the strace does show.** It shows only that B and D import the const-max modules.
 - **What supports the routing instead.** The halved step (section 5) and the CPU route test.
 
@@ -414,8 +416,8 @@ frame 52 (C's and D's worst).
     and the 11-13 profile (another session, bf16 and MXFP8 only).
   - B and D were not profiled.
   - 7-10% of the saving is unattributed.
-- **Device routing is shown indirectly.** It rests on the NEFF keys, the step times and the CPU
-  test. The op's presence inside the routed NEFFs is not shown.
+- **Device routing is shown directly** (audit correction): the routed NEFFs of B and D contain the
+  const-max kernel and no `attention_cte`; A's and C's contain only `attention_cte` (section 4).
 - **HBM use was not recorded** for any arm.
 - **Inputs outside the sigma rule.** 50 of the 55 routed layers have sigma > 1, outside the
   kernel docstring's precondition. The largest routed gap is 78.2 against the limit of 80. No run
