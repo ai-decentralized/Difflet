@@ -1,7 +1,8 @@
 # Multi-model gateway: every servable model resident on one trn3 — design
 
 **Date:** 2026-11-20
-**Status:** draft for review — no code until the user approves this document.
+**Status:** design settled 2026-11-20 (approach A, shared-host question answered); implementation plan next.
+No code until the user confirms the implementation plan.
 **Fact-check baseline:** main `eaf4c003`. Items marked "verified" were checked against the code or the host.
 
 Markers: **[User decision]** the user decided it in the discussion; **[My choice]** a default I picked, open to
@@ -237,9 +238,11 @@ key on loopback. Same caveat as today: one shared key; put the port behind a sec
   `/home/ubuntu/ws/trainium-kernel-agent/locks/corenode.lock` and then waits until `fuser /dev/neuron*` is empty
   (`.../examples/hy4-mxfp8/e2e_lane.sh:8-9`). Every Neuron runtime process also opens `/dev/neuron0`, so **while
   the fleet is up, every HY4 whole-node job waits** — the node cannot be shared partially. And if the launcher only
-  peeks at the lock, a HY4 lane can take it and then hang on our devices with nobody told. The user decides when
-  the fleet may run and how it treats the lock (recommended: the launcher takes the lock and holds it for the
-  fleet's lifetime, so HY4 lanes queue visibly at the lock; `launch --stop` releases it).
+  peeks at the lock, a HY4 lane can take it and then hang on our devices with nobody told.
+  **[User decision, 2026-11-20]** "我们忽略其他的task会用这台机器，我们先站上device，我后续会通知大家的": the fleet
+  takes devices 0–5 now; the launcher does not touch `corenode.lock`; the user tells the other sessions. The
+  launcher still refuses a device whose cores another process holds — the Neuron runtime cannot share cores, so
+  starting there would only fail later with a less clear error **[My choice]**.
 - **Fit on one device [to verify].** Not yet run on trn3: whether every serving stage of each model fits in one
   device's 4 cores and 144 GB — especially MiniMax-H3 (TP4 DiT plus video and audio VAEs) and Wan (a registry
   layout that wants more than 4 cores would be refused). Step 1 of the plan starts each model alone on its device;
@@ -268,10 +271,8 @@ wording, page styling, launcher flag names, how long the launcher waits per mode
 
 ## 10. Open questions for the user
 
-1. Section 7 shared host: fleet up means every HY4 whole-node job waits. When may the fleet run, and should the
-   launcher hold `corenode.lock` for its lifetime (recommended)?
-2. Section 7 weights: start sequentially from EBS (slow first start, my default) or copy hub weights to
-   `/mnt/nvme`?
+1. ~~Shared host~~ — answered 2026-11-20: take the devices now, ignore other sessions (section 7).
+2. ~~Weights~~ — no objection to the default: sequential start from EBS.
 3. The shape list per model (after the inventory step) — the user will set it.
 
 ## 11. Review log
