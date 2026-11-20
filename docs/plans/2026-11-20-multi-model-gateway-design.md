@@ -59,6 +59,20 @@ users which models are up and which shapes each one serves.
 So the per-model servers exist; what is missing is the front door that routes by `model`, the page, and a way
 to start the six servers with the right pinning.
 
+**Finding (2026-11-20, after the cache inventory) — blocks five of the six models.** On this host's native
+`neuron` backend only MiniMax-H3 can run `difflet serve` (its stage is `placement="neuron_native"`, added in
+#158). The serve adapters of FLUX, Qwen-Image, Wan, HunyuanVideo and LTX-2 take the Trainium NxD AoT path:
+FLUX/LTX-2 compile through `_serving_compile_environment`, which forces `WORLD_SIZE=1`
+(`common/orchestrators/flux.py:155-178`), and `NeuronBackend.prepare_runtime` refuses tp4 under it
+(`backends/neuron/runtime.py:89-97`); Qwen imports `neuronx_distributed_inference`
+(`serving/orchestrators/qwen_image.py:410`); Wan and HunyuanVideo import the Trainium application/config. No venv
+on the host has `neuronx_distributed`. Those five run natively only through `difflet generate` (torchrun ranks
+each calling `DiffletPipeline.from_pretrained`, `cli/orchestrators/torchrun.py:423`). The resident worker already
+runs one process per rank on the neuron backend (`supports_torchrun_mpmd`, `resident_worker.py:545-563`), so native
+serving for them is feasible but is new serving code — a separate project. Also: no serve-layout artifacts exist
+on the host, and native NEFF reuse is keyed by graph bytes, so every backend's first start compiles; the only
+MiniMax-H3 serve graphs were built at tp4×cp2 (two devices), not tp4 on one device.
+
 ## 3. Goals, non-goals, anti-goals
 
 **Goals**
