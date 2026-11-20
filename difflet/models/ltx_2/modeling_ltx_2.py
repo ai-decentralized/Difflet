@@ -18,8 +18,10 @@ needs the LTX-2 geometry attributes (``in_channels``, ``latent_num_frames``, ``a
 
 from __future__ import annotations
 
+import json
 import math
 import os
+from pathlib import Path
 
 import torch
 from torch import nn
@@ -243,11 +245,13 @@ class _LTX2TPAttnProcessor:
             v3 = value.reshape(bsz, k_len, n_heads, head_dim).permute(0, 2, 1, 3).reshape(
                 bsz * n_heads, k_len, head_dim
             )
+            sigma = getattr(attn, "constmax_sigma", None)  # experiment E1, video attn1 only
             out3 = difflet_attention(
                 q3, k3, v3,
                 scale=1.0 / math.sqrt(head_dim),
                 causal=False,
                 tp_q=True, tp_k=True, tp_out=False,
+                **({} if sigma is None else {"constmax_sigma": sigma}),
             )
             hidden_states = out3.reshape(bsz, n_heads, q_len, head_dim).permute(0, 2, 1, 3).reshape(
                 bsz, q_len, inner
@@ -490,6 +494,17 @@ class _LTX2TransformerTraceModule(nn.Module):
                 self.tp_rank_util,
                 reduce_dtype=config_reduce_dtype(config),
             )
+        # Experiment E1 (docs/plans/2026-11-18-attn-constmax-sparse-experiments.md): each video
+        # self-attention whose layer passes the table's gap rule carries its score sigma as a
+        # [128, 1] buffer for the neuron backend's const-max route; the layers that fail it (the
+        # per-layer allowlist) stay on attention_cte. Table: scripts/attn_constmax/table.py.
+        if os.environ.get("DIFFLET_EXP_ATTN_CONSTMAX") == "1":
+            table = json.loads(Path(__file__).with_name("attn_constmax.json").read_text())["layers"]
+            for i, block in enumerate(self.transformer.transformer_blocks):
+                row = table[f"transformer_blocks.{i}.attn1"]
+                if row["ok"]:
+                    block.attn1.register_buffer("constmax_sigma", torch.full((128, 1), row["sigma"]),
+                                                persistent=False)
 
     def forward(
         self,
