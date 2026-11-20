@@ -72,7 +72,7 @@ def resolve_serving_model(options: ServeOptions) -> ResolvedServingModel:
             )
     else:
         try:
-            metadata = _SERVING_METADATA[entry.name]
+            metadata = _native_neuron_metadata(entry.name) or _SERVING_METADATA[entry.name]
         except KeyError as exc:
             # A model served only on GPUs (HunyuanVideo 1.5) is refused here, not with a
             # traceback.
@@ -133,6 +133,20 @@ def resolve_serving_model(options: ServeOptions) -> ResolvedServingModel:
         metadata=metadata,
         profile=profile,
     )
+
+
+def _native_neuron_metadata(entry_name: str) -> ServingModelMetadata | None:
+    """On the native neuron backend, the models with a native resident path
+    (``difflet.backends.neuron.serving``) instead of their Trainium AoT adapters, which need
+    neuronx_distributed. MiniMax-H3's own metadata is already native; None for every other
+    model and backend."""
+    if current_backend() != "neuron":
+        return None
+    from difflet.backends.neuron.serving import NATIVE_SERVED_CHECKPOINTS, neuron_serving_metadata
+
+    if entry_name not in NATIVE_SERVED_CHECKPOINTS:
+        return None
+    return neuron_serving_metadata(entry_name)
 
 
 def _visible_gpu_count(platform) -> int:

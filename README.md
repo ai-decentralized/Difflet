@@ -477,6 +477,19 @@ runs a real generation smoke test before `/ready` opens. Warm restarts reuse the
 serving profile owns all four cores on a `trn2.3xlarge`, so you cannot run two servers, or a
 server and a CLI generation, at the same time.
 
+On the PyTorch-native `neuron` backend (`DIFFLET_BACKEND=neuron`, e.g. trn3), FLUX.1-dev,
+Qwen-Image, Wan 2.1, HunyuanVideo and LTX-2 serve through `difflet/backends/neuron/serving.py`:
+one resident pipeline per rank, the VAE decode in the same process, the primary rank writing the
+PNG or MP4 (LTX-2 without its audio track). Nothing is compiled ahead of time: the first start
+compiles at load into `--cache-dir`, later starts reuse it. Pin one server per device with
+`NEURON_RT_VISIBLE_CORES` (device *d* = cores `4d..4d+3` at LNC=2) to run several side by side:
+
+```bash
+NEURON_RT_VISIBLE_CORES=0-3 DIFFLET_BACKEND=neuron difflet serve \
+  --model-id black-forest-labs/FLUX.1-dev --tp-degree 4 \
+  --height 1024 --width 1024 --cache-dir /mnt/nvme/difflet-fleet/cache/flux --port 8100
+```
+
 ### Check readiness
 
 ```bash

@@ -1,0 +1,565 @@
+"""``difflet serve`` for FLUX.1-dev, Qwen-Image, Wan 2.1, HunyuanVideo and LTX-2 on the native
+``neuron`` backend (``DIFFLET_BACKEND=neuron``, torch-neuronx).
+
+Each model stays resident as one ``DiffletPipeline`` per rank: the resident worker spawns one
+process per rank of ``tp * cp`` (``supports_torchrun_mpmd``) with RANK/WORLD_SIZE set, every rank
+builds and loads the same pipeline that ``difflet generate`` builds (``run_generate_stage``,
+``difflet/cli/orchestrators/torchrun.py``), every rank runs every request, and the primary
+replica alone writes the PNG or MP4 (the others return an empty output the worker drops). The
+VAE decode runs in the same process — the CLI's separate vae launch is a one-shot process with
+its own tp1 mesh, which cannot be built beside the tp4 DiT (``parallel_mesh`` is set once per
+process). MiniMax-H3 keeps its own adapter (``difflet.serving.models.minimax_h3``).
+
+The request contract comes from each model's ``ModelSpec`` (``difflet/models/<model>/spec.py``)
+through the GPU flow's validator. Importing this module must not import torch: the serving
+parent process resolves the preparer and the validator itself.
+"""
+
+from __future__ import annotations
+
+import dataclasses
+import io
+import os
+import time
+from collections import OrderedDict
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from difflet.backends.gpu.serving import GpuServingRequestValidator, gpu_serving_metadata
+from difflet.common.registry.base import ServingModelMetadata
+from difflet.models.spec import ModelSpec, gpu_model_spec
+from difflet.serving.engines.stage_pipeline import (
+    ErasedStageRunner,
+    ValidatedStageRunner,
+    require_exact_payload,
+    stage_result,
+)
+from difflet.serving.errors import feature_not_supported
+from difflet.serving.options import CompilePolicy, DownloadPolicy
+from difflet.serving.orchestrators.base import resolve_hf_model_source
+from difflet.serving.types import (
+    ArtifactSet,
+    CompileArtifactIdentity,
+    DiffletGenerateOutput,
+    DiffletGenerateRequest,
+    DistributedProcessEnvironment,
+    FileBackedGenerateOutput,
+    ParallelTopology,
+    ResolvedRuntimeBundle,
+    RuntimeEnvironment,
+    RuntimePlan,
+    ServingProfile,
+    StageExecutionResult,
+    StageInvocation,
+    StagePayload,
+    StageRuntimeSpec,
+    VideoGenerateOptions,
+    WorkerAllocationSpec,
+)
+
+STAGE_ID = "pipeline"
+_MODULE = "difflet.backends.neuron.serving"
+
+#: The checkpoints served natively, by registry entry name. Wan is 2.1 only: the native Wan
+#: app at serving runs one transformer (``enable_transformer_2=False``), so a Wan 2.2 request
+#: would silently lose its low-noise expert.
+NATIVE_SERVED_CHECKPOINTS: dict[str, tuple[str, ...]] = {
+    "flux": ("black-forest-labs/FLUX.1-dev",),
+    "qwen_image": ("Qwen/Qwen-Image",),
+    "wan": ("Wan-AI/Wan2.1-T2V-14B-Diffusers",),
+    "hunyuan_video": ("hunyuanvideo-community/HunyuanVideo",),
+    "ltx_2": ("Lightricks/LTX-2",),
+}
+
+#: Profile options the native resident path does not run: (profile attribute, flag).
+_REFUSED_PROFILE_OPTIONS = (
+    ("shapes", "--shapes (bucketed request shapes)"),
+    ("teacache_cadence", "--teacache-cadence (a `difflet generate` option on this backend)"),
+    ("teacache_online_delta", "--teacache-online-delta"),
+    ("teacache_speedup", "--teacache-speedup"),
+    ("host_vae", "--host-vae (the decoder placement is fixed per model)"),
+    ("clip_placement", "--clip-placement"),
+    ("torch_compile", "--torch-compile (CUDA only)"),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class NeuronInitialPayload(StagePayload):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class NeuronImagePayload(StagePayload):
+    output: DiffletGenerateOutput
+
+
+@dataclass(frozen=True, slots=True)
+class NeuronVideoPayload(StagePayload):
+    output: FileBackedGenerateOutput
+
+
+# --------------------------------------------------------------------- metadata
+
+
+def neuron_serving_metadata(model_type: str) -> ServingModelMetadata:
+    """The GPU flow's metadata for ``model_type`` (same request contract, one opaque stage),
+    with this module's factories and the natively served checkpoints."""
+    return dataclasses.replace(
+        gpu_serving_metadata(_spec(model_type)),
+        checkpoint_ids=NATIVE_SERVED_CHECKPOINTS[model_type],
+        artifact_preparer_factory=f"{_MODULE}:NeuronServingArtifactPreparer",
+        orchestrator_factory=f"{_MODULE}:NeuronServingStageAdapter",
+        request_validator_factory=f"{_MODULE}:NeuronServingRequestValidator",
+    )
+
+
+def _spec(model_type: str) -> ModelSpec:
+    spec = gpu_model_spec(model_type)
+    if spec is None or model_type not in NATIVE_SERVED_CHECKPOINTS:
+        raise feature_not_supported(f"{model_type!r} is not served on the native neuron backend")
+    return spec
+
+
+def _spec_for_model_id(model_id: str) -> ModelSpec:
+    from difflet.registry import resolve_model
+
+    return _spec(resolve_model(model_id).name)
+
+
+def _is_primary_replica() -> bool:
+    return int(os.environ.get("DIFFLET_REPLICA_RANK", "0")) == 0
+
+
+def _require_neuron_backend() -> None:
+    from difflet.backends.registry import current_backend
+
+    if current_backend() != "neuron":
+        raise ValueError("native neuron serving needs DIFFLET_BACKEND=neuron")
+
+
+def refuse_unsupported_profile(profile: ServingProfile, spec: ModelSpec) -> None:
+    for attribute, label in _REFUSED_PROFILE_OPTIONS:
+        value = getattr(profile, attribute, None)
+        if value not in (None, False, (), []):
+            raise feature_not_supported(
+                f"[{spec.model_type}/neuron serve] {label} is not supported by native serving"
+            )
+
+
+# --------------------------------------------------------------------- per model
+
+
+def native_application_kwargs(model_type: str, spec: ModelSpec) -> dict[str, Any]:
+    """The application kwargs of the CLI's default native generate, with the decoder loaded in
+    the same process (``difflet/cli/orchestrators/<model>.py``, ``_torchrun_application_kwargs``).
+    ``text_seq_len`` is the spec's prompt budget, so the validator and the DiT agree."""
+    if model_type == "flux":
+        # Every rank holds a VAE copy; rank 0 alone decodes (TorchNeuronFluxApplication).
+        return {"decode_vae": True}
+    common = {
+        "text_seq_len": spec.prompt_budgets[0].max_tokens,
+        "batch_size": 1,
+        "exec_mode": None,
+        "encoder_threads": 12,
+    }
+    if model_type == "qwen_image":
+        # shortcut: the decoder runs on every rank (enable_vae_decoder); its HBM beside the tp4
+        # DiT is unmeasured (fits trn3's ~36 GB/core on paper); decode on rank 0 only if it OOMs.
+        return {**common, "enable_text_encoder": True, "enable_transformer": True,
+                "enable_vae_decoder": True}
+    if model_type == "wan":
+        # shortcut: as Qwen-Image — every rank decodes; 81 frames decode in fp32 (~12 GiB).
+        return {**common, "enable_text_encoder": True, "enable_transformer": True,
+                "enable_transformer_2": False, "enable_vae_decoder": True,
+                "text_encoder_device": "neuron"}
+    if model_type == "hunyuan_video":
+        # The CLI default: Llama/CLIP on rank 0's host, the VAE decodes on rank 0's core.
+        return {**common, "text_encoder_device": "host", "enable_vae_decoder": True,
+                "vae_dtype": "bfloat16", "vae_exec_mode": "compile"}
+    if model_type == "ltx_2":
+        # Gemma on the device (the CLI's placement at tp4); the video/audio VAEs and the
+        # vocoder on rank 0's host (enable_decode_components), as the CLI's host decode.
+        return {**common, "enable_text_encoder": True, "enable_transformer": True,
+                "enable_decode_components": True, "text_encoder_device": "neuron"}
+    raise feature_not_supported(f"{model_type!r} is not served on the native neuron backend")
+
+
+def native_pipeline_kwargs(model_type: str, profile: ServingProfile, *, revision: str | None
+                           ) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {
+        "model_type": model_type,
+        "height": int(profile.height),
+        "width": int(profile.width),
+        "revision": revision,
+    }
+    if profile.num_frames is not None:
+        kwargs["num_frames"] = int(profile.num_frames)
+    return kwargs
+
+
+def native_request_kwargs(model_type: str, request: DiffletGenerateRequest,
+                          profile: ServingProfile, *, primary: bool) -> dict[str, Any]:
+    """``pipe(**kwargs)`` for one request, without the generator (the adapter adds a
+    ``torch.Generator`` seeded identically on every rank). Each application takes a different
+    set (``difflet/models/<model>/neuron_application.py``); an unknown kwarg is a TypeError."""
+    video = request.video
+    kwargs: dict[str, Any] = {
+        "prompt": request.prompt,
+        "num_inference_steps": int(request.num_inference_steps),
+    }
+    if model_type == "flux":
+        kwargs.update(height=int(profile.height), width=int(profile.width),
+                      guidance_scale=float(request.guidance_scale), output_type="pil")
+    elif model_type == "qwen_image":
+        kwargs["output_type"] = "pt"  # no guidance: the DiT has guidance_embeds=False
+    elif model_type == "wan":
+        kwargs.update(height=int(profile.height), width=int(profile.width),
+                      num_frames=int(profile.num_frames),
+                      guidance_scale=float(request.guidance_scale), output_type="pt")
+        if video is not None and video.negative_prompt is not None:
+            kwargs["negative_prompt"] = video.negative_prompt
+    elif model_type == "hunyuan_video":
+        kwargs.update(guidance_scale=float(request.guidance_scale), output_type="pt")
+    elif model_type == "ltx_2":
+        # Only rank 0 holds the decoders; "pt" raises on the others.
+        kwargs.update(guidance_scale=float(request.guidance_scale),
+                      output_type="pt" if primary else "latent")
+        if video is not None and video.negative_prompt is not None:
+            kwargs["negative_prompt"] = video.negative_prompt
+    else:
+        raise feature_not_supported(f"{model_type!r} is not served on the native neuron backend")
+    return kwargs
+
+
+def encode_output(model_type: str, out: Any, request: DiffletGenerateRequest):
+    """The primary replica's pipeline output as the served PNG or MP4."""
+    from difflet.serving.models._common import encode_video_tensor
+
+    if model_type == "flux":
+        return _png(out.images[0])
+    if model_type == "qwen_image":
+        return _png(_qwen_pil(out.images))
+    frames = out.frames.detach().to(device="cpu").float()
+    if model_type == "ltx_2":  # (B, F, C, H, W) in [0, 1]; the audio track is not served
+        return encode_video_tensor(frames.clamp(0.0, 1.0), request, layout="BFCHW",
+                                   value_range="zero_to_one")
+    # Wan, HunyuanVideo: (B, C, F, H, W) in [-1, 1]
+    return encode_video_tensor(frames.clamp(-1.0, 1.0), request, layout="BCTHW",
+                               value_range="minus_one_to_one")
+
+
+def _qwen_pil(images):
+    """``[1, 3, H, W]`` in [-1, 1] -> PIL, the CLI's mapping (``qwen_image._write_image``)."""
+    import torch
+    from PIL import Image
+
+    x = images.detach().to(device="cpu").float()[0]
+    x = ((x * 0.5 + 0.5).clamp(0.0, 1.0) * 255.0 + 0.5).to(torch.uint8)
+    return Image.fromarray(x.permute(1, 2, 0).numpy())
+
+
+def _png(image) -> DiffletGenerateOutput:
+    buf = io.BytesIO()
+    image.save(buf, format="PNG")
+    return DiffletGenerateOutput(data=buf.getvalue(), mime_type="image/png", output_format="png")
+
+
+def _empty_output(spec: ModelSpec, request: DiffletGenerateRequest):
+    """A non-primary replica's output: the worker drops it (only rank 0 replies)."""
+    if spec.output != "video":
+        return DiffletGenerateOutput(data=b"", mime_type="image/png", output_format="png")
+    video = request.video
+    return FileBackedGenerateOutput(
+        path="", mime_type="video/mp4", output_format="mp4", size_bytes=0,
+        width=request.width, height=request.height, num_frames=video.num_frames,
+        fps=float(video.fps), duration_s=0.0)
+
+
+# --------------------------------------------------------------------- runtime plan
+
+
+def native_runtime_plan(profile: ServingProfile, spec: ModelSpec, source_id: str) -> RuntimePlan:
+    """One resident allocation of ``tp * cp`` cores; the worker spawns one process per rank,
+    each bound to its own core of ``NEURON_RT_VISIBLE_CORES`` (as MiniMax-H3's plan)."""
+    from difflet.common.neuron_cores import resolve_available_neuron_core_ids
+
+    world = int(profile.world_size)
+    parallel = profile.parallel
+    inputs = {
+        "backend": "neuron",
+        "model_type": profile.model_type,
+        "source_id": source_id,
+        "height": int(profile.height),
+        "width": int(profile.width),
+        "tp_degree": int(parallel.tp_degree),
+        "cp_degree": int(parallel.cp_degree),
+    }
+    if profile.num_frames is not None:
+        inputs["num_frames"] = int(profile.num_frames)
+    distributed = DistributedProcessEnvironment(1, 1, 0, 0)
+    allocation = WorkerAllocationSpec(
+        allocation_id=f"{spec.short_name}-neuron-resident",
+        requested_num_cores=world,
+        effective_num_cores=world,
+        world_size=world,
+    )
+    return RuntimePlan(
+        mode="resident",
+        profile_identity=CompileArtifactIdentity.from_cache_inputs(inputs).digest,
+        environment=RuntimeEnvironment(
+            available_core_ids=resolve_available_neuron_core_ids(required_num_cores=world),
+            num_cores_override=None,
+            virtual_core_size_override=None,
+            logical_nc_config_override=None,
+            inherited_distributed=distributed,
+            child_distributed=distributed,
+        ),
+        allocations=(allocation,),
+        stages=(
+            StageRuntimeSpec(
+                stage_id=STAGE_ID,
+                allocation_id=allocation.allocation_id,
+                topology=ParallelTopology(tp_degree=int(parallel.tp_degree),
+                                          cp_degree=int(parallel.cp_degree), world_size=world),
+                artifact_id=None,
+                placement="neuron_native",
+            ),
+        ),
+    )
+
+
+# --------------------------------------------------------------------- preparer
+
+
+class NeuronServingArtifactPreparer:
+    """Resolve the commit-pinned snapshot; nothing is compiled ahead of time — the ranks
+    compile or load their NEFFs at load, from the cache under ``--cache-dir``."""
+
+    def __init__(self, model_id: str, revision: str | None = None) -> None:
+        self.model_id = model_id
+        self.revision = revision
+        self.spec = _spec_for_model_id(model_id)
+        self.model_type = self.spec.model_type
+
+    def prepare_runtime(self, profile: ServingProfile, *, download_policy: DownloadPolicy,
+                        compile_policy: CompilePolicy) -> ResolvedRuntimeBundle:
+        del compile_policy  # the NEFF cache is content-keyed; there is nothing to force
+        _require_neuron_backend()
+        refuse_unsupported_profile(profile, self.spec)
+        from difflet.registry import resolve_model
+
+        entry = resolve_model(self.model_id)
+        print(f"[difflet serve] resolving {self.spec.display_name} weights for {self.model_id}")
+        source = resolve_hf_model_source(self.model_id, revision=self.revision,
+                                         download_policy=download_policy,
+                                         allow_patterns=entry.download_patterns)
+        print("[difflet serve] neuron backend: resident pipeline per rank, NEFFs at load")
+        return ResolvedRuntimeBundle(
+            profile=profile,
+            source=source,
+            pipeline_definition=neuron_serving_metadata(self.model_type).pipeline_definition,
+            runtime_plan=native_runtime_plan(profile, self.spec, source.resolved_source_id),
+            compile_specs=(),
+            artifacts=ArtifactSet(()),
+        )
+
+
+# --------------------------------------------------------------------- validator
+
+
+class NeuronServingRequestValidator(GpuServingRequestValidator):
+    """The GPU flow's spec-driven contract, plus what the native resident apps do not take."""
+
+    def validate(self, request: DiffletGenerateRequest) -> None:
+        super().validate(request)
+        video = request.video
+        if self.model_type == "wan" and video is not None and video.guidance_scale_2 is not None:
+            raise feature_not_supported(
+                "guidance_scale_2 is not taken by Wan 2.1: it has one transformer")
+
+
+# --------------------------------------------------------------------- adapter
+
+
+class NeuronPipelineRunner:
+    """The one stage, on every rank: prompt in, PNG or MP4 out on the primary replica."""
+
+    def __init__(self, adapter: "NeuronServingStageAdapter") -> None:
+        self.adapter = adapter
+
+    async def execute(self, invocation: StageInvocation[NeuronInitialPayload]
+                      ) -> StageExecutionResult:
+        started = time.monotonic()
+        invocation.context.cancellation.throw_if_cancelled()
+        output = self.adapter.generate(invocation.request)
+        invocation.context.cancellation.throw_if_cancelled()
+        return stage_result(self.adapter.final_payload(output), started_monotonic=started)
+
+    async def shutdown(self) -> None:
+        self.adapter.pipe = None
+
+
+class NeuronServingStageAdapter:
+    """``ServingStageAdapter`` for the five models on the native neuron backend."""
+
+    def __init__(self, model_id: str) -> None:
+        self.model_id = model_id
+        self.spec = _spec_for_model_id(model_id)
+        self.model_type = self.spec.model_type
+        self.active_profile: ServingProfile | None = None
+        self.pipe: Any = None
+        self._smoke = None
+
+    @property
+    def _final_payload(self) -> type:
+        return NeuronVideoPayload if self.spec.output == "video" else NeuronImagePayload
+
+    def final_payload(self, output) -> StagePayload:
+        return self._final_payload(output=output)
+
+    async def create_loaded_runners(self, runtime: ResolvedRuntimeBundle
+                                    ) -> OrderedDict[str, ErasedStageRunner]:
+        profile = runtime.profile
+        refuse_unsupported_profile(profile, self.spec)
+        _require_neuron_backend()
+        _export_rank_environment(profile, self.model_type)
+        # Worker-side import: the parent process never loads torch for this adapter.
+        from difflet.pipeline.difflet_pipeline import DiffletPipeline
+
+        self.active_profile = profile
+        print(f"[difflet serve] loading {self.spec.display_name} on the neuron backend "
+              f"(tp{profile.parallel.tp_degree} cp{profile.parallel.cp_degree})", flush=True)
+        # from_pretrained prepares the runtime (core binding, NEFF cache, process group) on
+        # this rank; load() is collective, so every rank must call it.
+        self.pipe = DiffletPipeline.from_pretrained(
+            self.model_id,
+            local_files_only=True,
+            parallel=profile.parallel,
+            compile_cache_dir=profile.cache_dir,
+            backend="neuron",
+            application_kwargs=native_application_kwargs(self.model_type, self.spec),
+            load=False,
+            # The commit the parent pinned, so a worker restart loads the snapshot the bundle
+            # and the validator's tokenizer describe.
+            **native_pipeline_kwargs(self.model_type, profile,
+                                     revision=runtime.source.resolved_source_id),
+        )
+        self.pipe.load(skip_warmup=False)
+        print(f"[difflet serve] {self.spec.display_name} pipeline resident", flush=True)
+        runner = ValidatedStageRunner(NeuronPipelineRunner(self), NeuronInitialPayload,
+                                      self._final_payload)
+        return OrderedDict(((STAGE_ID, runner),))
+
+    def generate(self, request: DiffletGenerateRequest):
+        """One request on this rank. Every rank calls the pipeline with the same kwargs and an
+        identically seeded generator (FLUX draws its noise on every rank)."""
+        if self.pipe is None or self.active_profile is None:
+            raise RuntimeError(f"{self.spec.display_name} pipeline is not loaded")
+        import torch
+
+        primary = _is_primary_replica()
+        kwargs = native_request_kwargs(self.model_type, request, self.active_profile,
+                                       primary=primary)
+        kwargs["generator"] = torch.Generator().manual_seed(int(request.seed))
+        out = self.pipe(**kwargs)
+        if not primary:
+            return _empty_output(self.spec, request)
+        return encode_output(self.model_type, out, request)
+
+    def initial_payload(self, request: DiffletGenerateRequest) -> NeuronInitialPayload:
+        return NeuronInitialPayload()
+
+    def finalize(self, payload: StagePayload):
+        return require_exact_payload(
+            payload, self._final_payload, boundary=f"{self.spec.display_name} final payload"
+        ).output
+
+    def smoke_request(self) -> DiffletGenerateRequest:
+        """``spec.smoke_steps`` steps at the resident shape: proves load plus one generate."""
+        spec, profile = self.spec, self.active_profile
+        if self.pipe is None or profile is None:
+            raise RuntimeError(f"{spec.display_name} load did not leave a resident pipeline")
+        guidance = (spec.default_guidance_scale if spec.default_guidance_scale is not None
+                    else spec.serving_noop_guidance_scale)
+        request = dict(request_id="startup-smoke", model=self.model_id, prompt=spec.smoke_prompt,
+                       height=profile.height, width=profile.width,
+                       num_inference_steps=spec.smoke_steps, guidance_scale=guidance, seed=0)
+        if spec.output != "video":
+            return DiffletGenerateRequest(**request)
+        from difflet.serving.models._common import StartupSmokeTarget
+
+        self._cleanup_smoke()
+        self._smoke = StartupSmokeTarget()
+        return DiffletGenerateRequest(
+            **request, output_format="mp4",
+            video=VideoGenerateOptions(num_frames=int(profile.num_frames),
+                                       fps=int(profile.output_fps),
+                                       output_target=self._smoke.file_target()))
+
+    def validate_smoke_output(self, output) -> None:
+        spec, profile = self.spec, self.active_profile
+        try:
+            if not _is_primary_replica():
+                return
+            if spec.output == "video":
+                from difflet.serving.models._common import validate_smoke_output
+
+                if profile is None or self._smoke is None:
+                    raise RuntimeError(f"{spec.display_name} smoke ran without a target")
+                validate_smoke_output(output, profile=profile, expected_path=self._smoke.path)
+            else:
+                from PIL import Image
+
+                if not output.data:
+                    raise RuntimeError(f"{spec.display_name} smoke produced empty output")
+                size = Image.open(io.BytesIO(output.data)).size
+                if profile is None or size != (profile.width, profile.height):
+                    raise RuntimeError(
+                        f"{spec.display_name} smoke image is {size}, not the profile shape")
+            print(f"[difflet serve] {spec.display_name} generation smoke passed", flush=True)
+        finally:
+            self._cleanup_smoke()
+
+    def reset_request_state(self, outcome: str) -> None:
+        if outcome == "error":
+            self._cleanup_smoke()
+
+    async def shutdown(self) -> None:
+        self._cleanup_smoke()
+        self.pipe = None
+        self.active_profile = None
+
+    def _cleanup_smoke(self) -> None:
+        smoke, self._smoke = self._smoke, None
+        if smoke is not None:
+            smoke.cleanup()
+
+
+def _export_rank_environment(profile: ServingProfile, model_type: str) -> None:
+    """What the CLI launcher exports to its ranks, set before the runtime is prepared: the
+    compile cache under ``--cache-dir`` (as MiniMax-H3's adapter), the launcher's 3 h
+    process-group timeout (a cold load holds peers in a collective for many minutes), and
+    HunyuanVideo's NKI trace cache. An operator-exported value wins."""
+    from difflet.backends.neuron.runtime import PG_TIMEOUT_ENV, TORCHRUN_PG_TIMEOUT_S
+
+    if profile.cache_dir and not os.environ.get("DIFFLET_COMPILE_CACHE"):
+        os.environ["DIFFLET_COMPILE_CACHE"] = str(Path(profile.cache_dir).expanduser().resolve())
+    if not os.environ.get(PG_TIMEOUT_ENV, "").strip():
+        os.environ[PG_TIMEOUT_ENV] = str(TORCHRUN_PG_TIMEOUT_S)
+    if model_type == "hunyuan_video":
+        os.environ.setdefault("DIFFLET_NKI_TRACE_CACHE", "1")
+
+
+__all__ = [
+    "NATIVE_SERVED_CHECKPOINTS",
+    "NeuronServingArtifactPreparer",
+    "NeuronServingRequestValidator",
+    "NeuronServingStageAdapter",
+    "encode_output",
+    "native_application_kwargs",
+    "native_pipeline_kwargs",
+    "native_request_kwargs",
+    "native_runtime_plan",
+    "neuron_serving_metadata",
+]
