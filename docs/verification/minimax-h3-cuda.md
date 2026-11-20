@@ -169,35 +169,38 @@ It compares the output with MiniMax's official `assets/i2va.mp4` (1344x768, 192 
 - AAC 32 kHz stereo audio;
 - ffmpeg SSIM ≥ 0.97 and PSNR ≥ 34 dB.
 
-Times are for `difflet serve` and vLLM-Omni's server: one warm-up request, then the median
-of three.
+Both sides ran 49 transformer evaluations per request: Difflet with `--steps 50`, vLLM-Omni
+with `steps=49`. Times are for `difflet serve` and vLLM-Omni's server: one warm-up request,
+then the median of three.
 
 | I2VA, 1x B200 | SSIM | PSNR | Warm request | vs vLLM-Omni |
 |---|---|---|---|---|
-| Difflet eager | 0.9770 | 35.02 dB | 301.2 s | 0.984x |
-| Difflet compiled | 0.9770 | 35.02 dB | 300.8 s | 0.985x |
-| vLLM-Omni eager | 0.9756 | 36.03 dB | 306.0 s | |
-| vLLM-Omni compiled | 0.9755 | 35.49 dB | 305.6 s | |
+| Difflet eager | 0.9802 | 37.99 dB | 302.1 s | 0.992x |
+| Difflet compiled | 0.9802 | 37.98 dB | 301.7 s | 0.991x |
+| vLLM-Omni eager | 0.9748 | 36.10 dB | 304.7 s | |
+| vLLM-Omni compiled | 0.9772 | 37.47 dB | 304.4 s | |
 
 All nine Difflet I2VA clips pass: four from each server and one from `difflet run`. Compiled
-output agrees with eager to within 2e-5 SSIM. An eager request spends 5.66 s per denoising
-step, 9.0 s decoding video, and under a second on the prompt, keyframe and audio.
+output agrees with eager to within 2e-5 SSIM. Repeated requests give bit-identical audio and
+video within 46 dB PSNR of each other, so the files are not byte-identical. An eager request
+spends 5.80 s per denoising step, 8.9 s decoding video, and under a second on the prompt,
+keyframe and audio.
 
 | | Ready | First request | Peak GPU memory |
 |---|---|---|---|
-| Difflet eager | 85 s | 307 s | 141.6 GiB |
-| Difflet compiled | 95 s | 306 s | 141.7 GiB |
-| vLLM-Omni eager | 95 s | 364 s | 130.6 GiB |
-| vLLM-Omni compiled | 75 s | 313 s | 131.1 GiB |
+| Difflet eager | 310 s | 309 s | 141.6 GiB |
+| Difflet compiled | 105 s | 307 s | 141.7 GiB |
+| vLLM-Omni eager | 606 s | 374 s | 130.9 GiB |
+| vLLM-Omni compiled | 170 s | 316 s | 131.1 GiB |
 
 Difflet's server loads every component and runs a short generation before it reports ready,
-which also compiles its blocks. Peak memory is the device's used memory, sampled every second.
-Difflet's peaks were sampled in an earlier session with the same checkpoint and precision;
-vLLM-Omni's peaks were the same to the MiB in both sessions.
+which also compiles its blocks. Ready times include reading the checkpoint from disk, so they
+depend on the host; each eager server here was the first to read its copy. Peak memory is the
+device's used memory, sampled every second.
 
 T2VA requests through both servers, and a compiled 10 s `difflet run`, returned H.264
 1344x768 at 24 fps with AAC 32 kHz stereo. T2VA is not part of the acceptance test; for
-information, the 10 s clip scores SSIM 0.866 against MiniMax's official `assets/t2va.mp4`.
+information, the 10 s clip scores SSIM 0.901 against MiniMax's official `assets/t2va.mp4`.
 
 ## Limits
 
