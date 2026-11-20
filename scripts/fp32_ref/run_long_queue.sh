@@ -17,11 +17,12 @@ SRC=$B/src
 PY=/home/ubuntu/venvs/native-fp8/bin/python
 DEVICE_RUNS=/mnt/nvme/difflet-exp/constmax-models
 if [ "${1:-}" = setup ]; then
-  HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+  # the top level: run inside a subdirectory, git archive would take only that subdirectory
+  REPO=$(git -C "$(dirname "${BASH_SOURCE[0]}")" rev-parse --show-toplevel) || exit 1
   if [ -e "$SRC" ]; then echo "$SRC exists; remove it to snapshot again" >&2; exit 2; fi
   mkdir -p "$SRC"
-  git -C "$HERE" archive HEAD | tar -x -C "$SRC" || exit 1
-  git -C "$HERE" rev-parse HEAD > "$B/src.sha"
+  git -C "$REPO" archive HEAD | tar -x -C "$SRC" || exit 1
+  git -C "$REPO" rev-parse HEAD > "$B/src.sha"
   printf '%s\n' hunyuan_video_long wan21_long wan22_long hunyuan_video_15_long > "$B/queue.txt"
   exit 0
 fi
