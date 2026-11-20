@@ -314,10 +314,12 @@ class FluxOrchestrator(ModelOrchestrator):
             with replica_request_scope(args, req, final=in_process):
                 marks: list[float] = []
                 bench_timing.new_request()
+                last: dict[str, Any] = {}
 
                 def on_step_end(_pipe, _i, _t, callback_kwargs):
                     marks.append(time.perf_counter())
                     step()
+                    last["latents"] = callback_kwargs.get("latents")
                     if dumping and _i == _pipe.num_timesteps - 1:  # packed, what the decode gets
                         latent_dump.dump_latents("final", callback_kwargs["latents"])
                     return callback_kwargs
@@ -347,6 +349,8 @@ class FluxOrchestrator(ModelOrchestrator):
                     latent_dump.dump_frames(output.images[0], rule="round", layout="HWC")
                     output.images[0].save(str(out))
                     print(f"[difflet] image saved to {out}", flush=True)
+                    if last.get("latents") is not None:  # packed, as the vae stage gets them
+                        torch.save(last["latents"].cpu(), stage_loop.work_file(args, req, "latents.pt"))
                 elif rank == 0:
                     path = stage_loop.work_file(args, req, "latents.pt")
                     torch.save(output.images.cpu(), path)

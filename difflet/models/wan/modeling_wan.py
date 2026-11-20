@@ -29,8 +29,11 @@ Key Trainium-aware decisions:
 
 from __future__ import annotations
 
+import json
 import math
+import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 import torch
@@ -434,12 +437,20 @@ class WanFeedForward(nn.Module):
 # Attention (self / cross)
 
 
+#: Experiment E2 (docs/plans/2026-11-18-attn-constmax-sparse-experiments.md): the backend's
+#: ``block_sparse_attention``, resolved by ``WanTransformer3DModel`` when ``DIFFLET_EXP_ATTN_SPARSE``
+#: is set (``ops_impl/block_sparse_attention.py``); None otherwise.
+_block_sparse_attention = None
+
+
 def _attn_kernel(
     q: torch.Tensor,
     k: torch.Tensor,
     v: torch.Tensor,
     *,
     head_dim: int,
+    kv_mask: Optional[str] = None,
+    constmax_sigma: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """Run attention on (B, heads, S, head_dim) tensors via ``difflet.ops.attention``.
 
@@ -456,6 +467,10 @@ def _attn_kernel(
     q_flat = q.reshape(batch * heads, seq_q, dim)
     k_flat = k.reshape(batch * heads, seq_k, dim)
     v_flat = v.reshape(batch * heads, seq_k, dim)
+    if kv_mask is not None:  # experiment E2: every batch row and head takes the one tile mask
+        out = _block_sparse_attention(q_flat, k_flat, v_flat, scale=1.0 / math.sqrt(head_dim),
+                                      kv_mask=kv_mask)
+        return out.reshape(batch, heads, seq_q, dim)
     out = attention(
         q_flat,
         k_flat,
@@ -466,8 +481,41 @@ def _attn_kernel(
         tp_q=True,
         tp_k=True,
         tp_out=False,
+        # Experiment E1: the layer's score sigma (add_constmax_sigma_), only when it has one.
+        **({} if constmax_sigma is None else {"constmax_sigma": constmax_sigma}),
     )
     return out.reshape(batch, heads, seq_q, dim)
+
+
+def add_constmax_sigma_(model: nn.Module, model_path) -> int:
+    """Experiment E1 (docs/plans/2026-11-18-attn-constmax-sparse-experiments.md), opt-in with
+    ``DIFFLET_EXP_ATTN_CONSTMAX=1``: each self-attention (``attn1``) whose layer passes the gap
+    rule of its expert's table (``attn_constmax.json``, scripts/attn_constmax/table_wan.py) carries
+    its score sigma as a non-persistent [128, 1] buffer, which ``_attn_kernel`` hands the neuron
+    backend's const-max route; the other layers (the allowlist) and every cross-attention stay on
+    attention_cte. The table is the one whose "<revision>/<expert dir>" key ``model_path`` (hub
+    snapshot, bf16 copy or quantized directory of one expert) matches; none is an error. Returns
+    the number of attentions routed (0 with the env unset)."""
+    if os.environ.get("DIFFLET_EXP_ATTN_CONSTMAX") != "1":
+        return 0
+    tables = json.loads(Path(__file__).with_name("attn_constmax.json").read_text())["tables"]
+    parts = Path(model_path).parts
+    keys = [k for k in tables
+            if k.split("/")[0] in str(model_path) and k.split("/")[1] in parts]
+    if len(keys) != 1:
+        raise ValueError(f"DIFFLET_EXP_ATTN_CONSTMAX: no single const-max table for {model_path} "
+                         f"(tables: {sorted(tables)})")
+    layers = tables[keys[0]]["layers"]
+    routed = 0
+    for i, block in enumerate(model.blocks):
+        row = layers[f"blocks.{i}.attn1"]
+        if row["ok"]:
+            block.attn1.register_buffer("constmax_sigma", torch.full((128, 1), row["sigma"]),
+                                        persistent=False)
+            routed += 1
+    print(f"[wan] const-max (experiment E1): {routed} of {len(model.blocks)} self-attentions "
+          f"routed, table {keys[0]}", flush=True)
+    return routed
 
 
 class WanAttention(nn.Module):
@@ -522,6 +570,9 @@ class WanAttention(nn.Module):
             )
         self.local_heads = heads // self.tp_degree
         self._rank_util = None
+        # Experiment E2: the self-attention's static tile-mask spec (kv_tiles_for), stamped by
+        # WanTransformer3DModel.forward under DIFFLET_EXP_ATTN_SPARSE; None = attention_cte.
+        self.kv_mask: Optional[str] = None
         # The self-attention's q/k channel order (ROPE_LAYOUTS); set by the model's
         # use_half_split_rope_, which reorders the q/k rows to match.
         self.rope_layout = "interleaved"
@@ -649,7 +700,9 @@ class WanAttention(nn.Module):
                     stacked_kv, gather_dim=3, process_group=self.cp_group
                 )  # [2, B, heads, S, head_dim]
                 k, v = torch.unbind(stacked_kv, dim=0)
-            out = _attn_kernel(q, k, v, head_dim=self.head_dim)
+            out = _attn_kernel(q, k, v, head_dim=self.head_dim,
+                               kv_mask=None if self.is_cross_attention else self.kv_mask,
+                               constmax_sigma=getattr(self, "constmax_sigma", None))
 
         # (B, local_heads, S, dim) → (B, S, local_heads * dim); RowParallelLinear then
         # all-reduces each rank's partial output projection back to the full model dim.
@@ -794,6 +847,18 @@ class WanTransformer3DModel(nn.Module):
                 "sp_enabled and context_parallel_enabled are mutually exclusive "
                 "(both shard the sequence dimension)."
             )
+        # Experiment E2: self-attention (attn1) on the fork with a static K/V-tile mask, e.g.
+        # DIFFLET_EXP_ATTN_SPARSE=temporal:6 (attn_tile_masks.kv_tiles_for); unset, nothing changes.
+        self.attn_sparse = os.environ.get("DIFFLET_EXP_ATTN_SPARSE") or None
+        if self.attn_sparse is not None:
+            if self.context_parallel_enabled:
+                raise ValueError("DIFFLET_EXP_ATTN_SPARSE needs the whole sequence in one call; "
+                                 "context parallelism shards it")
+            from difflet.ops._dispatch import load_backend_attr
+
+            global _block_sparse_attention
+            _block_sparse_attention = load_backend_attr("block_sparse_attention",
+                                                        "block_sparse_attention")
         if self.cfg_parallel_enabled and self.context_parallel_enabled:
             from difflet.pipeline.parallel_config import cfg_cp_composable
 
@@ -967,6 +1032,10 @@ class WanTransformer3DModel(nn.Module):
         ppf = num_frames // p_t
         pph = height // p_h
         ppw = width // p_w
+
+        if self.attn_sparse is not None:  # experiment E2: the mask spec with this call's grid
+            for block in self.blocks:
+                block.attn1.kv_mask = f"{self.attn_sparse}@{ppf}x{pph}x{ppw}"
 
         # (cos, sin) each (1, S, 1, head_dim)
         rotary_emb = self.rope(hidden_states, self.rope_layout)
