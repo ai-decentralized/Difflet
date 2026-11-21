@@ -181,8 +181,9 @@ then the median of three.
 | vLLM-Omni compiled | 0.9772 | 37.47 dB | 304.4 s | |
 
 All nine Difflet I2VA clips pass: four from each server and one from `difflet run`. Compiled
-output agrees with eager to within 2e-5 SSIM. Repeated requests give bit-identical audio and
-video within 46 dB PSNR of each other, so the files are not byte-identical. An eager request
+output agrees with eager to within 2e-5 SSIM. Repeated requests generate bit-identical video
+and audio, but the MP4 files can differ slightly (43 dB PSNR or more between them): on the
+B200 host's AVX-512 CPU, libx264's multithreaded encoding is not repeatable. An eager request
 spends 5.80 s per denoising step, 8.9 s decoding video, and under a second on the prompt,
 keyframe and audio.
 
