@@ -249,3 +249,77 @@ def test_validate_corrupt_mp4_raises_typed_error(tmp_path):
 
     with pytest.raises(VideoMediaValidationError, match="decodable MP4"):
         validate_mp4(output)
+
+
+# ------------------------------------------------------------ joint audio/video
+
+
+def _decoded_audio_samples(path) -> tuple[int, int, int]:
+    av = pytest.importorskip("av")
+    with av.open(str(path)) as container:
+        frames = list(container.decode(audio=0))
+    return sum(f.samples for f in frames), frames[0].sample_rate, len(frames[0].layout.channels)
+
+
+@pytest.mark.parametrize("raw_samples", [800, 2000, 6400])  # short, exact, long
+def test_encode_muxes_a_stereo_track_cut_or_padded_to_the_video(tmp_path, raw_samples):
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("av")
+    path = tmp_path / "clip.mp4"
+    video = torch.rand(1, 3, 6, 16, 16)  # 6 frames at 24 fps: 0.25 s, 2000 samples at 8 kHz
+    audio = torch.rand(1, 2, raw_samples) * 2 - 1
+
+    metadata = encode_tensor_to_mp4(
+        video,
+        path,
+        fps=24,
+        layout="BCTHW",
+        value_range="zero_to_one",
+        audio=audio,
+        audio_sample_rate=8000,
+    )
+
+    assert (metadata.num_frames, metadata.width, metadata.height) == (6, 16, 16)
+    samples, rate, channels = _decoded_audio_samples(path)
+    # AAC decodes whole 1024-sample frames: the track holds 2000 samples plus codec padding.
+    assert rate == 8000 and channels == 2 and 2000 <= samples <= 2000 + 2048
+    validate_mp4(path, expected_num_frames=6, expected_fps=24, audio_sample_rate=8000)
+
+
+def test_audio_must_be_one_stereo_clip(tmp_path):
+    torch = pytest.importorskip("torch")
+    with pytest.raises(VideoMediaEncodingError, match=r"\(1, 2, samples\)"):
+        encode_tensor_to_mp4(
+            torch.rand(1, 3, 2, 16, 16),
+            tmp_path / "clip.mp4",
+            fps=24,
+            layout="BCTHW",
+            value_range="zero_to_one",
+            audio=torch.zeros(1, 1, 800),
+            audio_sample_rate=8000,
+        )
+
+
+def test_validation_requires_exactly_the_declared_audio_track(tmp_path):
+    torch = pytest.importorskip("torch")
+    pytest.importorskip("av")
+    silent, joint = tmp_path / "silent.mp4", tmp_path / "joint.mp4"
+    video = torch.rand(1, 3, 6, 16, 16)
+    encode_tensor_to_mp4(video, silent, fps=24, layout="BCTHW", value_range="zero_to_one")
+    encode_tensor_to_mp4(
+        video,
+        joint,
+        fps=24,
+        layout="BCTHW",
+        value_range="zero_to_one",
+        audio=torch.zeros(1, 2, 2000),
+        audio_sample_rate=8000,
+    )
+
+    with pytest.raises(VideoMediaValidationError, match="one stereo 8000 Hz audio stream"):
+        validate_mp4(silent, audio_sample_rate=8000)
+    with pytest.raises(VideoMediaValidationError, match="one stereo 16000 Hz audio stream"):
+        validate_mp4(joint, audio_sample_rate=16000)
+    with pytest.raises(VideoMediaValidationError, match="must not contain an audio stream"):
+        validate_mp4(joint)
+    validate_mp4(joint, require_silent=False)

@@ -61,6 +61,8 @@ def encode_video_tensor(
     *,
     layout: VideoTensorLayout,
     value_range: VideoValueRange,
+    audio=None,
+    audio_sample_rate: int | None = None,
 ) -> FileBackedGenerateOutput:
     from difflet.serving.video_media import encode_tensor_to_mp4
 
@@ -72,6 +74,8 @@ def encode_video_tensor(
         fps=request.video.fps,
         layout=layout,
         value_range=value_range,
+        audio=audio,
+        audio_sample_rate=audio_sample_rate,
     )
     return FileBackedGenerateOutput(
         path=target.staging_path,
@@ -106,6 +110,7 @@ def validate_smoke_output(
     *,
     profile: ServingProfile,
     expected_path: Path,
+    allow_audio: bool = False,
 ) -> None:
     from difflet.serving.video_media import validate_mp4
 
@@ -142,6 +147,7 @@ def validate_smoke_output(
         expected_height=profile.height,
         expected_num_frames=profile.num_frames,
         expected_fps=profile.output_fps,
+        require_silent=not allow_audio,
     )
     if metadata.size_bytes != output.size_bytes:
         raise RuntimeError("startup smoke MP4 size metadata mismatch")

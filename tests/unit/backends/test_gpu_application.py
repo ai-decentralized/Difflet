@@ -21,7 +21,7 @@ from difflet.pipeline.parallel_mesh import MeshSpec
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 MODELS = [spec.model_type for spec in gpu_model_specs()]
-SHAPE = {"height": 64, "width": 64}
+SHAPE = {}  # each model's default shape
 # Tiny transformer/config.json per model: enough to build the components, never loaded.
 TINY_CONFIGS = {
     "hunyuan_video_15": dict(
@@ -87,6 +87,22 @@ TINY_CONFIGS = {
         audio_cross_attention_dim=16,
         caption_channels=24,
         num_layers=1,
+    ),
+    "minimax_h3": dict(
+        num_attention_heads=2,
+        attention_head_dim=32,
+        hidden_size=64,
+        num_layers=1,
+        num_refiner_layers=1,
+        ffn_dim=64,
+        in_channels=2,
+        audio_in_channels=3,
+        patch_size=[1, 1, 1],
+        text_dim=4,
+        freq_dim=4,
+        time_embed_hidden_dim=16,
+        time_embed_dim=8,
+        rope_freq_dim=4,
     ),
     "wan": dict(
         patch_size=[1, 2, 2],

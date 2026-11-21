@@ -30,7 +30,7 @@ class VideoMediaEncodingError(VideoMediaError):
 
 
 class VideoMediaValidationError(VideoMediaError):
-    """A generated file is not the expected silent MP4."""
+    """A generated file is not the expected MP4."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,8 +59,13 @@ def encode_tensor_to_mp4(
     pixel_format: str = "yuv420p",
     crf: int | None = 18,
     preset: str | None = "medium",
+    audio: Any = None,
+    audio_sample_rate: int | None = None,
 ) -> VideoMediaMetadata:
-    """Encode one batch/clip tensor to a silent MP4 and reopen-validate it.
+    """Encode one batch/clip tensor to an MP4 and reopen-validate it.
+
+    The MP4 is silent unless ``audio`` is given: ``(1, 2, samples)`` stereo in [-1, 1] at
+    ``audio_sample_rate``, trimmed or zero-padded to the video's duration and muxed as AAC.
 
     Supported model layouts intentionally cover the current T2V adapters:
 
@@ -94,11 +99,20 @@ def encode_tensor_to_mp4(
         raise VideoMediaEncodingError("video tensor dimensions must be positive")
     if pixel_format == "yuv420p" and (width % 2 or height % 2):
         raise VideoMediaEncodingError("yuv420p encoding requires even width and height")
+    samples = None
+    if audio is not None:
+        audio_sample_rate = _validate_positive_int(audio_sample_rate, "audio_sample_rate")
+        samples = _stereo_samples(audio, round(num_frames / fps * audio_sample_rate))
 
     av = _import_av()
     try:
         with av.open(str(output_path), mode="w", format="mp4") as container:
             stream = container.add_stream(codec, rate=fps)
+            # Every stream exists before the first packet is muxed.
+            audio_stream = None
+            if samples is not None:
+                audio_stream = container.add_stream("aac", rate=audio_sample_rate)
+                audio_stream.layout = "stereo"
             stream.width = width
             stream.height = height
             stream.pix_fmt = pixel_format
@@ -118,9 +132,11 @@ def encode_tensor_to_mp4(
                     container.mux(packet)
             for packet in stream.encode():
                 container.mux(packet)
+            if audio_stream is not None:
+                _mux_aac(av, container, audio_stream, samples, audio_sample_rate)
     except Exception as exc:
         _truncate_failed_output(output_path)
-        raise VideoMediaEncodingError(f"failed to encode silent MP4 with codec {codec!r}") from exc
+        raise VideoMediaEncodingError(f"failed to encode MP4 with codec {codec!r}") from exc
 
     return validate_mp4(
         output_path,
@@ -128,8 +144,36 @@ def encode_tensor_to_mp4(
         expected_height=height,
         expected_num_frames=num_frames,
         expected_fps=fps,
-        require_silent=True,
+        audio_sample_rate=audio_sample_rate if samples is not None else None,
     )
+
+
+def _stereo_samples(audio: Any, num_samples: int):
+    """``(2, num_samples)`` float32 NumPy samples in [-1, 1] from a ``(1, 2, S)`` tensor."""
+    np = _import_numpy()
+    value = audio.detach().to(device="cpu").float().numpy() if hasattr(audio, "detach") else audio
+    samples = np.asarray(value, dtype=np.float32)
+    if samples.ndim != 3 or samples.shape[:2] != (1, 2):
+        raise VideoMediaEncodingError(f"audio must be (1, 2, samples); got {samples.shape}")
+    samples = np.clip(samples[0, :, :num_samples], -1.0, 1.0)
+    if samples.shape[1] < num_samples:
+        samples = np.pad(samples, ((0, 0), (0, num_samples - samples.shape[1])))
+    return np.ascontiguousarray(samples)
+
+
+def _mux_aac(av: Any, container: Any, stream: Any, samples: Any, sample_rate: int) -> None:
+    time_base = Fraction(1, sample_rate)
+    for start in range(0, samples.shape[1], 1024):
+        frame = av.AudioFrame.from_ndarray(
+            samples[:, start : start + 1024].copy(), format="fltp", layout="stereo"
+        )
+        frame.sample_rate = sample_rate
+        frame.pts = start
+        frame.time_base = time_base
+        for packet in stream.encode(frame):
+            container.mux(packet)
+    for packet in stream.encode():
+        container.mux(packet)
 
 
 def normalize_video_tensor(
@@ -220,9 +264,14 @@ def validate_mp4(
     expected_num_frames: int | None = None,
     expected_fps: int | float | None = None,
     require_silent: bool = True,
+    audio_sample_rate: int | None = None,
     max_size_bytes: int | None = None,
 ) -> VideoMediaMetadata:
-    """Reopen and fully decode an MP4, returning trusted media metadata."""
+    """Reopen and fully decode an MP4, returning trusted media metadata.
+
+    With ``audio_sample_rate`` the MP4 must carry one stereo audio stream at that rate;
+    ``require_silent`` applies only without it.
+    """
 
     media_path = _validate_existing_mp4(path, max_size_bytes=max_size_bytes)
     for field_name, value in (
@@ -246,7 +295,15 @@ def validate_mp4(
                     f"generated MP4 must contain exactly one video stream; got {len(video_streams)}"
                 )
             audio_streams = tuple(container.streams.audio)
-            if require_silent and audio_streams:
+            if audio_sample_rate is not None:
+                if len(audio_streams) != 1 or (
+                    audio_streams[0].codec_context.channels,
+                    audio_streams[0].codec_context.sample_rate,
+                ) != (2, audio_sample_rate):
+                    raise VideoMediaValidationError(
+                        f"generated MP4 must contain one stereo {audio_sample_rate} Hz audio stream"
+                    )
+            elif require_silent and audio_streams:
                 raise VideoMediaValidationError("generated MP4 must not contain an audio stream")
             stream = video_streams[0]
             codec_context = stream.codec_context

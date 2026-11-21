@@ -58,6 +58,13 @@ class ModelSpec:
     default_fps: int | None = None
     accepts_cfg_parallel: bool = False
     accepts_negative_prompt: bool = False
+    #: The keyframes a request may condition on (``"first"``, ``"last"``): ``difflet run
+    #: --first-frame/--last-frame`` and a served video request's ``first_frame``/``last_frame``
+    #: uploads reach ``generate(first_image=..., last_image=...)`` as RGB PIL images.
+    keyframe_anchors: tuple[str, ...] = ()
+    #: ``generate`` returns ``video`` (``(1, 3, F, H, W)`` in [0, 1]), ``audio`` (``(1, 2,
+    #: samples)`` in [-1, 1]) and ``sample_rate``, written as one MP4 with an AAC stereo track.
+    output_has_audio: bool = False
     #: CLI options the model refuses: (argparse attribute, how the message names it).
     refused_cli_flags: tuple[tuple[str, str], ...] = ()
     #: CLI options forwarded to the application as keyword arguments when set.
@@ -76,6 +83,10 @@ class ModelSpec:
     smoke_prompt: str = "a small red square"
     #: The application class, as ``module:attribute``; imported only where torch is loaded.
     application: str = ""
+    #: The checkpoint files ``difflet run`` and ``difflet serve`` download (Hugging Face allow
+    #: patterns). ``None`` keeps their defaults: the registry entry's subset for ``run``, the
+    #: diffusers component folders (``DEFAULT_DIFFUSERS_PATTERNS``) for ``serve``.
+    download_patterns: tuple[str, ...] | None = None
 
 
 #: Models with a GPU spec, by registry entry name.
@@ -86,6 +97,8 @@ _GPU_SPEC_MODULES = {
     "hunyuan_video": "difflet.models.hunyuan_video.spec",
     "ltx_2": "difflet.models.ltx_2.spec",
     "hunyuan_video_15": "difflet.models.hunyuan_video_15.spec",
+    # The neuron and Trainium backends own difflet/models/minimax_h3/; CUDA's spec is its own.
+    "minimax_h3": "difflet.backends.cuda.minimax_h3.spec",
 }
 
 
