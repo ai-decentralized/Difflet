@@ -16,11 +16,12 @@ latents. The driver then decodes them on the host after the launch has exited
 decoder never shares a core or a process with the DiT. ``compile`` is the stage's load + warm-up
 (it fills the NEFF cache) and its stage manifest. --cache-dir becomes DIFFLET_COMPILE_CACHE unless
 that is exported. DP replicas (--dp, --requests) are separate torchrun launches whose rank 0
-claims the requests, as for Wan and Qwen-Image. The options the ranks do not run (TeaCache,
-several --shapes, --cp-mode ring, --sp, --cfg-parallel without --guidance-scale > 1 or with
---cp-degree > 1) and a TP degree whose DiT shard cannot fit one core are refused here, before
-torchrun starts. --cp-degree > 1 (gather_kv or ulysses) shards the video tokens over the CP group
-(tp x cp ranks).
+claims the requests, as for Wan and Qwen-Image. The options the ranks do not run (adaptive
+TeaCache, several --shapes, --cp-mode ring, --sp, --cfg-parallel without --guidance-scale > 1 or
+with --cp-degree > 1) and a TP degree whose DiT shard cannot fit one core are refused here, before
+torchrun starts; the probe-free TeaCache modes (--teacache-cadence, --teacache-online-delta) run,
+decided on each rank's host. --cp-degree > 1 (gather_kv or ulysses) shards the video tokens over
+the CP group (tp x cp ranks).
 Gemma-3's language model runs on the device by default, TP-sharded beside the DiT, with the
 connectors on rank 0's host (``--host-text-encoder`` keeps it on rank 0's host); the driver moves
 it to the host itself when it cannot fit, at tp2 (``_place_text_encoder``).
@@ -116,7 +117,8 @@ _DEFAULT_STEPS = 40
 _DEFAULT_GUIDANCE = 3.5
 _DEFAULT_SHAPE = (512, 768, 121)
 #: What the neuron LTX-2 ranks run, for the driver's rejection message.
-_TORCHRUN_RUNS = "tensor and CFG parallelism at one static shape, and DP replicas"
+_TORCHRUN_RUNS = ("tensor and CFG parallelism at one static shape, DP replicas and probe-free "
+                  "TeaCache (--teacache-cadence, --teacache-online-delta)")
 #: TorchNeuronLtx2Application keyword arguments for the torchrun generate stage: the text path
 #: on rank 0's host with 12 threads, no decode in the launch (the driver decodes after it) and
 #: exec_mode=None (the application reads DIFFLET_EXEC_MODE, which --exec-mode exports).
@@ -137,11 +139,11 @@ def _guidance(args: argparse.Namespace) -> float:
 
 
 def _torchrun_application_kwargs(args: argparse.Namespace) -> dict:
-    """The application kwargs, plus any TeaCache flag the user gave (the application refuses it
-    in phase 1 instead of the stage dropping it): Gemma-3 on the device when the driver left
-    ``device_text_encoder`` on (``LTX2Orchestrator._place_text_encoder``), and the MXFP8 spec
-    with --quant (the application resolves the quantized directory the driver's ``compile``
-    wrote; it never writes one)."""
+    """The application kwargs, plus any TeaCache flag the user gave (the application runs the
+    probe-free modes and refuses the adaptive ones instead of the stage dropping them): Gemma-3
+    on the device when the driver left ``device_text_encoder`` on
+    (``LTX2Orchestrator._place_text_encoder``), and the MXFP8 spec with --quant (the application
+    resolves the quantized directory the driver's ``compile`` wrote; it never writes one)."""
     kwargs = dict(_TORCHRUN_APPLICATION_KWARGS)
     if getattr(args, "device_text_encoder", False):
         kwargs["text_encoder_device"] = "neuron"
@@ -160,9 +162,11 @@ def _torchrun_application_kwargs(args: argparse.Namespace) -> dict:
 
 def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
     """The options the torchrun (neuron) ranks do not run, as the command line names them:
-    every torchrun backend's (TeaCache), several --shapes (one static shape per process), and
-    the parallel modes LTX-2 has no implementation of (--cp-mode ring, --sp). Torch-free."""
-    found = torchrun_unsupported_options(args)
+    every torchrun backend's except the probe-free TeaCache modes, which the ranks run (so:
+    adaptive TeaCache, and several --shapes, one static shape per process), and the parallel
+    modes LTX-2 has no implementation of (--cp-mode ring, --sp). Torch-free."""
+    found = [flag for flag in torchrun_unsupported_options(args)
+             if flag not in ("--teacache-cadence", "--teacache-online-delta")]
     if (getattr(args, "cp_degree", None) or 1) > 1 and getattr(args, "cp_mode", None) == "ring":
         found.append("--cp-mode ring")
     if getattr(args, "sp_enabled", False):
