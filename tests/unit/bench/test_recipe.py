@@ -149,7 +149,7 @@ def test_qwen_recipes_run_true_cfg():
     recipes = R.load_recipes()
     for name in ("qwen_image", "qwen_image_mxfp8"):
         argv = recipes[name].argv()
-        assert argv[argv.index("--true-cfg-scale") + 1] == "4.0"  # the model card's
+        assert argv[argv.index("--true-cfg-scale") + 1] == "6.0"
         assert argv[argv.index("--negative-prompt") + 1] == " "
         assert "--guidance-scale" not in argv  # ignored by Qwen-Image (guidance_embeds=false)
 

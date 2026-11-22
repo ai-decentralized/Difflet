@@ -12,7 +12,8 @@
 #
 # Settings: shape, steps, guidance and negative prompt are each model card's (the README of the
 # pinned revision; a value the card leaves out is the diffusers pipeline's default), except
-# wan_2_1_neuron, which mirrors benchmark/models.py::MATRIX. Revisions: benchmark/models.py::MATRIX;
+# qwen_image (1024x1024, true CFG 6.0: the user's choice) and wan_2_1_neuron, which mirrors
+# benchmark/models.py::MATRIX. Revisions: benchmark/models.py::MATRIX;
 # they must be quoted strings. Negative prompts are the model cards' text byte for byte.
 
 _neuron:
@@ -38,15 +39,15 @@ flux_mxfp8:
     quant: mxfp8
 
 qwen_image:
-  description: the card's 1:1 size and true CFG 4.0 (two DiT forwards per step); --guidance-scale is ignored, guidance_embeds=false (issue #169)
+  description: true CFG 6.0 (two DiT forwards per step); --guidance-scale is ignored, guidance_embeds=false (issue #169)
   extends: _neuron
   args:
     model-id: Qwen/Qwen-Image
     revision: "75e0b4be04f60ec59a75f475837eced720f823b6"
-    height: 1328
-    width: 1328
+    height: 1024
+    width: 1024
     tp-degree: 4
-    true-cfg-scale: 4.0
+    true-cfg-scale: 6.0
     negative-prompt: " "
     prompt: a cat sitting on a bench
 
