@@ -23,7 +23,7 @@ models:
     port: 8102
     cache_dir: /mnt/nvme/difflet-fleet/cache/wan
     serve_args: [--tp-degree, "4", --height, "480", --width, "832", --num-frames, "81",
-                 --worker-restart-timeout, "7200"]
+                 --worker-restart-timeout, "7200", --request-timeout, "1800"]
   - model_id: hunyuanvideo-community/HunyuanVideo
     slug: hunyuan-video
     device: 3
@@ -31,14 +31,14 @@ models:
     cache_dir: /mnt/nvme/difflet-fleet/cache/hunyuan-video
     env: {HF_HUB_CACHE: /mnt/nvme/difflet-quant-bench-hub}
     serve_args: [--tp-degree, "4", --height, "320", --width, "512", --num-frames, "61",
-                 --worker-restart-timeout, "7200"]
+                 --worker-restart-timeout, "7200", --request-timeout, "1800"]
   - model_id: Lightricks/LTX-2
     slug: ltx-2
     device: 4
     port: 8104
     cache_dir: /mnt/nvme/difflet-fleet/cache/ltx-2
     serve_args: [--tp-degree, "4", --height, "512", --width, "768", --num-frames, "121",
-                 --worker-restart-timeout, "7200"]
+                 --worker-restart-timeout, "7200", --request-timeout, "1800"]
   - model_id: MiniMaxAI/MiniMax-H3
     slug: minimax-h3
     device: 5
@@ -46,4 +46,4 @@ models:
     cache_dir: /mnt/nvme/difflet-fleet/cache/minimax-h3
     env: {HF_HUB_CACHE: /mnt/nvme/h3-neuron-port/hf-cache}
     serve_args: [--tp-degree, "4", --height, "256", --width, "448", --num-frames, "124",
-                 --worker-restart-timeout, "7200"]
+                 --worker-restart-timeout, "7200", --request-timeout, "1800"]
