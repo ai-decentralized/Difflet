@@ -5,17 +5,19 @@ Status: draft for review, 2026-11-22.
 ## Intent
 
 A public-facing web page that puts one Trainium3 chip next to one NVIDIA RTX PRO 6000 for the
-diffusion models Difflet runs. It has two jobs: compare fairly, and look good enough that people
-outside the team want to share it.
+diffusion models Difflet runs. Its one job: a reader sees, at a glance, which side is better on
+each metric for each model, and by how much (user, 2026-11-22: plain and simple, no flashy
+effects).
 
 ## Goals, non-goals, anti-goals
 
-- **Goals:** per-step DiT latency for every model where both sides have a number; output quality
-  against the same fp32 reference; the method on the page, close to the numbers; a striking first
-  screen (one big number) and one interactive element (a 50-step denoising race).
+- **Goals:** one at-a-glance matrix (models × metrics, each cell says who is better and by how
+  much, colour-coded); per-step DiT latency for every model where both sides have a number; output
+  quality against the same fp32 reference; the raw numbers and the method below the matrix.
 - **Non-goals:** re-measuring the RTX PRO 6000 (decided 2026-11-22: use what exists); cost per
   output; end-to-end latency comparison (the two sides measure it differently, see Constraints);
-  other GPUs (H100, B200, B300); multi-prompt quality.
+  other GPUs (H100, B200, B300); multi-prompt quality; animation, races, hero numbers, dark
+  "keynote" styling (dropped 2026-11-22).
 - **Anti-goals:** a number that reads stronger than its source. Every RTX figure derived from a
   whole-request time is marked as an upper bound; missing data says "not measured", never a
   stand-in from another GPU.
@@ -36,7 +38,7 @@ outside the team want to share it.
 - Quality figures are one prompt and one seed. The quality report says such figures detect
   regressions but do not characterise accuracy (Qwen-Image moves from −6.1 dB to +1.5 dB with a
   second prompt). The page shows them with that caveat next to them (user: "有什么给什么").
-- Must work at phone width and respect `prefers-reduced-motion`.
+- Must work at phone width; wide tables scroll inside their own box.
 
 ## Approaches
 
@@ -48,40 +50,43 @@ outside the team want to share it.
 3. Generate the page from `benchmark/*.json`. The data is not in that format (it comes from
    reports and verification docs), and a generator for seven rows is more code than the page.
 
-Format, chosen from mockups A–H on the design canvas: mockup H, the keynote skeleton (E) with the
-race (D) on top. Canvas: https://claude.ai/artifact/NUfD8XtkjvC5EkJ59KGgqj#artboard-Trn3VsRTX6000
+Format, chosen from mockups A–I on the design canvas: mockup I, the plain "at a glance" page
+(the flashy mockups D–H were dropped). Canvas:
+https://claude.ai/artifact/NUfD8XtkjvC5EkJ59KGgqj#artboard-Glance
 
 ## Design
 
 - **File:** `docs/compare/trn3-vs-rtx-pro-6000.html`, one file. A `DATA` object at the top of
-  its script holds every number with its source string; all ratios, chips and the hero number are
-  computed from it, never typed into the markup.
+  its script holds every number with its source string; every ratio, difference, colour and
+  column summary is computed from it, never typed into the markup.
 - **Sections, top to bottom:**
-  1. Hero: FLUX.1-dev per-step ratio, trn3 best layout against RTX compiled (241 / 213.9 =
-     1.13×), with the eager ratio (1.42×) underneath; three tiles: 7 models on one chip, 5 of 8
-     configurations at or above the RTX bf16 floor, 1.15–1.49× over Trainium2.
-  2. Race: pick a model with RTX data (FLUX, Qwen-Image, Wan 2.2, HunyuanVideo 1.0, 1.5), RTX
-     compile/eager toggle, two lanes replaying 50 steps at per-step speed (playback scaled so the
-     slower lane takes ~8 s), a noise-to-image reveal, the winner and margin; upper-bound rows say
-     so under the result.
-  3. Per-step table, all 7 models: trn3 TP4, trn3 best layout, RTX eager, RTX compiled,
-     "trn3 best vs RTX compiled" chip, RTX source.
-  4. Quality: one dumbbell row per configuration on a dB axis, trn3 vs fp32 and RTX bf16 vs fp32,
-     gap chip, SSIM; the single-prompt caveat and the LTX-2 fp32-timestep figure below.
-  5. Method: hardware, stack, step definition, settings, quality method; a data note (RTX not
-     re-measured, upper bounds, missing models, why no e2e).
-- **Look:** dark ground (#050608), trn3 orange #FF8A3D, RTX blue #5AA9FF; Space Grotesk numbers,
-  Inter / Noto Sans SC text, JetBrains Mono figures; scroll reveal via CSS `animation-timeline`
-  behind `@supports` and `prefers-reduced-motion`.
+  1. Header: title, one line on the setup (one chip vs one card, 7 models, bf16, 50 steps,
+     seed 42, RTX numbers from existing verification records).
+  2. **At-a-glance matrix**, the core of the page. Rows: the 7 models (Wan 2.2 = both experts).
+     Columns: per-step DiT vs RTX torch.compile; per-step DiT vs RTX eager; PSNR vs fp32; SSIM vs
+     fp32. Each cell shows the verdict in large type ("trn3 1.13× faster", "+0.9 dB", "RTX ≥1.22×
+     faster", "level", "no RTX data") and the two raw values in small type; the cell colour says
+     who is better (orange = trn3, blue = RTX, grey = level or no data). Each column header carries
+     a count ("trn3 faster on 3 / 5, 2 without RTX data"). Level = within 2% on speed, 0.1 dB on
+     PSNR, 0.005 on SSIM. A legend and a two-line note on ≤ / ≥ / ≈ and the quality reference sit
+     with the matrix.
+  3. Raw data, speed: per model trn3 TP4 and best-layout step (with layout), RTX eager and
+     compiled step, trn3 warm e2e, cold e2e and compile, RTX whole-request time (with its step
+     count), plus the metric definitions underneath and why e2e is not compared.
+  4. Raw data, quality: all 8 configurations (Wan 2.2 high-noise expert too), PSNR / SSIM for
+     trn3 and RTX bf16, both differences; the reference, the single-prompt caveat and the LTX-2
+     fp32-timestep figure underneath.
+- **Look:** light page (#F4F5F7 ground, white cards), Inter / Noto Sans SC; trn3 tint #FBE3D0
+  with #8A3A07 text, RTX tint #DCE7FC with #1E3A8A text (both above 4.5:1), grey for level and
+  no data; the verdict text carries the meaning, so colour is never the only signal. No animation.
 - **Language:** English (my call, for a public page; the mockup copy is Chinese and gets
   translated). Say if it should stay Chinese or be bilingual.
-- **Check:** a small script asserts the computed hero ratio, table chips and the 5/8 count against
-  the appendix values, so an edited number cannot silently change a claim.
+- **Check:** a small script asserts the matrix verdicts and the column counts (3 / 5, 4 / 5,
+  4 / 7, 4 / 7) against the appendix values, so an edited number cannot silently change a claim.
 
 ## Left to the builder
 
-Exact spacing and type scale, the race art (abstract placeholder unless real outputs are
-supplied), animation timing.
+Exact spacing and type scale, column widths, how the matrix stacks at phone width.
 
 ## Appendix: the numbers
 
@@ -117,6 +122,19 @@ Quality, PSNR dB / SSIM against diffusers fp32 on the RTX PRO 6000 (TF32 off), o
 | LTX-2 | TP4 | 26.84 / 0.928 | 34.12 / 0.964 | −7.3 |
 
 LTX-2 with the fp32 timestep fix: 27.62 / 0.939.
+
+trn3 end to end and compile, s (one generate process; cold = page cache dropped; compile = empty
+cache), and the RTX whole-request time, s, eager / compiled, excluding load:
+
+| Model | trn3 warm e2e | trn3 cold e2e | trn3 compile | RTX whole request |
+|---|---:|---:|---:|---|
+| FLUX.1-dev | 50.7 | 103.6 | 150 | 9.4 / 7.1 (28 steps) |
+| Qwen-Image | 78.0 | 103.7 | 107 | 16.5 / 12.4 |
+| Wan 2.2, 9 frames, both experts | 118.8 | 154.7 | 278 | 44.5 / 32.8 (40 steps) |
+| Wan 2.1 | 115.1 | 142.3 | 235 | — |
+| HunyuanVideo 1.0 | 103.4 | 143.4 | 182 | 65.6 / 61.4 |
+| HunyuanVideo 1.5 | 775.6 | 805.4 | 1,239 | 412.3 / 408.0 |
+| LTX-2 | 96.7 | 127.1 | 103 | — |
 
 Hardware and stacks: trn3.48xlarge, one Trainium3 chip (4 logical cores at LNC=2, 36 GB HBM per
 core), torch 2.14.0, torch-neuronx 2.14.3.0.1, neuronx-cc 2.28. RTX PRO 6000 Blackwell Server
