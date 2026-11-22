@@ -3,8 +3,8 @@
 > **Code removed on 2026-11-22.** The quality result below (section 9) left E2 unused, so the
 > attention fork with `kv_tiles`, the masks, the op, the Wan hook (`DIFFLET_EXP_ATTN_SPARSE`),
 > `scripts/block_sparse/` and their tests were deleted from `exp/attn-constmax-rebased`. The
-> code this document measured is at `0f43e1a8` (that branch) and `02ff24b7`
-> (`exp/attn-constmax-sparse`).
+> code this document measured is at `af7572f1`, that branch's commit before the removal
+> (`exp/attn-constmax-sparse` was deleted).
 
 Plan: `docs/plans/2026-11-18-attn-constmax-sparse-experiments.md`, section E2. Branch
 `exp/attn-constmax-sparse`. Run on 2026-11-18, devices 8-13. Kernel at `098dca20`, probe at
