@@ -54,8 +54,11 @@ a ``negative_prompt`` (``QwenImageOrchestrator``, diffusers' formula): two forwa
 with CFG parallelism (``cfg_parallel_enabled``, not with CP) one batch-2 call whose branches run
 on the two CFG groups. CFG parallelism refuses a call without true CFG.
 
-Phase 1 limits, each rejected in ``__init__``: one static shape, batch 1, no TeaCache and no DP
-within one application.
+Phase 1 limits, each rejected in ``__init__``: one static shape, batch 1, no adaptive (probe)
+TeaCache and no DP within one application. The probe-free TeaCache modes (``teacache_cadence``,
+``teacache_online_delta_alpha``) run: each rank's orchestrator decides on the host, from the
+step index or from its own copy of the DiT outputs (the ranks must decide alike: one skipping
+alone would leave the others waiting in the DiT's collectives). Not with true CFG.
 
 Timing hooks (for the benchmark): ``step_hook`` is called with no arguments once per denoise
 iteration, right after the orchestrator's scheduler step (``load`` wraps
@@ -131,12 +134,11 @@ _KWARG_DEFAULTS: dict[str, Any] = {
     "quant": None,
     "quant_checkpoint": None,
 }
+#: Refused: the adaptive mode needs the probe, which has no neuron port for Qwen-Image.
 _TEACACHE_KWARGS = (
     "teacache_speedup",
     "teacache_calibration",
     "teacache_calibration_path",
-    "teacache_cadence",
-    "teacache_online_delta_alpha",
 )
 #: The dtype the text embeddings are zero-padded in: the Trainium text stage's (CLI and
 #: serving) and the TPU encode's, whatever the encoder computed in.
@@ -621,6 +623,8 @@ class TorchNeuronQwenImageApplication(TorchNeuronModelApplication):
             height=self.shape["height"],
             width=self.shape["width"],
             text_seq_len=self.text_seq_len,
+            teacache_cadence=self.options["teacache_cadence"],
+            teacache_online_delta_alpha=self.options["teacache_online_delta_alpha"],
         )
 
     # ----------------------------------------------------------------- evidence

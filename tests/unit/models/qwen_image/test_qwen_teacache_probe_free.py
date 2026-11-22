@@ -132,3 +132,18 @@ def test_num_steps_sync_is_required_for_probe_free_skips():
     assert controller.stats()["skipped_steps"] == 20
     assert len(transformer.calls) == 30  # one DiT call per full step
     assert out.latents.shape == (1, 16, 64)
+
+
+def test_stats_line_is_printed_after_the_loop_only_with_teacache(capsys):
+    def run(**teacache):
+        pipeline = QwenImageOrchestrator(
+            model_path="/fake/model", transformer=FakeTransformer(), dtype=torch.float32,
+            **teacache,
+        )
+        pipeline(bundle=_bundle(), timesteps=torch.linspace(1.0, 0.02, 50), output_type="latent")
+        return pipeline.teacache_controller, capsys.readouterr().out
+
+    controller, out = run(teacache_cadence=2)
+    assert controller.stats()["skipped_steps"] == 20
+    assert out.count(f"[teacache] stats: {controller.stats()}\n") == 1
+    assert "[teacache] stats" not in run()[1]
