@@ -21,7 +21,7 @@ bounds ``[B*H, S_q, 1]``), in a compiled region; only const-max passes ``constma
 Accuracy (the first worker's outputs): rel L2 (float64) against fp32 attention of the same bf16
 inputs with scores at keys >= hi set to -inf, overall and worst head, over every ``--ref-stride``-th
 query row; non-finite count over every row.
-Time: E2's method (scripts/block_sparse/probe.py): per worker process, a cache hit, one warm call,
+Time: E2's method (scripts/block_sparse/probe.py, removed; at 02ff24b7): per worker process, a cache hit, one warm call,
 ``--calls`` calls and one sync; ``--runs`` processes per arm, the order alternated (cte, cm),
 (cm, cte), ...; median and (max - min) / median per arm.
 

@@ -1,5 +1,11 @@
 # Static block-sparse attention on trn3: kernel level at `wan_81f`, and Wan 2.1 (E2)
 
+> **Code removed on 2026-11-22.** The quality result below (section 9) left E2 unused, so the
+> attention fork with `kv_tiles`, the masks, the op, the Wan hook (`DIFFLET_EXP_ATTN_SPARSE`),
+> `scripts/block_sparse/` and their tests were deleted from `exp/attn-constmax-rebased`. The
+> code this document measured is at `0f43e1a8` (that branch) and `02ff24b7`
+> (`exp/attn-constmax-sparse`).
+
 Plan: `docs/plans/2026-11-18-attn-constmax-sparse-experiments.md`, section E2. Branch
 `exp/attn-constmax-sparse`. Run on 2026-11-18, devices 8-13. Kernel at `098dca20`, probe at
 `2c98f795`. The kernel and mask files did not change after `098dca20`. E1 committed to the same
