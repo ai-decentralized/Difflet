@@ -11,7 +11,7 @@ hunyuan_video_15}_long.py`, each the short script with the long settings below (
 their settings and noise md5s are unchanged); `_wan.py` takes the model card's negative prompt
 from bench.sh, checks an optional `noise_md5` and counts two DiT forwards per step under CFG;
 `scripts/fp32_ref/run_long_queue.sh` runs the queue. (The campaign's scorer,
-`scripts/attn_constmax/score.sh`, was removed with its other one-off scripts; it is at `c72c0485`.)
+`scripts/attn_constmax/score.sh`, was removed with its other one-off scripts; it is at `618365c3`.)
 `tests/unit/scripts/test_fp32_ref_long.py` checks every setting against each arm's command line
 and request lines, the noise, Wan 2.2's expert split and the device latents' layout.
 
@@ -21,7 +21,7 @@ Device files: `R = /mnt/nvme/difflet-exp/constmax-models`; `cmd` is the timed ru
 (`R/wan2x/<arm>/timed.cmd.txt:1`; HV1 and HV1.5 `R/<model>/<arm>/timed.log`, the
 `Command being timed` line), `req` is `R/<model>/<arm>/requests.jsonl:1-2`; all four arms agree.
 The arm scripts cited below (`arms_wan.sh`, `hv1_arms.sh`, `hv15_arms.sh`, under
-`scripts/attn_constmax/`) were removed with the campaign's one-off scripts; they are at `c72c0485`.
+`scripts/attn_constmax/`) were removed with the campaign's one-off scripts; they are at `618365c3`.
 
 | model | setting | value | device source |
 |---|---|---|---|
@@ -121,4 +121,4 @@ TORCH_DEVICE_BACKEND_AUTOLOAD=0 python scripts/compare_difflet_runs.py \
 with `<key>` = `wan21_long`, `wan22_long`, `hunyuan_video_long` or `hunyuan_video_15_long`, and
 `<run>` a generate's work directory (its second request's output and final latents). It reports
 video PSNR (frame mean and worst), SSIM, LPIPS, and latent cosine and rel L2. The const-max
-campaign scored its arms A-D this way through `scripts/attn_constmax/score.sh` (at `c72c0485`).
+campaign scored its arms A-D this way through `scripts/attn_constmax/score.sh` (at `618365c3`).

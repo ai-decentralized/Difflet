@@ -2,7 +2,7 @@
 """HunyuanVideo-1.5's CPU fp32 reference at the const-max campaign's shape (480x848x121):
 ``hunyuan_video_15.py`` with the frames, latents layout and noise md5 of the device runs
 ``/mnt/nvme/difflet-exp/constmax-models/hunyuan_video_15/{A,B,C,D}``
-(arm script ``scripts/attn_constmax/hv15_arms.sh``, at c72c0485). Everything else (revision,
+(arm script ``scripts/attn_constmax/hv15_arms.sh``, at 618365c3). Everything else (revision,
 480x848, 50 steps, seed 42, the prompt, true CFG 6.0 against "", the 128-pixel decode tiles,
 24 fps) is the short script's and equals the device's; the table is
 docs/plans/2026-11-20-cpu-fp32-reference-long.md.

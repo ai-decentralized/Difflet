@@ -3,7 +3,7 @@
 (480x832x81, 40 steps, CFG 4.0 / 3.0 with the model card's negative prompt): ``wan22.py`` with
 the settings of the device runs ``/mnt/nvme/difflet-exp/constmax-models/wan22/{A,B,C,D}``
 (bench.sh's ``wan22_official``; their arm script ``scripts/attn_constmax/arms_wan.sh`` is at
-c72c0485); the table is docs/plans/2026-11-20-cpu-fp32-reference-long.md. Writes what
+618365c3); the table is docs/plans/2026-11-20-cpu-fp32-reference-long.md. Writes what
 ``wan22.py`` writes (score a run against it with ``scripts/compare_difflet_runs.py``):
 
     DIFFLET_BACKEND=cpu HF_HUB_OFFLINE=1 PYTHONPATH=. taskset -c 48-95,144-191 \\

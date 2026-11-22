@@ -1220,7 +1220,7 @@ class HunyuanVideoTransformer3DModel(nn.Module):
                 for _ in range(num_single_layers)
             ]
         )
-        # Experiment E1 (evidence at 3f674fd2): each joint
+        # Experiment E1 (evidence at 713d53d9): each joint
         # attention whose layer passes the table's gap rule carries its score sigma as a [128, 1]
         # buffer (a graph input, so each block class keeps one shared graph) for the neuron
         # backend's const-max route; the layers that fail it stay on attention_cte. Table:

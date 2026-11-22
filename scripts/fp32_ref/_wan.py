@@ -30,7 +30,7 @@ from scripts.fp32_ref import _common
 
 EXPERTS = ("transformer", "transformer_2")
 #: Where the device runs took the model cards' negative prompts from (their arm script,
-#: scripts/attn_constmax/arms_wan.sh, removed and kept at c72c0485, evals its lines).
+#: scripts/attn_constmax/arms_wan.sh, removed and kept at 618365c3, evals its lines).
 BENCH_SH = Path(__file__).resolve().parents[1] / "quant_bench" / "bench.sh"
 
 

@@ -1,6 +1,6 @@
 """The per-layer softmax_max tables for nkilib's ``attention_const_max``
 (``--attention const-max``), from each checkpoint's QK-RMSNorm weights. Experiment E1;
-evidence at 3f674fd2.
+evidence at 713d53d9.
 
 This is ``/mnt/nvme/difflet-mxattn/probe/constmax/bounds.py`` (section 12 of
 ``docs/verification/2026-11-13-dit-block-profile.md`` on ``feat/mxfp8-sage-attention``) with its
