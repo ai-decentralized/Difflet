@@ -37,14 +37,30 @@ def test_generate_requires_prompt_or_requests():
         cli_main._validate_dp(args)
 
 
-def test_teacache_rejected_in_batch_mode(tmp_path):
+_TEACACHE_FLAGS = (["--teacache-cadence", "2"], ["--teacache-online-delta", "0.6"])
+
+
+@pytest.mark.parametrize("teacache", _TEACACHE_FLAGS)
+def test_teacache_accepted_with_requests_on_one_replica(tmp_path, teacache):
     p = cli_main._build_parser()
     req = tmp_path / "r.jsonl"
     req.write_text(json.dumps({"prompt": "x", "output": "x.png"}) + "\n")
-    args = p.parse_args(_argv(["--requests", str(req), "--teacache-cadence", "2"]))
+    args = p.parse_args(_argv(["--requests", str(req), *teacache]))
     args.command = "generate"
-    with pytest.raises(SystemExit):
+    cli_main._validate_dp(args)
+
+
+@pytest.mark.parametrize("teacache", _TEACACHE_FLAGS)
+def test_teacache_rejected_with_dp_replicas(tmp_path, capsys, teacache):
+    p = cli_main._build_parser()
+    req = tmp_path / "r.jsonl"
+    req.write_text(json.dumps({"prompt": "x", "output": "x.png"}) + "\n")
+    args = p.parse_args(_argv(["--dp", "2", "--requests", str(req), *teacache]))
+    args.command = "generate"
+    with pytest.raises(SystemExit) as exc:
         cli_main._validate_dp(args)
+    assert exc.value.code == 1
+    assert "TeaCache flags are not supported with DP replicas" in capsys.readouterr().err
 
 
 def test_core_budget_validation(tmp_path):
