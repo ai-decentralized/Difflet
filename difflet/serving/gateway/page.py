@@ -83,6 +83,8 @@ details.advanced { margin-top: .75rem; } details summary { cursor: pointer; colo
   cursor: pointer; }
 #run:disabled { opacity: .55; cursor: progress; }
 #state { min-height: 1.5rem; margin-top: .6rem; font-size: .9rem; color: var(--muted); }
+#progress { width: 100%; height: .5rem; margin-top: .75rem; accent-color: var(--accent); }
+.estimate { color: var(--fg); font-weight: 600; }
 #state.error { color: var(--down); }
 .results { display: grid; gap: 1rem; }
 .empty { color: var(--muted); border: 1px dashed var(--line); border-radius: 10px; padding: 3rem 1rem;
@@ -115,6 +117,12 @@ let kind = 'image';
 let running = false;
 
 function shapeText(s) { return s[2] ? s[0] + '×' + s[1] + '×' + s[2] : s[0] + '×' + s[1]; }
+function duration(seconds) { return seconds < 90 ? Math.round(seconds) + ' s' : (seconds / 60).toFixed(1) + ' min'; }
+// Seconds a request should take (measured: base + per step), null without a measurement.
+function estimate(m, steps) {
+  const n = steps === null ? m.steps : steps;
+  return m && m.estimate && n ? m.estimate.base + m.estimate.per_step * n : null;
+}
 function current() { return MODELS.find((m) => m.id === $('model').value); }
 function setState(text, error) { $('state').textContent = text; $('state').className = error ? 'error' : ''; }
 
@@ -137,8 +145,17 @@ function renderModels() {
 
 function renderModelInfo() {
   const m = current();
-  $('model-info').textContent = m ? 'Shape ' + shapeText(m.shapes[0]) + ' · device ' + m.device
+  const info = $('model-info');
+  info.textContent = m ? 'Shape ' + shapeText(m.shapes[0]) + ' · device ' + m.device
     + (m.steps ? ' · default ' + m.steps + ' steps' : '') : 'No ' + kind + ' model is ready yet.';
+  const steps = readNumber('steps');
+  const seconds = m ? estimate(m, steps) : null;
+  if (seconds !== null) {
+    const est = document.createElement('span');
+    est.className = 'estimate';
+    est.textContent = 'Estimated ~' + duration(seconds) + ' at ' + (steps === null ? m.steps : steps) + ' steps';
+    info.append(document.createElement('br'), est);
+  }
   $('guidance-box').hidden = !m || m.guidance === null;
   $('steps').placeholder = m && m.steps ? String(m.steps) : 'default';
   $('guidance').placeholder = m && m.guidance !== null ? String(m.guidance) : '';
@@ -257,9 +274,17 @@ async function run() {
   running = true;
   renderModelInfo();
   const started = performance.now();
+  const expected = estimate(m, steps);
+  const bar = $('progress');
+  bar.hidden = expected === null;
+  bar.value = 0;
   let phase = 'running';
-  const tick = () => setState(m.label + ': ' + phase + ' · '
-    + ((performance.now() - started) / 1000).toFixed(0) + ' s');
+  const tick = () => {
+    const elapsed = (performance.now() - started) / 1000;
+    if (expected !== null) bar.value = Math.min(elapsed / expected, 0.99);
+    setState(m.label + ': ' + phase + ' · ' + duration(elapsed)
+      + (expected === null ? '' : ' of ~' + duration(expected)));
+  };
   tick();
   const timer = setInterval(tick, 500);
   try {
@@ -274,6 +299,7 @@ async function run() {
     setState(e.message, true);
   } finally {
     clearInterval(timer);
+    bar.hidden = true;
     running = false;
     renderModelInfo();
   }
@@ -291,6 +317,7 @@ async function refresh() {
 
 for (const b of document.querySelectorAll('.tabs button')) b.onclick = () => selectTab(b.dataset.kind);
 $('model').onchange = renderModelInfo;
+$('steps').addEventListener('input', renderModelInfo);
 $('run').onclick = run;
 $('prompt').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) run(); });
 selectTab(MODELS.some((m) => m.kind === 'image') ? 'image' : 'video');
@@ -308,6 +335,7 @@ def render_page(config: FleetConfig, statuses: Mapping[str, str], *, base_url: s
         rows.append(
             f"<tr><td><code>{escape(entry.model_id)}</code></td><td>{escape(entry.kind)}</td>"
             f"<td>{entry.device}</td><td>{escape(shapes)}</td>"
+            f"<td>{escape(estimate_text(entry, _defaults(entry.model_id)[0]))}</td>"
             f'<td><span class="badge {escape(status)}" title="{escape(_STATUS_HELP.get(status, ""))}">'
             f"{escape(status)}</span></td></tr>")
         examples.append(f"<h3><code>{escape(entry.model_id)}</code></h3>\n"
@@ -349,16 +377,18 @@ def render_page(config: FleetConfig, statuses: Mapping[str, str], *, base_url: s
 <div class="hint">Empty fields use the model's defaults; an empty seed is random.</div>
 </details>
 <button id="run" type="button">Run</button>
+<progress id="progress" max="1" value="0" hidden></progress>
 <div id="state" aria-live="polite"></div>
-<p class="notice">{escape(QUEUE_LINE)} A request must use one of its model's shapes: H×W for
-images, H×W×F (frames) for videos.</p>
+<p class="notice">{escape(QUEUE_LINE)} Estimated times were measured on this server with nobody
+else's request ahead; a busy model adds its queue. A request must use one of its model's shapes:
+H×W for images, H×W×F (frames) for videos.</p>
 </div>
 <div class="results" id="results"><div class="empty">Results appear here.</div></div>
 </div>
 <section class="api">
 <details><summary>Models, status and API examples</summary>
 <div class="scroll"><table>
-<thead><tr><th>Model</th><th>Kind</th><th>Device</th><th>Shapes</th><th>Status</th></tr></thead>
+<thead><tr><th>Model</th><th>Kind</th><th>Device</th><th>Shapes</th><th>Est. time</th><th>Status</th></tr></thead>
 <tbody>
 {chr(10).join(rows)}
 </tbody>
@@ -394,22 +424,36 @@ def _ui_model(entry: FleetEntry, status: str) -> dict:
         "status": status,
         "steps": steps,
         "guidance": guidance,
+        "estimate": (None if entry.estimate is None
+                     else {"base": entry.estimate[0], "per_step": entry.estimate[1]}),
     }
+
+
+def estimate_text(entry: FleetEntry, steps: int | None) -> str:
+    """"~9 s (28 steps)" from the entry's measured estimate, "" without one."""
+    if entry.estimate is None or not steps:
+        return ""
+    return f"~{_duration(entry.estimate[0] + entry.estimate[1] * steps)} ({steps} steps)"
+
+
+def _duration(seconds: float) -> str:
+    return f"{round(seconds)} s" if seconds < 90 else f"{seconds / 60:.1f} min"
 
 
 def _defaults(model_id: str) -> tuple[int | None, float | None]:
     """The steps and guidance scale a backend uses when a request omits them (the model's
-    ``ModelSpec``; guidance None when the model takes none). None, None for a model without a spec
-    (MiniMax-H3): the page then sends neither and shows the backend's default as "default"."""
+    ``ModelSpec``; guidance None when the model takes none). A model without a spec (MiniMax-H3)
+    takes its serving metadata's steps and no guidance scale."""
     from difflet.models.spec import gpu_model_spec
     from difflet.registry import resolve_model
+    from difflet.serving.model_registry import serving_default_steps
 
     try:
         spec = gpu_model_spec(resolve_model(model_id).name)
     except (KeyError, ValueError):
-        return None, None
+        spec = None
     if spec is None:
-        return None, None
+        return serving_default_steps(model_id), None
     guidance = None if spec.guidance == "none" else spec.default_guidance_scale
     return spec.default_steps, guidance
 

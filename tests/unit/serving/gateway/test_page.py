@@ -91,7 +91,18 @@ def test_page_models_carry_the_backend_defaults():
 
     assert (models[FLUX]["steps"], models[FLUX]["guidance"]) == (28, 3.5)
     assert (models[QWEN]["steps"], models[QWEN]["guidance"]) == (50, None)  # takes no guidance
-    assert (models[H3]["steps"], models[H3]["guidance"]) == (None, None)  # no spec: backend default
+    assert (models[H3]["steps"], models[H3]["guidance"]) == (30, None)  # its serving metadata's
+
+
+def test_page_shows_the_measured_estimate():
+    flux = FleetEntry(model_id=FLUX, device=0, port=8100, cache_dir=Path("/c"),
+                      serve_args=("--height", "1024", "--width", "1024"), estimate=(1.5, 0.25))
+    page = render_page(_config(flux, _hv()), {FLUX: "ready"}, base_url=BASE)
+
+    assert _models(page)[FLUX]["estimate"] == {"base": 1.5, "per_step": 0.25}
+    assert _models(page)[HV]["estimate"] is None
+    assert "<td>~8 s (28 steps)</td>" in page  # 1.5 + 0.25 * 28 = 8.5, FLUX's default steps
+    assert 'id="progress"' in page
 
 
 def test_every_id_the_script_uses_exists_once():
