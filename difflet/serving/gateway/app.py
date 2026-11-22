@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Awaitable, Callable
 from urllib.parse import quote, urlencode
 
@@ -62,6 +63,7 @@ def create_gateway_app(
     async def statuses() -> dict[str, Status]:
         return await (status_fn() if status_fn is not None else fleet_status(config, http))
 
+    runs = RunCounter(config.runs_dir / "gateway-stats.json")
     app = FastAPI(title="Difflet gateway", lifespan=lifespan)
     if api_key:
         app.add_middleware(ApiKeyAuthenticationMiddleware, api_key=api_key)
@@ -110,14 +112,14 @@ def create_gateway_app(
         except ValueError:
             payload = None
         entry = route(payload.get("model") if isinstance(payload, dict) else None, "image")
-        return _relay(await send(request, entry, "/v1/chat/completions", body=body))
+        return _relay(runs.count(await send(request, entry, "/v1/chat/completions", body=body)))
 
     @app.post("/v1/videos")
     @app.post("/v1/videos/sync")
     async def create_video(request: Request):
         body = await _read_body(request)
         entry = route(await _form_model(request, body), "video")
-        return _relay(await send(request, entry, request.url.path, body=body))
+        return _relay(runs.count(await send(request, entry, request.url.path, body=body)))
 
     @app.get("/v1/videos")
     async def list_videos(request: Request):
@@ -177,11 +179,40 @@ def create_gateway_app(
         return JSONResponse(status_code=200 if all_ready else 503, content={
             "status": "ready" if all_ready else "not_ready", "models": found})
 
+    @app.get("/stats")
+    async def stats():
+        return {"total_runs": runs.total}
+
     @app.get("/", response_class=HTMLResponse)
     async def page(request: Request):
-        return HTMLResponse(render_page(config, await statuses(), base_url=str(request.base_url)))
+        return HTMLResponse(render_page(config, await statuses(), base_url=str(request.base_url),
+                                        total_runs=runs.total))
 
     return app
+
+
+class RunCounter:
+    """Generations the gateway passed on successfully (an image answered 200, a video job
+    accepted), kept across gateway restarts in one JSON file. A display figure: a file that cannot
+    be read or written never fails a request."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        try:
+            self.total = int(json.loads(path.read_text())["total_runs"])
+        except (OSError, ValueError, KeyError, TypeError):
+            self.total = 0
+
+    def count(self, response: httpx.Response) -> httpx.Response:
+        if response.status_code == 200:
+            self.total += 1
+            try:
+                tmp = self.path.with_suffix(".tmp")
+                tmp.write_text(json.dumps({"total_runs": self.total}))
+                tmp.replace(self.path)
+            except OSError:
+                pass
+        return response
 
 
 async def _read_body(request: Request) -> bytes:

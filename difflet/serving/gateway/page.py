@@ -1,6 +1,9 @@
-"""The gateway's page at ``/``: every model, its shapes, its status, an example request.
+"""The gateway's page at ``/``: generate an image or a video with any ready model, plus every
+model's shapes, status and an example API request.
 
-Server-rendered on each load from the fleet file, no JavaScript (design §6.5).
+Server-rendered from the fleet file; a small inline script calls the gateway's own ``/v1`` routes
+(the page sends no API key: it works when the gateway runs without one) and polls ``/ready`` and
+``/stats`` instead of reloading the page, so a running generation is never lost.
 """
 
 from __future__ import annotations
@@ -20,21 +23,76 @@ _STATUS_HELP = {
     "down": "no backend process, or it serves another model",
 }
 _AUTH = '-H "Authorization: Bearer $DIFFLET_API_KEY"'
+EXAMPLE_PROMPTS = {
+    "image": (
+        "a small red sailboat on a calm blue lake at sunrise",
+        "a cat sitting on a wooden bench in a sunlit park, shallow depth of field",
+        "a cozy coffee shop interior on a rainy evening, warm light, film photo",
+        "an astronaut riding a horse on the moon, highly detailed illustration",
+    ),
+    "video": (
+        "a red fox walking through fresh snow in a pine forest",
+        "a golden retriever running on a beach at sunset",
+        "a cat walking across a sunlit garden",
+        "waves crashing against a rocky coast, slow motion, cinematic",
+    ),
+}
 _CSS = """
-:root { color-scheme: light dark; --bg: #ffffff; --fg: #1f2328; --muted: #59636e;
-  --line: #d1d9e0; --code: #f6f8fa; --ready: #1a7f37; --loading: #9a6700;
-  --recovering: #bc4c00; --down: #cf222e; }
+:root { color-scheme: light dark; --bg: #ffffff; --panel: #f6f8fa; --fg: #1f2328;
+  --muted: #59636e; --line: #d1d9e0; --accent: #0969da; --accent-fg: #ffffff;
+  --ready: #1a7f37; --loading: #9a6700; --recovering: #bc4c00; --down: #cf222e; }
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #0d1117; --fg: #e6edf3; --muted: #9198a1; --line: #3d444d; --code: #151b23;
+  :root { --bg: #0d1117; --panel: #151b23; --fg: #e6edf3; --muted: #9198a1; --line: #3d444d;
+    --accent: #4493f8; --accent-fg: #0d1117;
     --ready: #3fb950; --loading: #d29922; --recovering: #db6d28; --down: #f85149; } }
 * { box-sizing: border-box; }
-body { margin: 0 auto; max-width: 72rem; padding: 1.5rem 1rem 3rem; background: var(--bg);
+body { margin: 0 auto; max-width: 80rem; padding: 1.25rem 1rem 3rem; background: var(--bg);
   color: var(--fg); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
-h1 { font-size: 1.6rem; margin: 0 0 .25rem; }
-h2 { font-size: 1.15rem; margin: 2rem 0 .5rem; }
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between;
+  gap: .5rem 1.5rem; margin-bottom: 1rem; }
+h1 { font-size: 1.6rem; margin: 0; }
+h2 { font-size: 1.1rem; margin: 0 0 .5rem; }
 h3 { font-size: .95rem; margin: 1.25rem 0 .4rem; }
 p { color: var(--muted); margin: .25rem 0 1rem; }
-a { color: inherit; }
+a { color: var(--accent); }
+.counter { color: var(--muted); } .counter b { color: var(--fg); font-size: 1.15rem; }
+.layout { display: grid; grid-template-columns: minmax(18rem, 26rem) 1fr; gap: 1.5rem;
+  align-items: start; }
+@media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
+.panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+  padding: 1rem; }
+.tabs { display: flex; gap: .25rem; margin-bottom: 1rem; }
+.tabs button { flex: 1; padding: .5rem; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg); color: var(--fg); font: inherit; cursor: pointer; }
+.tabs button[aria-selected="true"] { background: var(--accent); color: var(--accent-fg);
+  border-color: var(--accent); font-weight: 600; }
+label { display: block; font-size: .85rem; font-weight: 600; margin: .75rem 0 .3rem; }
+select, textarea, input { width: 100%; padding: .5rem .6rem; border: 1px solid var(--line);
+  border-radius: 8px; background: var(--bg); color: var(--fg); font: inherit; }
+textarea { min-height: 6rem; resize: vertical; }
+.hint { color: var(--muted); font-size: .8rem; margin-top: .3rem; }
+.examples { display: flex; flex-wrap: wrap; gap: .35rem; }
+.examples button { border: 1px solid var(--line); border-radius: 1rem; background: var(--bg);
+  color: var(--muted); padding: .2rem .65rem; font: inherit; font-size: .8rem; cursor: pointer;
+  text-align: left; }
+.examples button:hover { color: var(--fg); border-color: var(--muted); }
+details.advanced { margin-top: .75rem; } details summary { cursor: pointer; color: var(--muted); }
+.row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
+#run { width: 100%; margin-top: 1rem; padding: .65rem; border: 0; border-radius: 8px;
+  background: var(--accent); color: var(--accent-fg); font: inherit; font-weight: 600;
+  cursor: pointer; }
+#run:disabled { opacity: .55; cursor: progress; }
+#state { min-height: 1.5rem; margin-top: .6rem; font-size: .9rem; color: var(--muted); }
+#state.error { color: var(--down); }
+.results { display: grid; gap: 1rem; }
+.empty { color: var(--muted); border: 1px dashed var(--line); border-radius: 10px; padding: 3rem 1rem;
+  text-align: center; }
+.card { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; background: var(--panel); }
+.card img, .card video { display: block; width: 100%; height: auto; background: #000; }
+.card .meta { padding: .6rem .8rem; font-size: .85rem; color: var(--muted); }
+.card .meta b { color: var(--fg); }
+.notice { font-size: .8rem; color: var(--muted); margin-top: 1rem; }
+section.api { margin-top: 2.5rem; }
 .scroll { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; }
 th, td { text-align: left; padding: .55rem .75rem; border-bottom: 1px solid var(--line);
@@ -42,16 +100,206 @@ th, td { text-align: left; padding: .55rem .75rem; border-bottom: 1px solid var(
 th { color: var(--muted); font-size: .8rem; font-weight: 600; text-transform: uppercase;
   letter-spacing: .03em; }
 code, pre { font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
-pre { margin: 0; padding: .75rem 1rem; background: var(--code); border: 1px solid var(--line);
+pre { margin: 0; padding: .75rem 1rem; background: var(--panel); border: 1px solid var(--line);
   border-radius: 6px; overflow-x: auto; }
 .badge { display: inline-block; padding: 0 .55rem; border: 1px solid currentColor;
   border-radius: 1rem; font-size: .8rem; font-weight: 600; }
 .ready { color: var(--ready); } .loading { color: var(--loading); }
 .recovering { color: var(--recovering); } .down { color: var(--down); }
 """
+_SCRIPT = r"""
+const MODELS = JSON.parse(document.getElementById('models').textContent);
+const EXAMPLES = JSON.parse(document.getElementById('example-prompts').textContent);
+const $ = (id) => document.getElementById(id);
+let kind = 'image';
+let running = false;
+
+function shapeText(s) { return s[2] ? s[0] + '×' + s[1] + '×' + s[2] : s[0] + '×' + s[1]; }
+function current() { return MODELS.find((m) => m.id === $('model').value); }
+function setState(text, error) { $('state').textContent = text; $('state').className = error ? 'error' : ''; }
+
+function renderModels() {
+  const select = $('model');
+  const keep = select.value;
+  select.innerHTML = '';
+  for (const m of MODELS.filter((m) => m.kind === kind)) {
+    const option = document.createElement('option');
+    option.value = m.id;
+    option.textContent = m.label + (m.status === 'ready' ? '' : '  (' + m.status + ')');
+    option.disabled = m.status !== 'ready';
+    select.appendChild(option);
+  }
+  const ready = [...select.options].filter((o) => !o.disabled);
+  if (ready.some((o) => o.value === keep)) select.value = keep;
+  else if (ready.length) select.value = ready[0].value;
+  renderModelInfo();
+}
+
+function renderModelInfo() {
+  const m = current();
+  $('model-info').textContent = m ? 'Shape ' + shapeText(m.shapes[0]) + ' · device ' + m.device
+    + (m.steps ? ' · default ' + m.steps + ' steps' : '') : 'No ' + kind + ' model is ready yet.';
+  $('guidance-box').hidden = !m || m.guidance === null;
+  $('steps').placeholder = m && m.steps ? String(m.steps) : 'default';
+  $('guidance').placeholder = m && m.guidance !== null ? String(m.guidance) : '';
+  $('run').disabled = running || !m || m.status !== 'ready';
+}
+
+function renderExamples() {
+  const box = $('examples');
+  box.innerHTML = '';
+  for (const text of EXAMPLES[kind]) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = text;
+    b.onclick = () => { $('prompt').value = text; };
+    box.appendChild(b);
+  }
+}
+
+function selectTab(next) {
+  kind = next;
+  for (const b of document.querySelectorAll('.tabs button')) {
+    b.setAttribute('aria-selected', String(b.dataset.kind === kind));
+  }
+  renderModels();
+  renderExamples();
+}
+
+async function api(url, options) {
+  const response = await fetch(url, options);
+  const text = await response.text();
+  let body = null;
+  try { body = JSON.parse(text); } catch (e) { body = null; }
+  if (!response.ok) {
+    const message = body && body.error && body.error.message;
+    throw new Error(message || ('HTTP ' + response.status));
+  }
+  return body;
+}
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+async function runImage(m, prompt, seed, steps, guidance) {
+  const extra = { height: m.shapes[0][0], width: m.shapes[0][1], seed: seed };
+  if (steps !== null) extra.num_inference_steps = steps;
+  if (guidance !== null) extra.guidance_scale = guidance;
+  const body = await api('/v1/chat/completions', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: m.id, messages: [{ role: 'user', content: prompt }], extra_body: extra }),
+  });
+  return { type: 'image', url: body.choices[0].message.content[0].image_url.url };
+}
+
+async function runVideo(m, prompt, seed, steps, guidance, onStatus) {
+  const [height, width, frames] = m.shapes[0];
+  const form = new FormData();
+  form.append('model', m.id);
+  form.append('prompt', prompt);
+  form.append('size', width + 'x' + height);
+  form.append('num_frames', String(frames));
+  form.append('seed', String(seed));
+  if (steps !== null) form.append('num_inference_steps', String(steps));
+  if (guidance !== null) form.append('guidance_scale', String(guidance));
+  const job = await api('/v1/videos', { method: 'POST', body: form });
+  const path = '/v1/videos/' + encodeURIComponent(job.id);
+  for (;;) {
+    await sleep(3000);
+    const state = await api(path);
+    if (state.status === 'completed') break;
+    if (state.status === 'failed' || state.status === 'cancelled') {
+      throw new Error((state.error && state.error.message) || ('video ' + state.status));
+    }
+    onStatus(state.status);
+  }
+  return { type: 'video', url: path + '/content' };
+}
+
+function addResult(m, prompt, seed, steps, seconds, media) {
+  const card = document.createElement('div');
+  card.className = 'card';
+  const el = document.createElement(media.type === 'image' ? 'img' : 'video');
+  el.src = media.url;
+  if (media.type === 'video') { el.controls = true; el.autoplay = true; el.loop = true; el.muted = true; el.playsInline = true; }
+  else el.alt = prompt;
+  const meta = document.createElement('div');
+  meta.className = 'meta';
+  const head = document.createElement('b');
+  head.textContent = m.label;
+  const link = document.createElement('a');
+  link.href = media.url;
+  link.download = media.type === 'image' ? 'difflet.png' : 'difflet.mp4';
+  link.textContent = 'download';
+  meta.append(head, ' · ' + seconds.toFixed(1) + ' s · seed ' + seed
+    + ' · ' + (steps === null ? 'default' : steps) + ' steps · ', link,
+    document.createElement('br'), prompt);
+  card.append(el, meta);
+  const results = $('results');
+  const empty = results.querySelector('.empty');
+  if (empty) empty.remove();
+  results.prepend(card);
+}
+
+function readNumber(id) {
+  const raw = $(id).value.trim();
+  return raw === '' ? null : Number(raw);
+}
+
+async function run() {
+  const m = current();
+  const prompt = $('prompt').value.trim();
+  if (!m) return;
+  if (!prompt) { setState('Enter a prompt first.', true); return; }
+  const seedValue = readNumber('seed');
+  const seed = seedValue === null ? Math.floor(Math.random() * 2147483647) : seedValue;
+  const steps = readNumber('steps');
+  const guidance = m.guidance === null ? null : readNumber('guidance');
+  running = true;
+  renderModelInfo();
+  const started = performance.now();
+  let phase = 'running';
+  const tick = () => setState(m.label + ': ' + phase + ' · '
+    + ((performance.now() - started) / 1000).toFixed(0) + ' s');
+  tick();
+  const timer = setInterval(tick, 500);
+  try {
+    const media = m.kind === 'image'
+      ? await runImage(m, prompt, seed, steps, guidance)
+      : await runVideo(m, prompt, seed, steps, guidance, (s) => { phase = s.replace('_', ' '); });
+    const seconds = (performance.now() - started) / 1000;
+    addResult(m, prompt, seed, steps, seconds, media);
+    setState('Done in ' + seconds.toFixed(1) + ' s.');
+    refresh();
+  } catch (e) {
+    setState(e.message, true);
+  } finally {
+    clearInterval(timer);
+    running = false;
+    renderModelInfo();
+  }
+}
+
+async function refresh() {
+  try {
+    const ready = await fetch('/ready').then((r) => r.json());
+    for (const m of MODELS) m.status = (ready.models || {})[m.id] || 'down';
+    renderModels();
+    const stats = await fetch('/stats').then((r) => r.json());
+    $('runs').textContent = String(stats.total_runs);
+  } catch (e) { /* keep the last known state */ }
+}
+
+for (const b of document.querySelectorAll('.tabs button')) b.onclick = () => selectTab(b.dataset.kind);
+$('model').onchange = renderModelInfo;
+$('run').onclick = run;
+$('prompt').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) run(); });
+selectTab(MODELS.some((m) => m.kind === 'image') ? 'image' : 'video');
+setInterval(refresh, 15000);
+"""
 
 
-def render_page(config: FleetConfig, statuses: Mapping[str, str], *, base_url: str) -> str:
+def render_page(config: FleetConfig, statuses: Mapping[str, str], *, base_url: str,
+                total_runs: int = 0) -> str:
     rows, examples = [], []
     for entry in config.models:
         status = statuses.get(entry.model_id, "down")
@@ -64,33 +312,106 @@ def render_page(config: FleetConfig, statuses: Mapping[str, str], *, base_url: s
             f"{escape(status)}</span></td></tr>")
         examples.append(f"<h3><code>{escape(entry.model_id)}</code></h3>\n"
                         f"<pre><code>{escape(_example(entry, base_url))}</code></pre>")
+    models = [_ui_model(entry, statuses.get(entry.model_id, "down")) for entry in config.models]
     return f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="refresh" content="30">
 <title>Difflet models</title>
 <style>{_CSS}</style>
 </head>
 <body>
-<h1>Difflet models</h1>
-<p>{escape(QUEUE_LINE)} A request must use one of its model's shapes: H×W for images,
-H×W×F (frames) for videos. This page refreshes every 30 s.</p>
+<header>
+<div><h1>Difflet</h1><p>Text-to-image and text-to-video on AWS Trainium.</p></div>
+<div class="counter">Total inference runs <b id="runs">{int(total_runs)}</b></div>
+</header>
+<div class="layout">
+<div class="panel">
+<div class="tabs" role="tablist">
+<button type="button" role="tab" data-kind="image" aria-selected="true">Text-to-Image</button>
+<button type="button" role="tab" data-kind="video" aria-selected="false">Text-to-Video</button>
+</div>
+<label for="model">Model</label>
+<select id="model"></select>
+<div class="hint" id="model-info"></div>
+<label for="prompt">Prompt</label>
+<textarea id="prompt" placeholder="Describe what to generate"></textarea>
+<label>Examples</label>
+<div class="examples" id="examples"></div>
+<details class="advanced"><summary>Advanced</summary>
+<div class="row3">
+<div><label for="steps">Steps</label><input id="steps" type="number" min="1" max="50"></div>
+<div id="guidance-box"><label for="guidance">Guidance</label>
+<input id="guidance" type="number" min="0" max="20" step="0.5"></div>
+<div><label for="seed">Seed</label><input id="seed" type="number" min="0" placeholder="random"></div>
+</div>
+<div class="hint">Empty fields use the model's defaults; an empty seed is random.</div>
+</details>
+<button id="run" type="button">Run</button>
+<div id="state" aria-live="polite"></div>
+<p class="notice">{escape(QUEUE_LINE)} A request must use one of its model's shapes: H×W for
+images, H×W×F (frames) for videos.</p>
+</div>
+<div class="results" id="results"><div class="empty">Results appear here.</div></div>
+</div>
+<section class="api">
+<details><summary>Models, status and API examples</summary>
 <div class="scroll"><table>
 <thead><tr><th>Model</th><th>Kind</th><th>Device</th><th>Shapes</th><th>Status</th></tr></thead>
 <tbody>
 {chr(10).join(rows)}
 </tbody>
 </table></div>
-<h2>Example requests</h2>
+<h2 style="margin-top:1.5rem">Example requests</h2>
 <p>Each uses the model's first shape. Send the gateway's API key as a Bearer token when it has
 one; the header is ignored when it has none. JSON: <a href="/v1/models">/v1/models</a>,
 <a href="/ready">/ready</a>, <a href="/health">/health</a>.</p>
 {chr(10).join(examples)}
+</details>
+</section>
+<script type="application/json" id="models">{_json(models)}</script>
+<script type="application/json" id="example-prompts">{_json(EXAMPLE_PROMPTS)}</script>
+<script>{_SCRIPT}</script>
 </body>
 </html>
 """
+
+
+def _json(value) -> str:
+    """JSON safe inside a ``<script>`` element: no ``</`` can end it early."""
+    return json.dumps(value).replace("</", "<\\/")
+
+
+def _ui_model(entry: FleetEntry, status: str) -> dict:
+    steps, guidance = _defaults(entry.model_id)
+    return {
+        "id": entry.model_id,
+        "label": entry.model_id.rsplit("/", 1)[-1],
+        "kind": entry.kind,
+        "device": entry.device,
+        "shapes": [list(shape) for shape in entry.shapes],
+        "status": status,
+        "steps": steps,
+        "guidance": guidance,
+    }
+
+
+def _defaults(model_id: str) -> tuple[int | None, float | None]:
+    """The steps and guidance scale a backend uses when a request omits them (the model's
+    ``ModelSpec``; guidance None when the model takes none). None, None for a model without a spec
+    (MiniMax-H3): the page then sends neither and shows the backend's default as "default"."""
+    from difflet.models.spec import gpu_model_spec
+    from difflet.registry import resolve_model
+
+    try:
+        spec = gpu_model_spec(resolve_model(model_id).name)
+    except (KeyError, ValueError):
+        return None, None
+    if spec is None:
+        return None, None
+    guidance = None if spec.guidance == "none" else spec.default_guidance_scale
+    return spec.default_steps, guidance
 
 
 def _example(entry: FleetEntry, base_url: str) -> str:
