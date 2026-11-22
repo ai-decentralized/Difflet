@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import importlib.util
 import inspect
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -73,7 +74,7 @@ def test_settings_are_the_device_command_lines(script, markers):
     D4, so no target override): the model, steps, seed, prompt and 9 frames, and none of the
     flags the reference leaves at the stage defaults."""
     path = _RUNS / script
-    if not path.is_file():
+    if not os.path.isfile(path):
         pytest.skip(f"no device run script {path} on this host")
     text = path.read_text()
     assert f"--model-id {ref.MODEL_ID}" in text and all(m in text for m in markers)
@@ -85,7 +86,7 @@ def test_settings_are_the_device_command_lines(script, markers):
 def test_guidance_is_the_snapshots():
     from difflet.backends.neuron.hunyuan_video15.pipeline import load_guidance
 
-    if not _SNAPSHOT.is_dir():
+    if not os.path.isdir(_SNAPSHOT):
         pytest.skip(f"no snapshot {_SNAPSHOT} on this host")
     assert load_guidance(str(_SNAPSHOT)) == ref.GUIDANCE_SCALE
 
@@ -133,7 +134,7 @@ def test_latents_layout_is_the_device_files(arm):
     """The device keeps bf16 latents; the reference's fp32 ones have the same unpacked shape,
     which is all compare_difflet_runs needs (it compares both in float64)."""
     path = score.BENCH / score.DEVICE_OUTPUTS["hunyuan_video_15"][arm]["latents"]
-    if not path.is_file():
+    if not os.path.isfile(path):
         pytest.skip(f"no device latents {path} on this host")
     device = torch.load(path, weights_only=True)
     assert type(device) is torch.Tensor and tuple(device.shape) == ref.LATENT_SHAPE
@@ -149,7 +150,7 @@ _SHIPPED_MD5 = {"bf16": "9ab6e81c5613651def4bb391d2f6da01",
 @pytest.mark.parametrize("arm", ["bf16", "mx"])
 def test_device_clips_are_the_shipped_trees(arm):
     path = score.BENCH / score.DEVICE_OUTPUTS["hunyuan_video_15"][arm]["output"]
-    if not path.is_file():
+    if not os.path.isfile(path):
         pytest.skip(f"no device clip {path} on this host")
     assert hashlib.md5(path.read_bytes()).hexdigest() == _SHIPPED_MD5[arm]
 
@@ -157,7 +158,7 @@ def test_device_clips_are_the_shipped_trees(arm):
 @pytest.mark.parametrize("arm", ["bf16", "mx"])
 def test_clip_format_is_the_device_files(arm):
     path = score.BENCH / score.DEVICE_OUTPUTS["hunyuan_video_15"][arm]["output"]
-    if not path.is_file():
+    if not os.path.isfile(path):
         pytest.skip(f"no device clip {path} on this host")
     meta = iio.immeta(path)
     assert meta["fps"] == ref.FPS and tuple(meta["size"]) == (ref.WIDTH, ref.HEIGHT)

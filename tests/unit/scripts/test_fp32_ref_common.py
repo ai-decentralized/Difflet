@@ -10,6 +10,7 @@ from __future__ import annotations
 import importlib.util
 import inspect
 import json
+import os
 from pathlib import Path
 
 import imageio.v3 as iio
@@ -240,7 +241,7 @@ _PATHS = sorted({p for arms in score.DEVICE_OUTPUTS.values() for arm in arms.val
 
 @pytest.mark.parametrize("rel", _PATHS)
 def test_device_output_exists_on_this_host(rel):
-    if not score.BENCH.is_dir():
+    if not os.path.isdir(score.BENCH):
         pytest.skip(f"no bench directory {score.BENCH} on this host")
     if not (score.BENCH / rel).exists() and rel.startswith(_PENDING):
         pytest.skip(f"{rel}: its device rerun has not written it yet")

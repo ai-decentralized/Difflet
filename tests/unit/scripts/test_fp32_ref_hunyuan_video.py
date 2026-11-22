@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import inspect
+import os
 from pathlib import Path
 
 import imageio.v3 as iio
@@ -51,7 +52,7 @@ def test_settings_are_the_device_command_lines(script):
     shape, steps, guidance and seed the reference copies, and no negative prompt. (Those runs used
     the fox prompt; the reference now follows the bench recipe's, see test_prompt_is_the_recipes.)"""
     path = _RUNS / script
-    if not path.is_file():
+    if not os.path.isfile(path):
         pytest.skip(f"no device run script {path} on this host")
     text = path.read_text()
     for words in (f"--model-id {ref.MODEL_ID}", f"REV={ref.REVISION}",
@@ -100,7 +101,7 @@ def test_initial_noise_refuses_another_law(monkeypatch):
 @pytest.mark.parametrize("arm", ["bf16", "mx"])
 def test_latents_layout_is_the_device_files(arm):
     path = score.BENCH / score.DEVICE_OUTPUTS["hunyuan_video"][arm]["latents"]
-    if not path.is_file():
+    if not os.path.isfile(path):
         pytest.skip(f"no device latents {path} on this host")
     device = torch.load(path, weights_only=True)
     assert type(device) is torch.Tensor and device.dtype == torch.float32
@@ -110,7 +111,7 @@ def test_latents_layout_is_the_device_files(arm):
 @pytest.mark.parametrize("arm", ["bf16", "mx"])
 def test_clip_format_is_the_device_files(arm):
     path = score.BENCH / score.DEVICE_OUTPUTS["hunyuan_video"][arm]["output"]
-    if not path.is_file():
+    if not os.path.isfile(path):
         pytest.skip(f"no device clip {path} on this host")
     meta = iio.immeta(path)
     assert meta["fps"] == ref.FPS and tuple(meta["size"]) == (ref.WIDTH, ref.HEIGHT)
