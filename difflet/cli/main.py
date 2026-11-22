@@ -1281,13 +1281,12 @@ def _validate_dp(args: argparse.Namespace) -> None:
         if batch and args.prompt and args.requests:
             print("Error: --prompt and --requests are mutually exclusive.", file=sys.stderr)
             raise SystemExit(1)
-    if batch and any(
+    if (getattr(args, "dp", None) or 1) > 1 and any(
         getattr(args, name, None) is not None
         for name in ("teacache_cadence", "teacache_online_delta", "teacache_speedup")
     ):
         print(
-            "Error: TeaCache flags are not supported in batch/DP mode "
-            "(per-request controller reset is a follow-up).",
+            "Error: TeaCache flags are not supported with DP replicas (--dp > 1).",
             file=sys.stderr,
         )
         raise SystemExit(1)
