@@ -37,6 +37,7 @@ flux_mxfp8:
     quant: mxfp8
 
 qwen_image:
+  description: true CFG 6.0 (two DiT forwards per step); --guidance-scale is ignored, guidance_embeds=false (issue #169)
   extends: _neuron
   args:
     model-id: Qwen/Qwen-Image
@@ -44,7 +45,8 @@ qwen_image:
     height: 1024
     width: 1024
     tp-degree: 4
-    guidance-scale: 7.5
+    true-cfg-scale: 6.0
+    negative-prompt: " "
     prompt: a cat sitting on a bench
 
 qwen_image_mxfp8:

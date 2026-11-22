@@ -143,6 +143,15 @@ def test_shipped_negative_prompts_are_not_mangled():
     assert recipes["wan21_official"].args["negative-prompt"].endswith("walking backwards")
 
 
+def test_qwen_recipes_run_true_cfg():
+    recipes = R.load_recipes()
+    for name in ("qwen_image", "qwen_image_mxfp8"):
+        argv = recipes[name].argv()
+        assert argv[argv.index("--true-cfg-scale") + 1] == "6.0"
+        assert argv[argv.index("--negative-prompt") + 1] == " "
+        assert "--guidance-scale" not in argv  # ignored by Qwen-Image (guidance_embeds=false)
+
+
 def test_parse_turns_argparse_errors_into_recipe_errors():
     with pytest.raises(R.RecipeError, match="invalid choice"):
         R.parse("generate", ["--model-id", "Qwen/Qwen-Image", "--prompt", "p",
