@@ -7,6 +7,7 @@ without ``/mnt/nvme/difflet-exp/constmax-models``."""
 from __future__ import annotations
 
 import importlib
+import inspect
 import json
 import re
 import shlex
@@ -95,6 +96,43 @@ def test_hv1_settings_are_the_device_runs(arm):
     _check_quant(flags, arm)
     assert all((r["prompt"], r["seed"], r["steps"]) == (long["PROMPT"], b.SEED, b.STEPS)
                and "negative_prompt" not in r for r in requests)
+
+
+def _hv1_main(monkeypatch, argv) -> dict:
+    """``hv1.main(argv)`` with the run itself stubbed: the directory and prompt it would use."""
+    seen = {}
+    for name in hv1.LONG:  # main sets these on base; registered here, monkeypatch restores them
+        monkeypatch.setattr(hv1.base, name, getattr(hv1.base, name))
+    monkeypatch.setattr(hv1.base, "require_fp32_math", lambda: None)
+    monkeypatch.setattr(hv1.base, "set_threads", lambda n: None)
+    monkeypatch.setattr(hv1.base, "run", lambda out_dir, steps: seen.update(
+        out_dir=out_dir, prompt=hv1.base.PROMPT))
+    assert hv1.main(argv) == 0
+    return seen
+
+
+def test_hv1_default_prompt_is_the_pinned_one_in_the_given_directory(monkeypatch, tmp_path):
+    out = tmp_path / "hunyuan_video_long"
+    for argv in (["--out-dir", str(out)],
+                 ["--out-dir", str(out), "--prompt", hv1.LONG["PROMPT"]]):
+        assert _hv1_main(monkeypatch, argv) == {"out_dir": out, "prompt": hv1.LONG["PROMPT"]}
+
+
+def test_hv1_another_prompt_is_recorded_and_writes_to_another_key(monkeypatch, tmp_path):
+    """A --prompt run can never land in the pinned prompt's directory (a 23 h reference), two
+    prompts never share one, and run.json's settings carry the prompt the run used."""
+    assert '"prompt": PROMPT' in inspect.getsource(hv1.base.run)  # read before the stub replaces it
+    out = tmp_path / "hunyuan_video_long"
+    cat = _hv1_main(monkeypatch, ["--prompt", "a cat walking through a garden",
+                                  "--out-dir", f"{out}/", "--steps", "1"])
+    dog = _hv1_main(monkeypatch, ["--out-dir", str(out), "--prompt", "a dog"])
+    # an abbreviation base.main would accept must not slip past the suffix
+    assert _hv1_main(monkeypatch, ["--prompt", "a dog", "--out", str(out)]) == dog
+    assert (cat["prompt"], dog["prompt"]) == ("a cat walking through a garden", "a dog")
+    assert len({out, cat["out_dir"], dog["out_dir"]}) == 3
+    for seen in (cat, dog):
+        assert seen["out_dir"].parent == tmp_path
+        assert seen["out_dir"].name.startswith("hunyuan_video_long_")
 
 
 @pytest.mark.parametrize("arm", ARMS)
