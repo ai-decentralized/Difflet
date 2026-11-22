@@ -25,7 +25,8 @@ def _args(**overrides):
 @pytest.mark.parametrize(
     ("overrides", "flag"),
     [
-        ({"teacache_cadence": 2}, "--teacache-cadence"),
+        ({"teacache_speedup": 1.5}, "--teacache-speedup"),
+        ({"teacache_calibration": "/tmp/cal.json"}, "--teacache-calibration"),
         ({"shapes": "480x704x49,512x768x121"}, "--shapes with more than one shape"),
         ({"cp_degree": 2, "cp_mode": "ring"}, "--cp-mode ring"),
         ({"sp_enabled": True}, "--sp"),
@@ -34,6 +35,27 @@ def _args(**overrides):
 def test_driver_lists_what_the_ranks_do_not_run(overrides, flag):
     assert flag in cli._torchrun_unsupported_options(_args(**overrides))
     assert cli._torchrun_unsupported_options(_args()) == []
+
+
+@pytest.mark.parametrize(
+    ("overrides", "flag", "app_kwarg"),
+    [
+        ({"teacache_cadence": 2}, "--teacache-cadence", "teacache_cadence"),
+        ({"teacache_online_delta": 0.6}, "--teacache-online-delta",
+         "teacache_online_delta_alpha"),
+    ],
+)
+def test_probe_free_teacache_runs_on_the_ranks(overrides, flag, app_kwarg):
+    """The probe-free modes are host-side skip decisions: not refused, forwarded to the stage
+    and handed to the application; with an adaptive flag beside them only that one is named."""
+    [value] = overrides.values()
+    args = _args(**overrides)
+    assert cli._torchrun_unsupported_options(args) == []
+    forwarded = cli.LTX2Orchestrator(args)._shared_cli_args("generate")
+    assert forwarded[forwarded.index(flag) + 1] == str(value)
+    assert cli._torchrun_application_kwargs(args)[app_kwarg] == value
+    assert cli._torchrun_unsupported_options(
+        _args(**overrides, teacache_speedup=1.5)) == ["--teacache-speedup"]
 
 
 def test_cfg_parallel_needs_guidance_when_generating():
