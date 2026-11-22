@@ -79,7 +79,6 @@ _REFUSED_PROFILE_OPTIONS = (
     ("teacache_online_delta", "--teacache-online-delta"),
     ("teacache_speedup", "--teacache-speedup"),
     ("host_vae", "--host-vae (the decoder placement is fixed per model)"),
-    ("clip_placement", "--clip-placement"),
     ("torch_compile", "--torch-compile (CUDA only)"),
 )
 
@@ -145,6 +144,11 @@ def refuse_unsupported_profile(profile: ServingProfile, spec: ModelSpec) -> None
             raise feature_not_supported(
                 f"[{spec.model_type}/neuron serve] {label} is not supported by native serving"
             )
+    # HunyuanVideo's profile defaults CLIP to "host", which is where the native app runs it.
+    if profile.clip_placement not in (None, "host"):
+        raise feature_not_supported(
+            f"[{spec.model_type}/neuron serve] --clip-placement {profile.clip_placement}: the "
+            "native app encodes CLIP on the host")
 
 
 # --------------------------------------------------------------------- per model
