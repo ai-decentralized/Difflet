@@ -109,7 +109,7 @@ CPU fp32 references exist at these settings (`/home/ubuntu/fp8-bench/fp32_ref/{q
 
 ### Task 7: device runs
 
-Per lane, in order: `compile` -> `smoke_d` -> `smoke_tc` -> `timed` (E1); E2 `timed` on a device in 8-15 once E1's compile is done.
+Per model: `compile` on one device; as soon as it exits 0, `smoke_d`, `smoke_tc`, E1 `timed` and E2 `timed` start at the same time, each on its own idle device (they only read the compiled cache). A timed result counts only if both smokes pass; a failed smoke kills that model's timed runs. Devices are handed out as models finish compiling (image models first); a model waiting for devices keeps the order smoke_d, E1 timed, smoke_tc, E2 timed. While the code tasks' CPU tests occupy CPUs 0-47, devices 8-15 take no timed run.
 
 Gates (a failed gate stops the lane and is reported; no tuning):
 
