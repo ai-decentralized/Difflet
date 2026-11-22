@@ -83,3 +83,17 @@ def test_a_tampered_frame_dump_is_refused(tmp_path):
     np.save(tmp_path / "ref" / "frames.npy", np.ones((1, 4, 4, 3), dtype=np.uint8))
     with pytest.raises(Q.QualityError, match="does not match the sha256"):
         Q.read_frames(tmp_path / "ref")
+
+
+def test_qwen_reference_spec_carries_true_cfg_and_keeps_unguided_ids():
+    from difflet.bench import reference as REF
+
+    base = {"model-id": "Qwen/Qwen-Image", "revision": "r", "prompt": "p", "height": 1024,
+            "width": 1024}
+    unguided = REF.spec_from_args(base)
+    assert "true_cfg_scale" not in unguided and unguided["negative_prompt"] is None
+    guided = REF.spec_from_args({**base, "true-cfg-scale": 6.0})
+    assert guided["true_cfg_scale"] == 6.0 and guided["negative_prompt"] == " "
+    explicit = REF.spec_from_args({**base, "true-cfg-scale": 6.0, "negative-prompt": ""})
+    assert explicit["negative_prompt"] == ""
+    assert REF.reference_id(unguided, {}) != REF.reference_id(guided, {})
