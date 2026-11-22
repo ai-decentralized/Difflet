@@ -956,6 +956,25 @@ def _build_parser() -> argparse.ArgumentParser:
     _add_serve_profile_flags(serve)
     _add_serve_flags(serve)
 
+    gateway = sub.add_parser(
+        "gateway",
+        help="One endpoint routing by model to several `difflet serve` backends, one per device",
+    )
+    gateway.add_argument(
+        "gateway_action",
+        choices=["serve", "up", "down", "status"],
+        help="serve: run the gateway; up/down: start/stop the fleet's backends; "
+        "status: print each backend's status",
+    )
+    gateway.add_argument(
+        "--config", required=True, help="Fleet file (example: examples/serving/fleet.yaml)"
+    )
+    gateway.add_argument(
+        "--api-key",
+        default=None,
+        help="Bearer token required on the gateway's /v1 routes (default: DIFFLET_API_KEY)",
+    )
+
     cache = sub.add_parser("cache", help="Inspect the compiled-artifact cache")
     cache.add_argument(
         "cache_action",
@@ -1500,6 +1519,13 @@ def main(argv: list[str] | None = None) -> None:
         from difflet.cli.cache_cmd import run_cache_command
 
         raise SystemExit(run_cache_command(args))
+
+    if args.command == "gateway":
+        # Before check_command_args: the gateway takes no --model-id.
+        from difflet.cli.gateway import run as run_gateway
+
+        run_gateway(args)
+        return
 
     check_command_args(args)
     from difflet.utils import bench_timing
