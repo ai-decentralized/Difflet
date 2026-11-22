@@ -29,6 +29,12 @@
 #
 # CPU_GATE_IMPORTS_REQUIRED (default 1): a failing scripts/test_imports.sh fails
 # the gate. Set it to 0 only to triage.
+#
+# CPU_GATE_SHARD=k/n runs shard k of n: tests/conftest.py collects only that shard's
+# tests/unit files (dealt by recorded run time, tests/_shard.py), the known-red and
+# neuron-skips ledgers are judged on those files alone, and pytest reports every test's
+# duration (--durations=0 --durations-min=0) so the logs can regenerate
+# scripts/cpu-gate-durations.txt.
 set -uo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -46,6 +52,22 @@ mkdir -p "$LOGDIR"
 ts="$(date +%Y%m%d-%H%M%S)"
 unit_only=0
 if [ "${1:-}" = "--unit-only" ]; then unit_only=1; shift; fi
+
+shard="${CPU_GATE_SHARD:-}"
+shard_args=()
+if [ -n "$shard" ]; then
+  shard_files="$("$PY" tests/_shard.py files "$shard")" || {
+    echo "cpu-gate: CPU_GATE_SHARD=$shard is not k/n with 1 <= k <= n" >&2
+    exit 2
+  }
+  shard_args=(--durations=0 --durations-min=0)
+fi
+# stdin: test ids, one per line; prints those whose file is in this shard (all when unsharded).
+in_shard() {
+  if [ -z "$shard" ]; then sed '/^$/d'; return; fi
+  awk 'NR == FNR { keep[$0]; next } { split($0, id, "::"); if (id[1] in keep) print }' \
+    <(printf '%s\n' "$shard_files") -
+}
 
 imports="skipped"
 if [ "$unit_only" -eq 0 ]; then
@@ -71,7 +93,8 @@ done
 # -rfEs: failures and errors must appear in the short summary, or the regression
 # diff below cannot see them (otherwise two failures can still report "regressions=0").
 "$PY" -m pytest tests/unit -q --tb=short -rfEs -p no:cacheprovider -p no:warnings \
-  --continue-on-collection-errors -n logical --dist loadfile "$@" > "$unit_log" 2>&1
+  --continue-on-collection-errors -n logical --dist loadfile "${shard_args[@]}" "$@" \
+  > "$unit_log" 2>&1
 summary="$(grep -E '^[0-9]+ (passed|failed)' "$unit_log" | tail -n 1 || true)"
 [ -n "$summary" ] || summary="$(tail -n 1 "$unit_log")"
 
@@ -80,9 +103,10 @@ known="$HERE/known-red.txt"
 # Anchor on "tests/": pytest's captured-log lines also start with "ERROR " and
 # would otherwise be mistaken for test ids.
 red_now="$(grep -E '^(FAILED|ERROR) tests/' "$unit_log" | sed -E 's/^(FAILED|ERROR) //; s/ - .*//' | sort -u)"
-unexpected="$(comm -23 <(printf '%s\n' "$red_now" | sed '/^$/d') <(sort -u "$known"))"
-fixed="$(comm -13 <(printf '%s\n' "$red_now" | sed '/^$/d') <(sort -u "$known"))"
-n_known="$(sed '/^$/d' "$known" | sort -u | wc -l | tr -d ' ')"
+known_ids="$(in_shard < "$known" | sort -u)"
+unexpected="$(comm -23 <(printf '%s\n' "$red_now" | sed '/^$/d') <(printf '%s\n' "$known_ids" | sed '/^$/d'))"
+fixed="$(comm -13 <(printf '%s\n' "$red_now" | sed '/^$/d') <(printf '%s\n' "$known_ids" | sed '/^$/d'))"
+n_known="$(printf '%s\n' "$known_ids" | sed '/^$/d' | wc -l | tr -d ' ')"
 n_fixed="$(printf '%s\n' "$fixed" | sed '/^$/d' | wc -l | tr -d ' ')"
 
 status=0
@@ -98,8 +122,9 @@ fi
 # model that lost "cpu" from its registration. It fails the gate; ledger it or fix it.
 skips_known="$HERE/neuron-skips.txt"
 [ -f "$skips_known" ] || : > "$skips_known"
-new_skips="$(comm -23 <(sort -u "$NEURON_GATE_REPORT") <(sort -u "$skips_known"))"
-gone_skips="$(comm -13 <(sort -u "$NEURON_GATE_REPORT") <(sort -u "$skips_known"))"
+skips_ids="$(in_shard < "$skips_known" | sort -u)"
+new_skips="$(comm -23 <(sort -u "$NEURON_GATE_REPORT") <(printf '%s\n' "$skips_ids" | sed '/^$/d'))"
+gone_skips="$(comm -13 <(sort -u "$NEURON_GATE_REPORT") <(printf '%s\n' "$skips_ids" | sed '/^$/d'))"
 n_gate="$(sed '/^$/d' "$NEURON_GATE_REPORT" | wc -l | tr -d ' ')"
 if [ -n "$new_skips" ]; then
   echo "NEURON-GATE DRIFT: newly skipped as Neuron-only (not in neuron-skips.txt):" >&2
@@ -118,5 +143,5 @@ if [ "$n_fixed" -gt 0 ]; then
   printf '%s\n' "$fixed" | head -n 20 >&2
 fi
 
-echo "cpu-gate: imports=$imports unit=[$summary] known_red=$n_known fixed=$n_fixed regressions=$(printf '%s\n' "$unexpected" | sed '/^$/d' | wc -l | tr -d ' ') neuron_skips=$n_gate new_skips=$(printf '%s\n' "$new_skips" | sed '/^$/d' | wc -l | tr -d ' ') log=$unit_log"
+echo "cpu-gate: imports=$imports unit=[$summary] known_red=$n_known fixed=$n_fixed regressions=$(printf '%s\n' "$unexpected" | sed '/^$/d' | wc -l | tr -d ' ') neuron_skips=$n_gate new_skips=$(printf '%s\n' "$new_skips" | sed '/^$/d' | wc -l | tr -d ' ')${shard:+ shard=$shard} log=$unit_log"
 exit $status
