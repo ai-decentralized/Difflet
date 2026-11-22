@@ -93,7 +93,7 @@ def test_hv1_settings_are_the_device_runs(arm):
     assert float(flags["--guidance-scale"]) == b.GUIDANCE_SCALE
     assert "--negative-prompt" not in flags and "--true-cfg" not in flags
     _check_quant(flags, arm)
-    assert all((r["prompt"], r["seed"], r["steps"]) == (b.PROMPT, b.SEED, b.STEPS)
+    assert all((r["prompt"], r["seed"], r["steps"]) == (long["PROMPT"], b.SEED, b.STEPS)
                and "negative_prompt" not in r for r in requests)
 
 
@@ -184,6 +184,8 @@ def test_hv15_noise_is_the_devices_bf16_draw(monkeypatch):
     shape = (1, 32, (b.NUM_FRAMES - 1) // VAE_TEMPORAL + 1, b.HEIGHT // VAE_SPATIAL,
              b.WIDTH // VAE_SPATIAL)
     assert shape == b.LATENT_SHAPE
+    if torch.__version__ < "2.13":
+        return  # older torch draws bf16 by another law (scripts/fp32_ref/_common.device_noise)
     bf16 = torch.bfloat16
     assert torch.equal(noise, randn_tensor(shape, generator=_gen(), device=torch.device("cpu"),
                                            dtype=bf16).float())
