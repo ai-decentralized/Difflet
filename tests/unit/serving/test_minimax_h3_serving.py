@@ -214,7 +214,8 @@ def test_validator_refuses_a_prompt_longer_than_the_bucket(tmp_path):
 # --------------------------------------------------------------------------- media
 
 
-@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="needs an ffmpeg binary")
+@pytest.mark.skipif(minimax_h3._bundled_ffmpeg() is None and shutil.which("ffmpeg") is None,
+                    reason="needs an ffmpeg binary")
 def test_write_av_mp4_muxes_a_stereo_track_into_the_parent_target(tmp_path):
     torch = pytest.importorskip("torch")
     pytest.importorskip("av")
