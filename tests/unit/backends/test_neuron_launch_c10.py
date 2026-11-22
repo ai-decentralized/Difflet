@@ -658,7 +658,8 @@ def test_main_apply_backend_flags_rejects_exec_mode_for_aot(monkeypatch, capsys)
 
 def test_main_attention_flag_parses_and_defaults_to_none():
     assert _parse_main(["generate", "--model-id", "x"]).attention is None
-    assert _parse_main(["compile", "--model-id", "x", "--attention", "const-max"]).attention == "const-max"
+    args = _parse_main(["compile", "--model-id", "x", "--attention", "const-max"])
+    assert args.attention == "const-max"
     with pytest.raises(SystemExit):
         _parse_main(["generate", "--model-id", "x", "--attention", "sparse"])
 
