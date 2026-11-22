@@ -1,0 +1,49 @@
+# One `difflet serve` backend per Neuron device behind one `difflet gateway`.
+# docs/serving/gateway.md explains every field. Start: difflet gateway up --config <this file>
+gateway: {host: 0.0.0.0, port: 8000}
+runs_dir: /mnt/nvme/difflet-fleet/runs   # <runs_dir>/<slug>/: cwd, serve.pid, serve.out, logs/
+models:
+  - model_id: black-forest-labs/FLUX.1-dev
+    slug: flux
+    device: 0
+    port: 8100
+    cache_dir: /mnt/nvme/difflet-fleet/cache/flux
+    env: {HF_HUB_CACHE: /mnt/nvme/difflet-quant-bench-hub}
+    serve_args: [--tp-degree, "4", --height, "1024", --width, "1024", --worker-restart-timeout, "7200"]
+  - model_id: Qwen/Qwen-Image
+    slug: qwen
+    device: 1
+    port: 8101
+    cache_dir: /mnt/nvme/difflet-fleet/cache/qwen
+    env: {HF_HUB_CACHE: /mnt/nvme/difflet-quant-bench-hub}
+    serve_args: [--tp-degree, "4", --height, "1024", --width, "1024", --worker-restart-timeout, "7200"]
+  - model_id: Wan-AI/Wan2.1-T2V-14B-Diffusers
+    slug: wan
+    device: 2
+    port: 8102
+    cache_dir: /mnt/nvme/difflet-fleet/cache/wan
+    serve_args: [--tp-degree, "4", --height, "480", --width, "832", --num-frames, "81",
+                 --worker-restart-timeout, "7200"]
+  - model_id: hunyuanvideo-community/HunyuanVideo
+    slug: hunyuan-video
+    device: 3
+    port: 8103
+    cache_dir: /mnt/nvme/difflet-fleet/cache/hunyuan-video
+    env: {HF_HUB_CACHE: /mnt/nvme/difflet-quant-bench-hub}
+    serve_args: [--tp-degree, "4", --height, "320", --width, "512", --num-frames, "61",
+                 --worker-restart-timeout, "7200"]
+  - model_id: Lightricks/LTX-2
+    slug: ltx-2
+    device: 4
+    port: 8104
+    cache_dir: /mnt/nvme/difflet-fleet/cache/ltx-2
+    serve_args: [--tp-degree, "4", --height, "512", --width, "768", --num-frames, "121",
+                 --worker-restart-timeout, "7200"]
+  - model_id: MiniMaxAI/MiniMax-H3
+    slug: minimax-h3
+    device: 5
+    port: 8105
+    cache_dir: /mnt/nvme/difflet-fleet/cache/minimax-h3
+    env: {HF_HUB_CACHE: /mnt/nvme/h3-neuron-port/hf-cache}
+    serve_args: [--tp-degree, "4", --height, "256", --width, "448", --num-frames, "124",
+                 --worker-restart-timeout, "7200"]
