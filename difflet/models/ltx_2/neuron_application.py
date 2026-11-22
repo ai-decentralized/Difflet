@@ -37,8 +37,10 @@ whose branches run on the two CFG groups. STG and modality guidance need extra t
 kwargs no Difflet LTX-2 DiT takes (``supports_ltx_2_extra_kwargs`` is False, as on Trainium),
 so the orchestrator refuses them.
 
-Phase 1 limits, each rejected in ``__init__``: one static shape, batch 1, no TeaCache, no DP
-within one application.
+Phase 1 limits, each rejected in ``__init__``: one static shape, batch 1, no adaptive TeaCache
+(the probe-free modes, ``teacache_cadence`` and ``teacache_online_delta_alpha``, run: the
+orchestrator decides on the host and skips every DiT forward of a skipped step), no DP within
+one application.
 
 Timing hooks (for the benchmark): ``step_hook`` is called with no arguments once per denoise
 iteration, after the audio scheduler step that ends it; ``transformer_adapter.forward_hook`` is
@@ -107,12 +109,11 @@ _KWARG_DEFAULTS: dict[str, Any] = {
     "quant": None,
     "quant_checkpoint": None,
 }
+#: Refused: the adaptive modes, which need a block-0 probe the neuron DiT does not have.
 _TEACACHE_KWARGS = (
     "teacache_speedup",
     "teacache_calibration",
     "teacache_calibration_path",
-    "teacache_cadence",
-    "teacache_online_delta_alpha",
 )
 #: The orchestrator's default step count when the call names none.
 _DEFAULT_STEPS = 4
@@ -542,6 +543,8 @@ class TorchNeuronLtx2Application(TorchNeuronModelApplication):
             num_frames=self.shape["num_frames"],
             text_seq_len=self.text_seq_len,
             frame_rate=self.frame_rate,
+            teacache_cadence=self.options["teacache_cadence"],
+            teacache_online_delta_alpha=self.options["teacache_online_delta_alpha"],
         )
         self._check_orchestrator_geometry(pipeline)
         return pipeline
