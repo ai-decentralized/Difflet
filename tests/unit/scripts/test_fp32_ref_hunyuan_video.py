@@ -48,17 +48,23 @@ def test_settings_are_the_orchestrators():
 @pytest.mark.parametrize("script", ["run_bf16_arms.sh", "run_loo.sh"])
 def test_settings_are_the_device_command_lines(script):
     """Both arms' launch scripts (bf16; V15, the shipped MXFP8 default): the model, revision,
-    shape, steps, guidance, seed and prompt the reference copies, and no negative prompt."""
+    shape, steps, guidance and seed the reference copies, and no negative prompt. (Those runs used
+    the fox prompt; the reference now follows the bench recipe's, see test_prompt_is_the_recipes.)"""
     path = _RUNS / script
     if not path.is_file():
         pytest.skip(f"no device run script {path} on this host")
     text = path.read_text()
     for words in (f"--model-id {ref.MODEL_ID}", f"REV={ref.REVISION}",
                   f"--height {ref.HEIGHT} --width {ref.WIDTH} --num-frames {ref.NUM_FRAMES}",
-                  f"--steps {ref.STEPS} --guidance-scale {ref.GUIDANCE_SCALE} --seed {ref.SEED}",
-                  f'--prompt "{ref.PROMPT}"'):
+                  f"--steps {ref.STEPS} --guidance-scale {ref.GUIDANCE_SCALE} --seed {ref.SEED}"):
         assert words in text
     assert "--negative-prompt" not in text and "--true-cfg" not in text
+
+
+def test_prompt_is_the_recipes():
+    from difflet.bench.recipe import load_recipes
+
+    assert ref.PROMPT == load_recipes()["hunyuan_video"].args["prompt"]
 
 
 def test_vae_tiles_are_the_device_decoders():

@@ -45,7 +45,7 @@ HEIGHT, WIDTH, NUM_FRAMES = 320, 512, 61
 STEPS, SEED = 50, 42
 #: ``--guidance-scale 6.0``: the distilled DiT's embedded guidance (x 1000 in the pipeline).
 GUIDANCE_SCALE = 6.0
-PROMPT = "a cinematic shot of a red fox running through a snowy forest"
+PROMPT = "a cat walking through a garden"
 #: research device_settings.negative_prompt: no negative prompt, so no true CFG.
 TRUE_CFG_SCALE = 1.0
 #: The Llama prompt length the device encodes at (the orchestrator's ``_TEXT_SEQ_LEN``).

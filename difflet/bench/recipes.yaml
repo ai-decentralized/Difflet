@@ -102,7 +102,6 @@ hunyuan_video:
     num-frames: 61
     tp-degree: 4
     guidance-scale: 6.0
-    prompt: a cinematic shot of a red fox running through a snowy forest
 
 hunyuan_video_15:
   description: the host-CPU bf16 encode depends on the thread count (48 and 96 give different clips)
