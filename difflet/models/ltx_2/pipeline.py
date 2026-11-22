@@ -536,8 +536,11 @@ class LTX2Orchestrator:
         use_cross_timestep: bool,
         attention_kwargs: dict[str, Any] | None,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        latents = bundle.hidden_states
-        audio_latents = bundle.audio_hidden_states
+        # The scheduler state, x0/velocity and guidance math stay fp32 (as diffusers' LTX2Pipeline
+        # keeps them); only the DiT input is rounded to the model dtype. In bf16 the early
+        # shifted-schedule steps (dt ~0.003) lose ~40% of each update to rounding.
+        latents = bundle.hidden_states.float()
+        audio_latents = bundle.audio_hidden_states.float()
         dump_latents("initial_video", latents)
         dump_latents("initial_audio", audio_latents)
         step_timer = StepTimer.from_env()

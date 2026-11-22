@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 import torch
 
-from difflet.models.ltx_2.application import LTX2DiTInputBundle
+from difflet.models.ltx_2.contract import LTX2DiTInputBundle
 from difflet.models.ltx_2.pipeline import (
     LTX2Orchestrator,
     LTX2PipelineOutput,
@@ -828,3 +828,17 @@ def test_ltx_2_dit_gets_the_timestep_in_its_declared_dtype(tmp_path, declared, e
     sent = torch.stack([call.timestep[0] for call in transformer.calls])
     assert sent.dtype == expected
     assert torch.equal(sent.float(), exact.to(expected).float())
+
+
+def test_ltx_2_host_state_stays_fp32_while_the_dit_gets_bf16(tmp_path):
+    """bf16 initial latents are carried in fp32 between steps (as diffusers' LTX2Pipeline does);
+    only the DiT input is rounded to the model dtype."""
+    transformer = _Bf16Transformer()
+    with pytest.warns(RuntimeWarning, match="scheduler_config.json"):
+        pipeline = LTX2Orchestrator(model_path=str(tmp_path), transformer=transformer, dtype=torch.bfloat16,
+                                    height=64, width=96, num_frames=17, audio_num_frames=4)
+    bundle = _bundle(torch.randn(1, 6, 128).bfloat16(), torch.randn(1, 4, 128).bfloat16())
+    output = pipeline(bundle=bundle, timesteps=torch.tensor([989.7009, 500.3]))
+    assert output.latents.dtype == torch.float32
+    assert output.audio_latents.dtype == torch.float32
+    assert all(call.hidden_states.dtype == torch.bfloat16 for call in transformer.calls)
