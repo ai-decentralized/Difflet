@@ -501,13 +501,14 @@ def test_vae_exec_mode_with_host_vae_is_refused(monkeypatch, tmp_path, capsys, m
 # ----------------------------------------------------------------- driver-side rejection
 
 _REJECTED = [
-    (dict(teacache_cadence=2), "--teacache-cadence"),
-    (dict(teacache_online_delta=0.6), "--teacache-online-delta"),
     (dict(teacache_speedup=1.5, teacache_calibration="c.json"),
      "--teacache-speedup, --teacache-calibration"),
     (dict(shapes="1024x1024,768x1360"), "--shapes with more than one shape"),
+    # The probe-free TeaCache flags run on the ranks: not named beside what is refused.
     (dict(sp_enabled=True, cfg_parallel=True, shapes="1024x1024, 512x512 ,",
-          teacache_cadence=3), "--teacache-cadence, --shapes with more than one shape"),
+          teacache_cadence=3), "--shapes with more than one shape"),
+    (dict(shapes="1024x1024,512x512", teacache_online_delta=0.6),
+     "--shapes with more than one shape"),
 ]
 
 
@@ -535,8 +536,8 @@ def test_neuron_driver_rejects_unsupported_options_before_any_launch(monkeypatch
     assert out == ""
     assert err.strip() == (
         f"Error: the neuron backend does not support {named} (it runs tensor, sequence, "
-        "context and CFG parallelism at one static shape, and DP replicas, no TeaCache); "
-        "nothing was launched.")
+        "context and CFG parallelism at one static shape, DP replicas, and TeaCache by "
+        "--teacache-cadence or --teacache-online-delta only); nothing was launched.")
     assert "DIFFLET_COMPILE_CACHE" not in os.environ
     assert not (tmp_path / "work").exists()
 
@@ -892,7 +893,8 @@ def test_dp_replica_stops_together_on_a_failed_request(tmp_path):
 ])
 def test_stage_generate_neuron_hands_unsupported_options_on(neuron_stage, tmp_path, overrides,
                                                             parallel, app_extra):
-    # Not dropped silently: the backend rejects cfg/sp, the application TeaCache.
+    # Not dropped silently: the backend rejects cfg/sp, the application adaptive TeaCache;
+    # the probe-free TeaCache kwargs are the ones it runs.
     args = _qwen_args(stage_mode="compile", cache_dir=str(tmp_path), **overrides)
     QwenImageOrchestrator(args)._stage_generate(args)
     kw = neuron_stage.CALLS[0]["kwargs"]
@@ -1432,6 +1434,25 @@ def test_main_generate_backend_neuron_reaches_the_torchrun_launch(monkeypatch, t
 
 
 @pytest.mark.parametrize("flag", [["--teacache-cadence", "2"],
+                                  ["--teacache-online-delta", "0.6"]])
+def test_main_generate_backend_neuron_launches_with_probe_free_teacache(monkeypatch, tmp_path,
+                                                                        flag):
+    cli_main = importlib.import_module("difflet.cli.main")  # the package exports main()
+
+    _unset(monkeypatch, *_CACHE_ENV, "NEURON_RT_NUM_CORES")
+    _backend(monkeypatch, None)
+    launches = _record_launches(monkeypatch)
+    cli_main.main(["generate", "--model-id", _QWEN_ID, "--backend", "neuron",
+                   "--total-cores", "4", "--prompt", "a fox", "--output",
+                   str(tmp_path / "o.png"), "--cache-dir", str(tmp_path / "cache"),
+                   "--work-dir", str(tmp_path / "work"), *flag])
+
+    [(cmd, _env)] = launches
+    assert cmd[cmd.index("--stage") + 1] == "generate"
+    assert cmd[cmd.index(flag[0]) + 1] == flag[1]  # the ranks' application takes it from here
+
+
+@pytest.mark.parametrize("flag", [["--teacache-speedup", "1.5", "--teacache-calibration", "c.json"],
                                   ["--shapes", "1024x1024,768x1360"]])
 def test_main_generate_backend_neuron_rejects_before_any_launch(monkeypatch, tmp_path, capsys,
                                                                 flag):
@@ -1617,6 +1638,36 @@ def test_cfg_parallel_without_true_cfg_is_refused_before_any_launch(monkeypatch,
     assert capsys.readouterr().err.strip() == (
         "Error: --cfg-parallel splits the two branches of true classifier-free guidance; "
         "Qwen-Image runs them only with --true-cfg-scale > 1; nothing was launched.")
+
+
+@pytest.mark.parametrize("teacache", [dict(teacache_cadence=2), dict(teacache_online_delta=0.6)])
+@pytest.mark.parametrize("mode", ["generate", "run"])
+def test_true_cfg_with_teacache_is_refused_before_any_launch(monkeypatch, tmp_path, capsys,
+                                                             mode, teacache):
+    # The ranks' orchestrator raises on this pair, but only at the first request, after the load.
+    _backend(monkeypatch, "neuron")
+    monkeypatch.setattr(qwen_mod.runner, "run_stage",
+                        lambda *a, **k: pytest.fail("no stage may be launched"))
+    monkeypatch.setattr(QwenImageOrchestrator, "download",
+                        lambda self: pytest.fail("rejected before the download"))
+    args = _qwen_args(true_cfg_scale=4.0, work_dir=str(tmp_path / "w"), **teacache)
+    with pytest.raises(SystemExit) as exc:
+        getattr(QwenImageOrchestrator(args), mode)()
+    assert exc.value.code == 2
+    assert capsys.readouterr().err.strip() == (
+        "Error: --true-cfg-scale > 1 does not combine with TeaCache for Qwen-Image (true "
+        "classifier-free guidance runs two forwards per step); nothing was launched.")
+
+
+def test_compile_and_unguided_generate_take_teacache_with_a_true_cfg_scale(monkeypatch,
+                                                                           tmp_path):
+    # compile runs no denoise loop; --true-cfg-scale 1.0 is true CFG off.
+    _backend(monkeypatch, "neuron")
+    stages, _ = _record_stages(monkeypatch)
+    QwenImageOrchestrator(_qwen_args(true_cfg_scale=4.0, teacache_cadence=2)).compile()
+    QwenImageOrchestrator(_qwen_args(true_cfg_scale=1.0, teacache_cadence=2,
+                                     work_dir=str(tmp_path / "w"))).generate()
+    assert stages == [("generate", 4), ("generate", 4)]
 
 
 def test_cfg_parallel_with_cp_is_refused(monkeypatch, tmp_path, capsys):
