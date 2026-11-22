@@ -393,9 +393,10 @@ def write_av_mp4(video, audio, sample_rate: int, path: str | Path, *, fps: int):
             handle.setsampwidth(2)
             handle.setframerate(int(sample_rate))
             handle.writeframes(pcm.tobytes())
-        ffmpeg = shutil.which("ffmpeg")
+        ffmpeg = shutil.which("ffmpeg") or _bundled_ffmpeg()
         if ffmpeg is None:
-            raise RuntimeError("MiniMax-H3 serving needs an ffmpeg binary on PATH to mux audio")
+            raise RuntimeError("MiniMax-H3 serving needs an ffmpeg binary on PATH (or the "
+                               "imageio-ffmpeg package) to mux audio")
         # Into the parent's pre-created target, in place (the file must stay the same inode).
         muxed = Path(temp) / "av.mp4"
         subprocess.run([ffmpeg, "-hide_banner", "-loglevel", "error", "-y", "-i", str(silent),
@@ -408,6 +409,17 @@ def write_av_mp4(video, audio, sample_rate: int, path: str | Path, *, fps: int):
                         expected_height=int(video.shape[-2]),
                         expected_num_frames=int(video.shape[2]), expected_fps=fps,
                         require_silent=False)
+
+
+def _bundled_ffmpeg() -> str | None:
+    """The ffmpeg binary of imageio-ffmpeg (a declared dependency), for hosts without one on
+    PATH."""
+    try:
+        import imageio_ffmpeg
+
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except (ImportError, RuntimeError):
+        return None
 
 
 def request_should_stop(context) -> bool:
