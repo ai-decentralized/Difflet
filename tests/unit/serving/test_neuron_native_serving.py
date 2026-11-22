@@ -167,6 +167,20 @@ def test_profile_options_native_serving_does_not_run(on_neuron, field, value):
         native.refuse_unsupported_profile(profile, native._spec("wan"))
 
 
+@pytest.mark.parametrize("model_id", NATIVE_IDS)
+def test_default_profiles_pass_the_refusals(on_neuron, model_id):
+    profile = _profile(model_id)  # HunyuanVideo's defaults CLIP to "host"
+
+    native.refuse_unsupported_profile(profile, native._spec(profile.model_type))
+
+
+def test_device_clip_placement_is_refused(on_neuron):
+    profile = dataclasses.replace(_profile(HV), clip_placement="neuron")
+
+    with pytest.raises(DiffletServingError, match="clip-placement"):
+        native.refuse_unsupported_profile(profile, native._spec("hunyuan_video"))
+
+
 def test_validator_refuses_guidance_scale_2_for_wan21(on_neuron, monkeypatch):
     profile = _profile(WAN21)
     runtime = SimpleNamespace(profile=profile, source=SimpleNamespace(pinned_model_path="/none"))
