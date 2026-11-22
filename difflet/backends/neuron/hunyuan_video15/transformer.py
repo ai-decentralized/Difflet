@@ -232,7 +232,8 @@ def _install_constmax_sigma(model) -> None:
     """Experiment E1 (``DIFFLET_EXP_ATTN_CONSTMAX=1``): each block's joint attention whose layer
     passes the table's gap rule carries its score sigma as a non-persistent ``[128, 1]`` buffer for
     the neuron backend's const-max route; the layers that fail it stay on attention_cte. Table:
-    ``attn_constmax.json`` beside this file, from ``scripts/attn_constmax/table_hv15.py``."""
+    ``attn_constmax.json`` beside this file, from
+    ``scripts/attn_constmax/table.py hunyuan_video_15``."""
     from pathlib import Path
 
     table = json.loads(Path(__file__).with_name("attn_constmax.json").read_text())["layers"]

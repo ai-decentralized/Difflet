@@ -1224,7 +1224,7 @@ class HunyuanVideoTransformer3DModel(nn.Module):
         # attention whose layer passes the table's gap rule carries its score sigma as a [128, 1]
         # buffer (a graph input, so each block class keeps one shared graph) for the neuron
         # backend's const-max route; the layers that fail it stay on attention_cte. Table:
-        # scripts/attn_constmax/table_hv1.py.
+        # scripts/attn_constmax/table.py hunyuan_video.
         if os.environ.get("DIFFLET_EXP_ATTN_CONSTMAX") == "1":
             table = json.loads(Path(__file__).with_name("attn_constmax.json").read_text())["layers"]
             for stack in ("transformer_blocks", "single_transformer_blocks"):

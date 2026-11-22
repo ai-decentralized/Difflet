@@ -203,7 +203,7 @@ def test_hv15_noise_is_the_devices_bf16_draw(monkeypatch):
 ])
 @pytest.mark.parametrize("arm", ARMS)
 def test_latents_layout_is_the_device_files(model, shape, dtype, arm):
-    """The final latents score.sh compares the reference's latents.pt with."""
+    """The final latents a scorer compares the reference's latents.pt with."""
     path = RUNS / model / arm / "work" / "worker_0" / "latents_req0001.pt"
     if not path.is_file():
         pytest.skip(f"no device latents {path} on this host")

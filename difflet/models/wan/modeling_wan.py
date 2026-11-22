@@ -479,7 +479,7 @@ def _attn_kernel(
 def add_constmax_sigma_(model: nn.Module, model_path) -> int:
     """Experiment E1 (evidence at 3f674fd2), opt-in with
     ``DIFFLET_EXP_ATTN_CONSTMAX=1``: each self-attention (``attn1``) whose layer passes the gap
-    rule of its expert's table (``attn_constmax.json``, scripts/attn_constmax/table_wan.py) carries
+    rule of its expert's table (``attn_constmax.json``, scripts/attn_constmax/table.py wan) carries
     its score sigma as a non-persistent [128, 1] buffer, which ``_attn_kernel`` hands the neuron
     backend's const-max route; the other layers (the allowlist) and every cross-attention stay on
     attention_cte. The table is the one whose "<revision>/<expert dir>" key ``model_path`` (hub

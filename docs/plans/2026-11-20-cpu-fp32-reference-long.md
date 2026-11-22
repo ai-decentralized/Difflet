@@ -10,8 +10,8 @@ against a diffusers fp32 run on the host CPU at the shapes and settings of the d
 hunyuan_video_15}_long.py`, each the short script with the long settings below (the short scripts,
 their settings and noise md5s are unchanged); `_wan.py` takes the model card's negative prompt
 from bench.sh, checks an optional `noise_md5` and counts two DiT forwards per step under CFG;
-`scripts/attn_constmax/score.sh` scores any model (mp4 for the video ones), takes `SCORES` and
-prints the worst frame; `scripts/fp32_ref/run_long_queue.sh` runs the queue.
+`scripts/fp32_ref/run_long_queue.sh` runs the queue. (The campaign's scorer,
+`scripts/attn_constmax/score.sh`, was removed with its other one-off scripts; it is at `c72c0485`.)
 `tests/unit/scripts/test_fp32_ref_long.py` checks every setting against each arm's command line
 and request lines, the noise, Wan 2.2's expert split and the device latents' layout.
 
@@ -20,6 +20,8 @@ and request lines, the noise, Wan 2.2's expert split and the device latents' lay
 Device files: `R = /mnt/nvme/difflet-exp/constmax-models`; `cmd` is the timed run's command line
 (`R/wan2x/<arm>/timed.cmd.txt:1`; HV1 and HV1.5 `R/<model>/<arm>/timed.log`, the
 `Command being timed` line), `req` is `R/<model>/<arm>/requests.jsonl:1-2`; all four arms agree.
+The arm scripts cited below (`arms_wan.sh`, `hv1_arms.sh`, `hv15_arms.sh`, under
+`scripts/attn_constmax/`) were removed with the campaign's one-off scripts; they are at `c72c0485`.
 
 | model | setting | value | device source |
 |---|---|---|---|
@@ -102,21 +104,21 @@ nohup $WT/scripts/fp32_ref/run_long_queue.sh 1 > /mnt/nvme/difflet-exp/fp32_ref_
 The queue is HV1, Wan 2.1, Wan 2.2, HV1.5: the two workers take HV1 and Wan 2.1 first. Each run
 writes `/mnt/nvme/difflet-exp/fp32_ref_long/<key>/` (`env.txt`, `run.log` with one line per step,
 `/usr/bin/time -v`'s peak RSS at its end, `run.json` with `timings.steps_s`, `latents.pt`,
-`out.mp4`, `out.pt`); `progress.txt` logs starts, exits and scores.
+`out.mp4`, `out.pt`); `progress.txt` logs starts and exits.
 
 ## Scoring
 
-After each reference the worker runs, and by hand:
+Score a device run against a reference on the CPU with `scripts/compare_difflet_runs.py`:
 
 ```bash
-cd /mnt/nvme/difflet-exp/fp32_ref_long/src && ROOT=/mnt/nvme/difflet-exp/constmax-models \
-  REF=/mnt/nvme/difflet-exp/fp32_ref_long/<key> SCORES=/mnt/nvme/difflet-exp/fp32_ref_long/<key>/scores \
-  nice -n 19 scripts/attn_constmax/score.sh <model> <cpus> A B C D
+R=/mnt/nvme/difflet-exp/fp32_ref_long/<key>
+TORCH_DEVICE_BACKEND_AUTOLOAD=0 python scripts/compare_difflet_runs.py \
+  --ref-image $R/out.mp4 --ref-latents $R/latents.pt \
+  --cand-image <run>/warm_2.mp4 --cand-latents <run>/work/worker_0/latents_req0001.pt \
+  --out <run>_vs_fp32.json
 ```
 
-with `<key>` / `<model>` = `wan21_long` / `wan21`, `wan22_long` / `wan22`, `hunyuan_video_long` /
-`hunyuan_video`, `hunyuan_video_15_long` / `hunyuan_video_15`. Each arm's `warm_2.mp4` and
-`work/worker_0/latents_req0001.pt` (the timed run's second request) is compared with the
-reference's `out.mp4` and `latents.pt`: `<arm>_vs_fp32.json` (PSNR frame mean and worst, SSIM,
-LPIPS, latent cosine and rel L2), plus B, C, D against A. The device campaign's own `scores/` are
-not touched.
+with `<key>` = `wan21_long`, `wan22_long`, `hunyuan_video_long` or `hunyuan_video_15_long`, and
+`<run>` a generate's work directory (its second request's output and final latents). It reports
+video PSNR (frame mean and worst), SSIM, LPIPS, and latent cosine and rel L2. The const-max
+campaign scored its arms A-D this way through `scripts/attn_constmax/score.sh` (at `c72c0485`).

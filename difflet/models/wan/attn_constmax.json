@@ -2,7 +2,7 @@
  "reference_sk": 32760,
  "d": 128,
  "gap_limit": 80.0,
- "generator": "scripts/attn_constmax/table_wan.py",
+ "generator": "scripts/attn_constmax/table.py",
  "rule": "softmax_max = 0.88 * sigma * sqrt(2 ln Sk); per call: max over heads",
  "tables": {
   "38ec498c/transformer": {
