@@ -82,6 +82,18 @@ def test_worker_cli_args_forward_torch_compile():
     assert "--torch-compile" not in worker_cli_args(_args())  # an older namespace
 
 
+def test_worker_cli_args_forward_vae_cores():
+    # HunyuanVideo 1.5: a worker without it decodes on the transformer stage's cores.
+    argv = worker_cli_args(_args(vae_cores=1))
+    assert argv[argv.index("--vae-cores") + 1] == "1"
+    assert "--vae-cores" not in worker_cli_args(_args(vae_cores=None))
+    assert "--vae-cores" not in worker_cli_args(_args())  # an older namespace
+    from difflet.cli.main import _build_parser
+
+    worker = _build_parser().parse_args(["generate", *argv, "--requests-dir", "r"])
+    assert worker.vae_cores == 1
+
+
 def test_check_hbm_skips_when_weights_missing(monkeypatch, capsys):
     from difflet.cli.dp import router as router_mod
 
