@@ -30,6 +30,7 @@ BASE=/mnt/nvme/difflet-exp/constmax-models  # 11-18: arm A's requests and the ca
 OUT=${OUT:-/mnt/nvme/difflet-exp/arm-e}
 PY=${PY:-$HOME/venvs/native-fp8/bin/python}
 Q=(--quant mxfp8 --attention const-max) G=() EXT=mp4 STEPS=50 TC_STEPS=14 PROMPT=
+HUB=/mnt/nvme/difflet-quant-bench-hub
 # A: arm A's directory; C: the cache; T: timeouts of compile, a smoke, timed
 case $MODEL in
   qwen_image) M=(--model-id Qwen/Qwen-Image --height 1024 --width 1024 --tp-degree 4)
@@ -41,12 +42,14 @@ case $MODEL in
   wan21) M=(--model-id Wan-AI/Wan2.1-T2V-14B-Diffusers
             --revision 38ec498cb3208fb688890f8cc7e94ede2cbd7f68
             --height 480 --width 832 --num-frames 81 --tp-degree 4)
-    G=(--guidance-scale 5.0) A=A C=wan-cache T=(2h 20m 40m) ;;
+    G=(--guidance-scale 5.0) A=A C=wan-cache T=(2h 20m 40m)
+    # 11-18's hub: the bf16 copy's manifest, and so the MXFP8 digest, holds the source's path
+    HUB=$HOME/.cache/huggingface/hub ;;
   wan22) M=(--model-id Wan-AI/Wan2.2-T2V-A14B-Diffusers
             --revision 5be7df9619b54f4e2667b2755bc6a756675b5cd7
             --dual-expert --height 480 --width 832 --num-frames 81 --tp-degree 4)
     G=(--guidance-scale 4.0 --guidance-scale-2 3.0) A=A C=wan-cache STEPS=40 TC_STEPS=20
-    T=(2h 20m 40m) ;;
+    T=(2h 20m 40m) HUB=$HOME/.cache/huggingface/hub ;;
   hunyuan_video) M=(--model-id hunyuanvideo-community/HunyuanVideo
                     --revision e8c2aaa66fe3742a32c11a6766aecbf07c56e773
                     --height 544 --width 960 --num-frames 129 --tp-degree 4)
@@ -113,7 +116,7 @@ else
 fi
 
 export PATH=/opt/aws_neuronx_venv_torch_neuronx_2_14_0/bin:/opt/aws/neuron/bin:$PATH
-export HF_HUB_OFFLINE=1 HF_HUB_CACHE=${HF_HUB_CACHE:-/mnt/nvme/difflet-quant-bench-hub}
+export HF_HUB_OFFLINE=1 HF_HUB_CACHE=${HF_HUB_CACHE:-$HUB}
 export NEURON_RT_VISIBLE_CORES=$CORES NEURON_NUMA_PIN=0 PYTHONPATH=$SRC
 # the 11-18 scripts' list, and the CPU-only jobs' switch: exported by a caller, it would keep
 # torch from loading the neuron backend
