@@ -27,18 +27,31 @@ from pathlib import Path
 import pytest
 
 
-def _load(filename: str, name: str):
-    path = Path(__file__).with_name(filename)
+def _load(path: Path, name: str):
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-_gate = _load("_neuron_gate.py", "difflet_tests_neuron_gate")
+_HERE = Path(__file__).parent
+_gate = _load(_HERE / "_neuron_gate.py", "difflet_tests_neuron_gate")
 NEURON_AVAILABLE = _gate.neuron_available()
-_shard = _load("_shard.py", "difflet_tests_shard")
+_shard = _load(_HERE / "_shard.py", "difflet_tests_shard")
 _SHARD_FILES = _shard.shard_files(os.environ.get("CPU_GATE_SHARD"))
+
+# A host without torch_neuronx that is not a trn instance cannot name its Neuron platform
+# target, and modules that resolve it at import (difflet.models.flux.modeling_flux) raise
+# there unless NEURON_PLATFORM_TARGET_OVERRIDE is set. Several test modules set it to trn2 at
+# import, and that leaked into every module the same process collected after them, so a
+# module could pass only because another one was collected (CI shard 1 of 3 had none).
+# Default it here, to the same trn2, before any module is collected. Loaded by path: the
+# package's __init__ would import the whole neuron backend.
+_platform = _load(_HERE.parent / "difflet/backends/neuron/ops_impl/platform.py",
+                  "difflet_tests_platform")
+if (importlib.util.find_spec("torch_neuronx") is None
+        and _platform._target_from_instance_type(_platform._read_product_name()) is None):
+    os.environ.setdefault(_platform.PLATFORM_OVERRIDE_ENV, "trn2")
 
 if not NEURON_AVAILABLE:
     collect_ignore = list(_gate.NEURON_COLLECT_IGNORE)
