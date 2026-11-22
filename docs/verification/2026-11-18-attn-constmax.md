@@ -1,6 +1,7 @@
 # E1: nkilib `attention_const_max` (bf16) at model level, FLUX.1-dev then LTX-2 (trn3)
 
-Plan: `docs/plans/2026-11-18-attn-constmax-sparse-experiments.md`, section E1. Branch
+Plan: `docs/plans/2026-11-18-attn-constmax-sparse-experiments.md`, section E1 (removed from the
+tree; at `0f43e1a8`). Branch
 `exp/attn-constmax-sparse`. Prior evidence: `docs/verification/2026-11-13-dit-block-profile.md`
 section 12 on `feat/mxfp8-sage-attention` (kernel level: 0.617x the rebalanced cte at
 `flux_1024`, 1.5-2.1x its error on flat inputs, 7.5-8x peaked, overflow at x4).
@@ -282,8 +283,8 @@ Every number below is **measured** on this host unless it is marked *inferred* o
   arms ran back to back on one device and one CPU set. Both bf16 arms reproduce their evidence
   bit for bit: FLUX `67da9e98` at 220.5 vs 221.6 ms, LTX-2 `0702ffd2` at 1282.6 vs 1283.9 ms.
 - **Results-doc name.** The plan names one doc for E1 and E2
-  (`2026-11-18-attn-constmax-sparse.md`). E1 is here, as the task asked; E2 writes
-  `2026-11-18-attn-block-sparse.md`.
+  (`2026-11-18-attn-constmax-sparse.md`). E1 is here, as the task asked; E2 wrote
+  `2026-11-18-attn-block-sparse.md` (removed with the block-sparse code; at `0f43e1a8`).
 - **The mxfp8 + const-max ratio against mxfp8 alone is cross-session** (evidence B1), not
   measured here.
 

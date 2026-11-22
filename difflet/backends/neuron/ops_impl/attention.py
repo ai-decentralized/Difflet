@@ -62,7 +62,7 @@ _RING_KERNEL = os.environ.get(RING_KERNEL_ENV, "1").strip() != "0"
 #: The longest per-rank sequence the NKI Library documents its ring kernel as tested at.
 _RING_KERNEL_MAX_SEQ = 16384
 
-#: Experiment E1 (docs/plans/2026-11-18-attn-constmax-sparse-experiments.md), opt-in:
+#: Experiment E1 (docs/verification/2026-11-18-attn-constmax.md), opt-in:
 #: ``DIFFLET_EXP_ATTN_CONSTMAX=1`` sends unbounded, non-causal, bf16, d = 128 kernel calls that
 #: carry their layer's score sigma (``constmax_sigma``, a [128, 1] tensor from the model's
 #: committed table) to nkilib's experimental ``attention_const_max``; such calls with key-prefix

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Experiment E1 model-level arms (docs/plans/2026-11-18-attn-constmax-sparse-experiments.md): one
+# Experiment E1 model-level arms (docs/verification/2026-11-18-attn-constmax.md): one
 # arm's compile (untimed; loads and warms up) or its timed generate (one process, two identical
 # requests; report.py's warm step is the second request's DiT step median), with
 # scripts/quant_bench/bench.sh's flags per model. Unlike bench.sh, each arm keeps its own cache
