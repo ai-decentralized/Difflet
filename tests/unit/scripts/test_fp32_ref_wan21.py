@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -36,7 +37,7 @@ SNAPSHOT = (Path.home() / ".cache/huggingface/hub/models--Wan-AI--Wan2.1-T2V-14B
 
 
 def _research() -> dict:
-    if not RESEARCH.is_file():
+    if not os.path.isfile(RESEARCH):
         pytest.skip(f"no phase G research {RESEARCH} on this host")
     objects = [o for o in json.loads(RESEARCH.read_text())
                if o["device_settings"]["model_id"] == S["model_id"]]
@@ -63,7 +64,7 @@ def test_settings_are_the_research_device_settings():
 def test_settings_are_the_device_command_lines(command):
     """Each scored run's flags, and no --guidance-scale / --negative-prompt: the CLI's
     guidance 1.0 and no negative prompt are what the device ran."""
-    if not command.is_file():
+    if not os.path.isfile(command):
         pytest.skip(f"no device command {command} on this host")
     text = command.read_text()
     assert f"--model-id {S['model_id']}" in text
@@ -81,7 +82,7 @@ def test_text_length_is_the_clis():
 def test_snapshot_is_one_expert_at_the_devices_flow_shift():
     """What the device loaded from the snapshot: no boundary_ratio (so one expert, one DiT
     forward per step at guidance 1.0) and the snapshot's UniPC at flow shift 3.0."""
-    if not SNAPSHOT.is_dir():
+    if not os.path.isdir(SNAPSHOT):
         pytest.skip(f"no snapshot {SNAPSHOT} on this host")
     from difflet.models.wan.experts import has_low_noise_expert, read_boundary_ratio
 

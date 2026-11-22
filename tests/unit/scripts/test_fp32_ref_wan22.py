@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 from collections import Counter
 from pathlib import Path
 
@@ -35,13 +36,13 @@ SNAPSHOT = (Path.home() / ".cache/huggingface/hub/models--Wan-AI--Wan2.2-T2V-A14
 
 
 def _snapshot() -> Path:
-    if not SNAPSHOT.is_dir():
+    if not os.path.isdir(SNAPSHOT):
         pytest.skip(f"no snapshot {SNAPSHOT} on this host")
     return SNAPSHOT
 
 
 def test_settings_are_the_research_device_settings():
-    if not RESEARCH.is_file():
+    if not os.path.isfile(RESEARCH):
         pytest.skip(f"no phase G research {RESEARCH} on this host")
     objects = [o for o in json.loads(RESEARCH.read_text())
                if o["device_settings"]["model_id"] == S["model_id"]]
@@ -63,7 +64,7 @@ def test_settings_are_the_research_device_settings():
 def test_settings_are_the_device_command_line():
     """Both experts, the shape and request flags, and no --guidance-scale(-2) /
     --negative-prompt: the CLI's guidance 1.0 on both experts and no negative prompt."""
-    if not COMMAND.is_file():
+    if not os.path.isfile(COMMAND):
         pytest.skip(f"no device command {COMMAND} on this host")
     text = COMMAND.read_text()
     assert f"--model-id {S['model_id']} --dual-expert" in text

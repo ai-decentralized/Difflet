@@ -13,6 +13,9 @@ one of the three exact Neuron-less signatures is reported as skipped with the re
 Trainium host sees every failure. Nothing is hidden on either kind of host: the
 skip count and reasons are in the summary (``-rs``), and the gate prints its state
 in the header.
+
+With ``CPU_GATE_SHARD=k/n`` only shard k of the ``tests/unit`` files is collected
+(``tests/_shard.py``); CI runs the trainium-native suite as three shards.
 """
 
 from __future__ import annotations
@@ -24,16 +27,31 @@ from pathlib import Path
 import pytest
 
 
-def _load_neuron_gate():
-    path = Path(__file__).with_name("_neuron_gate.py")
-    spec = importlib.util.spec_from_file_location("difflet_tests_neuron_gate", path)
+def _load(path: Path, name: str):
+    spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
 
 
-_gate = _load_neuron_gate()
+_HERE = Path(__file__).parent
+_gate = _load(_HERE / "_neuron_gate.py", "difflet_tests_neuron_gate")
 NEURON_AVAILABLE = _gate.neuron_available()
+_shard = _load(_HERE / "_shard.py", "difflet_tests_shard")
+_SHARD_FILES = _shard.shard_files(os.environ.get("CPU_GATE_SHARD"))
+
+# A host without torch_neuronx that is not a trn instance cannot name its Neuron platform
+# target, and modules that resolve it at import (difflet.models.flux.modeling_flux) raise
+# there unless NEURON_PLATFORM_TARGET_OVERRIDE is set. Several test modules set it to trn2 at
+# import, and that leaked into every module the same process collected after them, so a
+# module could pass only because another one was collected (CI shard 1 of 3 had none).
+# Default it here, to the same trn2, before any module is collected. Loaded by path: the
+# package's __init__ would import the whole neuron backend.
+_platform = _load(_HERE.parent / "difflet/backends/neuron/ops_impl/platform.py",
+                  "difflet_tests_platform")
+if (importlib.util.find_spec("torch_neuronx") is None
+        and _platform._target_from_instance_type(_platform._read_product_name()) is None):
+    os.environ.setdefault(_platform.PLATFORM_OVERRIDE_ENV, "trn2")
 
 if not NEURON_AVAILABLE:
     collect_ignore = list(_gate.NEURON_COLLECT_IGNORE)
@@ -46,6 +64,20 @@ def pytest_report_header(config):
         f"neuron gate: active — {len(_gate.NEURON_COLLECT_IGNORE)} Trainium-only test modules "
         "not collected; Neuron-only failures reported as skips (see tests/_neuron_gate.py)"
     )
+
+
+def pytest_ignore_collect(collection_path, config):
+    # CPU_GATE_SHARD=k/n (scripts/cpu-gate.sh, CI): only shard k's tests/unit files are
+    # collected, so the others are not even imported (tests/_shard.py).
+    if _SHARD_FILES is None or not collection_path.name.startswith("test_"):
+        return None
+    try:
+        name = collection_path.resolve().relative_to(_shard.ROOT).as_posix()
+    except ValueError:
+        return None
+    if collection_path.suffix != ".py" or not name.startswith("tests/unit/"):
+        return None
+    return True if name not in _SHARD_FILES else None
 
 
 @pytest.hookimpl(hookwrapper=True)

@@ -35,7 +35,8 @@ jobs:
     # Shown as e.g. "trainium-aot-unit-test (py3.12, torch 2.9)": the stack (one per backend's
     # lock), its Python and its torch. A job name cannot read the lock, so `torch` is spelled
     # out below and the "Torch version in the job name" step fails when the lock moves on.
-    name: ${{ matrix.stack }}-unit-test (py${{ matrix.python-version }}, torch ${{ matrix.torch }})
+    # A sharded stack adds its shard: "trainium-native-unit-test (py3.14, torch 2.14, shard 1/3)".
+    name: ${{ matrix.stack }}-unit-test (py${{ matrix.python-version }}, torch ${{ matrix.torch }}${{ matrix.shard && format(', shard {0}/{1}', matrix.shard, matrix.shards) || '' }})
     runs-on: ubuntu-latest
     timeout-minutes: 45
     strategy:
@@ -58,12 +59,31 @@ jobs:
             torch: "2.11"
             lock: requirements-cuda.lock
             pytest-args: --ignore-glob=tests/unit/backends/test_neuron_* --ignore=tests/unit/quant
+          # The native suite holds ~88% of the CPU time (tests/unit/backends/test_neuron_*),
+          # ~21 min on one 4-CPU runner; three shards, each a third of the files by recorded
+          # run time (tests/_shard.py, scripts/cpu-gate-durations.txt), run in parallel.
+          # The e2e pins compare sha256 hashes keyed to this exact torch build, so this is
+          # the only stack where they run, and they are stale: the hashes move with the host's
+          # thread count and vector ISA, and the Qwen-Image ones predate c9f4009 (the
+          # padded-prompt mask). Left out until they compare reference tensors instead;
+          # every other torch build skips them anyway, as main's CI always did.
           - stack: trainium-native
-            # The e2e pins compare sha256 hashes keyed to this exact torch build, so this is
-            # the only job where they run, and they are stale: the hashes move with the host's
-            # thread count and vector ISA, and the Qwen-Image ones predate c9f4009 (the
-            # padded-prompt mask). Left out until they compare reference tensors instead;
-            # every other torch build skips them anyway, as main's CI always did.
+            shard: 1
+            shards: 3
+            pytest-args: --ignore=tests/unit/backends/test_neuron_e2e_pins.py
+            python-version: "3.14"
+            torch: "2.14"
+            lock: requirements-neuron-native.lock
+          - stack: trainium-native
+            shard: 2
+            shards: 3
+            pytest-args: --ignore=tests/unit/backends/test_neuron_e2e_pins.py
+            python-version: "3.14"
+            torch: "2.14"
+            lock: requirements-neuron-native.lock
+          - stack: trainium-native
+            shard: 3
+            shards: 3
             pytest-args: --ignore=tests/unit/backends/test_neuron_e2e_pins.py
             python-version: "3.14"
             torch: "2.14"
@@ -116,11 +136,12 @@ jobs:
         env:
           PYTHON_BIN: python
           CPU_GATE_LOGDIR: ${{ runner.temp }}/cpu-gate
+          CPU_GATE_SHARD: ${{ matrix.shard && format('{0}/{1}', matrix.shard, matrix.shards) || '' }}
         run: scripts/cpu-gate.sh ${{ matrix.pytest-args }}
 
       - name: Upload gate logs
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: cpu-gate-logs-${{ matrix.stack }}-py${{ matrix.python-version }}
+          name: cpu-gate-logs-${{ matrix.stack }}-py${{ matrix.python-version }}${{ matrix.shard && format('-shard{0}', matrix.shard) || '' }}
           path: ${{ runner.temp }}/cpu-gate
