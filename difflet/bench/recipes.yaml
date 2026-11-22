@@ -135,3 +135,10 @@ hunyuan_video_15:
     width: 848
     num-frames: 121
 
+
+wan22_official:
+  description: wan22 at 480x832, the official-settings shape measured on device on 11-08 (D2); the card's 720x1280 has not run on neuron
+  extends: wan22
+  args:
+    height: 480
+    width: 832
