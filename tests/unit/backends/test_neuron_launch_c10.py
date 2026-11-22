@@ -656,6 +656,52 @@ def test_main_apply_backend_flags_rejects_exec_mode_for_aot(monkeypatch, capsys)
     assert "DIFFLET_EXEC_MODE" not in os.environ
 
 
+def test_main_attention_flag_parses_and_defaults_to_none():
+    assert _parse_main(["generate", "--model-id", "x"]).attention is None
+    assert _parse_main(["compile", "--model-id", "x", "--attention", "const-max"]).attention == "const-max"
+    with pytest.raises(SystemExit):
+        _parse_main(["generate", "--model-id", "x", "--attention", "sparse"])
+
+
+@pytest.mark.parametrize("attention, ambient, want", [
+    ("const-max", None, "1"),  # the flag exports it
+    ("cte", "1", None),        # an explicit cte unsets an ambient value
+    (None, "1", "1"),          # no flag: the ambient value (experiment scripts) is kept
+    (None, None, None),        # no flag, nothing set: attention_cte
+])
+def test_main_apply_backend_flags_exports_attention(monkeypatch, attention, ambient, want):
+    from difflet.cli.main import _apply_backend_flags
+
+    _isolate_env(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE", "DIFFLET_EXP_ATTN_CONSTMAX")
+    if ambient is not None:
+        monkeypatch.setenv("DIFFLET_EXP_ATTN_CONSTMAX", ambient)
+
+    _apply_backend_flags(SimpleNamespace(backend="neuron", exec_mode=None, attention=attention,
+                                         model_id="black-forest-labs/FLUX.1-dev"))
+
+    assert os.environ.get("DIFFLET_EXP_ATTN_CONSTMAX") == want
+
+
+@pytest.mark.parametrize("backend, model_id, message", [
+    ("trainium", "black-forest-labs/FLUX.1-dev", "neuron backend only"),
+    ("neuron", "MiniMaxAI/MiniMax-H3", "no const-max table"),
+])
+def test_main_apply_backend_flags_refuses_const_max(monkeypatch, capsys, backend, model_id,
+                                                    message):
+    from difflet.cli.main import _apply_backend_flags
+
+    _isolate_env(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE", "DIFFLET_EXP_ATTN_CONSTMAX")
+
+    with pytest.raises(SystemExit) as exc:
+        _apply_backend_flags(SimpleNamespace(backend=backend, exec_mode=None,
+                                             attention="const-max", model_id=model_id))
+
+    assert exc.value.code == 2
+    assert message in capsys.readouterr().err
+    assert "DIFFLET_EXP_ATTN_CONSTMAX" not in os.environ
+    assert "DIFFLET_BACKEND" not in os.environ
+
+
 def test_main_exports_selection_before_orchestrator(monkeypatch, tmp_path):
     cli_main = _cli_main()
 
