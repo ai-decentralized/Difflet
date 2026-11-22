@@ -32,7 +32,24 @@ def test_load_example_fleet():
     assert [e.device for e in config.models] == list(range(len(config.models)))
     assert {e.kind for e in config.models} <= {"image", "video"}
     assert all(e.shapes for e in config.models)
+    assert all(e.estimate for e in config.models)  # every example backend was measured
     assert (config.host, config.port) == ("0.0.0.0", 8000)
+
+
+def test_estimate_loaded(tmp_path):
+    (entry,) = _load(tmp_path, _entry(estimate={"base_s": 1.5, "per_step_s": 0.3})).models
+    assert entry.estimate == (1.5, 0.3)
+    (entry,) = _load(tmp_path, _entry()).models
+    assert entry.estimate is None
+
+
+@pytest.mark.parametrize("estimate", [{"base_s": 1}, {"base_s": "x", "per_step_s": 1},
+                                      {"base_s": 1, "per_step_s": 0},
+                                      {"base_s": -1, "per_step_s": 1},
+                                      {"base_s": 1, "per_step_s": 1, "extra": 2}])
+def test_bad_estimate_rejected(tmp_path, estimate):
+    with pytest.raises(FleetConfigError, match="estimate"):
+        _load(tmp_path, _entry(estimate=estimate))
 
 
 def test_image_shape_from_height_width(tmp_path):

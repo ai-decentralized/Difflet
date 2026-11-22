@@ -19,7 +19,8 @@ from difflet.serving.model_registry import serving_output_modality
 #: Flags the launcher passes itself; an entry's serve_args must not repeat them.
 OWNED_FLAGS = ("--host", "--port", "--model-id", "--cache-dir")
 _TOP_FIELDS = {"gateway", "runs_dir", "models"}
-_ENTRY_FIELDS = {"model_id", "device", "port", "cache_dir", "serve_args", "slug", "env"}
+_ENTRY_FIELDS = {"model_id", "device", "port", "cache_dir", "serve_args", "slug", "env",
+                 "estimate"}
 _SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 
 #: (height, width, frames or None for an image model)
@@ -41,6 +42,9 @@ class FleetEntry:
     slug: str | None = None
     #: Extra environment for this backend (HF_HUB_CACHE, PYTHONPATH, ...).
     env: Mapping[str, str] = field(default_factory=dict, hash=False)
+    #: (base_s, per_step_s): a request takes about ``base_s + per_step_s * steps`` seconds on
+    #: this backend, measured; the page shows it. None: no estimate.
+    estimate: tuple[float, float] | None = None
 
     def __post_init__(self) -> None:
         if self.slug is None:
@@ -140,6 +144,15 @@ def _entry(raw: Any, where: str) -> FleetEntry:
         raise FleetConfigError(f"{where}.slug {slug!r} must be a plain directory name "
                                "(letters, digits, '.', '_', '-')")
     env = _mapping(raw.get("env", {}), f"{where}.env", None)
+    estimate = None
+    if raw.get("estimate") is not None:
+        est = _mapping(raw["estimate"], f"{where}.estimate", {"base_s", "per_step_s"})
+        try:
+            estimate = (float(est["base_s"]), float(est["per_step_s"]))
+        except (KeyError, TypeError, ValueError) as exc:
+            raise FleetConfigError(f"{where}.estimate needs numbers base_s and per_step_s") from exc
+        if estimate[0] < 0 or estimate[1] <= 0:
+            raise FleetConfigError(f"{where}.estimate: base_s >= 0 and per_step_s > 0")
     entry = FleetEntry(
         model_id=str(raw["model_id"]).rstrip("/"),
         device=_int(raw["device"], f"{where}.device", 0, 1023),
@@ -148,6 +161,7 @@ def _entry(raw: Any, where: str) -> FleetEntry:
         serve_args=args,
         slug=slug,
         env={str(k): str(v) for k, v in env.items()},
+        estimate=estimate,
     )
     try:
         kind = entry.kind
