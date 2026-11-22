@@ -45,10 +45,10 @@ template, `2026-11-18-attn-constmax.md` line 160, uses request 2's DiT step medi
 | Qwen-Image | 1024x1024, tp4, 50 steps; 6 x 5,120 x 128, key-bounded | 57 of 60 joint | 304.7 | **0.896** | 0.790 | **0.712** | 0.901 | 48.82 dB, 0.99993 (n/a: image) | 35.91 (36.34) dB | tp2 vs tp4 44.31 dB, but measured on the pre-`c9f4009` unmasked graph. No floor exists for the current graph (corrected). | CORRECTED | DONE |
 | FLUX.1-dev | 1024x1024, tp4, 50 steps; 6 x 4,608 x 128, unbounded | 57 of 57 | 222.6 | **0.903** | 0.834 | **0.742** | 0.889 | 41.40 dB, 0.99957 (n/a: image) | 23.31 (23.36) dB | tp2 vs tp4 29.4 dB; CPU bf16 vs fp32 21.47 dB | CORRECTED | DONE |
 | LTX-2 | 512x768x121, tp4, 50 steps; 8 x 6,144 x 128 (video attn1), unbounded | 45 of 48 video attn1; audio and cross-attn stay on cte | 1,287.1 | **0.948** | 0.757 | **0.695** | 0.919 | 27.63 dB, 0.99947 (25.33) | 16.54 (16.55) dB | tp2 vs tp4 25.9 dB (worst 23.6) | CORRECTED | DONE |
-| Wan 2.1 T2V 14B | 480x832x81, tp4, 50 steps, CFG 5.0 (2 forwards); 10 x 32,760 x 128, unbounded | 36 of 40 attn1, 72 calls per step; attn2 stays on cte | 10,107.5 | **0.813** | 0.981 | **0.793** | 0.809 | 22.21 dB, 0.96906 (21.87) | n/a: no fp32 reference at 81 frames | tp8 vs tp4 22.75 dB (worst 18.31), from host B | CONFIRMED | DONE |
-| Wan 2.2 T2V A14B | 480x832x81, tp4, 40 steps, CFG 4.0 / 3.0, two experts; 10 x 32,760 x 128, unbounded | 36 of 40 attn1 per expert, 72 calls per step | 10,115.2 | **0.813** | 0.981 | **0.793** | 0.808 | 12.31 dB, 0.89913 (11.77); fails the SSIM screen | n/a: no fp32 reference at 81 frames | tp8 vs tp4 14.83 dB (worst 13.74), host B, weak | CONFIRMED | DONE |
-| HunyuanVideo | 544x960x129, tp4, 50 steps, guidance 6.0; 6 x 67,576 x 128, key-bounded (hi 67,449) | 55 of 60 joint (19 of 20 dual, 36 of 40 single); on device, B's and D's routed NEFFs hold `attention_const_max` (auditor) | 18,485.6 | **0.4975** | 0.971 | **0.468** | 0.482 | 17.28 dB, 0.93291 (11.60) | n/a: no fp32 reference at this shape | none at this shape (bf16 tp2 runs out of HBM); 36.64 dB at 320x512x61 cannot resolve it | CORRECTED (3rd attempt) | DONE (3rd attempt; the first two timed no arm) |
-| HunyuanVideo-1.5 | 480x848x121, tp2 x CFG2, 50 steps, CFG 6.0; 8 x 51,275 x 128, key-bounded | 52 of 54 joint | 9,917.5 | **0.632** | 1.011 | **0.631** | 0.624 | 14.76 dB, 0.8744 (14.04) | n/a: no fp32 reference at this shape | 15.90 (worst 15.31) / 16.94 / 18.41 dB | CORRECTED | DONE |
+| Wan 2.1 T2V 14B | 480x832x81, tp4, 50 steps, CFG 5.0 (2 forwards); 10 x 32,760 x 128, unbounded | 36 of 40 attn1, 72 calls per step; attn2 stays on cte | 10,107.5 | **0.813** | 0.981 | **0.793** | 0.809 | 22.21 dB, 0.96906 (21.87) | 20.33 (20.15) dB, section 8 | tp8 vs tp4 22.75 dB (worst 18.31), from host B | CONFIRMED | DONE |
+| Wan 2.2 T2V A14B | 480x832x81, tp4, 40 steps, CFG 4.0 / 3.0, two experts; 10 x 32,760 x 128, unbounded | 36 of 40 attn1 per expert, 72 calls per step | 10,115.2 | **0.813** | 0.981 | **0.793** | 0.808 | 12.31 dB, 0.89913 (11.77); fails the SSIM screen | 10.87 (11.00) dB, section 8 | tp8 vs tp4 14.83 dB (worst 13.74), host B, weak | CONFIRMED | DONE |
+| HunyuanVideo | 544x960x129, tp4, 50 steps, guidance 6.0; 6 x 67,576 x 128, key-bounded (hi 67,449) | 55 of 60 joint (19 of 20 dual, 36 of 40 single); on device, B's and D's routed NEFFs hold `attention_const_max` (auditor) | 18,485.6 | **0.4975** | 0.971 | **0.468** | 0.482 | 17.28 dB, 0.93291 (11.60) | 17.53 (15.36) dB, section 8 | none at this shape (bf16 tp2 runs out of HBM); 36.64 dB at 320x512x61 cannot resolve it | CORRECTED (3rd attempt) | DONE (3rd attempt; the first two timed no arm) |
+| HunyuanVideo-1.5 | 480x848x121, tp2 x CFG2, 50 steps, CFG 6.0; 8 x 51,275 x 128, key-bounded | 52 of 54 joint | 9,917.5 | **0.632** | 1.011 | **0.631** | 0.624 | 14.76 dB, 0.8744 (14.04) | 14.55 (16.09) dB, section 8 | 15.90 (worst 15.31) / 16.94 / 18.41 dB | CORRECTED | DONE |
 
 Notes on the table:
 
@@ -496,3 +496,67 @@ the default call. Every verdict rests on one seed and one prompt.
   - CPU fp32 references: `/home/ubuntu/fp8-bench/fp32_ref/{qwen_image,flux,ltx_2}`;
   - FLUX CPU bf16 floor: `fp32_ref/flux_cpu_bf16/score.json`;
   - the other floors are the *evidence* sections cited in the lane docs.
+
+## 8. Against CPU fp32 at the campaign shapes (added 2026-11-21)
+
+The CPU fp32 references of the four long video models at the shapes and settings of the device arms
+(`docs/plans/2026-11-20-cpu-fp32-reference-long.md`: same prompt, negative prompt, CFG, steps, seed
+and initial noise, md5-asserted; only the dtype, fp32, and the device, CPU, differ). Scored with
+`scripts/attn_constmax/score.sh`: video PSNR (frame mean and worst frame), SSIM, LPIPS and latent
+cosine of each arm's warm request against the reference. Measured; one prompt and one seed each.
+
+**Wan 2.1 T2V 14B, 480x832x81, CFG 5.0, 50 steps** (reference wall time 15:57:51, 96 threads, nice 19)
+
+| arm | vs fp32 PSNR (worst frame) | SSIM | LPIPS | latent cos |
+|---|---|---|---|---|
+| A bf16 | 20.15 (18.25) | 0.675 | 0.187 | 0.9527 |
+| B bf16 + const-max | 20.33 (18.34) | 0.658 | 0.161 | 0.9573 |
+| C mxfp8 | 17.83 (15.60) | 0.551 | 0.241 | 0.9245 |
+| D mxfp8 + const-max | 17.82 (15.73) | 0.555 | 0.242 | 0.9257 |
+
+**Wan 2.2 T2V A14B, 480x832x81, CFG 4.0 / 3.0, 40 steps** (reference wall time 15:19:09, 96 threads, nice 19)
+
+| arm | vs fp32 PSNR (worst frame) | SSIM | LPIPS | latent cos |
+|---|---|---|---|---|
+| A bf16 | 11.00 (9.89) | 0.185 | 0.460 | 0.8433 |
+| B bf16 + const-max | 10.87 (10.06) | 0.177 | 0.477 | 0.8302 |
+| C mxfp8 | 12.41 (11.83) | 0.267 | 0.368 | 0.8983 |
+| D mxfp8 + const-max | 11.98 (11.64) | 0.235 | 0.390 | 0.8840 |
+
+**HunyuanVideo, 544x960x129, guidance 6.0, 50 steps** (reference wall time 22:49:19, 96 threads, nice 19)
+
+| arm | vs fp32 PSNR (worst frame) | SSIM | LPIPS | latent cos |
+|---|---|---|---|---|
+| A bf16 | 15.36 (10.73) | 0.714 | 0.424 | 0.8998 |
+| B bf16 + const-max | 17.53 (15.66) | 0.818 | 0.300 | 0.9424 |
+| C mxfp8 | 15.31 (10.51) | 0.718 | 0.417 | 0.8974 |
+| D mxfp8 + const-max | 15.29 (10.49) | 0.718 | 0.417 | 0.8972 |
+
+**HunyuanVideo-1.5, 480x848x121, CFG 6.0, 50 steps** (reference wall time 19:59:29, 96 threads, nice 19)
+
+| arm | vs fp32 PSNR (worst frame) | SSIM | LPIPS | latent cos |
+|---|---|---|---|---|
+| A bf16 | 16.09 (14.85) | 0.328 | 0.358 | 0.9156 |
+| B bf16 + const-max | 14.55 (14.06) | 0.261 | 0.440 | 0.8665 |
+| C mxfp8 | 12.52 (11.99) | 0.190 | 0.533 | 0.7653 |
+| D mxfp8 + const-max | 12.48 (12.04) | 0.193 | 0.542 | 0.7685 |
+
+Reading (measured numbers above; the readings are inferences from one prompt and one seed):
+
+- **Wan 2.1.** B is as close to fp32 as A (+0.18 dB, latent cos 0.957 vs 0.953). C and D are about
+  2.3 dB further: the MXFP8 linears, not const-max, move Wan 2.1 away from fp32. The earlier B vs A
+  gap (22.21 dB) is a different but equally close sample, not a loss.
+- **Wan 2.2.** Every arm is 10.9-12.4 dB from fp32, bf16 included: the 81-frame, two-expert,
+  CFG 4.0 / 3.0 trajectory diverges, so one sample cannot rank the arms (C even lands closer than
+  A). B and A agree within 0.13 dB.
+- **HunyuanVideo.** B is 2.2 dB closer to fp32 than A (worst frame +4.9 dB, cos 0.942 vs 0.900),
+  so the earlier "B is the outlier" against A was A's distance, not B's. D is no closer than C, so
+  the gain is not attributable to const-max from one sample. Reading: no loss.
+- **HunyuanVideo-1.5.** B is 1.5 dB further from fp32 than A (cos 0.867 vs 0.916), below the bf16
+  floor pairs (15.9-18.4 dB between two bf16 runs); C and D are about 3.6 dB further. It is the one
+  model with a possible const-max loss against fp32, smaller than MXFP8's, and one sample cannot
+  separate it from trajectory spread.
+- **All seven models.** Against fp32, const-max (B) is within 0.5 dB of bf16 (A) on Qwen-Image,
+  FLUX, LTX-2, Wan 2.1 and Wan 2.2, 2.2 dB closer on HunyuanVideo, and 1.5 dB further on
+  HunyuanVideo-1.5. On top of MXFP8 (D vs C) it is within 0.4 dB everywhere. A default change
+  would still need a multi-seed, multi-prompt set on the video models, HunyuanVideo-1.5 first.
