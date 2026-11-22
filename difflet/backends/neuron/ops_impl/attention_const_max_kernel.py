@@ -15,7 +15,7 @@
 # Difflet: forked from nkilib 2.14 (the copy bundled in aws_neuronx_venv_torch_neuronx_2_14_0:
 # torch-neuronx 2.14, nki 0.7.0), experimental/attention/attention_const_max.py, sha256
 # 4aa030f09121d3f3e26f664a7a6bc92a7cdb299fb73170a7e6eb3a02907d3d76 (experiment E1 for the
-# key-bounded models: docs/verification/2026-11-18-attn-constmax-kernel.md). Only the functions
+# key-bounded models; evidence at 3f674fd2). Only the functions
 # that change are copied (``attention_const_max``, ``_shard_inputs``,
 # ``_attention_const_max_compute``, ``attention_const_max_core``); every other helper is imported
 # from the installed upstream file. Added: the optional key-prefix bound ``key_bound``. Without it

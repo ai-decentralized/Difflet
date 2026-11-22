@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# LTX-2 lane of the const-max model sweep (docs/verification/2026-11-18-attn-constmax-ltx2.md):
+# LTX-2 lane of the const-max model sweep (evidence at 3f674fd2):
 # arms.sh's LTX-2 flags and modes, with the four arms A bf16, B bf16 + const-max, C --quant mxfp8,
 # D mxfp8 + const-max. Outputs under ROOT/ltx_2/<arm> (score.sh's layout); A and B reuse E1's
 # caches, C and D get their own.

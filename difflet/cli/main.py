@@ -565,8 +565,8 @@ def _add_backend_flags(p: argparse.ArgumentParser) -> None:
         help="DiT attention kernel on --backend neuron (default: cte, nkilib attention_cte). "
         "'const-max': nkilib attention_const_max with each layer's committed score bound for "
         "the layers its table allows (the rest stay on cte); 0.50-0.95x the DiT step on the "
-        "seven DiTs, quality checked on FLUX, LTX-2 and Qwen-Image only "
-        "(docs/verification/2026-11-18-attn-constmax-all-models.md). Pass it to compile and "
+        "seven DiTs; against CPU fp32 within bf16's distance except HunyuanVideo-1.5 "
+        "(-1.5 dB), one prompt and seed per model. Pass it to compile and "
         f"generate alike. Exported as {CONSTMAX_ENV} to every stage.",
     )
 

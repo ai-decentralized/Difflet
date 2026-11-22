@@ -494,7 +494,7 @@ class _LTX2TransformerTraceModule(nn.Module):
                 self.tp_rank_util,
                 reduce_dtype=config_reduce_dtype(config),
             )
-        # Experiment E1 (docs/verification/2026-11-18-attn-constmax.md): each video
+        # Experiment E1 (evidence at 3f674fd2): each video
         # self-attention whose layer passes the table's gap rule carries its score sigma as a
         # [128, 1] buffer for the neuron backend's const-max route; the layers that fail it (the
         # per-layer allowlist) stay on attention_cte. Table: scripts/attn_constmax/table.py.

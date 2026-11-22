@@ -1,4 +1,4 @@
-"""Experiment E1 (docs/verification/2026-11-18-attn-constmax.md): the per-layer
+"""Experiment E1 (evidence at 3f674fd2): the per-layer
 softmax_max table for nkilib's ``attention_const_max``, from the checkpoint's QK-RMSNorm weights.
 
 This is ``/mnt/nvme/difflet-mxattn/probe/constmax/bounds.py`` (section 12 of
