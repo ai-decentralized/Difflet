@@ -130,6 +130,8 @@ class NeuronHunyuanVideo15TransformerApplication(TorchNeuronApplicationBase):
 
     def build_module(self) -> torch.nn.Module:
         model = _tensor_signature_model()(**self.model_config)
+        if os.environ.get("DIFFLET_EXP_ATTN_CONSTMAX") == "1":
+            _install_constmax_sigma(model)
         if self.tp > 1:
             _install_tensor_parallel(model, self.tp, sp=self.sp)
         if self.cp > 1:
@@ -226,6 +228,26 @@ class NeuronHunyuanVideo15TransformerApplication(TorchNeuronApplicationBase):
             out.contiguous(), 0, collectives.get_cfg_group())
 
 
+def _install_constmax_sigma(model) -> None:
+    """Experiment E1 (``DIFFLET_EXP_ATTN_CONSTMAX=1``): each block's joint attention whose layer
+    passes the table's gap rule carries its score sigma as a non-persistent ``[128, 1]`` buffer for
+    the neuron backend's const-max route; the layers that fail it stay on attention_cte. Table:
+    ``attn_constmax.json`` beside this file, from
+    ``scripts/attn_constmax/table.py hunyuan_video_15``."""
+    from pathlib import Path
+
+    table = json.loads(Path(__file__).with_name("attn_constmax.json").read_text())["layers"]
+    for i, block in enumerate(model.transformer_blocks):
+        row = table[f"transformer_blocks.{i}.attn"]
+        if row["ok"]:
+            block.attn.register_buffer("constmax_sigma", torch.full((128, 1), row["sigma"]), persistent=False)
+
+
+def _constmax_kwargs(attn) -> dict:
+    sigma = getattr(attn, "constmax_sigma", None)
+    return {} if sigma is None else {"constmax_sigma": sigma}
+
+
 def _joint_qkv(attn, hidden_states, encoder_hidden_states, image_rotary_emb):
     """diffusers' HunyuanVideo15AttnProcessor2_0 up to the attention: projections, QK norms, rotary
     on the image stream; ``[B, H, S, d]`` (this rank's heads) for image and text."""
@@ -289,7 +311,8 @@ class _JointBoundedProcessor:
         valid = attention_mask.to(torch.int32).sum(dim=1) + n  # [B]
         hi = valid.view(b, 1, 1).expand(b, h, s).reshape(b * h, s, 1).to(torch.int32)
         out = attention(q, k, v, scale=q.shape[-1] ** -0.5, causal=False,
-                        bound_min=torch.zeros_like(hi), bound_max=hi, tp_q=True, tp_k=True, tp_out=False)
+                        bound_min=torch.zeros_like(hi), bound_max=hi, tp_q=True, tp_k=True, tp_out=False,
+                        **_constmax_kwargs(attn))
         out = out.reshape(b, h, s, -1)
         return _joint_out(attn, out[:, :, :n], out[:, :, n:], hidden_states.dtype)
 
@@ -319,7 +342,8 @@ class _JointGatherKvProcessor:
         valid = attention_mask.to(torch.int32).sum(dim=1) + n
         hi = valid.view(b, 1, 1).expand(b, h, s_q).reshape(b * h, s_q, 1).to(torch.int32)
         out = attention(qq, kk, vv, scale=q.shape[-1] ** -0.5, causal=False,
-                        bound_min=torch.zeros_like(hi), bound_max=hi, tp_q=True, tp_k=True, tp_out=False)
+                        bound_min=torch.zeros_like(hi), bound_max=hi, tp_q=True, tp_k=True, tp_out=False,
+                        **_constmax_kwargs(attn))
         out = out.reshape(b, h, s_q, -1)
         return _joint_out(attn, out[:, :, :n_local], out[:, :, n_local:], hidden_states.dtype)
 

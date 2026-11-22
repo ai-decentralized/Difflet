@@ -15,6 +15,7 @@ clamp then (x + 1) / 2 in the same fp32 arithmetic).
 from __future__ import annotations
 
 import argparse
+import shlex
 import time
 from collections import Counter
 from pathlib import Path
@@ -28,6 +29,17 @@ from difflet.pipeline.path_resolver import resolve_model_path
 from scripts.fp32_ref import _common
 
 EXPERTS = ("transformer", "transformer_2")
+#: Where the device runs took the model cards' negative prompts from (their arm script,
+#: scripts/attn_constmax/arms_wan.sh, removed and kept at 618365c3, evals its lines).
+BENCH_SH = Path(__file__).resolve().parents[1] / "quant_bench" / "bench.sh"
+
+
+def card_negative_prompt(name: str) -> str:
+    """bench.sh's ``<name>='...'`` (``WAN21_NEG`` / ``WAN22_NEG``), the bytes the device passed."""
+    for line in BENCH_SH.read_text(encoding="utf-8").splitlines():
+        if line.startswith(f"{name}="):
+            return shlex.split(line.split("=", 1)[1])[0]
+    raise KeyError(f"{name} is not set in {BENCH_SH}")
 
 
 def reference_noise(settings: dict, snapshot) -> torch.Tensor:
@@ -41,6 +53,9 @@ def reference_noise(settings: dict, snapshot) -> torch.Tensor:
     if not torch.equal(noise, device):
         raise AssertionError(f"the injected noise {tuple(noise.shape)} is not the device's draw "
                              f"{tuple(device.shape)} (seed {settings['seed']}, fp32)")
+    md5 = settings.get("noise_md5")
+    if md5 is not None and _common.tensor_md5(noise) != md5:
+        raise AssertionError(f"initial noise md5 {_common.tensor_md5(noise)} is not {md5}")
     return noise
 
 
@@ -93,7 +108,7 @@ class _StepRecorder:
 def generate(pipe, settings: dict, steps: int, noise: torch.Tensor):
     """One device request through the fp32 pipeline: the decoded frames (F, H, W, 3) float
     [0, 1], the final latents, the per-step seconds, the decode seconds and the DiT forwards
-    each expert ran (counted by hooks: the evidence for no CFG and for the expert switch)."""
+    each expert ran (counted by hooks: the evidence for the CFG forwards and the expert switch)."""
     forwards: Counter = Counter()
     for name in EXPERTS:
         model = getattr(pipe, name, None)
@@ -148,9 +163,10 @@ def main(key: str, settings: dict, dit_forwards: dict, argv=None) -> int:
           f"{args.threads} threads", flush=True)
     frames, latents, step_s, decode_s, forwards = generate(pipe, settings, args.steps, noise)
     _check_outputs(frames, latents, settings)
-    if sum(forwards.values()) != args.steps:
-        raise RuntimeError(f"{forwards} DiT forwards over {args.steps} steps: the device ran one "
-                           f"per step (guidance {settings['guidance_scale']}, no CFG)")
+    per_step = 2 if settings["guidance_scale"] > 1.0 else 1  # CFG: cond + uncond, as the device
+    if sum(forwards.values()) != per_step * args.steps:
+        raise RuntimeError(f"{forwards} DiT forwards over {args.steps} steps: the device ran "
+                           f"{per_step} per step (guidance {settings['guidance_scale']})")
     if args.steps == settings["steps"] and forwards != dit_forwards:
         raise RuntimeError(f"DiT forwards per expert {forwards}, the device ran {dit_forwards}")
     _common.save_run(
@@ -160,7 +176,7 @@ def main(key: str, settings: dict, dit_forwards: dict, argv=None) -> int:
         noise_md5=_common.tensor_md5(noise),
         timings={"load_s": load_s, "steps_s": step_s, "decode_s": decode_s,
                  "wall_s": time.perf_counter() - started},
-        fps=_common.DEVICE_FPS[key])
+        fps=_common.DEVICE_FPS[key.removesuffix("_long")])
     print(f"[fp32-ref] {key}: wrote {args.out_dir} in {time.perf_counter() - started:.0f} s",
           flush=True)
     return 0

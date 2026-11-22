@@ -22,8 +22,11 @@
 # Fork date: 2026-05-08
 # Modifications: (none — verbatim copy; see git log for divergence)
 # <<< NxDI fork banner <<<
+import json
 import logging
 import math
+import os
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 import numpy as np
@@ -116,7 +119,7 @@ def _sp_unbias(x: torch.Tensor, row_linear: nn.Module) -> torch.Tensor:
     return x - (tp - 1) * bias.to(x.dtype)
 
 
-def attention_wrapper_sharded_without_swap(query, key, value):
+def attention_wrapper_sharded_without_swap(query, key, value, constmax_sigma=None):
     """
     Attention wrapper using NKI attention_cte kernel.
 
@@ -125,6 +128,9 @@ def attention_wrapper_sharded_without_swap(query, key, value):
 
     Uses tp_q=True, tp_k=True to let the kernel handle transposes internally
     for better performance (optimized DMA transpose).
+
+    ``constmax_sigma`` (experiment E1, ``DIFFLET_EXP_ATTN_CONSTMAX=1`` only): the layer's
+    [128, 1] score sigma, passed on to the backend's const-max route.
     """
     bs, n_head, q_len, d_head = query.shape
     k_len = key.shape[2]
@@ -146,6 +152,7 @@ def attention_wrapper_sharded_without_swap(query, key, value):
         tp_q=True,  # Q is (batch, seqlen, d)
         tp_k=True,  # K is (batch, seqlen, d) - kernel transposes internally
         tp_out=False,  # Output is (batch, seqlen, d)
+        **({} if constmax_sigma is None else {"constmax_sigma": constmax_sigma}),
     )
 
     attn_output = attn_output.reshape((bs, n_head, q_len, d_head))
@@ -324,6 +331,18 @@ class NeuronFluxTransformer2DModel(torch.nn.Module):
                 for i in range(self.config.num_single_layers)
             ]
         )
+        # Experiment E1 (evidence at 713d53d9): each attention
+        # whose layer passes the table's gap rule carries its score sigma as a [128, 1] buffer (a
+        # graph input, so each block class keeps one shared graph); the neuron backend's const-max
+        # route reads it. Table: scripts/attn_constmax/table.py.
+        if os.environ.get("DIFFLET_EXP_ATTN_CONSTMAX") == "1":
+            table = json.loads(Path(__file__).with_name("attn_constmax.json").read_text())["layers"]
+            for stack in ("transformer_blocks", "single_transformer_blocks"):
+                for i, block in enumerate(getattr(self, stack)):
+                    row = table[f"{stack}.{i}.attn"]
+                    if row["ok"]:
+                        block.attn.register_buffer("constmax_sigma", torch.full((128, 1), row["sigma"]),
+                                                   persistent=False)
 
         # this might be different to DiT, this is not AdaLayerNormZero.
         # The key difference is in the initialization strategy.
@@ -1421,7 +1440,8 @@ class NeuronFluxAttention(nn.Module):
             # Already ran SDPA in the single_trasformer_block, context parallel attention case above.
             # Use the NKI flash attention kernel wrapper for the remaining cases (non-Trn1).
             if not self.context_parallel_enabled or encoder_hidden_states is not None:
-                hidden_states = attention_wrapper_sharded_without_swap(query, key, value)
+                hidden_states = attention_wrapper_sharded_without_swap(
+                    query, key, value, getattr(self, "constmax_sigma", None))
 
         hidden_states = hidden_states.transpose(1, 2).reshape(batch_size, -1, self.heads * head_dim)
         if query is not None:

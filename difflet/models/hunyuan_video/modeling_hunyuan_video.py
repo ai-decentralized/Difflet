@@ -7,8 +7,11 @@ under ``difflet.backends.trainium``.
 
 from __future__ import annotations
 
+import json
 import math
+import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import torch
@@ -550,6 +553,7 @@ class HunyuanVideoAttention(nn.Module):
                 context_v,
                 attention_mask=attention_mask,
                 scale=1.0 / math.sqrt(self.head_dim),
+                constmax_sigma=getattr(self, "constmax_sigma", None),  # experiment E1
             )
         hidden_states = hidden_states.flatten(2, 3).to(latent_q.dtype)
         encoder_hidden_states = encoder_hidden_states.flatten(2, 3).to(latent_q.dtype)
@@ -1216,6 +1220,19 @@ class HunyuanVideoTransformer3DModel(nn.Module):
                 for _ in range(num_single_layers)
             ]
         )
+        # Experiment E1 (evidence at 713d53d9): each joint
+        # attention whose layer passes the table's gap rule carries its score sigma as a [128, 1]
+        # buffer (a graph input, so each block class keeps one shared graph) for the neuron
+        # backend's const-max route; the layers that fail it stay on attention_cte. Table:
+        # scripts/attn_constmax/table.py hunyuan_video.
+        if os.environ.get("DIFFLET_EXP_ATTN_CONSTMAX") == "1":
+            table = json.loads(Path(__file__).with_name("attn_constmax.json").read_text())["layers"]
+            for stack in ("transformer_blocks", "single_transformer_blocks"):
+                for i, block in enumerate(getattr(self, stack)):
+                    row = table[f"{stack}.{i}.attn"]
+                    if row["ok"]:
+                        block.attn.register_buffer("constmax_sigma", torch.full((128, 1), row["sigma"]),
+                                                   persistent=False)
         self.norm_out = AdaLayerNormContinuous(
             inner_dim, inner_dim, elementwise_affine=False, eps=1e-6
         )
@@ -1401,6 +1418,7 @@ def dual_stream_attention(
     *,
     attention_mask: torch.Tensor | None = None,
     scale: float | None = None,
+    constmax_sigma: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """HunyuanVideo joint attention over latent and context streams.
 
@@ -1412,6 +1430,9 @@ def dual_stream_attention(
     Under context parallelism the latent query is sharded across CP ranks while
     the latent K/V have already been gathered to the full sequence, so the latent
     query length may be shorter than the latent K/V length (``q_len != kv_len``).
+
+    ``constmax_sigma`` (experiment E1, ``DIFFLET_EXP_ATTN_CONSTMAX=1`` only): the layer's
+    ``[128, 1]`` score sigma, passed on to the backend's attention only when given.
     """
     _check_stream_shapes(context_q, context_k, context_v, name="context")
     # latent K/V must match each other; latent Q may be a shorter shard (CP), so
@@ -1449,6 +1470,7 @@ def dual_stream_attention(
     k_flat = k.permute(0, 2, 1, 3).reshape(batch * heads, kv_len, head_dim)
     v_flat = v.permute(0, 2, 1, 3).reshape(batch * heads, kv_len, head_dim)
     mask_flat = _flatten_attention_mask(attention_mask, batch=batch, heads=heads)
+    constmax = {} if constmax_sigma is None else {"constmax_sigma": constmax_sigma}
 
     if mask_flat is not None:
         # Route the contiguous (right-padded) key-padding mask to attention_cte's
@@ -1472,6 +1494,7 @@ def dual_stream_attention(
             tp_q=True,
             tp_k=True,
             tp_out=False,
+            **constmax,
         )
     else:
         out = attention(
@@ -1483,6 +1506,7 @@ def dual_stream_attention(
             tp_q=True,
             tp_k=True,
             tp_out=False,
+            **constmax,
         )
     out = out.reshape(batch, heads, q_len, head_dim).permute(0, 2, 1, 3)
     return out[:, :q_latent_seq], out[:, q_latent_seq:]

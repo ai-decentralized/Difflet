@@ -519,6 +519,21 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
     _add_teacache_flags(p)
 
 
+ATTENTION_CHOICES = ("cte", "const-max")
+#: The env var the neuron attention and the models read for --attention const-max.
+CONSTMAX_ENV = "DIFFLET_EXP_ATTN_CONSTMAX"
+#: Models with committed const-max tables (one per DiT; Wan: one per expert).
+CONSTMAX_MODELS = frozenset({
+    "black-forest-labs/FLUX.1-dev",
+    "Qwen/Qwen-Image",
+    "Lightricks/LTX-2",
+    "Wan-AI/Wan2.1-T2V-14B-Diffusers",
+    "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
+    "hunyuanvideo-community/HunyuanVideo",
+    "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+})
+
+
 def _add_backend_flags(p: argparse.ArgumentParser) -> None:
     # Imported here, not at module top: `python -m difflet.cli.stage` imports the
     # difflet.cli package (and so this module) before running the stage module as
@@ -543,10 +558,22 @@ def _add_backend_flags(p: argparse.ArgumentParser) -> None:
         "torch.compile). Default: $DIFFLET_EXEC_MODE, else compile. Unrelated to "
         "--mode, the latency/throughput preset.",
     )
+    p.add_argument(
+        "--attention",
+        choices=ATTENTION_CHOICES,
+        default=None,
+        help="DiT attention kernel on --backend neuron (default: cte, nkilib attention_cte). "
+        "'const-max': nkilib attention_const_max with each layer's committed score bound for "
+        "the layers its table allows (the rest stay on cte); 0.50-0.95x the DiT step on the "
+        "seven DiTs; against CPU fp32 within bf16's distance except HunyuanVideo-1.5 "
+        "(-1.5 dB), one prompt and seed per model. Pass it to compile and "
+        f"generate alike. Exported as {CONSTMAX_ENV} to every stage.",
+    )
 
 
 def _apply_backend_flags(args: argparse.Namespace) -> None:
-    """Check --backend / --exec-mode, then export them for every process this command spawns.
+    """Check --backend / --exec-mode / --attention, then export them for every process this
+    command spawns (--attention const-max as DIFFLET_EXP_ATTN_CONSTMAX=1, cte by unsetting it).
 
     Stages inherit the environment; nothing goes through the orchestrators'
     ``_shared_cli_args``, whose flags the stage-parser drift test pins
@@ -580,10 +607,25 @@ def _apply_backend_flags(args: argparse.Namespace) -> None:
                 file=sys.stderr,
             )
             raise SystemExit(2)
+    attention = getattr(args, "attention", None)
+    if attention == "const-max":
+        if (backend or os.environ.get("DIFFLET_BACKEND")) != "neuron":
+            print("Error: --attention const-max runs on the neuron backend only "
+                  "(pass --backend neuron).", file=sys.stderr)
+            raise SystemExit(2)
+        if model_id not in CONSTMAX_MODELS:
+            print(f"Error: --attention const-max has no const-max table for {model_id!r}; "
+                  f"models with one: {', '.join(sorted(CONSTMAX_MODELS))}.", file=sys.stderr)
+            raise SystemExit(2)
     if backend is not None:
         os.environ["DIFFLET_BACKEND"] = backend
     if exec_mode is not None:
         os.environ["DIFFLET_EXEC_MODE"] = exec_mode
+    # Unset, the ambient variable is kept (the experiment scripts export it themselves).
+    if attention == "const-max":
+        os.environ[CONSTMAX_ENV] = "1"
+    elif attention == "cte":
+        os.environ.pop(CONSTMAX_ENV, None)
 
 
 _TPU_CLI_UNSUPPORTED = (
