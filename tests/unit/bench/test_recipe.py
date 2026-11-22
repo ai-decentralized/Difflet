@@ -131,7 +131,8 @@ def test_check_recipe_refusals(args, match):
 
 def test_every_shipped_recipe_passes_the_structural_checks():
     recipes = R.load_recipes()
-    assert {"flux", "qwen_image", "wan21", "wan22_official", "hv15_official"} <= set(recipes)
+    assert {"flux", "qwen_image", "ltx_2", "wan21", "wan22", "hunyuan_video",
+            "hunyuan_video_15"} <= set(recipes)
     for recipe in recipes.values():
         R.check_recipe(recipe)
         assert recipe.args["backend"] == "neuron"
@@ -139,8 +140,18 @@ def test_every_shipped_recipe_passes_the_structural_checks():
 
 def test_shipped_negative_prompts_are_not_mangled():
     recipes = R.load_recipes()
-    assert recipes["wan22_official"].args["negative-prompt"].startswith("色调艳丽，过曝")
-    assert recipes["wan21_official"].args["negative-prompt"].endswith("walking backwards")
+    assert recipes["wan22"].args["negative-prompt"].startswith("色调艳丽，过曝")
+    assert recipes["wan21"].args["negative-prompt"].endswith("walking backwards")
+    assert recipes["ltx_2"].args["negative-prompt"].endswith("transition, static.")
+
+
+def test_qwen_recipes_run_true_cfg():
+    recipes = R.load_recipes()
+    for name in ("qwen_image", "qwen_image_mxfp8"):
+        argv = recipes[name].argv()
+        assert argv[argv.index("--true-cfg-scale") + 1] == "6.0"
+        assert argv[argv.index("--negative-prompt") + 1] == " "
+        assert "--guidance-scale" not in argv  # ignored by Qwen-Image (guidance_embeds=false)
 
 
 def test_parse_turns_argparse_errors_into_recipe_errors():

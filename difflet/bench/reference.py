@@ -8,8 +8,8 @@ size. The id hashes everything that decides the output: model and revision, shap
 guidance, the initial latents' hashes and the reference implementation's version. A reference is
 never rewritten; hosts share one by copying the directory, and the manifest proves it is the same.
 
-Supported (the settings ``scripts/cpu_fp32_reference.py`` validated): Qwen-Image without true CFG,
-and LTX-2 at guidance 1.0. Anything else is refused with the reason, not approximated.
+Supported (the settings ``scripts/cpu_fp32_reference.py`` validated): Qwen-Image with or without
+true CFG (diffusers' ``true_cfg_scale`` and negative prompt), and LTX-2 at guidance 1.0. Anything else is refused with the reason, not approximated.
 """
 
 from __future__ import annotations
@@ -54,8 +54,10 @@ def spec_from_args(args: dict[str, Any]) -> dict[str, Any]:
     if model == "qwen_image":
         true_cfg = args.get("true-cfg-scale")
         if true_cfg not in (None, False) and float(true_cfg) > 1.0:
-            raise ReferenceError("the Qwen-Image reference runs without true CFG; this recipe "
-                                 f"sets --true-cfg-scale {true_cfg}")
+            # Only under true CFG, so the unguided references keep their ids.
+            spec["true_cfg_scale"] = float(true_cfg)
+            if spec["negative_prompt"] is None:
+                spec["negative_prompt"] = " "  # the engine's default (qwen_image._true_cfg_kwargs)
     if model == "ltx_2" and float(args.get("guidance-scale") or 0) != 1.0:
         raise ReferenceError("the LTX-2 reference runs at guidance 1.0; pin guidance-scale: 1.0 "
                              "in the recipe (the engine's own default may differ)")
@@ -190,13 +192,17 @@ def _run_qwen(spec: dict[str, Any], model_dir: Path, initial_dir: Path, out: Pat
     encoder = QwenImagePipeline.from_pretrained(str(model_dir), transformer=None, vae=None,
                                                 torch_dtype=torch.float32)
     embeds, mask = encoder.encode_prompt(prompt=spec["prompt"], device="cpu")
+    scale = spec.get("true_cfg_scale", 1.0)
+    neg_embeds, neg_mask = (encoder.encode_prompt(prompt=spec["negative_prompt"], device="cpu")
+                            if scale > 1.0 else (None, None))
     del encoder
     gc.collect()
     pipe = QwenImagePipeline.from_pretrained(str(model_dir), text_encoder=None, tokenizer=None,
                                              torch_dtype=torch.float32)
     pipe.prepare_latents = _fixed(torch.load(initial_dir / "initial.pt", map_location="cpu"))
     recorder = _Recorder(spec["steps"])
-    image = pipe(prompt_embeds=embeds, prompt_embeds_mask=mask, true_cfg_scale=1.0,
+    image = pipe(prompt_embeds=embeds, prompt_embeds_mask=mask, negative_prompt_embeds=neg_embeds,
+                 negative_prompt_embeds_mask=neg_mask, true_cfg_scale=scale,
                  height=int(spec["height"]), width=int(spec["width"]),
                  num_inference_steps=spec["steps"], callback_on_step_end=recorder,
                  output_type="pt").images[0]

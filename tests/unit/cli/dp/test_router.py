@@ -328,11 +328,12 @@ def _alive(pid: int) -> bool:
         os.kill(pid, 0)
     except ProcessLookupError:
         return False
-    # Zombies answer kill(0); treat a zombie as dead.
+    # Zombies answer kill(0); treat a zombie as dead. A zombie reaped between the open and
+    # the read makes the read fail with ESRCH (ProcessLookupError): dead too.
     try:
         with open(f"/proc/{pid}/status") as fh:
             return "State:\tZ" not in fh.read()
-    except FileNotFoundError:
+    except (FileNotFoundError, ProcessLookupError):
         return False
 
 

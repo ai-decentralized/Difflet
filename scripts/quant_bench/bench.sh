@@ -87,8 +87,7 @@ args_for() {  # args_for <key>: M (model, shape, layout), P (sampling, no prompt
     hunyuan_video) M=(--model-id hunyuanvideo-community/HunyuanVideo
                       --revision e8c2aaa66fe3742a32c11a6766aecbf07c56e773
                       --height 320 --width 512 --num-frames 61 --tp-degree 4)
-      P=(--seed 42 --guidance-scale 6.0)
-      PROMPT="a cinematic shot of a red fox running through a snowy forest" ;;
+      P=(--seed 42 --guidance-scale 6.0) ;;
     hunyuan_video_15) M=(--model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v
                          --num-frames 9)
       P=(--seed 42); QT=$HV15_MX_TARGETS ;;
