@@ -8,7 +8,8 @@
 # usage: run.sh <model> <E1|E2|F|Fb> <compile|smoke_d|smoke_tc|timed> <device 0-15>
 #   models    qwen_image flux ltx_2 wan21 wan22 hunyuan_video hunyuan_video_15
 #   E1        --teacache-online-delta 0.6          E2  --teacache-cadence 2
-#   F         E2 + --sp (the tp4 + SP layout: qwen_image, flux, hunyuan_video only)
+#   F         E2 at the model's best layout: + --sp (qwen_image, flux, hunyuan_video: tp4 + SP);
+#             wan21 / wan22: --tp-degree 2 --cfg-parallel --sp (tp2 x CFG2 + SP, 4 cores)
 #   Fb        F without --quant mxfp8, in the bf16 + const-max cache (README: MXFP8 with SP
 #             measured 1.92x slower on HunyuanVideo); F arms keep their own smoke dirs
 #   compile   difflet compile with E's flags (load + warm-up; TeaCache is a generate flag)
@@ -33,7 +34,7 @@ BASE=/mnt/nvme/difflet-exp/constmax-models  # 11-18: arm A's requests and the ca
 OUT=${OUT:-/mnt/nvme/difflet-exp/arm-e}
 PY=${PY:-$HOME/venvs/native-fp8/bin/python}
 Q=(--quant mxfp8 --attention const-max) G=() EXT=mp4 STEPS=50 TC_STEPS=14 PROMPT=
-HUB=/mnt/nvme/difflet-quant-bench-hub X=() CB= S=
+HUB=/mnt/nvme/difflet-quant-bench-hub X=() FX=(--sp) CB= S=
 # A: arm A's directory; C: the cache; T: timeouts of compile, a smoke, timed
 case $MODEL in
   qwen_image) M=(--model-id Qwen/Qwen-Image --height 1024 --width 1024 --tp-degree 4)
@@ -45,14 +46,16 @@ case $MODEL in
   wan21) M=(--model-id Wan-AI/Wan2.1-T2V-14B-Diffusers
             --revision 38ec498cb3208fb688890f8cc7e94ede2cbd7f68
             --height 480 --width 832 --num-frames 81 --tp-degree 4)
-    G=(--guidance-scale 5.0) A=A C=wan-cache T=(2h 20m 40m)
+    G=(--guidance-scale 5.0) A=A C=wan-cache CB=wan-cache T=(2h 20m 40m)
+    FX=(--tp-degree 2 --cfg-parallel --sp)  # the later --tp-degree wins
     # 11-18's hub: the bf16 copy's manifest, and so the MXFP8 digest, holds the source's path
     HUB=$HOME/.cache/huggingface/hub ;;
   wan22) M=(--model-id Wan-AI/Wan2.2-T2V-A14B-Diffusers
             --revision 5be7df9619b54f4e2667b2755bc6a756675b5cd7
             --dual-expert --height 480 --width 832 --num-frames 81 --tp-degree 4)
     G=(--guidance-scale 4.0 --guidance-scale-2 3.0) A=A C=wan-cache STEPS=40 TC_STEPS=20
-    T=(2h 20m 40m) HUB=$HOME/.cache/huggingface/hub ;;
+    T=(2h 20m 40m) HUB=$HOME/.cache/huggingface/hub CB=wan-cache
+    FX=(--tp-degree 2 --cfg-parallel --sp) ;;
   hunyuan_video) M=(--model-id hunyuanvideo-community/HunyuanVideo
                     --revision e8c2aaa66fe3742a32c11a6766aecbf07c56e773
                     --height 544 --width 960 --num-frames 129 --tp-degree 4)
@@ -67,8 +70,8 @@ esac
 case $ARM in
   E1) TC=(--teacache-online-delta 0.6) ;;
   E2) TC=(--teacache-cadence 2) ;;
-  F|Fb) [ -n "$CB" ] || die "arm $ARM: $MODEL has no tp4 + SP layout here"
-    TC=(--teacache-cadence 2) X=(--sp) S=_$ARM
+  F|Fb) [ -n "$CB" ] || die "arm $ARM: $MODEL has no SP layout here"
+    TC=(--teacache-cadence 2) X=("${FX[@]}") S=_$ARM
     [ "$ARM" = F ] || { Q=(--attention const-max); C=$CB; } ;;
   *) die "unknown arm $ARM" ;;
 esac
