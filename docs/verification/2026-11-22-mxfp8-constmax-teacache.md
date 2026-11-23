@@ -66,7 +66,7 @@ scorer `scripts/compare_difflet_runs.py` as for 11-18's arms (`/mnt/nvme/difflet
 | LTX-2 | 16.55 / 16.54 / 16.85 (C) / – | 16.61 (15.32) / 0.464 | 16.92 (15.59) / 0.489 | 23.46 / 22.97 | 24.64 / 23.69 |
 | Wan 2.1 | 20.15 / 20.33 / 17.83 / 17.82 | 18.09 (17.07) / 0.586 | 18.33 (17.59) / 0.597 | 18.53 / 18.75 | 21.17 / 22.85 |
 | Wan 2.2 | 11.00 / 10.87 / 12.41 / 11.98 | 11.85 (11.25) / 0.247 | 12.34 (11.85) / 0.263 | 11.24 / 11.31 | 13.04 / 13.59 |
-| HunyuanVideo (cat) | pending: the cat-prompt fp32 reference (~23 h, started 11-22 13:3x) | pending | pending | 21.39 / 23.57 | – (D ran the fox prompt) |
+| HunyuanVideo (cat) | A_cat 17.18 (16.61) / SSIM 0.394 (measured; B, C, D ran the fox prompt) | 17.50 (16.81) / 0.403 | 17.32 (16.72) / 0.403 | 21.39 / 23.57 | – (D ran the fox prompt) |
 | HV1.5 (no MXFP8) | 16.09 / 14.55 / 12.52 / 12.48 | 15.30 (14.26) / 0.289 | 15.28 (14.40) / 0.297 | 15.27 / 15.29 | 15.86 / 15.02 |
 
 Reading (single seed; the 11-18 A-D range is the yardstick):
@@ -78,6 +78,8 @@ Reading (single seed; the 11-18 A-D range is the yardstick):
   comparable). E vs A 23.5 / 23.0 dB is below the bf16 tp2-vs-tp4 floor (25.9 dB) and in line with MXFP8 alone vs
   bf16 (22.5 dB, 11-07).
 - Wan 2.1: E at D's level (MXFP8 costs ~2 dB, as on 11-18); TeaCache adds nothing.
+- HunyuanVideo: E within 0.3 dB of A_cat against fp32 (reference `fp32_ref_long/hunyuan_video_long_c33ed38e`,
+  cat prompt recorded, noise md5 df925d6d08d0004d0c1c807cb1df6fea, 22 h 25 m on node 0).
 - Wan 2.2 and HunyuanVideo-class trajectories are chaotic at these shapes (11-18's arms scatter by ~2 dB, not
   monotonic); differences under 2 dB are not conclusions.
 - HV1.5 (no MXFP8): E between A and B, above B.
