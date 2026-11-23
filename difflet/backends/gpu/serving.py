@@ -129,6 +129,8 @@ def gpu_serving_metadata(spec: ModelSpec) -> ServingModelMetadata:
         request_validator_factory=f"{_MODULE}:GpuServingRequestValidator",
         default_fps=spec.default_fps,
         default_host_vae=False,
+        output_has_audio=spec.output_has_audio,
+        input_keyframes=bool(spec.keyframe_anchors),
     )
 
 
@@ -243,7 +245,10 @@ class GpuServingArtifactPreparer:
         refuse_unsupported_profile(profile, spec)
         print(f"[difflet serve] resolving {spec.display_name} weights for {self.model_id}")
         source = resolve_hf_model_source(
-            self.model_id, revision=self.revision, download_policy=download_policy
+            self.model_id,
+            revision=self.revision,
+            download_policy=download_policy,
+            allow_patterns=spec.download_patterns,
         )
         # No compile phase: the flow is eager, and DiffletPipeline writes its manifest-only
         # artifact inside the worker at load. An empty spec/binding pair keeps
@@ -323,6 +328,12 @@ class GpuServingRequestValidator:
                     raise feature_not_supported(
                         f"{_tag(spec)} {field} is not taken by {spec.display_name}: {why}"
                     )
+            for keyframe in video.keyframes:
+                if keyframe.anchor not in spec.keyframe_anchors:
+                    raise feature_not_supported(
+                        f"{_tag(spec)} {keyframe.anchor}_frame is not taken by "
+                        f"{spec.display_name} on the {gpu_platform().display_name} backend"
+                    )
         self._validate_prompts(request, video)
 
     def _validate_guidance(self, request: DiffletGenerateRequest) -> None:
@@ -380,9 +391,20 @@ class GpuPipelineRunner:
 
         frames = self.adapter.generate_frames(invocation.request)
         invocation.context.cancellation.throw_if_cancelled()
-        output = encode_video_tensor(
-            frames, invocation.request, layout="BCTHW", value_range="minus_one_to_one"
-        )
+        if self.adapter.spec.output_has_audio:
+            # Joint output (ModelSpec.output_has_audio): video in [0, 1] and its audio track.
+            output = encode_video_tensor(
+                frames.video,
+                invocation.request,
+                layout="BCTHW",
+                value_range="zero_to_one",
+                audio=frames.audio,
+                audio_sample_rate=frames.sample_rate,
+            )
+        else:
+            output = encode_video_tensor(
+                frames, invocation.request, layout="BCTHW", value_range="minus_one_to_one"
+            )
         return stage_result(GpuVideoPayload(output=output), started_monotonic=started)
 
     async def shutdown(self) -> None:
@@ -470,8 +492,9 @@ class GpuServingStageAdapter:
         )
 
     def generate_frames(self, request: DiffletGenerateRequest):
-        """``app.generate`` with the CLI's arguments, plus ``guidance_scale_2`` and
-        ``negative_prompt`` when the request carries them."""
+        """``app.generate`` with the CLI's arguments, plus ``guidance_scale_2``,
+        ``negative_prompt`` and the keyframe uploads when the request carries them; no
+        ``guidance_scale`` for a model that takes none (its application refuses it)."""
         if self.pipe is None or self.active_profile is None:
             raise RuntimeError(f"{self.spec.display_name} pipeline is not loaded")
         import torch
@@ -479,16 +502,26 @@ class GpuServingStageAdapter:
         video = _video(request, self.spec)
         kwargs: dict[str, Any] = dict(
             num_inference_steps=int(request.num_inference_steps),
-            guidance_scale=float(request.guidance_scale),
             seed=int(request.seed),
             num_frames=int(self.active_profile.num_frames),
             output_type="pt",
         )
+        if self.spec.guidance != "none":
+            kwargs["guidance_scale"] = float(request.guidance_scale)
         if video.guidance_scale_2 is not None:
             kwargs["guidance_scale_2"] = float(video.guidance_scale_2)
         if video.negative_prompt is not None:
             kwargs["negative_prompt"] = video.negative_prompt
+        if video.keyframes:
+            from PIL import Image
+
+            # The parent validated the uploads and re-encoded them as RGB PNG.
+            for keyframe in video.keyframes:
+                image = Image.open(io.BytesIO(keyframe.png))
+                kwargs[f"{keyframe.anchor}_image"] = image.convert("RGB")
         frames = self.pipe.app.generate(request.prompt, **kwargs)
+        if self.spec.output_has_audio:
+            return frames
         return frames.detach().to(device="cpu", dtype=torch.float32).clamp(-1.0, 1.0)
 
     def initial_payload(self, request: DiffletGenerateRequest) -> GpuInitialPayload:
@@ -548,7 +581,12 @@ class GpuServingStageAdapter:
             if profile is None or self._smoke is None:
                 raise RuntimeError(f"{spec.display_name} smoke ran without a profile or a target")
             try:
-                validate_smoke_output(output, profile=profile, expected_path=self._smoke.path)
+                validate_smoke_output(
+                    output,
+                    profile=profile,
+                    expected_path=self._smoke.path,
+                    allow_audio=spec.output_has_audio,
+                )
             finally:
                 self._smoke.cleanup()
                 self._smoke = None

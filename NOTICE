@@ -72,6 +72,11 @@ This product includes software derived from the following third-party projects:
   the upstream copyright (2025 The Hunyuan Team and The HuggingFace Team) and its
   Apache License 2.0 header; Difflet replaces its projections and attention and
   keeps the checkpoint layout.
+  The MiniMax-H3 CUDA modules, difflet/backends/cuda/minimax_h3/modeling.py,
+  vae.py and audio_vae.py, adapt portions of the MiniMax-H3 transformer and VAE
+  modeling (Copyright 2025-2026 The MiniMax authors and The HuggingFace Team).
+  They keep that copyright and the Apache License 2.0 header; Difflet replaces
+  the transformer's per-row arithmetic and keeps the checkpoint layout.
 
 ================================================================================
 3. xDiT (xfuser) — design inspiration only, no code

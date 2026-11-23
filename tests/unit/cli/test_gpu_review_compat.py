@@ -18,7 +18,9 @@ def test_zero_request_steps_keep_existing_default(spec):
 
 
 @pytest.mark.parametrize(
-    "spec", [s for s in gpu_model_specs() if s.output == "video"], ids=lambda s: s.model_type
+    "spec",
+    [s for s in gpu_model_specs() if s.output == "video" and not s.output_has_audio],
+    ids=lambda s: s.model_type,
 )
 def test_video_writer_receives_model_fps(spec, monkeypatch, tmp_path):
     from difflet.cli.orchestrators import wan

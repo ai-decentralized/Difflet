@@ -37,6 +37,7 @@ from difflet.serving.types import (
 
 SPECS = gpu_model_specs()
 H, W, F = 32, 48, 9  # a tiny profile: the MP4 is really encoded
+AUDIO_RATE = 32000  # the joint audio/video models' track
 _FROM_PRETRAINED = "difflet.pipeline.difflet_pipeline.DiffletPipeline.from_pretrained"
 
 
@@ -99,7 +100,9 @@ def _prepare(spec, profile, policy=CompilePolicy.AUTO):
 
 def test_prepare_runtime_resolves_the_snapshot_and_builds_an_eager_bundle(spec, source):
     bundle = _prepare(spec, _profile(spec))
-    assert source == [((_model(spec),), {"revision": None, "download_policy": DownloadPolicy.AUTO})]
+    # The spec's files (None: the diffusers default).
+    policy = {"revision": None, "download_policy": DownloadPolicy.AUTO}
+    assert source == [((_model(spec),), {**policy, "allow_patterns": spec.download_patterns})]
     assert bundle.compile_specs == () and bundle.artifacts.bindings == ()
     assert [s.stage_id for s in bundle.pipeline_definition.stages] == ["pipeline"]
     (stage,) = bundle.runtime_plan.stages
@@ -241,7 +244,8 @@ def test_guidance_scale_is_honoured_within_the_range(spec, source):
 @_specs(lambda s: s.guidance == "none")
 def test_guidance_scale_other_than_the_noop_value_is_refused(spec, source):
     with pytest.raises(DiffletServingError) as exc:
-        _validator(_prepare(spec, _profile(spec))).validate(_request(spec, guidance_scale=1.0))
+        other = spec.serving_noop_guidance_scale + 1.0
+        _validator(_prepare(spec, _profile(spec))).validate(_request(spec, guidance_scale=other))
     assert exc.value.code == "feature_not_supported"
     assert spec.no_guidance_reason in exc.value.message
 
@@ -250,10 +254,12 @@ def test_guidance_scale_other_than_the_noop_value_is_refused(spec, source):
 
 
 class _App:
-    """``app.generate``'s result: PIL images, or (B, 3, F, H, W) frames in [-1, 1]."""
+    """``app.generate``'s result: PIL images, (B, 3, F, H, W) frames in [-1, 1], or for a joint
+    audio/video model those frames in [0, 1] with a stereo track."""
 
-    def __init__(self, height, width, num_frames):
+    def __init__(self, height, width, num_frames, has_audio=False):
         self.calls, self.shape = [], (height, width, num_frames)
+        self.has_audio = has_audio
 
     def generate(self, prompt, **kw):
         self.calls.append((prompt, kw))
@@ -261,12 +267,18 @@ class _App:
         if num_frames is None:
             return [Image.new("RGB", (width, height), "red")]
         g = torch.Generator().manual_seed(kw["seed"])
-        return torch.rand((1, 3, num_frames, height, width), generator=g) * 2 - 1
+        frames = torch.rand((1, 3, num_frames, height, width), generator=g)
+        if self.has_audio:
+            samples = num_frames * AUDIO_RATE // 24
+            return types.SimpleNamespace(
+                video=frames, audio=torch.rand(1, 2, samples) * 2 - 1, sample_rate=AUDIO_RATE
+            )
+        return frames * 2 - 1
 
 
 class _Pipe:
-    def __init__(self, height, width, num_frames=None):
-        self.app = _App(height, width, num_frames)
+    def __init__(self, height, width, num_frames=None, has_audio=False):
+        self.app = _App(height, width, num_frames, has_audio)
 
 
 @pytest.fixture
@@ -275,7 +287,8 @@ def recorder(monkeypatch):
 
     def fake(model_id, **kw):
         calls.append((model_id, kw))
-        return _Pipe(kw["height"], kw["width"], kw.get("num_frames"))
+        has_audio = mod._spec_for_model_id(model_id).output_has_audio
+        return _Pipe(kw["height"], kw["width"], kw.get("num_frames"), has_audio)
 
     monkeypatch.setattr(_FROM_PRETRAINED, staticmethod(fake))
     return calls
@@ -349,7 +362,12 @@ def test_generate_passes_the_cli_s_arguments(spec, source, recorder, tmp_path):
 
 def test_smoke_output_of_the_wrong_shape_fails_startup(spec, source, monkeypatch):
     monkeypatch.setattr(
-        _FROM_PRETRAINED, staticmethod(lambda m, **kw: _Pipe(H * 2, W, kw.get("num_frames")))
+        _FROM_PRETRAINED,
+        staticmethod(
+            lambda m, **kw: _Pipe(
+                H * 2, W, kw.get("num_frames"), mod._spec_for_model_id(m).output_has_audio
+            )
+        ),
     )
     adapter, engine = _engine(spec, _prepare(spec, _profile(spec)))
     with pytest.raises(RuntimeError):
@@ -476,6 +494,7 @@ def test_generate_writes_a_valid_mp4_at_the_profile_shape(spec, source, recorder
         expected_height=H,
         expected_num_frames=F,
         expected_fps=fps,
+        audio_sample_rate=AUDIO_RATE if spec.output_has_audio else None,
     )
     assert meta.size_bytes == out.size_bytes > 0
 
@@ -553,6 +572,7 @@ def test_videos_sync_serves_a_clip_through_the_gpu_adapter(
         queue_timeout_s=60.0,
         request_timeout_s=60.0,
         recovery_timeout_s=1.0,
+        allow_audio=resolved.metadata.output_has_audio,
     )
     app = create_app(
         options=options,
@@ -590,11 +610,15 @@ def test_videos_sync_serves_a_clip_through_the_gpu_adapter(
             expected_height=H,
             expected_num_frames=F,
             expected_fps=spec.default_fps,
+            audio_sample_rate=AUDIO_RATE if spec.output_has_audio else None,
         )
         assert meta.size_bytes == len(response.content)
         prompt, kw = adapter.pipe.app.calls[-1]
         assert prompt == "a cat in a garden" and kw["seed"] == 5
-        assert kw["guidance_scale"] == spec.default_guidance_scale
+        if spec.guidance == "none":
+            assert "guidance_scale" not in kw
+        else:
+            assert kw["guidance_scale"] == spec.default_guidance_scale
         if "guidance_scale_2" not in dict(spec.refused_video_fields):
             assert kw["guidance_scale_2"] == 3.0
         else:
@@ -645,3 +669,69 @@ def test_a_model_served_only_on_gpus_is_refused_cleanly_elsewhere(monkeypatch, t
     model = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v"
     with pytest.raises(DiffletServingError, match="not enabled for serving"):
         resolve_serving_model(ServeOptions(model_id=model, cache_dir=str(tmp_path)))
+
+
+# ------------------------------------------------- keyframes and joint audio/video output
+
+
+def _png(size=(40, 30)) -> bytes:
+    import io
+
+    buffer = io.BytesIO()
+    Image.new("RGB", size, (10, 20, 30)).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def test_metadata_declares_the_spec_s_keyframes_and_audio_track(spec):
+    metadata = mod.gpu_serving_metadata(spec)
+    assert metadata.input_keyframes == bool(spec.keyframe_anchors)
+    assert metadata.output_has_audio == spec.output_has_audio
+
+
+@_specs(lambda s: s.keyframe_anchors)
+def test_a_keyframe_upload_reaches_generate_as_rgb(spec, source, recorder, tmp_path):
+    from difflet.serving.types import KeyframeInput
+
+    adapter, engine = _engine(spec, _prepare(spec, _profile(spec)))
+    asyncio.run(engine.start())
+    anchor = spec.keyframe_anchors[0]
+    keyframes = (KeyframeInput(anchor=anchor, png=_png()),)
+    req = _request(spec, _target(tmp_path), video={"keyframes": keyframes})
+    _validator(_prepare(spec, _profile(spec))).validate(req)
+    asyncio.run(engine.generate(req, WorkerRequestContext.with_timeout("r1", 60.0)))
+    _, kw = adapter.pipe.app.calls[-1]
+    image = kw[f"{anchor}_image"]
+    assert image.mode == "RGB" and image.size == (40, 30)
+
+
+@_specs(lambda s: s.output == "video" and set(s.keyframe_anchors) != {"first", "last"})
+def test_a_keyframe_anchor_the_spec_lacks_is_refused_before_the_queue(spec, source):
+    from difflet.serving.types import KeyframeInput
+
+    anchor = next(a for a in ("first", "last") if a not in spec.keyframe_anchors)
+    req = _request(spec, video={"keyframes": (KeyframeInput(anchor=anchor, png=_png()),)})
+    with pytest.raises(DiffletServingError) as exc:
+        _validator(_prepare(spec, _profile(spec))).validate(req)
+    assert exc.value.code == "feature_not_supported" and f"{anchor}_frame" in exc.value.message
+
+
+@_specs(lambda s: s.output_has_audio)
+def test_the_clip_carries_its_audio_track_which_a_silent_model_s_check_refuses(
+    spec, source, recorder, tmp_path
+):
+    from difflet.serving.video_media import VideoMediaValidationError
+    from difflet.serving.video_service import _validate_media
+
+    adapter, engine = _engine(spec, _prepare(spec, _profile(spec)))
+    asyncio.run(engine.start())  # the smoke output is validated with its audio track
+    target = _target(tmp_path)
+    out = asyncio.run(
+        engine.generate(_request(spec, target), WorkerRequestContext.with_timeout("r1", 60.0))
+    )
+    _, kw = adapter.pipe.app.calls[-1]
+    assert "guidance_scale" not in kw and not any(k.endswith("_image") for k in kw)
+    request = _request(spec, target)
+    meta = _validate_media(pathlib.Path(out.path), request, allow_audio=True)
+    assert (meta.width, meta.height, meta.num_frames) == (W, H, F)
+    with pytest.raises(VideoMediaValidationError, match="must not contain an audio stream"):
+        _validate_media(pathlib.Path(out.path), request)

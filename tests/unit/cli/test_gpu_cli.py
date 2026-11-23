@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import dataclasses
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
@@ -67,6 +68,9 @@ def _args(spec, **over):
     return argparse.Namespace(**d)
 
 
+AUDIO_RATE = 32000  # the joint audio/video models' track
+
+
 def _orch(spec, **over):
     return GpuOrchestrator(_args(spec, **over), spec)
 
@@ -74,7 +78,15 @@ def _orch(spec, **over):
 class _App:
     def __init__(self, spec):
         self.calls = []
-        if spec.output == "video":
+        if spec.output_has_audio:
+            # Joint output: video (B, 3, F, H, W) in [0, 1] and stereo audio in [-1, 1].
+            torch.manual_seed(0)
+            self.result = SimpleNamespace(
+                video=torch.rand(1, 3, 9, 16, 16),
+                audio=torch.rand(1, 2, 9 * AUDIO_RATE // 24) * 2 - 1,
+                sample_rate=AUDIO_RATE,
+            )
+        elif spec.output == "video":
             # The application's ``output_type="pt"`` result: (B, 3, F, H, W) in [-1, 1].
             torch.manual_seed(0)
             self.result = torch.rand(1, 3, 9, 16, 16) * 2 - 1
@@ -245,7 +257,7 @@ def test_negative_prompt_flag_reaches_generate_and_a_request_wins(spec, recorder
     assert orch._last_pipe.app.calls[0][1]["negative_prompt"] == "blurry"
 
 
-def test_download_uses_the_registry_subset_when_the_model_declares_one(spec, monkeypatch):
+def test_download_uses_the_spec_files_else_the_registry_subset(spec, monkeypatch):
     from difflet.registry import resolve_model
 
     seen = {}
@@ -255,7 +267,8 @@ def test_download_uses_the_registry_subset_when_the_model_declares_one(spec, mon
     )
     _orch(spec).download()
     entry = resolve_model(spec.cli_model_ids[0], model_type=spec.model_type)
-    assert seen["allow_patterns"] == entry.download_patterns
+    expected = spec.download_patterns
+    assert seen["allow_patterns"] == (entry.download_patterns if expected is None else expected)
 
 
 @pytest.mark.parametrize("command", ["generate", "run"])
@@ -427,3 +440,58 @@ def test_round_robin_claims_only_this_worker_s_requests(spec, recorder, tmp_path
     assert [p for p, _ in orch._last_pipe.app.calls] == ["p1", "p3"]
     s = summarize(requests_dir)
     assert s.done == [1, 3] and s.unfinished == [0, 2]
+
+
+# ------------------------------------------------- keyframes and joint audio/video output
+
+_SILENT = next(s for s in SPECS if s.output == "video" and not s.keyframe_anchors)
+_KEYFRAMED = dataclasses.replace(_SILENT, keyframe_anchors=("first",), output_has_audio=True)
+
+
+@pytest.fixture
+def image_file(tmp_path):
+    path = tmp_path / "frame.png"
+    Image.new("RGBA", (40, 30), (10, 20, 30, 255)).save(path)
+    return path
+
+
+def test_a_keyframe_is_refused_by_a_model_that_takes_none(image_file):
+    with pytest.raises(SystemExit, match="--first-frame"):
+        _orch(_SILENT, first_frame=str(image_file)).refuse_unsupported()
+
+
+def test_a_keyframe_anchor_the_spec_lacks_is_refused_before_any_load(image_file):
+    with pytest.raises(SystemExit, match="--last-frame"):
+        _orch(_KEYFRAMED, last_frame=str(image_file)).refuse_unsupported()
+
+
+@pytest.mark.parametrize("spec", [_KEYFRAMED], ids=["keyframed"])
+def test_the_first_frame_reaches_generate_as_rgb(spec, recorder, image_file, tmp_path):
+    orch = _orch(spec, first_frame=str(image_file), output=str(tmp_path / "out.mp4"))
+    orch.generate()
+    ((_, kw),) = orch._last_pipe.app.calls
+    assert kw["first_image"].mode == "RGB" and kw["first_image"].size == (40, 30)
+    assert "last_image" not in kw
+
+
+@pytest.mark.parametrize("spec", [_KEYFRAMED], ids=["keyframed"])
+def test_joint_output_is_one_mp4_with_its_audio_track(spec, recorder, saved, tmp_path):
+    from difflet.serving.video_media import validate_mp4
+
+    out = tmp_path / "out.mp4"
+    _orch(spec, output=str(out)).generate()
+    metadata = validate_mp4(
+        out, expected_num_frames=9, expected_fps=spec.default_fps, audio_sample_rate=AUDIO_RATE
+    )
+    assert (metadata.width, metadata.height) == (16, 16)
+    assert saved == []  # not the silent writer
+
+
+@pytest.mark.parametrize("spec", [_KEYFRAMED], ids=["keyframed"])
+def test_joint_output_falls_back_to_tensors_without_an_mp4_suffix(spec, recorder, tmp_path):
+    _orch(spec, output=str(tmp_path / "out.bin")).generate()
+    saved = torch.load(tmp_path / "out.pt")
+    expected = _App(spec).result
+    assert torch.equal(saved["video"], expected.video)
+    assert torch.equal(saved["audio"], expected.audio)
+    assert saved["sample_rate"] == AUDIO_RATE

@@ -21,6 +21,7 @@ FORBIDDEN_PREFIXES = (
     "nkilib",
     "difflet.backends.trainium",
     "difflet.backends.tpu",
+    "difflet.backends.neuron",
 )
 
 # Directories are scanned recursively; a file entry is scanned on its own (the GPU
@@ -43,6 +44,10 @@ SCANNED = [
     Path("difflet/models/wan/spec.py"),
     Path("difflet/models/hunyuan_video/modeling_hunyuan_video.py"),
     Path("difflet/models/hunyuan_video/spec.py"),
+    Path("difflet/models/minimax_h3/contracts.py"),
+    Path("difflet/models/minimax_h3/keyframes.py"),
+    Path("difflet/models/minimax_h3/pipeline.py"),
+    Path("difflet/models/minimax_h3/scheduling_minimax_h3.py"),
 ]
 
 OPS_MODULES = ("attention", "collectives", "embeddings", "linear", "mx", "norm", "platform")

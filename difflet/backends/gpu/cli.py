@@ -135,6 +135,9 @@ class GpuOrchestrator(ModelOrchestrator):
                 self._refuse(label)
         if not self.spec.accepts_negative_prompt and is_set(getattr(args, "negative_prompt", None)):
             self._refuse("--negative-prompt")
+        for anchor in self._keyframe_paths():
+            if anchor not in self.spec.keyframe_anchors:
+                self._refuse(f"--{anchor}-frame")
         if self.spec.guidance == "none" and getattr(args, "guidance_scale", None) is not None:
             # The application refuses the value as a silent no-op, and the CLI must not hide
             # that by dropping the flag.
@@ -150,6 +153,15 @@ class GpuOrchestrator(ModelOrchestrator):
             if is_set(value):
                 kwargs[flag] = value
         return kwargs
+
+    def _keyframe_paths(self) -> dict[str, str]:
+        """``--first-frame``/``--last-frame`` by anchor; ``compile`` has neither flag."""
+        args = self.args
+        paths = {
+            "first": getattr(args, "first_frame", None),
+            "last": getattr(args, "last_frame", None),
+        }
+        return {anchor: path for anchor, path in paths.items() if path}
 
     def _num_frames(self) -> int | None:
         if self.spec.output != "video":
@@ -206,6 +218,13 @@ class GpuOrchestrator(ModelOrchestrator):
             kwargs["negative_prompt"] = negative
         if spec.output == "video":
             kwargs["num_frames"] = self._num_frames()
+        keyframes = self._keyframe_paths()
+        if keyframes:
+            from PIL import Image
+
+            for anchor, path in keyframes.items():
+                with Image.open(path) as image:
+                    kwargs[f"{anchor}_image"] = image.convert("RGB")
         return kwargs
 
     def save_result(self, result, out: Path) -> str:
@@ -214,6 +233,8 @@ class GpuOrchestrator(ModelOrchestrator):
             image = result[0]
             image.save(out)
             return f"{out} ({image.size[0]}x{image.size[1]})"
+        if self.spec.output_has_audio:
+            return self._save_audio_video(result, out)
         # A (B, 3, F, H, W) tensor in [-1, 1]: MP4 through the Trainium orchestrator's writer,
         # else the tensor as ``.pt``.
         from difflet.cli.orchestrators.wan import _save_video
@@ -228,6 +249,36 @@ class GpuOrchestrator(ModelOrchestrator):
         torch.save(result, pt)
         return f"{pt} {shape}"
 
+    def _save_audio_video(self, result, out: Path) -> str:
+        """Joint output (``ModelSpec.output_has_audio``): one MP4 with an AAC stereo track
+        through the serving encoder, else the tensors as ``.pt``."""
+        from difflet.serving.video_media import VideoMediaError, encode_tensor_to_mp4
+
+        _, _, frames, height, width = result.video.shape
+        shape = f"({frames} frames, {height}x{width}, audio {result.sample_rate} Hz)"
+        if out.suffix == ".mp4":
+            out.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                encode_tensor_to_mp4(
+                    result.video,
+                    out.resolve(),
+                    fps=self.spec.default_fps,
+                    layout="BCTHW",
+                    value_range="zero_to_one",
+                    audio=result.audio,
+                    audio_sample_rate=result.sample_rate,
+                )
+                return f"{out} {shape}"
+            except VideoMediaError as exc:
+                print(f"{self.tag} MP4 export failed ({exc}); saving tensors instead", flush=True)
+        import torch
+
+        pt = out.with_suffix(".pt")
+        torch.save(
+            {"video": result.video, "audio": result.audio, "sample_rate": result.sample_rate}, pt
+        )
+        return f"{pt} {shape}"
+
     # ------------------------------------------------------------ commands
 
     def download(self) -> None:
@@ -236,13 +287,16 @@ class GpuOrchestrator(ModelOrchestrator):
         from difflet.pipeline.path_resolver import resolve_model_path
         from difflet.registry import resolve_model
 
-        # The registry's subset when the model declares one; None keeps the diffusers default.
-        entry = resolve_model(self.model_id, model_type=self.spec.model_type)
+        # The spec's files, else the registry's subset; None keeps the diffusers default.
+        patterns = self.spec.download_patterns
+        if patterns is None:
+            entry = resolve_model(self.model_id, model_type=self.spec.model_type)
+            patterns = entry.download_patterns
         resolve_model_path(
             self.model_id,
             revision=self.args.revision,
             local_files_only=False,
-            allow_patterns=entry.download_patterns,
+            allow_patterns=patterns,
         )
         print(f"[difflet] weights ready for {self.model_id}")
 

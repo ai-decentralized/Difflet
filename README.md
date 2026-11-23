@@ -126,6 +126,7 @@ see the per-model limits below.
 | HunyuanVideo (original) | ⚠️ experimental ⁷ | ⚠️ experimental ⁷ | ⚠️ execution observed ⁷ | ❌ | Not measured | — ¹ | ❌ | ❌ |
 | LTX-2 | ⚠️ video, CPU checks ⁸ | ⚠️ video, CPU checks ⁸ | ⚠️ Python qualified ⁸ | ❌ | Not measured | ❌ | ❌ | ❌ |
 | HunyuanVideo 1.5 | ⚠️ experimental ⁹ | ⚠️ experimental ⁹ | ✅ ⁹ | ❌ | Not measured | ❌ | ❌ | ❌ |
+| MiniMax-H3 | ✅ video + audio ¹⁰ | ✅ video + audio ¹⁰ | ✅ | ❌ | Not measured | — ¹⁰ | ❌ | ❌ |
 
 An option the GPU backend does not support is refused with a message naming it, not ignored.
 TeaCache (adaptive), TAEF1, and `--host-vae` are refused on GPUs for these models.
@@ -155,6 +156,12 @@ TeaCache (adaptive), TAEF1, and `--host-vae` are refused on GPUs for these model
    On one RTX PRO 6000, eager and compiled output meet a relative accuracy bar against
    vLLM-Omni and warm latency is within 10% of it; see the
    [HunyuanVideo 1.5 CUDA guide](docs/verification/hunyuanvideo15-cuda.md).
+10. Single-GPU BF16 text-to-video and first-frame image-to-video (`--first-frame`, a
+   `first_frame` upload) with a stereo audio track, for `MiniMaxAI/MiniMax-H3`; every
+   component stays on one 180 GB-class GPU such as a B200. The checkpoint is
+   guidance-distilled: one transformer pass per step, so there is no CFG branch to split. On
+   one B200, I2VA passes vLLM-Omni's own acceptance test, eager and compiled, at vLLM-Omni's
+   warm speed; see the [MiniMax-H3 CUDA guide](docs/verification/minimax-h3-cuda.md).
 
 Measured timings against stock diffusers, and the full pass/limit matrix, are in
 [docs/verification/gpu-backend-results.md](docs/verification/gpu-backend-results.md).
