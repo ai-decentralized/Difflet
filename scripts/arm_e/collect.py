@@ -238,8 +238,8 @@ def self_test() -> None:
 
 def main(model: str) -> int:
     root = OUT / model
-    res = {"model": model, "arms": {name: arm(model, root / name, tc=name.startswith("E"))
-                                    for name in ("A_cat", "E1", "E2")
+    res = {"model": model, "arms": {name: arm(model, root / name, tc=name[0] in "EF")
+                                    for name in ("A_cat", "E1", "E2", "F", "Fb")
                                     if (root / name / "timed.log").exists()},
            "A_1118": arm(model, BASE / A_1118[model][0])}
     if not res["arms"]:

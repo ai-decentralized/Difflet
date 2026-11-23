@@ -5,9 +5,12 @@
 # requests are arm A's file) plus --quant mxfp8 --attention const-max and TeaCache.
 # HunyuanVideo-1.5 has no MXFP8 (D4): --attention const-max only, decoding on one core like arm A.
 #
-# usage: run.sh <model> <E1|E2> <compile|smoke_d|smoke_tc|timed> <device 0-15>
+# usage: run.sh <model> <E1|E2|F|Fb> <compile|smoke_d|smoke_tc|timed> <device 0-15>
 #   models    qwen_image flux ltx_2 wan21 wan22 hunyuan_video hunyuan_video_15
 #   E1        --teacache-online-delta 0.6          E2  --teacache-cadence 2
+#   F         E2 + --sp (the tp4 + SP layout: qwen_image, flux, hunyuan_video only)
+#   Fb        F without --quant mxfp8, in the bf16 + const-max cache (README: MXFP8 with SP
+#             measured 1.92x slower on HunyuanVideo); F arms keep their own smoke dirs
 #   compile   difflet compile with E's flags (load + warm-up; TeaCache is a generate flag)
 #   smoke_d   10 steps, E's flags without TeaCache (11-18's arm D on this tree)
 #   smoke_tc  14 steps (wan22: 20) with --teacache-cadence 2
@@ -24,19 +27,19 @@
 #   and the requests; run nothing, write nothing)
 set -u
 die() { echo "run.sh: $*" >&2; exit 2; }
-[ $# -eq 4 ] || die "usage: run.sh <model> <E1|E2> <compile|smoke_d|smoke_tc|timed> <device 0-15>"
+[ $# -eq 4 ] || die "usage: run.sh <model> <E1|E2|F|Fb> <compile|smoke_d|smoke_tc|timed> <device 0-15>"
 MODEL=$1 ARM=$2 MODE=$3 DEV=$4
 BASE=/mnt/nvme/difflet-exp/constmax-models  # 11-18: arm A's requests and the caches
 OUT=${OUT:-/mnt/nvme/difflet-exp/arm-e}
 PY=${PY:-$HOME/venvs/native-fp8/bin/python}
 Q=(--quant mxfp8 --attention const-max) G=() EXT=mp4 STEPS=50 TC_STEPS=14 PROMPT=
-HUB=/mnt/nvme/difflet-quant-bench-hub
+HUB=/mnt/nvme/difflet-quant-bench-hub X=() CB= S=
 # A: arm A's directory; C: the cache; T: timeouts of compile, a smoke, timed
 case $MODEL in
   qwen_image) M=(--model-id Qwen/Qwen-Image --height 1024 --width 1024 --tp-degree 4)
-    G=(--guidance-scale 7.5) A=A C=qwen_image/cache/D EXT=png T=(30m 10m 10m) ;;
+    G=(--guidance-scale 7.5) A=A C=qwen_image/cache/D CB=qwen_image/cache/B EXT=png T=(30m 10m 10m) ;;
   flux) M=(--model-id black-forest-labs/FLUX.1-dev --height 1024 --width 1024 --tp-degree 4)
-    A=bf16 C=flux/cache/flux-mxcm EXT=png T=(30m 10m 10m) ;;
+    A=bf16 C=flux/cache/flux-mxcm CB=flux/cache/flux-cm EXT=png T=(30m 10m 10m) ;;
   ltx_2) M=(--model-id Lightricks/LTX-2 --height 512 --width 768 --num-frames 121 --tp-degree 4)
     A=bf16 C=ltx_2/cache/mxcm T=(1h 10m 15m) ;;
   wan21) M=(--model-id Wan-AI/Wan2.1-T2V-14B-Diffusers
@@ -53,7 +56,7 @@ case $MODEL in
   hunyuan_video) M=(--model-id hunyuanvideo-community/HunyuanVideo
                     --revision e8c2aaa66fe3742a32c11a6766aecbf07c56e773
                     --height 544 --width 960 --num-frames 129 --tp-degree 4)
-    G=(--guidance-scale 6.0) A=A C=hunyuan_video/cache PROMPT="a cat walking through a garden"
+    G=(--guidance-scale 6.0) A=A C=hunyuan_video/cache CB=hunyuan_video/cache PROMPT="a cat walking through a garden"
     T=(4h 30m 1h) ;;
   hunyuan_video_15) M=(--model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v
                        --revision 286be7ce72277246578a3e3cc2487e95ddae5bcf
@@ -64,12 +67,15 @@ esac
 case $ARM in
   E1) TC=(--teacache-online-delta 0.6) ;;
   E2) TC=(--teacache-cadence 2) ;;
+  F|Fb) [ -n "$CB" ] || die "arm $ARM: $MODEL has no tp4 + SP layout here"
+    TC=(--teacache-cadence 2) X=(--sp) S=_$ARM
+    [ "$ARM" = F ] || { Q=(--attention const-max); C=$CB; } ;;
   *) die "unknown arm $ARM" ;;
 esac
 case $MODE in
   compile) W=$OUT/$MODEL/$ARM TO=${T[0]} ;;
-  smoke_d) W=$OUT/$MODEL/$MODE TO=${T[1]} N=10 TC=() ;;
-  smoke_tc) W=$OUT/$MODEL/$MODE TO=${T[1]} N=$TC_STEPS TC=(--teacache-cadence 2) ;;
+  smoke_d) W=$OUT/$MODEL/$MODE$S TO=${T[1]} N=10 TC=() ;;
+  smoke_tc) W=$OUT/$MODEL/$MODE$S TO=${T[1]} N=$TC_STEPS TC=(--teacache-cadence 2) ;;
   timed) W=$OUT/$MODEL/$ARM TO=${T[2]} N=$STEPS ;;
   *) die "unknown mode $MODE" ;;
 esac
@@ -106,9 +112,9 @@ NEG=$(field negative_prompt)
 
 cmd=(/usr/bin/time -v timeout "$TO" taskset -c "$CPUS" "$PY" -m difflet.cli.main)
 if [ "$MODE" = compile ]; then
-  cmd+=(compile --backend neuron "${M[@]}" "${Q[@]}" --cache-dir "$C")
+  cmd+=(compile --backend neuron "${M[@]}" "${Q[@]}" "${X[@]}" --cache-dir "$C")
 else
-  cmd+=(generate --backend neuron "${M[@]}" "${Q[@]}" --cache-dir "$C" --steps "$N" --seed 42
+  cmd+=(generate --backend neuron "${M[@]}" "${Q[@]}" "${X[@]}" --cache-dir "$C" --steps "$N" --seed 42
         "${G[@]}")
   if [ "$MODE" = timed ]; then cmd+=(--requests "$W/requests.jsonl")
   else cmd+=(--prompt "$PROMPT" --output "$W/smoke.$EXT"); fi
