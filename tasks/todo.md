@@ -688,3 +688,19 @@ Encode once and broadcast, and Wan serving on TPU (2026-08-24):
   stragglers tripped over their own deleted files -- three tracebacks per
   request, after `run_complete`, with the request succeeding anyway. Skipping
   the decode on non-primary replicas takes an async job from 62 s to 35 s.
+
+Resident serve steps slower than `difflet generate` (2026-11-23):
+- [ ] Add per-step timestamps in the resident worker so a served request reports its own step time.
+- [ ] Measure one FLUX backend alone on its own CPU slice: step time against `generate`'s 213.7 ms.
+- [ ] Test the suspected cause: the worker sets `os.cpu_count() // world` torch threads per rank
+  (`difflet/serving/engines/resident_worker.py:1074-1076`, 48 on this host, ignoring taskset)
+  where `generate`'s DiT ranks run with 1; scope any change to the denoise loop, since host-side
+  stages (LTX-2's VAE decode and text connectors) get faster with more threads.
+- [ ] Give each resident backend its own CPU range in the fleet launcher, and re-measure under
+  concurrent requests.
+- Rationale: on the same commit and layout, served requests step slower than `generate`: FLUX
+  277 vs 214 ms, LTX-2 1,479 vs 1,251, Qwen-Image 343 vs 297, HunyuanVideo 669 vs 619, Wan 9,335
+  vs 9,077 (two-point fits of single 2026-11-22 requests; the gap also holds with the fleet idle).
+  With several models generating at once, requests slowed a further 47-93%.
+- Findings so far: cause not identified; the thread count is a hypothesis from reading the code.
+  Upper bound if closed: FLUX's 28-step served request 8.3-8.7 s to about 6.5 s.
