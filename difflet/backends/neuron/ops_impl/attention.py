@@ -344,9 +344,11 @@ def _load_flash_scalar_exp_op():
     return flash_attention_scalar_exp
 
 
-# Resolved once at import: no import or cache lookup inside traced (compiled) code.
-_EXP_KNOB = _attention_cte_has_exp_knob()
+# Resolved once at import: no import or cache lookup inside traced (compiled) code. torch_neuronx
+# before nkilib (with autoload off, this module can be its first importer): nkilib reads
+# NKI_DMA_TRANSPOSE_AS_PE_TRANSPOSE at import, and torch_neuronx's import may set it.
 _FLASH_KERNEL = _load_flash_kernel()
+_EXP_KNOB = _attention_cte_has_exp_knob()
 _FLASH_SCALAR_EXP_OP = _load_flash_scalar_exp_op()
 _FLASH_BOUNDED_OP = _load_flash_bounded_op()
 _FLASH_BOUNDED_SCALAR_EXP_OP = _load_flash_bounded_op(vector_exp=False)

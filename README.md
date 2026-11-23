@@ -224,9 +224,9 @@ Wan 2.2 4.0 / 3.0 at 40) both run 0.98× (9.96 s against 10.14–10.15 s per ste
 0.93× / 0.89×; Wan 2.1's clip is 15.1 dB from bf16 against 22.7 dB between two bf16 runs at
 different TP degrees, failing the device screen (Wan 2.2: 14.3 against 14.8 dB, passing). Their
 faster compile and cold start under `--quant` (0.63–0.75×) come from the NKI trace cache the flag
-turns on, not from MXFP8: bf16 Wan 2.1 with `DIFFLET_NKI_TRACE_CACHE=1` compiles in 541 s instead
-of 958 and starts cold in 653 s instead of 997, against which MXFP8 is 1.21× compile and 1.01× cold
-(Wan 2.2 shows the same warmup split; evidence section 12).
+turned on (now the default), not from MXFP8: bf16 Wan 2.1 with `DIFFLET_NKI_TRACE_CACHE=1`
+compiles in 541 s instead of 958 and starts cold in 653 s instead of 997, against which MXFP8 is
+1.21× compile and 1.01× cold (Wan 2.2 shows the same warmup split; evidence section 12).
 Quantizing the self-attention q/k/v as well (a `DIFFLET_QUANT_TARGETS` override; their q/k are
 then reordered per head at load so that the rotary turns contiguous halves: 8.05 ms per tp4
 block against 10.67 in bf16) makes the step 0.76–0.77× at 9 frames and 0.93–0.94× at 81, but

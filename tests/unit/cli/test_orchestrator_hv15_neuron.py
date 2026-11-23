@@ -76,7 +76,7 @@ def launches(monkeypatch, tmp_path):
     # The vae warm-up marker lives in the NEFF cache: the test's own, never the user's.
     monkeypatch.setenv("TORCH_NEURONX_NEFF_CACHE_DIR", str(tmp_path / "neff"))
 
-    # The driver and prepare_quant set it: setenv first records the original state (a delenv
+    # No user setting (restored afterwards): setenv first records the original state (a delenv
     # of an unset variable records nothing to undo), so a leak cannot reach the next test.
     monkeypatch.setenv("DIFFLET_NKI_TRACE_CACHE", "")
     monkeypatch.delenv("DIFFLET_NKI_TRACE_CACHE")
@@ -128,9 +128,8 @@ def _fake_pipeline(seen: dict, latents=lambda generator: torch.full((1, 4, 2, 2,
 
 def test_default_layout_is_tp2_x_cfg2(launches, tmp_path):
     hv15.HunyuanVideo15Orchestrator(_args(work_dir=str(tmp_path / "w"))).generate()
-    # Every stage keeps the attention kernel's trace.
-    assert launches.env_seen == ["1", "1", "1", "1"]
-    assert "DIFFLET_NKI_TRACE_CACHE" not in os.environ  # restored after the launches
+    # No opt-in to set: the trace cache is on by default (neuron.compile) in every stage.
+    assert launches.env_seen == [None, None, None, None]
     # The vae stage decodes its tiles on the transformer stage's cores (--vae-cores default); on a
     # cold cache one core builds its kernels first, in compile mode.
     assert [(s, n) for s, n, _ in launches] == [("encode", 1), ("transformer", 4), ("vae", 1),
@@ -204,9 +203,7 @@ def test_quant_generate_before_compile_is_refused_before_any_launch(launches, mo
                                                                    tmp_path, capsys):
     """A host where compile never ran has no bf16 copy, so the directory is looked for from the
     fp32 source, which nothing quantized: refused on the driver (exit 2, as its other
-    refusals), naming `difflet compile`, before the encode stage, the work dir or any write.
-    prepare_quant opts in to the trace cache before it refuses, and the driver still restores
-    its environment (an in-process caller outlives the refusal)."""
+    refusals), naming `difflet compile`, before the encode stage, the work dir or any write."""
     _toy_snapshot(monkeypatch, tmp_path)
     with pytest.raises(SystemExit) as exc:
         hv15.HunyuanVideo15Orchestrator(_args(work_dir=str(tmp_path / "w"),
@@ -309,17 +306,16 @@ def test_the_native_path_keeps_no_args_keyed_artifact(launches, monkeypatch, tmp
         assert seen["init"]["quant"] is not None
 
 
-def test_a_quant_launch_restores_the_trace_cache_opt_in(launches, monkeypatch, tmp_path):
-    """prepare_quant opts in to the NKI trace cache for the MXFP8 kernel; the driver reads the
-    user's setting before it, so the launches still see the opt-in and the driver's
-    environment is restored after them, as on a bf16 launch."""
+def test_a_quant_launch_keeps_the_users_trace_cache_setting(launches, monkeypatch, tmp_path):
+    """The NKI trace cache is on by default, so a --quant launch sets nothing, and a user's
+    opt-out reaches every stage."""
     _toy_snapshot(monkeypatch, tmp_path)
     hv15.HunyuanVideo15Orchestrator(_args(work_dir=str(tmp_path / "w"), quant="mxfp8")).compile()
     assert "DIFFLET_NKI_TRACE_CACHE" not in os.environ
+    monkeypatch.setenv("DIFFLET_NKI_TRACE_CACHE", "0")
     launches.env_seen.clear()
     hv15.HunyuanVideo15Orchestrator(_args(work_dir=str(tmp_path / "w"), quant="mxfp8")).generate()
-    assert launches.env_seen == ["1", "1", "1"]
-    assert "DIFFLET_NKI_TRACE_CACHE" not in os.environ
+    assert launches.env_seen == ["0", "0", "0"]
 
 
 def test_the_driver_module_imports_no_torch_and_no_neuron_backend():

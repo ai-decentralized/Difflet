@@ -4,11 +4,14 @@ import sys
 
 import pytest
 
+from difflet.backends.neuron.compile import stack_version_tag
+
 # What run_stage's torchrun branch adds for the neuron ranks (compile.configure_compile_cache).
 NEURON_CACHE_VARS = (
     "TORCH_NEURONX_NEFF_CACHE_DIR",
     "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR",
     "TORCH_NEURONX_HLO_CACHE_DIR",
+    "NKI_TRACE_CACHE_URL",
     "NKI_ENABLE_TRACE_CACHE",
 )
 
@@ -236,8 +239,9 @@ def test_torchrun_launch_exports_the_neuron_cache_locations(monkeypatch, tmp_pat
     assert {name: env[name] for name in NEURON_CACHE_VARS} == {
         "TORCH_NEURONX_NEFF_CACHE_DIR": str(tmp_path / "neuron" / "neff"),
         "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR": str(tmp_path / "neuron" / "neff_local"),
-        "TORCH_NEURONX_HLO_CACHE_DIR": str(tmp_path / "neuron" / "hlo"),
-        "NKI_ENABLE_TRACE_CACHE": "0",
+        "TORCH_NEURONX_HLO_CACHE_DIR": str(tmp_path / "neuron" / "hlo" / stack_version_tag()),
+        "NKI_TRACE_CACHE_URL": str(tmp_path / "neuron" / "nki_trace"),
+        "NKI_ENABLE_TRACE_CACHE": "1",
     }
     assert not any(name in os.environ for name in NEURON_CACHE_VARS)  # the launcher's own env
     assert not (tmp_path / "neuron").exists()  # torch-neuronx creates the directories
@@ -254,7 +258,8 @@ def test_torchrun_launch_keeps_cache_locations_the_shell_exported(
     run_stage("pkg.mod:Orch", "toy", num_cores=2, virtual_core_size=None, cli_args=[])
 
     env = captured_launch["env"]
-    assert env["TORCH_NEURONX_HLO_CACHE_DIR"] == "/shell/hlo"
+    # kept, with the stack-version subdirectory the trace cache (on by default) adds
+    assert env["TORCH_NEURONX_HLO_CACHE_DIR"] == f"/shell/hlo/{stack_version_tag()}"
     assert env["TORCH_NEURONX_NEFF_CACHE_DIR"] == str(tmp_path / "neuron" / "neff")
 
 

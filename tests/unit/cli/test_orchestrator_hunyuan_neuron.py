@@ -184,12 +184,14 @@ def test_stage_parser_consumes_the_forwarded_vae_flags(monkeypatch):
 
 
 @pytest.mark.parametrize("vae_flag", [{}, {"host_vae": True}])
-def test_launches_opt_into_the_nki_trace_cache(launches, monkeypatch, tmp_path, vae_flag):
+def test_launches_leave_the_nki_trace_cache_setting_to_the_user(launches, monkeypatch, tmp_path,
+                                                               vae_flag):
     """At 720x1280x129 (119,056 joint tokens) each rank spent 30+ minutes in the NKI trace of
     the key-bounded attention_cte (py-spy on trn2: nki compile under get_kernel_config in fake
-    mode), and every launch repeats it unless torch-neuronx's NKI trace cache keeps it. Every
-    neuron launch (compile and generate, either decode) runs with DIFFLET_NKI_TRACE_CACHE=1, as
-    HunyuanVideo 1.5's does, and the driver's environment is restored afterwards."""
+    mode), and every launch repeats it unless torch-neuronx's NKI trace cache keeps it. The
+    cache is on by default (neuron.compile), so every neuron launch (compile and generate,
+    either decode) runs with the driver's DIFFLET_NKI_TRACE_CACHE as it is: unset, or a user's
+    opt-out."""
     stages, _ = launches
     monkeypatch.delenv("DIFFLET_NKI_TRACE_CACHE", raising=False)
     seen = []
@@ -197,8 +199,7 @@ def test_launches_opt_into_the_nki_trace_cache(launches, monkeypatch, tmp_path, 
         stages.append((stage, kw)), seen.append(os.environ.get("DIFFLET_NKI_TRACE_CACHE"))))
     HunyuanVideoOrchestrator(_args(work_dir=str(tmp_path / "w"), **vae_flag)).generate()
     HunyuanVideoOrchestrator(_args(**vae_flag)).compile()
-    assert seen and seen == ["1"] * len(stages)
-    assert "DIFFLET_NKI_TRACE_CACHE" not in os.environ
+    assert seen and seen == [None] * len(stages)
     monkeypatch.setenv("DIFFLET_NKI_TRACE_CACHE", "0")  # an explicit choice is kept
     seen.clear()
     HunyuanVideoOrchestrator(_args(work_dir=str(tmp_path / "w"), **vae_flag)).generate()
@@ -389,9 +390,8 @@ def tiny_fp8_snapshot(tmp_path_factory):
 
 def _quant_cache(monkeypatch, tmp_path, snapshot: str) -> Path:
     """Set up a test that runs ``prepare_quant``: a fresh compile cache (``tmp_path / "cache"``
-    as DIFFLET_COMPILE_CACHE), DIFFLET_NKI_TRACE_CACHE restored afterwards (the preparer sets
-    it with ``os.environ.setdefault``) and the resolver pointed at ``snapshot`` (after
-    ``launches``, which points it at a fake path)."""
+    as DIFFLET_COMPILE_CACHE), no DIFFLET_NKI_TRACE_CACHE (restored afterwards) and the
+    resolver pointed at ``snapshot`` (after ``launches``, which points it at a fake path)."""
     _unset(monkeypatch, "DIFFLET_NKI_TRACE_CACHE")
     cache = tmp_path / "cache"
     monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(cache))
@@ -480,7 +480,7 @@ def test_compile_writes_the_directory_and_generate_resolves_it(launches, monkeyp
     assert source["path"] == str(Path(tiny_fp8_snapshot) / "transformer")
     assert "bf16_copy_of" not in source
     assert f"[hunyuan_video] MXFP8 transformer (nki): {quantized}\n" in capsys.readouterr().out
-    assert os.environ["DIFFLET_NKI_TRACE_CACHE"] == "1"
+    assert "DIFFLET_NKI_TRACE_CACHE" not in os.environ  # on by default: nothing to set
     [(stage, kw)] = stages
     cli = kw["cli_args"]
     assert stage == "generate" and cli[cli.index("--quant") + 1] == "mxfp8"
@@ -833,6 +833,7 @@ def vae_stage(monkeypatch, tmp_path):
     _backend(monkeypatch, "neuron")
     monkeypatch.setattr(registry, "get_backend",
                         lambda name: SimpleNamespace(prepare_runtime=lambda parallel: None))
+    fake_pipeline.prepare_runtime_off_device(monkeypatch)  # its torch_neuronx import
     monkeypatch.setattr("difflet.pipeline.path_resolver.resolve_model_path",
                         lambda *a, **k: str(tmp_path / "model"))
     monkeypatch.setattr(vae_mod, "NeuronHunyuanVideoVaeDecoderApplication", _FakeVae)

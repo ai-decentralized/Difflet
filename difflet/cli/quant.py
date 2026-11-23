@@ -143,17 +143,11 @@ def prepare_quant(args: argparse.Namespace, component_dirs: dict[str, str], *, c
 
     None when ``--quant`` is off, and None without a line when no source directory is there
     (none given, or one missing: the weights are not downloaded yet, and the ranks report
-    that). The trace-cache choice is made before that, so the ranks inherit it either way.
+    that).
     """
     spec = quant_spec(args, default_tp_degree=default_tp_degree)
     if spec is None:
         return None
-    if spec.compute == "nki":
-        # The mxfp8 kernel path traces nkilib's matmul_mxfp8 once per launch per rank unless
-        # the trace cache keeps it: 191 s of start-up measured without it (trn3, 2026-10-31).
-        # Its inputs are all call arguments, so a cached trace cannot go stale. An explicit
-        # choice is kept; the ranks inherit the variable.
-        os.environ.setdefault("DIFFLET_NKI_TRACE_CACHE", "1")
     if not component_dirs or not all(os.path.isdir(d) for d in component_dirs.values()):
         return None
     from difflet.quant.checkpoint import prepare_quantized_checkpoint

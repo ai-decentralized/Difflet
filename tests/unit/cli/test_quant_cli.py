@@ -140,9 +140,9 @@ def tiny_dir(tmp_path_factory):
 
 @pytest.fixture
 def _trace_cache_restored(monkeypatch):
-    """Undo the DIFFLET_NKI_TRACE_CACHE the preparer sets with os.environ.setdefault: setenv
-    first records the variable's original state (delenv of an unset variable records
-    nothing, and the value leaked into later tests' compile-cache layout)."""
+    """No DIFFLET_NKI_TRACE_CACHE, and whatever a test sets undone afterwards: setenv first
+    records the variable's original state (delenv of an unset variable records nothing, and
+    a value leaked into later tests' compile-cache layout)."""
     monkeypatch.setenv("DIFFLET_NKI_TRACE_CACHE", "")
     monkeypatch.delenv("DIFFLET_NKI_TRACE_CACHE")
 
@@ -159,7 +159,7 @@ def test_prepare_quant_writes_on_create_and_refuses_when_missing(
     assert (Path(out["transformer"]) / "difflet_quant.json").is_file()
     assert Path(out["transformer"]).is_relative_to(tmp_path)
     assert capsys.readouterr().out.startswith(f"[t] MXFP8 transformer (nki): {out['transformer']}")
-    assert os.environ["DIFFLET_NKI_TRACE_CACHE"] == "1"
+    assert "DIFFLET_NKI_TRACE_CACHE" not in os.environ  # the trace cache is on by default
     # Resolve-only now finds it, and a second component is prepared under its own name.
     both = Q.prepare_quant(args, {"transformer": tiny_dir, "twin": tiny_dir}, create=False,
                            tag="t")
@@ -207,8 +207,7 @@ def test_each_driver_refuses_quant_the_way_it_refuses_everything_else(
 def test_prepare_quant_is_off_without_the_flag_or_the_weights(tmp_path, capsys,
                                                               _trace_cache_restored):
     """None and no line when --quant is off, or when the weights are not downloaded yet (the
-    ranks report that); the trace-cache choice is still made for the ranks in the second case,
-    and dequant compute leaves it alone."""
+    ranks report that); the trace-cache setting is never touched (on by default)."""
     missing = {"transformer": str(tmp_path / "not-downloaded" / "transformer")}
     assert Q.prepare_quant(_parse("compile", "--model-id", QWEN), missing, create=True,
                            tag="t") is None
@@ -220,7 +219,7 @@ def test_prepare_quant_is_off_without_the_flag_or_the_weights(tmp_path, capsys,
     args = _parse("compile", "--model-id", QWEN, "--backend", "neuron", "--quant", "mxfp8")
     assert Q.prepare_quant(args, missing, create=True, tag="t") is None
     assert Q.prepare_quant(args, {}, create=True, tag="t") is None
-    assert os.environ["DIFFLET_NKI_TRACE_CACHE"] == "1"
+    assert "DIFFLET_NKI_TRACE_CACHE" not in os.environ
     assert capsys.readouterr() == ("", "")
 
 
@@ -282,10 +281,10 @@ def test_application_kwargs_carry_the_spec(monkeypatch):
     assert "quant" not in _torchrun_application_kwargs(_parse("generate", "--model-id", QWEN))
 
 
-def test_the_kernel_path_turns_on_the_nki_trace_cache(monkeypatch, tmp_path,
-                                                      _trace_cache_restored):
-    """--quant mxfp8 (kernel compute) sets DIFFLET_NKI_TRACE_CACHE=1 for the ranks before any
-    launch unless the user chose; dequant compute and no --quant leave it alone."""
+def test_quant_leaves_the_nki_trace_cache_setting_alone(monkeypatch, tmp_path,
+                                                        _trace_cache_restored):
+    """The trace cache is on by default (neuron.compile), so no --quant path sets
+    DIFFLET_NKI_TRACE_CACHE, and a user's opt-out reaches the ranks unchanged."""
     cli_main = importlib.import_module("difflet.cli.main")
     monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
     monkeypatch.setenv("DIFFLET_EXEC_MODE", "compile")
@@ -304,7 +303,7 @@ def test_the_kernel_path_turns_on_the_nki_trace_cache(monkeypatch, tmp_path,
     prepare("--quant", "mxfp8", "--quant-compute", "dequant")
     assert "DIFFLET_NKI_TRACE_CACHE" not in os.environ
     prepare("--quant", "mxfp8")
-    assert os.environ["DIFFLET_NKI_TRACE_CACHE"] == "1"
+    assert "DIFFLET_NKI_TRACE_CACHE" not in os.environ
     monkeypatch.setenv("DIFFLET_NKI_TRACE_CACHE", "0")
     prepare("--quant", "mxfp8")
     assert os.environ["DIFFLET_NKI_TRACE_CACHE"] == "0"
