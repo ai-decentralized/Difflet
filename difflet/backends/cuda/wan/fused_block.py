@@ -128,19 +128,6 @@ if HAS_TRITON:
         tl.store(out_ptr + row * n + cols, out.to(tl.bfloat16), mask=mask)
 
 
-def _rows(x: torch.Tensor) -> tuple[int, int, int]:
-    """``(batch, tokens, channels)`` of a ``(B, S, C)`` activation."""
-    batch, tokens, channels = x.shape
-    return batch, tokens, channels
-
-
-def _modulation(t: torch.Tensor, batch: int, channels: int) -> int:
-    """The batch stride of a ``(B, 1, C)`` fp32 modulation chunk, which is read in place."""
-    if t.dtype != torch.float32 or t.shape != (batch, 1, channels) or t.stride(-1) != 1:
-        raise ValueError(f"expected a ({batch}, 1, {channels}) fp32 modulation, got {t.shape}")
-    return t.stride(0)
-
-
 def layer_norm(
     x: torch.Tensor,
     eps: float,
@@ -151,14 +138,12 @@ def layer_norm(
     scale: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """``bf16(layer_norm_fp32(x) [* weight + bias] [* (1 + scale) + shift])`` for a bf16
-    ``(B, S, C)`` ``x``; ``shift``/``scale`` are ``(B, 1, C)`` fp32."""
-    batch, tokens, channels = _rows(x)
+    ``(B, S, C)`` ``x``. ``shift`` and ``scale`` are ``(B, 1, C)`` fp32 chunks of the block's
+    modulation, read in place through their shared batch stride."""
+    batch, tokens, channels = x.shape
     x = x.contiguous()
     out = torch.empty_like(x)
     affine, modulate = weight is not None, shift is not None
-    stride = _modulation(shift, batch, channels) if modulate else 0
-    if modulate and _modulation(scale, batch, channels) != stride:
-        raise ValueError("shift and scale must share a layout")
     _layer_norm_kernel[(batch * tokens,)](
         x,
         weight if affine else x,
@@ -169,7 +154,7 @@ def layer_norm(
         tokens,
         channels,
         float(eps),
-        stride,
+        shift.stride(0) if modulate else 0,
         AFFINE=affine,
         MODULATE=modulate,
         BLOCK=triton.next_power_of_2(channels),
@@ -181,7 +166,7 @@ def layer_norm(
 def gated_residual(residual: torch.Tensor, update: torch.Tensor, gate: torch.Tensor):
     """``bf16(residual.float() + update.float() * gate)``; bf16 ``(B, S, C)`` residual and
     update, ``(B, 1, C)`` fp32 gate."""
-    batch, tokens, channels = _rows(residual)
+    batch, tokens, channels = residual.shape
     residual, update = residual.contiguous(), update.contiguous()
     out = torch.empty_like(residual)
     block = 2048
@@ -192,7 +177,7 @@ def gated_residual(residual: torch.Tensor, update: torch.Tensor, gate: torch.Ten
         out,
         tokens,
         channels,
-        _modulation(gate, batch, channels),
+        gate.stride(0),
         BLOCK=block,
         num_warps=8,
     )
@@ -209,13 +194,9 @@ def rms_norm_rotary(
 ) -> torch.Tensor:
     """RMS norm over all of ``x``'s channels (fp32, weighted, bf16 store), then the interleaved
     rotary of every head with the ``(1, S, 1, head_dim)`` fp32 tables: what
-    ``rms_norm_fp32`` and ``apply_rotary_emb`` compute in sequence, in one pass."""
-    batch, tokens, channels = _rows(x)
-    if x.stride(-1) != 1:
-        x = x.contiguous()
-    for table in (cos, sin):
-        if table.dtype != torch.float32 or table.numel() != tokens * head_dim:
-            raise ValueError(f"expected ({tokens}, {head_dim}) fp32 rotary tables")
+    ``rms_norm_fp32`` and ``apply_rotary_emb`` compute in sequence, in one pass. ``x`` is a
+    projection's output: unit stride across channels, rows ``x.stride(1)`` apart."""
+    batch, tokens, channels = x.shape
     out = torch.empty((batch, tokens, channels), dtype=torch.bfloat16, device=x.device)
     _rms_norm_rotary_kernel[(batch * tokens,)](
         x,
@@ -284,11 +265,4 @@ def fuse_blocks(module) -> int:
     return len(module.blocks)
 
 
-__all__ = [
-    "HAS_TRITON",
-    "fuse_blocks",
-    "fused_block_forward",
-    "gated_residual",
-    "layer_norm",
-    "rms_norm_rotary",
-]
+__all__ = ["fuse_blocks"]
