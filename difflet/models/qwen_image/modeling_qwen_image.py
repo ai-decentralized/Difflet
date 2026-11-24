@@ -410,7 +410,7 @@ class _QwenImageTrainiumAttnProcessor:
                 q_joint,
                 img_key.transpose(1, 2), img_value.transpose(1, 2),  # sharded image K,V
                 txt_key.transpose(1, 2), txt_value.transpose(1, 2),  # replicated text K,V
-                scale=scale, causal=False,
+                scale=scale, causal=False, text_first=True,
             )  # [B, H, Sq, d]
             joint_hidden_states = o_joint.transpose(1, 2)  # [B, Sq, H, d]
         elif self.context_parallel_enabled and self.cp_mode == "ulysses":
@@ -521,7 +521,7 @@ class _QwenImageTrainiumAttnProcessor:
             q_joint = torch.cat([txt_query, img_query], dim=1)
             out = joint_ring_attention(
                 bhsd(q_joint), bhsd(img_key), bhsd(img_value), bhsd(txt_key), bhsd(txt_value),
-                scale=scale, causal=False, text_valid_len=valid,
+                scale=scale, causal=False, text_valid_len=valid, text_first=True,
             )
             return bhsd(out)
         if image_seq_len is None:

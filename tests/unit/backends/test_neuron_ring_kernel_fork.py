@@ -37,3 +37,10 @@ def test_const_max_ring_forks_keep_the_apache_header_and_name_their_source():
 def test_const_max_ring_forks_import_absolutely():
     for path in CONSTMAX:
         assert not re.search(r"^\s*from \.", path.read_text(), flags=re.M), path.name
+
+
+def test_joint_ring_kernel_keeps_the_apache_header_and_names_its_origin():
+    head = (KERNEL.parent / "joint_ring_const_max_fwd_kernel.py").read_text().splitlines()[:25]
+    assert any("Copyright Amazon.com, Inc. or its affiliates" in line for line in head)
+    assert any("Licensed under the Apache License, Version 2.0" in line for line in head)
+    assert any("Difflet: derived from ring_attention_const_max_fwd" in line for line in head)
