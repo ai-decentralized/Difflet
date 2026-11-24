@@ -14,11 +14,30 @@ EXAMPLE = str(Path(__file__).resolve().parents[3] / "examples" / "serving" / "fl
 
 
 @pytest.mark.parametrize("action", ["serve", "up", "down", "status"])
-def test_gateway_parser_actions(action):
+def test_gateway_parser_actions(action, capsys):
     args = _build_parser().parse_args(["gateway", action, "--config", "f.yaml"])
     assert (args.command, args.gateway_action, args.config) == ("gateway", action, "f.yaml")
-    with pytest.raises(SystemExit):
-        _build_parser().parse_args(["gateway", action])
+    with pytest.raises(SystemExit) as exc:
+        main(["gateway", action])
+    assert exc.value.code == 1 and "--config" in capsys.readouterr().err
+
+
+def test_gateway_page_writes_the_static_page(tmp_path, capsys):
+    out = tmp_path / "site" / "index.html"
+    out.parent.mkdir()
+    main(["gateway", "page", "--api-base", "https://api.example", "--out", str(out)])
+    page = out.read_text()
+    assert page.startswith("<!doctype html>")
+    assert 'window.DIFFLET_API = "https://api.example";' in page and "<table" not in page
+    assert str(out) in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("argv", [["--out", "x.html"], ["--api-base", "https://api.example"],
+                                  ["--api-base", "api.example", "--out", "x.html"]])
+def test_gateway_page_needs_an_api_base_url_and_an_out_path(tmp_path, capsys, argv):
+    with pytest.raises(SystemExit) as exc:
+        main(["gateway", "page", *argv])
+    assert exc.value.code == 1 and capsys.readouterr().err.startswith("Error: ")
 
 
 @pytest.mark.parametrize("action", ["up", "down"])

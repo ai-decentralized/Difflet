@@ -4,7 +4,9 @@ import json
 import re
 from pathlib import Path
 
-from difflet.serving.gateway.fleet import FleetConfig, FleetEntry
+import pytest
+
+from difflet.serving.gateway.fleet import FleetConfig, FleetEntry, Limits, Wait
 from difflet.serving.gateway.page import _json, render_page
 
 FLUX = "black-forest-labs/FLUX.1-dev"
@@ -63,9 +65,13 @@ QWEN = "Qwen/Qwen-Image"
 H3 = "MiniMaxAI/MiniMax-H3"
 
 
+def _ui(page):
+    found = re.search(r'<script type="application/json" id="ui">(.*?)</script>', page, re.S)
+    return json.loads(found.group(1))
+
+
 def _models(page):
-    found = re.search(r'<script type="application/json" id="models">(.*?)</script>', page, re.S)
-    return {m["id"]: m for m in json.loads(found.group(1))}
+    return {m["id"]: m for m in _ui(page)["models"]}
 
 
 def test_page_is_a_generation_form_that_never_reloads():
@@ -73,7 +79,8 @@ def test_page_is_a_generation_form_that_never_reloads():
                        total_runs=7)
     assert 'http-equiv="refresh"' not in page  # a reload would drop a running generation
     for marker in ('id="model"', 'id="prompt"', 'id="run"', 'data-kind="image"',
-                   'data-kind="video"', "fetch('/ready')", "'/v1/videos'", 'id="runs">7<'):
+                   'data-kind="video"', "fetch(API + '/ready')", "API + '/v1/videos'",
+                   'id="runs">7<', 'window.DIFFLET_API = "";'):
         assert marker in page
     models = _models(page)
     assert models[FLUX]["kind"] == "image" and models[FLUX]["status"] == "ready"
@@ -105,8 +112,10 @@ def test_page_shows_the_measured_estimate():
     assert 'id="progress"' in page
 
 
-def test_every_id_the_script_uses_exists_once():
-    page = render_page(_config(_flux(), _hv()), {FLUX: "ready"}, base_url=BASE)
+@pytest.mark.parametrize("static", [False, True])
+def test_every_id_the_script_uses_exists_once(static):
+    page = (render_page(None, {}, api_base="https://api.example") if static
+            else render_page(_config(_flux(), _hv()), {FLUX: "ready"}, base_url=BASE))
     ids = re.findall(r'\bid="([^"]+)"', page)
     assert len(ids) == len(set(ids)), "duplicate element ids"
     used = set(re.findall(r"\$\('([^']+)'\)", page))
@@ -116,3 +125,26 @@ def test_every_id_the_script_uses_exists_once():
 
 def test_embedded_json_cannot_end_its_script_element():
     assert "</" not in _json({"x": "</script><script>alert(1)"})
+
+
+def test_server_page_embeds_the_wait_thresholds_and_limits():
+    config = FleetConfig(host="0.0.0.0", port=8000, runs_dir=Path("/runs"), models=(_flux(),),
+                         limits=Limits(client_per_hour=5), wait=Wait(10, 20, 30))
+    ui = _ui(render_page(config, {FLUX: "ready"}, base_url=BASE))
+    assert ui["wait"] == {"notice_s": 10, "suggest_s": 20, "reject_s": 30}
+    assert ui["limits"] == {"client_active": 1, "client_per_hour": 5, "ip_per_hour": 2000}
+
+
+def test_static_page_calls_the_api_base_and_embeds_no_models():
+    page = render_page(None, {}, api_base="https://api.example/")
+    assert 'window.DIFFLET_API = "https://api.example";' in page
+    assert _ui(page) == {"models": [], "wait": None, "limits": None}
+    assert "<table" not in page and "Example requests" not in page
+    assert "API + '/ui/models'" in page and 'id="prompt"' in page
+    assert re.search(r"<(?:link|img|script)\b[^>]*\b(?:href|src)=", page) is None  # one file
+
+
+def test_page_script_sends_a_client_id_kept_in_local_storage():
+    page = render_page(_config(_flux()), {FLUX: "ready"}, base_url=BASE)
+    assert "'X-Difflet-Client': CLIENT" in page
+    assert "localStorage.getItem" in page

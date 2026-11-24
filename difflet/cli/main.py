@@ -962,13 +962,19 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     gateway.add_argument(
         "gateway_action",
-        choices=["serve", "up", "down", "status"],
+        choices=["serve", "up", "down", "status", "page"],
         help="serve: run the gateway; up/down: start/stop the fleet's backends; "
-        "status: print each backend's status",
+        "status: print each backend's status; page: write the page as a static file",
     )
     gateway.add_argument(
-        "--config", required=True, help="Fleet file (example: examples/serving/fleet.yaml)"
+        "--config",
+        default=None,
+        help="Fleet file, required except for page (example: examples/serving/fleet.yaml)",
     )
+    gateway.add_argument(
+        "--api-base", default=None, help="page: the gateway's URL the static page calls"
+    )
+    gateway.add_argument("--out", default=None, help="page: the HTML file to write")
     gateway.add_argument(
         "--api-key",
         default=None,

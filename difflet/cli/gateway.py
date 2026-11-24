@@ -1,7 +1,8 @@
 """`difflet gateway` — one endpoint in front of several pinned `difflet serve` backends.
 
 ``up``/``down`` start and stop the backends named in the fleet file, ``status`` prints each one's
-status, ``serve`` runs the gateway. docs/serving/gateway.md.
+status, ``serve`` runs the gateway, ``page`` writes the page as a static file to host elsewhere.
+docs/serving/gateway.md.
 """
 
 from __future__ import annotations
@@ -9,7 +10,10 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import re
 import sys
+from pathlib import Path
+from typing import NoReturn
 
 import httpx
 
@@ -20,6 +24,11 @@ from difflet.serving.gateway.status import fleet_status
 
 
 def run(args: argparse.Namespace) -> None:
+    if args.gateway_action == "page":
+        _write_page(args.api_base, args.out)
+        return
+    if not args.config:
+        _fail(f"gateway {args.gateway_action} needs --config FLEET_FILE")
     try:
         config = load_fleet(args.config)
         if args.gateway_action == "up":
@@ -31,8 +40,26 @@ def run(args: argparse.Namespace) -> None:
         else:
             _serve(config, args.api_key or os.environ.get("DIFFLET_API_KEY") or None)
     except (FleetConfigError, LauncherError, HostError) as exc:
-        print(f"Error: {exc}", file=sys.stderr)
-        raise SystemExit(1)
+        _fail(str(exc))
+
+
+def _fail(message: str) -> NoReturn:
+    print(f"Error: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def _write_page(api_base: str | None, out: str | None) -> None:
+    """The page as one static file that calls the gateway at ``api_base`` (it must allow the
+    page's origin in ``gateway.cors_origins``)."""
+    if not (api_base and re.fullmatch(r"https?://\S+", api_base)) or not out:
+        _fail("gateway page needs --api-base http(s)://GATEWAY and --out PATH")
+    from difflet.serving.gateway.page import render_page
+
+    try:
+        Path(out).write_text(render_page(None, {}, api_base=api_base))
+    except OSError as exc:
+        _fail(f"cannot write {out}: {exc}")
+    print(f"wrote {out} (calls {api_base.rstrip('/')})")
 
 
 def _serve(config: FleetConfig, api_key: str | None) -> None:

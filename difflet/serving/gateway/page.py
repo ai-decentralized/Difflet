@@ -1,9 +1,12 @@
 """The gateway's page at ``/``: generate an image or a video with any ready model, plus every
 model's shapes, status and an example API request.
 
-Server-rendered from the fleet file; a small inline script calls the gateway's own ``/v1`` routes
+Server-rendered from the fleet file; a small inline script calls the gateway's ``/v1`` routes
 (the page sends no API key: it works when the gateway runs without one) and polls ``/ready`` and
-``/stats`` instead of reloading the page, so a running generation is never lost.
+``/stats`` instead of reloading the page, so a running generation is never lost. A static copy
+(``difflet gateway page``), hosted elsewhere, calls the gateway at its API base and loads the
+models from ``/ui/models``. Every generation request carries the browser's ``X-Difflet-Client``
+id for the gateway's per-client limits.
 """
 
 from __future__ import annotations
@@ -78,6 +81,9 @@ textarea { min-height: 6rem; resize: vertical; }
   color: var(--muted); padding: .2rem .65rem; font: inherit; font-size: .8rem; cursor: pointer;
   text-align: left; }
 .examples button:hover { color: var(--fg); border-color: var(--muted); }
+.warn { color: var(--recovering); } .warn:empty { display: none; }
+.warn button { border: 1px solid currentColor; border-radius: 1rem; background: var(--bg);
+  color: var(--accent); padding: 0 .55rem; font: inherit; cursor: pointer; }
 details.advanced { margin-top: .75rem; } details summary { cursor: pointer; color: var(--muted); }
 .row3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: .5rem; }
 #run { width: 100%; margin-top: 1rem; padding: .65rem; border: 0; border-radius: 8px;
@@ -112,15 +118,38 @@ pre { margin: 0; padding: .75rem 1rem; background: var(--panel); border: 1px sol
 .recovering { color: var(--recovering); } .down { color: var(--down); }
 """
 _SCRIPT = r"""
-const MODELS = JSON.parse(document.getElementById('models').textContent);
-const EXAMPLES = JSON.parse(document.getElementById('example-prompts').textContent);
 const $ = (id) => document.getElementById(id);
+const API = window.DIFFLET_API || '';  // the gateway; '' when it served this page itself
+const UI = JSON.parse($('ui').textContent);
+const EXAMPLES = JSON.parse($('example-prompts').textContent);
+// A static copy of the page embeds no models: it loads them, with the wait thresholds and the
+// limits, from GET /ui/models.
+const STATIC = UI.models.length === 0;
+let MODELS = UI.models;
+let WAIT = UI.wait;
+let LIMITS = UI.limits;
 let kind = 'image';
 let running = false;
 let QUEUE = {};  // model id -> requests running or waiting (GET /queue)
+// This browser's id for the gateway's per-client limits; in memory when storage is blocked.
+const CLIENT = (() => {
+  const fresh = () => Array.from(crypto.getRandomValues(new Uint8Array(16)),
+    (b) => b.toString(16).padStart(2, '0')).join('');
+  try {
+    let id = localStorage.getItem('difflet-client');
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(id || '')) {
+      id = fresh();
+      localStorage.setItem('difflet-client', id);
+    }
+    return id;
+  } catch (e) { return fresh(); }
+})();
 
 function shapeText(s) { return s[2] ? s[0] + '×' + s[1] + '×' + s[2] : s[0] + '×' + s[1]; }
-function duration(seconds) { return seconds < 90 ? Math.round(seconds) + ' s' : (seconds / 60).toFixed(1) + ' min'; }
+function duration(seconds) {
+  if (seconds < 90) return Math.round(seconds) + ' s';
+  return seconds < 5400 ? (seconds / 60).toFixed(1) + ' min' : (seconds / 3600).toFixed(1) + ' h';
+}
 // Seconds a request should take (measured: base + per step), null without a measurement.
 function estimate(m, steps) {
   const n = steps === null ? m.steps : steps;
@@ -152,7 +181,8 @@ function renderModelInfo() {
   const m = current();
   const info = $('model-info');
   info.textContent = m ? 'Shape ' + shapeText(m.shapes[0]) + ' · device ' + m.device
-    + (m.steps ? ' · default ' + m.steps + ' steps' : '') : 'No ' + kind + ' model is ready yet.';
+    + (m.steps ? ' · default ' + m.steps + ' steps' : '')
+    : (STATIC && !MODELS.length ? 'Loading models…' : 'No ' + kind + ' model is ready yet.');
   const steps = readNumber('steps');
   const seconds = m ? estimate(m, steps) : null;
   if (seconds !== null) {
@@ -172,10 +202,48 @@ function renderModelInfo() {
         + (each !== null && seconds !== null ? ' · total wait ~' + duration(waiting * each + seconds) : '');
     info.append(document.createElement('br'), queue);
   }
+  const tooBusy = renderWait(m);
   $('guidance-box').hidden = !m || m.guidance === null;
   $('steps').placeholder = m && m.steps ? String(m.steps) : 'default';
   $('guidance').placeholder = m && m.guidance !== null ? String(m.guidance) : '';
-  $('run').disabled = running || !m || m.status !== 'ready';
+  $('run').disabled = running || !m || m.status !== 'ready' || tooBusy;
+}
+
+// Seconds before a new request on m starts, as the gateway estimates it: the requests ahead at
+// the model's default steps. null without an estimate.
+function waitFor(m) {
+  const each = estimate(m, null);
+  return each === null ? null : (QUEUE[m.id] || 0) * each;
+}
+
+// The long-wait warning under the queue line; true when the gateway would refuse the request.
+function renderWait(m) {
+  const box = $('wait');
+  box.textContent = '';
+  const wait = m && WAIT ? waitFor(m) : null;
+  if (wait === null || wait < WAIT.notice_s) return false;
+  const tooBusy = wait >= WAIT.reject_s;
+  box.append(tooBusy ? 'This model is too busy right now (over ' + duration(WAIT.reject_s)
+    + '); please choose another model.' : 'Long wait: about ' + duration(wait) + ' before it starts.');
+  if (wait >= WAIT.suggest_s) {
+    const better = MODELS.filter((o) => o.id !== m.id && o.kind === m.kind && o.status === 'ready'
+      && waitFor(o) !== null && waitFor(o) < wait).sort((a, b) => waitFor(a) - waitFor(b)).slice(0, 2);
+    if (better.length) box.append(' Consider another model: ');
+    for (const o of better) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.textContent = o.label + (waitFor(o) ? ' (~' + duration(waitFor(o)) + ' wait)' : ' (no wait)');
+      b.onclick = () => { $('model').value = o.id; renderModelInfo(); };
+      box.append(b, ' ');
+    }
+  }
+  return tooBusy;
+}
+
+function renderLimits() {
+  $('limits').textContent = LIMITS ? 'Each browser can have ' + LIMITS.client_active
+    + (LIMITS.client_active === 1 ? ' request' : ' requests') + ' running or waiting, and run up to '
+    + LIMITS.client_per_hour + ' per hour.' : '';
 }
 
 function renderExamples() {
@@ -217,8 +285,8 @@ async function runImage(m, prompt, seed, steps, guidance) {
   const extra = { height: m.shapes[0][0], width: m.shapes[0][1], seed: seed };
   if (steps !== null) extra.num_inference_steps = steps;
   if (guidance !== null) extra.guidance_scale = guidance;
-  const body = await api('/v1/chat/completions', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' },
+  const body = await api(API + '/v1/chat/completions', {
+    method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Difflet-Client': CLIENT },
     body: JSON.stringify({ model: m.id, messages: [{ role: 'user', content: prompt }], extra_body: extra }),
   });
   return { type: 'image', url: body.choices[0].message.content[0].image_url.url };
@@ -234,8 +302,9 @@ async function runVideo(m, prompt, seed, steps, guidance, onStatus) {
   form.append('seed', String(seed));
   if (steps !== null) form.append('num_inference_steps', String(steps));
   if (guidance !== null) form.append('guidance_scale', String(guidance));
-  const job = await api('/v1/videos', { method: 'POST', body: form });
-  const path = '/v1/videos/' + encodeURIComponent(job.id);
+  const job = await api(API + '/v1/videos', {
+    method: 'POST', headers: { 'X-Difflet-Client': CLIENT }, body: form });
+  const path = API + '/v1/videos/' + encodeURIComponent(job.id);
   for (;;) {
     await sleep(3000);
     const state = await api(path);
@@ -323,17 +392,25 @@ async function run() {
 
 async function refreshQueue() {
   try {
-    QUEUE = (await fetch('/queue').then((r) => r.json())).models || {};
+    QUEUE = (await fetch(API + '/queue').then((r) => r.json())).models || {};
     renderModels();
   } catch (e) { /* keep the last known queue */ }
 }
 
 async function refresh() {
   try {
-    const ready = await fetch('/ready').then((r) => r.json());
-    for (const m of MODELS) m.status = (ready.models || {})[m.id] || 'down';
+    if (STATIC) {
+      const ui = await fetch(API + '/ui/models').then((r) => r.json());
+      MODELS = ui.models;
+      WAIT = ui.wait;
+      LIMITS = ui.limits;
+      renderLimits();
+    } else {
+      const ready = await fetch(API + '/ready').then((r) => r.json());
+      for (const m of MODELS) m.status = (ready.models || {})[m.id] || 'down';
+    }
     renderModels();
-    const stats = await fetch('/stats').then((r) => r.json());
+    const stats = await fetch(API + '/stats').then((r) => r.json());
     $('runs').textContent = String(stats.total_runs);
   } catch (e) { /* keep the last known state */ }
 }
@@ -343,29 +420,23 @@ $('model').onchange = renderModelInfo;
 $('steps').addEventListener('input', renderModelInfo);
 $('run').onclick = run;
 $('prompt').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) run(); });
-selectTab(MODELS.some((m) => m.kind === 'image') ? 'image' : 'video');
+selectTab(MODELS.length && !MODELS.some((m) => m.kind === 'image') ? 'video' : 'image');
+renderLimits();
+if (STATIC) refresh();
 setInterval(refresh, 15000);
 refreshQueue();
 setInterval(refreshQueue, 5000);
 """
 
 
-def render_page(config: FleetConfig, statuses: Mapping[str, str], *, base_url: str,
-                total_runs: int = 0) -> str:
-    rows, examples = [], []
-    for entry in config.models:
-        status = statuses.get(entry.model_id, "down")
-        shapes = ", ".join("×".join(str(n) for n in shape if n is not None)
-                           for shape in entry.shapes)
-        rows.append(
-            f"<tr><td><code>{escape(entry.model_id)}</code></td><td>{escape(entry.kind)}</td>"
-            f"<td>{entry.device}</td><td>{escape(shapes)}</td>"
-            f"<td>{escape(estimate_text(entry, model_defaults(entry.model_id)[0]))}</td>"
-            f'<td><span class="badge {escape(status)}" title="{escape(_STATUS_HELP.get(status, ""))}">'
-            f"{escape(status)}</span></td></tr>")
-        examples.append(f"<h3><code>{escape(entry.model_id)}</code></h3>\n"
-                        f"<pre><code>{escape(_example(entry, base_url))}</code></pre>")
-    models = [_ui_model(entry, statuses.get(entry.model_id, "down")) for entry in config.models]
+def render_page(config: FleetConfig | None, statuses: Mapping[str, str], *, base_url: str = "",
+                total_runs: int = 0, api_base: str = "") -> str:
+    """The page. Its script calls the gateway at ``api_base`` ('': the page's own origin). Without a
+    ``config`` it is the static page (``difflet gateway page``): no models embedded, so the
+    script loads them from ``{api_base}/ui/models``, and no model table or API examples."""
+    ui = ({"models": [], "wait": None, "limits": None} if config is None
+          else ui_models(config, statuses))
+    api = "" if config is None else _api_section(config, statuses, base_url)
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -377,7 +448,7 @@ def render_page(config: FleetConfig, statuses: Mapping[str, str], *, base_url: s
 <body>
 <header>
 <div><h1>Difflet</h1><p>Text-to-image and text-to-video on AWS Trainium.</p></div>
-<div class="counter">Total inference runs <b id="runs">{int(total_runs)}</b></div>
+<div class="counter">Total inference runs <b id="runs">{"–" if config is None else int(total_runs)}</b></div>
 </header>
 <div class="layout">
 <div class="panel">
@@ -388,6 +459,7 @@ def render_page(config: FleetConfig, statuses: Mapping[str, str], *, base_url: s
 <label for="model">Model</label>
 <select id="model"></select>
 <div class="hint" id="model-info"></div>
+<div class="hint warn" id="wait" aria-live="polite"></div>
 <label for="prompt">Prompt</label>
 <textarea id="prompt" placeholder="Describe what to generate"></textarea>
 <label>Examples</label>
@@ -406,11 +478,37 @@ def render_page(config: FleetConfig, statuses: Mapping[str, str], *, base_url: s
 <div id="state" aria-live="polite"></div>
 <p class="notice">{escape(QUEUE_LINE)} Estimated times were measured on this server with one
 model busy at a time; the wait counts the requests ahead at their model's default steps. A request
-must use one of its model's shapes: H×W for images, H×W×F (frames) for videos.</p>
+must use one of its model's shapes: H×W for images, H×W×F (frames) for videos.
+<span id="limits"></span></p>
 </div>
 <div class="results" id="results"><div class="empty">Results appear here.</div></div>
 </div>
-<section class="api">
+{api}
+<script type="application/json" id="ui">{_json(ui)}</script>
+<script type="application/json" id="example-prompts">{_json(EXAMPLE_PROMPTS)}</script>
+<script>window.DIFFLET_API = {_json(api_base.rstrip("/"))};</script>
+<script>{_SCRIPT}</script>
+</body>
+</html>
+"""
+
+
+def _api_section(config: FleetConfig, statuses: Mapping[str, str], base_url: str) -> str:
+    """The server-rendered model table and example requests, folded under the form."""
+    rows, examples = [], []
+    for entry in config.models:
+        status = statuses.get(entry.model_id, "down")
+        shapes = ", ".join("×".join(str(n) for n in shape if n is not None)
+                           for shape in entry.shapes)
+        rows.append(
+            f"<tr><td><code>{escape(entry.model_id)}</code></td><td>{escape(entry.kind)}</td>"
+            f"<td>{entry.device}</td><td>{escape(shapes)}</td>"
+            f"<td>{escape(estimate_text(entry, model_defaults(entry.model_id)[0]))}</td>"
+            f'<td><span class="badge {escape(status)}" title="{escape(_STATUS_HELP.get(status, ""))}">'
+            f"{escape(status)}</span></td></tr>")
+        examples.append(f"<h3><code>{escape(entry.model_id)}</code></h3>\n"
+                        f"<pre><code>{escape(_example(entry, base_url))}</code></pre>")
+    return f"""<section class="api">
 <details><summary>Models, status and API examples</summary>
 <div class="scroll"><table>
 <thead><tr><th>Model</th><th>Kind</th><th>Device</th><th>Shapes</th><th>Est. time</th><th>Status</th></tr></thead>
@@ -424,13 +522,7 @@ one; the header is ignored when it has none. JSON: <a href="/v1/models">/v1/mode
 <a href="/ready">/ready</a>, <a href="/health">/health</a>.</p>
 {chr(10).join(examples)}
 </details>
-</section>
-<script type="application/json" id="models">{_json(models)}</script>
-<script type="application/json" id="example-prompts">{_json(EXAMPLE_PROMPTS)}</script>
-<script>{_SCRIPT}</script>
-</body>
-</html>
-"""
+</section>"""
 
 
 def _json(value) -> str:
