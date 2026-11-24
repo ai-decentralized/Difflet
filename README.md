@@ -123,7 +123,7 @@ see the per-model limits below.
 | FLUX.1-dev | ✅ image | ✅ image | ✅ | ❌ | ✅ ² | — ¹ | ❌ | ❌ |
 | Qwen-Image | ✅ image | ⚠️ image ³ | ✅ | ✅ | ✅ | — ⁴ | ❌ | ❌ |
 | Wan 2.2 | ✅ video | ✅ video | ✅ | ❌ | ⚠️ ⁵ | ✅ ⁶ | ❌ | ❌ |
-| Wan 2.1 ¹¹ | ✅ video | ✅ video | ✅ | ❌ | ⚠️ ⁵ | Not measured | ❌ | ❌ |
+| Wan 2.1 ¹¹ | ✅ video | ✅ video | ✅ | ❌ | ⚠️ ⁵ | ✅ ⁶ | ❌ | ❌ |
 | HunyuanVideo (original) | ⚠️ experimental ⁷ | ⚠️ experimental ⁷ | ⚠️ execution observed ⁷ | ❌ | Not measured | — ¹ | ❌ | ❌ |
 | LTX-2 | ⚠️ video, CPU checks ⁸ | ⚠️ video, CPU checks ⁸ | ⚠️ Python qualified ⁸ | ❌ | Not measured | ❌ | ❌ | ❌ |
 | HunyuanVideo 1.5 | ⚠️ experimental ⁹ | ⚠️ experimental ⁹ | ✅ ⁹ | ❌ | Not measured | ❌ | ❌ | ❌ |

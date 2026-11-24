@@ -3,9 +3,10 @@
 What was run on GPUs for Qwen-Image, FLUX.1-dev, Wan 2.2 T2V-A14B and Wan 2.1 T2V-14B on the
 CUDA backend, what works with a documented limit, what is refused by design, and what was never
 run. Hardware: NVIDIA RTX PRO 6000 Blackwell (Server and Workstation editions, 96 GB, PCIe, no
-NVLink), torch 2.11.0+cu128; Flux with two replicas on 2 × A100 80 GB; Wan 2.1's accuracy against
-diffusers and its speed on one A100 80 GB (SXM4), its DiT parity and its Python, CLI, `--dp 2` and
-HTTP cells also on two H200s.
+NVLink), torch 2.11.0+cu128; Flux with two replicas on 2 × A100 80 GB. Wan 2.1's six-seed accuracy
+against diffusers and its speed are from one A100 80 GB (SXM4); its DiT parity, its Python, CLI,
+staged-CLI, `--dp 2`, `--cfg-parallel` and HTTP cells, its fused-against-unfused comparison and
+Wan 2.2's checks with the fused eager blocks are from H200s.
 
 Statuses: **PASS** (ran end to end) / **LIMIT** (works with a documented constraint) / **N/A**
 (refused by design) / **NOT MEASURED** (not refused, not run).
@@ -17,13 +18,13 @@ Statuses: **PASS** (ran end to end) / **LIMIT** (works with a documented constra
 | `difflet run` | PASS | PASS | PASS | PASS |
 | DiT parity vs diffusers | PASS (all-ones and padded prompt) | PASS | PASS (both experts, rounding block) | PASS (rounding block) |
 | e2e vs diffusers | PASS | PASS, gate relative to a recorded noise floor over seeds | PASS, gate relative to a recorded noise floor over seeds | PASS at 9 and 81 frames, gate relative to a recorded noise floor |
-| CLI matrix (download, compile, generate) | PASS | PASS | PASS | NOT MEASURED (`difflet run` only) |
+| CLI matrix (download, compile, generate) | PASS | PASS | PASS | PASS, tensor-equal to `difflet run` |
 | `difflet serve` | PASS; LIMIT: one request at a time (429 after the 30 s queue timeout) | PASS, PNG byte-identical to `difflet run` | PASS, frames bit-identical to `difflet run` in-process; the MP4 writer is not byte-deterministic | PASS, served frames equal the Python path's (MP4 compared through the same encoder) |
 | `--torch-compile` | PASS | PASS | PASS | PASS |
 | `--teacache-cadence N` | PASS | N/A | N/A | N/A |
 | `--dp 2 --requests` | PASS, byte-identical | PASS on 2 × A100, byte-identical; NOT MEASURED on two PRO 6000s | PASS, bit-identical | PASS, bit-identical |
 | `serve --dp-degree 2` | PASS | PASS on 2 × A100 | N/A: the video service runs one job at a time | N/A: the video service runs one job at a time |
-| `--cfg-parallel` (2 GPUs) | N/A: one pass per step | N/A: guidance-distilled | PASS, bit-identical | NOT MEASURED |
+| `--cfg-parallel` (2 GPUs) | N/A: one pass per step | N/A: guidance-distilled | PASS, bit-identical | PASS, bit-identical |
 | `--dp` × `--cfg-parallel` | N/A | N/A | NOT MEASURED (needs 4 GPUs) | NOT MEASURED |
 | CP, TP, `--sp` | N/A: refused | N/A: refused | N/A: refused | N/A: refused |
 
@@ -42,15 +43,26 @@ cosine):
   0–7 the gate is relative to diffusers' own noise floor (diffusers against itself with its bf16
   gemm reductions perturbed spans 30.9–37.6 dB over three seeds).
 - Wan 2.2: 26.30 dB / 0.99609 with the fp32 timestep; over seeds 0–2, 26.30–28.89 dB against
-  diffusers' own noise floor of 23.79–28.62 dB, so the gate is relative to that floor.
+  diffusers' own noise floor of 23.79–28.62 dB, so the gate is relative to that floor. With the
+  fused eager blocks on one H200 (same prompt, steps and seeds): 28.80, 28.65 and 22.97 dB
+  against a floor of 27.58, 27.05 and 23.37 dB; every gate passes.
 - Wan 2.1 on one A100, 480×832×9: over seeds 0–5, 23.16–27.70 dB (mean 25.68) eager and 19.22–27.88 dB
   (mean 24.65) compiled, against diffusers' own noise floor of 14.45–27.15 dB (mean 23.14).
   480×832×81 with the model card's negative prompt, seed 42: 19.95 dB / 0.9756, against a floor of
   16.15 dB / 0.9414. At 81 frames, and on some 9-frame seeds, a timestep rounded through bf16
   moves diffusers' own clip below 20 dB, so the comparison is against that floor.
+- Wan 2.1 eager with and without the fused blocks, on one H200, 480×832×9, PSNR against diffusers
+  (the unfused run is the modeling's own forward):
+
+  | Seed | 0 | 1 | 2 | 3 | 4 | 5 | Mean |
+  |---|---|---|---|---|---|---|---|
+  | Fused blocks | 31.62 | 23.81 | 23.92 | 22.14 | 25.65 | 22.51 | 24.94 dB |
+  | Modeling's ops | 30.14 | 19.36 | 23.54 | 21.42 | 24.05 | 22.63 | 23.52 dB |
+  | diffusers vs itself | 26.36 | 24.34 | 28.74 | 20.65 | 27.27 | 14.16 | 23.58 dB |
 - DiT parity (rel_l1 against the fp32 reference, relative to diffusers' bf16 control; gates
-  1.15× / 1.2× / 0.995): Qwen 0.994×, Flux 0.987×, Wan 1.051× / 1.043× per expert, Wan 2.1
-  1.007× on an A100 and 1.005× on an H200 (1.003× / 1.002× at the bf16-rounded timestep).
+  1.15× / 1.2× / 0.995): Qwen 0.994×, Flux 0.987×, Wan 1.051× / 1.043× per expert (1.052× /
+  1.044× with the fused eager blocks on an H200), Wan 2.1 1.007× on an A100 and 1.005× on an H200
+  (1.003× / 1.002× at the bf16-rounded timestep).
 
 **Speed** (RTX PRO 6000 Server Edition unless noted):
 
@@ -66,7 +78,9 @@ and 921 s in diffusers. Eager runs each block's LayerNorms, adaLN modulation, ga
 q/k norm with rotary as fused Triton kernels: a DiT forward at 480×832×9 takes 627 ms, against
 761 ms with the modeling's unfused ops. Peak allocated memory is 41.7 GiB at 9 frames and 41.9 GiB
 at 81, within 0.1 GiB of diffusers. Compiling adds 20–80 s to a load, depending on the shape and
-the compile cache.
+the compile cache. On H200s at 480×832×9, a request takes 27.4 s on one card and 20.4 s with
+`--cfg-parallel` on two. Wan 2.2 eager with the fused blocks on one H200 (40 steps, 480×832×9)
+takes 19.3 s per warm request against 26.5 s in diffusers, peak 68.5 GiB against 68.6 GiB.
 
 The Qwen-Image prompt trim took its DiT forward from 516 ms to 323 ms; the fused across-heads
 q/k RMSNorm took Wan's from 614 ms to 536 ms. Two GPUs: Wan `--cfg-parallel` 26.1 s against
@@ -86,11 +100,10 @@ supplementary; an official compiled comparison remains unavailable. See the
 
 1. Wan `--dp` × `--cfg-parallel` (needs four GPUs; allowed by construction).
 2. FLUX.1-dev with two replicas on two RTX PRO 6000s (measured on 2 × A100 instead).
-3. Wan 2.1 `--cfg-parallel` and the staged CLI commands (`download`, `compile`, `generate`).
-4. The fused Flux `proj_out` (`fuse_proj_out`, off by default): about 1% faster per DiT forward,
+3. The fused Flux `proj_out` (`fuse_proj_out`, off by default): about 1% faster per DiT forward,
    but seed 0's e2e PSNR moved from 41.58 dB to 31.56 dB in eager mode (42.27 dB compiled). A
    bf16 block-level comparison against diffusers' `proj_out` is the next check.
-5. The Trainium byte-identity of the Flux modeling split on a trn2 host was checked separately
+4. The Trainium byte-identity of the Flux modeling split on a trn2 host was checked separately
    (HLO and a FLUX.1-dev image identical before and after); TPU has no compile/load lifecycle to
    run.
 
