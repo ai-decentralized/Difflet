@@ -93,8 +93,8 @@ class Wait:
     gateway refuses a submission."""
 
     notice_s: int = 1800
-    suggest_s: int = 3600
-    reject_s: int = 10800
+    suggest_s: int = 1800
+    reject_s: int = 7200
 
 
 @dataclass(frozen=True)

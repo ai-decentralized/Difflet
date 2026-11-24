@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from difflet.serving.gateway.fleet import FleetConfig, FleetEntry, Limits, Wait
-from difflet.serving.gateway.page import _json, render_page
+from difflet.serving.gateway.page import _duration, _json, render_page
 
 FLUX = "black-forest-labs/FLUX.1-dev"
 HV = "hunyuanvideo-community/HunyuanVideo"
@@ -125,6 +125,11 @@ def test_every_id_the_script_uses_exists_once(static):
 
 def test_embedded_json_cannot_end_its_script_element():
     assert "</" not in _json({"x": "</script><script>alert(1)"})
+
+
+def test_durations_read_in_seconds_minutes_or_hours():
+    assert [_duration(s) for s in (8.4, 90, 1800, 5400, 7200)] == [
+        "8 s", "1.5 min", "30 min", "1.5 h", "2 h"]
 
 
 def test_server_page_embeds_the_wait_thresholds_and_limits():

@@ -12,7 +12,7 @@ from starlette.requests import Request
 from difflet.serving.gateway import app as gateway_app
 from difflet.serving.gateway.app import client_ip, client_key, create_gateway_app
 from difflet.serving.gateway.fleet import FleetConfig, FleetEntry, Limits, Wait
-from difflet.serving.gateway.page import model_defaults
+from difflet.serving.gateway.page import _duration, model_defaults
 
 FLUX = "black-forest-labs/FLUX.1-dev"
 HV = "hunyuanvideo-community/HunyuanVideo"
@@ -612,5 +612,6 @@ def test_model_busy_names_shorter_waits(tmp_path, backends):
     assert resp.status_code == 429 and _code(resp) == "model_busy"
     message = resp.json()["error"]["message"]
     assert HV in message and f"{LTX} (no wait)" in message and FLUX not in message
+    assert f"over {_duration(int(2.5 * hv_each))}" in message  # the configured threshold
     assert resp.headers["retry-after"] == str(round(hv_each))  # one request ahead must finish
     assert [r.method for r in backends.seen] == ["GET"] * len(backends.seen)  # nothing forwarded

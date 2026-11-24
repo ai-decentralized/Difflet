@@ -271,7 +271,7 @@ def create_gateway_app(
         raise RateLimited(
             429, "model_busy",
             f"{entry.model_id} is too busy right now: the estimated wait is about "
-            f"{_duration(wait)}. {tip}",
+            f"{_duration(wait)}, over {_duration(config.wait.reject_s)}. {tip}",
             # until enough requests ahead finish for the wait to drop under the threshold
             retry_after=math.ceil((wait - config.wait.reject_s) / seconds) * seconds)
 

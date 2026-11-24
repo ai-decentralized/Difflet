@@ -148,7 +148,8 @@ const CLIENT = (() => {
 function shapeText(s) { return s[2] ? s[0] + '×' + s[1] + '×' + s[2] : s[0] + '×' + s[1]; }
 function duration(seconds) {
   if (seconds < 90) return Math.round(seconds) + ' s';
-  return seconds < 5400 ? (seconds / 60).toFixed(1) + ' min' : (seconds / 3600).toFixed(1) + ' h';
+  const [value, unit] = seconds < 5400 ? [seconds / 60, ' min'] : [seconds / 3600, ' h'];
+  return value.toFixed(1).replace(/\.0$/, '') + unit;  // '2 h', '1.5 h'
 }
 // Seconds a request should take (measured: base + per step), null without a measurement.
 function estimate(m, steps) {
@@ -563,7 +564,8 @@ def estimate_text(entry: FleetEntry, steps: int | None) -> str:
 def _duration(seconds: float) -> str:
     if seconds < 90:
         return f"{round(seconds)} s"
-    return f"{seconds / 60:.1f} min" if seconds < 5400 else f"{seconds / 3600:.1f} h"
+    value, unit = (seconds / 60, "min") if seconds < 5400 else (seconds / 3600, "h")
+    return f"{value:.1f}".removesuffix(".0") + f" {unit}"  # "2 h", "1.5 h"
 
 
 @functools.cache
