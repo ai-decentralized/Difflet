@@ -1,9 +1,15 @@
-# Experimental LTX-2 on CUDA
+# LTX-2 on CUDA
 
 Lightricks/LTX-2 runs on the existing single-device GPU application lifecycle.
 Python can return joint audio/video or both latent streams. The generic CLI and
 video-serving interfaces return video only; they do not mux the generated audio.
-Those frontends have CPU regression coverage, not end-to-end GPU qualification.
+
+Both frontends ran end to end on one RTX PRO 6000 Blackwell 96 GB, in eager mode with
+the default `diffusers` profile, at 384x256, 9 frames and 24 fps. The CLI and HTTP MP4s
+matched the Python video at 27.16 dB and 31.74 dB PSNR against a 25 dB bar, two
+identical HTTP requests returned identical MP4s, and a request outside the server's
+profile got `400 profile_mismatch`. Like the measurements below, this run precedes the
+submission extraction.
 
 Use BF16, one GPU and one resident shape. Height/width must be multiples of 32;
 frame count must be 8k+1. TP/CP/SP/CFG parallelism, quantization, offload, TeaCache,

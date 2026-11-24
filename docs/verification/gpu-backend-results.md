@@ -88,7 +88,7 @@ q/k RMSNorm took Wan's from 614 ms to 536 ms. Two GPUs: Wan `--cfg-parallel` 26.
 
 ## Original HunyuanVideo
 
-Experimental BF16 support passed 12 full-length accuracy cases and 24 timed-video checks
+BF16 support passed 12 full-length accuracy cases and 24 timed-video checks
 at 320×512×61, 50 steps, guidance 6, seeds 0–2 on an RTX PRO 6000 Blackwell 96 GB.
 Public Python, CLI and resident HTTP checks passed in eager and compiled modes.
 Six matched eager pairs measured 65.626 s versus 67.300 s for the unmodified Omni
@@ -109,7 +109,7 @@ supplementary; an official compiled comparison remains unavailable. See the
 
 ## LTX-2 CUDA
 
-Experimental single-GPU BF16 audiovisual generation is qualified in eager and compiled
+Single-GPU BF16 audiovisual generation is qualified in eager and compiled
 modes against pinned native Omni, using an explicit native-compatible generation profile.
 The four-way B200 comparison measures Difflet eager/compiled and native eager/corrected-private
 compiled on reduced and larger workloads. Upstream default native compilation failed quality

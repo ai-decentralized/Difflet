@@ -60,7 +60,7 @@ Three entry points share one engine:
 
 | Backend | `DIFFLET_BACKEND` | Status | Models | Parallelism | Details |
 |---|---|---|---|---|---|
-| NVIDIA GPUs | `cuda` | ✅ Supported (subset) | FLUX.1-dev, Qwen-Image, Wan 2.1/2.2; HunyuanVideo and LTX-2 experimental | DP, CFG-parallel (Wan) | [GPU features](#nvidia-gpus) |
+| NVIDIA GPUs | `cuda` | ✅ Supported (subset) | FLUX.1-dev, Qwen-Image, Wan 2.1/2.2, HunyuanVideo 1.0/1.5, LTX-2, MiniMax-H3 | DP, CFG-parallel (Wan) | [GPU features](#nvidia-gpus) |
 | AWS Trainium2 (AOT) | `trainium` | ✅ Supported | All [supported models](#supported-models) | TP, CP, SP, CFG-parallel, DP | [Trainium features](#trainium) |
 | AWS Trainium2 / Trainium3 (native PyTorch) | `neuron` | ✅ Supported | FLUX.1-dev, Qwen-Image, Wan 2.1/2.2, HunyuanVideo 1.0/1.5, LTX-2 | TP, CP, SP, CFG-parallel, DP; FP8 (`--quant mxfp8`) on Trainium3 | [Native backend results](docs/verification/neuron-backend-results.md) |
 | Cloud TPU | `tpu` | 🧪 Experimental | FLUX.1-dev, Qwen-Image, Wan, HunyuanVideo, LTX-2 (`difflet serve` and the benchmark runners) | TP | [v5e benchmarks](benchmark/v5e/RESULTS.md) |
@@ -124,9 +124,9 @@ see the per-model limits below.
 | Qwen-Image | ✅ image | ⚠️ image ³ | ✅ | ✅ | ✅ | — ⁴ | ❌ | ❌ |
 | Wan 2.2 | ✅ video | ✅ video | ✅ | ❌ | ⚠️ ⁵ | ✅ ⁶ | ❌ | ❌ |
 | Wan 2.1 ¹¹ | ✅ video | ✅ video | ✅ | ❌ | ⚠️ ⁵ | ✅ ⁶ | ❌ | ❌ |
-| HunyuanVideo (original) | ⚠️ experimental ⁷ | ⚠️ experimental ⁷ | ⚠️ execution observed ⁷ | ❌ | Not measured | — ¹ | ❌ | ❌ |
-| LTX-2 | ⚠️ video, CPU checks ⁸ | ⚠️ video, CPU checks ⁸ | ⚠️ Python qualified ⁸ | ❌ | Not measured | ❌ | ❌ | ❌ |
-| HunyuanVideo 1.5 | ⚠️ experimental ⁹ | ⚠️ experimental ⁹ | ✅ ⁹ | ❌ | Not measured | ❌ | ❌ | ❌ |
+| HunyuanVideo (original) | ✅ video ⁷ | ✅ video ⁷ | ⚠️ execution observed ⁷ | ❌ | Not measured | — ¹ | ❌ | ❌ |
+| LTX-2 | ✅ video ⁸ | ✅ video ⁸ | ⚠️ Python qualified ⁸ | ❌ | Not measured | ❌ | ❌ | ❌ |
+| HunyuanVideo 1.5 | ✅ video ⁹ | ✅ video ⁹ | ✅ ⁹ | ❌ | Not measured | ❌ | ❌ | ❌ |
 | MiniMax-H3 | ✅ video + audio ¹⁰ | ✅ video + audio ¹⁰ | ✅ | ❌ | Not measured | — ¹⁰ | ❌ | ❌ |
 
 An option the GPU backend does not support is refused with a message naming it, not ignored.
@@ -142,15 +142,16 @@ TeaCache (adaptive), TAEF1, and `--host-vae` are refused on GPUs for these model
 5. `--dp N --requests` works, with output bit-identical to one GPU. `serve --dp-degree` does
    not apply, because the video service runs one job at a time.
 6. Two GPUs under `torchrun`, `difflet run` only. Output is bit-identical to one GPU.
-7. Experimental single-GPU BF16 support for `hunyuanvideo-community/HunyuanVideo`.
+7. Single-GPU BF16 support for `hunyuanvideo-community/HunyuanVideo`.
    Eager and compiled Python, CLI and HTTP generation were verified at 320×512×61,
    50 steps on a 96 GB GPU. See the [HunyuanVideo CUDA guide](docs/verification/hunyuanvideo-cuda.md)
    for usage, accuracy and benchmark limits. HunyuanVideo 1.5 is a separate model.
 8. LTX-2 single-GPU BF16 Python audiovisual generation passes eager/compiled correctness
-   and performance checks on B200. CLI/HTTP video-only paths have CPU coverage; GPU frontend
-   validation is not claimed. The opt-in profile requires explicit TP=1 and a pre-CUDA startup
-   setting; see the [LTX-2 CUDA guide](docs/verification/ltx2-cuda.md).
-9. Experimental single-GPU BF16 text-to-video for
+   and performance checks on B200. The CLI and HTTP server return video without the audio
+   track; in eager mode on an RTX PRO 6000 their MP4s matched the Python video at 27.2 dB and
+   31.7 dB PSNR. The opt-in profile requires explicit TP=1 and a pre-CUDA startup setting; see
+   the [LTX-2 CUDA guide](docs/verification/ltx2-cuda.md).
+9. Single-GPU BF16 text-to-video for
    `hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v`, separate from the Trainium
    HunyuanVideo 1.5 path. Classifier-free guidance runs both branches in sequence on one GPU.
    On one RTX PRO 6000, eager and compiled output meet a relative accuracy bar against
@@ -408,7 +409,7 @@ image = pipe(
 image.save("out.png")
 ```
 
-LTX-2 also has an experimental single-GPU CUDA path with joint audiovisual Python output
+LTX-2 also has a single-GPU CUDA path with joint audiovisual Python output
 and an opt-in native-compatible BF16 profile. See the [LTX-2 CUDA guide](docs/verification/ltx2-cuda.md)
 for its separate runtime, explicit TP=1/startup requirements and qualified eager/compiled results.
 

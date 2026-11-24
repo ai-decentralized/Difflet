@@ -1,6 +1,6 @@
 # Original HunyuanVideo on CUDA
 
-Experimental single-GPU BF16 support for the original
+Single-GPU BF16 support for the original
 `hunyuanvideo-community/HunyuanVideo` Diffusers checkpoint, using Difflet's transformer
 and the shared GPU application, Python API, CLI and resident HTTP server.
 
