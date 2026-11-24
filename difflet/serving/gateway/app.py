@@ -17,6 +17,7 @@ from urllib.parse import quote, urlencode
 
 import httpx
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from starlette.requests import Request as StarletteRequest
 
@@ -24,7 +25,7 @@ from difflet.serving.auth import ApiKeyAuthenticationMiddleware
 from difflet.serving.errors import DiffletServingError
 from difflet.serving.gateway.fleet import FleetConfig, FleetEntry
 from difflet.serving.gateway.launcher import read_pid
-from difflet.serving.gateway.page import render_page
+from difflet.serving.gateway.page import render_page, ui_models
 from difflet.serving.gateway.status import Status, fleet_status
 from difflet.serving.openai.api_server import _run_until_disconnect
 from difflet.serving.openai.serving_video import MAX_KEYFRAME_FORM_BODY_BYTES
@@ -71,6 +72,13 @@ def create_gateway_app(
     app = FastAPI(title="Difflet gateway", lifespan=lifespan)
     if api_key:
         app.add_middleware(ApiKeyAuthenticationMiddleware, api_key=api_key)
+    if config.cors_origins:
+        # Added last, so outermost: a preflight never meets the API key, and a 401 still carries
+        # the CORS headers the page needs to read it.
+        app.add_middleware(CORSMiddleware, allow_origins=list(config.cors_origins),
+                           allow_methods=["GET", "POST", "DELETE", "OPTIONS"],
+                           allow_headers=["Content-Type", "Authorization", "X-Difflet-Client"],
+                           expose_headers=["Retry-After", "X-Request-Id"])
 
     @app.exception_handler(DiffletServingError)
     async def _serving_error(request: Request, exc: DiffletServingError):
@@ -220,6 +228,10 @@ def create_gateway_app(
     async def queue():
         counts = await asyncio.gather(*(active(entry) for entry in config.models))
         return {"models": {e.model_id: n for e, n in zip(config.models, counts)}}
+
+    @app.get("/ui/models")
+    async def ui():
+        return ui_models(config, await statuses())
 
     @app.get("/", response_class=HTMLResponse)
     async def page(request: Request):

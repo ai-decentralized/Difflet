@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from difflet.serving.gateway.fleet import FleetConfigError, load_fleet
+from difflet.serving.gateway.fleet import FleetConfigError, Limits, Wait, load_fleet
 from difflet.serving.model_registry import serving_output_modality
 
 EXAMPLE = Path(__file__).resolve().parents[4] / "examples" / "serving" / "fleet.yaml"
@@ -33,7 +33,44 @@ def test_load_example_fleet():
     assert {e.kind for e in config.models} <= {"image", "video"}
     assert all(e.shapes for e in config.models)
     assert all(e.estimate for e in config.models)  # every example backend was measured
-    assert (config.host, config.port) == ("0.0.0.0", 8000)
+    assert (config.host, config.port) == ("127.0.0.1", 8000)  # behind a TLS proxy on the host
+    assert config.cors_origins == ("https://difflet.yottalabs.ai",)
+    assert config.limits == Limits(client_active=1, client_per_hour=20, ip_per_hour=2000)
+    assert config.wait == Wait(notice_s=1800, suggest_s=3600, reject_s=10800)
+
+
+def test_gateway_section_defaults(tmp_path):
+    config = _load(tmp_path, _entry())
+    assert config.cors_origins == ()
+    assert config.limits == Limits(1, 20, 2000)
+    assert config.wait == Wait(1800, 3600, 10800)
+
+
+def test_gateway_section_loaded(tmp_path):
+    config = _load(tmp_path, _entry(), gateway={
+        "port": 8000, "cors_origins": ["https://a.example", "http://localhost:3000"],
+        "limits": {"client_per_hour": 5}, "wait": {"notice_s": 60, "suggest_s": 60}})
+    assert config.cors_origins == ("https://a.example", "http://localhost:3000")
+    assert config.limits == Limits(client_active=1, client_per_hour=5, ip_per_hour=2000)
+    assert config.wait == Wait(notice_s=60, suggest_s=60, reject_s=10800)
+
+
+@pytest.mark.parametrize("gateway, field", [
+    ({"cors_origins": "https://a.example"}, "cors_origins"),
+    ({"cors_origins": ["https://a.example/"]}, "cors_origins"),  # an Origin never ends in /
+    ({"cors_origins": ["a.example"]}, "cors_origins"),
+    ({"limits": {"client_active": 0}}, "client_active"),
+    ({"limits": {"client_per_hour": "5"}}, "client_per_hour"),
+    ({"limits": {"per_day": 5}}, "per_day"),
+    ({"limits": [1]}, "limits"),
+    ({"wait": {"reject_s": 0}}, "reject_s"),
+    ({"wait": {"notice_s": 4000}}, "notice_s <= suggest_s"),
+    ({"wait": {"x": 1}}, "'x'"),
+    ({"timeout": 5}, "timeout"),
+])
+def test_bad_gateway_section_rejected(tmp_path, gateway, field):
+    with pytest.raises(FleetConfigError, match=field):
+        _load(tmp_path, _entry(), gateway=gateway)
 
 
 def test_estimate_loaded(tmp_path):

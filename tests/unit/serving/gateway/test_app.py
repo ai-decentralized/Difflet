@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from difflet.serving.gateway import app as gateway_app
 from difflet.serving.gateway.app import create_gateway_app
-from difflet.serving.gateway.fleet import FleetConfig, FleetEntry
+from difflet.serving.gateway.fleet import FleetConfig, FleetEntry, Limits, Wait
 
 FLUX = "black-forest-labs/FLUX.1-dev"
 HV = "hunyuanvideo-community/HunyuanVideo"
@@ -19,13 +19,13 @@ NOT_FOUND = {"error": {"message": "Video job was not found", "type": "invalid_re
                        "code": "video_not_found"}}
 
 
-def _config(tmp_path):
+def _config(tmp_path, **gateway):
     image = ("--height", "1024", "--width", "1024")
     return FleetConfig(host="0.0.0.0", port=8000, runs_dir=tmp_path, models=(
         FleetEntry(FLUX, 0, 8100, Path("/c/0"), image),
         FleetEntry(HV, 3, 8103, Path("/c/3"), ("--shapes", "320x512x61,320x512x33")),
         FleetEntry(LTX, 4, 8104, Path("/c/4"),
-                   ("--height", "512", "--width", "768", "--num-frames", "121"))))
+                   ("--height", "512", "--width", "768", "--num-frames", "121"))), **gateway)
 
 
 class Backends:
@@ -58,15 +58,15 @@ def backends():
     return Backends()
 
 
-def _client(tmp_path, backends, *, api_key=None, statuses=None):
+def _client(tmp_path, backends, *, api_key=None, statuses=None, config=None, peer=None):
     statuses = statuses or {FLUX: "ready", HV: "ready", LTX: "ready"}
 
     async def status_fn():
         return dict(statuses)
 
-    app = create_gateway_app(_config(tmp_path), api_key=api_key, status_fn=status_fn,
+    app = create_gateway_app(config or _config(tmp_path), api_key=api_key, status_fn=status_fn,
                              client=httpx.AsyncClient(transport=httpx.MockTransport(backends)))
-    return TestClient(app)
+    return TestClient(app, client=peer or ("testclient", 50000))
 
 
 def _chat(model=FLUX):
@@ -197,7 +197,7 @@ def test_api_key_required_on_v1_only(tmp_path, backends):
     client = _client(tmp_path, backends, api_key="k")
     assert client.get("/v1/models").status_code == 401
     assert client.get("/v1/models", headers={"Authorization": "Bearer k"}).status_code == 200
-    for path in ("/", "/health", "/ready"):
+    for path in ("/", "/health", "/ready", "/ui/models"):
         assert client.get(path).status_code == 200
 
 
@@ -381,3 +381,55 @@ def test_stats_count_successful_generations_across_restarts(tmp_path, backends):
     with _client(tmp_path, backends) as client:  # a restarted gateway keeps the count
         assert client.get("/stats").json() == {"total_runs": 1}
         assert 'id="runs">1<' in client.get("/").text
+
+
+SITE = "https://difflet.yottalabs.ai"
+
+
+def test_cors_preflight_from_the_page_origin_skips_the_api_key(tmp_path, backends):
+    client = _client(tmp_path, backends, api_key="k",
+                     config=_config(tmp_path, cors_origins=(SITE,)))
+    resp = client.options("/v1/chat/completions", headers={
+        "Origin": SITE, "Access-Control-Request-Method": "POST",
+        "Access-Control-Request-Headers": "content-type,x-difflet-client"})
+    assert resp.status_code == 200
+    assert resp.headers["access-control-allow-origin"] == SITE
+    assert "x-difflet-client" in resp.headers["access-control-allow-headers"].lower()
+    assert "DELETE" in resp.headers["access-control-allow-methods"]
+    assert backends.seen == []
+
+    denied = client.get("/v1/models", headers={"Origin": SITE})  # a 401 the page can read
+    assert denied.status_code == 401 and denied.headers["access-control-allow-origin"] == SITE
+    opened = client.get("/ui/models", headers={"Origin": SITE})
+    assert opened.headers["access-control-allow-origin"] == SITE
+    exposed = opened.headers["access-control-expose-headers"].lower()
+    assert "retry-after" in exposed and "x-request-id" in exposed
+
+
+def test_cors_refuses_another_origin(tmp_path, backends):
+    client = _client(tmp_path, backends, config=_config(tmp_path, cors_origins=(SITE,)))
+    resp = client.options("/v1/chat/completions", headers={
+        "Origin": "https://evil.example", "Access-Control-Request-Method": "POST"})
+    assert "access-control-allow-origin" not in resp.headers
+    assert "access-control-allow-origin" not in client.get(
+        "/ui/models", headers={"Origin": "https://evil.example"}).headers
+
+
+def test_no_cors_headers_without_origins(tmp_path, backends):
+    resp = _client(tmp_path, backends).get("/ui/models", headers={"Origin": SITE})
+    assert "access-control-allow-origin" not in resp.headers
+
+
+def test_ui_models_lists_the_page_models_with_live_status(tmp_path, backends):
+    statuses = {FLUX: "ready", HV: "loading", LTX: "down"}
+    config = _config(tmp_path, limits=Limits(client_per_hour=5), wait=Wait(60, 120, 300))
+    body = _client(tmp_path, backends, statuses=statuses, config=config).get("/ui/models").json()
+    assert body["wait"] == {"notice_s": 60, "suggest_s": 120, "reject_s": 300}
+    assert body["limits"] == {"client_active": 1, "client_per_hour": 5, "ip_per_hour": 2000}
+    flux, hv, ltx = body["models"]
+    assert flux == {"id": FLUX, "label": "FLUX.1-dev", "kind": "image", "device": 0,
+                    "shapes": [[1024, 1024, None]], "status": "ready", "steps": 28,
+                    "guidance": 3.5, "estimate": None}
+    assert (hv["id"], hv["status"], hv["shapes"]) == (HV, "loading", [[320, 512, 61], [320, 512, 33]])
+    assert ltx["status"] == "down"
+    assert backends.seen == []

@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from starlette.middleware.cors import CORSMiddleware
+
 from difflet.cli import gateway as gateway_cli
 from difflet.cli.main import _build_parser, main
 from difflet.serving.auth import ApiKeyAuthenticationMiddleware
@@ -36,10 +38,10 @@ def test_gateway_serve_builds_app(monkeypatch):
     monkeypatch.delenv("DIFFLET_API_KEY", raising=False)
     main(["gateway", "serve", "--config", EXAMPLE, "--api-key", "k"])
     ((app, kw),) = runs
-    assert (kw["host"], kw["port"], kw["workers"]) == ("0.0.0.0", 8000, 1)
-    assert any(m.cls is ApiKeyAuthenticationMiddleware for m in app.user_middleware)
+    assert (kw["host"], kw["port"], kw["workers"]) == ("127.0.0.1", 8000, 1)
+    assert [m.cls for m in app.user_middleware] == [CORSMiddleware, ApiKeyAuthenticationMiddleware]
     main(["gateway", "serve", "--config", EXAMPLE])
-    assert not runs[1][0].user_middleware  # no key anywhere: no auth
+    assert [m.cls for m in runs[1][0].user_middleware] == [CORSMiddleware]  # no key: no auth
 
 
 def test_gateway_status_prints_rows(monkeypatch, capsys):

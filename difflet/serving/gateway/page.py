@@ -8,7 +8,9 @@ Server-rendered from the fleet file; a small inline script calls the gateway's o
 
 from __future__ import annotations
 
+import functools
 import json
+from dataclasses import asdict
 from html import escape
 from typing import Mapping
 
@@ -358,7 +360,7 @@ def render_page(config: FleetConfig, statuses: Mapping[str, str], *, base_url: s
         rows.append(
             f"<tr><td><code>{escape(entry.model_id)}</code></td><td>{escape(entry.kind)}</td>"
             f"<td>{entry.device}</td><td>{escape(shapes)}</td>"
-            f"<td>{escape(estimate_text(entry, _defaults(entry.model_id)[0]))}</td>"
+            f"<td>{escape(estimate_text(entry, model_defaults(entry.model_id)[0]))}</td>"
             f'<td><span class="badge {escape(status)}" title="{escape(_STATUS_HELP.get(status, ""))}">'
             f"{escape(status)}</span></td></tr>")
         examples.append(f"<h3><code>{escape(entry.model_id)}</code></h3>\n"
@@ -436,8 +438,15 @@ def _json(value) -> str:
     return json.dumps(value).replace("</", "<\\/")
 
 
+def ui_models(config: FleetConfig, statuses: Mapping[str, str]) -> dict:
+    """What the page's script needs (``GET /ui/models``, embedded in the server-rendered page):
+    every model with its live status, the wait thresholds and the limits."""
+    return {"models": [_ui_model(e, statuses.get(e.model_id, "down")) for e in config.models],
+            "wait": asdict(config.wait), "limits": asdict(config.limits)}
+
+
 def _ui_model(entry: FleetEntry, status: str) -> dict:
-    steps, guidance = _defaults(entry.model_id)
+    steps, guidance = model_defaults(entry.model_id)
     return {
         "id": entry.model_id,
         "label": entry.model_id.rsplit("/", 1)[-1],
@@ -463,7 +472,8 @@ def _duration(seconds: float) -> str:
     return f"{round(seconds)} s" if seconds < 90 else f"{seconds / 60:.1f} min"
 
 
-def _defaults(model_id: str) -> tuple[int | None, float | None]:
+@functools.cache
+def model_defaults(model_id: str) -> tuple[int | None, float | None]:
     """The steps and guidance scale a backend uses when a request omits them (the model's
     ``ModelSpec``; guidance None when the model takes none). A model without a spec (MiniMax-H3)
     takes its serving metadata's steps and no guidance scale."""

@@ -8,7 +8,7 @@ to ``difflet serve``. Design: docs/plans/2026-11-20-multi-model-gateway-design.m
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -22,6 +22,8 @@ _TOP_FIELDS = {"gateway", "runs_dir", "models"}
 _ENTRY_FIELDS = {"model_id", "device", "port", "cache_dir", "serve_args", "slug", "env",
                  "estimate"}
 _SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+#: What a browser sends as ``Origin``: scheme, host and optional port, no path.
+_ORIGIN = re.compile(r"https?://[A-Za-z0-9.-]+(:[0-9]+)?")
 
 #: (height, width, frames or None for an image model)
 Shape = tuple[int, int, int | None]
@@ -74,11 +76,37 @@ class FleetEntry:
 
 
 @dataclass(frozen=True)
+class Limits:
+    """Caps on generation submissions (docs/serving/gateway.md, "Limits for a public page")."""
+
+    #: Requests one client may have running or waiting at once.
+    client_active: int = 1
+    #: Accepted submissions per client in any hour.
+    client_per_hour: int = 20
+    #: Accepted submissions per client IP in any hour (an event's attendees share one).
+    ip_per_hour: int = 2000
+
+
+@dataclass(frozen=True)
+class Wait:
+    """Estimated waits, in seconds, at which the page warns, suggests another model, and the
+    gateway refuses a submission."""
+
+    notice_s: int = 1800
+    suggest_s: int = 3600
+    reject_s: int = 10800
+
+
+@dataclass(frozen=True)
 class FleetConfig:
     host: str
     port: int
     runs_dir: Path
     models: tuple[FleetEntry, ...]
+    #: Origins whose pages may call the gateway (CORS); empty: no CORS headers.
+    cors_origins: tuple[str, ...] = ()
+    limits: Limits = Limits()
+    wait: Wait = Wait()
 
     def entry(self, model_id: str) -> FleetEntry | None:
         wanted = model_id.rstrip("/")
@@ -104,7 +132,16 @@ def load_fleet(path: str | Path) -> FleetConfig:
     except (OSError, yaml.YAMLError) as exc:
         raise FleetConfigError(f"cannot read fleet file {path}: {exc}") from exc
     raw = _mapping(raw, str(path), _TOP_FIELDS)
-    gateway = _mapping(raw.get("gateway", {}), "gateway", {"host", "port"})
+    gateway = _mapping(raw.get("gateway", {}), "gateway",
+                       {"host", "port", "cors_origins", "limits", "wait"})
+    origins = gateway.get("cors_origins", [])
+    if not isinstance(origins, list) or not all(isinstance(o, str) and _ORIGIN.fullmatch(o)
+                                                for o in origins):
+        raise FleetConfigError("gateway.cors_origins must be a list of origins such as "
+                               "https://example.com (no path, no trailing /)")
+    wait = _positive_ints(Wait, gateway.get("wait", {}), "gateway.wait")
+    if not wait.notice_s <= wait.suggest_s <= wait.reject_s:
+        raise FleetConfigError("gateway.wait: want notice_s <= suggest_s <= reject_s")
     if "runs_dir" not in raw:
         raise FleetConfigError("runs_dir is required")
     items = raw.get("models")
@@ -115,6 +152,9 @@ def load_fleet(path: str | Path) -> FleetConfig:
         port=_int(gateway.get("port", 8000), "gateway.port", 1, 65535),
         runs_dir=Path(str(raw["runs_dir"])),
         models=tuple(_entry(item, f"models[{i}]") for i, item in enumerate(items)),
+        cors_origins=tuple(origins),
+        limits=_positive_ints(Limits, gateway.get("limits", {}), "gateway.limits"),
+        wait=wait,
     )
     for name in ("model_id", "device", "port", "slug"):
         values = [getattr(e, name) for e in config.models]
@@ -172,6 +212,13 @@ def _entry(raw: Any, where: str) -> FleetEntry:
         raise FleetConfigError(f"{where}: a video model's shape needs a frame count "
                                "(--num-frames, or HxWxF in --shapes)")
     return entry
+
+
+def _positive_ints(cls, raw: Any, where: str):
+    """``cls`` (all positive-integer fields) from a mapping; absent fields keep their default."""
+    names = {f.name for f in fields(cls)}
+    return cls(**{k: _int(v, f"{where}.{k}", 1, 10**9)
+                  for k, v in _mapping(raw, where, names).items()})
 
 
 def _flag_values(args: tuple[str, ...]) -> dict[str, str]:
