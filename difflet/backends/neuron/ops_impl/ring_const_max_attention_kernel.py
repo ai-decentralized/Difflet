@@ -14,8 +14,8 @@
 #
 # Difflet: forked from aws-neuron/vllm-omni-neuron v0.29.0.0.2.0,
 # vllm_omni_neuron/kernels/nkilib/experimental/attention/attention_const_max.py, sha256 a334a4d6cf82f529faf1d133fc73e6cd331f46ef2e5a1acacb439213dd2fd43e.
-# Changes: imports only (the core utilities and neurotile from the installed nkilib, the base
-# kernel from its Difflet fork); the kernel code is unchanged.
+# Changes: imports (the core utilities and neurotile from the installed nkilib, the base kernel
+# from its Difflet fork); an optional run-time key mask (key_mask_hbm), for joint attention.
 
 """
 Constant-Max Attention Kernel
@@ -81,6 +81,7 @@ def _attention_const_max_partial(
     aug_col_base=0,
     is_accumulate_step=False,
     kv_pad_rows=0,
+    key_mask_hbm=None,
 ):
     """Partial (unnormalized) attention folding into a resident SBUF accumulator.
 
@@ -106,6 +107,10 @@ def _attention_const_max_partial(
         kv_pad_rows: Number of trailing Sk tokens that are caller-supplied ZERO padding (used when
             the caller rounded Sk up to a 128-multiple to keep the KV loop uniform). Those rows are
             masked out of the sums exactly; 0 means Sk is entirely real tokens.
+        key_mask_hbm: optional [N, Sk] @ HBM, 1 for a valid key and 0 for a masked one, known only
+            at run time (Difflet: joint attention's text padding). It replaces the [V|1] ones column,
+            so a masked key adds nothing to Σ P·1; the caller zeroes masked keys' V rows (Σ P·V) and
+            K rows (their norms then stay out of the bound).
 
     Pseudocode:
         for each head:
@@ -224,6 +229,7 @@ def _attention_const_max_partial(
                 v_tail=v_tail,
                 total_kv_tiles=total_kv_tiles,
                 kv_pad_rows=kv_pad_rows,
+                key_mask=None if key_mask_hbm is None else key_mask_hbm[head_idx],
             )
 
             # Fold each output tile's accumulated o_aug = [Σ P·V | Σ P·1] straight from PSUM into the
@@ -249,6 +255,7 @@ def _process_kv_tiles_pipelined(
     k_tail: Optional[nt.NDSlice] = None,
     v_tail: Optional[nt.NDSlice] = None,
     kv_pad_rows: int = 0,
+    key_mask=None,
 ) -> None:
     """Pipelined MM1→exp→MM2 across all KV tiles with a prologue/epilogue split.
 
@@ -382,6 +389,15 @@ def _process_kv_tiles_pipelined(
                 if kv_pad_rows > 0 and kv_tile_idx == total_kv_tiles - 1:
                     nisa.memset(v_aug_all[:, v_buf, d : d + 1], 0.0)
                     nisa.memset(v_aug_all[0 : _P - kv_pad_rows, v_buf, d : d + 1], 1.0)
+
+                # Run-time key mask (Difflet): this tile's mask slice becomes its ones column, one key
+                # per partition, so a masked key (V row zeroed by the caller) adds nothing to either sum.
+                if key_mask is not None:
+                    num_rows = rows.stop - rows.start
+                    nisa.dma_copy(
+                        dst=v_aug_all[rows, v_buf, d : d + 1],
+                        src=key_mask.ap(pattern=[[1, num_rows], [1, 1]], offset=kv_tile_idx * _P),
+                    )
 
                 # MM1(i) — the K tile's free extent is this tile's row count, so the matmul
                 # writes exactly that many score partitions.

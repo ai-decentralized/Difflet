@@ -365,6 +365,7 @@ def test_no_ring_kernel_is_prepared_without_cp():
     neuron_attention.prepare_ring_kernel(MeshSpec(cp=1, tp=4))
     assert neuron_attention._RING_KERNEL_OP is None
     assert neuron_attention._RING_CONSTMAX_OP is None
+    assert neuron_attention._JOINT_RING_OP is None
 
 
 def test_bounded_default_takes_the_scalar_exp_op(fake_bounded_op, monkeypatch):
@@ -497,4 +498,45 @@ def test_ring_attention_takes_token_major_inputs_exactly():
     got = cpu_attention.ring_attention(*(x.transpose(1, 2).contiguous() for x in (q, k, v)),
                                        scale=0.25, token_major=True)
     assert got.shape == want.shape == (2, 3, 40, 16)
+    assert torch.equal(got, want)
+
+
+def _joint_kernel_contract(q, k, v, k_txt, v_txt, key_mask, scale):
+    """The joint ring kernel's contract on one CPU process: token-major inputs, q = [image ‖ text]
+    rows, keys [text ‖ image] with masked text keys (key_mask 0) left out; out [B, H, S_q, d]."""
+    b, _, h, _ = q.shape
+    keys, vals = torch.cat([k_txt, k], dim=1), torch.cat([v_txt, v], dim=1)
+    scores = torch.einsum("bqhd,bkhd->bhqk", q.float(), keys.float()) * scale
+    valid = torch.cat([key_mask.reshape(b, h, -1), torch.ones(b, h, k.shape[1])], dim=-1) > 0
+    scores = scores.masked_fill(~valid[:, :, None, :], float("-inf"))
+    return torch.einsum("bhqk,bkhd->bhqd", torch.softmax(scores, dim=-1), vals.float()).to(q.dtype)
+
+
+@pytest.mark.parametrize("text_first", [False, True])
+@pytest.mark.parametrize("valid", [None, 5])
+def test_joint_ring_kernel_adapter_matches_masked_joint_attention(text_first, valid):
+    """Row order, masked text rows and the key mask reach the kernel as its contract expects."""
+    b, h, s_img, s_txt, d = 2, 3, 12, 8, 16
+    q_img, q_txt = torch.randn(b, h, s_img, d), torch.randn(b, h, s_txt, d)
+    k, v = torch.randn(b, h, s_img, d), torch.randn(b, h, s_img, d)
+    k_txt, v_txt = torch.randn(b, h, s_txt, d), torch.randn(b, h, s_txt, d)
+    q = torch.cat([q_txt, q_img], dim=2) if text_first else torch.cat([q_img, q_txt], dim=2)
+    valid_len = None if valid is None else torch.tensor([valid, s_txt], dtype=torch.int32)
+    got = neuron_attention._joint_ring_kernel(
+        _joint_kernel_contract, q, k, v, k_txt, v_txt, scale=0.25, text_valid_len=valid_len,
+        text_first=text_first)
+    n = torch.full((b,), s_txt) if valid is None else valid_len
+    want = torch.empty_like(got)
+    for i in range(b):  # dense reference per sample: its valid text keys and all image keys
+        keys = torch.cat([k_txt[i, :, : n[i]], k[i]], dim=1)
+        vals = torch.cat([v_txt[i, :, : n[i]], v[i]], dim=1)
+        want[i] = torch.softmax(q[i] @ keys.transpose(1, 2) * 0.25, dim=-1) @ vals
+    assert got.shape == q.shape
+    torch.testing.assert_close(got, want, atol=1e-5, rtol=1e-5)
+
+
+def test_cpu_joint_ring_attention_accepts_text_first():
+    q, k, v, kt, vt = (torch.randn(1, 2, n, 8) for n in (10, 6, 6, 4, 4))
+    want = cpu_attention.joint_ring_attention(q, k, v, kt, vt, scale=0.3)
+    got = cpu_attention.joint_ring_attention(q, k, v, kt, vt, scale=0.3, text_first=True)
     assert torch.equal(got, want)
