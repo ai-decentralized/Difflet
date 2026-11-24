@@ -88,3 +88,18 @@ This product includes software derived from the following third-party projects:
   Difflet's overall positioning (focused DiT inference, Python API + torchrun,
   no scheduler/HTTP) and the registration decorator style are inspired by
   xDiT. No xDiT source code is copied or linked.
+
+================================================================================
+NKI Library (nkilib)
+================================================================================
+
+  Source:  https://github.com/aws-neuron/nki-library
+  License: Apache License 2.0
+  Copyright: Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+
+  Forked from nkilib as bundled with nki 0.7.0 (torch-neuronx 2.14):
+    experimental/attention/attention_const_max.py  →  difflet/backends/neuron/ops_impl/attention_const_max_kernel.py
+    experimental/attention/ring_attention_fwd.py   →  difflet/backends/neuron/ops_impl/ring_attention_fwd_kernel.py
+
+  Each forked file retains its original Apache 2.0 copyright header, followed by
+  a note naming the source file, its sha256 and the changes Difflet made.

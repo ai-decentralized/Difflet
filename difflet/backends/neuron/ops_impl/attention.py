@@ -602,7 +602,8 @@ def _ring_kernel_op(rings: tuple):
         op = getattr(torch.ops.difflet_neuron, name)  # already registered (module reload)
     except (AttributeError, RuntimeError):
         try:
-            from nkilib.experimental.attention.ring_attention_fwd import ring_attention_spmd_fwd
+            # Difflet's fork: its exp on the Scalar engine on Trainium3 (ring_attention_fwd_kernel.py).
+            from difflet.backends.neuron.ops_impl.ring_attention_fwd_kernel import ring_attention_spmd_fwd
             from torch_neuronx.neuron_dynamo_backend.decompositions import get_logical_neuron_cores
             from torch_neuronx.nki_hop import nki_op
         except ImportError:
