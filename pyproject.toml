@@ -99,7 +99,7 @@ include = ["difflet*"]
 exclude = ["tests*", "examples*", "benchmark*", "scripts*", "docs*"]
 
 [tool.setuptools.package-data]
-difflet = ["py.typed", "bench/*.yaml", "bench/suites/*.yaml"]
+difflet = ["py.typed", "bench/*.yaml", "bench/suites/*.yaml", "serving/gateway/*.svg"]
 
 [tool.black]
 line-length = 100

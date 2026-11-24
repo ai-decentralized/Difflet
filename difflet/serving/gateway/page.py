@@ -11,13 +11,23 @@ id for the gateway's per-client limits.
 
 from __future__ import annotations
 
+import base64
 import functools
 import json
+from importlib import resources
 from dataclasses import asdict
 from html import escape
 from typing import Mapping
 
 from difflet.serving.gateway.fleet import FleetConfig, FleetEntry
+
+_ASSETS = resources.files(__package__)
+#: The README's logo (docs/assets/difflet-logo-black.svg) with the wordmark in currentColor, so one
+#: inline copy reads in both themes; the favicon is its gradient mark alone.
+_LOGO = (_ASSETS / "difflet-logo.svg").read_text().replace(
+    '<svg width="389" height="90"', '<svg class="logo" role="img" aria-label="Difflet"', 1)
+_FAVICON = "data:image/svg+xml;base64," + base64.b64encode(
+    (_ASSETS / "difflet-icon.svg").read_bytes()).decode()
 
 QUEUE_LINE = ("Each model runs one request at a time; others wait in its queue (HTTP 429 when the "
               "queue is full or times out).")
@@ -55,7 +65,10 @@ body { margin: 0 auto; max-width: 80rem; padding: 1.25rem 1rem 3rem; background:
   color: var(--fg); font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
 header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between;
   gap: .5rem 1.5rem; margin-bottom: 1rem; }
-h1 { font-size: 1.6rem; margin: 0; }
+h1 { font-size: 1.6rem; margin: 0; line-height: 0; }
+.logo { height: 2.25rem; width: auto; margin: .25rem 0 .35rem; }
+.powered { color: var(--muted); text-decoration: none; font-size: .9rem; white-space: nowrap; }
+.powered b { color: var(--fg); } .powered:hover b { color: var(--accent); }
 h2 { font-size: 1.1rem; margin: 0 0 .5rem; }
 h3 { font-size: .95rem; margin: 1.25rem 0 .4rem; }
 p { color: var(--muted); margin: .25rem 0 1rem; }
@@ -441,11 +454,14 @@ def render_page(config: FleetConfig | None, statuses: Mapping[str, str], *, base
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Difflet models</title>
+<link rel="icon" type="image/svg+xml" href="{_FAVICON}">
 <style>{_CSS}</style>
 </head>
 <body>
 <header>
-<div><h1>Difflet</h1><p>Text-to-image and text-to-video on AWS Trainium.</p></div>
+<div><h1>{_LOGO}</h1><p>Text-to-image and text-to-video on AWS Trainium.</p></div>
+<a class="powered" href="https://yottalabs.ai" target="_blank" rel="noopener">Powered by
+<b>yottalabs.ai</b></a>
 </header>
 <div class="layout">
 <div class="panel">

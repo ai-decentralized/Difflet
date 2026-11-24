@@ -89,6 +89,15 @@ def test_page_is_a_generation_form_that_never_reloads():
     assert models[HV]["shapes"][0] == [320, 512, 61]
 
 
+def test_page_carries_the_difflet_logo_and_powered_by():
+    for page in (render_page(_config(_flux()), {FLUX: "ready"}, base_url=BASE),
+                 render_page(None, {}, api_base="https://api.example")):  # static copy too
+        assert '<svg class="logo" role="img" aria-label="Difflet"' in page
+        assert 'fill="currentColor"' in page  # the wordmark follows the theme's text colour
+        assert '<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,' in page
+        assert 'href="https://yottalabs.ai"' in page and "Powered by" in page
+
+
 def test_page_models_carry_the_backend_defaults():
     qwen = FleetEntry(model_id=QWEN, device=1, port=8101, cache_dir=Path("/c"),
                       serve_args=("--height", "1024", "--width", "1024"))
@@ -146,7 +155,8 @@ def test_static_page_calls_the_api_base_and_embeds_no_models():
     assert _ui(page) == {"models": [], "wait": None, "limits": None}
     assert "<table" not in page and "Example requests" not in page
     assert "API + '/ui/models'" in page and 'id="prompt"' in page
-    assert re.search(r"<(?:link|img|script)\b[^>]*\b(?:href|src)=", page) is None  # one file
+    # one file: nothing loaded from elsewhere (the favicon is an inline data: URI)
+    assert re.search(r'<(?:link|img|script)\b[^>]*\b(?:href|src)="(?!data:)', page) is None
 
 
 def test_page_script_sends_a_client_id_kept_in_local_storage():
