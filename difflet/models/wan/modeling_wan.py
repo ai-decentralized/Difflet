@@ -666,28 +666,32 @@ class WanAttention(nn.Module):
             q = rotate(q, cos, sin)
             k = rotate(k, cos, sin)
 
-        # (B, S, heads, dim) → (B, heads, S, dim) for the kernel.
-        q = q.transpose(1, 2)
-        k = k.transpose(1, 2)
-        v = v.transpose(1, 2)
-
         # CP self-attention: ring rotates sharded K,V; ulysses all-to-alls the sequence
         # shard into a head shard; gather_kv all-gathers full K,V. Cross-attention K,V
         # come from encoder_hidden_states, which is not scattered, so CP never applies.
         cp_self_attn = self.context_parallel_enabled and not self.is_cross_attention
         if cp_self_attn and self.cp_mode == "ring":
-            out = ring_attention(q, k, v, scale=1.0 / math.sqrt(self.head_dim), causal=False)
-        elif cp_self_attn and self.cp_mode == "ulysses":
-            out = ulysses_attention(q, k, v, scale=1.0 / math.sqrt(self.head_dim), causal=False)
+            # Token-major (B, S, heads, dim) as projected: the const-max ring kernel takes it as
+            # is; the output comes back (B, heads, S, dim) like the other paths'.
+            out = ring_attention(q, k, v, scale=1.0 / math.sqrt(self.head_dim), causal=False,
+                                 token_major=True)
         else:
-            if cp_self_attn:
-                stacked_kv = torch.stack([k, v], dim=0)  # [2, B, heads, S/cp, head_dim]
-                stacked_kv = gather_from_tensor_model_parallel_region_with_dim(
-                    stacked_kv, gather_dim=3, process_group=self.cp_group
-                )  # [2, B, heads, S, head_dim]
-                k, v = torch.unbind(stacked_kv, dim=0)
-            out = _attn_kernel(q, k, v, head_dim=self.head_dim,
-                               constmax_sigma=getattr(self, "constmax_sigma", None))
+            # (B, S, heads, dim) → (B, heads, S, dim) for the kernel.
+            q = q.transpose(1, 2)
+            k = k.transpose(1, 2)
+            v = v.transpose(1, 2)
+            if cp_self_attn and self.cp_mode == "ulysses":
+                out = ulysses_attention(q, k, v, scale=1.0 / math.sqrt(self.head_dim),
+                                        causal=False)
+            else:
+                if cp_self_attn:
+                    stacked_kv = torch.stack([k, v], dim=0)  # [2, B, heads, S/cp, head_dim]
+                    stacked_kv = gather_from_tensor_model_parallel_region_with_dim(
+                        stacked_kv, gather_dim=3, process_group=self.cp_group
+                    )  # [2, B, heads, S, head_dim]
+                    k, v = torch.unbind(stacked_kv, dim=0)
+                out = _attn_kernel(q, k, v, head_dim=self.head_dim,
+                                   constmax_sigma=getattr(self, "constmax_sigma", None))
 
         # (B, local_heads, S, dim) → (B, S, local_heads * dim); RowParallelLinear then
         # all-reduces each rank's partial output projection back to the full model dim.

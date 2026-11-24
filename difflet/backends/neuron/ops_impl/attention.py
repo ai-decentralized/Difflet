@@ -542,10 +542,12 @@ def _dense_bhsd(q, k, v, *, scale: float):
     return out.reshape(b, h, s_q, d)
 
 
-def ring_attention(q, k, v, *, scale: float, causal: bool = False):
+def ring_attention(q, k, v, *, scale: float, causal: bool = False, token_major: bool = False):
     """Ring context-parallel self-attention over a sequence sharded on the CP group.
 
-    ``q, k, v``: ``[B, H, S/cp, d]`` to ``[B, H, S/cp, d]``. In ``cp`` rounds each rank attends
+    ``q, k, v``: ``[B, H, S/cp, d]`` to ``[B, H, S/cp, d]``; with ``token_major``, ``q, k, v`` are
+    ``[B, S/cp, H, d]`` (the projections' own layout, which the const-max ring kernel takes as is)
+    and the output is still ``[B, H, S/cp, d]``. In ``cp`` rounds each rank attends
     its query shard to the K/V block it holds, getting ``(o_r, l_r)`` (output, logsumexp), and
     passes the block to the next rank. Partial results merge in fp32 by their logsumexp
     (``_merge_partials``), which is exactly the softmax over all ``S`` keys. Non-causal only. Any shard length: the flash kernel's
@@ -553,6 +555,9 @@ def ring_attention(q, k, v, *, scale: float, causal: bool = False):
     """
     if causal:
         raise NotImplementedError("ring_attention supports non-causal attention only")
+    token_major_qkv = (q, k, v) if token_major else None
+    if token_major:  # [B, H, S/cp, d] views for every other path: no copy
+        q, k, v = (x.transpose(1, 2) for x in (q, k, v))
     from difflet.backends.neuron.ops_impl import collectives
     from difflet.backends.neuron.ops_impl.parallel_mesh import get_axis_rank, get_axis_size
 
@@ -560,8 +565,9 @@ def ring_attention(q, k, v, *, scale: float, causal: bool = False):
     if cp == 1:
         return _dense_bhsd(q, k, v, scale=scale)
     if _RING_CONSTMAX_OP is not None and _ring_kernel_eligible(q, k, v) and q.shape[-1] == 128:
-        token_major = lambda x: x.transpose(1, 2).contiguous()  # [B, S/cp, H, d]: its layout
-        out = _RING_CONSTMAX_OP(token_major(q), token_major(k), token_major(v), scale)
+        # [B, S/cp, H, d]: its layout, as the caller passed it, else from the head-major tensors.
+        tm = token_major_qkv or tuple(x.transpose(1, 2) for x in (q, k, v))
+        out = _RING_CONSTMAX_OP(*(x.contiguous() for x in tm), scale)
         return out.reshape(q.shape)
     if _RING_KERNEL_OP is not None and _ring_kernel_eligible(q, k, v):
         return _RING_KERNEL_OP(q, k, v, scale).reshape(q.shape)
