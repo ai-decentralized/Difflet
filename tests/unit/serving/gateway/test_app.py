@@ -322,6 +322,54 @@ def test_client_disconnect_cancels_upstream(tmp_path):
     asyncio.run(run())
 
 
+def test_queue_counts_active_video_jobs_from_the_backend(tmp_path, backends):
+    jobs = [{"id": f"video_gen_{i}", "status": s}
+            for i, s in enumerate(("queued", "in_progress", "completed", "failed", "queued"))]
+    backends.routes[(8103, "GET", "/v1/videos")] = httpx.Response(
+        200, json={"object": "list", "data": jobs, "has_more": False})
+    backends.down.add(8104)  # a backend that does not answer shows an empty queue
+    with _client(tmp_path, backends) as client:
+        assert client.get("/queue").json() == {"models": {FLUX: 0, HV: 3, LTX: 0}}
+    listed = [r for r in backends.seen if r.url.port == 8103]
+    assert listed[0].url.params["limit"] == "100"
+
+
+def test_queue_counts_a_held_request_until_its_backend_answers(tmp_path):
+    release = asyncio.Event()
+
+    async def backend(request: httpx.Request) -> httpx.Response:
+        await request.aread()
+        if request.url.path != "/v1/chat/completions":
+            return httpx.Response(404, json=NOT_FOUND)
+        await release.wait()  # the backend is still generating
+
+        async def body():  # streamed like a real socket, as the Backends fixture does
+            yield b'{"ok": 1}'
+
+        return httpx.Response(200, headers={"content-type": "application/json"}, content=body())
+
+    async def ready():
+        return {}
+
+    app = create_gateway_app(_config(tmp_path), status_fn=ready,
+                             client=httpx.AsyncClient(transport=httpx.MockTransport(backend)))
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://gw") as client:
+            pending = asyncio.create_task(client.post("/v1/chat/completions", json=_chat()))
+            for _ in range(100):
+                if (await client.get("/queue")).json()["models"][FLUX] == 1:
+                    break
+                await asyncio.sleep(0.01)
+            assert (await client.get("/queue")).json()["models"][FLUX] == 1
+            release.set()
+            assert (await pending).status_code == 200
+            assert (await client.get("/queue")).json()["models"][FLUX] == 0
+
+    asyncio.run(run())
+
+
 def test_stats_count_successful_generations_across_restarts(tmp_path, backends):
     backends.routes[(8100, "POST", "/v1/chat/completions")] = httpx.Response(200, json={"ok": 1})
     with _client(tmp_path, backends) as client:

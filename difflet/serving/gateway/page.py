@@ -115,6 +115,7 @@ const EXAMPLES = JSON.parse(document.getElementById('example-prompts').textConte
 const $ = (id) => document.getElementById(id);
 let kind = 'image';
 let running = false;
+let QUEUE = {};  // model id -> requests running or waiting (GET /queue)
 
 function shapeText(s) { return s[2] ? s[0] + '×' + s[1] + '×' + s[2] : s[0] + '×' + s[1]; }
 function duration(seconds) { return seconds < 90 ? Math.round(seconds) + ' s' : (seconds / 60).toFixed(1) + ' min'; }
@@ -133,7 +134,9 @@ function renderModels() {
   for (const m of MODELS.filter((m) => m.kind === kind)) {
     const option = document.createElement('option');
     option.value = m.id;
-    option.textContent = m.label + (m.status === 'ready' ? '' : '  (' + m.status + ')');
+    const waiting = QUEUE[m.id] || 0;
+    option.textContent = m.label + (m.status === 'ready' ? '' : '  (' + m.status + ')')
+      + (waiting ? '  · ' + waiting + ' in queue' : '');
     option.disabled = m.status !== 'ready';
     select.appendChild(option);
   }
@@ -155,6 +158,17 @@ function renderModelInfo() {
     est.className = 'estimate';
     est.textContent = 'Estimated ~' + duration(seconds) + ' at ' + (steps === null ? m.steps : steps) + ' steps';
     info.append(document.createElement('br'), est);
+  }
+  if (m) {
+    // The requests ahead are assumed to run at their model's default steps.
+    const waiting = QUEUE[m.id] || 0;
+    const each = estimate(m, null);
+    const queue = document.createElement('span');
+    queue.className = 'estimate';
+    queue.textContent = waiting === 0 ? 'Queue: empty, starts right away'
+      : 'Queue: ' + waiting + ' running or waiting'
+        + (each !== null && seconds !== null ? ' · total wait ~' + duration(waiting * each + seconds) : '');
+    info.append(document.createElement('br'), queue);
   }
   $('guidance-box').hidden = !m || m.guidance === null;
   $('steps').placeholder = m && m.steps ? String(m.steps) : 'default';
@@ -305,6 +319,13 @@ async function run() {
   }
 }
 
+async function refreshQueue() {
+  try {
+    QUEUE = (await fetch('/queue').then((r) => r.json())).models || {};
+    renderModels();
+  } catch (e) { /* keep the last known queue */ }
+}
+
 async function refresh() {
   try {
     const ready = await fetch('/ready').then((r) => r.json());
@@ -322,6 +343,8 @@ $('run').onclick = run;
 $('prompt').addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) run(); });
 selectTab(MODELS.some((m) => m.kind === 'image') ? 'image' : 'video');
 setInterval(refresh, 15000);
+refreshQueue();
+setInterval(refreshQueue, 5000);
 """
 
 
@@ -379,9 +402,9 @@ def render_page(config: FleetConfig, statuses: Mapping[str, str], *, base_url: s
 <button id="run" type="button">Run</button>
 <progress id="progress" max="1" value="0" hidden></progress>
 <div id="state" aria-live="polite"></div>
-<p class="notice">{escape(QUEUE_LINE)} Estimated times were measured on this server with nobody
-else's request ahead; a busy model adds its queue. A request must use one of its model's shapes:
-H×W for images, H×W×F (frames) for videos.</p>
+<p class="notice">{escape(QUEUE_LINE)} Estimated times were measured on this server with one
+model busy at a time; the wait counts the requests ahead at their model's default steps. A request
+must use one of its model's shapes: H×W for images, H×W×F (frames) for videos.</p>
 </div>
 <div class="results" id="results"><div class="empty">Results appear here.</div></div>
 </div>

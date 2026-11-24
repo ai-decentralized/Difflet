@@ -8,6 +8,7 @@ still working closes the upstream request, so the backend cancels it.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -64,6 +65,9 @@ def create_gateway_app(
         return await (status_fn() if status_fn is not None else fleet_status(config, http))
 
     runs = RunCounter(config.runs_dir / "gateway-stats.json")
+    #: Requests the gateway holds open per model (chat completions, /v1/videos/sync): a backend
+    #: answers them only when the generation ends, so each counts while it waits and while it runs.
+    inflight = {entry.model_id: 0 for entry in config.models}
     app = FastAPI(title="Difflet gateway", lifespan=lifespan)
     if api_key:
         app.add_middleware(ApiKeyAuthenticationMiddleware, api_key=api_key)
@@ -112,14 +116,43 @@ def create_gateway_app(
         except ValueError:
             payload = None
         entry = route(payload.get("model") if isinstance(payload, dict) else None, "image")
-        return _relay(runs.count(await send(request, entry, "/v1/chat/completions", body=body)))
+        return _relay(runs.count(await held(request, entry, "/v1/chat/completions", body)))
 
     @app.post("/v1/videos")
     @app.post("/v1/videos/sync")
     async def create_video(request: Request):
         body = await _read_body(request)
         entry = route(await _form_model(request, body), "video")
+        if request.url.path.endswith("/sync"):
+            return _relay(runs.count(await held(request, entry, request.url.path, body)))
         return _relay(runs.count(await send(request, entry, request.url.path, body=body)))
+
+    async def held(request: Request, entry: FleetEntry, path: str, body: bytes) -> httpx.Response:
+        """``send`` for a request the backend answers when its generation ends, counted in
+        ``inflight`` until then."""
+        inflight[entry.model_id] += 1
+        try:
+            return await send(request, entry, path, body=body)
+        finally:
+            inflight[entry.model_id] -= 1
+
+    async def active(entry: FleetEntry) -> int:
+        """Requests running or waiting on ``entry``: the ones the gateway holds open, plus a video
+        backend's async jobs still queued or in progress (its own list, so API users count too)."""
+        count = inflight[entry.model_id]
+        if entry.kind != "video":
+            return count
+        try:
+            # shortcut: the newest 100 jobs only (the list is newest first); page with `after`
+            # if a queue can exceed 100.
+            resp = await http.get(entry.base_url + "/v1/videos", params={"limit": 100},
+                                  timeout=5.0)
+            if resp.status_code == 200:
+                count += sum(1 for job in resp.json().get("data", [])
+                             if job.get("status") in ("queued", "in_progress"))
+        except (httpx.HTTPError, ValueError, AttributeError):
+            pass  # a backend that does not answer has no visible queue
+        return count
 
     @app.get("/v1/videos")
     async def list_videos(request: Request):
@@ -182,6 +215,11 @@ def create_gateway_app(
     @app.get("/stats")
     async def stats():
         return {"total_runs": runs.total}
+
+    @app.get("/queue")
+    async def queue():
+        counts = await asyncio.gather(*(active(entry) for entry in config.models))
+        return {"models": {e.model_id: n for e, n in zip(config.models, counts)}}
 
     @app.get("/", response_class=HTMLResponse)
     async def page(request: Request):
