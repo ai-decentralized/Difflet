@@ -9,7 +9,8 @@
 #   models    qwen_image flux ltx_2 wan21 wan22 hunyuan_video hunyuan_video_15
 #   E1        --teacache-online-delta 0.6          E2  --teacache-cadence 2
 #   F         E2 at the model's best layout: + --sp (qwen_image, flux, hunyuan_video: tp4 + SP);
-#             wan21 / wan22: --tp-degree 2 --cfg-parallel --sp (tp2 x CFG2 + SP, 4 cores)
+#             wan21 / wan22: --tp-degree 2 --cfg-parallel --sp (tp2 x CFG2 + SP, 4 cores);
+#             ltx_2: --tp-degree 2 --cfg-parallel (tp2 x CFG2)
 #   Fb        F without --quant mxfp8, in the bf16 + const-max cache (README: MXFP8 with SP
 #             measured 1.92x slower on HunyuanVideo); F arms keep their own smoke dirs
 #   compile   difflet compile with E's flags (load + warm-up; TeaCache is a generate flag)
@@ -42,7 +43,8 @@ case $MODEL in
   flux) M=(--model-id black-forest-labs/FLUX.1-dev --height 1024 --width 1024 --tp-degree 4)
     A=bf16 C=flux/cache/flux-mxcm CB=flux/cache/flux-cm EXT=png T=(30m 10m 10m) ;;
   ltx_2) M=(--model-id Lightricks/LTX-2 --height 512 --width 768 --num-frames 121 --tp-degree 4)
-    A=bf16 C=ltx_2/cache/mxcm T=(1h 10m 15m) ;;
+    A=bf16 C=ltx_2/cache/mxcm CB=../constmax/cache/ltx_2-cm T=(2h 30m 30m)
+    FX=(--tp-degree 2 --cfg-parallel) ;;  # LTX-2 has no SP; tp2 loads and warms up longer
   wan21) M=(--model-id Wan-AI/Wan2.1-T2V-14B-Diffusers
             --revision 38ec498cb3208fb688890f8cc7e94ede2cbd7f68
             --height 480 --width 832 --num-frames 81 --tp-degree 4)
