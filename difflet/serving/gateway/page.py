@@ -583,14 +583,18 @@ def _duration(seconds: float) -> str:
 @functools.cache
 def model_defaults(model_id: str) -> tuple[int | None, float | None]:
     """The steps and guidance scale a backend uses when a request omits them (the model's
-    ``ModelSpec``; guidance None when the model takes none). A model without a spec (MiniMax-H3)
-    takes its serving metadata's steps and no guidance scale."""
+    ``ModelSpec``; guidance None when the model takes none). A model the neuron backend does not
+    serve from its spec (MiniMax-H3, whose spec is CUDA's alone) takes its serving metadata's
+    steps and no guidance scale."""
+    from difflet.backends.neuron.serving import NATIVE_SERVED_CHECKPOINTS
     from difflet.models.spec import gpu_model_spec
     from difflet.registry import resolve_model
     from difflet.serving.model_registry import serving_default_steps
 
     try:
-        spec = gpu_model_spec(resolve_model(model_id).name)
+        name = resolve_model(model_id).name
+        # The fleet's backends run on neuron (launcher.FIXED_ENV), which reads only these specs.
+        spec = gpu_model_spec(name) if name in NATIVE_SERVED_CHECKPOINTS else None
     except (KeyError, ValueError):
         spec = None
     if spec is None:
