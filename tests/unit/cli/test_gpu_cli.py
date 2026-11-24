@@ -230,6 +230,12 @@ def _refusals():
             cases.append(({"cfg_parallel": True}, refusal))
         if not spec.accepts_negative_prompt:
             cases.append(({"negative_prompt": "blurry"}, "--negative-prompt"))
+        if "guidance_scale_2" not in dict(spec.refused_cli_flags):
+            # Every checkpoint with one denoising stage (Wan 2.1, the image models).
+            for model_id in spec.cli_model_ids:
+                if model_id not in spec.guidance_scale_2_checkpoint_ids:
+                    over = {"guidance_scale_2": 7.0, "model_id": model_id}
+                    cases.append((over, f"--guidance-scale-2 has no effect on {model_id}"))
         for over, expected in cases:
             yield pytest.param(spec, over, expected, id=f"{spec.model_type}-{next(iter(over))}")
 
@@ -240,6 +246,21 @@ def test_unsupported_flags_are_refused_by_name_before_any_load(spec, over, expec
         _orch(spec, **over).generate()
     assert f"[{spec.model_type}/cuda]" in str(exc.value) and expected in str(exc.value)
     assert recorder == []
+
+
+@pytest.mark.parametrize(
+    "spec", [s for s in SPECS if s.guidance_scale_2_checkpoint_ids], ids=lambda s: s.model_type
+)
+def test_guidance_scale_2_reaches_generate_only_when_given(spec, recorder, tmp_path):
+    for model_id in spec.guidance_scale_2_checkpoint_ids:
+        orch = _orch(
+            spec, model_id=model_id, guidance_scale_2=2.5, output=str(tmp_path / f"a{_ext(spec)}")
+        )
+        orch.generate()
+        assert orch._last_pipe.app.calls[0][1]["guidance_scale_2"] == 2.5
+    orch = _orch(spec, output=str(tmp_path / f"b{_ext(spec)}"))
+    orch.generate()
+    assert "guidance_scale_2" not in orch._last_pipe.app.calls[0][1]
 
 
 @pytest.mark.parametrize(

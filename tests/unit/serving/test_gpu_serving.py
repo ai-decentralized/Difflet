@@ -446,6 +446,31 @@ def test_both_experts_guidance_and_a_negative_prompt_are_accepted(spec, source):
         assert exc.value.code == "invalid_extra_body"
 
 
+@_specs(
+    lambda s: (
+        s.guidance_scale_2_checkpoint_ids
+        and set(s.served_checkpoint_ids) - set(s.guidance_scale_2_checkpoint_ids)
+    )
+)
+def test_guidance_scale_2_is_refused_for_a_checkpoint_with_one_denoising_stage(
+    spec, monkeypatch
+):
+    # Wan 2.1 under the Wan spec: one transformer, so guidance_scale_2 would never be read.
+    for checkpoint in set(spec.served_checkpoint_ids) - set(spec.guidance_scale_2_checkpoint_ids):
+        source = ResolvedModelSource("hf_snapshot", checkpoint, None, "/snap/x", "a" * 40)
+        monkeypatch.setattr(mod, "resolve_hf_model_source", lambda *a, **k: source)
+        bundle = mod.GpuServingArtifactPreparer(checkpoint).prepare_runtime(
+            _profile(spec, model_id=checkpoint),
+            download_policy=DownloadPolicy.AUTO,
+            compile_policy=CompilePolicy.AUTO,
+        )
+        v = _validator(bundle)
+        v.validate(_request(spec, model=checkpoint))
+        with pytest.raises(DiffletServingError) as exc:
+            v.validate(_request(spec, model=checkpoint, video={"guidance_scale_2": 3.0}))
+        assert exc.value.code == "feature_not_supported" and checkpoint in exc.value.message
+
+
 @_video_only
 def test_fields_the_application_does_not_take_are_refused(spec, source):
     v = _validator(_prepare(spec, _profile(spec)))

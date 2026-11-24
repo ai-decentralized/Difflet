@@ -56,6 +56,11 @@ class ModelSpec:
     #: Why a guidance scale has no effect, for the refusal messages.
     no_guidance_reason: str = ""
     default_fps: int | None = None
+    #: Checkpoints whose application takes ``guidance_scale_2``, the scale of a second
+    #: denoising stage (Wan 2.2's low-noise expert): ``difflet run --guidance-scale-2`` and a
+    #: served ``guidance_scale_2`` reach ``generate`` for these and are refused, before any
+    #: download or load, for every other checkpoint.
+    guidance_scale_2_checkpoint_ids: tuple[str, ...] = ()
     accepts_cfg_parallel: bool = False
     accepts_negative_prompt: bool = False
     #: The keyframes a request may condition on (``"first"``, ``"last"``): ``difflet run
