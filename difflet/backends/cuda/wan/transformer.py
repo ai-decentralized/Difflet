@@ -102,6 +102,16 @@ class CudaWanTransformerApplication(GpuComponent):
             strict=True,
         )
 
+    def apply_load_time_swaps(self, module: torch.nn.Module) -> None:
+        # Eager on a CUDA device: each block's elementwise chains as fused Triton kernels
+        # (``fused_block.py``). Under compile inductor fuses them itself, so the blocks keep
+        # the modeling's forward.
+        if self.torch_compile or self.device.type != "cuda":
+            return
+        from difflet.backends.cuda.wan.fused_block import fuse_blocks
+
+        fuse_blocks(module)
+
     def repeated_blocks(self, module: torch.nn.Module) -> list[torch.nn.ModuleList]:
         # One static shape per process, so the compile is static (dynamic=False).
         return [module.blocks]

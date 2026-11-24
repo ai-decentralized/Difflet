@@ -279,3 +279,14 @@ def test_torch_compile_wraps_each_wan_block(tmp_path):
     app.load(str(tmp_path / "cache"), skip_warmup=True)
     assert len(app.module.blocks) == TINY["num_layers"]
     assert all(isinstance(b, OptimizedModule) for b in app.module.blocks)
+
+
+def test_a_cpu_load_keeps_the_modeling_blocks(tmp_path):
+    # The fused eager blocks (fused_block.py) are Triton kernels: CUDA devices only.
+    transformer = tmp_path / "transformer"
+    _reference(transformer)
+    cfg = _config(transformer, torch_dtype=torch.float32)
+    app = CudaWanTransformerApplication(model_path=str(transformer), config=cfg, device="cpu")
+    app.compile(str(tmp_path / "cache"))
+    app.load(str(tmp_path / "cache"), skip_warmup=True)
+    assert all("forward" not in vars(block) for block in app.module.blocks)
