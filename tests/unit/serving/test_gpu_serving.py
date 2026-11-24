@@ -18,6 +18,7 @@ import torch
 from PIL import Image
 
 from difflet.backends.gpu import serving as mod
+from difflet.backends.gpu.policy import guidance_scale_2_refusal
 from difflet.models.spec import gpu_model_specs
 from difflet.pipeline.parallel_config import DiffletParallelConfig
 from difflet.serving.engines.stage_pipeline import StagePipelineEngine
@@ -468,7 +469,9 @@ def test_guidance_scale_2_is_refused_for_a_checkpoint_with_one_denoising_stage(
         v.validate(_request(spec, model=checkpoint))
         with pytest.raises(DiffletServingError) as exc:
             v.validate(_request(spec, model=checkpoint, video={"guidance_scale_2": 3.0}))
-        assert exc.value.code == "feature_not_supported" and checkpoint in exc.value.message
+        assert exc.value.code == "feature_not_supported"
+        # The CLI's wording: one helper builds it for both (policy.guidance_scale_2_refusal).
+        assert exc.value.message.endswith(guidance_scale_2_refusal(spec, checkpoint))
 
 
 @_video_only

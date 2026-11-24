@@ -27,6 +27,7 @@ from types import SimpleNamespace
 from difflet.cli.orchestrators.base import ModelOrchestrator
 from difflet.backends.gpu.policy import (
     cfg_parallel_refusal,
+    guidance_scale_2_refusal,
     is_set,
     unsupported_parallel,
 )
@@ -133,13 +134,9 @@ class GpuOrchestrator(ModelOrchestrator):
         for attribute, label in self.spec.refused_cli_flags:
             if is_set(getattr(args, attribute, None)):
                 self._refuse(label)
-        if is_set(getattr(args, "guidance_scale_2", None)) and (
-            self.model_id not in self.spec.guidance_scale_2_checkpoint_ids
-        ):
-            raise SystemExit(
-                f"{self.tag} --guidance-scale-2 has no effect on {self.model_id}: it has one "
-                "denoising stage, so every step uses --guidance-scale"
-            )
+        refusal = guidance_scale_2_refusal(self.spec, self.model_id)
+        if refusal and is_set(getattr(args, "guidance_scale_2", None)):
+            raise SystemExit(f"{self.tag} {refusal}")
         if not self.spec.accepts_negative_prompt and is_set(getattr(args, "negative_prompt", None)):
             self._refuse("--negative-prompt")
         for anchor in self._keyframe_paths():

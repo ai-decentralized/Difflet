@@ -16,6 +16,7 @@ import torch
 from PIL import Image
 
 from difflet.backends.gpu.cli import GpuOrchestrator
+from difflet.backends.gpu.policy import guidance_scale_2_refusal
 from difflet.cli.orchestrators import wan as trainium_wan
 from difflet.models.spec import gpu_model_specs
 from difflet.platforms.base import PARALLEL_MODE_FLAGS
@@ -235,7 +236,7 @@ def _refusals():
             for model_id in spec.cli_model_ids:
                 if model_id not in spec.guidance_scale_2_checkpoint_ids:
                     over = {"guidance_scale_2": 7.0, "model_id": model_id}
-                    cases.append((over, f"--guidance-scale-2 has no effect on {model_id}"))
+                    cases.append((over, guidance_scale_2_refusal(spec, model_id)))
         for over, expected in cases:
             yield pytest.param(spec, over, expected, id=f"{spec.model_type}-{next(iter(over))}")
 

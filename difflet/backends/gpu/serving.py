@@ -31,6 +31,7 @@ from typing import Any
 from difflet.backends.gpu.policy import (
     cfg_parallel_refusal,
     gpu_platform,
+    guidance_scale_2_refusal,
     is_set,
     unsupported_parallel,
 )
@@ -328,11 +329,9 @@ class GpuServingRequestValidator:
                     raise feature_not_supported(
                         f"{_tag(spec)} {field} is not taken by {spec.display_name}: {why}"
                     )
-            if g2 is not None and self.model_id not in spec.guidance_scale_2_checkpoint_ids:
-                raise feature_not_supported(
-                    f"{_tag(spec)} guidance_scale_2 is not taken by {self.model_id}: it has "
-                    "one denoising stage, so every step uses guidance_scale"
-                )
+            refusal = guidance_scale_2_refusal(spec, self.model_id)
+            if refusal and g2 is not None:
+                raise feature_not_supported(f"{_tag(spec)} {refusal}")
             for keyframe in video.keyframes:
                 if keyframe.anchor not in spec.keyframe_anchors:
                     raise feature_not_supported(

@@ -54,4 +54,22 @@ def cfg_parallel_refusal(spec: ModelSpec) -> str:
     )
 
 
-__all__ = ["cfg_parallel_refusal", "gpu_platform", "is_set", "unsupported_parallel"]
+def guidance_scale_2_refusal(spec: ModelSpec, model_id: str) -> str | None:
+    """Why ``guidance_scale_2`` is refused for ``model_id``, or ``None`` when its application
+    takes it (``spec.guidance_scale_2_checkpoint_ids``): the one wording ``difflet run`` and
+    ``difflet serve`` give, before anything is downloaded or loaded."""
+    if model_id in spec.guidance_scale_2_checkpoint_ids:
+        return None
+    return (
+        f"guidance_scale_2 has no effect on {model_id}: it has one denoising stage, so every "
+        "step uses guidance_scale"
+    )
+
+
+__all__ = [
+    "cfg_parallel_refusal",
+    "gpu_platform",
+    "guidance_scale_2_refusal",
+    "is_set",
+    "unsupported_parallel",
+]
