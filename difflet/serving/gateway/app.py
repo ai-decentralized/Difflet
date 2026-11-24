@@ -19,7 +19,6 @@ import re
 from collections import deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from pathlib import Path
 from time import monotonic
 from typing import Awaitable, Callable
 from urllib.parse import quote, urlencode
@@ -122,7 +121,6 @@ def create_gateway_app(
     async def statuses() -> dict[str, Status]:
         return await (status_fn() if status_fn is not None else fleet_status(config, http))
 
-    runs = RunCounter(config.runs_dir / "gateway-stats.json")
     #: Requests the gateway holds open per model (chat completions, /v1/videos/sync): a backend
     #: answers them only when the generation ends, so each counts while it waits and while it runs.
     inflight = {entry.model_id: 0 for entry in config.models}
@@ -246,7 +244,7 @@ def create_gateway_app(
             mine.remove(entry.model_id)
             if not mine:
                 del client_held[key]
-        return _relay(runs.count(resp), raw)
+        return _relay(resp, raw)
 
     def check_rate(windows: dict[str, deque[float]], key: str, limit: int, code: str,
                    who: str) -> None:
@@ -408,10 +406,6 @@ def create_gateway_app(
         return JSONResponse(status_code=200 if all_ready else 503, content={
             "status": "ready" if all_ready else "not_ready", "models": found})
 
-    @app.get("/stats")
-    async def stats():
-        return {"total_runs": runs.total}
-
     @app.get("/queue")
     async def queue():
         return {"models": await polled_queue()}
@@ -423,34 +417,9 @@ def create_gateway_app(
     @app.get("/", response_class=HTMLResponse)
     async def page(request: Request):
         return HTMLResponse(render_page(config, await polled_statuses(),
-                                        base_url=str(request.base_url),
-                                        total_runs=runs.total))
+                                        base_url=str(request.base_url)))
 
     return app
-
-
-class RunCounter:
-    """Generations the gateway passed on successfully (an image answered 200, a video job
-    accepted), kept across gateway restarts in one JSON file. A display figure: a file that cannot
-    be read or written never fails a request."""
-
-    def __init__(self, path: Path) -> None:
-        self.path = path
-        try:
-            self.total = int(json.loads(path.read_text())["total_runs"])
-        except (OSError, ValueError, KeyError, TypeError):
-            self.total = 0
-
-    def count(self, response: httpx.Response) -> httpx.Response:
-        if response.status_code == 200:
-            self.total += 1
-            try:
-                tmp = self.path.with_suffix(".tmp")
-                tmp.write_text(json.dumps({"total_runs": self.total}))
-                tmp.replace(self.path)
-            except OSError:
-                pass
-        return response
 
 
 async def _read_body(request: Request) -> bytes:

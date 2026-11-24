@@ -29,7 +29,10 @@ def _load(tmp_path, *models, gateway=None):
 
 def test_load_example_fleet():
     config = load_fleet(EXAMPLE)
-    assert [e.device for e in config.models] == list(range(len(config.models)))
+    assert sorted(e.device for e in config.models) == list(range(len(config.models)))
+    videos = [e.model_id for e in config.models if e.kind == "video"]
+    assert videos[0] == "hunyuanvideo-community/HunyuanVideo"  # the page lists in file order
+    assert videos[-1] == "Wan-AI/Wan2.1-T2V-14B-Diffusers"  # the slowest last
     assert {e.kind for e in config.models} <= {"image", "video"}
     assert all(e.shapes for e in config.models)
     assert all(e.estimate for e in config.models)  # every example backend was measured

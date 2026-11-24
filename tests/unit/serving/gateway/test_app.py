@@ -392,19 +392,6 @@ def test_queue_counts_a_held_request_until_its_backend_answers(tmp_path, monkeyp
     asyncio.run(run())
 
 
-def test_stats_count_successful_generations_across_restarts(tmp_path, backends):
-    backends.routes[(8100, "POST", "/v1/chat/completions")] = httpx.Response(200, json={"ok": 1})
-    with _client(tmp_path, backends) as client:
-        assert client.get("/stats").json() == {"total_runs": 0}
-        assert client.post("/v1/chat/completions", json=_chat()).status_code == 200
-        assert client.post("/v1/chat/completions", json=_chat(LTX)).status_code == 400  # not counted
-        assert client.get("/stats").json() == {"total_runs": 1}
-
-    with _client(tmp_path, backends) as client:  # a restarted gateway keeps the count
-        assert client.get("/stats").json() == {"total_runs": 1}
-        assert 'id="runs">1<' in client.get("/").text
-
-
 SITE = "https://difflet.yottalabs.ai"
 
 

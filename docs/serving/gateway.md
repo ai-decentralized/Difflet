@@ -108,7 +108,6 @@ directory is put first on `PATH` when it is not on it already.
 | `GET /health` | `200` while the gateway runs |
 | `GET /ui/models` | The page's model list (`id`, `label`, `kind`, `device`, `shapes`, `status`, default `steps` and `guidance`, `estimate`), plus `wait` and `limits` |
 | `GET /queue` | Per model, the requests running or waiting: held by the gateway, plus a video backend's queued or in-progress jobs |
-| `GET /stats` | `total_runs`: generations passed on successfully, kept across gateway restarts |
 | `GET /` | The models page |
 
 Backend answers, errors included, come back with their status and body unchanged. The gateway's
@@ -140,8 +139,7 @@ working, the gateway closes the upstream request and the backend cancels it.
 ## API key
 
 `--api-key KEY` (or `DIFFLET_API_KEY`) makes every `/v1` route require
-`Authorization: Bearer KEY`; `/`, `/health`, `/ready`, `/ui/models`, `/queue` and `/stats` stay
-open. It is one shared key, as for `difflet serve`; put the port behind a security group or a
+`Authorization: Bearer KEY`; `/`, `/health`, `/ready`, `/ui/models` and `/queue` stay open. It is one shared key, as for `difflet serve`; put the port behind a security group or a
 TLS-terminating proxy. The backends listen on `127.0.0.1` without a key. The page sends no key,
 so it works only with a gateway started without one.
 

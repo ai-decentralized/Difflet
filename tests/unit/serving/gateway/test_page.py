@@ -75,13 +75,13 @@ def _models(page):
 
 
 def test_page_is_a_generation_form_that_never_reloads():
-    page = render_page(_config(_flux(), _hv()), {FLUX: "ready", HV: "loading"}, base_url=BASE,
-                       total_runs=7)
+    page = render_page(_config(_flux(), _hv()), {FLUX: "ready", HV: "loading"}, base_url=BASE)
     assert 'http-equiv="refresh"' not in page  # a reload would drop a running generation
     for marker in ('id="model"', 'id="prompt"', 'id="run"', 'data-kind="image"',
                    'data-kind="video"', "fetch(API + '/ready')", "API + '/v1/videos'",
-                   'id="runs">7<', 'window.DIFFLET_API = "";'):
+                   'window.DIFFLET_API = "";'):
         assert marker in page
+    assert "Total inference runs" not in page and "/stats" not in page
     models = _models(page)
     assert models[FLUX]["kind"] == "image" and models[FLUX]["status"] == "ready"
     assert models[FLUX]["shapes"] == [[1024, 1024, None]]

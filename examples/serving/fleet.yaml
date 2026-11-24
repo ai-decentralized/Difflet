@@ -29,14 +29,7 @@ models:
     env: {HF_HUB_CACHE: /mnt/nvme/difflet-quant-bench-hub}
     serve_args: [--tp-degree, "4", --height, "1024", --width, "1024", --worker-restart-timeout, "7200"]
     estimate: {base_s: 1.2, per_step_s: 0.343}   # 10 steps 4.6 s, 50 steps 18.3 s
-  - model_id: Wan-AI/Wan2.1-T2V-14B-Diffusers
-    slug: wan
-    device: 2
-    port: 8102
-    cache_dir: /mnt/nvme/difflet-fleet/cache/wan
-    serve_args: [--tp-degree, "4", --height, "480", --width, "832", --num-frames, "81",
-                 --worker-restart-timeout, "7200", --request-timeout, "1800"]
-    estimate: {base_s: 19.0, per_step_s: 9.7}    # 10 steps 116 s, 30 steps 310 s
+  # The page lists each kind's models in this order: HunyuanVideo first, Wan (the slowest) last.
   - model_id: hunyuanvideo-community/HunyuanVideo
     slug: hunyuan-video
     device: 3
@@ -63,3 +56,11 @@ models:
     serve_args: [--tp-degree, "4", --height, "256", --width, "448", --num-frames, "124",
                  --worker-restart-timeout, "7200", --request-timeout, "1800"]
     estimate: {base_s: 14.7, per_step_s: 0.587}  # 10 steps 20.6 s, 30 steps 32.3 s
+  - model_id: Wan-AI/Wan2.1-T2V-14B-Diffusers
+    slug: wan
+    device: 2
+    port: 8102
+    cache_dir: /mnt/nvme/difflet-fleet/cache/wan
+    serve_args: [--tp-degree, "4", --height, "480", --width, "832", --num-frames, "81",
+                 --worker-restart-timeout, "7200", --request-timeout, "1800"]
+    estimate: {base_s: 19.0, per_step_s: 9.7}    # 10 steps 116 s, 30 steps 310 s

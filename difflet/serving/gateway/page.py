@@ -3,7 +3,7 @@ model's shapes, status and an example API request.
 
 Server-rendered from the fleet file; a small inline script calls the gateway's ``/v1`` routes
 (the page sends no API key: it works when the gateway runs without one) and polls ``/ready`` and
-``/stats`` instead of reloading the page, so a running generation is never lost. A static copy
+``/queue`` instead of reloading the page, so a running generation is never lost. A static copy
 (``difflet gateway page``), hosted elsewhere, calls the gateway at its API base and loads the
 models from ``/ui/models``. Every generation request carries the browser's ``X-Difflet-Client``
 id for the gateway's per-client limits.
@@ -60,7 +60,6 @@ h2 { font-size: 1.1rem; margin: 0 0 .5rem; }
 h3 { font-size: .95rem; margin: 1.25rem 0 .4rem; }
 p { color: var(--muted); margin: .25rem 0 1rem; }
 a { color: var(--accent); }
-.counter { color: var(--muted); } .counter b { color: var(--fg); font-size: 1.15rem; }
 .layout { display: grid; grid-template-columns: minmax(18rem, 26rem) 1fr; gap: 1.5rem;
   align-items: start; }
 @media (max-width: 860px) { .layout { grid-template-columns: 1fr; } }
@@ -411,8 +410,6 @@ async function refresh() {
       for (const m of MODELS) m.status = (ready.models || {})[m.id] || 'down';
     }
     renderModels();
-    const stats = await fetch(API + '/stats').then((r) => r.json());
-    $('runs').textContent = String(stats.total_runs);
   } catch (e) { /* keep the last known state */ }
 }
 
@@ -431,7 +428,7 @@ setInterval(refreshQueue, 5000);
 
 
 def render_page(config: FleetConfig | None, statuses: Mapping[str, str], *, base_url: str = "",
-                total_runs: int = 0, api_base: str = "") -> str:
+                api_base: str = "") -> str:
     """The page. Its script calls the gateway at ``api_base`` ('': the page's own origin). Without a
     ``config`` it is the static page (``difflet gateway page``): no models embedded, so the
     script loads them from ``{api_base}/ui/models``, and no model table or API examples."""
@@ -449,7 +446,6 @@ def render_page(config: FleetConfig | None, statuses: Mapping[str, str], *, base
 <body>
 <header>
 <div><h1>Difflet</h1><p>Text-to-image and text-to-video on AWS Trainium.</p></div>
-<div class="counter">Total inference runs <b id="runs">{"–" if config is None else int(total_runs)}</b></div>
 </header>
 <div class="layout">
 <div class="panel">
