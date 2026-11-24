@@ -454,7 +454,10 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
                 with bench_timing.span("decode", stage="vae", request=req.index):
                     video = app.decode(latents)
                     if lead:
-                        video = video.float().cpu()
+                        # To the host first, then fp32 (exact for bf16): a device-side cast is an eager
+                        # kernel the one-core warm-up never builds, and a multi-rank stage cannot
+                        # compile it on a cold cache (no compilation service).
+                        video = video.cpu().float()
                 if not lead:  # a helper rank: its tiles went to rank 0
                     continue
                 decoded = time.perf_counter()
