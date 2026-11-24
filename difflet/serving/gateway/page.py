@@ -469,7 +469,9 @@ def estimate_text(entry: FleetEntry, steps: int | None) -> str:
 
 
 def _duration(seconds: float) -> str:
-    return f"{round(seconds)} s" if seconds < 90 else f"{seconds / 60:.1f} min"
+    if seconds < 90:
+        return f"{round(seconds)} s"
+    return f"{seconds / 60:.1f} min" if seconds < 5400 else f"{seconds / 3600:.1f} h"
 
 
 @functools.cache

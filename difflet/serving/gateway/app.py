@@ -4,14 +4,23 @@ It reads the request's ``model`` to pick the backend and forwards the request by
 the backend's status and body come back unchanged. It never times out a forwarded request on its
 own (a video can wait hours in its backend's queue); a client that goes away while the backend is
 still working closes the upstream request, so the backend cancels it.
+
+Generation submissions pass the fleet's limits first (``submit``): per client IP and per client
+per hour, one request at a time per client, and no model whose estimated wait is too long.
 """
 
 from __future__ import annotations
 
 import asyncio
+import ipaddress
 import json
+import math
+import re
+from collections import deque
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
+from time import monotonic
 from typing import Awaitable, Callable
 from urllib.parse import quote, urlencode
 
@@ -25,7 +34,7 @@ from difflet.serving.auth import ApiKeyAuthenticationMiddleware
 from difflet.serving.errors import DiffletServingError
 from difflet.serving.gateway.fleet import FleetConfig, FleetEntry
 from difflet.serving.gateway.launcher import read_pid
-from difflet.serving.gateway.page import render_page, ui_models
+from difflet.serving.gateway.page import _duration, model_defaults, render_page, ui_models
 from difflet.serving.gateway.status import Status, fleet_status
 from difflet.serving.openai.api_server import _run_until_disconnect
 from difflet.serving.openai.serving_video import MAX_KEYFRAME_FORM_BODY_BYTES
@@ -36,6 +45,36 @@ _HOP_BY_HOP = {b"connection", b"keep-alive", b"transfer-encoding", b"te", b"trai
                b"proxy-authorization", b"proxy-authenticate"}
 _DROP_REQUEST = _HOP_BY_HOP | {b"host", b"content-length", b"authorization"}
 _DROP_RESPONSE = _HOP_BY_HOP | {b"date", b"server"}  # uvicorn sends its own
+_CLIENT_ID = re.compile(r"[A-Za-z0-9_-]{8,64}")
+_ACTIVE_JOB = ("queued", "in_progress")
+_HOUR_S = 3600.0
+#: How long the gateway remembers a client's async video job that is still listed as active.
+_JOB_MEMORY_S = 24 * 3600.0
+
+
+@dataclass
+class RateLimited(DiffletServingError):
+    """A 429 the gateway answers itself, with ``Retry-After: retry_after`` (seconds)."""
+
+    retry_after: float = 60.0
+
+
+def client_ip(request: Request) -> str:
+    """The client's address: behind a proxy on this host (a loopback peer), the last
+    X-Forwarded-For entry, the one that proxy appended; otherwise the peer itself."""
+    peer = request.client.host if request.client else ""
+    forwarded = ",".join(request.headers.getlist("x-forwarded-for")).split(",")[-1].strip()
+    try:
+        behind_proxy = ipaddress.ip_address(peer).is_loopback
+    except ValueError:
+        behind_proxy = False
+    return forwarded if forwarded and behind_proxy else peer
+
+
+def client_key(request: Request) -> str:
+    """Who the per-client limits count: the page's ``X-Difflet-Client`` id, else the IP."""
+    given = request.headers.get("x-difflet-client", "")
+    return given if _CLIENT_ID.fullmatch(given) else f"ip:{client_ip(request)}"
 
 
 def create_gateway_app(
@@ -69,6 +108,15 @@ def create_gateway_app(
     #: Requests the gateway holds open per model (chat completions, /v1/videos/sync): a backend
     #: answers them only when the generation ends, so each counts while it waits and while it runs.
     inflight = {entry.model_id: 0 for entry in config.models}
+    # shortcut: the limits' state is in memory, so it resets when the gateway restarts and holds
+    # for one gateway process only; move it to a shared store if the gateway is ever replicated.
+    #: Times of the submissions a backend accepted (HTTP 200) in the last hour, per IP / client.
+    ip_accepted: dict[str, deque[float]] = {}
+    client_accepted: dict[str, deque[float]] = {}
+    #: Model ids of the requests each client has in the gateway now (held open, or being admitted).
+    client_held: dict[str, list[str]] = {}
+    #: Async video jobs each client created: job id -> (model id, when).
+    client_jobs: dict[str, dict[str, tuple[str, float]]] = {}
     app = FastAPI(title="Difflet gateway", lifespan=lifespan)
     if api_key:
         app.add_middleware(ApiKeyAuthenticationMiddleware, api_key=api_key)
@@ -82,7 +130,10 @@ def create_gateway_app(
 
     @app.exception_handler(DiffletServingError)
     async def _serving_error(request: Request, exc: DiffletServingError):
-        return JSONResponse(status_code=exc.status_code, content=exc.to_payload())
+        headers = ({"Retry-After": str(max(1, math.ceil(exc.retry_after)))}
+                   if isinstance(exc, RateLimited) else None)
+        return JSONResponse(status_code=exc.status_code, content=exc.to_payload(),
+                            headers=headers)
 
     def route(model, kind: str) -> FleetEntry:
         served = ", ".join(e.model_id for e in config.models)
@@ -124,42 +175,151 @@ def create_gateway_app(
         except ValueError:
             payload = None
         entry = route(payload.get("model") if isinstance(payload, dict) else None, "image")
-        return _relay(runs.count(await held(request, entry, "/v1/chat/completions", body)))
+        return await submit(request, entry, "/v1/chat/completions", body, hold=True)
 
     @app.post("/v1/videos")
     @app.post("/v1/videos/sync")
     async def create_video(request: Request):
         body = await _read_body(request)
         entry = route(await _form_model(request, body), "video")
-        if request.url.path.endswith("/sync"):
-            return _relay(runs.count(await held(request, entry, request.url.path, body)))
-        return _relay(runs.count(await send(request, entry, request.url.path, body=body)))
+        return await submit(request, entry, request.url.path, body,
+                            hold=request.url.path.endswith("/sync"))
 
-    async def held(request: Request, entry: FleetEntry, path: str, body: bytes) -> httpx.Response:
-        """``send`` for a request the backend answers when its generation ends, counted in
-        ``inflight`` until then."""
-        inflight[entry.model_id] += 1
+    async def submit(request: Request, entry: FleetEntry, path: str, body: bytes, *,
+                     hold: bool) -> StreamingResponse:
+        """Forward a generation once the limits let it through, in this order: the client IP's
+        and the client's submissions in the last hour, the client's requests running or waiting,
+        the model's estimated wait. ``hold``: the backend answers when the generation ends, so the
+        request counts in ``inflight`` until then; otherwise it answers with an async job."""
+        ip, key = client_ip(request), client_key(request)
+        check_rate(ip_accepted, ip, config.limits.ip_per_hour, "ip_rate_limited",
+                   "This network has")
+        check_rate(client_accepted, key, config.limits.client_per_hour, "client_rate_limited",
+                   "You have")
+        mine = client_held.setdefault(key, [])
+        ahead = list(mine)
+        mine.append(entry.model_id)  # before any await, so a parallel submission sees this one
+        raw = None
         try:
-            return await send(request, entry, path, body=body)
+            ahead += await running_jobs(key)
+            if len(ahead) >= config.limits.client_active:
+                raise RateLimited(
+                    429, "client_busy",
+                    "You already have a request running or waiting; it must finish first",
+                    retry_after=max((s for m in ahead if (s := each(config.entry(m))) is not None),
+                                    default=60.0))
+            await check_wait(entry)
+            if hold:
+                inflight[entry.model_id] += 1
+            try:
+                resp = await send(request, entry, path, body=body)
+            finally:
+                if hold:
+                    inflight[entry.model_id] -= 1
+            if resp.status_code == 200:
+                now = monotonic()
+                ip_accepted.setdefault(ip, deque()).append(now)
+                client_accepted.setdefault(key, deque()).append(now)
+                if not hold:  # an async video job: remember it until it finishes
+                    raw = await _read_raw(resp)
+                    if (job_id := _job_id(raw)) is not None:
+                        client_jobs.setdefault(key, {})[job_id] = (entry.model_id, now)
         finally:
-            inflight[entry.model_id] -= 1
+            mine.remove(entry.model_id)
+            if not mine:
+                del client_held[key]
+        return _relay(runs.count(resp), raw)
 
-    async def active(entry: FleetEntry) -> int:
-        """Requests running or waiting on ``entry``: the ones the gateway holds open, plus a video
-        backend's async jobs still queued or in progress (its own list, so API users count too)."""
-        count = inflight[entry.model_id]
-        if entry.kind != "video":
-            return count
+    def check_rate(windows: dict[str, deque[float]], key: str, limit: int, code: str,
+                   who: str) -> None:
+        now = monotonic()
+        times = windows.get(key)
+        while times and now - times[0] >= _HOUR_S:
+            times.popleft()
+        if times is not None and not times:
+            del windows[key]
+        elif times is not None and len(times) >= limit:
+            retry = times[len(times) - limit] + _HOUR_S - now  # when one leaves the window
+            raise RateLimited(429, code, f"{who} reached the limit of {limit} generations per "
+                              f"hour; try again in about {_duration(retry)}", retry_after=retry)
+
+    def each(entry: FleetEntry) -> float | None:
+        """Seconds one request takes on ``entry`` at its default steps (measured), None without
+        an estimate."""
+        steps = model_defaults(entry.model_id)[0]
+        if entry.estimate is None or not steps:
+            return None
+        return entry.estimate[0] + entry.estimate[1] * steps
+
+    async def check_wait(entry: FleetEntry) -> None:
+        """Refuse ``entry`` when the requests ahead, at their default steps, take longer than
+        ``wait.reject_s``, naming up to two ready models of its kind with a shorter wait."""
+        seconds = each(entry)
+        if seconds is None:
+            return
+        wait = await active(entry) * seconds
+        if wait <= config.wait.reject_s:
+            return
+        found = await statuses()
+        others = [e for e in config.models if e is not entry and e.kind == entry.kind
+                  and found.get(e.model_id) == "ready" and each(e) is not None]
+        waits = [n * each(e) for e, n in zip(others, await asyncio.gather(*map(active, others)))]
+        shorter = sorted((w, e.model_id) for e, w in zip(others, waits) if w < wait)[:2]
+        tip = ("Models with a shorter wait: " + ", ".join(
+            f"{m} ({'no wait' if w == 0 else 'about ' + _duration(w)})" for w, m in shorter) + "."
+            if shorter else "Try again later.")
+        raise RateLimited(
+            429, "model_busy",
+            f"{entry.model_id} is too busy right now: the estimated wait is about "
+            f"{_duration(wait)}. {tip}",
+            # until enough requests ahead finish for the wait to drop under the threshold
+            retry_after=math.ceil((wait - config.wait.reject_s) / seconds) * seconds)
+
+    async def running_jobs(key: str) -> list[str]:
+        """Model ids of the async video jobs ``key`` created that their backend still lists as
+        queued or in progress. A job listed as finished, not listed, or older than a day is
+        forgotten; one on a backend that does not answer is kept but not counted."""
+        jobs = client_jobs.get(key, {})
+        now = monotonic()
+        for job_id, (_, created) in list(jobs.items()):
+            if now - created > _JOB_MEMORY_S:
+                del jobs[job_id]
+        # Only the jobs known before the listings are fetched: a job recorded meanwhile may be
+        # newer than its listing.
+        known = list(jobs.items())
+        models = sorted({model for _, (model, _) in known})
+        listed = dict(zip(models, await asyncio.gather(
+            *(video_jobs(config.entry(m)) for m in models))))
+        running = []
+        for job_id, (model, _) in known:
+            if listed[model] is None:
+                continue
+            if listed[model].get(job_id) in _ACTIVE_JOB:
+                running.append(model)
+            else:
+                jobs.pop(job_id, None)
+        return running
+
+    async def video_jobs(entry: FleetEntry) -> dict[str, str] | None:
+        """Job id -> status from a video backend's own list, None when it does not answer."""
         try:
             # shortcut: the newest 100 jobs only (the list is newest first); page with `after`
             # if a queue can exceed 100.
             resp = await http.get(entry.base_url + "/v1/videos", params={"limit": 100},
                                   timeout=5.0)
             if resp.status_code == 200:
-                count += sum(1 for job in resp.json().get("data", [])
-                             if job.get("status") in ("queued", "in_progress"))
+                return {job.get("id"): job.get("status") for job in resp.json().get("data", [])}
         except (httpx.HTTPError, ValueError, AttributeError):
-            pass  # a backend that does not answer has no visible queue
+            pass
+        return None
+
+    async def active(entry: FleetEntry) -> int:
+        """Requests running or waiting on ``entry``: the ones the gateway holds open, plus a video
+        backend's async jobs still queued or in progress (its own list, so API users count too)."""
+        count = inflight[entry.model_id]
+        if entry.kind == "video":  # a backend that does not answer has no visible queue
+            jobs = await video_jobs(entry) or {}
+            count += sum(1 for status in jobs.values() if status in _ACTIVE_JOB)
         return count
 
     @app.get("/v1/videos")
@@ -287,8 +447,28 @@ async def _form_model(request: Request, body: bytes):
         return None
 
 
-def _relay(resp: httpx.Response) -> StreamingResponse:
+async def _read_raw(resp: httpx.Response) -> bytes:
+    """A streamed response's bytes as sent (no decoding), for a body to look at and relay."""
+    try:
+        return b"".join([chunk async for chunk in resp.aiter_raw()])
+    finally:
+        await resp.aclose()
+
+
+def _job_id(raw: bytes) -> str | None:
+    try:
+        job_id = json.loads(raw).get("id")
+    except (ValueError, AttributeError):
+        return None
+    return job_id if isinstance(job_id, str) else None
+
+
+def _relay(resp: httpx.Response, raw: bytes | None = None) -> StreamingResponse:
+    """``resp`` back to the client as the backend sent it; ``raw``: its body, already read."""
     async def chunks():
+        if raw is not None:
+            yield raw
+            return
         try:
             async for chunk in resp.aiter_raw():
                 yield chunk

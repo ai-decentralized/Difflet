@@ -7,10 +7,12 @@ from pathlib import Path
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from difflet.serving.gateway import app as gateway_app
-from difflet.serving.gateway.app import create_gateway_app
+from difflet.serving.gateway.app import client_ip, client_key, create_gateway_app
 from difflet.serving.gateway.fleet import FleetConfig, FleetEntry, Limits, Wait
+from difflet.serving.gateway.page import model_defaults
 
 FLUX = "black-forest-labs/FLUX.1-dev"
 HV = "hunyuanvideo-community/HunyuanVideo"
@@ -433,3 +435,182 @@ def test_ui_models_lists_the_page_models_with_live_status(tmp_path, backends):
     assert (hv["id"], hv["status"], hv["shapes"]) == (HV, "loading", [[320, 512, 61], [320, 512, 33]])
     assert ltx["status"] == "down"
     assert backends.seen == []
+
+
+def _request(peer, *headers):
+    return Request({"type": "http", "client": (peer, 1234),
+                    "headers": [(k.lower().encode(), v.encode()) for k, v in headers]})
+
+
+def test_client_ip_trusts_forwarded_for_only_behind_a_loopback_peer():
+    xff = ("X-Forwarded-For", "6.6.6.6, 1.2.3.4")
+    assert client_ip(_request("127.0.0.1", xff)) == "1.2.3.4"  # the proxy appended the last one
+    assert client_ip(_request("::1", ("X-Forwarded-For", "6.6.6.6"),
+                              ("X-Forwarded-For", "1.2.3.4"))) == "1.2.3.4"
+    assert client_ip(_request("9.9.9.9", xff)) == "9.9.9.9"  # a direct client cannot pick one
+    assert client_ip(_request("127.0.0.1")) == "127.0.0.1"
+    assert client_ip(_request("testclient", xff)) == "testclient"
+
+
+@pytest.mark.parametrize("given, key", [
+    ("abcd1234", "abcd1234"), ("A_b-" * 16, "A_b-" * 16),
+    ("abc", "ip:9.9.9.9"), ("x" * 65, "ip:9.9.9.9"), ("../../etc", "ip:9.9.9.9"),
+    ("abcd 1234", "ip:9.9.9.9"), ("abcd1234\n", "ip:9.9.9.9")])
+def test_client_key_is_the_header_or_the_ip(given, key):
+    assert client_key(_request("9.9.9.9", ("X-Difflet-Client", given))) == key
+    assert client_key(_request("9.9.9.9")) == "ip:9.9.9.9"
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    now = [1000.0]
+    monkeypatch.setattr(gateway_app, "monotonic", lambda: now[0])
+    return now
+
+
+def _as(client_id, **headers):
+    return {"X-Difflet-Client": client_id, **headers}
+
+
+def test_ip_limit_counts_the_forwarded_client_and_comes_first(tmp_path, backends, clock):
+    backends.routes[(8100, "POST", "/v1/chat/completions")] = httpx.Response(200, json={"ok": 1})
+    config = _config(tmp_path, limits=Limits(client_per_hour=1, ip_per_hour=2))
+    client = _client(tmp_path, backends, config=config, peer=("127.0.0.1", 40000))
+    venue = {"X-Forwarded-For": "1.2.3.4"}
+    for who in ("client-aaaa", "client-bbbb"):
+        assert client.post("/v1/chat/completions", json=_chat(),
+                           headers=_as(who, **venue)).status_code == 200
+    clock[0] += 100
+    resp = client.post("/v1/chat/completions", json=_chat(), headers=_as("client-aaaa", **venue))
+    assert resp.status_code == 429 and _code(resp) == "ip_rate_limited"  # before client_rate_limited
+    assert resp.headers["retry-after"] == "3500"
+    assert "2 generations per hour" in resp.json()["error"]["message"]
+    assert client.post("/v1/chat/completions", json=_chat(),
+                       headers=_as("client-cccc", **{"X-Forwarded-For": "5.6.7.8"})
+                       ).status_code == 200  # another network
+    assert len(backends.seen) == 3
+
+
+def test_client_hourly_limit_slides_and_counts_accepted_only(tmp_path, backends, clock):
+    route = (8100, "POST", "/v1/chat/completions")
+    config = _config(tmp_path, limits=Limits(client_per_hour=2))
+    client = _client(tmp_path, backends, config=config)
+    backends.routes[route] = httpx.Response(429, json={"error": {"code": "queue_full"}})
+    assert client.post("/v1/chat/completions", json=_chat(), headers=_as("me-123456")
+                       ).status_code == 429  # refused by the backend: not counted
+    backends.routes[route] = httpx.Response(200, json={"ok": 1})
+    for _ in range(2):
+        assert client.post("/v1/chat/completions", json=_chat(),
+                           headers=_as("me-123456")).status_code == 200
+        clock[0] += 10
+    resp = client.post("/v1/chat/completions", json=_chat(), headers=_as("me-123456"))
+    assert resp.status_code == 429 and _code(resp) == "client_rate_limited"
+    assert resp.headers["retry-after"] == "3580"  # the first one leaves the window at 1000 + 3600
+    assert client.post("/v1/chat/completions", json=_chat(),
+                       headers=_as("you-123456")).status_code == 200  # another client
+    clock[0] = 1000.0 + 3600
+    assert client.post("/v1/chat/completions", json=_chat(),
+                       headers=_as("me-123456")).status_code == 200
+    assert client.post("/v1/chat/completions", json=_chat(), headers=_as("me-123456")
+                       ).status_code == 429  # 1010 and 4600 are in the window
+    assert len(backends.seen) == 5
+
+
+def test_client_busy_while_the_gateway_holds_its_request(tmp_path):
+    release = asyncio.Event()
+
+    async def backend(request: httpx.Request) -> httpx.Response:
+        await request.aread()
+        if request.url.path == "/v1/videos":
+            return httpx.Response(200, json={"data": []})
+        await release.wait()  # the backend is still generating
+
+        async def body():  # streamed like a real socket, as the Backends fixture does
+            yield b'{"ok": 1}'
+
+        return httpx.Response(200, content=body())
+
+    async def ready():
+        return {}
+
+    app = create_gateway_app(_config(tmp_path), status_fn=ready,
+                             client=httpx.AsyncClient(transport=httpx.MockTransport(backend)))
+    video, ctype = _multipart([("model", HV), ("prompt", "x")])
+
+    async def run():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
+                                     base_url="http://gw") as client:
+            pending = asyncio.create_task(client.post("/v1/chat/completions", json=_chat(),
+                                                      headers=_as("me-123456")))
+            for _ in range(100):
+                if (await client.get("/queue")).json()["models"][FLUX] == 1:
+                    break
+                await asyncio.sleep(0.01)
+            busy = await client.post("/v1/videos/sync", content=video,
+                                     headers=_as("me-123456", **{"Content-Type": ctype}))
+            assert busy.status_code == 429 and _code(busy) == "client_busy"
+            assert "must finish first" in busy.json()["error"]["message"]
+            assert int(busy.headers["retry-after"]) > 0
+            release.set()
+            assert (await pending).status_code == 200
+            assert (await client.post("/v1/chat/completions", json=_chat(),
+                                      headers=_as("me-123456"))).status_code == 200
+
+    asyncio.run(run())
+
+
+def test_client_busy_while_its_async_video_job_is_queued(tmp_path, backends, clock):
+    listing = (8103, "GET", "/v1/videos")
+    backends.routes[(8103, "POST", "/v1/videos")] = httpx.Response(
+        200, json={"id": "video_gen_a", "status": "queued"})
+    backends.routes[(8104, "POST", "/v1/videos")] = httpx.Response(200, json={"id": "video_gen_b"})
+    backends.routes[listing] = httpx.Response(200, json={"data": [
+        {"id": "video_gen_a", "status": "queued"}, {"id": "video_gen_x", "status": "queued"}]})
+    client = _client(tmp_path, backends)
+    hv, ctype = _multipart([("model", HV), ("prompt", "x")])
+    ltx, _ = _multipart([("model", LTX), ("prompt", "x")])
+    me = _as("me-123456", **{"Content-Type": ctype})
+
+    first = client.post("/v1/videos", content=hv, headers=me)
+    assert first.status_code == 200 and first.json()["id"] == "video_gen_a"  # relayed unchanged
+    busy = client.post("/v1/videos", content=ltx, headers=me)
+    assert busy.status_code == 429 and _code(busy) == "client_busy"
+    assert client.post("/v1/videos", content=ltx, headers=_as("you-123456", **{
+        "Content-Type": ctype})).status_code == 200  # someone else's job does not count
+
+    backends.down.add(8103)  # a backend that does not answer: its job is kept, not counted
+    assert client.post("/v1/videos", content=ltx, headers=me).status_code == 200
+    backends.down.discard(8103)
+    backends.routes[(8104, "GET", "/v1/videos")] = httpx.Response(200, json={"data": [
+        {"id": "video_gen_b", "status": "completed"}]})
+    assert _code(client.post("/v1/videos", content=ltx, headers=me)) == "client_busy"
+
+    backends.routes[listing] = httpx.Response(200, json={"data": [
+        {"id": "video_gen_a", "status": "completed"}]})
+    assert client.post("/v1/videos", content=hv, headers=me).status_code == 200  # released
+    clock[0] += 24 * 3600 + 1  # still queued a day later: forgotten
+    backends.routes[listing] = httpx.Response(200, json={"data": [
+        {"id": "video_gen_a", "status": "queued"}]})
+    assert client.post("/v1/videos", content=ltx, headers=me).status_code == 200
+
+
+def test_model_busy_names_shorter_waits(tmp_path, backends):
+    hv_each = 10 + 1.0 * model_defaults(HV)[0]
+    image = ("--height", "1024", "--width", "1024")
+    config = FleetConfig(host="0.0.0.0", port=8000, runs_dir=tmp_path, models=(
+        FleetEntry(FLUX, 0, 8100, Path("/c/0"), image),
+        FleetEntry(HV, 3, 8103, Path("/c/3"), ("--shapes", "320x512x61"), estimate=(10, 1.0)),
+        FleetEntry(LTX, 4, 8104, Path("/c/4"),
+                   ("--height", "512", "--width", "768", "--num-frames", "121"),
+                   estimate=(5, 0.5))), wait=Wait(1, 1, int(2.5 * hv_each)))
+    backends.routes[(8103, "GET", "/v1/videos")] = httpx.Response(200, json={"data": [
+        {"id": f"video_gen_{i}", "status": "queued"} for i in range(3)]})
+    backends.routes[(8104, "GET", "/v1/videos")] = httpx.Response(200, json={"data": []})
+    body, ctype = _multipart([("model", HV), ("prompt", "x")])
+    resp = _client(tmp_path, backends, config=config).post(
+        "/v1/videos", content=body, headers={"Content-Type": ctype})
+    assert resp.status_code == 429 and _code(resp) == "model_busy"
+    message = resp.json()["error"]["message"]
+    assert HV in message and f"{LTX} (no wait)" in message and FLUX not in message
+    assert resp.headers["retry-after"] == str(round(hv_each))  # one request ahead must finish
+    assert [r.method for r in backends.seen] == ["GET"] * len(backends.seen)  # nothing forwarded
