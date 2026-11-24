@@ -103,3 +103,18 @@ NKI Library (nkilib)
 
   Each forked file retains its original Apache 2.0 copyright header, followed by
   a note naming the source file, its sha256 and the changes Difflet made.
+
+================================================================================
+vLLM Omni Neuron (aws-neuron/vllm-omni-neuron)
+================================================================================
+
+  Source:  https://github.com/aws-neuron/vllm-omni-neuron
+  License: Apache License 2.0
+  Copyright: Copyright Amazon.com, Inc. or its affiliates. All Rights Reserved.
+
+  Forked from release v0.29.0.0.2.0 (vllm_omni_neuron/kernels/nkilib/experimental/attention/):
+    ring_attention_const_max_fwd.py  →  difflet/backends/neuron/ops_impl/ring_const_max_fwd_kernel.py
+    attention_const_max.py           →  difflet/backends/neuron/ops_impl/ring_const_max_attention_kernel.py
+
+  Each forked file retains its original Apache 2.0 copyright header, followed by a
+  note naming the source file, its sha256 and the changes Difflet made (imports only).

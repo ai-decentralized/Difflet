@@ -364,6 +364,7 @@ def test_no_ring_kernel_is_prepared_without_cp():
 
     neuron_attention.prepare_ring_kernel(MeshSpec(cp=1, tp=4))
     assert neuron_attention._RING_KERNEL_OP is None
+    assert neuron_attention._RING_CONSTMAX_OP is None
 
 
 def test_bounded_default_takes_the_scalar_exp_op(fake_bounded_op, monkeypatch):
