@@ -336,7 +336,23 @@ def test_queue_counts_active_video_jobs_from_the_backend(tmp_path, backends):
     assert listed[0].url.params["limit"] == "100"
 
 
-def test_queue_counts_a_held_request_until_its_backend_answers(tmp_path):
+def test_polled_queue_and_statuses_are_shared_between_pages(tmp_path, backends, monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(gateway_app, "monotonic", lambda: clock[0])
+    backends.routes[(8103, "GET", "/v1/videos")] = httpx.Response(
+        200, json={"object": "list", "data": [], "has_more": False})
+    with _client(tmp_path, backends) as client:
+        for _ in range(5):  # five tabs polling at once
+            client.get("/queue")
+        assert sum(1 for r in backends.seen if r.url.port == 8103) == 1
+        clock[0] += gateway_app._POLL_CACHE_S
+        client.get("/queue")
+        assert sum(1 for r in backends.seen if r.url.port == 8103) == 2
+
+
+def test_queue_counts_a_held_request_until_its_backend_answers(tmp_path, monkeypatch):
+    clock = [1000.0]
+    monkeypatch.setattr(gateway_app, "monotonic", lambda: clock[0])
     release = asyncio.Event()
 
     async def backend(request: httpx.Request) -> httpx.Response:
@@ -356,18 +372,22 @@ def test_queue_counts_a_held_request_until_its_backend_answers(tmp_path):
     app = create_gateway_app(_config(tmp_path), status_fn=ready,
                              client=httpx.AsyncClient(transport=httpx.MockTransport(backend)))
 
+    async def fresh_queue(client):  # past the shared poll window, so /queue asks again
+        clock[0] += gateway_app._POLL_CACHE_S
+        return (await client.get("/queue")).json()["models"][FLUX]
+
     async def run():
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app),
                                      base_url="http://gw") as client:
             pending = asyncio.create_task(client.post("/v1/chat/completions", json=_chat()))
             for _ in range(100):
-                if (await client.get("/queue")).json()["models"][FLUX] == 1:
+                if await fresh_queue(client) == 1:
                     break
                 await asyncio.sleep(0.01)
-            assert (await client.get("/queue")).json()["models"][FLUX] == 1
+            assert await fresh_queue(client) == 1
             release.set()
             assert (await pending).status_code == 200
-            assert (await client.get("/queue")).json()["models"][FLUX] == 0
+            assert await fresh_queue(client) == 0
 
     asyncio.run(run())
 

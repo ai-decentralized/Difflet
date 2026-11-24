@@ -50,6 +50,24 @@ _ACTIVE_JOB = ("queued", "in_progress")
 _HOUR_S = 3600.0
 #: How long the gateway remembers a client's async video job that is still listed as active.
 _JOB_MEMORY_S = 24 * 3600.0
+#: How long the answers every open page polls (/queue, the backend statuses) are shared.
+_POLL_CACHE_S = 2.0
+
+
+def _shared(seconds: float, fetch: Callable[[], Awaitable]) -> Callable[[], Awaitable]:
+    """``fetch`` called at most once per ``seconds``; callers in between, and callers waiting
+    while a fetch runs, get its result."""
+    lock = asyncio.Lock()
+    value, fetched = None, -math.inf
+
+    async def get():
+        nonlocal value, fetched
+        async with lock:
+            if monotonic() - fetched >= seconds:
+                value, fetched = await fetch(), monotonic()
+        return value
+
+    return get
 
 
 @dataclass
@@ -356,9 +374,19 @@ def create_gateway_app(
     async def video_content(request: Request, video_id: str):
         return await find_video(request, f"/v1/videos/{quote(video_id, safe='')}/content")
 
+    async def queue_counts() -> dict[str, int]:
+        counts = await asyncio.gather(*(active(entry) for entry in config.models))
+        return {e.model_id: n for e, n in zip(config.models, counts)}
+
+    # What every open page polls (/queue every 5 s, statuses every 15 s) is shared for a moment,
+    # so a full venue of tabs costs the backends one probe round per interval, not one per tab.
+    # The limit checks above read the backends directly.
+    polled_statuses = _shared(_POLL_CACHE_S, statuses)
+    polled_queue = _shared(_POLL_CACHE_S, queue_counts)
+
     @app.get("/v1/models")
     async def models():
-        found = await statuses()
+        found = await polled_statuses()
         return {"object": "list", "data": [{
             "id": e.model_id,
             "object": "model",
@@ -375,7 +403,7 @@ def create_gateway_app(
 
     @app.get("/ready")
     async def ready():
-        found = await statuses()
+        found = await polled_statuses()
         all_ready = all(found.get(e.model_id) == "ready" for e in config.models)
         return JSONResponse(status_code=200 if all_ready else 503, content={
             "status": "ready" if all_ready else "not_ready", "models": found})
@@ -386,16 +414,16 @@ def create_gateway_app(
 
     @app.get("/queue")
     async def queue():
-        counts = await asyncio.gather(*(active(entry) for entry in config.models))
-        return {"models": {e.model_id: n for e, n in zip(config.models, counts)}}
+        return {"models": await polled_queue()}
 
     @app.get("/ui/models")
     async def ui():
-        return ui_models(config, await statuses())
+        return ui_models(config, await polled_statuses())
 
     @app.get("/", response_class=HTMLResponse)
     async def page(request: Request):
-        return HTMLResponse(render_page(config, await statuses(), base_url=str(request.base_url),
+        return HTMLResponse(render_page(config, await polled_statuses(),
+                                        base_url=str(request.base_url),
                                         total_runs=runs.total))
 
     return app
