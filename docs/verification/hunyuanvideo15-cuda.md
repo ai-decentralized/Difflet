@@ -1,6 +1,6 @@
 # HunyuanVideo 1.5 on CUDA
 
-Experimental single-GPU BF16 text-to-video for
+Single-GPU BF16 text-to-video for
 `hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v`, through Difflet's GPU
 application, Python API, CLI and resident HTTP server. It is separate from the Trainium
 HunyuanVideo 1.5 path and from the original HunyuanVideo; support does not carry over
