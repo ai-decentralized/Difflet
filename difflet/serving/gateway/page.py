@@ -352,7 +352,8 @@ def render_page(config: FleetConfig, statuses: Mapping[str, str], *, base_url: s
 <body>
 <header>
 <div><h1>Difflet</h1><p>Text-to-image and text-to-video on AWS Trainium.</p></div>
-<div class="counter">Total inference runs <b id="runs">{int(total_runs)}</b></div>
+<div class="counter"><a href="compare">Trainium3 vs RTX PRO 6000</a> · Total inference runs
+<b id="runs">{int(total_runs)}</b></div>
 </header>
 <div class="layout">
 <div class="panel">

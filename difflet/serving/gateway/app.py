@@ -21,6 +21,7 @@ from starlette.requests import Request as StarletteRequest
 
 from difflet.serving.auth import ApiKeyAuthenticationMiddleware
 from difflet.serving.errors import DiffletServingError
+from difflet.serving.gateway.compare import render_compare
 from difflet.serving.gateway.fleet import FleetConfig, FleetEntry
 from difflet.serving.gateway.launcher import read_pid
 from difflet.serving.gateway.page import render_page
@@ -182,6 +183,12 @@ def create_gateway_app(
     @app.get("/stats")
     async def stats():
         return {"total_runs": runs.total}
+
+    compare_page = render_compare()
+
+    @app.get("/compare", response_class=HTMLResponse)
+    async def compare():
+        return HTMLResponse(compare_page)
 
     @app.get("/", response_class=HTMLResponse)
     async def page(request: Request):

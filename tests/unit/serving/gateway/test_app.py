@@ -280,6 +280,14 @@ def test_page_served(tmp_path, backends):
     assert "Difflet models" in resp.text and "320×512×61" in resp.text
 
 
+def test_compare_page_served_and_linked_without_the_api_key(tmp_path, backends):
+    client = _client(tmp_path, backends, api_key="secret")
+    assert 'href="compare"' in client.get("/").text
+    resp = client.get("/compare")
+    assert resp.status_code == 200 and resp.headers["content-type"].startswith("text/html")
+    assert "RTX PRO 6000" in resp.text and backends.seen == []
+
+
 def test_client_disconnect_cancels_upstream(tmp_path):
     async def run():
         started, cancelled = asyncio.Event(), asyncio.Event()

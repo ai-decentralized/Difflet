@@ -93,6 +93,7 @@ directory is put first on `PATH` when it is not on it already.
 | `GET /ready` | `200` when every model is ready, else `503`; the body lists each model's status |
 | `GET /health` | `200` while the gateway runs |
 | `GET /` | The models page |
+| `GET /compare` | Trainium3 against RTX PRO 6000: per-step DiT time and output quality, charts and raw numbers (static; linked from `/`) |
 
 Backend answers, errors included, come back with their status and body unchanged. The gateway's
 own errors use the backends' error format:
