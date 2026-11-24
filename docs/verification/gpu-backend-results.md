@@ -1,32 +1,36 @@
 # GPU backend (CUDA): verification results
 
-What was run on GPUs for Qwen-Image, FLUX.1-dev and Wan 2.2 T2V-A14B on the CUDA backend, what
-works with a documented limit, what is refused by design, and what was never run. Hardware:
-NVIDIA RTX PRO 6000 Blackwell (Server and Workstation editions, 96 GB, PCIe, no NVLink), torch
-2.11.0+cu128; Flux with two replicas on 2 × A100 80 GB.
+What was run on GPUs for Qwen-Image, FLUX.1-dev, Wan 2.2 T2V-A14B and Wan 2.1 T2V-14B on the
+CUDA backend, what works with a documented limit, what is refused by design, and what was never
+run. Hardware: NVIDIA RTX PRO 6000 Blackwell (Server and Workstation editions, 96 GB, PCIe, no
+NVLink), torch 2.11.0+cu128; Flux with two replicas on 2 × A100 80 GB; Wan 2.1's accuracy against
+diffusers and its speed on one A100 80 GB (SXM4), its DiT parity and its Python, CLI, `--dp 2` and
+HTTP cells also on two H200s.
 
 Statuses: **PASS** (ran end to end) / **LIMIT** (works with a documented constraint) / **N/A**
 (refused by design) / **NOT MEASURED** (not refused, not run).
 
 ## Support matrix
 
-| Feature | Qwen-Image | FLUX.1-dev | Wan 2.2 T2V-A14B |
-|---|---|---|---|
-| `difflet run` | PASS | PASS | PASS |
-| DiT parity vs diffusers | PASS (all-ones and padded prompt) | PASS | PASS (both experts, rounding block) |
-| e2e vs diffusers | PASS | PASS, gate relative to a recorded noise floor over seeds | PASS, gate relative to a recorded noise floor over seeds |
-| CLI matrix (download, compile, generate) | PASS | PASS | PASS |
-| `difflet serve` | PASS; LIMIT: one request at a time (429 after the 30 s queue timeout) | PASS, PNG byte-identical to `difflet run` | PASS, frames bit-identical to `difflet run` in-process; the MP4 writer is not byte-deterministic |
-| `--torch-compile` | PASS | PASS | PASS |
-| `--teacache-cadence N` | PASS | N/A | N/A |
-| `--dp 2 --requests` | PASS, byte-identical | PASS on 2 × A100, byte-identical; NOT MEASURED on two PRO 6000s | PASS, bit-identical |
-| `serve --dp-degree 2` | PASS | PASS on 2 × A100 | N/A: the video service runs one job at a time |
-| `--cfg-parallel` (2 GPUs) | N/A: one pass per step | N/A: guidance-distilled | PASS, bit-identical |
-| `--dp` × `--cfg-parallel` | N/A | N/A | NOT MEASURED (needs 4 GPUs) |
-| CP, TP, `--sp` | N/A: refused | N/A: refused | N/A: refused |
+| Feature | Qwen-Image | FLUX.1-dev | Wan 2.2 T2V-A14B | Wan 2.1 T2V-14B |
+|---|---|---|---|---|
+| `difflet run` | PASS | PASS | PASS | PASS |
+| DiT parity vs diffusers | PASS (all-ones and padded prompt) | PASS | PASS (both experts, rounding block) | PASS (rounding block) |
+| e2e vs diffusers | PASS | PASS, gate relative to a recorded noise floor over seeds | PASS, gate relative to a recorded noise floor over seeds | PASS at 9 and 81 frames, gate relative to a recorded noise floor |
+| CLI matrix (download, compile, generate) | PASS | PASS | PASS | NOT MEASURED (`difflet run` only) |
+| `difflet serve` | PASS; LIMIT: one request at a time (429 after the 30 s queue timeout) | PASS, PNG byte-identical to `difflet run` | PASS, frames bit-identical to `difflet run` in-process; the MP4 writer is not byte-deterministic | PASS, served frames equal the Python path's (MP4 compared through the same encoder) |
+| `--torch-compile` | PASS | PASS | PASS | PASS |
+| `--teacache-cadence N` | PASS | N/A | N/A | N/A |
+| `--dp 2 --requests` | PASS, byte-identical | PASS on 2 × A100, byte-identical; NOT MEASURED on two PRO 6000s | PASS, bit-identical | PASS, bit-identical |
+| `serve --dp-degree 2` | PASS | PASS on 2 × A100 | N/A: the video service runs one job at a time | N/A: the video service runs one job at a time |
+| `--cfg-parallel` (2 GPUs) | N/A: one pass per step | N/A: guidance-distilled | PASS, bit-identical | NOT MEASURED |
+| `--dp` × `--cfg-parallel` | N/A | N/A | NOT MEASURED (needs 4 GPUs) | NOT MEASURED |
+| CP, TP, `--sp` | N/A: refused | N/A: refused | N/A: refused | N/A: refused |
 
-Wan 2.1 (`Wan-AI/Wan2.1-T2V-14B-Diffusers`) is routed by the CLI but has never run on a GPU and
-is not served.
+Wan 2.1 (`Wan-AI/Wan2.1-T2V-14B-Diffusers`) runs Wan 2.2's application with its one transformer
+and Wan 2.2's spec defaults (40 steps, guidance 4.0); every Wan 2.1 number here uses its model
+card's 50 steps at guidance 5.0. On two H200s, Python, `difflet run` and `difflet run --dp 2`
+gave tensor-equal frames for one request, and `difflet serve` the same frames in its MP4.
 
 ## Numbers
 
@@ -39,8 +43,14 @@ cosine):
   gemm reductions perturbed spans 30.9–37.6 dB over three seeds).
 - Wan 2.2: 26.30 dB / 0.99609 with the fp32 timestep; over seeds 0–2, 26.30–28.89 dB against
   diffusers' own noise floor of 23.79–28.62 dB, so the gate is relative to that floor.
+- Wan 2.1 on one A100, 480×832×9: over seeds 0–5, 23.16–27.70 dB (mean 25.68) eager and 19.22–27.88 dB
+  (mean 24.65) compiled, against diffusers' own noise floor of 14.45–27.15 dB (mean 23.14).
+  480×832×81 with the model card's negative prompt, seed 42: 19.95 dB / 0.9756, against a floor of
+  16.15 dB / 0.9414. At 81 frames, and on some 9-frame seeds, a timestep rounded through bf16
+  moves diffusers' own clip below 20 dB, so the comparison is against that floor.
 - DiT parity (rel_l1 against the fp32 reference, relative to diffusers' bf16 control; gates
-  1.15× / 1.2× / 0.995): Qwen 0.994×, Flux 0.987×, Wan 1.051× / 1.043× per expert.
+  1.15× / 1.2× / 0.995): Qwen 0.994×, Flux 0.987×, Wan 1.051× / 1.043× per expert, Wan 2.1
+  1.007× on an A100 and 1.005× on an H200 (1.003× / 1.002× at the bf16-rounded timestep).
 
 **Speed** (RTX PRO 6000 Server Edition unless noted):
 
@@ -49,6 +59,14 @@ cosine):
 | DiT forward, eager / compiled / diffusers | 323 / 243 / 300 ms | 303 / 241 / 292 ms | 536 / — / 528 ms |
 | Whole run, eager / compiled / diffusers | 16.5 / 12.4 / 15.2 s | 9.4 / 7.1 / 8.3 s | 44.5 / 32.8 / 42.8 s |
 | Peak memory | 58 GB | — | 71.3 GiB (Workstation) |
+
+Wan 2.1 (50 steps, guidance 5.0, one A100 80 GB, each run alone): at 480×832×9 a warm run takes
+64.4 s eager, 63.8 s compiled and 81.3 s in diffusers; at 480×832×81, 788 s eager, 786 s compiled
+and 921 s in diffusers. Eager runs each block's LayerNorms, adaLN modulation, gated residuals and
+q/k norm with rotary as fused Triton kernels: a DiT forward at 480×832×9 takes 627 ms, against
+761 ms with the modeling's unfused ops. Peak allocated memory is 41.7 GiB at 9 frames and 41.9 GiB
+at 81, within 0.1 GiB of diffusers. Compiling adds 20–80 s to a load, depending on the shape and
+the compile cache.
 
 The Qwen-Image prompt trim took its DiT forward from 516 ms to 323 ms; the fused across-heads
 q/k RMSNorm took Wan's from 614 ms to 536 ms. Two GPUs: Wan `--cfg-parallel` 26.1 s against
@@ -68,7 +86,7 @@ supplementary; an official compiled comparison remains unavailable. See the
 
 1. Wan `--dp` × `--cfg-parallel` (needs four GPUs; allowed by construction).
 2. FLUX.1-dev with two replicas on two RTX PRO 6000s (measured on 2 × A100 instead).
-3. Wan 2.1.
+3. Wan 2.1 `--cfg-parallel` and the staged CLI commands (`download`, `compile`, `generate`).
 4. The fused Flux `proj_out` (`fuse_proj_out`, off by default): about 1% faster per DiT forward,
    but seed 0's e2e PSNR moved from 41.58 dB to 31.56 dB in eager mode (42.27 dB compiled). A
    bf16 block-level comparison against diffusers' `proj_out` is the next check.

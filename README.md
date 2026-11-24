@@ -60,7 +60,7 @@ Three entry points share one engine:
 
 | Backend | `DIFFLET_BACKEND` | Status | Models | Parallelism | Details |
 |---|---|---|---|---|---|
-| NVIDIA GPUs | `cuda` | ✅ Supported (subset) | FLUX.1-dev, Qwen-Image, Wan 2.2; HunyuanVideo and LTX-2 experimental | DP, CFG-parallel (Wan) | [GPU features](#nvidia-gpus) |
+| NVIDIA GPUs | `cuda` | ✅ Supported (subset) | FLUX.1-dev, Qwen-Image, Wan 2.1/2.2; HunyuanVideo and LTX-2 experimental | DP, CFG-parallel (Wan) | [GPU features](#nvidia-gpus) |
 | AWS Trainium2 (AOT) | `trainium` | ✅ Supported | All [supported models](#supported-models) | TP, CP, SP, CFG-parallel, DP | [Trainium features](#trainium) |
 | AWS Trainium2 / Trainium3 (native PyTorch) | `neuron` | ✅ Supported | FLUX.1-dev, Qwen-Image, Wan 2.1/2.2, HunyuanVideo 1.0/1.5, LTX-2 | TP, CP, SP, CFG-parallel, DP; FP8 (`--quant mxfp8`) on Trainium3 | [Native backend results](docs/verification/neuron-backend-results.md) |
 | Cloud TPU | `tpu` | 🧪 Experimental | FLUX.1-dev, Qwen-Image, Wan, HunyuanVideo, LTX-2 (`difflet serve` and the benchmark runners) | TP | [v5e benchmarks](benchmark/v5e/RESULTS.md) |
@@ -123,6 +123,7 @@ see the per-model limits below.
 | FLUX.1-dev | ✅ image | ✅ image | ✅ | ❌ | ✅ ² | — ¹ | ❌ | ❌ |
 | Qwen-Image | ✅ image | ⚠️ image ³ | ✅ | ✅ | ✅ | — ⁴ | ❌ | ❌ |
 | Wan 2.2 | ✅ video | ✅ video | ✅ | ❌ | ⚠️ ⁵ | ✅ ⁶ | ❌ | ❌ |
+| Wan 2.1 ¹¹ | ✅ video | ✅ video | ✅ | ❌ | ⚠️ ⁵ | Not measured | ❌ | ❌ |
 | HunyuanVideo (original) | ⚠️ experimental ⁷ | ⚠️ experimental ⁷ | ⚠️ execution observed ⁷ | ❌ | Not measured | — ¹ | ❌ | ❌ |
 | LTX-2 | ⚠️ video, CPU checks ⁸ | ⚠️ video, CPU checks ⁸ | ⚠️ Python qualified ⁸ | ❌ | Not measured | ❌ | ❌ | ❌ |
 | HunyuanVideo 1.5 | ⚠️ experimental ⁹ | ⚠️ experimental ⁹ | ✅ ⁹ | ❌ | Not measured | ❌ | ❌ | ❌ |
@@ -139,8 +140,7 @@ TeaCache (adaptive), TAEF1, and `--host-vae` are refused on GPUs for these model
    after the 30 s queue timeout. Use `serve --dp-degree N` for concurrency.
 4. Qwen-Image runs one transformer pass per step, so there is no CFG branch to split.
 5. `--dp N --requests` works, with output bit-identical to one GPU. `serve --dp-degree` does
-   not apply, because the video service runs one job at a time. Wan 2.1 is routed to the GPU
-   flow but has not been run on a GPU.
+   not apply, because the video service runs one job at a time.
 6. Two GPUs under `torchrun`, `difflet run` only. Output is bit-identical to one GPU.
 7. Experimental single-GPU BF16 support for `hunyuanvideo-community/HunyuanVideo`.
    Eager and compiled Python, CLI and HTTP generation were verified at 320×512×61,
@@ -162,6 +162,10 @@ TeaCache (adaptive), TAEF1, and `--host-vae` are refused on GPUs for these model
    guidance-distilled: one transformer pass per step, so there is no CFG branch to split. On
    one B200, I2VA passes vLLM-Omni's own acceptance test, eager and compiled, at vLLM-Omni's
    warm speed; see the [MiniMax-H3 CUDA guide](docs/verification/minimax-h3-cuda.md).
+11. `Wan-AI/Wan2.1-T2V-14B-Diffusers`, single-GPU BF16 text-to-video on the same runtime as
+   Wan 2.2 with its one transformer. The defaults are Wan 2.2's (40 steps, guidance 4.0); Wan
+   2.1's model card uses `--steps 50 --guidance-scale 5.0`. It has no second denoising stage,
+   so `--guidance-scale-2` and a served `guidance_scale_2` are refused.
 
 Measured timings against stock diffusers, and the full pass/limit matrix, are in
 [docs/verification/gpu-backend-results.md](docs/verification/gpu-backend-results.md).

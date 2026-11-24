@@ -133,8 +133,8 @@ backend-neutral modules always, the Trainium modules only when the Neuron SDK is
 
 ### GPU backends (CUDA)
 
-`DIFFLET_BACKEND=cuda` routes Qwen-Image, FLUX.1-dev, Wan 2.2 T2V-A14B and original
-HunyuanVideo through the GPU flow (see the measured qualification limits): the DiT
+`DIFFLET_BACKEND=cuda` routes Qwen-Image, FLUX.1-dev, Wan 2.2 T2V-A14B, Wan 2.1 T2V-14B and
+original HunyuanVideo through the GPU flow (see the measured qualification limits): the DiT
 through `difflet.ops`, the text encoders, VAE and scheduler loop in the same process on the
 same device. There is no ahead-of-time compile step: `compile()` writes `cuda_manifest.json`,
 `load()` builds the module eagerly from the diffusers safetensors. Design:
@@ -172,6 +172,8 @@ DIFFLET_BACKEND=cuda difflet run --model-id black-forest-labs/FLUX.1-dev --promp
     --output /tmp/f.png --guidance-scale 3.5
 DIFFLET_BACKEND=cuda difflet run --model-id Wan-AI/Wan2.2-T2V-A14B-Diffusers --prompt "..." \
     --output /tmp/w.mp4 [--cfg-parallel]        # --cfg-parallel: two GPUs under torchrun
+DIFFLET_BACKEND=cuda difflet run --model-id Wan-AI/Wan2.1-T2V-14B-Diffusers --prompt "..." \
+    --output /tmp/w21.mp4 --steps 50 --guidance-scale 5.0   # Wan 2.1's model-card settings
 DIFFLET_BACKEND=cuda difflet serve --model-id <id> [--dp-degree 2] [--torch-compile]
 
 scripts/cpu-gate.sh                              # CPU-host gate (no SDK, no GPU); what CI runs
@@ -196,7 +198,12 @@ Design points worth knowing:
   (`max-autotune-no-cudagraphs`); Qwen-Image compiles with dynamic shapes (one graph for every
   prompt length) and warms up twice, Flux and Wan compile statically. Off by default.
 - **Wan** keeps both experts resident on a 96 GB card, runs true CFG with fp32 host latents,
-  and passes the timestep to the DiT in fp32 (`timestep_dtype`).
+  and passes the timestep to the DiT in fp32 (`timestep_dtype`). Wan 2.1 is the same
+  application with one transformer and no expert boundary; it shares Wan 2.2's spec defaults
+  (40 steps, guidance 4.0) and refuses `guidance_scale_2`. Eager, each block's LayerNorms, adaLN
+  modulation, gated residuals and q/k norm with rotary run as fused Triton kernels
+  (`backends/cuda/wan/fused_block.py`, swapped in at load); `--torch-compile` leaves them to
+  inductor.
 - **Flux** runs Difflet's backend-neutral DiT inside diffusers' `FluxPipeline` through
   `FluxDiTAdapter`. The single block's `proj_out` can run as one gemm at tp=1 (`fuse_proj_out`,
   a load-time swap), off by default until a bf16 block-level comparison with diffusers explains
