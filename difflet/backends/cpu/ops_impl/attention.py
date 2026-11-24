@@ -52,9 +52,12 @@ def cross_attention(q, k, v, *, scale: float | None = None, attention_mask=None,
     return attention(q, k, v, scale=scale, causal=False, attention_mask=attention_mask, **kwargs)
 
 
-def ring_attention(q, k, v, *, scale: float, causal: bool = False):
+def ring_attention(q, k, v, *, scale: float, causal: bool = False, token_major: bool = False):
     # Single-process CPU reference: cp_degree == 1, so the "ring" is just plain
-    # non-causal attention over the local (== full) sequence.
+    # non-causal attention over the local (== full) sequence. token_major: q, k, v are
+    # [B, S, H, d]; the output is [B, H, S, d] either way.
+    if token_major:
+        q, k, v = (x.transpose(1, 2) for x in (q, k, v))
     b, h, s_q, d = q.shape
     s_k = k.shape[2]
     out = attention(

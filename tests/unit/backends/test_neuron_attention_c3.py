@@ -364,6 +364,7 @@ def test_no_ring_kernel_is_prepared_without_cp():
 
     neuron_attention.prepare_ring_kernel(MeshSpec(cp=1, tp=4))
     assert neuron_attention._RING_KERNEL_OP is None
+    assert neuron_attention._RING_CONSTMAX_OP is None
 
 
 def test_bounded_default_takes_the_scalar_exp_op(fake_bounded_op, monkeypatch):
@@ -487,3 +488,13 @@ def test_scalar_exp_loaders_return_none_without_the_knob(monkeypatch):
     monkeypatch.setattr(neuron_attention, "_EXP_KNOB", False)
     assert neuron_attention._load_flash_scalar_exp_op() is None
     assert neuron_attention._load_flash_bounded_op(vector_exp=False) is None
+
+
+def test_ring_attention_takes_token_major_inputs_exactly():
+    """token_major=True: q, k, v as [B, S, H, d], the output [B, H, S, d] as before."""
+    q, k, v = (torch.randn(2, 3, 40, 16) for _ in range(3))
+    want = cpu_attention.ring_attention(q, k, v, scale=0.25)
+    got = cpu_attention.ring_attention(*(x.transpose(1, 2).contiguous() for x in (q, k, v)),
+                                       scale=0.25, token_major=True)
+    assert got.shape == want.shape == (2, 3, 40, 16)
+    assert torch.equal(got, want)

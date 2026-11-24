@@ -61,6 +61,11 @@ RING_KERNEL_ENV = "DIFFLET_NEURON_RING_KERNEL"
 _RING_KERNEL = os.environ.get(RING_KERNEL_ENV, "1").strip() != "0"
 #: The longest per-rank sequence the NKI Library documents its ring kernel as tested at.
 _RING_KERNEL_MAX_SEQ = 16384
+#: ``DIFFLET_NEURON_RING_CONSTMAX=0`` keeps eligible ring CP calls on the running-max ring kernel
+#: (the A/B switch). Default ``1``: head dimension 128 runs the const-max ring kernel
+#: (``_ring_const_max_op``), whose K-stationary attention lets the K/V permutes overlap compute.
+RING_CONSTMAX_ENV = "DIFFLET_NEURON_RING_CONSTMAX"
+_RING_CONSTMAX = os.environ.get(RING_CONSTMAX_ENV, "1").strip() != "0"
 
 #: Experiment E1 (evidence at 713d53d9), opt-in:
 #: ``DIFFLET_EXP_ATTN_CONSTMAX=1`` sends unbounded, non-causal, bf16, d = 128 kernel calls that
@@ -537,10 +542,12 @@ def _dense_bhsd(q, k, v, *, scale: float):
     return out.reshape(b, h, s_q, d)
 
 
-def ring_attention(q, k, v, *, scale: float, causal: bool = False):
+def ring_attention(q, k, v, *, scale: float, causal: bool = False, token_major: bool = False):
     """Ring context-parallel self-attention over a sequence sharded on the CP group.
 
-    ``q, k, v``: ``[B, H, S/cp, d]`` to ``[B, H, S/cp, d]``. In ``cp`` rounds each rank attends
+    ``q, k, v``: ``[B, H, S/cp, d]`` to ``[B, H, S/cp, d]``; with ``token_major``, ``q, k, v`` are
+    ``[B, S/cp, H, d]`` (the projections' own layout, which the const-max ring kernel takes as is)
+    and the output is still ``[B, H, S/cp, d]``. In ``cp`` rounds each rank attends
     its query shard to the K/V block it holds, getting ``(o_r, l_r)`` (output, logsumexp), and
     passes the block to the next rank. Partial results merge in fp32 by their logsumexp
     (``_merge_partials``), which is exactly the softmax over all ``S`` keys. Non-causal only. Any shard length: the flash kernel's
@@ -548,12 +555,20 @@ def ring_attention(q, k, v, *, scale: float, causal: bool = False):
     """
     if causal:
         raise NotImplementedError("ring_attention supports non-causal attention only")
+    token_major_qkv = (q, k, v) if token_major else None
+    if token_major:  # [B, H, S/cp, d] views for every other path: no copy
+        q, k, v = (x.transpose(1, 2) for x in (q, k, v))
     from difflet.backends.neuron.ops_impl import collectives
     from difflet.backends.neuron.ops_impl.parallel_mesh import get_axis_rank, get_axis_size
 
     cp = get_axis_size("cp")
     if cp == 1:
         return _dense_bhsd(q, k, v, scale=scale)
+    if _RING_CONSTMAX_OP is not None and _ring_kernel_eligible(q, k, v) and q.shape[-1] == 128:
+        # [B, S/cp, H, d]: its layout, as the caller passed it, else from the head-major tensors.
+        tm = token_major_qkv or tuple(x.transpose(1, 2) for x in (q, k, v))
+        out = _RING_CONSTMAX_OP(*(x.contiguous() for x in tm), scale)
+        return out.reshape(q.shape)
     if _RING_KERNEL_OP is not None and _ring_kernel_eligible(q, k, v):
         return _RING_KERNEL_OP(q, k, v, scale).reshape(q.shape)
     out, _ = _ring_partials(q, k, v, scale=scale, cp=cp,
@@ -573,6 +588,9 @@ def _ring_kernel_eligible(q, k, v) -> bool:
 _RING_KERNEL_OPS: dict = {}
 #: The ring kernel op for the current mesh's CP rings, set by ``prepare_ring_kernel``.
 _RING_KERNEL_OP = None
+_RING_CONSTMAX_OPS: dict = {}
+#: The const-max ring kernel op for the current mesh's CP rings, set by ``prepare_ring_kernel``.
+_RING_CONSTMAX_OP = None
 
 
 def prepare_ring_kernel(spec) -> None:
@@ -580,11 +598,13 @@ def prepare_ring_kernel(spec) -> None:
     registration, so it happens at mesh initialization, before any compilation, and
     ``ring_attention`` only reads the result. ``None`` without CP, when switched off, or when
     the kernel is unavailable."""
-    global _RING_KERNEL_OP
+    global _RING_KERNEL_OP, _RING_CONSTMAX_OP
     if not _RING_KERNEL or spec.axis_size("cp") == 1:
-        _RING_KERNEL_OP = None
+        _RING_KERNEL_OP = _RING_CONSTMAX_OP = None
         return
-    _RING_KERNEL_OP = _ring_kernel_op(tuple(tuple(g) for g in spec.axis_groups("cp")))
+    rings = tuple(tuple(g) for g in spec.axis_groups("cp"))
+    _RING_KERNEL_OP = _ring_kernel_op(rings)
+    _RING_CONSTMAX_OP = _ring_const_max_op(rings) if _RING_CONSTMAX else None
 
 
 def _ring_kernel_op(rings: tuple):
@@ -618,6 +638,42 @@ def _ring_kernel_op(rings: tuple):
                                                 num_workers=num_workers, softmax_scale=scale,
                                                 tp_q=True, tp_k=True)
     _RING_KERNEL_OPS[rings] = op
+    return op
+
+
+def _ring_const_max_op(rings: tuple):
+    """``(q, k, v, scale) -> out``, q/k/v token-major ``[B, S/cp, H, 128]``, out
+    ``[B, H, S/cp, 128]``: vLLM-Omni Neuron's const-max ring kernel
+    (``ring_const_max_fwd_kernel.py``). Its softmax max is a
+    per-row Cauchy-Schwarz bound computed in the kernel, so the ring merge is a plain sum, and its
+    K-stationary attention has no ``dma_transpose``, which cannot run beside a collective: the K/V
+    permutes overlap the attention itself. One op per ring set, as ``_ring_kernel_op``; ``None``
+    when the kernel or ``nki_op`` is unavailable."""
+    if rings in _RING_CONSTMAX_OPS:
+        return _RING_CONSTMAX_OPS[rings]
+    import hashlib
+
+    name = "ring_const_max_" + hashlib.sha1(repr(rings).encode()).hexdigest()[:12]
+    try:
+        op = getattr(torch.ops.difflet_neuron, name)  # already registered (module reload)
+    except (AttributeError, RuntimeError):
+        try:
+            from difflet.backends.neuron.ops_impl.ring_const_max_fwd_kernel import (
+                ring_attention_const_max_fwd,
+            )
+            from torch_neuronx.neuron_dynamo_backend.decompositions import get_logical_neuron_cores
+            from torch_neuronx.nki_hop import nki_op
+        except ImportError:
+            _RING_CONSTMAX_OPS[rings] = None
+            return None
+        num_workers = len(rings[0])
+
+        @nki_op(f"difflet_neuron::{name}", mutates_args={})
+        def op(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, scale: float) -> torch.Tensor:
+            lnc = int(get_logical_neuron_cores())
+            return ring_attention_const_max_fwd[lnc](q, k, v, replica_groups=rings,
+                                                     num_workers=num_workers, softmax_scale=scale)
+    _RING_CONSTMAX_OPS[rings] = op
     return op
 
 
