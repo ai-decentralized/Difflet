@@ -11,6 +11,9 @@ One fleet file drives everything: which backends `up` starts, where the gateway 
 the page shows. An example for a trn3 with six models on devices 0–5 is
 [`examples/serving/fleet.yaml`](../../examples/serving/fleet.yaml).
 
+To bring the public server (difflet.yottalabs.ai) up on a new machine, from mounting the disks
+to TLS and DNS, follow [gateway-setup.md](gateway-setup.md).
+
 ## Start and stop
 
 Run these from the device venv: `up` starts each backend with the interpreter it runs under.
@@ -44,7 +47,7 @@ difflet gateway page --api-base https://api.example.com --out site/index.html   
 gateway:
   host: 127.0.0.1
   port: 8000
-  cors_origins: ["https://difflet.yottalabs.ai"]
+  cors_origins: ["https://page.example.com"]
   limits: {client_active: 1, client_per_hour: 20, ip_per_hour: 2000}
   wait: {notice_s: 1800, suggest_s: 1800, reject_s: 7200}
 runs_dir: /mnt/nvme/difflet-fleet/runs
@@ -62,7 +65,7 @@ models:
 | Field | Meaning |
 |---|---|
 | `gateway.host`, `gateway.port` | Where the gateway listens (default `0.0.0.0:8000`; `127.0.0.1` behind a proxy on the host) |
-| `gateway.cors_origins` | Origins whose pages may call the gateway, such as `https://difflet.yottalabs.ai` (default none: no CORS headers) |
+| `gateway.cors_origins` | Origins whose pages may call the gateway, such as `https://page.example.com` (default none: no CORS headers) |
 | `gateway.limits` | Per-client and per-IP caps on generations ([Limits for a public page](#limits-for-a-public-page)); each field optional |
 | `gateway.wait` | Estimated waits at which the page warns and the gateway refuses ([Wait thresholds](#wait-thresholds)); each field optional |
 | `runs_dir` | Parent of each backend's working directory (required) |
@@ -146,15 +149,15 @@ so it works only with a gateway started without one.
 ## Public page: static hosting, CORS and limits
 
 The page can be served by a static host on another domain, calling the gateway through a
-TLS-terminating proxy on the gateway's host. For example, the page on Vercel at
-`https://difflet.yottalabs.ai` and the gateway at `https://api-difflet.yottalabs.ai`:
+TLS-terminating proxy on the gateway's host. For example, a page on a static host at
+`https://page.example.com` and the gateway at `https://api.example.com`:
 
 1. In the fleet file: `gateway.host: 127.0.0.1` (only the proxy reaches the gateway) and
-   `cors_origins: ["https://difflet.yottalabs.ai"]`.
+   `cors_origins: ["https://page.example.com"]`.
 2. Caddy on the gateway's host, with ports 80 and 443 open (Caddy gets the certificate itself):
 
    ```caddyfile
-   api-difflet.yottalabs.ai {
+   api.example.com {
        reverse_proxy 127.0.0.1:8000 {
            flush_interval -1
        }
@@ -167,7 +170,7 @@ TLS-terminating proxy on the gateway's host. For example, the page on Vercel at
 3. Write the page and deploy the directory as a static site (no build step):
 
    ```bash
-   difflet gateway page --api-base https://api-difflet.yottalabs.ai --out site/index.html
+   difflet gateway page --api-base https://api.example.com --out site/index.html
    ```
 
    The file is self-contained (inline style and script, no external assets). It embeds no
