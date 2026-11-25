@@ -23,7 +23,8 @@ Paths used throughout:
 
 | Path | What |
 |---|---|
-| `~/Difflet` | The repo checkout; its `.venv` is the device venv |
+| `~/Difflet` | The repo checkout, installed editable into the device venv |
+| `/opt/aws_neuronx_venv_torch_neuronx_2_14_0` | The device venv (DLAMI TorchNeuron, native neuron backend) |
 | `/mnt/nvme/hub` | The Hugging Face hub cache (all six models' weights) |
 | `/mnt/nvme/difflet-fleet/fleet.yaml` | The fleet file |
 | `/mnt/nvme/difflet-fleet/cache/<slug>` | Each backend's compiled artifacts |
@@ -72,19 +73,46 @@ only after checking that `$DISKS` is the four instance-store disks.
 
 ## 2. Code and venv
 
+The fleet runs the **native** neuron backend (`DIFFLET_BACKEND=neuron`, which the launcher sets).
+It needs the DLAMI's TorchNeuron venv, `/opt/aws_neuronx_venv_torch_neuronx_2_14_0` (torch 2.14,
+torch-neuronx 2.14), plus difflet and its dependencies.
+
+> Not `scripts/setup_env.sh`'s `.venv`: that one is torch-xla, and every backend dies at startup
+> with `AssertionError: Unknown backend type neuron` (no `neuron` process-group backend).
+
 ```bash
-cd ~ && git clone git@github.com:ai-decentralized/Difflet.git && cd Difflet
-git checkout main          # the gateway must be on this branch: `difflet gateway --help` works
-./scripts/setup_env.sh     # builds ~/Difflet/.venv from requirements-neuron.lock
-source .venv/bin/activate
-difflet gateway --help
+cd ~ && git clone git@github.com:ai-decentralized/Difflet.git && cd Difflet   # main has the gateway
+V=/opt/aws_neuronx_venv_torch_neuronx_2_14_0/bin
+# difflet's dependencies the SDK venv lacks (diffusers, transformers, accelerate, uvicorn, ...),
+# pinned by the native lock; the dry run must not list torch or any neuron package
+DEPS=$($V/python - <<'EOF'
+import tomllib, re, importlib.metadata as md
+for d in tomllib.load(open("pyproject.toml", "rb"))["project"]["dependencies"]:
+    try:
+        md.version(re.split(r"[<>=!~\[; ]", d, maxsplit=1)[0])
+    except md.PackageNotFoundError:
+        print(d.split(";")[0].strip())
+EOF
+)
+echo "$DEPS"
+if [ -n "$DEPS" ]; then   # empty on a rerun: everything is installed
+  $V/pip install --dry-run -c requirements-neuron-native.lock $DEPS | grep "^Would install"
+  $V/pip install -c requirements-neuron-native.lock $DEPS
+fi
+# in the lock but not in pyproject: FLUX's and Wan's T5 tokenizers need sentencepiece
+$V/pip install -c requirements-neuron-native.lock sentencepiece pyzstd ninja
+$V/pip install -e . --no-deps
+(cd /tmp && $V/python -c "import torch_neuronx, diffusers, sentencepiece, difflet.serving.gateway.app; print('ok')")
 ```
 
-Use `setup_env.sh`'s `.venv`, not a DLAMI venv under `/opt`: the compile-cache key includes the
-toolchain versions, so only the pinned environment can reuse caches copied from another machine.
+The last check runs from `/tmp` on purpose: from `~/Difflet`, `import difflet` succeeds even when
+difflet is not installed, and the backends (which run in `/mnt/nvme/difflet-fleet/runs/<slug>`)
+then fail with `No module named 'difflet'`. `pip check` afterwards still lists `datasets` and
+`pipenv` conflicts; difflet uses neither.
 
 Create the wrapper the rest of this guide uses (it activates the venv and points every backend at
-the shared hub cache, so manual runs, cron and systemd behave the same):
+the shared hub cache, so manual runs, cron and systemd behave the same; the SDK venv has no
+`difflet` script, hence `python -m`):
 
 ```bash
 mkdir -p /mnt/nvme/difflet-fleet /mnt/nvme/hub
@@ -92,10 +120,10 @@ cat > /mnt/nvme/difflet-fleet/fleetctl <<'EOF'
 #!/usr/bin/env bash
 # fleetctl up|down|status|serve [args] -- difflet gateway on this host's fleet file
 set -euo pipefail
-source "$HOME/Difflet/.venv/bin/activate"
+source /opt/aws_neuronx_venv_torch_neuronx_2_14_0/bin/activate
 export HF_HUB_CACHE=/mnt/nvme/hub
 action=$1; shift
-exec difflet gateway "$action" --config /mnt/nvme/difflet-fleet/fleet.yaml "$@"
+exec python -m difflet.cli.main gateway "$action" --config /mnt/nvme/difflet-fleet/fleet.yaml "$@"
 EOF
 chmod +x /mnt/nvme/difflet-fleet/fleetctl
 ```
@@ -114,16 +142,16 @@ aws s3 sync s3://<bucket>/difflet-fleet/hub /mnt/nvme/hub
 MiniMax-H3's 498 GB repo):
 
 ```bash
-source ~/Difflet/.venv/bin/activate
+source /opt/aws_neuronx_venv_torch_neuronx_2_14_0/bin/activate
 export HF_HUB_CACHE=/mnt/nvme/hub
 huggingface-cli login                          # the token with the FLUX.1-dev license
 for m in black-forest-labs/FLUX.1-dev Qwen/Qwen-Image Wan-AI/Wan2.1-T2V-14B-Diffusers \
          hunyuanvideo-community/HunyuanVideo Lightricks/LTX-2 MiniMaxAI/MiniMax-H3; do
-  difflet download --model-id "$m" || echo "FAILED: $m"
+  python -m difflet.cli.main download --model-id "$m" || echo "FAILED: $m"
 done
 ```
 
-Run it in `tmux`: it takes a while. Check: every model printed `weights ready`, and
+All six are 419 GB; in us-east-2 they downloaded in about 4 minutes. Check: every model printed `weights ready`, and
 `du -sh /mnt/nvme/hub/models--*` lists six models. The backends run with `HF_HUB_OFFLINE=1`, so a
 model that is missing here fails at startup instead of downloading.
 
@@ -147,7 +175,7 @@ models as `down`. Keep `gateway.host: 127.0.0.1`: only Caddy may reach the gatew
 ## 5. Compiled artifacts and backends
 
 If you have a backup of the compile caches, restore it first; with the same
-`requirements-neuron.lock` the artifacts are reused as they are:
+device venv (the same torch-neuronx and neuronx-cc versions) the artifacts are reused as they are:
 
 ```bash
 aws s3 sync s3://<bucket>/difflet-fleet/cache /mnt/nvme/difflet-fleet/cache
