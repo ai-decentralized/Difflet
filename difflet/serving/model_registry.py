@@ -216,6 +216,27 @@ def model_accepts_keyframes(model_id: str) -> bool:
                for metadata in _SERVING_METADATA.values())
 
 
+def serving_output_modality(model_id: str) -> str:
+    """``"image"`` or ``"video"``: what the built-in model serving ``model_id`` returns, read
+    from its ``ServingModelMetadata``; ``ValueError`` when no built-in model serves it."""
+    _ensure_builtin_serving_models_registered()
+    normalized = model_id.rstrip("/")
+    for metadata in _SERVING_METADATA.values():
+        if normalized in metadata.checkpoint_ids:
+            return metadata.output_modality
+    raise ValueError(f"{model_id!r} is not a servable checkpoint")
+
+
+def serving_default_steps(model_id: str) -> int | None:
+    """The built-in ``ServingModelMetadata``'s default steps for ``model_id``, None when no
+    built-in model serves it. (A model with a ``ModelSpec`` defaults to the spec's steps on the GPU
+    and native neuron flows; this is the value for one without, such as MiniMax-H3.)"""
+    _ensure_builtin_serving_models_registered()
+    normalized = model_id.rstrip("/")
+    return next((m.default_steps for m in _SERVING_METADATA.values()
+                 if normalized in m.checkpoint_ids), None)
+
+
 def _ensure_builtin_serving_models_registered() -> None:
     global _BUILTINS_LOADED
     if _BUILTINS_LOADED:
