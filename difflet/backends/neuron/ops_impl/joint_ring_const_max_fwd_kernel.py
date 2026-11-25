@@ -104,7 +104,8 @@ def joint_ring_attention_const_max_fwd(
     """Ring CP joint attention, const-max softmax, K/V permutes overlapped with the attention.
 
     Args:
-        q: [b, L_img + L_txt, h, 128] token-major: this rank's image rows, then all text rows.
+        q: [b, L_img + L_qt, h, 128] token-major: this rank's image rows, then L_qt text query rows
+            (all L_txt text rows, or this rank's share of them: every query row attends all keys).
         k, v: [b, L_img, h, 128] token-major: this rank's image block (rotated around the ring).
         k_txt, v_txt: [b, L_txt, h, 128] token-major: the text block, identical on every rank.
             Masked keys must have zeroed K and V rows.
@@ -122,7 +123,7 @@ def joint_ring_attention_const_max_fwd(
     _, txt_len, txt_heads, _ = k_txt.shape
     kernel_assert(heads == k_heads == txt_heads, "expects equal q, k and text heads")
     kernel_assert(head_dim == _P, f"head_dim must be 128, got {head_dim}")
-    kernel_assert(q_len == img_len + txt_len, f"q rows {q_len} != image {img_len} + text {txt_len}")
+    kernel_assert(q_len >= img_len, f"q rows {q_len} < image rows {img_len}")
     if replica_groups is None:
         replica_groups = ()
 

@@ -70,6 +70,11 @@ _RING_CONSTMAX = os.environ.get(RING_CONSTMAX_ENV, "1").strip() != "0"
 #: Default ``1``: eligible ``joint_ring_attention`` calls run the joint const-max ring kernel.
 JOINT_RING_KERNEL_ENV = "DIFFLET_NEURON_JOINT_RING_KERNEL"
 _JOINT_RING_KERNEL = os.environ.get(JOINT_RING_KERNEL_ENV, "1").strip() != "0"
+#: ``DIFFLET_NEURON_JOINT_RING_TEXT_SPLIT=0`` has every rank compute all text queries in the joint
+#: ring kernel (the A/B switch). Default ``1``: each rank computes ceil(S_txt/cp) of them and the
+#: text outputs are all-gathered over the CP group.
+JOINT_RING_TEXT_SPLIT_ENV = "DIFFLET_NEURON_JOINT_RING_TEXT_SPLIT"
+_JOINT_RING_TEXT_SPLIT = os.environ.get(JOINT_RING_TEXT_SPLIT_ENV, "1").strip() != "0"
 
 #: Experiment E1 (evidence at 713d53d9), opt-in:
 #: ``DIFFLET_EXP_ATTN_CONSTMAX=1`` sends unbounded, non-causal, bf16, d = 128 kernel calls that
@@ -731,15 +736,31 @@ def _joint_ring_kernel_eligible(q, image_k, image_v, text_k, text_v) -> bool:
             and image_k.shape[2] <= _RING_KERNEL_MAX_SEQ)
 
 
+def _text_split_rows(s_txt: int, cp: int) -> int:
+    """Text query rows per rank under the text split: ceil(S_txt / cp), the last share padded."""
+    return -(-s_txt // cp)
+
+
 def _joint_ring_kernel(op, q, image_k, image_v, text_k, text_v, *, scale: float,
-                       text_valid_len=None, text_first: bool = False):
+                       text_valid_len=None, text_first: bool = False, text_split=None):
     """Adapt a head-major ``joint_ring_attention`` call to the joint kernel: image rows first,
     masked text K/V rows zeroed (out of the softmax bound and of Σ P·V), a per-key 1/0 mask
-    (out of Σ P·1), token-major tensors; the output comes back in ``q``'s row order."""
+    (out of Σ P·1), token-major tensors; the output comes back in ``q``'s row order.
+
+    ``text_split`` = ``(cp, rank, gather)``: the kernel takes only this rank's share of the text
+    queries, rows ``[rank·T, (rank+1)·T)`` with ``T = ceil(S_txt/cp)`` (zero-padded at the end),
+    and ``gather`` all-gathers the text outputs along the sequence over the CP group. Every rank
+    computing all text rows is redundant: each one sees every key."""
     b, h, s_q, _ = q.shape
     s_txt = text_k.shape[2]
     if text_first:
         q = torch.cat([q[:, :, s_txt:], q[:, :, :s_txt]], dim=2)
+    s_img = s_q - s_txt
+    if text_split is not None:
+        cp, rank, gather = text_split
+        rows = _text_split_rows(s_txt, cp)
+        q_txt = F.pad(q[:, :, s_img:], (0, 0, 0, rows * cp - s_txt))
+        q = torch.cat([q[:, :, :s_img], q_txt[:, :, rank * rows:(rank + 1) * rows]], dim=2)
     if text_valid_len is None:
         key_mask = torch.ones(b * h, s_txt, dtype=q.dtype, device=q.device)
     else:
@@ -751,6 +772,9 @@ def _joint_ring_kernel(op, q, image_k, image_v, text_k, text_v, *, scale: float,
     token_major = lambda x: x.transpose(1, 2).contiguous()  # noqa: E731
     out = op(token_major(q), token_major(image_k), token_major(image_v), token_major(text_k),
              token_major(text_v), key_mask.contiguous(), scale)
+    if text_split is not None:  # this rank's text rows → every rank's, unpadded
+        text_out = gather(out[:, :, s_img:].contiguous())[:, :, :s_txt]
+        out = torch.cat([out[:, :, :s_img], text_out], dim=2)
     if text_first:
         out = torch.cat([out[:, :, s_q - s_txt:], out[:, :, :s_q - s_txt]], dim=2)
     return out
@@ -816,8 +840,17 @@ def joint_ring_attention(q, image_k, image_v, text_k, text_v, *, scale: float,
     cp = get_axis_size("cp")
     if (cp > 1 and _JOINT_RING_OP is not None
             and _joint_ring_kernel_eligible(q, image_k, image_v, text_k, text_v)):
+        split = None
+        if _JOINT_RING_TEXT_SPLIT:
+            group = collectives.get_cp_group()
+
+            def gather(x):
+                return collectives.gather_from_tensor_model_parallel_region_with_dim(
+                    x, gather_dim=2, process_group=group)
+            split = (cp, get_axis_rank("cp"), gather)
         return _joint_ring_kernel(_JOINT_RING_OP, q, image_k, image_v, text_k, text_v, scale=scale,
-                                  text_valid_len=text_valid_len, text_first=text_first)
+                                  text_valid_len=text_valid_len, text_first=text_first,
+                                  text_split=split)
     if cp == 1 and text_valid_len is None:
         return _dense_bhsd(q, torch.cat([text_k, image_k], dim=2),
                            torch.cat([text_v, image_v], dim=2), scale=scale)
