@@ -268,6 +268,9 @@ difflet.yottalabs.ai {
 	respond @job_delete 403
 
 	reverse_proxy 127.0.0.1:8000 {
+		# behind Cloudflare (proxied): the gateway counts the real client, not the edge node;
+		# only safe while 80/443 accept Cloudflare's IP ranges alone (else the header can be forged)
+		header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}
 		# pass streamed video bytes on at once; no read timeout may be added: a request can
 		# wait in its model's queue and run for many minutes
 		flush_interval -1
@@ -280,17 +283,25 @@ sudo caddy validate --config /etc/caddy/Caddyfile
 sudo systemctl reload caddy
 ```
 
-**DNS, in Cloudflare:** an `A` record `difflet` → the Elastic IP, **DNS only (grey cloud)**. Caddy
-then gets its certificate from Let's Encrypt itself (ports 80 and 443 must be open). DNS only
-because the gateway's limits and timeouts assume Caddy talks to the browser directly:
+**DNS, in Cloudflare (proxied, orange cloud):** an `A` record `difflet` → the Elastic IP, Proxied.
+Cloudflare then hides the origin and absorbs floods, and Caddy still gets a Let's Encrypt
+certificate itself: the HTTP-01 challenge reaches it through Cloudflare on port 80. Three
+settings make the pieces fit:
 
-- Proxied (orange cloud), Cloudflare cuts a request off at 100 s (a `524`), and the gateway sees
-  Cloudflare's edge IPs, so `ip_per_hour` counts per edge node instead of per user.
-- If the record must stay proxied: set SSL/TLS to *Full (strict)*, add
-  `header_up X-Forwarded-For {http.request.header.CF-Connecting-IP}` inside `reverse_proxy`, and
-  allow 443 only from [Cloudflare's IP ranges](https://www.cloudflare.com/ips/) (otherwise anyone
-  can forge that header). The 100 s cut-off remains; the page's image requests normally finish
-  within it, `/v1/videos/sync` API calls do not.
+- **SSL/TLS mode *Full (strict)*** in the zone. *Flexible* makes Cloudflare call the origin over
+  HTTP, Caddy redirects that to HTTPS, and the browser loops on the redirect.
+- **The security group admits 80 and 443 from [Cloudflare's IP ranges](https://www.cloudflare.com/ips/) only**,
+  not `0.0.0.0/0`. The `header_up` line trusts `CF-Connecting-IP`; a client reaching the origin
+  directly could forge it. (`0.0.0.0/0` works too, at the cost that a direct client can pick the
+  IP the per-IP limit counts.) Never open the ports the backends' ranks listen on: each backend's
+  torch.distributed store binds `0.0.0.0` on a random high port, without authentication.
+- **Cloudflare ends a proxied request at 100 s** (`524`). The page stays within it: images take
+  seconds and wait at most 30 s in their queue, and videos are async jobs the page polls. API
+  calls to `/v1/videos/sync` for a video longer than that fail.
+
+With the record **DNS only (grey cloud)** instead, remove the `header_up` line: without Cloudflare
+the header is absent, the gateway would see every client as `127.0.0.1`, and the per-IP limit
+would be shared by everyone.
 
 Check, from any machine:
 
