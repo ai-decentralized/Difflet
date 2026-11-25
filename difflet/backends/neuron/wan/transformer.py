@@ -112,9 +112,12 @@ class NeuronWanTransformerApplication(TorchNeuronApplicationBase):
             self.skipped_checkpoint_prefixes = skipped
 
     def build_module(self) -> torch.nn.Module:
-        from difflet.models.wan.modeling_wan import WanTransformer3DModel, add_constmax_sigma_
+        from difflet.models.wan.modeling_wan import (
+            WanTransformer3DModel, add_constmax_sigma_, add_ring_constmax_ok_,
+        )
 
         module = WanTransformer3DModel(self.config, dtype=self.dtype)
+        add_ring_constmax_ok_(module, self.model_path)  # ring CP const-max guard, always
         add_constmax_sigma_(module, self.model_path)  # experiment E1; a no-op with its env unset
         return module
 
