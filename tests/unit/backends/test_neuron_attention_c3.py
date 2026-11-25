@@ -540,3 +540,49 @@ def test_cpu_joint_ring_attention_accepts_text_first():
     want = cpu_attention.joint_ring_attention(q, k, v, kt, vt, scale=0.3)
     got = cpu_attention.joint_ring_attention(q, k, v, kt, vt, scale=0.3, text_first=True)
     assert torch.equal(got, want)
+
+
+@pytest.mark.parametrize("text_first", [False, True])
+def test_joint_ring_text_split_matches_masked_joint_attention(text_first):
+    """Each of cp ranks takes its share of the text queries (11 rows over 4 ranks: 3, 3, 3, 2 +
+    padding) and the gathered text outputs equal every rank computing all text rows."""
+    cp, b, h, s_img, s_txt, d, valid = 4, 2, 3, 6, 11, 16, 7
+    q_img = [torch.randn(b, h, s_img, d) for _ in range(cp)]
+    k_img, v_img = torch.randn(b, h, cp * s_img, d), torch.randn(b, h, cp * s_img, d)
+    q_txt, k_txt, v_txt = (torch.randn(b, h, s_txt, d) for _ in range(3))
+    valid_len = torch.tensor([valid, s_txt], dtype=torch.int32)
+
+    def full_keys_kernel(q, k, v, kt, vt, m, scale):  # the ring brings every image block
+        tm = lambda x: x.transpose(1, 2)  # noqa: E731
+        return _joint_kernel_contract(q, tm(k_img), tm(v_img), kt, vt, m, scale)
+
+    def query(r):
+        parts = [q_txt, q_img[r]] if text_first else [q_img[r], q_txt]
+        return torch.cat(parts, dim=2)
+
+    def run(r, gather):
+        local = slice(r * s_img, (r + 1) * s_img)
+        return neuron_attention._joint_ring_kernel(
+            full_keys_kernel, query(r), k_img[:, :, local], v_img[:, :, local], k_txt, v_txt,
+            scale=0.25, text_valid_len=valid_len, text_first=text_first, text_split=(cp, r, gather))
+
+    shares = {}
+
+    def record(r):
+        def gather(x):
+            shares[r] = x
+            return torch.zeros(b, h, cp * x.shape[2], d)
+        return gather
+
+    for r in range(cp):  # pass 1: record each rank's text share (the gather's inputs)
+        run(r, record(r))
+    gathered = torch.cat([shares[r] for r in range(cp)], dim=2)
+    assert gathered.shape[2] == cp * neuron_attention._text_split_rows(s_txt, cp)
+    for r in range(cp):  # pass 2: every rank receives all shares, as the all-gather delivers them
+        got = run(r, lambda x: gathered)
+        want = torch.empty_like(got)
+        for i in range(b):
+            keys = torch.cat([k_txt[i, :, : valid_len[i]], k_img[i]], dim=1)
+            vals = torch.cat([v_txt[i, :, : valid_len[i]], v_img[i]], dim=1)
+            want[i] = torch.softmax(query(r)[i] @ keys.transpose(1, 2) * 0.25, dim=-1) @ vals
+        torch.testing.assert_close(got, want, atol=1e-5, rtol=1e-5)
