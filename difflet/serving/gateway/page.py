@@ -461,7 +461,7 @@ def render_page(config: FleetConfig | None, statuses: Mapping[str, str], *, base
 <header>
 <div><h1>{_LOGO}</h1><p>Text-to-image and text-to-video on AWS Trainium.</p></div>
 <a class="powered" href="https://yottalabs.ai" target="_blank" rel="noopener">Powered by
-<b>yottalabs.ai</b></a>
+<b>Yotta Labs</b></a>
 </header>
 <div class="layout">
 <div class="panel">

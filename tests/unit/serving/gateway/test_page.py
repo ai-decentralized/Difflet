@@ -95,7 +95,7 @@ def test_page_carries_the_difflet_logo_and_powered_by():
         assert '<svg class="logo" role="img" aria-label="Difflet"' in page
         assert 'fill="currentColor"' in page  # the wordmark follows the theme's text colour
         assert '<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,' in page
-        assert 'href="https://yottalabs.ai"' in page and "Powered by" in page
+        assert 'href="https://yottalabs.ai"' in page and "Powered by\n<b>Yotta Labs</b>" in page
 
 
 def test_page_models_carry_the_backend_defaults():
