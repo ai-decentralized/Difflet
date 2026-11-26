@@ -6,9 +6,9 @@
 # through the gateway on 2026-11-22, from two step counts each (Wan: 10 and 30 steps). When
 # several models run at once they share the host CPUs, and requests ran up to ~40% slower.
 gateway:
-  host: 127.0.0.1   # behind a TLS proxy (Caddy) on this host; docs/serving/gateway.md
+  host: 127.0.0.1   # behind Caddy on this host, page same-origin; docs/serving/gateway-setup.md
   port: 8000
-  cors_origins: ["https://difflet.yottalabs.ai"]   # where the static page is hosted
+  cors_origins: ["https://difflet.yottalabs.ai"]   # only for a page hosted on another origin; harmless same-origin
   limits: {client_active: 1, client_per_hour: 20, ip_per_hour: 2000}
   wait: {notice_s: 1800, suggest_s: 1800, reject_s: 7200}
 runs_dir: /mnt/nvme/difflet-fleet/runs   # <runs_dir>/<slug>/: cwd, serve.pid, serve.out, logs/
