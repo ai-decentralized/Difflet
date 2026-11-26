@@ -74,6 +74,7 @@ def routed(monkeypatch):
     # the recorded stub above is the unbounded kernel either way.
     monkeypatch.setattr(attn, "_FLASH_SCALAR_EXP_OP", None)
     monkeypatch.setattr(attn, "_FLASH_BOUNDED_OP", bounded)
+    monkeypatch.setattr(attn, "_FLASH_BOUNDED_SCALAR_EXP_OP", bounded)  # vector_exp=False
     monkeypatch.setattr(attn, "_FLASH_LSE_OP", None)  # ring partials: the fp32 math path
     monkeypatch.setattr(mx_attention, "_CALLS", Counter())
     monkeypatch.setattr(mx_attention, "_LOGGED", False)
@@ -263,7 +264,8 @@ def _both_paths(q, k, v, lo, hi):
 @pytest.mark.parametrize("value", ["off", "qk", "pv", "qk+pv"])
 def test_only_a_variant_puts_mx_attention_nodes_in_the_graph(routed, monkeypatch, value):
     monkeypatch.setattr(attn, "ATTN_QUANT", value)
-    for name, fn in (("_FLASH_KERNEL", _flash), ("_FLASH_BOUNDED_OP", _bounded)):
+    for name, fn in (("_FLASH_KERNEL", _flash), ("_FLASH_BOUNDED_OP", _bounded),
+                     ("_FLASH_BOUNDED_SCALAR_EXP_OP", _bounded)):
         monkeypatch.setattr(attn, name, fn)  # no recorder: its list would be a Dynamo guard
     targets = _graph_targets(_both_paths, *_qkv(), *_bounds())
     nodes = [t for t in targets if "mx_attention" in t]
