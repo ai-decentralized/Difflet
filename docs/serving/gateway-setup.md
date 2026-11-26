@@ -303,10 +303,16 @@ With the record **DNS only (grey cloud)** instead, remove the `header_up` line: 
 the header is absent, the gateway would see every client as `127.0.0.1`, and the per-IP limit
 would be shared by everyone.
 
+If the site answers `522`, Cloudflare cannot reach the origin: the security group does not admit
+80/443 yet (on this host, `curl -s http://169.254.169.254/latest/meta-data/security-groups` with an
+IMDSv2 token lists the groups actually attached). `525` right after opening the ports means Caddy
+has no certificate yet because its earlier attempts failed and it is backing off;
+`sudo systemctl reload caddy` makes it try again at once.
+
 Check, from any machine:
 
 ```bash
-curl -sI https://difflet.yottalabs.ai/ | head -1                      # HTTP/2 200
+curl -s -o /dev/null -w '%{http_code}\n' https://difflet.yottalabs.ai/   # 200 (HEAD gets 405: / is GET only)
 curl -s https://difflet.yottalabs.ai/ready | jq .status                # "ready"
 curl -s -o /dev/null -w '%{http_code}\n' \
   'https://difflet.yottalabs.ai/v1/videos?model=Lightricks/LTX-2'     # 403
