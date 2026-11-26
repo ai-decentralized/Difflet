@@ -25,7 +25,7 @@ SPEC = ModelSpec(
     default_num_frames=9,
     default_steps=40,  # WanPipeline's Wan 2.2 default
     guidance="cfg",
-    default_guidance_scale=4.0,  # the high-noise expert's
+    default_guidance_scale=4.0,  # every step on Wan 2.1, the high-noise stage on Wan 2.2
     default_fps=16,
     # Wan 2.1 has one transformer and no expert boundary.
     guidance_scale_2_checkpoint_ids=(WAN22,),
@@ -48,7 +48,10 @@ SPEC = ModelSpec(
     refused_video_fields=(
         ("boundary_ratio", "the expert boundary is the checkpoint's (model_index.json)"),
         ("flow_shift", "the scheduler shift is the checkpoint's"),
-        ("true_cfg_scale", "Wan already runs true CFG; use guidance_scale and guidance_scale_2"),
+        (
+            "true_cfg_scale",
+            "Wan already runs true CFG; use guidance_scale (and guidance_scale_2 on Wan 2.2)",
+        ),
     ),
     refused_application_kwargs=("shapes",),
     refused_application_kwarg_prefixes=("teacache_",),

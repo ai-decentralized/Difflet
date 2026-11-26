@@ -1,9 +1,10 @@
 """Wan on the GPU flow: Wan 2.2's two experts (Wan 2.1's one transformer), UMT5 and the VAE
 on one GPU, driven by the backend-neutral ``WanOrchestrator``.
 
-* The two DiT experts are ``CudaWanTransformerApplication`` (the neutral
-  ``WanTransformer3DModel`` on ``difflet.ops``), each loaded from its own diffusers directory
-  and compiled into its own artifact subdirectory.
+* Each DiT expert (two on Wan 2.2, one on Wan 2.1) is a ``CudaWanTransformerApplication``:
+  the neutral ``WanTransformer3DModel`` on ``difflet.ops``, loaded from its own diffusers
+  directory and compiled into its own artifact subdirectory. In eager mode its blocks run the
+  fused forward of ``backends/cuda/wan/fused_block.py`` (see ``transformer.py``).
 * UMT5 (``transformers.UMT5EncoderModel``) sits behind the ``(input_ids, attention_mask) →
   embeds`` callable ``WanOrchestrator.encode_prompt`` expects.
 * diffusers' ``AutoencoderKLWan`` sits behind a decoder callable whose ``.config`` carries
@@ -311,7 +312,7 @@ class CudaWanApplication(GpuApplication):
         num_frames: int | None = None,
         output_type: str = "pt",
     ):
-        """Text → video through the orchestrator's denoise loop with both experts.
+        """Text → video through the orchestrator's denoise loop with the snapshot's experts.
 
         ``latents`` is ``(B, C, F', H', W')`` initial noise used verbatim (the end-to-end
         oracle feeds the same tensor to stock diffusers); otherwise ``seed`` draws it with a
