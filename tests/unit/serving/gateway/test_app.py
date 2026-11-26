@@ -279,7 +279,15 @@ def test_models_lists_config(tmp_path, backends):
 def test_page_served(tmp_path, backends):
     resp = _client(tmp_path, backends).get("/")
     assert resp.status_code == 200 and resp.headers["content-type"].startswith("text/html")
-    assert "Difflet models" in resp.text and "320×512×61" in resp.text
+    assert "Difflet models" in resp.text and "<table" not in resp.text  # the table is on /info
+
+
+def test_info_page_served(tmp_path, backends):
+    resp = _client(tmp_path, backends).get("/info")
+    assert resp.status_code == 200 and resp.headers["content-type"].startswith("text/html")
+    assert "320×512×61" in resp.text and "Example requests" in resp.text
+    # the examples call this gateway, at the address the request came in on
+    assert "http://testserver/v1/chat/completions" in resp.text
 
 
 def test_client_disconnect_cancels_upstream(tmp_path):
