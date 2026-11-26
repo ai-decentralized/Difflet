@@ -4,8 +4,8 @@
 its own Neuron device. A client names the model in its request (`model` in the chat-completions
 JSON, or the `model` field of a video form); the gateway forwards the request to that model's
 backend and returns the backend's answer unchanged. A page at `/` generates images and videos
-with any ready model and lists every model, its shapes, its status and an example request; a
-static copy of it can be hosted elsewhere ([Public page](#public-page-static-hosting-cors-and-limits)).
+with any ready model, and `/info` lists every model, its shapes, its status and an example request; a
+static copy of the `/` page can be hosted elsewhere ([Public page](#public-page-static-hosting-cors-and-limits)).
 
 One fleet file drives everything: which backends `up` starts, where the gateway routes, and what
 the page shows. An example for a trn3 with six models on devices 0–5 is
@@ -111,7 +111,8 @@ directory is put first on `PATH` when it is not on it already.
 | `GET /health` | `200` while the gateway runs |
 | `GET /ui/models` | The page's model list (`id`, `label`, `kind`, `device`, `shapes`, `status`, default `steps` and `guidance`, `estimate`), plus `wait` and `limits` |
 | `GET /queue` | Per model, the requests running or waiting: held by the gateway, plus a video backend's queued or in-progress jobs |
-| `GET /` | The models page |
+| `GET /` | The generation page |
+| `GET /info` | Every model's kind, device, shapes, estimated time and status, and an example request per model |
 
 Backend answers, errors included, come back with their status and body unchanged. The gateway's
 own errors use the backends' error format:
@@ -142,7 +143,7 @@ working, the gateway closes the upstream request and the backend cancels it.
 ## API key
 
 `--api-key KEY` (or `DIFFLET_API_KEY`) makes every `/v1` route require
-`Authorization: Bearer KEY`; `/`, `/health`, `/ready`, `/ui/models` and `/queue` stay open. It is one shared key, as for `difflet serve`; put the port behind a security group or a
+`Authorization: Bearer KEY`; `/`, `/info`, `/health`, `/ready`, `/ui/models` and `/queue` stay open. It is one shared key, as for `difflet serve`; put the port behind a security group or a
 TLS-terminating proxy. The backends listen on `127.0.0.1` without a key. The page sends no key,
 so it works only with a gateway started without one.
 

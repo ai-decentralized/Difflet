@@ -339,7 +339,8 @@ kill -TERM -- -$(cat /mnt/nvme/difflet-fleet/runs/<slug>/serve.pid)
 
 ## 9. End-to-end check
 
-1. Open `https://difflet.yottalabs.ai`: six models, all ready, each with its estimated time.
+1. Open `https://difflet.yottalabs.ai/info`: six models, all ready, each with its estimated time
+   and an example request; `https://difflet.yottalabs.ai` is the generation form.
 2. Generate one image (FLUX) and one video (HunyuanVideo, the fastest video model) from the page.
 3. The same from a terminal:
 

@@ -33,7 +33,8 @@ from difflet.serving.auth import ApiKeyAuthenticationMiddleware
 from difflet.serving.errors import DiffletServingError
 from difflet.serving.gateway.fleet import FleetConfig, FleetEntry
 from difflet.serving.gateway.launcher import read_pid
-from difflet.serving.gateway.page import _duration, model_defaults, render_page, ui_models
+from difflet.serving.gateway.page import (_duration, model_defaults, render_info, render_page,
+                                          ui_models)
 from difflet.serving.gateway.status import Status, fleet_status
 from difflet.serving.openai.api_server import _run_until_disconnect
 from difflet.serving.openai.serving_video import MAX_KEYFRAME_FORM_BODY_BYTES
@@ -415,8 +416,12 @@ def create_gateway_app(
         return ui_models(config, await polled_statuses())
 
     @app.get("/", response_class=HTMLResponse)
-    async def page(request: Request):
-        return HTMLResponse(render_page(config, await polled_statuses(),
+    async def page():
+        return HTMLResponse(render_page(config, await polled_statuses()))
+
+    @app.get("/info", response_class=HTMLResponse)
+    async def info(request: Request):
+        return HTMLResponse(render_info(config, await polled_statuses(),
                                         base_url=str(request.base_url)))
 
     return app
