@@ -474,6 +474,21 @@ def test_guidance_scale_2_is_refused_for_a_checkpoint_with_one_denoising_stage(
         assert exc.value.message.endswith(guidance_scale_2_refusal(spec, checkpoint))
 
 
+@_specs(lambda s: s.guidance_scale_2_checkpoint_ids)
+def test_a_trailing_slash_on_the_served_id_keeps_guidance_scale_2(spec, monkeypatch):
+    # resolve_serving_model accepts "<id>/" and the profile keeps the slash.
+    for checkpoint in spec.guidance_scale_2_checkpoint_ids:
+        served = checkpoint + "/"
+        source = ResolvedModelSource("hf_snapshot", served, None, "/snap/x", "a" * 40)
+        monkeypatch.setattr(mod, "resolve_hf_model_source", lambda *a, **k: source)
+        bundle = mod.GpuServingArtifactPreparer(served).prepare_runtime(
+            _profile(spec, model_id=served),
+            download_policy=DownloadPolicy.AUTO,
+            compile_policy=CompilePolicy.AUTO,
+        )
+        _validator(bundle).validate(_request(spec, model=served, video={"guidance_scale_2": 3.0}))
+
+
 @_video_only
 def test_fields_the_application_does_not_take_are_refused(spec, source):
     v = _validator(_prepare(spec, _profile(spec)))

@@ -57,8 +57,9 @@ def cfg_parallel_refusal(spec: ModelSpec) -> str:
 def guidance_scale_2_refusal(spec: ModelSpec, model_id: str) -> str | None:
     """Why ``guidance_scale_2`` is refused for ``model_id``, or ``None`` when its application
     takes it (``spec.guidance_scale_2_checkpoint_ids``): the one wording ``difflet run`` and
-    ``difflet serve`` give, before anything is downloaded or loaded."""
-    if model_id in spec.guidance_scale_2_checkpoint_ids:
+    ``difflet serve`` give before ``generate`` (for ``difflet run``, before any download or
+    load). A trailing slash is ignored, as the serving registry ignores it."""
+    if model_id.rstrip("/") in spec.guidance_scale_2_checkpoint_ids:
         return None
     return (
         f"guidance_scale_2 has no effect on {model_id}: it has one denoising stage, so every "
