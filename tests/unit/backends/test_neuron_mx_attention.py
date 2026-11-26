@@ -70,6 +70,9 @@ def routed(monkeypatch):
     monkeypatch.setattr(attn, "_MX_ATTENTION_OP", _mx_op)
     monkeypatch.setattr(attn, "_on_neuron", lambda t: True)
     monkeypatch.setattr(attn, "_FLASH_KERNEL", flash)
+    # The unbounded default (vector_exp=False) prefers the Scalar-exp op when it loaded: off, so
+    # the recorded stub above is the unbounded kernel either way.
+    monkeypatch.setattr(attn, "_FLASH_SCALAR_EXP_OP", None)
     monkeypatch.setattr(attn, "_FLASH_BOUNDED_OP", bounded)
     monkeypatch.setattr(attn, "_FLASH_LSE_OP", None)  # ring partials: the fp32 math path
     monkeypatch.setattr(mx_attention, "_CALLS", Counter())
