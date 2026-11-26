@@ -362,6 +362,52 @@ def test_a_block_that_does_not_fit_keeps_the_modeling_forward(tmp_path, monkeypa
     assert "forward" not in vars(module.blocks[1])
 
 
+def test_the_fused_forward_composes_the_modeling_block(tmp_path, monkeypatch):
+    # The kernels are Triton (test_cuda_wan_fused_block.py checks them and their bf16
+    # rounding on a CUDA device). With their torch formulas in their place, in fp32,
+    # fused_block_forward must compute the modeling block to fp32 precision on any host, so a
+    # change to WanTransformerBlock.forward or WanAttention.forward fails here.
+    import torch.nn.functional as F
+
+    from difflet.backends.cuda.wan import fused_block
+    from difflet.models.wan.modeling_wan import WanRotaryPosEmbed
+    from difflet.ops import apply_rotary_emb_slices, rms_norm_fp32
+
+    def layer_norm(x, eps, *, weight=None, bias=None, shift=None, scale=None):
+        y = F.layer_norm(x.float(), x.shape[-1:], weight, bias, eps)
+        return (y if shift is None else y * (1 + scale) + shift).to(x.dtype)
+
+    def gated_residual(residual, update, gate):
+        return (residual.float() + update.float() * gate).to(residual.dtype)
+
+    def rms_norm_rotary(x, weight, eps, cos, sin, head_dim):
+        heads = rms_norm_fp32(x, weight, eps).unflatten(-1, (-1, head_dim))
+        return apply_rotary_emb_slices(heads, cos, sin).flatten(-2)
+
+    for kernel in (layer_norm, gated_residual, rms_norm_rotary):
+        monkeypatch.setattr(fused_block, kernel.__name__, kernel)
+    transformer = tmp_path / "transformer"
+    _reference(transformer)
+    cfg = _config(transformer, torch_dtype=torch.float32)
+    app = CudaWanTransformerApplication(model_path=str(transformer), config=cfg, device="cpu")
+    app.compile(str(tmp_path / "cache"))
+    app.load(str(tmp_path / "cache"), skip_warmup=True)
+    block = app.module.blocks[0]
+    assert fused_block._fits(block)
+
+    torch.manual_seed(2)
+    head_dim = TINY["attention_head_dim"]
+    dim = TINY["num_attention_heads"] * head_dim
+    rotary = WanRotaryPosEmbed(head_dim, (1, 2, 2), 1024)(torch.zeros(1, 16, 3, 8, 12))
+    hidden = torch.randn(2, rotary[0].shape[1], dim)
+    text = torch.randn(2, 6, dim)
+    temb = 0.1 * torch.randn(2, 6, dim)
+    with torch.no_grad():
+        want = block(hidden, text, temb, rotary)
+        got = fused_block.fused_block_forward(block, hidden, text, temb, rotary)
+    torch.testing.assert_close(got, want)
+
+
 def test_a_per_token_timestep_takes_the_modeling_forward(tmp_path, monkeypatch):
     from difflet.backends.cuda.wan.fused_block import fused_block_forward
     from difflet.models.wan.modeling_wan import WanTransformerBlock
