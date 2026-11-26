@@ -25,7 +25,6 @@ from difflet.serving.validation import BoundedValidationExecutor
 logger = logging.getLogger(__name__)
 
 _ResultT = TypeVar("_ResultT")
-_DISCONNECT_POLL_SECONDS = 0.1
 
 
 async def _wait_for_disconnect(request) -> None:
@@ -33,16 +32,12 @@ async def _wait_for_disconnect(request) -> None:
     # so the only relevant subsequent ASGI message is ``http.disconnect``.
     # Avoid Starlette's zero-timeout ``is_disconnected()`` probe: with some
     # AnyIO/TestClient combinations it can remain blocked after the body is read.
-    while True:
-        try:
-            message = await asyncio.wait_for(
-                request.receive(),
-                timeout=_DISCONNECT_POLL_SECONDS,
-            )
-        except asyncio.TimeoutError:
-            continue
-        if message.get("type") == "http.disconnect":
-            return
+    # Block on ``receive()`` instead of polling it under ``asyncio.wait_for``: on
+    # Python 3.11, ``wait_for`` drops a cancellation that lands on the same loop
+    # step as the inner ``receive()`` returning, so ``_run_until_disconnect``
+    # cancelling this task in its ``finally`` was lost and the request hung forever.
+    while (await request.receive()).get("type") != "http.disconnect":
+        pass
 
 
 async def _run_until_disconnect(
