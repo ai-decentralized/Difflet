@@ -38,6 +38,9 @@ _STATUS_HELP = {
     "down": "no backend process, or it serves another model",
 }
 _AUTH = '-H "Authorization: Bearer $DIFFLET_API_KEY"'
+#: The seed the page sends when its Seed field is empty, and the seed of the /info examples: the
+#: same prompt gives the same result unless the visitor picks another seed.
+DEFAULT_SEED = 41
 EXAMPLE_PROMPTS = {
     "image": (
         "a small red sailboat on a calm blue lake at sunrise",
@@ -132,6 +135,7 @@ pre { margin: 0; padding: .75rem 1rem; background: var(--panel); border: 1px sol
 _SCRIPT = r"""
 const $ = (id) => document.getElementById(id);
 const API = window.DIFFLET_API || '';  // the gateway; '' when it served this page itself
+const DEFAULT_SEED = window.DIFFLET_SEED;  // sent when the Seed field is empty
 const UI = JSON.parse($('ui').textContent);
 const EXAMPLES = JSON.parse($('example-prompts').textContent);
 // A static copy of the page embeds no models: it loads them, with the wait thresholds and the
@@ -366,7 +370,7 @@ async function run() {
   if (!m) return;
   if (!prompt) { setState('Enter a prompt first.', true); return; }
   const seedValue = readNumber('seed');
-  const seed = seedValue === null ? Math.floor(Math.random() * 2147483647) : seedValue;
+  const seed = seedValue === null ? DEFAULT_SEED : seedValue;
   const steps = readNumber('steps');
   const guidance = m.guidance === null ? null : readNumber('guidance');
   running = true;
@@ -487,9 +491,10 @@ def render_page(config: FleetConfig | None, statuses: Mapping[str, str], *,
 <div><label for="steps">Steps</label><input id="steps" type="number" min="1" max="50"></div>
 <div id="guidance-box"><label for="guidance">Guidance</label>
 <input id="guidance" type="number" min="0" max="20" step="0.5"></div>
-<div><label for="seed">Seed</label><input id="seed" type="number" min="0" placeholder="random"></div>
+<div><label for="seed">Seed</label><input id="seed" type="number" min="0" placeholder="{DEFAULT_SEED}"></div>
 </div>
-<div class="hint">Empty fields use the model's defaults; an empty seed is random.</div>
+<div class="hint">Empty fields use the defaults: the model's steps and guidance, and seed
+{DEFAULT_SEED}.</div>
 </details>
 <button id="run" type="button">Run</button>
 <progress id="progress" max="1" value="0" hidden></progress>
@@ -503,7 +508,8 @@ must use one of its model's shapes: H×W for images, H×W×F (frames) for videos
 </div>
 <script type="application/json" id="ui">{_json(ui)}</script>
 <script type="application/json" id="example-prompts">{_json(EXAMPLE_PROMPTS)}</script>
-<script>window.DIFFLET_API = {_json(api_base.rstrip("/"))};</script>
+<script>window.DIFFLET_API = {_json(api_base.rstrip("/"))};
+window.DIFFLET_SEED = {DEFAULT_SEED};</script>
 <script>{_SCRIPT}</script>
 </body>
 </html>
@@ -622,7 +628,7 @@ def _example(entry: FleetEntry, base_url: str) -> str:
             '  -H "Content-Type: application/json" \\\n'
             f"  -d '{{\"model\": {body},\n"
             '       "messages": [{"role": "user", "content": "a small red sailboat on a calm blue lake"}],\n'
-            f'       "extra_body": {{"height": {height}, "width": {width}, "seed": 42}}}}\' \\\n'
+            f'       "extra_body": {{"height": {height}, "width": {width}, "seed": {DEFAULT_SEED}}}}}\' \\\n'
             "  | jq -r '.choices[0].message.content[0].image_url.url' | cut -d, -f2- "
             "| base64 -d > image.png")
     return (
@@ -630,7 +636,8 @@ def _example(entry: FleetEntry, base_url: str) -> str:
         f"  {_AUTH} \\\n"
         f"  -F 'model={entry.model_id}' \\\n"
         "  -F 'prompt=a cinematic mountain landscape at sunrise' \\\n"
-        f"  -F 'size={width}x{height}' -F 'num_frames={frames}' | jq -r .id)\n"
+        f"  -F 'size={width}x{height}' -F 'num_frames={frames}' -F 'seed={DEFAULT_SEED}' "
+        "| jq -r .id)\n"
         "# repeat until the status is \"completed\"\n"
         f'curl -sS {_AUTH} "{base}/v1/videos/$video_id" | jq .status\n'
         f'curl -fL {_AUTH} "{base}/v1/videos/$video_id/content" -o video.mp4')

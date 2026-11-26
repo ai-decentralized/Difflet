@@ -177,3 +177,14 @@ def test_page_script_sends_a_client_id_kept_in_local_storage():
     page = render_page(_config(_flux()), {FLUX: "ready"})
     assert "'X-Difflet-Client': CLIENT" in page
     assert "localStorage.getItem" in page
+
+
+def test_an_empty_seed_is_41_not_random():
+    for page in (render_page(_config(_flux(), _hv()), {FLUX: "ready"}),
+                 render_page(None, {}, api_base="https://api.example")):  # static copy too
+        assert 'id="seed" type="number" min="0" placeholder="41"' in page
+        assert "window.DIFFLET_SEED = 41;" in page
+        assert "seedValue === null ? DEFAULT_SEED : seedValue" in page
+        assert "Math.random" not in page and "seed is random" not in page
+    info = render_info(_config(_flux(), _hv()), {FLUX: "ready"}, base_url=BASE)
+    assert "&quot;seed&quot;: 41}" in info and "-F &#x27;seed=41&#x27;" in info
