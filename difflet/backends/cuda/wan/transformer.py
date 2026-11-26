@@ -5,10 +5,12 @@ The module is the backend-neutral ``WanTransformer3DModel``
 selected backend at import time. It is built on the meta device, materialized in the
 requested dtype, and filled from one expert's diffusers safetensors directory
 (``transformer/`` or ``transformer_2/``) through the shared checkpoint loader with
-the FFN rename (``checkpoint_key``); at tp=1 every tensor loads whole.
+the FFN rename (``checkpoint_key``); at tp=1 every tensor loads whole. In eager mode on a
+CUDA device a bf16 expert's blocks then run ``fused_block.py``'s forward
+(``apply_load_time_swaps``).
 
-The expert is the unit, as on TPU: Wan 2.2 A14B ships two independent experts and
-the application decides how many are resident.
+The expert is the unit, as on TPU: Wan 2.2 A14B ships two independent experts (Wan 2.1
+one) and the application decides how many are resident.
 """
 
 from __future__ import annotations
@@ -105,8 +107,8 @@ class CudaWanTransformerApplication(GpuComponent):
     def apply_load_time_swaps(self, module: torch.nn.Module) -> None:
         # Eager on a CUDA device: each block's elementwise chains as fused Triton kernels
         # (``fused_block.py``). Under compile inductor fuses them itself, so the blocks keep
-        # the modeling's forward.
-        if self.torch_compile or self.device.type != "cuda":
+        # the modeling's forward; so does an fp32 model, since the kernels round to bf16.
+        if self.torch_compile or self.device.type != "cuda" or self.dtype != torch.bfloat16:
             return
         from difflet.backends.cuda.wan.fused_block import fuse_blocks
 

@@ -9,10 +9,13 @@ fp32 arithmetic and its bf16 rounding points. The LayerNorm and RMS statistics r
 different order, so results agree with the modeling within bf16 rounding, not bit for bit.
 
 ``fuse_blocks`` replaces each block's ``forward`` with ``fused_block_forward`` at load. The
-CUDA transformer does this in eager mode only: under ``--torch-compile`` inductor fuses the
-same chains itself. The fused forward is written for the layout the CUDA backend runs: one
-device per process, no tensor, sequence or context parallelism (the platform refuses those
-before loading), the interleaved rotary and a timestep per sample.
+CUDA transformer does this for a bf16 model in eager mode only: the kernels round where bf16
+does, and under ``--torch-compile`` inductor fuses the same chains itself. The fused forward
+is written for one layout, which the CUDA backend runs today: tp=1 without sequence or context
+parallelism, the interleaved rotary, no const-max attention sigma, an affine cross-attention
+norm, and one timestep per sample. The shared modeling supports more than that, so
+``fuse_blocks`` checks each block at load (``_fits``) and leaves any other block on the
+modeling's forward, and ``fused_block_forward`` hands a per-token timestep back to it.
 """
 
 from __future__ import annotations
@@ -195,7 +198,9 @@ def rms_norm_rotary(
     """RMS norm over all of ``x``'s channels (fp32, weighted, bf16 store), then the interleaved
     rotary of every head with the ``(1, S, 1, head_dim)`` fp32 tables: what
     ``rms_norm_fp32`` and ``apply_rotary_emb`` compute in sequence, in one pass. ``x`` is a
-    projection's output: unit stride across channels, rows ``x.stride(1)`` apart."""
+    projection's output or a channel slice of one: unit stride across channels, rows
+    ``x.stride(1)`` apart and batches ``tokens * x.stride(1)`` apart (row ``b * tokens + t`` is
+    read at ``row * x.stride(1)``)."""
     batch, tokens, channels = x.shape
     out = torch.empty((batch, tokens, channels), dtype=torch.bfloat16, device=x.device)
     _rms_norm_rotary_kernel[(batch * tokens,)](
@@ -239,7 +244,10 @@ def _attention(attn, hidden_states, kv_source, rotary_emb) -> torch.Tensor:
 
 
 def fused_block_forward(block, hidden_states, encoder_hidden_states, temb, rotary_emb):
-    """``WanTransformerBlock.forward`` with each elementwise chain in one kernel."""
+    """``WanTransformerBlock.forward`` with each elementwise chain in one kernel. A per-token
+    timestep (a 4-D ``temb``) is known only here, so that call takes the modeling's forward."""
+    if temb.ndim != 3:
+        return type(block).forward(block, hidden_states, encoder_hidden_states, temb, rotary_emb)
     shift, scale, gate, c_shift, c_scale, c_gate = (block.scale_shift_table + temb.float()).chunk(
         6, dim=1
     )
@@ -255,14 +263,36 @@ def fused_block_forward(block, hidden_states, encoder_hidden_states, temb, rotar
     return gated_residual(hidden_states, block.ffn(norm_h), c_gate)
 
 
+def _fits(block) -> bool:
+    """Whether ``fused_block_forward`` computes this block's forward: the layout the module
+    docstring names, checked once at load."""
+    for attn in (block.attn1, block.attn2):
+        if (
+            attn.tp_degree != 1
+            or attn.sp_enabled
+            or attn.context_parallel_enabled
+            or attn.rope_layout != "interleaved"
+            or hasattr(attn, "constmax_sigma")
+        ):
+            return False
+    norm2 = block.norm2
+    return (
+        not block.ffn.sp_enabled
+        and isinstance(norm2, torch.nn.LayerNorm)
+        and norm2.elementwise_affine
+    )
+
+
 def fuse_blocks(module) -> int:
-    """Give every block of a loaded ``WanTransformer3DModel`` the fused forward. Returns the
-    number of blocks changed: 0 without Triton (the blocks keep the modeling's forward)."""
+    """Give every block of a loaded bf16 ``WanTransformer3DModel`` that ``_fits`` the fused
+    forward; any other block keeps the modeling's. Returns the number of blocks changed (0
+    without Triton)."""
     if not HAS_TRITON:
         return 0
-    for block in module.blocks:
+    fused = [block for block in module.blocks if _fits(block)]
+    for block in fused:
         block.forward = types.MethodType(fused_block_forward, block)
-    return len(module.blocks)
+    return len(fused)
 
 
 __all__ = ["fuse_blocks"]
