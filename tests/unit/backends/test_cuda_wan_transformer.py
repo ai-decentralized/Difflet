@@ -408,7 +408,16 @@ def test_the_fused_forward_composes_the_modeling_block(tmp_path, monkeypatch):
     torch.testing.assert_close(got, want)
 
 
-def test_a_per_token_timestep_takes_the_modeling_forward(tmp_path, monkeypatch):
+@pytest.mark.parametrize(
+    "temb",
+    [torch.zeros(2, 4, 6, 16), torch.zeros(1, 6, 16)],
+    ids=["one-per-token", "one-for-the-batch"],
+)
+def test_a_timestep_the_kernels_cannot_index_takes_the_modeling_forward(
+    tmp_path, monkeypatch, temb
+):
+    # The kernels read sample b's modulation at row b of a (B, 6, dim) temb; the modeling also
+    # takes (B, S, 6, dim) and broadcasts (1, 6, dim) over the batch.
     from difflet.backends.cuda.wan.fused_block import fused_block_forward
     from difflet.models.wan.modeling_wan import WanTransformerBlock
 
@@ -417,6 +426,6 @@ def test_a_per_token_timestep_takes_the_modeling_forward(tmp_path, monkeypatch):
         WanTransformerBlock, "forward", lambda self, *args: calls.append(args) or "modeling"
     )
     block = _block_module(tmp_path).blocks[0]
-    temb = torch.zeros(1, 4, 6, 16)  # (B, S, 6, dim): one timestep per token
-    assert fused_block_forward(block, "h", "e", temb, "r") == "modeling"
+    hidden = torch.zeros(2, 4, 16)
+    assert fused_block_forward(block, hidden, "e", temb, "r") == "modeling"
     assert len(calls) == 1 and calls[0][2] is temb

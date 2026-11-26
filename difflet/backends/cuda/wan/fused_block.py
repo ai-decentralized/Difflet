@@ -15,7 +15,8 @@ is written for one layout, which the CUDA backend runs today: tp=1 without seque
 parallelism, the interleaved rotary, no const-max attention sigma, an affine cross-attention
 norm, and one timestep per sample. The shared modeling supports more than that, so
 ``fuse_blocks`` checks each block at load (``_fits``) and leaves any other block on the
-modeling's forward, and ``fused_block_forward`` hands a per-token timestep back to it.
+modeling's forward, and ``fused_block_forward`` hands a per-token timestep, or one timestep
+for a whole batch, back to it.
 """
 
 from __future__ import annotations
@@ -244,9 +245,11 @@ def _attention(attn, hidden_states, kv_source, rotary_emb) -> torch.Tensor:
 
 
 def fused_block_forward(block, hidden_states, encoder_hidden_states, temb, rotary_emb):
-    """``WanTransformerBlock.forward`` with each elementwise chain in one kernel. A per-token
-    timestep (a 4-D ``temb``) is known only here, so that call takes the modeling's forward."""
-    if temb.ndim != 3:
+    """``WanTransformerBlock.forward`` with each elementwise chain in one kernel. The kernels
+    read sample ``b``'s modulation at row ``b``, so a call whose ``temb`` is not one row per
+    sample (a per-token 4-D ``temb``, or one timestep broadcast over the batch) takes the
+    modeling's forward; only the call knows ``temb``'s shape."""
+    if temb.ndim != 3 or temb.shape[0] != hidden_states.shape[0]:
         return type(block).forward(block, hidden_states, encoder_hidden_states, temb, rotary_emb)
     shift, scale, gate, c_shift, c_scale, c_gate = (block.scale_shift_table + temb.float()).chunk(
         6, dim=1
