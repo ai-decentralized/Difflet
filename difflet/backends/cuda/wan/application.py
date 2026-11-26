@@ -35,7 +35,8 @@ from difflet.models.wan.pipeline import _read_boundary_ratio
 from difflet.models.wan.spec import SPEC
 
 DEFAULT_STEPS = SPEC.default_steps
-DEFAULT_GUIDANCE_SCALE = SPEC.default_guidance_scale  # the high-noise stage
+# Every step on Wan 2.1, the high-noise stage on Wan 2.2.
+DEFAULT_GUIDANCE_SCALE = SPEC.default_guidance_scale
 DEFAULT_GUIDANCE_SCALE_2 = 3.0  # Wan 2.2's low-noise stage (below the boundary)
 
 

@@ -200,10 +200,10 @@ Design points worth knowing:
 - **Wan** keeps both experts resident on a 96 GB card, runs true CFG with fp32 host latents,
   and passes the timestep to the DiT in fp32 (`timestep_dtype`). Wan 2.1 is the same
   application with one transformer and no expert boundary; it shares Wan 2.2's spec defaults
-  (40 steps, guidance 4.0) and refuses `guidance_scale_2`. Eager, each block's LayerNorms, adaLN
-  modulation, gated residuals and q/k norm with rotary run as fused Triton kernels
-  (`backends/cuda/wan/fused_block.py`, swapped in at load); `--torch-compile` leaves them to
-  inductor.
+  (40 steps, guidance 4.0) and refuses `guidance_scale_2`. Eager in bf16, each block's
+  LayerNorms, adaLN modulation, gated residuals and q/k norm with rotary run as fused Triton
+  kernels (`backends/cuda/wan/fused_block.py`, swapped in at load for every block in the layout
+  they compute); `--torch-compile` leaves them to inductor.
 - **Flux** runs Difflet's backend-neutral DiT inside diffusers' `FluxPipeline` through
   `FluxDiTAdapter`. The single block's `proj_out` can run as one gemm at tp=1 (`fuse_proj_out`,
   a load-time swap), off by default until a bf16 block-level comparison with diffusers explains

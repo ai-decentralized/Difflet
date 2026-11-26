@@ -6,8 +6,8 @@ selected backend at import time. It is built on the meta device, materialized in
 requested dtype, and filled from one expert's diffusers safetensors directory
 (``transformer/`` or ``transformer_2/``) through the shared checkpoint loader with
 the FFN rename (``checkpoint_key``); at tp=1 every tensor loads whole. In eager mode on a
-CUDA device a bf16 expert's blocks then run ``fused_block.py``'s forward
-(``apply_load_time_swaps``).
+CUDA device a bf16 expert's blocks then run ``fused_block.py``'s forward where they fit the
+layout it computes (``apply_load_time_swaps``).
 
 The expert is the unit, as on TPU: Wan 2.2 A14B ships two independent experts (Wan 2.1
 one) and the application decides how many are resident.
