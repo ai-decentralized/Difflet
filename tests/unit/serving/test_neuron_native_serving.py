@@ -11,7 +11,9 @@ from types import SimpleNamespace
 
 import pytest
 
+from difflet.backends.gpu.policy import guidance_scale_2_refusal
 from difflet.backends.neuron import serving as native
+from difflet.models.spec import gpu_model_spec
 from difflet.serving import model_registry
 from difflet.serving.errors import DiffletServingError
 from difflet.serving.model_registry import load_request_validator_factory, resolve_serving_model
@@ -188,8 +190,11 @@ def test_validator_refuses_guidance_scale_2_for_wan21(on_neuron, monkeypatch):
     monkeypatch.setattr(validator, "_validate_prompts", lambda request, video: None)
 
     validator.validate(_request(WAN21, profile))
-    with pytest.raises(DiffletServingError, match="guidance_scale_2"):
+    with pytest.raises(DiffletServingError) as exc:
         validator.validate(_request(WAN21, profile, guidance_scale_2=3.0))
+    # The GPU flow's refusal, inherited: one wording for every backend that serves the spec.
+    assert exc.value.code == "feature_not_supported"
+    assert exc.value.message.endswith(guidance_scale_2_refusal(gpu_model_spec("wan"), WAN21))
 
 
 # ------------------------------------------------------------------ adapter
