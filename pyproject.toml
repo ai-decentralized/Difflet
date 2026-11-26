@@ -46,6 +46,7 @@ dependencies = [
     "boto3>=1.34",                                # S3 artifact store — artifact_store.py:156
     "python-dotenv>=1.0",                         # .env loading — serve.py:248
     "PyYAML",                                     # difflet bench recipes and suites
+    "httpx>=0.28",                                # difflet gateway reverse proxy
 ]
 
 [project.optional-dependencies]
@@ -98,7 +99,7 @@ include = ["difflet*"]
 exclude = ["tests*", "examples*", "benchmark*", "scripts*", "docs*"]
 
 [tool.setuptools.package-data]
-difflet = ["py.typed", "bench/*.yaml", "bench/suites/*.yaml"]
+difflet = ["py.typed", "bench/*.yaml", "bench/suites/*.yaml", "serving/gateway/*.svg"]
 
 [tool.black]
 line-length = 100

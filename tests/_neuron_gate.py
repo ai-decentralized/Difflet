@@ -62,7 +62,6 @@ NEURON_COLLECT_IGNORE = [
     "unit/models/ltx_2/test_ltx_2_application.py",
     "unit/models/ltx_2/test_ltx_2_entry.py",
     "unit/models/ltx_2/test_ltx_2_pipeline.py",
-    "unit/models/ltx_2/test_ltx_2_pipeline_orchestrator.py",
     "unit/models/ltx_2/test_ltx2_tp_reduce_dtype.py",
     "unit/models/minimax_h3/test_trainium_transformer.py",
     "unit/models/minimax_h3/test_vae.py",

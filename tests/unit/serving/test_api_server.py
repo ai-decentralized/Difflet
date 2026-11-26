@@ -392,3 +392,41 @@ def test_chat_completions_disconnect_cancels_and_awaits_generation():
         assert leaked == []
 
     asyncio.run(_run())
+
+
+def test_run_until_disconnect_returns_when_the_body_message_and_the_result_land_together():
+    """The operation finishes on the same loop step as the watcher's first ``receive()``
+    (the unread request body): ``_run_until_disconnect`` must still return and leave no
+    watcher behind. Polling ``receive()`` under ``asyncio.wait_for`` hung here on Python
+    3.11, whose ``wait_for`` dropped the watcher's cancellation."""
+    from difflet.serving.openai.api_server import _run_until_disconnect
+
+    class _Request:
+        def __init__(self):
+            self.messages = [{"type": "http.request", "body": b"", "more_body": False}]
+
+        async def receive(self):
+            if self.messages:
+                return self.messages.pop(0)
+            await asyncio.Event().wait()  # the client stays connected
+
+    async def _operation():
+        await asyncio.sleep(0)
+        return "done"
+
+    async def _run():
+        run = asyncio.create_task(_run_until_disconnect(_operation(), request=_Request()))
+        done, _ = await asyncio.wait({run}, timeout=2)  # waits without cancelling ``run``
+        if not done:
+            run.cancel()
+            pytest.fail("_run_until_disconnect hung after its operation finished")
+        assert run.result() == "done"
+        current = asyncio.current_task()
+        leaked = [
+            task
+            for task in asyncio.all_tasks()
+            if task is not current and task.get_name().startswith("difflet-http-")
+        ]
+        assert leaked == []
+
+    asyncio.run(_run())

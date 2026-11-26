@@ -75,8 +75,11 @@ def ring_attention(q, k, v, *, scale: float, causal: bool = False, token_major: 
 
 def joint_ring_attention(
     q, image_k, image_v, text_k, text_v, *, scale: float, causal: bool = False,
-    text_valid_len=None,
+    text_valid_len=None, text_first: bool = False,
 ):
+    # text_first only matters to the neuron joint ring kernel; every query row attends the same
+    # keys, so the row order is the caller's either way here.
+    del text_first
     # cp_degree == 1 reference: the ring degenerates to plain full joint attention
     # over the concatenated [image, text] keys. This is the merge-math oracle.
     full_k = torch.cat([image_k, text_k], dim=2)

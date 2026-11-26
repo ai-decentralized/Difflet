@@ -365,6 +365,7 @@ def test_no_ring_kernel_is_prepared_without_cp():
     neuron_attention.prepare_ring_kernel(MeshSpec(cp=1, tp=4))
     assert neuron_attention._RING_KERNEL_OP is None
     assert neuron_attention._RING_CONSTMAX_OP is None
+    assert neuron_attention._JOINT_RING_OP is None
 
 
 def test_bounded_default_takes_the_scalar_exp_op(fake_bounded_op, monkeypatch):
@@ -498,3 +499,90 @@ def test_ring_attention_takes_token_major_inputs_exactly():
                                        scale=0.25, token_major=True)
     assert got.shape == want.shape == (2, 3, 40, 16)
     assert torch.equal(got, want)
+
+
+def _joint_kernel_contract(q, k, v, k_txt, v_txt, key_mask, scale):
+    """The joint ring kernel's contract on one CPU process: token-major inputs, q = [image ‖ text]
+    rows, keys [text ‖ image] with masked text keys (key_mask 0) left out; out [B, H, S_q, d]."""
+    b, _, h, _ = q.shape
+    keys, vals = torch.cat([k_txt, k], dim=1), torch.cat([v_txt, v], dim=1)
+    scores = torch.einsum("bqhd,bkhd->bhqk", q.float(), keys.float()) * scale
+    valid = torch.cat([key_mask.reshape(b, h, -1), torch.ones(b, h, k.shape[1])], dim=-1) > 0
+    scores = scores.masked_fill(~valid[:, :, None, :], float("-inf"))
+    return torch.einsum("bhqk,bkhd->bhqd", torch.softmax(scores, dim=-1), vals.float()).to(q.dtype)
+
+
+@pytest.mark.parametrize("text_first", [False, True])
+@pytest.mark.parametrize("valid", [None, 5])
+def test_joint_ring_kernel_adapter_matches_masked_joint_attention(text_first, valid):
+    """Row order, masked text rows and the key mask reach the kernel as its contract expects."""
+    b, h, s_img, s_txt, d = 2, 3, 12, 8, 16
+    q_img, q_txt = torch.randn(b, h, s_img, d), torch.randn(b, h, s_txt, d)
+    k, v = torch.randn(b, h, s_img, d), torch.randn(b, h, s_img, d)
+    k_txt, v_txt = torch.randn(b, h, s_txt, d), torch.randn(b, h, s_txt, d)
+    q = torch.cat([q_txt, q_img], dim=2) if text_first else torch.cat([q_img, q_txt], dim=2)
+    valid_len = None if valid is None else torch.tensor([valid, s_txt], dtype=torch.int32)
+    got = neuron_attention._joint_ring_kernel(
+        _joint_kernel_contract, q, k, v, k_txt, v_txt, scale=0.25, text_valid_len=valid_len,
+        text_first=text_first)
+    n = torch.full((b,), s_txt) if valid is None else valid_len
+    want = torch.empty_like(got)
+    for i in range(b):  # dense reference per sample: its valid text keys and all image keys
+        keys = torch.cat([k_txt[i, :, : n[i]], k[i]], dim=1)
+        vals = torch.cat([v_txt[i, :, : n[i]], v[i]], dim=1)
+        want[i] = torch.softmax(q[i] @ keys.transpose(1, 2) * 0.25, dim=-1) @ vals
+    assert got.shape == q.shape
+    torch.testing.assert_close(got, want, atol=1e-5, rtol=1e-5)
+
+
+def test_cpu_joint_ring_attention_accepts_text_first():
+    q, k, v, kt, vt = (torch.randn(1, 2, n, 8) for n in (10, 6, 6, 4, 4))
+    want = cpu_attention.joint_ring_attention(q, k, v, kt, vt, scale=0.3)
+    got = cpu_attention.joint_ring_attention(q, k, v, kt, vt, scale=0.3, text_first=True)
+    assert torch.equal(got, want)
+
+
+@pytest.mark.parametrize("text_first", [False, True])
+def test_joint_ring_text_split_matches_masked_joint_attention(text_first):
+    """Each of cp ranks takes its share of the text queries (11 rows over 4 ranks: 3, 3, 3, 2 +
+    padding) and the gathered text outputs equal every rank computing all text rows."""
+    cp, b, h, s_img, s_txt, d, valid = 4, 2, 3, 6, 11, 16, 7
+    q_img = [torch.randn(b, h, s_img, d) for _ in range(cp)]
+    k_img, v_img = torch.randn(b, h, cp * s_img, d), torch.randn(b, h, cp * s_img, d)
+    q_txt, k_txt, v_txt = (torch.randn(b, h, s_txt, d) for _ in range(3))
+    valid_len = torch.tensor([valid, s_txt], dtype=torch.int32)
+
+    def full_keys_kernel(q, k, v, kt, vt, m, scale):  # the ring brings every image block
+        tm = lambda x: x.transpose(1, 2)  # noqa: E731
+        return _joint_kernel_contract(q, tm(k_img), tm(v_img), kt, vt, m, scale)
+
+    def query(r):
+        parts = [q_txt, q_img[r]] if text_first else [q_img[r], q_txt]
+        return torch.cat(parts, dim=2)
+
+    def run(r, gather):
+        local = slice(r * s_img, (r + 1) * s_img)
+        return neuron_attention._joint_ring_kernel(
+            full_keys_kernel, query(r), k_img[:, :, local], v_img[:, :, local], k_txt, v_txt,
+            scale=0.25, text_valid_len=valid_len, text_first=text_first, text_split=(cp, r, gather))
+
+    shares = {}
+
+    def record(r):
+        def gather(x):
+            shares[r] = x
+            return torch.zeros(b, h, cp * x.shape[2], d)
+        return gather
+
+    for r in range(cp):  # pass 1: record each rank's text share (the gather's inputs)
+        run(r, record(r))
+    gathered = torch.cat([shares[r] for r in range(cp)], dim=2)
+    assert gathered.shape[2] == cp * neuron_attention._text_split_rows(s_txt, cp)
+    for r in range(cp):  # pass 2: every rank receives all shares, as the all-gather delivers them
+        got = run(r, lambda x: gathered)
+        want = torch.empty_like(got)
+        for i in range(b):
+            keys = torch.cat([k_txt[i, :, : valid_len[i]], k_img[i]], dim=1)
+            vals = torch.cat([v_txt[i, :, : valid_len[i]], v_img[i]], dim=1)
+            want[i] = torch.softmax(query(r)[i] @ keys.transpose(1, 2) * 0.25, dim=-1) @ vals
+        torch.testing.assert_close(got, want, atol=1e-5, rtol=1e-5)

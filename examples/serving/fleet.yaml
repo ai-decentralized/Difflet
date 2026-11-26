@@ -1,0 +1,66 @@
+# One `difflet serve` backend per Neuron device behind one `difflet gateway`.
+# docs/serving/gateway.md explains every field. Start: difflet gateway up --config <this file>
+#
+# estimate: a request takes about base_s + per_step_s * steps seconds, end to end at the client.
+# Measured on trn3.48xlarge (native neuron backend, tp4 on one device), one model at a time
+# through the gateway on 2026-11-22, from two step counts each (Wan: 10 and 30 steps). When
+# several models run at once they share the host CPUs, and requests ran up to ~40% slower.
+gateway:
+  host: 127.0.0.1   # behind Caddy on this host, page same-origin; docs/serving/gateway-setup.md
+  port: 8000
+  cors_origins: ["https://difflet.yottalabs.ai"]   # only for a page hosted on another origin; harmless same-origin
+  limits: {client_active: 1, client_per_hour: 20, ip_per_hour: 2000}
+  wait: {notice_s: 1800, suggest_s: 1800, reject_s: 7200}
+runs_dir: /mnt/nvme/difflet-fleet/runs   # <runs_dir>/<slug>/: cwd, serve.pid, serve.out, logs/
+models:
+  - model_id: black-forest-labs/FLUX.1-dev
+    slug: flux
+    device: 0
+    port: 8100
+    cache_dir: /mnt/nvme/difflet-fleet/cache/flux
+    env: {HF_HUB_CACHE: /mnt/nvme/difflet-quant-bench-hub}
+    serve_args: [--tp-degree, "4", --height, "1024", --width, "1024", --worker-restart-timeout, "7200"]
+    estimate: {base_s: 0.7, per_step_s: 0.278}   # 10 steps 3.5 s, 28 steps 8.5 s
+  - model_id: Qwen/Qwen-Image
+    slug: qwen
+    device: 1
+    port: 8101
+    cache_dir: /mnt/nvme/difflet-fleet/cache/qwen
+    env: {HF_HUB_CACHE: /mnt/nvme/difflet-quant-bench-hub}
+    serve_args: [--tp-degree, "4", --height, "1024", --width, "1024", --worker-restart-timeout, "7200"]
+    estimate: {base_s: 1.2, per_step_s: 0.343}   # 10 steps 4.6 s, 50 steps 18.3 s
+  # The page lists each kind's models in this order: HunyuanVideo first, Wan (the slowest) last.
+  - model_id: hunyuanvideo-community/HunyuanVideo
+    slug: hunyuan-video
+    device: 3
+    port: 8103
+    cache_dir: /mnt/nvme/difflet-fleet/cache/hunyuan-video
+    env: {HF_HUB_CACHE: /mnt/nvme/difflet-quant-bench-hub}
+    serve_args: [--tp-degree, "4", --height, "320", --width, "512", --num-frames, "61",
+                 --worker-restart-timeout, "7200", --request-timeout, "1800"]
+    estimate: {base_s: 14.8, per_step_s: 0.669}  # 10 steps 21.5 s, 50 steps 48.2 s
+  - model_id: Lightricks/LTX-2
+    slug: ltx-2
+    device: 4
+    port: 8104
+    cache_dir: /mnt/nvme/difflet-fleet/cache/ltx-2
+    serve_args: [--tp-degree, "4", --height, "512", --width, "768", --num-frames, "121",
+                 --worker-restart-timeout, "7200", --request-timeout, "1800"]
+    estimate: {base_s: 22.8, per_step_s: 1.480}  # 10 steps 37.6 s, 40 steps 82.0 s
+  - model_id: MiniMaxAI/MiniMax-H3
+    slug: minimax-h3
+    device: 5
+    port: 8105
+    cache_dir: /mnt/nvme/difflet-fleet/cache/minimax-h3
+    env: {HF_HUB_CACHE: /mnt/nvme/h3-neuron-port/hf-cache}
+    serve_args: [--tp-degree, "4", --height, "256", --width, "448", --num-frames, "124",
+                 --worker-restart-timeout, "7200", --request-timeout, "1800"]
+    estimate: {base_s: 14.7, per_step_s: 0.587}  # 10 steps 20.6 s, 30 steps 32.3 s
+  - model_id: Wan-AI/Wan2.1-T2V-14B-Diffusers
+    slug: wan
+    device: 2
+    port: 8102
+    cache_dir: /mnt/nvme/difflet-fleet/cache/wan
+    serve_args: [--tp-degree, "4", --height, "480", --width, "832", --num-frames, "81",
+                 --worker-restart-timeout, "7200", --request-timeout, "1800"]
+    estimate: {base_s: 19.0, per_step_s: 9.7}    # 10 steps 116 s, 30 steps 310 s

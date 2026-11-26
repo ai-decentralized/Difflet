@@ -66,6 +66,15 @@ _RING_KERNEL_MAX_SEQ = 16384
 #: (``_ring_const_max_op``), whose K-stationary attention lets the K/V permutes overlap compute.
 RING_CONSTMAX_ENV = "DIFFLET_NEURON_RING_CONSTMAX"
 _RING_CONSTMAX = os.environ.get(RING_CONSTMAX_ENV, "1").strip() != "0"
+#: ``DIFFLET_NEURON_JOINT_RING_KERNEL=0`` keeps joint ring CP on the permute loop (the A/B switch).
+#: Default ``1``: eligible ``joint_ring_attention`` calls run the joint const-max ring kernel.
+JOINT_RING_KERNEL_ENV = "DIFFLET_NEURON_JOINT_RING_KERNEL"
+_JOINT_RING_KERNEL = os.environ.get(JOINT_RING_KERNEL_ENV, "1").strip() != "0"
+#: ``DIFFLET_NEURON_JOINT_RING_TEXT_SPLIT=0`` has every rank compute all text queries in the joint
+#: ring kernel (the A/B switch). Default ``1``: each rank computes ceil(S_txt/cp) of them and the
+#: text outputs are all-gathered over the CP group.
+JOINT_RING_TEXT_SPLIT_ENV = "DIFFLET_NEURON_JOINT_RING_TEXT_SPLIT"
+_JOINT_RING_TEXT_SPLIT = os.environ.get(JOINT_RING_TEXT_SPLIT_ENV, "1").strip() != "0"
 
 #: Experiment E1 (evidence at 713d53d9), opt-in:
 #: ``DIFFLET_EXP_ATTN_CONSTMAX=1`` sends unbounded, non-causal, bf16, d = 128 kernel calls that
@@ -591,6 +600,9 @@ _RING_KERNEL_OP = None
 _RING_CONSTMAX_OPS: dict = {}
 #: The const-max ring kernel op for the current mesh's CP rings, set by ``prepare_ring_kernel``.
 _RING_CONSTMAX_OP = None
+_JOINT_RING_OPS: dict = {}
+#: The joint const-max ring kernel op for the mesh's CP rings, set by ``prepare_ring_kernel``.
+_JOINT_RING_OP = None
 
 
 def prepare_ring_kernel(spec) -> None:
@@ -598,13 +610,14 @@ def prepare_ring_kernel(spec) -> None:
     registration, so it happens at mesh initialization, before any compilation, and
     ``ring_attention`` only reads the result. ``None`` without CP, when switched off, or when
     the kernel is unavailable."""
-    global _RING_KERNEL_OP, _RING_CONSTMAX_OP
+    global _RING_KERNEL_OP, _RING_CONSTMAX_OP, _JOINT_RING_OP
     if not _RING_KERNEL or spec.axis_size("cp") == 1:
-        _RING_KERNEL_OP = _RING_CONSTMAX_OP = None
+        _RING_KERNEL_OP = _RING_CONSTMAX_OP = _JOINT_RING_OP = None
         return
     rings = tuple(tuple(g) for g in spec.axis_groups("cp"))
     _RING_KERNEL_OP = _ring_kernel_op(rings)
     _RING_CONSTMAX_OP = _ring_const_max_op(rings) if _RING_CONSTMAX else None
+    _JOINT_RING_OP = _joint_ring_op(rings) if _JOINT_RING_KERNEL else None
 
 
 def _ring_kernel_op(rings: tuple):
@@ -677,6 +690,96 @@ def _ring_const_max_op(rings: tuple):
     return op
 
 
+def _joint_ring_op(rings: tuple):
+    """``(q, k, v, k_txt, v_txt, key_mask, scale) -> out``, all token-major ``[B, S, H, 128]``:
+    q has this rank's image rows then all text rows, k/v the image block, k_txt/v_txt the
+    replicated text block (masked rows zeroed), key_mask ``[B*H, S_txt]`` 1/0; out
+    ``[B, H, S_q, 128]`` in q's row order. The joint const-max ring kernel
+    (``joint_ring_const_max_fwd_kernel.py``); one op per ring set, as ``_ring_kernel_op``."""
+    if rings in _JOINT_RING_OPS:
+        return _JOINT_RING_OPS[rings]
+    import hashlib
+
+    name = "joint_ring_const_max_" + hashlib.sha1(repr(rings).encode()).hexdigest()[:12]
+    try:
+        op = getattr(torch.ops.difflet_neuron, name)  # already registered (module reload)
+    except (AttributeError, RuntimeError):
+        try:
+            from difflet.backends.neuron.ops_impl.joint_ring_const_max_fwd_kernel import (
+                joint_ring_attention_const_max_fwd,
+            )
+            from torch_neuronx.neuron_dynamo_backend.decompositions import get_logical_neuron_cores
+            from torch_neuronx.nki_hop import nki_op
+        except ImportError:
+            _JOINT_RING_OPS[rings] = None
+            return None
+        num_workers = len(rings[0])
+
+        @nki_op(f"difflet_neuron::{name}", mutates_args={})
+        def op(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, k_txt: torch.Tensor,
+               v_txt: torch.Tensor, key_mask: torch.Tensor, scale: float) -> torch.Tensor:
+            lnc = int(get_logical_neuron_cores())
+            return joint_ring_attention_const_max_fwd[lnc](
+                q, k, v, k_txt, v_txt, key_mask, softmax_scale=scale, replica_groups=rings,
+                num_workers=num_workers)
+    _JOINT_RING_OPS[rings] = op
+    return op
+
+
+def _joint_ring_kernel_eligible(q, image_k, image_v, text_k, text_v) -> bool:
+    """Compiled, head dim 128, a kernel dtype, equal heads, ``q`` holding exactly the image and
+    text rows, and an image block within the length the ring kernels are measured at."""
+    return (torch.compiler.is_compiling() and q.dim() == 4 and q.shape[-1] == 128
+            and q.dtype in _KERNEL_DTYPES and image_k.shape == image_v.shape
+            and text_k.shape == text_v.shape and q.shape[1] == image_k.shape[1] == text_k.shape[1]
+            and q.shape[2] == image_k.shape[2] + text_k.shape[2]
+            and image_k.shape[2] <= _RING_KERNEL_MAX_SEQ)
+
+
+def _text_split_rows(s_txt: int, cp: int) -> int:
+    """Text query rows per rank under the text split: ceil(S_txt / cp), the last share padded."""
+    return -(-s_txt // cp)
+
+
+def _joint_ring_kernel(op, q, image_k, image_v, text_k, text_v, *, scale: float,
+                       text_valid_len=None, text_first: bool = False, text_split=None):
+    """Adapt a head-major ``joint_ring_attention`` call to the joint kernel: image rows first,
+    masked text K/V rows zeroed (out of the softmax bound and of Σ P·V), a per-key 1/0 mask
+    (out of Σ P·1), token-major tensors; the output comes back in ``q``'s row order.
+
+    ``text_split`` = ``(cp, rank, gather)``: the kernel takes only this rank's share of the text
+    queries, rows ``[rank·T, (rank+1)·T)`` with ``T = ceil(S_txt/cp)`` (zero-padded at the end),
+    and ``gather`` all-gathers the text outputs along the sequence over the CP group. Every rank
+    computing all text rows is redundant: each one sees every key."""
+    b, h, s_q, _ = q.shape
+    s_txt = text_k.shape[2]
+    if text_first:
+        q = torch.cat([q[:, :, s_txt:], q[:, :, :s_txt]], dim=2)
+    s_img = s_q - s_txt
+    if text_split is not None:
+        cp, rank, gather = text_split
+        rows = _text_split_rows(s_txt, cp)
+        q_txt = F.pad(q[:, :, s_img:], (0, 0, 0, rows * cp - s_txt))
+        q = torch.cat([q[:, :, :s_img], q_txt[:, :, rank * rows:(rank + 1) * rows]], dim=2)
+    if text_valid_len is None:
+        key_mask = torch.ones(b * h, s_txt, dtype=q.dtype, device=q.device)
+    else:
+        valid = (torch.arange(s_txt, device=q.device)[None, :]
+                 < text_valid_len.to(torch.int32)[:, None]).to(q.dtype)  # [B, S_txt]
+        text_k = text_k * valid[:, None, :, None]
+        text_v = text_v * valid[:, None, :, None]
+        key_mask = valid[:, None, :].expand(b, h, s_txt).reshape(b * h, s_txt)
+    token_major = lambda x: x.transpose(1, 2).contiguous()  # noqa: E731
+    out = op(token_major(q), token_major(image_k), token_major(image_v), token_major(text_k),
+             token_major(text_v), key_mask.contiguous(), scale)
+    if text_split is not None:  # this rank's text rows → every rank's, unpadded
+        text_out = gather(out[:, :, s_img:].contiguous())[:, :, :s_txt]
+        out = torch.cat([out[:, :, :s_img], text_out], dim=2)
+    if text_first:
+        out = torch.cat([out[:, :, s_q - s_txt:], out[:, :, :s_q - s_txt]], dim=2)
+    return out
+
+
 def _ring_partials(q, k, v, *, scale: float, cp: int, group, rank: int, out=None, lse=None):
     """The ring loop shared by ``ring_attention`` and ``joint_ring_attention``.
 
@@ -700,7 +803,7 @@ def _ring_partials(q, k, v, *, scale: float, cp: int, group, rank: int, out=None
 
 
 def joint_ring_attention(q, image_k, image_v, text_k, text_v, *, scale: float,
-                         causal: bool = False, text_valid_len=None):
+                         causal: bool = False, text_valid_len=None, text_first: bool = False):
     """Ring context-parallel joint (text + image) attention: image sharded, text replicated.
 
     ``q``: this rank's joint queries ``[B, H, S_txt + S_img/cp, d]`` (the caller's order; Qwen
@@ -717,6 +820,13 @@ def joint_ring_attention(q, image_k, image_v, text_k, text_v, *, scale: float,
     a causal mask across ring-rotated image blocks would need per-hop position offsets, and no
     joint caller is causal. At ``cp == 1`` this is plain attention over ``[text ‖ image]``.
 
+    ``text_first``: ``q``'s rows are ``[text ‖ image]`` (Qwen-Image), not ``[image ‖ text]``;
+    only the joint ring kernel, which takes image rows first, needs to know.
+
+    Compiled calls with head dim 128 run the joint const-max ring kernel (``_joint_ring_kernel``):
+    one kernel per attention, the text block attended once before the ring, the K/V permutes
+    overlapped with the attention. Other calls run the loop below.
+
     ``text_valid_len`` (``[B]``, optional): text keys at or beyond it are padding (the caller
     puts valid text tokens first, as HunyuanVideo 1.5 does). They are masked in the text partial
     only, computed densely (the text block is short) with a key-index mask against the count, so
@@ -728,6 +838,19 @@ def joint_ring_attention(q, image_k, image_v, text_k, text_v, *, scale: float,
     from difflet.backends.neuron.ops_impl.parallel_mesh import get_axis_rank, get_axis_size
 
     cp = get_axis_size("cp")
+    if (cp > 1 and _JOINT_RING_OP is not None
+            and _joint_ring_kernel_eligible(q, image_k, image_v, text_k, text_v)):
+        split = None
+        if _JOINT_RING_TEXT_SPLIT:
+            group = collectives.get_cp_group()
+
+            def gather(x):
+                return collectives.gather_from_tensor_model_parallel_region_with_dim(
+                    x, gather_dim=2, process_group=group)
+            split = (cp, get_axis_rank("cp"), gather)
+        return _joint_ring_kernel(_JOINT_RING_OP, q, image_k, image_v, text_k, text_v, scale=scale,
+                                  text_valid_len=text_valid_len, text_first=text_first,
+                                  text_split=split)
     if cp == 1 and text_valid_len is None:
         return _dense_bhsd(q, torch.cat([text_k, image_k], dim=2),
                            torch.cat([text_v, image_v], dim=2), scale=scale)

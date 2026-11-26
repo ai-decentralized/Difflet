@@ -586,6 +586,12 @@ URL instead of a data URL, copy `.env.example` to `.env` and set the bucket and 
 roles, S3-compatible providers, and URL lifetime are covered in
 [docs/serving/s3.md](docs/serving/s3.md).
 
+### Several models behind one endpoint
+
+On a multi-device Trainium host, `difflet gateway` runs one `difflet serve` per device from one
+fleet file, routes each request by its `model` field, and serves a page listing every model's
+shapes and status. See [docs/serving/gateway.md](docs/serving/gateway.md).
+
 ## Go further
 
 **Serve several shapes from one worker.** `--shapes` compiles one bucketed artifact that
@@ -632,6 +638,7 @@ paths, and stage core counts are in [docs/cli-staged-commands.md](docs/cli-stage
 | `difflet compile` | AOT-compile the model and cache it on disk |
 | `difflet generate` | Run inference against a prior `compile` |
 | `difflet serve` | Start the OpenAI-compatible image and video server |
+| `difflet gateway` | Start several `difflet serve` backends and one endpoint routing by model ([docs](docs/serving/gateway.md)) |
 | `difflet plan` | Rank the parallel configurations this host and model allow |
 | `difflet cache ls` | List compiled artifacts with their shapes, TP, and dtype |
 | `difflet clean` | Delete Neuron compiler scratch from the working directory |
