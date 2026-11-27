@@ -156,6 +156,15 @@ _PROBE_FREE_TEACACHE_SERVING_MODELS = frozenset(
 )
 _PROBE_FREE_TEACACHE_SERVING_BACKENDS = frozenset({"tpu", "neuron"})
 
+# --cfg-parallel splits the two classifier-free-guidance branches (uncond, cond) over two rank
+# groups. Served on the native neuron backend (difflet.backends.neuron.serving) for the models
+# whose resident app runs both branches on the request path: Wan 2.1 and LTX-2 take the
+# request's guidance_scale and negative prompt and, under CFG parallel, make one batch-2 DiT
+# call per step (the trn3 eval's best layout for both is TP2 x CFG2).
+_NATIVE_CFG_PARALLEL_SERVING_MODELS = frozenset({"wan", "ltx_2"})
+# Guidance-distilled DiTs: one forward per step, so there is no second branch to split.
+_GUIDANCE_DISTILLED_MODELS = frozenset({"flux", "hunyuan_video", "minimax_h3"})
+
 
 # The --cp-mode values `difflet serve` accepts. Every model keeps the two modes serving has
 # always accepted; a model listed here has qualified others for serving (MiniMax-H3's DiT
@@ -230,10 +239,7 @@ def build_serving_profile(
             f"{model_id} does not support --clip-placement; it is HunyuanVideo-only."
         )
     if cfg_parallel:
-        raise invalid_extra_body(
-            f"{model_id} serving does not expose the true-CFG request path required "
-            "by --cfg-parallel."
-        )
+        _validate_cfg_parallel(model_id=model_id, model_type=model_type)
     if sp_enabled and not entry.require_capabilities().supports_sp:
         raise invalid_extra_body(f"{model_id} does not support --sp serving.")
     _validate_probe_free_teacache(
@@ -357,6 +363,35 @@ def build_serving_profile(
         clip_placement=resolved_clip_placement,
         shapes=canonical_shapes,
         torch_compile=bool(torch_compile),
+    )
+
+
+def _validate_cfg_parallel(*, model_id: str, model_type: str) -> None:
+    """Accept --cfg-parallel where a served app runs both CFG branches per request: Wan 2.1 and
+    LTX-2 on the native neuron backend. Everything else is refused at option resolution,
+    before a worker loads any weights, with the reason."""
+    from difflet.backends.registry import current_backend
+
+    if current_backend() == "neuron" and model_type in _NATIVE_CFG_PARALLEL_SERVING_MODELS:
+        return
+    if model_type in _GUIDANCE_DISTILLED_MODELS:
+        raise invalid_extra_body(
+            f"{model_id} is guidance-distilled: it runs one DiT forward per step, so there is "
+            "no second CFG branch for --cfg-parallel to split."
+        )
+    if model_type == "qwen_image":
+        # TODO(cfg-parallel): Qwen-Image's true CFG (true_cfg_scale with a negative prompt)
+        # is not on the serving request path yet, so a served request runs one branch. Once
+        # serving passes it, add "qwen_image" to _NATIVE_CFG_PARALLEL_SERVING_MODELS: a later
+        # optimization, deliberately left out of the first CFG-parallel serving change.
+        raise invalid_extra_body(
+            f"{model_id} serving does not run true CFG yet, so --cfg-parallel has no second "
+            "branch to split (planned)."
+        )
+    raise invalid_extra_body(
+        f"{model_id} serving does not expose the true-CFG request path required by "
+        "--cfg-parallel on this backend (served on the native neuron backend for: "
+        f"{', '.join(sorted(_NATIVE_CFG_PARALLEL_SERVING_MODELS))})."
     )
 
 
