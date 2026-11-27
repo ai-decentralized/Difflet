@@ -40,7 +40,7 @@ _STATUS_HELP = {
 _AUTH = '-H "Authorization: Bearer $DIFFLET_API_KEY"'
 #: The seed the page sends when its Seed field is empty, and the seed of the /info examples: the
 #: same prompt gives the same result unless the visitor picks another seed.
-DEFAULT_SEED = 41
+DEFAULT_SEED = 42
 EXAMPLE_PROMPTS = {
     "image": (
         "a small red sailboat on a calm blue lake at sunrise",
