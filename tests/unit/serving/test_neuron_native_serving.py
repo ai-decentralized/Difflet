@@ -158,13 +158,78 @@ def test_runtime_plan_takes_one_core_per_rank(on_neuron, monkeypatch):
     assert plan.profile_identity
 
 
-@pytest.mark.parametrize("field,value", [("teacache_cadence", 2), ("torch_compile", True),
+@pytest.mark.parametrize("field,value", [("teacache_speedup", 1.5), ("torch_compile", True),
                                          ("host_vae", True)])
 def test_profile_options_native_serving_does_not_run(on_neuron, field, value):
     profile = dataclasses.replace(_profile(WAN21), **{field: value})
 
     with pytest.raises(DiffletServingError):
         native.refuse_unsupported_profile(profile, native._spec("wan"))
+
+
+# ------------------------------------------------------------------ probe-free TeaCache
+
+
+@pytest.mark.parametrize("field,value,expected", [
+    ("teacache_cadence", 2, {"teacache_cadence": 2}),
+    ("teacache_online_delta", 0.6, {"teacache_online_delta_alpha": 0.6}),
+])
+def test_probe_free_teacache_is_served_natively(on_neuron, field, value, expected):
+    profile = dataclasses.replace(_profile(WAN21), **{field: value})
+
+    native.refuse_unsupported_profile(profile, native._spec("wan"))  # not refused
+    assert native.native_teacache_kwargs(profile) == expected
+
+
+def test_teacache_off_adds_no_application_kwargs(on_neuron):
+    assert native.native_teacache_kwargs(_profile(FLUX)) == {}
+
+
+@pytest.mark.parametrize("model_id", NATIVE_IDS)
+def test_serve_resolves_probe_free_teacache_on_neuron(on_neuron, model_id):
+    options = ServeOptions(model_id=model_id, tp_degree=4, teacache_cadence=2)
+
+    assert resolve_serving_model(options).profile.teacache_cadence == 2
+
+
+def test_minimax_h3_refuses_probe_free_teacache(on_neuron):
+    options = ServeOptions(model_id="MiniMaxAI/MiniMax-H3", tp_degree=4, teacache_cadence=2)
+
+    with pytest.raises(DiffletServingError, match="teacache"):
+        resolve_serving_model(options)
+
+
+def test_the_loaded_application_gets_the_teacache_kwargs(on_neuron, monkeypatch, tmp_path):
+    pytest.importorskip("torch")
+    import asyncio
+
+    from difflet.backends.neuron.runtime import PG_TIMEOUT_ENV
+    from difflet.pipeline import difflet_pipeline
+
+    seen = {}
+
+    class _Pipe:
+        def load(self, skip_warmup):
+            seen["loaded"] = not skip_warmup
+
+    def fake_from_pretrained(model_id, **kwargs):
+        seen.update(kwargs)
+        return _Pipe()
+
+    monkeypatch.setattr(difflet_pipeline.DiffletPipeline, "from_pretrained",
+                        staticmethod(fake_from_pretrained))
+    # _export_rank_environment keeps operator values: preset both, so nothing leaks.
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path))
+    monkeypatch.setenv(PG_TIMEOUT_ENV, "60")
+    profile = dataclasses.replace(_profile(WAN21), teacache_cadence=2)
+    runtime = SimpleNamespace(profile=profile,
+                              source=SimpleNamespace(resolved_source_id="abc123"))
+
+    asyncio.run(native.NeuronServingStageAdapter(WAN21).create_loaded_runners(runtime))
+
+    assert seen["loaded"]
+    assert seen["application_kwargs"]["teacache_cadence"] == 2
+    assert seen["application_kwargs"]["enable_vae_decoder"] is True  # the model's own kwargs
 
 
 @pytest.mark.parametrize("model_id", NATIVE_IDS)

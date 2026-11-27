@@ -72,12 +72,13 @@ NATIVE_SERVED_CHECKPOINTS: dict[str, tuple[str, ...]] = {
     "ltx_2": ("Lightricks/LTX-2",),
 }
 
-#: Profile options the native resident path does not run: (profile attribute, flag).
+#: Profile options the native resident path does not run: (profile attribute, flag). The
+#: probe-free TeaCache modes (--teacache-cadence, --teacache-online-delta) are served
+#: (``native_teacache_kwargs``); the calibrated-adaptive one needs a probe graph the resident
+#: apps do not build.
 _REFUSED_PROFILE_OPTIONS = (
     ("shapes", "--shapes (bucketed request shapes)"),
-    ("teacache_cadence", "--teacache-cadence (a `difflet generate` option on this backend)"),
-    ("teacache_online_delta", "--teacache-online-delta"),
-    ("teacache_speedup", "--teacache-speedup"),
+    ("teacache_speedup", "--teacache-speedup (adaptive TeaCache; use --teacache-cadence)"),
     ("host_vae", "--host-vae (the decoder placement is fixed per model)"),
     ("torch_compile", "--torch-compile (CUDA only)"),
 )
@@ -187,6 +188,21 @@ def native_application_kwargs(model_type: str, spec: ModelSpec) -> dict[str, Any
         return {**common, "enable_text_encoder": True, "enable_transformer": True,
                 "enable_decode_components": True, "text_encoder_device": "neuron"}
     raise feature_not_supported(f"{model_type!r} is not served on the native neuron backend")
+
+
+def native_teacache_kwargs(profile: ServingProfile) -> dict[str, Any]:
+    """The probe-free TeaCache mode the profile asks for, under the application keys the CLI's
+    native generate passes (``_torchrun_application_kwargs``): ``teacache_cadence`` or
+    ``teacache_online_delta_alpha``; empty when TeaCache is off. Each pipeline resets its
+    controller at the start of every denoise call, so one resident app serves many requests
+    with the same skip schedule. Option resolution has already refused a model or backend
+    without the controller (``difflet.serving.options._validate_probe_free_teacache``)."""
+    kwargs: dict[str, Any] = {}
+    if profile.teacache_cadence is not None:
+        kwargs["teacache_cadence"] = int(profile.teacache_cadence)
+    if profile.teacache_online_delta is not None:
+        kwargs["teacache_online_delta_alpha"] = float(profile.teacache_online_delta)
+    return kwargs
 
 
 def native_pipeline_kwargs(model_type: str, profile: ServingProfile, *, revision: str | None
@@ -442,7 +458,8 @@ class NeuronServingStageAdapter:
             parallel=profile.parallel,
             compile_cache_dir=profile.cache_dir,
             backend="neuron",
-            application_kwargs=native_application_kwargs(self.model_type, self.spec),
+            application_kwargs={**native_application_kwargs(self.model_type, self.spec),
+                                **native_teacache_kwargs(profile)},
             load=False,
             # The commit the parent pinned, so a worker restart loads the snapshot the bundle
             # and the validator's tokenizer describe.

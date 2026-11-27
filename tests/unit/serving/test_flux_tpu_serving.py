@@ -86,8 +86,8 @@ def test_create_loaded_runners_on_tpu_builds_the_eager_application(monkeypatch, 
     assert seen["model_path"] == str(tmp_path / "snap")
 
 
-@pytest.mark.parametrize("backend, ok", [("tpu", True), ("trainium", False)])
-def test_probe_free_teacache_for_flux_is_tpu_only(monkeypatch, backend, ok):
+@pytest.mark.parametrize("backend, ok", [("tpu", True), ("neuron", True), ("trainium", False)])
+def test_probe_free_teacache_for_flux_is_tpu_and_native_neuron_only(monkeypatch, backend, ok):
     monkeypatch.setenv("DIFFLET_BACKEND", backend)
     kwargs = dict(model_type="flux", teacache_cadence=2, teacache_online_delta=None, teacache_speedup=None)
     if ok:

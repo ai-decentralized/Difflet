@@ -148,11 +148,13 @@ class ServeOptions:
 
 # Serving adapters that wire the probe-free TeaCache controller
 # (--teacache-cadence / --teacache-online-delta) into their denoise loop, on the
-# TPU backend. Every other backend refuses both modes in serving (see
-# _validate_probe_free_teacache).
+# TPU backend and on the native neuron backend (difflet.backends.neuron.serving,
+# which hands the flags to the same pipelines `difflet generate` runs). Every other
+# backend refuses both modes in serving (see _validate_probe_free_teacache).
 _PROBE_FREE_TEACACHE_SERVING_MODELS = frozenset(
     {"flux", "qwen_image", "wan", "hunyuan_video", "ltx_2"}
 )
+_PROBE_FREE_TEACACHE_SERVING_BACKENDS = frozenset({"tpu", "neuron"})
 
 
 # The --cp-mode values `difflet serve` accepts. Every model keeps the two modes serving has
@@ -373,18 +375,20 @@ def _validate_probe_free_teacache(
     controller are accepted here, so a misconfigured profile fails at option
     resolution instead of after a worker has loaded 20B of weights.
 
-    TPU only for now: they were measured on TPU, not on Trainium, so every other
-    backend keeps refusing them as it did.
+    TPU and the native neuron backend only: the native neuron resident pipelines are
+    the ones `difflet generate` runs with these flags (measured on trn3). The AoT
+    Trainium adapters and the GPU flow keep refusing them as they did.
     """
     from difflet.backends.registry import current_backend
 
     if (teacache_cadence is not None or teacache_online_delta is not None) and (
-        current_backend() != "tpu"
+        current_backend() not in _PROBE_FREE_TEACACHE_SERVING_BACKENDS
     ):
         raise invalid_extra_body(
             "resident serving does not yet implement --teacache-cadence or "
-            "--teacache-online-delta; use adaptive --teacache-speedup with a "
-            "calibration file."
+            "--teacache-online-delta on this backend (served on: "
+            f"{', '.join(sorted(_PROBE_FREE_TEACACHE_SERVING_BACKENDS))}); use adaptive "
+            "--teacache-speedup with a calibration file."
         )
     active = [
         name

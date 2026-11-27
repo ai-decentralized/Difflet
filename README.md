@@ -658,9 +658,9 @@ paths, and stage core counts are in [docs/cli-staged-commands.md](docs/cli-stage
 | `--total-cores N` | compile, generate, run | Core budget for validation (default: `NEURON_RT_NUM_CORES`) |
 | `--height/--width/--num-frames` | compile, generate, run, serve | Output shape (default: the model's registry shape) |
 | `--shapes HxWxF[,...]` | compile, generate, run, serve | Compile or serve several shapes from one bucketed artifact |
-| `--teacache-cadence N` | generate, run | Skip every N-th denoise step |
+| `--teacache-cadence N` | generate, run, serve | Skip every N-th denoise step (serve: TPU and the native neuron backend) |
 | `--teacache-speedup F`, `--teacache-calibration PATH` | generate, run, serve | Adaptive TeaCache target and calibration file |
-| `--teacache-online-delta ALPHA` | generate, run | Probe-free online-delta TeaCache |
+| `--teacache-online-delta ALPHA` | generate, run, serve | Probe-free online-delta TeaCache (serve: as `--teacache-cadence`) |
 | `--torch-compile` | generate, run, serve | CUDA backend only: `torch.compile` the DiT blocks (eager is the default) |
 | `--quant mxfp8` | compile, generate, run | `--backend neuron` on Trainium3: MXFP8 attention q/k/v and MLP linears (Qwen-Image, FLUX.1-dev) |
 | `--prompt` | generate, run | Text prompt |

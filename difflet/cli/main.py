@@ -371,14 +371,16 @@ def _add_serve_profile_flags(p: argparse.ArgumentParser) -> None:
         type=int,
         default=None,
         metavar="N",
-        help="Request fixed-cadence TeaCache (not supported by serving)",
+        help="Fixed-cadence TeaCache: skip every N-th DiT step (N >= 2). Served on the TPU and "
+        "native neuron backends for FLUX, Qwen-Image, Wan 2.1, HunyuanVideo and LTX-2",
     )
     p.add_argument(
         "--teacache-online-delta",
         type=float,
         default=None,
         metavar="ALPHA",
-        help="Request online-delta TeaCache (not supported by serving)",
+        help="Online-delta TeaCache: skip a step whose output delta is below ALPHA times the "
+        "first post-warmup delta. Served where --teacache-cadence is",
     )
     p.add_argument(
         "--teacache-speedup",
