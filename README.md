@@ -100,7 +100,7 @@ Which features each model supports today. ✅ = supported · ⚠️ = supported 
 
 - **TP** — tensor parallelism (`--tp-degree`). Splits each layer across devices (NeuronCores on Trainium).
 - **CP — all-gather** — context parallelism with gather-KV attention (`--cp-degree N --cp-mode gather_kv`, the default). Splits the sequence across ranks.
-- **CP — ring** — context parallelism with ring attention (`--cp-degree N --cp-mode ring`). Lower memory than all-gather for long sequences.
+- **CP — ring** — context parallelism with ring attention (`--cp-degree N --cp-mode ring`). Lower memory than all-gather for long sequences. Within one instance at CP ≤ 4, gather-KV with const-max attention measured faster for Qwen-Image and HunyuanVideo 1.5 (by ~9% on Trn3); ring was within 2% for Wan 2.2.
 - **CP — ulysses** — context parallelism with head-sharded attention (`--cp-mode ulysses`). Needs the model's head count divisible by `tp_degree × cp_degree`.
 - **SP** — Megatron-style sequence parallelism (`--sp`). Shards the norm/modulation/residual regions along the sequence axis across the existing tensor-parallel group; `world_size` is unchanged. Mutually exclusive with `--cp-degree > 1`.
 - **CFG-parallel** — splits the conditional/unconditional CFG passes across 2 data-parallel ranks (`--cfg-parallel`). Only meaningful for true two-pass classifier-free guidance, not working for distilled guidance.
@@ -179,8 +179,8 @@ Measured timings against stock diffusers, and the full pass/limit matrix, are in
 | FLUX.1-dev | ✅ | ✅ | ✅ | ✅ | ✅ | — ⁹ | ✅ |
 | Qwen-Image | ✅ | ✅ | ✅ | ✅ | ✅ | — ⁹ | ✅ |
 | Wan 2.2 / 2.1 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| HunyuanVideo | ✅ | ⚠️ ¹⁰ | — ¹⁴ | ✅ | ✅ | — ⁹ | ⚠️ ¹¹ |
-| HunyuanVideo 1.5 | ✅ | ✅ | — ¹⁴ | ✅ | ⚠️ ¹⁵ | ✅ | ✅ |
+| HunyuanVideo | ✅ | ⚠️ ¹⁰ | ⚠️ ¹⁴ | ✅ | ✅ | — ⁹ | ⚠️ ¹¹ |
+| HunyuanVideo 1.5 | ✅ | ✅ | ⚠️ ¹⁴ | ✅ | ⚠️ ¹⁵ | ✅ | ✅ |
 | LTX-2 | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ✅ |
 | MiniMax-H3 | ✅ TP4 | ❌ | ❌ | ❌ | ❌ | — ⁹ | ❌ |
 
@@ -292,7 +292,7 @@ reference for all seven models).
 11. DP works, but on a 4-core `trn2.3xlarge` each 2-core replica runs out of HBM loading the compiled VAE at the default 320×512×61 shape. Use a smaller shape or a host with more cores per replica.
 12. Wan 2.1 is the qualified serving checkpoint. Wan 2.2 can be started for experiments but its dual-transformer path has not passed resident-serving acceptance.
 13. MiniMax-H3 supports the Trainium four-stage CLI at TP4 and CP1: text and DiT use four cores, and each VAE uses one core. The verified end-to-end shape is **256×448×124**; pass `--height 256 --width 448 --num-frames 124`. The registry default **768×1344×124** is not qualified on `trn2.3xlarge`: the standard DiT graph exceeds device memory, and compilation with precomputed AdaLN exceeded host memory. The 640×1152×124 DiT compiled successfully but has not been verified end to end. Python API generation, resident serving, DP, JSONL batching, multi-shape compilation, and TeaCache are not supported for H3. See the [verification](docs/design/minimax_h3/01_e2e_reverification_2026-09-30.md) and [bring-up handoff](docs/design/minimax_h3/00_trainium_bringup_handoff.md).
-14. Not applicable: the model always carries a padded-text attention mask, and the Trainium ring-attention kernel has no text-mask path. `--cp-mode ring` is refused (for HunyuanVideo 1.5 before any stage launches); use `--cp-mode ulysses` (or `gather_kv` for HunyuanVideo 1.5).
+14. Native backend (`--backend neuron`) only. The model always carries a padded-text attention mask, which the joint const-max ring kernel applies at run time; the Trainium (AoT) backend's ring kernel has no text-mask path, so it refuses `--cp-mode ring` (for HunyuanVideo 1.5 before any stage launches). Layers whose const-max calibration exceeds its gap limit run the running-max ring instead of the const-max kernel.
 15. `--tp-degree 4 --sp` needs the image token count divisible by 4. It works at 320×512×61; at the default 480×848×121 it is refused before compile, so use the default `--tp-degree 2 --cfg-parallel` there.
 16. The DiT runs on the NeuronCores; the VAE decodes on the host by default (diffusers' tiled decoder in fp32), because the compiled decoder does not build on neuronx-cc 2.26 (`--device-vae` opts into it). The host decode takes about 7 minutes at 320×512×61 and about 45 minutes at 480×848×121. Verified on device: TP2, TP2 × CFG2, TP4, TP4 + SP, TP2 × CP2 (ulysses and gather_kv), DP, JSONL batches and the default shape; see [docs/verification/hv15-aot-evidence.md](docs/verification/hv15-aot-evidence.md).
 17. Available but not recommended for HunyuanVideo 1.5: the calibration signal is weak and the output is visibly degraded, and the probe loads a second copy of the DiT weights, so it does not fit at the default shape. Use `--teacache-cadence 2` (20 of 50 steps skipped, about 40% less denoise time).
