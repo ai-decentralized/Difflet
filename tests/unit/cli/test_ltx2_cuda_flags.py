@@ -142,7 +142,6 @@ def test_batch_dispatch_refuses_flags_before_request_or_model_io(monkeypatch, co
     [
         (("--tp-degree", "2"), "--tp-degree"),
         (("--cp-degree", "2"), "--cp-degree"),
-        (("--cfg-parallel",), "not implemented for LTX-2"),
     ],
 )
 def test_parallel_modes_refuse_before_download(monkeypatch, flags, message):
@@ -153,6 +152,26 @@ def test_parallel_modes_refuse_before_download(monkeypatch, flags, message):
     orch = _orchestrator(*flags, command="run")
     with pytest.raises(SystemExit, match=message):
         orch.download()
+
+
+def test_cfg_parallel_runs_one_branch_per_rank_under_torchrun(monkeypatch, tmp_path):
+    downloads, launches = [], []
+    monkeypatch.setattr(
+        "difflet.pipeline.path_resolver.resolve_model_path",
+        lambda *args, **kwargs: downloads.append(args) or str(tmp_path),
+    )
+    monkeypatch.setattr(
+        "difflet.cli.runner.run_torchrun", lambda n, argv: launches.append((n, argv)) or 0
+    )
+    monkeypatch.delenv("WORLD_SIZE", raising=False)
+    flags = ["--model-id", "Lightricks/LTX-2", "--cfg-parallel", "--prompt", "a cat"]
+    orch = _orchestrator(*flags[2:], command="run")
+    orch.download()
+    assert downloads
+    assert orch.pipeline_kwargs(load=True)["parallel"].cfg_parallel_enabled is True
+    # The parent re-execs `generate` as two ranks; each loads and runs the full request.
+    orch.generate(argv=["difflet", "run", *flags])
+    assert launches == [(2, ["-m", "difflet.cli.main", "generate", *flags])]
 
 
 def test_ltx2_download_uses_registered_checkpoint_subset(monkeypatch):

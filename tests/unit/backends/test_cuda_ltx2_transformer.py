@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import importlib.util
 import json
 import os
@@ -11,6 +12,10 @@ from pathlib import Path
 
 import pytest
 import torch
+import torch.distributed as dist
+import torch.multiprocessing as mp
+
+from difflet.pipeline.parallel_mesh import MeshSpec
 
 GEOMETRY = dict(height=64, width=96, num_frames=17, text_seq_len=6)
 TINY = dict(
@@ -544,3 +549,163 @@ def test_official_gate_policy_covers_component_warmup_and_adapter_without_sigma_
     assert len(seen) == 2
     assert torch.equal(seen[0][1], kwargs["audio_sigma"] * factor)
     assert torch.equal(seen[1][1], kwargs["sigma"] * factor)
+
+
+# ------------------------------------------------ CFG-parallel on two gloo ranks
+
+CFG_WORLD = 2
+
+
+def test_cfg_parallel_component_has_a_cfg_two_mesh_and_batch_two_examples(tmp_path, monkeypatch):
+    # The CLI parent compiles before torchrun starts the ranks (WORLD_SIZE unset, no
+    # process group): the manifest it writes records the cfg=2 mesh the ranks load.
+    monkeypatch.delenv("WORLD_SIZE", raising=False)
+    Config, Component, _ = _api()
+    directory = tmp_path / "transformer"
+    _checkpoint(directory)
+    cfg = Config.from_pretrained(directory, cfg_parallel_enabled=True, **GEOMETRY)
+    app = Component(model_path=str(directory), config=cfg, device="cpu")
+    assert app.config == MeshSpec(cfg=2, tp=1)
+    assert [tuple(t.shape) for t in app.get_example_inputs()] == [
+        (2, 18, 8),
+        (2, 18, 8),
+        (2, 6, 24),
+        (2, 6, 24),
+        (2,),
+        (2,),
+        (2, 6),
+        (2, 6),
+        (2, 3, 18, 2),
+        (2, 1, 18, 2),
+    ]
+    app.compile(tmp_path / "cache")
+    manifest = json.loads((tmp_path / "cache" / "cuda_manifest.json").read_text())
+    assert manifest["mesh"] == {"dp": 1, "cfg": 2, "cp": 1, "tp": 1}
+
+
+def test_cfg_parallel_load_without_a_world_two_group_is_refused_before_the_weights(
+    tmp_path, monkeypatch
+):
+    monkeypatch.delenv("WORLD_SIZE", raising=False)
+    from difflet.backends.cuda.ltx_2 import transformer
+
+    def no_load(*args, **kwargs):
+        pytest.fail("weights were read before the CFG world was checked")
+
+    monkeypatch.setattr(transformer, "load_checkpoint_into", no_load)
+    Config, Component, _ = _api()
+    directory = tmp_path / "transformer"
+    _checkpoint(directory)
+    cfg = Config.from_pretrained(directory, cfg_parallel_enabled=True, **GEOMETRY)
+    app = Component(model_path=str(directory), config=cfg, device="cpu")
+    app.compile(tmp_path / "cache")
+    assert not dist.is_initialized()
+    with pytest.raises(RuntimeError, match=r"torchrun --nproc_per_node=2"):
+        app.load(tmp_path / "cache")
+    assert app.module is None and not app.is_loaded
+
+
+def _pair(reference, *, official=False):
+    """Guidance's batch of 2 as a profile passes it: two different rows, so a missed split
+    or a gather in the wrong order cannot pass. The official profile passes per-token
+    timesteps and no masks."""
+    rows = [_kwargs(_bundle(reference, scale=scale)) for scale in (1.0, 0.37)]
+    rows[1]["encoder_attention_mask"] = ~rows[1]["encoder_attention_mask"]
+    kwargs = {
+        name: torch.cat([value, rows[1][name]]) if isinstance(value, torch.Tensor) else value
+        for name, value in rows[0].items()
+    }
+    if official:
+        kwargs.update(
+            timestep=kwargs["timestep"].reshape(-1, 1).expand(-1, 18),
+            audio_timestep=kwargs["audio_timestep"].reshape(-1, 1).expand(-1, 18),
+            encoder_attention_mask=None,
+            audio_encoder_attention_mask=None,
+        )
+    return kwargs
+
+
+def _cfg_worker(rank: int, root: str) -> None:
+    os.environ.update(WORLD_SIZE=str(CFG_WORLD), RANK=str(rank), LOCAL_RANK=str(rank))
+    # A file rendezvous, not a port: a port probed free in the parent can be taken by
+    # another pytest-xdist worker's gloo ranks before rank 0 binds it (EADDRINUSE).
+    dist.init_process_group(
+        "gloo",
+        init_method=f"file://{root}/rendezvous",
+        rank=rank,
+        world_size=CFG_WORLD,
+        timeout=datetime.timedelta(seconds=60),
+    )
+    from difflet.backends.cuda.ops_impl import parallel_mesh
+
+    try:
+        Config, Component, Adapter = _api()
+        directory = Path(root) / "transformer"
+        cfg = Config.from_pretrained(
+            directory, torch_dtype=torch.float32, cfg_parallel_enabled=True, **GEOMETRY
+        )
+        app = Component(model_path=str(directory), config=cfg, device="cpu")
+        cache = Path(root) / f"cache-{rank}"
+        app.compile(cache)
+        app.load(cache)  # the batch-2 warm-up runs the split and the gather too
+        # This rank must run one branch: record the batch each stream enters with.
+        batches = []
+        transformer = app.module.transformer
+        for stream in (transformer.proj_in, transformer.audio_proj_in):
+            stream.register_forward_pre_hook(lambda _m, args: batches.append(args[0].shape[0]))
+        inputs = torch.load(Path(root) / "inputs.pt")
+        adapter = Adapter(app)
+        with torch.no_grad():
+            results = {name: adapter(**kwargs) for name, kwargs in inputs["calls"].items()}
+            results["ten_tensor"] = app(*inputs["ten_tensor"])
+        torch.save({"results": results, "batches": batches}, Path(root) / f"rank-{rank}.pt")
+    finally:
+        parallel_mesh.destroy_parallel_mesh()
+        dist.destroy_process_group()
+
+
+@pytest.mark.multirank
+def test_cfg_parallel_equals_one_process_on_the_same_batch(tmp_path, monkeypatch):
+    """Two ranks, one CFG branch each, gathered back: every rank returns both streams' full
+    batch, equal to one process running the batch of 2. A batch of 1 (no guidance) runs whole
+    on each rank."""
+    if not dist.is_available() or not dist.is_gloo_available():
+        pytest.skip("torch.distributed with gloo is unavailable in this torch build")
+    reference, app, adapter = _loaded(tmp_path)  # one process, FP32; saves the checkpoint
+    calls = {
+        "diffusers": _pair(reference),
+        "official": _pair(reference, official=True),
+        "unguided": _kwargs(_bundle(reference)),
+    }
+    ten_tensor = tuple(
+        torch.cat([a, b])
+        for a, b in zip(
+            _bundle(reference).as_model_inputs(),
+            _bundle(reference, scale=0.37).as_model_inputs(),
+            strict=True,
+        )
+    )
+    with torch.no_grad():
+        expected = {name: adapter(**kwargs) for name, kwargs in calls.items()}
+        expected["ten_tensor"] = app(*ten_tensor)
+    for name in ("diffusers", "official", "ten_tensor"):
+        assert all(
+            out.shape == (2, 18, 8) and not torch.allclose(out[0], out[1]) for out in expected[name]
+        )
+    torch.save({"calls": calls, "ten_tensor": ten_tensor}, tmp_path / "inputs.pt")
+
+    monkeypatch.delenv("WORLD_SIZE", raising=False)
+    # Spawned children unpickle _cfg_worker by this module's importlib name
+    # (``unit.backends.test_cuda_ltx2_transformer``): put tests/ on their sys.path.
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[2]))
+    mp.spawn(_cfg_worker, args=(str(tmp_path),), nprocs=CFG_WORLD, join=True)
+    assert not dist.is_initialized()  # the parent never joined a group
+
+    for rank in range(CFG_WORLD):
+        got = torch.load(tmp_path / f"rank-{rank}.pt")
+        # Four calls, two streams each, every one at batch 1 on this rank.
+        assert got["batches"] == [1] * 8, got["batches"]
+        for name, want in expected.items():
+            for actual, wanted in zip(got["results"][name], want, strict=True):
+                assert actual.shape == wanted.shape
+                torch.testing.assert_close(actual, wanted, rtol=1e-6, atol=1e-6)

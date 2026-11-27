@@ -380,6 +380,7 @@ def test_official_forward_uses_native_gate_sigmas_and_cleans_up():
 @pytest.mark.parametrize("profile", ["diffusers", "ltx_official_bf16"])
 def test_component_load_policy_and_adapter_scope_official_transformer(profile, monkeypatch):
     from difflet.backends.cuda.ltx_2.dit_config import Ltx2DiTConfig
+    from difflet.backends.cuda.ltx_2.modeling import CudaLtx2TransformerModule
     from difflet.backends.cuda.ltx_2.transformer import (
         CudaLtx2TransformerApplication,
         Ltx2DiTAdapter,
@@ -389,10 +390,17 @@ def test_component_load_policy_and_adapter_scope_official_transformer(profile, m
     app = CudaLtx2TransformerApplication(
         model_path="unused", config=Ltx2DiTConfig(), device="cpu", generation_profile=profile
     )
-    from types import SimpleNamespace
 
-    inner = torch.nn.Identity()
-    wrapper = SimpleNamespace(transformer=inner)
+    class Inner(torch.nn.Module):
+        def forward(self, **kwargs):
+            return kwargs["hidden_states"]
+
+    # The real wrapper around a stand-in transformer, without building the full model.
+    inner = Inner()
+    wrapper = CudaLtx2TransformerModule.__new__(CudaLtx2TransformerModule)
+    torch.nn.Module.__init__(wrapper)
+    wrapper.transformer = inner
+    wrapper.cfg_group = None
     called = []
     monkeypatch.setattr(
         m, "configure_official_transformer", lambda model: called.append(("load", model))
@@ -405,7 +413,7 @@ def test_component_load_policy_and_adapter_scope_official_transformer(profile, m
     app.module = wrapper
     adapter = Ltx2DiTAdapter(app)
     tensor = torch.ones(1)
-    assert adapter(tensor) is tensor
+    assert adapter(hidden_states=tensor) is tensor
     assert called == (
         [("load", inner), ("gate-policy", inner)] if profile == "ltx_official_bf16" else []
     )
