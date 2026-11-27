@@ -136,7 +136,7 @@ def attention(
     attention; the outputs differ in their low bits, so a denoising trajectory lands on a nearby
     but different sample. No effect off
     trn3 B1: trn2 has no Vector exp and always uses the Scalar engine. No effect on the MX route
-    either, which always uses the Vector exp.
+    either, which always runs its exp on the Scalar engine (``mx_attention.load_op``).
 
     ``mx=False`` keeps the call in bf16 under ``DIFFLET_ATTN_QUANT``: the cross-attention call
     sites pass it (plan Global Constraints: only self/joint attention is routed)."""

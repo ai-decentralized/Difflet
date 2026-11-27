@@ -313,9 +313,10 @@ def test_the_switch_resolves_once_at_import_and_registers_the_op_only_when_set(v
     assert proc.stdout.strip().splitlines()[-1] == expect
 
 
-def test_the_op_calls_the_fork_with_the_vector_engine_exp_and_its_bounds(monkeypatch):
-    """Ruling BR32: the fork runs with ``allow_vector_exp=True``, as shipped attention_cte runs
-    the bf16 arm; the flags and scale as given, bounds only when the call has them; the LNC grid."""
+def test_the_op_calls_the_fork_with_the_scalar_engine_exp_and_its_bounds(monkeypatch):
+    """Ruling BR32 after main #164: the fork runs with ``allow_vector_exp=False``, as Difflet's bf16
+    attention_cte runs; the flags and scale as given, bounds only when the call has them; the LNC
+    grid."""
     pytest.importorskip("difflet.backends.neuron.ops_impl.mx_attention_kernel")
     hop = pytest.importorskip("torch_neuronx.nki_hop")
     import torch_neuronx
@@ -337,8 +338,8 @@ def test_the_op_calls_the_fork_with_the_vector_engine_exp_and_its_bounds(monkeyp
     op(q, q, q, lo, hi, 1.0, False, True)
     (g0, unbounded), (g1, bounded) = calls
     assert g0 == g1 == (logical_cores(),)
-    assert unbounded == dict(scale=0.5, pv_mx=False, qk_mx=True, allow_vector_exp=True)
-    assert bounded == dict(scale=1.0, pv_mx=False, qk_mx=True, allow_vector_exp=True,
+    assert unbounded == dict(scale=0.5, pv_mx=False, qk_mx=True, allow_vector_exp=False)
+    assert bounded == dict(scale=1.0, pv_mx=False, qk_mx=True, allow_vector_exp=False,
                            bound_min=lo, bound_max=hi)
 
 

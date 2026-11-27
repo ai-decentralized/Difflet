@@ -3,10 +3,10 @@ nkilib's ``attention_cte`` (``mx_attention_kernel.mx_attention_fwd``) registered
 ``difflet_neuron::mx_attention`` (as ``fp8_kernels`` registers ``mx_linear``), and the count of the
 calls ``ops_impl/attention.py`` routes to it under ``DIFFLET_ATTN_QUANT`` (``--attn-quant``).
 
-The op runs the fork with the exp on the Vector Engine (``allow_vector_exp=True``), as shipped
-attention_cte runs Difflet's bf16 attention, so the routed call differs from bf16 only by the
-quantization (ruling BR32). Which matmuls are MXFP8 is the caller's ``qk_mx`` / ``pv_mx`` (the
-switch's variant).
+The op runs the fork with the exp on the Scalar Engine (``allow_vector_exp=False``), as Difflet's
+bf16 attention runs attention_cte since main #164, so the routed call differs from bf16 only by the
+quantization (ruling BR32's rule, re-applied after that change). Which matmuls are MXFP8 is the
+caller's ``qk_mx`` / ``pv_mx`` (the switch's variant).
 
 The count is the evidence that a call site is quantized (plan Review Focus 5): calls bucketed by
 ``(s_q, s_k, bounded)``, counted when Dynamo traces them (once per compiled graph, through
@@ -58,7 +58,7 @@ def load_op():
                      pv_mx: bool, qk_mx: bool) -> torch.Tensor:
         bounds = {} if bound_min is None else {"bound_min": bound_min, "bound_max": bound_max}
         return kernel[(logical_cores(),)](q, k, v, scale=scale, pv_mx=pv_mx, qk_mx=qk_mx,
-                                          allow_vector_exp=True, **bounds)
+                                          allow_vector_exp=False, **bounds)
 
     return mx_attention
 
