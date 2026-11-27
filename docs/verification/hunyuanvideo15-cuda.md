@@ -39,7 +39,9 @@ GPU. Negative prompts work through `difflet run --negative-prompt`, `--requests`
 `--dp` runs, the Python API and the server.
 
 Image-to-video, the 720p checkpoints, CFG-parallel, TP/CP/SP, TeaCache, host VAE, TAEF1 and
-shape buckets are not supported. DP replicas have not been measured.
+shape buckets are not supported. `difflet run --dp 2 --requests` ran four requests on two
+H200 141 GB, each output identical to the same request on one card, with generation 1.99×
+faster than on one card.
 
 ## How it runs
 

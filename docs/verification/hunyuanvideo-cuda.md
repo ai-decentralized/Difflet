@@ -32,7 +32,9 @@ the reference template crop; longer prompts are refused. CLIP uses the reference
 
 HunyuanVideo 1.5, image-to-video, negative prompts, TP/CP/SP, CFG-parallel, TeaCache,
 host VAE, TAEF1 and shape buckets are unsupported. The resident video service uses one
-worker; replica scaling and smaller GPUs have not been qualified.
+worker, and smaller GPUs have not been qualified. `difflet run --dp 2 --requests` ran four
+requests on two H200 141 GB, each output identical to the same request on one card, with
+generation 1.98× faster than on one card.
 
 ## Numerical implementation
 

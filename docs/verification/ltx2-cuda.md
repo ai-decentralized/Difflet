@@ -7,8 +7,10 @@ Those frontends have CPU regression coverage, not end-to-end GPU qualification.
 
 Use BF16, one GPU and one resident shape. Height/width must be multiples of 32;
 frame count must be 8k+1. TP/CP/SP/CFG parallelism, quantization, offload, TeaCache,
-TAEF1 and bucketed shapes are outside this CUDA implementation. Other models'
-GPU behavior and Trainium/Neuron/TPU implementations are unchanged.
+TAEF1 and bucketed shapes are outside this CUDA implementation. With the default
+profile, `difflet run --dp 2 --requests` ran four requests on two H200 141 GB, each output
+identical to the same request on one card, with generation 1.95× faster than on one card.
+Other models' GPU behavior and Trainium/Neuron/TPU implementations are unchanged.
 
 ## Installation and Python generation
 
