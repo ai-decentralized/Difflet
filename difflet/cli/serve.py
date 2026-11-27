@@ -175,6 +175,7 @@ def options_from_args(args: argparse.Namespace) -> ServeOptions:
         cache_dir=args.cache_dir,
         host_vae=getattr(args, "host_vae", False),
         clip_placement=getattr(args, "clip_placement", None),
+        quant=getattr(args, "quant", None),
         teacache_cadence=getattr(args, "teacache_cadence", None),
         teacache_online_delta=getattr(args, "teacache_online_delta", None),
         teacache_speedup=getattr(args, "teacache_speedup", None),
