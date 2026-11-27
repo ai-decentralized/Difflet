@@ -7,6 +7,7 @@ to ``difflet serve``. Design: docs/plans/2026-11-20-multi-model-gateway-design.m
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field, fields
 from pathlib import Path
@@ -20,7 +21,7 @@ from difflet.serving.model_registry import serving_output_modality
 OWNED_FLAGS = ("--host", "--port", "--model-id", "--cache-dir")
 _TOP_FIELDS = {"gateway", "runs_dir", "models"}
 _ENTRY_FIELDS = {"model_id", "device", "port", "cache_dir", "serve_args", "slug", "env",
-                 "estimate"}
+                 "estimate", "defaults"}
 _SLUG = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 #: What a browser sends as ``Origin``: scheme, host and optional port, no path.
 _ORIGIN = re.compile(r"https?://[A-Za-z0-9.-]+(:[0-9]+)?")
@@ -47,6 +48,10 @@ class FleetEntry:
     #: (base_s, per_step_s): a request takes about ``base_s + per_step_s * steps`` seconds on
     #: this backend, measured; the page shows it. None: no estimate.
     estimate: tuple[float, float] | None = None
+    #: The steps and guidance scale the page sends when its fields are empty, and that the
+    #: estimates and wait thresholds assume; None keeps the backend's own default.
+    default_steps: int | None = None
+    default_guidance: float | None = None
 
     def __post_init__(self) -> None:
         if self.slug is None:
@@ -193,6 +198,15 @@ def _entry(raw: Any, where: str) -> FleetEntry:
             raise FleetConfigError(f"{where}.estimate needs numbers base_s and per_step_s") from exc
         if estimate[0] < 0 or estimate[1] <= 0:
             raise FleetConfigError(f"{where}.estimate: base_s >= 0 and per_step_s > 0")
+    defaults = _mapping(raw.get("defaults") or {}, f"{where}.defaults", {"steps", "guidance"})
+    default_steps = (None if defaults.get("steps") is None
+                     else _int(defaults["steps"], f"{where}.defaults.steps", 1, 200))
+    default_guidance = defaults.get("guidance")
+    if default_guidance is not None:
+        if (isinstance(default_guidance, bool) or not isinstance(default_guidance, (int, float))
+                or not math.isfinite(default_guidance) or default_guidance < 0):
+            raise FleetConfigError(f"{where}.defaults.guidance must be a number >= 0")
+        default_guidance = float(default_guidance)
     entry = FleetEntry(
         model_id=str(raw["model_id"]).rstrip("/"),
         device=_int(raw["device"], f"{where}.device", 0, 1023),
@@ -202,11 +216,19 @@ def _entry(raw: Any, where: str) -> FleetEntry:
         slug=slug,
         env={str(k): str(v) for k, v in env.items()},
         estimate=estimate,
+        default_steps=default_steps,
+        default_guidance=default_guidance,
     )
     try:
         kind = entry.kind
     except ValueError as exc:
         raise FleetConfigError(f"{where}.model_id: {exc}") from exc
+    if default_guidance is not None:
+        from difflet.serving.gateway.page import model_defaults  # page imports this module
+
+        if model_defaults(entry.model_id)[1] is None:
+            raise FleetConfigError(f"{where}.defaults.guidance: {entry.model_id} takes no "
+                                   "guidance scale")
     shapes = entry.shapes
     if kind == "video" and any(frames is None for _, _, frames in shapes):
         raise FleetConfigError(f"{where}: a video model's shape needs a frame count "

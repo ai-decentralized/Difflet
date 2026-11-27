@@ -76,7 +76,8 @@ models:
 | `serve_args` | Every other `difflet serve` flag; the shape flags here are what the page shows |
 | `slug` | Optional name of the working directory; default: the model id, lower-cased, with `/` and `.` as `-` |
 | `env` | Optional extra environment for this backend (`HF_HUB_CACHE`, `PYTHONPATH`, ...) |
-| `estimate` | Optional, measured: a request takes about `base_s + per_step_s * steps` seconds. The page shows it; the wait thresholds use it at the model's default steps |
+| `estimate` | Optional, measured: a request takes about `base_s + per_step_s * steps` seconds. The page shows it; the wait thresholds use it at the entry's default steps (`defaults`) |
+| `defaults` | Optional `{steps, guidance}`: what the page sends when its Steps or Guidance field is empty, and the steps the estimates and wait thresholds assume. Unset, the backend's own default (the model's spec). `guidance` is refused for a model that takes none (Qwen-Image, MiniMax-H3). API requests that omit them still get the backend's default |
 
 The file is refused, with the field named, when a field is unknown, a model, device, port or
 slug repeats, the gateway's port is also a backend's, `serve_args` sets `--host`, `--port`,

@@ -609,6 +609,27 @@ def test_client_busy_while_its_async_video_job_is_queued(tmp_path, backends, clo
     assert client.post("/v1/videos", content=ltx, headers=me).status_code == 200
 
 
+@pytest.mark.parametrize("default_steps,refused", [(None, False), (100, True)])
+def test_the_wait_threshold_assumes_the_fleet_default_steps(tmp_path, backends, default_steps,
+                                                            refused):
+    # HunyuanVideo's own default is 50 steps: 3 queued x (10 + 1.0 x 50) = 180 s < 250 s, but
+    # at the fleet's 100 steps 3 x 110 = 330 s > 250 s.
+    assert model_defaults(HV)[0] == 50
+    config = FleetConfig(host="0.0.0.0", port=8000, runs_dir=tmp_path, models=(
+        FleetEntry(HV, 3, 8103, Path("/c/3"), ("--shapes", "320x512x61"), estimate=(10, 1.0),
+                   default_steps=default_steps),), wait=Wait(1, 1, 250))
+    backends.routes[(8103, "GET", "/v1/videos")] = httpx.Response(200, json={"data": [
+        {"id": f"video_gen_{i}", "status": "queued"} for i in range(3)]})
+    backends.routes[(8103, "POST", "/v1/videos")] = httpx.Response(200, json={"id": "video_gen_x"})
+    body, ctype = _multipart([("model", HV), ("prompt", "x")])
+
+    resp = _client(tmp_path, backends, config=config).post(
+        "/v1/videos", content=body, headers={"content-type": ctype})
+
+    assert (resp.status_code == 429 and _code(resp) == "model_busy") if refused else (
+        resp.status_code == 200)
+
+
 def test_model_busy_names_shorter_waits(tmp_path, backends):
     hv_each = 10 + 1.0 * model_defaults(HV)[0]
     image = ("--height", "1024", "--width", "1024")

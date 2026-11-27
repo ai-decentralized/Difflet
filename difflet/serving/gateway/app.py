@@ -33,7 +33,7 @@ from difflet.serving.auth import ApiKeyAuthenticationMiddleware
 from difflet.serving.errors import DiffletServingError
 from difflet.serving.gateway.fleet import FleetConfig, FleetEntry
 from difflet.serving.gateway.launcher import read_pid
-from difflet.serving.gateway.page import (_duration, model_defaults, render_info, render_page,
+from difflet.serving.gateway.page import (_duration, entry_defaults, render_info, render_page,
                                           ui_models)
 from difflet.serving.gateway.status import Status, fleet_status
 from difflet.serving.openai.api_server import _run_until_disconnect
@@ -263,7 +263,7 @@ def create_gateway_app(
     def each(entry: FleetEntry) -> float | None:
         """Seconds one request takes on ``entry`` at its default steps (measured), None without
         an estimate."""
-        steps = model_defaults(entry.model_id)[0]
+        steps = entry_defaults(entry)[0]
         if entry.estimate is None or not steps:
             return None
         return entry.estimate[0] + entry.estimate[1] * steps
