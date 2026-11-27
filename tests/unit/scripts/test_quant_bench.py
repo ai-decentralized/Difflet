@@ -22,8 +22,8 @@ PINS = {"wan21_official": "38ec498cb3208fb688890f8cc7e94ede2cbd7f68",
 #: Shell variables that would make an arm's compile, threads or quantized set something other
 #: than the bench's: cache locations that win over --cache-dir, thread counts that change
 #: HunyuanVideo-1.5's host-CPU encode, and leaked overrides: the MXFP8 targets, and the attention
-#: switch, which would turn the bf16 and mx arms into attention-quant runs (the CLI keeps an
-#: exported value when --attn-quant is absent; the attention arms pass the flag).
+#: switch, which would turn the bf16 and mx arms into MXFP8-attention runs (the CLI keeps an
+#: exported value when --attention is absent; the attention arms pass --attention mx_attention).
 LEAKS = ("DIFFLET_COMPILE_CACHE", "TORCH_NEURONX_NEFF_CACHE_DIR",
          "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR", "TORCH_NEURONX_HLO_CACHE_DIR",
          "TORCHINDUCTOR_CACHE_DIR", "DIFFLET_NEURON_WEIGHT_STORE", "DIFFLET_SHARED_WEIGHTS_DIR",
@@ -143,9 +143,9 @@ def test_quality_reads_no_output_of_a_failed_step(tmp_path):
 
 
 @needs_tools
-def test_the_attention_arms_add_attn_quant_beside_the_quant_flags(tmp_path):
-    """ARMS: `both` is the mx arm plus --attn-quant qk+pv,
-    `attn` is --attn-quant qk+pv alone; the former default's targets follow --quant only."""
+def test_the_attention_arms_add_mx_attention_beside_the_quant_flags(tmp_path):
+    """ARMS: `both` is the mx arm plus --attention mx_attention,
+    `attn` is --attention mx_attention alone; the former default's targets follow --quant only."""
     from tests.unit.backends._neuron_hv15_toy import HV15_MEASURED_TARGETS
 
     root, lines = _bench(tmp_path, "qwen_image", "hv15_official", ARMS="bf16 both attn")
@@ -153,9 +153,9 @@ def test_the_attention_arms_add_attn_quant_beside_the_quant_flags(tmp_path):
     for line in lines:
         argv = line["argv"]
         arm = Path(_flag(argv, "--cache-dir")).name.rpartition("-")[2]  # CACHE_ROOT/<key>-<arm>
-        quant, attn = _flag(argv, "--quant"), _flag(argv, "--attn-quant")
-        assert (quant, attn) == {"bf16": (None, None), "both": ("mxfp8", "qk+pv"),
-                                 "attn": (None, "qk+pv")}[arm], argv
+        quant, attn = _flag(argv, "--quant"), _flag(argv, "--attention")
+        assert (quant, attn) == {"bf16": (None, None), "both": ("mxfp8", "mx_attention"),
+                                 "attn": (None, "mx_attention")}[arm], argv
         hv15 = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v" in argv
         want = ";".join(HV15_MEASURED_TARGETS) if hv15 and quant else None
         assert line["env"]["DIFFLET_QUANT_TARGETS"] == want, argv

@@ -30,7 +30,7 @@
 #        capture.sh --key <key> --arm <arm> --out <root> --candidates
 #   keys: key_for's below, flags from scripts/quant_bench/bench.sh's args_for.
 #   arms: bf16, mxfp8 (--quant mxfp8); the attention arms both (--quant mxfp8
-#   --attn-quant qk+pv) and, for hv15_official only, attn (--attn-quant qk+pv alone).
+#   --attention mx_attention) and, for hv15_official only, attn (--attention mx_attention alone).
 #   --candidates: step 2 alone on a kept dump, its selection on stdout; no device, no file.
 # env: PY (the native-fp8 venv's python), SIGNATURES (default: signatures.json here); inherited
 #      as given: HF_HUB_CACHE, DIFFLET_NKI_TRACE_CACHE; CAPTURE_LOCK (lib.sh); CAPTURE_CACHE (the
@@ -47,7 +47,7 @@ export PATH=/opt/aws_neuronx_venv_torch_neuronx_2_14_0/bin:$PATH:/opt/aws/neuron
 export HF_HUB_OFFLINE=1
 # bench.sh's: shell cache locations would win over --cache-dir, thread counts change
 # HunyuanVideo-1.5's host encode, no arm here overrides the MXFP8 targets, and only the
-# attention arms quantize attention (by their --attn-quant, never an exported switch)
+# attention arms quantize attention (by their --attention mx_attention, never an exported switch)
 unset DIFFLET_COMPILE_CACHE TORCH_NEURONX_NEFF_CACHE_DIR TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR \
   TORCH_NEURONX_HLO_CACHE_DIR TORCHINDUCTOR_CACHE_DIR DIFFLET_NEURON_WEIGHT_STORE \
   DIFFLET_SHARED_WEIGHTS_DIR OMP_NUM_THREADS MKL_NUM_THREADS DIFFLET_QUANT_TARGETS \
@@ -120,8 +120,8 @@ done
 case $ARM in
   bf16) QF=() ;;
   mxfp8) QF=(--quant mxfp8) ;;
-  both) QF=(--quant mxfp8 --attn-quant qk+pv) ;;
-  attn) QF=(--attn-quant qk+pv) ;;
+  both) QF=(--quant mxfp8 --attention mx_attention) ;;
+  attn) QF=(--attention mx_attention) ;;
   *) ARM= ;;
 esac
 if [ -z "$KEY" ] || [ -z "$ARM" ] || [ -z "$OUT" ] || { [ -z "$ONLY" ] && { [ -z "$DEV" ] || [ -z "$CPUS" ]; }; }; then
@@ -352,7 +352,7 @@ top = src.value_counts().idxmax() if len(src) else ""
 if re.search(not_a_block, top):  # a VAE's or text encoder's rows come from its own code
     sys.exit(f"dominant source location {top}")
 layers = rows.layer.dropna()
-# nkilib's attention_cte, or Difflet's MXFP8 fork of it (--attn-quant)
+# nkilib's attention_cte, or Difflet's MXFP8 fork of it (--attention mx_attention)
 attention = rows.nki_source_location.str.contains("attention_cte|mx_attention_kernel", na=False).any()
 kinds = json.loads(Path(signatures).read_text()).get(key, {})
 match = [k for k, s in kinds.items() if all(layers.str.startswith(r).any() for r in s["require"])

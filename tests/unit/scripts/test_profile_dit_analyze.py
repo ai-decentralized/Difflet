@@ -205,7 +205,7 @@ def test_attention_loads_and_write_back_are_phase_other_not_unmapped(tmp_path):
 
 
 def test_the_mxfp8_forks_rows_are_attention_in_its_own_phases_none_unmapped(tmp_path):
-    """The --attn-quant routed op (Difflet's fork of attention_cte): its rows are the
+    """The --attention mx_attention op (Difflet's fork of attention_cte): its rows are the
     attention component whatever HLO op they sit under, its loads are phase "other" by design."""
     fork = REPO / "difflet/backends/neuron/ops_impl/mx_attention_kernel.py"
     text = fork.read_text().splitlines()

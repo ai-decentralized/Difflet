@@ -80,7 +80,7 @@ DUAL = [("HunyuanVideoAttention[attn][0]_custom-call.414", ATTN)] * 3 + [
 SINGLE = [("HunyuanVideoAttention[attn][0]_custom-call.293", ATTN)] * 3 + [
     ("AdaLayerNormZeroSingle[norm][0]/LayerNorm[norm][0]_reduce.95", NORM),
     ("ColumnParallelLinear[proj_mlp][0]_dot.5", LINEAR)]
-MX = "/repo/difflet/backends/neuron/ops_impl/mx_attention_kernel.py"  # --attn-quant's kernel
+MX = "/repo/difflet/backends/neuron/ops_impl/mx_attention_kernel.py"  # mx_attention's kernel
 #: marker -> (the source files its debug info names, its Instruction rows)
 MARKERS = {{"block": (["/repo/difflet/models/toy/modeling_toy.py", ATTN, LINEAR],
                      [("Attn[attn][0]_custom-call.1", ATTN), ("Mlp[ff][0]_dot.2", LINEAR)]),
@@ -234,7 +234,7 @@ def test_each_key_dumps_one_step_at_its_shape_and_captures_its_blocks_as_four_wo
     arms = ("bf16",) if key == "hv15_official" else ("bf16", "mxfp8")
     for arm in arms:  # an exported attention switch never reaches the bf16 / mxfp8 arms
         done, arm_dir, py, x, fuser = _capture(tmp_path / arm, key, arm, device=3,
-                                               DIFFLET_ATTN_QUANT="qk+pv")
+                                               DIFFLET_ATTN_QUANT="mxfp8")
         assert done.returncode == 0, done.stderr
         assert _status(arm_dir) == "DONE"
         [gen] = py
@@ -617,24 +617,25 @@ def test_hv15_mxfp8_is_refused_naming_the_pair(tmp_path):
 
 
 @needs_tools
-@pytest.mark.parametrize("key, arm, flags", [("qwen_image", "both", ("mxfp8", "qk+pv")),
-                                             ("hunyuan_video_L", "both", ("mxfp8", "qk+pv")),
-                                             ("hv15_official", "attn", (None, "qk+pv"))])
-def test_the_attention_arms_dump_with_attn_quant_and_keep_the_forks_blocks(tmp_path, key, arm,
-                                                                         flags):
-    """The attention arms: `both` = --quant mxfp8 --attn-quant qk+pv, `attn` =
-    --attn-quant qk+pv alone; every attention row then comes from Difflet's fork, which counts as
-    the attention kernel; CAPTURE_CACHE replaces the key's root cache."""
+@pytest.mark.parametrize("key, arm, flags", [
+    ("qwen_image", "both", ("mxfp8", "mx_attention")),
+    ("hunyuan_video_L", "both", ("mxfp8", "mx_attention")),
+    ("hv15_official", "attn", (None, "mx_attention"))])
+def test_the_attention_arms_dump_with_mx_attention_and_keep_the_forks_blocks(tmp_path, key, arm,
+                                                                           flags):
+    """The attention arms: `both` = --quant mxfp8 --attention mx_attention, `attn` =
+    --attention mx_attention alone; every attention row then comes from Difflet's fork, which
+    counts as the attention kernel; CAPTURE_CACHE replaces the key's root cache."""
     blocks = TABLE[key][3]
     dump = [{str(100 + i): f"mxblock{i}" for i in range(blocks)} for _ in range(4)]
     done, arm_dir, py, x, _ = _capture(tmp_path, key, arm, dump=dump,
                                        CAPTURE_CACHE=str(tmp_path / "mirror"),
-                                       DIFFLET_ATTN_QUANT="qk")
+                                       DIFFLET_ATTN_QUANT="off")
     assert done.returncode == 0, done.stderr
     assert _status(arm_dir) == "DONE" and arm_dir.name == arm
     [gen] = py
-    assert (_flag(gen["argv"], "--quant"), _flag(gen["argv"], "--attn-quant")) == flags
-    assert gen["env"]["DIFFLET_ATTN_QUANT"] is None  # the flag alone sets the variant
+    assert (_flag(gen["argv"], "--quant"), _flag(gen["argv"], "--attention")) == flags
+    assert gen["env"]["DIFFLET_ATTN_QUANT"] is None  # the flag alone sets the switch
     assert _flag(gen["argv"], "--cache-dir") == str(tmp_path / "mirror")
     assert len([ln for ln in x if ln["argv"][0] == "capture"]) == blocks
 

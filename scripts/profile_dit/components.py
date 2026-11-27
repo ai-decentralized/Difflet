@@ -149,7 +149,7 @@ _ATTENTION_PHASES = (
 )
 
 
-#: Difflet's fork of attention_cte (the op ``--attn-quant`` routes to): phase by the enclosing
+#: Difflet's fork of attention_cte (the op ``--attention mx_attention`` routes to): phase by the
 #: function, then by the nisa call a statement makes; the fork's own MX work in three phases of
 #: its own: Q and K (one helper, ``_mx_swizzle_quantize``, serves both, so they are not split),
 #: V, and P, each with its loads, regroups, transposes, copies and ``quantize_mx``. Functions not

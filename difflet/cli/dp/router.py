@@ -132,7 +132,6 @@ def worker_cli_args(args) -> list[str]:
         # FP8 DiT: a worker that lost these would run the bf16 DiT against the fp8 stage key.
         ("--quant", getattr(args, "quant", None)),
         ("--quant-compute", getattr(args, "quant_compute", None)),
-        ("--attn-quant", getattr(args, "attn_quant", None)),  # else bf16 attention
         ("--guidance-scale-2", getattr(args, "guidance_scale_2", None)),
         # TeaCache: a worker that lost these would silently run without it.
         ("--teacache-cadence", getattr(args, "teacache_cadence", None)),

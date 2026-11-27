@@ -32,7 +32,7 @@ def attention(
     tp_out: bool = False,
     **kwargs,
 ):
-    kwargs.pop("mx", None)  # the neuron backend's DIFFLET_ATTN_QUANT opt-out, unknown to cte
+    kwargs.pop("mx", None)  # neuron's --attention mx_attention opt-out, unknown to cte
     # Contiguous-masked (lossless) flash path: a caller that resolved its mask to
     # attention_cte's per-query bound_min/bound_max range (via
     # ops_impl.mask_bounds.mask_to_contiguous_bounds, computed OUTSIDE the traced

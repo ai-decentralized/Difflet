@@ -32,8 +32,9 @@ PY=${PY:-$HOME/venvs/native-fp8/bin/python}
 # with "posix_spawn failed".
 export PATH=/opt/aws_neuronx_venv_torch_neuronx_2_14_0/bin:$PATH
 export HF_HUB_OFFLINE=1
-# An exported attention switch would make the bf16 and mx arms attention-quant runs (the CLI
-# keeps it when --attn-quant is absent): only the attention arms set it, by their flag.
+# An exported attention switch would make the bf16 and mx arms MXFP8-attention runs (the CLI
+# keeps it when --attention is absent): only the attention arms set it, by
+# --attention mx_attention.
 unset DIFFLET_QUANT_TARGETS DIFFLET_ATTN_QUANT
 # A shell's cache locations win over --cache-dir (an exported DIFFLET_COMPILE_CACHE wins,
 # difflet/cli/orchestrators/torchrun.py root_compile_cache_at_cache_dir; set TORCH_NEURONX_*
@@ -142,14 +143,14 @@ print(json.dumps(line, ensure_ascii=False))' "$PROMPT" "$STEPS" "$1" "$NEG"
 }
 
 arm_flags() {  # arm_flags <arm>: QF (the arm's flags) and QENV (its environment): bf16; mx
-               # (--quant mxfp8, with the key's QT); both (mx plus MXFP8 QK^T and PV in
-               # attention); attn (that attention alone)
+               # (--quant mxfp8, with the key's QT); both (mx plus --attention mx_attention,
+               # QK^T and PV in MXFP8); attn (that attention alone)
   QF=() QENV=()
   case $1 in
     bf16) ;;
     mx) QF=(--quant mxfp8) ;;
-    both) QF=(--quant mxfp8 --attn-quant qk+pv) ;;
-    attn) QF=(--attn-quant qk+pv) ;;
+    both) QF=(--quant mxfp8 --attention mx_attention) ;;
+    attn) QF=(--attention mx_attention) ;;
     *) echo "bench.sh: unknown arm $1" >&2; exit 2 ;;
   esac
   if [ -n "$QT" ] && [ ${#QF[@]} -gt 0 ] && [ "${QF[0]}" = --quant ]; then

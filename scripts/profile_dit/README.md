@@ -39,8 +39,8 @@ NVMe mirror). `hv15_official mxfp8` is refused (exit 2).
 `HF_HUB_CACHE` and `DIFFLET_NKI_TRACE_CACHE` are taken from the caller's environment; `PY`
 defaults to `~/venvs/native-fp8/bin/python`.
 
-**Attention arms**: `both` = `--quant mxfp8 --attn-quant
-qk+pv`, and `attn` = `--attn-quant qk+pv` alone, for `hv15_official` only (`hv15_official both`
+**Attention arms**: `both` = `--quant mxfp8 --attention
+mx_attention`, and `attn` = `--attention mx_attention` alone, for `hv15_official` only (`hv15_official both`
 and `<other key> attn` are refused). Their routed attention runs Difflet's fork of
 attention_cte (`ops_impl/mx_attention_kernel.py`), which counts as the attention kernel for the
 signature and the components; `components.py` maps the fork's rows to phases by function

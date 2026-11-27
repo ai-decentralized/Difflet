@@ -133,13 +133,12 @@ def _build_stage_parser() -> argparse.ArgumentParser:
 
 
 def _export_backend_selection(args: argparse.Namespace) -> None:
-    from difflet.cli.quant import export_attn_quant
-
+    # --attention is not a stage flag: the driver exported its variable (DIFFLET_ATTN_QUANT or
+    # DIFFLET_EXP_ATTN_CONSTMAX), and the stage inherits it.
     if args.backend is not None:
         os.environ["DIFFLET_BACKEND"] = args.backend
     if args.exec_mode is not None:
         os.environ["DIFFLET_EXEC_MODE"] = args.exec_mode
-    export_attn_quant(args)  # --attn-quant: read once, at ops_impl/attention.py's import
 
 
 def main(argv: list[str] | None = None) -> int:

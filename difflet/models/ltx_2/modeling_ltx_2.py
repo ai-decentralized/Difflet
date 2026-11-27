@@ -206,7 +206,7 @@ class _LTX2TPAttnProcessor:
             attention_mask = attention_mask.view(batch_size, attn.heads, -1, attention_mask.shape[-1])
 
         # Self-attention only (attn1; audio_attn1 is head dim 64) may run in MXFP8 under
-        # DIFFLET_ATTN_QUANT: the text and audio/video cross-attentions pass mx=False.
+        # --attention mx_attention: the text and audio/video cross-attentions pass mx=False.
         is_self_attention = encoder_hidden_states is None
         if encoder_hidden_states is None:
             encoder_hidden_states = hidden_states

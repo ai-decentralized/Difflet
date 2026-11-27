@@ -21,9 +21,10 @@ so both of its MXFP8 arms export the former default (G1 + G3) as `DIFFLET_QUANT_
 their three commands only. `hunyuan_video_L` is HunyuanVideo at 544x960x129.
 
 `ARMS` (default `bf16 mx`) picks the arms and their order; `arm_flags` also has the MXFP8
-attention arms `both` (`--quant mxfp8 --attn-quant qk+pv`) and `attn` (`--attn-quant qk+pv`).
-An exported `DIFFLET_ATTN_QUANT` is unset first, so only those two arms quantize attention, through
-their flag (the CLI keeps an exported value when `--attn-quant` is absent). Sourced, `bench.sh` only defines its functions (`args_for`, `arm_flags`, `timed`,
+attention arms `both` (`--quant mxfp8 --attention mx_attention`) and `attn`
+(`--attention mx_attention`). An exported `DIFFLET_ATTN_QUANT` is unset first, so only those two
+arms quantize attention, through their flag (the CLI keeps an exported value when `--attention`
+is absent). Sourced, `bench.sh` only defines its functions (`args_for`, `arm_flags`, `timed`,
 `request_line`), so a runner of its own can reuse these keys' commands with its own protocol.
 
 ## Host

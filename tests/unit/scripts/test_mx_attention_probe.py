@@ -36,7 +36,8 @@ def test_the_shape_table_has_the_seven_rows():
 
 @pytest.mark.parametrize("bad", [["--shape", "sd3_1024", "--impl", "cte"],
                                  ["--shape", "wan_81f", "--impl", "sdpa"],
-                                 ["--shape", "wan_81f", "--impl", "cte", "--pv-mx"],
+                                 ["--shape", "wan_81f", "--impl", "fork", "--pv-mx"],
+                                 ["--shape", "wan_81f", "--impl", "routed", "--qk-mx"],
                                  ["--shape", "wan_81f", "--impl", "fork", "--cte-no-vector-exp"],
                                  ["--shape", "wan_81f", "--impl", "cte", "--fork-vector-exp"],
                                  ["--shape", "qwen_1024", "--impl", "constmax"]])
@@ -45,7 +46,7 @@ def test_the_cli_rejects_what_it_cannot_run(bad, tmp_path, capsys):
         probe.main([*bad, "--out", str(tmp_path / "o.json")])
     assert exc.value.code == 2
     err = capsys.readouterr().err
-    assert ("invalid choice" in err or "need --impl fork or routed" in err
+    assert ("invalid choice" in err or "unrecognized arguments: --" in err
             or "needs --impl cte" in err
             or "needs --impl fork" in err or "unbounded attention only" in err)
 
@@ -145,12 +146,12 @@ def test_main_runs_the_workers_and_scores_the_first_ones_output(tmp_path, monkey
     assert [f["run"] for f in result["fuser"]] == [1, 2, 3]  # each worker's own device check
 
 
-@pytest.mark.parametrize("flags", [{"qk_mx": False, "pv_mx": True}, {"qk_mx": True, "pv_mx": True}])
 @pytest.mark.parametrize("name", sorted(TINY))
-def test_with_an_mx_flag_the_reference_is_the_task1_mirror(name, flags):
-    """bf16 inputs as the kernel loads them, the kernel's block membership, on the bounded
-    path q scaled in fp32 then rounded to bf16 as _flash_attention_bounded does, and with qk_mx
-    K smoothed per head as the call path smooths it (``smooth_keys``)."""
+def test_with_mx_the_reference_is_the_task1_mirror(name):
+    """QK^T and PV in MXFP8: bf16 inputs as the kernel loads them, the kernel's block
+    membership, on the bounded path q scaled in fp32 then rounded to bf16 as
+    _flash_attention_bounded does, and K smoothed per head as the call path smooths it
+    (``smooth_keys``)."""
     fork = pytest.importorskip("difflet.backends.neuron.ops_impl.mx_attention_kernel")
     from difflet.quant.mx_attention import smooth_keys
 
@@ -161,21 +162,20 @@ def test_with_an_mx_flag_the_reference_is_the_task1_mirror(name, flags):
     if bounds:
         qs = (q.float() * kw["scale"]).bfloat16()
         kw = dict(scale=1.0, bound_min=bounds[0], bound_max=bounds[1])
-    ks = torch.cat([smooth_keys(k[h:h + 1]) for h in range(row["bh"])]) if flags["qk_mx"] else k
-    expected = probe.mx_attention_reference(qs, ks, v, **flags, **kw, qk_perm=fork.qk_perm,
-                                            pv_perm=fork.pv_perm)
+    ks = torch.cat([smooth_keys(k[h:h + 1]) for h in range(row["bh"])])
+    expected = probe.mx_attention_reference(qs, ks, v, qk_mx=True, pv_mx=True, **kw,
+                                            qk_perm=fork.qk_perm, pv_perm=fork.pv_perm)
     exact = probe.reference(row, q, k, v, bounds, 1)
-    got = probe.reference(row, q, k, v, bounds, 1, **flags)
+    got = probe.reference(row, q, k, v, bounds, 1, mx=True)
     assert got.dtype == torch.bfloat16
     torch.testing.assert_close(got, expected[1], atol=0, rtol=0)
     assert 1e-2 < (got.float() - exact).norm() / exact.norm() < 1e-1  # MX, not bf16, rounding
 
 
-@pytest.mark.parametrize("qk_mx", [False, True])
-def test_use_fork_smooths_k_before_the_kernel_and_the_padding_with_qk_mx(qk_mx, monkeypatch):
-    """With qk_mx the torch side hands the kernel
-    ``smooth_keys(k)``, the mean taken over the call's real keys, before the bounded path pads K
-    with zeros (padded keys stay zero); without it, K unchanged. Both flags reach the kernel."""
+def test_use_fork_smooths_k_before_the_kernel_and_the_padding(monkeypatch):
+    """The torch side hands the kernel ``smooth_keys(k)``, the mean taken over the call's real
+    keys, before the bounded path pads K with zeros (padded keys stay zero); the kernel runs QK^T
+    and PV in MXFP8 on both paths."""
     pytest.importorskip("difflet.backends.neuron.ops_impl.mx_attention_kernel")
     hop = pytest.importorskip("torch_neuronx.nki_hop")
     import torch_neuronx
@@ -194,7 +194,7 @@ def test_use_fork_smooths_k_before_the_kernel_and_the_padding_with_qk_mx(qk_mx, 
     monkeypatch.setattr(torch_neuronx, "wrap_nki", lambda kernel: FakeKernel())
     for name in ("_FLASH_KERNEL", "_FLASH_BOUNDED_OP", "_flash_attention_bounded"):
         monkeypatch.setattr(attn, name, getattr(attn, name))  # restored after the test
-    probe.use_fork(qk_mx=qk_mx, pv_mx=True)
+    probe.use_fork()
     g = torch.Generator().manual_seed(0)
     q, k, v = (torch.randn(1, 2, 600, 128, generator=g).bfloat16() + 3 for _ in range(3))
     attn._FLASH_KERNEL(q, k, v, is_causal=False, scale=0.5, training=False)
@@ -202,11 +202,11 @@ def test_use_fork_smooths_k_before_the_kernel_and_the_padding_with_qk_mx(qk_mx, 
     # Called as attention()'s bounded path calls it (with vector_exp), not just scale.
     attn._flash_attention_bounded(q, k, v, lo, lo + 513, scale=0.5, vector_exp=True)
     (k_unbounded, kw_u), (k_bounded, kw_b) = calls
-    expect = smooth_keys(k) if qk_mx else k
+    expect = smooth_keys(k)
     assert torch.equal(k_unbounded, expect.flatten(0, 1))
     assert k_bounded.shape == (2, 640, 128)  # padded to 128 after smoothing
     assert torch.equal(k_bounded[:, :600], expect[0]) and not k_bounded[:, 600:].any()
-    assert kw_u["qk_mx"] is qk_mx and kw_u["pv_mx"] is True and kw_b["qk_mx"] is qk_mx
+    assert all(kw["qk_mx"] is True and kw["pv_mx"] is True for kw in (kw_u, kw_b))
 
 
 def test_fork_vector_exp_reaches_the_kernel_and_only_then(monkeypatch):
@@ -231,34 +231,27 @@ def test_fork_vector_exp_reaches_the_kernel_and_only_then(monkeypatch):
     for vector_exp in (True, False):
         for name in ("_FLASH_KERNEL", "_FLASH_BOUNDED_OP", "_flash_attention_bounded"):
             monkeypatch.setattr(attn, name, getattr(attn, name))  # restored after the test
-        probe.use_fork(qk_mx=True, pv_mx=False, vector_exp=vector_exp)
+        probe.use_fork(vector_exp=vector_exp)
         attn._FLASH_KERNEL(q, q, q, is_causal=False, scale=0.5, training=False)
-    assert calls == [dict(scale=0.5, pv_mx=False, qk_mx=True, allow_vector_exp=True),
-                     dict(scale=0.5, pv_mx=False, qk_mx=True)]
+    assert calls == [dict(scale=0.5, pv_mx=True, qk_mx=True, allow_vector_exp=True),
+                     dict(scale=0.5, pv_mx=True, qk_mx=True)]
 
 
-@pytest.mark.parametrize("impl, flags", [
-    (["--impl", "routed"], (True, False)),  # no flag: qk
-    (["--impl", "routed", "--qk-mx"], (True, False)),
-    (["--impl", "routed", "--pv-mx"], (False, True)),
-    (["--impl", "routed", "--qk-mx", "--pv-mx"], (True, True)),
-    (["--impl", "fork", "--qk-mx", "--fork-vector-exp"], (True, False)),
-    (["--impl", "fork", "--pv-mx", "--fork-vector-exp"], (False, True))])
-def test_main_scores_the_routed_op_and_the_vector_exp_fork_against_their_mirror(
-        impl, flags, tmp_path, monkeypatch):
-    """--impl routed is Difflet's attention under DIFFLET_ATTN_QUANT set to the variant its
-    --qk-mx / --pv-mx name (neither: qk): scored against that variant's mirror, as the fork with
-    the same flags and --fork-vector-exp is."""
+@pytest.mark.parametrize("impl", [["--impl", "routed"], ["--impl", "fork"],
+                                  ["--impl", "fork", "--fork-vector-exp"]])
+def test_main_scores_the_routed_op_and_the_fork_against_the_mirror(impl, tmp_path, monkeypatch):
+    """--impl routed (Difflet's attention under DIFFLET_ATTN_QUANT=mxfp8) and --impl fork (with
+    or without --fork-vector-exp) run QK^T and PV in MXFP8: both are scored against the CPU
+    reference with qk_mx=pv_mx=True, and the JSON names no variant."""
     pytest.importorskip("difflet.backends.neuron.ops_impl.mx_attention_kernel")
     tiny = {"name": "tiny_u", **TINY["tiny_u"], "d": 128}
     monkeypatch.setattr(probe, "load_shapes", lambda: {"tiny_u": dict(TINY["tiny_u"], d=128)})
     q, k, v, bounds = probe.make_inputs(tiny)
 
     def fake_worker(argv, log):
-        assert ("--fork-vector-exp" in argv) == ("fork" in impl)
+        assert ("--fork-vector-exp" in argv) == ("--fork-vector-exp" in impl)
         if "--save-output" in argv:
-            out = torch.stack([probe.reference(tiny, q, k, v, bounds, h, qk_mx=flags[0],
-                                               pv_mx=flags[1])
+            out = torch.stack([probe.reference(tiny, q, k, v, bounds, h, mx=True)
                                for h in range(tiny["bh"])])
             torch.save(out, probe.output_path(Path(argv[argv.index("--out") + 1])))
         Path(argv[argv.index("--worker") + 1]).write_text(
@@ -268,32 +261,9 @@ def test_main_scores_the_routed_op_and_the_vector_exp_fork_against_their_mirror(
     out = tmp_path / "r.json"
     assert probe.main(["--shape", "tiny_u", *impl, "--runs", "1", "--out", str(out)]) == 0
     result = json.loads(out.read_text())
-    assert result["reference"] == "mirror" and (result["qk_mx"], result["pv_mx"]) == flags
-    assert result["rel_l2"] == 0.0 and result["fork_vector_exp"] is ("fork" in impl)
-
-
-def test_main_scores_a_fork_run_against_the_mirror(tmp_path, monkeypatch):
-    pytest.importorskip("difflet.backends.neuron.ops_impl.mx_attention_kernel")
-    tiny = {"name": "tiny_u", **TINY["tiny_u"], "d": 128}
-    monkeypatch.setattr(probe, "load_shapes", lambda: {"tiny_u": dict(TINY["tiny_u"], d=128)})
-    q, k, v, bounds = probe.make_inputs(tiny)
-
-    def fake_worker(argv, log):
-        assert argv[argv.index("--impl") + 1] == "fork" and "--pv-mx" in argv
-        if "--save-output" in argv:
-            out = torch.stack([probe.reference(tiny, q, k, v, bounds, h, pv_mx=True)
-                               for h in range(tiny["bh"])])
-            torch.save(out, probe.output_path(Path(argv[argv.index("--out") + 1])))
-        Path(argv[argv.index("--worker") + 1]).write_text(
-            json.dumps({"ms": 1.0, "first_call_s": 1.0, "fuser": {}}))
-
-    monkeypatch.setattr(probe, "run_worker", fake_worker)
-    out = tmp_path / "f.json"
-    assert probe.main(["--shape", "tiny_u", "--impl", "fork", "--pv-mx", "--runs", "1",
-                       "--out", str(out)]) == 0
-    result = json.loads(out.read_text())
-    assert result["reference"] == "mirror" and result["pv_mx"] and not result["qk_mx"]
-    assert result["rel_l2"] == 0.0
+    assert result["reference"] == "mirror" and result["impl"] == impl[1]
+    assert "qk_mx" not in result and "pv_mx" not in result
+    assert result["rel_l2"] == 0.0 and result["fork_vector_exp"] is ("--fork-vector-exp" in impl)
 
 
 def test_the_peaked_case_doubles_q_and_k_exactly():
@@ -435,10 +405,10 @@ def test_main_records_softmax_max_and_nonfinite_outputs_for_constmax(tmp_path, m
     assert result["nonfinite"] == 2 and result["per_head"][0]["rel_l2"] < 1e-6
 
 
-@pytest.mark.parametrize("impl, qk_mx, pv_mx, switch", [
-    ("routed", False, False, "qk"), ("routed", True, False, "qk"), ("routed", False, True, "pv"),
-    ("routed", True, True, "qk+pv"), ("fork", True, True, "off"), ("cte", False, False, "off")])
-def test_the_worker_sets_the_switch_to_the_routed_variant(impl, qk_mx, pv_mx, switch):
-    """The worker exports DIFFLET_ATTN_QUANT before ops_impl.attention is imported: the routed
-    arm's variant, ``off`` for every other arm (a shell value never turns cte or fork into MX)."""
-    assert probe.attn_switch(SimpleNamespace(impl=impl, qk_mx=qk_mx, pv_mx=pv_mx)) == switch
+@pytest.mark.parametrize("impl, switch", [("routed", "mxfp8"), ("fork", "off"), ("cte", "off"),
+                                          ("constmax", "off")])
+def test_the_worker_sets_the_switch_for_the_routed_arm(impl, switch):
+    """The worker exports DIFFLET_ATTN_QUANT before ops_impl.attention is imported: ``mxfp8``
+    for the routed arm, ``off`` for every other arm (a shell value never turns cte or fork into
+    MX)."""
+    assert probe.attn_switch(SimpleNamespace(impl=impl)) == switch

@@ -387,10 +387,10 @@ class TorchNeuronApplicationBase(torch.nn.Module):
         self.warmup_shapes = [tuple(arg.shape) for arg in args]
         if self._attn_quant():
             if self.rank == 0:  # the warm-up traced them
-                mx_attention.log_routed_calls(attention.ATTN_QUANT)
+                mx_attention.log_routed_calls()
             if not mx_attention.mx_attention_calls():  # every rank traced the same graph
                 raise RuntimeError(
-                    f"DIFFLET_ATTN_QUANT={attention.ATTN_QUANT} (--attn-quant): "
+                    f"DIFFLET_ATTN_QUANT={attention.ATTN_QUANT} (--attention mx_attention): "
                     f"{type(self).__name__}'s warm-up routed no attention call to the MXFP8 "
                     "kernel, so it would run bf16 attention under the quantized cache key: "
                     f"{attention.mx_unrouted_reason()}.")
@@ -410,9 +410,9 @@ class TorchNeuronApplicationBase(torch.nn.Module):
     # -------------------------------------------------------------- internals
 
     def _attn_quant(self) -> bool:
-        """``DIFFLET_ATTN_QUANT`` set to a variant on a DiT (an application with MXFP8 target
-        layers), with or without ``quant``: the other applications (text encoders, VAEs) route
-        no attention."""
+        """``DIFFLET_ATTN_QUANT=mxfp8`` (``--attention mx_attention``) on a DiT (an application
+        with MXFP8 target layers), with or without ``quant``: the other applications (text
+        encoders, VAEs) route no attention."""
         return attention.ATTN_QUANT != "off" and self.quant_model is not None
 
     def _init_runtime(self) -> None:

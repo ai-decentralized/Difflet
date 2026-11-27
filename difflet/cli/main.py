@@ -7,8 +7,9 @@ import sys
 
 from difflet import envs
 from difflet.cli.quant import add_quant_flags as _add_quant_flags
-from difflet.cli.quant import export_attn_quant, validate_quant
+from difflet.cli.quant import validate_quant
 from difflet.pipeline.parallel_config import CP_MODES
+from difflet.quant.spec import ATTN_QUANT_ENV
 
 VALID_MODELS = {
     "black-forest-labs/FLUX.1-dev",
@@ -519,7 +520,7 @@ def _add_generate_flags(p: argparse.ArgumentParser) -> None:
     _add_teacache_flags(p)
 
 
-ATTENTION_CHOICES = ("cte", "const-max")
+ATTENTION_CHOICES = ("cte", "const-max", "mx_attention")
 #: The env var the neuron attention and the models read for --attention const-max.
 CONSTMAX_ENV = "DIFFLET_EXP_ATTN_CONSTMAX"
 #: Models with committed const-max tables (one per DiT; Wan: one per expert).
@@ -566,14 +567,21 @@ def _add_backend_flags(p: argparse.ArgumentParser) -> None:
         "'const-max': nkilib attention_const_max with each layer's committed score bound for "
         "the layers its table allows (the rest stay on cte); 0.50-0.95x the DiT step on the "
         "seven DiTs; against CPU fp32 within bf16's distance except HunyuanVideo-1.5 "
-        "(-1.5 dB), one prompt and seed per model. Pass it to compile and "
-        f"generate alike. Exported as {CONSTMAX_ENV} to every stage.",
+        "(-1.5 dB), one prompt and seed per model. "
+        "'mx_attention': Difflet's MXFP8 attention kernel for self/joint attention (QK^T and PV "
+        "on nc_matmul_mx, K smoothed; the softmax and cross-attention stay bf16); trn3, compile "
+        "mode, models with MXFP8 target layers; slower than cte and costs quality on some "
+        "models; independent of --quant. Pass it to compile and generate alike. Exported to "
+        f"every stage: const-max as {CONSTMAX_ENV}=1, mx_attention as {ATTN_QUANT_ENV}=mxfp8 "
+        "(each clears the other's).",
     )
 
 
 def _apply_backend_flags(args: argparse.Namespace) -> None:
     """Check --backend / --exec-mode / --attention, then export them for every process this
-    command spawns (--attention const-max as DIFFLET_EXP_ATTN_CONSTMAX=1, cte by unsetting it).
+    command spawns (--attention const-max as DIFFLET_EXP_ATTN_CONSTMAX=1, mx_attention as
+    DIFFLET_ATTN_QUANT=mxfp8, each unsetting the other; cte by unsetting both). The neuron
+    attention reads both once, at its import, so this runs before anything imports a backend.
 
     Stages inherit the environment; nothing goes through the orchestrators'
     ``_shared_cli_args``, whose flags the stage-parser drift test pins
@@ -617,15 +625,28 @@ def _apply_backend_flags(args: argparse.Namespace) -> None:
             print(f"Error: --attention const-max has no const-max table for {model_id!r}; "
                   f"models with one: {', '.join(sorted(CONSTMAX_MODELS))}.", file=sys.stderr)
             raise SystemExit(2)
+    if attention == "mx_attention" and (backend or os.environ.get("DIFFLET_BACKEND")) != "neuron":
+        # Its other refusals (trn3 and compile mode, a model with MXFP8 target layers, no ring or
+        # Ulysses CP) are validate_quant's, beside --quant's.
+        print("Error: --attention mx_attention runs on the neuron backend only "
+              "(pass --backend neuron).", file=sys.stderr)
+        raise SystemExit(2)
     if backend is not None:
         os.environ["DIFFLET_BACKEND"] = backend
     if exec_mode is not None:
         os.environ["DIFFLET_EXEC_MODE"] = exec_mode
-    # Unset, the ambient variable is kept (the experiment scripts export it themselves).
+    # Unset, the ambient variables are kept (the experiment scripts export them themselves).
+    # Given, it selects one kernel: the other kernel's variable is cleared, so the two are never
+    # both active (ops_impl/attention.py refuses that at its import).
     if attention == "const-max":
         os.environ[CONSTMAX_ENV] = "1"
+        os.environ.pop(ATTN_QUANT_ENV, None)
+    elif attention == "mx_attention":
+        os.environ[ATTN_QUANT_ENV] = "mxfp8"
+        os.environ.pop(CONSTMAX_ENV, None)
     elif attention == "cte":
         os.environ.pop(CONSTMAX_ENV, None)
+        os.environ.pop(ATTN_QUANT_ENV, None)
 
 
 _TPU_CLI_UNSUPPORTED = (
@@ -1513,7 +1534,6 @@ def main(argv: list[str] | None = None) -> None:
 
     parser = _build_parser()
     args = parser.parse_args(argv)
-    export_attn_quant(args)  # before anything imports a backend (ATTN_QUANT is read at import)
 
     if args.command == "clean":
         from difflet.cli.clean import run as run_clean

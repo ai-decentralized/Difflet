@@ -427,8 +427,8 @@ class NeuronMiniMaxH3TransformerApplication(TorchNeuronApplicationBase):
             # No quant_model, so the base skips the switch's checks; its MX op would still route
             # every bounded call (and drop the tuned vector_exp=False).
             raise NotImplementedError(
-                f"DIFFLET_ATTN_QUANT={attention.ATTN_QUANT}: MiniMax-H3 has no --attn-quant (no "
-                "MXFP8 target layers); unset DIFFLET_ATTN_QUANT"
+                f"DIFFLET_ATTN_QUANT={attention.ATTN_QUANT}: MiniMax-H3 has no --attention "
+                "mx_attention (no MXFP8 target layers); unset DIFFLET_ATTN_QUANT"
             )
         super().__init__(model_path=model_path, parallel=parallel, dtype=dtype,
                          exec_mode=exec_mode, device=device, **kwargs)

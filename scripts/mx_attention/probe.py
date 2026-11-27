@@ -1,22 +1,20 @@
 #!/usr/bin/env python3
 """One attention call on one NeuronCore (LNC=2) at a model's per-rank shape: accuracy and time.
 
-usage: probe.py --shape NAME --impl {cte,fork,constmax,routed} [--qk-mx] [--pv-mx]
-                [--fork-vector-exp] [--cte-no-vector-exp] --out FILE [--runs N] [--calls N]
-                [--peak F]
+usage: probe.py --shape NAME --impl {cte,fork,constmax,routed} [--fork-vector-exp]
+                [--cte-no-vector-exp] --out FILE [--runs N] [--calls N] [--peak F]
 
 ``--impl cte`` is Difflet's attention as the models call it today, ``ops_impl.attention.attention``
 in the ``tp_q``/``tp_k`` layout: nkilib's ``attention_cte`` in bf16, bounded rows through its
 range-select op (q pre-scaled in fp32, lengths padded to 128, HV1 split over heads), scored
 against fp32 attention. ``--impl fork`` is the same call with the kernel swapped for Difflet's
-fork (``ops_impl/mx_attention_kernel.py``; ``--qk-mx`` / ``--pv-mx`` select its variant),
-scored against fp32 attention with both flags off and against the CPU reference
-(``mx_attention_reference`` on the bf16 inputs, the kernel's block membership) otherwise;
-``--fork-vector-exp`` runs the fork's exp on the Vector Engine, as shipped attention_cte does
-(``allow_vector_exp=True``; the fork's default is the Scalar Engine). ``--impl routed`` is
-``ops_impl.attention.attention`` itself under ``DIFFLET_ATTN_QUANT`` set to the variant its
-``--qk-mx`` / ``--pv-mx`` name (``qk``, ``pv``, ``qk+pv``; neither: ``qk``): the op the models
-call, with the ScalarE exp, scored against that variant's CPU reference.
+fork (``ops_impl/mx_attention_kernel.py``) with QK^T and PV in MXFP8 (K smoothed first), scored
+against the CPU reference (``mx_attention_reference`` on the bf16 inputs, the kernel's block
+membership, ``qk_mx=pv_mx=True``); ``--fork-vector-exp`` runs the fork's exp on the Vector
+Engine, as shipped attention_cte does (``allow_vector_exp=True``; the fork's default is the
+Scalar Engine). ``--impl routed`` is ``ops_impl.attention.attention`` itself under
+``DIFFLET_ATTN_QUANT=mxfp8`` (``--attention mx_attention``): the op the models call, with the
+ScalarE exp, scored against the same CPU reference.
 ``--cte-no-vector-exp`` is ``--impl cte`` with attention_cte's ``allow_vector_exp=False`` (the
 exp on ScalarE, not VectorE), scored against fp32 attention.
 ``--impl constmax`` (unbounded shapes only) is the unbounded call on nkilib's experimental
@@ -95,25 +93,23 @@ def make_inputs(row: dict, peak: float = 1.0):
     return q, k, v, (torch.zeros_like(hi), hi)
 
 
-def reference(row: dict, q, k, v, bounds, h: int, *, qk_mx: bool = False,
-              pv_mx: bool = False) -> torch.Tensor:
-    """Head ``h``'s attention, ``[s, d]``: fp32 with both flags off, else the CPU reference of the
-    fork (bf16 inputs as the kernel loads them, its MX block membership). The bounded path takes
-    scale 1.0, so q is scaled in fp32 first (and, mirroring, rounded to bf16 as
-    ``_flash_attention_bounded`` does)."""
+def reference(row: dict, q, k, v, bounds, h: int, *, mx: bool = False) -> torch.Tensor:
+    """Head ``h``'s attention, ``[s, d]``: fp32, or with ``mx`` the CPU reference of the fork with
+    QK^T and PV in MXFP8 (bf16 inputs as the kernel loads them, its MX block membership, K
+    smoothed as the call path hands the kernel K). The bounded path takes scale 1.0, so q is
+    scaled in fp32 first (and, mirroring, rounded to bf16 as ``_flash_attention_bounded``
+    does)."""
     scale = row["d"] ** -0.5
-    mirror = qk_mx or pv_mx
-    qh, kh, vh = (t[h:h + 1] if mirror else t[h:h + 1].float() for t in (q, k, v))
+    qh, kh, vh = (t[h:h + 1] if mx else t[h:h + 1].float() for t in (q, k, v))
     kw = dict(scale=scale)
     if bounds:
         qh = (qh.float() * scale).to(qh.dtype)
         kw = dict(scale=1.0, bound_min=bounds[0][h:h + 1], bound_max=bounds[1][h:h + 1])
-    if mirror:
+    if mx:
         from difflet.backends.neuron.ops_impl.mx_attention_kernel import pv_perm, qk_perm
         kw.update(qk_perm=qk_perm, pv_perm=pv_perm)
-    if qk_mx:  # as use_fork's call path hands the kernel K
-        kh = smooth_keys(kh)
-    return mx_attention_reference(qh, kh, vh, qk_mx=qk_mx, pv_mx=pv_mx, **kw)[0]
+        kh = smooth_keys(kh)  # as use_fork's call path hands the kernel K
+    return mx_attention_reference(qh, kh, vh, qk_mx=mx, pv_mx=mx, **kw)[0]
 
 
 def _metrics(s: torch.Tensor) -> dict:
@@ -201,11 +197,11 @@ def use_kernel(name: str, kernel, scale_kw: str = "scale", **kw) -> None:
     attn._FLASH_SCALAR_EXP_OP, attn._FLASH_BOUNDED_SCALAR_EXP_OP = None, op
 
 
-def use_fork(*, qk_mx: bool, pv_mx: bool, vector_exp: bool = False) -> None:
-    """``ops_impl.attention`` on the fork's ``mx_attention_fwd`` with these flags (``vector_exp``:
-    ``allow_vector_exp=True``, passed only then, so the other arms' calls are unchanged). With
-    ``qk_mx`` the torch side smooths K first (``smooth_keys``, inside the compiled region, so its
-    time counts): on the unbounded path right before the kernel, on the bounded path before
+def use_fork(*, vector_exp: bool = False) -> None:
+    """``ops_impl.attention`` on the fork's ``mx_attention_fwd`` with QK^T and PV in MXFP8
+    (``vector_exp``: ``allow_vector_exp=True``, passed only then, so the other arms' calls are
+    unchanged). The torch side smooths K first (``smooth_keys``, inside the compiled region, so
+    its time counts): on the unbounded path right before the kernel, on the bounded path before
     ``_flash_attention_bounded`` pads K with zeros, so the mean is over the call's real keys, as
     the routed op (``--impl routed``) does it."""
     from torch_neuronx import wrap_nki
@@ -213,13 +209,12 @@ def use_fork(*, qk_mx: bool, pv_mx: bool, vector_exp: bool = False) -> None:
     from difflet.backends.neuron.ops_impl import attention as attn
     from difflet.backends.neuron.ops_impl.mx_attention_kernel import mx_attention_fwd
 
-    use_kernel("mx_attention_fork", wrap_nki(mx_attention_fwd), pv_mx=pv_mx, qk_mx=qk_mx,
+    use_kernel("mx_attention_fork", wrap_nki(mx_attention_fwd), pv_mx=True, qk_mx=True,
                **({"allow_vector_exp": True} if vector_exp else {}))
-    if qk_mx:
-        unbounded, bounded = attn._FLASH_KERNEL, attn._flash_attention_bounded
-        attn._FLASH_KERNEL = lambda q, k, v, **kw: unbounded(q, smooth_keys(k), v, **kw)
-        attn._flash_attention_bounded = (lambda q, k, v, lo, hi, **kw:
-                                         bounded(q, smooth_keys(k), v, lo, hi, **kw))
+    unbounded, bounded = attn._FLASH_KERNEL, attn._flash_attention_bounded
+    attn._FLASH_KERNEL = lambda q, k, v, **kw: unbounded(q, smooth_keys(k), v, **kw)
+    attn._flash_attention_bounded = (lambda q, k, v, lo, hi, **kw:
+                                     bounded(q, smooth_keys(k), v, lo, hi, **kw))
 
 
 def use_cte_no_vector_exp() -> None:
@@ -253,18 +248,18 @@ def use_const_max(softmax_max: float) -> None:
 
 
 def attn_switch(args) -> str:
-    """The worker's ``DIFFLET_ATTN_QUANT``: the routed arm's variant (``--qk-mx`` / ``--pv-mx``,
-    neither: ``qk``), ``off`` for every other arm."""
-    if args.impl != "routed":
-        return "off"
-    qk_mx = args.qk_mx or not args.pv_mx
-    return {(True, False): "qk", (False, True): "pv", (True, True): "qk+pv"}[(qk_mx, args.pv_mx)]
+    """The worker's ``DIFFLET_ATTN_QUANT``: ``mxfp8`` for the routed arm (``--attention
+    mx_attention``), ``off`` for every other arm."""
+    return "mxfp8" if args.impl == "routed" else "off"
 
 
 def worker(args, row: dict) -> None:
     """Device side: compile, save the first output if asked, time CALLS calls with one sync."""
     switch = attn_switch(args)
     os.environ["DIFFLET_ATTN_QUANT"] = switch  # read once, at ops_impl.attention's import
+    # --impl picks the kernel (constmax swaps it in itself): a shell's const-max switch would
+    # only make the routed arm's import refuse the pair.
+    os.environ.pop("DIFFLET_EXP_ATTN_CONSTMAX", None)
     os.environ.setdefault("DIFFLET_COMPILE_CACHE", "/mnt/nvme/difflet-mxattn/probe/cache")
     # every kernel input is a call argument, so the NKI trace cache is safe for nkilib's kernel
     # (compile.py); the fork compiles uncached unless DIFFLET_NKI_TRACE_CACHE=1 (the cache
@@ -282,7 +277,7 @@ def worker(args, row: dict) -> None:
         raise SystemExit(f"ops_impl.attention was imported with DIFFLET_ATTN_QUANT="
                          f"{attn.ATTN_QUANT}")
     if args.impl == "fork":
-        use_fork(qk_mx=args.qk_mx, pv_mx=args.pv_mx, vector_exp=args.fork_vector_exp)
+        use_fork(vector_exp=args.fork_vector_exp)
     elif args.cte_no_vector_exp:
         use_cte_no_vector_exp()
     elif args.impl == "constmax":
@@ -319,8 +314,6 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     p.add_argument("--shape", required=True, choices=sorted(shapes))
     p.add_argument("--impl", required=True, choices=("cte", "fork", "constmax", "routed"))
-    p.add_argument("--qk-mx", action="store_true")
-    p.add_argument("--pv-mx", action="store_true")
     p.add_argument("--fork-vector-exp", action="store_true",
                    help="the fork with allow_vector_exp=True (the exp on VectorE, as shipped cte)")
     p.add_argument("--cte-no-vector-exp", action="store_true",
@@ -332,8 +325,6 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--worker", type=Path, help=argparse.SUPPRESS)
     p.add_argument("--save-output", action="store_true", help=argparse.SUPPRESS)
     args = p.parse_args(argv)
-    if (args.qk_mx or args.pv_mx) and args.impl not in ("fork", "routed"):
-        p.error("--qk-mx and --pv-mx need --impl fork or routed")
     if args.cte_no_vector_exp and args.impl != "cte":
         p.error("--cte-no-vector-exp needs --impl cte")
     if args.fork_vector_exp and args.impl != "fork":
@@ -358,15 +349,14 @@ def main(argv: list[str] | None = None) -> int:
     torch.set_num_threads(len(os.sched_getaffinity(0)))
     q, k, v, bounds = make_inputs(row, args.peak)
     device = torch.load(output_path(args.out)).float()
-    # routed without a flag: qk
-    flags = dict(qk_mx=args.qk_mx or (args.impl == "routed" and not args.pv_mx), pv_mx=args.pv_mx)
-    overall, heads = compare(device, lambda h: reference(row, q, k, v, bounds, h, **flags),
+    mx = args.impl in ("fork", "routed")  # QK^T and PV in MXFP8: scored against the mirror
+    overall, heads = compare(device, lambda h: reference(row, q, k, v, bounds, h, mx=mx),
                              row["bh"])
     ms = [r["ms"] for r in runs]
-    result = {"shape": row, "impl": args.impl, **flags, "cte_no_vector_exp": args.cte_no_vector_exp,
+    result = {"shape": row, "impl": args.impl, "cte_no_vector_exp": args.cte_no_vector_exp,
               "fork_vector_exp": args.fork_vector_exp,
               "calls": args.calls, "peak": args.peak, "runs_ms": ms, "first_call_s": [r["first_call_s"] for r in runs],
-              **summarize(ms), "reference": "mirror" if any(flags.values()) else "fp32",
+              **summarize(ms), "reference": "mirror" if mx else "fp32",
               **overall, "per_head": heads, "nonfinite": int((~device.isfinite()).sum()),
               "softmax_max": softmax_max_for(row) if args.impl == "constmax" else None,
               "inputs": f"q, k, v ~ N(0, 1) bf16, seed {SEED}, q and k x {args.peak}, scale d^-0.5",
