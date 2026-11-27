@@ -18,7 +18,13 @@ runs it at the publishers' settings.
 Keys: section 11's `flux qwen_image ltx_2 wan21 wan22 hunyuan_video hunyuan_video_15` and the
 official `wan21_official wan22_official hv15_official`. HunyuanVideo-1.5 has no MXFP8 default,
 so both of its MXFP8 arms export the former default (G1 + G3) as `DIFFLET_QUANT_TARGETS`, for
-their three commands only.
+their three commands only. `hunyuan_video_L` is HunyuanVideo at section 7f's 544x960x129.
+
+`ARMS` (default `bf16 mx`) picks the arms and their order; `arm_flags` also has the MXFP8
+attention plan's `both` (`--quant mxfp8 --attn-quant qk+pv`) and `attn` (`--attn-quant qk+pv`).
+An exported `DIFFLET_ATTN_QUANT` is unset first, so only those two arms quantize attention, through
+their flag (the CLI keeps an exported value when `--attn-quant` is absent). Sourced, `bench.sh` only defines its functions (`args_for`, `arm_flags`, `timed`,
+`request_line`), so a runner of its own can reuse these keys' commands with its own protocol.
 
 ## Host
 

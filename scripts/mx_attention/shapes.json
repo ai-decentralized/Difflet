@@ -1,0 +1,30 @@
+{
+  "wan_81f": {
+    "bh": 10, "s": 32760, "d": 128, "path": "unbounded", "routed": true,
+    "source": "wan21_official/bf16/blk1 WanAttention[attn1] %custom-call.233: q, k, v 83,865,600 B each = 10 x 32,760 x 128 bf16"
+  },
+  "hv1_L": {
+    "bh": 6, "s": 67576, "valid_k": 67449, "d": 128, "path": "bounded", "routed": true,
+    "source": "hunyuan_video_L/bf16/blk1 (dual) and blk2 (single) HunyuanVideoAttention[attn]: two calls of 3 heads each (_head_chunk), q, k, v 51,904,512 B = 3 x 67,584 x 128 bf16 = 67,320 image + 256 text padded to 128; bound_max 811,008 B = 3 x 67,584 x 4"
+  },
+  "hv15_121f": {
+    "bh": 8, "s": 51275, "valid_k": 50283, "d": 128, "path": "bounded", "routed": true,
+    "source": "hv15_official/bf16/blk1 Attention[attn] %custom-call.375: q, k, v 105,119,744 B = 8 x 51,328 x 128 bf16 = 49,290 image + 1,985 text padded to 128; bound_max 1,642,496 B = 8 x 51,328 x 4"
+  },
+  "ltx2_video": {
+    "bh": 8, "s": 6144, "d": 128, "path": "unbounded", "routed": true,
+    "source": "ltx_2/bf16/blk1 LTX2Attention[attn1] %custom-call.327: q, k, v 12,582,912 B = 8 x 6,144 x 128 bf16"
+  },
+  "flux_1024": {
+    "bh": 6, "s": 4608, "d": 128, "path": "unbounded", "routed": true,
+    "source": "flux/bf16/blk1 (dual) %custom-call.372 and blk2 (single) %custom-call.236, NeuronFluxAttention[attn]: q, k, v 7,077,888 B = 6 x 4,608 x 128 bf16 = 4,096 image + 512 text"
+  },
+  "qwen_1024": {
+    "bh": 6, "s": 5120, "valid_k": 4609, "d": 128, "path": "bounded", "routed": true,
+    "source": "qwen_image/bf16/blk1 Attention[attn] %custom-call.391: q, k, v 7,864,320 B = 6 x 5,120 x 128 bf16 = 4,096 image + 1,024 text, CFG batch 1 (block inputs [1, 4096, 3072] and [1, 1024, 3072]); bound_max 122,880 B = 6 x 5,120 x 4"
+  },
+  "ltx2_audio": {
+    "bh": 8, "s": 126, "d": 64, "path": "unbounded", "routed": false,
+    "source": "ltx_2/bf16/blk1 audio self-attention: q, k, v 129,024 B = 8 x 126 x 64 bf16; not routed (head dim 64)"
+  }
+}
