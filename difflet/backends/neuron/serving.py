@@ -60,6 +60,9 @@ from difflet.serving.types import (
 
 STAGE_ID = "pipeline"
 _MODULE = "difflet.backends.neuron.serving"
+#: Read once, at import, by ``ops_impl/attention.py`` and the models' const-max tables
+#: (``--attention const-max`` on the CLI exports the same variable to its stages).
+_CONSTMAX_ENV = "DIFFLET_EXP_ATTN_CONSTMAX"
 
 #: The checkpoints served natively, by registry entry name. Wan is 2.1 only: the native Wan
 #: app at serving runs one transformer (``enable_transformer_2=False``), so a Wan 2.2 request
@@ -324,6 +327,8 @@ def native_runtime_plan(profile: ServingProfile, spec: ModelSpec, source_id: str
         inputs["sp"] = True
     if parallel.cp_mode != "gather_kv":
         inputs["cp_mode"] = str(parallel.cp_mode)
+    if profile.attention is not None:  # additive: the default kernel keeps the old identity
+        inputs["attention"] = str(profile.attention)
     distributed = DistributedProcessEnvironment(1, 1, 0, 0)
     allocation = WorkerAllocationSpec(
         allocation_id=f"{spec.short_name}-neuron-resident",
@@ -374,6 +379,8 @@ class NeuronServingArtifactPreparer:
         del compile_policy  # the NEFF cache is content-keyed; there is nothing to force
         _require_neuron_backend()
         refuse_unsupported_profile(profile, self.spec)
+        # Parent-side, before the engine spawns the ranks: they inherit it at start().
+        export_attention_environment(profile)
         from difflet.registry import resolve_model
 
         entry = resolve_model(self.model_id)
@@ -481,6 +488,7 @@ class NeuronServingStageAdapter:
                                      revision=runtime.source.resolved_source_id),
         )
         self.pipe.load(skip_warmup=False)
+        check_attention_kernel(profile)
         print(f"[difflet serve] {self.spec.display_name} pipeline resident", flush=True)
         runner = ValidatedStageRunner(NeuronPipelineRunner(self), NeuronInitialPayload,
                                       self._final_payload)
@@ -569,6 +577,33 @@ class NeuronServingStageAdapter:
         smoke, self._smoke = self._smoke, None
         if smoke is not None:
             smoke.cleanup()
+
+
+def export_attention_environment(profile: ServingProfile) -> None:
+    """Set ``DIFFLET_EXP_ATTN_CONSTMAX`` for ``--attention const-max`` in the serving parent,
+    before the ranks are spawned: the attention module reads it once, at import, so a rank
+    cannot pick it up later. A variable already exported without the flag is refused: the
+    ranks would run const-max under a profile (and identity) that says cte."""
+    if profile.attention == "const-max":
+        os.environ[_CONSTMAX_ENV] = "1"
+    elif os.environ.get(_CONSTMAX_ENV) == "1":
+        raise feature_not_supported(
+            f"{_CONSTMAX_ENV}=1 is set but the profile's attention is cte: pass "
+            f"--attention const-max (the profile records it) or unset {_CONSTMAX_ENV}")
+
+
+def check_attention_kernel(profile: ServingProfile) -> None:
+    """After a rank has loaded, refuse a const-max mismatch between the profile and the
+    attention module, which read the variable at import: a rank that imported it before the
+    variable was set would otherwise run cte silently under a const-max profile."""
+    from difflet.backends.neuron.ops_impl import attention
+
+    want = profile.attention == "const-max"
+    if bool(attention._CONSTMAX) != want:
+        raise RuntimeError(
+            f"the neuron attention module runs {'const-max' if attention._CONSTMAX else 'cte'} "
+            f"but the serving profile asks for {'const-max' if want else 'cte'}: "
+            f"{_CONSTMAX_ENV} must be set before the rank imports it")
 
 
 def _export_rank_environment(profile: ServingProfile) -> None:

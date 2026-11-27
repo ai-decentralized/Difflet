@@ -368,6 +368,16 @@ def _add_serve_profile_flags(p: argparse.ArgumentParser) -> None:
         help="HunyuanVideo CLIP placement for this immutable serving profile",
     )
     p.add_argument(
+        "--attention",
+        choices=ATTENTION_CHOICES,
+        default=None,
+        help="DiT attention kernel of this serving profile on the native neuron backend "
+        "(default: cte). 'const-max': nkilib attention_const_max with each layer's committed "
+        "score bound for the layers its table allows (the rest stay on cte); FLUX.1-dev, "
+        "Qwen-Image, Wan 2.1, HunyuanVideo and LTX-2. Set for every rank before it loads; "
+        f"do not export {CONSTMAX_ENV} yourself.",
+    )
+    p.add_argument(
         "--teacache-cadence",
         type=int,
         default=None,
