@@ -373,14 +373,9 @@ class NeuronServingArtifactPreparer:
 
 
 class NeuronServingRequestValidator(GpuServingRequestValidator):
-    """The GPU flow's spec-driven contract, plus what the native resident apps do not take."""
-
-    def validate(self, request: DiffletGenerateRequest) -> None:
-        super().validate(request)
-        video = request.video
-        if self.model_type == "wan" and video is not None and video.guidance_scale_2 is not None:
-            raise feature_not_supported(
-                "guidance_scale_2 is not taken by Wan 2.1: it has one transformer")
+    """The GPU flow's spec-driven contract. It covers what the native resident apps do not
+    take: Wan 2.1's ``guidance_scale_2`` is refused from the Wan spec
+    (``guidance_scale_2_checkpoint_ids``)."""
 
 
 # --------------------------------------------------------------------- adapter

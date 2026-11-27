@@ -22,6 +22,7 @@ import pytest
 import torch
 from diffusers import AutoencoderKLWan, UniPCMultistepScheduler, WanTransformer3DModel
 
+from difflet.backends.cuda.wan.application import DEFAULT_GUIDANCE_SCALE_2
 from difflet.backends.gpu.application import create_gpu_application
 from difflet.pipeline.parallel_config import DiffletParallelConfig
 
@@ -126,9 +127,11 @@ def _build(root, *, parallel=None, dtype="bf16", **kwargs):
     )
 
 
-def _loaded_app(tmp_path, *, vae=False, dtype="fp32", **kwargs):
+def _loaded_app(tmp_path, *, vae=False, dtype="fp32", snapshot=None, **kwargs):
+    """``snapshot`` goes to ``_write_model`` (``dict(transformer_2=False,
+    boundary_ratio=None)`` is a Wan 2.1 snapshot)."""
     root = tmp_path / "wan"
-    reference_vae = _write_model(root, vae=vae)
+    reference_vae = _write_model(root, vae=vae, **(snapshot or {}))
     text_encoder = FakeTextEncoder()
     app = _build(
         root,
@@ -435,6 +438,44 @@ def test_guidance_scale_2_is_used_below_the_boundary(tmp_path, monkeypatch):
     assert not torch.allclose(
         steps[-1].noise_pred, low_uncond.out + 4.0 * (low_cond.out - low_uncond.out)
     )
+
+
+def test_guidance_scale_2_defaults_to_wan_22s_low_noise_scale(tmp_path, monkeypatch):
+    app, _, _ = _loaded_app(tmp_path)
+    calls = _spy_experts(monkeypatch, app)
+    steps = _spy_scheduler_steps(monkeypatch, app.pipeline)
+    app.generate("a cat", num_inference_steps=4, guidance_scale=4.0, seed=0, output_type="latent")
+
+    for index, step in enumerate(steps):
+        cond, uncond = calls[2 * index], calls[2 * index + 1]
+        scale = 4.0 if step.timestep >= BOUNDARY else DEFAULT_GUIDANCE_SCALE_2
+        torch.testing.assert_close(step.noise_pred, uncond.out + scale * (cond.out - uncond.out))
+
+
+def test_a_snapshot_without_a_boundary_refuses_guidance_scale_2(tmp_path, monkeypatch):
+    # Wan 2.1: one transformer, no boundary_ratio. The orchestrator would accept
+    # guidance_scale_2 and never read it, so the application refuses it before any step.
+    app, _, _ = _loaded_app(tmp_path, snapshot=dict(transformer_2=False, boundary_ratio=None))
+    calls = _spy_experts(monkeypatch, app)
+    steps = _spy_scheduler_steps(monkeypatch, app.pipeline)
+    with pytest.raises(ValueError, match="guidance_scale_2 has no effect") as excinfo:
+        app.generate(
+            "a cat",
+            num_inference_steps=4,
+            guidance_scale=5.0,
+            guidance_scale_2=5.0,
+            seed=0,
+            output_type="latent",
+        )
+    assert "boundary_ratio" in str(excinfo.value)
+    assert calls == [] and steps == []
+
+    app.generate("a cat", num_inference_steps=4, guidance_scale=5.0, seed=0, output_type="latent")
+    assert {c.expert for c in calls} == {"transformer"}
+    assert len(steps) == 4
+    for index, step in enumerate(steps):
+        cond, uncond = calls[2 * index], calls[2 * index + 1]
+        torch.testing.assert_close(step.noise_pred, uncond.out + 5.0 * (cond.out - uncond.out))
 
 
 def test_generate_is_seeded_on_the_host_and_one_shape(tmp_path):

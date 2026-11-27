@@ -7,6 +7,7 @@ import pytest
 from difflet.backends.gpu.serving import gpu_serving_metadata
 from difflet.common.registry import flux, qwen_image, wan
 from difflet.models.spec import gpu_model_specs
+from difflet.models.wan.spec import SPEC as wan_spec
 from difflet.serving import model_registry
 from difflet.serving.errors import DiffletServingError
 from difflet.serving.model_registry import resolve_serving_model
@@ -57,15 +58,12 @@ def test_other_backends_keep_the_trainium_metadata(monkeypatch, backend, model_i
     assert resolved.profile.parallel.tp_degree > 1  # the registry's, not the GPU flow's 1
 
 
-def test_wan21_is_not_served_on_cuda_because_it_never_ran_on_a_gpu(monkeypatch):
-    # A DiffletServingError, so `difflet serve` exits with the message, not a traceback.
-    with pytest.raises(DiffletServingError) as exc:
-        _resolve_model(monkeypatch, _WAN21)
-    assert exc.value.code == "feature_not_supported"
-    message = exc.value.message
-    assert _WAN21 in message and "CUDA" in message and _WAN22 in message
-    assert "not served on the CUDA backend yet" in message
-    # On Trainium the Wan serving metadata keeps both checkpoints.
+def test_wan21_is_served_on_cuda_through_the_wan_spec(monkeypatch):
+    resolved = _resolve_model(monkeypatch, _WAN21)
+    assert resolved.metadata == gpu_serving_metadata(wan_spec)
+    assert resolved.metadata.checkpoint_ids == (_WAN22, _WAN21)
+    assert resolved.profile.model_id == _WAN21
+    # On Trainium the Wan serving metadata keeps both checkpoints too.
     assert _resolve_model(monkeypatch, _WAN21, backend="trainium").metadata.checkpoint_ids == (
         _WAN21,
         _WAN22,

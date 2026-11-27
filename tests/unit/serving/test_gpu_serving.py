@@ -18,6 +18,7 @@ import torch
 from PIL import Image
 
 from difflet.backends.gpu import serving as mod
+from difflet.backends.gpu.policy import guidance_scale_2_refusal
 from difflet.models.spec import gpu_model_specs
 from difflet.pipeline.parallel_config import DiffletParallelConfig
 from difflet.serving.engines.stage_pipeline import StagePipelineEngine
@@ -444,6 +445,48 @@ def test_both_experts_guidance_and_a_negative_prompt_are_accepted(spec, source):
         with pytest.raises(DiffletServingError) as exc:
             v.validate(_request(spec, video=bad))
         assert exc.value.code == "invalid_extra_body"
+
+
+@_specs(
+    lambda s: (
+        s.guidance_scale_2_checkpoint_ids
+        and set(s.served_checkpoint_ids) - set(s.guidance_scale_2_checkpoint_ids)
+    )
+)
+def test_guidance_scale_2_is_refused_for_a_checkpoint_with_one_denoising_stage(
+    spec, monkeypatch
+):
+    # Wan 2.1 under the Wan spec: one transformer, so guidance_scale_2 would never be read.
+    for checkpoint in set(spec.served_checkpoint_ids) - set(spec.guidance_scale_2_checkpoint_ids):
+        source = ResolvedModelSource("hf_snapshot", checkpoint, None, "/snap/x", "a" * 40)
+        monkeypatch.setattr(mod, "resolve_hf_model_source", lambda *a, **k: source)
+        bundle = mod.GpuServingArtifactPreparer(checkpoint).prepare_runtime(
+            _profile(spec, model_id=checkpoint),
+            download_policy=DownloadPolicy.AUTO,
+            compile_policy=CompilePolicy.AUTO,
+        )
+        v = _validator(bundle)
+        v.validate(_request(spec, model=checkpoint))
+        with pytest.raises(DiffletServingError) as exc:
+            v.validate(_request(spec, model=checkpoint, video={"guidance_scale_2": 3.0}))
+        assert exc.value.code == "feature_not_supported"
+        # The CLI's wording: one helper builds it for both (policy.guidance_scale_2_refusal).
+        assert exc.value.message.endswith(guidance_scale_2_refusal(spec, checkpoint))
+
+
+@_specs(lambda s: s.guidance_scale_2_checkpoint_ids)
+def test_a_trailing_slash_on_the_served_id_keeps_guidance_scale_2(spec, monkeypatch):
+    # resolve_serving_model accepts "<id>/" and the profile keeps the slash.
+    for checkpoint in spec.guidance_scale_2_checkpoint_ids:
+        served = checkpoint + "/"
+        source = ResolvedModelSource("hf_snapshot", served, None, "/snap/x", "a" * 40)
+        monkeypatch.setattr(mod, "resolve_hf_model_source", lambda *a, **k: source)
+        bundle = mod.GpuServingArtifactPreparer(served).prepare_runtime(
+            _profile(spec, model_id=served),
+            download_policy=DownloadPolicy.AUTO,
+            compile_policy=CompilePolicy.AUTO,
+        )
+        _validator(bundle).validate(_request(spec, model=served, video={"guidance_scale_2": 3.0}))
 
 
 @_video_only

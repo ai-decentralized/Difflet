@@ -31,6 +31,7 @@ from typing import Any
 from difflet.backends.gpu.policy import (
     cfg_parallel_refusal,
     gpu_platform,
+    guidance_scale_2_refusal,
     is_set,
     unsupported_parallel,
 )
@@ -328,6 +329,9 @@ class GpuServingRequestValidator:
                     raise feature_not_supported(
                         f"{_tag(spec)} {field} is not taken by {spec.display_name}: {why}"
                     )
+            refusal = guidance_scale_2_refusal(spec, self.model_id)
+            if refusal and g2 is not None:
+                raise feature_not_supported(f"{_tag(spec)} {refusal}")
             for keyframe in video.keyframes:
                 if keyframe.anchor not in spec.keyframe_anchors:
                     raise feature_not_supported(
