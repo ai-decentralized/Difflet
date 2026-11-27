@@ -38,6 +38,9 @@ _STATUS_HELP = {
     "down": "no backend process, or it serves another model",
 }
 _AUTH = '-H "Authorization: Bearer $DIFFLET_API_KEY"'
+#: The seed the page sends when its Seed field is empty, and the seed of the /info examples: the
+#: same prompt gives the same result unless the visitor picks another seed.
+DEFAULT_SEED = 42
 EXAMPLE_PROMPTS = {
     "image": (
         "a small red sailboat on a calm blue lake at sunrise",
@@ -132,6 +135,7 @@ pre { margin: 0; padding: .75rem 1rem; background: var(--panel); border: 1px sol
 _SCRIPT = r"""
 const $ = (id) => document.getElementById(id);
 const API = window.DIFFLET_API || '';  // the gateway; '' when it served this page itself
+const DEFAULT_SEED = window.DIFFLET_SEED;  // sent when the Seed field is empty
 const UI = JSON.parse($('ui').textContent);
 const EXAMPLES = JSON.parse($('example-prompts').textContent);
 // A static copy of the page embeds no models: it loads them, with the wait thresholds and the
@@ -366,7 +370,7 @@ async function run() {
   if (!m) return;
   if (!prompt) { setState('Enter a prompt first.', true); return; }
   const seedValue = readNumber('seed');
-  const seed = seedValue === null ? Math.floor(Math.random() * 2147483647) : seedValue;
+  const seed = seedValue === null ? DEFAULT_SEED : seedValue;
   const steps = readNumber('steps');
   const guidance = m.guidance === null ? null : readNumber('guidance');
   running = true;
@@ -440,20 +444,14 @@ setInterval(refreshQueue, 5000);
 """
 
 
-def render_page(config: FleetConfig | None, statuses: Mapping[str, str], *, base_url: str = "",
-                api_base: str = "") -> str:
-    """The page. Its script calls the gateway at ``api_base`` ('': the page's own origin). Without a
-    ``config`` it is the static page (``difflet gateway page``): no models embedded, so the
-    script loads them from ``{api_base}/ui/models``, and no model table or API examples."""
-    ui = ({"models": [], "wait": None, "limits": None} if config is None
-          else ui_models(config, statuses))
-    api = "" if config is None else _api_section(config, statuses, base_url)
+def _top(title: str) -> str:
+    """The document head and the page header (logo, tagline, Powered by) every page shares."""
     return f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Difflet models</title>
+<title>{escape(title)}</title>
 <link rel="icon" type="image/svg+xml" href="{_FAVICON}">
 <style>{_CSS}</style>
 </head>
@@ -461,9 +459,20 @@ def render_page(config: FleetConfig | None, statuses: Mapping[str, str], *, base
 <header>
 <div><h1>{_LOGO}</h1><p>Text-to-image and text-to-video on AWS Trainium.</p></div>
 <a class="powered" href="https://yottalabs.ai" target="_blank" rel="noopener">Powered by
-<b>yottalabs.ai</b></a>
+<b>Yotta Labs</b></a>
 </header>
-<div class="layout">
+"""
+
+
+def render_page(config: FleetConfig | None, statuses: Mapping[str, str], *,
+                api_base: str = "") -> str:
+    """The generation page at ``/``. Its script calls the gateway at ``api_base`` ('': the page's
+    own origin). Without a ``config`` it is the static page (``difflet gateway page``): no models
+    embedded, so the script loads them from ``{api_base}/ui/models``. The model table and the API
+    examples are on ``/info`` (``render_info``)."""
+    ui = ({"models": [], "wait": None, "limits": None} if config is None
+          else ui_models(config, statuses))
+    return _top("Difflet models") + f"""<div class="layout">
 <div class="panel">
 <div class="tabs" role="tablist">
 <button type="button" role="tab" data-kind="image" aria-selected="true">Text-to-Image</button>
@@ -482,9 +491,9 @@ def render_page(config: FleetConfig | None, statuses: Mapping[str, str], *, base
 <div><label for="steps">Steps</label><input id="steps" type="number" min="1" max="50"></div>
 <div id="guidance-box"><label for="guidance">Guidance</label>
 <input id="guidance" type="number" min="0" max="20" step="0.5"></div>
-<div><label for="seed">Seed</label><input id="seed" type="number" min="0" placeholder="random"></div>
+<div><label for="seed">Seed</label><input id="seed" type="number" min="0" placeholder="{DEFAULT_SEED}"></div>
 </div>
-<div class="hint">Empty fields use the model's defaults; an empty seed is random.</div>
+<div class="hint">Empty fields use the model's defaults; an empty seed is {DEFAULT_SEED}.</div>
 </details>
 <button id="run" type="button">Run</button>
 <progress id="progress" max="1" value="0" hidden></progress>
@@ -496,18 +505,19 @@ must use one of its model's shapes: H×W for images, H×W×F (frames) for videos
 </div>
 <div class="results" id="results"><div class="empty">Results appear here.</div></div>
 </div>
-{api}
 <script type="application/json" id="ui">{_json(ui)}</script>
 <script type="application/json" id="example-prompts">{_json(EXAMPLE_PROMPTS)}</script>
-<script>window.DIFFLET_API = {_json(api_base.rstrip("/"))};</script>
+<script>window.DIFFLET_API = {_json(api_base.rstrip("/"))};
+window.DIFFLET_SEED = {DEFAULT_SEED};</script>
 <script>{_SCRIPT}</script>
 </body>
 </html>
 """
 
 
-def _api_section(config: FleetConfig, statuses: Mapping[str, str], base_url: str) -> str:
-    """The server-rendered model table and example requests, folded under the form."""
+def render_info(config: FleetConfig, statuses: Mapping[str, str], *, base_url: str) -> str:
+    """The page at ``/info``: every model's kind, device, shapes, estimated time and status, and
+    an example request per model against ``base_url``."""
     rows, examples = [], []
     for entry in config.models:
         status = statuses.get(entry.model_id, "down")
@@ -521,8 +531,9 @@ def _api_section(config: FleetConfig, statuses: Mapping[str, str], base_url: str
             f"{escape(status)}</span></td></tr>")
         examples.append(f"<h3><code>{escape(entry.model_id)}</code></h3>\n"
                         f"<pre><code>{escape(_example(entry, base_url))}</code></pre>")
-    return f"""<section class="api">
-<details><summary>Models, status and API examples</summary>
+    return _top("Difflet models: status and API") + f"""<p><a href="/">&larr; Generate images and videos</a></p>
+<section class="api">
+<h2>Models and status</h2>
 <div class="scroll"><table>
 <thead><tr><th>Model</th><th>Kind</th><th>Device</th><th>Shapes</th><th>Est. time</th><th>Status</th></tr></thead>
 <tbody>
@@ -534,8 +545,10 @@ def _api_section(config: FleetConfig, statuses: Mapping[str, str], base_url: str
 one; the header is ignored when it has none. JSON: <a href="/v1/models">/v1/models</a>,
 <a href="/ready">/ready</a>, <a href="/health">/health</a>.</p>
 {chr(10).join(examples)}
-</details>
-</section>"""
+</section>
+</body>
+</html>
+"""
 
 
 def _json(value) -> str:
@@ -614,7 +627,7 @@ def _example(entry: FleetEntry, base_url: str) -> str:
             '  -H "Content-Type: application/json" \\\n'
             f"  -d '{{\"model\": {body},\n"
             '       "messages": [{"role": "user", "content": "a small red sailboat on a calm blue lake"}],\n'
-            f'       "extra_body": {{"height": {height}, "width": {width}, "seed": 42}}}}\' \\\n'
+            f'       "extra_body": {{"height": {height}, "width": {width}, "seed": {DEFAULT_SEED}}}}}\' \\\n'
             "  | jq -r '.choices[0].message.content[0].image_url.url' | cut -d, -f2- "
             "| base64 -d > image.png")
     return (
@@ -622,7 +635,8 @@ def _example(entry: FleetEntry, base_url: str) -> str:
         f"  {_AUTH} \\\n"
         f"  -F 'model={entry.model_id}' \\\n"
         "  -F 'prompt=a cinematic mountain landscape at sunrise' \\\n"
-        f"  -F 'size={width}x{height}' -F 'num_frames={frames}' | jq -r .id)\n"
+        f"  -F 'size={width}x{height}' -F 'num_frames={frames}' -F 'seed={DEFAULT_SEED}' "
+        "| jq -r .id)\n"
         "# repeat until the status is \"completed\"\n"
         f'curl -sS {_AUTH} "{base}/v1/videos/$video_id" | jq .status\n'
         f'curl -fL {_AUTH} "{base}/v1/videos/$video_id/content" -o video.mp4')

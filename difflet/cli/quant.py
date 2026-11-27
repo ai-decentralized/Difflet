@@ -1,8 +1,9 @@
-"""The MXFP8 quantization flags of the CLI (``--quant``, ``--quant-compute``): their parser,
-their validation, the spec they describe, their cache-key fields, their forwarding to stage
-and DP-worker launches, and the driver's quantized-checkpoint step (``prepare_quant``).
-Torch-free at import, so the driver validates before torchrun starts a rank; only
-``prepare_quant`` loads the checkpoint writer, and torch with it, when it runs.
+"""The MXFP8 quantization flags of the CLI (``--quant``, ``--quant-compute``): their parser, their
+validation (and that of ``--attention mx_attention``, the MXFP8 attention kernel), the spec they
+describe, their cache-key fields, their forwarding to stage and DP-worker launches, and the
+driver's quantized-checkpoint step (``prepare_quant``). Torch-free at import, so the driver
+validates before torchrun starts a rank; only ``prepare_quant`` loads the checkpoint writer, and
+torch with it, when it runs.
 
 ``--quant mxfp8`` quantizes the DiT's target linears (``difflet/quant/targets.py``) to OCP
 MXFP8 from a quantized checkpoint directory that ``compile`` writes under the cache dir
@@ -10,6 +11,14 @@ MXFP8 from a quantized checkpoint directory that ``compile`` writes under the ca
 block scales are computed offline, the activations' inside the kernel. ``--quant-compute``
 picks the matmul path (``nki``, the MXFP8 kernel, the default; ``dequant``, fp8 weights in HBM
 with bf16 matmuls, memory only).
+
+``--attention mx_attention`` (``difflet/cli/main.py``), independent of ``--quant``, runs the DiT's
+self/joint attention with QK^T and PV on the MXFP8 attention kernel (``cte``, ``const-max`` or no
+flag: bf16 attention). It travels as ``DIFFLET_ATTN_QUANT=mxfp8``, which ``ops_impl/attention.py``
+reads once at import, so ``main._apply_backend_flags`` exports it before anything imports a
+backend; stages and DP workers inherit it, as they do ``--attention const-max``'s variable, and
+the DiT stage keys name it (``quant_cache_fields``). ``validate_quant`` holds its launch checks
+beside ``--quant``'s.
 """
 
 from __future__ import annotations
@@ -19,7 +28,14 @@ import os
 import sys
 from typing import Callable
 
-from difflet.quant.spec import COMPUTE_MODES, DEFAULT_COMPUTE, FORMAT, QuantSpec
+from difflet.quant.spec import (
+    ATTN_QUANT_ENV,
+    COMPUTE_MODES,
+    DEFAULT_COMPUTE,
+    FORMAT,
+    QuantSpec,
+    attn_quant_mode,
+)
 from difflet.quant.targets import TARGETS_BY_MODEL, default_spec
 
 #: CLI model ids with MXFP8 target layers, by their ``difflet.quant.targets`` key.
@@ -67,31 +83,62 @@ def _fail(message: str) -> None:
     raise SystemExit(1)
 
 
+#: ``--attention``'s MXFP8 kernel, as the refusals name it.
+MX_ATTENTION_FLAG = "--attention mx_attention"
+
+
 def validate_quant(args: argparse.Namespace) -> None:
-    """The driver's refusals, before anything is downloaded or launched."""
+    """The driver's refusals, before anything is downloaded or launched. ``--quant`` and
+    ``--attention mx_attention`` each need the neuron backend, a model with MXFP8 target layers,
+    the compiled DiT and no UNSAFE_FP8FNCAST; neither needs the other. Runs after
+    ``main._apply_backend_flags``, so an exported ``DIFFLET_ATTN_QUANT`` is ``--attention``'s
+    when the flag is given, and the ambient value otherwise."""
     quant = getattr(args, "quant", None)
-    compute = getattr(args, "quant_compute", None)
-    if quant is None:
-        if compute is not None:
-            _fail("--quant-compute needs --quant mxfp8.")
-        return
+    if quant is None and getattr(args, "quant_compute", None) is not None:
+        _fail("--quant-compute needs --quant mxfp8.")
+    try:
+        exported = attn_quant_mode()
+    except ValueError as exc:
+        _fail(str(exc))
+    if exported != "off" and os.environ.get("DIFFLET_EXP_ATTN_CONSTMAX") == "1":
+        # Only an ambient pair gets here (--attention clears the other kernel's variable); the
+        # neuron attention would refuse it at its import, in every rank.
+        _fail(f"{ATTN_QUANT_ENV}={exported} and DIFFLET_EXP_ATTN_CONSTMAX=1 select different "
+              "attention kernels: at most one may be set (--attention picks one: mx_attention "
+              "or const-max).")
+    if exported != "off" and getattr(args, "model_id", None) == "MiniMaxAI/MiniMax-H3":
+        _fail(f"{ATTN_QUANT_ENV}={exported} ({MX_ATTENTION_FLAG}) is not available for "
+              "'MiniMaxAI/MiniMax-H3': it has no MXFP8 target layers; unset it.")
+    if quant is not None:
+        _validate_mxfp8_launch(args, "--quant")
+    if getattr(args, "attention", None) == "mx_attention":
+        _validate_mxfp8_launch(args, MX_ATTENTION_FLAG)
+    if quant is not None and getattr(args, "teacache_speedup", None) is not None:
+        _fail("--quant and adaptive TeaCache (--teacache-speedup) are mutually exclusive; use "
+              "--teacache-cadence instead.")
+
+
+def _validate_mxfp8_launch(args: argparse.Namespace, flag: str) -> None:
     backend = getattr(args, "backend", None) or os.environ.get("DIFFLET_BACKEND")
     if backend != "neuron":
-        _fail("--quant runs on the PyTorch-native neuron backend only (pass --backend neuron).")
+        _fail(f"{flag} runs on the PyTorch-native neuron backend only (pass --backend neuron).")
     model_id = getattr(args, "model_id", None)
     if model_id not in QUANT_MODELS:
-        _fail(f"--quant is not available for {model_id!r}; models with MXFP8 target layers: "
+        _fail(f"{flag} is not available for {model_id!r}; models with MXFP8 target layers: "
               f"{', '.join(sorted(QUANT_MODELS))}.")
     exec_mode = getattr(args, "exec_mode", None) or os.environ.get("DIFFLET_EXEC_MODE")
     if exec_mode == "eager":
-        _fail("--quant needs the compiled DiT (--exec-mode compile, the default): eager "
+        _fail(f"{flag} needs the compiled DiT (--exec-mode compile, the default): eager "
               "quantizes every activation op by op.")
-    if getattr(args, "teacache_speedup", None) is not None:
-        _fail("--quant and adaptive TeaCache (--teacache-speedup) are mutually exclusive; use "
-              "--teacache-cadence instead.")
     if os.environ.get("UNSAFE_FP8FNCAST"):
-        _fail("--quant: unset UNSAFE_FP8FNCAST; it makes neuronx-cc mix the legacy fp8 type "
+        _fail(f"{flag}: unset UNSAFE_FP8FNCAST; it makes neuronx-cc mix the legacy fp8 type "
               "with OCP float8_e4m3fn (NCC_EOCP001).")
+    cp_mode = getattr(args, "cp_mode", None)
+    if flag == MX_ATTENTION_FLAG and (getattr(args, "cp_degree", None) or 1) > 1 and cp_mode in (
+            "ring", "ulysses"):
+        _fail(f"{flag} with --cp-mode {cp_mode}: ring and Ulysses context parallelism keep "
+              "every attention call bf16, so nothing would be quantized; use --cp-mode gather_kv "
+              "or no context parallelism.")
 
 
 #: Semicolon-separated regexes replacing the model's default target layers (experiments on
@@ -143,17 +190,11 @@ def prepare_quant(args: argparse.Namespace, component_dirs: dict[str, str], *, c
 
     None when ``--quant`` is off, and None without a line when no source directory is there
     (none given, or one missing: the weights are not downloaded yet, and the ranks report
-    that). The trace-cache choice is made before that, so the ranks inherit it either way.
+    that).
     """
     spec = quant_spec(args, default_tp_degree=default_tp_degree)
     if spec is None:
         return None
-    if spec.compute == "nki":
-        # The mxfp8 kernel path traces nkilib's matmul_mxfp8 once per launch per rank unless
-        # the trace cache keeps it: 191 s of start-up measured without it (trn3, 2026-10-31).
-        # Its inputs are all call arguments, so a cached trace cannot go stale. An explicit
-        # choice is kept; the ranks inherit the variable.
-        os.environ.setdefault("DIFFLET_NKI_TRACE_CACHE", "1")
     if not component_dirs or not all(os.path.isdir(d) for d in component_dirs.values()):
         return None
     from difflet.quant.checkpoint import prepare_quantized_checkpoint
@@ -180,5 +221,5 @@ def quant_cli_args(args: argparse.Namespace) -> list[str]:
     return parts
 
 
-__all__ = ["QUANT_MODELS", "QUANT_TARGETS_ENV", "add_quant_flags", "prepare_quant",
-           "quant_cli_args", "quant_spec", "validate_quant"]
+__all__ = ["MX_ATTENTION_FLAG", "QUANT_MODELS", "QUANT_TARGETS_ENV", "add_quant_flags",
+           "prepare_quant", "quant_cli_args", "quant_spec", "validate_quant"]

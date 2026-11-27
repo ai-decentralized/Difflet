@@ -40,8 +40,9 @@ the unpack and the un-normalisation (``_vae_latents``), so they see the same fp3
 ``compile`` is the generate stage's load + warm-up (it fills the NEFF cache) and its stage
 manifest, plus the vae stage's warm-up decode with --device-vae; the stage cache key names the
 backend and exec mode; --cache-dir becomes DIFFLET_COMPILE_CACHE unless that is exported; the
-options the ranks reject (TeaCache, several --shapes), the pairs they cannot run together
-(--sp or --cfg-parallel with --cp-degree > 1, --cfg-parallel without --true-cfg-scale > 1) and a
+options the ranks reject (adaptive TeaCache, several --shapes), the pairs they cannot run together
+(--sp or --cfg-parallel with --cp-degree > 1, --cfg-parallel without --true-cfg-scale > 1,
+--true-cfg-scale > 1 with TeaCache) and a
 TP degree whose DiT shard cannot fit one core (``_check_dit_fits``) are refused by the driver
 before torchrun starts. The ranks run TP, SP (--sp), CP and, with opt-in true CFG
 (--true-cfg-scale > 1, --negative-prompt: diffusers' two forwards per step), CFG parallelism
@@ -128,8 +129,8 @@ _TORCHRUN_APPLICATION_KWARGS = {
 }
 #: What the neuron Qwen-Image ranks support, for the driver's rejection message.
 _TORCHRUN_RUNS = (
-    "tensor, sequence, context and CFG parallelism at one static shape, and DP replicas, "
-    "no TeaCache"
+    "tensor, sequence, context and CFG parallelism at one static shape, DP replicas, and "
+    "TeaCache by --teacache-cadence or --teacache-online-delta only"
 )
 
 
@@ -140,7 +141,10 @@ def _torchrun_unsupported_options(args: argparse.Namespace) -> list[str]:
     as Wan's: each replica's rank 0 claims the requests (``replica_requests``); --cfg-parallel
     runs with true CFG (``_torchrun_conflicts``). Torch-free: the shapes are counted, not
     parsed, so a malformed --shapes fails where it always did."""
-    return torchrun_unsupported_options(args)
+    # The probe-free TeaCache modes run on the ranks (host decisions in the orchestrator); the
+    # adaptive one (--teacache-speedup, --teacache-calibration) needs the probe and stays refused.
+    return [f for f in torchrun_unsupported_options(args)
+            if f not in ("--teacache-cadence", "--teacache-online-delta")]
 
 
 def _true_cfg_scale(args: argparse.Namespace) -> float | None:
@@ -155,7 +159,8 @@ def _torchrun_conflicts(args: argparse.Namespace, *, generating: bool) -> list[s
     shard the image sequence, CFG and CP both take the data-parallel lanes;
     ``NeuronQwenImageConfig`` refuses either pair in every rank, as Wan's config does); and,
     for a ``generating`` command, --cfg-parallel without --true-cfg-scale > 1 (the CFG groups
-    split true CFG's two branches; ``compile`` only warms the batch-2 graph up). Torch-free."""
+    split true CFG's two branches; ``compile`` only warms the batch-2 graph up) and
+    --true-cfg-scale > 1 with a probe-free TeaCache flag. Torch-free."""
     sp_cp = None
     if getattr(args, "sp_enabled", False) and (getattr(args, "cp_degree", None) or 1) > 1:
         sp_cp = ("--sp and --cp-degree > 1 are mutually exclusive for Qwen-Image (both shard "
@@ -164,8 +169,15 @@ def _torchrun_conflicts(args: argparse.Namespace, *, generating: bool) -> list[s
     if getattr(args, "cfg_parallel", False) and generating and _true_cfg_scale(args) is None:
         cfg_without_true_cfg = ("--cfg-parallel splits the two branches of true classifier-free "
                                 "guidance; Qwen-Image runs them only with --true-cfg-scale > 1")
+    true_cfg_teacache = None
+    if generating and _true_cfg_scale(args) is not None and any(
+            getattr(args, name, None) is not None
+            for name in ("teacache_cadence", "teacache_online_delta")):
+        # The ranks' orchestrator raises on this pair too, but only after the load.
+        true_cfg_teacache = ("--true-cfg-scale > 1 does not combine with TeaCache for Qwen-Image "
+                             "(true classifier-free guidance runs two forwards per step)")
     found = (vae_placement_conflict(args), vae_dtype_conflict(args), vae_exec_mode_conflict(args),
-             sp_cp, cfg_cp_conflict(args), cfg_without_true_cfg)
+             sp_cp, cfg_cp_conflict(args), cfg_without_true_cfg, true_cfg_teacache)
     return [conflict for conflict in found if conflict is not None]
 
 
@@ -197,7 +209,8 @@ def _true_cfg_kwargs(args: argparse.Namespace, req) -> dict:
 
 def _torchrun_application_kwargs(args: argparse.Namespace) -> dict:
     """The application kwargs, plus any TeaCache flag the user gave: the neuron application
-    rejects TeaCache (phase 1) instead of the stage dropping the flag silently.
+    runs the probe-free modes and rejects the adaptive one (phase 1) instead of the stage
+    dropping the flag silently.
     --device-text-encoder puts Qwen2.5-VL's language model on the device (the driver has already
     dropped the flag when it cannot fit: ``QwenImageOrchestrator._place_text_encoder``)."""
     kwargs = dict(_TORCHRUN_APPLICATION_KWARGS)

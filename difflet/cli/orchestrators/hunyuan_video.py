@@ -42,9 +42,7 @@ application with it (``_torchrun_application_kwargs``).
 from __future__ import annotations
 
 import argparse
-import contextlib
 import functools
-import os
 import shutil
 import sys
 from pathlib import Path
@@ -176,26 +174,6 @@ _VAE_DTYPE_DEFAULT = "bf16"
 _VAE_EXEC_MODE_DEFAULT = "compile"
 #: --vae-dtype's values as the decoder application takes them.
 _VAE_DTYPES = {"bf16": "bfloat16", "fp32": "float32"}
-#: The neuron launches opt into torch-neuronx's NKI trace cache (``difflet/backends/neuron/
-#: compile.py``), as HunyuanVideo 1.5's do: every process traces the key-bounded attention_cte
-#: kernel again unless the cache keeps it, and that trace grows with the joint length. At
-#: 720x1280x129 (119,056 joint tokens, tp4) each rank was still tracing after 30 minutes
-#: (trn2, 2026-10-25: py-spy shows nki's compile under get_kernel_config in fake mode). The
-#: kernel's inputs are all call arguments, so a cached trace cannot go stale.
-_NKI_TRACE_OPT_IN = "DIFFLET_NKI_TRACE_CACHE"
-
-
-@contextlib.contextmanager
-def _nki_trace_cache():
-    """``DIFFLET_NKI_TRACE_CACHE=1`` around the launches (the ranks inherit it), unless the
-    caller set it; the driver's environment is restored afterwards."""
-    previous = os.environ.get(_NKI_TRACE_OPT_IN)
-    os.environ[_NKI_TRACE_OPT_IN] = previous if previous is not None else "1"
-    try:
-        yield
-    finally:
-        if previous is None:
-            os.environ.pop(_NKI_TRACE_OPT_IN, None)
 
 
 def _shape(args: argparse.Namespace) -> tuple[int, int, int]:
@@ -499,12 +477,11 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
         manifest; with the vae launch, the vae stage's warm-up decode."""
         self._prepare_torchrun(generating=False)
         shared = self._shared_cli_args(stage_mode="compile")
-        with _nki_trace_cache():
-            runner.run_stage(_HF_MODEL_ID, "generate", num_cores=replica_cores(self.args),
-                             virtual_core_size=None, cli_args=shared)
-            if _vae_placement(self.args) == "launch":
-                runner.run_stage(_HF_MODEL_ID, "vae", num_cores=1, virtual_core_size=None,
-                                 cli_args=shared)
+        runner.run_stage(_HF_MODEL_ID, "generate", num_cores=replica_cores(self.args),
+                         virtual_core_size=None, cli_args=shared)
+        if _vae_placement(self.args) == "launch":
+            runner.run_stage(_HF_MODEL_ID, "vae", num_cores=1, virtual_core_size=None,
+                             cli_args=shared)
 
     def _generate_torchrun(self) -> None:
         """``generate`` on a torchrun backend: the generate stage (prompt encode on rank 0's
@@ -519,12 +496,11 @@ class HunyuanVideoOrchestrator(ModelOrchestrator):
         shared = self._shared_cli_args(stage_mode="generate", work_dir=str(work_dir))
         try:
             placement = _vae_placement(self.args)
-            with _nki_trace_cache():
-                runner.run_stage(_HF_MODEL_ID, "generate", num_cores=replica_cores(self.args),
-                                 virtual_core_size=None, cli_args=shared)
-                if placement == "launch":
-                    runner.run_stage(_HF_MODEL_ID, "vae", num_cores=1, virtual_core_size=None,
-                                     cli_args=shared)
+            runner.run_stage(_HF_MODEL_ID, "generate", num_cores=replica_cores(self.args),
+                             virtual_core_size=None, cli_args=shared)
+            if placement == "launch":
+                runner.run_stage(_HF_MODEL_ID, "vae", num_cores=1, virtual_core_size=None,
+                                 cli_args=shared)
             if placement == "host":
                 self._decode_on_host(work_dir)
         except Exception:

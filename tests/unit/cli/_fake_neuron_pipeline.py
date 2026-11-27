@@ -51,6 +51,29 @@ BACKEND_NAME = "cpu"
 FAIL_PROMPT = "fail on every rank"
 
 
+def prepare_runtime_off_device(monkeypatch) -> None:
+    """Run ``NeuronBackend.prepare_runtime`` for real on the CPU, its ``import torch_neuronx``
+    answered by a stand-in (the loaded module, if any) that lives only for that call, so no
+    module imported later in the process caches the stand-in."""
+    import sys
+
+    from difflet.backends.neuron import runtime
+
+    real = runtime.NeuronBackend.prepare_runtime
+
+    def prepare(self, parallel):
+        loaded = sys.modules.get("torch_neuronx")
+        sys.modules["torch_neuronx"] = loaded or SimpleNamespace(
+            is_neuron_runtime_initialized=lambda: False)
+        try:
+            real(self, parallel)
+        finally:
+            if loaded is None:
+                sys.modules.pop("torch_neuronx", None)
+
+    monkeypatch.setattr(runtime.NeuronBackend, "prepare_runtime", prepare)
+
+
 def _rank_world() -> tuple[int, int]:
     import torch.distributed as dist
 

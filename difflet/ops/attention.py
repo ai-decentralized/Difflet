@@ -35,6 +35,7 @@ def attention(
 
 
 def cross_attention(q, k, v, *, scale: float | None = None, attention_mask=None, **kwargs):
+    kwargs.setdefault("mx", False)  # cross-attention stays bf16 under --attention mx_attention
     return attention(
         q,
         k,

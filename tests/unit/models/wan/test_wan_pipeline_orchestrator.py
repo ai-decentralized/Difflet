@@ -475,6 +475,22 @@ def _run_cadence(pipeline, *, steps, guidance_scale=1.0):
     )
 
 
+def test_fixed_cadence_skips_the_batched_step_under_cfg_parallel(tmp_path, capsys):
+    # CFG parallel runs one batch-2 call per step; TeaCache caches the combined prediction, as
+    # on the serial path, so a skipped step saves that one call.
+    transformer = FakeCfgParallelTransformer(uncond=1.0, cond=3.0)
+    pipeline = WanOrchestrator(
+        model_path=str(tmp_path), transformer=transformer, dtype=torch.float32,
+        boundary_ratio=None, teacache_cadence=2,
+    )
+    _run_cadence(pipeline, steps=14, guidance_scale=4.0)
+    assert pipeline._teacache_last_stats["skipped_steps"] == 2
+    assert pipeline._teacache_last_stats["full_steps"] == 12
+    assert len(transformer.calls) == 12
+    assert all(call["hidden_states"].shape[0] == 2 for call in transformer.calls)
+    assert "[teacache] stats: {'full_steps': 12, 'skipped_steps': 2" in capsys.readouterr().out
+
+
 def test_fixed_cadence_skips_dit_steps_and_prints_stats(tmp_path, capsys):
     # Regression for the CLI-dropped flag: the pipeline must build a probe-free
     # controller from teacache_cadence (no calibration file, no CPU shadow),

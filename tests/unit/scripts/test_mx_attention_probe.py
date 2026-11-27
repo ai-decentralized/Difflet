@@ -1,0 +1,414 @@
+"""scripts/mx_attention/probe.py: the one-core attention probe's CLI, its shape table, its fp32
+reference per head and its timing summary. Nothing here touches a device: the device workers are
+replaced by a fake that writes what a worker writes."""
+
+from __future__ import annotations
+
+import importlib.util
+import json
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+import torch
+import torch.nn.functional as F
+
+REPO = Path(__file__).resolve().parents[3]
+_SPEC = importlib.util.spec_from_file_location(
+    "mx_attention_probe", REPO / "scripts" / "mx_attention" / "probe.py")
+probe = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(probe)
+
+SEVEN = {"wan_81f", "hv1_L", "hv15_121f", "ltx2_video", "flux_1024", "qwen_1024", "ltx2_audio"}
+
+
+def test_the_shape_table_has_the_seven_rows():
+    shapes = probe.load_shapes()
+    assert set(shapes) == SEVEN
+    for name, row in shapes.items():
+        assert row["path"] in ("bounded", "unbounded"), name
+        if row["path"] == "bounded":
+            assert 0 < row["valid_k"] < row["s"] and row["valid_k"] % 32, name
+        if name != "ltx2_audio":
+            assert row["routed"] is True and row["d"] == 128, name
+    assert shapes["ltx2_audio"]["d"] == 64 and shapes["ltx2_audio"]["routed"] is False
+
+
+@pytest.mark.parametrize("bad", [["--shape", "sd3_1024", "--impl", "cte"],
+                                 ["--shape", "wan_81f", "--impl", "sdpa"],
+                                 ["--shape", "wan_81f", "--impl", "fork", "--pv-mx"],
+                                 ["--shape", "wan_81f", "--impl", "routed", "--qk-mx"],
+                                 ["--shape", "wan_81f", "--impl", "fork", "--cte-no-vector-exp"],
+                                 ["--shape", "wan_81f", "--impl", "cte", "--fork-vector-exp"],
+                                 ["--shape", "qwen_1024", "--impl", "constmax"]])
+def test_the_cli_rejects_what_it_cannot_run(bad, tmp_path, capsys):
+    with pytest.raises(SystemExit) as exc:
+        probe.main([*bad, "--out", str(tmp_path / "o.json")])
+    assert exc.value.code == 2
+    err = capsys.readouterr().err
+    assert ("invalid choice" in err or "unrecognized arguments: --" in err
+            or "needs --impl cte" in err
+            or "needs --impl fork" in err or "unbounded attention only" in err)
+
+
+MISSING = b"Specified filename /dev/neuron24 does not exist."
+
+
+@pytest.mark.parametrize("core, rc, said", [("13", 1, b""), ("4", 0, b" 4242"), ("31", 2, b""),
+                                            ("99", 1, MISSING), ("4,5", None, b""),
+                                            ("", None, b"")])
+def test_require_idle_core_checks_the_one_cores_device(core, rc, said, monkeypatch):
+    """Device = core // 4 (four logical cores per device at LNC=2); fuser exit 1 with no output
+    (no process) is idle; 0 (held), anything else and exit 1 with fuser's message for a device
+    that does not exist stop the probe, as does not naming exactly one core."""
+    seen = []
+
+    def fake_run(cmd, **kw):
+        seen.append(cmd)
+        return SimpleNamespace(returncode=rc, stdout=b"" if rc else said, stderr=said if rc else b"")
+
+    monkeypatch.setattr(probe.subprocess, "run", fake_run)
+    monkeypatch.setenv("NEURON_RT_VISIBLE_CORES", core)
+    if rc == 1 and not said:
+        got = probe.require_idle_core()
+        assert seen == [["fuser", "/dev/neuron3"]]
+        assert got["device"] == 3 and got["core"] == 13 and got["idle"] is True
+        return
+    with pytest.raises(SystemExit):
+        probe.require_idle_core()
+    assert seen == ([] if rc is None else [["fuser", f"/dev/neuron{int(core) // 4}"]])
+
+
+TINY = {"tiny": {"bh": 3, "s": 700, "valid_k": 613, "d": 64, "path": "bounded", "routed": True},
+        "tiny_u": {"bh": 2, "s": 640, "d": 64, "path": "unbounded", "routed": True}}
+
+
+@pytest.mark.parametrize("name", sorted(TINY))
+def test_the_reference_is_fp32_attention_per_head(name):
+    row = {"name": name, **TINY[name]}
+    q, k, v, bounds = probe.make_inputs(row)
+    assert q.dtype == torch.bfloat16 and q.shape == (row["bh"], row["s"], row["d"])
+    mask = None
+    if bounds:
+        lo, hi = bounds
+        assert lo.dtype == torch.int32 and lo.shape == (row["bh"], row["s"], 1)
+        assert (lo == 0).all() and (hi == row["valid_k"]).all()
+        mask = torch.arange(row["s"]) < row["valid_k"]
+    expected = F.scaled_dot_product_attention(q.float(), k.float(), v.float(), attn_mask=mask)
+    for h in range(row["bh"]):
+        torch.testing.assert_close(probe.reference(row, q, k, v, bounds, h), expected[h],
+                                   atol=1e-5, rtol=1e-5)
+
+
+def test_compare_reports_each_head_and_the_whole():
+    row = {"name": "tiny", **TINY["tiny"]}
+    q, k, v, bounds = probe.make_inputs(row)
+    exact = torch.stack([probe.reference(row, q, k, v, bounds, h) for h in range(row["bh"])])
+    device = exact.clone()
+    device[1] *= 1.01
+    overall, heads = probe.compare(device, lambda h: exact[h], row["bh"])
+    assert heads[0] == {"rel_l2": 0.0, "cosine": pytest.approx(1.0, abs=1e-12)}
+    assert heads[1]["rel_l2"] == pytest.approx(0.01, rel=1e-6)
+    assert 0 < overall["rel_l2"] < heads[1]["rel_l2"]
+
+
+def test_the_timing_is_the_median_and_spread_of_the_processes():
+    assert probe.summarize([10.0, 12.0, 11.0]) == {"median_ms": 11.0, "spread": 2.0 / 11.0}
+
+
+def test_main_runs_the_workers_and_scores_the_first_ones_output(tmp_path, monkeypatch):
+    """--runs worker processes, the first saving the device output; here a fake worker writes
+    the exact reference with one head off, and a ms per call per run."""
+    monkeypatch.setattr(probe, "load_shapes", lambda: {k: dict(r) for k, r in TINY.items()})
+    row = {"name": "tiny", **TINY["tiny"]}
+    q, k, v, bounds = probe.make_inputs(row)
+    calls = []
+
+    def fake_worker(argv, log):
+        calls.append(argv)
+        run = Path(argv[argv.index("--worker") + 1])
+        if "--save-output" in argv:
+            out = torch.stack([probe.reference(row, q, k, v, bounds, h) for h in range(3)])
+            out[2] *= -1
+            torch.save(out.bfloat16(), probe.output_path(Path(argv[argv.index("--out") + 1])))
+        run.write_text(json.dumps({"ms": 5.0 + len(calls), "first_call_s": 1.0,
+                                   "fuser": {"device": 1, "idle": True, "run": len(calls)}}))
+
+    monkeypatch.setattr(probe, "run_worker", fake_worker)
+    out = tmp_path / "tiny.json"
+    assert probe.main(["--shape", "tiny", "--impl", "cte", "--out", str(out)]) == 0
+    assert len(calls) == 3 and sum("--save-output" in c for c in calls) == 1
+    result = json.loads(out.read_text())
+    assert result["runs_ms"] == [6.0, 7.0, 8.0] and result["median_ms"] == 7.0
+    assert result["spread"] == pytest.approx(2.0 / 7.0)
+    assert [h["cosine"] for h in result["per_head"]] == pytest.approx([1, 1, -1], abs=1e-2)
+    assert result["shape"]["name"] == "tiny" and result["reference"] == "fp32"
+    assert [f["run"] for f in result["fuser"]] == [1, 2, 3]  # each worker's own device check
+
+
+@pytest.mark.parametrize("name", sorted(TINY))
+def test_with_mx_the_reference_is_the_task1_mirror(name):
+    """QK^T and PV in MXFP8: bf16 inputs as the kernel loads them, the kernel's block
+    membership, on the bounded path q scaled in fp32 then rounded to bf16 as
+    _flash_attention_bounded does, and K smoothed per head as the call path smooths it
+    (``smooth_keys``)."""
+    fork = pytest.importorskip("difflet.backends.neuron.ops_impl.mx_attention_kernel")
+    from difflet.quant.mx_attention import smooth_keys
+
+    row = {"name": name, **TINY[name], "d": 128}
+    q, k, v, bounds = probe.make_inputs(row)
+    kw = dict(scale=128 ** -0.5)
+    qs = q
+    if bounds:
+        qs = (q.float() * kw["scale"]).bfloat16()
+        kw = dict(scale=1.0, bound_min=bounds[0], bound_max=bounds[1])
+    ks = torch.cat([smooth_keys(k[h:h + 1]) for h in range(row["bh"])])
+    expected = probe.mx_attention_reference(qs, ks, v, qk_mx=True, pv_mx=True, **kw,
+                                            qk_perm=fork.qk_perm, pv_perm=fork.pv_perm)
+    exact = probe.reference(row, q, k, v, bounds, 1)
+    got = probe.reference(row, q, k, v, bounds, 1, mx=True)
+    assert got.dtype == torch.bfloat16
+    torch.testing.assert_close(got, expected[1], atol=0, rtol=0)
+    assert 1e-2 < (got.float() - exact).norm() / exact.norm() < 1e-1  # MX, not bf16, rounding
+
+
+def test_use_fork_smooths_k_before_the_kernel_and_the_padding(monkeypatch):
+    """The torch side hands the kernel ``smooth_keys(k)``, the mean taken over the call's real
+    keys, before the bounded path pads K with zeros (padded keys stay zero); the kernel runs QK^T
+    and PV in MXFP8 on both paths."""
+    pytest.importorskip("difflet.backends.neuron.ops_impl.mx_attention_kernel")
+    hop = pytest.importorskip("torch_neuronx.nki_hop")
+    import torch_neuronx
+
+    from difflet.backends.neuron.ops_impl import attention as attn
+    from difflet.backends.neuron.ops_impl import fp8_kernels  # noqa: F401  (imported before nki_op is faked)
+    from difflet.quant.mx_attention import smooth_keys
+
+    calls = []
+
+    class FakeKernel:  # wrap_nki(mx_attention_fwd)[grid](q, k, v, **kw)
+        def __getitem__(self, grid):
+            return lambda q, k, v, **kw: calls.append((k, kw)) or q
+
+    monkeypatch.setattr(hop, "nki_op", lambda name, mutates_args: lambda f: f)
+    monkeypatch.setattr(torch_neuronx, "wrap_nki", lambda kernel: FakeKernel())
+    for name in ("_FLASH_KERNEL", "_FLASH_BOUNDED_OP", "_flash_attention_bounded"):
+        monkeypatch.setattr(attn, name, getattr(attn, name))  # restored after the test
+    probe.use_fork()
+    g = torch.Generator().manual_seed(0)
+    q, k, v = (torch.randn(1, 2, 600, 128, generator=g).bfloat16() + 3 for _ in range(3))
+    attn._FLASH_KERNEL(q, k, v, is_causal=False, scale=0.5, training=False)
+    lo = torch.zeros(2, 600, 1, dtype=torch.int32)
+    # Called as attention()'s bounded path calls it (with vector_exp), not just scale.
+    attn._flash_attention_bounded(q, k, v, lo, lo + 513, scale=0.5, vector_exp=True)
+    (k_unbounded, kw_u), (k_bounded, kw_b) = calls
+    expect = smooth_keys(k)
+    assert torch.equal(k_unbounded, expect.flatten(0, 1))
+    assert k_bounded.shape == (2, 640, 128)  # padded to 128 after smoothing
+    assert torch.equal(k_bounded[:, :600], expect[0]) and not k_bounded[:, 600:].any()
+    assert all(kw["qk_mx"] is True and kw["pv_mx"] is True for kw in (kw_u, kw_b))
+
+
+def test_fork_vector_exp_reaches_the_kernel_and_only_then(monkeypatch):
+    """--fork-vector-exp calls the fork with allow_vector_exp=True (the exp on VectorE, as
+    shipped attention_cte); without it the call passes no kwarg (the fork's ScalarE default)."""
+    pytest.importorskip("difflet.backends.neuron.ops_impl.mx_attention_kernel")
+    hop = pytest.importorskip("torch_neuronx.nki_hop")
+    import torch_neuronx
+
+    from difflet.backends.neuron.ops_impl import attention as attn
+    from difflet.backends.neuron.ops_impl import fp8_kernels  # noqa: F401  (imported before nki_op is faked)
+
+    calls = []
+
+    class FakeKernel:
+        def __getitem__(self, grid):
+            return lambda q, k, v, **kw: calls.append(kw) or q
+
+    monkeypatch.setattr(hop, "nki_op", lambda name, mutates_args: lambda f: f)
+    monkeypatch.setattr(torch_neuronx, "wrap_nki", lambda kernel: FakeKernel())
+    q = torch.zeros(1, 2, 256, 128, dtype=torch.bfloat16)
+    for vector_exp in (True, False):
+        for name in ("_FLASH_KERNEL", "_FLASH_BOUNDED_OP", "_flash_attention_bounded"):
+            monkeypatch.setattr(attn, name, getattr(attn, name))  # restored after the test
+        probe.use_fork(vector_exp=vector_exp)
+        attn._FLASH_KERNEL(q, q, q, is_causal=False, scale=0.5, training=False)
+    assert calls == [dict(scale=0.5, pv_mx=True, qk_mx=True, allow_vector_exp=True),
+                     dict(scale=0.5, pv_mx=True, qk_mx=True)]
+
+
+@pytest.mark.parametrize("impl", [["--impl", "routed"], ["--impl", "fork"],
+                                  ["--impl", "fork", "--fork-vector-exp"]])
+def test_main_scores_the_routed_op_and_the_fork_against_the_mirror(impl, tmp_path, monkeypatch):
+    """--impl routed (Difflet's attention under DIFFLET_ATTN_QUANT=mxfp8) and --impl fork (with
+    or without --fork-vector-exp) run QK^T and PV in MXFP8: both are scored against the CPU
+    reference with qk_mx=pv_mx=True, and the JSON names no variant."""
+    pytest.importorskip("difflet.backends.neuron.ops_impl.mx_attention_kernel")
+    tiny = {"name": "tiny_u", **TINY["tiny_u"], "d": 128}
+    monkeypatch.setattr(probe, "load_shapes", lambda: {"tiny_u": dict(TINY["tiny_u"], d=128)})
+    q, k, v, bounds = probe.make_inputs(tiny)
+
+    def fake_worker(argv, log):
+        assert ("--fork-vector-exp" in argv) == ("--fork-vector-exp" in impl)
+        if "--save-output" in argv:
+            out = torch.stack([probe.reference(tiny, q, k, v, bounds, h, mx=True)
+                               for h in range(tiny["bh"])])
+            torch.save(out, probe.output_path(Path(argv[argv.index("--out") + 1])))
+        Path(argv[argv.index("--worker") + 1]).write_text(
+            json.dumps({"ms": 1.0, "first_call_s": 1.0, "fuser": {}}))
+
+    monkeypatch.setattr(probe, "run_worker", fake_worker)
+    out = tmp_path / "r.json"
+    assert probe.main(["--shape", "tiny_u", *impl, "--runs", "1", "--out", str(out)]) == 0
+    result = json.loads(out.read_text())
+    assert result["reference"] == "mirror" and result["impl"] == impl[1]
+    assert "qk_mx" not in result and "pv_mx" not in result
+    assert result["rel_l2"] == 0.0 and result["fork_vector_exp"] is ("--fork-vector-exp" in impl)
+
+
+def test_the_peaked_case_doubles_q_and_k_exactly():
+    """--peak 2 multiplies q and k by 2 (exact in bf16), so the scores' std goes
+    from ~1 to ~4; v and the bounds are unchanged."""
+    row = {"name": "tiny", **TINY["tiny"]}
+    q, k, v, bounds = probe.make_inputs(row)
+    q2, k2, v2, bounds2 = probe.make_inputs(row, peak=2.0)
+    assert torch.equal(q2, q * 2) and torch.equal(k2, k * 2) and torch.equal(v2, v)
+    assert all(torch.equal(a, b) for a, b in zip(bounds, bounds2))
+
+
+def test_main_passes_peak_and_calls_to_the_workers(tmp_path, monkeypatch):
+    """--peak reaches the workers' inputs and the host reference; --calls sets the calls per
+    process (20 vs 40 shows whether host dispatch is hidden); --cte-no-vector-exp
+    reaches the workers and the result."""
+    monkeypatch.setattr(probe, "load_shapes", lambda: {"tiny_u": dict(TINY["tiny_u"])})
+    row = {"name": "tiny_u", **TINY["tiny_u"]}
+    q, k, v, bounds = probe.make_inputs(row, peak=2.0)
+
+    def fake_worker(argv, log):
+        assert argv[argv.index("--peak") + 1] == "2" and argv[argv.index("--calls") + 1] == "40"
+        assert "--cte-no-vector-exp" in argv
+        if "--save-output" in argv:
+            out = torch.stack([probe.reference(row, q, k, v, bounds, h) for h in range(row["bh"])])
+            torch.save(out, probe.output_path(Path(argv[argv.index("--out") + 1])))
+        Path(argv[argv.index("--worker") + 1]).write_text(
+            json.dumps({"ms": 1.0, "first_call_s": 1.0, "fuser": {}}))
+
+    monkeypatch.setattr(probe, "run_worker", fake_worker)
+    out = tmp_path / "p.json"
+    assert probe.main(["--shape", "tiny_u", "--impl", "cte", "--peak", "2", "--calls", "40",
+                       "--cte-no-vector-exp", "--runs", "1", "--out", str(out)]) == 0
+    result = json.loads(out.read_text())
+    assert result["calls"] == 40 and result["peak"] == 2.0 and result["rel_l2"] < 1e-6
+    assert result["cte_no_vector_exp"] is True
+
+
+def test_cte_no_vector_exp_calls_attention_cte_as_difflet_does_plus_the_knob(monkeypatch):
+    """Both paths of ops_impl.attention reach nkilib attention_cte with Difflet's arguments plus
+    allow_vector_exp=False: unbounded exactly as torch-neuronx's _compute_attention_nki calls it
+    (its SDPA wrapper cannot forward the knob), bounded as _load_flash_bounded_op does."""
+    hop = pytest.importorskip("torch_neuronx.nki_hop")
+    dec = pytest.importorskip("torch_neuronx.neuron_dynamo_backend.decompositions")
+    from difflet.backends.neuron.ops_impl import attention as attn
+    from difflet.backends.neuron.ops_impl.fp8_kernels import logical_cores
+
+    calls = []
+
+    class FakeKernel:  # wrap_nki(attention_cte)[grid](q, k, v, **kw)
+        def __getitem__(self, grid):
+            return lambda q, k, v, **kw: calls.append((grid, q.shape, kw)) or q + 1
+
+    monkeypatch.setattr(hop, "nki_op", lambda name, mutates_args: lambda f: f)
+    monkeypatch.setattr(dec, "wrapped_flash_fwd", FakeKernel())
+    for name in ("_FLASH_KERNEL", "_FLASH_BOUNDED_OP"):
+        monkeypatch.setattr(attn, name, getattr(attn, name))  # restored after the test
+    q = torch.zeros(1, 2, 640, 128)
+    dec._compute_attention_nki(q, q, q, False, 0.5, False)  # shipped unbounded call
+    probe.use_cte_no_vector_exp()
+    out = attn._FLASH_KERNEL(q, q, q, is_causal=False, scale=0.5, training=False)
+    assert out.shape == q.shape and bool((out == 1).all())
+    lo = torch.zeros(2, 640, 1, dtype=torch.int32)
+    attn._FLASH_BOUNDED_OP(q[0], q[0], q[0], lo, lo + 613, 1.0)
+    (g0, s0, shipped), (g1, s1, unbounded), (g2, s2, bounded) = calls
+    assert g0 == g1 == g2 == (logical_cores(),) and s0 == s1 == s2 == (2, 640, 128)
+    assert unbounded == {**shipped, "allow_vector_exp": False}
+    assert bounded.pop("bound_min") is lo and torch.equal(bounded.pop("bound_max"), lo + 613)
+    assert bounded == dict(tp_q=True, tp_k=True, scale=1.0, causal_mask=False,
+                           cache_softmax=False, allow_vector_exp=False)
+
+
+def test_softmax_max_is_the_docstrings_gumbel_estimate_at_score_std_one():
+    """attention_const_max's docstring: softmax_max ~ 0.88 sigma sqrt(2 ln Sk); the probe's flat
+    inputs have sigma = 1 (q, k ~ N(0, 1), scale d^-0.5), and --peak keeps the same value."""
+    assert probe.softmax_max_for({"s": 32760}) == pytest.approx(4.0128, abs=1e-4)
+    assert probe.softmax_max_for({"s": 4608}) == pytest.approx(3.6146, abs=1e-4)
+
+
+def test_use_const_max_calls_the_shipped_kernel_on_the_unbounded_path(monkeypatch):
+    """ops_impl.attention's unbounded path reaches nkilib's experimental attention_const_max
+    (unmodified) on the LNC grid with q, k, v [bh, s, d] as given (SEQ_MAJOR q and k: the kernel
+    transposes them itself, no layout op outside it), the call's scale as softmax_scale and the
+    given softmax_max."""
+    hop = pytest.importorskip("torch_neuronx.nki_hop")
+    import torch_neuronx
+    from nkilib.core.utils.common_types import AttentionLayout
+    from nkilib.experimental.attention import attention_const_max as acm
+
+    from difflet.backends.neuron.ops_impl import attention as attn
+    from difflet.backends.neuron.ops_impl.fp8_kernels import logical_cores
+
+    calls, wrapped = [], []
+
+    class FakeKernel:
+        def __getitem__(self, grid):
+            return lambda q, k, v, **kw: calls.append((grid, q, k, v, kw)) or q + 1
+
+    monkeypatch.setattr(hop, "nki_op", lambda name, mutates_args: lambda f: f)
+    monkeypatch.setattr(torch_neuronx, "wrap_nki", lambda kernel: wrapped.append(kernel) or FakeKernel())
+    for name in ("_FLASH_KERNEL", "_FLASH_BOUNDED_OP"):
+        monkeypatch.setattr(attn, name, getattr(attn, name))  # restored after the test
+    probe.use_const_max(4.25)
+    g = torch.Generator().manual_seed(0)
+    q, k, v = (torch.randn(1, 2, 640, 128, generator=g).bfloat16() for _ in range(3))
+    out = attn._FLASH_KERNEL(q, k, v, is_causal=False, scale=0.5, training=False)
+    assert wrapped == [acm.attention_const_max]
+    ((grid, q1, k1, v1, kw),) = calls
+    assert grid == (logical_cores(),)
+    assert all(torch.equal(a, b.flatten(0, 1)) for a, b in ((q1, q), (k1, k), (v1, v)))
+    assert kw == dict(softmax_scale=0.5, softmax_max=4.25, q_layout=AttentionLayout.SEQ_MAJOR,
+                      k_layout=AttentionLayout.SEQ_MAJOR)
+    assert torch.equal(out, q + 1)
+
+
+def test_main_records_softmax_max_and_nonfinite_outputs_for_constmax(tmp_path, monkeypatch):
+    """--impl constmax: scored against fp32 attention, its softmax_max in the result, and the
+    device output's inf/NaN count (a too-low softmax_max overflows exp)."""
+    monkeypatch.setattr(probe, "load_shapes", lambda: {"tiny_u": dict(TINY["tiny_u"])})
+    row = {"name": "tiny_u", **TINY["tiny_u"]}
+    q, k, v, bounds = probe.make_inputs(row)
+
+    def fake_worker(argv, log):
+        assert argv[argv.index("--impl") + 1] == "constmax"
+        if "--save-output" in argv:
+            out = torch.stack([probe.reference(row, q, k, v, bounds, h) for h in range(row["bh"])])
+            out[1, 3, :2] = torch.tensor([float("inf"), float("nan")])
+            torch.save(out, probe.output_path(Path(argv[argv.index("--out") + 1])))
+        Path(argv[argv.index("--worker") + 1]).write_text(
+            json.dumps({"ms": 1.0, "first_call_s": 1.0, "fuser": {}}))
+
+    monkeypatch.setattr(probe, "run_worker", fake_worker)
+    out = tmp_path / "c.json"
+    assert probe.main(["--shape", "tiny_u", "--impl", "constmax", "--runs", "1",
+                       "--out", str(out)]) == 0
+    result = json.loads(out.read_text())
+    assert result["impl"] == "constmax" and result["reference"] == "fp32"
+    assert result["softmax_max"] == pytest.approx(probe.softmax_max_for({"s": 640}))
+    assert result["nonfinite"] == 2 and result["per_head"][0]["rel_l2"] < 1e-6
+
+
+@pytest.mark.parametrize("impl, switch", [("routed", "mxfp8"), ("fork", "off"), ("cte", "off"),
+                                          ("constmax", "off")])
+def test_the_worker_sets_the_switch_for_the_routed_arm(impl, switch):
+    """The worker exports DIFFLET_ATTN_QUANT before ops_impl.attention is imported: ``mxfp8``
+    for the routed arm, ``off`` for every other arm (a shell value never turns cte or fork into
+    MX)."""
+    assert probe.attn_switch(SimpleNamespace(impl=impl)) == switch

@@ -11,7 +11,7 @@ built however deep the model is. ``nn.Module.compile`` is used rather than
 Compiled NEFFs persist across processes under ``TORCH_NEURONX_NEFF_CACHE_DIR``: a warm start
 re-traces with Dynamo but skips neuronx-cc. ``configure_compile_cache`` sets the cache
 locations (laid out by ``neuron_cache_env``: ``<DIFFLET_COMPILE_CACHE>/neuron/
-{neff,neff_local,hlo}``), so every torch-neuronx cache lives under one root that survives
+{neff,neff_local,hlo,nki_trace}``), so every torch-neuronx cache lives under one root that survives
 reboots and is cleared as one (a cold-start measurement is otherwise partly warm).
 torch-neuronx reads the locations at two different times:
 
@@ -56,21 +56,28 @@ NEFF_CACHE_ENV = "TORCH_NEURONX_NEFF_CACHE_DIR"
 NEFF_LOCAL_CACHE_ENV = "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR"
 HLO_CACHE_ENV = "TORCH_NEURONX_HLO_CACHE_DIR"
 NKI_TRACE_CACHE_ENV = "NKI_ENABLE_TRACE_CACHE"
-#: Opt-in to torch-neuronx's NKI trace cache (off by default: torch-neuronx warns that its key may
-#: miss environment dependencies and serve stale kernels). Kernels whose every input is a call
-#: argument are safe to cache; some are expensive to trace (the key-bounded attention_cte at
-#: ~51k tokens: ~10 min per process uncached, ~2 min cached). The cache lives in the HLO cache
-#: directory, so an opted-in process gets a subdirectory per stack version (no stale hits across
-#: upgrades).
-NKI_TRACE_OPT_IN_ENV = "DIFFLET_NKI_TRACE_CACHE"
+#: Opt-out of torch-neuronx's NKI trace cache ("0", "false", "no" or "off"; on otherwise; a false
+#: NKI_ENABLE_TRACE_CACHE, the switch torch-neuronx's warning names, also turns it off). Without
+#: it every process traces each NKI kernel again: Wan's DiT warm-up ~460 s against ~100 s cached,
+#: the key-bounded attention_cte at ~51k tokens ~10 min against ~2 min. torch-neuronx warns that
+#: the key may miss non-argument kernel inputs; the kernels Difflet traces take theirs as
+#: arguments or from the compile target and options, which are in the key (nkilib's own read
+#: of NKI_DMA_TRANSPOSE_AS_PE_TRANSPOSE matches the key's lower_dma_transpose for "true"/unset).
+#: The entries live under the compile root (NKI_TRACE_CACHE_URL, nki adds a per-version
+#: subdirectory); with it on, the derived HLO cache directory, which holds the cross-rank trace
+#: locks, gets a subdirectory per stack version.
+NKI_TRACE_OPT_OUT_ENV = "DIFFLET_NKI_TRACE_CACHE"
+NKI_TRACE_URL_ENV = "NKI_TRACE_CACHE_URL"
 _STACK_PACKAGES = ("torch-neuronx", "nki", "neuronx-cc")
 
 CACHE_SUBDIR = "neuron"
-# torch-neuronx cache variables and their subdirectories under <cache root>/CACHE_SUBDIR.
+# torch-neuronx and nki cache variables and their subdirectories under <cache root>/CACHE_SUBDIR.
+# nki's trace cache defaults to /var/tmp, which outlives the root: a new root would not trace cold.
 CACHE_ENV_DIRS = {
     NEFF_CACHE_ENV: "neff",
     NEFF_LOCAL_CACHE_ENV: "neff_local",
     HLO_CACHE_ENV: "hlo",
+    NKI_TRACE_URL_ENV: "nki_trace",
 }
 
 # The torch-neuronx module that reads HLO_CACHE_ENV into its CACHE_DIR at import.
@@ -111,7 +118,7 @@ def resolve_exec_mode(value: str | None = None) -> str:
 def neuron_cache_env(
     root: str | os.PathLike[str] | None = None, *, env: Mapping[str, str] | None = None
 ) -> dict[str, str]:
-    """The three cache locations, by variable name.
+    """The cache locations, by variable name.
 
     A variable already set to a non-empty value in ``env`` (``os.environ`` by default) is
     kept verbatim; any other is ``<root>/neuron/<subdir>`` as an absolute path with ``~``
@@ -146,14 +153,17 @@ def configure_compile_cache(
     under ``env``'s ``DIFFLET_COMPILE_CACHE``, falling back to this process's
     (``neuron_cache_env``): ``neuron/neff`` for NEFFs
     (``cache_dir``), ``neuron/neff_local`` for the per-host compile locks (``local_cache_dir``),
-    ``neuron/hlo`` for the HLO cache (``hlo_cache_dir``). ``NKI_ENABLE_TRACE_CACHE`` is always
-    overwritten: ``import torch_neuronx`` defaults it to "1" (torch_neuronx/__init__.py:169),
-    and that cache can serve stale kernels, so it stays off unless asked for. torch-neuronx
-    creates the directories. Returns the values written to ``env`` (``os.environ`` by default).
+    ``neuron/hlo`` for the HLO cache (``hlo_cache_dir``), ``neuron/nki_trace`` for nki's
+    trace cache (``NKI_TRACE_CACHE_URL``). ``NKI_ENABLE_TRACE_CACHE`` is always
+    overwritten: on unless ``env``'s ``DIFFLET_NKI_TRACE_CACHE`` or ``NKI_ENABLE_TRACE_CACHE``
+    is a false value (``"0"``, ``"false"``, ``"no"``, ``"off"``), and always on with
+    ``nki_trace_cache=True``. torch-neuronx creates the directories. Returns the values
+    written to ``env`` (``os.environ`` by default).
 
     With the NKI trace cache on, a derived HLO location (the default, or one inherited from
-    ``env``) gets a subdirectory per stack version, so a stack upgrade cannot serve stale
-    kernels; an explicit ``hlo_cache_dir`` is used as given.
+    ``env``) gets a subdirectory per stack version, which keeps the cross-rank trace locks and
+    the eager HLO entries apart per stack (stale traces are nki's concern: its cache is per nki
+    version and checks each hit's dependencies); an explicit ``hlo_cache_dir`` is used as given.
 
     In a process that already imported torch, the HLO location moves the HLO cache entries but
     not the lock directory torch-neuronx fixed at import (module docstring). When this writes
@@ -161,13 +171,15 @@ def configure_compile_cache(
     it logs one warning per process saying so.
     """
     target = os.environ if env is None else env
-    nki_trace_cache = nki_trace_cache or str(target.get(NKI_TRACE_OPT_IN_ENV, "")).strip().lower() in (
-        "1", "true", "yes")
+    opt_outs = (target.get(NKI_TRACE_OPT_OUT_ENV), target.get(NKI_TRACE_CACHE_ENV))
+    nki_trace_cache = nki_trace_cache or not any(
+        str(v or "").strip().lower() in ("0", "false", "no", "off") for v in opt_outs)
     defaults = neuron_cache_env(env=target)
     explicit = {
         NEFF_CACHE_ENV: cache_dir,
         NEFF_LOCAL_CACHE_ENV: local_cache_dir,
         HLO_CACHE_ENV: hlo_cache_dir,
+        NKI_TRACE_URL_ENV: None,
     }
     settings = {
         var: defaults[var] if path is None else _absolute(path) for var, path in explicit.items()

@@ -133,6 +133,8 @@ def _build_stage_parser() -> argparse.ArgumentParser:
 
 
 def _export_backend_selection(args: argparse.Namespace) -> None:
+    # --attention is not a stage flag: the driver exported its variable (DIFFLET_ATTN_QUANT or
+    # DIFFLET_EXP_ATTN_CONSTMAX), and the stage inherits it.
     if args.backend is not None:
         os.environ["DIFFLET_BACKEND"] = args.backend
     if args.exec_mode is not None:

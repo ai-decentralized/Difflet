@@ -16,6 +16,7 @@ from types import SimpleNamespace  # noqa: E402
 from difflet.backends.neuron.ops_impl import parallel_mesh  # noqa: E402
 from difflet.pipeline.parallel_config import DiffletParallelConfig  # noqa: E402
 from tests.unit.backends._neuron_gloo import run_ranks  # noqa: E402
+from tests.unit.backends._neuron_ltx2_teacache import teacache_worker  # noqa: E402
 from tests.unit.backends._neuron_ltx2_toy import (  # noqa: E402
     TINY_SHAPE,
     TINY_TEXT_SEQ_LEN,
@@ -117,7 +118,9 @@ def _app(tiny, **kwargs):
 @pytest.mark.parametrize(
     ("kwargs", "error", "match"),
     [
-        ({"teacache_cadence": 2}, NotImplementedError, "TeaCache"),
+        ({"teacache_speedup": 1.5}, NotImplementedError, "TeaCache"),
+        ({"teacache_calibration_path": "/tmp/cal.json"}, NotImplementedError, "TeaCache"),
+        ({"teacache_fused": True}, NotImplementedError, "TeaCache"),
         ({"batch_size": 2}, NotImplementedError, "batch_size=1"),
         ({"bogus": 1}, TypeError, "unexpected keyword arguments: bogus"),
         ({"shapes": [[64, 96, 17], [64, 64, 17]]}, NotImplementedError, "one static shape"),
@@ -126,6 +129,36 @@ def _app(tiny, **kwargs):
 def test_application_refuses(tiny, kwargs, error, match):
     with pytest.raises(error, match=match):
         _app(tiny, **kwargs)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "field", "value"),
+    [({"teacache_cadence": 2}, "cadence", 2),
+     ({"teacache_online_delta_alpha": 0.6}, "online_delta_alpha", 0.6)],
+)
+def test_probe_free_teacache_reaches_the_orchestrator(tiny, kwargs, field, value):
+    app = _app(tiny, **kwargs)
+    pipeline = app._build_pipeline(app._orchestrator_class())
+    assert getattr(pipeline._teacache_controller.calibration, field) == value
+    plain = _app(tiny)
+    assert plain._build_pipeline(plain._orchestrator_class())._teacache_controller is None
+
+
+# Alpha 5: the tiny DiT's step deltas never fall under 0.6 of the baseline (nothing would skip).
+@pytest.mark.parametrize("kwargs", [{"teacache_cadence": 2}, {"teacache_online_delta_alpha": 5.0}])
+def test_probe_free_teacache_skips_both_cfg_forwards(tiny, kwargs):
+    # Warm-up 5 and cool-down 5 leave steps 5-8 of 14: both modes skip steps 6 and 8 (cadence 2;
+    # online-delta never skips twice in a row).
+    steps, skipped = 14, 2
+    [[first, second]] = run_ranks(teacache_worker, tiny.dir, kwargs, steps, world_size=1,
+                                  env=OFFLINE)
+    assert (first["steps"], first["full"], first["skipped"]) == (steps, steps - skipped, skipped)
+    assert first["dit_calls"] == 2 * (steps - skipped)  # a skipped step runs neither CFG forward
+    assert first["stats_line"]
+    for name in ("video", "audio"):
+        assert torch.tensor(first[name]).isfinite().all()
+    # The controller and the audio residual restart per call: the second request repeats the first.
+    assert second == first
 
 
 def test_application_accepts_the_trainium_cli_kwargs(tiny):

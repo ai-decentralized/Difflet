@@ -1,9 +1,10 @@
-"""Wan 2.2 on the GPU flow: both experts, UMT5 and the VAE on one GPU, driven by the
-backend-neutral ``WanOrchestrator``.
+"""Wan on the GPU flow: Wan 2.2's two experts (Wan 2.1's one transformer), UMT5 and the VAE
+on one GPU, driven by the backend-neutral ``WanOrchestrator``.
 
-* The two DiT experts are ``CudaWanTransformerApplication`` (the neutral
-  ``WanTransformer3DModel`` on ``difflet.ops``), each loaded from its own diffusers directory
-  and compiled into its own artifact subdirectory.
+* Each DiT expert (two on Wan 2.2, one on Wan 2.1) is a ``CudaWanTransformerApplication``:
+  the neutral ``WanTransformer3DModel`` on ``difflet.ops``, loaded from its own diffusers
+  directory and compiled into its own artifact subdirectory. In eager mode its blocks run the
+  fused forward of ``backends/cuda/wan/fused_block.py`` (see ``transformer.py``).
 * UMT5 (``transformers.UMT5EncoderModel``) sits behind the ``(input_ids, attention_mask) →
   embeds`` callable ``WanOrchestrator.encode_prompt`` expects.
 * diffusers' ``AutoencoderKLWan`` sits behind a decoder callable whose ``.config`` carries
@@ -15,7 +16,8 @@ backend-neutral ``WanOrchestrator``.
 (``model_index.json``) run ``transformer``, below it ``transformer_2``.
 
 **CFG.** ``guidance_scale > 1`` is the orchestrator's sequential cond + uncond passes per step;
-``guidance_scale_2`` applies below the boundary. Loop latents stay on the host in fp32 —
+``guidance_scale_2`` applies below the boundary, and a snapshot without one (Wan 2.1) refuses
+it. Loop latents stay on the host in fp32 —
 UniPC's corrector collapses in bf16 — and the DiT/VAE callables move tensors to the device per
 call and return host tensors.
 """
@@ -33,7 +35,8 @@ from difflet.models.wan.pipeline import _read_boundary_ratio
 from difflet.models.wan.spec import SPEC
 
 DEFAULT_STEPS = SPEC.default_steps
-DEFAULT_GUIDANCE_SCALE = SPEC.default_guidance_scale  # the high-noise stage
+# Every step on Wan 2.1, the high-noise stage on Wan 2.2.
+DEFAULT_GUIDANCE_SCALE = SPEC.default_guidance_scale
 DEFAULT_GUIDANCE_SCALE_2 = 3.0  # Wan 2.2's low-noise stage (below the boundary)
 
 
@@ -282,31 +285,51 @@ class CudaWanApplication(GpuApplication):
 
     # ---------------------------------------------------------- generation
 
+    def _low_noise_guidance_scale(self, guidance_scale_2: float | None) -> float | None:
+        """The scale the orchestrator applies below the expert boundary, or ``None`` when the
+        snapshot has no boundary, where a given value would be accepted and never read."""
+        if self.pipeline.boundary_ratio is None:
+            if guidance_scale_2 is not None:
+                raise ValueError(
+                    f"guidance_scale_2 has no effect on {self.model_path!r}: it has one "
+                    "transformer and no expert boundary (model_index.json has no "
+                    "boundary_ratio), so every step uses guidance_scale"
+                )
+            return None
+        if guidance_scale_2 is None:
+            return DEFAULT_GUIDANCE_SCALE_2
+        return float(guidance_scale_2)
+
     def generate(
         self,
         prompt: str | list[str],
         *,
         num_inference_steps: int = DEFAULT_STEPS,
         guidance_scale: float = DEFAULT_GUIDANCE_SCALE,
-        guidance_scale_2: float = DEFAULT_GUIDANCE_SCALE_2,
+        guidance_scale_2: float | None = None,
         negative_prompt: str | list[str] | None = None,
         seed: int | None = None,
         latents: torch.Tensor | None = None,
         num_frames: int | None = None,
         output_type: str = "pt",
     ):
-        """Text → video through the orchestrator's denoise loop with both experts.
+        """Text → video through the orchestrator's denoise loop with the snapshot's experts.
 
         ``latents`` is ``(B, C, F', H', W')`` initial noise used verbatim (the end-to-end
         oracle feeds the same tensor to stock diffusers); otherwise ``seed`` draws it with a
         host generator (``prepare_latents`` draws on the host). One shape is loaded, so a
         different ``num_frames`` is refused.
 
+        ``guidance_scale_2`` is the low-noise stage's scale on a snapshot with an expert
+        boundary (Wan 2.2; ``DEFAULT_GUIDANCE_SCALE_2`` when unset). A snapshot without one
+        (Wan 2.1) runs every step at ``guidance_scale`` and refuses ``guidance_scale_2``.
+
         Returns the ``(B, 3, F, H, W)`` frames tensor in ``[-1, 1]`` for ``"pt"``, the
         latents for ``"latent"``.
         """
         if self.pipeline is None:
             raise RuntimeError("application is not loaded; call load() first")
+        guidance_scale_2 = self._low_noise_guidance_scale(guidance_scale_2)
         if not isinstance(prompt, str) and len(prompt) > 1:
             raise NotImplementedError(
                 f"Wan generates one prompt at a time on the GPU flow, got {len(prompt)}; "
@@ -326,7 +349,7 @@ class CudaWanApplication(GpuApplication):
             negative_prompt=negative_prompt,
             num_inference_steps=int(num_inference_steps),
             guidance_scale=float(guidance_scale),
-            guidance_scale_2=None if guidance_scale_2 is None else float(guidance_scale_2),
+            guidance_scale_2=guidance_scale_2,
             latents=latents,
             channels=int(self.config.in_channels),
             num_frames=loaded_frames,

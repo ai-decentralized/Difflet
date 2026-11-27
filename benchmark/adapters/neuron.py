@@ -30,13 +30,13 @@ from pathlib import Path
 from typing import Any
 
 from benchmark.harness import BackendAdapter, OutputInfo, Stats
-from difflet.backends.neuron.compile import CACHE_ENV_DIRS, neuron_cache_env
+from difflet.backends.neuron.compile import CACHE_ENV_DIRS, CACHE_SUBDIR, neuron_cache_env
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BENCH_SCRIPT = REPO_ROOT / "benchmark" / "neuron_wan_bench.py"
 WORLD = 4
 
-#: torch-neuronx's three cache locations; a launch takes them from its row's cache root only.
+#: torch-neuronx's and nki's cache locations; a launch takes them from its row's cache root only.
 CACHE_ENV_VARS = tuple(CACHE_ENV_DIRS)
 #: torchrun owns these; a copy inherited from the shell must not reach a launch.
 TORCHRUN_RANK_ENV = ("WORLD_SIZE", "RANK", "LOCAL_RANK", "LOCAL_WORLD_SIZE", "MASTER_ADDR",
@@ -92,8 +92,8 @@ def launch_env(base: Mapping[str, str], *, cache_root: str | os.PathLike[str],
     are torchrun's rank variables, ``DIFFLET_BACKEND`` / ``DIFFLET_EXEC_MODE`` (the command
     names them), a stale core count or ``OMP_NUM_THREADS``, which is set only to
     ``omp_threads`` when given (the bench launch: ``BENCH_OMP_THREADS``; a CLI launch: unset,
-    D82). ``export_cache_dirs`` (the bare torchrun bench launch) then exports the three
-    locations under ``cache_root`` plus ``NKI_ENABLE_TRACE_CACHE=0``, exactly what
+    D82). ``export_cache_dirs`` (the bare torchrun bench launch) then exports the cache
+    locations under ``cache_root`` plus ``NKI_ENABLE_TRACE_CACHE``, exactly what
     ``difflet.cli.runner.run_stage`` exports to its ranks, so they are set before the ranks
     import torch. A CLI launch leaves that to the launcher. ``metrics_dir`` turns on
     torch-neuronx's per-graph CSV (``graph_stats``) into that directory.
@@ -111,8 +111,9 @@ def launch_env(base: Mapping[str, str], *, cache_root: str | os.PathLike[str],
         from difflet.backends.neuron.compile import configure_compile_cache
 
         configure_compile_cache(env=env)
-        expected = neuron_cache_env(root=env["DIFFLET_COMPILE_CACHE"], env={})
-        if any(env[name] != expected[name] for name in CACHE_ENV_VARS):
+        # under the row's neuron dir; the HLO one may carry the trace cache's stack subdirectory
+        base = Path(env["DIFFLET_COMPILE_CACHE"], CACHE_SUBDIR)
+        if not all(Path(env[name]).is_relative_to(base) for name in CACHE_ENV_VARS):
             raise AssertionError(f"cache locations {[env[n] for n in CACHE_ENV_VARS]} are not "
                                  f"under {env['DIFFLET_COMPILE_CACHE']}")
     if metrics_dir is not None:
@@ -122,7 +123,7 @@ def launch_env(base: Mapping[str, str], *, cache_root: str | os.PathLike[str],
 
 
 def cache_dirs(cache_root: str | os.PathLike[str]) -> dict[str, Path]:
-    """``neff``, ``neff_local`` and ``hlo`` under ``<cache_root>/neuron``."""
+    """``neff``, ``neff_local``, ``hlo`` and ``nki_trace`` under ``<cache_root>/neuron``."""
     locations = neuron_cache_env(root=os.fspath(cache_root), env={})
     return {CACHE_ENV_DIRS[name]: Path(path) for name, path in locations.items()}
 

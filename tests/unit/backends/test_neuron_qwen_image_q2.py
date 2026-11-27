@@ -42,6 +42,7 @@ from tests.unit.backends._neuron_qwen_app_toy import (  # noqa: E402
     tokenizer_available,
     write_tiny_qwen_snapshot,
 )
+from tests.unit.backends._neuron_qwen_teacache_worker import q2_teacache_worker  # noqa: E402
 from tests.unit.backends._neuron_qwen_toy import (  # noqa: E402
     TINY_PACKED,
     TINY_SHAPE,
@@ -210,8 +211,6 @@ def test_kwargs_mirror_the_cli_and_reject_phase1_limits(tiny):
                        shapes=[[32, 48]])
     assert single.config.image_seq_len == 6 and single.shape["height"] == 32
     for kwargs, match in (
-        ({"teacache_cadence": 2}, "TeaCache"),
-        ({"teacache_online_delta_alpha": 0.5}, "TeaCache"),
         ({"teacache_calibration_path": "/x.json"}, "TeaCache"),
         ({"teacache_speedup": 1.5}, "TeaCache"),
         ({"teacache_calibration": object()}, "TeaCache"),
@@ -237,6 +236,37 @@ def test_kwargs_mirror_the_cli_and_reject_phase1_limits(tiny):
     assert fp32.text_encoder.dtype is torch.float32
     assert _composed(tiny, enable_text_encoder=True).text_encoder.dtype is torch.bfloat16
     assert fp32.text_encoder.enc_seq_len == qwen_common.ENC_SEQ == 256
+
+
+def test_probe_free_teacache_kwargs_reach_the_orchestrator(tiny):
+    def controller(**kwargs):
+        app = _composed(tiny, **kwargs)
+        return app._build_pipeline(app._orchestrator_class()).teacache_controller
+
+    assert controller() is None
+    cadence = controller(teacache_cadence=2)
+    assert (cadence.calibration.cadence, cadence.calibration.online_delta_alpha) == (2, 0.0)
+    assert not cadence.needs_signal()  # host decisions only: no probe
+    online = controller(teacache_online_delta_alpha=0.6).calibration
+    assert (online.cadence, online.online_delta_alpha) == (0, 0.6)
+
+
+# alpha 2.0: the toy's step-to-step deltas stay near their baseline, so 0.6 would skip nothing.
+@pytest.mark.parametrize("teacache", [{"teacache_cadence": 2},
+                                      {"teacache_online_delta_alpha": 2.0}])
+def test_end_to_end_probe_free_teacache_decides_alike_on_both_tp_ranks(tiny, teacache):
+    results = run_ranks(q2_teacache_worker, tiny.dir, teacache, world_size=2, env=OFFLINE)
+    stats = results[0]["stats"]
+    assert stats["full_steps"] + stats["skipped_steps"] == 12 and stats["skipped_steps"] > 0
+    if "teacache_cadence" in teacache:
+        assert stats["skipped_steps"] == 1  # warm-up 5, cool-down 5: of 12 steps only step 6
+    for result in results:
+        # A rank that skipped alone would leave the other waiting in the DiT's collectives.
+        assert result["stats"] == stats
+        # The controller is reset per call: the second request repeats the first.
+        assert result["sha256"] == [results[0]["sha256"][0]] * 2
+        assert result["out"].count(f"[teacache] stats: {stats}\n") == 2
+        assert (result["steps"], result["forwards"]) == (24, 2 * stats["full_steps"])
 
 
 def test_dit_contract_and_call_dispatch(tiny):

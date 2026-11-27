@@ -171,6 +171,9 @@ def test_pipeline_neuron_single_rank_skips_compile(tmp_path, monkeypatch):
     from difflet.backends.neuron import compile as neuron_compile
 
     monkeypatch.setattr(neuron_compile, "_hlo_cache_warned", False)
+    # prepare_runtime imports torch_neuronx; a stub keeps the real one (and the device) out.
+    monkeypatch.setitem(sys.modules, "torch_neuronx",
+                        SimpleNamespace(is_neuron_runtime_initialized=lambda: False))
 
     pipe = _dummy_pipeline(tmp_path, "neuron")
 

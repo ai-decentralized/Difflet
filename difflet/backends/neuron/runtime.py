@@ -110,6 +110,10 @@ class NeuronBackend(BackendRuntime):
         install_neuron_workarounds()  # strided bool bitwise ops; bf16 Layer/GroupNorm in fp32
         configure_compile_cache()
         bind_core()
+        # The CLI launches neuron stages with torch's backend autoload off (cli.main), so the
+        # device is registered here, before any device work.
+        import torch_neuronx  # noqa: F401
+
         init_process_group()
         _runtime_prepared = True
 

@@ -30,9 +30,11 @@ CACHE_VARS = (
     "TORCH_NEURONX_NEFF_CACHE_DIR",
     "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR",
     "TORCH_NEURONX_HLO_CACHE_DIR",
+    "NKI_TRACE_CACHE_URL",
     "NKI_ENABLE_TRACE_CACHE",
 )
 HLO_CACHE_MODULE = "torch_neuronx.python_ops.compilation.hlo_cache"
+TAG = neuron_compile.stack_version_tag()  # the HLO subdirectory the default trace cache adds
 COMPILE_LOGGER = "difflet.backends.neuron.compile"
 
 
@@ -154,8 +156,9 @@ def test_configure_compile_cache_defaults_under_the_difflet_cache(monkeypatch, t
     assert settings == env == {
         "TORCH_NEURONX_NEFF_CACHE_DIR": str(tmp_path / "neuron" / "neff"),
         "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR": str(tmp_path / "neuron" / "neff_local"),
-        "TORCH_NEURONX_HLO_CACHE_DIR": str(tmp_path / "neuron" / "hlo"),
-        "NKI_ENABLE_TRACE_CACHE": "0",
+        "TORCH_NEURONX_HLO_CACHE_DIR": str(tmp_path / "neuron" / "hlo" / TAG),
+        "NKI_TRACE_CACHE_URL": str(tmp_path / "neuron" / "nki_trace"),
+        "NKI_ENABLE_TRACE_CACHE": "1",
     }
     assert not (tmp_path / "neuron").exists()  # torch-neuronx creates the directories itself
 
@@ -169,13 +172,16 @@ def test_configure_compile_cache_keeps_launcher_dirs_but_forces_the_trace_cache_
         "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR": "/local/locks",
         "TORCH_NEURONX_HLO_CACHE_DIR": "/shared/hlo",
         "NKI_ENABLE_TRACE_CACHE": "1",  # what `import torch_neuronx` sets by default
+        "DIFFLET_NKI_TRACE_CACHE": "0",
     }
     neuron_compile.configure_compile_cache(env=env)
     assert env == {
         "TORCH_NEURONX_NEFF_CACHE_DIR": "/shared/neff",
         "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR": "/local/locks",
         "TORCH_NEURONX_HLO_CACHE_DIR": "/shared/hlo",
+        "NKI_TRACE_CACHE_URL": str(tmp_path / "neuron" / "nki_trace"),
         "NKI_ENABLE_TRACE_CACHE": "0",
+        "DIFFLET_NKI_TRACE_CACHE": "0",
     }
 
 
@@ -186,8 +192,9 @@ def test_configure_compile_cache_inherits_the_hlo_dir_alone(monkeypatch, tmp_pat
     assert env == {
         "TORCH_NEURONX_NEFF_CACHE_DIR": str(tmp_path / "neuron" / "neff"),
         "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR": str(tmp_path / "neuron" / "neff_local"),
-        "TORCH_NEURONX_HLO_CACHE_DIR": "/shared/hlo",
-        "NKI_ENABLE_TRACE_CACHE": "0",
+        "TORCH_NEURONX_HLO_CACHE_DIR": f"/shared/hlo/{TAG}",
+        "NKI_TRACE_CACHE_URL": str(tmp_path / "neuron" / "nki_trace"),
+        "NKI_ENABLE_TRACE_CACHE": "1",
     }
 
 
@@ -196,6 +203,7 @@ def test_configure_compile_cache_explicit_arguments_win(tmp_path):
         "TORCH_NEURONX_NEFF_CACHE_DIR": "/shared/neff",
         "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR": "/local/locks",
         "TORCH_NEURONX_HLO_CACHE_DIR": "/shared/hlo",
+        "NKI_TRACE_CACHE_URL": "/shared/trace",
     }
     neuron_compile.configure_compile_cache(
         tmp_path / "neff",
@@ -208,6 +216,7 @@ def test_configure_compile_cache_explicit_arguments_win(tmp_path):
         "TORCH_NEURONX_NEFF_CACHE_DIR": str(tmp_path / "neff"),
         "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR": str(tmp_path / "locks"),
         "TORCH_NEURONX_HLO_CACHE_DIR": str(tmp_path / "hlo"),
+        "NKI_TRACE_CACHE_URL": "/shared/trace",
         "NKI_ENABLE_TRACE_CACHE": "1",
     }
 
@@ -227,7 +236,8 @@ def test_configure_compile_cache_explicit_neff_dirs_leave_the_hlo_dir_at_its_def
         "TORCH_NEURONX_NEFF_CACHE_DIR": str(tmp_path / "neff"),
         "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR": str(tmp_path / "locks"),
         # the trace cache on: the default HLO location gets its stack-version subdirectory
-        "TORCH_NEURONX_HLO_CACHE_DIR": str(tmp_path / "root" / "neuron" / "hlo" / neuron_compile.stack_version_tag()),
+        "TORCH_NEURONX_HLO_CACHE_DIR": str(tmp_path / "root" / "neuron" / "hlo" / TAG),
+        "NKI_TRACE_CACHE_URL": str(tmp_path / "root" / "neuron" / "nki_trace"),
         "NKI_ENABLE_TRACE_CACHE": "1",
     }
 
@@ -258,8 +268,8 @@ def test_configure_compile_cache_writes_the_process_environment(monkeypatch, tmp
     monkeypatch.setattr(neuron_compile, "_hlo_cache_warned", True)  # no log about the real one
     neuron_compile.configure_compile_cache()
     assert os.environ["TORCH_NEURONX_NEFF_CACHE_DIR"] == str(tmp_path / "neuron" / "neff")
-    assert os.environ["TORCH_NEURONX_HLO_CACHE_DIR"] == str(tmp_path / "neuron" / "hlo")
-    assert os.environ["NKI_ENABLE_TRACE_CACHE"] == "0"
+    assert os.environ["TORCH_NEURONX_HLO_CACHE_DIR"] == str(tmp_path / "neuron" / "hlo" / TAG)
+    assert os.environ["NKI_ENABLE_TRACE_CACHE"] == "1"
 
 
 @pytest.fixture
@@ -293,7 +303,7 @@ def test_configure_compile_cache_logs_once_that_an_imported_torch_neuronx_keeps_
     assert len(records) == 1
     assert records[0].levelno == logging.WARNING
     message = records[0].getMessage()
-    assert f"TORCH_NEURONX_HLO_CACHE_DIR={tmp_path / 'neuron' / 'hlo'} was set" in message
+    assert f"TORCH_NEURONX_HLO_CACHE_DIR={tmp_path / 'neuron' / 'hlo' / TAG} was set" in message
     assert "HLO lowering locks stay in /tmp/hlo_cache" in message
     assert "processes started with the new value" in message
 
@@ -301,7 +311,7 @@ def test_configure_compile_cache_logs_once_that_an_imported_torch_neuronx_keeps_
 def test_configure_compile_cache_does_not_log_when_the_hlo_dir_already_matches(
     fake_hlo_cache, caplog, tmp_path
 ):
-    fake_hlo_cache.CACHE_DIR = str(tmp_path / "neuron" / "hlo") + "/"  # the same directory
+    fake_hlo_cache.CACHE_DIR = str(tmp_path / "neuron" / "hlo" / TAG) + "/"  # the same directory
     with caplog.at_level(logging.WARNING, logger=COMPILE_LOGGER):
         neuron_compile.configure_compile_cache()
     assert _compile_log_records(caplog) == []
@@ -332,8 +342,23 @@ def test_prepare_runtime_configures_the_cache_before_binding_a_core(monkeypatch)
     monkeypatch.setattr(runtime, "bind_core", lambda: calls.append("bind"))
     monkeypatch.setattr(runtime, "init_process_group", lambda: calls.append("pg"))
     monkeypatch.delenv("WORLD_SIZE", raising=False)
+    _fake_torch_neuronx(monkeypatch, False)
     runtime.NeuronBackend().prepare_runtime(DiffletParallelConfig())
     assert calls == ["cache", "bind", "pg"]
+
+
+def test_prepare_runtime_imports_torch_neuronx_after_binding_the_core(monkeypatch):
+    """The CLI launches neuron stages with torch's backend autoload off, so prepare_runtime
+    registers the device itself (a None entry fails the import where it happens)."""
+    calls = []
+    monkeypatch.setattr(runtime, "configure_compile_cache", lambda: calls.append("cache"))
+    monkeypatch.setattr(runtime, "bind_core", lambda: calls.append("bind"))
+    monkeypatch.setattr(runtime, "init_process_group", lambda: calls.append("pg"))
+    monkeypatch.delenv("WORLD_SIZE", raising=False)
+    monkeypatch.setitem(sys.modules, "torch_neuronx", None)
+    with pytest.raises(ImportError, match="torch_neuronx"):
+        runtime.NeuronBackend().prepare_runtime(DiffletParallelConfig())
+    assert calls == ["cache", "bind"]
 
 
 def test_prepare_runtime_leaves_the_env_alone_when_the_config_is_rejected(monkeypatch):
@@ -822,8 +847,8 @@ def test_launcher_exports_the_cache_settings_to_every_rank(monkeypatch, tmp_path
     env = {"TORCH_NEURONX_NEFF_CACHE_DIR": "/shared/neff"}
     runner._prepare_mpmd_env(env, 4, strict_environment=False)
     assert env["TORCH_NEURONX_NEFF_CACHE_DIR"] == "/shared/neff"
-    assert env["TORCH_NEURONX_HLO_CACHE_DIR"] == str(tmp_path / "neuron" / "hlo")
-    assert env["NKI_ENABLE_TRACE_CACHE"] == "0"
+    assert env["TORCH_NEURONX_HLO_CACHE_DIR"] == str(tmp_path / "neuron" / "hlo" / TAG)
+    assert env["NKI_ENABLE_TRACE_CACHE"] == "1"
 
 
 @pytest.mark.parametrize(("exported", "expected"), [

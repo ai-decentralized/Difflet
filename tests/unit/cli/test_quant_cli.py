@@ -1,6 +1,7 @@
-"""The CLI's MXFP8 flags (``difflet/cli/quant.py``): parsing on compile/generate/run, the
-driver's refusals, the spec and its forwarding to the stage parser and the DP workers, and the
-Qwen-Image and LTX-2 DiT stage keys (additive: a bf16 command line's key is unchanged)."""
+"""The CLI's MXFP8 flags (``difflet/cli/quant.py``) and ``--attention mx_attention``: parsing on
+compile/generate/run, the driver's refusals, the spec and its forwarding to the stage parser and
+the DP workers (the attention switch through the environment), and the DiT stage keys
+(additive: a bf16 command line's key is unchanged)."""
 
 from __future__ import annotations
 
@@ -140,9 +141,9 @@ def tiny_dir(tmp_path_factory):
 
 @pytest.fixture
 def _trace_cache_restored(monkeypatch):
-    """Undo the DIFFLET_NKI_TRACE_CACHE the preparer sets with os.environ.setdefault: setenv
-    first records the variable's original state (delenv of an unset variable records
-    nothing, and the value leaked into later tests' compile-cache layout)."""
+    """No DIFFLET_NKI_TRACE_CACHE, and whatever a test sets undone afterwards: setenv first
+    records the variable's original state (delenv of an unset variable records nothing, and
+    a value leaked into later tests' compile-cache layout)."""
     monkeypatch.setenv("DIFFLET_NKI_TRACE_CACHE", "")
     monkeypatch.delenv("DIFFLET_NKI_TRACE_CACHE")
 
@@ -159,7 +160,7 @@ def test_prepare_quant_writes_on_create_and_refuses_when_missing(
     assert (Path(out["transformer"]) / "difflet_quant.json").is_file()
     assert Path(out["transformer"]).is_relative_to(tmp_path)
     assert capsys.readouterr().out.startswith(f"[t] MXFP8 transformer (nki): {out['transformer']}")
-    assert os.environ["DIFFLET_NKI_TRACE_CACHE"] == "1"
+    assert "DIFFLET_NKI_TRACE_CACHE" not in os.environ  # the trace cache is on by default
     # Resolve-only now finds it, and a second component is prepared under its own name.
     both = Q.prepare_quant(args, {"transformer": tiny_dir, "twin": tiny_dir}, create=False,
                            tag="t")
@@ -207,8 +208,7 @@ def test_each_driver_refuses_quant_the_way_it_refuses_everything_else(
 def test_prepare_quant_is_off_without_the_flag_or_the_weights(tmp_path, capsys,
                                                               _trace_cache_restored):
     """None and no line when --quant is off, or when the weights are not downloaded yet (the
-    ranks report that); the trace-cache choice is still made for the ranks in the second case,
-    and dequant compute leaves it alone."""
+    ranks report that); the trace-cache setting is never touched (on by default)."""
     missing = {"transformer": str(tmp_path / "not-downloaded" / "transformer")}
     assert Q.prepare_quant(_parse("compile", "--model-id", QWEN), missing, create=True,
                            tag="t") is None
@@ -220,7 +220,7 @@ def test_prepare_quant_is_off_without_the_flag_or_the_weights(tmp_path, capsys,
     args = _parse("compile", "--model-id", QWEN, "--backend", "neuron", "--quant", "mxfp8")
     assert Q.prepare_quant(args, missing, create=True, tag="t") is None
     assert Q.prepare_quant(args, {}, create=True, tag="t") is None
-    assert os.environ["DIFFLET_NKI_TRACE_CACHE"] == "1"
+    assert "DIFFLET_NKI_TRACE_CACHE" not in os.environ
     assert capsys.readouterr() == ("", "")
 
 
@@ -282,10 +282,10 @@ def test_application_kwargs_carry_the_spec(monkeypatch):
     assert "quant" not in _torchrun_application_kwargs(_parse("generate", "--model-id", QWEN))
 
 
-def test_the_kernel_path_turns_on_the_nki_trace_cache(monkeypatch, tmp_path,
-                                                      _trace_cache_restored):
-    """--quant mxfp8 (kernel compute) sets DIFFLET_NKI_TRACE_CACHE=1 for the ranks before any
-    launch unless the user chose; dequant compute and no --quant leave it alone."""
+def test_quant_leaves_the_nki_trace_cache_setting_alone(monkeypatch, tmp_path,
+                                                        _trace_cache_restored):
+    """The trace cache is on by default (neuron.compile), so no --quant path sets
+    DIFFLET_NKI_TRACE_CACHE, and a user's opt-out reaches the ranks unchanged."""
     cli_main = importlib.import_module("difflet.cli.main")
     monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
     monkeypatch.setenv("DIFFLET_EXEC_MODE", "compile")
@@ -304,7 +304,7 @@ def test_the_kernel_path_turns_on_the_nki_trace_cache(monkeypatch, tmp_path,
     prepare("--quant", "mxfp8", "--quant-compute", "dequant")
     assert "DIFFLET_NKI_TRACE_CACHE" not in os.environ
     prepare("--quant", "mxfp8")
-    assert os.environ["DIFFLET_NKI_TRACE_CACHE"] == "1"
+    assert "DIFFLET_NKI_TRACE_CACHE" not in os.environ
     monkeypatch.setenv("DIFFLET_NKI_TRACE_CACHE", "0")
     prepare("--quant", "mxfp8")
     assert os.environ["DIFFLET_NKI_TRACE_CACHE"] == "0"
@@ -561,3 +561,310 @@ def test_ltx2_driver_refuses_a_dead_target_pattern_before_writing(
     assert err.endswith(f": {dead}; nothing was launched.\n")
     assert orch._quantized_dit is None
     assert not (tmp_path / "quantized").exists()
+
+
+# ------------------------------------------------------------------ --attention mx_attention
+
+
+def _isolate_env(monkeypatch, *names):
+    """Unset ``names`` now and restore them after the test, even when the code under test
+    assigns os.environ itself (delenv of an absent name records nothing to undo)."""
+    for name in names:
+        monkeypatch.setenv(name, "")
+        monkeypatch.delenv(name)
+
+
+_SWITCHES = ("DIFFLET_ATTN_QUANT", "DIFFLET_EXP_ATTN_CONSTMAX")
+
+
+@pytest.mark.parametrize("command", ["compile", "generate", "run"])
+def test_mx_attention_is_an_attention_kernel_and_attn_quant_is_gone(command):
+    """The MXFP8 kernel is the third ``--attention`` value; the former ``--attn-quant`` flag is
+    refused by the CLI parser, and the stage parser does not declare it either."""
+    assert _parse(command, "--model-id", QWEN, "--attention", "mx_attention").attention == \
+        "mx_attention"
+    assert _parse(command, "--model-id", QWEN).attention is None  # absent: the environment's
+    for bad in (["--attn-quant", "qk+pv"], ["--attn-quant", "pv"], ["--attention", "qk+pv"],
+                ["--attention", "mxfp8"]):
+        with pytest.raises(SystemExit):
+            _parse(command, "--model-id", QWEN, *bad)
+    parsed, extra = _build_stage_parser().parse_known_args(
+        ["--orchestrator", QWEN, "--stage", "generate", "--attn-quant", "qk+pv"])
+    assert extra == ["--attn-quant", "qk+pv"] and not hasattr(parsed, "attn_quant")
+
+
+def test_the_attention_help_carries_mx_attentions_cost_and_scope():
+    """A user who finds mx_attention in --help learns what runs in MXFP8, where it runs, that
+    it is slower and costs quality on some models, and that it is independent of --quant."""
+    cli_main = importlib.import_module("difflet.cli.main")
+    assert cli_main.ATTENTION_CHOICES == ("cte", "const-max", "mx_attention")
+    generate = next(a for a in cli_main._build_parser()._actions
+                    if isinstance(a, argparse._SubParsersAction)).choices["generate"]
+    help_text = " ".join(next(a.help for a in generate._actions if a.dest == "attention").split())
+    for words in ("'mx_attention': Difflet's MXFP8 attention kernel for self/joint attention",
+                  "QK^T and PV on nc_matmul_mx", "the softmax and cross-attention stay bf16",
+                  "trn3, compile mode, models with MXFP8 target layers", "slower than cte",
+                  "costs quality on some models", "independent of --quant",
+                  "DIFFLET_ATTN_QUANT=mxfp8"):
+        assert words in help_text, words
+
+
+@pytest.mark.parametrize("attention, ambient, want", [
+    ("mx_attention", (None, "1"), ("mxfp8", None)),     # exports its switch, clears const-max's
+    ("mx_attention", ("off", None), ("mxfp8", None)),   # over an exported value
+    ("const-max", ("mxfp8", None), (None, "1")),        # exports its switch, clears the MX one
+    ("cte", ("mxfp8", "1"), (None, None)),              # clears both
+    (None, ("mxfp8", None), ("mxfp8", None)),           # absent: the environment as it was
+    (None, (None, "1"), (None, "1")),
+    (None, (None, None), (None, None)),
+])
+def test_attention_exports_one_kernels_switch_and_clears_the_other(monkeypatch, attention,
+                                                                   ambient, want):
+    """``--attention`` picks one kernel, so DIFFLET_ATTN_QUANT and DIFFLET_EXP_ATTN_CONSTMAX are
+    never both left set by the flag; without it the ambient environment is kept."""
+    cli_main = importlib.import_module("difflet.cli.main")
+    _isolate_env(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE", *_SWITCHES)
+    for name, value in zip(_SWITCHES, ambient):
+        if value is not None:
+            monkeypatch.setenv(name, value)
+    cli_main._apply_backend_flags(argparse.Namespace(backend="neuron", exec_mode=None,
+                                                     attention=attention, model_id=QWEN))
+    assert tuple(os.environ.get(name) for name in _SWITCHES) == want
+
+
+def test_mx_attention_on_another_backend_exits_before_anything_is_exported(monkeypatch, capsys):
+    cli_main = importlib.import_module("difflet.cli.main")
+    _isolate_env(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE", *_SWITCHES)
+    monkeypatch.setenv("DIFFLET_EXP_ATTN_CONSTMAX", "1")
+    with pytest.raises(SystemExit) as exc:
+        cli_main._apply_backend_flags(argparse.Namespace(backend="trainium", exec_mode=None,
+                                                         attention="mx_attention", model_id=QWEN))
+    assert exc.value.code == 2
+    assert "--attention mx_attention runs on the neuron backend only" in capsys.readouterr().err
+    assert "DIFFLET_ATTN_QUANT" not in os.environ and "DIFFLET_BACKEND" not in os.environ
+    assert os.environ["DIFFLET_EXP_ATTN_CONSTMAX"] == "1"
+
+
+def test_mx_attention_is_independent_of_quant_and_refused_where_it_cannot_run(capsys,
+                                                                              monkeypatch):
+    _isolate_env(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE", "UNSAFE_FP8FNCAST",
+                 *_SWITCHES)
+    base = dict(model_id=QWEN, backend="neuron", quant=None, quant_compute=None,
+                attention="mx_attention", exec_mode=None, teacache_speedup=None)
+    Q.validate_quant(argparse.Namespace(**base))  # without --quant
+    Q.validate_quant(argparse.Namespace(**{**base, "quant": "mxfp8"}))  # with it
+    Q.validate_quant(argparse.Namespace(**{**base, "teacache_speedup": 1.5}))  # --quant's rule
+    for other in ("cte", "const-max", None):  # the other kernels: none of its checks
+        Q.validate_quant(argparse.Namespace(**{**base, "attention": other, "backend": None,
+                                               "exec_mode": "eager"}))
+    _refused(argparse.Namespace(**{**base, "backend": "trainium"}),
+             "--attention mx_attention runs on the PyTorch-native neuron backend only", capsys)
+    _refused(argparse.Namespace(**{**base, "model_id": "MiniMaxAI/MiniMax-H3"}),
+             "--attention mx_attention is not available for", capsys)
+    monkeypatch.setenv("DIFFLET_ATTN_QUANT", "mxfp8")  # exported, no flag: H3 refuses it as well
+    _refused(argparse.Namespace(**{**base, "model_id": "MiniMaxAI/MiniMax-H3", "attention": None}),
+             "DIFFLET_ATTN_QUANT=mxfp8 (--attention mx_attention) is not available for", capsys)
+    monkeypatch.delenv("DIFFLET_ATTN_QUANT")
+    _refused(argparse.Namespace(**{**base, "exec_mode": "eager"}),
+             "--attention mx_attention needs the compiled DiT", capsys)
+    monkeypatch.setenv("UNSAFE_FP8FNCAST", "1")
+    _refused(argparse.Namespace(**base), "UNSAFE_FP8FNCAST", capsys)
+
+
+@pytest.mark.parametrize("cp_mode, cp_degree, refused", [
+    ("ring", 2, True), ("ulysses", 2, True), ("gather_kv", 2, False), ("ring", 1, False),
+    ("ulysses", None, False)])
+def test_mx_attention_is_refused_where_context_parallelism_keeps_attention_bf16(
+        capsys, monkeypatch, cp_mode, cp_degree, refused):
+    """Ring and Ulysses send every self/joint attention call through their bf16 paths: the
+    kernel would quantize nothing (and still fork the stage key)."""
+    _isolate_env(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE", "UNSAFE_FP8FNCAST",
+                 *_SWITCHES)
+    args = argparse.Namespace(model_id=QWEN, backend="neuron", quant=None, quant_compute=None,
+                              attention="mx_attention", exec_mode=None, teacache_speedup=None,
+                              cp_mode=cp_mode, cp_degree=cp_degree)
+    if refused:
+        _refused(args, f"--attention mx_attention with --cp-mode {cp_mode}", capsys)
+    else:
+        Q.validate_quant(args)
+    Q.validate_quant(argparse.Namespace(**{**vars(args), "attention": None, "quant": "mxfp8"}))
+
+
+@pytest.mark.parametrize("value, refused", [
+    ("qk+pv", "the qk / pv variants are gone"), ("qk", "'qk'"), ("pv", "'pv'"),
+    ("both", "'both'"), ("", None), ("off", None), ("mxfp8", None)])
+def test_the_driver_checks_an_exported_switch_before_anything_launches(
+        capsys, monkeypatch, value, refused):
+    """Without ``--attention`` an exported value is kept: the driver refuses a bad one (the
+    former variants too) in one line, as its other refusals, not as a traceback from a cache key
+    or a rank's import."""
+    _isolate_env(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE", "UNSAFE_FP8FNCAST",
+                 *_SWITCHES)
+    monkeypatch.setenv("DIFFLET_ATTN_QUANT", value)
+    args = argparse.Namespace(model_id=QWEN, backend="neuron", quant=None, quant_compute=None,
+                              attention=None, exec_mode=None, teacache_speedup=None)
+    if refused:
+        _refused(args, refused, capsys)
+    else:
+        Q.validate_quant(args)
+
+
+def test_the_driver_refuses_both_attention_switches_exported(capsys, monkeypatch):
+    """An ambient pair (``--attention`` clears one of them) names both variables, before any
+    rank's import of the neuron attention would refuse it."""
+    _isolate_env(monkeypatch, "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE", "UNSAFE_FP8FNCAST",
+                 *_SWITCHES)
+    monkeypatch.setenv("DIFFLET_ATTN_QUANT", "mxfp8")
+    monkeypatch.setenv("DIFFLET_EXP_ATTN_CONSTMAX", "1")
+    args = argparse.Namespace(model_id=QWEN, backend="neuron", quant=None, quant_compute=None,
+                              attention=None, exec_mode=None, teacache_speedup=None)
+    _refused(args, "DIFFLET_ATTN_QUANT=mxfp8 and DIFFLET_EXP_ATTN_CONSTMAX=1 select different "
+             "attention kernels", capsys)
+    monkeypatch.setenv("DIFFLET_ATTN_QUANT", "off")
+    Q.validate_quant(args)
+
+
+def test_mx_attention_reaches_stages_and_dp_workers_through_the_environment():
+    """Nothing is forwarded on a stage or worker line (as for const-max): stages and DP workers
+    inherit the exported DIFFLET_ATTN_QUANT."""
+    args = _parse("generate", "--model-id", QWEN, "--backend", "neuron", "--attention",
+                  "mx_attention")
+    assert Q.quant_cli_args(args) == []
+
+    from difflet.cli.dp.router import worker_cli_args
+
+    args.dp = 2
+    worker = worker_cli_args(args)
+    assert "--attention" not in worker and "--attn-quant" not in worker
+    assert _parse("generate", *worker).attention is None  # the worker keeps the environment's
+
+
+_ORDER_PROBE = """
+import importlib, os, sys
+m = importlib.import_module("difflet.cli.main")
+def stop(args):  # the orchestrator: the first code that imports a backend module
+    pre = "difflet.backends.neuron.ops_impl.attention" in sys.modules
+    # What the import resolves is under test, not the kernel: with the switch on, the import
+    # loads the MX op, which needs torch-neuronx (absent on a CPU host such as CI).
+    from difflet.backends.neuron.ops_impl import mx_attention
+    mx_attention.load_op = lambda: None
+    from difflet.backends.neuron.ops_impl import attention
+    print("RESULT", pre, os.environ.get("DIFFLET_ATTN_QUANT"),
+          os.environ.get("DIFFLET_EXP_ATTN_CONSTMAX"), attention.ATTN_QUANT, attention._CONSTMAX)
+    raise SystemExit(0)
+m._get_orchestrator = stop
+m.main(sys.argv[1:])
+"""
+
+
+@pytest.mark.parametrize("flag, env, expect", [
+    ("mx_attention", {}, ("mxfp8", "None", "mxfp8", "False")),  # the flag sets the switch
+    ("mx_attention", {"DIFFLET_ATTN_QUANT": "off", "DIFFLET_EXP_ATTN_CONSTMAX": "1"},
+     ("mxfp8", "None", "mxfp8", "False")),                       # over the exported values
+    ("cte", {"DIFFLET_ATTN_QUANT": "mxfp8"}, ("None", "None", "off", "False")),
+    ("const-max", {"DIFFLET_ATTN_QUANT": "mxfp8"}, ("None", "1", "off", "True")),
+    (None, {"DIFFLET_ATTN_QUANT": "mxfp8"}, ("mxfp8", "None", "mxfp8", "False")),  # kept
+    (None, {}, ("None", "None", "off", "False")),
+])
+def test_attention_sets_the_switch_before_any_backend_module_is_imported(flag, env, expect):
+    """ATTN_QUANT and _CONSTMAX are resolved once, when ops_impl/attention.py is imported:
+    main()'s _apply_backend_flags exports --attention before anything imports a backend (the
+    orchestrator, the stage launches)."""
+    import subprocess
+    import sys
+
+    environ = {k: v for k, v in os.environ.items() if k not in _SWITCHES}
+    environ.update(DIFFLET_BACKEND="cpu", PYTHONPATH=str(Path(__file__).parents[3]), **env)
+    argv = ["generate", "--model-id", QWEN, "--backend", "neuron", "--tp-degree", "4",
+            "--prompt", "p", "--output", "/nonexistent/o.png",
+            *(["--attention", flag] if flag else [])]
+    proc = subprocess.run([sys.executable, "-c", _ORDER_PROBE, *argv], env=environ,
+                          capture_output=True, text=True)
+    lines = [line for line in proc.stdout.splitlines() if line.startswith("RESULT")]
+    assert lines, proc.stderr[-3000:]
+    pre, *resolved = lines[-1].split()[1:]
+    assert pre == "False" and tuple(resolved) == expect
+
+
+def test_the_stage_entry_keeps_the_inherited_switch(monkeypatch):
+    """A stage line carries no attention flag: the stage imports the backend under the
+    DIFFLET_ATTN_QUANT its driver exported."""
+    from difflet.cli import stage
+
+    monkeypatch.setenv("DIFFLET_ATTN_QUANT", "mxfp8")
+    seen = []
+
+    def load(name):
+        seen.append(os.environ.get("DIFFLET_ATTN_QUANT"))
+        raise SystemExit(0)
+
+    monkeypatch.setattr(stage, "_load_orchestrator_class", load)
+    with pytest.raises(SystemExit):
+        stage.main(["--orchestrator", QWEN, "--stage", "generate"])
+    assert seen == ["mxfp8"]
+
+
+def test_the_attention_switch_values(monkeypatch):
+    from difflet.quant import spec as S
+
+    monkeypatch.delenv("DIFFLET_ATTN_QUANT", raising=False)
+    assert S.attn_quant_mode() == "off"
+    assert S.ATTN_QUANT_VALUES == ("off", "mxfp8")
+    for value, expect in (("off", "off"), ("", "off"), ("  ", "off"), (" OFF ", "off"),
+                          ("mxfp8", "mxfp8"), (" MXFP8 ", "mxfp8")):  # empty: `VAR= cmd`
+        monkeypatch.setenv("DIFFLET_ATTN_QUANT", value)
+        assert S.attn_quant_mode() == expect
+    for bad in ("qk", "pv", "qk+pv", "fp8", "both", "on"):
+        monkeypatch.setenv("DIFFLET_ATTN_QUANT", bad)
+        with pytest.raises(ValueError) as exc:
+            S.attn_quant_mode()
+        message = str(exc.value)
+        assert "DIFFLET_ATTN_QUANT" in message and repr(bad) in message
+        assert all(v in message for v in ("unset", "empty", "'off'", "'mxfp8'"))
+        assert ("variants are gone" in message) == (bad in ("qk", "pv", "qk+pv"))
+
+
+def _dit_key(model, monkeypatch, value):
+    cli_main = importlib.import_module("difflet.cli.main")
+    monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
+    monkeypatch.setenv("DIFFLET_EXEC_MODE", "compile")
+    if value is None:
+        monkeypatch.delenv("DIFFLET_ATTN_QUANT", raising=False)
+    else:
+        monkeypatch.setenv("DIFFLET_ATTN_QUANT", value)
+    args = cli_main._build_parser().parse_args(
+        ["generate", "--model-id", model, "--cache-dir", "/c", "--tp-degree", "2"])
+    orch = cli_main._get_orchestrator(args)
+    stage = {QWEN: "generate", HV1: "generate", WAN21: "transformer"}.get(model)
+    if stage is None:  # LTX-2: one keyed stage
+        return orch._stage_cache_inputs(args), orch._stage_compiled_dir(args)
+    return orch._stage_cache_inputs(stage, args), orch._stage_compiled_dir(stage, args)
+
+
+@pytest.mark.parametrize("model", [QWEN, WAN21, HV1, LTX2])
+def test_the_dit_stage_key_tells_off_and_mxfp8_apart(monkeypatch, model):
+    """Additive: off (unset or 'off') keeps today's key and dir; mxfp8 adds ``attn_quant`` and
+    nothing else, so the two are two artifacts (with or without --quant: the field sits beside
+    the spec's)."""
+    unset, unset_dir = _dit_key(model, monkeypatch, None)
+    off, off_dir = _dit_key(model, monkeypatch, "off")
+    assert off == unset and off_dir == unset_dir and "attn_quant" not in off
+    key, key_dir = _dit_key(model, monkeypatch, "mxfp8")
+    assert {k: v for k, v in key.items() if k != "attn_quant"} == off
+    assert key["attn_quant"] == "mxfp8" and key_dir.parent == off_dir.parent
+    assert key_dir != off_dir
+
+
+def test_quant_cache_fields_adds_mxfp8_attention_beside_the_spec(monkeypatch):
+    from difflet.quant.spec import quant_cache_fields
+
+    monkeypatch.delenv("DIFFLET_ATTN_QUANT", raising=False)
+    spec = Q.quant_spec(_parse("generate", "--model-id", QWEN, "--quant", "mxfp8"))
+    linear = quant_cache_fields(spec)
+    assert quant_cache_fields(None) == {} and "attn_quant" not in linear
+    for off in ("off", ""):  # empty is off: the keys stay today's
+        monkeypatch.setenv("DIFFLET_ATTN_QUANT", off)
+        assert quant_cache_fields(None) == {} and quant_cache_fields(spec) == linear
+    monkeypatch.setenv("DIFFLET_ATTN_QUANT", "mxfp8")
+    assert quant_cache_fields(None) == {"attn_quant": "mxfp8"}
+    assert quant_cache_fields(spec) == {**linear, "attn_quant": "mxfp8"}

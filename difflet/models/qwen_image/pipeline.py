@@ -364,6 +364,8 @@ class QwenImageOrchestrator:
                 trajectory.append(latents.detach().cpu())
             if step_timer is not None:
                 step_timer.step_done(step_index)
+        if controller is not None:
+            print(f"[teacache] stats: {controller.stats()}", flush=True)
         dump_latents("final", latents)
         return latents
 

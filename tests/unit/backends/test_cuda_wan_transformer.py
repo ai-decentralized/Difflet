@@ -279,3 +279,153 @@ def test_torch_compile_wraps_each_wan_block(tmp_path):
     app.load(str(tmp_path / "cache"), skip_warmup=True)
     assert len(app.module.blocks) == TINY["num_layers"]
     assert all(isinstance(b, OptimizedModule) for b in app.module.blocks)
+
+
+def test_a_cpu_load_keeps_the_modeling_blocks(tmp_path):
+    # The fused eager blocks (fused_block.py) are Triton kernels: CUDA devices only.
+    transformer = tmp_path / "transformer"
+    _reference(transformer)
+    cfg = _config(transformer, torch_dtype=torch.float32)
+    app = CudaWanTransformerApplication(model_path=str(transformer), config=cfg, device="cpu")
+    app.compile(str(tmp_path / "cache"))
+    app.load(str(tmp_path / "cache"), skip_warmup=True)
+    assert all("forward" not in vars(block) for block in app.module.blocks)
+
+
+@pytest.mark.parametrize(
+    "dtype,torch_compile,fused",
+    [(torch.bfloat16, False, 1), (torch.float32, False, 0), (torch.bfloat16, True, 0)],
+    ids=["bf16-eager", "fp32-eager", "bf16-compiled"],
+)
+def test_only_a_bf16_eager_cuda_expert_takes_the_fused_blocks(
+    tmp_path, monkeypatch, dtype, torch_compile, fused
+):
+    # The kernels round to bf16; under compile inductor fuses the chains itself. Constructing
+    # the expert on "cuda" touches no device.
+    from difflet.backends.cuda.wan import fused_block
+
+    calls = []
+    monkeypatch.setattr(fused_block, "fuse_blocks", lambda module: calls.append(module) or 0)
+    transformer = tmp_path / "transformer"
+    _reference(transformer)
+    app = CudaWanTransformerApplication(
+        model_path=str(transformer),
+        config=_config(transformer, torch_dtype=dtype),
+        device="cuda",
+        torch_compile=torch_compile,
+    )
+    app.apply_load_time_swaps(object())
+    assert len(calls) == fused
+
+
+def _block_module(tmp_path, num_layers=1):
+    transformer = tmp_path / "transformer"
+    torch.manual_seed(0)
+    WanTransformer3DModel(**{**TINY, "num_layers": num_layers}).save_pretrained(str(transformer))
+    app = CudaWanTransformerApplication(
+        model_path=str(transformer), config=_config(transformer), device="cpu"
+    )
+    return app.build_module()
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        lambda b: setattr(b.attn1, "tp_degree", 2),
+        lambda b: setattr(b.attn2, "sp_enabled", True),
+        lambda b: setattr(b.ffn, "sp_enabled", True),
+        lambda b: setattr(b.attn1, "context_parallel_enabled", True),
+        lambda b: setattr(b.attn1, "rope_layout", "half_split"),
+        lambda b: b.attn1.register_buffer("constmax_sigma", torch.ones(128, 1), persistent=False),
+        lambda b: setattr(b, "norm2", torch.nn.Identity()),
+        lambda b: setattr(b, "norm2", torch.nn.LayerNorm(16, elementwise_affine=False)),
+    ],
+    ids=["tp", "sp", "ffn-sp", "cp", "half-split-rope", "constmax", "no-norm2", "plain-norm2"],
+)
+def test_the_fused_forward_fits_only_the_layout_it_computes(tmp_path, change):
+    from difflet.backends.cuda.wan.fused_block import _fits
+
+    block = _block_module(tmp_path).blocks[0]
+    assert _fits(block)
+    change(block)
+    assert not _fits(block)
+
+
+def test_a_block_that_does_not_fit_keeps_the_modeling_forward(tmp_path, monkeypatch):
+    from difflet.backends.cuda.wan import fused_block
+
+    monkeypatch.setattr(fused_block, "HAS_TRITON", True)  # fuse_blocks only binds methods
+    module = _block_module(tmp_path, num_layers=2)
+    module.blocks[1].attn1.rope_layout = "half_split"
+    assert fused_block.fuse_blocks(module) == 1
+    assert module.blocks[0].forward.__func__ is fused_block.fused_block_forward
+    assert "forward" not in vars(module.blocks[1])
+
+
+def test_the_fused_forward_composes_the_modeling_block(tmp_path, monkeypatch):
+    # The kernels are Triton (test_cuda_wan_fused_block.py checks them and their bf16
+    # rounding on a CUDA device). With their torch formulas in their place, in fp32,
+    # fused_block_forward must compute the modeling block to fp32 precision on any host, so a
+    # change to WanTransformerBlock.forward or WanAttention.forward fails here.
+    import torch.nn.functional as F
+
+    from difflet.backends.cuda.wan import fused_block
+    from difflet.models.wan.modeling_wan import WanRotaryPosEmbed
+    from difflet.ops import apply_rotary_emb_slices, rms_norm_fp32
+
+    def layer_norm(x, eps, *, weight=None, bias=None, shift=None, scale=None):
+        y = F.layer_norm(x.float(), x.shape[-1:], weight, bias, eps)
+        return (y if shift is None else y * (1 + scale) + shift).to(x.dtype)
+
+    def gated_residual(residual, update, gate):
+        return (residual.float() + update.float() * gate).to(residual.dtype)
+
+    def rms_norm_rotary(x, weight, eps, cos, sin, head_dim):
+        heads = rms_norm_fp32(x, weight, eps).unflatten(-1, (-1, head_dim))
+        return apply_rotary_emb_slices(heads, cos, sin).flatten(-2)
+
+    for kernel in (layer_norm, gated_residual, rms_norm_rotary):
+        monkeypatch.setattr(fused_block, kernel.__name__, kernel)
+    transformer = tmp_path / "transformer"
+    _reference(transformer)
+    cfg = _config(transformer, torch_dtype=torch.float32)
+    app = CudaWanTransformerApplication(model_path=str(transformer), config=cfg, device="cpu")
+    app.compile(str(tmp_path / "cache"))
+    app.load(str(tmp_path / "cache"), skip_warmup=True)
+    block = app.module.blocks[0]
+    assert fused_block._fits(block)
+
+    torch.manual_seed(2)
+    head_dim = TINY["attention_head_dim"]
+    dim = TINY["num_attention_heads"] * head_dim
+    rotary = WanRotaryPosEmbed(head_dim, (1, 2, 2), 1024)(torch.zeros(1, 16, 3, 8, 12))
+    hidden = torch.randn(2, rotary[0].shape[1], dim)
+    text = torch.randn(2, 6, dim)
+    temb = 0.1 * torch.randn(2, 6, dim)
+    with torch.no_grad():
+        want = block(hidden, text, temb, rotary)
+        got = fused_block.fused_block_forward(block, hidden, text, temb, rotary)
+    torch.testing.assert_close(got, want)
+
+
+@pytest.mark.parametrize(
+    "temb",
+    [torch.zeros(2, 4, 6, 16), torch.zeros(1, 6, 16)],
+    ids=["one-per-token", "one-for-the-batch"],
+)
+def test_a_timestep_the_kernels_cannot_index_takes_the_modeling_forward(
+    tmp_path, monkeypatch, temb
+):
+    # The kernels read sample b's modulation at row b of a (B, 6, dim) temb; the modeling also
+    # takes (B, S, 6, dim) and broadcasts (1, 6, dim) over the batch.
+    from difflet.backends.cuda.wan.fused_block import fused_block_forward
+    from difflet.models.wan.modeling_wan import WanTransformerBlock
+
+    calls = []
+    monkeypatch.setattr(
+        WanTransformerBlock, "forward", lambda self, *args: calls.append(args) or "modeling"
+    )
+    block = _block_module(tmp_path).blocks[0]
+    hidden = torch.zeros(2, 4, 16)
+    assert fused_block_forward(block, hidden, "e", temb, "r") == "modeling"
+    assert len(calls) == 1 and calls[0][2] is temb

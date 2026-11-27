@@ -357,12 +357,17 @@ class WanOrchestrator:
             boundary_timestep = float(self.boundary_ratio) * float(train_timesteps)
 
         # CFG parallel runs uncond+cond as a single batched DiT call (one branch
-        # per data-parallel rank), so the serial TeaCache residual path doesn't
-        # apply; keep them mutually exclusive (mirrors Flux).
+        # per data-parallel rank). TeaCache caches the combined prediction either way,
+        # but the adaptive mode's block-0 signal is a batch-1 forward the CFG mesh has
+        # no path for: with CFG parallel only a probe-free controller runs.
         cfg_parallel = bool(
             getattr(_component_config(self.transformer), "cfg_parallel_enabled", False)
         )
-        teacache_on = False if cfg_parallel else self._maybe_init_teacache()
+        if cfg_parallel:
+            teacache_on = (self._teacache_controller is not None
+                           and not self._teacache_controller.needs_signal())
+        else:
+            teacache_on = self._maybe_init_teacache()
         ctrl = self._teacache_controller if teacache_on else None
         if ctrl is not None:
             from difflet.pipeline.teacache import sync_probe_free_num_steps
@@ -385,26 +390,6 @@ class WanOrchestrator:
             scale = self._select_guidance_scale(timestep, boundary_timestep, guidance_scale, guidance_scale_2)
             model_dtype = _component_dtype(current_model, self.dtype)
             timestep_dtype = _component_timestep_dtype(current_model, model_dtype)
-
-            if cfg_parallel:
-                # Stack [uncond, cond] into batch=2; the transformer scatters one
-                # branch to each DP rank and gathers the result back to batch=2.
-                if negative_prompt_embeds is None:
-                    negative_prompt_embeds = self._negative_prompt_embeds(prompt_embeds)
-                batched_latents = torch.cat([latents, latents], dim=0).to(dtype=model_dtype)
-                batched_embeds = torch.cat(
-                    [negative_prompt_embeds, prompt_embeds], dim=0
-                ).to(dtype=model_dtype)
-                batched_timestep = _batch_timestep(timestep, 2, latents.device, timestep_dtype)
-                out = _first_tensor(
-                    current_model(batched_latents, batched_timestep, batched_embeds)
-                )
-                self._count_forwards(expert, 1)
-                uncond, cond = out[0:1], out[1:2]
-                noise_pred = uncond + scale * (cond - uncond)
-                latents = self._scheduler_step(noise_pred, timestep, latents, num_inference_steps)
-                self.last_step_seconds.append(time.perf_counter() - step_started)
-                continue
 
             timestep_batch = _batch_timestep(
                 timestep, latents.shape[0], latents.device, timestep_dtype
@@ -444,6 +429,22 @@ class WanOrchestrator:
 
             if should_skip:
                 noise_pred = ctrl.skip_noise_pred(mod_input=mod_input)
+            elif cfg_parallel:
+                # Stack [uncond, cond] into batch=2; the transformer scatters one
+                # branch to each DP rank and gathers the result back to batch=2.
+                if negative_prompt_embeds is None:
+                    negative_prompt_embeds = self._negative_prompt_embeds(prompt_embeds)
+                batched_latents = torch.cat([latents, latents], dim=0).to(dtype=model_dtype)
+                batched_embeds = torch.cat(
+                    [negative_prompt_embeds, prompt_embeds], dim=0
+                ).to(dtype=model_dtype)
+                batched_timestep = _batch_timestep(timestep, 2, latents.device, timestep_dtype)
+                out = _first_tensor(
+                    current_model(batched_latents, batched_timestep, batched_embeds)
+                )
+                self._count_forwards(expert, 1)
+                uncond, cond = out[0:1], out[1:2]
+                noise_pred = uncond + scale * (cond - uncond)
             else:
                 noise_pred = _first_tensor(
                     current_model(
@@ -464,8 +465,8 @@ class WanOrchestrator:
                         )
                     )
                     noise_pred = uncond + scale * (noise_pred - uncond)
-                if ctrl is not None:
-                    ctrl.record_full_step(noise_pred, mod_input=mod_input)
+            if ctrl is not None and not should_skip:
+                ctrl.record_full_step(noise_pred, mod_input=mod_input)
 
             latents = self._scheduler_step(noise_pred, timestep, latents, num_inference_steps)
             self.last_step_seconds.append(time.perf_counter() - step_started)

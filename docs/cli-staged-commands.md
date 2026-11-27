@@ -352,6 +352,50 @@ DIFFLET_BACKEND=neuron difflet generate --model-id Qwen/Qwen-Image \
   2>&1 | tee /tmp/logs/qwen-generate-mxfp8.log
 ```
 
+### MXFP8 attention (`--attention mx_attention`, Trainium3 only, experimental)
+
+`--attention mx_attention` runs the DiT's self/joint attention through Difflet's MXFP8 fork of
+nkilib's `attention_cte`, with QK^T and PV both on `nc_matmul_mx`: Q and K quantized along the
+head dim (K smoothed first: its mean over the call's keys subtracted), P and V per 512-key tile.
+
+The softmax, its exp (on ScalarE, as in bf16), the cross-attention and causal, masked or
+head-dim != 128 calls stay bf16. It is opt-in and never a default (`cte` is), and it is
+independent of `--quant`: either runs with or without the other. Pass it to `compile` and
+`generate` alike (or `run`); it is exported as `DIFFLET_ATTN_QUANT=mxfp8`, which every stage
+and DP worker inherits. Without `--attention`, an exported `DIFFLET_ATTN_QUANT` (`mxfp8`; unset,
+empty or `off` is off) is kept; `--attention cte` and `--attention const-max` clear it. It and
+const-max's `DIFFLET_EXP_ATTN_CONSTMAX=1` select different kernels and are never both set: a
+launch with both exported is refused. It is refused on every backend but `neuron`, on trn2,
+under `--exec-mode eager`, for models without MXFP8 target layers, and with
+`--cp-mode ring|ulysses` at `--cp-degree` > 1 (their attention stays bf16). A DiT whose warm-up
+routes no call to the kernel stops with the cause. It is a separate DiT stage artifact and NEFF
+set, compiled cold on first use (over 30 min for HunyuanVideo-1.5 at 480x848x121).
+
+```bash
+DIFFLET_BACKEND=neuron difflet generate --model-id Qwen/Qwen-Image \
+  --tp-degree 4 --height 1024 --width 1024 --quant mxfp8 --attention mx_attention \
+  --steps 50 --seed 42 --prompt "a cat sitting on a bench" --output qwen-mxfp8-attn.png
+```
+
+**Measured: slower, with a quality cost on some models.** Each model ran at its DiT profile shape
+with `--quant mxfp8 --attention mx_attention` (HunyuanVideo-1.5: `--attention mx_attention`
+alone). The DiT step against bf16, linear MXFP8 alone in brackets:
+
+| model | step / bf16 | linear alone / bf16 |
+|---|---|---|
+| Qwen-Image 1024x1024 | 0.848 | 0.791 |
+| FLUX.1-dev 1024x1024 | 0.878 | 0.827 |
+| LTX-2 512x768x121 | 0.771 | 0.752 |
+| Wan 2.1 480x832x81 | 1.112 | 0.982 |
+| Wan 2.2-A14B 480x832x81 | 1.114 | 0.981 |
+| HunyuanVideo 544x960x129 | 1.366 | 0.972 |
+| HunyuanVideo-1.5 480x848x121 (attention alone) | 1.219 | - |
+
+- **Speed.** It is slower than `--quant mxfp8` alone on every model, and slower than bf16 on
+  the long video models. Quantizing P for PV costs more than the two MX matmuls save.
+- **Quality.** QK^T in MXFP8 suffers from K-channel outliers: against diffusers fp32 on the CPU,
+  Qwen-Image's image is 29.08 dB, where bf16's is 36.34 dB and linear MXFP8's 37.36 dB.
+
 ---
 
 ## HunyuanVideo 1.5 (3-stage: encode → aot_transformer → aot_vae)

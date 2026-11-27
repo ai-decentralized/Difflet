@@ -89,7 +89,7 @@ compile, then a 927 s exit); the vae stage's NEFFs are layout-independent, so a 
 holds them only compiles the DiT (about 3 min with the checkpoint in the page cache). At long
 sequences the bounded attention kernel's NKI trace dominates a cold compile (at 119k joint tokens:
 44 min with 6 heads per call, about 5 min with 1); the NKI trace cache (`DIFFLET_NKI_TRACE_CACHE`,
-on for HunyuanVideo since `f4d9ac1`) keeps it for later launches and also takes 23 s off every
+on by default, `=0` turns it off) keeps it for later launches and also takes 23 s off every
 320×512×61 launch. Editing `ops_impl/attention.py` recompiles every cached block graph once.
 
 ## Models and their verification shapes (verify_cli.py MODELS)

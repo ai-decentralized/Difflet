@@ -14,6 +14,7 @@ from __future__ import annotations
 import dataclasses
 import hashlib
 import json
+import os
 import re
 from collections.abc import Iterable
 from pathlib import Path
@@ -183,10 +184,36 @@ def strip_prefix(name: str) -> str:
     return name
 
 
+#: ``--attention mx_attention`` (``difflet/cli/main.py``), which the CLI exports as
+#: ``DIFFLET_ATTN_QUANT=mxfp8``: the neuron backend's self/joint attention runs QK^T and PV in
+#: MXFP8 (``ops_impl/attention.py``). Unset, empty or ``off``: bf16 attention, every graph
+#: unchanged. Independent of ``--quant``.
+ATTN_QUANT_ENV = "DIFFLET_ATTN_QUANT"
+ATTN_QUANT_VALUES = ("off", "mxfp8")
+
+
+def attn_quant_mode() -> str:
+    """``DIFFLET_ATTN_QUANT`` as ``"off"`` (unset, empty or ``off``) or ``"mxfp8"``; anything
+    else (the former ``qk``, ``pv`` and ``qk+pv`` too) raises, naming the variable and its
+    values."""
+    value = os.environ.get(ATTN_QUANT_ENV, "").strip().lower() or "off"  # VAR= cmd clears it
+    if value not in ATTN_QUANT_VALUES:
+        hint = (" (the qk / pv variants are gone: 'mxfp8' runs QK^T and PV in MXFP8)"
+                if value in ("qk", "pv", "qk+pv") else "")
+        raise ValueError(f"{ATTN_QUANT_ENV} must be unset, empty, 'off' or 'mxfp8' (--attention "
+                         f"mx_attention), got {value!r}{hint}")
+    return value
+
+
 def quant_cache_fields(spec: QuantSpec | None) -> dict[str, Any]:
-    """``{}`` when quantization is off, else :meth:`QuantSpec.cache_fields`. The one helper every
-    key site calls, so a bf16 artifact's key never gains a field."""
-    return {} if spec is None else spec.cache_fields()
+    """``{}`` when quantization is off, else :meth:`QuantSpec.cache_fields`, plus
+    ``attn_quant: mxfp8`` when ``DIFFLET_ATTN_QUANT`` is on (it changes the DiT's attention
+    graph). The one helper every DiT key site calls, so a bf16 artifact's key never gains a
+    field."""
+    fields = {} if spec is None else spec.cache_fields()
+    if attn_quant_mode() != "off":
+        fields["attn_quant"] = "mxfp8"
+    return fields
 
 
 def file_sha256(path: str | Path) -> str:
@@ -198,6 +225,8 @@ def file_sha256(path: str | Path) -> str:
 
 
 __all__ = [
+    "ATTN_QUANT_ENV",
+    "ATTN_QUANT_VALUES",
     "BLOCK",
     "COMPUTE_MODES",
     "DEFAULT_COMPUTE",
@@ -205,6 +234,7 @@ __all__ = [
     "LAYOUT_K",
     "QUANT_SCHEMA",
     "QuantSpec",
+    "attn_quant_mode",
     "file_sha256",
     "quant_cache_fields",
     "strip_prefix",
