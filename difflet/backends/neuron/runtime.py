@@ -111,8 +111,14 @@ class NeuronBackend(BackendRuntime):
         configure_compile_cache()
         bind_core()
         # The CLI launches neuron stages with torch's backend autoload off (cli.main), so the
-        # device is registered here, before any device work.
-        import torch_neuronx  # noqa: F401
+        # device is registered here, before any device work. Without torch-neuronx installed (the
+        # CPU unit tests run the neuron applications on gloo) there is no device to register; a
+        # torch-neuronx that is installed but fails to import still raises.
+        try:
+            import torch_neuronx  # noqa: F401
+        except ModuleNotFoundError as exc:
+            if exc.name != "torch_neuronx":
+                raise
 
         init_process_group()
         _runtime_prepared = True
