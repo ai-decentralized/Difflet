@@ -265,6 +265,11 @@ class MiniMaxH3ServingArtifactPreparer:
         if profile.revision != self.revision:
             raise ValueError("MiniMax-H3 preparer revision must match the serving profile")
         text_buckets()  # a bad mode or bucket fails here, before the workers start
+        # --attention const-max: set before the engine spawns the ranks, which inherit it
+        # (the attention module reads it once, at import).
+        from difflet.backends.neuron.serving import export_attention_environment
+
+        export_attention_environment(profile)
         entry = resolve_model(self.model_id, model_type=_MODEL_TYPE)
         print(f"[difflet serve] resolving MiniMax-H3 weights for {self.model_id}")
         source = resolve_hf_model_source(self.model_id, revision=self.revision,
@@ -574,6 +579,9 @@ class MiniMaxH3ServingStageAdapter:
             log=lambda message: print(f"[difflet serve] MiniMax-H3: {message}", flush=True))
         print(f"[difflet serve] loading MiniMax-H3 worker profile {profile}", flush=True)
         resident.load()
+        from difflet.backends.neuron.serving import check_attention_kernel
+
+        check_attention_kernel(profile)
         runner = ValidatedStageRunner(MiniMaxH3PipelineRunner(resident, profile),
                                       MiniMaxH3InitialPayload, MiniMaxH3FinalPayload)
         print("[difflet serve] MiniMax-H3 worker loaded", flush=True)

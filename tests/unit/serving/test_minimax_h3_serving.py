@@ -170,6 +170,25 @@ def test_preparer_requires_the_native_neuron_backend(tmp_path, monkeypatch):
                                  compile_policy="never")
 
 
+def test_preparer_exports_const_max_before_the_ranks_spawn(tmp_path, monkeypatch):
+    monkeypatch.setattr(minimax_h3, "_backend_name", lambda: "neuron")
+    monkeypatch.setenv("DIFFLET_EXP_ATTN_CONSTMAX", "0")  # monkeypatch restores it afterwards
+
+    class _Stop(Exception):
+        pass
+
+    def stop(*args, **kwargs):
+        raise _Stop  # the export happened before the weights are resolved
+
+    monkeypatch.setattr(minimax_h3, "resolve_hf_model_source", stop)
+    preparer = minimax_h3.MiniMaxH3ServingArtifactPreparer()
+    with pytest.raises(_Stop):
+        preparer.prepare_runtime(_profile(tmp_path, attention="const-max"),
+                                 download_policy="never", compile_policy="never")
+
+    assert os.environ["DIFFLET_EXP_ATTN_CONSTMAX"] == "1"
+
+
 def test_text_bucket_env(monkeypatch):
     assert minimax_h3.text_buckets() == {0: 512}
     monkeypatch.setenv(minimax_h3.TEXT_BUCKET_ENV, "1024")
