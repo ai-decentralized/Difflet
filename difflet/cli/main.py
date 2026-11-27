@@ -377,6 +377,16 @@ def _add_serve_profile_flags(p: argparse.ArgumentParser) -> None:
         f"do not export {CONSTMAX_ENV} yourself.",
     )
     p.add_argument(
+        "--quant",
+        dest="quant",
+        choices=["mxfp8"],
+        default=None,
+        help="Native neuron backend on Trainium3: run the DiT's target linears in OCP MXFP8 "
+        "(the `difflet compile --quant mxfp8` recipe, at this profile's tp). The quantized "
+        "checkpoint is written under --cache-dir at the first start and reused after. "
+        "FLUX.1-dev, Qwen-Image, Wan 2.1, HunyuanVideo and LTX-2.",
+    )
+    p.add_argument(
         "--teacache-cadence",
         type=int,
         default=None,

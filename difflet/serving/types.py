@@ -272,6 +272,9 @@ class ServingProfile:
     # Native neuron backend: the DiT attention kernel, None for the default (cte) or
     # "const-max". It changes the compiled graph, so it is part of the profile identity.
     attention: str | None = None
+    # Native neuron backend: "mxfp8" (the DiT's target linears in MXFP8) or None (bf16). It
+    # changes the weights and the compiled graph, so it is part of the profile identity.
+    quant: str | None = None
 
     @property
     def world_size(self) -> int:

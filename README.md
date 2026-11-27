@@ -663,7 +663,7 @@ paths, and stage core counts are in [docs/cli-staged-commands.md](docs/cli-stage
 | `--teacache-online-delta ALPHA` | generate, run, serve | Probe-free online-delta TeaCache (serve: as `--teacache-cadence`) |
 | `--torch-compile` | generate, run, serve | CUDA backend only: `torch.compile` the DiT blocks (eager is the default) |
 | `--attention {cte,const-max}` | compile, generate, run, serve | `--backend neuron`: the DiT attention kernel; `const-max` uses each layer's committed score bound (FLUX.1-dev, Qwen-Image, Wan, HunyuanVideo, LTX-2) |
-| `--quant mxfp8` | compile, generate, run | `--backend neuron` on Trainium3: MXFP8 attention q/k/v and MLP linears (Qwen-Image, FLUX.1-dev) |
+| `--quant mxfp8` | compile, generate, run, serve | `--backend neuron` on Trainium3: MXFP8 DiT linears (Qwen-Image, FLUX.1-dev, LTX-2, Wan, HunyuanVideo; HunyuanVideo-1.5 with `DIFFLET_QUANT_TARGETS`). `serve` writes the quantized checkpoint under `--cache-dir` at its first start and reuses it after |
 | `--prompt` | generate, run | Text prompt |
 | `--negative-prompt TEXT`, `--true-cfg-scale F` | generate, run | Qwen-Image on `--backend neuron`: opt-in true classifier-free guidance |
 | `--requests FILE` | generate, run | JSONL batch file, one request per line |

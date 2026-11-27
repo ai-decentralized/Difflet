@@ -387,6 +387,146 @@ def test_a_rank_refuses_an_attention_kernel_the_profile_does_not_name(
             native.check_attention_kernel(profile)
 
 
+# ------------------------------------------------------------------ MXFP8
+
+
+def _quant_profile(model_id: str, **options):
+    options.setdefault("tp_degree", 4)
+    return resolve_serving_model(ServeOptions(model_id=model_id, quant="mxfp8",
+                                              **options)).profile
+
+
+@pytest.mark.parametrize("model_id", NATIVE_IDS)
+def test_mxfp8_is_served_for_every_native_model(on_neuron, model_id):
+    assert _quant_profile(model_id).quant == "mxfp8"
+    assert _profile(model_id).quant is None
+
+
+@pytest.mark.parametrize("options,match", [
+    ({"model_id": "MiniMaxAI/MiniMax-H3"}, "MXFP8 target layers"),
+    ({"model_id": FLUX, "teacache_speedup": 1.5}, "mutually exclusive"),
+])
+def test_mxfp8_refusals(on_neuron, options, match):
+    with pytest.raises(DiffletServingError, match=match):
+        _quant_profile(**options)
+
+
+def test_mxfp8_refuses_unsafe_fp8fncast(on_neuron, monkeypatch):
+    monkeypatch.setenv("UNSAFE_FP8FNCAST", "1")
+
+    with pytest.raises(DiffletServingError, match="UNSAFE_FP8FNCAST"):
+        _quant_profile(FLUX)
+
+
+def test_mxfp8_is_refused_off_the_native_backend(monkeypatch):
+    monkeypatch.setattr(model_registry, "current_backend", lambda: "trainium")
+    monkeypatch.setattr("difflet.backends.registry.current_backend", lambda: "trainium")
+
+    with pytest.raises(DiffletServingError, match="native neuron backend only"):
+        _quant_profile(WAN21)
+
+
+def test_the_spec_is_the_cli_recipe_at_the_profile_tp(on_neuron, monkeypatch):
+    from difflet.quant.spec import QuantSpec
+    from difflet.quant.targets import default_spec
+
+    monkeypatch.delenv("DIFFLET_QUANT_TARGETS", raising=False)
+    tp4 = native.native_quant_spec(_quant_profile(FLUX))
+    tp2 = native.native_quant_spec(dataclasses.replace(
+        _quant_profile(FLUX), parallel=dataclasses.replace(_profile(FLUX).parallel, tp_degree=2)))
+
+    assert tp4 == default_spec("flux", tp_degree=4) and tp2.tp_degree == 2
+    assert native.native_quant_spec(_profile(FLUX)) is None
+    kwargs = native.native_quant_kwargs(_quant_profile(FLUX))
+    assert QuantSpec.from_dict(kwargs["quant"]) == tp4  # what the rank's resolve_quant reads
+    assert native.native_quant_kwargs(_profile(FLUX)) == {}
+
+
+def test_the_spec_honors_the_targets_override(on_neuron, monkeypatch):
+    monkeypatch.setenv("DIFFLET_QUANT_TARGETS", r"blocks\.0\.attn\.to_q;blocks\.0\.ff\.net\.0")
+
+    spec = native.native_quant_spec(_quant_profile(FLUX))
+
+    assert spec.targets == (r"blocks\.0\.attn\.to_q", r"blocks\.0\.ff\.net\.0")
+
+
+def test_mxfp8_enters_the_identity_and_bf16_keeps_it(on_neuron, monkeypatch):
+    monkeypatch.setenv("NEURON_RT_VISIBLE_CORES", "0-3")
+    monkeypatch.delenv("DIFFLET_QUANT_TARGETS", raising=False)
+    seen = []
+    real = native.CompileArtifactIdentity.from_cache_inputs
+    monkeypatch.setattr(native.CompileArtifactIdentity, "from_cache_inputs",
+                        staticmethod(lambda inputs: seen.append(dict(inputs)) or real(inputs)))
+
+    native.native_runtime_plan(_quant_profile(QWEN), native._spec("qwen_image"), "a")
+    native.native_runtime_plan(_profile(QWEN), native._spec("qwen_image"), "a")
+
+    assert seen[0]["quant"] == "mxfp8" and "quant_targets" not in seen[0]
+    assert "quant" not in seen[1]
+
+
+@pytest.mark.parametrize("model_id", [FLUX, WAN21])
+def test_the_parent_writes_the_quantized_dit_from_the_rank_source(
+        on_neuron, monkeypatch, tmp_path, model_id):
+    pytest.importorskip("torch")
+    import difflet.backends.neuron.core.weights_bf16 as weights_bf16
+    import difflet.quant.checkpoint as checkpoint
+
+    calls = []
+    monkeypatch.setattr(checkpoint, "prepare_quantized_checkpoint",
+                        lambda source, spec, create: calls.append((source, spec, create))
+                        or tmp_path / "quantized")
+    monkeypatch.setattr(weights_bf16, "resolve_component_dir",
+                        lambda component, dtype: f"{component}@bf16-copy")
+    profile = _quant_profile(model_id)
+
+    out = native.prepare_native_quant(profile, str(tmp_path / "snap"))
+
+    source, spec, create = calls[0]
+    expected = str(tmp_path / "snap" / "transformer")
+    assert source == (expected + "@bf16-copy" if model_id == WAN21 else expected)
+    assert spec == native.native_quant_spec(profile) and create is True
+    assert out == str(tmp_path / "quantized")
+    assert native.prepare_native_quant(_profile(model_id), str(tmp_path)) is None
+
+
+def test_a_quantization_failure_is_a_clean_startup_refusal(on_neuron, monkeypatch, tmp_path):
+    import difflet.quant.checkpoint as checkpoint
+
+    def refuse(source, spec, create):
+        raise ValueError("no safetensors in transformer")
+
+    monkeypatch.setattr(checkpoint, "prepare_quantized_checkpoint", refuse)
+
+    with pytest.raises(DiffletServingError, match="--quant mxfp8: transformer: no safetensors"):
+        native.prepare_native_quant(_quant_profile(FLUX), str(tmp_path))
+
+
+@pytest.mark.parametrize("quant", [None, "mxfp8"])
+def test_prepare_runtime_quantizes_only_with_quant(on_neuron, monkeypatch, tmp_path, quant):
+    from difflet.backends.neuron.runtime import PG_TIMEOUT_ENV
+
+    monkeypatch.setenv("NEURON_RT_VISIBLE_CORES", "0-3")
+    monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path))  # preset: nothing leaks
+    monkeypatch.setenv(PG_TIMEOUT_ENV, "60")
+    from difflet.serving.types import ResolvedModelSource
+
+    source = ResolvedModelSource(source_kind="hf_snapshot", model_id=FLUX, requested_revision=None,
+                                 pinned_model_path=str(tmp_path / "snap"),
+                                 resolved_source_id="abc")
+    monkeypatch.setattr(native, "resolve_hf_model_source", lambda *a, **k: source)
+    written = []
+    monkeypatch.setattr(native, "prepare_native_quant",
+                        lambda profile, model_dir: written.append(model_dir))
+    profile = _quant_profile(FLUX) if quant else _profile(FLUX)
+
+    bundle = native.NeuronServingArtifactPreparer(FLUX).prepare_runtime(
+        profile, download_policy=None, compile_policy=None)
+
+    assert written == ([str(tmp_path / "snap")] if quant else [])
+    assert bundle.profile is profile
+
+
 @pytest.mark.parametrize("model_id", NATIVE_IDS)
 def test_default_profiles_pass_the_refusals(on_neuron, model_id):
     profile = _profile(model_id)  # HunyuanVideo's defaults CLIP to "host"
