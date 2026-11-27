@@ -268,39 +268,6 @@ def test_cfg_parallel_stays_refused_off_the_native_backend(monkeypatch):
 
 def test_cfg_parallel_takes_one_rank_per_core_and_enters_the_identity(on_neuron, monkeypatch):
     monkeypatch.setenv("NEURON_RT_VISIBLE_CORES", "8-11")
-
-
-# ------------------------------------------------------------------ const-max attention
-
-CONSTMAX_ENV = "DIFFLET_EXP_ATTN_CONSTMAX"
-
-
-def _attention_profile(model_id: str, attention: str | None):
-    return resolve_serving_model(
-        ServeOptions(model_id=model_id, tp_degree=4, attention=attention)).profile
-
-
-@pytest.mark.parametrize("model_id", NATIVE_IDS)
-def test_const_max_is_served_for_every_native_model(on_neuron, model_id):
-    assert _attention_profile(model_id, "const-max").attention == "const-max"
-    assert _attention_profile(model_id, "cte").attention is None  # cte is the default
-
-
-def test_const_max_is_refused_without_a_table(on_neuron):
-    with pytest.raises(DiffletServingError, match="const-max table"):
-        _attention_profile("MiniMaxAI/MiniMax-H3", "const-max")
-
-
-def test_const_max_is_refused_off_the_native_backend(monkeypatch):
-    monkeypatch.setattr(model_registry, "current_backend", lambda: "trainium")
-    monkeypatch.setattr("difflet.backends.registry.current_backend", lambda: "trainium")
-
-    with pytest.raises(DiffletServingError, match="native neuron backend only"):
-        _attention_profile(WAN21, "const-max")
-
-
-def test_const_max_enters_the_identity_and_cte_keeps_it(on_neuron, monkeypatch):
-    monkeypatch.setenv("NEURON_RT_VISIBLE_CORES", "0-3")
     seen = []
     real = native.CompileArtifactIdentity.from_cache_inputs
     monkeypatch.setattr(native.CompileArtifactIdentity, "from_cache_inputs",
@@ -342,6 +309,42 @@ def test_wan_under_cfg_parallel_keeps_guidance_one_valid(on_neuron, monkeypatch)
     _validator(profile, monkeypatch).validate(
         dataclasses.replace(_request(WAN21, profile), guidance_scale=1.0))
 
+
+# ------------------------------------------------------------------ const-max attention
+
+CONSTMAX_ENV = "DIFFLET_EXP_ATTN_CONSTMAX"
+
+
+def _attention_profile(model_id: str, attention: str | None):
+    return resolve_serving_model(
+        ServeOptions(model_id=model_id, tp_degree=4, attention=attention)).profile
+
+
+@pytest.mark.parametrize("model_id", NATIVE_IDS)
+def test_const_max_is_served_for_every_native_model(on_neuron, model_id):
+    assert _attention_profile(model_id, "const-max").attention == "const-max"
+    assert _attention_profile(model_id, "cte").attention is None  # cte is the default
+
+
+def test_const_max_is_refused_without_a_table(on_neuron):
+    with pytest.raises(DiffletServingError, match="const-max table"):
+        _attention_profile("MiniMaxAI/MiniMax-H3", "const-max")
+
+
+def test_const_max_is_refused_off_the_native_backend(monkeypatch):
+    monkeypatch.setattr(model_registry, "current_backend", lambda: "trainium")
+    monkeypatch.setattr("difflet.backends.registry.current_backend", lambda: "trainium")
+
+    with pytest.raises(DiffletServingError, match="native neuron backend only"):
+        _attention_profile(WAN21, "const-max")
+
+
+def test_const_max_enters_the_identity_and_cte_keeps_it(on_neuron, monkeypatch):
+    monkeypatch.setenv("NEURON_RT_VISIBLE_CORES", "0-3")
+    seen = []
+    real = native.CompileArtifactIdentity.from_cache_inputs
+    monkeypatch.setattr(native.CompileArtifactIdentity, "from_cache_inputs",
+                        staticmethod(lambda inputs: seen.append(dict(inputs)) or real(inputs)))
 
     native.native_runtime_plan(_attention_profile(FLUX, "const-max"), native._spec("flux"), "a")
     native.native_runtime_plan(_attention_profile(FLUX, None), native._spec("flux"), "a")
