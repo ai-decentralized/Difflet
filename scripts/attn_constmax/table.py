@@ -23,6 +23,10 @@ Models and their reference Sk:
   The token refiner's self-attention has no QK norm and is not in the table.
 - hunyuan_video_15: ``transformer_blocks.{i}.attn``, four pairs per key-bounded call; Sk at
   480x848x121 = 31 x 30 x 53 image + 1,985 text (1,000 Qwen2.5-VL + 256 ByT5 + 729 image-embedding).
+- minimax_h3: the 50 single-stream blocks' self-attention (``transformer_blocks.{i}.attn``, one
+  pair; the text-only token refiner's queries are under the kernel's 128 and stay on
+  attention_cte); Sk at 256x448x124 = the packed t2va sequence padded to 5,120 rows (4,622 live
+  keys, key-prefix bounds).
 - wan: each expert's self-attention (``blocks.{i}.attn1``; cross-attention stays on attention_cte)
   at Sk = 21 x 30 x 52 = 32,760 (480x832x81), one table per expert keyed "<revision[:8]>/<expert
   dir>" (Wan 2.1 and both Wan 2.2-A14B experts, snapshots pinned); WanTransformer3DModel's
@@ -32,10 +36,13 @@ Cross-check: with BOUNDS_JSON given (bounds.json of the run above: flux, ltx_2, 
 every layer whose call has one pair must have bounds.json's per-call numbers (sigma_max_over_heads,
 softmax_max_max_over_heads, call_gap) to 1e-4 (for wan: Wan 2.1's layers).
 
-usage: table.py {flux,ltx_2,qwen_image,hunyuan_video,hunyuan_video_15,wan} OUT_JSON [BOUNDS_JSON]
+usage: table.py {flux,ltx_2,qwen_image,hunyuan_video,hunyuan_video_15,minimax_h3,wan} OUT_JSON
+       [BOUNDS_JSON]
+(the hub is $HF_HUB_CACHE, else ~/.cache/huggingface/hub)
 """
 import json
 import math
+import os
 import re
 import sys
 from pathlib import Path
@@ -43,7 +50,7 @@ from pathlib import Path
 import torch
 from safetensors import safe_open
 
-HUB = Path.home() / ".cache/huggingface/hub"
+HUB = Path(os.environ.get("HF_HUB_CACHE") or Path.home() / ".cache/huggingface/hub")
 D = 128
 GAP_LIMIT = 80.0
 GENERATOR = "scripts/attn_constmax/table.py"
@@ -63,6 +70,8 @@ MODELS = {  # key: (bounds.json name, snapshot dir, attention module regex, refe
     "hunyuan_video_15": ("HunyuanVideo-1.5 (joint, 480x848x121)",
                          "models--hunyuanvideo-community--HunyuanVideo-1.5-Diffusers-480p_t2v",
                          r"transformer_blocks\.\d+\.attn\.", 31 * 30 * 53 + 1000 + 256 + 729),
+    "minimax_h3": ("MiniMax-H3 (t2va, 256x448x124)", "models--MiniMaxAI--MiniMax-H3",
+                   r"transformer_blocks\.\d+\.attn\.", 5120),
 }
 WAN_SK = 32760
 WAN_21 = (

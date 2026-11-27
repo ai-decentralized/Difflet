@@ -41,6 +41,7 @@ from __future__ import annotations
 import dataclasses
 import json
 import math
+import os
 from pathlib import Path
 from typing import Any
 
@@ -297,12 +298,14 @@ def _ulysses_processor_class():
             # The key bounds are the full mask's live prefix, for every query row.
             bound_min, bound_max = _prefix_bounds(attention_mask, num_heads=heads,
                                                   query_length=q_len)
+            sigma = getattr(attn, "constmax_sigma", None)  # --attention const-max
             out = self._attention(
                 q.reshape(batch * heads, q_len, head_dim),
                 k.reshape(batch * heads, k_len, head_dim),
                 v.reshape(batch * heads, k_len, head_dim),
                 scale=1.0 / math.sqrt(head_dim), causal=False, tp_q=True, tp_k=True,
                 tp_out=False, bound_min=bound_min, bound_max=bound_max,
+                **({} if sigma is None else {"constmax_sigma": sigma}),
             ).reshape(batch, heads, q_len, head_dim)
             if self.mode == "ulysses":
                 out = collectives.heads_to_seq(out, group, self.cp)
@@ -405,8 +408,34 @@ def _trace_module_class():
                                                             self.transformer)
             for name in FP32_MODULES:
                 _give_fp32_host_storage(getattr(self.transformer, name))
+            add_constmax_sigma_(self.transformer)
 
     return NeuronMiniMaxH3TraceModule
+
+
+#: The const-max table of the 50 blocks' self-attention (scripts/attn_constmax/table.py
+#: minimax_h3), committed beside the model's modeling code.
+CONSTMAX_TABLE = Path(__file__).resolve().parents[3] / "models" / "minimax_h3" / "attn_constmax.json"
+
+
+def add_constmax_sigma_(transformer) -> list[int]:
+    """--attention const-max (``DIFFLET_EXP_ATTN_CONSTMAX=1``): give every block whose layer
+    passes its table's gap rule its score sigma as a ``[128, 1]`` buffer (a graph input, so the
+    routed blocks share one graph), which the processors pass to ``difflet.ops.attention`` (the
+    bounded const-max fork: key-prefix bounds, d = 128); the others stay on attention_cte. The
+    token refiner (text only, fewer than 128 queries) and the VAE never carry one. Returns the
+    routed block indices; empty when the variable is not set."""
+    if os.environ.get("DIFFLET_EXP_ATTN_CONSTMAX") != "1":
+        return []
+    table = json.loads(CONSTMAX_TABLE.read_text())["layers"]
+    routed = []
+    for i, block in enumerate(transformer.transformer_blocks):
+        row = table[f"transformer_blocks.{i}.attn"]
+        if row["ok"]:
+            block.attn.register_buffer("constmax_sigma", torch.full((128, 1), row["sigma"]),
+                                       persistent=False)
+            routed.append(i)
+    return routed
 
 
 class NeuronMiniMaxH3TransformerApplication(TorchNeuronApplicationBase):
