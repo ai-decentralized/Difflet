@@ -246,6 +246,7 @@ def clean_neuron_mesh(monkeypatch, tmp_path):
     monkeypatch.setattr(runtime, "_runtime_prepared", False)
     # No device here; the AoT venv's torch_neuronx has no native-runtime query at all.
     monkeypatch.setattr(runtime, "_neuron_runtime_initialized", lambda: False)
+    fake_pipeline.prepare_runtime_off_device(monkeypatch)  # its torch_neuronx import
     for name in (*_CACHE_ENV, "NKI_ENABLE_TRACE_CACHE"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path / "compile_cache"))

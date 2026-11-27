@@ -910,6 +910,7 @@ def test_neuron_vae_stage_decodes_on_the_device(monkeypatch, tmp_path, mode, vae
     monkeypatch.setattr(runtime, "_runtime_prepared", False)
     # No device here; the AoT venv's torch_neuronx has no native-runtime query at all.
     monkeypatch.setattr(runtime, "_neuron_runtime_initialized", lambda: False)
+    fake_pipeline.prepare_runtime_off_device(monkeypatch)  # its torch_neuronx import
     for name in (*_CACHE_ENV, "NKI_ENABLE_TRACE_CACHE"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path / "compile_cache"))
@@ -1015,11 +1016,14 @@ def test_neuron_cache_dir_roots_the_compile_cache_when_unset(monkeypatch, tmp_pa
     assert os.environ["DIFFLET_COMPILE_CACHE"] == root
     # transformer and vae stages; `run` launches both twice (compile, then generate)
     assert len(launches) == (4 if mode == "run" else 2)
+    from difflet.backends.neuron.compile import stack_version_tag
+
     for env in launches:
         assert env["DIFFLET_COMPILE_CACHE"] == root
         assert (env["TORCH_NEURONX_NEFF_CACHE_DIR"], env["TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR"],
                 env["TORCH_NEURONX_HLO_CACHE_DIR"]) == tuple(
-            str(tmp_path / "cache" / "neuron" / sub) for sub in ("neff", "neff_local", "hlo"))
+            str(tmp_path / "cache" / "neuron" / sub)
+            for sub in ("neff", "neff_local", f"hlo/{stack_version_tag()}"))  # trace cache on
     assert capsys.readouterr().out.count(_CACHE_NOTE + root) == 1  # `run`: once, at compile
     # The stage manifest dir and its key do not depend on the variable.
     assert keys_before == {s: (orch._stage_cache_inputs(s, args),
@@ -2172,8 +2176,8 @@ def quant_driver(monkeypatch, tmp_path, tiny_wan22_fp8):
     monkeypatch.setenv("DIFFLET_BACKEND", "neuron")
     monkeypatch.setenv("DIFFLET_EXEC_MODE", "compile")
     monkeypatch.setenv("DIFFLET_NEURON_HBM_GIB", "24")
-    # prepare_quant sets the trace cache with os.environ.setdefault: setenv first records the
-    # variable's original state, so the value does not leak into later tests' cache layout.
+    # No user trace cache setting: setenv first records the variable's original state, so a
+    # value does not leak into later tests' cache layout.
     monkeypatch.setenv("DIFFLET_NKI_TRACE_CACHE", "")
     monkeypatch.delenv("DIFFLET_NKI_TRACE_CACHE")
     _unset(monkeypatch, *_CACHE_ENV)
@@ -2237,7 +2241,7 @@ def test_compile_quantizes_each_expert_from_its_bf16_copy_and_generate_resolves_
         assert source["bf16_copy_of"] == str((quant_driver.root / name).resolve())
         assert f"[wan] MXFP8 {name} (nki): {path}\n" in out
     assert out.index("MXFP8 transformer ") < out.index("MXFP8 transformer_2 ")
-    assert os.environ["DIFFLET_NKI_TRACE_CACHE"] == "1"
+    assert "DIFFLET_NKI_TRACE_CACHE" not in os.environ  # on by default: nothing to set
     assert [stage for stage, _ in quant_driver.stages] == ["transformer", "vae"]
     quant_driver.stages.clear()
     generating = WanOrchestrator(_wan_args(work_dir=str(tmp_path / "work"), dual_expert=True,

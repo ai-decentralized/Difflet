@@ -15,10 +15,11 @@ import pytest
 from difflet.backends.neuron import compile as neuron_compile
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-NEFF, NEFF_LOCAL, HLO = (
+NEFF, NEFF_LOCAL, HLO, TRACE = (
     "TORCH_NEURONX_NEFF_CACHE_DIR",
     "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR",
     "TORCH_NEURONX_HLO_CACHE_DIR",
+    "NKI_TRACE_CACHE_URL",
 )
 
 
@@ -34,7 +35,8 @@ def clean_cache_env(monkeypatch, tmp_path):
 
 def test_layout_is_neuron_neff_neff_local_hlo():
     assert neuron_compile.CACHE_SUBDIR == "neuron"
-    assert neuron_compile.CACHE_ENV_DIRS == {NEFF: "neff", NEFF_LOCAL: "neff_local", HLO: "hlo"}
+    assert neuron_compile.CACHE_ENV_DIRS == {NEFF: "neff", NEFF_LOCAL: "neff_local", HLO: "hlo",
+                                             TRACE: "nki_trace"}
 
 
 def test_cache_env_defaults_under_difflet_cache(clean_cache_env):
@@ -42,6 +44,7 @@ def test_cache_env_defaults_under_difflet_cache(clean_cache_env):
         NEFF: str(clean_cache_env / "neuron" / "neff"),
         NEFF_LOCAL: str(clean_cache_env / "neuron" / "neff_local"),
         HLO: str(clean_cache_env / "neuron" / "hlo"),
+        TRACE: str(clean_cache_env / "neuron" / "nki_trace"),
     }
     assert not (clean_cache_env / "neuron").exists()  # nothing created
 
@@ -54,6 +57,7 @@ def test_cache_env_keeps_variables_already_set(clean_cache_env, monkeypatch):
         NEFF: "/shared/neff",
         NEFF_LOCAL: str(clean_cache_env / "other" / "neuron" / "neff_local"),
         HLO: str(clean_cache_env / "other" / "neuron" / "hlo"),
+        TRACE: str(clean_cache_env / "other" / "neuron" / "nki_trace"),
     }
 
 
@@ -66,6 +70,7 @@ def test_cache_env_reads_the_given_mapping_not_os_environ(clean_cache_env, monke
         NEFF: str(clean_cache_env / "neuron" / "neff"),  # os.environ's value is not consulted
         NEFF_LOCAL: str(clean_cache_env / "neuron" / "neff_local"),
         HLO: "relative/hlo",  # verbatim, as the process that reads it will see it
+        TRACE: str(clean_cache_env / "neuron" / "nki_trace"),
     }
     assert given == {HLO: "relative/hlo"}
     assert dict(os.environ) == before
@@ -80,6 +85,7 @@ def test_cache_env_takes_the_root_from_the_given_mapping_first(clean_cache_env, 
         NEFF: str(row / "neuron" / "neff"),
         NEFF_LOCAL: str(row / "neuron" / "neff_local"),
         HLO: str(row / "neuron" / "hlo"),
+        TRACE: str(row / "neuron" / "nki_trace"),
     }
     assert neuron_compile.neuron_cache_env(clean_cache_env / "explicit", env=given)[HLO] == str(
         clean_cache_env / "explicit" / "neuron" / "hlo"
@@ -94,7 +100,8 @@ def test_cache_env_takes_the_root_from_the_given_mapping_first(clean_cache_env, 
     )
     configured = {"DIFFLET_COMPILE_CACHE": str(row)}
     neuron_compile.configure_compile_cache(env=configured)
-    assert configured["TORCH_NEURONX_HLO_CACHE_DIR"] == str(row / "neuron" / "hlo")
+    assert configured["TORCH_NEURONX_HLO_CACHE_DIR"] == str(
+        row / "neuron" / "hlo" / neuron_compile.stack_version_tag())
 
 
 def test_cache_env_expands_the_home_directory_and_makes_paths_absolute(
@@ -135,18 +142,35 @@ def test_compile_module_imports_without_torch():
     assert proc.returncode == 0, proc.stderr
 
 
-def test_nki_trace_cache_opt_in_versions_the_hlo_cache(tmp_path):
-    env = {"DIFFLET_COMPILE_CACHE": str(tmp_path), "DIFFLET_NKI_TRACE_CACHE": "1"}
+@pytest.mark.parametrize("value", [None, "", "1", "true"])
+def test_nki_trace_cache_is_on_unless_turned_off_and_versions_the_hlo_cache(tmp_path, value):
+    env = {"DIFFLET_COMPILE_CACHE": str(tmp_path)}
+    if value is not None:
+        env["DIFFLET_NKI_TRACE_CACHE"] = value
     neuron_compile.configure_compile_cache(env=env)
     tag = neuron_compile.stack_version_tag()
     assert env["NKI_ENABLE_TRACE_CACHE"] == "1"
     assert env["TORCH_NEURONX_HLO_CACHE_DIR"] == os.path.join(str(tmp_path), "neuron", "hlo", tag)
-    neuron_compile.configure_compile_cache(env=env)  # the launcher, then prepare_runtime: same value
+    neuron_compile.configure_compile_cache(env=env)  # launcher, then prepare_runtime: same value
     assert env["TORCH_NEURONX_HLO_CACHE_DIR"] == os.path.join(str(tmp_path), "neuron", "hlo", tag)
 
 
-def test_nki_trace_cache_stays_off_without_the_opt_in(tmp_path):
-    env = {"DIFFLET_COMPILE_CACHE": str(tmp_path)}
+@pytest.mark.parametrize("var", ["DIFFLET_NKI_TRACE_CACHE", "NKI_ENABLE_TRACE_CACHE"])
+@pytest.mark.parametrize("value", ["0", "false", "no", "off", " OFF "])
+def test_nki_trace_cache_turns_off_for_a_false_value(tmp_path, var, value):
+    # NKI_ENABLE_TRACE_CACHE=0 is the switch torch-neuronx's trace-cache warning names
+    env = {"DIFFLET_COMPILE_CACHE": str(tmp_path), var: value}
     neuron_compile.configure_compile_cache(env=env)
     assert env["NKI_ENABLE_TRACE_CACHE"] == "0"
     assert env["TORCH_NEURONX_HLO_CACHE_DIR"] == os.path.join(str(tmp_path), "neuron", "hlo")
+
+
+def test_nki_trace_cache_lives_under_the_compile_root(tmp_path):
+    """nki's own default (/var/tmp) outlives the root, so a new root would not trace cold; a
+    location the shell exported is kept."""
+    env = {"DIFFLET_COMPILE_CACHE": str(tmp_path)}
+    neuron_compile.configure_compile_cache(env=env)
+    assert env[TRACE] == os.path.join(str(tmp_path), "neuron", "nki_trace")
+    env = {"DIFFLET_COMPILE_CACHE": str(tmp_path), TRACE: "/shell/trace"}
+    neuron_compile.configure_compile_cache(env=env)
+    assert env[TRACE] == "/shell/trace"

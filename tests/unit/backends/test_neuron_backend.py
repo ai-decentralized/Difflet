@@ -125,7 +125,7 @@ def test_prepare_runtime_single_process_needs_no_device(monkeypatch, tmp_path):
     # prepare_runtime exports the cache settings; setenv+delenv records them for restoration
     # (delenv alone records nothing for a variable that is not set).
     for name in ("TORCH_NEURONX_NEFF_CACHE_DIR", "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR",
-                 "TORCH_NEURONX_HLO_CACHE_DIR", "NKI_ENABLE_TRACE_CACHE"):
+                 "TORCH_NEURONX_HLO_CACHE_DIR", "NKI_TRACE_CACHE_URL", "NKI_ENABLE_TRACE_CACHE"):
         monkeypatch.setenv(name, "")
         monkeypatch.delenv(name)
     monkeypatch.setenv("DIFFLET_COMPILE_CACHE", str(tmp_path))
@@ -135,10 +135,14 @@ def test_prepare_runtime_single_process_needs_no_device(monkeypatch, tmp_path):
     from difflet.backends.neuron import compile as neuron_compile
 
     monkeypatch.setattr(neuron_compile, "_hlo_cache_warned", False)
+    # prepare_runtime imports torch_neuronx; a stub keeps the real one (and the device) out.
+    monkeypatch.setitem(sys.modules, "torch_neuronx",
+                        types.SimpleNamespace(is_neuron_runtime_initialized=lambda: False))
     runtime.NeuronBackend().prepare_runtime(DiffletParallelConfig())
     assert os.environ["TORCH_NEURONX_NEFF_CACHE_DIR"] == str(tmp_path / "neuron" / "neff")
-    assert os.environ["TORCH_NEURONX_HLO_CACHE_DIR"] == str(tmp_path / "neuron" / "hlo")
-    assert os.environ["NKI_ENABLE_TRACE_CACHE"] == "0"
+    assert os.environ["TORCH_NEURONX_HLO_CACHE_DIR"] == str(
+        tmp_path / "neuron" / "hlo" / neuron_compile.stack_version_tag())
+    assert os.environ["NKI_ENABLE_TRACE_CACHE"] == "1"
 
 
 # ------------------------------------------- process-group timeout (DIFFLET_NEURON_PG_TIMEOUT_S)

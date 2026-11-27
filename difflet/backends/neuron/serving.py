@@ -427,7 +427,7 @@ class NeuronServingStageAdapter:
         profile = runtime.profile
         refuse_unsupported_profile(profile, self.spec)
         _require_neuron_backend()
-        _export_rank_environment(profile, self.model_type)
+        _export_rank_environment(profile)
         # Worker-side import: the parent process never loads torch for this adapter.
         from difflet.pipeline.difflet_pipeline import DiffletPipeline
 
@@ -540,19 +540,17 @@ class NeuronServingStageAdapter:
             smoke.cleanup()
 
 
-def _export_rank_environment(profile: ServingProfile, model_type: str) -> None:
+def _export_rank_environment(profile: ServingProfile) -> None:
     """What the CLI launcher exports to its ranks, set before the runtime is prepared: the
-    compile cache under ``--cache-dir`` (as MiniMax-H3's adapter), the launcher's 3 h
-    process-group timeout (a cold load holds peers in a collective for many minutes), and
-    HunyuanVideo's NKI trace cache. An operator-exported value wins."""
+    compile cache under ``--cache-dir`` (as MiniMax-H3's adapter) and the launcher's 3 h
+    process-group timeout (a cold load holds peers in a collective for many minutes). An
+    operator-exported value wins."""
     from difflet.backends.neuron.runtime import PG_TIMEOUT_ENV, TORCHRUN_PG_TIMEOUT_S
 
     if profile.cache_dir and not os.environ.get("DIFFLET_COMPILE_CACHE"):
         os.environ["DIFFLET_COMPILE_CACHE"] = str(Path(profile.cache_dir).expanduser().resolve())
     if not os.environ.get(PG_TIMEOUT_ENV, "").strip():
         os.environ[PG_TIMEOUT_ENV] = str(TORCHRUN_PG_TIMEOUT_S)
-    if model_type == "hunyuan_video":
-        os.environ.setdefault("DIFFLET_NKI_TRACE_CACHE", "1")
 
 
 __all__ = [

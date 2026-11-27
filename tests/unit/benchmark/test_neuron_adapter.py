@@ -16,6 +16,7 @@ import pytest
 
 from benchmark.adapters import neuron as na
 from benchmark.models import MATRIX
+from difflet.backends.neuron.compile import stack_version_tag
 from tests.unit.benchmark import _neuron_results as fake
 
 CACHE_VARS = ("TORCH_NEURONX_NEFF_CACHE_DIR", "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR",
@@ -30,6 +31,7 @@ def _shell():
             "TORCH_NEURONX_NEFF_CACHE_DIR": "/elsewhere/neff",
             "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR": "/elsewhere/local",
             "TORCH_NEURONX_HLO_CACHE_DIR": "/elsewhere/hlo",
+            "NKI_TRACE_CACHE_URL": "/elsewhere/nki_trace",
             "WORLD_SIZE": "8", "RANK": "3", "DIFFLET_BACKEND": "trainium",
             "DIFFLET_EXEC_MODE": "eager", "NEURON_RT_NUM_CORES": "2",
             "OMP_NUM_THREADS": "12"}
@@ -42,8 +44,10 @@ def test_bench_env_never_inherits_the_shells_cache_locations(tmp_path):
     assert env["DIFFLET_COMPILE_CACHE"] == root
     assert env["TORCH_NEURONX_NEFF_CACHE_DIR"] == os.path.join(root, "neuron", "neff")
     assert env["TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR"] == os.path.join(root, "neuron", "neff_local")
-    assert env["TORCH_NEURONX_HLO_CACHE_DIR"] == os.path.join(root, "neuron", "hlo")
-    assert env["NKI_ENABLE_TRACE_CACHE"] == "0"
+    assert env["TORCH_NEURONX_HLO_CACHE_DIR"] == os.path.join(
+        root, "neuron", "hlo", stack_version_tag())  # the trace cache's per-stack subdirectory
+    assert env["NKI_TRACE_CACHE_URL"] == os.path.join(root, "neuron", "nki_trace")
+    assert env["NKI_ENABLE_TRACE_CACHE"] == "1"
     for name in ("WORLD_SIZE", "RANK", "DIFFLET_BACKEND", "DIFFLET_EXEC_MODE",
                  "NEURON_RT_NUM_CORES"):
         assert name not in env
@@ -80,7 +84,8 @@ def test_cache_dirs_layout(tmp_path):
     dirs = na.cache_dirs(tmp_path)
     assert dirs == {"neff": tmp_path / "neuron" / "neff",
                     "neff_local": tmp_path / "neuron" / "neff_local",
-                    "hlo": tmp_path / "neuron" / "hlo"}
+                    "hlo": tmp_path / "neuron" / "hlo",
+                    "nki_trace": tmp_path / "neuron" / "nki_trace"}
 
 
 # ----------------------------------------------------------------------------- commands

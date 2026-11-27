@@ -78,7 +78,6 @@ _CLI_NAME = "hunyuan-video-1.5"
 _RUNS = "tensor, sequence, context and CFG parallelism, and TeaCache"
 _FPS = 24
 _DEFAULT_STEPS = 50
-_NKI_TRACE_OPT_IN = "DIFFLET_NKI_TRACE_CACHE"
 
 
 def _unsupported(args: argparse.Namespace) -> list[str]:
@@ -151,41 +150,29 @@ class HunyuanVideo15Orchestrator(ModelOrchestrator):
             except FileNotFoundError as exc:  # no local snapshot: the stages report it themselves
                 print(f"[hv15] bf16 copy skipped: {exc}", flush=True)
         tp, cfg, cp = _layout(self.args)
-        # The key-bounded attention kernel at 121 frames (~51k joint tokens) takes ~10 min to trace
-        # in every process unless torch-neuronx's NKI trace cache keeps it; its inputs are all call
-        # arguments, so the stages opt in (a per-stack-version cache, see neuron.compile). Set only
-        # around the launches (the stages inherit the environment), then restored. The user's
-        # setting is read before _prepare_quant, which opts in for the MX kernel before it can
-        # refuse, so the restore also covers a refused --quant.
-        previous = os.environ.get(_NKI_TRACE_OPT_IN)
+        self._prepare_quant(create=mode == "compile", tp=tp)
+        work_dir = Path(getattr(self.args, "work_dir", None)
+                        or Path.home() / ".cache" / "difflet" / "work" / "hv15")
+        work_dir.mkdir(parents=True, exist_ok=True)
+        cli = self._stage_cli_args(mode, str(work_dir), tp, cfg, cp)
         try:
-            self._prepare_quant(create=mode == "compile", tp=tp)
-            work_dir = Path(getattr(self.args, "work_dir", None)
-                            or Path.home() / ".cache" / "difflet" / "work" / "hv15")
-            work_dir.mkdir(parents=True, exist_ok=True)
-            cli = self._stage_cli_args(mode, str(work_dir), tp, cfg, cp)
-            os.environ[_NKI_TRACE_OPT_IN] = previous if previous is not None else "1"
-            try:
-                if mode == "generate":
-                    runner.run_stage(_HF_MODEL_ID, "encode", num_cores=1, virtual_core_size=None,
-                                     cli_args=cli)
-                runner.run_stage(_HF_MODEL_ID, "transformer", num_cores=tp * (2 if cfg else 1) * cp,
-                                 virtual_core_size=None, cli_args=cli)
-                # The tiles decode across the transformer stage's cores (free by then) unless
-                # --vae-cores says otherwise; each rank decodes tiles of the same size as one core.
-                vae_cores = int(getattr(self.args, "vae_cores", None)
-                                or tp * (2 if cfg else 1) * cp)
-                if vae_cores > 1:
-                    self._warm_vae_kernels(work_dir, tp, cfg, cp)
-                runner.run_stage(_HF_MODEL_ID, "vae", num_cores=vae_cores, virtual_core_size=None,
+            if mode == "generate":
+                runner.run_stage(_HF_MODEL_ID, "encode", num_cores=1, virtual_core_size=None,
                                  cli_args=cli)
-            except Exception:
-                print(f"[difflet] work dir preserved at {work_dir} for inspection",
-                      file=sys.stderr)
-                raise
-        finally:
-            if previous is None:
-                os.environ.pop(_NKI_TRACE_OPT_IN, None)
+            runner.run_stage(_HF_MODEL_ID, "transformer", num_cores=tp * (2 if cfg else 1) * cp,
+                             virtual_core_size=None, cli_args=cli)
+            # The tiles decode across the transformer stage's cores (free by then) unless
+            # --vae-cores says otherwise; each rank decodes tiles of the same size as one core.
+            vae_cores = int(getattr(self.args, "vae_cores", None)
+                            or tp * (2 if cfg else 1) * cp)
+            if vae_cores > 1:
+                self._warm_vae_kernels(work_dir, tp, cfg, cp)
+            runner.run_stage(_HF_MODEL_ID, "vae", num_cores=vae_cores, virtual_core_size=None,
+                             cli_args=cli)
+        except Exception:
+            print(f"[difflet] work dir preserved at {work_dir} for inspection",
+                  file=sys.stderr)
+            raise
         if not getattr(self.args, "keep_work_dir", False):
             shutil.rmtree(work_dir, ignore_errors=True)
 

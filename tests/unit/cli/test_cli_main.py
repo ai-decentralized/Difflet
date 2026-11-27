@@ -1,5 +1,7 @@
 from __future__ import annotations
 import importlib
+import os
+
 import pytest
 
 
@@ -121,3 +123,40 @@ def test_compile_teacache_speedup_requires_calibration(monkeypatch, capsys):
                   "--teacache-speedup", "1.5"])
     assert exc.value.code == 1
     assert "--teacache-calibration" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("command, backend, exported, expected", [
+    ("generate", "neuron", None, "0"),
+    ("compile", "neuron", None, "0"),
+    ("generate", "neuron", "1", "1"),  # an exported value wins
+    ("generate", "trainium", None, None),
+    ("generate", "cuda", None, None),
+    ("generate", None, None, None),  # auto-detection: the single-process path, unchanged
+])
+def test_neuron_launches_turn_off_torchs_backend_autoload(monkeypatch, command, backend,
+                                                          exported, expected):
+    """torch's backend autoload imports torch_neuronx into every process that imports torch. A
+    neuron compile/generate/run turns it off in the driver before the driver first imports
+    torch, so the driver, torchrun's agents and the ranks (which import torch_neuronx in
+    prepare_runtime) inherit it; other backends are left alone."""
+    cli = _cli()
+    for name in ("TORCH_DEVICE_BACKEND_AUTOLOAD", "DIFFLET_BACKEND"):
+        monkeypatch.setenv(name, "")  # records the original state for the undo
+        monkeypatch.delenv(name)
+    if exported is not None:
+        monkeypatch.setenv("TORCH_DEVICE_BACKEND_AUTOLOAD", exported)
+    seen = []
+
+    class FakeOrch:
+        def generate(self):
+            seen.append(os.environ.get("TORCH_DEVICE_BACKEND_AUTOLOAD"))
+
+        compile = generate
+
+    monkeypatch.setattr(cli, "_get_orchestrator", lambda args: FakeOrch())
+    flags = [] if backend is None else ["--backend", backend]
+    request = ["--prompt", "x", "--output", "o.png"] if command == "generate" else []
+    # --total-cores: the core budget check probes no hardware
+    cli.main([command, "--model-id", "black-forest-labs/FLUX.1-dev", *request,
+              "--total-cores", "64", *flags])
+    assert seen == [expected]

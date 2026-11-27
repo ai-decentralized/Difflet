@@ -40,7 +40,8 @@ Launch (the driver builds this; one device job at a time; absolute paths):
     HF_HUB_OFFLINE=1 DIFFLET_NO_JEMALLOC=1 OMP_NUM_THREADS=3 DIFFLET_NEURON_PG_TIMEOUT_S=3600 \\
     DIFFLET_COMPILE_CACHE=<cache> TORCH_NEURONX_NEFF_CACHE_DIR=<cache>/neuron/neff \\
     TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR=<cache>/neuron/neff_local \\
-    TORCH_NEURONX_HLO_CACHE_DIR=<cache>/neuron/hlo NKI_ENABLE_TRACE_CACHE=0 \\
+    TORCH_NEURONX_HLO_CACHE_DIR=<cache>/neuron/hlo/<stack tag> \\
+    NKI_TRACE_CACHE_URL=<cache>/neuron/nki_trace NKI_ENABLE_TRACE_CACHE=1 \\
     PYTHONSAFEPATH=1 PYTHONPATH=<worktree> <venv>/bin/python -m torch.distributed.run \\
         --standalone --nproc-per-node 4 <worktree>/benchmark/neuron_wan_bench.py \\
         --model-dir <snapshot> --steps 50 --guidance-scale 5.0 --iters 3 --out-dir <dir>
@@ -346,7 +347,7 @@ def run(args: argparse.Namespace) -> int:
     if missing:
         raise SystemExit(
             f"{', '.join(missing)} not set: torch-neuronx fixes its HLO lock directory when "
-            "this process imports torch, so the launcher must export the three cache "
+            "this process imports torch, so the launcher must export the cache "
             "locations (benchmark/neuron_cold_warm.py does, from neuron_cache_env)")
     import torch.distributed as dist
     import torch_neuronx

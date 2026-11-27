@@ -306,13 +306,12 @@ def test_registry_routes_flux_to_the_neuron_application():
 
 
 def test_quant_is_forwarded_to_the_transformer_stage(launches, monkeypatch, tmp_path):
-    """--quant mxfp8 is forwarded to the transformer stage and turns on the NKI trace cache; the
-    driver's quantized-checkpoint step is skipped when the weights are not local (the ranks
-    report it)."""
+    """--quant mxfp8 is forwarded to the transformer stage and leaves the NKI trace cache
+    setting alone (on by default); the driver's quantized-checkpoint step is skipped when the
+    weights are not local (the ranks report it)."""
     import difflet.pipeline.path_resolver as resolver
 
-    # setenv first records the original state, so the undo also removes the value the
-    # orchestrator sets with os.environ.setdefault.
+    # setenv first records the original state, so the undo restores it.
     monkeypatch.setenv("DIFFLET_NKI_TRACE_CACHE", "")
     monkeypatch.delenv("DIFFLET_NKI_TRACE_CACHE")
     monkeypatch.setattr(resolver, "resolve_model_path",
@@ -322,7 +321,7 @@ def test_quant_is_forwarded_to_the_transformer_stage(launches, monkeypatch, tmp_
     flux_cli.FluxOrchestrator(args).generate()
     cli = launches[0]["cli_args"]
     assert cli[cli.index("--quant") + 1] == "mxfp8" and "--quant-compute" not in cli
-    assert os.environ.get("DIFFLET_NKI_TRACE_CACHE") == "1"
+    assert "DIFFLET_NKI_TRACE_CACHE" not in os.environ
     plain = _args(work_dir=str(tmp_path / "w2"), model_id="black-forest-labs/FLUX.1-dev")
     flux_cli.FluxOrchestrator(plain).generate()
     assert "--quant" not in launches[1]["cli_args"]

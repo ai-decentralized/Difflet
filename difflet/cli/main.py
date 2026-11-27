@@ -1533,6 +1533,12 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     check_command_args(args)
+    if (args.command in ("compile", "generate", "run") and envs.DIFFLET_BACKEND
+            and _lookup_backend(None).name == "neuron"):
+        # Autoload imports torch_neuronx (seconds) into every process that imports torch: this
+        # driver and the torchrun agents never touch the device, and each rank imports it in
+        # NeuronBackend.prepare_runtime. Set before this process first imports torch.
+        os.environ.setdefault("TORCH_DEVICE_BACKEND_AUTOLOAD", "0")
     from difflet.utils import bench_timing
 
     bench_timing.event("args", command=args.command, args=vars(args))
