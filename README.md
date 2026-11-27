@@ -125,7 +125,7 @@ see the per-model limits below.
 | Wan 2.2 | ✅ video | ✅ video | ✅ | ❌ | ⚠️ ⁵ | ✅ ⁶ | ❌ | ❌ |
 | Wan 2.1 ¹¹ | ✅ video | ✅ video | ✅ | ❌ | ⚠️ ⁵ | ✅ ⁶ | ❌ | ❌ |
 | HunyuanVideo (original) | ⚠️ experimental ⁷ | ⚠️ experimental ⁷ | ⚠️ execution observed ⁷ | ❌ | Not measured | — ¹ | ❌ | ❌ |
-| LTX-2 | ⚠️ video, CPU checks ⁸ | ⚠️ video, CPU checks ⁸ | ⚠️ Python qualified ⁸ | ❌ | Not measured | ❌ | ❌ | ❌ |
+| LTX-2 | ⚠️ video, CPU checks ⁸ | ⚠️ video, CPU checks ⁸ | ⚠️ Python qualified ⁸ | ❌ | Not measured | ✅ ¹² | ❌ | ❌ |
 | HunyuanVideo 1.5 | ⚠️ experimental ⁹ | ⚠️ experimental ⁹ | ✅ ⁹ | ❌ | Not measured | ❌ | ❌ | ❌ |
 | MiniMax-H3 | ✅ video + audio ¹⁰ | ✅ video + audio ¹⁰ | ✅ | ❌ | Not measured | — ¹⁰ | ❌ | ❌ |
 
@@ -166,6 +166,11 @@ TeaCache (adaptive), TAEF1, and `--host-vae` are refused on GPUs for these model
    Wan 2.2 with its one transformer. The defaults are Wan 2.2's (40 steps, guidance 4.0); Wan
    2.1's model card uses `--steps 50 --guidance-scale 5.0`. It has no second denoising stage,
    so `--guidance-scale-2` and a served `guidance_scale_2` are refused.
+12. Two GPUs under `torchrun`, `difflet run` only. Each GPU runs its guidance branch at batch 1,
+   while one GPU runs the pair as one batch of 2, and BF16 rounds differently at the two batch
+   sizes: frames come out 24.9 to 44.6 dB PSNR from one GPU's, and bit-identical to one GPU
+   running the pair at batch 1. On two RTX PRO 6000 96 GB, a 512×768×121 video finishes 1.96×
+   faster; see the [LTX-2 CUDA guide](docs/verification/ltx2-cuda.md).
 
 Measured timings against stock diffusers, and the full pass/limit matrix, are in
 [docs/verification/gpu-backend-results.md](docs/verification/gpu-backend-results.md).
