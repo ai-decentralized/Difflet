@@ -662,6 +662,7 @@ paths, and stage core counts are in [docs/cli-staged-commands.md](docs/cli-stage
 | `--teacache-speedup F`, `--teacache-calibration PATH` | generate, run, serve | Adaptive TeaCache target and calibration file |
 | `--teacache-online-delta ALPHA` | generate, run | Probe-free online-delta TeaCache |
 | `--torch-compile` | generate, run, serve | CUDA backend only: `torch.compile` the DiT blocks (eager is the default) |
+| `--attention {cte,const-max}` | compile, generate, run, serve | `--backend neuron`: the DiT attention kernel; `const-max` uses each layer's committed score bound (FLUX.1-dev, Qwen-Image, Wan, HunyuanVideo, LTX-2) |
 | `--quant mxfp8` | compile, generate, run | `--backend neuron` on Trainium3: MXFP8 attention q/k/v and MLP linears (Qwen-Image, FLUX.1-dev) |
 | `--prompt` | generate, run | Text prompt |
 | `--negative-prompt TEXT`, `--true-cfg-scale F` | generate, run | Qwen-Image on `--backend neuron`: opt-in true classifier-free guidance |

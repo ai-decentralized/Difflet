@@ -269,6 +269,9 @@ class ServingProfile:
     shapes: tuple[tuple[int, int, int | None], ...] | None = None
     # CUDA backend only: torch.compile the DiT blocks in the resident worker (opt-in).
     torch_compile: bool = False
+    # Native neuron backend: the DiT attention kernel, None for the default (cte) or
+    # "const-max". It changes the compiled graph, so it is part of the profile identity.
+    attention: str | None = None
 
     @property
     def world_size(self) -> int:
