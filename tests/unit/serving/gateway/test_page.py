@@ -123,6 +123,27 @@ def test_page_models_carry_the_backend_defaults():
     assert (models[H3]["steps"], models[H3]["guidance"]) == (30, None)  # its serving metadata's
 
 
+def test_fleet_defaults_override_the_backend_defaults_on_the_page_and_info():
+    import dataclasses
+
+    flux = dataclasses.replace(_flux(), default_steps=50, default_guidance=4.0,
+                               estimate=(1.0, 0.5))
+    models = _models(render_page(_config(flux), {FLUX: "ready"}))
+    info = render_info(_config(flux), {FLUX: "ready"}, base_url=BASE)
+
+    assert (models[FLUX]["steps"], models[FLUX]["guidance"]) == (50, 4.0)
+    assert "<td>~26 s (50 steps)</td>" in info  # 1.0 + 0.5 * 50, at the fleet's steps
+    only_steps = dataclasses.replace(_flux(), default_steps=50)
+    assert _models(render_page(_config(only_steps), {}))[FLUX]["guidance"] == 3.5  # backend's
+
+
+def test_an_empty_steps_or_guidance_field_sends_the_default():
+    page = render_page(_config(_flux()), {FLUX: "ready"})
+
+    assert "const steps = stepsValue === null ? (m.steps || null) : stepsValue;" in page
+    assert "(guidanceValue === null ? m.guidance : guidanceValue)" in page
+
+
 def test_page_shows_the_measured_estimate():
     flux = FleetEntry(model_id=FLUX, device=0, port=8100, cache_dir=Path("/c"),
                       serve_args=("--height", "1024", "--width", "1024"), estimate=(1.5, 0.25))
