@@ -501,6 +501,7 @@ class HunyuanVideoAttention(nn.Module):
                 latent_k.transpose(1, 2), latent_v.transpose(1, 2),
                 context_k.transpose(1, 2), context_v.transpose(1, 2),
                 scale=scale, causal=False, text_valid_len=text_valid_len,
+                constmax_ok=getattr(self, "ring_constmax_ok", True),
             )  # [B, H, S_img/cp + S_txt, d]
             o_joint = o_joint.transpose(1, 2)     # [B, S_img/cp + S_txt, H, d]
             img_len = latent_q.shape[1]
@@ -1225,6 +1226,14 @@ class HunyuanVideoTransformer3DModel(nn.Module):
         # buffer (a graph input, so each block class keeps one shared graph) for the neuron
         # backend's const-max route; the layers that fail it stay on attention_cte. Table:
         # scripts/attn_constmax/table.py hunyuan_video.
+        # Ring CP, always: the const-max ring kernels' Cauchy-Schwarz shift can overshoot
+        # the true row maximum by the table's gap (hard_bound - softmax_max) and underflow; layers
+        # past the gap limit ("ok": false) keep the running-max ring.
+        ring_table = json.loads(
+            Path(__file__).with_name("attn_constmax.json").read_text())["layers"]
+        for stack in ("transformer_blocks", "single_transformer_blocks"):
+            for i, block in enumerate(getattr(self, stack)):
+                block.attn.ring_constmax_ok = bool(ring_table[f"{stack}.{i}.attn"]["ok"])
         if os.environ.get("DIFFLET_EXP_ATTN_CONSTMAX") == "1":
             table = json.loads(Path(__file__).with_name("attn_constmax.json").read_text())["layers"]
             for stack in ("transformer_blocks", "single_transformer_blocks"):

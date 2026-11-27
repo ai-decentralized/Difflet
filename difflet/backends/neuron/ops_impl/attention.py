@@ -628,12 +628,17 @@ def _dense_bhsd(q, k, v, *, scale: float):
     return out.reshape(b, h, s_q, d)
 
 
-def ring_attention(q, k, v, *, scale: float, causal: bool = False, token_major: bool = False):
+def ring_attention(q, k, v, *, scale: float, causal: bool = False, token_major: bool = False,
+                   constmax_ok: bool = True):
     """Ring context-parallel self-attention over a sequence sharded on the CP group.
 
     ``q, k, v``: ``[B, H, S/cp, d]`` to ``[B, H, S/cp, d]``; with ``token_major``, ``q, k, v`` are
     ``[B, S/cp, H, d]`` (the projections' own layout, which the const-max ring kernel takes as is)
-    and the output is still ``[B, H, S/cp, d]``. In ``cp`` rounds each rank attends
+    and the output is still ``[B, H, S/cp, d]``. ``constmax_ok=False`` (a layer past its const-max
+    table's gap limit, ``ring_constmax_ok``) keeps the call off the const-max ring kernel, whose
+    Cauchy-Schwarz shift underflows when it overshoots the true row maximum by that much.
+
+    In ``cp`` rounds each rank attends
     its query shard to the K/V block it holds, getting ``(o_r, l_r)`` (output, logsumexp), and
     passes the block to the next rank. Partial results merge in fp32 by their logsumexp
     (``_merge_partials``), which is exactly the softmax over all ``S`` keys. Non-causal only. Any shard length: the flash kernel's
@@ -650,7 +655,8 @@ def ring_attention(q, k, v, *, scale: float, causal: bool = False, token_major: 
     cp = get_axis_size("cp")
     if cp == 1:
         return _dense_bhsd(q, k, v, scale=scale)
-    if _RING_CONSTMAX_OP is not None and _ring_kernel_eligible(q, k, v) and q.shape[-1] == 128:
+    if (constmax_ok and _RING_CONSTMAX_OP is not None and _ring_kernel_eligible(q, k, v)
+            and q.shape[-1] == 128):
         # [B, S/cp, H, d]: its layout, as the caller passed it, else from the head-major tensors.
         tm = token_major_qkv or tuple(x.transpose(1, 2) for x in (q, k, v))
         out = _RING_CONSTMAX_OP(*(x.contiguous() for x in tm), scale)
@@ -880,7 +886,8 @@ def _ring_partials(q, k, v, *, scale: float, cp: int, group, rank: int, out=None
 
 
 def joint_ring_attention(q, image_k, image_v, text_k, text_v, *, scale: float,
-                         causal: bool = False, text_valid_len=None, text_first: bool = False):
+                         causal: bool = False, text_valid_len=None, text_first: bool = False,
+                         constmax_ok: bool = True):
     """Ring context-parallel joint (text + image) attention: image sharded, text replicated.
 
     ``q``: this rank's joint queries ``[B, H, S_txt + S_img/cp, d]`` (the caller's order; Qwen
@@ -915,7 +922,7 @@ def joint_ring_attention(q, image_k, image_v, text_k, text_v, *, scale: float,
     from difflet.backends.neuron.ops_impl.parallel_mesh import get_axis_rank, get_axis_size
 
     cp = get_axis_size("cp")
-    if (cp > 1 and _JOINT_RING_OP is not None
+    if (cp > 1 and constmax_ok and _JOINT_RING_OP is not None
             and _joint_ring_kernel_eligible(q, image_k, image_v, text_k, text_v)):
         split = None
         if _JOINT_RING_TEXT_SPLIT:

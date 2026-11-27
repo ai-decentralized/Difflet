@@ -130,6 +130,7 @@ class NeuronHunyuanVideo15TransformerApplication(TorchNeuronApplicationBase):
 
     def build_module(self) -> torch.nn.Module:
         model = _tensor_signature_model()(**self.model_config)
+        _install_ring_constmax_ok(model)
         if os.environ.get("DIFFLET_EXP_ATTN_CONSTMAX") == "1":
             _install_constmax_sigma(model)
         if self.tp > 1:
@@ -241,6 +242,18 @@ def _install_constmax_sigma(model) -> None:
         row = table[f"transformer_blocks.{i}.attn"]
         if row["ok"]:
             block.attn.register_buffer("constmax_sigma", torch.full((128, 1), row["sigma"]), persistent=False)
+
+
+def _install_ring_constmax_ok(model) -> None:
+    """Ring CP, always: the const-max ring kernels' Cauchy-Schwarz shift can overshoot the true row
+    maximum by the table's gap (hard_bound - softmax_max) and underflow; each block's attention
+    carries its layer's ``ok`` as ``ring_constmax_ok``, and layers past the gap limit keep the
+    running-max ring."""
+    from pathlib import Path
+
+    table = json.loads(Path(__file__).with_name("attn_constmax.json").read_text())["layers"]
+    for i, block in enumerate(model.transformer_blocks):
+        block.attn.ring_constmax_ok = bool(table[f"transformer_blocks.{i}.attn"]["ok"])
 
 
 def _constmax_kwargs(attn) -> dict:
@@ -359,7 +372,8 @@ class _JointRingProcessor:
         q, k, v, eq, ek, ev = _joint_qkv(attn, hidden_states, encoder_hidden_states, image_rotary_emb)
         n_local = q.shape[2]
         out = joint_ring_attention(torch.cat([q, eq], dim=2), k, v, ek, ev, scale=q.shape[-1] ** -0.5,
-                                   text_valid_len=attention_mask.to(torch.int32).sum(dim=1))
+                                   text_valid_len=attention_mask.to(torch.int32).sum(dim=1),
+                                   constmax_ok=getattr(attn, "ring_constmax_ok", True))
         return _joint_out(attn, out[:, :, :n_local], out[:, :, n_local:], hidden_states.dtype)
 
 

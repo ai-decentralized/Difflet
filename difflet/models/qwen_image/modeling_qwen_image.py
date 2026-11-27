@@ -396,6 +396,7 @@ class _QwenImageTrainiumAttnProcessor:
             joint_hidden_states = self._masked_joint_attention(
                 img_query, img_key, img_value, txt_query, txt_key, txt_value,
                 text_valid_len=text_valid_len, image_seq_len=image_seq_len, cm=cm,
+                constmax_ok=getattr(attn, "ring_constmax_ok", True),
             )
         elif self.context_parallel_enabled and self.cp_mode == "ring":
             if attention_mask is not None:
@@ -411,6 +412,7 @@ class _QwenImageTrainiumAttnProcessor:
                 img_key.transpose(1, 2), img_value.transpose(1, 2),  # sharded image K,V
                 txt_key.transpose(1, 2), txt_value.transpose(1, 2),  # replicated text K,V
                 scale=scale, causal=False, text_first=True,
+                constmax_ok=getattr(attn, "ring_constmax_ok", True),
             )  # [B, H, Sq, d]
             joint_hidden_states = o_joint.transpose(1, 2)  # [B, Sq, H, d]
         elif self.context_parallel_enabled and self.cp_mode == "ulysses":
@@ -500,6 +502,7 @@ class _QwenImageTrainiumAttnProcessor:
     def _masked_joint_attention(
         self, img_query, img_key, img_value, txt_query, txt_key, txt_value, *,
         text_valid_len: torch.Tensor, image_seq_len: int | None, cm: dict | None = None,
+        constmax_ok: bool = True,
     ) -> torch.Tensor:
         """Joint attention with the text padding masked out of the keys, as diffusers masks it
         (``[text_mask | ones(image)]`` on the key axis, every query). In ``[B, S, H, d]``, out
@@ -522,6 +525,7 @@ class _QwenImageTrainiumAttnProcessor:
             out = joint_ring_attention(
                 bhsd(q_joint), bhsd(img_key), bhsd(img_value), bhsd(txt_key), bhsd(txt_value),
                 scale=scale, causal=False, text_valid_len=valid, text_first=True,
+                constmax_ok=constmax_ok,
             )
             return bhsd(out)
         if image_seq_len is None:
@@ -702,6 +706,13 @@ class _QwenImageTransformerTraceModule(nn.Module):
         # buffer (a graph input, so the routed blocks share one graph) for the neuron backend's
         # const-max route; the layers that fail it stay on attention_cte. Table:
         # scripts/attn_constmax/table.py.
+        # Ring CP, always: the const-max ring kernels' Cauchy-Schwarz shift can overshoot
+        # the true row maximum by the table's gap (hard_bound - softmax_max) and underflow; layers
+        # past the gap limit ("ok": false) keep the running-max ring.
+        ring_table = json.loads(
+            Path(__file__).with_name("attn_constmax.json").read_text())["layers"]
+        for i, block in enumerate(self.transformer.transformer_blocks):
+            block.attn.ring_constmax_ok = bool(ring_table[f"transformer_blocks.{i}.attn"]["ok"])
         if os.environ.get("DIFFLET_EXP_ATTN_CONSTMAX") == "1":
             table = json.loads(Path(__file__).with_name("attn_constmax.json").read_text())["layers"]
             for i, block in enumerate(self.transformer.transformer_blocks):

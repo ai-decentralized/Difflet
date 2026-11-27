@@ -510,6 +510,27 @@ def add_constmax_sigma_(model: nn.Module, model_path) -> int:
     return routed
 
 
+def add_ring_constmax_ok_(model: nn.Module, model_path) -> int:
+    """Ring CP, always: the const-max ring kernels' Cauchy-Schwarz shift can overshoot the true row
+    maximum by the table's gap (hard_bound - softmax_max) and underflow; each self-attention
+    (``attn1``) carries its layer's ``ok`` from its expert's table as ``ring_constmax_ok``, and
+    layers past the gap limit keep the running-max ring. A checkpoint with no single table keeps
+    the default (every layer on the const-max ring). Returns the number of layers kept off it."""
+    tables = json.loads(Path(__file__).with_name("attn_constmax.json").read_text())["tables"]
+    parts = Path(model_path).parts
+    keys = [k for k in tables if k.split("/")[0] in str(model_path) and k.split("/")[1] in parts]
+    if len(keys) != 1:
+        print(f"[wan] ring const-max guard: no single table for {model_path}; all layers allowed",
+              flush=True)
+        return 0
+    layers = tables[keys[0]]["layers"]
+    kept_off = 0
+    for i, block in enumerate(model.blocks):
+        block.attn1.ring_constmax_ok = bool(layers[f"blocks.{i}.attn1"]["ok"])
+        kept_off += not block.attn1.ring_constmax_ok
+    return kept_off
+
+
 class WanAttention(nn.Module):
     """Self- or cross-attention for WanTransformerBlock.
 
@@ -677,7 +698,8 @@ class WanAttention(nn.Module):
             # Token-major (B, S, heads, dim) as projected: the const-max ring kernel takes it as
             # is; the output comes back (B, heads, S, dim) like the other paths'.
             out = ring_attention(q, k, v, scale=1.0 / math.sqrt(self.head_dim), causal=False,
-                                 token_major=True)
+                                 token_major=True,
+                                 constmax_ok=getattr(self, "ring_constmax_ok", True))
         else:
             # (B, S, heads, dim) → (B, heads, S, dim) for the kernel.
             q = q.transpose(1, 2)
