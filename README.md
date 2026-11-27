@@ -124,10 +124,10 @@ see the per-model limits below.
 | Qwen-Image | ✅ image | ⚠️ image ³ | ✅ | ✅ | ✅ | — ⁴ | ❌ | ❌ |
 | Wan 2.2 | ✅ video | ✅ video | ✅ | ❌ | ⚠️ ⁵ | ✅ ⁶ | ❌ | ❌ |
 | Wan 2.1 ¹¹ | ✅ video | ✅ video | ✅ | ❌ | ⚠️ ⁵ | ✅ ⁶ | ❌ | ❌ |
-| HunyuanVideo (original) | ⚠️ experimental ⁷ | ⚠️ experimental ⁷ | ⚠️ execution observed ⁷ | ❌ | Not measured | — ¹ | ❌ | ❌ |
-| LTX-2 | ⚠️ video, CPU checks ⁸ | ⚠️ video, CPU checks ⁸ | ⚠️ Python qualified ⁸ | ❌ | Not measured | ✅ ¹² | ❌ | ❌ |
-| HunyuanVideo 1.5 | ⚠️ experimental ⁹ | ⚠️ experimental ⁹ | ✅ ⁹ | ❌ | Not measured | ❌ | ❌ | ❌ |
-| MiniMax-H3 | ✅ video + audio ¹⁰ | ✅ video + audio ¹⁰ | ✅ | ❌ | Not measured | — ¹⁰ | ❌ | ❌ |
+| HunyuanVideo (original) | ⚠️ experimental ⁷ | ⚠️ experimental ⁷ | ⚠️ execution observed ⁷ | ❌ | ⚠️ ⁵ | — ¹ | ❌ | ❌ |
+| LTX-2 | ⚠️ video, CPU checks ⁸ | ⚠️ video, CPU checks ⁸ | ⚠️ Python qualified ⁸ | ❌ | ⚠️ ⁵ | ✅ ¹² | ❌ | ❌ |
+| HunyuanVideo 1.5 | ⚠️ experimental ⁹ | ⚠️ experimental ⁹ | ✅ ⁹ | ❌ | ⚠️ ⁵ | ❌ | ❌ | ❌ |
+| MiniMax-H3 | ✅ video + audio ¹⁰ | ✅ video + audio ¹⁰ | ✅ | ❌ | ⚠️ ⁵ | — ¹⁰ | ❌ | ❌ |
 
 An option the GPU backend does not support is refused with a message naming it, not ignored.
 TeaCache (adaptive), TAEF1, and `--host-vae` are refused on GPUs for these models.
@@ -139,8 +139,10 @@ TeaCache (adaptive), TAEF1, and `--host-vae` are refused on GPUs for these model
 3. `difflet serve` handles one request at a time. A second concurrent request gets `429`
    after the 30 s queue timeout. Use `serve --dp-degree N` for concurrency.
 4. Qwen-Image runs one transformer pass per step, so there is no CFG branch to split.
-5. `--dp N --requests` works, with output bit-identical to one GPU. `serve --dp-degree` does
-   not apply, because the video service runs one job at a time.
+5. `--dp N --requests` works, with output bit-identical to one GPU. HunyuanVideo (original),
+   HunyuanVideo 1.5 and LTX-2 were measured with two replicas on two H200 141 GB, and
+   MiniMax-H3 on two B200 180 GB. `serve --dp-degree` does not apply, because the video service
+   runs one job at a time.
 6. Two GPUs under `torchrun`, `difflet run` only. Output is bit-identical to one GPU.
 7. Experimental single-GPU BF16 support for `hunyuanvideo-community/HunyuanVideo`.
    Eager and compiled Python, CLI and HTTP generation were verified at 320×512×61,

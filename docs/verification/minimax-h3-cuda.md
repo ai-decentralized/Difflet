@@ -206,6 +206,9 @@ information, the 10 s clip scores SSIM 0.901 against MiniMax's official `assets/
 ## Limits
 
 - One GPU per generation: tensor, sequence, context and CFG parallelism are refused.
+  Replicas work: `difflet run --dp 2 --requests` ran four requests on two B200 180 GB, each
+  video and audio identical to the same request on one card, with generation 1.89× faster
+  than on one card.
 - Ref2VA, a last keyframe, negative prompts and guidance scales are not supported. The
   checkpoint is guidance-distilled.
 - BF16 only.

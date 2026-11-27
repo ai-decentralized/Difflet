@@ -6,7 +6,9 @@ run. Hardware: NVIDIA RTX PRO 6000 Blackwell (Server and Workstation editions, 9
 NVLink), torch 2.11.0+cu128; Flux with two replicas on 2 × A100 80 GB. Wan 2.1's six-seed accuracy
 against diffusers and its speed are from one A100 80 GB (SXM4); its DiT parity, its Python, CLI,
 staged-CLI, `--dp 2`, `--cfg-parallel` and HTTP cells, its fused-against-unfused comparison and
-Wan 2.2's checks with the fused eager blocks are from H200s.
+Wan 2.2's checks with the fused eager blocks are from H200s. The `--dp 2` table for
+HunyuanVideo (original), HunyuanVideo 1.5 and LTX-2 is from two H200 141 GB, and for MiniMax-H3
+from two B200 180 GB.
 
 Statuses: **PASS** (ran end to end) / **LIMIT** (works with a documented constraint) / **N/A**
 (refused by design) / **NOT MEASURED** (not refused, not run).
@@ -95,6 +97,24 @@ Six matched eager pairs measured 65.626 s versus 67.300 s for the unmodified Omn
 Diffusers adapter on a controlled common runtime. The modified compiled control is
 supplementary; an official compiled comparison remains unavailable. See the
 [HunyuanVideo CUDA guide](hunyuanvideo-cuda.md) for methodology and limits.
+
+## Data parallelism for HunyuanVideo 1.0/1.5, LTX-2 and MiniMax-H3
+
+`difflet run --dp 2 --dp-schedule round_robin --requests` ran four requests on two replicas,
+against each card running the same four requests alone (BF16, torch 2.11.0+cu128). Every
+`--dp 2` output was `torch.equal` to the same request on the same card (MiniMax-H3: video and
+audio), and the two cards' one-card outputs were equal. Generation time is the four requests
+on one card against the slower of the two replicas.
+
+| Model | GPUs | Shape, steps | One card | `--dp 2` | Speedup |
+|---|---|---|---|---|---|
+| HunyuanVideo (original) | 2 × H200 141 GB | 320×512×61, 50 | 204.4 s | 103.4 s | 1.98× |
+| HunyuanVideo 1.5 | 2 × H200 141 GB | 480×832×33, 50 | 151.8 s | 76.4 s | 1.99× |
+| LTX-2 | 2 × H200 141 GB | 512×768×121, 40 | 159.5 s | 81.6 s | 1.95× |
+| MiniMax-H3 | 2 × B200 180 GB | 256×448×124, 50 | 45.0 s | 23.8 s | 1.89× |
+
+`serve --dp-degree` is refused for video models, because the video service runs one job at a
+time.
 
 ## Remaining qualification
 
