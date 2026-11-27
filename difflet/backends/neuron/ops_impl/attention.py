@@ -46,6 +46,10 @@ import os
 import torch
 import torch.nn.functional as F
 
+from difflet.backends.neuron.ops_impl.mx_attention import load_op, record_call
+from difflet.quant.mx_attention import smooth_keys
+from difflet.quant.spec import attn_quant_mode
+
 #: ``DIFFLET_NEURON_ATTENTION=sdpa`` sends every call through ``F.scaled_dot_product_attention``
 #: (never the direct kernel call): the A/B switch behind the SDPA-gate measurement. Read once at
 #: import, so compiled regions see a constant. Default ``auto``: the direct kernel when eligible.
@@ -84,6 +88,20 @@ _JOINT_RING_TEXT_SPLIT = os.environ.get(JOINT_RING_TEXT_SPLIT_ENV, "1").strip() 
 #: Difflet's bounded fork of it (``attention_const_max_kernel.py``). Read once at import.
 _CONSTMAX = os.environ.get("DIFFLET_EXP_ATTN_CONSTMAX") == "1"
 
+#: ``DIFFLET_ATTN_QUANT=mxfp8`` (``--attention mx_attention``) sends the self/joint attention
+#: calls (non-causal, unmasked or key-bounded, bf16, head dim 128, ``mx=True``) to
+#: ``difflet_neuron::mx_attention``, QK^T and PV in MXFP8. Unset or ``off``: every graph is
+#: unchanged. Read once at import, as above (any other value raises); trn3 and compile mode only
+#: (``application_base``).
+ATTN_QUANT = attn_quant_mode()
+# The two switches pick different kernels for the same calls (the MX route would silently win):
+# ``--attention`` exports one and clears the other, so both set is an environment set by hand.
+if ATTN_QUANT != "off" and _CONSTMAX:  # DIFFLET_EXP_ATTN_CONSTMAX=1, read above
+    raise ValueError(
+        f"DIFFLET_ATTN_QUANT={ATTN_QUANT} and DIFFLET_EXP_ATTN_CONSTMAX=1 select different "
+        "attention kernels (Difflet's MXFP8 attention, nkilib attention_const_max): at most one "
+        "may be set (--attention picks one: mx_attention or const-max)")
+
 # Kernel limits stated by torch-neuronx's SDPA gate, other than its 512-multiple lengths.
 _KERNEL_DTYPES = (torch.bfloat16, torch.float16)
 _KERNEL_MAX_HEAD_DIM = 128
@@ -112,6 +130,7 @@ def attention(
     tp_k: bool = False,
     tp_out: bool = False,
     vector_exp: bool = False,
+    mx: bool = True,
     constmax_sigma=None,
     **kwargs,
 ):
@@ -123,7 +142,11 @@ def attention(
     (Wan 81f 63.7 -> 52.0 ms, H3 768p bounded 66.4 -> 54.0 ms) with the same rel L2 against fp32
     attention; the outputs differ in their low bits, so a denoising trajectory lands on a nearby
     but different sample. No effect off
-    trn3 B1: trn2 has no Vector exp and always uses the Scalar engine."""
+    trn3 B1: trn2 has no Vector exp and always uses the Scalar engine. No effect on the MX route
+    either, which always runs its exp on the Scalar engine (``mx_attention.load_op``).
+
+    ``mx=False`` keeps the call in bf16 under ``--attention mx_attention`` (``DIFFLET_ATTN_QUANT``):
+    the cross-attention call sites pass it (only self/joint attention is routed)."""
     if kwargs:
         raise NotImplementedError(
             "neuron attention does not support attention_cte-only kwargs: "
@@ -132,11 +155,19 @@ def attention(
     q = q if tp_q else q.transpose(-1, -2)
     k = k if tp_k else k.transpose(-1, -2)
 
-    if bound_min is not None or bound_max is not None:
+    bounded = bound_min is not None or bound_max is not None
+    if bounded:
         if bound_min is None or bound_max is None:
             raise ValueError("bound_min and bound_max must both be provided")
         if attention_mask is not None:
             raise ValueError("attention_mask and bounds are mutually exclusive")
+
+    if mx and ATTN_QUANT != "off" and _routes_to_mx(q, k, v, causal, attention_mask):
+        out = _mx_attention(q, k, v, bound_min, bound_max,
+                            scale=1.0 if scale is None else float(scale))
+        return out.transpose(-1, -2) if tp_out else out
+
+    if bounded:
         if (_CONSTMAX and constmax_sigma is not None and not causal and _CONST_MAX_BOUNDED_OP is not None
                 and _const_max_shape_ok(q, k, v, None) and q.shape[-2] >= 128):
             # The key-bounded fork: callers' key-prefix contract (bound_min 0, bound_max equal along
@@ -242,10 +273,50 @@ def _load_flash_bounded_op(vector_exp: bool = True):
     return flash_attention_bounded
 
 
+def mx_unrouted_reason() -> str:
+    """Why a DiT under ``DIFFLET_ATTN_QUANT`` routed no call to the MXFP8 op (the warm-up's
+    check, ``application_base``)."""
+    if _ATTENTION_PATH == "sdpa":
+        return f"{ATTENTION_PATH_ENV}=sdpa sends every attention call through SDPA"
+    return ("no self/joint attention call qualified: ring and Ulysses context parallelism keep "
+            "attention bf16, as do causal, masked, non-bf16 and head-dim != 128 calls and a DiT "
+            "off the NeuronCores")
+
+
+def _routes_to_mx(q, k, v, causal: bool, attention_mask) -> bool:
+    """The calls the MXFP8 fork takes: non-causal, unmasked (bounds aside), bf16, head dim 128,
+    within the flash kernel's limits (``_can_use_flash_kernel``)."""
+    return (_MX_ATTENTION_OP is not None and not causal and attention_mask is None
+            and q.shape[-1] == 128 and all(t.dtype == torch.bfloat16 for t in (q, k, v))
+            and _can_use_flash_kernel(q, k, v, None))
+
+
+def _mx_attention(q, k, v, bound_min, bound_max, *, scale: float):
+    """``[B, H, S, d]`` or ``[B*H, S, d]`` through the MXFP8 op (QK^T and PV in MXFP8; it is
+    called as ``_FLASH_BOUNDED_OP`` is). K is smoothed (minus its mean over the call's keys,
+    ``smooth_keys``, for K's block scales) before any padding. A bounded call then takes
+    ``_flash_attention_bounded``'s q pre-scale, 128 padding, head chunks and one slice; an
+    unbounded one is not padded: the fork takes partial 512-key and 128-query tiles itself
+    (one pad/slice round trip at most)."""
+    shape = q.shape
+    bh, s_q, d = math.prod(shape[:-2]), shape[-2], shape[-1]
+    q3, k3, v3 = (t.reshape(bh, t.shape[-2], t.shape[-1]) for t in (q, k, v))
+    k3 = smooth_keys(k3)
+    record_call(s_q, k3.shape[1], bound_min is not None)
+    if bound_min is not None:
+        out = _flash_attention_bounded(q3, k3, v3, bound_min, bound_max, scale=scale,
+                                       op=_MX_ATTENTION_OP)
+    else:
+        out = _MX_ATTENTION_OP(q3.contiguous(), k3.contiguous(), v3.contiguous(), None, None,
+                               scale)
+    return out.reshape(*shape[:-1], v.shape[-1])
+
+
 def _flash_attention_bounded(q, k, v, bound_min, bound_max, *, scale: float,
-                             vector_exp: bool = True):
-    """``[B, H, S, d]`` or ``[B*H, S, d]`` through the bounded kernel; bounds of ``[B*H, S_q, 1]``
-    (or anything that reshapes to it)."""
+                             vector_exp: bool = True, op=None):
+    """``[B, H, S, d]`` or ``[B*H, S, d]`` through the bounded kernel (``op``, default
+    ``_FLASH_BOUNDED_OP``, its Scalar-exp variant with ``vector_exp=False``); bounds of
+    ``[B*H, S_q, 1]`` (or anything that reshapes to it)."""
     shape = q.shape
     bh, s_q, d = math.prod(shape[:-2]), shape[-2], shape[-1]
     q3, k3, v3 = (t.reshape(bh, t.shape[-2], d) for t in (q, k, v))
@@ -267,7 +338,9 @@ def _flash_attention_bounded(q, k, v, bound_min, bound_max, *, scale: float,
         q3 = F.pad(q3, (0, 0, 0, pad_q))
         lo = F.pad(lo, (0, 0, 0, pad_q))
         hi = F.pad(hi, (0, 0, 0, pad_q), value=1)
-    op = _FLASH_BOUNDED_OP if vector_exp else (_FLASH_BOUNDED_SCALAR_EXP_OP or _FLASH_BOUNDED_OP)
+    if op is None:  # the MXFP8 path passes its own op
+        op = (_FLASH_BOUNDED_OP if vector_exp
+              else (_FLASH_BOUNDED_SCALAR_EXP_OP or _FLASH_BOUNDED_OP))
     chunk = _head_chunk(bh, q3.shape[1], k3.shape[1])
     if chunk == bh:  # one call on the whole tensors: the graph compiled before the split existed
         out = op(q3.contiguous(), k3.contiguous(), v3.contiguous(),
@@ -366,6 +439,7 @@ _EXP_KNOB = _attention_cte_has_exp_knob()
 _FLASH_SCALAR_EXP_OP = _load_flash_scalar_exp_op()
 _FLASH_BOUNDED_OP = _load_flash_bounded_op()
 _FLASH_BOUNDED_SCALAR_EXP_OP = _load_flash_bounded_op(vector_exp=False)
+_MX_ATTENTION_OP = load_op() if ATTN_QUANT != "off" else None  # unset / off: nothing loaded
 
 
 def _load_flash_lse_op():
@@ -528,6 +602,7 @@ def cross_attention(q, k, v, *, scale: float | None = None, attention_mask=None,
         tp_q=False,
         tp_k=False,
         tp_out=False,
+        mx=False,
         **kwargs,
     )
 
@@ -545,11 +620,11 @@ def _merge_causal_mask(q, k, attention_mask):
 def _dense_bhsd(q, k, v, *, scale: float):
     """Unmasked attention on ``[B, H, S, d]`` in the standard layout, through ``attention``'s
     ``attention_cte`` convention (heads folded into the batch, ``tp_q``/``tp_k`` set), as Wan's
-    own attention path calls it."""
+    own attention path calls it. Its callers, the CP variants, stay bf16 (``mx=False``)."""
     b, h, s_q, d = q.shape
     s_k = k.shape[2]
     out = attention(q.reshape(b * h, s_q, d), k.reshape(b * h, s_k, d), v.reshape(b * h, s_k, d),
-                    scale=scale, causal=False, tp_q=True, tp_k=True, tp_out=False)
+                    scale=scale, causal=False, tp_q=True, tp_k=True, tp_out=False, mx=False)
     return out.reshape(b, h, s_q, d)
 
 
@@ -989,7 +1064,7 @@ def joint_ulysses_attention(q_img, q_txt, image_k, image_v, text_k, text_v, *, s
         bound_max = count.expand(b, h, s, 1).reshape(b * h, s, 1)
         out = attention(q.reshape(b * h, s, d), k.reshape(b * h, s, d), v.reshape(b * h, s, d),
                         scale=scale, causal=False, bound_min=torch.zeros_like(bound_max),
-                        bound_max=bound_max, tp_q=True, tp_k=True, tp_out=False)
+                        bound_max=bound_max, tp_q=True, tp_k=True, tp_out=False, mx=False)
         out = out.reshape(b, h, s, d)
     s_img = q_img.shape[2]
     img_out, txt_out = out[:, :, :s_img], out[:, :, s_img:]

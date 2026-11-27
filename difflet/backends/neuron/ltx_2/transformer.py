@@ -276,6 +276,7 @@ def _cp_processor_class():
         def __call__(self, attn, hidden_states, encoder_hidden_states=None,
                      attention_mask=None, query_rotary_emb=None, key_rotary_emb=None):
             del attention_mask
+            is_self_attention = encoder_hidden_states is None  # mx: as the TP processor
             if encoder_hidden_states is None:
                 encoder_hidden_states = hidden_states
             query = attn.to_q(hidden_states)
@@ -310,7 +311,7 @@ def _cp_processor_class():
                     v4 = gather_from_tensor_model_parallel_region_with_dim(
                         v4, gather_dim=2, process_group=self.cp_group)
                 out = attention(q4, k4, v4, scale=scale, causal=False, tp_q=True, tp_k=True,
-                                tp_out=False)
+                                tp_out=False, mx=is_self_attention)
             hidden_states = out.permute(0, 2, 1, 3).reshape(bsz, q_len, inner).to(out_dtype)
             hidden_states = attn.to_out[0](hidden_states)
             return attn.to_out[1](hidden_states)

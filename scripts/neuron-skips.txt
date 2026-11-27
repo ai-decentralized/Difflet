@@ -1,3 +1,4 @@
+tests/unit/backends/test_neuron_mx_attention.py::test_the_switch_needs_trn3_on_the_neuron_device
 tests/unit/backends/test_neuron_qwen_image_q1.py::test_application_guards_topology_and_dtype
 tests/unit/backends/test_neuron_qwen_image_q2.py::test_kwargs_mirror_the_cli_and_reject_phase1_limits
 tests/unit/backends/test_neuron_wan_w1.py::test_transformer_application_guards_tp_and_dtype

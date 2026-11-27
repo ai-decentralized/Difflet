@@ -21,11 +21,13 @@ PINS = {"wan21_official": "38ec498cb3208fb688890f8cc7e94ede2cbd7f68",
         "hv15_official": "286be7ce72277246578a3e3cc2487e95ddae5bcf"}
 #: Shell variables that would make an arm's compile, threads or quantized set something other
 #: than the bench's: cache locations that win over --cache-dir, thread counts that change
-#: HunyuanVideo-1.5's host-CPU encode, and a leaked override.
+#: HunyuanVideo-1.5's host-CPU encode, and leaked overrides: the MXFP8 targets, and the attention
+#: switch, which would turn the bf16 and mx arms into MXFP8-attention runs (the CLI keeps an
+#: exported value when --attention is absent; the attention arms pass --attention mx_attention).
 LEAKS = ("DIFFLET_COMPILE_CACHE", "TORCH_NEURONX_NEFF_CACHE_DIR",
          "TORCH_NEURONX_NEFF_LOCAL_CACHE_DIR", "TORCH_NEURONX_HLO_CACHE_DIR",
          "TORCHINDUCTOR_CACHE_DIR", "DIFFLET_NEURON_WEIGHT_STORE", "DIFFLET_SHARED_WEIGHTS_DIR",
-         "OMP_NUM_THREADS", "MKL_NUM_THREADS", "DIFFLET_QUANT_TARGETS")
+         "OMP_NUM_THREADS", "MKL_NUM_THREADS", "DIFFLET_QUANT_TARGETS", "DIFFLET_ATTN_QUANT")
 
 #: The bench's PY: a `-m difflet.cli.main` command is recorded (its argv and the LEAKS it
 #: sees) and writes "<DRY_RUN>" to its --output, or fails without writing when the output
@@ -138,3 +140,33 @@ def test_quality_reads_no_output_of_a_failed_step(tmp_path):
     assert done.returncode == 0, done.stderr
     md5 = json.loads((tmp_path / "quality.json").read_text())["wan21_official"]["bf16"]["md5"]
     assert md5["cold_1"] is None and md5["cold_2"] is not None
+
+
+@needs_tools
+def test_the_attention_arms_add_mx_attention_beside_the_quant_flags(tmp_path):
+    """ARMS: `both` is the mx arm plus --attention mx_attention,
+    `attn` is --attention mx_attention alone; the former default's targets follow --quant only."""
+    from tests.unit.backends._neuron_hv15_toy import HV15_MEASURED_TARGETS
+
+    root, lines = _bench(tmp_path, "qwen_image", "hv15_official", ARMS="bf16 both attn")
+    assert len(lines) == 2 * 3 * 4  # two keys, three arms, four commands each
+    for line in lines:
+        argv = line["argv"]
+        arm = Path(_flag(argv, "--cache-dir")).name.rpartition("-")[2]  # CACHE_ROOT/<key>-<arm>
+        quant, attn = _flag(argv, "--quant"), _flag(argv, "--attention")
+        assert (quant, attn) == {"bf16": (None, None), "both": ("mxfp8", "mx_attention"),
+                                 "attn": (None, "mx_attention")}[arm], argv
+        hv15 = "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v" in argv
+        want = ";".join(HV15_MEASURED_TARGETS) if hv15 and quant else None
+        assert line["env"]["DIFFLET_QUANT_TARGETS"] == want, argv
+    for key in ("qwen_image", "hv15_official"):
+        assert sorted(p.name for p in (root / key).iterdir() if p.is_dir()) == ["attn", "bf16",
+                                                                                 "both"]
+
+
+def test_an_unknown_arm_fails_before_anything_runs(tmp_path):
+    done = subprocess.run(["bash", str(QB / "bench.sh"), "--cores", "0-3", "--cpus", "0", "flux"],
+                          env={**os.environ, "ARMS": "bf16 qk", "BENCH_ROOT": str(tmp_path / "r")},
+                          capture_output=True, text=True, timeout=60)
+    assert done.returncode == 2 and "unknown arm qk" in done.stderr
+    assert not (tmp_path / "r").exists()

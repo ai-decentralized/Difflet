@@ -2,9 +2,8 @@
 (``--attention const-max``), from each checkpoint's QK-RMSNorm weights. Experiment E1;
 evidence at 713d53d9.
 
-This is ``/mnt/nvme/difflet-mxattn/probe/constmax/bounds.py`` (section 12 of
-``docs/verification/2026-11-13-dit-block-profile.md`` on ``feat/mxfp8-sage-attention``) with its
-formulas unchanged -- the kernel docstring's rule, per layer, head h and (q norm, k norm) pair:
+This is ``/mnt/nvme/difflet-mxattn/probe/constmax/bounds.py`` with its formulas unchanged -- the
+kernel docstring's rule, per layer, head h and (q norm, k norm) pair:
   sigma = sqrt(sum(gamma_q^2 * gamma_k^2) / d)
   softmax_max = 0.88 * sigma * sqrt(2 ln Sk)
   hard_bound = sqrt(d) * max|gamma_q| * max|gamma_k|

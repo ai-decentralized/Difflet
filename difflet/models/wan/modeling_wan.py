@@ -443,9 +443,11 @@ def _attn_kernel(
     v: torch.Tensor,
     *,
     head_dim: int,
+    mx: bool = True,
     constmax_sigma: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     """Run attention on (B, heads, S, head_dim) tensors via ``difflet.ops.attention``.
+    ``mx=False`` (cross-attention) keeps it bf16 under ``--attention mx_attention``.
 
     Routes to the nkilib flash kernel (``attention_cte``) on Trainium — measured
     ~4x faster than the prior PyTorch-SDPA fallback (cclog 90: SDPA 15.33 ms vs
@@ -470,6 +472,7 @@ def _attn_kernel(
         tp_q=True,
         tp_k=True,
         tp_out=False,
+        mx=mx,
         # Experiment E1: the layer's score sigma (add_constmax_sigma_), only when it has one.
         **({} if constmax_sigma is None else {"constmax_sigma": constmax_sigma}),
     )
@@ -691,6 +694,7 @@ class WanAttention(nn.Module):
                     )  # [2, B, heads, S, head_dim]
                     k, v = torch.unbind(stacked_kv, dim=0)
                 out = _attn_kernel(q, k, v, head_dim=self.head_dim,
+                                   mx=not self.is_cross_attention,
                                    constmax_sigma=getattr(self, "constmax_sigma", None))
 
         # (B, local_heads, S, dim) → (B, S, local_heads * dim); RowParallelLinear then
