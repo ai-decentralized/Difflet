@@ -65,6 +65,8 @@ class ServeOptions:
     cache_dir: str | None = None
     host_vae: bool = False
     clip_placement: ServingPlacement | None = None
+    # Native neuron backend: the DiT attention kernel ("cte", the default, or "const-max").
+    attention: str | None = None
     teacache_cadence: int | None = None
     teacache_online_delta: float | None = None
     teacache_speedup: float | None = None
@@ -165,6 +167,11 @@ _NATIVE_CFG_PARALLEL_SERVING_MODELS = frozenset({"wan", "ltx_2"})
 # Guidance-distilled DiTs: one forward per step, so there is no second branch to split.
 _GUIDANCE_DISTILLED_MODELS = frozenset({"flux", "hunyuan_video", "minimax_h3"})
 
+# --attention const-max: the models served natively (difflet.backends.neuron.serving) that
+# have a committed const-max table (difflet/models/<model>/attn_constmax.json; the CLI's
+# CONSTMAX_MODELS). MiniMax-H3 has none yet.
+_CONSTMAX_SERVING_MODELS = frozenset({"flux", "qwen_image", "wan", "hunyuan_video", "ltx_2"})
+
 
 # The --cp-mode values `difflet serve` accepts. Every model keeps the two modes serving has
 # always accepted; a model listed here has qualified others for serving (MiniMax-H3's DiT
@@ -220,8 +227,13 @@ def build_serving_profile(
     teacache_speedup: float | None,
     teacache_calibration: str | None,
     torch_compile: bool = False,
+    attention: str | None = None,
 ) -> ServingProfile:
     """Resolve registry defaults plus `difflet serve` overrides."""
+
+    resolved_attention = _resolve_attention(
+        model_id=model_id, model_type=model_type, attention=attention
+    )
 
     if output_modality == "image" and num_frames is not None:
         raise invalid_extra_body(
@@ -363,6 +375,7 @@ def build_serving_profile(
         clip_placement=resolved_clip_placement,
         shapes=canonical_shapes,
         torch_compile=bool(torch_compile),
+        attention=resolved_attention,
     )
 
 
@@ -393,6 +406,29 @@ def _validate_cfg_parallel(*, model_id: str, model_type: str) -> None:
         "--cfg-parallel on this backend (served on the native neuron backend for: "
         f"{', '.join(sorted(_NATIVE_CFG_PARALLEL_SERVING_MODELS))})."
     )
+
+
+def _resolve_attention(*, model_id: str, model_type: str, attention: str | None) -> str | None:
+    """``--attention``: None for the default kernel (cte, so a default profile keeps its
+    identity), "const-max" where the native neuron backend serves the model and its const-max
+    table is committed. Refused everywhere else, before a worker loads any weights."""
+    if attention in (None, "cte"):
+        return None
+    if attention != "const-max":
+        raise invalid_extra_body(f"--attention must be 'cte' or 'const-max', got {attention!r}.")
+    from difflet.backends.registry import current_backend
+
+    if current_backend() != "neuron":
+        raise invalid_extra_body(
+            "--attention const-max runs on the native neuron backend only (DIFFLET_BACKEND=neuron)."
+        )
+    if model_type not in _CONSTMAX_SERVING_MODELS:
+        served = ", ".join(sorted(_CONSTMAX_SERVING_MODELS))
+        raise invalid_extra_body(
+            f"--attention const-max needs a committed const-max table; {model_id} has none "
+            f"(served for: {served})."
+        )
+    return "const-max"
 
 
 def _validate_probe_free_teacache(

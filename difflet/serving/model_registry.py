@@ -122,6 +122,7 @@ def resolve_serving_model(options: ServeOptions) -> ResolvedServingModel:
         teacache_speedup=options.teacache_speedup,
         teacache_calibration=options.teacache_calibration,
         torch_compile=bool(getattr(options, "torch_compile", False)),
+        attention=getattr(options, "attention", None),
     )
     if on_gpu and entry.name == "hunyuan_video":
         from difflet.backends.cuda.hunyuan_video.serving import resolve_clip_profile
