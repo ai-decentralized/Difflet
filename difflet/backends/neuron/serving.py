@@ -60,6 +60,9 @@ from difflet.serving.types import (
 
 STAGE_ID = "pipeline"
 _MODULE = "difflet.backends.neuron.serving"
+#: Semicolon-separated regexes replacing a model's default MXFP8 target layers
+#: (``difflet/cli/quant.py:QUANT_TARGETS_ENV``, an experiment knob, honored as the CLI does).
+_QUANT_TARGETS_ENV = "DIFFLET_QUANT_TARGETS"
 
 #: The checkpoints served natively, by registry entry name. Wan is 2.1 only: the native Wan
 #: app at serving runs one transformer (``enable_transformer_2=False``), so a Wan 2.2 request
@@ -189,6 +192,69 @@ def native_application_kwargs(model_type: str, spec: ModelSpec) -> dict[str, Any
     raise feature_not_supported(f"{model_type!r} is not served on the native neuron backend")
 
 
+def native_quant_spec(profile: ServingProfile):
+    """The profile's MXFP8 spec, or None for bf16: the recipe `difflet compile --quant mxfp8`
+    uses (``difflet/cli/quant.py:quant_spec``), at the profile's tp, because a row-parallel
+    weight is quantized per rank K range (tp2 x CFG2 and tp4 are different directories), and
+    with ``DIFFLET_QUANT_TARGETS`` when set. The serving parent (which writes the directory)
+    and every rank (which reads it) build it with this one function."""
+    if profile.quant is None:
+        return None
+    from difflet.quant.spec import DEFAULT_COMPUTE
+    from difflet.quant.targets import default_spec
+
+    overrides = {}
+    targets = os.environ.get(_QUANT_TARGETS_ENV)
+    if targets:
+        overrides["targets"] = tuple(t for t in targets.split(";") if t)
+    return default_spec(profile.model_type, compute=DEFAULT_COMPUTE,
+                        tp_degree=int(profile.parallel.tp_degree), **overrides)
+
+
+def native_quant_kwargs(profile: ServingProfile) -> dict[str, Any]:
+    """``{"quant": spec dict}`` for the resident app (every native app's ``quant`` option,
+    resolved by ``backends/neuron/core/quant.py:resolve_quant`` from the compile cache, read
+    only), or empty for bf16."""
+    spec = native_quant_spec(profile)
+    return {} if spec is None else {"quant": spec.to_dict()}
+
+
+def _quant_source_dir(model_type: str, model_dir: str) -> str:
+    """The DiT directory the rank's app quantizes from, so the parent writes the directory
+    ``resolve_quant`` will look up: ``<snapshot>/transformer``; for Wan the directory its app
+    loads in bf16 (``resolve_component_dir``: the bf16 copy `difflet compile` made when there is
+    one, else the hub's fp32 directory), as ``wan/neuron_application.py`` resolves it."""
+    transformer = os.path.join(model_dir, "transformer")
+    if model_type != "wan":
+        return transformer
+    import torch
+
+    from difflet.backends.neuron.core.weights_bf16 import resolve_component_dir
+
+    return resolve_component_dir(transformer, torch.bfloat16)
+
+
+def prepare_native_quant(profile: ServingProfile, model_dir: str) -> str | None:
+    """Write the quantized DiT under the compile cache in the serving parent, before any rank
+    starts (the ranks only read it): a valid directory from an earlier start or a
+    `difflet compile --quant mxfp8` at the same tp is reused, a missing or stale one written
+    (``ensure_quantized_dir``). Returns its path, None for bf16."""
+    spec = native_quant_spec(profile)
+    if spec is None:
+        return None
+    from difflet.quant.checkpoint import prepare_quantized_checkpoint
+
+    source = _quant_source_dir(profile.model_type, model_dir)
+    start = time.monotonic()
+    try:
+        quantized = prepare_quantized_checkpoint(source, spec, create=True)
+    except (ValueError, FileNotFoundError) as exc:
+        raise feature_not_supported(f"--quant mxfp8: transformer: {exc}") from exc
+    print(f"[difflet serve] MXFP8 transformer ({spec.compute}, tp{spec.tp_degree}): {quantized} "
+          f"({time.monotonic() - start:.1f} s)", flush=True)
+    return str(quantized)
+
+
 def native_pipeline_kwargs(model_type: str, profile: ServingProfile, *, revision: str | None
                            ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {
@@ -301,6 +367,11 @@ def native_runtime_plan(profile: ServingProfile, spec: ModelSpec, source_id: str
     }
     if profile.num_frames is not None:
         inputs["num_frames"] = int(profile.num_frames)
+    if profile.quant is not None:  # additive: a bf16 profile keeps its identity
+        inputs["quant"] = str(profile.quant)
+        targets = os.environ.get(_QUANT_TARGETS_ENV)
+        if targets:
+            inputs["quant_targets"] = targets
     distributed = DistributedProcessEnvironment(1, 1, 0, 0)
     allocation = WorkerAllocationSpec(
         allocation_id=f"{spec.short_name}-neuron-resident",
@@ -358,6 +429,11 @@ class NeuronServingArtifactPreparer:
         source = resolve_hf_model_source(self.model_id, revision=self.revision,
                                          download_policy=download_policy,
                                          allow_patterns=entry.download_patterns)
+        if profile.quant is not None:
+            # The compile root the ranks will use (they inherit it), then the quantized DiT
+            # under it, once, here: no rank ever writes one (resolve_quant only reads).
+            _export_rank_environment(profile)
+            prepare_native_quant(profile, source.pinned_model_path)
         print("[difflet serve] neuron backend: resident pipeline per rank, NEFFs at load")
         return ResolvedRuntimeBundle(
             profile=profile,
@@ -442,7 +518,8 @@ class NeuronServingStageAdapter:
             parallel=profile.parallel,
             compile_cache_dir=profile.cache_dir,
             backend="neuron",
-            application_kwargs=native_application_kwargs(self.model_type, self.spec),
+            application_kwargs={**native_application_kwargs(self.model_type, self.spec),
+                                **native_quant_kwargs(profile)},
             load=False,
             # The commit the parent pinned, so a worker restart loads the snapshot the bundle
             # and the validator's tokenizer describe.

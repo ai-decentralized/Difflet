@@ -269,6 +269,9 @@ class ServingProfile:
     shapes: tuple[tuple[int, int, int | None], ...] | None = None
     # CUDA backend only: torch.compile the DiT blocks in the resident worker (opt-in).
     torch_compile: bool = False
+    # Native neuron backend: "mxfp8" (the DiT's target linears in MXFP8) or None (bf16). It
+    # changes the weights and the compiled graph, so it is part of the profile identity.
+    quant: str | None = None
 
     @property
     def world_size(self) -> int:

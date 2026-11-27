@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -65,6 +66,8 @@ class ServeOptions:
     cache_dir: str | None = None
     host_vae: bool = False
     clip_placement: ServingPlacement | None = None
+    # Native neuron backend: "mxfp8" runs the DiT's target linears in MXFP8.
+    quant: str | None = None
     teacache_cadence: int | None = None
     teacache_online_delta: float | None = None
     teacache_speedup: float | None = None
@@ -154,6 +157,10 @@ _PROBE_FREE_TEACACHE_SERVING_MODELS = frozenset(
     {"flux", "qwen_image", "wan", "hunyuan_video", "ltx_2"}
 )
 
+# --quant mxfp8: the models served natively (difflet.backends.neuron.serving) that have MXFP8
+# target layers (difflet.quant.targets; the CLI's QUANT_MODELS). MiniMax-H3 has none yet.
+_MXFP8_SERVING_MODELS = frozenset({"flux", "qwen_image", "wan", "hunyuan_video", "ltx_2"})
+
 
 # The --cp-mode values `difflet serve` accepts. Every model keeps the two modes serving has
 # always accepted; a model listed here has qualified others for serving (MiniMax-H3's DiT
@@ -209,8 +216,13 @@ def build_serving_profile(
     teacache_speedup: float | None,
     teacache_calibration: str | None,
     torch_compile: bool = False,
+    quant: str | None = None,
 ) -> ServingProfile:
     """Resolve registry defaults plus `difflet serve` overrides."""
+
+    resolved_quant = _resolve_quant(
+        model_id=model_id, model_type=model_type, quant=quant, teacache_speedup=teacache_speedup
+    )
 
     if output_modality == "image" and num_frames is not None:
         raise invalid_extra_body(
@@ -355,7 +367,42 @@ def build_serving_profile(
         clip_placement=resolved_clip_placement,
         shapes=canonical_shapes,
         torch_compile=bool(torch_compile),
+        quant=resolved_quant,
     )
+
+
+def _resolve_quant(
+    *, model_id: str, model_type: str, quant: str | None, teacache_speedup: float | None
+) -> str | None:
+    """``--quant``: None (bf16) or "mxfp8" where the native neuron backend serves a model with
+    MXFP8 target layers. The CLI's refusals (``difflet/cli/quant.py``) apply, at option
+    resolution, before a worker loads any weights."""
+    if quant is None:
+        return None
+    if quant != "mxfp8":
+        raise invalid_extra_body(f"--quant must be 'mxfp8', got {quant!r}.")
+    from difflet.backends.registry import current_backend
+
+    if current_backend() != "neuron":
+        raise invalid_extra_body(
+            "--quant mxfp8 runs on the native neuron backend only (DIFFLET_BACKEND=neuron)."
+        )
+    if model_type not in _MXFP8_SERVING_MODELS:
+        served = ", ".join(sorted(_MXFP8_SERVING_MODELS))
+        raise invalid_extra_body(
+            f"--quant mxfp8 needs MXFP8 target layers; {model_id} has none (served for: {served})."
+        )
+    if teacache_speedup is not None:
+        raise invalid_extra_body(
+            "--quant and adaptive TeaCache (--teacache-speedup) are mutually exclusive; use "
+            "--teacache-cadence instead."
+        )
+    if os.environ.get("UNSAFE_FP8FNCAST"):
+        raise invalid_extra_body(
+            "--quant: unset UNSAFE_FP8FNCAST; it makes neuronx-cc mix the legacy fp8 type "
+            "with OCP float8_e4m3fn (NCC_EOCP001)."
+        )
+    return "mxfp8"
 
 
 def _validate_probe_free_teacache(
