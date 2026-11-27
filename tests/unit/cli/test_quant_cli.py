@@ -744,6 +744,10 @@ import importlib, os, sys
 m = importlib.import_module("difflet.cli.main")
 def stop(args):  # the orchestrator: the first code that imports a backend module
     pre = "difflet.backends.neuron.ops_impl.attention" in sys.modules
+    # What the import resolves is under test, not the kernel: with the switch on, the import
+    # loads the MX op, which needs torch-neuronx (absent on a CPU host such as CI).
+    from difflet.backends.neuron.ops_impl import mx_attention
+    mx_attention.load_op = lambda: None
     from difflet.backends.neuron.ops_impl import attention
     print("RESULT", pre, os.environ.get("DIFFLET_ATTN_QUANT"),
           os.environ.get("DIFFLET_EXP_ATTN_CONSTMAX"), attention.ATTN_QUANT, attention._CONSTMAX)

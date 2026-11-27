@@ -425,17 +425,31 @@ def _dit_application():
     return Dit
 
 
-def test_the_switch_needs_trn3_and_compile_mode_on_a_dit(monkeypatch):
-    from difflet.backends.neuron.ops_impl import platform
+def test_the_switch_needs_compile_mode_on_a_dit(monkeypatch):
+    """The checks that run before the device: eager mode is refused on a DiT, an application
+    without MXFP8 target layers (a VAE, an encoder) is not checked, and the switch off passes."""
     from tests.unit.backends._neuron_toy import ToyApplication
 
     Dit = _dit_application()
     monkeypatch.setattr(attn, "ATTN_QUANT", "mxfp8")  # no --quant (quant=None): checked anyway
     with pytest.raises(ValueError, match=r"DIFFLET_ATTN_QUANT=mxfp8.*compile"):
         Dit(device="cpu", exec_mode="eager")
-    platform.get_platform_target.cache_clear()
-    monkeypatch.setenv("NEURON_PLATFORM_TARGET_OVERRIDE", "trn2")
+    ToyApplication(device="cpu", exec_mode="eager")  # no MXFP8 layers (a VAE, an encoder): no check
+    monkeypatch.setattr(attn, "ATTN_QUANT", "off")
+    Dit(device="cpu", exec_mode="eager")
+
+
+def test_the_switch_needs_trn3_on_the_neuron_device(monkeypatch):
+    """trn2 is refused and trn3 accepted. Both build the DiT on the neuron device, which imports
+    torch-neuronx first, so this needs the Neuron SDK (ledgered in scripts/neuron-skips.txt for the
+    CPU gate); the checks above do not."""
+    from difflet.backends.neuron.ops_impl import platform
+
+    Dit = _dit_application()
+    monkeypatch.setattr(attn, "ATTN_QUANT", "mxfp8")
     try:
+        monkeypatch.setenv("NEURON_PLATFORM_TARGET_OVERRIDE", "trn2")
+        platform.get_platform_target.cache_clear()
         with pytest.raises(ValueError, match="trn3"):
             Dit(device="neuron", exec_mode="compile")
         monkeypatch.setenv("NEURON_PLATFORM_TARGET_OVERRIDE", "trn3")
@@ -443,9 +457,6 @@ def test_the_switch_needs_trn3_and_compile_mode_on_a_dit(monkeypatch):
         Dit(device="neuron", exec_mode="compile")
     finally:
         platform.get_platform_target.cache_clear()
-    ToyApplication(device="cpu", exec_mode="eager")  # no MXFP8 layers (a VAE, an encoder): no check
-    monkeypatch.setattr(attn, "ATTN_QUANT", "off")
-    Dit(device="cpu", exec_mode="eager")
 
 
 @pytest.mark.parametrize("path, cause", [("auto", "no self/joint attention call qualified"),

@@ -13,8 +13,11 @@ import importlib.util
 import json
 from pathlib import Path
 
-import pandas as pd
 import pytest
+
+# analyze.py reads neuron-explorer's parquets: a host without pandas / pyarrow (the CPU CI) skips.
+pd = pytest.importorskip("pandas")
+pytest.importorskip("pyarrow")
 
 REPO = Path(__file__).resolve().parents[3]
 _SPEC = importlib.util.spec_from_file_location(

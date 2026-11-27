@@ -6,6 +6,7 @@ system_profile.py's step window is pinned on a synthetic system profile."""
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import shutil
@@ -174,8 +175,11 @@ exit "${FUSER_RC:-1}"
 TEST_SIGNATURES = {key: {"block": {"require": ["Attn[attn]", "Mlp[ff]"], "attention_kernel": True}}
                    for key in TABLE}
 
-needs_tools = pytest.mark.skipif(not (shutil.which("bash") and shutil.which("taskset")),
-                                 reason="capture.sh runs its commands under taskset")
+needs_tools = pytest.mark.skipif(
+    not (shutil.which("bash") and shutil.which("taskset")
+         and importlib.util.find_spec("pandas") and importlib.util.find_spec("pyarrow")),
+    reason="capture.sh runs its commands under taskset and reads the profile parquets with "
+           "pandas / pyarrow (the fake neuron-explorer writes them)")
 
 
 def _dump(key: str) -> list[dict[str, str]]:
