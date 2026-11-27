@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -346,6 +347,9 @@ def q2_difflet_pipeline_worker(rank: int, world_size: int, model_dir: str, cache
     from difflet.pipeline.difflet_pipeline import DiffletPipeline
     from difflet.pipeline.parallel_config import DiffletParallelConfig
 
+    # prepare_runtime imports torch_neuronx; a stub stands in where it is not installed (CPU CI).
+    sys.modules.setdefault("torch_neuronx",
+                           SimpleNamespace(is_neuron_runtime_initialized=lambda: False))
     pipe = DiffletPipeline.from_pretrained(
         "Qwen/Qwen-Image",
         parallel=DiffletParallelConfig(tp_degree=world_size),
