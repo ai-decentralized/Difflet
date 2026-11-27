@@ -1,7 +1,7 @@
 """The CPU reference of MXFP8 attention: exact attention with MX off, bounds and the 512-key
 padding leave no trace in P's MX blocks, and the perms decide the block membership. The tests pass
-``swizzle_perm``, a membership other than the default (the kernel's contiguous blocks, ruling
-BR1), so the perms are exercised as parameters."""
+``swizzle_perm``, a membership other than the default (the kernel's contiguous blocks), so the
+perms are exercised as parameters."""
 
 from __future__ import annotations
 
@@ -59,7 +59,7 @@ def test_k_smoothing_alone_changes_nothing():
 
 
 def test_smooth_keys_subtracts_the_key_mean_in_fp32_and_rounds_once():
-    """What the qk_mx call path hands the kernel (plan Task 4 Step 2): K minus its mean over the
+    """What the qk_mx call path hands the kernel: K minus its mean over the
     keys (dim -2), computed in fp32 and rounded once to k's dtype; with a large channel bias it
     shrinks the MX error of the scores."""
     g = torch.Generator().manual_seed(3)

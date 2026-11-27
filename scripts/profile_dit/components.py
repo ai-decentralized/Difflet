@@ -1,4 +1,4 @@
-"""Which DiT block component a profiled instruction belongs to (DiT block profile plan, Task 2).
+"""Which DiT block component a profiled instruction belongs to.
 
 ``neuron-explorer view --output-format parquet`` writes one ``Instruction.parquet`` row per
 device instruction with ``layer`` (the torch module path, ``<Class>[<attr>][<i>]/...``, then
@@ -10,7 +10,7 @@ a row in one of ``COMPONENTS`` by the first rule that holds:
 1. ``layer`` is ``Unknown``, or empty with no source: ``unattributed`` (never ``other``).
 2. A row whose ``nki_source_location`` is the attention kernel: ``attention``, whatever HLO
    op the profiler files it under (Wan's mxfp8 block: kernel rows under the all-reduce after
-   the kernel, ruling R14).
+   the kernel).
 3. The HLO op (``hlo_name``'s, or the one ``layer`` ends with) is a collective: ``collective``.
 4. An attention module's own ops (``<...>Attention[<attr>][<i>]_<op>``) and its compiler
    regions (``.../computation_<n>``): the attention custom-call is ``attention``; the rest is
@@ -20,7 +20,7 @@ a row in one of ``COMPONENTS`` by the first rule that holds:
    (``matmul_mxfp8`` sources) carry the linear's path and so take its component.
 6. Anything else: ``other``.
 
-Two choices the plan leaves open: a LayerNorm inside an adaLN module (``norm1.norm``) is
+Two choices made here: a LayerNorm inside an adaLN module (``norm1.norm``) is
 ``norm``, as Qwen-Image's and Wan's plain ``norm1`` are, and the adaLN linear, its SiLU and its
 modulate are ``modulation``; the block's own ops (no module path: the adaLN modulate, the gates
 and the residual adds) are ``modulation`` too, since that is where Wan and LTX-2 apply theirs.
@@ -98,14 +98,14 @@ _MODELS = {  # model -> (module-path rules, attention-module sources)
     "wan": ((*_ATTN, *_WAN_FFN, *_NORM_AND_MODULATION), _WAN_SOURCES),
     "ltx_2": ((*_ATTN, *_FEEDFORWARD, *_NORM_AND_MODULATION), _LTX_SOURCES),
 }
-# the plan's configuration keys
+# capture.sh's configuration keys
 _MODELS.update(hunyuan_video_L=_MODELS["hunyuan_video"], hv15_official=_MODELS["hunyuan_video_15"],
                wan21_official=_MODELS["wan"], wan22_official=_MODELS["wan"])
 
 
 def classify(layer: str, hlo_name: str, nki_source: str, hlo_attrs: str, model: str) -> str:
     """The component of one ``Instruction.parquet`` row of ``model`` (a model or a configuration
-    key of the plan). A function of its strings alone: classify the unique rows, not every
+    key of ``capture.sh``). A function of its strings alone: classify the unique rows, not every
     instruction (HunyuanVideo-1.5's block has 5.9M rows and 912 distinct ones)."""
     if model not in _MODELS:
         raise ValueError(f"no component rules for model {model!r}; known: {sorted(_MODELS)}")
@@ -113,7 +113,7 @@ def classify(layer: str, hlo_name: str, nki_source: str, hlo_attrs: str, model: 
     if layer == "Unknown" or not (layer or nki_source):
         return "unattributed"
     # whatever HLO the profiler files it under: Wan's mxfp8 block puts kernel rows under the
-    # all-reduce after the kernel (2026-11-13, ruling R14)
+    # all-reduce after the kernel (2026-11-13)
     if _ATTENTION_KERNEL.search(nki_source):
         return "attention"
     hlo_op = hlo_name.partition("= ")[2].partition("(")[0]
@@ -149,7 +149,7 @@ _ATTENTION_PHASES = (
 )
 
 
-#: Difflet's fork of attention_cte (the MXFP8 attention plan's routed op): phase by the enclosing
+#: Difflet's fork of attention_cte (the op ``--attn-quant`` routes to): phase by the enclosing
 #: function, then by the nisa call a statement makes; the fork's own MX work in three phases of
 #: its own: Q and K (one helper, ``_mx_swizzle_quantize``, serves both, so they are not split),
 #: V, and P, each with its loads, regroups, transposes, copies and ``quantize_mx``. Functions not

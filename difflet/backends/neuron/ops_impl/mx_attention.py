@@ -1,14 +1,14 @@
-"""The MXFP8 attention op of the neuron backend (MXFP8 attention plan, Task 5): Difflet's fork of
-nkilib's ``attention_cte`` (``mx_attention_kernel.mx_attention_fwd``) registered as the torch op
+"""The MXFP8 attention op of the neuron backend: Difflet's fork of nkilib's ``attention_cte``
+(``mx_attention_kernel.mx_attention_fwd``) registered as the torch op
 ``difflet_neuron::mx_attention`` (as ``fp8_kernels`` registers ``mx_linear``), and the count of the
 calls ``ops_impl/attention.py`` routes to it under ``DIFFLET_ATTN_QUANT`` (``--attn-quant``).
 
 The op runs the fork with the exp on the Scalar Engine (``allow_vector_exp=False``), as Difflet's
 bf16 attention runs attention_cte since main #164, so the routed call differs from bf16 only by the
-quantization (ruling BR32's rule, re-applied after that change). Which matmuls are MXFP8 is the
-caller's ``qk_mx`` / ``pv_mx`` (the switch's variant).
+quantization. Which matmuls are MXFP8 is the caller's ``qk_mx`` / ``pv_mx`` (the switch's
+variant).
 
-The count is the evidence that a call site is quantized (plan Review Focus 5): calls bucketed by
+The count is the evidence that a call site is quantized: calls bucketed by
 ``(s_q, s_k, bounded)``, counted when Dynamo traces them (once per compiled graph, through
 ``comptime``, so neither the graph nor its guards see the counter) and per call in eager code;
 ``log_routed_calls`` prints them once.

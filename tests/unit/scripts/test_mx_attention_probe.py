@@ -173,7 +173,7 @@ def test_with_an_mx_flag_the_reference_is_the_task1_mirror(name, flags):
 
 @pytest.mark.parametrize("qk_mx", [False, True])
 def test_use_fork_smooths_k_before_the_kernel_and_the_padding_with_qk_mx(qk_mx, monkeypatch):
-    """Plan Task 4 Step 2 / Global Constraints: with qk_mx the torch side hands the kernel
+    """With qk_mx the torch side hands the kernel
     ``smooth_keys(k)``, the mean taken over the call's real keys, before the bounded path pads K
     with zeros (padded keys stay zero); without it, K unchanged. Both flags reach the kernel."""
     pytest.importorskip("difflet.backends.neuron.ops_impl.mx_attention_kernel")
@@ -210,9 +210,8 @@ def test_use_fork_smooths_k_before_the_kernel_and_the_padding_with_qk_mx(qk_mx, 
 
 
 def test_fork_vector_exp_reaches_the_kernel_and_only_then(monkeypatch):
-    """Ruling BR32: --fork-vector-exp calls the fork with allow_vector_exp=True (the exp on
-    VectorE, as shipped attention_cte); without it the call is the one 4a/4b timed (no kwarg, the
-    fork's ScalarE default)."""
+    """--fork-vector-exp calls the fork with allow_vector_exp=True (the exp on VectorE, as
+    shipped attention_cte); without it the call passes no kwarg (the fork's ScalarE default)."""
     pytest.importorskip("difflet.backends.neuron.ops_impl.mx_attention_kernel")
     hop = pytest.importorskip("torch_neuronx.nki_hop")
     import torch_neuronx
@@ -239,7 +238,7 @@ def test_fork_vector_exp_reaches_the_kernel_and_only_then(monkeypatch):
 
 
 @pytest.mark.parametrize("impl, flags", [
-    (["--impl", "routed"], (True, False)),  # no flag: qk, Task 5's routed arm
+    (["--impl", "routed"], (True, False)),  # no flag: qk
     (["--impl", "routed", "--qk-mx"], (True, False)),
     (["--impl", "routed", "--pv-mx"], (False, True)),
     (["--impl", "routed", "--qk-mx", "--pv-mx"], (True, True)),
@@ -298,7 +297,7 @@ def test_main_scores_a_fork_run_against_the_mirror(tmp_path, monkeypatch):
 
 
 def test_the_peaked_case_doubles_q_and_k_exactly():
-    """Ruling BR11: --peak 2 multiplies q and k by 2 (exact in bf16), so the scores' std goes
+    """--peak 2 multiplies q and k by 2 (exact in bf16), so the scores' std goes
     from ~1 to ~4; v and the bounds are unchanged."""
     row = {"name": "tiny", **TINY["tiny"]}
     q, k, v, bounds = probe.make_inputs(row)
@@ -309,7 +308,7 @@ def test_the_peaked_case_doubles_q_and_k_exactly():
 
 def test_main_passes_peak_and_calls_to_the_workers(tmp_path, monkeypatch):
     """--peak reaches the workers' inputs and the host reference; --calls sets the calls per
-    process (ruling BR13: 20 vs 40 shows whether host dispatch is hidden); --cte-no-vector-exp
+    process (20 vs 40 shows whether host dispatch is hidden); --cte-no-vector-exp
     reaches the workers and the result."""
     monkeypatch.setattr(probe, "load_shapes", lambda: {"tiny_u": dict(TINY["tiny_u"])})
     row = {"name": "tiny_u", **TINY["tiny_u"]}

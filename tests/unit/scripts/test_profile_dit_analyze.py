@@ -3,7 +3,7 @@
 The blocks here are synthetic: tiny ``Instruction`` / ``CcOp`` / ``ActiveTime`` / ``Warning``
 parquets and a ``summary.json`` written into ``tmp_path``. Layers are Qwen-Image module paths that
 ``components.classify`` puts in a known component. ``hlo_name`` and ``hlo_attrs`` are null, as
-most rows of a real parquet are (ruling R13). The last test runs the captured blocks when they are
+most rows of a real parquet are. The last test runs the captured blocks when they are
 on this host."""
 
 from __future__ import annotations
@@ -30,9 +30,9 @@ MLP_ACT = "FeedForward[img_mlp][0]/GELU[0][0]_tanh.1"
 MOD = "Sequential[img_mod][0]/ColumnParallelLinear[1][0]_dot.91"
 OTHER = "Mystery[x][0]_add.1"  # no rule names it
 
-#: Step 4 (2026-11-13): per engine and physical core, the union of a block's instruction intervals
+#: Measured 2026-11-13: per engine and physical core, the union of a block's instruction intervals
 #: without EVENT_SEMAPHORE* rows against ActiveTime.parquet differed by at most 0.113% (FLUX single,
-#: GpSimd) over HV1 dual and the Task 1 smokes (Qwen-Image, FLUX dual and single, HV1.5).
+#: GpSimd) over HV1 dual and the device smokes (Qwen-Image, FLUX dual and single, HV1.5).
 ACTIVE_TIME_TOLERANCE = 0.005
 
 
@@ -43,7 +43,7 @@ def row(engine, start, end, layer=MLP_UP, opcode="MATMUL", pcore=0, src="", psum
 
 
 def block(tmp_path, rows, cc=(), total_time=1e-3, exec8=None, source=True, **summary):
-    """A block directory as Task 1 writes it."""
+    """A block directory as capture.sh writes it."""
     trace = tmp_path / "pq" / "trace"
     trace.mkdir(parents=True)
     pd.DataFrame(rows).to_parquet(trace / "Instruction.parquet")
@@ -99,7 +99,7 @@ def test_components_sum_to_no_more_than_their_engine_and_the_block(tmp_path):
 
 
 def test_components_overlapping_on_an_engine_are_reported_up_to_1_5x(tmp_path):
-    """Ruling R28: branches the compiler interleaves on one engine (HV1's single-stream block:
+    """Branches the compiler interleaves on one engine (HV1's single-stream block:
     attention and the MLP, TensorE 1.16x) overlap; up to 1.5x it is reported, above it is a
     counting bug; no engine's components may exceed the block."""
     out = run(tmp_path / "a", [row("Tensor", 0, 1000), row("Tensor", 800, 1000, MOD)])
@@ -127,7 +127,7 @@ def test_psum_read_out_splits_into_pure_copies_and_fused_compute(tmp_path):
                          row("Scalar", 4000, 9000, MLP_ACT, opcode="COPY")])  # reads no PSUM
     assert out["psum_readout_fused_ms"] == pytest.approx(1e-3)
     assert out["psum_readout_copy_ms"] == pytest.approx(8e-4)  # across engines: 2200-2400 once
-    # ruling R16: per engine, so each sits inside its VectorE / ScalarE bar
+    # per engine, so each sits inside its VectorE / ScalarE bar
     assert out["psum_readout_copy_ms_by_engine"] == {"vector": pytest.approx(5e-4),
                                                      "scalar": pytest.approx(5e-4)}
     assert out["psum_readout_fused_ms_by_engine"] == {"vector": pytest.approx(1e-3)}
@@ -165,7 +165,7 @@ def test_rows_with_no_module_path_are_unattributed_not_other(tmp_path):
 
 
 def test_unattributed_time_is_split_by_its_source_file_and_function(tmp_path):
-    """Ruling R25: Unknown rows stay unattributed; unattributed_by_source says which source file
+    """Unknown rows stay unattributed; unattributed_by_source says which source file
     (and function, where the file can be read and parsed) their busy time came from, on the
     same per-physical-core union basis, with "(none)" for rows that name no source."""
     mod = tmp_path / "mod.py"
@@ -195,7 +195,7 @@ def test_unmapped_attention_lines_over_10_percent_of_attention_are_refused(tmp_p
 
 
 def test_attention_loads_and_write_back_are_phase_other_not_unmapped(tmp_path):
-    # ruling R11: 3772 (output write-back) is phase "other" by design, however large
+    # 3772 (output write-back) is phase "other" by design, however large
     out = run(tmp_path, [row("Tensor", 0, 1000, ATTN, src=f"{CTE}:4128"),
                          row("Sync", 1000, 3000, ATTN, opcode="DMA_DIRECT2D", src=f"{CTE}:3772"),
                          row("Vector", 1000, 1300, ATTN, src=f"{CTE}:3381")])
@@ -205,7 +205,7 @@ def test_attention_loads_and_write_back_are_phase_other_not_unmapped(tmp_path):
 
 
 def test_the_mxfp8_forks_rows_are_attention_in_its_own_phases_none_unmapped(tmp_path):
-    """The MXFP8 attention plan's routed op (Difflet's fork of attention_cte): its rows are the
+    """The --attn-quant routed op (Difflet's fork of attention_cte): its rows are the
     attention component whatever HLO op they sit under, its loads are phase "other" by design."""
     fork = REPO / "difflet/backends/neuron/ops_impl/mx_attention_kernel.py"
     text = fork.read_text().splitlines()
@@ -214,7 +214,7 @@ def test_the_mxfp8_forks_rows_are_attention_in_its_own_phases_none_unmapped(tmp_
         return f"{fork}:{next(i for i, s in enumerate(text, 1) if s.strip() == statement)}"
     out = run(tmp_path, [
         row("Tensor", 0, 1000, ATTN, src=at("nisa.nc_matmul_mx(")),  # MM1, qk_mx
-        row("Vector", 0, 400, "Attention[attn][0]_all-reduce.1",  # under a collective (R14)
+        row("Vector", 0, 400, "Attention[attn][0]_all-reduce.1",  # under a collective
             src=at("nisa.quantize_mx(dst=data, src=packed, dst_scale=scale)")),  # V's
         row("Sync", 1000, 3000, ATTN, opcode="DMA_DIRECT2D",
             src=at("nisa.dma_copy(dst=out_dst_pat, src=v_src_pat)"))])  # the bf16 V load
@@ -240,7 +240,7 @@ def test_replay_spread_and_neff_hash_come_from_what_the_block_directory_has(tmp_
     assert out["warnings"] == ["Missing additional dynamic DMA metadata"]
     (tmp_path / "hv1" / "block.neff").unlink()
     assert analyze.analyze(tmp_path / "hv1", "qwen_image")["block_neff_sha256"] is None
-    # ruling R22: captured again without --enable-dge-notifs after a notification queue overflow
+    # captured again without --enable-dge-notifs after a notification queue overflow
     (tmp_path / "t1" / "source.json").write_text(json.dumps({"sha256": "abc", "dge_notifs": False}))
     assert analyze.analyze(tmp_path / "t1", "qwen_image")["dge_notifs"] is False
 
@@ -250,7 +250,7 @@ def test_the_timeline_is_physical_core_0_in_execution_order_with_gaps_under_5_us
                          row("Tensor", 3500, 3800), row("Tensor", 10_000, 11_000),
                          row("Vector", 500, 800, MLP_ACT), row("Tensor", 20_000, 30_000, pcore=1)],
               cc=[(1500, 2500)])
-    # busy_us (ruling R16): the busy runs inside a segment, overlaps once (0-1 and 3-4 us)
+    # busy_us: the busy runs inside a segment, overlaps once (0-1 and 3-4 us)
     assert out["timeline"] == [
         {"component": "mlp_up", "engine_class": "tensor", "start_us": 0.0, "end_us": 4.0,
          "busy_us": 2.0},
@@ -263,7 +263,7 @@ def test_the_timeline_is_physical_core_0_in_execution_order_with_gaps_under_5_us
 
 
 def test_a_long_blocks_timeline_is_bounded_and_keeps_each_engine_classs_span(tmp_path):
-    # ruling R15: 20,000 short rows, 26 us apart per engine, over a 200 ms block -> gaps under
+    # 20,000 short rows, 26 us apart per engine, over a 200 ms block -> gaps under
     # 200 ms / 4000 = 50 us merge
     kinds = [("Tensor", MLP_UP, "MATMUL"), ("Vector", MLP_ACT, "TENSOR_TENSOR"),
              ("Scalar", MLP_ACT, "DMA_DIRECT2D")]
@@ -275,7 +275,7 @@ def test_a_long_blocks_timeline_is_bounded_and_keeps_each_engine_classs_span(tmp
                                    ("hbm_dma", 20, 199_974, 6666)]:
         spans = [(s["start_us"], s["end_us"]) for s in timeline if s["engine_class"] == ec]
         assert (min(spans)[0], max(e for _, e in spans)) == (first, last), ec
-        # the merged segments still carry every row's 4 us of busy time (ruling R16)
+        # the merged segments still carry every row's 4 us of busy time
         assert sum(s["busy_us"] for s in timeline if s["engine_class"] == ec) == pytest.approx(
             4.0 * rows_), ec
 

@@ -1,8 +1,8 @@
 # DiT block profile (`scripts/profile_dit`)
 
 Where one DiT block spends its time on trn3, per engine and per component, bf16 against linear
-MXFP8 (plan: `docs/plans/2026-11-13-dit-block-profile.md`). `capture.sh` captures one
-configuration's block NEFFs (Task 1) and `analyze.py` breaks one block down (Task 3).
+MXFP8. `capture.sh` captures one configuration's block NEFFs and `analyze.py` breaks one block
+down.
 
 Run the analysis on the checkout and the Neuron SDK that produced the capture: `components.py`
 maps attention rows to phases by the line numbers of nkilib 2.14's `attention_cte.py`, and its
@@ -26,27 +26,26 @@ capture.sh --key <key> --arm <bf16|mxfp8|both|attn> --device <d> --cpus <taskset
 ```
 
 One lane: device `d` (`NEURON_RT_VISIBLE_CORES=4d..4d+3`), one CPU set, one directory
-`<root>/<key>/<arm>/`. Keys and flags are the plan's configuration table, taken from
+`<root>/<key>/<arm>/`. Keys and flags (`key_for`) are taken from
 `scripts/quant_bench/bench.sh`'s `args_for` with `--steps 1` (`hunyuan_video_L`: HunyuanVideo at
-evidence section 7f's 544x960x129, no `--sp`), except **`qwen_image` and `ltx_2`, which run
+544x960x129, no `--sp`), except **`qwen_image` and `ltx_2`, which run
 `--steps 2`**: their schedulers stretch the sigmas to `shift_terminal` (0.02, 0.1), and one step's
 single sigma divides 0 by 0 in diffusers' `FlowMatchEulerDiscreteScheduler`, so the timestep is
 NaN and the scheduler's step fails after the DiT forward (`qwen_image` dump, 2026-11-13: `IndexError`
 in `index_for_timestep`; LTX-2's config gives the same NaN on CPU). `system_profile.py` divides
-the denoise loop by the step count. The compile cache is per key (ruling R7): `qwen_image` uses
+the denoise loop by the step count. The compile cache is per key: `qwen_image` uses
 `~/difflet-cache-fp8`, every other key `~/difflet-cache-video`; `CAPTURE_CACHE` replaces it (an
-NVMe mirror, the MXFP8 attention plan's Task 6). `hv15_official mxfp8` is refused (exit 2).
+NVMe mirror). `hv15_official mxfp8` is refused (exit 2).
 `HF_HUB_CACHE` and `DIFFLET_NKI_TRACE_CACHE` are taken from the caller's environment; `PY`
 defaults to `~/venvs/native-fp8/bin/python`.
 
-**Attention arms** (the MXFP8 attention plan's Task 6): `both` = `--quant mxfp8 --attn-quant
+**Attention arms**: `both` = `--quant mxfp8 --attn-quant
 qk+pv`, and `attn` = `--attn-quant qk+pv` alone, for `hv15_official` only (`hv15_official both`
 and `<other key> attn` are refused). Their routed attention runs Difflet's fork of
 attention_cte (`ops_impl/mx_attention_kernel.py`), which counts as the attention kernel for the
 signature and the components; `components.py` maps the fork's rows to phases by function
 (`_FORK_PHASES`), with its own `qk_quantize` (Q and K share one helper, so they are not split),
-`v_quantize` and `p_quantize`. Both kernels' exp statements are phase `exp` (since Task 6; Plan
-A's committed breakdowns count them in `mask_softmax`). `capture.sh` takes `HF_HUB_CACHE` from
+`v_quantize` and `p_quantize`. Both kernels' exp statements are phase `exp`. `capture.sh` takes `HF_HUB_CACHE` from
 the caller: give an attention arm the hub its linear arm's cache entries were built from (see
 **Running several configurations**). An exported `DIFFLET_ATTN_QUANT` is
 unset, so only these two arms quantize attention, through their flag.
@@ -54,7 +53,7 @@ unset, so only these two arms quantize attention, through their flag.
 | step | command | output |
 |---|---|---|
 | dump | `timeout -s INT -k 90 5400 neuron-explorer inspect -o dump <PY> -m difflet.cli.main generate ...` under `NEURON_RT_INSPECT_DEVICE_PROFILE=1`; the run exits by itself | `dump/`, `dump.log` (ends `dump exit <rc>`), `out.*`, `work/` |
-| candidates | NEFFs over 1 MB whose sha256 is on every rank of rank 0's TP group and whose debug info names model code (below); the roles still missing matched per rank (below); count = the table's; ranks are the dump's processes in pid order | `lane.log` |
+| candidates | NEFFs over 1 MB whose sha256 is on every rank of rank 0's TP group and whose debug info names model code (below); the roles still missing matched per rank (below); count = the key's `BLOCKS`; ranks are the dump's processes in pid order | `lane.log` |
 | system profile | `view -d <rank 0's dump> --output-format json`, then `system_profile.py` | `system.json`, `system_summary.json` |
 | per block | `capture --collectives-worker-count=4 --collectives-workers-per-node=4 ... --num-exec=8 --profile-nth-exec=4 --enable-dge-notifs`, then `view --output-format summary-json` (executions 4 and 8) and `--output-format parquet --ingest-only` (execution 4) | `blk<i>/{block.neff, capture.log, profile_rank_0_exec_{4,8}.ntff, summary.json, summary_exec8.json, pq/trace/*.parquet, source.json}` |
 | end | | `STATUS`: `DONE`, `FAILED <reason>` or `BUSY` |
@@ -72,12 +71,12 @@ unset, so only these two arms quantize attention, through their flag.
   process holds it); its output goes to `lane.log`. Any other exit is busy, fuser's own failures
   too; with no `fuser` on `PATH` it stops at once (exit 2). A busy device, or the runtime's `Logical Neuron Core(s) not
   available` in a log, writes `BUSY` and exits 0 with nothing more run on the device.
-- **One capture at a time, host-wide (ruling R17).** `capture_neff` (`lib.sh`) holds a `flock` on
+- **One capture at a time, host-wide.** `capture_neff` (`lib.sh`) holds a `flock` on
   `CAPTURE_LOCK` (default `/mnt/nvme/difflet-prof/.capture.lock`) from its `require_idle` to the
   capture's end, so no lane's replay runs beside another's; dumps and views stay parallel.
   `lane.log` shows the wait: `blk<i> capture start (waits for the capture lock)`, then `capture
   lock taken`.
-- **At most four heavy dumps at once, host-wide (ruling R20).** A `hunyuan_video_L`,
+- **At most four heavy dumps at once, host-wide.** A `hunyuan_video_L`,
   `wan21_official`, `wan22_official` or `hv15_official` dump (11-42 min should it compile cold)
   first takes one of four slot locks `DUMP_SLOT.1-4` (`lib.sh`'s `dump_slot`, default
   `/mnt/nvme/difflet-prof/.dump-slot`, polled every 2 s) and gives it back as the dump ends,
@@ -88,14 +87,14 @@ unset, so only these two arms quantize attention, through their flag.
   0`) removes the lane's `blk<i>/`, `system.json` and `system_summary.json` first: its NEFFs may
   differ. To re-measure after a code change, use a new ROOT (`--out`): a finished lane is kept.
 - **HV1.5 (tp2 x CFG2):** ranks 2-3 are the second TP group; their candidates are compared by
-  sha256 and captured as further `blk<i>` when they differ (ruling R3). `system_summary.json`
+  sha256 and captured as further `blk<i>` when they differ. `system_summary.json`
   covers rank 0 only.
-- **Every rank its own NEFF (ruling R21).** LTX-2 and Wan compile another block NEFF on every
+- **Every rank its own NEFF.** LTX-2 and Wan compile another block NEFF on every
   rank (2026-11-13 run, ltx_2 bf16: 6,105,602 / 6,103,355 / 6,103,814 / 6,103,754 B, four
   sha256; Wan 2.1 / 2.2 bf16 89.56-89.61 MB), so none is on every rank and pass 1 ended them
   `FAILED candidates`. The roles that no shared NEFF fills are matched per rank: on each rank its
   NEFFs over 1 MB of model code not shared, largest first, the i-th of every rank one role, the
-  count per rank the table's and each role's sizes within 5% of rank 0's, else `FAILED
+  count per rank the key's `BLOCKS` and each role's sizes within 5% of rank 0's, else `FAILED
   candidates: rank <r> holds ...` / `... role <i> sizes ...`. Such a block is replayed one
   capture process per worker (`capture_neff` sees `blk<i>/rank<r>.neff`): worker r on rank r's
   NEFF and logical core 4d+r, `--collectives-workers-per-node=1 --collectives-worker-start-id=r
@@ -104,7 +103,7 @@ unset, so only these two arms quantize attention, through their flag.
   Checked on ltx_2 bf16, device 14: executions 4 / 8 13.52 / 13.57 ms against 13.44 / 13.60 ms
   with rank 0's NEFF on all four workers in one process. `source.json` gets `per_rank: true` and
   `sha256_by_rank`; layouts with one NEFF on every rank keep the one-process replay.
-- **Notification queue overflow (ruling R22).** HV1's 235 MB dual block overflowed the runtime's
+- **Notification queue overflow.** HV1's 235 MB dual block overflowed the runtime's
   notification queue with `--enable-dge-notifs` (`NRT_EXEC_SW_NQ_OVERFLOW`, both arms, pass 1).
   No runtime setting raises that queue: the only documented knobs, `NEURON_RT_PROFILE_BUF_<type>_MB`
   (EVENT, DMA, H2D_DMA, THROTTLE, CC_CORE_INSTRUCTION, CC_CORE_EVENT), size the profile buffers,
@@ -113,7 +112,7 @@ unset, so only these two arms quantize attention, through their flag.
   kept as `capture_dge.log`, and it is captured again without the flag (`blk<i>/no_dge`);
   `source.json` and `breakdown.json` say `dge_notifs: false` (the profile then warns its DMA
   values may be inaccurate). `hunyuan_video_L` captures without the flag from the start (`DGE=`
-  in `key_for`, ruling R23), so no doomed first try holds the capture lock; the retry stays for
+  in `key_for`), so no doomed first try holds the capture lock; the retry stays for
   any other key.
 - **`--candidates`** prints the selection of a kept dump (`<size> <sha256> same|rank <path on each
   rank>`) and exits: no device, no file written (the device-free check of a lane).
@@ -126,7 +125,7 @@ unset, so only these two arms quantize attention, through their flag.
 - `blk<i>/source.json` = `{neff_name, sha256, ranks: [the NEFF's path in each rank's dump],
   kind, per_rank, dge_notifs}` (+ `sha256_by_rank` when `per_rank`); `neff_name` and `sha256`
   are rank 0's, `neff_name` the file name the dump gives it (`neff_<model id>_vnc_0.neff`), the
-  key `system_summary.json` uses (ruling R2).
+  key `system_summary.json` uses.
 - `system_summary.json` (`system_profile.py`), all per step: `{blocks, step: {wall_ms, steps,
   gap_s, dump_steps}, neffs: {<neff_name>: {execs_per_step, in_model_median_ms}}, non_block_ms, host_gap_ms,
   cc_running: {n, total_ms}}`. The denoise loop is the last burst of block executions, none more
@@ -139,13 +138,13 @@ unset, so only these two arms quantize attention, through their flag.
   checks the pid order. If the dump log shows rank 0's process dropping system-profile events
   (full ring buffer), the lane fails: rerun the dump (remove `dump.log`) with
   `NEURON_RT_INSPECT_SYS_TRACE_MAX_EVENTS_PER_NC` raised.
-- **The dump's own step lines check the window (ruling R9).** HunyuanVideo-1.5's orchestrator
+- **The dump's own step lines check the window.** HunyuanVideo-1.5's orchestrator
   prints `denoise <s> s, <N> steps`; the torchrun and FLUX orchestrators print `step median <ms>
   ms (n=<N - 1>, ...)` for two steps or more (Qwen-Image's, LTX-2's) and no step line at one
   step (FLUX, HV1, Wan: `dump_steps` null, unchecked). The lane fails `FAILED system profile:
   ...` when the dump ran another step count than the lane divides by, or when the window is
   shorter than the dump's N - 1 step intervals (a host gap over 200 ms inside the loop would
-  leave a step outside it). The Task 1 smokes pass: Qwen-Image 2 steps, window 598.1 ms against
+  leave a step outside it). The device smokes below pass: Qwen-Image 2 steps, window 598.1 ms against
   one 305.1 ms interval; HV1.5 1 step; FLUX unchecked.
 
 ## `signatures.json`
@@ -164,7 +163,7 @@ Signature roots are module containers that MXFP8 does not replace (an attention 
 feed-forward container, a norm): a quantized linear changes its class (`ColumnParallelLinear` to
 `FP8ColumnParallelLinear` in HV1's capture), so linear classes stay out of `require`.
 
-## Measured (Task 1 Step 5, device smokes, 2026-11-13)
+## Measured (device smokes, 2026-11-13)
 
 Devices 1-3 (cores 4-15), 16-thread CPU sets on NUMA node 1, `HF_HUB_CACHE=
 /mnt/nvme/difflet-quant-bench-hub` (its revisions are the cache keys'), while other lanes
@@ -184,7 +183,7 @@ was then killed (below) and the lane rerun warm.
 - **`system_summary.json` checks.** Qwen-Image: 60 executions per step x 4.897 ms = 293.8 ms in a
   299.0 ms loop per step (the dump's own host-side step median: 305.1 ms). FLUX: 19 x 4.310 +
   38 x 3.396 = 210.9 ms in a 209.9 ms loop. HV1's 2026-11-08 SP profile (`profsp_V15`): 20 x
-  42.34 + 40 x 9.69 = 1234.5 ms in a 1235.2 ms loop (evidence 7e: SP step 1263.8 ms).
+  42.34 + 40 x 9.69 = 1234.5 ms in a 1235.2 ms loop (SP step 1263.8 ms).
 - **`--enable-dge-notifs`: kept.** No timeout (Qwen-Image capture 17 s with it, 17 s without);
   the dynamic DMAs are traced (Qwen-Image `dma_transfer_count` 5731 against 2504) and the
   profile's own warning "Missing additional dynamic DMA metadata, reported DMA values may be
@@ -206,12 +205,12 @@ was then killed (below) and the lane rerun warm.
   a 182.4 ms in-model median in the real run, 54 per step.
 - **Views of a large block take minutes, not seconds.** HV1.5's NTFFs are 2.17 GB each (7.5 M
   events, 5.9 M instruction rows); each view took 8-9 min (486 s, 555 s, 481 s above) at about
-  3-4 cores and 37-67 GB RSS each, against the 900 s limit per view the plan set. A block twice
+  3-4 cores and 37-67 GB RSS each, against a first limit of 900 s per view. A block twice
   as long per execution (HunyuanVideo at 544x960x129) would likely exceed it, and a view that
   times out fails the lane and its rerun captures again (`summary.json` is the block's
-  done-marker), so each block view now runs under `timeout 2700` (ruling R8; the capture keeps
+  done-marker), so each block view now runs under `timeout 2700` (the capture keeps
   1200 s, rank 0's system-profile view 900 s: it took 2-21 s). Each of the three is killed 60 s
-  after its TERM if it ignores it (`timeout -k 60`, ruling R9): a hung capture never holds the
+  after its TERM if it ignores it (`timeout -k 60`): a hung capture never holds the
   device past 21 min.
 - **Do not edit `capture.sh` while a lane runs it.** bash reads a script as it goes, at byte
   offsets: an edit under a running lane makes it parse the new file from the old offset.

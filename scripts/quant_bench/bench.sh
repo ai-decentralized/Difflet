@@ -78,7 +78,7 @@ args_for() {  # args_for <key>: M (model, shape, layout), P (sampling, no prompt
                       --height 320 --width 512 --num-frames 61 --tp-degree 4)
       P=(--seed 42 --guidance-scale 6.0)
       PROMPT="a cinematic shot of a red fox running through a snowy forest" ;;
-    # HunyuanVideo at evidence 7f's long shape (the DiT block profile's key, capture.sh)
+    # HunyuanVideo at its long shape, 544x960x129 (the DiT block profile's key, capture.sh)
     hunyuan_video_L) M=(--model-id hunyuanvideo-community/HunyuanVideo
                         --revision e8c2aaa66fe3742a32c11a6766aecbf07c56e773
                         --height 544 --width 960 --num-frames 129 --tp-degree 4)
@@ -143,7 +143,7 @@ print(json.dumps(line, ensure_ascii=False))' "$PROMPT" "$STEPS" "$1" "$NEG"
 
 arm_flags() {  # arm_flags <arm>: QF (the arm's flags) and QENV (its environment): bf16; mx
                # (--quant mxfp8, with the key's QT); both (mx plus MXFP8 QK^T and PV in
-               # attention, the MXFP8 attention plan's Task 6); attn (that attention alone)
+               # attention); attn (that attention alone)
   QF=() QENV=()
   case $1 in
     bf16) ;;

@@ -11,7 +11,7 @@ not bit for bit. It forms P exactly as the kernel does (nkilib 2.14
   ``[bound_min, bound_max)`` become ``_FLOAT32_MIN`` (:161, ``range_select`` :4282-4299), not
   -inf. The bounded path takes ``scale`` 1.0 (:4286), so its callers pre-scale q in fp32.
 - Unbounded keys beyond the real length are never scored: MM1, the row max and ``exponential``
-  run on ``num_valid_k`` (:3184, :4093, :3366); by the plan's contract the fork zeroes the last
+  run on ``num_valid_k`` (:3184, :4093, :3366); the fork zeroes the last
   P tile's tail before ``quantize_mx``, and V's padding is zero.
 - Sections: above 10,240 keys the kernel walks 8,192-key sections (:198-199, :1793-1798). The row
   max is the running max over the sections so far (``tensor_reduce`` then ``minimum`` of the
@@ -29,8 +29,8 @@ not bit for bit. It forms P exactly as the kernel does (nkilib 2.14
 MX operands are quantized along their contraction axis: Q and K along the head dim by
 ``qk_perm(D)``, P and V along keys per 512-key tile by ``pv_perm(512)`` (:mod:`difflet.quant.mx`
 for the law). The perms default to the kernel's (``mx_attention_kernel.qk_perm`` / ``pv_perm``,
-ruling BR1): contiguous blocks of 32, the group-of-4 layout's, locked on the device by
-``scripts/mx_attention/membership.py`` (not imported here: that module needs the Neuron SDK).
+not imported here: that module needs the Neuron SDK): contiguous blocks of 32, the group-of-4
+layout's, locked on the device (checked on trn3 against the kernel's loaders).
 Inputs are taken as given: bf16, as the kernel loads them (:2122-2150), gives the
 kernel's numbers; fp32 with MX off is exact attention (PV then takes E in v's dtype), which is how
 the tests check the softmax bookkeeping against SDPA.
@@ -89,7 +89,7 @@ def mx_attention_reference(q: torch.Tensor, k: torch.Tensor, v: torch.Tensor, *,
     acc = torch.zeros(bh, s_q, v.shape[-1])
     # shortcut: one section's scores for all of q at once: BH x S_q x 8192 fp32 is 10.7 GB on
     # wan_81f, and the section's ~5-6 fp32 temporaries peak near 60 GB; slice heads or queries in
-    # the caller (the probe evaluates one head at a time, ruling BR8).
+    # the caller (the probe evaluates one head at a time).
     for start in range(0, s_k, section_len):
         stop = min(start + section_len, s_k)
         section = (qf @ kf[:, start:stop].transpose(1, 2)) * scale

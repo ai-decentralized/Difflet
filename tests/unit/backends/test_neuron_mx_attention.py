@@ -1,7 +1,7 @@
-"""``DIFFLET_ATTN_QUANT`` ``qk`` / ``pv`` / ``qk+pv`` (MXFP8 attention plan, Tasks 5 and 5b), on
-CPU tensors: which calls reach ``difflet_neuron::mx_attention`` and with which flags, what the
-torch side hands it, the routed-call count and the application's checks. The op is a CPU custom
-op computing the Task 1 reference (``mx_attention_reference``, as the kernel computes), the bf16
+"""``DIFFLET_ATTN_QUANT`` ``qk`` / ``pv`` / ``qk+pv`` on CPU tensors: which calls reach
+``difflet_neuron::mx_attention`` and with which flags, what the torch side hands it, the
+routed-call count and the application's checks. The op is a CPU custom op computing the CPU
+reference (``mx_attention_reference``, as the kernel computes), the bf16
 kernels are recorders, and the tensors pretend to be on the device (as
 ``test_neuron_attention_c3.py`` does)."""
 
@@ -102,7 +102,7 @@ def test_unbounded_and_bounded_non_causal_head_dim_128_calls_reach_the_op(routed
         out_b = attn.attention(q, k, v, scale=SCALE, bound_min=lo, bound_max=hi, tp_q=True,
                                tp_k=True)
     assert routed.bf16 == [] and len(routed.mx) == 2
-    for call in routed.mx:  # ruling BR28: QK^T in MXFP8, PV in bf16
+    for call in routed.mx:  # QK^T in MXFP8, PV in bf16
         assert call["qk_mx"] is True and call["pv_mx"] is False
     unbounded = routed.mx[0]
     assert unbounded["bound_min"] is None and unbounded["scale"] == SCALE
@@ -115,8 +115,8 @@ def test_unbounded_and_bounded_non_causal_head_dim_128_calls_reach_the_op(routed
 @pytest.mark.parametrize("variant, qk_mx, pv_mx", [("qk", True, False), ("pv", False, True),
                                                    ("qk+pv", True, True)])
 def test_each_variant_reaches_the_op_with_its_flags(routed, monkeypatch, variant, qk_mx, pv_mx):
-    """Ruling BR34: the variant picks the op's (qk_mx, pv_mx); K is smoothed only when QK^T is
-    MXFP8 (the smoothing is for K's block scales; the Task 1 mirror and the probe's fork arm
+    """The variant picks the op's (qk_mx, pv_mx); K is smoothed only when QK^T is
+    MXFP8 (the smoothing is for K's block scales; the CPU reference and the probe's fork arm
     smooth only then), so ``pv`` hands the op the bf16 path's K."""
     monkeypatch.setattr(attn, "ATTN_QUANT", variant)
     q, k, v = _qkv(offset=3.0)
@@ -296,7 +296,7 @@ def test_an_invalid_switch_value_raises_naming_the_variable_and_its_values(value
     assert proc.returncode != 0 and "DIFFLET_ATTN_QUANT" in proc.stderr
     assert all(word in proc.stderr for word in ("unset", "'off'", "'qk'", "'pv'", "'qk+pv'",
                                                 repr(value)))
-    assert ("no longer a value" in proc.stderr) == (value == "mxfp8")  # Task 5's spelling
+    assert ("no longer a value" in proc.stderr) == (value == "mxfp8")  # the switch's earlier spelling
 
 
 @pytest.mark.parametrize("value, expect", [(None, "off None"), ("off", "off None"),
@@ -314,9 +314,8 @@ def test_the_switch_resolves_once_at_import_and_registers_the_op_only_when_set(v
 
 
 def test_the_op_calls_the_fork_with_the_scalar_engine_exp_and_its_bounds(monkeypatch):
-    """Ruling BR32 after main #164: the fork runs with ``allow_vector_exp=False``, as Difflet's bf16
-    attention_cte runs; the flags and scale as given, bounds only when the call has them; the LNC
-    grid."""
+    """The fork runs with ``allow_vector_exp=False``, as Difflet's bf16 attention_cte does since
+    main #164; the flags and scale as given, bounds only when the call has them; the LNC grid."""
     pytest.importorskip("difflet.backends.neuron.ops_impl.mx_attention_kernel")
     hop = pytest.importorskip("torch_neuronx.nki_hop")
     import torch_neuronx

@@ -10,7 +10,7 @@ The denoise loop is the last burst of block executions (no two consecutive ones 
 STEP_GAP_NS apart), from the start of its first block to the end of its last; per step = its
 counts and times over the run's step count.
 
-The dump's own log is the check on both (ruling R9): the steps it says it ran must be the step
+The dump's own log is the check on both: the steps it says it ran must be the step
 count, and the loop window must cover its step intervals (a host gap over STEP_GAP_NS inside the
 loop would leave a step outside the window and every per-step number short). HunyuanVideo-1.5's
 orchestrator prints "denoise <s> s, <N> steps"; the torchrun and FLUX orchestrators print

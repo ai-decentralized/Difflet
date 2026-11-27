@@ -49,13 +49,13 @@ def test_the_help_names_the_attention_qkv_a_default_keeps_bf16():
 
 
 def test_the_attn_quant_help_carries_its_cost_and_its_evidence():
-    """A user who finds --attn-quant in --help learns it is opt-in, slower and where the numbers
-    are, not only what it does."""
+    """A user who finds --attn-quant in --help learns it is opt-in, slower and costs quality on
+    some models, not only what it does."""
     parser = argparse.ArgumentParser()
     Q.add_quant_flags(parser)
     help_text = " ".join(next(a.help for a in parser._actions if a.dest == "attn_quant").split())
     for words in ("never a default", "slower than --quant mxfp8 alone on every model",
-                  "quality cost", "docs/verification/2026-11-13-dit-block-profile.md"):
+                  "quality cost"):
         assert words in help_text, words
 
 
@@ -573,7 +573,7 @@ def test_ltx2_driver_refuses_a_dead_target_pattern_before_writing(
     assert not (tmp_path / "quantized").exists()
 
 
-# ------------------------------------------------------------------ --attn-quant (plan Task 5b)
+# ------------------------------------------------------------------ --attn-quant
 
 ATTN_VARIANTS = ("qk", "pv", "qk+pv")
 
@@ -637,7 +637,7 @@ def test_attn_quant_is_refused_where_context_parallelism_keeps_attention_bf16(
                                             ("", None), ("off", None), ("pv", None)])
 def test_the_driver_checks_an_exported_switch_before_anything_launches(
         capsys, monkeypatch, value, refused):
-    """Without the flag an exported value is kept (BR34): the driver refuses a bad one in one
+    """Without the flag an exported value is kept: the driver refuses a bad one in one
     line, as its other refusals, not as a traceback from a cache key or a rank's import."""
     for name in ("DIFFLET_BACKEND", "DIFFLET_EXEC_MODE", "UNSAFE_FP8FNCAST"):
         monkeypatch.delenv(name, raising=False)

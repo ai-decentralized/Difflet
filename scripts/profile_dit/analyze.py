@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
-"""Per-engine, per-component and per-phase time of one captured block NEFF (DiT block profile
-plan, Task 3).
+"""Per-engine, per-component and per-phase time of one captured block NEFF.
 
 usage: analyze.py <block_dir> --model <key>    writes <block_dir>/breakdown.json
 
-Reads Task 1's ``blk<i>/``: ``summary.json`` (execution 4), ``summary_exec8.json`` and
+Reads ``capture.sh``'s ``blk<i>/``: ``summary.json`` (execution 4), ``summary_exec8.json`` and
 ``source.json`` when present, ``block.neff`` and
 ``pq/trace/{Instruction,ActiveTime,CcOp,Warning}.parquet``.
 
@@ -16,12 +15,12 @@ HV1's dual block 48.3 of ScalarE's 53.7 ms of durations are DMA). Collectives ar
 ``CcOp.parquet``'s operations (one logical core, so not averaged), as engine_class and component
 ``collective``. ``mfu``, ``mbu`` and ``throttle`` are the summary's fractions (0..1). Rows with
 no module path stay ``unattributed``; ``unattributed_by_source`` splits that time by the source
-file (and function) the rows name (ruling R25).
+file (and function) the rows name.
 
 Refused with ``ValueError``: ``other`` over 10% of an engine_class's attributed (not
-``unattributed``) time; attention lines no phase rule names over 10% of attention time (ruling
-R11); an engine_class's components summing to over 1.5 x its union (``component_overlap``
-reports the ratio: interleaved branches overlap, ruling R28) or over the block.
+``unattributed``) time; attention lines no phase rule names over 10% of attention time; an
+engine_class's components summing to over 1.5 x its union (``component_overlap`` reports the
+ratio: interleaved branches overlap) or over the block.
 """
 
 from __future__ import annotations
@@ -50,9 +49,9 @@ _CTE = "/nkilib/core/attention/attention_cte.py"
 #: 3420; previous-output load 3667; output write-back 3772. Every other "other" line is unmapped.
 _OTHER_LINES = {1251, 1908, 1931, 1935, 1939, 2616, 2789, 3008, 3103, 3420, 3489, 3516, 3667, 3772}
 _LIMIT = 0.10
-_OVERLAP_LIMIT = 1.5  # an engine's components over its union (ruling R28)
-#: Time line runs merge across gaps under max(5 us, block / 4000) (ruling R15: HV1.5's 182 ms
-#: block had 51,226 segments at 5 us; breakdown.json is committed and the page has 16 MB).
+_OVERLAP_LIMIT = 1.5  # an engine's components over its union
+#: Time line runs merge across gaps under max(5 us, block / 4000), so breakdown.json stays small
+#: (HV1.5's 182 ms block had 51,226 segments at 5 us).
 _TIMELINE_GAP_NS, _TIMELINE_SEGMENTS = 5_000, 4000
 
 
@@ -102,7 +101,7 @@ def _mean(summary: dict, pattern: str) -> float | None:
 
 
 def _unmapped(nki_source: str) -> bool:
-    """An attention row's source that no phase rule and no known "other" line names (ruling R11);
+    """An attention row's source that no phase rule and no known "other" line names;
     the MXFP8 fork's "other" is every line of its functions outside ``_FORK_PHASES``."""
     path, _, line = nki_source.rpartition(":")
     known = line.isdigit() and (int(line) in _OTHER_LINES if path.endswith(_CTE) else
@@ -111,7 +110,7 @@ def _unmapped(nki_source: str) -> bool:
 
 
 def _source_label(nki_source: str, hlo_attrs: str) -> str:
-    """Where an unattributed row came from (ruling R25): the file of its nki_source_location, else
+    """Where an unattributed row came from: the file of its nki_source_location, else
     of its hlo_attrs, with ``:<function>`` when the file can be parsed; "(none)" without either."""
     path, _, line = nki_source.rpartition(":")
     if not path:
@@ -131,7 +130,7 @@ def _rows(trace: Path, model: str) -> pd.DataFrame:
     rows = pd.read_parquet(trace / "Instruction.parquet", columns=[
         "start_ts", "end_ts", "engine", "pcore_idx", "opcode", "psum_read_bytes", *_KEYS])
     rows = rows[~rows.opcode.str.startswith("EVENT_SEMAPHORE")]
-    rows[_KEYS] = rows[_KEYS].fillna("")  # classify takes strings (ruling R13)
+    rows[_KEYS] = rows[_KEYS].fillna("")  # classify takes strings
     unique = rows[_KEYS].drop_duplicates()  # classify each distinct row once, not every instruction
     unique["component"] = [classify(*r, model) for r in unique.itertuples(index=False)]
     rows = rows.merge(unique, on=_KEYS, how="left")
@@ -143,7 +142,7 @@ def _rows(trace: Path, model: str) -> pd.DataFrame:
 def _timeline(rows: pd.DataFrame, cc: pd.DataFrame, block_ms: float) -> list[dict]:
     """Physical core 0's runs per (component, engine_class), by start; a run's gaps under
     max(5 us, block / 4000) are merged, so no key has more than ~4000 runs. ``busy_us`` is the
-    busy time inside a segment (the union of its rows; ruling R16), so a merged one shows its
+    busy time inside a segment (the union of its rows), so a merged one shows its
     density."""
     gap = max(_TIMELINE_GAP_NS, block_ms * 1e6 / _TIMELINE_SEGMENTS)
     core0 = rows[rows.pcore_idx == 0].groupby(["component", "engine_class"])
@@ -176,7 +175,7 @@ def analyze(block_dir: Path, model: str) -> dict:
     engines = _busy_ms(rows, ["engine_class"], n)
     components = _nest(_busy_ms(rows, ["component", "engine_class"], n))
     components.setdefault("collective", {})["collective"] = cc_ms
-    # ruling R28: branches the compiler interleaves on one engine overlap (HV1's single-stream
+    # branches the compiler interleaves on one engine overlap (HV1's single-stream
     # block: attention and the MLP, TensorE 1.16x): reported; over 1.5x it is a counting bug
     component_overlap = {}
     for ec, ms in engines.items():
@@ -233,7 +232,7 @@ def analyze(block_dir: Path, model: str) -> dict:
                          "psum_to_sbuf": summary.get("psum_read_sbuf_write_bytes")},
         "psum_readout_copy_ms": psum.get(True, 0.0),
         "psum_readout_fused_ms": psum.get(False, 0.0),
-        # per engine (ruling R16): the part of each VectorE / ScalarE bar that reads PSUM out
+        # per engine: the part of each VectorE / ScalarE bar that reads PSUM out
         "psum_readout_copy_ms_by_engine": {ec: ms for (c, ec), ms in psum_by_engine.items() if c},
         "psum_readout_fused_ms_by_engine": {ec: ms for (c, ec), ms in psum_by_engine.items()
                                             if not c},
@@ -247,7 +246,7 @@ def analyze(block_dir: Path, model: str) -> dict:
         "warnings": pd.read_parquet(trace / "Warning.parquet").message.tolist(),
         "timeline": _timeline(rows, cc, block_ms),
         # False: captured without --enable-dge-notifs after a notification queue overflow
-        # (ruling R22): the profile's own warning says its DMA values may be inaccurate
+        # (the profile's own warning says its DMA values may be inaccurate)
         "dge_notifs": json.loads(source.read_text()).get("dge_notifs", True) if source.exists()
         else None,
         "unattributed_by_source": _by_source(rows[rows.component == "unattributed"], n),
@@ -256,7 +255,7 @@ def analyze(block_dir: Path, model: str) -> dict:
 
 
 def _by_source(rows: pd.DataFrame, n_pcores: int) -> dict:
-    """{source: {engine_class: ms}} of unattributed rows (ruling R25), unions as everywhere."""
+    """{source: {engine_class: ms}} of unattributed rows, unions as everywhere."""
     sources = rows[["nki_source_location", "hlo_attrs"]].drop_duplicates()
     sources["source"] = [_source_label(*r) for r in sources.itertuples(index=False)]
     rows = rows.merge(sources, on=["nki_source_location", "hlo_attrs"], how="left")

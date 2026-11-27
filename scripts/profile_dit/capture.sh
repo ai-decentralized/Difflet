@@ -1,35 +1,35 @@
 #!/usr/bin/env bash
-# One DiT block's device profile per model and arm (docs/plans/2026-11-13-dit-block-profile.md,
-# Task 1), on one lane: one idle device and one CPU set. Into <root>/<key>/<arm>/:
+# One DiT block's device profile per model and arm, on one lane: one idle device and one CPU set.
+# Into <root>/<key>/<arm>/:
 #   1. dump: a 1-step `generate` (2 steps where the scheduler cannot take 1, see key_for) under
 #      `neuron-explorer inspect` writes every rank's NEFFs and system profile under dump/, and
 #      exits by itself (dump.log ends "dump exit <rc>");
 #   2. candidates: the NEFFs over 1 MB whose sha256 is on every rank of rank 0's TP group and
 #      whose debug info names model code and no VAE or text encoder (model_code), as many as the
 #      key's block NEFFs, else FAILED candidates; the roles no shared NEFF fills matched per rank
-#      when every rank compiled its own (per_rank, ruling R21); with a second TP group (HV1.5's
+#      when every rank compiled its own (per_rank); with a second TP group (HV1.5's
 #      CFG halves, ranks 2-3) its NEFFs as well when their sha256 differ;
 #   3. rank 0's system profile (system.json) and its step summary (system_summary.json,
 #      system_profile.py);
 #   4. per candidate, blk<i>/: block.neff (rank<r>.neff when every rank has its own) replayed
 #      with its collectives as one worker per rank (`capture --num-exec=8 --profile-nth-exec=4`:
 #      executions 4 and 8 profiled; again without --enable-dge-notifs after a notification queue
-#      overflow, ruling R22), exported as summary.json (execution 4), summary_exec8.json and
+#      overflow), exported as summary.json (execution 4), summary_exec8.json and
 #      pq/trace/*.parquet (rank 0's execution 4), then confirmed against signatures.json: a NEFF
 #      whose instructions come mostly from a VAE or a text encoder, or that matches none of the
 #      key's block kinds, fails the lane once every candidate is captured and checked;
 #      source.json = {neff_name, sha256, ranks: [the NEFF's path in each rank's dump], kind,
 #      per_rank, dge_notifs}.
 # require_idle (lib.sh) runs before every device command (the dump, each capture); a capture also
-# holds the host-wide capture lock (lib.sh's capture_neff, ruling R17). The lane ends
+# holds the host-wide capture lock (lib.sh's capture_neff). The lane ends
 # in STATUS: DONE, FAILED <reason> (exit 1) or BUSY (exit 0, nothing more run on the device). A
 # rerun skips what is done: the dump once dump.log says "dump exit 0", a block once its
 # summary.json exists (written last); a dump redone removes the blocks and system profile first.
 #
 # usage: capture.sh --key <key> --arm <arm> --device <d> --cpus <taskset list> --out <root>
 #        capture.sh --key <key> --arm <arm> --out <root> --candidates
-#   keys: the plan's configuration table, flags from scripts/quant_bench/bench.sh's args_for.
-#   arms: bf16, mxfp8 (--quant mxfp8); the MXFP8 attention plan's Task 6: both (--quant mxfp8
+#   keys: key_for's below, flags from scripts/quant_bench/bench.sh's args_for.
+#   arms: bf16, mxfp8 (--quant mxfp8); the attention arms both (--quant mxfp8
 #   --attn-quant qk+pv) and, for hv15_official only, attn (--attn-quant qk+pv alone).
 #   --candidates: step 2 alone on a kept dump, its selection on stdout; no device, no file.
 # env: PY (the native-fp8 venv's python), SIGNATURES (default: signatures.json here); inherited
@@ -61,7 +61,7 @@ WAN21_NEG='Bright tones, overexposed, static, blurred details, subtitles, style,
 WAN22_NEG='色调艳丽，过曝，静态，细节模糊不清，字幕，风格，作品，画作，画面，静止，整体发灰，最差质量，低质量，JPEG压缩残留，丑陋的，残缺的，多余的手指，画得不好的手部，画得不好的脸部，畸形的，毁容的，形态畸形的肢体，手指融合，静止不动的画面，杂乱的背景，三条腿，背景人很多，倒着走'
 
 key_for() {  # key_for <key>: M, P, PROMPT, NEG and EXT as bench.sh's args_for (hunyuan_video_L:
-             # hunyuan_video at evidence 7f's shape), with --steps STEPS; CACHE (ruling R7),
+             # hunyuan_video at 544x960x129), with --steps STEPS; CACHE (per key),
              # BLOCKS (block NEFFs per arm), TP (ranks per TP group), DGE (captures with
              # --enable-dge-notifs)
   NEG= EXT=mp4 PROMPT="a cat walking through a garden" TP=4 BLOCKS=1 STEPS=1 DGE=1
@@ -90,7 +90,7 @@ key_for() {  # key_for <key>: M, P, PROMPT, NEG and EXT as bench.sh's args_for (
                         --height 544 --width 960 --num-frames 129 --tp-degree 4)
       P=(--seed 42 --guidance-scale 6.0); BLOCKS=2
       # its 225-235 MB blocks overflow the notification queue with DGE notifications (pass 1,
-      # both arms): captured without them from the start (ruling R23)
+      # both arms): captured without them from the start
       DGE=
       PROMPT="a cinematic shot of a red fox running through a snowy forest" ;;
     hv15_official) M=(--model-id hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v
@@ -101,7 +101,7 @@ key_for() {  # key_for <key>: M, P, PROMPT, NEG and EXT as bench.sh's args_for (
   esac
   P=(--steps "$STEPS" "${P[@]}")
   if [ -n "$NEG" ]; then P+=(--negative-prompt "$NEG"); fi
-  # HEAVY: a cold compile of this shape takes 11-42 min; its dump holds a dump slot (ruling R20)
+  # HEAVY: a cold compile of this shape takes 11-42 min; its dump holds a dump slot
   case $1 in wan21_official|wan22_official|hunyuan_video_L|hv15_official) HEAVY=1 ;; *) HEAVY= ;; esac
 }
 
@@ -158,7 +158,7 @@ on_device() {  # on_device <cmd...>: the lane's tag, its CPU set
   env DIFFLET_PROF_LANE="$A" taskset -c "$CPUS" "$@"
 }
 view() {  # view <ntff> <args...>: blk $B's NTFF read on the lane's CPUs (no device: no require_idle);
-          # 2700 s (ruling R8): HV1.5's 2.17 GB NTFFs took 481-555 s per view, longer blocks more
+          # 2700 s: HV1.5's 2.17 GB NTFFs took 481-555 s per view, longer blocks more
   local ntff=$1; shift
   ( cd "$B" && taskset -c "$CPUS" timeout -k 60 2700 neuron-explorer view -n block.neff -s "$ntff" \
       "$@" ) \
@@ -217,8 +217,8 @@ candidates() {  # candidates <first rank>: "<size> <sha256> same <its path on ea
     done
 }
 per_rank() {  # per_rank <n> <sha256 already chosen...>: "<size> <sha256> rank <path on rank 0..
-              # WORLD-1>" (rank 0's size and sha256) for n roles whose NEFF differs between ranks
-              # (ruling R21): on each rank its NEFFs over 1 MB of model code not chosen yet, largest
+              # WORLD-1>" (rank 0's size and sha256) for n roles whose NEFF differs between ranks:
+              # on each rank its NEFFs over 1 MB of model code not chosen yet, largest
               # first, the i-th of every rank one role, within 5% of rank 0's size; else a line
               # "MISMATCH <reason>"
   local n=$1 r k tmp
@@ -247,7 +247,7 @@ per_rank() {  # per_rank <n> <sha256 already chosen...>: "<size> <sha256> rank <
   rm -rf "$tmp"
 }
 mapfile -t SEL < <(candidates 0)
-if [ ${#SEL[@]} -lt "$BLOCKS" ]; then  # the rest differ between ranks (ruling R21)
+if [ ${#SEL[@]} -lt "$BLOCKS" ]; then  # the rest differ between ranks
   mapfile -t PR < <(per_rank $((BLOCKS - ${#SEL[@]})) $(printf '%s\n' "${SEL[@]}" | cut -d' ' -f2))
   mismatch=$(printf '%s\n' "${PR[@]}" | grep -m1 '^MISMATCH ')
   if [ -n "$mismatch" ]; then fail "candidates: ${mismatch#MISMATCH }"; fi
@@ -259,7 +259,7 @@ if [ ${#SEL[@]} -ne "$BLOCKS" ]; then
 fi
 GROUP0=${#SEL[@]}
 if [ "$TP" -lt $WORLD ] && ! printf '%s\n' "${SEL[@]}" | cut -d' ' -f3 | grep -qx rank; then
-  # the next TP group (ruling R3; a per-rank replay already gives every worker its own NEFF)
+  # the next TP group (a per-rank replay already gives every worker its own NEFF)
   mapfile -t C1 < <(candidates "$TP")
   if [ ${#C1[@]} -ne "$BLOCKS" ]; then
     fail "candidates: ranks $TP-$((2 * TP - 1)) share ${#C1[@]} NEFFs over 1 MB of model code," \
@@ -285,7 +285,7 @@ if [ ! -s "$A/system_summary.json" ]; then
     --output-file "$A/system.json" > "$A/system_view.log" 2>&1 || fail "system view exit $?"
   names=()
   for c in "${SEL[@]:0:$GROUP0}"; do names+=("$(basename "$(cut -d' ' -f4 <<< "$c")")"); done
-  # the dump's own step count and step intervals check the loop window (ruling R9)
+  # the dump's own step count and step intervals check the loop window
   if ! "$PY" "$HERE/system_profile.py" "$A/system.json" "$R0" "$STEPS" "$A/dump.log" "${names[@]}" \
       > "$A/system_summary.json.tmp" 2> "$A/system_profile.err"; then
     fail "system profile: $(tail -1 "$A/system_profile.err")"
@@ -304,7 +304,7 @@ for c in "${SEL[@]}"; do
     rm -rf "$B"
     mkdir -p "$B"
     cp "${paths%% *}" "$B/block.neff"
-    if [ "$mode" = rank ]; then  # rank<r>.neff: capture_neff replays one worker per rank (R21)
+    if [ "$mode" = rank ]; then  # rank<r>.neff: capture_neff replays one worker per rank
       r=0
       for p in $paths; do cp "$p" "$B/rank$r.neff"; r=$((r + 1)); done
     fi
@@ -314,7 +314,7 @@ for c in "${SEL[@]}"; do
     rc=$CAPTURE_RC
     note "$A" "blk$i capture end, exit $rc"
     if [ "$rc" -ne 0 ] && nq_overflow "$B/capture.log"; then
-      # ruling R22: no runtime setting raises that queue (NEURON_RT_PROFILE_BUF_<type>_MB size
+      # no runtime setting raises that queue (NEURON_RT_PROFILE_BUF_<type>_MB size
       # the profile buffers: DMA at 1024 MB overflowed the same); again without the DGE
       # notifications, the failed capture's partial NTFFs gone first
       note "$A" "blk$i notification queue overflow: capture again without --enable-dge-notifs"
@@ -362,7 +362,7 @@ if not match:
 kind = max(match, key=lambda k: len(kinds[k]["require"]))
 source = {"neff_name": Path(ranks[0]).name, "sha256": sha, "ranks": ranks, "kind": kind,
           "per_rank": mode == "rank", "dge_notifs": not Path(blk, "no_dge").exists()}
-if mode == "rank":  # every rank its own NEFF (ruling R21); ranks[r] is rank r's
+if mode == "rank":  # every rank its own NEFF; ranks[r] is rank r's
     source["sha256_by_rank"] = [hashlib.sha256(Path(p).read_bytes()).hexdigest() for p in ranks]
 Path(blk, "source.json").write_text(json.dumps(source, indent=1) + "\n")
 print(kind)

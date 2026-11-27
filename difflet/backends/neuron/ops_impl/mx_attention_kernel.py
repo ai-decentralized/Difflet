@@ -14,8 +14,8 @@
 #
 # Difflet: forked from nkilib 2.14 (the copy bundled in aws_neuronx_venv_torch_neuronx_2_14_0:
 # torch-neuronx 2.14.3, nki 0.7.0, neuronx-cc 2.28.7631), core/attention/attention_cte.py, sha256
-# 608f0c0320564df85ef3f038bc749591279e7fe5c22480d1dcdb6b3361a2c734 (MXFP8 attention plan, Task 3).
-# Pruned to the subset Difflet calls (Step 6): every branch of a feature ``_check_difflet_subset``
+# 608f0c0320564df85ef3f038bc749591279e7fe5c22480d1dcdb6b3361a2c734.
+# Pruned to the subset Difflet calls: every branch of a feature ``_check_difflet_subset``
 # refuses is gone, the subset's instruction stream unchanged. Added: Difflet's entry point
 # ``mx_attention_fwd``, the MX block membership ``qk_perm`` / ``pv_perm``, MM2 on ``nc_matmul_mx``
 # (``pv_mx``: ``_mx_load_v``, ``_mx_quantize_p``), MM1 on ``nc_matmul_mx`` with row tiling
@@ -41,12 +41,10 @@ THE SUBSET:
   128]`` bf16, v ``[batch, seqlen_k, d_v]`` (d_v <= 512; 128 with pv_mx), one k/v batch per q batch.
 - Sequence packing (bound_min/bound_max provided): query i attends keys
   ``bound_min[i] <= j < bound_max[i]``, masked with range_select; that path takes scale 1.0.
-- ``pv_mx``: MM2 on ``nc_matmul_mx``, P and V MX-quantized per 512-key tile (MXFP8 attention
-  plan, Task 3).
+- ``pv_mx``: MM2 on ``nc_matmul_mx``, P and V MX-quantized per 512-key tile.
 - ``qk_mx``: MM1 on ``nc_matmul_mx``, Q and K MX-quantized on load along the head dim, each large
-  tile's four 512-key tiles in the four row quadrants of the PE array (plan Task 4).
-- ``allow_vector_exp`` as attention_cte has it, but default False: the exp on the Scalar Engine
-  (rulings BR19 / BR20).
+  tile's four 512-key tiles in the four row quadrants of the PE array.
+- ``allow_vector_exp`` as attention_cte has it, but default False: the exp on the Scalar Engine.
 
 Everything else attention_cte offers is refused (``_check_difflet_subset``).
 
@@ -148,9 +146,9 @@ def mx_attention_fwd(q, k, v, *, scale, bound_min=None, bound_max=None, pv_mx: b
     """Difflet's entry: non-causal attention in the ``tp_q=True, tp_k=True`` layout (q, k, v
     ``[batch, seqlen, d]`` bf16), optionally key-bounded, as ``ops_impl/attention.py`` calls
     attention_cte on both paths. ``pv_mx`` / ``qk_mx``: MM2 / MM1 on ``nc_matmul_mx``; both False
-    is attention_cte unchanged at the same ``allow_vector_exp`` (default False here: ScalarE exp,
-    rulings BR19 / BR20). Difflet's one production caller, the torch op in
-    ``ops_impl/mx_attention.py``, passes True: the VectorE exp of shipped attention_cte (BR32)."""
+    is attention_cte unchanged at the same ``allow_vector_exp`` (default False here: ScalarE
+    exp). Difflet's one production caller, the torch op in ``ops_impl/mx_attention.py``, passes
+    False too, as Difflet's bf16 attention_cte runs since main #164."""
     return _attention_cte(q=q, k=k, v=v, scale=scale, causal_mask=False, tp_q=True, tp_k=True,
                           bound_min=bound_min, bound_max=bound_max, pv_mx=pv_mx, qk_mx=qk_mx,
                           allow_vector_exp=allow_vector_exp)
@@ -166,8 +164,8 @@ if _psum_num_banks() == 7:
 # indices, then block 1's, ...), for the CPU reference. Both operands of each matmul reach
 # ``nc_matmul_mx`` in the group-of-4 layout (nkilib's ``swizzle_quantize_mx``: partition g, byte j
 # of the x4 operand holds contraction index 4g + j), and ``quantize_mx`` blocks 8 partitions x 4
-# bytes, so block b is indices 32b..32b+31. Locked on the device by
-# scripts/mx_attention/membership.py (rerun on MM2's own loaders, ruling BR16, and on MM1's, Task 4).
+# bytes, so block b is indices 32b..32b+31. Locked on the device (checked on trn3 against MM2's
+# own loaders and MM1's).
 def qk_perm(d: int):
     """MM1's blocks along the head dim (Q and K)."""
     import torch
@@ -182,7 +180,7 @@ def pv_perm(tile: int):
     return torch.arange(tile)
 
 
-# Why MM2's loaders take the routes below (neuronx-cc 2.28, on the device, 3b micro-probes): a DMA
+# Why MM2's loaders take the routes below (neuronx-cc 2.28, on the device, micro-probes): a DMA
 # transpose cannot write the group-of-4 order (its output steps must be 32-byte aligned,
 # NCC_IBIR155, and its transposing dimensions contiguous, BIR verifier checkDMATranspose), and
 # ``quantize_mx`` takes no strided source (NCC_IBIR164), so each group of 4 must sit contiguous in
@@ -235,7 +233,7 @@ def _mx_quantize_p(data, scale, psum, stage, src, src_offset, num_q, num_keys):
 # (tile_size (32, 128), tile_position (32 t, 0); operands and scales at partition 32 t). The four
 # share one query group (the stationary, repeated in every quadrant) and take a large tile's four
 # 512-key tiles (the moving operands, tile t in quadrant t): their score tiles are the large
-# tile's, in its four PSUM banks (scripts/mx_attention/row_tiling.py, plan Task 4 Step 1).
+# tile's, in its four PSUM banks.
 _QUADRANT = 32  # PE rows per row tile, = the x4 operand's partitions at d = 128
 _SCALE_ROWS = _QUADRANT // 8  # a quadrant's MX scales sit in its first 4 partitions
 
@@ -319,7 +317,7 @@ _REFUSED = (
 
 def _check_difflet_subset(q, tp_q, tp_k, causal_mask, refused):
     """Refuse every attention_cte feature outside Difflet's subset, whose branches the fork no
-    longer has (plan Task 3 Step 6), instead of silently computing something else: causal masking
+    longer has, instead of silently computing something else: causal masking
     (``causal_mask=True``), the transposed q / k layouts (``tp_q`` / ``tp_k`` False), head dims
     other than 128, and any argument of ``_REFUSED`` (or any other name) passed at all: prefix
     caching (``k_prior``, ``v_prior``, ``prior_used_len``), the attention sink (``sink``), sliding

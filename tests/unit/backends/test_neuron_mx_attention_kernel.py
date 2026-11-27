@@ -41,7 +41,7 @@ def test_attention_cte_refuses_what_difflet_never_uses(name):
 
 @pytest.mark.parametrize("name", fork._REFUSED)
 def test_every_pruned_feature_is_refused_whatever_its_value(name):
-    """Ruling BR16 (3): each attention_cte argument whose branches the prune removed is refused
+    """Each attention_cte argument whose branches the prune removed is refused
     by name, even at attention_cte's own default, and the docstring names it."""
     assert f"``{name}``" in fork._check_difflet_subset.__doc__ or name.startswith("kvp_")
     with pytest.raises(AssertionError, match=f"refuses {name}"):
@@ -103,9 +103,9 @@ def test_difflet_subset_passes():
 
 
 def test_allow_vector_exp_is_accepted_and_defaults_to_the_scalar_exp(monkeypatch):
-    """Ruling BR20 (0): the fork takes attention_cte's ``allow_vector_exp`` again, False (exp on
-    ScalarE, the rebalanced bf16 baseline of BR19) by default at both entries, and
-    ``mx_attention_fwd`` passes it through."""
+    """The fork takes attention_cte's ``allow_vector_exp`` again, False (exp on ScalarE, the
+    rebalanced bf16 baseline) by default at both entries, and ``mx_attention_fwd`` passes it
+    through."""
     import inspect
 
     assert "allow_vector_exp" not in fork._REFUSED
@@ -122,7 +122,7 @@ def test_allow_vector_exp_is_accepted_and_defaults_to_the_scalar_exp(monkeypatch
 
 @pytest.mark.parametrize("pv_mx", [False, True])
 def test_qk_mx_is_passed_through_with_pv_mx(pv_mx, monkeypatch):
-    """Task 4 Step 2: ``qk_mx`` is no longer refused; QK-only and QK+PV reach the kernel."""
+    """``qk_mx`` is no longer refused; QK-only and QK+PV reach the kernel."""
     seen = []
     monkeypatch.setattr(fork, "_attention_cte", lambda **kw: seen.append((kw["qk_mx"], kw["pv_mx"])))
     fork.mx_attention_fwd.func(Q, K, V, scale=1.0, pv_mx=pv_mx, qk_mx=True)
@@ -139,9 +139,8 @@ def test_entry_point_keeps_attention_cte_compile_options():
 
 
 def test_the_reference_defaults_to_the_kernels_block_membership():
-    """Rulings BR1 / BR16: the perms the kernel exports (contiguous blocks of 32, locked on the
-    device on MM2's own loaders by scripts/mx_attention/membership.py) are the CPU reference's
-    defaults."""
+    """The perms the kernel exports (contiguous blocks of 32, locked on the device on MM2's own
+    loaders) are the CPU reference's defaults."""
     import torch
 
     from difflet.quant.mx import swizzle_perm
@@ -208,9 +207,9 @@ SIM_SHAPES = {"partial": (1, 602, 602, None), "bounded": (2, 640, 640, 600),
 @pytest.mark.parametrize("vector_exp", [False, True])
 @pytest.mark.parametrize("case", sorted(SIM_SHAPES))
 def test_pv_mx_simulated_matches_the_mirror(case, vector_exp):
-    """MM2 on nc_matmul_mx (Step 3): the simulated kernel equals the Task 1 mirror (P and V
+    """MM2 on nc_matmul_mx: the simulated kernel equals the CPU reference (P and V
     MX-quantized per 512-key tile by ``pv_perm``, the last tile zero-padded) to summation order,
-    and is not the bf16 kernel; with either exp engine (True: the torch op's, ruling BR32)."""
+    and is not the bf16 kernel; with either exp engine."""
     from difflet.quant.mx_attention import mx_attention_reference
 
     bh, s_q, s_k, valid = SIM_SHAPES[case]
@@ -231,12 +230,11 @@ def test_pv_mx_simulated_matches_the_mirror(case, vector_exp):
 @pytest.mark.parametrize("case, lnc", [("partial", 1), ("bounded", 1), ("sections", 1),
                                        ("lnc2_odd_bounded", 2)])
 def test_qk_mx_simulated_matches_the_mirror(case, lnc, pv_mx, vector_exp):
-    """MM1 on nc_matmul_mx (Task 4 Step 2): Q and K MX-quantized on load along the head dim by
-    ``qk_perm``, QK-only and QK+PV, equal the Task 1 mirror to summation order, and are not the
+    """MM1 on nc_matmul_mx: Q and K MX-quantized on load along the head dim by
+    ``qk_perm``, QK-only and QK+PV, equal the CPU reference to summation order, and are not the
     kernel without ``qk_mx``. Covers a partial query group (602 = 4 x 128 + 90 rows) and a partial
     key tile, bounds with ``bound_max % 32 != 0``, two flash sections, and the LNC2 split of an odd
-    batch (per-group Q loads on the seqlen-sharded path); with either exp engine (True: the shipped
-    configuration, the torch op's, ruling BR32)."""
+    batch (per-group Q loads on the seqlen-sharded path); with either exp engine."""
     from difflet.quant.mx_attention import mx_attention_reference
 
     bh, s_q, s_k, valid = {**SIM_SHAPES, "lnc2_odd_bounded": (3, 1152, 1152, 1001)}[case]
@@ -264,9 +262,9 @@ def _partition(t):
 
 @pytest.mark.parametrize("pv_mx", [False, True])
 def test_qk_mx_four_key_tiles_share_the_pe_array_in_distinct_psum_banks(pv_mx, monkeypatch):
-    """Ruling BR21 and the brief's ISA constraints, on the kernel's real allocation (replaces
-    row_tiling.py's check_psum): each large tile's MM1 is four ``nc_matmul_mx`` in the four row
-    quadrants (``tile_position`` (32 t, 0), ``tile_size`` (32, 128), stationary, moving and both
+    """The row tiling's ISA constraints, on the kernel's real allocation: each large tile's MM1
+    is four ``nc_matmul_mx`` in the four row quadrants (``tile_position`` (32 t, 0),
+    ``tile_size`` (32, 128), stationary, moving and both
     scales at partition 32 t, the stationary's free size 128 > 64), the score tiles in four
     distinct MM1 PSUM banks, never MM2's (4) nor the bank Q's and K's transposes use (7, or 6 with
     pv_mx, where P's transposes hold 7)."""
@@ -312,7 +310,7 @@ def test_qk_mx_four_key_tiles_share_the_pe_array_in_distinct_psum_banks(pv_mx, m
 def test_both_flags_off_simulates_bit_identical_to_attention_cte(case, lnc, vector_exp, monkeypatch):
     """The pv_mx edits and the prune leave the flags-off path alone: bit for bit nkilib's
     attention_cte at the same ``allow_vector_exp`` (the fork's default False = ScalarE exp, the
-    rebalanced cte of ruling BR19; True = shipped attention_cte's VectorE exp), the LNC2 split of
+    rebalanced cte; True = shipped attention_cte's VectorE exp), the LNC2 split of
     an odd batch (HV1's 3-head calls) included. The simulator computes both exps to the same bits,
     so the engine is checked by the exp instructions issued."""
     import nki.isa as nisa

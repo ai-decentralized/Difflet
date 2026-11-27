@@ -85,8 +85,7 @@ def add_quant_flags(p: argparse.ArgumentParser) -> None:
         "for the launch, over any exported value. Experimental, opt-in, never a default: "
         "measured slower than --quant mxfp8 alone on every model and slower than bf16 on Wan, "
         "HunyuanVideo and HunyuanVideo-1.5, with a quality cost on some (Qwen-Image: about 7 dB "
-        "further from fp32 with qk+pv); see docs/verification/2026-11-13-dit-block-profile.md "
-        "section 15.",
+        "further from fp32 with qk+pv).",
     )
 
 

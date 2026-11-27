@@ -6,11 +6,11 @@
 WORLD=4  # capture workers = world size = tp x cfg x cp, every key
 # fuser decides whether a device is idle: one that cannot run must never read as idle
 command -v fuser > /dev/null || { echo "fuser not found" >&2; exit 2; }
-# One `neuron-explorer capture` at a time among our lanes, host-wide (ruling R17): a capture is a
+# One `neuron-explorer capture` at a time among our lanes, host-wide: a capture is a
 # measurement, so no other lane's replay runs beside it; dumps and views stay parallel.
 CAPTURE_LOCK=${CAPTURE_LOCK:-/mnt/nvme/difflet-prof/.capture.lock}
 # A heavy key's dump (HV1 544x960x129, Wan 81f, HV1.5 121f: 11-42 min if it compiles cold) holds
-# one of 4 slot locks <DUMP_SLOT>.1-4 (ruling R20): at most 4 such compiles at once host-wide.
+# one of 4 slot locks <DUMP_SLOT>.1-4: at most 4 such compiles at once host-wide.
 DUMP_SLOT=${DUMP_SLOT:-/mnt/nvme/difflet-prof/.dump-slot}
 
 note() {  # note <lane dir> <text...>: a timestamped line in the lane log
@@ -72,15 +72,15 @@ capture_neff() {  # capture_neff <device> <lane dir> <blk dir> <cpus>: <blk dir>
                   # profiled (<blk dir>/profile_rank_0_exec_{4,8}.ntff), holding CAPTURE_LOCK from
                   # require_idle to the capture's end. Returns 1 when the device is busy (BUSY
                   # written), else 0 with CAPTURE_RC = the capture's exit (capture.log's last line).
-                  # With <blk dir>/rank<r>.neff (every rank its own NEFF, ruling R21): one capture
+                  # With <blk dir>/rank<r>.neff (every rank its own NEFF): one capture
                   # process per worker, worker r on rank<r>.neff and logical core 4d+r, one root
                   # communicator, worker 0 profiled; capture.log = their logs, CAPTURE_RC the first
                   # failing worker's exit
   local d=$1 dir=$2 blk=$3 cpus=$4 r rc port pids=()
   local opts=(--collectives-worker-count=$WORLD --num-exec=8 --profile-nth-exec=4)
   # --enable-dge-notifs: the dynamic DMAs traced (without it the profile warns its DMA values
-  # may be inaccurate); same total_time, no slower (README, Task 1 smokes); <blk>/no_dge: the
-  # block overflowed the notification queue with it (nq_overflow, ruling R22)
+  # may be inaccurate); same total_time, no slower (README's device smokes); <blk>/no_dge: the
+  # block overflowed the notification queue with it (nq_overflow)
   [ -f "$blk/no_dge" ] || opts+=(--enable-dge-notifs)
   exec 8>> "$CAPTURE_LOCK"
   flock 8

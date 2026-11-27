@@ -144,7 +144,7 @@ def test_quality_reads_no_output_of_a_failed_step(tmp_path):
 
 @needs_tools
 def test_the_attention_arms_add_attn_quant_beside_the_quant_flags(tmp_path):
-    """ARMS (the MXFP8 attention plan's Task 6): `both` is the mx arm plus --attn-quant qk+pv,
+    """ARMS: `both` is the mx arm plus --attn-quant qk+pv,
     `attn` is --attn-quant qk+pv alone; the former default's targets follow --quant only."""
     from tests.unit.backends._neuron_hv15_toy import HV15_MEASURED_TARGETS
 

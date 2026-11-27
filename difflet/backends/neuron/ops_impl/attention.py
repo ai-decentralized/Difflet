@@ -90,9 +90,9 @@ _CONSTMAX = os.environ.get("DIFFLET_EXP_ATTN_CONSTMAX") == "1"
 
 #: ``DIFFLET_ATTN_QUANT`` (``--attn-quant``) ``qk``, ``pv`` or ``qk+pv`` sends the self/joint
 #: attention calls (non-causal, unmasked or key-bounded, bf16, head dim 128, ``mx=True``) to
-#: ``difflet_neuron::mx_attention`` with QK^T, PV or both in MXFP8 (``ATTN_QUANT_VARIANTS``; MXFP8
-#: attention plan, Tasks 5 and 5b). Unset or ``off``: every graph is unchanged. Read once at
-#: import, as above (any other value raises); trn3 and compile mode only (``application_base``).
+#: ``difflet_neuron::mx_attention`` with QK^T, PV or both in MXFP8 (``ATTN_QUANT_VARIANTS``).
+#: Unset or ``off``: every graph is unchanged. Read once at import, as above (any other value
+#: raises); trn3 and compile mode only (``application_base``).
 ATTN_QUANT = attn_quant_variant()
 
 # Kernel limits stated by torch-neuronx's SDPA gate, other than its 512-multiple lengths.
@@ -139,7 +139,7 @@ def attention(
     either, which always runs its exp on the Scalar engine (``mx_attention.load_op``).
 
     ``mx=False`` keeps the call in bf16 under ``DIFFLET_ATTN_QUANT``: the cross-attention call
-    sites pass it (plan Global Constraints: only self/joint attention is routed)."""
+    sites pass it (only self/joint attention is routed)."""
     if kwargs:
         raise NotImplementedError(
             "neuron attention does not support attention_cte-only kwargs: "
@@ -297,7 +297,7 @@ def _mx_attention(q, k, v, bound_min, bound_max, *, scale: float):
     any padding; ``pv`` alone hands the op K as the bf16 path does. A bounded call then takes
     ``_flash_attention_bounded``'s q pre-scale, 128 padding, head chunks and one slice; an
     unbounded one is not padded: the fork takes partial 512-key and 128-query tiles itself
-    (ruling BR3: one pad/slice round trip at most)."""
+    (one pad/slice round trip at most)."""
     shape = q.shape
     bh, s_q, d = math.prod(shape[:-2]), shape[-2], shape[-1]
     q3, k3, v3 = (t.reshape(bh, t.shape[-2], t.shape[-1]) for t in (q, k, v))

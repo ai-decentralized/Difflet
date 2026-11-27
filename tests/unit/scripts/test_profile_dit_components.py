@@ -1,10 +1,10 @@
 """scripts/profile_dit/components.py: which DiT block component a profiled instruction belongs to.
 
 The rows are real ``Instruction.parquet`` strings (2026-11-13): HunyuanVideo's dual block
-(``/home/ubuntu/fp8-bench/hv1_tp4/profsp_V15/blk1``, an MXFP8 capture) and the Task 1 smokes
+(``/home/ubuntu/fp8-bench/hv1_tp4/profsp_V15/blk1``, an MXFP8 capture) and the device smokes
 (Qwen-Image, FLUX dual and single, HunyuanVideo-1.5; bf16). No Wan or LTX-2 parquet exists yet:
-their rows are written from the model code and Task 4 adds captured ones. A row put in the wrong
-component misstates the breakdown the page draws, so each rule has a case here."""
+their rows are written from the model code (captured ones added later). A row put in the wrong
+component misstates the breakdown, so each rule has a case here."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ WAN = "difflet/models/wan/modeling_wan.py"
 LTX = "difflet/models/ltx_2/modeling_ltx_2.py"
 
 CASES = [
-    # HunyuanVideo dual block (hv1 blk1): the brief's four rows ...
+    # HunyuanVideo dual block (hv1 blk1): four rows ...
     ("AdaLayerNormZero[norm1][0]/ColumnParallelLinear[linear][0]_dot",
      "%dot = dot(%reshape.6, %transpose.110)", f"{HV1}/linear.py:130", attrs(f"{HV1}/linear.py", 130),
      "hunyuan_video", "modulation"),
@@ -154,7 +154,7 @@ CASES = [
      "", "", "ltx_2", "out_proj"),
     ("FeedForward[audio_ff][0]/GELU[0][0]/ColumnParallelLinear[proj][0]_dot.60",
      "%dot.60 = dot(%reshape.59, %transpose.58)", "", "", "ltx_2", "mlp_up"),
-    # Real rows of the 2026-11-13 run (ruling R14). Wan 2.1 / 2.2 block, mxfp8: attention-kernel
+    # Real rows of the 2026-11-13 run. Wan 2.1 / 2.2 block, mxfp8: attention-kernel
     # instructions the profiler files under the all-reduce after the kernel (attention_cte.py
     # lines, the collective's hlo_attrs: 1.4% of the block's summed durations) are the kernel's
     ("WanAttention[attn1][0]_all-reduce.164", "%all-reduce.164 = all-reduce(%reshape.159)",
@@ -240,7 +240,7 @@ def test_attention_phase(line, phase):
     assert components.attention_phase(f"{CTE}:{line}") == phase
 
 
-#: the MXFP8 fork's statements (the plan's Task 6 phases); found by text, so a moved line moves
+#: the MXFP8 fork's statements and their phases; found by text, so a moved line moves
 #: the test with it
 _FORK_STATEMENTS = [
     ("_qk_and_max_large_tile_impl", "nisa.nc_matmul_mx(", "qk_matmul"),

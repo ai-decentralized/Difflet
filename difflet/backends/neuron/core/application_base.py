@@ -205,7 +205,7 @@ class TorchNeuronApplicationBase(torch.nn.Module):
                     "weights are quantized per rank K range)"
                 )
         elif self._attn_quant():
-            # The attention's nc_matmul_mx needs what --quant's does (plan Global Constraints).
+            # The attention's nc_matmul_mx needs what --quant's does.
             label = self.quant_label or self.quant_model
             require_fp8_supported(f"{label} (DIFFLET_ATTN_QUANT={attention.ATTN_QUANT})",
                                   self.device.type, self.exec_mode)
@@ -386,7 +386,7 @@ class TorchNeuronApplicationBase(torch.nn.Module):
         self.phase_seconds["warmup forward"] = time.perf_counter() - start
         self.warmup_shapes = [tuple(arg.shape) for arg in args]
         if self._attn_quant():
-            if self.rank == 0:  # the warm-up traced them (plan Review Focus 5)
+            if self.rank == 0:  # the warm-up traced them
                 mx_attention.log_routed_calls(attention.ATTN_QUANT)
             if not mx_attention.mx_attention_calls():  # every rank traced the same graph
                 raise RuntimeError(

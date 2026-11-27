@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""One attention call on one NeuronCore (LNC=2) at a model's per-rank shape: accuracy and time
-(MXFP8 attention plan, ``docs/plans/2026-11-13-mxfp8-attention.md``, Task 2).
+"""One attention call on one NeuronCore (LNC=2) at a model's per-rank shape: accuracy and time.
 
 usage: probe.py --shape NAME --impl {cte,fork,constmax,routed} [--qk-mx] [--pv-mx]
                 [--fork-vector-exp] [--cte-no-vector-exp] --out FILE [--runs N] [--calls N]
@@ -10,39 +9,37 @@ usage: probe.py --shape NAME --impl {cte,fork,constmax,routed} [--qk-mx] [--pv-m
 in the ``tp_q``/``tp_k`` layout: nkilib's ``attention_cte`` in bf16, bounded rows through its
 range-select op (q pre-scaled in fp32, lengths padded to 128, HV1 split over heads), scored
 against fp32 attention. ``--impl fork`` is the same call with the kernel swapped for Difflet's
-fork (``ops_impl/mx_attention_kernel.py``, plan Task 3; ``--qk-mx`` / ``--pv-mx`` select its
-variant), scored against fp32 attention with both flags off and against the Task 1 mirror
+fork (``ops_impl/mx_attention_kernel.py``; ``--qk-mx`` / ``--pv-mx`` select its variant),
+scored against fp32 attention with both flags off and against the CPU reference
 (``mx_attention_reference`` on the bf16 inputs, the kernel's block membership) otherwise;
 ``--fork-vector-exp`` runs the fork's exp on the Vector Engine, as shipped attention_cte does
 (``allow_vector_exp=True``; the fork's default is the Scalar Engine). ``--impl routed`` is
 ``ops_impl.attention.attention`` itself under ``DIFFLET_ATTN_QUANT`` set to the variant its
-``--qk-mx`` / ``--pv-mx`` name (``qk``, ``pv``, ``qk+pv``; neither: ``qk``; plan Tasks 5 and 5b:
-the op the models call, with the ScalarE exp), scored against that variant's mirror.
+``--qk-mx`` / ``--pv-mx`` name (``qk``, ``pv``, ``qk+pv``; neither: ``qk``): the op the models
+call, with the ScalarE exp, scored against that variant's CPU reference.
 ``--cte-no-vector-exp`` is ``--impl cte`` with attention_cte's ``allow_vector_exp=False`` (the
-exp on ScalarE, not VectorE), scored against fp32 attention (plan Task 4-pre, ruling BR18).
+exp on ScalarE, not VectorE), scored against fp32 attention.
 ``--impl constmax`` (unbounded shapes only) is the unbounded call on nkilib's experimental
 ``attention_const_max``, shipped and unmodified, bf16: exp straight from MM1's PSUM with a constant
 max (``softmax_max_for``: its docstring's Gumbel estimate at score std 1, kept under ``--peak``),
-row sums from MM2 over [V | 1]; scored against fp32 attention, with the output's inf/NaN count
-(ruling BR24).
+row sums from MM2 over [V | 1]; scored against fp32 attention, with the output's inf/NaN count.
 
-Time: the compiled region from bf16 q, k, v (and the int32 bounds) to the bf16 output, measured
-as evidence section 4c timed kernels: one warm call, then ``--calls`` (default 20) calls and one
-sync, in each of ``--runs`` worker processes (a fresh runtime each); 20 vs 40 calls shows whether
-the host's dispatch is hidden at the ~1 ms rows (ruling BR13). The JSON has every run's ms per call, their
-median and the spread (max - min) / median: the denominators of the plan's gates G1/G2.
+Time: the compiled region from bf16 q, k, v (and the int32 bounds) to the bf16 output: one warm
+call, then ``--calls`` (default 20) calls and one sync, in each of ``--runs`` worker processes (a
+fresh runtime each); 20 vs 40 calls shows whether the host's dispatch is hidden at the ~1 ms rows.
+The JSON has every run's ms per call, their median and the spread (max - min) / median.
 
 Accuracy: the first worker saves the device output (``<out>.out.pt``); the host evaluates the
-reference one head at a time (ruling BR8: a head of ``wan_81f`` is ~6 section-sized fp32
-temporaries, ~6.4 GB) and reports rel L2 and cosine (float64) per head and overall.
+reference one head at a time (a head of ``wan_81f`` is ~6 section-sized fp32 temporaries,
+~6.4 GB) and reports rel L2 and cosine (float64) per head and overall.
 
 Inputs: q, k, v ~ N(0, 1) in bf16 from seed 0, scale ``d ** -0.5`` (the flat case: scores std ~1);
-``--peak F`` multiplies q and k by F (2: scores std ~4, the peaked case of ruling BR11). A bounded row attends keys
+``--peak F`` multiplies q and k by F (2: scores std ~4, the peaked case). A bounded row attends keys
 ``[0, valid_k)`` from every query, the models' key-padding bounds; ``valid_k`` (shapes.json) is
 the image tokens plus half the text plus one, never a multiple of 32. attention_cte masks with
 range-select, never skipping a tile, so the bound values do not change its time.
 
-Device rule (ruling BR4): ``NEURON_RT_VISIBLE_CORES`` must name one logical core; each worker
+Device rule: ``NEURON_RT_VISIBLE_CORES`` must name one logical core; each worker
 checks its device (core // 4) is idle by ``fuser`` just before opening it, else stops. Pin the
 CPU set with ``taskset`` around the whole command.
 """
@@ -100,7 +97,7 @@ def make_inputs(row: dict, peak: float = 1.0):
 
 def reference(row: dict, q, k, v, bounds, h: int, *, qk_mx: bool = False,
               pv_mx: bool = False) -> torch.Tensor:
-    """Head ``h``'s attention, ``[s, d]``: fp32 with both flags off, else the Task 1 mirror of the
+    """Head ``h``'s attention, ``[s, d]``: fp32 with both flags off, else the CPU reference of the
     fork (bf16 inputs as the kernel loads them, its MX block membership). The bounded path takes
     scale 1.0, so q is scaled in fp32 first (and, mirroring, rounded to bf16 as
     ``_flash_attention_bounded`` does)."""
@@ -210,7 +207,7 @@ def use_fork(*, qk_mx: bool, pv_mx: bool, vector_exp: bool = False) -> None:
     ``qk_mx`` the torch side smooths K first (``smooth_keys``, inside the compiled region, so its
     time counts): on the unbounded path right before the kernel, on the bounded path before
     ``_flash_attention_bounded`` pads K with zeros, so the mean is over the call's real keys, as
-    Task 5's op (``--impl routed``) does it."""
+    the routed op (``--impl routed``) does it."""
     from torch_neuronx import wrap_nki
 
     from difflet.backends.neuron.ops_impl import attention as attn
@@ -270,8 +267,8 @@ def worker(args, row: dict) -> None:
     os.environ["DIFFLET_ATTN_QUANT"] = switch  # read once, at ops_impl.attention's import
     os.environ.setdefault("DIFFLET_COMPILE_CACHE", "/mnt/nvme/difflet-mxattn/probe/cache")
     # every kernel input is a call argument, so the NKI trace cache is safe for nkilib's kernel
-    # (compile.py); the fork compiles uncached unless DIFFLET_NKI_TRACE_CACHE=1 (ruling BR12;
-    # the cache does retrace after an edit to the fork's file: task-3a report)
+    # (compile.py); the fork compiles uncached unless DIFFLET_NKI_TRACE_CACHE=1 (the cache
+    # does retrace after an edit to the fork's file)
     os.environ.setdefault("DIFFLET_NKI_TRACE_CACHE", "0" if args.impl == "fork" else "1")
     from difflet.backends import get_backend
     from difflet.pipeline.parallel_config import DiffletParallelConfig
@@ -361,7 +358,7 @@ def main(argv: list[str] | None = None) -> int:
     torch.set_num_threads(len(os.sched_getaffinity(0)))
     q, k, v, bounds = make_inputs(row, args.peak)
     device = torch.load(output_path(args.out)).float()
-    # routed without a flag: qk (Task 5's arm)
+    # routed without a flag: qk
     flags = dict(qk_mx=args.qk_mx or (args.impl == "routed" and not args.pv_mx), pv_mx=args.pv_mx)
     overall, heads = compare(device, lambda h: reference(row, q, k, v, bounds, h, **flags),
                              row["bh"])

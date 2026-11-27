@@ -243,14 +243,14 @@ def test_each_key_dumps_one_step_at_its_shape_and_captures_its_blocks_as_four_wo
         assert (_flag(argv, "--height"), _flag(argv, "--width"), _flag(argv, "--num-frames")) == (
             height, width, frames)
         assert ("--quant" in argv) == (arm == "mxfp8") and _flag(argv, "--quant") in (None, "mxfp8")
-        cache = "difflet-cache-fp8" if key == "qwen_image" else "difflet-cache-video"  # R7
+        cache = "difflet-cache-fp8" if key == "qwen_image" else "difflet-cache-video"
         assert Path(_flag(argv, "--cache-dir")).name == cache
         assert gen["env"] == {"NEURON_RT_VISIBLE_CORES": "12-15",
                               "NEURON_RT_INSPECT_DEVICE_PROFILE": "1", "DIFFLET_ATTN_QUANT": None}
         captures = [ln["argv"] for ln in x if ln["argv"][0] == "capture"]
         assert len(captures) == blocks
-        # capture 1200 s; each block view 2700 s (ruling R8: HV1.5's took 481-555 s); rank 0's
-        # system view 900 s; each killed 60 s after its signal if it ignores it (ruling R9)
+        # capture 1200 s; each block view 2700 s (HV1.5's took 481-555 s); rank 0's
+        # system view 900 s; each killed 60 s after its signal if it ignores it
         assert {tuple(ln["parent"]) for ln in x if ln["argv"][0] == "capture"} == {
             ("timeout", "-k", "60", "1200")}
         block_views = [ln for ln in x if ln["argv"][0] == "view" and "-n" in ln["argv"]]
@@ -258,7 +258,7 @@ def test_each_key_dumps_one_step_at_its_shape_and_captures_its_blocks_as_four_wo
         assert {tuple(ln["parent"]) for ln in block_views} == {("timeout", "-k", "60", "2700")}
         [system_view] = [ln for ln in x if ln["argv"][0] == "view" and "-d" in ln["argv"]]
         assert tuple(system_view["parent"]) == ("timeout", "-k", "60", "900")
-        # HV1 without the DGE notifications from the start (ruling R23: its 225-235 MB blocks
+        # HV1 without the DGE notifications from the start (its 225-235 MB blocks
         # overflow the notification queue with them); every other key with them
         dge = key != "hunyuan_video_L"
         for c in captures:
@@ -367,7 +367,7 @@ def test_a_failing_fuser_reads_as_busy_never_idle(tmp_path):
 
 @needs_tools
 def test_two_lanes_never_capture_at_the_same_time(tmp_path):
-    """Ruling R17: one `neuron-explorer capture` at a time host-wide among our lanes (a capture
+    """One `neuron-explorer capture` at a time host-wide among our lanes (a capture
     lock); two FLUX lanes start together, each capture takes 0.5 s."""
     env = {"CAPTURE_LOCK": str(tmp_path / "capture.lock"), "SPANS": str(tmp_path / "spans"),
            "FAKE_CAPTURE_S": "0.5"}
@@ -393,7 +393,7 @@ def _max_overlap(spans: list[tuple[float, float]]) -> int:
 
 @needs_tools
 def test_at_most_four_heavy_dumps_run_at_once_and_light_ones_never_wait(tmp_path):
-    """Ruling R20: a compile inside a heavy key's dump (HV1 544x960x129, Wan 81f, HV1.5 121f)
+    """A compile inside a heavy key's dump (HV1 544x960x129, Wan 81f, HV1.5 121f)
     must not run 13-wide. Seven heavy lanes and two light ones start together, each dump 2 s;
     the slots are held for the dump only."""
     heavy = [(k, a) for k in ("hunyuan_video_L", "wan21_official", "wan22_official")
@@ -442,7 +442,7 @@ def test_dropped_system_events_fail_the_lane_only_on_rank_0(tmp_path, pid, statu
 @pytest.mark.parametrize("steps, status", [(1, "DONE"), (2, "FAILED system profile: ")])
 def test_a_dump_that_ran_another_step_count_than_the_lane_fails_before_any_capture(
         tmp_path, steps, status):
-    """Ruling R9: the per-step numbers divide by the lane's step count; HunyuanVideo-1.5's
+    """The per-step numbers divide by the lane's step count; HunyuanVideo-1.5's
     orchestrator prints the steps it ran (line format of the 2026-11-13 smoke's dump.log)."""
     line = f"[hv15] request 0: denoise 162.5 s, {steps} steps, median 162527 ms (first 162527 ms)"
     done, arm_dir, _, x, _ = _capture(tmp_path, "hv15_official", FAKE_STEP_LINE=line)
@@ -457,11 +457,11 @@ def test_a_dump_that_ran_another_step_count_than_the_lane_fails_before_any_captu
 
 @needs_tools
 def test_a_notification_queue_overflow_is_captured_again_without_dge_notifs(tmp_path):
-    """Ruling R22: HV1's 235 MB dual block overflowed the runtime's notification queue with
+    """HV1's 235 MB dual block overflowed the runtime's notification queue with
     --enable-dge-notifs (NRT_EXEC_SW_NQ_OVERFLOW, 2026-11-13); no runtime setting raises that
     queue (NEURON_RT_PROFILE_BUF_DMA_MB=1024 overflowed the same), so the block is captured again
     without the flag, its partial NTFFs deleted first, and source.json says so. HV1 now starts
-    without it (ruling R23); the retry stays for any other key, here FLUX's two blocks."""
+    without it; the retry stays for any other key, here FLUX's two blocks."""
     done, arm_dir, _, x, _ = _capture(tmp_path, "flux", FAKE_NQ_OVERFLOW="1")
     assert done.returncode == 0, done.stderr
     assert _status(arm_dir) == "DONE"
@@ -480,7 +480,7 @@ def _opts(argv: list[str]) -> dict[str, str]:
 
 @needs_tools
 def test_neffs_that_differ_per_rank_are_replayed_one_worker_per_rank(tmp_path):
-    """Ruling R21: LTX-2 and Wan compile another block NEFF on every rank (2026-11-13 run, ltx_2
+    """LTX-2 and Wan compile another block NEFF on every rank (2026-11-13 run, ltx_2
     bf16: 6,105,602 / 6,103,355 / 6,103,814 / 6,103,754 B, four sha256). The replay runs one
     process per worker, worker r on rank r's NEFF and logical core 4d+r, one root communicator;
     worker 0 is profiled and analyzed."""
@@ -622,7 +622,7 @@ def test_hv15_mxfp8_is_refused_naming_the_pair(tmp_path):
                                              ("hv15_official", "attn", (None, "qk+pv"))])
 def test_the_attention_arms_dump_with_attn_quant_and_keep_the_forks_blocks(tmp_path, key, arm,
                                                                          flags):
-    """The MXFP8 attention plan's Task 6: `both` = --quant mxfp8 --attn-quant qk+pv, `attn` =
+    """The attention arms: `both` = --quant mxfp8 --attn-quant qk+pv, `attn` =
     --attn-quant qk+pv alone; every attention row then comes from Difflet's fork, which counts as
     the attention kernel; CAPTURE_CACHE replaces the key's root cache."""
     blocks = TABLE[key][3]
@@ -720,7 +720,7 @@ def test_system_profile_counts_the_step_not_the_warmup(tmp_path, steps):
     assert s["blocks"] == ["neff_11_vnc_0.neff"]
 
 
-#: The dump's own step lines (ruling R9): HunyuanVideo-1.5's orchestrator prints the steps it ran;
+#: The dump's own step lines: HunyuanVideo-1.5's orchestrator prints the steps it ran;
 #: the torchrun and FLUX orchestrators print the median of the step intervals and their count
 #: (steps - 1), only when there are two steps or more (Qwen-Image's 2-step smoke, 2026-11-13).
 HV15_LINE = "[hv15] request 0: denoise 162.5 s, {n} steps, median 162527 ms (first 162527 ms)"
