@@ -177,6 +177,11 @@ class MiniMaxH3TPAttnProcessor:
                 query_length=query_length,
             )
             kwargs.update(bound_min=bound_min, bound_max=bound_max)
+        # --attention const-max (neuron): a block whose layer passes its table's gap rule
+        # carries its score sigma (NeuronMiniMaxH3TraceModule); the others stay on cte.
+        sigma = getattr(attn, "constmax_sigma", None)
+        if sigma is not None:
+            kwargs["constmax_sigma"] = sigma
         output = self._attention(
             q.reshape(batch_size * num_heads, query_length, head_dim),
             k.reshape(batch_size * num_heads, key_length, head_dim),

@@ -326,9 +326,16 @@ def test_const_max_is_served_for_every_native_model(on_neuron, model_id):
     assert _attention_profile(model_id, "cte").attention is None  # cte is the default
 
 
-def test_const_max_is_refused_without_a_table(on_neuron):
+def test_minimax_h3_serves_const_max_through_its_own_adapter(on_neuron):
+    assert _attention_profile("MiniMaxAI/MiniMax-H3", "const-max").attention == "const-max"
+
+
+def test_const_max_is_refused_without_a_table(on_neuron, monkeypatch):
+    from difflet.serving import options
+
+    monkeypatch.setattr(options, "_CONSTMAX_SERVING_MODELS", frozenset({"wan"}))
     with pytest.raises(DiffletServingError, match="const-max table"):
-        _attention_profile("MiniMaxAI/MiniMax-H3", "const-max")
+        _attention_profile(FLUX, "const-max")
 
 
 def test_const_max_is_refused_off_the_native_backend(monkeypatch):

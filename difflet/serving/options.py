@@ -176,8 +176,11 @@ _MXFP8_SERVING_MODELS = frozenset({"flux", "qwen_image", "wan", "hunyuan_video",
 
 # --attention const-max: the models served natively (difflet.backends.neuron.serving) that
 # have a committed const-max table (difflet/models/<model>/attn_constmax.json; the CLI's
-# CONSTMAX_MODELS). MiniMax-H3 has none yet.
-_CONSTMAX_SERVING_MODELS = frozenset({"flux", "qwen_image", "wan", "hunyuan_video", "ltx_2"})
+# CONSTMAX_MODELS), and MiniMax-H3, whose own adapter (difflet.serving.models.minimax_h3) exports the
+# variable the same way.
+_CONSTMAX_SERVING_MODELS = frozenset(
+    {"flux", "qwen_image", "wan", "hunyuan_video", "ltx_2", "minimax_h3"}
+)
 
 
 # The --cp-mode values `difflet serve` accepts. Every model keeps the two modes serving has

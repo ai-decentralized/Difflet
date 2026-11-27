@@ -373,7 +373,7 @@ def _add_serve_profile_flags(p: argparse.ArgumentParser) -> None:
         help="DiT attention kernel of this serving profile on the native neuron backend "
         "(default: cte). 'const-max': nkilib attention_const_max with each layer's committed "
         "score bound for the layers its table allows (the rest stay on cte); FLUX.1-dev, "
-        "Qwen-Image, Wan 2.1, HunyuanVideo and LTX-2. Set for every rank before it loads; "
+        "Qwen-Image, Wan 2.1, HunyuanVideo, LTX-2 and MiniMax-H3. Set for every rank before it loads; "
         f"do not export {CONSTMAX_ENV} yourself.",
     )
     p.add_argument(
@@ -553,6 +553,7 @@ CONSTMAX_MODELS = frozenset({
     "Wan-AI/Wan2.2-T2V-A14B-Diffusers",
     "hunyuanvideo-community/HunyuanVideo",
     "hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v",
+    "MiniMaxAI/MiniMax-H3",
 })
 
 
