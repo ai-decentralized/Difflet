@@ -167,6 +167,84 @@ def test_profile_options_native_serving_does_not_run(on_neuron, field, value):
         native.refuse_unsupported_profile(profile, native._spec("wan"))
 
 
+# ------------------------------------------------------------------ CFG parallel
+
+
+def _cfg_profile(model_id: str):
+    options = ServeOptions(model_id=model_id, tp_degree=2, cfg_parallel=True)
+    return resolve_serving_model(options).profile
+
+
+@pytest.mark.parametrize("model_id", [WAN21, LTX2])
+def test_cfg_parallel_is_served_natively_for_true_cfg_models(on_neuron, model_id):
+    profile = _cfg_profile(model_id)
+
+    assert profile.parallel.cfg_parallel_enabled is True
+    assert profile.world_size == 4  # TP2 x CFG2: one device
+    native.refuse_unsupported_profile(profile, native._spec(profile.model_type))
+
+
+@pytest.mark.parametrize("model_id,reason", [
+    (FLUX, "guidance-distilled"), (HV, "guidance-distilled"),
+    ("MiniMaxAI/MiniMax-H3", "guidance-distilled"), (QWEN, "planned"),
+])
+def test_cfg_parallel_is_refused_where_there_is_no_cfg_branch(on_neuron, model_id, reason):
+    with pytest.raises(DiffletServingError, match=reason):
+        _cfg_profile(model_id)
+
+
+def test_cfg_parallel_stays_refused_off_the_native_backend(monkeypatch):
+    monkeypatch.setattr(model_registry, "current_backend", lambda: "trainium")
+    monkeypatch.setattr("difflet.backends.registry.current_backend", lambda: "trainium")
+
+    with pytest.raises(DiffletServingError, match="true-CFG request path"):
+        _cfg_profile(WAN21)
+
+
+def test_cfg_parallel_takes_one_rank_per_core_and_enters_the_identity(on_neuron, monkeypatch):
+    monkeypatch.setenv("NEURON_RT_VISIBLE_CORES", "8-11")
+    seen = []
+    real = native.CompileArtifactIdentity.from_cache_inputs
+    monkeypatch.setattr(native.CompileArtifactIdentity, "from_cache_inputs",
+                        staticmethod(lambda inputs: seen.append(dict(inputs)) or real(inputs)))
+
+    cfg_plan = native.native_runtime_plan(_cfg_profile(WAN21), native._spec("wan"), "abc")
+    plain = dataclasses.replace(_cfg_profile(WAN21),
+                                parallel=dataclasses.replace(_cfg_profile(WAN21).parallel,
+                                                             cfg_parallel_enabled=False))
+    plain_plan = native.native_runtime_plan(plain, native._spec("wan"), "abc")
+
+    assert cfg_plan.allocations[0].world_size == 4
+    assert cfg_plan.environment.available_core_ids == (8, 9, 10, 11)
+    assert seen[0]["cfg_parallel"] is True
+    assert "cfg_parallel" not in seen[1] and "sp" not in seen[1] and "cp_mode" not in seen[1]
+    assert cfg_plan.profile_identity != plain_plan.profile_identity
+
+
+def _validator(profile, monkeypatch):
+    runtime = SimpleNamespace(profile=profile, source=SimpleNamespace(pinned_model_path="/none"))
+    validator = native.NeuronServingRequestValidator(runtime)
+    monkeypatch.setattr(validator, "_validate_prompts", lambda request, video: None)
+    return validator
+
+
+def test_ltx2_under_cfg_parallel_refuses_a_request_without_cfg(on_neuron, monkeypatch):
+    profile = _cfg_profile(LTX2)
+    validator = _validator(profile, monkeypatch)
+
+    validator.validate(_request(LTX2, profile))  # guidance 3.0
+    no_cfg = dataclasses.replace(_request(LTX2, profile), guidance_scale=1.0)
+    with pytest.raises(DiffletServingError, match="guidance_scale must be > 1"):
+        validator.validate(no_cfg)
+
+
+def test_wan_under_cfg_parallel_keeps_guidance_one_valid(on_neuron, monkeypatch):
+    profile = _cfg_profile(WAN21)
+
+    _validator(profile, monkeypatch).validate(
+        dataclasses.replace(_request(WAN21, profile), guidance_scale=1.0))
+
+
 @pytest.mark.parametrize("model_id", NATIVE_IDS)
 def test_default_profiles_pass_the_refusals(on_neuron, model_id):
     profile = _profile(model_id)  # HunyuanVideo's defaults CLIP to "host"

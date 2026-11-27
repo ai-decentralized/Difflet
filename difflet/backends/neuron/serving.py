@@ -35,7 +35,7 @@ from difflet.serving.engines.stage_pipeline import (
     require_exact_payload,
     stage_result,
 )
-from difflet.serving.errors import feature_not_supported
+from difflet.serving.errors import feature_not_supported, profile_mismatch
 from difflet.serving.options import CompilePolicy, DownloadPolicy
 from difflet.serving.orchestrators.base import resolve_hf_model_source
 from difflet.serving.types import (
@@ -301,6 +301,13 @@ def native_runtime_plan(profile: ServingProfile, spec: ModelSpec, source_id: str
     }
     if profile.num_frames is not None:
         inputs["num_frames"] = int(profile.num_frames)
+    # Additive only: a default layout keeps the identity it had before these axes were served.
+    if parallel.cfg_parallel_enabled:
+        inputs["cfg_parallel"] = True
+    if parallel.sp_enabled:
+        inputs["sp"] = True
+    if parallel.cp_mode != "gather_kv":
+        inputs["cp_mode"] = str(parallel.cp_mode)
     distributed = DistributedProcessEnvironment(1, 1, 0, 0)
     allocation = WorkerAllocationSpec(
         allocation_id=f"{spec.short_name}-neuron-resident",
@@ -381,6 +388,15 @@ class NeuronServingRequestValidator(GpuServingRequestValidator):
         if self.model_type == "wan" and video is not None and video.guidance_scale_2 is not None:
             raise feature_not_supported(
                 "guidance_scale_2 is not taken by Wan 2.1: it has one transformer")
+        if (self.model_type == "ltx_2" and self.runtime.profile.parallel.cfg_parallel_enabled
+                and float(request.guidance_scale) <= 1.0):
+            # The LTX-2 app refuses a call without CFG under CFG parallel (its DiT takes only
+            # the batch-2 pair); refuse the request here rather than fail it on the ranks. The
+            # audio guidance the app also checks defaults to guidance_scale, which serving
+            # does not override. Wan runs batch 2 either way, so guidance 1 stays valid there.
+            raise profile_mismatch(
+                "this LTX-2 server runs --cfg-parallel, which needs classifier-free guidance: "
+                "guidance_scale must be > 1")
 
 
 # --------------------------------------------------------------------- adapter
