@@ -9,8 +9,14 @@ the default `diffusers` profile, at 384x256, 9 frames and 24 fps. The CLI and HT
 matched the Python video at 27.16 dB and 31.74 dB PSNR against a 25 dB bar, two
 identical HTTP requests returned identical MP4s, and a request outside the server's
 profile got `400 profile_mismatch`. This run, like the audiovisual correctness and
-performance measurements below, precedes the submission extraction; the `--dp` and
-CFG-parallel runs used the current code.
+performance measurements below, precedes the submission extraction; the `--torch-compile`,
+`--dp` and CFG-parallel runs used the current code.
+
+With `--torch-compile` on one RTX PRO 6000 at the same shape and 40 steps, `difflet run`
+returned a tensor bit-identical to the compiled Python API's, the CLI and HTTP MP4s decoded
+to the frames that output gives through each writer, and Dynamo traced compiled graphs in
+both processes. With the default profile at that shape, compiled and eager output are
+bit-identical.
 
 Use BF16 and one resident shape, on one GPU or, with CFG-parallel, two. Height/width
 must be multiples of 32; frame count must be 8k+1. TP/CP/SP parallelism, quantization,

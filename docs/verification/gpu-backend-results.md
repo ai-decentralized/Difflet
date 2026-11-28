@@ -92,7 +92,10 @@ q/k RMSNorm took Wan's from 614 ms to 536 ms. Two GPUs: Wan `--cfg-parallel` 26.
 
 BF16 support passed 12 full-length accuracy cases and 24 timed-video checks
 at 320×512×61, 50 steps, guidance 6, seeds 0–2 on an RTX PRO 6000 Blackwell 96 GB.
-Public Python, CLI and resident HTTP checks passed in eager and compiled modes.
+Public Python, CLI and resident HTTP checks passed in eager and compiled modes. On the
+current code, `--torch-compile` output is bit-identical to stock Diffusers' eager output on
+seeds 0–2, at 64.2 s per warm request against 69.2 s eager, and `difflet run` and
+`difflet serve` return the compiled Python output exactly.
 Six matched eager pairs measured 65.626 s versus 67.300 s for the unmodified Omni
 Diffusers adapter on a controlled common runtime. The modified compiled control is
 supplementary; an official compiled comparison remains unavailable. See the

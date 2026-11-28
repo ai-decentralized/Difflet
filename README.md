@@ -124,8 +124,8 @@ see the per-model limits below.
 | Qwen-Image | ✅ image | ⚠️ image ³ | ✅ | ✅ | ✅ | — ⁴ | ❌ | ❌ |
 | Wan 2.2 | ✅ video | ✅ video | ✅ | ❌ | ⚠️ ⁵ | ✅ ⁶ | ❌ | ❌ |
 | Wan 2.1 ¹¹ | ✅ video | ✅ video | ✅ | ❌ | ⚠️ ⁵ | ✅ ⁶ | ❌ | ❌ |
-| HunyuanVideo (original) | ✅ video ⁷ | ✅ video ⁷ | ⚠️ execution observed ⁷ | ❌ | ⚠️ ⁵ | — ¹ | ❌ | ❌ |
-| LTX-2 | ✅ video ⁸ | ✅ video ⁸ | ⚠️ Python qualified ⁸ | ❌ | ⚠️ ⁵ | ✅ ¹² | ❌ | ❌ |
+| HunyuanVideo (original) | ✅ video ⁷ | ✅ video ⁷ | ✅ ⁷ | ❌ | ⚠️ ⁵ | — ¹ | ❌ | ❌ |
+| LTX-2 | ✅ video ⁸ | ✅ video ⁸ | ✅ ⁸ | ❌ | ⚠️ ⁵ | ✅ ¹² | ❌ | ❌ |
 | HunyuanVideo 1.5 | ✅ video ⁹ | ✅ video ⁹ | ✅ ⁹ | ❌ | ⚠️ ⁵ | ❌ | ❌ | ❌ |
 | MiniMax-H3 | ✅ video + audio ¹⁰ | ✅ video + audio ¹⁰ | ✅ | ❌ | ⚠️ ⁵ | — ¹⁰ | ❌ | ❌ |
 
@@ -146,12 +146,14 @@ TeaCache (adaptive), TAEF1, and `--host-vae` are refused on GPUs for these model
 6. Two GPUs under `torchrun`, `difflet run` only. Output is bit-identical to one GPU.
 7. Single-GPU BF16 support for `hunyuanvideo-community/HunyuanVideo`.
    Eager and compiled Python, CLI and HTTP generation were verified at 320×512×61,
-   50 steps on a 96 GB GPU. See the [HunyuanVideo CUDA guide](docs/verification/hunyuanvideo-cuda.md)
+   50 steps on a 96 GB GPU. With `--torch-compile` the output is bit-identical to stock
+   Diffusers' eager output, 7% faster than eager. See the [HunyuanVideo CUDA guide](docs/verification/hunyuanvideo-cuda.md)
    for usage, accuracy and benchmark limits. HunyuanVideo 1.5 is a separate model.
 8. LTX-2 single-GPU BF16 Python audiovisual generation passes eager/compiled correctness
    and performance checks on B200. The CLI and HTTP server return video without the audio
    track; in eager mode on an RTX PRO 6000 their MP4s matched the Python video at 27.2 dB and
-   31.7 dB PSNR. The opt-in profile requires explicit TP=1 and a pre-CUDA startup setting; see
+   31.7 dB PSNR, and with `--torch-compile` their output is identical to compiled Python's.
+   The opt-in profile requires explicit TP=1 and a pre-CUDA startup setting; see
    the [LTX-2 CUDA guide](docs/verification/ltx2-cuda.md).
 9. Single-GPU BF16 text-to-video for
    `hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v`, separate from the Trainium
