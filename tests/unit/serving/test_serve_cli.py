@@ -174,6 +174,19 @@ def test_difflet_serve_operational_controls_have_documented_defaults(monkeypatch
     assert options.api_key is None
 
 
+def test_difflet_serve_maps_attention(monkeypatch):
+    calls = []
+    monkeypatch.setattr("difflet.cli.serve.run", calls.append)
+    cli_main = importlib.import_module("difflet.cli.main")
+
+    cli_main.main(["serve", "--model-id", "black-forest-labs/FLUX.1-dev"])
+    cli_main.main(["serve", "--model-id", "black-forest-labs/FLUX.1-dev",
+                   "--attention", "const-max"])
+
+    assert options_from_args(calls[0]).attention is None
+    assert options_from_args(calls[1]).attention == "const-max"
+
+
 def test_difflet_serve_maps_optional_api_key_without_exposing_it_in_repr(monkeypatch):
     calls = []
     monkeypatch.setattr("difflet.cli.serve.run", calls.append)
