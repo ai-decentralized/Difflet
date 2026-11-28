@@ -41,19 +41,60 @@ _AUTH = '-H "Authorization: Bearer $DIFFLET_API_KEY"'
 #: The seed the page sends when its Seed field is empty, and the seed of the /info examples: the
 #: same prompt gives the same result unless the visitor picks another seed.
 DEFAULT_SEED = 42
+#: Per kind: the hint under the prompt box and the example buttons, (label, prompt) each. The
+#: video prompts are long on purpose: no rewrite model expands a short prompt here, and the video
+#: models (HunyuanVideo above all) follow a detailed one far better. Each stays under 150 words,
+#: inside every served video model's prompt budget.
 EXAMPLE_PROMPTS = {
-    "image": (
-        "a small red sailboat on a calm blue lake at sunrise",
-        "a cat sitting on a wooden bench in a sunlit park, shallow depth of field",
-        "a cozy coffee shop interior on a rainy evening, warm light, film photo",
-        "an astronaut riding a horse on the moon, highly detailed illustration",
-    ),
-    "video": (
-        "a red fox walking through fresh snow in a pine forest",
-        "a golden retriever running on a beach at sunset",
-        "a cat walking across a sunlit garden",
-        "waves crashing against a rocky coast, slow motion, cinematic",
-    ),
+    "image": {
+        "hint": "",
+        "prompts": tuple((p, p) for p in (
+            "a small red sailboat on a calm blue lake at sunrise",
+            "a cat sitting on a wooden bench in a sunlit park, shallow depth of field",
+            "a cozy coffee shop interior on a rainy evening, warm light, film photo",
+            "an astronaut riding a horse on the moon, highly detailed illustration",
+        )),
+    },
+    "video": {
+        "hint": ("Video models do much better with a long, detailed prompt: the subject and how it "
+                 "looks, what it does in order, the scene, the lighting and the camera."),
+        "prompts": (
+            ("Red fox in fresh snow",
+             "A cinematic, photorealistic wildlife shot of a red fox walking through fresh, deep "
+             "snow in a quiet pine forest. The fox has a thick russet-orange coat, a white chest, "
+             "black legs and a bushy white-tipped tail. It moves from left to right with slow, "
+             "careful steps, its paws sinking into the powdery snow and leaving a trail of prints, "
+             "head low and ears alert. Tall snow-covered pine trees stand in the soft-focus "
+             "background while light snowflakes drift down. Overcast morning light, cool blue "
+             "tones against the warm orange fur. The camera tracks the fox smoothly at eye level "
+             "with a shallow depth of field."),
+            ("Golden retriever at sunset",
+             "A cinematic slow-motion shot of a happy golden retriever running along a sandy "
+             "beach at sunset. The dog has a fluffy golden coat that ripples with each stride, "
+             "floppy ears bouncing and tongue out. It runs toward the camera along the wet sand "
+             "at the water's edge, splashing through shallow foam as small waves roll in behind "
+             "it. The low sun sits on the horizon, casting warm golden backlight, long shadows "
+             "and a glowing rim of light around the fur; the sky fades from orange to soft pink. "
+             "The camera tracks backward at a low angle with a shallow depth of field, "
+             "photorealistic."),
+            ("Cat in a sunlit garden",
+             "A photorealistic, cinematic shot of an orange tabby cat walking along a low stone "
+             "edge in a sunlit garden. The cat has a soft striped orange coat, white paws and "
+             "green eyes; its tail is raised as it steps forward calmly and glances around. "
+             "Around it are blooming lavender, yellow daisies and green leafy plants, with a "
+             "gravel path and a wooden fence softly blurred in the background. Bright "
+             "late-morning sunlight casts dappled shadows through the leaves. The camera follows "
+             "the cat slowly at its eye level, with a shallow depth of field and natural colors."),
+            ("Waves on a rocky coast",
+             "A cinematic slow-motion shot of powerful ocean waves crashing against dark, jagged "
+             "volcanic rocks on a rugged coastline. Turquoise water surges forward, rises and "
+             "explodes into white spray and foam that bursts high into the air, then pours back "
+             "down the rock faces in thin streams. Mist hangs over the water as the next wave "
+             "builds in the background. Overcast sky with soft, diffuse light and a cool "
+             "blue-gray palette. The camera holds a steady low-angle wide shot near the rocks, "
+             "catching fine droplets in sharp detail; photorealistic, dramatic and atmospheric."),
+        ),
+    },
 }
 _CSS = """
 :root { color-scheme: light dark; --bg: #ffffff; --panel: #f6f8fa; --fg: #1f2328;
@@ -266,13 +307,15 @@ function renderLimits() {
 function renderExamples() {
   const box = $('examples');
   box.innerHTML = '';
-  for (const text of EXAMPLES[kind]) {
+  for (const [label, text] of EXAMPLES[kind].prompts) {
     const b = document.createElement('button');
     b.type = 'button';
-    b.textContent = text;
+    b.textContent = label;
+    b.title = text;
     b.onclick = () => { $('prompt').value = text; };
     box.appendChild(b);
   }
+  $('prompt-hint').textContent = EXAMPLES[kind].hint;
 }
 
 function selectTab(next) {
@@ -484,6 +527,7 @@ def render_page(config: FleetConfig | None, statuses: Mapping[str, str], *,
 <div class="hint warn" id="wait" aria-live="polite"></div>
 <label for="prompt">Prompt</label>
 <textarea id="prompt" placeholder="Describe what to generate"></textarea>
+<div class="hint" id="prompt-hint"></div>
 <label>Examples</label>
 <div class="examples" id="examples"></div>
 <details class="advanced"><summary>Advanced</summary>
