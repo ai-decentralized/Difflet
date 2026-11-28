@@ -369,12 +369,15 @@ denoise time. Three modes are exposed on `difflet generate` / `difflet run`:
 The modes are mutually exclusive. The latent-metrics helpers (`difflet/pipeline/latent_metrics.py`)
 support a CPU-shadow gate for calibrating skip decisions against a reference trajectory.
 
-**In `difflet serve`.** The two probe-free modes are accepted for Qwen-Image and Wan serving
-(`--teacache-cadence N` / `--teacache-online-delta ALPHA`); they carry no compile-cache
-identity, so they can be toggled on a resident profile without a recompile. Adaptive
-`--teacache-speedup` remains Flux/Qwen-Image image serving only. HunyuanVideo, LTX-2 and Flux
-serving accept the probe-free pair on the TPU backend only (Flux's Trainium pipeline is the
-legacy NxDI fork with adaptive TeaCache only, so the flags are refused there rather than ignored).
+**In `difflet serve`.** The two probe-free modes (`--teacache-cadence N` /
+`--teacache-online-delta ALPHA`) are served on the TPU backend and on the native neuron backend
+(`DIFFLET_BACKEND=neuron`) for FLUX, Qwen-Image, Wan 2.1, HunyuanVideo and LTX-2: the native
+resident app is the pipeline `difflet generate` runs, which takes the same two flags and resets
+its controller at the start of every request. They carry no compile-cache identity, so they can
+be toggled on a resident profile without a recompile. The AoT Trainium adapters still refuse
+them (Flux's Trainium pipeline is the legacy NxDI fork with adaptive TeaCache only), and so does
+MiniMax-H3, which has no TeaCache controller. Adaptive `--teacache-speedup` remains Flux/Qwen-Image
+image serving only and is refused on the native neuron backend.
 
 Two TPU host-side rules learned the hard way: keep every host component (text encoders,
 connectors, audio VAE, vocoder) in **fp32** — bf16 is emulated on the EPYC host and runs 100×
