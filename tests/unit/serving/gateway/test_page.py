@@ -7,7 +7,8 @@ from pathlib import Path
 import pytest
 
 from difflet.serving.gateway.fleet import FleetConfig, FleetEntry, Limits, Wait
-from difflet.serving.gateway.page import _duration, _json, render_info, render_page
+from difflet.serving.gateway.page import (EXAMPLE_PROMPTS, _duration, _json, render_info,
+                                          render_page)
 
 FLUX = "black-forest-labs/FLUX.1-dev"
 HV = "hunyuanvideo-community/HunyuanVideo"
@@ -64,6 +65,20 @@ def test_page_leaves_the_model_table_and_api_examples_to_info():
     page = render_page(_config(_flux(), _hv()), {FLUX: "ready"})
     assert "<table" not in page and "Example requests" not in page and "curl " not in page
     assert "Models, status and API examples" not in page
+
+
+def test_video_examples_are_long_labelled_prompts():
+    video = EXAMPLE_PROMPTS["video"]
+    assert video["hint"]
+    for label, prompt in video["prompts"]:
+        assert len(label.split()) <= 5
+        assert 60 <= len(prompt.split()) <= 150  # detailed, inside every video prompt budget
+    assert not EXAMPLE_PROMPTS["image"]["hint"]
+    assert all(label == prompt for label, prompt in EXAMPLE_PROMPTS["image"]["prompts"])
+    page = render_page(_config(_flux(), _hv()), {FLUX: "ready"})
+    embedded = page.split('id="example-prompts">', 1)[1].split("</script>", 1)[0]
+    assert json.loads(embedded) == json.loads(json.dumps(EXAMPLE_PROMPTS))
+    assert '<div class="hint" id="prompt-hint"></div>' in page
 
 
 def test_page_shows_the_queue_line():
