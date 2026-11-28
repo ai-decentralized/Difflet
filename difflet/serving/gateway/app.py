@@ -19,6 +19,7 @@ import re
 from collections import deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from email.message import Message
 from time import monotonic
 from typing import Awaitable, Callable
 from urllib.parse import quote, urlencode
@@ -33,7 +34,7 @@ from difflet.serving.auth import ApiKeyAuthenticationMiddleware
 from difflet.serving.errors import DiffletServingError
 from difflet.serving.gateway.fleet import FleetConfig, FleetEntry
 from difflet.serving.gateway.launcher import read_pid
-from difflet.serving.gateway.page import (_duration, model_defaults, render_info, render_page,
+from difflet.serving.gateway.page import (_duration, entry_defaults, render_info, render_page,
                                           ui_models)
 from difflet.serving.gateway.status import Status, fleet_status
 from difflet.serving.openai.api_server import _run_until_disconnect
@@ -198,7 +199,11 @@ def create_gateway_app(
     @app.post("/v1/videos/sync")
     async def create_video(request: Request):
         body = await _read_body(request)
-        entry = route(await _form_model(request, body), "video")
+        model, fields = await _form_model(request, body)
+        entry = route(model, "video")
+        if entry.default_negative_prompt is not None and "negative_prompt" not in fields:
+            body = _with_form_field(request.headers.get("content-type", ""), body,
+                                    "negative_prompt", entry.default_negative_prompt)
         return await submit(request, entry, request.url.path, body,
                             hold=request.url.path.endswith("/sync"))
 
@@ -263,7 +268,7 @@ def create_gateway_app(
     def each(entry: FleetEntry) -> float | None:
         """Seconds one request takes on ``entry`` at its default steps (measured), None without
         an estimate."""
-        steps = model_defaults(entry.model_id)[0]
+        steps = entry_defaults(entry)[0]
         if entry.estimate is None or not steps:
             return None
         return entry.estimate[0] + entry.estimate[1] * steps
@@ -437,16 +442,32 @@ async def _read_body(request: Request) -> bytes:
     return bytes(body)
 
 
-async def _form_model(request: Request, body: bytes):
-    """The ``model`` field of a form body that was already read (None when there is none)."""
+async def _form_model(request: Request, body: bytes) -> tuple[str | None, frozenset[str]]:
+    """The ``model`` field of a form body that was already read (None when there is none), and
+    the names of all its fields."""
     async def receive():
         return {"type": "http.request", "body": body, "more_body": False}
 
     try:
         async with StarletteRequest(request.scope, receive).form() as form:
-            return form.get("model")
+            return form.get("model"), frozenset(form.keys())
     except Exception:  # a malformed form names no model; the caller answers model_required
-        return None
+        return None, frozenset()
+
+
+def _with_form_field(content_type: str, body: bytes, name: str, value: str) -> bytes:
+    """``body`` (a form that parsed) with one more text field, in its own encoding."""
+    message = Message()
+    message["content-type"] = content_type
+    if message.get_content_type() == "application/x-www-form-urlencoded":
+        return body + (b"&" if body else b"") + urlencode({name: value}).encode()
+    boundary = message.get_param("boundary")
+    end = body.rfind(f"--{boundary}--".encode()) if boundary else -1
+    if end < 0:
+        return body
+    part = (f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n'
+            f"{value}\r\n").encode()
+    return body[:end] + part + body[end:]
 
 
 async def _read_raw(resp: httpx.Response) -> bytes:

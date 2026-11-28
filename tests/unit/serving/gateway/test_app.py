@@ -171,6 +171,48 @@ def test_videos_sync_streams_bytes(tmp_path, backends):
     assert resp.headers["content-type"] == "video/mp4" and resp.headers["x-model"] == HV
 
 
+def _negative_config(tmp_path):
+    return FleetConfig(host="0.0.0.0", port=8000, runs_dir=tmp_path, models=(
+        FleetEntry(HV, 3, 8103, Path("/c/3"), ("--shapes", "320x512x61"),
+                   default_negative_prompt="static, overexposed"),
+        FleetEntry(LTX, 4, 8104, Path("/c/4"),
+                   ("--height", "512", "--width", "768", "--num-frames", "121"))))
+
+
+async def _forwarded_form(seen: httpx.Request) -> dict:
+    async def receive():
+        return {"type": "http.request", "body": seen.content, "more_body": False}
+
+    scope = {"type": "http", "method": "POST", "path": "/",
+             "headers": [(b"content-type", seen.headers["content-type"].encode())]}
+    async with Request(scope, receive).form() as form:
+        return {k: (v if isinstance(v, str) else (v.filename, await v.read()))
+                for k, v in form.multi_items()}
+
+
+def test_video_form_gets_the_entry_negative_prompt(tmp_path, backends):
+    for port in (8103, 8104):  # sync: no async job for the client-busy check to look up
+        backends.routes[(port, "POST", "/v1/videos/sync")] = httpx.Response(200, content=b"mp4")
+    client = _client(tmp_path, backends, config=_negative_config(tmp_path))
+
+    def post(**kwargs):
+        assert client.post("/v1/videos/sync", **kwargs).status_code == 200
+        return backends.seen[-1]
+
+    multipart, ctype = _multipart([("model", HV), ("prompt", "a fox")],
+                                  files=[("input_reference", "k.png", b"\x89PNG")])
+    seen = post(content=multipart, headers={"Content-Type": ctype})
+    assert asyncio.run(_forwarded_form(seen)) == {
+        "model": HV, "prompt": "a fox", "input_reference": ("k.png", b"\x89PNG"),
+        "negative_prompt": "static, overexposed"}
+    seen = post(data={"model": HV, "prompt": "a fox"})  # urlencoded
+    assert asyncio.run(_forwarded_form(seen))["negative_prompt"] == "static, overexposed"
+    sent, ctype = _multipart([("model", HV), ("prompt", "a fox"), ("negative_prompt", "")])
+    assert post(content=sent, headers={"Content-Type": ctype}).content == sent  # the client's own
+    sent, ctype = _multipart([("model", LTX), ("prompt", "a fox")])  # LTX-2: no default here
+    assert post(content=sent, headers={"Content-Type": ctype}).content == sent
+
+
 def test_backend_error_passed_through(tmp_path, backends):
     error = {"error": {"message": "queue is full", "type": "server_error", "code": "queue_full"}}
     backends.routes[(8100, "POST", "/v1/chat/completions")] = httpx.Response(429, json=error)
@@ -607,6 +649,27 @@ def test_client_busy_while_its_async_video_job_is_queued(tmp_path, backends, clo
     backends.routes[listing] = httpx.Response(200, json={"data": [
         {"id": "video_gen_a", "status": "queued"}]})
     assert client.post("/v1/videos", content=ltx, headers=me).status_code == 200
+
+
+@pytest.mark.parametrize("default_steps,refused", [(None, False), (100, True)])
+def test_the_wait_threshold_assumes_the_fleet_default_steps(tmp_path, backends, default_steps,
+                                                            refused):
+    # HunyuanVideo's own default is 50 steps: 3 queued x (10 + 1.0 x 50) = 180 s < 250 s, but
+    # at the fleet's 100 steps 3 x 110 = 330 s > 250 s.
+    assert model_defaults(HV)[0] == 50
+    config = FleetConfig(host="0.0.0.0", port=8000, runs_dir=tmp_path, models=(
+        FleetEntry(HV, 3, 8103, Path("/c/3"), ("--shapes", "320x512x61"), estimate=(10, 1.0),
+                   default_steps=default_steps),), wait=Wait(1, 1, 250))
+    backends.routes[(8103, "GET", "/v1/videos")] = httpx.Response(200, json={"data": [
+        {"id": f"video_gen_{i}", "status": "queued"} for i in range(3)]})
+    backends.routes[(8103, "POST", "/v1/videos")] = httpx.Response(200, json={"id": "video_gen_x"})
+    body, ctype = _multipart([("model", HV), ("prompt", "x")])
+
+    resp = _client(tmp_path, backends, config=config).post(
+        "/v1/videos", content=body, headers={"content-type": ctype})
+
+    assert (resp.status_code == 429 and _code(resp) == "model_busy") if refused else (
+        resp.status_code == 200)
 
 
 def test_model_busy_names_shorter_waits(tmp_path, backends):

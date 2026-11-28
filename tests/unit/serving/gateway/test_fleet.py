@@ -92,6 +92,53 @@ def test_bad_estimate_rejected(tmp_path, estimate):
         _load(tmp_path, _entry(estimate=estimate))
 
 
+def test_request_defaults_loaded(tmp_path):
+    (entry,) = _load(tmp_path, _entry(defaults={"steps": 50, "guidance": 3.5})).models
+    assert (entry.default_steps, entry.default_guidance) == (50, 3.5)
+    (entry,) = _load(tmp_path, _entry(defaults={"steps": 50})).models
+    assert (entry.default_steps, entry.default_guidance) == (50, None)
+    (entry,) = _load(tmp_path, _entry()).models
+    assert (entry.default_steps, entry.default_guidance) == (None, None)
+
+
+@pytest.mark.parametrize("defaults", [{"steps": 0}, {"steps": 201}, {"steps": "50"},
+                                      {"guidance": -1}, {"guidance": True},
+                                      {"guidance": "high"}, {"steps": 50, "cfg": 2}])
+def test_bad_request_defaults_rejected(tmp_path, defaults):
+    with pytest.raises(FleetConfigError, match="defaults"):
+        _load(tmp_path, _entry(defaults=defaults))
+
+
+def test_negative_prompt_default_loaded_for_a_video_model(tmp_path):
+    hv = _entry(model_id=HV, serve_args=("--height", "320", "--width", "512", "--num-frames", "61"),
+                defaults={"negative_prompt": "static, blurry"})
+    (entry,) = _load(tmp_path, hv).models
+    assert entry.default_negative_prompt == "static, blurry"
+    assert _load(tmp_path, _entry()).models[0].default_negative_prompt is None
+
+
+@pytest.mark.parametrize("entry, match", [
+    (_entry(defaults={"negative_prompt": "blurry"}), "only a video model's"),
+    (_entry(model_id="MiniMaxAI/MiniMax-H3",
+            serve_args=("--height", "256", "--width", "448", "--num-frames", "124"),
+            defaults={"negative_prompt": "blurry"}), "takes no guidance scale"),
+    (_entry(model_id=HV, serve_args=("--height", "320", "--width", "512", "--num-frames", "61"),
+            defaults={"negative_prompt": " "}), "non-empty string"),
+    (_entry(model_id=HV, serve_args=("--height", "320", "--width", "512", "--num-frames", "61"),
+            defaults={"negative_prompt": ["blurry"]}), "non-empty string"),
+])
+def test_bad_negative_prompt_default_rejected(tmp_path, entry, match):
+    with pytest.raises(FleetConfigError, match=match):
+        _load(tmp_path, entry)
+
+
+def test_guidance_default_refused_for_a_model_without_guidance(tmp_path):
+    qwen = _entry(model_id="Qwen/Qwen-Image", defaults={"guidance": 4.0})
+
+    with pytest.raises(FleetConfigError, match="takes no guidance scale"):
+        _load(tmp_path, qwen)
+
+
 def test_image_shape_from_height_width(tmp_path):
     config = _load(tmp_path, _entry())
     (entry,) = config.models

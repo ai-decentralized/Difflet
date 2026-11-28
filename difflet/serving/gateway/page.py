@@ -371,8 +371,13 @@ async function run() {
   if (!prompt) { setState('Enter a prompt first.', true); return; }
   const seedValue = readNumber('seed');
   const seed = seedValue === null ? DEFAULT_SEED : seedValue;
-  const steps = readNumber('steps');
-  const guidance = m.guidance === null ? null : readNumber('guidance');
+  // An empty field sends the fleet's default (m.steps, m.guidance: the entry's `defaults`, else
+  // the backend's own), so a request runs what the page shows and the estimates assume.
+  const stepsValue = readNumber('steps');
+  const steps = stepsValue === null ? (m.steps || null) : stepsValue;
+  const guidanceValue = m.guidance === null ? null : readNumber('guidance');
+  const guidance = m.guidance === null ? null
+    : (guidanceValue === null ? m.guidance : guidanceValue);
   running = true;
   renderModelInfo();
   const started = performance.now();
@@ -526,7 +531,7 @@ def render_info(config: FleetConfig, statuses: Mapping[str, str], *, base_url: s
         rows.append(
             f"<tr><td><code>{escape(entry.model_id)}</code></td><td>{escape(entry.kind)}</td>"
             f"<td>{entry.device}</td><td>{escape(shapes)}</td>"
-            f"<td>{escape(estimate_text(entry, model_defaults(entry.model_id)[0]))}</td>"
+            f"<td>{escape(estimate_text(entry, entry_defaults(entry)[0]))}</td>"
             f'<td><span class="badge {escape(status)}" title="{escape(_STATUS_HELP.get(status, ""))}">'
             f"{escape(status)}</span></td></tr>")
         examples.append(f"<h3><code>{escape(entry.model_id)}</code></h3>\n"
@@ -564,7 +569,7 @@ def ui_models(config: FleetConfig, statuses: Mapping[str, str]) -> dict:
 
 
 def _ui_model(entry: FleetEntry, status: str) -> dict:
-    steps, guidance = model_defaults(entry.model_id)
+    steps, guidance = entry_defaults(entry)
     return {
         "id": entry.model_id,
         "label": entry.model_id.rsplit("/", 1)[-1],
@@ -591,6 +596,18 @@ def _duration(seconds: float) -> str:
         return f"{round(seconds)} s"
     value, unit = (seconds / 60, "min") if seconds < 5400 else (seconds / 3600, "h")
     return f"{value:.1f}".removesuffix(".0") + f" {unit}"  # "2 h", "1.5 h"
+
+
+def entry_defaults(entry: FleetEntry) -> tuple[int | None, float | None]:
+    """The steps and guidance scale the page sends when its fields are empty, and that the
+    estimates and the wait thresholds assume: the fleet entry's ``defaults`` where set, else the
+    backend's own (``model_defaults``)."""
+    steps, guidance = model_defaults(entry.model_id)
+    if entry.default_steps is not None:
+        steps = entry.default_steps
+    if entry.default_guidance is not None:
+        guidance = entry.default_guidance
+    return steps, guidance
 
 
 @functools.cache
