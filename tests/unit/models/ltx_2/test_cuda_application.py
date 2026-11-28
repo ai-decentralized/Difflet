@@ -279,24 +279,36 @@ def test_registry_routes_cuda_to_the_gpu_application(tmp_path):
     assert type(app).__name__ == "CudaLtx2Application"
 
 
-@pytest.mark.parametrize(
-    "parallel,message",
-    [
-        (dict(tp_degree=2), "tp-degree"),
-        (dict(tp_degree=1, cfg_parallel_enabled=True), "not implemented for LTX-2"),
-    ],
-)
-def test_parallel_modes_are_refused_by_the_shared_gpu_policy(tmp_path, parallel, message):
+def test_tensor_parallel_is_refused_by_the_shared_gpu_policy(tmp_path):
     from difflet.backends.cuda.ltx_2.application import CudaLtx2Application
 
-    with pytest.raises(NotImplementedError, match=message):
+    with pytest.raises(NotImplementedError, match="tp-degree"):
         CudaLtx2Application(
             model_path=str(tmp_path),
-            parallel=DiffletParallelConfig(**parallel),
+            parallel=DiffletParallelConfig(tp_degree=2),
             dtype="bf16",
             shape=SHAPE,
             device="cpu",
         )
+
+
+def test_cfg_parallel_builds_a_cfg_two_transformer_with_a_batch_two_contract(tmp_path, monkeypatch):
+    from diffusers import LTX2VideoTransformer3DModel
+
+    from difflet.backends.cuda.ltx_2.application import CudaLtx2Application
+    from difflet.pipeline.parallel_mesh import MeshSpec
+
+    monkeypatch.delenv("WORLD_SIZE", raising=False)
+    LTX2VideoTransformer3DModel(**TINY).save_pretrained(tmp_path / "transformer")
+    app = CudaLtx2Application(
+        model_path=str(tmp_path),
+        parallel=DiffletParallelConfig(tp_degree=1, cfg_parallel_enabled=True),
+        dtype="bf16",
+        shape=SHAPE,
+        device="cpu",
+    )
+    assert app.transformer.config == MeshSpec(cfg=2, tp=1)
+    assert {spec["shape"][0] for spec in app.dit_input_contract().values()} == {2}
 
 
 def test_missing_companions_are_refused_even_for_latent_generation(loaded):

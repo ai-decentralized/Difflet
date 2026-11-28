@@ -1,14 +1,30 @@
-# Experimental LTX-2 on CUDA
+# LTX-2 on CUDA
 
 Lightricks/LTX-2 runs on the existing single-device GPU application lifecycle.
 Python can return joint audio/video or both latent streams. The generic CLI and
 video-serving interfaces return video only; they do not mux the generated audio.
-Those frontends have CPU regression coverage, not end-to-end GPU qualification.
 
-Use BF16, one GPU and one resident shape. Height/width must be multiples of 32;
-frame count must be 8k+1. TP/CP/SP/CFG parallelism, quantization, offload, TeaCache,
-TAEF1 and bucketed shapes are outside this CUDA implementation. Other models'
-GPU behavior and Trainium/Neuron/TPU implementations are unchanged.
+Both frontends ran end to end on one RTX PRO 6000 Blackwell 96 GB, in eager mode with
+the default `diffusers` profile, at 384x256, 9 frames and 24 fps. The CLI and HTTP MP4s
+matched the Python video at 27.16 dB and 31.74 dB PSNR against a 25 dB bar, two
+identical HTTP requests returned identical MP4s, and a request outside the server's
+profile got `400 profile_mismatch`. This run, like the audiovisual correctness and
+performance measurements below, precedes the submission extraction; the `--torch-compile`,
+`--dp` and CFG-parallel runs used the current code.
+
+With `--torch-compile` on one RTX PRO 6000 at the same shape and 40 steps, `difflet run`
+returned a tensor bit-identical to the compiled Python API's, the CLI and HTTP MP4s decoded
+to the frames that output gives through each writer, and Dynamo traced compiled graphs in
+both processes. With the default profile at that shape, compiled and eager output are
+bit-identical.
+
+Use BF16 and one resident shape, on one GPU or, with CFG-parallel, two. Height/width
+must be multiples of 32; frame count must be 8k+1. TP/CP/SP parallelism, quantization,
+offload, TeaCache, TAEF1 and bucketed shapes are outside this CUDA implementation. With
+the default profile, `difflet run --dp 2 --requests` ran four requests on two H200 141 GB,
+each output identical to the same request on one card, with generation 1.95× faster than
+on one card. Other models' GPU behavior and Trainium/Neuron/TPU implementations are
+unchanged.
 
 ## Installation and Python generation
 
@@ -64,6 +80,32 @@ schedule, conditioning, rotary arithmetic and BF16 sampler/guidance/update order
 Compilation preserves BF16 intermediate casts and native RMS normalization and
 retains eager GEMM selection. These policies are local to LTX-2; other GPU models
 continue using the shared compiler's existing mode.
+
+## CFG-parallel on two GPUs
+
+`difflet run --cfg-parallel` runs the two classifier-free guidance branches of each step on
+two GPUs, one branch per GPU, and all-gathers the outputs; `difflet run` relaunches itself
+under `torchrun`. From Python, start two processes with `torchrun --nproc_per_node=2` and pass
+`DiffletParallelConfig(tp_degree=1, cfg_parallel_enabled=True)`. `difflet serve` refuses
+`--cfg-parallel`. A request with guidance scale 1 has no pair to split: each GPU runs it
+whole, so it is not faster.
+
+The output is close to one GPU's, not bit-identical. Both profiles hand the transformer the
+guidance pair as one batch of 2, which one GPU runs as a single call, while each GPU under
+CFG-parallel runs its branch at batch 1. BF16 matrix multiplies round differently at the two
+batch sizes, by a few ulps in one transformer call, and over 40 guided steps that grows to
+24.9 to 44.6 dB PSNR between the two videos. The split itself is exact: one GPU running the
+pair as two batch-1 calls gives output bit-identical to CFG-parallel.
+
+Checked with `difflet run --requests` on two RTX PRO 6000 96 GB, torch 2.11.0 (CUDA 12.8),
+Diffusers 0.38.0, the default profile in eager mode and checkpoint revision
+`64f65d09e0b76c96202b5bc09997673184cf9b5d`: four 512x768/121-frame requests, 40 steps,
+guidance 4, seeds 0-3, one with a negative prompt. Every video tensor under `--cfg-parallel`
+is bit-identical to one GPU's with the pair run as two batch-1 calls. The median generation
+time of the three requests after the first falls from 69.6 s on one GPU to 35.6 s on two
+(1.96x), prompt encoding and decoding included. Not run on a GPU: the opt-in official
+profile, `--torch-compile` with `--cfg-parallel`, and the audio stream, which the CLI does
+not write.
 
 ## Audiovisual correctness and fair performance
 

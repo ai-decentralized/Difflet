@@ -1,6 +1,6 @@
 # HunyuanVideo 1.5 on CUDA
 
-Experimental single-GPU BF16 text-to-video for
+Single-GPU BF16 text-to-video for
 `hunyuanvideo-community/HunyuanVideo-1.5-Diffusers-480p_t2v`, through Difflet's GPU
 application, Python API, CLI and resident HTTP server. It is separate from the Trainium
 HunyuanVideo 1.5 path and from the original HunyuanVideo; support does not carry over
@@ -39,7 +39,9 @@ GPU. Negative prompts work through `difflet run --negative-prompt`, `--requests`
 `--dp` runs, the Python API and the server.
 
 Image-to-video, the 720p checkpoints, CFG-parallel, TP/CP/SP, TeaCache, host VAE, TAEF1 and
-shape buckets are not supported. DP replicas have not been measured.
+shape buckets are not supported. `difflet run --dp 2 --requests` ran four requests on two
+H200 141 GB, each output identical to the same request on one card, with generation 1.99×
+faster than on one card.
 
 ## How it runs
 

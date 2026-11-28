@@ -72,6 +72,7 @@ class CudaLtx2Application(GpuApplication):
             frame_rate=self.frame_rate,
             text_seq_len=self.text_seq_len,
             torch_dtype=self.dtype,
+            cfg_parallel_enabled=self.parallel.cfg_parallel_enabled,
         )
         self.transformer = CudaLtx2TransformerApplication(
             model_path=self.transformer_path,

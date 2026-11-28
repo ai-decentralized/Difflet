@@ -1,6 +1,6 @@
 # Original HunyuanVideo on CUDA
 
-Experimental single-GPU BF16 support for the original
+Single-GPU BF16 support for the original
 `hunyuanvideo-community/HunyuanVideo` Diffusers checkpoint, using Difflet's transformer
 and the shared GPU application, Python API, CLI and resident HTTP server.
 
@@ -32,7 +32,9 @@ the reference template crop; longer prompts are refused. CLIP uses the reference
 
 HunyuanVideo 1.5, image-to-video, negative prompts, TP/CP/SP, CFG-parallel, TeaCache,
 host VAE, TAEF1 and shape buckets are unsupported. The resident video service uses one
-worker; replica scaling and smaller GPUs have not been qualified.
+worker, and smaller GPUs have not been qualified. `difflet run --dp 2 --requests` ran four
+requests on two H200 141 GB, each output identical to the same request on one card, with
+generation 1.98× faster than on one card.
 
 ## Numerical implementation
 
@@ -70,10 +72,21 @@ These identity checks do not transfer numerical calibration between runtimes.
 The measurements above describe the previously qualified implementation. Review changes
 move compact attention, checkpoint conversion and compiler options into the HunyuanVideo
 CUDA package, restore shared validation/default behavior, and retain the existing CLI
-video writer with model-specific FPS. The revised source has CPU regression coverage;
-its numerical, compiled-memory, CLI/HTTP decoded-identity and performance gates have not
-been rerun on a GPU. Earlier measurements are historical evidence, not qualification of
-this revision. CLI and HTTP now retain their existing distinct encoding paths.
+video writer with model-specific FPS. CLI and HTTP now retain their existing distinct
+encoding paths.
+
+The revised source was checked again on one RTX PRO 6000 Blackwell Server Edition 96 GB with
+torch 2.11.0+cu128 and Diffusers 0.38.0, at 320×512×61, 50 steps, guidance 6 and seeds 0–2,
+with `tests/numerical/gpu_hunyuan_video_parity.py --mode both`:
+
+- Eager and `--torch-compile` output are bit-identical to stock Diffusers' eager output on
+  all three seeds, and the compiled run executed compiled graphs. Diffusers' own compiled
+  output is 29.5–46.0 dB PSNR from its eager output.
+- Warm requests take 69.2 s eager and 64.2 s compiled, against 71.6 s and 62.6 s for
+  Diffusers. Peak allocated memory is 47.5 GiB in every mode.
+- With `--torch-compile`, `difflet run` returns a tensor bit-identical to the Python API's,
+  and the CLI's and server's MP4s decode to the frames that output gives through each
+  writer. Dynamo traced compiled graphs in both processes.
 
 Python callers must pass `parallel=DiffletParallelConfig(tp_degree=1)` explicitly.
 HunyuanVideo geometry is validated by its CUDA configuration before loading weights.

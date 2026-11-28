@@ -22,6 +22,7 @@ SPEC = ModelSpec(
     guidance="cfg",
     default_guidance_scale=4.0,
     default_fps=24,
+    accepts_cfg_parallel=True,
     accepts_negative_prompt=True,
     refused_cli_flags=(
         ("guidance_scale_2", "--guidance-scale-2 (LTX-2 has one joint transformer)"),

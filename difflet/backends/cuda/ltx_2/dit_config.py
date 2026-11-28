@@ -31,6 +31,7 @@ _RUNTIME_FIELDS = frozenset(
         "audio_num_frames",
         "audio_vae_temporal_compression_ratio",
         "torch_dtype",
+        "cfg_parallel_enabled",
     }
 )
 
@@ -104,6 +105,9 @@ class Ltx2DiTConfig:
     use_cross_timestep: bool = False
 
     torch_dtype: torch.dtype = torch.bfloat16
+    #: One CFG branch per process: the transformer splits guidance's batch of 2 over a cfg=2
+    #: mesh, so its warm-up and input contract are batch 2.
+    cfg_parallel_enabled: bool = False
 
     def __post_init__(self) -> None:
         if self.out_channels is None:

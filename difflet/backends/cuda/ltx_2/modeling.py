@@ -1,9 +1,38 @@
-"""Single-device LTX-2 wrapper; shared accelerator modeling is unchanged."""
+"""LTX-2 wrapper for the CUDA backend; shared accelerator modeling is unchanged.
+
+Under CFG-parallel each of two processes holds the whole transformer. A call carrying
+guidance's ``[negative, positive]`` batch of 2 runs this rank's branch at batch 1 and
+all-gathers both outputs over the CFG group, so every rank returns the full batch.
+"""
 
 from __future__ import annotations
 
 import torch
 from torch import nn
+
+from difflet.backends.cuda.ops_impl import parallel_mesh
+from difflet.backends.cuda.ops_impl.collectives import (
+    gather_from_tensor_model_parallel_region_with_dim,
+    scatter_to_process_group_spmd,
+)
+
+#: The transformer's keyword arguments that carry guidance's batch of 2, in both profiles'
+#: calls: the latent streams, the prompt embeddings and masks, timesteps, sigmas and
+#: coordinates. The others are shapes and flags, or inputs only a batch-1 call carries.
+_CFG_BATCHED = (
+    "hidden_states",
+    "audio_hidden_states",
+    "encoder_hidden_states",
+    "audio_encoder_hidden_states",
+    "timestep",
+    "audio_timestep",
+    "sigma",
+    "audio_sigma",
+    "encoder_attention_mask",
+    "audio_encoder_attention_mask",
+    "video_coords",
+    "audio_coords",
+)
 
 
 class CudaLtx2TransformerModule(nn.Module):
@@ -12,6 +41,11 @@ class CudaLtx2TransformerModule(nn.Module):
         from diffusers.models.transformers.transformer_ltx2 import LTX2VideoTransformer3DModel
 
         self.config = config
+        self.cfg_group = None
+        if config.cfg_parallel_enabled:
+            # The component initialised the cfg=2 mesh before building this module.
+            self.cfg_group = parallel_mesh.get_cfg_group()
+            self.cfg_rank = parallel_mesh.get_axis_rank("cfg")
         self.transformer = LTX2VideoTransformer3DModel(
             in_channels=int(config.in_channels),
             out_channels=int(config.out_channels),
@@ -70,7 +104,7 @@ class CudaLtx2TransformerModule(nn.Module):
         video_coords: torch.Tensor,
         audio_coords: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        video_out, audio_out = self.transformer(
+        return self.transformer_call(
             hidden_states=hidden_states,
             audio_hidden_states=audio_hidden_states,
             encoder_hidden_states=encoder_hidden_states,
@@ -94,4 +128,22 @@ class CudaLtx2TransformerModule(nn.Module):
             use_cross_timestep=bool(self.config.use_cross_timestep),
             return_dict=False,
         )
-        return (video_out, audio_out)
+
+    def transformer_call(self, **kwargs):
+        """The inner transformer's keyword call, one CFG branch per rank under CFG-parallel.
+
+        A batch of 1 (a request without guidance) has no pair to split: every rank runs it
+        whole, so the result is one GPU's.
+        """
+        if self.cfg_group is None or kwargs["hidden_states"].shape[0] == 1:
+            return self.transformer(**kwargs)
+        for name in _CFG_BATCHED:
+            if kwargs.get(name) is not None:
+                kwargs[name] = scatter_to_process_group_spmd(
+                    kwargs[name], 0, self.cfg_rank, process_group=self.cfg_group
+                )
+        video, audio = self.transformer(**kwargs)
+        return tuple(
+            gather_from_tensor_model_parallel_region_with_dim(out, 0, process_group=self.cfg_group)
+            for out in (video, audio)
+        )
